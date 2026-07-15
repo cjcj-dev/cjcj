@@ -1616,8 +1616,7 @@ public class ClosureConversion {
     private func GetInstTypeParamsForCustomTypeDef(givInstTypes: ArrayList<Type>,
         srcFunc: Value): ArrayList<Type> {
         let result = ArrayList<Type>()
-        let memberFunc = GetTopLevelFunctionForValue(srcFunc) ??
-            throw IllegalStateException("ClosureConversion instantiated type source has no top-level function")
+        let memberFunc = srcFunc.AsFunction() ?? GetTopLevelFunc(srcFunc)
         let parentCustomTypeDef = memberFunc.GetParentCustomTypeDef() ?? return result
         if (let Some(extendDef) <- (parentCustomTypeDef as ExtendDef)) {
             let extendedType = extendDef.GetExtendedType() ??
@@ -1649,115 +1648,6 @@ public class ClosureConversion {
             idx2++
         }
         return result
-    }
-
-    private func GetOutDefDeclaredTypes(innerDef: Value): ArrayList<Type> {
-        let visibleGenericTypes = GetVisiableGenericTypes(innerDef)
-        let instArgs = ArrayList<Type>()
-        for (genericTy in visibleGenericTypes) {
-            instArgs.add(genericTy)
-        }
-        if (let Some(parentFunc) <- GetTopLevelFunctionForValue(innerDef)) {
-            if (let Some(parentDef) <- parentFunc.GetParentCustomTypeDef()) {
-                if (let Some(extendDef) <- (parentDef as ExtendDef)) {
-                    let exGenericTypes = extendDef.GetGenericTypeParams()
-                    var removeCount: Int64 = 0
-                    while (removeCount < exGenericTypes.size && !instArgs.isEmpty()) {
-                        instArgs.remove(at: 0)
-                        removeCount++
-                    }
-                    if (let Some(extendedTy) <- extendDef.GetExtendedType()) {
-                        let exTypeArgs = extendedTy.GetTypeArgs()
-                        var insertIdx: Int64 = 0
-                        for (argTy in exTypeArgs) {
-                            instArgs.add(argTy, at: insertIdx)
-                            insertIdx++
-                        }
-                    }
-                }
-            }
-        }
-        return instArgs
-    }
-
-    private func GetTopLevelFunctionForValue(value: Value): Option<Function> {
-        if (let Some(fn) <- value.AsFunction()) {
-            return Some(fn)
-        }
-        if (let Some(param) <- value.AsParameter()) {
-            return param.GetTopLevelFunc()
-        }
-        if (let Some(local) <- value.AsLocalVar()) {
-            return local.GetTopLevelFunc()
-        }
-        return None
-    }
-
-    // Mirror C++ GetVisiableGenericTypes (src/CHIR/Utils/Utils.cpp:1050-1108):
-    // collect the generic params of srcFunc and of the lexically enclosing
-    // lambdas/funcs (and any owning custom type def), outermost first.
-    private func GetVisiableGenericTypes(srcFunc: Value): ArrayList<GenericType> {
-        let result = ArrayList<GenericType>()
-        CollectVisiableGenericTypes(srcFunc, result)
-        return result
-    }
-
-    private func CollectVisiableGenericTypes(value: Value, result: ArrayList<GenericType>): Unit {
-        if (let Some(fn) <- value.AsFunction()) {
-            CollectVisiableGenericTypesFromFunction(fn, result)
-            return
-        }
-        if (let Some(local) <- value.AsLocalVar()) {
-            CollectVisiableGenericTypesFromLocalVar(local, result)
-            return
-        }
-        if (let Some(param) <- value.AsParameter()) {
-            if (let Some(topLevelFunc) <- param.GetTopLevelFunc()) {
-                CollectVisiableGenericTypesFromFunction(topLevelFunc, result)
-            }
-        }
-    }
-
-    private func CollectVisiableGenericTypesFromFunction(fn: Function, result: ArrayList<GenericType>): Unit {
-        InsertGenericTypesAtFront(result, fn.GetGenericTypeParams())
-        if (let Some(parentDef) <- fn.GetParentCustomTypeDef()) {
-            InsertGenericTypesAtFront(result, parentDef.GetGenericTypeParams())
-        }
-    }
-
-    private func CollectVisiableGenericTypesFromLocalVar(value: LocalVar, result: ArrayList<GenericType>): Unit {
-        let expr = value.GetExpr() ??
-            throw IllegalStateException("ClosureConversion visible-generic local var has no expression")
-        // A lambda's return value can see generic types declared in the lambda itself.
-        if (let Some(lambda) <- (expr as Lambda)) {
-            InsertGenericTypesAtFront(result, lambda.GetGenericTypeParams())
-        }
-        var curPos = expr.GetParentBlockGroup() ??
-            throw IllegalStateException("ClosureConversion visible-generic local var has no parent block group")
-        while (curPos.GetOwnerFunc().isNone()) {
-            let ownedExpr = curPos.GetOwnerExpression() ??
-                throw IllegalStateException("ClosureConversion visible-generic block group has no owner")
-            if (let Some(lam) <- (ownedExpr as Lambda)) {
-                InsertGenericTypesAtFront(result, lam.GetGenericTypeParams())
-                curPos = lam.GetParentBlockGroup() ??
-                    throw IllegalStateException("ClosureConversion visible-generic lambda has no parent block group")
-            } else {
-                curPos = ownedExpr.GetParentBlockGroup() ??
-                    throw IllegalStateException("ClosureConversion visible-generic expr has no parent block group")
-            }
-        }
-        let ownFunc = curPos.GetOwnerFunc() ??
-            throw IllegalStateException("ClosureConversion visible-generic block group has no owner func")
-        CollectVisiableGenericTypesFromFunction(ownFunc, result)
-    }
-
-    private func InsertGenericTypesAtFront(target: ArrayList<GenericType>,
-        values: ArrayList<GenericType>): Unit {
-        var idx: Int64 = 0
-        for (value in values) {
-            target.add(value, at: idx)
-            idx++
-        }
     }
 
     // Mirror C++ NeedAddThisType (src/CHIR/Transformation/ClosureConversion.cpp:192-211):

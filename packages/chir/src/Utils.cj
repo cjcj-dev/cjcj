@@ -97,6 +97,154 @@ public class GenericTypeConvertor {
     }
 }
 
+// C++: CHIR/Utils/Utils.cpp:751-769.
+public func GetInstMapFromCustomDefAndParent(def: CustomTypeDef,
+    instMap: HashMap<Int64, (GenericType, Type)>, builder: CHIRBuilder): Unit {
+    if (def.IsExtend()) {
+        for (parentInterfaceTy in def.GetImplementedInterfaceTys()) {
+            let parentInterfaceDef = parentInterfaceTy.GetCustomTypeDef()
+            let parentInterfaceDefGenericParams = parentInterfaceDef.GetGenericTypeParams()
+            let instParentInterfaceTy =
+                (ReplaceRawGenericArgType(parentInterfaceTy, instMap, builder) as ClassType).getOrThrow()
+            let parentInterfaceTypeGenericArgs = instParentInterfaceTy.GetGenericArgs()
+            var idx: Int64 = 0
+            while (idx < parentInterfaceDefGenericParams.size) {
+                let genericParam = parentInterfaceDefGenericParams[idx]
+                if (!instMap.contains(genericParam.objectId)) {
+                    instMap[genericParam.objectId] = (genericParam, parentInterfaceTypeGenericArgs[idx])
+                }
+                idx++
+            }
+            parentInterfaceTy.GetInstMap(instMap, builder)
+        }
+    } else {
+        (def.GetType().getOrThrow() as CustomType).getOrThrow().GetInstMap(instMap, builder)
+    }
+}
+
+// C++: CHIR/Utils/Utils.cpp:1034-1048.
+public func GetTopLevelFunc(value: Value): Function {
+    if (let Some(parameter) <- value.AsParameter()) {
+        return parameter.GetTopLevelFunc().getOrThrow()
+    } else if (let Some(localVar) <- value.AsLocalVar()) {
+        return localVar.GetTopLevelFunc().getOrThrow()
+    } else if (let Some(block) <- value.AsBlock()) {
+        return block.GetTopLevelFunc().getOrThrow()
+    } else if (let Some(blockGroup) <- value.AsBlockGroup()) {
+        return blockGroup.GetTopLevelFunc().getOrThrow()
+    }
+    CJC_ABORT()
+    throw IllegalStateException("GetTopLevelFunc called with unsupported value kind")
+}
+
+// C++: CHIR/Utils/Utils.cpp:1050-1127.
+public func GetVisiableGenericTypes(value: Function, result: ArrayList<GenericType>): Unit {
+    var insertIdx: Int64 = 0
+    for (genericType in value.GetGenericTypeParams()) {
+        result.add(genericType, at: insertIdx)
+        insertIdx++
+    }
+    if (let Some(parentDef) <- value.GetParentCustomTypeDef()) {
+        insertIdx = 0
+        for (genericType in parentDef.GetGenericTypeParams()) {
+            result.add(genericType, at: insertIdx)
+            insertIdx++
+        }
+    }
+}
+
+public func GetVisiableGenericTypes(value: LocalVar, result: ArrayList<GenericType>): Unit {
+    let expr = value.GetExpr().getOrThrow()
+    if (let Some(lambda) <- (expr as Lambda)) {
+        var insertIdx: Int64 = 0
+        for (genericType in lambda.GetGenericTypeParams()) {
+            result.add(genericType, at: insertIdx)
+            insertIdx++
+        }
+    }
+    var curPos = expr.GetParentBlockGroup().getOrThrow()
+    while (curPos.GetOwnerFunc().isNone()) {
+        let ownedExpr = curPos.GetOwnerExpression().getOrThrow()
+        if (let Some(lambda) <- (ownedExpr as Lambda)) {
+            var insertIdx: Int64 = 0
+            for (genericType in lambda.GetGenericTypeParams()) {
+                result.add(genericType, at: insertIdx)
+                insertIdx++
+            }
+            curPos = lambda.GetParentBlockGroup().getOrThrow()
+        } else {
+            curPos = ownedExpr.GetParentBlockGroup().getOrThrow()
+        }
+    }
+    GetVisiableGenericTypes(curPos.GetOwnerFunc().getOrThrow(), result)
+}
+
+public func GetVisiableGenericTypes(value: Parameter, result: ArrayList<GenericType>): Unit {
+    if (let Some(topLevelFunc) <- value.GetTopLevelFunc()) {
+        GetVisiableGenericTypes(topLevelFunc, result)
+    } else {
+        GetVisiableGenericTypes(value.GetOwnerLambda().getOrThrow().GetResult().getOrThrow(), result)
+    }
+}
+
+public func GetVisiableGenericTypes(value: BlockGroup, result: ArrayList<GenericType>): Unit {
+    if (let Some(ownerFunc) <- value.GetOwnerFunc()) {
+        GetVisiableGenericTypes(ownerFunc, result)
+    } else {
+        let parentLambda = (value.GetOwnerExpression().getOrThrow() as Lambda).getOrThrow()
+        GetVisiableGenericTypes(parentLambda.GetResult().getOrThrow(), result)
+    }
+}
+
+public func GetVisiableGenericTypes(value: Block, result: ArrayList<GenericType>): Unit {
+    GetVisiableGenericTypes(value.GetParentBlockGroup().getOrThrow(), result)
+}
+
+public func GetVisiableGenericTypes(value: Value): ArrayList<GenericType> {
+    let result = ArrayList<GenericType>()
+    if (let Some(funcValue) <- value.AsFunction()) {
+        GetVisiableGenericTypes(funcValue, result)
+    } else if (let Some(block) <- value.AsBlock()) {
+        GetVisiableGenericTypes(block, result)
+    } else if (let Some(blockGroup) <- value.AsBlockGroup()) {
+        GetVisiableGenericTypes(blockGroup, result)
+    } else if (let Some(parameter) <- value.AsParameter()) {
+        GetVisiableGenericTypes(parameter, result)
+    } else if (let Some(localVar) <- value.AsLocalVar()) {
+        GetVisiableGenericTypes(localVar, result)
+    }
+    return result
+}
+
+// C++: CHIR/Utils/Utils.cpp:839-872.
+public func GetOutDefDeclaredTypes(innerDef: Value): ArrayList<Type> {
+    let visibleGenericTypes = GetVisiableGenericTypes(innerDef)
+    let instArgs = ArrayList<Type>()
+    for (genericType in visibleGenericTypes) {
+        instArgs.add(genericType)
+    }
+    var parentFunc = innerDef.AsFunction()
+    if (parentFunc.isNone()) {
+        parentFunc = Some(GetTopLevelFunc(innerDef))
+    }
+    if (let Some(parentCustomTypeDef) <- parentFunc.getOrThrow().GetParentCustomTypeDef()) {
+        if (let Some(extendDef) <- (parentCustomTypeDef as ExtendDef)) {
+            var idx: Int64 = 0
+            while (idx < extendDef.GetGenericTypeParams().size) {
+                instArgs.remove(at: 0)
+                idx++
+            }
+            let extendTypeArgs = extendDef.GetExtendedType().getOrThrow().GetTypeArgs()
+            idx = 0
+            for (typeArg in extendTypeArgs) {
+                instArgs.add(typeArg, at: idx)
+                idx++
+            }
+        }
+    }
+    return instArgs
+}
+
 public func GetInstMapFromCurDefToCurType(curType: CustomType): HashMap<GenericType, Type> {
     let genericTypeArgs = curType.GetCustomTypeDef().GetGenericTypeParams()
     let instTypeArgs = curType.GetTypeArgs()

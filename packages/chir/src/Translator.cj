@@ -1281,6 +1281,9 @@ public class Translator {
             if (target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
                 return TranslateEnumCtorRef(target, RequireAstTy(expr))
             }
+            if (target.astKind == ASTKind.FUNC_DECL) {
+                return TranslateFuncRef(expr)
+            }
             if (let Some(varDecl) <- (target as AstVarDecl)) {
                 if (IsInstanceMember(varDecl)) {
                     let leftValueInfo = TranslateInstanceFieldRefAsLeftValue(varDecl)
@@ -1291,6 +1294,85 @@ public class Translator {
             return GetDerefedValue(value)
         }
         throw IllegalStateException("faithful AST2CHIR RefExpr has no Sema target: ${expr.ref.identifier.Val()}")
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:332-348.
+    private func TranslateMemberFuncRef(refExpr: AstRefExpr): Value {
+        let target = refExpr.ref.target.getOrThrow()
+        CJC_ASSERT(target.astKind == ASTKind.FUNC_DECL)
+        var thisObj: Option<Value> = None
+        if (!target.TestAttr(AstAttribute.STATIC)) {
+            thisObj = Some(GetImplicitThisParam())
+        }
+        let targetFuncDecl = (target as AstFuncDecl).getOrThrow()
+        let instFuncType = GetInstCalleeInfoFromRefExpr(refExpr, targetFuncDecl)
+        if (!instFuncType.isVirtualFuncCall && target.TestAttr(AstAttribute.STATIC)) {
+            let targetFunc = GetSymbolTable(target)
+            return TranslateGlobalOrLocalFuncRef(refExpr, targetFunc)
+        } else {
+            return WrapMemberMethodByLambda(targetFuncDecl, instFuncType, thisObj)
+        }
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:350-421.
+    private func TranslateGlobalOrLocalFuncRef(refExpr: AstRefExpr, originalFunc: Value): Value {
+        let outerDeclaredTypes = GetOutDefDeclaredTypes(originalFunc)
+        if (let Some(originalFunction) <- originalFunc.AsFunction()) {
+            if (originalFunction.IsMemberFunc()) {
+                if (let Some(currentFunction) <- currentFunc) {
+                    if (currentFunction.GetParentCustomTypeDef().isSome()) {
+                        let originCustomDef = originalFunction.GetParentCustomTypeDef().getOrThrow()
+                        let parentFuncCustomDef = currentFunction.GetParentCustomTypeDef().getOrThrow()
+                        if (originCustomDef != parentFuncCustomDef) {
+                            let instMap = HashMap<Int64, (GenericType, Type)>()
+                            GetInstMapFromCustomDefAndParent(parentFuncCustomDef, instMap, builder)
+                            var idx: Int64 = 0
+                            while (idx < originCustomDef.GetGenericTypeParams().size) {
+                                if (outerDeclaredTypes[idx].IsGeneric()) {
+                                    let genericType = (outerDeclaredTypes[idx] as GenericType).getOrThrow()
+                                    if (let Some(found) <- instMap.get(genericType.objectId)) {
+                                        outerDeclaredTypes[idx] = found[1]
+                                    }
+                                }
+                                idx++
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let instArgs = ArrayList<Type>()
+        CJC_ASSERT(outerDeclaredTypes.size >= refExpr.instTys.size)
+        var idx: Int64 = 0
+        while (idx < outerDeclaredTypes.size - refExpr.instTys.size) {
+            instArgs.add(outerDeclaredTypes[idx])
+            idx++
+        }
+        for (ty in refExpr.instTys) {
+            instArgs.add(chirTy.TranslateType(ty))
+        }
+        if (instArgs.isEmpty()) {
+            return originalFunc
+        }
+        let getInstantiateValue = builder.CreateGetInstantiateValue(
+            chirTy.TranslateType(RequireAstTy(refExpr)), originalFunc, instArgs, CurrentBlock())
+        getInstantiateValue.SetDebugLocation(TranslateLocation(refExpr))
+        return RequireResult(getInstantiateValue)
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:423-438.
+    private func TranslateFuncRef(refExpr: AstRefExpr): Value {
+        let target = refExpr.ref.target.getOrThrow()
+        CJC_ASSERT(target.astKind == ASTKind.FUNC_DECL)
+        let _ = TranslateLocation(refExpr)
+        if (let Some(outerDecl) <- target.outerDecl) {
+            if (outerDecl.IsNominalDecl()) {
+                return TranslateMemberFuncRef(refExpr)
+            }
+        }
+        let targetFunc = GetSymbolTable(target)
+        return TranslateGlobalOrLocalFuncRef(refExpr, targetFunc)
     }
 
     public func Visit(expr: AstReturnExpr): Option<Value> {

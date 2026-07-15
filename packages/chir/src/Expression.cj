@@ -1802,9 +1802,9 @@ public class GetInstantiateValue <: Expression {
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let clonedTypes = if (GetGenericResult().IsLocalVar()) {
             let sourceResult = GetResult() ?? throw IllegalArgumentException("GetInstantiateValue clone requires result")
-            let oldOutDefTypes = GetOutDefDeclaredTypesForValue(sourceResult)
+            let oldOutDefTypes = GetOutDefDeclaredTypes(sourceResult)
             let oldAllTypes = GetInstantiateTypes()
-            let newAllTypes = GetOutDefDeclaredTypesForValue(parent)
+            let newAllTypes = GetOutDefDeclaredTypes(parent)
             var idx = oldOutDefTypes.size
             while (idx < oldAllTypes.size) {
                 newAllTypes.add(oldAllTypes[idx])
@@ -2277,145 +2277,6 @@ private func GetAllocExprOfRetVal(body: BlockGroup): (Int64, Int64) {
     }
     CJC_ABORT()
     return (0, 0)
-}
-
-private func GetOutDefDeclaredTypesForValue(innerDef: Value): ArrayList<Type> {
-    let visibleGenericTypes = GetVisibleGenericTypesForValue(innerDef)
-    let instArgs = ArrayList<Type>()
-    for (genericTy in visibleGenericTypes) {
-        instArgs.add(genericTy)
-    }
-    if (let Some(parentFunc) <- GetTopLevelFunctionForOutDef(innerDef)) {
-        if (let Some(parentDef) <- parentFunc.GetParentCustomTypeDef()) {
-            if (let Some(extendDef) <- (parentDef as ExtendDef)) {
-                let exGenericTypes = extendDef.GetGenericTypeParams()
-                var removeCount: Int64 = 0
-                while (removeCount < exGenericTypes.size && !instArgs.isEmpty()) {
-                    instArgs.remove(at: 0)
-                    removeCount++
-                }
-                if (let Some(extendedTy) <- extendDef.GetExtendedType()) {
-                    let exTypeArgs = extendedTy.GetTypeArgs()
-                    var insertIdx: Int64 = 0
-                    for (argTy in exTypeArgs) {
-                        instArgs.add(argTy, at: insertIdx)
-                        insertIdx++
-                    }
-                }
-            }
-        }
-    }
-    return instArgs
-}
-
-private func GetVisibleGenericTypesForValue(value: Value): ArrayList<GenericType> {
-    let result = ArrayList<GenericType>()
-    if (let Some(fn) <- value.AsFunction()) {
-        CollectVisibleGenericTypesFromFunction(fn, result)
-    } else if (let Some(block) <- value.AsBlock()) {
-        CollectVisibleGenericTypesFromBlock(block, result)
-    } else if (let Some(group) <- value.AsBlockGroup()) {
-        CollectVisibleGenericTypesFromBlockGroup(group, result)
-    } else if (let Some(param) <- value.AsParameter()) {
-        CollectVisibleGenericTypesFromParameter(param, result)
-    } else if (let Some(localVar) <- value.AsLocalVar()) {
-        CollectVisibleGenericTypesFromLocalVar(localVar, result)
-    }
-    return result
-}
-
-private func CollectVisibleGenericTypesFromFunction(fn: Function, result: ArrayList<GenericType>): Unit {
-    PrependGenericTypeParams(result, fn.GetGenericTypeParams())
-    if (let Some(parentDef) <- fn.GetParentCustomTypeDef()) {
-        PrependGenericTypeParams(result, parentDef.GetGenericTypeParams())
-    }
-}
-
-private func CollectVisibleGenericTypesFromLocalVar(value: LocalVar, result: ArrayList<GenericType>): Unit {
-    if (let Some(ownerExpr) <- value.GetExpr()) {
-        if (let Some(lambdaExpr) <- (ownerExpr as Lambda)) {
-            PrependGenericTypeParams(result, lambdaExpr.GetGenericTypeParams())
-        }
-        if (let Some(startGroup) <- ownerExpr.GetParentBlockGroup()) {
-            var currentGroup = startGroup
-            while (currentGroup.GetOwnerFunc().isNone()) {
-                if (let Some(ownedExpr) <- currentGroup.GetOwnerExpression()) {
-                    if (let Some(lambdaOwner) <- (ownedExpr as Lambda)) {
-                        PrependGenericTypeParams(result, lambdaOwner.GetGenericTypeParams())
-                        if (let Some(nextGroup) <- lambdaOwner.GetParentBlockGroup()) {
-                            currentGroup = nextGroup
-                        } else {
-                            return
-                        }
-                    } else if (let Some(nextGroup) <- ownedExpr.GetParentBlockGroup()) {
-                        currentGroup = nextGroup
-                    } else {
-                        return
-                    }
-                } else {
-                    return
-                }
-            }
-            if (let Some(ownerFunc) <- currentGroup.GetOwnerFunc()) {
-                CollectVisibleGenericTypesFromFunction(ownerFunc, result)
-            }
-        }
-    }
-}
-
-private func CollectVisibleGenericTypesFromParameter(value: Parameter, result: ArrayList<GenericType>): Unit {
-    if (let Some(topLevelFunc) <- value.GetTopLevelFunc()) {
-        CollectVisibleGenericTypesFromFunction(topLevelFunc, result)
-    } else if (let Some(ownerLambda) <- value.GetOwnerLambda()) {
-        if (let Some(lambdaResult) <- ownerLambda.GetResult()) {
-            CollectVisibleGenericTypesFromLocalVar(lambdaResult, result)
-        }
-    }
-}
-
-private func CollectVisibleGenericTypesFromBlockGroup(value: BlockGroup, result: ArrayList<GenericType>): Unit {
-    if (let Some(ownerFunc) <- value.GetOwnerFunc()) {
-        CollectVisibleGenericTypesFromFunction(ownerFunc, result)
-    } else if (let Some(ownerExpr) <- value.GetOwnerExpression()) {
-        if (let Some(parentLambda) <- (ownerExpr as Lambda)) {
-            if (let Some(lambdaResult) <- parentLambda.GetResult()) {
-                CollectVisibleGenericTypesFromLocalVar(lambdaResult, result)
-            }
-        }
-    }
-}
-
-private func CollectVisibleGenericTypesFromBlock(value: Block, result: ArrayList<GenericType>): Unit {
-    if (let Some(parentGroup) <- value.GetParentBlockGroup()) {
-        CollectVisibleGenericTypesFromBlockGroup(parentGroup, result)
-    }
-}
-
-private func GetTopLevelFunctionForOutDef(value: Value): Option<Function> {
-    if (let Some(fn) <- value.AsFunction()) {
-        return fn
-    }
-    if (let Some(param) <- value.AsParameter()) {
-        return param.GetTopLevelFunc()
-    }
-    if (let Some(localVar) <- value.AsLocalVar()) {
-        return localVar.GetTopLevelFunc()
-    }
-    if (let Some(block) <- value.AsBlock()) {
-        return block.GetTopLevelFunc()
-    }
-    if (let Some(group) <- value.AsBlockGroup()) {
-        return group.GetTopLevelFunc()
-    }
-    return None
-}
-
-private func PrependGenericTypeParams(result: ArrayList<GenericType>, params: ArrayList<GenericType>): Unit {
-    var insertIdx: Int64 = 0
-    for (param in params) {
-        result.add(param, at: insertIdx)
-        insertIdx++
-    }
 }
 
 private func ContainsParameter(values: ArrayList<Parameter>, param: Parameter): Bool {
