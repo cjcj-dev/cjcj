@@ -3502,8 +3502,9 @@ public class FaithfulAST2CHIR {
 
     private func GeneratePackageInitBase(suffix: String): Function {
         let pkg = CurrentPackage()
-        let packageInit = CreateEmptyGVInitFunc(PackageInitFuncName(pkg.GetName(), suffix),
-            PackageInitFuncName(pkg.GetName(), suffix), "", pkg.GetName(), BasicLinkage.EXTERNAL)
+        let packageInit = CreateTranslator().CreateEmptyGVInitFunc(PackageInitFuncName(pkg.GetName(), suffix),
+            PackageInitFuncName(pkg.GetName(), suffix), "", pkg.GetName(), BasicLinkage.EXTERNAL,
+            INVALID_LOCATION, false)
         let boolTy = builder.context.GetBoolTy()
         let entry = RequireEntryBlock(packageInit)
         let initFlag = CreatePackageInitOnceFlag(if (suffix.isEmpty()) {
@@ -3545,8 +3546,10 @@ public class FaithfulAST2CHIR {
 
     private func CreateImportsInitFunc(suffix: String): Function {
         let pkg = CurrentPackage()
-        let importsInit = CreateEmptyGVInitFunc(PackageInitFuncName(pkg.GetName(), suffix + "_importsInit"),
-            PackageInitFuncName(pkg.GetName(), suffix + "_importsInit"), "", pkg.GetName(), BasicLinkage.EXTERNAL)
+        let importsInit = CreateTranslator().CreateEmptyGVInitFunc(
+            PackageInitFuncName(pkg.GetName(), suffix + "_importsInit"),
+            PackageInitFuncName(pkg.GetName(), suffix + "_importsInit"), "", pkg.GetName(), BasicLinkage.EXTERNAL,
+            INVALID_LOCATION, false)
         importsInit.SetLinkTypeInfo(BasicLinkage.INTERNAL)
         let entry = RequireEntryBlock(importsInit)
         entry.EnableAttr(Attribute.INITIALIZER)
@@ -3605,11 +3608,15 @@ public class FaithfulAST2CHIR {
                     }
                 }
             } else {
-                CreateInitFuncApply(initFn, block)
+                let trans = CreateTranslator()
+                trans.SetCurrentBlock(block)
+                let _ = trans.CreateAndAppendGVInitFuncCall(initFn)
             }
             return
         }
-        CreateInitFuncApply(initFn, block)
+        let trans = CreateTranslator()
+        trans.SetCurrentBlock(block)
+        let _ = trans.CreateAndAppendGVInitFuncCall(initFn)
     }
 
     private func FindApplyIn(block: Block, applyCallee: Function): Option<Apply> {
@@ -3708,11 +3715,13 @@ public class FaithfulAST2CHIR {
                 }
             }
         }
-        let fileInit = CreateEmptyGVInitFunc(FileInitFuncName(fileVars.file, ""), FileInitFuncName(fileVars.file, ""),
-            "", FileOwnerPackageName(fileVars.file), BasicLinkage.INTERNAL)
+        let trans = CreateTranslator()
+        let fileInit = trans.CreateEmptyGVInitFunc(FileInitFuncName(fileVars.file, ""),
+            FileInitFuncName(fileVars.file, ""), "", FileOwnerPackageName(fileVars.file), BasicLinkage.INTERNAL,
+            trans.TranslateFileLocation(fileVars.file.begin.fileID), false)
         let entry = RequireEntryBlock(fileInit)
         for (initFunc in initFuncs) {
-            CreateInitFuncApply(initFunc, entry)
+            let _ = trans.CreateAndAppendGVInitFuncCall(initFunc)
         }
         if (entry.GetTerminator().isNone()) {
             builder.CreateExit(None, entry)
@@ -3764,8 +3773,10 @@ public class FaithfulAST2CHIR {
         if (varsToGenInit.isEmpty()) {
             return None
         }
-        let fileInit = CreateEmptyGVInitFunc(FileInitFuncName(fileVars.file, "_literal"),
-            FileInitFuncName(fileVars.file, "_literal"), "", FileOwnerPackageName(fileVars.file), BasicLinkage.INTERNAL)
+        let trans = CreateTranslator()
+        let fileInit = trans.CreateEmptyGVInitFunc(FileInitFuncName(fileVars.file, "_literal"),
+            FileInitFuncName(fileVars.file, "_literal"), "", FileOwnerPackageName(fileVars.file),
+            BasicLinkage.INTERNAL, trans.TranslateFileLocation(fileVars.file.begin.fileID), false)
         fileInit.DisableAttr(Attribute.NO_INLINE)
         fileInit.SetDebugLocation(INVALID_LOCATION)
         let entry = RequireEntryBlock(fileInit)
@@ -3863,11 +3874,12 @@ public class FaithfulAST2CHIR {
     }
 
     private func TranslateInitializerToFunction(varDecl: AstVarDecl, suffix!: String): Function {
-        let initFn = CreateEmptyGVInitFunc(GlobalVarInitFuncName(varDecl),
+        let trans = CreateTranslator()
+        let loc = if (varDecl.IsConst()) { INVALID_LOCATION } else { trans.TranslateLocation(varDecl) }
+        let initFn = trans.CreateEmptyGVInitFunc(GlobalVarInitFuncName(varDecl),
             "gv$_" + varDecl.identifier.Val() + suffix, EffectiveRawMangledName(varDecl),
-            EffectivePackageName(varDecl), BasicLinkage.INTERNAL)
+            EffectivePackageName(varDecl), BasicLinkage.INTERNAL, loc, varDecl.IsConst())
         if (varDecl.IsConst()) {
-            initFn.EnableAttr(Attribute.CONST)
             if (suffix != "$literal") {
                 initFuncsForConstVar.add(initFn)
             }
@@ -3876,16 +3888,16 @@ public class FaithfulAST2CHIR {
         if (suffix != "$literal") {
             globalVar.SetInitFunc(initFn)
         }
-        CreateTranslator().TranslateInitializerToFunctionImpl(initFn, varDecl, globalVar)
+        trans.TranslateInitializerToFunctionImpl(initFn, varDecl, globalVar)
         return initFn
     }
 
     private func CreateGlobalVarWithPatternInitFunc(decl: AstVarWithPatternDecl): Function {
-        let initFn = CreateEmptyGVInitFunc(GlobalVarWithPatternInitFuncName(decl),
+        let trans = CreateTranslator()
+        let initFn = trans.CreateEmptyGVInitFunc(GlobalVarWithPatternInitFuncName(decl),
             GlobalVarWithPatternInitSrcName(decl), EffectiveRawMangledName(decl), EffectivePackageName(decl),
-            BasicLinkage.INTERNAL)
+            BasicLinkage.INTERNAL, trans.TranslateLocation(decl), decl.IsConst())
         if (decl.IsConst()) {
-            initFn.EnableAttr(Attribute.CONST)
             initFuncsForConstVar.add(initFn)
         }
         let varDecls = ArrayList<AstVarDecl>()
@@ -3894,7 +3906,7 @@ public class FaithfulAST2CHIR {
         for (varDecl in varDecls) {
             RequireGlobalVar(globalCache.Get(varDecl)).SetInitFunc(initFn)
         }
-        CreateTranslator().TranslateGlobalVarWithPatternInitializer(initFn, decl)
+        trans.TranslateGlobalVarWithPatternInitializer(initFn, decl)
         return initFn
     }
 
@@ -4018,29 +4030,6 @@ public class FaithfulAST2CHIR {
             return Int64(value)
         }
         return -Int64(UInt64.Max - value) - 1
-    }
-
-    private func CreateEmptyGVInitFunc(identifier: String, srcCodeIdentifier: String, rawMangledName: String,
-        packageName: String, linkage: BasicLinkage): Function {
-        let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetVoidTy())
-        let effectiveRawName = if (rawMangledName.isEmpty()) { identifier } else { rawMangledName }
-        let fn = builder.CreateFunction(funcTy, identifier, srcCodeIdentifier: srcCodeIdentifier,
-            rawMangledName: effectiveRawName, packageName: packageName)
-        fn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
-        fn.EnableAttr(Attribute.NO_REFLECT_INFO)
-        fn.EnableAttr(Attribute.NO_INLINE)
-        fn.EnableAttr(Attribute.COMPILER_ADD)
-        fn.EnableAttr(Attribute.INITIALIZER)
-        fn.SetLinkTypeInfo(linkage)
-        let body = builder.CreateBlockGroup(fn)
-        fn.InitBody(body)
-        let entry = builder.CreateBlock(body)
-        body.SetEntryBlock(entry)
-        return fn
-    }
-
-    private func CreateInitFuncApply(initFn: Function, block: Block): Unit {
-        builder.CreateApply(builder.context.GetVoidTy(), initFn, FuncCallContext(), block)
     }
 
     private func RequireResult(expr: Expression): LocalVar {
@@ -4338,7 +4327,7 @@ public class FaithfulAST2CHIR {
         let fn = builder.CreateFunction(funcTy, mangledName,
             srcCodeIdentifier: EffectiveFunctionSrcIdentifier(funcDecl), rawMangledName: EffectiveFunctionRawName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
-        fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.keywordPos, funcDecl.end))
+        fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.begin, funcDecl.end))
         AttachFunctionGenericParams(funcDecl, fn)
         if (!funcDecl.TestAttr(AstAttribute.ABSTRACT)) {
             let body = builder.CreateBlockGroup(fn)
@@ -4471,7 +4460,7 @@ public class FaithfulAST2CHIR {
         let fn = builder.CreateFunction(funcTy, EffectiveMangledName(funcDecl),
             srcCodeIdentifier: funcDecl.identifier.Val(), rawMangledName: EffectiveRawMangledName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
-        fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.keywordPos, funcDecl.end))
+        fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.begin, funcDecl.end))
         AttachFunctionGenericParams(funcDecl, fn)
         fn.EnableAttr(Attribute.IMPORTED)
         SetFuncAttributeAndLinkageType(funcDecl, fn)

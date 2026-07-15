@@ -482,6 +482,56 @@ public class Translator {
         currentBlock = savedBlock
     }
 
+    public func CreateEmptyGVInitFunc(mangledName: String, identifier: String, rawMangledName: String,
+        pkgName: String, linkage: BasicLinkage, loc: DebugLocation, isConst: Bool): Function {
+        var fn: Function
+        var body: BlockGroup
+        if (let Some(cachedFunc) <-
+            TryGetFromCache<Function>(GLOBAL_VALUE_PREFIX + mangledName, deserializedVals)) {
+            fn = cachedFunc
+            body = builder.CreateBlockGroup(fn)
+            fn.ReplaceBody(body)
+        } else {
+            let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetUnitTy())
+            fn = builder.CreateFunction(funcTy, mangledName, srcCodeIdentifier: identifier,
+                rawMangledName: rawMangledName, packageName: pkgName)
+            body = builder.CreateBlockGroup(fn)
+            fn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
+            fn.EnableAttr(Attribute.NO_REFLECT_INFO)
+            fn.EnableAttr(Attribute.NO_INLINE)
+            fn.EnableAttr(Attribute.COMPILER_ADD)
+            fn.EnableAttr(Attribute.INITIALIZER)
+            if (isConst) {
+                fn.EnableAttr(Attribute.CONST)
+            }
+            fn.InitBody(body)
+        }
+        fn.SetLinkTypeInfo(linkage)
+        fn.SetDebugLocation(loc)
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        SetFuncBlockGroup(body)
+        SetCurrentBlock(entry)
+        let retVal = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetUnitTy()),
+            builder.context.GetUnitTy(), entry)
+        fn.SetReturnValue(RequireResult(retVal))
+        return fn
+    }
+
+    public func SetCurrentBlock(block: Block): Unit {
+        currentBlock = block
+    }
+
+    public func CreateAndAppendGVInitFuncCall(callee: Value): Expression {
+        let instFuncTy = (callee.GetType().getOrThrow() as FuncType).getOrThrow()
+        return TryCreate(CurrentBlock(), instFuncTy.GetReturnType(), callee, FuncCallContext())
+    }
+
+    private func SetFuncBlockGroup(group: BlockGroup): Unit {
+        blockGroupStack.clear()
+        blockGroupStack.add(group)
+    }
+
     public func TranslateAnnoFactoryFuncBody(decl: AstDecl, funcDef: Function): Unit {
         let body = builder.CreateBlockGroup(funcDef)
         blockGroupStack.add(body)
@@ -6711,6 +6761,22 @@ public class Translator {
         return rawArrayAllocate
     }
 
+    private func TryCreate(parent: Block, resultTy: Type, callee: Value,
+        callContext: FuncCallContext): Expression {
+        if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
+            let successBlock = CreateBlock()
+            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
+            let term = if (let Some(exceptBlock) <- exceptionBlock) {
+                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock, parent)
+            } else {
+                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock, parent)
+            }
+            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
+            return term
+        }
+        return builder.CreateApply(resultTy, callee, callContext, parent)
+    }
+
     private func TranslateRawArrayByCollection(expr: AstArrayExpr, arrayTy: Type, rawArrayTy: RawArrayType): Value {
         let collection = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[0], "RawArray collection"), this) ??
             throw IllegalStateException("faithful AST2CHIR RawArray collection produced no value")
@@ -9319,7 +9385,7 @@ public class Translator {
         store.SetDebugLocation(loc)
     }
 
-    private func TranslateLocation(node: AstNode): DebugLocation {
+    public func TranslateLocation(node: AstNode): DebugLocation {
         return TranslateLocation(node.begin, node.end)
     }
 
@@ -9341,7 +9407,7 @@ public class Translator {
         return TranslateLocation(begin, begin + AstTokenKindLiteral(expr.op).size)
     }
 
-    private func TranslateLocation(beginPos: AstPosition, endPos: AstPosition): DebugLocation {
+    public func TranslateLocation(beginPos: AstPosition, endPos: AstPosition): DebugLocation {
         match (beginPos.GetStatus()) {
             case AstPositionStatus.IGNORE => return TranslateFileLocation(beginPos.fileID)
             case _ => ()
@@ -9351,7 +9417,7 @@ public class Translator {
         return loc
     }
 
-    private func TranslateFileLocation(fileID: UInt64): DebugLocation {
+    public func TranslateFileLocation(fileID: UInt64): DebugLocation {
         let fileId = UInt32(fileID)
         return DebugLocation(builder.context.GetSourceFileName(fileId), fileId, Position(), Position())
     }
