@@ -55,13 +55,15 @@ public func SerializePackageToCjoFlatBuffer(
     exportForIncr!: Bool = false,
     exportFuncBody!: Bool = true
 ): Array<UInt8> {
-    let writer = FrontendCjoFlatBufferWriter(packageDepInfo, cjoManager, debug, optimizationLevel,
+    let writer = ASTWriter(packageDepInfo, cjoManager, debug, optimizationLevel,
         saveFileWithAbsPath: saveFileWithAbsPath, diag: diag, serializingCommon: serializingCommon,
         exportContent: exportContent, exportForIncr: exportForIncr, exportFuncBody: exportFuncBody)
-    return writer.Write(pkg)
+    writer.PreSaveFullExportDecls(pkg)
+    writer.ExportAST(pkg)
+    return writer.AST2FB(pkg)
 }
 
-private class FrontendCjoFlatBufferWriter {
+public class ASTWriter {
     private let builder: FlatBufferBuilder = FlatBufferBuilder()
     private let packageDepInfo: String
     private let cjoManager: SemaCjoManager
@@ -72,7 +74,7 @@ private class FrontendCjoFlatBufferWriter {
     private var serializingCommon: Bool
     private let exportContent: Bool
     private let exportForIncr: Bool
-    private let exportFuncBody: Bool
+    private var exportFuncBody: Bool
     private let mangler: RealBaseMangler = RealBaseMangler()
     private let typeManager: FaithfulSemaTypeManager = FaithfulSemaTypeManager()
 
@@ -89,6 +91,7 @@ private class FrontendCjoFlatBufferWriter {
     private let completedDeclKeys: HashSet<Node> = HashSet<Node>()
     private let allDecls: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allExprs: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
+    private let topLevelDecls: HashSet<Decl> = HashSet<Decl>()
     // ASTWriterImpl.h:120 savedExprMap. Node Hashable/Equatable preserves AST object identity.
     private let savedExprMap: HashMap<Node, UInt32> = HashMap<Node, UInt32>()
     private let paramOwnerMangles: HashMap<String, String> = HashMap<String, String>()
@@ -117,8 +120,8 @@ private class FrontendCjoFlatBufferWriter {
         this.exportFuncBody = exportFuncBody
     }
 
-    public func Write(pkg: Package): Array<UInt8> {
-        builder.Clear()
+    // ASTWriter.cpp:559-627 ASTWriterImpl::PreSaveFullExportDecls.
+    public func PreSaveFullExportDecls(pkg: Package): Unit {
         currentPackageName = pkg.fullPackageName
         for (file in pkg.files) {
             if (let Some(packageSpec) <- file.packageSpec) {
@@ -128,8 +131,79 @@ private class FrontendCjoFlatBufferWriter {
                 }
             }
         }
-        SaveFiles(pkg)
+        for (file in pkg.files) {
+            SaveFileInfo(file)
+        }
+        if (!exportContent || pkg.isMacroPackage) {
+            return
+        }
+
+        let fullExportDecls = ArrayList<Decl>()
+        let fullExportExprs = ArrayList<Expr>()
+        let searchingQueue = ArrayList<Decl>()
+        let searched = HashSet<Decl>()
+        IterateToplevelDecls(pkg, { decl: Decl =>
+            if (ShouldAlwaysExport(decl)) {
+                searchingQueue.add(decl)
+            }
+        })
+        var searchingIndex: Int64 = 0
+        while (searchingIndex < searchingQueue.size) {
+            let decl = searchingQueue[searchingIndex]
+            searchingIndex++
+            if (searched.contains(decl)) {
+                continue
+            }
+            searched.add(decl)
+            if (let Some(fd) <- (decl as FuncDecl)) {
+                CollectFullExportParamDecl(fullExportDecls, fd, searchingQueue)
+            } else if (let Some(pd) <- (decl as PropDecl)) {
+                for (getter in pd.getters) {
+                    searchingQueue.add(getter)
+                }
+                for (setter in pd.setters) {
+                    searchingQueue.add(setter)
+                }
+            } else if (let Some(vd) <- (decl as VarDecl)) {
+                if (ShouldExportSource(vd)) {
+                    CollectBodyToQueue(decl, searchingQueue)
+                    fullExportDecls.add(decl)
+                }
+            }
+            if (decl.TestAttr(Attribute.GLOBAL)) {
+                topLevelDecls.add(decl)
+            }
+            if (!IsExternalNorminalDecl(decl)) {
+                continue
+            }
+            CollectAnnotations(decl, fullExportExprs)
+            CollectMembers(decl, searchingQueue)
+        }
+
+        if (fullExportDecls.isEmpty()) {
+            return
+        }
+        MangleExportId(pkg)
+        for (decl in fullExportDecls) {
+            let _ = GetDeclIndex(decl)
+        }
+        for (expr in fullExportExprs) {
+            let _ = SaveExpr(expr)
+        }
+    }
+
+    // ASTWriter.cpp:720-752 ASTWriterImpl::ExportAST. This writer's existing
+    // top-level traversal is retained until DFSCollectFilesDeclarations is ported.
+    public func ExportAST(pkg: Package): Unit {
+        exportFuncBody = false
+        MangleExportId(pkg)
+        for (file in pkg.files) {
+            allFileImports.add(SaveFileImports(file))
+        }
         SaveTopLevelDecls(pkg)
+    }
+
+    public func AST2FB(pkg: Package): Array<UInt8> {
 
         let importsVec = builder.CreateVectorOffsets(packageNameOffsets)
         let filesVec = builder.CreateVectorOffsets(allFiles)
@@ -167,28 +241,23 @@ private class FrontendCjoFlatBufferWriter {
         return builder.Finish(root, CJO_FILE_IDENTIFIER)
     }
 
-    private func SaveFiles(pkg: Package): Unit {
-        for (file in pkg.files) {
-            let fileIndex = UInt32(allFiles.size + 1)
-            fileIdToIndex[file.begin.fileID] = (0u32, fileIndex)
-            allFiles.add(builder.CreateString(StoredFilePath(pkg, file)))
-            allFileImports.add(SaveFileImports(file))
-            allFileInfo.add(SaveFileInfo(file))
+    // ASTWriter.cpp:907-930 ASTWriterImpl::SaveFileInfo.
+    private func SaveFileInfo(file: File): Unit {
+        if (fileIdToIndex.contains(file.begin.fileID)) {
+            return
         }
-    }
-
-    private func StoredFilePath(pkg: Package, file: File): String {
-        if (saveFileWithAbsPath || serializingCommon || file.filePath.isEmpty()) {
-            return file.filePath
+        let fileIndex = UInt32(allFiles.size + 1)
+        let filePath = if (saveFileWithAbsPath || serializingCommon) {
+            file.filePath
+        } else {
+            FileUtil.JoinPath(file.curPackage.getOrThrow().fullPackageName, FileUtil.GetFileName(file.filePath))
         }
-        return FileUtil.JoinPath(pkg.fullPackageName, FileUtil.GetFileName(file.filePath))
-    }
-
-    private func SaveFileInfo(file: File): FlatBufferOffset {
+        allFiles.add(builder.CreateString(filePath))
+        fileIdToIndex[file.begin.fileID] = (0u32, fileIndex)
         let begin = PositionBytes(file.begin)
         let end = PositionBytes(file.end)
         let feature = if (let Some(fd) <- file.feature) { SaveFeaturesDirective(fd) } else { 0u32 }
-        return CreateModuleFileInfo(builder, UInt32(file.begin.fileID), begin, end, feature)
+        allFileInfo.add(CreateModuleFileInfo(builder, UInt32(file.begin.fileID), begin, end, feature))
     }
 
     // ASTWriter.cpp:911-919 CreateFeatureId.
@@ -251,8 +320,98 @@ private class FrontendCjoFlatBufferWriter {
         return builder.EndTable()
     }
 
-    private func SaveTopLevelDecls(pkg: Package): Unit {
+    // ASTWriter.cpp:157-160 IsExternalNorminalDecl.
+    private func IsExternalNorminalDecl(decl: Decl): Bool {
+        return decl.IsNominalDecl() && decl.linkage != Linkage.INTERNAL
+    }
+
+    // ASTWriter.cpp:162-175 ShouldAlwaysExport.
+    private func ShouldAlwaysExport(decl: Decl): Bool {
+        if (decl.IsCommonMatchedWithSpecific()) {
+            return false
+        }
+        return decl.IsExportedDecl() || decl.TestAttr(Attribute.IMPLICIT_USED) ||
+            (decl.TestAttr(Attribute.GLOBAL) && decl.linkage != Linkage.INTERNAL) ||
+            (serializingCommon && decl.astKind == ASTKind.EXTEND_DECL)
+    }
+
+    // ASTWriter.cpp:183-199 CollectBodyToQueue.
+    private func CollectBodyToQueue(decl: Decl, searchingQueue: ArrayList<Decl>): Unit {
+        var nodeToBeWalk: Option<Node> = None
+        if (let Some(vd) <- (decl as VarDecl)) {
+            if (let Some(initializer) <- vd.initializer) {
+                nodeToBeWalk = Some(initializer)
+            }
+        } else if (let Some(fd) <- (decl as FuncDecl)) {
+            if (let Some(body) <- fd.funcBody.getOrThrow().body) {
+                nodeToBeWalk = Some(body)
+            }
+        }
+        if (let Some(root) <- nodeToBeWalk) {
+            let walker = Walker(root, visitPre: { node: Node =>
+                if (let Some(target) <- node.GetTarget()) {
+                    if (!target.TestAttr(Attribute.IMPORTED) && target.TestAttr(Attribute.GLOBAL)) {
+                        searchingQueue.add(target)
+                    }
+                }
+                return VisitAction.WALK_CHILDREN
+            })
+            let _ = walker.Walk()
+        }
+    }
+
+    // ASTWriter.cpp:213-238 CollectFullExportParamDecl.
+    private func CollectFullExportParamDecl(
+        fullExportDecls: ArrayList<Decl>, fd: FuncDecl, searchingQueue: ArrayList<Decl>
+    ): Unit {
+        if (!Ty.IsTyCorrect(fd.GetTy())) {
+            return
+        }
+        let funcBody = fd.funcBody.getOrThrow()
+        CJC_ASSERT(!funcBody.paramLists.isEmpty())
+        var fullExport = fd.isConst || fd.isInline || fd.isFrozen || IsDefaultImplementation(fd) ||
+            IsGenericInCommonSerialization(fd)
+        fullExport = fullExport && !fd.IsCommonMatchedWithSpecific()
+        if (fullExport) {
+            fullExportDecls.add(fd)
+            CollectBodyToQueue(fd, searchingQueue)
+        }
+        for (param in funcBody.paramLists[0].params) {
+            if (let Some(desugarDecl) <- param.desugarDecl) {
+                if (desugarDecl.isInline || fullExport) {
+                    fullExportDecls.add(desugarDecl)
+                    CollectBodyToQueue(desugarDecl, searchingQueue)
+                }
+            }
+        }
+    }
+
+    // ASTWriter.cpp:408-417 CollectAnnotations.
+    private func CollectAnnotations(decl: Decl, fullExportExprs: ArrayList<Expr>): Unit {
+        if (let Some(classDecl) <- (decl as ClassDecl)) {
+            for (annotation in classDecl.annotations) {
+                if (annotation.astKind == ASTKind.ANNOTATION && !annotation.args.isEmpty()) {
+                    fullExportExprs.add(annotation.args[0].expr.getOrThrow())
+                }
+            }
+        }
+    }
+
+    // ASTWriter.cpp:419-427 CollectMembers.
+    private func CollectMembers(decl: Decl, searchingQueue: ArrayList<Decl>): Unit {
+        for (member in decl.GetMemberDecls()) {
+            if (member.linkage != Linkage.INTERNAL || IsGenericInCommonSerialization(member)) {
+                searchingQueue.add(member)
+            }
+        }
+    }
+
+    // ASTWriter.cpp:177-181 MangleExportId.
+    private func MangleExportId(pkg: Package): Unit {
         mangler.MangleExportIds(pkg)
+    }
+
+    private func SaveTopLevelDecls(pkg: Package): Unit {
         for (file in pkg.files) {
             for (decl in file.decls) {
                 SaveTopLevelDeclIfNeeded(decl)
@@ -271,10 +430,11 @@ private class FrontendCjoFlatBufferWriter {
             return
         }
         let targets = ArrayList<Decl>()
-        AppendDeclForSerialization(decl, targets)
+        AppendDecl(decl, targets)
         for (target in targets) {
             if (IsSupportedTopLevelDecl(target)) {
-                let _ = SaveDeclIndex(target, true)
+                topLevelDecls.add(target)
+                let _ = GetDeclIndex(target)
                 continue
             }
             throw IllegalArgumentException("not yet serialized in faithful .cjo writer: " + ASTKindName(target.astKind))
@@ -284,7 +444,7 @@ private class FrontendCjoFlatBufferWriter {
     // Mirror C++ ASTWriter AppendDecl (Modules/ASTSerialization/ASTWriter.cpp:99-120): a MainDecl/MacroDecl is exported
     // through its desugared FuncDecl; a VarWithPatternDecl is exported as the VarDecls of its pattern; the synthesized
     // `$mainInvoke` function is not exported; everything else is exported as-is.
-    private func AppendDeclForSerialization(decl: Decl, out: ArrayList<Decl>): Unit {
+    private func AppendDecl(decl: Decl, out: ArrayList<Decl>): Unit {
         if (let Some(mainDecl) <- (decl as MainDecl)) {
             if (let Some(desugar) <- mainDecl.desugarDecl) {
                 out.add(desugar)
@@ -353,25 +513,27 @@ private class FrontendCjoFlatBufferWriter {
         return (decl as ExtendDecl).isSome()
     }
 
-    private func SaveDeclIndex(decl: Decl, isTopLevel: Bool): UInt32 {
+    private func GetDeclIndex(decl: Decl): UInt32 {
         if (decl.fullPackageName.isEmpty()) {
             decl.fullPackageName = currentPackageName
         }
+        let isGlobal = decl.TestAttr(Attribute.GLOBAL) && !decl.TestAttr(Attribute.HAS_INITIAL)
+        let isTopLevel = isGlobal || topLevelDecls.contains(decl)
         let key: Node = decl
         if (let Some(existing) <- declKeyToIndex.get(key)) {
             if (!completedDeclKeys.contains(key)) {
-                SaveDeclBody(decl, key, existing, isTopLevel)
+                SaveDecl(decl, key, existing, isTopLevel)
             }
             return existing
         }
         let next = UInt32(allDecls.size + 1)
         declKeyToIndex[key] = next
         allDecls.add(0u32)
-        SaveDeclBody(decl, key, next, isTopLevel)
+        SaveDecl(decl, key, next, isTopLevel)
         return next
     }
 
-    private func PreSaveDeclIndex(decl: Decl): UInt32 {
+    private func PreSaveDecl(decl: Decl): UInt32 {
         let key: Node = decl
         if (let Some(existing) <- declKeyToIndex.get(key)) {
             return existing
@@ -412,7 +574,7 @@ private class FrontendCjoFlatBufferWriter {
         return dependencies
     }
 
-    private func SaveDeclBody(decl: Decl, key: Node, index: UInt32, isTopLevel: Bool): Unit {
+    private func SaveDecl(decl: Decl, key: Node, index: UInt32, isTopLevel: Bool): Unit {
         if (completedDeclKeys.contains(key)) {
             return
         }
@@ -756,12 +918,12 @@ private class FrontendCjoFlatBufferWriter {
             if (let Some(fd) <- funcDecl) {
                 paramOwnerMangles[DeclKey(param)] = ExistingMangledName(fd)
             }
-            params.add(SaveDeclIndex(param, false))
+            params.add(GetDeclIndex(param))
             if (let Some(desugar) <- param.desugarDecl) {
                 if (desugar.fullPackageName.isEmpty()) {
                     desugar.fullPackageName = currentPackageName
                 }
-                desugars.add(SaveDeclIndex(desugar, false))
+                desugars.add(GetDeclIndex(desugar))
             } else {
                 desugars.add(0u32)
             }
@@ -784,11 +946,11 @@ private class FrontendCjoFlatBufferWriter {
     private func SavePropInfo(propDecl: PropDecl): FlatBufferOffset {
         let setters = ArrayList<UInt32>()
         for (setter in propDecl.setters) {
-            setters.add(SaveDeclIndex(setter, false))
+            setters.add(GetDeclIndex(setter))
         }
         let getters = ArrayList<UInt32>()
         for (getter in propDecl.getters) {
-            getters.add(SaveDeclIndex(getter, false))
+            getters.add(GetDeclIndex(getter))
         }
         let setterVec = builder.CreateVectorU32(setters)
         let getterVec = builder.CreateVectorU32(getters)
@@ -815,7 +977,7 @@ private class FrontendCjoFlatBufferWriter {
     // Returns the 1-based expr index of the serialized initializer, or 0 (INVALID_FORMAT_INDEX)
     // when no faithful expr record is emitted. Mirrors ASTWriter.cpp:1319-1320.
     private func SaveVarInitializer(varDecl: VarDecl): UInt32 {
-        if (!ShouldExportVarSource(varDecl)) {
+        if (!ShouldExportSource(varDecl)) {
             return 0u32
         }
         if (let Some(initializer) <- varDecl.initializer) {
@@ -847,7 +1009,7 @@ private class FrontendCjoFlatBufferWriter {
 
     // Mirrors ASTWriter.cpp:312-348 ShouldExportSource(VarDecl) for the cases handled by this writer:
     // local non-global variables without outerDecl, plus public global/member const variables.
-    private func ShouldExportVarSource(varDecl: VarDecl): Bool {
+    private func ShouldExportSource(varDecl: VarDecl): Bool {
         if (!Ty.IsTyCorrect(varDecl.GetTy()) || varDecl.initializer.isNone() ||
             varDecl.TestAttr(Attribute.IMPORTED)) {
             return false
@@ -1089,7 +1251,7 @@ private class FrontendCjoFlatBufferWriter {
                 operands.add(SaveExpr(childExpr))
                 childrenCond.add(true)
             } else if (let Some(childDecl) <- (node as Decl)) {
-                operands.add(SaveDeclIndex(childDecl, false))
+                operands.add(GetDeclIndex(childDecl))
                 childrenCond.add(false)
             } else {
                 CJC_ABORT()
@@ -1191,7 +1353,7 @@ private class FrontendCjoFlatBufferWriter {
         }
         let resources = ArrayList<FlatBufferOffset>()
         for (resource in te.resourceSpec) {
-            let declIndex = SaveDeclIndex(resource, false)
+            let declIndex = GetDeclIndex(resource)
             resources.add(CreateFullId(LOCAL_PACKAGE_INDEX, "", declIndex))
         }
         let operands = ArrayList<UInt32>()
@@ -1388,7 +1550,7 @@ private class FrontendCjoFlatBufferWriter {
             operands.add(SaveExpr(arg))
         }
         let operandsVec = builder.CreateVectorU32(operands)
-        let futureIndex = SaveDeclIndex(se.futureObj.getOrThrow(), false)
+        let futureIndex = GetDeclIndex(se.futureObj.getOrThrow())
         let future = CreateFullId(LOCAL_PACKAGE_INDEX, "", futureIndex)
         let info = CreateSpawnInfo(builder, future)
 
@@ -1611,7 +1773,7 @@ private class FrontendCjoFlatBufferWriter {
             throw IllegalArgumentException("VarPattern without VarDecl is not supported in faithful .cjo writer")
         }
         let varDecl = vp.varDecl.getOrThrow()
-        let declIndex = SaveDeclIndex(varDecl, false)
+        let declIndex = GetDeclIndex(varDecl)
         let exprs = ArrayList<UInt32>()
         exprs.add(declIndex)
         let exprsVec = builder.CreateVectorU32(exprs)
@@ -2026,11 +2188,11 @@ private class FrontendCjoFlatBufferWriter {
             if (let Some(specific) <- member.specificImplementation) {
                 addedPlatformImpls.add(specific)
                 if (shouldExportDecl(specific)) {
-                    body.add(SaveDeclIndex(specific, false))
+                    body.add(GetDeclIndex(specific))
                 }
             }
             if (shouldExportDecl(member)) {
-                body.add(SaveDeclIndex(member, false))
+                body.add(GetDeclIndex(member))
             }
         }
         return builder.CreateVectorU32(body)
@@ -2075,7 +2237,7 @@ private class FrontendCjoFlatBufferWriter {
                     }
                 }
             }
-            typeParameters.add(SaveDeclIndex(declToSave, false))
+            typeParameters.add(GetDeclIndex(declToSave))
         }
         let constraints = ArrayList<FlatBufferOffset>()
         for (constraint in generic.genericConstraints) {
@@ -2283,7 +2445,7 @@ private class FrontendCjoFlatBufferWriter {
                 throw IllegalArgumentException("not yet serialized in faithful .cjo writer: local type reference " +
                     ASTKindName(decl.astKind))
             }
-            return CreateFullId(LOCAL_PACKAGE_INDEX, "", PreSaveDeclIndex(decl))
+            return CreateFullId(LOCAL_PACKAGE_INDEX, "", PreSaveDecl(decl))
         }
         let packageIndex = SavePackageName(pkgName)
         let id = EnsureExportId(decl)

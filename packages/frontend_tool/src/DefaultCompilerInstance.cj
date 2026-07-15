@@ -7,6 +7,7 @@ import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
 import cjcj::utils.FileUtil
 import cjcj::utils.ProfileRecorder
+import cjcj::utils.STANDARD_LIBS
 
 public open class DefaultCompilerInstance {
     public let invocation: CompilerInvocation
@@ -194,14 +195,12 @@ public open class DefaultCompilerInstance {
             return true
         }
         let cjoPath = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
-        let pkgs = ArrayList<Package>()
-        pkgs.add(pkg)
-        let depInfos = core.importManager.GeneratePkgDepInfo(pkgs)
-        let packageDepInfo = if (depInfos.isEmpty()) { "" } else { depInfos[0] }
-        let data = SerializePackageToCjoFlatBuffer(pkg, packageDepInfo, core.importManager.GetCjoManager(),
-            invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel, diag: diag,
-            serializingCommon: invocation.globalOptions.outputMode == OutputMode.CHIR,
-            exportContent: core.importManager.IsSourceCodeImported(), exportFuncBody: true)
+        let saveFileWithAbsPath = if (STANDARD_LIBS.contains(pkg.fullPackageName)) {
+            invocation.globalOptions.enableCoverage
+        } else {
+            invocation.globalOptions.enableCompileDebug || invocation.globalOptions.enableCoverage
+        }
+        let data = core.ExportAST(saveFileWithAbsPath, pkg)
         if (!FileUtil.WriteBufferToASTFile(cjoPath, data)) {
             diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO: " + cjoPath)
             return false

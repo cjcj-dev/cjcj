@@ -20,8 +20,10 @@ import cjcj::lex.Lexer as CangjieLexer
 import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
 import cjcj::incremental_compilation.CachedMangleMap
+import cjcj::option.OutputMode
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
+import cjcj::utils.STANDARD_LIBS
 import cjcj::chir.CHIRBuilder as ChirBuilder
 import cjcj::chir.CHIRDeserializer as ChirDeserializer
 import cjcj::chir.CHIRPrinter as ChirPrinter
@@ -186,6 +188,9 @@ public class CompilerInstance {
     private let pkgs: ArrayList<Package> = ArrayList<Package>()
     private let pkgCtxMap: HashMap<String, ASTContext> = HashMap<String, ASTContext>()
     private let depPackageInfo: ArrayList<String> = ArrayList<String>()
+    // ImportManager.h:392 astWriters. Package inherits Node, so this preserves
+    // the C++ map's Package* identity semantics.
+    private let astWriters: HashMap<Node, ASTWriter> = HashMap<Node, ASTWriter>()
     private var astResourcesDestroyed: Bool = false
     private var compileStrategy: Option<CompileStrategy> = None
     private var hasTypeCheckerFlag: Bool = false
@@ -428,10 +433,58 @@ public class CompilerInstance {
         if (!invocation.globalOptions.enIncrementalCompilation) {
             testManager.PrepareToMock(GetSourcePackages())
         }
+        // Sema/Desugar/AfterTypeCheck.cpp:466-476: pre-save full exported
+        // declarations after desugaring and linkage analysis, before generic instantiation.
+        let saveFileWithAbsPath = invocation.globalOptions.enableCompileDebug ||
+            invocation.globalOptions.enableCoverage
+        for (pkg in srcPkgs) {
+            let saveAbsPath = if (STANDARD_LIBS.contains(pkg.fullPackageName)) {
+                invocation.globalOptions.enableCoverage
+            } else {
+                saveFileWithAbsPath
+            }
+            ExportDeclsWithContent(saveAbsPath, pkg)
+        }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "desugar")
         }
         return true
+    }
+
+    // ImportManager.cpp:342-363 ImportManager::ExportDeclsWithContent.
+    public func ExportDeclsWithContent(saveFileWithAbsPath: Bool, pkg: Package): Unit {
+        let pkgs = ArrayList<Package>()
+        pkgs.add(pkg)
+        let depInfos = importManager.GeneratePkgDepInfo(pkgs)
+        let packageDepInfo = if (depInfos.isEmpty()) { "" } else { depInfos[0] }
+        let writer = ASTWriter(packageDepInfo, importManager.GetCjoManager(),
+            invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel,
+            saveFileWithAbsPath: saveFileWithAbsPath, diag: diag,
+            serializingCommon: invocation.globalOptions.outputMode == OutputMode.CHIR,
+            exportContent: importManager.IsSourceCodeImported(), exportForIncr: false, exportFuncBody: true)
+        writer.PreSaveFullExportDecls(pkg)
+        astWriters[pkg] = writer
+    }
+
+    // ImportManager.cpp:291-320 ImportManager::ExportAST.
+    public func ExportAST(saveFileWithAbsPath: Bool, pkg: Package): Array<UInt8> {
+        let writer = if (let Some(savedWriter) <- astWriters.get(pkg)) {
+            savedWriter
+        } else {
+            let pkgs = ArrayList<Package>()
+            pkgs.add(pkg)
+            let depInfos = importManager.GeneratePkgDepInfo(pkgs)
+            let packageDepInfo = if (depInfos.isEmpty()) { "" } else { depInfos[0] }
+            let newWriter = ASTWriter(packageDepInfo, importManager.GetCjoManager(),
+                invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel,
+                saveFileWithAbsPath: saveFileWithAbsPath, diag: diag,
+                serializingCommon: invocation.globalOptions.outputMode == OutputMode.CHIR,
+                exportContent: importManager.IsSourceCodeImported(), exportForIncr: false, exportFuncBody: true)
+            newWriter.PreSaveFullExportDecls(pkg)
+            newWriter
+        }
+        writer.ExportAST(pkg)
+        return writer.AST2FB(pkg)
     }
 
     public func PerformGenericInstantiation(): Bool {
