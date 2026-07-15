@@ -2583,14 +2583,15 @@ extend ParserImpl {
         let ret = PrimaryCtorDecl()
         try (cs = ChainScope(this, ret)) {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
-            let id = ExpectIdentifierWithPos(ret)
-            ret.identifier = id
+            let id = ParseIdentifierFromToken(Peek())
             ret.keywordPos = id.Begin()
             ret.begin = if (ret.begin.IsZero()) { id.Begin() } else { ret.begin }
             if (!curPrimaryDeclIdent.isEmpty() && id.Val() != curPrimaryDeclIdent) {
                 DiagUnknownPrimaryConstructor(curPrimaryDeclIdent)
                 ret.EnableAttr(Attribute.IS_BROKEN)
             }
+            ret.identifier = id
+            Next()
             let bodyScope = if (ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) {
                 ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT
             } else {
