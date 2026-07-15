@@ -1,10 +1,11 @@
 package cjcj::chir
 
 import std.collection.*
+import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::mangle.{MANGLE_CANGJIE_PREFIX, MANGLE_FUNC_PARAM_TYPE_PREFIX, MANGLE_GLOBAL_FILE_INIT_PREFIX,
-    MANGLE_GLOBAL_VARIABLE_INIT_PREFIX, MANGLE_VOID_TY_SUFFIX, MangleName}
+    MANGLE_GLOBAL_VARIABLE_INIT_PREFIX, MANGLE_VOID_TY_SUFFIX, MangleName, SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION}
 import cjcj::option.{GlobalOptions, SanitizerCoverageOptions, SanitizerCoverageType}
 import cjcj::utils.{CJC_ASSERT, OverflowStrategy}
 
@@ -152,6 +153,94 @@ public class SanitizerCoverage {
     public init(option: GlobalOptions, builder: CHIRBuilder) {
         sanCovOption = option.sancovOption
         this.builder = builder
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:190-196.
+    private func InitFuncBag(`package`: Package): Unit {
+        for (v in `package`.GetGlobalFuncsWithoutBody()) {
+            funcBag[v.GetIdentifierWithoutPrefix()] = v
+        }
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:198-221.
+    public func RunOnPackage(`package`: Package, diag: BasicDiagnosticEngine, isDebug: Bool): Bool {
+        if (!CheckSancovOption(diag)) {
+            return false
+        }
+        InitFuncBag(`package`)
+        packageName = `package`.GetName()
+        for (`func` in `package`.GetGlobalFuncsWithBody()) {
+            if (`func`.IsGVInit() || `func`.TestAttr(Attribute.COMPILER_ADD) ||
+                `func`.GetPackageName() != `package`.GetName()) {
+                continue
+            }
+            let targetSuffix = SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION + MANGLE_FUNC_PARAM_TYPE_PREFIX +
+                MANGLE_VOID_TY_SUFFIX
+            if (`func`.GetIdentifier().endsWith(targetSuffix)) {
+                continue
+            }
+            RunOnFunc(`func`, isDebug)
+        }
+        GenerateInitFunc(`package`.GetPackageInitFunc().getOrThrow(), isDebug)
+        return true
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:223-265.
+    private func RunOnFunc(`func`: Function, isDebug: Bool): Unit {
+        if (sanCovOption.traceCmp) {
+            let visitAction: VisitExprActionFunc = { expr: Expression =>
+                if (expr.GetExprKind() == ExprKind.MULTIBRANCH) {
+                    let mb = (expr as MultiBranch).getOrThrow()
+                    InjectTraceForSwitch(mb, isDebug)
+                }
+                if (expr.IsBinaryExpr()) {
+                    let binary = (expr as BinaryExpression).getOrThrow()
+                    InjectTraceForCmp(binary, isDebug)
+                }
+                return VisitResult.CONTINUE
+            }
+            Visitor.Visit(`func`, visitAction)
+        }
+        if (sanCovOption.traceMemCmp) {
+            let visitAction: VisitExprActionFunc = { expr: Expression =>
+                InjectTraceMemCmp(expr, isDebug)
+                return VisitResult.CONTINUE
+            }
+            Visitor.Visit(`func`, visitAction)
+        }
+        let isCoverageOpen = sanCovOption.inlineBoolFlag || sanCovOption.inline8bitCounters ||
+            sanCovOption.tracePCGuard || sanCovOption.stackDepth
+        if (!isCoverageOpen) {
+            return
+        }
+        let isBasicBlockLevel = sanCovOption.coverageType == SanitizerCoverageType.SCK_BB ||
+            sanCovOption.coverageType == SanitizerCoverageType.SCK_UNKNOW
+        for (block in `func`.GetBody().getOrThrow().GetBlocks()) {
+            if (isBasicBlockLevel || block.IsEntry()) {
+                InsertCoverageAheadBlock(block, isDebug)
+            }
+        }
+    }
+
+    // C++: CHIR/Transformation/SanitizerCoverage.cpp:267-288.
+    private func CheckSancovOption(diag: BasicDiagnosticEngine): Bool {
+        let isSancov = sanCovOption.inline8bitCounters || sanCovOption.inlineBoolFlag ||
+            sanCovOption.tracePCGuard
+        let isSancovLevelVaild = sanCovOption.coverageType == SanitizerCoverageType.SCK_FUNCTION ||
+            sanCovOption.coverageType == SanitizerCoverageType.SCK_BB
+        if (!isSancov && sanCovOption.pcTable) {
+            diag.Diagnose(BasicDiagKind.chir_sancov_illegal_usage_of_pc_table)
+            return false
+        }
+        if (isSancov && sanCovOption.coverageType == SanitizerCoverageType.SCK_NONE) {
+            diag.Diagnose(BasicDiagKind.chir_sancov_illegal_usage_of_level)
+            return false
+        }
+        if (!isSancov && isSancovLevelVaild) {
+            diag.Diagnose(BasicDiagKind.chir_sancov_illegal_usage_of_level)
+            return false
+        }
+        return true
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:290-343.

@@ -45,6 +45,7 @@ import cjcj::chir.RangePropagation
 import cjcj::chir.IsTrackedGVForRangeAnalysis
 import cjcj::chir.rangeStateGlobals
 import cjcj::chir.ReplaceUsesWithWrapper
+import cjcj::chir.SanitizerCoverage
 import cjcj::chir.ShouldReportUnusedCodeWarnings
 import cjcj::chir.Terminator as ChirTerminator
 import cjcj::chir.ToCHIRPhase
@@ -150,6 +151,8 @@ private class ToCHIR {
         }
         ast2chir.ReplaceSrcCodeImportedValAfterClosureConversion(lowered, closure.GetUselessClassDef(),
             closure.GetUselessLambda())
+        // C++: CHIR/CHIR.cpp:1183.
+        RunSanitizerCoverage()
         EraseDebugExpr()
         CFFIFuncWrapper()
         if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
@@ -157,6 +160,20 @@ private class ToCHIR {
         }
         builder.MergeAllocatedInstance()
         return Some(lowered)
+    }
+
+    // C++: CHIR/CHIR.cpp:589-598 ToCHIR::RunSanitizerCoverage.
+    private func RunSanitizerCoverage(): Unit {
+        let opts = instance.invocation.globalOptions
+        if (!opts.IsSancovOptionEnabled()) {
+            return
+        }
+        try (recorder = ProfileRecorder("CHIR", "Sanitizer Coverage")) {
+            let sanCovOpt = SanitizerCoverage(opts, builder)
+            let _ = sanCovOpt.RunOnPackage(chirPkg.getOrThrow(), instance.diag.AsBasicDiagnosticEngine(),
+                opts.chirDebugOptimizer)
+            DumpCHIRToFile("Sanitizer_Coverage")
+        }
     }
 
     private func DumpCHIRToFile(suffix: String, needCheckFlag!: Bool = true): Unit {
