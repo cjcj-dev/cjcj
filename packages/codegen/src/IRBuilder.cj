@@ -1056,7 +1056,7 @@ public class IRBuilder2 <: Resource {
         if (blocks.size < 3) {
             return LLVMNullValue()
         }
-        let size = GetSize32(valueCGType.GetOriginal(), valueCGType)
+        let size = GetSize_32(valueCGType.GetOriginal())
         CreateCondBr(CreateTypeInfoIsReferenceCall(destTy), blocks[0], blocks[1])
 
         SetInsertPoint(blocks[0])
