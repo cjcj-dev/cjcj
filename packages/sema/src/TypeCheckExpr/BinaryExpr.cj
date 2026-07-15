@@ -1197,6 +1197,9 @@ private func SynCoalescingExpr(impl: TypeCheckerImpl, be: BinaryExpr,
                 be.SetTy(unboxedTy)
                 return unboxedTy
             }
+            if (let Some(diagValue) <- impl.diag) {
+                DiagMismatchedTypes(diagValue, rightExpr, unboxedTy)
+            }
         }
     }
     return BinaryInvalid(be)
@@ -1231,12 +1234,20 @@ private func ChkCoalescingExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr
         let unboxedTy = concreteLeftTy.typeArgs[0]
         if (typeManager.CheckTypeCompatibility(target, unboxedTy) == TypeCompatibility.INCOMPATIBLE) {
             let _ = BinaryInvalid(be)
+            if (Ty.IsTyCorrect(unboxedTy)) {
+                if (let Some(diagValue) <- impl.diag) {
+                    DiagMismatchedTypesWithFoundTy(diagValue, leftExpr, target, unboxedTy)
+                }
+            }
             return false
         }
         if (let Some(rightExpr) <- be.rightExpr) {
             if (ChkBinaryOperand(typeManager, target, rightExpr, ctx, checker)) {
                 be.SetTy(target)
                 return true
+            }
+            if (let Some(diagValue2) <- impl.diag) {
+                DiagMismatchedTypes(diagValue2, rightExpr, target)
             }
         }
     }
