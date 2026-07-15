@@ -11,6 +11,7 @@ import cjcj::chir.GlobalVar
 import cjcj::chir.Package
 import cjcj::chir.Type
 import cjcj::chir.Value
+import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::option.GlobalOptions
 import cjcj::utils.{CJC_ASSERT, DynamicCast}
 

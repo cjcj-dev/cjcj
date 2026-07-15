@@ -16,6 +16,7 @@
 [dependencies]
   "cjcj::basic" = { path = "../basic" }
   "cjcj::chir" = { path = "../chir" }
+  "cjcj::incremental_compilation" = { path = "../incremental_compilation" }
   "cjcj::mangle" = { path = "../mangle" }
   "cjcj::option" = { path = "../option" }
   "cjcj::utils" = { path = "../utils" }

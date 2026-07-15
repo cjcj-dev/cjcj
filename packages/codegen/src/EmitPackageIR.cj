@@ -11,6 +11,7 @@ import cjcj::chir.Function
 import cjcj::chir.NoHeapAllocChecker
 import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.Type
+import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::option.EnvironmentType
 import cjcj::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
 import cjcj::mangle.MANGLE_VOID_TY_SUFFIX

@@ -11,6 +11,7 @@ import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.Package
 import cjcj::chir.Type
 import cjcj::chir.Value
+import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::option.GlobalOptions
 
 // Mirrors CodeGen/CGPkgContext.h:19-31 ObjectLocker.
@@ -28,20 +29,6 @@ public class ObjectLocker<T> {
         return synchronized(locker) {
             function(object)
         }
-    }
-}
-
-public class CachedMangleMap {
-    public let importedInlineDecls: HashSet<String> = HashSet<String>()
-    public let newExternalDecls: HashSet<String> = HashSet<String>()
-    public let incrRemovedDecls: HashSet<String> = HashSet<String>()
-
-    public init() {}
-
-    public func Clear(): Unit {
-        importedInlineDecls.clear()
-        newExternalDecls.clear()
-        incrRemovedDecls.clear()
     }
 }
 

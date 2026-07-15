@@ -86,6 +86,13 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         let ret = super.PerformGenericInstantiation()
         if (ret) {
             CollectChangedTypeNames()
+            for (srcPkg in core.GetSourcePackages()) {
+                IterateAllExportableDecls(srcPkg, { decl =>
+                    if (!decl.IsExportedDecl() && decl.linkage == Linkage.EXTERNAL && !decl.mangledName.isEmpty()) {
+                        cacheMangles.newExternalDecls.add(decl.mangledName)
+                    }
+                })
+            }
         }
         return ret
     }
@@ -112,13 +119,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             }
             return true
         }
-        if (kind == IncreKind.EMPTY_PKG) {
-            return true
-        }
-        if (kind == IncreKind.INCR) {
-            return CodegenOnePackage(true)
-        }
-        return super.PerformCodeGen()
+        return CodegenOnePackage(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)
     }
 
     public override func PerformCjoSaving(): Bool {

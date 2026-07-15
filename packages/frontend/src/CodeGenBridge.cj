@@ -56,8 +56,9 @@ import cjcj::chir.Value as ChirValue
 import cjcj::ast.Package as RealASTPackage
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::codegen.CHIRData as CodegenCHIRData
+import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::codegen.ClearPackageModules
-import cjcj::codegen.GenPackageModules
+import cjcj::codegen.GenPackageModules as CodegenGenPackageModules
 import cjcj::codegen.LLVMModuleHandle as LLVMModuleHandle
 import cjcj::codegen.SavePackageModule
 import cjcj::meta_transformation.TryRunCHIRMetaTransforms
@@ -563,7 +564,8 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
         isDebug: options.chirDebugOptimizer)
 }
 
-public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool {
+public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
+    cachedMangleMap: CachedMangleMap): Bool {
     if (instance.diag.GetErrorCount() != 0) {
         return false
     }
@@ -586,13 +588,12 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
         for ((mangledName, fn) in instance.chirData.GetImplicitFuncs(realPackage)) {
             codegenData.AddImplicitFunc(mangledName, fn)
         }
-        PruneImportedFunctionBodiesForRealCodegen(realPackage)
         let noHeapAllocChecker = NoHeapAllocChecker(instance.diag.AsBasicDiagnosticEngine())
         noHeapAllocChecker.RunOnPackage(realPackage)
         let noWriteBarrierRecChecker = NoWriteBarrierRecChecker(instance.diag.AsBasicDiagnosticEngine())
         noWriteBarrierRecChecker.RunOnPackage(realPackage)
-        let packageModules = GenPackageModules(codegenData, codegenOptions,
-            instance.invocation.globalOptions.enIncrementalCompilation, noHeapAllocChecker, noWriteBarrierRecChecker)
+        let packageModules = CodegenGenPackageModules(codegenData, codegenOptions, enableIncrement,
+            noHeapAllocChecker, noWriteBarrierRecChecker, cachedMangleMap: cachedMangleMap)
         if (instance.diag.GetErrorCount() != 0) {
             instance.diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
             ClearPackageModules(packageModules)
@@ -603,17 +604,6 @@ public func EmitRealCodeGenForCompilerInstance(instance: CompilerInstance): Bool
         packageIndex++
     }
     return emittedAll
-}
-
-private func PruneImportedFunctionBodiesForRealCodegen(pkg: RealCHIRPackage): Unit {
-    let kept = ArrayList<ChirFunction>()
-    for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
-        if (fn.IsSrcCodeImported()) {
-            continue
-        }
-        kept.add(fn)
-    }
-    pkg.SetAllGlobalFuncs(kept)
 }
 
 private func BuildRealCodeGenPackages(realPackages: ArrayList<RealCHIRPackage>): ArrayList<RealCHIRPackage> {

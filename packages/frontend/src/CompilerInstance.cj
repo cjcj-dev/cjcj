@@ -18,6 +18,7 @@ import cjcj::meta_transformation.NativeMetaTransformPlugin
 import cjcj::lex.Lexer as CangjieLexer
 import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
+import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::chir.CHIRBuilder as ChirBuilder
 import cjcj::chir.CHIRDeserializer as ChirDeserializer
@@ -714,14 +715,15 @@ public class CompilerInstance {
         }
     }
 
-    public func PerformCodeGen(): Bool {
+    public func PerformCodeGen(enableIncrement!: Bool = false,
+        cachedMangleMap!: CachedMangleMap = CachedMangleMap()): Bool {
         if (diag.GetErrorCount() != 0) {
             return false
         }
         if (let Some(pkg) <- chirData.GetCurrentCHIRPackage()) {
             chirData.ActivateCodegenFuncsForPackage(pkg)
         }
-        return EmitRealCodeGenForCompilerInstance(this)
+        return GenPackageModules(this, enableIncrement, cachedMangleMap)
     }
 
     public func PerformCjoSaving(): Bool {

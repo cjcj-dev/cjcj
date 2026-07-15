@@ -2,6 +2,7 @@ package cjcj::frontend_tool
 
 import std.collection.*
 import cjcj::frontend.*
+import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
 import cjcj::utils.FileUtil
@@ -243,7 +244,8 @@ public open class DefaultCompilerInstance {
         let _ = core.packageManager.ResolveDependence(imported)
     }
 
-    public func CodegenOnePackage(enableIncrement: Bool): Bool {
+    public func CodegenOnePackage(enableIncrement: Bool,
+        cachedMangleMap!: CachedMangleMap = CachedMangleMap()): Bool {
         if (invocation.globalOptions.disableCodeGen) {
             return true
         }
@@ -253,7 +255,7 @@ public open class DefaultCompilerInstance {
                     pkg.fullPackageName, ".frontend_tool.codegen"))
             }
         }
-        return core.PerformCodeGen()
+        return core.PerformCodeGen(enableIncrement: enableIncrement, cachedMangleMap: cachedMangleMap)
     }
 
     protected func SaveCjos(pkgs: ArrayList<Package>): Bool {
