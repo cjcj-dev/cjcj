@@ -571,7 +571,6 @@ public class RuntimeInit {
         if (let Some(opened) <- handle) {
             if (initRuntime) {
                 FinishRuntime(opened)
-                initRuntime = false
             }
             @When[backend == "cjnative" && env != "ohos"]
             let _ = CloseSymbolTable(opened)
@@ -579,8 +578,11 @@ public class RuntimeInit {
         handle = None
         runtimeMethodFunc = CPointer<Unit>()
         runtimeReleaseFunc = CPointer<Unit>()
-        @When[backend == "cjnative" && env != "ohos"]
-        let _ = CloseMacroDynamicLibrary()
+        if (initRuntime) {
+            @When[backend == "cjnative" && env != "ohos"]
+            let _ = CloseMacroDynamicLibrary()
+            initRuntime = false
+        }
     }
 
     public func GetHandle(): Option<RuntimeHandle> {
