@@ -10,6 +10,8 @@ import cjcj::basic.DiagSeverity as BasicDiagSeverity
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagnosticBuilder
+import cjcj::basic.SubDiagnostic
 import cjcj::modules.SemaImportManager
 
 public type CallArgChecker = (Ty, FuncArg) -> Bool
@@ -1889,6 +1891,113 @@ private func AllCallArgsHaveCorrectTy(ce: CallExpr): Bool {
     return true
 }
 
+// Mirrors C++ TypeArgumentInference.cpp:28-37.
+private func GetUnivTyVarsToSolve(maps: SubstPack): TyVars {
+    let ret = TyVars()
+    for (entry in maps.u2i.entries) {
+        if (let Some(instTyVar) <- (entry.ty as GenericsTy)) {
+            if (let None <- maps.inst.Get(instTyVar)) {
+                ret.add(entry.tyVar)
+            }
+        }
+    }
+    return ret
+}
+
+// Mirrors C++ TypeArgumentInference.cpp:40-51.
+private func TryReplaceIdeal(ty: Option<Ty>): Option<Ty> {
+    if (let Some(value) <- ty) {
+        if (value.kind == TypeKind.TYPE_IDEAL_INT) {
+            return Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
+        } else if (value.kind == TypeKind.TYPE_IDEAL_FLOAT) {
+            return Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_FLOAT64))
+        }
+    }
+    return ty
+}
+
+// Mirrors C++ TypeArgumentInference.cpp:53-70.
+private func MakeOneBlameHint(blame: Blame): String {
+    let lb = TryReplaceIdeal(blame.lb).getOrThrow()
+    let ub = TryReplaceIdeal(blame.ub).getOrThrow()
+    return match (blame.style) {
+        case BlameStyle.ARGUMENT =>
+            "of type '" + lb.String() + "', should match parameter type '" + ub.String() + "'"
+        case BlameStyle.RETURN =>
+            "of return type '" + lb.String() + "', should match expected type '" + ub.String() + "'"
+        case BlameStyle.CONSTRAINT => ""
+    }
+}
+
+// Mirrors C++ TypeArgumentInference.cpp:72-156.
+private func MakeBlameMsg(builder: DiagnosticBuilder, diagInfo: SolvingErrInfo): Unit {
+    match (diagInfo.style) {
+        case SolvingErrStyle.NO_CONSTRAINT =>
+            let tyVar = diagInfo.tyVar.getOrThrow()
+            let decl = tyVar.decl.getOrThrow()
+            AddNote(builder, decl, MakeRangeForDeclIdentifier(decl),
+                "no information known for type variable '" + tyVar.String() + "'")
+        case SolvingErrStyle.ARG_MISMATCH =>
+            let blame = diagInfo.blames[0].values[0]
+            let lb = TryReplaceIdeal(blame.lb).getOrThrow()
+            let ub = TryReplaceIdeal(blame.ub).getOrThrow()
+            let src = blame.src.getOrThrow()
+            let subDiag = SubDiagnostic("mismatched types")
+            subDiag.AddMainHint(MakeRange(src.GetBegin(), src.GetEnd()),
+                "of type '" + lb.String() + "', impossible to match parameter type '" + ub.String() + "'")
+            builder.AddNote(subDiag)
+        case SolvingErrStyle.RET_MISMATCH =>
+            let blame = diagInfo.blames[0].values[0]
+            let lb = TryReplaceIdeal(blame.lb).getOrThrow()
+            let ub = TryReplaceIdeal(blame.ub).getOrThrow()
+            let src = blame.src.getOrThrow()
+            let subDiag = SubDiagnostic("mismatched types")
+            subDiag.AddMainHint(MakeRange(src.GetBegin(), src.GetEnd()),
+                "of return type '" + lb.String() + "', impossible to match expected type '" + ub.String() + "'")
+            builder.AddNote(subDiag)
+        case SolvingErrStyle.CONFLICTING_CONSTRAINTS =>
+            let tyVar = diagInfo.tyVar.getOrThrow()
+            var constraintsMsg = ""
+            let indentStr = "\n      "
+            for (lb0 in diagInfo.lbs) {
+                let lb = TryReplaceIdeal(Some(lb0)).getOrThrow()
+                constraintsMsg += indentStr + "'" + lb.String() + " <: " + tyVar.String() + "'"
+            }
+            for (ub0 in diagInfo.ubs) {
+                let ub = TryReplaceIdeal(Some(ub0)).getOrThrow()
+                constraintsMsg += indentStr + "'" + tyVar.String() + " <: " + ub.String() + "'"
+            }
+            let decl = tyVar.decl.getOrThrow()
+            AddNote(builder, decl, MakeRangeForDeclIdentifier(decl),
+                "following constraints for type variable '" + tyVar.String() +
+                "' cannot be solved:" + constraintsMsg)
+            var blameId: Int64 = 0
+            for (lb0 in diagInfo.lbs) {
+                let lb = TryReplaceIdeal(Some(lb0)).getOrThrow()
+                let msg = "constraint '" + lb.String() + " <: " + tyVar.String() + "' may come from:"
+                for (blame in diagInfo.blames[blameId].values) {
+                    let src = blame.src.getOrThrow()
+                    let subDiag = SubDiagnostic(msg)
+                    subDiag.AddMainHint(MakeRange(src.GetBegin(), src.GetEnd()), MakeOneBlameHint(blame))
+                    builder.AddNote(subDiag)
+                }
+                blameId++
+            }
+            for (ub0 in diagInfo.ubs) {
+                let ub = TryReplaceIdeal(Some(ub0)).getOrThrow()
+                let msg = "constraint '" + tyVar.String() + " <: " + ub.String() + "' may come from:"
+                for (blame in diagInfo.blames[blameId].values) {
+                    let src = blame.src.getOrThrow()
+                    let subDiag = SubDiagnostic(msg)
+                    subDiag.AddMainHint(MakeRange(src.GetBegin(), src.GetEnd()), MakeOneBlameHint(blame))
+                    builder.AddNote(subDiag)
+                }
+                blameId++
+            }
+        case SolvingErrStyle.DEFAULT => ()
+    }
+}
+
 private func ShouldReportCallInferenceFailure(target: Option<Ty>): Bool {
     if (let Some(targetTy) <- target) {
         return !targetTy.IsQuest() && !targetTy.HasGeneric()
@@ -2421,6 +2530,7 @@ private func GenerateTypeMappingByInference(typeManager: TypeManager, diag: Opti
     }
     let typeMappings = ArrayList<SubstPack>()
     let realCtx = ctx ?? return typeMappings
+    var diagInfo = SolvingErrInfo()
     let combinationSize = candidate.argCombinations.size
     var cbIndex: Int64 = 0
     while (cbIndex < combinationSize) {
@@ -2433,20 +2543,76 @@ private func GenerateTypeMappingByInference(typeManager: TypeManager, diag: Opti
             let currentSubst = typeManager.GetInstMapping()
             typeManager.PackMapping(currentSubst, newSubst)
             typeMappings.add(currentSubst)
-        } else if (let Some(_) <- errOrSubst.error) {
-            ()
+        } else if (let Some(error) <- errOrSubst.error) {
+            diagInfo = error
         }
     }
     if (typeMappings.isEmpty() && AllCallArgsHaveCorrectTy(ce)) {
-        MarkCallInferenceFailure(inferenceFailure, ce, fd, target)
+        DiagnoseForCallInference(diag, ce, fd, typeManager.GetInstMapping(), diagInfo)
     }
     return typeMappings
 }
 
-private func DiagnoseForCallInference(diag: Option<BasicDiagnosticEngine>, ce: CallExpr): Unit {
+// Mirrors C++ TypeArgumentInference.cpp:158-206.
+private func DiagnoseForCallInference(diag: Option<BasicDiagnosticEngine>, ce: CallExpr, fd: FuncDecl,
+    maps: SubstPack, diagInfo: SolvingErrInfo): Unit {
     if (let Some(diagValue) <- diag) {
-        if (let Some(base) <- ce.baseFunc) {
-            DiagRefEmit(diagValue, base, BasicDiagKindRefactor.sema_unable_to_infer_generic_func)
+        if (let Some(baseFunc) <- ce.baseFunc) {
+            let tyVars = GetUnivTyVarsToSolve(maps)
+            let builder = DiagnoseRefactor(
+                diagValue, BasicDiagKindRefactor.sema_unable_to_infer_generic_func, baseFunc)
+            var typeStr = "'" + fd.GetTy().getOrThrow().String() + "'"
+            if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+                if (let Some(baseExpr) <- memberAccess.baseExpr) {
+                    if (Ty.IsTyCorrect(baseExpr.GetTy())) {
+                        let refBase = baseExpr as RefExpr
+                        let isNormalRef = if (let Some(refExpr) <- refBase) {
+                            !refExpr.isThis && !refExpr.isSuper
+                        } else {
+                            true
+                        }
+                        if (isNormalRef) {
+                            typeStr += " in context type '" + baseExpr.GetTy().getOrThrow().String() + "'"
+                        }
+                    }
+                }
+            }
+            let fdVars = TySet()
+            if (let Some(fdGeneric) <- fd.GetGeneric()) {
+                for (tyParam in fdGeneric.typeParameters) {
+                    if (let Some(ty) <- tyParam.GetTy()) {
+                        fdVars.Add(ty)
+                    }
+                }
+            }
+            var constraintStr = ""
+            var fdConstraints = ""
+            for (ty in tyVars) {
+                if (!ty.upperBounds.isEmpty()) {
+                    let str = ty.String() + " <: " + Ty.GetTypesToStableStr(ty.upperBounds, " & ")
+                    if (fdVars.Contains(ty)) {
+                        fdConstraints += str + ", "
+                    } else {
+                        constraintStr += str + ", "
+                    }
+                }
+            }
+            constraintStr += fdConstraints
+            if (!constraintStr.isEmpty()) {
+                let comma = constraintStr.lastIndexOf(",").getOrThrow()
+                typeStr += " with constraint '" + constraintStr[0..comma] + "'"
+            }
+            if (fd.ShouldDiagnose()) {
+                let addFunctionTypeNote = match (diagInfo.style) {
+                    case SolvingErrStyle.CONFLICTING_CONSTRAINTS | SolvingErrStyle.NO_CONSTRAINT => false
+                    case _ => true
+                }
+                if (addFunctionTypeNote) {
+                    AddNote(builder, fd, MakeRangeForDeclIdentifier(fd), "for function type " + typeStr)
+                }
+                MakeBlameMsg(builder, diagInfo)
+            }
+            builder.Emit()
         }
     }
 }
