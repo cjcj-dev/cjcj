@@ -1815,9 +1815,11 @@ extend ParserImpl {
         let ret = ThrowExpr()
         let token = Expect(TokenKind.THROW, "expected 'throw'")
         ret.throwPos = token.Begin()
-        ret.begin = token.Begin()
-        if (!AtTerminator()) { ret.expr = ParseExpr() }
-        ret.end = if (let Some(expr) <- ret.expr) { expr.end } else { token.End() }
+        ret.begin = Peek().Begin()
+        ret.expr = ParseExpr()
+        if (let Some(expr) <- ret.expr) {
+            ret.end = expr.end
+        }
         return ret
     }
 
