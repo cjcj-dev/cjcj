@@ -570,6 +570,10 @@ foreign {
         flags: UInt32, derivedFrom: LLVMMetadataRef, elements: CPointer<LLVMMetadataRef>, numElements: UInt32,
         runtimeLang: UInt32, vtableHolder: LLVMMetadataRef, uniqueId: CString,
         uniqueIdLen: UIntNative): LLVMMetadataRef
+    func LLVMDIBuilderCreateReplaceableCompositeType(builder: LLVMDIBuilderRef, tag: UInt32, name: CString,
+        nameLen: UIntNative, scope: LLVMMetadataRef, file: LLVMMetadataRef, lineNo: UInt32, runtimeLang: UInt32,
+        sizeInBits: UInt64, alignInBits: UInt32, flags: UInt32, uniqueId: CString,
+        uniqueIdLen: UIntNative): LLVMMetadataRef
     func LLVMDIBuilderGetOrCreateSubrange(builder: LLVMDIBuilderRef, lowerBound: Int64,
         count: Int64): LLVMMetadataRef
     func LLVMDIBuilderGetOrCreateArray(builder: LLVMDIBuilderRef, data: CPointer<LLVMMetadataRef>,
@@ -607,6 +611,7 @@ foreign {
         elements: LLVMMetadataRef): LLVMMetadataRef
     func LLVMSelfhostDIBuilderCreateArrayType(builder: LLVMDIBuilderRef, sizeInBits: UInt64,
         alignInBits: UInt32, ty: LLVMMetadataRef, subscripts: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMSelfhostMDNodeReplaceWithDistinct(composite: LLVMMetadataRef): LLVMMetadataRef
     func LLVMSelfhostDIBuilderCreateEnumerationType(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef,
         name: CString, nameLen: UIntNative, file: LLVMMetadataRef, lineNo: UInt32, sizeInBits: UInt64,
         alignInBits: UInt32, elements: CPointer<LLVMMetadataRef>, count: UIntNative,

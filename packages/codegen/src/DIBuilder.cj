@@ -57,6 +57,7 @@ private let DW_ATE_UTF: UInt32 = 16u32
 private let DW_TAG_const_type: UInt32 = 0x26u32
 private let DW_TAG_typedef: UInt32 = 0x16u32
 private let DW_TAG_subprogram: UInt32 = 0x2eu32
+private let DW_TAG_class_type: UInt32 = 0x02u32
 private let FlagZero: UInt32 = 0u32
 private let FlagArtificial: UInt32 = 64u32
 private let FlagVirtual: UInt32 = 32u32
@@ -65,6 +66,7 @@ private let FlagObjectPointer: UInt32 = 1024u32
 private let FlagProtected: UInt32 = 2u32
 private let FlagPublic: UInt32 = 3u32
 private let FlagStaticMember: UInt32 = 4096u32
+private let FlagTypePassByReference: UInt32 = 8388608u32
 private let SPFlagPureVirtual: UInt32 = 2u32
 private let SPFlagDefinition: UInt32 = 8u32
 let DWARF_VERSION: UInt64 = 4u64
@@ -670,6 +672,20 @@ public class DIBuilder {
         elements.add(createMemberType(fwdDecl, "elements", defaultFile, 0u32, bitInSize, align, offset,
             FlagZero, elemType))
         let _ = replaceArrays(fwdDecl, getOrCreateArray(elements))
+    }
+
+    private func CreateVarFuncType(funcTy: FuncType): LLVMMetadataRef {
+        let size = GetSizeInBits(CreateRefType())
+        let name = GenerateFuncName(funcTy)
+        let tag = DW_TAG_class_type
+        var fwdDecl = createReplaceableCompositeType(tag, name, namespaceScope, defaultFile, 0u32, 0u32, 64u64,
+            0u32, FlagTypePassByReference, funcTy.ToString())
+        fwdDecl = replaceWithDistinct(fwdDecl)
+        let funcDIType = CreateFuncType(funcTy)
+        let funcPtrType = createMemberType(fwdDecl, "ptr", defaultFile, 0u32, GetSizeInBits(CreateRefType()), 0u32,
+            0u64, FlagZero, CreatePointerType(funcDIType, sizeInBits: size))
+        let _ = replaceArrays(fwdDecl, getOrCreateArray(ArrayList<LLVMMetadataRef>([funcPtrType])))
+        return fwdDecl
     }
 
     private func GenerateTypeName(ty: Type): String {
@@ -1393,6 +1409,25 @@ public class DIBuilder {
     private func createArrayType(sizeInBits: UInt64, alignInBits: UInt32, ty: LLVMMetadataRef,
         subscripts: LLVMMetadataRef): LLVMMetadataRef {
         return unsafe { LLVMSelfhostDIBuilderCreateArrayType(raw, sizeInBits, alignInBits, ty, subscripts) }
+    }
+
+    private func createReplaceableCompositeType(tag: UInt32, name: String, scope: LLVMMetadataRef,
+        file: LLVMMetadataRef, lineNo: UInt32, runtimeLang: UInt32, sizeInBits: UInt64, alignInBits: UInt32,
+        flags: UInt32, uniqueId: String): LLVMMetadataRef {
+        var result = LLVMNullMetadata()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource(),
+            uniqueIdCString = unsafe { LibC.mallocCString(uniqueId) }.asResource()) {
+            result = unsafe {
+                LLVMDIBuilderCreateReplaceableCompositeType(raw, tag, nameCString.value, UIntNative(name.size),
+                    scope, file, lineNo, runtimeLang, sizeInBits, alignInBits, flags, uniqueIdCString.value,
+                    UIntNative(uniqueId.size))
+            }
+        }
+        return result
+    }
+
+    private func replaceWithDistinct(composite: LLVMMetadataRef): LLVMMetadataRef {
+        return unsafe { LLVMSelfhostMDNodeReplaceWithDistinct(composite) }
     }
 
     private func replaceArrays(composite: LLVMMetadataRef, elements: LLVMMetadataRef): LLVMMetadataRef {

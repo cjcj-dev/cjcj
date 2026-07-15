@@ -518,6 +518,12 @@ extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderCreateArrayType(LLVMDIBuilderRef
         SizeInBits, AlignInBits, unwrap<DIType>(Ty), DINodeArray(subscripts)));
 }
 
+extern "C" LLVMMetadataRef LLVMSelfhostMDNodeReplaceWithDistinct(LLVMMetadataRef Composite)
+{
+    auto *composite = unwrap<DICompositeType>(Composite);
+    return wrap(MDNode::replaceWithDistinct(TempDICompositeType(composite)));
+}
+
 extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderCreateEnumerationType(LLVMDIBuilderRef Builder,
     LLVMMetadataRef Scope, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned LineNo,
     uint64_t SizeInBits, uint32_t AlignInBits, LLVMMetadataRef *Elements, size_t Count,
