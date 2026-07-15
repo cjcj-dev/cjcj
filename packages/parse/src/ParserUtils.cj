@@ -5,6 +5,7 @@ import cjcj::ast.OverloadableExpr as AstOverloadableExpr
 import cjcj::ast.VisitAction
 import cjcj::ast.Walker
 import cjcj::option.IsUnsafeBackend as OptionIsUnsafeBackend
+import cjcj::utils.CJC_ASSERT
 
 func LookupMatchingOpenBracket(kind: TokenKind): TokenKind {
     if (kind == TokenKind.RCURL) {
@@ -96,6 +97,23 @@ extend ParserImpl {
             Next()
             ConsumeUntil(TokenKind.RSQUARE, targetTokenConsumed: false)
         }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParserUtils.cpp:290-301
+    public func ParseOneOrMoreSepTrailing(
+        storeSeparator: (Position) -> Unit,
+        parseElement: () -> Unit,
+        end: TokenKind,
+        separator!: TokenKind = TokenKind.COMMA
+    ): Unit {
+        do {
+            parseElement()
+            if (Skip(separator)) {
+                storeSeparator(lastToken.Begin())
+            } else {
+                break
+            }
+        } while (!Seeing(end))
     }
 
     public func ConsumeUntilDecl(): Unit {
@@ -689,6 +707,62 @@ extend ParserImpl {
             generic.end = generic.rightAnglePos + 1
         }
         return generic
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:1774-1822
+    public func ParseGenericParamDecl(): GenericParamDecl {
+        let ret = GenericParamDecl()
+        try (cs = ChainScope(this, ret)) {
+            ret.identifier = ParseIdentifierFromToken(lookahead)
+            ret.begin = lookahead.Begin()
+            ret.end = lookahead.End()
+            Next()
+        }
+        return ret
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:1785-1822
+    public func ParseGeneric(): Generic {
+        CJC_ASSERT(lastToken.kind == TokenKind.LT)
+        let ret = Generic()
+        ret.leftAnglePos = lastToken.Begin()
+        ret.begin = lastToken.Begin()
+        try (cs = ChainScope(this, ret)) {
+            ParseOneOrMoreSepTrailing(
+                { commaPos: Position =>
+                    if (!ret.typeParameters.isEmpty()) {
+                        ret.typeParameters[ret.typeParameters.size - 1].commaPos = commaPos
+                    }
+                },
+                { =>
+                    var genericParamDecl: Option<GenericParamDecl> = None
+                    if (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword()) {
+                        genericParamDecl = Some(ParseGenericParamDecl())
+                    } else {
+                        if (!ret.TestAttr(Attribute.IS_BROKEN)) {
+                            DiagExpectedIdentifierGeneric(ret)
+                        }
+                        TryConsumeUntilAny([TokenKind.COMMA, TokenKind.GT])
+                        ret.EnableAttr(Attribute.IS_BROKEN)
+                    }
+                    // C++ Next resets lookahead to SENTINEL (ParserUtils.cpp:126), so the
+                    // lookahead.kind != GT guard at ParseDecl.cpp:1809 is true after a parsed parameter.
+                    if (let Some(genericParam) <- genericParamDecl) {
+                        ret.typeParameters.add(genericParam)
+                    }
+                },
+                TokenKind.GT)
+            if (!Skip(TokenKind.GT)) {
+                if (!ret.TestAttr(Attribute.IS_BROKEN)) {
+                    ret.end = lastToken.End()
+                    DiagExpectedRightDelimiter("<", ret.leftAnglePos)
+                }
+            } else {
+                ret.rightAnglePos = lastToken.Begin()
+                ret.end = lastToken.End()
+            }
+        }
+        return ret
     }
 
     public func ParseGenericConstraints(): ArrayList<GenericConstraint> {

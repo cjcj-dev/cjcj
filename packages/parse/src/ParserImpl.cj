@@ -124,6 +124,7 @@ public class ParserImpl {
     public func SetCompileOptions(opts: GlobalOptions): Unit {
         compileOptions = opts
         scanDepPkg = opts.scanDepPkg
+        enableInteropCJMapping = opts.enableInteropCJMapping
         enableEH = opts.enableEH
         lexer.SetEHEnabled(opts.enableEH)
     }

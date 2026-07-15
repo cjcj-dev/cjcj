@@ -1,6 +1,8 @@
 package cjcj::parse
 
 import cjcj::ast.ASTCloner
+import cjcj::ast.InsertSyntheticClassDecl
+import cjcj::ast.IsDeclAppropriateForSyntheticClassGeneration
 import cjcj::ast.Node
 import cjcj::ast.IsMirror
 import cjcj::ast.SortModifierByPos
@@ -1577,25 +1579,42 @@ extend ParserImpl {
     public func ParseClassDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ClassDecl {
         let ret = ClassDecl()
         try (cs = ChainScope(this, ret)) {
-            ParseInheritableHeader(ret, TokenKind.CLASS, modifiers, annos)
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            let key = Expect(TokenKind.CLASS, "expected declaration keyword")
+            ret.keywordPos = key.Begin()
+            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            ret.identifier = ExpectIdentifierWithPos(ret)
+            ParseInterfaceDeclOrClassDeclGeneric(ret)
             CheckDeclarationInScope(scopeKind, DefKind.CLASS)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CLASS))
+            FFIParserImpl(this).CheckClassLikeSignature(ret, annos)
             SetPrimaryDecl(ret.identifier.Val(), isRawId: ret.identifier.IsRaw())
             ParseClassLikeBody(ret, ScopeKind.CLASS_BODY)
             RevertPrimaryDecl()
             ret.end = lastToken.End()
         }
+        CheckCJMappingAttr(ret)
         return ret
     }
 
     public func ParseInterfaceDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): InterfaceDecl {
         let ret = InterfaceDecl()
         try (cs = ChainScope(this, ret)) {
-            ParseInheritableHeader(ret, TokenKind.INTERFACE, modifiers, annos)
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            let key = Expect(TokenKind.INTERFACE, "expected declaration keyword")
+            ret.keywordPos = key.Begin()
+            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            ret.identifier = ExpectIdentifierWithPos(ret)
+            ParseInterfaceDeclOrClassDeclGeneric(ret)
             CheckDeclarationInScope(scopeKind, DefKind.INTERFACE)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.INTERFACE))
+            FFIParserImpl(this).CheckClassLikeSignature(ret, annos)
             ParseClassLikeBody(ret, ScopeKind.INTERFACE_BODY)
             ret.end = lastToken.End()
+        }
+        CheckCJMappingAttr(ret)
+        if (IsDeclAppropriateForSyntheticClassGeneration(ret)) {
+            InsertSyntheticClassDecl(ret, currentFile.getOrThrow())
         }
         return ret
     }
@@ -1800,6 +1819,68 @@ extend ParserImpl {
             EnsureDeclGeneric(ret).genericConstraints.add(constraint)
         }
         ret.end = ret.identifier.End()
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:1282-1289
+    public func ParseConstraints(decl: Decl): Unit {
+        if (let None <- decl.generic) {
+            Skip(TokenKind.WHERE)
+            DiagUnexpectedWhere(lastToken)
+        } else if (let Some(generic) <- decl.generic) {
+            for (constraint in ParseGenericConstraints()) {
+                generic.genericConstraints.add(constraint)
+            }
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:1312-1330
+    public func ParseInterfaceDeclOrClassDeclGeneric(ret: InheritableDecl): Unit {
+        if (Skip(TokenKind.LT)) {
+            ret.EnableAttr(Attribute.GENERIC)
+            ret.generic = ParseGeneric()
+        }
+        if (SeeingAny([TokenKind.IDENTIFIER, TokenKind.COLON]) || SeeingContextualKeyword()) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_lt_brace, lookahead,
+                ConvertToken(lookahead)).Emit()
+            ConsumeUntilDecl(TokenKind.LCURL)
+        }
+        if (Skip(TokenKind.UPPERBOUND)) {
+            ParseInheritedTypes(ret)
+        }
+        if (Seeing(TokenKind.WHERE)) {
+            ParseConstraints(ret)
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:829-857
+    public func CheckCJMappingAttr(decl: Decl): Unit {
+        if (!enableInteropCJMapping) {
+            return
+        }
+        if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE) ||
+            decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+            return
+        }
+        // Currently only support struct decl, enum decl, class decl interface decl, extend decl.
+        let isCJMappingClass = decl.astKind == ASTKind.CLASS_DECL && !decl.TestAttr(Attribute.ABSTRACT)
+        // Support java type.
+        if (decl.astKind == ASTKind.STRUCT_DECL || decl.astKind == ASTKind.ENUM_DECL || isCJMappingClass ||
+            decl.astKind == ASTKind.INTERFACE_DECL) {
+            if (!decl.TestAttr(Attribute.PUBLIC)) {
+                return
+            }
+            match (compileOptions.targetInteropLanguage) {
+                case InteropLanguage.Java => decl.EnableAttr(Attribute.JAVA_CJ_MAPPING)
+                case InteropLanguage.ObjC => decl.EnableAttr(Attribute.OBJ_C_CJ_MAPPING)
+                case _ => ()
+            }
+        }
+        if (decl.astKind == ASTKind.EXTEND_DECL) {
+            match (compileOptions.targetInteropLanguage) {
+                case InteropLanguage.Java => decl.EnableAttr(Attribute.JAVA_CJ_MAPPING)
+                case _ => ()
+            }
+        }
     }
 
     public func ParseInheritedTypes(decl: InheritableDecl): Unit {
