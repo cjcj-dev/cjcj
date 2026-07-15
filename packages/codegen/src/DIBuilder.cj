@@ -34,6 +34,7 @@ import cjcj::chir.TupleType
 import cjcj::chir.TypeKind
 import cjcj::chir.VArrayType
 import cjcj::chir.GetCustomTypeIdentifier
+import cjcj::chir.GetFuncTypeWithoutThisPtrFromAutoEnvBaseType
 import cjcj::utils.{CJC_ASSERT, StaticCast}
 
 // GAP_TODO(C07-debug-location-parity):
@@ -797,7 +798,7 @@ public class DIBuilder {
 
     private func GenerateCustomTypeName(ty: CustomType, needPkgPrefix!: Bool = true): String {
         if (ty.IsAutoEnvBase()) {
-            throw IllegalStateException("DIBuilder class type slice is not ported")
+            return GenerateClosureTypeName((ty as ClassType).getOrThrow())
         }
         let pkgName = ty.GetCustomTypeDef().GetPackageName()
         var typeName = if (needPkgPrefix) { pkgName + "::" } else { "" }
@@ -810,6 +811,20 @@ public class DIBuilder {
             typeName = typeName[0..typeName.size - 1]
             typeName += ">"
         }
+        return typeName
+    }
+
+    private func GenerateClosureTypeName(ty: ClassType): String {
+        var typeName = "("
+        let (paramTypes, retType) = GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(ty)
+        if (!paramTypes.isEmpty()) {
+            for (paramTy in paramTypes) {
+                typeName += GenerateTypeName(paramTy) + ","
+            }
+            typeName = typeName[0..typeName.size - 1]
+        }
+        typeName += ")->"
+        typeName += GenerateTypeName(retType)
         return typeName
     }
 
