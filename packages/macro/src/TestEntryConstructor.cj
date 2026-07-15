@@ -281,7 +281,7 @@ private func createSuiteVarDecl(varName: String, suiteName: String, suiteKind: S
     let suiteNameArg = FuncArg()
     let suiteLiteral = LitConstExpr()
     suiteLiteral.kind = LitConstKind.STRING
-    suiteLiteral.rawString = suiteName
+    suiteLiteral.stringValue = suiteName
     suiteNameArg.expr = Some(suiteLiteral)
     let suiteArgs = ArrayList<FuncArg>()
     suiteArgs.add(suiteNameArg)
@@ -472,21 +472,22 @@ public class TestEntryConstructor {
         let entryMainCall = CreateCallExpr(CreateRefExpr("entryMain"), args)
         let zero = LitConstExpr()
         zero.kind = LitConstKind.INTEGER
-        zero.rawString = "0"
+        zero.stringValue = "0"
         let binary = CreateBinaryExpr(entryMainCall, zero, TokenKind.GT)
         let thenBlock = Block()
         let retOne = ReturnExpr()
         let one = LitConstExpr()
         one.kind = LitConstKind.INTEGER
-        one.rawString = "1"
+        one.stringValue = "1"
         retOne.expr = Some(one)
         thenBlock.body.add(retOne)
         let ifExpr = CreateIfExpr(binary, thenBlock)
+        ifExpr.hasElse = false
         body.body.add(ifExpr)
         let retZero = ReturnExpr()
         let zeroRet = LitConstExpr()
         zeroRet.kind = LitConstKind.INTEGER
-        zeroRet.rawString = "0"
+        zeroRet.stringValue = "0"
         retZero.expr = Some(zeroRet)
         body.body.add(retZero)
         entryBody.body = Some(body)
