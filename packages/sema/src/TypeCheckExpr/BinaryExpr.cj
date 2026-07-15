@@ -456,19 +456,27 @@ private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr,
     }
     DesugarInTypeCheck(be)
     if (let Some(desugar) <- be.desugarExpr) {
-        let desugarTy = synthesizer(desugar)
-        if (Ty.IsTyCorrect(desugarTy)) {
-            if (let Some(callExpr) <- (desugar as CallExpr)) {
-                if (FlowOperandsHaveNamedParam(callExpr)) {
-                    RecoverToBinaryExpr(be)
-                    return (true, BinaryInvalid(be))
+        try (ds = DiagSuppressor(diag)) {
+            let desugarTy = synthesizer(desugar)
+            if (Ty.IsTyCorrect(desugarTy)) {
+                ds.ReportDiag()
+                if (let Some(callExpr) <- (desugar as CallExpr)) {
+                    if (FlowOperandsHaveNamedParam(callExpr)) {
+                        RecoverToBinaryExpr(be)
+                        return (true, BinaryInvalid(be))
+                    }
                 }
+                PropagateBinaryDesugarTarget(be, desugar)
+                be.SetTy(desugarTy)
+                return (true, desugarTy)
             }
-            PropagateBinaryDesugarTarget(be, desugar)
-            be.SetTy(desugarTy)
-            return (true, desugarTy)
+            let _ = ds.GetSuppressedDiag()
+            RecoverToBinaryExpr(be)
+            let invalidTy = BinaryInvalid(be)
+            DiagnoseForBinaryExpr(typeManager, be, Some(synthesizer), diag)
+            ds.ReportDiag()
+            return (true, invalidTy)
         }
-        RecoverToBinaryExpr(be)
     }
     return (false, TypeManager.GetInvalidTy())
 }
