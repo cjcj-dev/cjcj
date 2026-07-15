@@ -8700,7 +8700,6 @@ extend TypeChecker {
         let _ = LookupCoreTy(ctx, "Object")
         let _ = LookupCoreTy(ctx, "Exception")
         let _ = LookupCoreTy(ctx, "Error")
-        for (resource in te.resourceSpec) { let _ = SynthesizeDecl(ctx, resource) }
         if (let Some(tryBlock) <- te.tryBlock) { let _ = SynthesizeBlock(ctx, tryBlock) }
         var idx: Int64 = 0
         while (idx < te.catchPatterns.size) {
@@ -8729,13 +8728,16 @@ extend TypeChecker {
             commandDecl.GetTy()
         } else { None }
         let tryTy = SynTryExpr(impl.typeManager, te, impl.diag.getOrThrow(),
-            exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
+            resourceTy: LookupCoreTy(ctx, "Resource"), exceptionTy: LookupCoreTy(ctx, "Exception"),
+            errorTy: LookupCoreTy(ctx, "Error"),
             commandTy: commandTy,
             patternChecker: Some({ targetTy: Ty, pattern: Pattern =>
                 ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false,
                     exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
                         Check(ctx, patternExpectedTy, patternExpr)
                     }), diag: impl.diag)
+            }), resourceSynthesizer: Some({ resource: VarDecl =>
+                SynthesizeAndReplaceIdealTy(ctx, SynPos.NONE, resource)
             }), synthesizer: Some({ pos: SynPos, expr: Expr => Synthesize(ctx, pos, expr) }),
             checker: Some({ target: Ty, expr: Expr => Check(ctx, target, expr) }))
         RemovePatternBindings(ctx, boundDecls)
@@ -8747,7 +8749,6 @@ extend TypeChecker {
         let _ = LookupCoreTy(ctx, "Object")
         let _ = LookupCoreTy(ctx, "Exception")
         let _ = LookupCoreTy(ctx, "Error")
-        for (resource in te.resourceSpec) { let _ = SynthesizeDecl(ctx, resource) }
         if (let Some(tryBlock) <- te.tryBlock) { let _ = SynthesizeBlock(ctx, tryBlock) }
         var idx: Int64 = 0
         while (idx < te.catchPatterns.size) {
@@ -8777,13 +8778,16 @@ extend TypeChecker {
             } else { None }
         } else { None }
         let ok = ChkTryExpr(impl.typeManager, target, te,
-            exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
+            resourceTy: LookupCoreTy(ctx, "Resource"), exceptionTy: LookupCoreTy(ctx, "Exception"),
+            errorTy: LookupCoreTy(ctx, "Error"),
             commandTy: commandTy, diag: impl.diag,
             patternChecker: Some({ targetTy: Ty, pattern: Pattern =>
                 ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false,
                     exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
                         Check(ctx, patternExpectedTy, patternExpr)
                     }), diag: impl.diag)
+            }), resourceSynthesizer: Some({ resource: VarDecl =>
+                SynthesizeAndReplaceIdealTy(ctx, SynPos.NONE, resource)
             }), synthesizer: Some({ pos: SynPos, expr: Expr => Synthesize(ctx, pos, expr) }),
             checker: Some({ expected: Ty, expr: Expr => Check(ctx, expected, expr) }))
         RemovePatternBindings(ctx, boundDecls)

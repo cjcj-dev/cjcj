@@ -9,9 +9,6 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::sema.*
 
-private let CORE_PACKAGE_NAME: String = "std.core"
-private let RESOURCE_TYPE_NAME: String = "Resource"
-
 private func TryInvalid(te: TryExpr): Ty {
     return TcInvalid(te)
 }
@@ -29,37 +26,6 @@ private func JoinTryTy(typeManager: TypeManager, currentTy: Ty, branchTy: Ty, cu
     tys.Add(currentTy)
     tys.Add(branchTy)
     return JoinAsVisibleTy(typeManager, tys, curFile: curFile)
-}
-
-private func IsCoreNamedTy(ty: Ty, name: String): Bool {
-    if (let Some(decl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
-        if (!decl.fullPackageName.isEmpty()) {
-            return decl.fullPackageName == CORE_PACKAGE_NAME && decl.identifier.Val() == name
-        }
-    }
-    return ty.name == name
-}
-
-private func IsResourceTy(typeManager: TypeManager, ty: Ty): Bool {
-    if (!Ty.IsTyCorrect(ty) || ty.IsNothing()) {
-        return false
-    }
-    if (IsCoreNamedTy(ty, RESOURCE_TYPE_NAME)) {
-        return true
-    }
-    if (let Some(genericTy) <- (ty as GenericsTy)) {
-        for (upperTy in genericTy.upperBounds) {
-            if (IsResourceTy(typeManager, upperTy)) {
-                return true
-            }
-        }
-    }
-    for (superTy in typeManager.GetAllSuperTys(ty).values) {
-        if (IsCoreNamedTy(superTy, RESOURCE_TYPE_NAME)) {
-            return true
-        }
-    }
-    return false
 }
 
 private func ChkTryWildcardPattern(target: Ty, pattern: WildcardPattern, included: ArrayList<Ty>,
@@ -388,80 +354,42 @@ private func ChkTryExprFinallyBlock(typeManager: TypeManager, te: TryExpr,
     return true
 }
 
-private func SynthesizeAndReplaceIdealTy(typeManager: TypeManager, resource: VarDecl,
-    synthesizer: (Expr) -> Ty): Bool {
-    var ok = true
-    var declaredTy: Option<Ty> = None
-    if (let Some(typeNode) <- resource.typeNode) {
-        if (let Some(typeTy) <- typeNode.GetTy()) {
-            declaredTy = Some(typeTy)
-            resource.SetTy(typeTy)
-        } else {
-            ok = false
-        }
-    }
-    if (let Some(initializer) <- resource.initializer) {
-        let initTy = if (let Some(existingTy) <- initializer.GetTy()) {
-            if (Ty.IsTyCorrect(existingTy)) {
-                existingTy
-            } else {
-                synthesizer(initializer)
-            }
-        } else {
-            synthesizer(initializer)
-        }
-        if (Ty.IsTyCorrect(initTy)) {
-            let concreteInitTy = TcReplaceIdeal(typeManager, initializer)
-            if (let Some(targetTy) <- declaredTy) {
-                if (typeManager.CheckTypeCompatibility(targetTy, concreteInitTy) == TypeCompatibility.INCOMPATIBLE) {
-                    ok = false
-                }
-            } else {
-                resource.SetTy(concreteInitTy)
-            }
-        } else {
-            ok = false
-        }
-    }
-    if (!Ty.IsTyCorrect(resource.GetTy())) {
-        ok = false
-    }
-    if (ok) {
-        if (let Some(resourceTy) <- resource.GetTy()) {
-            ok = IsResourceTy(typeManager, resourceTy)
-        } else {
-            ok = false
-        }
-    }
-    if (!ok) {
-        resource.SetTy(TypeManager.GetInvalidTy())
-    }
-    return ok
-}
-
 private func SynTryWithResourcesExpr(typeManager: TypeManager, te: TryExpr,
+    resourceTy!: Option<Ty> = None,
     exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None,
     diag!: Option<BasicDiagnosticEngine> = None,
     patternChecker!: Option<(Ty, Pattern) -> Bool> = None,
+    resourceSynthesizer!: Option<(VarDecl) -> Bool> = None,
     synthesizer!: Option<(SynPos, Expr) -> Ty> = None,
     checker!: Option<(Ty, Expr) -> Bool> = None): Ty {
-    var ok = true
+    if (let None <- resourceTy) {
+        te.SetTy(TypeManager.GetInvalidTy())
+        return te.GetTy().getOrThrow()
+    }
+    let expectedResourceTy = resourceTy.getOrThrow()
+    var isWellTyped = true
     for (resource in te.resourceSpec) {
-        ok = SynthesizeAndReplaceIdealTy(typeManager, resource,
-            { expr: Expr => synthesizer.getOrThrow()(SynPos.EXPR_ARG, expr) }) && ok
+        if (!resourceSynthesizer.getOrThrow()(resource)) {
+            isWellTyped = false
+            resource.SetTy(TypeManager.GetInvalidTy())
+            continue
+        }
+        let actualResourceTy = resource.GetTy().getOrThrow()
+        if (actualResourceTy.IsNothing() || !typeManager.IsSubtype(actualResourceTy, expectedResourceTy)) {
+            DiagMismatchedTypes(diag.getOrThrow(), resource, expectedResourceTy,
+                note: "the resource specification should implement interface 'Resource'")
+            resource.SetTy(TypeManager.GetInvalidTy())
+        }
     }
-    if (let Some(tryBlock) <- te.tryBlock) {
-        ok = Ty.IsTyCorrect(synthesizer.getOrThrow()(SynPos.EXPR_ARG, tryBlock)) && ok
-    } else {
-        ok = false
-    }
-    ok = ChkTryExprCatchPatterns(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
-        diag: diag, patternChecker: patternChecker) && ok
+    isWellTyped = Ty.IsTyCorrect(synthesizer.getOrThrow()(SynPos.EXPR_ARG, te.tryBlock.getOrThrow())) && isWellTyped
+    isWellTyped = ChkTryExprCatchPatterns(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
+        diag: diag, patternChecker: patternChecker) && isWellTyped
     for (catchBlock in te.catchBlocks) {
-        ok = Ty.IsTyCorrect(synthesizer.getOrThrow()(SynPos.EXPR_ARG, catchBlock)) && ok
+        isWellTyped = Ty.IsTyCorrect(synthesizer.getOrThrow()(SynPos.EXPR_ARG, catchBlock)) && isWellTyped
     }
-    ok = ChkTryExprFinallyBlock(typeManager, te, diag: diag, synthesizer: synthesizer, checker: checker) && ok
-    if (ok) {
+    isWellTyped = ChkTryExprFinallyBlock(typeManager, te, diag: diag, synthesizer: synthesizer,
+        checker: checker) && isWellTyped
+    if (isWellTyped) {
         let unitTy = TcUnitTy()
         te.SetTy(unitTy)
         return unitTy
@@ -556,13 +484,16 @@ private func SynTryExprCatchesAndHandles(typeManager: TypeManager, te: TryExpr, 
 }
 
 public func SynTryExpr(typeManager: TypeManager, te: TryExpr, diag: BasicDiagnosticEngine,
+    resourceTy!: Option<Ty> = None,
     exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None, commandTy!: Option<Ty> = None,
     patternChecker!: Option<(Ty, Pattern) -> Bool> = None,
+    resourceSynthesizer!: Option<(VarDecl) -> Bool> = None,
     synthesizer!: Option<(SynPos, Expr) -> Ty> = None,
     checker!: Option<(Ty, Expr) -> Bool> = None): Ty {
     if (!te.resourceSpec.isEmpty()) {
-        return SynTryWithResourcesExpr(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
-            diag: Some(diag), patternChecker: patternChecker, synthesizer: synthesizer, checker: checker)
+        return SynTryWithResourcesExpr(typeManager, te, resourceTy: resourceTy, exceptionTy: exceptionTy,
+            errorTy: errorTy, diag: Some(diag), patternChecker: patternChecker,
+            resourceSynthesizer: resourceSynthesizer, synthesizer: synthesizer, checker: checker)
     }
     var ok = true
     var baseTy: Ty = TypeManager.GetNothingTy()
@@ -623,14 +554,17 @@ private func ChkTryExprCatchesAndHandles(typeManager: TypeManager, target: Ty, t
 }
 
 public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr,
+    resourceTy!: Option<Ty> = None,
     exceptionTy!: Option<Ty> = None, errorTy!: Option<Ty> = None, commandTy!: Option<Ty> = None,
     diag!: Option<BasicDiagnosticEngine> = None,
     patternChecker!: Option<(Ty, Pattern) -> Bool> = None,
+    resourceSynthesizer!: Option<(VarDecl) -> Bool> = None,
     synthesizer!: Option<(SynPos, Expr) -> Ty> = None,
     checker!: Option<(Ty, Expr) -> Bool> = None): Bool {
     if (!te.resourceSpec.isEmpty()) {
-        let actualTy = SynTryWithResourcesExpr(typeManager, te, exceptionTy: exceptionTy, errorTy: errorTy,
-            diag: diag, patternChecker: patternChecker, synthesizer: synthesizer, checker: checker)
+        let actualTy = SynTryWithResourcesExpr(typeManager, te, resourceTy: resourceTy,
+            exceptionTy: exceptionTy, errorTy: errorTy, diag: diag, patternChecker: patternChecker,
+            resourceSynthesizer: resourceSynthesizer, synthesizer: synthesizer, checker: checker)
         if (Ty.IsTyCorrect(actualTy) &&
             typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
             return true
