@@ -1858,8 +1858,13 @@ extend ParserImpl {
         SetDeclBodyLeftCurl(ret, leftCurl)
         while (true) {
             if (let Some(classDecl) <- (ret as ClassDecl)) {
-                if (CheckSkipRcurOrPrematureEnd(classDecl.body.getOrThrow())) {
+                let body = classDecl.body.getOrThrow()
+                let hasNLorSEMI = SkipNLOrSemi()
+                if (CheckSkipRcurOrPrematureEnd(body)) {
                     break
+                }
+                if (!body.decls.isEmpty() && !hasNLorSEMI) {
+                    DiagExpectSemiOrNewline()
                 }
             } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
                 if (CheckSkipRcurOrPrematureEnd(interfaceDecl.body.getOrThrow())) {
@@ -1911,7 +1916,9 @@ extend ParserImpl {
                 }
                 AddBodyMember(ret, member)
             }
-            SkipNLOrSemi()
+            if (let None <- (ret as ClassDecl)) {
+                SkipNLOrSemi()
+            }
         }
         if (let Some(classDecl) <- (ret as ClassDecl)) {
             classDecl.body.getOrThrow().end = lastToken.End()
