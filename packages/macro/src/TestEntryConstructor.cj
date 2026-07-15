@@ -1,7 +1,7 @@
 package cjcj::macro_pkg
 
 import std.collection.*
-import cjcj::ast.Diagnose
+import cjcj::ast.{Diagnose, VisitAction, Walker}
 
 public let TEST_REGISTER_ATTR: String = "TEST_REGISTER"
 public let TEST_ENTRY_NAME: String = "$test.entry"
@@ -92,7 +92,7 @@ private func classDeclMembers(classDecl: ClassDecl): ArrayList<Decl> {
     return ArrayList<Decl>()
 }
 
-private func isValidTestSuiteRegisterFunction(decl: Decl): Bool {
+private func IsValidTestSuiteRegisterFunction(decl: Decl): Bool {
     if (let Some(funcDecl) <- (decl as FuncDecl)) {
         if (funcDecl.funcBody.getOrThrow().paramLists.size > 1) {
             return false
@@ -105,29 +105,33 @@ private func isValidTestSuiteRegisterFunction(decl: Decl): Bool {
     return false
 }
 
-private func getTestSuiteRegisterFunctions(root: Node): ArrayList<FuncDecl> {
-    let out = ArrayList<FuncDecl>()
-    collectTestSuiteRegisterFunctions(root, out)
-    return out
-}
-
-private func collectTestSuiteRegisterFunctions(node: Node, out: ArrayList<FuncDecl>): Unit {
-    if (node.TestAttr(Attribute.IS_BROKEN)) {
-        return
-    }
-    if (let Some(decl) <- (node as Decl)) {
-        if (isValidTestSuiteRegisterFunction(decl)) {
-            if (let Some(funcDecl) <- (decl as FuncDecl)) {
-                out.add(funcDecl)
+private func GetTestSuiteRegisterFunctions(pkg: Node): ArrayList<FuncDecl> {
+    let results = ArrayList<FuncDecl>()
+    let preVisit = { node: Node =>
+        if (node.TestAttr(Attribute.IS_BROKEN)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (ASTKindEquals(node.astKind, ASTKind.EXTEND_DECL)) {
+            let extendDecl = (node as ExtendDecl).getOrThrow()
+            if (let Some(extendedType) <- extendDecl.extendedType) {
+                if (let Some(refType) <- (extendedType as RefType)) {
+                    if (refType.ref.identifier == "TestPackage") {
+                        for (member in extendDecl.members) {
+                            if (let Some(memberFunc) <- (member as FuncDecl)) {
+                                if (IsValidTestSuiteRegisterFunction(member)) {
+                                    results.add(memberFunc)
+                                }
+                            }
+                        }
+                    }
+                }
             }
+            return VisitAction.SKIP_CHILDREN
         }
-        for (member in decl.GetMemberDecls()) {
-            collectTestSuiteRegisterFunctions(member, out)
-        }
+        return VisitAction.WALK_CHILDREN
     }
-    for (child in node.Children()) {
-        collectTestSuiteRegisterFunctions(child, out)
-    }
+    let _ = Walker(pkg, visitPre: preVisit).Walk()
+    return results
 }
 
 private func getTopLevelFuncDecls(pkg: Package, out: ArrayList<FuncDecl>): Unit {
@@ -315,7 +319,7 @@ public class TestEntryConstructor {
         let testMod = TestModule(moduleName)
         for (pkg in srcPkgs) {
             let testPkg = TestPackage(pkg.fullPackageName)
-            let funcs = getTestSuiteRegisterFunctions(pkg)
+            let funcs = GetTestSuiteRegisterFunctions(pkg)
             for (funcDecl in funcs) {
                 testPkg.testRegisterFunctions.add(funcDecl)
             }
@@ -323,7 +327,7 @@ public class TestEntryConstructor {
         }
         if (let Some(mainPartPkg) <- importedMainPartPkgForTestPkg) {
             let mainTestPkg = TestPackage(mainPartPkg.fullPackageName)
-            let mainFuncs = getTestSuiteRegisterFunctions(mainPartPkg)
+            let mainFuncs = GetTestSuiteRegisterFunctions(mainPartPkg)
             for (mainFuncDecl in mainFuncs) {
                 mainTestPkg.testRegisterFunctions.add(mainFuncDecl)
             }
