@@ -2,6 +2,7 @@ package cjcj::driver
 
 import std.collection.*
 import std.sort.*
+import cjcj::basic.{DEFAULT_POSITION, DiagnosticEngine, DiagKindRefactor}
 import cjcj::option.Backend as OptionBackend
 import cjcj::option.BackendToString as OptionBackendToString
 import cjcj::option.GetDefaultOutputNameLength
@@ -739,17 +740,27 @@ public class DriverOptions {
         }
         if (compilePackage) {
             if (!inputCjoFile.isEmpty()) {
-                eprintln("error: cjo inputs are not accepted when '-p' or '--package' is specified.")
+                let diag = DiagnosticEngine()
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.driver_not_accept_cjo_inputs_when,
+                    DEFAULT_POSITION,
+                    arguments: ["'-p' or '--package'"]
+                ).Emit()
                 return false
             }
             if (packagePaths.isEmpty() && moduleSrcPath.isEmpty()) {
-                eprintln("error: package directory is required when '--scan-dependency' is used with '-p' or '--package'.")
+                let diag = DiagnosticEngine()
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.driver_require_package_directory_scan_dependency,
+                    DEFAULT_POSITION
+                ).Emit()
                 return false
             }
             return true
         }
         if (inputCjoFile.isEmpty()) {
-            eprintln("error: cjo input is required when '--scan-dependency' is used without '-p' or '--package'.")
+            let diag = DiagnosticEngine()
+            diag.DiagnoseRefactor(DiagKindRefactor.driver_source_cjo_empty, DEFAULT_POSITION).Emit()
             return false
         }
         return true
@@ -832,7 +843,7 @@ public class DriverOptions {
         }
         if (IsCompileAsExeEnabled()) {
             if (!IsLTOEnabled()) {
-                eprintln("error: option '--compile-as-exe' can only be enabled in LTO mode.")
+                eprintln("error: --compile-as-exe only takes effect when lto mode is enabled")
                 return false
             }
             if (target.GetOSFamily() == OSType.WINDOWS || target.GetOSFamily() == OSType.DARWIN ||
@@ -843,7 +854,7 @@ public class DriverOptions {
         }
         if (IsLTOPkgVisibilityEnabled()) {
             if (!IsLTOEnabled()) {
-                eprintln("error: option '--lto-keep-pkg-visibility' can only be enabled in LTO mode.")
+                eprintln("error: --lto-keep-pkg-visibility only takes effect when lto mode is enabled")
                 return false
             }
             if (!ltoVisiblePkgs.isEmpty() && IsCompileAsExeEnabled()) {
@@ -868,7 +879,12 @@ public class DriverOptions {
         }
         if (enablePgoInstrUse) {
             if (!FileUtil.FileExist(pgoProfileFile)) {
-                eprintln("error: no such file or directory '${pgoProfileFile}'")
+                let diag = DiagnosticEngine()
+                diag.DiagnoseRefactor(
+                    DiagKindRefactor.no_such_file_or_directory,
+                    DEFAULT_POSITION,
+                    arguments: [pgoProfileFile]
+                ).Emit()
                 return false
             }
             if (FileUtil.GetFileExtension(pgoProfileFile) != "profdata") {
@@ -955,7 +971,8 @@ public class DriverOptions {
         if (supported) {
             if (linkStatic && outputMode != OutputMode.EXECUTABLE) {
                 linkStatic = false
-                eprintln("warning: '--static' is usable only when emitting an executable.")
+                let diag = DiagnosticEngine()
+                diag.DiagnoseRefactor(DiagKindRefactor.driver_warning_unusable_static, DEFAULT_POSITION).Emit()
             }
             if ((linkStaticStd ?? true) == false && linkStatic) {
                 eprintln("error: '--static' conflicts with dynamic standard library linking.")
