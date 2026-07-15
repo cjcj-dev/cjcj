@@ -1202,7 +1202,7 @@ extend ParserImpl {
         let list = FuncParamList()
         try (cs = ChainScope(this, list)) {
             list.begin = lookahead.Begin()
-            list.leftParenPos = lookahead.Begin()
+            list.leftParenPos = lastToken.Begin()
             var namedParameter: Option<FuncParam> = None
             var memberParameter: Option<FuncParam> = None
             while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
