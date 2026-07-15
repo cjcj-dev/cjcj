@@ -2346,7 +2346,7 @@ extend TypeChecker {
                 impl.CheckInstDupSuperInterfacesEntry(pkg)
                 // Check legality of usage after sema type completed.
                 // Mirrors C++ TypeChecker.cpp:2053 (CheckLegalityOfUsage).
-                RunLegalityOfUsageCheck(ctx, pkg)
+                CheckLegalityOfUsage(ctx, pkg)
                 // C++ TypeChecker.cpp:2060-2062 desugars property access in sema before const checking.
                 DesugarForPropDecl(impl.typeManager, pkg)
                 let _ = CheckConstEvaluation(pkg, impl.diag.getOrThrow())
@@ -2649,12 +2649,12 @@ extend TypeChecker {
         }
     }
 
-    private func RunLegalityOfUsageCheck(ctx: ASTContext, pkg: Package): Unit {
+    private func CheckLegalityOfUsage(ctx: ASTContext, pkg: Package): Unit {
         if (let Some(diagValue) <- impl.diag) {
             impl.CheckValueTypeRecursive(pkg)
-            CheckClosures(ctx, pkg)
             let result = CheckLegalityOfUsage(
                 ctx, pkg, diagValue, impl.typeManager, impl, opts: GlobalOptions())
+            CheckClosures(ctx, pkg)
             EmitLegalityOfUsage(diagValue, result)
         }
     }

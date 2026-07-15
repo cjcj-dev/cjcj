@@ -1391,7 +1391,7 @@ public func TypeCheckReferenceCheckThisOrSuperInInitializer(
     return true
 }
 
-private func TypeCheckReferenceCheckUsageOfThis(
+private func CheckUsageOfThis(
     diag: BasicDiagnosticEngine,
     ctx: ASTContext,
     re: RefExpr
@@ -1490,12 +1490,8 @@ private func TypeCheckReferenceCheckUsageOfThis(
             }
         }
         if (notInConstructor && insideConstructor) {
-            let builder = diag.Diagnose(
-                re.begin,
-                re.end,
-                BasicDiagKind.sema_illegal_capture_this,
-                args: [BasicDiagArgument("struct")])
-            builder.Emit()
+            Diagnose(diag, re, BasicDiagKind.sema_illegal_capture_this,
+                args: [BasicDiagArgument("struct")]).Emit()
             valid = false
         }
         var inInvalidCtx = false
@@ -1601,7 +1597,7 @@ private func TypeCheckReferenceCheckLegalityForNameReferenceExpr(
 ): Unit {
     if (let Some(refExpr) <- (nameRef as RefExpr)) {
         if (refExpr.isThis) {
-            let _ = TypeCheckReferenceCheckUsageOfThis(diag, ctx, refExpr)
+            let _ = CheckUsageOfThis(diag, ctx, refExpr)
         } else if (refExpr.isSuper) {
             let _ = TypeCheckReferenceCheckUsageOfSuper(diag, ctx, refExpr)
         } else {
