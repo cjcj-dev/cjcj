@@ -61,8 +61,8 @@ import cjcj::ast.IsImpl as AstIsImpl
 import cjcj::ast.IsMirror as AstIsMirror
 import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, FileUtil, MAIN_INVOKE, ProfileRecorder,
-    STATIC_INIT_FUNC, STATIC_INIT_VAR}
+import cjcj::utils.{CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, FileUtil, MAIN_INVOKE,
+    ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR}
 
 foreign {
     func CJSelfhostStrtoldToFloat32(value: CString): Float64
@@ -4331,7 +4331,11 @@ public class FaithfulAST2CHIR {
             return
         }
         let funcTy = AdjustFuncType(funcDecl, RequireFuncType(chirType.TranslateType(RequireAstTy(funcDecl))))
-        let fn = builder.CreateFunction(funcTy, EffectiveFunctionIdentifier(funcDecl),
+        var mangledName = EffectiveFunctionIdentifier(funcDecl)
+        if (funcDecl.TestAttr(AstAttribute.NO_MANGLE) && funcTy.IsCFunc()) {
+            mangledName += CFFI_FUNC_SUFFIX
+        }
+        let fn = builder.CreateFunction(funcTy, mangledName,
             srcCodeIdentifier: EffectiveFunctionSrcIdentifier(funcDecl), rawMangledName: EffectiveFunctionRawName(funcDecl),
             packageName: EffectivePackageName(funcDecl))
         fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.keywordPos, funcDecl.end))
