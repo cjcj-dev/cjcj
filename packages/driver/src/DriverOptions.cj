@@ -296,22 +296,39 @@ public class DriverOptions {
     }
 
     public func ValidateInputFilePath(path: String): Option<String> {
+        return ValidateInputFilePath(path, DiagKindRefactor.driver_invalid_source_file)
+    }
+
+    public func ValidateInputFilePath(path: String, notFoundError: DiagKindRefactor): Option<String> {
+        let diag = DiagnosticEngine()
+        if (FileUtil.IsAbsolutePathAboveLengthLimit(path)) {
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.driver_path_exceeds_length_limit,
+                DEFAULT_POSITION,
+                arguments: [path, FILE_PATH_MAX_LENGTH.toString()]
+            ).Emit()
+            return None
+        }
         if (!FileUtil.FileExist(path)) {
-            eprintln("error: no such file or directory '${path}'")
+            diag.DiagnoseRefactor(notFoundError, DEFAULT_POSITION, arguments: [path]).Emit()
             return None
         }
         if (!FileUtil.Access(path, FileMode.FM_READ)) {
-            eprintln("error: permission denied '${path}'")
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.permission_denied,
+                DEFAULT_POSITION,
+                arguments: [path]
+            ).Emit()
             return None
         }
         if (FileUtil.IsDir(path)) {
-            eprintln("error: not a file '${path}'")
+            diag.DiagnoseRefactor(DiagKindRefactor.not_a_file, DEFAULT_POSITION, arguments: [path]).Emit()
             return None
         }
         if (let Some(absPath) <- FileUtil.GetAbsPath(path)) {
             return absPath
         }
-        eprintln("error: invalid path '${path}'")
+        diag.DiagnoseRefactor(DiagKindRefactor.invalid_path, DEFAULT_POSITION, arguments: [path]).Emit()
         return None
     }
 

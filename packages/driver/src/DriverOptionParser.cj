@@ -496,7 +496,7 @@ private func ParseOptionWithValue(opts: DriverOptions, optionArg: OptionArgInsta
     if (arg == "--obf-sym-input-mapping") { opts.layoutObfInputSymMappingFiles = value; return true }
     if (arg == "--obf-sym-output-mapping") { opts.layoutObfOutputSymMappingFile = value; return true }
     if (arg == "--obf-apply-mapping-file") {
-        if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+        if (let Some(path) <- opts.ValidateInputFilePath(value, DiagKindRefactor.no_such_file_or_directory)) {
             opts.layoutObfUserMappingFile = path
             return true
         }
@@ -504,7 +504,7 @@ private func ParseOptionWithValue(opts: DriverOptions, optionArg: OptionArgInsta
     }
     if (arg == "--obf-sym-prefix") { opts.layoutObfSymPrefix = value; return true }
     if (arg == "--obf-config") {
-        if (let Some(path) <- opts.ValidateInputFilePath(value)) {
+        if (let Some(path) <- opts.ValidateInputFilePath(value, DiagKindRefactor.no_such_file_or_directory)) {
             opts.obfuscationConfigFile = path
             return true
         }
