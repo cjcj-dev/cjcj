@@ -425,7 +425,32 @@ private class FrontendCjoFlatBufferWriter {
         let rawMangle = builder.CreateString(decl.rawMangleName)
         let generic = SaveGeneric(decl)
         let genericDecl = if (ShouldEmitGenericDecl(decl)) { SaveGenericDeclIndex(decl) } else { 0u32 }
-        let attributes = builder.CreateVectorU64(PackedAttributes(decl))
+        let attrs = decl.GetAttrs().Clone()
+        if (serializingCommon) {
+            attrs.SetAttr(Attribute.FROM_COMMON_PART, true)
+        }
+        if (decl.TestAttr(Attribute.GENERIC_INSTANTIATED) && decl.TestAttr(Attribute.GENERIC)) {
+            attrs.SetAttr(Attribute.UNREACHABLE, true)
+        }
+        if (decl.TestAttr(Attribute.SPECIFIC)) {
+            attrs.SetAttr(Attribute.SPECIFIC, false)
+            attrs.SetAttr(Attribute.COMMON, true)
+            attrs.SetAttr(Attribute.COMMON_WITH_DEFAULT, true)
+        }
+        if (let Some(varDecl) <- (decl as VarDecl)) {
+            if (let Some(outer) <- varDecl.outerDecl) {
+                if (outer.TestAttr(Attribute.COMMON)) {
+                    attrs.SetAttr(Attribute.INITIALIZED, varDecl.initializer.isSome())
+                    if (varDecl.TestAttr(Attribute.STATIC) && varDecl.TestAttr(Attribute.INITIALIZED)) {
+                        attrs.SetAttr(Attribute.INITIALIZED, true)
+                    }
+                }
+            }
+            if (varDecl.TestAttr(Attribute.SPECIFIC)) {
+                attrs.SetAttr(Attribute.SPECIFIC, false)
+            }
+        }
+        let attributes = builder.CreateVectorU64(SaveAttributes(attrs))
         let annotations = SaveAnnotations(decl)
         let typeIndex = SaveDeclType(decl)
         let info = SaveDeclInfo(decl)
@@ -2299,9 +2324,9 @@ private class FrontendCjoFlatBufferWriter {
         return builder.CreateVectorOffsets(offsets)
     }
 
-    private func PackedAttributes(decl: Decl): ArrayList<UInt64> {
+    private func SaveAttributes(attrs: AttributePack): ArrayList<UInt64> {
         let words = ArrayList<UInt64>()
-        let attrIndices = decl.GetAttrs().GetAllIdxOfAttr()
+        let attrIndices = attrs.GetAllIdxOfAttr()
         for (attrIndex in attrIndices) {
             let wordIndex = Int64(attrIndex / 64u64)
             let bitIndex = attrIndex % 64u64

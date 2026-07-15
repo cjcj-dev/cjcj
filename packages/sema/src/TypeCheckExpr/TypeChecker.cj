@@ -929,6 +929,12 @@ public class TypeChecker {
         } else {
             MPTypeCheckerImpl(impl.typeManager)
         }
+        if (let Some(instance) <- ci) {
+            let opts = instance.globalOptions
+            mpImpl.compileCommon = opts.outputMode == OptionOutputMode.CHIR
+            mpImpl.compilePlatform = !opts.commonPartCjos.isEmpty()
+            mpImpl.severalParents = opts.commonPartCjos.size > 1
+        }
     }
 
 }
@@ -1001,6 +1007,10 @@ extend TypeChecker {
                 CollectDeclsWithMember(pkg, ctx)
             }
         }
+        for (pkg in pkgs) {
+            mpImpl.MatchSpecificWithCommon(pkg)
+            mpImpl.CheckNotAllowedAnnotations(pkg)
+        }
         return contexts
     }
 
@@ -1009,6 +1019,7 @@ extend TypeChecker {
         ctx.curPackage = pkg
         ctx.fullPackageName = pkg.fullPackageName
         CheckPrimaryCtorBeforeMerge(pkg)
+        mpImpl.PrepareTypeCheck4CJMP(pkg)
         SeedImportedPackageDecls(ctx)
         AddDefaultFunction(pkg)
         if (pkg.fullPackageName == UTILS_CORE_PACKAGE_NAME && !pkg.files.isEmpty() &&
