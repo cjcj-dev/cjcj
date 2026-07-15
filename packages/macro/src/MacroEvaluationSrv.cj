@@ -1,6 +1,7 @@
 package cjcj::macro_pkg
 
 import cjcj::basic.Errorln
+import cjcj::utils.FileUtil
 import std.collection.*
 
 @When[os == "Linux"]
@@ -194,15 +195,17 @@ extend MacroEvaluation {
         let macroLibs = ArrayList<String>()
         MacroEvalMsgSerializer.DeSerializeDeflibMsg(macroLibs, msg)
         for (lib in macroLibs) {
-            let handle = OpenSymbolTable(lib)
+            let dyfile = FileUtil.NormalizePath(lib)
+            let handle = OpenSymbolTable(dyfile)
             if (!handle.opened) {
                 let res = ArrayList<UInt8>()
-                for (byte in ("RespondFindDef " + lib).toArray()) {
+                for (byte in ("RespondFindDef " + dyfile).toArray()) {
                     res.add(byte)
                 }
                 let _ = MacroProcMsger.GetInstance().SendMsgToClient(res)
                 return false
             }
+            SetOpenedLibHandles(handle)
         }
         let ok = ArrayList<UInt8>()
         for (byte in "RespondFindDef ".toArray()) {

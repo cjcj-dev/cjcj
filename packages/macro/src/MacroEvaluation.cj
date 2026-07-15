@@ -1317,7 +1317,9 @@ public class MacroEvaluation {
             let handle = OpenSymbolTable(dyfile)
             if (!handle.opened) {
                 ci.GetDiag().Diagnose(DEFAULT_POSITION, "Cannot dlopen from the dynamic library '" + dyfile + "' for macro")
+                return
             }
+            SetOpenedLibHandles(handle)
         }
     }
 }

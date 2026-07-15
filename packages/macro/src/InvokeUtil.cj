@@ -131,15 +131,20 @@ private func FD_ISSET(fd: Int32, set: CPointer<FdSet>): Bool {
     }
 }
 
-@When[os != "Windows"]
+@When[os == "Linux"]
 private let DLOPEN_MODE: Int32 = 0x101
+
+@When[os == "macOS" || os == "iOS"]
+private let DLOPEN_MODE: Int32 = 0x9
 
 @When[os != "Windows"]
 foreign {
     func dlopen(filename: CString, flag: Int32): CPointer<Unit>
     func dlsym(handle: CPointer<Unit>, symbol: CString): CPointer<Unit>
     func dlclose(handle: CPointer<Unit>): Int32
-    func free(ptr: CPointer<Unit>): Unit
+    func realpath(path: CString, resolvedPath: CString): CString
+    func dlerror(): CString
+    func free(ptr: CString): Unit
 }
 
 @When[os == "Windows"]
@@ -147,7 +152,7 @@ foreign {
     func LoadLibraryA(filename: CString): CPointer<Unit>
     func GetProcAddress(handle: CPointer<Unit>, symbol: CString): CPointer<Unit>
     func FreeLibrary(handle: CPointer<Unit>): Int32
-    func free(ptr: CPointer<Unit>): Unit
+    func free(ptr: CString): Unit
 }
 
 @C
@@ -286,16 +291,6 @@ public class RuntimeHandle {
 private let openedLibHandles: ArrayList<RuntimeHandle> = ArrayList<RuntimeHandle>()
 
 @When[os != "Windows"]
-private func openNativeLibrary(path: CString): CPointer<Unit> {
-    return unsafe { dlopen(path, DLOPEN_MODE) }
-}
-
-@When[os == "Windows"]
-private func openNativeLibrary(path: CString): CPointer<Unit> {
-    return unsafe { LoadLibraryA(path) }
-}
-
-@When[os != "Windows"]
 private func getNativeSymbol(handle: CPointer<Unit>, name: CString): CPointer<Unit> {
     return unsafe { dlsym(handle, name) }
 }
@@ -395,13 +390,36 @@ private func makeRuntimeConfig(envs: ArrayList<(String, String)>): RuntimeConfig
         RuntimeConcurrencyParamC(STACK_SIZE, stackSizeFromEnv(envs), PROCESSOR_NUM))
 }
 
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
 public func OpenSymbolTable(libPath: String): RuntimeHandle {
     var result = RuntimeHandle()
     try (path = unsafe { LibC.mallocCString(libPath) }.asResource()) {
-        let rawHandle = openNativeLibrary(path.value)
+        let realpathRes = unsafe { realpath(path.value, CString(CPointer<UInt8>())) }
+        if (realpathRes.isNull()) {
+            Errorln("could not get realpath of library: " + libPath)
+            return result
+        }
+        let rawHandle = unsafe { dlopen(realpathRes, DLOPEN_MODE) }
+        unsafe { free(realpathRes) }
         let handle = RuntimeHandle(libPath, raw: rawHandle)
-        if (handle.opened) {
-            openedLibHandles.add(handle)
+        if (!handle.opened) {
+            Errorln("could not load the dynamic library: " + libPath)
+            Errorln("error info is: " + unsafe { dlerror() }.toString())
+        }
+        result = handle
+    } catch (e: Exception) {
+        result = RuntimeHandle()
+    }
+    return result
+}
+
+@When[os == "Windows"]
+public func OpenSymbolTable(libPath: String): RuntimeHandle {
+    var result = RuntimeHandle()
+    try (path = unsafe { LibC.mallocCString(libPath) }.asResource()) {
+        let handle = RuntimeHandle(libPath, raw: unsafe { LoadLibraryA(path.value) })
+        if (!handle.opened) {
+            Errorln("could not load the dynamic library: " + libPath)
         }
         result = handle
     } catch (e: Exception) {
@@ -488,7 +506,7 @@ public func CallRuntime(handle: RuntimeHandle, method: String, envs: ArrayList<(
 
 public func FreeNativeBuffer(buffer: CPointer<UInt8>): Unit {
     if (!buffer.isNull()) {
-        unsafe { free(CPointer<Unit>(buffer)) }
+        unsafe { free(CString(buffer)) }
     }
 }
 
