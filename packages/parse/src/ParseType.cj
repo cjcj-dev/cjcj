@@ -35,7 +35,11 @@ extend ParserImpl {
             }
             let baseType = ParseBaseType()
             skipNL = true
+            let trailingNewlineSkipped = oldSkipNL && Seeing(TokenKind.NL)
             while (oldSkipNL && Skip(TokenKind.NL)) {}
+            if (trailingNewlineSkipped) {
+                newlineSkipped = true
+            }
             opt.componentType = baseType
             opt.end = baseType.end
             return opt
