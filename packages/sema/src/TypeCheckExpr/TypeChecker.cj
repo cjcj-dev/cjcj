@@ -2212,6 +2212,7 @@ extend TypeChecker {
                         }
                     }
                 }
+                impl.CheckExtendRules(ctx)
                 // C2e[A]: overload-conflict detection runs after PreCheckPackage so parameter types
                 // are resolved (the func return type may still be uninferred, matching C++).
                 if (let Some(diagValue) <- impl.diag) {

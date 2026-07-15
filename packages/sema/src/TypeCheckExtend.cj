@@ -172,7 +172,7 @@ private func TypeCheckExtendDiagNonExtendableCoreInterface(
     }
 }
 
-public func TypeCheckExtendCheckExtendGenerics(
+public func CheckExtendGenerics(
     diag: BasicDiagnosticEngine,
     extendDecl: ExtendDecl
 ): Bool {
@@ -282,7 +282,7 @@ public func TypeCheckExtendPreCheckExtend(
         }
     }
     TypeCheckExtendSetExternalAttr(ctx, extendDecl)
-    if (!TypeCheckExtendCheckExtendGenerics(diag, extendDecl)) {
+    if (!CheckExtendGenerics(diag, extendDecl)) {
         valid = false
     }
     let _ = tm
@@ -379,7 +379,7 @@ private func TypeCheckExtendCollectRelatedExtends(tm: TypeManager, decl: Inherit
     return out
 }
 
-public func TypeCheckExtendCheckOrphanRule(
+public func CheckExtendOrphanRule(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
     ctx: ASTContext,
@@ -1047,7 +1047,7 @@ public func TypeCheckExtendCheckDecl(
     }
     extendDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
     var valid = TypeCheckExtendPreCheckExtend(diag, tm, ctx, extendDecl)
-    if (!TypeCheckExtendCheckOrphanRule(diag, tm, ctx, extendDecl)) {
+    if (!CheckExtendOrphanRule(diag, tm, ctx, extendDecl)) {
         valid = false
     }
     var extendedDecl: Option<Decl> = None
@@ -1104,6 +1104,27 @@ public func TypeCheckExtendCheckDecl(
         }
     }
     return valid
+}
+
+extend TypeCheckerImpl {
+    // C++ src/Sema/TypeCheckExtend.cpp:436-452 TypeCheckerImpl::CheckExtendRules.
+    public func CheckExtendRules(ctx: ASTContext): Unit {
+        let pkg = ctx.curPackage.getOrThrow()
+        if (pkg.TestAttr(Attribute.IMPORTED)) {
+            return
+        }
+        for (sym in GetSymsByASTKind(ctx, ASTKind.EXTEND_DECL, order: SearchOrder.POS_ASC)) {
+            let node = sym.node ?? continue
+            let extendDecl = (node as ExtendDecl) ?? continue
+            let extendedType = extendDecl.extendedType ?? continue
+            if (!Ty.IsTyCorrect(extendedType.GetTy())) {
+                continue
+            }
+            let diagnosticEngine = diag.getOrThrow()
+            let _ = CheckExtendOrphanRule(diagnosticEngine, typeManager, ctx, extendDecl)
+            let _ = CheckExtendGenerics(diagnosticEngine, extendDecl)
+        }
+    }
 }
 
 private func IsIndexAssignmentOperator(funcDecl: FuncDecl): Bool {
