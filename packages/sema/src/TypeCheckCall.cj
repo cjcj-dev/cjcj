@@ -2631,23 +2631,22 @@ private func FillEnumTypeArgumentsTy(typeManager: TypeManager, ctorDecl: Decl, t
         case Some(value) => value
         case None => return
     }
-    if (let Some(baseExpr) <- ma.baseExpr) {
-        if (let Some(ref) <- (baseExpr as NameReferenceExpr)) {
-            if (ref.typeArguments.isEmpty()) {
-                ref.instTys.clear()
-            }
-            if (ref.instTys.isEmpty()) {
-                for (typeParam in generic.typeParameters) {
-                    let genericTy = (typeParam.GetTy().getOrThrow() as GenericsTy).getOrThrow()
-                    ref.instTys.add(typeManager.ApplySubstPack(genericTy, typeMapping))
-                }
+    let baseExpr = ma.baseExpr.getOrThrow()
+    if (let Some(ref) <- (baseExpr as NameReferenceExpr)) {
+        if (ref.typeArguments.isEmpty()) {
+            ref.instTys.clear()
+        }
+        if (ref.instTys.isEmpty()) {
+            for (typeParam in generic.typeParameters) {
+                let genericTy = (typeParam.GetTy().getOrThrow() as GenericsTy).getOrThrow()
+                ref.instTys.add(typeManager.ApplySubstPack(genericTy, typeMapping))
             }
         }
-        baseExpr.SetTy(typeManager.ApplySubstPack(enumDecl.GetTy().getOrThrow(), typeMapping))
-        let enumCallNoTyArgs = ma.typeArguments.isEmpty() && baseExpr.GetTypeArgs().isEmpty()
-        if (enumCallNoTyArgs) {
-            ma.SetTy(typeManager.ApplySubstPack(ma.GetTy().getOrThrow(), typeMapping))
-        }
+    }
+    baseExpr.SetTy(typeManager.ApplySubstPack(enumDecl.GetTy().getOrThrow(), typeMapping))
+    let enumCallNoTyArgs = ma.typeArguments.isEmpty() && baseExpr.GetTypeArgs().isEmpty()
+    if (enumCallNoTyArgs) {
+        ma.SetTy(typeManager.ApplySubstPack(ma.GetTy().getOrThrow(), typeMapping))
     }
 }
 
@@ -2692,10 +2691,7 @@ private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: Cal
         }
     }
 
-    let baseExpr = match (memberAccess.baseExpr) {
-        case Some(value) => value
-        case None => return
-    }
+    let baseExpr = memberAccess.baseExpr.getOrThrow()
     let baseDecl = match (GetRealTarget(baseExpr.GetTarget())) {
         case Some(value) => value
         case None => return
