@@ -36,6 +36,8 @@ import cjcj::chir.VArrayType
 import cjcj::chir.GetCustomTypeIdentifier
 import cjcj::chir.GetFuncTypeWithoutThisPtrFromAutoEnvBaseType
 import cjcj::chir.IsClosureConversionEnvClass
+import cjcj::chir.IsCoreObject
+import cjcj::chir.IsCapturedClass
 import cjcj::utils.{CC_DEF_PREFIX, CJC_ASSERT, OBJECT_NAME, StaticCast}
 
 // GAP_TODO(C07-debug-location-parity):
@@ -885,6 +887,59 @@ public class DIBuilder {
         CreateCustomTypeMember(classDef.GetDirectInstanceVars(), elements, fwdDecl, diFile)
         CreateMethodType(classDef, elements, fwdDecl)
         CreateGetGenericFunc(classTy, fwdDecl, elements)
+        fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
+        return fwdDecl
+    }
+
+    private func CreateClassType(classTy: ClassType): LLVMMetadataRef {
+        let classDef = classTy.GetClassDef()
+        let identifier = classTy.ToString()
+        if (CGType.GetOrCreate(cgMod, classTy).GetSize().isNone()) {
+            return CreateGenericClassType(classTy)
+        }
+
+        if (IsCoreObject(classDef)) {
+            return GetOrCreateObjectClassType()
+        }
+        if (classDef.IsInterface()) {
+            return CreateInterfaceType(classTy)
+        }
+        if (classTy.IsAutoEnvBase()) {
+            return CreateClosureType(classTy)
+        } else if (IsClosureConversionEnvClass(classDef)) {
+            return CreateCapturedVars(classTy)
+        }
+        let classLayout = (CGType.GetOrCreate(cgMod, classTy) as CGClassType).getOrThrow().GetLayoutType()
+        CJC_ASSERT(unsafe { LLVMIsOpaqueStruct(classLayout) } == 0)
+        let position = classDef.GetDebugLocation()
+        var name = ""
+        if (IsCapturedClass(classDef)) {
+            name = "$Captured_"
+            let capturedTy = DeRef(classDef.GetDirectInstanceVar(0).ty)
+            if (capturedTy.IsCustomType()) {
+                name += GenerateCustomTypeName((capturedTy as CustomType).getOrThrow(), needPkgPrefix: false)
+            } else {
+                name += GenerateTypeName(capturedTy)
+            }
+        } else {
+            name = GenerateCustomTypeName(classTy, needPkgPrefix: false)
+        }
+        let diFile = GetOrCreateFile(position)
+        let classSize = GetClassSize(classLayout) + 64u64
+        let builder = cgMod.GetCGContext().GetCHIRBuilder()
+        let superDiType = GetOrCreateType(classTy.GetSuperClassTy(builder: builder).getOrThrow())
+        let defPackage = createNameSpace(compileUnit, classDef.GetPackageName(), false)
+        let tag = DW_TAG_class_type
+        var fwdDecl = createReplaceableCompositeType(tag, name, defPackage, diFile,
+            position.GetBeginPos().line, 0u32, classSize, 0u32, FlagTypePassByReference, identifier)
+        fwdDecl = replaceWithDistinct(fwdDecl)
+        typeCache[classTy.objectId] = fwdDecl
+        let elements = ArrayList<LLVMMetadataRef>()
+        let inheritType = createInheritance(fwdDecl, superDiType, 0u64, 0u32, FlagZero)
+        elements.add(inheritType)
+        CreateInheritedInterface(elements, fwdDecl, classTy)
+        CreateClassMemberType(classTy, classLayout, elements, fwdDecl)
+        CreateMethodType(classDef, elements, fwdDecl)
         fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(elements))
         return fwdDecl
     }
