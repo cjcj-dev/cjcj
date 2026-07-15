@@ -3985,6 +3985,7 @@ public class Translator {
         if (let Some(stopLocalVar) <- stopExprVar.AsLocalVar()) {
             stopLocalVar.GetExpr().getOrThrow().SetGeneratedFromForIn(true)
         }
+        let condLoc = TranslateLocation(inExpression.body[3])
         let condition = Translator.TranslateASTNode(inExpression.body[3], this) ??
             throw IllegalStateException("faithful AST2CHIR for-in range condition produced no value")
         condition.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetGeneratedFromForIn(true)
@@ -3993,7 +3994,7 @@ public class Translator {
         let forInEntryBlock = builder.CreateBlock(parentGroup)
         currentBlock = forInEntryBlock
         let condVar = InitializeForInCondVar()
-        InitializeDelayExitSignal()
+        InitializeDelayExitSignal(condLoc)
         let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: false)
         if (let Some(retValLocation) <- forInRetValLocation) {
             forInExprReturnMap[RequireResult(forIn)] = retValLocation
@@ -4028,6 +4029,7 @@ public class Translator {
         let endDecl = RequireBodyVarDecl(inExpression, 2, "for-in string end var")
         let inductiveVar = GetSymbolTable(indexDecl)
         inductiveVar.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetGeneratedFromForIn(true)
+        let condLoc = TranslateLocation(inExpression.body[2])
         let stringSize = GetDerefedValue(GetSymbolTable(endDecl))
         let conditionExpr = builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
             GetDerefedValue(inductiveVar), stringSize, CurrentBlock())
@@ -4039,7 +4041,7 @@ public class Translator {
         let forInEntryBlock = builder.CreateBlock(parentGroup)
         currentBlock = forInEntryBlock
         let condVar = InitializeForInCondVar()
-        InitializeDelayExitSignal()
+        InitializeDelayExitSignal(condLoc)
         let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: false)
         if (let Some(retValLocation) <- forInRetValLocation) {
             forInExprReturnMap[RequireResult(forIn)] = retValLocation
@@ -4079,6 +4081,7 @@ public class Translator {
         let matchExpr = (inExpression.body[1] as AstMatchExpr) ??
             throw IllegalStateException("faithful AST2CHIR iterator ForInExpr expects MatchExpr as second node")
         let matchTy = chirTy.TranslateType(RequireAstTy(matchExpr))
+        let condLoc = TranslateLocation(inExpression.body[1])
         let iterNextLocation = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(matchTy), matchTy,
             CurrentBlock()))
         builder.CreateStore(MakeForInIterNoneValue(matchTy), iterNextLocation, CurrentBlock())
@@ -4088,7 +4091,7 @@ public class Translator {
         let forInEntryBlock = builder.CreateBlock(parentGroup)
         currentBlock = forInEntryBlock
         let condVar = InitializeForInCondVar()
-        InitializeDelayExitSignal()
+        InitializeDelayExitSignal(condLoc)
         let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: true)
         if (let Some(retValLocation) <- forInRetValLocation) {
             forInExprReturnMap[RequireResult(forIn)] = retValLocation
@@ -4129,7 +4132,8 @@ public class Translator {
 
         currentBlock = forInEntryBlock
         let condVar = InitializeForInCondVar()
-        InitializeDelayExitSignal()
+        let condLoc = TranslateLocation(RequireExpr(expr.inExpression, "closed-range for-in inExpression"))
+        InitializeDelayExitSignal(condLoc)
         let forInRetValLocation = GenerateForInRetValLocation()
         let forIn = InitForInClosedRangeExprSkeleton(expr, iterVar, condVar)
         if (let Some(retValLocation) <- forInRetValLocation) {
@@ -4524,17 +4528,48 @@ public class Translator {
         return condVar
     }
 
-    private func InitializeDelayExitSignal(): Unit {
-        if (delayExitSignal.isSome()) {
-            return
+    private func GetOuterMostExpr(): Option<Value> {
+        var finalValidExpr: Option<Value> = None
+        var index = blockGroupStack.size - 1
+        while (index >= 0) {
+            let group = blockGroupStack[index]
+            let ownedExpr = group.GetOwnerExpression()
+            if (let Some(owner) <- ownedExpr) {
+                if (owner.GetExprKind() == ExprKind.LAMBDA) {
+                    return finalValidExpr
+                }
+            }
+            if (let Some(topLevelFunc) <- CurrentBlock().GetTopLevelFunc()) {
+                if (let Some(body) <- topLevelFunc.GetBody()) {
+                    if (group == body) {
+                        return finalValidExpr
+                    }
+                }
+            }
+            if (let Some(owner) <- ownedExpr) {
+                if ((owner as ForIn).isSome()) {
+                    if (let Some(result) <- owner.GetResult()) {
+                        let value: Value = result
+                        finalValidExpr = Some(value)
+                    }
+                }
+            }
+            index--
         }
-        let signalExpr = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetInt64Ty()),
-            builder.context.GetInt64Ty(), CurrentBlock())
-        signalExpr.SetGeneratedFromForIn(true)
-        let signal = RequireResult(signalExpr)
-        delayExitSignal = signal
-        let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
-        builder.CreateStore(zero, signal, CurrentBlock())
+        return finalValidExpr
+    }
+
+    private func InitializeDelayExitSignal(loc: DebugLocation): Unit {
+        if (GetOuterMostExpr().isNone()) {
+            let signalExpr = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetInt64Ty()),
+                builder.context.GetInt64Ty(), CurrentBlock())
+            signalExpr.SetDebugLocation(loc)
+            signalExpr.SetGeneratedFromForIn(true)
+            let signal = RequireResult(signalExpr)
+            delayExitSignal = signal
+            let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
+            builder.CreateStore(zero, signal, CurrentBlock())
+        }
     }
 
     private func DelayExitSignalGreaterThanZero(): Value {
