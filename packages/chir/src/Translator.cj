@@ -50,6 +50,7 @@ import cjcj::ast.JumpExpr as AstJumpExpr
 import cjcj::ast.LambdaExpr as AstLambdaExpr
 import cjcj::ast.LetPatternDestructor as AstLetPatternDestructor
 import cjcj::ast.LitConstExpr as AstLitConstExpr
+import cjcj::ast.LitConstKind as AstLitConstKind
 import cjcj::ast.MatchCase as AstMatchCase
 import cjcj::ast.MainDecl as AstMainDecl
 import cjcj::ast.MatchExpr as AstMatchExpr
@@ -168,6 +169,17 @@ private class TranslateIfExpr <: TranslateCondCtrlExpr {
     }
 }
 
+private class TranslateWhileExpr <: TranslateCondCtrlExpr {
+    public var conditionBlock: Option<Block> = None
+    public var bodyBlock: Option<Block> = None
+    public let e: AstWhileExpr
+
+    public init(e: AstWhileExpr) {
+        super()
+        this.e = e
+    }
+}
+
 // Static member func and global func should create alloc node for print `unused variable` warning.
 private func ShouldCreateAlloc(decl: AstVarDecl, opts: GlobalOptions, rValueIsEmpty: Bool): Bool {
     if (decl.isConst) {
@@ -194,16 +206,6 @@ private func ShouldCreateAlloc(decl: AstVarDecl, opts: GlobalOptions, rValueIsEm
         }
     }
     return false
-}
-
-private class FaithfulLoopTarget {
-    public let continueBlock: Block
-    public let breakBlock: Block
-
-    public init(continueBlock: Block, breakBlock: Block) {
-        this.continueBlock = continueBlock
-        this.breakBlock = breakBlock
-    }
 }
 
 private class ControlType {
@@ -330,7 +332,7 @@ public class Translator {
     private var lambdaWrapperCounter: UInt64 = 0u64
     private var delayExitSignal: Option<Value> = None
     private let blockGroupStack: ArrayList<BlockGroup> = ArrayList<BlockGroup>()
-    private let loopTargetStack: ArrayList<FaithfulLoopTarget> = ArrayList<FaithfulLoopTarget>()
+    private var terminatorSymbolTable: AST2CHIRNodeMap<(Block, Block)> = AST2CHIRNodeMap<(Block, Block)>()
     private let tryCatchContext: ArrayList<Block> = ArrayList<Block>()
     private let tryBodyContext: ArrayList<AstTryExpr> = ArrayList<AstTryExpr>()
     private let finallyContext: ArrayList<FinallyControlVal> = ArrayList<FinallyControlVal>()
@@ -426,9 +428,7 @@ public class Translator {
         for (blockGroup in blockGroupStack) {
             copied.blockGroupStack.add(blockGroup)
         }
-        for (loopTarget in loopTargetStack) {
-            copied.loopTargetStack.add(loopTarget)
-        }
+        copied.terminatorSymbolTable = AST2CHIRNodeMap<(Block, Block)>(terminatorSymbolTable)
         for (tryCatchBlock in tryCatchContext) {
             copied.tryCatchContext.add(tryCatchBlock)
         }
@@ -1979,7 +1979,7 @@ public class Translator {
     }
 
     private func TranslateCondition(cond: AstExpr, isRightmost: Bool,
-        impl: TranslateIfExpr): DanglingBlock {
+        impl: TranslateCondCtrlExpr): DanglingBlock {
         if (let Some(parenExpr) <- (cond as AstParenExpr)) {
             return TranslateCondition(RequireExpr(parenExpr.expr, "parenthesized if condition"), isRightmost, impl)
         }
@@ -1997,7 +1997,7 @@ public class Translator {
     }
 
     private func TranslateNormalCondition(cond: AstExpr, isRightmost: Bool,
-        impl: TranslateIfExpr): DanglingBlock {
+        impl: TranslateCondCtrlExpr): DanglingBlock {
         let value = TranslateExprArg(cond)
         let loc = TranslateLocation(cond.begin, cond.end)
         let current = CurrentBlock()
@@ -2029,7 +2029,7 @@ public class Translator {
     }
 
     private func TranslateBinary(binaryExpr: AstBinaryExpr, isRightmost: Bool,
-        impl: TranslateIfExpr): DanglingBlock {
+        impl: TranslateCondCtrlExpr): DanglingBlock {
         let left = TranslateCondition(RequireExpr(binaryExpr.leftExpr, "if condition left operand"), false, impl)
         let branchBlock = CreateBlock()
         currentBlock = branchBlock
@@ -2053,7 +2053,7 @@ public class Translator {
     }
 
     private func TranslateLetPattern(letPattern: AstLetPatternDestructor, isRightmost: Bool,
-        impl: TranslateIfExpr): DanglingBlock {
+        impl: TranslateCondCtrlExpr): DanglingBlock {
         if (CanOptimizeLetPatternToSwitch(letPattern)) {
             return TranslateLetPatternAsTable(letPattern, isRightmost, impl)
         }
@@ -2061,7 +2061,7 @@ public class Translator {
     }
 
     private func TranslateLetPatternAsMatch(letPattern: AstLetPatternDestructor, isRightmost: Bool,
-        impl: TranslateIfExpr): DanglingBlock {
+        impl: TranslateCondCtrlExpr): DanglingBlock {
         let selectorValue = TranslateExprArg(RequireExpr(letPattern.initializer, "if-let initializer"))
         let originLoc = TranslateLocation(letPattern)
         var result = DanglingBlock()
@@ -2086,7 +2086,7 @@ public class Translator {
     }
 
     private func TranslateLetPatternAsTable(letPattern: AstLetPatternDestructor, isRightmost: Bool,
-        impl: TranslateIfExpr): DanglingBlock {
+        impl: TranslateCondCtrlExpr): DanglingBlock {
         let selectorTy = RequireAstTy(RequireExpr(letPattern.initializer, "if-let initializer"))
         let selectorValue = TranslateExprArg(RequireExpr(letPattern.initializer, "if-let initializer"))
         let enumDecl = AstTy.GetDeclOfTy(Some(selectorTy)) as AstEnumDecl
@@ -2150,7 +2150,7 @@ public class Translator {
     }
 
     private func TranslateTrivialPatternAsTable(letPattern: AstLetPatternDestructor, value: Value,
-        countOfPatterns: Int64, impl: TranslateIfExpr): DanglingBlock {
+        countOfPatterns: Int64, impl: TranslateCondCtrlExpr): DanglingBlock {
         let indexToBodies = TreeMap<UInt64, Block>()
         let baseBlock = currentBlock
         let trueBlock = CreateBlock()
@@ -2208,7 +2208,7 @@ public class Translator {
     }
 
     private func CreateBranch(value: Value, current: Block, trueBlock: Block, falseBlock: Block,
-        impl: TranslateIfExpr): Branch {
+        impl: TranslateCondCtrlExpr): Branch {
         let result = builder.CreateBranch(value, trueBlock, falseBlock, current)
         result.SetSourceExpr(GetSourceExpr(impl))
         return result
@@ -2218,15 +2218,39 @@ public class Translator {
         return builder.CreateGoTo(destination, source)
     }
 
-    private func GetExpr(impl: TranslateIfExpr): AstExpr {
-        return impl.e
+    private func GetExpr(impl: TranslateCondCtrlExpr): AstExpr {
+        if (let Some(ifImpl) <- (impl as TranslateIfExpr)) {
+            return ifImpl.e
+        }
+        return (impl as TranslateWhileExpr).getOrThrow().e
     }
 
-    private func GetSourceExpr(impl: TranslateIfExpr): SourceExpr {
-        return match (impl.e.sugarKind) {
+    private func GetSourceExpr(impl: TranslateCondCtrlExpr): SourceExpr {
+        if (let Some(whileImpl) <- (impl as TranslateWhileExpr)) {
+            return match (whileImpl.e.sugarKind) {
+                case AstSugarKind.FOR_IN_EXPR => SourceExpr.FOR_IN_EXPR
+                case _ => SourceExpr.WHILE_EXPR
+            }
+        }
+        let ifImpl = (impl as TranslateIfExpr).getOrThrow()
+        return match (ifImpl.e.sugarKind) {
             case AstSugarKind.FOR_IN_EXPR => SourceExpr.FOR_IN_EXPR
             case _ => SourceExpr.IF_EXPR
         }
+    }
+
+    private func TranslateTrueBlock(impl: TranslateCondCtrlExpr): Block {
+        if (let Some(ifImpl) <- (impl as TranslateIfExpr)) {
+            return TranslateTrueBlock(ifImpl)
+        }
+        return TranslateTrueBlock((impl as TranslateWhileExpr).getOrThrow())
+    }
+
+    private func TranslateFalseBlock(impl: TranslateCondCtrlExpr): Block {
+        if (let Some(ifImpl) <- (impl as TranslateIfExpr)) {
+            return TranslateFalseBlock(ifImpl)
+        }
+        return TranslateFalseBlock((impl as TranslateWhileExpr).getOrThrow())
     }
 
     private func TranslateTrueBlock(impl: TranslateIfExpr): Block {
@@ -3095,59 +3119,97 @@ public class Translator {
         return false
     }
 
-    public func Visit(expr: AstWhileExpr): Option<Value> {
-        let parentBlock = CurrentBlock()
-        let group = RequireParentBlockGroup(parentBlock, "while")
-        let conditionBlock = builder.CreateBlock(group)
-        let bodyBlock = builder.CreateBlock(group)
-        let endBlock = builder.CreateBlock(group)
-        endBlock.SetDebugLocation(TranslateLocation(expr))
-        builder.CreateGoTo(conditionBlock, parentBlock)
-
-        loopTargetStack.add(FaithfulLoopTarget(conditionBlock, endBlock))
-        currentBlock = conditionBlock
-        TranslateIfCondition(RequireExpr(expr.condExpr, "while condition"), bodyBlock, endBlock)
-
-        currentBlock = bodyBlock
-        let bodyAstBlock = RequireBlock(expr.body, "while body")
-        let _ = Translator.TranslateASTNode(bodyAstBlock, this)
-        if (bodyBlock.GetTerminator().isNone()) {
-            builder.CreateGoTo(GetBlockByAST(bodyAstBlock), bodyBlock)
+    private func TranslateConditionBlock(impl: TranslateWhileExpr): Unit {
+        impl.conditionBlock = Some(CreateBlock())
+        match (impl.e.sugarKind) {
+            case AstSugarKind.FOR_IN_EXPR =>
+                impl.conditionBlock.getOrThrow().SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+            case _ => ()
         }
-        if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateGoTo(conditionBlock, CurrentBlock())
+        let _ = CreateGoto(impl.conditionBlock.getOrThrow(), CurrentBlock())
+        currentBlock = impl.conditionBlock
+    }
+
+    private func TranslateTrueBlock(impl: TranslateWhileExpr): Block {
+        CJC_ASSERT(impl.bodyBlock.isNone())
+        terminatorSymbolTable.Set(impl.e, (impl.conditionBlock.getOrThrow(), impl.endBlock.getOrThrow()))
+        try (context = ScopeContext(scopeInfo)) {
+            if (impl.e.TestAttr(AstAttribute.IMPLICIT_ADD)) {
+                context.close()
+            } else {
+                context.ScopePlus()
+            }
+            let body = RequireBlock(impl.e.body, "while body")
+            TranslateSubExprToDiscarded(body)
+            impl.bodyBlock = Some(GetBlockByAST(body))
+            impl.bodyBlock.getOrThrow().SetDebugLocation(TranslateLocation(body.begin, body.end))
         }
-        loopTargetStack.remove(at: loopTargetStack.size - 1)
-        currentBlock = endBlock
+        let bodyBlockEnd = CurrentBlock()
+        let branch = CreateGoto(impl.conditionBlock.getOrThrow(), bodyBlockEnd)
+        branch.SetDebugLocation(TranslateLocation(RequireExpr(impl.e.condExpr, "while condition")))
+        branch.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+        terminatorSymbolTable.Erase(impl.e)
+        return impl.bodyBlock.getOrThrow()
+    }
+
+    private func TranslateFalseBlock(impl: TranslateWhileExpr): Block {
+        return impl.endBlock.getOrThrow()
+    }
+
+    private func Translate(expr: AstWhileExpr, impl: TranslateWhileExpr): Option<Value> {
+        TranslateConditionBlock(impl)
+        try (context = ScopeContext(scopeInfo)) {
+            if (expr.TestAttr(AstAttribute.IMPLICIT_ADD)) {
+                context.close()
+            } else {
+                context.ScopePlus()
+            }
+            impl.endBlock = Some(CreateBlock())
+            impl.endBlock.getOrThrow().SetDebugLocation(TranslateLocation(expr))
+            impl.endBlock.getOrThrow().SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+            let topResult = TranslateCondition(RequireExpr(impl.e.condExpr, "while condition"), true, impl)
+            if (let Some(topTrueBlock) <- topResult.tb) {
+                let _ = CreateGoto(impl.bodyBlock.getOrThrow(), topTrueBlock)
+            }
+            if (let Some(topFalseBlock) <- topResult.fb) {
+                let _ = CreateGoto(impl.endBlock.getOrThrow(), topFalseBlock)
+            }
+            currentBlock = impl.endBlock
+        }
         return None
     }
 
+    public func Visit(expr: AstWhileExpr): Option<Value> {
+        let impl = TranslateWhileExpr(expr)
+        return Translate(expr, impl)
+    }
+
     public func Visit(expr: AstDoWhileExpr): Option<Value> {
-        let parentBlock = CurrentBlock()
-        let group = RequireParentBlockGroup(parentBlock, "do-while")
-        let bodyBlock = builder.CreateBlock(group)
-        let conditionBlock = builder.CreateBlock(group)
-        let endBlock = builder.CreateBlock(group)
-        builder.CreateGoTo(bodyBlock, parentBlock)
-
-        loopTargetStack.add(FaithfulLoopTarget(conditionBlock, endBlock))
-        currentBlock = bodyBlock
-        let bodyAstBlock = RequireBlock(expr.body, "do-while body")
-        let _ = Translator.TranslateASTNode(bodyAstBlock, this)
-        if (bodyBlock.GetTerminator().isNone()) {
-            builder.CreateGoTo(GetBlockByAST(bodyAstBlock), bodyBlock)
+        let backupBlock = CurrentBlock()
+        let conditionBlock = CreateBlock()
+        let endBlock = CreateBlock()
+        endBlock.SetDebugLocation(TranslateLocation(expr))
+        terminatorSymbolTable.Set(expr, (conditionBlock, endBlock))
+        try (context = ScopeContext(scopeInfo)) {
+            context.ScopePlus()
+            let whileLoc = TranslateLocation(RequireExpr(expr.condExpr, "do-while condition"))
+            let body = RequireBlock(expr.body, "do-while body")
+            TranslateSubExprToDiscarded(body)
+            let trueBlock = GetBlockByAST(body)
+            let gotoCondition = builder.CreateGoTo(conditionBlock, CurrentBlock())
+            gotoCondition.SetDebugLocation(whileLoc)
+            gotoCondition.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+            currentBlock = conditionBlock
+            let condition = TranslateExprArg(RequireExpr(expr.condExpr, "do-while condition"))
+            let conditionType = condition.GetType().getOrThrow()
+            CJC_ASSERT(conditionType.IsBoolean() || conditionType.IsNothing() || conditionType.IsGeneric())
+            let newConditionBlock = CurrentBlock()
+            let _ = builder.CreateGoTo(trueBlock, backupBlock)
+            let branch = builder.CreateBranch(condition, trueBlock, endBlock, newConditionBlock)
+            branch.SetDebugLocation(whileLoc)
+            branch.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+            currentBlock = endBlock
         }
-        if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateGoTo(conditionBlock, CurrentBlock())
-        }
-
-        currentBlock = conditionBlock
-        let condValue = TranslateExprArg(RequireExpr(expr.condExpr, "do-while condition"))
-        if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateBranch(condValue, bodyBlock, endBlock, CurrentBlock())
-        }
-        loopTargetStack.remove(at: loopTargetStack.size - 1)
-        currentBlock = endBlock
         return None
     }
 
@@ -3162,23 +3224,12 @@ public class Translator {
 
     public func Visit(expr: AstJumpExpr): Option<Value> {
         let loc = TranslateLocation(expr)
-        let isForIn = if (let Some(refLoop) <- expr.refLoop) {
-            refLoop.astKind == ASTKind.FOR_IN_EXPR && delayExitSignal.isSome()
-        } else {
-            false
-        }
-        var destination: Option<Block> = None
+        let refLoop = expr.refLoop.getOrThrow()
+        let isForIn = refLoop.astKind == ASTKind.FOR_IN_EXPR && delayExitSignal.isSome()
         let loopLocInfo = if (isForIn) {
-            let refLoop = expr.refLoop.getOrThrow()
             forInExprAST2DebugLocMap.get(refLoop.objectId).getOrThrow()
         } else {
-            if (loopTargetStack.isEmpty()) {
-                throw IllegalStateException("faithful AST2CHIR JumpExpr outside loop")
-            }
-            let target = loopTargetStack[loopTargetStack.size - 1]
-            let targetBlock = if (expr.isBreak) { target.breakBlock } else { target.continueBlock }
-            destination = Some(targetBlock)
-            target.breakBlock.GetDebugLocation()
+            terminatorSymbolTable.Get(refLoop)[1].GetDebugLocation()
         }
         if (!finallyContext.isEmpty()) {
             let tryLocInfo = CurrentFinallyContext().finallyBlock.GetDebugLocation()
@@ -3198,7 +3249,8 @@ public class Translator {
             })
             builder.CreateExit(None, CurrentBlock())
         } else {
-            builder.CreateGoTo(destination.getOrThrow(), CurrentBlock())
+            let blocks = terminatorSymbolTable.Get(refLoop)
+            builder.CreateGoTo(if (expr.isBreak) { blocks[1] } else { blocks[0] }, CurrentBlock())
         }
         terminator.SetDebugLocation(loc)
         let group = RequireParentBlockGroup(CurrentBlock(), "jump continuation")
@@ -6318,6 +6370,19 @@ public class Translator {
                 currentBlock = falseBlock
             }
             idx++
+        }
+    }
+
+    private func TranslateSubExprToDiscarded(node: AstNode): Unit {
+        let _ = Translator.TranslateASTNode(node, this)
+        if (let Some(literal) <- (node as AstLitConstExpr)) {
+            if (literal.kind == AstLitConstKind.UNIT) {
+                let unit = builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), CurrentBlock())
+                unit.SetDebugLocation(TranslateLocation(node))
+                if (literal.TestAttr(AstAttribute.COMPILER_ADD)) {
+                    unit.GetResult().getOrThrow().EnableAttr(Attribute.COMPILER_ADD)
+                }
+            }
         }
     }
 
