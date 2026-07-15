@@ -7,7 +7,7 @@ import cjcj::ast.*
 import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
 import cjcj::modules.PackageRelation as ModulesPackageRelation
 import cjcj::modules.SplitQualifiedName as ModulesSplitQualifiedName
-import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, PData}
 
 public enum TypeCompatibility {
     | INCOMPATIBLE
@@ -1602,7 +1602,7 @@ public class TypeManager {
         return visited.contains(ty.objectId)
     }
 
-    private func isInheritableTypeForGenericMapping(ty: Ty): Bool {
+    private func IsInheritableType(ty: Ty): Bool {
         if (!Ty.IsTyCorrect(ty) || !ty.IsClassLike()) {
             return false
         }
@@ -1640,7 +1640,7 @@ public class TypeManager {
         generateDeclGenericMapping(m, decl, targetTy)
         for (inheritedType in decl.inheritedTypes) {
             if (let Some(inheritedTy) <- inheritedType.GetTy()) {
-                if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                if (IsInheritableType(inheritedTy)) {
                     generateGenericMappingVisit(m, inheritedTy, visited)
                 }
             }
@@ -1684,7 +1684,7 @@ public class TypeManager {
         }
         for (inheritedType in decl.inheritedTypes) {
             if (let Some(inheritedTy) <- inheritedType.GetTy()) {
-                if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                if (IsInheritableType(inheritedTy)) {
                     generateGenericMappingVisit(m, inheritedTy, visited, false)
                 }
             }
@@ -1852,7 +1852,7 @@ public class TypeManager {
         if (!Ty.IsTyCorrect(ty) || !Ty.IsTyCorrect(superTy)) {
             return false
         }
-        if (hasExtendInterfaceTyHelper(superTy, GetAllExtendsByTy(ty), GetTypeArgs(ty), typeMapping)) {
+        if (HasExtendInterfaceTyHelper(superTy, GetAllExtendsByTy(ty), GetTypeArgs(ty))) {
             return true
         }
         if (ty.IsClass()) {
@@ -1860,10 +1860,8 @@ public class TypeManager {
                 let substituteMapping = GetSubstituteMapping(ty, typeMapping)
                 for (inheritedType in decl.inheritedTypes) {
                     if (let Some(inheritedTy) <- inheritedType.GetTy()) {
-                        if (inheritedTy.IsClass() && isInheritableTypeForGenericMapping(inheritedTy)) {
-                            if (HasExtendedInterfaceTy(inheritedTy, superTy, substituteMapping)) {
-                                return true
-                            }
+                        if (inheritedTy.IsClass() && IsInheritableType(inheritedTy)) {
+                            return HasExtendedInterfaceTy(inheritedTy, superTy, substituteMapping)
                         }
                     }
                 }
@@ -3466,7 +3464,7 @@ public class TypeManager {
             let substituteMapping = GetSubstituteMapping(ty, typeMapping)
             for (inheritedType in decl.inheritedTypes) {
                 if (let Some(inheritedTy) <- inheritedType.GetTy()) {
-                    if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                    if (IsInheritableType(inheritedTy)) {
                         out.AddAll(GetAllSuperTys(inheritedTy, typeMapping: substituteMapping))
                     }
                 }
@@ -3480,7 +3478,7 @@ public class TypeManager {
             let substituteMapping = GetSubstituteMapping(ty, typeMapping)
             for (inheritedType in decl.inheritedTypes) {
                 if (let Some(inheritedTy) <- inheritedType.GetTy()) {
-                    if (isInheritableTypeForGenericMapping(inheritedTy) &&
+                    if (IsInheritableType(inheritedTy) &&
                         HasSuperTy(inheritedTy, superTy, substituteMapping)) {
                         return true
                     }
@@ -3518,7 +3516,7 @@ public class TypeManager {
             }
             for (superInterfaceTy in extendDecl.inheritedTypes) {
                 if (let Some(inheritedTy) <- superInterfaceTy.GetTy()) {
-                    if (isInheritableTypeForGenericMapping(inheritedTy)) {
+                    if (IsInheritableType(inheritedTy)) {
                         let instTy = GetInstantiatedTy(inheritedTy, typeMapping)
                         out.AddAll(GetAllSuperTys(instTy, typeMapping: TypeSubst(), withExtended: true))
                     }
@@ -3528,13 +3526,43 @@ public class TypeManager {
         return out
     }
 
-    private func hasExtendInterfaceTyHelper(superTy: Ty, extends: ArrayList<ExtendDecl>, typeArgs: ArrayList<Ty>,
-        typeMapping: TypeSubst): Bool {
-        let interfaceTys = getAllExtendInterfaceTyHelper(extends, typeArgs)
-        for (interfaceTy in interfaceTys.values) {
-            let instTy = GetInstantiatedTy(interfaceTy, typeMapping)
-            if (SameTy(instTy, superTy) || HasSuperTy(instTy, superTy, typeMapping, withExtended: true)) {
-                return true
+    private func HasExtendInterfaceTyHelper(
+        superTy: Ty, extends: ArrayList<ExtendDecl>, typeArgs: ArrayList<Ty>): Bool {
+        try (cs = PData.CommitScope(constraints)) {
+            for (extendDecl in extends) {
+                if (!CheckGenericDeclInstantiation(Some(extendDecl), typeArgs)) {
+                    PData.Reset(constraints)
+                    continue
+                }
+                let extendedTy: Option<Ty> = if (let Some(extendedType) <- extendDecl.extendedType) {
+                    extendedType.GetTy()
+                } else {
+                    None
+                }
+                if ((let None <- extendedTy) || extendedTy.getOrThrow().typeArgs.size != typeArgs.size) {
+                    PData.Reset(constraints)
+                    continue
+                }
+                let typeMapping = TypeSubst()
+                var idx: Int64 = 0
+                while (idx < typeArgs.size) {
+                    if (let Some(genericSuper) <- (extendedTy.getOrThrow().typeArgs[idx] as GenericsTy)) {
+                        typeMapping.Put(genericSuper, typeArgs[idx])
+                    }
+                    idx++
+                }
+                for (superInterfaceTy in extendDecl.inheritedTypes) {
+                    if (let Some(inheritedTy) <- superInterfaceTy.GetTy()) {
+                        if (!IsInheritableType(inheritedTy)) {
+                            continue
+                        }
+                        let instTy = GetInstantiatedTy(inheritedTy, typeMapping)
+                        if (HasSuperTy(instTy, superTy, typeMapping, withExtended: true)) {
+                            return true
+                        }
+                    }
+                }
+                PData.Reset(constraints)
             }
         }
         return false
