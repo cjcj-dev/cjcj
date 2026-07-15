@@ -1036,7 +1036,8 @@ extend TypeChecker {
         }
         AddDefaultParamFunctions(pkg)
         let enableMacroInLSP = if (let Some(instance) <- ci) { instance.globalOptions.enableMacroInLSP } else { false }
-        Collector(enableMacroInLsp: enableMacroInLSP).BuildSymbolTable(ctx, pkg, impl.diag, buildTrie: false)
+        Collector(scopeManager: impl.scopeManager, enableMacroInLsp: enableMacroInLSP).
+            BuildSymbolTable(ctx, pkg, impl.diag, buildTrie: false)
         MarkOutermostBinaryExpressions(pkg)
         AddCurFile(pkg)
         MarkParamWithInitialValue(pkg)

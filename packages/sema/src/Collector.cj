@@ -17,10 +17,11 @@ private func WalkMacroCall(macrocall: Node, decl: Decl): Unit {
 
 public class Collector {
     public let decls: ArrayList<Decl> = ArrayList<Decl>()
-    private let scopeManager: ScopeManager = ScopeManager()
+    private let scopeManager: ScopeManager
     private var enableMacroInLsp: Bool = false
 
-    public init(enableMacroInLsp!: Bool = false) {
+    public init(scopeManager!: ScopeManager = ScopeManager(), enableMacroInLsp!: Bool = false) {
+        this.scopeManager = scopeManager
         this.enableMacroInLsp = enableMacroInLsp
     }
 
@@ -33,10 +34,20 @@ public class Collector {
         ctx.currentScopeLevel = 0u32
         ctx.currentMaxDepth = 0u32
         ctx.currentScopeName = TOPLEVEL_SCOPE_NAME
-        AssignPackageScopes(ctx, pkg)
+        let root: Node = pkg
+        BuildSymbolTable(ctx, root, diag, buildTrie: buildTrie)
+    }
+
+    public func BuildSymbolTable(ctx: ASTContext, node: Node, diag: Option<BasicDiagnosticEngine>,
+        buildTrie!: Bool = true): Unit {
+        if (let Some(pkg) <- (node as Package)) {
+            AssignPackageScopes(ctx, pkg)
+        } else {
+            AssignNode(ctx, node)
+        }
         let collector = this
         let walkerBox = Box<Option<Walker>>(None)
-        let walker = Walker(pkg, visitPre: { node: Node =>
+        let walker = Walker(node, visitPre: { node: Node =>
             if (node.IsExpr()) {
                 if (let Some(file) <- node.curFile) {
                     if (file.TestAttr(Attribute.FROM_COMMON_PART)) {

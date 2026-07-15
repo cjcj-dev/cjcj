@@ -88,6 +88,7 @@ public class TypeCheckerImpl {
     public var typeManager: TypeManager
     public var diag: Option<BasicDiagnosticEngine> = None
     public var importManager: Option<SemaImportManager> = None
+    public let scopeManager: ScopeManager = ScopeManager()
 
     public init(typeManager!: TypeManager = TypeManager(), diag!: Option<BasicDiagnosticEngine> = None,
         importManager!: Option<SemaImportManager> = None) {
