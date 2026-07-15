@@ -3161,6 +3161,11 @@ class CHIRDeserializerImpl {
                 CJC_ABORT()
                 return id2Expression[id] as T
         }
+        if (expression is Terminator) {
+            let parentBlock = expression.GetParentBlock().getOrThrow()
+            expression.DetachFromBlockOnly()
+            expression.SetParent(parentBlock)
+        }
         return expression as T
     }
 

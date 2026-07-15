@@ -151,6 +151,18 @@ private class DanglingBlock {
     }
 }
 
+private class BindingConfig {
+    public let hasInitial: Bool
+    public let createDebug: Bool
+    public let setSymbol: Bool
+
+    public init(hasInitial!: Bool = false, createDebug!: Bool = true, setSymbol!: Bool = true) {
+        this.hasInitial = hasInitial
+        this.createDebug = createDebug
+        this.setSymbol = setSymbol
+    }
+}
+
 private open class TranslateCondCtrlExpr {
     public var endBlock: Option<Block> = None
 
@@ -778,8 +790,13 @@ public class Translator {
         currentFunc = fn
         currentAstFuncDecl = funcDecl
         let savedBlock = currentBlock
-        let entry = body.GetEntryBlock() ?? builder.CreateBlock(body)
+        let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
+        if (NeedCreateDebugForFirstParam(fn)) {
+            let _ = builder.CreateDebug(builder.context.GetUnitTy(), fn.GetParam(0), "this", entry)
+        }
+        BindingFuncParam(funcDecl, fn, entry,
+            BindingConfig(hasInitial: funcDecl.TestAttr(AstAttribute.HAS_INITIAL)))
         if (let Some(returnType) <- fn.GetReturnType()) {
             if (!returnType.IsVoid()) {
                 let retValue = builder.CreateAllocate(builder.context.GetRefTy(returnType), returnType, entry)
@@ -788,7 +805,6 @@ public class Translator {
             }
         }
         currentBlock = entry
-        BindFuncParams(funcDecl, fn)
         if (let Some(funcBody) <- funcDecl.funcBody) {
             if (let Some(astBody) <- funcBody.body) {
                 TranslateConstructorDefaultFieldInitializers(funcDecl, funcBody)
@@ -3952,21 +3968,41 @@ public class Translator {
         def.AddInstanceVar(memberInfo)
     }
 
-    private func BindFuncParams(funcDecl: AstFuncDecl, fn: Function): Unit {
-        if (let Some(body) <- funcDecl.funcBody) {
-            if (body.paramLists.isEmpty()) {
-                return
+    private func BindingFuncParam(funcDecl: AstFuncDecl, fn: Function, entry: Block, cfg: BindingConfig): Unit {
+        let body = funcDecl.funcBody.getOrThrow()
+        let params = body.paramLists[0].params
+        let offset: Int64 = if (params.size < fn.GetNumOfParams()) { 1 } else { 0 }
+        CJC_ASSERT(params.size + offset == fn.GetNumOfParams())
+        var idx: Int64 = 0
+        for (param in params) {
+            let value = fn.GetParam(idx + offset)
+            if (cfg.setSymbol) {
+                localValSymbolTable.Set(param, value)
             }
-            var idx: Int64 = 0
-            let params = body.paramLists[0].params
-            let offset: Int64 = if (params.size < fn.GetNumOfParams()) { 1 } else { 0 }
-            for (param in params) {
-                if (idx + offset < fn.GetNumOfParams()) {
-                    localValSymbolTable.Set(param, fn.GetParam(idx + offset))
-                }
+            if (!cfg.createDebug) {
                 idx++
+                continue
             }
+            let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), value,
+                param.identifier.GetRawText(), entry)
+            debugInfo.SetDebugLocation(TranslateLocationWithoutScope(builder.context, param.begin, param.end))
+            debugInfo.SetDebugLocationInfoForWarning(GetDeclLoc(builder.context, param))
+            if (cfg.hasInitial) {
+                debugInfo.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+            }
+            idx++
         }
+    }
+
+    private func NeedCreateDebugForFirstParam(fn: Function): Bool {
+        if (fn.TestAttr(Attribute.STATIC)) {
+            return false
+        }
+        let parentDef = fn.GetParentCustomTypeDef() ?? return false
+        if (let Some(extendDef) <- (parentDef as ExtendDef)) {
+            return extendDef.GetExtendedType().getOrThrow().IsNominal()
+        }
+        return true
     }
 
     private func BindLambdaParams(funcBody: AstFuncBody, lambda: Lambda, funcTy: FuncType): Unit {
