@@ -600,6 +600,24 @@ public class DIBuilder {
         return fwdDecl
     }
 
+    private func CreateCPointerType(ptrTy: CPointerType): LLVMMetadataRef {
+        let name = GenerateTypeName(ptrTy)
+        let diFile = defaultFile
+        let uniqueName = ptrTy.ToString()
+        let sizeInBits = GetSizeInBits(CreateRefType())
+        var basicType = createBasicType("Int8", sizeInBits, DW_ATE_unsigned)
+        if (!ptrTy.GetTypeArgs().isEmpty() && !ptrTy.GetTypeArgs()[0].IsCPointer()) {
+            basicType = GetOrCreateType(ptrTy.GetTypeArgs()[0])
+        }
+        var fwdDecl = createStructType(compileUnit, name, diFile, 0u32, sizeInBits, 0u32, FlagZero,
+            LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), uniqueName)
+        let elemType = CreatePointerType(basicType, sizeInBits: sizeInBits)
+        let eleType = createMemberType(fwdDecl, "ptr", diFile, 0u32, sizeInBits, 8u32, 0u64,
+            FlagZero, elemType) // 8 is default align size.
+        fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(ArrayList<LLVMMetadataRef>([eleType])))
+        return fwdDecl
+    }
+
     private func GenerateTypeName(ty: Type): String {
         if (ty.IsPrimitive()) {
             return ty.ToString()
