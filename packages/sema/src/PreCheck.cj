@@ -699,7 +699,7 @@ private func CheckAssumption(typeManager: TypeManager, ctx: ASTContext, diag: Ba
             ExposeGenericUpperBounds(ctx, generic)
             return
         }
-        let _ = CheckGenericConstraints(generic)
+        CheckGenericConstraints(ctx, typeManager, diag, generic)
         if (!CheckUpperBoundsLegality(typeManager, generic)) {
             let declTy = decl.GetTy().getOrThrow()
             let builder = Diagnose(diag, decl,

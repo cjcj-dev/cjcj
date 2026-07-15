@@ -291,41 +291,40 @@ private func emitIncompleteInstantiation(diag: Option<BasicDiagnosticEngine>, no
     }
 }
 
-public func CheckUpperBound(genericConstraint: GenericConstraint): Bool {
+public func CheckUpperBound(ctx: ASTContext, typeManager: TypeManager, diag: BasicDiagnosticEngine,
+    genericConstraint: GenericConstraint): Unit {
+    let _ = ctx
     if (let Some(refType) <- genericConstraint.refType) {
-        if (!Ty.IsTyCorrect(refType.GetTy())) {
-            return false
-        }
-    } else {
-        return false
+        let _ = TypeCheckTypeCheckReferenceTypeLegality(diag, typeManager, refType)
     }
     for (upperBound in genericConstraint.upperBounds) {
-        if (!Ty.IsTyCorrect(upperBound.GetTy())) {
-            return false
-        }
+        let _ = TypeCheckTypeCheckReferenceTypeLegality(diag, typeManager, upperBound)
     }
-    return true
 }
 
-public func CheckGenericConstraints(generic: Generic): Bool {
+public func CheckGenericConstraints(ctx: ASTContext, typeManager: TypeManager, diag: BasicDiagnosticEngine,
+    generic: Generic): Unit {
+    if (generic.genericConstraints.isEmpty()) {
+        return
+    }
     for (genericConstraint in generic.genericConstraints) {
-        if (!CheckUpperBound(genericConstraint)) {
-            return false
+        CheckUpperBound(ctx, typeManager, diag, genericConstraint)
+        var found = false
+        if (let None <- genericConstraint.refType) {
+            continue
         }
-        if (let Some(refType) <- genericConstraint.refType) {
-            var found = false
-            for (typeParameter in generic.typeParameters) {
-                if (refType.ref.identifier.Val() == typeParameter.identifier.Val()) {
-                    found = true
-                    break
-                }
+        let refType = genericConstraint.refType.getOrThrow()
+        for (typeParameter in generic.typeParameters) {
+            if (refType.ref.identifier.Val() == typeParameter.identifier.Val()) {
+                found = true
+                break
             }
-            if (!found) {
-                return false
-            }
+        }
+        if (!found) {
+            Diagnose(diag, refType, BasicDiagKind.sema_generics_type_variable_not_defined,
+                args: [BasicDiagArgument(refType.ref.identifier.Val())]).Emit()
         }
     }
-    return true
 }
 
 public func CheckInstTyWithUpperbound(typeManager: TypeManager, typeMapping: TypeSubst): Bool {
