@@ -30,6 +30,11 @@ public func GenerateBooleanOperation(irBuilder: IRBuilder2, chirExpr: CHIRBinary
             }
         }
     }
+    if (let Some(leftTy) <- leftOperand.GetType()) {
+        if (leftTy.IsFloat() && kind == ExprKind.NOTEQUAL) {
+            return irBuilder.CreateFCmpUNE(leftValue.GetRawValue(), rightRawValue, name: "fcmpune")
+        }
+    }
     return irBuilder.CreateBinaryTyped(kind, leftValue.GetRawValue(), rightRawValue, leftOperand.GetType(),
         chirExpr.expr.GetResultType(), name: ExprKindName(chirExpr.GetBinaryExprKind()))
 }

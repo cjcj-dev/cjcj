@@ -1258,6 +1258,17 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
+    public func CreateFCmpUNE(left: LLVMValueRef, right: LLVMValueRef, name!: String = ""): LLVMValueRef {
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            result = unsafe {
+                LLVMBuildFCmp(builder.raw, LLVMRealPredicateValue(LLVMRealPredicate.UNE), left, right,
+                    nameCString.value)
+            }
+        }
+        return result
+    }
+
     public func CreateRetVoid(): LLVMValueRef {
         return unsafe { LLVMBuildRetVoid(builder.raw) }
     }
