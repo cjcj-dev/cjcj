@@ -1111,8 +1111,9 @@ extend ParserImpl {
         let body = FuncBody()
         body.begin = Peek().Begin()
         try (cs = ChainScope(this, body)) {
-            if (let Some(generic) <- ParseOptionalGeneric()) {
-                body.generic = generic
+            // C++: Parse/ParseDecl.cpp:2304-2307 ParserImpl::ParseFuncBody.
+            if (!ScopeKindEquals(scopeKind, ScopeKind.MAIN_BODY) && Skip(TokenKind.LT)) {
+                body.generic = ParseGeneric()
             }
             ParseFuncParameters(scopeKind, body)
             let paramsEnd = lastToken.End()
