@@ -37,6 +37,22 @@ import cjcj::utils.VARRAY_NAME
 private let INOUT_TEMP_VALUE: String = "temporary value"
 private let INOUT_IMMUTABLE: String = "is a immutable variable"
 
+// C++ src/Sema/TypeCheckExpr/IfExpr.cpp:99-114.
+private func CollectVariables(ctx: ASTContext, node: Node): ArrayList<Node> {
+    let varPatterns = ArrayList<Node>()
+    let _ = Walker(node, visitPre: { current: Node =>
+        let isVarPattern = current.astKind == ASTKind.VAR_PATTERN ||
+            (current.astKind == ASTKind.VAR_OR_ENUM_PATTERN &&
+                !ctx.IsEnumConstructor((current as VarOrEnumPattern).getOrThrow().identifier.Val()))
+        if (isVarPattern) {
+            varPatterns.add(current)
+            return VisitAction.SKIP_CHILDREN
+        }
+        return VisitAction.WALK_CHILDREN
+    }).Walk()
+    return varPatterns
+}
+
 // C++ src/Sema/TypeCheckExpr.cpp:22-30.
 private func IsLocalDeclOutOfFuncBody(decl: Decl, curFuncBody: FuncBody): Bool {
     if (let Some(outerDecl) <- decl.outerDecl) {
@@ -5522,74 +5538,6 @@ extend TypeChecker {
         }
     }
 
-    private func PatternHasConditionBinding(ctx: ASTContext, pattern: Pattern): Bool {
-        if (let Some(_) <- (pattern as VarPattern)) {
-            return true
-        }
-        if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
-            if (let Some(inner) <- varOrEnum.pattern) {
-                return PatternHasConditionBinding(ctx, inner)
-            }
-            return !ctx.IsEnumConstructor(varOrEnum.identifier.Val())
-        }
-        if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
-            for (subPattern in tuplePattern.patterns) {
-                if (PatternHasConditionBinding(ctx, subPattern)) {
-                    return true
-                }
-            }
-            return false
-        }
-        if (let Some(enumPattern) <- (pattern as EnumPattern)) {
-            for (subPattern2 in enumPattern.patterns) {
-                if (PatternHasConditionBinding(ctx, subPattern2)) {
-                    return true
-                }
-            }
-            return false
-        }
-        if (let Some(typePattern) <- (pattern as TypePattern)) {
-            if (let Some(inner2) <- typePattern.pattern) {
-                return PatternHasConditionBinding(ctx, inner2)
-            }
-            return false
-        }
-        if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
-            if (let Some(inner3) <- exceptPattern.pattern) {
-                return PatternHasConditionBinding(ctx, inner3)
-            }
-        }
-        return false
-    }
-
-    private func ConditionHasBinding(ctx: ASTContext, expr: Expr): Bool {
-        if (let Some(letPattern) <- (expr as LetPatternDestructor)) {
-            for (pattern in letPattern.patterns) {
-                if (PatternHasConditionBinding(ctx, pattern)) {
-                    return true
-                }
-            }
-            return false
-        }
-        if (let Some(parenExpr) <- (expr as ParenExpr)) {
-            if (let Some(inner) <- parenExpr.expr) {
-                return ConditionHasBinding(ctx, inner)
-            }
-            return false
-        }
-        if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
-            if (let Some(left) <- binaryExpr.leftExpr) {
-                if (ConditionHasBinding(ctx, left)) {
-                    return true
-                }
-            }
-            if (let Some(right) <- binaryExpr.rightExpr) {
-                return ConditionHasBinding(ctx, right)
-            }
-        }
-        return false
-    }
-
     private func BindCollectedConditionDecls(ctx: ASTContext, patterns: ArrayList<Pattern>,
         boundDecls: ArrayList<Decl>): Unit {
         let collected = ArrayList<Decl>()
@@ -5656,8 +5604,19 @@ extend TypeChecker {
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
             if (binaryExpr.op == TokenKind.AND || binaryExpr.op == TokenKind.OR) {
                 var suppressChildren = suppressIntroducingVariableError
-                if (!suppressChildren && binaryExpr.op == TokenKind.OR && ConditionHasBinding(ctx, binaryExpr)) {
-                    suppressChildren = true
+                if (!suppressChildren && binaryExpr.op == TokenKind.OR) {
+                    let vars = CollectVariables(ctx, binaryExpr)
+                    if (!vars.isEmpty()) {
+                        let builder = DiagnoseRefactor(impl.diag.getOrThrow(),
+                            BasicDiagKindRefactor.sema_var_in_or_condition, vars[0])
+                        var idx: Int64 = 1
+                        while (idx < vars.size) {
+                            AddHint(builder, vars[idx])
+                            idx++
+                        }
+                        builder.Emit()
+                        suppressChildren = true
+                    }
                 }
                 var ok = true
                 if (let Some(left) <- binaryExpr.leftExpr) {
