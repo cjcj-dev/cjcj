@@ -201,6 +201,25 @@ extend ParserImpl {
         return token
     }
 
+    private func SkipExprOperator(): Unit {
+        Peek()
+        if (let Some(combInfo) <- LookupSeenCombinator()) {
+            var skipCount = combInfo.Value().size
+            var skippedToken = Peek()
+            while (skipCount > 0) {
+                Next()
+                skipCount--
+                if (skipCount > 0) {
+                    skippedToken = lastToken
+                }
+            }
+            lastToken = skippedToken
+            lastToken.kind = TokenKind.SENTINEL
+            return
+        }
+        Next()
+    }
+
     // C++: Parse/ParseExpr.cpp:155-205 ParserImpl::MakeOperatorExpr.
     public func MakeOperatorExpr(leftExpr: Expr, operatorToken: Token): Expr {
         if (operatorToken.kind == TokenKind.IS) {
@@ -445,10 +464,8 @@ extend ParserImpl {
         var lhs = left
         while (true) {
             var op = Peek()
-            var combinedOperator = false
             if (let Some(combined) <- LookupSeenCombinator()) {
                 op = combined
-                combinedOperator = true
             }
             let prec = Precedence(op.kind)
             if (prec < minPrec || prec == INVALID_PRECEDENCE) {
@@ -473,11 +490,7 @@ extend ParserImpl {
             if (!CheckMacroExprRules(preOp, op, lhs)) {
                 lhs.isBroken = true
             }
-            if (combinedOperator) {
-                SkipAmbiguousToken()
-            } else {
-                Next()
-            }
+            SkipExprOperator()
             let node = MakeOperatorExpr(lhs, op)
             if (node.astKind == ASTKind.IS_EXPR || node.astKind == ASTKind.AS_EXPR) {
                 if (let Some(expr) <- (node as IsExpr)) {
@@ -511,9 +524,9 @@ extend ParserImpl {
                 }
                 if (prec == nextPrec && (nextOp.kind == TokenKind.COALESCING || nextOp.kind == TokenKind.EXP)) {
                     rhs = ParseExprRhsWithPre(prec, rhs, ek, op)
-                } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
+                } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.hasBroken) {
                     DiagNoneAssociativeOp(op, nextOp)
-                    rhs.isBroken = true
+                    rhs.hasBroken = true
                 }
                 if (!CheckMacroExprRules(op, Token(TokenKind.DOT), rhs)) {
                     rhs.isBroken = true
@@ -573,10 +586,8 @@ extend ParserImpl {
         let prePrec = Precedence(preT.kind)
         while (true) {
             var op = Peek()
-            var combinedOperator = false
             if (let Some(combined) <- LookupSeenCombinator()) {
                 op = combined
-                combinedOperator = true
             }
             let prec = Precedence(op.kind)
             if (prec <= prePrec || prec == INVALID_PRECEDENCE) {
@@ -601,11 +612,7 @@ extend ParserImpl {
             if (!CheckMacroExprRules(preT, op, lhs)) {
                 lhs.isBroken = true
             }
-            if (combinedOperator) {
-                SkipAmbiguousToken()
-            } else {
-                Next()
-            }
+            SkipExprOperator()
             let node = MakeOperatorExpr(lhs, op)
             if (node.astKind == ASTKind.IS_EXPR || node.astKind == ASTKind.AS_EXPR) {
                 if (let Some(expr) <- (node as IsExpr)) {
@@ -639,9 +646,9 @@ extend ParserImpl {
                 }
                 if (prec == nextPrec && (nextOp.kind == TokenKind.COALESCING || nextOp.kind == TokenKind.EXP)) {
                     rhs = ParseExprRhsWithPre(prec, rhs, ek, op)
-                } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.isBroken) {
+                } else if (prec == nextPrec && IsNoneAssociative(nextOp.kind) && !rhs.hasBroken) {
                     DiagNoneAssociativeOp(op, nextOp)
-                    rhs.isBroken = true
+                    rhs.hasBroken = true
                 }
                 if (!CheckMacroExprRules(op, Token(TokenKind.DOT), rhs)) {
                     rhs.isBroken = true
