@@ -12,6 +12,7 @@ import cjcj::utils.NFC as UtilsNFC
 import cjcj::utils.CJC_ABORT
 import cjcj::utils.CJC_ASSERT
 import std.collection.*
+import std.convert.*
 
 public let BYTE_X_FLAG: UInt8 = 0x80u8
 public let BYTE_2_FLAG: UInt8 = 0xc0u8
@@ -1170,15 +1171,6 @@ public class LexerImpl {
         }
     }
 
-    private func TrimmedHex(value: UInt32): String {
-        let raw = ToHexString(value, len: 8)
-        var idx: Int64 = 0
-        while (idx + 1 < raw.size && raw[idx] == b'0') {
-            idx++
-        }
-        return raw[idx..]
-    }
-
     private func IsLegalUnicodeScalar(value: UInt32): Bool {
         return value <= 0xd7ffu32 || (value >= 0xe000u32 && value <= UTF8_4_MAX)
     }
@@ -1255,7 +1247,7 @@ public class LexerImpl {
         if (!IsLegalUnicodeScalar(hexVal) && success) {
             lexDiagnose(
                 diag, DiagKindRefactor.lex_illegal_uni_character_literal,
-                MakeRange(GetPos(escapeStart), GetPos(pNext)), TrimmedHex(hexVal)
+                MakeRange(GetPos(escapeStart), GetPos(pNext)), UInt64(hexVal).toString(radix: 16).toAsciiLower()
             )
         }
     }
