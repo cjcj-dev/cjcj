@@ -184,6 +184,61 @@ private func WarnConflictImport(diag: DiagnosticEngine, name: String, current: B
     builder.Emit()
 }
 
+private func IsSamePosition(pos1: Position, pos2: Position): Bool {
+    return pos1 == pos2 && pos1.fileID == pos2.fileID
+}
+
+private func DiagForDifferentPackageNames(
+    diag: DiagnosticEngine,
+    packageNamePosMap: ArrayList<(String, String, Position, Bool)>
+): Unit {
+    var diagPosition = Position()
+    var diagPackageName = ""
+    for (item in packageNamePosMap) {
+        if (item[3]) {
+            diagPosition = item[2]
+            diagPackageName = item[0]
+            break
+        }
+    }
+    let builder = diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+        DiagKindRefactor.package_multiple_package_declarations, MakeRange(diagPosition, diagPackageName))
+    var counter: UInt8 = 0u8
+    for (item in packageNamePosMap) {
+        if (counter >= 2u8) {
+            break
+        }
+        if (IsSamePosition(diagPosition, item[2])) {
+            continue
+        }
+        if (item[3]) {
+            builder.AddNote(MakeRange(item[2], item[0]),
+                "another different package declaration '" + item[1] + " package " + item[0] + "'")
+        } else {
+            builder.AddNote(MakeRange(item[2], ""),
+                "another different package declaration 'public package " + DEFAULT_PACKAGE_NAME + "'")
+        }
+        counter++
+    }
+    builder.Emit()
+}
+
+private func DiagRootPackageModifier(diag: DiagnosticEngine, packageSpec: PackageSpec): Unit {
+    let packageRange = MakeRange(packageSpec.packageName.Begin(), packageSpec.packageName.Val())
+    let builder = DiagnoseRefactor(diag.AsBasicDiagnosticEngine(),
+        DiagKindRefactor.package_root_package_should_be_public, packageSpec, packageRange)
+    let packageMsg = "package " + packageSpec.packageName.Val()
+    builder.AddNote("default modifier of 'package' is 'public', you can use '" + packageMsg + "' instead")
+    builder.Emit()
+}
+
+private func IsRootPackage(packageSpec: PackageSpec): Bool {
+    if (packageSpec.hasDoubleColon && packageSpec.prefixPaths.size == 1) {
+        return true
+    }
+    return packageSpec.prefixPaths.isEmpty()
+}
+
 public class CompilationCache {
     public var compileArgs: String = ""
     public var lambdaCounter: Int64 = 0
@@ -6064,6 +6119,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "empty package name")
                 return false
             }
+            CheckPackageSpecsIdentical(pkg)
             AddImplicitImports(pkg, opts)
             sourcePackagesForMembers.add(pkg)
             AddSourcePackage(pkg)
@@ -6097,6 +6153,62 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
         SetHasBuildIndex(true)
         return diag.GetErrorCount() == 0
+    }
+
+    private func CheckPackageSpecsIdentical(pkg: Package): Unit {
+        let packageNamePosMap = ArrayList<(String, String, Position, Bool)>()
+        for (file in pkg.files) {
+            if (file.packageSpec.isNone() || file.begin == file.end) {
+                var exists = false
+                for (item in packageNamePosMap) {
+                    if (item[0] == DEFAULT_PACKAGE_NAME && item[1] == "public") {
+                        exists = true
+                        break
+                    }
+                }
+                if (!exists) {
+                    packageNamePosMap.add((DEFAULT_PACKAGE_NAME, "public", file.begin, false))
+                }
+            } else if (let Some(packageSpec) <- file.packageSpec) {
+                if (IsRootPackage(packageSpec) && !packageSpec.TestAttr(Attribute.PUBLIC)) {
+                    DiagRootPackageModifier(diag, packageSpec)
+                }
+                let fullPackageName = packageSpec.GetPackageName()
+                let accessLevel = GetAccessLevelStr(packageSpec)
+                var exists = false
+                for (item in packageNamePosMap) {
+                    if (item[0] == fullPackageName && item[1] == accessLevel) {
+                        exists = true
+                        break
+                    }
+                }
+                if (!exists) {
+                    let position = if (packageSpec.prefixPaths.isEmpty()) {
+                        packageSpec.packageName.Begin()
+                    } else {
+                        packageSpec.prefixPoses[0]
+                    }
+                    packageNamePosMap.add((fullPackageName, accessLevel, position, true))
+                }
+            }
+        }
+        sort(packageNamePosMap, by: { left: (String, String, Position, Bool),
+            right: (String, String, Position, Bool) =>
+            if (left[0] < right[0]) {
+                Ordering.LT
+            } else if (left[0] > right[0]) {
+                Ordering.GT
+            } else if (left[1] < right[1]) {
+                Ordering.LT
+            } else if (left[1] > right[1]) {
+                Ordering.GT
+            } else {
+                Ordering.EQ
+            }
+        }, stable: true)
+        if (packageNamePosMap.size > 1) {
+            DiagForDifferentPackageNames(diag, packageNamePosMap)
+        }
     }
 
     public func ReindexSourcePackagesAfterMacroExpand(pkgs: ArrayList<Package>): Unit {
