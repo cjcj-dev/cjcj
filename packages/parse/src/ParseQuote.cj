@@ -153,19 +153,22 @@ extend ParserImpl {
         ret.begin = token.Begin()
         ret.quotePos = token.Begin()
         skipNL = false
-        if (newlineSkipped || Seeing(TokenKind.NL)) {
-            let lineBreakToken = if (Seeing(TokenKind.NL)) { Peek() } else { lastToken }
-            ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_line_break, lineBreakToken).Emit()
-            ret.isBroken = true
+        if (Skip(TokenKind.NL) || newlineSkipped) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_line_break, lastToken).Emit()
+            ret.hasBroken = true
         }
         SkipBlank(TokenKind.NL)
         if (Skip(TokenKind.LPAREN)) {
             ret.leftParenPos = lastToken.Begin()
             ParseQuoteTokens(ret)
-            ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after quote expression").Begin()
+            if (!Skip(TokenKind.RPAREN)) {
+                DiagExpectedRightDelimiter("(", ret.leftParenPos)
+            }
+            ret.rightParenPos = lastToken.Begin()
         } else {
-            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren, Peek(), ConvertToken(Peek())).Emit()
-            ret.isBroken = true
+            if (!ret.hasBroken) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren, Peek(), ConvertToken(Peek())).Emit()
+            }
         }
         skipNL = true
         ret.end = lastToken.End()
