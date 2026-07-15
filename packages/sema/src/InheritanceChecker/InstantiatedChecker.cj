@@ -334,8 +334,8 @@ private func ApplyCurrentInstantiationMap(checker: StructInheritanceChecker, ins
 }
 
 private func MergeTypeSubstForInstantiation(target: TypeSubst, source: TypeSubst): Unit {
-    for (entry in source.entries) {
-        target.Put(entry.tyVar, entry.ty)
+    for ((tyVar, ty) in source.entries) {
+        target.Put(tyVar.value, ty)
     }
 }
 

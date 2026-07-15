@@ -39,8 +39,8 @@ private func insertTypeManagerCacheKeyPair(pairs: ArrayList<(Int64, Int64)>, pai
 private func typeSubstCacheKey(mapping: TypeSubst): String {
     let builder = StringBuilder()
     let pairs = ArrayList<(Int64, Int64)>()
-    for (entry in mapping.entries) {
-        insertTypeManagerCacheKeyPair(pairs, (entry.tyVar.objectId, entry.ty.objectId))
+    for ((tyVar, ty) in mapping.entries) {
+        insertTypeManagerCacheKeyPair(pairs, (tyVar.value.objectId, ty.objectId))
     }
     for (pair in pairs) {
         builder.append("|")
@@ -784,10 +784,10 @@ public class TypeManager {
 
     private func getSolvedU2I(maps: SubstPack): TypeSubst {
         let out = TypeSubst()
-        for (entry in maps.u2i.entries) {
-            if (let Some(instTv) <- (entry.ty as GenericsTy)) {
+        for ((tyVar, ty) in maps.u2i.entries) {
+            if (let Some(instTv) <- (ty as GenericsTy)) {
                 if (let Some(_) <- maps.inst.Get(instTv)) {
-                    out.Put(entry.tyVar, entry.ty)
+                    out.Put(tyVar.value, ty)
                 }
             }
         }
@@ -819,9 +819,9 @@ public class TypeManager {
         }
         let mapping = GetInstMapping()
         let i2uMap = TypeSubst()
-        for (entry in mapping.u2i.entries) {
-            if (let Some(instTv) <- (entry.ty as GenericsTy)) {
-                i2uMap.Put(instTv, entry.tyVar)
+        for ((tyVar, ty) in mapping.u2i.entries) {
+            if (let Some(instTv) <- (ty as GenericsTy)) {
+                i2uMap.Put(instTv, tyVar.value)
             }
         }
         return GetInstantiatedTy(ty, i2uMap)
@@ -850,28 +850,32 @@ public class TypeManager {
     }
 
     public func PackMapping(maps: SubstPack, m: MultiTypeSubst): Unit {
-        for (entry in m.entries) {
-            if (entry.tyVar.isPlaceholder) {
-                let instTys = entry.tys.Clone()
-                let _ = instTys.Remove(entry.tyVar)
-                maps.inst.PutAll(entry.tyVar, instTys)
-            } else if (!entry.tys.IsEmpty()) {
-                if (let Some(instTv) <- ensureInstTyVar(maps, entry.tyVar)) {
-                    maps.inst.PutAll(instTv, entry.tys)
+        for ((tyVar, tys) in m.entries) {
+            if (tyVar.value.isPlaceholder) {
+                for (ty in tys) {
+                    if (ty != Ptr<Ty>(tyVar.value)) {
+                        maps.inst.Put(tyVar.value, ty.value)
+                    }
+                }
+            } else if (!tys.isEmpty()) {
+                if (let Some(instTv) <- ensureInstTyVar(maps, tyVar.value)) {
+                    for (ty in tys) {
+                        maps.inst.Put(instTv, ty.value)
+                    }
                 }
             }
         }
     }
 
     public func PackMapping(maps: SubstPack, m: TypeSubst): Unit {
-        for (entry in m.entries) {
-            if (entry.tyVar.isPlaceholder) {
-                if (!SameTy(entry.tyVar, entry.ty)) {
-                    maps.inst.Put(entry.tyVar, entry.ty)
+        for ((tyVar, ty) in m.entries) {
+            if (tyVar.value.isPlaceholder) {
+                if (!SameTy(tyVar.value, ty)) {
+                    maps.inst.Put(tyVar.value, ty)
                 }
             } else {
-                if (let Some(instTv) <- ensureInstTyVar(maps, entry.tyVar)) {
-                    maps.inst.Put(instTv, entry.ty)
+                if (let Some(instTv) <- ensureInstTyVar(maps, tyVar.value)) {
+                    maps.inst.Put(instTv, ty)
                 }
             }
         }
@@ -891,15 +895,17 @@ public class TypeManager {
 
     public func ZipSubstPack(mapping: SubstPack): MultiTypeSubst {
         let out = MultiTypeSubst()
-        for (entry in mapping.u2i.entries) {
-            if (let Some(instVar) <- (entry.ty as GenericsTy)) {
+        for ((tyVar, ty) in mapping.u2i.entries) {
+            if (let Some(instVar) <- (ty as GenericsTy)) {
                 if (let Some(instSet) <- mapping.inst.Get(instVar)) {
-                    out.PutAll(entry.tyVar, instSet)
+                    for (instTy in instSet) {
+                        out.Put(tyVar.value, instTy.value)
+                    }
                 } else {
-                    out.Put(entry.tyVar, entry.ty)
+                    out.Put(tyVar.value, ty)
                 }
             } else {
-                out.Put(entry.tyVar, entry.ty)
+                out.Put(tyVar.value, ty)
             }
         }
         return out
@@ -1128,8 +1134,8 @@ public class TypeManager {
     public func GetSubstituteMapping(nominalTy: Ty, typeMapping: TypeSubst): TypeSubst {
         if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(nominalTy))) {
             let substituteMapping = GenerateTypeMapping(decl, nominalTy.typeArgs)
-            for (entry in substituteMapping.entries) {
-                entry.ty = GetInstantiatedTy(entry.ty, typeMapping)
+            for ((tyVar, ty) in substituteMapping.entries) {
+                substituteMapping.entries[tyVar] = GetInstantiatedTy(ty, typeMapping)
             }
             return substituteMapping
         }
@@ -3489,8 +3495,8 @@ public class TypeManager {
     }
 
     private func mergeTypeSubst(target: TypeSubst, source: TypeSubst): Unit {
-        for (entry in source.entries) {
-            target.Put(entry.tyVar, entry.ty)
+        for ((tyVar, ty) in source.entries) {
+            target.Put(tyVar.value, ty)
         }
     }
 
@@ -3695,14 +3701,7 @@ public class TypeManager {
     }
 
     private func removeTypeSubst(mapping: TypeSubst, tyVar: GenericsTy): Unit {
-        var idx: Int64 = 0
-        while (idx < mapping.entries.size) {
-            if (Ptr<GenericsTy>(mapping.entries[idx].tyVar) == Ptr<GenericsTy>(tyVar)) {
-                mapping.entries.remove(at: idx)
-                return
-            }
-            idx++
-        }
+        mapping.entries.remove(Ptr<GenericsTy>(tyVar))
     }
 
     private func containsFuncDecl(values: ArrayList<FuncDecl>, decl: FuncDecl): Bool {

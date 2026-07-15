@@ -1452,16 +1452,15 @@ private func ErasePromoteMappingForOmittedBaseTypeArgs(mapping: MultiTypeSubst, 
     }
     let genericTys = GetAllGenericTys(baseDecl.GetTy().getOrThrow())
     let definedTys = TypeCheckCallCollectTypeArgTys(baseTypeArgs)
-    for (entry in mapping.entries) {
-        var idx: Int64 = 0
-        while (idx < entry.tys.values.size) {
-            let mappedTy = entry.tys.values[idx]
-            if (TypeCheckCallGenericListContains(genericTys, mappedTy) && !TyListContains(definedTys, mappedTy)) {
-                entry.tys.values.remove(at: idx)
-            } else {
-                idx++
+    for ((tyVar, tys) in mapping.entries) {
+        let retained = TreeSet<Ptr<Ty>>()
+        for (mappedTy in tys) {
+            if (!TypeCheckCallGenericListContains(genericTys, mappedTy.value) ||
+                TyListContains(definedTys, mappedTy.value)) {
+                retained.add(mappedTy)
             }
         }
+        mapping.entries[tyVar] = retained
     }
 }
 
@@ -1517,14 +1516,14 @@ func GenerateTypeMappingForBaseExpr(typeManager: TypeManager, baseExpr: Expr,
                     }
                     ErasePromoteMappingForOmittedBaseTypeArgs(promoteMapping, realDecl, memberBase.GetTypeArgs())
                     let genericTysInst = GetAllGenericTys(memberBaseTy)
-                    var idx: Int64 = 0
-                    while (idx < directMapping.u2i.entries.size) {
-                        let entry = directMapping.u2i.entries[idx]
-                        if (!TypeCheckCallGenericListContains(genericTysInst, entry.tyVar)) {
-                            directMapping.u2i.entries.remove(at: idx)
-                        } else {
-                            idx++
+                    let removed = ArrayList<Ptr<GenericsTy>>()
+                    for ((tyVar, _) in directMapping.u2i.entries) {
+                        if (!TypeCheckCallGenericListContains(genericTysInst, tyVar.value)) {
+                            removed.add(tyVar)
                         }
+                    }
+                    for (tyVar in removed) {
+                        directMapping.u2i.entries.remove(tyVar)
                     }
                     typeMapping.Merge(directMapping)
                     typeManager.PackMapping(typeMapping, promoteMapping)
@@ -1894,10 +1893,10 @@ private func AllCallArgsHaveCorrectTy(ce: CallExpr): Bool {
 // Mirrors C++ TypeArgumentInference.cpp:28-37.
 private func GetUnivTyVarsToSolve(maps: SubstPack): TyVars {
     let ret = TyVars()
-    for (entry in maps.u2i.entries) {
-        if (let Some(instTyVar) <- (entry.ty as GenericsTy)) {
+    for ((tyVar, ty) in maps.u2i.entries) {
+        if (let Some(instTyVar) <- (ty as GenericsTy)) {
             if (let None <- maps.inst.Get(instTyVar)) {
-                ret.add(entry.tyVar)
+                ret.add(tyVar.value)
             }
         }
     }
@@ -2077,8 +2076,8 @@ private class TyArgSynState {
 }
 
 private func SubstContainsTyVar(subst: TypeSubst, tyVar: GenericsTy): Bool {
-    for (entry in subst.entries) {
-        if (entry.ty.Contains(tyVar)) {
+    for ((_, ty) in subst.entries) {
+        if (ty.Contains(tyVar)) {
             return true
         }
     }
@@ -2245,8 +2244,8 @@ private func DisableBodyInferForArgs(ctx: ASTContext, ce: CallExpr): Unit {
 
 private func ConstrainByUpperbound(typeManager: TypeManager): Unit {
     let instMapping = typeManager.GetInstMapping()
-    for (entry in instMapping.u2i.entries) {
-        if (let Some(instTv) <- (entry.ty as GenericsTy)) {
+    for ((tyVar, ty) in instMapping.u2i.entries) {
+        if (let Some(instTv) <- (ty as GenericsTy)) {
             var found = false
             for (toSolve in typeManager.GetUnsolvedTyVars()) {
                 if (SameTy(toSolve, instTv)) {
@@ -2257,7 +2256,7 @@ private func ConstrainByUpperbound(typeManager: TypeManager): Unit {
             if (!found) {
                 continue
             }
-            for (upperBound in entry.tyVar.upperBounds) {
+            for (upperBound in tyVar.value.upperBounds) {
                 let bounds = typeManager.constraints.GetOrCreate(instTv)
                 bounds.ubs.Add(typeManager.InstOf(upperBound))
             }
@@ -2864,23 +2863,27 @@ private func CheckAndGetMappingForTypeDecl(typeManager: TypeManager, diag: Optio
             mapping = Promotion(typeManager).GetPromoteTypeMapping(baseTy, targetTy)
         }
     }
-    for (entry in mapping.entries) {
-        for (ty in entry.tys.values) {
-            if (ty.IsGeneric()) {
-                if (let Some(genTy) <- (ty as GenericsTy)) {
-                    mts.Put(genTy, typeManager.ApplySubstPack(entry.tyVar, typeMapping))
+    for ((tyVar, tys) in mapping.entries) {
+        for (ty in tys) {
+            if (ty.value.IsGeneric()) {
+                if (let Some(genTy) <- (ty.value as GenericsTy)) {
+                    mts.Put(genTy, typeManager.ApplySubstPack(tyVar.value, typeMapping))
                 }
             }
         }
     }
     var valid = true
     var diagMessage = ""
-    for (entry in mts.entries) {
-        if (entry.tys.values.size > 1) {
+    for ((tyVar, tys) in mts.entries) {
+        if (tys.size > 1) {
             if (!diagMessage.isEmpty()) {
                 diagMessage += ", "
             }
-            diagMessage += "'" + entry.tyVar.String() + "' to '" + Ty.GetTypesToStr(entry.tys.values, "', '") + "'"
+            let values = ArrayList<Ty>()
+            for (ty in tys) {
+                values.add(ty.value)
+            }
+            diagMessage += "'" + tyVar.value.String() + "' to '" + Ty.GetTypesToStr(values, "', '") + "'"
             valid = false
         }
     }
@@ -3593,12 +3596,12 @@ private func IsGenericCall(ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl):
 }
 
 private func ReplaceIdealTypeInSubstPack(typeManager: TypeManager, maps: SubstPack): Unit {
-    for (entry in maps.inst.entries) {
-        let tys = entry.tys.Clone()
-        entry.tys.Clear()
-        for (ty in tys.values) {
-            entry.tys.Add(typeManager.ReplaceIdealTy(ty))
+    for ((tyVar, tys) in maps.inst.entries) {
+        let replaced = TreeSet<Ptr<Ty>>()
+        for (ty in tys) {
+            replaced.add(Ptr<Ty>(typeManager.ReplaceIdealTy(ty.value)))
         }
+        maps.inst.entries[tyVar] = replaced
     }
 }
 
@@ -3908,14 +3911,7 @@ private func InstantiatePartOfTheGenericParameters(typeManager: TypeManager,
         if (let Some(generic) <- funcBody.generic) {
             for (typeParameter in generic.typeParameters) {
                 if (let Some(genericTy) <- (typeParameter.GetTy().getOrThrow() as GenericsTy)) {
-                    var idx: Int64 = 0
-                    while (idx < outerDeclTypeMapping.u2i.entries.size) {
-                        if (Ptr<GenericsTy>(outerDeclTypeMapping.u2i.entries[idx].tyVar) == Ptr<GenericsTy>(genericTy)) {
-                            outerDeclTypeMapping.u2i.entries.remove(at: idx)
-                            break
-                        }
-                        idx++
-                    }
+                    outerDeclTypeMapping.u2i.entries.remove(Ptr<GenericsTy>(genericTy))
                 }
             }
             if (outerDeclTypeMapping.u2i.IsEmpty()) {
@@ -4435,12 +4431,14 @@ public func SelfhostPortStatus_TypeCheckCall(): Bool {
 
 // C++ src/Sema/TypeCheckCall.cpp:970 ReduceSubstPack.
 public func ReduceSubstPack(maps: SubstPack, typeManager: TypeManager): Unit {
-    for (entry in maps.inst.entries) {
-        let instsFinal = TySet()
-        for (ty in entry.tys.values) {
-            instsFinal.AddAll(typeManager.GetInstantiatedTys(ty, maps.inst))
+    for ((tyVar, tys) in maps.inst.entries) {
+        let instsFinal = TreeSet<Ptr<Ty>>()
+        for (ty in tys) {
+            for (instTy in typeManager.GetInstantiatedTys(ty.value, maps.inst).values) {
+                instsFinal.add(Ptr<Ty>(instTy))
+            }
         }
-        entry.tys = instsFinal
+        maps.inst.entries[tyVar] = instsFinal
     }
 }
 

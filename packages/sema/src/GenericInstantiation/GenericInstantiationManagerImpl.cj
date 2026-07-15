@@ -49,9 +49,9 @@ private func sameSubst(lhs: TypeSubst, rhs: TypeSubst): Bool {
     if (lhs.entries.size != rhs.entries.size) {
         return false
     }
-    for (entry in lhs.entries) {
-        if (let Some(value) <- rhs.Get(entry.tyVar)) {
-            if (!SameTy(entry.ty, value)) {
+    for ((tyVar, ty) in lhs.entries) {
+        if (let Some(value) <- rhs.Get(tyVar.value)) {
+            if (!SameTy(ty, value)) {
                 return false
             }
         } else {
@@ -78,8 +78,8 @@ private func genericInfoKey(decl: Decl, subst: TypeSubst): String {
     let builder = StringBuilder()
     builder.append(decl.objectId.toString())
     let pairs = ArrayList<(Int64, Int64)>()
-    for (entry in subst.entries) {
-        insertGenericInfoKeyPair(pairs, (entry.tyVar.objectId, entry.ty.objectId))
+    for ((tyVar, ty) in subst.entries) {
+        insertGenericInfoKeyPair(pairs, (tyVar.value.objectId, ty.objectId))
     }
     for (pair in pairs) {
         builder.append("|")
@@ -862,8 +862,8 @@ class GenericInstantiationManagerImpl {
                             let tmpMapping = GenerateTypeMappingByTy(implOuter.GetTy(), Some(ty))
                             let rts = GetReversedTypeSubst(tmpMapping)
                             let tg = TyGeneralizer(ci.typeManager, rts)
-                            for (entry in typeMapping.entries) {
-                                entry.ty = tg.Generalize(entry.ty)
+                            for ((tyVar, ty) in typeMapping.entries) {
+                                typeMapping.entries[tyVar] = tg.Generalize(ty)
                             }
                         }
                     }

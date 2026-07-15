@@ -281,9 +281,9 @@ public class TypeCheckerImpl {
             if (extendInstMap.entries.size != instantiateMap.entries.size) {
                 continue
             }
-            for (entry in instantiateMap.entries) {
-                if (!extendInstMap.Contains(entry.tyVar)) {
-                    extendInstMap.Put(entry.tyVar, entry.ty)
+            for ((tyVar, ty) in instantiateMap.entries) {
+                if (!extendInstMap.Contains(tyVar.value)) {
+                    extendInstMap.Put(tyVar.value, ty)
                 }
             }
             for (interfaceType in extendDecl.inheritedTypes) {

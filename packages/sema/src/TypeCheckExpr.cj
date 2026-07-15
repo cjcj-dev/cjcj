@@ -55,8 +55,8 @@ private func GenerateTypeMappingForTypeAliasDeclVisit(typeManager: TypeManager, 
     let target = targetOpt.getOrThrow()
     if (let Some(targetAlias) <- (target as TypeAliasDecl)) {
         let nested = GenerateTypeMappingForTypeAliasDeclVisit(typeManager, targetAlias, visited)
-        for (entry in nested.entries) {
-            mapping.Put(entry.tyVar, entry.ty)
+        for ((tyVar, ty) in nested.entries) {
+            mapping.Put(tyVar.value, ty)
         }
         SubstituteTypeForTypeAliasTypeMapping(typeManager, targetAlias, typeNode.GetTypeArgs(), mapping)
         return mapping
@@ -91,7 +91,7 @@ private func SubstituteTypeForTypeAliasTypeMapping(typeManager: TypeManager, tad
             }
         }
     }
-    for (entry in mapping.entries) {
-        entry.ty = typeManager.GetInstantiatedTy(entry.ty, aliasParamMapping)
+    for ((tyVar, ty) in mapping.entries) {
+        mapping.entries[tyVar] = typeManager.GetInstantiatedTy(ty, aliasParamMapping)
     }
 }

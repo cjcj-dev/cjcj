@@ -367,44 +367,23 @@ public class TyVarBounds {
     }
 }
 
-public class TypeSubstEntry {
-    public var tyVar: GenericsTy
-    public var ty: Ty
-
-    public init(tyVar: GenericsTy, ty: Ty) {
-        this.tyVar = tyVar
-        this.ty = ty
-    }
-}
-
 public class TypeSubst {
-    public let entries: ArrayList<TypeSubstEntry> = ArrayList<TypeSubstEntry>()
+    public let entries: TreeMap<Ptr<GenericsTy>, Ty> = TreeMap<Ptr<GenericsTy>, Ty>()
 
     public init() {}
 
-    public init(entries: Array<TypeSubstEntry>) {
-        for (entry in entries) {
-            Put(entry.tyVar, entry.ty)
+    public init(entries: Array<(GenericsTy, Ty)>) {
+        for ((tyVar, ty) in entries) {
+            Put(tyVar, ty)
         }
     }
 
     public func Put(tyVar: GenericsTy, ty: Ty): Unit {
-        for (entry in entries) {
-            if (Ptr<GenericsTy>(entry.tyVar) == Ptr<GenericsTy>(tyVar)) {
-                entry.ty = ty
-                return
-            }
-        }
-        entries.add(TypeSubstEntry(tyVar, ty))
+        entries[Ptr<GenericsTy>(tyVar)] = ty
     }
 
     public func Get(tyVar: GenericsTy): Option<Ty> {
-        for (entry in entries) {
-            if (Ptr<GenericsTy>(entry.tyVar) == Ptr<GenericsTy>(tyVar)) {
-                return entry.ty
-            }
-        }
-        return None
+        return entries.get(Ptr<GenericsTy>(tyVar))
     }
 
     public func Contains(tyVar: GenericsTy): Bool {
@@ -420,38 +399,25 @@ public class TypeSubst {
 
     public func Clone(): TypeSubst {
         let out = TypeSubst()
-        for (entry in entries) {
-            out.Put(entry.tyVar, entry.ty)
+        for ((tyVar, ty) in entries) {
+            out.Put(tyVar.value, ty)
         }
         return out
     }
 }
 
-public class MultiTypeSubstEntry {
-    public var tyVar: GenericsTy
-    public var tys: TySet
-
-    public init(tyVar: GenericsTy, tys!: TySet = TySet()) {
-        this.tyVar = tyVar
-        this.tys = tys
-    }
-}
-
 public class MultiTypeSubst {
-    public let entries: ArrayList<MultiTypeSubstEntry> = ArrayList<MultiTypeSubstEntry>()
+    public let entries: TreeMap<Ptr<GenericsTy>, TreeSet<Ptr<Ty>>> =
+        TreeMap<Ptr<GenericsTy>, TreeSet<Ptr<Ty>>>()
 
     public init() {}
 
     public func Put(tyVar: GenericsTy, ty: Ty): Unit {
-        for (entry in entries) {
-            if (Ptr<GenericsTy>(entry.tyVar) == Ptr<GenericsTy>(tyVar)) {
-                entry.tys.Add(ty)
-                return
-            }
+        let key = Ptr<GenericsTy>(tyVar)
+        if (!entries.contains(key)) {
+            entries[key] = TreeSet<Ptr<Ty>>()
         }
-        let set = TySet()
-        set.Add(ty)
-        entries.add(MultiTypeSubstEntry(tyVar, tys: set))
+        entries.get(key).getOrThrow().add(Ptr<Ty>(ty))
     }
 
     public func PutAll(tyVar: GenericsTy, tys: TySet): Unit {
@@ -460,19 +426,16 @@ public class MultiTypeSubst {
         }
     }
 
-    public func Get(tyVar: GenericsTy): Option<TySet> {
-        for (entry in entries) {
-            if (Ptr<GenericsTy>(entry.tyVar) == Ptr<GenericsTy>(tyVar)) {
-                return entry.tys
-            }
-        }
-        return None
+    public func Get(tyVar: GenericsTy): Option<TreeSet<Ptr<Ty>>> {
+        return entries.get(Ptr<GenericsTy>(tyVar))
     }
 
     public func Clone(): MultiTypeSubst {
         let out = MultiTypeSubst()
-        for (entry in entries) {
-            out.PutAll(entry.tyVar, entry.tys)
+        for ((tyVar, tys) in entries) {
+            for (ty in tys) {
+                out.Put(tyVar.value, ty.value)
+            }
         }
         return out
     }
@@ -494,11 +457,13 @@ public class SubstPack {
     }
 
     public func Merge(other: SubstPack): Unit {
-        for (entry in other.u2i.entries) {
-            u2i.Put(entry.tyVar, entry.ty)
+        for ((tyVar, ty) in other.u2i.entries) {
+            u2i.Put(tyVar.value, ty)
         }
-        for (entry in other.inst.entries) {
-            inst.PutAll(entry.tyVar, entry.tys)
+        for ((tyVar, tys) in other.inst.entries) {
+            for (ty in tys) {
+                inst.Put(tyVar.value, ty.value)
+            }
         }
     }
 }
@@ -741,16 +706,20 @@ public func ToStringC(c: Constraint): String {
 
 public func ToStringS(m: TypeSubst): String {
     let parts = ArrayList<String>()
-    for (entry in m.entries) {
-        parts.add("${entry.tyVar.String()} |-> ${entry.ty.String()}")
+    for ((tyVar, ty) in m.entries) {
+        parts.add("${tyVar.value.String()} |-> ${ty.String()}")
     }
     return "[" + JoinStrings(parts, ", ") + "]"
 }
 
 public func ToStringMS(m: MultiTypeSubst): String {
     let parts = ArrayList<String>()
-    for (entry in m.entries) {
-        parts.add("${entry.tyVar.String()} |-> ${entry.tys.ToString()}")
+    for ((tyVar, tys) in m.entries) {
+        let values = ArrayList<String>()
+        for (ty in tys) {
+            values.add(ty.value.String())
+        }
+        parts.add("${tyVar.value.String()} |-> {${JoinStrings(values, ", ")}}")
     }
     return "[" + JoinStrings(parts, ", ") + "]"
 }

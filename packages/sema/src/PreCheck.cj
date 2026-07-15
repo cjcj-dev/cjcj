@@ -567,9 +567,9 @@ private func AddUpperBoundOnTypeParameters(typeManager: TypeManager, ctx: ASTCon
                 GetAllAssumptions(aliasedTypeGeneric.assumptionCollection, allAssumptionMap)
                 if (let Some(constraintTys) <- revTypeMapping.Get(genericTy)) {
                     let constraints = UpperBounds()
-                    for (constraintTy in constraintTys.values) {
+                    for (constraintTy in constraintTys) {
                         if (let Some(upperKeys) <-
-                            allAssumptionMap.get(Ptr<GenericsTy>((constraintTy as GenericsTy).getOrThrow()))) {
+                            allAssumptionMap.get(Ptr<GenericsTy>((constraintTy.value as GenericsTy).getOrThrow()))) {
                             for (upperKey in upperKeys) {
                                 constraints.Add(upperKey.value)
                             }
@@ -580,8 +580,8 @@ private func AddUpperBoundOnTypeParameters(typeManager: TypeManager, ctx: ASTCon
                         let instTy = typeManager.GetInstantiatedTy(constraint, typeArgAppliedMap)
                         if (Ty.IsTyCorrect(instTy)) {
                             upperBoundsForParam.add(Ptr<Ty>(instTy))
-                            for (constraintTy in constraintTys.values) {
-                                let constraintKey = Ptr<Ty>(constraintTy)
+                            for (constraintTy in constraintTys) {
+                                let constraintKey = constraintTy
                                 let constraintUpperKey = Ptr<Ty>(constraint)
                                 if (!ctx.gcBlames.contains(constraintKey)) {
                                     ctx.gcBlames[constraintKey] = HashMap<Ptr<Ty>, HashSet<Node>>()
@@ -823,8 +823,8 @@ private func preCheckGetSubstituteMap(typeManager: TypeManager, decl1: FuncDecl,
     if (let Some(outer1) <- decl1.outerDecl) {
         if (let Some(outer2) <- decl2.outerDecl) {
             let parentMap = typeManager.GenerateGenericMappingFromGeneric(outer1, outer2)
-            for (entry in parentMap.entries) {
-                substituteMap.Put(entry.tyVar, entry.ty)
+            for ((tyVar, ty) in parentMap.entries) {
+                substituteMap.Put(tyVar.value, ty)
             }
         }
     }

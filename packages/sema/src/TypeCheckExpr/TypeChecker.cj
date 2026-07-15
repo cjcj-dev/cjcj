@@ -6040,8 +6040,8 @@ extend TypeChecker {
                 }
             }
         }
-        for (entry in typeMapping.entries) {
-            entry.ty = impl.typeManager.SubstituteTypeAliasInTy(entry.ty, needSubstituteGeneric: true,
+        for ((tyVar, ty) in typeMapping.entries) {
+            typeMapping.entries[tyVar] = impl.typeManager.SubstituteTypeAliasInTy(ty, needSubstituteGeneric: true,
                 typeMapping: aliasParamMapping)
         }
     }
@@ -6099,8 +6099,8 @@ extend TypeChecker {
         let nestedMapping = GenerateTypeMappingForTypeAliasDecl(tad)
         SubstituteTypeForTypeAliasTypeMapping(tad, typeArgs, nestedMapping)
         let directMapping = GenerateTypeMapping(tad, typeArgs)
-        for (entry in directMapping.entries) {
-            nestedMapping.Put(entry.tyVar, entry.ty)
+        for ((tyVar, ty) in directMapping.entries) {
+            nestedMapping.Put(tyVar.value, ty)
         }
         return nestedMapping
     }

@@ -28,8 +28,8 @@ private func genericListContainsTy(values: ArrayList<GenericsTy>, ty: Ty): Bool 
 }
 
 private func mergeTypeSubst(target: TypeSubst, source: TypeSubst): Unit {
-    for (entry in source.entries) {
-        target.Put(entry.tyVar, entry.ty)
+    for ((tyVar, ty) in source.entries) {
+        target.Put(tyVar.value, ty)
     }
 }
 
@@ -50,16 +50,15 @@ private func filterPromoteMappingForExplicitBaseArgs(mapping: MultiTypeSubst, re
     }
     let genericTys = GetAllGenericTys(realBase.GetTy().getOrThrow())
     let explicitTys = collectTypeArgTys(baseTypeArgs)
-    for (entry in mapping.entries) {
-        var idx: Int64 = 0
-        while (idx < entry.tys.values.size) {
-            let mappedTy = entry.tys.values[idx]
-            if (genericListContainsTy(genericTys, mappedTy) && !typeListContainsTy(explicitTys, mappedTy)) {
-                entry.tys.values.remove(at: idx)
-            } else {
-                idx++
+    for ((tyVar, tys) in mapping.entries) {
+        let retained = TreeSet<Ptr<Ty>>()
+        for (mappedTy in tys) {
+            if (!genericListContainsTy(genericTys, mappedTy.value) ||
+                typeListContainsTy(explicitTys, mappedTy.value)) {
+                retained.add(mappedTy)
             }
         }
+        mapping.entries[tyVar] = retained
     }
 }
 
@@ -328,12 +327,12 @@ public func CheckGenericConstraints(ctx: ASTContext, typeManager: TypeManager, d
 }
 
 public func CheckInstTyWithUpperbound(typeManager: TypeManager, typeMapping: TypeSubst): Bool {
-    for (entry in typeMapping.entries) {
-        let genericTy = entry.tyVar
+    for ((tyVar, ty) in typeMapping.entries) {
+        let genericTy = tyVar.value
         for (upperBound in genericTy.upperBounds) {
             let upperBoundTy = typeManager.GetInstantiatedTy(upperBound, typeMapping)
-            if ((SameTy(entry.ty, upperBoundTy) && entry.ty.IsCType()) ||
-                !typeManager.IsSubtype(entry.ty, upperBoundTy, implicitBoxed: true, allowOptionBox: false)) {
+            if ((SameTy(ty, upperBoundTy) && ty.IsCType()) ||
+                !typeManager.IsSubtype(ty, upperBoundTy, implicitBoxed: true, allowOptionBox: false)) {
                 return false
             }
         }
@@ -468,12 +467,12 @@ extend TypeCheckerImpl {
         if (typeMapping.IsEmpty()) {
             return true
         }
-        for (entry in typeMapping.entries) {
-            let genericTy = entry.tyVar
+        for ((tyVar, ty) in typeMapping.entries) {
+            let genericTy = tyVar.value
             var satisfiesConstraints = true
             for (upperBound in genericTy.upperBounds) {
                 let upperBoundTy = typeManager.GetInstantiatedTy(upperBound, typeMapping)
-                if (!typeManager.IsSubtype(entry.ty, upperBoundTy)) {
+                if (!typeManager.IsSubtype(ty, upperBoundTy)) {
                     satisfiesConstraints = false
                     break
                 }
@@ -495,7 +494,7 @@ extend TypeCheckerImpl {
             }
 
             var isIncompleteInterface = false
-            if (let Some(interfaceTy) <- (entry.ty as InterfaceTy)) {
+            if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
                 if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
                     let interfaceStaticMembers = ArrayList<Decl>()
                     collectStaticMembers(interfaceDecl, interfaceStaticMembers)
@@ -504,9 +503,9 @@ extend TypeCheckerImpl {
                     isIncompleteInterface = true
                 }
             }
-            let isInstByNothing = entry.ty.IsNothing()
+            let isInstByNothing = ty.IsNothing()
             if (isIncompleteInterface || isInstByNothing) {
-                emitIncompleteInstantiation(diag, getInstDiagNode(expr, entry.ty), genericTy, entry.ty, isInstByNothing)
+                emitIncompleteInstantiation(diag, getInstDiagNode(expr, ty), genericTy, ty, isInstByNothing)
                 return false
             }
         }

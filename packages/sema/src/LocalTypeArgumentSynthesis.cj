@@ -115,10 +115,10 @@ private class TypeSubsts {
                 continue
             }
             var allSame = true
-            for (entry in value.entries) {
+            for ((tyVar, ty) in value.entries) {
                 var found = false
-                for (other in subst.entries) {
-                    if (refEq(entry.tyVar, other.tyVar) && refEq(entry.ty, other.ty)) {
+                for ((otherTyVar, otherTy) in subst.entries) {
+                    if (tyVar == otherTyVar && refEq(ty, otherTy)) {
                         found = true
                         break
                     }
@@ -167,8 +167,8 @@ private func ToTySet(values: ArrayList<GenericsTy>): TySet {
 }
 
 private func substContainsTyVar(subst: TypeSubst, tyVar: GenericsTy): Bool {
-    for (entry in subst.entries) {
-        if (entry.ty.Contains(tyVar)) {
+    for ((_, ty) in subst.entries) {
+        if (ty.Contains(tyVar)) {
             return true
         }
     }
@@ -441,17 +441,17 @@ public class LocalTypeArgumentSynthesis {
 
     private func CopyUpperbound(): Unit {
         let instMapping = tyMgr.GetInstMapping()
-        for (entry in instMapping.u2i.entries) {
-            if (let Some(instTyVar) <- (entry.ty as GenericsTy)) {
+        for ((tyVar, ty) in instMapping.u2i.entries) {
+            if (let Some(instTyVar) <- (ty as GenericsTy)) {
                 if (!containsTyVar(argPack.tyVarsToSolve, instTyVar)) {
                     continue
                 }
-                for (upper in entry.tyVar.upperBounds) {
+                for (upper in tyVar.value.upperBounds) {
                     let instUpper = tyMgr.InstOf(upper)
                     if (!containsTy(instTyVar.upperBounds, instUpper)) {
                         instTyVar.upperBounds.add(instUpper)
                     }
-                    let univKey = Ptr<Ty>(entry.tyVar)
+                    let univKey = Ptr<Ty>(tyVar.value)
                     let upperKey = Ptr<Ty>(upper)
                     if (let Some(upperToBlames) <- gcBlames.get(univKey)) {
                         if (let Some(sourceBlames) <- upperToBlames.get(upperKey)) {
@@ -1140,8 +1140,8 @@ public class LocalTypeArgumentSynthesis {
     }
 
     private func MergeTypeSubst(target: TypeSubst, source: TypeSubst): Unit {
-        for (entry in source.entries) {
-            target.Put(entry.tyVar, entry.ty)
+        for ((tyVar, ty) in source.entries) {
+            target.Put(tyVar.value, ty)
         }
     }
 
@@ -1245,8 +1245,8 @@ public class LocalTypeArgumentSynthesis {
 
     private func ResetIdealTypesInSubst(m: TypeSubst): TypeSubst {
         let res = TypeSubst()
-        for (entry in m.entries) {
-            res.Put(entry.tyVar, tyMgr.ReplaceIdealTy(entry.ty))
+        for ((tyVar, ty) in m.entries) {
+            res.Put(tyVar.value, tyMgr.ReplaceIdealTy(ty))
         }
         return res
     }

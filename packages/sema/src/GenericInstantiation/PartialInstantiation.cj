@@ -161,9 +161,9 @@ private func generalizeSetTys(typeArgs: ArrayList<Ty>, generalizer: TyGeneralize
 
 public func GetReversedTypeSubst(typeMapping: TypeSubst): ReversedTypeSubst {
     let out = ReversedTypeSubst()
-    for (entry in typeMapping.entries) {
-        if (!out.contains(entry.ty.objectId)) {
-            out.add(entry.ty.objectId, entry.tyVar)
+    for ((tyVar, ty) in typeMapping.entries) {
+        if (!out.contains(ty.objectId)) {
+            out.add(ty.objectId, tyVar.value)
         }
     }
     return out

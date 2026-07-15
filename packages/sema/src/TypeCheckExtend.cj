@@ -550,13 +550,13 @@ public func TypeCheckExtendCheckDupDefImplByDiffTypArgs(
 }
 
 private func TypeCheckExtendMergeTypeSubstNoConflict(target: TypeSubst, source: TypeSubst): Bool {
-    for (entry in source.entries) {
-        if (let Some(existing) <- target.Get(entry.tyVar)) {
-            if (!SameTy(existing, entry.ty)) {
+    for ((tyVar, ty) in source.entries) {
+        if (let Some(existing) <- target.Get(tyVar.value)) {
+            if (!SameTy(existing, ty)) {
                 return false
             }
         } else {
-            target.Put(entry.tyVar, entry.ty)
+            target.Put(tyVar.value, ty)
         }
     }
     return true

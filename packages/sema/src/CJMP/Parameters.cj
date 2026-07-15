@@ -162,9 +162,9 @@ extend MPTypeCheckerImpl {
             return
         }
         let mapping = typeManager.GenerateGenericMappingFromGeneric(commonDecl, specificDecl)
-        for (entry in mapping.entries) {
-            if (!genericTyMap.Contains(entry.tyVar)) {
-                genericTyMap.Put(entry.tyVar, entry.ty)
+        for ((tyVar, ty) in mapping.entries) {
+            if (!genericTyMap.Contains(tyVar.value)) {
+                genericTyMap.Put(tyVar.value, ty)
             }
         }
     }
