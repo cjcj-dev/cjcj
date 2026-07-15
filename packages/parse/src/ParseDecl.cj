@@ -323,7 +323,14 @@ extend ParserImpl {
     }
 
     public func SeeingDecl(): Bool {
-        return SeeingDeclInScope(ScopeKind.UNKNOWN_SCOPE)
+        if (SeeingIfAvailable()) {
+            return false
+        }
+        return (SeeingModifier() && !Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) ||
+            SeeingAny([TokenKind.FUNC, TokenKind.MACRO, TokenKind.LET, TokenKind.VAR,
+            TokenKind.ENUM, TokenKind.TYPE, TokenKind.STRUCT, TokenKind.CLASS,
+            TokenKind.INTERFACE, TokenKind.MAIN, TokenKind.EXTEND]) ||
+            (SeeingBuiltinAnnotation() && !SeeingAnnotationLambdaExpr())
     }
 
     public func SeeingDeclInScope(scopeKind: ScopeKind): Bool {
