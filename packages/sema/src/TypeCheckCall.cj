@@ -2618,27 +2618,96 @@ private func DiagnoseForCallInference(diag: Option<BasicDiagnosticEngine>, ce: C
     }
 }
 
-private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr, typeMapping: SubstPack): Unit {
-    let generic = match (GetCurrentGeneric(fd, ce)) {
-        case Some(value) => value
+private func FillEnumTypeArgumentsTy(typeManager: TypeManager, ctorDecl: Decl, typeMapping: SubstPack,
+    ma: MemberAccess): Unit {
+    let enumDecl = match (ctorDecl.outerDecl) {
+        case Some(outerDecl) => match (outerDecl as EnumDecl) {
+            case Some(value) => value
+            case None => return
+        }
         case None => return
     }
-    if (let Some(base) <- ce.baseFunc) {
-        if (let Some(ref) <- (base as NameReferenceExpr)) {
-            if (ref.GetTypeArgs().isEmpty()) {
+    let generic = enumDecl.generic ?? return
+    if (let Some(baseExpr) <- ma.baseExpr) {
+        if (let Some(ref) <- (baseExpr as NameReferenceExpr)) {
+            if (ref.typeArguments.isEmpty()) {
                 ref.instTys.clear()
             }
             if (ref.instTys.isEmpty()) {
                 for (typeParam in generic.typeParameters) {
-                    if (let Some(paramTy) <- typeParam.GetTy()) {
-                        if (let Some(genericTy) <- (paramTy as GenericsTy)) {
-                            ref.instTys.add(typeManager.ApplySubstPack(genericTy, typeMapping))
-                        }
-                    }
+                    let genericTy = (typeParam.GetTy().getOrThrow() as GenericsTy).getOrThrow()
+                    ref.instTys.add(typeManager.ApplySubstPack(genericTy, typeMapping))
+                }
+            }
+        }
+        baseExpr.SetTy(typeManager.ApplySubstPack(enumDecl.GetTy().getOrThrow(), typeMapping))
+        let enumCallNoTyArgs = ma.typeArguments.isEmpty() && baseExpr.GetTypeArgs().isEmpty()
+        if (enumCallNoTyArgs) {
+            ma.SetTy(typeManager.ApplySubstPack(ma.GetTy().getOrThrow(), typeMapping))
+        }
+    }
+}
+
+private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr, typeMapping: SubstPack): Unit {
+    let generic = GetCurrentGeneric(fd, ce)
+    if (let Some(base) <- ce.baseFunc) {
+        if ((let Some(ref) <- (base as NameReferenceExpr)) && (let Some(genericDecl) <- generic)) {
+            if (ref.typeArguments.isEmpty()) {
+                ref.instTys.clear()
+            }
+            if (ref.instTys.isEmpty()) {
+                for (typeParam in genericDecl.typeParameters) {
+                    let genericTy = (typeParam.GetTy().getOrThrow() as GenericsTy).getOrThrow()
+                    ref.instTys.add(typeManager.ApplySubstPack(genericTy, typeMapping))
                 }
             }
         }
     }
+
+    let memberAccess = match (ce.baseFunc) {
+        case Some(base) => match (base as MemberAccess) {
+            case Some(value) => value
+            case None => return
+        }
+        case None => return
+    }
+    let outerDecl = fd.outerDecl ?? return
+    if (fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+        FillEnumTypeArgumentsTy(typeManager, fd, typeMapping, memberAccess)
+        return
+    }
+    if (let Some(baseExpr) <- memberAccess.baseExpr) {
+        if (let Some(innerMemberAccess) <- (baseExpr as MemberAccess)) {
+            if (let Some(innerTarget) <- innerMemberAccess.target) {
+                if (innerTarget.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                    FillEnumTypeArgumentsTy(typeManager, innerTarget, typeMapping, innerMemberAccess)
+                }
+            }
+        }
+    }
+
+    let baseExpr = memberAccess.baseExpr ?? return
+    let baseDecl = GetRealTarget(baseExpr.GetTarget()) ?? return
+    let ref = (baseExpr as NameReferenceExpr) ?? return
+    let baseGeneric = baseDecl.GetGeneric() ?? return
+    let typeAccessOmitTypeArgs =
+        (fd.TestAttr(Attribute.STATIC) || baseDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) && ref.instTys.isEmpty()
+    if (!typeAccessOmitTypeArgs) {
+        return
+    }
+    if (baseDecl != outerDecl) {
+        var mapping = TypeSubst()
+        let outerDeclTy = typeManager.GetInstantiatedTy(outerDecl.GetTy().getOrThrow(), mapping)
+        if ((let Some(baseDeclTy) <- baseDecl.GetTy()) && (let Some(_) <- outerDecl.GetTy())) {
+            mapping = MultiTypeSubstToTypeSubst(Promotion(typeManager).GetDowngradeTypeMapping(baseDeclTy, outerDeclTy))
+        }
+        typeManager.PackMapping(typeMapping, mapping)
+    }
+    for (typeParameter in baseGeneric.typeParameters) {
+        let genericTy = (typeParameter.GetTy().getOrThrow() as GenericsTy).getOrThrow()
+        ref.instTys.add(typeManager.ApplySubstPack(genericTy, typeMapping))
+    }
+    baseExpr.SetTy(typeManager.ApplySubstPack(baseExpr.GetTy().getOrThrow(), typeMapping))
 }
 
 private func CheckCallArgCompatible(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
