@@ -26,6 +26,7 @@ import cjcj::chir.ExtendDef
 import cjcj::chir.NumericType
 import cjcj::chir.MemberVarInfo
 import cjcj::chir.CPointerType
+import cjcj::chir.CStringType
 import cjcj::chir.RawArrayType
 import cjcj::chir.RefType
 import cjcj::chir.StructType
@@ -49,6 +50,7 @@ private let LLVM_DWARF_EMISSION_FULL: Int32 = 1
 private let LLVM_DWARF_EMISSION_LINE_TABLES_ONLY: Int32 = 2
 private let DW_ATE_signed: UInt32 = 5u32
 private let DW_ATE_unsigned: UInt32 = 7u32
+private let DW_ATE_unsigned_char: UInt32 = 8u32
 private let DW_ATE_float: UInt32 = 4u32
 private let DW_ATE_boolean: UInt32 = 2u32
 private let DW_ATE_UTF: UInt32 = 16u32
@@ -578,6 +580,24 @@ public class DIBuilder {
         }
         genericType = replaceArrays(genericType, getOrCreateArray(elements))
         return genericType
+    }
+
+    private func CreateCStringType(cStringType: CStringType): LLVMMetadataRef {
+        let name = GenerateTypeName(cStringType)
+        let uniqueName = cStringType.ToString()
+        let diFile = defaultFile
+        let refSizeInBits = GetSizeInBits(CreateRefType())
+        // Generates the CString struct.
+        var fwdDecl = createStructType(compileUnit, name, diFile, 0u32, refSizeInBits, 0u32, FlagZero,
+            LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), uniqueName)
+        // Generates a member 'chars' of the 'Int8 *' type in CString struct.
+        let elemSizeInBits = GetTypeSize(unsafe { LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw) })
+        let basicType = createBasicType("char", elemSizeInBits, DW_ATE_unsigned_char)
+        let elemType = CreatePointerType(basicType, sizeInBits: elemSizeInBits)
+        let eleType = createMemberType(fwdDecl, "chars", diFile, 0u32, elemSizeInBits, 8u32, 0u64,
+            FlagZero, elemType) // 8 is default align size.
+        fwdDecl = replaceArrays(fwdDecl, getOrCreateArray(ArrayList<LLVMMetadataRef>([eleType])))
+        return fwdDecl
     }
 
     private func GenerateTypeName(ty: Type): String {
