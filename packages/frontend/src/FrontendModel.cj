@@ -6124,9 +6124,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             sourcePackagesForMembers.add(pkg)
             AddSourcePackage(pkg)
         }
-        if (!ResolveImportedPackages(pkgs)) {
-            return false
-        }
+        ResolveImportedPackages(pkgs)
         for (pkg in pkgs) {
             dependencyGraph.getOrThrow().AddDependenciesForPackage(pkg)
         }
