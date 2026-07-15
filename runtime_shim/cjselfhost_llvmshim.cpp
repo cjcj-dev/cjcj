@@ -509,6 +509,15 @@ extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderReplaceArrays(
     return wrap(composite);
 }
 
+extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderCreateArrayType(LLVMDIBuilderRef Builder,
+    uint64_t SizeInBits, uint32_t AlignInBits, LLVMMetadataRef Ty, LLVMMetadataRef Subscripts)
+{
+    auto *builder = unwrap(Builder);
+    auto *subscripts = Subscripts == nullptr ? nullptr : unwrap<MDTuple>(Subscripts);
+    return wrap(builder->createArrayType(
+        SizeInBits, AlignInBits, unwrap<DIType>(Ty), DINodeArray(subscripts)));
+}
+
 extern "C" LLVMMetadataRef LLVMSelfhostDIBuilderCreateEnumerationType(LLVMDIBuilderRef Builder,
     LLVMMetadataRef Scope, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned LineNo,
     uint64_t SizeInBits, uint32_t AlignInBits, LLVMMetadataRef *Elements, size_t Count,

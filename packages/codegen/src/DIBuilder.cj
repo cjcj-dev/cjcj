@@ -551,6 +551,19 @@ public class DIBuilder {
             LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(), UNIT_TYPE_STR)
     }
 
+    private func CreateVArrayType(vArrTy: VArrayType): LLVMMetadataRef {
+        let size = vArrTy.GetSize()
+        let elementType = GetOrCreateType(vArrTy.GetElementType())
+        let name = GenerateTypeName(vArrTy)
+        let llvmType = CGType.GetOrCreate(cgMod, vArrTy).GetLLVMType()
+        let typeSize = GetTypeSize(llvmType)
+        // Align in 64-bit.
+        let range = getOrCreateSubrange(0, Int64(size))
+        let diType = createArrayType(typeSize, 0u32, elementType,
+            getOrCreateArray(ArrayList<LLVMMetadataRef>([range])))
+        return createTypedef(diType, name, defaultFile, 0u32, compileUnit)
+    }
+
     private func GenerateTypeName(ty: Type): String {
         if (ty.IsPrimitive()) {
             return ty.ToString()
@@ -1263,6 +1276,15 @@ public class DIBuilder {
             result = unsafe { LLVMDIBuilderGetOrCreateArray(raw, elementsPtr.value, UIntNative(elements.size)) }
         }
         return result
+    }
+
+    private func getOrCreateSubrange(lowerBound: Int64, count: Int64): LLVMMetadataRef {
+        return unsafe { LLVMDIBuilderGetOrCreateSubrange(raw, lowerBound, count) }
+    }
+
+    private func createArrayType(sizeInBits: UInt64, alignInBits: UInt32, ty: LLVMMetadataRef,
+        subscripts: LLVMMetadataRef): LLVMMetadataRef {
+        return unsafe { LLVMSelfhostDIBuilderCreateArrayType(raw, sizeInBits, alignInBits, ty, subscripts) }
     }
 
     private func replaceArrays(composite: LLVMMetadataRef, elements: LLVMMetadataRef): LLVMMetadataRef {

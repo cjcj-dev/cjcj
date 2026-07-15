@@ -570,6 +570,8 @@ foreign {
         flags: UInt32, derivedFrom: LLVMMetadataRef, elements: CPointer<LLVMMetadataRef>, numElements: UInt32,
         runtimeLang: UInt32, vtableHolder: LLVMMetadataRef, uniqueId: CString,
         uniqueIdLen: UIntNative): LLVMMetadataRef
+    func LLVMDIBuilderGetOrCreateSubrange(builder: LLVMDIBuilderRef, lowerBound: Int64,
+        count: Int64): LLVMMetadataRef
     func LLVMDIBuilderGetOrCreateArray(builder: LLVMDIBuilderRef, data: CPointer<LLVMMetadataRef>,
         numElements: UIntNative): LLVMMetadataRef
     func LLVMDIBuilderCreateInheritance(builder: LLVMDIBuilderRef, ty: LLVMMetadataRef,
@@ -603,6 +605,8 @@ foreign {
         vtableHolder: LLVMMetadataRef, flags: UInt32, spFlags: UInt32): LLVMMetadataRef
     func LLVMSelfhostDIBuilderReplaceArrays(builder: LLVMDIBuilderRef, composite: LLVMMetadataRef,
         elements: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMSelfhostDIBuilderCreateArrayType(builder: LLVMDIBuilderRef, sizeInBits: UInt64,
+        alignInBits: UInt32, ty: LLVMMetadataRef, subscripts: LLVMMetadataRef): LLVMMetadataRef
     func LLVMSelfhostDIBuilderCreateEnumerationType(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef,
         name: CString, nameLen: UIntNative, file: LLVMMetadataRef, lineNo: UInt32, sizeInBits: UInt64,
         alignInBits: UInt32, elements: CPointer<LLVMMetadataRef>, count: UIntNative,
