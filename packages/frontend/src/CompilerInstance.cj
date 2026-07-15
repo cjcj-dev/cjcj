@@ -3,6 +3,7 @@ package cjcj::frontend
 import cjcj::ast.Package as RealASTPackage
 import cjcj::ast.PackageDecl as RealASTPackageDecl
 import cjcj::mangle.BaseMangler as RealBaseMangler
+import cjcj::mangle.CHIRMangler as RealCHIRMangler
 import cjcj::mangle.MangleAstAdapter as RealMangleAstAdapter
 import cjcj::mangle.MangleDecl as RealMangleDecl
 import cjcj::mangle.ManglerContext as RealManglerContext
@@ -171,7 +172,7 @@ public class CompilerInstance {
     public let bufferCache: HashMap<String, SrcCodeCacheInfo> = HashMap<String, SrcCodeCacheInfo>()
     public let tokensEvalInMacro: ArrayList<String> = ArrayList<String>()
     public var currentPkg: Option<Package> = None
-    public let mangler: RealBaseMangler = RealBaseMangler()
+    public var mangler: RealBaseMangler = RealCHIRMangler(false)
     public let mangledName2DeclMap: HashMap<String, Decl> = HashMap<String, Decl>()
     public var releaseCHIRMemory: Bool = true
     public var needToOptString: Bool = false
@@ -474,6 +475,7 @@ public class CompilerInstance {
     }
 
     public func PerformMangling(): Bool {
+        mangler = RealCHIRMangler(invocation.globalOptions.enableCompileTest)
         let adapter = mangler.adapter
         PrepareManglerContexts(mangler, adapter)
         mangler.lambdaCounter = cachedInfo.lambdaCounter
