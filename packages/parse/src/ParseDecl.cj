@@ -1832,7 +1832,6 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:1282-1289
     public func ParseConstraints(decl: Decl): Unit {
         if (let None <- decl.generic) {
-            Skip(TokenKind.WHERE)
             DiagUnexpectedWhere(lastToken)
         } else if (let Some(generic) <- decl.generic) {
             for (constraint in ParseGenericConstraints()) {
@@ -1855,7 +1854,7 @@ extend ParserImpl {
         if (Skip(TokenKind.UPPERBOUND)) {
             ParseInheritedTypes(ret)
         }
-        if (Seeing(TokenKind.WHERE)) {
+        if (Skip(TokenKind.WHERE)) {
             ParseConstraints(ret)
         }
     }
@@ -2134,8 +2133,8 @@ extend ParserImpl {
             if (Skip(TokenKind.UPPERBOUND)) {
                 ParseInheritedTypes(ret)
             }
-            for (constraint in ParseGenericConstraints()) {
-                EnsureDeclGeneric(ret).genericConstraints.add(constraint)
+            if (Skip(TokenKind.WHERE)) {
+                ParseConstraints(ret)
             }
             ParseClassLikeBody(ret, ScopeKind.EXTEND_BODY)
         }
