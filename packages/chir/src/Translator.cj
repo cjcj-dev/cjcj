@@ -1633,7 +1633,7 @@ public class Translator {
         return futureObj
     }
 
-    public func Visit(expr: AstCallExpr): Option<Value> {
+    private func ProcessCallExpr(expr: AstCallExpr): Option<Value> {
         if (let Some(intrinsicResult) <- TranslateIntrinsicCall(expr)) {
             return Some(intrinsicResult)
         }
@@ -1664,6 +1664,82 @@ public class Translator {
         let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
         return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
             instTypeArgs: instTypeArgs), loc: TranslateLocation(expr))
+    }
+
+    private func ProcessMapExpr(originExpr: AstNode, isSubScript: Bool): Unit {
+        if (GetMapExpr(originExpr).isSome()) {
+            let expr = (originExpr as AstExpr) ??
+                throw IllegalStateException("faithful AST2CHIR map expression origin is not an expression")
+            if (TryGetExprValue(expr).isSome()) {
+                return
+            }
+            let isSuper = if (let Some(refExpr) <- (expr as AstRefExpr)) { refExpr.isSuper } else { false }
+            if (!(isSubScript && isSuper)) {
+                let chirNode = TranslateExprArg(expr)
+                SetExprValue(expr, chirNode)
+            }
+        }
+    }
+
+    private func TranslateCompoundAssignmentElementRef(memberAccess: AstMemberAccess): Unit {
+        let loc = TranslateLocation(memberAccess)
+        let baseExpr = RequireExpr(memberAccess.baseExpr, "compound assignment member base")
+        let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
+        let baseLeftValuePath = baseLeftValueInfo.path
+        let baseLeftValue = baseLeftValueInfo.base.getOrThrow()
+        if (baseLeftValuePath.isEmpty()) {
+            SetExprValue(baseExpr, baseLeftValue)
+        } else {
+            let baseCustomType = (baseLeftValue.GetType().getOrThrow().StripAllRefs() as CustomType).getOrThrow()
+            let baseType = baseLeftValue.GetType().getOrThrow()
+            if (baseType.IsReferenceTypeWithRefDims(1) || baseType.IsValueOrGenericTypeWithRefDims(1)) {
+                let memberRef = CreateGetElementRefWithPath(
+                    loc, baseLeftValue, baseLeftValuePath, CurrentBlock(), baseCustomType)
+                SetExprValue(baseExpr, memberRef)
+            } else {
+                let memberType = GetInstMemberTypeByName(baseCustomType, baseLeftValuePath, builder)
+                CJC_ASSERT(baseType.IsValueOrGenericTypeWithRefDims(0))
+                let getMember = builder.CreateFieldByName(
+                    memberType, baseLeftValue, baseLeftValuePath, CurrentBlock())
+                getMember.SetDebugLocation(loc)
+                SetExprValue(baseExpr, RequireResult(getMember))
+            }
+        }
+    }
+
+    public func Visit(expr: AstCallExpr): Option<Value> {
+        if (!expr.TestAttr(AstAttribute.SIDE_EFFECT)) {
+            return ProcessCallExpr(expr)
+        }
+        let resolvedFunction = expr.resolvedFunction.getOrThrow()
+        let baseFunc = RequireExpr(expr.baseFunc, "side-effect call base")
+        if (resolvedFunction.isSetter) {
+            if (let Some(memberAccess) <- (baseFunc as AstMemberAccess)) {
+                let memberBase = RequireExpr(memberAccess.baseExpr, "side-effect setter member base")
+                if (memberBase.mapExpr.isSome()) {
+                    TranslateCompoundAssignmentElementRef(memberAccess)
+                }
+            } else {
+                CJC_ASSERT((baseFunc as AstRefExpr).isSome())
+            }
+        } else if (resolvedFunction.TestAttr(AstAttribute.OPERATOR)) {
+            let memberAccess = (baseFunc as AstMemberAccess).getOrThrow()
+            CJC_ASSERT(RequireExpr(memberAccess.baseExpr, "side-effect operator member base").mapExpr.isSome())
+            TranslateCompoundAssignmentElementRef(memberAccess)
+        } else {
+            CJC_ABORT()
+        }
+        let isSubScript = resolvedFunction.identifier.Val() == "[]"
+        if (isSubScript) {
+            let args = expr.desugarArgs.getOrThrow()
+            CJC_ASSERT(!args.isEmpty())
+            var idx: Int64 = 0
+            while (idx + 1 < args.size) {
+                ProcessMapExpr(RequireFuncArgExpr(args[idx], "subscript side-effect argument"), isSubScript)
+                idx++
+            }
+        }
+        return ProcessCallExpr(expr)
     }
 
     // C++ CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:1260-1272.
