@@ -13,6 +13,7 @@ import cjcj::chir.ExtendDef
 import cjcj::chir.ExprKind
 import cjcj::chir.Expression
 import cjcj::chir.Function
+import cjcj::chir.FuncType
 import cjcj::chir.GenericType
 import cjcj::chir.GetElementRef
 import cjcj::chir.GetFieldOfType
@@ -20,6 +21,7 @@ import cjcj::chir.IntType
 import cjcj::chir.LocalVar
 import cjcj::chir.Parameter
 import cjcj::chir.RawArrayLiteralInit
+import cjcj::chir.ReplaceRawGenericArgType
 import cjcj::chir.RefType
 import cjcj::chir.Tuple
 import cjcj::chir.Type
@@ -35,6 +37,26 @@ import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, HashString64, REF_PACKAGE_NAM
 
 public func GetCodeGenGlobalName(value: Value): String {
     return value.GetIdentifierWithoutPrefix()
+}
+
+public func GetInstAbstractMethodTypes(interfaceTy: ClassType,
+    builder: CHIRBuilder): ArrayList<(Function, FuncType)> {
+    let result = ArrayList<(Function, FuncType)>()
+    let typeArgs = interfaceTy.GetGenericArgs()
+    let paramArgs = interfaceTy.GetClassDef().GetGenericTypeParams()
+    let instMap = HashMap<GenericType, Type>()
+    CJC_ASSERT(typeArgs.size == paramArgs.size)
+    var idx: Int64 = 0
+    while (idx < typeArgs.size) {
+        instMap[paramArgs[idx]] = typeArgs[idx]
+        idx++
+    }
+    for (method in interfaceTy.GetClassDef().GetMethods()) {
+        let instFuncType = (ReplaceRawGenericArgType(method.GetType().getOrThrow(), instMap, builder) as FuncType).
+            getOrThrow()
+        result.add((method, instFuncType))
+    }
+    return result
 }
 
 public func GenNameForBB(name: String, extraInfo!: UInt64 = 0u64): String {

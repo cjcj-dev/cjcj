@@ -7,7 +7,7 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::basic.Position as BasicPosition
 import cjcj::basic.Range as BasicRange
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, CORE_PACKAGE_NAME, FileUtil, STD_LIB_FUTURE}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, CORE_PACKAGE_NAME, FileUtil, OBJECT_NAME, STD_LIB_FUTURE}
 
 public let ANY_TYPE: String = "ANY_TYPE"
 public let NOT_CARE: String = "NOT_CARE"
@@ -15,6 +15,41 @@ private let STD_PACKAGE_PREFIX: String = "std."
 
 public func IsCoreFuture(def: CustomTypeDef): Bool {
     return CheckCustomTypeDefIsExpected(def, CORE_PACKAGE_NAME, STD_LIB_FUTURE)
+}
+
+public func IsCoreObject(def: CustomTypeDef): Bool {
+    return CheckCustomTypeDefIsExpected(def, CORE_PACKAGE_NAME, OBJECT_NAME)
+}
+
+public func IsClosureConversionEnvClass(def: ClassDef): Bool {
+    return def.Get<IsAutoEnvClass, Bool>()
+}
+
+public func IsCapturedClass(def: ClassDef): Bool {
+    return def.Get<IsCapturedClassInCC, Bool>()
+}
+
+public func GetFuncTypeFromAutoEnvBaseDef(autoEnvBaseDef: ClassDef): (String, FuncType) {
+    let methods = autoEnvBaseDef.GetMethods()
+    CJC_ASSERT(methods.size == 1)
+    return (methods[0].GetSrcCodeIdentifier(), methods[0].GetFuncType().getOrThrow())
+}
+
+public func GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(autoEnvBaseType: ClassType): (ArrayList<Type>, Type) {
+    let typeArgs = autoEnvBaseType.GetGenericArgs()
+    if (typeArgs.isEmpty()) {
+        let (_, funcType) = GetFuncTypeFromAutoEnvBaseDef(autoEnvBaseType.GetClassDef())
+        let paramTypes = funcType.GetParamTypes()
+        paramTypes.remove(at: 0)
+        return (paramTypes, funcType.GetReturnType())
+    }
+    let paramTypes = ArrayList<Type>()
+    var idx: Int64 = 0
+    while (idx < typeArgs.size - 1) {
+        paramTypes.add(typeArgs[idx])
+        idx++
+    }
+    return (paramTypes, typeArgs[typeArgs.size - 1])
 }
 
 public func GetBuiltinTypeWithVTable(ty: BuiltinType, builder: CHIRBuilder): BuiltinType {
