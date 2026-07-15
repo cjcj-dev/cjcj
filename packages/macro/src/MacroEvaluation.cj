@@ -11,6 +11,7 @@ import cjcj::parse.Parser as EvalParser
 import cjcj::parse.ScopeKind as EvalParsedScopeKind
 import cjcj::parse.SrcIdentifier as EvalParsedSrcIdentifier
 import cjcj::ast.{VisitAction, Walker}
+import cjcj::utils.FileUtil
 import std.collection.*
 
 private func appendTokens(target: ArrayList<Token>, source: ArrayList<Token>): Unit {
@@ -762,14 +763,22 @@ public class MacroEvaluation {
     }
 
     public func GetMacroDefDynamicFiles(): ArrayList<String> {
-        let out = ArrayList<String>()
+        let macroDynFiles = ArrayList<String>()
         for (packageName in ci.importManager.GetImportedStdMacroPackages()) {
-            out.add("lib" + packageName.replace(".", "_") + LIB_SUFFIX)
+            let basePath = FileUtil.JoinPath(FileUtil.GetDirPath(ci.GetGlobalOptions().executablePath),
+                "../runtime/lib")
+            let libName = "lib" + FileUtil.ConvertPackageNameToLibCangjieBaseFormat(packageName) + LIB_SUFFIX
+            let macroPath = FileUtil.JoinPath(
+                FileUtil.JoinPath(basePath, ci.GetGlobalOptions().GetCangjieLibHostPathName()), libName)
+            macroDynFiles.add(macroPath)
+        }
+        if (ci.GetGlobalOptions().macroLib.isEmpty() && macroDynFiles.isEmpty()) {
+            return macroDynFiles
         }
         for (lib in ci.GetGlobalOptions().macroLib) {
-            out.add(lib)
+            macroDynFiles.add(FileUtil.NormalizePath(lib))
         }
-        return out
+        return macroDynFiles
     }
 
     public func SaveUsedMacros(macCall: MacroCall): Unit {
