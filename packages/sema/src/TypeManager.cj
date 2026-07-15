@@ -2,7 +2,6 @@ package cjcj::sema
 
 import std.collection.*
 import std.env.getVariable
-import std.sort.*
 import cjcj::ast.*
 import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
 import cjcj::modules.PackageRelation as ModulesPackageRelation
@@ -299,6 +298,41 @@ private class TyVarScopeDepthEntry {
     }
 }
 
+private struct TypePointer <: Hashable & Equatable<TypePointer> {
+    private let ptr: Option<Ty>
+
+    public init(ptr: Option<Ty>) {
+        this.ptr = ptr
+    }
+
+    public func Get(): Option<Ty> {
+        return ptr
+    }
+
+    public func HasValue(): Bool {
+        return ptr.isSome()
+    }
+
+    public operator func ==(right: TypePointer): Bool {
+        if (!HasValue() && !right.HasValue()) {
+            return true
+        }
+        if (let Some(leftTy) <- Get()) {
+            if (let Some(rightTy) <- right.Get()) {
+                return leftTy == rightTy
+            }
+        }
+        return false
+    }
+
+    public func hashCode(): Int64 {
+        if (let Some(ty) <- ptr) {
+            return ty.Hash()
+        }
+        return 0
+    }
+}
+
 public class TypeManager {
     private static let theInvalidTy: InvalidTy = InvalidTy()
     private static let theAnyTy: AnyTy = AnyTy()
@@ -345,7 +379,7 @@ public class TypeManager {
         HashMap<Int64, HashMap<Int64, HashMap<Int64, Bool>>>()
     private let declInstantiationStatus: ArrayList<DeclInstantiationStatusEntry> =
         ArrayList<DeclInstantiationStatusEntry>()
-    private let allocatedTyCache: HashMap<String, Ty> = HashMap<String, Ty>()
+    private let allocatedTys: HashMap<TypePointer, Ty> = HashMap<TypePointer, Ty>()
     private var allocatedTyConstructionTraces: Option<HashMap<Int64, String>> = None
     private let allocatedClassLikeTys: ArrayList<Ty> = ArrayList<Ty>()
     private var validateTypeManagerInterning: Bool = false
@@ -608,11 +642,11 @@ public class TypeManager {
     }
 
     private func internAllocatedTy(ty: Ty, classLike!: Bool = false): Ty {
-        let key = typeManagerTyKey(ty)
-        if (let Some(cached) <- allocatedTyCache.get(key)) {
+        let key = TypePointer(Some(ty))
+        if (let Some(cached) <- allocatedTys.get(key)) {
             return cached
         }
-        allocatedTyCache[key] = ty
+        allocatedTys[key] = ty
         if (validateTypeManagerInterning && ty.Hash() % 16 == 0) {
             if (let Some(traces) <- allocatedTyConstructionTraces) {
                 traces[ty.objectId] = ThreadSnapshot.dumpCurrentThread().toString()
@@ -628,7 +662,7 @@ public class TypeManager {
         let tysByHash = HashMap<Int64, ArrayList<Ty>>()
         var sampled: Int64 = 0
         var violations: Int64 = 0
-        for ((_, ty) in allocatedTyCache) {
+        for ((_, ty) in allocatedTys) {
             let hash = ty.Hash()
             if (hash % 16 != 0) {
                 continue
@@ -658,7 +692,7 @@ public class TypeManager {
                 tysByHash[hash] = ArrayList<Ty>([ty])
             }
         }
-        eprintln("TY-INTERN-VALIDATION TOTAL=${allocatedTyCache.size} SAMPLED=${sampled} " +
+        eprintln("TY-INTERN-VALIDATION TOTAL=${allocatedTys.size} SAMPLED=${sampled} " +
             "VIOLATIONS=${violations}")
         return violations == 0
     }
@@ -1425,185 +1459,6 @@ public class TypeManager {
         return false
     }
 
-    private func typeManagerTyKey(ty: Ty): String {
-        if (let Some(genericTy) <- (ty as GenericsTy)) {
-            if (let Some(genericDecl) <- genericTy.decl) {
-                return genericDecl.objectId.toString()
-            }
-            return genericTy.objectId.toString()
-        }
-        if (let Some(classThisTy) <- (ty as ClassThisTy)) {
-            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_CLASS).toString() + ":1:" + classThisTy.name
-            for (typeArg in classThisTy.typeArgs) {
-                out += ":" + typeArg.objectId.toString()
-            }
-            if (let Some(decl) <- classThisTy.declPtr) {
-                out += ":" + decl.objectId.toString()
-            } else {
-                out += ":0"
-            }
-            return out
-        }
-        if (let Some(classTy) <- (ty as ClassTy)) {
-            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_CLASS).toString() + ":0:" + classTy.name
-            for (typeArg in classTy.typeArgs) {
-                out += ":" + typeArg.objectId.toString()
-            }
-            if (let Some(decl) <- classTy.declPtr) {
-                out += ":" + decl.objectId.toString()
-            } else {
-                out += ":0"
-            }
-            return out
-        }
-        if (let Some(refEnumTy) <- (ty as RefEnumTy)) {
-            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_ENUM).toString() + ":1:" + refEnumTy.name
-            for (typeArg in refEnumTy.typeArgs) {
-                out += ":" + typeArg.objectId.toString()
-            }
-            if (let Some(decl) <- refEnumTy.declPtr) {
-                out += ":" + decl.objectId.toString()
-            } else {
-                out += ":0"
-            }
-            return out
-        }
-        if (let Some(enumTy) <- (ty as EnumTy)) {
-            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_ENUM).toString() + ":0:" + enumTy.name
-            for (typeArg in enumTy.typeArgs) {
-                out += ":" + typeArg.objectId.toString()
-            }
-            if (let Some(decl) <- enumTy.declPtr) {
-                out += ":" + decl.objectId.toString()
-            } else {
-                out += ":0"
-            }
-            return out
-        }
-        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
-            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_INTERFACE).toString() + ":" + interfaceTy.name
-            for (typeArg in interfaceTy.typeArgs) {
-                out += ":" + typeArg.objectId.toString()
-            }
-            if (let Some(decl) <- interfaceTy.declPtr) {
-                out += ":" + decl.objectId.toString()
-            } else {
-                out += ":0"
-            }
-            return out
-        }
-        if (let Some(structTy) <- (ty as StructTy)) {
-            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE_STRUCT).toString() + ":" + structTy.name
-            for (typeArg in structTy.typeArgs) {
-                out += ":" + typeArg.objectId.toString()
-            }
-            if (let Some(decl) <- structTy.declPtr) {
-                out += ":" + decl.objectId.toString()
-            } else {
-                out += ":0"
-            }
-            return out
-        }
-        if (let Some(typeAliasTy) <- (ty as TypeAliasTy)) {
-            var out = "nominal:" + TypeKindIndex(TypeKind.TYPE).toString() + ":" + typeAliasTy.name
-            for (typeArg in typeAliasTy.typeArgs) {
-                out += ":" + typeArg.objectId.toString()
-            }
-            if (let Some(decl) <- typeAliasTy.declPtr) {
-                out += ":" + decl.objectId.toString()
-            } else {
-                out += ":0"
-            }
-            return out
-        }
-        if (let Some(arrayTy) <- (ty as ArrayTy)) {
-            var out = "compound:" + TypeKindIndex(TypeKind.TYPE_ARRAY).toString()
-            if (!arrayTy.typeArgs.isEmpty()) {
-                out += ":" + arrayTy.typeArgs[0].objectId.toString()
-            } else {
-                out += ":0"
-            }
-            return out + ":" + arrayTy.dims.toString()
-        }
-        if (let Some(varrayTy) <- (ty as VArrayTy)) {
-            var out = "compound:" + TypeKindIndex(TypeKind.TYPE_VARRAY).toString()
-            if (!varrayTy.typeArgs.isEmpty()) {
-                out += ":" + varrayTy.typeArgs[0].objectId.toString()
-            } else {
-                out += ":0"
-            }
-            return out + ":" + varrayTy.size.toString()
-        }
-        if (let Some(pointerTy) <- (ty as PointerTy)) {
-            var out = "compound:" + TypeKindIndex(TypeKind.TYPE_POINTER).toString()
-            if (!pointerTy.typeArgs.isEmpty()) {
-                out += ":" + pointerTy.typeArgs[0].objectId.toString()
-            } else {
-                out += ":0"
-            }
-            return out
-        }
-        if (let Some(tupleTy) <- (ty as TupleTy)) {
-            var out = "compound:" + TypeKindIndex(TypeKind.TYPE_TUPLE).toString() + ":" + tupleTy.isClosureTy.toString()
-            for (typeArg in tupleTy.typeArgs) {
-                out += ":" + typeArg.objectId.toString()
-            }
-            return out
-        }
-        if (let Some(funcTy) <- (ty as FuncTy)) {
-            var out = "compound:" + TypeKindIndex(TypeKind.TYPE_FUNC).toString() + ":" + funcTy.retTy.objectId.toString()
-            for (paramTy in funcTy.paramTys) {
-                out += ":" + paramTy.objectId.toString()
-            }
-            out += ":" + funcTy.isClosureTy.toString()
-            out += ":" + funcTy.isC.toString()
-            out += ":" + funcTy.hasVariableLenArg.toString()
-            out += ":" + funcTy.noCast.toString()
-            return out
-        }
-        if (let Some(unionTy) <- (ty as UnionTy)) {
-            let memberIds = ArrayList<Int64>()
-            for (memberTy in unionTy.tys) {
-                memberIds.add(memberTy.objectId)
-            }
-            sort(memberIds, by: { left: Int64, right: Int64 =>
-                if (left < right) {
-                    Ordering.LT
-                } else if (left > right) {
-                    Ordering.GT
-                } else {
-                    Ordering.EQ
-                }
-            }, stable: true)
-            var out = "union:" + TypeKindIndex(TypeKind.TYPE_UNION).toString()
-            for (memberId in memberIds) {
-                out += ":" + memberId.toString()
-            }
-            return out
-        }
-        if (let Some(intersectionTy) <- (ty as IntersectionTy)) {
-            let memberIds = ArrayList<Int64>()
-            for (memberTy in intersectionTy.tys) {
-                memberIds.add(memberTy.objectId)
-            }
-            sort(memberIds, by: { left: Int64, right: Int64 =>
-                if (left < right) {
-                    Ordering.LT
-                } else if (left > right) {
-                    Ordering.GT
-                } else {
-                    Ordering.EQ
-                }
-            }, stable: true)
-            var out = "intersection:" + TypeKindIndex(TypeKind.TYPE_INTERSECTION).toString()
-            for (memberId in memberIds) {
-                out += ":" + memberId.toString()
-            }
-            return out
-        }
-        return ty.objectId.toString()
-    }
-
     private func hasVisitedGenericMappingTy(visited: HashSet<Int64>, ty: Ty): Bool {
         return visited.contains(ty.objectId)
     }
@@ -2045,7 +1900,7 @@ public class TypeManager {
     public func Clear(): Unit {
         constraints.Clear()
         ClearMapCache()
-        allocatedTyCache.clear()
+        allocatedTys.clear()
         if (let Some(traces) <- allocatedTyConstructionTraces) {
             traces.clear()
         }
