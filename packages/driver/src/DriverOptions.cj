@@ -354,6 +354,10 @@ public class DriverOptions {
         let out = ArrayList<String>()
         if (!frontendForwardArgs.isEmpty()) {
             for (arg in frontendForwardArgs) {
+                if (IsObfuscationEnabled() && (arg == "--apc" || arg == "--aggressive-parallel-compile" ||
+                    arg.startsWith("--apc=") || arg.startsWith("--aggressive-parallel-compile="))) {
+                    continue
+                }
                 out.add(arg)
             }
         } else {
@@ -392,6 +396,9 @@ public class DriverOptions {
             for (file in srcFiles) {
                 out.add(file)
             }
+        }
+        if (IsObfuscationEnabled()) {
+            out.add("--aggressive-parallel-compile=1")
         }
         let multiBC = (aggressiveParallelCompile ?? 1) > 1
         if (!frontendOutputFiles.isEmpty() && !multiBC) {
