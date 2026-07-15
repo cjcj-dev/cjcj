@@ -279,6 +279,17 @@ public class TestManager {
             arguments: [MOCK_ON_COMPILATION_OPTION]).Emit()
     }
 
+    // C++: Sema/Test/TestManager.cpp:108-111.
+    public func ReportUnsupportedType(reportOn: Expr): Unit {
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_unsupported_type, reportOn).Emit()
+    }
+
+    // C++: Sema/Test/TestManager.cpp:113-116.
+    public func ReportNotInTestMode(reportOn: Expr): Unit {
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_not_in_test_mode, reportOn,
+            arguments: [TEST_COMPILATION_OPTION]).Emit()
+    }
+
     public func PrepareToMock(pkg: Package): Unit {
         if (pkg.files.isEmpty()) {
             return
@@ -355,43 +366,34 @@ public class TestManager {
     }
 
     private func CollectToCreateMockCalls(callExpr: CallExpr): VisitAction {
-        let mockKind = MockManager.GetMockKind(callExpr)
-        if (mockKind == MockKind.NOT_MOCK) {
+        let isMockCall = MockManager.IsMockCall(callExpr)
+        if (!isMockCall) {
             return VisitAction.WALK_CHILDREN
         }
         if (let Some(callTy) <- callExpr.GetTy()) {
             if (callTy.HasGeneric()) {
-                callExpr.EnableAttr(Attribute.IS_BROKEN)
+                callExpr.desugarExpr = MockManager.CreateIllegalMockCallException(
+                    callExpr.curFile.getOrThrow(), typeManager, importManager)
                 return VisitAction.WALK_CHILDREN
             }
         }
-        if (let Some(baseFunc) <- callExpr.baseFunc) {
-            if (let Some(baseTy) <- baseFunc.GetTy()) {
-                if (baseTy.typeArgs.size > 1) {
-                    let typeArgument = baseTy.typeArgs[1]
-                    if (!typeArgument.IsClass() && !typeArgument.IsInterface()) {
-                        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                        let _ = DiagnoseRefactor(diag,
-                            BasicDiagKindRefactor.sema_mock_unsupported_type, callExpr)
-                        callExpr.EnableAttr(Attribute.IS_BROKEN)
-                        return VisitAction.SKIP_CHILDREN
-                    }
-                    if (mockCompatible && testEnabled) {
-                        return VisitAction.WALK_CHILDREN
-                    }
-                }
-            }
+
+        let typeArgument = callExpr.baseFunc.getOrThrow().GetTy().getOrThrow().typeArgs[1]
+        if (!typeArgument.IsClass() && !typeArgument.IsInterface()) {
+            ReportUnsupportedType(callExpr)
+            return VisitAction.SKIP_CHILDREN
         }
-        if (!testEnabled) {
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            let _ = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_not_in_test_mode, callExpr,
-                arguments: ["--test"])
-        } else if (mockMode != MockMode.RUNTIME_ERROR) {
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            let _ = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_disabled, callExpr,
-                arguments: ["--mock=on"])
+
+        if (mockCompatible && testEnabled) {
+            return VisitAction.WALK_CHILDREN
+        } else if (mockMode == MockMode.RUNTIME_ERROR && testEnabled) {
+            callExpr.desugarExpr = MockManager.CreateIllegalMockCallException(
+                callExpr.curFile.getOrThrow(), typeManager, importManager)
+        } else if (!testEnabled) {
+            ReportNotInTestMode(callExpr)
+        } else {
+            ReportMockDisabled(callExpr)
         }
-        callExpr.EnableAttr(Attribute.IS_BROKEN)
         return VisitAction.WALK_CHILDREN
     }
 

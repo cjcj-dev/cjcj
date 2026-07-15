@@ -1,9 +1,11 @@
 package cjcj::sema.Test
 
+import std.collection.*
 import cjcj::ast.*
 import cjcj::modules.SemaImportManager
+import cjcj::sema.CreateThrowException
 import cjcj::sema.TypeManager
-import cjcj::utils.DynamicCast
+import cjcj::utils.{CJC_ASSERT, DynamicCast}
 
 private let CREATE_MOCK_FUNC_NAME: String = "createMock"
 private let CREATE_SPY_FUNC_NAME: String = "createSpy"
@@ -19,6 +21,7 @@ private let DECL_KIND_ENUM_NAME: String = "DeclKind"
 private let HAS_DEFAULT_VALUE_FOR_STUB_INTERFACE_NAME: String = "HasDefaultValueForStub"
 private let NO_DEFAULT_VALUE_FOR_MOCK_EXCEPTION_NAME: String = "NoDefaultValueForMockException"
 private let MOCK_RETURN_VALUE_TYPE_MISMATCH_EXCEPTION_NAME: String = "MockReturnValueTypeMismatchException"
+private let ILLEGAL_MOCK_CALL_EXCEPTION_NAME: String = "IllegalMockCallException"
 private let MOCK_ZERO_VALUE_NAME: String = "MockZeroValue"
 private let MOCKED_DECL_SUFFIX: String = "$Mocked"
 private let UNITTEST_MOCK_INTERNAL_PACKAGE_NAME: String = "std.unittest.mock.internal"
@@ -155,6 +158,14 @@ public class MockManager {
 
     public static func IsMockCall(callExpr: CallExpr): Bool {
         return GetMockKind(callExpr) != MockKind.NOT_MOCK
+    }
+
+    // C++: Sema/Test/MockManager.cpp:415-422.
+    public static func CreateIllegalMockCallException(curFile: File, typeMgr: TypeManager,
+        importMgr: SemaImportManager): ThrowExpr {
+        let exceptionDecl = GetDeclFromMockPackage<ClassDecl>(importMgr, ILLEGAL_MOCK_CALL_EXCEPTION_NAME)
+        CJC_ASSERT(exceptionDecl.isSome())
+        return CreateThrowException(exceptionDecl.getOrThrow(), ArrayList<Expr>(), curFile, typeMgr)
     }
 
     public static func FindMockedClassOf(decl: ClassLikeDecl): Option<ClassDecl> {

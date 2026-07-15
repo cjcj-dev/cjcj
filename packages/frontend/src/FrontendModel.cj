@@ -8049,6 +8049,12 @@ public class TestManager {
         impl.MarkDeclsForTestIfNeeded(pkgs)
     }
 
+    public func PrepareToMock(pkgs: ArrayList<Package>): Unit {
+        for (pkg in pkgs) {
+            impl.PrepareToMock(pkg)
+        }
+    }
+
     // The GenericInstantiation mock hooks need the sema TestManager directly (the
     // sema.GenericInstantiation package cannot see this frontend wrapper).
     public func GetImpl(): RealTestManager {

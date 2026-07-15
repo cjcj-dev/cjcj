@@ -420,6 +420,9 @@ public class CompilerInstance {
         for (pkg in srcPkgs) {
             AnalyzeFunctionLinkage(pkg, invocation.globalOptions)
         }
+        if (!invocation.globalOptions.enIncrementalCompilation) {
+            testManager.PrepareToMock(GetSourcePackages())
+        }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "desugar")
         }

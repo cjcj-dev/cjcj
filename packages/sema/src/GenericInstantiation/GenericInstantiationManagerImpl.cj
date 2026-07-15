@@ -396,21 +396,13 @@ class GenericInstantiationManagerImpl {
         }
         curPkg = pkg
         InstantiatedExtendRecorder(this, ci.typeManager).Record(pkg)
-        // C++ GenericInstantiationManagerImpl.cpp:287 — PrepareToMock, after RecordExtend, before instantiation.
-        if (ci.globalOptions.enableCompileTest) {
-            if (let Some(tm) <- testManager) {
-                tm.PrepareToMock(pkg)
-            }
-        }
         for (decl in pkg.genericInstantiatedDecls) {
             collectExistingInstantiation(decl)
         }
         InstantiateReferencedGenerics(pkg)
-        // C++ GenericInstantiationManagerImpl.cpp:306 — HandleCreateMock, after instantiation, before rearrange.
-        if (ci.globalOptions.enableCompileTest) {
-            if (let Some(tm) <- testManager) {
-                tm.HandleCreateMock(pkg)
-            }
+        // C++: Sema/GenericInstantiation/GenericInstantiationManagerImpl.cpp:296-298.
+        if (let Some(tm) <- testManager) {
+            tm.HandleCreateMock(pkg)
         }
         RearrangeReferences(pkg)
         RecoverDesugarForBuiltIn()
