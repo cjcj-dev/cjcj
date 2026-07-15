@@ -106,6 +106,12 @@ private func optionValues(name: String): Array<OptionValue> {
             value("thin", "", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE])
         ]
     }
+    if (name == "lto_staticlib_format_value") {
+        return [
+            value("bitcode", "", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE]),
+            value("native", "", [Backend.CJNATIVE], [Group.STABLE, Group.VISIBLE])
+        ]
+    }
     if (name == "bchir_print_mode") {
         return [
             value("deserialized", "after deserialisation", [Backend.CJNATIVE], [Group.STABLE]),
@@ -159,6 +165,7 @@ public func CreateOptionInfos(): Array<OptionInfo> {
         OptionInfo("--static-libs", ID.STATIC_LIBS, Kind.FLAG, [Backend.CJNATIVE], [Group.DRIVER, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Statically link packages of other modules except std"),
         OptionInfo("--dy-libs", ID.DY_LIBS, Kind.FLAG, [Backend.CJNATIVE], [Group.DRIVER, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Dynamically link packages of other modules except std"),
         OptionInfo("--lto", ID.LTO, Kind.SEPARATED, [Backend.CJNATIVE], [Group.DRIVER, Group.STABLE, Group.VISIBLE], "", optionValues("lto_mode"), Occurrence.SINGLE_OCCURRENCE, "Enable LTO to either 'full' or 'thin' (Not available for Windows target)"),
+        OptionInfo("--lto-staticlib-format", ID.LTO_STATICLIB_FORMAT, Kind.SEPARATED, [Backend.CJNATIVE], [Group.DRIVER, Group.VISIBLE], "", optionValues("lto_staticlib_format_value"), Occurrence.SINGLE_OCCURRENCE, "Specify the format of static library output in LTO mode. Candidate formats: "),
         OptionInfo("--compile-as-exe", ID.COMPILE_AS_EXE, Kind.FLAG, [Backend.CJNATIVE], [Group.DRIVER, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Hide symbols from bitcode files in LTO mode, and only the package init symbols remain visible"),
         OptionInfo("--lto-keep-pkg-visibility", ID.LTO_KEEP_PKG_VISIBILITY, Kind.SEPARATED, [Backend.CJNATIVE], [Group.DRIVER, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Specify packages that remain visible in LTO mode. Use \"\" to hide all packages"),
         OptionInfo("--profile-compile-time", ID.PROFILE_COMPILE_TIME, Kind.FLAG, [Backend.ALL], [Group.GLOBAL, Group.VISIBLE, Group.STABLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Write time spent of all phases to <package>.time.prof in the output directory"),

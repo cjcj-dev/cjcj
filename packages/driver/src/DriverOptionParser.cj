@@ -390,6 +390,10 @@ private func ParseOptionWithValue(opts: DriverOptions, optionArg: OptionArgInsta
         eprintln("error: unsupported --lto value '${value}'")
         return false
     }
+    if (arg == "--lto-staticlib-format") {
+        opts.emitStaticLibInLTO = Some(value == "native")
+        return true
+    }
     if (arg == "--output-type") {
         if (!ParseOutputType(opts, value)) { return false }
         addFrontendSeparated(opts, arg, value)

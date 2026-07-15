@@ -337,6 +337,7 @@ public open class GlobalOptions <: Option {
     public var enableMemoryCollect: Bool = false
     public var linkStaticStd: CoreOption<Bool> = None
     public var ltoMod: LTOMode = LTOMode.NO_LTO
+    public var emitStaticLibInLTO: CoreOption<Bool> = None
     public var enableCompileAsExe: Bool = false
     public var ltoHideAllPkgs: Bool = false
     public let ltoVisiblePkgs: ArrayList<String> = ArrayList<String>()
@@ -591,6 +592,9 @@ public open class GlobalOptions <: Option {
 
     public func IsLTOEnabled(): Bool { return ltoMod != LTOMode.NO_LTO }
     public func IsFullLTOEnabled(): Bool { return ltoMod == LTOMode.FULL_LTO }
+    public func ShouldEmitStaticLibInLTO(): Bool {
+        return (emitStaticLibInLTO ?? false) && outputMode == OutputMode.STATIC_LIB && IsLTOEnabled()
+    }
     public func IsCompileAsExeEnabled(): Bool { return enableCompileAsExe }
     public func IsLTOPkgVisibilityEnabled(): Bool { return ltoHideAllPkgs || !ltoVisiblePkgs.isEmpty() }
     public func GetLtoVisiblePkgs(): Array<String> { return ltoVisiblePkgs.toArray() }
@@ -1182,16 +1186,27 @@ public open class GlobalOptions <: Option {
             }
         }
         if (IsLTOEnabled()) {
-            if (target.GetOSFamily() == OSType.DARWIN || target.GetOSFamily() == OSType.IOS ||
-                target.GetOSFamily() == OSType.WINDOWS) {
+            if (target.GetOSFamily() == OSType.DARWIN || target.GetOSFamily() == OSType.WINDOWS) {
                 emitOptionDiag(BasicDiagKindRefactor.driver_target_lto_unsupported, ltoUnsupportedOSName(target))
+                return false
+            }
+            if (!experimentalMode && target.os == OSType.IOS) {
+                Errorln("LTO on iOS is an experimental feature, use '--experimental' to enable it.")
+                return false
+            }
+            if (target.os == OSType.IOS && IsObfuscationEnabled()) {
+                Errorln("Obfuscation is not supported when LTO is enabled on iOS.")
+                return false
+            }
+            if (target.os == OSType.IOS && outputMode != OutputMode.STATIC_LIB) {
+                Errorln("iOS LTO only supports --output-type=staticlib.")
                 return false
             }
             if (outputMode == OutputMode.OBJ) {
                 Errorln("--output-type=obj is not allowed in LTO mode")
                 return false
             }
-            if (outputMode == OutputMode.STATIC_LIB && !bcInputFiles.isEmpty()) {
+            if (outputMode == OutputMode.STATIC_LIB && !bcInputFiles.isEmpty() && !ShouldEmitStaticLibInLTO()) {
                 Errorln("The input file cannot be bc files When generating a static library in LTO mode.")
                 return false
             }
@@ -1224,6 +1239,7 @@ public open class GlobalOptions <: Option {
                 emitOptionDiag(BasicDiagKindRefactor.driver_visible_pkgs_only_for_dylib)
             }
         }
+        if (!CheckLTOStaticLibFormatOptions()) { return false }
         if (enablePgoInstrGen && enablePgoInstrUse) {
             emitOptionDiag(BasicDiagKindRefactor.driver_pgo_both_gen_and_use)
             return false
@@ -1307,6 +1323,25 @@ public open class GlobalOptions <: Option {
                 }
             }
             linkStaticStd = Some(false)
+        }
+        return true
+    }
+
+    private func CheckLTOStaticLibFormatOptions(): Bool {
+        if (let None <- emitStaticLibInLTO) {
+            return true
+        }
+        if (!IsLTOEnabled()) {
+            Errorln("Option '--lto-staticlib-format' only takes effect when lto mode is enabled.")
+            return false
+        }
+        if (outputMode != OutputMode.STATIC_LIB) {
+            Errorln("Option '--lto-staticlib-format' requires '--output-type=staticlib'.")
+            return false
+        }
+        if (target.os != OSType.IOS) {
+            Errorln("Option '--lto-staticlib-format' is only supported on iOS platforms.")
+            return false
         }
         return true
     }

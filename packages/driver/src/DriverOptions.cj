@@ -117,6 +117,7 @@ public class DriverOptions {
     public var linkStaticStd: Option<Bool> = None
     public var linkStaticLibs: Option<Bool> = None
     public var ltoMod: LTOMode = LTOMode.NO_LTO
+    public var emitStaticLibInLTO: Option<Bool> = None
     public var enableCompileAsExe: Bool = false
     public var ltoHideAllPkgs: Bool = false
     public let ltoVisiblePkgs: ArrayList<String> = ArrayList<String>()
@@ -235,6 +236,9 @@ public class DriverOptions {
 
     public func IsLTOEnabled(): Bool { return ltoMod != LTOMode.NO_LTO }
     public func IsFullLTOEnabled(): Bool { return ltoMod == LTOMode.FULL_LTO }
+    public func ShouldEmitStaticLibInLTO(): Bool {
+        return (emitStaticLibInLTO ?? false) && outputMode == OutputMode.STATIC_LIB && IsLTOEnabled()
+    }
     public func IsEmitCHIREnable(): Bool { return outputMode == OutputMode.CHIR || !emitCHIRPhase.isEmpty() }
     public func IsCompilingCJMPSpecific(): Bool { return !commonPartChirs.isEmpty() }
     public func IsCompilingCJMP(): Bool { return IsCompilingCJMPSpecific() || outputMode == OutputMode.CHIR }
@@ -503,7 +507,8 @@ public class DriverOptions {
         success = success && CheckScanDependencyOptions()
         success = success && ReprocessCoverageOptions()
         success = success && CheckSanitizerOptions()
-        success = success && CheckLTOOptions()
+        success = success && CheckLtoOptions()
+        success = success && CheckLTOStaticLibFormatOptions()
         success = success && CheckPGOOptions()
         success = success && CheckCompileTargetOption()
         success = success && CheckCJMPOptions()
@@ -821,19 +826,31 @@ public class DriverOptions {
         return true
     }
 
-    private func CheckLTOOptions(): Bool {
+    private func CheckLtoOptions(): Bool {
         if (IsLTOEnabled()) {
-            if (target.GetOSFamily() == OSType.DARWIN || target.GetOSFamily() == OSType.IOS ||
-                target.GetOSFamily() == OSType.WINDOWS) {
-                eprintln("error: LTO mode is not supported on target '${target.OSToString()}'.")
+            if (target.GetOSFamily() == OSType.DARWIN || target.GetOSFamily() == OSType.WINDOWS) {
+                let osName = if (target.GetOSFamily() == OSType.DARWIN) { "Darwin" } else { "Windows" }
+                eprintln("error: LTO mode is not supported on target '${osName}'.")
+                return false
+            }
+            if (!experimentalMode && target.os == OSType.IOS) {
+                eprintln("error: LTO on iOS is an experimental feature, use '--experimental' to enable it.")
+                return false
+            }
+            if (target.os == OSType.IOS && IsObfuscationEnabled()) {
+                eprintln("error: Obfuscation is not supported when LTO is enabled on iOS.")
+                return false
+            }
+            if (target.os == OSType.IOS && outputMode != OutputMode.STATIC_LIB) {
+                eprintln("error: iOS LTO only supports --output-type=staticlib.")
                 return false
             }
             if (outputMode == OutputMode.OBJ) {
                 eprintln("error: --output-type=obj is not allowed in LTO mode.")
                 return false
             }
-            if (outputMode == OutputMode.STATIC_LIB && !bcInputFiles.isEmpty()) {
-                eprintln("error: input bitcode files cannot be used when generating a static library in LTO mode.")
+            if (outputMode == OutputMode.STATIC_LIB && !bcInputFiles.isEmpty() && !ShouldEmitStaticLibInLTO()) {
+                eprintln("error: The input file cannot be bc files When generating a static library in LTO mode.")
                 return false
             }
             if (optimizationLevel == OptimizationLevel.Os || optimizationLevel == OptimizationLevel.Oz) {
@@ -864,6 +881,25 @@ public class DriverOptions {
             if (outputMode != OutputMode.SHARED_LIB) {
                 eprintln("warning: option '--lto-keep-pkg-visibility' has effect only when emitting a dynamic library.")
             }
+        }
+        return true
+    }
+
+    private func CheckLTOStaticLibFormatOptions(): Bool {
+        if (let None <- emitStaticLibInLTO) {
+            return true
+        }
+        if (!IsLTOEnabled()) {
+            eprintln("error: Option '--lto-staticlib-format' only takes effect when lto mode is enabled.")
+            return false
+        }
+        if (outputMode != OutputMode.STATIC_LIB) {
+            eprintln("error: Option '--lto-staticlib-format' requires '--output-type=staticlib'.")
+            return false
+        }
+        if (target.os != OSType.IOS) {
+            eprintln("error: Option '--lto-staticlib-format' is only supported on iOS platforms.")
+            return false
         }
         return true
     }

@@ -212,6 +212,10 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.DY_STD) { opts.linkStaticStd = Some(false); return handled() }
     if (id == ID.STATIC_LIBS || id == ID.DY_LIBS || id == ID.STATIC) { return handled() }
     if (id == ID.LTO) { return parseLto(opts, arg.value) }
+    if (id == ID.LTO_STATICLIB_FORMAT) {
+        opts.emitStaticLibInLTO = Some(arg.value == "native")
+        return handled()
+    }
     if (id == ID.COMPILE_AS_EXE) { opts.enableCompileAsExe = true; return handled() }
     if (id == ID.LTO_KEEP_PKG_VISIBILITY) {
         if (arg.value.isEmpty()) {
