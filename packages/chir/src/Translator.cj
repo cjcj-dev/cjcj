@@ -1303,10 +1303,10 @@ public class Translator {
         }
         var idx: Int64 = 0
         while (idx + 1 < nodes.size) {
-            TranslateBlockNodeToDiscarded(nodes[idx])
+            TranslateSubExprToDiscarded(nodes[idx])
             idx++
         }
-        return TranslateBlockNodeAsValue(nodes[idx])
+        return TranslateSubExprAsValue(nodes[idx])
     }
 
     public func Visit(expr: AstLitConstExpr): Option<Value> {
@@ -3442,7 +3442,9 @@ public class Translator {
                 return None
             }
             if (let Some(loc) <- resultLoc) {
-                return RequireResult(builder.CreateLoad(tryTy, loc, CurrentBlock()))
+                let result = builder.CreateLoad(tryTy, loc, CurrentBlock())
+                result.SetDebugLocation(TranslateLocation(expr))
+                return RequireResult(result)
             }
             return None
         }
@@ -5072,20 +5074,14 @@ public class Translator {
         return RequireResult(builder.CreateField(selectorTy, value, path, CurrentBlock()))
     }
 
-    private func TranslateBlockNodeToDiscarded(node: AstNode): Unit {
-        let _ = Translator.TranslateASTNode(node, this)
-    }
-
-    private func TranslateBlockNodeAsValue(node: AstNode): Option<Value> {
+    private func TranslateSubExprAsValue(node: AstNode): Option<Value> {
         let value = Translator.TranslateASTNode(node, this)
-        let nodePtr = Translator.GetDesugaredExpr(node)
-        return match (nodePtr.astKind) {
-            case ASTKind.VAR_DECL => None
-            case ASTKind.VAR_WITH_PATTERN_DECL => None
-            case ASTKind.ASSIGN_EXPR => None
-            case ASTKind.RETURN_EXPR => None
-            case _ => value
+        if (let Some(result) <- value) {
+            if (let Some(_) <- (node as AstExpr)) {
+                return Some(GetDerefedValue(result, TranslateLocation(node)))
+            }
         }
+        return value
     }
 
     private func CurrentFunction(): Function {

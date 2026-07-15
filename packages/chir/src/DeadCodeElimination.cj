@@ -196,9 +196,8 @@ public class DeadCodeElimination {
 
     private func TryReportUnusedOnExpr(expr: Expression, opts: GlobalOptions, blockUsed: Bool): Unit {
         let kind = expr.GetExprKind()
-        if (kind == ExprKind.DEBUGEXPR) {
-            ReportUnusedLocalVariable(expr, opts.enableCompileDebug)
-        } else if (blockUsed) {
+        ReportUnusedLocalVariable(expr, opts.enableCompileDebug)
+        if (blockUsed) {
             ReportUnusedExpression(expr)
         }
         if (kind == ExprKind.LAMBDA) {
