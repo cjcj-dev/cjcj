@@ -202,19 +202,7 @@ public class CHIRContext {
     public func GetVoidTy(): VoidType { return voidTy }
 
     public func GetStringTy(): Option<StructType> {
-        if (let Some(pkg) <- curPackage) {
-            if (let Some(def) <- pkg.TryGetStructDef("String")) {
-                if (def.GetPackageName() == "std.core") {
-                    return GetStructTy(def, ArrayList<Type>())
-                }
-            }
-            for (def in pkg.GetAllStructDef()) {
-                if (def.GetPackageName() == "std.core" && def.GetIdentifier() == "String") {
-                    return GetStructTy(def, ArrayList<Type>())
-                }
-            }
-        }
-        return None
+        return GetStructType("std.core", "String")
     }
 
     public func GetStructType(packageName: String, name: String,
