@@ -564,6 +564,22 @@ public class DIBuilder {
         return createTypedef(diType, name, defaultFile, 0u32, compileUnit)
     }
 
+    private func CreateGenericType(genericTy: GenericType): LLVMMetadataRef {
+        let name = GenerateTypeName(genericTy)
+        let genericSize = 64u64
+        var genericType = createStructType(compileUnit, name, defaultFile, 0u32, genericSize, 0u32,
+            FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(), 0u32, LLVMNullMetadata(),
+            genericTy.GetIdentifier())
+        let ti = CreateTypeInfoMember(genericType, defaultFile)
+        let elements = ArrayList<LLVMMetadataRef>([ti])
+        for (upperBound in genericTy.GetUpperBounds()) {
+            let upperBoundType = GetOrCreateType(upperBound)
+            elements.add(createInheritance(genericType, upperBoundType, 0u64, 0u32, FlagZero))
+        }
+        genericType = replaceArrays(genericType, getOrCreateArray(elements))
+        return genericType
+    }
+
     private func GenerateTypeName(ty: Type): String {
         if (ty.IsPrimitive()) {
             return ty.ToString()
