@@ -375,27 +375,6 @@ private func IsFlowOperator(op: TokenKind): Bool {
     return op == TokenKind.PIPELINE || op == TokenKind.COMPOSITION
 }
 
-private func CheckFlowOperandsHaveNamedParam(typeManager: TypeManager, be: BinaryExpr,
-    synthesizer: BinaryOperandSynthesizer): Bool {
-    if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
-        return false
-    }
-    let leftValue = be.leftExpr.getOrThrow()
-    let rightValue = be.rightExpr.getOrThrow()
-    rightValue.isInFlowExpr = true
-    let leftTy = synthesizer(leftValue)
-    let rightTy = synthesizer(rightValue)
-    if (!Ty.IsTyCorrect(leftTy) || !Ty.IsTyCorrect(rightTy)) {
-        if (be.op == TokenKind.COMPOSITION) {
-            let _ = BinaryInvalid(be)
-            return false
-        }
-        ClearExprKeepTargets(leftValue)
-        ClearExprKeepTargets(rightValue)
-    }
-    return true
-}
-
 private func FuncDeclHasNamedParam(fd: FuncDecl): Bool {
     if (let Some(body) <- fd.funcBody) {
         if (!body.paramLists.isEmpty()) {
@@ -418,11 +397,15 @@ private func RefExprTargetIsFuncDeclAndHasNamedParam(re: RefExpr): Bool {
     return false
 }
 
-private func FlowOperandsHaveNamedParam(callExpr: CallExpr): Bool {
+private func CheckFlowOperandsHaveNamedParam(callExpr: CallExpr, diag: Option<BasicDiagnosticEngine>): Bool {
     for (arg in callExpr.args) {
         if (let Some(argExpr) <- arg.expr) {
             if (let Some(refExpr) <- (argExpr as RefExpr)) {
                 if (RefExprTargetIsFuncDeclAndHasNamedParam(refExpr)) {
+                    if (let Some(diagValue) <- diag) {
+                        Diagnose(diagValue, argExpr,
+                            BasicDiagKind.sema_fail_flow_expr_operand_has_named_param).Emit()
+                    }
                     return true
                 }
             }
@@ -433,49 +416,74 @@ private func FlowOperandsHaveNamedParam(callExpr: CallExpr): Bool {
 
 private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr,
     synthesizer: BinaryOperandSynthesizer, diag: Option<BasicDiagnosticEngine>): (Bool, Ty) {
-    if (!CheckFlowOperandsHaveNamedParam(typeManager, be, synthesizer)) {
-        return (true, TypeManager.GetInvalidTy())
-    }
-    // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:1093-1108 TypeCheckerImpl::ChkFlowExpr.
-    let isThisExpr = { exp: Expr =>
-        if (let Some(refExpr) <- (exp as RefExpr)) {
-            if (refExpr.isAlone && refExpr.isThis) {
-                if (let Some(diagValue) <- diag) {
-                    Diagnose(diagValue, refExpr, BasicDiagKind.sema_flow_expressions_use_this_or_super,
-                        args: [BasicDiagArgument(refExpr.ref.identifier.Val())]).Emit()
-                }
-                return false
-            }
+    if (let Some(existingTy) <- be.GetTy()) {
+        if (Ty.IsTyCorrect(existingTy)) {
+            return (true, existingTy)
         }
-        return true
+    }
+    if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
+        return (true, TypeManager.GetInvalidTy())
     }
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
-    if ((be.op == TokenKind.COMPOSITION && !isThisExpr(leftExpr)) || !isThisExpr(rightExpr)) {
-        return (true, BinaryInvalid(be))
-    }
-    DesugarInTypeCheck(be)
-    if (let Some(desugar) <- be.desugarExpr) {
+    rightExpr.isInFlowExpr = true
+    try (cs = typeManager.constraints.CommitScope()) {
         try (ds = DiagSuppressor(diag)) {
-            let desugarTy = synthesizer(desugar)
-            if (Ty.IsTyCorrect(desugarTy)) {
-                ds.ReportDiag()
-                if (let Some(callExpr) <- (desugar as CallExpr)) {
-                    if (FlowOperandsHaveNamedParam(callExpr)) {
-                        RecoverToBinaryExpr(be)
-                        return (true, BinaryInvalid(be))
-                    }
+            let _ = synthesizer(leftExpr)
+            let _ = synthesizer(rightExpr)
+            if (ds.HasError()) {
+                if (be.op == TokenKind.COMPOSITION) {
+                    let invalidTy = BinaryInvalid(be)
+                    ds.ReportDiag()
+                    return (true, invalidTy)
                 }
-                PropagateBinaryDesugarTarget(be, desugar)
-                be.SetTy(desugarTy)
-                return (true, desugarTy)
+                ClearExprKeepTargets(leftExpr)
+                ClearExprKeepTargets(rightExpr)
+                typeManager.constraints.Reset()
             }
-            let _ = ds.GetSuppressedDiag()
-            RecoverToBinaryExpr(be)
-            let invalidTy = BinaryInvalid(be)
-            DiagnoseForBinaryExpr(typeManager, be, Some(synthesizer), diag)
-            ds.ReportDiag()
-            return (true, invalidTy)
+        }
+        // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:1093-1108 TypeCheckerImpl::ChkFlowExpr.
+        let isThisExpr = { exp: Expr =>
+            if (let Some(refExpr) <- (exp as RefExpr)) {
+                if (refExpr.isAlone && refExpr.isThis) {
+                    if (let Some(diagValue) <- diag) {
+                        Diagnose(diagValue, refExpr, BasicDiagKind.sema_flow_expressions_use_this_or_super,
+                            args: [BasicDiagArgument(refExpr.ref.identifier.Val())]).Emit()
+                    }
+                    return false
+                }
+            }
+            return true
+        }
+        if ((be.op == TokenKind.COMPOSITION && !isThisExpr(leftExpr)) || !isThisExpr(rightExpr)) {
+            return (true, BinaryInvalid(be))
+        }
+        DesugarInTypeCheck(be)
+        if (let Some(desugar) <- be.desugarExpr) {
+            var desugarTy: Option<Ty> = None
+            try (ds = DiagSuppressor(diag)) {
+                let synthesizedTy = synthesizer(desugar)
+                if (Ty.IsTyCorrect(synthesizedTy)) {
+                    ds.ReportDiag()
+                    desugarTy = Some(synthesizedTy)
+                } else {
+                    let _ = ds.GetSuppressedDiag()
+                    RecoverToBinaryExpr(be)
+                    let invalidTy = BinaryInvalid(be)
+                    DiagnoseForBinaryExpr(typeManager, be, Some(synthesizer), diag)
+                    ds.ReportDiag()
+                    return (true, invalidTy)
+                }
+            }
+            if (let Some(callExpr) <- (desugar as CallExpr)) {
+                if (CheckFlowOperandsHaveNamedParam(callExpr, diag)) {
+                    RecoverToBinaryExpr(be)
+                    return (true, BinaryInvalid(be))
+                }
+            }
+            PropagateBinaryDesugarTarget(be, desugar)
+            be.SetTy(desugarTy.getOrThrow())
+            return (true, desugarTy.getOrThrow())
         }
     }
     return (false, TypeManager.GetInvalidTy())
@@ -1050,57 +1058,74 @@ private func ChkFlowExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     diag: Option<BasicDiagnosticEngine>): Bool {
     if (let Some(existingTy) <- be.GetTy()) {
         if (Ty.IsTyCorrect(existingTy)) {
-            return typeManager.CheckTypeCompatibility(target, existingTy) != TypeCompatibility.INCOMPATIBLE
+            return typeManager.CheckTypeCompatibility(existingTy, target) != TypeCompatibility.INCOMPATIBLE
         }
     }
-    if (!CheckFlowOperandsHaveNamedParam(typeManager, be, synthesizer)) {
+    if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
         return false
-    }
-    // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:1093-1108 TypeCheckerImpl::ChkFlowExpr.
-    let isThisExpr = { exp: Expr =>
-        if (let Some(refExpr) <- (exp as RefExpr)) {
-            if (refExpr.isAlone && refExpr.isThis) {
-                if (let Some(diagValue) <- diag) {
-                    Diagnose(diagValue, refExpr, BasicDiagKind.sema_flow_expressions_use_this_or_super,
-                        args: [BasicDiagArgument(refExpr.ref.identifier.Val())]).Emit()
-                }
-                return false
-            }
-        }
-        return true
     }
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
-    if ((be.op == TokenKind.COMPOSITION && !isThisExpr(leftExpr)) || !isThisExpr(rightExpr)) {
-        let _ = BinaryInvalid(be)
-        return false
-    }
-    DesugarInTypeCheck(be)
-    if (let Some(desugar) <- be.desugarExpr) {
-        if (checker(target, desugar)) {
-            if (let Some(callExpr) <- (desugar as CallExpr)) {
-                if (FlowOperandsHaveNamedParam(callExpr)) {
-                    RecoverToBinaryExpr(be)
+    rightExpr.isInFlowExpr = true
+    try (cs = typeManager.constraints.CommitScope()) {
+        try (ds = DiagSuppressor(diag)) {
+            let _ = synthesizer(leftExpr)
+            let _ = synthesizer(rightExpr)
+            if (ds.HasError()) {
+                if (be.op == TokenKind.COMPOSITION) {
                     let _ = BinaryInvalid(be)
+                    ds.ReportDiag()
+                    return false
+                }
+                ClearExprKeepTargets(leftExpr)
+                ClearExprKeepTargets(rightExpr)
+                typeManager.constraints.Reset()
+            }
+        }
+        // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:1093-1108 TypeCheckerImpl::ChkFlowExpr.
+        let isThisExpr = { exp: Expr =>
+            if (let Some(refExpr) <- (exp as RefExpr)) {
+                if (refExpr.isAlone && refExpr.isThis) {
+                    if (let Some(diagValue) <- diag) {
+                        Diagnose(diagValue, refExpr, BasicDiagKind.sema_flow_expressions_use_this_or_super,
+                            args: [BasicDiagArgument(refExpr.ref.identifier.Val())]).Emit()
+                    }
                     return false
                 }
             }
-            PropagateBinaryDesugarTarget(be, desugar)
-            be.SetTy(TcTyOrInvalid(desugar))
             return true
         }
-        RecoverToBinaryExpr(be)
+        if ((be.op == TokenKind.COMPOSITION && !isThisExpr(leftExpr)) || !isThisExpr(rightExpr)) {
+            let _ = BinaryInvalid(be)
+            return false
+        }
+        DesugarInTypeCheck(be)
+        if (let Some(desugar) <- be.desugarExpr) {
+            if (checker(target, desugar)) {
+                if (let Some(callExpr) <- (desugar as CallExpr)) {
+                    if (CheckFlowOperandsHaveNamedParam(callExpr, diag)) {
+                        RecoverToBinaryExpr(be)
+                        let _ = BinaryInvalid(be)
+                        return false
+                    }
+                }
+                PropagateBinaryDesugarTarget(be, desugar)
+                be.SetTy(TcTyOrInvalid(desugar))
+                return true
+            }
+            RecoverToBinaryExpr(be)
+        }
+        let actualTy = if (be.op == TokenKind.PIPELINE) {
+            SynPipelineExpr(typeManager, be)
+        } else {
+            SynCompositionExpr(typeManager, be)
+        }
+        if (Ty.IsTyCorrect(actualTy) &&
+            typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
+            return true
+        }
+        let _ = BinaryInvalid(be)
     }
-    let actualTy = if (be.op == TokenKind.PIPELINE) {
-        SynPipelineExpr(typeManager, be)
-    } else {
-        SynCompositionExpr(typeManager, be)
-    }
-    if (Ty.IsTyCorrect(actualTy) &&
-        typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
-        return true
-    }
-    let _ = BinaryInvalid(be)
     return false
 }
 
