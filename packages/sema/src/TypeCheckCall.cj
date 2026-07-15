@@ -2994,7 +2994,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     argSynthesizer!: Option<(FuncArg) -> Ty> = None): Option<FunctionMatchingUnit> {
     let ce = candidate.ce
     let fd = candidate.fd
-    let wrongNormalArgSize = !fd.hasVariableLenArg && !IsPossibleVariadicFunction(fd, ce) && (if (let Some(params) <- BodyParamList(
+    let wrongNormalArgSize = !fd.hasVariableLenArg && (if (let Some(params) <- BodyParamList(
         fd)) {
         params.params.size != ce.args.size
     } else {
