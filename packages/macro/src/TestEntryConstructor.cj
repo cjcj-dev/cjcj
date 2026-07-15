@@ -273,7 +273,7 @@ private func createMethodCall(refName: String, decl: FuncDecl, args: ArrayList<F
     return CreateCallExpr(method, args, target: Some(decl))
 }
 
-private func createSuiteVarDecl(varName: String, suiteName: String, suiteKind: String): VarDecl {
+private func CreateSuiteVarDecl(varName: String, suiteName: String, suiteKind: String): VarDecl {
     let vd = VarDecl()
     vd.identifier = SrcIdentifier(varName)
     vd.fullPackageName = suiteName
@@ -455,7 +455,7 @@ public class TestEntryConstructor {
         entryFunc.funcBody = Some(entryBody)
         entryBody.retType = Some(CreatePrimitiveType(TypeKind.TYPE_INT64))
         let body = Block()
-        body.body.add(createSuiteVarDecl("testPkg", packageName, "TestPackage"))
+        body.body.add(CreateSuiteVarDecl("testPkg", packageName, "TestPackage"))
         if (mockEnabled) {
             body.body.add(CreateCallExpr(CreateMemberAccess(CreateRefExpr("testPkg"), "enableOptimizedMockForBench"),
                 ArrayList<FuncArg>()))
