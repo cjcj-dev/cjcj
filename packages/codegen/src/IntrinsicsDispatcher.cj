@@ -145,7 +145,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         return GenerateArraySyscall(irBuilder, kind, args, resultType)
     }
     if (IsVArrayIntrinsic(kind)) {
-        return GenerateVArrayIntrinsic(irBuilder, kind, args, resultType, needArrayBoundCheck)
+        return GenerateVarrayIntrinsics(irBuilder, kind, args, resultType, needArrayBoundCheck)
     }
     if (IsMathIntrinsic(kind)) {
         return irBuilder.CallMathIntrinsics(kind, args)
@@ -331,7 +331,7 @@ private func GenerateExclusiveScope(irBuilder: IRBuilder2, args: ArrayList<Value
         PREFIX_OF_BACKEND_SYMS + "ExclusiveScope", parameters, ArrayList<String>())
 }
 
-private func GenerateVArrayIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args: ArrayList<Value>,
+private func GenerateVarrayIntrinsics(irBuilder: IRBuilder2, kind: IntrinsicKind, args: ArrayList<Value>,
     resultType: Option<Type>, needArrayBoundCheck: Bool): LLVMValueRef {
     let parameters = ArrayList<CGValue>()
     for (arg in args) {
@@ -341,7 +341,6 @@ private func GenerateVArrayIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind,
         return LLVMNullValue()
     }
     let varrPtr = parameters[0]
-    let varrLLVMType = varrPtr.GetCGType().getOrThrow().GetPointerElementType().getOrThrow().GetLLVMType()
     if (kind == IntrinsicKind.VARRAY_SET) {
         let indices = ArrayList<LLVMValueRef>()
         var idx: Int64 = 2
@@ -352,8 +351,7 @@ private func GenerateVArrayIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind,
         if (needArrayBoundCheck) {
             irBuilder.CallVArrayIntrinsicIndexCheck(varrPtr, indices)
         }
-        let elementPtr = irBuilder.CreateVArrayGEP(varrLLVMType, varrPtr.GetRawValue(), indices,
-            name: "varr.idx.set.gep")
+        let elementPtr = irBuilder.CreateVArrayGEP(varrPtr, indices, name: "varr.idx.set.gep")
         irBuilder.CreateVArrayStore(parameters[1], elementPtr)
         return LLVMNullValue()
     }
@@ -365,8 +363,7 @@ private func GenerateVArrayIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind,
             idx++
         }
         irBuilder.CallVArrayIntrinsicIndexCheck(varrPtr, indices)
-        let elementPtr = irBuilder.CreateVArrayGEP(varrLLVMType, varrPtr.GetRawValue(), indices,
-            name: "varr.idx.get.gep")
+        let elementPtr = irBuilder.CreateVArrayGEP(varrPtr, indices, name: "varr.idx.get.gep")
         if (let Some(retTy) <- resultType) {
             let retCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), retTy)
             return irBuilder.CreateLoad(retCGType.GetLLVMType(), elementPtr)

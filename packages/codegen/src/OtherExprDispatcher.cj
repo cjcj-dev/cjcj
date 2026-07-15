@@ -6,6 +6,7 @@ import cjcj::chir.GetRTTI
 import cjcj::chir.GetRTTIStatic
 import cjcj::chir.Lambda
 import cjcj::chir.TypeCast
+import cjcj::chir.`VArray` as CHIRVArray
 
 public func HandleStructedControlFlowExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetExprKind() == ExprKind.LAMBDA) {
@@ -43,7 +44,7 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return GenerateTupleOrAggregateExpression(irBuilder, chirExpr)
     }
     if (kind == ExprKind.VARRAY) {
-        return GenerateVArrayExpression(irBuilder, chirExpr)
+        return GenerateVArray(irBuilder, (chirExpr as CHIRVArray).getOrThrow())
     }
     if (kind == ExprKind.VARRAY_BUILDER) {
         return GenerateVArrayBuilder(irBuilder, chirExpr)

@@ -3895,14 +3895,17 @@ public class IRBuilder2 <: Resource {
         SetInsertPoint(optBB)
     }
 
-    public func CreateVArrayGEP(arrayType: LLVMTypeRef, pointer: LLVMValueRef, indices: ArrayList<LLVMValueRef>,
+    public func CreateVArrayGEP(varrayPtr: CGValue, indices: ArrayList<LLVMValueRef>,
         name!: String = ""): LLVMValueRef {
-        let gepIndices = ArrayList<LLVMValueRef>()
-        gepIndices.add(GetInt64(0))
-        for (index in indices) {
-            gepIndices.add(index)
+        indices.add(GetInt64(0), at: 0)
+        let elementType = varrayPtr.GetCGType().getOrThrow().GetPointerElementType().getOrThrow().GetLLVMType()
+        let varrayType = if (!elementType.isNull() &&
+            unsafe { LLVMGetTypeKind(elementType) } == LLVM_ARRAY_TYPE_KIND) {
+            elementType
+        } else {
+            LLVMNullType()
         }
-        return CreateGEP(arrayType, pointer, gepIndices, name: name)
+        return CreateGEP(varrayType, varrayPtr.GetRawValue(), indices, name: name)
     }
 
     public func VArrayInitedByLambda(varrayLen: LLVMValueRef, autoEnv: CGValue,
