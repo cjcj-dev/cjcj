@@ -405,14 +405,14 @@ public class CGFunction <: CGValue {
         CJC_ASSERT(!entryBlock.isNull())
 
         let builder = IRBuilder2(cgMod)
-        let structAllocas = ArrayList<(LLVMValueRef, LLVMTypeRef)>()
+        let structAllocas = ArrayList<LLVMValueRef>()
         var inst = unsafe { LLVMGetFirstInstruction(entryBlock) }
         while (!inst.isNull()) {
             if (unsafe { LLVMGetInstructionOpcode(inst) } == LLVM_ALLOCA_OPCODE) {
                 let allocatedType = unsafe { LLVMGetAllocatedType(inst) }
                 if (!allocatedType.isNull() && unsafe { LLVMGetTypeKind(allocatedType) } == LLVM_STRUCT_TYPE_KIND &&
                     builder.IsLLVMTypeContainsRef(allocatedType)) {
-                    structAllocas.add((inst, allocatedType))
+                    structAllocas.add(inst)
                 }
             }
             inst = unsafe { LLVMGetNextInstruction(inst) }
@@ -420,7 +420,7 @@ public class CGFunction <: CGValue {
 
         let loopInfo = unsafe { LLVMSelfhostCreateLoopInfo(function) }
         CJC_ASSERT(!loopInfo.isNull())
-        for ((alloca, allocatedType) in structAllocas) {
+        for (alloca in structAllocas) {
             let basicBlocks = ArrayList<LLVMBasicBlockRef>()
             var useRef = unsafe { LLVMSelfhostGetFirstUse(alloca) }
             while (!useRef.isNull()) {
@@ -479,14 +479,14 @@ public class CGFunction <: CGValue {
                             let predecessorTerminator = unsafe { LLVMGetBasicBlockTerminator(predecessor) }
                             CJC_ASSERT(!predecessorTerminator.isNull())
                             builder.SetInsertPointBefore(predecessorTerminator)
-                            builder.CreateCJMemsetStructWith0(alloca, allocatedType)
+                            builder.CreateCJMemSetStructWith0(alloca)
                         }
                         predecessorIdx++
                     }
                 }
             } else {
                 builder.SetInsertPointBefore(insertPoint)
-                builder.CreateCJMemsetStructWith0(alloca, allocatedType)
+                builder.CreateCJMemSetStructWith0(alloca)
             }
         }
         unsafe { LLVMSelfhostDisposeLoopInfo(loopInfo) }

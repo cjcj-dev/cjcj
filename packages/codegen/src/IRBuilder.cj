@@ -1148,7 +1148,11 @@ public class IRBuilder2 <: Resource {
         return unsafe { LLVMBuildMemMove(builder.raw, dest, destAlign, src, srcAlign, size) }
     }
 
-    public func CreateCJMemsetStructWith0(addr: LLVMValueRef, allocatedType: LLVMTypeRef): LLVMValueRef {
+    public func CreateCJMemSetStructWith0(addr: LLVMValueRef): LLVMValueRef {
+        let allocatedType = unsafe { LLVMGetAllocatedType(addr) }
+        CJC_ASSERT(unsafe { LLVMGetTypeKind(allocatedType) } == LLVM_STRUCT_TYPE_KIND)
+        let currentLocation = unsafe { LLVMGetCurrentDebugLocation2(builder.raw) }
+        unsafe { LLVMSetCurrentDebugLocation2(builder.raw, LLVMNullMetadata()) }
         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
         let pointerType = unsafe { LLVMPointerType(i8Type, 0u32) }
         let dest = CreateBitCast(addr, pointerType, name: "cj.memset.addr")
@@ -1164,6 +1168,7 @@ public class IRBuilder2 <: Resource {
         if (!cjMemset.isNull() && operandCount > 0) {
             unsafe { LLVMSetOperand(memsetCall, UInt32(operandCount - 1), cjMemset) }
         }
+        unsafe { LLVMSetCurrentDebugLocation2(builder.raw, currentLocation) }
         return memsetCall
     }
 

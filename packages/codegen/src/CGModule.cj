@@ -91,7 +91,7 @@ public class MTableInterfaceInfo {
 public class CGModule {
     private let cgCtx: CGContext
     private var module: Option<LLVMModuleHandle>
-    private let functions: HashMap<Value, CGFunction> = HashMap<Value, CGFunction>()
+    private let functions: HashMap<UIntNative, CGFunction> = HashMap<UIntNative, CGFunction>()
     private let globalVariables: HashMap<String, CGValue> = HashMap<String, CGValue>()
     private let localValueMapping: HashMap<Value, CGValue> = HashMap<Value, CGValue>()
     // Mirrors CodeGen/CGModule.h:309-310.
@@ -325,8 +325,8 @@ public class CGModule {
 
     public func GetOrInsertCGFunction(chirValue: Value, forWrapper!: Bool = false): CGFunction {
         let name = GetCodeGenGlobalName(chirValue)
-        if (functions.contains(chirValue)) {
-            return functions[chirValue]
+        if (localValueMapping.contains(chirValue)) {
+            return (localValueMapping[chirValue] as CGFunction).getOrThrow()
         }
         let cgFuncType = CGType.GetOrCreateWithNode(this, chirValue, allowBasePtr: true, forWrapper: forWrapper)
         let functionType = if (let Some(chirType) <- chirValue.GetType()) {
@@ -416,7 +416,8 @@ public class CGModule {
             AddFnAttr(rawFunction, "readonly")
             AddFnAttr(rawFunction, "willreturn")
         }
-        functions[chirValue] = cgFunc
+        functions[rawFunction.toUIntNative()] = cgFunc
+        SetOrUpdateMappedCGValue(chirValue, cgFunc)
         return cgFunc
     }
 
@@ -677,8 +678,8 @@ public class CGModule {
 
     public func GetOrInsertGlobalVariable(chirGV: GlobalVar): CGValue {
         let name = GetCodeGenGlobalName(chirGV)
-        if (globalVariables.contains(name)) {
-            return globalVariables[name]
+        if (let Some(mappedValue) <- GetMappedValue(chirGV)) {
+            return mappedValue
         }
         let chirType = if (let Some(valueType) <- chirGV.GetType()) {
             valueType
@@ -717,27 +718,12 @@ public class CGModule {
         }
         let cgValue = CGValue(rawGlobal, cgType)
         globalVariables[name] = cgValue
+        SetOrUpdateMappedCGValue(chirGV, cgValue)
         return cgValue
     }
 
     public func GetMappedValue(chirValue: Value): Option<CGValue> {
-        if (let Some(functionValue) <- (chirValue as Function)) {
-            if (functions.contains(functionValue)) {
-                return functions[functionValue]
-            }
-            return None
-        }
-        if (let Some(globalValue) <- (chirValue as GlobalVar)) {
-            let name = GetCodeGenGlobalName(globalValue)
-            if (globalVariables.contains(name)) {
-                return globalVariables[name]
-            }
-            return None
-        }
-        if (localValueMapping.contains(chirValue)) {
-            return localValueMapping[chirValue]
-        }
-        return None
+        return localValueMapping.get(chirValue)
     }
 
     // Mirrors CodeGen/CGModule.h:185-188 CGModule::SetValuesToLoad.
@@ -761,30 +747,7 @@ public class CGModule {
     }
 
     public func SetOrUpdateMappedCGValue(chirValue: Value, value: CGValue): Unit {
-        if (let Some(functionValue) <- (chirValue as Function)) {
-            if (let Some(cgFunction) <- (value as CGFunction)) {
-                functions[functionValue] = cgFunction
-                return
-            }
-            throw IllegalArgumentException("function mapping requires CGFunction: " + GetCodeGenGlobalName(functionValue))
-        }
-        if (let Some(globalValue) <- (chirValue as GlobalVar)) {
-            globalVariables[GetCodeGenGlobalName(globalValue)] = value
-            return
-        }
         localValueMapping[chirValue] = value
-    }
-
-    public func RemoveMappedCGValue(chirValue: Value): Unit {
-        if (let Some(functionValue) <- (chirValue as Function)) {
-            functions.remove(functionValue)
-            return
-        }
-        if (let Some(globalValue) <- (chirValue as GlobalVar)) {
-            globalVariables.remove(GetCodeGenGlobalName(globalValue))
-            return
-        }
-        localValueMapping.remove(chirValue)
     }
 
     public func GetMappedCGValue(chirValue: Value): CGValue {

@@ -242,7 +242,7 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             if (irBuilder.IsLLVMTypeContainsRef(thisLLVMType)) {
                 if (item.isCalleeMutOrCtor) {
                     let load = irBuilder.CreateEntryAlloca(thisLLVMType)
-                    let _ = irBuilder.CreateCJMemsetStructWith0(load, thisLLVMType)
+                    let _ = irBuilder.CreateCJMemSetStructWith0(load)
                     irBuilder.CallGCReadAgg(thisLLVMType, ArrayList<LLVMValueRef>(
                         [load, basePtr, thisParamWithoutTI, size64]))
                     irBuilder.CallGCWriteAgg(thisLLVMType, ArrayList<LLVMValueRef>(
@@ -290,7 +290,7 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             }
             if (irBuilder.IsLLVMTypeContainsRef(thisLLVMType)) {
                 let load = irBuilder.CreateEntryAlloca(thisLLVMType)
-                let _ = irBuilder.CreateCJMemsetStructWith0(load, thisLLVMType)
+                let _ = irBuilder.CreateCJMemSetStructWith0(load)
                 irBuilder.CallGCReadAgg(thisLLVMType, ArrayList<LLVMValueRef>(
                     [load, thisParamWithTI, payloadPtr, size64]))
                 irBuilder.CallGCWriteAgg(thisLLVMType, ArrayList<LLVMValueRef>(
@@ -476,7 +476,7 @@ private func CreateCJEntryTryScope(cgMod: CGModule, irBuilder: IRBuilder2, userM
         let getCommandLineArgsFuncReturnType = getCommandLineArgsFuncCHIRNode.GetFuncType().getOrThrow().GetReturnType()
         let retCGType = CGType.GetOrCreate(cgMod, getCommandLineArgsFuncReturnType)
         let commandLineArgs = irBuilder.CreateEntryAlloca(retCGType.GetLLVMType())
-        let _ = irBuilder.CreateCJMemsetStructWith0(commandLineArgs, retCGType.GetLLVMType())
+        let _ = irBuilder.CreateCJMemSetStructWith0(commandLineArgs)
         let commandLineArgsCallArgs = ArrayList<LLVMValueRef>()
         commandLineArgsCallArgs.add(commandLineArgs)
         let _ = irBuilder.CreateGetCommandLineArgsCall(commandLineArgsCallArgs)
