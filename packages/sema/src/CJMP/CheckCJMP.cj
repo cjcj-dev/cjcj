@@ -49,6 +49,46 @@ private func GetTypeNameFromTy(ty: Ty, forCJMPMatch: Bool, genericIdx: HashMap<P
     }
 }
 
+private func CalculatedGenericConstraintsStr(genericConstraints: ArrayList<GenericConstraint>,
+    genericIdx: HashMap<Ptr<Ty>, UInt32>): String {
+    var ret = ""
+    var constraintCount: Int64 = 0
+    for (genericConstraint in genericConstraints) {
+        if (!genericConstraint.isImplicitlyIntroduced) {
+            constraintCount++
+        }
+    }
+    if (constraintCount == 0) {
+        return ret
+    }
+
+    let genericConstraintStrings = TreeSet<String>()
+    for (genericConstraint in genericConstraints) {
+        if (genericConstraint.isImplicitlyIntroduced) {
+            continue
+        }
+        let upperBoundStrings = TreeSet<String>()
+        for (upperBound in genericConstraint.upperBounds) {
+            upperBoundStrings.add(GetTypeNameFromTy(upperBound.GetTy().getOrThrow(), true, genericIdx))
+        }
+        CJC_ASSERT(!upperBoundStrings.isEmpty())
+
+        var genericConstraintString = "[" + GetTypeNameFromTy(
+            genericConstraint.refType.getOrThrow().GetTy().getOrThrow(), true, genericIdx) + "<:"
+        for (upperBoundString in upperBoundStrings) {
+            genericConstraintString += upperBoundString + ","
+        }
+        genericConstraintString += "]"
+        genericConstraintStrings.add(genericConstraintString)
+    }
+    CJC_ASSERT(!genericConstraintStrings.isEmpty())
+
+    for (genericConstraintString in genericConstraintStrings) {
+        ret += genericConstraintString
+    }
+    return ret
+}
+
 private func IsCommon(node: Node): Bool {
     return node.TestAttr(Attribute.COMMON)
 }
