@@ -9,6 +9,8 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Position as BasicPosition
 import cjcj::modules.SemaImportManager
+import cjcj::option.BackendType as OptionBackendType
+import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::utils.CTYPE_NAME
 import cjcj::utils.FileUtil
 
@@ -788,7 +790,8 @@ public func PreCheckPackage(pkg: Package): Bool {
 }
 
 public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeManager = TypeManager(),
-    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None,
+    backendType!: OptionBackendType = OptionGlobalOptions().backend): Bool {
     ctx.curPackage = pkg
     ctx.fullPackageName = pkg.fullPackageName
     ctx.mem2Decls.clear()
@@ -801,7 +804,7 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
         }
     }
     collectLetPatternDecls(ctx, pkg)
-    PreSetDeclType(typeManager, ctx, importManager: importManager, diag: diag)
+    PreSetDeclType(typeManager, ctx, importManager: importManager, diag: diag, backendType: backendType)
     addSuperClassObjectForClassDecl(ctx, pkg, diag.getOrThrow())
     CollectAndCheckAssumption(typeManager, ctx, pkg, diag.getOrThrow())
     return valid

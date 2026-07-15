@@ -7,6 +7,9 @@ import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::modules.SemaImportManager
+import cjcj::option.BackendType as OptionBackendType
+import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::option.IsUnsafeBackend as OptionIsUnsafeBackend
 
 private class ResolveTypeWalkerBox {
     public var typeManager: TypeManager
@@ -931,16 +934,76 @@ func ReplaceThisTypeInFunc(typeManager: TypeManager, funcDecl: FuncDecl): Unit {
 }
 
 public func PreSetDeclType(typeManager: TypeManager, ctx: ASTContext,
-    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
+    importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None,
+    backendType!: OptionBackendType = OptionGlobalOptions().backend): Unit {
     ResolveDecls(typeManager, ctx, importManager: importManager, diag: diag)
     ResolveTypeAlias(typeManager, ctx, importManager: importManager, diag: diag)
     MarkAliasGenericParameters(ctx)
     ResolveNames(typeManager, ctx, importManager: importManager, diag: diag)
-    // C++: src/Sema/PreCheck.cpp:1795-1800 calls ReplaceThisTypeInFunc for every FuncDecl.
-    let syms = ctx.searcher.Search(ctx, ASTKindQuery(ASTKind.FUNC_DECL), order: SearchOrder.POS_ASC)
+    // C++: src/Sema/PreCheck.cpp:1774-1782 presets every enum constructor before the function pass.
+    var syms = ctx.searcher.Search(ctx, ASTKindQuery(ASTKind.ENUM_DECL), order: SearchOrder.POS_ASC)
+    for (sym in syms) {
+        let enumDecl = (sym.node.getOrThrow() as EnumDecl).getOrThrow()
+        for (constructor in enumDecl.constructors) {
+            let _ = TypeCheckDeclSetEnumElementTy(typeManager, constructor, diag: diag)
+        }
+    }
+    // C++: src/Sema/PreCheck.cpp:1783-1793 presets explicitly typed variables and properties.
+    syms = ctx.searcher.Search(ctx, ASTKindQuery(ASTKind.VAR_DECL), order: SearchOrder.POS_ASC)
+    let propSyms = ctx.searcher.Search(ctx, ASTKindQuery(ASTKind.PROP_DECL), order: SearchOrder.POS_ASC)
+    for (propSym in propSyms) {
+        syms.add(propSym)
+    }
+    for (sym in syms) {
+        let varDecl = (sym.node.getOrThrow() as VarDecl).getOrThrow()
+        if (let Some(typeNode) <- varDecl.typeNode) {
+            if (Ty.IsTyCorrect(typeNode.GetTy())) {
+                varDecl.SetTy(typeNode.GetTy().getOrThrow())
+            }
+        }
+    }
+    // C++: src/Sema/PreCheck.cpp:1794-1827 presets every function declaration.
+    syms = ctx.searcher.Search(ctx, ASTKindQuery(ASTKind.FUNC_DECL), order: SearchOrder.POS_ASC)
     for (sym in syms) {
         let funcDecl = (sym.node.getOrThrow() as FuncDecl).getOrThrow()
         ReplaceThisTypeInFunc(typeManager, funcDecl)
+        if (Ty.IsTyCorrect(funcDecl.GetTy())) {
+            continue
+        }
+        let funcBody = funcDecl.funcBody.getOrThrow()
+        let paramTys = GetFuncBodyParamTys(funcBody)
+        var retTy: Ty = TypeManager.GetQuestTy()
+        if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+            retTy = if (funcDecl.TestAttr(Attribute.STATIC)) {
+                TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            } else if (let Some(outerDecl) <- funcDecl.outerDecl) {
+                if (outerDecl.IsNominalDecl()) {
+                    outerDecl.GetTy().getOrThrow()
+                } else {
+                    TypeManager.GetInvalidTy()
+                }
+            } else {
+                TypeManager.GetInvalidTy()
+            }
+            funcDecl.SetTy(typeManager.GetFunctionTy(paramTys.toArray(), retTy))
+            continue
+        }
+        if (let Some(retType) <- funcBody.retType) {
+            retTy = retType.GetTy().getOrThrow()
+        } else if (let Some(body) <- funcBody.body) {
+            if (body.body.isEmpty()) {
+                retTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            }
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = funcBody.TestAttr(Attribute.C) ||
+            (funcDecl.TestAttr(Attribute.FOREIGN) && OptionIsUnsafeBackend(backendType))
+        cfg.hasVariableLenArg = funcDecl.hasVariableLenArg ||
+            (!funcBody.paramLists.isEmpty() && funcBody.paramLists[0].hasVariableLenArg)
+        funcDecl.SetTy(typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg))
+        if (funcDecl.TestAttr(Attribute.IS_CHECK_VISITED)) {
+            funcBody.SetTy(funcDecl.GetTy().getOrThrow())
+        }
     }
 }
 
