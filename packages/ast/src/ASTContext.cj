@@ -45,8 +45,6 @@ public class InvertedIndex {
         putLevel(scopeLevelIndexes, symbol.scopeLevel, symbol)
         let astKindName = ASTKindName(symbol.astKind)
         putString(astKindIndexes, astKindName, symbol)
-        scopeNameTrie.Insert(symbol.scopeName)
-        astKindTrie.Insert(astKindName)
         if (withTrie) {
             nameTrie.Insert(symbol.name, symbol)
             if (let Some(node) <- symbol.node) {

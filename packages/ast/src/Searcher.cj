@@ -4,28 +4,28 @@ import cjcj::utils.{CJC_ASSERT, FileUtil}
 import std.collection.*
 
 public class TrieNode {
-    public var c: String = ""
+    public var c: UInt8 = 0u8
     public var value: String = ""
     public var prefix: String = ""
     public var depth: UInt32 = 0u32
     public var parent: Option<TrieNode> = None
-    public let next: HashMap<String, TrieNode> = HashMap<String, TrieNode>()
+    public let next: TreeMap<UInt8, TrieNode> = TreeMap<UInt8, TrieNode>()
     public let suffixes: HashSet<String> = HashSet<String>()
     public let ids: TreeSet<Ptr<Symbol>> = TreeSet<Ptr<Symbol>>()
     public init() {}
 
-    public init(c: String) {
+    public init(c: UInt8) {
         this.c = c
     }
 }
 
 public class Trie {
-    public var root: TrieNode = TrieNode("R")
+    public var root: TrieNode = TrieNode(82u8)
 
     public init() {}
 
     public func Reset(): Unit {
-        root = TrieNode("R")
+        root = TrieNode(82u8)
     }
 
     public func Reset(value: String): Unit {
@@ -38,20 +38,14 @@ public class Trie {
         var prefix = ""
         var idx: Int64 = 0
         for (byte in value.toArray()) {
-            let key = String.fromUtf8([byte])
-            prefix += key
-            if (!node.next.contains(key)) {
-                let child = TrieNode(key)
-                child.prefix = prefix
-                child.depth = node.depth + 1u32
-                child.parent = node
-                node.next[key] = child
+            if (!node.next.contains(byte)) {
+                node.next[byte] = TrieNode(byte)
             }
-            if (let Some(child) <- node.next.get(key)) {
-                node = child
-                if (idx + 1 < value.size) {
-                    node.suffixes.add(value[(idx + 1)..])
-                }
+            node = node.next.get(byte).getOrThrow()
+            prefix = value[..(idx + 1)]
+            node.prefix = prefix
+            if (idx + 1 < value.size) {
+                node.suffixes.add(value[(idx + 1)..])
             }
             idx++
         }
@@ -63,21 +57,18 @@ public class Trie {
         var prefix = ""
         var idx: Int64 = 0
         for (byte in value.toArray()) {
-            let key = String.fromUtf8([byte])
-            prefix += key
-            if (!node.next.contains(key)) {
-                let child = TrieNode(key)
-                child.prefix = prefix
-                child.depth = node.depth + 1u32
-                child.parent = node
-                node.next[key] = child
+            if (!node.next.contains(byte)) {
+                node.next[byte] = TrieNode(byte)
             }
-            if (let Some(child) <- node.next.get(key)) {
-                node = child
-                node.ids.add(Ptr<Symbol>(symbol))
-                if (idx + 1 < value.size) {
-                    node.suffixes.add(value[(idx + 1)..])
-                }
+            let child = node.next.get(byte).getOrThrow()
+            child.depth = node.depth + 1u32
+            child.parent = node
+            child.ids.add(Ptr<Symbol>(symbol))
+            node = child
+            prefix = value[..(idx + 1)]
+            node.prefix = prefix
+            if (idx + 1 < value.size) {
+                node.suffixes.add(value[(idx + 1)..])
             }
             idx++
         }
@@ -87,13 +78,12 @@ public class Trie {
     public func Delete(value: String, symbol: Symbol): Unit {
         var node = root
         for (byte in value.toArray()) {
-            let key = String.fromUtf8([byte])
-            if (let Some(child) <- node.next.get(key)) {
-                child.ids.remove(Ptr<Symbol>(symbol))
-                node = child
-            } else {
+            if (node.next.isEmpty()) {
                 return
             }
+            let child = node.next.get(byte).getOrThrow()
+            child.ids.remove(Ptr<Symbol>(symbol))
+            node = child
         }
     }
 
@@ -110,8 +100,7 @@ public class Trie {
     public func GetPrefixRootNode(prefix: String): Option<TrieNode> {
         var node = root
         for (byte in prefix.toArray()) {
-            let key = String.fromUtf8([byte])
-            if (let Some(child) <- node.next.get(key)) {
+            if (let Some(child) <- node.next.get(byte)) {
                 node = child
             } else {
                 return None
@@ -187,8 +176,7 @@ public class PosSearchApi {
     public static func FindCommonRootInPosTrie(posTrie: Trie, pos: String): TrieNode {
         var node = posTrie.root
         for (byte in pos.toArray()) {
-            let key = String.fromUtf8([byte])
-            if (let Some(child) <- node.next.get(key)) {
+            if (let Some(child) <- node.next.get(byte)) {
                 node = child
             } else {
                 return node
@@ -227,7 +215,7 @@ public class PosSearchApi {
                 }
                 break
             }
-            let target = digitAt(posStr, node.depth)
+            let target = posStr.toArray()[Int64(node.depth)]
             for ((key, child) in node.next) {
                 let selected = if (close) { !(key < target) } else { target < key }
                 if (selected) {
@@ -273,8 +261,8 @@ public class PosSearchApi {
 
     public static func GetIDsLessThanPosOfDepth(
         n: TrieNode, posStr: String, ids: TreeSet<Ptr<Symbol>>, isClose: Box<Bool>): Unit {
-        let target = digitAt(posStr, n.depth)
-        var endIter = ""
+        let target = posStr.toArray()[Int64(n.depth)]
+        var endIter = 0u8
         var foundEndIter = false
         for ((key, _) in n.next) {
             if (!(key < target) && (!foundEndIter || key < endIter)) {
@@ -298,14 +286,6 @@ public class PosSearchApi {
                 }
             }
         }
-    }
-
-    private static func digitAt(value: String, depth: UInt32): String {
-        let idx = Int64(depth)
-        if (idx < 0 || idx >= value.size) {
-            return ""
-        }
-        return value[idx..(idx + 1)]
     }
 
     private static func fillZeroUInt(value: UInt64, width: Int64): String {
