@@ -3756,6 +3756,7 @@ extend TypeChecker {
         }
         if (let Some(structDecl) <- (decl as StructDecl)) {
             SynthesizeInheritedTypes(ctx, structDecl)
+            let _ = TypeCheckDeclCheckStructInheritedTypes(impl.diag.getOrThrow(), structDecl)
             if (let Some(body2) <- structDecl.body) {
                 TypeCheckCompositeBody(ctx, structDecl, body2.decls)
                 impl.CheckRecursiveConstructorCall(body2.decls)
