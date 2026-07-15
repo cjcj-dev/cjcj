@@ -1,6 +1,7 @@
 package cjcj::ast
 
 import std.collection.*
+import std.sort.*
 import std.sync.AtomicInt64
 import cjcj::utils.Identifiable
 
@@ -52,14 +53,23 @@ private func typeArgsString(values: ArrayList<Ty>, delimiter: String): String {
     return JoinStrings(parts, delimiter)
 }
 
-private func typeLessByStableName(left: Ty, right: Ty): Bool {
+private func CompTyByNames(left: Ty, right: Ty): Bool {
     let leftStr = left.String()
     let rightStr = right.String()
-    return leftStr < rightStr || (leftStr == rightStr && left.Hash() < right.Hash())
-}
-
-private func sameStableTypeName(left: Ty, right: Ty): Bool {
-    return !typeLessByStableName(left, right) && !typeLessByStableName(right, left)
+    if (leftStr < rightStr) {
+        return true
+    }
+    if (leftStr != rightStr) {
+        return false
+    }
+    let leftDecl = Ty.GetDeclPtrOfTy(Some(left))
+    let rightDecl = Ty.GetDeclPtrOfTy(Some(right))
+    if (let Some(leftDeclValue) <- leftDecl) {
+        if (let Some(rightDeclValue) <- rightDecl) {
+            return CompNodeByPos(leftDeclValue, rightDeclValue)
+        }
+    }
+    return Ptr<Ty>(left) < Ptr<Ty>(right)
 }
 
 private func stableTypeArgsString(values: ArrayList<Ty>, delimiter: String): String {
@@ -68,11 +78,11 @@ private func stableTypeArgsString(values: ArrayList<Ty>, delimiter: String): Str
         var idx: Int64 = 0
         var inserted = false
         while (idx < sorted.size) {
-            if (sameStableTypeName(sorted[idx], value)) {
+            if (!CompTyByNames(sorted[idx], value) && !CompTyByNames(value, sorted[idx])) {
                 inserted = true
                 break
             }
-            if (typeLessByStableName(value, sorted[idx])) {
+            if (CompTyByNames(value, sorted[idx])) {
                 sorted.add(value, at: idx)
                 inserted = true
                 break
@@ -93,53 +103,6 @@ private func hashCombine(seed: Int64, value: Int64): Int64 {
 
 private func boolHash(value: Bool): Int64 {
     return if (value) { 1 } else { 0 }
-}
-
-private func declStableHash(decl: Option<Decl>): Int64 {
-    if (let Some(value) <- decl) {
-        var out = ASTKindIndex(value.astKind)
-        out = hashCombine(out, value.identifier.Val().hashCode())
-        out = hashCombine(out, value.fullPackageName.hashCode())
-        out = hashCombine(out, value.begin.hashCode())
-        out = hashCombine(out, value.end.hashCode())
-        return out
-    }
-    return 0
-}
-
-private func classDeclStableHash(decl: Option<ClassDecl>): Int64 {
-    if (let Some(value) <- decl) {
-        return declStableHash(value)
-    }
-    return 0
-}
-
-private func interfaceDeclStableHash(decl: Option<InterfaceDecl>): Int64 {
-    if (let Some(value) <- decl) {
-        return declStableHash(value)
-    }
-    return 0
-}
-
-private func structDeclStableHash(decl: Option<StructDecl>): Int64 {
-    if (let Some(value) <- decl) {
-        return declStableHash(value)
-    }
-    return 0
-}
-
-private func enumDeclStableHash(decl: Option<EnumDecl>): Int64 {
-    if (let Some(value) <- decl) {
-        return declStableHash(value)
-    }
-    return 0
-}
-
-private func typeAliasDeclStableHash(decl: Option<TypeAliasDecl>): Int64 {
-    if (let Some(value) <- decl) {
-        return declStableHash(value)
-    }
-    return 0
 }
 
 private func genericLowerBound(ty: Ty): Option<Ty> {
@@ -260,18 +223,12 @@ private func collectCandidateGenericTyArgs(
     }
 }
 
-private func hashTypeArgs(seed: Int64, values: ArrayList<Ty>): Int64 {
-    var out = seed
-    for (value in values) {
-        out = hashCombine(out, value.Hash())
-    }
-    return out
-}
-
-private func hashNominalTy(kind: TypeKind, name: String, typeArgs: ArrayList<Ty>, declHash: Int64): Int64 {
-    var out = TypeKindIndex(kind)
+private func HashNominalTy(name: String, typeArgs: ArrayList<Ty>, declHash: Int64): Int64 {
+    var out: Int64 = 0
     out = hashCombine(out, name.hashCode())
-    out = hashTypeArgs(out, typeArgs)
+    for (typeArg in typeArgs) {
+        out = hashCombine(out, Ptr<Ty>(typeArg).hashCode())
+    }
     out = hashCombine(out, declHash)
     return out
 }
@@ -648,7 +605,7 @@ public open class Ty <: Identifiable {
     }
 
     public open func Hash(): Int64 {
-        return hashCode()
+        return Ptr<Ty>(this).hashCode()
     }
 
     public open operator func ==(right: Ty): Bool {
@@ -968,11 +925,12 @@ public class ArrayTy <: Ty {
     }
 
     public override func Hash(): Int64 {
-        var out = TypeKindIndex(TypeKind.TYPE_ARRAY)
+        var out: Int64 = 0
         if (!typeArgs.isEmpty()) {
-            out = hashCombine(out, typeArgs[0].Hash())
+            out = hashCombine(out, Ptr<Ty>(typeArgs[0]).hashCode())
         }
-        return hashCombine(out, Int64(dims))
+        out = hashCombine(out, Int64(dims))
+        return hashCombine(out, TypeKindIndex(TypeKind.TYPE_ARRAY))
     }
 
     public override operator func ==(right: Ty): Bool {
@@ -1010,11 +968,12 @@ public class VArrayTy <: Ty {
     }
 
     public override func Hash(): Int64 {
-        var out = TypeKindIndex(TypeKind.TYPE_VARRAY)
+        var out: Int64 = 0
         if (!typeArgs.isEmpty()) {
-            out = hashCombine(out, typeArgs[0].Hash())
+            out = hashCombine(out, Ptr<Ty>(typeArgs[0]).hashCode())
         }
-        return hashCombine(out, size)
+        out = hashCombine(out, size)
+        return hashCombine(out, TypeKindIndex(TypeKind.TYPE_VARRAY))
     }
 
     public override operator func ==(right: Ty): Bool {
@@ -1049,11 +1008,11 @@ public class PointerTy <: Ty {
     }
 
     public override func Hash(): Int64 {
-        var out = TypeKindIndex(TypeKind.TYPE_POINTER)
+        var out: Int64 = 0
         if (!typeArgs.isEmpty()) {
-            out = hashCombine(out, typeArgs[0].Hash())
+            out = hashCombine(out, Ptr<Ty>(typeArgs[0]).hashCode())
         }
-        return out
+        return hashCombine(out, TypeKindIndex(TypeKind.TYPE_POINTER))
     }
 
     public override operator func ==(right: Ty): Bool {
@@ -1105,8 +1064,11 @@ public class TupleTy <: Ty {
     }
 
     public override func Hash(): Int64 {
-        var out = hashCombine(TypeKindIndex(TypeKind.TYPE_TUPLE), boolHash(isClosureTy))
-        return hashTypeArgs(out, typeArgs)
+        var out = hashCombine(0, boolHash(isClosureTy))
+        for (typeArg in typeArgs) {
+            out = hashCombine(out, Ptr<Ty>(typeArg).hashCode())
+        }
+        return hashCombine(out, TypeKindIndex(TypeKind.TYPE_TUPLE))
     }
 
     public override operator func ==(right: Ty): Bool {
@@ -1172,14 +1134,15 @@ public class FuncTy <: Ty {
     }
 
     public override func Hash(): Int64 {
-        var out = TypeKindIndex(TypeKind.TYPE_FUNC)
-        out = hashCombine(out, retTy.Hash())
-        out = hashTypeArgs(out, paramTys)
+        var out = hashCombine(0, Ptr<Ty>(retTy).hashCode())
+        for (paramTy in paramTys) {
+            out = hashCombine(out, Ptr<Ty>(paramTy).hashCode())
+        }
         out = hashCombine(out, boolHash(isClosureTy))
         out = hashCombine(out, boolHash(isC))
         out = hashCombine(out, boolHash(hasVariableLenArg))
         out = hashCombine(out, boolHash(noCast))
-        return out
+        return hashCombine(out, TypeKindIndex(TypeKind.TYPE_FUNC))
     }
 
     public override operator func ==(right: Ty): Bool {
@@ -1217,7 +1180,16 @@ public class UnionTy <: Ty {
     }
 
     public override func Hash(): Int64 {
-        return hashTypeArgs(TypeKindIndex(TypeKind.TYPE_UNION), tys)
+        let orderedTys = ArrayList<Ptr<Ty>>()
+        for (ty in tys) {
+            orderedTys.add(Ptr<Ty>(ty))
+        }
+        sort(orderedTys, by: { left: Ptr<Ty>, right: Ptr<Ty> => left.compare(right) }, stable: true)
+        var out: Int64 = 0
+        for (ty in orderedTys) {
+            out = hashCombine(out, ty.hashCode())
+        }
+        return hashCombine(out, TypeKindIndex(TypeKind.TYPE_UNION))
     }
 
     public override operator func ==(right: Ty): Bool {
@@ -1258,7 +1230,16 @@ public class IntersectionTy <: Ty {
     }
 
     public override func Hash(): Int64 {
-        return hashTypeArgs(TypeKindIndex(TypeKind.TYPE_INTERSECTION), tys)
+        let orderedTys = ArrayList<Ptr<Ty>>()
+        for (ty in tys) {
+            orderedTys.add(Ptr<Ty>(ty))
+        }
+        sort(orderedTys, by: { left: Ptr<Ty>, right: Ptr<Ty> => left.compare(right) }, stable: true)
+        var out: Int64 = 0
+        for (ty in orderedTys) {
+            out = hashCombine(out, ty.hashCode())
+        }
+        return hashCombine(out, TypeKindIndex(TypeKind.TYPE_INTERSECTION))
     }
 
     public override operator func ==(right: Ty): Bool {
@@ -1319,7 +1300,11 @@ public class InterfaceTy <: ClassLikeTy {
     }
 
     public override func Hash(): Int64 {
-        return hashNominalTy(TypeKind.TYPE_INTERFACE, name, typeArgs, interfaceDeclStableHash(declPtr))
+        var declHash: Int64 = 0
+        if (let Some(value) <- declPtr) {
+            declHash = value.hashCode()
+        }
+        return HashNominalTy(name, typeArgs, declHash)
     }
 
     public override operator func ==(right: Ty): Bool {
@@ -1416,7 +1401,11 @@ public open class ClassTy <: ClassLikeTy {
     }
 
     public open override func Hash(): Int64 {
-        let base = hashNominalTy(TypeKind.TYPE_CLASS, name, typeArgs, classDeclStableHash(declPtr))
+        var declHash: Int64 = 0
+        if (let Some(value) <- declPtr) {
+            declHash = value.hashCode()
+        }
+        let base = HashNominalTy(name, typeArgs, declHash)
         return hashCombine(base, 0)
     }
 
@@ -1457,7 +1446,11 @@ public class ClassThisTy <: ClassTy {
     }
 
     public override func Hash(): Int64 {
-        let base = hashNominalTy(TypeKind.TYPE_CLASS, name, typeArgs, classDeclStableHash(declPtr))
+        var declHash: Int64 = 0
+        if (let Some(value) <- declPtr) {
+            declHash = value.hashCode()
+        }
+        let base = HashNominalTy(name, typeArgs, declHash)
         return hashCombine(base, 1)
     }
 
@@ -1504,7 +1497,11 @@ public class TypeAliasTy <: Ty {
     }
 
     public override func Hash(): Int64 {
-        return hashNominalTy(TypeKind.TYPE, name, typeArgs, typeAliasDeclStableHash(declPtr))
+        var declHash: Int64 = 0
+        if (let Some(value) <- declPtr) {
+            declHash = value.hashCode()
+        }
+        return HashNominalTy(name, typeArgs, declHash)
     }
 
     public override operator func ==(right: Ty): Bool {
@@ -1555,7 +1552,7 @@ public class GenericsTy <: Ty {
     public override func Hash(): Int64 {
         var out = 0
         if (let Some(genericDecl) <- decl) {
-            out = hashCombine(out, genericDecl.objectId)
+            out = hashCombine(out, genericDecl.hashCode())
         }
         return out
     }
@@ -1622,7 +1619,11 @@ public open class EnumTy <: Ty {
     }
 
     public open override func Hash(): Int64 {
-        let base = hashNominalTy(TypeKind.TYPE_ENUM, name, typeArgs, enumDeclStableHash(declPtr))
+        var declHash: Int64 = 0
+        if (let Some(value) <- declPtr) {
+            declHash = value.hashCode()
+        }
+        let base = HashNominalTy(name, typeArgs, declHash)
         return hashCombine(base, 0)
     }
 
@@ -1664,7 +1665,11 @@ public class RefEnumTy <: EnumTy {
     }
 
     public override func Hash(): Int64 {
-        let base = hashNominalTy(TypeKind.TYPE_ENUM, name, typeArgs, enumDeclStableHash(declPtr))
+        var declHash: Int64 = 0
+        if (let Some(value) <- declPtr) {
+            declHash = value.hashCode()
+        }
+        let base = HashNominalTy(name, typeArgs, declHash)
         return hashCombine(base, 1)
     }
 
@@ -1713,7 +1718,11 @@ public class StructTy <: Ty {
     }
 
     public override func Hash(): Int64 {
-        return hashNominalTy(TypeKind.TYPE_STRUCT, name, typeArgs, structDeclStableHash(declPtr))
+        var declHash: Int64 = 0
+        if (let Some(value) <- declPtr) {
+            declHash = value.hashCode()
+        }
+        return HashNominalTy(name, typeArgs, declHash)
     }
 
     public override operator func ==(right: Ty): Bool {
