@@ -821,7 +821,7 @@ public class IRBuilder2 <: Resource {
     }
 
     public func IsGlobalVariableBasePtr(value: LLVMValueRef): Bool {
-        return !value.isNull() && !unsafe { LLVMIsAGlobalVariable(value) }.isNull()
+        return !unsafe { LLVMIsAGlobalVariable(LLVMSelfhostStripInBoundsOffsets(value)) }.isNull()
     }
 
     public func TryCreateGenericStore(value: CGValue, dest: CGValue, boxType!: Option<Type> = None): Option<LLVMValueRef> {

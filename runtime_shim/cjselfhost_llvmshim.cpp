@@ -22,6 +22,8 @@
 //         src/CodeGen/CJNative/EmitPackageIR.cpp:526-616  llvm::CallBase/InvokeInst APIs.
 //   Constant array literal support:
 //         src/CodeGen/Utils/CGUtils.cpp:250-255  llvm::dyn_cast<llvm::Constant>(value).
+//   IRBuilder2::IsGlobalVariableBasePtr support:
+//         src/CodeGen/CJNative/CJNativeIRBuilder.cpp:456-459  Value::stripInBoundsOffsets().
 //   DIBuilder subprogram support:
 //         src/CodeGen/DIBuilder.cpp:204-207, 282-283, 455-476  C++ overloads not exposed exactly by LLVM-C.
 //   DIBuilder composite type support:
@@ -376,6 +378,11 @@ extern "C" LLVMValueRef LLVMSelfhostCreateCall(LLVMBuilderRef Builder, LLVMTypeR
 	        return wrap(gep->getResultElementType());
 	    }
 	    return nullptr;
+	}
+
+	extern "C" LLVMValueRef LLVMSelfhostStripInBoundsOffsets(LLVMValueRef Value)
+	{
+	    return wrap(unwrap(Value)->stripInBoundsOffsets());
 	}
 
 	extern "C" LLVMValueRef LLVMSelfhostCreateAtomicCmpXchg(
