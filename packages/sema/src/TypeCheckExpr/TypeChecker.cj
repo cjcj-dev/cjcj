@@ -473,6 +473,10 @@ private func IsAnyParamTypeOmitted(le: LambdaExpr): Bool {
     return false
 }
 
+private func IsLambdaIncompatible(le: LambdaExpr, paramsMismatched: Bool): Bool {
+    return paramsMismatched && IsAnyParamTypeOmitted(le)
+}
+
 // C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:49-100 ClearCacheForNames.
 private func ClearCacheForNames(ctx: ASTContext, le: LambdaExpr, paramNames: ArrayList<String>): Unit {
     let parentStack = ArrayList<Node>()
@@ -3564,6 +3568,38 @@ extend TypeChecker {
         return fp.GetTy() ?? TypeManager.GetInvalidTy()
     }
 
+    private func ChkFuncParam(ctx: ASTContext, target: Ty, fp: FuncParam): Bool {
+        if (let Some(fpTy) <- fp.GetTy()) {
+            if (Ptr<Ty>(fpTy) == Ptr<Ty>(target)) {
+                return true
+            }
+        }
+        if (let Some(typeNode) <- fp.typeNode) {
+            let _ = SynthesizeNode(ctx, SynPos.NONE, typeNode)
+            if (!Ty.IsTyCorrect(typeNode.GetTy())) {
+                return false
+            }
+            fp.SetTy(typeNode.GetTy().getOrThrow())
+            if (!impl.typeManager.IsSubtype(target, typeNode.GetTy().getOrThrow())) {
+                if (let Some(diagValue) <- impl.diag) {
+                    DiagMismatchedTypes(diagValue, fp, target)
+                }
+                return false
+            }
+            if (let Some(assignment) <- fp.assignment) {
+                if (!Check(ctx, fp.GetTy().getOrThrow(), assignment)) {
+                    return false
+                }
+                if (let Some(desugarDecl) <- fp.desugarDecl) {
+                    let _ = SynthesizeNode(ctx, SynPos.NONE, desugarDecl)
+                }
+            }
+        } else {
+            fp.SetTy(target)
+        }
+        return true
+    }
+
     private func SynthesizePropDecl(ctx: ASTContext, pd: PropDecl): Ty {
         let propTy = CheckPropDecl(pd,
             { typeNode: Type =>
@@ -4930,7 +4966,7 @@ extend TypeChecker {
         return checkRet
     }
 
-    private func ClearLambdaBodyForContextCheck(le: LambdaExpr): Unit {
+    private func ClearLambdaBodyForReCheck(le: LambdaExpr): Unit {
         if (let Some(funcBody) <- le.funcBody) {
             if (let Some(body) <- funcBody.body) {
                 let walker = Walker(body, visitPre: { node: Node =>
@@ -5201,72 +5237,44 @@ extend TypeChecker {
         return le.GetTy().getOrThrow()
     }
 
-    private func LambdaParamListForCheck(le: LambdaExpr): Option<FuncParamList> {
-        if (let Some(funcBody) <- le.funcBody) {
-            if (!funcBody.paramLists.isEmpty()) {
-                return Some(funcBody.paramLists[0])
-            }
-        }
-        return None
-    }
-
-    private func CloneLambdaTargetFuncCfg(funcTy: FuncTy): FuncTyConfig {
-        let cfg = FuncTyConfig()
-        cfg.isC = funcTy.isC
-        cfg.isClosureTy = funcTy.isClosureTy
-        cfg.hasVariableLenArg = funcTy.hasVariableLenArg
-        cfg.noCast = funcTy.noCast
-        return cfg
-    }
-
-    private func CheckLambdaParamsWithTarget(ctx: ASTContext, le: LambdaExpr, targetFuncTy: FuncTy,
+    private func ChkLamParamTys(ctx: ASTContext, le: LambdaExpr, targetParamTys: ArrayList<Ty>,
         outParamTys: ArrayList<Ty>): Bool {
-        let paramList = LambdaParamListForCheck(le) ?? return false
-        if (paramList.params.size != targetFuncTy.paramTys.size) {
+        CJC_ASSERT(le.funcBody.isSome() && !le.funcBody.getOrThrow().paramLists.isEmpty())
+        let paramList = le.funcBody.getOrThrow().paramLists[0]
+        if (paramList.params.size != targetParamTys.size) {
+            if (let Some(diagValue) <- impl.diag) {
+                let builder = DiagnoseRefactor(
+                    diagValue, BasicDiagKindRefactor.sema_param_miss_match, paramList)
+                builder.AddMainHintArguments(
+                    [targetParamTys.size.toString(), paramList.params.size.toString()])
+                builder.Emit()
+            }
             return false
         }
         for (idx in 0..paramList.params.size) {
             let param = paramList.params[idx]
-            let targetParamTy = targetFuncTy.paramTys[idx]
-            var paramTy = targetParamTy
-            if (let Some(typeNode) <- param.typeNode) {
-                SynthesizeTypeNode(ctx, param.typeNode)
-                if (let Some(typeTy) <- typeNode.GetTy()) {
-                    paramTy = typeTy
-                } else {
-                    return false
-                }
-            }
-            param.SetTy(paramTy)
-            if (!impl.typeManager.IsSubtype(targetParamTy, paramTy, implicitBoxed: false, allowOptionBox: false)) {
+            let targetParamTy = targetParamTys[idx]
+            if (!ChkFuncParam(ctx, targetParamTy, param)) {
                 return false
             }
-            outParamTys.add(paramTy)
+            if (!impl.typeManager.IsSubtype(targetParamTy, param.GetTy().getOrThrow(),
+                implicitBoxed: false, allowOptionBox: false)) {
+                le.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
+            outParamTys.add(param.GetTy().getOrThrow())
         }
         return true
     }
 
-    private func SetLambdaTargetRetType(le: LambdaExpr, retTy: Ty): Bool {
-        if (let Some(funcBody) <- le.funcBody) {
-            let retType = RefType()
-            retType.begin = le.begin
-            retType.end = le.end
-            retType.SetTy(retTy)
-            retType.EnableAttr(Attribute.COMPILER_ADD)
-            funcBody.retType = Some(retType)
+    private func ChkLamBody(ctx: ASTContext, funcBody: FuncBody): Bool {
+        let previousFuncBody = currentFuncBody
+        currentFuncBody = Some(funcBody)
+        let bodyMatched = CheckFuncBody(ctx, funcBody)
+        currentFuncBody = previousFuncBody
+        if (bodyMatched && Ty.IsTyCorrect(funcBody.GetTy()) &&
+            Ty.IsTyCorrect(funcBody.body.getOrThrow().GetTy())) {
             return true
-        }
-        return false
-    }
-
-    private func CheckLambdaBody(ctx: ASTContext, funcBody: FuncBody): Bool {
-        let _ = SynthesizeFuncBody(ctx, funcBody)
-        if (Ty.IsTyCorrect(funcBody.GetTy().getOrThrow())) {
-            if (let Some(body) <- funcBody.body) {
-                if (Ty.IsTyCorrect(body.GetTy().getOrThrow())) {
-                    return true
-                }
-            }
         }
         funcBody.SetTy(TypeManager.GetInvalidTy())
         return false
@@ -5298,17 +5306,16 @@ extend TypeChecker {
         if (let Some(targetFuncTy) <- (targetTy as FuncTy)) {
             try (ds = DiagSuppressor(impl.diag)) {
                 let paramTys = ArrayList<Ty>()
-                if (!CheckLambdaParamsWithTarget(ctx, le, targetFuncTy, paramTys)) {
-                    let _ = TcInvalid(le)
-                    return false
-                }
-                if (!SetLambdaTargetRetType(le, targetFuncTy.retTy)) {
-                    let _ = TcInvalid(le)
-                    return false
-                }
-                ClearLambdaBodyForContextCheck(le)
+                let paramsMatched = ChkLamParamTys(ctx, le, targetFuncTy.paramTys, paramTys)
+                let retType = RefType()
+                retType.begin = le.begin
+                retType.end = le.end
+                retType.SetTy(targetFuncTy.retTy)
+                retType.EnableAttr(Attribute.COMPILER_ADD)
+                le.funcBody.getOrThrow().retType = Some(retType)
+                ClearLambdaBodyForReCheck(le)
                 let funcBody = le.funcBody.getOrThrow()
-                if (CheckLambdaBody(ctx, funcBody)) {
+                if (ChkLamBody(ctx, funcBody) && paramsMatched) {
                     ds.ReportDiag()
                     var bodyRetTy = targetFuncTy.retTy
                     if (let Some(funcBodyTy) <- funcBody.GetTy()) {
@@ -5316,16 +5323,37 @@ extend TypeChecker {
                             bodyRetTy = bodyFuncTy.retTy
                         }
                     }
-                    let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), bodyRetTy,
-                        cfg: CloneLambdaTargetFuncCfg(targetFuncTy))
+                    let cfg = FuncTyConfig()
+                    cfg.isC = targetFuncTy.isC
+                    cfg.isClosureTy = targetFuncTy.isClosureTy
+                    cfg.hasVariableLenArg = targetFuncTy.hasVariableLenArg
+                    let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), bodyRetTy, cfg: cfg)
                     funcBody.SetTy(funcTy)
                     le.SetTy(funcTy)
                     return true
+                } else if (IsLambdaIncompatible(le, !paramsMatched)) {
+                    ds.ReportDiag()
+                    return false
                 }
-                funcBody.SetTy(TypeManager.GetInvalidTy())
-                le.SetTy(funcBody.GetTy().getOrThrow())
             }
-            let _ = TcInvalid(le)
+            let enableMacroInLSP = if (let Some(instance) <- ci) {
+                instance.globalOptions.enableMacroInLSP
+            } else {
+                false
+            }
+            if (!enableMacroInLSP) {
+                ClearLambdaBodyForReCheck(le)
+            }
+            let funcBody = le.funcBody.getOrThrow()
+            funcBody.retType = None
+            let bodyTy = SynthesizeNode(ctx, SynPos.EXPR_ARG, funcBody)
+            if (Ty.IsTyCorrect(bodyTy) && !impl.typeManager.IsSubtype(bodyTy, targetTy)) {
+                if (let Some(diagValue) <- impl.diag) {
+                    DiagMismatchedTypesWithFoundTy(diagValue, le, targetTy, bodyTy)
+                }
+            }
+            funcBody.SetTy(TypeManager.GetInvalidTy())
+            le.SetTy(funcBody.GetTy().getOrThrow())
             return false
         }
         let _ = TcInvalid(le)
