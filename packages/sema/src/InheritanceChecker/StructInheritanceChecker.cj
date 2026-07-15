@@ -2286,12 +2286,13 @@ public class StructInheritanceChecker {
                 } else {
                     "extend"
                 }
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                diag.DiagnoseRefactor(
+                DiagnoseRefactor(
+                    diag,
                     DiagKindRefactor.sema_extend_member_cannot_shadow,
+                    child,
                     DeclIdentifierRange(child),
                     arguments: [child.identifier.Val(), typeName]
-                )
+                ).Emit()
             } else {
                 let isExtendedDefault = IsExtendedDefaultImpl(parent, child)
                 let parentOuterIsExtend = if (let Some(outer) <- parentDecl.outerDecl) {
@@ -2300,34 +2301,42 @@ public class StructInheritanceChecker {
                     false
                 }
                 if (isExtendedDefault || parentOuterIsExtend) {
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         DiagKindRefactor.sema_extend_function_cannot_overridden,
+                        child,
                         DeclIdentifierRange(child),
                         arguments: [DeclKindText(parentDecl), child.identifier.Val()]
                     )
                     if (!isExtendedDefault) {
-                        builder.AddNote(
+                        AddNote(
+                            builder,
+                            parentDecl,
                             DeclIdentifierRange(parentDecl),
                             "overridden definition of '" + child.identifier.Val() + "' is here"
                         )
                     }
-                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                    builder.Emit()
                 } else if (if (let Some(outer) <- child.outerDecl) { outer.astKind == ASTKind.EXTEND_DECL } else { false }) {
                     let typeName = if (let Some(outer) <- child.outerDecl) {
                         InheritedTypeString(outer)
                     } else {
                         ""
                     }
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         DiagKindRefactor.sema_extend_member_cannot_shadow,
+                        child,
                         DeclIdentifierRange(child),
                         arguments: [child.identifier.Val(), typeName]
                     )
-                    builder.AddNote(
+                    AddNote(
+                        builder,
+                        parentDecl,
                         DeclIdentifierRange(parentDecl),
                         "shadowed definition of '" + child.identifier.Val() + "' is here"
                     )
-                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                    builder.Emit()
                 } else {
                     return true
                 }
