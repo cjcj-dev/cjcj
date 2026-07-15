@@ -17,7 +17,7 @@ public func TempFileKindSuffix(kind: TempFileKind, options: DriverOptions): Stri
         case TempFileKind.O_OPT_BC => ".bc"
         case TempFileKind.T_ASM => ".s"
         case TempFileKind.O_OBJ => ObjSuffix(options.target.os)
-        case TempFileKind.T_OBJ => ObjSuffix(options.target.os)
+        case TempFileKind.T_OBJ => ".o"
         case TempFileKind.T_EXE_MAC => "_temp"
         case TempFileKind.T_DYLIB_MAC => "_temp.dylib"
     }
