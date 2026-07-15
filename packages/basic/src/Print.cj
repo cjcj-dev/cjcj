@@ -1,5 +1,7 @@
 package cjcj::basic
 
+import std.env.getStdOut
+
 public enum DiagColor {
     | NO_COLOR
     | RESET
@@ -121,6 +123,7 @@ public func Info(value: String): Unit {
 
 public func Infoln(value: String): Unit {
     println(GREEN_INFO_MARK + value)
+    getStdOut().flush()
 }
 
 @When[debug]
