@@ -572,7 +572,12 @@ public func ClassifyInput(opts: DriverOptions, input: String, index: UInt64): Bo
     let extension = FileUtil.GetFileExtension(input)
     if (extension == "cj") {
         if (opts.compilePackage) {
-            eprintln("error: source file '${input}' cannot be used with '-p' or '--package'.")
+            let diag = DiagnosticEngine()
+            diag.DiagnoseRefactor(
+                DiagKindRefactor.driver_unsupport_compile_package_with_source_file,
+                DEFAULT_POSITION,
+                arguments: [input]
+            ).Emit()
             return false
         }
         if (let None <- opts.ValidateInputFilePath(input)) {
