@@ -201,6 +201,56 @@ extend ParserImpl {
         return token
     }
 
+    // C++: Parse/ParseExpr.cpp:155-205 ParserImpl::MakeOperatorExpr.
+    public func MakeOperatorExpr(leftExpr: Expr, operatorToken: Token): Expr {
+        if (operatorToken.kind == TokenKind.IS) {
+            let isExpr = IsExpr()
+            SpreadAttrAndConsume(leftExpr, isExpr, [])
+            if (leftExpr.astKind == ASTKind.IS_EXPR || leftExpr.astKind == ASTKind.AS_EXPR) {
+                DiagChainedAsExpr(leftExpr, operatorToken)
+            }
+            isExpr.begin = leftExpr.begin
+            isExpr.isPos = operatorToken.Begin()
+            isExpr.leftExpr = leftExpr
+            return isExpr
+        } else if (operatorToken.kind == TokenKind.AS) {
+            let asExpr = AsExpr()
+            SpreadAttrAndConsume(leftExpr, asExpr, [])
+            if (leftExpr.astKind == ASTKind.IS_EXPR || leftExpr.astKind == ASTKind.AS_EXPR) {
+                DiagChainedAsExpr(leftExpr, operatorToken)
+            }
+            asExpr.begin = leftExpr.begin
+            asExpr.asPos = operatorToken.Begin()
+            asExpr.leftExpr = leftExpr
+            return asExpr
+        } else if (operatorToken.kind == TokenKind.RANGEOP || operatorToken.kind == TokenKind.CLOSEDRANGEOP) {
+            let rangeExpr = RangeExpr()
+            SpreadAttrAndConsume(leftExpr, rangeExpr, [])
+            rangeExpr.begin = leftExpr.begin
+            rangeExpr.isClosed = operatorToken.kind == TokenKind.CLOSEDRANGEOP
+            rangeExpr.rangePos = operatorToken.Begin()
+            rangeExpr.startExpr = leftExpr
+            return rangeExpr
+        } else if (IsAssignment(operatorToken.kind)) {
+            let assignExpr = AssignExpr()
+            SpreadAttrAndConsume(leftExpr, assignExpr, [])
+            assignExpr.begin = leftExpr.begin
+            assignExpr.hasQuestSuffix = leftExpr.hasQuestSuffix
+            assignExpr.leftValue = leftExpr
+            assignExpr.assignPos = operatorToken.Begin()
+            assignExpr.op = operatorToken.kind
+            assignExpr.isCompound = operatorToken.kind != TokenKind.ASSIGN
+            return assignExpr
+        }
+        let binaryExpr = BinaryExpr()
+        SpreadAttrAndConsume(leftExpr, binaryExpr, [])
+        binaryExpr.begin = leftExpr.begin
+        binaryExpr.op = operatorToken.kind
+        binaryExpr.operatorPos = operatorToken.Begin()
+        binaryExpr.leftExpr = leftExpr
+        return binaryExpr
+    }
+
     public func ParseBaseExpr(expr: Expr): Expr {
         return ParseBaseExpr(expr, ExprKind.ALL)
     }
@@ -428,25 +478,16 @@ extend ParserImpl {
             } else {
                 Next()
             }
-            if (op.kind == TokenKind.IS || op.kind == TokenKind.AS) {
-                if (op.kind == TokenKind.IS) {
-                    let expr = IsExpr()
-                    SpreadAttrAndConsume(lhs, expr, [])
-                    expr.leftExpr = lhs
-                    expr.isPos = op.Begin()
-                    expr.begin = lhs.begin
+            let node = MakeOperatorExpr(lhs, op)
+            if (node.astKind == ASTKind.IS_EXPR || node.astKind == ASTKind.AS_EXPR) {
+                if (let Some(expr) <- (node as IsExpr)) {
                     try (cs = ChainScope(this, expr)) {
                         let typeNode = ParseType()
                         expr.isType = typeNode
                         expr.end = typeNode.end
                     }
                     lhs = expr
-                } else {
-                    let expr = AsExpr()
-                    SpreadAttrAndConsume(lhs, expr, [])
-                    expr.leftExpr = lhs
-                    expr.asPos = op.Begin()
-                    expr.begin = lhs.begin
+                } else if (let Some(expr) <- (node as AsExpr)) {
                     try (cs = ChainScope(this, expr)) {
                         let typeNode = ParseType()
                         expr.asType = typeNode
@@ -456,31 +497,6 @@ extend ParserImpl {
                 }
                 continue
             }
-            let node: Expr = if (IsAssignment(op.kind)) {
-                let expr = AssignExpr()
-                expr.leftValue = lhs
-                expr.op = op.kind
-                expr.assignPos = op.Begin()
-                expr.isCompound = op.kind != TokenKind.ASSIGN
-                expr.begin = lhs.begin
-                expr.hasQuestSuffix = lhs.hasQuestSuffix
-                expr
-            } else if (op.kind == TokenKind.RANGEOP || op.kind == TokenKind.CLOSEDRANGEOP) {
-                let expr = RangeExpr()
-                expr.startExpr = lhs
-                expr.rangePos = op.Begin()
-                expr.isClosed = op.kind == TokenKind.CLOSEDRANGEOP
-                expr.begin = lhs.begin
-                expr
-            } else {
-                let expr = BinaryExpr()
-                expr.leftExpr = lhs
-                expr.op = op.kind
-                expr.operatorPos = op.Begin()
-                expr.begin = lhs.begin
-                expr
-            }
-            SpreadAttrAndConsume(lhs, node, [])
             try (cs = ChainScope(this, node)) {
                 var rhs = ParseUnaryExpr(ek)
                 var nextOp = Peek()
@@ -590,23 +606,16 @@ extend ParserImpl {
             } else {
                 Next()
             }
-            if (op.kind == TokenKind.IS || op.kind == TokenKind.AS) {
-                if (op.kind == TokenKind.IS) {
-                    let expr = IsExpr()
-                    expr.leftExpr = lhs
-                    expr.isPos = op.Begin()
-                    expr.begin = lhs.begin
+            let node = MakeOperatorExpr(lhs, op)
+            if (node.astKind == ASTKind.IS_EXPR || node.astKind == ASTKind.AS_EXPR) {
+                if (let Some(expr) <- (node as IsExpr)) {
                     try (cs = ChainScope(this, expr)) {
                         let typeNode = ParseType()
                         expr.isType = typeNode
                         expr.end = typeNode.end
                     }
                     lhs = expr
-                } else {
-                    let expr = AsExpr()
-                    expr.leftExpr = lhs
-                    expr.asPos = op.Begin()
-                    expr.begin = lhs.begin
+                } else if (let Some(expr) <- (node as AsExpr)) {
                     try (cs = ChainScope(this, expr)) {
                         let typeNode = ParseType()
                         expr.asType = typeNode
@@ -615,30 +624,6 @@ extend ParserImpl {
                     lhs = expr
                 }
                 continue
-            }
-            let node: Expr = if (IsAssignment(op.kind)) {
-                let expr = AssignExpr()
-                expr.leftValue = lhs
-                expr.op = op.kind
-                expr.assignPos = op.Begin()
-                expr.isCompound = op.kind != TokenKind.ASSIGN
-                expr.begin = lhs.begin
-                expr.hasQuestSuffix = lhs.hasQuestSuffix
-                expr
-            } else if (op.kind == TokenKind.RANGEOP || op.kind == TokenKind.CLOSEDRANGEOP) {
-                let expr = RangeExpr()
-                expr.startExpr = lhs
-                expr.rangePos = op.Begin()
-                expr.isClosed = op.kind == TokenKind.CLOSEDRANGEOP
-                expr.begin = lhs.begin
-                expr
-            } else {
-                let expr = BinaryExpr()
-                expr.leftExpr = lhs
-                expr.op = op.kind
-                expr.operatorPos = op.Begin()
-                expr.begin = lhs.begin
-                expr
             }
             try (cs = ChainScope(this, node)) {
                 var rhs = ParseUnaryExpr(ek)

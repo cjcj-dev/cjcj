@@ -99,23 +99,6 @@ extend ParserImpl {
         }
     }
 
-    // C++ anchor: cangjie_compiler/src/Parse/ParserUtils.cpp:290-301
-    public func ParseOneOrMoreSepTrailing(
-        storeSeparator: (Position) -> Unit,
-        parseElement: () -> Unit,
-        end: TokenKind,
-        separator!: TokenKind = TokenKind.COMMA
-    ): Unit {
-        do {
-            parseElement()
-            if (Skip(separator)) {
-                storeSeparator(lastToken.Begin())
-            } else {
-                break
-            }
-        } while (!Seeing(end))
-    }
-
     public func ConsumeUntilDecl(): Unit {
         ConsumeUntilDecl(TokenKind.SENTINEL)
     }
