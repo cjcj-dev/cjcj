@@ -238,7 +238,7 @@ foreign {
     func LLVMGetUnnamedAddress(global: LLVMValueRef): Int32
     func LLVMSetUnnamedAddress(global: LLVMValueRef, unnamedAddr: Int32): Unit
     func LLVMIsDeclaration(global: LLVMValueRef): Int32
-    func LLVMGetGlobalConstant(global: LLVMValueRef): Int32
+    func LLVMIsGlobalConstant(global: LLVMValueRef): Int32
     func LLVMSetGlobalConstant(global: LLVMValueRef, isConstant: Int32): Unit
     func LLVMGetVisibility(global: LLVMValueRef): Int32
     func LLVMSetVisibility(global: LLVMValueRef, visibility: Int32): Unit

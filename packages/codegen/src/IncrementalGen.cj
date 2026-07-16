@@ -35,7 +35,7 @@ private func CopyGlobalVariableTo(destModule: LLVMModuleHandle, name: String, gv
         LLVMSetLinkage(newGV, LLVMGetLinkage(gv))
         LLVMSetAlignment(newGV, LLVMGetAlignment(gv))
         LLVMSetUnnamedAddress(newGV, LLVMGetUnnamedAddress(gv))
-        LLVMSetGlobalConstant(newGV, LLVMGetGlobalConstant(gv))
+        LLVMSetGlobalConstant(newGV, LLVMIsGlobalConstant(gv))
         LLVMSetVisibility(newGV, LLVMGetVisibility(gv))
         LLVMSelfhostGlobalVariableCopyAttributes(newGV, gv)
         LLVMSetThreadLocalMode(newGV, LLVMGetThreadLocalMode(gv))
@@ -280,7 +280,7 @@ public class IncrementalGen {
             if (!injectedGv.isNull() &&
                 (unsafe { LLVMTypeOf(injectedGv) }.toUIntNative() !=
                     unsafe { LLVMTypeOf(gv) }.toUIntNative() ||
-                (unsafe { LLVMGetGlobalConstant(injectedGv) } != unsafe { LLVMGetGlobalConstant(gv) } &&
+                (unsafe { LLVMIsGlobalConstant(injectedGv) } != unsafe { LLVMIsGlobalConstant(gv) } &&
                 unsafe { LLVMIsDeclaration(gv) } == 0))) {
                 SetLLVMValueName(injectedGv, gvName + "$useless$")
                 injectedGv = LLVMNullValue()
