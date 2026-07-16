@@ -1552,6 +1552,15 @@ class CHIRSerializerImpl {
         File.writeTo(filename, builder.Finish(serializedPackage))
     }
 
+    func ConvertToMemoryData(): Array<UInt8> {
+        let chirPackage = pkg.getOrThrow()
+        let serializedPackage = CreateCHIRPackageDirect(builder, Some(chirPackage.GetName()), Some(""),
+            UInt8(AccessLevelIndex(chirPackage.GetPackageAccessLevel())), Some(typeKind), Some(allType),
+            Some(valueKind), Some(allValue), Some(exprKind), Some(allExpression), Some(defKind),
+            Some(allCustomTypeDef), packageInitFunc, ToCHIRPhaseIndex(ToCHIRPhase.RAW), packageLiteralInitFunc)
+        return builder.Finish(serializedPackage)
+    }
+
     func Initialize(): Unit {
         let chirPackage = pkg.getOrThrow()
         for (value in chirPackage.GetGlobalVars()) {
