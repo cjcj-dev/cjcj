@@ -433,9 +433,6 @@ public class ASTWriter {
                 SaveTopLevelDeclIfNeeded(decl)
             }
         }
-        for (decl in pkg.genericInstantiatedDecls) {
-            SaveTopLevelDeclIfNeeded(decl)
-        }
     }
 
     private func SaveTopLevelDeclIfNeeded(decl: Decl): Unit {
