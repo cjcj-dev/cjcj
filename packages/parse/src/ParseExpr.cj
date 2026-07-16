@@ -1759,7 +1759,6 @@ extend ParserImpl {
         let token = Peek()
         ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_wildcard_or_exception_pattern, token,
             ConvertToken(token)).Emit()
-        Next()
         return InvalidPattern(token.Begin())
     }
 
