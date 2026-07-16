@@ -349,6 +349,101 @@ public class IncrementalGen {
         }
     }
 
+    // Mirrors IncrementalGen.cpp:298-335.
+    private func UpdateInitializationsOfGlobalVariables(valueMap: LLVMSelfhostValueToValueMapRef): Unit {
+        let incremental = incrementalModule.getOrThrow()
+        let injected = injectedModule.getOrThrow()
+        let compileUnit = unsafe { LLVMSelfhostModuleGetFirstDICompileUnit(injected.raw) }
+        let currentGlobalVars = unsafe { LLVMSelfhostDICompileUnitGetGlobalVariables(compileUnit) }
+        let newGlobalVars = unsafe { LLVMSelfhostCreateTempGlobalsTuple(injected.raw, currentGlobalVars) }
+        let context = LLVMContextHandle(unsafe { LLVMGetModuleContext(injected.raw) }, owned: false)
+        let debugKind = LLVMGetMDKindID(context, "dbg")
+        var gv = unsafe { LLVMGetFirstGlobal(incremental.raw) }
+        while (!gv.isNull()) {
+            let nextGV = unsafe { LLVMGetNextGlobal(gv) }
+            if (HasGlobalVariableAttribute(gv, "nonRecompile")) {
+                try (nameCString = unsafe { LibC.mallocCString("nonRecompile") }.asResource()) {
+                    unsafe { LLVMSelfhostGlobalVariableRemoveAttribute(gv, nameCString.value,
+                        UInt32("nonRecompile".size)) }
+                }
+                gv = nextGV
+                continue
+            }
+            let gvToBeUpdated = GetNamedGlobal(injected, GetLLVMValueName(gv))
+            CJC_ASSERT(!gvToBeUpdated.isNull())
+            if (IsGVForExtensionDefs(gv)) {
+                unsafe { LLVMSetInitializer(gvToBeUpdated,
+                    LLVMSelfhostMapValue(LLVMGetInitializer(gv), valueMap)) }
+                gv = nextGV
+                continue
+            }
+            unsafe { LLVMSelfhostGlobalObjectClearMetadata(gvToBeUpdated) }
+            try (countPtr = LibC.malloc<UIntNative>().asResource()) {
+                unsafe { countPtr.value.write(UIntNative(0)) }
+                let entries = unsafe { LLVMGlobalCopyAllMetadata(gv, countPtr.value) }
+                let count = unsafe { countPtr.value.read() }
+                if (!entries.isNull()) {
+                    var idx: UInt32 = 0u32
+                    while (idx < UInt32(count)) {
+                        let kind = unsafe { LLVMValueMetadataEntriesGetKind(entries, idx) }
+                        let sourceMetadata = unsafe { LLVMValueMetadataEntriesGetMetadata(entries, idx) }
+                        let mappedMetadata = unsafe { LLVMSelfhostMapMetadata(sourceMetadata, valueMap) }
+                        unsafe { LLVMGlobalSetMetadata(gvToBeUpdated, kind, mappedMetadata) }
+                        if (kind == debugKind) {
+                            unsafe { LLVMSelfhostTempTuplePushBack(newGlobalVars, mappedMetadata) }
+                        }
+                        idx++
+                    }
+                    unsafe { LLVMDisposeValueMetadataEntries(entries) }
+                }
+            }
+            if (unsafe { LLVMIsDeclaration(gv) } == 0) {
+                unsafe {
+                    LLVMSetInitializer(gvToBeUpdated, LLVMSelfhostMapValue(LLVMGetInitializer(gv), valueMap))
+                    LLVMSetLinkage(gvToBeUpdated, LLVMGetLinkage(gv))
+                }
+            }
+            gv = nextGV
+        }
+        let permanentNode = unsafe { LLVMSelfhostTempTupleReplaceWithPermanent(newGlobalVars) }
+        unsafe { LLVMSelfhostDICompileUnitReplaceGlobalVariables(compileUnit, permanentNode) }
+    }
+
+    // Mirrors IncrementalGen.cpp:337-358.
+    private func UpdateDefinitionsOfFunction(valueMap: LLVMSelfhostValueToValueMapRef): Unit {
+        let incremental = incrementalModule.getOrThrow()
+        let injected = injectedModule.getOrThrow()
+        var function = unsafe { LLVMGetFirstFunction(incremental.raw) }
+        while (!function.isNull()) {
+            if (unsafe { LLVMIsDeclaration(function) } != 0 || !AllowFunctionBodyBeReplaced(function)) {
+                function = unsafe { LLVMGetNextFunction(function) }
+                continue
+            }
+            let funcToBeUpdated = GetNamedFunction(injected, GetLLVMValueName(function))
+            DeleteFuncBody(funcToBeUpdated)
+            unsafe {
+                LLVMSelfhostCloneFunctionInto(funcToBeUpdated, function, valueMap)
+                LLVMSetLinkage(funcToBeUpdated, LLVMGetLinkage(function))
+            }
+            UpdateCompileUnitWith(funcToBeUpdated,
+                unsafe { LLVMSelfhostModuleGetFirstDICompileUnit(injected.raw) })
+            function = unsafe { LLVMGetNextFunction(function) }
+        }
+    }
+
+    // Mirrors IncrementalGen.cpp:360-366.
+    private func UpdateBodyOfKeepTypesFunction(valueMap: LLVMSelfhostValueToValueMapRef): Unit {
+        let incremental = incrementalModule.getOrThrow()
+        let injected = injectedModule.getOrThrow()
+        let sourceFunction = GetNamedFunction(incremental, FOR_KEEPING_SOME_TYPES_FUNC_NAME)
+        let targetFunction = GetNamedFunction(injected, FOR_KEEPING_SOME_TYPES_FUNC_NAME)
+        var block = unsafe { LLVMGetFirstBasicBlock(sourceFunction) }
+        while (!block.isNull()) {
+            unsafe { let _ = LLVMSelfhostCloneBasicBlock(block, valueMap, targetFunction) }
+            block = unsafe { LLVMGetNextBasicBlock(block) }
+        }
+    }
+
     // Mirrors IncrementalGen.cpp:368-374.
     private func CollectUselessDefinitions(uselessDefinition: LLVMValueRef): Unit {
         if (uselessDefinition.isNull()) {
