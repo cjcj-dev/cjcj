@@ -15,6 +15,7 @@
 
 [dependencies]
   "cjcj::basic" = { path = "../basic" }
+  "cjcj::frontend" = { path = "../frontend" }
   "cjcj::frontend_tool" = { path = "../frontend_tool" }
   "cjcj::macro_pkg" = { path = "../macro" }
   "cjcj::option" = { path = "../option" }
