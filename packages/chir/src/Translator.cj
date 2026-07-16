@@ -1236,6 +1236,10 @@ public class Translator {
             varInfoByName[varInfo.name] = varInfo
         }
         let initOrder = AstGetVarsInitializationOrderWithPositions(parent)
+        if (parent.identifier.Val() == "C2") {
+            throw IllegalStateException("CJMPDBG C2 members=" + parent.GetMemberDeclPtrs().size.toString() +
+                " initOrder=" + initOrder.size.toString() + " chirVars=" + memberVars.size.toString())
+        }
         for (item in initOrder) {
             let member = item.decl.getOrThrow()
             CJC_ASSERT(!member.isMemberParam || member.initializer.isNone())
