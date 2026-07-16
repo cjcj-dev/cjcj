@@ -2862,17 +2862,6 @@ extend TypeChecker {
             return SynthesizeFuncBody(ctx, funcBody)
         }
         if (let Some(decl) <- (node as Decl)) {
-            if (!node.TestAttr(Attribute.IS_BROKEN) && !IsChecked(ctx, node) && node.symbol.isSome()) {
-                var currentContext = ctx
-                if ((let Some(instance) <- ci) && instance.sourcePackages.size > 1 &&
-                    (let Some(file) <- node.curFile) && (let Some(packageValue) <- file.curPackage) &&
-                    (let Some(packageContext) <- instance.GetASTContextByPackage(Some(packageValue)))) {
-                    currentContext = packageContext
-                }
-                try (stashDiagnoseStatus = impl.diag.getOrThrow().AutoStashDisableDiagnoseStatus()) {
-                    CheckAnnotations(currentContext, decl)
-                }
-            }
             return SynthesizeDecl(ctx, decl)
         }
         if (let Some(expr) <- (node as Expr)) {
@@ -3696,6 +3685,17 @@ extend TypeChecker {
     }
 
     private func SynthesizeDecl(ctx: ASTContext, decl: Decl): Ty {
+        if (!decl.TestAttr(Attribute.IS_BROKEN) && !IsChecked(ctx, decl) && decl.symbol.isSome()) {
+            var currentContext = ctx
+            if ((let Some(instance) <- ci) && instance.sourcePackages.size > 1 &&
+                (let Some(file) <- decl.curFile) && (let Some(packageValue) <- file.curPackage) &&
+                (let Some(packageContext) <- instance.GetASTContextByPackage(Some(packageValue)))) {
+                currentContext = packageContext
+            }
+            try (stashDiagnoseStatus = impl.diag.getOrThrow().AutoStashDisableDiagnoseStatus()) {
+                CheckAnnotations(currentContext, decl)
+            }
+        }
         // Mirrors C++ TypeChecker.cpp:740-748: imported decls with a correct loaded type are already checked.
         if (decl.TestAttr(Attribute.IMPORTED) && Ty.IsTyCorrect(decl.GetTy()) && decl.TyKind() != TypeKind.TYPE_QUEST) {
             return decl.GetTy() ?? TypeManager.GetInvalidTy()
