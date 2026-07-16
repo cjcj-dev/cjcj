@@ -1906,7 +1906,7 @@ public class StructInheritanceChecker {
                 for (memberDecl in sortedDecls) {
                     builder.AddNote(DeclIdentifierRange(memberDecl), DeclKindText(memberDecl) + " member")
                 }
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                builder.Emit()
             } else {
                 for (member in found) {
                     if (!member.inconsistentTypes.IsEmpty() && member.IsProp()) {
