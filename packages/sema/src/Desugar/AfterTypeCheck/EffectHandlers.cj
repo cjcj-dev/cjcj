@@ -841,7 +841,7 @@ private func CreateFrame(typeManager: TypeManager, importManager: SemaImportMana
     }
 
     let lambdaVar = CreateVarDecl(FRAME_LAMBDA_VAR_NAME, tryLambda, None)
-    ctx.AddDeclName((FRAME_LAMBDA_VAR_NAME, lambdaVar.scopeName), lambdaVar)
+    ctx.AddDeclName(Names(FRAME_LAMBDA_VAR_NAME, lambdaVar.scopeName), lambdaVar)
     CopyGeneratedPosition(tryLambda, lambdaVar)
     nodes.add(lambdaVar)
 
