@@ -451,6 +451,59 @@ public class IRBuilder2 <: Resource {
         }
     }
 
+    public func CreateLoadInstForParameter(chirExpression: Expression): Unit {
+        for (operand in chirExpression.GetOperands()) {
+            if (let Some((elementType, valueToLoad)) <- cgMod.GetValuesToLoad(operand)) {
+                var loadInst = LLVMNullValue()
+                try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
+                    loadInst = unsafe { LLVMBuildLoad2(builder.raw, elementType, valueToLoad, nameCString.value) }
+                }
+                if (let Some(basePtr) <-
+                    GetCGContext().GetBasePtrOf(cgMod.GetMappedCGValue(operand).GetRawValue())) {
+                    GetCGContext().SetBasePtr(loadInst, basePtr)
+                }
+                FixedCGTypeOfFuncArg(cgMod, operand, loadInst)
+            }
+            if (let Some((pointerType, boxedValue)) <- cgMod.GetBoxedValuesToLoad(operand)) {
+                if (chirExpression.GetExprKind() == ExprKind.STORE_ELEMENT_REF &&
+                    chirExpression.GetOperand(1) == operand) {
+                    let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+                    let gep = CreateGEP(i8Type, boxedValue, ArrayList<LLVMValueRef>([GetInt64(8)]))
+                    let castToCurrentValue = CreateBitCast(gep, pointerType)
+                    FixedCGTypeOfFuncArg(cgMod, operand, castToCurrentValue)
+                    continue
+                }
+                let payload = GetPayloadFromObject(boxedValue)
+                let elementType = unsafe { LLVMGetElementType(pointerType) }
+                let castedPtr = CreateBitCast(payload, unsafe { LLVMPointerType(elementType, 1u32) })
+                if (chirExpression.GetExprKind() == ExprKind.STORE && chirExpression.GetOperand(1) == operand) {
+                    FixedCGTypeOfFuncArg(cgMod, operand, castedPtr)
+                    continue
+                }
+                let castedPtrType = unsafe { LLVMTypeOf(castedPtr) }
+                CJC_ASSERT(unsafe { LLVMGetTypeKind(castedPtrType) } == LLVM_POINTER_TYPE_KIND &&
+                    unsafe { LLVMGetTypeKind(pointerType) } == LLVM_POINTER_TYPE_KIND)
+                var temp = castedPtr
+                if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_STRUCT_TYPE_KIND &&
+                    unsafe { LLVMGetPointerAddressSpace(pointerType) } == 0u32) {
+                    let boxedValueName = LLVMCStringToString(unsafe { LLVMGetValueName(boxedValue) }) ?? ""
+                    temp = CreateEntryAlloca(elementType, name: boxedValueName + ".copied")
+                    let size = unsafe {
+                        LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
+                    }
+                    if (IsLLVMTypeContainsRef(elementType)) {
+                        CallGCReadAgg(elementType,
+                            ArrayList<LLVMValueRef>([temp, boxedValue, castedPtr, size]))
+                    } else {
+                        let align = cgMod.GetABITypeAlignment(elementType)
+                        CreateMemCpy(temp, align, castedPtr, align, size)
+                    }
+                }
+                FixedCGTypeOfFuncArg(cgMod, operand, temp)
+            }
+        }
+    }
+
     public func SetInsertCGFunction(cgFunc: CGFunction): Unit {
         cgFunction = cgFunc
     }

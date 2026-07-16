@@ -13,6 +13,7 @@ public func HandleBinaryExpression(irBuilder: IRBuilder2, chirExpr: CHIRBinaryEx
     if (ShouldUseOverflowBinary(kind, overflowStrategy)) {
         if (let Some(resultTy) <- chirExpr.expr.GetResultType()) {
             if (resultTy.IsInteger()) {
+                irBuilder.EmitLocation(chirExpr)
                 return GenerateOverflowBinary(irBuilder, overflowStrategy, kind, chirExpr.GetLHSOperand(),
                     chirExpr.GetRHSOperand(), chirExpr.expr.GetResultType())
             }

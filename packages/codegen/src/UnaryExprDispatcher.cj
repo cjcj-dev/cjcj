@@ -32,6 +32,7 @@ public func HandleUnaryExpression(irBuilder: IRBuilder2, chirExpr: CHIRUnaryExpr
         overflowStrategy == OverflowStrategy.CHECKED) && chirExpr.unaryExpr.GetExprKind() == ExprKind.NEG) {
         if (let Some(resultTy) <- resultType) {
             if (resultTy.IsInteger()) {
+                irBuilder.EmitLocation(chirExpr)
                 return GenerateOverflowUnary(irBuilder, overflowStrategy, chirExpr.unaryExpr.GetExprKind(), operand,
                     cgValue.GetRawValue(), resultType)
             }

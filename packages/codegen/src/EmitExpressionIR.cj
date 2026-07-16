@@ -44,6 +44,9 @@ public func EmitExpressionIR(cgMod: CGModule, irBuilder: IRBuilder2, chirExprs: 
             irBuilder.EmitLocation(chirExprWrapper)
         }
         irBuilder.SetCHIRExpr(chirExprWrapper)
+        if (cgMod.GetCGContext().GetCompileOptions().enableCompileDebug) {
+            irBuilder.CreateLoadInstForParameter(chirExpr)
+        }
         if (chirExpr.GetExprMajorKind() == ExprMajorKind.UNARY_EXPR ||
             chirExpr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
             irBuilder.EmitLocation(chirExprWrapper)
