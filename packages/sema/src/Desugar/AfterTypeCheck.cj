@@ -103,7 +103,7 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager
             case ASTKind.TRY_EXPR =>
                 if (let Some(tryExpr) <- (node as TryExpr)) {
                     DesugarTryWithResourcesExpr(typeManager, pkg, tryExpr, context: context, synthesizer: synthesizer)
-                    DesugarTryToFrame(typeManager, importManager, pkg, tryExpr,
+                    DesugarTryToFrame(typeManager, importManager, context.getOrThrow(), pkg, tryExpr,
                         { target: Ty, call: CallExpr => callChecker.getOrThrow()(context.getOrThrow(), target, call) })
                 }
             case ASTKind.PERFORM_EXPR =>

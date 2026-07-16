@@ -811,7 +811,8 @@ private func WrapHandlerLambda(typeManager: TypeManager, importManager: SemaImpo
 }
 
 private func CreateFrame(typeManager: TypeManager, importManager: SemaImportManager,
-    callChecker: (Ty, CallExpr) -> Bool, pkg: Package, tryExpr: TryExpr, nodes: ArrayList<Node>):
+    ctx: ASTContext, callChecker: (Ty, CallExpr) -> Bool, pkg: Package,
+    tryExpr: TryExpr, nodes: ArrayList<Node>):
     Option<VarDecl> {
     if (let None <- tryExpr.tryLambda) {
         return None
@@ -840,6 +841,7 @@ private func CreateFrame(typeManager: TypeManager, importManager: SemaImportMana
     }
 
     let lambdaVar = CreateVarDecl(FRAME_LAMBDA_VAR_NAME, tryLambda, None)
+    ctx.AddDeclName((FRAME_LAMBDA_VAR_NAME, lambdaVar.scopeName), lambdaVar)
     CopyGeneratedPosition(tryLambda, lambdaVar)
     nodes.add(lambdaVar)
 
@@ -1002,7 +1004,7 @@ private func ClearOriginalTryHandleSurface(tryExpr: TryExpr): Unit {
 }
 
 public func DesugarTryToFrame(typeManager: TypeManager, importManager: SemaImportManager,
-    pkg: Package, tryExpr: TryExpr,
+    ctx: ASTContext, pkg: Package, tryExpr: TryExpr,
     callChecker: (Ty, CallExpr) -> Bool): Unit {
     if (tryExpr.handlers.isEmpty() || !Ty.IsTyCorrect(tryExpr.GetTy())) {
         return
@@ -1011,7 +1013,7 @@ public func DesugarTryToFrame(typeManager: TypeManager, importManager: SemaImpor
         return
     }
     let nodes = ArrayList<Node>()
-    if (let Some(frameVar) <- CreateFrame(typeManager, importManager, callChecker, pkg, tryExpr, nodes)) {
+    if (let Some(frameVar) <- CreateFrame(typeManager, importManager, ctx, callChecker, pkg, tryExpr, nodes)) {
         if (!AddSetHandlers(typeManager, importManager, callChecker, pkg, tryExpr, frameVar, nodes)) {
             return
         }
