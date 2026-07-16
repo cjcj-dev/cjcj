@@ -71,9 +71,17 @@ extend ParserImpl {
         let annos = ArrayList<Annotation>()
         ParseAnnotations(annos)
         let expr = if (isTailClosure) { ParseLambdaExprWithTrailingClosure() } else { ParseLambdaExpr() }
-        if (!annos.isEmpty()) {
-            expr.begin = annos[0].begin
+        for (anno in annos) {
+            if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
+                expr.EnableAttr(Attribute.NUMERIC_OVERFLOW)
+                expr.overflowStrategy = anno.overflowStrategy
+            } else if (anno.kind == AnnotationKind.ENSURE_PREPARED_TO_MOCK) {
+                expr.EnableAttr(Attribute.MOCK_SUPPORTED)
+            } else {
+                DiagExpectedDeclaration(expr.begin, "lambda expression")
+            }
         }
+        SetBeginToAnnotationsBegin(expr, annos)
         return expr
     }
 

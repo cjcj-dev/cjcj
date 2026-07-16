@@ -2726,7 +2726,7 @@ extend ParserImpl {
         }
     }
 
-    private func SetBeginToAnnotationsBegin(node: Node, annos: ArrayList<Annotation>): Unit {
+    func SetBeginToAnnotationsBegin(node: Node, annos: ArrayList<Annotation>): Unit {
         if (!annos.isEmpty()) {
             node.begin = annos[0].begin
         }
