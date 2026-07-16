@@ -3,7 +3,7 @@ package cjcj::codegen
 import cjcj::chir.Attribute
 import cjcj::chir.GlobalVar
 import cjcj::chir.StringLiteral
-import cjcj::chir.MangleCHIRType
+import cjcj::chir.MangleType
 
 private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
     private let cgMod: CGModule
@@ -51,7 +51,7 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
         }
         if (chirGV.GetParentCustomTypeDef().isNone()) {
             if (let Some(chirTy) <- chirGV.GetType()) {
-                let metadata = LLVMCreateMDTupleFromString(cgMod.GetLLVMContext(), MangleCHIRType(chirTy))
+                let metadata = LLVMCreateMDTupleFromString(cgMod.GetLLVMContext(), MangleType(chirTy))
                 LLVMSetGlobalMetadata(cgMod.GetLLVMContext(), rawGlobal, GC_GLOBAL_VAR_TYPE, metadata)
             }
         }

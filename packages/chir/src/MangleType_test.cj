@@ -10,15 +10,15 @@ public class MangleTypeTest {
     public func builtinTypes(): Unit {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
-        @Expect(MangleCHIRType(builder.context.GetInt8Ty()), "a")
-        @Expect(MangleCHIRType(builder.context.GetInt16Ty()), "s")
-        @Expect(MangleCHIRType(builder.context.GetInt32Ty()), "i")
-        @Expect(MangleCHIRType(builder.context.GetInt64Ty()), "l")
-        @Expect(MangleCHIRType(builder.context.GetUInt8Ty()), "h")
-        @Expect(MangleCHIRType(builder.context.GetFloat64Ty()), "d")
-        @Expect(MangleCHIRType(builder.context.GetBoolTy()), "b")
-        @Expect(MangleCHIRType(builder.context.GetUnitTy()), "u")
-        @Expect(MangleCHIRType(builder.context.GetCStringTy()), "k")
+        @Expect(MangleType(builder.context.GetInt8Ty()), "a")
+        @Expect(MangleType(builder.context.GetInt16Ty()), "s")
+        @Expect(MangleType(builder.context.GetInt32Ty()), "i")
+        @Expect(MangleType(builder.context.GetInt64Ty()), "l")
+        @Expect(MangleType(builder.context.GetUInt8Ty()), "h")
+        @Expect(MangleType(builder.context.GetFloat64Ty()), "d")
+        @Expect(MangleType(builder.context.GetBoolTy()), "b")
+        @Expect(MangleType(builder.context.GetUnitTy()), "u")
+        @Expect(MangleType(builder.context.GetCStringTy()), "k")
     }
 
     @TestCase
@@ -29,7 +29,7 @@ public class MangleTypeTest {
         params.add(builder.context.GetInt64Ty())
         params.add(builder.context.GetInt64Ty())
         let funcTy = builder.context.GetFuncTy(params, builder.context.GetInt64Ty())
-        @Expect(MangleCHIRType(funcTy), "F0lllE")
+        @Expect(MangleType(funcTy), "F0lllE")
     }
 
     @TestCase
@@ -41,9 +41,9 @@ public class MangleTypeTest {
         tupleItems.add(builder.context.GetInt16Ty())
         tupleItems.add(builder.context.GetInt32Ty())
         let tupleTy = builder.context.GetTupleTy(tupleItems)
-        @Expect(MangleCHIRType(tupleTy), "T2_asiE")
+        @Expect(MangleType(tupleTy), "T2_asiE")
 
         let refTy = builder.context.GetRefTy(builder.context.GetInt8Ty())
-        @Expect(MangleCHIRType(refTy), "a")
+        @Expect(MangleType(refTy), "a")
     }
 }

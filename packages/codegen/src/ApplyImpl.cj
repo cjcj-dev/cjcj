@@ -11,7 +11,7 @@ import cjcj::chir.Function
 import cjcj::chir.Type
 import cjcj::chir.TypeKind
 import cjcj::chir.Value
-import cjcj::chir.MangleCHIRType
+import cjcj::chir.MangleType
 import cjcj::option.{ArchType, OSType}
 import cjcj::utils.CJC_ASSERT
 
@@ -316,7 +316,7 @@ private func GetIndirectCFuncCallWrapper(cgMod: CGModule, irBuilder: IRBuilder2,
             }
         }
     }
-    let wrapper = cgMod.GetOrInsertFunction("wrapper." + MangleCHIRType(funcTy), wrapperFuncType)
+    let wrapper = cgMod.GetOrInsertFunction("wrapper." + MangleType(funcTy), wrapperFuncType)
     if (unsafe { LLVMIsDeclaration(wrapper) } != 0) {
         GenerateWrapperFuncBody(cgMod, irBuilder, wrapper, funcType, isSRet, funcTy)
     }

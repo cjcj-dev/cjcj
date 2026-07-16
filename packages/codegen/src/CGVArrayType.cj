@@ -1,6 +1,7 @@
 package cjcj::codegen
 
 import std.collection.*
+import cjcj::chir.MangleType
 import cjcj::chir.Type
 import cjcj::chir.VArrayType
 
@@ -22,7 +23,7 @@ public class CGVArrayType <: CGType {
         }
         let arrayType = unsafe { LLVMArrayType(elementTy, elementCount) }
         let layoutName = if (let Some(vArrayTy) <- (chirType as VArrayType)) {
-            "VArray.${vArrayTy.size}" + vArrayTy.GetElementType().ToString()
+            "VArray.${vArrayTy.size}" + MangleType(vArrayTy.GetElementType())
         } else {
             "VArray.0Invalid"
         }

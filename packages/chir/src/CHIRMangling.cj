@@ -151,7 +151,7 @@ public func ManglePrimitive(kind: TypeKind): String {
 
 func MangleArraySliceType(t: Type, genericsTypeStack: ArrayList<String>, useGenericName: Bool): String {
     let typeArgs = t.GetTypeArgs()
-    return MANGLE_ARRAY_SLICE_PREFIX + MangleCHIRType(typeArgs[0], genericsTypeStack, useGenericName: useGenericName) +
+    return MANGLE_ARRAY_SLICE_PREFIX + MangleType(typeArgs[0], genericsTypeStack, useGenericName: useGenericName) +
         MANGLE_SUFFIX
 }
 
@@ -188,12 +188,12 @@ private func UnsupportedCHIRType(kind: TypeKind, context: String): String {
     throw IllegalArgumentException(context + ": " + TypeKindName(kind))
 }
 
-public func MangleCHIRType(t: Type): String {
+public func MangleType(t: Type): String {
     let genericsTypeStack = ArrayList<String>()
-    return MangleCHIRType(t, genericsTypeStack)
+    return MangleType(t, genericsTypeStack)
 }
 
-public func MangleCHIRType(t: Type, genericsTypeStack: ArrayList<String>, useGenericName!: Bool = false): String {
+public func MangleType(t: Type, genericsTypeStack: ArrayList<String>, useGenericName!: Bool = false): String {
     let primitive = ManglePrimitive(t.GetTypeKind())
     if (!primitive.isEmpty()) {
         return primitive
@@ -202,34 +202,34 @@ public func MangleCHIRType(t: Type, genericsTypeStack: ArrayList<String>, useGen
         let items = tupleTy.GetTypeArgs()
         var out = MANGLE_TUPLE_PREFIX + DecimalToManglingNumber("${items.size}")
         for (item in items) {
-            out += MangleCHIRType(item, genericsTypeStack, useGenericName: useGenericName)
+            out += MangleType(item, genericsTypeStack, useGenericName: useGenericName)
         }
         return out + MANGLE_SUFFIX
     }
     if (let Some(structTy) <- (t as StructType)) {
         var out = MANGLE_TYPE_STRUCT_PREFIX + IdentifierForMangledCHIRType(structTy.GetCustomTypeDef())
         for (arg in structTy.GetGenericArgs()) {
-            out += MangleCHIRType(arg, genericsTypeStack, useGenericName: useGenericName)
+            out += MangleType(arg, genericsTypeStack, useGenericName: useGenericName)
         }
         return out
     }
     if (let Some(enumTy) <- (t as EnumType)) {
         var out = MANGLE_NESTED_PREFIX + IdentifierForMangledCHIRType(enumTy.GetCustomTypeDef())
         for (arg in enumTy.GetGenericArgs()) {
-            out += MangleCHIRType(arg, genericsTypeStack, useGenericName: useGenericName)
+            out += MangleType(arg, genericsTypeStack, useGenericName: useGenericName)
         }
         return out
     }
     if (let Some(classTy) <- (t as ClassType)) {
         var out = MANGLE_TYPE_CLASS_PREFIX + IdentifierForMangledCHIRType(classTy.GetCustomTypeDef())
         for (arg in classTy.GetGenericArgs()) {
-            out += MangleCHIRType(arg, genericsTypeStack, useGenericName: useGenericName)
+            out += MangleType(arg, genericsTypeStack, useGenericName: useGenericName)
         }
         return out
     }
     if (let Some(funcTy) <- (t as FuncType)) {
         var out = if (funcTy.IsCFunc()) { MANGLE_CFUNC_PREFIX } else { MANGLE_GENERAL_FUNC_PREFIX }
-        var retTy = MangleCHIRType(funcTy.GetReturnType(), genericsTypeStack, useGenericName: useGenericName)
+        var retTy = MangleType(funcTy.GetReturnType(), genericsTypeStack, useGenericName: useGenericName)
         if (retTy.isEmpty()) {
             retTy = MANGLE_VOID_TY_SUFFIX
         }
@@ -239,23 +239,23 @@ public func MangleCHIRType(t: Type, genericsTypeStack: ArrayList<String>, useGen
             return out + MANGLE_VOID_TY_SUFFIX + MANGLE_SUFFIX
         }
         for (param in params) {
-            out += MangleCHIRType(param, genericsTypeStack, useGenericName: useGenericName)
+            out += MangleType(param, genericsTypeStack, useGenericName: useGenericName)
         }
         return out + MANGLE_SUFFIX
     }
     if (let Some(rawArrayTy) <- (t as RawArrayType)) {
         return MANGLE_TYPE_ARRAY_PREFIX + DecimalToManglingNumber("${rawArrayTy.GetDims()}") +
-            MangleCHIRType(rawArrayTy.GetElementType(), genericsTypeStack, useGenericName: useGenericName)
+            MangleType(rawArrayTy.GetElementType(), genericsTypeStack, useGenericName: useGenericName)
     }
     if (let Some(refTy) <- (t as RefType)) {
-        return MangleCHIRType(refTy.GetBaseType(), genericsTypeStack, useGenericName: useGenericName)
+        return MangleType(refTy.GetBaseType(), genericsTypeStack, useGenericName: useGenericName)
     }
     if (let Some(varrayTy) <- (t as VArrayType)) {
         return MANGLE_VARRAY_PREFIX + DecimalToManglingNumber("${varrayTy.size}") +
-            MangleCHIRType(varrayTy.GetElementType(), genericsTypeStack, useGenericName: useGenericName)
+            MangleType(varrayTy.GetElementType(), genericsTypeStack, useGenericName: useGenericName)
     }
     if (let Some(cPointerTy) <- (t as CPointerType)) {
-        return MANGLE_POINTER_PREFIX + MangleCHIRType(cPointerTy.GetElementType(), genericsTypeStack,
+        return MANGLE_POINTER_PREFIX + MangleType(cPointerTy.GetElementType(), genericsTypeStack,
             useGenericName: useGenericName)
     }
     if (let Some(genericTy) <- (t as GenericType)) {
@@ -376,11 +376,11 @@ public func GenerateVirtualFuncMangleName(rawFunc: Function, customTypeDef: Cust
         customTyGenericTypeStack.add(genericType.GetSrcCodeIdentifier())
     }
     if (customTypeDef.IsExtend()) {
-        out += MANGLE_CHIR_EXTEND_PREFIX + MangleCHIRType(customTypeDef.GetType().getOrThrow(),
+        out += MANGLE_CHIR_EXTEND_PREFIX + MangleType(customTypeDef.GetType().getOrThrow(),
             customTyGenericTypeStack)
         let implementTypes = ArrayList<String>()
         for (ty in customTypeDef.GetImplementedInterfaceTys()) {
-            implementTypes.add(MangleCHIRType(ty, customTyGenericTypeStack))
+            implementTypes.add(MangleType(ty, customTyGenericTypeStack))
         }
         sort(implementTypes, by: { left: String, right: String =>
             if (left < right) {
@@ -398,7 +398,7 @@ public func GenerateVirtualFuncMangleName(rawFunc: Function, customTypeDef: Cust
     } else {
         out += MANGLE_DOLLAR_PREFIX + ReplaceManglePrefixWith(customTypeDef.GetIdentifierWithoutPrefix(), "")
     }
-    out += MANGLE_DOLLAR_PREFIX + MangleCHIRType(parentTy, customTyGenericTypeStack)
+    out += MANGLE_DOLLAR_PREFIX + MangleType(parentTy, customTyGenericTypeStack)
     return out
 }
 
@@ -408,7 +408,7 @@ public func GenerateInstantiateFuncMangleName(baseName: String, instTysInFunc: A
         out += MANGLE_VOID_TY_SUFFIX
     } else {
         for (paramTy in instTysInFunc) {
-            out += MangleCHIRType(paramTy)
+            out += MangleType(paramTy)
         }
     }
     return out
@@ -435,9 +435,9 @@ public func GenerateOverflowOperatorFuncMangleName(name: String, ovf: OverflowSt
     } else {
         throw IllegalArgumentException("Unsupported name for overflow operator mangling: " + name)
     }
-    out += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleCHIRType(typeInfo)
+    out += MANGLE_FUNC_PARAM_TYPE_PREFIX + MangleType(typeInfo)
     if (isBinary) {
-        out += MangleCHIRType(typeInfo)
+        out += MangleType(typeInfo)
     }
     return out
 }
@@ -451,7 +451,7 @@ public func GenerateGenericBaseClassMangleName(paramNum: Int64): String {
 }
 
 public func GenerateInstantiatedBaseClassMangleName(funcType: FuncType): String {
-    return MANGLE_CLOSURE_INSTANTIATE_PREFIX + MangleCHIRType(funcType)
+    return MANGLE_CLOSURE_INSTANTIATE_PREFIX + MangleType(funcType)
 }
 
 public func GenerateGlobalImplClassMangleName(function: Function): String {
