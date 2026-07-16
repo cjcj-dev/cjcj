@@ -1003,6 +1003,28 @@ public class InteropLibBridge {
         return WrapJavaEntity(WithinFile<RefExpr>(CreateRefExpr(param), curFile)).getOrThrow()
     }
 
+    public func CreateDeletingGlobalRefFinalizer(decl: ClassDecl): FuncDecl {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let curFile = decl.curFile
+        let fbody = CreateFuncBody(ArrayList<FuncParamList>(), None,
+            Some(CreateBlock(ArrayList<Node>(), Some(unitTy))), Some(unitTy))
+        fbody.paramLists.add(FuncParamList())
+        let deleteCall = CreateDeleteGlobalRefCall(
+            CreateGetJniEnvCall(curFile).getOrThrow(), CreateJavaRefCall(decl, curFile)).getOrThrow()
+        fbody.body.getOrThrow().body.add(deleteCall)
+        let fd = CreateFuncDecl("~init", Some(fbody),
+            Some(typeManager.GetFunctionTy(Array<Ty>(), unitTy)))
+        fd.EnableAttr(Attribute.PRIVATE)
+        fd.EnableAttr(Attribute.FINALIZER)
+        fd.EnableAttr(Attribute.IN_CLASSLIKE)
+        fd.linkage = Linkage.EXTERNAL
+        fd.funcBody.getOrThrow().funcDecl = fd
+        fd.fullPackageName = decl.fullPackageName
+        fd.outerDecl = Some(decl)
+        fd.curFile = curFile
+        return fd
+    }
+
     public func CreateJavaEntityCall(arg: Expr): Option<Expr> {
         let javaEntityDecl = GetJavaEntityDecl()
         if (let None <- javaEntityDecl) {
