@@ -71,23 +71,6 @@ private func rankTypeLookupTargets(targets: ArrayList<Decl>): ArrayList<Decl> {
     return out
 }
 
-private func collectPackageTypeDecls(pkg: Package, name: String): ArrayList<Decl> {
-    let out = ArrayList<Decl>()
-    let keys = HashSet<String>()
-    for (file in pkg.files) {
-        for (decl in file.decls) {
-            if (decl.identifier == name && decl.IsTypeDecl()) {
-                let key = declIdentityKeyForTypeCheck(decl)
-                if (!keys.contains(key)) {
-                    keys.add(key)
-                    out.add(decl)
-                }
-            }
-        }
-    }
-    return out
-}
-
 private class ImportedPackageLookup {
     public var decl: Option<PackageDecl> = None
     public var conflicted: Bool = false
@@ -526,7 +509,7 @@ public func GetTyFromASTType(typeManager: TypeManager, ctx: ASTContext, node: Ty
         return ty
     }
     if (let Some(qualifiedType) <- (node as QualifiedType)) {
-        let ty = GetTyFromASTQualifiedType(typeManager, ctx, qualifiedType,
+        let ty = GetTyFromASTType(typeManager, ctx, qualifiedType,
             importManager: importManager, diag: diag)
         qualifiedType.SetTy(ty)
         return ty
@@ -618,7 +601,7 @@ public func GetTyFromASTRefType(typeManager: TypeManager, ctx: ASTContext, rt: R
     return GetTyFromASTDecl(typeManager, target, typeArgs)
 }
 
-public func GetTyFromASTQualifiedType(typeManager: TypeManager, ctx: ASTContext, qt: QualifiedType,
+public func GetTyFromASTType(typeManager: TypeManager, ctx: ASTContext, qt: QualifiedType,
     importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(target) <- qt.target) {
         if (target.astKind == ASTKind.PACKAGE_DECL) {
@@ -647,29 +630,27 @@ public func GetTyFromASTQualifiedType(typeManager: TypeManager, ctx: ASTContext,
         } else {
             let _ = GetTyFromASTType(typeManager, ctx, baseType, importManager: importManager, diag: diag)
         }
-        if (let Some(baseTarget) <- baseType.GetTarget()) {
-            if (let Some(packageDecl) <- (baseTarget as PackageDecl)) {
-                let packageTargets = collectPackageTypeDecls(packageDecl.srcPackage, qt.field.Val())
-                if (!packageTargets.isEmpty()) {
-                    let target = packageTargets[0]
-                    ReplaceTarget(qt, Some(target))
-                    let typeArgs = getTypeArgTys(typeManager, ctx, qt.typeArguments,
-                        importManager: importManager, diag: diag)
-                    return GetTyFromASTDecl(typeManager, target, typeArgs)
-                }
-                return TypeManager.GetInvalidTy()
+        let targetsOfField = FieldLookup(typeManager, baseType.GetTarget(), qt.field.Val(),
+            info: LookupInfo(lookupInherit: false, lookupExtend: false), importManager: importManager)
+        if (targetsOfField.isEmpty()) {
+            if (let Some(diagValue) <- diag) {
+                Diagnose(diagValue, qt, qt.field.Begin(), BasicDiagKind.sema_undeclared_type_name,
+                    args: [BasicDiagArgument(qt.field.Val())]).Emit()
             }
-            let targetsOfField = FieldLookup(typeManager, Some(baseTarget), qt.field.Val(),
-                info: LookupInfo(lookupInherit: false, lookupExtend: false))
-            let typeTargets = rankTypeLookupTargets(targetsOfField)
-            if (!typeTargets.isEmpty()) {
-                let target = typeTargets[0]
-                ReplaceTarget(qt, Some(target))
-                let typeArgs = getTypeArgTys(typeManager, ctx, qt.typeArguments,
-                    importManager: importManager, diag: diag)
-                return GetTyFromASTDecl(typeManager, target, typeArgs)
-            }
+            return TypeManager.GetInvalidTy()
         }
+        let target = targetsOfField[0]
+        if (!target.IsTypeDecl()) {
+            if (let Some(diagValue) <- diag) {
+                Diagnose(diagValue, qt, qt.field.Begin(), BasicDiagKind.sema_not_a_type,
+                    args: [BasicDiagArgument(qt.field.Val())]).Emit()
+            }
+            return TypeManager.GetInvalidTy()
+        }
+        ReplaceTarget(qt, Some(target))
+        let typeArgs = getTypeArgTys(typeManager, ctx, qt.typeArguments,
+            importManager: importManager, diag: diag)
+        return GetTyFromASTDecl(typeManager, target, typeArgs)
     }
     return TypeManager.GetInvalidTy()
 }
