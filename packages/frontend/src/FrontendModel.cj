@@ -8,7 +8,7 @@ public import cjcj::basic.{
 public import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.StringConvertor
-import cjcj::flatbuffers.FlatBufferString
+import cjcj::flatbuffers.{FlatBufferString, Vector}
 import cjcj::basic.Diagnostic as BasicDiagnostic
 import cjcj::basic.DiagFormat as BasicDiagFormat
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -1217,7 +1217,7 @@ private class CjoSignatureMaterializer {
     // IncrementalLoader.cpp:116-136 CollectRemovedDefaultImpl.
     private func CollectRemovedDefaultImpl(astDecl: Decl, decl: PackageFormat_Decl,
         needRemoved: HashSet<String>): Unit {
-        let body = if (astDecl.astKind == ASTKind.CLASS_DECL) {
+        let body: Option<Vector<UInt32>> = if (astDecl.astKind == ASTKind.CLASS_DECL) {
             decl.GetInfoAsClassInfo().getOrThrow().GetBody()
         } else if (astDecl.astKind == ASTKind.INTERFACE_DECL) {
             decl.GetInfoAsInterfaceInfo().getOrThrow().GetBody()
@@ -1289,7 +1289,7 @@ private class CjoSignatureMaterializer {
                 CollectRemovedDecl(decl.GetMangledName().getOrThrow().str(), needRemoved)
             }
         } else {
-            let body = if (decl.GetKind() == MF_DECL_KIND_CLASS_DECL) {
+            let body: Option<Vector<UInt32>> = if (decl.GetKind() == MF_DECL_KIND_CLASS_DECL) {
                 decl.GetInfoAsClassInfo().getOrThrow().GetBody()
             } else if (decl.GetKind() == MF_DECL_KIND_INTERFACE_DECL) {
                 decl.GetInfoAsInterfaceInfo().getOrThrow().GetBody()
