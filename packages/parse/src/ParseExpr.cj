@@ -16,6 +16,67 @@ private let G_NO_NEED_SEMI_EXPR_LIST: Array<ASTKind> = [
     ASTKind.IF_EXPR, ASTKind.TRY_EXPR, ASTKind.FOR_IN_EXPR, ASTKind.WHILE_EXPR
 ]
 
+private func CreateLambdaFromBlock(block: Block, expr: Expr, paramList: FuncParamList): LambdaExpr {
+    let paramLists = ArrayList<FuncParamList>()
+    paramList.begin = expr.begin
+    paramList.end = expr.end
+    paramLists.add(paramList)
+    let funcBody = CreateFuncBody(paramLists, None, block, None)
+    let lambda = CreateLambdaExpr(funcBody)
+    lambda.begin = expr.begin
+    lambda.end = expr.end
+    return lambda
+}
+
+private func DesugarTry(expr: TryExpr): Unit {
+    if (expr.handlers.isEmpty()) {
+        return
+    }
+    var lambdaBlock: Block
+    if (expr.catchBlocks.isEmpty()) {
+        lambdaBlock = (ASTCloner.Clone(expr.tryBlock.getOrThrow(), SetIsClonedSourceCode) as Block).getOrThrow()
+    } else {
+        let tryWithoutHandle = (ASTCloner.Clone(expr, SetIsClonedSourceCode) as TryExpr).getOrThrow()
+        tryWithoutHandle.handlers.clear()
+        tryWithoutHandle.finallyBlock = None
+        if (let Some(ty) <- expr.GetTy()) {
+            tryWithoutHandle.SetTy(ty)
+        }
+        let lambdaBody = ArrayList<Node>()
+        lambdaBody.add(tryWithoutHandle)
+        lambdaBlock = CreateBlock(lambdaBody)
+    }
+    expr.tryLambda = CreateLambdaFromBlock(lambdaBlock, expr.tryBlock.getOrThrow(), FuncParamList())
+
+    for (handler in expr.handlers) {
+        let commandPattern = (handler.commandPattern.getOrThrow() as CommandTypePattern).getOrThrow()
+        if (expr.TestAttr(Attribute.HAS_BROKEN) || commandPattern.TestAttr(Attribute.IS_BROKEN) ||
+            commandPattern.types[0].TestAttr(Attribute.IS_BROKEN)) {
+            expr.EnableAttr(Attribute.HAS_BROKEN)
+            return
+        }
+        let paramList = FuncParamList()
+        let originalCommandPatternType = commandPattern.types[0]
+        let commandTy = originalCommandPatternType.GetTy()
+        let clonedCommandPattern = (ASTCloner.Clone(originalCommandPatternType) as Type).getOrThrow()
+        let command = if ((let Some(pattern) <- commandPattern.pattern) &&
+            (let Some(varPattern) <- (pattern as VarPattern)) && (let Some(varDecl) <- varPattern.varDecl)) {
+            CreateFuncParam(varDecl.identifier.Val(), clonedCommandPattern, None, commandTy)
+        } else {
+            CreateFuncParam("_", clonedCommandPattern, None, commandTy)
+        }
+        CopyBasicInfo(commandPattern.pattern.getOrThrow(), command)
+        paramList.params.add(command)
+        let handlerBlock = (ASTCloner.Clone(handler.block.getOrThrow(), SetIsClonedSourceCode) as Block).getOrThrow()
+        handler.desugaredLambda = CreateLambdaFromBlock(handlerBlock, handler.block.getOrThrow(), paramList)
+    }
+
+    if (let Some(finallyBlock) <- expr.finallyBlock) {
+        let clonedFinally = (ASTCloner.Clone(finallyBlock, SetIsClonedSourceCode) as Block).getOrThrow()
+        expr.finallyLambda = CreateLambdaFromBlock(clonedFinally, finallyBlock, FuncParamList())
+    }
+}
+
 extend ParserImpl {
     public func TypeArgsMaybeConfusedWithExprWithComma(typeArgs: ArrayList<Type>): Bool {
         if (typeArgs.size <= 1) {
@@ -1616,6 +1677,9 @@ extend ParserImpl {
             ret.end = tryBlock.end
         } else {
             ret.end = token.End()
+        }
+        if (!ret.TestAttr(Attribute.HAS_BROKEN)) {
+            DesugarTry(ret)
         }
         return ret
     }
