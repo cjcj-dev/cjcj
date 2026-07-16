@@ -6901,7 +6901,10 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     public func GetImportsOfDecl(fullPackageName: String): HashMap<Decl, ArrayList<ImportSpec>> {
-        return declsImportedByNodeMap.get(fullPackageName).getOrThrow()
+        if (let Some(declImports) <- declsImportedByNodeMap.get(fullPackageName)) {
+            return declImports
+        }
+        return HashMap<Decl, ArrayList<ImportSpec>>()
     }
 
     public func AddUsedMacroDecls(file: File, decl: Decl): Unit {
