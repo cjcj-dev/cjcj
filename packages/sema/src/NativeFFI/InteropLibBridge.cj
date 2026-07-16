@@ -20,6 +20,14 @@ private let INTEROPLIB_JNI_JLONG_ID: String = "jlong"
 private let INTEROPLIB_JNI_JOBJECT_ID: String = "jobject"
 private let INTEROPLIB_JAVA_ENTITY_KIND: String = "Java_CFFI_JavaEntityKind"
 private let INTEROPLIB_JAVA_ENTITY_KIND_JOBJECT: String = "JOBJECT"
+private let INTEROPLIB_JAVA_ENTITY_KIND_JBYTE: String = "JBYTE"
+private let INTEROPLIB_JAVA_ENTITY_KIND_JSHORT: String = "JSHORT"
+private let INTEROPLIB_JAVA_ENTITY_KIND_JCHAR: String = "JCHAR"
+private let INTEROPLIB_JAVA_ENTITY_KIND_JINT: String = "JINT"
+private let INTEROPLIB_JAVA_ENTITY_KIND_JLONG: String = "JLONG"
+private let INTEROPLIB_JAVA_ENTITY_KIND_JFLOAT: String = "JFLOAT"
+private let INTEROPLIB_JAVA_ENTITY_KIND_JDOUBLE: String = "JDOUBLE"
+private let INTEROPLIB_JAVA_ENTITY_KIND_JBOOLEAN: String = "JBOOLEAN"
 private let INTEROPLIB_JNI_GET_ENV_ID: String = "Java_CFFI_get_env"
 private let INTEROPLIB_CFFI_NEW_GLOBAL_REF_ID: String = "Java_CFFI_newGlobalReference"
 private let INTEROPLIB_CFFI_DELETE_GLOBAL_REF_ID: String = "Java_CFFI_deleteGlobalReference"
@@ -70,6 +78,8 @@ private let DETACH_CJ_OBJECT: String = "detachCJObject"
 private let ATTACH_CJ_OBJECT: String = "attachCJObject"
 private let GET_JAVALAMBDA_OBJECT_DECL_ID: String = "getJavaLambdaObject"
 private let GET_JAVALAMBDA_ENTITY_DECL_ID: String = "getJavaLambdaEntity"
+private let JAVA_ARRAY_GET_FOR_REF_TYPES: String = "$javaarrayget"
+private let JAVA_ARRAY_SET_FOR_REF_TYPES: String = "$javaarrayset"
 
 public class MemberJNISignature {
     public var classTypeSignature: String
@@ -156,6 +166,10 @@ public class InteropLibBridge {
     private let typeManager: TypeManager
     private let diag: BasicDiagnosticEngine
     private let utils: Utils
+    private let supportedArrayPrimitiveElementType: Array<TypeKind> = [
+        TypeKind.TYPE_BOOLEAN, TypeKind.TYPE_INT8, TypeKind.TYPE_UINT16, TypeKind.TYPE_INT16,
+        TypeKind.TYPE_INT32, TypeKind.TYPE_INT64, TypeKind.TYPE_FLOAT32, TypeKind.TYPE_FLOAT64
+    ]
 
     public init(importManager: ImportManager, typeManager: TypeManager,
         diag: BasicDiagnosticEngine, utils: Utils) {
@@ -912,6 +926,56 @@ public class InteropLibBridge {
         }
         CJC_ABORT()
         return FuncDecl()
+    }
+
+    public func SelectJSigByTypeKind(kind: TypeKind, ty: Ty): Expr {
+        return CreateLitConstExpr(LitConstKind.STRING, utils.GetJavaTypeSignature(ty),
+            utils.GetStringDecl().GetTy().getOrThrow())
+    }
+
+    public func SelectJPrimitiveNameByTypeKind(kind: TypeKind, ty: Ty): Expr {
+        let typeName = match (kind) {
+            case TypeKind.TYPE_INT8 => INTEROPLIB_JAVA_ENTITY_KIND_JBYTE
+            case TypeKind.TYPE_INT16 => INTEROPLIB_JAVA_ENTITY_KIND_JSHORT
+            case TypeKind.TYPE_UINT16 => INTEROPLIB_JAVA_ENTITY_KIND_JCHAR
+            case TypeKind.TYPE_INT32 => INTEROPLIB_JAVA_ENTITY_KIND_JINT
+            case TypeKind.TYPE_INT64 => INTEROPLIB_JAVA_ENTITY_KIND_JLONG
+            case TypeKind.TYPE_FLOAT32 => INTEROPLIB_JAVA_ENTITY_KIND_JFLOAT
+            case TypeKind.TYPE_FLOAT64 => INTEROPLIB_JAVA_ENTITY_KIND_JDOUBLE
+            case TypeKind.TYPE_BOOLEAN => INTEROPLIB_JAVA_ENTITY_KIND_JBOOLEAN
+            case TypeKind.TYPE_ENUM => INTEROPLIB_JAVA_ENTITY_KIND_JOBJECT
+            case _ =>
+                CJC_ABORT()
+                ""
+        }
+        return CreateRefExpr(LookupEnumMember(GetJavaEntityKindDecl().getOrThrow(), typeName).getOrThrow())
+    }
+
+    public func GenerateTypeMappingWithSelector(selector: (TypeKind, Ty) -> Expr): HashMap<String, Expr> {
+        let typeMapping = HashMap<String, Expr>()
+        for (kind in supportedArrayPrimitiveElementType) {
+            let ty = TypeManager.GetPrimitiveTy(kind)
+            typeMapping.add(Ty.ToString(ty), selector(kind, ty))
+        }
+        return typeMapping
+    }
+
+    public func FindArrayJavaEntityGetDecl(jArrayDecl: ClassDecl): Option<FuncDecl> {
+        for (member in jArrayDecl.body.getOrThrow().decls) {
+            if (member.identifier == JAVA_ARRAY_GET_FOR_REF_TYPES) {
+                return member as FuncDecl
+            }
+        }
+        return None
+    }
+
+    public func FindArrayJavaEntitySetDecl(jArrayDecl: ClassDecl): Option<FuncDecl> {
+        for (member in jArrayDecl.body.getOrThrow().decls) {
+            if (member.identifier == JAVA_ARRAY_SET_FOR_REF_TYPES) {
+                return member as FuncDecl
+            }
+        }
+        return None
     }
 
     public func CreateGetTypeForTypeParameterCall(genericParam: GenericParamDecl): Expr {
