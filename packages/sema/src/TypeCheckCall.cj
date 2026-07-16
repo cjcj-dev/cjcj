@@ -4318,7 +4318,10 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
         if (let Some(targetDecl) <- base.GetTarget()) {
             if (targetDecl.astKind == ASTKind.TYPE_ALIAS_DECL) {
                 if (let Some(diagValue) <- diag) {
-                    DiagRef(diagValue, base, BasicDiagKindRefactor.sema_invalid_called_object)
+                    let builder = DiagnoseRefactor(
+                        diagValue, BasicDiagKindRefactor.sema_invalid_called_object, base)
+                    builder.AddNote("cannot call a type alias for a function type")
+                    builder.Emit()
                 }
                 return false
             }
