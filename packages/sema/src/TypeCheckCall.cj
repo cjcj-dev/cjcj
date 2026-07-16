@@ -3447,7 +3447,7 @@ internal func CollectValidFuncTys(typeManager: TypeManager, diag: Option<BasicDi
     funcs: ArrayList<FuncDecl>, expr: Expr, targetTy!: Option<FuncTy> = None,
     declSynthesizer!: Option<CallDeclSynthesizer> = None): FuncTyPair {
     let pair = FuncTyPair()
-    let filteredFuncs = FilterShadowedFunc(funcs)
+    let filteredFuncs = FilterShadowedFunc(typeManager, funcs)
     let typeArgs = expr.GetTypeArgs()
     try (ds = DiagSuppressor(diag)) {
         for (fd in filteredFuncs) {
