@@ -2,10 +2,51 @@ package cjcj::sema
 
 import std.collection.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagnosticBuilder as BasicDiagnosticBuilder
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.Range as BasicRange
 import cjcj::ast.*
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
+
+private func GetNoteMessageForMemberDecl(target: Decl): String {
+    var message = "found "
+    let outerDecl = target.outerDecl.getOrThrow()
+    if (outerDecl.astKind == ASTKind.EXTEND_DECL) {
+        message += "extended "
+    }
+    return message + DeclKindToString(target) + " member of '" + outerDecl.GetTy().getOrThrow().String() + "'"
+}
+
+public func AddDiagNotesForImportedDecls(builder: BasicDiagnosticBuilder,
+    declToImports: HashMap<Decl, ArrayList<ImportSpec>>, targets: ArrayList<Decl>): Unit {
+    let imports = ArrayList<ImportSpec>()
+    let implicitImports = HashSet<String>()
+    for (target in targets) {
+        if (!target.TestAttr(Attribute.GLOBAL) && target.astKind != ASTKind.PACKAGE_DECL) {
+            CJC_ASSERT(target.outerDecl.getOrThrow().IsNominalDecl())
+            AddNote(builder, target, MakeRangeForDeclIdentifier(target), GetNoteMessageForMemberDecl(target))
+        }
+        if (let Some(importSpecs) <- declToImports.get(target)) {
+            for (importSpec in importSpecs) {
+                if (importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
+                    implicitImports.add(target.fullPackageName)
+                } else {
+                    var index: Int64 = 0
+                    while (index < imports.size && CompNodeByPos(imports[index], importSpec)) {
+                        index++
+                    }
+                    imports.add(importSpec, at: index)
+                }
+            }
+        }
+    }
+    for (importSpec in imports) {
+        AddNote(builder, importSpec, MakeRange(importSpec.begin, importSpec.end), "found imported candidate")
+    }
+    for (implicitPackage in implicitImports) {
+        builder.AddNote("found candidate from implicit imported pacakge '" + implicitPackage + "'")
+    }
+}
 
 // C++ src/Sema/Diags.cpp:189-215 DiagRedefinitionWithFoundNode.
 public func DiagRedefinitionWithFoundNode(
