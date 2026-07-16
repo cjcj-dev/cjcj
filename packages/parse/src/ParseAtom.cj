@@ -270,7 +270,11 @@ extend ParserImpl {
                     break
                 }
             }
-            ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after VArray arguments").Begin()
+            if (!Skip(TokenKind.RPAREN)) {
+                ret.isBroken = true
+                DiagExpectedRightDelimiter("(", ret.leftParenPos)
+            }
+            ret.rightParenPos = lastToken.Begin()
             ret.end = ret.rightParenPos + 1
         }
         return ret
