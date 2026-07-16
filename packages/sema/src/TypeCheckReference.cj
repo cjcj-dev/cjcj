@@ -13,6 +13,7 @@ import cjcj::macro_pkg.TestEntryConstructor
 import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
 import cjcj::modules.PackageRelation as ModulesPackageRelation
 import cjcj::modules.SemaImportManager
+import cjcj::sema.FFI.CheckInvalidRefInCFunc
 
 private func TypeCheckReferenceRange(node: Node): BasicRange {
     var rangeEnd = node.end
@@ -399,26 +400,6 @@ private func TypeCheckReferenceGetCurFuncBody(ctx: ASTContext, scopeName: String
     return None
 }
 
-private func IsInCFunc(ctx: ASTContext, re: RefExpr): Bool {
-    var symbolOpt = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, re.scopeName)
-    while (let Some(symbol) <- symbolOpt) {
-        if (let Some(node) <- symbol.node) {
-            if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
-                if (let Some(lambdaTy) <- lambdaExpr.GetTy()) {
-                    if (Ty.IsTyCorrect(lambdaTy) && lambdaTy.IsCFunc()) {
-                        return true
-                    }
-                }
-            }
-        }
-        if (symbol.scopeName.isEmpty()) {
-            break
-        }
-        symbolOpt = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, symbol.scopeName)
-    }
-    return false
-}
-
 private func TypeCheckReferenceCheckMutationInStruct(
     diag: BasicDiagnosticEngine,
     ctx: ASTContext,
@@ -458,41 +439,6 @@ private func TypeCheckReferenceCheckMutationInStruct(
                 }
             }
         }
-    }
-}
-
-private func CheckInvalidRefInCFunc(
-    diag: BasicDiagnosticEngine,
-    ctx: ASTContext,
-    re: RefExpr
-): Unit {
-    if (!IsInCFunc(ctx, re)) {
-        return
-    }
-    let name = if (re.isThis) { "this" } else { "super" }
-    let builder = Diagnose(
-        diag,
-        re,
-        BasicDiagKind.sema_cfunc_cannot_capture_this,
-        args: [BasicDiagArgument(name)])
-    builder.Emit()
-}
-
-private func CheckInvalidRefInCFunc(
-    diag: BasicDiagnosticEngine,
-    ctx: ASTContext,
-    re: RefExpr,
-    target: Decl
-): Unit {
-    if (!IsInCFunc(ctx, re) || target.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.ENUM_CONSTRUCTOR)) {
-        return
-    }
-    let isNonStaticMember = !target.TestAttr(Attribute.STATIC) &&
-        (target.TestAnyAttr(Attribute.IN_CLASSLIKE, Attribute.IN_STRUCT, Attribute.IN_ENUM) ||
-        target.TestAttr(Attribute.IN_EXTEND))
-    if (isNonStaticMember) {
-        Diagnose(diag, re, BasicDiagKind.sema_cfunc_cannot_capture_this,
-            args: [BasicDiagArgument("this")]).Emit()
     }
 }
 
@@ -1377,7 +1323,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
         TypeCheckReferenceEmitRefNotType(diag, re, re.ref.identifier.Val(), decl)
         valid = false
     }
-    CheckInvalidRefInCFunc(diag, ctx, re, decl)
+    CheckInvalidRefInCFunc(ctx, re, decl, diag)
     return valid
 }
 
@@ -1538,7 +1484,7 @@ private func CheckUsageOfThis(
         let currentNode = ctx.currentCheckingNodes[ctx.currentCheckingNodes.size - 1]
         valid = TypeCheckReferenceCheckThisOrSuperInInitializer(diag, currentNode, re) && valid
     }
-    CheckInvalidRefInCFunc(diag, ctx, re)
+    CheckInvalidRefInCFunc(ctx, re, diag)
     return valid
 }
 
@@ -1590,7 +1536,7 @@ private func TypeCheckReferenceCheckUsageOfSuper(
         let currentNode = ctx.currentCheckingNodes[ctx.currentCheckingNodes.size - 1]
         valid = TypeCheckReferenceCheckThisOrSuperInInitializer(diag, currentNode, re) && valid
     }
-    CheckInvalidRefInCFunc(diag, ctx, re)
+    CheckInvalidRefInCFunc(ctx, re, diag)
     return valid
 }
 
