@@ -44,6 +44,8 @@ public class ParserImpl {
     public let bracketsStack: ArrayList<TokenKind> = ArrayList<TokenKind>()
     let combinedDoubleArrow: Array<TokenKind> = [TokenKind.ASSIGN, TokenKind.GT]
     let intrinsics: HashSet<Node> = HashSet<Node>()
+    // C++: Parse/ParserImpl.h:227 ParserImpl::combinedDoubleArrow.
+    let combinedDoubleArrow: Array<TokenKind> = [TokenKind.ASSIGN, TokenKind.GT]
 
     public init(fileID: UInt64, input: String, diag: BasicDiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
         this.diag = diag

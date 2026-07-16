@@ -4,7 +4,6 @@ import std.collection.*
 import cjcj::ast.MacroExpandDecl as AstMacroExpandDecl
 import cjcj::ast.ExprKind as AstExprKind
 import cjcj::ast.FuncBody as AstFuncBody
-import cjcj::ast.FuncParam as AstFuncParam
 import cjcj::ast.FuncParamList as AstFuncParamList
 import cjcj::ast.MacroInvocation as AstMacroInvocation
 import cjcj::ast.ScopeKind as AstScopeKind
