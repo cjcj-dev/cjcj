@@ -1245,6 +1245,79 @@ private class CjoSignatureMaterializer {
         }
     }
 
+    // IncrementalLoader.cpp:148-205 CollectRemovedDecls.
+    private func CollectRemovedDecls(decl: PackageFormat_Decl, needRemoved: HashSet<String>): Unit {
+        if (decl.GetKind() == MF_DECL_KIND_FUNC_DECL) {
+            CollectRemovedDecl(decl.GetMangledName().getOrThrow().str(), needRemoved)
+            let info = decl.GetInfoAsFuncInfo().getOrThrow()
+            let paramLists = info.GetFuncBody().getOrThrow().GetParamLists().getOrThrow()
+            var paramListIndex: UInt32 = 0u32
+            while (paramListIndex < paramLists.size()) {
+                let paramList = PackageFormat_FuncParamList(data.getOrThrow(),
+                    (paramLists.Get(paramListIndex) as Int64).getOrThrow())
+                let desugars = paramList.GetDesugars().getOrThrow()
+                var desugarOffset: UInt32 = 0u32
+                while (desugarOffset < desugars.size()) {
+                    let desugarIndex = (desugars.Get(desugarOffset) as UInt32).getOrThrow()
+                    if (desugarIndex != 0u32) {
+                        let member = GetFormatDeclByIndex(desugarIndex)
+                        CollectRemovedDecl(member.GetMangledName().getOrThrow().str(), needRemoved)
+                    }
+                    desugarOffset++
+                }
+                paramListIndex++
+            }
+        } else if (decl.GetKind() == MF_DECL_KIND_PROP_DECL) {
+            let info = decl.GetInfoAsPropInfo().getOrThrow()
+            let setters = info.GetSetters().getOrThrow()
+            var setterIndex: UInt32 = 0u32
+            while (setterIndex < setters.size()) {
+                let setter = GetFormatDeclByIndex((setters.Get(setterIndex) as UInt32).getOrThrow())
+                CollectRemovedDecl(setter.GetMangledName().getOrThrow().str(), needRemoved)
+                setterIndex++
+            }
+            let getters = info.GetGetters().getOrThrow()
+            var getterIndex: UInt32 = 0u32
+            while (getterIndex < getters.size()) {
+                let getter = GetFormatDeclByIndex((getters.Get(getterIndex) as UInt32).getOrThrow())
+                CollectRemovedDecl(getter.GetMangledName().getOrThrow().str(), needRemoved)
+                getterIndex++
+            }
+        } else if (decl.GetKind() == MF_DECL_KIND_VAR_DECL) {
+            let attrs = GetAttributes(decl)
+            if (attrs.TestAttr(Attribute.GLOBAL) || attrs.TestAttr(Attribute.STATIC)) {
+                CollectRemovedDecl(decl.GetMangledName().getOrThrow().str(), needRemoved)
+            }
+        } else {
+            let body = if (decl.GetKind() == MF_DECL_KIND_CLASS_DECL) {
+                decl.GetInfoAsClassInfo().getOrThrow().GetBody()
+            } else if (decl.GetKind() == MF_DECL_KIND_INTERFACE_DECL) {
+                decl.GetInfoAsInterfaceInfo().getOrThrow().GetBody()
+            } else if (decl.GetKind() == MF_DECL_KIND_ENUM_DECL) {
+                decl.GetInfoAsEnumInfo().getOrThrow().GetBody()
+            } else if (decl.GetKind() == MF_DECL_KIND_STRUCT_DECL) {
+                decl.GetInfoAsStructInfo().getOrThrow().GetBody()
+            } else if (decl.GetKind() == MF_DECL_KIND_EXTEND_DECL) {
+                decl.GetInfoAsExtendInfo().getOrThrow().GetBody()
+            } else {
+                None
+            }
+            if (body.isNone()) {
+                return
+            }
+            if (decl.GetKind() != MF_DECL_KIND_EXTEND_DECL) {
+                CollectRemovedDecl(decl.GetMangledName().getOrThrow().str(), needRemoved)
+            }
+            let members = body.getOrThrow()
+            var memberIndex: UInt32 = 0u32
+            while (memberIndex < members.size()) {
+                CollectRemovedDecls(
+                    GetFormatDeclByIndex((members.Get(memberIndex) as UInt32).getOrThrow()), needRemoved)
+                memberIndex++
+            }
+        }
+    }
+
     // ReferenceLoader.cpp:210-214 ASTLoader::SetIsChirNow.
     public func SetIsChirNow(value!: Bool = false): Unit { isChirNow = value }
 
