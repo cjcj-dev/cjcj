@@ -42,7 +42,6 @@ public class ParserImpl {
     public let commentsMap: TokenVecMap = TokenVecMap()
     public let chainedAST: ArrayList<Node> = ArrayList<Node>()
     public let bracketsStack: ArrayList<TokenKind> = ArrayList<TokenKind>()
-    let combinedDoubleArrow: Array<TokenKind> = [TokenKind.ASSIGN, TokenKind.GT]
     let intrinsics: HashSet<Node> = HashSet<Node>()
     // C++: Parse/ParserImpl.h:227 ParserImpl::combinedDoubleArrow.
     let combinedDoubleArrow: Array<TokenKind> = [TokenKind.ASSIGN, TokenKind.GT]

@@ -414,18 +414,6 @@ extend ParserImpl {
         return Seeing(TokenKind.DOUBLE_ARROW) || SeeingCombinator([TokenKind.ASSIGN, TokenKind.GT])
     }
 
-    public func SeeingAnnotationTrailingClosure(tokenKinds: Array<TokenKind>): Bool {
-        if (!SeeingAny([TokenKind.AT, TokenKind.AT_EXCL])) {
-            return false
-        }
-        let tokens = lexer.LookAheadSkipNL(tokenKinds.size + 1)
-        let firstKind = tokens[0].kind
-        if (firstKind == TokenKind.IDENTIFIER || GetContextualKeyword().contains(firstKind)) {
-            return tokens[tokens.size - 1].kind == TokenKind.LSQUARE
-        }
-        return false
-    }
-
     public func SeeingContextualKeyword(): Bool {
         for (kind in GetContextualKeyword()) {
             if (Seeing(kind)) {
