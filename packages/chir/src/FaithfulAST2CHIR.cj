@@ -2255,11 +2255,16 @@ public class FaithfulAST2CHIR {
     private func TranslateOtherTopLevelDecls(node: AstPackage): Unit {
         let _ = node
         for (decl in globalAndMemberFuncs) {
+            if (!NeedTranslate(decl)) {
+                continue
+            }
             let trans = CreateTranslator()
+            trans.SetTopLevel(decl)
             let _ = Translator.TranslateASTNode(decl, trans)
         }
         for (decl in localConstFuncs.stableOrderValue) {
             let trans = CreateTranslator()
+            trans.SetTopLevel(decl)
             let _ = Translator.TranslateASTNode(decl, trans)
         }
         TranslateVecDecl(globalAndStaticVars, CreateTranslator())
@@ -2269,6 +2274,10 @@ public class FaithfulAST2CHIR {
             trans.TranslateAnnoFactoryFuncBody(decl, funcDef)
         }
         SetCompileTimeValueFlag()
+    }
+
+    private func NeedTranslate(decl: AstDecl): Bool {
+        return !noNeedToTranslateDecls.contains(decl)
     }
 
     private func SetCompileTimeValueFlag(): Unit {

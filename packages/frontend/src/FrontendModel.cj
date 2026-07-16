@@ -2998,7 +2998,9 @@ private class CjoSignatureMaterializer {
         } else if (decl.begin.fileID == 0u64 && !pkg.files.isEmpty()) {
             decl.curFile = Some(pkg.files[0])
         }
-        decl.EnableAttr(Attribute.IMPORTED)
+        if (!decl.TestAttr(Attribute.FROM_COMMON_PART) || !deserializingCommon) {
+            decl.EnableAttr(Attribute.IMPORTED)
+        }
     }
 
     private func FileByFlatIndex(index: UInt32): File {
