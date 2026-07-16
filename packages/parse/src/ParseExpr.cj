@@ -1347,40 +1347,45 @@ extend ParserImpl {
         try (cs = ChainScope(this, ret)) {
             if (Seeing([TokenKind.LCURL, TokenKind.CASE])) {
                 ParseMatchNoSelector(ret)
-                return ret
-            }
-            ret.matchMode = true
-            if (!Skip(TokenKind.LPAREN)) {
-                DiagExpectedSelectorOrMatchExprBody(ret.begin)
-                ret.selector = InvalidExpr(lookahead.Begin())
-                ret.EnableAttr(Attribute.HAS_BROKEN)
-                ConsumeUntilAny([TokenKind.LCURL, TokenKind.NL], targetTokenConsumed: false)
-            } else {
-                ret.leftParenPos = lastToken.Begin()
-                ret.selector = ParseExpr()
-                if (!Skip(TokenKind.RPAREN)) {
-                    DiagExpectedRightDelimiter("(", ret.leftParenPos)
-                }
-                ret.rightParenPos = lastToken.Begin()
-            }
-            if (!Skip(TokenKind.LCURL)) {
-                if (!ret.TestAttr(Attribute.HAS_BROKEN)) {
-                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
+                if (ret.matchCaseOthers.isEmpty()) {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_case, lookahead,
                         ConvertToken(lookahead)).Emit()
-                    ret.EnableAttr(Attribute.HAS_BROKEN)
                 }
             } else {
-                ret.leftCurlPos = lastToken.Begin()
-            }
-            SkipSemi()
-            if (!Seeing(TokenKind.CASE)) {
-                ConsumeUntil(TokenKind.RCURL, targetTokenConsumed: false)
-            }
-            ParseMatchCases(ret)
-            if (ret.matchCases.isEmpty()) {
-                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_case, Peek(), ConvertToken(Peek()))
-                builder.AddHint(MakeRange(ret.begin, "match"))
-                builder.Emit()
+                ret.matchMode = true
+                if (!Skip(TokenKind.LPAREN)) {
+                    DiagExpectedSelectorOrMatchExprBody(ret.begin)
+                    ret.selector = InvalidExpr(lookahead.Begin())
+                    ret.EnableAttr(Attribute.HAS_BROKEN)
+                    ConsumeUntilAny([TokenKind.LCURL, TokenKind.NL], targetTokenConsumed: false)
+                } else {
+                    ret.leftParenPos = lastToken.Begin()
+                    ret.selector = ParseExpr()
+                    if (!Skip(TokenKind.RPAREN)) {
+                        DiagExpectedRightDelimiter("(", ret.leftParenPos)
+                    }
+                    ret.rightParenPos = lastToken.Begin()
+                }
+                if (!Skip(TokenKind.LCURL)) {
+                    if (!ret.TestAttr(Attribute.HAS_BROKEN)) {
+                        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
+                            ConvertToken(lookahead)).Emit()
+                        ret.EnableAttr(Attribute.HAS_BROKEN)
+                    }
+                } else {
+                    ret.leftCurlPos = lastToken.Begin()
+                }
+                SkipSemi()
+                if (!Seeing(TokenKind.CASE)) {
+                    ConsumeUntil(TokenKind.RCURL, targetTokenConsumed: false)
+                }
+                ParseMatchCases(ret)
+                if (ret.matchCases.isEmpty()) {
+                    let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_case, lookahead,
+                        ConvertToken(lookahead))
+                    builder.AddHint(MakeRange(ret.begin, "match"))
+                    builder.Emit()
+                }
             }
             if (!Skip(TokenKind.RCURL) && !ret.leftCurlPos.IsZero()) {
                 DiagExpectedRightDelimiter("{", ret.leftCurlPos)
@@ -1455,39 +1460,48 @@ extend ParserImpl {
 
     public func ParseMatchNoSelector(ret: MatchExpr): Unit {
         ret.matchMode = false
-        ret.leftCurlPos = Expect(TokenKind.LCURL, "expected '{' for match body").Begin()
-        SkipNLOrSemi()
-        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RCURL)) {
-            if (!Skip(TokenKind.CASE)) {
-                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_case, Peek(), ConvertToken(Peek()))
-                builder.AddHint(MakeRange(ret.begin, "match"))
-                Next()
-                SkipNLOrSemi()
-                builder.Emit()
-                continue
-            }
+        ret.leftCurlPos = Peek().Begin()
+        Next()
+        let consumeTarget = { =>
+            SeeingAny([TokenKind.CASE, TokenKind.RCURL, TokenKind.DOUBLE_ARROW]) ||
+                SeeingCombinator([TokenKind.ASSIGN, TokenKind.GT])
+        }
+        while (Skip(TokenKind.CASE)) {
             let matchCase = MatchCaseOther()
-            matchCase.begin = lastToken.Begin()
+            matchCase.begin = lookahead.Begin()
             if (Skip(TokenKind.WILDCARD)) {
                 matchCase.matchExpr = WildcardExpr(lastToken.Begin())
             } else {
                 matchCase.matchExpr = ParseExpr()
             }
-            if (!SkipDoubleArrow()) {
-                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_case, Peek(),
-                    ConvertToken(Peek()))
+            if (!Skip(TokenKind.DOUBLE_ARROW) && !SkipCombinedDoubleArrow()) {
+                let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_case,
+                    lookahead, ConvertToken(lookahead))
                 builder.AddHint(MakeRange(matchCase.begin, "case"))
                 builder.Emit()
+                ConsumeUntilAny(consumeTarget, targetTokenConsumed: false)
+                let invalidBlock = Block()
+                invalidBlock.EnableAttr(Attribute.IS_BROKEN)
+                invalidBlock.begin = lookahead.Begin()
+                invalidBlock.end = lookahead.Begin()
+                matchCase.exprOrDecls = invalidBlock
+                matchCase.EnableAttr(Attribute.HAS_BROKEN)
+                if (!Skip(TokenKind.DOUBLE_ARROW) && !SkipCombinedDoubleArrow()) {
+                    matchCase.end = lastToken.End()
+                    ret.matchCaseOthers.add(matchCase)
+                    continue
+                }
             }
             matchCase.arrowPos = lastToken.Begin()
             let block = ParseExprOrDeclsInMatchCase()
             matchCase.exprOrDecls = block
-            matchCase.end = block.end
+            matchCase.end = lastToken.End()
+            if (block.body.isEmpty() && !matchCase.TestAttr(Attribute.HAS_BROKEN)) {
+                DiagMatchCaseBodyCannotBeEmpty(matchCase.arrowPos + "=>".size)
+                matchCase.EnableAttr(Attribute.HAS_BROKEN)
+            }
             ret.matchCaseOthers.add(matchCase)
-            SkipNLOrSemi()
         }
-        ret.rightCurlPos = Expect(TokenKind.RCURL, "expected '}' after match").Begin()
-        ret.end = ret.rightCurlPos + 1
     }
 
     public func ParseExprOrDeclsInMatchCase(): Block {
