@@ -446,22 +446,23 @@ private func CreateGeneratedMemberCall(typeManager: TypeManager, callChecker: (T
 }
 
 private func CreateActiveFrameParentAccess(typeManager: TypeManager, importManager: SemaImportManager,
-    callChecker: (Ty, CallExpr) -> Bool, source: Node, frameTy: Ty): Option<MemberAccess> {
-    if (let Some(activeFrame) <- CreateHandlerFrameCall(typeManager, importManager, callChecker, source,
+    synthesizer: (Node) -> Ty, source: Node, frameTy: Ty): Option<MemberAccess> {
+    if (let Some(getActiveFrame) <- CreateHandlerFrameMethod(typeManager, importManager, source,
         GET_ACTIVE_FRAME_NAME, ArrayList<Ty>())) {
-        let activeFrameValue = CreateGeneratedMemberCall(typeManager, callChecker, source, activeFrame,
-            GET_OR_THROW_NAME, frameTy)
-        let parentAccess = CreateGeneratedFieldAccess(source, activeFrameValue, PARENT_FIELD_NAME)
-        parentAccess.SetTy(frameTy)
+        let getActiveFrameCall = CreateCallExpr(getActiveFrame, ArrayList<FuncArg>())
+        let getOrThrowAccess = CreateMemberAccess(getActiveFrameCall, GET_OR_THROW_NAME)
+        let getOrThrowCall = CreateCallExpr(getOrThrowAccess, ArrayList<FuncArg>())
+        let parentAccess = CreateMemberAccess(getOrThrowCall, PARENT_FIELD_NAME)
+        let _ = synthesizer(parentAccess)
         return parentAccess
     }
     return None
 }
 
 private func CreateFrameGuardCondition(typeManager: TypeManager, importManager: SemaImportManager,
-    callChecker: (Ty, CallExpr) -> Bool, source: Node, wrapperVar: VarDecl,
+    synthesizer: (Node) -> Ty, source: Node, wrapperVar: VarDecl,
     frameTy: Ty): Option<BinaryExpr> {
-    if (let Some(parentAccess) <- CreateActiveFrameParentAccess(typeManager, importManager, callChecker,
+    if (let Some(parentAccess) <- CreateActiveFrameParentAccess(typeManager, importManager, synthesizer,
         source, frameTy)) {
         let wrapperFrame = CreateGeneratedFieldAccess(source, CreateRefExpr(wrapperVar, source), FRAME_FIELD_NAME)
         wrapperFrame.SetTy(frameTy)
@@ -474,14 +475,14 @@ private func CreateFrameGuardCondition(typeManager: TypeManager, importManager: 
 }
 
 private func CreateWrapperGuardCatch(typeManager: TypeManager, importManager: SemaImportManager,
-    callChecker: (Ty, CallExpr) -> Bool, source: Node, wrapperDecl: ClassDecl, payloadFieldName: String,
+    synthesizer: (Node) -> Ty, source: Node, wrapperDecl: ClassDecl, payloadFieldName: String,
     frameTy: Ty): Option<GeneratedCatchClause> {
     let wrapperTy = typeManager.GetClassTy(wrapperDecl, Array<Ty>())
     let wrapperPattern = CreateVarPattern(V_COMPILER_NAME, wrapperTy)
     CopyGeneratedPosition(source, wrapperPattern)
     if (let Some(wrapperVar) <- wrapperPattern.varDecl) {
         CopyGeneratedPosition(source, wrapperVar)
-        if (let Some(condition) <- CreateFrameGuardCondition(typeManager, importManager, callChecker, source,
+        if (let Some(condition) <- CreateFrameGuardCondition(typeManager, importManager, synthesizer, source,
             wrapperVar, frameTy)) {
             let payload = CreateGeneratedFieldAccess(source, CreateRefExpr(wrapperVar, source), payloadFieldName)
             let thenBlock = CreateGeneratedBlock(source, CreateThrowExprFromExpr(source, payload),
@@ -536,14 +537,15 @@ private func CreateEarlyReturnMatch(typeManager: TypeManager, importManager: Sem
 }
 
 private func CreateEarlyReturnGuardCatch(typeManager: TypeManager, importManager: SemaImportManager,
-    callChecker: (Ty, CallExpr) -> Bool, source: Node, funcBody: FuncBody, earlyReturnDecl: ClassDecl,
+    synthesizer: (Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool,
+    source: Node, funcBody: FuncBody, earlyReturnDecl: ClassDecl,
     frameTy: Ty, tryReturnTy: Ty): Option<GeneratedCatchClause> {
     let earlyReturnTy = typeManager.GetClassTy(earlyReturnDecl, Array<Ty>())
     let earlyReturnPattern = CreateVarPattern(V_COMPILER_NAME, earlyReturnTy)
     CopyGeneratedPosition(source, earlyReturnPattern)
     if (let Some(earlyReturnVar) <- earlyReturnPattern.varDecl) {
         CopyGeneratedPosition(source, earlyReturnVar)
-        if (let Some(condition) <- CreateFrameGuardCondition(typeManager, importManager, callChecker, source,
+        if (let Some(condition) <- CreateFrameGuardCondition(typeManager, importManager, synthesizer, source,
             earlyReturnVar, frameTy)) {
             if (let Some(matchExpr) <- CreateEarlyReturnMatch(typeManager, importManager, callChecker, source, funcBody,
                 earlyReturnVar, tryReturnTy)) {
@@ -562,7 +564,7 @@ private func CreateEarlyReturnGuardCatch(typeManager: TypeManager, importManager
 }
 
 private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
-    importManager: SemaImportManager, callChecker: (Ty, CallExpr) -> Bool,
+    importManager: SemaImportManager, synthesizer: (Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool,
     pkg: Package, tryLambda: LambdaExpr, tryReturnTy: Ty): Bool {
     if (let None <- tryLambda.funcBody) {
         return false
@@ -598,7 +600,7 @@ private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
     wrappedTry.SetTy(tryReturnTy)
 
     let exceptionWrapper = FindEffectClassDecl(importManager, CLASS_FRAME_EXCEPTION_WRAPPER).getOrThrow()
-    if (let Some(exceptionCatch) <- CreateWrapperGuardCatch(typeManager, importManager, callChecker,
+    if (let Some(exceptionCatch) <- CreateWrapperGuardCatch(typeManager, importManager, synthesizer,
         sourceBlock, exceptionWrapper,
         EXCEPTION_FIELD_NAME, frameTy)) {
         wrappedTry.catchPatterns.add(exceptionCatch.pattern)
@@ -608,7 +610,7 @@ private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
     }
 
     let errorWrapper = FindEffectClassDecl(importManager, CLASS_FRAME_ERROR_WRAPPER).getOrThrow()
-    if (let Some(errorCatch) <- CreateWrapperGuardCatch(typeManager, importManager, callChecker,
+    if (let Some(errorCatch) <- CreateWrapperGuardCatch(typeManager, importManager, synthesizer,
         sourceBlock, errorWrapper,
         ERROR_FIELD_NAME, frameTy)) {
         wrappedTry.catchPatterns.add(errorCatch.pattern)
@@ -618,7 +620,7 @@ private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
     }
 
     let earlyReturnDecl = FindEffectClassDecl(importManager, CLASS_EARLY_RETURN).getOrThrow()
-    if (let Some(earlyReturnCatch) <- CreateEarlyReturnGuardCatch(typeManager, importManager, callChecker,
+    if (let Some(earlyReturnCatch) <- CreateEarlyReturnGuardCatch(typeManager, importManager, synthesizer, callChecker,
         sourceBlock, funcBody,
         earlyReturnDecl, frameTy, tryReturnTy)) {
         wrappedTry.catchPatterns.add(earlyReturnCatch.pattern)
@@ -811,7 +813,7 @@ private func WrapHandlerLambda(typeManager: TypeManager, importManager: SemaImpo
 }
 
 private func CreateFrame(typeManager: TypeManager, importManager: SemaImportManager,
-    ctx: ASTContext, callChecker: (Ty, CallExpr) -> Bool, pkg: Package,
+    ctx: ASTContext, synthesizer: (Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool, pkg: Package,
     tryExpr: TryExpr, nodes: ArrayList<Node>):
     Option<VarDecl> {
     if (let None <- tryExpr.tryLambda) {
@@ -835,7 +837,7 @@ private func CreateFrame(typeManager: TypeManager, importManager: SemaImportMana
     frameTypeArgs.add(tryReturnTy)
     let frameTy = typeManager.GetClassTy(frameDecl, frameTypeArgs.toArray())
 
-    if (!EncloseTryLambdaForImmediateWrappers(typeManager, importManager, callChecker,
+    if (!EncloseTryLambdaForImmediateWrappers(typeManager, importManager, synthesizer, callChecker,
         pkg, tryLambda, tryReturnTy)) {
         return None
     }
@@ -1008,7 +1010,7 @@ private func ClearOriginalTryHandleSurface(tryExpr: TryExpr): Unit {
 
 public func DesugarTryToFrame(typeManager: TypeManager, importManager: SemaImportManager,
     ctx: ASTContext, pkg: Package, tryExpr: TryExpr,
-    callChecker: (Ty, CallExpr) -> Bool): Unit {
+    synthesizer: (Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool): Unit {
     if (tryExpr.handlers.isEmpty() || !Ty.IsTyCorrect(tryExpr.GetTy())) {
         return
     }
@@ -1016,7 +1018,8 @@ public func DesugarTryToFrame(typeManager: TypeManager, importManager: SemaImpor
         return
     }
     let nodes = ArrayList<Node>()
-    if (let Some(frameVar) <- CreateFrame(typeManager, importManager, ctx, callChecker, pkg, tryExpr, nodes)) {
+    if (let Some(frameVar) <- CreateFrame(typeManager, importManager, ctx, synthesizer,
+        callChecker, pkg, tryExpr, nodes)) {
         if (!AddSetHandlers(typeManager, importManager, callChecker, pkg, tryExpr, frameVar, nodes)) {
             return
         }
