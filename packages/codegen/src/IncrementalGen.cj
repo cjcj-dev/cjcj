@@ -9,7 +9,7 @@ import cjcj::utils.{CJC_ASSERT, FileUtil}
 
 // Mirrors IncrementalGen.cpp:35-42.
 private func AllowFunctionBodyBeReplaced(`func`: LLVMValueRef): Bool {
-    return GetLLVMValueName(`func`) != FOR_KEEPING_SOME_TYPES_FUNC_NAME
+    return getName(`func`) != FOR_KEEPING_SOME_TYPES_FUNC_NAME
 }
 
 // Mirrors IncrementalGen.cpp:44-48.
@@ -19,13 +19,13 @@ private func IsFileInitFuncName(funcName: String): Bool {
 
 // Mirrors IncrementalGen.cpp:88-91.
 private func IsGVForExtensionDefs(gv: LLVMValueRef): Bool {
-    return HasGlobalVariableAttribute(gv, "InnerTypeExtensions") ||
-        HasGlobalVariableAttribute(gv, "OuterTypeExtensions")
+    return hasAttribute(gv, "InnerTypeExtensions") ||
+        hasAttribute(gv, "OuterTypeExtensions")
 }
 
 // Mirrors IncrementalGen.cpp:50-66.
 private func CopyGlobalVariableTo(destModule: LLVMModuleHandle, name: String, gv: LLVMValueRef): LLVMValueRef {
-    var newGV = GetNamedGlobal(destModule, name)
+    var newGV = getNamedGlobal(destModule, name)
     if (newGV.isNull()) {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             newGV = unsafe { LLVMAddGlobal(destModule.raw, LLVMGlobalGetValueType(gv), nameCString.value) }
@@ -69,7 +69,8 @@ private func DeleteFuncBody(function: LLVMValueRef): Unit {
     unsafe { LLVMSelfhostGlobalObjectClearMetadata(function) }
 }
 
-private func HasGlobalVariableAttribute(gv: LLVMValueRef, name: String): Bool {
+// Adapts llvm::GlobalVariable::hasAttribute (IncrementalGen.cpp:90) to the shim ABI.
+private func hasAttribute(gv: LLVMValueRef, name: String): Bool {
     var result = false
     try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
         result = unsafe {
@@ -79,17 +80,20 @@ private func HasGlobalVariableAttribute(gv: LLVMValueRef, name: String): Bool {
     return result
 }
 
-private func GetLLVMValueName(value: LLVMValueRef): String {
+// Adapts llvm::Value::getName to LLVM-C.
+private func getName(value: LLVMValueRef): String {
     return LLVMCStringToString(unsafe { LLVMGetValueName(value) }) ?? ""
 }
 
-private func SetLLVMValueName(value: LLVMValueRef, name: String): Unit {
+// Adapts llvm::Value::setName to LLVM-C.
+private func setName(value: LLVMValueRef, name: String): Unit {
     try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
         unsafe { LLVMSetValueName2(value, nameCString.value, UIntNative(name.size)) }
     }
 }
 
-private func GetNamedFunction(module: LLVMModuleHandle, name: String): LLVMValueRef {
+// Adapts llvm::Module::getFunction to LLVM-C.
+private func getFunction(module: LLVMModuleHandle, name: String): LLVMValueRef {
     var result = LLVMNullValue()
     try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
         result = unsafe { LLVMGetNamedFunction(module.raw, nameCString.value) }
@@ -97,7 +101,8 @@ private func GetNamedFunction(module: LLVMModuleHandle, name: String): LLVMValue
     return result
 }
 
-private func GetNamedGlobal(module: LLVMModuleHandle, name: String): LLVMValueRef {
+// Adapts llvm::Module::getNamedGlobal to LLVM-C.
+private func getNamedGlobal(module: LLVMModuleHandle, name: String): LLVMValueRef {
     var result = LLVMNullValue()
     try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
         result = unsafe { LLVMGetNamedGlobal(module.raw, nameCString.value) }
@@ -114,7 +119,8 @@ private func AddUniqueLLVMValue(values: ArrayList<LLVMValueRef>, value: LLVMValu
     values.add(value)
 }
 
-private func GetGlobalObjectMetadata(context: LLVMContextHandle, value: LLVMValueRef,
+// Adapts llvm::GlobalObject::getMetadata to LLVM-C's metadata-entry API.
+private func getMetadata(context: LLVMContextHandle, value: LLVMValueRef,
     name: String): LLVMMetadataRef {
     let kind = LLVMGetMDKindID(context, name)
     if (kind == 0u32) {
@@ -249,29 +255,29 @@ public class IncrementalGen {
     private func UpdateCachedDeclsFromInjectedModule(cachedMangles: CachedMangleMap): Unit {
         let module = injectedModule.getOrThrow()
         for (name in cachedMangles.incrRemovedDecls) {
-            let oldF = GetNamedFunction(module, name)
+            let oldF = getFunction(module, name)
             if (!oldF.isNull()) {
-                SetLLVMValueName(oldF, name + "$useless$")
+                setName(oldF, name + "$useless$")
                 CollectUselessDefinitions(oldF)
                 if (name.startsWith("macroCall_c_") || name.startsWith("macroCall_a_")) {
                     let nameWrapper = name + "$real"
-                    let oldFWrapper = GetNamedFunction(module, nameWrapper)
-                    SetLLVMValueName(oldFWrapper, nameWrapper + "$useless$")
+                    let oldFWrapper = getFunction(module, nameWrapper)
+                    setName(oldFWrapper, nameWrapper + "$useless$")
                     CollectUselessDefinitions(oldFWrapper)
                 }
             } else {
-                let oldV = GetNamedGlobal(module, name)
+                let oldV = getNamedGlobal(module, name)
                 if (!oldV.isNull()) {
-                    SetLLVMValueName(oldV, name + "$useless$")
+                    setName(oldV, name + "$useless$")
                     CollectUselessDefinitions(oldV)
                 }
             }
 
             if (codegenAddedCachedMap.contains(name)) {
                 for (codegenAddedName in codegenAddedCachedMap[name]) {
-                    let old = GetNamedGlobal(module, codegenAddedName)
+                    let old = getNamedGlobal(module, codegenAddedName)
                     if (!old.isNull()) {
-                        SetLLVMValueName(old, name + "$useless$")
+                        setName(old, name + "$useless$")
                         CollectUselessDefinitions(old)
                     }
                 }
@@ -280,11 +286,11 @@ public class IncrementalGen {
         }
 
         for (name in cachedMangles.newExternalDecls) {
-            let oldF = GetNamedFunction(module, name)
+            let oldF = getFunction(module, name)
             if (!oldF.isNull()) {
                 AddLinkageTypeMetadata(oldF, LLVMLinkage.External, cgParallelEnabled)
             } else {
-                let oldV = GetNamedGlobal(module, name)
+                let oldV = getNamedGlobal(module, name)
                 if (!oldV.isNull()) {
                     AddLinkageTypeMetadata(oldV, LLVMLinkage.External, cgParallelEnabled)
                 }
@@ -292,7 +298,7 @@ public class IncrementalGen {
         }
 
         for (name in cachedMangles.importedInlineDecls) {
-            let oldF = GetNamedFunction(module, name)
+            let oldF = getFunction(module, name)
             if (!oldF.isNull()) {
                 DeleteFuncBody(oldF)
                 AddLinkageTypeMetadata(oldF, LLVMLinkage.External, cgParallelEnabled)
@@ -301,7 +307,7 @@ public class IncrementalGen {
                     LLVMSetPersonalityFn(oldF, LLVMNullValue())
                 }
             } else {
-                let oldV = GetNamedGlobal(module, name)
+                let oldV = getNamedGlobal(module, name)
                 if (!oldV.isNull()) {
                     AddLinkageTypeMetadata(oldV, LLVMLinkage.External, cgParallelEnabled)
                     unsafe {
@@ -320,29 +326,29 @@ public class IncrementalGen {
         var gv = unsafe { LLVMGetFirstGlobal(incremental.raw) }
         while (!gv.isNull()) {
             let nextGV = unsafe { LLVMGetNextGlobal(gv) }
-            let gvName = GetLLVMValueName(gv)
+            let gvName = getName(gv)
             if (IsGVForExtensionDefs(gv)) {
                 var idx: Int64 = 0
-                var found = GetNamedGlobal(injected, gvName + idx.toString())
+                var found = getNamedGlobal(injected, gvName + idx.toString())
                 while (!found.isNull()) {
                     idx++
-                    found = GetNamedGlobal(injected, gvName + idx.toString())
+                    found = getNamedGlobal(injected, gvName + idx.toString())
                 }
                 try (nameCString = unsafe { LibC.mallocCString(gvName + idx.toString()) }.asResource()) {
                     found = unsafe { LLVMAddGlobal(injected.raw, LLVMGlobalGetValueType(gv), nameCString.value) }
                 }
-                SetLLVMValueName(gv, GetLLVMValueName(found))
-                let _ = CopyGlobalVariableTo(injected, GetLLVMValueName(found), gv)
+                setName(gv, getName(found))
+                let _ = CopyGlobalVariableTo(injected, getName(found), gv)
                 gv = nextGV
                 continue
             }
-            var injectedGv = GetNamedGlobal(injected, gvName)
+            var injectedGv = getNamedGlobal(injected, gvName)
             if (!injectedGv.isNull() &&
                 (unsafe { LLVMTypeOf(injectedGv) }.toUIntNative() !=
                     unsafe { LLVMTypeOf(gv) }.toUIntNative() ||
                 (unsafe { LLVMIsGlobalConstant(injectedGv) } != unsafe { LLVMIsGlobalConstant(gv) } &&
                 unsafe { LLVMIsDeclaration(gv) } == 0))) {
-                SetLLVMValueName(injectedGv, gvName + "$useless$")
+                setName(injectedGv, gvName + "$useless$")
                 injectedGv = LLVMNullValue()
             }
             if (injectedGv.isNull()) {
@@ -353,12 +359,12 @@ public class IncrementalGen {
 
         var function = unsafe { LLVMGetFirstFunction(incremental.raw) }
         while (!function.isNull()) {
-            let funcName = GetLLVMValueName(function)
-            var injectedFunc = GetNamedFunction(injected, funcName)
+            let funcName = getName(function)
+            var injectedFunc = getFunction(injected, funcName)
             if (!injectedFunc.isNull() &&
                 unsafe { LLVMGlobalGetValueType(injectedFunc) }.toUIntNative() !=
                     unsafe { LLVMGlobalGetValueType(function) }.toUIntNative()) {
-                SetLLVMValueName(injectedFunc, funcName + "$useless$")
+                setName(injectedFunc, funcName + "$useless$")
                 CollectUselessDefinitions(injectedFunc)
                 injectedFunc = LLVMNullValue()
             }
@@ -382,7 +388,7 @@ public class IncrementalGen {
         let injected = injectedModule.getOrThrow()
         var function = unsafe { LLVMGetFirstFunction(incremental.raw) }
         while (!function.isNull()) {
-            let oldFunction = GetNamedFunction(injected, GetLLVMValueName(function))
+            let oldFunction = getFunction(injected, getName(function))
             if (!oldFunction.isNull()) {
                 unsafe { LLVMSelfhostValueToValueMapSet(valueMap, function, oldFunction) }
                 let paramCount = unsafe { LLVMCountParams(function) }
@@ -391,7 +397,7 @@ public class IncrementalGen {
                     while (idx < paramCount) {
                         let source = unsafe { LLVMGetParam(function, idx) }
                         let dest = unsafe { LLVMGetParam(oldFunction, idx) }
-                        SetLLVMValueName(dest, GetLLVMValueName(source))
+                        setName(dest, getName(source))
                         unsafe { LLVMSelfhostValueToValueMapSet(valueMap, source, dest) }
                         idx++
                     }
@@ -401,7 +407,7 @@ public class IncrementalGen {
         }
         var gv = unsafe { LLVMGetFirstGlobal(incremental.raw) }
         while (!gv.isNull()) {
-            let existed = GetNamedGlobal(injected, GetLLVMValueName(gv))
+            let existed = getNamedGlobal(injected, getName(gv))
             if (!existed.isNull()) {
                 unsafe { LLVMSelfhostValueToValueMapSet(valueMap, gv, existed) }
             }
@@ -421,7 +427,7 @@ public class IncrementalGen {
         var gv = unsafe { LLVMGetFirstGlobal(incremental.raw) }
         while (!gv.isNull()) {
             let nextGV = unsafe { LLVMGetNextGlobal(gv) }
-            if (HasGlobalVariableAttribute(gv, "nonRecompile")) {
+            if (hasAttribute(gv, "nonRecompile")) {
                 try (nameCString = unsafe { LibC.mallocCString("nonRecompile") }.asResource()) {
                     unsafe { LLVMSelfhostGlobalVariableRemoveAttribute(gv, nameCString.value,
                         UInt32("nonRecompile".size)) }
@@ -429,7 +435,7 @@ public class IncrementalGen {
                 gv = nextGV
                 continue
             }
-            let gvToBeUpdated = GetNamedGlobal(injected, GetLLVMValueName(gv))
+            let gvToBeUpdated = getNamedGlobal(injected, getName(gv))
             CJC_ASSERT(!gvToBeUpdated.isNull())
             if (IsGVForExtensionDefs(gv)) {
                 unsafe { LLVMSetInitializer(gvToBeUpdated,
@@ -479,7 +485,7 @@ public class IncrementalGen {
                 function = unsafe { LLVMGetNextFunction(function) }
                 continue
             }
-            let funcToBeUpdated = GetNamedFunction(injected, GetLLVMValueName(function))
+            let funcToBeUpdated = getFunction(injected, getName(function))
             DeleteFuncBody(funcToBeUpdated)
             unsafe {
                 LLVMSelfhostCloneFunctionInto(funcToBeUpdated, function, valueMap)
@@ -495,8 +501,8 @@ public class IncrementalGen {
     private func UpdateBodyOfKeepTypesFunction(valueMap: LLVMSelfhostValueToValueMapRef): Unit {
         let incremental = incrementalModule.getOrThrow()
         let injected = injectedModule.getOrThrow()
-        let sourceFunction = GetNamedFunction(incremental, FOR_KEEPING_SOME_TYPES_FUNC_NAME)
-        let targetFunction = GetNamedFunction(injected, FOR_KEEPING_SOME_TYPES_FUNC_NAME)
+        let sourceFunction = getFunction(incremental, FOR_KEEPING_SOME_TYPES_FUNC_NAME)
+        let targetFunction = getFunction(injected, FOR_KEEPING_SOME_TYPES_FUNC_NAME)
         var block = unsafe { LLVMGetFirstBasicBlock(sourceFunction) }
         while (!block.isNull()) {
             unsafe { let _ = LLVMSelfhostCloneBasicBlock(block, valueMap, targetFunction) }
@@ -542,7 +548,7 @@ public class IncrementalGen {
                     if (!unsafe { LLVMIsAInstruction(user) }.isNull()) {
                         if (unsafe { LLVMSelfhostIsCallInst(user) } != 0) {
                             let parent = unsafe { LLVMGetBasicBlockParent(LLVMGetInstructionParent(user)) }
-                            if (IsFileInitFuncName(GetLLVMValueName(parent))) {
+                            if (IsFileInitFuncName(getName(parent))) {
                                 unsafe { LLVMInstructionEraseFromParent(user) }
                                 break
                             }
@@ -619,15 +625,15 @@ public class IncrementalGen {
         var gv = unsafe { LLVMGetFirstGlobal(module.raw) }
         while (!gv.isNull()) {
             if (unsafe { LLVMIsDeclaration(gv) } == 0) {
-                let reflection = GetGlobalObjectMetadata(context, gv, "Reflection")
+                let reflection = getMetadata(context, gv, "Reflection")
                 if (!reflection.isNull()) {
-                    if (HasGlobalVariableAttribute(gv, TYPE_TEMPLATE_ATTR)) {
+                    if (hasAttribute(gv, TYPE_TEMPLATE_ATTR)) {
                         metaBoundByTT.add(reflection)
                     } else {
                         metaBoundByTI.add(reflection)
                     }
                 }
-                let reflectionGV = GetGlobalObjectMetadata(context, gv, "ReflectionGV")
+                let reflectionGV = getMetadata(context, gv, "ReflectionGV")
                 if (!reflectionGV.isNull()) {
                     metaBoundByGV.add(reflectionGV)
                 }
@@ -658,7 +664,7 @@ public class IncrementalGen {
         var function = unsafe { LLVMGetFirstFunction(module.raw) }
         while (!function.isNull()) {
             if (unsafe { LLVMIsDeclaration(function) } == 0) {
-                let reflectionFunction = GetGlobalObjectMetadata(context, function, "ReflectionFunc")
+                let reflectionFunction = getMetadata(context, function, "ReflectionFunc")
                 if (!reflectionFunction.isNull()) {
                     metaBoundByF.add(reflectionFunction)
                 }
@@ -706,7 +712,7 @@ public class IncrementalGen {
     private func UpdateIncrLLVMUsedNames(): Unit {
         let module = injectedModule.getOrThrow()
         for (name in ["ExternalExtensionDefs", "NonExternalExtensionDefs"]) {
-            if (!GetNamedGlobal(module, name).isNull()) {
+            if (!getNamedGlobal(module, name).isNull()) {
                 llvmUsedGVNames.add(name)
             }
         }
