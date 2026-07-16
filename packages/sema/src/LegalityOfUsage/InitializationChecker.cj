@@ -2145,7 +2145,7 @@ public class InitializationChecker {
                 (initFunc.TestAttr(Attribute.COMMON) && !initFunc.TestAttr(Attribute.COMMON_WITH_DEFAULT))) {
                 continue
             }
-            CheckInitInConstructor(initFunc, uninitNonFuncDecls)
+            CheckInitInConstructors(initFunc, uninitNonFuncDecls)
             RemoveCtorUninitVars(ctorUninitVars, initFunc)
         }
         for (funcDecl in info.funcDecls) {
@@ -2156,7 +2156,7 @@ public class InitializationChecker {
         }
     }
 
-    private func CheckInitInConstructor(fd: FuncDecl, uninitNonFuncDecls: ArrayList<Decl>): Unit {
+    private func CheckInitInConstructors(fd: FuncDecl, uninitNonFuncDecls: ArrayList<Decl>): Unit {
         if (!IsOtherInit(fd.constructorCall)) {
             for (decl in uninitNonFuncDecls) {
                 decl.DisableAttr(Attribute.INITIALIZED)
@@ -2199,7 +2199,14 @@ public class InitializationChecker {
                 !ContainsInitDecl(definitelyUninitVars, decl)) {
                 continue
             }
-            AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, fd, target: decl, message: decl.identifier.Val())
+            if (fd.TestAttr(Attribute.COMPILER_ADD) && fd.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
+                AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, fd,
+                    target: decl, message: decl.identifier.Val())
+            } else {
+                let diagNode: Node = if (fd.TestAttr(Attribute.COMPILER_ADD)) { decl } else { fd }
+                AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, diagNode,
+                    target: decl, message: decl.identifier.Val())
+            }
         }
     }
 
