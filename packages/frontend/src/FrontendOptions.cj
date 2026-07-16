@@ -13,6 +13,10 @@ public open class GlobalOptions <: OptionBaseGlobalOptions {
     public init() {
         super()
     }
+
+    public init(other: OptionBaseGlobalOptions) {
+        super(other)
+    }
 }
 
 public enum DumpAction {
