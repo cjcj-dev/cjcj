@@ -27,6 +27,14 @@ private let CJO_FILE_IDENTIFIER: String = "CJOF"
 private let INVALID_PACKAGE_INDEX: Int64 = -1
 private let LOCAL_PACKAGE_INDEX: Int64 = -2
 
+// ASTWriter.cpp:372-380 CanSkip4CJMP.
+private func CanSkip4CJMP(decl: Decl, serializingCommon: Bool): Bool {
+    if (serializingCommon && !decl.IsNominalDecl() && decl.TestAttr(Attribute.GLOBAL)) {
+        return false
+    }
+    return true
+}
+
 // ASTWriterImpl.h:44-50 NodeInfo.
 private class NodeInfo {
     let begin: ArrayList<UInt8>
@@ -426,7 +434,7 @@ public class ASTWriter {
     }
 
     private func SaveTopLevelDeclIfNeeded(decl: Decl): Unit {
-        if (!ShouldSerializeTopLevelDecl(decl)) {
+        if (!NeedToExportDecl(decl)) {
             return
         }
         let targets = ArrayList<Decl>()
@@ -477,12 +485,18 @@ public class ASTWriter {
         out.add(decl)
     }
 
-    private func ShouldSerializeTopLevelDecl(decl: Decl): Bool {
-        if (decl.doNotExport || decl.TestAttr(Attribute.COMPILER_ADD)) {
+    // ASTWriter.cpp:629-644 ASTWriterImpl::NeedToExportDecl.
+    private func NeedToExportDecl(decl: Decl): Bool {
+        if (decl.doNotExport) {
             return false
         }
-        return decl.IsExportedDecl() ||
-            (decl.TestAttr(Attribute.GLOBAL) && decl.linkage != Linkage.INTERNAL)
+        let canSkip = !exportForIncr && !ShouldAlwaysExport(decl) &&
+            (!topLevelDecls.contains(decl) || decl.linkage == Linkage.INTERNAL) &&
+            CanSkip4CJMP(decl, serializingCommon)
+        if (canSkip) {
+            return false
+        }
+        return true
     }
 
     private func IsSupportedTopLevelDecl(decl: Decl): Bool {
