@@ -1754,7 +1754,7 @@ extend ParserImpl {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let key = Expect(TokenKind.STRUCT, "expected declaration keyword")
             ret.keywordPos = key.Begin()
-            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            ret.begin = key.Begin()
             CheckDeclarationInScope(scopeKind, DefKind.STRUCT)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.STRUCT))
             ret.identifier = ExpectIdentifierWithPos(ret)
@@ -1783,7 +1783,7 @@ extend ParserImpl {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let key = Expect(TokenKind.ENUM, "expected declaration keyword")
             ret.keywordPos = key.Begin()
-            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            ret.begin = key.Begin()
             CheckDeclarationInScope(scopeKind, DefKind.ENUM)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.ENUM))
             ret.identifier = ExpectIdentifierWithPos(ret)
