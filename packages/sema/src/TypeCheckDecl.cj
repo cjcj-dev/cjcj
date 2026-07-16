@@ -14,7 +14,7 @@ private func TypeCheckDeclEmitDiag(
     kind: BasicDiagKind,
     args!: Array<BasicDiagArgument> = Array<BasicDiagArgument>()
 ): Unit {
-    let builder = diag.Diagnose(node.begin, node.end, kind, args: args)
+    let builder = Diagnose(diag, node, kind, args: args)
     builder.Emit()
 }
 
