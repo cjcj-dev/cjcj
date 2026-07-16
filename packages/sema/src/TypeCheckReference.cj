@@ -1559,7 +1559,7 @@ private func TypeCheckReferenceCheckLegalityIsSkip(node: Node): Bool {
     return false
 }
 
-private func TypeCheckReferenceCheckLegalityForNameReferenceExpr(
+private func CheckLegalityOfReferenceForNameReferenceExpr(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
     impl: TypeCheckerImpl,
@@ -1728,7 +1728,7 @@ private func TypeCheckReferenceCheckLegalityForExpr(
         return VisitAction.SKIP_CHILDREN
     }
     if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
-        TypeCheckReferenceCheckLegalityForNameReferenceExpr(diag, tm, impl, ctx, nameRef)
+        CheckLegalityOfReferenceForNameReferenceExpr(diag, tm, impl, ctx, nameRef)
         return VisitAction.WALK_CHILDREN
     }
     if (let Some(assignExpr) <- (expr as AssignExpr)) {
