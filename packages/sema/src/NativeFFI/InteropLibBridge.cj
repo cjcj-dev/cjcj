@@ -755,6 +755,155 @@ public class InteropLibBridge {
         return CreateCall(GetNewJavaArrayDecl(), Some(curFile), args: args)
     }
 
+    public func CreateNewJavaObjectCall(env: Expr, classTypeSignature: String,
+        constructorSignature: String, callArgs: ArrayList<Expr>): Option<CallExpr> {
+        let funcDecl = GetNewJavaObjectDecl()
+        let jclassDecl = GetJClassDecl()
+        let parseDecl = GetParseMethodSignatureDecl()
+        let callNestDecl = GetCallNestDecl()
+        let methodIDDecl = GetMethodIdConstr()
+        if (funcDecl.isNone() || jclassDecl.isNone() || parseDecl.isNone() ||
+            callNestDecl.isNone() || methodIDDecl.isNone()) { return None }
+        let curFile = env.curFile.getOrThrow()
+        let classBody = jclassDecl.getOrThrow().funcBody.getOrThrow()
+        let nestBody = callNestDecl.getOrThrow().funcBody.getOrThrow()
+        CJC_ASSERT_WITH_MSG(!classBody.paramLists.isEmpty(), "paramLists cannot be empty")
+        CJC_ASSERT_WITH_MSG(classBody.paramLists[0].params.size > 1,
+            "at least 2 parameters expected for classInit function")
+        CJC_ASSERT_WITH_MSG(!nestBody.paramLists.isEmpty(), "paramLists cannot be empty")
+        CJC_ASSERT_WITH_MSG(!nestBody.paramLists[0].params.isEmpty(),
+            "at least 1 parameter expected for callNestInit function")
+        let strTy = classBody.paramLists[0].params[1].GetTy().getOrThrow()
+        let intTy = nestBody.paramLists[0].params[0].GetTy().getOrThrow()
+        let classExpr = CreateLitConstExpr(LitConstKind.STRING, classTypeSignature, strTy)
+        classExpr.curFile = Some(curFile)
+        let ctorSignatureExpr = CreateLitConstExpr(LitConstKind.STRING, constructorSignature, strTy)
+        ctorSignatureExpr.curFile = Some(curFile)
+        let methodNameExpr = CreateLitConstExpr(LitConstKind.STRING, JAVA_CONSTRUCTOR, strTy)
+        methodNameExpr.curFile = Some(curFile)
+        let jclass = CreateCall(jclassDecl.getOrThrow(), curFile,
+            (ASTCloner.Clone(env) as Expr).getOrThrow(), classExpr)
+        let parsedSignature = CreateCall(parseDecl.getOrThrow(), curFile, ctorSignatureExpr)
+        let idArgs = ArrayList<FuncArg>()
+        idArgs.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        idArgs.add(CreateFuncArg((ASTCloner.Clone(jclass) as Expr).getOrThrow()))
+        idArgs.add(CreateFuncArg(methodNameExpr))
+        idArgs.add(CreateFuncArg(parsedSignature))
+        let methodID = CreateCall(methodIDDecl.getOrThrow(), curFile, args: idArgs)
+        let arrayDecl = importManager.GetCoreDecl(STD_LIB_ARRAY)
+        if (let None <- arrayDecl) { return None }
+        let arrayTy = typeManager.GetStructTy((arrayDecl.getOrThrow() as StructDecl).getOrThrow(),
+            [GetJavaEntityTy().getOrThrow()])
+        let argsSize = CreateLitConstExpr(LitConstKind.INTEGER, callArgs.size.toString(), intTy)
+        let argsAsArray = WithinFile<ArrayLit>(CreateArrayLit(callArgs, arrayTy), curFile)
+        let callNest = CreateCall(callNestDecl.getOrThrow(), curFile, argsSize)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        args.add(CreateFuncArg(jclass))
+        args.add(CreateFuncArg(methodID))
+        args.add(CreateFuncArg(argsAsArray))
+        args.add(CreateFuncArg(callNest))
+        return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
+    }
+
+    public func CreateCallMethodCall(env: Expr, obj: Expr, signature: MemberJNISignature,
+        callArgs: ArrayList<Expr>, curFile: File, virt!: Bool = true): Option<CallExpr> {
+        let funcDecl = if (virt) { GetCallMethodDecl() } else { GetNonVirtualCallMethodDecl() }
+        let jclassDecl = GetJClassDecl()
+        let parseDecl = GetParseMethodSignatureDecl()
+        let callNestDecl = GetCallNestDecl()
+        let methodIDDecl = GetMethodIdConstr()
+        if (funcDecl.isNone() || jclassDecl.isNone() || parseDecl.isNone() ||
+            callNestDecl.isNone() || methodIDDecl.isNone()) { return None }
+        let classBody = jclassDecl.getOrThrow().funcBody.getOrThrow()
+        let nestBody = callNestDecl.getOrThrow().funcBody.getOrThrow()
+        CJC_ASSERT_WITH_MSG(!classBody.paramLists.isEmpty(), "paramLists cannot be empty")
+        CJC_ASSERT_WITH_MSG(classBody.paramLists[0].params.size > 1,
+            "at least 2 parameters expected for classInit function")
+        CJC_ASSERT_WITH_MSG(!nestBody.paramLists.isEmpty(), "paramLists cannot be empty")
+        CJC_ASSERT_WITH_MSG(!nestBody.paramLists[0].params.isEmpty(),
+            "at least 1 parameter expected for callNestInit function")
+        let strTy = classBody.paramLists[0].params[1].GetTy().getOrThrow()
+        let intTy = nestBody.paramLists[0].params[0].GetTy().getOrThrow()
+        let classExpr = CreateLitConstExpr(LitConstKind.STRING, signature.classTypeSignature, strTy)
+        classExpr.curFile = Some(curFile)
+        let nameExpr = CreateLitConstExpr(LitConstKind.STRING, signature.name, strTy)
+        nameExpr.curFile = Some(curFile)
+        let signatureExpr = CreateLitConstExpr(LitConstKind.STRING, signature.signature, strTy)
+        signatureExpr.curFile = Some(curFile)
+        let jclass = CreateCall(jclassDecl.getOrThrow(), curFile,
+            (ASTCloner.Clone(env) as Expr).getOrThrow(), classExpr)
+        let parsedSignature = CreateCall(parseDecl.getOrThrow(), curFile, signatureExpr)
+        let idArgs = ArrayList<FuncArg>()
+        idArgs.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        idArgs.add(CreateFuncArg(jclass))
+        idArgs.add(CreateFuncArg(nameExpr))
+        idArgs.add(CreateFuncArg(parsedSignature))
+        let methodID = CreateCall(methodIDDecl.getOrThrow(), curFile, args: idArgs)
+        let arrayDecl = importManager.GetCoreDecl(STD_LIB_ARRAY)
+        if (arrayDecl.isNone() || GetJavaEntityTy().isNone()) { return None }
+        let arrayTy = typeManager.GetStructTy((arrayDecl.getOrThrow() as StructDecl).getOrThrow(),
+            [GetJavaEntityTy().getOrThrow()])
+        let callNest = CreateCall(callNestDecl.getOrThrow(), curFile,
+            CreateLitConstExpr(LitConstKind.INTEGER, callArgs.size.toString(), intTy))
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        args.add(CreateFuncArg(obj))
+        args.add(CreateFuncArg(methodID))
+        args.add(CreateFuncArg(CreateArrayLit(callArgs, arrayTy)))
+        args.add(CreateFuncArg(callNest))
+        return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
+    }
+
+    public func CreateCallStaticMethodCall(env: Expr, signature: MemberJNISignature,
+        callArgs: ArrayList<Expr>, curFile: File): Option<CallExpr> {
+        let funcDecl = GetCallStaticMethodDecl()
+        let jclassDecl = GetJClassDecl()
+        let parseDecl = GetParseMethodSignatureDecl()
+        let callNestDecl = GetCallNestDecl()
+        let methodIDDecl = GetMethodIdConstrStatic()
+        if (funcDecl.isNone() || jclassDecl.isNone() || parseDecl.isNone() ||
+            callNestDecl.isNone() || methodIDDecl.isNone()) { return None }
+        let classBody = jclassDecl.getOrThrow().funcBody.getOrThrow()
+        let nestBody = callNestDecl.getOrThrow().funcBody.getOrThrow()
+        CJC_ASSERT_WITH_MSG(!classBody.paramLists.isEmpty(), "paramLists cannot be empty")
+        CJC_ASSERT_WITH_MSG(classBody.paramLists[0].params.size > 1,
+            "at least 2 parameters expected for classInit function")
+        CJC_ASSERT_WITH_MSG(!nestBody.paramLists.isEmpty(), "paramLists cannot be empty")
+        CJC_ASSERT_WITH_MSG(!nestBody.paramLists[0].params.isEmpty(),
+            "at least 1 parameter expected for callNestInit function")
+        let strTy = classBody.paramLists[0].params[1].GetTy().getOrThrow()
+        let intTy = nestBody.paramLists[0].params[0].GetTy().getOrThrow()
+        let classExpr = CreateLitConstExpr(LitConstKind.STRING, signature.classTypeSignature, strTy)
+        classExpr.curFile = Some(curFile)
+        let nameExpr = CreateLitConstExpr(LitConstKind.STRING, signature.name, strTy)
+        nameExpr.curFile = Some(curFile)
+        let signatureExpr = CreateLitConstExpr(LitConstKind.STRING, signature.signature, strTy)
+        signatureExpr.curFile = Some(curFile)
+        let jclass = CreateCall(jclassDecl.getOrThrow(), curFile,
+            (ASTCloner.Clone(env) as Expr).getOrThrow(), classExpr)
+        let parsedSignature = CreateCall(parseDecl.getOrThrow(), curFile, signatureExpr)
+        let idArgs = ArrayList<FuncArg>()
+        idArgs.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        idArgs.add(CreateFuncArg((ASTCloner.Clone(jclass) as Expr).getOrThrow()))
+        idArgs.add(CreateFuncArg(nameExpr))
+        idArgs.add(CreateFuncArg(parsedSignature))
+        let methodID = CreateCall(methodIDDecl.getOrThrow(), curFile, args: idArgs)
+        let arrayDecl = importManager.GetCoreDecl(STD_LIB_ARRAY)
+        if (arrayDecl.isNone() || GetJavaEntityTy().isNone()) { return None }
+        let arrayTy = typeManager.GetStructTy((arrayDecl.getOrThrow() as StructDecl).getOrThrow(),
+            [GetJavaEntityTy().getOrThrow()])
+        let callNest = CreateCall(callNestDecl.getOrThrow(), curFile,
+            CreateLitConstExpr(LitConstKind.INTEGER, callArgs.size.toString(), intTy))
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        args.add(CreateFuncArg(jclass))
+        args.add(CreateFuncArg(methodID))
+        args.add(CreateFuncArg(CreateArrayLit(callArgs, arrayTy)))
+        args.add(CreateFuncArg(callNest))
+        return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
+    }
+
     public func CreateJavaEntityCall(arg: Expr): Option<Expr> {
         let javaEntityDecl = GetJavaEntityDecl()
         if (let None <- javaEntityDecl) {
