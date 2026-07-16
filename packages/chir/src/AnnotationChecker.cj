@@ -1,5 +1,7 @@
 package cjcj::chir
 
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagKindRefactor
 import cjcj::utils.CJC_ASSERT
 import cjcj::utils.StaticCast
 import std.collection.*
@@ -17,11 +19,13 @@ private let EXTENSION_TARGET = "Extension"
 
 public class AnnotationChecker {
     private let pkg: Package
+    private let diag: BasicDiagnosticEngine
     private let annotationTargets: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
     private let targetToErrMsg: HashMap<String, String> = HashMap<String, String>()
 
-    public init(pkg: Package) {
+    public init(pkg: Package, diag: BasicDiagnosticEngine) {
         this.pkg = pkg
+        this.diag = diag
         targetToErrMsg[TYPE_TARGET] = "type"
         targetToErrMsg[PARAMETER_TARGET] = "parameter"
         targetToErrMsg[INIT_TARGET] = "init"
@@ -34,15 +38,10 @@ public class AnnotationChecker {
         targetToErrMsg[EXTENSION_TARGET] = "extend"
     }
 
-    public func Run(): CHIRCheckResult {
-        let result = CHIRCheckResult()
-        Run(result)
-        return result
-    }
-
-    public func Run(result: CHIRCheckResult): Unit {
+    public func Run(): Bool {
         CollectAnnotationTargets()
-        CheckAnnotationTargets(result)
+        CheckAnnotationTargets()
+        return diag.GetErrorCount() == 0
     }
 
     private func CollectAnnotationTargets(): Unit {
@@ -75,145 +74,79 @@ public class AnnotationChecker {
         let constExpr = StaticCast<Constant>(StaticCast<LocalVar>(typecast.GetSourceValue()).GetExpr().getOrThrow())
         let constValue = constExpr.GetValue()
         CJC_ASSERT(RequiredResultType(constExpr).GetTypeKind() == TypeKind.TYPE_UINT32)
-        let enumCtorIdx = StaticCast<IntLiteral>(constValue).value
-        return annotationKindDef.GetCtor(enumCtorIdx).name
+        let enumCtorIdx = StaticCast<IntLiteral>(constValue).GetUnsignedVal()
+        return annotationKindDef.GetCtor(Int64(enumCtorIdx)).name
     }
 
-    private func CheckAnnotationTargets(result: CHIRCheckResult): Unit {
+    private func CheckAnnotationTargets(): Unit {
         for (def in pkg.GetCurPkgCustomTypeDef()) {
-            if ((def as ExtendDef).isSome()) {
-                CheckTargetsOnDef(def, EXTENSION_TARGET, result)
+            if (def.IsExtend()) {
+                CheckTargetsOnDef(def, EXTENSION_TARGET)
             } else {
-                CheckTargetsOnDef(def, TYPE_TARGET, result)
+                CheckTargetsOnDef(def, TYPE_TARGET)
             }
         }
         for (globalVar in pkg.GetGlobalVarsWithInit(includeSrcCodeImported: false)) {
-            CheckTargetsOnGlobalVar(globalVar, result)
+            CheckTargetsOnGlobalVar(globalVar)
         }
         for (fn in pkg.GetGlobalFunctions(includePureAbstract: true)) {
-            if (!fn.TestAttr(Attribute.IMPORTED)) {
-                CheckTargetsOnGlobalFunc(fn, result)
+            if (fn.TestAttr(Attribute.IMPORTED)) {
+                continue
             }
+            CheckTargetsOnGlobalFunc(fn)
         }
     }
 
-    private func CheckTargetsOnDef(def: CustomTypeDef, defTarget: String, result: CHIRCheckResult): Unit {
-        CheckTargets(GetDefCustomAnnotations(def), defTarget, result)
+    private func CheckTargetsOnGlobalVar(globalVar: GlobalVar): Unit {
+        if (globalVar.GetParentCustomTypeDef().isSome()) {
+            CheckTargets(globalVar.GetAnnoInfo(), MEMBER_VARIABLE_TARGET)
+        } else {
+            CheckTargets(globalVar.GetAnnoInfo(), GLOBAL_VARIABLE_TARGET)
+        }
+    }
+
+    private func CheckTargetsOnGlobalFunc(fn: Function): Unit {
+        if (fn.GetParentCustomTypeDef().isSome()) {
+            if (fn.IsConstructor()) {
+                CheckTargets(fn.GetAnnoInfo(), INIT_TARGET)
+            } else if (fn.GetFuncKind() == FuncKind.GETTER || fn.GetFuncKind() == FuncKind.SETTER) {
+                CheckTargets(fn.GetAnnoInfo(), MEMBER_PROPERTY_TARGET)
+            } else {
+                CheckTargets(fn.GetAnnoInfo(), MEMBER_FUNCTION_TARGET)
+            }
+        } else {
+            CheckTargets(fn.GetAnnoInfo(), GLOBAL_FUNCTION_TARGET)
+        }
+        for (param in fn.GetParams()) {
+            CheckTargets(param.GetAnnoInfo(), PARAMETER_TARGET)
+        }
+    }
+
+    private func CheckTargets(annoInfo: AnnoInfo, target: String): Unit {
+        for (annoPair in annoInfo.GetCustomAnnoInstances()) {
+            let annoClassName = annoPair.GetAnnoClassName()
+            let targets = annotationTargets.get(annoClassName).getOrThrow()
+            if (targets.isEmpty()) {
+                continue
+            }
+            if (targets.contains(target)) {
+                continue
+            }
+            let loc = ToRangeIfNotZero(annoPair.GetDebugLocation())[1]
+            diag.DiagnoseRefactor(DiagKindRefactor.chir_annotation_not_applicable, loc,
+                annoClassName, targetToErrMsg.get(target).getOrThrow()).Emit()
+        }
+    }
+
+    private func CheckTargetsOnDef(def: CustomTypeDef, defTarget: String): Unit {
+        CheckTargets(def.GetAnnoInfo(), defTarget)
         for (memberVar in def.GetDirectInstanceVars()) {
-            CheckTargets(memberVar.annoInfo.GetAnnotations(), MEMBER_VARIABLE_TARGET, result)
+            CheckTargets(memberVar.annoInfo, MEMBER_VARIABLE_TARGET)
         }
         if (let Some(enumDef) <- (def as EnumDef)) {
             for (ctor in enumDef.GetCtors()) {
-                CheckTargets(ctor.annoInfo.GetAnnotations(), ENUM_CONSTRUCTOR_TARGET, result)
+                CheckTargets(ctor.annoInfo, ENUM_CONSTRUCTOR_TARGET)
             }
         }
     }
-
-    private func CheckTargetsOnGlobalVar(globalVar: GlobalVar, result: CHIRCheckResult): Unit {
-        if (globalVar.GetParentCustomTypeDef().isSome()) {
-            CheckTargets(globalVar.GetAnnoInfo().GetAnnotations(), MEMBER_VARIABLE_TARGET, result)
-        } else {
-            CheckTargets(globalVar.GetAnnoInfo().GetAnnotations(), GLOBAL_VARIABLE_TARGET, result)
-        }
-    }
-
-    private func CheckTargetsOnGlobalFunc(fn: Function, result: CHIRCheckResult): Unit {
-        if (fn.GetParentCustomTypeDef().isSome()) {
-            if (fn.IsConstructor()) {
-                CheckTargets(fn.GetAnnoInfo().GetAnnotations(), INIT_TARGET, result)
-            } else if (fn.GetFuncKind() == FuncKind.GETTER || fn.GetFuncKind() == FuncKind.SETTER) {
-                CheckTargets(fn.GetAnnoInfo().GetAnnotations(), MEMBER_PROPERTY_TARGET, result)
-            } else {
-                CheckTargets(fn.GetAnnoInfo().GetAnnotations(), MEMBER_FUNCTION_TARGET, result)
-            }
-        } else {
-            CheckTargets(fn.GetAnnoInfo().GetAnnotations(), GLOBAL_FUNCTION_TARGET, result)
-        }
-        for (param in fn.GetParams()) {
-            CheckTargets(param.GetAnnoInfo().GetAnnotations(), PARAMETER_TARGET, result)
-        }
-    }
-
-    private func CheckTargets(annotations: ArrayList<String>, target: String, result: CHIRCheckResult): Unit {
-        for (annotation in annotations) {
-            let annoName = NormalizeAnnotationName(annotation)
-            if (annoName.isEmpty()) {
-                continue
-            }
-            let maybeTargets = ResolveAnnotationTargets(annoName)
-            if (maybeTargets.isNone()) {
-                result.AddError("annotation `${annoName}` has no collected annotation target metadata.")
-                continue
-            }
-            if (let Some(targets) <- maybeTargets) {
-                if (targets.isEmpty() || targets.contains(target)) {
-                    continue
-                }
-                let targetText = targetToErrMsg.get(target) ?? target
-                result.AddError("annotation `${annoName}` is not applicable to ${targetText}.")
-            }
-        }
-    }
-
-    private func ResolveAnnotationTargets(name: String): Option<HashSet<String>> {
-        if (let Some(targets) <- annotationTargets.get(name)) {
-            return CopyStringSet(targets)
-        }
-        let shortName = ShortAnnotationName(name)
-        if (let Some(targets) <- annotationTargets.get(shortName)) {
-            return CopyStringSet(targets)
-        }
-        return None
-    }
-}
-
-private func GetDefCustomAnnotations(def: CustomTypeDef): ArrayList<String> {
-    return def.GetAnnoInfo().GetAnnotations()
-}
-
-private func NormalizeAnnotationName(annotation: String): String {
-    var name = annotation.trimAscii()
-    if (name.startsWith("@")) {
-        name = name[1..]
-    }
-    let parenIndex = FindByte(name, b'(')
-    if (parenIndex >= 0) {
-        name = name[0..parenIndex]
-    }
-    return name.trimAscii()
-}
-
-private func ShortAnnotationName(name: String): String {
-    let trimmed = name.trimAscii()
-    var lastDot: Int64 = -1
-    var idx: Int64 = 0
-    while (idx < trimmed.size) {
-        if (trimmed[idx] == b'.') {
-            lastDot = idx
-        }
-        idx++
-    }
-    if (lastDot >= 0 && lastDot + 1 < trimmed.size) {
-        return trimmed[lastDot + 1..]
-    }
-    return trimmed
-}
-
-private func FindByte(value: String, target: UInt8): Int64 {
-    var idx: Int64 = 0
-    while (idx < value.size) {
-        if (value[idx] == target) {
-            return idx
-        }
-        idx++
-    }
-    return -1
-}
-
-private func CopyStringSet(values: HashSet<String>): HashSet<String> {
-    let out = HashSet<String>()
-    for (value in values) {
-        out.add(value)
-    }
-    return out
 }

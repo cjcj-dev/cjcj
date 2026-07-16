@@ -1021,11 +1021,21 @@ public abstract class GlobalValue <: Value {
     }
 }
 
-public class GlobalVar <: GlobalValue {
+// C++ include/cangjie/CHIR/AST2CHIR/AST2CHIR.h:465 annotationTargets keys by GlobalVar* identity. The
+// Equatable/Hashable view exposes that pointer identity as the inherited nodeId.
+public class GlobalVar <: GlobalValue & Hashable & Equatable<GlobalVar> {
     private var initializer: Option<Value> = None
 
     public init(ty: Type, identifier: String, srcCodeIdentifier: String, rawMangledName: String, packageName: String) {
         super(ValueKind.KIND_GLOBALVAR, ty, identifier, srcCodeIdentifier, rawMangledName, packageName)
+    }
+
+    public operator func ==(right: GlobalVar): Bool {
+        return nodeId == right.nodeId
+    }
+
+    public operator func !=(right: GlobalVar): Bool {
+        return nodeId != right.nodeId
     }
 
     public override func AsGlobalVar(): Option<GlobalVar> { return this }
