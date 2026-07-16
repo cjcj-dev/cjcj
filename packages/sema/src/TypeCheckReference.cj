@@ -399,7 +399,7 @@ private func TypeCheckReferenceGetCurFuncBody(ctx: ASTContext, scopeName: String
     return None
 }
 
-private func TypeCheckReferenceIsInCFunc(ctx: ASTContext, re: RefExpr): Bool {
+private func IsInCFunc(ctx: ASTContext, re: RefExpr): Bool {
     var symbolOpt = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, re.scopeName)
     while (let Some(symbol) <- symbolOpt) {
         if (let Some(node) <- symbol.node) {
@@ -461,18 +461,18 @@ private func TypeCheckReferenceCheckMutationInStruct(
     }
 }
 
-private func TypeCheckReferenceCheckInvalidThisOrSuperInCFunc(
+private func CheckInvalidRefInCFunc(
     diag: BasicDiagnosticEngine,
     ctx: ASTContext,
     re: RefExpr
 ): Unit {
-    if (!TypeCheckReferenceIsInCFunc(ctx, re)) {
+    if (!IsInCFunc(ctx, re)) {
         return
     }
     let name = if (re.isThis) { "this" } else { "super" }
-    let builder = diag.Diagnose(
-        re.begin,
-        re.end,
+    let builder = Diagnose(
+        diag,
+        re,
         BasicDiagKind.sema_cfunc_cannot_capture_this,
         args: [BasicDiagArgument(name)])
     builder.Emit()
@@ -1519,7 +1519,7 @@ private func CheckUsageOfThis(
         let currentNode = ctx.currentCheckingNodes[ctx.currentCheckingNodes.size - 1]
         valid = TypeCheckReferenceCheckThisOrSuperInInitializer(diag, currentNode, re) && valid
     }
-    TypeCheckReferenceCheckInvalidThisOrSuperInCFunc(diag, ctx, re)
+    CheckInvalidRefInCFunc(diag, ctx, re)
     return valid
 }
 
@@ -1571,7 +1571,7 @@ private func TypeCheckReferenceCheckUsageOfSuper(
         let currentNode = ctx.currentCheckingNodes[ctx.currentCheckingNodes.size - 1]
         valid = TypeCheckReferenceCheckThisOrSuperInInitializer(diag, currentNode, re) && valid
     }
-    TypeCheckReferenceCheckInvalidThisOrSuperInCFunc(diag, ctx, re)
+    CheckInvalidRefInCFunc(diag, ctx, re)
     return valid
 }
 

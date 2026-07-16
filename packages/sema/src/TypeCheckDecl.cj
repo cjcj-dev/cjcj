@@ -537,8 +537,8 @@ public func TypeCheckDeclSynchronizeTypeAndInitializer(
                     vd.SetTy(TypeManager.GetInvalidTy())
                     if (let Some(diagValue) <- diag) {
                         if (vd.ShouldDiagnose() && !CanSkipDiag(initializer)) {
-                            TypeCheckDeclEmitDiag(diagValue, initializer,
-                                BasicDiagKind.sema_cfunc_var_cannot_have_var_param)
+                            Diagnose(diagValue, initializer,
+                                BasicDiagKind.sema_cfunc_var_cannot_have_var_param).Emit()
                         }
                     }
                     return TypeManager.GetInvalidTy()
@@ -597,12 +597,12 @@ private func TypeCheckDeclCheckEnumFuncDeclIsCStructParam(diag: BasicDiagnosticE
                     if (let Some(decl) <- structTy.declPtr) {
                         if (decl.identifier.Val() != "String") {
                             if (let Some(outer) <- funcDecl.outerDecl) {
-                                TypeCheckDeclEmitDiag(diag, funcDecl,
+                                Diagnose(diag, funcDecl,
                                     BasicDiagKind.sema_enum_pattern_func_param_cty_error,
                                     args: [
                                         BasicDiagArgument(funcDecl.identifier.Val()),
                                         BasicDiagArgument(outer.identifier.Val())
-                                    ])
+                                    ]).Emit()
                             }
                         }
                     }
@@ -654,8 +654,8 @@ public func TypeCheckDeclSetEnumElementTyForFunc(
     if (let Some(diagValue) <- diag) {
         let outer = funcDecl.outerDecl.getOrThrow()
         if (outer.TestAttr(Attribute.C)) {
-            TypeCheckDeclEmitDiag(diagValue, funcDecl, BasicDiagKind.sema_enum_pattern_func_cty_error,
-                args: [BasicDiagArgument(funcDecl.identifier.Val()), BasicDiagArgument(outer.identifier.Val())])
+            Diagnose(diagValue, funcDecl, BasicDiagKind.sema_enum_pattern_func_cty_error,
+                args: [BasicDiagArgument(funcDecl.identifier.Val()), BasicDiagArgument(outer.identifier.Val())]).Emit()
         } else {
             TypeCheckDeclCheckEnumFuncDeclIsCStructParam(diagValue, funcDecl)
         }
