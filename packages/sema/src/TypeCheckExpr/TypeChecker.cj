@@ -2370,7 +2370,6 @@ extend TypeChecker {
     }
 
     private func DoTypeCheck(ctx: ASTContext, pkg: Package): Unit {
-        PreparePackageSignatures(ctx)
         for (sym in impl.GetToplevelDecls(ctx)) {
             if (let Some(node) <- sym.node) {
                 if (let Some(decl) <- (node as Decl)) {
