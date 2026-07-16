@@ -452,6 +452,103 @@ public class IncrementalGen {
         AddUniqueLLVMValue(uselessDefinitions, uselessDefinition)
     }
 
+    // Mirrors IncrementalGen.cpp:376-431.
+    private func CollectUselessFunctions(): Unit {
+        let removed = ArrayList<LLVMValueRef>()
+        for (item in uselessDefinitions) {
+            let queue = ArrayList<LLVMValueRef>()
+            let willBeRemoved = ArrayList<LLVMValueRef>()
+            queue.add(item)
+            var queueIdx: Int64 = 0
+            while (queueIdx < queue.size) {
+                let current = queue[queueIdx]
+                queueIdx++
+                var seen = false
+                for (value in removed) {
+                    if (value.toUIntNative() == current.toUIntNative()) {
+                        seen = true
+                        break
+                    }
+                }
+                if (seen) {
+                    continue
+                }
+                removed.add(current)
+                willBeRemoved.add(current)
+                var useRef = unsafe { LLVMGetFirstUse(current) }
+                while (!useRef.isNull()) {
+                    let nextUse = unsafe { LLVMSelfhostGetNextUse(useRef) }
+                    let user = unsafe { LLVMSelfhostGetUser(useRef) }
+                    if (!unsafe { LLVMIsAInstruction(user) }.isNull()) {
+                        if (unsafe { LLVMSelfhostIsCallInst(user) } != 0) {
+                            let parent = unsafe { LLVMGetBasicBlockParent(LLVMGetInstructionParent(user)) }
+                            if (IsFileInitFuncName(GetLLVMValueName(parent))) {
+                                unsafe { LLVMInstructionEraseFromParent(user) }
+                                break
+                            }
+                        }
+                        queue.add(unsafe { LLVMGetBasicBlockParent(LLVMGetInstructionParent(user)) })
+                    } else {
+                        queue.add(user)
+                    }
+                    useRef = nextUse
+                }
+            }
+            var removeIdx = willBeRemoved.size - 1
+            while (removeIdx >= 0) {
+                let object = willBeRemoved[removeIdx]
+                let isFunction = !unsafe { LLVMIsAFunction(object) }.isNull()
+                let isGlobalVariable = !unsafe { LLVMIsAGlobalVariable(object) }.isNull()
+                if (isFunction || isGlobalVariable) {
+                    AddUniqueLLVMValue(deferErase, object)
+                    unsafe { LLVMSelfhostGlobalObjectClearMetadata(object) }
+                    if (isFunction) {
+                        DeleteFuncBody(object)
+                    } else {
+                        unsafe { LLVMSetInitializer(object, LLVMNullValue()) }
+                    }
+                }
+                removeIdx--
+            }
+        }
+        uselessDefinitions.clear()
+    }
+
+    // Mirrors IncrementalGen.cpp:433-460.
+    private func EraseUselessFunctions(): Unit {
+        for (item in deferErase) {
+            if (!unsafe { LLVMIsAFunction(item) }.isNull()) {
+                unsafe { LLVMDeleteFunction(item) }
+            } else if (!unsafe { LLVMIsAGlobalVariable(item) }.isNull()) {
+                unsafe { LLVMDeleteGlobal(item) }
+            }
+        }
+
+        let module = injectedModule.getOrThrow()
+        var erased = false
+        do {
+            erased = false
+            var function = unsafe { LLVMGetFirstFunction(module.raw) }
+            while (!function.isNull()) {
+                let nextFunction = unsafe { LLVMGetNextFunction(function) }
+                let isFromCFFI = HasAttributeAtIndex(function, UInt32.Max, C2CJ_ATTR) ||
+                    HasAttributeAtIndex(function, UInt32.Max, CJSTUB_ATTR)
+                if (HasAttributeAtIndex(function, UInt32.Max, FUNC_USED_BY_CLOSURE)) {
+                    unsafe { LLVMSelfhostGlobalValueRemoveDeadConstantUsers(function) }
+                    let noUsers = unsafe { LLVMGetFirstUse(function) }.isNull()
+                    let linkage = unsafe { LLVMGetLinkage(function) }
+                    let isLocal = linkage == LLVMLinkageValue(LLVMLinkage.Internal) ||
+                        linkage == LLVMLinkageValue(LLVMLinkage.Private)
+                    if (noUsers && (isLocal || isFromCFFI)) {
+                        unsafe { LLVMDeleteFunction(function) }
+                        erased = true
+                    }
+                }
+                function = nextFunction
+            }
+        } while (erased)
+    }
+
     // Mirrors IncrementalGen.cpp:550-558.
     private func UpdateIncrLLVMUsedNames(): Unit {
         let module = injectedModule.getOrThrow()
