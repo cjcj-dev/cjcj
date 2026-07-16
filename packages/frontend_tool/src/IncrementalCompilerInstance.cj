@@ -7,11 +7,11 @@ import cjcj::codegen.{getZExtValue, LLVMContextHandle, LLVMGetMDNodeOperands,
 import cjcj::frontend.*
 import cjcj::incremental_compilation.{CachedMangleMap, CompilationCache, DeleteRecompiledNodesInCHIROptEffectMap,
     DeleteRemovedNodesInCHIROptEffectMap, IncreKind, IncreResult, IncrementalScopeAnalysis,
-    IncrementalScopeAnalysisArgs, MergeCHIROptEffectMap, VarInitDepMap, VirtualWrapperDepMap}
+    IncrementalScopeAnalysisArgs, MergeCHIROptEffectMap}
 import cjcj::sema.{CollectChangedStructTypes, CollectCompilerAddedDeclUsage, CollectRemovedMangles,
-    CollectRemovedManglesForReCompile, MarkIncrementalCheckForCtor}
-import cjcj::sema.Desugar.HandleCtorForIncr
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, IncrementalCompilationLogger}
+    CollectRemovedManglesForReCompile, HandleCtorForIncr, MarkIncrementalCheckForCtor}
+import cjcj::utils.IncrementalCompilationLogger
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
 import cjcj::utils.FileUtil
@@ -20,7 +20,10 @@ import cjcj::utils.ProfileRecorder
 public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     public let cacheMangles: CachedMangleMap = CachedMangleMap()
     public let changedTypes: HashSet<StructTy> = HashSet<StructTy>()
-    public var kind: IncreKind = IncreKind.INVALID
+    public mut prop kind: IncreKind {
+        get() { return core.kind }
+        set(value) { core.kind = value }
+    }
     private let declsToBeReCompiled: HashSet<Decl> = HashSet<Decl>()
     private let rawIncrRemovedDecls: ArrayList<String> = ArrayList<String>()
 
@@ -28,29 +31,75 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         super(invocation, diag)
     }
 
-    // C++: FrontendTool/IncrementalCompilerInstance.cpp:51-96.
+    public override func InitCompilerInstance(): Bool {
+        return core.InitCompilerInstance()
+    }
+
+    public override func PerformIncrementalScopeAnalysis(): Bool {
+        let recorder = ProfileRecorder("Main Stage", "AST Diff")
+        let sourcePackages = core.GetSourcePackages()
+        CJC_ASSERT(sourcePackages.size == 1)
+        let packageValue = sourcePackages[0]
+        if (!core.CalculateASTCache()) {
+            recorder.close()
+            return true
+        }
+        let options = invocation.globalOptions
+        if (!options.pluginPaths.isEmpty()) {
+            kind = IncreKind.ROLLBACK
+            diag.Warn(DiagCategory.OTHER, DEFAULT_POSITION,
+                "`--incremental-compile` is incompatible with `--plugin` and will be ignored.")
+            recorder.close()
+            return true
+        }
+        if (!core.declsWithDuplicatedRawMangleName.isEmpty()) {
+            kind = IncreKind.ROLLBACK
+            IncrementalCompilationLogger.GetInstance().LogLn(
+                "illegal source code leads to duplicated raw mangle name, roll back to full compilation")
+            recorder.close()
+            return true
+        }
+        let increRes = IncrementalScopeAnalysis(IncrementalScopeAnalysisArgs(core.rawMangleName2DeclMap,
+            core.astCacheInfo, packageValue, options, core.importManager, core.cachedInfo, core.fileMap,
+            core.directExtends))
+        if (increRes.kind == IncreKind.INCR) {
+            if (!CheckCachedBitcodeInfo(packageValue.fullPackageName, options)) {
+                increRes.kind = IncreKind.ROLLBACK
+            } else {
+                for (mangle in increRes.deletedMangleNames) { cacheMangles.incrRemovedDecls.add(mangle) }
+            }
+        }
+        if (increRes.kind == IncreKind.NO_CHANGE) {
+            for (srcPkg in sourcePackages) { options.UpdateCachedDirName(srcPkg.fullPackageName) }
+            if (!options.IsLTOEnabled() && !CheckCachedObjFile(options, increRes.cacheInfo)) {
+                increRes.kind = IncreKind.ROLLBACK
+            }
+            if (options.IsLTOEnabled() && !CheckCachedBitcodeInfoForLTO(options, increRes.cacheInfo)) {
+                increRes.kind = IncreKind.ROLLBACK
+            }
+        }
+        increRes.Dump()
+        SaveCompilationResult(increRes)
+        recorder.close()
+        return true
+    }
+
     private func SaveCompilationResult(result: IncreResult): Unit {
         kind = result.kind
         core.rawMangleName2DeclMap = result.mangle2decl
+        if (kind == IncreKind.ROLLBACK) { declsToBeReCompiled.clear() }
         if (kind == IncreKind.ROLLBACK || kind == IncreKind.INCR) {
-            if (kind == IncreKind.ROLLBACK) {
-                declsToBeReCompiled.clear()
-            }
             core.cachedInfo = result.cacheInfo
             core.CacheCompileArgs()
             declsToBeReCompiled.clear()
             for (decl in result.declsToRecompile) { declsToBeReCompiled.add(decl) }
             rawIncrRemovedDecls.clear()
             for (removed in result.deleted) { rawIncrRemovedDecls.add(removed) }
-            core.mangledName2DeclMap.clear()
             for ((mangle, decl) in result.mangle2decl) {
-                if (!decl.TestAttr(Attribute.IMPORTED)) {
-                    core.mangledName2DeclMap[mangle] = decl
-                }
+                if (!decl.TestAttr(Attribute.IMPORTED)) { core.mangledName2DeclMap[mangle] = decl }
             }
             for (changed in declsToBeReCompiled) {
-                if (changed.TestAttr(Attribute.IMPORTED) &&
-                    (changed.IsFunc() || IsGlobalOrStaticVar(changed))) {
+                if (changed.TestAttr(Attribute.IMPORTED) && (changed.IsFunc() || IsGlobalOrStaticVar(changed))) {
                     cacheMangles.EmplaceImportedInlineDeclPtr(changed)
                 } else {
                     CollectRemovedManglesForReCompile(changed, core.cachedInfo.semaInfo,
@@ -68,77 +117,27 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             for (fileName in result.cacheInfo.bitcodeFilesName) {
                 core.cachedInfo.bitcodeFilesName.add(fileName)
             }
-        } else if (kind == IncreKind.EMPTY_PKG) {
-            return
-        } else {
+        } else if (kind == IncreKind.INVALID) {
             CJC_ABORT()
         }
-        core.kind = kind
-    }
-
-    public override func InitCompilerInstance(): Bool {
-        return core.InitCompilerInstance()
-    }
-
-    public override func PerformIncrementalScopeAnalysis(): Bool {
-        let recorder = ProfileRecorder("Main Stage", "AST Diff")
-        CJC_ASSERT(core.srcPkgs.size == 1)
-        let sourcePackage = core.srcPkgs[0]
-        if (!core.CalculateASTCache()) {
-            recorder.close()
-            return true
-        }
-        let options = invocation.globalOptions
-        if (!options.pluginPaths.isEmpty()) {
-            kind = IncreKind.ROLLBACK
-            diag.Warn(DiagCategory.OTHER, DEFAULT_POSITION,
-                "`--incremental-compile` is incompatible with `--plugin` and will be ignored.")
-            core.kind = kind
-            recorder.close()
-            return true
-        }
-        if (!core.declsWithDuplicatedRawMangleName.isEmpty()) {
-            kind = IncreKind.ROLLBACK
-            IncrementalCompilationLogger.GetInstance().LogLn(
-                "illegal source code leads to duplicated raw mangle name, roll back to full compilation")
-            core.kind = kind
-            recorder.close()
-            return true
-        }
-        let args = IncrementalScopeAnalysisArgs(core.rawMangleName2DeclMap, core.astCacheInfo, sourcePackage,
-            options, core.importManager, core.cachedInfo, core.fileMap, core.directExtends)
-        let result = IncrementalScopeAnalysis(args)
-        if (result.kind == IncreKind.INCR) {
-            if (!CheckCachedBitcodeInfo(sourcePackage.fullPackageName, options)) {
-                result.kind = IncreKind.ROLLBACK
-            } else {
-                for (mangle in result.deletedMangleNames) { cacheMangles.incrRemovedDecls.add(mangle) }
-            }
-        }
-        if (result.kind == IncreKind.NO_CHANGE) {
-            for (srcPkg in core.GetSourcePackages()) {
-                options.UpdateCachedDirName(srcPkg.fullPackageName)
-            }
-            if (!options.IsLTOEnabled() && !CheckCachedObjFile(options, result.cacheInfo)) {
-                result.kind = IncreKind.ROLLBACK
-            }
-            if (options.IsLTOEnabled() && !CheckCachedBitcodeInfoForLTO(options, result.cacheInfo)) {
-                result.kind = IncreKind.ROLLBACK
-            }
-        }
-        result.Dump()
-        SaveCompilationResult(result)
-        recorder.close()
-        return true
     }
 
     public override func PerformSema(): Bool {
-        LogIncrementalStageDecision("Semantic", "no change, skip sema", "full sema", "incremental sema")
+        let recorder = ProfileRecorder("Main Stage", "Semantic")
+        let logger = IncrementalCompilationLogger.GetInstance()
+        if (logger.IsEnable()) {
+            let message = if (kind == IncreKind.NO_CHANGE) { "no change, skip sema" } else if (
+                kind == IncreKind.ROLLBACK) { "full sema" } else { "incremental sema" }
+            logger.LogLn(message)
+        }
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
+            recorder.close()
             return true
         }
         if (kind == IncreKind.ROLLBACK) {
-            return super.PerformSema()
+            let ret = super.PerformSema()
+            recorder.close()
+            return ret
         }
         for (srcPkg in core.GetSourcePackages()) {
             srcPkg.EnableAttr(Attribute.INCRE_COMPILE)
@@ -148,31 +147,35 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             }
         }
         MarkIncrementalCheckForCtor(declsToBeReCompiled)
+        let visit = { decl: Decl =>
+            if (!decl.IsNominalDecl() && decl.astKind != ASTKind.PROP_DECL) {
+                decl.EnableAttr(Attribute.IS_CHECK_VISITED)
+                decl.EnableAttr(Attribute.INITIALIZED)
+                decl.EnableAttr(Attribute.INITIALIZATION_CHECKED)
+                decl.EnableAttr(Attribute.INCRE_COMPILE)
+            }
+            if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                if (let Some(funcBody) <- funcDecl.funcBody) {
+                    funcBody.body = None
+                    return
+                }
+            }
+            if (let Some(varDecl) <- (decl as VarDecl)) {
+                if (varDecl.initializer.isNone()) { return }
+                varDecl.EnableAttr(Attribute.DEFAULT)
+                if (HasSimpleInitialiser(varDecl)) { varDecl.DisableAttr(Attribute.IS_CHECK_VISITED) }
+            }
+        }
         for ((_, decl) in core.mangledName2DeclMap) {
             if (!decl.toBeCompiled && !IsInDeclWithAttribute(decl, Attribute.GENERIC) &&
                 Ty.IsTyCorrect(decl.GetTy()) &&
                 (decl.astKind != ASTKind.FUNC_DECL || !decl.TestAttr(Attribute.DEFAULT))) {
-                if (!decl.IsNominalDecl() && decl.astKind != ASTKind.PROP_DECL) {
-                    decl.EnableAttr(Attribute.IS_CHECK_VISITED)
-                    decl.EnableAttr(Attribute.INITIALIZED)
-                    decl.EnableAttr(Attribute.INITIALIZATION_CHECKED)
-                    decl.EnableAttr(Attribute.INCRE_COMPILE)
-                }
-                if (let Some(funcDecl) <- (decl as FuncDecl)) {
-                    if (let Some(funcBody) <- funcDecl.funcBody) {
-                        funcBody.body = None
-                    }
-                } else if (let Some(varDecl) <- (decl as VarDecl)) {
-                    if (varDecl.initializer.isSome()) {
-                        varDecl.EnableAttr(Attribute.DEFAULT)
-                        if (HasSimpleInitialiser(varDecl)) {
-                            varDecl.DisableAttr(Attribute.IS_CHECK_VISITED)
-                        }
-                    }
-                }
+                visit(decl)
             }
         }
-        return super.PerformSema()
+        let ret = super.PerformSema()
+        recorder.close()
+        return ret
     }
 
     public override func PerformOverflowStrategy(): Bool {
@@ -212,10 +215,35 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             return true
         }
         let success = super.PerformMangling()
-        if (success) {
-            cacheMangles.UpdateImportedInlineDeclsMangle()
-        }
+        if (success) { cacheMangles.UpdateImportedInlineDeclsMangle() }
         return success
+    }
+
+    public override func UpdateCachedInfo(): Unit {
+        core.UpdateMangleNameForCachedInfo()
+        UpdateCHIROptEffectMap()
+        if (kind == IncreKind.ROLLBACK) {
+            core.cachedInfo.virtualFuncDep.clear()
+            for ((raw, wrap) in core.chirInfo.curVirtFuncWrapDep) { core.cachedInfo.virtualFuncDep[raw] = wrap }
+            core.cachedInfo.ccOutFuncs.clear()
+            for (raw in core.chirInfo.ccOutFuncsRawMangle) { core.cachedInfo.ccOutFuncs.add(raw) }
+            core.cachedInfo.varInitDepMap.clear()
+            for ((raw, wrap) in core.chirInfo.varInitDepMap) { core.cachedInfo.varInitDepMap[raw] = wrap }
+        } else if (kind == IncreKind.INCR) {
+            for ((raw, _) in core.chirInfo.delVirtFuncWrapForIncr) { core.cachedInfo.virtualFuncDep.remove(raw) }
+            for ((raw, wrap) in core.chirInfo.curVirtFuncWrapDep) { core.cachedInfo.virtualFuncDep[raw] = wrap }
+            for (raw in rawIncrRemovedDecls) { core.cachedInfo.varInitDepMap.remove(raw) }
+            for ((raw, wrap) in core.chirInfo.varInitDepMap) { core.cachedInfo.varInitDepMap[raw] = wrap }
+            for (raw in core.chirInfo.ccOutFuncsRawMangle) { core.cachedInfo.ccOutFuncs.add(raw) }
+        }
+        for (pkg in core.GetSourcePackages()) { CollectCompilerAddedDeclUsage(pkg, core.cachedInfo.semaInfo) }
+    }
+
+    private func UpdateCHIROptEffectMap(): Unit {
+        DeleteRemovedNodesInCHIROptEffectMap(rawIncrRemovedDecls, core.cachedInfo.chirOptInfo)
+        DeleteRecompiledNodesInCHIROptEffectMap(declsToBeReCompiled, core.cachedInfo.chirOptInfo)
+        MergeCHIROptEffectMap(core.chirInfo.optEffectMap, core.cachedInfo.chirOptInfo,
+            core.rawMangleName2DeclMap)
     }
 
     public override func PerformCHIRCompilation(): Bool {
@@ -233,47 +261,6 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         return ret
     }
 
-    // C++: FrontendTool/IncrementalCompilerInstance.cpp:376-404.
-    public override func UpdateCachedInfo(): Unit {
-        core.UpdateMangleNameForCachedInfo()
-        UpdateCHIROptEffectMap()
-        if (kind == IncreKind.ROLLBACK) {
-            core.cachedInfo.virtualFuncDep.clear()
-            for ((raw, wrapper) in core.chirInfo.curVirtFuncWrapDep) {
-                core.cachedInfo.virtualFuncDep[raw] = wrapper
-            }
-            core.cachedInfo.ccOutFuncs.clear()
-            for (mangle in core.chirInfo.ccOutFuncsRawMangle) { core.cachedInfo.ccOutFuncs.add(mangle) }
-            core.cachedInfo.varInitDepMap.clear()
-            for ((raw, initFunc) in core.chirInfo.varInitDepMap) {
-                core.cachedInfo.varInitDepMap[raw] = initFunc
-            }
-        } else if (kind == IncreKind.INCR) {
-            for ((raw, _) in core.chirInfo.delVirtFuncWrapForIncr) {
-                core.cachedInfo.virtualFuncDep.remove(raw)
-            }
-            for ((raw, wrapper) in core.chirInfo.curVirtFuncWrapDep) {
-                core.cachedInfo.virtualFuncDep[raw] = wrapper
-            }
-            for (raw in rawIncrRemovedDecls) { core.cachedInfo.varInitDepMap.remove(raw) }
-            for ((raw, initFunc) in core.chirInfo.varInitDepMap) {
-                core.cachedInfo.varInitDepMap[raw] = initFunc
-            }
-            for (mangle in core.chirInfo.ccOutFuncsRawMangle) { core.cachedInfo.ccOutFuncs.add(mangle) }
-        }
-        for (pkg in core.GetSourcePackages()) {
-            CollectCompilerAddedDeclUsage(pkg, core.cachedInfo.semaInfo)
-        }
-    }
-
-    // C++: FrontendTool/IncrementalCompilerInstance.cpp:414-421.
-    private func UpdateCHIROptEffectMap(): Unit {
-        DeleteRemovedNodesInCHIROptEffectMap(rawIncrRemovedDecls, core.cachedInfo.chirOptInfo)
-        DeleteRecompiledNodesInCHIROptEffectMap(declsToBeReCompiled, core.cachedInfo.chirOptInfo)
-        MergeCHIROptEffectMap(core.chirInfo.optEffectMap, core.cachedInfo.chirOptInfo,
-            core.rawMangleName2DeclMap)
-    }
-
     public override func PerformCodeGen(): Bool {
         if (kind == IncreKind.NO_CHANGE) {
             for (srcPkg in core.GetSourcePackages()) {
@@ -282,17 +269,27 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             }
             return true
         }
-        if (!CodegenOnePackage(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)) {
-            return false
+        if (kind == IncreKind.INCR) {
+            // S6-pending: rollback stub, see INCREMENTAL_PORT_SPEC S6
+            kind = IncreKind.ROLLBACK
         }
-        if (ShouldSaveCjoForOutputMode()) {
-            RegisterCjoOutputs(core.GetSourcePackages())
-        }
-        return true
+        return CodegenOnePackage(false, cachedMangleMap: cacheMangles)
     }
 
     public override func PerformCjoSaving(): Bool {
-        LogCjoSavingDecision()
+        let logger = IncrementalCompilationLogger.GetInstance()
+        if (logger.IsEnable()) {
+            let message = if (kind == IncreKind.NO_CHANGE) {
+                "no change, skip cjo saving"
+            } else if (kind == IncreKind.EMPTY_PKG) {
+                "empty pkg, skip cjo saving"
+            } else if (invocation.globalOptions.outputMode == OutputMode.CHIR) {
+                " chir output mode, skip cjo saving"
+            } else {
+                "incremental cjo saving"
+            }
+            logger.LogLn(message)
+        }
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
             return true
         }
@@ -304,59 +301,16 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             return true
         }
         var ret = true
-        for (srcPkg in core.GetSourcePackages()) {
-            if (invocation.globalOptions.outputMode == OutputMode.CHIR) {
-                ret = ret && SaveCjo(srcPkg)
-            }
-            if (ret && !srcPkg.IsEmpty()) {
+        for (pkg in core.GetSourcePackages()) {
+            if (invocation.globalOptions.outputMode == OutputMode.CHIR) { ret = ret && SaveCjo(pkg) }
+            if (ret && !pkg.IsEmpty()) {
                 let cachedCjo = invocation.globalOptions.GenerateCachedPathName(
-                    srcPkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
+                    pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
                 ret = ret && FileUtil.WriteBufferToASTFile(cachedCjo,
-                    core.importManager.ExportASTSignature(srcPkg))
+                    core.importManager.ExportASTSignature(pkg))
             }
         }
         return ret
-    }
-
-    private func LogIncrementalStageDecision(
-        stageName: String,
-        noChangeMessage: String,
-        rollbackMessage: String,
-        incrementalMessage: String
-    ): Unit {
-        let logger = IncrementalCompilationLogger.GetInstance()
-        if (!logger.IsEnable()) {
-            return
-        }
-        let message = if (kind == IncreKind.NO_CHANGE) {
-            noChangeMessage
-        } else if (kind == IncreKind.ROLLBACK) {
-            rollbackMessage
-        } else if (kind == IncreKind.INCR) {
-            incrementalMessage
-        } else if (kind == IncreKind.EMPTY_PKG) {
-            "empty pkg, skip " + stageName
-        } else {
-            "invalid incremental state for " + stageName
-        }
-        logger.LogLn(message)
-    }
-
-    private func LogCjoSavingDecision(): Unit {
-        let logger = IncrementalCompilationLogger.GetInstance()
-        if (!logger.IsEnable()) {
-            return
-        }
-        let message = if (kind == IncreKind.NO_CHANGE) {
-            "no change, skip cjo saving"
-        } else if (kind == IncreKind.EMPTY_PKG) {
-            "empty pkg, skip cjo saving"
-        } else if (invocation.globalOptions.outputMode == OutputMode.CHIR) {
-            " chir output mode, skip cjo saving"
-        } else {
-            "incremental cjo saving"
-        }
-        logger.LogLn(message)
     }
 
     private func LoadCachedCodegenResult(): Unit {
@@ -369,42 +323,41 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
 
 }
 
-// C++: FrontendTool/IncrementalCompilerInstance.cpp:427-441.
+private func HasSimpleInitialiser(decl: VarDecl): Bool {
+    if (let None <- decl.initializer) { return false }
+    let initializer = decl.initializer.getOrThrow()
+    if (initializer.astKind == ASTKind.LIT_CONST_EXPR) {
+        let lit = (initializer as LitConstExpr).getOrThrow()
+        return lit.kind != LitConstKind.JSTRING && lit.kind != LitConstKind.UNIT
+    }
+    return false
+}
+
 private func UpdateIncrRemovedDeclsForVirtualFuncDep(cacheMangles: CachedMangleMap,
     rawIncrRemovedDecls: ArrayList<String>, virtualFuncDep: VirtualWrapperDepMap,
     delVirtFuncWrapForIncr: VirtualWrapperDepMap): Unit {
     let logger = IncrementalCompilationLogger.GetInstance()
-    for (deletedRaw in rawIncrRemovedDecls) {
-        if (let Some(wrapper) <- virtualFuncDep.get(deletedRaw)) {
-            logger.LogLn("[delVirDep][remove] raw: " + deletedRaw + " mg: " + wrapper)
-            cacheMangles.incrRemovedDecls.add(wrapper)
+    for (delRaw in rawIncrRemovedDecls) {
+        if (let Some(mangle) <- virtualFuncDep.get(delRaw)) {
+            logger.LogLn("[delVirDep][remove] raw: " + delRaw + " mg: " + mangle)
+            cacheMangles.incrRemovedDecls.add(mangle)
         }
     }
-    for ((deletedRaw, deleted) in delVirtFuncWrapForIncr) {
-        logger.LogLn("[delVirDep][change] raw: " + deletedRaw + " mg: " + deleted)
-        cacheMangles.incrRemovedDecls.add(deleted)
+    for ((delRaw, del) in delVirtFuncWrapForIncr) {
+        logger.LogLn("[delVirDep][change] raw: " + delRaw + " mg: " + del)
+        cacheMangles.incrRemovedDecls.add(del)
     }
 }
 
-// C++: FrontendTool/IncrementalCompilerInstance.cpp:442-452.
 private func UpdateIncrRemovedDeclsForVarInitDep(cacheMangles: CachedMangleMap,
     rawIncrRemovedDecls: ArrayList<String>, varInitDepMap: VarInitDepMap): Unit {
     let logger = IncrementalCompilationLogger.GetInstance()
-    for (deletedRaw in rawIncrRemovedDecls) {
-        if (let Some(initFunc) <- varInitDepMap.get(deletedRaw)) {
-            logger.LogLn("[delVarInitDep][remove] raw: " + deletedRaw + " mg: " + initFunc)
-            cacheMangles.incrRemovedDecls.add(initFunc)
+    for (delRaw in rawIncrRemovedDecls) {
+        if (let Some(mangle) <- varInitDepMap.get(delRaw)) {
+            logger.LogLn("[delVarInitDep][remove] raw: " + delRaw + " mg: " + mangle)
+            cacheMangles.incrRemovedDecls.add(mangle)
         }
     }
-}
-
-// C++: FrontendTool/IncrementalCompilerInstance.cpp:252-264.
-private func HasSimpleInitialiser(decl: VarDecl): Bool {
-    let initializer = decl.initializer ?? return false
-    if (let Some(litConst) <- (initializer as LitConstExpr)) {
-        return litConst.kind != LitConstKind.JSTRING && litConst.kind != LitConstKind.UNIT
-    }
-    return false
 }
 
 private func GetCachedSplitNum(cachedCodeGenPath: String): Option<UInt64> {
