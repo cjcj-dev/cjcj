@@ -740,7 +740,7 @@ private func FilterIncompatibleCandidatesForCall(diag: Option<BasicDiagnosticEng
         }
         if (HasSamePositionalArgsSize(fd, ce) && CheckArgsWithParamName(None, ce, fd)) {
             out.add(fd)
-        } else if (let None <- badCandidate) {
+        } else {
             badCandidate = Some(fd)
         }
     }
