@@ -1425,38 +1425,30 @@ public class InitializationChecker {
         return true
     }
 
-    private func CheckIllegalRefExprAccess(refExpr: RefExpr, target: Decl): Bool {
-        if (target.TestAttr(Attribute.STATIC) || target.TestAttr(Attribute.CONSTRUCTOR)) {
-            return true
+    private func CheckIllegalRefExprAccess(refExpr: RefExpr, topLevelRef: Symbol, topLevelTarget: Symbol): Bool {
+        let target = refExpr.GetTarget() ?? return true
+        if (SameSymbol(topLevelRef, topLevelTarget)) {
+            let targetStruct = topLevelRef.node ?? return true
+            return CheckIllegalMemberAccess(refExpr, target, targetStruct)
         }
-        if (let None <- target.outerDecl) {
-            return true
-        }
-        let targetOuter = target.outerDecl.getOrThrow()
-        if (!targetOuter.IsNominalDecl()) {
-            return true
-        }
-        if (let None <- CurrentNominalDeclForUsage(target)) {
-            return true
-        }
-        let currentNominal = CurrentNominalDeclForUsage(target).getOrThrow()
-        if (SameDecl(currentNominal, targetOuter)) {
-            return CheckIllegalMemberAccess(refExpr, target, currentNominal)
-        }
+        let exprFunc = ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC_LIKE, refExpr.scopeName)
         if (target.astKind == ASTKind.VAR_DECL) {
-            if (let Some(outerFunc) <- CurrentOutermostNamedFuncDecl()) {
-                if (let Some(owner) <- outerFunc.outerDecl) {
-                    if (owner.IsNominalDecl()) {
-                        return true
-                    }
-                }
+            var hasInheritableOuter = false
+            if ((let Some(funcSymbol) <- exprFunc) && funcSymbol.astKind == ASTKind.FUNC_DECL &&
+                (let Some(funcNode) <- funcSymbol.node) && (let Some(funcDecl) <- (funcNode as FuncDecl)) &&
+                (let Some(outerDecl) <- funcDecl.outerDecl) && (let Some(_) <- (outerDecl as InheritableDecl))) {
+                hasInheritableOuter = true
             }
-            AddIssue(InitializationIssueKind.ILLEGAL_SUPER_MEMBER_USE, refExpr, target: target,
-                message: refExpr.ref.identifier.Val())
-            return false
-        }
-        if (target.IsFuncOrProp()) {
-            return CheckIllegalMemberAccess(refExpr, target, currentNominal)
+            if (!hasInheritableOuter) {
+                AddIssue(InitializationIssueKind.ILLEGAL_SUPER_MEMBER_USE, refExpr, target: target,
+                    message: refExpr.ref.identifier.Val())
+                return false
+            }
+        } else if (target.IsFuncOrProp()) {
+            let targetStruct = topLevelRef.node ?? return true
+            if (!CheckIllegalMemberAccess(refExpr, target, targetStruct)) {
+                return false
+            }
         }
         return true
     }
@@ -1488,7 +1480,7 @@ public class InitializationChecker {
                             let referenceInside = refNode.IsStructOrClassDecl() && target.outerDecl.isSome() &&
                                 target.outerDecl.getOrThrow().IsNominalDecl() &&
                                 !target.TestAttr(Attribute.CONSTRUCTOR) && !target.TestAttr(Attribute.STATIC)
-                            if (referenceInside && !CheckIllegalRefExprAccess(refExpr, target)) {
+                            if (referenceInside && !CheckIllegalRefExprAccess(refExpr, refSymbol, targetSymbol)) {
                                 return false
                             }
                             let inDifferentScope = !SameSymbol(refSymbol, targetSymbol) &&
