@@ -2786,6 +2786,9 @@ public class FaithfulAST2CHIR {
             }
         }
         CollectLocalConstDecl(instLocalconstFuncs, false)
+        for (funcDecl in localConstFuncs.stableOrderValue) {
+            eprintln("CHIRTAIL_LOCALCONST ${funcDecl.identifier.Val()} generic=${funcDecl.TestAttr(AstAttribute.GENERIC)} instantiated=${funcDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)} id=${funcDecl.objectId}")
+        }
     }
 
     private func FlatternLocalConstVars(): Unit {
