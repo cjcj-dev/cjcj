@@ -1711,7 +1711,7 @@ public class StructInheritanceChecker {
         let instantiatedSupers = typeManager.GetInstantiatedTys(childOuterTy, mapping)
         for (instTy in instantiatedSupers.values) {
             if (!typeManager.CheckGenericDeclInstantiation(Some(childOuterExtend), instTy.typeArgs)) {
-                DiagnoseIncompleteOverrideOrImpl(interfaceDecl, childDecl, childOuterDecl)
+                CheckIncompleteOverrideOrImplOfExtendImpl(interfaceDecl, childDecl, childOuterDecl)
                 return
             }
         }
@@ -1735,7 +1735,11 @@ public class StructInheritanceChecker {
         return false
     }
 
-    private func DiagnoseIncompleteOverrideOrImpl(interfaceDecl: Decl, childDecl: Decl, childOuterDecl: Decl): Unit {
+    private func CheckIncompleteOverrideOrImplOfExtendImpl(
+        interfaceDecl: Decl,
+        childDecl: Decl,
+        childOuterDecl: Decl
+    ): Unit {
         if (checkingDecls.isEmpty()) {
             return
         }
