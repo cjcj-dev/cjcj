@@ -312,13 +312,13 @@ private func emitIncompleteInstantiation(diag: Option<BasicDiagnosticEngine>, no
         } else {
             "interface or abstract class '" + instTy.String() + "'"
         }
-        let builder = diagEngine.Diagnose(node.begin, node.end,
+        let builder = Diagnose(diagEngine, node,
             BasicDiagKind.sema_cannot_instantiated_by_incomplete_type,
             args: [BasicDiagArgument(genericTy.String()), BasicDiagArgument(typeString)])
         if (isNothing) {
             builder.AddNote("'Nothing' type has no members")
         }
-        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+        builder.Emit()
     }
 }
 
