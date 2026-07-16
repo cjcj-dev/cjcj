@@ -1032,6 +1032,151 @@ public class InteropLibBridge {
         return None
     }
 
+    public func SelectEntityUnwrapperByTypeKind(kind: TypeKind, ty: Ty,
+        entity: Expr, mirror: ClassLikeDecl): Expr {
+        let clonedEntity = (ASTCloner.Clone(entity) as Expr).getOrThrow()
+        clonedEntity.curFile = entity.curFile
+        return CreateMatchWithTypeCast(
+            UnwrapJavaEntity(clonedEntity, ty, mirror).getOrThrow(), ty).getOrThrow()
+    }
+
+    public func UnwrapJavaMirrorOption(entity: Expr, ty: Ty, mirror: ClassLikeDecl,
+        toRaw!: Bool = false): Expr {
+        CJC_ASSERT(ty.IsCoreOptionType())
+        CJC_ASSERT_WITH_MSG(!ty.typeArgs.isEmpty(), "Option type must be generic")
+        let curFile = entity.curFile.getOrThrow()
+        let declTy = ty.typeArgs[0]
+        let decl = Ty.GetDeclOfTy(declTy)
+        CJC_ASSERT((decl.isSome() && IsMirror(decl.getOrThrow())) || declTy.IsString() ||
+            (toRaw && decl.isSome() && IsImpl(decl.getOrThrow())))
+        let actualTy = if (toRaw) { GetJniJobjectTy() } else { ty }
+        return utils.CreateOptionMatch(CreateGetJavaEntityOrNullCall(entity).getOrThrow(),
+            { value: VarDecl =>
+                UnwrapJavaEntity(WithinFile<RefExpr>(CreateRefExpr(value), curFile),
+                    declTy, mirror, toRaw: toRaw).getOrThrow()
+            },
+            { => if (toRaw) { CreateJobjectNull() } else { utils.CreateOptionNoneRef(declTy) } },
+            actualTy)
+    }
+
+    public func UnwrapJavaImplOption(env: Expr, entityOption: Expr, ty: Ty,
+        mirror: ClassLikeDecl, toRaw!: Bool = false): Expr {
+        CJC_ASSERT_WITH_MSG(!ty.typeArgs.isEmpty(), "Option type must be generic")
+        let implTy = ty.typeArgs[0]
+        CJC_ASSERT(implTy.IsClass())
+        let actualTy = if (toRaw) { GetJniJobjectTy() } else { ty }
+        let curFile = entityOption.curFile.getOrThrow()
+        return utils.CreateOptionMatch(CreateGetJavaEntityOrNullCall(entityOption).getOrThrow(),
+            { value: VarDecl =>
+                let entityRef = WithinFile<RefExpr>(CreateRefExpr(value), curFile)
+                if (toRaw) {
+                    UnwrapJavaEntity(entityRef, implTy, mirror, toRaw: true).getOrThrow()
+                } else {
+                    UnwrapJavaImpl(env, entityRef, implTy)
+                }
+            },
+            { => if (toRaw) { CreateJobjectNull() } else { utils.CreateOptionNoneRef(implTy) } },
+            actualTy)
+    }
+
+    public func UnwrapJavaImpl(env: Expr, entity: Expr, ty: Ty): Expr {
+        let classTy = (ty as ClassTy).getOrThrow()
+        let classDecl = classTy.decl.getOrThrow()
+        CJC_ASSERT(IsImplReferenceWrapper(classDecl))
+        let ctor = GetJavaImplWrappingConstructor(classDecl)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg((ASTCloner.Clone(entity) as Expr).getOrThrow()))
+        args.add(CreateFuncArg(CreateGetRegistryIdCall(env, entity).getOrThrow()))
+        return CreateCallExpr(WithinFile<RefExpr>(CreateRefExpr(ctor), entity.curFile),
+            args, Some(ctor), ty, CallKind.CALL_OBJECT_CREATION)
+    }
+
+    public func UnwrapJavaArrayEntity(entity: Expr, ty: Ty, mirror: ClassLikeDecl): Expr {
+        if (ty == TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)) {
+            return CreateUnitExpr()
+        }
+        CJC_ASSERT_WITH_MSG(mirror.generic.isSome() &&
+            !mirror.generic.getOrThrow().typeParameters.isEmpty(), "JArray type must be generic")
+        let genericParam = mirror.generic.getOrThrow().typeParameters[0]
+        let mapping = GenerateTypeMappingWithSelector(
+            { kind: TypeKind, selectedTy: Ty =>
+                SelectEntityUnwrapperByTypeKind(kind, selectedTy, entity, mirror)
+            })
+        return CreateMatchByTypeArgument(genericParam, mapping, ty,
+            CreateMatchWithTypeCast(entity, ty).getOrThrow())
+    }
+
+    public func UnwrapJavaPrimitiveEntity(entity: Expr, ty: Ty): Option<Expr> {
+        let funcDecl = GetUnwrapJavaEntityDecl()
+        if (let None <- funcDecl) {
+            return None
+        }
+        let actualEntityTy = if (ty.IsPrimitive()) {
+            ty
+        } else {
+            typeManager.GetPointerTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        }
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(entity))
+        let fdRef = WithinFile<RefExpr>(CreateRefExpr(funcDecl.getOrThrow()), entity.curFile)
+        fdRef.instTys.add(actualEntityTy)
+        fdRef.SetTy(typeManager.GetInstantiatedTy(funcDecl.getOrThrow().GetTy().getOrThrow(),
+            GenerateTypeMapping(funcDecl.getOrThrow(), fdRef.instTys)))
+        let callExpr = CreateCallExpr(fdRef, args, funcDecl, actualEntityTy, CallKind.CALL_DECLARED_FUNCTION)
+        callExpr.curFile = entity.curFile
+        return Some(callExpr)
+    }
+
+    public func UnwrapJavaEntity(entity: Expr, ty: Ty, outerDecl: Decl,
+        toRaw!: Bool = false): Option<Expr> {
+        let curFile = entity.curFile
+        if (ty.IsPrimitive() || (toRaw && !ty.IsCoreOptionType())) {
+            return UnwrapJavaPrimitiveEntity(entity, ty)
+        }
+        if (IsJArray(outerDecl) && ty.IsGeneric()) {
+            return Some(UnwrapJavaArrayEntity(entity, ty, (outerDecl as ClassLikeDecl).getOrThrow()))
+        } else if (let Some(javaEntityTy) <- GetJavaEntityTy()) {
+            if (ty == javaEntityTy) {
+                return Some(entity)
+            }
+        }
+        if (ty.IsString()) {
+            let notNull = CreateEnsureNotNullCall(entity).getOrThrow()
+            return CreateJavaStringToCangjieCall(CreateGetJniEnvCall(curFile).getOrThrow(), notNull)
+        }
+        if (ty.IsCoreOptionType()) {
+            let classLikeDecl = (outerDecl as ClassLikeDecl).getOrThrow()
+            CJC_ASSERT_WITH_MSG(!ty.typeArgs.isEmpty(), "Option type must be generic")
+            let actualTy = ty.typeArgs[0]
+            let actualDecl = Ty.GetDeclOfTy(actualTy)
+            if ((actualDecl.isSome() && IsMirror(actualDecl.getOrThrow())) || actualTy.IsString()) {
+                return Some(UnwrapJavaMirrorOption(entity, ty, classLikeDecl, toRaw: toRaw))
+            }
+            return Some(UnwrapJavaImplOption(CreateGetJniEnvCall(curFile).getOrThrow(),
+                entity, ty, classLikeDecl, toRaw: toRaw))
+        }
+        if (ty.IsTuple()) {
+            return CreateGetFromRegistryByEntityCall(
+                CreateGetJniEnvCall(curFile).getOrThrow(), entity, ty, false)
+        }
+        if (let None <- (ty as ClassLikeTy)) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_java_interop_not_supported,
+                DEFAULT_POSITION, "type " + ty.name).Emit()
+            return None
+        }
+        let decl = (ty as ClassLikeTy).getOrThrow().commonDecl
+        if (let None <- decl) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_java_interop_not_supported,
+                DEFAULT_POSITION, "unknown decl " + ty.name).Emit()
+            return None
+        }
+        if (IsMirror(decl.getOrThrow())) {
+            return CreateMirrorConstructorCall(importManager, entity, ty)
+        }
+        CJC_ASSERT(IsImpl(decl.getOrThrow()))
+        return Some(UnwrapJavaImpl(CreateGetJniEnvCall(curFile).getOrThrow(), entity, ty))
+    }
+
     public func CreateGetTypeForTypeParameterCall(genericParam: GenericParamDecl): Expr {
         let getTypeForTypeParamDecl = FindGetTypeForTypeParamDecl(genericParam.curFile.getOrThrow())
         let refExpr = WithinFile<RefExpr>(CreateRefExpr(getTypeForTypeParamDecl), genericParam.curFile)
