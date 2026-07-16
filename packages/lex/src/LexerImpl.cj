@@ -6,6 +6,7 @@ import cjcj::utils.IsASCIIIdContinue as UtilsIsASCIIIdContinue
 import cjcj::utils.IsASCIIIdStart as UtilsIsASCIIIdStart
 import cjcj::utils.IsCJXIDStart as UtilsIsCJXIDStart
 import cjcj::utils.IsDigit as UtilsIsDigit
+import cjcj::utils.IsLegalUnicode
 import cjcj::utils.IsXDigit as UtilsIsXDigit
 import cjcj::utils.IsXIDContinue as UtilsIsXIDContinue
 import cjcj::utils.NFC as UtilsNFC
@@ -1055,8 +1056,10 @@ public class LexerImpl {
 
     private func DiagExpectedDigit(base: UInt8): Unit {
         let name = PrefixName(base)
+        let begin = GetPos(pCurrent)
+        let range = MakeRange(begin, begin + Position(0, 0, pNext - pCurrent))
         let builder = diag.DiagnoseRefactor(
-            DiagKindRefactor.lex_expected_digit, MakeRange(GetPos(pCurrent), GetPos(pNext)),
+            DiagKindRefactor.lex_expected_digit, range,
             arguments: [name, ConvertCurrentChar()]
         )
         builder.AddMainHintArguments([name])
@@ -1171,10 +1174,6 @@ public class LexerImpl {
         }
     }
 
-    private func IsLegalUnicodeScalar(value: UInt32): Bool {
-        return value <= 0xd7ffu32 || (value >= 0xe000u32 && value <= UTF8_4_MAX)
-    }
-
     private func DiagExpectedRightBracket(pStart: Int64): Unit {
         let builder = diag.DiagnoseRefactor(
             DiagKindRefactor.lex_expected_right_bracket, GetPos(pCurrent), arguments: [ConvertCurrentChar()]
@@ -1244,22 +1243,12 @@ public class LexerImpl {
             Back()
             success = false
         }
-        if (!IsLegalUnicodeScalar(hexVal) && success) {
+        if (!IsLegalUnicode(hexVal) && success) {
             lexDiagnose(
                 diag, DiagKindRefactor.lex_illegal_uni_character_literal,
                 MakeRange(GetPos(escapeStart), GetPos(pNext)), UInt64(hexVal).toString(radix: 16).toAsciiLower()
             )
         }
-    }
-
-    private func EscapeNote(target: String, isByteLiteral: Bool): String {
-        var note = "found " + if (isByteLiteral) { "11" } else { "12" } + " possible escapes: "
-        note += "'\\b', '\\t', '\\n', '\\v', '\\f', '\\r', "
-        note += "'\\0', '\\\\', '\\'', '\\\"', '\\u{__}'"
-        if (!isByteLiteral) {
-            note += ", '\\$'"
-        }
-        return note + " in " + target + " literal"
     }
 
     private func DiagUnrecognizedEscape(pStart: Int64, isInString: Bool, isByteLiteral: Bool): Unit {
@@ -1270,10 +1259,11 @@ public class LexerImpl {
         if (isInString && isByteLiteral) {
             target = "byte array"
         }
-        let escaped = "\\" + ConvertCurrentChar()
+        let current = ConvertCurrentChar()
+        let escaped = "\\" + current
         let builder = diag.DiagnoseRefactor(
             DiagKindRefactor.lex_unrecognized_escape,
-            MakeRange(GetPos(pCurrent - 1), GetPos(pCurrent) + ConvertCurrentChar().size),
+            MakeRange(GetPos(pCurrent - 1), GetPos(pCurrent) + current.size),
             arguments: [escaped, target]
         )
         if (getByte(pStart) == b'"' && getByte(pStart + 1) == b'"') {
@@ -1281,7 +1271,14 @@ public class LexerImpl {
         } else {
             builder.AddHint(GetPos(pStart), arguments: [target])
         }
-        builder.AddNote(EscapeNote(target, isByteLiteral))
+        var note = "found " + if (isByteLiteral) { "11" } else { "12" } + " possible escapes: "
+        note += "'\\r', '\\f', '\\v', '\\n', '\\t', '\\b', "
+        note += "'\\0', '\\\\', '\\'', '\\\"', '\\u{__}'"
+        if (!isByteLiteral) {
+            note += ", '\\$'"
+        }
+        note += " in " + target + " literal"
+        builder.AddNote(note)
         builder.Emit()
     }
 
