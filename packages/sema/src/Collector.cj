@@ -718,6 +718,9 @@ public class Collector {
 
     private func AssignFuncParam(ctx: ASTContext, fp: FuncParam): Unit {
         SetCurrentScope(ctx, fp)
+        for (annotation in fp.annotations) {
+            AssignNode(ctx, annotation)
+        }
         if (let Some(typeNode) <- fp.typeNode) {
             AssignNode(ctx, typeNode)
         }
