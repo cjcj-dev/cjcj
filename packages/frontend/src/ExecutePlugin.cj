@@ -3,7 +3,7 @@ package cjcj::frontend
 import cjcj::chir.{BuiltinType, CHIRBuilder, CHIRDeserializer, CHIRSerializer, CustomDefKind, CustomType,
     Function, GetBuiltinTypeWithVTable, GlobalVar}
 import cjcj::chir.Block as CHIRBlock
-import cjcj::chir.Package as CHIRPackage
+import cjcj::chir.Package as PluginCHIRPackage
 import cjcj::chir.Terminator as CHIRTerminator
 import cjcj::macro_pkg.{CloseSymbolTable, GetMethodPointer, OpenSymbolTableSafely, RuntimeHandle}
 import std.collection.*
@@ -42,7 +42,7 @@ class ExecutePlugin {
         }
     }
 
-    func SerializePackage(pkg: CHIRPackage): Bool {
+    func SerializePackage(pkg: PluginCHIRPackage): Bool {
         serializedData = CHIRSerializer.Serialize(pkg)
         if (serializedData.isEmpty()) {
             return false
@@ -74,7 +74,7 @@ class ExecutePlugin {
         srcCodeImportedVars: ArrayList<GlobalVar>,
         initFuncsForConstVar: ArrayList<Function>,
         maybeUnreachable: HashMap<CHIRBlock, CHIRTerminator>
-    ): Option<CHIRPackage> {
+    ): Option<PluginCHIRPackage> {
         CHIRPtrToString(srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar, maybeUnreachable)
 
         builder.MergeAllocatedInstance()
