@@ -224,6 +224,45 @@ private func filteredTypeArgsForTarget(target: Decl, typeArgs: ArrayList<Type>):
     return out
 }
 
+// C++ src/Sema/TypeCheckExpr.cpp:340-365 TypeCheckerImpl::HandleAlias.
+private func HandleAlias(typeManager: TypeManager, expr: Expr, targets: ArrayList<Decl>): Unit {
+    var idx: Int64 = 0
+    while (idx < targets.size) {
+        if (let Some(aliasDecl) <- (targets[idx] as TypeAliasDecl)) {
+            if (let Some(_) <- aliasDecl.typeNode) {
+                let innerTypeAliasTarget = GetLastTypeAliasTarget(aliasDecl)
+                if (let Some(innerType) <- innerTypeAliasTarget.typeNode) {
+                    if (let Some(realTarget) <- innerType.GetTarget()) {
+                        targets[idx] = realTarget
+                        if (let Some(reference) <- (expr as NameReferenceExpr)) {
+                            let wasEmpty = reference.typeArguments.isEmpty()
+                            let typeMapping = GenerateTypeMappingForTypeAliasUse(typeManager, aliasDecl, reference)
+                            SubstituteTypeArguments(typeManager, innerTypeAliasTarget,
+                                reference.typeArguments, typeMapping)
+                            let _ = UpdateInstTysWithTypeArgs(reference)
+                            if (wasEmpty && !reference.typeArguments.isEmpty()) {
+                                reference.compilerAddedTyArgs = true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        idx++
+    }
+}
+
+// C++ src/Sema/TypeCheckExpr.cpp:255-260 TypeCheckerImpl::GetRealTarget(Expr*, Decl*).
+private func GetRealTarget(typeManager: TypeManager, expr: Expr, target: Option<Decl>): Option<Decl> {
+    if (let None <- target) {
+        return None
+    }
+    let targets = ArrayList<Decl>()
+    targets.add(target.getOrThrow())
+    HandleAlias(typeManager, expr, targets)
+    return Some(targets[0])
+}
+
 public func getGenericConstraintDiagNode(checkNode: Node, typeNodes: ArrayList<Type>, instTy: Ty): Node {
     for (typeNode in typeNodes) {
         if (!typeNode.TestAttr(Attribute.COMPILER_ADD)) {
@@ -755,18 +794,19 @@ extend TypeCheckerImpl {
     }
 
     public func CheckGenericExpr(expr: Expr): Unit {
-        if (let None <- exprTarget(expr)) {
+        let targetOption = exprTarget(expr)
+        if (let None <- targetOption) {
             return
         }
-        let target = exprTarget(expr).getOrThrow()
-        let realTarget = GetRealTarget(target)
+        let target = targetOption.getOrThrow()
+        let realTarget = GetRealTarget(typeManager, expr, targetOption)
         let rawTypeArgs = expr.GetTypeArgs()
         let instTys = exprInstantiationTys(expr)
-        if (rawTypeArgs.isEmpty() && instTys.isEmpty()) {
+        if ((let None <- realTarget) || (rawTypeArgs.isEmpty() && instTys.isEmpty())) {
             return
         }
         let effectiveTypeArgs = filteredTypeArgsForTarget(target, rawTypeArgs)
-        expr.SetTy(GetGenericType(typeManager, realTarget, effectiveTypeArgs))
+        expr.SetTy(GetGenericType(typeManager, realTarget.getOrThrow(), effectiveTypeArgs))
         if (!CheckGenericDeclInstantiation(realTarget, effectiveTypeArgs, expr)) {
             expr.SetTy(TypeManager.GetInvalidTy())
         }

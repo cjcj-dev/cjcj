@@ -321,7 +321,7 @@ private func CheckRefExprCheckTyArgs(refType: RefType, target: Decl): Bool {
 }
 
 // C++ src/Sema/TypeCheckerImpl.h:1702-1723 SubstituteTypeArguments<Type>.
-private func SubstituteTypeArguments(tm: TypeManager, typeArguments: ArrayList<Type>, sourceType: Type,
+public func SubstituteTypeArguments(tm: TypeManager, typeArguments: ArrayList<Type>, sourceType: Type,
     typeMapping: TypeSubst): Unit {
     if (!typeArguments.isEmpty()) {
         let file = typeArguments[0].curFile.getOrThrow()
@@ -348,7 +348,7 @@ private func SubstituteTypeArguments(tm: TypeManager, typeArguments: ArrayList<T
 }
 
 // C++ src/Sema/TypeChecker.cpp:690-703 TypeCheckerImpl::SubstituteTypeArguments.
-private func SubstituteTypeArguments(tm: TypeManager, tad: TypeAliasDecl, typeArguments: ArrayList<Type>,
+public func SubstituteTypeArguments(tm: TypeManager, tad: TypeAliasDecl, typeArguments: ArrayList<Type>,
     typeMapping: TypeSubst): Unit {
     if (!typeArguments.isEmpty() && typeArguments[0].TestAttr(Attribute.COMPILER_ADD)) {
         return
