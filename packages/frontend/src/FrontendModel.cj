@@ -8061,6 +8061,16 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return LoadCachedPackage(pkg, cachedCjo, mangledName2DeclMap)
     }
 
+    // ImportManager.cpp:322-339 ImportManager::ExportASTSignature.
+    public func ExportASTSignature(pkg: Package): Array<UInt8> {
+        let writer = ASTWriter("", GetCjoManager(), globalOptions.enableCompileDebug,
+            globalOptions.optimizationLevel, diag: diag, exportContent: true,
+            exportForIncr: true, exportFuncBody: true)
+        writer.PreSaveFullExportDecls(pkg)
+        writer.ExportAST(pkg)
+        return writer.AST2FB(pkg)
+    }
+
     private func ResolveImportedPackageHeaders(pkg: Package, isRecursive!: Bool = false): Bool {
         var success = true
         for (file in pkg.files) {
