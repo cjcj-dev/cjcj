@@ -1364,7 +1364,7 @@ extend ParserImpl {
         } else {
             param.identifier = ExpectIdentifierWithPos(param)
         }
-        param.begin = if (!param.modifiers.isEmpty()) { param.modifiers[0].begin } else { param.identifier.Begin() }
+        param.begin = param.identifier.Begin()
         if (param.identifier.Empty()) {
             param.begin = Peek().Begin()
             param.typeNode = InvalidType(Peek().Begin())
