@@ -362,10 +362,70 @@ extend ParserImpl {
         return ParseLeftParenExprInKind(ExprKind.ALL)
     }
 
+    public func ParseTupleLitForParenExpr(leftParenPos: Position): TupleLit {
+        let refExprs = ArrayList<RefExpr>()
+        let commaPosVector = ArrayList<Position>()
+        do {
+            if (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword()) {
+                refExprs.add(ParseRefExpr(ExprKind.EXPR_IN_TUPLE))
+            }
+            Next()
+            commaPosVector.add(Peek().Begin())
+        } while (SeeingIdentifierAndTargetOp([TokenKind.COMMA]))
+        let tupleLit = TupleLit()
+        tupleLit.begin = leftParenPos
+        tupleLit.leftParenPos = leftParenPos
+        for (refExpr in refExprs) {
+            tupleLit.children.add(refExpr)
+        }
+        for (commaPos in commaPosVector) {
+            tupleLit.commaPosVector.add(commaPos)
+        }
+        ParseOneOrMoreWithSeparator(TokenKind.COMMA,
+            { pos: Position => tupleLit.commaPosVector.add(pos) },
+            {
+                if (Seeing(TokenKind.RPAREN) && tupleLit.children.size > 1) {
+                    return
+                }
+                tupleLit.children.add(ParseExpr(ExprKind.EXPR_IN_TUPLE))
+            })
+        if (!Skip(TokenKind.RPAREN)) {
+            DiagExpectedRightDelimiter("(", tupleLit.leftParenPos)
+            ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RPAREN])
+        }
+        tupleLit.rightParenPos = lastToken.Begin()
+        tupleLit.end = lastToken.End()
+        return tupleLit
+    }
+
+    public func ParseTupleLitForParenExprComma(leftParenPos: Position, expr: Expr): TupleLit {
+        let tupleLit = TupleLit()
+        tupleLit.children.add(expr)
+        while (Skip(TokenKind.COMMA)) {
+            tupleLit.commaPosVector.add(lastToken.Begin())
+            if (Seeing(TokenKind.RPAREN) && tupleLit.children.size > 1) {
+                break
+            }
+            tupleLit.children.add(ParseExpr(ExprKind.EXPR_IN_TUPLE))
+        }
+        if (!Skip(TokenKind.RPAREN)) {
+            DiagExpectedRightDelimiter("(", leftParenPos)
+            ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RPAREN])
+        }
+        tupleLit.leftParenPos = leftParenPos
+        tupleLit.rightParenPos = Peek().Begin()
+        tupleLit.begin = leftParenPos
+        tupleLit.end = lastToken.End()
+        return tupleLit
+    }
+
     public func ParseLeftParenExprInKind(ek: ExprKind): Expr {
         let left = Expect(TokenKind.LPAREN, "expected '('")
         if (Skip(TokenKind.RPAREN)) {
             return LitConstExpr(LitConstKind.UNIT, Token(TokenKind.UNIT_LITERAL, "()", left.Begin(), lastToken.End()))
+        }
+        if (SeeingIdentifierAndTargetOp([TokenKind.COMMA])) {
+            return ParseTupleLitForParenExpr(left.Begin())
         }
         let childKind = if (ExprKindEquals(ek, ExprKind.IF_COND_EXPR) ||
             ExprKindEquals(ek, ExprKind.EXPR_IN_IF_COND_TUPLE)) {
@@ -377,27 +437,8 @@ extend ParserImpl {
             ExprKind.EXPR_IN_TUPLE
         }
         let first = ParseExpr(childKind)
-        if (Skip(TokenKind.COMMA)) {
-            let tuple = TupleLit()
-            tuple.leftParenPos = left.Begin()
-            tuple.begin = left.Begin()
-            tuple.children.add(first)
-            tuple.commaPosVector.add(lastToken.Begin())
-            while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                tuple.children.add(ParseExpr(childKind))
-                if (Skip(TokenKind.COMMA)) {
-                    tuple.commaPosVector.add(lastToken.Begin())
-                } else {
-                    break
-                }
-            }
-            if (!Skip(TokenKind.RPAREN)) {
-                DiagExpectedRightDelimiter("(", tuple.leftParenPos)
-                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RPAREN])
-            }
-            tuple.rightParenPos = lastToken.Begin()
-            tuple.end = lastToken.End()
-            return tuple
+        if (Seeing(TokenKind.COMMA)) {
+            return ParseTupleLitForParenExprComma(left.Begin(), first)
         }
         let paren = ParenExpr()
         paren.leftParenPos = left.Begin()
