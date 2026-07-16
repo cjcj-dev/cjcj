@@ -21,8 +21,10 @@ public class MacroInvocation {
     public let macroAtPosition: ArrayList<Position> = ArrayList<Position>()
     public let newTokens: ArrayList<Token> = ArrayList<Token>()
     public var newTokensStr: String = ""
-    public var scopeKind: ScopeKind = ScopeKind.UNKNOWN_SCOPE
-    public var exprKind: ExprKind = ExprKind.UNKNOWN_EXPR
+    // Mirrors Node.h:2419 std::variant<ScopeKind, ExprKind> scope. Option presence
+    // preserves the active alternative even when its value is UNKNOWN_*.
+    public var scopeKind: Option<ScopeKind> = Some(ScopeKind.UNKNOWN_SCOPE)
+    public var exprKind: Option<ExprKind> = None
     public var hasParenthesis: Bool = false
     public var hasAttr: Bool = false
     public var isFuncParam: Bool = false
