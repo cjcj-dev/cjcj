@@ -159,6 +159,21 @@ public class CHIRContext {
         curPackage = pkg
     }
 
+    public func SearchObjectTyInPackage(): Option<ClassType> {
+        let pkg = curPackage.getOrThrow()
+        for (classDef in pkg.GetImportedClasses()) {
+            if (IsCoreObject(classDef)) {
+                return classDef.GetType() as ClassType
+            }
+        }
+        for (classDef in pkg.GetClasses()) {
+            if (IsCoreObject(classDef)) {
+                return classDef.GetType() as ClassType
+            }
+        }
+        return None
+    }
+
     public func RegisterSourceFileName(fileId: UInt32, fileName: String): Unit {
         fileNameMap[fileId] = fileName
     }
