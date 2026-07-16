@@ -270,12 +270,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             }
             return true
         }
-        if (kind == IncreKind.INCR) {
-            // S6-pending: rollback stub, see INCREMENTAL_PORT_SPEC S6
-            kind = IncreKind.ROLLBACK
-            return true
-        }
-        return CodegenOnePackage(false, cachedMangleMap: cacheMangles)
+        return CodegenOnePackage(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)
     }
 
     public override func PerformCjoSaving(): Bool {
