@@ -7789,7 +7789,8 @@ extend TypeChecker {
             return false
         }
         var meetConstraints = true
-        if (let Some(varDecl) <- (target.getOrThrow() as VarDeclAbstract)) {
+        if (target.getOrThrow().astKind == ASTKind.VAR_DECL) {
+            let varDecl = (target.getOrThrow() as VarDecl).getOrThrow()
             if (!varDecl.isVar) {
                 if (let Some(diagValue2) <- impl.diag) {
                     let builder2 = diagValue2.DiagnoseRefactor(BasicDiagKindRefactor.sema_inout_must_be_var_variable,
