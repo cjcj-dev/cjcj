@@ -612,6 +612,7 @@ public open class Ty <: Identifiable & Hashable & Equatable<Ty> {
         return refEq(this, right)
     }
 
+    @OverflowWrapping
     public func hashCode(): Int64 {
         var value = TypeKindIndex(kind) * 131 + name.hashCode()
         for (arg in typeArgs) {
