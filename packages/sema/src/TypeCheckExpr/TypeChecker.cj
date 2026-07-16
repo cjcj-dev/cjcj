@@ -8756,7 +8756,7 @@ extend TypeChecker {
             }
         }
         if (!FilterAndCheckTargetsOfRef(
-            impl.diag.getOrThrow(), impl.typeManager, ctx, re, targets) || !isWellTyped) {
+            impl.diag.getOrThrow(), impl.typeManager, ctx, re, targets, impl.importManager) || !isWellTyped) {
             re.SetTy(TypeManager.GetInvalidTy())
             return
         }

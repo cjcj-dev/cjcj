@@ -290,7 +290,8 @@ private func TypeCheckReferenceCheckAmbiguousImportedNonFuncs(
     diag: BasicDiagnosticEngine,
     expr: Expr,
     targets: ArrayList<Option<Decl>>,
-    name: String
+    name: String,
+    importManager: SemaImportManager
 ): Bool {
     let source = ArrayList<Option<Decl>>()
     let imported = ArrayList<Decl>()
@@ -318,12 +319,7 @@ private func TypeCheckReferenceCheckAmbiguousImportedNonFuncs(
     if (!hasImportedNonFunc || TypeCheckReferenceAllMemberDecl(imported)) {
         return true
     }
-    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ambiguous_use, expr,
-        arguments: [name])
-    for (target in imported) {
-        TypeCheckReferenceAddCandidateNote(builder, target)
-    }
-    builder.Emit()
+    DiagAmbiguousUse(diag, expr, name, imported, importManager)
     return false
 }
 
@@ -821,7 +817,8 @@ public func FilterAndCheckTargetsOfRef(
     tm: TypeManager,
     ctx: ASTContext,
     re: RefExpr,
-    targets: ArrayList<Option<Decl>>
+    targets: ArrayList<Option<Decl>>,
+    importManager: SemaImportManager
 ): Bool {
     TypeCheckReferenceRemoveDuplicateTargets(tm, targets)
     TypeCheckReferenceFilterCandidatesForRef(tm, ctx, re, targets)
@@ -837,7 +834,8 @@ public func FilterAndCheckTargetsOfRef(
         targets.clear()
         return false
     }
-    if (!TypeCheckReferenceCheckAmbiguousImportedNonFuncs(diag, re, targets, re.ref.identifier.Val())) {
+    if (!TypeCheckReferenceCheckAmbiguousImportedNonFuncs(
+        diag, re, targets, re.ref.identifier.Val(), importManager)) {
         return false
     }
     if (!TypeCheckReferenceIsRefTypeArgSizeValid(diag, re, targets) ||
