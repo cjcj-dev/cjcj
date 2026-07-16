@@ -639,6 +639,30 @@ foreign {
         valueMap: LLVMSelfhostValueToValueMapRef): Unit
     func LLVMSelfhostCloneBasicBlock(basicBlock: LLVMBasicBlockRef,
         valueMap: LLVMSelfhostValueToValueMapRef, function: LLVMValueRef): LLVMBasicBlockRef
+    func LLVMSelfhostGlobalVariableCopyAttributes(dest: LLVMValueRef, source: LLVMValueRef): Unit
+    func LLVMSelfhostGlobalVariableCopyAttributesFrom(dest: LLVMValueRef, source: LLVMValueRef): Unit
+    func LLVMSelfhostGlobalVariableHasAttribute(gv: LLVMValueRef, kind: CString, kindLen: UInt32): Int32
+    func LLVMSelfhostGlobalVariableRemoveAttribute(gv: LLVMValueRef, kind: CString, kindLen: UInt32): Unit
+    func LLVMSelfhostFunctionGetAddressSpace(function: LLVMValueRef): UInt32
+    func LLVMSelfhostFunctionCreateWithAddressSpace(fnTy: LLVMTypeRef, linkage: UInt32, addrSpace: UInt32,
+        name: CString, nameLen: UInt32, module: LLVMModuleRef): LLVMValueRef
+    func LLVMSelfhostFunctionCopyAttributesFrom(dest: LLVMValueRef, source: LLVMValueRef): Unit
+    func LLVMSelfhostDISubprogramReplaceUnit(subprogram: LLVMMetadataRef, compileUnit: LLVMMetadataRef): Unit
+    func LLVMSelfhostBasicBlockDropAllReferences(basicBlock: LLVMBasicBlockRef): Unit
+    func LLVMSelfhostGlobalObjectClearMetadata(globalObject: LLVMValueRef): Unit
+    func LLVMSelfhostModuleGetFirstDICompileUnit(module: LLVMModuleRef): LLVMMetadataRef
+    func LLVMSelfhostDICompileUnitGetGlobalVariables(compileUnit: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMSelfhostCreateTempGlobalsTuple(module: LLVMModuleRef,
+        currentGlobalVars: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMSelfhostTempTuplePushBack(temp: LLVMMetadataRef, metadata: LLVMMetadataRef): Unit
+    func LLVMSelfhostTempTupleReplaceWithPermanent(temp: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMSelfhostDICompileUnitReplaceGlobalVariables(compileUnit: LLVMMetadataRef,
+        permanent: LLVMMetadataRef): Unit
+    func LLVMSelfhostGetUser(useRef: LLVMUseRef): LLVMValueRef
+    func LLVMSelfhostGlobalValueRemoveDeadConstantUsers(globalValue: LLVMValueRef): Unit
+    func LLVMSelfhostGlobalValueSetDSOLocal(globalValue: LLVMValueRef, local: Int32): Unit
+    func LLVMSelfhostNamedMetadataClearOperands(module: LLVMModuleRef, name: CString, nameLen: UInt32): Unit
+    func LLVMSelfhostNamedMetadataEraseFromParent(module: LLVMModuleRef, name: CString, nameLen: UInt32): Unit
 }
 
 public func LLVMNullContext(): LLVMContextRef { return CPointer<Unit>() }

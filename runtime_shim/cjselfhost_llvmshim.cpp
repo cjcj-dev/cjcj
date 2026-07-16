@@ -33,6 +33,13 @@
 //   IncrementalGen LLVM value mapper support:
 //         src/CodeGen/IncrementalGen/IncrementalGen.cpp:159-166,275-365
 //         llvm::ValueToValueMapTy/MapValue/MapMetadata/CloneFunctionInto/CloneBasicBlock.
+//   IncrementalGen module-merge support:
+//         src/CodeGen/IncrementalGen/IncrementalGen.cpp:52-91,143-176,214-224,228-273,298-334,349,433-459,462-525
+//         and src/CodeGen/CGModule.cpp:183-188: GlobalVariable attribute copy/query/removal,
+//         Function::Create with address space, copyAttributesFrom, DISubprogram::replaceUnit,
+//         BasicBlock::dropAllReferences, GlobalObject::clearMetadata, DICompileUnit
+//         global-variable tuple lifecycle, generic Use::getUser, removeDeadConstantUsers,
+//         setDSOLocal, NamedMDNode clearOperands/eraseFromParent.
 
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
@@ -719,4 +726,169 @@ extern "C" LLVMValueRef LLVMSelfhostCallGraphNodeGetFunction(CallGraphNode *Node
 extern "C" int LLVMSelfhostGlobalObjectHasEmptySection(LLVMValueRef GlobalObjectRef)
 {
     return unwrap<GlobalObject>(GlobalObjectRef)->getSection().empty() ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// IncrementalGen module-merge support.
+// C++ use: src/CodeGen/IncrementalGen/IncrementalGen.cpp:52-91,143-176,214-224,
+// 228-273,298-334,349,433-459,462-525; src/CodeGen/CGModule.cpp:183-188.
+// ---------------------------------------------------------------------------
+
+// Mirror `newGV->setAttributes(gv.getAttributes())` (IncrementalGen.cpp:62).
+extern "C" void LLVMSelfhostGlobalVariableCopyAttributes(LLVMValueRef Dest, LLVMValueRef Src)
+{
+    unwrap<GlobalVariable>(Dest)->setAttributes(unwrap<GlobalVariable>(Src)->getAttributes());
+}
+
+// Mirror `newGV->copyAttributesFrom(&gv)` (IncrementalGen.cpp:64).
+extern "C" void LLVMSelfhostGlobalVariableCopyAttributesFrom(LLVMValueRef Dest, LLVMValueRef Src)
+{
+    unwrap<GlobalVariable>(Dest)->copyAttributesFrom(unwrap<GlobalVariable>(Src));
+}
+
+// Mirror `gv.hasAttribute(Kind)` (IncrementalGen.cpp:88-91,306,472-473).
+extern "C" int LLVMSelfhostGlobalVariableHasAttribute(LLVMValueRef GV, const char *Kind, unsigned KindLen)
+{
+    return unwrap<GlobalVariable>(GV)->hasAttribute(StringRef(Kind, KindLen)) ? 1 : 0;
+}
+
+// Mirror `gv.setAttributes(gv.getAttributes().removeAttribute(ctx, Kind))` (IncrementalGen.cpp:307).
+extern "C" void LLVMSelfhostGlobalVariableRemoveAttribute(LLVMValueRef GV, const char *Kind, unsigned KindLen)
+{
+    auto *gv = unwrap<GlobalVariable>(GV);
+    gv->setAttributes(gv->getAttributes().removeAttribute(gv->getContext(), StringRef(Kind, KindLen)));
+}
+
+// Mirror `func.getAddressSpace()` (IncrementalGen.cpp:269).
+extern "C" unsigned LLVMSelfhostFunctionGetAddressSpace(LLVMValueRef Fn)
+{
+    return unwrap<Function>(Fn)->getAddressSpace();
+}
+
+// Mirror `llvm::Function::Create(fnType, linkage, addrSpace, name, module)`
+// (IncrementalGen.cpp:268-269). Linkage arrives as the LLVM-C enum and is applied
+// through LLVMSetLinkage so the C-API linkage mapping stays authoritative.
+extern "C" LLVMValueRef LLVMSelfhostFunctionCreateWithAddressSpace(
+    LLVMTypeRef FnTy, unsigned CLinkage, unsigned AddrSpace, const char *Name, unsigned NameLen, LLVMModuleRef M)
+{
+    auto *fn = Function::Create(
+        unwrap<FunctionType>(FnTy), GlobalValue::ExternalLinkage, AddrSpace, StringRef(Name, NameLen), unwrap(M));
+    auto ref = wrap(fn);
+    LLVMSetLinkage(ref, static_cast<LLVMLinkage>(CLinkage));
+    return ref;
+}
+
+// Mirror `newFunc->copyAttributesFrom(&func)` (IncrementalGen.cpp:270).
+extern "C" void LLVMSelfhostFunctionCopyAttributesFrom(LLVMValueRef Dest, LLVMValueRef Src)
+{
+    unwrap<Function>(Dest)->copyAttributesFrom(unwrap<Function>(Src));
+}
+
+// Mirror `sp->replaceUnit(&newCU)` and `replaceUnit(nullptr)` (IncrementalGen.cpp:72,150).
+extern "C" void LLVMSelfhostDISubprogramReplaceUnit(LLVMMetadataRef SP, LLVMMetadataRef CU)
+{
+    unwrap<DISubprogram>(SP)->replaceUnit(CU == nullptr ? nullptr : unwrap<DICompileUnit>(CU));
+}
+
+// Mirror `bb.dropAllReferences()` (IncrementalGen.cpp:80).
+extern "C" void LLVMSelfhostBasicBlockDropAllReferences(LLVMBasicBlockRef BB)
+{
+    unwrap(BB)->dropAllReferences();
+}
+
+// Mirror `func->clearMetadata()` / `gvToBeUpdated->clearMetadata()` / `def->clearMetadata()`
+// (IncrementalGen.cpp:85,317,418).
+extern "C" void LLVMSelfhostGlobalObjectClearMetadata(LLVMValueRef GO)
+{
+    unwrap<GlobalObject>(GO)->clearMetadata();
+}
+
+// Mirror `**injectedModule->debug_compile_units_begin()` and the `llvm.dbg.cu` operand-0
+// read (IncrementalGen.cpp:301-302,356); null when the module has no compile unit.
+extern "C" LLVMMetadataRef LLVMSelfhostModuleGetFirstDICompileUnit(LLVMModuleRef M)
+{
+    auto *module = unwrap(M);
+    auto it = module->debug_compile_units_begin();
+    if (it == module->debug_compile_units_end()) {
+        return nullptr;
+    }
+    return wrap(*it);
+}
+
+// Mirror `compileUnitToBeUpdated->getGlobalVariables()` (IncrementalGen.cpp:303); null when absent.
+extern "C" LLVMMetadataRef LLVMSelfhostDICompileUnitGetGlobalVariables(LLVMMetadataRef CU)
+{
+    return wrap(unwrap<DICompileUnit>(CU)->getGlobalVariables().get());
+}
+
+// Mirror `currentGlobalVars ? currentGlobalVars->clone() : diBuilder.getOrCreateArray({})->clone()`
+// (IncrementalGen.cpp:300-304). Returns a temporary MDTuple that must be finalized with
+// LLVMSelfhostTempTupleReplaceWithPermanent.
+extern "C" LLVMMetadataRef LLVMSelfhostCreateTempGlobalsTuple(LLVMModuleRef M, LLVMMetadataRef CurrentGlobalVars)
+{
+    if (CurrentGlobalVars != nullptr) {
+        return wrap(cast<MDTuple>(unwrap(CurrentGlobalVars))->clone().release());
+    }
+    DIBuilder diBuilder(*unwrap(M));
+    return wrap(diBuilder.getOrCreateArray({})->clone().release());
+}
+
+// Mirror `newGlobalVars->push_back(gvToBeUpdatedDbgInfo)` (IncrementalGen.cpp:325;
+// push_back is the Cangjie-patched resizable-MDNode API, llvm/IR/Metadata.h:1386).
+extern "C" void LLVMSelfhostTempTuplePushBack(LLVMMetadataRef Temp, LLVMMetadataRef MD)
+{
+    cast<MDTuple>(unwrap(Temp))->push_back(unwrap(MD));
+}
+
+// Mirror `MDNode::replaceWithPermanent(newGlobalVars->clone())` plus the TempMDTuple
+// end-of-scope release (IncrementalGen.cpp:333).
+extern "C" LLVMMetadataRef LLVMSelfhostTempTupleReplaceWithPermanent(LLVMMetadataRef Temp)
+{
+    auto *temp = cast<MDTuple>(unwrap(Temp));
+    auto *permanent = MDNode::replaceWithPermanent(temp->clone());
+    MDNode::deleteTemporary(temp);
+    return wrap(permanent);
+}
+
+// Mirror `compileUnitToBeUpdated->replaceGlobalVariables(permanentNode)` (IncrementalGen.cpp:334).
+extern "C" void LLVMSelfhostDICompileUnitReplaceGlobalVariables(LLVMMetadataRef CU, LLVMMetadataRef Permanent)
+{
+    unwrap<DICompileUnit>(CU)->replaceGlobalVariables(cast<MDTuple>(unwrap(Permanent)));
+}
+
+// Mirror the generic `it->getUser()` traversal that must also surface Constant users
+// (IncrementalGen.cpp:380-397). LLVMSelfhostGetUserInstruction stays instruction-only
+// for its existing callers.
+extern "C" LLVMValueRef LLVMSelfhostGetUser(LLVMUseRef UseRef)
+{
+    return wrap(unwrap(UseRef)->getUser());
+}
+
+// Mirror `cur->removeDeadConstantUsers()` (IncrementalGen.cpp:453).
+extern "C" void LLVMSelfhostGlobalValueRemoveDeadConstantUsers(LLVMValueRef GV)
+{
+    unwrap<GlobalValue>(GV)->removeDeadConstantUsers();
+}
+
+// Mirror `oldF->setDSOLocal(false)` / `oldV->setDSOLocal(false)` (IncrementalGen.cpp:218,223);
+// no LLVM-C DSO-local accessor exists in this LLVM.
+extern "C" void LLVMSelfhostGlobalValueSetDSOLocal(LLVMValueRef GV, int Local)
+{
+    unwrap<GlobalValue>(GV)->setDSOLocal(Local != 0);
+}
+
+// Mirror `namedMD->clearOperands()` (IncrementalGen.cpp:485,494,503,521); no-op when absent.
+extern "C" void LLVMSelfhostNamedMetadataClearOperands(LLVMModuleRef M, const char *Name, unsigned NameLen)
+{
+    if (auto *namedMD = unwrap(M)->getNamedMetadata(StringRef(Name, NameLen))) {
+        namedMD->clearOperands();
+    }
+}
+
+// Mirror `namedMD->eraseFromParent()` (CGModule.cpp:183-188); no-op when absent.
+extern "C" void LLVMSelfhostNamedMetadataEraseFromParent(LLVMModuleRef M, const char *Name, unsigned NameLen)
+{
+    if (auto *namedMD = unwrap(M)->getNamedMetadata(StringRef(Name, NameLen))) {
+        namedMD->eraseFromParent();
+    }
 }
