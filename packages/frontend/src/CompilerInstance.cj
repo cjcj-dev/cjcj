@@ -23,7 +23,7 @@ import cjcj::lex.TokenKindValue
 import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::incremental_compilation.IncreKind
 import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
-    MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, TopLevelDeclCache, VarInitDepMap,
+    MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, SemanticInfo, TopLevelDeclCache, VarInitDepMap,
     VirtualWrapperDepMap, WriteCache}
 import cjcj::option.OutputMode
 import cjcj::utils.FreeIdleMemoryToOS
@@ -1122,6 +1122,30 @@ public class CompilerInstance {
         cachedInfo.compileArgs.clear()
         for (arg in invocation.globalOptions.ToSerialized()) { cachedInfo.compileArgs.add(arg) }
     }
+
+    // C++ src/Frontend/CompilerInstance.cpp:510-529.
+    private func CacheSemaUsage(info: SemanticInfo): Unit {
+        for ((decl, usage) in cachedInfo.semaInfo.usages) {
+            if (decl.toBeCompiled) {
+                continue
+            }
+            var usageDecl = decl
+            if (let Some(mainDecl) <- (decl as MainDecl)) {
+                if (let Some(desugarDecl) <- mainDecl.desugarDecl) {
+                    usageDecl = desugarDecl
+                }
+            } else if (let Some(macroDecl) <- (decl as MacroDecl)) {
+                if (let Some(desugarDecl) <- macroDecl.desugarDecl) {
+                    usageDecl = desugarDecl
+                }
+            }
+            if (info.usages.contains(usageDecl)) {
+                info.usages[usageDecl] = usage
+            }
+        }
+        cachedInfo.semaInfo = info
+    }
+
 
     private func WriteCachedInfo(): Bool {
         if (srcPkgs.isEmpty()) {
