@@ -954,6 +954,28 @@ private const INVALID_PACKAGE_INDEX: Int32 = -1
 private const CURRENT_PKG_INDEX: Int32 = -2
 private const PKG_REFERENCE_INDEX: Int32 = -3
 
+// IncrementalLoader.cpp:29-34 IsChangedDeclMayOmitType.
+private func IsChangedDeclMayOmitType(decl: Decl): Bool {
+    return decl.toBeCompiled && !decl.TestAttr(Attribute.CONSTRUCTOR) &&
+        (decl.astKind == ASTKind.FUNC_DECL || decl.astKind == ASTKind.VAR_DECL ||
+        decl.TestAttr(Attribute.GENERIC))
+}
+
+// IncrementalLoader.cpp:36-39 DoNotLoadCache.
+private func DoNotLoadCache(decl: Decl): Bool {
+    return decl.astKind == ASTKind.PRIMARY_CTOR_DECL || decl.astKind == ASTKind.TYPE_ALIAS_DECL ||
+        decl.astKind == ASTKind.FUNC_PARAM
+}
+
+// IncrementalLoader.cpp:139-145 CollectRemovedDecl.
+private func CollectRemovedDecl(mangledName: String, needRemoved: HashSet<String>): Unit {
+    needRemoved.add(mangledName)
+    if (IncrementalCompilationLogger.GetInstance().IsEnable()) {
+        IncrementalCompilationLogger.GetInstance().LogLn(
+            "[CollectRemovedDecl] removed mangled: " + mangledName)
+    }
+}
+
 private class CjoSignatureMaterializer {
     private let packageName: String
     private var pkg: Package
