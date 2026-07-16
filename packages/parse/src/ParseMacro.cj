@@ -70,6 +70,8 @@ extend ParserImpl {
     public func ParseAnnotationLambdaExpr(isTailClosure: Bool): LambdaExpr {
         let annos = ArrayList<Annotation>()
         ParseAnnotations(annos)
+        // C++ ParseAtom.cpp:1427-1432 ParseAnnotationLambdaExpr.
+        Next()
         let expr = if (isTailClosure) { ParseLambdaExprWithTrailingClosure() } else { ParseLambdaExpr() }
         for (anno in annos) {
             if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
