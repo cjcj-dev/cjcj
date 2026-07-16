@@ -705,7 +705,8 @@ extend ParserImpl {
 
     private func ParseMacroParameterList(macroDecl: MacroDecl): FuncParamList {
         let paramList = ParseParameterList(ScopeKind.MACRO_BODY)
-        if (paramList.params.isEmpty() || paramList.params.size > 2) {
+        if ((paramList.params.isEmpty() || paramList.params.size > 2) &&
+            !paramList.TestAttr(Attribute.IS_BROKEN)) {
             let pos = if (paramList.params.isEmpty()) { paramList.begin } else { paramList.params[0].begin }
             let diagKind = if (paramList.params.isEmpty()) {
                 DiagKindRefactor.parse_macro_unexpected_empty_parameter
@@ -713,18 +714,17 @@ extend ParserImpl {
                 DiagKindRefactor.parse_macro_expected_right_parameter_nums
             }
             ParseDiagnoseRefactor(diagKind, pos).Emit()
-            macroDecl.EnableAttr(Attribute.IS_BROKEN)
         } else {
             for (param in paramList.params) {
                 if (let Some(paramType) <- param.typeNode) {
                     CheckMacroParamType(macroDecl, paramType, false)
                 } else {
                     ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_param_type, lookahead).Emit()
-                    macroDecl.EnableAttr(Attribute.IS_BROKEN)
+                    macroDecl.EnableAttr(Attribute.HAS_BROKEN)
                 }
                 if (param.isNamedParam) {
                     DiagMacroUnexpectNamedParam(param)
-                    macroDecl.EnableAttr(Attribute.IS_BROKEN)
+                    macroDecl.EnableAttr(Attribute.HAS_BROKEN)
                 }
             }
         }
@@ -740,7 +740,7 @@ extend ParserImpl {
         } else {
             ParseDiagnoseRefactor(DiagKindRefactor.parse_macro_illegal_param_type, typeNode).Emit()
         }
-        macroDecl.EnableAttr(Attribute.IS_BROKEN)
+        macroDecl.EnableAttr(Attribute.HAS_BROKEN)
     }
 
     private func IsTokensRefType(typeNode: Type): Bool {
