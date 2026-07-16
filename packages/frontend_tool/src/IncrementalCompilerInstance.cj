@@ -5,9 +5,12 @@ import cjcj::basic.{Errorln, StringConvertor}
 import cjcj::codegen.{getZExtValue, LLVMContextHandle, LLVMGetMDNodeOperands,
     LLVMGetNamedMetadataOperandValues, LLVMParseIRFile}
 import cjcj::frontend.*
-import cjcj::incremental_compilation.{CachedMangleMap, CompilationCache, IncreKind}
-import cjcj::utils.IncrementalCompilationLogger
-import cjcj::utils.CJC_ASSERT
+import cjcj::incremental_compilation.{CachedMangleMap, CompilationCache, DeleteRecompiledNodesInCHIROptEffectMap,
+    DeleteRemovedNodesInCHIROptEffectMap, IncreKind, IncreResult, IncrementalScopeAnalysis,
+    IncrementalScopeAnalysisArgs, MergeCHIROptEffectMap}
+import cjcj::sema.{CollectChangedStructTypes, CollectCompilerAddedDeclUsage, CollectRemovedMangles,
+    CollectRemovedManglesForReCompile, HandleCtorForIncr, MarkIncrementalCheckForCtor}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, IncrementalCompilationLogger}
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
 import cjcj::utils.FileUtil
@@ -15,16 +18,61 @@ import cjcj::utils.ProfileRecorder
 
 public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     public let cacheMangles: CachedMangleMap = CachedMangleMap()
-    public let changedTypes: HashSet<String> = HashSet<String>()
+    public let changedTypes: HashSet<StructTy> = HashSet<StructTy>()
     public var kind: IncreKind = IncreKind.INVALID
-    private let declsToBeReCompiled: HashSet<String> = HashSet<String>()
+    private let declsToBeReCompiled: HashSet<Decl> = HashSet<Decl>()
     private let rawIncrRemovedDecls: ArrayList<String> = ArrayList<String>()
-    private let filesToBeReCompiled: HashSet<String> = HashSet<String>()
-    private let rawIncrRemovedFiles: ArrayList<String> = ArrayList<String>()
-    private var currentCacheText: String = ""
 
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
         super(invocation, diag)
+    }
+
+    // C++: FrontendTool/IncrementalCompilerInstance.cpp:51-96.
+    private func SaveCompilationResult(result: IncreResult): Unit {
+        kind = result.kind
+        core.rawMangleName2DeclMap = result.mangle2decl
+        if (kind == IncreKind.ROLLBACK || kind == IncreKind.INCR) {
+            if (kind == IncreKind.ROLLBACK) {
+                declsToBeReCompiled.clear()
+            }
+            core.cachedInfo = result.cacheInfo
+            core.CacheCompileArgs()
+            declsToBeReCompiled.clear()
+            for (decl in result.declsToRecompile) { declsToBeReCompiled.add(decl) }
+            rawIncrRemovedDecls.clear()
+            for (removed in result.deleted) { rawIncrRemovedDecls.add(removed) }
+            core.mangledName2DeclMap.clear()
+            for ((mangle, decl) in result.mangle2decl) {
+                if (!decl.TestAttr(Attribute.IMPORTED)) {
+                    core.mangledName2DeclMap[mangle] = decl
+                }
+            }
+            for (changed in declsToBeReCompiled) {
+                if (changed.TestAttr(Attribute.IMPORTED) &&
+                    (changed.IsFunc() || IsGlobalOrStaticVar(changed))) {
+                    cacheMangles.EmplaceImportedInlineDeclPtr(changed)
+                } else {
+                    CollectRemovedManglesForReCompile(changed, core.cachedInfo.semaInfo,
+                        cacheMangles.incrRemovedDecls)
+                }
+            }
+            for (removed in rawIncrRemovedDecls) {
+                CollectRemovedMangles(removed, core.cachedInfo.semaInfo, cacheMangles.incrRemovedDecls)
+            }
+            for (typeMangle in result.reBoxedTypes) {
+                CollectRemovedMangles(typeMangle, core.cachedInfo.semaInfo, cacheMangles.incrRemovedDecls)
+            }
+        } else if (kind == IncreKind.NO_CHANGE) {
+            core.cachedInfo.bitcodeFilesName.clear()
+            for (fileName in result.cacheInfo.bitcodeFilesName) {
+                core.cachedInfo.bitcodeFilesName.add(fileName)
+            }
+        } else if (kind == IncreKind.EMPTY_PKG) {
+            return
+        } else {
+            CJC_ABORT()
+        }
+        core.kind = kind
     }
 
     public override func InitCompilerInstance(): Bool {
