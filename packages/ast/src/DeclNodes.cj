@@ -200,12 +200,20 @@ public open class Decl <: Node & Hashable & Equatable<Decl> {
     }
 }
 
-public open class InheritableDecl <: Decl {
+public open class InheritableDecl <: Decl & Hashable & Equatable<InheritableDecl> {
     public var upperBoundPos: Position = INVALID_POSITION
     public let inheritedTypes: ArrayList<Type> = ArrayList<Type>()
 
     public init(kind: ASTKind) {
         super(kind)
+    }
+
+    public operator func ==(right: InheritableDecl): Bool {
+        return objectId == right.objectId
+    }
+
+    public operator func !=(right: InheritableDecl): Bool {
+        return objectId != right.objectId
     }
 
     public func GetSuperInterfaceTys(): ArrayList<InterfaceTy> {
