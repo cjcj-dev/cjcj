@@ -173,9 +173,6 @@ extend ParserImpl {
                 (SeeingDeclInScope(scopeKind) || SeeingMacroCallDecl())) {
                 ParseMacroCallArgsWithoutParen(scopeKind, modifiers, decl.invocation)
             }
-            if (let Some(innerDecl) <- decl.invocation.decl) {
-                CheckAnnotationAnno(decl.annotations, innerDecl)
-            }
             decl.identifier = SrcIdentifier(
                 decl.invocation.macroCallDiagInfo.identifier,
                 decl.invocation.macroCallDiagInfo.identifier,
@@ -187,6 +184,9 @@ extend ParserImpl {
                     decl.annotations.add(anno)
                 }
                 SetBeginToAnnotationsBegin(decl, decl.annotations)
+            }
+            if (let Some(innerDecl) <- decl.invocation.decl) {
+                CheckAnnotationAnno(decl.annotations, innerDecl)
             }
             decl.end = if (let Some(inputDecl) <- decl.invocation.decl) { inputDecl.end } else { lastToken.End() }
             let inputIsEnumConstructor = if (let Some(inputDecl) <- decl.invocation.decl) {
