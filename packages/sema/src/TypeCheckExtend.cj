@@ -222,7 +222,7 @@ public func CheckExtendGenerics(
     return false
 }
 
-public func TypeCheckExtendCheckExtendedTypeValidity(
+public func CheckExtendedTypeValidity(
     diag: BasicDiagnosticEngine,
     extendedType: Type
 ): Bool {
@@ -241,7 +241,7 @@ public func TypeCheckExtendCheckExtendedTypeValidity(
     return false
 }
 
-public func TypeCheckExtendPreCheckExtend(
+public func PreCheckExtend(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
     ctx: ASTContext,
@@ -262,9 +262,6 @@ public func TypeCheckExtendPreCheckExtend(
             }
             extendDecl.SetTy(extendedTy)
         }
-        if (!TypeCheckExtendCheckExtendedTypeValidity(diag, extendedType)) {
-            valid = false
-        }
     }
     var idx: Int64 = 0
     while (idx < extendDecl.inheritedTypes.size) {
@@ -281,7 +278,12 @@ public func TypeCheckExtendPreCheckExtend(
             idx++
         }
     }
-    TypeCheckExtendSetExternalAttr(ctx, extendDecl)
+    SetExtendExternalAttr(ctx, extendDecl)
+    if (let Some(extendedType) <- extendDecl.extendedType) {
+        if (!CheckExtendedTypeValidity(diag, extendedType)) {
+            valid = false
+        }
+    }
     if (!CheckExtendGenerics(diag, extendDecl)) {
         valid = false
     }
@@ -714,7 +716,7 @@ public func TypeCheckExtendBuildMap(
     extends: ArrayList<ExtendDecl>
 ): Unit {
     for (extendDecl in extends) {
-        TypeCheckExtendPreCheckExtend(diag, tm, ctx, extendDecl)
+        PreCheckExtend(diag, tm, ctx, extendDecl)
     }
     TypeCheckExtendUpdateExtendMap(tm, extends)
     TypeCheckExtendCheckDuplicateInterfaces(diag, tm, extends)
@@ -861,7 +863,7 @@ private func TypeCheckExtendCheckInterfacesForTy(
     return valid
 }
 
-public func TypeCheckExtendSetExternalAttr(ctx: ASTContext, extendDecl: ExtendDecl): Unit {
+public func SetExtendExternalAttr(ctx: ASTContext, extendDecl: ExtendDecl): Unit {
     if (let None <- extendDecl.extendedType) {
         return
     }
@@ -1046,7 +1048,7 @@ public func TypeCheckExtendCheckDecl(
         return true
     }
     extendDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
-    var valid = TypeCheckExtendPreCheckExtend(diag, tm, ctx, extendDecl)
+    var valid = PreCheckExtend(diag, tm, ctx, extendDecl)
     if (!CheckExtendOrphanRule(diag, tm, ctx, extendDecl)) {
         valid = false
     }

@@ -1004,6 +1004,9 @@ extend TypeChecker {
         for (ctx in contexts) {
             BuildCurrentPackageExtendMap(ctx)
         }
+        for (ctx in contexts) {
+            impl.CheckExtendRules(ctx)
+        }
         CheckCHIRClassDependencies()
         UpdateAnyTy()
         UpdateCTypeTy()
@@ -2164,7 +2167,7 @@ extend TypeChecker {
         if (let Some(diagValue) <- impl.diag) {
             let extendNodes = HashSet<Node>()
             for (extendDecl in extends) {
-                TypeCheckExtendPreCheckExtend(diagValue, impl.typeManager, ctx, extendDecl)
+                PreCheckExtend(diagValue, impl.typeManager, ctx, extendDecl)
                 extendNodes.add(extendDecl)
             }
             mpImpl.PrepareTypeCheck4CJMPExtension(
@@ -2224,7 +2227,6 @@ extend TypeChecker {
                         }
                     }
                 }
-                impl.CheckExtendRules(ctx)
                 // C2e[A]: overload-conflict detection runs after PreCheckPackage so parameter types
                 // are resolved (the func return type may still be uninferred, matching C++).
                 if (let Some(diagValue) <- impl.diag) {
