@@ -2,22 +2,23 @@ package cjcj::incremental_compilation
 
 import std.collection.*
 import std.sort.*
+import cjcj::ast.*
 import cjcj::option.GlobalOptions
-import cjcj::utils.IncrementalCompilationLogger
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, IncrementalCompilationLogger}
 
 public let DELIMITER_NUM: Int64 = 60
 
 public class CommonChange {
-    public var decl: IncrDecl
+    public var decl: Decl
     public var sig: Bool = false
     public var srcUse: Bool = false
     public var body: Bool = false
 
-    public init(decl: IncrDecl) {
+    public init(decl: Decl) {
         this.decl = decl
     }
 
-    public init(decl: IncrDecl, sig: Bool, srcUse: Bool, body: Bool) {
+    public init(decl: Decl, sig: Bool, srcUse: Bool, body: Bool) {
         this.decl = decl
         this.sig = sig
         this.srcUse = srcUse
@@ -29,17 +30,15 @@ public class CommonChange {
     }
 
     public func ToString(): String {
-        let builder = StringBuilder()
-        builder.append(decl.rawMangleName + ": ")
+        let out = StringBuilder()
+        out.append(decl.rawMangleName + ": ")
         if (!HasChange()) {
-            builder.append("no change\n")
-            return builder.toString()
+            return out.append("no change\n").toString()
         }
-        if (sig) { builder.append("sig ") }
-        if (srcUse) { builder.append("srcuse ") }
-        if (body) { builder.append("body ") }
-        builder.append("\n")
-        return builder.toString()
+        if (sig) { out.append("sig ") }
+        if (srcUse) { out.append("srcuse ") }
+        if (body) { out.append("body ") }
+        return out.append("\n").toString()
     }
 }
 
@@ -51,61 +50,55 @@ public class TypeChange {
     public var body: Bool = false
     public var order: Bool = false
     public let changed: ArrayList<CommonChange> = ArrayList<CommonChange>()
-    public let added: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let del: ArrayList<String> = ArrayList<String>()
+    public let added: ArrayList<Decl> = ArrayList<Decl>()
+    public let del: ArrayList<RawMangledName> = ArrayList<RawMangledName>()
 
     public init() {}
 
     public func HasChange(): Bool {
-        return instVar || virtFun || sig || srcUse || body || order || !changed.isEmpty() ||
-            !added.isEmpty() || !del.isEmpty()
+        return instVar || virtFun || sig || srcUse || body || order || !changed.isEmpty() || !added.isEmpty() ||
+            !del.isEmpty()
     }
 
     public func ToString(): String {
         if (!HasChange()) {
             return "no change\n"
         }
-        let builder = StringBuilder()
-        if (instVar) { builder.append("memory ") }
-        if (virtFun) { builder.append("virtual ") }
-        if (sig) { builder.append("sig ") }
-        if (srcUse) { builder.append("srcuse ") }
-        if (body) { builder.append("body ") }
-        builder.append("\n")
+        let out = StringBuilder()
+        if (instVar) { out.append("memory ") }
+        if (virtFun) { out.append("virtual ") }
+        if (sig) { out.append("sig ") }
+        if (srcUse) { out.append("srcuse ") }
+        if (body) { out.append("body ") }
+        out.append("\n")
         if (!added.isEmpty()) {
-            builder.append("    added members " + added.size.toString() + ": ")
-            for (decl in added) {
-                builder.append(decl.rawMangleName + " ")
-            }
-            builder.append("\n")
+            out.append("    added members " + added.size.toString() + ": ")
+            for (decl in added) { out.append(decl.rawMangleName + " ") }
+            out.append("\n")
         }
         if (!del.isEmpty()) {
-            builder.append("    deleted members " + del.size.toString() + ": ")
-            for (name in del) {
-                builder.append(name + " ")
-            }
-            builder.append("\n")
+            out.append("    deleted members " + del.size.toString() + ": ")
+            for (mangle in del) { out.append(mangle + " ") }
+            out.append("\n")
         }
         if (!changed.isEmpty()) {
-            builder.append("    changed members " + changed.size.toString() + ":\n")
-            for (change in changed) {
-                builder.append("         " + change.ToString())
-            }
+            out.append("    changed members " + changed.size.toString() + ":\n")
+            for (change in changed) { out.append("         " + change.ToString()) }
         }
-        return builder.toString()
+        return out.toString()
     }
 }
 
 public class ModifiedDecls {
-    public let added: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let deletes: ArrayList<String> = ArrayList<String>()
+    public let added: ArrayList<Decl> = ArrayList<Decl>()
+    public let deletes: ArrayList<RawMangledName> = ArrayList<RawMangledName>()
     public var importChanged: Bool = false
     public var args: Bool = false
-    public let types: HashMap<IncrDecl, TypeChange> = HashMap<IncrDecl, TypeChange>()
-    public let commons: HashMap<IncrDecl, CommonChange> = HashMap<IncrDecl, CommonChange>()
-    public let aliases: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let deletedTypeAlias: ArrayList<String> = ArrayList<String>()
-    public let orderChanges: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
+    public let types: HashMap<Decl, TypeChange> = HashMap<Decl, TypeChange>()
+    public let commons: HashMap<Decl, CommonChange> = HashMap<Decl, CommonChange>()
+    public let aliases: ArrayList<TypeAliasDecl> = ArrayList<TypeAliasDecl>()
+    public let deletedTypeAlias: ArrayList<RawMangledName> = ArrayList<RawMangledName>()
+    public let orderChanges: ArrayList<Decl> = ArrayList<Decl>()
 
     public init() {}
 
@@ -123,70 +116,76 @@ public class ModifiedDecls {
             logger.LogLn("no raw modified decls")
             return
         }
-        let builder = StringBuilder()
-        appendDelimiter(builder)
-        builder.append("\nbegin dump raw modified decls:\n")
-        let sortedAdded = ArrayList<IncrDecl>()
-        for (decl in added) {
-            sortedAdded.add(decl)
+        let out = StringBuilder()
+        var delimiter: Int64 = 0
+        while (delimiter < DELIMITER_NUM) {
+            out.append("=")
+            delimiter++
         }
-        sort(sortedAdded, by: { left: IncrDecl, right: IncrDecl =>
-            CompareDeclSource(left, right)
+        out.append("\nbegin dump raw modified decls:\n")
+        let sortedAdded = ArrayList<Decl>()
+        for (decl in added) { sortedAdded.add(decl) }
+        sort(sortedAdded, by: { left: Decl, right: Decl =>
+            if (left.begin < right.begin) { Ordering.LT } else if (right.begin < left.begin) { Ordering.GT } else {
+                Ordering.EQ
+            }
         }, stable: true)
         for (decl in sortedAdded) {
-            builder.append("added ")
-            if (!decl.identifier.isEmpty()) {
-                builder.append(decl.identifier + " ")
+            CJC_NULLPTR_CHECK(Some(decl))
+            out.append("added ")
+            if (!decl.identifier.Empty()) {
+                out.append(decl.identifier.Val() + " ")
             }
-            builder.append(decl.rawMangleName + " at " + decl.begin.line.toString() + "," +
-                decl.begin.column.toString() + "\n")
+            out.append(decl.rawMangleName + " at " + decl.identifier.Begin().line.toString() + "," +
+                decl.identifier.Begin().column.toString() + "\n")
         }
-        for (name in SortedStringList(deletedTypeAlias)) {
-            builder.append("deleted " + name + "\n")
-        }
-        for (name in SortedStringList(deletes)) {
-            builder.append("deleted " + name + "\n")
-        }
-        let typePairs = ArrayList<(IncrDecl, TypeChange)>()
-        for ((decl, change) in types) {
-            typePairs.add((decl, change))
-        }
-        sort(typePairs, by: { left: (IncrDecl, TypeChange), right: (IncrDecl, TypeChange) =>
-            CompareDeclSource(left[0], right[0])
+        let sortedDeletedTypeAlias = ArrayList<RawMangledName>()
+        for (mangle in deletedTypeAlias) { sortedDeletedTypeAlias.add(mangle) }
+        sort(sortedDeletedTypeAlias)
+        for (mangle in sortedDeletedTypeAlias) { out.append("deleted " + mangle + "\n") }
+        let sortedDeletes = ArrayList<RawMangledName>()
+        for (mangle in deletes) { sortedDeletes.add(mangle) }
+        sort(sortedDeletes)
+        for (mangle in sortedDeletes) { out.append("deleted " + mangle + "\n") }
+        let sortedTypes = ArrayList<(Decl, TypeChange)>()
+        for ((decl, change) in types) { sortedTypes.add((decl, change)) }
+        sort(sortedTypes, by: { left: (Decl, TypeChange), right: (Decl, TypeChange) =>
+            if (left[0].begin < right[0].begin) { Ordering.LT } else if (right[0].begin < left[0].begin) {
+                Ordering.GT
+            } else { Ordering.EQ }
         }, stable: true)
-        for (pair in typePairs) {
-            if (pair[1].HasChange()) {
-                builder.append(PrintDecl(pair[0]) + ": " + pair[1].ToString())
+        for (entry in sortedTypes) {
+            if (entry[1].HasChange()) {
+                out.append(PrintDecl(entry[0]) + ": " + entry[1].ToString())
             }
         }
-        let commonPairs = ArrayList<(IncrDecl, CommonChange)>()
-        for ((decl, change) in commons) {
-            commonPairs.add((decl, change))
-        }
-        sort(commonPairs, by: { left: (IncrDecl, CommonChange), right: (IncrDecl, CommonChange) =>
-            CompareDeclSource(left[0], right[0])
+        let sortedCommons = ArrayList<(Decl, CommonChange)>()
+        for ((decl, change) in commons) { sortedCommons.add((decl, change)) }
+        sort(sortedCommons, by: { left: (Decl, CommonChange), right: (Decl, CommonChange) =>
+            if (left[0].begin < right[0].begin) { Ordering.LT } else if (right[0].begin < left[0].begin) {
+                Ordering.GT
+            } else { Ordering.EQ }
         }, stable: true)
-        for (pair in commonPairs) {
-            if (pair[1].HasChange()) {
-                builder.append(pair[1].ToString())
-            }
+        for (entry in sortedCommons) {
+            if (entry[1].HasChange()) { out.append(entry[1].ToString()) }
         }
         if (!orderChanges.isEmpty()) {
-            builder.append(orderChanges.size.toString() + " order changed decl(s).\n")
+            out.append(orderChanges.size.toString() + " order changed decl(s).\n")
         }
-        for (decl in orderChanges) {
-            builder.append("order change " + decl.rawMangleName + "\n")
+        let sortedOrderChanges = ArrayList<Decl>()
+        for (decl in orderChanges) { sortedOrderChanges.add(decl) }
+        sort(sortedOrderChanges, by: { left: Decl, right: Decl =>
+            if (left.begin < right.begin) { Ordering.LT } else if (right.begin < left.begin) { Ordering.GT } else {
+                Ordering.EQ
+            }
+        }, stable: true)
+        for (decl in sortedOrderChanges) { out.append("order change " + decl.rawMangleName + "\n") }
+        delimiter = 0
+        while (delimiter < DELIMITER_NUM) {
+            out.append("=")
+            delimiter++
         }
-        appendDelimiter(builder)
-        logger.LogLn(builder.toString())
-    }
-
-    private func appendDelimiter(builder: StringBuilder): Unit {
-        var idx: Int64 = 0
-        while (idx < DELIMITER_NUM) {
-            builder.append("=")
-            idx++
-        }
+        logger.LogLn(out.toString())
     }
 }
 
@@ -222,45 +221,32 @@ public class ASTDiffResult {
     }
 }
 
-private func RequireMangledDecl(mangled2Decl: RawMangled2DeclMap, rawMangle: String, context: String): IncrDecl {
-    if (let Some(decl) <- mangled2Decl.get(rawMangle)) {
-        return decl
-    }
-    throw IllegalStateException("missing declaration for " + context + ": " + rawMangle)
-}
-
 private class OrderDiffCompare {
-    private let mangled2Decl: RawMangled2DeclMap
-    private let exclude: HashSet<String>
-    public let orderChanges: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
+    private let md: RawMangled2DeclMap
+    private let exc: HashSet<RawMangledName>
+    public let orderChanges: ArrayList<Decl> = ArrayList<Decl>()
 
     public init(mangled2Decl: RawMangled2DeclMap, cachedFileMap: CachedFileMap, curFileMap: FileMap,
         modified: ModifiedDecls) {
-        this.mangled2Decl = mangled2Decl
-        this.exclude = GetAddedDecls(modified)
+        md = mangled2Decl
+        exc = GetAddedDecls(modified)
         for ((file, oldOrder) in cachedFileMap) {
             if (let Some(curOrder) <- curFileMap.get(file)) {
-                for (decl in CompareOrders(oldOrder, curOrder)) {
-                    orderChanges.add(decl)
-                }
+                for (decl in CompareOrders(oldOrder, curOrder)) { orderChanges.add(decl) }
             }
         }
-        let emptyOld = ArrayList<String>()
+        let empty = ArrayList<RawMangledName>()
         for ((file, curOrder) in curFileMap) {
             if (!cachedFileMap.contains(file)) {
-                for (decl in CompareOrders(emptyOld, curOrder)) {
-                    orderChanges.add(decl)
-                }
+                for (decl in CompareOrders(empty, curOrder)) { orderChanges.add(decl) }
             }
         }
     }
 
-    private static func GetAddedDecls(modified: ModifiedDecls): HashSet<String> {
-        let result = HashSet<String>()
+    private static func GetAddedDecls(modified: ModifiedDecls): HashSet<RawMangledName> {
+        let result = HashSet<RawMangledName>()
         for (decl in modified.added) {
-            if (decl.IsImported()) {
-                continue
-            }
+            if (IsImported(decl)) { continue }
             if (IsOOEAffectedDecl(decl)) {
                 result.add(decl.rawMangleName)
                 continue
@@ -271,95 +257,94 @@ private class OrderDiffCompare {
                     continue
                 }
                 for (nested in GetMembers(member)) {
-                    if (IsOOEAffectedDecl(nested)) {
-                        result.add(decl.rawMangleName)
-                    }
+                    if (IsOOEAffectedDecl(nested)) { result.add(decl.rawMangleName) }
                 }
             }
         }
         for ((decl, _) in modified.types) {
-            if (decl.IsImported()) {
-                continue
-            }
+            if (IsImported(decl)) { continue }
             for (member in GetMembers(decl)) {
                 if (IsOOEAffectedDecl(member)) {
                     result.add(member.rawMangleName)
                     continue
                 }
                 for (nested in GetMembers(member)) {
-                    if (IsOOEAffectedDecl(nested)) {
-                        result.add(decl.rawMangleName)
-                    }
+                    if (IsOOEAffectedDecl(nested)) { result.add(decl.rawMangleName) }
                 }
             }
         }
         return result
     }
 
-    private func BuildGvidMap(cur: ArrayList<IncrDecl>): HashMap<String, Int64> {
-        let out = HashMap<String, Int64>()
-        for (decl in cur) {
-            out[decl.rawMangleName] = decl.cacheHash.gvid
-        }
-        return out
+    private static func IsGV(decl: Decl): Bool {
+        return IsGlobalOrStaticVar(decl) || decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL
     }
 
-    private func BuildMaxids(oldOrder: ArrayList<String>, gvidMap: HashMap<String, Int64>): ArrayList<Int64> {
+    private static func BuildGvidMap(cur: ArrayList<Decl>): HashMap<RawMangledName, Int64> {
+        let result = HashMap<RawMangledName, Int64>()
+        for (decl in cur) { result[decl.rawMangleName] = decl.hash.gvid }
+        return result
+    }
+
+    private func BuildMaxids(old: ArrayList<RawMangledName>, gvidMap: HashMap<RawMangledName, Int64>): ArrayList<Int64> {
         let maxids = ArrayList<Int64>()
         maxids.add(0)
         var last: Int64 = 0
-        for (mangle in oldOrder) {
-            if (let Some(currentId) <- gvidMap.get(mangle)) {
-                let maxid = if (currentId > last) { currentId } else { last }
+        for (mangle in old) {
+            if (let Some(currentGvid) <- gvidMap.get(mangle)) {
+                let maxid = if (currentGvid > last) { currentGvid } else { last }
                 maxids.add(maxid)
-                let decl = RequireMangledDecl(mangled2Decl, mangle, "cached order entry")
-                if (IsOrderAffectingGlobal(decl)) {
-                    last = maxid
-                }
+                CJC_ASSERT(md.contains(mangle))
+                let decl = md[mangle]
+                if (IsGV(decl)) { last = maxid }
             }
         }
         return maxids
     }
 
-    private func CompareOrders(oldOrder: ArrayList<String>, curOrder: ArrayList<IncrDecl>): ArrayList<IncrDecl> {
-        let result = HashSet<IncrDecl>()
-        let gvidMap = BuildGvidMap(curOrder)
-        let maxids = BuildMaxids(oldOrder, gvidMap)
+    private func FindRecompileDeclsFromOrder(old: ArrayList<RawMangledName>,
+        gvidMap: HashMap<RawMangledName, Int64>, maxids: ArrayList<Int64>, result: HashSet<Decl>): Unit {
         var rid: Int64 = 0
         var idx: Int64 = 0
-        while (idx < oldOrder.size) {
-            let name = oldOrder[idx]
-            if (let Some(currentId) <- gvidMap.get(name)) {
+        while (idx < old.size) {
+            if (let Some(currentGvid) <- gvidMap.get(old[idx])) {
                 rid++
-                if (rid < maxids.size && currentId < maxids[rid]) {
-                    result.add(RequireMangledDecl(mangled2Decl, name, "order-changed declaration"))
-                }
+                if (currentGvid < maxids[rid]) { result.add(md[old[idx]]) }
             }
             idx++
         }
+    }
 
-        let oldNames = HashSet<String>()
-        for (name in oldOrder) {
-            oldNames.add(name)
-        }
-        var curIdx = curOrder.size
-        while (curIdx > 0) {
-            curIdx--
-            let decl = curOrder[curIdx]
-            if (exclude.contains(decl.rawMangleName) || oldNames.contains(decl.rawMangleName)) {
-                continue
-            }
-            result.add(decl)
-            if (IsOrderAffectingGlobal(decl)) {
-                var prefix: Int64 = 0
-                while (prefix < curIdx) {
-                    result.add(curOrder[prefix])
-                    prefix++
+    private func FindRecompileDeclsFromFileMove(cur: ArrayList<Decl>, oldNames: HashSet<RawMangledName>,
+        exclude: HashSet<RawMangledName>, result: HashSet<Decl>): Unit {
+        var idx = cur.size
+        while (idx > 0) {
+            idx--
+            if (exclude.contains(cur[idx].rawMangleName)) { continue }
+            if (oldNames.contains(cur[idx].rawMangleName)) { continue }
+            result.add(cur[idx])
+            if (IsGV(cur[idx])) {
+                var preceding: Int64 = 0
+                while (preceding < idx) {
+                    result.add(cur[preceding])
+                    preceding++
                 }
                 break
             }
         }
-        return SortedDeclsBySource(result)
+    }
+
+    private func CompareOrders(old: ArrayList<RawMangledName>, cur: ArrayList<Decl>): ArrayList<Decl> {
+        let gvidMap = BuildGvidMap(cur)
+        let maxids = BuildMaxids(old, gvidMap)
+        let result = HashSet<Decl>()
+        FindRecompileDeclsFromOrder(old, gvidMap, maxids, result)
+        let oldNames = HashSet<RawMangledName>()
+        for (mangle in old) { oldNames.add(mangle) }
+        FindRecompileDeclsFromFileMove(cur, oldNames, exc, result)
+        let ordered = ArrayList<Decl>()
+        for (decl in result) { ordered.add(decl) }
+        return ordered
     }
 }
 
@@ -375,10 +360,8 @@ private class ASTDiffImpl {
     public func CompareCurPkgASTCache(cached: ASTCache, cur: ASTCache, cachedFileMap: CachedFileMap,
         curFileMap: FileMap): Unit {
         CompareCommonDecls(cached, cur)
-        let orderDiff = OrderDiffCompare(mangled2Decl, cachedFileMap, curFileMap, ret)
-        for (decl in orderDiff.orderChanges) {
-            ret.orderChanges.add(decl)
-        }
+        let compare = OrderDiffCompare(mangled2Decl, cachedFileMap, curFileMap, ret)
+        for (decl in compare.orderChanges) { ret.orderChanges.add(decl) }
     }
 
     public func CompareImportedASTCache(cached: ASTCache, cur: ASTCache): Unit {
@@ -395,77 +378,80 @@ private class ASTDiffImpl {
         }
         for ((mangled, _) in cur) {
             if (!cached.contains(mangled)) {
-                ret.added.add(RequireMangledDecl(mangled2Decl, mangled, "added top-level declaration"))
+                CJC_ASSERT(mangled2Decl.contains(mangled))
+                CollectAddedTopLevelDecl(mangled2Decl[mangled])
             }
         }
     }
 
-    private func CollectDeletedTopLevelDecl(mangled: String, topDecl: TopLevelDeclCache): Unit {
-        if (topDecl.astKind == UInt8(IncrDeclKindIndex(IncrDeclKind.TYPE_ALIAS_DECL))) {
+    private func CollectSourcePackage(pkg: Package): (ASTCache, HashSet<Decl>) {
+        let calculator = ASTCacheCalculator(pkg, srcInfo)
+        calculator.Walk()
+        mangled2Decl = calculator.mangled2Decl
+        return (calculator.ret, calculator.duplicatedMangleNames)
+    }
+
+    private func CollectAddedTopLevelDecl(decl: Decl): Unit {
+        ret.added.add(decl)
+    }
+
+    private func CollectDeletedTopLevelDecl(mangled: RawMangledName, topDecl: TopLevelDeclCache): Unit {
+        if (topDecl.astKind == UInt8(ASTKindIndex(ASTKind.TYPE_ALIAS_DECL))) {
             ret.deletedTypeAlias.add(mangled)
         } else {
             ret.deletes.add(mangled)
         }
-        for (member in topDecl.members) {
-            ret.deletes.add(member.rawMangle)
-        }
+        for (member in topDecl.members) { ret.deletes.add(member.rawMangle) }
     }
 
     private func CompareMemberDecl(typeChange: TypeChange, cached: MemberDeclCache, cur: MemberDeclCache): Unit {
-        let decl = RequireMangledDecl(mangled2Decl, cur.rawMangle, "changed member declaration")
-        let change = CommonChange(decl, cached.sigHash != cur.sigHash, cached.srcUse != cur.srcUse,
-            cached.bodyHash != cur.bodyHash)
-        if (change.HasChange()) {
-            typeChange.changed.add(change)
-        }
+        let change = CommonChange(mangled2Decl[cur.rawMangle], cached.sigHash != cur.sigHash,
+            cached.srcUse != cur.srcUse, cached.bodyHash != cur.bodyHash)
+        if (change.HasChange()) { typeChange.changed.add(change) }
         CompareMembers(typeChange, cached.members, cur.members)
     }
 
     private func CompareMembers(typeChange: TypeChange, cached: ArrayList<MemberDeclCache>,
         cur: ArrayList<MemberDeclCache>): Unit {
-        let sortedCached = ArrayList<MemberDeclCache>()
-        let sortedCur = ArrayList<MemberDeclCache>()
-        for (member in cached) { sortedCached.add(member) }
-        for (member in cur) { sortedCur.add(member) }
-        sort(sortedCached, by: { left: MemberDeclCache, right: MemberDeclCache =>
-            CompareStrings(left.rawMangle, right.rawMangle)
+        let sortedCache = ArrayList<MemberDeclCache>()
+        for (member in cached) { sortedCache.add(member) }
+        sort(sortedCache, by: { left: MemberDeclCache, right: MemberDeclCache =>
+            if (left.rawMangle < right.rawMangle) { Ordering.LT } else if (left.rawMangle > right.rawMangle) {
+                Ordering.GT
+            } else { Ordering.EQ }
         }, stable: true)
+        let sortedCur = ArrayList<MemberDeclCache>()
+        for (member in cur) { sortedCur.add(member) }
         sort(sortedCur, by: { left: MemberDeclCache, right: MemberDeclCache =>
-            CompareStrings(left.rawMangle, right.rawMangle)
+            if (left.rawMangle < right.rawMangle) { Ordering.LT } else if (left.rawMangle > right.rawMangle) {
+                Ordering.GT
+            } else { Ordering.EQ }
         }, stable: true)
         var cachedIdx: Int64 = 0
         var curIdx: Int64 = 0
-        while (cachedIdx < sortedCached.size && curIdx < sortedCur.size) {
-            let cachedMember = sortedCached[cachedIdx]
-            let curMember = sortedCur[curIdx]
-            if (cachedMember.rawMangle < curMember.rawMangle) {
-                typeChange.del.add(cachedMember.rawMangle)
-                for (child in cachedMember.members) {
-                    typeChange.del.add(child.rawMangle)
-                }
+        while (cachedIdx < sortedCache.size && curIdx < sortedCur.size) {
+            if (sortedCache[cachedIdx].rawMangle < sortedCur[curIdx].rawMangle) {
+                typeChange.del.add(sortedCache[cachedIdx].rawMangle)
+                for (child in sortedCache[cachedIdx].members) { typeChange.del.add(child.rawMangle) }
                 cachedIdx++
-            } else if (cachedMember.rawMangle > curMember.rawMangle) {
-                typeChange.added.add(RequireMangledDecl(mangled2Decl, curMember.rawMangle,
-                    "added member declaration"))
-                curIdx++
-            } else {
-                CompareMemberDecl(typeChange, cachedMember, curMember)
-                cachedIdx++
-                curIdx++
+                continue
             }
+            if (sortedCache[cachedIdx].rawMangle > sortedCur[curIdx].rawMangle) {
+                typeChange.added.add(mangled2Decl[sortedCur[curIdx].rawMangle])
+                curIdx++
+                continue
+            }
+            CompareMemberDecl(typeChange, sortedCache[cachedIdx], sortedCur[curIdx])
+            cachedIdx++
+            curIdx++
         }
-        while (cachedIdx < sortedCached.size) {
-            let cachedMember = sortedCached[cachedIdx]
-            typeChange.del.add(cachedMember.rawMangle)
-            for (child in cachedMember.members) {
-                typeChange.del.add(child.rawMangle)
-            }
+        while (cachedIdx < sortedCache.size) {
+            typeChange.del.add(sortedCache[cachedIdx].rawMangle)
+            for (child in sortedCache[cachedIdx].members) { typeChange.del.add(child.rawMangle) }
             cachedIdx++
         }
         while (curIdx < sortedCur.size) {
-            let curMember = sortedCur[curIdx]
-            typeChange.added.add(RequireMangledDecl(mangled2Decl, curMember.rawMangle,
-                "added member declaration"))
+            typeChange.added.add(mangled2Decl[sortedCur[curIdx].rawMangle])
             curIdx++
         }
     }
@@ -481,38 +467,35 @@ private class ASTDiffImpl {
         return change
     }
 
-    private func CommonCompare(cached: TopLevelDeclCache, cur: TopLevelDeclCache, decl: IncrDecl): CommonChange {
-        return CommonChange(decl, cached.sigHash != cur.sigHash, cached.srcUse != cur.srcUse,
-            cached.bodyHash != cur.bodyHash)
+    private static func CommonCompare(left: TopLevelDeclCache, right: TopLevelDeclCache,
+        decl: Decl): CommonChange {
+        return CommonChange(decl, left.sigHash != right.sigHash, left.srcUse != right.srcUse,
+            left.bodyHash != right.bodyHash)
     }
 
     private func CompareTopLevelDecl(cachedDecl: TopLevelDeclCache, curDecl: TopLevelDeclCache,
-        mangled: String): Unit {
-        let decl = RequireMangledDecl(mangled2Decl, mangled, "top-level declaration")
-        match (decl.astKind) {
-            case IncrDeclKind.TYPE_ALIAS_DECL =>
-                if (cachedDecl.sigHash != curDecl.sigHash) {
-                    ret.aliases.add(decl)
-                }
-            case IncrDeclKind.FUNC_DECL | IncrDeclKind.MACRO_DECL | IncrDeclKind.MAIN_DECL |
-                IncrDeclKind.VAR_DECL | IncrDeclKind.VAR_WITH_PATTERN_DECL =>
-                let change = CommonCompare(cachedDecl, curDecl, decl)
-                if (change.HasChange()) {
-                    ret.commons[decl] = change
-                }
-            case _ =>
-                let typeChange = CompareTypeDecl(cachedDecl, curDecl)
-                if (typeChange.HasChange()) {
-                    ret.types[decl] = typeChange
-                }
+        mangled: RawMangledName): Unit {
+        let decl = mangled2Decl[mangled]
+        if (decl.astKind == ASTKind.TYPE_ALIAS_DECL) {
+            if (cachedDecl.sigHash != curDecl.sigHash) {
+                ret.aliases.add((decl as TypeAliasDecl).getOrThrow())
+            }
+        } else if (decl.astKind == ASTKind.FUNC_DECL || decl.astKind == ASTKind.MACRO_DECL ||
+            decl.astKind == ASTKind.MAIN_DECL || decl.astKind == ASTKind.VAR_DECL ||
+            decl.astKind == ASTKind.VAR_WITH_PATTERN_DECL) {
+            let change = CommonCompare(cachedDecl, curDecl, decl)
+            if (change.HasChange()) { ret.commons[decl] = change }
+        } else {
+            let change = CompareTypeDecl(cachedDecl, curDecl)
+            if (change.HasChange()) { ret.types[(decl as InheritableDecl).getOrThrow()] = change }
         }
     }
 }
 
 public func ASTDiff(args: ASTDiffArgs): ASTDiffResult {
     let impl = ASTDiffImpl((args.op.enableCompileDebug, args.op.displayLineInfo))
-    for ((name, decl) in args.rawMangleName2DeclMap) {
-        args.importedMangled2Decl[name] = decl
+    for ((mangled, decl) in args.rawMangleName2DeclMap) {
+        args.importedMangled2Decl[mangled] = decl
     }
     impl.mangled2Decl = args.importedMangled2Decl
     impl.CompareCurPkgASTCache(args.prevCache.curPkgASTCache, args.astCacheInfo, args.prevCache.fileMap,
