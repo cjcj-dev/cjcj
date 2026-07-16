@@ -34,18 +34,6 @@ public open class FFIParserImpl {
             decl.astKind == ASTKind.VAR_DECL) {
             CheckForeignNameAnnotation(decl)
         }
-        if (let Some(classLikeDecl) <- (decl as ClassLikeDecl)) {
-            let java = Java()
-            let objc = ObjC()
-            for (anno in decl.annotations) {
-                if (anno.kind == AnnotationKind.JAVA_MIRROR) {
-                    java.CheckMirrorSignature(classLikeDecl, decl.annotations)
-                } else if (anno.kind == AnnotationKind.JAVA_IMPL) {
-                    java.CheckImplSignature(classLikeDecl, decl.annotations)
-                }
-            }
-            objc.CheckClassLikeSignature(decl, decl.annotations)
-        }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             let objc = ObjC()
             objc.CheckMirrorSignature(funcDecl, funcDecl.annotations)
