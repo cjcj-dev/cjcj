@@ -31,12 +31,6 @@ private func AppendInt32(out: ArrayList<UInt8>, value: Int64): Unit {
     AppendUInt32(out, UInt32(value))
 }
 
-private func IsEscapedTokenKind(kind: TokenKind): Bool {
-    return kind == TokenKind.STRING_LITERAL || kind == TokenKind.JSTRING_LITERAL ||
-        kind == TokenKind.RUNE_LITERAL || kind == TokenKind.MULTILINE_STRING ||
-        kind == TokenKind.MULTILINE_RAW_STRING
-}
-
 private func NormalizeQuoteTokens(tokens: ArrayList<Token>): Unit {
     var idx: Int64 = 0
     while (idx < tokens.size) {
@@ -67,7 +61,7 @@ private func SerializeQuoteTokens(tokens: ArrayList<Token>): ArrayList<UInt8> {
         AppendUInt32(out, UInt32(begin.fileID))
         AppendInt32(out, begin.line)
         var column = begin.column
-        if (IsEscapedTokenKind(token.kind) && column + 1 + token.Value().size == token.End().column) {
+        if (GetEscapeTokenKinds().contains(token.kind) && column + 1 + token.Value().size == token.End().column) {
             column++
         }
         AppendInt32(out, column)

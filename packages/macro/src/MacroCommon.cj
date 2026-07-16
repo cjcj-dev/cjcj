@@ -45,11 +45,11 @@ public func IsBuiltInMacro(name: String): Bool {
 
 public func GetEscapeTokenKinds(): ArrayList<TokenKind> {
     let out = ArrayList<TokenKind>()
-    out.add(TokenKind.STRING_LITERAL)
-    out.add(TokenKind.JSTRING_LITERAL)
-    out.add(TokenKind.RUNE_LITERAL)
-    out.add(TokenKind.MULTILINE_STRING)
-    out.add(TokenKind.MULTILINE_RAW_STRING)
+    out.add(TokenKind.DOLLAR_IDENTIFIER)
+    out.add(TokenKind.AT)
+    out.add(TokenKind.DOLLAR)
+    out.add(TokenKind.LPAREN)
+    out.add(TokenKind.RPAREN)
     return out
 }
 
