@@ -5,6 +5,7 @@ import cjcj::chir.Attribute
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.ClassDef
 import cjcj::chir.ClassType
+import cjcj::chir.CustomTypeDef
 import cjcj::chir.CustomType
 import cjcj::chir.DebugLocation
 import cjcj::chir.Function
@@ -92,7 +93,7 @@ public class CGContext {
     private let debugLocOfRetExpr: HashMap<UIntNative, ArrayList<DebugLocation>> =
         HashMap<UIntNative, ArrayList<DebugLocation>>()
     private let nonRefBox2RefMap: HashMap<UIntNative, LLVMValueRef> = HashMap<UIntNative, LLVMValueRef>()
-    private let vtableSizeMap: HashMap<ClassDef, UInt16> = HashMap<ClassDef, UInt16>()
+    private let vtableSizeMap: HashMap<CustomTypeDef, UInt16> = HashMap<CustomTypeDef, UInt16>()
     private var cjStringType: LLVMTypeRef = LLVMNullType()
 
     public var debugValue: LLVMValueRef = LLVMNullValue()
