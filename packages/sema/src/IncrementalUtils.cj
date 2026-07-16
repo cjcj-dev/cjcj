@@ -2,8 +2,10 @@ package cjcj::sema
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::incremental_compilation.SemanticInfo
 import cjcj::mangle.ASTMangler
+import cjcj::sema.Desugar.DesugarPrimaryCtor
 import cjcj::utils.{BOX_DECL_PREFIX, CJC_ASSERT, CJC_NULLPTR_CHECK, IncrementalCompilationLogger,
     InternalError, MACRO_ATTR_ARGS, GetMacroFuncName}
 
@@ -94,7 +96,7 @@ public func HandleCtorForIncr(pkg: Package, mangledName2DeclMap: HashMap<String,
         for (member in members) {
             if (let Some(primary) <- (member as PrimaryCtorDecl)) {
                 if (!primary.toBeCompiled) {
-                    if (primary.isConst || primary.HasAnno(AnnotationKind.FROZEN)) {
+                    if (primary.isConst || primary.HasAnno(AstAnnotationKind.FROZEN)) {
                         primary.toBeCompiled = true
                     } else {
                         primaryCtor = Some(primary)
