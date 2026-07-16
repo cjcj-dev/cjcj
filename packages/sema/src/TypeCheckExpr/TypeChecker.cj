@@ -2423,7 +2423,8 @@ extend TypeChecker {
                     }), diag: impl.diag)
                 CollectMainFunctionsFromMainDecls(pkg)
                 let instance = ci.getOrThrow()
-                PluginCustomAnnoChecker(impl.diag.getOrThrow(), impl.typeManager, instance.globalOptions).Check(pkg)
+                PluginCustomAnnoChecker(
+                    instance, impl.diag.getOrThrow(), impl.importManager.getOrThrow()).Check(pkg)
             }
         }
         let instance = ci.getOrThrow()

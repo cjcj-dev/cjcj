@@ -8,7 +8,7 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::modules.SemaImportManager
-import cjcj::sema.TypeManager
+import cjcj::sema.{CompilerInstance, TypeManager}
 import cjcj::utils.FileUtil
 
 private let PKG_NAME_OHOS_LABELS: String = "ohos.labels"
@@ -292,7 +292,10 @@ private class PluginAnnoCacheEntry {
 }
 
 public class PluginCustomAnnoChecker {
+    private var ci: Option<CompilerInstance> = None
     private var diag: BasicDiagnosticEngine
+    private var importManager: Option<SemaImportManager> = None
+    private var ctx: Option<ASTContext> = None
     private var typeManager: Option<TypeManager> = None
     private var globalOptions: OptionGlobalOptions = OptionGlobalOptions()
     private var curModuleName: String = ""
@@ -332,13 +335,26 @@ public class PluginCustomAnnoChecker {
         ParseOption()
     }
 
+    public init(ci: CompilerInstance, diag: BasicDiagnosticEngine, importManager: SemaImportManager) {
+        this.ci = Some(ci)
+        this.diag = diag
+        this.importManager = Some(importManager)
+        this.typeManager = Some(ci.typeManager)
+        this.globalOptions = ci.globalOptions
+        ParseOption()
+    }
+
     public func SetTypeManager(typeManager: TypeManager): Unit {
         this.typeManager = typeManager
     }
 
     public func IsAnnoAPILevel(annotation: Annotation, decl: Decl): Bool {
-        if (decl.GetFullPackageName() == PKG_NAME_OHOS_LABELS) {
-            return annotation.identifier.Val() == APILEVEL_ANNO_NAME
+        if (let Some(context) <- ctx) {
+            if (let Some(pkg) <- context.curPackage) {
+                if (pkg.fullPackageName == PKG_NAME_OHOS_LABELS) {
+                    return annotation.identifier.Val() == APILEVEL_ANNO_NAME
+                }
+            }
         }
         if (let Some(baseExpr) <- annotation.baseExpr) {
             if (let Some(target) <- baseExpr.GetTarget()) {
@@ -357,8 +373,12 @@ public class PluginCustomAnnoChecker {
     }
 
     public func IsAnnoHide(annotation: Annotation, decl: Decl): Bool {
-        if (decl.GetFullPackageName() == PKG_NAME_OHOS_LABELS) {
-            return annotation.identifier.Val() == HIDE_ANNO_NAME
+        if (let Some(context) <- ctx) {
+            if (let Some(pkg) <- context.curPackage) {
+                if (pkg.fullPackageName == PKG_NAME_OHOS_LABELS) {
+                    return annotation.identifier.Val() == HIDE_ANNO_NAME
+                }
+            }
         }
         if (let Some(baseExpr) <- annotation.baseExpr) {
             if (let Some(target) <- baseExpr.GetTarget()) {
@@ -1073,6 +1093,7 @@ public class PluginCustomAnnoChecker {
     }
 
     public func Check(pkg: Package): Unit {
+        ctx = ci.getOrThrow().GetASTContextByPackage(Some(pkg))
         curModuleName = GetModuleName(pkg.fullPackageName)
         CheckAnnoBeforeMacro(pkg)
         let scopeDecl = ArrayList<Decl>()
@@ -1111,6 +1132,9 @@ public class PluginCustomAnnoChecker {
             return VisitAction.KEEP_DECISION
         })
         let _ = walker.Walk()
+        if (!ci.getOrThrow().globalOptions.enableMacroInLSP) {
+            ClearAnnoInfoOfDepPkg(importManager.getOrThrow())
+        }
     }
 }
 
