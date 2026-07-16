@@ -623,6 +623,7 @@ public class CompilerInstance {
             semaInstance.sourcePackages.add(pkg)
         }
         semaInstance.importManager = Some(importManager)
+        semaInstance.cacheSemaUsage = Some({ info: SemanticInfo => CacheSemaUsage(info) })
         SeedFaithfulSemaResolvedImports(semaInstance)
         let checker = FaithfulSemaTypeChecker(Some(semaInstance))
         checker.TypeCheckForPackages(pkgs)

@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::incremental_compilation.IncreKind
+import cjcj::incremental_compilation.SemanticInfo
 import cjcj::modules.SemaImportManager
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
@@ -33,7 +34,13 @@ public class CompilerInstance {
     public let resolvedUsedMacroDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     public let pkgCtxMap: HashMap<Node, ASTContext> = HashMap<Node, ASTContext>()
+    public var cacheSemaUsage: Option<(SemanticInfo) -> Unit> = None
     public init() {}
+
+    // C++ CompilerInstance.h:563. The closure preserves the frontend-owned cache across the package boundary.
+    public func CacheSemaUsage(info: SemanticInfo): Unit {
+        cacheSemaUsage.getOrThrow()(info)
+    }
 
     public func IsBuildTrie(): Bool {
         return buildTrie

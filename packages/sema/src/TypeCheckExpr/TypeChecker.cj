@@ -2427,6 +2427,10 @@ extend TypeChecker {
                 PluginCustomAnnoChecker(impl.diag.getOrThrow(), impl.typeManager, instance.globalOptions).Check(pkg)
             }
         }
+        let instance = ci.getOrThrow()
+        if (instance.globalOptions.enIncrementalCompilation) {
+            instance.CacheSemaUsage(GetSemanticUsage(impl.typeManager, activePkgs))
+        }
         GenerateMainInvoke()
         substituteImportedTypeAliasTy(impl.typeManager, recursivePkgs)
         CheckWhetherHasProgramEntry()
