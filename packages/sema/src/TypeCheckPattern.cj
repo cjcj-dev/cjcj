@@ -717,6 +717,10 @@ public func IsFuncTyEnumPatternMatched(typeManager: TypeManager, ctx: ASTContext
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (funcTy.paramTys.size != pattern.patterns.size) {
+        if (let Some(diagValue) <- diag) {
+            Diagnose(diagValue, pattern, BasicDiagKind.sema_pattern_not_match,
+                args: [BasicDiagArgument("enum")]).Emit()
+        }
         return false
     }
     var idx: Int64 = 0
@@ -727,7 +731,14 @@ public func IsFuncTyEnumPatternMatched(typeManager: TypeManager, ctx: ASTContext
         }
         idx++
     }
-    return typeManager.IsTyEqual(funcTy.retTy, target)
+    if (!typeManager.IsTyEqual(funcTy.retTy, target)) {
+        if (let Some(diagValue) <- diag) {
+            Diagnose(diagValue, pattern, BasicDiagKind.sema_pattern_not_match,
+                args: [BasicDiagArgument("enum")]).Emit()
+        }
+        return false
+    }
+    return true
 }
 
 public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: EnumPattern,
@@ -776,6 +787,10 @@ public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
                 }
             }
         }
+    }
+    if (let Some(diagValue) <- diag) {
+        Diagnose(diagValue, pattern, BasicDiagKind.sema_pattern_not_match,
+            args: [BasicDiagArgument("enum")]).Emit()
     }
     return InvalidPatternTy(pattern)
 }
