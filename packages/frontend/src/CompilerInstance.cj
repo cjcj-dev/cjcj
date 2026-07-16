@@ -332,8 +332,19 @@ public class CompilerInstance {
     }
 
     public func PerformPluginLoad(): Bool {
+        if (invocation.globalOptions.pluginPaths.isEmpty()) {
+            return true
+        }
         loadedPluginPaths.clear()
         CloseLoadedNativeMetaTransformPlugins()
+        try {
+            if (RegisterCjPlugin()) {
+                metaTransformPluginBuilder.SetIsCppPlugin(false)
+                return true
+            }
+        } catch (e: Exception) {
+            return false
+        }
         for (pluginPath in invocation.globalOptions.pluginPaths) {
             try {
                 let metaTransformPlugin = NativeMetaTransformPlugin.Get(pluginPath)
@@ -348,6 +359,7 @@ public class CompilerInstance {
                 return false
             }
         }
+        metaTransformPluginBuilder.SetIsCppPlugin(true)
         return true
     }
 
