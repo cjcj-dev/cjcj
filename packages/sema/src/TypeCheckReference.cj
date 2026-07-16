@@ -318,8 +318,7 @@ private func TypeCheckReferenceCheckAmbiguousImportedNonFuncs(
     if (!hasImportedNonFunc || TypeCheckReferenceAllMemberDecl(imported)) {
         return true
     }
-    let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_ambiguous_use,
-        TypeCheckReferenceRange(expr),
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ambiguous_use, expr,
         arguments: [name])
     for (target in imported) {
         TypeCheckReferenceAddCandidateNote(builder, target)
@@ -722,16 +721,14 @@ public func TypeCheckReferenceFilterTargetsForFuncReference(
         }
         if (targets.isEmpty()) {
             let name = if (let Some(symbol) <- expr.symbol) { " '" + symbol.name + "'" } else { "" }
-            let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_func_without_type_arg,
-                TypeCheckReferenceRange(expr),
-                arguments: [name])
+            let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_generic_func_without_type_arg,
+                expr, TypeCheckReferenceRange(expr), arguments: [name])
             builder.Emit()
             return false
         }
     }
     if (targets.size > 1 && TypeCheckReferenceAllFuncDecl(targets)) {
-        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_ambiguous_use,
-            TypeCheckReferenceRange(expr),
+        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ambiguous_use, expr,
             arguments: [targets[0].getOrThrow().identifier.Val()])
         builder.Emit()
         targets.clear()
@@ -1080,10 +1077,9 @@ private func TypeCheckReferenceIsNamespaceMemberAccessLegal(
     } else if (realTarget.IsNominalDecl() && !realTarget.TestAttr(Attribute.FOREIGN) &&
         target.TestAttr(Attribute.ABSTRACT)) {
         let strType = if (target.astKind == ASTKind.FUNC_DECL) { "function" } else { "property" }
-        let builder = diag.DiagnoseRefactor(
+        let builder = DiagnoseRefactor(diag,
             BasicDiagKindRefactor.sema_interface_call_with_unimplemented_call,
-            TypeCheckReferenceFieldRange(ma),
-            arguments: [strType, ma.field.Val()])
+            ma, TypeCheckReferenceFieldRange(ma), arguments: [strType, ma.field.Val()])
         builder.Emit()
         valid = false
     }
@@ -1267,9 +1263,8 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
                 valid = false
             }
             if (decl.TestAttr(Attribute.UNSAFE) && !ma.isInFlowExpr) {
-                let builder = diag.DiagnoseRefactor(
-                    BasicDiagKindRefactor.sema_unsafe_func_can_only_be_called,
-                    TypeCheckReferenceRange(ma))
+                let builder = DiagnoseRefactor(diag,
+                    BasicDiagKindRefactor.sema_unsafe_func_can_only_be_called, ma)
                 builder.Emit()
                 valid = false
             }
@@ -1357,9 +1352,8 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
                 valid = false
             }
             if (decl.TestAttr(Attribute.UNSAFE) && !re.isInFlowExpr) {
-                let builder = diag.DiagnoseRefactor(
-                    BasicDiagKindRefactor.sema_unsafe_func_can_only_be_called,
-                    TypeCheckReferenceRange(re))
+                let builder = DiagnoseRefactor(diag,
+                    BasicDiagKindRefactor.sema_unsafe_func_can_only_be_called, re)
                 builder.Emit()
                 valid = false
             }

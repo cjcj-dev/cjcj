@@ -19,15 +19,14 @@ import cjcj::basic.MakeRange as BasicMakeRange
 // Faithful to the legacy `Diagnose(const AST::Node&, DiagKind, args...)` overload
 // (DiagnosticEngine.h:866-880): the range is derived from `node.GetBegin()`.
 private func DiagnoseNode(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind, arg: String): Unit {
-    diag.Diagnose(node.GetBegin(), kind, args: [BasicDiagArgument(arg)]).Emit()
+    Diagnose(diag, node, kind, args: [BasicDiagArgument(arg)]).Emit()
 }
 
 // Faithful to `DiagnoseRefactor(DiagKindRefactor, const AST::Node&, args...)`
 // (DiagnosticEngine.h:938-948): the range is `MakeRange(node.GetBegin(), node.GetEnd())`.
 private func DiagnoseRefactorNode(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKindRefactor,
     arg: String): Unit {
-    let range = BasicMakeRange(node.GetBegin(), node.GetEnd())
-    diag.DiagnoseRefactor(kind, range, arguments: [arg]).Emit()
+    DiagnoseRefactor(diag, kind, node, arguments: [arg]).Emit()
 }
 
 // Reproduces the InitializationChecker diagnostic site selection.

@@ -457,9 +457,8 @@ public func DiagMismatchedTypes(diag: BasicDiagnosticEngine, node: Node, typeNod
     let typeTy = typeNode.GetTy().getOrThrow()
     CJC_ASSERT(Ty.IsTyCorrect(typeTy))
     if (typeNode.ShouldDiagnose() && !because.isEmpty()) {
-        let builder = diag.DiagnoseRefactor(
-            BasicDiagKindRefactor.sema_mismatched_types_because,
-            MakeRange(node.begin, node.end))
+        let builder = DiagnoseRefactor(diag,
+            BasicDiagKindRefactor.sema_mismatched_types_because, node)
         var tyStr = node.GetTy().getOrThrow().String()
         if (let Some(thisTy) <- (node.GetTy().getOrThrow() as ClassThisTy)) {
             tyStr = ClassTy(thisTy.name, thisTy.declPtr.getOrThrow(), thisTy.typeArgs.toArray()).String()

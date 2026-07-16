@@ -2274,16 +2274,15 @@ extend TypeChecker {
                 if (let Some(funcDecl) <- refFuncBody.funcDecl) {
                     if (IsStaticInitializer(funcDecl)) {
                         returnExpr.SetTy(TypeManager.GetInvalidTy())
-                        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_return_in_static_init,
-                            MakeRange(node.begin, node.end)).Emit()
+                        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_invalid_return_in_static_init,
+                            node).Emit()
                         continue
                     }
                 }
                 returnExpr.refFuncBody = Some(refFuncBody)
             } else {
                 returnExpr.SetTy(TypeManager.GetInvalidTy())
-                diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_return,
-                    MakeRange(node.begin, node.end)).Emit()
+                DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_invalid_return, node).Emit()
             }
         }
         for (sym in impl.GetSymsByASTKind(ctx, ASTKind.FUNC_PARAM)) {
@@ -2291,14 +2290,13 @@ extend TypeChecker {
             if (let Some(returnExpr2) <- GetDanglingReturn(param)) {
                 returnExpr2.refFuncBody = None
                 returnExpr2.SetTy(TypeManager.GetInvalidTy())
-                diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_return,
-                    MakeRange(returnExpr2.begin, returnExpr2.end)).Emit()
+                DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_invalid_return, returnExpr2).Emit()
             }
         }
         for (sym in impl.GetSymsByASTKind(ctx, ASTKind.JUMP_EXPR)) {
             let node2 = sym.node.getOrThrow()
             if (let None <- GetRefLoopSymbol(ctx, node2)) {
-                diag.Diagnose(node2.begin, node2.end, BasicDiagKind.sema_invalid_loop_control).Emit()
+                Diagnose(diag, node2, BasicDiagKind.sema_invalid_loop_control).Emit()
                 node2.SetTy(TypeManager.GetInvalidTy())
             }
         }
