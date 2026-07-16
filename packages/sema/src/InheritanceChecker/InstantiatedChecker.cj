@@ -412,7 +412,7 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
 }
 
 func CheckInstantiatedDecl(checker: StructInheritanceChecker, decl: Decl, instTys: ArrayList<Ty>): Unit {
-    if (decl.IsBuiltIn() || IsImportedInstantiationBoundary(decl)) {
+    if (decl.IsBuiltIn()) {
         return
     }
     let typeMapping = BuildInstantiationTypeMap(decl, instTys)
