@@ -570,7 +570,9 @@ public func CreateMirrorConstructorCall(importManager: ImportManager, entity: Ex
                 } else {
                     CJC_ABORT()
                 }
-                if (let Some(call) <- CreateCall(Some(mirrorCtor), curFile, entity)) {
+                let args = ArrayList<FuncArg>()
+                args.add(CreateFuncArg(entity))
+                if (let Some(call) <- CreateCall(Some(mirrorCtor), curFile, args: args)) {
                     call.callKind = CallKind.CALL_OBJECT_CREATION
                     call.SetTy(mirrorTy)
                     return Some(call)
@@ -580,6 +582,7 @@ public func CreateMirrorConstructorCall(importManager: ImportManager, entity: Ex
         }
     }
     CJC_ABORT()
+    return None
 }
 
 public func IsSynthetic(node: Node): Bool {

@@ -414,7 +414,10 @@ public class InteropLibBridge {
         let funcDecl = fd.getOrThrow()
         let body = funcDecl.funcBody.getOrThrow()
         let strTy = body.paramLists[0].params[1].GetTy().getOrThrow()
-        let classSignExpr = CreateLitConstExpr(LitConstKind.STRING, classSign, Some(strTy))
-        return CreateCall(fd, curFile, refExpr, classSignExpr).getOrThrow()
+        let classSignExpr = CreateLitConstExpr(LitConstKind.STRING, classSign, strTy)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(refExpr))
+        args.add(CreateFuncArg(classSignExpr))
+        return CreateCall(fd, curFile, args: args).getOrThrow()
     }
 }
