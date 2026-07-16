@@ -872,6 +872,105 @@ public class InteropLibBridge {
         return CreateCallExpr(fdRef, args, Some(funcDecl), callTy, CallKind.CALL_OBJECT_CREATION)
     }
 
+    public func FindGetTypeForTypeParamDecl(file: File): FuncDecl {
+        for (decl in file.curPackage.getOrThrow().files[0].decls) {
+            if (decl.identifier.Val() == GET_TYPE_FOR_TYPE_PARAMETER_FUNC_NAME) {
+                return (decl as FuncDecl).getOrThrow()
+            }
+        }
+        CJC_ABORT()
+        return FuncDecl()
+    }
+
+    public func FindCStringToStringDecl(): FuncDecl {
+        for (extendDecl in typeManager.GetAllExtendsByTy(TypeManager.GetCStringTy())) {
+            for (member in extendDecl.GetMemberDecls()) {
+                if (member.identifier == "toString") {
+                    return (member as FuncDecl).getOrThrow()
+                }
+            }
+        }
+        CJC_ABORT()
+        return FuncDecl()
+    }
+
+    public func FindStringEqualsDecl(): FuncDecl {
+        for (decl in utils.GetStringDecl().GetMemberDeclPtrs()) {
+            if (decl.identifier == "==") {
+                return (decl as FuncDecl).getOrThrow()
+            }
+        }
+        CJC_ABORT()
+        return FuncDecl()
+    }
+
+    public func FindStringStartsWithDecl(): FuncDecl {
+        for (decl in utils.GetStringDecl().GetMemberDeclPtrs()) {
+            if (decl.identifier == "startsWith") {
+                return (decl as FuncDecl).getOrThrow()
+            }
+        }
+        CJC_ABORT()
+        return FuncDecl()
+    }
+
+    public func CreateGetTypeForTypeParameterCall(genericParam: GenericParamDecl): Expr {
+        let getTypeForTypeParamDecl = FindGetTypeForTypeParamDecl(genericParam.curFile.getOrThrow())
+        let refExpr = WithinFile<RefExpr>(CreateRefExpr(getTypeForTypeParamDecl), genericParam.curFile)
+        refExpr.instTys.add(genericParam.GetTy().getOrThrow())
+        let callExpr = CreateCallExpr(refExpr, ArrayList<FuncArg>(), Some(getTypeForTypeParamDecl),
+            getTypeForTypeParamDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow(),
+            CallKind.CALL_INTRINSIC_FUNCTION)
+        callExpr.curFile = genericParam.curFile
+        return callExpr
+    }
+
+    public func CreateMatchByTypeArgument(genericParam: GenericParamDecl,
+        typeToCaseMap: HashMap<String, Expr>, retTy: Ty, defaultCase: Expr): MatchExpr {
+        let strTy = utils.GetStringDecl().GetTy().getOrThrow()
+        let cStrToStringDecl = FindCStringToStringDecl()
+        let strEqualsDecl = FindStringEqualsDecl()
+        let strStartsWithDecl = FindStringStartsWithDecl()
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let file = genericParam.curFile
+        let cStrToStringCall = CallExpr()
+        let cStrToStringMa = CreateMemberAccess(CreateGetTypeForTypeParameterCall(genericParam), "toString")
+        cStrToStringMa.SetTy(cStrToStringDecl.GetTy().getOrThrow())
+        cStrToStringMa.target = Some(cStrToStringDecl)
+        cStrToStringMa.callOrPattern = Some(cStrToStringCall)
+        cStrToStringCall.SetTy(strTy)
+        cStrToStringCall.resolvedFunction = Some(cStrToStringDecl)
+        cStrToStringCall.baseFunc = Some(cStrToStringMa)
+        cStrToStringCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+        cStrToStringCall.curFile = file
+        let cases = ArrayList<MatchCase>()
+        for ((typeDesc, expr) in typeToCaseMap.entries) {
+            let isOption = typeDesc.startsWith(CORE_PACKAGE_NAME + ":" + OPTION_NAME)
+            let selectedDecl = if (isOption) { strStartsWithDecl } else { strEqualsDecl }
+            let caseCall = CallExpr()
+            let caseMa = CreateMemberAccess((ASTCloner.Clone(cStrToStringCall) as Expr).getOrThrow(),
+                if (isOption) { "startsWith" } else { "==" })
+            caseMa.SetTy(selectedDecl.GetTy().getOrThrow())
+            caseMa.target = Some(selectedDecl)
+            caseMa.callOrPattern = Some(caseCall)
+            caseCall.SetTy(boolTy)
+            caseCall.resolvedFunction = Some(selectedDecl)
+            caseCall.baseFunc = Some(caseMa)
+            caseCall.args.add(CreateFuncArg(CreateLitConstExpr(LitConstKind.STRING, typeDesc, strTy)))
+            caseCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+            caseCall.curFile = file
+            let patternForType = ConstPattern()
+            patternForType.SetTy(strTy)
+            patternForType.literal = CreateLitConstExpr(LitConstKind.STRING, typeDesc, strTy)
+            patternForType.operatorCallExpr = caseCall
+            cases.add(CreateMatchCase(patternForType, expr))
+        }
+        cases.add(CreateMatchCase(WildcardPattern(), defaultCase))
+        let matchExpr = CreateMatchExpr(cStrToStringCall, cases, retTy)
+        matchExpr.curFile = file
+        return matchExpr
+    }
+
     public func CreateGetJavaLambdaObjectCall(refExpr: RefExpr, classSign: String,
         curFile: Option<File>): CallExpr {
         return CreateGetJavaLambdaCall(GetJavaLambdaObjectDecl(), refExpr, classSign, curFile)
