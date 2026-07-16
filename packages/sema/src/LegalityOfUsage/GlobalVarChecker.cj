@@ -3,6 +3,7 @@ package cjcj::sema.LegalityOfUsage
 import std.collection.*
 import cjcj::ast.*
 import cjcj::sema.*
+import cjcj::utils.CJC_ABORT
 
 public enum GlobalVarInitIssueKind {
     | USED_BEFORE_INITIALIZATION
@@ -76,6 +77,7 @@ extend DefColor <: Equatable<DefColor> {
 private class DefNode {
     public var variable: Decl
     public let usage: ArrayList<UseEdge> = ArrayList<UseEdge>()
+    public let usedBy: ArrayList<UseEdge> = ArrayList<UseEdge>()
     public var visitOrder: Int64 = -1
     public var color: DefColor = DefColor.WHITE
 
@@ -264,14 +266,18 @@ private class DefUseGraph {
         } else if (let Some(member) <- (refExpr as MemberAccess)) {
             refPos = member.field.Begin()
             refName = member.field.Val()
+        } else {
+            CJC_ABORT()
         }
         userNode.usage.add(UseEdge(refExpr, refPos, refName, usedNode))
+        usedNode.usedBy.add(UseEdge(refExpr, refPos, refName, userNode))
     }
 
     public func AddOrderEdge(user: Decl, used: VarDeclAbstract): Unit {
         let userNode = GetOrBuildNode(user)
         let usedNode = GetOrBuildNode(used)
         userNode.usage.add(UseEdge(usedNode))
+        usedNode.usedBy.add(UseEdge(userNode))
     }
 }
 
