@@ -8918,7 +8918,6 @@ extend TypeChecker {
             if (let Some(commandPattern) <- handler.commandPattern) {
                 SynthesizeTryCatchPatternTypes(ctx, commandPattern)
             }
-            if (let Some(block) <- handler.block) { let _ = SynthesizeBlock(ctx, block) }
         }
         if (let Some(finallyBlock) <- te.finallyBlock) { let _ = SynthesizeBlock(ctx, finallyBlock) }
         if (let Some(tryLambda) <- te.tryLambda) { let _ = Synthesize(ctx, tryLambda) }
@@ -8967,7 +8966,6 @@ extend TypeChecker {
             if (let Some(commandPattern) <- handler.commandPattern) {
                 SynthesizeTryCatchPatternTypes(ctx, commandPattern)
             }
-            if (let Some(block) <- handler.block) { let _ = SynthesizeBlock(ctx, block) }
         }
         if (let Some(finallyBlock) <- te.finallyBlock) { let _ = SynthesizeBlock(ctx, finallyBlock) }
         if (let Some(tryLambda) <- te.tryLambda) { let _ = Synthesize(ctx, tryLambda) }
