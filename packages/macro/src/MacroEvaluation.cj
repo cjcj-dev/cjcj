@@ -203,14 +203,15 @@ private func isInPrimaryFuncParam(decl: Decl, mcPos: Position): Bool {
     let checkMacroCallScope = { curNode: Node =>
         if (ASTKindEquals(curNode.astKind, ASTKind.MACRO_EXPAND_PARAM) && curNode.begin == mcPos) {
             if (let Some(invocation) <- curNode.GetConstInvocation()) {
-                let scope = invocation.scopeKind
-                let primaryCtorScope = match (scope) {
-                    case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS => true
-                    case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT => true
-                    case _ => false
-                }
-                if (primaryCtorScope) {
-                    primaryFuncParam.value = true
+                if (let Some(scope) <- invocation.scopeKind) {
+                    let primaryCtorScope = match (scope) {
+                        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS => true
+                        case ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT => true
+                        case _ => false
+                    }
+                    if (primaryCtorScope) {
+                        primaryFuncParam.value = true
+                    }
                 }
             }
             return VisitAction.SKIP_CHILDREN
@@ -240,12 +241,8 @@ private func getMacroScopeKind(invocation: MacroInvocation, mcPos: Position): Sc
             case _ => ()
         }
     }
-    let hasScope = match (invocation.scopeKind) {
-        case ScopeKind.UNKNOWN_SCOPE => false
-        case _ => true
-    }
-    if (hasScope) {
-        return invocation.scopeKind
+    if (let Some(scopeKind) <- invocation.scopeKind) {
+        return scopeKind
     }
     return ScopeKind.TOPLEVEL
 }
@@ -254,12 +251,8 @@ private func getMacroScopeKindReEval(invocation: MacroInvocation): ScopeKind {
     if (invocation.hasParenthesis) {
         return ScopeKind.UNKNOWN_SCOPE
     }
-    let hasScope = match (invocation.scopeKind) {
-        case ScopeKind.UNKNOWN_SCOPE => false
-        case _ => true
-    }
-    if (hasScope) {
-        return invocation.scopeKind
+    if (let Some(scopeKind) <- invocation.scopeKind) {
+        return scopeKind
     }
     return ScopeKind.TOPLEVEL
 }
@@ -448,7 +441,7 @@ private func CheckMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine, comp
     if (let Some(macroFile) <- macCall.RequireNode().curFile) {
         parser.SetCurFile(macroFile)
     }
-    let _ = parser.ParseDecl(toEvaluationParsedScopeKind(invocation.scopeKind))
+    let _ = parser.ParseDecl(toEvaluationParsedScopeKind(invocation.scopeKind.getOrThrow()))
     let hasParseError = parserDiag.GetErrorCount() > 0u64
     forwardEvaluationParserDiagnostics(parserDiag, diag)
     if (hasParseError) {
