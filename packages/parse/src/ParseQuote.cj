@@ -134,10 +134,8 @@ extend ParserImpl {
 
     public func ParseQuoteExpr(): QuoteExpr {
         let ret = QuoteExpr()
-        EnterQuoteExprMod()
-        let token = Expect(TokenKind.QUOTE, "expected 'quote'")
-        ret.begin = token.Begin()
-        ret.quotePos = token.Begin()
+        ret.begin = lastToken.Begin()
+        ret.quotePos = lastToken.Begin()
         skipNL = false
         if (Skip(TokenKind.NL) || newlineSkipped) {
             ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_line_break, lastToken).Emit()
@@ -158,7 +156,6 @@ extend ParserImpl {
         }
         skipNL = true
         ret.end = lastToken.End()
-        ExitQuoteExprMod()
         return ret
     }
 }

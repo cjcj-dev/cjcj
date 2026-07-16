@@ -62,7 +62,13 @@ extend ParserImpl {
         if (Seeing(TokenKind.RESUME)) { return ParseResumeExpr() }
         if (Seeing(TokenKind.SPAWN)) { return ParseSpawnExpr() }
         if (Seeing(TokenKind.SYNCHRONIZED)) { return ParseSynchronizedExpr() }
-        if (Seeing(TokenKind.QUOTE)) { return ParseQuoteExpr() }
+        if (Seeing(TokenKind.QUOTE)) {
+            EnterQuoteExprMod()
+            Next()
+            let ret = ParseQuoteExpr()
+            ExitQuoteExprMod()
+            return ret
+        }
         if (SeeingMacroCall() || SeeingBuiltinAnnotation()) { return ParseMacroExprOrLambdaExpr() }
         return GetInvalidExprInAtom(Peek().Begin())
     }
