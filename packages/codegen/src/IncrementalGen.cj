@@ -110,15 +110,6 @@ private func getNamedGlobal(module: LLVMModuleHandle, name: String): LLVMValueRe
     return result
 }
 
-private func AddUniqueLLVMValue(values: ArrayList<LLVMValueRef>, value: LLVMValueRef): Unit {
-    for (existing in values) {
-        if (existing.toUIntNative() == value.toUIntNative()) {
-            return
-        }
-    }
-    values.add(value)
-}
-
 // Adapts llvm::GlobalObject::getMetadata to LLVM-C's metadata-entry API.
 private func getMetadata(context: LLVMContextHandle, value: LLVMValueRef,
     name: String): LLVMMetadataRef {
@@ -515,7 +506,12 @@ public class IncrementalGen {
         if (uselessDefinition.isNull()) {
             return
         }
-        AddUniqueLLVMValue(uselessDefinitions, uselessDefinition)
+        for (existing in uselessDefinitions) {
+            if (existing.toUIntNative() == uselessDefinition.toUIntNative()) {
+                return
+            }
+        }
+        uselessDefinitions.add(uselessDefinition)
     }
 
     // Mirrors IncrementalGen.cpp:376-431.
@@ -566,7 +562,7 @@ public class IncrementalGen {
                 let isFunction = !unsafe { LLVMIsAFunction(object) }.isNull()
                 let isGlobalVariable = !unsafe { LLVMIsAGlobalVariable(object) }.isNull()
                 if (isFunction || isGlobalVariable) {
-                    AddUniqueLLVMValue(deferErase, object)
+                    deferErase.add(object)
                     unsafe { LLVMSelfhostGlobalObjectClearMetadata(object) }
                     if (isFunction) {
                         DeleteFuncBody(object)
@@ -641,20 +637,20 @@ public class IncrementalGen {
             gv = unsafe { LLVMGetNextGlobal(gv) }
         }
 
-        ClearNamedMetadataOperands(module, METADATA_TYPES)
+        clearOperands(module, METADATA_TYPES)
         for (metadata in metaBoundByTI) {
             if (LLVMGetMDNodeOperands(LLVMMetadataToValue(context, metadata)).size != 1) {
                 LLVMAddNamedMetadataOperand(module, METADATA_TYPES, metadata)
             }
         }
-        ClearNamedMetadataOperands(module, METADATA_TYPETEMPLATES)
+        clearOperands(module, METADATA_TYPETEMPLATES)
         for (metadata in metaBoundByTT) {
             if (LLVMGetMDNodeOperands(LLVMMetadataToValue(context, metadata)).size != 1) {
                 LLVMAddNamedMetadataOperand(module, METADATA_TYPETEMPLATES, metadata)
             }
         }
         if (!LLVMGetNamedMetadata(module, METADATA_GLOBAL_VAR).isNull()) {
-            ClearNamedMetadataOperands(module, METADATA_GLOBAL_VAR)
+            clearOperands(module, METADATA_GLOBAL_VAR)
             for (metadata in metaBoundByGV) {
                 LLVMAddNamedMetadataOperand(module, METADATA_GLOBAL_VAR, metadata)
             }
@@ -672,7 +668,7 @@ public class IncrementalGen {
             function = unsafe { LLVMGetNextFunction(function) }
         }
         if (!LLVMGetNamedMetadata(module, METADATA_FUNCTIONS).isNull()) {
-            ClearNamedMetadataOperands(module, METADATA_FUNCTIONS)
+            clearOperands(module, METADATA_FUNCTIONS)
             for (metadata in metaBoundByF) {
                 LLVMAddNamedMetadataOperand(module, METADATA_FUNCTIONS, metadata)
             }
@@ -702,7 +698,8 @@ public class IncrementalGen {
         }
     }
 
-    private func ClearNamedMetadataOperands(module: LLVMModuleHandle, name: String): Unit {
+    // Adapts llvm::NamedMDNode::clearOperands to the shim ABI.
+    private func clearOperands(module: LLVMModuleHandle, name: String): Unit {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             unsafe { LLVMSelfhostNamedMetadataClearOperands(module.raw, nameCString.value, UInt32(name.size)) }
         }
