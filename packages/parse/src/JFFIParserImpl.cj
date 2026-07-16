@@ -127,7 +127,9 @@ public class JFFIParserImpl {
         if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL) {
             return
         }
-        parser.DiagUnexpectedAnnoOnKind(anno, decl.keywordPos, anno.identifier.Val(), decl.astKind)
+        if (anno.kind == AnnotationKind.JAVA_MIRROR) {
+            parser.DiagUnexpectedAnnoOnKind(anno, decl.keywordPos, anno.identifier.Val(), decl.astKind)
+        }
     }
 
     private func CheckImplAnnoTarget(anno: Annotation, decl: Decl): Unit {
