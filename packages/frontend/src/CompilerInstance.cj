@@ -393,7 +393,7 @@ public class CompilerInstance {
                 DiagnoseInvalidPlugin(pluginPath)
                 return false
             }
-            var result = 1
+            var result: Int32 = 1
             try (path = unsafe { LibC.mallocCString(pluginPath) }.asResource()) {
                 result = unsafe { initLibFunc(path.value) }
             }
