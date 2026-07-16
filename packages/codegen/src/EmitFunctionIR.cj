@@ -1,5 +1,6 @@
 package cjcj::codegen
 
+import cjcj::chir.Attribute
 import cjcj::chir.Function
 import cjcj::option.MockMode
 
@@ -41,6 +42,18 @@ private class FunctionGeneratorImpl <: IRGeneratorImpl {
             }
         } else {
             // Declarations are materialized by GetOrInsertCGFunction and have no body to emit.
+        }
+        if ((options.enableTimer || options.enableMemoryCollect)) {
+            if (let Some(genericDecl) <- chirFunc.GetGenericDecl()) {
+                if (genericDecl.TestAttr(Attribute.IMPORTED)) {
+                    addAttribute(rawFunction, GENERIC_DECL_IN_IMPORTED_PKG_ATTR)
+                } else {
+                    addAttribute(rawFunction, GENERIC_DECL_IN_CURRENT_PKG_ATTR)
+                }
+            }
+        }
+        if (chirFunc.IsLambda()) {
+            addAttribute(rawFunction, FUNC_USED_BY_CLOSURE)
         }
     }
 
