@@ -7048,46 +7048,35 @@ extend TypeChecker {
     }
 
     private func GetDeclOfThisType(ctx: ASTContext, expr: Expr): Option<Decl> {
+        var decl: Option<Decl> = None
         if (let Some(memberAccess) <- (expr as MemberAccess)) {
-            if (let Some(baseExpr) <- memberAccess.baseExpr) {
-                if (let Some(classTy) <- (baseExpr.GetTy().getOrThrow() as ClassTy)) {
-                    if (let Some(classDecl) <- classTy.declPtr) {
-                        let decl: Decl = classDecl
-                        return Some(decl)
-                    }
-                }
+            if ((let Some(baseExpr) <- memberAccess.baseExpr) && (let Some(baseTy) <- baseExpr.GetTy()) &&
+                (let Some(classTy) <- (baseTy as ClassTy)) && (let Some(classDecl) <- classTy.declPtr)) {
+                decl = Some(classDecl)
             }
-            return None
-        }
-        if (let Some(refExpr) <- (expr as RefExpr)) {
-            if (let Some(varDecl) <- (refExpr.GetTarget() as VarDecl)) {
-                if (let Some(initializer) <- varDecl.initializer) {
-                    if (let Some(memberInitializer) <- (initializer as MemberAccess)) {
-                        if (let Some(initializerBase) <- memberInitializer.baseExpr) {
-                            if (let Some(baseTarget) <- initializerBase.GetTarget()) {
-                                if (let Some(classTy) <- (baseTarget.GetTy().getOrThrow() as ClassTy)) {
-                                    if (let Some(classDecl) <- classTy.declPtr) {
-                                        let decl: Decl = classDecl
-                                        return Some(decl)
-                                    }
-                                }
-                            }
-                        }
+        } else if (let Some(refExpr) <- (expr as RefExpr)) {
+            if ((let Some(baseFunc) <- refExpr.GetTarget()) &&
+                (let Some(varDecl) <- (baseFunc as VarDecl)) &&
+                (let Some(initializer) <- varDecl.initializer) &&
+                initializer.astKind == ASTKind.MEMBER_ACCESS) {
+                let memberInitializer = (initializer as MemberAccess).getOrThrow()
+                let baseTarget = memberInitializer.baseExpr.getOrThrow().GetTarget()
+                if ((let Some(target) <- baseTarget) && (let Some(targetTy) <- target.GetTy()) &&
+                    targetTy.IsClass()) {
+                    let classTy = (targetTy as ClassTy).getOrThrow()
+                    if (let Some(classDecl) <- classTy.declPtr) {
+                        decl = Some(classDecl)
                     }
                 }
             } else if (let Some(outMostFunc) <- ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC,
                 expr.scopeName)) {
-                if (let Some(funcDecl) <- (outMostFunc.node.getOrThrow() as FuncDecl)) {
-                    if (let Some(funcBody) <- funcDecl.funcBody) {
-                        if (let Some(classLikeDecl) <- funcBody.parentClassLike) {
-                            let decl: Decl = classLikeDecl
-                            return Some(decl)
-                        }
-                    }
+                let funcDecl = (outMostFunc.node.getOrThrow() as FuncDecl).getOrThrow()
+                if (let Some(classLikeDecl) <- funcDecl.funcBody.getOrThrow().parentClassLike) {
+                    decl = Some(classLikeDecl)
                 }
             }
         }
-        return None
+        return decl
     }
 
     private func DynamicBindingThisType(ctx: ASTContext, baseExpr: Expr, funcDecl: FuncDecl,
@@ -7104,14 +7093,13 @@ extend TypeChecker {
             return None
         }
         let funcTy = (rawFuncTy as FuncTy).getOrThrow()
-        if (let Some(classDecl) <- (GetDeclOfThisType(ctx, baseExpr) as ClassDecl)) {
-            if (Ty.IsTyCorrect(classDecl.GetTy())) {
-                let thisTy = impl.typeManager.ApplySubstPack(
-                    impl.typeManager.GetClassThisTy(classDecl, classDecl.GetTy().getOrThrow().typeArgs.toArray()),
-                    typeMapping)
-                baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), thisTy))
-                return Some(thisTy)
-            }
+        if ((let Some(declOfThisType) <- GetDeclOfThisType(ctx, baseExpr)) &&
+            (let Some(classDecl) <- (declOfThisType as ClassDecl)) && Ty.IsTyCorrect(classDecl.GetTy())) {
+            let thisTy = impl.typeManager.ApplySubstPack(
+                impl.typeManager.GetClassThisTy(classDecl, classDecl.GetTy().getOrThrow().typeArgs.toArray()),
+                typeMapping)
+            baseExpr.SetTy(impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), thisTy))
+            return Some(thisTy)
         } else if (let Some(memberAccess) <- (baseExpr as MemberAccess)) {
             if (let Some(memberBase) <- memberAccess.baseExpr) {
                 if (let Some(genericTy) <- (memberBase.GetTy().getOrThrow() as GenericsTy)) {
@@ -7156,7 +7144,7 @@ extend TypeChecker {
         }
         if (!Ty.IsTyCorrect(expr.GetTy())) {
             expr.SetTy(TypeManager.GetInvalidTy())
-        } else if (let Some(funcDecl) <- (target as FuncDecl)) {
+        } else if ((let Some(targetDecl) <- target) && (let Some(funcDecl) <- (targetDecl as FuncDecl))) {
             let _ = DynamicBindingThisType(ctx, expr, funcDecl, typeMapping)
         }
     }
