@@ -637,12 +637,14 @@ public class IncrementalGen {
             gv = unsafe { LLVMGetNextGlobal(gv) }
         }
 
+        let _ = LLVMGetOrInsertNamedMetadata(module, METADATA_TYPES)
         clearOperands(module, METADATA_TYPES)
         for (metadata in metaBoundByTI) {
             if (LLVMGetMDNodeOperands(LLVMMetadataToValue(context, metadata)).size != 1) {
                 LLVMAddNamedMetadataOperand(module, METADATA_TYPES, metadata)
             }
         }
+        let _ = LLVMGetOrInsertNamedMetadata(module, METADATA_TYPETEMPLATES)
         clearOperands(module, METADATA_TYPETEMPLATES)
         for (metadata in metaBoundByTT) {
             if (LLVMGetMDNodeOperands(LLVMMetadataToValue(context, metadata)).size != 1) {
