@@ -1,12 +1,39 @@
 package cjcj::sema
 
 import std.collection.*
+import std.sort.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagnosticBuilder as BasicDiagnosticBuilder
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.Range as BasicRange
 import cjcj::ast.*
+import cjcj::modules.SemaImportManager
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
+
+public func DiagAmbiguousUse(diag: BasicDiagnosticEngine, node: Node, name: String,
+    targets: ArrayList<Decl>, importManager: SemaImportManager): Unit {
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ambiguous_use, node,
+        arguments: [name])
+    sort(targets, by: { left: Decl, right: Decl =>
+        if (CompNodeByPos(left, right)) { Ordering.LT } else if (CompNodeByPos(right, left)) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    })
+    CJC_ASSERT(targets.size > 1)
+    let importedTargets = ArrayList<Decl>()
+    for (target in targets) {
+        if (target.TestAttr(Attribute.IMPORTED)) {
+            importedTargets.add(target)
+        } else {
+            AddNote(builder, target, MakeRangeForDeclIdentifier(target), "found candidate")
+        }
+    }
+    let fullPackageName = node.curFile.getOrThrow().curPackage.getOrThrow().fullPackageName
+    AddDiagNotesForImportedDecls(
+        builder, importManager.GetImportsOfDecl(fullPackageName), importedTargets)
+}
 
 private func GetNoteMessageForMemberDecl(target: Decl): String {
     var message = "found "
