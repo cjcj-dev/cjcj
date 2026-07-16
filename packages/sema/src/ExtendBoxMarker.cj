@@ -1,9 +1,11 @@
 package cjcj::sema
 
 import std.collection.*
+import std.sync.Mutex
 import cjcj::ast.*
 
 public class ExtendBoxMarker {
+    public static let mtx: Mutex = Mutex()
     private var typeManager: TypeManager
 
     public init(typeManager: TypeManager) {
