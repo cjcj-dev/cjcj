@@ -249,6 +249,11 @@ public class CHIRBuilder {
         return markAsCompileTimeValue
     }
 
+    public func UpdateTypeInCorePackage(): Unit {
+        context.SetObjectTy(context.SearchObjectTyInPackage())
+        context.SetAnyTy(context.SearchAnyTyInPackage())
+    }
+
     public func MergeAllocatedInstance(): Unit {
         context.GetAllocatedValues().add(all: allocatedValues)
         context.GetAllocatedStructs().add(all: allocatedStructs)
