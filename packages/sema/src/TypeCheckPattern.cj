@@ -620,6 +620,9 @@ public func ChkConstPattern(typeManager: TypeManager, ctx: ASTContext, target: T
     }
     let literalTy = literal.GetTy().getOrThrow()
     if (!typeManager.IsTyEqual(literalTy, target)) {
+        if (let Some(diagValue) <- diag) {
+            DiagMismatchedTypes(diagValue, literal, target)
+        }
         return InvalidPatternTy(pattern)
     }
     if (let Some(lit) <- (literal as LitConstExpr)) {
