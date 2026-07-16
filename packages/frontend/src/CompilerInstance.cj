@@ -28,6 +28,7 @@ import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.STANDARD_LIBS
 import cjcj::utils.IncrementalCompilationLogger
+import cjcj::utils.InternalError
 import cjcj::chir.CHIRBuilder as ChirBuilder
 import cjcj::chir.CHIRDeserializer as ChirDeserializer
 import cjcj::chir.CHIRPrinter as ChirPrinter
@@ -1102,6 +1103,9 @@ public class CompilerInstance {
         if (!invocation.globalOptions.enIncrementalCompilation) {
             return false
         }
+        if (invocation.globalOptions.printVersionOnly || invocation.globalOptions.showUsage) {
+            InternalError("'printVersionOnly' or 'showUsage' cannot be true.")
+        }
         if (invocation.frontendOptions.dumpAction != DumpAction.NO_ACTION) {
             return false
         }
@@ -1112,9 +1116,13 @@ public class CompilerInstance {
             return false
         }
         if (srcPkgs.size != 1) {
+            InternalError("source packages should only have one element.")
+        }
+        if (!invocation.globalOptions.compilePackage && invocation.globalOptions.srcFiles.isEmpty() &&
+            !invocation.globalOptions.inputObjs.isEmpty()) {
             return false
         }
-        if (srcPkgs[0].IsEmpty()) {
+        if (srcPkgs[0].IsEmpty() || kind == IncreKind.NO_CHANGE) {
             return false
         }
         return true
