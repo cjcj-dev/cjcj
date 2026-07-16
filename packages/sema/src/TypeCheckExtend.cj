@@ -1,6 +1,7 @@
 package cjcj::sema
 
 import std.collection.*
+import std.sort.*
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
