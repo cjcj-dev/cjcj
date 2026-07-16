@@ -224,7 +224,7 @@ public open class DefaultCompilerInstance {
         return invocation.globalOptions.outputMode == OutputMode.CHIR || ShouldSaveCjoForOutputMode()
     }
 
-    private func ShouldSaveCjoForOutputMode(): Bool {
+    protected func ShouldSaveCjoForOutputMode(): Bool {
         return invocation.globalOptions.outputMode == OutputMode.STATIC_LIB ||
             invocation.globalOptions.outputMode == OutputMode.SHARED_LIB
     }
