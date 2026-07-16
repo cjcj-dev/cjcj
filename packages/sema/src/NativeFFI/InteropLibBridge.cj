@@ -1142,7 +1142,11 @@ public class InteropLibBridge {
         }
         if (ty.IsString()) {
             let notNull = CreateEnsureNotNullCall(entity).getOrThrow()
-            return CreateJavaStringToCangjieCall(CreateGetJniEnvCall(curFile).getOrThrow(), notNull)
+            if (let Some(call) <- CreateJavaStringToCangjieCall(
+                CreateGetJniEnvCall(curFile).getOrThrow(), notNull)) {
+                return Some(call)
+            }
+            return None
         }
         if (ty.IsCoreOptionType()) {
             let classLikeDecl = (outerDecl as ClassLikeDecl).getOrThrow()
@@ -1156,8 +1160,11 @@ public class InteropLibBridge {
                 entity, ty, classLikeDecl, toRaw: toRaw))
         }
         if (ty.IsTuple()) {
-            return CreateGetFromRegistryByEntityCall(
-                CreateGetJniEnvCall(curFile).getOrThrow(), entity, ty, false)
+            if (let Some(call) <- CreateGetFromRegistryByEntityCall(
+                CreateGetJniEnvCall(curFile).getOrThrow(), entity, ty, false)) {
+                return Some(call)
+            }
+            return None
         }
         if (let None <- (ty as ClassLikeTy)) {
             diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_java_interop_not_supported,
