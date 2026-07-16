@@ -1,8 +1,8 @@
 package cjcj::parse
 
 import cjcj::ast.ASTCloner
-import cjcj::ast.InsertSyntheticClassDecl
-import cjcj::ast.IsDeclAppropriateForSyntheticClassGeneration
+import cjcj::ast.InsertObjCSyntheticClassDecl
+import cjcj::ast.IsObjCDeclAppropriateForSyntheticClassGeneration
 import cjcj::ast.Node
 import cjcj::ast.IsMirror
 import cjcj::ast.SortModifierByPos
@@ -1759,8 +1759,8 @@ extend ParserImpl {
             ret.end = lastToken.End()
         }
         CheckCJMappingAttr(ret)
-        if (IsDeclAppropriateForSyntheticClassGeneration(ret)) {
-            InsertSyntheticClassDecl(ret, currentFile.getOrThrow())
+        if (IsObjCDeclAppropriateForSyntheticClassGeneration(ret)) {
+            let _ = InsertObjCSyntheticClassDecl(ret, currentFile.getOrThrow())
         }
         return ret
     }
