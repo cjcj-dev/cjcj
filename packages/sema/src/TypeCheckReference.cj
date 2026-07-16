@@ -22,48 +22,6 @@ private func TypeCheckReferenceRange(node: Node): BasicRange {
     return MakeRange(node.begin, rangeEnd)
 }
 
-private func TypeCheckReferenceDeclIdentifierRange(decl: Decl): BasicRange {
-    if (let Some(funcDecl) <- (decl as FuncDecl)) {
-        if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
-            if (let Some(outerDecl) <- funcDecl.outerDecl) {
-                if (funcDecl.identifier.Begin().IsZero()) {
-                    return MakeRange(outerDecl.identifier.Begin(), outerDecl.identifier.End())
-                }
-                if (funcDecl.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
-                    return MakeRange(funcDecl.identifier.Begin(), outerDecl.identifier.End())
-                }
-            }
-            return MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.End())
-        }
-        if (funcDecl.isGetter || funcDecl.isSetter) {
-            return MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.Begin() + 3)
-        }
-    }
-    if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-        if (let Some(extendedType) <- extendDecl.extendedType) {
-            return MakeRange(extendedType.begin, extendedType.end)
-        }
-    }
-    if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
-        if (let Some(pattern) <- vpd.irrefutablePattern) {
-            return MakeRange(pattern.begin, pattern.end)
-        }
-    }
-    if (decl.identifier.Begin().IsZero()) {
-        return TypeCheckReferenceRange(decl)
-    }
-    return MakeRange(decl.identifier.Begin(), decl.identifier.End())
-}
-
-private func TypeCheckReferenceAddCandidateNote(builder: BasicDiagnosticBuilder, decl: Decl): Unit {
-    let range = TypeCheckReferenceDeclIdentifierRange(decl)
-    if (range.begin.IsZero() || range.end.IsZero()) {
-        builder.AddNote("found candidate")
-        return
-    }
-    builder.AddNote(range, "found candidate")
-}
-
 private func TypeCheckReferenceFieldRange(ma: MemberAccess): BasicRange {
     let beginPos = ma.field.Begin()
     if (!beginPos.IsZero()) {
