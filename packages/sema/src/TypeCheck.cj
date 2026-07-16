@@ -261,23 +261,6 @@ private func getTyFromASTCFuncType(typeManager: TypeManager, ctx: ASTContext, rt
     return TypeManager.GetInvalidTy()
 }
 
-private func varraySizeFromConstantType(constantType: Option<Type>): Option<Int64> {
-    if (let Some(constant) <- constantType) {
-        if (let Some(constantNode) <- (constant as ConstantType)) {
-            if (let Some(expr) <- constantNode.constantExpr) {
-                if (let Some(lit) <- (expr as LitConstExpr)) {
-                    lit.constNumValue.asInt.InitIntLiteral(lit.stringValue, TypeKind.TYPE_INT64)
-                    lit.constNumValue.asInt.SetOutOfRange(TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
-                    if (!lit.constNumValue.asInt.IsOutOfRange()) {
-                        return lit.constNumValue.asInt.`Int64`()
-                    }
-                }
-            }
-        }
-    }
-    return None
-}
-
 private func markDirectSubtype(superTy: Ty, subtype: Ty): Unit {
     if (let Some(classLikeTy) <- (superTy as ClassLikeTy)) {
         for (existing in classLikeTy.directSubtypes) {
@@ -668,8 +651,23 @@ public func GetTyFromASTVArrayType(typeManager: TypeManager, ctx: ASTContext, va
     importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     let elemTy = GetTyFromASTType(typeManager, ctx, varrayType.typeArgument,
         importManager: importManager, diag: diag)
-    if (let Some(size) <- varraySizeFromConstantType(varrayType.constantType)) {
-        return typeManager.GetVArrayTy(elemTy, size)
+    if (let Some(rawConstantType) <- varrayType.constantType) {
+        if (let Some(constantType) <- (rawConstantType as ConstantType)) {
+            if (let Some(rawExpr) <- constantType.constantExpr) {
+                if (let Some(lit) <- (rawExpr as LitConstExpr)) {
+                    lit.constNumValue.asInt.InitIntLiteral(lit.stringValue, TypeKind.TYPE_INT64)
+                    lit.constNumValue.asInt.SetOutOfRange(TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
+                    if (lit.constNumValue.asInt.IsOutOfRange()) {
+                        if (let Some(diagValue) <- diag) {
+                            DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_exceed_num_value_range, lit,
+                                arguments: [lit.stringValue, "Int64"]).Emit()
+                        }
+                        return TypeManager.GetInvalidTy()
+                    }
+                    return typeManager.GetVArrayTy(elemTy, lit.constNumValue.asInt.`Int64`())
+                }
+            }
+        }
     }
     return TypeManager.GetInvalidTy()
 }
