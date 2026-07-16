@@ -1642,63 +1642,72 @@ extend ParserImpl {
             ParseInheritableHeader(ret, TokenKind.ENUM, modifiers, annos)
             CheckDeclarationInScope(scopeKind, DefKind.ENUM)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.ENUM))
-            if (Skip(TokenKind.LCURL)) {
-                ret.leftCurlPos = lastToken.Begin()
-                ret.bodyScope = DummyBody()
-                if (let Some(bodyScope) <- ret.bodyScope) {
-                    bodyScope.begin = ret.leftCurlPos
+            if (!Skip(TokenKind.LCURL)) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
+                    ConvertToken(lookahead)).Emit()
+                ConsumeUntilDeclOrNL(TokenKind.LCURL)
+                if (!Skip(TokenKind.LCURL)) {
+                    ret.EnableAttr(Attribute.IS_BROKEN)
+                    ret.bodyScope = DummyBody()
+                    ret.end = lastToken.End()
+                    return ret
                 }
-                if (Seeing(TokenKind.BITOR)) {
-                    Next()
-                }
-                do {
-                    if (lastToken.kind == TokenKind.BITOR) {
-                        ret.bitOrPosVector.add(lastToken.Begin())
-                    }
-                    let seeingEllipse = Seeing(TokenKind.ELLIPSIS)
-                    if ((!seeingEllipse && !Seeing(TokenKind.IDENTIFIER) && !SeeingMacroCallDecl() &&
-                        !SeeingContextualKeyword() && !SeeingAtWhen()) || SeeingKeywordWithDecl()) {
-                        if (!ret.TestAttr(Attribute.IS_BROKEN)) {
-                            DiagExpectedIdentifierEnumDecl(ret)
-                        }
-                        TryConsumeUntilAny([TokenKind.BITOR])
-                        ret.EnableAttr(Attribute.IS_BROKEN)
-                    } else if (seeingEllipse) {
-                        Next()
-                        if (ret.constructors.isEmpty()) {
-                            DiagExpectedIdentifierEnumDecl(ret)
-                        }
-                        ret.hasEllipsis = true
-                        ret.ellipsisPos = lastToken.Begin()
-                        break
-                    } else {
-                        ParseCaseBody(ret)
-                    }
-                    SkipBlank(TokenKind.SEMI)
-                } while (Skip(TokenKind.BITOR))
-                while (true) {
-                    SkipBlank(TokenKind.SEMI)
-                    if (Skip(TokenKind.RCURL)) {
-                        ret.rightCurlPos = lastToken.Begin()
-                        break
-                    }
-                    if (DetectPrematureEnd()) {
-                        DiagExpectedRightDelimiter("{", ret.leftCurlPos)
-                        break
-                    }
-                    let member = ParseDecl(ScopeKind.ENUM_BODY)
-                    if (member.IsInvalid()) {
-                        continue
-                    }
-                    if (member.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
-                        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_decl,
-                            MakeRange(member.identifier.Begin(), member.identifier.End()), member.identifier.Val()).Emit()
-                    }
-                    SetMemberParentInheritableDecl(ret, member)
-                    ret.members.add(member)
-                }
-                ret.end = ret.rightCurlPos + 1
             }
+            ret.leftCurlPos = lastToken.Begin()
+            ret.bodyScope = DummyBody()
+            if (let Some(bodyScope) <- ret.bodyScope) {
+                bodyScope.begin = ret.leftCurlPos
+            }
+            if (Seeing(TokenKind.BITOR)) {
+                Next()
+            }
+            do {
+                if (lastToken.kind == TokenKind.BITOR) {
+                    ret.bitOrPosVector.add(lastToken.Begin())
+                }
+                let seeingEllipse = Seeing(TokenKind.ELLIPSIS)
+                if ((!seeingEllipse && !Seeing(TokenKind.IDENTIFIER) && !SeeingMacroCallDecl() &&
+                    !SeeingContextualKeyword() && !SeeingAtWhen()) || SeeingKeywordWithDecl()) {
+                    if (!ret.TestAttr(Attribute.IS_BROKEN)) {
+                        DiagExpectedIdentifierEnumDecl(ret)
+                    }
+                    TryConsumeUntilAny([TokenKind.BITOR])
+                    ret.EnableAttr(Attribute.IS_BROKEN)
+                } else if (seeingEllipse) {
+                    Next()
+                    if (ret.constructors.isEmpty()) {
+                        DiagExpectedIdentifierEnumDecl(ret)
+                    }
+                    ret.hasEllipsis = true
+                    ret.ellipsisPos = lastToken.Begin()
+                    break
+                } else {
+                    ParseCaseBody(ret)
+                }
+                SkipBlank(TokenKind.SEMI)
+            } while (Skip(TokenKind.BITOR))
+            while (true) {
+                SkipBlank(TokenKind.SEMI)
+                if (Skip(TokenKind.RCURL)) {
+                    ret.rightCurlPos = lastToken.Begin()
+                    break
+                }
+                if (DetectPrematureEnd()) {
+                    DiagExpectedRightDelimiter("{", ret.leftCurlPos)
+                    break
+                }
+                let member = ParseDecl(ScopeKind.ENUM_BODY)
+                if (member.IsInvalid()) {
+                    continue
+                }
+                if (member.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_decl,
+                        MakeRange(member.identifier.Begin(), member.identifier.End()), member.identifier.Val()).Emit()
+                }
+                SetMemberParentInheritableDecl(ret, member)
+                ret.members.add(member)
+            }
+            ret.end = ret.rightCurlPos + 1
         }
         return ret
     }
