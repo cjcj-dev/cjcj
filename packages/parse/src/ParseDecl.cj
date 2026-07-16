@@ -1294,6 +1294,7 @@ extend ParserImpl {
     }
 
     public func ParseFuncParam(): FuncParam {
+        // C++: Parse/ParseAtom.cpp:1459-1490 ParserImpl::ParseFuncParam.
         let consumeTarget = { =>
             SeeingAny([TokenKind.DOUBLE_ARROW, TokenKind.COLON, TokenKind.COMMA, TokenKind.NL, TokenKind.SEMI,
                 TokenKind.RCURL]) || SeeingCombinator(combinedDoubleArrow)
@@ -1306,7 +1307,7 @@ extend ParserImpl {
                 param.identifier = ExpectIdentifierWithPos(param)
             }
             if (param.identifier.Empty()) {
-                param.EnableAttr(Attribute.IS_BROKEN)
+                chainedAST[chainedAST.size - 1].EnableAttr(Attribute.IS_BROKEN)
                 ConsumeUntilAny(consumeTarget, targetTokenConsumed: false)
             }
             param.isVar = false

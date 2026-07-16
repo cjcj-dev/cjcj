@@ -2064,6 +2064,7 @@ extend ParserImpl {
         return ParseLambdaExpr(false)
     }
 
+    // C++: Parse/ParseAtom.cpp:1492-1518 ParserImpl::ParseFuncParamListInLambdaExpr.
     private func ParseFuncParamListInLambdaExpr(): AstFuncParamList {
         let paramList = AstFuncParamList()
         try (cs = ChainScope(this, paramList)) {
@@ -2088,6 +2089,69 @@ extend ParserImpl {
             }
         }
         return paramList
+    }
+
+    // C++: Parse/ParseAtom.cpp:1520-1564 ParserImpl::ParseFuncBodyInLambdaExpr.
+    public func ParseFuncBodyInLambdaExpr(isTailClosure: Bool): AstFuncBody {
+        let funcBody = AstFuncBody()
+        try (cs = ChainScope(this, funcBody)) {
+            let paramList = ParseFuncParamListInLambdaExpr()
+            if (paramList.TestAttr(Attribute.IS_BROKEN)) {
+                chainedAST[chainedAST.size - 1].EnableAttr(Attribute.HAS_BROKEN)
+            }
+            if (!paramList.params.isEmpty() && !Skip(TokenKind.DOUBLE_ARROW) && !SkipCombinedDoubleArrow()) {
+                if (!chainedAST[chainedAST.size - 1].TestAttr(Attribute.HAS_BROKEN)) {
+                    ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_lambda, Peek(),
+                        ConvertToken(Peek())).Emit()
+                }
+                ConsumeUntilAny({ =>
+                    return SeeingAny([TokenKind.NL, TokenKind.SEMI, TokenKind.DOUBLE_ARROW, TokenKind.RCURL]) ||
+                        SeeingCombinator(combinedDoubleArrow)
+                }, targetTokenConsumed: false)
+                if (!Skip(TokenKind.DOUBLE_ARROW)) {
+                    let _ = SkipCombinedDoubleArrow()
+                }
+            } else {
+                if (paramList.params.isEmpty() && !isTailClosure) {
+                    let hasDoubleArrow = lastToken.kind == TokenKind.DOUBLE_ARROW ||
+                        Skip(TokenKind.DOUBLE_ARROW) || SkipCombinedDoubleArrow()
+                    let hasWildard = Seeing([TokenKind.WILDCARD, TokenKind.DOUBLE_ARROW]) ||
+                        Seeing([TokenKind.WILDCARD, TokenKind.COMMA]) ||
+                        SeeingTokenAndCombinator(TokenKind.WILDCARD, combinedDoubleArrow)
+                    if (!hasDoubleArrow && !hasWildard) {
+                        ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_lambda, Peek(),
+                            ConvertToken(Peek())).Emit()
+                    }
+                }
+                if (lastToken.kind == TokenKind.DOUBLE_ARROW || Skip(TokenKind.DOUBLE_ARROW) ||
+                    SkipCombinedDoubleArrow()) {
+                    funcBody.doubleArrowPos = lastToken.Begin()
+                }
+            }
+            funcBody.begin = lastToken.Begin()
+            funcBody.paramLists.add(paramList)
+            let block = ParseExpressionOrDeclarations(ScopeKind.FUNC_BODY)
+            funcBody.body = Some(block)
+            funcBody.end = block.end
+        }
+        return funcBody
+    }
+
+    // C++: Parse/ParseAtom.cpp:1623-1640 ParserImpl::ParseBaseLambdaExpr.
+    public func ParseBaseLambdaExpr(): LambdaExpr {
+        let ret = LambdaExpr()
+        ret.begin = lastToken.Begin()
+        if (SeeingInvaildOperaterInLambdaExpr()) {
+            Skip(TokenKind.IDENTIFIER)
+            SkipKeyWordIdentifier()
+            Peek()
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_ccd_in_lambda, Peek(), ConvertToken(Peek())).Emit()
+            ConsumeUntilAny({ =>
+                return SeeingAny([TokenKind.NL, TokenKind.SEMI, TokenKind.DOUBLE_ARROW, TokenKind.RCURL]) ||
+                    SeeingCombinator(combinedDoubleArrow)
+            }, targetTokenConsumed: false)
+        }
+        return ret
     }
 
     public func ParseLambdaExpr(isTailClosure: Bool): LambdaExpr {

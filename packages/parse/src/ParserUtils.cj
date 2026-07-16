@@ -667,6 +667,40 @@ extend ParserImpl {
         return true
     }
 
+    // C++: Parse/ParserUtils.cpp:734-765 ParserImpl::SeeingInvaildOperaterInLambdaExpr.
+    public func SeeingInvaildOperaterInLambdaExpr(): Bool {
+        let tokenKinds = [TokenKind.COMMA, TokenKind.COLON, TokenKind.DOUBLE_ARROW]
+        if (SeeingIdentifierLike()) {
+            let combinedDoubleArrowSize: Int64 = 2
+            let lookNum = combinedDoubleArrowSize + 1
+            let tokens = lexer.LookAheadSkipNL(lookNum)
+            CJC_ASSERT(!tokens.isEmpty())
+            if (tokens[0].kind != TokenKind.NOT) {
+                return false
+            }
+            if (tokens.size < 2) {
+                return false
+            }
+            let secondTk = tokens[1]
+            if (tokenKinds.contains(secondTk.kind)) {
+                return true
+            }
+            if (tokens.size < lookNum) {
+                return false
+            }
+            let thirdTk = tokens[tokens.size - 1]
+            CJC_ASSERT(combinedDoubleArrow.size == combinedDoubleArrowSize)
+            if (secondTk.kind != combinedDoubleArrow[0] || thirdTk.kind != combinedDoubleArrow[1]) {
+                return false
+            }
+            if (thirdTk.Begin().line == secondTk.Begin().line &&
+                thirdTk.Begin().column == secondTk.Begin().column + 1) {
+                return true
+            }
+        }
+        return false
+    }
+
     public func SeeingPrimitiveTypeToken(kind: TokenKind): Bool {
         let idx = TokenKindIndex(kind)
         return idx >= TokenKindIndex(TokenKind.INT8) && idx <= TokenKindIndex(TokenKind.UNIT)
