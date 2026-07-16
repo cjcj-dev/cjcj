@@ -1220,20 +1220,20 @@ public class InitializationChecker {
 
     private func IsUsedInInitFunction(expr: Expr): Bool {
         if (let Some(decl) <- expr.GetTarget()) {
-            if (!decl.TestAnyAttr(Attribute.IN_STRUCT, Attribute.IN_CLASSLIKE)) {
-                return false
-            }
-            if (let Some(currentFunc) <- CurrentNamedFuncDecl()) {
-                if (!currentFunc.TestAttr(Attribute.CONSTRUCTOR)) {
-                    return false
-                }
-                if (currentFunc.TestAttr(Attribute.STATIC) != decl.TestAttr(Attribute.STATIC)) {
-                    return false
-                }
-                if (let Some(exprOuter) <- currentFunc.outerDecl) {
-                    if (let Some(targetOuter) <- decl.outerDecl) {
-                        return exprOuter.IsNominalDecl() && targetOuter.IsNominalDecl() &&
-                            IsRelatedTypeDecl(exprOuter, targetOuter)
+            if (decl.TestAnyAttr(Attribute.IN_STRUCT, Attribute.IN_CLASSLIKE)) {
+                let symOfVdStruct = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, decl.scopeName)
+                let symOfExprStruct = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, expr.scopeName)
+                let symOfExprFunc = ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC, expr.scopeName)
+                if ((let Some(vdStruct) <- symOfVdStruct) && (let Some(exprStruct) <- symOfExprStruct) &&
+                    (let Some(exprFunc) <- symOfExprFunc)) {
+                    let structOfExpr = (exprStruct.node.getOrThrow() as Decl).getOrThrow()
+                    let structOfVd = (vdStruct.node.getOrThrow() as Decl).getOrThrow()
+                    let currentFunc = exprFunc.node.getOrThrow()
+                    let sameStaticStatus = currentFunc.TestAttr(Attribute.STATIC) ==
+                        decl.TestAttr(Attribute.STATIC)
+                    if (currentFunc.TestAttr(Attribute.CONSTRUCTOR) && sameStaticStatus &&
+                        IsRelatedTypeDecl(structOfExpr, structOfVd)) {
+                        return true
                     }
                 }
             }
