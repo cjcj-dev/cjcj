@@ -7272,8 +7272,9 @@ public class Translator {
             args.add(GetDerefedValue(indexValue))
         }
         let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_GET, args: args)
-        return RequireResult(builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(expr)), callContext,
-            CurrentBlock()))
+        let intrinsic = builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(expr)), callContext, CurrentBlock())
+        intrinsic.SetDebugLocation(TranslateLocation(expr))
+        return RequireResult(intrinsic)
     }
 
     private func TranslateEnumCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {

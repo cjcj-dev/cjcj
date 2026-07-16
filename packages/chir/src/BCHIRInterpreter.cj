@@ -1,10 +1,11 @@
 package cjcj::chir
 
 import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
+import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Position as BasicPosition
-import cjcj::utils.OverflowStrategy
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, OverflowStrategy}
 import std.collection.*
 
 public class BCHIRInterpreter {
@@ -309,8 +310,8 @@ public class BCHIRInterpreter {
                 if (let Some(sourceKind) <- TypeKindFromCell(code.Get(pc + 1))) {
                     if (let Some(targetKind) <- TypeKindFromCell(code.Get(pc + 2))) {
                         if (let Some(strategy) <- OverflowStrategyFromCell(code.Get(pc + 3))) {
-                            if (let Some(casted) <- CastValueToTypeKind(interpStack.ArgsPopIVal(), sourceKind,
-                                targetKind, strategy)) {
+                            if (let Some(casted) <- InterpretTypeCast(interpStack.ArgsPopIVal(), sourceKind,
+                                targetKind, strategy, pc)) {
                                 interpStack.ArgsPush(casted)
                                 pc += 1 + GetOpCodeArgSize(opCode)
                             } else {
@@ -377,7 +378,7 @@ public class BCHIRInterpreter {
                 }
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (IsBinaryOp(opCode)) {
-                if (!EvaluateBinary(opCode, pc)) {
+                if (!BinOp(opCode, pc)) {
                     return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 pc += 1 + GetOpCodeArgSize(opCode)
@@ -477,6 +478,37 @@ public class BCHIRInterpreter {
         interpreterError = true
     }
 
+    // Mirrors C++ BCHIRInterpreter.cpp:749-752.
+    private func RaiseArithmeticException(sourcePc: Int64): Unit {
+        ReportConstEvalException(sourcePc, "ArithmeticException")
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:754-757.
+    private func RaiseOverflowException(sourcePc: Int64): Unit {
+        ReportConstEvalException(sourcePc, "OverflowException")
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:759-762.
+    private func RaiseIndexOutOfBoundsException(sourcePc: Int64): Unit {
+        ReportConstEvalException(sourcePc, "IndexOutOfBoundsException")
+    }
+
+    // Mirrors C++ BCHIRInterpreter.h:294-311.
+    private func FailWith(opIndex: Int64, excErrorMsg: String, kind: BasicDiagKind, arg: String): Unit {
+        let sourceManager = diag.GetSourceManager()
+        let position = bchir.GetLinkedByteCode().GetCodePositionAnnotation(opIndex) ??
+            BCHIRCodePosition(0, 0, 0)
+        let fileName = bchir.GetFileName(position.fileID)
+        let fileID = sourceManager.TryGetFileID(fileName) ?? sourceManager.AddSource(fileName, "")
+        let diagnosticPosition = BasicPosition(fileID, position.line, position.column)
+        if (diagnosticPosition.IsZero()) {
+            diag.Diagnose(kind, args: [BasicDiagArgument(arg)]).Emit()
+        } else {
+            diag.Diagnose(diagnosticPosition, kind, args: [BasicDiagArgument(arg)]).Emit()
+        }
+        RaiseError(opIndex, excErrorMsg)
+    }
+
     // Mirrors C++ BCHIRInterpreter.cpp:774-788.
     private func ReportConstEvalException(opIndex: Int64, exceptionName: String): Unit {
         interpreterError = true
@@ -493,6 +525,92 @@ public class BCHIRInterpreter {
         let error = diag.Diagnose(errorPosition, BasicDiagKind.const_eval_exception)
         error.AddNote(exceptionName)
         error.Emit()
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:817-828.
+    private func CastOrRaiseExceptionForInt(value: InterpreterValue, sourceKind: TypeKind,
+        targetKind: TypeKind, strategy: OverflowStrategy, opIndex: Int64): Option<InterpreterValue> {
+        let raw = ValueAsInt(value) ?? return None
+        let result = if (IsUnsignedIntegerTypeKind(sourceKind)) {
+            let unsignedRaw = if (raw >= 0) { UInt64(raw) } else { UInt64.Max - UInt64(-(raw + 1)) }
+            OverflowChecker.IsTypecastOverflowForInt(unsignedRaw, targetKind, strategy)
+        } else {
+            OverflowChecker.IsTypecastOverflowForInt(raw, targetKind, strategy)
+        }
+        if (result.isOverflow && strategy == OverflowStrategy.THROWING) {
+            RaiseOverflowException(opIndex)
+            return None
+        }
+        if (targetKind == TypeKind.TYPE_RUNE) {
+            return InterpreterValue.MakeRune(Rune(result.value))
+        }
+        return IntegerValueForTypeKind(targetKind, result.value)
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:841-855.
+    private func CastOrRaiseExceptionForFloat(value: InterpreterValue, targetKind: TypeKind,
+        opIndex: Int64): Option<InterpreterValue> {
+        let raw = value.GetFloat()
+        if (IsTypecastOverflowForFloat(raw, targetKind)) {
+            RaiseOverflowException(opIndex)
+            return None
+        }
+        let converted = if (IsUnsignedIntegerTypeKind(targetKind)) {
+            let unsignedValue = UInt64(raw)
+            if (unsignedValue <= UInt64(Int64.Max)) {
+                Int64(unsignedValue)
+            } else {
+                -1 - Int64(UInt64.Max - unsignedValue)
+            }
+        } else {
+            Int64(raw)
+        }
+        return IntegerValueForTypeKind(targetKind, converted)
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:857-903.
+    private func InterpretTypeCastForInt(value: InterpreterValue, sourceKind: TypeKind, targetKind: TypeKind,
+        strategy: OverflowStrategy, opIndex: Int64): Option<InterpreterValue> {
+        if (IsIntegerTypeKind(targetKind) || targetKind == TypeKind.TYPE_RUNE) {
+            return CastOrRaiseExceptionForInt(value, sourceKind, targetKind, strategy, opIndex)
+        }
+        if (IsFloatTypeKind(targetKind)) {
+            return CastValueToTypeKind(value, sourceKind, targetKind, strategy)
+        }
+        FailWith(opIndex, "interpreter cannot perform integer typecast",
+            BasicDiagKind.interp_cannot_interp_node, "InterpretTypeCastForInt")
+        return None
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:905-950.
+    private func InterpretTypeCastForFloat(value: InterpreterValue, sourceKind: TypeKind, targetKind: TypeKind,
+        strategy: OverflowStrategy, opIndex: Int64): Option<InterpreterValue> {
+        if (IsIntegerTypeKind(targetKind)) {
+            return CastOrRaiseExceptionForFloat(value, targetKind, opIndex)
+        }
+        if (IsFloatTypeKind(targetKind)) {
+            return CastValueToTypeKind(value, sourceKind, targetKind, strategy)
+        }
+        FailWith(opIndex, "interpreter cannot perform float typecast",
+            BasicDiagKind.interp_cannot_interp_node, "InterpretTypeCastForFloat")
+        return None
+    }
+
+    // Mirrors C++ BCHIRInterpreter.cpp:952-1019.
+    private func InterpretTypeCast(value: InterpreterValue, sourceKind: TypeKind, targetKind: TypeKind,
+        strategy: OverflowStrategy, opIndex: Int64): Option<InterpreterValue> {
+        if (sourceKind == TypeKind.TYPE_RUNE) {
+            CJC_ASSERT(targetKind == TypeKind.TYPE_UINT32 || targetKind == TypeKind.TYPE_UINT64)
+            return CastValueToTypeKind(value, sourceKind, targetKind, strategy)
+        }
+        if (IsIntegerTypeKind(sourceKind) || sourceKind == TypeKind.TYPE_BOOLEAN) {
+            return InterpretTypeCastForInt(value, sourceKind, targetKind, strategy, opIndex)
+        }
+        if (IsFloatTypeKind(sourceKind)) {
+            return InterpretTypeCastForFloat(value, sourceKind, targetKind, strategy, opIndex)
+        }
+        CJC_ABORT()
+        return None
     }
 
     private func CurrentFrameName(code: BCHIRDefinition, pc: Int64): String {
@@ -755,6 +873,7 @@ public class BCHIRInterpreter {
             let index = path[pathIdx].GetInt()
             let elements = current.GetElementsRef()
             if (index < 0 || index >= elements.size) {
+                RaiseIndexOutOfBoundsException(varrayGetPc)
                 return None
             }
             current = elements[index]
@@ -911,11 +1030,11 @@ public class BCHIRInterpreter {
         return false
     }
 
-    private func EvaluateBinary(opCode: OpCode, opIndex: Int64): Bool {
+    private func BinOp(opCode: OpCode, opIndex: Int64): Bool {
         let right = interpStack.ArgsPopIVal()
         let left = interpStack.ArgsPopIVal()
         if (left.IsIntLike() && right.IsIntLike()) {
-            return EvaluateIntBinary(opCode, left, right, opIndex)
+            return BinRegOpInt(opCode, left, right, opIndex)
         }
         if (left.IsFloatLike() && right.IsFloatLike()) {
             return EvaluateFloatBinary(opCode, left, right)
@@ -941,7 +1060,7 @@ public class BCHIRInterpreter {
         return false
     }
 
-    private func EvaluateIntBinary(
+    private func BinRegOpInt(
         opCode: OpCode, left: InterpreterValue, right: InterpreterValue, opIndex: Int64
     ): Bool {
         let lhs = left.GetInt()
@@ -949,6 +1068,11 @@ public class BCHIRInterpreter {
         if (opCode == OpCode.BIN_LSHIFT || opCode == OpCode.BIN_LSHIFT_EXC ||
             opCode == OpCode.BIN_RSHIFT || opCode == OpCode.BIN_RSHIFT_EXC) {
             return BinShiftOpIntCase(opCode, left, right, opIndex)
+        }
+        if ((opCode == OpCode.BIN_DIV || opCode == OpCode.BIN_DIV_EXC ||
+            opCode == OpCode.BIN_MOD || opCode == OpCode.BIN_MOD_EXC) && rhs == 0) {
+            RaiseArithmeticException(opIndex)
+            return false
         }
         let result = match (opCode) {
             case OpCode.BIN_ADD => InterpreterValue.MakeInt(left.kind, lhs + rhs)
@@ -1159,6 +1283,26 @@ private func OverflowStrategyFromCell(cell: Int64): Option<OverflowStrategy> {
         case 4 => OverflowStrategy.SATURATING
         case _ => None
     }
+}
+
+// Mirrors C++ BCHIRInterpreter.cpp:830-839.
+private func IsTypecastOverflowForFloat(value: Float64, targetKind: TypeKind): Bool {
+    let bounds = match (targetKind) {
+        case TypeKind.TYPE_INT8 => (Float64(Int8.Min), Float64(Int8.Max))
+        case TypeKind.TYPE_INT16 => (Float64(Int16.Min), Float64(Int16.Max))
+        case TypeKind.TYPE_INT32 => (Float64(Int32.Min), Float64(Int32.Max))
+        case TypeKind.TYPE_INT64 => (Float64(Int64.Min), Float64(Int64.Max))
+        case TypeKind.TYPE_INT_NATIVE => (Float64(IntNative.Min), Float64(IntNative.Max))
+        case TypeKind.TYPE_UINT8 => (0.0, Float64(UInt8.Max))
+        case TypeKind.TYPE_UINT16 => (0.0, Float64(UInt16.Max))
+        case TypeKind.TYPE_UINT32 => (0.0, Float64(UInt32.Max))
+        case TypeKind.TYPE_UINT64 => (0.0, Float64(UInt64.Max))
+        case TypeKind.TYPE_UINT_NATIVE => (0.0, Float64(UIntNative.Max))
+        case _ => return false
+    }
+    let bMax = value > bounds[1]
+    let bMin = value < bounds[0]
+    return bMax || bMin
 }
 
 private func CastValueToTypeKind(value: InterpreterValue, sourceKind: TypeKind,
