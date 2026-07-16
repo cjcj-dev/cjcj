@@ -556,8 +556,6 @@ extend MPTypeCheckerImpl {
             if (let Some(generic) <- extendDecl.generic) {
                 key += CalculatedGenericConstraintsStr(generic.genericConstraints, genericIdx)
             }
-            eprintln("CJMP-EXTKEY key=${key} common=${extendDecl.TestAttr(Attribute.COMMON)} " +
-                "specific=${extendDecl.TestAttr(Attribute.SPECIFIC)} id=${extendDecl.objectId}")
 
             if (extendDecl.TestAttr(Attribute.COMMON)) {
                 if (let Some(specificExtendDecl) <- specificExtendDecls.get(key)) {
