@@ -182,17 +182,25 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformOverflowStrategy(): Bool {
+        let recorder = ProfileRecorder("Main Stage", "Overflow Strategy")
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
+            recorder.close()
             return true
         }
-        return super.PerformOverflowStrategy()
+        let ret = super.PerformOverflowStrategy()
+        recorder.close()
+        return ret
     }
 
     public override func PerformDesugarAfterSema(): Bool {
+        let recorder = ProfileRecorder("Main Stage", "Desugar after Sema")
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
+            recorder.close()
             return true
         }
-        return super.PerformDesugarAfterSema()
+        let ret = super.PerformDesugarAfterSema()
+        recorder.close()
+        return ret
     }
 
     public override func PerformGenericInstantiation(): Bool {
@@ -250,7 +258,9 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformCHIRCompilation(): Bool {
+        let recorder = ProfileRecorder("Main Stage", "CHIR")
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
+            recorder.close()
             return true
         }
         let ret = super.PerformCHIRCompilation()
@@ -261,18 +271,23 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             UpdateIncrRemovedDeclsForVarInitDep(cacheMangles, rawIncrRemovedDecls,
                 core.cachedInfo.varInitDepMap)
         }
+        recorder.close()
         return ret
     }
 
     public override func PerformCodeGen(): Bool {
+        let recorder = ProfileRecorder("Main Stage", "CodeGen")
         if (kind == IncreKind.NO_CHANGE) {
             for (srcPkg in core.GetSourcePackages()) {
                 LoadCachedCodegenResult()
                 invocation.globalOptions.UpdateCachedDirName(srcPkg.fullPackageName)
             }
+            recorder.close()
             return true
         }
-        return CodegenOnePackage(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)
+        let ret = CodegenOnePackage(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)
+        recorder.close()
+        return ret
     }
 
     public override func PerformCjoSaving(): Bool {
@@ -296,7 +311,9 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 
     public override func PerformResultsSaving(): Bool {
+        let recorder = ProfileRecorder("Main Stage", "Save results")
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
+            recorder.close()
             return true
         }
         var ret = true
@@ -309,6 +326,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
                     core.importManager.ExportASTSignature(pkg))
             }
         }
+        recorder.close()
         return ret
     }
 
