@@ -339,7 +339,27 @@ extend ParserImpl {
     }
 
     public func DiagExpectedIdentifierRefType(_: Node): Unit {
-        DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.End()))
+        let toGenericLen: Int64 = 2
+        if (chainedAST.size <= toGenericLen) {
+            DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.End()))
+            return
+        }
+        let parent = chainedAST[chainedAST.size - 2]
+        if (parent.astKind != ASTKind.GENERIC_CONSTRAINT) {
+            DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.End()))
+            return
+        }
+        let genericConstraint = (parent as GenericConstraint).getOrThrow()
+        if (!genericConstraint.wherePos.IsZero()) {
+            DiagExpectedIdentifier(
+                MakeRange(genericConstraint.wherePos, genericConstraint.wherePos + "where".size),
+                "a generic type name", "after 'where' in generic constraint")
+        } else if (lastToken.kind == TokenKind.COMMA && !lastToken.Begin().IsZero()) {
+            DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.Begin() + ",".size),
+                "a generic type name", "after ',' in generic constraint")
+        } else {
+            CJC_ABORT()
+        }
     }
 
     public func DiagExpectedIdentifierPropDecl(node: Node): Unit {
