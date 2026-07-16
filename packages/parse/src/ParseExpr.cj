@@ -1021,7 +1021,8 @@ extend ParserImpl {
         ret.backarrowPos = lastToken.Begin()
         if (AtTerminator()) {
             ParseDiagnoseRefactor(
-                DiagKindRefactor.parse_expected_expression, lastToken.End(), lastToken.Value(), Peek().Value()).Emit()
+                DiagKindRefactor.parse_expected_expression, lastToken.End(), ConvertToken(lastToken),
+                ConvertToken(Peek())).Emit()
             let invalid = InvalidExpr(Peek().Begin())
             ret.initializer = invalid
             ret.end = invalid.end
