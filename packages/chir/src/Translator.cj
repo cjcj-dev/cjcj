@@ -726,6 +726,30 @@ public class Translator {
         chirParam.SetAnnoInfo(CreateAnnoFactoryFuncSig(astParam, parent))
     }
 
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateAnnotation.cpp:247-262.
+    public func CreateAnnoFactoryFuncsForFuncDecl(funcDecl: AstFuncDecl,
+        parent: Option<CustomTypeDef>): Unit {
+        if (funcDecl.TestAttr(AstAttribute.IMPORTED)) {
+            return
+        }
+        let funcBody = funcDecl.funcBody.getOrThrow()
+        CJC_ASSERT(!funcBody.paramLists.isEmpty())
+        let params = funcBody.paramLists[0].params
+        let funcDef = (GetSymbolTable(funcDecl) as Function).getOrThrow()
+        let annotatedDecl: AstDecl = if (let Some(propDecl) <- funcDecl.propDecl) {
+            propDecl
+        } else {
+            funcDecl
+        }
+        CreateAnnotationInfo(annotatedDecl, funcDef, parent)
+        let offset: Int64 = if (params.size == funcDef.GetNumOfParams()) { 0 } else { 1 }
+        var index: Int64 = 0
+        while (index < params.size) {
+            CreateParamAnnotationInfo(params[index], funcDef.GetParam(index + offset), parent)
+            index++
+        }
+    }
+
     public func TranslateAnnoFactoryFuncBody(decl: AstDecl, funcDef: Function): Unit {
         let body = builder.CreateBlockGroup(funcDef)
         blockGroupStack.add(body)
@@ -4038,6 +4062,7 @@ public class Translator {
         if (let Some(instFuncs) <- genericFuncMap.Get(funcDecl)) {
             AddMemberFunctionGenericInstantiations(def, instFuncs, funcDecl)
         }
+        CreateAnnoFactoryFuncsForFuncDecl(funcDecl, Some(def))
     }
 
     private func TranslateClassLikeMemberFuncDecl(classDef: ClassDef, funcDecl: AstFuncDecl): Unit {
@@ -4078,6 +4103,7 @@ public class Translator {
             case Some(value) => value
             case None =>
                 AddExtendGenericFuncInstantiations(def, funcDecl, funcDecl)
+                CreateAnnoFactoryFuncsForFuncDecl(funcDecl, Some(def))
                 return
         }
         if (!body.paramLists.isEmpty()) {
@@ -4089,6 +4115,7 @@ public class Translator {
             }
         }
         AddExtendGenericFuncInstantiations(def, funcDecl, funcDecl)
+        CreateAnnoFactoryFuncsForFuncDecl(funcDecl, Some(def))
     }
 
     private func AddExtendGenericFuncInstantiations(def: ExtendDef, genericFunc: AstFuncDecl,
@@ -4113,9 +4140,11 @@ public class Translator {
         } else {
             for (getter in propDecl.getters) {
                 AddMethodIfPresent(def, getter)
+                CreateAnnoFactoryFuncsForFuncDecl(getter, Some(def))
             }
             for (setter in propDecl.setters) {
                 AddMethodIfPresent(def, setter)
+                CreateAnnoFactoryFuncsForFuncDecl(setter, Some(def))
             }
         }
     }

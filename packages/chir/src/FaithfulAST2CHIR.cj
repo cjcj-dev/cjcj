@@ -4392,6 +4392,11 @@ public class FaithfulAST2CHIR {
             implicitFuncs[fn.GetIdentifierWithoutPrefix()] = fn
         }
         globalCache.Set(funcDecl, fn)
+        if (funcDecl.TestAttr(AstAttribute.GLOBAL) &&
+            !funcDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
+            let translator = CreateTranslator()
+            translator.CreateAnnoFactoryFuncsForFuncDecl(funcDecl, None)
+        }
     }
 
     private func CreatePseudoImportedFuncSignatureAndSetGlobalCache(funcDecl: AstFuncDecl): Unit {
