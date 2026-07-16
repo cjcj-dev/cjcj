@@ -6167,7 +6167,6 @@ extend TypeChecker {
     private func SynthesizeForInExpr(ctx: ASTContext, forInExpr: ForInExpr): Ty {
         var isWellTyped = true
         var inPatternTy: Ty = TypeManager.GetInvalidTy()
-        let boundDecls = ArrayList<Decl>()
         if (let Some(inExpression) <- forInExpr.inExpression) {
             let inTy = Synthesize(ctx, SynPos.EXPR_ARG, inExpression)
             isWellTyped = Ty.IsTyCorrect(inTy) &&
@@ -6193,12 +6192,6 @@ extend TypeChecker {
                     Check(ctx, patternExpectedTy, patternExpr)
                 }), diag: impl.diag)
             isWellTyped = patternOk && isWellTyped
-            if (patternOk) {
-                CollectPatternBinding(pattern, boundDecls)
-                for (decl in boundDecls) {
-                    BindLocalDeclIfAbsent(ctx, decl)
-                }
-            }
         } else {
             isWellTyped = false
         }
@@ -6219,7 +6212,6 @@ extend TypeChecker {
                 DiagnoseForInPattern(forInExpr)
             }
         }
-        RemovePatternBindings(ctx, boundDecls)
         let ty = if (isWellTyped) {
             TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
         } else {
