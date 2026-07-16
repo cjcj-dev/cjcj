@@ -549,6 +549,35 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 }
 
+// C++: FrontendTool/IncrementalCompilerInstance.cpp:427-441.
+private func UpdateIncrRemovedDeclsForVirtualFuncDep(cacheMangles: CachedMangleMap,
+    rawIncrRemovedDecls: ArrayList<String>, virtualFuncDep: VirtualWrapperDepMap,
+    delVirtFuncWrapForIncr: VirtualWrapperDepMap): Unit {
+    let logger = IncrementalCompilationLogger.GetInstance()
+    for (deletedRaw in rawIncrRemovedDecls) {
+        if (let Some(wrapper) <- virtualFuncDep.get(deletedRaw)) {
+            logger.LogLn("[delVirDep][remove] raw: " + deletedRaw + " mg: " + wrapper)
+            cacheMangles.incrRemovedDecls.add(wrapper)
+        }
+    }
+    for ((deletedRaw, deleted) in delVirtFuncWrapForIncr) {
+        logger.LogLn("[delVirDep][change] raw: " + deletedRaw + " mg: " + deleted)
+        cacheMangles.incrRemovedDecls.add(deleted)
+    }
+}
+
+// C++: FrontendTool/IncrementalCompilerInstance.cpp:442-452.
+private func UpdateIncrRemovedDeclsForVarInitDep(cacheMangles: CachedMangleMap,
+    rawIncrRemovedDecls: ArrayList<String>, varInitDepMap: VarInitDepMap): Unit {
+    let logger = IncrementalCompilationLogger.GetInstance()
+    for (deletedRaw in rawIncrRemovedDecls) {
+        if (let Some(init) <- varInitDepMap.get(deletedRaw)) {
+            logger.LogLn("[delVarInitDep][remove] raw: " + deletedRaw + " mg: " + init)
+            cacheMangles.incrRemovedDecls.add(init)
+        }
+    }
+}
+
 // C++: FrontendTool/IncrementalCompilerInstance.cpp:252-264.
 private func HasSimpleInitialiser(decl: VarDecl): Bool {
     let initializer = decl.initializer ?? return false
