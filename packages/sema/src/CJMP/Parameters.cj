@@ -88,8 +88,14 @@ extend MPTypeCheckerImpl {
 
     public func MatchCJMPFunctionParameters(specificFunc: FuncDecl, commonFunc: FuncDecl): Bool {
         if (specificFunc.identifier.GetRawText() == "f1" || specificFunc.identifier.GetRawText() == "f2") {
-            let specificOuterName = specificFunc.outerDecl.map({ outer: Decl => outer.rawMangleName }).getOrDefault("")
-            let commonOuterName = commonFunc.outerDecl.map({ outer: Decl => outer.rawMangleName }).getOrDefault("")
+            var specificOuterName = ""
+            var commonOuterName = ""
+            if (let Some(specificOuter) <- specificFunc.outerDecl) {
+                specificOuterName = specificOuter.rawMangleName
+            }
+            if (let Some(commonOuter) <- commonFunc.outerDecl) {
+                commonOuterName = commonOuter.rawMangleName
+            }
             let specificTy = specificFunc.GetTy().getOrThrow()
             let commonTy = commonFunc.GetTy().getOrThrow()
             eprintln("CJMP-PROBE func=${specificFunc.identifier.GetRawText()} sOuter=${specificOuterName} cOuter=${commonOuterName}")
