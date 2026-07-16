@@ -2450,7 +2450,7 @@ extend ParserImpl {
                 propDecl.modifiers.add(modifier)
             }
         }
-        propDecl.end = Peek().End()
+        propDecl.end = lastToken.End()
     }
 
     private func ParsePropMemberDecl(modifiers: ArrayList<Modifier>): FuncDecl {
@@ -2466,7 +2466,7 @@ extend ParserImpl {
                 ret.isSetter = true
             }
             Next()
-            ret.begin = Peek().Begin()
+            ret.begin = lastToken.Begin()
             if (!modifiers.isEmpty()) {
                 var firstModifier = modifiers[0]
                 for (modifier in modifiers) {
