@@ -157,37 +157,44 @@ extend ParserImpl {
 
     public func ParseMacroCall(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MacroExpandDecl {
         let decl = MacroExpandDecl()
-        if (let Some(file) <- currentFile) {
-            decl.curFile = file
-            file.hasMacro = true
-        }
-        ApplyModifiersAndAnnotations(decl, modifiers, annos)
-        decl.begin = if (decl.begin.IsZero()) { Peek().Begin() } else { decl.begin }
-        if (!modifiers.isEmpty()) {
-            let firstModifier = SortModifierByPos(modifiers)[0]
-            DiagExpectNoModifierBefore(firstModifier, "macro call")
-            decl.begin = firstModifier.begin
-        }
-        ParseMacroInvocation(scopeKind, modifiers, decl.invocation, decl)
-        if (!decl.invocation.hasParenthesis && decl.invocation.decl.isNone() &&
-            (SeeingDeclInScope(scopeKind) || SeeingMacroCallDecl())) {
-            ParseMacroCallArgsWithoutParen(scopeKind, modifiers, decl.invocation)
-        }
-        decl.identifier = SrcIdentifier(
-            decl.invocation.macroCallDiagInfo.identifier,
-            decl.invocation.macroCallDiagInfo.identifier,
-            decl.invocation.macroNamePos,
-            decl.invocation.macroNamePos + decl.invocation.macroCallDiagInfo.identifier.size,
-            false)
-        decl.end = if (let Some(inputDecl) <- decl.invocation.decl) { inputDecl.end } else { lastToken.End() }
-        let inputIsEnumConstructor = if (let Some(inputDecl) <- decl.invocation.decl) {
-            inputDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)
-        } else {
-            false
-        }
-        if (ScopeKindEquals(scopeKind, ScopeKind.ENUM_CONSTRUCTOR) &&
-            (decl.invocation.hasParenthesis || inputIsEnumConstructor)) {
-            decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+        try (cs = ChainScope(this, decl)) {
+            if (let Some(file) <- currentFile) {
+                decl.curFile = file
+                file.hasMacro = true
+            }
+            decl.begin = Peek().Begin()
+            if (!modifiers.isEmpty()) {
+                let firstModifier = SortModifierByPos(modifiers)[0]
+                DiagExpectNoModifierBefore(firstModifier, "macro call")
+                decl.begin = firstModifier.begin
+            }
+            ParseMacroInvocation(scopeKind, modifiers, decl.invocation, decl)
+            if (!decl.invocation.hasParenthesis && decl.invocation.decl.isNone() &&
+                (SeeingDeclInScope(scopeKind) || SeeingMacroCallDecl())) {
+                ParseMacroCallArgsWithoutParen(scopeKind, modifiers, decl.invocation)
+            }
+            decl.identifier = SrcIdentifier(
+                decl.invocation.macroCallDiagInfo.identifier,
+                decl.invocation.macroCallDiagInfo.identifier,
+                decl.invocation.macroNamePos,
+                decl.invocation.macroNamePos + decl.invocation.macroCallDiagInfo.identifier.size,
+                false)
+            if (!annos.isEmpty()) {
+                for (anno in annos) {
+                    decl.annotations.add(anno)
+                }
+                SetBeginToAnnotationsBegin(decl, decl.annotations)
+            }
+            decl.end = if (let Some(inputDecl) <- decl.invocation.decl) { inputDecl.end } else { lastToken.End() }
+            let inputIsEnumConstructor = if (let Some(inputDecl) <- decl.invocation.decl) {
+                inputDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)
+            } else {
+                false
+            }
+            if (ScopeKindEquals(scopeKind, ScopeKind.ENUM_CONSTRUCTOR) &&
+                (decl.invocation.hasParenthesis || inputIsEnumConstructor)) {
+                decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+            }
         }
         return decl
     }
