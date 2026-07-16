@@ -47,6 +47,13 @@ public func AddCurFile(root: Node, file!: Option<File> = None): Unit {
 
 private func assignCurFile(root: Node, file: File): Unit {
     let walker = Walker(root, visitPre: { curNode: Node =>
+        if (let Some(fileNode) <- (curNode as File)) {
+            fileNode.curFile = Some(fileNode)
+            for (importSpec in fileNode.imports) {
+                importSpec.curFile = Some(fileNode)
+            }
+            return VisitAction.WALK_CHILDREN
+        }
         if (let None <- curNode.curFile) {
             curNode.curFile = file
         }
