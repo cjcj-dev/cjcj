@@ -8168,7 +8168,6 @@ public class Translator {
 
     private func TranslateMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
         let loc = TranslateLocation(expr)
-        let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let argValues = ArrayList<Value>()
         let callee = globalSymbolTable.Get(calleeDecl)
         let calleeInfo = if (let Some(base) <- expr.baseFunc) {
@@ -8182,6 +8181,7 @@ public class Translator {
         } else {
             throw IllegalStateException("faithful AST2CHIR member call has no base")
         }
+        let resultTy = calleeInfo.instRetTy
         var thisType: Option<Type> = Some(calleeInfo.thisType)
         var thisObj: Option<Value> = None
         var expectedThisObjTy: Option<Type> = None
