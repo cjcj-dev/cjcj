@@ -105,6 +105,21 @@ private func HasNonParamCtorForClass(classDecl: ClassDecl): Bool {
     return false
 }
 
+// C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:137-143 ParamMemUsage.
+private class ParamMemUsage {
+    let id: String
+    let sig: MemSig
+    let decls: HashSet<Decl>
+    let resultConstrained: Bool
+
+    init(id: String, sig: MemSig, decls: HashSet<Decl>, resultConstrained!: Bool = false) {
+        this.id = id
+        this.sig = sig
+        this.decls = decls
+        this.resultConstrained = resultConstrained
+    }
+}
+
 extend TypeChecker {
     // C++ src/Sema/TypeCheckExpr.cpp:98-134.
     public func SetCaptureKind(ctx: ASTContext, nre: NameReferenceExpr, curFuncBody: FuncBody): Unit {
@@ -5109,11 +5124,9 @@ extend TypeChecker {
         return false
     }
 
-    private func FindCandidatesFromCall(
-        ctx: ASTContext,
-        callExpr: CallExpr,
-        unsolvedParams: HashMap<String, FuncParam>
-    ): (String, ArrayList<Decl>) {
+    // C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:147-158 FindCandidatesFromCall.
+    private func FindCandidatesFromCall(ctx: ASTContext, callExpr: CallExpr,
+        unsolvedParams: HashMap<String, FuncParam>, resultConstrained: Bool): ParamMemUsage {
         if (let Some(baseFunc) <- callExpr.baseFunc) {
             if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
                 if (let Some(baseExpr) <- memberAccess.baseExpr) {
@@ -5122,32 +5135,58 @@ extend TypeChecker {
                         if (unsolvedParams.contains(id)) {
                             let sig = MemSig(memberAccess.field.Val(), false, UInt64(callExpr.args.size),
                                 UInt64(memberAccess.typeArguments.size))
-                            return (id, ctx.Mem2Decls(sig))
+                            let decls = HashSet<Decl>()
+                            for (decl in ctx.Mem2Decls(sig)) {
+                                decls.add(decl)
+                            }
+                            return ParamMemUsage(id, sig, decls, resultConstrained: resultConstrained)
                         }
                     }
                 }
             }
         }
-        return ("", ArrayList<Decl>())
+        return ParamMemUsage("", MemSig(), HashSet<Decl>())
     }
 
-    private func FindCandidatesFromAccess(
-        ctx: ASTContext,
-        memberAccess: MemberAccess,
-        unsolvedParams: HashMap<String, FuncParam>
-    ): (String, ArrayList<Decl>) {
+    // C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:162-173 FindCandidatesFromAccess.
+    private func FindCandidatesFromAccess(ctx: ASTContext, memberAccess: MemberAccess,
+        unsolvedParams: HashMap<String, FuncParam>, resultConstrained: Bool): ParamMemUsage {
         if (let Some(baseExpr) <- memberAccess.baseExpr) {
             if (let Some(refExpr) <- (baseExpr as RefExpr)) {
                 let id = refExpr.ref.identifier.Val()
                 if (unsolvedParams.contains(id)) {
                     let sig = MemSig(memberAccess.field.Val(), true, 0u64, 0u64)
-                    return (id, ctx.Mem2Decls(sig))
+                    let decls = HashSet<Decl>()
+                    for (decl in ctx.Mem2Decls(sig)) {
+                        decls.add(decl)
+                    }
+                    return ParamMemUsage(id, sig, decls, resultConstrained: resultConstrained)
                 }
             }
         }
-        return ("", ArrayList<Decl>())
+        return ParamMemUsage("", MemSig(), HashSet<Decl>())
     }
 
+    // C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:175-186 FindCandidatesFromSubscript.
+    private func FindCandidatesFromSubscript(ctx: ASTContext, subscriptExpr: SubscriptExpr,
+        unsolvedParams: HashMap<String, FuncParam>, resultConstrained: Bool): ParamMemUsage {
+        if (let Some(baseExpr) <- subscriptExpr.baseExpr) {
+            if (let Some(refExpr) <- (baseExpr as RefExpr)) {
+                let id = refExpr.ref.identifier.Val()
+                if (unsolvedParams.contains(id)) {
+                    let sig = MemSig("[]", false, UInt64(subscriptExpr.indexExprs.size), 0u64)
+                    let decls = HashSet<Decl>()
+                    for (decl in ctx.Mem2Decls(sig)) {
+                        decls.add(decl)
+                    }
+                    return ParamMemUsage(id, sig, decls, resultConstrained: resultConstrained)
+                }
+            }
+        }
+        return ParamMemUsage("", MemSig(), HashSet<Decl>())
+    }
+
+    // C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:225-310 TryInferFromSyntaxInfo.
     private func TryInferFromSyntaxInfo(ctx: ASTContext, le: LambdaExpr): Unit {
         if (impl.typeManager.GetInnermostUnsolvedTyVars().isEmpty()) {
             return
@@ -5166,51 +5205,86 @@ extend TypeChecker {
             return
         }
 
-        let candidates = HashMap<String, ArrayList<Decl>>()
+        let candidates = HashMap<String, HashSet<Decl>>()
+        let memSigs = HashMap<String, ArrayList<MemSig>>()
+        let resultConstrainedMemSigs = HashMap<String, HashSet<MemSig>>()
         let candidateIds = ArrayList<String>()
-        let candiHandler = { candi: (String, ArrayList<Decl>) =>
-            let id = candi[0]
-            let decls = candi[1]
-            if (id.isEmpty()) {
+        let candiHandler = { candidate: ParamMemUsage =>
+            if (candidate.id.isEmpty()) {
                 false
             } else {
-                if (!candidates.contains(id)) {
-                    candidates[id] = decls
-                    candidateIds.add(id)
-                } else if (let Some(existing) <- candidates.get(id)) {
-                    let kept = ArrayList<Decl>()
+                if (!memSigs.contains(candidate.id)) {
+                    memSigs[candidate.id] = ArrayList<MemSig>()
+                }
+                memSigs.get(candidate.id).getOrThrow().add(candidate.sig)
+                if (candidate.resultConstrained) {
+                    if (!resultConstrainedMemSigs.contains(candidate.id)) {
+                        resultConstrainedMemSigs[candidate.id] = HashSet<MemSig>()
+                    }
+                    resultConstrainedMemSigs.get(candidate.id).getOrThrow().add(candidate.sig)
+                }
+                if (!candidates.contains(candidate.id)) {
+                    candidates[candidate.id] = candidate.decls
+                    candidateIds.add(candidate.id)
+                } else if (let Some(existing) <- candidates.get(candidate.id)) {
+                    let removed = ArrayList<Decl>()
                     for (oldDecl in existing) {
-                        var found = false
-                        for (candidateDecl in decls) {
-                            if (SameDecl(oldDecl, candidateDecl)) {
-                                found = true
-                                break
-                            }
-                        }
-                        if (found) {
-                            kept.add(oldDecl)
+                        if (!candidate.decls.contains(oldDecl)) {
+                            removed.add(oldDecl)
                         }
                     }
-                    existing.clear()
-                    for (keptDecl in kept) {
-                        existing.add(keptDecl)
+                    for (removedDecl in removed) {
+                        let _ = existing.remove(removedDecl)
                     }
                 }
                 true
             }
         }
+        let resultConstrained = Box<Bool>(false)
         let memberScanner = Box<(Node) -> VisitAction>({ _: Node => VisitAction.WALK_CHILDREN })
         memberScanner.value = { node: Node =>
+            if (let Some(binaryExpr) <- (node as BinaryExpr)) {
+                let old = resultConstrained.value
+                resultConstrained.value = true
+                let _ = Walker(binaryExpr.leftExpr.getOrThrow(), visitPre: memberScanner.value).Walk()
+                let _ = Walker(binaryExpr.rightExpr.getOrThrow(), visitPre: memberScanner.value).Walk()
+                resultConstrained.value = old
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(isExpr) <- (node as IsExpr)) {
+                let old = resultConstrained.value
+                resultConstrained.value = true
+                let _ = Walker(isExpr.leftExpr.getOrThrow(), visitPre: memberScanner.value).Walk()
+                resultConstrained.value = old
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(asExpr) <- (node as AsExpr)) {
+                let old = resultConstrained.value
+                resultConstrained.value = true
+                let _ = Walker(asExpr.leftExpr.getOrThrow(), visitPre: memberScanner.value).Walk()
+                resultConstrained.value = old
+                return VisitAction.SKIP_CHILDREN
+            }
             if (let Some(callExpr) <- (node as CallExpr)) {
-                if (candiHandler(FindCandidatesFromCall(ctx, callExpr, unsolvedParams))) {
+                if (candiHandler(FindCandidatesFromCall(ctx, callExpr, unsolvedParams,
+                    resultConstrained.value))) {
                     for (arg in callExpr.args) {
                         let argWalker = Walker(arg, visitPre: memberScanner.value)
                         let _ = argWalker.Walk()
                     }
                     return VisitAction.SKIP_CHILDREN
                 }
+            } else if (let Some(subscriptExpr) <- (node as SubscriptExpr)) {
+                if (candiHandler(FindCandidatesFromSubscript(ctx, subscriptExpr, unsolvedParams,
+                    resultConstrained.value))) {
+                    for (indexExpr in subscriptExpr.indexExprs) {
+                        let _ = Walker(indexExpr, visitPre: memberScanner.value).Walk()
+                    }
+                    return VisitAction.SKIP_CHILDREN
+                }
             } else if (let Some(memberAccess) <- (node as MemberAccess)) {
-                let _ = candiHandler(FindCandidatesFromAccess(ctx, memberAccess, unsolvedParams))
+                let _ = candiHandler(FindCandidatesFromAccess(ctx, memberAccess, unsolvedParams,
+                    resultConstrained.value))
             }
             VisitAction.WALK_CHILDREN
         }
@@ -5222,7 +5296,9 @@ extend TypeChecker {
         for (id in candidateIds) {
             if (let Some(param) <- unsolvedParams.get(id)) {
                 if (let Some(tyVar) <- (param.GetTy().getOrThrow() as GenericsTy)) {
-                    TryEnforceCandidate(tyVar, candidates.get(id) ?? ArrayList<Decl>(), impl.typeManager)
+                    TryEnforceCandidate(tyVar, candidates.get(id) ?? HashSet<Decl>(), impl.typeManager,
+                        memSigs: memSigs.get(id) ?? ArrayList<MemSig>(),
+                        resultConstrainedMemSigs: resultConstrainedMemSigs.get(id) ?? HashSet<MemSig>())
                 }
             }
         }
@@ -6335,7 +6411,11 @@ extend TypeChecker {
         } else {
             MemSig(ma.field.Val(), true, 0u64, 0u64)
         }
-        TryEnforceCandidate(typeVar, ctx.Mem2Decls(signature), impl.typeManager)
+        let candidates = HashSet<Decl>()
+        for (candidate in ctx.Mem2Decls(signature)) {
+            candidates.add(candidate)
+        }
+        TryEnforceCandidate(typeVar, candidates, impl.typeManager)
     }
 
     private func LookupShadowedTopLevelTypeByName(ctx: ASTContext, name: String, scopeName: String,

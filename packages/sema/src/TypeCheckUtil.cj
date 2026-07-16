@@ -1112,8 +1112,256 @@ public func FindSmallestTy(tys: TySet, lessThan: (Ty, Ty) -> Bool): Ty {
     return TypeManager.GetInvalidTy()
 }
 
-// C++ src/Sema/TypeCheckUtil.cpp:958 TryEnforceCandidate.
-public func TryEnforceCandidate(tv: GenericsTy, candidates: ArrayList<Decl>, tyMgr: TypeManager): Unit {
+// C++ src/Sema/TypeCheckUtil.cpp:958-976 MemberMatchesSig.
+private func MemberMatchesSig(member: Decl, sig: MemSig): Bool {
+    if (member.identifier.Val() != sig.id) {
+        return false
+    }
+    if (sig.isVarOrProp) {
+        return member.astKind == ASTKind.VAR_DECL || member.astKind == ASTKind.PROP_DECL
+    }
+    let funcDecl = (member as FuncDecl) ?? return false
+    let funcBody = funcDecl.funcBody ?? return false
+    if (funcBody.paramLists.isEmpty()) {
+        return false
+    }
+    let genArity = if (let Some(generic) <- funcDecl.GetGeneric()) {
+        UInt64(generic.typeParameters.size)
+    } else {
+        0u64
+    }
+    return UInt64(funcBody.paramLists[0].params.size) == sig.arity &&
+        (sig.genArity == 0u64 || genArity == sig.genArity)
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:978-990 GetDeclGenericParamVec.
+private func GetDeclGenericParamVec(decl: Decl): ArrayList<GenericsTy> {
+    let result = ArrayList<GenericsTy>()
+    if (let Some(generic) <- decl.GetGeneric()) {
+        for (typeParameter in generic.typeParameters) {
+            if (let Some(genericTy) <- (typeParameter.GetTy() as GenericsTy)) {
+                result.add(genericTy)
+            }
+        }
+    }
+    return result
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:994-1006 CollectMemberParamCoverage.
+private func CollectMemberParamCoverage(member: Decl, ownerGps: TySet, covered: TySet): Unit {
+    let funcDecl = match (member as FuncDecl) {
+        case Some(value) => value
+        case None => return
+    }
+    let funcBody = match (funcDecl.funcBody) {
+        case Some(value) => value
+        case None => return
+    }
+    if (funcBody.paramLists.isEmpty()) {
+        return
+    }
+    let ownerGpsVec = StaticToTyVars(ownerGps)
+    for (param in funcBody.paramLists[0].params) {
+        if (let Some(paramTy) <- param.GetTy()) {
+            if (paramTy.HasGeneric()) {
+                for (genericTy in paramTy.GetGenericTyArgs(ownerGpsVec)) {
+                    covered.Add(genericTy)
+                }
+            }
+        }
+    }
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:1008-1025 CollectMemberResultCoverage.
+private func CollectMemberResultCoverage(member: Decl, ownerGps: TySet, covered: TySet): Unit {
+    var resultTy: Option<Ty> = None
+    if (let Some(funcDecl) <- (member as FuncDecl)) {
+        if (let Some(funcBody) <- funcDecl.funcBody) {
+            if (let Some(retType) <- funcBody.retType) {
+                resultTy = retType.GetTy()
+            }
+        }
+    }
+    if (!Ty.IsTyCorrect(resultTy) && (let Some(memberTy) <- member.GetTy()) && memberTy.IsFunc()) {
+        resultTy = Some((memberTy as FuncTy).getOrThrow().retTy)
+    }
+    if (let None <- resultTy) {
+        resultTy = member.GetTy()
+    }
+    if (let Some(value) <- resultTy) {
+        if (value.HasGeneric()) {
+            let ownerGpsVec = StaticToTyVars(ownerGps)
+            for (genericTy in value.GetGenericTyArgs(ownerGpsVec)) {
+                covered.Add(genericTy)
+            }
+        }
+    }
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:1030-1048 DirectMemberCoverage.
+private func DirectMemberCoverage(owner: Decl, memSigs: ArrayList<MemSig>,
+    resultConstrainedMemSigs: HashSet<MemSig>, ownerGps: TySet, anyMatch: TypeCheckUtilBoolBox): TySet {
+    let covered = TySet()
+    for (member in owner.GetMemberDecls()) {
+        for (sig in memSigs) {
+            if (!MemberMatchesSig(member, sig)) {
+                continue
+            }
+            anyMatch.value = true
+            CollectMemberParamCoverage(member, ownerGps, covered)
+            if (resultConstrainedMemSigs.contains(sig)) {
+                CollectMemberResultCoverage(member, ownerGps, covered)
+            }
+        }
+    }
+    return covered
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:1050-1054 CoverageInput.
+private class CoverageInput {
+    let memSigs: ArrayList<MemSig>
+    let resultConstrainedMemSigs: HashSet<MemSig>
+    let tyMgr: TypeManager
+
+    init(memSigs: ArrayList<MemSig>, resultConstrainedMemSigs: HashSet<MemSig>, tyMgr: TypeManager) {
+        this.memSigs = memSigs
+        this.resultConstrainedMemSigs = resultConstrainedMemSigs
+        this.tyMgr = tyMgr
+    }
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:1059-1064 CoverageContext.
+private class CoverageContext {
+    let input: CoverageInput
+    let tyMgr: TypeManager
+    let anyMatch: TypeCheckUtilBoolBox
+    let covered: TySet
+
+    init(input: CoverageInput, tyMgr: TypeManager, anyMatch: TypeCheckUtilBoolBox, covered: TySet) {
+        this.input = input
+        this.tyMgr = tyMgr
+        this.anyMatch = anyMatch
+        this.covered = covered
+    }
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:1071-1100 CollectExtendCoverage.
+private func CollectExtendCoverage(inheritableDecl: InheritableDecl, gpsVec: ArrayList<GenericsTy>,
+    context: CoverageContext): Unit {
+    for (extendDecl in context.tyMgr.GetDeclExtends(inheritableDecl)) {
+        let extGpsVec = GetDeclGenericParamVec(extendDecl)
+        let extGps = TySet()
+        for (genericTy in extGpsVec) {
+            extGps.Add(genericTy)
+        }
+        let extMatch = TypeCheckUtilBoolBox(false)
+        let extCovered = DirectMemberCoverage(extendDecl, context.input.memSigs,
+            context.input.resultConstrainedMemSigs, extGps, extMatch)
+        if (!extMatch.value) {
+            continue
+        }
+        context.anyMatch.value = true
+        let extendedType = extendDecl.extendedType ?? continue
+        let extTy = extendedType.GetTy() ?? continue
+        var idx: Int64 = 0
+        while (idx < gpsVec.size && idx < extTy.typeArgs.size) {
+            let arg = extTy.typeArgs[idx]
+            if (arg.HasGeneric()) {
+                let need = arg.GetGenericTyArgs(extGpsVec)
+                var allCovered = !need.isEmpty()
+                for (genericTy2 in need) {
+                    if (!extCovered.Contains(genericTy2)) {
+                        allCovered = false
+                        break
+                    }
+                }
+                if (allCovered) {
+                    context.covered.Add(gpsVec[idx])
+                }
+            }
+            idx++
+        }
+    }
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:1106-1133 CollectSuperCoverage.
+private func CollectSuperCoverage(inheritableDecl: InheritableDecl, gps: TySet, visited: HashSet<Decl>,
+    context: CoverageContext): Unit {
+    let gpsVec = StaticToTyVars(gps)
+    for (inheritedType in inheritableDecl.inheritedTypes) {
+        let superTy = inheritedType.GetTy() ?? continue
+        let superDeclRaw = Ty.GetDeclOfTy(Some(superTy)) ?? continue
+        let superDecl = (superDeclRaw as InheritableDecl) ?? continue
+        if (visited.contains(superDecl)) {
+            continue
+        }
+        visited.add(superDecl)
+        let superMatch = TypeCheckUtilBoolBox(false)
+        let superCovered = CoveredGenericsOf(superDecl, context.input, superMatch, visited)
+        if (!superMatch.value) {
+            continue
+        }
+        context.anyMatch.value = true
+        let superGpsVec = GetDeclGenericParamVec(superDecl)
+        var idx: Int64 = 0
+        while (idx < superGpsVec.size && idx < superTy.typeArgs.size) {
+            let arg = superTy.typeArgs[idx]
+            if (superCovered.Contains(superGpsVec[idx]) && arg.HasGeneric()) {
+                for (genericTy in arg.GetGenericTyArgs(gpsVec)) {
+                    context.covered.Add(genericTy)
+                }
+            }
+            idx++
+        }
+    }
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:1138-1153 CoveredGenericsOf.
+private func CoveredGenericsOf(decl: Decl, input: CoverageInput, anyMatch: TypeCheckUtilBoolBox,
+    visited: HashSet<Decl>): TySet {
+    let gpsVec = GetDeclGenericParamVec(decl)
+    let gps = TySet()
+    for (genericTy in gpsVec) {
+        gps.Add(genericTy)
+    }
+    let covered = DirectMemberCoverage(decl, input.memSigs, input.resultConstrainedMemSigs, gps, anyMatch)
+    let inheritableDecl = (decl as InheritableDecl) ?? return covered
+    let context = CoverageContext(input, input.tyMgr, anyMatch, covered)
+    CollectExtendCoverage(inheritableDecl, gpsVec, context)
+    CollectSuperCoverage(inheritableDecl, gps, visited, context)
+    return covered
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:1160-1174 CanDetermineCandidate.
+private func CanDetermineCandidate(candidate: Decl, memSigs: ArrayList<MemSig>,
+    resultConstrainedMemSigs: HashSet<MemSig>, tyMgr: TypeManager): Bool {
+    if (memSigs.isEmpty()) {
+        return true
+    }
+    let gpsVec = GetDeclGenericParamVec(candidate)
+    if (gpsVec.isEmpty()) {
+        return true
+    }
+    let anyMatch = TypeCheckUtilBoolBox(false)
+    let visited = HashSet<Decl>()
+    visited.add(candidate)
+    let input = CoverageInput(memSigs, resultConstrainedMemSigs, tyMgr)
+    let covered = CoveredGenericsOf(candidate, input, anyMatch, visited)
+    if (!anyMatch.value) {
+        return true
+    }
+    for (genericTy in gpsVec) {
+        if (!covered.Contains(genericTy)) {
+            return false
+        }
+    }
+    return true
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:1177-1219 TryEnforceCandidate.
+public func TryEnforceCandidate(tv: GenericsTy, candidates: HashSet<Decl>, tyMgr: TypeManager,
+    memSigs!: ArrayList<MemSig> = ArrayList<MemSig>(),
+    resultConstrainedMemSigs!: HashSet<MemSig> = HashSet<MemSig>()): Unit {
     if (candidates.isEmpty()) {
         return
     }
@@ -1128,13 +1376,27 @@ public func TryEnforceCandidate(tv: GenericsTy, candidates: ArrayList<Decl>, tyM
         !promotion.Promote(sub, sup).values.isEmpty()
     }
     let uniq = FindSmallestTy(declTys, isSuperDecl)
-    if (Ty.IsTyCorrect(uniq)) {
+    if (resultConstrainedMemSigs.isEmpty() && Ty.IsTyCorrect(uniq)) {
         let _ = tyMgr.ConstrainByCtor(tv, uniq)
     } else {
+        let sumTys = TySet()
+        for (decl2 in candidates) {
+            if (CanDetermineCandidate(decl2, memSigs, resultConstrainedMemSigs, tyMgr)) {
+                if (let Some(declTy2) <- decl2.GetTy()) {
+                    sumTys.Add(declTy2)
+                }
+            }
+        }
+        if (sumTys.IsEmpty() && !resultConstrainedMemSigs.isEmpty()) {
+            sumTys.AddAll(declTys)
+        }
+        if (sumTys.IsEmpty()) {
+            return
+        }
         let tyArgs = ArrayList<GenericsTy>()
         tyMgr.constraints.GetOrCreate(tv).sum.softClear()
-        for (declTy2 in declTys.values) {
-            let _ = tyMgr.AddSumByCtor(tv, declTy2, tyArgs)
+        for (sumTy in sumTys.values) {
+            let _ = tyMgr.AddSumByCtor(tv, sumTy, tyArgs)
         }
     }
 }
