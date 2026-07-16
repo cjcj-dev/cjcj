@@ -439,7 +439,7 @@ public func OpenSymbolTableSafely(path: String): RuntimeHandle {
 
 @When[os == "Linux" || os == "macOS" || os == "iOS"]
 public func OpenSymbolTableSafely(path: String): RuntimeHandle {
-    let handle = OpenSymbolTable(path, 0x2 | 0x0)
+    let handle = OpenSymbolTable(path, dlopenMode: 0x2 | 0x0)
     if (handle.opened) {
         SetOpenedLibHandles(handle)
     }
