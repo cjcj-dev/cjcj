@@ -1077,7 +1077,7 @@ private func TypeCheckReferenceIsNamespaceMemberAccessLegal(
         valid = false
     }
     if (target.TestAttr(Attribute.ENUM_CONSTRUCTOR) && !ma.typeArguments.isEmpty()) {
-        let builder = diag.Diagnose(ma,
+        let builder = Diagnose(diag, ma,
             BasicDiagKind.sema_invalid_type_param_of_enum_member_access,
             args: [BasicDiagArgument(ma.field.Val()), BasicDiagArgument(targetOfBaseDecl.identifier.Val())])
         builder.Emit()
