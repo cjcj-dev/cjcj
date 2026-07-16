@@ -8,7 +8,8 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::basic.Position as BasicPosition
 import cjcj::basic.Range as BasicRange
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, CORE_PACKAGE_NAME, FileUtil, OBJECT_NAME, STD_LIB_FUTURE}
+import cjcj::utils.{ANY_NAME, CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, CORE_PACKAGE_NAME, FileUtil, OBJECT_NAME,
+    STD_LIB_FUTURE}
 import std.sync.*
 
 // C++ Analysis/Utils.cpp:17-45.
@@ -69,6 +70,10 @@ public func IsCoreFuture(def: CustomTypeDef): Bool {
 
 public func IsCoreObject(def: CustomTypeDef): Bool {
     return CheckCustomTypeDefIsExpected(def, CORE_PACKAGE_NAME, OBJECT_NAME)
+}
+
+public func IsCoreAny(def: CustomTypeDef): Bool {
+    return CheckCustomTypeDefIsExpected(def, CORE_PACKAGE_NAME, ANY_NAME)
 }
 
 public func IsClosureConversionEnvClass(def: ClassDef): Bool {
