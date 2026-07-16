@@ -720,6 +720,148 @@ public class InteropLibBridge {
         return CreateCall(GetNewGlobalRefDecl(), obj.curFile, args: args)
     }
 
+    public func CreateCFFINewJavaCFFINewJavaProxyObjectForCJMappingCall(jniEnv: Expr,
+        entity: Expr, name: String, withMarkerParam: Bool): Option<CallExpr> {
+        let funcDecl = GetNewJavaProxyObjectForCJMappingDecl()
+        if (let None <- funcDecl) {
+            return None
+        }
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(jniEnv))
+        args.add(CreateFuncArg(entity))
+        args.add(CreateFuncArg(CreateLitConstExpr(LitConstKind.STRING, name,
+            utils.GetStringDecl().GetTy().getOrThrow())))
+        args.add(CreateFuncArg(CreateLitConstExpr(LitConstKind.BOOL,
+            if (withMarkerParam) { "true" } else { "false" },
+            TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))))
+        return CreateCall(funcDecl, entity.curFile, args: args)
+    }
+
+    public func CreateJavaEntityCall(arg: Expr): Option<Expr> {
+        let javaEntityDecl = GetJavaEntityDecl()
+        if (let None <- javaEntityDecl) {
+            return None
+        }
+        let argTy = arg.GetTy().getOrThrow()
+        if (let Some(classLikeTy) <- (argTy as ClassLikeTy)) {
+            if (let Some(decl) <- classLikeTy.commonDecl) {
+                if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+                    return Some(CreateJavaRefCall(arg))
+                }
+            }
+        } else if (argTy.IsCoreOptionType()) {
+            CJC_ASSERT_WITH_MSG(!argTy.typeArgs.isEmpty(), "Option type must be generic")
+            if (let Some(classLikeTy) <- (argTy.typeArgs[0] as ClassLikeTy)) {
+                if (let Some(decl) <- classLikeTy.commonDecl) {
+                    if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+                        return Some(CreateJavaEntityFromOptionMirror(arg, decl))
+                    }
+                }
+            }
+        }
+        if (argTy.IsTuple()) {
+            let curFile = arg.curFile.getOrThrow()
+            let className = (curFile.GetFullPackageName() + "." + GetCjMappingTupleName(argTy)).replace(".", "/")
+            let entity = CreateCFFINewJavaCFFINewJavaProxyObjectForCJMappingCall(
+                CreateGetJniEnvCall(Some(curFile)).getOrThrow(), arg, className, true).getOrThrow()
+            return CreateJavaEntityJobjectCall(entity)
+        }
+        var suitableCtor: Option<FuncDecl> = None
+        for (decl in javaEntityDecl.getOrThrow().body.getOrThrow().decls) {
+            if (let Some(ctor) <- (decl as FuncDecl)) {
+                if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
+                    let body = ctor.funcBody.getOrThrow()
+                    CJC_ASSERT_WITH_MSG(!body.paramLists.isEmpty(), "paramLists cannot be empty")
+                    if (body.paramLists[0].params.size == 1 &&
+                        typeManager.IsTyEqual(argTy, body.paramLists[0].params[0].GetTy().getOrThrow())) {
+                        suitableCtor = Some(ctor)
+                    }
+                }
+            }
+        }
+        if (let None <- suitableCtor) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_java_interop_not_supported,
+                arg.begin, "Type " + argTy.name).Emit()
+            return None
+        }
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(arg))
+        if (let Some(call) <- CreateCall(suitableCtor, arg.curFile, args: args)) {
+            call.callKind = CallKind.CALL_STRUCT_CREATION
+            return Some(call)
+        }
+        return None
+    }
+
+    public func JObjectToString(jobjectExpr: Expr, curFile: Option<File>): Option<Expr> {
+        let entity = CreateJavaEntityJobjectCall(WithinFile<Expr>(jobjectExpr, curFile))
+        if (let None <- entity) {
+            return None
+        }
+        if (let Some(call) <- CreateJavaStringToCangjieCall(
+            CreateGetJniEnvCall(curFile).getOrThrow(), entity.getOrThrow())) {
+            return Some(call)
+        }
+        return None
+    }
+
+    public func OptionStringToJObject(optionExpr: Expr, jniEnv: FuncParam, outerDecl: Decl): Expr {
+        let curFile = optionExpr.curFile.getOrThrow()
+        return utils.CreateOptionMatch(optionExpr,
+            { value: VarDecl =>
+                let inner = WithinFile<RefExpr>(CreateRefExpr(value), curFile)
+                let env = WithinFile<RefExpr>(CreateRefExpr(jniEnv), curFile)
+                let entity = CreateCangjieStringToJavaCall(env, inner).getOrThrow()
+                UnwrapJavaEntity(entity, GetJniJobjectTy(), outerDecl, toRaw: true).getOrThrow()
+            },
+            { => CreateJobjectNull() }, GetJniJobjectTy())
+    }
+
+    public func StringToJObject(cjStringExpr: Expr, curFile: Option<File>,
+        jniEnvParam: FuncParam, outerDecl: Decl): Option<Expr> {
+        let env = WithinFile<RefExpr>(CreateRefExpr(jniEnvParam), curFile)
+        let entity = CreateCangjieStringToJavaCall(
+            env, WithinFile<Expr>(cjStringExpr, curFile))
+        if (let None <- entity) {
+            return None
+        }
+        return UnwrapJavaEntity(WithinFile<Expr>(entity.getOrThrow(), curFile),
+            GetJniJobjectTy(), outerDecl, toRaw: true)
+    }
+
+    public func WrapJavaEntity(cjExpr: Expr): Option<Expr> {
+        let curFile = cjExpr.curFile.getOrThrow()
+        if (cjExpr.TyKind() == TypeKind.TYPE_UNIT) {
+            if (let Some(call) <- CreateJavaEntityCall(Some(curFile))) {
+                return Some(call)
+            }
+            return None
+        }
+        if (IsOptionOfString(cjExpr.GetTy().getOrThrow())) {
+            let matchExpr = utils.CreateOptionMatch(cjExpr,
+                { value: VarDecl => WrapJavaEntity(
+                    WithinFile<RefExpr>(CreateRefExpr(value), curFile)).getOrThrow() },
+                { => CreateJavaEntityNullCall(Some(curFile)).getOrThrow() },
+                GetJavaEntityTy().getOrThrow())
+            return Some(WithinFile<Expr>(matchExpr, curFile))
+        }
+        if (cjExpr.GetTy().getOrThrow().IsString()) {
+            if (let Some(call) <- CreateCangjieStringToJavaCall(
+                CreateGetJniEnvCall(Some(curFile)).getOrThrow(), cjExpr)) {
+                return Some(call)
+            }
+            return None
+        }
+        return CreateJavaEntityCall(cjExpr)
+    }
+
+    public func SelectEntityWrapperByTypeKind(kind: TypeKind, ty: Ty,
+        param: FuncParam, file: Option<File>): Expr {
+        let paramRef = CreateRefExpr(param)
+        paramRef.curFile = file
+        return WrapJavaEntity(CreateMatchWithTypeCast(paramRef, ty).getOrThrow()).getOrThrow()
+    }
+
     public func CreateDeleteGlobalRefCall(env: Expr, obj: Expr): Option<CallExpr> {
         let args = ArrayList<FuncArg>()
         args.add(CreateFuncArg(env))
