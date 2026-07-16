@@ -1192,20 +1192,9 @@ public open class GlobalOptions <: Option {
             emitOptionDiag(BasicDiagKindRefactor.driver_require_package_directory)
             return false
         }
-        if (compilePackage && packagePaths.size > 1 && !ValidateUniquePackagePaths()) { return false }
-        return true
-    }
-
-    private func ValidateUniquePackagePaths(): Bool {
-        let seen = ArrayList<String>()
-        for (packagePath in packagePaths) {
-            let absPath = GetAbsPath(packagePath)
-            let canonical = if (absPath.hasValue) { absPath.value } else { NormalizePath(packagePath) }
-            if (containsString(seen, canonical)) {
-                Errorln("duplicate package path '" + packagePath + "' specified with '-p'")
-                return false
-            }
-            seen.add(canonical)
+        if (compilePackage && packagePaths.size > 1) {
+            emitOptionDiag(BasicDiagKindRefactor.driver_require_one_package_directory)
+            return false
         }
         return true
     }
