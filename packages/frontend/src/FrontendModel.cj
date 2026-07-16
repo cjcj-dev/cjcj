@@ -1191,6 +1191,29 @@ private class CjoSignatureMaterializer {
         }
     }
 
+    // IncrementalLoader.cpp:100-114 PrepareForLoadTypeCache.
+    private func PrepareForLoadTypeCache(sourcePackage: Package): Unit {
+        let package = packageTable.getOrThrow()
+        let imports = package.GetImports().getOrThrow()
+        var importIndex: UInt32 = 0u32
+        while (importIndex < imports.size()) {
+            importedFullPackageNames.add(FlatBufferString(data.getOrThrow(),
+                (imports.Get(importIndex) as Int64).getOrThrow()).str())
+            importIndex++
+        }
+        var fileCount = sourcePackage.files.size
+        let cachedFileCount = Int64(package.GetAllFiles().getOrThrow().size())
+        if (cachedFileCount > fileCount) {
+            fileCount = cachedFileCount
+        }
+        allFileIds = Array<UInt64>(fileCount, repeat: 0u64)
+        var fileIndex: Int64 = 0
+        while (fileIndex < sourcePackage.files.size) {
+            allFileIds[fileIndex] = sourcePackage.files[fileIndex].begin.fileID
+            fileIndex++
+        }
+    }
+
     // ReferenceLoader.cpp:210-214 ASTLoader::SetIsChirNow.
     public func SetIsChirNow(value!: Bool = false): Unit { isChirNow = value }
 
