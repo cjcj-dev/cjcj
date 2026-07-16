@@ -1466,7 +1466,7 @@ private func ReorderCallArgument(typeManager: TypeManager, ctx: Option<ASTContex
 
 private func TypeCheckCallGenericListContains(values: ArrayList<GenericsTy>, ty: Ty): Bool {
     for (value in values) {
-        if (SameTy(value, ty)) {
+        if (Ptr<Ty>(value) == Ptr<Ty>(ty)) {
             return true
         }
     }
