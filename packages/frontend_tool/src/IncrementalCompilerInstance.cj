@@ -500,6 +500,15 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     }
 }
 
+// C++: FrontendTool/IncrementalCompilerInstance.cpp:252-264.
+private func HasSimpleInitialiser(decl: VarDecl): Bool {
+    let initializer = decl.initializer ?? return false
+    if (let Some(litConst) <- (initializer as LitConstExpr)) {
+        return litConst.kind != LitConstKind.JSTRING && litConst.kind != LitConstKind.UNIT
+    }
+    return false
+}
+
 private func GetCachedSplitNum(cachedCodeGenPath: String): Option<UInt64> {
     var splitNum: Option<UInt64> = None
     @When[os == "Windows"]
