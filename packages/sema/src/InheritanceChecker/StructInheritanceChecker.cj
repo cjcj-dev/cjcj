@@ -1763,9 +1763,9 @@ public class StructInheritanceChecker {
         } else {
             let prefix = if (checkingDecl.astKind == ASTKind.EXTEND_DECL) { "extend " } else { "" }
             let classNameOverride = prefix + InheritedDisplayName(checkingDecl)
-            let builder = diag.Diagnose(
-                checkingDecl.begin,
-                checkingDecl.end,
+            let builder = Diagnose(
+                diag,
+                checkingDecl,
                 DiagKind.sema_interface_member_must_be_implemented_in_struct,
                 args: [
                     DiagArgument(funcOrProp),
