@@ -4,7 +4,7 @@ import cjcj::basic.Linkage as BasicLinkage
 import std.collection.*
 import std.reflect.TypeInfo
 
-// GAP_TODO: MarkExpressionAsMustNotOverflow ConstAnalysis.h:243 producer absent.
+// C++ ConstAnalysis.h:242-247 producer is ported by ConstAnalysis.MarkExpressionAsMustNotOverflow.
 
 public interface AnnotationBase {
     func Clone(): AnnotationBase

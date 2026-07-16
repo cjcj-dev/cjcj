@@ -4,7 +4,8 @@ import std.collection.*
 import std.sort.*
 
 import cjcj::utils.{CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy, STATIC_INIT_FUNC}
-import cjcj::option.{GlobalOptions, OptimizationFlag}
+import cjcj::option.{EnvironmentType, GlobalOptions, OptimizationFlag}
+import cjcj::mangle.{DecimalToManglingNumber, MANGLE_COUNT_PREFIX, MANGLE_SUFFIX}
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::ast.ASTKind
 import cjcj::ast.IsInstanceConstructor as AstIsInstanceConstructor
@@ -105,6 +106,16 @@ private class FaithfulLeftValueInfo {
             this.path.add(item)
         }
     }
+}
+
+// C++: CHIR/AST2CHIR/TranslateASTNode/TranslateAnnotation.cpp:17-25.
+private func GetIdentifierToPrint(decl: AstDecl): String {
+    if (let Some(propDecl) <- (decl as AstPropDecl)) {
+        if (!propDecl.getters.isEmpty()) {
+            return propDecl.getters[0].identifier.Val()
+        }
+    }
+    return decl.identifier.Val()
 }
 
 // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:48-58.
@@ -359,6 +370,7 @@ public class Translator {
     private let maybeUnreachable: HashMap<Block, Terminator>
     private let isComputingAnnos: Bool
     private let initFuncsForAnnoFactory: ArrayList<Function>
+    private let annotationFuncMap: HashMap<AstDecl, AnnoInfo> = HashMap<AstDecl, AnnoInfo>()
 
     public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
         localConstVars!: ElementList = ElementList(), localConstFuncs!: ElementList = ElementList(),
@@ -542,6 +554,111 @@ public class Translator {
     private func SetFuncBlockGroup(group: BlockGroup): Unit {
         blockGroupStack.clear()
         blockGroupStack.add(group)
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateAnnotation.cpp:34-68.
+    public func TranslateCustomAnnoInstanceSig(expr: AstExpr, funcDef: Function, index: Int64): GlobalVar {
+        var name = funcDef.GetIdentifierWithoutPrefix()
+        CJC_ASSERT(name.size > 3)
+        name = name[0..3] + "O" + name[4..]
+        name += MANGLE_COUNT_PREFIX
+        name += DecimalToManglingNumber(index.toString())
+        let varName = name + MANGLE_SUFFIX
+        let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(TranslateType(RequireAstTy(expr))),
+            varName, srcCodeIdentifier: varName, packageName: funcDef.GetPackageName())
+        globalVar.EnableAttr(Attribute.COMPILER_ADD)
+        globalVar.EnableAttr(Attribute.CONST)
+        globalVar.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+        let initName = name + "iiHv"
+        let initFunc = builder.CreateFunction(builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetUnitTy()),
+            initName, srcCodeIdentifier: initName, packageName: funcDef.GetPackageName())
+        initFunc.SetFuncKind(FuncKind.GLOBALVAR_INIT)
+        initFunc.SetLinkTypeInfo(BasicLinkage.INTERNAL)
+        initFunc.EnableAttr(Attribute.CONST)
+        initFunc.EnableAttr(Attribute.COMPILER_ADD)
+        initFunc.EnableAttr(Attribute.INITIALIZER)
+        initFunc.EnableAttr(Attribute.NO_INLINE)
+        initFunc.EnableAttr(Attribute.NO_REFLECT_INFO)
+        initFuncsForAnnoFactory.add(initFunc)
+        let body = builder.CreateBlockGroup(initFunc)
+        initFunc.InitBody(body)
+        let entry = builder.CreateBlock(body)
+        body.SetEntryBlock(entry)
+        globalVar.SetInitFunc(initFunc)
+        let retVal = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetUnitTy()),
+            builder.context.GetUnitTy(), entry)
+        initFunc.SetReturnValue(RequireResult(retVal))
+        return globalVar
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateAnnotation.cpp:70-80.
+    public func TranslateAnnotationsArraySig(annotations: AstArrayLit, funcDef: Function): ArrayList<GlobalVar> {
+        let result = ArrayList<GlobalVar>()
+        var index: Int64 = 0
+        for (child in annotations.children) {
+            if (!(isComputingAnnos && child.TestAttr(AstAttribute.NO_REFLECT_INFO))) {
+                result.add(TranslateCustomAnnoInstanceSig(child, funcDef, index))
+            }
+            index++
+        }
+        return result
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateAnnotation.cpp:175-237.
+    public func CreateAnnoFactoryFuncSig(decl: AstDecl, parent: Option<CustomTypeDef>): AnnoInfo {
+        let annotations = decl.annotationsArray
+        if (decl.TestAttr(AstAttribute.IMPORTED) || annotations.isNone() ||
+            annotations.getOrThrow().children.isEmpty() || decl.TestAttr(AstAttribute.SPECIFIC) ||
+            opts.disableReflection) {
+            return AnnoInfo()
+        }
+        if (opts.target.env == EnvironmentType.OHOS && parent.isSome() &&
+            parent.getOrThrow().GetCustomKind() == CustomDefKind.TYPE_ENUM) {
+            return AnnoInfo()
+        }
+        if (let Some(info) <- annotationFuncMap.get(decl)) {
+            return info
+        }
+        let annotationsArray = annotations.getOrThrow()
+        let returnType = TranslateType(RequireAstTy(annotationsArray))
+        let funcType = builder.context.GetFuncTy(ArrayList<Type>(), returnType)
+        let loc = TranslateLocation(annotationsArray.children[0])
+        let mangledName = GenerateAnnotationFuncMangleName(decl.mangledName)
+        if (opts.chirDebugOptimizer) {
+            println("The annotation factory function of " + GetIdentifierToPrint(decl) + " in the line " +
+                decl.begin.line.toString() + " is " + mangledName)
+        }
+        let funcDef = builder.CreateFunction(funcType, mangledName, srcCodeIdentifier: mangledName,
+            packageName: decl.fullPackageName)
+        funcDef.SetDebugLocation(loc)
+        funcDef.SetFuncKind(FuncKind.ANNOFACTORY_FUNC)
+        funcDef.EnableAttr(Attribute.CONST)
+        annoFactoryFuncs.add((decl, funcDef))
+        if (let Some(parentDef) <- parent) {
+            parentDef.AddMethod(funcDef)
+            funcDef.EnableAttr(Attribute.STATIC)
+        }
+        funcDef.Set<AnnoFactoryInfo, ArrayList<GlobalVar>>(TranslateAnnotationsArraySig(annotationsArray, funcDef))
+        let annoInstances = ArrayList<CustomAnnoInstance>()
+        for (element in annotationsArray.children) {
+            let callExpr = (element as AstCallExpr).getOrThrow()
+            let callee = callExpr.resolvedFunction.getOrThrow().funcBody.getOrThrow()
+            let annoClassDecl = callee.parentClassLike.getOrThrow()
+            let paramValues = ArrayList<String>()
+            for (arg in callExpr.args) {
+                let argValue = arg.expr.getOrThrow()
+                if (let Some(literal) <- (argValue as AstLitConstExpr)) {
+                    paramValues.add(literal.rawString)
+                } else {
+                    return AnnoInfo(mangledName, ArrayList<CustomAnnoInstance>())
+                }
+            }
+            annoInstances.add(CustomAnnoInstance(annoClassDecl.identifier.GetRawText(), paramValues,
+                TranslateLocation(element)))
+        }
+        let annoInfo = AnnoInfo(mangledName, annoInstances)
+        annotationFuncMap[decl] = annoInfo
+        return annoInfo
     }
 
     public func TranslateAnnoFactoryFuncBody(decl: AstDecl, funcDef: Function): Unit {

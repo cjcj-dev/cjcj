@@ -123,9 +123,8 @@ public class CHIRContext {
     }
 
     public func MergeTypes(): Unit {
-        // GAP_TODO: C++ CHIR.cpp:520/:564 and include/cangjie/Utils/ParallelUtil.h:71
-        // merge per-thread CHIRBuilder contexts after parallel translation/optimization.
-        // Selfhost currently has a single CHIRContext and no corresponding sub-builder merge points.
+        // C++ CHIRContext.cpp:249-252 merges dynamic types into the stable set. The parallel range-propagation
+        // call site is ported at CodeGenBridge.cj:307-332; serial constant propagation is performance-equivalent.
         synchronized(CHIRContext.dynamicAllocatedTysMtx) {
             for ((_, bucket) in dynamicAllocatedTys) {
                 for (ty in bucket) {

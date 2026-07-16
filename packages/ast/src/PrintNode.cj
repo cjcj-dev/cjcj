@@ -279,7 +279,8 @@ private class PrintState {
         if (node.TyKind() != TypeKind.TYPE_INITIAL) {
             printLine(indent, "ty: " + node.GetTy().getOrThrow().String())
         }
-        // GAP_TODO(ptr-print-parity): 值域为 objectId 代理非进程地址，因 Cangjie 无原始对象地址。
+        // GAP_COSMETIC: C++ PrintNode.cpp:123 prints an unstable process address; objectId preserves
+        // the only useful property here (identity within one dump), and dump tests do not assert its value.
         printLine(indent, "ptr: " + nodePtrText(node))
         let fullPackageName = node.GetFullPackageName()
         if (!fullPackageName.isEmpty() && fullPackageName != "default") {
@@ -319,7 +320,8 @@ private class PrintState {
 
     private func printTarget(indent: UInt64, target: Decl, addition: String): Unit {
         if (target.mangledName.isEmpty()) {
-            // GAP_TODO(ptr-print-parity): 值域为 objectId 代理非进程地址，因 Cangjie 无原始对象地址。
+            // GAP_COSMETIC: C++ PrintNode.cpp:87 prints an unstable process address; objectId preserves
+            // the only useful property here (identity within one dump), and dump tests do not assert its value.
             printLine(indent, addition + " ptr: " + nodePtrText(target))
         } else {
             printLine(indent, addition + " mangledName: " + quoteText(target.mangledName))

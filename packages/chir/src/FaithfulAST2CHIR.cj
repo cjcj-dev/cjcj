@@ -4617,19 +4617,28 @@ public class FaithfulAST2CHIR {
     }
 
     private func CreateGlobalVarSignature(decls: ArrayList<AstDecl>, isLocalConst!: Bool = false): Unit {
-        // GAP_TODO: annotated-decl factory metadata remains unported; C++ CreateAnnoFactoryFuncSig
-        // invokes TranslateAnnotationsArraySig and TranslateCustomAnnoInstanceSig
-        // (TranslateAnnotation.cpp:34-80,175-236; AST2CHIR.cpp:217,230; ASTPackage2CHIR.cpp:1024).
-        // Until that root is ported, AnnoInfo.mangledName keeps the C++ default "none".
+        let translator = CreateTranslator()
         for (decl in decls) {
             if (let Some(varDecl) <- (decl as AstVarDecl)) {
-                let _ = CreateAndCacheGlobalVar(varDecl, isLocalConst: isLocalConst)
+                let globalVar = CreateAndCacheGlobalVar(varDecl, isLocalConst: isLocalConst)
+                if (globalVar.TestAttr(Attribute.STATIC)) {
+                    continue
+                }
+                let annoInfo = translator.CreateAnnoFactoryFuncSig(decl, None)
+                if (annoInfo.IsAvailable()) {
+                    globalVar.SetAnnoInfo(annoInfo)
+                }
             } else if (let Some(varWithPattern) <- (decl as AstVarWithPatternDecl)) {
                 let varDecls = ArrayList<AstVarDecl>()
                 FlattenGlobalVarWithPatternDecl(RequirePattern(varWithPattern.irrefutablePattern,
                     "global var-with-pattern pattern"), varDecls)
                 for (varDecl in varDecls) {
-                    let _ = CreateAndCacheGlobalVar(varDecl, isLocalConst: isLocalConst)
+                    let globalVar = CreateAndCacheGlobalVar(varDecl, isLocalConst: isLocalConst)
+                    let annoInfo = translator.CreateAnnoFactoryFuncSig(decl, None)
+                    if (annoInfo.IsAvailable()) {
+                        CJC_ASSERT(!globalVar.TestAttr(Attribute.STATIC))
+                        globalVar.SetAnnoInfo(annoInfo)
+                    }
                 }
             }
         }
