@@ -38,7 +38,7 @@ public func DumpIR(llvmModule: LLVMModuleHandle, filePath: String): Unit {
     let _ = FileUtil.WriteToFile(normalizedPath, llvmModule.PrintToString())
 }
 
-private func SaveToBitcodeFile(module: LLVMModuleHandle, bcFilePath: String): Bool {
+public func SaveToBitcodeFile(module: LLVMModuleHandle, bcFilePath: String): Bool {
     @When[os == "Windows"]
     let tempPath = StringConvertor.NormalizeStringToUTF8(bcFilePath)
     @When[os == "Windows"]
