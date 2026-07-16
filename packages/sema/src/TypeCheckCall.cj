@@ -704,7 +704,7 @@ private func SyntaxFilterCandidates(ce: CallExpr, candidates: ArrayList<FuncDecl
                 paramTy = Some(RealNonOptionTy(paramInfo.ty))
             }
             if (let Some(realParamTy) <- paramTy) {
-                if (!IsFunctionalTy(realParamTy)) {
+                if (!realParamTy.IsFunc() && !realParamTy.IsAny() && !realParamTy.IsGeneric()) {
                     mismatch = true
                 }
             } else {
