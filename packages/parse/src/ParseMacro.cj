@@ -209,6 +209,7 @@ extend ParserImpl {
         node: Node
     ): Unit {
         if (!ParseMacroCallIdentifier(invocation, node)) {
+            node.EnableAttr(Attribute.IS_BROKEN)
             invocation.macroCallDiagInfo.macroCallEnd = lastToken.End()
             return
         }
