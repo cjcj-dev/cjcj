@@ -2490,7 +2490,7 @@ public class ASTWriter {
             return CreateFullId(LOCAL_PACKAGE_INDEX, "", PreSaveDecl(decl))
         }
         let packageIndex = SavePackageName(pkgName)
-        let id = EnsureExportId(decl)
+        let id = if (decl.exportId.isEmpty()) { decl.identifier.Val() } else { decl.exportId }
         return CreateFullId(Int64(packageIndex), id, 0u32)
     }
 
