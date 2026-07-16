@@ -1059,8 +1059,7 @@ private func TypeCheckReferenceIsNamespaceMemberAccessLegal(
         let packageName = TypeCheckReferencePackageNameOfAccessSite(ma)
         let targetPackage = target.fullPackageName
         if (!TypeCheckReferenceIsVisibleFromPackage(target, packageName)) {
-            let builder = diag.Diagnose(ma.begin, ma.end,
-                BasicDiagKind.sema_package_internal_decl_obtain_illegal,
+            let builder = Diagnose(diag, ma, BasicDiagKind.sema_package_internal_decl_obtain_illegal,
                 args: [
                     BasicDiagArgument(GetAccessLevelStr(target)),
                     BasicDiagArgument(ma.field.Val()),
