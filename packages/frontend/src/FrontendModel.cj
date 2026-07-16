@@ -1083,6 +1083,49 @@ private class CjoSignatureMaterializer {
         for ((_, expr) in allLoadedExprs) { PostLoadReference(expr) }
     }
 
+    // ASTLoader.cpp:207-220 VerifyForData.
+    private func VerifyForData(id: String): Bool {
+        let rawData = data ?? Array<UInt8>()
+        if (!CjoFlatBuffer(rawData).VerifyPackageBuffer()) {
+            diag.DiagnoseRefactor(DiagKindRefactor.module_loaded_ast_failed, DEFAULT_POSITION,
+                arguments: [id, packageName, CANGJIE_VERSION])
+            return false
+        }
+        return true
+    }
+
+    // ASTLoaderImpl.h:173-180 GetAttributes.
+    private func GetAttributes(decl: PackageFormat_Decl): AttributePack {
+        let attrs = AttributePack()
+        let rawAttrs = decl.GetAttributes().getOrThrow()
+        var wordIndex: UInt32 = 0u32
+        while (wordIndex < rawAttrs.size()) {
+            let word = (rawAttrs.Get(wordIndex) as UInt64).getOrThrow()
+            var bit: Int64 = 0
+            while (bit < 64) {
+                if ((word & (1u64 << UInt64(bit))) != 0u64) {
+                    if (let Some(attr) <- FlatAttributeByIndex(Int64(wordIndex) * 64 + bit)) {
+                        attrs.SetAttr(attr, true)
+                    }
+                }
+                bit++
+            }
+            wordIndex++
+        }
+        return attrs
+    }
+
+    // ASTLoaderImpl.h:228 LoadDecl.
+    private func LoadDecl(declIndex: UInt32): Option<Decl> {
+        if (let Some(loaded) <- allLoadedDecls.get(declIndex)) {
+            return Some(loaded)
+        }
+        if (let Some(record) <- flatDecls.get(declIndex)) {
+            return EnsureFlatDecl(record)
+        }
+        return None
+    }
+
     // ReferenceLoader.cpp:210-214 ASTLoader::SetIsChirNow.
     public func SetIsChirNow(value!: Bool = false): Unit { isChirNow = value }
 
