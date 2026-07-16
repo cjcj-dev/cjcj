@@ -221,7 +221,52 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
             return true
         }
-        return super.PerformCHIRCompilation()
+        let ret = super.PerformCHIRCompilation()
+        for (ty in core.chirInfo.ccTys) { changedTypes.add(ty) }
+        if (kind == IncreKind.INCR) {
+            UpdateIncrRemovedDeclsForVirtualFuncDep(cacheMangles, rawIncrRemovedDecls,
+                core.cachedInfo.virtualFuncDep, core.chirInfo.delVirtFuncWrapForIncr)
+            UpdateIncrRemovedDeclsForVarInitDep(cacheMangles, rawIncrRemovedDecls,
+                core.cachedInfo.varInitDepMap)
+        }
+        return ret
+    }
+
+    // C++: FrontendTool/IncrementalCompilerInstance.cpp:376-404.
+    public override func UpdateCachedInfo(): Unit {
+        core.UpdateMangleNameForCachedInfo()
+        UpdateCHIROptEffectMap()
+        if (kind == IncreKind.ROLLBACK) {
+            core.cachedInfo.virtualFuncDep.clear()
+            for ((raw, wrapper) in core.chirInfo.curVirtFuncWrapDep) {
+                core.cachedInfo.virtualFuncDep[raw] = wrapper
+            }
+            core.cachedInfo.ccOutFuncs.clear()
+            for (mangle in core.chirInfo.ccOutFuncsRawMangle) { core.cachedInfo.ccOutFuncs.add(mangle) }
+            core.cachedInfo.varInitDepMap.clear()
+            for ((raw, init) in core.chirInfo.varInitDepMap) { core.cachedInfo.varInitDepMap[raw] = init }
+        } else if (kind == IncreKind.INCR) {
+            for ((raw, _) in core.chirInfo.delVirtFuncWrapForIncr) {
+                core.cachedInfo.virtualFuncDep.remove(raw)
+            }
+            for ((raw, wrapper) in core.chirInfo.curVirtFuncWrapDep) {
+                core.cachedInfo.virtualFuncDep[raw] = wrapper
+            }
+            for (raw in rawIncrRemovedDecls) { core.cachedInfo.varInitDepMap.remove(raw) }
+            for ((raw, init) in core.chirInfo.varInitDepMap) { core.cachedInfo.varInitDepMap[raw] = init }
+            for (mangle in core.chirInfo.ccOutFuncsRawMangle) { core.cachedInfo.ccOutFuncs.add(mangle) }
+        }
+        for (pkg in core.GetSourcePackages()) {
+            CollectCompilerAddedDeclUsage(pkg, core.cachedInfo.semaInfo)
+        }
+    }
+
+    // C++: FrontendTool/IncrementalCompilerInstance.cpp:414-421.
+    private func UpdateCHIROptEffectMap(): Unit {
+        DeleteRemovedNodesInCHIROptEffectMap(rawIncrRemovedDecls, core.cachedInfo.chirOptInfo)
+        DeleteRecompiledNodesInCHIROptEffectMap(declsToBeReCompiled, core.cachedInfo.chirOptInfo)
+        MergeCHIROptEffectMap(core.chirInfo.optEffectMap, core.cachedInfo.chirOptInfo,
+            core.rawMangleName2DeclMap)
     }
 
     public override func PerformCodeGen(): Bool {
