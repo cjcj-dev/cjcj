@@ -2813,6 +2813,25 @@ extend TypeChecker {
             (visitedExpr || visitedDecl || visitedType)
     }
 
+    // C++ src/Sema/TypeChecker.cpp:752-770.
+    private func PerformBasicChecksForSynthesize(ctx: ASTContext, node: Option<Node>): Option<Ty> {
+        let nodeValue = match (node) {
+            case Some(value) => value
+            case None => return Some(TypeManager.GetInvalidTy())
+        }
+        if (nodeValue.TestAttr(Attribute.IS_BROKEN)) {
+            nodeValue.SetTy(TypeManager.GetInvalidTy())
+            return nodeValue.GetTy()
+        }
+        if (IsChecked(ctx, nodeValue)) {
+            return nodeValue.GetTy()
+        }
+        if ((nodeValue as Decl).isSome() && nodeValue.symbol.isNone()) {
+            return nodeValue.GetTy()
+        }
+        return None
+    }
+
     // C++ src/Sema/TypeCheckAnnotation.cpp:96-129.
     internal func CheckAnnotationDecl(ctx: ASTContext, annotation: Annotation): Unit {
         if (annotation.TestAttr(Attribute.TOOL_ADD)) {
@@ -3685,16 +3704,17 @@ extend TypeChecker {
     }
 
     private func SynthesizeDecl(ctx: ASTContext, decl: Decl): Ty {
-        if (!decl.TestAttr(Attribute.IS_BROKEN) && !IsChecked(ctx, decl) && decl.symbol.isSome()) {
-            var currentContext = ctx
-            if ((let Some(instance) <- ci) && instance.sourcePackages.size > 1 &&
-                (let Some(file) <- decl.curFile) && (let Some(packageValue) <- file.curPackage) &&
-                (let Some(packageContext) <- instance.GetASTContextByPackage(Some(packageValue)))) {
-                currentContext = packageContext
-            }
-            try (stashDiagnoseStatus = impl.diag.getOrThrow().AutoStashDisableDiagnoseStatus()) {
-                CheckAnnotations(currentContext, decl)
-            }
+        if (let Some(result) <- PerformBasicChecksForSynthesize(ctx, Some(decl))) {
+            return result
+        }
+        var currentContext = ctx
+        if ((let Some(instance) <- ci) && instance.sourcePackages.size > 1 &&
+            (let Some(file) <- decl.curFile) && (let Some(packageValue) <- file.curPackage) &&
+            (let Some(packageContext) <- instance.GetASTContextByPackage(Some(packageValue)))) {
+            currentContext = packageContext
+        }
+        try (stashDiagnoseStatus = impl.diag.getOrThrow().AutoStashDisableDiagnoseStatus()) {
+            CheckAnnotations(currentContext, decl)
         }
         // Mirrors C++ TypeChecker.cpp:740-748: imported decls with a correct loaded type are already checked.
         if (decl.TestAttr(Attribute.IMPORTED) && Ty.IsTyCorrect(decl.GetTy()) && decl.TyKind() != TypeKind.TYPE_QUEST) {
