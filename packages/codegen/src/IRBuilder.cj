@@ -815,6 +815,10 @@ public class IRBuilder2 <: Resource {
         return buildLoad(elementType, addr, name)
     }
 
+    public func CreateLoad(elementType: LLVMTypeRef, addr: LLVMValueRef, name: CString): LLVMValueRef {
+        return unsafe { LLVMBuildLoad2(builder.raw, elementType, addr, name) }
+    }
+
     public func CreateLoad(cgVal: CGValue, name!: String = ""): LLVMValueRef {
         let pointerCGType = cgVal.GetCGType().getOrThrow()
         let elementCGType = pointerCGType.GetPointerElementType().getOrThrow()

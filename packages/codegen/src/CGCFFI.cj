@@ -419,13 +419,21 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         CJC_ASSERT(!isVoidTy(retType))
         if (isStructTy(retType) && unsafe { LLVMIsLiteralStruct(retType) } != 0) {
             let tmpVal = builder.CreateBitCast(value, unsafe { LLVMPointerType(retType, 0u32) })
-            return builder.CreateLoad(retType, tmpVal)
+            var loadResult = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
+                loadResult = builder.CreateLoad(retType, tmpVal, nameCString.value)
+            }
+            return loadResult
         }
         var castRes = value
         if (!isStructTy(retType) && IsStructPtrTy(unsafe { LLVMTypeOf(value) })) {
             castRes = builder.CreateBitCast(value, unsafe { LLVMPointerType(retType, 0u32) })
         }
-        return builder.CreateLoad(retType, castRes)
+        var loadResult = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
+            loadResult = builder.CreateLoad(retType, castRes, nameCString.value)
+        }
+        return loadResult
     }
 
     protected override func ProcessInvocationArg(chirParamTy: StructType, kind: ProcessKind, argIdx: Int64Box,
