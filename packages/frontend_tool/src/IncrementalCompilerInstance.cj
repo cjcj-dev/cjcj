@@ -292,9 +292,17 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
             return true
         }
-        let ret = super.PerformResultsSaving()
-        if (ret) {
-            return SaveIncrementalSignatures()
+        var ret = true
+        for (srcPkg in core.GetSourcePackages()) {
+            if (invocation.globalOptions.outputMode == OutputMode.CHIR) {
+                ret = ret && SaveCjo(srcPkg)
+            }
+            if (ret && !srcPkg.IsEmpty()) {
+                let cachedCjo = invocation.globalOptions.GenerateCachedPathName(
+                    srcPkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
+                ret = ret && FileUtil.WriteBufferToASTFile(cachedCjo,
+                    core.importManager.ExportASTSignature(srcPkg))
+            }
         }
         return ret
     }
