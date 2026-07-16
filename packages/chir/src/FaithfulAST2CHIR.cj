@@ -1103,6 +1103,9 @@ public class FaithfulAST2CHIR {
     private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
     private let opts: GlobalOptions
     private let kind: IncreKind
+    private let cachedInfo: CompilationCache
+    private let curVirtFuncWrapDep: VirtualWrapperDepMap
+    private let delVirtFuncWrapForIncr: VirtualWrapperDepMap
     private let chirWFC: Bool
     private let chirOptOverO2: Bool
     private let diag: Option<BasicDiagnosticEngine>
@@ -1158,6 +1161,9 @@ public class FaithfulAST2CHIR {
         gim!: Option<GenericInstantiationManager> = None,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
         opts!: GlobalOptions = GlobalOptions(), kind!: IncreKind = IncreKind.INVALID,
+        cachedInfo!: CompilationCache = CompilationCache(),
+        curVirtFuncWrapDep!: VirtualWrapperDepMap = VirtualWrapperDepMap(),
+        delVirtFuncWrapForIncr!: VirtualWrapperDepMap = VirtualWrapperDepMap(),
         chirWFC!: Bool = false, chirOptOverO2!: Bool = false,
         diag!: Option<BasicDiagnosticEngine> = None, isComputingAnnos!: Bool = false) {
         this.builder = builder
@@ -1169,6 +1175,9 @@ public class FaithfulAST2CHIR {
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
         this.opts = opts
         this.kind = kind
+        this.cachedInfo = cachedInfo
+        this.curVirtFuncWrapDep = curVirtFuncWrapDep
+        this.delVirtFuncWrapForIncr = delVirtFuncWrapForIncr
         this.chirWFC = chirWFC
         this.chirOptOverO2 = chirOptOverO2
         this.diag = diag
@@ -1203,8 +1212,7 @@ public class FaithfulAST2CHIR {
             let generator = GenerateVTable(CurrentPackage(), allDefs, builder, opts, "GenerateVTable")
             generator.CreateVTable()
             generator.UpdateOperatorVirFunc()
-            generator.CreateVirtualFuncWrapper(IncreKind.INVALID, CompilationCache(), VirtualWrapperDepMap(),
-                VirtualWrapperDepMap())
+            generator.CreateVirtualFuncWrapper(kind, cachedInfo, curVirtFuncWrapDep, delVirtFuncWrapForIncr)
             generator.SetSrcFuncType()
             generator.CreateMutFuncWrapper()
             generator.UpdateFuncCall()

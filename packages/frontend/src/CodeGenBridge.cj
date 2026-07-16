@@ -60,7 +60,7 @@ import cjcj::chir.Value as ChirValue
 import cjcj::ast.Package as RealASTPackage
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::codegen.CHIRData as CodegenCHIRData
-import cjcj::incremental_compilation.CachedMangleMap
+import cjcj::incremental_compilation.{CachedMangleMap, VirtualWrapperDepMap}
 import cjcj::codegen.ClearPackageModules
 import cjcj::codegen.GenPackageModules as CodegenGenPackageModules
 import cjcj::codegen.LLVMModuleHandle as LLVMModuleHandle
@@ -80,7 +80,19 @@ import cjcj::utils.REFLECT_PACKAGE_NAME
 import cjcj::utils.{TaskQueue, TaskResult}
 
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
-    return ToCHIR(instance, pkg).Run()
+    let convertor = ToCHIR(instance, pkg)
+    let result = convertor.Run()
+    if (result.isSome()) {
+        instance.chirInfo.curVirtFuncWrapDep.clear()
+        for ((rawMangledName, wrapper) in convertor.GetCurVirtualFuncWrapperDepForIncr()) {
+            instance.chirInfo.curVirtFuncWrapDep[rawMangledName] = wrapper
+        }
+        instance.chirInfo.delVirtFuncWrapForIncr.clear()
+        for ((rawMangledName, wrapper) in convertor.GetDeleteVirtualFuncWrapperForIncr()) {
+            instance.chirInfo.delVirtFuncWrapForIncr[rawMangledName] = wrapper
+        }
+    }
+    return result
 }
 
 private class ToCHIR {
@@ -91,6 +103,8 @@ private class ToCHIR {
     private let outputPath: String
     private let builder: ChirBuilder
     private let effectMap: ChirOptEffectCHIRMap = ChirOptEffectCHIRMap()
+    private let curVirtFuncWrapDep: VirtualWrapperDepMap = VirtualWrapperDepMap()
+    private let delVirtFuncWrapForIncr: VirtualWrapperDepMap = VirtualWrapperDepMap()
     private var maybeUnreachable: HashMap<ChirBlock, ChirTerminator> = HashMap<ChirBlock, ChirTerminator>()
     private var chirPkg: Option<RealCHIRPackage> = None
     private var debugFileIndex: UInt64 = 0u64
@@ -117,6 +131,9 @@ private class ToCHIR {
             }),
             opts: instance.invocation.globalOptions,
             kind: instance.kind,
+            cachedInfo: instance.cachedInfo,
+            curVirtFuncWrapDep: curVirtFuncWrapDep,
+            delVirtFuncWrapForIncr: delVirtFuncWrapForIncr,
             chirWFC: instance.invocation.globalOptions.chirWFC,
             chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2(),
             diag: Some(instance.diag.AsBasicDiagnosticEngine()))
@@ -168,6 +185,14 @@ private class ToCHIR {
         }
         builder.MergeAllocatedInstance()
         return Some(lowered)
+    }
+
+    public func GetCurVirtualFuncWrapperDepForIncr(): VirtualWrapperDepMap {
+        return curVirtFuncWrapDep
+    }
+
+    public func GetDeleteVirtualFuncWrapperForIncr(): VirtualWrapperDepMap {
+        return delVirtFuncWrapForIncr
     }
 
     // C++: CHIR/CHIR.cpp:589-598 ToCHIR::RunSanitizerCoverage.
