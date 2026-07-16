@@ -87,10 +87,6 @@ public class InteropLibBridge {
         return importManager.GetPackageDecl(InteropLibBridge.INTEROPLIB_PACKAGE_NAME).isSome()
     }
 
-    public func IsInteropLibAccessible(): Bool {
-        return InteropLibBridge.IsInteropLibAccessible(importManager)
-    }
-
     private func ImportDecl<T>(packageName: String, declName: String,
         silent!: Bool = false): Option<T> where T <: Decl {
         if (let Some(decl) <- importManager.GetImportedDecl(packageName, declName)) {

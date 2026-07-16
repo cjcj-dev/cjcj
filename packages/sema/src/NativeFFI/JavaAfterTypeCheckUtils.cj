@@ -561,18 +561,18 @@ public func CreateMirrorConstructorCall(importManager: ImportManager, entity: Ex
     if (let Some(classLikeTy) <- (mirrorTy as ClassLikeTy)) {
         if (let Some(decl) <- classLikeTy.commonDecl) {
             if (decl.TestAttr(Attribute.JAVA_MIRROR)) {
-                var mirrorCtor: FuncDecl
+                var mirrorCtor: Option<FuncDecl> = None
                 if ((decl as InterfaceDecl).isSome() ||
                     ((decl as ClassDecl).isSome() && decl.TestAttr(Attribute.ABSTRACT))) {
-                    mirrorCtor = GetGeneratedConstructorInMirror(GetSyntheticClass(importManager, decl)).getOrThrow()
+                    mirrorCtor = GetGeneratedConstructorInMirror(GetSyntheticClass(importManager, decl))
                 } else if ((decl as ClassDecl).isSome()) {
-                    mirrorCtor = GetGeneratedJavaMirrorConstructor(decl)
+                    mirrorCtor = Some(GetGeneratedJavaMirrorConstructor(decl))
                 } else {
                     CJC_ABORT()
                 }
                 let args = ArrayList<FuncArg>()
                 args.add(CreateFuncArg(entity))
-                if (let Some(call) <- CreateCall(Some(mirrorCtor), curFile, args: args)) {
+                if (let Some(call) <- CreateCall(mirrorCtor, curFile, args: args)) {
                     call.callKind = CallKind.CALL_OBJECT_CREATION
                     call.SetTy(mirrorTy)
                     return Some(call)
