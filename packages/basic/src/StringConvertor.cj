@@ -5,7 +5,7 @@ import std.collection.*
 private let UTF8_1_MAX: UInt32 = 0x7fu32
 private let UTF8_2_MAX: UInt32 = 0x7ffu32
 private let UTF8_3_MAX: UInt32 = 0xffffu32
-private let UTF8_4_MAX: UInt32 = 0x1fffffu32
+private let UTF8_4_MAX: UInt32 = 0x10ffffu32
 private let UTF8_5_MAX: UInt32 = 0x3ffffffu32
 private let UTF8_6_MAX: UInt32 = 0x7fffffffu32
 
@@ -25,12 +25,6 @@ private let LOW_6_BIT_MASK: UInt32 = 0x3fu32
 
 private func singleByteString(value: UInt8): String {
     return String.fromUtf8([value])
-}
-
-private func appendNormalizeSpan(builder: StringBuilder, str: String, begin: Int64, end: Int64): Unit {
-    if (begin < end) {
-        builder.append(str[begin..end])
-    }
 }
 
 private func isHexDigit(value: UInt8): Bool {
@@ -198,7 +192,9 @@ public class StringConvertor {
         while (idx < bytes.size) {
             let current = bytes[idx]
             if (current == b'\\' && idx + 1 < bytes.size && !isRawString) {
-                appendNormalizeSpan(builder, str, spanBegin, idx)
+                if (spanBegin < idx) {
+                    builder.append(String.fromUtf8(bytes[spanBegin..idx]))
+                }
                 if (idx + 2 < bytes.size && bytes[idx + 1] == b'u' && bytes[idx + 2] == b'{') {
                     idx += 3
                     var point: UInt32 = 0u32
@@ -226,7 +222,9 @@ public class StringConvertor {
                 continue
             }
             if (current == b'\r') {
-                appendNormalizeSpan(builder, str, spanBegin, idx)
+                if (spanBegin < idx) {
+                    builder.append(String.fromUtf8(bytes[spanBegin..idx]))
+                }
                 if (idx + 1 < bytes.size && bytes[idx + 1] == b'\n') {
                     builder.append("\n")
                     idx += 2
@@ -239,7 +237,9 @@ public class StringConvertor {
                 idx++
             }
         }
-        appendNormalizeSpan(builder, str, spanBegin, bytes.size)
+        if (spanBegin < bytes.size) {
+            builder.append(String.fromUtf8(bytes[spanBegin..bytes.size]))
+        }
         return builder.toString()
     }
 
