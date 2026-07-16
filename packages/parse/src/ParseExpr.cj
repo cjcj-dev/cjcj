@@ -1897,9 +1897,25 @@ extend ParserImpl {
         let ret = ForInExpr()
         let token = Expect(TokenKind.FOR, "expected 'for'")
         ret.begin = token.Begin()
-        ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after for").Begin()
+        if (!Skip(TokenKind.LPAREN)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren, lookahead,
+                ConvertToken(lookahead)).Emit()
+            ConsumeUntilIfExprEnd()
+            ret.EnableAttr(Attribute.IS_BROKEN)
+            ret.end = lastToken.End()
+            return ret
+        }
+        ret.leftParenPos = lastToken.Begin()
         ret.pattern = ParsePattern()
-        ret.inPos = Expect(TokenKind.IN, "expected 'in' in for expression").Begin()
+        if (!Skip(TokenKind.IN)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_in_forin_expression, lookahead,
+                ConvertToken(lookahead)).Emit()
+            ConsumeUntilIfExprEnd()
+            ret.EnableAttr(Attribute.IS_BROKEN)
+            ret.end = lastToken.End()
+            return ret
+        }
+        ret.inPos = lookahead.Begin()
         ret.inExpression = ParseExpr()
         if (Skip(TokenKind.WHERE)) {
             ret.wherePos = lastToken.Begin()
@@ -1998,6 +2014,7 @@ extend ParserImpl {
         let token = Expect(TokenKind.SPAWN, "expected 'spawn'")
         ret.spawnPos = token.Begin()
         ret.begin = token.Begin()
+        let firstTaskToken = lookahead
         if (Seeing(TokenKind.LPAREN)) {
             if (newlineSkipped) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_newline_not_allowed_between_spawn_and_argument,
@@ -2025,6 +2042,8 @@ extend ParserImpl {
         }
         if (let Some(task) <- ret.task) {
             if (task.astKind != ASTKind.LAMBDA_EXPR) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, firstTaskToken,
+                    ConvertToken(lookahead)).Emit()
                 ret.isBroken = true
             }
             if (let Some(lambda) <- (task as LambdaExpr)) {
@@ -2045,7 +2064,12 @@ extend ParserImpl {
         let token = Expect(TokenKind.SYNCHRONIZED, "expected 'synchronized'")
         ret.syncPos = token.Begin()
         ret.begin = token.Begin()
-        ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after synchronized").Begin()
+        if (!Skip(TokenKind.LPAREN)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren, lookahead,
+                ConvertToken(lookahead)).Emit()
+            ret.EnableAttr(Attribute.HAS_BROKEN)
+        }
+        ret.leftParenPos = lastToken.Begin()
         ret.mutex = ParseExpr()
         if (!Skip(TokenKind.RPAREN) && !ret.TestAttr(Attribute.HAS_BROKEN)) {
             DiagExpectedRightDelimiter("(", ret.leftParenPos)
