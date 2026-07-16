@@ -1214,6 +1214,37 @@ private class CjoSignatureMaterializer {
         }
     }
 
+    // IncrementalLoader.cpp:116-136 CollectRemovedDefaultImpl.
+    private func CollectRemovedDefaultImpl(astDecl: Decl, decl: PackageFormat_Decl,
+        needRemoved: HashSet<String>): Unit {
+        let body = if (astDecl.astKind == ASTKind.CLASS_DECL) {
+            decl.GetInfoAsClassInfo().getOrThrow().GetBody()
+        } else if (astDecl.astKind == ASTKind.INTERFACE_DECL) {
+            decl.GetInfoAsInterfaceInfo().getOrThrow().GetBody()
+        } else if (astDecl.astKind == ASTKind.ENUM_DECL) {
+            decl.GetInfoAsEnumInfo().getOrThrow().GetBody()
+        } else if (astDecl.astKind == ASTKind.STRUCT_DECL) {
+            decl.GetInfoAsStructInfo().getOrThrow().GetBody()
+        } else if (astDecl.astKind == ASTKind.EXTEND_DECL) {
+            decl.GetInfoAsExtendInfo().getOrThrow().GetBody()
+        } else {
+            None
+        }
+        if (!astDecl.toBeCompiled || body.isNone()) {
+            return
+        }
+        let members = body.getOrThrow()
+        var offset: UInt32 = 0u32
+        while (offset < members.size()) {
+            let member = GetFormatDeclByIndex((members.Get(offset) as UInt32).getOrThrow())
+            if (member.GetMangledBeforeSema().getOrThrow().str().isEmpty() &&
+                GetAttributes(member).TestAttr(Attribute.DEFAULT)) {
+                CollectRemovedDecls(member, needRemoved)
+            }
+            offset++
+        }
+    }
+
     // ReferenceLoader.cpp:210-214 ASTLoader::SetIsChirNow.
     public func SetIsChirNow(value!: Bool = false): Unit { isChirNow = value }
 
