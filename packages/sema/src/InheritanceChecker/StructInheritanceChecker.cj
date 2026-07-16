@@ -1759,7 +1759,7 @@ public class StructInheritanceChecker {
                 DeclIdentifierRange(childDecl),
                 "member " + memberStr + " conflict with that in " + interfaceBeOverridden
             )
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+            builder.Emit()
         } else {
             let prefix = if (checkingDecl.astKind == ASTKind.EXTEND_DECL) { "extend " } else { "" }
             let classNameOverride = prefix + InheritedDisplayName(checkingDecl)
@@ -1777,7 +1777,7 @@ public class StructInheritanceChecker {
                 DeclIdentifierRange(childDecl),
                 "member " + memberStr + " may not be visible to '" + classNameOverride + "'"
             )
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+            builder.Emit()
         }
     }
 
