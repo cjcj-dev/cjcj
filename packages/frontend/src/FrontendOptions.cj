@@ -1,12 +1,18 @@
 package cjcj::frontend
 
 public import cjcj::option.{
-    ArgList, CreateOptionTable, GlobalOptions, ID as OptionID,
+    ArgList, CreateOptionTable, GlobalOptions as OptionBaseGlobalOptions, ID as OptionID,
     OptionArgInstance, OptionInfo, OptionTable, SetupConditionalCompilationCfg
 }
 public import cjcj::utils.{
     CACHED_AST_EXTENSION, CACHED_LOG_EXTENSION, CJ_D_FILE_EXTENSION, DEFAULT_PACKAGE_NAME, SERIALIZED_FILE_EXTENSION,
     OverflowStrategy, OverflowStrategyName
+}
+
+public open class GlobalOptions <: OptionBaseGlobalOptions {
+    public init() {
+        super()
+    }
 }
 
 public enum DumpAction {
