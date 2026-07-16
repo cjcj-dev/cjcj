@@ -138,7 +138,7 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
         return sourceRawValue
     }
     if (sourceCGType.GetSize().isSome()) {
-        let objectValue = irBuilder.CallValueIntrinsicAlloc(sourceTy)
+        let objectValue = irBuilder.CallClassIntrinsicAlloc(DeRef(sourceTy))
         let payloadPtr = irBuilder.GetPayloadFromObject(objectValue)
         let payloadElementType = if (sourceTy.IsRef()) {
             sourceCGType.GetPointerElementType().getOrThrow().GetLLVMType()
