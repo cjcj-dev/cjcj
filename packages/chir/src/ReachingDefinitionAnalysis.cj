@@ -259,16 +259,18 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
                 for (expr in block.GetExpressionsRef()) {
                     if (expr.GetExprKind() == ExprKind.ALLOCATE || expr.GetExprKind() == ExprKind.ALLOCATE_WITH_EXCEPTION) {
                         if (let Some(result) <- expr.GetResult()) {
-                            let allocatedTy = if (let Some(allocate) <- (expr as Allocate)) {
+                            let allocatedTy: Option<Type> = if (let Some(allocate) <- (expr as Allocate)) {
                                 Some(allocate.GetType())
                             } else if (let Some(allocate) <- (expr as AllocateWithException)) {
                                 Some(allocate.GetType())
                             } else {
                                 None
                             }
-                            if (let Some(ty) <- allocatedTy && CanTrackAllocation(ty)) {
-                                allocateIdxMap[result.nodeId] = trackedAllocations.size
-                                trackedAllocations.add(result)
+                            if (let Some(ty) <- allocatedTy) {
+                                if (CanTrackAllocation(ty)) {
+                                    allocateIdxMap[result.nodeId] = trackedAllocations.size
+                                    trackedAllocations.add(result)
+                                }
                             }
                         }
                     }
