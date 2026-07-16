@@ -61,18 +61,19 @@ private func readNativeInt32(ptr: CPointer<UInt8>, cursor: Box<Int64>): Int64 {
 }
 
 private func readNativeString(ptr: CPointer<UInt8>, cursor: Box<Int64>, len: Int64): String {
-    let builder = StringBuilder()
+    let value = ArrayList<UInt8>()
     var idx: Int64 = 0
     while (idx < len) {
         let byte = readNativeByte(ptr, cursor)
         if (byte == 0u8) {
-            builder.append("\\0")
+            value.add(b'\\')
+            value.add(b'0')
         } else {
-            builder.append(String.fromUtf8([byte]))
+            value.add(byte)
         }
         idx++
     }
-    return builder.toString()
+    return String.fromUtf8(value.toArray())
 }
 
 @OverflowWrapping
@@ -81,19 +82,20 @@ private func readInt32(bytes: ArrayList<UInt8>, cursor: Box<Int64>): Int64 {
 }
 
 private func readString(bytes: ArrayList<UInt8>, cursor: Box<Int64>, len: Int64): String {
-    let builder = StringBuilder()
+    let value = ArrayList<UInt8>()
     var idx: Int64 = 0
     while (idx < len) {
         let byte = bytes[cursor.value]
         if (byte == 0u8) {
-            builder.append("\\0")
+            value.add(b'\\')
+            value.add(b'0')
         } else {
-            builder.append(String.fromUtf8([byte]))
+            value.add(byte)
         }
         cursor.value++
         idx++
     }
-    return builder.toString()
+    return String.fromUtf8(value.toArray())
 }
 
 private let ALL_TOKEN_KINDS: Array<TokenKind> = [
