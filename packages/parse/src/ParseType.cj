@@ -86,14 +86,12 @@ extend ParserImpl {
             ref.begin = ref.ref.identifier.Begin()
             if (!onlyRef && Skip(TokenKind.LT)) {
                 ref.leftAnglePos = lastToken.Begin()
-                while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
-                    ref.typeArguments.add(ParseType())
-                    if (!Skip(TokenKind.COMMA)) {
-                        break
-                    }
+                let parsed = ParseTypeArguments()
+                for (typeArgument in parsed[1]) {
+                    ref.typeArguments.add(typeArgument)
                 }
-                ref.rightAnglePos = Expect(TokenKind.GT, "expected '>' after type arguments").Begin()
-                ref.end = ref.rightAnglePos + 1
+                ref.rightAnglePos = lastToken.Begin()
+                ref.end = lastToken.End()
             } else {
                 ref.end = ref.ref.identifier.End()
             }
