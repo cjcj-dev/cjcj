@@ -3,6 +3,7 @@ package cjcj::sema.Plugin
 import std.collection.*
 import std.sort.*
 import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
@@ -268,7 +269,7 @@ private func ClearAnnoInfoOfDepPkg(importManager: SemaImportManager): Unit {
             if (let Some(decl) <- (node as Decl)) {
                 var index: Int64 = 0
                 while (index < decl.annotations.size) {
-                    if (decl.annotations[index].kind == AnnotationKind.CUSTOM) {
+                    if (decl.annotations[index].kind == AstAnnotationKind.CUSTOM) {
                         decl.annotations.remove(at: index)
                     } else {
                         index++
