@@ -8,7 +8,7 @@ import cjcj::lex.{Lexer as RealLexer, StringPartKind}
 import cjcj::parse.IsBuiltinAnnotation as ParseIsBuiltinAnnotation
 import cjcj::parse.Parser as EvalParser
 import cjcj::parse.ScopeKind as EvalParsedScopeKind
-import cjcj::ast.{VisitAction, Walker}
+import cjcj::ast.{IsPureAnnotation, VisitAction, Walker}
 import cjcj::utils.{CJC_ASSERT, FileUtil}
 import std.collection.*
 
@@ -1268,7 +1268,7 @@ public class MacroEvaluation {
 
     public func ProcessNewTokens(macCall: MacroCall): Unit {
         let invocation = macCall.RequireInvocation()
-        if (invocation.macroCallDiagInfo.isCustom || invocation.newTokens.isEmpty()) {
+        if (IsPureAnnotation(invocation)) {
             return
         }
         let retTokens = ArrayList<Token>()
