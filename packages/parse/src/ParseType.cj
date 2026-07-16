@@ -143,7 +143,6 @@ extend ParserImpl {
             }
             if (!Skip(TokenKind.COMMA)) {
                 DiagVArrayTypeArgMismatch(MakeRange(ret.leftAnglePos, Peek().End()), "a type argument and size literal")
-                ConsumeUntilAny([TokenKind.NL])
                 return InvalidType(Peek().Begin())
             } else {
                 typeArgument.commaPos = lastToken.Begin()
@@ -151,7 +150,6 @@ extend ParserImpl {
                 if (!Skip(TokenKind.DOLLAR)) {
                     DiagVArrayTypeArgMismatch(MakeRange(Peek().Begin(), Peek().End()),
                         "a '$' follows an integer literal as the second generic argument")
-                    ConsumeUntilAny([TokenKind.NL])
                     return InvalidType(Peek().Begin())
                 } else {
                     let constType = ConstantType()
