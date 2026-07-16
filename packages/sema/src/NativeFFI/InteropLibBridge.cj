@@ -49,6 +49,8 @@ private let INTEROPLIB_CFFI_IS_INSTANCE_OF_DECL_ID: String = "Java_CFFI_isInstan
 private let INTEROPLIB_CFFI_GET_FROM_REGISTRY_BY_ENTITY_OPTION_DECL_ID: String =
     "Java_CFFI_getFromRegistryByObjOption"
 private let INTEROPLIB_CFFI_GET_FROM_REGISTRY_BY_ENTITY_DECL_ID: String = "Java_CFFI_getFromRegistryByObj"
+private let INTEROPLIB_CFFI_GET_REGISTRY_ID: String = "Java_CFFI_getRegistryId"
+private let INTEROPLIB_CFFI_GET_REGISTRY_ID_OR_NONE: String = "Java_CFFI_getRegistryIdOrNone"
 private let INTEROPLIB_CFFI_JAVA_STRING_TO_CANGJIE: String = "Java_CFFI_JavaStringToCangjie"
 private let INTEROPLIB_CFFI_CANGJIE_STRING_TO_JAVA: String = "Java_CFFI_CangjieStringToJava"
 private let INTEROPLIB_CFFI_WITH_EXCEPTION_HANDLING_ID: String = "withExceptionHandling"
@@ -204,6 +206,14 @@ public class InteropLibBridge {
 
     public func GetUnwrapJavaEntityDecl(): Option<FuncDecl> {
         return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_UNWRAP_JAVA_ENTITY_METHOD_DECL_ID)
+    }
+
+    public func GetGetRegistryIdDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_GET_REGISTRY_ID)
+    }
+
+    public func GetGetRegistryIdOrNoneDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_GET_REGISTRY_ID_OR_NONE)
     }
 
     public func GetGetFromRegistryByEntityOptionDecl(): Option<FuncDecl> {
@@ -513,6 +523,43 @@ public class InteropLibBridge {
         throwCase.curFile = Some(curFile)
         cases.add(throwCase)
         return Some(WithinFile<MatchExpr>(CreateMatchExpr(exprToCast, cases, castTy), curFile))
+    }
+
+    public static func IsJavaEntityTy(ty: Ty): Bool {
+        if (let Some(javaEntityTy) <- (ty as StructTy)) {
+            if (let Some(javaEntity) <- javaEntityTy.decl) {
+                return javaEntity.fullPackageName == InteropLibBridge.INTEROPLIB_PACKAGE_NAME &&
+                    javaEntity.identifier.Val() == INTEROPLIB_CFFI_JAVA_ENTITY
+            }
+        }
+        return false
+    }
+
+    public func CheckInteropLibVersion(): Unit {
+        let versionDecl = GetInteropLibVersionVarDecl()
+        if (let None <- versionDecl) {
+            if (let None <- importManager.GetPackageDecl(InteropLibBridge.INTEROPLIB_PACKAGE_NAME)) {
+                diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.sema_java_mirror_interoplib_must_be_imported, DEFAULT_POSITION).Emit()
+                return
+            }
+        }
+        if (let Some(decl) <- versionDecl) {
+            if (let Some(initializer) <- decl.initializer) {
+                if (initializer.astKind == ASTKind.LIT_CONST_EXPR && initializer.TyKind() == TypeKind.TYPE_INT64) {
+                    let libVersionLit = (initializer as LitConstExpr).getOrThrow()
+                    let libVersion = Int64.parse(libVersionLit.stringValue)
+                    if (libVersion != InteropLibBridge.INTEROPLIB_VERSION) {
+                        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_java_interoplib_version_mismatch,
+                            DEFAULT_POSITION, libVersionLit.stringValue,
+                            InteropLibBridge.INTEROPLIB_VERSION.toString()).Emit()
+                    }
+                    return
+                }
+            }
+        }
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_java_interoplib_version_too_old,
+            DEFAULT_POSITION, InteropLibBridge.INTEROPLIB_VERSION.toString()).Emit()
     }
 
     public func CreateGetJavaLambdaObjectCall(refExpr: RefExpr, classSign: String,
