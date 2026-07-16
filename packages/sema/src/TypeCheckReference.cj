@@ -1566,6 +1566,9 @@ private func TypeCheckReferenceCheckLegalityForNameReferenceExpr(
     ctx: ASTContext,
     nameRef: NameReferenceExpr
 ): Unit {
+    if (!nameRef.instTys.isEmpty()) {
+        let _ = impl.CheckInstTypeCompleteness(ctx, nameRef)
+    }
     if (let Some(refExpr) <- (nameRef as RefExpr)) {
         if (refExpr.isThis) {
             let _ = CheckUsageOfThis(diag, ctx, refExpr)
