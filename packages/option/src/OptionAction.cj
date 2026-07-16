@@ -163,7 +163,6 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
         }
         return handled()
     }
-    if (id == ID.STRIP_ALL) { opts.stripAll = true; return handled() }
     if (id == ID.NO_STACKTRACE_INFO) { opts.displayLineInfo = false; return handled() }
     if (id == ID.COMPILE_TEST) {
         opts.parseTest = true
@@ -282,7 +281,6 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.DISABLE_CODEGEN) { opts.disableCodeGen = true; return handled() }
     if (id == ID.DISABLE_REFLECTION) { opts.disableReflection = true; return handled() }
     if (id == ID.SANITIZE) { return parseSanitizer(opts, arg.value) }
-    if (id == ID.SANITIZE_SET_RPATH) { opts.sanitizerSetRpath = true; return handled() }
     if (id == ID.ENABLE_COVERAGE) { opts.enableCoverage = true; return handled() }
     if (id == ID.COMPILE_MACRO) {
         opts.compileMacroPackage = true

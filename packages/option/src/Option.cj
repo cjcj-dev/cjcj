@@ -397,7 +397,6 @@ public open class GlobalOptions <: Option {
     public var dumpAll: Bool = false
     public var dumpToScreen: Bool = false
     public var sanitizerType: SanitizerType = SanitizerType.NONE
-    public var sanitizerSetRpath: Bool = false
     public var stackTraceFmt: StackTraceFormat = StackTraceFormat.DEFAULT
     public var errorCountLimit: MaybeUInt64 = MaybeUInt64(8u64)
     public var jobs: MaybeUInt64 = MaybeUInt64()
@@ -408,12 +407,6 @@ public open class GlobalOptions <: Option {
     public let symbolsNeedLocalizedPerPkg: HashMap<String, ArrayList<String>> =
         HashMap<String, ArrayList<String>>()
     public var overflowStrategy: OverflowStrategy = OverflowStrategy.THROWING
-    public let libraryPaths: ArrayList<String> = ArrayList<String>()
-    public let linkOptionGroups: ArrayList<String> = ArrayList<String>()
-    public let toolchains: ArrayList<String> = ArrayList<String>()
-    public var optOptions: String = ""
-    public var llcOptions: String = ""
-    public var stripAll: Bool = false
     public var emitCHIRPhase: CandidateEmitCHIRPhase = CandidateEmitCHIRPhase.NA
     public let sancovOption: SanitizerCoverageOptions = SanitizerCoverageOptions()
     public init() { super() }
