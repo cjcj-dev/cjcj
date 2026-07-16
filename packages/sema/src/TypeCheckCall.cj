@@ -1548,7 +1548,7 @@ func GenerateTypeMappingForBaseExpr(typeManager: TypeManager, baseExpr: Expr,
                     let instBaseTy = typeManager.GetInstantiatedTy(memberBaseTy, directMapping.u2i)
                     let promoteMapping = Promotion(typeManager).GetPromoteTypeMapping(instBaseTy, outerTy)
                     if (let Some(realTy) <- realDecl.GetTy()) {
-                        if (!SameTy(realTy, instBaseTy)) {
+                        if (Ptr<Ty>(realTy) != Ptr<Ty>(instBaseTy)) {
                             typeManager.PackMapping(typeMapping, GenerateTypeMapping(realDecl, instBaseTy.typeArgs))
                         }
                     }
