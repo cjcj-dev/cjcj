@@ -1680,11 +1680,14 @@ public class InitializationChecker {
             case ASTKind.CALL_EXPR =>
                 if (let Some(call) <- (expr as CallExpr)) {
                     var result = CheckExprOption(call.baseFunc)
-                    for (arg in call.args) {
-                        result = CheckExprOption(arg.expr) && result
-                    }
-                    for (arg in call.defaultArgs) {
-                        result = CheckExprOption(arg.expr) && result
+                    if (let Some(desugarArgs) <- call.desugarArgs) {
+                        for (arg in desugarArgs) {
+                            result = result && CheckExprOption(arg.expr)
+                        }
+                    } else {
+                        for (arg in call.args) {
+                            result = result && CheckExprOption(arg.expr)
+                        }
                     }
                     result
                 } else { true }
