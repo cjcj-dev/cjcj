@@ -3,6 +3,7 @@ package cjcj::codegen
 import std.collection.*
 import cjcj::chir.Attribute
 import cjcj::chir.CHIRBuilder
+import cjcj::chir.ClassDef
 import cjcj::chir.ClassType
 import cjcj::chir.CustomType
 import cjcj::chir.DebugLocation
@@ -91,6 +92,7 @@ public class CGContext {
     private let debugLocOfRetExpr: HashMap<UIntNative, ArrayList<DebugLocation>> =
         HashMap<UIntNative, ArrayList<DebugLocation>>()
     private let nonRefBox2RefMap: HashMap<UIntNative, LLVMValueRef> = HashMap<UIntNative, LLVMValueRef>()
+    private let vtableSizeMap: HashMap<ClassDef, UInt16> = HashMap<ClassDef, UInt16>()
     private var cjStringType: LLVMTypeRef = LLVMNullType()
 
     public var debugValue: LLVMValueRef = LLVMNullValue()
@@ -122,6 +124,7 @@ public class CGContext {
         dependentPartialOrderOfTypes.clear()
         debugLocOfRetExpr.clear()
         nonRefBox2RefMap.clear()
+        vtableSizeMap.clear()
         genericParamsCacheMap.clear()
         genericParamsSizeBlockLevelCacheMap.clear()
         subCHIRPackage.Clear()
@@ -138,6 +141,24 @@ public class CGContext {
     public func IsCGParallelEnabled(): Bool { return cgPkgContext.IsCGParallelEnabled() }
     public func IsLineInfoEnabled(): Bool { return cgPkgContext.IsLineInfoEnabled() }
     public func AddLocalizedSymbol(symName: String): Unit { cgPkgContext.AddLocalizedSymbol(symName) }
+
+    public func GetVTableSizeOf(introType: ClassType): UInt16 {
+        let classDef = introType.GetClassDef()
+        if (classDef.IsInterface()) {
+            return 0u16
+        }
+        if (let Some(cached) <- vtableSizeMap.get(classDef)) {
+            return cached
+        }
+        var count = 0u16
+        var current: Option<ClassDef> = Some(classDef)
+        while (let Some(def) <- current) {
+            count++
+            current = def.GetSuperClassDef()
+        }
+        vtableSizeMap.add(classDef, count)
+        return count
+    }
 
     public func IsCustomTypeOfOtherLLVMModule(chirType: Type): Bool {
         if (let Some(customType) <- (chirType as CustomType)) {

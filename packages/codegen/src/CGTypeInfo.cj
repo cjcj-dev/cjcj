@@ -588,7 +588,7 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, chirTy: Type, typ
     let cgType = CGType.GetOrCreate(cgMod, chirTy)
     let typeInfoName = TypeInfoGlobalName(cgMod, chirTy)
     let fieldCount = GenFieldsNumOfTypeInfo(cgMod, chirTy)
-    var inheritedClassNum = InheritedClassNumBase(chirTy)
+    var inheritedClassNum = InheritedClassNumBase(cgMod, chirTy)
     let (mtable, updatedInheritedClassNum) = GenerateMTableOfTypeInfo(cgMod, chirTy, i8PtrType, inheritedClassNum)
     inheritedClassNum = updatedInheritedClassNum
     let sizeValue = TypeInfoSizeValue(cgMod, chirTy, cgType)
@@ -717,7 +717,7 @@ private func BuildSourceGenericTypeTemplateInitializer(cgMod: CGModule, customTy
     values.add(GenerateFinalizerOfTypeTemplate(cgMod, sourceTy, i8PtrType))
     values.add(unsafe { LLVMConstNull(i8PtrType) })
     values.add(GenerateExtensionDefPtrOfTypeInfo(cgMod, sourceTy, extensionDefPtrPtrType))
-    values.add(unsafe { LLVMConstInt(i16Type, TypeTemplateInheritedClassNumValue(sourceTy), 0) })
+    values.add(unsafe { LLVMConstInt(i16Type, TypeTemplateInheritedClassNumValue(cgMod, sourceTy), 0) })
     return TypeInfoConstStruct(typeTemplateTy, values)
 }
 
@@ -1127,11 +1127,11 @@ private func TypeTemplateLinkage(def: CustomTypeDef): LLVMLinkage {
     return linkageType
 }
 
-private func TypeTemplateInheritedClassNumValue(customTy: CustomType): UInt64 {
+private func TypeTemplateInheritedClassNumValue(cgMod: CGModule, customTy: CustomType): UInt64 {
     if (IsAutoEnvType(customTy)) {
         return INHERITED_CLASS_NUM_FE_FLAG
     }
-    return InheritedClassNumValue(customTy)
+    return InheritedClassNumValue(cgMod, customTy)
 }
 
 private func GetIntNativeRuntimeType(cgMod: CGModule): Type {
@@ -1547,42 +1547,17 @@ private func SameCustomTypeDef(left: Type, right: Type): Bool {
     return true
 }
 
-private func InheritedClassNumValue(chirTy: Type): UInt64 {
-    return INHERITED_CLASS_NUM_FE_FLAG + InheritedClassNumBase(chirTy)
+private func InheritedClassNumValue(cgMod: CGModule, chirTy: Type): UInt64 {
+    return INHERITED_CLASS_NUM_FE_FLAG + InheritedClassNumBase(cgMod, chirTy)
 }
 
-private func InheritedClassNumBase(chirTy: Type): UInt64 {
+private func InheritedClassNumBase(cgMod: CGModule, chirTy: Type): UInt64 {
     if (let Some(classTy) <- (chirTy as ClassType)) {
-        return UInt64(ClassInheritanceDepth(classTy))
+        if (!chirTy.IsAutoEnv()) {
+            return UInt64(cgMod.GetCGContext().GetVTableSizeOf(classTy))
+        }
     }
     return 0u64
-}
-
-private func IsCoreObjectClass(classTy: ClassType): Bool {
-    return IsCoreObjectClassDef(classTy.GetClassDef())
-}
-
-private func ClassInheritanceDepth(classTy: ClassType): Int64 {
-    if (classTy.GetClassDef().IsInterface()) {
-        return 0
-    }
-    let classDef = classTy.GetClassDef()
-    if (IsCoreObjectClass(classTy)) {
-        return 1
-    }
-    var count: Int64 = 2
-    var current = classDef.GetSuperClassDef()
-    while (let Some(superDef) <- current) {
-        if (!IsCoreObjectClassDef(superDef)) {
-            count++
-        }
-        current = superDef.GetSuperClassDef()
-    }
-    return count
-}
-
-private func IsCoreObjectClassDef(def: ClassDef): Bool {
-    return def.GetPackageName() == "std.core" && def.GetSrcCodeIdentifier() == "Object"
 }
 
 private func GenerateExtensionDefPtrOfTypeInfo(cgMod: CGModule, chirTy: Type,
