@@ -1025,6 +1025,10 @@ extend TypeChecker {
         }
         impl.PreCheckAllExtendInterface()
         for (ctx in contexts) {
+            mpImpl.UpdateSpecificMemberGenericTy(ctx,
+                { currentCtx: ASTContext, kind: ASTKind => impl.GetSymsByASTKind(currentCtx, kind) })
+        }
+        for (ctx in contexts) {
             impl.CheckExtendRules(ctx)
         }
         CheckCHIRClassDependencies()
