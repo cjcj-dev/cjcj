@@ -1992,9 +1992,9 @@ public class StructInheritanceChecker {
             return
         }
         if (!parentDecl.TestAttr(Attribute.STATIC) && child.TestAttr(Attribute.REDEF)) {
-            diag.Diagnose(
-                child.begin,
-                child.end,
+            Diagnose(
+                diag,
+                child,
                 DiagKind.sema_func_no_override_or_redefine_modifier,
                 args: [DiagArgument("redef"), DiagArgument(typeText), DiagArgument(name)]
             ).Emit()
@@ -2007,9 +2007,9 @@ public class StructInheritanceChecker {
             if ((!parentDecl.TestAttr(Attribute.OPEN) && notInInterface) || TestManager.IsDeclOpenToMock(parentDecl)) {
                 DiagCannotOverride(diag, child, parentDecl)
             } else if (child.TestAttr(Attribute.ABSTRACT) && notInInterface) {
-                diag.Diagnose(
-                    child.begin,
-                    child.end,
+                Diagnose(
+                    diag,
+                    child,
                     DiagKind.sema_invalid_override_member_in_class,
                     args: [DiagArgument(typeText), DiagArgument(name), DiagArgument(typeText)]
                 ).Emit()
