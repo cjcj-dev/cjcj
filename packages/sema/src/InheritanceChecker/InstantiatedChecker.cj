@@ -503,14 +503,13 @@ func CheckCStructArguments(
         return
     }
     if (Ty.IsCStructType(ty)) {
-        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
         Diagnose(
             checker.diag,
             node,
             leftAnglePos,
             DiagKind.sema_cffi_cannot_have_type_param,
             args: [DiagArgument("struct with @C")]
-        )
+        ).Emit()
     }
     let _ = node
     for (typeArg in typeArgs) {
@@ -525,8 +524,7 @@ func CheckCStructArgument(checker: StructInheritanceChecker, ty: Ty, typeArg: Ty
     if (let Some(typeArgTy) <- typeArg.GetTy()) {
         if (ty.IsPointer()) {
             if (!typeArgTy.IsGeneric() && !Ty.IsMetCType(typeArgTy)) {
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                Diagnose(checker.diag, typeArg, DiagKind.sema_illegal_cpointer_generic_type)
+                Diagnose(checker.diag, typeArg, DiagKind.sema_illegal_cpointer_generic_type).Emit()
             }
             return
         }
@@ -543,8 +541,7 @@ func CheckCStruct(checker: StructInheritanceChecker, ty: Ty, typeArg: Type): Uni
     }
     if (ty.IsPointer()) {
         if (!ty.typeArgs.isEmpty() && !ty.typeArgs[0].IsGeneric() && !Ty.IsMetCType(ty.typeArgs[0])) {
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            Diagnose(checker.diag, typeArg, DiagKind.sema_illegal_cpointer_generic_type)
+            Diagnose(checker.diag, typeArg, DiagKind.sema_illegal_cpointer_generic_type).Emit()
         }
         return
     }

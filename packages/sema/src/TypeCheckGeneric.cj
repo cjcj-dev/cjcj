@@ -606,7 +606,12 @@ extend TypeCheckerImpl {
         }
         let genericParams = GetDeclTypeParams(targetDecl)
         if (typeArgs.isEmpty() || genericParams.size != typeArgs.size) {
-            emitGenericArgumentNoMatch(diag, checkNode)
+            if (let Some(diagEngine) <- diag) {
+                let range = MakeRange(checkNode.begin,
+                    if (checkNode.end.IsZero()) { checkNode.begin + 1 } else { checkNode.end })
+                DiagnoseRefactor(diagEngine, BasicDiagKindRefactor.sema_generic_argument_no_match,
+                    checkNode, range).Emit()
+            }
             return false
         }
         let genericDecl = targetDecl.GetGeneric()
@@ -684,7 +689,12 @@ extend TypeCheckerImpl {
         }
         let genericParams = GetDeclTypeParams(decl)
         if (typeArgs.isEmpty() || genericParams.size != typeArgs.size) {
-            emitGenericArgumentNoMatch(diag, checkNode)
+            if (let Some(diagEngine) <- diag) {
+                let range = MakeRange(checkNode.begin,
+                    if (checkNode.end.IsZero()) { checkNode.begin + 1 } else { checkNode.end })
+                DiagnoseRefactor(diagEngine, BasicDiagKindRefactor.sema_generic_argument_no_match,
+                    checkNode, range).Emit()
+            }
             return false
         }
         let genericDecl = decl.GetGeneric()
