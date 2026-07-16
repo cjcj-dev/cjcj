@@ -256,15 +256,17 @@ public class StringConvertor {
     }
 
     public static func EscapeToJsonString(str: String): String {
-        let builder = StringBuilder()
+        let result = ArrayList<UInt8>()
         for (byte in str.toArray()) {
             if (let Some(escaped) <- escapeForJson(byte)) {
-                builder.append(escaped)
+                for (escapedByte in escaped.toArray()) {
+                    result.add(escapedByte)
+                }
             } else {
-                builder.append(singleByteString(byte))
+                result.add(byte)
             }
         }
-        return builder.toString()
+        return String.fromUtf8(result.toArray())
     }
 
     public static func UTF8ToCodepoint(str: String): Array<UInt32> {
