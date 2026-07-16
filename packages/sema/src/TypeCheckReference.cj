@@ -478,6 +478,23 @@ private func CheckInvalidRefInCFunc(
     builder.Emit()
 }
 
+private func CheckInvalidRefInCFunc(
+    diag: BasicDiagnosticEngine,
+    ctx: ASTContext,
+    re: RefExpr,
+    target: Decl
+): Unit {
+    if (!IsInCFunc(ctx, re) || target.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.ENUM_CONSTRUCTOR)) {
+        return
+    }
+    let isNonStaticMember = !target.TestAttr(Attribute.STATIC) &&
+        target.TestAnyAttr(Attribute.IN_CLASSLIKE, Attribute.IN_STRUCT, Attribute.IN_ENUM, Attribute.IN_EXTEND)
+    if (isNonStaticMember) {
+        Diagnose(diag, re, BasicDiagKind.sema_cfunc_cannot_capture_this,
+            args: [BasicDiagArgument("this")]).Emit()
+    }
+}
+
 private func RecommendImportForMemberAccess(
     tm: TypeManager,
     importManager: Option<SemaImportManager>,
@@ -1359,6 +1376,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
         TypeCheckReferenceEmitRefNotType(diag, re, re.ref.identifier.Val(), decl)
         valid = false
     }
+    CheckInvalidRefInCFunc(diag, ctx, re, decl)
     return valid
 }
 
