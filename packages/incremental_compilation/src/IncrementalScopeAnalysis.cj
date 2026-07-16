@@ -5,6 +5,7 @@ import std.fs.File
 import std.fs.exists
 import cjcj::option.GlobalOptions
 import cjcj::utils.CJC_ABORT
+import cjcj::utils.IncrementalCompilationLogger
 
 public class IncreResult {
     public var kind: IncreKind = IncreKind.INVALID

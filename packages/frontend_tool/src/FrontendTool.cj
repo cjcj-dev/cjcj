@@ -8,7 +8,7 @@ import cjcj::basic.WriteError
 import cjcj::frontend.*
 import cjcj::option.DiagFormat as OptionDiagFormat
 import cjcj::incremental_compilation.IncreKind
-import cjcj::incremental_compilation.IncrementalCompilationLogger
+import cjcj::utils.IncrementalCompilationLogger
 import cjcj::option.MockMode
 import cjcj::option.CompileTarget
 import cjcj::option.OrderedInput as OptionOrderedInput

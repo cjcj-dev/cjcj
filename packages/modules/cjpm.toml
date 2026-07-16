@@ -20,4 +20,3 @@
   "cjcj::lex" = { path = "../lex" }
   "cjcj::option" = { path = "../option" }
   "cjcj::utils" = { path = "../utils" }
-  "cjcj::incremental_compilation" = { path = "../incremental_compilation" }

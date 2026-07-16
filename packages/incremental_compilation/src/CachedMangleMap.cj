@@ -1,6 +1,7 @@
 package cjcj::incremental_compilation
 
 import std.collection.*
+import cjcj::utils.IncrementalCompilationLogger
 
 public class CachedMangleMap {
     public let incrRemovedDecls: HashSet<String> = HashSet<String>()

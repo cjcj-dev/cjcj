@@ -1,6 +1,5 @@
-package cjcj::incremental_compilation
+package cjcj::utils
 
-import cjcj::utils.FileUtil
 import std.fs.File
 
 public enum WriteKind {

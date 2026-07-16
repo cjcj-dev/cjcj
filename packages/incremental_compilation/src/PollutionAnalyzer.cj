@@ -2,6 +2,7 @@ package cjcj::incremental_compilation
 
 import std.collection.*
 import cjcj::utils.CJC_ABORT
+import cjcj::utils.IncrementalCompilationLogger
 
 public enum UseIndex {
     | BODY

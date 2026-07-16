@@ -4,7 +4,7 @@ import std.collection.*
 import cjcj::frontend.*
 import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::incremental_compilation.IncreKind
-import cjcj::incremental_compilation.IncrementalCompilationLogger
+import cjcj::utils.IncrementalCompilationLogger
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
 import cjcj::utils.FileUtil

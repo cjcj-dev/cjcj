@@ -3,6 +3,7 @@ package cjcj::incremental_compilation
 import std.collection.*
 import std.sort.*
 import cjcj::option.GlobalOptions
+import cjcj::utils.IncrementalCompilationLogger
 
 public let DELIMITER_NUM: Int64 = 60
 
