@@ -233,7 +233,7 @@ private func HashNominalTy(name: String, typeArgs: ArrayList<Ty>, declHash: Int6
     return out
 }
 
-public open class Ty <: Identifiable {
+public open class Ty <: Identifiable & Hashable & Equatable<Ty> {
     private static let nextObjectId = AtomicInt64(1)
     private static let initialTy: Ty = InitialTy()
 
