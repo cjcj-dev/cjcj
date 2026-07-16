@@ -411,8 +411,7 @@ func CheckInferrableEnumReference(diag: Option<BasicDiagnosticEngine>, typeManag
     let refineResult = EnumSugarTargetsFinder.RefineTargetTy(typeManager, target, expr.GetTarget())
     if (let None <- refineResult) {
         if (let Some(diagValue) <- diag) {
-            let builder = diagValue.Diagnose(expr.begin, expr.end, BasicDiagKind.sema_generic_type_without_type_argument)
-            builder.Emit()
+            Diagnose(diagValue, expr, BasicDiagKind.sema_generic_type_without_type_argument).Emit()
         }
         return false
     }
