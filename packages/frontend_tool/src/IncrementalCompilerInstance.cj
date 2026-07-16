@@ -97,7 +97,9 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             rawIncrRemovedDecls.clear()
             for (removed in result.deleted) { rawIncrRemovedDecls.add(removed) }
             for ((mangle, decl) in result.mangle2decl) {
-                if (!decl.TestAttr(Attribute.IMPORTED)) { core.mangledName2DeclMap[mangle] = decl }
+                if (!decl.TestAttr(Attribute.IMPORTED) && !core.mangledName2DeclMap.contains(mangle)) {
+                    core.mangledName2DeclMap[mangle] = decl
+                }
             }
             for (changed in declsToBeReCompiled) {
                 if (changed.TestAttr(Attribute.IMPORTED) && (changed.IsFunc() || IsGlobalOrStaticVar(changed))) {
