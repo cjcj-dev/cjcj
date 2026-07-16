@@ -2,7 +2,7 @@ package cjcj::macro_pkg
 
 import std.collection.*
 import std.sort.*
-import cjcj::ast.DiagnoseRefactor
+import cjcj::ast.{Diagnose, DiagnoseRefactor}
 import cjcj::ast.AnnotationKind as RealAnnotationKind
 import cjcj::ast.ExprKind as ParsedAstExprKind
 import cjcj::ast.Node as ParsedAstNode
@@ -10,8 +10,6 @@ import cjcj::ast.ScopeKind as ParsedAstScopeKind
 import cjcj::ast.VarDecl as ParsedAstVarDecl
 import cjcj::ast.VisitAction
 import cjcj::ast.Walker
-import cjcj::basic.DiagCategory as ParsedDiagCategory
-import cjcj::basic.DiagnosticEngine as ParsedDiagnosticEngine
 import cjcj::parse.Annotation as ParsedAnnotation
 import cjcj::parse.Decl as ParsedDecl
 import cjcj::parse.Expr as ParsedExpr
@@ -95,21 +93,15 @@ private func sortMacroCalls(calls: ArrayList<MacroCall>): Unit {
     }, stable: true)
 }
 
-private func hasMacroCallInNode(node: Node, diag: DiagnosticEngine, skipIfAvailable!: Bool = false): Bool {
+private func HasMacroCallInNode(node: Node, diag: DiagnosticEngine): Bool {
     let hasMacroCall = Box<Bool>(false)
     walkNode(node, { curNode: Node =>
         if (curNode.IsMacroCallNode()) {
-            if (skipIfAvailable) {
-                if (let Some(invocation) <- curNode.GetInvocation()) {
-                    if (invocation.IsIfAvailable()) {
-                        return true
-                    }
-                }
-            }
             hasMacroCall.value = true
             if (let Some(invocation) <- curNode.GetInvocation()) {
-                emitMacroDiagArg(diag, invocation.macroCallDiagInfo.identifierPos,
-                    DiagKind.macro_undeclared_identifier, invocation.macroCallDiagInfo.identifier)
+                Diagnose(diag, node, invocation.macroCallDiagInfo.identifierPos,
+                    DiagKind.macro_undeclared_identifier,
+                    args: [DiagArgument(invocation.macroCallDiagInfo.identifier)]).Emit()
             }
             return false
         }
@@ -118,19 +110,11 @@ private func hasMacroCallInNode(node: Node, diag: DiagnosticEngine, skipIfAvaila
     return hasMacroCall.value
 }
 
-private func isWhenAnnotation(anno: Annotation): Bool {
-    match (anno.kind) {
-        case WHEN => return true
-        case _ => ()
-    }
-    return anno.identifier.Val() == "When"
-}
-
-private func checkWhenAfterMacroExpand(node: Node, diag: DiagnosticEngine): Unit {
+private func CheckWhenAfterMacroExpand(node: Node, diag: DiagnosticEngine): Unit {
     walkNode(node, { curNode: Node =>
         if (let Some(decl) <- (curNode as Decl)) {
             for (anno in decl.annotations) {
-                if (isWhenAnnotation(anno)) {
+                if (anno.kind == RealAnnotationKind.WHEN) {
                     DiagnoseRefactor(diag,
                         DiagKindRefactor.conditional_compilation_unexpected_after_macro, anno).Emit()
                 }
@@ -140,7 +124,7 @@ private func checkWhenAfterMacroExpand(node: Node, diag: DiagnosticEngine): Unit
     })
 }
 
-private func checkUnhandledMacroCall(pkg: Package, diag: DiagnosticEngine): Unit {
+private func CheckUnhandledMacroCall(pkg: Package, diag: DiagnosticEngine): Unit {
     if (diag.GetErrorCount() > 0) {
         return
     }
@@ -148,17 +132,31 @@ private func checkUnhandledMacroCall(pkg: Package, diag: DiagnosticEngine): Unit
         if (!file.hasMacro) {
             continue
         }
-        let _ = hasMacroCallInNode(file, diag, skipIfAvailable: true)
+        walkNode(file, { curNode: Node =>
+            if (let Some(macroExpr) <- (curNode as MacroExpandExpr)) {
+                if (macroExpr.invocation.IsIfAvailable()) {
+                    return true
+                }
+            }
+            if (curNode.IsMacroCallNode()) {
+                if (let Some(invocation) <- curNode.GetInvocation()) {
+                    Diagnose(diag, curNode, invocation.macroCallDiagInfo.identifierPos,
+                        DiagKind.macro_undeclared_identifier,
+                        args: [DiagArgument(invocation.macroCallDiagInfo.identifier)]).Emit()
+                }
+                return false
+            }
+            return true
+        })
     }
 }
 
-private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall, ci: MacroHost): ArrayList<Node> {
+private func ReplaceEachMacroImpl(tokens: ArrayList<Token>, macroNode: MacroCall, ci: MacroHost): ArrayList<Node> {
     let out = ArrayList<Node>()
     if (tokens.isEmpty()) {
         return out
     }
-    let parserDiag = ParsedDiagnosticEngine()
-    let generatedParser = GeneratedParser(tokens.toArray(), parserDiag, ci.GetDiag().GetSourceManager(),
+    let generatedParser = GeneratedParser(tokens.toArray(), ci.GetDiag(), ci.GetDiag().GetSourceManager(),
         attachComment: ci.GetGlobalOptions().enableAddCommentToAst,
         parseDeclFile: ci.GetGlobalOptions().compileCjd)
     generatedParser.SetCompileOptions(ci.GetGlobalOptions())
@@ -188,36 +186,10 @@ private func parseGeneratedNodes(tokens: ArrayList<Token>, macroNode: MacroCall,
         generatedParser.ParseNodes(parsedExprKind, macroNode.RequireNode(), modifiers: macroNode.GetModifiers(),
             annos: macroNode.GetAnnotations())
     }
-    let hasParseError = parserDiag.GetErrorCount() > 0u64
-    forwardParserDiagnostics(parserDiag, ci.GetDiag())
-    if (hasParseError) {
-        out.add(makeInvalidGeneratedNode(tokens))
-        return out
-    }
-    let fallbackFile = macroNode.RequireNode().curFile
     for (parsedNode in parsedNodes) {
-        out.add(convertParsedNode(parsedNode, fallbackFile))
+        out.add(parsedNode)
     }
     return out
-}
-
-private func makeInvalidGeneratedNode(tokens: ArrayList<Token>): Node {
-    let invalidNode = Node()
-    if (!tokens.isEmpty()) {
-        invalidNode.begin = tokens[0].Begin()
-        invalidNode.end = tokens[tokens.size - 1].End()
-    }
-    invalidNode.EnableAttr(Attribute.IS_BROKEN)
-    return invalidNode
-}
-
-private func forwardParserDiagnostics(parserDiag: ParsedDiagnosticEngine, diag: DiagnosticEngine): Unit {
-    for (diagnostic in parserDiag.GetCategoryDiagnostic(ParsedDiagCategory.LEX)) {
-        diag.HandleDiagnostic(diagnostic)
-    }
-    for (diagnostic in parserDiag.GetCategoryDiagnostic(ParsedDiagCategory.PARSE)) {
-        diag.HandleDiagnostic(diagnostic)
-    }
 }
 
 private func toParsedScopeKind(scope: ScopeKind): ParsedScopeKind {
@@ -432,10 +404,6 @@ private func convertParsedMacroInvocation(
     return parsedInvocation
 }
 
-private func convertParsedNode(parsedNode: ParsedNode, fallbackFile: Option<File>): Node {
-    return parsedNode
-}
-
 private func replaceNodeVector(container: ArrayList<Node>, loc: Int64, newNodes: ArrayList<Node>): Unit {
     if (loc < 0 || loc >= container.size) {
         return
@@ -496,7 +464,7 @@ private func replaceExprVector(
             return
         }
     }
-    emitMacroDiag(diag, newNodes[newNodes.size - 1].begin, DiagKind.macro_expect_one_expr)
+    Diagnose(diag, newNodes[newNodes.size - 1], DiagKind.macro_expect_one_expr).Emit()
 }
 
 private func checkReplacedEnumCaseMember(macroNode: MacroCall, newDecls: ArrayList<Decl>, diag: DiagnosticEngine): Unit {
@@ -507,10 +475,10 @@ private func checkReplacedEnumCaseMember(macroNode: MacroCall, newDecls: ArrayLi
         }
         if (macroNode.RequireNode().TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
             if (!newDecls.isEmpty() && !newDecls[0].TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
-                emitMacroDiag(diag, newDecls[0].begin, DiagKind.macro_expect_enum_constructor)
+                Diagnose(diag, newDecls[0], DiagKind.macro_expect_enum_constructor).Emit()
             }
             if (newDecls.size > 1) {
-                emitMacroDiag(diag, newDecls[1].begin, DiagKind.macro_expect_one_enum_constructor)
+                Diagnose(diag, newDecls[1], DiagKind.macro_expect_one_enum_constructor).Emit()
             }
             if (let Some(enumDecl) <- (parent as EnumDecl)) {
                 if (ASTKindEquals(newDecls[0].astKind, ASTKind.FUNC_DECL)) {
@@ -520,8 +488,8 @@ private func checkReplacedEnumCaseMember(macroNode: MacroCall, newDecls: ArrayLi
         } else {
             for (decl in newDecls) {
                 if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
-                    emitMacroDiagArg(diag, decl.begin, DiagKind.macro_expect_decl_not_enum_constructor,
-                        decl.identifier.GetRawText())
+                    Diagnose(diag, decl, DiagKind.macro_expect_decl_not_enum_constructor,
+                        args: [DiagArgument(decl.identifier.GetRawText())]).Emit()
                 }
             }
         }
@@ -566,7 +534,7 @@ private func replaceDeclVector(
             }
             replacements.add(decl)
         } else {
-            emitMacroDiag(diag, node.begin, DiagKind.macro_expect_declaration)
+            Diagnose(diag, node, DiagKind.macro_expect_declaration).Emit()
         }
     }
     if (replacements.isEmpty()) {
@@ -611,7 +579,7 @@ private func checkReplacedFuncParamList(
             if (!meetNamedParameter && param.isNamedParam) {
                 meetNamedParameter = true
             } else if (meetNamedParameter && !param.isNamedParam) {
-                emitMacroDiag(diag, param.begin, DiagKind.macro_named_parameter_after_unnamed)
+                Diagnose(diag, param, DiagKind.macro_named_parameter_after_unnamed).Emit()
             }
         }
     }
@@ -641,7 +609,7 @@ private func replaceParamVector(
             }
             replacements.add(param)
         } else {
-            emitMacroDiag(diag, node.begin, DiagKind.macro_expect_declaration)
+            Diagnose(diag, node, DiagKind.macro_expect_declaration).Emit()
         }
     }
     if (replacements.isEmpty()) {
@@ -707,7 +675,7 @@ public class MacroExpansion {
         }
         for (pkg in packages) {
             AddCurFile(pkg)
-            checkUnhandledMacroCall(pkg, ci.GetDiag())
+            CheckUnhandledMacroCall(pkg, ci.GetDiag())
         }
     }
 
@@ -807,15 +775,15 @@ public class MacroExpansion {
         if (MacroExpandFailed(invocation.newTokens) || macCall.status == MacroEvalStatus.FAIL) {
             return
         }
-        let nodes = parseGeneratedNodes(invocation.newTokens, macCall, ci)
+        let nodes = ReplaceEachMacroImpl(invocation.newTokens, macCall, ci)
         for (node in nodes) {
             if (node.IsInvalid()) {
                 return
             }
-            if (hasMacroCallInNode(node, ci.GetDiag())) {
+            if (HasMacroCallInNode(node, ci.GetDiag())) {
                 return
             }
-            checkWhenAfterMacroExpand(node, ci.GetDiag())
+            CheckWhenAfterMacroExpand(node, ci.GetDiag())
         }
         ReplaceEachMacroHelper(macCall, nodes)
     }
@@ -833,10 +801,10 @@ public class MacroExpansion {
                         }
                     }
                 } else {
-                    emitMacroDiag(ci.GetDiag(), newNodes[0].begin, DiagKind.macro_expect_one_expr)
+                    Diagnose(ci.GetDiag(), newNodes[0], DiagKind.macro_expect_one_expr).Emit()
                 }
             } else {
-                emitMacroDiag(ci.GetDiag(), newNodes[newNodes.size - 1].begin, DiagKind.macro_expect_one_expr)
+                Diagnose(ci.GetDiag(), newNodes[newNodes.size - 1], DiagKind.macro_expect_one_expr).Emit()
             }
         } else if (target.kind == ReplaceTargetKind.NODE_VECTOR) {
             if (let Some(nodes) <- target.nodes) {

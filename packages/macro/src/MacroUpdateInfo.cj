@@ -187,7 +187,7 @@ public func AssignExprReplacement(target: ReplaceTarget, expr: Expr): Bool {
                 return true
             }
         } else if (target.exprField == ExprFieldKind.ASSIGN_RIGHT_EXPR) {
-            if (let Some(parentAssignExpr) <- (parentNode as BinaryExpr)) {
+            if (let Some(parentAssignExpr) <- (parentNode as AssignExpr)) {
                 parentAssignExpr.rightExpr = Some(expr)
                 return true
             }
@@ -310,13 +310,11 @@ public func UpdateMacroInfo(node: Node, collector: MacroCollector): Unit {
         updateExprContainer(subscriptExpr.indexExprs, subscriptExpr, collector)
     } else if (let Some(letPatternExpr) <- (node as LetPatternDestructor)) {
         updateExprField(letPatternExpr.initializer, letPatternExpr, ExprFieldKind.LET_PATTERN_INITIALIZER, collector)
+    } else if (let Some(assign) <- (node as AssignExpr)) {
+        updateExprField(assign.rightExpr, assign, ExprFieldKind.ASSIGN_RIGHT_EXPR, collector)
     } else if (let Some(binary) <- (node as BinaryExpr)) {
-        if (ASTKindEquals(binary.astKind, ASTKind.ASSIGN_EXPR)) {
-            updateExprField(binary.rightExpr, binary, ExprFieldKind.ASSIGN_RIGHT_EXPR, collector)
-        } else {
-            updateExprField(binary.rightExpr, binary, ExprFieldKind.BINARY_RIGHT_EXPR, collector)
-            updateExprField(binary.leftExpr, binary, ExprFieldKind.BINARY_LEFT_EXPR, collector)
-        }
+        updateExprField(binary.rightExpr, binary, ExprFieldKind.BINARY_RIGHT_EXPR, collector)
+        updateExprField(binary.leftExpr, binary, ExprFieldKind.BINARY_LEFT_EXPR, collector)
     } else if (let Some(arrayLit) <- (node as ArrayLit)) {
         updateExprContainer(arrayLit.children, arrayLit, collector)
     } else if (let Some(tupleLit) <- (node as TupleLit)) {

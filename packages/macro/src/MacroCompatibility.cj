@@ -26,7 +26,7 @@ public import cjcj::option.MockMode
 public import cjcj::modules.{MacroHost, MacroHostImportManager}
 
 public import cjcj::ast.{
-    Annotation, ArrayExpr, ArrayLit, AsExpr, BinaryExpr, Block, CallExpr, ClassDecl, CommandTypePattern,
+    Annotation, ArrayExpr, ArrayLit, AsExpr, AssignExpr, BinaryExpr, Block, CallExpr, ClassDecl, CommandTypePattern,
     ConstPattern, ConstantType, Decl, DoWhileExpr, EnumDecl, EnumPattern, ExceptTypePattern, Expr,
     ExtendDecl, File, ForInExpr, FuncArg, FuncBody, FuncDecl, FuncParam, FuncParamList, FuncType, Handler,
     IfExpr, ImportContent, ImportSpec, IncOrDecExpr, InterfaceDecl, InterpolationExpr, IsExpr, JumpExpr,
