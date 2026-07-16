@@ -7222,6 +7222,7 @@ public class Translator {
     }
 
     private func TranslateTupleAccess(expr: AstSubscriptExpr): Value {
+        let loc = TranslateLocation(expr)
         let path = ArrayList<UInt64>()
         var baseExpr: Option<AstExpr> = None
         var current: Option<AstSubscriptExpr> = expr
@@ -7236,10 +7237,10 @@ public class Translator {
             baseExpr = subscript.baseExpr
             current = if (let Some(base) <- subscript.baseExpr) { base as AstSubscriptExpr } else { None }
         }
-        let base = Translator.TranslateASTNode(RequireExpr(baseExpr, "tuple access base"), this) ??
-            throw IllegalStateException("faithful AST2CHIR tuple base produced no value")
-        let baseValue = GetDerefedValue(base)
+        let base = TranslateExprArg(RequireExpr(baseExpr, "tuple access base"))
+        let baseValue = GetDerefedValue(base, loc)
         let field = builder.CreateField(chirTy.TranslateType(RequireAstTy(expr)), baseValue, path, CurrentBlock())
+        field.SetDebugLocation(loc)
         if (expr.TestAttr(AstAttribute.IMPLICIT_ADD)) {
             field.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         }
@@ -7276,11 +7277,22 @@ public class Translator {
     }
 
     private func TranslateEnumCtorCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
+        let loc = TranslateLocation(expr)
         let args = ArrayList<Value>()
-        args.add(CreateEnumSelectorConstant(calleeDecl))
+        let selectorTy = GetEnumSelectorType(calleeDecl)
+        let enumId = GetEnumCtorId(calleeDecl)
+        let selector = if (selectorTy.IsBoolean()) {
+            builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0), CurrentBlock())
+        } else {
+            builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock())
+        }
+        selector.SetDebugLocation(loc)
+        args.add(RequireResult(selector))
         let expectedParamTys = FuncParamTypes(expr, calleeDecl)
         AppendTranslatedCallArgs(expr, calleeDecl, args, expectedParamTys, ArrayList<Value>())
-        return RequireResult(builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), args, CurrentBlock()))
+        let tuple = builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), args, CurrentBlock())
+        tuple.SetDebugLocation(loc)
+        return RequireResult(tuple)
     }
 
     private func CallBaseFuncTy(expr: AstCallExpr, calleeDecl: AstFuncDecl): AstFuncTy {
