@@ -473,6 +473,8 @@ extend ParserImpl {
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
+            SetDeclBeginPos(decl)
+            SetBeginToAnnotationsBegin(decl, annos)
             return decl
         }
         if (Seeing(TokenKind.INIT)) {
@@ -2209,6 +2211,7 @@ extend ParserImpl {
             ret.begin = key.Begin()
             CheckDeclarationInScope(scopeKind, DefKind.PROPERTY)
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            ret.begin = key.Begin()
             ret.identifier = ExpectIdentifierWithPos(ret)
             if (Skip(TokenKind.COLON)) {
                 ret.colonPos = lastToken.Begin()
