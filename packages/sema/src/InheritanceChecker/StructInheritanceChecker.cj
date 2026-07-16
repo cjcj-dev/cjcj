@@ -2355,16 +2355,16 @@ public class StructInheritanceChecker {
         if (let Some(childDecl) <- child.decl) {
             let typeText = DeclKindText(childDecl)
             if (childDecl.TestAttr(Attribute.OVERRIDE)) {
-                diag.Diagnose(
-                    childDecl.begin,
-                    childDecl.end,
+                Diagnose(
+                    diag,
+                    childDecl,
                     DiagKind.sema_missing_overridden_func,
                     args: [DiagArgument(typeText), DiagArgument(childDecl.identifier.Val()), DiagArgument(typeText)]
                 ).Emit()
             } else if (childDecl.TestAttr(Attribute.REDEF) && childDecl.TestAttr(Attribute.STATIC)) {
-                diag.Diagnose(
-                    childDecl.begin,
-                    childDecl.end,
+                Diagnose(
+                    diag,
+                    childDecl,
                     DiagKind.sema_missing_redefined_func,
                     args: [DiagArgument(typeText), DiagArgument(childDecl.identifier.Val()), DiagArgument(typeText)]
                 ).Emit()
