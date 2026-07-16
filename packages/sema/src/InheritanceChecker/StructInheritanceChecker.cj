@@ -1782,7 +1782,9 @@ public class StructInheritanceChecker {
     }
 
     private func DiagnoseForUnimplementedInterfaces(members: MemberMap, structDecl: Decl): Unit {
-        if (structDecl.TestAnyAttr(Attribute.FOREIGN, Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER)) {
+        if (structDecl.TestAttr(Attribute.FOREIGN) ||
+            structDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER) ||
+            structDecl.TestAttr(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)) {
             return
         }
         let prefix = if (structDecl.astKind == ASTKind.EXTEND_DECL) { "extend " } else { "" }
@@ -1831,12 +1833,13 @@ public class StructInheritanceChecker {
             } else if (let Some(outer) <- memberDecl.outerDecl) {
                 if (!SameDecl(outer, structDecl)) {
                     if (isStaticAbsMember && isAbstractClass) {
-                        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                        diag.DiagnoseRefactor(
+                        DiagnoseRefactor(
+                            diag,
                             DiagKindRefactor.sema_inherit_abstract_class_static_unimplement_func,
-                            DeclRange(structDecl),
+                            structDecl,
+                            MakeRange(structDecl.identifier.Begin(), structDecl.identifier.End()),
                             arguments: [structName, DeclKindText(memberDecl), entry.name]
-                        )
+                        ).Emit()
                     } else if (!member.inconsistentTypes.IsEmpty()) {
                         DiagnoseInheritedInsconsistType(member, structDecl)
                     }
