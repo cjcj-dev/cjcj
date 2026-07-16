@@ -210,7 +210,7 @@ public class IncrementalGen {
 
     // Mirrors IncrementalGen.cpp:143-176.
     public func LinkModules(incremental: LLVMModuleHandle,
-        cachedMangles!: CachedMangleMap = CachedMangleMap()): LLVMModuleHandle {
+        cachedMangles!: CachedMangleMap): LLVMModuleHandle {
         CJC_ASSERT(!incremental.raw.isNull() && injectedModule.isSome())
         incrementalModule = incremental
         InitCodeGenAddedCachedMap()
