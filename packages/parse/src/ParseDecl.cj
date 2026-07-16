@@ -370,7 +370,7 @@ extend ParserImpl {
         if (SeeingEnumConstructor(scopeKind)) {
             return ParseEnumConstructor(modifiers, annos)
         }
-        if (Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
+        if (SeeingMacroCallDecl()) {
             return ParseMacroCall(scopeKind, modifiers, annos)
         }
         if (SeeingFinalizer()) { return ParseFinalizer(scopeKind, modifiers, annos) }
