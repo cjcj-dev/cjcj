@@ -320,7 +320,7 @@ public func PreCheckAnnoForCFFI(decl: Decl, diag: BasicDiagnosticEngine): Unit {
                 decl,
                 args: [BasicDiagArgument("interface declaration")])
         } else if (decl.astKind == ASTKind.VAR_DECL) {
-            EmitLegacy(diag, BasicDiagKind.sema_native_var_error, decl)
+            Diagnose(diag, decl, BasicDiagKind.sema_native_var_error).Emit()
         }
     }
     for (annotation in decl.annotations) {

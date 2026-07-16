@@ -922,7 +922,7 @@ private func preCheckDiagStaticAndNonStaticOverload(
 }
 
 // C++ src/Sema/PreCheck.cpp:1486 PreCheckMacroRedefinition.
-private func preCheckMacroRedefinition(diag: BasicDiagnosticEngine, funcs: ArrayList<FuncDecl>): Unit {
+private func PreCheckMacroRedefinition(diag: BasicDiagnosticEngine, funcs: ArrayList<FuncDecl>): Unit {
     let macroVec = ArrayList<FuncDecl>()
     for (funcDecl in funcs) {
         if (funcDecl.TestAttr(Attribute.MACRO_FUNC) && !funcDecl.TestAttr(Attribute.COMPILER_ADD)) {
@@ -945,10 +945,8 @@ private func preCheckMacroRedefinition(diag: BasicDiagnosticEngine, funcs: Array
     let cnt1 = macroVec[1].funcBody.getOrThrow().paramLists[0].params.size
     if ((macroVec.size == 2 && cnt0 == cnt1) || macroVec.size > 2) {
         for (macroDecl2 in macroVec) {
-            let builder = diag.Diagnose(macroDecl2.begin, macroDecl2.end,
-                BasicDiagKind.sema_expand_macro_redefinition,
-                args: [BasicDiagArgument(macroDecl2.identifier.Val())])
-            builder.Emit()
+            Diagnose(diag, macroDecl2, BasicDiagKind.sema_expand_macro_redefinition,
+                args: [BasicDiagArgument(macroDecl2.identifier.Val())]).Emit()
         }
     }
 }
@@ -1115,7 +1113,7 @@ public func PreCheckFuncRedefinition(pkg: Package, syms: ArrayList<Symbol>, diag
         groups[names.scopeName + "\u{0}" + names.name] = funcs
     }
     for ((_, funcs) in groups) {
-        preCheckMacroRedefinition(diag, funcs)
+        PreCheckMacroRedefinition(diag, funcs)
         preCheckFuncRedefinitionForEnum(diag, funcs)
         preCheckFuncRedefinitionForFFI(diag, funcs)
         preCheckFuncStaticConflict(diag, funcs)
