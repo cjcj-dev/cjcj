@@ -41,6 +41,7 @@ import cjcj::ast.ForInKind as AstForInKind
 import cjcj::ast.FuncArg as AstFuncArg
 import cjcj::ast.FuncBody as AstFuncBody
 import cjcj::ast.FuncDecl as AstFuncDecl
+import cjcj::ast.FuncParam as AstFuncParam
 import cjcj::ast.FuncTy as AstFuncTy
 import cjcj::ast.GenericsTy as AstGenericsTy
 import cjcj::ast.IfExpr as AstIfExpr
@@ -717,6 +718,12 @@ public class Translator {
     private func CreateAnnotationInfo(decl: AstDecl, value: CustomTypeDef,
         parent: Option<CustomTypeDef>): Unit {
         value.SetAnnoInfo(CreateAnnoFactoryFuncSig(decl, parent))
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateAnnotation.cpp:242-245.
+    public func CreateParamAnnotationInfo(astParam: AstFuncParam, chirParam: Parameter,
+        parent: Option<CustomTypeDef>): Unit {
+        chirParam.SetAnnoInfo(CreateAnnoFactoryFuncSig(astParam, parent))
     }
 
     public func TranslateAnnoFactoryFuncBody(decl: AstDecl, funcDef: Function): Unit {
