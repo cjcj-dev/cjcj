@@ -158,6 +158,60 @@ public class MemberJNISignature {
     }
 }
 
+private func GetJavaEntityIsNullCall(entityDecl: StructDecl): Option<PropDecl> {
+    for (member in entityDecl.GetMemberDecls()) {
+        if (let Some(prop) <- (member as PropDecl)) {
+            if (prop.identifier == "isNull") {
+                return Some(prop)
+            }
+        }
+    }
+    return None
+}
+
+private func CreateJavaEntityIsNullExpr(entity: Expr, entityDecl: StructDecl): Option<Expr> {
+    let isNullProp = GetJavaEntityIsNullCall(entityDecl)
+    if (let None <- isNullProp) {
+        return None
+    }
+    CJC_ASSERT_WITH_MSG(!isNullProp.getOrThrow().getters.isEmpty(), "getters cannot be empty")
+    let getter = isNullProp.getOrThrow().getters[0]
+    let access = CreateMemberAccess(entity, getter)
+    CopyBasicInfo(access.baseExpr.getOrThrow(), access)
+    let call = CreateCallExpr(access, ArrayList<FuncArg>(), Some(getter),
+        isNullProp.getOrThrow().GetTy().getOrThrow(), CallKind.CALL_DECLARED_FUNCTION)
+    CopyBasicInfo(call.baseFunc.getOrThrow(), call)
+    return Some(call)
+}
+
+private func IsWrappingConstructorOfJavaImpl(refWrapperMember: Decl): Bool {
+    if (!refWrapperMember.TestAttr(Attribute.CONSTRUCTOR) ||
+        !refWrapperMember.TestAttr(Attribute.COMPILER_ADD)) {
+        return false
+    }
+    if (let Some(ctor) <- (refWrapperMember as FuncDecl)) {
+        if (let Some(body) <- ctor.funcBody) {
+            if (!body.paramLists.isEmpty() && body.paramLists[0].params.size == 2) {
+                let params = body.paramLists[0].params
+                return InteropLibBridge.IsJavaEntityTy(params[0].GetTy().getOrThrow()) &&
+                    params[1].GetTy().getOrThrow().kind == TypeKind.TYPE_INT64
+            }
+        }
+    }
+    return false
+}
+
+private func GetJavaImplWrappingConstructor(refWrapper: ClassDecl): FuncDecl {
+    CJC_ASSERT(IsImplReferenceWrapper(refWrapper))
+    for (member in refWrapper.GetMemberDeclPtrs()) {
+        if (IsWrappingConstructorOfJavaImpl(member)) {
+            return (member as FuncDecl).getOrThrow()
+        }
+    }
+    CJC_ABORT()
+    return FuncDecl()
+}
+
 public class InteropLibBridge {
     private static let INTEROPLIB_VERSION: Int64 = 10
     private static let INTEROPLIB_PACKAGE_NAME: String = "java.internal"
