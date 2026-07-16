@@ -80,6 +80,7 @@ private let GET_JAVALAMBDA_OBJECT_DECL_ID: String = "getJavaLambdaObject"
 private let GET_JAVALAMBDA_ENTITY_DECL_ID: String = "getJavaLambdaEntity"
 private let JAVA_ARRAY_GET_FOR_REF_TYPES: String = "$javaarrayget"
 private let JAVA_ARRAY_SET_FOR_REF_TYPES: String = "$javaarrayset"
+private let markerClassDecl: ClassDecl = CreateConstructorMarkerClassDecl()
 
 public class MemberJNISignature {
     public var classTypeSignature: String
@@ -902,6 +903,104 @@ public class InteropLibBridge {
         args.add(CreateFuncArg(CreateArrayLit(callArgs, arrayTy)))
         args.add(CreateFuncArg(callNest))
         return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
+    }
+
+    public func CreateCFFINewJavaObjectCall(jniEnv: Expr, classTypeSignature: String,
+        params: FuncParamList, isMirror: Bool, curFile: File): Option<CallExpr> {
+        let callArgs = ArrayList<Expr>()
+        for (param in params.params) {
+            callArgs.add(WrapJavaEntity(
+                WithinFile<RefExpr>(CreateRefExpr(param), curFile)).getOrThrow())
+        }
+        let paramTys = GetParamTys(params)
+        if (!isMirror) {
+            callArgs.add(CreateJavaEntityNullCall(Some(curFile)).getOrThrow())
+            paramTys.add(typeManager.GetClassTy(markerClassDecl, []))
+        }
+        return CreateNewJavaObjectCall(jniEnv, classTypeSignature,
+            utils.GetJavaTypeSignature(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT), paramTys), callArgs)
+    }
+
+    public func CreateCFFICallArrayMethodCall(jniEnv: Expr, obj: Expr, params: FuncParamList,
+        genericParam: GenericParamDecl, kind: ArrayOperationKind): Option<Expr> {
+        CJC_ASSERT(kind == ArrayOperationKind.GET || kind == ArrayOperationKind.SET)
+        let javaEntityKindDecl = GetJavaEntityKindDecl().getOrThrow()
+        let jObject = utils.GetJObjectDecl().getOrThrow()
+        let javaRef = GetJavaRefField(jObject)
+        let curFile = genericParam.curFile.getOrThrow()
+        let funcDecl = if (kind == ArrayOperationKind.GET) {
+            GetJavaArrayGetDecl()
+        } else {
+            GetJavaArraySetDecl()
+        }
+        let indexArg = params.params[0]
+        let primitiveKind = CreateMatchByTypeArgument(genericParam,
+            GenerateTypeMappingWithSelector(
+                { selectedKind: TypeKind, selectedTy: Ty =>
+                    SelectJPrimitiveNameByTypeKind(selectedKind, selectedTy)
+                }),
+            javaEntityKindDecl.GetTy().getOrThrow(),
+            WithinFile<RefExpr>(CreateRefExpr(GetJavaEntityKindJObject()), curFile))
+        if (kind == ArrayOperationKind.GET) {
+            let args = ArrayList<FuncArg>()
+            args.add(CreateFuncArg(jniEnv))
+            args.add(CreateFuncArg(primitiveKind))
+            args.add(CreateFuncArg(obj))
+            args.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(indexArg), curFile)))
+            if (let Some(call) <- CreateCall(funcDecl, Some(curFile), args: args)) { return Some(call) }
+            return None
+        }
+        let valueArg = params.params[1]
+        let paramRef = WithinFile<RefExpr>(CreateRefExpr(valueArg), curFile)
+        let valueEntity: Expr = if (valueArg.GetTy().getOrThrow().name == INTEROPLIB_CFFI_JAVA_ENTITY) {
+            paramRef
+        } else {
+            CreateMatchByTypeArgument(genericParam,
+                GenerateTypeMappingWithSelector(
+                    { selectedKind: TypeKind, selectedTy: Ty =>
+                        SelectEntityWrapperByTypeKind(selectedKind, selectedTy, valueArg, Some(curFile))
+                    }),
+                GetJavaEntityDecl().getOrThrow().GetTy().getOrThrow(),
+                CreateMemberAccess(CreateMatchWithTypeCast(paramRef, jObject.GetTy().getOrThrow()).getOrThrow(),
+                    javaRef))
+        }
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(jniEnv))
+        args.add(CreateFuncArg(primitiveKind))
+        args.add(CreateFuncArg(obj))
+        args.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(indexArg), curFile)))
+        args.add(CreateFuncArg(valueEntity))
+        if (let Some(call) <- CreateCall(funcDecl, Some(curFile), args: args)) { return Some(call) }
+        return None
+    }
+
+    public func CreateCFFICallMethodCall(jniEnv: Expr, obj: Expr, signature: MemberJNISignature,
+        params: FuncParamList, curFile: File): Option<CallExpr> {
+        let callArgs = ArrayList<Expr>()
+        for (param in params.params) {
+            callArgs.add(CreateParamExpr(param, obj.curFile))
+        }
+        return CreateCallMethodCall(jniEnv, obj, signature, callArgs, curFile)
+    }
+
+    public func CreateCFFICallStaticMethodCall(jniEnv: Expr, signature: MemberJNISignature,
+        params: FuncParamList, curFile: File): Option<CallExpr> {
+        let callArgs = ArrayList<Expr>()
+        for (param in params.params) {
+            callArgs.add(CreateParamExpr(param, Some(curFile)))
+        }
+        return CreateCallStaticMethodCall(jniEnv, signature, callArgs, curFile)
+    }
+
+    public func CreateParamExpr(param: FuncParam, curFile: Option<File>): Expr {
+        if (param.TyKind() == TypeKind.TYPE_FUNC) {
+            let file = curFile.getOrThrow()
+            let lambdaJavaClassSign = NormalizeJavaSignature(file.curPackage.getOrThrow().fullPackageName + "." +
+                GetLambdaJavaClassName(param.GetTy().getOrThrow()) + "$Box")
+            return CreateGetJavaLambdaEntityCall(
+                WithinFile<RefExpr>(CreateRefExpr(param), curFile), lambdaJavaClassSign, curFile)
+        }
+        return WrapJavaEntity(WithinFile<RefExpr>(CreateRefExpr(param), curFile)).getOrThrow()
     }
 
     public func CreateJavaEntityCall(arg: Expr): Option<Expr> {
