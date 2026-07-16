@@ -13,9 +13,9 @@ public class ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParserImpl.h:150
     var inputString: String = ""
     private let tokenLines: HashSet<Int64> = HashSet<Int64>()
-    public var lookahead: Token = Token(TokenKind.SENTINEL, "", INVALID_POSITION, INVALID_POSITION)
-    public var lastToken: Token = Token(TokenKind.SENTINEL, "", INVALID_POSITION, INVALID_POSITION)
-    public var lastNoneNLToken: Token = Token(TokenKind.SENTINEL, "", INVALID_POSITION, INVALID_POSITION)
+    public var lookahead: Token = Token(TokenKind.SENTINEL, "", BEGIN_POSITION, BEGIN_POSITION)
+    public var lastToken: Token = Token(TokenKind.SENTINEL, "", BEGIN_POSITION, BEGIN_POSITION)
+    public var lastNoneNLToken: Token = Token(TokenKind.SENTINEL, "", BEGIN_POSITION, BEGIN_POSITION)
     public var newlineSkipped: Bool = true
     public var skipNL: Bool = true
     public var firstNLPosition: Position = DEFAULT_POSITION
@@ -38,6 +38,7 @@ public class ParserImpl {
     public var enableAttachComment: Bool = false
     public var compileOptions: GlobalOptions = GlobalOptions()
     public var scanDepPkg: Bool = false
+    private var calculateLineNum: Bool = false
     public let commentsMap: TokenVecMap = TokenVecMap()
     public let chainedAST: ArrayList<Node> = ArrayList<Node>()
     public let bracketsStack: ArrayList<TokenKind> = ArrayList<TokenKind>()
@@ -50,7 +51,6 @@ public class ParserImpl {
         this.lexer = Lexer(fileID, input, diag, sm, cts: attachComment)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
-        Init()
     }
 
     public init(input: String, diag: BasicDiagnosticEngine, sm: SourceManager, pos: Position, attachComment: Bool, parsingDeclFiles: Bool) {
@@ -60,7 +60,6 @@ public class ParserImpl {
         this.lexer = Lexer(input, diag, sm, pos, cts: attachComment)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
-        Init()
     }
 
     public init(inputTokens: Array<Token>, diag: BasicDiagnosticEngine, sm: SourceManager, attachComment: Bool, parsingDeclFiles: Bool) {
@@ -70,11 +69,6 @@ public class ParserImpl {
         this.lexer = Lexer(inputTokens, diag, sm, cts: attachComment)
         this.enableAttachComment = attachComment
         this.parseDeclFile = parsingDeclFiles
-        Init()
-    }
-
-    private func Init(): Unit {
-        Next()
     }
 
     public func GetLineNum(): Int64 {
@@ -126,6 +120,7 @@ public class ParserImpl {
         scanDepPkg = opts.scanDepPkg
         enableInteropCJMapping = opts.enableInteropCJMapping
         enableEH = opts.enableEH
+        calculateLineNum = opts.enableTimer || opts.enableMemoryCollect
         lexer.SetEHEnabled(opts.enableEH)
     }
 
@@ -139,6 +134,36 @@ public class ParserImpl {
     }
 
     public func Peek(): Token {
+        if (lookahead.kind != TokenKind.SENTINEL) {
+            return lookahead
+        }
+        deadlocked = false
+        var firstNLFlag = true
+        do {
+            lookahead = lexer.Next()
+            if (calculateLineNum) {
+                RecordTokenLines(lookahead)
+            }
+            if (lookahead.kind == TokenKind.LCURL || lookahead.kind == TokenKind.LPAREN ||
+                lookahead.kind == TokenKind.LSQUARE) {
+                bracketsStack.add(lookahead.kind)
+            }
+            let matchingBracket = LookupMatchingOpenBracket(lookahead.kind)
+            if (matchingBracket != TokenKind.ILLEGAL && !bracketsStack.isEmpty() &&
+                matchingBracket == bracketsStack[bracketsStack.size - 1]) {
+                bracketsStack.remove(at: bracketsStack.size - 1)
+            }
+            if (lookahead.kind == TokenKind.NL) {
+                newlineSkipped = true
+                if (firstNLFlag) {
+                    firstNLPosition = lookahead.Begin()
+                    firstNLFlag = false
+                }
+            }
+        } while (lookahead.kind == TokenKind.COMMENT || (lookahead.kind == TokenKind.NL && skipNL))
+        if (lookahead.kind == TokenKind.END && !lastToken.Begin().IsZero()) {
+            lookahead.SetValuePos(lookahead.Value(), lastToken.End(), lastToken.End())
+        }
         return lookahead
     }
 
@@ -161,49 +186,25 @@ public class ParserImpl {
                 lastNoneNLToken = lookahead
             }
         }
-        deadlocked = false
-        var token = lexer.Next()
-        RecordTokenLines(token)
-        if (token.kind == TokenKind.LCURL || token.kind == TokenKind.LPAREN ||
-            token.kind == TokenKind.LSQUARE) {
-            bracketsStack.add(token.kind)
-        }
-        var matchingBracket = LookupMatchingOpenBracket(token.kind)
-        if (matchingBracket != TokenKind.ILLEGAL && !bracketsStack.isEmpty() &&
-            matchingBracket == bracketsStack[bracketsStack.size - 1]) {
-            bracketsStack.remove(at: bracketsStack.size - 1)
-        }
         newlineSkipped = false
+        Peek()
         var firstNLFlag = true
-        if (token.kind == TokenKind.NL) {
+        if (lookahead.kind == TokenKind.NL) {
             newlineSkipped = true
-            firstNLPosition = token.Begin()
+            firstNLPosition = lookahead.Begin()
             firstNLFlag = false
         }
-        while (token.kind == TokenKind.COMMENT || (skipNL && token.kind == TokenKind.NL)) {
-            token = lexer.Next()
-            RecordTokenLines(token)
-            if (token.kind == TokenKind.LCURL || token.kind == TokenKind.LPAREN ||
-                token.kind == TokenKind.LSQUARE) {
-                bracketsStack.add(token.kind)
-            }
-            matchingBracket = LookupMatchingOpenBracket(token.kind)
-            if (matchingBracket != TokenKind.ILLEGAL && !bracketsStack.isEmpty() &&
-                matchingBracket == bracketsStack[bracketsStack.size - 1]) {
-                bracketsStack.remove(at: bracketsStack.size - 1)
-            }
-            if (token.kind == TokenKind.NL) {
+        while ((skipNL && lexer.Seeing([TokenKind.NL])) || lexer.Seeing([TokenKind.COMMENT])) {
+            if (lexer.Seeing([TokenKind.NL])) {
                 newlineSkipped = true
                 if (firstNLFlag) {
-                    firstNLPosition = token.Begin()
+                    firstNLPosition = lexer.LookAhead(1)[0].Begin()
                     firstNLFlag = false
                 }
             }
+            lexer.Next()
         }
-        if (token.kind == TokenKind.END && !lastToken.Begin().IsZero()) {
-            token.SetValuePos(token.Value(), lastToken.End(), lastToken.End())
-        }
-        lookahead = token
+        lookahead.kind = TokenKind.SENTINEL
     }
 
     private func RecordTokenLines(token: Token): Unit {
