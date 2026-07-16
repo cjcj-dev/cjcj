@@ -944,12 +944,13 @@ public class InteropLibBridge {
         cStrToStringCall.callKind = CallKind.CALL_DECLARED_FUNCTION
         cStrToStringCall.curFile = file
         let cases = ArrayList<MatchCase>()
-        for ((typeDesc, expr) in typeToCaseMap.entries) {
+        for ((typeDesc, expr) in typeToCaseMap) {
             let isOption = typeDesc.startsWith(CORE_PACKAGE_NAME + ":" + OPTION_NAME)
             let selectedDecl = if (isOption) { strStartsWithDecl } else { strEqualsDecl }
             let caseCall = CallExpr()
-            let caseMa = CreateMemberAccess((ASTCloner.Clone(cStrToStringCall) as Expr).getOrThrow(),
-                if (isOption) { "startsWith" } else { "==" })
+            let caseName: String = if (isOption) { "startsWith" } else { "==" }
+            let caseMa = CreateMemberAccess(
+                (ASTCloner.Clone(cStrToStringCall) as Expr).getOrThrow(), caseName)
             caseMa.SetTy(selectedDecl.GetTy().getOrThrow())
             caseMa.target = Some(selectedDecl)
             caseMa.callOrPattern = Some(caseCall)
