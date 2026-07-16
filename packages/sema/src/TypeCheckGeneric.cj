@@ -807,7 +807,7 @@ extend TypeCheckerImpl {
         }
         let effectiveTypeArgs = filteredTypeArgsForTarget(target, rawTypeArgs)
         expr.SetTy(GetGenericType(typeManager, realTarget.getOrThrow(), effectiveTypeArgs))
-        if (!CheckGenericDeclInstantiation(realTarget, effectiveTypeArgs, expr)) {
+        if (!CheckGenericDeclInstantiation(realTarget.getOrThrow(), effectiveTypeArgs, expr)) {
             expr.SetTy(TypeManager.GetInvalidTy())
         }
     }
