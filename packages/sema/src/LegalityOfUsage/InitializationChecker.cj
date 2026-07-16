@@ -869,7 +869,11 @@ public class InitializationChecker {
             if (member.TestAnyAttr(Attribute.INITIALIZED, Attribute.TOOL_ADD, Attribute.COMMON) || opts.compileCjd) {
                 continue
             }
-            AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, member, target: member)
+            if (let Some(initFunc) <- staticInit) {
+                AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, initFunc, target: member)
+            } else {
+                AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, member, target: member)
+            }
         }
     }
 

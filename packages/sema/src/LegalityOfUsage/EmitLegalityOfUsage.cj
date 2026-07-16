@@ -66,8 +66,18 @@ private func EmitInitializationIssue(diag: BasicDiagnosticEngine, issue: Initial
                     // CheckStaticInitForTypeDecl collects this issue without a message; the C++
                     // format argument is the field identifier (decl->identifier), so derive it from
                     // the target rather than the (empty) issue message.
-                    DiagnoseRefactorNode(diag, target, BasicDiagKindRefactor.sema_type_uninitialized_static_field,
-                        target.identifier.Val())
+                    let builder = DiagnoseRefactor(diag,
+                        BasicDiagKindRefactor.sema_type_uninitialized_static_field,
+                        target,
+                        arguments: [target.identifier.Val()])
+                    let note = "you may add an initializer inline or "
+                    if (let Some(staticInit) <- (issue.node as FuncDecl)) {
+                        builder.AddNote(note + "initialize the variable in the 'static init'")
+                        AddNote(builder, staticInit, MakeRangeForDeclIdentifier(staticInit), "static init defined here")
+                    } else {
+                        builder.AddNote(note + "define a 'static init' to perform initialization")
+                    }
+                    builder.Emit()
                 } else {
                     var diagNode = issue.node
                     if (let Some(funcDecl) <- (issue.node as FuncDecl)) {
