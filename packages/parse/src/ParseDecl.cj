@@ -422,6 +422,8 @@ extend ParserImpl {
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
+            SetDeclBeginPos(decl)
+            SetBeginToAnnotationsBegin(decl, annos)
             return decl
         }
         if (Seeing(TokenKind.STRUCT)) {
@@ -1608,7 +1610,7 @@ extend ParserImpl {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let key = Expect(TokenKind.INTERFACE, "expected declaration keyword")
             ret.keywordPos = key.Begin()
-            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            ret.begin = key.Begin()
             ret.identifier = ExpectIdentifierWithPos(ret)
             ParseInterfaceDeclOrClassDeclGeneric(ret)
             CheckDeclarationInScope(scopeKind, DefKind.INTERFACE)
