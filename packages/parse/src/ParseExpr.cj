@@ -468,6 +468,9 @@ extend ParserImpl {
     private func ParseExprRhsWithPre(minPrec: UInt8, left: Expr, ek: ExprKind, preOp: Token): Expr {
         var lhs = left
         while (true) {
+            if (!SeeingExprOperator()) {
+                return lhs
+            }
             var op = Peek()
             if (let Some(combined) <- LookupSeenCombinator()) {
                 op = combined
@@ -590,6 +593,9 @@ extend ParserImpl {
         var lhs = left
         let prePrec = Precedence(preT.kind)
         while (true) {
+            if (!SeeingExprOperator()) {
+                return lhs
+            }
             var op = Peek()
             if (let Some(combined) <- LookupSeenCombinator()) {
                 op = combined
