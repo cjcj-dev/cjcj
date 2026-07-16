@@ -1,6 +1,7 @@
 package cjcj::parse
 
 import std.collection.*
+import cjcj::ast.CreateRefExpr
 
 extend ParserImpl {
     public func EnterQuoteExprMod(): Unit {
