@@ -168,8 +168,8 @@ private func CreateClassConstructorCall(typeManager: TypeManager, callChecker: (
     return None
 }
 
-private func CreateDefaultExceptionCall(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, source: Node): Option<CallExpr> {
+private func CreateDefaultExceptionCall(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, source: Node): Option<CallExpr> {
     if (let Some(exceptionDecl) <- FindCoreClassDecl(importManager, CLASS_EXCEPTION_NAME)) {
         if (let Some(initDecl) <- FindDefaultConstructor(exceptionDecl)) {
             let exceptionTy = typeManager.GetClassTy(exceptionDecl, Array<Ty>())
@@ -214,7 +214,7 @@ private func CreateImmediateHandlerReturnRef(funcTy: FuncTy, ctorName: String): 
     return None
 }
 
-private func CreateHandlerFrameMethod(typeManager: TypeManager, pkg: Package, source: Node,
+private func CreateHandlerFrameMethod(typeManager: TypeManager, importManager: SemaImportManager, source: Node,
     methodName: String, typeArgs: ArrayList<Ty>): Option<MemberAccess> {
     if (let Some(frameDecl) <- FindEffectClassDecl(importManager, CLASS_HANDLER_FRAME)) {
         let frameTy = typeManager.GetClassTy(frameDecl, Array<Ty>())
@@ -237,9 +237,10 @@ private func CreateHandlerFrameMethod(typeManager: TypeManager, pkg: Package, so
     return None
 }
 
-private func CreateHandlerFrameCall(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, source: Node, methodName: String, typeArgs: ArrayList<Ty>): Option<CallExpr> {
-    if (let Some(method) <- CreateHandlerFrameMethod(typeManager, pkg, source, methodName, typeArgs)) {
+private func CreateHandlerFrameCall(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, source: Node,
+    methodName: String, typeArgs: ArrayList<Ty>): Option<CallExpr> {
+    if (let Some(method) <- CreateHandlerFrameMethod(typeManager, importManager, source, methodName, typeArgs)) {
         if (let Some(retTy) <- FuncRetTy(method.target)) {
             let callExpr = CreateCallExpr(method, ArrayList<FuncArg>())
             if (FinishEffectCall(typeManager, callChecker, retTy, callExpr)) {
@@ -261,7 +262,8 @@ private func FinishEffectCall(typeManager: TypeManager, callChecker: (Ty, CallEx
     return true
 }
 
-public func DesugarPerformExpr(typeManager: TypeManager, pkg: Package, performExpr: PerformExpr,
+public func DesugarPerformExpr(typeManager: TypeManager, importManager: SemaImportManager, pkg: Package,
+    performExpr: PerformExpr,
     callChecker: (Ty, CallExpr) -> Bool): Unit {
     if (!Ty.IsTyCorrect(performExpr.GetTy())) {
         return
@@ -275,7 +277,7 @@ public func DesugarPerformExpr(typeManager: TypeManager, pkg: Package, performEx
                 let typeArgs = ArrayList<Ty>()
                 typeArgs.add(commandTy)
                 typeArgs.add(resultTy)
-                if (let Some(perfMethod) <- CreateHandlerFrameMethod(typeManager, pkg, performExpr,
+                if (let Some(perfMethod) <- CreateHandlerFrameMethod(typeManager, importManager, performExpr,
                     PERF_METHOD_NAME, typeArgs)) {
                     let args = ArrayList<FuncArg>()
                     args.add(CreateFuncArg(commandExpr))
@@ -311,8 +313,8 @@ private func CreateResultResume(typeManager: TypeManager, callChecker: (Ty, Call
     return None
 }
 
-private func CreateThrowingResume(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, resumeExpr: ResumeExpr,
+private func CreateThrowingResume(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, pkg: Package, resumeExpr: ResumeExpr,
     resultTy: EnumTy): Option<CallExpr> {
     if (let Some(throwingExpr) <- resumeExpr.throwingExpr) {
         if (let Some(throwingTy) <- throwingExpr.GetTy()) {
@@ -355,7 +357,8 @@ private func CreateThrowingResume(typeManager: TypeManager, callChecker: (Ty, Ca
     return None
 }
 
-public func DesugarResumeExpr(typeManager: TypeManager, pkg: Package, resumeExpr: ResumeExpr,
+public func DesugarResumeExpr(typeManager: TypeManager, importManager: SemaImportManager, pkg: Package,
+    resumeExpr: ResumeExpr,
     callChecker: (Ty, CallExpr) -> Bool): Unit {
     if (!Ty.IsTyCorrect(resumeExpr.GetTy())) {
         return
@@ -368,7 +371,7 @@ public func DesugarResumeExpr(typeManager: TypeManager, pkg: Package, resumeExpr
             if (let Some(resultDecl) <- FindEffectEnumDecl(importManager, IMMEDIATE_HANDLER_RETURN_NAME)) {
                 let resultTy = typeManager.GetEnumTy(resultDecl, typeArgs: [handlerResultTy])
                 let wrapped = if (let Some(_) <- resumeExpr.throwingExpr) {
-                    CreateThrowingResume(typeManager, callChecker, pkg, resumeExpr, resultTy)
+                    CreateThrowingResume(typeManager, importManager, callChecker, pkg, resumeExpr, resultTy)
                 } else {
                     CreateResultResume(typeManager, callChecker, resumeExpr, resultTy, handlerResultTy)
                 }
