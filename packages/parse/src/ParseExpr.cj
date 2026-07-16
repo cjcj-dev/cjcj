@@ -1468,7 +1468,7 @@ extend ParserImpl {
         }
         while (Skip(TokenKind.CASE)) {
             let matchCase = MatchCaseOther()
-            matchCase.begin = lookahead.Begin()
+            matchCase.begin = lastToken.Begin()
             if (Skip(TokenKind.WILDCARD)) {
                 matchCase.matchExpr = WildcardExpr(lastToken.Begin())
             } else {
