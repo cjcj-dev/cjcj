@@ -95,7 +95,7 @@ public func CreateGlobalVarIndex(builder: FlatBufferBuilder, file: FlatBufferOff
 }
 
 public func CreateMemberDecl(builder: FlatBufferBuilder, mangle: FlatBufferOffset, sig: UInt64,
-    srcUse: UInt64, body: UInt64, type: UInt8, isGV: Bool, gvid: FlatBufferOffset,
+    srcUse: UInt64, body: UInt64, `type`: UInt8, isGV: Bool, gvid: FlatBufferOffset,
     members: FlatBufferOffset, cgMangle: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(9)
     builder.AddU64(3, body, defaultValue: 0u64)
@@ -106,12 +106,12 @@ public func CreateMemberDecl(builder: FlatBufferBuilder, mangle: FlatBufferOffse
     builder.AddOffset(6, gvid)
     builder.AddOffset(0, mangle)
     builder.AddBool(5, isGV, defaultValue: false)
-    builder.AddU8(4, type, defaultValue: 0u8)
+    builder.AddU8(4, `type`, defaultValue: 0u8)
     return builder.EndTable()
 }
 
 public func CreateTopDecl(builder: FlatBufferBuilder, mangle: FlatBufferOffset, sig: UInt64,
-    srcUse: UInt64, body: UInt64, type: UInt8, isGV: Bool, instVar: UInt64, virt: UInt64,
+    srcUse: UInt64, body: UInt64, `type`: UInt8, isGV: Bool, instVar: UInt64, virt: UInt64,
     gvid: FlatBufferOffset, members: FlatBufferOffset, extends: FlatBufferOffset,
     cgMangle: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(12)
@@ -126,7 +126,7 @@ public func CreateTopDecl(builder: FlatBufferBuilder, mangle: FlatBufferOffset, 
     builder.AddOffset(8, gvid)
     builder.AddOffset(0, mangle)
     builder.AddBool(5, isGV, defaultValue: false)
-    builder.AddU8(4, type, defaultValue: 0u8)
+    builder.AddU8(4, `type`, defaultValue: 0u8)
     return builder.EndTable()
 }
 

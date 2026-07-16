@@ -273,7 +273,7 @@ public class CachedASTFormat_MemberDecl <: Table {
     public func sig(): UInt64 { return GetField<UInt64>(6u16, 0u64) }
     public func srcUse(): UInt64 { return GetField<UInt64>(8u16, 0u64) }
     public func body(): UInt64 { return GetField<UInt64>(10u16, 0u64) }
-    public func type(): UInt8 { return GetField<UInt8>(12u16, 0u8) }
+    public func `type`(): UInt8 { return GetField<UInt8>(12u16, 0u8) }
     public func isGV(): Bool { return GetField<Bool>(14u16, false) }
     public func gvid(): Option<CachedASTFormat_GlobalVarIndex> {
         return if (let Some(p) <- GetPointer(16u16)) { Some(CachedASTFormat_GlobalVarIndex(data, p)) } else { None }
@@ -316,7 +316,7 @@ public class CachedASTFormat_TopDecl <: Table {
     public func sig(): UInt64 { return GetField<UInt64>(6u16, 0u64) }
     public func srcUse(): UInt64 { return GetField<UInt64>(8u16, 0u64) }
     public func body(): UInt64 { return GetField<UInt64>(10u16, 0u64) }
-    public func type(): UInt8 { return GetField<UInt8>(12u16, 0u8) }
+    public func `type`(): UInt8 { return GetField<UInt8>(12u16, 0u8) }
     public func isGV(): Bool { return GetField<Bool>(14u16, false) }
     public func instVar(): UInt64 { return GetField<UInt64>(16u16, 0u64) }
     public func virt(): UInt64 { return GetField<UInt64>(18u16, 0u64) }
