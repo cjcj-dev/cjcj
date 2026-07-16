@@ -617,7 +617,7 @@ private func MetControlTransferExpr(node: Node): Bool {
     return false
 }
 
-private func IsInitializedMemberAccess(member: MemberAccess): Bool {
+private func IsInitialized(member: MemberAccess): Bool {
     let initialized = InitBoolBox(false)
     let walker = Walker(member, visitPre: { node: Node =>
         if (let Some(target) <- node.GetTarget()) {
@@ -1576,7 +1576,7 @@ public class InitializationChecker {
             } else {
                 false
             }
-            if (isInSameDecl && !IsInitializedMemberAccess(member)) {
+            if (isInSameDecl && !IsInitialized(member)) {
                 AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, member, target: target,
                     message: target.identifier.Val())
                 return false
