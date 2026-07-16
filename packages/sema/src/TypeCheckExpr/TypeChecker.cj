@@ -3417,6 +3417,42 @@ extend TypeChecker {
         return true
     }
 
+    // Mirrors C++ TypeCheckDecl.cpp:65-96 TypeCheckerImpl::CheckFuncDecl.
+    private func CheckFuncDecl(ctx: ASTContext, fd: FuncDecl): Unit {
+        let body = fd.funcBody.getOrThrow()
+        if (fd.TestAttr(Attribute.IS_CHECK_VISITED)) {
+            return
+        }
+        fd.EnableAttr(Attribute.IS_CHECK_VISITED)
+        let redefModifier = FindModifier(fd, TokenKind.REDEF)
+        let staticModifier = FindModifier(fd, TokenKind.STATIC)
+        if ((let Some(redef) <- redefModifier) && (let None <- staticModifier) &&
+            (let None <- fd.propDecl)) {
+            if (let Some(diagValue) <- impl.diag) {
+                Diagnose(diagValue, redef, BasicDiagKind.sema_redef_modify_static_func,
+                    args: [BasicDiagArgument("function")]).Emit()
+            }
+        }
+
+        SetFunctionBodyOwner(fd, body)
+        if (!Ty.IsTyCorrect(fd.GetTy())) {
+            let _ = PrepareFuncBodySignature(ctx, body)
+        }
+        let _ = SynthesizeFuncBody(ctx, body)
+        if (Ty.IsTyCorrect(fd.GetTy()) && fd.GetTy().getOrThrow().HasQuestTy()) {
+            let funcTy = (fd.GetTy().getOrThrow() as FuncTy).getOrThrow()
+            fd.SetTy(impl.typeManager.GetFunctionTy(
+                funcTy.paramTys.toArray(), TypeManager.GetInvalidTy()))
+        }
+        if (fd.TestAttr(Attribute.MAIN_ENTRY)) {
+            CheckEntryFunc(fd)
+        } else if (fd.TestAttr(Attribute.OPERATOR)) {
+            if (let Some(diagValue2) <- impl.diag) {
+                let _ = TypeCheckDeclCheckOperatorOverloadFunc(diagValue2, fd)
+            }
+        }
+    }
+
     private func AddRetTypeNode(fb: FuncBody): Unit {
         if (let None <- fb.retType) {
             fb.retType = Some(RefType())
@@ -3777,33 +3813,9 @@ extend TypeChecker {
             return declTy
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            if (let Some(body) <- funcDecl.funcBody) {
-                if (funcDecl.TestAttr(Attribute.IS_CHECK_VISITED)) {
-                    return funcDecl.GetTy() ?? TypeManager.GetInvalidTy()
-                }
-                funcDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
-                let redefModifier = FindModifier(funcDecl, TokenKind.REDEF)
-                let staticModifier = FindModifier(funcDecl, TokenKind.STATIC)
-                if ((let Some(redef) <- redefModifier) && (let None <- staticModifier) &&
-                    (let None <- funcDecl.propDecl)) {
-                    if (let Some(diagValue) <- impl.diag) {
-                        Diagnose(diagValue, redef, BasicDiagKind.sema_redef_modify_static_func,
-                            args: [BasicDiagArgument("function")]).Emit()
-                    }
-                }
-                SetFunctionBodyOwner(funcDecl, body)
-                if (!Ty.IsTyCorrect(funcDecl.GetTy())) {
-                    let _ = PrepareFuncBodySignature(ctx, body)
-                }
-                let funcTy = SynthesizeFuncBody(ctx, body)
-                if (funcDecl.TestAttr(Attribute.MAIN_ENTRY)) {
-                    CheckEntryFunc(funcDecl)
-                } else if (funcDecl.TestAttr(Attribute.OPERATOR)) {
-                    if (let Some(diagValue) <- impl.diag) {
-                        let _ = TypeCheckDeclCheckOperatorOverloadFunc(diagValue, funcDecl)
-                    }
-                }
-                return funcTy
+            if (funcDecl.funcBody.isSome()) {
+                CheckFuncDecl(ctx, funcDecl)
+                return funcDecl.GetTy() ?? TypeManager.GetInvalidTy()
             }
         }
         if (let Some(mainDecl) <- (decl as MainDecl)) {
