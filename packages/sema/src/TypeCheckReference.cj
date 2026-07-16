@@ -682,12 +682,12 @@ public func TypeCheckReferenceFilterInvalidEnumTargets(
         }
     }
     if (targets.isEmpty()) {
-        let builder = diag.DiagnoseRefactor(
-            BasicDiagKindRefactor.sema_enum_constructor_with_param_must_have_args,
-            TypeCheckReferenceRange(nre),
+        let builder = DiagnoseRefactor(diag,
+            BasicDiagKindRefactor.sema_enum_constructor_with_param_must_have_args, nre,
             arguments: [candidates[0].getOrThrow().identifier.Val()])
         for (candidate in candidates) {
-            builder.AddNote(TypeCheckReferenceRange(candidate.getOrThrow()), "found candidate")
+            let decl = candidate.getOrThrow()
+            AddNote(builder, decl, MakeRangeForDeclIdentifier(decl), "found candidate")
         }
         builder.Emit()
         return false
