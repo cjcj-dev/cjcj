@@ -61,11 +61,13 @@ public func SerializePackageToCjoFlatBuffer(
     serializingCommon!: Bool = false,
     exportContent!: Bool = true,
     exportForIncr!: Bool = false,
-    exportFuncBody!: Bool = true
+    exportFuncBody!: Bool = true,
+    compileCjd!: Bool = false
 ): Array<UInt8> {
     let writer = ASTWriter(packageDepInfo, cjoManager, debug, optimizationLevel,
         saveFileWithAbsPath: saveFileWithAbsPath, diag: diag, serializingCommon: serializingCommon,
-        exportContent: exportContent, exportForIncr: exportForIncr, exportFuncBody: exportFuncBody)
+        exportContent: exportContent, exportForIncr: exportForIncr, exportFuncBody: exportFuncBody,
+        compileCjd: compileCjd)
     writer.PreSaveFullExportDecls(pkg)
     writer.ExportAST(pkg)
     return writer.AST2FB(pkg)
@@ -83,6 +85,7 @@ public class ASTWriter {
     private let exportContent: Bool
     private let exportForIncr: Bool
     private var exportFuncBody: Bool
+    private let compileCjd: Bool
     private let mangler: RealBaseMangler = RealBaseMangler()
     private let typeManager: FaithfulSemaTypeManager = FaithfulSemaTypeManager()
 
@@ -114,7 +117,8 @@ public class ASTWriter {
         serializingCommon!: Bool,
         exportContent!: Bool,
         exportForIncr!: Bool,
-        exportFuncBody!: Bool
+        exportFuncBody!: Bool,
+        compileCjd!: Bool = false
     ) {
         this.packageDepInfo = packageDepInfo
         this.cjoManager = cjoManager
@@ -126,6 +130,7 @@ public class ASTWriter {
         this.exportContent = exportContent
         this.exportForIncr = exportForIncr
         this.exportFuncBody = exportFuncBody
+        this.compileCjd = compileCjd
     }
 
     // ASTWriter.cpp:559-627 ASTWriterImpl::PreSaveFullExportDecls.
@@ -959,12 +964,16 @@ public class ASTWriter {
 
     private func SavePropInfo(propDecl: PropDecl): FlatBufferOffset {
         let setters = ArrayList<UInt32>()
-        for (setter in propDecl.setters) {
-            setters.add(GetDeclIndex(setter))
+        if (!compileCjd) {
+            for (setter in propDecl.setters) {
+                setters.add(GetDeclIndex(setter))
+            }
         }
         let getters = ArrayList<UInt32>()
-        for (getter in propDecl.getters) {
-            getters.add(GetDeclIndex(getter))
+        if (!compileCjd) {
+            for (getter in propDecl.getters) {
+                getters.add(GetDeclIndex(getter))
+            }
         }
         let setterVec = builder.CreateVectorU32(setters)
         let getterVec = builder.CreateVectorU32(getters)
