@@ -1173,6 +1173,12 @@ extend TypeCheckerImpl {
                 CheckForbiddenFuncReferenceAccess(pos, funcDecl, target)
             }
         }
+        if (target.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            Diagnose(diag.getOrThrow(), ma, BasicDiagKind.sema_invalid_enum_member_access).Emit()
+        }
+        if (target.astKind == ASTKind.VAR_DECL && !ma.typeArguments.isEmpty() && ma.isAlone) {
+            DiagnoseRefactor(diag.getOrThrow(), BasicDiagKindRefactor.sema_generic_argument_no_match, ma).Emit()
+        }
     }
 }
 

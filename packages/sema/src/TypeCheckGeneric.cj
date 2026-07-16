@@ -224,13 +224,6 @@ private func filteredTypeArgsForTarget(target: Decl, typeArgs: ArrayList<Type>):
     return out
 }
 
-private func emitGenericArgumentNoMatch(diag: Option<BasicDiagnosticEngine>, node: Node): Unit {
-    if (let Some(diagEngine) <- diag) {
-        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-        diagEngine.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_argument_no_match, node.begin)
-    }
-}
-
 public func getGenericConstraintDiagNode(checkNode: Node, typeNodes: ArrayList<Type>, instTy: Ty): Node {
     for (typeNode in typeNodes) {
         if (!typeNode.TestAttr(Attribute.COMPILER_ADD)) {
@@ -591,7 +584,11 @@ extend TypeCheckerImpl {
                 }
             }
         }
-        emitGenericArgumentNoMatch(diag, checkNode)
+        if (let Some(diagEngine) <- diag) {
+            let diagPos = if (typeArgs.isEmpty()) { checkNode.begin } else { typeArgs[0].begin }
+            DiagnoseRefactor(diagEngine, BasicDiagKindRefactor.sema_generic_argument_no_match,
+                checkNode, diagPos).Emit()
+        }
         return false
     }
 
@@ -680,7 +677,11 @@ extend TypeCheckerImpl {
             if (let Some(ty) <- typeNode.GetTy()) {
                 typeArgs.add(ty)
             } else {
-                emitGenericArgumentNoMatch(diag, checkNode)
+                if (let Some(diagEngine) <- diag) {
+                    let end = if (checkNode.end.IsZero()) { checkNode.begin + 1 } else { checkNode.end }
+                    DiagnoseRefactor(diagEngine, BasicDiagKindRefactor.sema_generic_argument_no_match,
+                        checkNode, MakeRange(checkNode.begin, end)).Emit()
+                }
                 return false
             }
         }
