@@ -64,8 +64,7 @@ public class JFFIParserImpl {
         if (decl.astKind == ASTKind.FUNC_DECL) {
             return
         }
-        decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.DiagUnexpectedAnnoOnKind(anno, decl.begin, anno.identifier.Val(), decl.astKind)
+        parser.DiagUnexpectedAnnoOnKind(anno, decl.keywordPos, anno.identifier.Val(), decl.astKind)
     }
 
     public func IsAbstractFunction(fd: FuncDecl, outerDecl: Decl): Bool {
