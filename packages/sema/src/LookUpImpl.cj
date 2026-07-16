@@ -268,6 +268,10 @@ private func importAllowsAccess(importSpec: ImportSpec, decl: Decl): Bool {
     return accessLevelRank(GetAccessLevel(importSpec)) <= accessLevelRank(GetAccessLevel(decl))
 }
 
+private func GetSpecificDecl(decl: Decl): Decl {
+    return decl.specificImplementation ?? decl
+}
+
 private func addMemberIfValidForLookup(results: ArrayList<Decl>, typeManager: TypeManager, baseTy: Option<Ty>,
     isSetter: Bool, decl: Decl): Unit {
     if (let Some(propDecl) <- (decl as PropDecl)) {
@@ -432,7 +436,8 @@ private func fieldLookupClass(typeManager: TypeManager, cd: ClassDecl, fieldName
 
 private func fieldLookupInterfaceTy(typeManager: TypeManager, idTy: InterfaceTy, fieldName: String,
     results: ArrayList<Decl>, info: LookupInfo): Unit {
-    if (let Some(id) <- idTy.declPtr) {
+    if (let Some(rawId) <- idTy.declPtr) {
+        let id = (GetSpecificDecl(rawId) as InterfaceDecl).getOrThrow()
         if (let Some(body) <- id.body) {
             for (member in body.decls) {
                 if (member.identifier != fieldName || ignoredMember(member)) {
@@ -796,7 +801,7 @@ public func FieldLookup(typeManager: TypeManager, decl: Option<Decl>, fieldName:
     info!: LookupInfo = LookupInfo(), importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
     let results = ArrayList<Decl>()
     if (let Some(target) <- decl) {
-        let actual = if (let Some(specific) <- target.specificImplementation) { specific } else { target }
+        let actual = GetSpecificDecl(target)
         if (let Some(classDecl) <- (actual as ClassDecl)) {
             fieldLookupClass(typeManager, classDecl, fieldName, results, info)
             return results
