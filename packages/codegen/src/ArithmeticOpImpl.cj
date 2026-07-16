@@ -367,6 +367,7 @@ public func GenerateBinaryExpOperation(irBuilder: IRBuilder2, chirExpr: CHIRBina
     let rightArg = chirExpr.GetRHSOperand()
     let valLeft = irBuilder.GetCGModule().GetMappedCGValue(leftArg)
     let valRight = irBuilder.GetCGModule().GetMappedCGValue(rightArg)
+    irBuilder.EmitLocation(chirExpr)
     return GenerateBinaryExpOperation(irBuilder, valLeft, valRight)
 }
 

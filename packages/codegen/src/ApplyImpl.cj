@@ -19,12 +19,16 @@ private let LLVM_POINTER_TYPE_KIND: Int32 = 12
 
 public func EmitCallLikeExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (let Some(applyExpr) <- (chirExpr as Apply)) {
-        irBuilder.SetCHIRExpr(CHIRApplyWrapper(applyExpr))
+        let apply = CHIRApplyWrapper(applyExpr)
+        irBuilder.SetCHIRExpr(apply)
+        irBuilder.EmitLocation(apply)
         return GenerateApply(irBuilder, applyExpr.GetCallee(), applyExpr.GetArgs(),
             thisType: applyExpr.GetThisType(), instTypeArgs: applyExpr.GetInstantiatedTypeArgs())
     }
     if (let Some(applyWithExceptionExpr) <- (chirExpr as ApplyWithException)) {
-        irBuilder.SetCHIRExpr(CHIRApplyWrapper(applyWithExceptionExpr))
+        let apply = CHIRApplyWrapper(applyWithExceptionExpr)
+        irBuilder.SetCHIRExpr(apply)
+        irBuilder.EmitLocation(apply)
         return GenerateApply(irBuilder, applyWithExceptionExpr.GetCallee(), applyWithExceptionExpr.GetArgs(),
             thisType: applyWithExceptionExpr.GetThisType(),
             instTypeArgs: applyWithExceptionExpr.GetInstantiatedTypeArgs())

@@ -119,8 +119,9 @@ private func GenerateNativeStruct(irBuilder: IRBuilder2, chirExpr: Expression, _
 
 private func GenerateAssociatedNonRefEnum(irBuilder: IRBuilder2, chirExpr: Expression,
     enumCGType: CGEnumType): LLVMValueRef {
-    let enumValue = irBuilder.CreateEntryAlloca(enumCGType, name: "enum.val")
     let i8Type = unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) }
+    irBuilder.EmitLocation(CHIRExprWrapper(chirExpr))
+    let enumValue = irBuilder.CreateEntryAlloca(enumCGType, name: "enum.val")
     let casted = irBuilder.CreateBitCast(enumValue, unsafe { LLVMPointerType(i8Type, 0u32) })
     let fieldTypes = CollectAssociatedNonRefFieldTypes(chirExpr)
     let useStructGEP = CGEnumType.NeedAndroidArm32AlignedEnumLayout(
@@ -184,6 +185,7 @@ private func GenerateAggregateValue(irBuilder: IRBuilder2, chirExpr: Expression,
 private func GenerateCommonEnum(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let cgMod = irBuilder.GetCGModule()
     let cgCtx = cgMod.GetCGContext()
+    irBuilder.EmitLocation(CHIRExprWrapper(chirExpr))
     let enumType = StaticCast<EnumType>(chirExpr.GetResultType().getOrThrow())
     let enumIdxExpr = StaticCast<Constant>(StaticCast<LocalVar>(chirExpr.GetOperand(0)).GetExpr().getOrThrow())
     var enumCaseTi = cgMod.GetOrCreateEnumCtorTIOrTT(enumType, Int64(enumIdxExpr.GetUnsignedIntLitVal()))
