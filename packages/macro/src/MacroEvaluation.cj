@@ -8,7 +8,7 @@ import cjcj::parse.IsBuiltinAnnotation as ParseIsBuiltinAnnotation
 import cjcj::parse.Parser as EvalParser
 import cjcj::parse.ScopeKind as EvalParsedScopeKind
 import cjcj::ast.{VisitAction, Walker}
-import cjcj::utils.FileUtil
+import cjcj::utils.{CJC_ASSERT, FileUtil}
 import std.collection.*
 
 private func appendTokens(target: ArrayList<Token>, source: ArrayList<Token>): Unit {
@@ -625,7 +625,7 @@ private func invokeAttrNativeMacro(macCall: MacroCall, attrBytes: ArrayList<UInt
     return result
 }
 
-private func evaluateNativeMacro(macCall: MacroCall): Bool {
+func evaluateNativeMacro(macCall: MacroCall): Bool {
     if (macCall.invokeFunc.isNull() && !macCall.FindMacroDefMethod()) {
         return false
     }
@@ -776,6 +776,7 @@ public class MacroEvaluation {
         }
     }
 
+    // Mirrors src/Macro/MacroEvaluationCJNative.cpp:111-139 EvaluateWithRuntime.
     public func EvaluateWithRuntime(macCall: MacroCall): Unit {
         if (useChildProcess) {
             if (SendMacroCallTaskToServer(macCall) && !enableParallelMacro) {
@@ -783,20 +784,56 @@ public class MacroEvaluation {
             }
             return
         }
-        let invocation = macCall.RequireInvocation()
-        if (!invocation.newTokens.isEmpty() && !MacroExpandFailed(invocation.newTokens)) {
-            macCall.isDataReady = true
+
+        // The C++ parallel branch depends on MacroEvaluation.cpp:919-1022, whose
+        // CreateThreadToEvalMacroCall/WaitForOneMacroCallEvalFinish chain is not yet
+        // present in selfhost. Preserve the existing synchronous behavior in that mode.
+        if (enableParallelMacro) {
+            let invocation = macCall.RequireInvocation()
+            if (!invocation.newTokens.isEmpty() && !MacroExpandFailed(invocation.newTokens)) {
+                macCall.isDataReady = true
+                return
+            }
+            if (!evaluateNativeMacro(macCall)) {
+                invocation.newTokens.clear()
+                invocation.newTokens.add(Token(TokenKind.ILLEGAL, ""))
+                macCall.isDataReady = true
+            }
             return
         }
-        if (!evaluateNativeMacro(macCall)) {
-            invocation.newTokens.clear()
-            invocation.newTokens.add(Token(TokenKind.ILLEGAL, ""))
-            macCall.isDataReady = true
+
+        let invokeMethodFuncFromC = InvokeNewTaskFromC(RuntimeInit.GetInstance().runtimeMethodFunc)
+        let mInvoke = MacroInvoke(macCall)
+        let id = synchronized(macroInvokeTableLock) {
+            let currentId = macroInvokeNextId
+            macroInvokeNextId++
+            macroInvokeTable[currentId] = mInvoke
+            currentId
         }
+        let handle = unsafe { LibC.malloc<Int64>() }
+        CJC_ASSERT(!handle.isNull())
+        unsafe { handle.write(id) }
+
+        synchronized(mInvoke.mtx) {
+            macCall.coroutineHandle = unsafe {
+                invokeMethodFuncFromC(CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
+            }
+            CJC_ASSERT(!macCall.coroutineHandle.isNull())
+            while (!macCall.isDataReady) {
+                mInvoke.cv.wait()
+            }
+        }
+        ReleaseThreadHandle(macCall)
+        synchronized(macroInvokeTableLock) {
+            macroInvokeTable.remove(id)
+        }
+        unsafe { LibC.free(handle) }
     }
 
+    // Mirrors src/Macro/MacroEvaluationCJNative.cpp:180-185 ReleaseThreadHandle.
     public func ReleaseThreadHandle(macCall: MacroCall): Unit {
-        let _ = macCall
+        let invokeReleaseHandle = ReleaseHandleFromC(RuntimeInit.GetInstance().runtimeReleaseFunc)
+        unsafe { invokeReleaseHandle(macCall.coroutineHandle) }
     }
 
     public func CheckAttrTokens(attrTokens: ArrayList<Token>, macCall: MacroCall): Bool {
