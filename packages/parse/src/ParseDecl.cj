@@ -1326,6 +1326,39 @@ extend ParserImpl {
         return param
     }
 
+    private func ParseLetOrVarInParamList(scopeKind: ScopeKind, fp: FuncParam): Position {
+        let isPrimaryConstructor = ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS) ||
+            ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT)
+        var memberStartPos = INVALID_POSITION
+        if (Skip(TokenKind.LET) || Skip(TokenKind.VAR)) {
+            fp.hasLetOrVar = true
+            fp.keywordPos = lastToken.Begin()
+            if (!isPrimaryConstructor) {
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_expected_parameter_rp,
+                    lastToken,
+                    ConvertToken(lastToken)).Emit()
+            } else {
+                fp.isMemberParam = true
+                fp.isVar = lastToken.kind == TokenKind.VAR
+                memberStartPos = lastToken.Begin()
+                fp.begin = memberStartPos
+            }
+        } else if (HasModifierToken(fp.modifiers, TokenKind.CONST) && lastToken.kind == TokenKind.CONST) {
+            let scope = if (isPrimaryConstructor) { "primary constructor paramlist" } else { "paramlist" }
+            let decl = if (isPrimaryConstructor) {
+                "const member variable declaration"
+            } else {
+                "const variable declaration"
+            }
+            let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_unexpected_declaration_in_scope,
+                MakeRange(lastToken.Begin(), lastToken.Begin() + "const".size), decl, scope)
+            builder.AddMainHintArguments(decl)
+            builder.Emit()
+        }
+        return memberStartPos
+    }
+
     public func ParseParameter(scopeKind: ScopeKind): FuncParam {
         let param = FuncParam()
         try (cs = ChainScope(this, param)) {
@@ -1333,24 +1366,7 @@ extend ParserImpl {
             let mods = ArrayList<Modifier>()
             ParseModifiers(mods)
             for (modifier in mods) { param.modifiers.add(modifier) }
-        let isPrimaryConstructor = ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_CLASS) ||
-            ScopeKindEquals(scopeKind, ScopeKind.PRIMARY_CONSTRUCTOR_BODY_FOR_STRUCT)
-        var memberStart = INVALID_POSITION
-        if (Skip(TokenKind.LET) || Skip(TokenKind.VAR)) {
-            param.hasLetOrVar = true
-            param.keywordPos = lastToken.Begin()
-            if (isPrimaryConstructor) {
-                param.isMemberParam = true
-                param.isVar = lastToken.kind == TokenKind.VAR
-                memberStart = lastToken.Begin()
-            } else {
-                ParseDiagnoseRefactor(
-                    DiagKindRefactor.parse_expected_parameter_rp,
-                    lastToken,
-                    ConvertToken(lastToken)).Emit()
-                param.EnableAttr(Attribute.IS_BROKEN)
-            }
-        }
+        let memberStart = ParseLetOrVarInParamList(scopeKind, param)
         if (Skip(TokenKind.ELLIPSIS)) {
             param.identifier = SrcIdentifier("...", "...", lastToken.Begin(), lastToken.End(), false)
             param.begin = if (!param.modifiers.isEmpty()) { param.modifiers[0].begin } else { param.identifier.Begin() }
