@@ -838,17 +838,18 @@ public class MacroEvaluation {
     }
 
     public func CheckAttrTokens(attrTokens: ArrayList<Token>, macCall: MacroCall): Bool {
-        ExpandBuildInMacro(attrTokens, macCall)
         if (attrTokens.isEmpty()) {
             return true
         }
+        ExpandBuildInMacro(attrTokens, macCall)
         if (!preprocessTokens(attrTokens, escapePosVec)) {
-            ci.GetDiag().Diagnose(attrTokens[0].Begin(), " illegal escape in macro call")
+            ci.GetDiag().Diagnose(attrTokens[0].Begin(), DiagKind.macro_expand_invalid_escape).Emit()
             return false
         }
         for (token in attrTokens) {
             if (token.kind == TokenKind.AT && !isEscapedAt(token.Begin(), escapePosVec)) {
-                ci.GetDiag().Diagnose(token.Begin(), " illegal input tokens in macro attribute")
+                ci.GetDiag().Diagnose(token.Begin(), DiagKind.macro_expand_invalid_attr_tokens,
+                    args: [DiagArgument(token.Value())]).Emit()
                 return false
             }
         }
@@ -1143,9 +1144,7 @@ public class MacroEvaluation {
             0
         }
         if (!preprocessTokens(inputTokens, escapePosVec)) {
-            if (!inputTokens.isEmpty()) {
-                ci.GetDiag().Diagnose(inputTokens[0].Begin(), " illegal escape in macro call")
-            }
+            ci.GetDiag().Diagnose(inputTokens[0].Begin(), DiagKind.macro_expand_invalid_escape).Emit()
             return
         }
         var startIndex = Box<Int64>(tokenStartOffset)
@@ -1155,7 +1154,7 @@ public class MacroEvaluation {
             let currentToken = inputTokens[curIndex.value]
             if (currentToken.kind == TokenKind.AT && !isEscapedAt(currentToken.Begin(), escapePosVec) &&
                 (curIndex.value == inputTokens.size - 1 || !IsIdentifierOrContextualKeyword(inputTokens[curIndex.value + 1].kind))) {
-                ci.GetDiag().Diagnose(currentToken.Begin(), " illegal input tokens in macro call")
+                ci.GetDiag().Diagnose(currentToken.Begin(), DiagKind.macro_expand_invalid_input_tokens).Emit()
             }
             if (currentToken.kind == TokenKind.QUOTE && curIndex.value + 1 < inputTokens.size &&
                 inputTokens[curIndex.value + 1].kind == TokenKind.LPAREN) {
