@@ -163,12 +163,12 @@ public class CHIRContext {
         let pkg = curPackage.getOrThrow()
         for (classDef in pkg.GetImportedClasses()) {
             if (IsCoreObject(classDef)) {
-                return classDef.GetType() as ClassType
+                return classDef.GetType().getOrThrow() as ClassType
             }
         }
         for (classDef in pkg.GetClasses()) {
             if (IsCoreObject(classDef)) {
-                return classDef.GetType() as ClassType
+                return classDef.GetType().getOrThrow() as ClassType
             }
         }
         return None
