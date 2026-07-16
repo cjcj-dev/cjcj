@@ -1141,20 +1141,21 @@ public class CompilerInstance {
 
     private func DetectCangjieModules(): Bool {
         if (cangjieHome.isEmpty()) {
-            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
-                "failed to detect Cangjie modules: cangjie home is empty")
+            diag.DiagnoseRefactor(DiagKindRefactor.frontend_failed_to_detect_cangjie_modules,
+                MakeRange(DEFAULT_POSITION, DEFAULT_POSITION), arguments: ["cangjie home is empty"])
             return false
         }
         let libPathName = invocation.globalOptions.GetCangjieLibTargetPathName()
         if (libPathName.isEmpty()) {
-            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
-                "failed to detect Cangjie modules: target library path name is empty")
+            diag.DiagnoseRefactor(DiagKindRefactor.frontend_failed_to_detect_cangjie_modules,
+                MakeRange(DEFAULT_POSITION, DEFAULT_POSITION), arguments: ["target library path name is empty"])
             return false
         }
         cangjieModules = JoinPath(JoinPath(cangjieHome, "modules"), libPathName)
         if (!FileExist(cangjieModules)) {
-            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
-                "failed to detect Cangjie modules: target library path is not exist: " + cangjieModules)
+            diag.DiagnoseRefactor(DiagKindRefactor.frontend_failed_to_detect_cangjie_modules,
+                MakeRange(DEFAULT_POSITION, DEFAULT_POSITION),
+                arguments: ["target library path is not exist : " + cangjieModules])
             return false
         }
         return true
