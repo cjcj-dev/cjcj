@@ -6,6 +6,7 @@ import std.sort.*
 import cjcj::utils.{CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy, STATIC_INIT_FUNC}
 import cjcj::option.{EnvironmentType, GlobalOptions, OptimizationFlag}
 import cjcj::mangle.{DecimalToManglingNumber, MANGLE_COUNT_PREFIX}
+import cjcj::mangle.MANGLE_SUFFIX as MANGLE_ANNOTATION_SUFFIX
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::ast.ASTKind
 import cjcj::ast.IsInstanceConstructor as AstIsInstanceConstructor
@@ -610,7 +611,7 @@ public class Translator {
         name = name[0..3] + "O" + name[4..]
         name += MANGLE_COUNT_PREFIX
         name += DecimalToManglingNumber(index.toString())
-        let varName = name + MANGLE_SUFFIX
+        let varName = name + MANGLE_ANNOTATION_SUFFIX
         let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(TranslateType(RequireAstTy(expr))),
             varName, srcCodeIdentifier: varName, packageName: funcDef.GetPackageName())
         globalVar.EnableAttr(Attribute.COMPILER_ADD)
