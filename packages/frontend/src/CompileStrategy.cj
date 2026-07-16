@@ -381,7 +381,6 @@ private class FullCompileStrategyImpl {
         realFile.fileName = GetFileName(realFile.filePath)
         realFile.fileHash = GetHash(realFile.filePath)
         realFile.begin = Position(fileID, 1, 1)
-        realFile.end = s.ci.GetSourceManager().GetSource(fileID).GetEndPos()
         realFile.curPackage = Some(pkg)
         realFile.indexOfPackage = UInt64(pkg.files.size)
         pkg.files.add(realFile)
