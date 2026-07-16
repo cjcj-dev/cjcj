@@ -1536,6 +1536,11 @@ extend ParserImpl {
         if (Skip(TokenKind.COLON)) {
             ret.colonPos = lastToken.Begin()
             ret.typeNode = ParseType()
+            if (let Some(typeNode) <- ret.typeNode) {
+                if (typeNode.TestAttr(Attribute.IS_BROKEN) || typeNode.TestAttr(Attribute.HAS_BROKEN)) {
+                    ret.EnableAttr(Attribute.HAS_BROKEN)
+                }
+            }
         }
         if (Skip(TokenKind.ASSIGN)) {
             ret.assignPos = lastToken.Begin()
