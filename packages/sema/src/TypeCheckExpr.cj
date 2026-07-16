@@ -29,21 +29,20 @@ public func CheckOptionBox(typeManager: TypeManager, target: Ty, ty: Ty): Bool {
 }
 
 public func GenerateTypeMappingForTypeAliasDecl(typeManager: TypeManager, tad: TypeAliasDecl): TypeSubst {
-    let visited = HashSet<String>()
+    let visited = HashSet<Decl>()
     return GenerateTypeMappingForTypeAliasDeclVisit(typeManager, tad, visited)
 }
 
 private func GenerateTypeMappingForTypeAliasDeclVisit(typeManager: TypeManager, tad: TypeAliasDecl,
-    visited: HashSet<String>): TypeSubst {
+    visited: HashSet<Decl>): TypeSubst {
     let mapping = TypeSubst()
-    let key = "${tad.fullPackageName}:${tad.identifier.Val()}:${tad.begin.ToString()}:${tad.end.ToString()}"
-    if (visited.contains(key)) {
-        return mapping
-    }
-    visited.add(key)
     if (let None <- tad.typeNode) {
         return mapping
     }
+    if (visited.contains(tad)) {
+        return mapping
+    }
+    visited.add(tad)
     let typeNode = tad.typeNode.getOrThrow()
     if (!Ty.IsTyCorrect(typeNode.GetTy())) {
         return mapping
@@ -55,11 +54,12 @@ private func GenerateTypeMappingForTypeAliasDeclVisit(typeManager: TypeManager, 
     let target = targetOpt.getOrThrow()
     if (let Some(targetAlias) <- (target as TypeAliasDecl)) {
         let nested = GenerateTypeMappingForTypeAliasDeclVisit(typeManager, targetAlias, visited)
-        for ((tyVar, ty) in nested.entries) {
-            mapping.Put(tyVar.value, ty)
+        let typeArgs = ArrayList<Ty>()
+        for (typeArg in typeNode.GetTypeArgs()) {
+            typeArgs.add(typeArg.GetTy().getOrThrow())
         }
-        SubstituteTypeForTypeAliasTypeMapping(typeManager, targetAlias, typeNode.GetTypeArgs(), mapping)
-        return mapping
+        SubstituteTypeForTypeAliasTypeMapping(typeManager, targetAlias, typeArgs, nested)
+        return nested
     }
     if (let Some(ty) <- typeNode.GetTy()) {
         for (arg in ty.typeArgs) {
@@ -72,7 +72,7 @@ private func GenerateTypeMappingForTypeAliasDeclVisit(typeManager: TypeManager, 
 }
 
 private func SubstituteTypeForTypeAliasTypeMapping(typeManager: TypeManager, tad: TypeAliasDecl,
-    typeArgs: ArrayList<Type>, mapping: TypeSubst): Unit {
+    typeArgs: ArrayList<Ty>, mapping: TypeSubst): Unit {
     if (let None <- tad.generic) {
         return
     }
@@ -85,13 +85,57 @@ private func SubstituteTypeForTypeAliasTypeMapping(typeManager: TypeManager, tad
         let genericParam = generic.typeParameters[idx]
         if (let Some(paramTy) <- genericParam.GetTy()) {
             if (let Some(genTy) <- (paramTy as GenericsTy)) {
-                if (let Some(typeArgTy) <- typeArgs[idx].GetTy()) {
-                    aliasParamMapping.Put(genTy, typeArgTy)
-                }
+                aliasParamMapping.Put(genTy, typeArgs[idx])
             }
         }
     }
     for ((tyVar, ty) in mapping.entries) {
-        mapping.entries[tyVar] = typeManager.GetInstantiatedTy(ty, aliasParamMapping)
+        mapping.entries[tyVar] = typeManager.SubstituteTypeAliasInTy(ty, needSubstituteGeneric: true,
+            typeMapping: aliasParamMapping)
     }
+}
+
+// C++ src/Sema/TypeCheckerImpl.h:1548-1572 GenerateTypeMappingForTypeAliasUse<Type>.
+public func GenerateTypeMappingForTypeAliasUse(typeManager: TypeManager, tad: TypeAliasDecl,
+    usage: Type): TypeSubst {
+    if (let None <- tad.typeNode) {
+        return TypeSubst()
+    }
+    let typeArgs = ArrayList<Ty>()
+    for (typeArg in usage.GetTypeArgs()) {
+        typeArgs.add(typeArg.GetTy().getOrThrow())
+    }
+    let target = tad.typeNode.getOrThrow().GetTarget()
+    if ((let None <- target) || target.getOrThrow().astKind != ASTKind.TYPE_ALIAS_DECL) {
+        return GenerateTypeMapping(tad, typeArgs)
+    }
+    let mapping = GenerateTypeMappingForTypeAliasDecl(typeManager, tad)
+    SubstituteTypeForTypeAliasTypeMapping(typeManager, tad, typeArgs, mapping)
+    let directMapping = GenerateTypeMapping(tad, typeArgs)
+    for ((tyVar, ty) in directMapping.entries) {
+        mapping.Put(tyVar.value, ty)
+    }
+    return mapping
+}
+
+// C++ src/Sema/TypeCheckUtil.cpp:894-917 GetLastTypeAliasTarget.
+public func GetLastTypeAliasTarget(decl: TypeAliasDecl): TypeAliasDecl {
+    return GetLastTypeAliasTargetVisit(decl, HashSet<Decl>())
+}
+
+private func GetLastTypeAliasTargetVisit(decl: TypeAliasDecl, visited: HashSet<Decl>): TypeAliasDecl {
+    if (visited.contains(decl)) {
+        return decl
+    }
+    visited.add(decl)
+    if (let Some(typeNode) <- decl.typeNode) {
+        if (let Some(realTarget) <- typeNode.GetTarget()) {
+            if (let Some(innerAlias) <- (realTarget as TypeAliasDecl)) {
+                if (innerAlias.typeNode.isSome()) {
+                    return GetLastTypeAliasTargetVisit(innerAlias, visited)
+                }
+            }
+        }
+    }
+    return decl
 }
