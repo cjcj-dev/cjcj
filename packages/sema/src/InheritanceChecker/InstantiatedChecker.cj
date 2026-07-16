@@ -427,9 +427,6 @@ func CheckInstantiatedDecl(checker: StructInheritanceChecker, decl: Decl, instTy
 func CheckInstDupFuncsInNominalDecls(checker: StructInheritanceChecker): Unit {
     for (file in checker.pkg.files) {
         for (decl in file.decls) {
-            if (IsImportedInstantiationBoundary(decl)) {
-                continue
-            }
             let empty = ArrayList<Ty>()
             let emptyKey = InstantiationKey(decl, empty)
             if (!checker.HasInstantiatedKey(emptyKey)) {
