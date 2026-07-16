@@ -197,6 +197,77 @@ public class MockManager {
         return CreateInitCall(initDecl.getOrThrow(), initArgs, mockClass.curFile.getOrThrow(), instTys: instTys)
     }
 
+    // C++: Sema/Test/MockManager.cpp:268-282.
+    public func WrapWithRequireMockObject(receiverExpr: Expr): Unit {
+        let callArgs = ArrayList<FuncArg>()
+        callArgs.add(CreateFuncArg((ASTCloner.Clone(receiverExpr) as Expr).getOrThrow()))
+        let requireMockObjCall = CallExpr()
+        let requireMockObjectDecl = requireMockObject.getOrThrow()
+        requireMockObjCall.baseFunc = mockUtils.CreateDeclBasedReferenceExpr(
+            requireMockObjectDecl, ArrayList<Ty>([receiverExpr.GetTy().getOrThrow()]),
+            REQUIRE_MOCK_OBJ_NAME, receiverExpr.curFile.getOrThrow())
+        requireMockObjCall.SetTy(receiverExpr.GetTy().getOrThrow())
+        requireMockObjCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+        requireMockObjCall.resolvedFunction = requireMockObjectDecl
+        requireMockObjCall.curFile = receiverExpr.curFile
+        requireMockObjCall.args.add(all: callArgs)
+        receiverExpr.desugarExpr = requireMockObjCall
+    }
+
+    // C++: Sema/Test/MockManager.cpp:284-326.
+    private func AddMockedInterface(mockedDecl: ClassDecl, handlerFieldDecl: VarDecl): Unit {
+        let nothingTy = TypeManager.GetNothingTy()
+        let mockedInterface = mockedInterfaceDecl.getOrThrow()
+        mockedDecl.inheritedTypes.add(CreateRefType(mockedInterface))
+        mockedInterface.subDecls.add(mockedDecl)
+        let interfaceMembers = mockedInterface.GetMemberDecls()
+        CJC_ASSERT(interfaceMembers.size == 1)
+        let getHandlerMethodDecl = (interfaceMembers[0] as FuncDecl).getOrThrow()
+        CJC_ASSERT(getHandlerMethodDecl.identifier.Val() == "getHandler")
+
+        let getHandlerMethod = (ASTCloner.Clone(getHandlerMethodDecl) as FuncDecl).getOrThrow()
+        let getHandlerMethodBody = FuncBody()
+        let returnExpr = CreateReturnExpr(CreateRefExpr(handlerFieldDecl), Some(getHandlerMethodBody))
+        returnExpr.SetTy(nothingTy)
+        let getHandlerMethodBlock = Block()
+        getHandlerMethodBlock.SetTy(nothingTy)
+        getHandlerMethodBlock.body.add(returnExpr)
+
+        getHandlerMethodBody.SetTy(getHandlerMethod.GetTy().getOrThrow())
+        getHandlerMethodBody.funcDecl = getHandlerMethod
+        getHandlerMethodBody.retType = CreateRefType(callHandlerDecl.getOrThrow())
+        getHandlerMethodBody.paramLists.add(CreateFuncParamList(ArrayList<FuncParam>()))
+        getHandlerMethodBody.parentClassLike = mockedDecl
+        getHandlerMethodBody.body = getHandlerMethodBlock
+
+        getHandlerMethod.outerDecl = mockedDecl
+        getHandlerMethod.curFile = mockedDecl.curFile
+        getHandlerMethod.moduleName = mockedDecl.moduleName
+        getHandlerMethod.fullPackageName = mockedDecl.fullPackageName
+        getHandlerMethod.EnableAttr(Attribute.OVERRIDE)
+        getHandlerMethod.DisableAttr(Attribute.ABSTRACT)
+        getHandlerMethod.EnableAttr(Attribute.IN_CLASSLIKE)
+        getHandlerMethod.linkage = Linkage.EXTERNAL
+        getHandlerMethod.funcBody = getHandlerMethodBody
+        mockedDecl.body.getOrThrow().decls.add(getHandlerMethod)
+    }
+
+    // C++: Sema/Test/MockManager.cpp:328-342.
+    private func FindOverridesInSuperDecl(superDecl: ClassLikeDecl, member: Decl,
+        foundOverrides: HashSet<Decl>): Unit {
+        for (anotherSuperDecl in superDecl.GetAllSuperDecls()) {
+            if (anotherSuperDecl == superDecl) {
+                continue
+            }
+            for (superMember in anotherSuperDecl.GetMemberDecls()) {
+                if (typeManager.PairIsOverrideOrImpl(member, superMember)) {
+                    foundOverrides.add(superMember)
+                    break
+                }
+            }
+        }
+    }
+
     public static func FindMockedClassOf(decl: ClassLikeDecl): Option<ClassDecl> {
         for (subDecl in decl.subDecls) {
             if (IsMockClass(subDecl)) {
