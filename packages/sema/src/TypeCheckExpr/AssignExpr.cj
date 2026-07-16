@@ -275,7 +275,7 @@ func PreCheckCompoundAssign(ae: AssignExpr, leftTy: Ty, diags: Array<Diagnostic>
     return true
 }
 
-func IsShiftAssignValid(ae: AssignExpr, leftTy: Ty): Bool {
+func IsShiftAssignValid(ae: AssignExpr, leftTy: Ty, diag: BasicDiagnosticEngine): Bool {
     if (ae.op != TokenKind.LSHIFT_ASSIGN && ae.op != TokenKind.RSHIFT_ASSIGN) {
         return true
     }
@@ -283,9 +283,11 @@ func IsShiftAssignValid(ae: AssignExpr, leftTy: Ty): Bool {
         if (let Some(lit) <- (rightExpr as LitConstExpr)) {
             InitializeLitConstValue(lit)
             if (lit.constNumValue.asInt.IsNegativeNum()) {
+                Diagnose(diag, rightExpr, BasicDiagKind.sema_negative_shift_count).Emit()
                 return false
             }
             if (leftTy.IsIntegerSubType() && lit.constNumValue.asInt.GreaterThanOrEqualBitLen(leftTy.kind)) {
+                Diagnose(diag, rightExpr, BasicDiagKind.sema_shift_count_overflow).Emit()
                 return false
             }
         }

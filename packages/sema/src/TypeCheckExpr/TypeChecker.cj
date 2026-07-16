@@ -8142,7 +8142,7 @@ extend TypeChecker {
             }
             return TypeManager.GetInvalidTy()
         }
-        if (!IsShiftAssignValid(ae, concreteLeftTy)) {
+        if (!IsShiftAssignValid(ae, concreteLeftTy, impl.diag.getOrThrow())) {
             return TypeManager.GetInvalidTy()
         }
         return ae.GetTy().getOrThrow()
