@@ -5923,8 +5923,7 @@ public class Translator {
         }
         currentBlock = trueBlock
         let newTrueBlock = CreateBlock()
-        let cond = Translator.TranslateASTNode(RequireExpr(matchCase.patternGuard, "match pattern guard"), this) ??
-            throw IllegalStateException("faithful AST2CHIR match pattern guard produced no value")
+        let cond = TranslateExprArg(RequireExpr(matchCase.patternGuard, "match pattern guard"))
         builder.CreateBranch(cond, newTrueBlock, falseBlock, CurrentBlock())
         return newTrueBlock
     }
