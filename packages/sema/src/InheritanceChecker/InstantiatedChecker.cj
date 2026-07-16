@@ -401,9 +401,7 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
             }
             if (!checker.HasInstantiatedKey(targetKey)) {
                 checker.AddInstantiatedKey(targetKey)
-                if (!IsImportedInstantiationBoundary(target)) {
-                    CheckInstantiatedDecl(checker, target, instTys)
-                }
+                CheckInstantiatedDecl(checker, target, instTys)
             }
             if (shouldUpdateTrigger) {
                 checker.PopInstantiationTrigger()
