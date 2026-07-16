@@ -2359,10 +2359,6 @@ extend ParserImpl {
             if (ret.TestAttr(Attribute.MUT)) {
                 ret.isVar = true
             }
-            if (Skip(TokenKind.ASSIGN)) {
-                ret.assignPos = lastToken.Begin()
-                ret.initializer = ParseExpr(ExprKind.VAR_INIT)
-            }
             let inClassLikeScope = ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) ||
                 ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)
             if (Skip(TokenKind.LCURL)) {
