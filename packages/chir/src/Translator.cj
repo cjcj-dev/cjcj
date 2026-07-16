@@ -3705,10 +3705,10 @@ public class Translator {
     public func Visit(expr: AstArrayLit): Option<Value> {
         let arrayTy = chirTy.TranslateType(RequireAstTy(expr))
         if (arrayTy.IsVArray()) {
+            let varrayTy = RequireVArrayType(arrayTy)
             let elements = ArrayList<Value>()
             for (child in expr.children) {
-                let element = Translator.TranslateASTNode(child, this) ??
-                    throw IllegalStateException("faithful AST2CHIR ArrayLit element produced no value")
+                let element = TranslateExprArg(child, varrayTy.GetElementType())
                 elements.add(element)
             }
             return RequireResult(builder.CreateVArray(arrayTy, elements, CurrentBlock()))
