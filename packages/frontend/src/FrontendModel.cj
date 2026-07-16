@@ -1925,9 +1925,10 @@ private class CjoSignatureMaterializer {
         allFileIds = Array<UInt64>()
         let reader = flat.getOrThrow()
         let root = reader.RootTable()
-        if (root < 0 || reader.StringField(root, 8) != packageName) {
+        if (root < 0) {
             return
         }
+        pkg.fullPackageName = reader.StringField(root, 8)
         pkg.EnableAttr(Attribute.IMPORTED)
         pkg.isMacroPackage = reader.U8Field(root, 26, 0u8) != 0u8
         let packageAccess = reader.U8Field(root, 28, 0u8)
