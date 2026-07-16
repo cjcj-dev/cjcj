@@ -15,11 +15,12 @@ private let THIS_NAME: String = "this"
 
 private func TryDesugarFunctionCallExpr(base: Expr): Expr {
     if (!Ty.IsInitialTy(base.GetTy()) && base.TyKind() != TypeKind.TYPE_FUNC) {
-        let memberAccess = CreateMemberAccess(base, CALL_OPERATOR_NAME)
+        let memberAccess = MemberAccess()
+        memberAccess.field = SrcIdentifier(CALL_OPERATOR_NAME)
         memberAccess.scopeName = base.scopeName
-        memberAccess.scopeLevel = base.scopeLevel
         memberAccess.begin = base.begin
         memberAccess.end = base.end
+        memberAccess.baseExpr = Some(base)
         return memberAccess
     }
     return base
