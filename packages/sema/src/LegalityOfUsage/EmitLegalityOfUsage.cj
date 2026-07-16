@@ -132,12 +132,12 @@ private func EmitGlobalVarInitializationIssue(diag: BasicDiagnosticEngine,
         // sema_global_var_used_before_initialization with two args: the reference name and
         // the qualified identifier of the variable being defined (issue.user).
         case GlobalVarInitIssueKind.USED_BEFORE_INITIALIZATION =>
-            diag.Diagnose(issue.refNode.GetBegin(), BasicDiagKind.sema_global_var_used_before_initialization,
+            Diagnose(diag, issue.refNode, issue.refPos, BasicDiagKind.sema_global_var_used_before_initialization,
                 args: [BasicDiagArgument(issue.refName), BasicDiagArgument(GlobalVarDefinedName(issue))]).Emit()
         // ToposortDFS cycle detection (GlobalVarChecker.cpp:646):
         // sema_used_before_initialization with one arg: the reference name.
         case GlobalVarInitIssueKind.INITIALIZATION_CYCLE =>
-            diag.Diagnose(issue.refNode.GetBegin(), BasicDiagKind.sema_used_before_initialization,
+            Diagnose(diag, issue.refNode, issue.refPos, BasicDiagKind.sema_used_before_initialization,
                 args: [BasicDiagArgument(issue.refName)]).Emit()
         // CollectForStaticInit (GlobalVarChecker.cpp:334-335):
         // sema_common_static_let_cant_be_initialized_in_static_init with one arg (variable name).

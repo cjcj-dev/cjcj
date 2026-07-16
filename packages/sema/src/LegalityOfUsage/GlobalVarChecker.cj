@@ -31,15 +31,17 @@ extend GlobalVarInitIssueKind <: Equatable<GlobalVarInitIssueKind> {
 public class GlobalVarInitializationIssue {
     public var kind: GlobalVarInitIssueKind
     public var refNode: Node
+    public var refPos: Position
     public var refName: String
     public var user: Decl
     public var used: Decl
     public var message: String
 
-    public init(kind: GlobalVarInitIssueKind, refNode: Node, refName: String, user: Decl, used: Decl,
+    public init(kind: GlobalVarInitIssueKind, refNode: Node, refPos: Position, refName: String, user: Decl, used: Decl,
         message!: String = "") {
         this.kind = kind
         this.refNode = refNode
+        this.refPos = refPos
         this.refName = refName
         this.user = user
         this.used = used
@@ -84,17 +86,20 @@ private class DefNode {
 
 private class UseEdge {
     public var refNode: Node
+    public var refPos: Position
     public var refName: String
     public var node: DefNode
 
     public init(node: DefNode) {
         this.refNode = node.variable
+        this.refPos = Position()
         this.refName = node.variable.identifier.Val()
         this.node = node
     }
 
-    public init(refNode: Node, refName: String, node: DefNode) {
+    public init(refNode: Node, refPos: Position, refName: String, node: DefNode) {
         this.refNode = refNode
+        this.refPos = refPos
         this.refName = refName
         this.node = node
     }
@@ -251,13 +256,16 @@ private class DefUseGraph {
     public func AddEdge(user: Decl, used: VarDeclAbstract, refExpr: Expr): Unit {
         let userNode = GetOrBuildNode(user)
         let usedNode = GetOrBuildNode(used)
+        var refPos = refExpr.begin
         var refName = used.identifier.Val()
         if (let Some(refNode) <- (refExpr as RefExpr)) {
+            refPos = refNode.begin
             refName = refNode.ref.identifier.Val()
         } else if (let Some(member) <- (refExpr as MemberAccess)) {
+            refPos = member.field.Begin()
             refName = member.field.Val()
         }
-        userNode.usage.add(UseEdge(refExpr, refName, usedNode))
+        userNode.usage.add(UseEdge(refExpr, refPos, refName, usedNode))
     }
 
     public func AddOrderEdge(user: Decl, used: VarDeclAbstract): Unit {
@@ -348,6 +356,7 @@ public class GlobalVarInitializationChecker {
                                         issues.add(GlobalVarInitializationIssue(
                                             GlobalVarInitIssueKind.COMMON_STATIC_LET_INITIALIZED_IN_STATIC_INIT,
                                             assign,
+                                            assign.begin,
                                             varTarget.identifier.Val(),
                                             staticInit,
                                             varTarget,
@@ -539,6 +548,7 @@ public class GlobalVarInitializationChecker {
                 issues.add(GlobalVarInitializationIssue(
                     GlobalVarInitIssueKind.USED_BEFORE_INITIALIZATION,
                     usage.refNode,
+                    usage.refPos,
                     usage.refName,
                     node.variable,
                     usedNode.variable
@@ -592,6 +602,7 @@ public class GlobalVarInitializationChecker {
                     issues.add(GlobalVarInitializationIssue(
                         GlobalVarInitIssueKind.INITIALIZATION_CYCLE,
                         usage.refNode,
+                        usage.refPos,
                         usage.refName,
                         node.variable,
                         usage.node.variable
