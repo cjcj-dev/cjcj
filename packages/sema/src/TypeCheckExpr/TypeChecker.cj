@@ -23,6 +23,7 @@ import cjcj::sema.FFI.*
 import cjcj::sema.InheritanceChecker.*
 import cjcj::sema.LegalityOfUsage.*
 import cjcj::sema.NativeFFI.*
+import cjcj::sema.Plugin.PluginCustomAnnoChecker
 import cjcj::utils.CFUNC_NAME
 import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 import cjcj::utils.CPOINTER_NAME
@@ -2407,6 +2408,9 @@ extend TypeChecker {
                         ChkCallExpr(checkCtx, Some(target), call)
                     }), diag: impl.diag)
                 CollectMainFunctionsFromMainDecls(pkg)
+                if (let Some(instance) <- ci) {
+                    PluginCustomAnnoChecker(impl.diag.getOrThrow(), impl.typeManager, instance.globalOptions).Check(pkg)
+                }
             }
         }
         GenerateMainInvoke()
