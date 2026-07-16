@@ -259,7 +259,14 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
                 for (expr in block.GetExpressionsRef()) {
                     if (expr.GetExprKind() == ExprKind.ALLOCATE || expr.GetExprKind() == ExprKind.ALLOCATE_WITH_EXCEPTION) {
                         if (let Some(result) <- expr.GetResult()) {
-                            if (CanTrackAllocation(result)) {
+                            let allocatedTy = if (let Some(allocate) <- (expr as Allocate)) {
+                                Some(allocate.GetType())
+                            } else if (let Some(allocate) <- (expr as AllocateWithException)) {
+                                Some(allocate.GetType())
+                            } else {
+                                None
+                            }
+                            if (let Some(ty) <- allocatedTy && CanTrackAllocation(ty)) {
                                 allocateIdxMap[result.nodeId] = trackedAllocations.size
                                 trackedAllocations.add(result)
                             }
@@ -372,19 +379,16 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
         }
     }
 
-    private func CanTrackAllocation(value: Value): Bool {
-        if (let Some(valueTy) <- value.GetType()) {
-            let allocatedTy = valueTy.StripAllRefs()
-            if (allocatedTy.IsClass() || allocatedTy.IsVArray() || allocatedTy.IsGeneric()) {
+    private func CanTrackAllocation(allocatedTy: Type): Bool {
+        if (allocatedTy.IsClass() || allocatedTy.IsVArray() || allocatedTy.IsGeneric()) {
+            return false
+        }
+        if (let Some(structTy) <- (allocatedTy as StructType)) {
+            if (structTy.GetStructDef().IsCStruct()) {
                 return false
             }
-            if (let Some(structTy) <- (allocatedTy as StructType)) {
-                if (structTy.GetStructDef().IsCStruct()) {
-                    return false
-                }
-            }
         }
-        return !allocateIdxMap.contains(value.nodeId)
+        return true
     }
 
     private func IsTrackedStructRef(value: Value): Bool {
