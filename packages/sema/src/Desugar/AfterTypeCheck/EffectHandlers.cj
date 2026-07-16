@@ -720,8 +720,9 @@ private func UpdateHandlerLambdaReturnTy(typeManager: TypeManager, lambda: Lambd
     }
 }
 
-private func WrapHandlerLambda(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, handler: Handler, lambda: LambdaExpr, tryResultTy: Ty): Bool {
+private func WrapHandlerLambda(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, pkg: Package, handler: Handler,
+    lambda: LambdaExpr, tryResultTy: Ty): Bool {
     if (let None <- lambda.funcBody) {
         return false
     }
@@ -765,7 +766,8 @@ private func WrapHandlerLambda(typeManager: TypeManager, callChecker: (Ty, CallE
 
     let exceptionDecl = FindCoreClassDecl(importManager, CLASS_EXCEPTION_NAME).getOrThrow()
     let exceptionWrapper = FindEffectClassDecl(importManager, CLASS_FRAME_EXCEPTION_WRAPPER).getOrThrow()
-    if (let Some(exceptionCatch) <- CreateWrapperCatchClause(typeManager, callChecker, pkg, sourceBlock, exceptionDecl,
+    if (let Some(exceptionCatch) <- CreateWrapperCatchClause(typeManager, importManager, callChecker,
+        sourceBlock, exceptionDecl,
         exceptionWrapper, CLASS_FRAME_EXCEPTION_WRAPPER)) {
         wrappedTry.catchPatterns.add(exceptionCatch.pattern)
         wrappedTry.catchBlocks.add(exceptionCatch.block)
@@ -774,7 +776,8 @@ private func WrapHandlerLambda(typeManager: TypeManager, callChecker: (Ty, CallE
     }
     let errorDecl = FindCoreClassDecl(importManager, CLASS_ERROR_NAME).getOrThrow()
     let errorWrapper = FindEffectClassDecl(importManager, CLASS_FRAME_ERROR_WRAPPER).getOrThrow()
-    if (let Some(errorCatch) <- CreateWrapperCatchClause(typeManager, callChecker, pkg, sourceBlock, errorDecl,
+    if (let Some(errorCatch) <- CreateWrapperCatchClause(typeManager, importManager, callChecker,
+        sourceBlock, errorDecl,
         errorWrapper, CLASS_FRAME_ERROR_WRAPPER)) {
         wrappedTry.catchPatterns.add(errorCatch.pattern)
         wrappedTry.catchBlocks.add(errorCatch.block)
@@ -786,7 +789,7 @@ private func WrapHandlerLambda(typeManager: TypeManager, callChecker: (Ty, CallE
     resultVar.SetTy(originalReturnTy)
     CopyGeneratedPosition(sourceBlock, resultVar)
     let earlyReturnDecl = FindEffectClassDecl(importManager, CLASS_EARLY_RETURN).getOrThrow()
-    if (let Some(activeFrame) <- CreateHandlerFrameCall(typeManager, callChecker, pkg, resultVar,
+    if (let Some(activeFrame) <- CreateHandlerFrameCall(typeManager, importManager, callChecker, resultVar,
         GET_ACTIVE_FRAME_NAME, ArrayList<Ty>())) {
         let earlyArgs = ArrayList<FuncArg>()
         earlyArgs.add(CreateFuncArg(activeFrame))
@@ -807,8 +810,8 @@ private func WrapHandlerLambda(typeManager: TypeManager, callChecker: (Ty, CallE
     return false
 }
 
-private func CreateFrame(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, tryExpr: TryExpr, nodes: ArrayList<Node>):
+private func CreateFrame(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, pkg: Package, tryExpr: TryExpr, nodes: ArrayList<Node>):
     Option<VarDecl> {
     if (let None <- tryExpr.tryLambda) {
         return None
@@ -831,7 +834,8 @@ private func CreateFrame(typeManager: TypeManager, callChecker: (Ty, CallExpr) -
     frameTypeArgs.add(tryReturnTy)
     let frameTy = typeManager.GetClassTy(frameDecl, frameTypeArgs.toArray())
 
-    if (!EncloseTryLambdaForImmediateWrappers(typeManager, callChecker, pkg, tryLambda, tryReturnTy)) {
+    if (!EncloseTryLambdaForImmediateWrappers(typeManager, importManager, callChecker,
+        pkg, tryLambda, tryReturnTy)) {
         return None
     }
 
@@ -885,8 +889,8 @@ private func AddSetFinally(typeManager: TypeManager, callChecker: (Ty, CallExpr)
     return true
 }
 
-private func AddSetHandler(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, tryExpr: TryExpr, frame: VarDecl,
+private func AddSetHandler(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, pkg: Package, tryExpr: TryExpr, frame: VarDecl,
     handler: Handler, commandPattern: CommandTypePattern, nodes: ArrayList<Node>): Bool {
     if (commandPattern.types.size != 1) {
         return false
@@ -905,7 +909,7 @@ private func AddSetHandler(typeManager: TypeManager, callChecker: (Ty, CallExpr)
     }
     let handlerLambda = handler.desugaredLambda.getOrThrow()
     let tryResultTy = tryExpr.GetTy().getOrThrow()
-    if (!WrapHandlerLambda(typeManager, callChecker, pkg, handler, handlerLambda, tryResultTy)) {
+    if (!WrapHandlerLambda(typeManager, importManager, callChecker, pkg, handler, handlerLambda, tryResultTy)) {
         return false
     }
 
@@ -936,8 +940,9 @@ private func AddSetHandler(typeManager: TypeManager, callChecker: (Ty, CallExpr)
     return true
 }
 
-private func AddSetHandlers(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, tryExpr: TryExpr, frame: VarDecl, nodes: ArrayList<Node>): Bool {
+private func AddSetHandlers(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, pkg: Package, tryExpr: TryExpr,
+    frame: VarDecl, nodes: ArrayList<Node>): Bool {
     for (handler in tryExpr.handlers) {
         if (let None <- handler.commandPattern) {
             return false
@@ -946,7 +951,8 @@ private func AddSetHandlers(typeManager: TypeManager, callChecker: (Ty, CallExpr
             return false
         }
         let commandPattern = (handler.commandPattern.getOrThrow() as CommandTypePattern).getOrThrow()
-        if (!AddSetHandler(typeManager, callChecker, pkg, tryExpr, frame, handler, commandPattern, nodes)) {
+        if (!AddSetHandler(typeManager, importManager, callChecker, pkg, tryExpr,
+            frame, handler, commandPattern, nodes)) {
             return false
         }
     }
@@ -995,7 +1001,8 @@ private func ClearOriginalTryHandleSurface(tryExpr: TryExpr): Unit {
     tryExpr.finallyLambda = None
 }
 
-public func DesugarTryToFrame(typeManager: TypeManager, pkg: Package, tryExpr: TryExpr,
+public func DesugarTryToFrame(typeManager: TypeManager, importManager: SemaImportManager,
+    pkg: Package, tryExpr: TryExpr,
     callChecker: (Ty, CallExpr) -> Bool): Unit {
     if (tryExpr.handlers.isEmpty() || !Ty.IsTyCorrect(tryExpr.GetTy())) {
         return
@@ -1004,8 +1011,8 @@ public func DesugarTryToFrame(typeManager: TypeManager, pkg: Package, tryExpr: T
         return
     }
     let nodes = ArrayList<Node>()
-    if (let Some(frameVar) <- CreateFrame(typeManager, callChecker, pkg, tryExpr, nodes)) {
-        if (!AddSetHandlers(typeManager, callChecker, pkg, tryExpr, frameVar, nodes)) {
+    if (let Some(frameVar) <- CreateFrame(typeManager, importManager, callChecker, pkg, tryExpr, nodes)) {
+        if (!AddSetHandlers(typeManager, importManager, callChecker, pkg, tryExpr, frameVar, nodes)) {
             return
         }
         if (!AddSetFinally(typeManager, callChecker, tryExpr, frameVar, nodes)) {
