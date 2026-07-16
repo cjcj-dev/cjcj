@@ -47,7 +47,9 @@ public func AddCurFile(root: Node, file!: Option<File> = None): Unit {
 
 private func assignCurFile(root: Node, file: File): Unit {
     let walker = Walker(root, visitPre: { curNode: Node =>
-        curNode.curFile = file
+        if (let None <- curNode.curFile) {
+            curNode.curFile = file
+        }
         if (let Some(_) <- curNode.curMacroCall) {
             AddMacroAttr(curNode)
             return VisitAction.SKIP_CHILDREN
