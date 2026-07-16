@@ -1175,42 +1175,6 @@ public class InitializationChecker {
         return None
     }
 
-    private func CurrentNominalDeclForScope(): Option<Decl> {
-        if (let Some(outerFunc) <- CurrentOutermostNamedFuncDecl()) {
-            if (let Some(owner) <- outerFunc.outerDecl) {
-                if (owner.IsNominalDecl()) {
-                    return owner
-                }
-            }
-        }
-        if (let Some(currentBody) <- CurrentFuncBody()) {
-            if (let Some(parentClassLike) <- currentBody.parentClassLike) {
-                return parentClassLike
-            }
-            if (let Some(parentStruct) <- currentBody.parentStruct) {
-                return parentStruct
-            }
-            if (let Some(parentEnum) <- currentBody.parentEnum) {
-                return parentEnum
-            }
-        }
-        return None
-    }
-
-    private func IsMemberAccessInSameNominalDecl(member: MemberAccess, target: Decl): Bool {
-        if (let None <- target.outerDecl) {
-            return false
-        }
-        let targetOuter = target.outerDecl.getOrThrow()
-        if (!targetOuter.IsNominalDecl()) {
-            return false
-        }
-        if (let Some(currentNominal) <- CurrentNominalDeclForScope()) {
-            return SameDecl(currentNominal, targetOuter)
-        }
-        return ScopeContains(targetOuter.scopeName, member.scopeName)
-    }
-
     private func GetOwningFuncBodyForScope(scopeName: String): Option<FuncBody> {
         var idx = currentFuncBodies.size - 1
         while (idx >= 0) {
@@ -1604,7 +1568,15 @@ public class InitializationChecker {
                     message: target.identifier.Val())
                 return false
             }
-            if (IsMemberAccessInSameNominalDecl(member, target) && !IsInitializedMemberAccess(member)) {
+            let memberStruct = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, member.scopeName)
+            let targetStruct = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, target.scopeName)
+            let isInSameDecl = if ((let Some(memberSymbol) <- memberStruct) &&
+                (let Some(targetSymbol) <- targetStruct)) {
+                SameSymbol(memberSymbol, targetSymbol)
+            } else {
+                false
+            }
+            if (isInSameDecl && !IsInitializedMemberAccess(member)) {
                 AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, member, target: target,
                     message: target.identifier.Val())
                 return false
