@@ -605,6 +605,7 @@ private func FuncDeclsGroupByFixedPositionalArity(candidates: ArrayList<FuncDecl
 // `variadicDesugar` is DesugarVariadicCallExpr, threaded in as a callback from the ctx-aware dispatch
 // (sema.TypeCheckExpr subpackage) because this main-sema package cannot import sema.Desugar directly.
 internal func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
+    importManager: SemaImportManager,
     ctx: Option<ASTContext>, target: Option<Ty>, ce: CallExpr, candidates: ArrayList<FuncDecl>,
     diagnostics: ArrayList<BasicDiagnostic>, variadicDesugar: (CallExpr, Int64) -> Unit,
     argChecker!: Option<CallArgChecker> = None,
@@ -661,7 +662,7 @@ internal func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDi
             }
         }
     } else if (results.size > 1) {
-        DiagnoseForCall(diag, candidates, results, ce, results[0])
+        DiagnoseForCall(diag, typeManager, importManager, candidates, results, ce, results[0])
     }
     ce.callKind = CallKind.CALL_INVALID
     return false
@@ -4504,7 +4505,8 @@ private func GetErrorKindForCall(candidatesBeforeCheck: ArrayList<FuncDecl>,
     return BasicDiagKind.sema_ambiguous_match
 }
 
-internal func DiagnoseForCall(diag: Option<BasicDiagnosticEngine>, candidatesBeforeCheck: ArrayList<FuncDecl>,
+internal func DiagnoseForCall(diag: Option<BasicDiagnosticEngine>, typeManager: TypeManager,
+    importManager: SemaImportManager, candidatesBeforeCheck: ArrayList<FuncDecl>,
     candidatesAfterCheck: ArrayList<FuncDecl>, ce: CallExpr, decl: Decl): Unit {
     if (let None <- diag) {
         return
@@ -4532,15 +4534,37 @@ internal func DiagnoseForCall(diag: Option<BasicDiagnosticEngine>, candidatesBef
     let errorKind = GetErrorKindForCall(candidatesBeforeCheck, candidatesAfterCheck, ce)
     if (candidatesBeforeCheck.isEmpty()) {
         ce.callKind = CallKind.CALL_INVALID
-        Diagnose(diagValue, ce, identifierPos, errorKind,
-            args: [BasicDiagArgument(identifier)]).Emit()
+        let builder = Diagnose(diagValue, ce, identifierPos, errorKind,
+            args: [BasicDiagArgument(identifier)])
+        if (let Some(memberAccess) <- (baseFunc as MemberAccess)) {
+            RecommendImportForMemberAccess(typeManager, Some(importManager), memberAccess, builder)
+        }
+        builder.Emit()
         return
     }
     if (candidatesBeforeCheck.size == 1) {
         return
     }
-    Diagnose(diagValue, ce, identifierPos, errorKind,
-        args: [BasicDiagArgument(identifier)]).Emit()
+    let hasEmpty = candidatesBeforeCheck.isEmpty() || candidatesAfterCheck.isEmpty()
+    let candidates = if (hasEmpty) { candidatesBeforeCheck } else { candidatesAfterCheck }
+    let noteKind = if (hasEmpty) {
+        BasicDiagKind.sema_found_possible_candidate_decl
+    } else {
+        BasicDiagKind.sema_found_candidate_decl
+    }
+    let importedTargets = ArrayList<Decl>()
+    let builder = Diagnose(diagValue, ce, identifierPos, errorKind,
+        args: [BasicDiagArgument(identifier)])
+    for (candidate in candidates) {
+        if (candidate.TestAttr(Attribute.IMPORTED)) {
+            importedTargets.add(candidate)
+        } else {
+            AddNote(builder, candidate, candidate.identifier.Begin(), noteKind)
+        }
+    }
+    let fullPackageName = ce.curFile.getOrThrow().curPackage.getOrThrow().fullPackageName
+    AddDiagNotesForImportedDecls(builder, importManager.GetImportsOfDecl(fullPackageName), importedTargets)
+    builder.Emit()
 }
 
 private func ResolveDeclForCallBase(ce: CallExpr, candidates: ArrayList<FuncDecl>): Option<Decl> {

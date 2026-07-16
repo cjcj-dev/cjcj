@@ -495,7 +495,7 @@ private func TypeCheckReferenceCheckMutationInStruct(
     }
 }
 
-private func RecommendImportForMemberAccess(
+internal func RecommendImportForMemberAccess(
     tm: TypeManager,
     importManager: Option<SemaImportManager>,
     ma: MemberAccess,

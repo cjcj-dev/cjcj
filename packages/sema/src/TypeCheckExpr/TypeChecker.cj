@@ -4936,7 +4936,8 @@ extend TypeChecker {
             return false
         }
         if (candidates.isEmpty()) {
-            DiagnoseForCall(impl.diag, candidates, candidates, ce, decl)
+            DiagnoseForCall(impl.diag, impl.typeManager, impl.importManager.getOrThrow(),
+                candidates, candidates, ce, decl)
             return false
         }
         let maybeEnumOverloadOP = IsPossibleEnumConstructor(candidates, baseFunc)
@@ -4985,6 +4986,7 @@ extend TypeChecker {
             })
             let ret = (maybeEnumOverloadOP && ChkFunctionCallExpr(ctx, target, ce)) ||
                 (maybeVariadicFunction && result.isEmpty() && ChkVariadicCallExpr(impl.typeManager, impl.diag,
+                    impl.importManager.getOrThrow(),
                     Some(ctx), target, ce, candidates, diagnostics,
                     { call7: CallExpr, arity4: Int64 => DesugarVariadicCallExpr(call7, arity4) },
                     argChecker: Some({ expectedTy11: Ty, arg19: FuncArg => CheckCallArgFromContext(ctx, expectedTy11, arg19) }),
@@ -5010,7 +5012,8 @@ extend TypeChecker {
                 }
             }
             if (diagnostics.isEmpty()) {
-                DiagnoseForCall(impl.diag, candidates, result, ce, decl)
+                DiagnoseForCall(impl.diag, impl.typeManager, impl.importManager.getOrThrow(),
+                    candidates, result, ce, decl)
             }
             RecoverCallArgs(ctx, ce, argsTys)
             if (impl.diag.getOrThrow().GetDiagnoseStatus()) {
