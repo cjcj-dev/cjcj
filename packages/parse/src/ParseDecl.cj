@@ -451,6 +451,8 @@ extend ParserImpl {
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
+            SetDeclBeginPos(decl)
+            SetBeginToAnnotationsBegin(decl, annos)
             return decl
         }
         if (Seeing(TokenKind.TYPE)) {
@@ -2138,7 +2140,7 @@ extend ParserImpl {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let key = Expect(TokenKind.EXTEND, "expected 'extend'")
             ret.keywordPos = key.Begin()
-            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            ret.begin = key.Begin()
             CheckDeclarationInScope(scopeKind, DefKind.EXTEND)
             if (modifiers.size == 1 && MPParserImpl(this).HasCJMPModifiers(modifiers[0])) {
                 MPParserImpl(this).CheckCJMPModifiers(modifiers)
