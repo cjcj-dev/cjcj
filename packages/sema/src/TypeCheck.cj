@@ -579,6 +579,8 @@ public func GetTyFromASTRefType(typeManager: TypeManager, ctx: ASTContext, rt: R
     }
     if (targets.size > 1 && targets[0].scopeLevel == targets[1].scopeLevel &&
         !targets[0].TestAttr(Attribute.SPECIFIC)) {
+        DiagAmbiguousUse(diag.getOrThrow(), rt, rt.ref.identifier.Val(), targets,
+            importManager.getOrThrow())
         return TypeManager.GetInvalidTy()
     }
     let target = targets[0]
