@@ -85,7 +85,7 @@ public class ASTWriter {
     private let allFiles: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allFileImports: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allFileInfo: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
-    private let typeKeyToIndex: HashMap<String, UInt32> = HashMap<String, UInt32>()
+    private let savedTypeMap: HashMap<Ty, UInt32> = HashMap<Ty, UInt32>()
     private let allTypes: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let declKeyToIndex: HashMap<Node, UInt32> = HashMap<Node, UInt32>()
     private let completedDeclKeys: HashSet<Node> = HashSet<Node>()
@@ -2302,16 +2302,41 @@ public class ASTWriter {
         return decl.TestAttr(Attribute.GENERIC_INSTANTIATED) && !decl.TestAttr(Attribute.GENERIC)
     }
 
+    private func TryGetSpecificImplementationTy(ty: Ty): Option<Ty> {
+        if (ty.kind != TypeKind.TYPE_CLASS && ty.kind != TypeKind.TYPE_STRUCT && ty.kind != TypeKind.TYPE_ENUM) {
+            return None
+        }
+        if (let Some(decl) <- Ty.GetDeclOfTy(Some(ty))) {
+            if (let Some(declTy) <- decl.GetTy()) {
+                if (ty == declTy) {
+                    if (let Some(specificImplementation) <- decl.specificImplementation) {
+                        return specificImplementation.GetTy()
+                    }
+                }
+            }
+        }
+        return None
+    }
+
     private func SaveType(ty: Ty): UInt32 {
-        if (ty.IsInvalid()) {
+        if (Ty.IsInitialTy(Some(ty))) {
             return 0u32
         }
-        let key = TypeKey(ty)
-        if (let Some(existing) <- typeKeyToIndex.get(key)) {
+        if (let Some(existing) <- savedTypeMap.get(ty)) {
             return existing
         }
+        let specificImplementationTy = TryGetSpecificImplementationTy(ty)
+        if (let Some(specificTy) <- specificImplementationTy) {
+            if (let Some(existingSpecific) <- savedTypeMap.get(specificTy)) {
+                savedTypeMap[ty] = existingSpecific
+                return existingSpecific
+            }
+        }
         let index = UInt32(allTypes.size + 1)
-        typeKeyToIndex[key] = index
+        savedTypeMap[ty] = index
+        if (let Some(specificTy2) <- specificImplementationTy) {
+            savedTypeMap[specificTy2] = index
+        }
         allTypes.add(0u32)
         allTypes[Int64(index) - 1] = SaveTypeTable(ty)
         return index
@@ -2641,10 +2666,6 @@ public class ASTWriter {
         return fullPkg + "|" + ASTKindName(decl.astKind) + "|" + stableName + "|" +
             decl.begin.fileID.toString() + ":" + decl.begin.line.toString() + ":" + decl.begin.column.toString() +
             "|" + decl.end.line.toString() + ":" + decl.end.column.toString()
-    }
-
-    private func TypeKey(ty: Ty): String {
-        return TypeKindName(ty.kind) + "|" + ty.String() + "|" + ty.Hash().toString()
     }
 
     private func PositionBytes(pos: Position): ArrayList<UInt8> {
