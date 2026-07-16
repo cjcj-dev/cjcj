@@ -8245,9 +8245,6 @@ extend TypeChecker {
             return FinishSynthesize(ctx, doWhileExpr, this.SynDoWhileExpr(ctx, doWhileExpr))
         }
         if (let Some(returnExpr) <- (expr as ReturnExpr)) {
-            if (let Some(fb) <- currentFuncBody) {
-                returnExpr.refFuncBody = Some(fb)
-            }
             return FinishSynthesize(ctx, returnExpr, SynthesizeReturnExpr(ctx, returnExpr))
         }
         if (let Some(lambdaExpr) <- (expr as LambdaExpr)) {
@@ -8527,9 +8524,6 @@ extend TypeChecker {
             return FinishCheck(ctx, unaryExpr, ChkUnaryExpr(ctx, target, unaryExpr))
         }
         if (let Some(returnExpr) <- (expr as ReturnExpr)) {
-            if (let Some(fb) <- currentFuncBody) {
-                returnExpr.refFuncBody = Some(fb)
-            }
             return FinishCheck(ctx, returnExpr, Ty.IsTyCorrect(SynthesizeReturnExpr(ctx, returnExpr)))
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
