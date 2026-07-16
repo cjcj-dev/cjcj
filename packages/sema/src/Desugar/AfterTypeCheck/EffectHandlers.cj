@@ -729,19 +729,19 @@ private func WrapHandlerLambda(typeManager: TypeManager, callChecker: (Ty, CallE
     }
     let resultDecl = FindEffectEnumDecl(importManager, IMMEDIATE_HANDLER_RETURN_NAME).getOrThrow()
     let resultTy = typeManager.GetEnumTy(resultDecl, typeArgs: [commandResultTy])
-    if (let None <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME)) {
+    if (let None <- FindCoreClassDecl(importManager, CLASS_EXCEPTION_NAME)) {
         return false
     }
     if (let None <- FindCoreClassDecl(importManager, CLASS_ERROR_NAME)) {
         return false
     }
-    if (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_EXCEPTION_WRAPPER)) {
+    if (let None <- FindEffectClassDecl(importManager, CLASS_FRAME_EXCEPTION_WRAPPER)) {
         return false
     }
-    if (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_ERROR_WRAPPER)) {
+    if (let None <- FindEffectClassDecl(importManager, CLASS_FRAME_ERROR_WRAPPER)) {
         return false
     }
-    if (let None <- FindEffectClassDecl(pkg, CLASS_EARLY_RETURN)) {
+    if (let None <- FindEffectClassDecl(importManager, CLASS_EARLY_RETURN)) {
         return false
     }
 
@@ -776,7 +776,7 @@ private func WrapHandlerLambda(typeManager: TypeManager, callChecker: (Ty, CallE
     let resultVar = CreateVarDecl(V_COMPILER_NAME, wrappedTry, None)
     resultVar.SetTy(originalReturnTy)
     CopyGeneratedPosition(sourceBlock, resultVar)
-    let earlyReturnDecl = FindEffectClassDecl(pkg, CLASS_EARLY_RETURN).getOrThrow()
+    let earlyReturnDecl = FindEffectClassDecl(importManager, CLASS_EARLY_RETURN).getOrThrow()
     if (let Some(activeFrame) <- CreateHandlerFrameCall(typeManager, callChecker, pkg, resultVar,
         GET_ACTIVE_FRAME_NAME, ArrayList<Ty>())) {
         let earlyArgs = ArrayList<FuncArg>()
@@ -805,7 +805,7 @@ private func CreateFrame(typeManager: TypeManager, callChecker: (Ty, CallExpr) -
         return None
     }
     let tryLambda = tryExpr.tryLambda.getOrThrow()
-    if (let None <- FindEffectClassDecl(pkg, CLASS_IMMEDIATE_FRAME)) {
+    if (let None <- FindEffectClassDecl(importManager, CLASS_IMMEDIATE_FRAME)) {
         return None
     }
     if (let None <- tryLambda.GetTy()) {
@@ -817,7 +817,7 @@ private func CreateFrame(typeManager: TypeManager, callChecker: (Ty, CallExpr) -
     }
     let tryLambdaTy = (lambdaTy as FuncTy).getOrThrow()
     let tryReturnTy = tryLambdaTy.retTy
-    let frameDecl = FindEffectClassDecl(pkg, CLASS_IMMEDIATE_FRAME).getOrThrow()
+    let frameDecl = FindEffectClassDecl(importManager, CLASS_IMMEDIATE_FRAME).getOrThrow()
     let frameTypeArgs = ArrayList<Ty>()
     frameTypeArgs.add(tryReturnTy)
     let frameTy = typeManager.GetClassTy(frameDecl, frameTypeArgs.toArray())
