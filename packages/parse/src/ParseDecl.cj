@@ -2280,6 +2280,7 @@ extend ParserImpl {
             let key = Expect(TokenKind.EXTEND, "expected 'extend'")
             ret.keywordPos = key.Begin()
             ret.begin = key.Begin()
+            ret.identifier.SetPos(key.Begin(), key.Begin())
             CheckDeclarationInScope(scopeKind, DefKind.EXTEND)
             if (modifiers.size == 1 && MPParserImpl(this).HasCJMPModifiers(modifiers[0])) {
                 MPParserImpl(this).CheckCJMPModifiers(modifiers)
