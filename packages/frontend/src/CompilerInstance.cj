@@ -23,13 +23,15 @@ import cjcj::lex.TokenKindValue
 import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::incremental_compilation.IncreKind
 import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
-    OptEffectStrMap, RawMangled2DeclMap, VarInitDepMap, VirtualWrapperDepMap, WriteCache}
+    MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, TopLevelDeclCache, VarInitDepMap,
+    VirtualWrapperDepMap, WriteCache}
 import cjcj::option.OutputMode
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.STANDARD_LIBS
 import cjcj::utils.IncrementalCompilationLogger
 import cjcj::utils.InternalError
+import cjcj::utils.CJC_ABORT
 import cjcj::chir.CHIRBuilder as ChirBuilder
 import cjcj::chir.CHIRDeserializer as ChirDeserializer
 import cjcj::chir.CHIRPrinter as ChirPrinter
@@ -148,6 +150,32 @@ public class CHIRInfo {
     public let ccOutFuncsRawMangle: HashSet<String> = HashSet<String>()
     public let varInitDepMap: VarInitDepMap = VarInitDepMap()
     public init() {}
+}
+
+// C++: Frontend/CompilerInstance.cpp:567-577.
+private func UpdateMemberDeclMangleNameForCachedInfo(rawMangleName2DeclMap: RawMangled2DeclMap,
+    memCache: MemberDeclCache): Unit {
+    if (let Some(decl) <- rawMangleName2DeclMap.get(memCache.rawMangle)) {
+        memCache.cgMangle = decl.mangledName
+    } else {
+        CJC_ABORT()
+    }
+    for (member in memCache.members) {
+        UpdateMemberDeclMangleNameForCachedInfo(rawMangleName2DeclMap, member)
+    }
+}
+
+// C++: Frontend/CompilerInstance.cpp:579-590.
+private func UpdateTopLevelDeclMangleNameForCachedInfo(rawMangleName2DeclMap: RawMangled2DeclMap,
+    rawMangle: String, topCache: TopLevelDeclCache): Unit {
+    if (let Some(decl) <- rawMangleName2DeclMap.get(rawMangle)) {
+        topCache.cgMangle = decl.mangledName
+    } else {
+        CJC_ABORT()
+    }
+    for (member in topCache.members) {
+        UpdateMemberDeclMangleNameForCachedInfo(rawMangleName2DeclMap, member)
+    }
 }
 
 private func PackageDiagnosticPosition(pkg: Package): Position {
@@ -946,12 +974,25 @@ public class CompilerInstance {
         return out
     }
 
-    public func UpdateAndWriteCachedInfoToDisk(): Bool {
+    public func UpdateAndWriteCachedInfoToDisk(updateCachedInfo: () -> Unit): Bool {
         if (!ShouldWriteCacheFile()) {
             return true
         }
-        UpdateCachedInfo()
+        updateCachedInfo()
         return WriteCachedInfo()
+    }
+
+    public func UpdateMangleNameForCachedInfo(): Unit {
+        for ((rawMangle, topCache) in cachedInfo.curPkgASTCache) {
+            UpdateTopLevelDeclMangleNameForCachedInfo(rawMangleName2DeclMap, rawMangle, topCache)
+        }
+        for ((rawMangle, topCache) in cachedInfo.importedASTCache) {
+            UpdateTopLevelDeclMangleNameForCachedInfo(rawMangleName2DeclMap, rawMangle, topCache)
+        }
+    }
+
+    public func UpdateCachedInfo(): Unit {
+        UpdateMangleNameForCachedInfo()
     }
 
     public func GetCHIRContext(): CHIRContext {
@@ -1080,10 +1121,6 @@ public class CompilerInstance {
     private func CacheCompileArgs(): Unit {
         cachedInfo.compileArgs.clear()
         for (arg in invocation.globalOptions.ToSerialized()) { cachedInfo.compileArgs.add(arg) }
-    }
-
-    private func UpdateCachedInfo(): Unit {
-        ()
     }
 
     private func WriteCachedInfo(): Bool {

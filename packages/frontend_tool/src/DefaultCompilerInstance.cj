@@ -181,7 +181,11 @@ public open class DefaultCompilerInstance {
     }
 
     public func UpdateAndWriteCachedInfoToDisk(): Bool {
-        return core.UpdateAndWriteCachedInfoToDisk()
+        return core.UpdateAndWriteCachedInfoToDisk({ => UpdateCachedInfo() })
+    }
+
+    public open func UpdateCachedInfo(): Unit {
+        core.UpdateCachedInfo()
     }
 
     public func DumpDepPackage(): Unit {
