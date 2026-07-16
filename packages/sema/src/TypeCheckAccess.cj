@@ -693,7 +693,7 @@ public func CheckMutationInStructNonMut(diag: BasicDiagnosticEngine, structDecl:
         if (let Some(refExpr) <- (currentExpr as RefExpr)) {
             if (let Some(target) <- refExpr.GetTarget()) {
                 if (ContainsDeclKey(forbiddenVars, target)) {
-                    let builder = diag.Diagnose(expr.begin, expr.end,
+                    let builder = Diagnose(diag, expr,
                         BasicDiagKind.sema_cannot_modify_var,
                         args: [BasicDiagArgument(target.identifier.Val())])
                     builder.Emit()
@@ -713,7 +713,7 @@ public func CheckMutationInStructNonMut(diag: BasicDiagnosticEngine, structDecl:
                     if (refExpr.isThis) {
                         if (let Some(target) <- memberAccess.GetTarget()) {
                             if (ContainsDeclKey(forbiddenVars, target)) {
-                                let builder = diag.Diagnose(expr.begin, expr.end,
+                                let builder = Diagnose(diag, expr,
                                     BasicDiagKind.sema_cannot_modify_var,
                                     args: [BasicDiagArgument(target.identifier.Val())])
                                 builder.Emit()
