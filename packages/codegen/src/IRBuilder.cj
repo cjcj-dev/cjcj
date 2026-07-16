@@ -5361,9 +5361,10 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateTypeInfoIsReferenceCall(typeInfoValue: LLVMValueRef): LLVMValueRef {
-        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let functionType = GetIntrinsicFunctionType(IS_REFERENCE_INTRINSIC_NAME)
+        let parameterType = GetLLVMFunctionParamType(functionType, 0u32).getOrThrow()
         let args = ArrayList<LLVMValueRef>()
-        args.add(CreateBitCast(typeInfoValue, i8PtrType, name: "isref.ti"))
+        args.add(CreateBitCast(typeInfoValue, parameterType, name: "isref.ti"))
         return CreateIntrinsicCallNoInvoke(IS_REFERENCE_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args, name: "isref")
     }
 
