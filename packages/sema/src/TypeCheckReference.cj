@@ -859,7 +859,7 @@ public func FilterAndCheckTargetsOfRef(
     return TypeCheckReferenceCheckForQuestFuncRetType(diag, targets[0].getOrThrow(), re, hasTarget)
 }
 
-public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
+public func FilterAndCheckTargetsOfNameAccess(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
     ctx: ASTContext,
@@ -931,7 +931,7 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(
             if (let Some(targetOfBase) <- baseExpr.GetTarget()) {
                 if (targetOfBase.IsTypeDecl() && (let Some(_) <- targetOfBase.GetGeneric()) &&
                     NeedFurtherInstantiation(baseExpr.GetTypeArgs())) {
-                    TypeCheckReferenceEmitGenericTypeWithoutTypeArg(diag, baseExpr)
+                    Diagnose(diag, baseExpr, BasicDiagKind.sema_generic_type_without_type_argument).Emit()
                     return false
                 }
             }
@@ -1016,11 +1016,6 @@ public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
     } else {
         None
     }
-}
-
-private func TypeCheckReferenceEmitGenericTypeWithoutTypeArg(diag: BasicDiagnosticEngine, expr: Expr): Unit {
-    let builder = diag.Diagnose(expr.begin, expr.end, BasicDiagKind.sema_generic_type_without_type_argument)
-    builder.Emit()
 }
 
 private func TypeCheckReferencePackageNameOfAccessSite(ma: MemberAccess): String {

@@ -6381,7 +6381,7 @@ extend TypeChecker {
         ma.SetTy(TypeManager.GetInvalidTy())
         let file = ma.curFile.getOrThrow()
         let targets = impl.ExtendFieldLookup(ctx, file, ma.baseExpr.getOrThrow().GetTy(), ma.field.Val())
-        if (!TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
+        if (!FilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
             ctx, ma, targets, importManager: impl.importManager)) {
             return
         }
@@ -6410,7 +6410,7 @@ extend TypeChecker {
         }
         baseExpr.SetTy(impl.typeManager.GetArrayTy(typeArgs[0].GetTy().getOrThrow(), 1u64))
         let targets = impl.ExtendFieldLookup(ctx, ma.curFile.getOrThrow(), baseExpr.GetTy(), ma.field.Val())
-        if (!TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
+        if (!FilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
             ctx, ma, targets, importManager: impl.importManager)) {
             return
         }
@@ -6624,7 +6624,7 @@ extend TypeChecker {
         })
         if (let Some(target) <- ma.baseExpr.getOrThrow().GetTarget()) {
             if (target.astKind == ASTKind.GENERIC_PARAM_DECL) {
-                let _ = TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
+                let _ = FilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
                     ctx, ma, functionTargets, importManager: impl.importManager)
             } else {
                 let _ = TypeCheckReferenceFilterAndGetTargetsOfObjAccess(impl.diag.getOrThrow(), impl.typeManager,
@@ -6948,7 +6948,7 @@ extend TypeChecker {
                 }
                 return
             }
-            if (!TypeCheckReferenceFilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
+            if (!FilterAndCheckTargetsOfNameAccess(impl.diag.getOrThrow(), impl.typeManager,
                 ctx, ma, targets, importManager: impl.importManager)) {
                 return
             }
