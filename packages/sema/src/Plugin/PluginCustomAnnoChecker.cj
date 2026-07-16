@@ -7,6 +7,7 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
 import cjcj::option.GlobalOptions as OptionGlobalOptions
+import cjcj::modules.SemaImportManager
 import cjcj::sema.TypeManager
 import cjcj::utils.FileUtil
 
@@ -255,6 +256,29 @@ public func ParseCheckingHide(expr: Expr, annoInfo: PluginCustomAnnoInfo, diag: 
 
 private func CopyAnnoInfo(source: PluginCustomAnnoInfo): PluginCustomAnnoInfo {
     return PluginCustomAnnoInfo(since: source.since, syscap: source.syscap, hasHideAnno: source.hasHideAnno)
+}
+
+private func ClearAnnoInfoOfDepPkg(importManager: SemaImportManager): Unit {
+    for ((fullPackageName, _) in importManager.GetDepPkgCjoPaths()) {
+        let depPkg = importManager.GetPackage(fullPackageName)
+        if (let None <- depPkg) {
+            continue
+        }
+        let walker = Walker(depPkg.getOrThrow(), visitPre: { node: Node =>
+            if (let Some(decl) <- (node as Decl)) {
+                var index: Int64 = 0
+                while (index < decl.annotations.size) {
+                    if (decl.annotations[index].kind == AnnotationKind.CUSTOM) {
+                        decl.annotations.remove(at: index)
+                    } else {
+                        index++
+                    }
+                }
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+    }
 }
 
 private class PluginAnnoCacheEntry {
