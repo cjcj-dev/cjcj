@@ -506,7 +506,7 @@ private func extractDeprecatedAnnotationArgs(anno: Annotation): (String, String,
     return (message, since, strict)
 }
 
-private func isMacroCallReadyForEval(macCall: MacroCall, diag: DiagnosticEngine, compileCjd: Bool): Bool {
+private func IsMacroCallReadyForEval(macCall: MacroCall, diag: DiagnosticEngine, compileCjd: Bool): Bool {
     if (HandleBeforeMacroCallEval(macCall, diag)) {
         return false
     }
@@ -1218,7 +1218,7 @@ public class MacroEvaluation {
         while (progress) {
             progress = false
             for (macCall in pMacroCalls) {
-                if (isMacroCallReadyForEval(macCall, ci.GetDiag(), ci.GetGlobalOptions().compileCjd)) {
+                if (IsMacroCallReadyForEval(macCall, ci.GetDiag(), ci.GetGlobalOptions().compileCjd)) {
                     EvalOneMacroCall(macCall)
                     SetMacroCallEvalResult(macCall, ci.GetDiag())
                     progress = true
