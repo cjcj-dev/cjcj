@@ -1321,6 +1321,14 @@ extend TypeChecker {
         }
     }
 
+    private func CheckJavaInteropLibImport(decl: Decl): Unit {
+        if (!InteropLibBridge.IsInteropLibAccessible(impl.importManager.getOrThrow())) {
+            DiagnoseRefactor(impl.diag.getOrThrow(),
+                BasicDiagKindRefactor.sema_java_mirror_interoplib_must_be_imported, decl).Emit()
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+    }
+
     private func AddBuiltInArrayDecl(pkg: Package): Unit {
         let builtInDecl = BuiltInDecl(BuiltInType.ARRAY)
         builtInDecl.identifier = SrcIdentifier(RAW_ARRAY_NAME)
@@ -3857,6 +3865,10 @@ extend TypeChecker {
                 TypeCheckCompositeBody(ctx, classDecl, body.decls)
                 impl.CheckRecursiveConstructorCall(body.decls)
             }
+            if (classDecl.TestAnyAttr(
+                Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE, Attribute.JAVA_CJ_MAPPING)) {
+                CheckJavaInteropLibImport(classDecl)
+            }
             return tyOrInvalid(classDecl)
         }
         if (let Some(structDecl) <- (decl as StructDecl)) {
@@ -3866,6 +3878,9 @@ extend TypeChecker {
                 TypeCheckCompositeBody(ctx, structDecl, body2.decls)
                 impl.CheckRecursiveConstructorCall(body2.decls)
             }
+            if (structDecl.TestAnyAttr(Attribute.JAVA_CJ_MAPPING)) {
+                CheckJavaInteropLibImport(structDecl)
+            }
             return tyOrInvalid(structDecl)
         }
         if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
@@ -3874,6 +3889,9 @@ extend TypeChecker {
                 impl.diag.getOrThrow(), impl.typeManager, interfaceDecl)
             if (let Some(body3) <- interfaceDecl.body) {
                 TypeCheckCompositeBody(ctx, interfaceDecl, body3.decls)
+            }
+            if (interfaceDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+                CheckJavaInteropLibImport(interfaceDecl)
             }
             return tyOrInvalid(interfaceDecl)
         }
