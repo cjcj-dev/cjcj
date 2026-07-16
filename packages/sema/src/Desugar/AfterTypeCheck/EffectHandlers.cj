@@ -895,7 +895,8 @@ private func AddSetFinally(typeManager: TypeManager, callChecker: (Ty, CallExpr)
 }
 
 private func AddSetHandler(typeManager: TypeManager, importManager: SemaImportManager,
-    callChecker: (Ty, CallExpr) -> Bool, pkg: Package, tryExpr: TryExpr, frame: VarDecl,
+    ctx: ASTContext, callChecker: (Ty, CallExpr) -> Bool,
+    pkg: Package, tryExpr: TryExpr, frame: VarDecl,
     handler: Handler, commandPattern: CommandTypePattern, nodes: ArrayList<Node>): Bool {
     if (commandPattern.types.size != 1) {
         return false
@@ -931,10 +932,13 @@ private func AddSetHandler(typeManager: TypeManager, importManager: SemaImportMa
     AddTargetIfFunc(setHandler)
 
     let lambdaVar = CreateVarDecl(HANDLER_LAMBDA_VAR_NAME, handlerLambda, None)
+    ctx.AddDeclName(Names(HANDLER_LAMBDA_VAR_NAME, lambdaVar.scopeName), lambdaVar)
     CopyGeneratedPosition(handlerLambda, lambdaVar)
     nodes.add(lambdaVar)
     let args = ArrayList<FuncArg>()
-    args.add(CreateFuncArg(CreateRefExpr(lambdaVar, tryExpr)))
+    let lambdaVarRef = CreateRefExpr(lambdaVar)
+    CopyNodeScopeInfo(lambdaVarRef, lambdaVar)
+    args.add(CreateFuncArg(lambdaVarRef))
     let setHandlerCall = CreateCallExpr(setHandler, args)
     if (!FinishEffectCall(typeManager, callChecker, UnitTy(), setHandlerCall)) {
         return false
@@ -946,7 +950,7 @@ private func AddSetHandler(typeManager: TypeManager, importManager: SemaImportMa
 }
 
 private func AddSetHandlers(typeManager: TypeManager, importManager: SemaImportManager,
-    callChecker: (Ty, CallExpr) -> Bool, pkg: Package, tryExpr: TryExpr,
+    ctx: ASTContext, callChecker: (Ty, CallExpr) -> Bool, pkg: Package, tryExpr: TryExpr,
     frame: VarDecl, nodes: ArrayList<Node>): Bool {
     for (handler in tryExpr.handlers) {
         if (let None <- handler.commandPattern) {
@@ -956,7 +960,7 @@ private func AddSetHandlers(typeManager: TypeManager, importManager: SemaImportM
             return false
         }
         let commandPattern = (handler.commandPattern.getOrThrow() as CommandTypePattern).getOrThrow()
-        if (!AddSetHandler(typeManager, importManager, callChecker, pkg, tryExpr,
+        if (!AddSetHandler(typeManager, importManager, ctx, callChecker, pkg, tryExpr,
             frame, handler, commandPattern, nodes)) {
             return false
         }
@@ -1018,7 +1022,7 @@ public func DesugarTryToFrame(typeManager: TypeManager, importManager: SemaImpor
     let nodes = ArrayList<Node>()
     if (let Some(frameVar) <- CreateFrame(typeManager, importManager, ctx, synthesizer,
         callChecker, pkg, tryExpr, nodes)) {
-        if (!AddSetHandlers(typeManager, importManager, callChecker, pkg, tryExpr, frameVar, nodes)) {
+        if (!AddSetHandlers(typeManager, importManager, ctx, callChecker, pkg, tryExpr, frameVar, nodes)) {
             return
         }
         if (!AddSetFinally(typeManager, callChecker, tryExpr, frameVar, nodes)) {
