@@ -2063,34 +2063,6 @@ extend ParserImpl {
         return ParseLambdaExpr(false)
     }
 
-    private func ParseLambdaFuncParam(): AstFuncParam {
-        let param = AstFuncParam()
-        try (cs = ChainScope(this, param)) {
-            if (Skip(TokenKind.WILDCARD)) {
-                param.identifier = SrcIdentifier("_", "_", lastToken.Begin(), lastToken.End(), false)
-            } else {
-                param.identifier = ExpectIdentifierWithPos(param)
-            }
-            if (param.identifier.Empty()) {
-                param.EnableAttr(Attribute.IS_BROKEN)
-                ConsumeUntilAny([TokenKind.DOUBLE_ARROW, TokenKind.COLON, TokenKind.COMMA, TokenKind.NL,
-                    TokenKind.SEMI, TokenKind.RCURL], targetTokenConsumed: false)
-            }
-            param.isVar = false
-            param.begin = param.identifier.Begin()
-            if (Skip(TokenKind.COLON)) {
-                param.colonPos = lastToken.Begin()
-                param.typeNode = ParseType()
-                if (let Some(typeNode) <- param.typeNode) {
-                    param.end = typeNode.end
-                }
-            } else {
-                param.end = param.identifier.End()
-            }
-        }
-        return param
-    }
-
     private func ParseFuncParamListInLambdaExpr(): AstFuncParamList {
         let paramList = AstFuncParamList()
         try (cs = ChainScope(this, paramList)) {
@@ -2100,7 +2072,7 @@ extend ParserImpl {
                 return paramList
             }
             while (!Seeing(TokenKind.END) && !SeeingDoubleArrow()) {
-                let param = ParseLambdaFuncParam()
+                let param = ParseFuncParam()
                 if (param.TestAttr(Attribute.IS_BROKEN)) {
                     paramList.EnableAttr(Attribute.IS_BROKEN)
                 }

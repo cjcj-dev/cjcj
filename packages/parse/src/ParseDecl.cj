@@ -1294,7 +1294,34 @@ extend ParserImpl {
     }
 
     public func ParseFuncParam(): FuncParam {
-        return ParseParameter(ScopeKind.UNKNOWN_SCOPE)
+        let consumeTarget = { =>
+            SeeingAny([TokenKind.DOUBLE_ARROW, TokenKind.COLON, TokenKind.COMMA, TokenKind.NL, TokenKind.SEMI,
+                TokenKind.RCURL]) || SeeingCombinator(combinedDoubleArrow)
+        }
+        let param = FuncParam()
+        try (cs = ChainScope(this, param)) {
+            if (Skip(TokenKind.WILDCARD)) {
+                param.identifier = SrcIdentifier("_", Peek().Begin(), Peek().End(), false)
+            } else {
+                param.identifier = ExpectIdentifierWithPos(param)
+            }
+            if (param.identifier.Empty()) {
+                param.EnableAttr(Attribute.IS_BROKEN)
+                ConsumeUntilAny(consumeTarget, targetTokenConsumed: false)
+            }
+            param.isVar = false
+            param.begin = Peek().Begin()
+            if (Skip(TokenKind.COLON)) {
+                param.colonPos = lastToken.Begin()
+                param.typeNode = ParseType()
+                if (let Some(typeNode) <- param.typeNode) {
+                    param.end = typeNode.end
+                }
+            } else {
+                param.end = param.identifier.GetRawEndPos()
+            }
+        }
+        return param
     }
 
     public func ParseParameter(scopeKind: ScopeKind): FuncParam {
