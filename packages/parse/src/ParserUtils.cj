@@ -797,9 +797,43 @@ extend ParserImpl {
         return ret
     }
 
+    public func ParseGenericUpperBound(genericConstraint: GenericConstraint): Bool {
+        var illegalConstraint = false
+        if (!Skip(TokenKind.UPPERBOUND)) {
+            if (!genericConstraint.TestAttr(Attribute.HAS_BROKEN)) {
+                DiagExpectCharacter("'<:'")
+                genericConstraint.EnableAttr(Attribute.HAS_BROKEN)
+            }
+            TryConsumeUntilAny(GetTypeFirst())
+            illegalConstraint = true
+        } else {
+            genericConstraint.operatorPos = lastToken.Begin()
+        }
+        do {
+            if (lastToken.kind == TokenKind.BITAND) {
+                genericConstraint.bitAndPos.add(lastToken.Begin())
+            }
+            let upperBound = ParseType()
+            if (!upperBound.TestAttr(Attribute.IS_BROKEN) && upperBound.astKind != ASTKind.THIS_TYPE) {
+                genericConstraint.upperBounds.add(upperBound)
+            } else {
+                if (!genericConstraint.TestAttr(Attribute.HAS_BROKEN)) {
+                    DiagExpectedIdentifierGenericConstraint(genericConstraint)
+                    genericConstraint.EnableAttr(Attribute.HAS_BROKEN)
+                }
+                let matched = TryConsumeUntilAny([TokenKind.BITAND])
+                illegalConstraint = true
+                if (!matched) {
+                    break
+                }
+            }
+        } while (Skip(TokenKind.BITAND))
+        return illegalConstraint
+    }
+
     public func ParseGenericConstraints(): ArrayList<GenericConstraint> {
         let out = ArrayList<GenericConstraint>()
-        while (true) {
+        do {
             let constraint = GenericConstraint()
             try (cs = ChainScope(this, constraint)) {
                 if (lastToken.kind == TokenKind.COMMA && !out.isEmpty()) {
@@ -810,28 +844,14 @@ extend ParserImpl {
                 let refTy = ParseRefType(true)
                 constraint.refType = refTy
                 SpreadAttrAndConsume(refTy, constraint, [TokenKind.UPPERBOUND])
-                if (!Skip(TokenKind.UPPERBOUND)) {
-                    DiagExpectCharacter("'<:'")
-                } else {
-                    constraint.operatorPos = lastToken.Begin()
+                let illegalConstraint = ParseGenericUpperBound(constraint)
+                if (!illegalConstraint) {
+                    constraint.begin = if (constraint.wherePos.IsZero()) { refTy.begin } else { constraint.wherePos }
+                    constraint.end = lastToken.End()
+                    out.add(constraint)
                 }
-                constraint.upperBounds.add(ParseType())
-                while (Skip(TokenKind.BITAND)) {
-                    constraint.bitAndPos.add(lastToken.Begin())
-                    constraint.upperBounds.add(ParseType())
-                }
-                constraint.begin = if (constraint.wherePos.IsZero()) { refTy.begin } else { constraint.wherePos }
-                constraint.end = if (!constraint.upperBounds.isEmpty()) {
-                    constraint.upperBounds[constraint.upperBounds.size - 1].end
-                } else {
-                    refTy.end
-                }
-                out.add(constraint)
             }
-            if (!Skip(TokenKind.COMMA)) {
-                break
-            }
-        }
+        } while (Skip(TokenKind.COMMA))
         let posRecord = HashMap<String, Position>()
         for (constraint in out) {
             if (let Some(refTy) <- constraint.refType) {
