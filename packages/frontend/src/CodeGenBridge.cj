@@ -19,6 +19,7 @@ import cjcj::chir.ClosureConversion
 import cjcj::chir.ConstAnalysisWrapper
 import cjcj::chir.ConstEvalPass
 import cjcj::chir.ConstPropagation
+import cjcj::chir.CustomTypeDef as ChirCustomTypeDef
 import cjcj::chir.DeadCodeElimination
 import cjcj::chir.DebugLocation as ChirDebugLocation
 import cjcj::chir.DevirtualizationInfo
@@ -29,6 +30,7 @@ import cjcj::chir.FuncKind as ChirFuncKind
 import cjcj::chir.FuncSigInfo as ChirFuncSigInfo
 import cjcj::chir.Function as ChirFunction
 import cjcj::chir.FunctionInline
+import cjcj::chir.GlobalValue as ChirGlobalValue
 import cjcj::chir.GetRefToArrayElem
 import cjcj::chir.INVALID_LOCATION as CHIR_INVALID_LOCATION
 import cjcj::chir.MergeBlocks
@@ -60,7 +62,7 @@ import cjcj::chir.Value as ChirValue
 import cjcj::ast.Package as RealASTPackage
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::codegen.CHIRData as CodegenCHIRData
-import cjcj::incremental_compilation.{CachedMangleMap, VirtualWrapperDepMap}
+import cjcj::incremental_compilation.{CachedMangleMap, OptEffectStrMap, VirtualWrapperDepMap}
 import cjcj::codegen.ClearPackageModules
 import cjcj::codegen.GenPackageModules as CodegenGenPackageModules
 import cjcj::codegen.LLVMModuleHandle as LLVMModuleHandle
@@ -79,10 +81,173 @@ import cjcj::utils.ProfileRecorder
 import cjcj::utils.REFLECT_PACKAGE_NAME
 import cjcj::utils.{TaskQueue, TaskResult}
 
+// C++: CHIR/CHIR.cpp:55-92.
+private func FlattenEffectMap(effectMap: ChirOptEffectCHIRMap): Unit {
+    let newEffectMap = ChirOptEffectCHIRMap()
+    for ((source, affected) in effectMap) {
+        let flattened = HashSet<ChirValue>()
+        let stack = ArrayList<ChirValue>()
+        for (node in affected) {
+            flattened.add(node)
+            stack.add(node)
+        }
+        while (!stack.isEmpty()) {
+            let current = stack.remove(at: stack.size - 1)
+            if (let Some(patch) <- effectMap.get(current)) {
+                for (node in patch) {
+                    flattened.add(node)
+                    stack.add(node)
+                }
+            }
+        }
+        newEffectMap[source] = flattened
+    }
+    effectMap.clear()
+    for ((source, affected) in newEffectMap) {
+        effectMap[source] = affected
+    }
+}
+
+// C++: CHIR/CHIR.cpp:94-102.
+private func IsDesugaredNoneStaticConstructor(value: ChirValue): Bool {
+    if (!value.IsFuncWithBody()) {
+        return false
+    }
+    let function = (value as ChirFunction).getOrThrow()
+    return function.TestAttr(ChirAttribute.COMPILER_ADD) && !function.TestAttr(ChirAttribute.STATIC) &&
+        (function.GetFuncKind() == ChirFuncKind.CLASS_CONSTRUCTOR ||
+            function.GetFuncKind() == ChirFuncKind.STRUCT_CONSTRUCTOR)
+}
+
+// C++: CHIR/CHIR.cpp:104-111.
+private func GetNoneStaticMemberVars(def: ChirCustomTypeDef): HashSet<String> {
+    let vars = HashSet<String>()
+    for (info in def.GetDirectInstanceVars()) {
+        vars.add(info.rawMangledName)
+    }
+    return vars
+}
+
+// C++: CHIR/CHIR.cpp:113-116.
+private func GetRawMangledName(value: ChirValue): String {
+    return (value as ChirGlobalValue).getOrThrow().GetRawMangledName()
+}
+
+// C++: CHIR/CHIR.cpp:118-128.
+private func GetRawMangledNameSet(values: HashSet<ChirValue>): HashSet<String> {
+    let result = HashSet<String>()
+    for (value in values) {
+        let name = GetRawMangledName(value)
+        if (!name.isEmpty()) {
+            result.add(name)
+        }
+    }
+    return result
+}
+
+// C++: CHIR/CHIR.cpp:130-166.
+private func UpdateOptEffectMapBecauseOfInit(oldMap: ChirOptEffectCHIRMap, newMap: OptEffectStrMap): Unit {
+    let sources = ArrayList<ChirValue>()
+    for ((source, _) in oldMap) {
+        sources.add(source)
+    }
+    for (source in sources) {
+        let affected = oldMap.get(source) ?? continue
+        let effectedNodePatch = HashSet<String>()
+        let affectedValues = ArrayList<ChirValue>()
+        for (value in affected) {
+            affectedValues.add(value)
+        }
+        for (value in affectedValues) {
+            if (IsDesugaredNoneStaticConstructor(value)) {
+                let parentClass = (value as ChirFunction).getOrThrow().GetParentCustomTypeDef().getOrThrow()
+                for (member in GetNoneStaticMemberVars(parentClass)) {
+                    effectedNodePatch.add(member)
+                }
+                affected.remove(value)
+            }
+        }
+        if (!effectedNodePatch.isEmpty()) {
+            let keyName = GetRawMangledName(source)
+            if (!keyName.isEmpty()) {
+                if (!newMap.contains(keyName)) {
+                    newMap[keyName] = HashSet<String>()
+                }
+                for (member in effectedNodePatch) {
+                    newMap[keyName].add(member)
+                }
+            }
+        }
+        if (IsDesugaredNoneStaticConstructor(source)) {
+            let parentClass = (source as ChirFunction).getOrThrow().GetParentCustomTypeDef().getOrThrow()
+            let effectedSet = GetRawMangledNameSet(affected)
+            for (member in effectedNodePatch) {
+                effectedSet.add(member)
+            }
+            for (member in GetNoneStaticMemberVars(parentClass)) {
+                if (!newMap.contains(member)) {
+                    newMap[member] = HashSet<String>()
+                }
+                for (effected in effectedSet) {
+                    newMap[member].add(effected)
+                }
+            }
+            oldMap.remove(source)
+        }
+    }
+}
+
+// C++: CHIR/CHIR.cpp:168-186.
+private func DropOutIllegalString(newMap: OptEffectStrMap): Unit {
+    let sources = ArrayList<String>()
+    for ((source, _) in newMap) {
+        sources.add(source)
+    }
+    for (source in sources) {
+        let affected = newMap.get(source) ?? continue
+        let affectedNames = ArrayList<String>()
+        for (name in affected) {
+            affectedNames.add(name)
+        }
+        for (name in affectedNames) {
+            if (name.isEmpty() || name == source || name == "$BOX") {
+                affected.remove(name)
+            }
+        }
+        if (source.isEmpty() || source == "$BOX" || affected.isEmpty()) {
+            newMap.remove(source)
+        }
+    }
+}
+
+// C++: CHIR/CHIR.cpp:188-200.
+private func UpdateEffectMapToString(oldMap: ChirOptEffectCHIRMap, newMap: OptEffectStrMap): Unit {
+    try (recorder = ProfileRecorder("CHIR", "UpdateEffectMapToString")) {
+        FlattenEffectMap(oldMap)
+        UpdateOptEffectMapBecauseOfInit(oldMap, newMap)
+        for ((source, affected) in oldMap) {
+            let keyName = GetRawMangledName(source)
+            if (!keyName.isEmpty()) {
+                if (!newMap.contains(keyName)) {
+                    newMap[keyName] = HashSet<String>()
+                }
+                for (name in GetRawMangledNameSet(affected)) {
+                    newMap[keyName].add(name)
+                }
+            }
+        }
+        DropOutIllegalString(newMap)
+    }
+}
+
 public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTPackage): Option<RealCHIRPackage> {
     let convertor = ToCHIR(instance, pkg)
     let result = convertor.Run()
     if (result.isSome()) {
+        instance.chirInfo.optEffectMap.clear()
+        for ((source, affected) in convertor.GetOptEffectMap()) {
+            instance.chirInfo.optEffectMap[source] = affected
+        }
         instance.chirInfo.curVirtFuncWrapDep.clear()
         for ((rawMangledName, wrapper) in convertor.GetCurVirtualFuncWrapperDepForIncr()) {
             instance.chirInfo.curVirtFuncWrapDep[rawMangledName] = wrapper
@@ -103,6 +268,7 @@ private class ToCHIR {
     private let outputPath: String
     private let builder: ChirBuilder
     private let effectMap: ChirOptEffectCHIRMap = ChirOptEffectCHIRMap()
+    private let strEffectMap: OptEffectStrMap = OptEffectStrMap()
     private let curVirtFuncWrapDep: VirtualWrapperDepMap = VirtualWrapperDepMap()
     private let delVirtFuncWrapForIncr: VirtualWrapperDepMap = VirtualWrapperDepMap()
     private var maybeUnreachable: HashMap<ChirBlock, ChirTerminator> = HashMap<ChirBlock, ChirTerminator>()
@@ -178,6 +344,9 @@ private class ToCHIR {
             closure.GetUselessLambda())
         // C++: CHIR/CHIR.cpp:1183.
         RunSanitizerCoverage()
+        if (instance.invocation.globalOptions.enIncrementalCompilation) {
+            UpdateEffectMapToString(effectMap, strEffectMap)
+        }
         EraseDebugExpr()
         CFFIFuncWrapper()
         if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
@@ -185,6 +354,10 @@ private class ToCHIR {
         }
         builder.MergeAllocatedInstance()
         return Some(lowered)
+    }
+
+    public func GetOptEffectMap(): OptEffectStrMap {
+        return strEffectMap
     }
 
     public func GetCurVirtualFuncWrapperDepForIncr(): VirtualWrapperDepMap {
