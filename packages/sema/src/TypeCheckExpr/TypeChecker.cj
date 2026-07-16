@@ -3880,6 +3880,11 @@ extend TypeChecker {
             }
             if (structDecl.TestAnyAttr(Attribute.JAVA_CJ_MAPPING)) {
                 CheckJavaInteropLibImport(structDecl)
+                if (!structDecl.inheritedTypes.isEmpty()) {
+                    impl.diag.getOrThrow().DiagnoseRefactor(
+                        BasicDiagKindRefactor.sema_cjmapping_struct_inheritance_interface_not_supported,
+                        MakeRange(structDecl.identifier.Begin(), structDecl.identifier.End())).Emit()
+                }
             }
             return tyOrInvalid(structDecl)
         }
