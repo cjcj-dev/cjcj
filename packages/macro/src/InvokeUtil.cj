@@ -428,6 +428,24 @@ public func OpenSymbolTable(libPath: String): RuntimeHandle {
     return result
 }
 
+@When[os == "Windows"]
+public func OpenSymbolTableSafely(path: String): RuntimeHandle {
+    let handle = OpenSymbolTable(path)
+    if (handle.opened) {
+        SetOpenedLibHandles(handle)
+    }
+    return handle
+}
+
+@When[os == "Linux" || os == "macOS" || os == "iOS"]
+public func OpenSymbolTableSafely(path: String): RuntimeHandle {
+    let handle = OpenSymbolTable(path, 0x2 | 0x0)
+    if (handle.opened) {
+        SetOpenedLibHandles(handle)
+    }
+    return handle
+}
+
 public func GetMethod(handle: RuntimeHandle, name: String): Option<String> {
     let pointer = GetMethodPointer(handle, name)
     if (pointer.isNull()) {
