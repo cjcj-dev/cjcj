@@ -51,9 +51,14 @@ private func DesugarTry(expr: TryExpr): Unit {
     expr.tryLambda = CreateLambdaFromBlock(lambdaBlock, expr.tryBlock.getOrThrow(), FuncParamList())
 
     for (handler in expr.handlers) {
-        let commandPattern = (handler.commandPattern.getOrThrow() as CommandTypePattern).getOrThrow()
-        if (expr.hasBroken || commandPattern.isBroken || commandPattern.types[0].isBroken) {
-            expr.EnableAttr(Attribute.HAS_BROKEN)
+        let rawCommandPattern = handler.commandPattern.getOrThrow()
+        if (expr.hasBroken || rawCommandPattern.isBroken) {
+            expr.hasBroken = true
+            return
+        }
+        let commandPattern = (rawCommandPattern as CommandTypePattern).getOrThrow()
+        if (commandPattern.types[0].isBroken) {
+            expr.hasBroken = true
             return
         }
         let paramList = FuncParamList()
