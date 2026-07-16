@@ -225,7 +225,7 @@ private func AddAttributeForWrapper(cgMod: CGModule, function: LLVMValueRef, cal
         let paramType = unsafe { LLVMTypeOf(LLVMGetParam(function, UInt32(paramIdx + 1))) }
         if (!IsLitStructPtrType(paramType) && IsStructPtrType(paramType)) {
             let byValType = GetPointerElementType(paramType)
-            AddByValAttribute(function, UInt32(paramIdx), byValType, align: GetTypeAlignment(cgMod, chirParamTy))
+            AddByValAttribute(function, UInt32(paramIdx + 1), byValType, align: GetTypeAlignment(cgMod, chirParamTy))
             AddTypeAttributeAtIndex(callInst, UInt32(paramIdx + 1), "byval", byValType)
         } else if (GetTypeSize(cgMod, paramType) < GetTypeSize(cgMod, chirParamTy)) {
             cumulativeOffset++
