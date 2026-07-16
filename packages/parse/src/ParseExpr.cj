@@ -478,6 +478,43 @@ extend ParserImpl {
         }
     }
 
+    // C++: Parse/ParserImpl.h:154-165 ParserImpl::SeeingTrailingClosure.
+    public func SeeingTrailingClosure(baseExpr: Expr): Bool {
+        if (Seeing(TokenKind.LCURL)) {
+            return true
+        }
+        if (baseExpr.astKind != ASTKind.CALL_EXPR && baseExpr.astKind != ASTKind.REF_EXPR &&
+            baseExpr.astKind != ASTKind.ARRAY_EXPR) {
+            return false
+        }
+        return SeeingAnnotationLambdaExpr() || SeeingAnnotationTrailingClosure([TokenKind.LSQUARE])
+    }
+
+    // C++: Parse/ParseExpr.cpp:786-809 ParserImpl::ParseTrailingClosureExpr.
+    public func ParseTrailingClosureExpr(baseExpr: Expr): TrailingClosureExpr {
+        let ret = TrailingClosureExpr()
+        let annos = ArrayList<Annotation>()
+        ParseAnnotations(annos)
+        SetBeginToAnnotationsBegin(ret, annos)
+        ret.leftLambda = lastToken.Begin()
+        Next()
+        let lambda = ParseLambdaExprWithTrailingClosure()
+        ret.lambda = Some(lambda)
+        ret.rightLambda = lastToken.Begin()
+        for (anno in annos) {
+            if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
+                lambda.EnableAttr(Attribute.NUMERIC_OVERFLOW)
+                lambda.overflowStrategy = anno.overflowStrategy
+                break
+            }
+        }
+        CheckBaseOfTrailingClosureExpr(baseExpr)
+        ret.expr = Some(baseExpr)
+        ret.begin = baseExpr.begin
+        ret.end = lambda.end
+        return ret
+    }
+
     public func SeeingOptionalSuffix(): Bool {
         return Seeing([TokenKind.QUEST, TokenKind.DOT]) || Seeing([TokenKind.QUEST, TokenKind.LPAREN], skipNewline: false) ||
             Seeing([TokenKind.QUEST, TokenKind.LSQUARE], skipNewline: false) ||
@@ -2014,7 +2051,7 @@ extend ParserImpl {
         }
         if (SeeingAnnotationLambdaExpr()) {
             ret.task = ParseAnnotationLambdaExpr(true)
-        } else if (Seeing(TokenKind.LCURL)) {
+        } else if (Skip(TokenKind.LCURL)) {
             ret.task = ParseLambdaExprWithTrailingClosure()
         } else {
             DiagExpectedExpression()
@@ -2057,11 +2094,29 @@ extend ParserImpl {
     }
 
     public func ParseLambdaExprWithTrailingClosure(): LambdaExpr {
-        return ParseLambdaExpr(true)
+        // C++: Parse/ParseAtom.cpp:1613-1621 ParserImpl::ParseLambdaExprWithTrailingClosure.
+        let ret = ParseBaseLambdaExpr()
+        try (cs = ChainScope(this, ret)) {
+            let funcBody = ParseFuncBodyInLambdaExpr(true)
+            ret.funcBody = Some(funcBody)
+            ret.end = funcBody.end
+            let body = funcBody.body.getOrThrow()
+            body.leftCurlPos = ret.begin
+        }
+        return ret
     }
 
     public func ParseLambdaExpr(): LambdaExpr {
-        return ParseLambdaExpr(false)
+        // C++: Parse/ParseAtom.cpp:1566-1574 ParserImpl::ParseLambdaExpr.
+        let ret = ParseBaseLambdaExpr()
+        try (cs = ChainScope(this, ret)) {
+            let funcBody = ParseFuncBodyInLambdaExpr(false)
+            ret.funcBody = Some(funcBody)
+            ret.end = funcBody.end
+            let body = funcBody.body.getOrThrow()
+            body.leftCurlPos = ret.begin
+        }
+        return ret
     }
 
     // C++: Parse/ParseAtom.cpp:1492-1518 ParserImpl::ParseFuncParamListInLambdaExpr.
@@ -2152,56 +2207,6 @@ extend ParserImpl {
             }, targetTokenConsumed: false)
         }
         return ret
-    }
-
-    public func ParseLambdaExpr(isTailClosure: Bool): LambdaExpr {
-        let lambda = LambdaExpr()
-        lambda.begin = Peek().Begin()
-        try (cs = ChainScope(this, lambda)) {
-            let body = AstFuncBody()
-            try (bodyScope = ChainScope(this, body)) {
-                if (Skip(TokenKind.LCURL)) {
-                    let paramList = ParseFuncParamListInLambdaExpr()
-                    if (!paramList.params.isEmpty() && !SkipDoubleArrow()) {
-                        if (!lambda.TestAttr(Attribute.HAS_BROKEN)) {
-                            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_lambda, Peek(),
-                                ConvertToken(Peek())).Emit()
-                        }
-                        ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.DOUBLE_ARROW, TokenKind.RCURL],
-                            targetTokenConsumed: false)
-                        if (!Skip(TokenKind.DOUBLE_ARROW)) {
-                            let _ = SkipCombinedDoubleArrow()
-                        }
-                        lambda.EnableAttr(Attribute.HAS_BROKEN)
-                    } else {
-                        if (paramList.params.isEmpty() && !isTailClosure) {
-                            let hasDoubleArrow = lastToken.kind == TokenKind.DOUBLE_ARROW ||
-                                Skip(TokenKind.DOUBLE_ARROW) || SkipCombinedDoubleArrow()
-                            let hasWildcard = Seeing([TokenKind.WILDCARD, TokenKind.DOUBLE_ARROW]) ||
-                                Seeing([TokenKind.WILDCARD, TokenKind.COMMA]) ||
-                                SeeingTokenAndCombinator(TokenKind.WILDCARD, [TokenKind.ASSIGN, TokenKind.GT])
-                            if (!hasDoubleArrow && !hasWildcard) {
-                                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_double_arrow_in_lambda, Peek(),
-                                    ConvertToken(Peek())).Emit()
-                            }
-                        }
-                        if (lastToken.kind == TokenKind.DOUBLE_ARROW || Skip(TokenKind.DOUBLE_ARROW) ||
-                            SkipCombinedDoubleArrow()) {
-                            body.doubleArrowPos = lastToken.Begin()
-                        }
-                    }
-                    body.begin = lastToken.Begin()
-                    body.paramLists.add(paramList)
-                    let block = ParseExpressionOrDeclarations(ScopeKind.FUNC_BODY)
-                    block.leftCurlPos = lambda.begin
-                    body.body = Some(block)
-                    body.end = block.end
-                    lambda.funcBody = Some(body)
-                    lambda.end = block.end
-                }
-            }
-        }
-        return lambda
     }
 
     public func CheckCondition(expr: Expr): Bool {

@@ -44,7 +44,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.LPAREN)) { return ParseLeftParenExpr() }
         if (Seeing(TokenKind.LSQUARE)) { return ParseArrayLitExpr() }
-        if (Seeing(TokenKind.LCURL)) { return ParseLambdaExpr() }
+        if (Skip(TokenKind.LCURL)) { return ParseLambdaExpr() }
         if (Seeing(TokenKind.IF)) { return ParseIfExpr() }
         if (Seeing(TokenKind.MATCH)) { return ParseMatchExpr() }
         if (Seeing(TokenKind.TRY)) { return ParseTryExpr() }

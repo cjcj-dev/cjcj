@@ -701,6 +701,19 @@ extend ParserImpl {
         return false
     }
 
+    // C++: Parse/ParserUtils.cpp:767-779 ParserImpl::SeeingAnnotationTrailingClosure.
+    public func SeeingAnnotationTrailingClosure(tokenKinds: Array<TokenKind>): Bool {
+        if (!SeeingAny([TokenKind.AT, TokenKind.AT_EXCL])) {
+            return false
+        }
+        let tokens = lexer.LookAheadSkipNL(tokenKinds.size + 1)
+        let contextual = GetContextualKeyword()
+        if (tokens[0].kind == TokenKind.IDENTIFIER || contextual.contains(tokens[0].kind)) {
+            return tokens[tokens.size - 1].kind == TokenKind.LSQUARE
+        }
+        return false
+    }
+
     public func SeeingPrimitiveTypeToken(kind: TokenKind): Bool {
         let idx = TokenKindIndex(kind)
         return idx >= TokenKindIndex(TokenKind.INT8) && idx <= TokenKindIndex(TokenKind.UNIT)
