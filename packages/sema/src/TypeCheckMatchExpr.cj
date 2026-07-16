@@ -148,7 +148,7 @@ public func ChkPatternsSameASTKind(ctx: ASTContext, patterns: ArrayList<Pattern>
                     diagValue, BasicDiagKindRefactor.sema_different_or_pattern, patterns[0])
                 builder.AddMainHintArguments([PatternKindForDiag(ctx, patterns[0])])
                 AddHint(builder, patterns[idx], arguments: [PatternKindForDiag(ctx, patterns[idx])])
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                builder.Emit()
             }
             return false
         }
