@@ -85,7 +85,7 @@ public class ASTWriter {
     private let allFiles: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allFileImports: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allFileInfo: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
-    private let savedTypeMap: HashMap<Ty, UInt32> = HashMap<Ty, UInt32>()
+    private let savedTypeMap: HashMap<Ptr<Ty>, UInt32> = HashMap<Ptr<Ty>, UInt32>()
     private let allTypes: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let declKeyToIndex: HashMap<Node, UInt32> = HashMap<Node, UInt32>()
     private let completedDeclKeys: HashSet<Node> = HashSet<Node>()
@@ -2322,20 +2322,21 @@ public class ASTWriter {
         if (Ty.IsInitialTy(Some(ty))) {
             return 0u32
         }
-        if (let Some(existing) <- savedTypeMap.get(ty)) {
+        let tyKey = Ptr<Ty>(ty)
+        if (let Some(existing) <- savedTypeMap.get(tyKey)) {
             return existing
         }
         let specificImplementationTy = TryGetSpecificImplementationTy(ty)
         if (let Some(specificTy) <- specificImplementationTy) {
-            if (let Some(existingSpecific) <- savedTypeMap.get(specificTy)) {
-                savedTypeMap[ty] = existingSpecific
+            if (let Some(existingSpecific) <- savedTypeMap.get(Ptr<Ty>(specificTy))) {
+                savedTypeMap[tyKey] = existingSpecific
                 return existingSpecific
             }
         }
         let index = UInt32(allTypes.size + 1)
-        savedTypeMap[ty] = index
+        savedTypeMap[tyKey] = index
         if (let Some(specificTy2) <- specificImplementationTy) {
-            savedTypeMap[specificTy2] = index
+            savedTypeMap[Ptr<Ty>(specificTy2)] = index
         }
         allTypes.add(0u32)
         allTypes[Int64(index) - 1] = SaveTypeTable(ty)
