@@ -1236,8 +1236,16 @@ public class Translator {
             varInfoByName[varInfo.name] = varInfo
         }
         let initOrder = AstGetVarsInitializationOrderWithPositions(parent)
+        if (parent.identifier.Val() == "C2" || parent.identifier.Val() == "C3") {
+            eprintln("CJMPDBG TranslateVariablesInit parent=" + parent.identifier.Val() + " members=" +
+                parent.GetMemberDeclPtrs().size.toString() + " initOrder=" + initOrder.size.toString())
+        }
         for (item in initOrder) {
             let member = item.decl.getOrThrow()
+            if (parent.identifier.Val() == "C2" || parent.identifier.Val() == "C3") {
+                eprintln("CJMPDBG init member=" + member.identifier.Val() + " hasInit=" +
+                    member.initializer.isSome().toString())
+            }
             CJC_ASSERT(!member.isMemberParam || member.initializer.isNone())
             let varInfo = varInfoByName.get(member.identifier.Val()).getOrThrow()
             if (ShouldTranslateMember(parent, member)) {
