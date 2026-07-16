@@ -2097,7 +2097,9 @@ extend TypeChecker {
             } else {
                 0u64
             }
-            let genArity = if (let Some(generic) <- funcDecl.generic) {
+            // C++ src/Sema/PreCheck.cpp:1926-1936 MemDecl2Sig uses GetGeneric so enum constructors
+            // inherit their parent enum's generic parameter list.
+            let genArity = if (let Some(generic) <- funcDecl.GetGeneric()) {
                 UInt64(generic.typeParameters.size)
             } else {
                 0u64
@@ -6415,7 +6417,10 @@ extend TypeChecker {
         for (candidate in ctx.Mem2Decls(signature)) {
             candidates.add(candidate)
         }
-        TryEnforceCandidate(typeVar, candidates, impl.typeManager)
+        // C++ src/Sema/TypeCheckExpr/NameReferenceExpr.cpp:519-536 TryInitializeBaseSum.
+        let memSigs = ArrayList<MemSig>()
+        memSigs.add(signature)
+        TryEnforceCandidate(typeVar, candidates, impl.typeManager, memSigs: memSigs)
     }
 
     private func LookupShadowedTopLevelTypeByName(ctx: ASTContext, name: String, scopeName: String,
