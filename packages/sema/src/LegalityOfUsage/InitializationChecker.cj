@@ -6,6 +6,7 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::sema.*
 import cjcj::sema.DiagCJMPCannotAssignToImmutableCommonInCtor
+import cjcj::utils.JAVA_REF_FIELD_NAME
 
 public enum InitializationIssueKind {
     | USED_BEFORE_INITIALIZATION
@@ -2181,6 +2182,20 @@ public class InitializationChecker {
                     decl.EnableAttr(Attribute.INITIALIZED)
                 }
                 return
+            }
+            if ((let Some(parentClassLike) <- body.parentClassLike) &&
+                (let Some(classDecl) <- (parentClassLike as ClassDecl)) &&
+                (let Some(superClass) <- classDecl.GetSuperClassDecl()) &&
+                superClass.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+                for (decl in uninitNonFuncDecls) {
+                    if (decl.astKind != ASTKind.VAR_DECL || !decl.TestAttr(Attribute.COMPILER_ADD)) {
+                        continue
+                    }
+                    if (decl.identifier.Val() != JAVA_REF_FIELD_NAME) {
+                        continue
+                    }
+                    decl.EnableAttr(Attribute.INITIALIZED)
+                }
             }
             let bodyScopeGate = CurrentScopeGate(body.scopeName)
             if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, bodyScopeGate)) {
