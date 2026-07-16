@@ -8579,7 +8579,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     private func IsTestPackage(pkgName: String): Bool {
-        return pkgName.size >= 5 && pkgName[pkgName.size - 5..pkgName.size] == "$test"
+        return pkgName.endsWith("$test")
     }
 
     private func GetMainPartPkgNameForTestPkg(testPkgName: String): String {
