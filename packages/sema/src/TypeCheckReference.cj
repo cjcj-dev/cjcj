@@ -694,7 +694,8 @@ public func TypeCheckReferenceFilterInvalidEnumTargets(
 public func TypeCheckReferenceFilterTargetsForFuncReference(
     diag: BasicDiagnosticEngine,
     expr: Expr,
-    targets: ArrayList<Option<Decl>>
+    targets: ArrayList<Option<Decl>>,
+    importManager: SemaImportManager
 ): Bool {
     let typeArgs = expr.GetTypeArgs()
     if (typeArgs.isEmpty() && !targets.isEmpty()) {
@@ -724,9 +725,11 @@ public func TypeCheckReferenceFilterTargetsForFuncReference(
         }
     }
     if (targets.size > 1 && TypeCheckReferenceAllFuncDecl(targets)) {
-        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ambiguous_use, expr,
-            arguments: [targets[0].getOrThrow().identifier.Val()])
-        builder.Emit()
+        let candidateDecls = ArrayList<Decl>()
+        for (target in targets) {
+            candidateDecls.add(target.getOrThrow())
+        }
+        DiagAmbiguousUse(diag, expr, candidateDecls[0].identifier.Val(), candidateDecls, importManager)
         targets.clear()
         return false
     }
@@ -848,7 +851,7 @@ public func FilterAndCheckTargetsOfRef(
     }
     let hasTargetTy = ctx.HasTargetTy(re) || re.isInFlowExpr
     if (!hasTargetTy && re.isAlone) {
-        return TypeCheckReferenceFilterTargetsForFuncReference(diag, re, targets)
+        return TypeCheckReferenceFilterTargetsForFuncReference(diag, re, targets, importManager)
     }
     let hasTarget = hasTargetTy || hasCallOrPattern
     if (targets.isEmpty()) {
@@ -935,7 +938,8 @@ public func FilterAndCheckTargetsOfNameAccess(
         }
         nullableTargets.clear()
         for (candidate in targets) { nullableTargets.add(Some(candidate)) }
-        let valid = TypeCheckReferenceFilterTargetsForFuncReference(diag, ma, nullableTargets)
+        let valid = TypeCheckReferenceFilterTargetsForFuncReference(
+            diag, ma, nullableTargets, importManager.getOrThrow())
         targets.clear()
         for (candidate in nullableTargets) { targets.add(candidate.getOrThrow()) }
         return valid
@@ -991,7 +995,8 @@ public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
         if (!accessibleDecls.isEmpty()) {
             let nullableAccessibleDecls = ArrayList<Option<Decl>>()
             for (candidate in accessibleDecls) { nullableAccessibleDecls.add(Some(candidate)) }
-            if (!TypeCheckReferenceFilterTargetsForFuncReference(diag, ma, nullableAccessibleDecls)) {
+            if (!TypeCheckReferenceFilterTargetsForFuncReference(
+                diag, ma, nullableAccessibleDecls, importManager.getOrThrow())) {
                 return None
             }
             accessibleDecls.clear()
