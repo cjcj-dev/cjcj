@@ -2067,9 +2067,9 @@ public class StructInheritanceChecker {
                 }
                 let typeText = DeclKindText(interfaceMember)
                 if (childDecl.TestAttr(Attribute.ABSTRACT) && !interfaceMember.TestAttr(Attribute.ABSTRACT)) {
-                    diag.Diagnose(
-                        childDecl.begin,
-                        childDecl.end,
+                    Diagnose(
+                        diag,
+                        childDecl,
                         DiagKind.sema_invalid_override_or_redefine_member_in_interface,
                         args: [DiagArgument(typeText), DiagArgument(childDecl.identifier.Val()), DiagArgument(typeText)]
                     ).Emit()
