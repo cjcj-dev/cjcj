@@ -149,26 +149,6 @@ public func IsZeroSizedTy(ty: Ty): Bool {
     return IsZeroSizedTyImpl(ty, ArrayList<Ty>())
 }
 
-public func IsInCFunc(ctx: ASTContext, refExpr: RefExpr): Bool {
-    var symbolOpt = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, refExpr.scopeName)
-    while (let Some(symbol) <- symbolOpt) {
-        if (symbol.scopeName.isEmpty()) {
-            return false
-        }
-        if (let Some(node) <- symbol.node) {
-            if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
-                if (let Some(lambdaTy) <- lambdaExpr.GetTy()) {
-                    if (Ty.IsTyCorrect(lambdaTy) && lambdaTy.IsCFunc()) {
-                        return true
-                    }
-                }
-            }
-        }
-        symbolOpt = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, symbol.scopeName)
-    }
-    return false
-}
-
 public func CheckAnnoC(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
     if (!annotation.args.isEmpty()) {
         EmitLegacy(
@@ -453,38 +433,6 @@ public func CheckCFuncSignature(body: FuncBody, diag: BasicDiagnosticEngine): Un
                 }
             }
         }
-    }
-}
-
-public func CheckInvalidRefInCFunc(ctx: ASTContext, refExpr: RefExpr, target: Decl, diag: BasicDiagnosticEngine): Unit {
-    if (!IsInCFunc(ctx, refExpr) || target.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.ENUM_CONSTRUCTOR)) {
-        return
-    }
-    if (IsNonStaticMember(target)) {
-        EmitLegacy(
-            diag,
-            BasicDiagKind.sema_cfunc_cannot_capture_this,
-            refExpr,
-            args: [BasicDiagArgument("this")])
-    }
-}
-
-public func CheckInvalidRefInCFunc(ctx: ASTContext, refExpr: RefExpr, diag: BasicDiagnosticEngine): Unit {
-    if (!IsInCFunc(ctx, refExpr)) {
-        return
-    }
-    if (refExpr.isThis) {
-        EmitLegacy(
-            diag,
-            BasicDiagKind.sema_cfunc_cannot_capture_this,
-            refExpr,
-            args: [BasicDiagArgument("this")])
-    } else if (refExpr.isSuper) {
-        EmitLegacy(
-            diag,
-            BasicDiagKind.sema_cfunc_cannot_capture_this,
-            refExpr,
-            args: [BasicDiagArgument("super")])
     }
 }
 
