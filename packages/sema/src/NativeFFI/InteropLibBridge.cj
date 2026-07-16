@@ -29,8 +29,7 @@ private let INTEROPLIB_CFFI_JAVA_ARRAY_GET_LENGTH: String = "Java_CFFI_arrayGetL
 private let INTEROPLIB_CFFI_JAVA_ENTITY_JOBJECT_ID: String = "Java_CFFI_JavaEntityJobject"
 private let INTEROPLIB_CFFI_JAVA_ENTITY_NULL_ID: String = "Java_CFFI_JavaEntityJobjectNull"
 private let INTEROPLIB_JNI_PUT_TO_REGISTRY_DECL_ID: String = "Java_CFFI_put_to_registry_1"
-private let INTEROPLIB_JNI_PUT_TO_REGISTRY_SELF_INIT_DECL_ID: String = "Java_CFFI_putToRegistry"
-private let INTEROPLIB_JNI_DELETE_CJ_OBJECT_DECL_ID: String = "Java_CFFI_deleteCJObject"
+private let INTEROPLIB_JNI_PUT_SET_TO_REGISTRY_DECL_ID: String = "Java_CFFI_putToRegistry"
 private let INTEROPLIB_JNI_REMOVE_FROM_REGISTRY_DECL_ID: String = "Java_CFFI_removeFromRegistry"
 private let INTEROPLIB_CFFI_CALL_METHOD_DECL_ID: String = "Java_CFFI_callVirtualMethod"
 private let INTEROPLIB_CFFI_NON_VIRT_CALL_METHOD_DECL_ID: String = "Java_CFFI_callMethod"
@@ -67,7 +66,7 @@ private let GET_JAVALAMBDA_OBJECT_DECL_ID: String = "getJavaLambdaObject"
 private let GET_JAVALAMBDA_ENTITY_DECL_ID: String = "getJavaLambdaEntity"
 
 public class InteropLibBridge {
-    private static let INTEROPLIB_VERSION: Int64 = 9
+    private static let INTEROPLIB_VERSION: Int64 = 10
     private static let INTEROPLIB_PACKAGE_NAME: String = "java.internal"
 
     private let importManager: ImportManager
@@ -185,10 +184,6 @@ public class InteropLibBridge {
         return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_CALL_STATIC_METHOD_DECL_ID)
     }
 
-    public func GetDeleteCJObjectDecl(): Option<FuncDecl> {
-        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_JNI_DELETE_CJ_OBJECT_DECL_ID)
-    }
-
     public func GetRemoveFromRegistryDecl(): Option<FuncDecl> {
         return GetInteropLibDecl<FuncDecl>(INTEROPLIB_JNI_REMOVE_FROM_REGISTRY_DECL_ID)
     }
@@ -197,8 +192,8 @@ public class InteropLibBridge {
         return GetInteropLibDecl<FuncDecl>(INTEROPLIB_JNI_PUT_TO_REGISTRY_DECL_ID)
     }
 
-    public func GetPutToRegistrySelfInitDecl(): Option<FuncDecl> {
-        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_JNI_PUT_TO_REGISTRY_SELF_INIT_DECL_ID)
+    public func GetPutSetToRegistryDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_JNI_PUT_SET_TO_REGISTRY_DECL_ID)
     }
 
     public func GetUnwrapJavaEntityDecl(): Option<FuncDecl> {
@@ -351,7 +346,7 @@ public class InteropLibBridge {
         return None
     }
 
-    public func GetJobjectTy(): Ty {
+    public func GetJniJobjectTy(): Ty {
         return typeManager.GetPointerTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
     }
 
@@ -380,7 +375,7 @@ public class InteropLibBridge {
     public func CreateJobjectNull(): PointerExpr {
         let pointerExpr = PointerExpr()
         let typeNode = Type()
-        typeNode.SetTy(GetJobjectTy())
+        typeNode.SetTy(GetJniJobjectTy())
         pointerExpr.typeNode = Some(typeNode)
         pointerExpr.SetTy(typeNode.GetTy().getOrThrow())
         return pointerExpr
@@ -392,7 +387,7 @@ public class InteropLibBridge {
     }
 
     public func CreateJClassOrJObjectFuncParam(name!: String = "_"): FuncParam {
-        return CreateFuncParam(name, CreateJobjectType(), None, Some(GetJobjectTy()))
+        return CreateFuncParam(name, CreateJobjectType(), None, Some(GetJniJobjectTy()))
     }
 
     public func CreateSelfFuncParam(): FuncParam {
