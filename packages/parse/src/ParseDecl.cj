@@ -1788,7 +1788,10 @@ extend ParserImpl {
                     paramList.params.add(param)
                     index.value++
                 })
-            paramList.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after enum constructor").Begin()
+            if (!Skip(TokenKind.RPAREN)) {
+                DiagExpectedRightDelimiter("(", paramList.leftParenPos)
+            }
+            paramList.rightParenPos = lastToken.Begin()
             paramList.end = paramList.rightParenPos + 1
             let body = FuncBody()
             body.begin = paramList.begin

@@ -1573,46 +1573,48 @@ extend ParserImpl {
     public func ParseTryWithResource(ret: TryExpr, scopeKind: ScopeKind): Unit {
         ret.lParen = Expect(TokenKind.LPAREN, "expected '(' after try").Begin()
         let resourceNames = ArrayList<(String, Position)>()
-        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
+        do {
+            if (lastToken.kind == TokenKind.COMMA) {
+                ret.resourceSpecCommaPos.add(lastToken.Begin())
+            }
             let decl = AstVarDecl()
             try (cs = ChainScope(this, decl)) {
                 decl.isVar = false
                 decl.isResourceVar = true
                 decl.identifier = ExpectIdentifierWithPos(decl)
-                decl.begin = decl.identifier.Begin()
+                decl.begin = lookahead.Begin()
+                var duplicate: Option<(String, Position)> = None
                 for (nameAndPos in resourceNames) {
                     if (nameAndPos[0] == decl.identifier.Val()) {
-                        DiagRedefinedResourceName((decl.identifier.Val(), decl.identifier.Begin()), nameAndPos)
+                        duplicate = Some(nameAndPos)
+                        break
                     }
                 }
-                resourceNames.add((decl.identifier.Val(), decl.identifier.Begin()))
+                if (let Some(previous) <- duplicate) {
+                    DiagRedefinedResourceName((decl.identifier.Val(), decl.identifier.Begin()), previous)
+                } else {
+                    resourceNames.add((decl.identifier.Val(), decl.identifier.Begin()))
+                }
                 if (Skip(TokenKind.COLON)) {
                     decl.colonPos = lastToken.Begin()
-                    decl.typeNode = ParseType()
+                    decl.typeNode = ParseRefType(false)
                 }
-                if (Skip(TokenKind.ASSIGN)) {
-                    decl.assignPos = lastToken.Begin()
-                    decl.initializer = ParseExpr(ExprKind.VAR_INIT)
-                } else {
+                if (!Skip(TokenKind.ASSIGN)) {
                     ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_assignment, Peek(),
                         ConvertToken(Peek())).Emit()
-                }
-                decl.end = if (let Some(expr) <- decl.initializer) {
-                    expr.end
-                } else if (let Some(ty) <- decl.typeNode) {
-                    ty.end
                 } else {
-                    decl.identifier.End()
+                    decl.assignPos = lastToken.Begin()
                 }
+                decl.initializer = ParseExpr(ExprKind.VAR_INIT)
+                decl.end = lastToken.End()
                 ret.resourceSpec.add(decl)
             }
-            if (Skip(TokenKind.COMMA)) {
-                ret.resourceSpecCommaPos.add(lastToken.Begin())
-            } else {
-                break
-            }
+        } while (Skip(TokenKind.COMMA))
+        if (!Skip(TokenKind.RPAREN)) {
+            DiagExpectedRightDelimiter("(", ret.lParen)
+        } else {
+            ret.rParen = lastToken.Begin()
         }
-        ret.rParen = Expect(TokenKind.RPAREN, "expected ')' after try resources").Begin()
         ret.isDesugaredFromTryWithResources = true
         ret.tryBlock = ParseBlock(scopeKind)
     }
@@ -1854,7 +1856,15 @@ extend ParserImpl {
             ret.wherePos = lastToken.Begin()
             ret.patternGuard = ParseExpr()
         }
-        ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after for-in").Begin()
+        if (!Skip(TokenKind.RPAREN)) {
+            DiagExpectedRightDelimiter("(", ret.leftParenPos)
+            ConsumeUntilIfExprEnd()
+            ret.EnableAttr(Attribute.IS_BROKEN)
+            ret.end = lastToken.End()
+            return ret
+        }
+        ret.rightParenPos = lastToken.Begin()
+        SkipBlank(TokenKind.NL)
         ret.body = ParseBlock(ScopeKind.FUNC_BODY)
         if (let Some(body) <- ret.body) { ret.end = body.end }
         return ret
@@ -1948,7 +1958,11 @@ extend ParserImpl {
                 ret.leftParenPos = lastToken.Begin()
                 ret.arg = ParseExpr()
             }
-            ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after spawn argument").Begin()
+            if (!Skip(TokenKind.RPAREN) && !ret.TestAttr(Attribute.HAS_BROKEN)) {
+                ret.EnableAttr(Attribute.HAS_BROKEN)
+                DiagExpectedRightDelimiter("(", ret.leftParenPos)
+            }
+            ret.rightParenPos = lastToken.Begin()
         }
         if (SeeingAnnotationLambdaExpr()) {
             ret.task = ParseAnnotationLambdaExpr(true)
@@ -1984,7 +1998,11 @@ extend ParserImpl {
         ret.begin = token.Begin()
         ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after synchronized").Begin()
         ret.mutex = ParseExpr()
-        ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after synchronized expression").Begin()
+        if (!Skip(TokenKind.RPAREN) && !ret.TestAttr(Attribute.HAS_BROKEN)) {
+            DiagExpectedRightDelimiter("(", ret.leftParenPos)
+            ret.EnableAttr(Attribute.HAS_BROKEN)
+        }
+        ret.rightParenPos = lastToken.Begin()
         ret.body = ParseBlock(ScopeKind.FUNC_BODY)
         if (let Some(body) <- ret.body) { ret.end = body.end }
         return ret

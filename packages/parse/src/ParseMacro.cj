@@ -5,6 +5,7 @@ import cjcj::ast.AddMacroAttr
 import cjcj::ast.ExprKind as AstExprKind
 import cjcj::ast.Identifier as AstIdentifier
 import cjcj::ast.ScopeKind as AstScopeKind
+import cjcj::ast.SortModifierByPos
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
@@ -154,6 +155,11 @@ extend ParserImpl {
         }
         ApplyModifiersAndAnnotations(decl, modifiers, annos)
         decl.begin = if (decl.begin.IsZero()) { Peek().Begin() } else { decl.begin }
+        if (!modifiers.isEmpty()) {
+            let firstModifier = SortModifierByPos(modifiers)[0]
+            DiagExpectNoModifierBefore(firstModifier, "macro call")
+            decl.begin = firstModifier.begin
+        }
         ParseMacroInvocation(scopeKind, modifiers, decl.invocation, decl)
         if (!decl.invocation.hasParenthesis && decl.invocation.decl.isNone() &&
             (SeeingDeclInScope(scopeKind) || SeeingMacroCallDecl())) {
