@@ -262,7 +262,7 @@ public class CHIRContext {
         return None
     }
 
-    public func SetObjectTy(ty: ClassType): Unit {
+    public func SetObjectTy(ty: Option<ClassType>): Unit {
         objectTy = ty
     }
 
@@ -270,7 +270,7 @@ public class CHIRContext {
         return objectTy
     }
 
-    public func SetAnyTy(ty: ClassType): Unit {
+    public func SetAnyTy(ty: Option<ClassType>): Unit {
         anyTy = ty
     }
 
