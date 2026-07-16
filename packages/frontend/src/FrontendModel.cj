@@ -5863,7 +5863,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     // as consumed by --scan-dependency. exportCJO=true (the .cjo-write default) records import file
     // names rather than absolute paths and derives std-dependencies from the package's collected
     // dependent std packages.
-    public func GeneratePkgDepInfo(pkg: Package, exportCJO!: Bool = true): String {
+    func GeneratePkgDepInfo(pkg: Package, exportCJO!: Bool = true): String {
         let dependencies = HashMap<String, FrontendDepInfoItem>()
         let features = HashSet<String>()
         var isProduct = true
