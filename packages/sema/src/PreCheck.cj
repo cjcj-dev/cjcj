@@ -776,10 +776,11 @@ private func preCheckAddObjectSuperClass(ctx: ASTContext, pkg: Package, classDec
     }
 }
 
-private func addSuperClassObjectForClassDecl(
+private func AddSuperClassObjectForClassDecl(
     ctx: ASTContext,
     pkg: Package,
-    diag: BasicDiagnosticEngine
+    diag: BasicDiagnosticEngine,
+    importManager: Option<SemaImportManager>
 ): Unit {
     let syms = ctx.searcher.Search(ctx, ASTKindQuery(ASTKind.CLASS_DECL), order: SearchOrder.POS_ASC)
     for (sym in syms) {
@@ -788,7 +789,13 @@ private func addSuperClassObjectForClassDecl(
         if (TypeCheckClassLikeHasSuperClass(diag, classDecl)) {
             continue
         }
-        preCheckAddObjectSuperClass(ctx, pkg, classDecl)
+        if (classDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
+            if (!AddJObjectSuperClassJavaInterop(importManager.getOrThrow(), diag, ctx, classDecl)) {
+                preCheckAddObjectSuperClass(ctx, pkg, classDecl)
+            }
+        } else {
+            preCheckAddObjectSuperClass(ctx, pkg, classDecl)
+        }
     }
 }
 
@@ -813,7 +820,7 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
     }
     collectLetPatternDecls(ctx, pkg)
     PreSetDeclType(typeManager, ctx, importManager: importManager, diag: diag, backendType: backendType)
-    addSuperClassObjectForClassDecl(ctx, pkg, diag.getOrThrow())
+    AddSuperClassObjectForClassDecl(ctx, pkg, diag.getOrThrow(), importManager)
     CollectAndCheckAssumption(typeManager, ctx, pkg, diag.getOrThrow())
     return valid
 }

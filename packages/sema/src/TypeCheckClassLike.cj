@@ -8,7 +8,7 @@ import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Range as BasicRange
-import cjcj::modules.ImportManager
+import cjcj::modules.SemaImportManager
 import cjcj::utils.{CJC_ASSERT, INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME, OBJ_C_ID_IDENT,
     OBJ_C_LANG_PACKAGE_IDENT}
 
@@ -283,7 +283,7 @@ public func TypeCheckClassLikeHasSuperClass(diag: BasicDiagnosticEngine, classDe
 }
 
 public func AddJObjectSuperClassJavaInterop(
-    importManager: ImportManager,
+    importManager: SemaImportManager,
     diag: BasicDiagnosticEngine,
     ctx: ASTContext,
     classDecl: ClassDecl
@@ -291,7 +291,8 @@ public func AddJObjectSuperClassJavaInterop(
     if (ctx.fullPackageName == INTEROP_JAVA_LANG_PACKAGE && classDecl.identifier.Val() == INTEROP_JOBJECT_NAME) {
         return false
     }
-    if (let Some(objectDecl) <- importManager.GetImportedDecl(INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME)) {
+    if (let Some(objectDecl) <- importManager.GetImportedDecl<Decl>(
+        INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME)) {
         CJC_ASSERT(objectDecl.astKind == ASTKind.CLASS_DECL)
         let classObject = (objectDecl as ClassDecl).getOrThrow()
         let typeNode = CreateRefType(classObject)
@@ -307,7 +308,7 @@ public func AddJObjectSuperClassJavaInterop(
 }
 
 public func AddObjCIdSuperInterfaceObjCInterop(
-    importManager: ImportManager,
+    importManager: SemaImportManager,
     diag: BasicDiagnosticEngine,
     ctx: ASTContext,
     classLikeDecl: ClassLikeDecl
