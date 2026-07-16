@@ -6,7 +6,7 @@ import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Range as BasicRange
-import cjcj::utils.CJC_ASSERT
+import cjcj::utils.{CJC_ASSERT, ProfileRecorder}
 
 private func TypeCheckExtendRange(node: Node): BasicRange {
     var rangeEnd = node.end
@@ -1102,15 +1102,88 @@ public func TypeCheckExtendCheckDecl(
             if (!TypeCheckExtendCheckDupDefImplByDiffTypArgs(diag, extends, extendDecl)) {
                 valid = false
             }
-            if (!TypeCheckExtendCheckSpecializationExtend(diag, tm, inheritableDecl, extendDecl, extends)) {
-                valid = false
-            }
         }
     }
     return valid
 }
 
 extend TypeCheckerImpl {
+    // C++ src/Sema/TypeCheckExtend.cpp:275-312 TypeCheckerImpl::PreCheckAllExtendInterface.
+    func PreCheckAllExtendInterface(): Unit {
+        try (recorder = ProfileRecorder("PreCheck", "PreCheckAllExtendInterface")) {
+            let builtinKeys = StableTys()
+            for (entry in typeManager.builtinTyToExtendMap) {
+                let _ = builtinKeys.Add(entry.ty)
+            }
+            for (builtinTy in builtinKeys.values) {
+                let extends = ArrayList<ExtendDecl>()
+                for (entry in typeManager.builtinTyToExtendMap) {
+                    if (entry.ty == builtinTy) {
+                        for (extendDecl in entry.extends) {
+                            extends.add(extendDecl)
+                        }
+                        break
+                    }
+                }
+                sort(extends, by: { left: ExtendDecl, right: ExtendDecl =>
+                    if (CompNodeByPos(left, right)) {
+                        Ordering.LT
+                    } else if (CompNodeByPos(right, left)) {
+                        Ordering.GT
+                    } else {
+                        Ordering.EQ
+                    }
+                }, stable: true)
+                CheckExtendInterfaces(builtinTy, extends)
+                if (builtinTy.IsPointer()) {
+                    var extendDeclInCore: Option<ExtendDecl> = None
+                    for (extendDecl in extends) {
+                        if (extendDecl.fullPackageName == "std.core") {
+                            extendDeclInCore = Some(extendDecl)
+                            break
+                        }
+                    }
+                    for (extendDecl in extends) {
+                        if ((let None <- extendDeclInCore) || extendDecl == extendDeclInCore.getOrThrow()) {
+                            continue
+                        }
+                        CheckSpecializationExtend(extendDeclInCore.getOrThrow(), extendDecl, extends)
+                    }
+                }
+            }
+            let extendedDecls = typeManager.GetAllExtendedDecls()
+            sort(extendedDecls, by: { left: InheritableDecl, right: InheritableDecl =>
+                if (CompNodeByPos(left, right)) {
+                    Ordering.LT
+                } else if (CompNodeByPos(right, left)) {
+                    Ordering.GT
+                } else {
+                    Ordering.EQ
+                }
+            }, stable: true)
+            for (extendedDecl in extendedDecls) {
+                CJC_ASSERT(extendedDecl.GetTy().isSome())
+                let extends = ArrayList<ExtendDecl>()
+                for (extendDecl in typeManager.GetDeclExtends(extendedDecl)) {
+                    extends.add(extendDecl)
+                }
+                sort(extends, by: { left: ExtendDecl, right: ExtendDecl =>
+                    if (CompNodeByPos(left, right)) {
+                        Ordering.LT
+                    } else if (CompNodeByPos(right, left)) {
+                        Ordering.GT
+                    } else {
+                        Ordering.EQ
+                    }
+                }, stable: true)
+                CheckExtendInterfaces(extendedDecl.GetTy().getOrThrow(), extends)
+                for (extendDecl in extends) {
+                    CheckSpecializationExtend(extendedDecl, extendDecl, extends)
+                }
+            }
+        }
+    }
+
     // C++ src/Sema/TypeCheckExtend.cpp:129-187 TypeCheckerImpl::CheckExtendInterfaces.
     func CheckExtendInterfaces(ty: Ty, extendDecls: ArrayList<ExtendDecl>): Unit {
         let inheritInterfaces = HashSet<Ty>()

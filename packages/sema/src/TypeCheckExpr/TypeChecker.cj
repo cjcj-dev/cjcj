@@ -1023,6 +1023,7 @@ extend TypeChecker {
         for (ctx in contexts) {
             BuildCurrentPackageExtendMap(ctx)
         }
+        impl.PreCheckAllExtendInterface()
         for (ctx in contexts) {
             impl.CheckExtendRules(ctx)
         }
@@ -2197,8 +2198,6 @@ extend TypeChecker {
             for (extendDecl in extends) {
                 let _ = CheckDeclAttributesForDecl(extendDecl, diagValue, opts: GlobalOptions())
             }
-            let _ = TypeCheckExtendCheckDuplicateInterfaces(diagValue, impl.typeManager, extends)
-            let _ = TypeCheckExtendCheckBuiltinPointerSpecializations(diagValue, impl.typeManager)
             return
         }
         for (extendDecl in extends) {
