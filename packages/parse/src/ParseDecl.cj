@@ -392,6 +392,8 @@ extend ParserImpl {
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
+            SetDeclBeginPos(decl)
+            SetBeginToAnnotationsBegin(decl, annos)
             return decl
         }
         if (Seeing(TokenKind.MAIN)) {
@@ -636,9 +638,7 @@ extend ParserImpl {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let keywordToken = Expect(TokenKind.MACRO, "expected 'macro'")
             ret.keywordPos = keywordToken.Begin()
-            if (ret.begin.IsZero()) {
-                ret.begin = keywordToken.Begin()
-            }
+            ret.begin = keywordToken.Begin()
             CheckDeclarationInScope(scopeKind, DefKind.MACRO)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.MACRO))
             ret.EnableAttr(Attribute.MACRO_FUNC)
