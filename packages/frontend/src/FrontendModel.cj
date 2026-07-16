@@ -6239,6 +6239,8 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     private let importedDeclsMap: TreeMap<String, ArrayList<Decl>> = TreeMap<String, ArrayList<Decl>>()
     private let fileImportedDeclsMap: HashMap<UInt64, TreeMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, TreeMap<String, ArrayList<Decl>>>()
+    private let declsImportedByNodeMap: HashMap<String, HashMap<Decl, ArrayList<ImportSpec>>> =
+        HashMap<String, HashMap<Decl, ArrayList<ImportSpec>>>()
     private let fileUsedMacroDeclsMap: HashMap<UInt64, TreeMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, TreeMap<String, ArrayList<Decl>>>()
     // Macro packages directly imported by a source package (keyed by full package name to dedupe).
@@ -6548,6 +6550,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         commonPartLoaders.clear()
         importedDeclsMap.clear()
         fileImportedDeclsMap.clear()
+        declsImportedByNodeMap.clear()
         fileUsedMacroDeclsMap.clear()
         directMacroDeps.clear()
         for (pkg in pkgs) {
@@ -6654,6 +6657,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
         importedDeclsMap.clear()
         fileImportedDeclsMap.clear()
+        declsImportedByNodeMap.clear()
         for (pkg in pkgs) {
             AddImportedDeclsForSourcePackage(pkg)
         }
@@ -6696,6 +6700,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         dependencyGraph.getOrThrow().Clear()
         importedDeclsMap.clear()
         fileImportedDeclsMap.clear()
+        declsImportedByNodeMap.clear()
         fileUsedMacroDeclsMap.clear()
     }
     public func SetSourceCodeImportStatus(shouldImport: Bool): Unit {
@@ -6881,6 +6886,13 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return out
     }
 
+    public func GetImportsOfDecl(fullPackageName: String): HashMap<Decl, ArrayList<ImportSpec>> {
+        if (let Some(declImports) <- declsImportedByNodeMap.get(fullPackageName)) {
+            return declImports
+        }
+        return HashMap<Decl, ArrayList<ImportSpec>>()
+    }
+
     public func AddUsedMacroDecls(file: File, decl: Decl): Unit {
         if (!fileUsedMacroDeclsMap.contains(file.indexOfPackage)) {
             fileUsedMacroDeclsMap[file.indexOfPackage] = TreeMap<String, ArrayList<Decl>>()
@@ -7027,6 +7039,10 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
         let relation = GetFrontendPackageRelation(srcFullPackageName, targetPackageName)
         let importLevel = GetAccessLevel(importSpec)
+        if (!declsImportedByNodeMap.contains(srcFullPackageName)) {
+            declsImportedByNodeMap[srcFullPackageName] = HashMap<Decl, ArrayList<ImportSpec>>()
+        }
+        let declImports = declsImportedByNodeMap.get(srcFullPackageName).getOrThrow()
         if (importSpec.IsImportAll()) {
             if (let Some(info) <- GetPackageInfo(targetPackageName)) {
                 for (name in info.declMap.keys()) {
@@ -7034,6 +7050,10 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                     for (decl in decls) {
                         if (IsVisibleImportedDecl(importLevel, relation, decl)) {
                             PutImportedDecl(targetMap, name, decl)
+                            if (!declImports.contains(decl)) {
+                                declImports[decl] = ArrayList<ImportSpec>()
+                            }
+                            declImports.get(decl).getOrThrow().add(importSpec)
                         }
                     }
                 }
@@ -7046,7 +7066,12 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             } else {
                 LastPackageName(targetPackageName)
             }
-            PutImportedDecl(targetMap, importedName, packageDeclOpt.getOrThrow())
+            let packageDecl = packageDeclOpt.getOrThrow()
+            PutImportedDecl(targetMap, importedName, packageDecl)
+            if (!declImports.contains(packageDecl)) {
+                declImports[packageDecl] = ArrayList<ImportSpec>()
+            }
+            declImports.get(packageDecl).getOrThrow().add(importSpec)
         } else {
             let importedName = if (importSpec.IsImportAlias()) {
                 importSpec.content.aliasName.Val()
@@ -7056,6 +7081,10 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             for (decl in GetPackageMembersByName(targetPackageName, importSpec.content.identifier.Val())) {
                 if (IsVisibleImportedDecl(importLevel, relation, decl)) {
                     PutImportedDecl(targetMap, importedName, decl)
+                    if (!declImports.contains(decl)) {
+                        declImports[decl] = ArrayList<ImportSpec>()
+                    }
+                    declImports.get(decl).getOrThrow().add(importSpec)
                 }
             }
             importSpec.content.isDecl = true
