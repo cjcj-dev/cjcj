@@ -118,6 +118,29 @@ public func GenerateTypeMappingForTypeAliasUse(typeManager: TypeManager, tad: Ty
     return mapping
 }
 
+// C++ src/Sema/TypeCheckerImpl.h:1548-1572 GenerateTypeMappingForTypeAliasUse<NameReferenceExpr>.
+public func GenerateTypeMappingForTypeAliasUse(typeManager: TypeManager, tad: TypeAliasDecl,
+    usage: NameReferenceExpr): TypeSubst {
+    if (let None <- tad.typeNode) {
+        return TypeSubst()
+    }
+    let typeArgs = ArrayList<Ty>()
+    for (typeArg in usage.GetTypeArgs()) {
+        typeArgs.add(typeArg.GetTy().getOrThrow())
+    }
+    let target = tad.typeNode.getOrThrow().GetTarget()
+    if ((let None <- target) || target.getOrThrow().astKind != ASTKind.TYPE_ALIAS_DECL) {
+        return GenerateTypeMapping(tad, typeArgs)
+    }
+    let mapping = GenerateTypeMappingForTypeAliasDecl(typeManager, tad)
+    SubstituteTypeForTypeAliasTypeMapping(typeManager, tad, typeArgs, mapping)
+    let directMapping = GenerateTypeMapping(tad, typeArgs)
+    for ((tyVar, ty) in directMapping.entries) {
+        mapping.Put(tyVar.value, ty)
+    }
+    return mapping
+}
+
 // C++ src/Sema/TypeCheckUtil.cpp:894-917 GetLastTypeAliasTarget.
 public func GetLastTypeAliasTarget(decl: TypeAliasDecl): TypeAliasDecl {
     return GetLastTypeAliasTargetVisit(decl, HashSet<Decl>())
