@@ -33,6 +33,20 @@ private type LLVMIsACallInstFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
 private type LLVMGetCalledValueFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
 private type LLVMSetValueName2Func = CFunc<(LLVMValueRef, CString, UIntNative) -> Unit>
 
+// Mirrors EmitPackageIR.cpp:56-67.
+private func DumpIRIfNeeded(cgMod: CGModule, suffix: String, subDirNum: Int64): Int64 {
+    let cgPkgContext = cgMod.GetCGContext().GetCGPkgContext()
+    let options = cgPkgContext.GetGlobalOptions()
+    if (!options.NeedDumpIRToFile()) {
+        return subDirNum
+    }
+    let module = cgMod.GetLLVMModule().getOrThrow()
+    let dumpPath = GenDumpPath(options.output, cgPkgContext.GetCurrentPkgName(),
+        "${subDirNum}_${suffix}", module.GetSourceFileName(), "ll")
+    DumpIR(module, dumpPath)
+    return subDirNum + 1
+}
+
 // Mirrors EmitPackageIR.cpp:437-465. Selfhost emits subpackages sequentially, so the
 // C++ threadNum == 1 branch is the active architecture-equivalent path.
 private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
@@ -65,6 +79,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     while (emitIdx < subPackages.size) {
         let subPackageToEmit = subPackages[emitIdx]
         let cgModToEmit = cgModules[emitIdx]
+        var subDirNum: Int64 = 0
         EmitTIOrTTForCustomDefs(cgModToEmit)
         for (globalVar in subPackageToEmit.chirGVs) {
             EmitGlobalVariableIR(cgModToEmit, globalVar)
@@ -105,6 +120,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         cgModToEmit.EraseUselessInstsAndDeclarations()
         cgModToEmit.GenIncremental()
         SetSymbolLinkageType(cgModToEmit)
+        subDirNum = DumpIRIfNeeded(cgModToEmit, "GenIncremental", subDirNum)
         EmitStaticGenericTIsAndLLVMUsed(cgModToEmit)
         emitIdx++
     }
