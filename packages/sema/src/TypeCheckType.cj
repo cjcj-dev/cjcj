@@ -96,7 +96,7 @@ public func TypeCheckTypeCheckReferenceTypeLegality(
     }
     if (typeNode.astKind == ASTKind.REF_TYPE) {
         if (let Some(refType) <- (typeNode as RefType)) {
-            if (!TypeCheckTypeCheckRefType(diag, tm, refType)) {
+            if (!CheckRefType(diag, tm, refType)) {
                 valid = false
             }
         }
@@ -245,7 +245,8 @@ public func TypeCheckTypeCheckVArrayType(
     return true
 }
 
-public func TypeCheckTypeIsGenericTypeWithTypeArgs(typeNode: Type): Bool {
+// C++ src/Sema/TypeCheckType.cpp:135-149 TypeCheckerImpl::IsGenericTypeWithTypeArgs.
+public func IsGenericTypeWithTypeArgs(typeNode: Type): Bool {
     if (let Some(refType) <- (typeNode as RefType)) {
         if (refType.IsGenericThisType()) {
             return true
@@ -262,7 +263,8 @@ public func TypeCheckTypeIsGenericTypeWithTypeArgs(typeNode: Type): Bool {
     return true
 }
 
-public func TypeCheckTypeCheckTypeParametersForAliasRef(
+// C++ src/Sema/TypeCheckType.cpp:151-163 TypeCheckerImpl::CheckTypeParametersForAliasRef.
+public func CheckTypeParametersForAliasRef(
     diag: BasicDiagnosticEngine,
     refType: RefType,
     aliasDecl: TypeAliasDecl
@@ -302,7 +304,8 @@ private func TypeCheckTypeIsLegalJavaTypeArgument(typeNode: Type): Bool {
     return false
 }
 
-private func TypeCheckTypeCheckRefExprCheckTyArgs(refType: RefType, target: Decl): Bool {
+// C++ src/Sema/TypeCheckType.cpp:271-299 TypeCheckerImpl::CheckRefExprCheckTyArgs.
+private func CheckRefExprCheckTyArgs(refType: RefType, target: Decl): Bool {
     if (refType.typeArguments.isEmpty()) {
         return true
     }
@@ -317,134 +320,139 @@ private func TypeCheckTypeCheckRefExprCheckTyArgs(refType: RefType, target: Decl
     return false
 }
 
-private func TypeCheckTypeGenerateAliasUseMapping(aliasDecl: TypeAliasDecl, typeArgs: ArrayList<Type>): TypeSubst {
-    let typeMapping = TypeSubst()
-    if (let None <- aliasDecl.generic) {
-        return typeMapping
+// C++ src/Sema/TypeCheckerImpl.h:1702-1723 SubstituteTypeArguments<Type>.
+private func SubstituteTypeArguments(tm: TypeManager, typeArguments: ArrayList<Type>, sourceType: Type,
+    typeMapping: TypeSubst): Unit {
+    if (!typeArguments.isEmpty()) {
+        let file = typeArguments[0].curFile.getOrThrow()
+        for (typeArgument in typeArguments) {
+            file.trashBin.add(typeArgument)
+        }
+        typeArguments.clear()
     }
-    let generic = aliasDecl.generic.getOrThrow()
-    if (generic.typeParameters.size != typeArgs.size) {
-        return typeMapping
-    }
-    for (idx in 0..typeArgs.size) {
-        if (let Some(paramTy) <- generic.typeParameters[idx].GetTy()) {
-            if (let Some(genTy) <- (paramTy as GenericsTy)) {
-                if (let Some(argTy) <- typeArgs[idx].GetTy()) {
-                    typeMapping.Put(genTy, argTy)
-                }
+    for (sourceTypeArgument in sourceType.GetTypeArgs()) {
+        let newTypeArg = (ASTCloner.Clone(sourceTypeArgument) as Type).getOrThrow()
+        newTypeArg.SetTy(if (let Some(newTy) <- newTypeArg.GetTy()) {
+            tm.SubstituteTypeAliasInTy(newTy, needSubstituteGeneric: true, typeMapping: typeMapping)
+        } else {
+            TypeManager.GetInvalidTy()
+        })
+        if (let Some(intersectionTy) <- (newTypeArg.GetTy().getOrThrow() as IntersectionTy)) {
+            if (intersectionTy.tys.isEmpty()) {
+                continue
             }
         }
+        newTypeArg.EnableAttr(Attribute.COMPILER_ADD)
+        typeArguments.add(newTypeArg)
     }
-    return typeMapping
 }
 
-private func TypeCheckTypeGetAliasTargetTy(
-    tm: TypeManager,
-    aliasDecl: TypeAliasDecl,
-    typeArgs: ArrayList<Type>
-): Option<Ty> {
+// C++ src/Sema/TypeChecker.cpp:690-703 TypeCheckerImpl::SubstituteTypeArguments.
+private func SubstituteTypeArguments(tm: TypeManager, tad: TypeAliasDecl, typeArguments: ArrayList<Type>,
+    typeMapping: TypeSubst): Unit {
+    if (!typeArguments.isEmpty() && typeArguments[0].TestAttr(Attribute.COMPILER_ADD)) {
+        return
+    }
+    if (let Some(typeNode) <- tad.typeNode) {
+        if (let Some(refType) <- (typeNode as RefType)) {
+            SubstituteTypeArguments(tm, typeArguments, refType, typeMapping)
+        }
+        if (let Some(qualifiedType) <- (typeNode as QualifiedType)) {
+            SubstituteTypeArguments(tm, typeArguments, qualifiedType, typeMapping)
+        }
+    }
+}
+
+// C++ src/Sema/TypeCheckType.cpp:165-177 TypeCheckerImpl::HandleAliasForRefType.
+private func HandleAliasForRefType(diag: BasicDiagnosticEngine, tm: TypeManager, refType: RefType,
+    target: Option<Decl>): Option<Decl> {
+    if (let None <- target) {
+        return target
+    }
+    if (let None <- (target.getOrThrow() as TypeAliasDecl)) {
+        return target
+    }
+    let aliasDecl = (target.getOrThrow() as TypeAliasDecl).getOrThrow()
     if (let None <- aliasDecl.typeNode) {
-        return None
+        return target
     }
-    let aliasBody = aliasDecl.typeNode.getOrThrow()
-    if (!Ty.IsTyCorrect(aliasBody.GetTy())) {
-        return None
+    if (!CheckTypeParametersForAliasRef(diag, refType, aliasDecl)) {
+        return target
     }
-    let typeMapping = TypeCheckTypeGenerateAliasUseMapping(aliasDecl, typeArgs)
-    return Some(tm.SubstituteTypeAliasInTy(aliasBody.GetTy().getOrThrow(), typeMapping: typeMapping))
+    let innerTypeAliasTarget = GetLastTypeAliasTarget(aliasDecl)
+    if (let Some(realTarget) <- innerTypeAliasTarget.typeNode.getOrThrow().GetTarget()) {
+        let typeMapping = GenerateTypeMappingForTypeAliasUse(tm, aliasDecl, refType)
+        SubstituteTypeArguments(tm, innerTypeAliasTarget, refType.typeArguments, typeMapping)
+        return Some(realTarget)
+    }
+    return target
 }
 
-// Mirrors C++ GetLastTypeAliasTargetVisit (src/Sema/TypeCheckUtil.cpp:890): walk a type-alias
-// chain (type A = B; type B = ArrayList<Int64>) down to the innermost alias whose body is a
-// non-alias type, so its type-argument Type nodes can be read.
-private func TypeCheckTypeGetLastAliasTargetVisit(decl: TypeAliasDecl, visited: HashSet<Int64>): TypeAliasDecl {
-    if (visited.contains(decl.objectId)) {
-        return decl
+// C++ src/Sema/TypeCheckType.cpp:180-192 BackupTypes and RestoreTypes.
+private func BackupTypes(source: ArrayList<Type>, backup: ArrayList<Type>): Unit {
+    for (typeNode in source) {
+        backup.add(typeNode)
     }
-    visited.add(decl.objectId)
-    if (let Some(typeNode) <- decl.typeNode) {
-        if (let Some(realTarget) <- typeNode.GetTarget()) {
-            if (let Some(innerAlias) <- (realTarget as TypeAliasDecl)) {
-                if (innerAlias.typeNode.isSome()) {
-                    return TypeCheckTypeGetLastAliasTargetVisit(innerAlias, visited)
+    source.clear()
+    for (typeNode in backup) {
+        let cloned = (ASTCloner.Clone(typeNode) as Type).getOrThrow()
+        cloned.DisableAttr(Attribute.COMPILER_ADD)
+        source.add(cloned)
+    }
+}
+
+private func RestoreTypes(source: ArrayList<Type>, backup: ArrayList<Type>): Unit {
+    source.clear()
+    for (typeNode in backup) {
+        source.add(typeNode)
+    }
+    backup.clear()
+}
+
+// C++ src/Sema/TypeCheckType.cpp:195-224 TypeCheckerImpl::CheckRefTypeWithRealTarget.
+private func CheckRefTypeWithRealTarget(diag: BasicDiagnosticEngine, tm: TypeManager,
+    refType: RefType): Bool {
+    let backup = ArrayList<Type>()
+    BackupTypes(refType.typeArguments, backup)
+    let target = refType.ref.target
+    let realTarget = HandleAliasForRefType(diag, tm, refType, target)
+    let typeArgs = refType.GetTypeArgs()
+    if ((let None <- realTarget) || typeArgs.isEmpty()) {
+        RestoreTypes(refType.typeArguments, backup)
+        return true
+    }
+    if (let Some(aliasTarget) <- (target.getOrThrow() as TypeAliasDecl)) {
+        let unusedTys = GetUnusedTysInTypeAlias(aliasTarget)
+        var idx: Int64 = 0
+        while (idx < typeArgs.size) {
+            let typeArgTy = typeArgs[idx].GetTy()
+            if (let Some(argTy) <- typeArgTy) {
+                var unused = false
+                for (unusedTy in unusedTys) {
+                    if (SameTy(argTy, unusedTy)) {
+                        unused = true
+                        break
+                    }
+                }
+                if (unused) {
+                    typeArgs.remove(at: idx)
+                    continue
                 }
             }
+            idx++
         }
     }
-    return decl
+    let checker = TypeCheckerImpl(typeManager: tm, diag: Some(diag))
+    let matched = checker.CheckGenericDeclInstantiation(realTarget.getOrThrow(), typeArgs, refType)
+    if (!matched) {
+        refType.SetTy(TypeManager.GetInvalidTy())
+    }
+    RestoreTypes(refType.typeArguments, backup)
+    return matched
 }
 
-// Mirrors C++ HandleAlias (src/Sema/TypeCheckExpr.cpp:340-365), reached on the call-base
-// candidate path via the Expr overload GetRealTarget(Expr*,Decl*) (TypeCheckExpr.cpp:255) from
-// GetCallBaseCandidates (TypeCheckCall.cpp:2314). The self-hosted port only ported the type side
-// of alias-arg handling (TypeCheckType), never the expression side, so a call base RefExpr whose
-// target is a type alias to a generic instantiated type (e.g. `type Foo = ArrayList<Int64>;
-// Foo()`) never received the alias's concrete type arguments; the constructor's type parameters
-// then stayed unbound and the result Ty became Invalid (reaching CHIR and throwing).
-//
-// When the alias use has no explicit type arguments, inject the alias's concrete type arguments
-// onto the base RefExpr's typeArguments (marked compiler-added, mirroring compilerAddedTyArgs) so
-// the ordinary generic-constructor instantiation path binds them.
-public func HandleAliasOnCallBase(tm: TypeManager, ce: CallExpr): Unit {
-    let base = match (ce.baseFunc) {
-        case Some(v) => v
-        case None => return
-    }
-    let refExpr = match (base as NameReferenceExpr) {
-        case Some(v) => v
-        case None => return
-    }
-    // Only inject when the alias use itself carries no explicit type arguments (the failing case).
-    if (!refExpr.typeArguments.isEmpty()) {
-        return
-    }
-    let target = match (refExpr.GetTarget()) {
-        case Some(v) => v
-        case None => return
-    }
-    let aliasDecl = match (target as TypeAliasDecl) {
-        case Some(v) => v
-        case None => return
-    }
-    if (aliasDecl.typeNode.isNone()) {
-        return
-    }
-    let aliasTargetTy = match (TypeCheckTypeGetAliasTargetTy(tm, aliasDecl, refExpr.typeArguments)) {
-        case Some(v) => v
-        case None => return
-    }
-    if (aliasTargetTy.typeArgs.isEmpty()) {
-        return
-    }
-    let innerAlias = TypeCheckTypeGetLastAliasTargetVisit(aliasDecl, HashSet<Int64>())
-    let body = match (innerAlias.typeNode) {
-        case Some(v) => v
-        case None => return
-    }
-    let bodyArgs = body.GetTypeArgs()
-    if (bodyArgs.size != aliasTargetTy.typeArgs.size) {
-        return
-    }
-    let newArgs = ArrayList<Type>()
-    var idx = 0
-    while (idx < bodyArgs.size) {
-        match (ASTCloner.Clone(bodyArgs[idx]) as Type) {
-            case Some(cloned) =>
-                cloned.SetTy(aliasTargetTy.typeArgs[idx])
-                cloned.EnableAttr(Attribute.COMPILER_ADD)
-                newArgs.add(cloned)
-            case None => return
-        }
-        idx++
-    }
-    for (arg in newArgs) {
-        refExpr.typeArguments.add(arg)
-    }
-    let _ = UpdateInstTysWithTypeArgs(refExpr)
-    refExpr.compilerAddedTyArgs = true
-}
-
-public func TypeCheckTypeCheckRefType(
+// C++ src/Sema/TypeCheckType.cpp:226-269 TypeCheckerImpl::CheckRefType.
+public func CheckRefType(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
     refType: RefType
@@ -456,60 +464,21 @@ public func TypeCheckTypeCheckRefType(
     if (!TypeCheckTypeCheckAccessLegality(diag, tm, refType, target, clearTargetOnFail: true)) {
         return false
     }
-    if (!TypeCheckTypeIsGenericTypeWithTypeArgs(refType)) {
-        TypeCheckTypeEmitOld(diag, refType, BasicDiagKind.sema_generic_type_without_type_argument)
-        refType.SetTy(TypeManager.GetInvalidTy())
-        return false
-    }
-    if (let Some(aliasDecl) <- (target as TypeAliasDecl)) {
-        if (!TypeCheckTypeCheckTypeParametersForAliasRef(diag, refType, aliasDecl)) {
-            return false
-        }
-    }
     if (let Some(builtinDecl) <- (target as BuiltInDecl)) {
         if (builtinDecl.IsType(BuiltInType.CFUNC)) {
             TypeCheckTypeCheckCFuncRefType(diag, tm, refType)
             return true
         }
     }
-    if (TypeCheckTypeCheckRefExprCheckTyArgs(refType, target)) {
+    if (!IsGenericTypeWithTypeArgs(refType)) {
+        Diagnose(diag, refType, BasicDiagKind.sema_generic_type_without_type_argument).Emit()
+        refType.SetTy(TypeManager.GetInvalidTy())
+        return false
+    }
+    if (CheckRefExprCheckTyArgs(refType, target)) {
         return true
     }
-    let typeArgs = refType.GetTypeArgs()
-    if (!typeArgs.isEmpty()) {
-        var checkTarget = target
-        let checkTypeArgs = ArrayList<Ty>()
-        var resolvedAliasTarget = false
-        if (let Some(aliasDecl) <- (target as TypeAliasDecl)) {
-            if (let Some(aliasTargetTy) <- TypeCheckTypeGetAliasTargetTy(tm, aliasDecl, typeArgs)) {
-                if (let Some(realTarget) <- Ty.GetDeclPtrOfTy(Some(aliasTargetTy))) {
-                    checkTarget = realTarget
-                    resolvedAliasTarget = true
-                    for (arg in aliasTargetTy.typeArgs) {
-                        checkTypeArgs.add(arg)
-                    }
-                }
-            }
-        }
-        if (!resolvedAliasTarget && checkTypeArgs.isEmpty()) {
-            for (arg in typeArgs) {
-                if (let Some(argTy) <- arg.GetTy()) {
-                    checkTypeArgs.add(argTy)
-                }
-            }
-        }
-        let checker = TypeCheckerImpl(typeManager: tm, diag: Some(diag))
-        let constraintsMatched = if (resolvedAliasTarget) {
-            checker.CheckGenericDeclInstantiation(checkTarget, checkTypeArgs, refType)
-        } else {
-            checker.CheckGenericDeclInstantiation(checkTarget, typeArgs, refType)
-        }
-        if (!constraintsMatched) {
-            refType.SetTy(TypeManager.GetInvalidTy())
-            return false
-        }
-    }
-    return true
+    return CheckRefTypeWithRealTarget(diag, tm, refType)
 }
 
 private func TypeCheckTypeCheckCFuncRefType(
@@ -546,7 +515,7 @@ public func TypeCheckTypeCheckQualifiedType(
     if (!TypeCheckTypeCheckAccessLegality(diag, tm, qualifiedType, qualifiedType.target.getOrThrow())) {
         valid = false
     }
-    if (!TypeCheckTypeIsGenericTypeWithTypeArgs(qualifiedType)) {
+    if (!IsGenericTypeWithTypeArgs(qualifiedType)) {
         TypeCheckTypeEmitOld(diag, qualifiedType, BasicDiagKind.sema_generic_type_without_type_argument)
         qualifiedType.SetTarget(None)
         qualifiedType.SetTy(TypeManager.GetInvalidTy())
