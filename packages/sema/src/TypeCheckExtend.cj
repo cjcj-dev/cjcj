@@ -1302,10 +1302,12 @@ extend TypeCheckerImpl {
     // C++ src/Sema/TypeCheckExtend.cpp:195-235 TypeCheckerImpl::CheckSpecializationExtend.
     func CheckSpecializationExtend(extendedDecl: InheritableDecl, extendDecl: ExtendDecl,
         otherExtendDecls: ArrayList<ExtendDecl>): Unit {
-        let extendedDeclTy = extendedDecl.GetTy().getOrThrow()
-        if (!extendedDeclTy.HasGeneric()) {
-            return
+        if (let Some(extendedDeclTyValue) <- extendedDecl.GetTy()) {
+            if (!extendedDeclTyValue.HasGeneric()) {
+                return
+            }
         }
+        let extendedDeclTy = extendedDecl.GetTy().getOrThrow()
         let orig2specMapping = GenerateTypeMapping(
             extendedDecl, extendDecl.extendedType.getOrThrow().GetTy().getOrThrow().typeArgs)
         CheckSpecializationExtendDupImstantation(
