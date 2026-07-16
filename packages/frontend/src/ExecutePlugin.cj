@@ -134,7 +134,7 @@ class ExecutePlugin {
                 GetBuiltinTypeWithVTable(builtinType, builder).AddExtend(definition)
             } else {
                 let customType = (definition.GetExtendedType() as CustomType).getOrThrow()
-                let customTypeDef = customType.GetCustomTypeDef().getOrThrow()
+                let customTypeDef = customType.GetCustomTypeDef()
                 CJC_ASSERT(customTypeDef.GetCustomKind() != CustomDefKind.TYPE_EXTEND)
                 customTypeDef.AddExtend(definition)
             }
