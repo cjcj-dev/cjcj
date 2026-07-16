@@ -602,7 +602,7 @@ public class ASTWriter {
         })
         let identifier = builder.CreateString(decl.identifier.Val())
         let mangledName = builder.CreateString(SerializedMangledName(decl))
-        let exportId = builder.CreateString(EnsureExportId(decl))
+        let exportId = builder.CreateString(decl.exportId)
         let rawMangle = builder.CreateString(decl.rawMangleName)
         let generic = SaveGeneric(decl)
         let genericDecl = if (ShouldEmitGenericDecl(decl)) { SaveGenericDeclIndex(decl) } else { 0u32 }
@@ -2651,29 +2651,6 @@ public class ASTWriter {
             return decl.exportId
         }
         return ""
-    }
-
-    private func EnsureExportId(decl: Decl): String {
-        if ((decl as FuncParam).isSome()) {
-            return ""
-        }
-        if (!decl.exportId.isEmpty()) {
-            return decl.exportId
-        }
-        if (!Ty.IsTyCorrect(decl.GetTy())) {
-            return ""
-        }
-        if (decl.TestAttr(Attribute.GLOBAL) || decl.IsNominalDecl()) {
-            decl.exportId = if ((decl as FuncDecl).isSome()) { mangler.MangleExportId(decl) } else { mangler.Mangle(decl) }
-            return decl.exportId
-        }
-        if (!decl.mangledName.isEmpty()) {
-            return decl.mangledName
-        }
-        if (!decl.rawMangleName.isEmpty()) {
-            return decl.rawMangleName
-        }
-        return decl.identifier.Val()
     }
 
     private func DeclKey(decl: Decl): String {
