@@ -276,6 +276,17 @@ extend ParserImpl {
         return ParseBaseExpr(expr, ExprKind.ALL)
     }
 
+    public func SeeingTrailingClosure(baseExpr: Expr): Bool {
+        if (Seeing(TokenKind.LCURL)) {
+            return true
+        }
+        if (baseExpr.astKind != ASTKind.CALL_EXPR && baseExpr.astKind != ASTKind.REF_EXPR &&
+            baseExpr.astKind != ASTKind.ARRAY_EXPR) {
+            return false
+        }
+        return SeeingAnnotationLambdaExpr() || SeeingAnnotationTrailingClosure([TokenKind.LSQUARE])
+    }
+
     public func ParseBaseExpr(expr: Expr, ek: ExprKind): Expr {
         var base = expr
         var hasQuestSuffix = false
@@ -321,14 +332,8 @@ extend ParserImpl {
                 base = ParseSubscriptExpr(base)
                 continue
             }
-            if (!newlineSkipped && Seeing(TokenKind.LCURL)) {
-                let trailing = TrailingClosureExpr()
-                trailing.lambda = ParseLambdaExprWithTrailingClosure()
-                CheckBaseOfTrailingClosureExpr(base)
-                trailing.expr = base
-                trailing.begin = base.begin
-                if (let Some(lambda) <- trailing.lambda) { trailing.end = lambda.end }
-                base = trailing
+            if (!newlineSkipped && SeeingTrailingClosure(base)) {
+                base = ParseTrailingClosureExpr(base)
                 continue
             }
             break
@@ -423,6 +428,30 @@ extend ParserImpl {
             base = incOrDec
         }
         return base
+    }
+
+    public func ParseTrailingClosureExpr(baseExpr: Expr): TrailingClosureExpr {
+        let ret = TrailingClosureExpr()
+        let annos = ArrayList<Annotation>()
+        ParseAnnotations(annos)
+        SetBeginToAnnotationsBegin(ret, annos)
+        ret.leftLambda = lastToken.Begin()
+        Next()
+        ret.lambda = ParseLambdaExprWithTrailingClosure()
+        ret.rightLambda = lastToken.Begin()
+        for (anno in annos) {
+            if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
+                let lambda = ret.lambda.getOrThrow()
+                lambda.EnableAttr(Attribute.NUMERIC_OVERFLOW)
+                lambda.overflowStrategy = anno.overflowStrategy
+                break
+            }
+        }
+        CheckBaseOfTrailingClosureExpr(baseExpr)
+        ret.expr = baseExpr
+        ret.begin = baseExpr.begin
+        ret.end = ret.lambda.getOrThrow().end
+        return ret
     }
 
     private func CheckBaseOfTrailingClosureExpr(baseExpr: Expr): Unit {

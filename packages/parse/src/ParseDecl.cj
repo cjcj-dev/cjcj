@@ -1698,10 +1698,24 @@ extend ParserImpl {
     public func ParseStructDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): StructDecl {
         let ret = StructDecl()
         try (cs = ChainScope(this, ret)) {
-            ParseInheritableHeader(ret, TokenKind.STRUCT, modifiers, annos)
-            ret.begin = ret.keywordPos
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            let key = Expect(TokenKind.STRUCT, "expected declaration keyword")
+            ret.keywordPos = key.Begin()
+            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
             CheckDeclarationInScope(scopeKind, DefKind.STRUCT)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.STRUCT))
+            ret.identifier = ExpectIdentifierWithPos(ret)
+            if (Skip(TokenKind.LT)) {
+                ret.generic = ParseGeneric()
+                ret.EnableAttr(Attribute.GENERIC)
+            }
+            if (Skip(TokenKind.UPPERBOUND)) {
+                ret.upperBoundPos = lastToken.Begin()
+                ParseStructInheritedTypes(ret)
+            }
+            if (Skip(TokenKind.WHERE)) {
+                ParseConstraints(ret)
+            }
             SetPrimaryDecl(ret.identifier.Val(), isRawId: ret.identifier.IsRaw())
             ParseClassLikeBody(ret, ScopeKind.STRUCT_BODY)
             RevertPrimaryDecl()
@@ -1713,10 +1727,23 @@ extend ParserImpl {
     public func ParseEnumDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): EnumDecl {
         let ret = EnumDecl()
         try (cs = ChainScope(this, ret)) {
-            ParseInheritableHeader(ret, TokenKind.ENUM, modifiers, annos)
-            ret.begin = ret.keywordPos
+            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            let key = Expect(TokenKind.ENUM, "expected declaration keyword")
+            ret.keywordPos = key.Begin()
+            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
             CheckDeclarationInScope(scopeKind, DefKind.ENUM)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.ENUM))
+            ret.identifier = ExpectIdentifierWithPos(ret)
+            if (Skip(TokenKind.LT)) {
+                ret.EnableAttr(Attribute.GENERIC)
+                ret.generic = ParseGeneric()
+            }
+            if (Skip(TokenKind.UPPERBOUND)) {
+                ParseInheritedTypes(ret)
+            }
+            if (Skip(TokenKind.WHERE)) {
+                ParseConstraints(ret)
+            }
             if (!Skip(TokenKind.LCURL)) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
                     ConvertToken(lookahead)).Emit()
@@ -1898,25 +1925,6 @@ extend ParserImpl {
         return decl
     }
 
-    public func ParseInheritableHeader(ret: InheritableDecl, keyword: TokenKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Unit {
-        ApplyModifiersAndAnnotations(ret, modifiers, annos)
-        let key = Expect(keyword, "expected declaration keyword")
-        ret.keywordPos = key.Begin()
-        ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
-        ret.identifier = ExpectIdentifierWithPos(ret)
-        if (let Some(generic) <- ParseOptionalGeneric()) {
-            ret.generic = generic
-            ret.EnableAttr(Attribute.GENERIC)
-        }
-        if (Skip(TokenKind.UPPERBOUND)) {
-            ParseInheritedTypes(ret)
-        }
-        if (Skip(TokenKind.WHERE)) {
-            ParseConstraints(ret)
-        }
-        ret.end = ret.identifier.End()
-    }
-
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:1282-1289
     public func ParseConstraints(decl: Decl): Unit {
         if (let None <- decl.generic) {
@@ -1996,6 +2004,23 @@ extend ParserImpl {
             }
             if (!decl.inheritedTypes.isEmpty()) {
                 decl.inheritedTypes[decl.inheritedTypes.size - 1].bitAndPos = lastToken.Begin()
+            }
+        }
+    }
+
+    public func ParseStructInheritedTypes(structDecl: StructDecl): Unit {
+        while (true) {
+            let interfaceType = ParseType()
+            if (interfaceType.astKind == ASTKind.REF_TYPE || interfaceType.astKind == ASTKind.QUALIFIED_TYPE) {
+                structDecl.inheritedTypes.add(interfaceType)
+            } else if (!interfaceType.TestAttr(Attribute.IS_BROKEN)) {
+                DiagInvalidInheritType(interfaceType)
+            }
+            if (!Skip(TokenKind.BITAND)) {
+                break
+            }
+            if (!structDecl.inheritedTypes.isEmpty()) {
+                structDecl.inheritedTypes[structDecl.inheritedTypes.size - 1].bitAndPos = lastToken.Begin()
             }
         }
     }
