@@ -383,7 +383,7 @@ extend ParserImpl {
         }
         ParseOneOrMoreWithSeparator(TokenKind.COMMA,
             { pos: Position => tupleLit.commaPosVector.add(pos) },
-            {
+            { =>
                 if (Seeing(TokenKind.RPAREN) && tupleLit.children.size > 1) {
                     return
                 }
