@@ -2,7 +2,6 @@ package cjcj::parse
 
 import std.collection.*
 import cjcj::ast.AddMacroAttr
-import cjcj::ast.ExprKind as AstExprKind
 import cjcj::ast.Identifier as AstIdentifier
 import cjcj::ast.ScopeKind as AstScopeKind
 import cjcj::ast.SortModifierByPos

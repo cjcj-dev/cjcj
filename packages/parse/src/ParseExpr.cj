@@ -6,7 +6,6 @@ import cjcj::ast.ExprKind as AstExprKind
 import cjcj::ast.FuncBody as AstFuncBody
 import cjcj::ast.FuncParamList as AstFuncParamList
 import cjcj::ast.MacroInvocation as AstMacroInvocation
-import cjcj::ast.ScopeKind as AstScopeKind
 import cjcj::ast.VarDecl as AstVarDecl
 import cjcj::ast.{ASTCloner, CopyBasicInfo, CreateBlock, CreateFuncBody, CreateFuncParam, CreateLambdaExpr,
     SetIsClonedSourceCode}
