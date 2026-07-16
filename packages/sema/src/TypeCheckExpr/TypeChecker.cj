@@ -5663,7 +5663,8 @@ extend TypeChecker {
             return false
         }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
-            if (binaryExpr.op == TokenKind.AND || binaryExpr.op == TokenKind.OR) {
+            if (IsCondition(binaryExpr) &&
+                (binaryExpr.op == TokenKind.AND || binaryExpr.op == TokenKind.OR)) {
                 var suppressChildren = suppressIntroducingVariableError
                 if (!suppressChildren && binaryExpr.op == TokenKind.OR) {
                     let vars = CollectVariables(ctx, binaryExpr)
