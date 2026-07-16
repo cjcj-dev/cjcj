@@ -917,11 +917,24 @@ private func GetTupleElements(expr: Expr): ArrayList<Expr> {
     return elements
 }
 
+private func GetDesugaredBinaryExprArgTys(be: BinaryExpr): (String, String) {
+    let callExpr = (be.desugarExpr.getOrThrow() as CallExpr).getOrThrow()
+    let memberAccess = (callExpr.baseFunc.getOrThrow() as MemberAccess).getOrThrow()
+    let baseTy = memberAccess.baseExpr.getOrThrow().GetTy().getOrThrow()
+    let argumentTy = callExpr.args[0].expr.getOrThrow().GetTy().getOrThrow()
+    return (baseTy.String(), argumentTy.String())
+}
+
 private func CheckTupleCanEqual(typeManager: TypeManager, be: BinaryExpr, leftTy: Ty, rightTy: Ty,
     synthesizer: BinaryOperandSynthesizer, diag: Option<BasicDiagnosticEngine>): Bool {
     if (let Some(leftTuple) <- (leftTy as TupleTy)) {
         if (let Some(rightTuple) <- (rightTy as TupleTy)) {
             if (leftTuple.typeArgs.size != rightTuple.typeArgs.size) {
+                if (let Some(diagValue) <- diag) {
+                    Diagnose(diagValue, be, BasicDiagKind.sema_tuple_cmp_not_supported,
+                        args: [BasicDiagArgument(TokenKindLiteral(be.op)), BasicDiagArgument(leftTuple.String()),
+                            BasicDiagArgument(rightTuple.String())]).Emit()
+                }
                 be.SetTy(TypeManager.GetInvalidTy())
                 return false
             }
@@ -949,7 +962,22 @@ private func CheckTupleCanEqual(typeManager: TypeManager, be: BinaryExpr, leftTy
                 try (ds = DiagSuppressor(diag)) {
                     returnTy = synthesizer(elementCmpExpr)
                 }
-                if (!Ty.IsTyCorrect(returnTy) || !returnTy.IsBoolean()) {
+                if (!Ty.IsTyCorrect(returnTy)) {
+                    if (let Some(diagValue) <- diag) {
+                        Diagnose(diagValue, be, BasicDiagKind.sema_tuple_cmp_not_supported,
+                            args: [BasicDiagArgument(TokenKindLiteral(be.op)), BasicDiagArgument(leftTuple.String()),
+                                BasicDiagArgument(rightTuple.String())]).Emit()
+                    }
+                    be.SetTy(TypeManager.GetInvalidTy())
+                    return false
+                }
+                if (!returnTy.IsBoolean()) {
+                    let argumentTys = GetDesugaredBinaryExprArgTys(elementCmpExpr)
+                    if (let Some(diagValue) <- diag) {
+                        Diagnose(diagValue, be, BasicDiagKind.sema_tuple_element_cmp_not_bool,
+                            args: [BasicDiagArgument(TokenKindLiteral(be.op)), BasicDiagArgument(argumentTys[0]),
+                                BasicDiagArgument(argumentTys[1])]).Emit()
+                    }
                     be.SetTy(TypeManager.GetInvalidTy())
                     return false
                 }
@@ -1395,14 +1423,14 @@ private func TargetAcceptsBool(typeManager: TypeManager, target: Ty): Bool {
     return target.IsBoolean() || typeManager.IsLitBoxableType(boolTy, target)
 }
 
-private func ChkRelationalExprBuiltin(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+private func ChkRelationalExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (!TargetAcceptsBool(typeManager, target)) {
         return false
     }
-    let relationTy = SynRelationalExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
-        diag: diag)
+    let relationTy = SynArithmeticOrRelationalExpr(TypeCheckerImpl(typeManager: typeManager, diag: diag), be,
+        isArithmetic: false, ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
     if (Ty.IsTyCorrect(relationTy) && relationTy.IsBoolean()) {
         return true
     }
@@ -1410,7 +1438,7 @@ private func ChkRelationalExprBuiltin(typeManager: TypeManager, target: Ty, be: 
     return false
 }
 
-private func ChkLogicalExprBuiltin(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+private func ChkLogicalExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, checker!: Option<BinaryOperandChecker> = None): Bool {
     if (!TargetAcceptsBool(typeManager, target)) {
         let _ = BinaryInvalid(be)
@@ -1435,7 +1463,7 @@ private func ChkLogicalExprBuiltin(typeManager: TypeManager, target: Ty, be: Bin
     return false
 }
 
-private func ChkShiftExprBuiltin(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+private func ChkShiftExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None): Bool {
     if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
@@ -1463,24 +1491,64 @@ private func ChkShiftExprBuiltin(typeManager: TypeManager, target: Ty, be: Binar
     return false
 }
 
-private func ChkBuiltinBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+private func CheckBinaryExprCaseBuiltIn(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
-    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Option<Bool> {
+    var checkRet = false
     if (IsArithmeticOperator(be.op)) {
-        return ChkArithmeticExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer,
+        checkRet = ChkArithmeticExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer,
+            checker: checker, diag: diag)
+    } else if (IsRelationalOperator(be.op)) {
+        checkRet = ChkRelationalExpr(typeManager, target, be, ctx: ctx,
+            synthesizer: synthesizer, checker: checker, diag: diag)
+        if (checkRet) {
+            return Some(true)
+        }
+        if ((let Some(leftExpr) <- be.leftExpr) && (let Some(rightExpr) <- be.rightExpr)) {
+            let leftTy = leftExpr.GetTy() ?? TypeManager.GetInvalidTy()
+            let rightTy = rightExpr.GetTy() ?? TypeManager.GetInvalidTy()
+            let cannotBeTuple = (!Ty.IsTyCorrect(leftTy) && !Ty.IsInitialTy(leftTy)) ||
+                (!Ty.IsTyCorrect(rightTy) && !Ty.IsInitialTy(rightTy)) ||
+                (be.op != TokenKind.EQUAL && be.op != TokenKind.NOTEQ)
+            if (cannotBeTuple) {
+                return None
+            }
+            let synthesizedLeftTy = SynBinaryOperand(typeManager, leftExpr, synthesizer)
+            let synthesizedRightTy = SynBinaryOperand(typeManager, rightExpr, synthesizer)
+            if (Ty.IsTyCorrect(synthesizedLeftTy) && synthesizedLeftTy.IsTuple() &&
+                Ty.IsTyCorrect(synthesizedRightTy) && synthesizedRightTy.IsTuple()) {
+                if (!CheckTupleCanEqual(typeManager, be, synthesizedLeftTy, synthesizedRightTy,
+                    synthesizer.getOrThrow(), diag)) {
+                    return Some(false)
+                }
+                if (!typeManager.IsSubtype(be.GetTy().getOrThrow(), target)) {
+                    if (let Some(diagValue) <- diag) {
+                        DiagMismatchedTypes(diagValue, be, target)
+                    }
+                    return Some(false)
+                }
+                return Some(true)
+            }
+        }
+    } else if (IsLogicalOperator(be.op)) {
+        checkRet = ChkLogicalExpr(typeManager, target, be, ctx: ctx, checker: checker)
+    } else if (IsShiftOperator(be.op)) {
+        checkRet = ChkShiftExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
+    } else if (IsFlowOperator(be.op)) {
+        if (ChkFlowExpr(typeManager, target, be, synthesizer.getOrThrow(), checker.getOrThrow(), diag)) {
+            return Some(true)
+        }
+    } else if (be.op == TokenKind.COALESCING) {
+        return Some(ChkCoalescingExpr(TypeCheckerImpl(typeManager: typeManager, diag: diag), target, be,
+            ctx: ctx, synthesizer: synthesizer, checker: checker))
+    } else {
+        checkRet = ChkArithmeticExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer,
             checker: checker, diag: diag)
     }
-    if (IsRelationalOperator(be.op)) {
-        return ChkRelationalExprBuiltin(typeManager, target, be, ctx: ctx,
-            synthesizer: synthesizer, checker: checker, diag: diag)
+    if (checkRet) {
+        return Some(true)
     }
-    if (IsLogicalOperator(be.op)) {
-        return ChkLogicalExprBuiltin(typeManager, target, be, ctx: ctx, checker: checker)
-    }
-    if (IsShiftOperator(be.op)) {
-        return ChkShiftExprBuiltin(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
-    }
-    return false
+    return None
 }
 
 public func SynBinaryExpr(impl: TypeCheckerImpl, be: BinaryExpr,
@@ -1608,17 +1676,11 @@ public func ChkBinaryExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
     let typeManager = impl.typeManager
-    if (be.op == TokenKind.COALESCING) {
-        return ChkCoalescingExpr(impl, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
-    }
-    if (IsFlowOperator(be.op)) {
-        return ChkFlowExpr(typeManager, target, be, synthesizer.getOrThrow(), checker.getOrThrow(), diag)
-    }
     try (ds = DiagSuppressor(diag)) {
-        if (ChkBuiltinBinaryExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker,
-            diag: diag)) {
+        if (let Some(checkRet) <- CheckBinaryExprCaseBuiltIn(typeManager, target, be, ctx: ctx,
+            synthesizer: synthesizer, checker: checker, diag: diag)) {
             ds.ReportDiag()
-            return true
+            return checkRet
         }
     }
     if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
