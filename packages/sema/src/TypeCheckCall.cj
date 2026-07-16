@@ -4303,7 +4303,8 @@ private func CheckFuncPtrCall(typeManager: TypeManager, diag: Option<BasicDiagno
     if (let Some(targetTy) <- target) {
         if (!typeManager.IsSubtype(ce.GetTy() ?? TypeManager.GetInvalidTy(), targetTy)) {
             if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, ce, BasicDiagKind.sema_parameters_and_arguments_mismatch)
+                // C++ src/Sema/TypeCheckCall.cpp:2268-2271.
+                DiagMismatchedTypes(diagValue, ce, targetTy)
             }
             return false
         }
