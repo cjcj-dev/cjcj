@@ -1,6 +1,7 @@
 package cjcj::parse
 
 import std.collection.*
+import cjcj::ast.INVALID_IDENTIFIER
 import cjcj::ast.OverloadableExpr as AstOverloadableExpr
 import cjcj::ast.VisitAction
 import cjcj::ast.Walker
@@ -769,7 +770,7 @@ extend ParserImpl {
             DiagExpectedIdentifierWithNode(node)
             node.hasBroken = true
         }
-        return SrcIdentifier("", "", pos, pos, false)
+        return SrcIdentifier(INVALID_IDENTIFIER, INVALID_IDENTIFIER, pos, pos, false)
     }
 
     public func ParseOptionalGeneric(): Option<Generic> {
