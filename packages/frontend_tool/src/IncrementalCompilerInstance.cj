@@ -282,7 +282,13 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             }
             return true
         }
-        return CodegenOnePackage(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)
+        if (!CodegenOnePackage(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)) {
+            return false
+        }
+        if (ShouldSaveCjoForOutputMode()) {
+            RegisterCjoOutputs(core.GetSourcePackages())
+        }
+        return true
     }
 
     public override func PerformCjoSaving(): Bool {
