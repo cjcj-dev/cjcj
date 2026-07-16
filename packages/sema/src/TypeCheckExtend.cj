@@ -1311,6 +1311,9 @@ extend TypeCheckerImpl {
         CheckSpecializationExtendDupImstantation(
             extendedDeclTy, extendDecl, extendedDecl, orig2specMapping, checkParent: true)
         for (otherExtendDecl in otherExtendDecls) {
+            if (let None <- otherExtendDecl.GetTy()) {
+                continue
+            }
             let otherExtendDeclTy = otherExtendDecl.GetTy().getOrThrow()
             if (!otherExtendDeclTy.HasGeneric()) {
                 continue
