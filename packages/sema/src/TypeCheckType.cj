@@ -17,7 +17,7 @@ private func TypeCheckTypeRange(node: Node): BasicRange {
 }
 
 private func TypeCheckTypeEmitOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind): Unit {
-    let builder = diag.Diagnose(node.begin, node.end, kind)
+    let builder = Diagnose(diag, node, kind)
     builder.Emit()
 }
 
