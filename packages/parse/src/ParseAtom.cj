@@ -205,6 +205,14 @@ extend ParserImpl {
                 let nested = ParserImpl(part.value[1..], diag, sourceManager, part.begin + 1, enableAttachComment, parseDeclFile)
                 nested.SetCompileOptions(compileOptions)
                 ret.block = nested.ParseBlock(ScopeKind.FUNC_BODY)
+                if ((let None <- ret.block) || ret.block.getOrThrow().body.isEmpty() ||
+                    nested.Peek().kind != TokenKind.END) {
+                    ParseDiagnoseRefactor(
+                        DiagKindRefactor.parse_empty_string_interpolation,
+                        MakeRange(part.begin, ret.end)
+                    ).Emit()
+                    return InvalidExpr(part.begin)
+                }
             } else {
                 ret.isBroken = true
             }
