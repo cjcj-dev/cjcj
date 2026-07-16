@@ -170,7 +170,7 @@ private func CreateClassConstructorCall(typeManager: TypeManager, callChecker: (
 
 private func CreateDefaultExceptionCall(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
     pkg: Package, source: Node): Option<CallExpr> {
-    if (let Some(exceptionDecl) <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME)) {
+    if (let Some(exceptionDecl) <- FindCoreClassDecl(importManager, CLASS_EXCEPTION_NAME)) {
         if (let Some(initDecl) <- FindDefaultConstructor(exceptionDecl)) {
             let exceptionTy = typeManager.GetClassTy(exceptionDecl, Array<Ty>())
             let ctorRef = CreateRefExpr(CLASS_EXCEPTION_NAME)
@@ -216,7 +216,7 @@ private func CreateImmediateHandlerReturnRef(funcTy: FuncTy, ctorName: String): 
 
 private func CreateHandlerFrameMethod(typeManager: TypeManager, pkg: Package, source: Node,
     methodName: String, typeArgs: ArrayList<Ty>): Option<MemberAccess> {
-    if (let Some(frameDecl) <- FindEffectClassDecl(pkg, CLASS_HANDLER_FRAME)) {
+    if (let Some(frameDecl) <- FindEffectClassDecl(importManager, CLASS_HANDLER_FRAME)) {
         let frameTy = typeManager.GetClassTy(frameDecl, Array<Ty>())
         let frameRef = CreateRefExpr(CLASS_HANDLER_FRAME)
         frameRef.ref.target = frameDecl
@@ -316,7 +316,7 @@ private func CreateThrowingResume(typeManager: TypeManager, callChecker: (Ty, Ca
     resultTy: EnumTy): Option<CallExpr> {
     if (let Some(throwingExpr) <- resumeExpr.throwingExpr) {
         if (let Some(throwingTy) <- throwingExpr.GetTy()) {
-            if (let Some(exceptionDecl) <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME)) {
+            if (let Some(exceptionDecl) <- FindCoreClassDecl(importManager, CLASS_EXCEPTION_NAME)) {
                 if (let Some(exceptionTy) <- exceptionDecl.GetTy()) {
                     if (typeManager.IsSubtype(throwingTy, exceptionTy)) {
                         let excTy = typeManager.GetFunctionTy([exceptionTy], resultTy)
@@ -333,7 +333,7 @@ private func CreateThrowingResume(typeManager: TypeManager, callChecker: (Ty, Ca
                     }
                 }
             }
-            if (let Some(errorDecl) <- FindCoreClassDecl(pkg, CLASS_ERROR_NAME)) {
+            if (let Some(errorDecl) <- FindCoreClassDecl(importManager, CLASS_ERROR_NAME)) {
                 if (let Some(errorTy) <- errorDecl.GetTy()) {
                     if (typeManager.IsSubtype(throwingTy, errorTy)) {
                         let errTy = typeManager.GetFunctionTy([errorTy], resultTy)
@@ -365,7 +365,7 @@ public func DesugarResumeExpr(typeManager: TypeManager, pkg: Package, resumeExpr
     }
     if (let Some(handler) <- resumeExpr.enclosing) {
         if (let Some(handlerResultTy) <- handler.commandResultTy) {
-            if (let Some(resultDecl) <- FindEffectEnumDecl(pkg, IMMEDIATE_HANDLER_RETURN_NAME)) {
+            if (let Some(resultDecl) <- FindEffectEnumDecl(importManager, IMMEDIATE_HANDLER_RETURN_NAME)) {
                 let resultTy = typeManager.GetEnumTy(resultDecl, typeArgs: [handlerResultTy])
                 let wrapped = if (let Some(_) <- resumeExpr.throwingExpr) {
                     CreateThrowingResume(typeManager, callChecker, pkg, resumeExpr, resultTy)
@@ -565,23 +565,23 @@ private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
     if (let None <- funcBody.body) {
         return false
     }
-    if (let None <- FindEffectClassDecl(pkg, CLASS_IMMEDIATE_FRAME)) {
+    if (let None <- FindEffectClassDecl(importManager, CLASS_IMMEDIATE_FRAME)) {
         return false
     }
-    if (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_EXCEPTION_WRAPPER)) {
+    if (let None <- FindEffectClassDecl(importManager, CLASS_FRAME_EXCEPTION_WRAPPER)) {
         return false
     }
-    if (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_ERROR_WRAPPER)) {
+    if (let None <- FindEffectClassDecl(importManager, CLASS_FRAME_ERROR_WRAPPER)) {
         return false
     }
-    if (let None <- FindEffectClassDecl(pkg, CLASS_EARLY_RETURN)) {
+    if (let None <- FindEffectClassDecl(importManager, CLASS_EARLY_RETURN)) {
         return false
     }
-    if (let None <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME)) {
+    if (let None <- FindCoreClassDecl(importManager, CLASS_EXCEPTION_NAME)) {
         return false
     }
     let sourceBlock = funcBody.body.getOrThrow()
-    let frameDecl = FindEffectClassDecl(pkg, CLASS_IMMEDIATE_FRAME).getOrThrow()
+    let frameDecl = FindEffectClassDecl(importManager, CLASS_IMMEDIATE_FRAME).getOrThrow()
     let frameTypeArgs = ArrayList<Ty>()
     frameTypeArgs.add(tryReturnTy)
     let frameTy = typeManager.GetClassTy(frameDecl, frameTypeArgs.toArray())
@@ -591,7 +591,7 @@ private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
     wrappedTry.tryBlock = sourceBlock
     wrappedTry.SetTy(tryReturnTy)
 
-    let exceptionWrapper = FindEffectClassDecl(pkg, CLASS_FRAME_EXCEPTION_WRAPPER).getOrThrow()
+    let exceptionWrapper = FindEffectClassDecl(importManager, CLASS_FRAME_EXCEPTION_WRAPPER).getOrThrow()
     if (let Some(exceptionCatch) <- CreateWrapperGuardCatch(typeManager, callChecker, pkg, sourceBlock, exceptionWrapper,
         EXCEPTION_FIELD_NAME, frameTy)) {
         wrappedTry.catchPatterns.add(exceptionCatch.pattern)
@@ -600,7 +600,7 @@ private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
         return false
     }
 
-    let errorWrapper = FindEffectClassDecl(pkg, CLASS_FRAME_ERROR_WRAPPER).getOrThrow()
+    let errorWrapper = FindEffectClassDecl(importManager, CLASS_FRAME_ERROR_WRAPPER).getOrThrow()
     if (let Some(errorCatch) <- CreateWrapperGuardCatch(typeManager, callChecker, pkg, sourceBlock, errorWrapper,
         ERROR_FIELD_NAME, frameTy)) {
         wrappedTry.catchPatterns.add(errorCatch.pattern)
@@ -609,7 +609,7 @@ private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
         return false
     }
 
-    let earlyReturnDecl = FindEffectClassDecl(pkg, CLASS_EARLY_RETURN).getOrThrow()
+    let earlyReturnDecl = FindEffectClassDecl(importManager, CLASS_EARLY_RETURN).getOrThrow()
     if (let Some(earlyReturnCatch) <- CreateEarlyReturnGuardCatch(typeManager, callChecker, pkg, sourceBlock, funcBody,
         earlyReturnDecl, frameTy, tryReturnTy)) {
         wrappedTry.catchPatterns.add(earlyReturnCatch.pattern)
@@ -724,15 +724,15 @@ private func WrapHandlerLambda(typeManager: TypeManager, callChecker: (Ty, CallE
         return false
     }
     let commandResultTy = handler.commandResultTy.getOrThrow()
-    if (let None <- FindEffectEnumDecl(pkg, IMMEDIATE_HANDLER_RETURN_NAME)) {
+    if (let None <- FindEffectEnumDecl(importManager, IMMEDIATE_HANDLER_RETURN_NAME)) {
         return false
     }
-    let resultDecl = FindEffectEnumDecl(pkg, IMMEDIATE_HANDLER_RETURN_NAME).getOrThrow()
+    let resultDecl = FindEffectEnumDecl(importManager, IMMEDIATE_HANDLER_RETURN_NAME).getOrThrow()
     let resultTy = typeManager.GetEnumTy(resultDecl, typeArgs: [commandResultTy])
     if (let None <- FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME)) {
         return false
     }
-    if (let None <- FindCoreClassDecl(pkg, CLASS_ERROR_NAME)) {
+    if (let None <- FindCoreClassDecl(importManager, CLASS_ERROR_NAME)) {
         return false
     }
     if (let None <- FindEffectClassDecl(pkg, CLASS_FRAME_EXCEPTION_WRAPPER)) {
@@ -754,8 +754,8 @@ private func WrapHandlerLambda(typeManager: TypeManager, callChecker: (Ty, CallE
     wrappedTry.tryBlock = sourceBlock
     wrappedTry.SetTy(originalReturnTy)
 
-    let exceptionDecl = FindCoreClassDecl(pkg, CLASS_EXCEPTION_NAME).getOrThrow()
-    let exceptionWrapper = FindEffectClassDecl(pkg, CLASS_FRAME_EXCEPTION_WRAPPER).getOrThrow()
+    let exceptionDecl = FindCoreClassDecl(importManager, CLASS_EXCEPTION_NAME).getOrThrow()
+    let exceptionWrapper = FindEffectClassDecl(importManager, CLASS_FRAME_EXCEPTION_WRAPPER).getOrThrow()
     if (let Some(exceptionCatch) <- CreateWrapperCatchClause(typeManager, callChecker, pkg, sourceBlock, exceptionDecl,
         exceptionWrapper, CLASS_FRAME_EXCEPTION_WRAPPER)) {
         wrappedTry.catchPatterns.add(exceptionCatch.pattern)
@@ -763,8 +763,8 @@ private func WrapHandlerLambda(typeManager: TypeManager, callChecker: (Ty, CallE
     } else {
         return false
     }
-    let errorDecl = FindCoreClassDecl(pkg, CLASS_ERROR_NAME).getOrThrow()
-    let errorWrapper = FindEffectClassDecl(pkg, CLASS_FRAME_ERROR_WRAPPER).getOrThrow()
+    let errorDecl = FindCoreClassDecl(importManager, CLASS_ERROR_NAME).getOrThrow()
+    let errorWrapper = FindEffectClassDecl(importManager, CLASS_FRAME_ERROR_WRAPPER).getOrThrow()
     if (let Some(errorCatch) <- CreateWrapperCatchClause(typeManager, callChecker, pkg, sourceBlock, errorDecl,
         errorWrapper, CLASS_FRAME_ERROR_WRAPPER)) {
         wrappedTry.catchPatterns.add(errorCatch.pattern)
