@@ -273,6 +273,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         if (kind == IncreKind.INCR) {
             // S6-pending: rollback stub, see INCREMENTAL_PORT_SPEC S6
             kind = IncreKind.ROLLBACK
+            return true
         }
         return CodegenOnePackage(false, cachedMangleMap: cacheMangles)
     }
