@@ -4192,6 +4192,8 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
     declSynthesizer!: Option<CallDeclSynthesizer> = None, argSynthesizer!: Option<(FuncArg) -> Ty> = None,
     exprSynthesizer!: Option<(Expr) -> Ty> = None,
     effectiveArgChecker!: Option<CallArgChecker> = None): (ArrayList<FuncDecl>, SubstPack) {
+    // C++ src/Sema/TypeCheckCall.cpp:2011 MatchFunctionForCall.
+    let tyVarScope = BeginTyVarScope(typeManager)
     let legals = ArrayList<FunctionMatchingUnit>()
     let argCombinations = if (let Some(ctxValue) <- ctx) {
         GetArgsCombination(typeManager, diag, ctxValue, ce, argSynthesizer, exprSynthesizer, declSynthesizer)
@@ -4205,6 +4207,7 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
         fallbackCombinations
     }
     if (!ce.args.isEmpty() && argCombinations.isEmpty()) {
+        EndTyVarScope(tyVarScope)
         return (ArrayList<FuncDecl>(), SubstPack())
     }
     if (ce.args.isEmpty() && argCombinations.isEmpty()) {
@@ -4212,8 +4215,10 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
     }
     if (candidates.size == 1) {
         let candidate = FunctionCandidate(candidates[0], ce, argCombinations)
-        return CheckFunctionMatch(typeManager, diag, ctx, candidate, target, argChecker, declSynthesizer,
+        let result = CheckFunctionMatch(typeManager, diag, ctx, candidate, target, argChecker, declSynthesizer,
             argSynthesizer, effectiveArgChecker)
+        EndTyVarScope(tyVarScope)
+        return result
     }
     let fdScopeLevelMap = HashMap<Node, Int64>()
     let orderedCandidates = GetOrderedCandidates(ctx, ce, candidates, fdScopeLevelMap)
@@ -4225,6 +4230,7 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
         }
         preScopeLevel = fdScopeLevelMap.get(orderedCandidates[0]).getOrThrow()
     }
+    var result = (ArrayList<FuncDecl>(), SubstPack())
     try (cs = PData.CommitScope(typeManager.constraints)) {
         var candidateIdx: Int64 = 0
         while (candidateIdx < orderedCandidates.size) {
@@ -4266,9 +4272,10 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
             legals.add(unit)
             candidateIdx++
         }
-        return CheckMatchResult(typeManager, diag, ctx, ce, legals, illegals, effectiveArgChecker)
+        result = CheckMatchResult(typeManager, diag, ctx, ce, legals, illegals, effectiveArgChecker)
     }
-    return (ArrayList<FuncDecl>(), SubstPack())
+    EndTyVarScope(tyVarScope)
+    return result
 }
 
 private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: TypeManager, ce: CallExpr, funcTy: FuncTy): Option<ArrayList<Ty>> {
