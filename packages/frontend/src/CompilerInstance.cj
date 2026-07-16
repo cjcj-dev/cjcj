@@ -2,6 +2,7 @@ package cjcj::frontend
 
 import cjcj::ast.Package as RealASTPackage
 import cjcj::ast.PackageDecl as RealASTPackageDecl
+import cjcj::ast.StructTy as RealASTStructTy
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::mangle.CHIRMangler as RealCHIRMangler
 import cjcj::mangle.MangleAstAdapter as RealMangleAstAdapter
@@ -22,7 +23,7 @@ import cjcj::lex.TokenKindValue
 import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::incremental_compilation.IncreKind
 import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
-    RawMangled2DeclMap, WriteCache}
+    OptEffectStrMap, RawMangled2DeclMap, VarInitDepMap, VirtualWrapperDepMap, WriteCache}
 import cjcj::option.OutputMode
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
@@ -140,9 +141,12 @@ private func StageFromIndex(idx: Int64): CompileStage {
 }
 
 public class CHIRInfo {
-    public let optEffectMap: HashMap<String, String> = HashMap<String, String>()
+    public let optEffectMap: OptEffectStrMap = OptEffectStrMap()
+    public let ccTys: HashSet<RealASTStructTy> = HashSet<RealASTStructTy>()
+    public let curVirtFuncWrapDep: VirtualWrapperDepMap = VirtualWrapperDepMap()
+    public let delVirtFuncWrapForIncr: VirtualWrapperDepMap = VirtualWrapperDepMap()
     public let ccOutFuncsRawMangle: HashSet<String> = HashSet<String>()
-    public let varInitDepMap: HashMap<String, String> = HashMap<String, String>()
+    public let varInitDepMap: VarInitDepMap = VarInitDepMap()
     public init() {}
 }
 
