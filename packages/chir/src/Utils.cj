@@ -9,6 +9,41 @@ import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::basic.Position as BasicPosition
 import cjcj::basic.Range as BasicRange
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, CORE_PACKAGE_NAME, FileUtil, OBJECT_NAME, STD_LIB_FUTURE}
+import std.sync.*
+
+// C++ Analysis/Utils.cpp:17-45.
+private let g_superClassMap: HashMap<Type, ArrayList<ClassType>> = HashMap<Type, ArrayList<ClassType>>()
+private let g_mtx: Mutex = Mutex()
+
+private func GetAllFathers(clsTy: ClassType, builder: CHIRBuilder): ArrayList<ClassType> {
+    synchronized(g_mtx) {
+        if (let Some(fathers) <- g_superClassMap.get(clsTy)) {
+            return fathers.clone()
+        }
+        let tys = ArrayList<ClassType>()
+        let fathers = ArrayList<ClassType>()
+        tys.add(clsTy)
+        fathers.add(clsTy)
+
+        var index: Int64 = 0
+        while (index < tys.size) {
+            let ty = tys[index]
+            index++
+
+            for (superType in ty.GetImplementedInterfaceTys(builder)) {
+                tys.add(superType)
+                fathers.add(superType)
+            }
+
+            if (let Some(superType) <- ty.GetSuperClassTy(builder: builder)) {
+                tys.add(superType)
+                fathers.add(superType)
+            }
+        }
+        g_superClassMap[clsTy] = fathers.clone()
+        return fathers
+    }
+}
 
 public let ANY_TYPE: String = "ANY_TYPE"
 public let NOT_CARE: String = "NOT_CARE"
@@ -509,6 +544,24 @@ public func IsGetOrThrowFunction(expr: Expression): Bool {
         return IsExpectedFunction(callee, getOrThrowInfo)
     }
     return false
+}
+
+// C++ Analysis/Utils.cpp:133-149.
+public func LeastCommonSuperClass(ty1: ClassType, ty2: ClassType, builder: CHIRBuilder): Option<ClassType> {
+    let allFathers1 = GetAllFathers(ty1, builder)
+    let allFathers2 = GetAllFathers(ty2, builder)
+
+    let allFathersSet = HashSet<Type>()
+    for (father in allFathers1) {
+        allFathersSet.add(father)
+    }
+
+    for (ty in allFathers2) {
+        if (allFathersSet.contains(ty)) {
+            return Some(ty)
+        }
+    }
+    return None
 }
 
 public func ReplaceUsesWithWrapper(curFunc: Value, apply: Option<Apply>, wrapperFunc: Value,
