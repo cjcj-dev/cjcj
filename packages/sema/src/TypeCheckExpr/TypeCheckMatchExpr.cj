@@ -28,7 +28,7 @@ extend TypeChecker {
             let _ = ReplaceIdealTy(impl.typeManager, selector, diag: impl.diag)
             return SynMatchExprHasSelector(impl.typeManager, ctx, impl.diag, me,
                 exprChecker: Some({ target: Ty, expr: Expr => Check(ctx, target, expr) }),
-                exprSynthesizer: Some({ expr: Expr => Synthesize(ctx, SynPos.EXPR_ARG, expr) }),
+                exprSynthesizer: Some({ expr: Expr => Synthesize(ctx, SynPos.NONE, expr) }),
                 desugarCallExpr: Some({ callExpr: CallExpr => DesugarCallExpr(callExpr) }))
         }
         return SynMatchExprNoSelector(ctx, me)

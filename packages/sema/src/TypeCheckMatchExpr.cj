@@ -376,6 +376,9 @@ public func SynMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     exprChecker!: Option<ConstPatternExprChecker> = None,
     exprSynthesizer!: Option<(Expr) -> Ty> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
+    let selector = me.selector.getOrThrow()
+    let _ = exprSynthesizer.getOrThrow()(selector)
+    let _ = ReplaceIdealTy(typeManager, selector, diag: diag)
     if (SugarKindEq(me.sugarKind, SugarKind.QUEST)) {
         return SynQuestSugarMatchCaseBody(typeManager, ctx, diag, me, exprChecker: exprChecker,
             exprSynthesizer: exprSynthesizer, desugarCallExpr: desugarCallExpr)
