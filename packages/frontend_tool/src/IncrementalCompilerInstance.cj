@@ -7,7 +7,7 @@ import cjcj::codegen.{getZExtValue, LLVMContextHandle, LLVMGetMDNodeOperands,
 import cjcj::frontend.*
 import cjcj::incremental_compilation.{CachedMangleMap, CompilationCache, DeleteRecompiledNodesInCHIROptEffectMap,
     DeleteRemovedNodesInCHIROptEffectMap, IncreKind, IncreResult, IncrementalScopeAnalysis,
-    IncrementalScopeAnalysisArgs, MergeCHIROptEffectMap}
+    IncrementalScopeAnalysisArgs, MergeCHIROptEffectMap, VarInitDepMap, VirtualWrapperDepMap}
 import cjcj::sema.{CollectChangedStructTypes, CollectCompilerAddedDeclUsage, CollectRemovedMangles,
     CollectRemovedManglesForReCompile, MarkIncrementalCheckForCtor}
 import cjcj::sema.Desugar.HandleCtorForIncr
