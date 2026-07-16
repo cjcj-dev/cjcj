@@ -366,7 +366,7 @@ extend ParserImpl {
         ParseAnnotations(annos)
         ParseModifiers(modifiers)
         CheckOverflowAnnotation(annos, scopeKind)
-        CheckAnnotationAnnotation(annos, modifiers)
+        CheckAnnotationAnno(annos, modifiers)
         if (SeeingEnumConstructor(scopeKind)) {
             return ParseEnumConstructor(modifiers, annos)
         }
@@ -522,21 +522,46 @@ extend ParserImpl {
         }
     }
 
-    private func CheckAnnotationAnnotation(annos: ArrayList<Annotation>, modifiers: ArrayList<Modifier>): Unit {
+    public func CheckAnnotationAnno(annos: ArrayList<Annotation>, decl: Decl): Unit {
+        for (anno in annos) {
+            if (anno.kind != AnnotationKind.ANNOTATION) {
+                continue
+            }
+            if (decl.astKind == ASTKind.MACRO_EXPAND_DECL) {
+                if (let Some(invocation) <- decl.GetInvocation()) {
+                    if (let Some(innerDecl) <- invocation.decl) {
+                        CheckAnnotationAnno(annos, innerDecl)
+                    }
+                }
+                return
+            }
+            if (decl.astKind != ASTKind.CLASS_DECL && decl.astKind != ASTKind.INVALID_DECL) {
+                DiagUnexpectedAnnoOnKind(anno, decl.keywordPos, anno.identifier.Val(), decl.astKind)
+                return
+            }
+            for (modifier in decl.modifiers) {
+                if (modifier.modifier == TokenKind.ABSTRACT || modifier.modifier == TokenKind.OPEN ||
+                    modifier.modifier == TokenKind.SEALED) {
+                    DiagUnexpectedAnnoOn(anno, modifier.begin, anno.identifier.Val(), modifier.ToString())
+                    return
+                }
+            }
+        }
+    }
+
+    private func CheckAnnotationAnno(annos: ArrayList<Annotation>, modifiers: ArrayList<Modifier>): Unit {
         for (anno in annos) {
             if (anno.kind != AnnotationKind.ANNOTATION) {
                 continue
             }
             if (!Seeing(TokenKind.CLASS) && !Seeing(TokenKind.AT)) {
                 DiagUnexpectedAnnoOn(anno, Peek().Begin(), anno.identifier.Val(), Peek().Value())
-                anno.isBroken = true
                 return
             }
             for (modifier in modifiers) {
                 if (modifier.modifier == TokenKind.ABSTRACT || modifier.modifier == TokenKind.OPEN ||
                     modifier.modifier == TokenKind.SEALED) {
                     DiagUnexpectedAnnoOn(anno, modifier.begin, anno.identifier.Val(), modifier.ToString())
-                    anno.isBroken = true
                     return
                 }
             }
