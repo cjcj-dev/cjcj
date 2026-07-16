@@ -98,15 +98,17 @@ public class MockUtils {
     private let importManager: SemaImportManager
     private let typeManager: TypeManager
     private let mangler: BaseMangler
-    private var getTypeForTypeParamDecl: Option<FuncDecl> = None
-    private var isSubtypeTypesDecl: Option<FuncDecl> = None
-    private var arrayDecl: Option<StructDecl> = None
-    private var stringDecl: Option<StructDecl> = None
-    private var optionDecl: Option<EnumDecl> = None
-    private var toStringDecl: Option<InheritableDecl> = None
-    private var objectDecl: Option<ClassDecl> = None
-    private var zeroValueDecl: Option<FuncDecl> = None
-    private var exceptionClassDecl: Option<ClassDecl> = None
+    // C++ MockUtils.h:163-175,233-235: these fields are private but MockManager,
+    // MockSupportManager, and TestManager are friends.
+    internal var getTypeForTypeParamDecl: Option<FuncDecl> = None
+    internal var isSubtypeTypesDecl: Option<FuncDecl> = None
+    internal var arrayDecl: Option<StructDecl> = None
+    internal var stringDecl: Option<StructDecl> = None
+    internal var optionDecl: Option<EnumDecl> = None
+    internal var toStringDecl: Option<InheritableDecl> = None
+    internal var objectDecl: Option<ClassDecl> = None
+    internal var zeroValueDecl: Option<FuncDecl> = None
+    internal var exceptionClassDecl: Option<ClassDecl> = None
 
     // C++: Sema/Test/MockUtils.cpp:43-46.
     public init(importManager: SemaImportManager, typeManager: TypeManager, mangler: BaseMangler) {

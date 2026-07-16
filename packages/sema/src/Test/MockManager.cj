@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::sema.{CreateInitCall, CreateThrowException, FindInitDecl, GetMemberDecl}
 import cjcj::sema.TypeManager
-import cjcj::utils.{CJC_ASSERT, DynamicCast}
+import cjcj::utils.{CJC_ASSERT, DynamicCast, GetRootPackageName, OBJECT_NAME}
 
 private let CREATE_MOCK_FUNC_NAME: String = "createMock"
 private let CREATE_SPY_FUNC_NAME: String = "createSpy"
@@ -97,7 +97,7 @@ public class MockManager {
     private let importManager: SemaImportManager
     private let mockUtils: MockUtils
 
-    private let instantiationCounters: HashMap<ClassLikeDecl, Int64> = HashMap<ClassLikeDecl, Int64>()
+    private let instantiationCounters: HashMap<Decl, Int64> = HashMap<Decl, Int64>()
 
     private var callHandlerDecl: Option<InterfaceDecl> = None
     private var mockedInterfaceDecl: Option<InterfaceDecl> = None
@@ -149,8 +149,9 @@ public class MockManager {
         }
         let objectRef = RefType()
         objectRef.ref.identifier = SrcIdentifier(OBJECT_NAME)
-        objectRef.ref.target = mockUtils.objectDecl
-        objectRef.SetTy(mockUtils.objectDecl.GetTy().getOrThrow())
+        let objectDecl = mockUtils.objectDecl.getOrThrow()
+        objectRef.ref.target = objectDecl
+        objectRef.SetTy(objectDecl.GetTy().getOrThrow())
         mockedDecl.inheritedTypes.add(objectRef, at: 0)
     }
 
@@ -209,10 +210,10 @@ public class MockManager {
 
     // C++: Sema/Test/MockManager.cpp:380-395.
     private func ComputeInstantiationNumberToMangleMockedDecl(declToMock: ClassLikeDecl): Int64 {
-        let genericDecl = if (let Some(decl) <- declToMock.genericDecl) {
+        let genericDecl: Option<ClassLikeDecl> = if (let Some(decl) <- declToMock.genericDecl) {
             decl as ClassLikeDecl
         } else {
-            None
+            Option<ClassLikeDecl>.None
         }
         if (let None <- genericDecl) {
             return 0
