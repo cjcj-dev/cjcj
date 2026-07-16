@@ -32,20 +32,20 @@ public func AddCurFile(root: Node, file!: Option<File> = None): Unit {
     if (let Some(pkg) <- (root as Package)) {
         for (pkgFile in pkg.files) {
             pkgFile.curPackage = pkg
-            assignCurFile(pkgFile, pkgFile)
+            AddCurFileImpl(pkgFile, pkgFile)
         }
         return
     }
     if (let Some(fileNode) <- (root as File)) {
-        assignCurFile(fileNode, fileNode)
+        AddCurFileImpl(fileNode, fileNode)
         return
     }
     if (let Some(value) <- file) {
-        assignCurFile(root, value)
+        AddCurFileImpl(root, value)
     }
 }
 
-private func assignCurFile(root: Node, file: File): Unit {
+private func AddCurFileImpl(root: Node, file: File): Unit {
     let walker = Walker(root, visitPre: { curNode: Node =>
         if (let Some(fileNode) <- (curNode as File)) {
             fileNode.curFile = Some(fileNode)
