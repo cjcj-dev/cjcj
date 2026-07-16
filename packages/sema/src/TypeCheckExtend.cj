@@ -1166,7 +1166,15 @@ extend TypeCheckerImpl {
         }
         for (interfaceTy in keys.values) {
             let typeSet = extendInterfaces[interfaceTy]
-            sort(typeSet, by: { left: Type, right: Type => CompNodeByPos(left, right) }, stable: true)
+            sort(typeSet, by: { left: Type, right: Type =>
+                if (CompNodeByPos(left, right)) {
+                    Ordering.LT
+                } else if (CompNodeByPos(right, left)) {
+                    Ordering.GT
+                } else {
+                    Ordering.EQ
+                }
+            }, stable: true)
             if (inheritInterfaces.contains(interfaceTy) || typeSet.size > 1) {
                 CJC_ASSERT(!typeSet.isEmpty())
                 let typeNode = typeSet[typeSet.size - 1]
