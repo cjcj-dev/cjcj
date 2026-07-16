@@ -304,24 +304,7 @@ extend ParserImpl {
                 break
             }
             if (!newlineSkipped && Skip(TokenKind.LPAREN)) {
-                let call = CallExpr()
-                try (cs = ChainScope(this, call)) {
-                    base.isBaseFunc = true
-                    call.baseFunc = base
-                    call.leftParenPos = lastToken.Begin()
-                    call.begin = base.begin
-                    while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RPAREN)) {
-                        call.args.add(ParseFuncArg())
-                        if (!Skip(TokenKind.COMMA)) { break }
-                    }
-                    if (!Skip(TokenKind.RPAREN) && !call.TestAttr(Attribute.HAS_BROKEN)) {
-                        call.EnableAttr(Attribute.HAS_BROKEN)
-                        DiagExpectedRightDelimiter("(", call.leftParenPos)
-                    }
-                    call.rightParenPos = lastToken.Begin()
-                    call.end = lastToken.End()
-                }
-                base = call
+                base = ParseCallExpr(base)
                 continue
             }
             if (Skip(TokenKind.DOT)) {
@@ -350,6 +333,27 @@ extend ParserImpl {
             base = chain
         }
         return base
+    }
+
+    public func ParseCallExpr(baseExpr: Expr): Expr {
+        let callExpr = CallExpr()
+        try (cs = ChainScope(this, callExpr)) {
+            callExpr.begin = baseExpr.begin
+            callExpr.leftParenPos = lastToken.Begin()
+            baseExpr.isBaseFunc = true
+            callExpr.baseFunc = baseExpr
+            ParseZeroOrMoreSepTrailing(
+                { pos: Position => callExpr.args[callExpr.args.size - 1].commaPos = pos },
+                { => callExpr.args.add(ParseFuncArg()) },
+                TokenKind.RPAREN)
+            if (!Skip(TokenKind.RPAREN) && !callExpr.TestAttr(Attribute.HAS_BROKEN)) {
+                callExpr.EnableAttr(Attribute.HAS_BROKEN)
+                DiagExpectedRightDelimiter("(", callExpr.leftParenPos)
+            }
+            callExpr.rightParenPos = lastToken.Begin()
+            callExpr.end = lastToken.End()
+        }
+        return callExpr
     }
 
     public func ParseSubscriptExpr(baseExpr: Expr): Expr {
