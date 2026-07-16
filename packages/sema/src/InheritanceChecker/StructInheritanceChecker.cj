@@ -1892,7 +1892,7 @@ public class StructInheritanceChecker {
                     diag,
                     DiagKindRefactor.sema_inherit_super_member_kind_inconsistent,
                     decl,
-                    DeclIdentifierRange(decl),
+                    MakeRange(decl.identifier.Begin(), decl.identifier.End()),
                     arguments: [name]
                 )
                 let sortedDecls = ArrayList<Decl>()
@@ -1902,7 +1902,8 @@ public class StructInheritanceChecker {
                     }
                 }
                 for (memberDecl in sortedDecls) {
-                    AddNote(builder, memberDecl, DeclIdentifierRange(memberDecl),
+                    AddNote(builder, memberDecl,
+                        MakeRange(memberDecl.identifier.Begin(), memberDecl.identifier.End()),
                         DeclKindText(memberDecl) + " member")
                 }
                 builder.Emit()
