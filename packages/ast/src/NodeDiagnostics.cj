@@ -286,6 +286,18 @@ public func AddNote(
     builder.AddNote(node.GetBegin(), kind, args: args)
 }
 
+public func AddNote(
+    builder: DiagnosticBuilder,
+    node: Node,
+    pos: Position,
+    kind: DiagKind,
+    args!: Array<DiagArgument> = Array<DiagArgument>()
+): Unit {
+    let begin = node.GetMacroCallPos(pos)
+    let end = if (begin == DEFAULT_POSITION) { begin } else { begin + 1 }
+    builder.diagnostic.notes.add(Diagnostic(begin, end, kind, args: args))
+}
+
 public func AddNote(builder: DiagnosticBuilder, node: Node, range: BasicRange, note: String): Unit {
     builder.diag.CheckRange(builder.diagnostic.GetDiagCategory(), range)
     let newRange = MakeRange(
