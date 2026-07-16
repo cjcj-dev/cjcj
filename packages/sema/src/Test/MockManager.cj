@@ -3,7 +3,7 @@ package cjcj::sema.Test
 import std.collection.*
 import cjcj::ast.*
 import cjcj::modules.SemaImportManager
-import cjcj::sema.CreateThrowException
+import cjcj::sema.{CreateInitCall, CreateThrowException, FindInitDecl}
 import cjcj::sema.TypeManager
 import cjcj::utils.{CJC_ASSERT, DynamicCast}
 
@@ -166,6 +166,18 @@ public class MockManager {
         let exceptionDecl = GetDeclFromMockPackage<ClassDecl>(importMgr, ILLEGAL_MOCK_CALL_EXCEPTION_NAME)
         CJC_ASSERT(exceptionDecl.isSome())
         return CreateThrowException(exceptionDecl.getOrThrow(), ArrayList<Expr>(), curFile, typeMgr)
+    }
+
+    // C++: Sema/Test/MockManager.cpp:397-413.
+    public static func CreateInitCallOfMockClass(mockClass: ClassDecl, mockCallArgs: ArrayList<FuncArg>,
+        typeManager: TypeManager, instTys: ArrayList<Ty>, valueParamTys: ArrayList<Ty>): CallExpr {
+        let initArgs = ArrayList<Expr>()
+        for (arg in mockCallArgs) {
+            initArgs.add((ASTCloner.Clone(arg.expr.getOrThrow()) as Expr).getOrThrow())
+        }
+        let initDecl = FindInitDecl(mockClass, typeManager, valueParamTys, instTys: instTys)
+        CJC_ASSERT(initDecl.isSome())
+        return CreateInitCall(initDecl.getOrThrow(), initArgs, mockClass.curFile.getOrThrow(), instTys: instTys)
     }
 
     public static func FindMockedClassOf(decl: ClassLikeDecl): Option<ClassDecl> {
