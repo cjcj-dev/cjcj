@@ -2223,13 +2223,12 @@ public class StructInheritanceChecker {
                 }
             }
             let interfaceName = if (let Some(outer) <- parentDecl.outerDecl) { outer.identifier.Val() } else { "" }
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            diag.Diagnose(
-                diagDecl.begin,
-                diagDecl.end,
+            Diagnose(
+                diag,
+                diagDecl,
                 DiagKind.sema_incompatible_mut_modifier_between_struct_and_interface,
                 args: [DiagArgument(child.identifier.Val()), DiagArgument(interfaceName)]
-            )
+            ).Emit()
         }
     }
 
