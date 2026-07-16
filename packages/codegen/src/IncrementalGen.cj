@@ -211,6 +211,40 @@ public class IncrementalGen {
         return ArrayList<String>(staticGINames)
     }
 
+    // Mirrors IncrementalGen.cpp:143-176.
+    public func LinkModules(incremental: LLVMModuleHandle,
+        cachedMangles!: CachedMangleMap = CachedMangleMap()): LLVMModuleHandle {
+        CJC_ASSERT(!incremental.raw.isNull() && injectedModule.isSome())
+        incrementalModule = incremental
+        InitCodeGenAddedCachedMap()
+        var function = unsafe { LLVMGetFirstFunction(incremental.raw) }
+        while (!function.isNull()) {
+            let subprogram = unsafe { LLVMGetSubprogram(function) }
+            if (!subprogram.isNull()) {
+                unsafe { LLVMSelfhostDISubprogramReplaceUnit(subprogram, LLVMNullMetadata()) }
+            }
+            function = unsafe { LLVMGetNextFunction(function) }
+        }
+
+        UpdateCachedDeclsFromInjectedModule(cachedMangles)
+        CopyDeclarationsToInjectedModule()
+        let valueMap = unsafe { LLVMSelfhostCreateValueToValueMap() }
+        FillValueMap(valueMap)
+        UpdateInitializationsOfGlobalVariables(valueMap)
+        UpdateDefinitionsOfFunction(valueMap)
+        UpdateBodyOfKeepTypesFunction(valueMap)
+        CollectUselessFunctions()
+        EraseUselessFunctions()
+        UpdateReflectionMetadata()
+        UpdateCodeGenAddedMetadata()
+        UpdateIncrLLVMUsedNames()
+        unsafe { LLVMSelfhostDisposeValueToValueMap(valueMap) }
+
+        let result = injectedModule.getOrThrow()
+        injectedModule = None
+        return result
+    }
+
     // Mirrors IncrementalGen.cpp:178-226.
     private func UpdateCachedDeclsFromInjectedModule(cachedMangles: CachedMangleMap): Unit {
         let module = injectedModule.getOrThrow()
