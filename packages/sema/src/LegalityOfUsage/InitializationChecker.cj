@@ -451,14 +451,13 @@ private func FromCommonPart(decl: Decl): Bool {
     return false
 }
 
-private func CollectUninitializedReferences(node: Node, excluded: ArrayList<Decl>): ArrayList<Decl> {
-    let result = ArrayList<Decl>()
+private func GetUnInitsInExpr(node: Node, unInitedNodes: ArrayList<Decl>): Unit {
     let walker = Walker(node, visitPre: { current: Node =>
         if (let Some(expr) <- (current as Expr)) {
             if (expr.IsReferenceExpr()) {
                 if (let Some(target) <- expr.GetTarget()) {
-                    if (!target.TestAttr(Attribute.INITIALIZED) && !ContainsInitDecl(excluded, target)) {
-                        AddUniqueDecl(result, target)
+                    if (!target.TestAttr(Attribute.INITIALIZED)) {
+                        AddUniqueDecl(unInitedNodes, target)
                     }
                 }
             }
@@ -466,11 +465,6 @@ private func CollectUninitializedReferences(node: Node, excluded: ArrayList<Decl
         VisitAction.WALK_CHILDREN
     })
     walker.Walk()
-    return result
-}
-
-private func CollectUninitializedReferences(node: Node): ArrayList<Decl> {
-    return CollectUninitializedReferences(node, ArrayList<Decl>())
 }
 
 private func CollectReferencedDeclsBeforeJumpExpr(block: Block): ArrayList<Decl> {
@@ -1977,11 +1971,11 @@ public class InitializationChecker {
         }
         var leftUninits = ArrayList<Decl>()
         if (let Some(left) <- binary.leftExpr) {
-            leftUninits = CollectUninitializedReferences(left)
+            GetUnInitsInExpr(left, leftUninits)
         }
         var rightUninits = ArrayList<Decl>()
         if (let Some(right) <- binary.rightExpr) {
-            rightUninits = CollectUninitializedReferences(right, leftUninits)
+            GetUnInitsInExpr(right, rightUninits)
         }
         var result = CheckExprOption(binary.leftExpr)
         optionalCtxDepth++
@@ -1995,7 +1989,8 @@ public class InitializationChecker {
 
     private func CheckInitInMatchExpr(matchExpr: MatchExpr): Bool {
         var result = CheckExprOption(matchExpr.selector)
-        let uninitsDecls = CollectUninitializedReferences(matchExpr)
+        let uninitsDecls = ArrayList<Decl>()
+        GetUnInitsInExpr(matchExpr, uninitsDecls)
         let commonInitedDeclsOfBranches = ArrayList<Decl>()
         let firstInitBranchInited = InitBoolBox(false)
         for (matchCase in matchExpr.matchCases) {
@@ -2029,7 +2024,8 @@ public class InitializationChecker {
 
     private func CheckInitInIfExpr(ifExpr: IfExpr): Bool {
         let result = CheckInitInConditionOption(ifExpr.condExpr)
-        let uninitsDecls = CollectUninitializedReferences(ifExpr)
+        let uninitsDecls = ArrayList<Decl>()
+        GetUnInitsInExpr(ifExpr, uninitsDecls)
         let commonInitedDeclsOfBranches = ArrayList<Decl>()
         let firstInitBranchInited = InitBoolBox(false)
         let curUninits = ArrayList<Decl>()
@@ -2076,7 +2072,8 @@ public class InitializationChecker {
 
     private func CheckInitInLoop(block: Option<Block>, shouldUnset!: Bool = true): Unit {
         if (let Some(loopBlock) <- block) {
-            let uninitedDecls = CollectUninitializedReferences(loopBlock)
+            let uninitedDecls = ArrayList<Decl>()
+            GetUnInitsInExpr(loopBlock, uninitedDecls)
             CheckInitialization(loopBlock)
             if (shouldUnset) {
                 for (decl in uninitedDecls) {
