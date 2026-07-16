@@ -6,6 +6,7 @@ import cjcj::chir.Block as CHIRBlock
 import cjcj::chir.Package as PluginCHIRPackage
 import cjcj::chir.Terminator as CHIRTerminator
 import cjcj::macro_pkg.{CloseSymbolTable, GetMethodPointer, OpenSymbolTableSafely, RuntimeHandle}
+import cjcj::utils.CJC_ASSERT
 import std.collection.*
 
 @C
