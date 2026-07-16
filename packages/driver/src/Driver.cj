@@ -2,12 +2,18 @@ package cjcj::driver
 
 import std.collection.*
 import cjcj::basic.{DEFAULT_POSITION, DiagnosticEngine, DiagKindRefactor, PrintVersion}
-import cjcj::option.{CreateOptionTable, Group}
+import cjcj::option.{ArgInstanceType, ArgList, ArgListEntry, CreateOptionTable, Group}
 import cjcj::utils.{ProfileRecorder, ProfileRecorderType}
+
+private func IsWarningArg(arg: String): Bool {
+    return arg.startsWith("-Woff") || arg.startsWith("--warn-off") || arg.startsWith("-Won") ||
+        arg.startsWith("--warn-on")
+}
 
 public class Driver {
     public let args: Array<String>
     public let driverOptions: DriverOptions = DriverOptions()
+    public let argList: ArgList = ArgList()
     public let executableName: String
     public var cangjieHome: String
 
@@ -20,7 +26,23 @@ public class Driver {
     }
 
     public func ParseArgs(): Bool {
-        if (!driverOptions.ParseFromArgs(args)) {
+        if (!CreateOptionTable(frontendMode: false).ParseArgs(args, argList)) {
+            return false
+        }
+        let warningArgs = ArrayList<ArgListEntry>()
+        let otherArgs = ArrayList<ArgListEntry>()
+        for (entry in argList.entries) {
+            if (entry.argInstanceType == ArgInstanceType.Option &&
+                IsWarningArg(argList.optionArgs[entry.index].str)) {
+                warningArgs.add(entry)
+            } else {
+                otherArgs.add(entry)
+            }
+        }
+        argList.entries.clear()
+        for (entry in warningArgs) { argList.entries.add(entry) }
+        for (entry in otherArgs) { argList.entries.add(entry) }
+        if (!driverOptions.ParseFromArgs(argList)) {
             return false
         }
         if (!driverOptions.cangjieHome.isEmpty()) {
@@ -71,7 +93,7 @@ public class Driver {
     public func ExecuteCompilation(): Bool {
         if (driverOptions.showUsage) {
             PrintUsage(driverOptions)
-            if (driverOptions.HasInputs()) {
+            if (!argList.GetInputs().isEmpty()) {
                 eprintln("warning: cjc doesn't do compilation job in show usage mode.")
             }
             return true
@@ -80,7 +102,7 @@ public class Driver {
             PrintVersion()
         }
         if (driverOptions.printVersionOnly) {
-            if (driverOptions.HasInputs()) {
+            if (!argList.GetInputs().isEmpty()) {
                 eprintln("warning: cjc doesn't do compilation job in version check mode.")
             }
             return true
@@ -96,9 +118,6 @@ public class Driver {
         }
         if (!ExecuteFrontendPhase(this)) {
             return false
-        }
-        if (driverOptions.frontendOnlyAction) {
-            return true
         }
         if (driverOptions.frontendOutputFiles.isEmpty() && driverOptions.inputObjs.isEmpty()) {
             return true

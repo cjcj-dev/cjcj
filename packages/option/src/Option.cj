@@ -408,14 +408,9 @@ public open class GlobalOptions <: Option {
     public let symbolsNeedLocalizedPerPkg: HashMap<String, ArrayList<String>> =
         HashMap<String, ArrayList<String>>()
     public var overflowStrategy: OverflowStrategy = OverflowStrategy.THROWING
-    public var targetCPU: String = ""
-    public var sysroot: String = ""
     public let libraryPaths: ArrayList<String> = ArrayList<String>()
-    public let libraries: ArrayList<String> = ArrayList<String>()
-    public let linkOptions: ArrayList<String> = ArrayList<String>()
     public let linkOptionGroups: ArrayList<String> = ArrayList<String>()
     public let toolchains: ArrayList<String> = ArrayList<String>()
-    public var useRuntimeRpath: Bool = false
     public var optOptions: String = ""
     public var llcOptions: String = ""
     public var stripAll: Bool = false

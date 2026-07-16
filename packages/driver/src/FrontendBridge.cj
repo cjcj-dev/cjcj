@@ -217,7 +217,7 @@ private func IsImportNameChar(byte: UInt8): Bool {
 }
 
 private func PrepareFrontendOutputs(opts: DriverOptions): Bool {
-    if (!HasFrontendSourceInput(opts) || opts.IsEmitCHIREnable() || opts.frontendOnlyAction ||
+    if (!HasFrontendSourceInput(opts) || opts.IsEmitCHIREnable() ||
         !opts.frontendOutputFiles.isEmpty()) {
         return true
     }
@@ -293,7 +293,7 @@ private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
     if (!HasFrontendSourceInput(opts)) {
         return true
     }
-    if (opts.IsEmitCHIREnable() || opts.frontendOnlyAction) {
+    if (opts.IsEmitCHIREnable()) {
         return true
     }
     return VerifyFrontendOutputs(opts)
@@ -301,9 +301,7 @@ private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
 
 private func PublishFrontendCjoOutputs(opts: DriverOptions): Bool {
     // C++: Option/Option.h:1199-1202 and FrontendTool/FrontendTool.cpp:108,152-155.
-    // DriverOptions folds OutputMode.CHIR into IsEmitCHIREnable; C++ only tests emitCHIRPhase here.
     if (!HasFrontendSourceInput(opts) || (opts.IsEmitCHIREnable() && opts.outputMode != OutputMode.CHIR) ||
-        opts.frontendOnlyAction ||
         opts.cjoOutputFiles.isEmpty()) {
         return true
     }
@@ -331,7 +329,7 @@ private func PublishFrontendCjoOutputs(opts: DriverOptions): Bool {
 }
 
 private func PublishFrontendBitcodeOutputs(opts: DriverOptions): Bool {
-    if (!HasFrontendSourceInput(opts) || opts.IsEmitCHIREnable() || opts.frontendOnlyAction ||
+    if (!HasFrontendSourceInput(opts) || opts.IsEmitCHIREnable() ||
         opts.frontendOutputFiles.isEmpty() || !opts.saveTemps) {
         return true
     }

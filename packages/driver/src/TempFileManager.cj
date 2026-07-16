@@ -182,7 +182,7 @@ public class TempFileManager {
     }
 
     private func CreateIntermediateFileInfo(info: TempFileInfo, kind: TempFileKind): TempFileInfo {
-        let dir = opts.outputDir ?? outputDir
+        let dir = if (opts.outputDir.hasValue) { opts.outputDir.value } else { outputDir }
         let path = FileUtil.JoinPath(dir, info.fileName) + TempFileKindSuffix(kind, opts)
         return TempFileInfo(fileName: info.fileName, filePath: path)
     }
@@ -223,7 +223,7 @@ public class TempFileManager {
     }
 
     private func CreateLinuxLLVMOptOutputBcFileInfo(info: TempFileInfo, kind: TempFileKind): TempFileInfo {
-        let dir = opts.outputDir ?? outputDir
+        let dir = if (opts.outputDir.hasValue) { opts.outputDir.value } else { outputDir }
         if (outputName.isEmpty()) {
             let fileName = "lib" + info.fileName
             let path = FileUtil.JoinPath(dir, fileName) + TempFileKindSuffix(kind, opts)

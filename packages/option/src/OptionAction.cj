@@ -138,28 +138,6 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.DUMP_DEPENDENT_PACKAGE) { opts.scanDepPkg = true; return handled() }
     if (id == ID.NO_SUB_PACKAGE) { opts.noSubPkg = true; return handled() }
     if (id == ID.TARGET) { return handled(success: ParseTargetTriple(opts, arg.value)) }
-    if (id == ID.TARGET_CPU) { opts.targetCPU = arg.value; return handled() }
-    if (id == ID.SYSROOT) {
-        let sysroot = opts.CheckDirectoryPath(arg.value)
-        if (sysroot.hasValue) { opts.sysroot = sysroot.value }
-        return handled(success: sysroot.hasValue)
-    }
-    if (id == ID.TOOLCHAIN) {
-        let toolchain = opts.CheckDirectoryPath(arg.value)
-        if (toolchain.hasValue) { opts.toolchains.add(toolchain.value) }
-        return handled(success: toolchain.hasValue)
-    }
-    if (id == ID.LIBRARY_PATH) {
-        let libPath = opts.CheckDirectoryPath(arg.value)
-        if (libPath.hasValue) { opts.libraryPaths.add(libPath.value) }
-        return handled(success: libPath.hasValue)
-    }
-    if (id == ID.LIBRARY) { opts.libraries.add(arg.value); return handled() }
-    if (id == ID.LINK_OPTION) { opts.linkOptions.add(arg.value); return handled() }
-    if (id == ID.LINK_OPTIONS) { opts.linkOptionGroups.add(arg.value); return handled() }
-    if (id == ID.USE_RUNTIME_RPATH) { opts.useRuntimeRpath = true; return handled() }
-    if (id == ID.OPT_OPTIONS) { opts.optOptions = arg.value; return handled() }
-    if (id == ID.LLC_OPTIONS) { opts.llcOptions = arg.value; return handled() }
     if (id == ID.OUTPUT_TYPE) { return parseOutputType(opts, arg.value) }
     if (id == ID.COMPILE_TARGET) { return parseCompileTarget(opts, arg.value) }
     if (id == ID.OPTIMIZATION_0) { return handled(success: opts.SetOptimizationLevel(OptimizationLevel.O0)) }

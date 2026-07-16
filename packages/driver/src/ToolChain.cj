@@ -2,6 +2,22 @@ package cjcj::driver
 
 import std.collection.*
 import std.sort.*
+import cjcj::utils.InternalError
+
+private func GetElementFromOrderVector(
+    orderVector: ArrayList<OrderedInput>, name: String
+): Option<OrderedInput> {
+    var index: Int64 = 0
+    while (index < orderVector.size) {
+        let item = orderVector[index]
+        if (item.value == name) {
+            orderVector.remove(at: index)
+            return Some(item)
+        }
+        index++
+    }
+    return None
+}
 
 public open class ToolChain {
     protected let driver: Driver
@@ -59,32 +75,6 @@ public open class ToolChain {
         for (value in values) {
             tool.AppendArg(value)
         }
-    }
-
-    private func IsSameInputPath(candidate: String, rawPath: String): Bool {
-        if (candidate == rawPath) {
-            return true
-        }
-        if (let Some(absCandidate) <- FileUtil.GetAbsPath(candidate)) {
-            return absCandidate == rawPath
-        }
-        return false
-    }
-
-    private func FindInputFileOrder(rawPath: String): Option<UInt64> {
-        for (item in driverOptions.orderedInputObjs) {
-            if (item.value == rawPath) {
-                return item.index
-            }
-        }
-        var index: Int64 = 1
-        while (index < driverOptions.argList.size) {
-            if (IsSameInputPath(driverOptions.argList[index], rawPath)) {
-                return UInt64(index - 1)
-            }
-            index++
-        }
-        return None
     }
 
     protected func CheckAndAddPathTo(results: ArrayList<String>, path: String, base!: String = ""): Unit {
@@ -345,32 +335,41 @@ public open class ToolChain {
 
     protected func AppendObjectsFromCompiled(tool: Tool, objFiles: ArrayList<TempFileInfo>,
         inputOrderTuples: ArrayList<(String, UInt64)>): Unit {
-        var index: UInt64 = 0u64
+        let itemTuples = ArrayList<OrderedInput>()
+        for (item in driverOptions.inputFileOrder) { itemTuples.add(item) }
         for (objFile in objFiles) {
             if (objFile.isFrontendOutput) {
                 tool.AppendArg(objFile.filePath)
             } else {
-                let order = FindInputFileOrder(objFile.rawPath) ?? UInt64(driverOptions.argList.size) + index
-                inputOrderTuples.add((objFile.filePath, order))
-                index++
+                if (let Some(found) <- GetElementFromOrderVector(itemTuples, objFile.rawPath)) {
+                    inputOrderTuples.add((objFile.filePath, found.index))
+                } else {
+                    InternalError("Input file not in inputFileOrder.")
+                }
             }
         }
     }
 
     protected func AppendObjectsFromInput(inputOrderTuples: ArrayList<(String, UInt64)>): Unit {
-        for (item in driverOptions.orderedInputObjs) {
-            inputOrderTuples.add((item.value, item.index))
+        let itemTuples = ArrayList<OrderedInput>()
+        for (item in driverOptions.inputFileOrder) { itemTuples.add(item) }
+        for (obj in driverOptions.inputObjs) {
+            if (let Some(found) <- GetElementFromOrderVector(itemTuples, obj)) {
+                inputOrderTuples.add((found.value, found.index))
+            } else {
+                InternalError("Input object file not in inputFileOrder.")
+            }
         }
     }
 
     protected func AppendLibrariesFromInput(inputOrderTuples: ArrayList<(String, UInt64)>): Unit {
-        for (item in driverOptions.orderedLibraries) {
-            inputOrderTuples.add((item.value, item.index))
+        for (item in driverOptions.inputLibraryOrder) {
+            inputOrderTuples.add(("-l" + item.value, item.index))
         }
     }
 
     protected func AppendLinkOptionFromInput(inputOrderTuples: ArrayList<(String, UInt64)>): Unit {
-        for (item in driverOptions.orderedLinkOptions) {
+        for (item in driverOptions.inputLinkOptionOrder) {
             if (!item.value.isEmpty()) {
                 inputOrderTuples.add((item.value, item.index))
             }
@@ -378,7 +377,7 @@ public open class ToolChain {
     }
 
     protected func AppendLinkOptionsFromInput(inputOrderTuples: ArrayList<(String, UInt64)>): Unit {
-        for (item in driverOptions.orderedLinkOptionGroups) {
+        for (item in driverOptions.inputLinkOptionsOrder) {
             for (part in SplitString(item.value, " ")) {
                 if (!part.isEmpty()) {
                     inputOrderTuples.add((part, item.index))
@@ -418,7 +417,7 @@ public open class ToolChain {
         // a macro-definition package links to a 'lib-macro_<pkg>' dynamic library (O_MACRO), which the
         // macro evaluator dlopens by that exact name; it must not be named like an ordinary 'lib<pkg>'
         // shared library. --compile-macro sets outputMode = SHARED_LIB, so this case must win over it.
-        let kind = if (driverOptions.compileMacro) {
+        let kind = if (driverOptions.compileMacroPackage) {
             TempFileKind.O_MACRO
         } else {
             match (driverOptions.outputMode) {

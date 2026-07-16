@@ -7,6 +7,7 @@ public import cjcj::option.{
 public import cjcj::option.EnvironmentOptions as OptionEnvironmentOptions
 public import cjcj::option.MaybeString as OptionMaybeString
 public import cjcj::option.OrderedInput as OptionOrderedInput
+public import cjcj::option.TempFileInfo as OptionTempFileInfo
 import cjcj::option.enumIndex as OptionOptimizationLevelIndex
 
 public enum ToolType {
@@ -96,27 +97,7 @@ public func OptimizationLevelIndex(value: OptimizationLevel): Int64 {
 
 public type OrderedInput = OptionOrderedInput
 
-public class TempFileInfo {
-    public var fileName: String
-    public var filePath: String
-    public var rawPath: String
-    public var isFrontendOutput: Bool
-    public var isForeignInput: Bool
-
-    public init(
-        fileName!: String = "",
-        filePath!: String = "",
-        rawPath!: String = "",
-        isFrontendOutput!: Bool = false,
-        isForeignInput!: Bool = false
-    ) {
-        this.fileName = fileName
-        this.filePath = filePath
-        this.rawPath = rawPath
-        this.isFrontendOutput = isFrontendOutput
-        this.isForeignInput = isForeignInput
-    }
-}
+public type TempFileInfo = OptionTempFileInfo
 
 public type EnvironmentOptions = OptionEnvironmentOptions
 public type MaybeString = OptionMaybeString

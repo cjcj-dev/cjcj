@@ -144,7 +144,7 @@ public class Job {
         }
         backend = nextBackend
         verbose = driverOptions.enableVerbose
-        jobLimit = NormalizeJobLimit(driverOptions.jobs)
+        jobLimit = NormalizeJobLimit(Some(driverOptions.GetJobs()))
         return true
     }
 

@@ -151,7 +151,8 @@ public class CJNATIVEBackend <: Backend {
         for (objFile in objFiles) {
             let srcFile = objFile.filePath
             let destFile = driverOptions.GetHashedObjFileName(FileUtil.GetFileNameWithoutExtension(srcFile)) + ".o"
-            if ((driverOptions.aggressiveParallelCompile ?? 1) > 1) {
+            if (driverOptions.aggressiveParallelCompile.hasValue &&
+                driverOptions.aggressiveParallelCompile.value > 1u64) {
                 let isParallelCompileObjFile = { =>
                     let fileName = FileUtil.GetFileNameWithoutExtension(srcFile)
                     let extension = FileUtil.GetFileExtension(srcFile)
