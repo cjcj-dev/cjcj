@@ -102,7 +102,7 @@ extend ParserImpl {
                 file.hasMacro = true
             }
             expr.begin = Peek().Begin()
-            ParseMacroInvocation(ScopeKind.FUNC_BODY, ArrayList<Modifier>(), expr.invocation, expr)
+            ParseMacroInvocation(ScopeKind.UNKNOWN_SCOPE, ArrayList<Modifier>(), expr.invocation, expr)
             expr.identifier = AstIdentifier(
                 expr.invocation.macroCallDiagInfo.identifier,
                 expr.invocation.macroNamePos,
