@@ -264,7 +264,7 @@ public func SynLitConstStringExpr(lce: LitConstExpr, stringTy!: Option<Ty> = Non
             if (!tm.IsSubtype(blockTy, toStringInterfaceTy)) {
                 if (Ty.IsTyCorrect(blockTy)) {
                     if (let Some(diagValue) <- diag) {
-                        let builder = diagValue.Diagnose(block.begin, block.end,
+                        let builder = Diagnose(diagValue, block,
                             BasicDiagKind.sema_invalid_string_implementation,
                             args: [BasicDiagArgument(blockTy.String())])
                         builder.Emit()
