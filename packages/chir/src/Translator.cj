@@ -7140,8 +7140,7 @@ public class Translator {
         }
         let sizeValue = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(Int64(arrayTy.size)),
             CurrentBlock()))
-        let argValue = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[0], "VArray init argument"), this) ??
-            throw IllegalStateException("faithful AST2CHIR VArray init argument produced no value")
+        let argValue = TranslateExprArg(RequireFuncArgExpr(expr.args[0], "VArray init argument"))
         let argTy = argValue.GetType() ??
             throw IllegalStateException("faithful AST2CHIR VArray init argument has no type")
         if (argTy.IsFunc()) {
