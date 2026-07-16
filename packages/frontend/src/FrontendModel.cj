@@ -1193,8 +1193,8 @@ private class CjoSignatureMaterializer {
 
     // IncrementalLoader.cpp:100-114 PrepareForLoadTypeCache.
     private func PrepareForLoadTypeCache(sourcePackage: Package): Unit {
-        let package = packageTable.getOrThrow()
-        let imports = package.GetImports().getOrThrow()
+        let cachedPackage = packageTable.getOrThrow()
+        let imports = cachedPackage.GetImports().getOrThrow()
         var importIndex: UInt32 = 0u32
         while (importIndex < imports.size()) {
             importedFullPackageNames.add(FlatBufferString(data.getOrThrow(),
@@ -1202,7 +1202,7 @@ private class CjoSignatureMaterializer {
             importIndex++
         }
         var fileCount = sourcePackage.files.size
-        let cachedFileCount = Int64(package.GetAllFiles().getOrThrow().size())
+        let cachedFileCount = Int64(cachedPackage.GetAllFiles().getOrThrow().size())
         if (cachedFileCount > fileCount) {
             fileCount = cachedFileCount
         }
