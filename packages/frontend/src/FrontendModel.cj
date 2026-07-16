@@ -2277,7 +2277,7 @@ private class CjoSignatureMaterializer {
                 DiagKindRefactor.feature_is_not_subset_of_child_set,
                 commonFile.begin,
                 arguments: [commonFile.GetFullPackageName(), commonFile.filePath])
-            diagBuilder.AddNote("Extra feature from common part file: " + JoinStrings(difference.toArray(), " "))
+            diagBuilder.AddNote("Extra feature from common part file: " + JoinStrings(difference.toArray(), " ") + " ")
             let childFile = sourcePkg.files[0]
             if (let Some(featureDirective) <- childFile.feature) {
                 diagBuilder.AddNote(MakeRange(featureDirective.begin, featureDirective.end),
