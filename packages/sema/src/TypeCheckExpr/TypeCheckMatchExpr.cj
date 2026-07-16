@@ -36,7 +36,8 @@ extend TypeChecker {
 
     // C++ src/Sema/TypeCheckMatchExpr.cpp:68-74 ChkMatchExpr.
     func ChkMatchExpr(ctx: ASTContext, target: Ty, me: MatchExpr): Bool {
-        if (let Some(_) <- me.selector) {
+        if (let Some(selector) <- me.selector) {
+            let _ = Synthesize(ctx, SynPos.EXPR_ARG, selector)
             return ChkMatchExprHasSelector(impl.typeManager, ctx, impl.diag, target, me,
                 exprChecker: Some({ target2: Ty, expr: Expr => Check(ctx, target2, expr) }),
                 desugarCallExpr: Some({ callExpr: CallExpr => DesugarCallExpr(callExpr) }))
