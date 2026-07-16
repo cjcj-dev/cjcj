@@ -1401,7 +1401,6 @@ private func ReorderCallArgument(typeManager: TypeManager, ctx: Option<ASTContex
     ce: CallExpr, argChecker: Option<CallArgChecker>): ArrayList<FuncDecl> {
     let out = ArrayList<FuncDecl>()
     ce.defaultArgs.clear()
-    ce.desugarArgs = None
     let bodyParams = BodyParamList(fmu.fd).getOrThrow().params
     let desugarArgs = ArrayList<FuncArg>()
     for (param in bodyParams) {
