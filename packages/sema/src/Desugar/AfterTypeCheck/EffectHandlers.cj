@@ -445,9 +445,9 @@ private func CreateGeneratedMemberCall(typeManager: TypeManager, callChecker: (T
     return callExpr
 }
 
-private func CreateActiveFrameParentAccess(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, source: Node, frameTy: Ty): Option<MemberAccess> {
-    if (let Some(activeFrame) <- CreateHandlerFrameCall(typeManager, callChecker, pkg, source,
+private func CreateActiveFrameParentAccess(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, source: Node, frameTy: Ty): Option<MemberAccess> {
+    if (let Some(activeFrame) <- CreateHandlerFrameCall(typeManager, importManager, callChecker, source,
         GET_ACTIVE_FRAME_NAME, ArrayList<Ty>())) {
         let activeFrameValue = CreateGeneratedMemberCall(typeManager, callChecker, source, activeFrame,
             GET_OR_THROW_NAME, frameTy)
@@ -458,9 +458,11 @@ private func CreateActiveFrameParentAccess(typeManager: TypeManager, callChecker
     return None
 }
 
-private func CreateFrameGuardCondition(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, source: Node, wrapperVar: VarDecl, frameTy: Ty): Option<BinaryExpr> {
-    if (let Some(parentAccess) <- CreateActiveFrameParentAccess(typeManager, callChecker, pkg, source, frameTy)) {
+private func CreateFrameGuardCondition(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, source: Node, wrapperVar: VarDecl,
+    frameTy: Ty): Option<BinaryExpr> {
+    if (let Some(parentAccess) <- CreateActiveFrameParentAccess(typeManager, importManager, callChecker,
+        source, frameTy)) {
         let wrapperFrame = CreateGeneratedFieldAccess(source, CreateRefExpr(wrapperVar, source), FRAME_FIELD_NAME)
         wrapperFrame.SetTy(frameTy)
         let condition = CreateBinaryExpr(parentAccess, wrapperFrame, TokenKind.EQUAL)
@@ -471,15 +473,15 @@ private func CreateFrameGuardCondition(typeManager: TypeManager, callChecker: (T
     return None
 }
 
-private func CreateWrapperGuardCatch(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, source: Node, wrapperDecl: ClassDecl, payloadFieldName: String,
+private func CreateWrapperGuardCatch(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, source: Node, wrapperDecl: ClassDecl, payloadFieldName: String,
     frameTy: Ty): Option<GeneratedCatchClause> {
     let wrapperTy = typeManager.GetClassTy(wrapperDecl, Array<Ty>())
     let wrapperPattern = CreateVarPattern(V_COMPILER_NAME, wrapperTy)
     CopyGeneratedPosition(source, wrapperPattern)
     if (let Some(wrapperVar) <- wrapperPattern.varDecl) {
         CopyGeneratedPosition(source, wrapperVar)
-        if (let Some(condition) <- CreateFrameGuardCondition(typeManager, callChecker, pkg, source,
+        if (let Some(condition) <- CreateFrameGuardCondition(typeManager, importManager, callChecker, source,
             wrapperVar, frameTy)) {
             let payload = CreateGeneratedFieldAccess(source, CreateRefExpr(wrapperVar, source), payloadFieldName)
             let thenBlock = CreateGeneratedBlock(source, CreateThrowExprFromExpr(source, payload),
@@ -496,8 +498,8 @@ private func CreateWrapperGuardCatch(typeManager: TypeManager, callChecker: (Ty,
     return None
 }
 
-private func CreateEarlyReturnMatch(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, source: Node, funcBody: FuncBody, earlyReturnVar: VarDecl,
+private func CreateEarlyReturnMatch(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, source: Node, funcBody: FuncBody, earlyReturnVar: VarDecl,
     tryReturnTy: Ty): Option<MatchExpr> {
     let resultAccess = CreateGeneratedFieldAccess(source, CreateRefExpr(earlyReturnVar, source), RESULT_FIELD_NAME)
     let resultPattern = CreateVarPattern(V_COMPILER_NAME, tryReturnTy)
@@ -517,7 +519,7 @@ private func CreateEarlyReturnMatch(typeManager: TypeManager, callChecker: (Ty, 
         let matchCases = ArrayList<MatchCase>()
         matchCases.add(CreateMatchCase(typePattern, returnResult))
 
-        if (let Some(exceptionCall) <- CreateDefaultExceptionCall(typeManager, callChecker, pkg, source)) {
+        if (let Some(exceptionCall) <- CreateDefaultExceptionCall(typeManager, importManager, callChecker, source)) {
             let wildcard = WildcardPattern()
             if (let Some(resultAccessTy) <- resultAccess.GetTy()) {
                 wildcard.SetTy(resultAccessTy)
@@ -533,17 +535,17 @@ private func CreateEarlyReturnMatch(typeManager: TypeManager, callChecker: (Ty, 
     return None
 }
 
-private func CreateEarlyReturnGuardCatch(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, source: Node, funcBody: FuncBody, earlyReturnDecl: ClassDecl,
+private func CreateEarlyReturnGuardCatch(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, source: Node, funcBody: FuncBody, earlyReturnDecl: ClassDecl,
     frameTy: Ty, tryReturnTy: Ty): Option<GeneratedCatchClause> {
     let earlyReturnTy = typeManager.GetClassTy(earlyReturnDecl, Array<Ty>())
     let earlyReturnPattern = CreateVarPattern(V_COMPILER_NAME, earlyReturnTy)
     CopyGeneratedPosition(source, earlyReturnPattern)
     if (let Some(earlyReturnVar) <- earlyReturnPattern.varDecl) {
         CopyGeneratedPosition(source, earlyReturnVar)
-        if (let Some(condition) <- CreateFrameGuardCondition(typeManager, callChecker, pkg, source,
+        if (let Some(condition) <- CreateFrameGuardCondition(typeManager, importManager, callChecker, source,
             earlyReturnVar, frameTy)) {
-            if (let Some(matchExpr) <- CreateEarlyReturnMatch(typeManager, callChecker, pkg, source, funcBody,
+            if (let Some(matchExpr) <- CreateEarlyReturnMatch(typeManager, importManager, callChecker, source, funcBody,
                 earlyReturnVar, tryReturnTy)) {
                 let thenBlock = CreateGeneratedBlock(source, matchExpr, TypeManager.GetNothingTy())
                 let rethrow = CreateThrowExprFromExpr(source, CreateRefExpr(earlyReturnVar, source))
