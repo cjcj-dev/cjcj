@@ -1272,16 +1272,15 @@ public class InitializationChecker {
         return false
     }
 
-    private func IsMemberUseOutsideCtor(target: Decl): Bool {
-        if (target.astKind != ASTKind.VAR_DECL) {
+    private func IsMemberUseOutsideCtor(ctx: ASTContext, expr: Expr, decl: Decl): Bool {
+        let isNotMemberVar = decl.outerDecl.isNone() || !decl.outerDecl.getOrThrow().IsNominalDecl() ||
+            decl.astKind != ASTKind.VAR_DECL
+        if (isNotMemberVar) {
             return false
         }
-        if (let Some(outer) <- target.outerDecl) {
-            if (!outer.IsNominalDecl()) {
-                return false
-            }
-            if (let Some(funcDecl) <- CurrentNamedFuncDecl()) {
-                return !funcDecl.TestAttr(Attribute.CONSTRUCTOR)
+        if (let Some(outerMostSymbol) <- ScopeManager.GetOutMostSymbol(ctx, SymbolKind.FUNC, expr.scopeName)) {
+            if (let Some(outerMostFunc) <- (outerMostSymbol.node.getOrThrow() as FuncDecl)) {
+                return !outerMostFunc.TestAttr(Attribute.CONSTRUCTOR)
             }
         }
         return false
@@ -1514,13 +1513,34 @@ public class InitializationChecker {
             if (CanSkipInitCheck(target) || !IsOrderRelated(refExpr, target, target.IsNominalDecl())) {
                 return true
             }
-            if (!CheckIllegalRefExprAccess(refExpr, target)) {
-                return false
+            let topLevelTarget = ScopeManager.GetCurSymbolByKind(SymbolKind.TOPLEVEL, ctx, target.scopeName)
+            if (let Some(targetSymbol) <- topLevelTarget) {
+                if (let Some(targetNode) <- targetSymbol.node) {
+                    if (CanSkipInitCheck(targetNode)) {
+                        return true
+                    }
+                    let topLevelRef = ScopeManager.GetCurSymbolByKind(SymbolKind.TOPLEVEL, ctx, refExpr.scopeName)
+                    if (let Some(refSymbol) <- topLevelRef) {
+                        if (let Some(refNode) <- refSymbol.node) {
+                            let referenceInside = refNode.IsStructOrClassDecl() && target.outerDecl.isSome() &&
+                                target.outerDecl.getOrThrow().IsNominalDecl() &&
+                                !target.TestAttr(Attribute.CONSTRUCTOR) && !target.TestAttr(Attribute.STATIC)
+                            if (referenceInside && !CheckIllegalRefExprAccess(refExpr, target)) {
+                                return false
+                            }
+                            let inDifferentScope = !SameSymbol(refSymbol, targetSymbol) &&
+                                !target.TestAttr(Attribute.STATIC)
+                            if (inDifferentScope) {
+                                return true
+                            }
+                        }
+                    }
+                }
             }
             if (let Some(_) <- (target as FuncParam)) {
                 return true
             }
-            if (target.IsFuncOrProp() || IsMemberUseOutsideCtor(target)) {
+            if (target.IsFuncOrProp() || IsMemberUseOutsideCtor(ctx, refExpr, target)) {
                 return true
             }
             if (!target.TestAttr(Attribute.INITIALIZED)) {
@@ -1576,7 +1596,7 @@ public class InitializationChecker {
                     }
                 }
             }
-            if (target.IsFuncOrProp() || IsMemberUseOutsideCtor(target)) {
+            if (target.IsFuncOrProp() || IsMemberUseOutsideCtor(ctx, member, target)) {
                 return result
             }
             if (target.TestAttr(Attribute.GLOBAL) && IsSameFile(member, target) && member.begin < target.begin) {
