@@ -898,7 +898,7 @@ public class TypeManager {
                         maps.inst.Put(tyVar.value, ty.value)
                     }
                 }
-            } else if (!tys.isEmpty()) {
+            } else {
                 if (let Some(instTv) <- ensureInstTyVar(maps, tyVar.value)) {
                     for (ty in tys) {
                         maps.inst.Put(instTv, ty.value)
