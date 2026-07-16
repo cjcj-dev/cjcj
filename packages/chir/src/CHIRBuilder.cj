@@ -19,6 +19,10 @@ public class CHIRBuilder {
         this.threadIdx = threadIdx
     }
 
+    public func GetChirContext(): CHIRContext {
+        return context
+    }
+
     public func GetAllCustomTypes(): HashSet<Type> {
         let result = HashSet<Type>()
         for ((_, bucket) in context.dynamicAllocatedTys) {
