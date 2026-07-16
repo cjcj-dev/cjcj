@@ -364,7 +364,7 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
                 if (target.IsNominalDecl() && target.TestAttr(Attribute.GENERIC)) {
                     let emptyInstTys = ArrayList<Ty>()
                     let emptyKey = InstantiationKey(target, emptyInstTys)
-                    if (!checker.HasInstantiatedKey(emptyKey) && !IsImportedInstantiationBoundary(target)) {
+                    if (!checker.HasInstantiatedKey(emptyKey)) {
                         checker.AddInstantiatedKey(emptyKey)
                         WalkInstDupFuncsInDecl(checker, target)
                     }
