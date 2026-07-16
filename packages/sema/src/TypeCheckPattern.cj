@@ -651,9 +651,6 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
     }
     let typeNode = pattern.typeNode.getOrThrow()
     SetTypeTy(typeManager, ctx, typeNode)
-    if (!Ty.IsTyCorrect(typeNode.GetTy())) {
-        return InvalidPatternTy(pattern)
-    }
     let patternTy = typeNode.GetTy().getOrThrow()
     if (typeManager.IsSubtype(target, patternTy, implicitBoxed: true, allowOptionBox: false)) {
         pattern.needRuntimeTypeCheck = false
