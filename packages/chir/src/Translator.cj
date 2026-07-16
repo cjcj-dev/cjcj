@@ -5,7 +5,7 @@ import std.sort.*
 
 import cjcj::utils.{CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, InternalError, OverflowStrategy, STATIC_INIT_FUNC}
 import cjcj::option.{EnvironmentType, GlobalOptions, OptimizationFlag}
-import cjcj::mangle.{DecimalToManglingNumber, MANGLE_COUNT_PREFIX, MANGLE_SUFFIX}
+import cjcj::mangle.{DecimalToManglingNumber, MANGLE_COUNT_PREFIX}
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::ast.ASTKind
 import cjcj::ast.IsInstanceConstructor as AstIsInstanceConstructor
