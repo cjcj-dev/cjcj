@@ -1,10 +1,13 @@
 package cjcj::frontend_tool
 
 import std.collection.*
+import cjcj::basic.{Errorln, StringConvertor}
+import cjcj::codegen.{getZExtValue, LLVMContextHandle, LLVMGetMDNodeOperands,
+    LLVMGetNamedMetadataOperandValues, LLVMParseIRFile}
 import cjcj::frontend.*
-import cjcj::incremental_compilation.CachedMangleMap
-import cjcj::incremental_compilation.IncreKind
+import cjcj::incremental_compilation.{CachedMangleMap, CompilationCache, IncreKind}
 import cjcj::utils.IncrementalCompilationLogger
+import cjcj::utils.CJC_ASSERT
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
 import cjcj::utils.FileUtil
@@ -390,6 +393,99 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         }
         return filesChanged
     }
+}
+
+private func GetCachedSplitNum(cachedCodeGenPath: String): Option<UInt64> {
+    var splitNum: Option<UInt64> = None
+    @When[os == "Windows"]
+    let tempPath = StringConvertor.NormalizeStringToUTF8(cachedCodeGenPath)
+    @When[os == "Windows"]
+    let path = if (let Some(value) <- tempPath) {
+        value
+    } else {
+        CJC_ASSERT(false)
+        cachedCodeGenPath
+    }
+    @When[os != "Windows"]
+    let path = cachedCodeGenPath
+    try (context = LLVMContextHandle.Create()) {
+        let parseResult = LLVMParseIRFile(context, path, name: path)
+        if (!parseResult.ok) {
+            Errorln("Illegal cached codegen info detected during incremental compilation.")
+            return splitNum
+        }
+        try (module = parseResult.module) {
+            for (mdNode in LLVMGetNamedMetadataOperandValues(module, "splitNum")) {
+                let operands = LLVMGetMDNodeOperands(mdNode)
+                splitNum = getZExtValue(operands[0])
+            }
+        }
+    }
+    return splitNum
+}
+
+private func CheckCachedBitcode(packageName: String, splitNum: UInt64, globalOp: GlobalOptions): Bool {
+    if (splitNum == 0u64) {
+        return false
+    }
+    var i = 0u64
+    while (i < splitNum) {
+        let cachedBcPath = globalOp.GenerateCachedPathNameForCodeGen(
+            i.toString() + "-" + packageName, "_cache.bc")
+        if (!FileUtil.FileExist(cachedBcPath)) {
+            IncrementalCompilationLogger.GetInstance().LogLn(
+                "the cached bitcode file is lost." + cachedBcPath + " index " + i.toString())
+            return false
+        }
+        i++
+    }
+    return true
+}
+
+private func CheckCachedBitcodeInfo(packageName: String, options: GlobalOptions): Bool {
+    let cgCachePath = options.GenerateCachedPathNameForCodeGen(packageName, ".cgCache")
+    if (!FileUtil.FileExist(cgCachePath)) {
+        IncrementalCompilationLogger.GetInstance().LogLn(
+            "load cached codegen info failed, roll back to full compilation")
+        return false
+    }
+    let splitNum = GetCachedSplitNum(cgCachePath)
+    if (splitNum.isNone()) {
+        IncrementalCompilationLogger.GetInstance().LogLn(
+            "get cached split num failed, roll back to full compilation")
+        return false
+    }
+    let bcCachedGood = CheckCachedBitcode(packageName, splitNum.getOrThrow(), options)
+    if (!bcCachedGood) {
+        IncrementalCompilationLogger.GetInstance().LogLn(
+            "load cached bitcode file failed, roll back to full compilation")
+        return false
+    }
+    return true
+}
+
+private func CheckCachedObjFile(options: GlobalOptions, cachedInfo: CompilationCache): Bool {
+    let logger = IncrementalCompilationLogger.GetInstance()
+    for (fileName in cachedInfo.bitcodeFilesName) {
+        let objFile = options.GetHashedObjFileName(fileName) + ".o"
+        if (!FileUtil.FileExist(objFile)) {
+            logger.LogLn("cached obj file not exist, roll back to full compilation")
+            return false
+        }
+    }
+    return true
+}
+
+private func CheckCachedBitcodeInfoForLTO(options: GlobalOptions, cachedInfo: CompilationCache): Bool {
+    let logger = IncrementalCompilationLogger.GetInstance()
+    for (fileName in cachedInfo.bitcodeFilesName) {
+        let objFile = options.GetHashedObjFileName(FileUtil.GetFileNameWithoutExtension(fileName)) + ".bc"
+        if (!FileUtil.FileExist(objFile)) {
+            logger.LogLn("load cached bitcode file for opt failed, roll back to full compilation")
+            return false
+        }
+    }
+    return true
 }
 
 private func LogIncrementalRollback(message: String): Unit {

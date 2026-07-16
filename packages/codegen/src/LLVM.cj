@@ -694,6 +694,10 @@ public func LLVMConsumeMessage(message: CString): String {
     return converted
 }
 
+public func getZExtValue(constantVal: LLVMValueRef): UInt64 {
+    return unsafe { LLVMConstIntGetZExtValue(constantVal) }
+}
+
 public class LLVMContextHandle <: Resource {
     public let raw: LLVMContextRef
     private let owned: Bool

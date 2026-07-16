@@ -15,6 +15,7 @@
 
 [dependencies]
   "cjcj::basic" = { path = "../basic" }
+  "cjcj::codegen" = { path = "../codegen" }
   "cjcj::frontend" = { path = "../frontend" }
   "cjcj::incremental_compilation" = { path = "../incremental_compilation" }
   "cjcj::option" = { path = "../option" }
