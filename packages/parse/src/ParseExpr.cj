@@ -576,7 +576,7 @@ extend ParserImpl {
                 op = combined
             }
             let prec = Precedence(op.kind)
-            if (prec < minPrec || prec == INVALID_PRECEDENCE) {
+            if (prec < minPrec || (prec == INVALID_PRECEDENCE && !IsAssignment(op.kind))) {
                 return lhs
             }
             if (newlineSkipped) {
@@ -862,7 +862,6 @@ extend ParserImpl {
     }
 
     public func Precedence(kind: TokenKind): UInt8 {
-        if (IsAssignment(kind)) { return 1u8 }
         return TokenPrecedence(kind)
     }
 
@@ -874,7 +873,8 @@ extend ParserImpl {
         if (let Some(_) <- LookupSeenCombinator()) {
             return true
         }
-        return Precedence(token.kind) != INVALID_PRECEDENCE
+        return Precedence(token.kind) != INVALID_PRECEDENCE || IsCompoundAssign(token.kind) ||
+            token.kind == TokenKind.ASSIGN
     }
 
     private func SeeingFakeOperator(): Bool {
