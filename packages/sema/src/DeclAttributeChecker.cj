@@ -349,11 +349,8 @@ private class DeclAttributeCheckerImpl {
         if (let Some(body) <- funcDecl.funcBody) {
             if (let Some(_) <- body.generic) {
                 if (funcDecl.TestAttr(Attribute.OPERATOR)) {
-                    AddIssue(
-                        DeclAttributeIssueKind.GENERIC_OPERATOR_FUNCTION,
-                        funcDecl,
-                        "generic operator overload functions are not supported"
-                    )
+                    // C++ src/Sema/DeclAttributeChecker.cpp:419-424.
+                    Diagnose(diag, funcDecl, BasicDiagKind.sema_generic_in_operator_overload).Emit()
                 }
             }
         }
