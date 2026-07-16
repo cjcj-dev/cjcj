@@ -52,8 +52,7 @@ private func DesugarTry(expr: TryExpr): Unit {
 
     for (handler in expr.handlers) {
         let commandPattern = (handler.commandPattern.getOrThrow() as CommandTypePattern).getOrThrow()
-        if (expr.TestAttr(Attribute.HAS_BROKEN) || commandPattern.TestAttr(Attribute.IS_BROKEN) ||
-            commandPattern.types[0].TestAttr(Attribute.IS_BROKEN)) {
+        if (expr.hasBroken || commandPattern.isBroken || commandPattern.types[0].isBroken) {
             expr.EnableAttr(Attribute.HAS_BROKEN)
             return
         }
@@ -1680,7 +1679,7 @@ extend ParserImpl {
         } else {
             ret.end = token.End()
         }
-        if (!ret.TestAttr(Attribute.HAS_BROKEN)) {
+        if (!ret.hasBroken) {
             DesugarTry(ret)
         }
         return ret
