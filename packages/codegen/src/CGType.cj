@@ -1,6 +1,7 @@
 package cjcj::codegen
 
 import std.collection.*
+import cjcj::basic.Linkage
 import cjcj::chir.Attribute
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.CustomType
@@ -9,7 +10,6 @@ import cjcj::chir.FuncType
 import cjcj::chir.Function
 import cjcj::chir.GenericType
 import cjcj::chir.LocalVar
-import cjcj::chir.Linkage
 import cjcj::chir.LinkTypeInfo
 import cjcj::chir.RefType
 import cjcj::chir.Type
