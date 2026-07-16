@@ -8,6 +8,8 @@ import cjcj::ast.FuncParamList as AstFuncParamList
 import cjcj::ast.MacroInvocation as AstMacroInvocation
 import cjcj::ast.ScopeKind as AstScopeKind
 import cjcj::ast.VarDecl as AstVarDecl
+import cjcj::ast.{ASTCloner, CopyBasicInfo, CreateBlock, CreateFuncBody, CreateFuncParam, CreateLambdaExpr,
+    SetIsClonedSourceCode}
 import cjcj::utils.CJC_ASSERT
 import cjcj::utils.IF_AVAILABLE
 
