@@ -9,7 +9,8 @@ import cjcj::incremental_compilation.{CachedMangleMap, CompilationCache, DeleteR
     DeleteRemovedNodesInCHIROptEffectMap, IncreKind, IncreResult, IncrementalScopeAnalysis,
     IncrementalScopeAnalysisArgs, MergeCHIROptEffectMap}
 import cjcj::sema.{CollectChangedStructTypes, CollectCompilerAddedDeclUsage, CollectRemovedMangles,
-    CollectRemovedManglesForReCompile, HandleCtorForIncr, MarkIncrementalCheckForCtor}
+    CollectRemovedManglesForReCompile, MarkIncrementalCheckForCtor}
+import cjcj::sema.Desugar.HandleCtorForIncr
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, IncrementalCompilationLogger}
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
