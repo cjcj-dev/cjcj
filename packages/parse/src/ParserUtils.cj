@@ -7,6 +7,14 @@ import cjcj::ast.Walker
 import cjcj::option.IsUnsafeBackend as OptionIsUnsafeBackend
 import cjcj::utils.CJC_ASSERT
 
+public func GetTypeFirst(): Array<TokenKind> {
+    return [TokenKind.INT8, TokenKind.INT16, TokenKind.INT32, TokenKind.INT64, TokenKind.INTNATIVE,
+        TokenKind.UINT8, TokenKind.UINT16, TokenKind.UINT32, TokenKind.UINT64, TokenKind.UINTNATIVE,
+        TokenKind.FLOAT16, TokenKind.FLOAT32, TokenKind.FLOAT64, TokenKind.RUNE, TokenKind.BOOLEAN,
+        TokenKind.NOTHING, TokenKind.UNIT, TokenKind.QUEST, TokenKind.LPAREN, TokenKind.IDENTIFIER,
+        TokenKind.THISTYPE, TokenKind.VARRAY]
+}
+
 func LookupMatchingOpenBracket(kind: TokenKind): TokenKind {
     if (kind == TokenKind.RCURL) {
         return TokenKind.LCURL

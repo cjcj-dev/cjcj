@@ -1148,7 +1148,13 @@ extend ParserImpl {
                 if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) && Seeing(TokenKind.THISTYPE)) {
                     enableThis = true
                 }
-                body.retType = ParseType()
+                if (SeeingAny(GetTypeFirst()) || SeeingContextualKeyword()) {
+                    body.retType = ParseType()
+                } else {
+                    body.EnableAttr(Attribute.IS_BROKEN)
+                    DiagExpectedIdentifierFuncBody(body)
+                    TryConsumeUntilAny([TokenKind.LCURL, TokenKind.WHERE])
+                }
                 if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY)) {
                     enableThis = false
                 }
