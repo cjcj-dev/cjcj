@@ -2736,7 +2736,6 @@ extend TypeChecker {
             impl.CheckValueTypeRecursive(pkg)
             let result = CheckLegalityOfUsage(
                 ctx, pkg, diagValue, impl.typeManager, impl, opts: GlobalOptions())
-            CheckClosures(ctx, pkg)
             EmitLegalityOfUsage(diagValue, result)
         }
     }
