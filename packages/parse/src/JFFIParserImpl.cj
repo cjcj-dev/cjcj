@@ -127,8 +127,7 @@ public class JFFIParserImpl {
         if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL) {
             return
         }
-        decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.DiagUnexpectedAnnoOnKind(anno, decl.begin, anno.identifier.Val(), decl.astKind)
+        parser.DiagUnexpectedAnnoOnKind(anno, decl.keywordPos, anno.identifier.Val(), decl.astKind)
     }
 
     private func CheckImplAnnoTarget(anno: Annotation, decl: Decl): Unit {
