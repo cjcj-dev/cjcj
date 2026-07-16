@@ -235,9 +235,15 @@ foreign {
     func LLVMSetValueName2(value: LLVMValueRef, name: CString, nameLen: UIntNative): Unit
     func LLVMGetLinkage(global: LLVMValueRef): Int32
     func LLVMSetLinkage(global: LLVMValueRef, linkage: Int32): Unit
+    func LLVMGetUnnamedAddress(global: LLVMValueRef): Int32
     func LLVMSetUnnamedAddress(global: LLVMValueRef, unnamedAddr: Int32): Unit
     func LLVMIsDeclaration(global: LLVMValueRef): Int32
+    func LLVMGetGlobalConstant(global: LLVMValueRef): Int32
     func LLVMSetGlobalConstant(global: LLVMValueRef, isConstant: Int32): Unit
+    func LLVMGetVisibility(global: LLVMValueRef): Int32
+    func LLVMSetVisibility(global: LLVMValueRef, visibility: Int32): Unit
+    func LLVMGetThreadLocalMode(global: LLVMValueRef): Int32
+    func LLVMSetThreadLocalMode(global: LLVMValueRef, mode: Int32): Unit
     func LLVMGetInitializer(global: LLVMValueRef): LLVMValueRef
     func LLVMSetInitializer(global: LLVMValueRef, constantVal: LLVMValueRef): Unit
     func LLVMGetAlignment(value: LLVMValueRef): UInt32
