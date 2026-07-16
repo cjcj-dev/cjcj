@@ -22,13 +22,6 @@ private func DeclIdentifierRange(decl: Decl): BasicRange {
     return DeclRange(decl)
 }
 
-private func NodeConflictRange(node: Node): BasicRange {
-    if (let Some(decl) <- (node as Decl)) {
-        return DeclIdentifierRange(decl)
-    }
-    return MakeRange(node.begin, node.end)
-}
-
 private func DeclKindText(decl: Decl): String {
     return DeclKindToString(decl)
 }
@@ -1923,15 +1916,19 @@ public class StructInheritanceChecker {
     private func DiagnoseInheritedInsconsistType(member: MemberSignature, node: Node): Unit {
         if (let Some(memberDecl) <- member.decl) {
             let typeName = if (memberDecl.astKind == ASTKind.PROP_DECL) { "type" } else { "return type" }
+            var range = MakeRange(node.begin, node.end)
+            if (let Some(decl) <- (node as Decl)) {
+                range = MakeRange(decl.identifier.Begin(), decl.identifier.End())
+            }
             let builder = DiagnoseRefactor(
                 diag,
                 DiagKindRefactor.sema_inherit_member_type_inconsistent,
                 node,
-                NodeConflictRange(node),
+                range,
                 arguments: [typeName, DeclKindText(memberDecl), memberDecl.identifier.Val()]
             )
             builder.AddNote("conflict types are " + StringifyInconsistentTypes(member.inconsistentTypes))
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+            builder.Emit()
         }
     }
 
