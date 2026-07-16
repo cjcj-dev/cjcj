@@ -350,7 +350,8 @@ private func collectDeclsFromDecl(decl: Decl, collector: DeclCollectorForTypeChe
     }
 }
 
-private func markTypeAliasCycle(root: TypeAliasDecl, path: ArrayList<Decl>): String {
+// C++ src/Sema/PreCheck.cpp:40-58 ConstructDiagInfoForCycle.
+private func ConstructDiagInfoForCycle(root: TypeAliasDecl, path: ArrayList<Decl>): String {
     var inCycle = false
     var diagInfo = ""
     for (decl in path) {
@@ -362,7 +363,6 @@ private func markTypeAliasCycle(root: TypeAliasDecl, path: ArrayList<Decl>): Str
             diagInfo += decl.identifier.Val() + "->"
         }
     }
-    root.EnableAttr(Attribute.IN_REFERENCE_CYCLE)
     return diagInfo + root.identifier.Val()
 }
 
@@ -383,29 +383,36 @@ private func isVisitStatus(value: InheritanceVisitStatus, expected: InheritanceV
     }
 }
 
-private func checkTypeAliasCycleForOneDecl(tad: TypeAliasDecl, path: ArrayList<Decl>): Unit {
+// C++ src/Sema/PreCheck.cpp:1265-1279 TypeCheckerImpl::CheckTypeAliasCycleForOneDecl.
+private func CheckTypeAliasCycleForOneDecl(diag: Option<BasicDiagnosticEngine>, tad: TypeAliasDecl,
+    path: ArrayList<Decl>): Unit {
     if (isVisitStatus(tad.checkFlag, InheritanceVisitStatus.VISITING)) {
-        let _ = markTypeAliasCycle(tad, path)
-        return
-    }
-    if (isVisitStatus(tad.checkFlag, InheritanceVisitStatus.VISITED)) {
+        let diagInfo = ConstructDiagInfoForCycle(tad, path)
+        if (let Some(diagValue) <- diag) {
+            Diagnose(diagValue, tad, BasicDiagKind.sema_typealias_cycle,
+                args: [BasicDiagArgument(diagInfo)]).Emit()
+        }
         return
     }
     tad.checkFlag = InheritanceVisitStatus.VISITING
     path.add(tad)
     if (let Some(typeNode) <- tad.typeNode) {
-        checkTypeAliasCycleForOneType(typeNode, path)
+        CheckTypeAliasCycleForOneType(diag, typeNode, path)
     }
     path.remove(at: path.size - 1)
     tad.checkFlag = InheritanceVisitStatus.VISITED
 }
 
-private func checkTypeAliasCycleForOneType(typeNode: Type, path: ArrayList<Decl>): Unit {
+// C++ src/Sema/PreCheck.cpp:1232-1263 CheckTypeAliasCycleForOneType and
+// CheckTypeAliasCycleForTypeArgsRecursively. Walker traversal is the existing selfhost
+// representation of C++ GetTypeArgsOfType followed by the per-type check.
+private func CheckTypeAliasCycleForOneType(diag: Option<BasicDiagnosticEngine>, typeNode: Type,
+    path: ArrayList<Decl>): Unit {
     let walker = Walker(typeNode, visitPre: { node: Node =>
         if (let Some(currentType) <- (node as Type)) {
             if (let Some(target) <- currentType.GetTarget()) {
                 if (let Some(aliasDecl) <- (target as TypeAliasDecl)) {
-                    checkTypeAliasCycleForOneDecl(aliasDecl, path)
+                    CheckTypeAliasCycleForOneDecl(diag, aliasDecl, path)
                 }
             }
         }
@@ -414,7 +421,8 @@ private func checkTypeAliasCycleForOneType(typeNode: Type, path: ArrayList<Decl>
     let _ = walker.Walk()
 }
 
-public func TypeAliasCircleCheck(ctx: ASTContext): Unit {
+// C++ src/Sema/PreCheck.cpp:1218-1230 TypeCheckerImpl::TypeAliasCircleCheck.
+public func TypeAliasCircleCheck(diag: Option<BasicDiagnosticEngine>, ctx: ASTContext): Unit {
     if (let Some(pkg) <- ctx.curPackage) {
         if (pkg.TestAttr(Attribute.IMPORTED)) {
             return
@@ -429,7 +437,7 @@ public func TypeAliasCircleCheck(ctx: ASTContext): Unit {
     for (decl in decls) {
         if (let Some(tad) <- (decl as TypeAliasDecl)) {
             let path = ArrayList<Decl>()
-            checkTypeAliasCycleForOneDecl(tad, path)
+            CheckTypeAliasCycleForOneDecl(diag, tad, path)
         }
     }
 }
@@ -826,7 +834,7 @@ public func ResolveTypeAlias(typeManager: TypeManager, ctx: ASTContext,
             SetTypeAliasDeclTy(typeManager, ctx, tad, importManager: importManager, diag: diag)
         }
     }
-    TypeAliasCircleCheck(ctx)
+    TypeAliasCircleCheck(diag, ctx)
     for (decl in decls) {
         if (let Some(tad) <- (decl as TypeAliasDecl)) {
             SubstituteTypeAliasForAlias(typeManager, tad)
