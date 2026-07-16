@@ -10,6 +10,19 @@ import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
 
+public func DiagGenericFuncWithoutTypeArg(diag: BasicDiagnosticEngine, expr: Expr): Unit {
+    if (!expr.ShouldDiagnose()) {
+        return
+    }
+    var range = MakeRange(expr.begin, expr.end)
+    if (let Some(memberAccess) <- (expr as MemberAccess)) {
+        range = MakeRange(memberAccess.field.Begin(), memberAccess.field.End())
+    }
+    let name = if (let Some(symbol) <- expr.symbol) { " '" + symbol.name + "'" } else { "" }
+    DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_generic_func_without_type_arg,
+        expr, range, arguments: [name]).Emit()
+}
+
 public func DiagAmbiguousUse(diag: BasicDiagnosticEngine, node: Node, name: String,
     targets: ArrayList<Decl>, importManager: SemaImportManager): Unit {
     let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ambiguous_use, node,
