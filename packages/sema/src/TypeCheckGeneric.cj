@@ -596,10 +596,9 @@ extend TypeCheckerImpl {
                 }
                 if (!found) {
                     if (let Some(diagEngine) <- diag) {
-                        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                        diagEngine.Diagnose(refType.begin, refType.end,
+                        Diagnose(diagEngine, refType,
                             BasicDiagKind.sema_generics_type_variable_not_defined,
-                            args: [BasicDiagArgument(refType.ref.identifier.Val())])
+                            args: [BasicDiagArgument(refType.ref.identifier.Val())]).Emit()
                     }
                 }
             }
