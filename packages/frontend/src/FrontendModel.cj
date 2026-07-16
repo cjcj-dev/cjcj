@@ -24,6 +24,7 @@ import cjcj::modules.{GetPackage, PackageFormat_AliasInfo, PackageFormat_Anno, P
     PackageFormat_ArrayTyInfo, PackageFormat_ClassInfo, PackageFormat_CompositeTyInfo, PackageFormat_Constraint,
     PackageFormat_Decl, PackageFormat_EnumInfo, PackageFormat_Expr, PackageFormat_ExtendInfo,
     PackageFormat_ForInInfo, PackageFormat_FullId, PackageFormat_FuncBody, PackageFormat_FuncInfo,
+    PackageFormat_FuncParamList,
     PackageFormat_FuncTyInfo, PackageFormat_Generic, PackageFormat_GenericTyInfo, PackageFormat_InterfaceInfo,
     PackageFormat_LetPatternDestructorInfo, PackageFormat_MatchCaseInfo, PackageFormat_Package,
     PackageFormat_Pattern, PackageFormat_Position, PackageFormat_ReferenceInfo, PackageFormat_SemaTy,
@@ -48,7 +49,7 @@ public import cjcj::mangle.BaseMangler
 import cjcj::sema.TypeManager as FaithfulSemaTypeManager
 import cjcj::sema.Test.TestManager as RealTestManager
 import cjcj::utils.{AST_PACKAGE_NAME, CORE_PACKAGE_NAME, DynamicCast, EraseIf, JoinStrings, MAIN_INVOKE,
-    SYNC_PACKAGE_NAME, CJC_ASSERT}
+    SERIALIZED_FILE_EXTENSION, SYNC_PACKAGE_NAME, CJC_ASSERT, IncrementalCompilationLogger}
 import cjcj::utils.FileUtil
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.STANDARD_LIBS
@@ -986,7 +987,7 @@ private class CjoSignatureMaterializer {
     private let importSrcCode: Bool
     private let deserializingCommon: Bool
     private let canInline: Bool
-    private let isLoadCache: Bool
+    private var isLoadCache: Bool
     private var isChirNow: Bool = false
 
     public init(packageName: String, pkg: Package, filesByIndex: HashMap<UInt32, File>,
