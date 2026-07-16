@@ -370,7 +370,8 @@ public class CompilerInstance {
             ProfileRecorder.SetOutputDir(globalOpts.output)
             if (IsNeedSaveIncrCompilationLogFile(globalOpts, invocation.frontendOptions)) {
                 let incrLogPath = globalOpts.GenerateCachedPathName(srcPkgs[0].fullPackageName, CACHED_LOG_EXTENSION)
-                let _ = WriteFileContent(incrLogPath, "")
+                IncrementalCompilationLogger.GetInstance().InitLogFile(incrLogPath)
+                IncrementalCompilationLogger.GetInstance().WriteBuffToFile()
             }
             if (globalOpts.NeedDumpASTToFile()) {
                 DumpAST(GetSourcePackages(), globalOpts.output, "parse")
