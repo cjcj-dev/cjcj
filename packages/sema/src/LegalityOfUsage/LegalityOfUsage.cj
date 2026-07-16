@@ -578,6 +578,7 @@ public func CheckLegalityOfUsage(
     diag: BasicDiagnosticEngine,
     typeManager: TypeManager,
     impl: TypeCheckerImpl,
+    checkClosures: (ASTContext, Node) -> Unit,
     opts!: OptionGlobalOptions = OptionGlobalOptions()
 ): LegalityOfUsageResult {
     let result = LegalityOfUsageResult()
@@ -592,7 +593,7 @@ public func CheckLegalityOfUsage(
     result.initializationIssues.clear()
     result.globalVarInitializationIssues.clear()
     CheckLegalityOfUnsafeAndInout(pkg, diag, backendType: opts.backend)
-    impl.CheckClosures(ctx, pkg)
+    checkClosures(ctx, pkg)
     CheckAccessLevelValidity(pkg, diag)
     CheckAllInvocationHasImpl(ctx, pkg, diag, typeManager)
     AppendSubscriptIssues(result.subscriptLegalityIssues, CheckSubscriptLegality(pkg))
