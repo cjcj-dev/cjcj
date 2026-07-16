@@ -463,8 +463,8 @@ public func TypeCheckDeclCheckIndexOperatorOverload(
     }
     if (!invalidNamedParams.isEmpty()) {
         let first = invalidNamedParams[0]
-        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_subscript_assign_parameter,
-            TypeCheckDeclIdentifierRange(first))
+        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_invalid_subscript_assign_parameter,
+            first, TypeCheckDeclIdentifierRange(first))
         var idx: Int64 = 1
         while (idx < invalidNamedParams.size) {
             builder.AddHint(TypeCheckDeclIdentifierRange(invalidNamedParams[idx]))
@@ -473,8 +473,8 @@ public func TypeCheckDeclCheckIndexOperatorOverload(
         builder.Emit()
     }
     if (params.size <= 1) {
-        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_subscript_assign_parameter_num,
-            TypeCheckDeclIdentifierRange(fd))
+        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_invalid_subscript_assign_parameter_num,
+            fd, TypeCheckDeclIdentifierRange(fd))
         builder.Emit()
         valid = false
     }
@@ -482,11 +482,16 @@ public func TypeCheckDeclCheckIndexOperatorOverload(
         if (let Some(realFuncTy) <- (fd.GetTy().getOrThrow() as FuncTy)) {
             if (!realFuncTy.retTy.IsUnit()) {
                 let range = if (let Some(retType) <- body.retType) {
-                    MakeRange(retType.begin, retType.end)
+                    if (!retType.begin.IsZero()) {
+                        MakeRange(retType.begin, retType.end)
+                    } else {
+                        TypeCheckDeclIdentifierRange(fd)
+                    }
                 } else {
                     TypeCheckDeclIdentifierRange(fd)
                 }
-                let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_invalid_subscript_assign_return, range)
+                let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_invalid_subscript_assign_return,
+                    fd, range)
                 builder.Emit()
                 valid = false
             }
