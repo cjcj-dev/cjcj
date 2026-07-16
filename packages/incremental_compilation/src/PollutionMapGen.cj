@@ -1,216 +1,172 @@
 package cjcj::incremental_compilation
 
 import std.collection.*
+import cjcj::ast.*
+import cjcj::modules.SemaImportManager
 
 public class PollutionMapGen {
     private let mangled2Decl: RawMangled2DeclMap
     private let sourcePopulations: SrcImportedDepMap
     private let graph: SemanticInfo
-    private let packageDecl: IncrDecl
+    private let pdecl: PackageDecl
     private let resp: ChangePollutedMap = ChangePollutedMap()
     private let rest: TypeMap = TypeMap()
 
-    public static func Get(packageDecl: IncrDecl, mangledName2AST: RawMangled2DeclMap,
+    public static func Get(packageDecl: PackageDecl, mangledName2AST: RawMangled2DeclMap,
         sourceImportedInfo: SrcImportedDepMap, usage: SemanticInfo, chirOpt: OptEffectStrMap,
-        importManager: IncrImportManager): (ChangePollutedMap, TypeMap) {
-        let gen = PollutionMapGen(packageDecl, mangledName2AST, sourceImportedInfo, usage)
-        gen.Collect()
-        gen.CollectCHIROpt(chirOpt)
-        gen.CollectAlias(importManager)
-        return (gen.resp, gen.rest)
+        importManager: SemaImportManager): (ChangePollutedMap, TypeMap) {
+        let instance = PollutionMapGen(packageDecl, mangledName2AST, sourceImportedInfo, usage)
+        instance.Collect()
+        instance.CollectCHIROpt(chirOpt)
+        instance.CollectAlias(importManager, packageDecl.srcPackage)
+        return (instance.resp, instance.rest)
     }
 
-    private init(packageDecl: IncrDecl, mangledName2AST: RawMangled2DeclMap,
+    private init(packageDecl: PackageDecl, mangledName2AST: RawMangled2DeclMap,
         sourcePopulations: SrcImportedDepMap, graph: SemanticInfo) {
-        this.packageDecl = packageDecl
-        this.mangled2Decl = mangledName2AST
+        pdecl = packageDecl
+        mangled2Decl = mangledName2AST
         this.sourcePopulations = sourcePopulations
         this.graph = graph
     }
 
     private func Collect(): Unit {
-        for ((decl, usage) in graph.usages) {
-            CollectPopulation(decl, usage)
-        }
-        for ((src, dsts) in sourcePopulations) {
-            CollectSourceImportedPopulation(src, dsts)
-        }
-        for ((mangle, relation) in graph.relations) {
-            CollectRelation(mangle, relation)
-        }
-        for ((name, relation) in graph.builtInTypeRelations) {
-            CollectBuiltinRelation(name, relation)
-        }
+        for ((decl, usage) in graph.usages) { CollectPopulation(decl, usage) }
+        for ((src, dsts) in sourcePopulations) { CollectSourceImportedPopulation(src, dsts) }
+        for ((mangle, relation) in graph.relations) { CollectRelation(mangle, relation) }
+        for ((name, relation) in graph.builtInTypeRelations) { CollectBuiltinRelation(name, relation) }
     }
 
     private func CollectCHIROpt(chirOpt: OptEffectStrMap): Unit {
         for ((src, uses) in chirOpt) {
-            if (!resp.directBody.contains(src)) {
-                resp.directBody[src] = HashSet<IncrDecl>()
+            if (!resp.directUses.body.contains(src)) {
+                resp.directUses.body[src] = HashSet<Decl>()
             }
             for (use in uses) {
-                if (let Some(decl) <- mangled2Decl.get(use)) {
-                    resp.directBody[src].add(decl)
-                }
+                if (let Some(decl) <- mangled2Decl.get(use)) { resp.directUses.body[src].add(decl) }
             }
         }
     }
 
-    private func CollectRelation(mangle: String, relation: SemaRelation): Unit {
-        for (ext in relation.extends) {
-            rest.AddExtend(mangle, ext)
-        }
-        for (interf in relation.extendedInterfaces) {
-            if (!rest.interfaceExtendTypes.contains(interf)) {
-                rest.interfaceExtendTypes[interf] = HashSet<String>()
+    private func CollectRelation(mangle: RawMangledName, relation: SemaRelation): Unit {
+        for (extendName in relation.extends) { rest.AddExtend(mangle, extendName) }
+        for (interfaceName in relation.extendedInterfaces) {
+            if (!rest.interfaceExtendTypes.contains(interfaceName)) {
+                rest.interfaceExtendTypes[interfaceName] = HashSet<RawMangledName>()
             }
-            rest.interfaceExtendTypes[interf].add(mangle)
+            rest.interfaceExtendTypes[interfaceName].add(mangle)
         }
         if (let Some(decl) <- mangled2Decl.get(mangle)) {
             for (typeName in relation.inherits) {
-                if (let Some(parent) <- mangled2Decl.get(typeName)) {
-                    rest.AddParent(parent, decl)
-                }
+                if (let Some(parent) <- mangled2Decl.get(typeName)) { rest.AddParent(parent, decl) }
             }
         }
     }
 
     private func CollectBuiltinRelation(name: String, relation: SemaRelation): Unit {
-        for (ext in relation.extends) {
-            rest.AddExtend(name, ext)
-        }
-        for (interf in relation.extendedInterfaces) {
-            if (!rest.interfaceExtendTypes.contains(interf)) {
-                rest.interfaceExtendTypes[interf] = HashSet<String>()
+        for (extendName in relation.extends) { rest.AddExtend(name, extendName) }
+        for (interfaceName in relation.extendedInterfaces) {
+            if (!rest.interfaceExtendTypes.contains(interfaceName)) {
+                rest.interfaceExtendTypes[interfaceName] = HashSet<RawMangledName>()
             }
-            rest.interfaceExtendTypes[interf].add(name)
+            rest.interfaceExtendTypes[interfaceName].add(name)
         }
     }
 
-    private func GetUnqualifiedUsageScope(decl: IncrDecl): IncrDecl {
-        var current = decl
-        while (true) {
-            if (let Some(parent) <- current.outerDecl) {
-                current = parent
-            } else {
-                break
-            }
+    private func GetUnqualifiedUsageScope(decl: Decl): Decl {
+        if (let None <- decl.outerDecl) {
+            return pdecl
         }
-        if (current == decl && !decl.HasOuterDecl()) {
-            return packageDecl
-        }
-        return current
+        var outer = decl.outerDecl.getOrThrow()
+        while (outer.outerDecl.isSome()) { outer = outer.outerDecl.getOrThrow() }
+        return outer
     }
 
-    private func CollectUsedNameInfo(decl: IncrDecl, usedName: String, usage: NameUsage, index: UseIndex): Unit {
-        let pqUses = if (index == UseIndex.BODY) { resp.pqBody } else { resp.pqApi }
+    private func CollectUsedNameInfo(decl: Decl, usedName: String, usage: NameUsage, index: Idx): Unit {
         for (qualifier in usage.packageQualifiers) {
-            if (!pqUses.contains(usedName)) {
-                pqUses[usedName] = HashMap<String, HashSet<IncrDecl>>()
+            if (!resp.pqUses[index].contains(usedName)) {
+                resp.pqUses[index][usedName] = HashMap<String, HashSet<Decl>>()
             }
-            if (!pqUses[usedName].contains(qualifier)) {
-                pqUses[usedName][qualifier] = HashSet<IncrDecl>()
+            if (!resp.pqUses[index][usedName].contains(qualifier)) {
+                resp.pqUses[index][usedName][qualifier] = HashSet<Decl>()
             }
-            pqUses[usedName][qualifier].add(decl)
+            resp.pqUses[index][usedName][qualifier].add(decl)
         }
-
-        let qUses = if (index == UseIndex.BODY) { resp.qBody } else { resp.qApi }
         for (parent in usage.parentDecls) {
             let key = QualifiedUsage(parent, usedName)
-            if (!qUses.contains(key)) {
-                qUses[key] = HashSet<IncrDecl>()
-            }
-            qUses[key].add(decl)
+            if (!resp.qUses[index].contains(key)) { resp.qUses[index][key] = HashSet<Decl>() }
+            resp.qUses[index][key].add(decl)
         }
-
         let scope = GetUnqualifiedUsageScope(decl)
         if (usage.hasUnqualifiedUsageOfImported) {
-            let imported = if (index == UseIndex.BODY) { resp.unqImportedBody } else { resp.unqImportedApi }
-            addUnqualified(imported, usedName, scope, decl)
+            if (!resp.unqUsesOfImported[index].contains(usedName)) {
+                resp.unqUsesOfImported[index][usedName] = HashMap<Decl, HashSet<Decl>>()
+            }
+            if (!resp.unqUsesOfImported[index][usedName].contains(scope)) {
+                resp.unqUsesOfImported[index][usedName][scope] = HashSet<Decl>()
+            }
+            resp.unqUsesOfImported[index][usedName][scope].add(decl)
         }
         if (usage.hasUnqualifiedUsage || usage.hasUnqualifiedUsageOfImported) {
-            let all = if (index == UseIndex.BODY) { resp.unqBody } else { resp.unqApi }
-            addUnqualified(all, usedName, scope, decl)
-        }
-    }
-
-    private func CollectUseInfo(decl: IncrDecl, info: UseInfo, index: UseIndex): Unit {
-        let directUses = if (index == UseIndex.BODY) { resp.directBody } else { resp.directApi }
-        for (use in info.usedDecls) {
-            if (!directUses.contains(use)) {
-                directUses[use] = HashSet<IncrDecl>()
+            if (!resp.unqUses[index].contains(usedName)) {
+                resp.unqUses[index][usedName] = HashMap<Decl, HashSet<Decl>>()
             }
-            directUses[use].add(decl)
-        }
-        for ((name, nameUsage) in info.usedNames) {
-            CollectUsedNameInfo(decl, name, nameUsage, index)
+            if (!resp.unqUses[index][usedName].contains(scope)) {
+                resp.unqUses[index][usedName][scope] = HashSet<Decl>()
+            }
+            resp.unqUses[index][usedName][scope].add(decl)
         }
     }
 
-    private func CollectPopulation(enclosingDecl: IncrDecl, usage: SemaUsage): Unit {
-        CollectUseInfo(enclosingDecl, usage.apiUsages, UseIndex.API)
-        CollectUseInfo(enclosingDecl, usage.bodyUsages, UseIndex.BODY)
+    private func CollectUseInfo(decl: Decl, info: UseInfo, index: Idx): Unit {
+        for (usedDecl in info.usedDecls) {
+            if (!resp.directUses[index].contains(usedDecl)) {
+                resp.directUses[index][usedDecl] = HashSet<Decl>()
+            }
+            resp.directUses[index][usedDecl].add(decl)
+        }
+        for ((name, usage) in info.usedNames) { CollectUsedNameInfo(decl, name, usage, index) }
+    }
+
+    private func CollectPopulation(enclosingDecl: Decl, usage: SemaUsage): Unit {
+        CollectUseInfo(enclosingDecl, usage.apiUsages, Idx.API)
+        CollectUseInfo(enclosingDecl, usage.bodyUsages, Idx.BODY)
         for (name in usage.boxedTypes) {
-            if (!resp.boxUses.contains(name)) {
-                resp.boxUses[name] = ArrayList<IncrDecl>()
-            }
+            if (!resp.boxUses.contains(name)) { resp.boxUses[name] = ArrayList<Decl>() }
             resp.boxUses[name].add(enclosingDecl)
         }
     }
 
-    private func CollectSourceImportedPopulation(src: IncrDecl, dsts: HashSet<IncrDecl>): Unit {
-        if (!resp.directBody.contains(src.rawMangleName)) {
-            resp.directBody[src.rawMangleName] = HashSet<IncrDecl>()
+    private func CollectSourceImportedPopulation(src: Decl, dsts: HashSet<Decl>): Unit {
+        if (!resp.directUses.body.contains(src.rawMangleName)) {
+            resp.directUses.body[src.rawMangleName] = HashSet<Decl>()
         }
-        for (dst in dsts) {
-            resp.directBody[src.rawMangleName].add(dst)
-        }
+        for (dst in dsts) { resp.directUses.body[src.rawMangleName].add(dst) }
     }
 
-    private func CollectAlias(importManager: IncrImportManager): Unit {
-        for (importInfo in importManager.GetSourceImports()) {
-            if (!importInfo.isImportAlias && !importInfo.isImportSingle) {
-                continue
-            }
-            let importedPackageName = importInfo.importedPackageName
-            let accessibleName = importInfo.AccessibleName()
-            if (accessibleName.isEmpty()) {
-                continue
-            }
-            if (let Some(_) <- importManager.GetPackageDecl(importedPackageName)) {
-                addPackageAlias(importedPackageName, accessibleName)
-            } else {
-                let declAliasName = importInfo.DeclAliasName()
-                if (!declAliasName.isEmpty()) {
-                    addDeclAlias(importInfo.prefixPath, importInfo.identifier, declAliasName)
+    private func CollectAlias(importManager: SemaImportManager, pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (importSpec in file.imports) {
+                if (!importSpec.IsImportAlias() && !importSpec.IsImportSingle()) { continue }
+                let content = importSpec.content
+                let prefix = content.GetPrefixPath()
+                let mayBeName = content.GetImportedPackageName()
+                let name = if (importSpec.IsImportAlias()) { content.aliasName } else { content.identifier }
+                if (importManager.GetPackageDecl(mayBeName).isSome()) {
+                    if (!resp.packageAliasMap.contains(mayBeName)) {
+                        resp.packageAliasMap[mayBeName] = HashSet<String>()
+                    }
+                    resp.packageAliasMap[mayBeName].add(name.Val())
+                } else {
+                    if (!resp.declAliasMap.contains(prefix)) {
+                        resp.declAliasMap[prefix] = HashMap<String, HashSet<String>>()
+                    }
+                    if (!resp.declAliasMap[prefix].contains(content.identifier.Val())) {
+                        resp.declAliasMap[prefix][content.identifier.Val()] = HashSet<String>()
+                    }
+                    resp.declAliasMap[prefix][content.identifier.Val()].add(content.aliasName.Val())
                 }
             }
         }
-    }
-
-    private func addPackageAlias(fullPackageName: String, aliasName: String): Unit {
-        if (!resp.packageAliasMap.contains(fullPackageName)) {
-            resp.packageAliasMap[fullPackageName] = HashSet<String>()
-        }
-        resp.packageAliasMap[fullPackageName].add(aliasName)
-    }
-
-    private func addDeclAlias(fullPackageName: String, identifier: String, aliasName: String): Unit {
-        let key = DeclAliasKey(fullPackageName, identifier)
-        if (!resp.declAliasMap.contains(key)) {
-            resp.declAliasMap[key] = HashSet<String>()
-        }
-        resp.declAliasMap[key].add(aliasName)
-    }
-
-    private func addUnqualified(container: UnqualifiedName2Usages, usedName: String, scope: IncrDecl,
-        decl: IncrDecl): Unit {
-        if (!container.contains(usedName)) {
-            container[usedName] = HashMap<IncrDecl, HashSet<IncrDecl>>()
-        }
-        if (!container[usedName].contains(scope)) {
-            container[usedName][scope] = HashSet<IncrDecl>()
-        }
-        container[usedName][scope].add(decl)
     }
 }
