@@ -1355,7 +1355,16 @@ public class TypeManager {
     }
 
     public func IsFuncParameterTypesIdentical(t1: FuncTy, t2: FuncTy): Bool {
-        return IsFuncParameterTypesIdentical(t1.paramTys, t2.paramTys)
+        if (!Ty.IsTyCorrect(t1) || !Ty.IsTyCorrect(t2) || t1.paramTys.size != t2.paramTys.size) {
+            return false
+        }
+        for (idx in 0..t2.paramTys.size) {
+            if (CheckTypeCompatibility(t1.paramTys[idx], t2.paramTys[idx], implicitBoxed: false) !=
+                TypeCompatibility.IDENTICAL) {
+                return false
+            }
+        }
+        return true
     }
 
     public func IsFuncParameterTypesIdentical(paramTys1: ArrayList<Ty>, paramTys2: ArrayList<Ty>,
@@ -1363,8 +1372,10 @@ public class TypeManager {
         if (paramTys1.size != paramTys2.size) {
             return false
         }
-        for (idx in 0..paramTys1.size) {
-            if (!SameTy(GetInstantiatedTy(paramTys1[idx], typeMapping), paramTys2[idx])) {
+        for (idx in 0..paramTys2.size) {
+            let paramTy1 = GetInstantiatedTy(paramTys1[idx], typeMapping)
+            if (CheckTypeCompatibility(paramTy1, paramTys2[idx], implicitBoxed: false) !=
+                TypeCompatibility.IDENTICAL) {
                 return false
             }
         }

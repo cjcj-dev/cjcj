@@ -295,19 +295,23 @@ private class DeclAttributeCheckerImpl {
         let hasBody = MemberHasBody(member)
         let memberKind = if (member.astKind == ASTKind.PROP_DECL) { "property" } else { "function" }
         if (hasBody && inCJMP && isAbstract) {
-            AddIssue(
-                DeclAttributeIssueKind.CJMP_ABSTRACT_MEMBER_WITH_BODY,
+            DiagnoseRefactor(
+                diag,
+                BasicDiagKindRefactor.sema_explicitly_abstract_can_not_have_body,
                 member,
-                "abstract ${memberKind} in a CJMP class cannot have a body"
-            )
+                arguments: [memberKind]
+            ).Emit()
         }
         let checkedBefore = member.TestAttr(Attribute.FROM_COMMON_PART)
         if (inAbstractCJMP && !isCJMP && !isAbstract && !compilerAddedOrConstructor && !hasBody && !checkedBefore) {
-            AddIssue(
-                DeclAttributeIssueKind.CJMP_ABSTRACT_MEMBER_WITHOUT_EXPLICIT_MODIFIER,
+            let cjmpKind = if (classDecl.TestAttr(Attribute.COMMON)) { "common" } else { "specific" }
+            DiagnoseRefactor(
+                diag,
+                BasicDiagKindRefactor.sema_cjmp_abstract_class_member_has_no_explicit_modifier,
                 member,
-                "member in common/specific abstract class needs an explicit modifier or body"
-            )
+                MakeRange(member.identifier.Begin(), member.identifier.End()),
+                arguments: [cjmpKind, memberKind, cjmpKind]
+            ).Emit()
         }
     }
 

@@ -2394,6 +2394,8 @@ extend TypeChecker {
                 // Check legality of usage after sema type completed.
                 // Mirrors C++ TypeChecker.cpp:2053 (CheckLegalityOfUsage).
                 CheckLegalityOfUsage(ctx, pkg)
+                mpImpl.CheckReturnAndVariableTypes(pkg)
+                mpImpl.ValidateMatchedAnnotationsAndModifiers(pkg)
                 // C++ TypeChecker.cpp:2060-2062 desugars property access in sema before const checking.
                 DesugarForPropDecl(impl.typeManager, pkg)
                 CheckConstEvaluation(pkg, impl.diag.getOrThrow())
