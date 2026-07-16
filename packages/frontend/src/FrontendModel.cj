@@ -1318,6 +1318,73 @@ private class CjoSignatureMaterializer {
         }
     }
 
+    // IncrementalLoader.cpp:207-221 ClearInstantiatedCache.
+    private func ClearInstantiatedCache(instantiatedDeclIndexes: ArrayList<UInt32>,
+        needRemoved: HashSet<String>): Unit {
+        for (index in instantiatedDeclIndexes) {
+            let declInfo = GetFormatDeclByIndex(index)
+            let genericDecl = GetDeclFromIndex(declInfo.GetGenericDecl())
+            if (genericDecl.isNone() || genericDecl.getOrThrow().toBeCompiled) {
+                CollectRemovedDecls(declInfo, needRemoved)
+            }
+        }
+    }
+
+    // IncrementalLoader.cpp:223-233 LoadDesugarDecl<MainDecl>.
+    private func LoadDesugarDecl(decl: MainDecl, index: UInt32): Unit {
+        if (decl.toBeCompiled) {
+            return
+        }
+        decl.desugarDecl = LoadDecl(index).getOrThrow() as FuncDecl
+        let desugarDecl = decl.desugarDecl.getOrThrow()
+        desugarDecl.EnableAttr(Attribute.INCRE_COMPILE)
+        desugarDecl.DisableAttr(Attribute.IMPORTED)
+    }
+
+    // IncrementalLoader.cpp:223-233 LoadDesugarDecl<MacroDecl>.
+    private func LoadDesugarDecl(decl: MacroDecl, index: UInt32): Unit {
+        if (decl.toBeCompiled) {
+            return
+        }
+        decl.desugarDecl = LoadDecl(index).getOrThrow() as FuncDecl
+        let desugarDecl = decl.desugarDecl.getOrThrow()
+        desugarDecl.EnableAttr(Attribute.INCRE_COMPILE)
+        desugarDecl.DisableAttr(Attribute.IMPORTED)
+    }
+
+    // IncrementalLoader.cpp:235-263 HasInlineDefaultParamFunc.
+    private func HasInlineDefaultParamFunc(decl: PackageFormat_Decl): Bool {
+        let ret = ArrayList<String>()
+        if (decl.GetKind() == MF_DECL_KIND_FUNC_DECL) {
+            ret.add(decl.GetMangledName().getOrThrow().str())
+            let info = decl.GetInfoAsFuncInfo().getOrThrow()
+            let paramLists = info.GetFuncBody().getOrThrow().GetParamLists().getOrThrow()
+            var paramListIndex: UInt32 = 0u32
+            while (paramListIndex < paramLists.size()) {
+                let paramList = PackageFormat_FuncParamList(data.getOrThrow(),
+                    (paramLists.Get(paramListIndex) as Int64).getOrThrow())
+                let desugars = paramList.GetDesugars().getOrThrow()
+                var desugarOffset: UInt32 = 0u32
+                while (desugarOffset < desugars.size()) {
+                    let desugarIndex = (desugars.Get(desugarOffset) as UInt32).getOrThrow()
+                    if (desugarIndex != 0u32) {
+                        let desugarDecl = GetFormatDeclByIndex(desugarIndex)
+                        let attrs = GetAttributes(desugarDecl)
+                        let desugarInfo = desugarDecl.GetInfoAsFuncInfo()
+                        if (attrs.TestAttr(Attribute.HAS_INITIAL) &&
+                            attrs.TestAttr(Attribute.IMPLICIT_ADD) && desugarInfo.isSome() &&
+                            desugarInfo.getOrThrow().GetIsInline() && canInline) {
+                            return true
+                        }
+                    }
+                    desugarOffset++
+                }
+                paramListIndex++
+            }
+        }
+        return false
+    }
+
     // ReferenceLoader.cpp:210-214 ASTLoader::SetIsChirNow.
     public func SetIsChirNow(value!: Bool = false): Unit { isChirNow = value }
 
