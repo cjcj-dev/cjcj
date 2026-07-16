@@ -463,14 +463,10 @@ extend ParserImpl {
         let array = ArrayLit()
         array.leftSquarePos = Expect(TokenKind.LSQUARE, "expected '['").Begin()
         array.begin = array.leftSquarePos
-        while (!Seeing(TokenKind.END) && !Seeing(TokenKind.RSQUARE)) {
-            array.children.add(ParseExpr(ExprKind.EXPR_IN_ARRAY))
-            if (Skip(TokenKind.COMMA)) {
-                array.commaPosVector.add(lastToken.Begin())
-            } else {
-                break
-            }
-        }
+        ParseZeroOrMoreSepTrailing(
+            { pos: Position => array.commaPosVector.add(pos) },
+            { => array.children.add(ParseExpr(ExprKind.EXPR_IN_ARRAY)) },
+            TokenKind.RSQUARE)
         if (!Skip(TokenKind.RSQUARE)) {
             DiagExpectedRightDelimiter("[", array.leftSquarePos)
             ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI, TokenKind.RSQUARE])
