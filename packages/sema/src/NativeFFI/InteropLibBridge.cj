@@ -737,6 +737,24 @@ public class InteropLibBridge {
         return CreateCall(funcDecl, entity.curFile, args: args)
     }
 
+    public func CreateCFFIArrayLengthGetCall(javarefExpr: Expr,
+        curFile: Option<File>): Option<CallExpr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(CreateGetJniEnvCall(curFile).getOrThrow()))
+        args.add(CreateFuncArg(javarefExpr))
+        return CreateCall(GetJavaArrayGetLengthDecl(), curFile, args: args)
+    }
+
+    public func CreateCFFINewJavaArrayCall(jniEnv: Expr, params: FuncParamList): Option<CallExpr> {
+        CJC_ASSERT_WITH_MSG(params.params.size == 2, "expected 2 params: 'length', '$jniType'.")
+        let curFile = jniEnv.curFile.getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(jniEnv))
+        args.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(params.params[1]), curFile)))
+        args.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(params.params[0]), curFile)))
+        return CreateCall(GetNewJavaArrayDecl(), Some(curFile), args: args)
+    }
+
     public func CreateJavaEntityCall(arg: Expr): Option<Expr> {
         let javaEntityDecl = GetJavaEntityDecl()
         if (let None <- javaEntityDecl) {
