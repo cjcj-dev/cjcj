@@ -5,6 +5,7 @@ import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::modules.ImportManager
+import cjcj::modules.SemaImportManager
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.TypeManager
 import cjcj::utils.*
@@ -80,6 +81,14 @@ public class InteropLibBridge {
         this.typeManager = typeManager
         this.diag = diag
         this.utils = utils
+    }
+
+    public static func IsInteropLibAccessible(importManager: SemaImportManager): Bool {
+        return importManager.GetPackageDecl(InteropLibBridge.INTEROPLIB_PACKAGE_NAME).isSome()
+    }
+
+    public func IsInteropLibAccessible(): Bool {
+        return InteropLibBridge.IsInteropLibAccessible(importManager)
     }
 
     private func ImportDecl<T>(packageName: String, declName: String,
