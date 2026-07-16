@@ -1236,18 +1236,8 @@ public class Translator {
             varInfoByName[varInfo.name] = varInfo
         }
         let initOrder = AstGetVarsInitializationOrderWithPositions(parent)
-        eprintln("CJMPDBG TranslateVariablesInit rawParent=" + parent.identifier.Val() + " members=" +
-            parent.GetMemberDeclPtrs().size.toString() + " initOrder=" + initOrder.size.toString())
-        if (parent.identifier.Val() == "C2" || parent.identifier.Val() == "C3") {
-            eprintln("CJMPDBG TranslateVariablesInit parent=" + parent.identifier.Val() + " members=" +
-                parent.GetMemberDeclPtrs().size.toString() + " initOrder=" + initOrder.size.toString())
-        }
         for (item in initOrder) {
             let member = item.decl.getOrThrow()
-            if (parent.identifier.Val() == "C2" || parent.identifier.Val() == "C3") {
-                eprintln("CJMPDBG init member=" + member.identifier.Val() + " hasInit=" +
-                    member.initializer.isSome().toString())
-            }
             CJC_ASSERT(!member.isMemberParam || member.initializer.isNone())
             let varInfo = varInfoByName.get(member.identifier.Val()).getOrThrow()
             if (ShouldTranslateMember(parent, member)) {
@@ -4002,11 +3992,6 @@ public class Translator {
     }
 
     private func ShouldTranslateMember(decl: AstDecl, member: AstDecl): Bool {
-        if (member.identifier.Val() == "y" || member.identifier.Val() == "z") {
-            eprintln("CJMPDBG ShouldTranslateMember decl=" + decl.identifier.Val() + " member=" +
-                member.identifier.Val() + " declFile=" + decl.curFile.isSome().toString() + " memberFile=" +
-                member.curFile.isSome().toString() + " different=" + DeclaredInDifferentFiles(decl, member).toString())
-        }
         if (!mergingSpecific) {
             return true
         }
