@@ -23,13 +23,6 @@ private func MachOLibCangjieFormat(pkg: String, extension: String): Option<Strin
     return None
 }
 
-private func MachOLtoLibCangjieFormat(pkg: String): Option<String> {
-    if (let Some(base) <- MachOLibCangjieBaseFormat(pkg)) {
-        return "lib" + base + ".bc"
-    }
-    return None
-}
-
 private func MachOLTOCStdFFILib(staticLib: String): Option<String> {
     return match (staticLib) {
         case "libcangjie-std-core.a" => "libcangjie-std-coreFFI.a"
@@ -303,9 +296,8 @@ public open class MachO <: ToolChain {
                 if (let Some(ffiLib) <- MachOLTOCStdFFILib(staticLib)) {
                     AddLinkOrderedSetValue(staticLibraries, FileUtil.JoinPath(cangjieLibPath, ffiLib))
                 }
-                if (let Some(ltoLib) <- MachOLtoLibCangjieFormat(pkg)) {
-                    AddLinkOrderedSetValue(ltoBuiltInDependencies, ltoLib)
-                }
+                AddLinkOrderedSetValue(ltoBuiltInDependencies,
+                    FileUtil.ConvertFilenameToLtoLibCangjieFormat(pkg))
             } else {
                 if (driverOptions.linkStaticStd ?? true) {
                     AddLinkOrderedSetValue(staticLibraries, FileUtil.JoinPath(cangjieLibPath, staticLib))

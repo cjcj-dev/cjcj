@@ -8,9 +8,6 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (!PrepareFrontendOutputs(driver.driverOptions)) {
         return false
     }
-    if (HasFrontendSourceInput(driver.driverOptions)) {
-        SeedBuiltinDependenciesFromSources(driver)
-    }
     let frontendOptions = driver.driverOptions.GenerateFrontendOptions()
     let frontendArgs = BuildFrontendArgumentVector(driver.cangjieHome, frontendOptions)
     if (driver.driverOptions.enableVerbose) {
@@ -44,176 +41,6 @@ private func BuildFrontendArgumentVector(cangjieHome: String, options: Array<Str
         args.add(option)
     }
     return args.toArray()
-}
-
-private func SeedBuiltinDependenciesFromSources(driver: Driver): Unit {
-    driver.driverOptions.directBuiltinDependencies.add("std.core")
-    let seen = HashSet<String>()
-    for (sourceFile in driver.driverOptions.srcFiles) {
-        let reason = Box<String>("")
-        match (FileUtil.ReadFileContent(sourceFile, reason)) {
-            case Some(content) =>
-                for (line in content.split("\n")) {
-                    match (ExtractImportStdPackage(line)) {
-                        case Some(pkg) => AddDirectStdBuiltinDependency(driver, pkg)
-                        case None => ()
-                    }
-                }
-            case None => ()
-        }
-    }
-}
-
-private func AddDirectStdBuiltinDependency(driver: Driver, pkg: String): Unit {
-    if (let None <- StandardLibName(pkg)) {
-        return
-    }
-    driver.driverOptions.directBuiltinDependencies.add(pkg)
-}
-
-private func AddIndirectStdBuiltinDependency(driver: Driver, pkg: String, seen: HashSet<String>): Unit {
-    if (let None <- StandardLibName(pkg)) {
-        return
-    }
-    if (!driver.driverOptions.directBuiltinDependencies.contains(pkg)) {
-        driver.driverOptions.indirectBuiltinDependencies.add(pkg)
-    }
-    AddStdBuiltinDependencyClosure(driver, pkg, seen)
-}
-
-private func AddStdBuiltinDependencyClosure(driver: Driver, pkg: String, seen: HashSet<String>): Unit {
-    if (seen.contains(pkg)) {
-        return
-    }
-    seen.add(pkg)
-    let modulePath = FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "modules"),
-        driver.driverOptions.GetCangjieLibTargetPathName())
-    let cjoPath = FileUtil.FindSerializationFile(pkg, ".cjo", [modulePath])
-    if (cjoPath.isEmpty()) {
-        return
-    }
-    let deps = ExtractStdPackagesFromCjo(cjoPath)
-    for (dep in deps) {
-        if (dep != pkg) {
-            AddIndirectStdBuiltinDependency(driver, dep, seen)
-        }
-    }
-}
-
-private func ExtractStdPackagesFromCjo(cjoPath: String): HashSet<String> {
-    let out = HashSet<String>()
-    let (ok, data, _) = FileUtil.ReadBinaryFileToBuffer(cjoPath)
-    if (!ok) {
-        return out
-    }
-    var builder = StringBuilder()
-    for (byte in data) {
-        if (byte >= 0x20u8 && byte <= 0x7eu8) {
-            builder.append(String.fromUtf8([byte]))
-        } else {
-            AddStdPackageRefsFromText(builder.toString(), out)
-            builder = StringBuilder()
-        }
-    }
-    AddStdPackageRefsFromText(builder.toString(), out)
-    return out
-}
-
-private func AddStdPackageRefsFromText(text: String, out: HashSet<String>): Unit {
-    var idx: Int64 = 0
-    while (idx + 4 <= text.size) {
-        if (!StartsWithAt(text, idx, "std.")) {
-            idx++
-            continue
-        }
-        var end = idx
-        while (end < text.size && IsStdPackageNameChar(text[end])) {
-            end++
-        }
-        if (let Some(pkg) <- LongestStdPackagePrefix(text[idx..end])) {
-            out.add(pkg)
-        }
-        idx = end
-    }
-}
-
-private func ExtractImportStdPackage(line: String): Option<String> {
-    let trimmed = StripLineComment(line).trimAscii()
-    if (!trimmed.startsWith("import ")) {
-        return None
-    }
-    var pos = "import ".size
-    while (pos < trimmed.size && (trimmed[pos] == b' ' || trimmed[pos] == b'\t')) {
-        pos++
-    }
-    let start = pos
-    while (pos < trimmed.size && IsImportNameChar(trimmed[pos])) {
-        pos++
-    }
-    if (pos <= start) {
-        return None
-    }
-    var raw = trimmed[start..pos]
-    while (raw.endsWith(".")) {
-        raw = raw[0..raw.size - 1]
-    }
-    return LongestStdPackagePrefix(raw)
-}
-
-private func StripLineComment(line: String): String {
-    if (let Some(pos) <- line.indexOf("//")) {
-        return line[0..pos]
-    }
-    return line
-}
-
-private func LongestStdPackagePrefix(name: String): Option<String> {
-    var current = name
-    while (!current.isEmpty()) {
-        if (let Some(_) <- StandardLibName(current)) {
-            return Some(current)
-        }
-        if (let Some(pos) <- LastDotPos(current)) {
-            current = current[0..pos]
-        } else {
-            return None
-        }
-    }
-    return None
-}
-
-private func LastDotPos(value: String): Option<Int64> {
-    var idx = value.size - 1
-    while (idx >= 0) {
-        if (value[idx] == b'.') {
-            return Some(idx)
-        }
-        idx--
-    }
-    return None
-}
-
-private func StartsWithAt(value: String, start: Int64, prefix: String): Bool {
-    if (start < 0 || start + prefix.size > value.size) {
-        return false
-    }
-    var idx: Int64 = 0
-    while (idx < prefix.size) {
-        if (value[start + idx] != prefix[idx]) {
-            return false
-        }
-        idx++
-    }
-    return true
-}
-
-private func IsStdPackageNameChar(byte: UInt8): Bool {
-    return (byte >= b'a' && byte <= b'z') || (byte >= b'A' && byte <= b'Z') ||
-        (byte >= b'0' && byte <= b'9') || byte == b'_' || byte == b'.'
-}
-
-private func IsImportNameChar(byte: UInt8): Bool {
-    return IsStdPackageNameChar(byte) || byte == b':'
 }
 
 private func PrepareFrontendOutputs(opts: DriverOptions): Bool {
@@ -250,9 +77,11 @@ private func ApplyFrontendOutputs(opts: DriverOptions, frontendOpts: FrontendToo
     opts.incrementalCompileNoChange = frontendOpts.incrementalCompileNoChange
     CopyStringList(opts.symbolsNeedLocalized, frontendOpts.symbolsNeedLocalized)
     CopyStringArrayMap(opts.symbolsNeedLocalizedPerPkg, frontendOpts.symbolsNeedLocalizedPerPkg)
+    opts.directBuiltinDependencies.clear()
     for (dep in frontendOpts.directBuiltinDependencies) {
         opts.directBuiltinDependencies.add(dep)
     }
+    opts.indirectBuiltinDependencies.clear()
     for (dep in frontendOpts.indirectBuiltinDependencies) {
         opts.indirectBuiltinDependencies.add(dep)
     }

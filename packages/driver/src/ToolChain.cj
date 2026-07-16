@@ -216,9 +216,8 @@ public open class ToolChain {
                 if (let Some(ffiLib) <- LTOCStdFFILib(staticLib)) {
                     AddLinkOrderedSetValue(staticLibraries, "-l:" + ffiLib)
                 }
-                if (let Some(ltoLib) <- LtoLibCangjieFormat(pkg)) {
-                    AddLinkOrderedSetValue(ltoBuiltInDependencies, ltoLib)
-                }
+                AddLinkOrderedSetValue(ltoBuiltInDependencies,
+                    FileUtil.ConvertFilenameToLtoLibCangjieFormat(pkg))
             } else if (driverOptions.EnableSanitizer()) {
                 let cangjieLibPath = FileUtil.JoinPath(FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "lib"),
                     driverOptions.GetCangjieLibTargetPathName()), driverOptions.SanitizerTypeToShortString())
@@ -298,13 +297,6 @@ public open class ToolChain {
         }
         if (let Some(libName) <- LibCangjieFormat(pkg, GetSharedLibraryExtension())) {
             return "-l:" + libName
-        }
-        return None
-    }
-
-    private func LtoLibCangjieFormat(pkg: String): Option<String> {
-        if (let Some(base) <- LibCangjieBaseFormat(pkg)) {
-            return "lib" + base + ".bc"
         }
         return None
     }
