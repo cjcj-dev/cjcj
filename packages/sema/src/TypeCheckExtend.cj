@@ -5,6 +5,7 @@ import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Range as BasicRange
+import cjcj::utils.CJC_ASSERT
 
 private func TypeCheckExtendRange(node: Node): BasicRange {
     var rangeEnd = node.end
@@ -1109,6 +1110,74 @@ public func TypeCheckExtendCheckDecl(
 }
 
 extend TypeCheckerImpl {
+    // C++ src/Sema/TypeCheckExtend.cpp:129-187 TypeCheckerImpl::CheckExtendInterfaces.
+    func CheckExtendInterfaces(ty: Ty, extendDecls: ArrayList<ExtendDecl>): Unit {
+        let inheritInterfaces = HashSet<Ty>()
+        if (let Some(extendedDeclValue) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+            if (let Some(extendedDecl) <- (extendedDeclValue as InheritableDecl)) {
+                for (inheritedType in extendedDecl.inheritedTypes) {
+                    if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                        for (superTy in typeManager.GetAllSuperTys(inheritedTy).values) {
+                            if (superTy.IsInterface()) {
+                                inheritInterfaces.add(superTy)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let extendInterfaces = HashMap<Ty, ArrayList<Type>>()
+        let promotion = Promotion(typeManager)
+        for (extendDecl in extendDecls) {
+            if (let None <- extendDecl.extendedType) {
+                continue
+            }
+            var typeMapping = MultiTypeSubst()
+            let extendedType = extendDecl.extendedType.getOrThrow()
+            if (let Some(extendedTy) <- extendedType.GetTy()) {
+                typeMapping = promotion.GetPromoteTypeMapping(ty, extendedTy)
+            }
+            for (interfaceType in extendDecl.inheritedTypes) {
+                let instantiateTy = typeManager.GetBestInstantiatedTy(
+                    interfaceType.GetTy().getOrThrow(), typeMapping)
+                if (!instantiateTy.IsInterface()) {
+                    continue
+                }
+                let interfaceTy = (instantiateTy as InterfaceTy).getOrThrow()
+                if (!extendInterfaces.contains(interfaceTy)) {
+                    extendInterfaces[interfaceTy] = ArrayList<Type>()
+                }
+                extendInterfaces[interfaceTy].add(interfaceType)
+                if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
+                    let interfaceName = interfaceDecl.identifier.Val()
+                    if (interfaceDecl.fullPackageName == "std.core" &&
+                        (interfaceName == "Any" || interfaceName == "CType")) {
+                        DiagnoseRefactor(diag.getOrThrow(),
+                            BasicDiagKindRefactor.sema_interface_is_not_extendable, interfaceType,
+                            arguments: [interfaceName]).Emit()
+                    }
+                }
+            }
+        }
+        let keys = StableTys()
+        for (interfaceTy in extendInterfaces.keys()) {
+            let _ = keys.Add(interfaceTy)
+        }
+        for (interfaceTy in keys.values) {
+            let typeSet = extendInterfaces[interfaceTy]
+            sort(typeSet, by: { left: Type, right: Type => CompNodeByPos(left, right) }, stable: true)
+            if (inheritInterfaces.contains(interfaceTy) || typeSet.size > 1) {
+                CJC_ASSERT(!typeSet.isEmpty())
+                let typeNode = typeSet[typeSet.size - 1]
+                if (!typeNode.TestAttr(Attribute.IMPORTED)) {
+                    DiagnoseRefactor(diag.getOrThrow(),
+                        BasicDiagKindRefactor.sema_extend_duplicate_interface, typeNode,
+                        arguments: [interfaceTy.String(), ty.String()]).Emit()
+                }
+            }
+        }
+    }
+
     // C++ src/Sema/TypeCheckExtend.cpp:237-273 TypeCheckerImpl::CheckSpecializationExtendDupImstantation.
     func CheckSpecializationExtendDupImstantation(extendedDeclTy: Ty, compareExtend: ExtendDecl,
         beComparedDecl: InheritableDecl, instantMapping: TypeSubst, checkParent!: Bool = false): Unit {
