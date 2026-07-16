@@ -1,10 +1,8 @@
-package cjcj::sema.Desugar
+package cjcj::sema
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::ast.AnnotationKind as AstAnnotationKind
-import cjcj::incremental_compilation.SemanticInfo
-import cjcj::mangle.ASTMangler
+import cjcj::incremental_compilation.{GetTypeRawMangleName, SemanticInfo}
 import cjcj::utils.{BOX_DECL_PREFIX, CJC_ASSERT, CJC_NULLPTR_CHECK, IncrementalCompilationLogger,
     InternalError, MACRO_ATTR_ARGS, GetMacroFuncName}
 
@@ -67,73 +65,6 @@ public func CollectChangedStructTypes(pkg: Package, declsToBeReCompiled: HashSet
         }
     }
     return tys
-}
-
-// C++ src/Sema/IncrementalUtils.cpp:99-113.
-private func IsNeedRecompileCtor(decl: Decl): Bool {
-    if (!decl.TestAttr(Attribute.CONSTRUCTOR)) {
-        return false
-    }
-    if (let Some(initFunc) <- (decl as FuncDecl)) {
-        if (initFunc.isConst || initFunc.isFrozen) {
-            return true
-        }
-    }
-    return false
-}
-
-// C++ src/Sema/IncrementalUtils.cpp:119-159.
-public func HandleCtorForIncr(pkg: Package, mangledName2DeclMap: HashMap<String, Decl>,
-    usageCache: SemanticInfo): Unit {
-    IterateToplevelDecls(pkg, { decl: Decl =>
-        if (decl.astKind != ASTKind.CLASS_DECL && decl.astKind != ASTKind.STRUCT_DECL) {
-            return
-        }
-        let members = decl.GetMemberDecls()
-        var primaryCtor: Option<PrimaryCtorDecl> = None
-        let index = members.size
-        for (member in members) {
-            if (let Some(primary) <- (member as PrimaryCtorDecl)) {
-                if (!primary.toBeCompiled) {
-                    if (primary.isConst || primary.HasAnno(AstAnnotationKind.FROZEN)) {
-                        primary.toBeCompiled = true
-                    } else {
-                        primaryCtor = Some(primary)
-                    }
-                } else if (!member.toBeCompiled && IsNeedRecompileCtor(member)) {
-                    member.toBeCompiled = true
-                }
-            } else if (!member.toBeCompiled && IsNeedRecompileCtor(member)) {
-                member.toBeCompiled = true
-            }
-        }
-        if (let Some(primary) <- primaryCtor) {
-            DesugarPrimaryCtor(decl, primary)
-            var memberIndex = index
-            CJC_ASSERT(memberIndex < members.size)
-            while (memberIndex < members.size) {
-                let member = members[memberIndex]
-                let originDecl = mangledName2DeclMap.get(member.rawMangleName)
-                mangledName2DeclMap[member.rawMangleName] = member
-                if (let Some(origin) <- originDecl) {
-                    if (let Some(usage) <- usageCache.usages.get(origin)) {
-                        usageCache.usages[member] = usage
-                        usageCache.usages.remove(origin)
-                    }
-                }
-                memberIndex++
-            }
-        }
-    })
-}
-
-// C++ src/Sema/IncrementalUtils.cpp:161-170.
-public func GetTypeRawMangleName(ty: Ty): String {
-    if (let Some(boxDecl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
-        return boxDecl.rawMangleName
-    }
-    CJC_ASSERT(ty.IsBuiltin())
-    return ASTMangler.MangleBuiltinType(Ty.KindName(ty.kind))
 }
 
 // C++ src/Sema/IncrementalUtils.cpp:172-183.

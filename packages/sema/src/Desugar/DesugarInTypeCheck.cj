@@ -3,6 +3,8 @@ package cjcj::sema.Desugar
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::incremental_compilation.SemanticInfo
+import cjcj::utils.CJC_ASSERT
 
 private let COMPOSITION_FUNC_NAME: String = "composition"
 private let CALL_OPERATOR_NAME: String = "()"
@@ -766,6 +768,65 @@ public func DesugarPrimaryCtor(decl: Decl, ctor: PrimaryCtorDecl): Unit {
         targetBody.paramLists.add(targetParamList)
         DesugarPrimaryCtorSetPrimaryFunc(decl, ctor, targetBody)
     }
+}
+
+// C++ src/Sema/IncrementalUtils.cpp:99-113.
+private func IsNeedRecompileCtor(decl: Decl): Bool {
+    if (!decl.TestAttr(Attribute.CONSTRUCTOR)) {
+        return false
+    }
+    if (let Some(initFunc) <- (decl as FuncDecl)) {
+        if (initFunc.isConst || initFunc.isFrozen) {
+            return true
+        }
+    }
+    return false
+}
+
+// C++ src/Sema/IncrementalUtils.cpp:119-159. Kept beside the unique DesugarPrimaryCtor implementation
+// because importing this child package from cjcj::sema would create a package cycle.
+public func HandleCtorForIncr(pkg: Package, mangledName2DeclMap: HashMap<String, Decl>,
+    usageCache: SemanticInfo): Unit {
+    IterateToplevelDecls(pkg, { decl: Decl =>
+        if (decl.astKind != ASTKind.CLASS_DECL && decl.astKind != ASTKind.STRUCT_DECL) {
+            return
+        }
+        let members = decl.GetMemberDecls()
+        var primaryCtor: Option<PrimaryCtorDecl> = None
+        let index = members.size
+        for (member in members) {
+            if (let Some(primary) <- (member as PrimaryCtorDecl)) {
+                if (!primary.toBeCompiled) {
+                    if (primary.isConst || primary.HasAnno(AstAnnotationKind.FROZEN)) {
+                        primary.toBeCompiled = true
+                    } else {
+                        primaryCtor = Some(primary)
+                    }
+                } else if (!member.toBeCompiled && IsNeedRecompileCtor(member)) {
+                    member.toBeCompiled = true
+                }
+            } else if (!member.toBeCompiled && IsNeedRecompileCtor(member)) {
+                member.toBeCompiled = true
+            }
+        }
+        if (let Some(primary) <- primaryCtor) {
+            DesugarPrimaryCtor(decl, primary)
+            var memberIndex = index
+            CJC_ASSERT(memberIndex < members.size)
+            while (memberIndex < members.size) {
+                let member = members[memberIndex]
+                let originDecl = mangledName2DeclMap.get(member.rawMangleName)
+                mangledName2DeclMap[member.rawMangleName] = member
+                if (let Some(origin) <- originDecl) {
+                    if (let Some(usage) <- usageCache.usages.get(origin)) {
+                        usageCache.usages[member] = usage
+                        usageCache.usages.remove(origin)
+                    }
+                }
+                memberIndex++
+            }
+        }
+    })
 }
 
 public func DesugarInTypeCheck(root: Node): Unit {
