@@ -287,7 +287,13 @@ private class FullCompileStrategyImpl {
                 if (cacheInfo.state == SrcCodeChangeState.DELETED) {
                     continue
                 }
-                let fileID = addSourceForParse(path, cacheInfo.code)
+                let isCjmpFile = s.ci.invocation.globalOptions.IsCompilingCJMP()
+                let fileID = s.ci.GetSourceManager().AddSource(path, cacheInfo.code, isCjmpFile: isCjmpFile)
+                if (s.fileIds.contains(fileID)) {
+                    s.ci.diag.DiagnoseRefactor(DiagKindRefactor.module_read_file_conflicted,
+                        DEFAULT_POSITION, arguments: [path])
+                }
+                s.fileIds.add(fileID)
                 fileInfos.add((path, fileID, cacheInfo.code))
             }
         } else {
@@ -304,7 +310,14 @@ private class FullCompileStrategyImpl {
                     success = false
                     continue
                 }
-                let fileID = addSourceForParse(filePath, readResult[1])
+                let isCjmpFile = s.ci.invocation.globalOptions.IsCompilingCJMP()
+                let fileID = s.ci.GetSourceManager().AddSource(filePath, readResult[1], isCjmpFile: isCjmpFile)
+                if (s.fileIds.contains(fileID)) {
+                    s.ci.diag.DiagnoseRefactor(DiagKindRefactor.module_read_file_conflicted,
+                        DEFAULT_POSITION, arguments: [filePath])
+                    continue
+                }
+                s.fileIds.add(fileID)
                 fileInfos.add((filePath, fileID, readResult[1]))
             }
         }
@@ -333,7 +346,8 @@ private class FullCompileStrategyImpl {
                 if (cacheInfo.state == SrcCodeChangeState.CHANGED) {
                     deleteFileInPackage(pkg, path)
                 }
-                let fileID = addSourceForParse(path, cacheInfo.code)
+                let fileID = s.ci.GetSourceManager().AddSource(path, cacheInfo.code)
+                s.fileIds.add(fileID)
                 fileInfos.add((path, fileID, cacheInfo.code))
             }
         }
@@ -408,17 +422,6 @@ private class FullCompileStrategyImpl {
                 pkg.accessible = AccessLevel.PUBLIC
             }
         }
-    }
-
-    private func addSourceForParse(path: String, code: String): UInt64 {
-        let isCjmpFile = s.ci.invocation.globalOptions.IsCompilingCJMP()
-        let fileID = s.ci.GetSourceManager().AddSource(path, code, isCjmpFile: isCjmpFile)
-        if (s.fileIds.contains(fileID)) {
-            s.ci.diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
-                "source file id conflict for " + path)
-        }
-        s.fileIds.add(fileID)
-        return fileID
     }
 
     private func deleteFileInPackage(pkg: Package, filePath: String): Unit {
