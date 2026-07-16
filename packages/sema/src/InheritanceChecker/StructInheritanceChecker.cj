@@ -1892,8 +1892,10 @@ public class StructInheritanceChecker {
                 }
             }
             if (found.size > 1 && !allFunc) {
-                let builder = diag.DiagnoseRefactor(
+                let builder = DiagnoseRefactor(
+                    diag,
                     DiagKindRefactor.sema_inherit_super_member_kind_inconsistent,
+                    decl,
                     DeclIdentifierRange(decl),
                     arguments: [name]
                 )
@@ -1904,7 +1906,8 @@ public class StructInheritanceChecker {
                     }
                 }
                 for (memberDecl in sortedDecls) {
-                    builder.AddNote(DeclIdentifierRange(memberDecl), DeclKindText(memberDecl) + " member")
+                    AddNote(builder, memberDecl, DeclIdentifierRange(memberDecl),
+                        DeclKindText(memberDecl) + " member")
                 }
                 builder.Emit()
             } else {
