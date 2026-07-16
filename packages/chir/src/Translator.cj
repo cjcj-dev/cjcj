@@ -1462,7 +1462,7 @@ public class Translator {
         }
         if (let Some(target) <- expr.ref.target) {
             if (target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
-                return TranslateEnumCtorRef(target, RequireAstTy(expr))
+                return TranslateEnumMemberVarRef(expr).base
             }
             if (target.astKind == ASTKind.FUNC_DECL) {
                 return TranslateFuncRef(expr)
@@ -2594,7 +2594,7 @@ public class Translator {
             return TranslateStaticTargetOrPackageMemberAccess(expr, target)
         }
         if (target.TestAttr(AstAttribute.ENUM_CONSTRUCTOR)) {
-            return TranslateEnumCtorRef(target, RequireAstTy(expr))
+            return TranslateEnumMemberAccess(expr)
         }
         if (IsInstanceMember(target)) {
             if (let Some(propDecl) <- (target as AstPropDecl)) {
@@ -8006,19 +8006,32 @@ public class Translator {
         }
     }
 
-    private func TranslateEnumCtorRef(constructor: AstDecl, astTy: AstTy): Value {
-        let enumType = chirTy.TranslateType(astTy)
-        let outer = constructor.outerDecl ??
-            throw IllegalStateException("faithful AST2CHIR enum constructor has no outer enum")
-        let enumDecl = (outer as AstEnumDecl) ??
-            throw IllegalStateException("faithful AST2CHIR enum constructor outer is not enum")
-        let selector = CreateEnumSelectorConstant(constructor)
-        if (enumDecl.hasArguments) {
-            let args = ArrayList<Value>()
-            args.add(selector)
-            return RequireResult(builder.CreateTuple(enumType, args, CurrentBlock()))
+    private func TranslateEnumMemberAccess(member: AstMemberAccess): Value {
+        let constructor = ResolveMemberAccessTarget(member, "faithful AST2CHIR enum member access")
+        let baseExpr = RequireExpr(member.baseExpr, "enum member access base")
+        let enumTy = (RequireAstTy(baseExpr) as AstEnumTy) ??
+            throw IllegalStateException("faithful AST2CHIR enum member access base is not EnumTy")
+        let enumDecl = enumTy.decl ??
+            throw IllegalStateException("faithful AST2CHIR enum member access EnumTy has no declaration")
+        let enumId = GetEnumCtorId(constructor)
+        let enumType = chirTy.TranslateType(enumTy)
+        let loc = TranslateLocation(constructor)
+        let selectorTy = GetSelectorType(enumTy)
+        let selector = if (selectorTy.IsBoolean()) {
+            builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0), CurrentBlock())
+        } else {
+            builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock())
         }
-        return RequireResult(builder.CreateTypeCast(enumType, selector, CurrentBlock()))
+        selector.SetDebugLocation(loc)
+        let selectorValue = RequireResult(selector)
+        if (!enumDecl.hasArguments) {
+            return TypeCastOrBoxIfNeeded(selectorValue, enumType, loc)
+        }
+        let args = ArrayList<Value>()
+        args.add(selectorValue)
+        let tuple = builder.CreateTuple(enumType, args, CurrentBlock())
+        tuple.SetDebugLocation(TranslateLocation(member))
+        return RequireResult(tuple)
     }
 
     private func TranslateMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
