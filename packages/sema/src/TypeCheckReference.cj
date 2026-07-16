@@ -488,7 +488,8 @@ private func CheckInvalidRefInCFunc(
         return
     }
     let isNonStaticMember = !target.TestAttr(Attribute.STATIC) &&
-        target.TestAnyAttr(Attribute.IN_CLASSLIKE, Attribute.IN_STRUCT, Attribute.IN_ENUM, Attribute.IN_EXTEND)
+        (target.TestAnyAttr(Attribute.IN_CLASSLIKE, Attribute.IN_STRUCT, Attribute.IN_ENUM) ||
+        target.TestAttr(Attribute.IN_EXTEND))
     if (isNonStaticMember) {
         Diagnose(diag, re, BasicDiagKind.sema_cfunc_cannot_capture_this,
             args: [BasicDiagArgument("this")]).Emit()
