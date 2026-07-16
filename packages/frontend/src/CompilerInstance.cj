@@ -491,7 +491,6 @@ public class CompilerInstance {
     }
 
     public func CalculateASTCache(): Bool {
-        CacheCompileArgs()
         if (srcPkgs.isEmpty()) {
             return false
         }
