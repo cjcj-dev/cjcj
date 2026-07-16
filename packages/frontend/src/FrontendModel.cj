@@ -8007,6 +8007,14 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return result
     }
 
+    // ImportManager.cpp:365-370 ImportManager::LoadCachedTypeForPackage.
+    public func LoadCachedTypeForPackage(pkg: Package,
+        mangledName2DeclMap: HashMap<String, Decl>): HashSet<String> {
+        let cachedCjo = globalOptions.GenerateCachedPathName(
+            pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
+        return LoadCachedPackage(pkg, cachedCjo, mangledName2DeclMap)
+    }
+
     private func ResolveImportedPackageHeaders(pkg: Package, isRecursive!: Bool = false): Bool {
         var success = true
         for (file in pkg.files) {
