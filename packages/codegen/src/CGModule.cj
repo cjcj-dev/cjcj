@@ -21,7 +21,7 @@ import cjcj::option.ArchType
 import cjcj::option.EnvironmentType
 import cjcj::option.OSType
 import cjcj::option.TripleInfo
-import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
+import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, InternalError}
 
 private let CJ_PERSONALITY_FUNC_NAME: String = "__cj_personality_v0$"
 
@@ -115,6 +115,7 @@ public class CGModule {
     // only blocks genuine self-recursion, matching C++'s per-type cache (CGType.cpp:165-173).
     private let enumClassificationStack: HashSet<String> = HashSet<String>()
     private var diBuilder: Option<DIBuilder> = None
+    private var incrementalGen: Option<IncrementalGen> = None
     // Faithful to C++ CGModule::delayGenTypeInfo (CGModule.h:316): concrete TypeInfo definitions are
     // queued here and drained iteratively by GenTypeInfo() rather than defined recursively inline, so a
     // recursive type (a field/type-arg referencing the type being defined) does not infinitely recurse.
@@ -173,6 +174,85 @@ public class CGModule {
         while (!delayGenTypeTemplate.isEmpty()) {
             let cgType = delayGenTypeTemplate.remove(at: delayGenTypeTemplate.size - 1)
             cgType.GenTypeTemplate()
+        }
+    }
+
+    // Mirrors CGModule.cpp:141-152.
+    public func InitIncrementalGen(): Bool {
+        CJC_ASSERT(cgCtx.GetCGPkgContext().IsIncrementEnabled())
+        let generator = IncrementalGen(cgCtx.IsCGParallelEnabled())
+        incrementalGen = generator
+        let moduleHandle = module.getOrThrow()
+        let cachePath = cgCtx.GetCompileOptions().GenerateCachedPathNameForCodeGen(
+            moduleHandle.GetSourceFileName(), "_cache.bc")
+        return generator.Init(cachePath, cgCtx.GetLLVMContext())
+    }
+
+    // Mirrors CGModule.cpp:154-190.
+    public func GenIncremental(): Unit {
+        let option = cgCtx.GetCompileOptions()
+        GenCodeGenAddedMetadata()
+        if (cgCtx.GetCGPkgContext().IsIncrementEnabled()) {
+            let generator = incrementalGen.getOrThrow()
+            if (!Verify()) {
+                InternalError("Incremental part failed to be compiled")
+            }
+            let moduleHandle = module.getOrThrow()
+            if (option.NeedDumpIRToFile()) {
+                let dumpPath = GenDumpPath(option.output, cgCtx.GetCurrentPkgName(), "Incre",
+                    moduleHandle.GetSourceFileName(), "incre.ll")
+                DumpIR(moduleHandle, dumpPath)
+            }
+            let releasedModule = ReleaseLLVMModule().getOrThrow()
+            let newModule = generator.LinkModules(releasedModule, cgCtx.GetCachedMangleMap())
+            for (name in generator.GetIncrLLVMUsedNames()) {
+                GetCGContext().AddLLVMUsedVars(name)
+            }
+            for (name in generator.GetIncrCachedStaticGINames()) {
+                GetCGContext().RegisterStaticGIName(name)
+            }
+            ResetLLVMModule(newModule)
+        }
+
+        let moduleHandle = module.getOrThrow()
+        if (option.enIncrementalCompilation) {
+            let cachePath = option.GenerateCachedPathNameForCodeGen(
+                moduleHandle.GetSourceFileName(), "_cache.bc")
+            let _ = SaveToBitcodeFile(moduleHandle, cachePath)
+        }
+        EraseNamedMetadata(moduleHandle, "CodeGenAddedForIncr")
+        EraseNamedMetadata(moduleHandle, "StaticGenericTIsForIncr")
+    }
+
+    // Mirrors CGModule.cpp:192-214.
+    public func GenCodeGenAddedMetadata(): Unit {
+        let moduleHandle = module.getOrThrow()
+        let context = GetLLVMContext()
+        let codegenAddedFuncsOrVars = GetCGContext().GetCodeGenAddedFuncsOrVars()
+        let _ = LLVMGetOrInsertNamedMetadata(moduleHandle, "CodeGenAddedForIncr")
+        for ((key, names) in codegenAddedFuncsOrVars) {
+            let operands = ArrayList<String>()
+            operands.add(key)
+            for (name in names) {
+                operands.add(name)
+            }
+            LLVMAddNamedMetadataOperand(moduleHandle, "CodeGenAddedForIncr",
+                LLVMCreateMDTupleFromStrings(context, operands))
+        }
+        let _ = LLVMGetOrInsertNamedMetadata(moduleHandle, "StaticGenericTIsForIncr")
+        for (name in GetCGContext().GetStaticGINames()) {
+            LLVMAddNamedMetadataOperand(moduleHandle, "StaticGenericTIsForIncr",
+                LLVMCreateMDTupleFromString(context, name))
+        }
+    }
+
+    private func EraseNamedMetadata(moduleHandle: LLVMModuleHandle, name: String): Unit {
+        if (LLVMGetNamedMetadata(moduleHandle, name).isNull()) {
+            return
+        }
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            unsafe { LLVMSelfhostNamedMetadataEraseFromParent(moduleHandle.raw,
+                nameCString.value, UInt32(name.size)) }
         }
     }
 
