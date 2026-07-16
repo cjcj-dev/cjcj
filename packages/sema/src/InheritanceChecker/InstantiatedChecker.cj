@@ -288,15 +288,13 @@ private func WillCauseInfiniteInstantiation(
     typeMapping: TypeSubst
 ): Bool {
     if (HaveCyclicSubstitution(checker.typeManager, typeMapping)) {
-        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-        Diagnose(checker.diag, triggerNode, DiagKind.sema_generic_infinite_instantiation)
+        Diagnose(checker.diag, triggerNode, DiagKind.sema_generic_infinite_instantiation).Emit()
         checker.MarkInfiniteInstantiationOccurred()
         return true
     }
     if (let Some(currentMapping) <- checker.CurrentInstantiationTypeMap()) {
         if (HaveCyclicSubstitution(checker.typeManager, currentMapping)) {
-            // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-            Diagnose(checker.diag, triggerNode, DiagKind.sema_generic_infinite_instantiation)
+            Diagnose(checker.diag, triggerNode, DiagKind.sema_generic_infinite_instantiation).Emit()
             checker.MarkInfiniteInstantiationOccurred()
             return true
         }
@@ -313,8 +311,7 @@ private func WillCauseInfiniteInstantiation(
     for (idx in 0..instTys.size) {
         if (let Some(genericTy) <- generic.typeParameters[idx].GetTy()) {
             if (HasSelfRecursiveInstantiation(checker, genericTy, instTys[idx], currentMapping, triggeredInside)) {
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                Diagnose(checker.diag, triggerNode, DiagKind.sema_generic_infinite_instantiation)
+                Diagnose(checker.diag, triggerNode, DiagKind.sema_generic_infinite_instantiation).Emit()
                 checker.MarkInfiniteInstantiationOccurred()
                 return true
             }
