@@ -1050,6 +1050,84 @@ public class InteropLibBridge {
         return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
     }
 
+    public func CreateSetFieldCall(env: Expr, obj: Expr, signature: MemberJNISignature,
+        value: Expr): Option<CallExpr> {
+        let funcDecl = GetSetFieldDecl()
+        let jclassInitFuncDecl = GetJClassDecl()
+        let parseSignatureFuncDecl = GetParseComponentSignatureDecl()
+        let fieldIDFuncDecl = GetFieldIdConstr()
+        if (funcDecl.isNone() || jclassInitFuncDecl.isNone() ||
+            parseSignatureFuncDecl.isNone() || fieldIDFuncDecl.isNone()) {
+            return None
+        }
+        let curFile = value.curFile.getOrThrow()
+        let body = jclassInitFuncDecl.getOrThrow().funcBody.getOrThrow()
+        CJC_ASSERT_WITH_MSG(!body.paramLists.isEmpty(), "paramLists cannot be empty")
+        CJC_ASSERT_WITH_MSG(body.paramLists[0].params.size > 1,
+            "at least 2 parameters expected for classInit function")
+        let strTy = body.paramLists[0].params[1].GetTy().getOrThrow()
+        let typeExpr = CreateLitConstExpr(LitConstKind.STRING, signature.classTypeSignature, strTy)
+        typeExpr.curFile = Some(curFile)
+        let nameExpr = CreateLitConstExpr(LitConstKind.STRING, signature.name, strTy)
+        nameExpr.curFile = Some(curFile)
+        let signatureExpr = CreateLitConstExpr(LitConstKind.STRING, signature.signature, strTy)
+        signatureExpr.curFile = Some(curFile)
+        let jclass = CreateCall(jclassInitFuncDecl.getOrThrow(), curFile,
+            (ASTCloner.Clone(env) as Expr).getOrThrow(), typeExpr)
+        let fieldSignature = CreateCall(parseSignatureFuncDecl.getOrThrow(), curFile, signatureExpr)
+        let idArgs = ArrayList<FuncArg>()
+        idArgs.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        idArgs.add(CreateFuncArg(jclass))
+        idArgs.add(CreateFuncArg(nameExpr))
+        idArgs.add(CreateFuncArg(fieldSignature))
+        let fieldID = CreateCall(fieldIDFuncDecl.getOrThrow(), curFile, args: idArgs)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        args.add(CreateFuncArg(obj))
+        args.add(CreateFuncArg(fieldID))
+        args.add(CreateFuncArg(WrapJavaEntity(value).getOrThrow()))
+        return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
+    }
+
+    public func CreateSetStaticFieldCall(env: Expr, typeSignature: String, fieldName: String,
+        fieldSignature: String, value: Expr): Option<CallExpr> {
+        let funcDecl = GetSetStaticFieldDecl()
+        let jclassInitFuncDecl = GetJClassDecl()
+        let parseSignatureFuncDecl = GetParseComponentSignatureDecl()
+        let fieldIDFuncDecl = GetFieldIdConstrStatic()
+        if (funcDecl.isNone() || jclassInitFuncDecl.isNone() ||
+            parseSignatureFuncDecl.isNone() || fieldIDFuncDecl.isNone()) {
+            return None
+        }
+        let curFile = value.curFile.getOrThrow()
+        let body = jclassInitFuncDecl.getOrThrow().funcBody.getOrThrow()
+        CJC_ASSERT_WITH_MSG(!body.paramLists.isEmpty(), "paramLists cannot be empty")
+        CJC_ASSERT_WITH_MSG(body.paramLists[0].params.size > 1,
+            "at least 2 parameters expected for classInit function")
+        let strTy = body.paramLists[0].params[1].GetTy().getOrThrow()
+        let typeExpr = CreateLitConstExpr(LitConstKind.STRING, typeSignature, strTy)
+        typeExpr.curFile = Some(curFile)
+        let nameExpr = CreateLitConstExpr(LitConstKind.STRING, fieldName, strTy)
+        nameExpr.curFile = Some(curFile)
+        let signatureExpr = CreateLitConstExpr(LitConstKind.STRING, fieldSignature, strTy)
+        signatureExpr.curFile = Some(curFile)
+        let jclass = CreateCall(jclassInitFuncDecl.getOrThrow(), curFile,
+            (ASTCloner.Clone(env) as Expr).getOrThrow(), typeExpr)
+        let parsedSignature = CreateCall(parseSignatureFuncDecl.getOrThrow(), curFile, signatureExpr)
+        let idArgs = ArrayList<FuncArg>()
+        idArgs.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        idArgs.add(CreateFuncArg((ASTCloner.Clone(jclass) as Expr).getOrThrow()))
+        idArgs.add(CreateFuncArg(nameExpr))
+        idArgs.add(CreateFuncArg(parsedSignature))
+        let fieldID = CreateCall(fieldIDFuncDecl.getOrThrow(), curFile, args: idArgs)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        args.add(CreateFuncArg(jclass))
+        args.add(CreateFuncArg(fieldID))
+        args.add(CreateFuncArg(WrapJavaEntity(value).getOrThrow()))
+        return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
+    }
+
     public func WrapExceptionHandling(env: Expr, action: LambdaExpr): Expr {
         let curFile = env.curFile.getOrThrow()
         let retTy = action.funcBody.getOrThrow().GetTy().getOrThrow()
