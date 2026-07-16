@@ -203,6 +203,52 @@ private class TranslateWhileExpr <: TranslateCondCtrlExpr {
     }
 }
 
+// C++: CHIR/AST2CHIR/Utils.cpp:173-176.
+func CollectFrozenFuncDecl(funcDecl: AstFuncDecl, opts: GlobalOptions): Bool {
+    return opts.IsCHIROptimizationLevelOverO2() && funcDecl.isFrozen &&
+        !funcDecl.TestAttr(AstAttribute.ABSTRACT)
+}
+
+// C++: CHIR/AST2CHIR/Utils.cpp:178-182.
+func IsLocalVarDecl(decl: AstDecl): Bool {
+    return decl.astKind == ASTKind.VAR_DECL && !decl.TestAttr(AstAttribute.STATIC) &&
+        !decl.TestAttr(AstAttribute.GLOBAL)
+}
+
+// C++: CHIR/AST2CHIR/Utils.cpp:184-208.
+func IsSrcImportedDecl(decl: AstDecl, opts: GlobalOptions): Bool {
+    if (!decl.TestAttr(AstAttribute.IMPORTED)) {
+        return false
+    }
+    if (decl.IsConst()) {
+        return true
+    }
+    if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
+        if (CollectFrozenFuncDecl(funcDecl, opts)) {
+            return true
+        }
+    }
+    if (decl.TestAttr(AstAttribute.STATIC) && decl.astKind == ASTKind.VAR_DECL) {
+        if (let Some(outerDecl) <- decl.outerDecl) {
+            if (outerDecl.IsNominalDecl()) {
+                for (member in outerDecl.GetMemberDecls()) {
+                    if (member.TestAttr(AstAttribute.CONSTRUCTOR) &&
+                        member.TestAttr(AstAttribute.STATIC) &&
+                        IsSrcCodeImportedGlobalDecl(member, opts)) {
+                        return true
+                    }
+                }
+            }
+        }
+    }
+    return false
+}
+
+// C++: CHIR/AST2CHIR/Utils.cpp:210-213.
+func IsSrcCodeImportedGlobalDecl(decl: AstDecl, opts: GlobalOptions): Bool {
+    return IsSrcImportedDecl(decl, opts) && !IsLocalVarDecl(decl)
+}
+
 // Static member func and global func should create alloc node for print `unused variable` warning.
 private func ShouldCreateAlloc(decl: AstVarDecl, opts: GlobalOptions, rValueIsEmpty: Bool): Bool {
     if (decl.isConst) {
@@ -659,6 +705,18 @@ public class Translator {
         let annoInfo = AnnoInfo(mangledName, annoInstances)
         annotationFuncMap[decl] = annoInfo
         return annoInfo
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/Translator.h:424-427.
+    private func CreateAnnotationInfo(decl: AstDecl, value: GlobalValue,
+        parent: Option<CustomTypeDef>): Unit {
+        value.SetAnnoInfo(CreateAnnoFactoryFuncSig(decl, parent))
+    }
+
+    // C++: CHIR/AST2CHIR/TranslateASTNode/Translator.h:424-427.
+    private func CreateAnnotationInfo(decl: AstDecl, value: CustomTypeDef,
+        parent: Option<CustomTypeDef>): Unit {
+        value.SetAnnoInfo(CreateAnnoFactoryFuncSig(decl, parent))
     }
 
     public func TranslateAnnoFactoryFuncBody(decl: AstDecl, funcDef: Function): Unit {
@@ -3845,6 +3903,8 @@ public class Translator {
     }
 
     private func TranslateClassLikeDecl(def: ClassDef, decl: AstClassLikeDecl): Unit {
+        // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateClassDecl.cpp:48-52.
+        CreateAnnotationInfo(decl, def, Some(def))
         if (let Some(astTy) <- decl.GetTy()) {
             let classTy = UnwrapClassType(chirTy.TranslateType(astTy))
             def.SetType(classTy)
@@ -4058,22 +4118,31 @@ public class Translator {
             return
         }
         if (decl.TestAttr(AstAttribute.STATIC)) {
-            if (let Some(value) <- globalSymbolTable.TryGet(decl)) {
-                if (let Some(globalVar) <- (value as GlobalVar)) {
-                    def.AddStaticMemberVar(globalVar)
-                }
+            let globalVar = (GetSymbolTable(decl) as GlobalVar).getOrThrow()
+            def.AddStaticMemberVar(globalVar)
+            if (!decl.TestAttr(AstAttribute.IMPORTED) || IsSrcCodeImportedGlobalDecl(decl, opts)) {
+                CreateAnnotationInfo(decl, globalVar, Some(def))
             }
             return
         }
         let memberTy = chirTy.TranslateType(RequireAstTy(decl))
-        for (existing in def.GetDirectInstanceVars()) {
-            if (existing.name == decl.identifier.Val()) {
-                return
-            }
-        }
         let memberInfo = MemberVarInfo(decl.identifier.Val(), memberTy, isStatic: false,
             isReadOnly: decl.IsConst(), rawMangledName: decl.rawMangleName)
         memberInfo.attributeInfo = BuildVarDeclAttr(decl)
+        memberInfo.loc = TranslateLocation(decl)
+        memberInfo.annoInfo = CreateAnnoFactoryFuncSig(decl, Some(def))
+        memberInfo.outerDef = Some(def)
+        let memberVars = def.GetDirectInstanceVars()
+        var index: Int64 = 0
+        while (index < memberVars.size) {
+            if (memberVars[index].TestAttr(Attribute.DESERIALIZED) &&
+                memberVars[index].name == decl.identifier.Val()) {
+                memberVars[index] = memberInfo
+                def.SetDirectInstanceVars(memberVars)
+                return
+            }
+            index++
+        }
         def.AddInstanceVar(memberInfo)
     }
 
