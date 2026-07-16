@@ -33,6 +33,7 @@ public func DiagAmbiguousUse(diag: BasicDiagnosticEngine, node: Node, name: Stri
     let fullPackageName = node.curFile.getOrThrow().curPackage.getOrThrow().fullPackageName
     AddDiagNotesForImportedDecls(
         builder, importManager.GetImportsOfDecl(fullPackageName), importedTargets)
+    builder.Emit()
 }
 
 private func GetNoteMessageForMemberDecl(target: Decl): String {
