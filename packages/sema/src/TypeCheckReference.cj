@@ -1533,22 +1533,22 @@ private func CheckUsageOfThis(
     return valid
 }
 
-private func TypeCheckReferenceCheckUsageOfSuper(
+private func CheckUsageOfSuper(
     diag: BasicDiagnosticEngine,
     ctx: ASTContext,
     re: RefExpr
 ): Bool {
-    if (let None <- TypeCheckReferenceGetCurInheritableDecl(ctx, re.scopeName)) {
+    if (let None <- GetCurInheritableDecl(ctx, re.scopeName)) {
         return true
     }
-    let outerDecl = TypeCheckReferenceGetCurInheritableDecl(ctx, re.scopeName).getOrThrow()
-    let curFuncBodyOpt = TypeCheckReferenceGetCurFuncBody(ctx, re.scopeName)
+    let outerDecl = GetCurInheritableDecl(ctx, re.scopeName).getOrThrow()
+    let curFuncBodyOpt = GetCurFuncBody(ctx, re.scopeName)
     var valid = true
     if (let Some(curFuncBody) <- curFuncBodyOpt) {
         if (curFuncBody.TestAttr(Attribute.STATIC)) {
-            let builder = diag.Diagnose(
-                re.begin,
-                re.end,
+            let builder = Diagnose(
+                diag,
+                re,
                 BasicDiagKind.sema_static_members_cannot_call_members,
                 args: [BasicDiagArgument(re.ref.identifier.Val())])
             builder.Emit()
@@ -1556,20 +1556,20 @@ private func TypeCheckReferenceCheckUsageOfSuper(
         }
     }
     if (outerDecl.astKind == ASTKind.INTERFACE_DECL) {
-        let builder = diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_use_super_in_interface)
+        let builder = Diagnose(diag, re, BasicDiagKind.sema_use_super_in_interface)
         builder.Emit()
         valid = false
     }
     if (outerDecl.astKind == ASTKind.EXTEND_DECL) {
-        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_extend_use_super, TypeCheckReferenceRange(re))
+        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_extend_use_super, re)
         builder.Emit()
         valid = false
     } else if (outerDecl.astKind != ASTKind.CLASS_DECL) {
-        let builder = diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_super_use_error_inside_non_class)
+        let builder = Diagnose(diag, re, BasicDiagKind.sema_super_use_error_inside_non_class)
         builder.Emit()
         valid = false
     } else if (re.isAlone) {
-        let builder = diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_illegal_super_alone)
+        let builder = Diagnose(diag, re, BasicDiagKind.sema_illegal_super_alone)
         builder.Emit()
         valid = false
     }
@@ -1609,7 +1609,7 @@ private func TypeCheckReferenceCheckLegalityForNameReferenceExpr(
         if (refExpr.isThis) {
             let _ = CheckUsageOfThis(diag, ctx, refExpr)
         } else if (refExpr.isSuper) {
-            let _ = TypeCheckReferenceCheckUsageOfSuper(diag, ctx, refExpr)
+            let _ = CheckUsageOfSuper(diag, ctx, refExpr)
         } else {
             let _ = TypeCheckReferenceCheckAccessLegalityOfRefExpr(diag, tm, impl, ctx, refExpr)
         }
