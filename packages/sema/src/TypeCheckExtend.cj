@@ -1135,7 +1135,7 @@ extend TypeCheckerImpl {
                     continue
                 }
                 let instantTy = typeManager.GetInstantiatedTy(beComparedSuperInterfaceTy, instantMapping)
-                if (instantTy != compareSuperInterfaceTy) {
+                if (!(instantTy == compareSuperInterfaceTy)) {
                     continue
                 }
                 let builder = DiagnoseRefactor(diag.getOrThrow(),
@@ -1174,7 +1174,7 @@ extend TypeCheckerImpl {
                 for ((tyVarPtr, mappedTy) in mapping.entries) {
                     let tyVar = tyVarPtr.value
                     if (let Some(existingTy) <- instantMapping.Get(tyVar)) {
-                        if (existingTy != mappedTy) {
+                        if (!(existingTy == mappedTy)) {
                             needCheck = false
                             break
                         }
