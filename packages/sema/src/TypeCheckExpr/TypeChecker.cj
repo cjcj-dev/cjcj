@@ -2408,9 +2408,8 @@ extend TypeChecker {
                         ChkCallExpr(checkCtx, Some(target), call)
                     }), diag: impl.diag)
                 CollectMainFunctionsFromMainDecls(pkg)
-                if (let Some(instance) <- ci) {
-                    PluginCustomAnnoChecker(impl.diag.getOrThrow(), impl.typeManager, instance.globalOptions).Check(pkg)
-                }
+                let instance = ci.getOrThrow()
+                PluginCustomAnnoChecker(impl.diag.getOrThrow(), impl.typeManager, instance.globalOptions).Check(pkg)
             }
         }
         GenerateMainInvoke()
