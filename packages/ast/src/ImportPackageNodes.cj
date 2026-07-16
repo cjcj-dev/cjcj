@@ -339,7 +339,16 @@ public class File <: Node {
             CJC_NULLPTR_CHECK(featureDirective.featuresSet)
             let set = featureDirective.featuresSet.getOrThrow()
             for (featureId in set.content) {
-                insertFeatureName(out, featureId.ToString())
+                let builder = StringBuilder()
+                var idx: Int64 = 0
+                for (identifier in featureId.identifiers) {
+                    builder.append(identifier.Val())
+                    if (idx + 1 != featureId.identifiers.size) {
+                        builder.append(".")
+                    }
+                    idx++
+                }
+                insertFeatureName(out, builder.toString())
             }
         }
         return out
