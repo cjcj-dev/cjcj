@@ -131,7 +131,7 @@ private func collectParentMacroName(macCall: MacroCall): Unit {
     }
 }
 
-private func getAllDeclsForMacroName(macCall: MacroCall, macroName: String, out: ArrayList<Decl>): Bool {
+private func GetAllDeclsForMacroName(macCall: MacroCall, macroName: String, out: ArrayList<Decl>): Bool {
     if (let Some(instance) <- macCall.ci) {
         let identifier = macCall.GetIdentifier()
         if (let Some(node) <- macCall.GetNode()) {
@@ -167,40 +167,20 @@ private func getAllDeclsForMacroName(macCall: MacroCall, macroName: String, out:
     return true
 }
 
-private func firstParamCount(fd: FuncDecl): Int64 {
-    if (fd.funcBody.getOrThrow().paramLists.isEmpty()) {
-        return 0
-    }
-    return fd.funcBody.getOrThrow().paramLists[0].params.size
-}
-
-private func isMacroFuncDecl(decl: Decl): Bool {
-    return ASTKindEquals(decl.astKind, ASTKind.FUNC_DECL) && decl.TestAttr(Attribute.MACRO_FUNC)
-}
-
-private func isDeclInMacroPackage(decl: Decl): Bool {
-    if (let Some(file) <- decl.curFile) {
-        if (let Some(pkg) <- file.curPackage) {
-            return pkg.isMacroPackage
-        }
-    }
-    return true
-}
-
-private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool {
+private func GetValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool {
+    let instance = macCall.ci.getOrThrow()
+    let invocation = macCall.RequireInvocation()
     let fds = ArrayList<FuncDecl>()
     for (decl in decls) {
-        if (!isMacroFuncDecl(decl)) {
-            if (macCall.RequireInvocation().hasParenthesis) {
-                if (let Some(instance) <- macCall.ci) {
-                    instance.GetDiag().Diagnose(macCall.GetBeginPos(),
-                        "expect macro definition '" + macCall.GetIdentifier() + "', but found another declaration")
-                }
+        if (!decl.TestAttr(Attribute.MACRO_FUNC) || !ASTKindEquals(decl.astKind, ASTKind.FUNC_DECL)) {
+            if (invocation.hasParenthesis) {
+                instance.GetDiag().Diagnose(macCall.GetBeginPos(), DiagKind.macro_expect_macro_definition,
+                    args: [DiagArgument(invocation.macroCallDiagInfo.identifier)]).Emit()
                 return false
             }
-            continue
         }
-        if (!isDeclInMacroPackage(decl)) {
+        if ((let None <- decl.curFile) || (let None <- decl.curFile.getOrThrow().curPackage) ||
+            !decl.curFile.getOrThrow().curPackage.getOrThrow().isMacroPackage) {
             continue
         }
         if (let Some(fd) <- (decl as FuncDecl)) {
@@ -208,29 +188,28 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
         }
     }
     if (fds.isEmpty()) {
-        if (macCall.RequireInvocation().hasParenthesis && !macCall.RequireInvocation().IsIfAvailable()) {
-            if (let Some(instance) <- macCall.ci) {
-                instance.GetDiag().Diagnose(macCall.GetBeginPos(), "undeclared macro identifier '" +
-                    macCall.GetIdentifier() + "'")
+        if (invocation.hasParenthesis && !invocation.IsIfAvailable()) {
+            let pos = invocation.macroCallDiagInfo.identifierPos
+            let identifier = invocation.macroCallDiagInfo.identifier
+            let content = instance.GetDiag().GetSourceManager().GetContentBetween(pos, pos + identifier.size)
+            if (content == identifier) {
+                instance.GetDiag().Diagnose(macCall.GetBeginPos(), DiagKind.macro_undeclared_identifier,
+                    args: [DiagArgument(identifier)]).Emit()
             }
         }
         return false
     }
     if (fds.size == 1 && !fds[0].funcBody.getOrThrow().paramLists.isEmpty()) {
-        let argsSize = firstParamCount(fds[0])
+        let argsSize = fds[0].funcBody.getOrThrow().paramLists[0].params.size
         if (macCall.HasAttribute()) {
             if (argsSize != MACRO_ATTR_ARGS) {
-                if (let Some(instance) <- macCall.ci) {
-                    instance.GetDiag().Diagnose(macCall.GetBeginPos(),
-                        "expect an attributed macro '" + macCall.GetIdentifier() + "', but find a plain one")
-                }
+                instance.GetDiag().Diagnose(macCall.GetBeginPos(), DiagKind.macro_expect_attributed_macro,
+                    args: [DiagArgument(invocation.macroCallDiagInfo.identifier)]).Emit()
                 return false
             }
         } else if (argsSize != MACRO_COMMON_ARGS) {
-            if (let Some(instance) <- macCall.ci) {
-                instance.GetDiag().Diagnose(macCall.GetBeginPos(),
-                    "expect a plain macro '" + macCall.GetIdentifier() + "', but find an attributed one")
-            }
+            instance.GetDiag().Diagnose(macCall.GetBeginPos(), DiagKind.macro_expect_plain_macro,
+                args: [DiagArgument(invocation.macroCallDiagInfo.identifier)]).Emit()
             return false
         }
         macCall.BindDefinition(fds[0])
@@ -238,12 +217,11 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
     }
     if (fds.size == MACRO_DEF_NUM && !fds[0].funcBody.getOrThrow().paramLists.isEmpty() &&
         !fds[1].funcBody.getOrThrow().paramLists.isEmpty()) {
-        let argsSize1 = firstParamCount(fds[0])
-        let argsSize2 = firstParamCount(fds[1])
+        let argsSize1 = fds[0].funcBody.getOrThrow().paramLists[0].params.size
+        let argsSize2 = fds[1].funcBody.getOrThrow().paramLists[0].params.size
         if (argsSize1 == argsSize2) {
-            if (let Some(instance) <- macCall.ci) {
-                instance.GetDiag().Diagnose(macCall.GetBeginPos(), "ambiguous match for macro call " + macCall.GetIdentifier())
-            }
+            instance.GetDiag().Diagnose(macCall.GetBeginPos(), DiagKind.macro_ambiguous_match,
+                args: [DiagArgument(invocation.macroCallDiagInfo.identifier)]).Emit()
             return false
         }
         if (macCall.HasAttribute()) {
@@ -256,22 +234,23 @@ private func getValidFuncDecl(macCall: MacroCall, decls: ArrayList<Decl>): Bool 
     return true
 }
 
-private func bindDefinitionByName(macCall: MacroCall, macroName: String): Bool {
+private func BindDefinition(macCall: MacroCall, macroName: String): Bool {
     if (macCall.GetDefinition().isSome()) {
         return true
     }
     let decls = ArrayList<Decl>()
-    if (!getAllDeclsForMacroName(macCall, macroName, decls)) {
+    if (!GetAllDeclsForMacroName(macCall, macroName, decls)) {
         return false
     }
-    if (!getValidFuncDecl(macCall, decls)) {
+    if (!GetValidFuncDecl(macCall, decls)) {
         return false
     }
     if (macCall.GetDefinition().isSome()) {
         return true
     }
     if (let Some(instance) <- macCall.ci) {
-        instance.GetDiag().Diagnose(macCall.GetBeginPos(), "ambiguous match for macro call " + macCall.GetIdentifier())
+        instance.GetDiag().Diagnose(macCall.GetBeginPos(), DiagKind.macro_ambiguous_match,
+            args: [DiagArgument(macCall.GetIdentifier())]).Emit()
     }
     return false
 }
@@ -356,7 +335,7 @@ extend MacroCall {
                 }
             }
         }
-        if (!bindDefinitionByName(this, macCallFullName)) {
+        if (!BindDefinition(this, macCallFullName)) {
             return false
         }
         if (!bindInvokeFunc(this)) {
