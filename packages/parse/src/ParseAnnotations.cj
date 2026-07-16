@@ -59,6 +59,7 @@ extend ParserImpl {
         anno.begin = atToken.Begin()
         anno.identifier = ExpectIdentifierWithPos(anno)
         anno.kind = NameToAnnotationKind(anno.identifier.Val())
+        anno.end = anno.identifier.End()
         try (cs = ChainScope(this, anno)) {
             if (anno.kind == AnnotationKind.ATTRIBUTE) {
                 ParseAttributeAnnotation(anno)
