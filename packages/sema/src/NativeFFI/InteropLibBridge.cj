@@ -476,6 +476,40 @@ public class InteropLibBridge {
             CreateMatchExpr(option, cases, GetJavaEntityTy().getOrThrow()), curFile)
     }
 
+    public func CreateMatchWithTypeCast(exprToCast: Expr, castTy: Ty): Option<MatchExpr> {
+        let exceptionDecl = importManager.GetCoreDecl<ClassDecl>(CLASS_EXCEPTION)
+        if (let None <- exceptionDecl) {
+            return None
+        }
+        let castType = Type()
+        castType.SetTy(castTy)
+        let varPattern = CreateVarPattern(V_COMPILER, castType.GetTy())
+        let curFile = exprToCast.curFile.getOrThrow()
+        varPattern.curFile = Some(curFile)
+        varPattern.varDecl.getOrThrow().curFile = Some(curFile)
+        let varPatternRef = WithinFile<RefExpr>(
+            CreateRefExpr(varPattern.varDecl.getOrThrow()), curFile)
+
+        let typePattern = CreateTypePattern(varPattern, castType, exprToCast)
+        typePattern.matchBeforeRuntime = false
+        let exceptionCallArgs = ArrayList<Expr>()
+        let message = CreateLitConstExpr(LitConstKind.STRING,
+            "internal error: CreateMatchWithTypeCast(" + Ty.KindName(exprToCast.TyKind()) + " -> " +
+                Ty.KindName(castTy.kind) + ")", utils.GetStringDecl().GetTy().getOrThrow())
+        message.curFile = Some(curFile)
+        exceptionCallArgs.add(message)
+
+        let cases = ArrayList<MatchCase>()
+        let castCase = CreateMatchCase(typePattern, varPatternRef)
+        castCase.curFile = Some(curFile)
+        cases.add(castCase)
+        let throwCase = CreateMatchCase(WildcardPattern(),
+            CreateThrowException(exceptionDecl.getOrThrow(), exceptionCallArgs, curFile, typeManager))
+        throwCase.curFile = Some(curFile)
+        cases.add(throwCase)
+        return Some(WithinFile<MatchExpr>(CreateMatchExpr(exprToCast, cases, castTy), curFile))
+    }
+
     public func CreateGetJavaLambdaObjectCall(refExpr: RefExpr, classSign: String,
         curFile: Option<File>): CallExpr {
         return CreateGetJavaLambdaCall(GetJavaLambdaObjectDecl(), refExpr, classSign, curFile)
