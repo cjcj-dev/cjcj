@@ -706,7 +706,7 @@ public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: Po
     pointerExpr.SetTy(pointerTypeNode.GetTy() ?? TypeManager.GetInvalidTy())
     if (!Ty.IsTyCorrect(pointerExpr.GetTy())) {
         if (let Some(diagValue) <- diag) {
-            DiagOld(diagValue, pointerExpr, BasicDiagKind.sema_pointer_unknow_generic_type)
+            Diagnose(diagValue, pointerExpr, BasicDiagKind.sema_pointer_unknow_generic_type).Emit()
         }
         return false
     } else if (!ret) {
