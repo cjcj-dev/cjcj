@@ -136,6 +136,41 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
             return true
         }
+        if (kind == IncreKind.ROLLBACK) {
+            return super.PerformSema()
+        }
+        for (srcPkg in core.GetSourcePackages()) {
+            srcPkg.EnableAttr(Attribute.INCRE_COMPILE)
+            HandleCtorForIncr(srcPkg, core.mangledName2DeclMap, core.cachedInfo.semaInfo)
+            for (mangle in core.importManager.LoadCachedTypeForPackage(srcPkg, core.mangledName2DeclMap)) {
+                cacheMangles.incrRemovedDecls.add(mangle)
+            }
+        }
+        MarkIncrementalCheckForCtor(declsToBeReCompiled)
+        for ((_, decl) in core.mangledName2DeclMap) {
+            if (!decl.toBeCompiled && !IsInDeclWithAttribute(decl, Attribute.GENERIC) &&
+                Ty.IsTyCorrect(decl.GetTy()) &&
+                (decl.astKind != ASTKind.FUNC_DECL || !decl.TestAttr(Attribute.DEFAULT))) {
+                if (!decl.IsNominalDecl() && decl.astKind != ASTKind.PROP_DECL) {
+                    decl.EnableAttr(Attribute.IS_CHECK_VISITED)
+                    decl.EnableAttr(Attribute.INITIALIZED)
+                    decl.EnableAttr(Attribute.INITIALIZATION_CHECKED)
+                    decl.EnableAttr(Attribute.INCRE_COMPILE)
+                }
+                if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                    if (let Some(funcBody) <- funcDecl.funcBody) {
+                        funcBody.body = None
+                    }
+                } else if (let Some(varDecl) <- (decl as VarDecl)) {
+                    if (varDecl.initializer.isSome()) {
+                        varDecl.EnableAttr(Attribute.DEFAULT)
+                        if (HasSimpleInitialiser(varDecl)) {
+                            varDecl.DisableAttr(Attribute.IS_CHECK_VISITED)
+                        }
+                    }
+                }
+            }
+        }
         return super.PerformSema()
     }
 
