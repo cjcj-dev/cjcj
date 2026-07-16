@@ -135,7 +135,7 @@ private func DesugarPointerCall(typeManager: TypeManager, ctx: Option<ASTContext
     }
     if (ce.args.size > 1) {
         if (let Some(diagValue) <- diag) {
-            DiagOld(diagValue, ce, BasicDiagKind.sema_pointer_too_much_argument)
+            Diagnose(diagValue, ce, BasicDiagKind.sema_pointer_too_much_argument).Emit()
         }
     }
     ce.args.clear()
