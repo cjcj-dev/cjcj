@@ -101,7 +101,7 @@ private func getDirectMappingTys(tyVar: GenericsTy, mts: MultiTypeSubst): TySet 
     return res
 }
 
-private func filterUnusedMapping(mapping: MultiTypeSubst, tys: TySet): MultiTypeSubst {
+private func FilterUnusedMapping(mapping: MultiTypeSubst, tys: TySet): MultiTypeSubst {
     let all = keySet(mapping)
     let reachable = ArrayList<GenericsTy>()
     let worklist = ArrayList<GenericsTy>()
@@ -127,15 +127,17 @@ private func filterUnusedMapping(mapping: MultiTypeSubst, tys: TySet): MultiType
     let ret = MultiTypeSubst()
     for ((tyVar, tys) in mapping.entries) {
         if (containsGeneric(reachable, tyVar.value)) {
+            let retained = TreeSet<Ptr<Ty>>()
             for (ty in tys) {
-                ret.Put(tyVar.value, ty.value)
+                retained.add(ty)
             }
+            ret.entries[tyVar] = retained
         }
     }
     return ret
 }
 
-private func filterUnusedMapping(mapping: SubstPack, tys: TySet): SubstPack {
+private func FilterUnusedMapping(mapping: SubstPack, tys: TySet): SubstPack {
     let allUniversal = ArrayList<GenericsTy>()
     let allInst = ArrayList<GenericsTy>()
     for ((tyVar, ty) in mapping.u2i.entries) {
@@ -182,15 +184,17 @@ private func filterUnusedMapping(mapping: SubstPack, tys: TySet): SubstPack {
     }
     for ((tyVar, tys) in mapping.inst.entries) {
         if (containsGeneric(reachable, tyVar.value)) {
+            let retained = TreeSet<Ptr<Ty>>()
             for (ty in tys) {
-                ret.inst.Put(tyVar.value, ty.value)
+                retained.add(ty)
             }
+            ret.inst.entries[tyVar] = retained
         }
     }
     return ret
 }
 
-private func expandFilteredMultiTypeSubst(mts: MultiTypeSubst): ArrayList<TypeSubst> {
+private func ExpandFilteredMultiTypeSubst(mts: MultiTypeSubst): ArrayList<TypeSubst> {
     let res = ArrayList<TypeSubst>()
     res.add(TypeSubst())
     for ((tyVar, tys) in mts.entries) {
@@ -371,8 +375,8 @@ public func ReduceMultiTypeSubst(typeManager: TypeManager, tyVars: ArrayList<Gen
 
 public func ExpandMultiTypeSubst(maps: SubstPack, usefulTys: TySet): ArrayList<SubstPack> {
     let ret = ArrayList<SubstPack>()
-    let filtered = filterUnusedMapping(maps, usefulTys)
-    for (mapping in expandFilteredMultiTypeSubst(filtered.inst)) {
+    let filtered = FilterUnusedMapping(maps, usefulTys)
+    for (mapping in ExpandFilteredMultiTypeSubst(filtered.inst)) {
         let substPack = SubstPack()
         substPack.u2i = filtered.u2i.Clone()
         MergeTypeSubstToMultiTypeSubst(substPack.inst, mapping)
@@ -382,7 +386,7 @@ public func ExpandMultiTypeSubst(maps: SubstPack, usefulTys: TySet): ArrayList<S
 }
 
 public func ExpandMultiTypeSubst(mts: MultiTypeSubst, usefulTys: TySet): ArrayList<TypeSubst> {
-    return expandFilteredMultiTypeSubst(filterUnusedMapping(mts, usefulTys))
+    return ExpandFilteredMultiTypeSubst(FilterUnusedMapping(mts, usefulTys))
 }
 
 public func GetMappedTy(mts: MultiTypeSubst, tyVar: GenericsTy): Ty {
