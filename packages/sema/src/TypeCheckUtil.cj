@@ -59,6 +59,16 @@ public func GetCurFuncBody(ctx: ASTContext, scopeName: String): Option<FuncBody>
     return None
 }
 
+// C++ src/Sema/TypeCheckUtil.h:222-226 TypeCheckUtil::GetCurInheritableDecl.
+public func GetCurInheritableDecl(ctx: ASTContext, scopeName: String): Option<InheritableDecl> {
+    if (let Some(symbol) <- ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, scopeName)) {
+        if (let Some(node) <- symbol.node) {
+            return node as InheritableDecl
+        }
+    }
+    return None
+}
+
 private class TypeCheckUtilBoolBox {
     public var value: Bool
 
