@@ -1105,8 +1105,8 @@ private func ChkFlowExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
                     ds.ReportDiag()
                     return false
                 }
-                ClearExprKeepTargets(leftExpr)
-                ClearExprKeepTargets(rightExpr)
+                leftExpr.Clear()
+                rightExpr.Clear()
                 typeManager.constraints.Reset()
             }
         }
