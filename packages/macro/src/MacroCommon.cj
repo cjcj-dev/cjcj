@@ -109,11 +109,9 @@ private func hasEvenTrailingBackslashes(value: String): Bool {
 public func ProcessQuotaMarksForSingle(value: String): String {
     var inDollar = false
     var leftCurlCount: Int64 = 0
-    let builder = StringBuilder()
+    let result = ArrayList<UInt8>()
     for (byte in value.toArray()) {
-        let current = String.fromUtf8([byte])
-        let existing = builder.toString()
-        if (!existing.isEmpty() && existing[existing.size - 1] == b'$' && byte == b'{') {
+        if (!result.isEmpty() && result[result.size - 1] == b'$' && byte == b'{') {
             inDollar = true
         }
         if (inDollar && byte == b'{') {
@@ -128,19 +126,22 @@ public func ProcessQuotaMarksForSingle(value: String): String {
             }
         }
         if (inDollar) {
-            builder.append(current)
-        } else if (byte == b'"' && (existing.isEmpty() || existing[existing.size - 1] != b'\\' ||
-            hasEvenTrailingBackslashes(existing))) {
-            builder.append("\\\"")
-        } else if (byte == b'\r' && (existing.isEmpty() || existing[existing.size - 1] != b'\\')) {
-            builder.append("\\r")
-        } else if (byte == b'\n' && (existing.isEmpty() || existing[existing.size - 1] != b'\\')) {
-            builder.append("\\n")
+            result.add(byte)
+        } else if (byte == b'"' && (result.isEmpty() || result[result.size - 1] != b'\\' ||
+            hasEvenTrailingBackslashes(String.fromUtf8(result.toArray())))) {
+            result.add(b'\\')
+            result.add(b'"')
+        } else if (byte == b'\r' && (result.isEmpty() || result[result.size - 1] != b'\\')) {
+            result.add(b'\\')
+            result.add(b'r')
+        } else if (byte == b'\n' && (result.isEmpty() || result[result.size - 1] != b'\\')) {
+            result.add(b'\\')
+            result.add(b'n')
         } else {
-            builder.append(current)
+            result.add(byte)
         }
     }
-    return builder.toString()
+    return String.fromUtf8(result.toArray())
 }
 
 public func ProcessQuotaMarks(value: String): String {
