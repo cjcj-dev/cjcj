@@ -288,7 +288,8 @@ extend TypeChecker {
         if (funcBody == targetFuncBody || target.TestAttr(Attribute.GLOBAL)) {
             return false
         }
-        if ((let Some(funcTy) <- (funcBody.GetTy() as FuncTy)) && funcTy.isC) {
+        if ((let Some(funcBodyTy) <- funcBody.GetTy()) &&
+            (let Some(funcTy) <- (funcBodyTy as FuncTy)) && funcTy.isC) {
             return true
         }
         if (target.astKind != ASTKind.VAR_DECL && target.astKind != ASTKind.FUNC_DECL) {
@@ -299,7 +300,8 @@ extend TypeChecker {
             if (outer == targetFuncBody) {
                 return false
             }
-            if ((let Some(outerFuncTy) <- (outer.GetTy() as FuncTy)) && outerFuncTy.isC) {
+            if ((let Some(outerTy) <- outer.GetTy()) &&
+                (let Some(outerFuncTy) <- (outerTy as FuncTy)) && outerFuncTy.isC) {
                 return true
             }
             outerFuncBody = GetCurFuncBody(ctx, GetParentScopeName(outer.scopeName))
