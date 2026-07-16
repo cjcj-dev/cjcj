@@ -562,7 +562,8 @@ private func CreateEarlyReturnGuardCatch(typeManager: TypeManager, importManager
 }
 
 private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
-    callChecker: (Ty, CallExpr) -> Bool, pkg: Package, tryLambda: LambdaExpr, tryReturnTy: Ty): Bool {
+    importManager: SemaImportManager, callChecker: (Ty, CallExpr) -> Bool,
+    pkg: Package, tryLambda: LambdaExpr, tryReturnTy: Ty): Bool {
     if (let None <- tryLambda.funcBody) {
         return false
     }
@@ -597,7 +598,8 @@ private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
     wrappedTry.SetTy(tryReturnTy)
 
     let exceptionWrapper = FindEffectClassDecl(importManager, CLASS_FRAME_EXCEPTION_WRAPPER).getOrThrow()
-    if (let Some(exceptionCatch) <- CreateWrapperGuardCatch(typeManager, callChecker, pkg, sourceBlock, exceptionWrapper,
+    if (let Some(exceptionCatch) <- CreateWrapperGuardCatch(typeManager, importManager, callChecker,
+        sourceBlock, exceptionWrapper,
         EXCEPTION_FIELD_NAME, frameTy)) {
         wrappedTry.catchPatterns.add(exceptionCatch.pattern)
         wrappedTry.catchBlocks.add(exceptionCatch.block)
@@ -606,7 +608,8 @@ private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
     }
 
     let errorWrapper = FindEffectClassDecl(importManager, CLASS_FRAME_ERROR_WRAPPER).getOrThrow()
-    if (let Some(errorCatch) <- CreateWrapperGuardCatch(typeManager, callChecker, pkg, sourceBlock, errorWrapper,
+    if (let Some(errorCatch) <- CreateWrapperGuardCatch(typeManager, importManager, callChecker,
+        sourceBlock, errorWrapper,
         ERROR_FIELD_NAME, frameTy)) {
         wrappedTry.catchPatterns.add(errorCatch.pattern)
         wrappedTry.catchBlocks.add(errorCatch.block)
@@ -615,7 +618,8 @@ private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
     }
 
     let earlyReturnDecl = FindEffectClassDecl(importManager, CLASS_EARLY_RETURN).getOrThrow()
-    if (let Some(earlyReturnCatch) <- CreateEarlyReturnGuardCatch(typeManager, callChecker, pkg, sourceBlock, funcBody,
+    if (let Some(earlyReturnCatch) <- CreateEarlyReturnGuardCatch(typeManager, importManager, callChecker,
+        sourceBlock, funcBody,
         earlyReturnDecl, frameTy, tryReturnTy)) {
         wrappedTry.catchPatterns.add(earlyReturnCatch.pattern)
         wrappedTry.catchBlocks.add(earlyReturnCatch.block)
@@ -635,15 +639,15 @@ private func EncloseTryLambdaForImmediateWrappers(typeManager: TypeManager,
     return true
 }
 
-private func CreateWrapperCatchClause(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    pkg: Package, source: Node, catchDecl: ClassDecl, wrapperDecl: ClassDecl,
+private func CreateWrapperCatchClause(typeManager: TypeManager, importManager: SemaImportManager,
+    callChecker: (Ty, CallExpr) -> Bool, source: Node, catchDecl: ClassDecl, wrapperDecl: ClassDecl,
     wrapperName: String): Option<GeneratedCatchClause> {
     if (let Some(catchTy) <- catchDecl.GetTy()) {
         let catchPattern = CreateVarPattern(V_COMPILER_NAME, catchTy)
         CopyGeneratedPosition(source, catchPattern)
         if (let Some(catchVar) <- catchPattern.varDecl) {
             CopyGeneratedPosition(source, catchVar)
-            if (let Some(activeFrame) <- CreateHandlerFrameCall(typeManager, callChecker, pkg, source,
+            if (let Some(activeFrame) <- CreateHandlerFrameCall(typeManager, importManager, callChecker, source,
                 GET_ACTIVE_FRAME_NAME, ArrayList<Ty>())) {
                 let wrapperArgs = ArrayList<FuncArg>()
                 wrapperArgs.add(CreateFuncArg(activeFrame))
