@@ -159,19 +159,12 @@ public class InstCtxScope {
         }
     }
 
-    public func SetRefDeclSimple(typeManager: TypeManager, fd: FuncDecl): Unit {
-        if (let Some(generic) <- fd.GetGeneric()) {
-            refMaps = SubstPack()
-            for (param in generic.typeParameters) {
-                if (let Some(paramTy) <- param.GetTy()) {
-                    if (let Some(genericTy) <- (paramTy as GenericsTy)) {
-                        typeManager.MakeInstTyVar(refMaps, genericTy)
-                    }
-                }
-            }
-            maps = curMaps.Clone()
-            maps.Merge(refMaps)
+    public func SetRefDeclSimple(typeManager: TypeManager, fd: FuncDecl, ce: CallExpr): Unit {
+        for (genericTy in GetTyVars(fd, ce, true)) {
+            typeManager.MakeInstTyVar(refMaps, genericTy)
         }
+        maps = curMaps.Clone()
+        maps.Merge(refMaps)
     }
 
     public func Close(): Unit {

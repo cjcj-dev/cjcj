@@ -1137,62 +1137,43 @@ private func IsInterfaceFuncWithSameSignature(typeManager: TypeManager, left: Fu
     return false
 }
 
-private func TypeListHasGeneric(tys: ArrayList<Ty>): Bool {
-    for (ty in tys) {
-        if (ty.HasGeneric()) {
-            return true
-        }
-    }
-    return false
-}
-
-private func CompareGenericCandidate(typeManager: TypeManager, left: FunctionMatchingUnit, right: FunctionMatchingUnit,
-    ce: CallExpr): Option<Bool> {
-    if (let None <- GetCurrentGeneric(right.fd, ce)) {
-        return None
-    }
-    if (!TypeListHasGeneric(right.tysInArgOrder)) {
-        return None
-    }
-    if (left.tysInArgOrder.size != right.tysInArgOrder.size) {
-        return Some(false)
-    }
-    let generic = GetCurrentGeneric(right.fd, ce).getOrThrow()
-    let typeMapping = SubstPack()
-    let tyVarsToSolve = ArrayList<GenericsTy>()
-    AddCurrentGenericInstTyVars(typeManager, generic, typeMapping, tyVarsToSolve)
-    if (tyVarsToSolve.isEmpty()) {
-        return Some(false)
-    }
-    let pack = LocTyArgSynArgPack()
-    for (tyVar in tyVarsToSolve) {
-        pack.tyVarsToSolve.add(tyVar)
-    }
-    var idx: Int64 = 0
-    while (idx < left.tysInArgOrder.size) {
-        pack.argTys.add(left.tysInArgOrder[idx])
-        pack.paramTys.add(typeManager.ApplySubstPack(right.tysInArgOrder[idx], typeMapping))
-        idx++
-    }
-    ProcessParamToArg(typeManager, pack)
-    if (let None <- LocalTypeArgumentSynthesis(typeManager, pack, GCBlames()).SynthesizeTypeArguments()) {
-        return Some(false)
-    }
-    var pos: Int64 = 0
-    while (pos < left.tysInArgOrder.size) {
-        if (left.tysInArgOrder[pos].IsNumeric() && right.tysInArgOrder[pos].IsNumeric() &&
-            CompareIntAndFloat(left.tysInArgOrder[pos], right.tysInArgOrder[pos]) == ComparisonRes.GT) {
-            return Some(false)
-        }
-        pos++
-    }
-    return Some(true)
-}
-
 private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatchingUnit, right: FunctionMatchingUnit,
     ce: CallExpr): Bool {
-    if (let Some(result) <- CompareGenericCandidate(typeManager, left, right, ce)) {
-        return result
+    var hasGeneric = false
+    for (ty in right.tysInArgOrder) {
+        if (ty.HasGeneric()) {
+            hasGeneric = true
+            break
+        }
+    }
+    if (GetCurrentGeneric(right.fd, ce).isSome() && hasGeneric) {
+        let instCtxScope = InstCtxScope(typeManager)
+        instCtxScope.SetRefDeclSimple(typeManager, right.fd, ce)
+        let pack = LocTyArgSynArgPack()
+        for (tyVar in GetTyVarsToSolve(typeManager.GetInstMapping())) {
+            pack.tyVarsToSolve.add(tyVar)
+        }
+        for (argTy in left.tysInArgOrder) {
+            pack.argTys.add(argTy)
+        }
+        for (paramTy in right.tysInArgOrder) {
+            pack.paramTys.add(paramTy)
+        }
+        ProcessParamToArg(typeManager, pack)
+        let synthesisResult = LocalTypeArgumentSynthesis(typeManager, pack, GCBlames()).SynthesizeTypeArguments()
+        instCtxScope.Close()
+        if (synthesisResult.isNone()) {
+            return false
+        }
+        var pos: Int64 = 0
+        while (pos < left.tysInArgOrder.size) {
+            if (left.tysInArgOrder[pos].IsNumeric() && right.tysInArgOrder[pos].IsNumeric() &&
+                CompareIntAndFloat(left.tysInArgOrder[pos], right.tysInArgOrder[pos]) == ComparisonRes.GT) {
+                return false
+            }
+            pos++
+        }
+        return true
     }
     if (let Some(leftOuter) <- left.fd.outerDecl) {
         if (let Some(rightOuter) <- right.fd.outerDecl) {

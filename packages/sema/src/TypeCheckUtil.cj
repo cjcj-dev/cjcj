@@ -923,6 +923,38 @@ public func GetCurrentGeneric(fd: FuncDecl, ce: CallExpr): Option<Generic> {
     return None
 }
 
+// C++ src/Sema/TypeCheckUtil.cpp:693-724 GetTyVars.
+public func GetTyVars(fd: FuncDecl, ce: CallExpr, ignoreContext: Bool): ArrayList<GenericsTy> {
+    let result = ArrayList<GenericsTy>()
+    if (let Some(generic) <- GetCurrentGeneric(fd, ce)) {
+        for (typeParameter in generic.typeParameters) {
+            if (let Some(genericTy) <- (typeParameter.GetTy().getOrThrow() as GenericsTy)) {
+                result.add(genericTy)
+            }
+        }
+    }
+    var isMemberOfGenericType = false
+    if (let Some(memberAccess) <- ((ce.baseFunc ?? return result) as MemberAccess)) {
+        if (let Some(baseExpr) <- memberAccess.baseExpr) {
+            let baseTarget = baseExpr.GetTarget()
+            isMemberOfGenericType = fd.TestAttr(Attribute.STATIC) && fd.outerDecl.isSome() &&
+                fd.outerDecl.getOrThrow().GetGeneric().isSome() && fd.outerDecl.getOrThrow().IsNominalDecl()
+            isMemberOfGenericType = isMemberOfGenericType ||
+                (baseTarget.isSome() && baseTarget.getOrThrow().GetGeneric().isSome() &&
+                baseTarget.getOrThrow().TestAttr(Attribute.ENUM_CONSTRUCTOR))
+        }
+    }
+    if (ignoreContext || !isMemberOfGenericType) {
+        return result
+    }
+    for (typeParameter in fd.outerDecl.getOrThrow().GetGeneric().getOrThrow().typeParameters) {
+        if (let Some(genericTy) <- (typeParameter.GetTy().getOrThrow() as GenericsTy)) {
+            result.add(genericTy)
+        }
+    }
+    return result
+}
+
 public func GetParamTysInArgsOrder(typeManager: TypeManager, ce: CallExpr, fd: FuncDecl): ArrayList<Ty> {
     let empty = ArrayList<Ty>()
     if (let None <- fd.funcBody) {
