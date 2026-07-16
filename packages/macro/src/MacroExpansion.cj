@@ -768,6 +768,9 @@ public class MacroExpansion {
             }
             idx--
         }
+        if (ci.GetDiag().GetErrorCount() != 0u64) {
+            ci.GetDiag().EmitCategoryGroup()
+        }
     }
 
     public func ReplaceEachMacro(macCall: MacroCall): Unit {
