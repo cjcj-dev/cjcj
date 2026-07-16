@@ -140,7 +140,7 @@ extend ParserImpl {
             DiagExpectedNoNewLine()
             return InvalidExpr(Peek().Begin())
         }
-        if (Seeing(TokenKind.NOT) || Seeing(TokenKind.ADD) || Seeing(TokenKind.SUB) || Seeing(TokenKind.BITNOT)) {
+        if (Seeing(TokenKind.NOT) || Seeing(TokenKind.SUB)) {
             let op = Peek()
             Next()
             let unary = UnaryExpr()
