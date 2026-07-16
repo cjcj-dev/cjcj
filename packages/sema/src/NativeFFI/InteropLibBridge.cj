@@ -772,6 +772,106 @@ public class InteropLibBridge {
         return None
     }
 
+    public func CreateGetFieldCall(env: Expr, obj: Expr, typeSignature: String,
+        fieldName: String, fieldSignature: String): Option<CallExpr> {
+        let funcDecl = GetGetFieldDecl()
+        let jclassInitFuncDecl = GetJClassDecl()
+        let parseSignatureFuncDecl = GetParseComponentSignatureDecl()
+        let fieldIDFuncDecl = GetFieldIdConstr()
+        if (funcDecl.isNone() || jclassInitFuncDecl.isNone() ||
+            parseSignatureFuncDecl.isNone() || fieldIDFuncDecl.isNone()) {
+            return None
+        }
+        let curFile = obj.curFile.getOrThrow()
+        let body = jclassInitFuncDecl.getOrThrow().funcBody.getOrThrow()
+        CJC_ASSERT_WITH_MSG(!body.paramLists.isEmpty(), "paramLists cannot be empty")
+        CJC_ASSERT_WITH_MSG(body.paramLists[0].params.size > 1,
+            "at least 2 parameters expected for classInit function")
+        let strTy = body.paramLists[0].params[1].GetTy().getOrThrow()
+        let jclass = CreateCall(jclassInitFuncDecl.getOrThrow(), curFile,
+            (ASTCloner.Clone(env) as Expr).getOrThrow(),
+            CreateLitConstExpr(LitConstKind.STRING, typeSignature, strTy))
+        let fieldSig = CreateCall(parseSignatureFuncDecl.getOrThrow(), curFile,
+            CreateLitConstExpr(LitConstKind.STRING, fieldSignature, strTy))
+        let fieldIDArgs = ArrayList<FuncArg>()
+        fieldIDArgs.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        fieldIDArgs.add(CreateFuncArg(jclass))
+        fieldIDArgs.add(CreateFuncArg(CreateLitConstExpr(LitConstKind.STRING, fieldName, strTy)))
+        fieldIDArgs.add(CreateFuncArg(fieldSig))
+        let fieldID = CreateCall(fieldIDFuncDecl.getOrThrow(), curFile, args: fieldIDArgs)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        args.add(CreateFuncArg(obj))
+        args.add(CreateFuncArg(fieldID))
+        return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
+    }
+
+    public func CreateGetStaticFieldCall(env: Expr, typeSignature: String,
+        fieldName: String, fieldSignature: String): Option<CallExpr> {
+        let funcDecl = GetGetStaticFieldDecl()
+        let jclassInitFuncDecl = GetJClassDecl()
+        let parseSignatureFuncDecl = GetParseComponentSignatureDecl()
+        let fieldIDFuncDecl = GetFieldIdConstrStatic()
+        if (funcDecl.isNone() || jclassInitFuncDecl.isNone() || parseSignatureFuncDecl.isNone() ||
+            fieldIDFuncDecl.isNone() || GetJavaEntityTy().isNone()) {
+            return None
+        }
+        let curFile = env.curFile.getOrThrow()
+        let body = jclassInitFuncDecl.getOrThrow().funcBody.getOrThrow()
+        CJC_ASSERT_WITH_MSG(!body.paramLists.isEmpty(), "paramLists cannot be empty")
+        CJC_ASSERT_WITH_MSG(body.paramLists[0].params.size > 1,
+            "at least 2 parameters expected for classInit function")
+        let strTy = body.paramLists[0].params[1].GetTy().getOrThrow()
+        let jclass = CreateCall(jclassInitFuncDecl.getOrThrow(), curFile,
+            (ASTCloner.Clone(env) as Expr).getOrThrow(),
+            CreateLitConstExpr(LitConstKind.STRING, typeSignature, strTy))
+        let fieldSig = CreateCall(parseSignatureFuncDecl.getOrThrow(), curFile,
+            CreateLitConstExpr(LitConstKind.STRING, fieldSignature, strTy))
+        let fieldIDArgs = ArrayList<FuncArg>()
+        fieldIDArgs.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        fieldIDArgs.add(CreateFuncArg((ASTCloner.Clone(jclass) as Expr).getOrThrow()))
+        fieldIDArgs.add(CreateFuncArg(CreateLitConstExpr(LitConstKind.STRING, fieldName, strTy)))
+        fieldIDArgs.add(CreateFuncArg(fieldSig))
+        let fieldID = CreateCall(fieldIDFuncDecl.getOrThrow(), curFile, args: fieldIDArgs)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg((ASTCloner.Clone(env) as Expr).getOrThrow()))
+        args.add(CreateFuncArg(jclass))
+        args.add(CreateFuncArg(fieldID))
+        return Some(CreateCall(funcDecl.getOrThrow(), curFile, args: args))
+    }
+
+    public func WrapExceptionHandling(env: Expr, action: LambdaExpr): Expr {
+        let curFile = env.curFile.getOrThrow()
+        let retTy = action.funcBody.getOrThrow().GetTy().getOrThrow()
+        let fd = GetWithExceptionHandlingDecl().getOrThrow()
+        let fdRef = WithinFile<RefExpr>(CreateRefExpr(fd), curFile)
+        fdRef.instTys.add(retTy)
+        fdRef.SetTy(typeManager.GetInstantiatedTy(fd.GetTy().getOrThrow(), GenerateTypeMapping(fd, fdRef.instTys)))
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(env))
+        args.add(CreateFuncArg(action))
+        return CreateCallExpr(fdRef, args, None, retTy, CallKind.CALL_DECLARED_FUNCTION)
+    }
+
+    public func CreateJavaObjectControllerCall(javaEntity: Expr, className: Expr,
+        classDecl: ClassDecl): CallExpr {
+        let funcDecl = GetJavaObjectControllerInitDecl().getOrThrow()
+        let javaObjectControllerDecl = GetJavaObjectControllerDecl().getOrThrow()
+        let curFile = classDecl.curFile.getOrThrow()
+        let instantiationRefType = CreateRefType(classDecl)
+        let instantiationTy = typeManager.GetClassTy(classDecl,
+            classDecl.GetTy().getOrThrow().typeArgs.toArray())
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(javaEntity))
+        args.add(CreateFuncArg(className))
+        let fdRef = CreateRefExpr(funcDecl)
+        fdRef.ref.identifier = javaObjectControllerDecl.identifier
+        fdRef.typeArguments.add(instantiationRefType)
+        fdRef.curFile = Some(curFile)
+        let callTy = typeManager.GetClassTy(javaObjectControllerDecl, [instantiationTy])
+        return CreateCallExpr(fdRef, args, Some(funcDecl), callTy, CallKind.CALL_OBJECT_CREATION)
+    }
+
     public func CreateGetJavaLambdaObjectCall(refExpr: RefExpr, classSign: String,
         curFile: Option<File>): CallExpr {
         return CreateGetJavaLambdaCall(GetJavaLambdaObjectDecl(), refExpr, classSign, curFile)
