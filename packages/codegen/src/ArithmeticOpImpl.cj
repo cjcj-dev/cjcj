@@ -18,7 +18,7 @@ private func GetCodeGenTypeName(llvmType: LLVMTypeRef): String {
     return ""
 }
 
-private func GetTypeName(cgType: CGType): String {
+internal func GetTypeName(cgType: CGType): String {
     let llvmType = cgType.GetLLVMType()
     var name = ""
     let llvmKind = if (llvmType.isNull()) { -1i32 } else { unsafe { LLVMGetTypeKind(llvmType) } }

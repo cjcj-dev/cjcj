@@ -194,18 +194,35 @@ private func GenerateWrappingBinaryIntOp(irBuilder: IRBuilder2, kind: ExprKind, 
 
 private func GenerateOverflowCheckedFunc(irBuilder: IRBuilder2, kind: ExprKind, lhs: Value,
     lhsValue: LLVMValueRef, rhsValue: LLVMValueRef): LLVMValueRef {
-    let intrinsicName = OverflowIntrinsicName(kind, lhs.GetType())
+    let cgType = CGType.GetOrCreate(irBuilder.GetCGModule(), lhs.GetType().getOrThrow())
+    let operandType = cgType.GetLLVMType()
+    var intrinsicName = OverflowIntrinsicName(kind, lhs.GetType())
+    let args = ArrayList<LLVMValueRef>()
+    if (kind == ExprKind.NEG) {
+        let prefix = if (IsSignedOverflowType(lhs.GetType())) { "llvm.s" } else { "llvm.u" }
+        intrinsicName = prefix + "sub.with.overflow"
+        args.add(unsafe { LLVMConstInt(operandType, 0u64, 0) })
+    }
     if (intrinsicName.isEmpty()) {
         return LLVMNullValue()
     }
-    let operandType = unsafe { LLVMTypeOf(lhsValue) }
-    let overloadedTypes = ArrayList<LLVMTypeRef>()
-    overloadedTypes.add(operandType)
-    let args = ArrayList<LLVMValueRef>()
     args.add(lhsValue)
-    args.add(rhsValue)
-    return irBuilder.CreateIntrinsicCallNoInvoke(intrinsicName, overloadedTypes, args,
-        name: ExprKindNameForIR(kind) + ".overflow")
+    if (kind != ExprKind.NEG) {
+        args.add(rhsValue)
+    }
+    let boolType = unsafe { LLVMInt1TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let returnType = irBuilder.CreateAnonymousStructType(ArrayList<LLVMTypeRef>([operandType, boolType]))
+    var functionType = LLVMNullType()
+    try (paramTypes = LibC.malloc<LLVMTypeRef>(count: 2).asResource()) {
+        unsafe {
+            paramTypes.value.write(operandType)
+            (paramTypes.value + 1).write(operandType)
+            functionType = LLVMFunctionType(returnType, paramTypes.value, 2u32, 0)
+        }
+    }
+    let functionName = intrinsicName + "." + GetTypeName(cgType)
+    let function = irBuilder.GetCGModule().GetOrInsertFunction(functionName, functionType)
+    return irBuilder.CreateCall(function, functionType, args, name: ExprKindNameForIR(kind) + ".overflow")
 }
 
 private func GenerateCheckedOverflowBinary(irBuilder: IRBuilder2, kind: ExprKind, lhs: Value,
