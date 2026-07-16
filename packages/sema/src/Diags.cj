@@ -20,7 +20,6 @@ private func GetNoteMessageForMemberDecl(target: Decl): String {
 public func AddDiagNotesForImportedDecls(builder: BasicDiagnosticBuilder,
     declToImports: HashMap<Decl, ArrayList<ImportSpec>>, targets: ArrayList<Decl>): Unit {
     let imports = ArrayList<ImportSpec>()
-    let importSet = HashSet<ImportSpec>()
     let implicitImports = HashSet<String>()
     for (target in targets) {
         if (!target.TestAttr(Attribute.GLOBAL) && target.astKind != ASTKind.PACKAGE_DECL) {
@@ -31,13 +30,14 @@ public func AddDiagNotesForImportedDecls(builder: BasicDiagnosticBuilder,
             for (importSpec in importSpecs) {
                 if (importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
                     implicitImports.add(target.fullPackageName)
-                } else if (!importSet.contains(importSpec)) {
-                    importSet.add(importSpec)
+                } else {
                     var index: Int64 = 0
                     while (index < imports.size && CompNodeByPos(imports[index], importSpec)) {
                         index++
                     }
-                    imports.add(importSpec, at: index)
+                    if (index == imports.size || CompNodeByPos(importSpec, imports[index])) {
+                        imports.add(importSpec, at: index)
+                    }
                 }
             }
         }
