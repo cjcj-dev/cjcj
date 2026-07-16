@@ -151,7 +151,7 @@ func DiagForGenericParamMemberNotFound(diag: BasicDiagnosticEngine, ma: MemberAc
 func DiagAmbiguousUpperBoundTargets(diag: BasicDiagnosticEngine, ma: MemberAccess,
     targets: ArrayList<Decl>): Unit {
     let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ambiguous_use, ma,
-        MakeRange(ma.field.Begin(), ma.field.End()), arguments: [ma.field.Val()])
+        arguments: [ma.field.Val()])
     for (target in targets) {
         let outerDecl = target.outerDecl.getOrThrow()
         var message = "found "
