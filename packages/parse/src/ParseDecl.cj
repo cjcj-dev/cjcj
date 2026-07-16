@@ -410,6 +410,8 @@ extend ParserImpl {
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
+            SetDeclBeginPos(decl)
+            SetBeginToAnnotationsBegin(decl, annos)
             return decl
         }
         if (Seeing(TokenKind.CLASS)) {
@@ -1470,7 +1472,7 @@ extend ParserImpl {
         let decl = VarDecl()
         try (cs = ChainScope(this, decl)) {
             ApplyModifiersAndAnnotations(decl, modifiers, annos)
-            decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
+            decl.begin = key.Begin()
             decl.isVar = isVar
             decl.isConst = isConst
             decl.keywordPos = key.Begin()
@@ -1501,7 +1503,7 @@ extend ParserImpl {
             decl.irrefutablePattern = pattern
             decl.isVar = isVar
             decl.isConst = isConst
-            decl.begin = if (decl.begin.IsZero()) { key.Begin() } else { decl.begin }
+            decl.begin = key.Begin()
             ParseTypeAndExpr(decl)
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 let setGlobalAttr = { node: Node =>
