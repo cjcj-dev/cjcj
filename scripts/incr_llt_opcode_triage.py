@@ -63,6 +63,7 @@ def run_side(
     jobs: int,
     timeout: int,
 ) -> tuple[int, Path]:
+    compiler = compiler.resolve()
     side = root / label
     temp = side / "tmp"
     logs = side / "logs"
