@@ -300,8 +300,8 @@ public func CheckStaticVarAccessNonStatic(diag: BasicDiagnosticEngine, vd: VarDe
                 !target.IsTypeDecl() && !target.TestAttr(Attribute.CONSTRUCTOR) &&
                 !target.TestAttr(Attribute.ENUM_CONSTRUCTOR) && hasOuterDecl
             if (invalidAccess) {
-                TypeCheckDeclEmitDiag(diag, vd, BasicDiagKind.sema_static_variable_cannot_access_non_static_member,
-                    args: [BasicDiagArgument(refExpr.ref.identifier.Val())])
+                Diagnose(diag, vd, BasicDiagKind.sema_static_variable_cannot_access_non_static_member,
+                    args: [BasicDiagArgument(refExpr.ref.identifier.Val())]).Emit()
             }
         } else if (node.astKind == ASTKind.MEMBER_ACCESS || node.astKind == ASTKind.FUNC_BODY) {
             return VisitAction.SKIP_CHILDREN
