@@ -706,9 +706,9 @@ public class FileUtil {
     }
 
     public static func Normalize(input: String, toUnix!: Bool = false): String {
-        let builder = StringBuilder()
+        let result = ArrayList<UInt8>()
         var previousIsSlash = false
-        let slash = preferredDirSeparator(toUnix)
+        let slash = preferredDirSeparator(toUnix).toArray()[0]
         for (byte in input.toArray()) {
             if (byte == 0u8) {
                 break
@@ -718,14 +718,14 @@ public class FileUtil {
                 continue
             }
             if (isSlashByte) {
-                builder.append(slash)
+                result.add(slash)
                 previousIsSlash = true
             } else {
-                builder.append(String.fromUtf8([byte]))
+                result.add(byte)
                 previousIsSlash = false
             }
         }
-        return builder.toString()
+        return String.fromUtf8(result.toArray())
     }
 
     @When[os == "Windows"]
