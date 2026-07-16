@@ -366,19 +366,19 @@ private func SetMacroCallEvalResult(macCall: MacroCall, diag: DiagnosticEngine):
     }
 }
 
-private func handleBeforeMacroCallEval(macCall: MacroCall, diag: DiagnosticEngine): Bool {
+private func HandleBeforeMacroCallEval(macCall: MacroCall, diag: DiagnosticEngine): Bool {
     let macCallFullName = macCall.GetFullName()
     if (!IsBuiltInMacro(macCallFullName)) {
         return false
     }
     let invocation = macCall.RequireInvocation()
     if (invocation.HasAttr()) {
-        diag.Diagnose(macCall.GetBeginPos(), "The build-in macro '" + macCallFullName +
-            "' is a plain macro, but find an attributed one.")
+        diag.Diagnose(macCall.GetBeginPos(), DiagKind.macro_build_in_unexpect_params_attrs,
+            args: [DiagArgument(macCallFullName)]).Emit()
     }
     if (!invocation.args.isEmpty()) {
-        diag.Diagnose(macCall.GetBeginPos(), "The build-in macro '" + macCallFullName +
-            "' expected an empty parameter, but found non-empty one.")
+        diag.Diagnose(macCall.GetBeginPos(), DiagKind.macro_build_in_unexpect_params,
+            args: [DiagArgument(macCallFullName)]).Emit()
     }
     let newTokens = ArrayList<Token>()
     let macroNode = macCall.RequireNode()
@@ -507,7 +507,7 @@ private func extractDeprecatedAnnotationArgs(anno: Annotation): (String, String,
 }
 
 private func isMacroCallReadyForEval(macCall: MacroCall, diag: DiagnosticEngine, compileCjd: Bool): Bool {
-    if (handleBeforeMacroCallEval(macCall, diag)) {
+    if (HandleBeforeMacroCallEval(macCall, diag)) {
         return false
     }
     if (macCall.status == MacroEvalStatus.INIT || macCall.status == MacroEvalStatus.REEVAL ||
