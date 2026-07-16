@@ -247,7 +247,7 @@ private class ToCHIR {
             if (options.IsCHIROptimizationLevelOverO2()) {
                 UselessAllocateElimination.RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
             }
-            // GAP_TODO: Devirtualization is unported; C++ call is CHIR.cpp:648 (blocked on TypeAnalysis facility).
+            // GAP_TODO: Devirtualization is unported; C++ call is CHIR.cpp:648.
             RunArrayLambdaOpt(currentPackage)
             if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_FUTURE)) {
                 RedundantFutureRemoval(currentPackage, isDebug: options.chirDebugOptimizer).RunOnPackage()
