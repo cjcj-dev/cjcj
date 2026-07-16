@@ -852,8 +852,7 @@ public class InitializationChecker {
                 return
             }
             let body = initFunc.funcBody.getOrThrow()
-            let bodyScopeGate = CurrentScopeGate(body.scopeName)
-            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, bodyScopeGate)) {
+            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, body.scopeName)) {
                 if (terminated.terminationKind == ASTKind.THROW_EXPR) {
                     return
                 }
@@ -2193,8 +2192,7 @@ public class InitializationChecker {
                     decl.EnableAttr(Attribute.INITIALIZED)
                 }
             }
-            let bodyScopeGate = CurrentScopeGate(body.scopeName)
-            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, bodyScopeGate)) {
+            if (let Some(terminated) <- FindTerminatedScope(terminatedScopes, body.scopeName)) {
                 if (terminated.terminationKind == ASTKind.THROW_EXPR) {
                     return
                 }
