@@ -71,6 +71,83 @@ private let ATTACH_CJ_OBJECT: String = "attachCJObject"
 private let GET_JAVALAMBDA_OBJECT_DECL_ID: String = "getJavaLambdaObject"
 private let GET_JAVALAMBDA_ENTITY_DECL_ID: String = "getJavaLambdaEntity"
 
+public class MemberJNISignature {
+    public var classTypeSignature: String
+    public var name: String
+    public var signature: String
+
+    public init(classTypeSignature: String, name: String, signature: String) {
+        this.classTypeSignature = classTypeSignature
+        this.name = name
+        this.signature = signature
+    }
+
+    public init(utils: Utils, member: FuncDecl) {
+        let jobject = (member.outerDecl.getOrThrow() as ClassLikeDecl).getOrThrow()
+        var ty = jobject.GetTy().getOrThrow()
+        if (IsSynthetic(jobject)) {
+            if (jobject.inheritedTypes.size > 1) {
+                ty = jobject.inheritedTypes[1].GetTy().getOrThrow()
+            } else {
+                CJC_ASSERT_WITH_MSG(!jobject.inheritedTypes.isEmpty(), "JObject must inherit Cangjie Object")
+                ty = jobject.inheritedTypes[0].GetTy().getOrThrow()
+            }
+        }
+        classTypeSignature = utils.GetJavaClassNormalizeSignature(ty)
+        name = GetJavaMemberName(member)
+        CJC_ASSERT(member.astKind == ASTKind.FUNC_DECL)
+        let body = member.funcBody.getOrThrow()
+        signature = utils.GetJavaTypeSignature(body.retType.getOrThrow().GetTy().getOrThrow(),
+            GetParamTys(body.paramLists[0]), fullPackageName: member.fullPackageName)
+    }
+
+    public init(utils: Utils, member: FuncDecl, genericConfig: GenericConfigInfo) {
+        let jobject = (member.outerDecl.getOrThrow() as ClassLikeDecl).getOrThrow()
+        classTypeSignature = ReplaceClassName(
+            utils.GetJavaClassNormalizeSignature(jobject.GetTy().getOrThrow()), genericConfig.declInstName)
+        name = GetJavaMemberName(member)
+        CJC_ASSERT(member.astKind == ASTKind.FUNC_DECL)
+        let body = member.funcBody.getOrThrow()
+        signature = utils.GetJavaTypeSignature(body.retType.getOrThrow().GetTy().getOrThrow(),
+            GetParamTys(body.paramLists[0]), fullPackageName: member.fullPackageName)
+    }
+
+    public init(utils: Utils, member: PropDecl) {
+        let jobject = (member.outerDecl.getOrThrow() as ClassLikeDecl).getOrThrow()
+        var ty = jobject.GetTy().getOrThrow()
+        if (IsSynthetic(jobject)) {
+            if (jobject.inheritedTypes.size > 1) {
+                ty = jobject.inheritedTypes[1].GetTy().getOrThrow()
+            } else {
+                CJC_ASSERT_WITH_MSG(!jobject.inheritedTypes.isEmpty(), "JObject must inherit Cangjie Object")
+                ty = jobject.inheritedTypes[0].GetTy().getOrThrow()
+            }
+        }
+        classTypeSignature = utils.GetJavaClassNormalizeSignature(ty)
+        name = GetJavaMemberName(member)
+        CJC_ASSERT(member.astKind == ASTKind.PROP_DECL)
+        signature = utils.GetJavaTypeSignature(member.GetTy().getOrThrow(),
+            fullPackageName: member.fullPackageName)
+    }
+
+    public init(utils: Utils, member: Decl, jobject: ClassLikeDecl) {
+        var ty = jobject.GetTy().getOrThrow()
+        if (IsSynthetic(jobject)) {
+            if (jobject.inheritedTypes.size > 1) {
+                ty = jobject.inheritedTypes[1].GetTy().getOrThrow()
+            } else {
+                CJC_ASSERT_WITH_MSG(!jobject.inheritedTypes.isEmpty(), "JObject must inherit Cangjie Object")
+                ty = jobject.inheritedTypes[0].GetTy().getOrThrow()
+            }
+        }
+        classTypeSignature = utils.GetJavaClassNormalizeSignature(ty)
+        name = GetJavaMemberName(member)
+        CJC_ASSERT(member.astKind == ASTKind.FUNC_DECL || member.astKind == ASTKind.PROP_DECL)
+        signature = utils.GetJavaTypeSignature(member.GetTy().getOrThrow(),
+            fullPackageName: member.fullPackageName)
+    }
+}
+
 public class InteropLibBridge {
     private static let INTEROPLIB_VERSION: Int64 = 10
     private static let INTEROPLIB_PACKAGE_NAME: String = "java.internal"
