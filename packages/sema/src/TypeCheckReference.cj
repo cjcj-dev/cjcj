@@ -1195,7 +1195,7 @@ public func TypeCheckReferenceCheckStaticMemberAccessLegality(
     return valid
 }
 
-public func TypeCheckReferenceCheckInstanceMemberAccessLegality(
+public func CheckInstanceMemberAccessLegality(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
     impl: TypeCheckerImpl,
@@ -1284,7 +1284,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
         if (!TypeCheckReferenceCheckStaticMemberAccessLegality(diag, ma, decl)) {
             valid = false
         }
-    } else if (!TypeCheckReferenceCheckInstanceMemberAccessLegality(diag, tm, impl, ctx, ma, decl)) {
+    } else if (!CheckInstanceMemberAccessLegality(diag, tm, impl, ctx, ma, decl)) {
         valid = false
     }
     return valid
