@@ -1236,15 +1236,6 @@ public class Translator {
             varInfoByName[varInfo.name] = varInfo
         }
         let initOrder = AstGetVarsInitializationOrderWithPositions(parent)
-        if (opts.IsCompilingCJMPSpecific()) {
-            throw IllegalStateException("CJMPDBG parent=" + parent.identifier.Val() + " members=" +
-                parent.GetMemberDeclPtrs().size.toString() +
-                " initOrder=" + initOrder.size.toString() + " chirVars=" + memberVars.size.toString() +
-                " astInitializer=" + initOrder[0].decl.getOrThrow().initializer.isSome().toString() +
-                " chirInitializer=" + memberVars[0].initializerFunc.isSome().toString() + " fromCommon=" +
-                initOrder[0].decl.getOrThrow().TestAttr(AstAttribute.FROM_COMMON_PART).toString() + " different=" +
-                DeclaredInDifferentFiles(parent, initOrder[0].decl.getOrThrow()).toString())
-        }
         for (item in initOrder) {
             let member = item.decl.getOrThrow()
             CJC_ASSERT(!member.isMemberParam || member.initializer.isNone())
