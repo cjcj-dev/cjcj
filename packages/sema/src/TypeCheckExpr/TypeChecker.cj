@@ -3,6 +3,7 @@ package cjcj::sema.TypeCheckExpr
 import std.collection.*
 import std.sort.*
 import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
@@ -2793,6 +2794,59 @@ extend TypeChecker {
         return SynthesizeNode(ctx, SynPos.NONE, node)
     }
 
+    // C++ src/Sema/TypeChecker.cpp:741-750.
+    private func IsChecked(ctx: ASTContext, node: Node): Bool {
+        let decl = node as Decl
+        let typeNode = node as Type
+        var visitedDecl = false
+        if (let Some(declValue) <- decl) {
+            visitedDecl = declValue.TestAttr(Attribute.IS_CHECK_VISITED) ||
+                declValue.TestAttr(Attribute.IMPORTED)
+        }
+        let visitedExpr = decl.isNone() && typeNode.isNone() &&
+            GetTypeCheckCache(ctx, node).lastKey.isSome() && impl.typeManager.GetUnsolvedTyVars().isEmpty()
+        var visitedType = false
+        if (let Some(typeValue) <- typeNode) {
+            visitedType = typeValue.TestAttr(Attribute.IS_CHECK_VISITED)
+        }
+        return Ty.IsTyCorrect(node.GetTy()) && node.TyKind() != TypeKind.TYPE_QUEST &&
+            (visitedExpr || visitedDecl || visitedType)
+    }
+
+    // C++ src/Sema/TypeCheckAnnotation.cpp:96-129.
+    internal func CheckAnnotationDecl(ctx: ASTContext, annotation: Annotation): Unit {
+        if (annotation.TestAttr(Attribute.TOOL_ADD)) {
+            return
+        }
+        CJC_ASSERT(annotation.kind == AstAnnotationKind.ANNOTATION)
+        if (annotation.args.isEmpty()) {
+            return
+        }
+        if (annotation.args.size > 1) {
+            DiagAnnotationArgTarget(impl.diag.getOrThrow(), annotation)
+            return
+        }
+        let arg = annotation.args[0]
+        if (arg.name.Val() != "target") {
+            DiagAnnotationArgTarget(impl.diag.getOrThrow(), arg)
+            return
+        }
+        let expr = arg.expr.getOrThrow()
+        if (expr.astKind != ASTKind.ARRAY_LIT) {
+            DiagnoseRefactor(impl.diag.getOrThrow(),
+                BasicDiagKindRefactor.sema_annotation_arg_target_array_lit, expr).Emit()
+            return
+        }
+        let arrayStruct = impl.importManager.getOrThrow().GetCoreDecl<StructDecl>("Array")
+        let annotationKindEnum = impl.importManager.getOrThrow().GetCoreDecl<EnumDecl>("AnnotationKind")
+        if ((let None <- arrayStruct) || (let None <- annotationKindEnum)) {
+            return
+        }
+        let targetTy = impl.typeManager.GetStructTy(arrayStruct.getOrThrow(),
+            [impl.typeManager.GetEnumTy(annotationKindEnum.getOrThrow())])
+        let _ = CheckCallArgFromContext(ctx, targetTy, arg)
+    }
+
     internal func SynthesizeNode(ctx: ASTContext, pos: SynPos, node: Node): Ty {
         if (let Some(typeNode) <- (node as Type)) {
             impl.SetTypeTy(ctx, typeNode)
@@ -2808,6 +2862,17 @@ extend TypeChecker {
             return SynthesizeFuncBody(ctx, funcBody)
         }
         if (let Some(decl) <- (node as Decl)) {
+            if (!node.TestAttr(Attribute.IS_BROKEN) && !IsChecked(ctx, node) && node.symbol.isSome()) {
+                var currentContext = ctx
+                if ((let Some(instance) <- ci) && instance.sourcePackages.size > 1 &&
+                    (let Some(file) <- node.curFile) && (let Some(packageValue) <- file.curPackage) &&
+                    (let Some(packageContext) <- instance.GetASTContextByPackage(Some(packageValue)))) {
+                    currentContext = packageContext
+                }
+                try (stashDiagnoseStatus = impl.diag.getOrThrow().AutoStashDisableDiagnoseStatus()) {
+                    CheckAnnotations(currentContext, decl)
+                }
+            }
             return SynthesizeDecl(ctx, decl)
         }
         if (let Some(expr) <- (node as Expr)) {
@@ -3787,12 +3852,13 @@ extend TypeChecker {
             for (constructor in enumDecl.constructors) {
                 let _ = PrepareEnumConstructorSignature(ctx, enumDecl, constructor)
             }
-            return CheckEnumDecl(impl.diag.getOrThrow(), impl.typeManager, enumDecl,
+            return CheckEnumDecl(impl.diag.getOrThrow(), enumDecl,
                 { typeNode: Type =>
                     SynthesizeTypeNode(ctx, Some(typeNode))
                     typeNode.GetTy() ?? TypeManager.GetInvalidTy()
                 },
-                { member: Decl => SynthesizeDecl(ctx, member) })
+                { member: Decl => SynthesizeDecl(ctx, member) },
+                { constructor: Decl => CheckAnnotations(ctx, constructor) })
         }
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
             if (let Some(diagValue) <- impl.diag) {

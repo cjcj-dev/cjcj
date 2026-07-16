@@ -663,8 +663,9 @@ public func TypeCheckDeclSetEnumElementTyForFunc(
     return ctorTy
 }
 
-public func CheckEnumDecl(diag: BasicDiagnosticEngine, tm: TypeManager, enumDecl: EnumDecl,
-    typeSynthesizer: (Type) -> Ty, declSynthesizer: (Decl) -> Ty): Ty {
+public func CheckEnumDecl(diag: BasicDiagnosticEngine, enumDecl: EnumDecl,
+    typeSynthesizer: (Type) -> Ty, declSynthesizer: (Decl) -> Ty,
+    annotationChecker: (Decl) -> Unit): Ty {
     if (enumDecl.TestAttr(Attribute.IS_CHECK_VISITED)) {
         return enumDecl.GetTy() ?? TypeManager.GetInvalidTy()
     }
@@ -674,7 +675,7 @@ public func CheckEnumDecl(diag: BasicDiagnosticEngine, tm: TypeManager, enumDecl
     }
     let _ = TypeCheckDeclCheckEnumInheritedTypes(diag, enumDecl)
     for (constructor in enumDecl.constructors) {
-        let _ = TypeCheckAnnotationCheckAnnotations(diag, tm, constructor)
+        annotationChecker(constructor)
         let walker = Walker(constructor, visitPre: { node: Node =>
             if (let Some(typeNode) <- (node as Type)) {
                 let _ = typeSynthesizer(typeNode)
