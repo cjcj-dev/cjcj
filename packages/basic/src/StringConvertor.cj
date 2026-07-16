@@ -189,6 +189,7 @@ private func isUTF8(data: Array<UInt8>): Bool {
 }
 
 public class StringConvertor {
+    @OverflowWrapping
     public static func Normalize(str: String, isRawString!: Bool = false): String {
         let bytes = str.toArray()
         let builder = StringBuilder()
