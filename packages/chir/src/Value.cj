@@ -698,6 +698,19 @@ public class BlockGroup <: Value & Hashable & Equatable<BlockGroup> {
         return blocks.clone()
     }
 
+    public func GetAllBlocks(): ArrayList<Block> {
+        let result = blocks.clone()
+        for (block in blocks) {
+            for (expr in block.GetExpressions()) {
+                if (expr.GetExprKind() == ExprKind.LAMBDA) {
+                    let lambdaBlocks = (expr as Lambda).getOrThrow().GetBody().getOrThrow().GetAllBlocks()
+                    result.add(all: lambdaBlocks)
+                }
+            }
+        }
+        return result
+    }
+
     public func GetBlocksRef(): ArrayList<Block> {
         return blocks
     }
