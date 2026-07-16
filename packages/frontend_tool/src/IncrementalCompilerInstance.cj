@@ -244,7 +244,9 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             core.cachedInfo.ccOutFuncs.clear()
             for (mangle in core.chirInfo.ccOutFuncsRawMangle) { core.cachedInfo.ccOutFuncs.add(mangle) }
             core.cachedInfo.varInitDepMap.clear()
-            for ((raw, init) in core.chirInfo.varInitDepMap) { core.cachedInfo.varInitDepMap[raw] = init }
+            for ((raw, initFunc) in core.chirInfo.varInitDepMap) {
+                core.cachedInfo.varInitDepMap[raw] = initFunc
+            }
         } else if (kind == IncreKind.INCR) {
             for ((raw, _) in core.chirInfo.delVirtFuncWrapForIncr) {
                 core.cachedInfo.virtualFuncDep.remove(raw)
@@ -253,7 +255,9 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
                 core.cachedInfo.virtualFuncDep[raw] = wrapper
             }
             for (raw in rawIncrRemovedDecls) { core.cachedInfo.varInitDepMap.remove(raw) }
-            for ((raw, init) in core.chirInfo.varInitDepMap) { core.cachedInfo.varInitDepMap[raw] = init }
+            for ((raw, initFunc) in core.chirInfo.varInitDepMap) {
+                core.cachedInfo.varInitDepMap[raw] = initFunc
+            }
             for (mangle in core.chirInfo.ccOutFuncsRawMangle) { core.cachedInfo.ccOutFuncs.add(mangle) }
         }
         for (pkg in core.GetSourcePackages()) {
@@ -380,9 +384,9 @@ private func UpdateIncrRemovedDeclsForVarInitDep(cacheMangles: CachedMangleMap,
     rawIncrRemovedDecls: ArrayList<String>, varInitDepMap: VarInitDepMap): Unit {
     let logger = IncrementalCompilationLogger.GetInstance()
     for (deletedRaw in rawIncrRemovedDecls) {
-        if (let Some(init) <- varInitDepMap.get(deletedRaw)) {
-            logger.LogLn("[delVarInitDep][remove] raw: " + deletedRaw + " mg: " + init)
-            cacheMangles.incrRemovedDecls.add(init)
+        if (let Some(initFunc) <- varInitDepMap.get(deletedRaw)) {
+            logger.LogLn("[delVarInitDep][remove] raw: " + deletedRaw + " mg: " + initFunc)
+            cacheMangles.incrRemovedDecls.add(initFunc)
         }
     }
 }
