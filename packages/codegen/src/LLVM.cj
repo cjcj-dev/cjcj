@@ -17,6 +17,7 @@ public type LLVMUseRef = CPointer<Unit>
 public type LLVMDIBuilderRef = CPointer<Unit>
 public type LLVMSelfhostLoopInfoRef = CPointer<Unit>
 public type LLVMSelfhostLoopRef = CPointer<Unit>
+public type LLVMSelfhostValueToValueMapRef = CPointer<Unit>
 public type LLVMSelfhostCallGraphRef = CPointer<Unit>
 public type LLVMSelfhostCallGraphNodeRef = CPointer<Unit>
 
@@ -626,6 +627,18 @@ foreign {
         length: CPointer<UIntNative>): CString
     func LLVMSelfhostDILocationGet(context: LLVMContextRef, line: UInt32, column: UInt32,
         scope: LLVMMetadataRef, inlinedAt: LLVMMetadataRef, isImplicitCode: Bool): LLVMMetadataRef
+    func LLVMSelfhostCreateValueToValueMap(): LLVMSelfhostValueToValueMapRef
+    func LLVMSelfhostDisposeValueToValueMap(valueMap: LLVMSelfhostValueToValueMapRef): Unit
+    func LLVMSelfhostValueToValueMapSet(valueMap: LLVMSelfhostValueToValueMapRef,
+        source: LLVMValueRef, dest: LLVMValueRef): Unit
+    func LLVMSelfhostMapValue(value: LLVMValueRef,
+        valueMap: LLVMSelfhostValueToValueMapRef): LLVMValueRef
+    func LLVMSelfhostMapMetadata(metadata: LLVMMetadataRef,
+        valueMap: LLVMSelfhostValueToValueMapRef): LLVMMetadataRef
+    func LLVMSelfhostCloneFunctionInto(newFunction: LLVMValueRef, oldFunction: LLVMValueRef,
+        valueMap: LLVMSelfhostValueToValueMapRef): Unit
+    func LLVMSelfhostCloneBasicBlock(basicBlock: LLVMBasicBlockRef,
+        valueMap: LLVMSelfhostValueToValueMapRef, function: LLVMValueRef): LLVMBasicBlockRef
 }
 
 public func LLVMNullContext(): LLVMContextRef { return CPointer<Unit>() }

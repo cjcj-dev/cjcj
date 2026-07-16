@@ -30,6 +30,9 @@
 //         src/CodeGen/DIBuilder.cpp:718-722, 899-917, 1102-1539.
 //   CGFunction::RemoveUnreachableBlocks support:
 //         src/CodeGen/CGFunction.cpp:211-217  llvm::removeUnreachableBlocks(Function&).
+//   IncrementalGen LLVM value mapper support:
+//         src/CodeGen/IncrementalGen/IncrementalGen.cpp:159-166,275-365
+//         llvm::ValueToValueMapTy/MapValue/MapMetadata/CloneFunctionInto/CloneBasicBlock.
 
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
@@ -58,7 +61,9 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
+#include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include "llvm/Transforms/Utils/ValueMapper.h"
 #include "llvm/IR/Value.h"
 
 #include "flatbuffers/ModuleFormat_generated.h"
@@ -131,6 +136,7 @@ LLVMValueRef CreateGCStaticAggCall(LLVMBuilderRef Builder, LLVMModuleRef Module,
 
 using LLVMSelfhostLoopInfoRef = LLVMSelfhostLoopInfoState*;
 using LLVMSelfhostLoopRef = Loop*;
+using LLVMSelfhostValueToValueMapRef = ValueToValueMapTy*;
 
 // Mirror TranslateLitConstant's `static_cast<float>(strtold(...))`
 // (src/CHIR/AST2CHIR/TranslateASTNode/TranslateLitConstExpr.cpp:25,80).
@@ -177,6 +183,48 @@ extern "C" LLVMSelfhostLoopInfoRef LLVMSelfhostCreateLoopInfo(LLVMValueRef Fn)
 extern "C" void LLVMSelfhostDisposeLoopInfo(LLVMSelfhostLoopInfoRef Info)
 {
     delete Info;
+}
+
+extern "C" LLVMSelfhostValueToValueMapRef LLVMSelfhostCreateValueToValueMap()
+{
+    return new ValueToValueMapTy();
+}
+
+extern "C" void LLVMSelfhostDisposeValueToValueMap(LLVMSelfhostValueToValueMapRef ValueMap)
+{
+    delete ValueMap;
+}
+
+extern "C" void LLVMSelfhostValueToValueMapSet(
+    LLVMSelfhostValueToValueMapRef ValueMap, LLVMValueRef Source, LLVMValueRef Dest)
+{
+    (*ValueMap)[unwrap(Source)] = unwrap(Dest);
+}
+
+extern "C" LLVMValueRef LLVMSelfhostMapValue(
+    LLVMValueRef ValueRef, LLVMSelfhostValueToValueMapRef ValueMap)
+{
+    return wrap(MapValue(unwrap(ValueRef), *ValueMap));
+}
+
+extern "C" LLVMMetadataRef LLVMSelfhostMapMetadata(
+    LLVMMetadataRef MetadataRef, LLVMSelfhostValueToValueMapRef ValueMap)
+{
+    return wrap(MapMetadata(unwrap(MetadataRef), *ValueMap));
+}
+
+extern "C" void LLVMSelfhostCloneFunctionInto(
+    LLVMValueRef NewFunction, LLVMValueRef OldFunction, LLVMSelfhostValueToValueMapRef ValueMap)
+{
+    SmallVector<ReturnInst*, 8> returns;
+    CloneFunctionInto(unwrap<Function>(NewFunction), unwrap<Function>(OldFunction), *ValueMap,
+        CloneFunctionChangeType::DifferentModule, returns);
+}
+
+extern "C" LLVMBasicBlockRef LLVMSelfhostCloneBasicBlock(
+    LLVMBasicBlockRef BasicBlockRef, LLVMSelfhostValueToValueMapRef ValueMap, LLVMValueRef FunctionRef)
+{
+    return wrap(CloneBasicBlock(unwrap(BasicBlockRef), *ValueMap, "", unwrap<Function>(FunctionRef)));
 }
 
 extern "C" LLVMSelfhostLoopRef LLVMSelfhostLoopInfoGetLoopFor(
