@@ -190,7 +190,7 @@ extend ParserImpl {
             ret.add(ParseDecl(ScopeKind.TOPLEVEL, modifiers, annos))
             return ret
         }
-        CheckNoDeprecatedAnnotation(annos, "foreign block")
+        CheckNoDeprecatedAnno(annos, "foreign block")
         let leftCurlPos = lastToken.Begin()
         SkipBlank(TokenKind.SEMI)
         inForeignBlock = true
@@ -232,7 +232,7 @@ extend ParserImpl {
         return ret
     }
 
-    private func CheckNoDeprecatedAnnotation(annos: ArrayList<Annotation>, invalidTarget: String): Unit {
+    private func CheckNoDeprecatedAnno(annos: ArrayList<Annotation>, invalidTarget: String): Unit {
         for (anno in annos) {
             if (anno.kind == AnnotationKind.DEPRECATED) {
                 DiagDeprecatedInvalidTarget(anno, invalidTarget)
@@ -810,6 +810,7 @@ extend ParserImpl {
     public func ParseMainDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MainDecl {
         let ret = MainDecl()
         try (cs = ChainScope(this, ret)) {
+            CheckNoDeprecatedAnno(annos, "main")
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let keywordToken = Expect(TokenKind.MAIN, "expected function keyword")
             ret.keywordPos = keywordToken.Begin()
@@ -2276,6 +2277,7 @@ extend ParserImpl {
     public func ParseExtendDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ExtendDecl {
         let ret = ExtendDecl()
         try (cs = ChainScope(this, ret)) {
+            CheckNoDeprecatedAnno(annos, "extend")
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let key = Expect(TokenKind.EXTEND, "expected 'extend'")
             ret.keywordPos = key.Begin()
@@ -2685,6 +2687,9 @@ extend ParserImpl {
     public func ParseConstructor(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): FuncDecl {
         let ret = FuncDecl()
         try (cs = ChainScope(this, ret)) {
+            if (HasModifierToken(modifiers, TokenKind.STATIC)) {
+                CheckNoDeprecatedAnno(annos, "static constructor")
+            }
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let key = Expect(TokenKind.INIT, "expected 'init'")
             ret.keywordPos = key.Begin()
@@ -2738,6 +2743,7 @@ extend ParserImpl {
                 }
                 ret.end = body.end
             }
+            CheckNoDeprecatedAnno(annos, "~init")
             if (HasModifierToken(modifiers, TokenKind.UNSAFE)) {
                 SetUnsafe(ret, modifiers: modifiers)
             }
@@ -2746,6 +2752,9 @@ extend ParserImpl {
     }
 
     public func ParsePrimaryConstructor(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): PrimaryCtorDecl {
+        if (HasModifierToken(modifiers, TokenKind.STATIC)) {
+            CheckNoDeprecatedAnno(annos, "static constructor")
+        }
         let ret = PrimaryCtorDecl()
         try (cs = ChainScope(this, ret)) {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
@@ -2847,8 +2856,14 @@ extend ParserImpl {
 
     private func CheckDeprecationOfFuncParam(param: FuncParam): Unit {
         for (anno in param.annotations) {
-            if (anno.kind == AnnotationKind.DEPRECATED && !param.isNamedParam) {
+            if (anno.kind != AnnotationKind.DEPRECATED) {
+                continue
+            }
+            if (!param.isNamedParam) {
                 DiagDeprecatedInvalidTarget(anno, "Not named parameter")
+            }
+            if (param.assignment.isNone()) {
+                DiagDeprecatedInvalidTarget(anno, "Parameter without default value")
             }
         }
     }
