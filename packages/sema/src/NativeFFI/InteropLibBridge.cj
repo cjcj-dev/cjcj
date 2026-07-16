@@ -394,6 +394,83 @@ public class InteropLibBridge {
         return CreateFuncParam("self", CreateJlongType(), None, Some(GetJlongTy()))
     }
 
+    public func CreateGetJniEnvCall(curFile: Option<File>): Option<CallExpr> {
+        return CreateCall(GetGetJniEnvDecl(), curFile)
+    }
+
+    public func CreateJavaEntityCall(file: Option<File>): Option<CallExpr> {
+        let javaEntityDecl = GetJavaEntityDecl()
+        if (let None <- javaEntityDecl) {
+            return None
+        }
+        var suitableCtor: Option<FuncDecl> = None
+        for (decl in javaEntityDecl.getOrThrow().body.getOrThrow().decls) {
+            if (let Some(ctor) <- (decl as FuncDecl)) {
+                CJC_ASSERT_WITH_MSG(!ctor.funcBody.getOrThrow().paramLists.isEmpty(),
+                    "at least one paramLists expected")
+                if (ctor.funcBody.getOrThrow().paramLists[0].params.isEmpty()) {
+                    suitableCtor = Some(ctor)
+                    break
+                }
+            }
+        }
+        if (let None <- suitableCtor) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_member_not_imported,
+                DEFAULT_POSITION, INTEROPLIB_CFFI_JAVA_ENTITY)
+        }
+        if (let Some(call) <- CreateCall(suitableCtor, file)) {
+            call.callKind = CallKind.CALL_STRUCT_CREATION
+            return Some(call)
+        }
+        return None
+    }
+
+    public func CreateJavaEntityJobjectCall(arg: Expr): Option<Expr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(arg))
+        if (let Some(call) <- CreateCall(GetCreateJavaEntityJobjectDecl(), arg.curFile, args: args)) {
+            return Some(call)
+        }
+        return None
+    }
+
+    public func CreateJavaEntityNullCall(curFile: Option<File>): Option<Expr> {
+        if (let Some(call) <- CreateCall(GetCreateJavaEntityNullDecl(), curFile)) {
+            return Some(call)
+        }
+        return None
+    }
+
+    public func CreateJavaEntityFromOptionMirror(option: Expr, mirror: ClassLikeDecl): Expr {
+        let curFile = option.curFile.getOrThrow()
+        let optionTy = option.GetTy().getOrThrow()
+        CJC_ASSERT_WITH_MSG(!optionTy.typeArgs.isEmpty(), "Option type must be generic")
+        let mirrorTy = optionTy.typeArgs[0]
+        let vp = CreateVarPattern(V_COMPILER, Some(mirrorTy))
+        vp.curFile = Some(curFile)
+        vp.varDecl.getOrThrow().curFile = Some(curFile)
+        let javarefAccess = CreateJavaRefCall(
+            WithinFile<RefExpr>(CreateRefExpr(vp.varDecl.getOrThrow()), curFile), mirror)
+
+        let somePattern = EnumPattern()
+        somePattern.SetTy(utils.GetOptionTy(mirrorTy))
+        somePattern.constructor = Some(utils.CreateOptionSomeRef(mirrorTy))
+        somePattern.patterns.add(vp)
+        somePattern.curFile = Some(curFile)
+        let caseSome = CreateMatchCase(somePattern, javarefAccess)
+
+        let nonePattern = EnumPattern()
+        nonePattern.constructor = Some(utils.CreateOptionNoneRef(mirrorTy))
+        nonePattern.SetTy(nonePattern.constructor.getOrThrow().GetTy().getOrThrow())
+        nonePattern.curFile = Some(curFile)
+        let caseNone = CreateMatchCase(nonePattern, CreateJavaEntityNullCall(Some(curFile)).getOrThrow())
+        let cases = ArrayList<MatchCase>()
+        cases.add(caseSome)
+        cases.add(caseNone)
+        return WithinFile<MatchExpr>(
+            CreateMatchExpr(option, cases, GetJavaEntityTy().getOrThrow()), curFile)
+    }
+
     public func CreateGetJavaLambdaObjectCall(refExpr: RefExpr, classSign: String,
         curFile: Option<File>): CallExpr {
         return CreateGetJavaLambdaCall(GetJavaLambdaObjectDecl(), refExpr, classSign, curFile)
