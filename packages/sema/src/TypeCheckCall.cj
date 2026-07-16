@@ -4258,7 +4258,6 @@ private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: Typ
             if (let Some(diagValue) <- diag) {
                 DiagOld(diagValue, arg, BasicDiagKind.sema_unsupport_named_argument)
             }
-            return None
         }
     }
     return Some(paramTys)
