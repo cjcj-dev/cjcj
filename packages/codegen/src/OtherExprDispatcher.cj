@@ -31,7 +31,16 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         }
         return LLVMNullValue()
     }
-    irBuilder.EmitLocation(CHIRExprWrapper(chirExpr))
+    if (kind == ExprKind.APPLY || kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC ||
+        kind == ExprKind.DEBUGEXPR || kind == ExprKind.FIELD || kind == ExprKind.TYPECAST || kind == ExprKind.TUPLE ||
+        kind == ExprKind.VARRAY || kind == ExprKind.VARRAY_BUILDER || kind == ExprKind.INTRINSIC ||
+        kind == ExprKind.RAW_ARRAY_LITERAL_INIT || kind == ExprKind.RAW_ARRAY_ALLOCATE ||
+        kind == ExprKind.RAW_ARRAY_INIT_BY_VALUE || kind == ExprKind.INSTANCEOF || kind == ExprKind.SPAWN ||
+        kind == ExprKind.GET_EXCEPTION || kind == ExprKind.BOX || kind == ExprKind.UNBOX ||
+        kind == ExprKind.TRANSFORM_TO_GENERIC || kind == ExprKind.TRANSFORM_TO_CONCRETE ||
+        kind == ExprKind.UNBOX_TO_REF || kind == ExprKind.GET_RTTI || kind == ExprKind.GET_RTTI_STATIC) {
+        irBuilder.EmitLocation(CHIRExprWrapper(chirExpr))
+    }
     if (kind == ExprKind.APPLY) {
         irBuilder.EmitLocation(CHIRExprWrapper(chirExpr))
         return EmitCallLikeExpression(irBuilder, chirExpr)
