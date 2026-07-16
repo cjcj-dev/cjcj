@@ -21,6 +21,7 @@ OPCODE = re.compile(
     r"([a-z][a-z0-9_.]*)\b"
 )
 ASSIGN = re.compile(r'^\s*(?:%[A-Za-z0-9_.$-]+|%"[^"]+")\s*=\s*')
+LABEL = re.compile(r'^[A-Za-z0-9_.$-]+:')
 
 
 def load_text_failures(path: Path) -> list[str]:
@@ -138,7 +139,7 @@ def opcode_multiset(work: Path, llvm_dis: Path) -> tuple[Counter[str], list[Path
                 continue
             depth += line.count("{") - line.count("}")
             stripped = line.strip()
-            if stripped and not stripped.endswith(":") and stripped != "}":
+            if stripped and not LABEL.match(stripped) and stripped != "}":
                 match = OPCODE.match(ASSIGN.sub("", stripped))
                 if match:
                     counts[match.group(1)] += 1
