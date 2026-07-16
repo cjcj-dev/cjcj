@@ -1,744 +1,23 @@
 package cjcj::incremental_compilation
 
 import std.collection.*
-import cjcj::ast.ASTKind as RealASTKind
-import cjcj::ast.ASTKindIndex as RealASTKindIndex
-import cjcj::ast.Attribute as RealAttribute
-import cjcj::ast.AttributeIndex as RealAttributeIndex
-import cjcj::basic.Position as BasicPosition
+import cjcj::ast.*
 
 public type RawMangledName = String
-public type RawMangled2DeclMap = HashMap<String, IncrDecl>
-public type OptEffectStrMap = HashMap<String, HashSet<String>>
-public type VirtualWrapperDepMap = HashMap<String, String>
-public type VarInitDepMap = HashMap<String, String>
-public type SrcImportedDepMap = HashMap<IncrDecl, HashSet<IncrDecl>>
-public type FileMap = HashMap<String, ArrayList<IncrDecl>>
-public type CachedFileMap = HashMap<String, ArrayList<String>>
-public type ASTCache = HashMap<String, TopLevelDeclCache>
-public type IncrPosition = BasicPosition
+public type RawMangled2DeclMap = HashMap<RawMangledName, Decl>
+public type OptEffectStrMap = HashMap<RawMangledName, HashSet<RawMangledName>>
+public type OptEffectNodeMap = HashMap<Decl, HashSet<Decl>>
+public type SrcImportedDepMap = HashMap<Decl, HashSet<Decl>>
+public type VirtualWrapperDepMap = HashMap<RawMangledName, String>
+public type VarInitDepMap = HashMap<RawMangledName, String>
+public type FileMap = HashMap<String, ArrayList<Decl>>
+public type CachedFileMap = HashMap<String, ArrayList<RawMangledName>>
+public type ASTCache = HashMap<RawMangledName, TopLevelDeclCache>
 
 public let CACHED_AST_EXTENSION: String = ".cachedast"
 public let SERIALIZED_FILE_EXTENSION: String = ".cjo"
 
-public enum IncrDeclKind {
-    | INVALID_DECL
-    | PACKAGE_DECL
-    | FUNC_DECL
-    | MACRO_DECL
-    | MAIN_DECL
-    | VAR_DECL
-    | VAR_WITH_PATTERN_DECL
-    | FUNC_PARAM
-    | PROP_DECL
-    | TYPE_ALIAS_DECL
-    | ENUM_DECL
-    | STRUCT_DECL
-    | CLASS_DECL
-    | INTERFACE_DECL
-    | EXTEND_DECL
-    | PRIMARY_CTOR_DECL
-}
-
-public func IncrDeclKindIndex(kind: IncrDeclKind): Int64 {
-    return match (kind) {
-        case IncrDeclKind.INVALID_DECL => RealASTKindIndex(RealASTKind.INVALID_DECL)
-        case IncrDeclKind.PACKAGE_DECL => RealASTKindIndex(RealASTKind.PACKAGE_DECL)
-        case IncrDeclKind.FUNC_DECL => RealASTKindIndex(RealASTKind.FUNC_DECL)
-        case IncrDeclKind.MACRO_DECL => RealASTKindIndex(RealASTKind.MACRO_DECL)
-        case IncrDeclKind.MAIN_DECL => RealASTKindIndex(RealASTKind.MAIN_DECL)
-        case IncrDeclKind.VAR_DECL => RealASTKindIndex(RealASTKind.VAR_DECL)
-        case IncrDeclKind.VAR_WITH_PATTERN_DECL => RealASTKindIndex(RealASTKind.VAR_WITH_PATTERN_DECL)
-        case IncrDeclKind.FUNC_PARAM => RealASTKindIndex(RealASTKind.FUNC_PARAM)
-        case IncrDeclKind.PROP_DECL => RealASTKindIndex(RealASTKind.PROP_DECL)
-        case IncrDeclKind.TYPE_ALIAS_DECL => RealASTKindIndex(RealASTKind.TYPE_ALIAS_DECL)
-        case IncrDeclKind.ENUM_DECL => RealASTKindIndex(RealASTKind.ENUM_DECL)
-        case IncrDeclKind.STRUCT_DECL => RealASTKindIndex(RealASTKind.STRUCT_DECL)
-        case IncrDeclKind.CLASS_DECL => RealASTKindIndex(RealASTKind.CLASS_DECL)
-        case IncrDeclKind.INTERFACE_DECL => RealASTKindIndex(RealASTKind.INTERFACE_DECL)
-        case IncrDeclKind.EXTEND_DECL => RealASTKindIndex(RealASTKind.EXTEND_DECL)
-        case IncrDeclKind.PRIMARY_CTOR_DECL => RealASTKindIndex(RealASTKind.PRIMARY_CTOR_DECL)
-    }
-}
-
-public func IncrDeclKindToASTKind(kind: IncrDeclKind): RealASTKind {
-    return match (kind) {
-        case IncrDeclKind.INVALID_DECL => RealASTKind.INVALID_DECL
-        case IncrDeclKind.PACKAGE_DECL => RealASTKind.PACKAGE_DECL
-        case IncrDeclKind.FUNC_DECL => RealASTKind.FUNC_DECL
-        case IncrDeclKind.MACRO_DECL => RealASTKind.MACRO_DECL
-        case IncrDeclKind.MAIN_DECL => RealASTKind.MAIN_DECL
-        case IncrDeclKind.VAR_DECL => RealASTKind.VAR_DECL
-        case IncrDeclKind.VAR_WITH_PATTERN_DECL => RealASTKind.VAR_WITH_PATTERN_DECL
-        case IncrDeclKind.FUNC_PARAM => RealASTKind.FUNC_PARAM
-        case IncrDeclKind.PROP_DECL => RealASTKind.PROP_DECL
-        case IncrDeclKind.TYPE_ALIAS_DECL => RealASTKind.TYPE_ALIAS_DECL
-        case IncrDeclKind.ENUM_DECL => RealASTKind.ENUM_DECL
-        case IncrDeclKind.STRUCT_DECL => RealASTKind.STRUCT_DECL
-        case IncrDeclKind.CLASS_DECL => RealASTKind.CLASS_DECL
-        case IncrDeclKind.INTERFACE_DECL => RealASTKind.INTERFACE_DECL
-        case IncrDeclKind.EXTEND_DECL => RealASTKind.EXTEND_DECL
-        case IncrDeclKind.PRIMARY_CTOR_DECL => RealASTKind.PRIMARY_CTOR_DECL
-    }
-}
-
-public func IncrDeclKindFromASTKind(kind: RealASTKind): IncrDeclKind {
-    return IncrDeclKindFromIndex(RealASTKindIndex(kind))
-}
-
-public func IncrDeclKindName(kind: IncrDeclKind): String {
-    return match (kind) {
-        case IncrDeclKind.INVALID_DECL => "INVALID_DECL"
-        case IncrDeclKind.PACKAGE_DECL => "PACKAGE_DECL"
-        case IncrDeclKind.FUNC_DECL => "FUNC_DECL"
-        case IncrDeclKind.MACRO_DECL => "MACRO_DECL"
-        case IncrDeclKind.MAIN_DECL => "MAIN_DECL"
-        case IncrDeclKind.VAR_DECL => "VAR_DECL"
-        case IncrDeclKind.VAR_WITH_PATTERN_DECL => "VAR_WITH_PATTERN_DECL"
-        case IncrDeclKind.FUNC_PARAM => "FUNC_PARAM"
-        case IncrDeclKind.PROP_DECL => "PROP_DECL"
-        case IncrDeclKind.TYPE_ALIAS_DECL => "TYPE_ALIAS_DECL"
-        case IncrDeclKind.ENUM_DECL => "ENUM_DECL"
-        case IncrDeclKind.STRUCT_DECL => "STRUCT_DECL"
-        case IncrDeclKind.CLASS_DECL => "CLASS_DECL"
-        case IncrDeclKind.INTERFACE_DECL => "INTERFACE_DECL"
-        case IncrDeclKind.EXTEND_DECL => "EXTEND_DECL"
-        case IncrDeclKind.PRIMARY_CTOR_DECL => "PRIMARY_CTOR_DECL"
-    }
-}
-
-public func IncrDeclKindFromIndex(value: Int64): IncrDeclKind {
-    if (value == RealASTKindIndex(RealASTKind.PACKAGE_DECL)) {
-        return IncrDeclKind.PACKAGE_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.FUNC_DECL)) {
-        return IncrDeclKind.FUNC_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.MACRO_DECL)) {
-        return IncrDeclKind.MACRO_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.MAIN_DECL)) {
-        return IncrDeclKind.MAIN_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.VAR_DECL)) {
-        return IncrDeclKind.VAR_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.VAR_WITH_PATTERN_DECL)) {
-        return IncrDeclKind.VAR_WITH_PATTERN_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.FUNC_PARAM)) {
-        return IncrDeclKind.FUNC_PARAM
-    }
-    if (value == RealASTKindIndex(RealASTKind.PROP_DECL)) {
-        return IncrDeclKind.PROP_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.TYPE_ALIAS_DECL)) {
-        return IncrDeclKind.TYPE_ALIAS_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.ENUM_DECL)) {
-        return IncrDeclKind.ENUM_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.STRUCT_DECL)) {
-        return IncrDeclKind.STRUCT_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.CLASS_DECL)) {
-        return IncrDeclKind.CLASS_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.INTERFACE_DECL)) {
-        return IncrDeclKind.INTERFACE_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.EXTEND_DECL)) {
-        return IncrDeclKind.EXTEND_DECL
-    }
-    if (value == RealASTKindIndex(RealASTKind.PRIMARY_CTOR_DECL)) {
-        return IncrDeclKind.PRIMARY_CTOR_DECL
-    }
-    return IncrDeclKind.INVALID_DECL
-}
-
-extend IncrDeclKind <: Equatable<IncrDeclKind> {
-    public operator func ==(right: IncrDeclKind): Bool {
-        return IncrDeclKindIndex(this) == IncrDeclKindIndex(right)
-    }
-
-    public operator func !=(right: IncrDeclKind): Bool {
-        return !(this == right)
-    }
-}
-
-extend IncrDeclKind <: Hashable {
-    public func hashCode(): Int64 {
-        return IncrDeclKindIndex(this)
-    }
-}
-
-public enum IncrAttribute {
-    | ABSTRACT
-    | CONSTRUCTOR
-    | ENUM_CONSTRUCTOR
-    | FROM_COMMON_PART
-    | GENERIC
-    | GLOBAL
-    | IMPORTED
-    | MACRO_FUNC
-    | OPEN
-    | PRIVATE
-    | PROTECTED
-    | PUBLIC
-    | STATIC
-}
-
-public func IncrAttributeIndex(attr: IncrAttribute): Int64 {
-    return match (attr) {
-        case IncrAttribute.ABSTRACT => RealAttributeIndex(RealAttribute.ABSTRACT)
-        case IncrAttribute.CONSTRUCTOR => RealAttributeIndex(RealAttribute.CONSTRUCTOR)
-        case IncrAttribute.ENUM_CONSTRUCTOR => RealAttributeIndex(RealAttribute.ENUM_CONSTRUCTOR)
-        case IncrAttribute.FROM_COMMON_PART => RealAttributeIndex(RealAttribute.FROM_COMMON_PART)
-        case IncrAttribute.GENERIC => RealAttributeIndex(RealAttribute.GENERIC)
-        case IncrAttribute.GLOBAL => RealAttributeIndex(RealAttribute.GLOBAL)
-        case IncrAttribute.IMPORTED => RealAttributeIndex(RealAttribute.IMPORTED)
-        case IncrAttribute.MACRO_FUNC => RealAttributeIndex(RealAttribute.MACRO_FUNC)
-        case IncrAttribute.OPEN => RealAttributeIndex(RealAttribute.OPEN)
-        case IncrAttribute.PRIVATE => RealAttributeIndex(RealAttribute.PRIVATE)
-        case IncrAttribute.PROTECTED => RealAttributeIndex(RealAttribute.PROTECTED)
-        case IncrAttribute.PUBLIC => RealAttributeIndex(RealAttribute.PUBLIC)
-        case IncrAttribute.STATIC => RealAttributeIndex(RealAttribute.STATIC)
-    }
-}
-
-public func IncrAttributeToASTAttribute(attr: IncrAttribute): RealAttribute {
-    return match (attr) {
-        case IncrAttribute.ABSTRACT => RealAttribute.ABSTRACT
-        case IncrAttribute.CONSTRUCTOR => RealAttribute.CONSTRUCTOR
-        case IncrAttribute.ENUM_CONSTRUCTOR => RealAttribute.ENUM_CONSTRUCTOR
-        case IncrAttribute.FROM_COMMON_PART => RealAttribute.FROM_COMMON_PART
-        case IncrAttribute.GENERIC => RealAttribute.GENERIC
-        case IncrAttribute.GLOBAL => RealAttribute.GLOBAL
-        case IncrAttribute.IMPORTED => RealAttribute.IMPORTED
-        case IncrAttribute.MACRO_FUNC => RealAttribute.MACRO_FUNC
-        case IncrAttribute.OPEN => RealAttribute.OPEN
-        case IncrAttribute.PRIVATE => RealAttribute.PRIVATE
-        case IncrAttribute.PROTECTED => RealAttribute.PROTECTED
-        case IncrAttribute.PUBLIC => RealAttribute.PUBLIC
-        case IncrAttribute.STATIC => RealAttribute.STATIC
-    }
-}
-
-public func IncrAttributeFromASTAttribute(attr: RealAttribute): Option<IncrAttribute> {
-    return match (attr) {
-        case RealAttribute.ABSTRACT => Some(IncrAttribute.ABSTRACT)
-        case RealAttribute.CONSTRUCTOR => Some(IncrAttribute.CONSTRUCTOR)
-        case RealAttribute.ENUM_CONSTRUCTOR => Some(IncrAttribute.ENUM_CONSTRUCTOR)
-        case RealAttribute.FROM_COMMON_PART => Some(IncrAttribute.FROM_COMMON_PART)
-        case RealAttribute.GENERIC => Some(IncrAttribute.GENERIC)
-        case RealAttribute.GLOBAL => Some(IncrAttribute.GLOBAL)
-        case RealAttribute.IMPORTED => Some(IncrAttribute.IMPORTED)
-        case RealAttribute.MACRO_FUNC => Some(IncrAttribute.MACRO_FUNC)
-        case RealAttribute.OPEN => Some(IncrAttribute.OPEN)
-        case RealAttribute.PRIVATE => Some(IncrAttribute.PRIVATE)
-        case RealAttribute.PROTECTED => Some(IncrAttribute.PROTECTED)
-        case RealAttribute.PUBLIC => Some(IncrAttribute.PUBLIC)
-        case RealAttribute.STATIC => Some(IncrAttribute.STATIC)
-        case _ => None
-    }
-}
-
-public func IncrAttributeName(attr: IncrAttribute): String {
-    return match (attr) {
-        case IncrAttribute.ABSTRACT => "ABSTRACT"
-        case IncrAttribute.CONSTRUCTOR => "CONSTRUCTOR"
-        case IncrAttribute.ENUM_CONSTRUCTOR => "ENUM_CONSTRUCTOR"
-        case IncrAttribute.FROM_COMMON_PART => "FROM_COMMON_PART"
-        case IncrAttribute.GENERIC => "GENERIC"
-        case IncrAttribute.GLOBAL => "GLOBAL"
-        case IncrAttribute.IMPORTED => "IMPORTED"
-        case IncrAttribute.MACRO_FUNC => "MACRO_FUNC"
-        case IncrAttribute.OPEN => "OPEN"
-        case IncrAttribute.PRIVATE => "PRIVATE"
-        case IncrAttribute.PROTECTED => "PROTECTED"
-        case IncrAttribute.PUBLIC => "PUBLIC"
-        case IncrAttribute.STATIC => "STATIC"
-    }
-}
-
-public func IncrAttributeFromName(name: String): Option<IncrAttribute> {
-    return match (name) {
-        case "ABSTRACT" => Some(IncrAttribute.ABSTRACT)
-        case "CONSTRUCTOR" => Some(IncrAttribute.CONSTRUCTOR)
-        case "ENUM_CONSTRUCTOR" => Some(IncrAttribute.ENUM_CONSTRUCTOR)
-        case "FROM_COMMON_PART" => Some(IncrAttribute.FROM_COMMON_PART)
-        case "GENERIC" => Some(IncrAttribute.GENERIC)
-        case "GLOBAL" => Some(IncrAttribute.GLOBAL)
-        case "IMPORTED" => Some(IncrAttribute.IMPORTED)
-        case "MACRO_FUNC" => Some(IncrAttribute.MACRO_FUNC)
-        case "OPEN" => Some(IncrAttribute.OPEN)
-        case "PRIVATE" => Some(IncrAttribute.PRIVATE)
-        case "PROTECTED" => Some(IncrAttribute.PROTECTED)
-        case "PUBLIC" => Some(IncrAttribute.PUBLIC)
-        case "STATIC" => Some(IncrAttribute.STATIC)
-        case _ => None
-    }
-}
-
-extend IncrAttribute <: Equatable<IncrAttribute> {
-    public operator func ==(right: IncrAttribute): Bool {
-        return IncrAttributeIndex(this) == IncrAttributeIndex(right)
-    }
-
-    public operator func !=(right: IncrAttribute): Bool {
-        return !(this == right)
-    }
-}
-
-extend IncrAttribute <: Hashable {
-    public func hashCode(): Int64 {
-        return IncrAttributeIndex(this)
-    }
-}
-
-public class DeclHashInfo {
-    public var sig: UInt64 = 0u64
-    public var srcUse: UInt64 = 0u64
-    public var bodyHash: UInt64 = 0u64
-    public var instVar: UInt64 = 0u64
-    public var virt: UInt64 = 0u64
-    public var gvid: Int64 = 0
-
-    public init() {}
-}
-
-public class IncrDecl <: Hashable & Equatable<IncrDecl> {
-    public var identifier: String = ""
-    public var rawMangleName: String = ""
-    public var mangledName: String = ""
-    public var fullPackageName: String = ""
-    public var filePath: String = ""
-    public var begin: IncrPosition = IncrPosition()
-    public var astKind: IncrDeclKind = IncrDeclKind.INVALID_DECL
-    public let attrs: HashSet<IncrAttribute> = HashSet<IncrAttribute>()
-    public let members: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let getters: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let setters: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let patternVariables: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let enumConstructors: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let constructorMangles: ArrayList<String> = ArrayList<String>()
-    public let enumConstructorMangles: ArrayList<String> = ArrayList<String>()
-    public let sourceImportedTargets: HashSet<IncrDecl> = HashSet<IncrDecl>()
-    public let sourceImportedTargetMangles: HashSet<String> = HashSet<String>()
-    public let defaultParamDesugarDecls: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let inheritedTypes: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let inheritedTypeMangles: ArrayList<String> = ArrayList<String>()
-    public var outerDecl: Option<IncrDecl> = None
-    public var desugarDecl: Option<IncrDecl> = None
-    public var desugaredRawMangleName: String = ""
-    public var extendedTypeMangle: Option<String> = None
-    public var extendedTypeIdentifier: String = ""
-    public var resolvedTypeName: String = ""
-    public var returnTypeName: String = ""
-    public var hasExplicitType: Bool = true
-    public var hasBody: Bool = false
-    public var hasInitializer: Bool = false
-    public var isMemberParam: Bool = false
-    public var isFinalizer: Bool = false
-    public var isConstValue: Bool = false
-    public var hasEllipsis: Bool = false
-    public var isGetter: Bool = false
-    public var isSetter: Bool = false
-    public var toBeCompiled: Bool = false
-    public var cgMangle: String = ""
-    public var cacheHash: DeclHashInfo = DeclHashInfo()
-    public var precomputedSigHash: Option<UInt64> = None
-    public var precomputedSrcUseHash: Option<UInt64> = None
-    public var precomputedBodyHash: Option<UInt64> = None
-    public var precomputedImportedBodyHash: Option<UInt64> = None
-
-    public init() {}
-
-    public init(identifier: String, rawMangleName: String, kind: IncrDeclKind) {
-        this.identifier = identifier
-        this.rawMangleName = rawMangleName
-        this.mangledName = rawMangleName
-        this.astKind = kind
-    }
-
-    public operator func ==(right: IncrDecl): Bool {
-        if (!rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-            return rawMangleName == right.rawMangleName
-        }
-        return identifier == right.identifier && filePath == right.filePath &&
-            begin.line == right.begin.line && begin.column == right.begin.column &&
-            astKind == right.astKind
-    }
-
-    public operator func !=(right: IncrDecl): Bool {
-        return !(this == right)
-    }
-
-    public func hashCode(): Int64 {
-        var out = rawMangleName.hashCode()
-        if (rawMangleName.isEmpty()) {
-            out = CombineHashI64(out, identifier.hashCode())
-            out = CombineHashI64(out, filePath.hashCode())
-            out = CombineHashI64(out, begin.line)
-            out = CombineHashI64(out, begin.column)
-            out = CombineHashI64(out, IncrDeclKindIndex(astKind))
-        }
-        return out
-    }
-
-    public func AddAttr(attr: IncrAttribute): Unit {
-        attrs.add(attr)
-    }
-
-    public func AddMember(member: IncrDecl): Unit {
-        member.outerDecl = Some(this)
-        if (member.fullPackageName.isEmpty()) {
-            member.fullPackageName = fullPackageName
-        }
-        if (member.filePath.isEmpty()) {
-            member.filePath = filePath
-        }
-        members.add(member)
-    }
-
-    public func AddPatternVar(variable: IncrDecl): Unit {
-        variable.outerDecl = Some(this)
-        if (variable.fullPackageName.isEmpty()) {
-            variable.fullPackageName = fullPackageName
-        }
-        if (variable.filePath.isEmpty()) {
-            variable.filePath = filePath
-        }
-        patternVariables.add(variable)
-    }
-
-    public func AddEnumConstructor(constructor: IncrDecl): Unit {
-        constructor.outerDecl = Some(this)
-        constructor.AddAttr(IncrAttribute.ENUM_CONSTRUCTOR)
-        if (constructor.fullPackageName.isEmpty()) {
-            constructor.fullPackageName = fullPackageName
-        }
-        if (constructor.filePath.isEmpty()) {
-            constructor.filePath = filePath
-        }
-        enumConstructors.add(constructor)
-        if (!constructor.rawMangleName.isEmpty()) {
-            enumConstructorMangles.add(constructor.rawMangleName)
-        }
-    }
-
-    public func AddSourceImportedTarget(target: IncrDecl): Unit {
-        sourceImportedTargets.add(target)
-    }
-
-    public func AddSourceImportedTargetMangle(rawMangle: String): Unit {
-        if (!rawMangle.isEmpty()) {
-            sourceImportedTargetMangles.add(rawMangle)
-        }
-    }
-
-    public func AddDefaultParamDesugarDecl(decl: IncrDecl): Unit {
-        defaultParamDesugarDecls.add(decl)
-    }
-
-    public func SetDesugarDecl(decl: IncrDecl): Unit {
-        desugarDecl = Some(decl)
-        if (decl.fullPackageName.isEmpty()) {
-            decl.fullPackageName = fullPackageName
-        }
-        if (decl.filePath.isEmpty()) {
-            decl.filePath = filePath
-        }
-        let raw = if (!decl.rawMangleName.isEmpty()) { decl.rawMangleName } else { decl.mangledName }
-        if (!raw.isEmpty()) {
-            desugaredRawMangleName = raw
-        }
-    }
-
-    public func SetDesugaredRawMangleName(rawMangle: String): Unit {
-        desugaredRawMangleName = rawMangle
-    }
-
-    public func AddInheritedType(parent: IncrDecl): Unit {
-        inheritedTypes.add(parent)
-        if (!parent.rawMangleName.isEmpty()) {
-            inheritedTypeMangles.add(parent.rawMangleName)
-        }
-    }
-
-    public func AddInheritedTypeMangle(rawMangle: String): Unit {
-        if (!rawMangle.isEmpty()) {
-            inheritedTypeMangles.add(rawMangle)
-        }
-    }
-
-    public func SetResolvedTypeName(typeName: String): Unit {
-        resolvedTypeName = typeName
-    }
-
-    public func SetReturnTypeName(typeName: String): Unit {
-        returnTypeName = typeName
-    }
-
-    public func SetPrecomputedHashes(sig: UInt64, srcUse: UInt64, body: UInt64): Unit {
-        precomputedSigHash = Some(sig)
-        precomputedSrcUseHash = Some(srcUse)
-        precomputedBodyHash = Some(body)
-        cacheHash.sig = sig
-        cacheHash.srcUse = srcUse
-        cacheHash.bodyHash = body
-    }
-
-    public func SetPrecomputedImportedBodyHash(body: UInt64): Unit {
-        precomputedImportedBodyHash = Some(body)
-    }
-
-    public func AddGetter(getter: IncrDecl): Unit {
-        getter.outerDecl = Some(this)
-        getters.add(getter)
-        members.add(getter)
-    }
-
-    public func AddSetter(setter: IncrDecl): Unit {
-        setter.outerDecl = Some(this)
-        setters.add(setter)
-        members.add(setter)
-    }
-
-    public func TestAttr(attr: IncrAttribute): Bool {
-        return attrs.contains(attr)
-    }
-
-    public func TestAnyAttr(left: IncrAttribute, right: IncrAttribute): Bool {
-        return attrs.contains(left) || attrs.contains(right)
-    }
-
-    public func IsImported(): Bool {
-        return TestAttr(IncrAttribute.IMPORTED)
-    }
-
-    public func IsNominalDecl(): Bool {
-        return astKind == IncrDeclKind.ENUM_DECL || astKind == IncrDeclKind.STRUCT_DECL ||
-            astKind == IncrDeclKind.CLASS_DECL || astKind == IncrDeclKind.INTERFACE_DECL ||
-            astKind == IncrDeclKind.EXTEND_DECL
-    }
-
-    public func IsTypeDecl(): Bool {
-        return IsNominalDecl() || astKind == IncrDeclKind.TYPE_ALIAS_DECL
-    }
-
-    public func IsConst(): Bool {
-        return isConstValue
-    }
-
-    public func IsStaticVar(): Bool {
-        return astKind == IncrDeclKind.VAR_DECL && TestAttr(IncrAttribute.STATIC)
-    }
-
-    public func IsGlobalOrStaticVar(): Bool {
-        return astKind == IncrDeclKind.VAR_DECL && (!HasOuterDecl() || TestAttr(IncrAttribute.STATIC) ||
-            TestAttr(IncrAttribute.GLOBAL))
-    }
-
-    public func IsClassOrEnumConstructor(): Bool {
-        return TestAttr(IncrAttribute.CONSTRUCTOR) || TestAttr(IncrAttribute.ENUM_CONSTRUCTOR) ||
-            astKind == IncrDeclKind.PRIMARY_CTOR_DECL
-    }
-
-    public func IsDirectExtend(): Bool {
-        return astKind == IncrDeclKind.EXTEND_DECL && HasExtendedTypeMangle() &&
-            inheritedTypes.isEmpty() && inheritedTypeMangles.isEmpty()
-    }
-
-    public func DisplayName(): String {
-        if (identifier.isEmpty()) {
-            if (astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
-                return "VarWithPatternDecl"
-            }
-            if (astKind == IncrDeclKind.EXTEND_DECL) {
-                return "ExtendDecl"
-            }
-            return IncrDeclKindName(astKind)
-        }
-        return identifier
-    }
-
-    public func HasOuterDecl(): Bool {
-        if (let Some(_) <- outerDecl) {
-            return true
-        }
-        return false
-    }
-
-    public func HasExtendedTypeMangle(): Bool {
-        if (let Some(_) <- extendedTypeMangle) {
-            return true
-        }
-        return false
-    }
-
-    public func AllMembersIncludingAccessors(): ArrayList<IncrDecl> {
-        let out = ArrayList<IncrDecl>()
-        for (member in members) {
-            out.add(member)
-        }
-        for (getter in getters) {
-            if (!out.contains(getter)) {
-                out.add(getter)
-            }
-        }
-        for (setter in setters) {
-            if (!out.contains(setter)) {
-                out.add(setter)
-            }
-        }
-        return out
-    }
-}
-
-public class IncrFile {
-    public var fileName: String = ""
-    public var filePath: String = ""
-    public let decls: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let exportedInternalDecls: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-    public let imports: ArrayList<IncrImportInfo> = ArrayList<IncrImportInfo>()
-
-    public init() {}
-
-    public init(path: String) {
-        this.filePath = path
-        this.fileName = path
-    }
-
-    public func AddDecl(decl: IncrDecl): Unit {
-        decl.filePath = filePath
-        decls.add(decl)
-    }
-
-    public func AddImport(importInfo: IncrImportInfo): Unit {
-        imports.add(importInfo)
-    }
-}
-
-public class IncrImportInfo {
-    public var prefixPath: String = ""
-    public var importedPackageName: String = ""
-    public var identifier: String = ""
-    public var aliasName: String = ""
-    public var isImportAlias: Bool = false
-    public var isImportSingle: Bool = false
-
-    public init() {}
-
-    public init(prefixPath: String, importedPackageName: String, identifier: String, aliasName: String,
-        isImportAlias: Bool, isImportSingle: Bool) {
-        this.prefixPath = prefixPath
-        this.importedPackageName = importedPackageName
-        this.identifier = identifier
-        this.aliasName = aliasName
-        this.isImportAlias = isImportAlias
-        this.isImportSingle = isImportSingle
-    }
-
-    public static func Alias(prefixPath: String, importedPackageName: String, aliasName: String): IncrImportInfo {
-        return IncrImportInfo(prefixPath, importedPackageName, "", aliasName, true, false)
-    }
-
-    public static func Single(prefixPath: String, importedPackageName: String, identifier: String,
-        aliasName!: String = ""): IncrImportInfo {
-        return IncrImportInfo(prefixPath, importedPackageName, identifier, aliasName, false, true)
-    }
-
-    public func AccessibleName(): String {
-        if (isImportAlias) {
-            return aliasName
-        }
-        return identifier
-    }
-
-    public func DeclAliasName(): String {
-        if (!aliasName.isEmpty()) {
-            return aliasName
-        }
-        return identifier
-    }
-}
-
-public class IncrPackage {
-    public var fullPackageName: String = ""
-    public var specsHash: UInt64 = 0u64
-    public let files: ArrayList<IncrFile> = ArrayList<IncrFile>()
-
-    public init() {}
-
-    public init(fullPackageName: String) {
-        this.fullPackageName = fullPackageName
-    }
-
-    public func AddFile(file: IncrFile): Unit {
-        for (decl in file.decls) {
-            if (decl.fullPackageName.isEmpty()) {
-                decl.fullPackageName = fullPackageName
-            }
-        }
-        files.add(file)
-    }
-
-    public func AllTopLevelDecls(): ArrayList<IncrDecl> {
-        let out = ArrayList<IncrDecl>()
-        for (file in files) {
-            for (decl in file.decls) {
-                out.add(decl)
-            }
-            for (decl in file.exportedInternalDecls) {
-                out.add(decl)
-            }
-        }
-        return out
-    }
-}
-
-public class IncrImportManager {
-    public let importedPackages: ArrayList<IncrPackage> = ArrayList<IncrPackage>()
-    private let sourceImports: ArrayList<IncrImportInfo> = ArrayList<IncrImportInfo>()
-    private let packageDecls: HashMap<String, IncrDecl> = HashMap<String, IncrDecl>()
-
-    public init() {}
-
-    public func AddImportedPackage(pkg: IncrPackage): Unit {
-        importedPackages.add(pkg)
-    }
-
-    public func GetAllImportedPackages(): ArrayList<IncrPackage> {
-        return importedPackages
-    }
-
-    public func AddSourceImport(importInfo: IncrImportInfo): Unit {
-        sourceImports.add(importInfo)
-    }
-
-    public func RegisterSourcePackageImports(pkg: IncrPackage): Unit {
-        for (file in pkg.files) {
-            for (importInfo in file.imports) {
-                sourceImports.add(importInfo)
-            }
-        }
-    }
-
-    public func GetSourceImports(): ArrayList<IncrImportInfo> {
-        return sourceImports
-    }
-
-    public func RegisterPackageDecl(packageName: String, decl: IncrDecl): Unit {
-        packageDecls[packageName] = decl
-    }
-
-    public func GetPackageDecl(packageName: String): Option<IncrDecl> {
-        return packageDecls.get(packageName)
-    }
-}
-
-public class GlobalVarIndex <: Hashable & Equatable<GlobalVarIndex> {
+public class GlobalVarIndex {
     public var file: String = ""
     public var id: Int64 = 0
 
@@ -749,24 +28,8 @@ public class GlobalVarIndex <: Hashable & Equatable<GlobalVarIndex> {
         this.id = id
     }
 
-    public operator func ==(right: GlobalVarIndex): Bool {
-        return file == right.file && id == right.id
-    }
-
-    public operator func !=(right: GlobalVarIndex): Bool {
-        return !(this == right)
-    }
-
     public operator func <(right: GlobalVarIndex): Bool {
-        return file < right.file || (file == right.file && id < right.id)
-    }
-
-    public func hashCode(): Int64 {
-        return CombineHashI64(file.hashCode(), id)
-    }
-
-    public func ToString(): String {
-        return "(" + file + ", " + id.toString() + ")"
+        return file == right.file && id < right.id
     }
 }
 
@@ -781,58 +44,28 @@ public open class DeclCacheBase {
     public var cgMangle: String = ""
 
     public init() {}
-
-    public func CopyBaseTo(target: DeclCacheBase): Unit {
-        target.sigHash = sigHash
-        target.srcUse = srcUse
-        target.bodyHash = bodyHash
-        target.astKind = astKind
-        target.isGV = isGV
-        target.gvid = GlobalVarIndex(gvid.file, gvid.id)
-        target.cgMangle = cgMangle
-        for (member in members) {
-            target.members.add(member.Clone())
-        }
-    }
 }
 
 public class MemberDeclCache <: DeclCacheBase {
-    public var rawMangle: String = ""
+    public var rawMangle: RawMangledName = ""
 
     public init() {}
 
-    public init(rawMangle: String) {
+    public init(rawMangle: RawMangledName) {
         this.rawMangle = rawMangle
-    }
-
-    public func Clone(): MemberDeclCache {
-        let out = MemberDeclCache(rawMangle)
-        CopyBaseTo(out)
-        return out
     }
 }
 
 public class TopLevelDeclCache <: DeclCacheBase {
-    public let extends: ArrayList<String> = ArrayList<String>()
+    public let extends: ArrayList<RawMangledName> = ArrayList<RawMangledName>()
     public var instVarHash: UInt64 = 0u64
     public var virtHash: UInt64 = 0u64
 
     public init() {}
-
-    public func Clone(): TopLevelDeclCache {
-        let out = TopLevelDeclCache()
-        CopyBaseTo(out)
-        for (ext in extends) {
-            out.extends.add(ext)
-        }
-        out.instVarHash = instVarHash
-        out.virtHash = virtHash
-        return out
-    }
 }
 
 public class NameUsage {
-    public let parentDecls: HashSet<String> = HashSet<String>()
+    public let parentDecls: HashSet<RawMangledName> = HashSet<RawMangledName>()
     public let packageQualifiers: HashSet<String> = HashSet<String>()
     public var hasUnqualifiedUsage: Bool = false
     public var hasUnqualifiedUsageOfImported: Bool = false
@@ -841,7 +74,7 @@ public class NameUsage {
 }
 
 public class UseInfo {
-    public let usedDecls: HashSet<String> = HashSet<String>()
+    public let usedDecls: HashSet<RawMangledName> = HashSet<RawMangledName>()
     public let usedNames: HashMap<String, NameUsage> = HashMap<String, NameUsage>()
 
     public init() {}
@@ -850,35 +83,27 @@ public class UseInfo {
 public class SemaUsage {
     public var apiUsages: UseInfo = UseInfo()
     public var bodyUsages: UseInfo = UseInfo()
-    public let boxedTypes: HashSet<String> = HashSet<String>()
+    public let boxedTypes: HashSet<RawMangledName> = HashSet<RawMangledName>()
 
     public init() {}
 }
 
 public class SemaRelation {
-    public let inherits: HashSet<String> = HashSet<String>()
-    public let extends: HashSet<String> = HashSet<String>()
-    public let extendedInterfaces: HashSet<String> = HashSet<String>()
+    public let inherits: HashSet<RawMangledName> = HashSet<RawMangledName>()
+    public let extends: HashSet<RawMangledName> = HashSet<RawMangledName>()
+    public let extendedInterfaces: HashSet<RawMangledName> = HashSet<RawMangledName>()
 
     public init() {}
 }
 
 public class SemanticInfo {
-    public let usages: HashMap<IncrDecl, SemaUsage> = HashMap<IncrDecl, SemaUsage>()
-    public let relations: HashMap<String, SemaRelation> = HashMap<String, SemaRelation>()
+    public let usages: HashMap<Decl, SemaUsage> = HashMap<Decl, SemaUsage>()
+    public let relations: HashMap<RawMangledName, SemaRelation> = HashMap<RawMangledName, SemaRelation>()
     public let builtInTypeRelations: HashMap<String, SemaRelation> = HashMap<String, SemaRelation>()
-    public let compilerAddedUsages: HashMap<String, HashSet<String>> = HashMap<String, HashSet<String>>()
+    public let compilerAddedUsages: HashMap<RawMangledName, HashSet<String>> =
+        HashMap<RawMangledName, HashSet<String>>()
 
     public init() {}
-}
-
-public class DeclDependency {
-    public var decl: IncrDecl
-    public let dependencies: ArrayList<IncrDecl> = ArrayList<IncrDecl>()
-
-    public init(decl: IncrDecl) {
-        this.decl = decl
-    }
 }
 
 public class CompilationCache {
@@ -887,7 +112,7 @@ public class CompilationCache {
     public var stringLiteralCounter: UInt64 = 0u64
     public var envClassCounter: UInt64 = 0u64
     public let compileArgs: ArrayList<String> = ArrayList<String>()
-    public let varAndFuncDep: ArrayList<DeclDependency> = ArrayList<DeclDependency>()
+    public let varAndFuncDep: ArrayList<(Decl, ArrayList<Decl>)> = ArrayList<(Decl, ArrayList<Decl>)>()
     public let chirOptInfo: OptEffectStrMap = OptEffectStrMap()
     public let virtualFuncDep: VirtualWrapperDepMap = VirtualWrapperDepMap()
     public let varInitDepMap: VarInitDepMap = VarInitDepMap()
@@ -899,56 +124,4 @@ public class CompilationCache {
     public let bitcodeFilesName: ArrayList<String> = ArrayList<String>()
 
     public init() {}
-
-    public func ClearAST(): Unit {
-        curPkgASTCache.clear()
-        fileMap.clear()
-        importedASTCache.clear()
-    }
-}
-
-public class DirectExtendEntry {
-    public var decl: IncrDecl
-    public var gvid: Int64 = 0
-
-    public init(decl: IncrDecl, gvid: Int64) {
-        this.decl = decl
-        this.gvid = gvid
-    }
-}
-
-public func CombineHashI64(left: Int64, right: Int64): Int64 {
-    return left ^ (right + 0x517cc1b727220a95i64 + (left << 6) + (left >> 2))
-}
-
-public func CombineHash(left: UInt64, right: UInt64): UInt64 {
-    return left ^ (right + 0x9e3779b97f4a7c15u64 + (left << 6) + (left >> 2))
-}
-
-public func StableHash(value: String): UInt64 {
-    var hash = 1469598103934665603u64
-    for (byte in value.toArray()) {
-        hash = (hash ^ UInt64(byte)) * 1099511628211u64
-    }
-    return hash
-}
-
-public func StableHashBool(value: Bool): UInt64 {
-    return if (value) { 1u64 } else { 0u64 }
-}
-
-public func CloneStringList(values: ArrayList<String>): ArrayList<String> {
-    let out = ArrayList<String>()
-    for (value in values) {
-        out.add(value)
-    }
-    return out
-}
-
-public func CloneStringSet(values: HashSet<String>): HashSet<String> {
-    let out = HashSet<String>()
-    for (value in values) {
-        out.add(value)
-    }
-    return out
 }

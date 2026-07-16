@@ -2,8 +2,7 @@ package cjcj::sema
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::mangle.ASTMangler
-import cjcj::utils.CJC_ASSERT
+import cjcj::incremental_compilation.GetTypeRawMangleName
 
 public class SemanticInfo {
     public let usedMangles: HashSet<String> = HashSet<String>()
@@ -116,14 +115,6 @@ public func HandleCtorForIncr(pkg: Package, mangledName2DeclMap: HashMap<String,
             usageCache.usedMangles.add(name)
         }
     }
-}
-
-public func GetTypeRawMangleName(ty: Ty): String {
-    if (let Some(boxDecl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
-        return boxDecl.rawMangleName
-    }
-    CJC_ASSERT(ty.IsBuiltin())
-    return ASTMangler.MangleBuiltinType(Ty.KindName(ty.kind))
 }
 
 public func CollectCompilerAddedDeclUsage(pkg: Package, usageCache: SemanticInfo): Unit {

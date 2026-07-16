@@ -1,17 +1,18 @@
 package cjcj::incremental_compilation
 
 import std.collection.*
+import cjcj::ast.Decl
 import cjcj::utils.IncrementalCompilationLogger
 
 public class CachedMangleMap {
     public let incrRemovedDecls: HashSet<String> = HashSet<String>()
     public let importedInlineDecls: HashSet<String> = HashSet<String>()
     public let newExternalDecls: HashSet<String> = HashSet<String>()
-    private let importedInlineDeclsPtr: HashSet<IncrDecl> = HashSet<IncrDecl>()
+    private let importedInlineDeclsPtr: HashSet<Decl> = HashSet<Decl>()
 
     public init() {}
 
-    public func EmplaceImportedInlineDeclPtr(decl: IncrDecl): Unit {
+    public func EmplaceImportedInlineDeclPtr(decl: Decl): Unit {
         importedInlineDeclsPtr.add(decl)
     }
 
@@ -39,20 +40,18 @@ public class CachedMangleMap {
             return
         }
         logger.LogLn("[CachedMangleMap] START")
-        dumpSet("[incrRemovedDecls]:", incrRemovedDecls)
-        dumpSet("[importedInlineDecls]:", importedInlineDecls)
-        dumpSet("[newExternalDecls]:", newExternalDecls)
+        if (!incrRemovedDecls.isEmpty()) {
+            logger.LogLn("[incrRemovedDecls]:")
+            for (mangle in incrRemovedDecls) { logger.LogLn(mangle) }
+        }
+        if (!importedInlineDecls.isEmpty()) {
+            logger.LogLn("[importedInlineDecls]:")
+            for (mangle in importedInlineDecls) { logger.LogLn(mangle) }
+        }
+        if (!newExternalDecls.isEmpty()) {
+            logger.LogLn("[newExternalDecls]:")
+            for (mangle in newExternalDecls) { logger.LogLn(mangle) }
+        }
         logger.LogLn("[CachedMangleMap] END")
-    }
-
-    private func dumpSet(title: String, values: HashSet<String>): Unit {
-        if (values.isEmpty()) {
-            return
-        }
-        let logger = IncrementalCompilationLogger.GetInstance()
-        logger.LogLn(title)
-        for (value in SortStrings(SetToArrayList(values))) {
-            logger.LogLn(value)
-        }
     }
 }

@@ -17,5 +17,8 @@
   "cjcj::ast" = { path = "../ast" }
   "cjcj::basic" = { path = "../basic" }
   "cjcj::flatbuffers" = { path = "../flatbuffers" }
+  "cjcj::mangle" = { path = "../mangle" }
+  "cjcj::modules" = { path = "../modules" }
   "cjcj::option" = { path = "../option" }
+  "cjcj::parse" = { path = "../parse" }
   "cjcj::utils" = { path = "../utils" }

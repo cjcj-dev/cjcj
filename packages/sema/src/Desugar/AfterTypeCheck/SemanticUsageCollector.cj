@@ -2,6 +2,7 @@ package cjcj::sema.Desugar.AfterTypeCheck
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::incremental_compilation.GetTypeRawMangleName
 import cjcj::sema.*
 
 private func AddDeclUsage(info: SemanticInfo, decl: Decl): Unit {

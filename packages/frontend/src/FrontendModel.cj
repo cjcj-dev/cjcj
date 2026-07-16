@@ -239,15 +239,6 @@ private func IsRootPackage(packageSpec: PackageSpec): Bool {
     return packageSpec.prefixPaths.isEmpty()
 }
 
-public class CompilationCache {
-    public var compileArgs: String = ""
-    public var lambdaCounter: Int64 = 0
-    public let bitcodeFilesName: ArrayList<String> = ArrayList<String>()
-    public let fileSummaries: ArrayList<String> = ArrayList<String>()
-    public let declSummaries: ArrayList<String> = ArrayList<String>()
-    public init() {}
-}
-
 public class CHIRPackage {
     public var name: String
     public var fileCount: Int64 = 0

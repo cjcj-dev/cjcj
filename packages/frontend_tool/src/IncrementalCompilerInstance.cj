@@ -318,7 +318,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         if (previousCache == currentCacheText) {
             return IncreKind.NO_CHANGE
         }
-        if (GetCacheLineValue(previousCache, "args:") != EscapeCacheLine(core.cachedInfo.compileArgs)) {
+        if (GetCacheLineValue(previousCache, "args:") != EscapeCacheLine(core.cachedInfo.compileArgs.toString())) {
             LogIncrementalRollback("compile args changed, roll back to full compilation")
             return IncreKind.ROLLBACK
         }
@@ -341,12 +341,21 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     private func RenderFrontendToolIncrementalCache(): String {
         let builder = StringBuilder()
         builder.append("version:1\n")
-        builder.append("args:" + EscapeCacheLine(core.cachedInfo.compileArgs) + "\n")
-        for (summary in core.cachedInfo.fileSummaries) {
-            builder.append("file:" + EscapeCacheLine(summary) + "\n")
-        }
-        for (summary in core.cachedInfo.declSummaries) {
-            builder.append("decl:" + EscapeCacheLine(summary) + "\n")
+        builder.append("args:" + EscapeCacheLine(core.cachedInfo.compileArgs.toString()) + "\n")
+        for (pkg in core.GetSourcePackages()) {
+            for (file in pkg.files) {
+                let fileSummary = pkg.fullPackageName + "|" + file.filePath + "|" + file.fileHash.toString()
+                builder.append("file:" + EscapeCacheLine(fileSummary) + "\n")
+                let decls = ArrayList<Decl>()
+                for (decl in file.decls) { decls.add(decl) }
+                var idx: Int64 = 0
+                while (idx < decls.size) {
+                    let decl = decls[idx]
+                    builder.append("decl:" + EscapeCacheLine(BuildDeclCacheSummary(pkg, file, decl)) + "\n")
+                    for (member in decl.GetMemberDecls()) { decls.add(member) }
+                    idx++
+                }
+            }
         }
         return builder.toString()
     }

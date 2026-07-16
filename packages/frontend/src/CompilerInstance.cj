@@ -21,10 +21,13 @@ import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
 import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::incremental_compilation.IncreKind
+import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
+    RawMangled2DeclMap, WriteCache}
 import cjcj::option.OutputMode
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.STANDARD_LIBS
+import cjcj::utils.IncrementalCompilationLogger
 import cjcj::chir.CHIRBuilder as ChirBuilder
 import cjcj::chir.CHIRDeserializer as ChirDeserializer
 import cjcj::chir.CHIRPrinter as ChirPrinter
@@ -162,6 +165,13 @@ public class CompilerInstance {
     public let srcDirs: HashSet<String> = HashSet<String>()
     public let diag: DiagnosticEngine
     public let cachedInfo: CompilationCache = CompilationCache()
+    public var rawMangleName2DeclMap: RawMangled2DeclMap = RawMangled2DeclMap()
+    public var astCacheInfo: ASTCache = ASTCache()
+    public var declsWithDuplicatedRawMangleName: HashSet<Decl> = HashSet<Decl>()
+    public var directExtends: HashMap<String, ArrayList<(ExtendDecl, Int64)>> =
+        HashMap<String, ArrayList<(ExtendDecl, Int64)>>()
+    public var fileMap: FileMap = FileMap()
+    public var order: ArrayList<Decl> = ArrayList<Decl>()
     public let chirInfo: CHIRInfo = CHIRInfo()
     public let metaTransformPluginBuilder: MetaTransformPluginBuilder = MetaTransformPluginBuilder()
     public let sm: SourceManager = SourceManager()
@@ -382,7 +392,8 @@ public class CompilerInstance {
     }
 
     public func PerformIncrementalScopeAnalysis(): Bool {
-        if (invocation.globalOptions.compileCjd) {
+        // IncrementalCompilerInstance.cpp:192-205 invokes the calculator only for the incremental instance.
+        if (invocation.globalOptions.compileCjd || !invocation.globalOptions.enIncrementalCompilation) {
             return true
         }
         CalculateASTCache()
@@ -391,26 +402,34 @@ public class CompilerInstance {
 
     public func CalculateASTCache(): Bool {
         CacheCompileArgs()
-        cachedInfo.fileSummaries.clear()
-        cachedInfo.declSummaries.clear()
         if (srcPkgs.isEmpty()) {
             return false
         }
+        var terminate = false
+        var message = ""
         if (diag.GetErrorCount() != 0) {
+            terminate = true
+            kind = IncreKind.ROLLBACK
+            message = "frontend error detected, roll back to full compilation"
+        } else if (srcPkgs[0].IsEmpty()) {
+            terminate = true
+            kind = IncreKind.EMPTY_PKG
+            message = "empty package, skip"
+        }
+        if (terminate) {
+            IncrementalCompilationLogger.GetInstance().LogLn(message)
             return false
         }
-        if (srcPkgs[0].IsEmpty()) {
-            return false
-        }
-        for (pkg in srcPkgs) {
-            for (file in pkg.files) {
-                cachedInfo.fileSummaries.add(pkg.fullPackageName + "|" + file.filePath + "|" + file.fileHash.toString())
-                for (decl in file.decls) {
-                    collectDeclCacheSummary(pkg, file, decl)
-                }
-            }
-        }
-        return !srcPkgs.isEmpty() && diag.GetErrorCount() == 0
+        let calculator = ASTCacheCalculator(srcPkgs[0],
+            (invocation.globalOptions.enableCompileDebug, invocation.globalOptions.displayLineInfo))
+        calculator.Walk()
+        rawMangleName2DeclMap = calculator.mangled2Decl
+        astCacheInfo = calculator.ret
+        declsWithDuplicatedRawMangleName = calculator.duplicatedMangleNames
+        directExtends = calculator.directExtends
+        fileMap = calculator.fileMap
+        order = calculator.order
+        return true
     }
 
     public func PerformSema(): Bool {
@@ -533,9 +552,9 @@ public class CompilerInstance {
         mangler = RealCHIRMangler(invocation.globalOptions.enableCompileTest)
         let adapter = mangler.adapter
         PrepareManglerContexts(mangler, adapter)
-        mangler.lambdaCounter = cachedInfo.lambdaCounter
+        mangler.lambdaCounter = Int64(cachedInfo.lambdaCounter)
         ManglingHelpFunction(mangler, adapter)
-        cachedInfo.lambdaCounter = mangler.lambdaCounter
+        cachedInfo.lambdaCounter = UInt64(mangler.lambdaCounter)
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpAST()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "mangle", dumpToScreen: invocation.globalOptions.dumpToScreen)
         }
@@ -1060,7 +1079,8 @@ public class CompilerInstance {
     }
 
     private func CacheCompileArgs(): Unit {
-        cachedInfo.compileArgs = JoinSerializedOptionFields(invocation.globalOptions.ToSerialized())
+        cachedInfo.compileArgs.clear()
+        for (arg in invocation.globalOptions.ToSerialized()) { cachedInfo.compileArgs.add(arg) }
     }
 
     private func UpdateCachedInfo(): Unit {
@@ -1071,8 +1091,11 @@ public class CompilerInstance {
         if (srcPkgs.isEmpty()) {
             return true
         }
+        // IncrementalScopeAnalysis.cpp:473-474 updates this cache before the existing writer consumes it.
+        cachedInfo.curPkgASTCache.clear()
+        for ((mangle, declCache) in astCacheInfo) { cachedInfo.curPkgASTCache[mangle] = declCache }
         let path = invocation.globalOptions.GenerateCachedPathName(srcPkgs[0].fullPackageName, CACHED_AST_EXTENSION)
-        return WriteFileContent(path, cachedInfo.compileArgs)
+        return WriteCache(srcPkgs[0], cachedInfo, order, path)
     }
 
     private func ShouldWriteCacheFile(): Bool {
@@ -1259,37 +1282,6 @@ public class CompilerInstance {
         convertedPrefix
     }
 
-    private func collectDeclCacheSummary(pkg: Package, file: File, decl: Decl): Unit {
-        cachedInfo.declSummaries.add(makeDeclSummary(pkg, file, decl))
-        for (member in decl.GetMemberDecls()) {
-            collectDeclCacheSummary(pkg, file, member)
-        }
-    }
-
-    private func makeDeclSummary(pkg: Package, file: File, decl: Decl): String {
-        let builder = StringBuilder()
-        builder.append(pkg.fullPackageName)
-        builder.append("|")
-        builder.append(file.filePath)
-        builder.append("|")
-        builder.append(ASTKindName(decl.astKind))
-        builder.append("|")
-        builder.append(decl.identifier.Val())
-        builder.append("|")
-        builder.append(decl.begin.line.toString())
-        builder.append(":")
-        builder.append(decl.begin.column.toString())
-        builder.append("-")
-        builder.append(decl.end.line.toString())
-        builder.append(":")
-        builder.append(decl.end.column.toString())
-        if (let Some(generic) <- decl.generic) {
-            builder.append("|generic:")
-            appendGenericParamList(builder, generic.typeParameters)
-        }
-        return builder.toString()
-    }
-
     private func collectCHIRDeclSummary(chirPkg: CHIRPackage, decl: Decl): Unit {
         if (decl.TestAttr(Attribute.IMPORTED) && !decl.isUsedImports) {
             return
@@ -1322,19 +1314,6 @@ private func appendGenericParamList(builder: StringBuilder, values: ArrayList<Ge
         builder.append(values[idx].identifier.Val())
         idx++
     }
-}
-
-private func JoinSerializedOptionFields(values: Array<String>): String {
-    let builder = StringBuilder()
-    var idx: Int64 = 0
-    while (idx < values.size) {
-        if (idx > 0) {
-            builder.append(",")
-        }
-        builder.append(values[idx])
-        idx++
-    }
-    return builder.toString()
 }
 
 private func IsNeedSaveIncrCompilationLogFile(globalOpts: GlobalOptions, frontOpts: FrontendOptions): Bool {

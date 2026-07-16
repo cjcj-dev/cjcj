@@ -1,455 +1,150 @@
 package cjcj::incremental_compilation
 
 import std.collection.*
-import std.sort.*
+import cjcj::ast.*
+import cjcj::mangle.ASTMangler
+import cjcj::utils.CJC_ASSERT
 
-public func PrintDecl(decl: IncrDecl): String {
-    let builder = StringBuilder()
-    if (!decl.identifier.isEmpty()) {
-        builder.append(decl.identifier + " ")
+public func PrintDecl(decl: Decl): String {
+    let out = StringBuilder()
+    if (!decl.identifier.Empty()) {
+        out.append(decl.identifier.Val() + " ")
     }
-    builder.append(decl.rawMangleName + " ")
-    if (!decl.filePath.isEmpty()) {
-        builder.append(decl.filePath + " ")
+    out.append(decl.rawMangleName + " ")
+    if (let Some(file) <- decl.curFile) {
+        out.append(file.fileName + " ")
     }
     if (!decl.begin.IsZero()) {
-        builder.append(decl.begin.line.toString())
+        out.append(decl.begin.line.toString())
     }
-    return builder.toString()
+    return out.toString()
 }
 
-public func IsImported(decl: IncrDecl): Bool {
-    return decl.IsImported()
-}
-
-public func IsInstance(decl: IncrDecl): Bool {
-    return !decl.TestAttr(IncrAttribute.STATIC) && !decl.TestAttr(IncrAttribute.CONSTRUCTOR)
-}
-
-public func IsEnumConstructor(decl: IncrDecl): Bool {
-    return decl.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)
-}
-
-public func IsTyped(decl: IncrDecl): Bool {
-    if (decl.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)) {
+public func IsVirtual(decl: Decl): Bool {
+    if (IsImported(decl)) {
+        return decl.TestAttr(Attribute.OPEN) || decl.TestAttr(Attribute.ABSTRACT)
+    }
+    if (let None <- decl.outerDecl) {
+        return false
+    }
+    let outerDecl = decl.outerDecl.getOrThrow()
+    if (outerDecl.astKind != ASTKind.CLASS_DECL && outerDecl.astKind != ASTKind.INTERFACE_DECL) {
+        return false
+    }
+    if (outerDecl.astKind == ASTKind.INTERFACE_DECL && !decl.TestAttr(Attribute.STATIC)) {
         return true
     }
-    if (decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
-        return decl.hasExplicitType || decl.IsImported()
+    if (decl.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.ENUM_CONSTRUCTOR)) {
+        return false
     }
-    if (decl.astKind == IncrDeclKind.VAR_DECL || decl.astKind == IncrDeclKind.FUNC_PARAM) {
-        if (let Some(parent) <- decl.outerDecl) {
-            if (parent.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
-                return IsTyped(parent)
+    if (outerDecl.TestAttr(Attribute.ABSTRACT) && !decl.TestAttr(Attribute.STATIC)) {
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (let Some(funcBody) <- funcDecl.funcBody) {
+                if (let None <- funcBody.body) {
+                    return true
+                }
             }
         }
-        return decl.hasExplicitType || decl.IsImported()
+        if (let Some(propDecl) <- (decl as PropDecl)) {
+            if (propDecl.getters.isEmpty() && propDecl.setters.isEmpty()) {
+                return true
+            }
+        }
     }
-    if (decl.astKind == IncrDeclKind.FUNC_DECL) {
-        return decl.hasExplicitType || decl.isGetter || decl.isSetter ||
-            decl.TestAttr(IncrAttribute.CONSTRUCTOR) || decl.isFinalizer
+    return decl.TestAttr(Attribute.OPEN) || decl.TestAttr(Attribute.ABSTRACT)
+}
+
+public func IsImported(decl: Decl): Bool {
+    return decl.TestAttr(Attribute.IMPORTED)
+}
+
+public func IsInstance(decl: Decl): Bool {
+    return !decl.TestAttr(Attribute.STATIC) && !decl.TestAttr(Attribute.CONSTRUCTOR)
+}
+
+public func IsTyped(decl: Decl): Bool {
+    if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+        return true
     }
-    if (decl.astKind == IncrDeclKind.PRIMARY_CTOR_DECL) {
-        return decl.hasExplicitType || decl.TestAttr(IncrAttribute.CONSTRUCTOR)
+    if (let Some(patternDecl) <- (decl as VarWithPatternDecl)) {
+        return patternDecl.typeNode.isSome() || IsImported(patternDecl)
+    }
+    if (let Some(varDecl) <- (decl as VarDecl)) {
+        if (let Some(outerDecl) <- varDecl.outerDecl) {
+            if (let Some(patternDecl) <- (outerDecl as VarWithPatternDecl)) {
+                return IsTyped(patternDecl)
+            }
+        }
+        return varDecl.typeNode.isSome() || IsImported(varDecl)
+    }
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        let funcBody = funcDecl.funcBody.getOrThrow()
+        return funcBody.retType.isSome() || funcDecl.isGetter || funcDecl.isSetter ||
+            funcDecl.TestAttr(Attribute.CONSTRUCTOR) || funcDecl.IsFinalizer()
     }
     return true
 }
 
-public func IsUntyped(decl: IncrDecl): Bool {
+public func IsUntyped(decl: Decl): Bool {
     return !IsTyped(decl)
 }
 
-public func IsVirtual(decl: IncrDecl): Bool {
-    if (IsImported(decl)) {
-        return decl.TestAttr(IncrAttribute.OPEN) || decl.TestAttr(IncrAttribute.ABSTRACT)
+public func IsEnumConstructor(decl: Decl): Bool {
+    return decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)
+}
+
+public func GetMembers(decl: Decl): ArrayList<Decl> {
+    if (let Some(enumDecl) <- (decl as EnumDecl)) {
+        let result = ArrayList<Decl>()
+        for (member in enumDecl.members) {
+            result.add(member)
+        }
+        return result
     }
-    if (let Some(parent) <- decl.outerDecl) {
-        if (parent.astKind != IncrDeclKind.CLASS_DECL && parent.astKind != IncrDeclKind.INTERFACE_DECL) {
-            return false
+    if (let Some(propDecl) <- (decl as PropDecl)) {
+        let result = ArrayList<Decl>()
+        for (getter in propDecl.getters) {
+            result.add(getter)
         }
-        if (parent.astKind == IncrDeclKind.INTERFACE_DECL && !decl.TestAttr(IncrAttribute.STATIC)) {
-            return true
+        for (setter in propDecl.setters) {
+            result.add(setter)
         }
-        if (decl.TestAttr(IncrAttribute.CONSTRUCTOR) || decl.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)) {
-            return false
-        }
-        if (parent.TestAttr(IncrAttribute.ABSTRACT) && !decl.TestAttr(IncrAttribute.STATIC)) {
-            if (decl.astKind == IncrDeclKind.FUNC_DECL && !decl.hasBody) {
-                return true
+        return result
+    }
+    if (let Some(varWithPatternDecl) <- (decl as VarWithPatternDecl)) {
+        let result = ArrayList<Decl>()
+        Walker(varWithPatternDecl.irrefutablePattern.getOrThrow(), visitPre: { node: Node =>
+            if (let Some(varDecl) <- (node as VarDecl)) {
+                result.add(varDecl)
             }
-            if (decl.astKind == IncrDeclKind.PROP_DECL && decl.getters.isEmpty() && decl.setters.isEmpty()) {
-                return true
-            }
-        }
-        return decl.TestAttr(IncrAttribute.OPEN) || decl.TestAttr(IncrAttribute.ABSTRACT)
+            return VisitAction.WALK_CHILDREN
+        }).Walk()
+        return result
     }
-    return false
+    return decl.GetMemberDeclPtrs()
 }
 
-public func GetMembers(decl: IncrDecl): ArrayList<IncrDecl> {
-    let out = ArrayList<IncrDecl>()
-    if (decl.astKind == IncrDeclKind.ENUM_DECL) {
-        for (member in decl.members) {
-            if (!member.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)) {
-                out.add(member)
-            }
-        }
-        return out
+public func IsOOEAffectedDecl(decl: Decl): Bool {
+    CJC_ASSERT(!decl.TestAttr(Attribute.IMPORTED) || decl.TestAttr(Attribute.FROM_COMMON_PART))
+    if (let Some(varDecl) <- (decl as VarDeclAbstract)) {
+        return varDecl.initializer.isSome()
     }
-    if (decl.astKind == IncrDeclKind.PROP_DECL) {
-        for (getter in decl.getters) {
-            out.add(getter)
-        }
-        for (setter in decl.setters) {
-            out.add(setter)
-        }
-        return out
+    if (let Some(funcDecl) <- (decl as FuncDecl)) {
+        return funcDecl.funcBody.getOrThrow().body.isSome()
     }
-    if (decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL && !decl.patternVariables.isEmpty()) {
-        for (variable in decl.patternVariables) {
-            out.add(variable)
-        }
-        return out
-    }
-    for (member in decl.members) {
-        out.add(member)
-    }
-    return out
-}
-
-public func GetEnumConstructors(decl: IncrDecl): ArrayList<IncrDecl> {
-    let out = ArrayList<IncrDecl>()
-    if (decl.astKind != IncrDeclKind.ENUM_DECL) {
-        return out
-    }
-    for (constructor in decl.enumConstructors) {
-        out.add(constructor)
-    }
-    if (!out.isEmpty()) {
-        return out
-    }
-    for (member in decl.members) {
-        if (member.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)) {
-            out.add(member)
-        }
-    }
-    return out
-}
-
-public func GetAllMembers(decl: IncrDecl): ArrayList<IncrDecl> {
-    let out = ArrayList<IncrDecl>()
-    for (member in GetRawMemberDecls(decl)) {
-        for (nested in GetAllMembers(member)) {
-            out.add(nested)
-        }
-        out.add(member)
-    }
-    return out
-}
-
-private func GetRawMemberDecls(decl: IncrDecl): ArrayList<IncrDecl> {
-    let out = ArrayList<IncrDecl>()
-    if (decl.astKind == IncrDeclKind.ENUM_DECL) {
-        for (constructor in GetEnumConstructors(decl)) {
-            out.add(constructor)
-        }
-        for (member in decl.members) {
-            if (!member.TestAttr(IncrAttribute.ENUM_CONSTRUCTOR)) {
-                out.add(member)
-            }
-        }
-        return out
-    }
-    return GetMembers(decl)
-}
-
-public func IsOOEAffectedDecl(decl: IncrDecl): Bool {
-    if (decl.astKind == IncrDeclKind.VAR_DECL || decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL) {
-        return decl.hasInitializer
-    }
-    if (decl.astKind == IncrDeclKind.FUNC_DECL) {
-        return decl.hasBody
-    }
-    if (decl.astKind == IncrDeclKind.MACRO_DECL || decl.astKind == IncrDeclKind.MAIN_DECL ||
-        decl.astKind == IncrDeclKind.PRIMARY_CTOR_DECL) {
+    if (decl.astKind == ASTKind.MACRO_DECL || decl.astKind == ASTKind.MAIN_DECL ||
+        decl.astKind == ASTKind.PRIMARY_CTOR_DECL) {
         return true
     }
     return false
 }
 
-public func GetDesugaredRawMangleName(decl: IncrDecl): Option<String> {
-    if (decl.astKind != IncrDeclKind.MAIN_DECL && decl.astKind != IncrDeclKind.MACRO_DECL) {
-        return None
+// C++ Sema/IncrementalUtils.cpp:161-171. This leaf dependency is shared here because
+// cjcj::sema already depends on cjcj::incremental_compilation.
+public func GetTypeRawMangleName(ty: Ty): String {
+    if (let Some(boxDecl) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+        return boxDecl.rawMangleName
     }
-    if (!decl.desugaredRawMangleName.isEmpty()) {
-        return Some(decl.desugaredRawMangleName)
-    }
-    if (let Some(desugar) <- decl.desugarDecl) {
-        if (!desugar.rawMangleName.isEmpty()) {
-            return Some(desugar.rawMangleName)
-        }
-        if (!desugar.mangledName.isEmpty()) {
-            return Some(desugar.mangledName)
-        }
-    }
-    return None
-}
-
-public func GetMainDesugaredRawMangleName(decl: IncrDecl): Option<String> {
-    if (decl.astKind != IncrDeclKind.MAIN_DECL) {
-        return None
-    }
-    return GetDesugaredRawMangleName(decl)
-}
-
-public func GetCacheWriteRawMangleName(decl: IncrDecl): String {
-    if (let Some(mangle) <- GetMainDesugaredRawMangleName(decl)) {
-        return mangle
-    }
-    return decl.rawMangleName
-}
-
-public func GetRecompiledCHIROptRawMangleName(decl: IncrDecl): String {
-    if (let Some(mangle) <- GetMainDesugaredRawMangleName(decl)) {
-        return mangle
-    }
-    return decl.rawMangleName
-}
-
-public func GetSemanticUsageRawMangleName(decl: IncrDecl): String {
-    if (let Some(mangle) <- GetDesugaredRawMangleName(decl)) {
-        return mangle
-    }
-    return decl.rawMangleName
-}
-
-public func TrimPackagePath(path: String): String {
-    if (path.isEmpty()) {
-        return path
-    }
-    var normalized = path.replace("\\", "/")
-    let marker = "/src/"
-    if (let Some(pos) <- normalized.lastIndexOf(marker)) {
-        normalized = normalized[pos + marker.size..]
-    }
-    if (normalized.startsWith("./")) {
-        normalized = normalized[2..]
-    }
-    return normalized
-}
-
-public func GetTrimmedPath(file: IncrFile): String {
-    if (!file.filePath.isEmpty()) {
-        return TrimPackagePath(file.filePath)
-    }
-    return TrimPackagePath(file.fileName)
-}
-
-public func GetTrimmedPath(decl: IncrDecl): String {
-    return TrimPackagePath(decl.filePath)
-}
-
-public func SetToArrayList(values: HashSet<String>): ArrayList<String> {
-    let out = ArrayList<String>()
-    for (value in values) {
-        out.add(value)
-    }
-    return out
-}
-
-public func SortStrings(values: ArrayList<String>): ArrayList<String> {
-    sort(values, by: { left: String, right: String =>
-        CompareStrings(left, right)
-    }, stable: true)
-    return values
-}
-
-public func SortedDeclsBySource(values: HashSet<IncrDecl>): ArrayList<IncrDecl> {
-    let out = ArrayList<IncrDecl>()
-    for (value in values) {
-        out.add(value)
-    }
-    sort(out, by: { left: IncrDecl, right: IncrDecl =>
-        CompareDeclSource(left, right)
-    }, stable: true)
-    return out
-}
-
-public func SortedStringSet(values: HashSet<String>): ArrayList<String> {
-    return SortStrings(SetToArrayList(values))
-}
-
-public func SortedStringList(values: ArrayList<String>): ArrayList<String> {
-    let out = CloneStringList(values)
-    return SortStrings(out)
-}
-
-public func ListsEqual(left: ArrayList<String>, right: ArrayList<String>): Bool {
-    if (left.size != right.size) {
-        return false
-    }
-    var idx: Int64 = 0
-    while (idx < left.size) {
-        if (left[idx] != right[idx]) {
-            return false
-        }
-        idx++
-    }
-    return true
-}
-
-public func ListsEqual(left: Array<String>, right: ArrayList<String>): Bool {
-    if (left.size != right.size) {
-        return false
-    }
-    var idx: Int64 = 0
-    while (idx < left.size) {
-        if (left[idx] != right[idx]) {
-            return false
-        }
-        idx++
-    }
-    return true
-}
-
-public func IsInDeclWithAttribute(decl: IncrDecl, attr: IncrAttribute): Bool {
-    if (decl.TestAttr(attr)) {
-        return true
-    }
-    if (let Some(parent) <- decl.outerDecl) {
-        return IsInDeclWithAttribute(parent, attr)
-    }
-    return false
-}
-
-public func IsClassOrEnumConstructor(decl: IncrDecl): Bool {
-    return decl.IsClassOrEnumConstructor()
-}
-
-public func IsStaticVar(decl: IncrDecl): Bool {
-    return decl.IsStaticVar()
-}
-
-public func IsGlobalOrStaticVar(decl: IncrDecl): Bool {
-    return decl.IsGlobalOrStaticVar()
-}
-
-public func IsOrderAffectingGlobal(decl: IncrDecl): Bool {
-    return decl.IsGlobalOrStaticVar() || decl.astKind == IncrDeclKind.VAR_WITH_PATTERN_DECL
-}
-
-public func ComputeDeclSigHash(decl: IncrDecl): UInt64 {
-    if (let Some(value) <- decl.precomputedSigHash) {
-        return value
-    }
-    if (decl.cacheHash.sig != 0u64) {
-        return decl.cacheHash.sig
-    }
-    var hash = StableHash(decl.identifier)
-    hash = CombineHash(hash, UInt64(IncrDeclKindIndex(decl.astKind)))
-    hash = CombineHash(hash, StableHash(decl.rawMangleName))
-    for (attr in SortedAttributes(decl.attrs)) {
-        hash = CombineHash(hash, UInt64(IncrAttributeIndex(attr)))
-    }
-    hash = CombineHash(hash, StableHashBool(decl.hasExplicitType))
-    hash = CombineHash(hash, StableHashBool(decl.isMemberParam))
-    return hash
-}
-
-public func ComputeDeclSrcUseHash(decl: IncrDecl): UInt64 {
-    if (let Some(value) <- decl.precomputedSrcUseHash) {
-        return value
-    }
-    if (decl.cacheHash.srcUse != 0u64) {
-        return decl.cacheHash.srcUse
-    }
-    var hash = 0u64
-    hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.PUBLIC)))
-    hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.PROTECTED)))
-    hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.PRIVATE)))
-    hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.IMPORTED)))
-    hash = CombineHash(hash, StableHashBool(decl.TestAttr(IncrAttribute.STATIC)))
-    hash = CombineHash(hash, StableHashBool(decl.IsConst()))
-    hash = CombineHash(hash, StableHash(decl.fullPackageName))
-    return hash
-}
-
-private func SortedAttributes(values: HashSet<IncrAttribute>): ArrayList<IncrAttribute> {
-    let out = ArrayList<IncrAttribute>()
-    for (value in values) {
-        out.add(value)
-    }
-    sort(out, by: { left: IncrAttribute, right: IncrAttribute =>
-        if (IncrAttributeIndex(left) < IncrAttributeIndex(right)) {
-            Ordering.LT
-        } else if (IncrAttributeIndex(left) > IncrAttributeIndex(right)) {
-            Ordering.GT
-        } else {
-            Ordering.EQ
-        }
-    }, stable: true)
-    return out
-}
-
-public func ComputeDeclBodyHash(decl: IncrDecl, srcInfo: (Bool, Bool)): UInt64 {
-    if (let Some(value) <- decl.precomputedBodyHash) {
-        return value
-    }
-    if (decl.cacheHash.bodyHash != 0u64) {
-        return decl.cacheHash.bodyHash
-    }
-    var hash = StableHash(decl.identifier + "#" + decl.rawMangleName)
-    hash = CombineHash(hash, StableHashBool(decl.hasBody))
-    hash = CombineHash(hash, StableHashBool(decl.hasInitializer))
-    hash = CombineHash(hash, StableHashBool(srcInfo[0]))
-    hash = CombineHash(hash, StableHashBool(srcInfo[1]))
-    if (srcInfo[0] || srcInfo[1]) {
-        hash = CombineHash(hash, UInt64(decl.begin.line))
-        hash = CombineHash(hash, UInt64(decl.begin.column))
-    }
-    for (member in decl.members) {
-        hash = CombineHash(hash, ComputeDeclSigHash(member))
-        hash = CombineHash(hash, ComputeDeclBodyHash(member, srcInfo))
-    }
-    return hash
-}
-
-public func ComputeImportedDeclBodyHash(decl: IncrDecl): UInt64 {
-    if (let Some(value) <- decl.precomputedImportedBodyHash) {
-        return value
-    }
-    return ComputeDeclBodyHash(decl, (false, false))
-}
-
-public func MangleDecl(decl: IncrDecl): String {
-    if (!decl.rawMangleName.isEmpty()) {
-        return decl.rawMangleName
-    }
-    let pkg = if (decl.fullPackageName.isEmpty()) { "_" } else { decl.fullPackageName }
-    let name = if (decl.identifier.isEmpty()) { IncrDeclKindName(decl.astKind) } else { decl.identifier }
-    var parentPart = ""
-    if (let Some(parent) <- decl.outerDecl) {
-        parentPart = parent.rawMangleName + "."
-    }
-    return pkg + "." + parentPart + name + "$" + IncrDeclKindName(decl.astKind)
-}
-
-public func CompareStrings(left: String, right: String): Ordering {
-    if (left < right) {
-        return Ordering.LT
-    }
-    if (left > right) {
-        return Ordering.GT
-    }
-    return Ordering.EQ
-}
-
-public func CompareDeclSource(left: IncrDecl, right: IncrDecl): Ordering {
-    if (left.begin < right.begin) {
-        return Ordering.LT
-    }
-    if (right.begin < left.begin) {
-        return Ordering.GT
-    }
-    return Ordering.EQ
+    CJC_ASSERT(ty.IsBuiltin())
+    return ASTMangler.MangleBuiltinType(Ty.KindName(ty.kind))
 }
