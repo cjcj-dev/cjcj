@@ -193,23 +193,24 @@ extend ParserImpl {
 
         invocation.scopeKind = ToAstScopeKind(scopeKind)
         invocation.exprKind = AstExprKind.UNKNOWN_EXPR
-        if (Skip(TokenKind.LPAREN)) {
-            ParseMacroCallArgsWithParen(invocation)
-        } else if (Seeing(TokenKind.LCURL)) {
-            Skip(TokenKind.LCURL)
-            invocation.leftParenPos = lastToken.Begin()
-            ParseMacroCallTokens(TokenKind.LCURL, TokenKind.RCURL, invocation.args, false)
-            invocation.rightParenPos = Expect(TokenKind.RCURL, "expected '}' after macro call input").Begin()
-            invocation.hasParenthesis = true
-            SyncMacroArgTokens(invocation)
-        } else {
-            ParseMacroCallArgsWithoutParen(scopeKind, modifiers, invocation)
-        }
+        ParseMacroCallArg(scopeKind, modifiers, invocation)
         if (!curPrimaryDeclIdent.isEmpty()) {
             invocation.outerDeclIdent = curPrimaryDeclIdent
         }
         PopulateMacroOriginPositions(invocation)
         invocation.macroCallDiagInfo.macroCallEnd = lastToken.End()
+    }
+
+    private func ParseMacroCallArg(
+        scopeKind: ScopeKind,
+        modifiers: ArrayList<Modifier>,
+        invocation: MacroInvocation
+    ): Unit {
+        if (Skip(TokenKind.LPAREN)) {
+            ParseMacroCallArgsWithParen(invocation)
+        } else {
+            ParseMacroCallArgsWithoutParen(scopeKind, modifiers, invocation)
+        }
     }
 
     private func ParseMacroCallArgsWithoutParen(
