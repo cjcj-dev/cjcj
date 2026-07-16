@@ -31,10 +31,16 @@ public open class FFIParserImpl {
         CheckAnnotations(decl.annotations, GuessScopeKind(decl), decl)
         CheckAnnotationsConflict(decl.annotations, decl)
         CheckForeignNameAnnotation(decl)
-        if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL) {
+        if (let Some(classLikeDecl) <- (decl as ClassLikeDecl)) {
             let java = Java()
             let objc = ObjC()
-            java.CheckClassLikeSignature(decl, decl.annotations)
+            for (anno in decl.annotations) {
+                if (anno.kind == AnnotationKind.JAVA_MIRROR) {
+                    java.CheckMirrorSignature(classLikeDecl, decl.annotations)
+                } else if (anno.kind == AnnotationKind.JAVA_IMPL) {
+                    java.CheckImplSignature(classLikeDecl, decl.annotations)
+                }
+            }
             objc.CheckClassLikeSignature(decl, decl.annotations)
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
@@ -137,7 +143,14 @@ public open class FFIParserImpl {
     public func CheckClassLikeSignature(decl: Decl, annos: ArrayList<Annotation>): Unit {
         let java = Java()
         let objc = ObjC()
-        java.CheckClassLikeSignature(decl, annos)
+        let classLikeDecl = (decl as ClassLikeDecl).getOrThrow()
+        for (anno in annos) {
+            if (anno.kind == AnnotationKind.JAVA_MIRROR) {
+                java.CheckMirrorSignature(classLikeDecl, annos)
+            } else if (anno.kind == AnnotationKind.JAVA_IMPL) {
+                java.CheckImplSignature(classLikeDecl, annos)
+            }
+        }
         objc.CheckClassLikeSignature(decl, annos)
     }
 

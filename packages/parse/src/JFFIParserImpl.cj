@@ -21,42 +21,41 @@ public class JFFIParserImpl {
         }
     }
 
-    public func CheckClassLikeSignature(decl: Decl, annos: ArrayList<Annotation>): Unit {
-        if (HasAnnotation(annos, AnnotationKind.JAVA_MIRROR)) {
-            decl.EnableAttr(Attribute.JAVA_MIRROR)
-            if (let Some(classLike) <- (decl as InheritableDecl)) {
-                if (!classLike.inheritedTypes.isEmpty()) {
-                    decl.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
-                }
-            }
-            if (decl.TestAttr(Attribute.SEALED)) {
-                DiagJavaMirrorCannotBeSealed(decl)
+    public func CheckMirrorSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
+        CJC_ASSERT(HasAnnotation(annos, AnnotationKind.JAVA_MIRROR))
+        decl.EnableAttr(Attribute.JAVA_MIRROR)
+        if (!decl.inheritedTypes.isEmpty()) {
+            decl.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
+        }
+        if (decl.TestAttr(Attribute.SEALED)) {
+            DiagJavaMirrorCannotBeSealed(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+    }
+
+    public func CheckImplSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
+        CJC_ASSERT(HasAnnotation(annos, AnnotationKind.JAVA_IMPL))
+        decl.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
+        if (let Some(_) <- decl.generic) {
+            if (!decl.TestAttr(Attribute.JAVA_CJ_MAPPING)) {
+                DiagJavaImplCannotBeGeneric(decl)
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
         }
-        if (HasAnnotation(annos, AnnotationKind.JAVA_IMPL)) {
-            decl.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
-            if (let Some(_) <- decl.generic) {
-                if (!decl.TestAttr(Attribute.JAVA_CJ_MAPPING)) {
-                    DiagJavaImplCannotBeGeneric(decl)
-                    decl.EnableAttr(Attribute.IS_BROKEN)
-                }
-            }
-            if (decl.TestAttr(Attribute.ABSTRACT)) {
-                DiagJavaImplCannotBeAbstract(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (decl.TestAttr(Attribute.SEALED)) {
-                DiagJavaImplCannotBeSealed(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (decl.astKind == ASTKind.CLASS_DECL && decl.TestAttr(Attribute.OPEN)) {
-                parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_open, decl).Emit()
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            } else if (decl.astKind == ASTKind.INTERFACE_DECL) {
-                parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_interface, decl).Emit()
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
+        if (decl.TestAttr(Attribute.ABSTRACT)) {
+            DiagJavaImplCannotBeAbstract(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (decl.TestAttr(Attribute.SEALED)) {
+            DiagJavaImplCannotBeSealed(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (decl.astKind == ASTKind.CLASS_DECL && decl.TestAttr(Attribute.OPEN)) {
+            parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_open, decl).Emit()
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        } else if (decl.astKind == ASTKind.INTERFACE_DECL) {
+            parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_be_interface, decl).Emit()
+            decl.EnableAttr(Attribute.IS_BROKEN)
         }
     }
 
@@ -136,8 +135,9 @@ public class JFFIParserImpl {
         if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL) {
             return
         }
-        decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.DiagUnexpectedAnnoOnKind(anno, decl.begin, anno.identifier.Val(), decl.astKind)
+        if (anno.kind == AnnotationKind.JAVA_IMPL) {
+            parser.DiagUnexpectedAnnoOnKind(anno, decl.begin, anno.identifier.Val(), decl.astKind)
+        }
     }
 }
 
