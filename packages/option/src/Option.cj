@@ -411,6 +411,200 @@ public open class GlobalOptions <: Option {
     public let sancovOption: SanitizerCoverageOptions = SanitizerCoverageOptions()
     public init() { super() }
 
+    // C++: Driver.cpp:211 copies the GlobalOptions base subobject by value. The implicitly generated
+    // copy operation covers every field declared by Option.h:285-1245.
+    public init(other: GlobalOptions) {
+        super()
+        argList = other.argList
+        frontendMode = other.frontendMode
+        for ((key, value) in other.environment.allVariables) { environment.allVariables.add(key, value) }
+        environment.cangjieHome.hasValue = other.environment.cangjieHome.hasValue
+        environment.cangjieHome.value = other.environment.cangjieHome.value
+        for (value in other.environment.cangjiePaths) { environment.cangjiePaths.add(value) }
+        for (value in other.environment.libraryPaths) { environment.libraryPaths.add(value) }
+        for (value in other.environment.paths) { environment.paths.add(value) }
+        environment.macOSSDKRoot.hasValue = other.environment.macOSSDKRoot.hasValue
+        environment.macOSSDKRoot.value = other.environment.macOSSDKRoot.value
+        host.arch = other.host.arch
+        host.vendor = other.host.vendor
+        host.os = other.host.os
+        host.env = other.host.env
+        host.apiLevel = other.host.apiLevel
+        target.arch = other.target.arch
+        target.vendor = other.target.vendor
+        target.os = other.target.os
+        target.env = other.target.env
+        target.apiLevel = other.target.apiLevel
+        for ((key, value) in other.passedWhenKeyValue) { passedWhenKeyValue.add(key, value) }
+        for (value in other.passedWhenCfgPaths) { passedWhenCfgPaths.add(value) }
+        cangjieHome = other.cangjieHome
+        output = other.output
+        outputDir.hasValue = other.outputDir.hasValue
+        outputDir.value = other.outputDir.value
+        outputJavaGenDir.hasValue = other.outputJavaGenDir.hasValue
+        outputJavaGenDir.value = other.outputJavaGenDir.value
+        outputObjCGenDir = other.outputObjCGenDir
+        for (value in other.importPaths) { importPaths.add(value) }
+        for (value in other.pluginPaths) { pluginPaths.add(value) }
+        for (value in other.commonPartCjos) { commonPartCjos.add(value) }
+        for (value in other.commonPartChirs) { commonPartChirs.add(value) }
+        enIncrementalCompilation = other.enIncrementalCompilation
+        printIncrementalInfo = other.printIncrementalInfo
+        compilationCachedPath = other.compilationCachedPath
+        compilationCachedDir = other.compilationCachedDir
+        compilationCachedFileName = other.compilationCachedFileName
+        executablePath = other.executablePath
+        moduleSrcPath = other.moduleSrcPath
+        for (value in other.packagePaths) { packagePaths.add(value) }
+        for (value in other.srcFiles) { srcFiles.add(value) }
+        for (value in other.inputObjs) { inputObjs.add(value) }
+        inputCjoFile = other.inputCjoFile
+        for (value in other.inputPdbaFiles) { inputPdbaFiles.add(value) }
+        for (value in other.directBuiltinDependencies) { directBuiltinDependencies.add(value) }
+        for (value in other.indirectBuiltinDependencies) { indirectBuiltinDependencies.add(value) }
+        for (value in other.frontendOutputFiles) {
+            frontendOutputFiles.add(TempFileInfo(fileName: value.fileName, filePath: value.filePath,
+                rawPath: value.rawPath, isFrontendOutput: value.isFrontendOutput,
+                isForeignInput: value.isForeignInput))
+        }
+        for (value in other.cjoOutputFiles) {
+            cjoOutputFiles.add(TempFileInfo(fileName: value.fileName, filePath: value.filePath,
+                rawPath: value.rawPath, isFrontendOutput: value.isFrontendOutput,
+                isForeignInput: value.isForeignInput))
+        }
+        for (value in other.bcInputFiles) { bcInputFiles.add(value) }
+        for (value in other.bcPackageNames) { bcPackageNames.add(value) }
+        for (value in other.inputFileOrder) { inputFileOrder.add(OrderedInput(value.value, value.index)) }
+        for (value in other.inputLibraryOrder) { inputLibraryOrder.add(OrderedInput(value.value, value.index)) }
+        for (value in other.inputLinkOptionsOrder) {
+            inputLinkOptionsOrder.add(OrderedInput(value.value, value.index))
+        }
+        for (value in other.inputLinkOptionOrder) {
+            inputLinkOptionOrder.add(OrderedInput(value.value, value.index))
+        }
+        for (value in other.removedPathPrefix) { removedPathPrefix.add(value) }
+        moduleName = other.moduleName
+        compilePackage = other.compilePackage
+        compileMacroPackage = other.compileMacroPackage
+        enableOutputType = other.enableOutputType
+        saveTemps = other.saveTemps
+        tempFolderPath = other.tempFolderPath
+        backend = other.backend
+        for (value in other.macroLib) { macroLib.add(value) }
+        enableVerbose = other.enableVerbose
+        showUsage = other.showUsage
+        printVersionOnly = other.printVersionOnly
+        experimentalMode = other.experimentalMode
+        scanDepPkg = other.scanDepPkg
+        noSubPkg = other.noSubPkg
+        displayLineInfo = other.displayLineInfo
+        enableCompileDebug = other.enableCompileDebug
+        enableAddCommentToAst = other.enableAddCommentToAst
+        enableMacroInLSP = other.enableMacroInLSP
+        enableMacroDebug = other.enableMacroDebug
+        enableParallelMacro = other.enableParallelMacro
+        enableCompileTest = other.enableCompileTest
+        compileTestsOnly = other.compileTestsOnly
+        exportForTest = other.exportForTest
+        enableEH = other.enableEH
+        mock = other.mock
+        diagFormat = other.diagFormat
+        parseTest = other.parseTest
+        implicitPrelude = other.implicitPrelude
+        enableInteropCJMapping = other.enableInteropCJMapping
+        targetInteropLanguage = other.targetInteropLanguage
+        enableTimer = other.enableTimer
+        enableMemoryCollect = other.enableMemoryCollect
+        linkStaticStd = other.linkStaticStd
+        ltoMod = other.ltoMod
+        emitStaticLibInLTO = other.emitStaticLibInLTO
+        enableCompileAsExe = other.enableCompileAsExe
+        ltoHideAllPkgs = other.ltoHideAllPkgs
+        for (value in other.ltoVisiblePkgs) { ltoVisiblePkgs.add(value) }
+        outputMode = other.outputMode
+        compileTarget = other.compileTarget
+        optimizationLevel = other.optimizationLevel
+        optPassOptions = other.optPassOptions
+        enableFuncSections = other.enableFuncSections
+        enableDataSections = other.enableDataSections
+        enableGcSections = other.enableGcSections
+        enableHotReload = other.enableHotReload
+        disableReflection = other.disableReflection
+        enablePgoInstrGen = other.enablePgoInstrGen
+        enablePgoInstrUse = other.enablePgoInstrUse
+        pgoProfileFile = other.pgoProfileFile
+        discardEhFrame = other.discardEhFrame
+        disableChirOpt = other.disableChirOpt
+        disableBackendOpt = other.disableBackendOpt
+        for (value in other.selectedCHIROpts) { selectedCHIROpts.add(value) }
+        interpreter = other.interpreter
+        printBCHIR.clear()
+        for (value in other.printBCHIR) { printBCHIR.add(value) }
+        for (value in other.interpreterSearchPaths) { interpreterSearchPaths.add(value) }
+        for (value in other.interpLoadLib) { interpLoadLib.add(value) }
+        for (value in other.interpreterArgs) { interpreterArgs.add(value) }
+        interpreterPrintResult = other.interpreterPrintResult
+        interpFullBchir = other.interpFullBchir
+        interpMainNoLinkage = other.interpMainNoLinkage
+        interpCHIR = other.interpCHIR
+        constEvalDebug = other.constEvalDebug
+        computeAnnotationsDebug = other.computeAnnotationsDebug
+        disableCodeGen = other.disableCodeGen
+        disableDeserializer = other.disableDeserializer
+        chirDebugOptimizer = other.chirDebugOptimizer
+        chirEA = other.chirEA
+        chirLICM = other.chirLICM
+        chirWFC = other.chirWFC
+        chirCC = other.chirCC
+        codegenDebugMode = other.codegenDebugMode
+        chirLLVM = other.chirLLVM
+        chirDeserialize = other.chirDeserialize
+        chirDeserializePath = other.chirDeserializePath
+        disableSemaVic = other.disableSemaVic
+        enableChirRGetOrThrowE = other.enableChirRGetOrThrowE
+        disableChirUselessImportElimination = other.disableChirUselessImportElimination
+        enableOpaque = other.enableOpaque
+        chirRenderMode = other.chirRenderMode
+        chirHLIR = other.chirHLIR
+        strictNumberMode = other.strictNumberMode
+        fastMathMode = other.fastMathMode
+        enableCoverage = other.enableCoverage
+        compileCjd = other.compileCjd
+        cjdbMode = other.cjdbMode
+        interopCJPackageConfigPath = other.interopCJPackageConfigPath
+        dumpAST = other.dumpAST
+        dumpCHIR = other.dumpCHIR
+        dumpIR = other.dumpIR
+        dumpAll = other.dumpAll
+        dumpToScreen = other.dumpToScreen
+        sanitizerType = other.sanitizerType
+        stackTraceFmt = other.stackTraceFmt
+        errorCountLimit.hasValue = other.errorCountLimit.hasValue
+        errorCountLimit.value = other.errorCountLimit.value
+        jobs.hasValue = other.jobs.hasValue
+        jobs.value = other.jobs.value
+        aggressiveParallelCompile.hasValue = other.aggressiveParallelCompile.hasValue
+        aggressiveParallelCompile.value = other.aggressiveParallelCompile.value
+        aggressiveParallelCompileWithoutArg = other.aggressiveParallelCompileWithoutArg
+        for (value in other.bitcodeFilesName) { bitcodeFilesName.add(value) }
+        for (value in other.symbolsNeedLocalized) { symbolsNeedLocalized.add(value) }
+        for ((key, values) in other.symbolsNeedLocalizedPerPkg) {
+            let copiedValues = ArrayList<String>()
+            for (value in values) { copiedValues.add(value) }
+            symbolsNeedLocalizedPerPkg.add(key, copiedValues)
+        }
+        overflowStrategy = other.overflowStrategy
+        emitCHIRPhase = other.emitCHIRPhase
+        sancovOption.coverageType = other.sancovOption.coverageType
+        sancovOption.traceCmp = other.sancovOption.traceCmp
+        sancovOption.traceMemCmp = other.sancovOption.traceMemCmp
+        sancovOption.tracePCGuard = other.sancovOption.tracePCGuard
+        sancovOption.inline8bitCounters = other.sancovOption.inline8bitCounters
+        sancovOption.inlineBoolFlag = other.sancovOption.inlineBoolFlag
+        sancovOption.pcTable = other.sancovOption.pcTable
+        sancovOption.stackDepth = other.sancovOption.stackDepth
+    }
+
     public override func ParseFromArgs(argList: ArgList): Bool {
         this.argList = argList
         let delayed = ArrayList<OptionArgInstance>()
