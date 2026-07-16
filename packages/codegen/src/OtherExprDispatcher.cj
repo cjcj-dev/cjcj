@@ -25,10 +25,23 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         }
         return LLVMNullValue()
     }
+    if (kind == ExprKind.GET_INSTANTIATE_VALUE) {
+        if (let Some(resultTy) <- chirExpr.GetResultType()) {
+            return unsafe { LLVMConstNull(CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()) }
+        }
+        return LLVMNullValue()
+    }
+    irBuilder.EmitLocation(CHIRExprWrapper(chirExpr))
     if (kind == ExprKind.APPLY) {
+        irBuilder.EmitLocation(CHIRExprWrapper(chirExpr))
         return EmitCallLikeExpression(irBuilder, chirExpr)
     }
-    if (kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC) {
+    if (kind == ExprKind.INVOKE) {
+        irBuilder.EmitLocation(CHIRExprWrapper(chirExpr))
+        return GenerateInvokeExpression(irBuilder, chirExpr)
+    }
+    if (kind == ExprKind.INVOKESTATIC) {
+        irBuilder.EmitLocation(CHIRExprWrapper(chirExpr))
         return GenerateInvokeExpression(irBuilder, chirExpr)
     }
     if (kind == ExprKind.RAW_ARRAY_ALLOCATE) {
@@ -67,6 +80,7 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return irBuilder.CallExceptionIntrinsicGetExceptionValue()
     }
     if (kind == ExprKind.INTRINSIC) {
+        irBuilder.EmitLocation(CHIRExprWrapper(chirExpr))
         return GenerateIntrinsic(irBuilder, chirExpr)
     }
     if (kind == ExprKind.GET_RTTI || kind == ExprKind.GET_RTTI_STATIC) {
@@ -77,11 +91,6 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     }
     if (kind == ExprKind.SPAWN) {
         return GenerateSpawn(irBuilder, chirExpr)
-    }
-    if (kind == ExprKind.GET_INSTANTIATE_VALUE) {
-        if (let Some(resultTy) <- chirExpr.GetResultType()) {
-            return unsafe { LLVMConstNull(CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy).GetLLVMType()) }
-        }
     }
     return LLVMNullValue()
 }

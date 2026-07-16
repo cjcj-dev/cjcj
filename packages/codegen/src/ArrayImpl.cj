@@ -216,6 +216,7 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     if (ShouldSkipNoOpStore(valueOperand, addrOperand)) {
         return LLVMNullValue()
     }
+    irBuilder.EmitLocation(CHIRExprWrapper(chirExpr), removable: true)
     let value = irBuilder.GetCGModule().GetMappedCGValue(valueOperand)
     let addr = irBuilder.GetCGModule().GetMappedCGValue(addrOperand)
     if (let Some(boxRetStore) <- TryGenerateBoxRetValueStore(irBuilder, chirExpr, valueOperand, addrOperand, value, addr)) {
@@ -516,6 +517,7 @@ public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): 
     }
     let baseValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(0))
     if (let Some(staticElementRef) <- (chirExpr as GetElementRef)) {
+        irBuilder.EmitLocation(CHIRExprWrapper(staticElementRef))
         let path = staticElementRef.GetPath()
         if (path.isEmpty()) {
             return LLVMNullValue()
@@ -572,6 +574,7 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         if (ShouldSkipNoOpStore(rhs, lhs)) {
             return LLVMNullValue()
         }
+        irBuilder.EmitLocation(CHIRExprWrapper(storeElementRef))
         let storeAddr = irBuilder.CreateGEP(storePlace, path, name: "store.elem.addr")
         if (rhs.TestAttr(Attribute.FOREIGN)) {
             AddFnAttr(storeValue.GetRawValue(), CJ2C_ATTR)

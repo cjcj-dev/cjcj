@@ -20,6 +20,7 @@ public func HandleMemoryExpression(irBuilder: IRBuilder2, chirExpr: Expression):
             if (let Some(retValueStorage) <- TryGetSpecialRetValueStorage(irBuilder, allocateExpr)) {
                 return retValueStorage
             }
+            irBuilder.EmitLocation(CHIRExprWrapper(allocateExpr))
         }
         let result = GenerateAllocate(irBuilder, chirExpr)
         if (let Some(allocateExpr) <- (chirExpr as Allocate)) {
