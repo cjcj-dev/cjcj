@@ -1487,6 +1487,7 @@ extend ParserImpl {
             CheckDeclarationInScope(scopeKind, DefKind.VARIABLE)
             decl.identifier = ExpectIdentifierWithPos(decl)
             ParseTypeAndExpr(decl)
+            EnableModifierAttrs(decl, CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE))
             CheckVarDeclModifiers(modifiers, decl, scopeKind, key)
         }
         return decl
