@@ -1497,6 +1497,12 @@ public class InitializationChecker {
             if (target.IsFuncOrProp() || IsMemberUseOutsideCtor(ctx, refExpr, target)) {
                 return true
             }
+            if (refExpr.ShouldDiagnose(allowCompilerAdd: true) && target.TestAttr(Attribute.GLOBAL) &&
+                IsSameFile(refExpr, target) && refExpr.begin < target.begin) {
+                AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, refExpr, target: target,
+                    message: refExpr.ref.identifier.Val())
+                return false
+            }
             if (!target.TestAttr(Attribute.INITIALIZED)) {
                 if (HasInitVarsAfterTerminator(refExpr.scopeName)) {
                     return true
