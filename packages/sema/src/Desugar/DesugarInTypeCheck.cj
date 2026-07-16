@@ -376,7 +376,7 @@ private func CreateArgumentForCompoundAssignOverload(ae: AssignExpr, createdCall
     return None
 }
 
-private func DesugarPipelineExpr(expr: BinaryExpr): Unit {
+private func DesugarPipelineExpr(ctx: ASTContext, expr: BinaryExpr): Unit {
     if (let Some(_) <- expr.desugarExpr) {
         return
     }
@@ -384,9 +384,12 @@ private func DesugarPipelineExpr(expr: BinaryExpr): Unit {
         if (let Some(right) <- expr.rightExpr) {
             let callExpr = CallExpr()
             CopyBasicInfo(expr, callExpr)
+            ctx.RemoveTypeCheckCache(callExpr)
             callExpr.baseFunc = TryDesugarFunctionCallExpr(right)
+            ctx.RemoveTypeCheckCache(callExpr.baseFunc.getOrThrow())
             let funcArg = FuncArg()
             CopyBasicInfo(left, funcArg)
+            ctx.RemoveTypeCheckCache(funcArg)
             funcArg.expr = left
             callExpr.args.add(funcArg)
             callExpr.sourceExpr = expr
@@ -397,16 +400,7 @@ private func DesugarPipelineExpr(expr: BinaryExpr): Unit {
     }
 }
 
-private func MakeFlowFuncArg(source: Expr): FuncArg {
-    let arg = FuncArg()
-    CopyBasicInfo(source, arg)
-    let callee = TryDesugarFunctionCallExpr(source)
-    callee.isInFlowExpr = true
-    arg.expr = callee
-    return arg
-}
-
-private func DesugarCompositionExpr(expr: BinaryExpr): Unit {
+private func DesugarCompositionExpr(ctx: ASTContext, expr: BinaryExpr): Unit {
     if (let Some(_) <- expr.desugarExpr) {
         return
     }
@@ -414,16 +408,42 @@ private func DesugarCompositionExpr(expr: BinaryExpr): Unit {
         if (let Some(right) <- expr.rightExpr) {
             let callExpr = CallExpr()
             CopyBasicInfo(expr, callExpr)
+            ctx.RemoveTypeCheckCache(callExpr)
             let baseFunc = CreateRefExprInCore(COMPOSITION_FUNC_NAME)
             CopyBasicInfo(expr, baseFunc)
+            ctx.RemoveTypeCheckCache(baseFunc)
             callExpr.baseFunc = baseFunc
-            callExpr.args.add(MakeFlowFuncArg(left))
-            callExpr.args.add(MakeFlowFuncArg(right))
+            let firstArg = FuncArg()
+            CopyBasicInfo(left, firstArg)
+            ctx.RemoveTypeCheckCache(firstArg)
+            firstArg.expr = TryDesugarFunctionCallExpr(left)
+            firstArg.expr.getOrThrow().isInFlowExpr = true
+            ctx.RemoveTypeCheckCache(firstArg.expr.getOrThrow())
+            let secondArg = FuncArg()
+            CopyBasicInfo(right, secondArg)
+            ctx.RemoveTypeCheckCache(secondArg)
+            secondArg.expr = TryDesugarFunctionCallExpr(right)
+            secondArg.expr.getOrThrow().isInFlowExpr = true
+            ctx.RemoveTypeCheckCache(secondArg.expr.getOrThrow())
+            callExpr.args.add(firstArg)
+            callExpr.args.add(secondArg)
             callExpr.sourceExpr = expr
             CopyUnsafeAttr(expr, callExpr)
             AddCurFile(callExpr, file: expr.curFile)
             expr.desugarExpr = callExpr
         }
+    }
+}
+
+// C++ src/Sema/Desugar/DesugarInTypeCheck.cpp:285-295 DesugarFlowExpr.
+public func DesugarFlowExpr(ctx: ASTContext, expr: BinaryExpr): Unit {
+    if (expr.desugarExpr.isSome()) {
+        return
+    }
+    if (expr.op == TokenKind.PIPELINE) {
+        DesugarPipelineExpr(ctx, expr)
+    } else if (expr.op == TokenKind.COMPOSITION) {
+        DesugarCompositionExpr(ctx, expr)
     }
 }
 
@@ -828,18 +848,4 @@ public func HandleCtorForIncr(pkg: Package, mangledName2DeclMap: HashMap<String,
             }
         }
     })
-}
-
-public func DesugarInTypeCheck(root: Node): Unit {
-    let walker = Walker(root, visitPost: { node: Node =>
-        if (let Some(binaryExpr) <- (node as BinaryExpr)) {
-            if (binaryExpr.op == TokenKind.PIPELINE) {
-                DesugarPipelineExpr(binaryExpr)
-            } else if (binaryExpr.op == TokenKind.COMPOSITION) {
-                DesugarCompositionExpr(binaryExpr)
-            }
-        }
-        VisitAction.WALK_CHILDREN
-    })
-    let _ = walker.Walk()
 }

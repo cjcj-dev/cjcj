@@ -414,7 +414,7 @@ private func CheckFlowOperandsHaveNamedParam(callExpr: CallExpr, diag: Option<Ba
     return false
 }
 
-private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr,
+private func SynFlowExpr(typeManager: TypeManager, ctx: ASTContext, be: BinaryExpr,
     synthesizer: BinaryOperandSynthesizer, diag: Option<BasicDiagnosticEngine>): (Bool, Ty) {
     if (let Some(existingTy) <- be.GetTy()) {
         if (Ty.IsTyCorrect(existingTy)) {
@@ -458,7 +458,7 @@ private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr,
         if ((be.op == TokenKind.COMPOSITION && !isThisExpr(leftExpr)) || !isThisExpr(rightExpr)) {
             return (true, BinaryInvalid(be))
         }
-        DesugarInTypeCheck(be)
+        DesugarFlowExpr(ctx, be)
         if (let Some(desugar) <- be.desugarExpr) {
             var desugarTy: Option<Ty> = None
             try (ds = DiagSuppressor(diag)) {
@@ -1069,10 +1069,10 @@ private func SynCompositionExpr(typeManager: TypeManager, be: BinaryExpr,
     return BinaryInvalid(be)
 }
 
-private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr,
+private func SynFlowExpr(typeManager: TypeManager, ctx: ASTContext, be: BinaryExpr,
     synthesizer!: Option<BinaryOperandSynthesizer> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Ty {
-    let desugarResult = SynFlowExpr(typeManager, be, synthesizer.getOrThrow(), diag)
+    let desugarResult = SynFlowExpr(typeManager, ctx, be, synthesizer.getOrThrow(), diag)
     if (desugarResult[0]) {
         return desugarResult[1]
     }
@@ -1081,7 +1081,7 @@ private func SynFlowExpr(typeManager: TypeManager, be: BinaryExpr,
     return TypeManager.GetInvalidTy()
 }
 
-private func ChkFlowExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+private func ChkFlowExpr(typeManager: TypeManager, ctx: ASTContext, target: Ty, be: BinaryExpr,
     synthesizer: BinaryOperandSynthesizer, checker: BinaryOperandChecker,
     diag: Option<BasicDiagnosticEngine>): Bool {
     if (let Some(existingTy) <- be.GetTy()) {
@@ -1127,7 +1127,7 @@ private func ChkFlowExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
             let _ = BinaryInvalid(be)
             return false
         }
-        DesugarInTypeCheck(be)
+        DesugarFlowExpr(ctx, be)
         let desugar = be.desugarExpr.getOrThrow()
         try (ds = DiagSuppressor(diag)) {
             if (!checker(target, desugar)) {
@@ -1535,7 +1535,7 @@ private func CheckBinaryExprCaseBuiltIn(typeManager: TypeManager, target: Ty, be
     } else if (IsShiftOperator(be.op)) {
         checkRet = ChkShiftExpr(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     } else if (IsFlowOperator(be.op)) {
-        if (ChkFlowExpr(typeManager, target, be, synthesizer.getOrThrow(), checker.getOrThrow(), diag)) {
+        if (ChkFlowExpr(typeManager, ctx.getOrThrow(), target, be, synthesizer.getOrThrow(), checker.getOrThrow(), diag)) {
             return Some(true)
         }
     } else if (be.op == TokenKind.COALESCING) {
@@ -1654,7 +1654,7 @@ public func SynBinaryExpr(impl: TypeCheckerImpl, be: BinaryExpr,
     } else if (be.op == TokenKind.COALESCING) {
         return SynCoalescingExpr(impl, be, ctx: ctx, synthesizer: synthesizer, checker: checker)
     } else if (IsFlowOperator(be.op)) {
-        return SynFlowExpr(typeManager, be, synthesizer: synthesizer, diag: diag)
+        return SynFlowExpr(typeManager, ctx.getOrThrow(), be, synthesizer: synthesizer, diag: diag)
     } else {
         be.SetTy(TypeManager.GetInvalidTy())
     }
@@ -1828,7 +1828,7 @@ extend TypeChecker {
         } else if (IsShiftOperator(be.op)) {
             inferRet = SynShiftExpr(impl.typeManager, be, synthesizer: Some(synthesizer))
         } else if (IsFlowOperator(be.op)) {
-            inferRet = SynFlowExpr(impl.typeManager, be, synthesizer: Some(synthesizer), diag: impl.diag)
+            inferRet = SynFlowExpr(impl.typeManager, ctx, be, synthesizer: Some(synthesizer), diag: impl.diag)
             return (Some(be.GetTy().getOrThrow()), inferRet)
         } else if (be.op == TokenKind.COALESCING) {
             let ty = SynCoalescingExpr(impl, be, ctx: Some(ctx), synthesizer: Some(synthesizer),
