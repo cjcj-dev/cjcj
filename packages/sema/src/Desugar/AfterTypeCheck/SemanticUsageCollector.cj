@@ -5,6 +5,7 @@ import cjcj::ast.*
 import cjcj::incremental_compilation.{NameUsage, SemanticInfo, SemaRelation, SemaUsage, UseInfo}
 import cjcj::mangle.ASTMangler
 import cjcj::sema.*
+import cjcj::sema.Desugar.GetTypeRawMangleName
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
 // C++ src/Sema/Desugar/AfterTypeCheck/SemanticUsageCollector.cpp:25-385.

@@ -1,11 +1,11 @@
-package cjcj::sema
+package cjcj::sema.Desugar
 
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::incremental_compilation.SemanticInfo
 import cjcj::mangle.ASTMangler
-import cjcj::sema.Desugar.DesugarPrimaryCtor
+import cjcj::sema.*
 import cjcj::utils.{BOX_DECL_PREFIX, CJC_ASSERT, CJC_NULLPTR_CHECK, IncrementalCompilationLogger,
     InternalError, MACRO_ATTR_ARGS, GetMacroFuncName}
 
