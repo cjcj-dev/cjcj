@@ -217,7 +217,8 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
             case ExprKind.TYPECAST =>
                 return HandleTypeCast(state, (expression as TypeCast).getOrThrow())
             case ExprKind.INTRINSIC =>
-                return HandleIntrinsic(state, (expression as Intrinsic).getOrThrow())
+                let _ = HandleIntrinsic(state, (expression as Intrinsic).getOrThrow())
+                return ConstExceptionKind.NA
             case ExprKind.CONSTANT | ExprKind.APPLY | ExprKind.FIELD =>
                 return ConstExceptionKind.NA
             case _ =>
