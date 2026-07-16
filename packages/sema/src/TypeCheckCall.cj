@@ -2749,7 +2749,7 @@ private func FillTypeArgumentsTy(typeManager: TypeManager, fd: FuncDecl, ce: Cal
     }
     if (baseDecl != outerDecl) {
         var mapping = TypeSubst()
-        let outerDeclTy = typeManager.GetInstantiatedTy(outerDecl.GetTy().getOrThrow(), mapping)
+        let outerDeclTy = typeManager.GetInstantiatedTy(outerDecl.GetTy().getOrThrow(), typeMapping.u2i)
         if (let Some(baseDeclTy) <- baseDecl.GetTy()) {
             if (outerDecl.GetTy().isSome()) {
                 mapping = MultiTypeSubstToTypeSubst(
