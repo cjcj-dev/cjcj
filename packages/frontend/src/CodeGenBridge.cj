@@ -256,6 +256,10 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
         for ((rawMangledName, wrapper) in convertor.GetDeleteVirtualFuncWrapperForIncr()) {
             instance.chirInfo.delVirtFuncWrapForIncr[rawMangledName] = wrapper
         }
+        instance.chirInfo.ccOutFuncsRawMangle.clear()
+        for (rawMangledName in convertor.GetCCOutFuncsRawMangle()) {
+            instance.chirInfo.ccOutFuncsRawMangle.add(rawMangledName)
+        }
     }
     return result
 }
@@ -271,6 +275,7 @@ private class ToCHIR {
     private let strEffectMap: OptEffectStrMap = OptEffectStrMap()
     private let curVirtFuncWrapDep: VirtualWrapperDepMap = VirtualWrapperDepMap()
     private let delVirtFuncWrapForIncr: VirtualWrapperDepMap = VirtualWrapperDepMap()
+    private let ccOutFuncsRawMangle: HashSet<String> = HashSet<String>()
     private var maybeUnreachable: HashMap<ChirBlock, ChirTerminator> = HashMap<ChirBlock, ChirTerminator>()
     private var chirPkg: Option<RealCHIRPackage> = None
     private var debugFileIndex: UInt64 = 0u64
@@ -331,10 +336,10 @@ private class ToCHIR {
         let closure = ClosureConversion(builder, opts: instance.invocation.globalOptions,
             srcCodeImportedFuncs: ast2chir.GetSrcCodeImportedFuncs())
         closure.RunOnPackage(lowered)
-        // C++: Frontend/CompilerInstance.cpp:981 and CHIR/CHIR.cpp:253-255.
-        instance.chirInfo.ccOutFuncsRawMangle.clear()
+        // C++: CHIR/CHIR.cpp:253-255.
+        ccOutFuncsRawMangle.clear()
         for (rawMangledName in closure.GetCCOutFuncsRawMangle()) {
-            instance.chirInfo.ccOutFuncsRawMangle.add(rawMangledName)
+            ccOutFuncsRawMangle.add(rawMangledName)
         }
         if (!RunConstantEvaluation(lowered, builder, instance.diag.AsBasicDiagnosticEngine(),
             instance.invocation.globalOptions, ast2chir.GetInitFuncsForConstVar())) {
@@ -366,6 +371,10 @@ private class ToCHIR {
 
     public func GetDeleteVirtualFuncWrapperForIncr(): VirtualWrapperDepMap {
         return delVirtFuncWrapForIncr
+    }
+
+    public func GetCCOutFuncsRawMangle(): HashSet<String> {
+        return ccOutFuncsRawMangle
     }
 
     // C++: CHIR/CHIR.cpp:589-598 ToCHIR::RunSanitizerCoverage.
