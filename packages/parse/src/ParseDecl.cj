@@ -1481,10 +1481,7 @@ extend ParserImpl {
             CheckDeclarationInScope(scopeKind, DefKind.VARIABLE)
             decl.identifier = ExpectIdentifierWithPos(decl)
             ParseTypeAndExpr(decl)
-            CheckVarDeclShape(decl, modifiers, scopeKind, key)
-            if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
-                SetUnsafe(decl, modifiers: modifiers)
-            }
+            CheckVarDeclModifiers(modifiers, decl, scopeKind, key)
         }
         return decl
     }
@@ -1554,6 +1551,37 @@ extend ParserImpl {
             ret.identifier.End()
         } else {
             ret.end
+        }
+    }
+
+    private func CheckVarDeclModifiers(
+        modifiers: ArrayList<Modifier>,
+        varDecl: VarDecl,
+        scopeKind: ScopeKind,
+        keyToken: Token
+    ): Unit {
+        if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+            SetUnsafe(varDecl, modifiers: modifiers)
+        }
+        if (!varDecl.isConst && HasModifierToken(modifiers, TokenKind.CONST)) {
+            DiagUnExpectedModifierOnDeclaration(varDecl)
+        } else if (varDecl.isConst &&
+            (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) &&
+            !HasModifierToken(modifiers, TokenKind.STATIC)) {
+            DiagConstVariableExpectedStatic(keyToken)
+        } else if ((let None <- varDecl.initializer) && !varDecl.TestAttr(Attribute.HAS_BROKEN)) {
+            if (varDecl.isConst) {
+                DiagConstVariableExpectedInitializer(varDecl)
+            } else if (!ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) && (let None <- varDecl.typeNode)) {
+                DiagExpectedOneOfTypeOrInitializer(varDecl, varDecl.identifier.Val())
+            } else if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) &&
+                !HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+                if (let None <- varDecl.typeNode) {
+                    DiagExpectedInitializerForToplevelVar(varDecl)
+                } else if (!diag.ignoreScopeCheck && !HasModifierToken(modifiers, TokenKind.COMMON)) {
+                    DiagExpectedInitializerForToplevelVar(varDecl)
+                }
+            }
         }
     }
 
