@@ -19,7 +19,7 @@ private func GetSubCHIRPackageIdx(splitNum: Int64): Int64 {
     return idx
 }
 
-private func DumpIR(llvmModule: LLVMModuleHandle, filePath: String): Unit {
+public func DumpIR(llvmModule: LLVMModuleHandle, filePath: String): Unit {
     if (filePath.isEmpty()) {
         print(llvmModule.PrintToString())
         return

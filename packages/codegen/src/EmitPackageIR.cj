@@ -106,6 +106,11 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         localizedSymbolsForPkg.add(symbol)
     }
     options.symbolsNeedLocalizedPerPkg[cgPkgContext.GetCHIRPackage().GetName()] = localizedSymbolsForPkg
+    if (options.NeedDumpIRToScreen()) {
+        for (cgMod in cgPkgContext.GetCGModules()) {
+            DumpIR(cgMod.GetLLVMModule().getOrThrow(), "")
+        }
+    }
     return cgPkgContext.ReleaseLLVMModules()
 }
 
