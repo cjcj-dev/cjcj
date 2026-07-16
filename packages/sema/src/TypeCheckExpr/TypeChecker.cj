@@ -3140,12 +3140,12 @@ extend TypeChecker {
     }
 
     private func PrepareFuncBodySignature(ctx: ASTContext, fb: FuncBody): Ty {
+        let retType = EnsureRetType(ctx, fb)
         for (paramList in fb.paramLists) {
             for (param in paramList.params) {
                 PrepareParamSignature(ctx, param)
             }
         }
-        let retType = EnsureRetType(ctx, fb)
         let paramTys = GetFuncBodyParamTys(fb)
         let retTy = SignatureReturnTy(fb, retType)
         let funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: FunctionTyConfigForFuncBody(fb))
