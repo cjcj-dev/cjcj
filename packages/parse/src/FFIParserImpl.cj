@@ -30,7 +30,10 @@ public open class FFIParserImpl {
     public func CheckInteropDecl(decl: Decl): Unit {
         CheckAnnotations(decl.annotations, GuessScopeKind(decl), decl)
         CheckAnnotationsConflict(decl.annotations, decl)
-        CheckForeignNameAnnotation(decl)
+        if (decl.astKind == ASTKind.FUNC_DECL || decl.astKind == ASTKind.PROP_DECL ||
+            decl.astKind == ASTKind.VAR_DECL) {
+            CheckForeignNameAnnotation(decl)
+        }
         if (let Some(classLikeDecl) <- (decl as ClassLikeDecl)) {
             let java = Java()
             let objc = ObjC()
@@ -104,12 +107,6 @@ public open class FFIParserImpl {
         for (anno in decl.annotations) {
             if (anno.kind != AnnotationKind.FOREIGN_NAME) {
                 continue
-            }
-            if (decl.astKind != ASTKind.FUNC_DECL && decl.astKind != ASTKind.PROP_DECL &&
-                decl.astKind != ASTKind.VAR_DECL) {
-                decl.EnableAttr(Attribute.IS_BROKEN)
-                parser.DiagUnexpectedAnnoOnKind(anno, decl.keywordPos, anno.identifier.Val(), decl.astKind)
-                return
             }
             if (let Some(outer) <- decl.outerDecl) {
                 if (outer.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE) ||
