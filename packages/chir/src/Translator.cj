@@ -3992,7 +3992,7 @@ public class Translator {
     }
 
     private func ShouldTranslateMember(decl: AstDecl, member: AstDecl): Bool {
-        if (decl.identifier.Val() == "C2" || decl.identifier.Val() == "C3") {
+        if (member.identifier.Val() == "y" || member.identifier.Val() == "z") {
             eprintln("CJMPDBG ShouldTranslateMember decl=" + decl.identifier.Val() + " member=" +
                 member.identifier.Val() + " declFile=" + decl.curFile.isSome().toString() + " memberFile=" +
                 member.curFile.isSome().toString() + " different=" + DeclaredInDifferentFiles(decl, member).toString())
