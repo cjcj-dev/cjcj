@@ -986,6 +986,10 @@ public func IsImpl(ty: Ty): Bool {
     return false
 }
 
+public func IsImplReferenceWrapper(node: Node): Bool {
+    return IsImpl(node)
+}
+
 public func IsJObject(decl: Decl): Bool {
     return IsJObject(decl, decl.fullPackageName)
 }
