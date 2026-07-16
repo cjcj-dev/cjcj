@@ -6,6 +6,7 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::option.GlobalOptions
 import cjcj::sema.*
 import cjcj::sema.Desugar.AfterTypeCheck.*
+import cjcj::modules.SemaImportManager
 
 private func UpdatePosForMacroExpandedNodes(pkgs: ArrayList<Package>): Unit {
     let visit = { curNode: Node =>
@@ -33,7 +34,7 @@ private func CheckExtendDecl(diag: BasicDiagnosticEngine, decl: ExtendDecl): Uni
     }
 }
 
-public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
+public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager: SemaImportManager, pkg: Package,
     context!: Option<ASTContext> = None, options!: GlobalOptions = GlobalOptions(),
     synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
     callChecker!: Option<(ASTContext, Ty, CallExpr) -> Bool> = None,
@@ -102,17 +103,17 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, pkg: Package,
             case ASTKind.TRY_EXPR =>
                 if (let Some(tryExpr) <- (node as TryExpr)) {
                     DesugarTryWithResourcesExpr(typeManager, pkg, tryExpr, context: context, synthesizer: synthesizer)
-                    DesugarTryToFrame(typeManager, pkg, tryExpr,
+                    DesugarTryToFrame(typeManager, importManager, pkg, tryExpr,
                         { target: Ty, call: CallExpr => callChecker.getOrThrow()(context.getOrThrow(), target, call) })
                 }
             case ASTKind.PERFORM_EXPR =>
                 if (let Some(performExpr) <- (node as PerformExpr)) {
-                    DesugarPerformExpr(typeManager, pkg, performExpr,
+                    DesugarPerformExpr(typeManager, importManager, pkg, performExpr,
                         { target: Ty, call: CallExpr => callChecker.getOrThrow()(context.getOrThrow(), target, call) })
                 }
             case ASTKind.RESUME_EXPR =>
                 if (let Some(resumeExpr) <- (node as ResumeExpr)) {
-                    DesugarResumeExpr(typeManager, pkg, resumeExpr,
+                    DesugarResumeExpr(typeManager, importManager, pkg, resumeExpr,
                         { target: Ty, call: CallExpr => callChecker.getOrThrow()(context.getOrThrow(), target, call) })
                 }
             case ASTKind.LIT_CONST_EXPR =>

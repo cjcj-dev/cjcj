@@ -2,6 +2,7 @@ package cjcj::sema.Desugar.AfterTypeCheck
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::modules.SemaImportManager
 import cjcj::sema.*
 
 private let CORE_PACKAGE_NAME: String = "std.core"
@@ -48,41 +49,16 @@ private func IsNamedDecl(decl: Decl, fullPackageName: String, name: String): Boo
     return decl.identifier.Val() == name && (fullPackageName.isEmpty() || decl.fullPackageName == fullPackageName)
 }
 
-private func FindPackageDecl(pkg: Package, fullPackageName: String, name: String): Option<Decl> {
-    for (decl in pkg.srcImportedNonGenericDecls) {
-        if (IsNamedDecl(decl, fullPackageName, name)) {
-            return decl
-        }
-    }
-    for (file in pkg.files) {
-        for (decl in file.decls) {
-            if (IsNamedDecl(decl, fullPackageName, name)) {
-                return decl
-            }
-        }
-    }
-    return None
+private func FindCoreClassDecl(importManager: SemaImportManager, name: String): Option<ClassDecl> {
+    return importManager.GetImportedDecl<ClassDecl>(CORE_PACKAGE_NAME, name)
 }
 
-private func FindCoreClassDecl(pkg: Package, name: String): Option<ClassDecl> {
-    if (let Some(decl) <- FindPackageDecl(pkg, CORE_PACKAGE_NAME, name)) {
-        return decl as ClassDecl
-    }
-    return None
+private func FindEffectClassDecl(importManager: SemaImportManager, name: String): Option<ClassDecl> {
+    return importManager.GetImportedDecl<ClassDecl>(EFFECT_INTERNALS_PACKAGE_NAME, name)
 }
 
-private func FindEffectClassDecl(pkg: Package, name: String): Option<ClassDecl> {
-    if (let Some(decl) <- FindPackageDecl(pkg, EFFECT_INTERNALS_PACKAGE_NAME, name)) {
-        return decl as ClassDecl
-    }
-    return None
-}
-
-private func FindEffectEnumDecl(pkg: Package, name: String): Option<EnumDecl> {
-    if (let Some(decl) <- FindPackageDecl(pkg, EFFECT_INTERNALS_PACKAGE_NAME, name)) {
-        return decl as EnumDecl
-    }
-    return None
+private func FindEffectEnumDecl(importManager: SemaImportManager, name: String): Option<EnumDecl> {
+    return importManager.GetImportedDecl<EnumDecl>(EFFECT_INTERNALS_PACKAGE_NAME, name)
 }
 
 private func AsFuncDecl(decl: Option<Decl>): Option<FuncDecl> {
