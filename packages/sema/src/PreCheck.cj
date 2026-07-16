@@ -511,7 +511,8 @@ private func shouldCollectAssumption(decl: Decl): Bool {
 
 private func CreateGenericConstraints(generic: Generic): Unit {
     for (param in generic.typeParameters) {
-        if (let Some(genericTy) <- (param.GetTy() as GenericsTy)) {
+        let paramTy = param.GetTy() ?? continue
+        if (let Some(genericTy) <- (paramTy as GenericsTy)) {
             let genericKey = Ptr<GenericsTy>(genericTy)
             if (!generic.assumptionCollection.contains(genericKey)) {
                 let upperBounds = HashSet<Ptr<Ty>>()
@@ -564,7 +565,8 @@ private func AddUpperBoundOnTypeParameters(typeManager: TypeManager, ctx: ASTCon
     typeTarget: Decl, revTypeMapping: MultiTypeSubst, allAssumptionMap: TyVarUB,
     typeArgAppliedMap: TypeSubst): Unit {
     for (typeParameter in generic.typeParameters) {
-        if (let Some(genericTy) <- (typeParameter.GetTy() as GenericsTy)) {
+        let typeParameterTy = typeParameter.GetTy() ?? continue
+        if (let Some(genericTy) <- (typeParameterTy as GenericsTy)) {
             if (let Some(aliasedTypeGeneric) <- typeTarget.GetGeneric()) {
                 GetAllAssumptions(aliasedTypeGeneric.assumptionCollection, allAssumptionMap)
                 if (let Some(constraintTys) <- revTypeMapping.Get(genericTy)) {
