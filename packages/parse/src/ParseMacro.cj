@@ -346,44 +346,35 @@ extend ParserImpl {
             Skip(TokenKind.AT_EXCL)
             invocation.isCompileTimeVisible = true
         }
+        invocation.macroCallDiagInfo.fullName = Peek().Value()
         invocation.atPos = atToken.Begin()
-        invocation.macroCallDiagInfo.macroCallBegin = atToken.Begin()
         if (newlineSkipped) {
             ParseDiagnoseRefactor(
                 DiagKindRefactor.parse_unexpected_newline_between_at_and_mc,
                 atToken.Begin(),
                 Peek().Value()).Emit()
         }
-        var currentPart = ExpectMacroIdentifierPart(node)
-        if (currentPart.Empty()) {
-            return false
-        }
-        invocation.macroCallDiagInfo.fullName = currentPart.Val()
+        var item = ParseIdentifierFromName(invocation.macroCallDiagInfo.fullName, lookahead.Begin(), lookahead.End(),
+            invocation.macroCallDiagInfo.fullName.size)
+        invocation.macroCallDiagInfo.identifierPos = item.Begin()
+        Next()
         while (Skip(TokenKind.DOT)) {
+            invocation.macroCallDiagInfo.fullName += "."
             invocation.fullNameDotPos.add(lastToken.Begin())
-            let nextPart = ExpectMacroIdentifierPart(node)
-            if (nextPart.Empty()) {
-                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI], targetTokenConsumed: false)
+            item = ExpectIdentifierWithPos(node)
+            if (item.Empty()) {
+                if (node.astKind == ASTKind.MACRO_EXPAND_EXPR) {
+                    ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI])
+                } else {
+                    ConsumeUntilDecl()
+                }
                 return false
             }
-            invocation.macroCallDiagInfo.fullName += "." + nextPart.Val()
-            currentPart = nextPart
+            invocation.macroCallDiagInfo.fullName += item.Val()
         }
-        invocation.macroNamePos = currentPart.Begin()
-        invocation.macroCallDiagInfo.identifier = currentPart.Val()
-        invocation.macroCallDiagInfo.identifierPos = currentPart.Begin()
+        invocation.macroNamePos = lastToken.Begin()
+        invocation.macroCallDiagInfo.identifier = item.Val()
         return true
-    }
-
-    private func ExpectMacroIdentifierPart(node: Node): SrcIdentifier {
-        let token = Peek()
-        if (IsMacroIdentifierStart(token.kind)) {
-            Next()
-            return ParseIdentifierFromToken(token)
-        }
-        node.isBroken = true
-        DiagExpectedIdentifierWithNode(node)
-        return SrcIdentifier("", "", token.Begin(), token.Begin(), false)
     }
 
     private func ParseMacroCallAttr(invocation: MacroInvocation): Unit {
