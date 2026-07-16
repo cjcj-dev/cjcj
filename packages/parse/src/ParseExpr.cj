@@ -1276,29 +1276,68 @@ extend ParserImpl {
             TokenKind.PROP]) || SeeingImport()
     }
 
-    public func ParseIfExpr(): IfExpr {
+    // C++: src/Parse/ParseAtom.cpp:404-409 ParserImpl::ConsumeUntilIfExprEnd.
+    public func ConsumeUntilIfExprEnd(): Unit {
+        ConsumeUntil(TokenKind.LCURL)
+        ConsumeUntil(TokenKind.RCURL)
+        SkipBlank(TokenKind.NL, blank1: TokenKind.SEMI)
+    }
+
+    public func ParseIfExpr(): Expr {
         let ret = IfExpr()
         let token = Expect(TokenKind.IF, "expected 'if'")
         ret.ifPos = token.Begin()
         ret.begin = token.Begin()
-        ret.leftParenPos = Expect(TokenKind.LPAREN, "expected '(' after if").Begin()
-        ret.condExpr = ParseExpr(ExprKind.IF_COND_EXPR)
-        if (let Some(cond) <- ret.condExpr) {
+        if (!Skip(TokenKind.LPAREN)) {
+            DiagExpectedLeftParenAfter(ret.begin, "if")
+            ConsumeUntilIfExprEnd()
+            ret.EnableAttr(Attribute.IS_BROKEN)
+            return ParserImpl.MakeInvalid(InvalidExpr(), ret.begin)
+        }
+        ret.leftParenPos = lastToken.Begin()
+        let cond = ParseExpr(ExprKind.IF_COND_EXPR)
+        ret.condExpr = cond
+        if (!cond.TestAttr(Attribute.IS_BROKEN)) {
             CheckCondition(cond)
         }
-        ret.rightParenPos = Expect(TokenKind.RPAREN, "expected ')' after if condition").Begin()
-        ret.thenBody = ParseBlock(ScopeKind.FUNC_BODY)
-        if (Skip(TokenKind.ELSE)) {
-            ret.hasElse = true
-            ret.elsePos = lastToken.Begin()
-            ret.elseBody = if (Seeing(TokenKind.IF)) { ParseIfExpr() } else { ParseBlock(ScopeKind.FUNC_BODY) }
+
+        if (!Skip(TokenKind.RPAREN)) {
+            if ((let Some(_) <- (cond as LetPatternDestructor)) && Skip(TokenKind.WHERE)) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_if_let_andand, lastToken).Emit()
+            } else {
+                DiagExpectedRightDelimiter("(", ret.leftParenPos)
+            }
+            ret.EnableAttr(Attribute.IS_BROKEN)
+            ret.thenBody = ParserImpl.MakeInvalid(Block(), lookahead.Begin())
+            ret.end = lookahead.Begin()
+            ConsumeUntilIfExprEnd()
+            if (lastToken.kind == TokenKind.RCURL && Skip(TokenKind.ELSE)) {
+                ParseElse(ret)
+            }
+            return ret
         }
-        if (let Some(elseBody) <- ret.elseBody) {
-            ret.end = elseBody.end
-        } else if (let Some(thenBody) <- ret.thenBody) {
-            ret.end = thenBody.end
+        ret.rightParenPos = lastToken.Begin()
+        let thenBody = ParseBlock(ScopeKind.FUNC_BODY)
+        ret.thenBody = thenBody
+        ret.end = thenBody.end
+        SkipBlank(TokenKind.NL)
+        if (Skip(TokenKind.ELSE)) {
+            ParseElse(ret)
         }
         return ret
+    }
+
+    // C++: src/Parse/ParseAtom.cpp:455-469 ParserImpl::ParseElse.
+    public func ParseElse(ret: IfExpr): Unit {
+        ret.hasElse = true
+        ret.elsePos = lastToken.Begin()
+        if (Seeing(TokenKind.IF)) {
+            ret.isElseIf = true
+            ret.elseBody = ParseIfExpr()
+        } else {
+            ret.elseBody = ParseBlock(ScopeKind.FUNC_BODY)
+        }
+        ret.end = lastToken.End()
     }
 
     public func ParseMatchExpr(): MatchExpr {
@@ -1735,14 +1774,36 @@ extend ParserImpl {
         let token = Expect(TokenKind.WHILE, "expected 'while'")
         ret.whilePos = token.Begin()
         ret.begin = token.Begin()
-        Expect(TokenKind.LPAREN, "expected '(' after while")
-        ret.condExpr = ParseExpr(ExprKind.WHILE_COND_EXPR)
-        if (let Some(cond) <- ret.condExpr) {
+        if (!Skip(TokenKind.LPAREN)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_paren, lookahead,
+                ConvertToken(lookahead)).Emit()
+        } else {
+            ret.leftParenPos = lastToken.Begin()
+        }
+        let cond = ParseExpr(ExprKind.WHILE_COND_EXPR)
+        ret.condExpr = cond
+        if (!cond.TestAttr(Attribute.HAS_BROKEN)) {
             CheckCondition(cond)
         }
-        Expect(TokenKind.RPAREN, "expected ')' after while condition")
-        ret.body = ParseBlock(ScopeKind.FUNC_BODY)
-        if (let Some(body) <- ret.body) { ret.end = body.end }
+
+        if (!Skip(TokenKind.RPAREN) && !ret.leftParenPos.IsZero()) {
+            if ((let Some(_) <- (cond as LetPatternDestructor)) && Skip(TokenKind.WHERE)) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_if_let_andand, lastToken).Emit()
+            } else {
+                DiagExpectedRightDelimiter("(", ret.leftParenPos)
+            }
+            ret.body = ParserImpl.MakeInvalid(Block(), lookahead.Begin())
+            ret.end = lookahead.Begin()
+            ConsumeUntilIfExprEnd()
+            return ret
+        }
+        ret.rightParenPos = lastToken.Begin()
+        let body = ParseBlock(ScopeKind.FUNC_BODY)
+        ret.body = body
+        if (body.TestAttr(Attribute.IS_BROKEN)) {
+            ret.EnableAttr(Attribute.IS_BROKEN)
+        }
+        ret.end = body.end
         return ret
     }
 

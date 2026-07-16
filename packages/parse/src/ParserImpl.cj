@@ -270,6 +270,14 @@ public class ParserImpl {
         }
     }
 
+    // C++: src/Parse/ParserImpl.h:484-491 ParserImpl::MakeInvalid.
+    public static func MakeInvalid<T>(node: T, pos: Position): T where T <: Node {
+        node.EnableAttr(Attribute.IS_BROKEN)
+        node.begin = pos
+        node.end = pos
+        return node
+    }
+
     public func SkipNLOrSemi(): Bool {
         var found = newlineSkipped
         let oldSkip = skipNL
