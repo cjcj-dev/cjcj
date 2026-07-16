@@ -32,11 +32,23 @@ import cjcj::mangle.MANGLE_NESTED_PREFIX
 import cjcj::mangle.MANGLE_SUFFIX
 import cjcj::option.OSType
 import cjcj::utils.CJC_ABORT
-import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, HashString64, REF_PACKAGE_NAME, STD_LIB_FUTURE,
+import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, FileUtil, HashString64, REF_PACKAGE_NAME, STD_LIB_FUTURE,
     STD_LIB_MONITOR, STD_LIB_MUTEX, STD_LIB_WAIT_QUEUE, STD_LIB_WEAK_REF, SYNC_PACKAGE_NAME}
 
 public func GetCodeGenGlobalName(value: Value): String {
     return value.GetIdentifierWithoutPrefix()
+}
+
+// Mirrors CodeGen/Utils/CGUtils.cpp:510-522.
+public func GenDumpPath(output: String, pkgName: String, subName: String,
+    srcFileName: String, suffix: String): String {
+    let dumpDir = if (FileUtil.IsDir(output)) {
+        FileUtil.JoinPath(output, pkgName + "_IR")
+    } else {
+        FileUtil.GetFileBase(output) + "_IR"
+    }
+    let subDir = FileUtil.JoinPath(dumpDir, subName)
+    return FileUtil.JoinPath(subDir, srcFileName + "." + suffix)
 }
 
 public func GetInstAbstractMethodTypes(interfaceTy: ClassType,
