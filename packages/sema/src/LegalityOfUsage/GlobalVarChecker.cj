@@ -341,51 +341,56 @@ public class GlobalVarInitializationChecker {
         }
     }
 
-    private func CollectForStaticInit(staticInit: FuncDecl, staticVars: ArrayList<Decl>): Unit {
-        let visited = ArrayList<Decl>()
-        if (let Some(body) <- staticInit.funcBody) {
-            let walker = Walker(body, visitPre: { node: Node =>
-                if (let Some(expr) <- (node as Expr)) {
-                    if (let Some(desugar) <- expr.desugarExpr) {
-                        CollectVarUsageBFS(desugar)
-                        return VisitAction.SKIP_CHILDREN
-                    }
+    private func CollectForStaticInitImpl(node: Node, staticInit: FuncDecl, staticVars: ArrayList<Decl>,
+        visited: ArrayList<Decl>): Unit {
+        let walker = Walker(node, visitPre: { current: Node =>
+            if (let Some(expr) <- (current as Expr)) {
+                if (let Some(desugar) <- expr.desugarExpr) {
+                    CollectForStaticInitImpl(desugar, staticInit, staticVars, visited)
+                    return VisitAction.SKIP_CHILDREN
                 }
-                if (let Some(assign) <- (node as AssignExpr)) {
-                    if (let Some(left) <- assign.leftValue) {
-                        if (let Some(target) <- left.GetTarget()) {
-                            if (let Some(varTarget) <- (target as VarDecl)) {
-                                if (ContainsDecl(staticVars, varTarget) && !ContainsDecl(visited, varTarget)) {
-                                    varTarget.EnableAttr(Attribute.INITIALIZED)
-                                    if (!varTarget.isVar && varTarget.TestAttr(Attribute.COMMON) &&
-                                        varTarget.TestAttr(Attribute.STATIC)) {
-                                        issues.add(GlobalVarInitializationIssue(
-                                            GlobalVarInitIssueKind.COMMON_STATIC_LET_INITIALIZED_IN_STATIC_INIT,
-                                            assign,
-                                            assign.begin,
-                                            varTarget.identifier.Val(),
-                                            staticInit,
-                                            varTarget,
-                                            message: "common static let cannot be initialized in static init"
-                                        ))
-                                    }
-                                    let staticNode = graph.GetOrBuildNode(varTarget)
-                                    currentNode = staticNode
-                                    staticNode.visitOrder = visitOrder
-                                    visitOrder++
-                                    if (let Some(right) <- assign.rightExpr) {
-                                        CollectVarUsageBFS(right)
-                                    }
-                                    visited.add(varTarget)
-                                    return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(assign) <- (current as AssignExpr)) {
+                if (let Some(left) <- assign.leftValue) {
+                    if (let Some(target) <- left.GetTarget()) {
+                        if (let Some(varTarget) <- (target as VarDecl)) {
+                            if (ContainsDecl(staticVars, varTarget) && !ContainsDecl(visited, varTarget)) {
+                                varTarget.EnableAttr(Attribute.INITIALIZED)
+                                if (!varTarget.isVar && varTarget.TestAttr(Attribute.COMMON) &&
+                                    varTarget.TestAttr(Attribute.STATIC)) {
+                                    issues.add(GlobalVarInitializationIssue(
+                                        GlobalVarInitIssueKind.COMMON_STATIC_LET_INITIALIZED_IN_STATIC_INIT,
+                                        assign,
+                                        assign.begin,
+                                        varTarget.identifier.Val(),
+                                        staticInit,
+                                        varTarget,
+                                        message: "common static let cannot be initialized in static init"
+                                    ))
                                 }
+                                let staticNode = graph.GetOrBuildNode(varTarget)
+                                currentNode = staticNode
+                                staticNode.visitOrder = visitOrder
+                                visitOrder++
+                                if (let Some(right) <- assign.rightExpr) {
+                                    CollectVarUsageBFS(right)
+                                }
+                                visited.add(varTarget)
+                                return VisitAction.SKIP_CHILDREN
                             }
                         }
                     }
                 }
-                VisitAction.WALK_CHILDREN
-            })
-            walker.Walk()
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
+    }
+
+    private func CollectForStaticInit(staticInit: FuncDecl, staticVars: ArrayList<Decl>): Unit {
+        let visited = ArrayList<Decl>()
+        if (let Some(body) <- staticInit.funcBody) {
+            CollectForStaticInitImpl(body, staticInit, staticVars, visited)
         }
         let initNode = graph.GetOrBuildNode(staticInit)
         currentNode = initNode
