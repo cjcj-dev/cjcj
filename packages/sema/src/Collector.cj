@@ -89,6 +89,55 @@ public class Collector {
             } else if (let Some(mainDecl) <- (node as MainDecl)) {
                 collector.CollectMainDecl(ctx, mainDecl, walkerBox.value.getOrThrow(), buildTrie: buildTrie)
                 return VisitAction.SKIP_CHILDREN
+            } else if (let Some(enumDecl) <- (node as EnumDecl)) {
+                // C++ src/Sema/Collector.cpp:180-214 Collector::CollectEnumDecl.
+                if (enumDecl.scopeLevel != 0u32) {
+                    Diagnose(diag.getOrThrow(), enumDecl, BasicDiagKind.sema_type_must_toplevel,
+                        args: [BasicDiagArgument("enum")]).Emit()
+                }
+                let currentWalker = walkerBox.value.getOrThrow()
+                for (annotation in enumDecl.annotations) {
+                    if (currentWalker.WalkNode(annotation) == VisitAction.STOP_NOW) {
+                        return VisitAction.STOP_NOW
+                    }
+                }
+                collector.AddSymbol(ctx, enumDecl, buildTrie: buildTrie)
+                if (let Some(generic) <- enumDecl.generic) {
+                    for (typeParameter in generic.typeParameters) {
+                        typeParameter.outerDecl = Some(enumDecl)
+                        if (currentWalker.WalkNode(typeParameter) == VisitAction.STOP_NOW) {
+                            return VisitAction.STOP_NOW
+                        }
+                    }
+                    for (constraint in generic.genericConstraints) {
+                        if (currentWalker.WalkNode(constraint) == VisitAction.STOP_NOW) {
+                            return VisitAction.STOP_NOW
+                        }
+                    }
+                }
+                for (inheritedType in enumDecl.inheritedTypes) {
+                    if (currentWalker.WalkNode(inheritedType) == VisitAction.STOP_NOW) {
+                        return VisitAction.STOP_NOW
+                    }
+                }
+                collector.AddSymbol(ctx, enumDecl.bodyScope.getOrThrow(), buildTrie: buildTrie)
+                for (constructor in enumDecl.constructors) {
+                    if (let Some(funcDecl) <- (constructor as FuncDecl)) {
+                        funcDecl.funcBody.getOrThrow().parentEnum = Some(enumDecl)
+                    }
+                    if (currentWalker.WalkNode(constructor) == VisitAction.STOP_NOW) {
+                        return VisitAction.STOP_NOW
+                    }
+                }
+                for (member in enumDecl.members) {
+                    if (currentWalker.WalkNode(member) == VisitAction.STOP_NOW) {
+                        return VisitAction.STOP_NOW
+                    }
+                    if (let Some(funcDecl) <- (member as FuncDecl)) {
+                        funcDecl.funcBody.getOrThrow().parentEnum = Some(enumDecl)
+                    }
+                }
+                return VisitAction.SKIP_CHILDREN
             } else if (let Some(extendDecl) <- (node as ExtendDecl)) {
                 if (extendDecl.scopeLevel != 0u32) {
                     Diagnose(diag.getOrThrow(), extendDecl, BasicDiagKind.sema_type_must_toplevel,
@@ -263,11 +312,6 @@ public class Collector {
         node.symbol = Some(symbol)
         ctx.symbolTable.add(symbol)
         ctx.invertedIndex.Index(symbol, withTrie: buildTrie)
-        if (let Some(enumDecl) <- (node as EnumDecl)) {
-            if (let Some(bodyScope) <- enumDecl.bodyScope) {
-                AddSymbol(ctx, bodyScope, buildTrie: buildTrie)
-            }
-        }
     }
 
     private func CollectLitConstExpr(ctx: ASTContext, lce: LitConstExpr, walker!: Option<Walker> = None,

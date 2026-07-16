@@ -522,6 +522,8 @@ private func CreateGenericConstraints(generic: Generic): Unit {
                 generic.assumptionCollection[genericKey] = upperBounds
             }
             let gc = GenericConstraint()
+            // C++ src/Sema/TypeCheckUtil.h:67-79 MakeOwnedNode.
+            gc.EnableAttr(Attribute.COMPILER_ADD)
             CopyBasicInfo(generic, gc)
             let sortedUpperTys = ArrayList<Ty>()
             for (upper in genericTy.upperBounds) {
@@ -545,9 +547,11 @@ private func CreateGenericConstraints(generic: Generic): Unit {
                     }
                 }
                 let sub = RefType()
+                sub.EnableAttr(Attribute.COMPILER_ADD)
                 sub.SetTy(genericTy)
                 CopyBasicInfo(generic, sub)
                 let upper = RefType()
+                upper.EnableAttr(Attribute.COMPILER_ADD)
                 upper.SetTy(upperTy)
                 CopyBasicInfo(generic, upper)
                 gc.refType = Some(sub)
@@ -662,7 +666,9 @@ private func IgnoreAssumptionForTypeAliasDecls(decls: ArrayList<Decl>): Unit {
             if (let Some(_) <- typeAliasDecl.typeNode) {
                 if (let Some(generic) <- typeAliasDecl.generic) {
                     for (typeParameter in generic.typeParameters) {
-                        if (let Some(genericTy) <- (typeParameter.GetTy() as GenericsTy)) {
+                        // C++ src/Sema/PreCheck.cpp:1402-1414.
+                        let parameterTy = typeParameter.GetTy() ?? continue
+                        if (let Some(genericTy) <- (parameterTy as GenericsTy)) {
                             genericTy.isAliasParam = true
                         }
                     }
