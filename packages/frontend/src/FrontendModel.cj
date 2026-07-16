@@ -7993,6 +7993,20 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return Some(materializer)
     }
 
+    // CjoManager.cpp:487-500 CjoManager::LoadCachedPackage.
+    public func LoadCachedPackage(pkg: Package, cjoPath: String,
+        mangledName2DeclMap: HashMap<String, Decl>): HashSet<String> {
+        let loader = ReadCjo(pkg.fullPackageName, cjoPath, printErr: false, sourcePackage: Some(pkg))
+        if (loader.isNone()) {
+            return HashSet<String>()
+        }
+        let result = loader.getOrThrow().LoadCachedTypeForPackage(pkg, mangledName2DeclMap)
+        for (file in pkg.files) {
+            ReplaceTypeAliasInNode(file)
+        }
+        return result
+    }
+
     private func ResolveImportedPackageHeaders(pkg: Package, isRecursive!: Bool = false): Bool {
         var success = true
         for (file in pkg.files) {
