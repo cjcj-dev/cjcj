@@ -65,16 +65,6 @@ func InstantiationKey(decl: Decl, instTys: ArrayList<Ty>): String {
     return "${decl.fullPackageName}:${decl.identifier.Val()}:${decl.begin.ToString()}:${JoinStrings(parts, ",")}"
 }
 
-private func IsImportedInstantiationBoundary(decl: Decl): Bool {
-    if (decl.TestAnyAttr(Attribute.IMPORTED, Attribute.SRC_IMPORTED)) {
-        return true
-    }
-    if (let Some(genericDecl) <- decl.genericDecl) {
-        return genericDecl.TestAnyAttr(Attribute.IMPORTED, Attribute.SRC_IMPORTED)
-    }
-    return false
-}
-
 private func GetReferenceTyAndTarget(node: Node): (Option<Ty>, Option<Decl>) {
     var target = GetRealTarget(node.GetTarget())
     var baseTy = node.GetTy()
