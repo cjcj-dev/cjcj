@@ -1385,6 +1385,104 @@ private class CjoSignatureMaterializer {
         return false
     }
 
+    // IncrementalLoader.cpp:266-344 LoadCachedTypeForPackage.
+    public func LoadCachedTypeForPackage(sourcePackage: Package,
+        mangledName2DeclMap: HashMap<String, Decl>): HashSet<String> {
+        if (!VerifyForData("cached type")) {
+            return HashSet<String>()
+        }
+        isLoadCache = true
+        try {
+            let rawData = data.getOrThrow()
+            packageTable = Some(GetPackage(rawData))
+            flat = Some(CjoFlatBuffer(rawData))
+            let reader = flat.getOrThrow()
+            let root = reader.RootTable()
+            flatAllTypes = reader.VectorField(root, 18)
+            flatAllDecls = reader.VectorField(root, 20)
+            flatAllExprs = reader.VectorField(root, 22)
+            flatImports = reader.VectorField(root, 12)
+            LoadSerializedDeclRecords()
+            PrepareForLoadTypeCache(sourcePackage)
+            let logger = IncrementalCompilationLogger.GetInstance()
+            logger.LogLn(
+                "[LoadCachedTypeForPackage] begin collect some unfounded for incr compile to remove:")
+            let instantiatedDeclIndexes = ArrayList<UInt32>()
+            let genericIndexes = ArrayList<UInt32>()
+            let unfounded = HashSet<String>()
+            let allDecls = packageTable.getOrThrow().GetAllDecls().getOrThrow()
+            var index: UInt32 = 0u32
+            while (index < allDecls.size()) {
+                let realIndex = index + 1u32
+                let decl = GetFormatDeclByIndex(realIndex)
+                if (GetAttributes(decl).TestAttr(Attribute.GENERIC_INSTANTIATED)) {
+                    instantiatedDeclIndexes.add(realIndex)
+                    index++
+                    continue
+                }
+                let mangle = decl.GetMangledBeforeSema().getOrThrow().str()
+                let found = mangledName2DeclMap.get(mangle)
+                if (found.isNone()) {
+                    if (!mangle.isEmpty()) {
+                        CollectRemovedDecls(decl, unfounded)
+                    }
+                    index++
+                    continue
+                }
+                let astDecl = found.getOrThrow()
+                if (IsChangedDeclMayOmitType(astDecl) || DoNotLoadCache(astDecl)) {
+                    if (astDecl.TestAttr(Attribute.GENERIC)) {
+                        if (!allLoadedDecls.contains(realIndex)) {
+                            allLoadedDecls.add(realIndex, astDecl)
+                        }
+                        genericIndexes.add(realIndex)
+                    }
+                    index++
+                    continue
+                }
+                if (let Some(mainDecl) <- (astDecl as MainDecl)) {
+                    LoadDesugarDecl(mainDecl, realIndex)
+                } else if (let Some(macroDecl) <- (astDecl as MacroDecl)) {
+                    LoadDesugarDecl(macroDecl, realIndex)
+                } else {
+                    LoadCachedTypeForDecl(decl, astDecl)
+                    CollectRemovedDefaultImpl(astDecl, decl, unfounded)
+                    if (!allLoadedDecls.contains(realIndex)) {
+                        allLoadedDecls.add(realIndex, astDecl)
+                    }
+                    let info = decl.GetInfoAsFuncInfo()
+                    let bodyIndex = if (let Some(varInfo) <- decl.GetInfoAsVarInfo()) {
+                        varInfo.GetInitializer()
+                    } else if (let Some(varWithPatternInfo) <- decl.GetInfoAsVarWithPatternInfo()) {
+                        varWithPatternInfo.GetInitializer()
+                    } else if (let Some(aliasInfo) <- decl.GetInfoAsAliasInfo()) {
+                        aliasInfo.GetAliasedTy()
+                    } else if (let Some(paramInfo) <- decl.GetInfoAsParamInfo()) {
+                        paramInfo.GetDefaultVal()
+                    } else {
+                        0u32
+                    }
+                    if (bodyIndex != 0u32 ||
+                        (info.isSome() && info.getOrThrow().GetIsInline() && canInline) ||
+                        HasInlineDefaultParamFunc(decl)) {
+                        astDecl.toBeCompiled = true
+                    }
+                }
+                index++
+            }
+            ClearInstantiatedCache(instantiatedDeclIndexes, unfounded)
+            for (genericIndex in genericIndexes) {
+                allLoadedDecls.remove(genericIndex)
+            }
+            allTypes = Array<Option<Ty>>(
+                Int64(packageTable.getOrThrow().GetAllTypes().getOrThrow().size()), repeat: None)
+            LoadRefs()
+            return unfounded
+        } finally {
+            isLoadCache = false
+        }
+    }
+
     // ReferenceLoader.cpp:210-214 ASTLoader::SetIsChirNow.
     public func SetIsChirNow(value!: Bool = false): Unit { isChirNow = value }
 
