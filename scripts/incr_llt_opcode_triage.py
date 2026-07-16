@@ -81,6 +81,7 @@ def run_side(
         "--progress=no_flush_progress",
         f"--temp_dir={temp}",
         f"--log_dir={logs}",
+        "--log_level=DEBUG",
         f"--output={summary}",
         f"--json_output={result}",
         "-C",
