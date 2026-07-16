@@ -278,7 +278,8 @@ public class IncrementalGen {
             }
             var injectedGv = GetNamedGlobal(injected, gvName)
             if (!injectedGv.isNull() &&
-                (unsafe { LLVMTypeOf(injectedGv) } != unsafe { LLVMTypeOf(gv) } ||
+                (unsafe { LLVMTypeOf(injectedGv) }.toUIntNative() !=
+                    unsafe { LLVMTypeOf(gv) }.toUIntNative() ||
                 (unsafe { LLVMGetGlobalConstant(injectedGv) } != unsafe { LLVMGetGlobalConstant(gv) } &&
                 unsafe { LLVMIsDeclaration(gv) } == 0))) {
                 SetLLVMValueName(injectedGv, gvName + "$useless$")
@@ -295,7 +296,8 @@ public class IncrementalGen {
             let funcName = GetLLVMValueName(function)
             var injectedFunc = GetNamedFunction(injected, funcName)
             if (!injectedFunc.isNull() &&
-                unsafe { LLVMGlobalGetValueType(injectedFunc) } != unsafe { LLVMGlobalGetValueType(function) }) {
+                unsafe { LLVMGlobalGetValueType(injectedFunc) }.toUIntNative() !=
+                    unsafe { LLVMGlobalGetValueType(function) }.toUIntNative()) {
                 SetLLVMValueName(injectedFunc, funcName + "$useless$")
                 CollectUselessDefinitions(injectedFunc)
                 injectedFunc = LLVMNullValue()
