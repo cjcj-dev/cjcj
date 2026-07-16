@@ -140,8 +140,8 @@ private func FindDefaultConstructor(classDecl: ClassDecl): Option<FuncDecl> {
     return None
 }
 
-private func CreateClassConstructorCall(typeManager: TypeManager, callChecker: (Ty, CallExpr) -> Bool,
-    source: Node, className: String, classDecl: ClassDecl, typeArgs: ArrayList<Ty>,
+private func CreateClassConstructorCall(typeManager: TypeManager, source: Node,
+    className: String, classDecl: ClassDecl, typeArgs: ArrayList<Ty>,
     args: ArrayList<FuncArg>): Option<CallExpr> {
     if (let Some(initDecl) <- FindConstructor(classDecl)) {
         let classTy = typeManager.GetClassTy(classDecl, typeArgs.toArray())
@@ -157,9 +157,7 @@ private func CreateClassConstructorCall(typeManager: TypeManager, callChecker: (
         }
         CopyGeneratedPosition(source, ctorRef)
         let callExpr = CreateCallExpr(ctorRef, args, Some(initDecl), Some(classTy), CallKind.CALL_OBJECT_CREATION)
-        if (!callChecker(classTy, callExpr)) {
-            return None
-        }
+        callExpr.desugarArgs = Some(ArrayList<FuncArg>())
         callExpr.callKind = CallKind.CALL_OBJECT_CREATION
         callExpr.SetTy(classTy)
         AddCurFile(callExpr, file: source.curFile)
@@ -654,7 +652,7 @@ private func CreateWrapperCatchClause(typeManager: TypeManager, importManager: S
                 let wrapperArgs = ArrayList<FuncArg>()
                 wrapperArgs.add(CreateFuncArg(activeFrame))
                 wrapperArgs.add(CreateFuncArg(CreateRefExpr(catchVar, source)))
-                if (let Some(wrapperCall) <- CreateClassConstructorCall(typeManager, callChecker, source, wrapperName,
+                if (let Some(wrapperCall) <- CreateClassConstructorCall(typeManager, source, wrapperName,
                     wrapperDecl, ArrayList<Ty>(), wrapperArgs)) {
                     let catchNodes = ArrayList<Node>()
                     catchNodes.add(CreateThrowExprFromCall(source, wrapperCall))
@@ -796,7 +794,7 @@ private func WrapHandlerLambda(typeManager: TypeManager, importManager: SemaImpo
         let earlyArgs = ArrayList<FuncArg>()
         earlyArgs.add(CreateFuncArg(activeFrame))
         earlyArgs.add(CreateFuncArg(CreateRefExpr(resultVar, sourceBlock)))
-        if (let Some(earlyReturnCall) <- CreateClassConstructorCall(typeManager, callChecker, sourceBlock,
+        if (let Some(earlyReturnCall) <- CreateClassConstructorCall(typeManager, sourceBlock,
             CLASS_EARLY_RETURN,
             earlyReturnDecl, ArrayList<Ty>(), earlyArgs)) {
             let resultNodes = ArrayList<Node>()
