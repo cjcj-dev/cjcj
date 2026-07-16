@@ -8064,7 +8064,8 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     // ImportManager.cpp:322-339 ImportManager::ExportASTSignature.
     public func ExportASTSignature(pkg: Package): Array<UInt8> {
         let writer = ASTWriter("", GetCjoManager(), globalOptions.enableCompileDebug,
-            globalOptions.optimizationLevel, diag: diag, exportContent: true,
+            globalOptions.optimizationLevel, saveFileWithAbsPath: false, diag: diag,
+            serializingCommon: false, exportContent: true,
             exportForIncr: true, exportFuncBody: true)
         writer.PreSaveFullExportDecls(pkg)
         writer.ExportAST(pkg)
