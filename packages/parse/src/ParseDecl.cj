@@ -1302,7 +1302,7 @@ extend ParserImpl {
         let param = FuncParam()
         try (cs = ChainScope(this, param)) {
             if (Skip(TokenKind.WILDCARD)) {
-                param.identifier = SrcIdentifier("_", Peek().Begin(), Peek().End(), false)
+                param.identifier = SrcIdentifier("_", lookahead.Begin(), lookahead.End(), false)
             } else {
                 param.identifier = ExpectIdentifierWithPos(param)
             }
@@ -1311,7 +1311,7 @@ extend ParserImpl {
                 ConsumeUntilAny(consumeTarget, targetTokenConsumed: false)
             }
             param.isVar = false
-            param.begin = Peek().Begin()
+            param.begin = lookahead.Begin()
             if (Skip(TokenKind.COLON)) {
                 param.colonPos = lastToken.Begin()
                 param.typeNode = ParseType()

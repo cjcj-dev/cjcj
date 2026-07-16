@@ -251,22 +251,12 @@ public class ParserImpl {
         if (kinds.isEmpty()) {
             return false
         }
+        // C++: Parse/ParserUtils.cpp:129-139 ParserImpl::Seeing(vector, bool).
         if (lookahead.kind != TokenKind.SENTINEL) {
             if (lookahead.kind != kinds[0]) {
                 return false
             }
-            if (kinds.size == 1) {
-                return true
-            }
-            let ahead = if (skipNewline) { lexer.LookAheadSkipNL(kinds.size - 1) } else { lexer.LookAhead(kinds.size - 1) }
-            var idx: Int64 = 1
-            while (idx < kinds.size) {
-                if ((idx - 1) >= ahead.size || ahead[idx - 1].kind != kinds[idx]) {
-                    return false
-                }
-                idx++
-            }
-            return true
+            return lexer.Seeing(kinds[1..], skipNewline: skipNewline)
         }
         return lexer.Seeing(kinds, skipNewline: skipNewline)
     }
