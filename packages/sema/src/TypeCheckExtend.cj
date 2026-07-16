@@ -1109,6 +1109,87 @@ public func TypeCheckExtendCheckDecl(
 }
 
 extend TypeCheckerImpl {
+    // C++ src/Sema/TypeCheckExtend.cpp:237-273 TypeCheckerImpl::CheckSpecializationExtendDupImstantation.
+    func CheckSpecializationExtendDupImstantation(extendedDeclTy: Ty, compareExtend: ExtendDecl,
+        beComparedDecl: InheritableDecl, instantMapping: TypeSubst, checkParent!: Bool = false): Unit {
+        for (compareSuperInterface in compareExtend.inheritedTypes) {
+            let compareSuperInterfaceTy = compareSuperInterface.GetTy().getOrThrow()
+            if (compareSuperInterfaceTy.HasGeneric() || compareSuperInterfaceTy.typeArgs.isEmpty()) {
+                continue
+            }
+            let allSuperTys = HashSet<Ty>()
+            for (inheritedType in beComparedDecl.inheritedTypes) {
+                if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                    if (checkParent) {
+                        for (superTy in typeManager.GetAllSuperTys(inheritedTy).values) {
+                            allSuperTys.add(superTy)
+                        }
+                    } else {
+                        allSuperTys.add(inheritedTy)
+                    }
+                }
+            }
+            for (beComparedSuperInterfaceTy in allSuperTys) {
+                if (beComparedSuperInterfaceTy.kind != TypeKind.TYPE_INTERFACE ||
+                    !beComparedSuperInterfaceTy.HasGeneric()) {
+                    continue
+                }
+                let instantTy = typeManager.GetInstantiatedTy(beComparedSuperInterfaceTy, instantMapping)
+                if (instantTy != compareSuperInterfaceTy) {
+                    continue
+                }
+                let builder = DiagnoseRefactor(diag.getOrThrow(),
+                    BasicDiagKindRefactor.sema_extend_duplicate_interface, compareSuperInterface,
+                    arguments: [compareSuperInterfaceTy.String(), extendedDeclTy.String()])
+                builder.AddNote(MakeRange(beComparedDecl.begin, beComparedDecl.end),
+                    "it may be an instantiated version of the following declaration")
+                builder.Emit()
+            }
+        }
+    }
+
+    // C++ src/Sema/TypeCheckExtend.cpp:195-235 TypeCheckerImpl::CheckSpecializationExtend.
+    func CheckSpecializationExtend(extendedDecl: InheritableDecl, extendDecl: ExtendDecl,
+        otherExtendDecls: ArrayList<ExtendDecl>): Unit {
+        let extendedDeclTy = extendedDecl.GetTy().getOrThrow()
+        if (!extendedDeclTy.HasGeneric()) {
+            return
+        }
+        let orig2specMapping = GenerateTypeMapping(
+            extendedDecl, extendDecl.extendedType.getOrThrow().GetTy().getOrThrow().typeArgs)
+        CheckSpecializationExtendDupImstantation(
+            extendedDeclTy, extendDecl, extendedDecl, orig2specMapping, checkParent: true)
+        for (otherExtendDecl in otherExtendDecls) {
+            let otherExtendDeclTy = otherExtendDecl.GetTy().getOrThrow()
+            if (!otherExtendDeclTy.HasGeneric()) {
+                continue
+            }
+            let orig2genericMapping = GenerateTypeMapping(
+                extendedDecl, otherExtendDecl.extendedType.getOrThrow().GetTy().getOrThrow().typeArgs)
+            let instantMapping = TypeSubst()
+            var needCheck = true
+            for (typeArg in extendedDeclTy.typeArgs) {
+                let tyArgGen = (typeArg as GenericsTy).getOrThrow()
+                let mapping = GenerateTypeMappingByTy(orig2genericMapping.Get(tyArgGen), orig2specMapping.Get(tyArgGen))
+                for ((tyVarPtr, mappedTy) in mapping.entries) {
+                    let tyVar = tyVarPtr.value
+                    if (let Some(existingTy) <- instantMapping.Get(tyVar)) {
+                        if (existingTy != mappedTy) {
+                            needCheck = false
+                            break
+                        }
+                    } else {
+                        instantMapping.Put(tyVar, mappedTy)
+                    }
+                }
+            }
+            if (needCheck) {
+                CheckSpecializationExtendDupImstantation(
+                    extendedDeclTy, extendDecl, otherExtendDecl, instantMapping)
+            }
+        }
+    }
+
     // C++ src/Sema/TypeCheckExtend.cpp:436-452 TypeCheckerImpl::CheckExtendRules.
     public func CheckExtendRules(ctx: ASTContext): Unit {
         let pkg = ctx.curPackage.getOrThrow()
