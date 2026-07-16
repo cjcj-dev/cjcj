@@ -1349,8 +1349,23 @@ public class Translator {
         return None
     }
 
+    // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateEnumDecl.cpp:16-32.
+    private func SkipConstructorInSpecificMerging(enumDef: EnumDef, newCtor: AstDecl): Bool {
+        CJC_ASSERT(newCtor.astKind == ASTKind.VAR_DECL || newCtor.astKind == ASTKind.FUNC_DECL)
+        if (!enumDef.TestAttr(Attribute.DESERIALIZED)) {
+            return false
+        }
+        for (ctor in enumDef.GetCtors()) {
+            if (ctor.mangledName == newCtor.mangledName) {
+                return true
+            }
+        }
+        return false
+    }
+
     public func Visit(enumDecl: AstEnumDecl): Option<Value> {
         let def = RequireEnumDef(chirTy.GetGlobalNominalCache(enumDecl))
+        CreateAnnotationInfo(enumDecl, def, Some(def))
         def.SetNonExhaustive(enumDecl.hasEllipsis)
         if (let Some(astTy) <- enumDecl.GetTy()) {
             def.SetType(RequireEnumType(chirTy.TranslateType(astTy)))
@@ -1362,6 +1377,10 @@ public class Translator {
         })
         SetImplementedInterfaces(def, enumDecl)
         for (ctor in enumDecl.constructors) {
+            CJC_ASSERT(ctor.astKind == ASTKind.VAR_DECL || ctor.astKind == ASTKind.FUNC_DECL)
+            if (mergingSpecific && SkipConstructorInSpecificMerging(def, ctor)) {
+                continue
+            }
             let payloadTypes = ArrayList<Type>()
             if (let Some(funcCtor) <- (ctor as AstFuncDecl)) {
                 if (let Some(ctorTy) <- funcCtor.GetTy()) {
@@ -1379,7 +1398,8 @@ public class Translator {
                 }
             }
             def.AddCtor(EnumCtorInfo(ctor.identifier.Val(), payloadTypes,
-                mangledName: ctor.mangledName, funcType: ctorFuncType))
+                mangledName: ctor.mangledName, funcType: ctorFuncType,
+                annoInfo: CreateAnnoFactoryFuncSig(ctor, Some(def))))
         }
         for (member in enumDecl.members) {
             if (!ShouldTranslateMember(enumDecl, member)) {
