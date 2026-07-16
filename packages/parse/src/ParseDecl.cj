@@ -440,6 +440,8 @@ extend ParserImpl {
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
+            SetDeclBeginPos(decl)
+            SetBeginToAnnotationsBegin(decl, annos)
             return decl
         }
         if (Seeing(TokenKind.EXTEND)) {
@@ -1647,6 +1649,7 @@ extend ParserImpl {
         let ret = EnumDecl()
         try (cs = ChainScope(this, ret)) {
             ParseInheritableHeader(ret, TokenKind.ENUM, modifiers, annos)
+            ret.begin = ret.keywordPos
             CheckDeclarationInScope(scopeKind, DefKind.ENUM)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.ENUM))
             if (!Skip(TokenKind.LCURL)) {
