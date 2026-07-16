@@ -73,7 +73,9 @@ private func EmitInitializationIssue(diag: BasicDiagnosticEngine, issue: Initial
                     let note = "you may add an initializer inline or "
                     if (let Some(staticInit) <- (issue.node as FuncDecl)) {
                         builder.AddNote(note + "initialize the variable in the 'static init'")
-                        AddNote(builder, staticInit, MakeRangeForDeclIdentifier(staticInit), "static init defined here")
+                        AddNote(builder, staticInit,
+                            BasicMakeRange(staticInit.identifier.Begin(), staticInit.identifier.End()),
+                            "static init defined here")
                     } else {
                         builder.AddNote(note + "define a 'static init' to perform initialization")
                     }
