@@ -475,10 +475,7 @@ public class CompilerInstance {
 
     // ImportManager.cpp:342-363 ImportManager::ExportDeclsWithContent.
     public func ExportDeclsWithContent(saveFileWithAbsPath: Bool, pkg: Package): Unit {
-        let pkgs = ArrayList<Package>()
-        pkgs.add(pkg)
-        let depInfos = importManager.GeneratePkgDepInfo(pkgs)
-        let packageDepInfo = if (depInfos.isEmpty()) { "" } else { depInfos[0] }
+        let packageDepInfo = importManager.GeneratePkgDepInfo(pkg)
         let writer = ASTWriter(packageDepInfo, importManager.GetCjoManager(),
             invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel,
             saveFileWithAbsPath: saveFileWithAbsPath, diag: diag,
@@ -493,10 +490,7 @@ public class CompilerInstance {
         let writer = if (let Some(savedWriter) <- astWriters.get(pkg)) {
             savedWriter
         } else {
-            let pkgs = ArrayList<Package>()
-            pkgs.add(pkg)
-            let depInfos = importManager.GeneratePkgDepInfo(pkgs)
-            let packageDepInfo = if (depInfos.isEmpty()) { "" } else { depInfos[0] }
+            let packageDepInfo = importManager.GeneratePkgDepInfo(pkg)
             let newWriter = ASTWriter(packageDepInfo, importManager.GetCjoManager(),
                 invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel,
                 saveFileWithAbsPath: saveFileWithAbsPath, diag: diag,

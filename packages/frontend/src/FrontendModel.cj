@@ -5852,7 +5852,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     public func GeneratePkgDepInfo(pkgs: ArrayList<Package>): ArrayList<String> {
         let out = ArrayList<String>()
         for (pkg in pkgs) {
-            out.add(GeneratePkgDepInfoForPackage(pkg, true))
+            out.add(GeneratePkgDepInfo(pkg, exportCJO: false))
         }
         return out
     }
@@ -5863,7 +5863,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     // as consumed by --scan-dependency. exportCJO=true (the .cjo-write default) records import file
     // names rather than absolute paths and derives std-dependencies from the package's collected
     // dependent std packages.
-    private func GeneratePkgDepInfoForPackage(pkg: Package, exportCJO: Bool): String {
+    public func GeneratePkgDepInfo(pkg: Package, exportCJO!: Bool = true): String {
         let dependencies = HashMap<String, FrontendDepInfoItem>()
         let features = HashSet<String>()
         var isProduct = true
@@ -8282,7 +8282,7 @@ public func EscapeJson(text: String): String {
 }
 
 // One entry of the "dependencies" array in the package dependency descriptor (see
-// GeneratePkgDepInfoForPackage). Mirrors C++ DependencyInfoItem (src/Modules/ImportManager.cpp:85-90).
+// GeneratePkgDepInfo). Mirrors C++ DependencyInfoItem (src/Modules/ImportManager.cpp:85-90).
 private class FrontendDepInfoItem {
     public var packageName: String = ""
     public var orPackage: String = ""
