@@ -7967,19 +7967,29 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return commonPartLoaders
     }
 
-    private func ReadCjo(fullPackageName: String, cjoPath: String): Option<CjoSignatureMaterializer> {
+    private func ReadCjo(fullPackageName: String, cjoPath: String, printErr!: Bool = true,
+        sourcePackage!: Option<Package> = None): Option<CjoSignatureMaterializer> {
         let (ok, data, reason) = FileUtil.ReadBinaryFileToBuffer(cjoPath)
-        if (!ok) {
+        if (!ok && printErr) {
             diag.DiagnoseRefactor(DiagKindRefactor.module_read_file_to_buffer_failed, DEFAULT_POSITION,
                 arguments: [cjoPath, reason])
             return None
         }
-        let pkg = CreatePackage(fullPackageName)
+        let pkg = sourcePackage ?? CreatePackage(fullPackageName)
         let filesByIndex = HashMap<UInt32, File>()
         let idToFileMap = HashMap<UInt64, File>()
+        if (sourcePackage.isSome()) {
+            var fileIndex: Int64 = 0
+            while (fileIndex < pkg.files.size) {
+                let file = pkg.files[fileIndex]
+                filesByIndex.add(UInt32(fileIndex + 1), file)
+                idToFileMap.add(file.begin.fileID, file)
+                fileIndex++
+            }
+        }
         let materializer = CjoSignatureMaterializer(fullPackageName, pkg, filesByIndex, idToFileMap, importedPackages,
             packageDecls, exportIdDeclMaps, diag, typeManager, importSrcCode: importSrcCode,
-            deserializingCommon: true, canInline: canInlineImportedSource, data: Some(data))
+            deserializingCommon: sourcePackage.isNone(), canInline: canInlineImportedSource, data: Some(data))
         return Some(materializer)
     }
 
