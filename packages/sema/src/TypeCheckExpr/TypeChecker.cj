@@ -4511,7 +4511,8 @@ extend TypeChecker {
             return (true, ma.GetTarget(), ArrayList<FuncDecl>())
         }
         if (ma.target.isNone() && ma.targets.isEmpty()) {
-            if ((baseExpr.GetTy() as VArrayTy).isSome() && ma.field.Val() == "size") {
+            if ((let Some(baseExprTy) <- baseExpr.GetTy()) &&
+                (baseExprTy as VArrayTy).isSome() && ma.field.Val() == "size") {
                 if (let Some(diag) <- impl.diag) {
                     Diagnose(diag, ce, BasicDiagKind.sema_no_match_operator_function_call).Emit()
                 }
