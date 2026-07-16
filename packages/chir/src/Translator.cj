@@ -593,11 +593,6 @@ public class Translator {
         currentBlock = block
     }
 
-    // C++: include/cangjie/CHIR/AST2CHIR/TranslateASTNode/Translator.h:324.
-    public func GetCurrentBlock(): Block {
-        return CurrentBlock()
-    }
-
     public func CreateAndAppendGVInitFuncCall(callee: Value): Expression {
         let instFuncTy = (callee.GetType().getOrThrow() as FuncType).getOrThrow()
         return TryCreate(CurrentBlock(), instFuncTy.GetReturnType(), callee, FuncCallContext())
@@ -1323,8 +1318,6 @@ public class Translator {
 
     public func Visit(structDecl: AstStructDecl): Option<Value> {
         let def = RequireStructDef(chirTy.GetGlobalNominalCache(structDecl))
-        // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateStructDecl.cpp:21-22.
-        CreateAnnotationInfo(structDecl, def, Some(def))
         if (let Some(astTy) <- structDecl.GetTy()) {
             def.SetType(RequireStructType(chirTy.TranslateType(astTy)))
         }
