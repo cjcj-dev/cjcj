@@ -858,6 +858,7 @@ private func CreateFrame(typeManager: TypeManager, importManager: SemaImportMana
     CopyNodeScopeInfo(lambdaVarRef, frameRef)
     frameArgs.add(CreateFuncArg(lambdaVarRef))
     let frameCreation = CreateCallExpr(frameInit, frameArgs, None, Some(frameTy), CallKind.CALL_OBJECT_CREATION)
+    frameCreation.desugarArgs = Some(ArrayList<FuncArg>())
     if (!callChecker(frameTy, frameCreation)) {
         return None
     }
