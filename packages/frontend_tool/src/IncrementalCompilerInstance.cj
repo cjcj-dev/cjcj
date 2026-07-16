@@ -194,8 +194,8 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         }
         let ret = super.PerformGenericInstantiation()
         if (ret) {
-            CollectChangedTypeNames()
             for (srcPkg in core.GetSourcePackages()) {
+                for (ty in CollectChangedStructTypes(srcPkg, declsToBeReCompiled)) { changedTypes.add(ty) }
                 IterateAllExportableDecls(srcPkg, { decl =>
                     if (!decl.IsExportedDecl() && decl.linkage == Linkage.EXTERNAL && !decl.mangledName.isEmpty()) {
                         cacheMangles.newExternalDecls.add(decl.mangledName)
@@ -210,7 +210,11 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         if (kind == IncreKind.NO_CHANGE || kind == IncreKind.EMPTY_PKG) {
             return true
         }
-        return super.PerformMangling()
+        let success = super.PerformMangling()
+        if (success) {
+            cacheMangles.UpdateImportedInlineDeclsMangle()
+        }
+        return success
     }
 
     public override func PerformCHIRCompilation(): Bool {
