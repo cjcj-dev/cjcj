@@ -9,6 +9,8 @@ import cjcj::chir.FuncType
 import cjcj::chir.Function
 import cjcj::chir.GenericType
 import cjcj::chir.LocalVar
+import cjcj::chir.Linkage
+import cjcj::chir.LinkTypeInfo
 import cjcj::chir.RefType
 import cjcj::chir.Type
 import cjcj::chir.TypeKind
@@ -359,7 +361,9 @@ public open class CGType {
     // Mirror C++ CGType::GenTypeInfo (CGType.cpp:616): define this type's concrete TypeInfo global.
     // Invoked from CGModule.GenTypeInfo()'s drain loop.
     public func GenTypeInfo(): Unit {
+        CJC_ASSERT(!IsDynamicGI())
         if (let Some(ti) <- typeInfo) {
+            PreActionOfGenTypeInfo()
             if (let Some(rawLayout) <- layoutType) {
                 let structName = LLVMCStringToString(unsafe { LLVMGetStructName(rawLayout) }) ?? ""
                 if (!structName.isEmpty()) {
@@ -369,7 +373,20 @@ public open class CGType {
                     cgCtx.AddGeneratedStructType(structName)
                 }
             }
-            PreActionOfGenTypeInfo()
+            if (unsafe { LLVMIsDeclaration(ti) } == 0) {
+                return
+            }
+            if (chirType.IsPrimitive() || chirType.IsVoid() || chirType.IsCString()) {
+                return
+            }
+            if (IsConcrete() && cgMod.GetCGContext().IsCustomTypeOfOtherLLVMModule(chirType)) {
+                if (let Some(customType) <- (chirType as CustomType)) {
+                    if (customType.GetCustomTypeDef().Get<LinkTypeInfo, Linkage>() == Linkage.EXTERNAL_WEAK) {
+                        unsafe { LLVMSetLinkage(ti, LLVMLinkageValue(LLVMLinkage.ExternalWeak)) }
+                    }
+                }
+                return
+            }
             DefineTypeInfoGlobalIfNeeded(cgMod, chirType, ti)
             PostActionOfGenTypeInfo()
         }
