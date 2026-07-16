@@ -27,42 +27,42 @@ public class Package {
     }
 
     public func ToString(): String {
-        var out = "package " + name
-        if (!globalVars.isEmpty()) {
-            out += "\n  globals:"
-            for (item in globalVars) {
-                out += "\n" + item.ToString(4)
-            }
+        var out = "package: " + name + "\n"
+        out += "packageAccessLevel: " + PackageAccessLevelToString(pkgAccessLevel) + "\n"
+        out += "packageInitFunc: " + GetPackageInitFunc().getOrThrow().GetIdentifier() + "\n"
+        out += "\n==========================vars===============================\n"
+        for (item in GetGlobalVars()) {
+            out += item.ToString(0) + "\n\n"
         }
-        if (!globalFuncs.isEmpty()) {
-            out += "\n  functions:"
-            for (item in globalFuncs) {
-                out += "\n" + item.ToString(4)
-            }
+        out += "\n==========================funcs===============================\n"
+        for (item in GetGlobalFunctions(includePureAbstract: true)) {
+            out += item.ToString(0) + "\n\n"
         }
-        if (!structs.isEmpty()) {
-            out += "\n  structs:"
-            for (item in structs) {
-                out += "\n" + item.ToString(4)
-            }
+        out += "\n\n"
+        out += "\n==========================types=================================\n"
+        for (item in importedStructs) {
+            out += item.ToString() + "\n\n"
         }
-        if (!classes.isEmpty()) {
-            out += "\n  classes:"
-            for (item in classes) {
-                out += "\n" + item.ToString(4)
-            }
+        for (item in importedClasses) {
+            out += item.ToString() + "\n\n"
         }
-        if (!enums.isEmpty()) {
-            out += "\n  enums:"
-            for (item in enums) {
-                out += "\n" + item.ToString(4)
-            }
+        for (item in importedEnums) {
+            out += item.ToString() + "\n\n"
         }
-        if (!extends.isEmpty()) {
-            out += "\n  extends:"
-            for (item in extends) {
-                out += "\n" + item.ToString(4)
-            }
+        for (item in importedExtends) {
+            out += item.ToString() + "\n\n"
+        }
+        for (item in structs) {
+            out += item.ToString() + "\n\n"
+        }
+        for (item in classes) {
+            out += item.ToString() + "\n\n"
+        }
+        for (item in enums) {
+            out += item.ToString() + "\n\n"
+        }
+        for (item in extends) {
+            out += item.ToString() + "\n\n"
         }
         return out
     }
