@@ -1697,7 +1697,7 @@ public class RefEnumTy <: EnumTy {
     }
 }
 
-public class StructTy <: Ty {
+public class StructTy <: Ty & Equatable<StructTy> {
     public var declPtr: Option<StructDecl> = None
     public var decl: Option<StructDecl> = None
 
@@ -1746,6 +1746,10 @@ public class StructTy <: Ty {
             return rightStruct.declPtr.isNone()
         }
         return false
+    }
+
+    public operator func ==(right: StructTy): Bool {
+        return (this as Ty) == (right as Ty)
     }
 
     public func GetGenericTy(): Option<StructTy> {
