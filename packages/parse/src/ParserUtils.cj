@@ -637,20 +637,31 @@ extend ParserImpl {
             ExprKindEquals(ek, ExprKind.EXPR_IN_WHILE_COND_TUPLE)
     }
 
-    public func SeeingInvalidParamListInLambdaExpr(): Bool {
+    public func SeeingInvaildParamListInLambdaExpr(): Bool {
+        let validKinds = [TokenKind.COMMA, TokenKind.COLON, TokenKind.DOUBLE_ARROW]
         if (SeeingIdentifierLike() || Seeing(TokenKind.WILDCARD)) {
-            let ahead = lexer.LookAheadSkipNL(2)
-            if (ahead.isEmpty()) {
-                return true
+            let combinedDoubleArrowSize: Int64 = 2
+            let tokens = lexer.LookAheadSkipNL(combinedDoubleArrowSize)
+            CJC_ASSERT(!tokens.isEmpty())
+            for (kind in validKinds) {
+                if (tokens[0].kind == kind) {
+                    return false
+                }
             }
-            let firstKind = ahead[0].kind
-            if (firstKind == TokenKind.COMMA || firstKind == TokenKind.COLON || firstKind == TokenKind.DOUBLE_ARROW) {
-                return false
-            }
-            if (ahead.size == 2 && firstKind == TokenKind.ASSIGN && ahead[1].kind == TokenKind.GT &&
-                ahead[1].Begin().line == ahead[0].Begin().line &&
-                ahead[1].Begin().column == ahead[0].Begin().column + 1) {
-                return false
+            CJC_ASSERT(combinedDoubleArrow.size == combinedDoubleArrowSize)
+            if (tokens.size == combinedDoubleArrow.size) {
+                let first = tokens[0]
+                if (first.kind != combinedDoubleArrow[0]) {
+                    return true
+                }
+                let second = tokens[1]
+                if (second.kind != combinedDoubleArrow[1]) {
+                    return true
+                }
+                if (second.Begin().line == first.Begin().line &&
+                    second.Begin().column == first.Begin().column + 1) {
+                    return false
+                }
             }
         }
         return true

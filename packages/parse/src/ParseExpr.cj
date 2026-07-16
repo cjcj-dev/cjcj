@@ -2066,23 +2066,21 @@ extend ParserImpl {
     private func ParseFuncParamListInLambdaExpr(): AstFuncParamList {
         let paramList = AstFuncParamList()
         try (cs = ChainScope(this, paramList)) {
-            if (SeeingInvalidParamListInLambdaExpr()) {
+            if (SeeingInvaildParamListInLambdaExpr()) {
                 paramList.begin = Peek().Begin()
                 paramList.end = Peek().Begin()
                 return paramList
             }
-            while (!Seeing(TokenKind.END) && !SeeingDoubleArrow()) {
-                let param = ParseFuncParam()
-                if (param.TestAttr(Attribute.IS_BROKEN)) {
-                    paramList.EnableAttr(Attribute.IS_BROKEN)
-                }
-                paramList.params.add(param)
-                if (Skip(TokenKind.COMMA)) {
-                    param.commaPos = lastToken.Begin()
-                } else {
-                    break
-                }
-            }
+            ParseZeroOrMoreSepTrailing(
+                { pos: Position => paramList.params[paramList.params.size - 1].commaPos = pos },
+                { =>
+                    let param = ParseFuncParam()
+                    if (param.TestAttr(Attribute.IS_BROKEN)) {
+                        paramList.EnableAttr(Attribute.IS_BROKEN)
+                    }
+                    paramList.params.add(param)
+                },
+                TokenKind.DOUBLE_ARROW)
             if (!paramList.params.isEmpty()) {
                 paramList.begin = paramList.params[0].begin
                 paramList.end = paramList.params[paramList.params.size - 1].end
