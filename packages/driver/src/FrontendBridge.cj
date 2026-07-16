@@ -139,16 +139,9 @@ private func PublishFrontendCjoOutputs(opts: DriverOptions): Bool {
     // set to ToCjoFileName(pkg); the on-disk path is a hashed cached file, so it is renamed on publish
     // for the importer to resolve it. When -o names a directory (e.g. --compile-macro), that
     // directory is the output location; otherwise the .cjo sits next to the -o file.
-    let outputDir = if (opts.output.isEmpty()) {
-        "."
-    } else if (FileUtil.IsDir(opts.output)) {
-        opts.output
-    } else {
-        FileUtil.GetDirPath(opts.output)
-    }
     var copied = true
     for (info in opts.cjoOutputFiles) {
-        let target = FileUtil.JoinPath(outputDir, info.fileName + ".cjo")
+        let target = TempFileManager.Instance().CreateNewFileInfo(info, TempFileKind.O_CJO).filePath
         if (info.filePath != target && !CopyFile(info.filePath, target)) {
             eprintln("error: failed to publish CJO output: " + target)
             copied = false
