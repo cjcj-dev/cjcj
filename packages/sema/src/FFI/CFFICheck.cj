@@ -87,12 +87,6 @@ private func HasCAnnotation(decl: Decl): Bool {
     return false
 }
 
-private func IsNonStaticMember(target: Decl): Bool {
-    return !target.TestAttr(Attribute.STATIC) &&
-        (target.TestAnyAttr(Attribute.IN_CLASSLIKE, Attribute.IN_STRUCT, Attribute.IN_ENUM) ||
-        target.TestAttr(Attribute.IN_EXTEND))
-}
-
 private func IsInoutZeroSizedArg(arg: FuncArg): Bool {
     if (!arg.withInout) {
         return false
