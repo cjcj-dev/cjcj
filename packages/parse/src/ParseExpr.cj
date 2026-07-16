@@ -171,8 +171,8 @@ extend ParserImpl {
             ret.semiPos = Peek().Begin()
         }
         if (let Some(macroExpr) <- (ret as MacroExpandExpr)) {
-            macroExpr.invocation.scopeKind = AstScopeKind.UNKNOWN_SCOPE
-            macroExpr.invocation.exprKind = match (ek) {
+            macroExpr.invocation.scopeKind = None
+            macroExpr.invocation.exprKind = Some(match (ek) {
                 case ExprKind.ALL => AstExprKind.ALL
                 case ExprKind.VAR_INIT => AstExprKind.VAR_INIT
                 case ExprKind.INDEX_EXPR => AstExprKind.INDEX_EXPR
@@ -187,7 +187,7 @@ extend ParserImpl {
                 case ExprKind.EXPR_IN_CALLSUFFIX => AstExprKind.EXPR_IN_CALLSUFFIX
                 case ExprKind.EXPR_IN_ANNOTATION => AstExprKind.EXPR_IN_ANNOTATION
                 case ExprKind.UNKNOWN_EXPR => AstExprKind.UNKNOWN_EXPR
-            }
+            })
         }
         if (SeeingFakeOperator()) {
             DiagExpecetedOpeOrEnd()

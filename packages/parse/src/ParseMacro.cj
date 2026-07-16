@@ -227,8 +227,8 @@ extend ParserImpl {
             ParseMacroCallAttr(invocation)
         }
 
-        invocation.scopeKind = ToAstScopeKind(scopeKind)
-        invocation.exprKind = AstExprKind.UNKNOWN_EXPR
+        invocation.scopeKind = Some(ToAstScopeKind(scopeKind))
+        invocation.exprKind = None
         ParseMacroCallArg(scopeKind, modifiers, invocation)
         if (!curPrimaryDeclIdent.isEmpty()) {
             invocation.outerDeclIdent = curPrimaryDeclIdent
