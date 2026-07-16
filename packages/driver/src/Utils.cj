@@ -41,17 +41,19 @@ public func JoinStrings(values: ArrayList<String>, delimiter: String): String {
 }
 
 public func GetSingleQuoted(value: String): String {
-    let builder = StringBuilder()
-    builder.append("'")
+    let result = ArrayList<UInt8>()
+    result.add(b'\'')
     for (byte in value.toArray()) {
         if (byte == b'\'') {
-            builder.append("'\\''")
+            for (escapedByte in "'\\''".toArray()) {
+                result.add(escapedByte)
+            }
         } else {
-            builder.append(String.fromUtf8([byte]))
+            result.add(byte)
         }
     }
-    builder.append("'")
-    return builder.toString()
+    result.add(b'\'')
+    return String.fromUtf8(result.toArray())
 }
 
 @When[os != "Windows"]
