@@ -1378,6 +1378,7 @@ extend ParserImpl {
         let token = Expect(TokenKind.MATCH, "expected 'match'")
         ret.begin = token.Begin()
         try (cs = ChainScope(this, ret)) {
+            skipNL = true
             if (Seeing([TokenKind.LCURL, TokenKind.CASE])) {
                 ParseMatchNoSelector(ret)
                 if (ret.matchCaseOthers.isEmpty()) {
