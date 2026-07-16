@@ -1503,8 +1503,10 @@ extend ParserImpl {
     ): VarWithPatternDecl {
         let decl = VarWithPatternDecl()
         try (cs = ChainScope(this, decl)) {
-            let pattern = ParseIrrefutablePattern(ArrayList<Attribute>(), isVar, true)
+            let attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE)
+            let pattern = ParseIrrefutablePattern(attrs, isVar, true)
             ApplyModifiersAndAnnotations(decl, modifiers, annos)
+            EnableModifierAttrs(decl, attrs)
             decl.keywordPos = key.Begin()
             decl.irrefutablePattern = pattern
             decl.isVar = isVar
@@ -1528,9 +1530,20 @@ extend ParserImpl {
                 DiagParseIllegalDeclarationPattern(decl, scopeKind)
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
-            CheckVarDeclShape(decl, modifiers, scopeKind, key)
-            if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
-                SetUnsafe(decl, modifiers: modifiers)
+            if (!decl.isConst && HasModifierToken(modifiers, TokenKind.CONST)) {
+                DiagUnExpectedModifierOnDeclaration(decl)
+                decl.EnableAttr(Attribute.IS_BROKEN)
+            } else if (let None <- decl.initializer) {
+                if (decl.isConst) {
+                    DiagConstVariableExpectedInitializer(decl)
+                    decl.EnableAttr(Attribute.IS_BROKEN)
+                } else if (!ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) && (let None <- decl.typeNode)) {
+                    DiagExpectedTypeOrInitializerInPattern(decl)
+                    decl.EnableAttr(Attribute.IS_BROKEN)
+                } else if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) && !diag.ignoreScopeCheck) {
+                    DiagExpectedInitializerForToplevelVar(decl)
+                    decl.EnableAttr(Attribute.IS_BROKEN)
+                }
             }
         }
         return decl
