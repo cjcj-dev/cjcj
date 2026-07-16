@@ -96,17 +96,19 @@ extend ParserImpl {
         }
         CJC_ASSERT(SeeingMacroCall())
         let expr = MacroExpandExpr()
-        if (let Some(file) <- currentFile) {
-            expr.curFile = file
-            file.hasMacro = true
+        try (cs = ChainScope(this, expr)) {
+            if (let Some(file) <- currentFile) {
+                expr.curFile = file
+                file.hasMacro = true
+            }
+            expr.begin = Peek().Begin()
+            ParseMacroInvocation(ScopeKind.FUNC_BODY, ArrayList<Modifier>(), expr.invocation, expr)
+            expr.identifier = AstIdentifier(
+                expr.invocation.macroCallDiagInfo.identifier,
+                expr.invocation.macroNamePos,
+                expr.invocation.macroNamePos + expr.invocation.macroCallDiagInfo.identifier.size)
+            expr.end = lastToken.End()
         }
-        expr.begin = Peek().Begin()
-        ParseMacroInvocation(ScopeKind.FUNC_BODY, ArrayList<Modifier>(), expr.invocation, expr)
-        expr.identifier = AstIdentifier(
-            expr.invocation.macroCallDiagInfo.identifier,
-            expr.invocation.macroNamePos,
-            expr.invocation.macroNamePos + expr.invocation.macroCallDiagInfo.identifier.size)
-        expr.end = lastToken.End()
         return expr
     }
 
