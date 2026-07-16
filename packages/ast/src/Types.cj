@@ -1767,6 +1767,8 @@ public class StructTy <: Ty {
     }
 }
 
+extend StructTy <: Hashable {}
+
 public func CompTyByNames(ty1: Option<Ty>, ty2: Option<Ty>): Bool {
     if (let Some(left) <- ty1) {
         if (let Some(right) <- ty2) {
