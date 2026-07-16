@@ -855,7 +855,7 @@ public class MacroEvaluation {
             if (attrTokens[idx].kind == TokenKind.AT && IsBuiltInMacro(attrTokens[idx + 1].Value()) &&
                 attrTokens[idx + 2].kind == TokenKind.LPAREN && attrTokens[idx + 3].kind == TokenKind.RPAREN) {
                 let macroName = attrTokens[idx + 1].Value()
-                let pos = attrTokens[idx].Begin()
+                let pos = macCall.GetBeginPos()
                 var replacement = Token(TokenKind.STRING_LITERAL, "", pos, pos)
                 if (macroName == SOURCE_PACKAGE) {
                     var packageName = ""
