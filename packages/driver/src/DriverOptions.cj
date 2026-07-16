@@ -205,7 +205,10 @@ public class DriverOptions <: GlobalOptions {
         if (let None <- targetCPU) { targetCPU = "generic" }
         let value = targetCPU ?? "generic"
         if (value == "generic" || value == "native") { return true }
-        if (IsSupportedTargetCPU(target.arch, value)) { return true }
+        let isSupportedTargetCPU =
+            (target.arch == ArchType.AARCH64 && AARCH64_TARGET_CPUS.contains(value)) ||
+            (target.arch == ArchType.X86_64 && X86_64_TARGET_CPUS.contains(value))
+        if (isSupportedTargetCPU) { return true }
         let diag = DiagnosticEngine()
         diag.DiagnoseRefactor(
             DiagKindRefactor.driver_unsupported_target_cpu, DEFAULT_POSITION, arguments: [value]).Emit()
