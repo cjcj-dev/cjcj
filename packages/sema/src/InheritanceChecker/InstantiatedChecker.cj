@@ -170,9 +170,6 @@ func CheckInstMemberSignatures(
     if (!checker.HasInstantiationTrigger()) {
         return
     }
-    if (IsImportedInstantiationBoundary(decl)) {
-        return
-    }
     let key = InstantiationKey(decl, instTys)
     if (checker.HasInstantiatedKey(key)) {
         checker.ReplayInstantiatedMemberDiagnostics(key)
