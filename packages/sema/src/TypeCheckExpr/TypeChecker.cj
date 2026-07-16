@@ -3141,6 +3141,7 @@ extend TypeChecker {
 
     private func PrepareFuncBodySignature(ctx: ASTContext, fb: FuncBody): Ty {
         let retType = EnsureRetType(ctx, fb)
+        SynthesizeTypeNode(ctx, Some(retType))
         for (paramList in fb.paramLists) {
             for (param in paramList.params) {
                 PrepareParamSignature(ctx, param)
