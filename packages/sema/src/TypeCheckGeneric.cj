@@ -206,7 +206,7 @@ private func exprInstantiationTys(expr: Expr): ArrayList<Ty> {
 private func filteredTypeArgsForTarget(target: Decl, typeArgs: ArrayList<Type>): ArrayList<Type> {
     let out = ArrayList<Type>()
     if (let Some(aliasDecl) <- (target as TypeAliasDecl)) {
-        let unusedTys = TypeCheckDeclGetUnusedTysInTypeAlias(aliasDecl)
+        let unusedTys = GetUnusedTysInTypeAlias(aliasDecl)
         for (typeArg in typeArgs) {
             if (let Some(ty) <- typeArg.GetTy()) {
                 if (!typeListContainsTy(unusedTys, ty)) {

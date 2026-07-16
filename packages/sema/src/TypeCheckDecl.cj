@@ -706,7 +706,8 @@ public func CheckEnumDecl(diag: BasicDiagnosticEngine, enumDecl: EnumDecl,
     return enumDecl.GetTy() ?? TypeManager.GetInvalidTy()
 }
 
-public func TypeCheckDeclGetUnusedTysInTypeAlias(tad: TypeAliasDecl): ArrayList<Ty> {
+// C++ src/Sema/TypeCheckDecl.cpp:679-697 TypeCheckerImpl::GetUnusedTysInTypeAlias.
+public func GetUnusedTysInTypeAlias(tad: TypeAliasDecl): ArrayList<Ty> {
     let unused = ArrayList<Ty>()
     if (let None <- tad.generic) {
         return unused
@@ -814,7 +815,7 @@ public func CheckTypeAlias(
     }
     CheckTypeAliasAccess(diag, tad)
     if (let Some(_) <- tad.generic) {
-        let unusedTys = TypeCheckDeclGetUnusedTysInTypeAlias(tad)
+        let unusedTys = GetUnusedTysInTypeAlias(tad)
         if (!unusedTys.isEmpty()) {
             Diagnose(diag, tad, BasicDiagKind.typealias_unused_type_parameters,
                 args: [BasicDiagArgument(Ty.GetTypesToStr(unusedTys, ","))]).Emit()
