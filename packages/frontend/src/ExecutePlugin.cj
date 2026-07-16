@@ -1,9 +1,10 @@
 package cjcj::frontend
 
 import cjcj::chir.{BuiltinType, CHIRBuilder, CHIRDeserializer, CHIRSerializer, CustomDefKind, CustomType,
-    Function, GetBuiltinTypeWithVTable, GlobalVar, Terminator}
+    Function, GetBuiltinTypeWithVTable, GlobalVar}
 import cjcj::chir.Block as CHIRBlock
 import cjcj::chir.Package as CHIRPackage
+import cjcj::chir.Terminator as CHIRTerminator
 import cjcj::macro_pkg.{CloseSymbolTable, GetMethodPointer, OpenSymbolTableSafely, RuntimeHandle}
 import std.collection.*
 
@@ -72,7 +73,7 @@ class ExecutePlugin {
         srcCodeImportedFuncs: ArrayList<Function>,
         srcCodeImportedVars: ArrayList<GlobalVar>,
         initFuncsForConstVar: ArrayList<Function>,
-        maybeUnreachable: HashMap<CHIRBlock, Terminator>
+        maybeUnreachable: HashMap<CHIRBlock, CHIRTerminator>
     ): Option<CHIRPackage> {
         CHIRPtrToString(srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar, maybeUnreachable)
 
@@ -96,7 +97,7 @@ class ExecutePlugin {
         srcCodeImportedFuncs: ArrayList<Function>,
         srcCodeImportedVars: ArrayList<GlobalVar>,
         initFuncsForConstVar: ArrayList<Function>,
-        maybeUnreachable: HashMap<CHIRBlock, Terminator>
+        maybeUnreachable: HashMap<CHIRBlock, CHIRTerminator>
     ): Unit {
         for (function in srcCodeImportedFuncs) {
             srcCodeImportedFuncNames.add(function.GetIdentifierWithoutPrefix())
@@ -125,7 +126,7 @@ class ExecutePlugin {
         srcCodeImportedFuncs: ArrayList<Function>,
         srcCodeImportedVars: ArrayList<GlobalVar>,
         initFuncsForConstVar: ArrayList<Function>,
-        maybeUnreachable: HashMap<CHIRBlock, Terminator>
+        maybeUnreachable: HashMap<CHIRBlock, CHIRTerminator>
     ): Unit {
         let chirPkg = builder.GetChirContext().GetCurPackage().getOrThrow()
         for (definition in chirPkg.GetAllExtendDef()) {
@@ -174,7 +175,7 @@ class ExecutePlugin {
                 }
                 let allBlocks = function.GetBody().getOrThrow().GetAllBlocks()
                 var unreachableBlock: Option<CHIRBlock> = None
-                var terminator: Option<Terminator> = None
+                var terminator: Option<CHIRTerminator> = None
                 for (block in allBlocks) {
                     if (unreachableBlock.isSome() && terminator.isSome()) {
                         break
