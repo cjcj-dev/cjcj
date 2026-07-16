@@ -24,11 +24,13 @@ private func IsGVForExtensionDefs(gv: LLVMValueRef): Bool {
 }
 
 private func HasGlobalVariableAttribute(gv: LLVMValueRef, name: String): Bool {
+    var result = false
     try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
-        return unsafe {
+        result = unsafe {
             LLVMSelfhostGlobalVariableHasAttribute(gv, nameCString.value, UInt32(name.size)) != 0
         }
     }
+    return result
 }
 
 private func GetLLVMValueName(value: LLVMValueRef): String {
@@ -36,15 +38,19 @@ private func GetLLVMValueName(value: LLVMValueRef): String {
 }
 
 private func GetNamedFunction(module: LLVMModuleHandle, name: String): LLVMValueRef {
+    var result = LLVMNullValue()
     try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
-        return unsafe { LLVMGetNamedFunction(module.raw, nameCString.value) }
+        result = unsafe { LLVMGetNamedFunction(module.raw, nameCString.value) }
     }
+    return result
 }
 
 private func GetNamedGlobal(module: LLVMModuleHandle, name: String): LLVMValueRef {
+    var result = LLVMNullValue()
     try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
-        return unsafe { LLVMGetNamedGlobal(module.raw, nameCString.value) }
+        result = unsafe { LLVMGetNamedGlobal(module.raw, nameCString.value) }
     }
+    return result
 }
 
 private func AddUniqueLLVMValue(values: ArrayList<LLVMValueRef>, value: LLVMValueRef): Unit {
