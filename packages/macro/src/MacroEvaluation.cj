@@ -1,6 +1,7 @@
 package cjcj::macro_pkg
 
 import cjcj::basic.SplitQualifiedName as BasicSplitQualifiedName
+import cjcj::basic.GetLineTerminator
 import cjcj::basic.DiagCategory as EvalParsedDiagCategory
 import cjcj::basic.DiagnosticEngine as EvalParsedDiagnosticEngine
 import cjcj::lex.{Lexer as RealLexer, StringPartKind}
@@ -1293,20 +1294,26 @@ public class MacroEvaluation {
             }
         }
         if (ci.GetGlobalOptions().enableMacroInLSP || ci.GetGlobalOptions().enableMacroDebug) {
+            let needNewLine = macCall.RequireNode().IsDecl() || subline > 1
             let beginComment = "/* ===== Emitted by MacroCall " + macCall.GetMacroInfo() + " ===== */"
             let endComment = "/* ===== End of the Emit ===== */"
-            let rebuilt = ArrayList<Token>()
-            rebuilt.add(Token(TokenKind.COMMENT, beginComment, macCall.GetBeginPos(), macCall.GetEndPos(),
-                cmtForMacDebug: true))
-            if (macCall.RequireNode().IsDecl() || subline > 1) {
-                rebuilt.add(Token(TokenKind.NL, "\n", macCall.GetBeginPos(), macCall.GetBeginPos() + 1,
+            if (needNewLine) {
+                invocation.newTokens.add(Token(TokenKind.NL), at: 0)
+                invocation.newTokens.add(Token(TokenKind.COMMENT, beginComment, macCall.GetBeginPos(),
+                    macCall.GetEndPos(), cmtForMacDebug: true), at: 0)
+                var pos = invocation.newTokens[invocation.newTokens.size - 1].Begin()
+                invocation.newTokens.add(Token(TokenKind.NL, GetLineTerminator(), pos, pos + 1,
+                    cmtForMacDebug: true))
+                pos = pos + 1
+                invocation.newTokens.add(Token(TokenKind.COMMENT, endComment, pos, pos + 1,
+                    cmtForMacDebug: true))
+            } else {
+                invocation.newTokens.add(Token(TokenKind.COMMENT, beginComment, macCall.GetBeginPos(),
+                    macCall.GetEndPos(), cmtForMacDebug: true), at: 0)
+                let pos = invocation.newTokens[invocation.newTokens.size - 1].Begin()
+                invocation.newTokens.add(Token(TokenKind.COMMENT, endComment, pos, pos + 1,
                     cmtForMacDebug: true))
             }
-            appendTokens(rebuilt, invocation.newTokens)
-            rebuilt.add(Token(TokenKind.COMMENT, endComment, macCall.GetEndPos(), macCall.GetEndPos() + 1,
-                cmtForMacDebug: true))
-            invocation.newTokens.clear()
-            appendTokens(invocation.newTokens, rebuilt)
         }
         invocation.newTokensStr = ConvertTokensToString(invocation.newTokens, offset: macCall.GetBeginPos().column)
         vecOfGeneratedCodes.add(invocation.newTokensStr)
