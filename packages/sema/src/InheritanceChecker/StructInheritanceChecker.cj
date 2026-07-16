@@ -526,7 +526,7 @@ public class StructInheritanceChecker {
     public let importManager: SemaImportManager
     public let opts: OptionGlobalOptions
 
-    private let structInheritedMembers: HashMap<Node, MemberMap> = HashMap<Node, MemberMap>()
+    private let structInheritedMembers: HashMap<InheritableDecl, MemberMap> = HashMap<InheritableDecl, MemberMap>()
     private let checkingDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
     private let instantiatedKeys: HashSet<String> = HashSet<String>()
     private let instantiatedMemberDiagnostics: ArrayList<InstantiatedMemberDiagnosticRecord> =
@@ -634,8 +634,8 @@ public class StructInheritanceChecker {
         CheckInstDupFuncsInNominalDecls(this)
     }
 
-    public func MoveStructInheritedMembers(): HashMap<Node, MemberMap> {
-        let out = HashMap<Node, MemberMap>()
+    public func MoveStructInheritedMembers(): HashMap<InheritableDecl, MemberMap> {
+        let out = HashMap<InheritableDecl, MemberMap>()
         for (decl in structInheritedMembers.keys()) {
             if (let Some(members) <- structInheritedMembers.get(decl)) {
                 out[decl] = members.Clone()
