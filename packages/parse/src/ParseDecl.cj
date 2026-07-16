@@ -478,6 +478,8 @@ extend ParserImpl {
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
+            SetDeclBeginPos(decl)
+            SetBeginToAnnotationsBegin(decl, annos)
             return decl
         }
         if (SeeingConsumedConstModifier(modifiers)) {
@@ -2549,6 +2551,7 @@ extend ParserImpl {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let key = Expect(TokenKind.INIT, "expected 'init'")
             ret.keywordPos = key.Begin()
+            ret.begin = key.Begin()
             ret.identifier = SrcIdentifier("init", "init", key.Begin(), key.End(), false)
             ret.EnableAttr(Attribute.CONSTRUCTOR)
             if (HasModifierToken(modifiers, TokenKind.CONST)) {
