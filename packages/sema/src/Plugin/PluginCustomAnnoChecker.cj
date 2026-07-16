@@ -312,26 +312,18 @@ public class PluginCustomAnnoChecker {
         this.typeManager = typeManager
     }
 
-    private func IsTargetCustomAnnotation(annotation: Annotation, expectedName: String): Bool {
-        if (let Some(baseExpr) <- annotation.baseExpr) {
-            if (let Some(target) <- baseExpr.GetTarget()) {
-                if (target.GetFullPackageName() == PKG_NAME_OHOS_LABELS) {
-                    if (let Some(outer) <- target.outerDecl) {
-                        return outer.identifier.Val() == expectedName
-                    }
-                    return target.identifier.Val() == expectedName
-                }
-            }
-        }
-        return false
-    }
-
     public func IsAnnoAPILevel(annotation: Annotation, decl: Decl): Bool {
         if (decl.GetFullPackageName() == PKG_NAME_OHOS_LABELS) {
             return annotation.identifier.Val() == APILEVEL_ANNO_NAME
         }
-        if (IsTargetCustomAnnotation(annotation, APILEVEL_ANNO_NAME)) {
-            return true
+        if (let Some(baseExpr) <- annotation.baseExpr) {
+            if (let Some(target) <- baseExpr.GetTarget()) {
+                if (let Some(outer) <- target.outerDecl) {
+                    return target.GetFullPackageName() == PKG_NAME_OHOS_LABELS &&
+                        outer.identifier.Val() == APILEVEL_ANNO_NAME
+                }
+                return false
+            }
         }
         return annotation.identifier.Val() == APILEVEL_ANNO_NAME
     }
@@ -344,8 +336,14 @@ public class PluginCustomAnnoChecker {
         if (decl.GetFullPackageName() == PKG_NAME_OHOS_LABELS) {
             return annotation.identifier.Val() == HIDE_ANNO_NAME
         }
-        if (IsTargetCustomAnnotation(annotation, HIDE_ANNO_NAME)) {
-            return true
+        if (let Some(baseExpr) <- annotation.baseExpr) {
+            if (let Some(target) <- baseExpr.GetTarget()) {
+                if (let Some(outer) <- target.outerDecl) {
+                    return target.GetFullPackageName() == PKG_NAME_OHOS_LABELS &&
+                        outer.identifier.Val() == HIDE_ANNO_NAME
+                }
+                return false
+            }
         }
         return annotation.identifier.Val() == HIDE_ANNO_NAME
     }
