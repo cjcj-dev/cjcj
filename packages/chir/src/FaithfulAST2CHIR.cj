@@ -16,7 +16,6 @@ import std.sort.*
 import cjcj::ast.ASTKind
 import cjcj::ast.ASTKindIndex
 import cjcj::ast.ASTKindName
-import cjcj::ast.Annotation as AstAnnotation
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::ast.AccessLevel as AstAccessLevel
 import cjcj::ast.ArrayExpr as AstArrayExpr
@@ -65,8 +64,8 @@ import cjcj::ast.IsImpl as AstIsImpl
 import cjcj::ast.IsMirror as AstIsMirror
 import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
-import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, FileUtil,
-    MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR}
+import cjcj::utils.{CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, FileUtil, MAIN_INVOKE,
+    ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR}
 
 foreign {
     func CJSelfhostStrtoldToFloat32(value: CString): Float64
@@ -1153,8 +1152,6 @@ public class FaithfulAST2CHIR {
     private let initFuncsForConstVar: ArrayList<Function> = ArrayList<Function>()
     private let initFuncsForAnnoFactory: ArrayList<Function> = ArrayList<Function>()
     private let annoFactoryFuncs: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>()
-    private let annotationTargets: HashMap<GlobalVar, AstExpr> = HashMap<GlobalVar, AstExpr>()
-    private let classDeclWithAnnotation: ArrayList<(AstClassDecl, ClassDef)> = ArrayList<(AstClassDecl, ClassDef)>()
     private let maybeUnreachable: HashMap<Block, Terminator> = HashMap<Block, Terminator>()
     private let isComputingAnnos: Bool
 
@@ -1208,9 +1205,6 @@ public class FaithfulAST2CHIR {
         CacheTopLevelDeclToGlobalSymbolTable()
         TranslateNominalDecls(node)
         TranslateInitOfGlobalVars(initOrder)
-        for ((decl, def) in classDeclWithAnnotation) {
-            SetAnnotationTargets(def, decl)
-        }
         TranslateOtherTopLevelDecls(node)
         FlatForInExpr(builder).RunOnPackage(CurrentPackage())
         try (recorder = ProfileRecorder("Canonicalization", "GenerateVTable")) {
@@ -1850,10 +1844,6 @@ public class FaithfulAST2CHIR {
         }
         if (!def.TestAttr(Attribute.DESERIALIZED)) {
             ApplyDeclAttrs(def, decl)
-            if (decl.TestAttr(AstAttribute.IS_ANNOTATION)) {
-                classDeclWithAnnotation.add(((decl as AstClassDecl).getOrThrow(),
-                    (def as ClassDef).getOrThrow()))
-            }
         }
         MaybeSetCoreBuiltinClassTy(def)
         chirType.SetGlobalNominalCache(decl, def)
@@ -1868,87 +1858,6 @@ public class FaithfulAST2CHIR {
         if (decl.TestAttr(AstAttribute.SPECIFIC)) {
             def.EnableAttr(Attribute.SPECIFIC)
             def.DisableAttr(Attribute.COMMON)
-        }
-    }
-
-    // C++: CHIR/AST2CHIR/ASTPackage2CHIR.cpp:950-967.
-    private func CreateAnnotationTargetVar(decl: AstClassDecl, expr: AstExpr, index: Int64): GlobalVar {
-        let varMangledName = decl.mangledName + ANNOTATION_VAR_POSTFIX + index.toString()
-        let loc = TranslateLocationWithoutScope(builder.context, expr.begin, expr.end)
-        let annotationTargetType = chirType.TranslateType(RequireAstTy(expr))
-        let varType = builder.context.GetRefTy(annotationTargetType)
-        let srcCodeIdentifier = decl.identifier.Val() + ANNOTATION_VAR_POSTFIX + index.toString()
-        let globalVar = builder.CreateGlobalVar(varType, varMangledName,
-            srcCodeIdentifier: srcCodeIdentifier, rawMangledName: varMangledName,
-            packageName: decl.fullPackageName)
-        globalVar.SetDebugLocation(loc)
-        globalVar.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
-        globalVar.EnableAttr(Attribute.COMPILER_ADD)
-        globalVar.EnableAttr(Attribute.NO_DEBUG_INFO)
-        globalVar.EnableAttr(Attribute.CONST)
-        globalVar.EnableAttr(Attribute.NO_REFLECT_INFO)
-        globalVar.SetLinkTypeInfo(BasicLinkage.INTERNAL)
-        return globalVar
-    }
-
-    // C++: CHIR/AST2CHIR/ASTPackage2CHIR.cpp:969-1001.
-    private func CreateInitFuncForAnnotationTargetVar(globalVar: GlobalVar): Function {
-        let mangledName = FAITHFUL_MANGLE_CANGJIE_PREFIX + FAITHFUL_MANGLE_GLOBAL_VARIABLE_INIT_PREFIX +
-            FaithfulMangleName(globalVar.GetPackageName()) + FaithfulMangleName(globalVar.GetSrcCodeIdentifier()) +
-            FAITHFUL_MANGLE_FUNC_PARAM_TYPE_PREFIX + FAITHFUL_MANGLE_VOID_TY_SUFFIX
-        if (let Some(value) <- deserializedVals.get(GLOBAL_VALUE_PREFIX + mangledName)) {
-            return (value as Function).getOrThrow()
-        }
-        let funcType = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetUnitTy())
-        let fn = builder.CreateFunction(funcType, mangledName, srcCodeIdentifier: "",
-            rawMangledName: mangledName, packageName: globalVar.GetPackageName())
-        fn.SetDebugLocation(globalVar.GetDebugLocation())
-        fn.SetFuncKind(FuncKind.GLOBALVAR_INIT)
-        fn.EnableAttr(Attribute.NO_REFLECT_INFO)
-        fn.EnableAttr(Attribute.NO_INLINE)
-        fn.EnableAttr(Attribute.COMPILER_ADD)
-        fn.EnableAttr(Attribute.INITIALIZER)
-        fn.EnableAttr(Attribute.NO_DEBUG_INFO)
-        fn.EnableAttr(Attribute.CONST)
-        let blockGroup = builder.CreateBlockGroup(fn)
-        fn.InitBody(blockGroup)
-        fn.SetLinkTypeInfo(BasicLinkage.INTERNAL)
-        let entry = builder.CreateBlock(blockGroup)
-        blockGroup.SetEntryBlock(entry)
-        let allocate = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetUnitTy()),
-            builder.context.GetUnitTy(), entry)
-        fn.SetReturnValue(RequireResult(allocate))
-        return fn
-    }
-
-    // C++: CHIR/AST2CHIR/ASTPackage2CHIR.cpp:1004-1041.
-    private func SetAnnotationTargets(customTypeDef: CustomTypeDef, decl: AstDecl): Unit {
-        if (!decl.TestAttr(AstAttribute.IS_ANNOTATION)) {
-            return
-        }
-        let classDef = (customTypeDef as ClassDef).getOrThrow()
-        var annotation: Option<AstAnnotation> = None
-        for (candidate in decl.annotations) {
-            if (candidate.kind == AstAnnotationKind.ANNOTATION) {
-                annotation = Some(candidate)
-                break
-            }
-        }
-        let anno = annotation.getOrThrow()
-        if (anno.args.isEmpty()) {
-            classDef.SetAnnotationTargets(ArrayList<GlobalVar>())
-        } else {
-            let children = (anno.args[0].expr.getOrThrow() as AstArrayLit).getOrThrow().children
-            let vars = ArrayList<GlobalVar>()
-            for (index in 0..children.size) {
-                let globalVar = CreateAnnotationTargetVar((decl as AstClassDecl).getOrThrow(), children[index], index)
-                vars.add(globalVar)
-                let initFunc = CreateInitFuncForAnnotationTargetVar(globalVar)
-                globalVar.SetInitFunc(initFunc)
-                initFuncsForConstVar.add(initFunc)
-                annotationTargets[globalVar] = children[index]
-            }
-            classDef.SetAnnotationTargets(vars)
         }
     }
 
@@ -2367,29 +2276,12 @@ public class FaithfulAST2CHIR {
             let _ = Translator.TranslateASTNode(decl, trans)
         }
         TranslateVecDecl(globalAndStaticVars, CreateTranslator())
-        TranslateAnnotationRelatedDecls()
-        SetCompileTimeValueFlag()
-    }
-
-    // C++: CHIR/AST2CHIR/AST2CHIR.cpp:365-390.
-    private func TranslateAnnotationRelatedDecls(): Unit {
-        for ((globalVar, expr) in annotationTargets) {
-            let initFunc = globalVar.GetInitFunc().getOrThrow()
-            let entry = initFunc.GetBody().getOrThrow().GetEntryBlock().getOrThrow()
-            let trans = CreateTranslator()
-            trans.SetCurrentBlock(entry)
-            let value = Translator.TranslateASTNode(expr, trans).getOrThrow()
-            let parentBlock = trans.GetCurrentBlock()
-            let store = builder.CreateStore(value, globalVar, parentBlock)
-            store.SetDebugLocation(globalVar.GetDebugLocation())
-            CJC_ASSERT(parentBlock.GetTerminator().isNone())
-            let _ = builder.CreateExit(None, parentBlock)
-        }
         for ((decl, funcDef) in annoFactoryFuncs) {
             let trans = CreateTranslator()
             trans.SetTopLevel(decl)
             trans.TranslateAnnoFactoryFuncBody(decl, funcDef)
         }
+        SetCompileTimeValueFlag()
     }
 
     private func NeedTranslate(decl: AstDecl): Bool {

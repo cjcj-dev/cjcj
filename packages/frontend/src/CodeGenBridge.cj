@@ -5,7 +5,6 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::chir.Apply as ChirApply
 import cjcj::chir.ApplyWithException as ChirApplyWithException
 import cjcj::chir.AnalysisWrapper
-import cjcj::chir.AnnotationChecker
 import cjcj::chir.ArrayLambdaOpt
 import cjcj::chir.Attribute as ChirAttribute
 import cjcj::chir.Block as ChirBlock
@@ -348,10 +347,6 @@ private class ToCHIR {
         }
         ast2chir.ReplaceSrcCodeImportedValAfterClosureConversion(lowered, closure.GetUselessClassDef(),
             closure.GetUselessLambda())
-        // C++: CHIR/CHIR.cpp:1178-1181.
-        if (!AnnotationChecker(lowered, instance.diag.AsBasicDiagnosticEngine()).Run()) {
-            return None
-        }
         // C++: CHIR/CHIR.cpp:1183.
         RunSanitizerCoverage()
         if (instance.invocation.globalOptions.enIncrementalCompilation) {
