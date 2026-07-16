@@ -160,9 +160,9 @@ public class MemberJNISignature {
 
 private func GetJavaEntityIsNullCall(entityDecl: StructDecl): Option<PropDecl> {
     for (member in entityDecl.GetMemberDecls()) {
-        if (let Some(prop) <- (member as PropDecl)) {
-            if (prop.identifier == "isNull") {
-                return Some(prop)
+        if (let Some(propDecl) <- (member as PropDecl)) {
+            if (propDecl.identifier == "isNull") {
+                return Some(propDecl)
             }
         }
     }
