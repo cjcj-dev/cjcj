@@ -1965,9 +1965,7 @@ public class InitializationChecker {
             return CheckInitInExpr(desugar)
         }
         if (binary.op != TokenKind.AND && binary.op != TokenKind.OR && binary.op != TokenKind.COALESCING) {
-            var simpleResult = CheckExprOption(binary.leftExpr)
-            simpleResult = CheckExprOption(binary.rightExpr) && simpleResult
-            return simpleResult
+            return CheckExprOption(binary.leftExpr) && CheckExprOption(binary.rightExpr)
         }
         var leftUninits = ArrayList<Decl>()
         if (let Some(left) <- binary.leftExpr) {
@@ -1979,10 +1977,12 @@ public class InitializationChecker {
         }
         var result = CheckExprOption(binary.leftExpr)
         optionalCtxDepth++
-        result = CheckExprOption(binary.rightExpr) && result
+        result = result && CheckExprOption(binary.rightExpr)
         optionalCtxDepth--
         for (decl in rightUninits) {
-            decl.DisableAttr(Attribute.INITIALIZED)
+            if (!ContainsInitDecl(leftUninits, decl)) {
+                decl.DisableAttr(Attribute.INITIALIZED)
+            }
         }
         return result
     }
