@@ -8,6 +8,7 @@ import cjcj::modules.ImportManager
 import cjcj::modules.SemaImportManager
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.TypeManager
+import cjcj::sema.CreateThrowException
 import cjcj::utils.*
 
 private let INTEROPLIB_VERSION_FIELD_ID: String = "INTEROPLIB_VERSION"
@@ -477,7 +478,11 @@ public class InteropLibBridge {
     }
 
     public func CreateMatchWithTypeCast(exprToCast: Expr, castTy: Ty): Option<MatchExpr> {
-        let exceptionDecl = importManager.GetCoreDecl<ClassDecl>(CLASS_EXCEPTION)
+        let exceptionDecl: Option<ClassDecl> = if (let Some(decl) <- importManager.GetCoreDecl(CLASS_EXCEPTION)) {
+            decl as ClassDecl
+        } else {
+            None
+        }
         if (let None <- exceptionDecl) {
             return None
         }
