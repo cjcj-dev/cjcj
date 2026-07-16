@@ -451,7 +451,13 @@ public class ParserImpl {
         node: Node,
         arguments!: Array<String> = Array<String>()
     ): BasicDiagnosticBuilder {
-        return ParseDiagnoseRefactor(kind, node, MakeRange(node.GetBegin(), node.GetEnd()), arguments: arguments)
+        let diagnosticNode = Node()
+        diagnosticNode.begin = node.begin
+        diagnosticNode.end = node.end
+        if (let Some(macroCall) <- curMacroCall) {
+            diagnosticNode.curMacroCall = macroCall
+        }
+        return ParseDiagnoseRefactor(kind, diagnosticNode, MakeRange(node.begin, node.end), arguments: arguments)
     }
 
     public func ParseDiagnoseRefactor(kind: BasicDiagKindRefactor, node: Node, argument: String): BasicDiagnosticBuilder {
