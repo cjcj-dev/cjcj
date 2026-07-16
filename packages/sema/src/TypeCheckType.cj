@@ -134,9 +134,7 @@ public func TypeCheckTypeCheckReferenceTypeLegality(
         }
     } else if (typeNode.astKind == ASTKind.VARRAY_TYPE) {
         if (let Some(varrayType) <- (typeNode as VArrayType)) {
-            if (!TypeCheckTypeCheckVArrayType(diag, tm, varrayType)) {
-                valid = false
-            }
+            TypeCheckTypeCheckVArrayType(diag, tm, varrayType)
         }
     }
     if (!Ty.IsTyCorrect(typeNode.GetTy())) {
