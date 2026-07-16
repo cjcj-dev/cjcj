@@ -81,30 +81,52 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
 
     public override func PerformIncrementalScopeAnalysis(): Bool {
         let recorder = ProfileRecorder("Main Stage", "AST Diff")
-        declsToBeReCompiled.clear()
-        rawIncrRemovedDecls.clear()
-        filesToBeReCompiled.clear()
-        rawIncrRemovedFiles.clear()
-        currentCacheText = ""
-        let calculated = core.CalculateASTCache()
-        let sourcePackages = core.GetSourcePackages()
-        if (!calculated || sourcePackages.isEmpty()) {
-            kind = IncreKind.EMPTY_PKG
-        } else if (sourcePackages.size != 1) {
+        CJC_ASSERT(core.srcPkgs.size == 1)
+        let sourcePackage = core.srcPkgs[0]
+        if (!core.CalculateASTCache()) {
+            recorder.close()
+            return true
+        }
+        let options = invocation.globalOptions
+        if (!options.pluginPaths.isEmpty()) {
             kind = IncreKind.ROLLBACK
-            IncrementalCompilationLogger.GetInstance().LogLn(
-                "incremental compilation expects exactly one source package, roll back to full compilation")
-        } else if (!invocation.globalOptions.pluginPaths.isEmpty()) {
-            kind = IncreKind.ROLLBACK
-            IncrementalCompilationLogger.GetInstance().LogLn(
-                "enable plugin, roll back to full compilation")
             diag.Warn(DiagCategory.OTHER, DEFAULT_POSITION,
                 "`--incremental-compile` is incompatible with `--plugin` and will be ignored.")
-        } else {
-            kind = AnalyseCurrentFrontendCache()
+            core.kind = kind
+            recorder.close()
+            return true
         }
-        core.kind = kind
-        LogIncrementalAnalysisResult()
+        if (!core.declsWithDuplicatedRawMangleName.isEmpty()) {
+            kind = IncreKind.ROLLBACK
+            IncrementalCompilationLogger.GetInstance().LogLn(
+                "illegal source code leads to duplicated raw mangle name, roll back to full compilation")
+            core.kind = kind
+            recorder.close()
+            return true
+        }
+        let args = IncrementalScopeAnalysisArgs(core.rawMangleName2DeclMap, core.astCacheInfo, sourcePackage,
+            options, core.importManager, core.cachedInfo, core.fileMap, core.directExtends)
+        let result = IncrementalScopeAnalysis(args)
+        if (result.kind == IncreKind.INCR) {
+            if (!CheckCachedBitcodeInfo(sourcePackage.fullPackageName, options)) {
+                result.kind = IncreKind.ROLLBACK
+            } else {
+                for (mangle in result.deletedMangleNames) { cacheMangles.incrRemovedDecls.add(mangle) }
+            }
+        }
+        if (result.kind == IncreKind.NO_CHANGE) {
+            for (srcPkg in core.GetSourcePackages()) {
+                options.UpdateCachedDirName(srcPkg.fullPackageName)
+            }
+            if (!options.IsLTOEnabled() && !CheckCachedObjFile(options, result.cacheInfo)) {
+                result.kind = IncreKind.ROLLBACK
+            }
+            if (options.IsLTOEnabled() && !CheckCachedBitcodeInfoForLTO(options, result.cacheInfo)) {
+                result.kind = IncreKind.ROLLBACK
+            }
+        }
+        result.Dump()
+        SaveCompilationResult(result)
         recorder.close()
         return true
     }
