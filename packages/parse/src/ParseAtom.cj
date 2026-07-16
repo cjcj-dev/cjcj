@@ -281,9 +281,11 @@ extend ParserImpl {
     }
 
     public func ParseRefExpr(ek: ExprKind): RefExpr {
+        let begin = Peek().Begin()
         let id = ParseIdentifierFromToken(Peek())
         Next()
         let expr = RefExpr(id)
+        expr.begin = begin
         if (!Seeing(TokenKind.LT)) {
             return expr
         }
