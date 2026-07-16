@@ -776,24 +776,62 @@ private func FuncParamTysValid(fd: FuncDecl): Bool {
     return false
 }
 
-private func FilterShadowedFunc(candidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
-    let out = ArrayList<FuncDecl>()
+private func RemoveShadowedFunc(typeManager: TypeManager, fd: FuncDecl, currentLevel: Int64, targetLevel: Int64,
+    funcs: ArrayList<FuncDecl>): Unit {
+    if (targetLevel >= currentLevel) {
+        return
+    }
+    let paramTys = if (let Some(funcTy) <- (fd.GetTy() as FuncTy)) { funcTy.paramTys } else { GetParamTys(fd) }
+    var idx: Int64 = 0
+    while (idx < funcs.size) {
+        let target = funcs[idx]
+        let sameGeneric = fd.TestAttr(Attribute.GENERIC) == target.TestAttr(Attribute.GENERIC)
+        let targetParamTys = if (let Some(funcTy) <- (target.GetTy() as FuncTy)) {
+            funcTy.paramTys
+        } else {
+            GetParamTys(target)
+        }
+        if (sameGeneric && typeManager.IsFuncParameterTypesIdentical(targetParamTys, paramTys)) {
+            funcs.remove(at: idx)
+        } else {
+            idx++
+        }
+    }
+}
+
+private func FilterShadowedFunc(typeManager: TypeManager, candidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
+    let levelMap = HashMap<Int64, ArrayList<FuncDecl>>()
     for (fd in candidates) {
-        var shadowed = false
-        for (existing in out) {
-            if (fd.identifier.Val() == existing.identifier.Val() && fd.TestAttr(Attribute.GENERIC) == existing
-                .TestAttr(Attribute.GENERIC)) {
-                let left = GetParamTys(fd)
-                let right = GetParamTys(existing)
-                if (left.size == right.size && SameTypeArgs(left, right)) {
-                    if (fd.scopeLevel <= existing.scopeLevel) {
-                        shadowed = true
-                    }
-                }
+        let scopeLevel = if (fd.TestAttr(Attribute.IMPORTED) && fd.TestAttr(Attribute.GLOBAL)) {
+            -1
+        } else if (fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            0
+        } else {
+            Int64(fd.scopeLevel)
+        }
+        if (!levelMap.contains(scopeLevel)) {
+            levelMap[scopeLevel] = ArrayList<FuncDecl>()
+        }
+        levelMap.get(scopeLevel).getOrThrow().add(fd)
+    }
+    for ((level, funcsAtLevel) in levelMap) {
+        for (fd in funcsAtLevel) {
+            for ((targetLevel, funcs) in levelMap) {
+                RemoveShadowedFunc(typeManager, fd, level, targetLevel, funcs)
             }
         }
-        if (!shadowed) {
-            AddUniqueFunc(out, fd)
+    }
+    let out = ArrayList<FuncDecl>()
+    for (fd in candidates) {
+        let scopeLevel = if (fd.TestAttr(Attribute.IMPORTED) && fd.TestAttr(Attribute.GLOBAL)) {
+            -1
+        } else if (fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+            0
+        } else {
+            Int64(fd.scopeLevel)
+        }
+        if (ContainsFuncDecl(levelMap.get(scopeLevel).getOrThrow(), fd)) {
+            out.add(fd)
         }
     }
     return out
@@ -920,7 +958,7 @@ internal func FilterCandidates(typeManager: TypeManager, diag: Option<BasicDiagn
             typeFiltered.add(fd)
         }
     }
-    return FilterExtendImplAbstractFunc(typeManager, FilterShadowedFunc(typeFiltered))
+    return FilterExtendImplAbstractFunc(typeManager, FilterShadowedFunc(typeManager, typeFiltered))
 }
 
 private func CalculateEnumCtorScopeLevel(ctx: ASTContext, ce: CallExpr, fd: FuncDecl): Int64 {
