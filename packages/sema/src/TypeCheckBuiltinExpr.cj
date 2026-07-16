@@ -733,7 +733,8 @@ public func ChkPointerExpr(typeManager: TypeManager, target: Ty, pointerExpr: Po
         }
         if (!arg.name.Empty()) {
             if (let Some(diagValue) <- diag) {
-                DiagOldStrings(diagValue, arg, BasicDiagKind.sema_unknown_named_argument, [arg.name.Val()])
+                diagValue.Diagnose(arg.name.Begin(), arg.name.End(), BasicDiagKind.sema_unknown_named_argument,
+                    args: [BasicDiagArgument(arg.name.Val())]).Emit()
             }
             return false
         }
@@ -779,7 +780,7 @@ public func SynCFuncCall(typeManager: TypeManager, ce: CallExpr,
     }
     if (ce.args.size != 1) {
         if (let Some(diagValue) <- diag) {
-            DiagOld(diagValue, base, BasicDiagKind.sema_cfunc_too_many_arguments)
+            Diagnose(diagValue, base, BasicDiagKind.sema_cfunc_too_many_arguments).Emit()
         }
         ce.SetTy(TypeManager.GetInvalidTy())
         return false
@@ -796,8 +797,9 @@ public func SynCFuncCall(typeManager: TypeManager, ce: CallExpr,
     var valid = true
     if (!ce.args[0].name.Empty()) {
         if (let Some(diagValue) <- diag) {
-            DiagOldStrings(diagValue, ce.args[0], BasicDiagKind.sema_unknown_named_argument,
-                [ce.args[0].name.Val()])
+            let arg = ce.args[0]
+            diagValue.Diagnose(arg.name.Begin(), arg.name.End(), BasicDiagKind.sema_unknown_named_argument,
+                args: [BasicDiagArgument(arg.name.Val())]).Emit()
         }
         valid = false
     }
@@ -807,7 +809,7 @@ public func SynCFuncCall(typeManager: TypeManager, ce: CallExpr,
         return valid
     }
     if (let Some(diagValue) <- diag) {
-        DiagOld(diagValue, ce.args[0], BasicDiagKind.sema_cfunc_ctor_must_be_cpointer)
+        Diagnose(diagValue, ce.args[0], BasicDiagKind.sema_cfunc_ctor_must_be_cpointer).Emit()
     }
     ce.SetTy(TypeManager.GetInvalidTy())
     let _ = typeManager

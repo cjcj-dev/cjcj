@@ -7358,8 +7358,8 @@ extend TypeChecker {
     private func InferCFuncExpr(ctx: ASTContext, re: RefExpr): Unit {
         if (re.typeArguments.size != 1) {
             if (let Some(diagValue) <- impl.diag) {
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_generic_argument_no_match, re.begin)
+                DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_generic_argument_no_match,
+                    re, MakeRange(re.GetBegin(), re.GetEnd())).Emit()
             }
             re.SetTy(TypeManager.GetInvalidTy())
             return
@@ -7369,8 +7369,8 @@ extend TypeChecker {
             case Some(value) => value
             case None =>
                 if (let Some(diagValue) <- impl.diag) {
-                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                    let _ = diagValue.Diagnose(typeArgument.begin, typeArgument.end, BasicDiagKind.sema_cfunc_type)
+                    diagValue.Diagnose(typeArgument.GetBegin(), typeArgument.GetEnd(),
+                        BasicDiagKind.sema_cfunc_type).Emit()
                 }
                 re.SetTy(TypeManager.GetInvalidTy())
                 return
