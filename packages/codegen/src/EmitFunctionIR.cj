@@ -46,14 +46,14 @@ private class FunctionGeneratorImpl <: IRGeneratorImpl {
         if ((options.enableTimer || options.enableMemoryCollect)) {
             if (let Some(genericDecl) <- chirFunc.GetGenericDecl()) {
                 if (genericDecl.TestAttr(Attribute.IMPORTED)) {
-                    addAttribute(rawFunction, GENERIC_DECL_IN_IMPORTED_PKG_ATTR)
+                    AddFnAttr(rawFunction, GENERIC_DECL_IN_IMPORTED_PKG_ATTR)
                 } else {
-                    addAttribute(rawFunction, GENERIC_DECL_IN_CURRENT_PKG_ATTR)
+                    AddFnAttr(rawFunction, GENERIC_DECL_IN_CURRENT_PKG_ATTR)
                 }
             }
         }
         if (chirFunc.IsLambda()) {
-            addAttribute(rawFunction, FUNC_USED_BY_CLOSURE)
+            AddFnAttr(rawFunction, FUNC_USED_BY_CLOSURE)
         }
     }
 
