@@ -23,7 +23,9 @@ private func CheckMatchExprSetTy(me: MatchExpr, target: Ty, typeManager: TypeMan
 extend TypeChecker {
     // C++ src/Sema/TypeCheckMatchExpr.cpp:60-66 SynMatchExpr.
     func SynMatchExpr(ctx: ASTContext, me: MatchExpr): Ty {
-        if (let Some(_) <- me.selector) {
+        if (let Some(selector) <- me.selector) {
+            let _ = Synthesize(ctx, SynPos.NONE, selector)
+            let _ = ReplaceIdealTy(impl.typeManager, selector, diag: impl.diag)
             return SynMatchExprHasSelector(impl.typeManager, ctx, impl.diag, me,
                 exprChecker: Some({ target: Ty, expr: Expr => Check(ctx, target, expr) }),
                 exprSynthesizer: Some({ expr: Expr => Synthesize(ctx, SynPos.EXPR_ARG, expr) }),
