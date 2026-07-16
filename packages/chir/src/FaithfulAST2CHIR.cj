@@ -4379,7 +4379,7 @@ public class FaithfulAST2CHIR {
         }
         let fn = builder.CreateFunction(funcTy, mangledName,
             srcCodeIdentifier: EffectiveFunctionSrcIdentifier(funcDecl), rawMangledName: EffectiveFunctionRawName(funcDecl),
-            packageName: EffectivePackageName(funcDecl))
+            packageName: GetNameOfDefinedPackage(funcDecl))
         fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.begin, funcDecl.end))
         AttachFunctionGenericParams(funcDecl, fn)
         if (!funcDecl.TestAttr(AstAttribute.ABSTRACT)) {

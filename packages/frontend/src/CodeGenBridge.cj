@@ -5,6 +5,7 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::chir.Apply as ChirApply
 import cjcj::chir.ApplyWithException as ChirApplyWithException
 import cjcj::chir.AnalysisWrapper
+import cjcj::chir.ArrayLambdaOpt
 import cjcj::chir.Attribute as ChirAttribute
 import cjcj::chir.Block as ChirBlock
 import cjcj::chir.CHIRBuilder as ChirBuilder
@@ -246,14 +247,25 @@ private class ToCHIR {
             if (options.IsCHIROptimizationLevelOverO2()) {
                 UselessAllocateElimination.RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
             }
-            // GAP_COSMETIC: C++ CHIR.cpp:644-645 runs Devirtualization and ArrayLambdaOpt here.
-            // Both passes only rewrite CHIR for optimization; their absence does not change language semantics.
+            // GAP_TODO: Devirtualization is unported; C++ call is CHIR.cpp:648 (blocked on TypeAnalysis facility).
+            RunArrayLambdaOpt(currentPackage)
             if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_FUTURE)) {
                 RedundantFutureRemoval(currentPackage, isDebug: options.chirDebugOptimizer).RunOnPackage()
             }
             if (options.IsCHIROptimizationLevelOverO2() && !options.interpFullBchir) {
                 GetRefToArrayElem.RunOnPackage(currentPackage, builder)
             }
+        }
+    }
+
+    private func RunArrayLambdaOpt(currentPackage: RealCHIRPackage): Unit {
+        let options = instance.invocation.globalOptions
+        if (!options.IsOptimizationExisted(OptimizationFlag.ARRAY_LAMBDA_OPT)) {
+            return
+        }
+        try (recorder = ProfileRecorder("CHIR Opt", "ArrayLambdaOpt")) {
+            ArrayLambdaOpt(builder).RunOnPackage(currentPackage, options.chirDebugOptimizer)
+            DumpCHIRToFile("ArrayLambdaOpt")
         }
     }
 

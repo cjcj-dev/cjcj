@@ -3,6 +3,7 @@ package cjcj::chir
 import std.collection.*
 import cjcj::ast.ASTKind
 import cjcj::ast.Decl as AstDecl
+import cjcj::ast.FuncDecl as AstFuncDecl
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::basic.Position as BasicPosition
@@ -14,6 +15,18 @@ public let NOT_CARE: String = "NOT_CARE"
 // C++: CHIR/Utils/Utils.h:119.
 public let GV_PKG_INIT_ONCE_FLAG: String = "$has_applied_pkg_init_func"
 private let STD_PACKAGE_PREFIX: String = "std."
+
+public func GetNameOfDefinedPackage(funcDecl: AstFuncDecl): String {
+    if (let Some(outerDecl) <- funcDecl.outerDecl) {
+        if (let Some(genericDecl) <- outerDecl.genericDecl) {
+            return genericDecl.fullPackageName
+        }
+    }
+    if (let Some(genericDecl) <- funcDecl.genericDecl) {
+        return genericDecl.fullPackageName
+    }
+    return funcDecl.fullPackageName
+}
 
 public func IsCoreFuture(def: CustomTypeDef): Bool {
     return CheckCustomTypeDefIsExpected(def, CORE_PACKAGE_NAME, STD_LIB_FUTURE)
