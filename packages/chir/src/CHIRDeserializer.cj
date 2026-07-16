@@ -39,4 +39,26 @@ public class CHIRDeserializer {
         phase.value = ToCHIRPhaseFromUInt8(chirPackage.GetPhase())
         return true
     }
+
+    public static func Deserialize(data: CPointer<UInt8>, size: Int64, chirBuilder: CHIRBuilder): Bool {
+        var succeed = true
+        try {
+            let serializationInfo = Array<UInt8>(size, { idx => unsafe { data.read(idx) } })
+            var options = VerifierOptions()
+            options.maxDepth = UInt32.Max
+            options.maxTables = UInt32.Max
+            let verifier = VerifierTemplate(serializationInfo, opts: options)
+            if (!verifier.VerifyBuffer({position: Int64, active: VerifierTemplate =>
+                PackageFormat_CHIRPackage(serializationInfo, position).Verify(active)})) {
+                println("validation of 'CHIRPackage' failed")
+                return false
+            }
+            let chirPackage = GetCHIRPackage(serializationInfo)
+            let deserializer = CHIRDeserializerImpl(chirBuilder, compilePlatform: false)
+            deserializer.Run(chirPackage)
+        } catch (e: Exception) {
+            succeed = false
+        }
+        return succeed
+    }
 }
