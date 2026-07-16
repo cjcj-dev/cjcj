@@ -3259,12 +3259,12 @@ private class CjoSignatureMaterializer {
             gpd.SetTy(typeManager.GetGenericsTy(gpd))
             flatGenericParamDecls[record.index] = gpd
             if (!gpd.exportId.isEmpty()) {
-                AddFlatDeclToImportedPackage(gpd)
+                AddDeclToImportedPackage(gpd)
             }
             return Some(gpd)
         }
         if (ShouldAddFlatDeclToImportedPackage(record.kind)) {
-            AddFlatDeclToImportedPackage(decl)
+            AddDeclToImportedPackage(decl)
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             LoadFlatFuncDeclAdvancedInfo(reader, record, funcDecl)
@@ -3457,7 +3457,7 @@ private class CjoSignatureMaterializer {
             varDecl.EnableAttr(Attribute.SRC_IMPORTED)
         }
         if (IsGlobalOrMember(varDecl)) {
-            AddFlatDeclToImportedPackage(varDecl)
+            AddDeclToImportedPackage(varDecl)
         }
     }
 
@@ -5276,7 +5276,7 @@ private class CjoSignatureMaterializer {
             kind == 10u16 || kind == 11u16 || kind == 13u16
     }
 
-    private func AddFlatDeclToImportedPackage(decl: Decl): Unit {
+    private func AddDeclToImportedPackage(decl: Decl): Unit {
         if (decl.astKind == ASTKind.EXTEND_DECL) {
             return
         }
@@ -5294,9 +5294,10 @@ private class CjoSignatureMaterializer {
         }
         let existingDecl = exportIdDeclMap.get(decl.exportId).getOrThrow()
         var reportError = existingDecl != decl && importSrcCode
+        reportError = reportError && !isChirNow
         if (decl.TestAttr(Attribute.FROM_COMMON_PART)) {
             reportError = false
-            if (FlatDeclaredInDifferentFiles(decl, existingDecl)) {
+            if (DeclaredInDifferentFiles(decl, existingDecl)) {
                 return
             }
             decl.EnableAttr(Attribute.ALREADY_LOADED)
@@ -5315,7 +5316,7 @@ private class CjoSignatureMaterializer {
         return createdMap
     }
 
-    private func FlatDeclaredInDifferentFiles(left: Decl, right: Decl): Bool {
+    private func DeclaredInDifferentFiles(left: Decl, right: Decl): Bool {
         if (let Some(leftFile) <- left.curFile) {
             if (let Some(rightFile) <- right.curFile) {
                 return leftFile != rightFile
