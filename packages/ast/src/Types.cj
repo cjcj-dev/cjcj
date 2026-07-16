@@ -1767,7 +1767,17 @@ public class StructTy <: Ty {
     }
 }
 
-extend StructTy <: Hashable {}
+extend StructTy <: Hashable & Equatable<StructTy> {
+    public operator func ==(right: StructTy): Bool {
+        let leftTy: Ty = this
+        let rightTy: Ty = right
+        return leftTy == rightTy
+    }
+
+    public operator func !=(right: StructTy): Bool {
+        return !(this == right)
+    }
+}
 
 public func CompTyByNames(ty1: Option<Ty>, ty2: Option<Ty>): Bool {
     if (let Some(left) <- ty1) {
