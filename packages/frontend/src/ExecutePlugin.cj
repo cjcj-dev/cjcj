@@ -1,7 +1,9 @@
 package cjcj::frontend
 
-import cjcj::chir.{Block, BuiltinType, CHIRBuilder, CHIRDeserializer, CHIRSerializer, CustomDefKind, CustomType,
-    Function, GetBuiltinTypeWithVTable, GlobalVar, Package, Terminator}
+import cjcj::chir.{BuiltinType, CHIRBuilder, CHIRDeserializer, CHIRSerializer, CustomDefKind, CustomType,
+    Function, GetBuiltinTypeWithVTable, GlobalVar, Terminator}
+import cjcj::chir.Block as CHIRBlock
+import cjcj::chir.Package as CHIRPackage
 import cjcj::macro_pkg.{CloseSymbolTable, GetMethodPointer, OpenSymbolTableSafely, RuntimeHandle}
 import std.collection.*
 
@@ -39,7 +41,7 @@ class ExecutePlugin {
         }
     }
 
-    func SerializePackage(pkg: Package): Bool {
+    func SerializePackage(pkg: CHIRPackage): Bool {
         serializedData = CHIRSerializer.Serialize(pkg)
         if (serializedData.isEmpty()) {
             return false
@@ -70,8 +72,8 @@ class ExecutePlugin {
         srcCodeImportedFuncs: ArrayList<Function>,
         srcCodeImportedVars: ArrayList<GlobalVar>,
         initFuncsForConstVar: ArrayList<Function>,
-        maybeUnreachable: HashMap<Block, Terminator>
-    ): Option<Package> {
+        maybeUnreachable: HashMap<CHIRBlock, Terminator>
+    ): Option<CHIRPackage> {
         CHIRPtrToString(srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar, maybeUnreachable)
 
         builder.MergeAllocatedInstance()
@@ -94,7 +96,7 @@ class ExecutePlugin {
         srcCodeImportedFuncs: ArrayList<Function>,
         srcCodeImportedVars: ArrayList<GlobalVar>,
         initFuncsForConstVar: ArrayList<Function>,
-        maybeUnreachable: HashMap<Block, Terminator>
+        maybeUnreachable: HashMap<CHIRBlock, Terminator>
     ): Unit {
         for (function in srcCodeImportedFuncs) {
             srcCodeImportedFuncNames.add(function.GetIdentifierWithoutPrefix())
@@ -123,7 +125,7 @@ class ExecutePlugin {
         srcCodeImportedFuncs: ArrayList<Function>,
         srcCodeImportedVars: ArrayList<GlobalVar>,
         initFuncsForConstVar: ArrayList<Function>,
-        maybeUnreachable: HashMap<Block, Terminator>
+        maybeUnreachable: HashMap<CHIRBlock, Terminator>
     ): Unit {
         let chirPkg = builder.GetChirContext().GetCurPackage().getOrThrow()
         for (definition in chirPkg.GetAllExtendDef()) {
@@ -171,7 +173,7 @@ class ExecutePlugin {
                     continue
                 }
                 let allBlocks = function.GetBody().getOrThrow().GetAllBlocks()
-                var unreachableBlock: Option<Block> = None
+                var unreachableBlock: Option<CHIRBlock> = None
                 var terminator: Option<Terminator> = None
                 for (block in allBlocks) {
                     if (unreachableBlock.isSome() && terminator.isSome()) {
