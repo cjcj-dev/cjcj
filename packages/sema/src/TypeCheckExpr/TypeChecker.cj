@@ -8445,11 +8445,13 @@ extend TypeChecker {
                     }
                 }
             }
-            return FinishCheck(ctx, lit, ChkLitConstExpr(impl.typeManager, target, lit, stringTy: stringTy,
+            let chkRet = ChkLitConstExpr(impl.typeManager, target, lit, stringTy: stringTy,
                 toStringTy: toStringTy, ctx: Some(ctx),
                 synthesizer: Some({ block: Block => Synthesize(ctx, SynPos.EXPR_ARG, block) }),
                 checker: Some({ targetTy: Ty, partExpr: Expr => Check(ctx, targetTy, partExpr) }),
-                diag: impl.diag))
+                diag: impl.diag)
+            InitializeLitConstValue(lit)
+            return FinishCheck(ctx, lit, chkRet)
         }
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
             return FinishCheck(ctx, arrayLit, CheckArrayLit(ctx, target, arrayLit))
