@@ -55,13 +55,15 @@ public func CollectChangedStructTypes(pkg: Package, declsToBeReCompiled: HashSet
         if (decl.astKind != ASTKind.STRUCT_DECL || decl.TestAttr(Attribute.GENERIC)) {
             continue
         }
-        if (let Some(structTy) <- (decl.GetTy() as StructTy)) {
-            tys.add(structTy)
+        if (let Some(rawTy) <- decl.GetTy()) {
+            if (let Some(structTy) <- (rawTy as StructTy)) {
+                tys.add(structTy)
+            }
         }
     }
     for (decl in pkg.genericInstantiatedDecls) {
         if (decl.toBeCompiled && decl.astKind == ASTKind.STRUCT_DECL) {
-            tys.add((decl.GetTy() as StructTy).getOrThrow())
+            tys.add((decl.GetTy().getOrThrow() as StructTy).getOrThrow())
         }
     }
     return tys
