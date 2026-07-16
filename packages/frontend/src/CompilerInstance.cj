@@ -198,7 +198,7 @@ public class CompilerInstance {
     public let srcFilePaths: ArrayList<String> = ArrayList<String>()
     public let srcDirs: HashSet<String> = HashSet<String>()
     public let diag: DiagnosticEngine
-    public let cachedInfo: CompilationCache = CompilationCache()
+    public var cachedInfo: CompilationCache = CompilationCache()
     public var rawMangleName2DeclMap: RawMangled2DeclMap = RawMangled2DeclMap()
     public var astCacheInfo: ASTCache = ASTCache()
     public var declsWithDuplicatedRawMangleName: HashSet<Decl> = HashSet<Decl>()
@@ -1179,7 +1179,7 @@ public class CompilerInstance {
         return packageManager.ResolveDependence(pkgs)
     }
 
-    private func CacheCompileArgs(): Unit {
+    public func CacheCompileArgs(): Unit {
         cachedInfo.compileArgs.clear()
         for (arg in invocation.globalOptions.ToSerialized()) { cachedInfo.compileArgs.add(arg) }
     }
