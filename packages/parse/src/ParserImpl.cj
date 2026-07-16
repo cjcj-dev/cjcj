@@ -78,7 +78,12 @@ public class ParserImpl {
     }
 
     public func GetProcessedTokens(): Int64 {
-        return lexer.GetCurrentToken()
+        var lexerTokensConsumed = lexer.GetCurrentToken()
+        let lookAheadKind = lookahead.kind
+        if (lookAheadKind != TokenKind.SENTINEL && lookAheadKind != TokenKind.END) {
+            lexerTokensConsumed--
+        }
+        return lexerTokensConsumed
     }
 
     public func GetPrimaryDeclIdentRawValue(): String {
