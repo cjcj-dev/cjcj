@@ -114,6 +114,32 @@ private func AddUniqueLLVMValue(values: ArrayList<LLVMValueRef>, value: LLVMValu
     values.add(value)
 }
 
+private func GetGlobalObjectMetadata(context: LLVMContextHandle, value: LLVMValueRef,
+    name: String): LLVMMetadataRef {
+    let kind = LLVMGetMDKindID(context, name)
+    if (kind == 0u32) {
+        return LLVMNullMetadata()
+    }
+    var result = LLVMNullMetadata()
+    try (countPtr = LibC.malloc<UIntNative>().asResource()) {
+        unsafe { countPtr.value.write(UIntNative(0)) }
+        let entries = unsafe { LLVMGlobalCopyAllMetadata(value, countPtr.value) }
+        let count = unsafe { countPtr.value.read() }
+        if (!entries.isNull()) {
+            var idx: UInt32 = 0u32
+            while (idx < UInt32(count)) {
+                if (unsafe { LLVMValueMetadataEntriesGetKind(entries, idx) } == kind) {
+                    result = unsafe { LLVMValueMetadataEntriesGetMetadata(entries, idx) }
+                    break
+                }
+                idx++
+            }
+            unsafe { LLVMDisposeValueMetadataEntries(entries) }
+        }
+    }
+    return result
+}
+
 public class IncrementalGen {
     private let cgParallelEnabled: Bool
     private var incrementalModule: Option<LLVMModuleHandle> = None
@@ -547,6 +573,99 @@ public class IncrementalGen {
                 function = nextFunction
             }
         } while (erased)
+    }
+
+    // Mirrors IncrementalGen.cpp:462-526.
+    private func UpdateReflectionMetadata(): Unit {
+        let module = injectedModule.getOrThrow()
+        let context = LLVMContextHandle(unsafe { LLVMGetModuleContext(module.raw) }, owned: false)
+        let metaBoundByTI = ArrayList<LLVMMetadataRef>()
+        let metaBoundByTT = ArrayList<LLVMMetadataRef>()
+        let metaBoundByGV = ArrayList<LLVMMetadataRef>()
+        var gv = unsafe { LLVMGetFirstGlobal(module.raw) }
+        while (!gv.isNull()) {
+            if (unsafe { LLVMIsDeclaration(gv) } == 0) {
+                let reflection = GetGlobalObjectMetadata(context, gv, "Reflection")
+                if (!reflection.isNull()) {
+                    if (HasGlobalVariableAttribute(gv, TYPE_TEMPLATE_ATTR)) {
+                        metaBoundByTT.add(reflection)
+                    } else {
+                        metaBoundByTI.add(reflection)
+                    }
+                }
+                let reflectionGV = GetGlobalObjectMetadata(context, gv, "ReflectionGV")
+                if (!reflectionGV.isNull()) {
+                    metaBoundByGV.add(reflectionGV)
+                }
+            }
+            gv = unsafe { LLVMGetNextGlobal(gv) }
+        }
+
+        ClearNamedMetadataOperands(module, METADATA_TYPES)
+        for (metadata in metaBoundByTI) {
+            if (LLVMGetMDNodeOperands(LLVMMetadataToValue(context, metadata)).size != 1) {
+                LLVMAddNamedMetadataOperand(module, METADATA_TYPES, metadata)
+            }
+        }
+        ClearNamedMetadataOperands(module, METADATA_TYPETEMPLATES)
+        for (metadata in metaBoundByTT) {
+            if (LLVMGetMDNodeOperands(LLVMMetadataToValue(context, metadata)).size != 1) {
+                LLVMAddNamedMetadataOperand(module, METADATA_TYPETEMPLATES, metadata)
+            }
+        }
+        if (!LLVMGetNamedMetadata(module, METADATA_GLOBAL_VAR).isNull()) {
+            ClearNamedMetadataOperands(module, METADATA_GLOBAL_VAR)
+            for (metadata in metaBoundByGV) {
+                LLVMAddNamedMetadataOperand(module, METADATA_GLOBAL_VAR, metadata)
+            }
+        }
+
+        let metaBoundByF = ArrayList<LLVMMetadataRef>()
+        var function = unsafe { LLVMGetFirstFunction(module.raw) }
+        while (!function.isNull()) {
+            if (unsafe { LLVMIsDeclaration(function) } == 0) {
+                let reflectionFunction = GetGlobalObjectMetadata(context, function, "ReflectionFunc")
+                if (!reflectionFunction.isNull()) {
+                    metaBoundByF.add(reflectionFunction)
+                }
+            }
+            function = unsafe { LLVMGetNextFunction(function) }
+        }
+        if (!LLVMGetNamedMetadata(module, METADATA_FUNCTIONS).isNull()) {
+            ClearNamedMetadataOperands(module, METADATA_FUNCTIONS)
+            for (metadata in metaBoundByF) {
+                LLVMAddNamedMetadataOperand(module, METADATA_FUNCTIONS, metadata)
+            }
+        }
+    }
+
+    // Mirrors IncrementalGen.cpp:528-548.
+    private func UpdateCodeGenAddedMetadata(): Unit {
+        let injected = injectedModule.getOrThrow()
+        let incremental = incrementalModule.getOrThrow()
+        if (!LLVMGetNamedMetadata(injected, "CodeGenAddedForIncr").isNull() &&
+            !LLVMGetNamedMetadata(incremental, "CodeGenAddedForIncr").isNull()) {
+            for (metadata in LLVMGetNamedMetadataOperandValues(incremental, "CodeGenAddedForIncr")) {
+                LLVMAddNamedMetadataOperand(injected, "CodeGenAddedForIncr", LLVMValueToMetadata(metadata))
+            }
+        }
+        if (!LLVMGetNamedMetadata(injected, "StaticGenericTIsForIncr").isNull()) {
+            if (!LLVMGetNamedMetadata(incremental, "StaticGenericTIsForIncr").isNull()) {
+                for (metadata in LLVMGetNamedMetadataOperandValues(incremental, "StaticGenericTIsForIncr")) {
+                    LLVMAddNamedMetadataOperand(injected, "StaticGenericTIsForIncr", LLVMValueToMetadata(metadata))
+                }
+            }
+            for (metadata in LLVMGetNamedMetadataOperandValues(injected, "StaticGenericTIsForIncr")) {
+                let operands = LLVMGetMDNodeOperands(metadata)
+                staticGINames.add(LLVMGetMDStringValue(operands[0]).getOrThrow())
+            }
+        }
+    }
+
+    private func ClearNamedMetadataOperands(module: LLVMModuleHandle, name: String): Unit {
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            unsafe { LLVMSelfhostNamedMetadataClearOperands(module.raw, nameCString.value, UInt32(name.size)) }
+        }
     }
 
     // Mirrors IncrementalGen.cpp:550-558.
