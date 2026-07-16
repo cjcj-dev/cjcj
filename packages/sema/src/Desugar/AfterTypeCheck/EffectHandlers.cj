@@ -854,7 +854,9 @@ private func CreateFrame(typeManager: TypeManager, importManager: SemaImportMana
     let frameInit = CreateMemberAccess(frameRef, INIT_METHOD_NAME)
     AddTargetIfFunc(frameInit)
     let frameArgs = ArrayList<FuncArg>()
-    frameArgs.add(CreateFuncArg(CreateRefExpr(lambdaVar, tryExpr)))
+    let lambdaVarRef = CreateRefExpr(lambdaVar)
+    CopyNodeScopeInfo(lambdaVarRef, frameRef)
+    frameArgs.add(CreateFuncArg(lambdaVarRef))
     let frameCreation = CreateCallExpr(frameInit, frameArgs, None, Some(frameTy), CallKind.CALL_OBJECT_CREATION)
     if (!callChecker(frameTy, frameCreation)) {
         return None
