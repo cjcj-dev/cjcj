@@ -802,10 +802,23 @@ public class TypeManager {
         return ty
     }
 
+    // C++ src/Sema/TypeManager.cpp:399-409 TypeManager::ApplyTypeSubstForTy.
+    public func ApplyTypeSubstForTy(typeMapping: TypeSubst, ty: Ty): Ty {
+        if (typeMapping.IsEmpty()) {
+            return ty
+        }
+        let tyVarScope = BeginTyVarScope(this)
+        let substPack = SubstPack()
+        PackMapping(substPack, typeMapping)
+        let result = ApplySubstPack(ty, substPack)
+        EndTyVarScope(tyVarScope)
+        return result
+    }
+
     public func ApplyTypeSubstForTys(subst: TypeSubst, tys: TySet): TySet {
         let out = TySet()
         for (ty in tys.values) {
-            out.Add(GetInstantiatedTy(ty, subst))
+            out.Add(ApplyTypeSubstForTy(subst, ty))
         }
         return out
     }
@@ -1025,7 +1038,7 @@ public class TypeManager {
         if (let Some(cached) <- tyToSuperTysMap.get(cacheKey)) {
             return cached.Clone()
         }
-        let maybeInstTy = if (typeMapping.IsEmpty()) { ty } else { GetInstantiatedTy(ty, typeMapping) }
+        let maybeInstTy = ApplyTypeSubstForTy(typeMapping, ty)
         if (maybeInstTy.IsClassLike() || maybeInstTy.IsStruct()) {
             out.Add(maybeInstTy)
         } else if (let Some(genTy) <- (maybeInstTy as GenericsTy)) {
