@@ -64,6 +64,10 @@ public class CHIRContext {
     private var anyTy: Option<ClassType> = None
 
     public init() {
+        Init()
+    }
+
+    public func Init(): Unit {
         RegisterBuiltin(invalidTy)
         RegisterBuiltin(unitTy)
         RegisterBuiltin(boolTy)
