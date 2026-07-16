@@ -10,6 +10,7 @@ import cjcj::modules.SemaImportManager
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.TypeManager
 import cjcj::sema.CreateThrowException
+import cjcj::sema.GenerateTypeMapping
 import cjcj::utils.*
 
 private let INTEROPLIB_VERSION_FIELD_ID: String = "INTEROPLIB_VERSION"
@@ -561,6 +562,137 @@ public class InteropLibBridge {
         }
         diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_java_interoplib_version_too_old,
             DEFAULT_POSITION, InteropLibBridge.INTEROPLIB_VERSION.toString()).Emit()
+    }
+
+    public func CreateNewGlobalRefCall(env: Expr, obj: Expr, isWeak: Bool): Option<CallExpr> {
+        let isWeakBoolValue = CreateBoolLit(isWeak)
+        isWeakBoolValue.curFile = obj.curFile
+        isWeakBoolValue.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(env))
+        args.add(CreateFuncArg(obj))
+        args.add(CreateFuncArg(isWeakBoolValue))
+        return CreateCall(GetNewGlobalRefDecl(), obj.curFile, args: args)
+    }
+
+    public func CreateDeleteGlobalRefCall(env: Expr, obj: Expr): Option<CallExpr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(env))
+        args.add(CreateFuncArg(obj))
+        return CreateCall(GetDeleteGlobalRefDecl(), obj.curFile, args: args)
+    }
+
+    public func CreateRemoveFromRegistryCall(registryId: Expr): Option<CallExpr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(registryId))
+        return CreateCall(GetRemoveFromRegistryDecl(), registryId.curFile, args: args)
+    }
+
+    public func CreatePutToRegistryCall(obj: Expr): Option<CallExpr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(obj))
+        return CreateCall(GetPutToRegistryDecl(), obj.curFile, args: args)
+    }
+
+    public func CreatePutSetToRegistryCall(env: Expr, entity: Expr, obj: Expr): Option<CallExpr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(env))
+        args.add(CreateFuncArg(entity))
+        args.add(CreateFuncArg(obj))
+        return CreateCall(GetPutSetToRegistryDecl(), entity.curFile, args: args)
+    }
+
+    public func CreateGetRegistryIdCall(env: Expr, entity: Expr,
+        nullable!: Bool = false): Option<CallExpr> {
+        let decl = if (nullable) { GetGetRegistryIdOrNoneDecl() } else { GetGetRegistryIdDecl() }
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(env))
+        args.add(CreateFuncArg(entity))
+        return CreateCall(decl, entity.curFile, args: args)
+    }
+
+    public func CreateGetFromRegistryByEntityCall(env: Expr, obj: Expr, ty: Ty,
+        retAsOption: Bool): Option<CallExpr> {
+        let funcDecl = if (retAsOption) {
+            GetGetFromRegistryByEntityOptionDecl()
+        } else {
+            GetGetFromRegistryByEntityDecl()
+        }
+        if (let None <- funcDecl) {
+            return None
+        }
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(env))
+        args.add(CreateFuncArg(obj))
+        let fdRef = WithinFile<RefExpr>(CreateRefExpr(funcDecl.getOrThrow()), obj.curFile)
+        fdRef.instTys.add(ty)
+        fdRef.SetTy(typeManager.GetInstantiatedTy(funcDecl.getOrThrow().GetTy().getOrThrow(),
+            GenerateTypeMapping(funcDecl.getOrThrow(), fdRef.instTys)))
+        let retTy = if (retAsOption) { utils.GetOptionTy(ty) } else { ty }
+        return Some(CreateCallExpr(fdRef, args, funcDecl, retTy, CallKind.CALL_DECLARED_FUNCTION))
+    }
+
+    public func CreateCangjieStringToJavaCall(env: Expr, string: Expr): Option<CallExpr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(env))
+        args.add(CreateFuncArg(string))
+        return CreateCall(GetCangjieStringToJava(), string.curFile, args: args)
+    }
+
+    public func CreateJavaStringToCangjieCall(env: Expr, jstring: Expr): Option<CallExpr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(env))
+        args.add(CreateFuncArg(jstring))
+        return CreateCall(GetJavaStringToCangjie(), jstring.curFile, args: args)
+    }
+
+    public func CreateGetFromRegistryCall(env: Expr, self: Expr, ty: Ty): Option<CallExpr> {
+        let funcDecl = GetGetFromRegistryDecl()
+        if (let None <- funcDecl) {
+            return None
+        }
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(env))
+        args.add(CreateFuncArg(self))
+        let fdRef = WithinFile<RefExpr>(CreateRefExpr(funcDecl.getOrThrow()), self.curFile)
+        fdRef.instTys.add(ty)
+        fdRef.SetTy(typeManager.GetInstantiatedTy(funcDecl.getOrThrow().GetTy().getOrThrow(),
+            GenerateTypeMapping(funcDecl.getOrThrow(), fdRef.instTys)))
+        return Some(CreateCallExpr(fdRef, args, funcDecl, ty, CallKind.CALL_DECLARED_FUNCTION))
+    }
+
+    public func CreateGetFromRegistryOptionCall(self: Expr, ty: Ty): Option<CallExpr> {
+        CJC_ASSERT(ty.IsCoreOptionType())
+        let funcDecl = GetGetFromRegistryOptionDecl()
+        if (let None <- funcDecl) {
+            return None
+        }
+        CJC_ASSERT_WITH_MSG(!ty.typeArgs.isEmpty(), "Option type expected to be generic")
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(self))
+        let fdRef = WithinFile<RefExpr>(CreateRefExpr(funcDecl.getOrThrow()), self.curFile)
+        fdRef.instTys.add(ty.typeArgs[0])
+        fdRef.SetTy(typeManager.GetInstantiatedTy(funcDecl.getOrThrow().GetTy().getOrThrow(),
+            GenerateTypeMapping(funcDecl.getOrThrow(), fdRef.instTys)))
+        return Some(CreateCallExpr(fdRef, args, funcDecl, ty, CallKind.CALL_DECLARED_FUNCTION))
+    }
+
+    public func CreateEnsureNotNullCall(entity: Expr): Option<Expr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(entity))
+        if (let Some(call) <- CreateCall(GetEnsureNotNullDecl(), entity.curFile, args: args)) {
+            return Some(call)
+        }
+        return None
+    }
+
+    public func CreateGetJavaEntityOrNullCall(entity: Expr): Option<Expr> {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(entity))
+        if (let Some(call) <- CreateCall(GetGetJavaEntityOrNullDecl(), entity.curFile, args: args)) {
+            return Some(call)
+        }
+        return None
     }
 
     public func CreateGetJavaLambdaObjectCall(refExpr: RefExpr, classSign: String,
