@@ -458,6 +458,8 @@ extend ParserImpl {
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
+            SetDeclBeginPos(decl)
+            SetBeginToAnnotationsBegin(decl, annos)
             return decl
         }
         if (Seeing(TokenKind.PROP)) {
@@ -2175,7 +2177,7 @@ extend ParserImpl {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let key = Expect(TokenKind.TYPE, "expected 'type'")
             ret.keywordPos = key.Begin()
-            ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
+            ret.begin = key.Begin()
             CheckDeclarationInScope(scopeKind, DefKind.TYPE)
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.TYPE))
             while (SeeingOperator()) {
