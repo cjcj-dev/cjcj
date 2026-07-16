@@ -21,6 +21,7 @@ public interface SemaImportManager {
     func GetAllImportedPackages(includeMacroPkg: Bool): ArrayList<ASTPackageDecl>
     func GetPackageDecl(fullPackageName: String): Option<ASTPackageDecl>
     func GetPackage(fullPackageName: String): Option<ASTPackage>
+    func GetDepPkgCjoPaths(): HashMap<String, String>
     func GetImportedDecl<T>(fullPackageName: String, name: String): Option<T> where T <: ASTDecl
     func GetAstDecl<T>(name: String): Option<T> where T <: ASTDecl
     func GetCoreDecl<T>(name: String): Option<T> where T <: ASTDecl

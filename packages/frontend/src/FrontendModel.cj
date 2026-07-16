@@ -6221,6 +6221,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     private let packageDecls: HashMap<String, PackageDecl> = HashMap<String, PackageDecl>()
     private let exportIdDeclMaps: HashMap<String, HashMap<String, Decl>> =
         HashMap<String, HashMap<String, Decl>>()
+    private let cjoFilePaths: HashMap<String, String> = HashMap<String, String>()
     private let depPkgCjdPaths: HashMap<String, String> = HashMap<String, String>()
     private let stdDepsMap: HashMap<String, StdDepEntry> = HashMap<String, StdDepEntry>()
     private let packageNameMap: FaithfulUnorderedMap<CjoPackageInfo> = FaithfulUnorderedMap<CjoPackageInfo>()
@@ -6536,6 +6537,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         importedPackages.clear()
         packageDecls.clear()
         exportIdDeclMaps.clear()
+        cjoFilePaths.clear()
         depPkgCjdPaths.clear()
         stdDepsMap.clear()
         packageNameMap.clear()
@@ -6695,6 +6697,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         ClearForReBuildIndex()
         typeManager.Clear()
         typeManager.ClearMapCache()
+        cjoFilePaths.clear()
         depPkgCjdPaths.clear()
         stdDepsMap.clear()
         dependencyGraph.getOrThrow().Clear()
@@ -6822,6 +6825,16 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return depPkgCjdPaths
     }
 
+    public func GetDepPkgCjoPaths(): HashMap<String, String> {
+        let out = HashMap<String, String>()
+        for (fullPackageName in cjoFilePaths.keys()) {
+            if (let Some(cjoPath) <- cjoFilePaths.get(fullPackageName)) {
+                out[fullPackageName] = cjoPath
+            }
+        }
+        return out
+    }
+
     public func GetUsedSTDLibFiles(depType: DepType): HashSet<String> {
         let result = HashSet<String>()
         for (cjoPath in stdDepsMap.keys()) {
@@ -6835,7 +6848,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     public func AnalyzeDepStdPkgsOfBC(fullPackageName: String): Bool {
-        if ((let Some(_) <- GetPackage(fullPackageName)) || depPkgCjdPaths.contains(fullPackageName)) {
+        if ((let Some(_) <- GetPackage(fullPackageName)) || cjoFilePaths.contains(fullPackageName)) {
             return true
         }
         let cjoPath = FileUtil.FindSerializationFile(fullPackageName, ".cjo", searchPath.toArray())
@@ -6851,6 +6864,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         if (!VerifySerializedPackageData(data, fullPackageName)) {
             return false
         }
+        cjoFilePaths[fullPackageName] = cjoPath
         depPkgCjdPaths[fullPackageName] = cjoPath
         for (depStdPkg in ReadAllDependentStdPkgs(data)) {
             let depCjoPath = FindAndSaveDepStdCjoPath(depStdPkg)
@@ -7814,6 +7828,9 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     private func SaveDepPkgCjoPath(fullPackageName: String, cjoPath: String): Unit {
+        if (!cjoFilePaths.contains(fullPackageName)) {
+            cjoFilePaths[fullPackageName] = cjoPath
+        }
         depPkgCjdPaths[fullPackageName] = cjoPath
     }
 
@@ -8263,12 +8280,12 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     }
 
     private func FindAndSaveDepStdCjoPath(fullPackageName: String): String {
-        if (let Some(cachedPath) <- depPkgCjdPaths.get(fullPackageName)) {
+        if (let Some(cachedPath) <- cjoFilePaths.get(fullPackageName)) {
             return cachedPath
         }
         let cjoPath = FileUtil.FindSerializationFile(fullPackageName, ".cjo", searchPath.toArray())
         if (!cjoPath.isEmpty()) {
-            depPkgCjdPaths[fullPackageName] = cjoPath
+            cjoFilePaths[fullPackageName] = cjoPath
         }
         return cjoPath
     }
