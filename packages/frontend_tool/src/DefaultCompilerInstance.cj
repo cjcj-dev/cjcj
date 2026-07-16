@@ -2,6 +2,7 @@ package cjcj::frontend_tool
 
 import std.collection.*
 import cjcj::frontend.*
+import cjcj::ast.PrintNode
 import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
@@ -430,42 +431,7 @@ private func ProfiledBool(title: String, subtitle: String, action: () -> Bool): 
 
 private func DumpASTToScreen(srcPkgs: ArrayList<Package>): Unit {
     for (pkg in srcPkgs) {
-        println(RenderPackageTree(pkg))
-    }
-}
-
-private func RenderPackageTree(pkg: Package): String {
-    let builder = StringBuilder()
-    builder.append("Package(" + pkg.fullPackageName + ")\n")
-    for (file in pkg.files) {
-        builder.append("  File(" + file.filePath + ")\n")
-        if (let Some(packageSpec) <- file.packageSpec) {
-            builder.append("    package " + packageSpec.GetPackageName() + "\n")
-        }
-        for (importSpec in file.imports) {
-            builder.append("    import " + GetImportedItemFullName(importSpec.content) + "\n")
-        }
-        for (decl in file.decls) {
-            AppendDeclTree(builder, decl, 2)
-        }
-    }
-    return builder.toString()
-}
-
-private func AppendDeclTree(builder: StringBuilder, decl: Decl, indent: Int64): Unit {
-    var spaces = ""
-    var idx: Int64 = 0
-    while (idx < indent) {
-        spaces += "  "
-        idx++
-    }
-    builder.append(spaces + ASTKindName(decl.astKind) + " " + decl.identifier.Val())
-    if (!decl.mangledName.isEmpty()) {
-        builder.append(" [" + decl.mangledName + "]")
-    }
-    builder.append("\n")
-    for (member in decl.GetMemberDecls()) {
-        AppendDeclTree(builder, member, indent + 1)
+        print(PrintNode(pkg))
     }
 }
 

@@ -3,6 +3,7 @@ package cjcj::frontend
 import cjcj::ast.Package as RealASTPackage
 import cjcj::ast.PackageDecl as RealASTPackageDecl
 import cjcj::ast.StructTy as RealASTStructTy
+import cjcj::ast.PrintNode
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::mangle.CHIRMangler as RealCHIRMangler
 import cjcj::mangle.MangleAstAdapter as RealMangleAstAdapter
@@ -1481,7 +1482,7 @@ private var astDumpFileNum: Int64 = 0
 
 private func DumpASTToScreen(srcPkgs: ArrayList<Package>): Unit {
     for (pkg in srcPkgs) {
-        println(RenderPackageTree(pkg))
+        print(PrintNode(pkg))
     }
 }
 
@@ -1514,43 +1515,8 @@ private func DumpAST(srcPkgs: ArrayList<Package>, outputOfProduct: String, prefi
         return
     }
     let dumpPath = JoinPath(realDirPath.getOrThrow(), astDumpFileNum.toString() + "_" + prefix + "_ast.txt")
-    let rendered = RenderPackageTree(srcPkgs[0])
+    let rendered = PrintNode(srcPkgs[0])
     if (WriteFileContent(dumpPath, rendered)) {
         astDumpFileNum++
-    }
-}
-
-private func RenderPackageTree(pkg: Package): String {
-    let builder = StringBuilder()
-    builder.append("Package(" + pkg.fullPackageName + ")\n")
-    for (file in pkg.files) {
-        builder.append("  File(" + file.filePath + ")\n")
-        if (let Some(packageSpec) <- file.packageSpec) {
-            builder.append("    package " + packageSpec.GetPackageName() + "\n")
-        }
-        for (importSpec in file.imports) {
-            builder.append("    import " + GetImportedItemFullName(importSpec.content) + "\n")
-        }
-        for (decl in file.decls) {
-            appendDecl(builder, decl, 2)
-        }
-    }
-    return builder.toString()
-}
-
-private func appendDecl(builder: StringBuilder, decl: Decl, indent: Int64): Unit {
-    var spaces = ""
-    var idx: Int64 = 0
-    while (idx < indent) {
-        spaces += "  "
-        idx++
-    }
-    builder.append(spaces + ASTKindName(decl.astKind) + " " + decl.identifier.Val())
-    if (!decl.mangledName.isEmpty()) {
-        builder.append(" [" + decl.mangledName + "]")
-    }
-    builder.append("\n")
-    for (member in decl.GetMemberDecls()) {
-        appendDecl(builder, member, indent + 1)
     }
 }
