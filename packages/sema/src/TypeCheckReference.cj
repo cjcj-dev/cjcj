@@ -1404,9 +1404,9 @@ private func CheckUsageOfThis(
     var valid = true
     if (let Some(curFuncBody) <- curFuncBodyOpt) {
         if (curFuncBody.TestAttr(Attribute.STATIC)) {
-            let builder = diag.Diagnose(
-                re.begin,
-                re.end,
+            let builder = Diagnose(
+                diag,
+                re,
                 BasicDiagKind.sema_static_members_cannot_call_members,
                 args: [BasicDiagArgument(re.ref.identifier.Val())])
             builder.Emit()
@@ -1415,7 +1415,7 @@ private func CheckUsageOfThis(
     }
     if (outerDecl.astKind == ASTKind.INTERFACE_DECL) {
         if (let Some(_) <- re.callOrPattern) {
-            let builder = diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_illegal_this_in_interface)
+            let builder = Diagnose(diag, re, BasicDiagKind.sema_illegal_this_in_interface)
             builder.Emit()
             valid = false
         }
@@ -1442,9 +1442,9 @@ private func CheckUsageOfThis(
             }
         }
         if (lambdaOrNestedFuncInMutFunc) {
-            let builder = diag.Diagnose(
-                re.begin,
-                re.end,
+            let builder = Diagnose(
+                diag,
+                re,
                 BasicDiagKind.sema_capture_this_or_instance_field_in_func,
                 args: [
                     BasicDiagArgument(re.ref.identifier.Val()),
@@ -1464,9 +1464,9 @@ private func CheckUsageOfThis(
             } else {
                 "constructor of " + (if (outerDecl.TestAttr(Attribute.OPEN)) { "open" } else { "abstract" }) + " class"
             }
-            let builder = diag.Diagnose(
-                re.begin,
-                re.end,
+            let builder = Diagnose(
+                diag,
+                re,
                 BasicDiagKind.sema_use_this_as_an_expression_in_func,
                 args: [BasicDiagArgument(info)])
             builder.Emit()
@@ -1503,9 +1503,9 @@ private func CheckUsageOfThis(
             }
         }
         if (inInvalidCtx) {
-            let builder = diag.Diagnose(
-                re.begin,
-                re.end,
+            let builder = Diagnose(
+                diag,
+                re,
                 BasicDiagKind.sema_illegal_this_outside_struct_constructor)
             builder.Emit()
             valid = false

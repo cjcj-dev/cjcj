@@ -168,19 +168,37 @@ private class DeclAttributeCheckerImpl {
     private func CheckExtendAttribute(extendDecl: ExtendDecl): Unit {
         SetCommonAttributes(extendDecl)
         for (member in extendDecl.members) {
-            if (member.TestAttr(Attribute.MUT) && HasExplicitMutModifier(member)) {
-                if (!IsExtendMutAllowed(extendDecl, member)) {
-                    AddIssue(
-                        DeclAttributeIssueKind.INVALID_MUT_EXTEND_MEMBER,
-                        member,
-                        "'mut' extend members are only valid for struct extensions or properties"
-                    )
+            let extendedDecl = Ty.GetDeclPtrOfTy(extendDecl.GetTy())
+            var mutDecl: Option<Modifier> = None
+            for (modifier in member.modifiers) {
+                if (modifier.modifier == TokenKind.MUT) {
+                    mutDecl = Some(modifier)
+                }
+            }
+            if (member.TestAttr(Attribute.MUT) && mutDecl.isSome()) {
+                let mutModifier = mutDecl.getOrThrow()
+                if (let Some(extendedDeclValue) <- extendedDecl &&
+                    extendedDeclValue.astKind != ASTKind.STRUCT_DECL && member.astKind != ASTKind.PROP_DECL) {
+                    DiagnoseRefactor(
+                        diag,
+                        BasicDiagKindRefactor.sema_invalid_mut_modifier_extend_of_struct,
+                        mutModifier,
+                        extendedDeclValue.identifier.Val()
+                    ).Emit()
+                } else if (let Some(extendedTy) <- extendDecl.GetTy() && extendedTy.IsPrimitive()) {
+                    DiagnoseRefactor(
+                        diag,
+                        BasicDiagKindRefactor.sema_invalid_mut_modifier_extend_of_struct,
+                        mutModifier,
+                        extendedTy.String()
+                    ).Emit()
                 }
             }
             if (let Some(propDecl) <- (member as PropDecl)) {
-                let needMut = !propDecl.TestAttr(Attribute.STATIC) && IsExtendTargetStruct(extendDecl)
-                if (needMut) {
-                    for (setter in propDecl.setters) {
+                let needMut = !propDecl.TestAttr(Attribute.STATIC) &&
+                    (if (let Some(extendedTy) <- extendDecl.GetTy()) { extendedTy.IsStruct() } else { false })
+                for (setter in propDecl.setters) {
+                    if (needMut) {
                         setter.EnableAttr(Attribute.MUT)
                     }
                 }
@@ -458,36 +476,6 @@ private func MemberHasBody(member: Decl): Bool {
 
 private func IsCommonWithoutDefault(decl: Decl): Bool {
     return decl.TestAttr(Attribute.COMMON) && !decl.TestAttr(Attribute.COMMON_WITH_DEFAULT)
-}
-
-private func HasExplicitMutModifier(decl: Decl): Bool {
-    for (modifier in decl.modifiers) {
-        if (modifier.modifier == TokenKind.MUT) {
-            return true
-        }
-    }
-    return false
-}
-
-private func IsExtendMutAllowed(extendDecl: ExtendDecl, member: Decl): Bool {
-    if (member.astKind == ASTKind.PROP_DECL) {
-        return true
-    }
-    return IsExtendTargetStruct(extendDecl)
-}
-
-private func IsExtendTargetStruct(extendDecl: ExtendDecl): Bool {
-    if (let Some(extendedType) <- extendDecl.extendedType) {
-        if (let Some(target) <- extendedType.GetTarget()) {
-            return target.astKind == ASTKind.STRUCT_DECL
-        }
-        if (let Some(ty) <- extendedType.GetTy()) {
-            if (let Some(_) <- (ty as StructTy)) {
-                return true
-            }
-        }
-    }
-    return false
 }
 
 private func CloneDeclAttributeIssues(values: ArrayList<DeclAttributeIssue>): ArrayList<DeclAttributeIssue> {

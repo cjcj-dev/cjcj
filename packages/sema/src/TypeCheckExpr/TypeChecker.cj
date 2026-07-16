@@ -2173,6 +2173,9 @@ extend TypeChecker {
             mpImpl.PrepareTypeCheck4CJMPExtension(
                 ci.getOrThrow(), impl.scopeManager, ctx, extendNodes)
             TypeCheckExtendUpdateExtendMap(impl.typeManager, extends)
+            for (extendDecl in extends) {
+                let _ = CheckDeclAttributesForDecl(extendDecl, diagValue, opts: GlobalOptions())
+            }
             let _ = TypeCheckExtendCheckDuplicateInterfaces(diagValue, impl.typeManager, extends)
             let _ = TypeCheckExtendCheckBuiltinPointerSpecializations(diagValue, impl.typeManager)
             return
