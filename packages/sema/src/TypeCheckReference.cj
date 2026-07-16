@@ -882,8 +882,7 @@ public func FilterAndCheckTargetsOfNameAccess(
         }
     }
     if (targets.isEmpty()) {
-        let accessRange = TypeCheckReferenceFieldRange(ma)
-        let builder = diag.Diagnose(accessRange.begin, accessRange.end,
+        let builder = Diagnose(diag, ma,
             BasicDiagKind.sema_illegal_access_non_static_member,
             args: [BasicDiagArgument(ma.field.Val())])
         builder.Emit()

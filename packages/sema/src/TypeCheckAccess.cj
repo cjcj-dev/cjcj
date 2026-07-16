@@ -467,7 +467,7 @@ public func CheckNonFuncAccessControl(diag: BasicDiagnosticEngine, typeManager: 
     if (IsLegalAccess(typeManager, sym, target, accessSite)) {
         return true
     }
-    let builder = diag.Diagnose(accessSite.begin, accessSite.end,
+    let builder = Diagnose(diag, accessSite,
         BasicDiagKind.sema_invalid_access_control,
         args: [BasicDiagArgument(target.identifier.Val())])
     builder.Emit()
