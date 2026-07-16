@@ -815,11 +815,11 @@ extend ParserImpl {
             let keywordToken = Expect(TokenKind.MAIN, "expected function keyword")
             ret.keywordPos = keywordToken.Begin()
             ret.begin = keywordToken.Begin()
+            ret.identifier = SrcIdentifier("main", "main", ret.keywordPos, ret.keywordPos + 4, false)
             CheckDeclarationInScope(scopeKind, DefKind.MAIN)
             let body = ParseFuncBody(ScopeKind.MAIN_BODY)
             ret.funcBody = body
             ret.end = body.end
-            ret.identifier = SrcIdentifier("main", "main", ret.keywordPos, ret.keywordPos + 4, false)
             if (let None <- body.body) {
                 DiagMissingBody("main function", "", lastToken.End())
             }
