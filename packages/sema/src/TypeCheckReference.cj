@@ -819,7 +819,7 @@ public func TypeCheckReferenceFilterTargetsInExtend(
     return !targets.isEmpty()
 }
 
-public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
+public func FilterAndCheckTargetsOfRef(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
     ctx: ASTContext,
@@ -829,10 +829,8 @@ public func TypeCheckReferenceFilterAndCheckTargetsOfRef(
     TypeCheckReferenceRemoveDuplicateTargets(tm, targets)
     TypeCheckReferenceFilterCandidatesForRef(tm, ctx, re, targets)
     if (targets.isEmpty()) {
-        let builder = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_undeclared_identifier,
-            TypeCheckReferenceRange(re),
-            arguments: [re.ref.identifier.Val()])
-        builder.Emit()
+        Diagnose(diag, re, BasicDiagKind.sema_undeclared_identifier,
+            args: [BasicDiagArgument(re.ref.identifier.Val())]).Emit()
         return false
     }
     if (targets.size == 1 && targets[0].getOrThrow().astKind == ASTKind.PACKAGE_DECL && re.isAlone) {

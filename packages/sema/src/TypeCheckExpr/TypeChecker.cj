@@ -2496,12 +2496,10 @@ extend TypeChecker {
         let file = fd.curFile.getOrThrow()
         if (let Some(diagValue) <- impl.diag) {
             if (file.isCommon) {
-                let builder = diagValue.DiagnoseRefactor(BasicDiagKindRefactor.sema_common_package_has_main,
-                    MakeRange(fd.begin, fd.end))
-                builder.Emit()
+                DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_common_package_has_main, fd).Emit()
             }
             if (!mainFunctionMap.isEmpty() && (!mainFunctionMap.contains(file) || !ContainsMainFunction(file, fd))) {
-                diagValue.Diagnose(fd.begin, fd.end, BasicDiagKind.sema_redefinition_entry).Emit()
+                Diagnose(diagValue, fd, BasicDiagKind.sema_redefinition_entry).Emit()
             }
         }
         if (let Some(body) <- fd.funcBody) {
@@ -2509,8 +2507,7 @@ extend TypeChecker {
                 if (let Some(retTy) <- retType.GetTy()) {
                     if (Ty.IsTyCorrect(retTy) && !(retTy.IsInteger() || retTy.IsUnit())) {
                         if (let Some(diagValue2) <- impl.diag) {
-                            diagValue2.Diagnose(fd.begin, fd.end,
-                                BasicDiagKind.sema_unexpected_return_type_for_entry).Emit()
+                            Diagnose(diagValue2, fd, BasicDiagKind.sema_unexpected_return_type_for_entry).Emit()
                         }
                     }
                 }
@@ -2539,7 +2536,7 @@ extend TypeChecker {
         }
         if (invalidParamTy) {
             if (let Some(diagValue3) <- impl.diag) {
-                diagValue3.Diagnose(fd.begin, fd.end, BasicDiagKind.sema_unexpected_param_for_entry).Emit()
+                Diagnose(diagValue3, fd, BasicDiagKind.sema_unexpected_param_for_entry).Emit()
             }
         }
         AddMainFunction(file, fd)
@@ -8707,7 +8704,7 @@ extend TypeChecker {
                 targets.add(Some(target))
             }
         }
-        if (!TypeCheckReferenceFilterAndCheckTargetsOfRef(
+        if (!FilterAndCheckTargetsOfRef(
             impl.diag.getOrThrow(), impl.typeManager, ctx, re, targets) || !isWellTyped) {
             re.SetTy(TypeManager.GetInvalidTy())
             return
