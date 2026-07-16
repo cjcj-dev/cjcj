@@ -69,7 +69,14 @@ private func EmitInitializationIssue(diag: BasicDiagnosticEngine, issue: Initial
                     DiagnoseRefactorNode(diag, target, BasicDiagKindRefactor.sema_type_uninitialized_static_field,
                         target.identifier.Val())
                 } else {
-                    DiagnoseNode(diag, issue.node, BasicDiagKind.sema_class_uninitialized_field, name)
+                    var diagNode = issue.node
+                    if (let Some(funcDecl) <- (issue.node as FuncDecl)) {
+                        if (funcDecl.TestAttr(Attribute.COMPILER_ADD) &&
+                            !funcDecl.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
+                            diagNode = target
+                        }
+                    }
+                    DiagnoseNode(diag, diagNode, BasicDiagKind.sema_class_uninitialized_field, name)
                 }
             } else {
                 DiagnoseNode(diag, issue.node, BasicDiagKind.sema_class_uninitialized_field, name)
