@@ -672,6 +672,7 @@ public class CompilerInstance {
         semaInstance.typeManager = typeManager.AsFaithfulSemaTypeManager()
         semaInstance.globalOptions = invocation.globalOptions
         semaInstance.kind = kind
+        semaInstance.compileStrategy = getCompileStrategy().strategyKind
         semaInstance.buildTrie = buildTrie
         semaInstance.frontendDumpActionIsTypeCheck = invocation.frontendOptions.dumpAction == DumpAction.TYPE_CHECK
         semaInstance.diag = Some(diag.AsBasicDiagnosticEngine())

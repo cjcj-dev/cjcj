@@ -9,10 +9,36 @@ import cjcj::modules.SemaImportManager
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 
+// C++ include/cangjie/Frontend/CompileStrategy.h:28-32.
+public enum StrategyType {
+    | DEFAULT
+    | FULL_COMPILE
+    | INCREMENTAL_COMPILE
+}
+
+private func StrategyTypeIndex(kind: StrategyType): Int64 {
+    return match (kind) {
+        case StrategyType.DEFAULT => 0
+        case StrategyType.FULL_COMPILE => 1
+        case StrategyType.INCREMENTAL_COMPILE => 2
+    }
+}
+
+extend StrategyType <: Equatable<StrategyType> {
+    public operator func ==(rhs: StrategyType): Bool {
+        return StrategyTypeIndex(this) == StrategyTypeIndex(rhs)
+    }
+
+    public operator func !=(rhs: StrategyType): Bool {
+        return !(this == rhs)
+    }
+}
+
 public class CompilerInstance {
     public var typeManager: TypeManager = TypeManager()
     public var globalOptions: OptionGlobalOptions = OptionGlobalOptions()
     public var kind: IncreKind = IncreKind.INVALID
+    public var compileStrategy: StrategyType = StrategyType.DEFAULT
     public var buildTrie: Bool = true
     public var frontendDumpActionIsTypeCheck: Bool = false
     public var diag: Option<BasicDiagnosticEngine> = None

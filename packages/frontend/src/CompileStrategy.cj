@@ -9,6 +9,7 @@ import cjcj::basic.GetHash
 import cjcj::basic.DiagCategory
 import cjcj::macro_pkg.MacroExpansion
 import cjcj::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
+import cjcj::sema.StrategyType
 import cjcj::utils.CJC_ASSERT
 import cjcj::utils.FileUtil
 import cjcj::utils.OverflowStrategy as FaithfulOverflowStrategy
@@ -58,30 +59,6 @@ func ParseAndMergeCjd(ci: CompilerInstance, cjdInfo: (String, String)): Unit {
     }
     synchronized(g_cjdAstCacheLock) {
         g_cjdAstCache[cjdInfo[0]] = Some(pkg)
-    }
-}
-
-public enum StrategyType {
-    | DEFAULT
-    | FULL_COMPILE
-    | INCREMENTAL_COMPILE
-}
-
-private func StrategyTypeIndex(kind: StrategyType): Int64 {
-    return match (kind) {
-        case StrategyType.DEFAULT => 0
-        case StrategyType.FULL_COMPILE => 1
-        case StrategyType.INCREMENTAL_COMPILE => 2
-    }
-}
-
-extend StrategyType <: Equatable<StrategyType> {
-    public operator func ==(rhs: StrategyType): Bool {
-        return StrategyTypeIndex(this) == StrategyTypeIndex(rhs)
-    }
-
-    public operator func !=(rhs: StrategyType): Bool {
-        return !(this == rhs)
     }
 }
 

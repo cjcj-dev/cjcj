@@ -2610,7 +2610,11 @@ extend TypeChecker {
             options = instance.globalOptions
         }
         let outputCHIR = options.outputMode == OptionOutputMode.CHIR
-        let incrementalCompile = if (let Some(instance) <- ci) { instance.kind == IncreKind.INCR } else { false }
+        let incrementalCompile = if (let Some(instance) <- ci) {
+            instance.compileStrategy == StrategyType.INCREMENTAL_COMPILE
+        } else {
+            false
+        }
         let mainBody = if (let Some(value6) <- mainFunc.funcBody) {
             value6
         } else {
