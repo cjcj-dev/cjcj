@@ -204,7 +204,8 @@ public class CGModule {
                 DumpIR(moduleHandle, dumpPath)
             }
             let releasedModule = ReleaseLLVMModule().getOrThrow()
-            let newModule = generator.LinkModules(releasedModule, cgCtx.GetCachedMangleMap())
+            let newModule = generator.LinkModules(releasedModule,
+                cachedMangles: cgCtx.GetCachedMangleMap())
             for (name in generator.GetIncrLLVMUsedNames()) {
                 GetCGContext().AddLLVMUsedVars(name)
             }
