@@ -33,6 +33,19 @@ private type LLVMIsACallInstFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
 private type LLVMGetCalledValueFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
 private type LLVMSetValueName2Func = CFunc<(LLVMValueRef, CString, UIntNative) -> Unit>
 
+// Mirrors EmitPackageIR.cpp:437-465. Selfhost emits subpackages sequentially, so the
+// C++ threadNum == 1 branch is the active architecture-equivalent path.
+private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
+    var result = true
+    if (!cgPkgContext.IsIncrementEnabled()) {
+        return result
+    }
+    for (cgModule in cgPkgContext.GetCGModules()) {
+        result = result && cgModule.InitIncrementalGen()
+    }
+    return result
+}
+
 public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enableIncrement: Bool,
     noHeapAllocChecker: NoHeapAllocChecker, noWriteBarrierRecChecker: NoWriteBarrierRecChecker,
     cachedMangleMap!: CachedMangleMap = CachedMangleMap()): ArrayList<LLVMModuleHandle> {
@@ -43,6 +56,9 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
     for (subPackageToRegister in subPackages) {
         let cgModToRegister = CGModule(subPackageToRegister, cgPkgContext)
         cgPkgContext.AddCGModule(cgModToRegister)
+    }
+    if (!InitIncrementalGen(cgPkgContext)) {
+        return cgPkgContext.ReleaseLLVMModules()
     }
     let cgModules = cgPkgContext.GetCGModules()
     var emitIdx: Int64 = 0
@@ -87,6 +103,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         GenerateBinarySectionInfo(cgModToEmit)
         KeepSomeTypesManually(cgModToEmit)
         cgModToEmit.EraseUselessInstsAndDeclarations()
+        cgModToEmit.GenIncremental()
         SetSymbolLinkageType(cgModToEmit)
         EmitStaticGenericTIsAndLLVMUsed(cgModToEmit)
         emitIdx++
