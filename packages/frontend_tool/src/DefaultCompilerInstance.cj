@@ -116,7 +116,7 @@ public open class DefaultCompilerInstance {
         })
     }
 
-    private func RegisterCjoOutputs(pkgs: ArrayList<Package>): Unit {
+    protected func RegisterCjoOutputs(pkgs: ArrayList<Package>): Unit {
         for (pkg in pkgs) {
             if (pkg.IsEmpty()) {
                 continue
