@@ -3290,7 +3290,7 @@ private class CjoSignatureMaterializer {
             LoadFlatEnumInfo(reader, record, enumDecl)
         }
         if (let Some(inheritable) <- (decl as InheritableDecl)) {
-            LoadFlatBodyMembers(reader, record, inheritable)
+            LoadInheritableDeclAdvancedInfo(reader, record, inheritable)
         }
         return Some(decl)
     }
@@ -4719,24 +4719,42 @@ private class CjoSignatureMaterializer {
         enumDecl.hasEllipsis = reader.U8Field(infoTable, 12, 0u8) != 0u8
     }
 
-    private func LoadFlatBodyMembers(reader: CjoFlatBuffer, record: CjoFlatDecl, parent: InheritableDecl): Unit {
-        let infoTable = reader.OffsetField(record.table, 38)
-        if (infoTable < 0) {
+    // C++: Modules/ASTSerialization/ASTLoader.cpp:867-879.
+    private func LoadAnnoTargets(reader: CjoFlatBuffer, infoTable: Int64, annotation: Annotation): Unit {
+        let anno1 = reader.U8Field(infoTable, 12, 0u8)
+        if (anno1 == 0xffu8) {
+            annotation.target = 0xffffu16
             return
+        }
+        let anno2 = reader.U8Field(infoTable, 16, 0u8)
+        annotation.target = (UInt16(anno2) << 7) | UInt16(anno1)
+    }
+
+    // C++: Modules/ASTSerialization/ASTLoader.cpp:881-910.
+    private func LoadInheritableDeclAdvancedInfo(reader: CjoFlatBuffer, record: CjoFlatDecl,
+        parent: InheritableDecl): Unit {
+        let infoTable = reader.OffsetField(record.table, 38)
+        CJC_ASSERT(infoTable >= 0)
+        if (parent.TestAttr(Attribute.IS_ANNOTATION)) {
+            let anno1 = reader.U8Field(infoTable, 12, 0u8)
+            let anno2 = reader.U8Field(infoTable, 16, 0u8)
+            if (anno1 != 0u8 || anno2 != 0u8) {
+                let annotation = Annotation()
+                annotation.kind = AstAnnotationKind.ANNOTATION
+                LoadAnnoTargets(reader, infoTable, annotation)
+                annotation.runtimeVisible = reader.U8Field(infoTable, 14, 0u8) != 0u8
+                parent.annotations.add(annotation)
+            }
         }
         let body = reader.VectorField(infoTable, 6)
-        if (body < 0) {
-            return
-        }
+        CJC_ASSERT(body >= 0)
         var idx: Int64 = 0
         let count = reader.VectorLength(body)
         while (idx < count) {
             let memberIndex = reader.VectorU32(body, idx)
-            if (let Some(memberRecord) <- flatDecls.get(memberIndex)) {
-                if (let Some(member) <- EnsureFlatDecl(memberRecord)) {
-                    AddFlatMember(parent, member)
-                }
-            }
+            let memberRecord = flatDecls.get(memberIndex).getOrThrow()
+            let member = EnsureFlatDecl(memberRecord).getOrThrow()
+            AddFlatMember(parent, member)
             idx++
         }
     }

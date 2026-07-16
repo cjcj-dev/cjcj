@@ -2030,28 +2030,21 @@ public class ASTWriter {
 
     // Builds the AnnoArg vector (schema/ModuleFormat.fbs:328-331): AnnoArg field 0 name,
     // 1 expr (Expr index). Mirrors ASTWriter::ASTWriterImpl::SaveAnnotationArgs
-    // (ASTWriter.cpp:1863-1878). Bounded slice: non-@Annotation args that are not LitConstExpr
-    // are skipped (matching the C++ guard at :1869).
+    // (ASTWriter.cpp:1837-1852).
     private func SaveAnnotationArgs(annotation: Annotation): FlatBufferOffset {
         let args = ArrayList<FlatBufferOffset>()
         for (arg in annotation.args) {
-            if (let Some(expr) <- arg.expr) {
-                let isLit = (expr as LitConstExpr).isSome()
-                if (annotation.kind != AstAnnotationKind.ANNOTATION && !isLit) {
-                    continue
-                }
-                // Bounded slice: only LitConstExpr is materialized as an Expr record.
-                let exprIndex = if (let Some(lce) <- (expr as LitConstExpr)) {
-                    SaveExpr(lce)
-                } else {
-                    0u32
-                }
-                let name = builder.CreateString(arg.name.GetRawText())
-                builder.StartTable(2)
-                builder.AddU32(1, exprIndex)
-                builder.AddOffset(0, name)
-                args.add(builder.EndTable())
+            let expr = arg.expr.getOrThrow()
+            if (annotation.kind != AstAnnotationKind.ANNOTATION &&
+                (let None <- (expr as LitConstExpr))) {
+                continue
             }
+            let exprIndex = SaveExpr(expr)
+            let name = builder.CreateString(arg.name.GetRawText())
+            builder.StartTable(2)
+            builder.AddU32(1, exprIndex)
+            builder.AddOffset(0, name)
+            args.add(builder.EndTable())
         }
         return builder.CreateVectorOffsets(args)
     }
