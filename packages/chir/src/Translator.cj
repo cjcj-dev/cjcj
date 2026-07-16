@@ -8,6 +8,7 @@ import cjcj::option.{EnvironmentType, GlobalOptions, OptimizationFlag}
 import cjcj::mangle.{DecimalToManglingNumber, MANGLE_COUNT_PREFIX}
 import cjcj::mangle.MANGLE_SUFFIX as MANGLE_ANNOTATION_SUFFIX
 import cjcj::basic.Linkage as BasicLinkage
+import cjcj::incremental_compilation.IncreKind
 import cjcj::ast.ASTKind
 import cjcj::ast.IsInstanceConstructor as AstIsInstanceConstructor
 import cjcj::ast.IsValidCFuncConstructorCall
@@ -412,6 +413,7 @@ public class Translator {
     private let overrideSrcFuncResolver: Option<(AstFuncDecl) -> Option<AstFuncDecl>>
     private let scopeInfo: ArrayList<Int64> = ArrayList<Int64>([0])
     private let opts: GlobalOptions
+    private let increKind: IncreKind
     private let mergingSpecific: Bool
     private var genericFuncMap: GenericFuncMap = GenericFuncMap()
     private let annoFactoryFuncs: ArrayList<(AstDecl, Function)>
@@ -425,13 +427,14 @@ public class Translator {
         deserializedVals!: HashMap<String, Value>,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
         opts!: GlobalOptions = GlobalOptions(),
+        increKind!: IncreKind = IncreKind.INVALID,
         annoFactoryFuncs!: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>(),
         maybeUnreachable!: HashMap<Block, Terminator> = HashMap<Block, Terminator>(),
         isComputingAnnos!: Bool = false,
         initFuncsForAnnoFactory!: ArrayList<Function> = ArrayList<Function>()) {
         this(builder, chirTy, globalSymbolTable, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
             deserializedVals: deserializedVals, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
-            mergingSpecific: opts.IsCompilingCJMPSpecific(), annoFactoryFuncs: annoFactoryFuncs,
+            increKind: increKind, mergingSpecific: opts.IsCompilingCJMPSpecific(), annoFactoryFuncs: annoFactoryFuncs,
             maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos, initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }
@@ -439,7 +442,7 @@ public class Translator {
     private init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
         localConstVars!: ElementList, localConstFuncs!: ElementList, deserializedVals!: HashMap<String, Value>,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>>, opts!: GlobalOptions,
-        mergingSpecific!: Bool, annoFactoryFuncs!: ArrayList<(AstDecl, Function)>,
+        increKind!: IncreKind, mergingSpecific!: Bool, annoFactoryFuncs!: ArrayList<(AstDecl, Function)>,
         maybeUnreachable!: HashMap<Block, Terminator>, isComputingAnnos!: Bool,
         initFuncsForAnnoFactory!: ArrayList<Function>) {
         this.builder = builder
@@ -450,6 +453,7 @@ public class Translator {
         this.deserializedVals = deserializedVals
         this.overrideSrcFuncResolver = overrideSrcFuncResolver
         this.opts = opts
+        this.increKind = increKind
         this.mergingSpecific = mergingSpecific
         this.annoFactoryFuncs = annoFactoryFuncs
         this.maybeUnreachable = maybeUnreachable
@@ -472,7 +476,8 @@ public class Translator {
     public func Copy(): Translator {
         return Translator(builder, chirTy, globalSymbolTable, localConstVars: localConstVars,
             localConstFuncs: localConstFuncs, deserializedVals: deserializedVals,
-            overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, annoFactoryFuncs: annoFactoryFuncs,
+            overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, increKind: increKind,
+            annoFactoryFuncs: annoFactoryFuncs,
             maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos, initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }
@@ -480,7 +485,8 @@ public class Translator {
     private func CopyForFork(): Translator {
         let copied = Translator(builder, chirTy, globalSymbolTable, localConstVars: localConstVars,
             localConstFuncs: localConstFuncs, deserializedVals: deserializedVals,
-            overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, mergingSpecific: mergingSpecific,
+            overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, increKind: increKind,
+            mergingSpecific: mergingSpecific,
             annoFactoryFuncs: annoFactoryFuncs, maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos,
             initFuncsForAnnoFactory: initFuncsForAnnoFactory)
@@ -993,6 +999,10 @@ public class Translator {
                     return fn
                 }
             }
+        }
+        if (increKind == IncreKind.INCR && !funcDecl.toBeCompiled &&
+            !IsSrcCodeImportedGlobalDecl(funcDecl, opts)) {
+            return None
         }
         let body = EnsureFuncBody(fn)
         blockGroupStack.add(body)

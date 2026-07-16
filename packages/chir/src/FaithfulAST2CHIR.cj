@@ -2578,6 +2578,7 @@ public class FaithfulAST2CHIR {
     private func CreateTranslator(): Translator {
         return Translator(builder, chirType, globalCache, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
             deserializedVals: deserializedVals, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
+            increKind: kind,
             annoFactoryFuncs: annoFactoryFuncs, maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos,
             initFuncsForAnnoFactory: initFuncsForAnnoFactory)
