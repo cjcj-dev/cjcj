@@ -401,6 +401,8 @@ extend ParserImpl {
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
+            SetDeclBeginPos(decl)
+            SetBeginToAnnotationsBegin(decl, annos)
             return decl
         }
         if (Seeing(TokenKind.LET) || Seeing(TokenKind.VAR) || Seeing(TokenKind.CONST)) {
@@ -780,7 +782,7 @@ extend ParserImpl {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let keywordToken = Expect(TokenKind.MAIN, "expected function keyword")
             ret.keywordPos = keywordToken.Begin()
-            if (ret.begin.IsZero()) { ret.begin = keywordToken.Begin() }
+            ret.begin = keywordToken.Begin()
             CheckDeclarationInScope(scopeKind, DefKind.MAIN)
             let body = ParseFuncBody(ScopeKind.MAIN_BODY)
             ret.funcBody = body
