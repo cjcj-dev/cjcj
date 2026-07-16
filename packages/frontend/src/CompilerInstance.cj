@@ -25,6 +25,7 @@ import cjcj::incremental_compilation.IncreKind
 import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
     MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, SemanticInfo, TopLevelDeclCache, VarInitDepMap,
     VirtualWrapperDepMap, WriteCache}
+import cjcj::macro_pkg.{GetMethodPointer, OpenSymbolTable, OpenSymbolTableSafely, RuntimeInit}
 import cjcj::option.OutputMode
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
@@ -343,6 +344,48 @@ public class CompilerInstance {
                 loadedNativeMetaTransformPlugins.add(metaTransformPlugin)
                 // Native C++ callbacks require a C++ MetaTransformPluginBuilder ABI adapter.
             } catch (e: Exception) {
+                DiagnoseInvalidPlugin(pluginPath)
+                return false
+            }
+        }
+        return true
+    }
+
+    private func RegisterCjPlugin(): Bool {
+        let firstPlugin = invocation.globalOptions.pluginPaths[0]
+        let temporaryHandle = OpenSymbolTable(firstPlugin)
+        if (!temporaryHandle.opened) {
+            return false
+        }
+        let execute = GetMethodPointer(temporaryHandle, "executeCHIRPlugins")
+        if (execute.isNull()) {
+            return false
+        }
+        let initArgs = ArrayList<(String, String)>()
+        for ((name, value) in invocation.globalOptions.environment.allVariables) {
+            initArgs.add((name, value))
+        }
+        let _ = RuntimeInit.GetInstance().InitRuntime(invocation.GetRuntimeLibPath(), initArgs: initArgs)
+        let runtimeHandle = OpenSymbolTableSafely(invocation.GetRuntimeLibPath())
+        if (!runtimeHandle.opened) {
+            return false
+        }
+        let initLibPointer = GetMethodPointer(runtimeHandle, "InitCJLibrary")
+        if (initLibPointer.isNull()) {
+            return false
+        }
+        let initLibFunc = CFunc<(CString) -> Int32>(initLibPointer)
+        for (pluginPath in invocation.globalOptions.pluginPaths) {
+            let handle = OpenSymbolTableSafely(pluginPath)
+            if (!handle.opened) {
+                DiagnoseInvalidPlugin(pluginPath)
+                return false
+            }
+            var result = 1
+            try (path = unsafe { LibC.mallocCString(pluginPath) }.asResource()) {
+                result = unsafe { initLibFunc(path.value) }
+            }
+            if (result != 0) {
                 DiagnoseInvalidPlugin(pluginPath)
                 return false
             }
