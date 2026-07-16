@@ -8,8 +8,8 @@ import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::utils.{CJC_ASSERT, FileUtil}
 
 // Mirrors IncrementalGen.cpp:35-42.
-private func AllowFunctionBodyBeReplaced(func: LLVMValueRef): Bool {
-    return GetLLVMValueName(func) != FOR_KEEPING_SOME_TYPES_FUNC_NAME
+private func AllowFunctionBodyBeReplaced(`func`: LLVMValueRef): Bool {
+    return GetLLVMValueName(`func`) != FOR_KEEPING_SOME_TYPES_FUNC_NAME
 }
 
 // Mirrors IncrementalGen.cpp:44-48.
