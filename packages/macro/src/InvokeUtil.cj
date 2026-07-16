@@ -391,7 +391,7 @@ private func makeRuntimeConfig(envs: ArrayList<(String, String)>): RuntimeConfig
 }
 
 @When[os == "Linux" || os == "macOS" || os == "iOS"]
-public func OpenSymbolTable(libPath: String): RuntimeHandle {
+public func OpenSymbolTable(libPath: String, dlopenMode!: Int32 = DLOPEN_MODE): RuntimeHandle {
     var result = RuntimeHandle()
     try (path = unsafe { LibC.mallocCString(libPath) }.asResource()) {
         let realpathRes = unsafe { realpath(path.value, CString(CPointer<UInt8>())) }
@@ -399,7 +399,7 @@ public func OpenSymbolTable(libPath: String): RuntimeHandle {
             Errorln("could not get realpath of library: " + libPath)
             return result
         }
-        let rawHandle = unsafe { dlopen(realpathRes, DLOPEN_MODE) }
+        let rawHandle = unsafe { dlopen(realpathRes, dlopenMode) }
         unsafe { free(realpathRes) }
         let handle = RuntimeHandle(libPath, raw: rawHandle)
         if (!handle.opened) {
