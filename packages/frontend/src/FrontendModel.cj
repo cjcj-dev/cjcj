@@ -1126,6 +1126,71 @@ private class CjoSignatureMaterializer {
         return None
     }
 
+    // IncrementalLoader.cpp:49-98 LoadCachedTypeForDecl.
+    private func LoadCachedTypeForDecl(decl: PackageFormat_Decl, astDecl: Decl): Unit {
+        astDecl.exportId = decl.GetExportId().getOrThrow().str()
+        astDecl.mangledName = decl.GetMangledName().getOrThrow().str()
+        AddDeclToImportedPackage(astDecl)
+        if (let Some(funcDecl) <- (astDecl as FuncDecl)) {
+            if (let Some(funcBody) <- funcDecl.funcBody) {
+                if (!funcBody.paramLists.isEmpty()) {
+                    let info = decl.GetInfoAsFuncInfo().getOrThrow()
+                    let rawParamLists = info.GetFuncBody().getOrThrow().GetParamLists().getOrThrow()
+                    let paramList = PackageFormat_FuncParamList(data.getOrThrow(),
+                        (rawParamLists.Get(0u32) as Int64).getOrThrow())
+                    let params = paramList.GetParams().getOrThrow()
+                    let length = params.size()
+                    CJC_ASSERT(UInt32(funcBody.paramLists[0].params.size) == length)
+                    var offset: UInt32 = 0u32
+                    while (offset < length) {
+                        let index = (params.Get(offset) as UInt32).getOrThrow()
+                        if (!allLoadedDecls.contains(index)) {
+                            allLoadedDecls.add(index, funcBody.paramLists[0].params[Int64(offset)])
+                        }
+                        offset++
+                    }
+                }
+            }
+        }
+        if (!astDecl.toBeCompiled && GetAttributes(decl).TestAttr(Attribute.IS_ANNOTATION)) {
+            astDecl.EnableAttr(Attribute.IS_ANNOTATION)
+            var found: Option<Annotation> = None
+            for (annotation in astDecl.annotations) {
+                if (annotation.kind == AstAnnotationKind.ANNOTATION) {
+                    found = Some(annotation)
+                    break
+                }
+            }
+            CJC_ASSERT(found.isSome())
+            let info = decl.GetInfoAsClassInfo().getOrThrow()
+            let annotation = found.getOrThrow()
+            annotation.target = UInt16(info.GetAnnoTargets())
+            annotation.runtimeVisible = info.GetRuntimeVisible()
+        }
+        if (let Some(generic) <- astDecl.GetGeneric()) {
+            if (let Some(genericIndex) <- decl.GetGeneric()) {
+                generic.EnableAttr(Attribute.INCRE_COMPILE)
+                let typeParameters = genericIndex.GetTypeParameters().getOrThrow()
+                let length = typeParameters.size()
+                CJC_ASSERT(UInt32(generic.typeParameters.size) == length)
+                var index: UInt32 = 0u32
+                while (index < length) {
+                    let genericParamIndex = (typeParameters.Get(index) as UInt32).getOrThrow()
+                    CJC_ASSERT(genericParamIndex != 0u32)
+                    let genericParamDecl = generic.typeParameters[Int64(index)]
+                    genericParamDecl.exportId =
+                        GetFormatDeclByIndex(genericParamIndex).GetExportId().getOrThrow().str()
+                    genericParamDecl.outerDecl = Some(astDecl)
+                    AddDeclToImportedPackage(genericParamDecl)
+                    if (!allLoadedDecls.contains(genericParamIndex)) {
+                        allLoadedDecls.add(genericParamIndex, genericParamDecl)
+                    }
+                    index++
+                }
+            }
+        }
+    }
+
     // ReferenceLoader.cpp:210-214 ASTLoader::SetIsChirNow.
     public func SetIsChirNow(value!: Bool = false): Unit { isChirNow = value }
 
