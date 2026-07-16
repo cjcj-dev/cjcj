@@ -1210,7 +1210,7 @@ public func TypeCheckReferenceCheckInstanceMemberAccessLegality(
     if (let Some(baseExpr) <- ma.baseExpr) {
         if (let Some(refExpr) <- (baseExpr as RefExpr)) {
             if (refExpr.isSuper && target.TestAttr(Attribute.ABSTRACT)) {
-                let builder = diag.Diagnose(ma.begin, ma.end,
+                let builder = Diagnose(diag, ma,
                     BasicDiagKind.sema_abstract_method_cannot_be_accessed_directly,
                     args: [BasicDiagArgument(target.identifier.Val())])
                 builder.Emit()
