@@ -4718,19 +4718,20 @@ public class IRBuilder2 <: Resource {
     }
 
     public func AllocateArray(rawArrayTy: RawArrayType, length: LLVMValueRef): LLVMValueRef {
-        let rawArrayCGType = CGType.GetOrCreate(cgMod, rawArrayTy)
-        let rawTypeInfo = rawArrayCGType.GetOrCreateTypeInfo()
+        // C++: CodeGen/CJNative/CJNativeIRBuilder.cpp:1168-1185 IRBuilder2::AllocateArray.
+        let rawTypeInfo = CreateTypeInfo(rawArrayTy)
         let rawTypeInfoArg = CreateBitCast(rawTypeInfo,
             unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }, name: "rawarray.ti")
         let lengthArg = CastIntegerToInt64(length)
+        let elementSize = GetSize_64(rawArrayTy.GetElementType())
+        let isArrayElementGeneric = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType()).IsDynamicGI()
         let args = ArrayList<LLVMValueRef>()
         args.add(rawTypeInfoArg)
         args.add(lengthArg)
-        let intrinsicName = if (rawArrayCGType.IsDynamicGI()) {
+        let intrinsicName = if (isArrayElementGeneric) {
             MALLOC_ARRAY_GENERIC_INTRINSIC_NAME
         } else {
-            let elementSize = GetRawArrayElementSize(rawArrayTy)
-            args.add(unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(elementSize), 0) })
+            args.add(elementSize)
             MALLOC_ARRAY_INTRINSIC_NAME
         }
         CheckNoHeapAlloc(intrinsicName)
