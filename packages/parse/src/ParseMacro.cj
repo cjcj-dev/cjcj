@@ -146,7 +146,7 @@ extend ParserImpl {
         }
     }
 
-    public func ParseMacroCallDeclInput(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Decl {
+    public func ParseMacroCall(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): MacroExpandDecl {
         let decl = MacroExpandDecl()
         if (let Some(file) <- currentFile) {
             decl.curFile = file
@@ -166,6 +166,15 @@ extend ParserImpl {
             decl.invocation.macroNamePos + decl.invocation.macroCallDiagInfo.identifier.size,
             false)
         decl.end = if (let Some(inputDecl) <- decl.invocation.decl) { inputDecl.end } else { lastToken.End() }
+        let inputIsEnumConstructor = if (let Some(inputDecl) <- decl.invocation.decl) {
+            inputDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)
+        } else {
+            false
+        }
+        if (ScopeKindEquals(scopeKind, ScopeKind.ENUM_CONSTRUCTOR) &&
+            (decl.invocation.hasParenthesis || inputIsEnumConstructor)) {
+            decl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
+        }
         return decl
     }
 

@@ -371,7 +371,7 @@ extend ParserImpl {
             return ParseEnumConstructor(modifiers, annos)
         }
         if (Seeing(TokenKind.AT) || Seeing(TokenKind.AT_EXCL)) {
-            return ParseMacroCallDeclInput(scopeKind, modifiers, annos)
+            return ParseMacroCall(scopeKind, modifiers, annos)
         }
         if (SeeingFinalizer()) { return ParseFinalizer(scopeKind, modifiers, annos) }
         if (SeeingPrimaryConstructor(scopeKind)) { return ParsePrimaryConstructor(scopeKind, modifiers, annos) }
