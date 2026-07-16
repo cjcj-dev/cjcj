@@ -163,7 +163,7 @@ private func ReplaceEachMacroImpl(tokens: ArrayList<Token>, macroNode: MacroCall
     generatedParser.SetPrimaryDecl(macroNode.RequireInvocation().outerDeclIdent)
     generatedParser.EnableCustomAnno()
     let invocation = macroNode.RequireInvocation()
-    let parsedNodes = if (invocation.scopeKind != ScopeKind.UNKNOWN_SCOPE) {
+    let parsedNodes = if (macroNode.RequireNode().IsDecl()) {
         generatedParser.ParseNodes(toParsedScopeKind(invocation.scopeKind), macroNode.RequireNode(),
             modifiers: macroNode.GetModifiers(), annos: macroNode.GetAnnotations())
     } else {
