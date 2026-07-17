@@ -757,6 +757,68 @@ public class MockSupportManager {
         return accessorDecl
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1079-1143.
+    private func GenerateVarDeclAccessor(fieldDecl: VarDecl, kind: AccessorKind): FuncDecl {
+        CJC_ASSERT(IsFieldOrVariable(kind))
+        let isGetter = MockUtils.IsGeneratedGetter(kind)
+        let accessorTy = if (isGetter) {
+            typeManager.GetFunctionTy([], fieldDecl.GetTy().getOrThrow())
+        } else {
+            typeManager.GetFunctionTy([fieldDecl.GetTy().getOrThrow()],
+                TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        }
+        let body = ArrayList<Node>()
+        let accessorParams = ArrayList<FuncParam>()
+        let fieldType: Type = if (let Some(typeNode) <- fieldDecl.typeNode) {
+            (ASTCloner.Clone(typeNode) as Type).getOrThrow()
+        } else {
+            MockUtils.CreateType(fieldDecl.GetTy().getOrThrow())
+        }
+
+        let accessorDecl = CreateFieldAccessorDecl(fieldDecl, accessorTy, kind)
+        accessorDecl.funcBody = FuncBody()
+        let accessorBody = accessorDecl.funcBody.getOrThrow()
+        if (isGetter) {
+            body.add(all: GenerateFieldGetterAccessorBody(fieldDecl, accessorBody, kind))
+        } else {
+            let setterParam = CreateFuncParam("newValue", Some(fieldType), None, fieldDecl.GetTy())
+            setterParam.outerDecl = accessorDecl
+            setterParam.moduleName = fieldDecl.moduleName
+            setterParam.fullPackageName = fieldDecl.fullPackageName
+            setterParam.curFile = fieldDecl.curFile
+            body.add(all: GenerateFieldSetterAccessorBody(fieldDecl, setterParam, accessorBody, kind))
+            accessorParams.add(setterParam)
+        }
+
+        let accessorParamLists = ArrayList<FuncParamList>()
+        accessorParamLists.add(CreateFuncParamList(accessorParams))
+        let retType: Type = if (isGetter) {
+            fieldType
+        } else {
+            MockUtils.CreateType(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        }
+
+        if (IsStaticField(kind)) {
+            accessorDecl.EnableAttr(Attribute.STATIC)
+        }
+        if (IsTopLevelField(kind)) {
+            accessorDecl.EnableAttr(Attribute.GLOBAL)
+        }
+        accessorBody.SetTy(accessorTy)
+        if (let Some(outerDecl) <- fieldDecl.outerDecl) {
+            accessorBody.parentClassLike = outerDecl as ClassDecl
+        }
+        accessorBody.funcDecl = accessorDecl
+        accessorBody.paramLists.add(all: accessorParamLists)
+        accessorBody.body = CreateBlock(body, Some(accessorTy))
+        accessorBody.retType = retType
+        if (fieldDecl.GetTy().getOrThrow().IsStruct() && kind == AccessorKind.FIELD_SETTER) {
+            accessorDecl.EnableAttr(Attribute.MUT)
+        }
+        accessorDecl.mangledName = mockUtils.Mangle(accessorDecl)
+        return accessorDecl
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
