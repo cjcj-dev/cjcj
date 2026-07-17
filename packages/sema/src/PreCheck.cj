@@ -465,42 +465,6 @@ private func CheckConflictDeclWithSubPackage(pkg: Package, diag: BasicDiagnostic
     }
 }
 
-private func collectDeclForAssumption(decl: Decl, out: ArrayList<Decl>): Unit {
-    out.add(decl)
-    if (let Some(generic) <- decl.GetGeneric()) {
-        for (param in generic.typeParameters) {
-            collectDeclForAssumption(param, out)
-        }
-    }
-    if (let Some(enumDecl) <- (decl as EnumDecl)) {
-        for (constructor in enumDecl.constructors) {
-            collectDeclForAssumption(constructor, out)
-        }
-    }
-    for (member in decl.GetMemberDecls()) {
-        collectDeclForAssumption(member, out)
-    }
-    if (let Some(classDecl) <- (decl as ClassDecl)) {
-        for (subDecl in classDecl.subDecls) {
-            collectDeclForAssumption(subDecl, out)
-        }
-    } else if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
-        for (subDecl in interfaceDecl.subDecls) {
-            collectDeclForAssumption(subDecl, out)
-        }
-    }
-}
-
-private func collectPackageDeclsForAssumption(pkg: Package): ArrayList<Decl> {
-    let out = ArrayList<Decl>()
-    for (file in pkg.files) {
-        for (decl in file.decls) {
-            collectDeclForAssumption(decl, out)
-        }
-    }
-    return out
-}
-
 private func shouldCollectAssumption(decl: Decl): Bool {
     match (decl.astKind) {
         case ASTKind.FUNC_DECL | ASTKind.BUILTIN_DECL | ASTKind.CLASS_DECL | ASTKind.INTERFACE_DECL |
@@ -723,16 +687,21 @@ private func CheckAssumption(typeManager: TypeManager, ctx: ASTContext, diag: Ba
     }
 }
 
-public func CollectAndCheckAssumption(typeManager: TypeManager, ctx: ASTContext, pkg: Package,
-    diag: BasicDiagnosticEngine): Unit {
-    let decls = collectPackageDeclsForAssumption(pkg)
-    for (decl in decls) {
-        collectAssumption(typeManager, ctx, decl)
-    }
-    IgnoreAssumptionForTypeAliasDecls(decls)
-    AddAssumptionForExtendDecls(typeManager, ctx, decls)
-    for (decl in decls) {
-        CheckAssumption(typeManager, ctx, diag, decl)
+extend TypeCheckerImpl {
+    // C++ src/Sema/PreCheck.cpp:1201-1217 TypeCheckerImpl::CollectAndCheckAssumption.
+    public func CollectAndCheckAssumption(ctx: ASTContext): Unit {
+        let decls = ArrayList<Decl>()
+        for (sym in GetGenericCandidates(ctx)) {
+            if ((let Some(node) <- sym.node) && (let Some(decl) <- (node as Decl))) {
+                decls.add(decl)
+                collectAssumption(typeManager, ctx, decl)
+            }
+        }
+        IgnoreAssumptionForTypeAliasDecls(decls)
+        AddAssumptionForExtendDecls(typeManager, ctx, decls)
+        for (decl in decls) {
+            CheckAssumption(typeManager, ctx, diag.getOrThrow(), decl)
+        }
     }
 }
 

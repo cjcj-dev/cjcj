@@ -1177,7 +1177,7 @@ extend TypeChecker {
                     }
                 }
                 AddSuperClassObjectForClassDecl(ctx, pkg, impl.diag.getOrThrow(), impl.importManager)
-                CollectAndCheckAssumption(impl.typeManager, ctx, pkg, impl.diag.getOrThrow())
+                impl.CollectAndCheckAssumption(ctx)
             }
         }
         for (ctx in contexts) {
