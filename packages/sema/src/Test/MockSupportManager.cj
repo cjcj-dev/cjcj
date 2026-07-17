@@ -715,6 +715,23 @@ public class MockSupportManager {
         return bodyNodes
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:967-985.
+    private func GenerateFieldSetterAccessorBody(fieldDecl: VarDecl, setterParam: FuncParam,
+        funcBody: FuncBody, kind: AccessorKind): ArrayList<Node> {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let retExpr: Expr = if (kind == AccessorKind.TOP_LEVEL_VARIABLE_SETTER) {
+            CreateRefExpr(fieldDecl)
+        } else {
+            let refExpr = CreateRefForFieldAccess(fieldDecl.outerDecl.getOrThrow(), kind)
+            CreateMemberAccess(refExpr, fieldDecl.identifier.Val())
+        }
+
+        let bodyNodes = ArrayList<Node>()
+        bodyNodes.add(CreateReturnExpr(
+            CreateAssignExpr(retExpr, CreateRefExpr(setterParam), Some(unitTy)), Some(funcBody)))
+        return bodyNodes
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
