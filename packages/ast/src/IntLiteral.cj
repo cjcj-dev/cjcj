@@ -61,13 +61,7 @@ private func GetBaseAndPureStringValue(stringVal: String): (Int32, String) {
         prefix = stringValue[0..baseLen].toAsciiLower()
     }
 
-    let builder = StringBuilder()
-    for (byte in stringValue.toArray()) {
-        if (byte != b'_') {
-            builder.append(String.fromUtf8([byte]))
-        }
-    }
-    stringValue = builder.toString()
+    stringValue = stringValue.replace("_", "")
 
     if (prefix == "0b") {
         stringValue = stringValue[baseLen..]
