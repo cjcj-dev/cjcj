@@ -1101,6 +1101,35 @@ public class MockSupportManager {
         return methodAccessor
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:921-947.
+    private func GeneratePropAccessor(propDecl: PropDecl): PropDecl {
+        let propAccessor = (ASTCloner.Clone(propDecl) as PropDecl).getOrThrow()
+        let outerClassDecl = propDecl.outerDecl.getOrThrow() as ClassDecl
+        CJC_ASSERT(outerClassDecl.isSome())
+
+        let propGetter = GenerateFuncAccessor(GetUsableGetterForProperty(propDecl).getOrThrow())
+        propGetter.propDecl = propAccessor
+        propAccessor.getters.clear()
+        propAccessor.getters.add(propGetter)
+        propAccessor.setters.clear()
+        if (propDecl.isVar) {
+            let propSetter = GenerateFuncAccessor(GetUsableSetterForProperty(propDecl).getOrThrow())
+            propSetter.propDecl = propAccessor
+            propAccessor.setters.add(propSetter)
+        }
+        propAccessor.identifier = SrcIdentifier(
+            MockUtils.BuildMockAccessorIdentifier(propDecl, AccessorKind.PROP))
+        propAccessor.mangledName = mockUtils.Mangle(propAccessor)
+        if (MockSupportManager.NeedEraseAccessorTypes(propDecl)) {
+            MockSupportManager.MarkMockAccessorWithAttributes(propAccessor, GetAccessLevel(propDecl))
+            propAccessor.linkage = propDecl.linkage
+        } else {
+            MockSupportManager.MarkMockAccessorWithAttributes(propAccessor, AccessLevel.PUBLIC)
+            propAccessor.linkage = Linkage.EXTERNAL
+        }
+        return propAccessor
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
