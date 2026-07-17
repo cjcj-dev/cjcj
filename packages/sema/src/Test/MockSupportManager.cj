@@ -1311,6 +1311,15 @@ public class MockSupportManager {
         return None
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1589-1597.
+    private func ReplaceRefExprFieldSetWithAccessorImpl(refExpr: RefExpr): Option<CallExpr> {
+        let target = refExpr.GetTarget().getOrThrow()
+        if (target.TestAttr(Attribute.COMPILER_ADD) || target.outerDecl.isNone()) {
+            return None
+        }
+        return GenerateSetterCall(refExpr)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
