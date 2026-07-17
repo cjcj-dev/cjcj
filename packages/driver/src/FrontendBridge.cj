@@ -45,9 +45,6 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
         PrintFrontendCommand(driver.cangjieHome, driver.driverOptions.GenerateFrontendOptions())
     }
     ApplyFrontendOutputs(driver.driverOptions, frontendOptions)
-    if (!PublishFrontendBitcodeOutputs(driver.driverOptions)) {
-        return false
-    }
     return PublishFrontendCjoOutputs(driver.driverOptions)
 }
 
@@ -148,33 +145,6 @@ private func PublishFrontendCjoOutputs(opts: DriverOptions): Bool {
         if (info.filePath != target && !CopyFile(info.filePath, target)) {
             eprintln("error: failed to publish CJO output: " + target)
             copied = false
-        }
-    }
-    return copied
-}
-
-private func PublishFrontendBitcodeOutputs(opts: DriverOptions): Bool {
-    if (!HasFrontendSourceInput(opts) || opts.IsEmitCHIREnable() ||
-        opts.frontendOutputFiles.isEmpty() || !opts.saveTemps) {
-        return true
-    }
-    var copied = true
-    for (output in opts.frontendOutputFiles) {
-        if (output.isForeignInput) {
-            continue
-        }
-        let fileName = if (output.fileName.isEmpty()) {
-            FileUtil.GetFileNameWithoutExtension(output.filePath)
-        } else {
-            output.fileName
-        }
-        let target = FileUtil.JoinPath(opts.tempFolderPath, fileName + ".bc")
-        if (output.filePath != target && !CopyFile(output.filePath, target)) {
-            eprintln("error: failed to publish bitcode output: " + target)
-            copied = false
-        } else {
-            output.filePath = target
-            output.rawPath = target
         }
     }
     return copied
