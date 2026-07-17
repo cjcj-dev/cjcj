@@ -26,12 +26,22 @@ public class DiagnosticEngineImpl {
     private var checkRangeErrorCodeRatherICE: Bool = false
     private var diagEngineErrorCode: DiagEngineErrorCode = DiagEngineErrorCode.NO_ERRORS
     private var firstErrorCategory: Option<DiagCategory> = None
+    private var closed: Bool = false
     private let pos2MacroCallDiagInfoMap: ArrayList<(UInt64, Option<MacroCallDiagInfo>)> =
         ArrayList<(UInt64, Option<MacroCallDiagInfo>)>()
 
     public init() {}
 
     ~init() {
+        close()
+    }
+
+    // C++: src/Basic/DiagnosticEngineImpl.h:21-30, DiagnosticEngineImpl::~DiagnosticEngineImpl.
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        closed = true
         let activeHandler = handler.getOrThrow()
         if (IsCompilerDiagnosticHandlerKind(activeHandler.GetKind())) {
             if (activeHandler.IsJsonFormat()) {
