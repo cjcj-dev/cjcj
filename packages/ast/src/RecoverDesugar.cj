@@ -229,10 +229,12 @@ public func RecoverToCallExpr(ce: CallExpr): Unit {
                 if (let Some(member) <- (baseFunc as MemberAccess)) {
                     if (member.field == "()") {
                         ce.baseFunc = member.baseExpr
+                        member.baseExpr = None
                         ce.args.clear()
                         for (arg in callExpr.args) {
                             ce.args.add(arg)
                         }
+                        callExpr.args.clear()
                         CJC_NULLPTR_CHECK(ce.curFile)
                         if (let Some(file) <- ce.curFile) {
                             file.trashBin.add(desugar)
