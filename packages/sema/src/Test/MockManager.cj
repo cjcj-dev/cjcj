@@ -125,7 +125,7 @@ public class MockManager {
     private let importManager: SemaImportManager
     private let mockUtils: MockUtils
 
-    private let mockedClassDecls: HashMap<ClassLikeDecl, ClassDecl> = HashMap<ClassLikeDecl, ClassDecl>()
+    private let mockedClassDecls: HashMap<Decl, ClassDecl> = HashMap<Decl, ClassDecl>()
     private let instantiationCounters: HashMap<Decl, Int64> = HashMap<Decl, Int64>()
     private let defaultForTypePresence: HashMap<Decl, Bool> = HashMap<Decl, Bool>()
 
