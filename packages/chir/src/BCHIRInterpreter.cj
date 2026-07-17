@@ -424,6 +424,15 @@ public class BCHIRInterpreter {
     private func InterpretString(text: String): Unit {
         let array = IValUtils.StringToArray(text)
         let pointer = AllocateValue(array)
+        var realSize: Int64 = 0
+        var index: Int64 = 0
+        while (index < text.size) {
+            if ((text[index] & 0xc0u8) != 0x80u8) {
+                realSize++
+            }
+            index++
+        }
+        let _ = realSize
         let fields = ArrayList<InterpreterValue>()
         fields.add(pointer)
         fields.add(InterpreterValue.MakeUInt(InterpreterValueKind.IUINT32, 0))
