@@ -1154,7 +1154,6 @@ extend TypeChecker {
         for (ctx in contexts) {
             BuildCurrentPackageExtendMap(ctx)
         }
-        impl.PreCheckAllExtendInterface()
         for (ctx in contexts) {
             mpImpl.UpdateSpecificMemberGenericTy(ctx,
                 { currentCtx: ASTContext, kind: ASTKind => impl.GetSymsByASTKind(currentCtx, kind) })
@@ -1183,6 +1182,8 @@ extend TypeChecker {
         for (ctx in contexts) {
             impl.CheckExtendRules(ctx)
         }
+        // C++ src/Sema/PreCheck.cpp:2028-2035 runs this only after every PreCheckUsage phase.
+        impl.PreCheckAllExtendInterface()
         CheckCHIRClassDependencies()
         UpdateAnyTy()
         UpdateCTypeTy()
