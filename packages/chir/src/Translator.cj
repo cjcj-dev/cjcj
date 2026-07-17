@@ -8305,8 +8305,8 @@ public class Translator {
             argValues.add(obj, at: 0)
         }
         let instTypeArgs = calleeInfo.instantiatedTypeArgs
-        return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
-            instTypeArgs: instTypeArgs, thisType: Some(calleeInfo.thisType)), loc: loc)
+        return CreateAndAppendApplyCallFromCallExpr(resultTy, callee, FuncCallContext(args: argValues,
+            instTypeArgs: instTypeArgs, thisType: Some(calleeInfo.thisType)), expr)
     }
 
     private func TranslateFuncInstArgs(expr: AstCallExpr, calleeDecl: AstFuncDecl): ArrayList<Type> {
