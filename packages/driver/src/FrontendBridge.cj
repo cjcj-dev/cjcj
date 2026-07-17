@@ -2,7 +2,7 @@ package cjcj::driver
 
 import std.collection.*
 import cjcj::basic.DiagFormat as BasicDiagFormat
-import cjcj::frontend.{CompilerInvocation, DiagnosticEngine, DumpAction, GlobalOptions}
+import cjcj::frontend.{CompilerInvocation, DumpAction, GlobalOptions}
 import cjcj::frontend_tool.{DefaultCompilerInstance, Driver as FrontendToolDriver,
     DriverOptions as FrontendToolDriverOptions, ExecuteFrontendByDriver, IncrementalCompilerInstance,
     NeedCreateIncrementalCompilerInstance}
@@ -18,7 +18,8 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (compilerInvocation.globalOptions.scanDepPkg) {
         compilerInvocation.frontendOptions.dumpAction = DumpAction.DUMP_DEP_PKG
     }
-    let diag = DiagnosticEngine()
+    // C++: src/Driver/Driver.cpp:220-226, reuse Driver::diag for the frontend instance.
+    let diag = driver.diag
     let errorCountLimit: Option<UInt64> = if (compilerInvocation.globalOptions.errorCountLimit.hasValue) {
         Some(compilerInvocation.globalOptions.errorCountLimit.value)
     } else {
