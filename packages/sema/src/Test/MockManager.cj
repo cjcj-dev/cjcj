@@ -1126,6 +1126,37 @@ public class MockManager {
         return Some(mockedMethod)
     }
 
+    // C++: Sema/Test/MockManager.cpp:1204-1238.
+    private func CreateMockedProp(originalProp: PropDecl, mockedDecl: ClassDecl,
+        classGenericSubsts: ArrayList<TypeSubst>): Option<PropDecl> {
+        if (MockUtils.IsMockAccessorRequired(originalProp)) {
+            return None
+        }
+        let mockedProp = (ASTCloner.Clone(originalProp) as PropDecl).getOrThrow()
+        mockedProp.EnableAttr(Attribute.OVERRIDE)
+        mockedProp.DisableAttr(Attribute.ABSTRACT)
+        mockedProp.EnableAttr(Attribute.IN_CLASSLIKE)
+
+        let mockedGetters = ArrayList<FuncDecl>()
+        let mockedSetters = ArrayList<FuncDecl>()
+        for (getter in originalProp.getters) {
+            if (let Some(mockedGetter) <- CreateMockedMethod(getter, mockedDecl, classGenericSubsts)) {
+                mockedGetters.add(mockedGetter)
+            }
+        }
+        for (setter in originalProp.setters) {
+            if (let Some(mockedSetter) <- CreateMockedMethod(setter, mockedDecl, classGenericSubsts)) {
+                mockedSetters.add(mockedSetter)
+            }
+        }
+        mockedProp.getters.clear()
+        mockedProp.getters.add(all: mockedGetters)
+        mockedProp.setters.clear()
+        mockedProp.setters.add(all: mockedSetters)
+        mockedProp.linkage = Linkage.INTERNAL
+        return Some(mockedProp)
+    }
+
     public static func MockedDeclName(original: ClassLikeDecl, instantiationNumber!: Int64 = 0): String {
         return original.identifier.Val() + MOCKED_DECL_SUFFIX + instantiationNumber.toString()
     }
