@@ -1766,48 +1766,78 @@ public class ClosureConversion {
         return boxedEnvs
     }
 
-    private func BoxMutableVar(env: LocalVar): Value {
-        let rawEnvTy = env.GetType() ??
-            throw IllegalStateException("ClosureConversion mutable capture has no type")
-        let envTy = (rawEnvTy as RefType) ??
-            throw IllegalStateException("ClosureConversion mutable capture is not a ref")
-        let valueTy = envTy.GetBaseType()
-        let classDef = CreateBoxClassDef(valueTy)
-        let classTy = RequireClassType(classDef)
+    private func CreateBoxClassObj(env: LocalVar, classDef: ClassDef): LocalVar {
         let envExpr = env.GetExpr() ??
             throw IllegalStateException("ClosureConversion mutable capture has no defining expression")
         let parent = envExpr.GetParentBlock() ??
             throw IllegalStateException("ClosureConversion mutable capture has no parent block")
-        let boxObjExpr = builder.CreateAllocate(builder.context.GetRefTy(classTy), classTy, parent)
-        boxObjExpr.MoveBefore(envExpr)
-        let boxObj = RequireResult(boxObjExpr)
-        let users = env.GetUsers()
-        for (user in users) {
-            if (user.nodeId == boxObjExpr.nodeId || user.GetParentBlock().isNone()) {
-                continue
-            }
+        let classTy = RequireClassType(classDef)
+        let obj = builder.CreateAllocate(builder.context.GetRefTy(classTy), classTy, parent)
+        obj.SetDebugLocation(envExpr.GetDebugLocation())
+        obj.MoveBefore(envExpr)
+        return RequireResult(obj)
+    }
+
+    private func ReplaceEnvWithBoxObjMemberVar(env: LocalVar, boxObj: LocalVar, lValue: LocalVar): Unit {
+        let debugExpr = env.GetDebugExpr()
+        for (user in env.GetUsers()) {
             let userParent = user.GetParentBlock() ??
                 throw IllegalStateException("ClosureConversion mutable capture user has no parent block")
-            let path = ArrayList<UInt64>()
-            path.add(0u64)
+            let path = ArrayList<UInt64>([0u64])
             if (let Some(store) <- (user as Store)) {
-                if (store.GetLocation().nodeId == env.nodeId) {
-                    let storeField = builder.CreateStoreElementRef(store.GetValue(), boxObj, path, userParent)
-                    storeField.MoveBefore(user)
-                    user.RemoveSelfFromBlock()
-                    continue
-                }
+                let storeField = builder.CreateStoreElementRef(store.GetValue(), boxObj, path, userParent)
+                storeField.MoveBefore(user)
+                user.RemoveSelfFromBlock()
+                continue
             }
             let fieldRef = builder.CreateGetElementRef(env.GetType() ??
                 throw IllegalStateException("ClosureConversion mutable capture has no type"), boxObj, path, userParent)
             fieldRef.MoveBefore(user)
             user.ReplaceOperand(env, RequireResult(fieldRef))
         }
-        // C++: CHIR/Transformation/ClosureConversion.cpp:1130-1132.
-        if (opts.chirDebugOptimizer) {
-            PrintMutableVarInfo(envExpr.GetDebugLocation().GetBeginPos())
+        if (let Some(oldDebug) <- debugExpr) {
+            let parent = oldDebug.GetParentBlock() ??
+                throw IllegalStateException("ClosureConversion mutable capture debug has no parent block")
+            let newDebug = builder.CreateDebug(builder.context.GetUnitTy(), lValue,
+                oldDebug.GetSrcCodeIdentifier(), parent)
+            newDebug.SetDebugLocation(oldDebug.GetDebugLocation())
+            newDebug.MoveBefore(oldDebug)
+            oldDebug.RemoveSelfFromBlock()
         }
-        envExpr.RemoveSelfFromBlock()
+        if (opts.chirDebugOptimizer) {
+            PrintMutableVarInfo(env.GetExpr().getOrThrow().GetDebugLocation().GetBeginPos())
+        }
+        env.GetExpr().getOrThrow().RemoveSelfFromBlock()
+    }
+
+    private func SetBoxClassAsMutableVar(rValue: LocalVar, srcCodeIdentifier: String): (LocalVar, LocalVar) {
+        let parent = rValue.GetExpr().getOrThrow().GetParentBlock().getOrThrow()
+        let retTy = builder.context.GetRefTy(rValue.GetType().getOrThrow())
+        let lValueExpr = builder.CreateAllocate(retTy, rValue.GetType().getOrThrow(), parent)
+        let lValue = RequireResult(lValueExpr)
+        lValue.SetSrcCodeIdentifier(srcCodeIdentifier)
+        lValueExpr.MoveAfter(rValue.GetExpr().getOrThrow())
+        let assignment = builder.CreateStore(rValue, lValue, parent)
+        assignment.MoveAfter(lValueExpr)
+        let load = builder.CreateLoad(rValue.GetType().getOrThrow(), lValue, parent)
+        load.MoveAfter(assignment)
+        return (lValue, RequireResult(load))
+    }
+
+    private func BoxMutableVar(env: LocalVar): Value {
+        let rawEnvTy = env.GetType() ??
+            throw IllegalStateException("ClosureConversion mutable capture has no type")
+        let envTy = (rawEnvTy as RefType) ??
+            throw IllegalStateException("ClosureConversion mutable capture is not a ref")
+        let classDef = CreateBoxClassDef(envTy.GetBaseType())
+        var boxObj = CreateBoxClassObj(env, classDef)
+        var allocRes = boxObj
+        if (opts.enableCompileDebug) {
+            let (lValue, rValue) = SetBoxClassAsMutableVar(boxObj, env.GetSrcCodeIdentifier())
+            allocRes = lValue
+            boxObj = rValue
+        }
+        ReplaceEnvWithBoxObjMemberVar(env, boxObj, allocRes)
         return boxObj
     }
 
