@@ -2476,6 +2476,8 @@ extend TypeChecker {
                 }
                 CheckReturnAndJump(ctx)
                 impl.PreCheckInvalidInherit(ctx, pkg)
+                // C++ src/Sema/PreCheck.cpp:1865-1866 TypeCheckerImpl::PreCheck.
+                mpImpl.PreCheck4CJMP(pkg)
             }
         }
         impl.typeManager.ClearMapCache()
