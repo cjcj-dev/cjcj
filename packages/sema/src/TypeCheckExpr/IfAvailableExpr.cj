@@ -1,9 +1,13 @@
 package cjcj::sema.TypeCheckExpr
 
 import cjcj::ast.*
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.MakeRange as BasicMakeRange
+import cjcj::modules.SemaImportManager
 import cjcj::sema.*
 import cjcj::sema.Plugin.*
+import cjcj::utils.CJC_ASSERT
 
 private let LEVEL_IDENTIFIER: String = "level"
 private let SYSCAP_IDENTIFIER: String = "syscap"
@@ -53,74 +57,137 @@ private func IsLiteralLevelCondition(condExpr: Expr): Bool {
     return false
 }
 
-private func CheckIfAvailableArg(iae: IfAvailableExpr, desugaredIf: IfExpr): Bool {
-    if (let Some(arg) <- iae.GetArg()) {
-        if (arg.name.Empty()) {
-            return false
-        }
-        let argName = arg.name.Val()
-        if (argName == LEVEL_IDENTIFIER) {
-            if (let Some(argExpr) <- arg.expr) {
-                if (!IsValidIfAvailableLevelLiteral(argExpr)) {
-                    return false
-                }
-            } else {
-                return false
-            }
-            if (let Some(condExpr) <- desugaredIf.condExpr) {
-                return IsLiteralLevelCondition(condExpr)
-            }
-            return false
-        }
-        if (argName == SYSCAP_IDENTIFIER) {
-            if (let Some(condExpr2) <- desugaredIf.condExpr) {
-                if (let Some(callExpr) <- (condExpr2 as CallExpr)) {
-                    if (callExpr.args.size == 1) {
-                        if (let Some(argExpr2) <- callExpr.args[0].expr) {
-                            return argExpr2.astKind == ASTKind.LIT_CONST_EXPR
-                        }
-                    }
-                }
-            }
-            return false
+private func ChkIfImportDeviceInfo(diag: BasicDiagnosticEngine, importManager: SemaImportManager,
+    iae: IfAvailableExpr): Bool {
+    if (iae.GetFullPackageName() == "ohos.device_info") {
+        return true
+    }
+    for (importedPkg in importManager.GetAllImportedPackages(false)) {
+        if (importedPkg.srcPackage.fullPackageName == "ohos.device_info") {
+            return true
         }
     }
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_use_expr_without_import, iae,
+        arguments: ["ohos.device_info", "IfAvailable"])
+    builder.AddNote("depend on declaration 'DeviceInfo'")
+    builder.Emit()
     return false
+}
+
+private func ChkIfImportBase(diag: BasicDiagnosticEngine, importManager: SemaImportManager,
+    iae: IfAvailableExpr): Bool {
+    if (iae.GetFullPackageName() == "ohos.base") {
+        return true
+    }
+    for (importedPkg in importManager.GetAllImportedPackages(false)) {
+        if (importedPkg.srcPackage.fullPackageName == "ohos.base") {
+            return true
+        }
+    }
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_use_expr_without_import, iae,
+        arguments: ["ohos.base", "IfAvailable"])
+    builder.AddNote("depend on declaration 'canIUse'")
+    builder.Emit()
+    return false
+}
+
+private class IfAvailableCheckState {
+    public var res: Bool = true
+    public var hasHardError: Bool = false
+
+    public init() {}
+}
+
+private func ChkLevelArgument(diag: BasicDiagnosticEngine, importManager: SemaImportManager,
+    iae: IfAvailableExpr, desugaredIf: IfExpr, state: IfAvailableCheckState): Unit {
+    let hasDeviceInfoImport = ChkIfImportDeviceInfo(diag, importManager, iae)
+    state.res = hasDeviceInfoImport && state.res
+    state.hasHardError = !hasDeviceInfoImport || state.hasHardError
+    let arg = iae.GetArg().getOrThrow()
+    let argExpr = arg.expr.getOrThrow()
+    if (!IsValidIfAvailableLevelLiteral(argExpr)) {
+        if (let Some(lit) <- (argExpr as LitConstExpr)) {
+            if (lit.kind == LitConstKind.STRING) {
+                DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_apilevel_invalid_version_format, arg,
+                    arguments: [lit.stringValue]).Emit()
+            } else {
+                DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ifavailable_arg_not_literal, arg).Emit()
+            }
+        } else {
+            DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ifavailable_arg_not_literal, arg).Emit()
+        }
+        state.hasHardError = true
+        state.res = false
+    }
+    if (!IsLiteralLevelCondition(desugaredIf.condExpr.getOrThrow())) {
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ifavailable_arg_not_literal, arg).Emit()
+        state.res = false
+        state.hasHardError = true
+    }
+}
+
+private func ChkSyscapArgument(diag: BasicDiagnosticEngine, importManager: SemaImportManager,
+    iae: IfAvailableExpr, desugaredIf: IfExpr, state: IfAvailableCheckState): Unit {
+    let hasBaseImport = ChkIfImportBase(diag, importManager, iae)
+    state.res = hasBaseImport && state.res
+    state.hasHardError = !hasBaseImport || state.hasHardError
+    let condExpr = desugaredIf.condExpr.getOrThrow()
+    CJC_ASSERT(condExpr.astKind == ASTKind.CALL_EXPR)
+    let callExpr = (condExpr as CallExpr).getOrThrow()
+    CJC_ASSERT(callExpr.args.size == 1)
+    if (callExpr.args[0].expr.getOrThrow().astKind != ASTKind.LIT_CONST_EXPR) {
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_ifavailable_arg_not_literal,
+            iae.GetArg().getOrThrow()).Emit()
+        state.res = false
+        state.hasHardError = true
+    }
 }
 
 extend TypeChecker {
     public func SynIfAvailableExpr(ctx: ASTContext, iae: IfAvailableExpr): Ty {
-        if (let Some(desugar) <- iae.desugarExpr) {
-            if (let Some(desugaredIf) <- (desugar as IfExpr)) {
-                var ok = CheckIfAvailableArg(iae, desugaredIf)
-                let lambdaTy = impl.typeManager.GetFunctionTy(Array<Ty>(), TcUnitTy())
-                if (let Some(lambda1) <- iae.GetLambda1()) {
-                    ok = Check(ctx, lambdaTy, lambda1) && ok
-                } else {
-                    ok = false
-                }
-                if (let Some(lambda2) <- iae.GetLambda2()) {
-                    ok = Check(ctx, lambdaTy, lambda2) && ok
-                } else {
-                    ok = false
-                }
-                let ifTy = SynIfExpr(CheckerContext(ctx, SynPos.EXPR_ARG), desugaredIf)
-                ok = Ty.IsTyCorrect(ifTy) && ok
-                if (ok) {
-                    iae.SetTy(ifTy)
-                    return ifTy
-                }
-            }
+        let desugaredIf = if (let Some(value) <- (iae.desugarExpr.getOrThrow() as IfExpr)) {
+            value
+        } else {
+            return TypeManager.GetInvalidTy()
         }
-        return IfAvailableInvalid(iae)
+        let state = IfAvailableCheckState()
+        let arg = iae.GetArg().getOrThrow()
+        let argName = arg.name
+        if (argName.Empty()) {
+            DiagnoseRefactor(impl.diag.getOrThrow(), BasicDiagKindRefactor.sema_ifavailable_arg_no_name, arg).Emit()
+            state.res = false
+            state.hasHardError = true
+        }
+        if (argName.Val() == LEVEL_IDENTIFIER && desugaredIf.condExpr.isSome()) {
+            ChkLevelArgument(impl.diag.getOrThrow(), impl.importManager.getOrThrow(), iae, desugaredIf, state)
+        } else if (argName.Val() == SYSCAP_IDENTIFIER && desugaredIf.condExpr.isSome()) {
+            ChkSyscapArgument(impl.diag.getOrThrow(), impl.importManager.getOrThrow(), iae, desugaredIf, state)
+        } else {
+            DiagnoseRefactor(impl.diag.getOrThrow(), BasicDiagKindRefactor.sema_ifavailable_unknow_arg_name,
+                BasicMakeRange(argName.Begin(), argName.End()), arguments: [argName.Val()]).Emit()
+            state.res = false
+            state.hasHardError = true
+        }
+        let targetTy = impl.typeManager.GetFunctionTy(Array<Ty>(), TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        state.res = Check(ctx, targetTy, iae.GetLambda1().getOrThrow()) && state.res
+        state.res = Check(ctx, targetTy, iae.GetLambda2().getOrThrow()) && state.res
+        if (!state.res) {
+            iae.SetTy(TypeManager.GetInvalidTy())
+            return iae.GetTy().getOrThrow()
+        }
+        iae.SetTy(Synthesize(ctx, SynPos.EXPR_ARG, desugaredIf))
+        return iae.GetTy().getOrThrow()
     }
 
     public func ChkIfAvailableExpr(ctx: ASTContext, target: Ty, iae: IfAvailableExpr): Bool {
         let actualTy = SynIfAvailableExpr(ctx, iae)
-        if (Ty.IsTyCorrect(actualTy) && impl.typeManager.IsSubtype(actualTy, target)) {
-            return true
+        if (!Ty.IsTyCorrect(actualTy)) {
+            return false
         }
-        let _ = IfAvailableInvalid(iae)
-        return false
+        if (!impl.typeManager.IsSubtype(actualTy, target)) {
+            DiagMismatchedTypes(impl.diag.getOrThrow(), iae, target)
+            return false
+        }
+        return true
     }
 }
