@@ -8,6 +8,9 @@ public import cjcj::option.EnvironmentOptions as OptionEnvironmentOptions
 public import cjcj::option.MaybeString as OptionMaybeString
 public import cjcj::option.OrderedInput as OptionOrderedInput
 public import cjcj::option.TempFileInfo as OptionTempFileInfo
+public import cjcj::option.TempFileKind
+public import cjcj::option.TempFileManager
+public import cjcj::option.{DylibSuffix, ObjSuffix, TempFileKindSuffix}
 import cjcj::option.enumIndex as OptionOptimizationLevelIndex
 
 public enum ToolType {
@@ -40,27 +43,6 @@ public enum ToolID {
     | CODESIGN
     | STRIP
     | CMD
-}
-
-public enum TempFileKind {
-    | O_CJO
-    | O_CJO_FLAG
-    | O_FULL_BCHIR
-    | O_BCHIR
-    | T_BC
-    | O_BC
-    | O_EXE
-    | O_DYLIB
-    | O_STATICLIB
-    | O_MACRO
-    | O_CHIR
-    | T_OPT_BC
-    | O_OPT_BC
-    | T_ASM
-    | O_OBJ
-    | T_OBJ
-    | T_EXE_MAC
-    | T_DYLIB_MAC
 }
 
 private func toolTypeIndex(value: ToolType): Int64 {
