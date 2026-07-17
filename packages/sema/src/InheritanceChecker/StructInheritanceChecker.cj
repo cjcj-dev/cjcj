@@ -1293,13 +1293,14 @@ public class StructInheritanceChecker {
             if (let Some(parentOuter) <- interfaceDecl.outerDecl) {
                 if (let Some(childOuter) <- childDecl.outerDecl) {
                     if (parentOuter.IsExportedDecl() && !childOuter.IsExportedDecl()) {
-                        let builder = diag.DiagnoseRefactor(
+                        let builder = DiagnoseRefactor(
+                            diag,
                             DiagKindRefactor.sema_export_extend_depend_non_export_extend,
-                            DeclRange(curDecl),
+                            curDecl,
                             arguments: [interfaceDecl.identifier.Val()]
                         )
                         builder.AddNote(DeclRange(childOuter), "following extension cannot be exported")
-                        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                        builder.Emit()
                     }
                 }
             }
