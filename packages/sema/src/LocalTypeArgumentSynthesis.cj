@@ -381,9 +381,6 @@ public class LocalTypeArgumentSynthesis {
 
     public static func Unify(typeManager: TypeManager, cst: Constraint, argTy: Ty, paramTy: Ty): Bool {
         let pack = LocTyArgSynArgPack()
-        for (entry in cst.entries) {
-            pack.tyVarsToSolve.add(entry.tyVar)
-        }
         let synthesis = LocalTypeArgumentSynthesis(typeManager, pack, GCBlames())
         synthesis.cms = ConstraintWithMemos()
         synthesis.cms.Add(ConstraintWithMemo(constraint: cloneConstraint(cst)))
