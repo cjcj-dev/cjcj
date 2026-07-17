@@ -846,8 +846,35 @@ extend ParserImpl {
             let body = ParseFuncBody(ScopeKind.MAIN_BODY)
             ret.funcBody = body
             ret.end = body.end
+            if (body.paramLists.size > 1) {
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_expected_left_brace, body.paramLists[1].begin, "(").Emit()
+            }
+            for (anno in annos) {
+                if (anno.kind != AnnotationKind.WHEN && anno.kind != AnnotationKind.NUMERIC_OVERFLOW &&
+                    anno.kind != AnnotationKind.C) {
+                    DiagUnexpectedAnnoOn(annos[0], ret.identifier.Begin(), annos[0].identifier.Val(),
+                        ret.identifier.Val())
+                }
+            }
             if (let None <- body.body) {
                 DiagMissingBody("main function", "", lastToken.End())
+            }
+            for (anno in annos) {
+                if (anno.kind == AnnotationKind.JAVA) {
+                    ret.EnableAttr(Attribute.JAVA_APP)
+                }
+                if (anno.kind == AnnotationKind.INTRINSIC) {
+                    CheckIntrinsicFunc(ret)
+                    ret.EnableAttr(Attribute.INTRINSIC)
+                }
+                if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
+                    ret.EnableAttr(Attribute.NUMERIC_OVERFLOW)
+                    ret.overflowStrategy = anno.overflowStrategy
+                }
+                if (anno.kind == AnnotationKind.FASTNATIVE) {
+                    ret.isFastNative = true
+                }
             }
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.MAIN))
             if (ret.TestAttr(Attribute.UNSAFE)) {
