@@ -34,6 +34,8 @@ private let FIELD_NAME_TO_STORE_OBJ_TO_SPY: String = "objectToSpyOn"
 private let PARAMETER_TO_MATCH_RETURN_ENTRY: String = "value"
 private let PARAMETER_TO_MATCH_THROW_ENTRY: String = "e"
 private let DEFAULT_VALUE_FOR_STUB_METHOD_NAME: String = "defaultValueForStub"
+private let OPTION_VALUE_CTOR: String = "Some"
+private let OPTION_NONE_CTOR: String = "None"
 private let UNITTEST_MOCK_INTERNAL_PACKAGE_NAME: String = "std.unittest.mock.internal"
 
 private func GetDeclFromMockPackage<T>(importManager: SemaImportManager, identifier: String): Option<T> where T <: Decl {
@@ -652,7 +654,7 @@ public class MockManager {
     private func CreateOuterDeclInfo(funcDecl: FuncDecl, curFile: File): Expr {
         let optionDecl = mockUtils.optionDecl.getOrThrow()
         let optionOuterIdDeclTy = typeManager.GetEnumTy(optionDecl,
-            [declIdDecl.getOrThrow().GetTy().getOrThrow()])
+            typeArgs: [declIdDecl.getOrThrow().GetTy().getOrThrow()])
         let outerDeclExpr: Expr
         if (let Some(rawOuterDecl) <- funcDecl.outerDecl) {
             let someOuterDeclIdDecl = LookupEnumMember(optionDecl, OPTION_VALUE_CTOR).getOrThrow()
