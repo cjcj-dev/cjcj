@@ -56,8 +56,25 @@ public class ExtendDef <: CustomTypeDef {
         }
     }
 
-    public override func ToString(indent: Int64): String {
-        let target = if (let Some(ty) <- extendedType) { ty.ToString() } else { "<unknown>" }
-        return IndentToString(indent) + "extend " + target
+    protected override func CustomTypeDefTitleToString(): String {
+        let extendedTy = extendedType.getOrThrow()
+        let extendedTyText = if (let Some(customTy) <- (extendedTy as CustomType)) {
+            customTy.GetCustomTypeDef().GetIdentifier() + GenericInsArgsToString(customTy)
+        } else {
+            extendedTy.ToString()
+        }
+        return "extend" + TypeVecToString("<", GetGenericTypeParams(), ">") + " " + extendedTyText
+    }
+
+    protected override func AddExtraComment(): String {
+        let comments = ArrayList<String>()
+        if (!GetIdentifier().isEmpty()) {
+            comments.add("id: " + GetIdentifier())
+        }
+        let constraints = GetGenericTypeConstaintsStr(GetGenericTypeParams())
+        if (!constraints.isEmpty()) {
+            comments.add("genericConstrains: " + constraints)
+        }
+        return StringJoin(comments, ", ")
     }
 }
