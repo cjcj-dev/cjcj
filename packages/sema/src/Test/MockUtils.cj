@@ -838,7 +838,9 @@ public class MockUtils {
             let mockedFuncDecl = (mockedDecl as FuncDecl).getOrThrow()
             CJC_ASSERT(mockedFuncDecl.funcBody.isSome())
             let mockedFuncBody = mockedFuncDecl.funcBody.getOrThrow()
-            UpdateRefTypesTarget(mockedFuncBody.retType.getOrThrow(), generic, newGeneric)
+            if (let Some(retType) <- mockedFuncBody.retType) {
+                UpdateRefTypesTarget(retType, generic, newGeneric)
+            }
             mockedFuncBody.generic = newGeneric
         } else {
             mockedDecl.generic = newGeneric
