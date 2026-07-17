@@ -570,7 +570,8 @@ public class CompilerInstance {
             invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel,
             saveFileWithAbsPath: saveFileWithAbsPath, diag: diag,
             serializingCommon: invocation.globalOptions.outputMode == OutputMode.CHIR,
-            exportContent: importManager.IsSourceCodeImported(), exportForIncr: false, exportFuncBody: true)
+            exportContent: importManager.IsSourceCodeImported(), exportForIncr: false,
+            exportForTest: invocation.globalOptions.exportForTest, exportFuncBody: true)
         writer.PreSaveFullExportDecls(pkg)
         astWriters[pkg] = writer
     }
@@ -585,7 +586,8 @@ public class CompilerInstance {
                 invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel,
                 saveFileWithAbsPath: saveFileWithAbsPath, diag: diag,
                 serializingCommon: invocation.globalOptions.outputMode == OutputMode.CHIR,
-                exportContent: importManager.IsSourceCodeImported(), exportForIncr: false, exportFuncBody: true)
+                exportContent: importManager.IsSourceCodeImported(), exportForIncr: false,
+                exportForTest: invocation.globalOptions.exportForTest, exportFuncBody: true)
             newWriter.PreSaveFullExportDecls(pkg)
             newWriter
         }

@@ -181,12 +181,14 @@ public func SerializePackageToCjoFlatBuffer(
     serializingCommon!: Bool = false,
     exportContent!: Bool = true,
     exportForIncr!: Bool = false,
+    exportForTest!: Bool = false,
     exportFuncBody!: Bool = true,
     compileCjd!: Bool = false
 ): Array<UInt8> {
     let writer = ASTWriter(packageDepInfo, cjoManager, debug, optimizationLevel,
         saveFileWithAbsPath: saveFileWithAbsPath, diag: diag, serializingCommon: serializingCommon,
-        exportContent: exportContent, exportForIncr: exportForIncr, exportFuncBody: exportFuncBody,
+        exportContent: exportContent, exportForIncr: exportForIncr, exportForTest: exportForTest,
+        exportFuncBody: exportFuncBody,
         compileCjd: compileCjd)
     writer.PreSaveFullExportDecls(pkg)
     writer.ExportAST(pkg)
@@ -204,6 +206,7 @@ public class ASTWriter {
     private var serializingCommon: Bool
     private let exportContent: Bool
     private let exportForIncr: Bool
+    private let exportForTest: Bool
     private var exportFuncBody: Bool
     private let compileCjd: Bool
     private let mangler: RealBaseMangler = RealBaseMangler()
@@ -238,6 +241,7 @@ public class ASTWriter {
         serializingCommon!: Bool,
         exportContent!: Bool,
         exportForIncr!: Bool,
+        exportForTest!: Bool,
         exportFuncBody!: Bool,
         compileCjd!: Bool = false
     ) {
@@ -250,6 +254,7 @@ public class ASTWriter {
         this.serializingCommon = serializingCommon
         this.exportContent = exportContent
         this.exportForIncr = exportForIncr
+        this.exportForTest = exportForTest
         this.exportFuncBody = exportFuncBody
         this.compileCjd = compileCjd
     }
@@ -2733,17 +2738,20 @@ public class ASTWriter {
     }
 
     private func ShouldOmitMangledName(decl: Decl): Bool {
-        if (IsInDeclWithAttribute(decl, Attribute.GENERIC)) {
-            return true
+        let ignoreMangledName = IsInDeclWithAttribute(decl, Attribute.GENERIC) ||
+            (decl as GenericParamDecl).isSome() || (decl as PropDecl).isSome() ||
+            (decl as TypeAliasDecl).isSome() || (decl as ExtendDecl).isSome() ||
+            ((decl as VarDecl).isSome() && !decl.TestAnyAttr(Attribute.STATIC, Attribute.GLOBAL))
+        if (!ignoreMangledName) {
+            return false
         }
-        if ((decl as GenericParamDecl).isSome() || (decl as PropDecl).isSome() ||
-            (decl as TypeAliasDecl).isSome() || (decl as ExtendDecl).isSome()) {
-            return true
+        let isInExtendToExportForTest = if (let Some(outerDecl) <- decl.outerDecl) {
+            (outerDecl as ExtendDecl).isSome() && !outerDecl.TestAttr(Attribute.IMPORTED) &&
+                !outerDecl.TestAttr(Attribute.COMPILER_ADD) && !decl.TestAttr(Attribute.PRIVATE)
+        } else {
+            false
         }
-        if ((decl as VarDecl).isSome() && !decl.TestAnyAttr(Attribute.STATIC, Attribute.GLOBAL)) {
-            return true
-        }
-        return false
+        return !exportForTest || !isInExtendToExportForTest
     }
 
     private func IsInDeclWithAttribute(decl: Decl, attr: Attribute): Bool {
