@@ -470,11 +470,15 @@ public class TestManager {
             // C++: Sema/Test/TestManager.cpp:845.
             mockUtils.getOrThrow().SetGetTypeForTypeParamDecl(pkg)
             CollectInternalDeclUsages(pkg)
-            pkg.EnableAttr(Attribute.MOCK_SUPPORTED)
-            MarkNodesMockSupported(pkg)
+            GenerateAccessors(pkg)
+            PrepareToSpy(pkg)
+            PrepareDecls(pkg)
+            ReplaceCallsWithAccessors(pkg)
+            ReplaceCallsToForeignFunctions(pkg)
         } else {
             CheckIfNoMockSupportDependencies(pkg)
         }
+        HandleEnsurePreparedToMock(pkg)
     }
 
     // C++: Sema/Test/TestManager.cpp:354-371.
