@@ -35,6 +35,23 @@ private func CanSkip4CJMP(decl: Decl, serializingCommon: Bool): Bool {
     return true
 }
 
+// ASTWriter.cpp:240-251 CollectInstantiatedTys.
+private func CollectInstantiatedTys(ty: Option<Ty>, tys: HashSet<Ptr<Ty>>): Unit {
+    if (!Ty.IsTyCorrect(ty)) {
+        return
+    }
+    let instantiatedTy = ty.getOrThrow()
+    if (instantiatedTy.typeArgs.isEmpty()) {
+        return
+    }
+    if (instantiatedTy.IsNominal()) {
+        tys.add(Ptr(instantiatedTy))
+    }
+    for (typeArg in instantiatedTy.typeArgs) {
+        CollectInstantiatedTys(Some(typeArg), tys)
+    }
+}
+
 // ASTWriterImpl.h:44-50 NodeInfo.
 private class NodeInfo {
     let begin: ArrayList<UInt8>
