@@ -11,6 +11,7 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::option.MockMode
+import cjcj::utils.CJC_ASSERT
 
 private let MOCK_ON_COMPILATION_OPTION: String = "--mock=on"
 private let TEST_COMPILATION_OPTION: String = "--test"
@@ -326,6 +327,25 @@ public class TestManager {
             return
         }
         DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_wrong_static_decl, reportOn).Emit()
+    }
+
+    // C++: Sema/Test/TestManager.cpp:236-266.
+    public func ExtractMemberAccessFromExpr(expr: Expr): Option<MemberAccess> {
+        let callSource = if (let Some(desugared) <- expr.desugarExpr) { desugared } else { expr }
+        if (let Some(callExpr) <- (callSource as CallExpr)) {
+            if (let Some(baseFunc) <- callExpr.baseFunc) {
+                return baseFunc as MemberAccess
+            }
+            return None
+        }
+        if (let Some(desugared) <- expr.desugarExpr) {
+            if (let Some(block) <- (desugared as Block)) {
+                CJC_ASSERT(block.body.size == 2)
+                let callExpr = (block.body[1] as CallExpr).getOrThrow()
+                return callExpr.baseFunc.getOrThrow() as MemberAccess
+            }
+        }
+        return None
     }
 
     // C++: Sema/Test/TestManager.cpp:108-111.
