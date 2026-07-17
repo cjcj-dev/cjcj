@@ -1349,14 +1349,6 @@ public open class CustomType <: Type {
         return out
     }
 
-    public override func ToString(): String {
-        let args = TypeVecToString("", argTys, "", delimiter: ",")
-        if (args.isEmpty()) {
-            return def.GetFullName()
-        }
-        return def.GetFullName() + "<" + args + ">"
-    }
-
     public override func ToSrcCodeString(): String {
         let args = ArrayList<String>()
         for (ty in argTys) {
