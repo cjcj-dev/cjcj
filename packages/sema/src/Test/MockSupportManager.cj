@@ -1211,6 +1211,54 @@ public class MockSupportManager {
         return Some(accessorCall)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1705-1767.
+    private func GenerateAccessorCallForField(
+        nameRefExpr: NameReferenceExpr, kind: AccessorKind): Option<CallExpr> {
+        let baseExpr: Option<Expr> = if (let Some(memberAccess) <- (nameRefExpr as MemberAccess)) {
+            Some((ASTCloner.Clone(memberAccess.baseExpr.getOrThrow()) as Expr).getOrThrow())
+        } else {
+            None
+        }
+        return GenerateAccessorCallForField(baseExpr, nameRefExpr.GetTarget().getOrThrow(),
+            nameRefExpr.GetTy().getOrThrow(), kind, nameRefExpr.curFile)
+    }
+
+    private func GenerateAccessorCallForField(baseExpr: Option<Expr>, memberDecl: Decl,
+        memberRefTy: Ty, kind: AccessorKind, curFile: Option<File>): Option<CallExpr> {
+        let accessorDecl = mockUtils.FindAccessorForMemberAccess(
+            memberDecl.outerDecl.getOrThrow().GetTy(), Some(memberDecl), kind) as Option<FuncDecl>
+        if (accessorDecl.isNone()) {
+            return None
+        }
+
+        let accessorCall = CallExpr()
+        let nameRefExpr: NameReferenceExpr = if (let Some(base) <- baseExpr) {
+            CreateMemberAccess(base, accessorDecl.getOrThrow())
+        } else {
+            CreateRefExpr(accessorDecl.getOrThrow())
+        }
+        nameRefExpr.curFile = curFile
+        nameRefExpr.SetTarget(accessorDecl.getOrThrow())
+        nameRefExpr.callOrPattern = accessorCall
+
+        if (kind == AccessorKind.FIELD_GETTER || kind == AccessorKind.STATIC_FIELD_GETTER) {
+            nameRefExpr.SetTy(typeManager.GetFunctionTy([], memberRefTy))
+            accessorCall.SetTy(memberRefTy)
+        } else if (kind == AccessorKind.FIELD_SETTER || kind == AccessorKind.STATIC_FIELD_SETTER) {
+            nameRefExpr.SetTy(typeManager.GetFunctionTy(
+                [memberRefTy], TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+            accessorCall.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        } else {
+            CJC_ABORT()
+        }
+
+        accessorCall.resolvedFunction = accessorDecl.getOrThrow()
+        accessorCall.baseFunc = nameRefExpr
+        accessorCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+        accessorCall.curFile = curFile
+        return Some(accessorCall)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
