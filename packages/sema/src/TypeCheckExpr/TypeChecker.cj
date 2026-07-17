@@ -8084,25 +8084,80 @@ extend TypeChecker {
         return LookupCoreTy(ctx, "Exception") ?? impl.typeManager.GetAnyTy()
     }
 
-    private func CheckArrayLit(ctx: ASTContext, target: Ty, arrayLit: ArrayLit): Bool {
-        let targetTy = UnboxOptionType(target)
-        var arrayStruct: Option<StructDecl> = None
+    // C++ src/Sema/TypeCheckBuiltinExpr.cpp:64-78.
+    private func GetArrayTypeByInterface(interfaceTy: Ty): Ty {
+        let invalid = TypeManager.GetInvalidTy()
         if (let Some(manager) <- impl.importManager) {
-            arrayStruct = manager.GetCoreDecl<StructDecl>("Array")
-        }
-        var matched = true
-        if (targetTy.typeArgs.size >= 1) {
-            let elemTy = targetTy.typeArgs[0]
-            for (child in arrayLit.children) {
-                if (!Check(ctx, elemTy, child)) {
-                    matched = false
-                    break
+            if (let Some(arrayStruct) <- manager.GetCoreDecl<StructDecl>("Array")) {
+                let arrayTy = arrayStruct.GetTy() ?? invalid
+                let arrayTys = Promotion(impl.typeManager).Downgrade(arrayTy, interfaceTy)
+                if (!arrayTys.values.isEmpty()) {
+                    return arrayTys.values[0]
                 }
             }
         }
-        if (!ChkArrayLit(impl.typeManager, target, arrayLit, arrayStruct: arrayStruct,
-            synthesizer: Some({ child: Expr => Synthesize(ctx, SynPos.EXPR_ARG, child) }), diag: impl.diag)) {
-            matched = false
+        return invalid
+    }
+
+    // C++ src/Sema/TypeCheckBuiltinExpr.cpp:80-133.
+    private func ChkArrayLit(ctx: ASTContext, target: Ty, arrayLit: ArrayLit): Bool {
+        var targetTy = UnboxOptionType(target)
+        arrayLit.SetTy(TypeManager.GetInvalidTy())
+        if (targetTy.IsInterface()) {
+            targetTy = GetArrayTypeByInterface(targetTy)
+            if (targetTy.IsInvalid()) {
+                if (arrayLit.children.isEmpty()) {
+                    if (let Some(diag) <- impl.diag) {
+                        Diagnose(diag, arrayLit, BasicDiagKind.sema_empty_arrayLit_type_undefined).Emit()
+                    }
+                    return false
+                }
+                let arrayLitTy = SynArrayLit(impl.typeManager, arrayLit,
+                    if (let Some(manager) <- impl.importManager) {
+                        manager.GetCoreDecl<StructDecl>("Array")
+                    } else {
+                        None
+                    }, synthesizer: Some({ child: Expr => Synthesize(ctx, SynPos.EXPR_ARG, child) }), diag: impl.diag)
+                if (impl.typeManager.IsSubtype(arrayLitTy, target)) {
+                    return true
+                }
+                if (Ty.IsTyCorrect(arrayLitTy)) {
+                    if (let Some(diag) <- impl.diag) {
+                        DiagMismatchedTypes(diag, arrayLit, target)
+                    }
+                }
+                return false
+            }
+        } else if (!Ty.IsTyCorrect(targetTy) ||
+            (!targetTy.IsStructArray() && (let None <- (targetTy as VArrayTy)))) {
+            if (let Some(diag) <- impl.diag) {
+                DiagMismatchedTypesWithFoundTy(diag, arrayLit, targetTy.String(), "Array")
+            }
+            return false
+        }
+        if (targetTy.typeArgs.isEmpty()) {
+            return false
+        }
+        var matched = true
+        if (let Some(varrayTy) <- (targetTy as VArrayTy)) {
+            if (varrayTy.size != arrayLit.children.size) {
+                if (let Some(diag) <- impl.diag) {
+                    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_varray_size_match, arrayLit)
+                    builder.AddMainHintArguments([varrayTy.size.toString(), arrayLit.children.size.toString()])
+                    builder.Emit()
+                }
+                matched = false
+            }
+        }
+        let arrayElemTy = targetTy.typeArgs[0]
+        for (child in arrayLit.children) {
+            if (!Check(ctx, arrayElemTy, child)) {
+                matched = false
+                break
+            }
+        }
+        if (matched) {
+            arrayLit.SetTy(targetTy)
         }
         return matched
     }
@@ -8563,7 +8618,7 @@ extend TypeChecker {
             return FinishCheck(ctx, lit, chkRet)
         }
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
-            return FinishCheck(ctx, arrayLit, CheckArrayLit(ctx, target, arrayLit))
+            return FinishCheck(ctx, arrayLit, ChkArrayLit(ctx, target, arrayLit))
         }
         if (let Some(tupleLit) <- (expr as TupleLit)) {
             return FinishCheck(ctx, tupleLit, CheckTupleLit(ctx, target, tupleLit))
