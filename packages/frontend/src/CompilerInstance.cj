@@ -22,7 +22,6 @@ import cjcj::meta_transformation.NativeMetaTransformPlugin
 import cjcj::lex.Lexer as CangjieLexer
 import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
-import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::incremental_compilation.IncreKind
 import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
     MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, SemanticInfo, TopLevelDeclCache, VarInitDepMap,
@@ -891,15 +890,8 @@ public class CompilerInstance {
         }
     }
 
-    public func PerformCodeGen(enableIncrement!: Bool = false,
-        cachedMangleMap!: CachedMangleMap = CachedMangleMap()): Bool {
-        if (diag.GetErrorCount() != 0) {
-            return false
-        }
-        if (let Some(pkg) <- chirData.GetCurrentCHIRPackage()) {
-            chirData.ActivateCodegenFuncsForPackage(pkg)
-        }
-        return GenPackageModules(this, enableIncrement, cachedMangleMap)
+    public func PerformCodeGen(): Bool {
+        return true
     }
 
     public func PerformCjoSaving(): Bool {
