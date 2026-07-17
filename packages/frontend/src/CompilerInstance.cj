@@ -24,7 +24,6 @@ import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationC
     MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, SemanticInfo, TopLevelDeclCache, VarInitDepMap,
     VirtualWrapperDepMap, WriteCache}
 import cjcj::macro_pkg.{GetMethodPointer, OpenSymbolTable, OpenSymbolTableSafely, RuntimeInit}
-import cjcj::option.OutputMode
 import cjcj::parse.ASTHasher
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
