@@ -343,6 +343,9 @@ extend ParserImpl {
 
     public func ParseBaseExpr(expr: Expr, ek: ExprKind): Expr {
         var base = expr
+        if (base.astKind == ASTKind.JUMP_EXPR) {
+            return base
+        }
         var hasQuestSuffix = false
         while (true) {
             if (newlineSkipped && !Seeing(TokenKind.DOT)) {
