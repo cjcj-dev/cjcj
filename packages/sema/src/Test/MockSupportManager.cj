@@ -1483,6 +1483,63 @@ public class MockSupportManager {
         return None
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1184-1260.
+    private func TransformAccessorCallForMutOperation(
+        originalNre: NameReferenceExpr, replacedNre: Expr, topLevelExpr: Expr): Unit {
+        CJC_ASSERT((topLevelExpr as AssignExpr).isSome() ||
+            ((topLevelExpr as CallExpr).isSome() &&
+                (topLevelExpr as CallExpr).getOrThrow().resolvedFunction.getOrThrow().TestAttr(Attribute.MUT)))
+
+        let tmpVarDecl = CreateTmpVarDecl(Some(MockUtils.CreateType(replacedNre.GetTy().getOrThrow())),
+            Some((ASTCloner.Clone(replacedNre) as Expr).getOrThrow()))
+        tmpVarDecl.isVar = true
+        let tmpVarRefToMutate = CreateRefExpr(tmpVarDecl)
+        tmpVarRefToMutate.ref.identifier = tmpVarDecl.identifier
+        tmpVarRefToMutate.curFile = replacedNre.curFile
+        tmpVarRefToMutate.SetTy(originalNre.GetTy().getOrThrow())
+
+        let newTopLevelExpr = (ASTCloner.Clone(topLevelExpr) as Expr).getOrThrow()
+        let mutBaseExpr: Expr = if (let Some(callExpr) <- (newTopLevelExpr as CallExpr)) {
+            callExpr.baseFunc.getOrThrow()
+        } else if (let Some(assignExpr) <- (newTopLevelExpr as AssignExpr)) {
+            assignExpr.leftValue.getOrThrow()
+        } else {
+            CJC_ABORT_WITH_MSG("Unexpected top-level mut expression")
+        }
+        let tmpVarRefToAssign = (ASTCloner.Clone(tmpVarRefToMutate) as Expr).getOrThrow()
+        CJC_ASSERT(mutBaseExpr.astKind == ASTKind.MEMBER_ACCESS)
+        (mutBaseExpr as MemberAccess).getOrThrow().baseExpr = tmpVarRefToMutate
+
+        let mutResultVarDecl = CreateTmpVarDecl(
+            Some(MockUtils.CreateType(newTopLevelExpr.GetTy().getOrThrow())), Some(newTopLevelExpr))
+        let mutResultVarRef = CreateRefExpr(mutResultVarDecl)
+        mutResultVarRef.ref.identifier = mutResultVarDecl.identifier
+        mutResultVarRef.curFile = replacedNre.curFile
+        let ty = topLevelExpr.GetTy().getOrThrow()
+
+        let newOriginalMa = (ASTCloner.Clone(originalNre) as NameReferenceExpr).getOrThrow()
+        newOriginalMa.desugarExpr = None
+        let backAssignExpr = CreateAssignExpr(newOriginalMa, tmpVarRefToAssign)
+        backAssignExpr.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        let _ = ReplaceFieldSetWithAccessor(backAssignExpr, false)
+        backAssignExpr.EnableAttr(Attribute.GENERATED_TO_MOCK)
+
+        let nodes = ArrayList<Node>()
+        nodes.add(tmpVarDecl)
+        nodes.add(mutResultVarDecl)
+        nodes.add(backAssignExpr)
+        nodes.add(CreateReturnExpr(mutResultVarRef, None))
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(CreateFuncParamList(ArrayList<FuncParam>()))
+        let lambda = CreateLambdaExpr(CreateFuncBody(paramLists,
+            Some(MockUtils.CreateType(replacedNre.GetTy().getOrThrow())),
+            Some(CreateBlock(nodes, Some(ty))), Some(ty)))
+        lambda.SetTy(typeManager.GetFunctionTy([], ty))
+        lambda.funcBody.getOrThrow().SetTy(lambda.GetTy().getOrThrow())
+        topLevelExpr.desugarExpr = CreateCallExpr(lambda, ArrayList<FuncArg>(), None,
+            Some(ty), CallKind.CALL_INVALID)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
