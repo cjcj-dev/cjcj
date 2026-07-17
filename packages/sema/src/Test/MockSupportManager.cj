@@ -732,6 +732,31 @@ public class MockSupportManager {
         return bodyNodes
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:987-1015.
+    private func CreateFieldAccessorDecl(fieldDecl: VarDecl,
+        accessorTy: FuncTy, kind: AccessorKind): FuncDecl {
+        let accessorDecl = FuncDecl()
+        accessorDecl.curFile = fieldDecl.curFile
+        accessorDecl.begin = fieldDecl.begin
+        accessorDecl.end = fieldDecl.end
+        accessorDecl.keywordPos = fieldDecl.keywordPos
+        accessorDecl.identifier.SetPos(fieldDecl.identifier.Begin(), fieldDecl.identifier.End())
+        accessorDecl.moduleName = fieldDecl.moduleName
+        accessorDecl.fullPackageName = fieldDecl.fullPackageName
+        accessorDecl.outerDecl = fieldDecl.outerDecl as ClassDecl
+        accessorDecl.SetTy(accessorTy)
+        accessorDecl.identifier = SrcIdentifier(mockUtils.BuildMockAccessorIdentifier(fieldDecl, kind),
+            fieldDecl.identifier.Begin(), fieldDecl.identifier.End(), false)
+        if (fieldDecl.IsStaticOrGlobal()) {
+            MockSupportManager.MarkMockAccessorWithAttributes(accessorDecl, GetAccessLevel(fieldDecl))
+            accessorDecl.linkage = fieldDecl.linkage
+        } else {
+            MockSupportManager.MarkMockAccessorWithAttributes(accessorDecl, AccessLevel.PUBLIC)
+            accessorDecl.linkage = Linkage.EXTERNAL
+        }
+        return accessorDecl
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
