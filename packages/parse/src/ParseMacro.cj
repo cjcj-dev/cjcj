@@ -14,12 +14,6 @@ private let G_EXPRS_CONNECTED_BY_COMMA_LIST: Array<ASTKind> = [
 ]
 
 extend ParserImpl {
-    private func IsMacroIdentifierStart(kind: TokenKind): Bool {
-        let idx = TokenKindIndex(kind)
-        return kind == TokenKind.IDENTIFIER ||
-            (idx >= TokenKindIndex(TokenKind.PUBLIC) && idx <= TokenKindIndex(TokenKind.OPEN))
-    }
-
     private func IsBuiltinMacro(identifier: String): Bool {
         return identifier == "sourcePackage" || identifier == "sourceFile" || identifier == "sourceLine"
     }
@@ -38,29 +32,28 @@ extend ParserImpl {
         if (!Seeing(TokenKind.AT)) {
             return false
         }
-        return SeeingMacroCallIdentifier()
+        let ahead = lexer.LookAheadSkipNL(1)
+        let kind = ahead[0].kind
+        let idx = TokenKindIndex(kind)
+        if (kind != TokenKind.IDENTIFIER &&
+            (idx < TokenKindIndex(TokenKind.PUBLIC) || idx > TokenKindIndex(TokenKind.OPEN))) {
+            return false
+        }
+        return !IsBuiltinAnnotation(moduleName, ahead[0].Value())
     }
 
     public func SeeingMacroCallDecl(): Bool {
         if (!Seeing(TokenKind.AT) && !Seeing(TokenKind.AT_EXCL)) {
             return false
         }
-        return SeeingMacroCallIdentifier()
-    }
-
-    private func SeeingMacroCallIdentifier(): Bool {
         let ahead = lexer.LookAheadSkipNL(1)
-        if (ahead.isEmpty()) {
-            return false
-        }
         let kind = ahead[0].kind
-        if (!IsMacroIdentifierStart(kind)) {
+        let idx = TokenKindIndex(kind)
+        if (kind != TokenKind.IDENTIFIER &&
+            (idx < TokenKindIndex(TokenKind.PUBLIC) || idx > TokenKindIndex(TokenKind.OPEN))) {
             return false
         }
-        if (kind == TokenKind.IDENTIFIER && IsBuiltinAnnotation(moduleName, ahead[0].Value())) {
-            return false
-        }
-        return true
+        return !IsBuiltinAnnotation(moduleName, ahead[0].Value())
     }
 
     public func ParseAnnotationLambdaExpr(): LambdaExpr {
