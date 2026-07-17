@@ -259,25 +259,26 @@ public class TestManager {
             let adapter = MangleAstAdapter()
             let manglerCtx = mangler.PrepareContextForPackage(adapter.ConvertPackage(pkg))
             adapter.CollectLocalDecls(manglerCtx, pkg)
-            var isInExtend = false
+            let isInExtend = ArrayList<Bool>()
+            isInExtend.add(false)
 
             let walker = Walker(pkg, visitPre: { node: Node =>
                 if (let Some(extendDecl) <- (node as ExtendDecl)) {
                     if (!extendDecl.TestAttr(Attribute.IMPORTED)) {
-                        isInExtend = true
+                        isInExtend[0] = true
                     }
                 }
                 if (let Some(decl) <- (node as Decl)) {
                     if (!decl.TestAttr(Attribute.PRIVATE) &&
                         (decl.IsFuncOrProp() || (decl as FuncParam).isSome() || (decl as ExtendDecl).isSome()) &&
-                        (isInExtend || decl.TestAttr(Attribute.FOREIGN))) {
+                        (isInExtend[0] || decl.TestAttr(Attribute.FOREIGN))) {
                         decl.mangledName = mangler.Mangle(decl)
                     }
                 }
                 return VisitAction.WALK_CHILDREN
             }, visitPost: { node: Node =>
                 if ((node as ExtendDecl).isSome() && !node.TestAttr(Attribute.IMPORTED)) {
-                    isInExtend = false
+                    isInExtend[0] = false
                 }
                 return VisitAction.KEEP_DECISION
             })
