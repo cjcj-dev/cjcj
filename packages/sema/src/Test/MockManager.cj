@@ -3,7 +3,8 @@ package cjcj::sema.Test
 import std.collection.*
 import cjcj::ast.*
 import cjcj::modules.SemaImportManager
-import cjcj::sema.{AddArrayLitConstructor, CreateInitCall, CreateThrowException, FindInitDecl, GetMemberDecl}
+import cjcj::sema.{AddArrayLitConstructor, CreateInitCall, CreateThrowException, FindInitDecl, GetMemberDecl,
+    GetUsableGetterForProperty, GetUsableSetterForProperty}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.{GenerateTypeMapping, TypeManager, TypeSubst}
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, DynamicCast, GetRootPackageName, OBJECT_NAME, V_COMPILER}
