@@ -429,11 +429,6 @@ public class CompilerInstance {
                 DumpAST(GetSourcePackages(), globalOpts.output, "parse")
             }
         }
-        if (ret) {
-            ret = CaptureRealASTPackages()
-        } else {
-            realASTPkgs.clear()
-        }
         return ret
     }
 
@@ -446,7 +441,12 @@ public class CompilerInstance {
     }
 
     public func PerformImportPackage(): Bool {
-        let ret = getCompileStrategy().ImportPackages()
+        var ret = getCompileStrategy().ImportPackages()
+        if (ret) {
+            ret = CaptureRealASTPackages()
+        } else {
+            realASTPkgs.clear()
+        }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "import")
         }
