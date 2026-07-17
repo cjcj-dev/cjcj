@@ -1278,6 +1278,17 @@ public class MockSupportManager {
         return GenerateAccessorCallForField(nameRefExpr, kind)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1386-1397.
+    private func ReplaceRefExprWithGetAccessor(refExpr: RefExpr): Option<Expr> {
+        let accessorCall = GenerateGetterCall(refExpr)
+        if (accessorCall.isNone()) {
+            return None
+        }
+        accessorCall.getOrThrow().sourceExpr = refExpr
+        refExpr.desugarExpr = accessorCall.getOrThrow()
+        return refExpr.desugarExpr
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
