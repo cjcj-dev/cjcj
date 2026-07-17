@@ -1638,6 +1638,44 @@ public class MockSupportManager {
         return ReplaceMemberAccessWithAccessor(member, isInConstructor)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1610-1638.
+    private func ReplaceFieldSetWithAccessor(
+        assignExpr: AssignExpr, isInConstructor: Bool): Option<Expr> {
+        let leftValue = assignExpr.leftValue.getOrThrow()
+        var accessorCall: Option<CallExpr> = None
+        if (let Some(refExpr) <- (leftValue as RefExpr)) {
+            accessorCall = ReplaceRefExprFieldSetWithAccessor(refExpr, isInConstructor)
+        } else if (let Some(memberAccess) <- (leftValue as MemberAccess)) {
+            accessorCall = ReplaceMemberAccessFieldSetWithAccessor(memberAccess, isInConstructor)
+            if (accessorCall.isNone()) {
+                var topLevelMutExpr: Option<Expr> = None
+                if (let Some(target) <- memberAccess.target) {
+                    if (let Some(outerDecl) <- target.outerDecl) {
+                        if ((outerDecl as StructDecl).isSome()) {
+                            topLevelMutExpr = assignExpr
+                        }
+                    }
+                }
+                ReplaceSubMemberAccessWithAccessor(
+                    memberAccess, isInConstructor, topLevelMutExpr)
+                return Some(assignExpr)
+            }
+        } else if (leftValue.astKind == ASTKind.WILDCARD_EXPR) {
+            return None
+        } else if (let Some(subscript) <- (leftValue as SubscriptExpr)) {
+            if (subscript.IsVArrayAccess()) {
+                return None
+            }
+        }
+
+        if (accessorCall.isNone()) {
+            return None
+        }
+        assignExpr.desugarExpr = GenerateBlockForAssignExpr(
+            assignExpr, accessorCall.getOrThrow())
+        return assignExpr.desugarExpr
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
