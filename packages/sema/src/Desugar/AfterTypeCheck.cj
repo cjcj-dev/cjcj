@@ -12,7 +12,7 @@ import cjcj::sema.Desugar.AfterTypeCheck.*
 import cjcj::sema.NativeFFI.Java.JavaInteropManager
 import cjcj::sema.NativeFFI.ObjC.InteropContext
 import cjcj::sema.NativeFFI.ObjC.Desugar as DesugarObjC
-import cjcj::modules.{ImportManager, SemaImportManager}
+import cjcj::modules.SemaImportManager
 
 public func UpdatePosForMacroExpandedNodes(pkgs: ArrayList<Package>): Unit {
     let visit = { curNode: Node =>
@@ -221,8 +221,7 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager
     }
     javaInteropManager.DesugarPackage(pkg, structMemberMap,
         { node: Node => DesugarForPropDecl(typeManager, node) })
-    let activeImportManager = (importManager as ImportManager).getOrThrow()
-    DesugarObjC(InteropContext(pkg, typeManager, activeImportManager, diagValue, mangler, options.output,
+    DesugarObjC(InteropContext(pkg, typeManager, importManager, diagValue, mangler, options.output,
         options.outputObjCGenDir, structMemberMap, options.target.os))
     DesugarDeclsForPackage(pkg, options.enableCoverage)
     let walker = Walker(pkg, visitPre: { node: Node =>

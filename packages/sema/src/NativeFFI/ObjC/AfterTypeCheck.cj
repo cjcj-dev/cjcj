@@ -4,7 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine
 import cjcj::mangle.BaseMangler
-import cjcj::modules.ImportManager
+import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{MemberMap, TypeManager}
 
@@ -14,10 +14,10 @@ public class ASTFactory {
     private let typeManager: TypeManager
     private let nameGenerator: NameGenerator
     private let typeMapper: TypeMapper
-    private let importManager: ImportManager
+    private let importManager: SemaImportManager
 
     public init(bridge: InteropLibBridge, typeManager: TypeManager, nameGenerator: NameGenerator,
-        typeMapper: TypeMapper, importManager: ImportManager) {
+        typeMapper: TypeMapper, importManager: SemaImportManager) {
         this.bridge = bridge
         this.typeManager = typeManager
         this.nameGenerator = nameGenerator
@@ -45,7 +45,7 @@ public class InteropContext {
 
     public let diag: DiagnosticEngine
     public let typeManager: TypeManager
-    public let importManager: ImportManager
+    public let importManager: SemaImportManager
     public let bridge: InteropLibBridge
     public let typeMapper: TypeMapper
     public let mangler: BaseMangler
@@ -56,7 +56,7 @@ public class InteropContext {
     public let structMemberSignatures: HashMap<InheritableDecl, MemberMap>
     public let sharedLibraryExtension: String
 
-    public init(pkg: Package, typeManager: TypeManager, importManager: ImportManager,
+    public init(pkg: Package, typeManager: TypeManager, importManager: SemaImportManager,
         diag: DiagnosticEngine, mangler: BaseMangler, cjLibOutputPath: String,
         outputObjCGenDir: String, structMemberSignatures: HashMap<InheritableDecl, MemberMap>,
         targetOsType: OSType) {

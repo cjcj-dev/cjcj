@@ -2,7 +2,7 @@ package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
 import cjcj::basic.{DEFAULT_POSITION, DiagKindRefactor, DiagnosticEngine}
-import cjcj::modules.ImportManager
+import cjcj::modules.SemaImportManager
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, OBJ_C_BLOCK_IDENT, OBJ_C_FUNC_IDENT,
     OBJ_C_LANG_PACKAGE_IDENT, OBJ_C_POINTER_IDENT}
 
@@ -69,10 +69,10 @@ public class InteropLibBridge {
     private static var mutexUnlock: Option<FuncDecl> = None
     private static var mutexConstructor: Option<FuncDecl> = None
     private static var forwarderMutexDecl: Option<TypeAliasDecl> = None
-    private let importManager: ImportManager
+    private let importManager: SemaImportManager
     private let diag: DiagnosticEngine
 
-    public init(importManager: ImportManager, diag: DiagnosticEngine) {
+    public init(importManager: SemaImportManager, diag: DiagnosticEngine) {
         this.importManager = importManager
         this.diag = diag
     }
@@ -248,7 +248,7 @@ public class InteropLibBridge {
     public func GetObjCStoreLambdaAsBlockDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJC_STORE_LAMBDA_AS_BLOCK, ASTKind.FUNC_DECL) }
     public func GetObjCGetLambdaFromBlockDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJC_GET_LAMBDA_FROM_BLOCK, ASTKind.FUNC_DECL) }
     public func GetObjectGetClassDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_OBJECT_GET_CLASS, ASTKind.FUNC_DECL) }
-    public func IsInteropLibAccessible(importManager: ImportManager): Bool { return importManager.GetPackageDecl(INTEROPLIB_PACKAGE_NAME).isSome() }
+    public func IsInteropLibAccessible(importManager: SemaImportManager): Bool { return importManager.GetPackageDecl(INTEROPLIB_PACKAGE_NAME).isSome() }
     public func IsInteropLibAccessible(): Bool { return IsInteropLibAccessible(importManager) }
 
     private func GetObjCBlockConstructorByABIName(abiTypeName: String): Option<FuncDecl> {
