@@ -173,7 +173,7 @@ public class CompilerInstance {
 
     private func AddDeclIfMissing(values: ArrayList<Decl>, decl: Decl): Unit {
         for (value in values) {
-            if (SameImportedAwareDecl(value, decl)) {
+            if (value == decl) {
                 return
             }
         }
@@ -194,17 +194,6 @@ public class CompilerInstance {
             (left.begin.fileID == right.begin.fileID && left.begin == right.begin && left.objectId < right.objectId)
     }
 
-    private func SameImportedAwareDecl(left: Decl, right: Decl): Bool {
-        if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
-            if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-                return left.rawMangleName == right.rawMangleName
-            }
-            if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
-                return left.mangledName == right.mangledName
-            }
-        }
-        return SameDecl(left, right)
-    }
 }
 
 public func GetImportedDecl(ctx: ASTContext, fullPackageName: String, name: String): Option<Decl> {
