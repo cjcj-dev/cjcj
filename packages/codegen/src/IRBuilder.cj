@@ -1137,7 +1137,7 @@ public class IRBuilder2 <: Resource {
         }
         if (IsLLVMTypeContainsRef(structType)) {
             let source = ReadManagedAggregateSourceIfNeeded(value.GetRawValue(), structCGType, size)
-            return CallGCWriteStruct(baseObject, dest, source, size, structCGType.GetOriginal().ToString())
+            return CallGCWriteAgg(structType, ArrayList<LLVMValueRef>([baseObject, dest, source, size]))
         }
         let align = cgMod.GetABITypeAlignment(structType)
         return CreateMemCpy(dest, align, value.GetRawValue(), align, size)
