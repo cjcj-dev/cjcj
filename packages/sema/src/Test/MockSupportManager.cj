@@ -1508,7 +1508,8 @@ public class MockSupportManager {
         }
         let tmpVarRefToAssign = (ASTCloner.Clone(tmpVarRefToMutate) as Expr).getOrThrow()
         CJC_ASSERT(mutBaseExpr.astKind == ASTKind.MEMBER_ACCESS)
-        (mutBaseExpr as MemberAccess).getOrThrow().baseExpr = tmpVarRefToMutate
+        let mutMemberAccess = (mutBaseExpr as MemberAccess).getOrThrow()
+        mutMemberAccess.baseExpr = tmpVarRefToMutate
 
         let mutResultVarDecl = CreateTmpVarDecl(
             Some(MockUtils.CreateType(newTopLevelExpr.GetTy().getOrThrow())), Some(newTopLevelExpr))
