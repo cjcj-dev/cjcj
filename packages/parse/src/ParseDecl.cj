@@ -2,6 +2,7 @@ package cjcj::parse
 
 import cjcj::ast.ASTCloner
 import cjcj::ast.InsertObjCSyntheticClassDecl
+import cjcj::ast.INVALID_IDENTIFIER
 import cjcj::ast.IsObjCDeclAppropriateForSyntheticClassGeneration
 import cjcj::ast.Node
 import cjcj::ast.IsMirror
@@ -1579,7 +1580,7 @@ extend ParserImpl {
             param.identifier = ExpectIdentifierWithPos(param)
         }
         param.begin = param.identifier.Begin()
-        if (param.identifier.Empty()) {
+        if (param.identifier.Val() == INVALID_IDENTIFIER) {
             param.begin = Peek().Begin()
             param.typeNode = InvalidType(Peek().Begin())
             param.assignment = InvalidExpr(Peek().Begin())
