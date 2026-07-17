@@ -382,12 +382,13 @@ public class TestManager {
     }
 
     public func HandleCreateMock(pkg: Package): Unit {
+        let callExprs = ArrayList<CallExpr>()
         let walker = Walker(pkg, visitPre: { node: Node =>
             if (!NodeBelongsToPackage(node, pkg)) {
                 return VisitAction.WALK_CHILDREN
             }
             if (let Some(callExpr) <- (node as CallExpr)) {
-                return CollectToCreateMockCalls(callExpr)
+                return CollectToCreateMockCalls(callExpr, callExprs)
             }
             if (let Some(funcDecl) <- (node as FuncDecl)) {
                 if (funcDecl.TestAttr(Attribute.CONTAINS_MOCK_CREATION_CALL) && IsGenericFuncDecl(funcDecl) &&
@@ -404,6 +405,7 @@ public class TestManager {
             return VisitAction.WALK_CHILDREN
         })
         let _ = walker.Walk()
+        CreateMockCalls(pkg, callExprs)
     }
 
     private func ShouldMarkMockSupported(pkg: Package): Bool {
