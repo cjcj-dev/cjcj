@@ -297,14 +297,14 @@ public class DIBuilder {
         let diFile = GetOrCreateFile(position)
         let ty = DeRef(debugNode.GetValue().GetType().getOrThrow())
         let isReadOnly = debugNode.GetValue().TestAttr(Attribute.READONLY)
-        var type = GetOrCreateType(ty, isReadOnly: isReadOnly)
+        var diType = GetOrCreateType(ty, isReadOnly: isReadOnly)
         let expr = ArrayList<UInt64>()
         var flags = FlagZero
         let hasSize = CGType.GetOrCreate(cgMod, ty).GetSize().isSome()
         if (IsReferenceType(ty, cgMod) || ty.IsGeneric() || !hasSize) {
             if (IsOptionOrOptionLike(ty) && hasSize) {
                 if (!IsOption(ty)) {
-                    type = CreatePointerType(type)
+                    diType = CreatePointerType(diType)
                 }
             } else {
                 flags |= FlagObjectPointer
@@ -315,7 +315,7 @@ public class DIBuilder {
         }
         let llvmValue = cgMod.GetMappedCGValue(debugNode.GetValue()).GetRawValue()
         let begin = position.GetBeginPos()
-        let localVariable = createAutoVariable(scope, identifier, diFile, begin.line, type, true, flags, 0u32)
+        let localVariable = createAutoVariable(scope, identifier, diFile, begin.line, diType, true, flags, 0u32)
         let location = unsafe {
             LLVMDIBuilderCreateDebugLocation(cgMod.GetLLVMContext().raw, begin.line, begin.column, scope,
                 LLVMNullMetadata())
@@ -329,17 +329,17 @@ public class DIBuilder {
         let parent = unsafe { LLVMGetBasicBlockParent(curBB) }
         let scope = GetOrCreateScope(position, unsafe { LLVMGetSubprogram(parent) })
         let diFile = GetOrCreateFile(position)
-        var type = GetOrCreateType(ty)
+        var diType = GetOrCreateType(ty)
         let flags = FlagObjectPointer
         let expr = ArrayList<UInt64>([DW_OP_deref])
         if (IsReferenceType(ty, cgMod)) {
-            type = CreatePointerType(type)
+            diType = CreatePointerType(diType)
             if (!ty.IsEnum()) {
                 expr.add(DW_OP_deref)
             }
         }
         let begin = position.GetBeginPos()
-        let localVariable = createAutoVariable(scope, name, diFile, begin.line, type, true, flags, 0u32)
+        let localVariable = createAutoVariable(scope, name, diFile, begin.line, diType, true, flags, 0u32)
         let location = unsafe {
             LLVMDIBuilderCreateDebugLocation(cgMod.GetLLVMContext().raw, begin.line, begin.column, scope,
                 LLVMNullMetadata())
@@ -359,7 +359,7 @@ public class DIBuilder {
         let expr = ArrayList<UInt64>()
         let position = debugNode.GetDebugLocation()
         let file = GetOrCreateFile(position)
-        var type = GetOrCreateType(paraTy, isReadOnly: true)
+        var diType = GetOrCreateType(paraTy, isReadOnly: true)
         var name = debugNode.GetSrcCodeIdentifier()
         let llvmValue = cgMod.GetMappedCGValue(debugNode.GetValue()).GetRawValue()
         if (name == "this") {
@@ -371,7 +371,7 @@ public class DIBuilder {
                 expr.add(DW_OP_deref)
             }
             let flag = FlagObjectPointer | FlagArtificial
-            let localVariable = createParameterVariable(scope, name, 1u32, file, 0u32, type, true, flag)
+            let localVariable = createParameterVariable(scope, name, 1u32, file, 0u32, diType, true, flag)
             let location = unsafe {
                 LLVMDIBuilderCreateDebugLocation(cgMod.GetLLVMContext().raw, 0u32, 0u32, scope,
                     LLVMNullMetadata())
@@ -392,7 +392,7 @@ public class DIBuilder {
                 let isRefOption = paraTy.IsEnum() && (cgType.IsOptionLikeRef() ||
                     (cgType as CGEnumType).getOrThrow().IsOptionLikeT())
                 if (isEnv) {
-                    type = CreatePointerType(type)
+                    diType = CreatePointerType(diType)
                 } else if (!isRefOption) {
                     expr.add(DW_OP_deref)
                 }
@@ -401,7 +401,7 @@ public class DIBuilder {
             }
             name = if (isEnv) { "$CapturedVars" } else { name }
             let localVariable = createParameterVariable(scope, name, UInt32(paramNo), file,
-                unsafe { LLVMDISubprogramGetLine(scope) }, type, true, FlagZero)
+                unsafe { LLVMDISubprogramGetLine(scope) }, diType, true, FlagZero)
             let begin = position.GetBeginPos()
             let location = unsafe {
                 LLVMDIBuilderCreateDebugLocation(cgMod.GetLLVMContext().raw, begin.line, begin.column, scope,
