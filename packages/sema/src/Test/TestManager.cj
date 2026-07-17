@@ -405,7 +405,7 @@ public class TestManager {
             return None
         }
 
-        let declToMock = (Ty.GetDeclOfTy(Some(typeArgument)) as ClassLikeDecl).getOrThrow()
+        let declToMock = (Ty.GetDeclOfTy(Some(typeArgument)).getOrThrow() as ClassLikeDecl).getOrThrow()
         if (MockSupportManager.DoesClassLikeSupportMocking(declToMock)) {
             let result = mockManager.getOrThrow().GenerateMockClassIfNeededAndGet(
                 declToMock, pkg, MockManager.GetMockKind(callExpr))
