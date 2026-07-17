@@ -99,6 +99,28 @@ public func IsMockAnnotedLambda(node: Node): Bool {
     return node.astKind == ASTKind.LAMBDA_EXPR && node.TestAttr(Attribute.MOCK_SUPPORTED)
 }
 
+// C++: Sema/Test/TestManager.cpp:404-427.
+public func ShouldPrepareDecl(node: Node, pkg: Package): Bool {
+    if (let None <- node.curFile) {
+        return false
+    }
+    if (node.curFile.getOrThrow().curPackage.getOrThrow() != pkg) {
+        if (let Some(decl) <- (node as Decl)) {
+            if (let Some(genericDecl) <- decl.genericDecl) {
+                if (genericDecl.TestAttr(Attribute.MOCK_SUPPORTED)) {
+                    return true
+                }
+            }
+        }
+        return false
+    } else if (let Some(decl) <- (node as Decl)) {
+        if (decl.genericDecl.isSome()) {
+            return false
+        }
+    }
+    return MockUtils.CanMock(node)
+}
+
 private class MockUsageFoundBox {
     public var value: Bool = false
     public init() {}
