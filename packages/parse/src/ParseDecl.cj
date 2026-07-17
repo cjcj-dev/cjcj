@@ -2957,6 +2957,7 @@ extend ParserImpl {
                         body.paramLists[0]).Emit()
                 }
             }
+            ParseFuncDeclAnnos(annos, ret)
         }
         CheckConstructorBody(ret, scopeKind)
         return ret
