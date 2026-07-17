@@ -338,6 +338,8 @@ private class ToCHIR {
         maybeUnreachable = ast2chir.GetMaybeUnreachableBlocks()
         chirPkg = Some(lowered)
         DumpCHIRToFile("AST_CHIR")
+        // C++: CHIR/CHIR.cpp:1311 ToCHIR::Canonicalization.
+        DumpCHIRToFile("Canonicalization")
         // C++: CHIR/CHIR.cpp:1133-1140 ToCHIR::Run.
         if (instance.invocation.globalOptions.outputMode == OutputMode.CHIR) {
             let fileName = FileUtil.JoinPath(outputPath, lowered.GetName()) + CHIR_SERIALIZATION_FILE_EXTENSION
@@ -366,6 +368,8 @@ private class ToCHIR {
         for (rawMangledName in closure.GetCCOutFuncsRawMangle()) {
             ccOutFuncsRawMangle.add(rawMangledName)
         }
+        // C++: CHIR/CHIR.cpp:255 ToCHIR::DoClosureConversion.
+        DumpCHIRToFile("ClosureConversion")
         if (!RunConstantEvaluation(lowered, builder, instance.diag.AsBasicDiagnosticEngine(),
             instance.invocation.globalOptions, ast2chir.GetInitFuncsForConstVar())) {
             return None
