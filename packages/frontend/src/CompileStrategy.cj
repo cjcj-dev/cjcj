@@ -89,7 +89,7 @@ public open class CompileStrategy {
 
     public func DesugarAfterSema(): Unit {
         let packages = ci.GetSourcePackages()
-        let typeChecker = FaithfulSemaTypeChecker(ci.faithfulSemaInstance)
+        let typeChecker = ci.GetTypeChecker()
         typeChecker.PerformDesugarAfterSema(packages)
     }
 
