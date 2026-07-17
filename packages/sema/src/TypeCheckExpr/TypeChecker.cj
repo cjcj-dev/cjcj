@@ -3568,7 +3568,9 @@ extend TypeChecker {
         if (!Ty.IsTyCorrect(retType.GetTy())) {
             if (!fb.TestAttr(Attribute.IS_CHECK_VISITED)) {
                 fb.EnableAttr(Attribute.IS_CHECK_VISITED)
-                let _ = Synthesize(ctx, SynPos.NONE, fb.body.getOrThrow())
+                if (let Some(body) <- fb.body) {
+                    let _ = SynthesizeNode(ctx, SynPos.NONE, body)
+                }
             }
             fb.SetTy(impl.typeManager.GetFunctionTy(paramTys.toArray(), retType.GetTy().getOrThrow(), cfg: cfg))
             return false
