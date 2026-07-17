@@ -1320,6 +1320,25 @@ public class MockSupportManager {
         return GenerateSetterCall(refExpr)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1567-1587.
+    private func ReplaceRefExprFieldSetWithAccessor(
+        refExpr: RefExpr, isInConstructor: Bool): Option<CallExpr> {
+        let target = refExpr.GetTarget()
+        if (target.isNone()) {
+            return None
+        }
+        if (target.getOrThrow().TestAttr(Attribute.GLOBAL)) {
+            return GenerateSetterCall(refExpr)
+        }
+        if (target.getOrThrow().TestAttr(Attribute.STATIC)) {
+            return ReplaceRefExprFieldSetWithAccessorImpl(refExpr)
+        }
+        if (!isInConstructor) {
+            return ReplaceRefExprFieldSetWithAccessorImpl(refExpr)
+        }
+        return None
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
