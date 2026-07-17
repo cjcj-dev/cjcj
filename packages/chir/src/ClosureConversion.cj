@@ -1668,7 +1668,7 @@ public class ClosureConversion {
             return false
         }
         let topLevelFunc = local.GetTopLevelFunc() ?? return false
-        let outerDecl = topLevelFunc.GetParentCustomTypeDef() ?? return false
+        let outerDecl = topLevelFunc.GetOuterDeclaredOrExtendedDef() ?? return false
         if (outerDecl.IsEnum() || outerDecl.IsStruct()) {
             return false
         }
