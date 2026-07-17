@@ -7,7 +7,7 @@ import cjcj::sema.GetUsableSetterForProperty
 import cjcj::sema.{GenerateTypeMapping, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::mangle.ManglerContext
-import cjcj::utils.{TEST_ENTRY_NAME, V_COMPILER}
+import cjcj::utils.{CJC_ASSERT, TEST_ENTRY_NAME, V_COMPILER}
 
 private let OPTION_VALUE_CTOR: String = "Some"
 private let OPTION_NONE_CTOR: String = "None"
