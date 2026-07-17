@@ -1924,6 +1924,8 @@ extend ParserImpl {
         let ret = StructDecl()
         try (cs = ChainScope(this, ret)) {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            // C++ src/Parse/ParseDecl.cpp:1646 moves annos into ret, leaving the caller's vector empty.
+            annos.clear()
             let key = Expect(TokenKind.STRUCT, "expected declaration keyword")
             ret.keywordPos = key.Begin()
             ret.begin = key.Begin()
