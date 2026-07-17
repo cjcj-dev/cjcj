@@ -416,35 +416,41 @@ public class DIBuilder {
         if (expr.isEmpty()) {
             return unsafe { LLVMDIBuilderCreateExpression(raw, CPointer<UInt64>(), 0) }
         }
+        var result = LLVMNullMetadata()
         try (data = LibC.malloc<UInt64>(count: expr.size).asResource()) {
             var index: Int64 = 0
             while (index < expr.size) {
                 unsafe { (data.value + index).write(expr[index]) }
                 index++
             }
-            return unsafe { LLVMDIBuilderCreateExpression(raw, data.value, UIntNative(expr.size)) }
+            result = unsafe { LLVMDIBuilderCreateExpression(raw, data.value, UIntNative(expr.size)) }
         }
+        return result
     }
 
     private func createAutoVariable(scope: LLVMMetadataRef, name: String, file: LLVMMetadataRef, lineNo: UInt32,
         ty: LLVMMetadataRef, alwaysPreserve: Bool, flags: UInt32, alignInBits: UInt32): LLVMMetadataRef {
+        var result = LLVMNullMetadata()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
-            return unsafe {
+            result = unsafe {
                 LLVMDIBuilderCreateAutoVariable(raw, scope, nameCString.value, UIntNative(name.size), file, lineNo,
                     ty, if (alwaysPreserve) { 1 } else { 0 }, flags, alignInBits)
             }
         }
+        return result
     }
 
     private func createParameterVariable(scope: LLVMMetadataRef, name: String, argNo: UInt32,
         file: LLVMMetadataRef, lineNo: UInt32, ty: LLVMMetadataRef, alwaysPreserve: Bool,
         flags: UInt32): LLVMMetadataRef {
+        var result = LLVMNullMetadata()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
-            return unsafe {
+            result = unsafe {
                 LLVMDIBuilderCreateParameterVariable(raw, scope, nameCString.value, UIntNative(name.size), argNo,
                     file, lineNo, ty, if (alwaysPreserve) { 1 } else { 0 }, flags)
             }
         }
+        return result
     }
 
     private func insertDeclare(storage: LLVMValueRef, varInfo: LLVMMetadataRef, expr: LLVMMetadataRef,
