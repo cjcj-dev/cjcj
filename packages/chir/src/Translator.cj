@@ -8101,8 +8101,8 @@ public class Translator {
             }
             idx++
         }
-        return Some(CreateApplyMaybeWithException(funcType.GetReturnType(), callee,
-            FuncCallContext(args: argValues), loc: TranslateLocation(expr)))
+        return Some(CreateAndAppendApplyCallFromCallExpr(funcType.GetReturnType(), callee,
+            FuncCallContext(args: argValues), expr))
     }
 
     private func CreateInvokeMaybeWithException(resultTy: Type, callContext: InvokeCallContext,
