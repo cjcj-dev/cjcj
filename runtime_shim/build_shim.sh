@@ -14,6 +14,7 @@ CXX="${CXX:-clang++}"
 if ! command -v "$CXX" >/dev/null 2>&1 && command -v clang++-15 >/dev/null 2>&1; then
     CXX=clang++-15
 fi
+CC="${CC:-cc}"
 
 if [ -d "$LLVM_SRC_INC" ] && [ -d "$LLVM_GEN_INC" ]; then
     LLVM_INCLUDE_ARGS=(-I"$LLVM_SRC_INC" -I"$LLVM_GEN_INC")
@@ -37,7 +38,11 @@ elif [ ! -f "$HERE/cjselfhost_llvmshim.o" ]; then
     exit 1
 fi
 
+"$CC" -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L \
+  -c "$HERE/cjc_runtime_config.c" -o "$HERE/cjc_runtime_config.o"
+
 echo "built: $HERE/cjselfhost_llvmshim.o"
+echo "built: $HERE/cjc_runtime_config.o"
 nm -C "$HERE/cjselfhost_llvmshim.o" | grep -cE ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost)' \
   | sed 's/^/exported LLVMSelfhost* symbols: /' || true
 
