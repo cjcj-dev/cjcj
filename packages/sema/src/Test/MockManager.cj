@@ -34,6 +34,7 @@ private let FIELD_NAME_TO_STORE_OBJ_TO_SPY: String = "objectToSpyOn"
 private let PARAMETER_TO_MATCH_RETURN_ENTRY: String = "value"
 private let PARAMETER_TO_MATCH_THROW_ENTRY: String = "e"
 private let DEFAULT_VALUE_FOR_STUB_METHOD_NAME: String = "defaultValueForStub"
+private let ON_CALL_METHOD_NAME: String = "onCall"
 private let OPTION_VALUE_CTOR: String = "Some"
 private let OPTION_NONE_CTOR: String = "None"
 private let UNITTEST_MOCK_INTERNAL_PACKAGE_NAME: String = "std.unittest.mock.internal"
@@ -760,6 +761,24 @@ public class MockManager {
         callHandlerRef.SetTy(callHandler.GetTy().getOrThrow())
         callHandlerRef.curFile = decl.curFile
         return callHandlerRef
+    }
+
+    // C++: Sema/Test/MockManager.cpp:1078-1100.
+    private func CreateOnCallInvocation(mockedArgsArray: Expr, typeArgsArray: Expr,
+        originalFunc: FuncDecl, objRef: Option<RefExpr>, handler: Expr): CallExpr {
+        let curFile = handler.curFile.getOrThrow()
+        let onCallArgs = ArrayList<FuncArg>()
+        onCallArgs.add(CreateFuncArg(CreateCallInfo(
+            originalFunc, mockedArgsArray, typeArgsArray, curFile, objRef)))
+        let onCallBaseFunc = CreateMemberAccess(handler, ON_CALL_METHOD_NAME)
+        let onCallFunc = CallExpr()
+        onCallFunc.SetTy((onCallBaseFunc.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy)
+        onCallFunc.resolvedFunction = (onCallBaseFunc.target.getOrThrow() as FuncDecl).getOrThrow()
+        onCallFunc.baseFunc = onCallBaseFunc
+        onCallFunc.args.add(all: onCallArgs)
+        onCallFunc.callKind = CallKind.CALL_DECLARED_FUNCTION
+        onCallFunc.curFile = curFile
+        return onCallFunc
     }
 
     // C++: Sema/Test/MockManager.cpp:972-1023.
