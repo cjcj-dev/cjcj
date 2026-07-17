@@ -515,6 +515,29 @@ public class TestManager {
         mockSupportManager.getOrThrow().PrepareDecls(decls)
     }
 
+    // C++: Sema/Test/TestManager.cpp:455-483.
+    public func GenerateAccessors(pkg: Package): Unit {
+        let decls = ArrayList<Decl>()
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (!node.IsSamePackage(pkg) || (node as ExtendDecl).isSome()) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            let decl = node as Decl
+            if (let None <- decl) {
+                return VisitAction.WALK_CHILDREN
+            }
+            if (!MockUtils.CanMock(node)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            decls.add(decl.getOrThrow())
+            return VisitAction.SKIP_CHILDREN
+        })
+        let _ = walker.Walk()
+        for (decl in decls) {
+            mockSupportManager.getOrThrow().GenerateAccessors(decl)
+        }
+    }
+
     // C++: Sema/Test/TestManager.cpp:733-754.
     private func CollectInternalDeclUsages(pkg: Package): Unit {
         let walker = Walker(pkg, visitPre: { node: Node =>
