@@ -20,7 +20,7 @@ import cjcj::modules.{CreateArrayInfo, CreateAssignInfo, CreateBinaryInfo, Creat
 import cjcj::option.OptimizationLevel
 import cjcj::sema.TypeManager as FaithfulSemaTypeManager
 import cjcj::utils.FileUtil
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
 import cjcj::utils.{MAIN_INVOKE, STATIC_INIT_FUNC}
 
 private let CJO_FILE_IDENTIFIER: String = "CJOF"
@@ -71,6 +71,42 @@ private func CollectInstantiations(decl: Decl): HashSet<Ptr<Ty>> {
         CollectInstantiatedTys(decl.GetTy(), instTys)
     }
     return instTys
+}
+
+// ASTWriter.cpp:275-304 CollectInstantiationRecursively.
+private func CollectInstantiationRecursively(instTys: HashSet<Ptr<Ty>>): Unit {
+    let visited = HashSet<Ptr<Ty>>()
+    let queue = ArrayList<Ty>()
+    for (typeIdentity in instTys) {
+        queue.add(typeIdentity.value)
+    }
+    var queueIndex: Int64 = 0
+    while (queueIndex < queue.size) {
+        let ty = queue[queueIndex]
+        queueIndex++
+        let typeIdentity = Ptr(ty)
+        if (visited.contains(typeIdentity)) {
+            continue
+        }
+        visited.add(typeIdentity)
+        let decl = Ty.GetDeclOfTy(Some(ty))
+        CJC_NULLPTR_CHECK(decl)
+        let inheritableDecl = decl.getOrThrow() as InheritableDecl
+        CJC_NULLPTR_CHECK(inheritableDecl)
+        let newTys = HashSet<Ptr<Ty>>()
+        for (inheritedType in inheritableDecl.getOrThrow().inheritedTypes) {
+            CollectInstantiatedTys(inheritedType.GetTy(), newTys)
+        }
+        for (member in inheritableDecl.getOrThrow().GetMemberDeclPtrs()) {
+            if (!member.TestAttr(Attribute.GENERIC)) {
+                CollectInstantiatedTys(member.GetTy(), newTys)
+            }
+        }
+        for (newTypeIdentity in newTys) {
+            instTys.add(newTypeIdentity)
+            queue.add(newTypeIdentity.value)
+        }
+    }
 }
 
 // ASTWriterImpl.h:44-50 NodeInfo.
