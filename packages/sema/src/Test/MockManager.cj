@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::sema.{AddArrayLitConstructor, CreateInitCall, CreateThrowException, FindInitDecl, GetMemberDecl}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.TypeManager
+import cjcj::sema.{TypeManager, TypeSubst}
 import cjcj::utils.{CJC_ASSERT, DynamicCast, GetRootPackageName, OBJECT_NAME, V_COMPILER}
 
 private let CREATE_MOCK_FUNC_NAME: String = "createMock"
@@ -730,6 +730,49 @@ public class MockManager {
 
         CJC_ASSERT(false)
         return CallExpr()
+    }
+
+    // C++: Sema/Test/MockManager.cpp:1158-1202.
+    private func CreateMockedMethodWithoutBody(originalMethod: FuncDecl, mockedDecl: ClassDecl,
+        classGenericSubsts: ArrayList<TypeSubst>): FuncDecl {
+        let mockedMethod = (ASTCloner.Clone(originalMethod) as FuncDecl).getOrThrow()
+
+        mockUtils.AddGenericIfNeeded(originalMethod, mockedMethod)
+        MockUtils.PrependFuncGenericSubst(originalMethod.funcBody.getOrThrow().generic,
+            mockedMethod.funcBody.getOrThrow().generic, classGenericSubsts)
+
+        let funcTy = mockUtils.GetInstantiatedTy(originalMethod.GetTy().getOrThrow(), classGenericSubsts)
+        let retTy = mockUtils.GetInstantiatedTy(
+            originalMethod.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow(), classGenericSubsts)
+        let mockedMethodBody = FuncBody()
+        mockedMethodBody.generic = mockedMethod.funcBody.getOrThrow().generic
+        mockedMethodBody.parentClassLike = mockedDecl
+        mockedMethodBody.funcDecl = mockedMethod
+        mockedMethodBody.SetTy(funcTy)
+        mockedMethodBody.retType = mockedMethod.funcBody.getOrThrow().retType
+        mockedMethodBody.retType.getOrThrow().SetTy(retTy)
+
+        let mockedMethodParams = ArrayList<FuncParam>()
+        for (param in originalMethod.funcBody.getOrThrow().paramLists[0].params) {
+            let funcParam = CreateFuncParam(param.identifier.Val(), None, None,
+                Some(mockUtils.GetInstantiatedTy(param.GetTy().getOrThrow(), classGenericSubsts)))
+            funcParam.outerDecl = mockedMethod
+            funcParam.curFile = mockedDecl.curFile
+            mockedMethodParams.add(funcParam)
+        }
+        mockedMethodBody.paramLists.add(CreateFuncParamList(mockedMethodParams))
+
+        mockedMethod.outerDecl = mockedDecl
+        mockedMethod.SetTy(funcTy)
+        mockedMethod.linkage = Linkage.EXTERNAL
+        mockedMethod.EnableAttr(Attribute.OVERRIDE)
+        mockedMethod.DisableAttr(Attribute.ABSTRACT)
+        mockedMethod.EnableAttr(Attribute.IN_CLASSLIKE)
+        mockedMethod.EnableAttr(Attribute.OPEN)
+        mockedMethod.curFile = mockedDecl.curFile
+        mockedMethod.funcBody = mockedMethodBody
+        mockedMethod.mangledName = mockUtils.Mangle(mockedMethod)
+        return mockedMethod
     }
 
     public static func MockedDeclName(original: ClassLikeDecl, instantiationNumber!: Int64 = 0): String {
