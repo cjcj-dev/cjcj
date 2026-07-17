@@ -72,7 +72,7 @@ public class BCHIRInterpreter {
                 interpStack.ArgsPush(InterpreterValue.MakeNull())
                 pc += 1
             } else if (opCode == OpCode.STRING) {
-                interpStack.ArgsPush(InterpreterValue.MakeString(bchir.GetString(code.Get(pc + 1))))
+                InterpretString(bchir.GetString(code.Get(pc + 1)))
                 pc += 2
             } else if (opCode == OpCode.FUNC) {
                 interpStack.ArgsPush(InterpreterValue.MakeFunction(code.Get(pc + 1)))
@@ -419,6 +419,17 @@ public class BCHIRInterpreter {
     }
 
     public func GetBCHIR(): BCHIR { return bchir }
+
+    // C++: CHIR/Interpreter/BCHIRInterpreter.cpp:617-650.
+    private func InterpretString(text: String): Unit {
+        let array = IValUtils.StringToArray(text)
+        let pointer = AllocateValue(array)
+        let fields = ArrayList<InterpreterValue>()
+        fields.add(pointer)
+        fields.add(InterpreterValue.MakeUInt(InterpreterValueKind.IUINT32, 0))
+        fields.add(InterpreterValue.MakeUInt(InterpreterValueKind.IUINT32, text.size))
+        interpStack.ArgsPush(InterpreterValue.MakeTuple(fields))
+    }
 
     public func ToArena(value: InterpreterValue): InterpreterValue {
         // Mirrors C++ BCHIRInterpreter.cpp:1079-1083.
