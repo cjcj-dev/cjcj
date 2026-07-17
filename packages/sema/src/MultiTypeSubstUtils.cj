@@ -490,7 +490,9 @@ public func InverseMapping(typeMapping: TypeSubst): TypeSubst {
     let inversed = TypeSubst()
     for ((tyVar, ty) in typeMapping.entries) {
         if (let Some(genTo) <- (ty as GenericsTy)) {
-            inversed.Put(genTo, tyVar.value)
+            if (!inversed.Contains(genTo)) {
+                inversed.Put(genTo, tyVar.value)
+            }
         }
     }
     return inversed
