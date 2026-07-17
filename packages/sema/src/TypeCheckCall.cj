@@ -661,7 +661,7 @@ internal func ChkVariadicCallExpr(ctx: Option<ASTContext>, target: Option<Ty>, c
             }
         }
     } else if (results.size > 1) {
-        DiagnoseForCall(diag, typeManager, importManager, candidates, results, ce, results[0])
+        DiagnoseForCall(diag, typeManager, importManager.getOrThrow(), candidates, results, ce, results[0])
     }
     ce.callKind = CallKind.CALL_INVALID
     return false
