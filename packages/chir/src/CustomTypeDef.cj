@@ -897,6 +897,10 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
         return kind + " " + GetIdentifier() + TypeVecToString("<", GetGenericTypeParams(), ">")
     }
 
+    protected func GenericInsArgsToString(ty: CustomType): String {
+        return TypeVecToString("<", ty.GetGenericArgs(), ">", delimiter: ", ")
+    }
+
     private func ParentToString(): String {
         let parentTys = GetSuperTypesInCurDef()
         if (parentTys.isEmpty()) {
