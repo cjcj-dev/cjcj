@@ -860,6 +860,34 @@ public class MockSupportManager {
             Some(accessorFuncBodyBlock), Some(funcTy))
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1017-1038.
+    private func CreateForeignFunctionAccessorDecl(funcDecl: FuncDecl): FuncDecl {
+        CJC_ASSERT(funcDecl.TestAttr(Attribute.FOREIGN))
+        let funcBody = funcDecl.funcBody.getOrThrow()
+        CJC_ASSERT(funcDecl.TyKind() == TypeKind.TYPE_FUNC)
+        let funcTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow()
+
+        let accessorFuncParamLists = ArrayList<FuncParamList>()
+        for (paramList in funcBody.paramLists) {
+            let accessorParamList = ArrayList<FuncParam>()
+            for (paramDecl in paramList.params) {
+                let accessorParamDecl = CreateFuncParam(paramDecl.identifier.Val(),
+                    Some((ASTCloner.Clone(paramDecl.typeNode.getOrThrow()) as Type).getOrThrow()),
+                    None, paramDecl.GetTy())
+                accessorParamList.add(accessorParamDecl)
+            }
+            accessorFuncParamLists.add(CreateFuncParamList(accessorParamList))
+        }
+
+        let accessorName = MockUtils.GetForeignAccessorName(funcDecl) + MockUtils.mockAccessorSuffix
+        let accessorDecl = CreateFuncDecl(accessorName,
+            Some(CreateForeignFunctionAccessorBody(funcDecl, accessorFuncParamLists)), Some(funcTy))
+        accessorDecl.EnableAttr(Attribute.GLOBAL)
+        accessorDecl.EnableAttr(Attribute.UNSAFE)
+        accessorDecl.EnableAttr(Attribute.NO_MANGLE)
+        return accessorDecl
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
