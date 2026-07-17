@@ -1833,6 +1833,87 @@ public class MockSupportManager {
         }
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:2024-2103.
+    public func ReplaceInterfaceDefaultFunc(
+        originalExpr: Expr, outerTy: Option<Ty>, isInMockAnnotatedLambda: Bool): Unit {
+        let expr = ExtractLastDesugaredExpr(originalExpr)
+        if (expr.TestAttr(Attribute.GENERATED_TO_MOCK)) {
+            return
+        }
+        let nameRefExpr = expr as NameReferenceExpr
+        if (nameRefExpr.isNone()) {
+            return
+        }
+        if (let Some(callOrPattern) <- nameRefExpr.getOrThrow().callOrPattern) {
+            ReplaceInterfaceDefaultFuncInCall(
+                callOrPattern, outerTy, isInMockAnnotatedLambda)
+            return
+        }
+        let target = nameRefExpr.getOrThrow().GetTarget()
+        if (target.isNone()) {
+            return
+        }
+        let funcDecl = target.getOrThrow() as FuncDecl
+        if (funcDecl.isNone() || funcDecl.getOrThrow().outerDecl.isNone()) {
+            return
+        }
+        CJC_ASSERT(!isInMockAnnotatedLambda)
+
+        let (buddyInterfaceDecl, foundBuddyFuncDecl) =
+            FindDefaultAccessorInterfaceAndFunction(funcDecl.getOrThrow())
+        if (buddyInterfaceDecl.isNone() || foundBuddyFuncDecl.isNone()) {
+            return
+        }
+        var buddyFuncDecl = foundBuddyFuncDecl
+        if (let Some(maExpr) <- (nameRefExpr.getOrThrow() as MemberAccess)) {
+            if (funcDecl.getOrThrow().TestAttr(Attribute.STATIC) &&
+                (maExpr.baseExpr.getOrThrow().GetTy().getOrThrow() as GenericsTy).isNone()) {
+                buddyFuncDecl = FindDefaultAccessorImplementation(
+                    maExpr.baseExpr.getOrThrow().GetTy(), buddyFuncDecl.getOrThrow())
+                if (buddyFuncDecl.isNone()) {
+                    return
+                }
+            }
+            if (!funcDecl.getOrThrow().TestAttr(Attribute.STATIC) &&
+                !IsClassLikeOrGeneric(maExpr.baseExpr.getOrThrow().GetTy().getOrThrow())) {
+                return
+            }
+            let buddyMa = CreateMemberAccess(
+                (ASTCloner.Clone(maExpr.baseExpr.getOrThrow()) as Expr).getOrThrow(),
+                buddyFuncDecl.getOrThrow())
+            CopyBasicInfo(maExpr, buddyMa)
+            buddyMa.EnableAttr(Attribute.GENERATED_TO_MOCK)
+            buddyMa.SetTy(typeManager.GetInstantiatedTy(
+                buddyFuncDecl.getOrThrow().GetTy().getOrThrow(),
+                GenerateTypeMapping(buddyFuncDecl.getOrThrow(), maExpr.instTys)))
+            buddyMa.instTys.add(all: maExpr.instTys)
+            maExpr.desugarExpr = buddyMa
+            return
+        }
+
+        if (let Some(refExpr) <- (expr as RefExpr)) {
+            if (funcDecl.getOrThrow().TestAttr(Attribute.STATIC)) {
+                buddyFuncDecl = FindDefaultAccessorImplementation(
+                    outerTy, buddyFuncDecl.getOrThrow())
+                if (buddyFuncDecl.isNone()) {
+                    return
+                }
+            }
+            if (!funcDecl.getOrThrow().TestAttr(Attribute.STATIC) &&
+                (outerTy.isNone() || !IsClassLikeOrGeneric(outerTy.getOrThrow()))) {
+                return
+            }
+            let buddyFuncRef = CreateRefExpr(buddyFuncDecl.getOrThrow())
+            CopyBasicInfo(refExpr, buddyFuncRef)
+            buddyFuncRef.EnableAttr(Attribute.GENERATED_TO_MOCK)
+            buddyFuncRef.SetTy(typeManager.GetInstantiatedTy(
+                buddyFuncDecl.getOrThrow().GetTy().getOrThrow(),
+                GenerateTypeMapping(buddyFuncDecl.getOrThrow(), refExpr.instTys)))
+            buddyFuncRef.instTys.add(all: refExpr.instTys)
+            refExpr.desugarExpr = buddyFuncRef
+        }
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
