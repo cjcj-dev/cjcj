@@ -9243,7 +9243,7 @@ public class Translator {
             let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
             let lhsBase = AddressOfLeftValue(baseLeftValueInfo, baseTy)
             let index = TranslateExprArg(subscriptExpr.indexExprs[0])
-            CreateVArraySet(lhsBase, rhs, index, elementTy)
+            CreateAndAppendVArraySet(lhsBase, rhs, index, elementTy, loc)
             return
         }
 
@@ -9290,16 +9290,19 @@ public class Translator {
                 compoundValue = RequireResult(opResult)
             }
         }
-        CreateVArraySet(lhsBase, compoundValue, index, elementTy)
+        CreateAndAppendVArraySet(lhsBase, compoundValue, index, elementTy, loc)
     }
 
-    private func CreateVArraySet(lhs: Value, rhs: Value, index: Value, elementTy: Type): Unit {
+    // C++: TranslateAssignExpr.cpp:102-113 Translator::CreateAndAppendVArraySet.
+    private func CreateAndAppendVArraySet(lhs: Value, rhs: Value, index: Value, elementTy: Type,
+        loc: DebugLocation): Unit {
         let args = ArrayList<Value>()
         args.add(lhs)
         args.add(CastValueIfNeeded(rhs, elementTy))
         args.add(index)
         let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_SET, args: args)
-        builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext, CurrentBlock())
+        let intrinsic = builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext, CurrentBlock())
+        intrinsic.SetDebugLocation(loc)
     }
 
     private func TranslateExprAsLeftValue(expr: AstExpr): FaithfulLeftValueInfo {
