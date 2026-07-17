@@ -262,17 +262,27 @@ public func IsCurFile(sm: SourceManager, token: Token, fileID!: UInt64 = 0): Boo
     if (fileID != 0 && fileID != token.Begin().fileID) {
         return false
     }
-    let content = sm.GetContentBetween(token.Begin(), token.End())
-    if (token.Value() == content || content == "\"" + token.Value() + "\"") {
+    let begin = token.Begin()
+    let end = token.End()
+    var content = Array<UInt8>()
+    if (begin.fileID != 0 && begin > INVALID_POSITION && end > INVALID_POSITION && end >= begin) {
+        let source = sm.GetSource(begin.fileID)
+        if (!source.buffer.isEmpty()) {
+            let startOffset = source.PosToOffset(begin)
+            let endOffset = source.PosToOffset(end)
+            content = source.buffer.toArray()[startOffset..endOffset]
+        }
+    }
+    if (token.Value().toArray() == content || ("\"" + token.Value() + "\"").toArray() == content) {
         return true
     }
-    if (token.kind == TokenKind.RUNE_LITERAL && content == "r'" + token.Value() + "'") {
+    if (token.kind == TokenKind.RUNE_LITERAL && ("r'" + token.Value() + "'").toArray() == content) {
         return true
     }
-    if (token.kind == TokenKind.MULTILINE_RAW_STRING && content == getMultiRawStringValue(token)) {
+    if (token.kind == TokenKind.MULTILINE_RAW_STRING && getMultiRawStringValue(token).toArray() == content) {
         return true
     }
-    if (token.kind == TokenKind.MULTILINE_STRING && content == getMultiStringValue(token)) {
+    if (token.kind == TokenKind.MULTILINE_STRING && getMultiStringValue(token).toArray() == content) {
         return true
     }
     return false
