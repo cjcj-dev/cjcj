@@ -2110,6 +2110,7 @@ extend ParserImpl {
         let decl: Decl = if (Skip(TokenKind.LPAREN)) {
             let funcDecl = FuncDecl()
             ApplyModifiersAndAnnotations(funcDecl, modifiers, annos)
+            annos.clear()
             funcDecl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
             funcDecl.identifier = identifier
             funcDecl.begin = if (funcDecl.begin.IsZero()) { identifier.Begin() } else { funcDecl.begin }
@@ -2150,6 +2151,7 @@ extend ParserImpl {
         } else {
             let varDecl = VarDecl()
             ApplyModifiersAndAnnotations(varDecl, modifiers, annos)
+            annos.clear()
             varDecl.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
             varDecl.identifier = identifier
             varDecl.begin = if (varDecl.begin.IsZero()) { varDecl.identifier.Begin() } else { varDecl.begin }
