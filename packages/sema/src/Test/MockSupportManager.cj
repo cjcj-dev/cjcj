@@ -743,9 +743,9 @@ public class MockSupportManager {
         accessorDecl.identifier.SetPos(fieldDecl.identifier.Begin(), fieldDecl.identifier.End())
         accessorDecl.moduleName = fieldDecl.moduleName
         accessorDecl.fullPackageName = fieldDecl.fullPackageName
-        accessorDecl.outerDecl = fieldDecl.outerDecl as ClassDecl
+        accessorDecl.outerDecl = (fieldDecl.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
         accessorDecl.SetTy(accessorTy)
-        accessorDecl.identifier = SrcIdentifier(mockUtils.BuildMockAccessorIdentifier(fieldDecl, kind),
+        accessorDecl.identifier = SrcIdentifier(MockUtils.BuildMockAccessorIdentifier(fieldDecl, kind),
             fieldDecl.identifier.Begin(), fieldDecl.identifier.End(), false)
         if (fieldDecl.IsStaticOrGlobal()) {
             MockSupportManager.MarkMockAccessorWithAttributes(accessorDecl, GetAccessLevel(fieldDecl))
