@@ -618,6 +618,7 @@ foreign {
         offsetInBits: UInt64, flags: UInt32, ty: LLVMMetadataRef): LLVMMetadataRef
     func LLVMGetSubprogram(function: LLVMValueRef): LLVMMetadataRef
     func LLVMSetSubprogram(function: LLVMValueRef, subprogram: LLVMMetadataRef): Unit
+    func LLVMDISubprogramGetLine(subprogram: LLVMMetadataRef): UInt32
     func LLVMSelfhostDIBuilderCreateSubroutineType(builder: LLVMDIBuilderRef, parameterTypes: CPointer<LLVMMetadataRef>,
         numParameterTypes: UIntNative, flags: UInt32): LLVMMetadataRef
     func LLVMSelfhostDIBuilderCreateFunction(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, name: CString,
