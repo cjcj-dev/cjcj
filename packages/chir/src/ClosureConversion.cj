@@ -1173,6 +1173,7 @@ public class ClosureConversion {
         }
         let globalFunc = CreateCCFunction(funcTy, GenerateGlobalFuncIdentifier(lambda), lambda.GetSrcCodeIdentifier(),
             genericTypeParams: convertedGenericParams)
+        globalFunc.SetDebugLocation(lambda.GetDebugLocation())
         SetLiftedLambdaAttr(globalFunc, lambda)
         let sigInfo = FuncSigInfo(lambdaTy, funcName: lambda.GetSrcCodeIdentifier(),
             genericTypeParams: lambda.GetGenericTypeParams())
