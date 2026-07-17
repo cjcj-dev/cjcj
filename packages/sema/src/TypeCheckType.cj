@@ -17,25 +17,18 @@ private func TypeCheckTypeRange(node: Node): BasicRange {
 }
 
 private func TypeCheckTypeEmitOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind): Unit {
-    // C++ src/Sema/FFI/CFFICheck.cpp:317-324 passes type.begin/type.end to the range overload.
-    let builder = diag.Diagnose(node.begin, node.end, kind)
+    let builder = Diagnose(diag, node, kind)
     builder.Emit()
 }
 
-private func TypeCheckTypeCheckCFuncParamType(diag: BasicDiagnosticEngine, typeNode: Type): Bool {
-    if (let None <- typeNode.GetTy()) {
-        return false
-    }
+// C++ src/Sema/FFI/CFFICheck.cpp:317-324.
+private func CheckCFuncParamType(diag: BasicDiagnosticEngine, typeNode: Type): Unit {
     let ty = typeNode.GetTy().getOrThrow()
     if (ty.IsUnit()) {
-        TypeCheckTypeEmitOld(diag, typeNode, BasicDiagKind.sema_cfunc_cannot_have_unit_args)
-        return false
+        diag.Diagnose(typeNode.begin, typeNode.end, BasicDiagKind.sema_cfunc_cannot_have_unit_args).Emit()
+    } else if (!Ty.IsMetCType(ty)) {
+        diag.Diagnose(typeNode.begin, typeNode.end, BasicDiagKind.sema_invalid_cfunc_arg_type).Emit()
     }
-    if (!Ty.IsMetCType(ty)) {
-        TypeCheckTypeEmitOld(diag, typeNode, BasicDiagKind.sema_invalid_cfunc_arg_type)
-        return false
-    }
-    return true
 }
 
 private func TypeCheckTypeCheckAccessLegality(
@@ -492,7 +485,7 @@ private func TypeCheckTypeCheckCFuncRefType(
     }
     if (let Some(funcType) <- (args[0] as FuncType)) {
         for (paramType in funcType.paramTypes) {
-            let _ = TypeCheckTypeCheckCFuncParamType(diag, paramType)
+            CheckCFuncParamType(diag, paramType)
         }
         if (let Some(retType) <- funcType.retType) {
             if (Ty.IsTyCorrect(retType.GetTy())) {
@@ -569,7 +562,7 @@ public func TypeCheckTypeCheckFuncType(
     if (funcType.isC) {
         for (paramType in funcType.paramTypes) {
             if (let Some(paramTy) <- paramType.GetTy()) {
-                let _ = TypeCheckTypeCheckCFuncParamType(diag, paramType)
+                CheckCFuncParamType(diag, paramType)
                 if (paramTy.IsUnit() || !Ty.IsMetCType(paramTy)) {
                     valid = false
                 }
