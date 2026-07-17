@@ -387,15 +387,8 @@ public class LocalTypeArgumentSynthesis {
         synthesis.deterministic = true
         let ok = synthesis.UnifyOne(Tracked(argTy), Tracked(paramTy))
         if (ok) {
-            cst.Clear()
             if (!synthesis.cms.IsEmpty()) {
-                for (entry in synthesis.cms.values[0].constraint.entries) {
-                    let bounds = cst.GetOrCreate(entry.tyVar)
-                    bounds.lbs.AddAll(entry.bounds.lbs)
-                    bounds.ubs.AddAll(entry.bounds.ubs)
-                    bounds.sum.AddAll(entry.bounds.sum)
-                    bounds.eq.AddAll(entry.bounds.eq)
-                }
+                cst.entries = synthesis.cms.values[0].constraint.entries
             }
         }
         return ok

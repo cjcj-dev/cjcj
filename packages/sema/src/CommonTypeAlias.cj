@@ -545,7 +545,7 @@ public class ConstraintEntry {
 }
 
 public class Constraint {
-    public let entries: ArrayList<ConstraintEntry> = ArrayList<ConstraintEntry>()
+    public var entries: ArrayList<ConstraintEntry> = ArrayList<ConstraintEntry>()
 
     public init() {}
 
