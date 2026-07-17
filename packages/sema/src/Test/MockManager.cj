@@ -20,6 +20,7 @@ private let ON_CALL_ENUM_NAME: String = "OnCall"
 private let DECL_KIND_ENUM_NAME: String = "DeclKind"
 private let RETURN_ZERO_ENTRY: String = "ReturnZero"
 private let RETURN_ENTRY: String = "Return"
+private let THROW_ENTRY: String = "Throw"
 private let HAS_DEFAULT_VALUE_FOR_STUB_INTERFACE_NAME: String = "HasDefaultValueForStub"
 private let NO_DEFAULT_VALUE_FOR_MOCK_EXCEPTION_NAME: String = "NoDefaultValueForMockException"
 private let MOCK_RETURN_VALUE_TYPE_MISMATCH_EXCEPTION_NAME: String = "MockReturnValueTypeMismatchException"
@@ -29,6 +30,7 @@ private let MOCKED_DECL_SUFFIX: String = "$Mocked"
 private let FIELD_NAME_TO_STORE_HANDLER: String = "handler"
 private let FIELD_NAME_TO_STORE_OBJ_TO_SPY: String = "objectToSpyOn"
 private let PARAMETER_TO_MATCH_RETURN_ENTRY: String = "value"
+private let PARAMETER_TO_MATCH_THROW_ENTRY: String = "e"
 private let UNITTEST_MOCK_INTERNAL_PACKAGE_NAME: String = "std.unittest.mock.internal"
 
 private func GetDeclFromMockPackage<T>(importManager: SemaImportManager, identifier: String): Option<T> where T <: Decl {
@@ -361,6 +363,33 @@ public class MockManager {
         let refExpr = CreateRefExpr(argVarDecl)
         refExpr.curFile = originalMethod.curFile
         return CreateMatchCase(pattern, CreateTypeCastForOnCallReturnValue(refExpr, retTy))
+    }
+
+    // C++: Sema/Test/MockManager.cpp:501-523.
+    private func CreateOnCallThrowMatchCase(originalMethod: FuncDecl,
+        enumConstructor: Decl): MatchCase {
+        let arg = VarPattern(SrcIdentifier(PARAMETER_TO_MATCH_THROW_ENTRY,
+            INVALID_POSITION, INVALID_POSITION, false))
+        let exceptionTy = mockUtils.exceptionClassDecl.getOrThrow().GetTy().getOrThrow()
+        arg.SetTy(exceptionTy)
+        let argVarDecl = arg.varDecl.getOrThrow()
+        argVarDecl.SetTy(exceptionTy)
+
+        let throwExpr = CreateThrowExpr(argVarDecl)
+        throwExpr.SetTy(TypeManager.GetNothingTy())
+        throwExpr.expr.getOrThrow().SetTy(exceptionTy)
+
+        let pattern = EnumPattern()
+        let constructorTy = enumConstructor.GetTy().getOrThrow()
+        pattern.SetTy(if (constructorTy.IsFunc()) {
+            (constructorTy as FuncTy).getOrThrow().retTy
+        } else {
+            constructorTy
+        })
+        pattern.patterns.add(arg)
+        pattern.constructor = mockUtils.CreateRefExprWithInstTys(enumConstructor,
+            constructorTy.typeArgs, THROW_ENTRY, originalMethod.curFile.getOrThrow())
+        return CreateMatchCase(pattern, throwExpr)
     }
 
     // C++: Sema/Test/MockManager.cpp:450-460.
