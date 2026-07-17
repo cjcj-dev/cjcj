@@ -132,9 +132,9 @@ public class JavaInteropManager {
     }
 
     // C++ TypeCheckJavaInterop.cpp:351-375.
-    public func CheckImplRedefinition(package: Package): Unit {
+    public func CheckImplRedefinition(pkg: Package): Unit {
         let javaNameToDecl = HashMap<String, ClassLikeDecl>()
-        for (file in package.files) {
+        for (file in pkg.files) {
             for (decl in file.decls) {
                 let classLikeDecl = decl as ClassLikeDecl
                 if (classLikeDecl.isNone() || decl.TestAttr(Attribute.IS_BROKEN)) {
