@@ -478,8 +478,7 @@ public class CompilerInstance {
     }
 
     public func PerformIncrementalScopeAnalysis(): Bool {
-        // IncrementalCompilerInstance.cpp:192-205 invokes the calculator only for the incremental instance.
-        if (invocation.globalOptions.compileCjd || !invocation.globalOptions.enIncrementalCompilation) {
+        if (invocation.globalOptions.compileCjd) {
             return true
         }
         CalculateASTCache()
