@@ -3,6 +3,7 @@ package cjcj::parse
 import std.collection.*
 import cjcj::ast.AddMacroAttr
 import cjcj::ast.Identifier as AstIdentifier
+import cjcj::ast.INVALID_IDENTIFIER
 import cjcj::ast.ScopeKind as AstScopeKind
 import cjcj::ast.SortModifierByPos
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
