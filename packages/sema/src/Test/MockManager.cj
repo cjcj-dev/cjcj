@@ -1435,6 +1435,21 @@ public class MockManager {
         callExpr.desugarExpr = call
     }
 
+    // C++: Sema/Test/MockManager.cpp:1586-1601.
+    private func HandleMockAnnotatedLambdaWithCall(callExpr: CallExpr): Unit {
+        let target = callExpr.resolvedFunction.getOrThrow()
+        let isInInterfaceWithDefault = target.outerDecl.isSome() &&
+            target.outerDecl.getOrThrow().astKind == ASTKind.INTERFACE_DECL &&
+            target.TestAttr(Attribute.DEFAULT)
+        CJC_ASSERT(isInInterfaceWithDefault ||
+            target.TestAttr(Attribute.IN_EXTEND) || target.IsStaticOrGlobal())
+        if (isInInterfaceWithDefault) {
+            GenerateCallHandlerForMethodWithDefault(callExpr)
+            return
+        }
+        GenerateCallHandlerForStaticDecl(target, callExpr)
+    }
+
     // C++: Sema/Test/MockManager.cpp:1204-1238.
     private func CreateMockedProp(originalProp: PropDecl, mockedDecl: ClassDecl,
         classGenericSubsts: ArrayList<TypeSubst>): Option<PropDecl> {
