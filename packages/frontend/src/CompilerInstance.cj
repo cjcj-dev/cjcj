@@ -668,8 +668,9 @@ public class CompilerInstance {
         if (pkgs.isEmpty()) {
             return true
         }
+        let compatibleSDKVersion = invocation.globalOptions.passedWhenKeyValue.get("APILevel_level") ?? ""
         for (pkg in pkgs) {
-            FaithfulDesugarBeforeTypeCheck(pkg)
+            FaithfulDesugarBeforeTypeCheck(pkg, compatibleSDKVersion: compatibleSDKVersion)
         }
         let semaInstance = FaithfulSemaCompilerInstance()
         semaInstance.typeManager = typeManager.AsFaithfulSemaTypeManager()
