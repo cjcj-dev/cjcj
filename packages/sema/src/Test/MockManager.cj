@@ -1309,6 +1309,43 @@ public class MockManager {
             Some(CreateBlock(handlerBody, Some(nothingTy))), Some(funcTy)))
     }
 
+    // C++: Sema/Test/MockManager.cpp:1447-1483.
+    private func FindDefaultAccessorInterfaceAndFunction(original: FuncDecl,
+        baseFunc: MemberAccess): (Option<InterfaceDecl>, Option<FuncDecl>) {
+        if (original.outerDecl.isNone()) {
+            return (None, None)
+        }
+        let interfaceDecl = original.outerDecl.getOrThrow() as InterfaceDecl
+        if (interfaceDecl.isNone() || !original.TestAttr(Attribute.DEFAULT)) {
+            return (None, None)
+        }
+        let accessorInterfaceDecl = mockUtils.FindGlobalDecl<InterfaceDecl>(
+            interfaceDecl.getOrThrow().curFile.getOrThrow(),
+            interfaceDecl.getOrThrow().identifier.Val() + MockUtils.defaultAccessorSuffix)
+        if (accessorInterfaceDecl.isNone()) {
+            return (None, None)
+        }
+        let extendDecl = typeManager.GetExtendDeclByInterface(
+            baseFunc.baseExpr.getOrThrow().GetTy().getOrThrow(),
+            accessorInterfaceDecl.getOrThrow().GetTy().getOrThrow())
+        if (extendDecl.isSome()) {
+            let accessorImplDecl = mockUtils.FindMemberDecl<FuncDecl>(extendDecl.getOrThrow(),
+                mockUtils.Mangle(original) + MockUtils.defaultAccessorSuffix)
+            CJC_ASSERT(accessorImplDecl.isSome())
+            return (accessorInterfaceDecl, accessorImplDecl)
+        }
+        let baseDecl = Ty.GetDeclOfTy(baseFunc.baseExpr.getOrThrow().GetTy())
+        if (baseDecl.isNone()) {
+            return (None, None)
+        }
+        let accessorImplDecl = mockUtils.FindMemberDecl<FuncDecl>(baseDecl.getOrThrow(),
+            mockUtils.Mangle(original) + MockUtils.defaultAccessorSuffix)
+        if (accessorImplDecl.isNone()) {
+            return (None, None)
+        }
+        return (accessorInterfaceDecl, accessorImplDecl)
+    }
+
     // C++: Sema/Test/MockManager.cpp:1204-1238.
     private func CreateMockedProp(originalProp: PropDecl, mockedDecl: ClassDecl,
         classGenericSubsts: ArrayList<TypeSubst>): Option<PropDecl> {
