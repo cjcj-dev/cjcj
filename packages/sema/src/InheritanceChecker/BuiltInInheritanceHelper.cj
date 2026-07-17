@@ -126,7 +126,8 @@ func IsBuiltInOperatorFuncInExtend(
                                         DiagnoseRefactor(diag,
                                             DiagKindRefactor.sema_return_type_incompatible,
                                             structDecl,
-                                            MakeRange(fd.identifier.Begin(), fd.identifier.End())
+                                            MakeRange(fd.identifier.Begin(), fd.identifier.End()),
+                                            fd.identifier.Val()
                                         )
                                     }
                                     return true
@@ -143,7 +144,8 @@ func IsBuiltInOperatorFuncInExtend(
                                         DiagnoseRefactor(diag,
                                             DiagKindRefactor.sema_return_type_incompatible,
                                             structDecl,
-                                            MakeRange(fd.identifier.Begin(), fd.identifier.End())
+                                            MakeRange(fd.identifier.Begin(), fd.identifier.End()),
+                                            fd.identifier.Val()
                                         )
                                     }
                                     return true
