@@ -1,12 +1,12 @@
 package cjcj::driver
 
 import std.collection.*
-import cjcj::basic.{DiagFormat as BasicDiagFormat, DiagnosticEngine}
-import cjcj::frontend.{CompilerInvocation, DumpAction}
+import cjcj::basic.DiagFormat as BasicDiagFormat
+import cjcj::frontend.{CompilerInvocation, DiagnosticEngine, DumpAction, GlobalOptions}
 import cjcj::frontend_tool.{DefaultCompilerInstance, Driver as FrontendToolDriver,
     DriverOptions as FrontendToolDriverOptions, ExecuteFrontendByDriver, IncrementalCompilerInstance,
     NeedCreateIncrementalCompilerInstance}
-import cjcj::option.{DiagFormat as OptionDiagFormat, GlobalOptions}
+import cjcj::option.DiagFormat as OptionDiagFormat
 
 public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (!PrepareFrontendOutputs(driver.driverOptions)) {
