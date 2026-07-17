@@ -1505,6 +1505,7 @@ public class MockSupportManager {
             assignExpr.leftValue.getOrThrow()
         } else {
             CJC_ABORT_WITH_MSG("Unexpected top-level mut expression")
+            topLevelExpr
         }
         let tmpVarRefToAssign = (ASTCloner.Clone(tmpVarRefToMutate) as Expr).getOrThrow()
         CJC_ASSERT(mutBaseExpr.astKind == ASTKind.MEMBER_ACCESS)
@@ -1546,7 +1547,8 @@ public class MockSupportManager {
         isInConstructor: Bool, topLevelMutExpr!: Option<Expr> = None): Unit {
         let baseExpr = memberAccess.baseExpr.getOrThrow()
         if (let Some(nre) <- (ExtractLastDesugaredExpr(baseExpr) as NameReferenceExpr)) {
-            let replacedNre = ReplaceExprWithAccessor(nre, isInConstructor, true)
+            let replacedNre = ReplaceExprWithAccessor(
+                nre, isInConstructor, isSubMemberAccess: true)
             if (topLevelMutExpr.isSome() && replacedNre.isSome()) {
                 TransformAccessorCallForMutOperation(
                     nre, replacedNre.getOrThrow(), topLevelMutExpr.getOrThrow())
@@ -1586,15 +1588,17 @@ public class MockSupportManager {
                 }
             }
         }
-        ReplaceSubMemberAccessWithAccessor(memberAccess, isInConstructor, parentMutExpr)
+        ReplaceSubMemberAccessWithAccessor(
+            memberAccess, isInConstructor, topLevelMutExpr: parentMutExpr)
         if (isInConstructor && IsMemberAccessOnThis(memberAccess)) {
             return None
         }
 
         if (let Some(funcDecl) <- (memberAccess.target.getOrThrow() as FuncDecl)) {
             if (funcDecl.propDecl.isSome()) {
+                let propDecl: Decl = funcDecl.propDecl.getOrThrow()
                 let foundProp = mockUtils.FindAccessorForMemberAccess(
-                    memberAccess.baseExpr.getOrThrow().GetTy(), funcDecl.propDecl, AccessorKind.METHOD)
+                    memberAccess.baseExpr.getOrThrow().GetTy(), Some(propDecl), AccessorKind.METHOD)
                 if (foundProp.isNone() || (foundProp.getOrThrow() as PropDecl).isNone()) {
                     return None
                 }
@@ -1658,7 +1662,7 @@ public class MockSupportManager {
                     }
                 }
                 ReplaceSubMemberAccessWithAccessor(
-                    memberAccess, isInConstructor, topLevelMutExpr)
+                    memberAccess, isInConstructor, topLevelMutExpr: topLevelMutExpr)
                 return Some(assignExpr)
             }
         } else if (leftValue.astKind == ASTKind.WILDCARD_EXPR) {
