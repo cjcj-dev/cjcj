@@ -381,6 +381,22 @@ public class TestManager {
         let _ = walker.Walk()
     }
 
+    // C++: Sema/Test/TestManager.cpp:186-207.
+    private func CreateMockCalls(pkg: Package, callExprs: ArrayList<CallExpr>): Unit {
+        for (callExpr in callExprs) {
+            if (let Some(mockClass) <- GenerateMockClassIfNeededAndGet(callExpr, pkg)) {
+                let valueParamTys = ArrayList<Ty>()
+                valueParamTys.add(callExpr.args[0].GetTy().getOrThrow())
+                if (MockManager.GetMockKind(callExpr) == MockKind.SPY) {
+                    valueParamTys.add(mockClass.GetTy().getOrThrow())
+                }
+                let typeArgument = callExpr.baseFunc.getOrThrow().GetTy().getOrThrow().typeArgs[1]
+                callExpr.desugarExpr = MockManager.CreateInitCallOfMockClass(
+                    mockClass, callExpr.args, typeManager, typeArgument.typeArgs, valueParamTys)
+            }
+        }
+    }
+
     public func HandleCreateMock(pkg: Package): Unit {
         let callExprs = ArrayList<CallExpr>()
         let walker = Walker(pkg, visitPre: { node: Node =>
