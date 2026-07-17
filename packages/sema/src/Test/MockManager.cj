@@ -566,6 +566,33 @@ public class MockManager {
         return CreateMatchCase(pattern, rhsExpr)
     }
 
+    // C++: Sema/Test/MockManager.cpp:705-725.
+    private func CreateOnCallResultMatchCase(originalFunc: FuncDecl, mockedFunc: Option<FuncDecl>,
+        enumConstructor: Decl): Option<MatchCase> {
+        let id = enumConstructor.identifier.Val()
+        let retTy = if (let Some(funcDecl) <- mockedFunc) {
+            funcDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        } else {
+            typeManager.GetAnyTy()
+        }
+        if (id == RETURN_ZERO_ENTRY) {
+            let zeroValueTy = if (retTy.IsAny()) {
+                mockZeroValueDecl.getOrThrow().GetTy().getOrThrow()
+            } else { retTy }
+            return Some(CreateOnCallReturnZeroMatchCase(originalFunc, zeroValueTy, enumConstructor))
+        } else if (id == RETURN_ENTRY) {
+            return Some(CreateOnCallReturnMatchCase(originalFunc, retTy, enumConstructor))
+        } else if (id == THROW_ENTRY) {
+            return Some(CreateOnCallThrowMatchCase(originalFunc, enumConstructor))
+        } else if (id == CALL_BASE_ENTRY && mockedFunc.isSome()) {
+            return Some(CreateOnCallCallBaseMatchCase(
+                originalFunc, mockedFunc.getOrThrow(), enumConstructor))
+        } else if (id == RETURN_DEFAULT_ENTRY) {
+            return Some(CreateOnCallReturnDefaultMatchCase(originalFunc, retTy, enumConstructor))
+        }
+        return None
+    }
+
     // C++: Sema/Test/MockManager.cpp:450-460.
     private func CreateMemberAssignment(member: VarDecl, rhsExpr: Expr): AssignExpr {
         let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
