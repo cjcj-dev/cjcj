@@ -28,6 +28,7 @@ import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationC
     VirtualWrapperDepMap, WriteCache}
 import cjcj::macro_pkg.{GetMethodPointer, OpenSymbolTable, OpenSymbolTableSafely, RuntimeInit}
 import cjcj::option.OutputMode
+import cjcj::parse.ASTHasher
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.STANDARD_LIBS
@@ -268,6 +269,7 @@ public class CompilerInstance {
             }
         }
         diag.SetSourceManager(sm)
+        ASTHasher.Init(invocation.globalOptions)
     }
 
     public func DestroyASTResources(): Unit {
