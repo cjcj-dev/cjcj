@@ -1092,6 +1092,40 @@ public class MockManager {
         return mockedMethod
     }
 
+    // C++: Sema/Test/MockManager.cpp:1118-1156.
+    private func CreateMockedMethod(originalMethod: FuncDecl, mockedDecl: ClassDecl,
+        classGenericSubsts: ArrayList<TypeSubst>): Option<FuncDecl> {
+        if (MockUtils.IsMockAccessorRequired(originalMethod)) {
+            return None
+        }
+        let mockedMethod = CreateMockedMethodWithoutBody(originalMethod, mockedDecl, classGenericSubsts)
+        let mockedMethodBody = mockedMethod.funcBody.getOrThrow()
+        let retTy = mockedMethodBody.retType.getOrThrow().GetTy().getOrThrow()
+
+        let thisRef = CreateRefExpr(SrcIdentifier("this"),
+            Some(typeManager.GetClassThisTy(mockedDecl, mockedDecl.GetTy().getOrThrow().typeArgs.toArray())),
+            DEFAULT_POSITION, ArrayList<Type>())
+        thisRef.ref.target = mockedDecl
+
+        let matchCasesForOnCallReturnedValue = ArrayList<MatchCase>()
+        for (constructor in onCallEnumDecl.getOrThrow().constructors) {
+            if (let Some(matchCase) <-
+                CreateOnCallResultMatchCase(originalMethod, Some(mockedMethod), constructor)) {
+                matchCasesForOnCallReturnedValue.add(matchCase)
+            }
+        }
+
+        let mockedMethodBodyNodes = ArrayList<Node>()
+        mockedMethodBodyNodes.add(CreateReturnExpr(CreateMatchExpr(CreateOnCallInvocation(
+            mockUtils.WrapCallArgsIntoArray(mockedMethod), mockUtils.WrapCallTypeArgsIntoArray(mockedMethod),
+            originalMethod, Some(thisRef), GetHandlerRefFromClass(mockedDecl)),
+            matchCasesForOnCallReturnedValue, retTy), Some(mockedMethodBody)))
+        mockedMethodBody.body = CreateBlock(mockedMethodBodyNodes)
+        mockedMethodBody.body.getOrThrow().SetTy(retTy)
+        mockedMethod.linkage = Linkage.INTERNAL
+        return Some(mockedMethod)
+    }
+
     public static func MockedDeclName(original: ClassLikeDecl, instantiationNumber!: Int64 = 0): String {
         return original.identifier.Val() + MOCKED_DECL_SUFFIX + instantiationNumber.toString()
     }
