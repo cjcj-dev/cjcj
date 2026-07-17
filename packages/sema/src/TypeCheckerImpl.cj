@@ -86,13 +86,17 @@ public class CollectDeclsInfo {
 
 public class TypeCheckerImpl {
     public var typeManager: TypeManager
+    public var ci: Option<CompilerInstance> = None
     public var diag: Option<BasicDiagnosticEngine> = None
     public var importManager: Option<SemaImportManager> = None
     public let scopeManager: ScopeManager = ScopeManager()
+    public let mainFunctionMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
     public var structMemberMap: HashMap<InheritableDecl, MemberMap> = HashMap<InheritableDecl, MemberMap>()
 
-    public init(typeManager!: TypeManager = TypeManager(), diag!: Option<BasicDiagnosticEngine> = None,
+    public init(ci!: Option<CompilerInstance> = None, typeManager!: TypeManager = TypeManager(),
+        diag!: Option<BasicDiagnosticEngine> = None,
         importManager!: Option<SemaImportManager> = None) {
+        this.ci = ci
         this.typeManager = typeManager
         this.diag = diag
         this.importManager = importManager

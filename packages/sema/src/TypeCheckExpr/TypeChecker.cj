@@ -929,31 +929,28 @@ private func CollectGenericParam(funcDecl: FuncDecl, desugared: FuncDecl): Unit 
 }
 
 public class TypeChecker {
-    internal var ci: Option<CompilerInstance> = None
     internal var impl: TypeCheckerImpl = TypeCheckerImpl()
     internal let contexts: ArrayList<ASTContext> = ArrayList<ASTContext>()
     internal var currentFuncBody: Option<FuncBody> = None
     internal let activeEnumConstructorRegistrations: ArrayList<EnumDecl> = ArrayList<EnumDecl>()
-    internal let mainFunctionMap: HashMap<Node, ArrayList<Decl>> = HashMap<Node, ArrayList<Decl>>()
     internal var mpImpl: MPTypeCheckerImpl = MPTypeCheckerImpl(impl.typeManager)
 
     public init(ci: Option<CompilerInstance>) {
-        this.ci = ci
         let tm = if (let Some(instance) <- ci) { instance.typeManager } else { TypeManager() }
         if (let Some(instance) <- ci) {
             tm.compileTestsOnly = instance.globalOptions.compileTestsOnly
         }
         impl = if (let Some(instance) <- ci) {
-            TypeCheckerImpl(typeManager: tm, diag: instance.diag, importManager: instance.importManager)
+            TypeCheckerImpl(ci: ci, typeManager: tm, diag: instance.diag, importManager: instance.importManager)
         } else {
-            TypeCheckerImpl(typeManager: tm)
+            TypeCheckerImpl(ci: ci, typeManager: tm)
         }
         mpImpl = if (let Some(diag) <- impl.diag) {
             MPTypeCheckerImpl(impl.typeManager, diag)
         } else {
             MPTypeCheckerImpl(impl.typeManager)
         }
-        if (let Some(instance) <- ci) {
+        if (let Some(instance) <- impl.ci) {
             let opts = instance.globalOptions
             mpImpl.compileCommon = opts.outputMode == OptionOutputMode.CHIR
             mpImpl.compilePlatform = !opts.commonPartCjos.isEmpty()
@@ -976,7 +973,7 @@ extend TypeChecker {
 
     public func SetOverflowStrategy(pkgs: ArrayList<Package>): Unit {
         var optionStrategy = OverflowStrategy.THROWING
-        if (let Some(instance) <- ci) {
+        if (let Some(instance) <- impl.ci) {
             optionStrategy = instance.globalOptions.overflowStrategy
         }
         SetIntegerOverflowStrategy(pkgs, optionStrategy)
@@ -987,7 +984,7 @@ extend TypeChecker {
 
     public func CheckInlineFunctions(pkgs: ArrayList<Package>): Unit {
         var options = OptionGlobalOptions()
-        if (let Some(instance) <- ci) {
+        if (let Some(instance) <- impl.ci) {
             options = instance.globalOptions
         }
         CheckInlineFunctionsForPackages(pkgs, options)
@@ -1003,13 +1000,13 @@ extend TypeChecker {
 
     private func PreTypeCheck(pkgs: ArrayList<Package>): ArrayList<ASTContext> {
         contexts.clear()
-        if (let Some(instance) <- ci) {
+        if (let Some(instance) <- impl.ci) {
             instance.pkgCtxMap.clear()
         }
         for (pkg in pkgs) {
             let ctx = ASTContext(pkg)
             contexts.add(ctx)
-            if (let Some(instance) <- ci) {
+            if (let Some(instance) <- impl.ci) {
                 instance.pkgCtxMap[pkg] = ctx
             }
         }
@@ -1063,7 +1060,7 @@ extend TypeChecker {
             AddBuiltInCStringDecl(pkg)
         }
         AddDefaultParamFunctions(pkg)
-        let enableMacroInLSP = if (let Some(instance) <- ci) { instance.globalOptions.enableMacroInLSP } else { false }
+        let enableMacroInLSP = if (let Some(instance) <- impl.ci) { instance.globalOptions.enableMacroInLSP } else { false }
         Collector(scopeManager: impl.scopeManager, enableMacroInLsp: enableMacroInLSP).
             BuildSymbolTable(ctx, pkg, impl.diag, buildTrie: false)
         MarkOutermostBinaryExpressions(pkg)
@@ -1962,7 +1959,7 @@ extend TypeChecker {
         ctx.resolvedPackageDeclMap.clear()
         ctx.resolvedCjoPackageMemberDeclsMap.clear()
         ctx.resolvedUsedMacroDeclsMap.clear()
-        if (let Some(instance) <- ci) {
+        if (let Some(instance) <- impl.ci) {
             for (packageDecl in instance.packageDecls) {
                 ctx.packageDecls.add(packageDecl)
             }
@@ -2205,7 +2202,7 @@ extend TypeChecker {
                 extendNodes.add(extendDecl)
             }
             mpImpl.PrepareTypeCheck4CJMPExtension(
-                ci.getOrThrow(), impl.scopeManager, ctx, extendNodes)
+                impl.ci.getOrThrow(), impl.scopeManager, ctx, extendNodes)
             TypeCheckExtendUpdateExtendMap(impl.typeManager, extends)
             for (extendDecl in extends) {
                 let _ = CheckDeclAttributesForDecl(extendDecl, diagValue, opts: GlobalOptions())
@@ -2234,7 +2231,7 @@ extend TypeChecker {
     }
 
     private func PreCheck(activeContexts: ArrayList<ASTContext>): Unit {
-        let enableMacroInLSP = if (let Some(instance) <- ci) { instance.globalOptions.enableMacroInLSP } else { false }
+        let enableMacroInLSP = if (let Some(instance) <- impl.ci) { instance.globalOptions.enableMacroInLSP } else { false }
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 if (let Some(diagValue) <- impl.diag) {
@@ -2335,10 +2332,10 @@ extend TypeChecker {
     }
 
     private func CheckCHIRClassDependencies(): Unit {
-        if (let None <- ci) {
+        if (let None <- impl.ci) {
             return
         }
-        let instance = ci.getOrThrow()
+        let instance = impl.ci.getOrThrow()
         if (!instance.globalOptions.chirCC || instance.globalOptions.implicitPrelude) {
             return
         }
@@ -2367,7 +2364,7 @@ extend TypeChecker {
     }
 
     private func UpdateCTypeTy(): Unit {
-        if (let Some(instance) <- ci) {
+        if (let Some(instance) <- impl.ci) {
             if (!instance.globalOptions.implicitPrelude) {
                 return
             }
@@ -2437,12 +2434,12 @@ extend TypeChecker {
                         ChkCallExpr(checkCtx, Some(target), call)
                     }), diag: impl.diag)
                 CollectMainFunctionsFromMainDecls(pkg)
-                let instance = ci.getOrThrow()
+                let instance = impl.ci.getOrThrow()
                 PluginCustomAnnoChecker(
                     instance, impl.diag.getOrThrow(), impl.importManager.getOrThrow()).Check(pkg)
             }
         }
-        let instance = ci.getOrThrow()
+        let instance = impl.ci.getOrThrow()
         if (instance.globalOptions.enIncrementalCompilation) {
             instance.CacheSemaUsage(GetSemanticUsage(impl.typeManager, activePkgs))
         }
@@ -2501,19 +2498,19 @@ extend TypeChecker {
     }
 
     private func AddMainFunction(file: File, decl: Decl): Unit {
-        if (!mainFunctionMap.contains(file)) {
-            mainFunctionMap[file] = ArrayList<Decl>()
+        if (!impl.mainFunctionMap.contains(file)) {
+            impl.mainFunctionMap[file] = ArrayList<Decl>()
         }
-        for (value in mainFunctionMap[file]) {
+        for (value in impl.mainFunctionMap[file]) {
             if (value == decl) {
                 return
             }
         }
-        mainFunctionMap[file].add(decl)
+        impl.mainFunctionMap[file].add(decl)
     }
 
     private func ContainsMainFunction(file: File, decl: Decl): Bool {
-        if (let Some(values) <- mainFunctionMap.get(file)) {
+        if (let Some(values) <- impl.mainFunctionMap.get(file)) {
             for (value in values) {
                 if (value == decl) {
                     return true
@@ -2532,7 +2529,8 @@ extend TypeChecker {
             if (file.isCommon) {
                 DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_common_package_has_main, fd).Emit()
             }
-            if (!mainFunctionMap.isEmpty() && (!mainFunctionMap.contains(file) || !ContainsMainFunction(file, fd))) {
+            if (!impl.mainFunctionMap.isEmpty() &&
+                (!impl.mainFunctionMap.contains(file) || !ContainsMainFunction(file, fd))) {
                 Diagnose(diagValue, fd, BasicDiagKind.sema_redefinition_entry).Emit()
             }
         }
@@ -2577,11 +2575,11 @@ extend TypeChecker {
     }
 
     private func GenerateMainInvoke(): Unit {
-        if (mainFunctionMap.size != 1) {
+        if (impl.mainFunctionMap.size != 1) {
             return
         }
         var mainFunctions: Option<ArrayList<Decl>> = None
-        for (values in mainFunctionMap.values()) {
+        for (values in impl.mainFunctionMap.values()) {
             mainFunctions = Some(values)
             break
         }
@@ -2618,11 +2616,11 @@ extend TypeChecker {
             return
         }
         var options = OptionGlobalOptions()
-        if (let Some(instance) <- ci) {
+        if (let Some(instance) <- impl.ci) {
             options = instance.globalOptions
         }
         let outputCHIR = options.outputMode == OptionOutputMode.CHIR
-        let incrementalCompile = if (let Some(instance) <- ci) {
+        let incrementalCompile = if (let Some(instance) <- impl.ci) {
             instance.compileStrategy == StrategyType.INCREMENTAL_COMPILE
         } else {
             false
@@ -2677,12 +2675,13 @@ extend TypeChecker {
     }
 
     private func CheckWhetherHasProgramEntry(): Unit {
-        if (let None <- ci) {
+        if (let None <- impl.ci) {
             return
         }
-        let instance = ci.getOrThrow()
+        let instance = impl.ci.getOrThrow()
         if (!instance.globalOptions.CompileExecutable() || instance.globalOptions.enableCompileTest ||
-            instance.frontendDumpActionIsTypeCheck || !mainFunctionMap.isEmpty() || instance.globalOptions.compileCjd) {
+            instance.frontendDumpActionIsTypeCheck || !impl.mainFunctionMap.isEmpty() ||
+            instance.globalOptions.compileCjd) {
             return
         }
         if (instance.sourcePackages.isEmpty() || instance.sourcePackages[0].files.isEmpty()) {
@@ -2697,7 +2696,7 @@ extend TypeChecker {
 
     public func PerformDesugarAfterInstantiation(ctx: ASTContext, pkg: Package): Unit {
         let activeContexts = ArrayList<ASTContext>()
-        if (let Some(instance) <- ci) {
+        if (let Some(instance) <- impl.ci) {
             for (sourcePackage in instance.sourcePackages) {
                 if (let Some(sourceContext) <- instance.GetASTContextByPackage(Some(sourcePackage))) {
                     activeContexts.add(sourceContext)
@@ -2715,7 +2714,7 @@ extend TypeChecker {
 
     private func GetImplicitUsedCoreDecls(): ArrayList<Decl> {
         let out = ArrayList<Decl>()
-        if (let Some(instance) <- ci) {
+        if (let Some(instance) <- impl.ci) {
             for (name in ["CJ_CORE_ExecAtexitCallbacks", "getCommandLineArgs", "eprintln", "handleException",
                 "NegativeArraySizeException", "createOverflowExceptionMsg", "createArithmeticExceptionMsg",
                 "SpawnException"]) {
@@ -2788,7 +2787,7 @@ extend TypeChecker {
     }
 
     private func GlobalOptions(): OptionGlobalOptions {
-        if (let Some(instance) <- ci) {
+        if (let Some(instance) <- impl.ci) {
             return instance.globalOptions
         }
         return OptionGlobalOptions()
@@ -3755,7 +3754,7 @@ extend TypeChecker {
             return result
         }
         var currentContext = ctx
-        if ((let Some(instance) <- ci) && instance.sourcePackages.size > 1 &&
+        if ((let Some(instance) <- impl.ci) && instance.sourcePackages.size > 1 &&
             (let Some(file) <- decl.curFile) && (let Some(packageValue) <- file.curPackage) &&
             (let Some(packageContext) <- instance.GetASTContextByPackage(Some(packageValue)))) {
             currentContext = packageContext
@@ -5550,7 +5549,7 @@ extend TypeChecker {
                     return false
                 }
             }
-            let enableMacroInLSP = if (let Some(instance) <- ci) {
+            let enableMacroInLSP = if (let Some(instance) <- impl.ci) {
                 instance.globalOptions.enableMacroInLSP
             } else {
                 false
