@@ -73,7 +73,7 @@ private class LookUpImpl {
             }
             var inResultOuter = inResult.outerDecl.getOrThrow().GetTy()
             if (resultsWithInstTyV.size > idx && resultsWithInstTyV[idx][1].isSome()) {
-                inResultOuter = resultsWithInstTyV[idx][1]
+                inResultOuter = Some(resultsWithInstTyV[idx][1].getOrThrow())
             } else if (inResult.outerDecl.getOrThrow().astKind == ASTKind.EXTEND_DECL) {
                 var isSubtype = false
                 if (let Some(outerTy) <- inResultOuter) {
