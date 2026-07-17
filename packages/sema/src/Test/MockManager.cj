@@ -1219,6 +1219,21 @@ public class MockManager {
         return mockedObjMatch
     }
 
+    // C++: Sema/Test/MockManager.cpp:1356-1369.
+    private func GetCurrentStaticHandler(curFile: File): Expr {
+        let currentStaticMa = CreateMemberAccess(
+            CreateRefExpr(callHandlerDecl.getOrThrow()), CURRENT_STATIC_FUNC_NAME)
+        currentStaticMa.SetTy(typeManager.GetFunctionTy(
+            [], callHandlerDecl.getOrThrow().GetTy().getOrThrow()))
+        let target = currentStaticMa.target
+        let currentStaticCall = CreateCallExpr(currentStaticMa, ArrayList<FuncArg>())
+        currentStaticCall.resolvedFunction = (target.getOrThrow() as FuncDecl).getOrThrow()
+        currentStaticCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+        currentStaticCall.SetTy(callHandlerDecl.getOrThrow().GetTy().getOrThrow())
+        currentStaticCall.curFile = curFile
+        return currentStaticCall
+    }
+
     // C++: Sema/Test/MockManager.cpp:1204-1238.
     private func CreateMockedProp(originalProp: PropDecl, mockedDecl: ClassDecl,
         classGenericSubsts: ArrayList<TypeSubst>): Option<PropDecl> {
