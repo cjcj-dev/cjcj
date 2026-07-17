@@ -519,12 +519,12 @@ public class MockSupportManager {
         }
 
         let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
-        let type = (MockUtils.CreateType(boolTy) as PrimitiveType).getOrThrow()
-        type.kind = TypeKind.TYPE_BOOLEAN
-        type.str = boolTy.String()
+        let typeNode = (MockUtils.CreateType(boolTy) as PrimitiveType).getOrThrow()
+        typeNode.kind = TypeKind.TYPE_BOOLEAN
+        typeNode.str = boolTy.String()
         let varDecl = CreateVarDecl(
             MockUtils.spyCallMarkerVarName + MockUtils.mockAccessorSuffix,
-            Some(CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy, true)), Some(type))
+            Some(CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy, true)), Some(typeNode))
         varDecl.isVar = true
         varDecl.EnableAttr(Attribute.GLOBAL)
         mockUtils.AttachGeneratedDecl(varDecl, pkg)
