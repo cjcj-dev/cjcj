@@ -243,7 +243,11 @@ public class JavaInteropManager {
     // C++ DesugarPackage.cpp:75-112.
     public func DesugarPackage(pkg: Package, memberMap: HashMap<InheritableDecl, MemberMap>,
         desugarPropRef: (Node) -> Unit): Unit {
-        if (!(hasMirrorOrImpl || targetInteropLanguage == InteropLanguage.Java)) {
+        let targetsJava = match (targetInteropLanguage) {
+            case InteropLanguage.Java => true
+            case _ => false
+        }
+        if (!(hasMirrorOrImpl || targetsJava)) {
             return
         }
         // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
