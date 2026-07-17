@@ -39,7 +39,7 @@ public class InteropContext {
     public let cjMappingInterfaces: ArrayList<ClassLikeDecl> = ArrayList<ClassLikeDecl>()
     public let fwdClasses: ArrayList<ClassDecl> = ArrayList<ClassDecl>()
     public let fwdClassMap: HashMap<Decl, ClassDecl> = HashMap<Decl, ClassDecl>()
-    public let fwdOverrideTable: HashMap<FuncDecl, FuncDecl> = HashMap<FuncDecl, FuncDecl>()
+    public let fwdOverrideTable: HashMap<Decl, FuncDecl> = HashMap<Decl, FuncDecl>()
     public let synWrappers: ArrayList<ClassDecl> = ArrayList<ClassDecl>()
     public let genDecls: ArrayList<Decl> = ArrayList<Decl>()
 
