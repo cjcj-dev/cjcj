@@ -225,7 +225,7 @@ public class CompilerInstance {
     public var isCJLint: Bool = false
     public var buildTrie: Bool = true
     public let srcPkgs: ArrayList<Package> = ArrayList<Package>()
-    public let realASTPkgs: HashMap<String, RealASTPackage> = HashMap<String, RealASTPackage>()
+    public let realASTPkgs: HashMap<Package, RealASTPackage> = HashMap<Package, RealASTPackage>()
     public let chirData: CHIRData = CHIRData()
     public var faithfulSemaInstance: Option<FaithfulSemaCompilerInstance> = None
     private var faithfulTypeChecker: Option<FaithfulSemaTypeChecker> = None
@@ -600,7 +600,7 @@ public class CompilerInstance {
     private func CaptureRealASTPackages(): Bool {
         realASTPkgs.clear()
         for (pkg in srcPkgs) {
-            realASTPkgs[pkg.fullPackageName] = pkg
+            realASTPkgs[pkg] = pkg
         }
         return true
     }
@@ -611,7 +611,7 @@ public class CompilerInstance {
         }
         let pkgs = ArrayList<RealASTPackage>()
         for (pkg in srcPkgs) {
-            if (let Some(realPkg) <- realASTPkgs.get(pkg.fullPackageName)) {
+            if (let Some(realPkg) <- realASTPkgs.get(pkg)) {
                 pkgs.add(realPkg)
             }
         }
@@ -731,7 +731,7 @@ public class CompilerInstance {
             return true
         }
         RegisterMacroCallDiagInfos(diag, pkg)
-        let realASTPkg = match (realASTPkgs.get(pkg.fullPackageName)) {
+        let realASTPkg = match (realASTPkgs.get(pkg)) {
             case Some(value) => value
             case None =>
                 diag.Diagnose(DiagCategory.CHIR, PackageDiagnosticPosition(pkg),
