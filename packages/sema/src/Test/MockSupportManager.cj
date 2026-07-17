@@ -1349,6 +1349,28 @@ public class MockSupportManager {
         return GenerateSetterCall(memberAccess)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1640-1658.
+    private func GenerateBlockForAssignExpr(
+        assignExpr: AssignExpr, accessorCall: CallExpr): Block {
+        let tmpVar = CreateTmpVarDecl(
+            Some(MockUtils.CreateType(assignExpr.rightExpr.getOrThrow().GetTy().getOrThrow())),
+            assignExpr.rightExpr)
+        let tmpVarRef = CreateRefExpr(tmpVar)
+        tmpVarRef.curFile = tmpVar.curFile
+        accessorCall.args.add(CreateFuncArg(
+            (ASTCloner.Clone(tmpVarRef) as Expr).getOrThrow()))
+        accessorCall.sourceExpr = assignExpr
+
+        let blockNodes = ArrayList<Node>()
+        blockNodes.add(tmpVar)
+        blockNodes.add(accessorCall)
+        let block = CreateBlock(blockNodes,
+            Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+        block.EnableAttr(Attribute.GENERATED_TO_MOCK)
+        block.EnableAttr(Attribute.COMPILER_ADD)
+        return block
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
