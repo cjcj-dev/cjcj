@@ -441,7 +441,7 @@ public class MockSupportManager {
     // C++: Sema/Test/MockSupportManager.cpp:397-468.
     private func PrepareStaticDecl(decl: Decl): Unit {
         let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-        let funcDecl = if (let Some(func) <- (decl as FuncDecl)) { func } else { return }
+        let funcDecl = if (let Some(functionDecl) <- (decl as FuncDecl)) { functionDecl } else { return }
         if (funcDecl.identifier.Val() == TEST_ENTRY_NAME) {
             return
         }
