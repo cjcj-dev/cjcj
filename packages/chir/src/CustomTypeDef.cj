@@ -880,12 +880,104 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
         return ""
     }
 
-    public func VTableToString(indent: Int64): String {
+    protected open func CustomTypeDefTitleToString(): String {
+        let kind = if (IsInterface()) {
+            "interface"
+        } else if (IsClass()) {
+            "class"
+        } else if (IsStruct()) {
+            "struct"
+        } else if (IsEnum()) {
+            "enum"
+        } else if (IsExtend()) {
+            "extend"
+        } else {
+            ""
+        }
+        return kind + " " + GetIdentifier() + TypeVecToString("<", GetGenericTypeParams(), ">")
+    }
+
+    private func ParentToString(): String {
+        let parentTys = GetSuperTypesInCurDef()
+        if (parentTys.isEmpty()) {
+            return ""
+        }
+        return " <: " + TypeVecToString("", parentTys, "", delimiter: " & ")
+    }
+
+    private func CommentToString(): String {
+        let comments = ArrayList<String>()
+        let baseComment = BaseCommentToString()
+        if (!baseComment.isEmpty()) {
+            comments.add(baseComment)
+        }
+        if (!GetSrcCodeIdentifier().isEmpty()) {
+            comments.add("srcCodeIdentifier: " + GetSrcCodeIdentifier())
+        }
+        let params = GetGenericTypeParams()
+        if (!params.isEmpty()) {
+            let constraints = GetGenericTypeConstaintsStr(params)
+            if (!constraints.isEmpty()) {
+                comments.add("genericConstrains: " + constraints)
+            }
+        }
+        if (let Some(decl) <- GetGenericDecl()) {
+            comments.add("genericDecl: " + decl.GetIdentifier())
+        }
+        let extra = AddExtraComment()
+        if (!extra.isEmpty()) {
+            comments.add(extra)
+        }
+        return cjcj::chir.CommentToString(comments)
+    }
+
+    protected open func LocalVarToString(): String {
+        var out = ""
+        for (localVar in GetDirectInstanceVars()) {
+            out += AddNewLineOrNot(localVar.annoInfo.ToString(indent: 1))
+            out += IndentToString(1) + localVar.attributeInfo.ToString()
+            out += if (localVar.TestAttr(Attribute.READONLY)) { "let " } else { "var " }
+            out += localVar.name + ": " + localVar.ty.ToString()
+            let comments = ArrayList<String>()
+            if (!localVar.loc.IsInvalidPos()) {
+                comments.add("loc: " + localVar.loc.ToString())
+            }
+            if (let Some(initFunc) <- localVar.initializerFunc) {
+                comments.add("initFunc: " + initFunc.GetIdentifier())
+            }
+            if (!localVar.rawMangledName.isEmpty()) {
+                comments.add("rawMangledName: " + localVar.rawMangledName)
+            }
+            out += cjcj::chir.CommentToString(comments) + "\n"
+        }
+        return out
+    }
+
+    private func StaticVarToString(): String {
+        var out = ""
+        for (staticVar in GetStaticMemberVars()) {
+            out += IndentToString(1) + staticVar.GetAttributeInfo().ToString()
+            out += if (staticVar.TestAttr(Attribute.READONLY)) { " let " } else { " var " }
+            out += staticVar.GetIdentifier() + ": " + staticVar.GetType().getOrThrow().ToString() + "\n"
+        }
+        return out
+    }
+
+    private func MethodToString(): String {
+        var out = ""
+        for (method in GetMethods()) {
+            out += IndentToString(1) + method.GetAttributeInfo().ToString()
+            out += " func " + method.GetIdentifier() + ": " + method.GetType().getOrThrow().ToString() + "\n"
+        }
+        return out
+    }
+
+    public func VTableToString(): String {
         let vtables = vtable.GetTypeVTables()
         if (vtables.isEmpty()) {
             return ""
         }
-        var curIndent = indent
+        var curIndent: Int64 = 1
         var out = IndentToString(curIndent) + "vtable {\n"
         curIndent++
         for (vtableInType in vtables) {
@@ -904,16 +996,20 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
             out += IndentToString(curIndent) + "}\n"
         }
         curIndent--
-        out += IndentToString(curIndent) + "}"
+        out += IndentToString(curIndent) + "}\n"
         return out
     }
 
     public open func ToString(indent: Int64): String {
-        let vtableText = VTableToString(indent + 1)
-        if (vtableText.isEmpty()) {
-            return IndentToString(indent) + GetFullName()
-        }
-        return IndentToString(indent) + GetFullName() + "\n" + vtableText
+        var out = AddNewLineOrNot(GetAnnoInfo().ToString(indent: indent))
+        out += IndentToString(indent) + GetAttributeInfo().ToString() + CustomTypeDefTitleToString()
+        out += ParentToString() + " {" + AddNewLineOrNot(CommentToString())
+        out += LocalVarToString()
+        out += StaticVarToString()
+        out += MethodToString()
+        out += VTableToString()
+        out += "}"
+        return out
     }
 
     public func ToString(): String {
