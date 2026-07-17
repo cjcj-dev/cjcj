@@ -1,6 +1,7 @@
 package cjcj::option
 
 import std.collection.*
+import std.core.Option as CoreOption
 import std.fs.Directory as FSDirectory
 import cjcj::basic.Errorln
 import cjcj::utils.{FileUtil, GenerateRandomHexString}
@@ -19,7 +20,7 @@ private let DELETING: UInt8 = 1u8
 private let DELETED: UInt8 = 2u8
 
 // C++: Driver/TempFileManager.cpp:49-73.
-private func TempDirLegalityCheck(path: String, fromEnvSetting: Bool): Option<String> {
+private func TempDirLegalityCheck(path: String, fromEnvSetting: Bool): CoreOption<String> {
     let absPath = FileUtil.GetAbsPath(path)
     if (let None <- absPath) {
         let pathKind = if (fromEnvSetting) {
