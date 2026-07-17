@@ -396,7 +396,10 @@ extend TypeChecker {
             case Some(value) => value
             case None => return
         }
-        if (target.astKind != ASTKind.VAR_DECL || target.astKind == ASTKind.FUNC_PARAM) {
+        if (let None <- (target as VarDecl)) {
+            return
+        }
+        if (let Some(_) <- (target as FuncParam)) {
             return
         }
         var funcSymbol = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, re.scopeName)
