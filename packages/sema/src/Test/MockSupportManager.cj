@@ -1389,6 +1389,19 @@ public class MockSupportManager {
         return ReplaceVarRefExprWithGetAccessor(refExpr)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1410-1422.
+    private func GenerateDesugarFuncArg(funcArg: FuncArg, varDecl: VarDecl): FuncArg {
+        let ret = funcArg
+        CopyBasicInfo(funcArg, ret)
+        ret.expr = CreateRefExpr(varDecl)
+        ret.SetTy(mockUtils.WrapTy2CPointer(varDecl.GetTy().getOrThrow()))
+        ret.name = funcArg.name
+        ret.withInout = funcArg.withInout
+        ret.EnableAttr(Attribute.COMPILER_ADD)
+        ret.EnableAttr(Attribute.GENERATED_TO_MOCK)
+        return ret
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
