@@ -54,10 +54,14 @@ public class BCHIRInterpreter {
                 interpStack.ArgsPush(IValUtils.PrimitiveUIntNat(code.Get8Bytes(pc + 1)))
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.FLOAT16 || opCode == OpCode.FLOAT32) {
-                interpStack.ArgsPush(InterpreterValue.MakeFloat(FloatOpKind(opCode), Float64(code.Get(pc + 1))))
+                let value = Float64(Float32.fromBits(UInt32(code.Get(pc + 1))))
+                interpStack.ArgsPush(InterpreterValue.MakeFloat(FloatOpKind(opCode), value))
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.FLOAT64) {
-                interpStack.ArgsPush(InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64, Float64(code.Get8Bytes(pc + 1))))
+                let raw = code.Get8Bytes(pc + 1)
+                let bits = if (raw >= 0) { UInt64(raw) } else { UInt64.Max - UInt64(-(raw + 1)) }
+                interpStack.ArgsPush(InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64,
+                    Float64.fromBits(bits)))
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (opCode == OpCode.BOOL) {
                 interpStack.ArgsPush(InterpreterValue.MakeBool(code.Get(pc + 1) != 0))
