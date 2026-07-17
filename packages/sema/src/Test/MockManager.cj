@@ -876,6 +876,19 @@ public class MockManager {
         return mockedMethod
     }
 
+    // C++: Sema/Test/MockManager.cpp:1102-1116.
+    private func CreateStaticMethodStub(originalMethod: FuncDecl, mockedDecl: ClassDecl,
+        classGenericSubsts: ArrayList<TypeSubst>): FuncDecl {
+        let mockedMethod = CreateMockedMethodWithoutBody(originalMethod, mockedDecl, classGenericSubsts)
+        let retTy = mockedMethod.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        let nodes = ArrayList<Node>()
+        nodes.add(CreateIllegalMockCallException(
+            originalMethod.curFile.getOrThrow(), typeManager, importManager))
+        mockedMethod.funcBody.getOrThrow().body = CreateBlock(nodes)
+        mockedMethod.funcBody.getOrThrow().body.getOrThrow().SetTy(retTy)
+        return mockedMethod
+    }
+
     public static func MockedDeclName(original: ClassLikeDecl, instantiationNumber!: Int64 = 0): String {
         return original.identifier.Val() + MOCKED_DECL_SUFFIX + instantiationNumber.toString()
     }
