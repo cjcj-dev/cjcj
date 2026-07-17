@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::sema.{AddArrayLitConstructor, CreateInitCall, CreateThrowException, FindInitDecl, GetMemberDecl}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.{TypeManager, TypeSubst}
+import cjcj::sema.{GenerateTypeMapping, TypeManager, TypeSubst}
 import cjcj::utils.{CJC_ASSERT, DynamicCast, GetRootPackageName, OBJECT_NAME, V_COMPILER}
 
 private let CREATE_MOCK_FUNC_NAME: String = "createMock"
@@ -178,6 +178,61 @@ public class MockManager {
         objectRef.ref.target = objectDecl
         objectRef.SetTy(objectDecl.GetTy().getOrThrow())
         mockedDecl.inheritedTypes.add(objectRef, at: 0)
+    }
+
+    // C++: Sema/Test/MockManager.cpp:169-236.
+    public func GenerateMockClassIfNeededAndGet(originalDecl: ClassLikeDecl, curPkg: Package,
+        mockKind: MockKind): GeneratedClassResult {
+        CJC_ASSERT(originalDecl.astKind == ASTKind.CLASS_DECL ||
+            originalDecl.astKind == ASTKind.INTERFACE_DECL)
+
+        if (mockedClassDecls.contains(originalDecl)) {
+            return GeneratedClassResult(mockedClassDecls[originalDecl], false)
+        }
+
+        let curFile = curPkg.files[0]
+        let mockedDecl = ClassDecl()
+        mockUtils.AddGenericIfNeeded(originalDecl, mockedDecl)
+        if (mockedDecl.generic.isNone()) {
+            mockedDecl.SetTy(typeManager.GetClassTy(mockedDecl, []))
+        }
+
+        mockedDecl.moduleName = GetRootPackageName(curPkg.fullPackageName)
+        mockedDecl.curFile = curFile
+        mockedDecl.fullPackageName = curPkg.fullPackageName
+        mockedDecl.identifier = SrcIdentifier(originalDecl.identifier.Val() + MOCKED_DECL_SUFFIX +
+            ComputeInstantiationNumberToMangleMockedDecl(originalDecl).toString())
+        mockedDecl.body = ClassBody()
+        mockedDecl.linkage = Linkage.INTERNAL
+        mockedDecl.EnableAttr(GetAttrByAccessLevel(GetAccessLevel(originalDecl)))
+        mockedDecl.EnableAttr(Attribute.OPEN)
+
+        let originalDeclRef = CreateRefType(originalDecl)
+        let substitutedOriginalTy = typeManager.GetInstantiatedTy(originalDeclRef.GetTy().getOrThrow(),
+            GenerateTypeMapping(originalDecl, mockedDecl.GetTy().getOrThrow().typeArgs))
+        originalDeclRef.SetTy(substitutedOriginalTy)
+        mockedDecl.inheritedTypes.add(originalDeclRef)
+        originalDecl.subDecls.add(mockedDecl)
+
+        let genericSubsts = MockUtils.BuildGenericSubsts(mockedDecl)
+        let handlerField = CreateFieldDecl(
+            mockedDecl, FIELD_NAME_TO_STORE_HANDLER, callHandlerDecl.getOrThrow().GetTy().getOrThrow(), curPkg)
+        AddMockedInterface(mockedDecl, handlerField)
+        mockedDecl.body.getOrThrow().decls.add(handlerField)
+        mockedDecl.body.getOrThrow().decls.add(CreateFieldDecl(
+            mockedDecl, FIELD_NAME_TO_STORE_OBJ_TO_SPY, substitutedOriginalTy, curPkg))
+        mockedDecl.body.getOrThrow().decls.add(CreateConstructorDecl(mockedDecl,
+            HashSet<String>([FIELD_NAME_TO_STORE_HANDLER, FIELD_NAME_TO_STORE_OBJ_TO_SPY]), mockKind, curFile))
+        mockedDecl.body.getOrThrow().decls.add(CreateConstructorDecl(mockedDecl,
+            HashSet<String>([FIELD_NAME_TO_STORE_HANDLER]), mockKind, curFile))
+
+        AddObjectSuperTypeIfNeeded(originalDecl, mockedDecl)
+        AddMockedMembers(originalDecl, mockedDecl, genericSubsts)
+        AddCurFile(mockedDecl, curFile)
+
+        mockedClassDecls[originalDecl] = mockedDecl
+        mockUtils.AttachGeneratedDecl(mockedDecl)
+        return GeneratedClassResult(mockedDecl, true)
     }
 
     public static func GetMockKind(callExpr: CallExpr): MockKind {
