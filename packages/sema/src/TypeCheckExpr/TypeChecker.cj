@@ -2242,15 +2242,19 @@ extend TypeChecker {
                 }
             }
         }
+        // C++ src/Sema/PreCheck.cpp:2014-2019 resolves declarations for every context before FFI annotations.
+        for (ctx in activeContexts) {
+            impl.ResolveDecls(ctx)
+        }
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
-                let _ = PreCheckPackage(ctx, pkg, typeManager: impl.typeManager,
-                    importManager: impl.importManager, diag: impl.diag, backendType: GlobalOptions().backend)
                 if (let Some(diagValue) <- impl.diag) {
                     PreCheckAnnoForFFI(pkg, diagValue)
                 } else {
                     PreCheckAnnoForFFI(pkg)
                 }
+                let _ = PreCheckPackage(ctx, pkg, typeManager: impl.typeManager,
+                    importManager: impl.importManager, diag: impl.diag, backendType: GlobalOptions().backend)
                 let _ = CheckDeclAttributesForPackage(pkg, impl.diag.getOrThrow(), opts: GlobalOptions())
                 // C++ src/Sema/PreCheck.cpp:1281-1321,1843-1844 checks nominal declarations after name resolution.
                 for (sym in impl.GetAllStructDecls(ctx)) {
