@@ -109,6 +109,27 @@ private func CollectInstantiationRecursively(instTys: HashSet<Ptr<Ty>>): Unit {
     }
 }
 
+// ASTWriter.cpp:382-405 GetImportPackageNameByImportSpec.
+private func GetImportPackageNameByImportSpec(importSpec: ImportSpec): String {
+    if (importSpec.IsImportMulti()) {
+        return ""
+    }
+    let builder = StringBuilder()
+    for (index in 0..importSpec.content.prefixPaths.size) {
+        builder.append(importSpec.content.prefixPaths[index])
+        if (index == 0 && importSpec.content.hasDoubleColon) {
+            builder.append("::")
+        } else if (index + 1 != importSpec.content.prefixPaths.size) {
+            builder.append(".")
+        }
+    }
+    if (!importSpec.IsImportAll() && !importSpec.content.isDecl) {
+        builder.append(".")
+        builder.append(importSpec.content.identifier.Val())
+    }
+    return builder.toString()
+}
+
 // ASTWriterImpl.h:44-50 NodeInfo.
 private class NodeInfo {
     let begin: ArrayList<UInt8>
