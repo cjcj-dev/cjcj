@@ -941,6 +941,149 @@ extend ParserImpl {
         }
     }
 
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:492-499
+    private func CheckPropDeclJavaMirror(decl: PropDecl): Unit {
+        if (let Some(outerDecl) <- decl.outerDecl && outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_prop_is_forbidden, decl).Emit()
+            decl.EnableAttr(Attribute.IS_BROKEN)
+            outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:501-508
+    private func CheckPrimaryCtorDeclJavaMirror(ctor: PrimaryCtorDecl): Unit {
+        if (let Some(outerDecl) <- ctor.outerDecl && outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+            ctor.EnableAttr(Attribute.JAVA_MIRROR)
+            ctor.EnableAttr(Attribute.IS_BROKEN)
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_java_mirror_decl_cannot_have_primary_ctor, ctor).Emit()
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:521-562
+    private func CheckJavaInteropMember(decl: Decl): Unit {
+        let outerDecl = decl.outerDecl.getOrThrow()
+        if (outerDecl.TestAttr(Attribute.JAVA_MIRROR_SUBTYPE) &&
+            !outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+            if (decl.GetGeneric().isSome() && !decl.TestAttr(Attribute.JAVA_CJ_MAPPING)) {
+                FFIParserImpl(this).Java().DiagJavaImplCannotBeGeneric(decl)
+                return
+            }
+            if (decl.astKind == ASTKind.FUNC_DECL &&
+                decl.TestAttr(Attribute.CONSTRUCTOR) && decl.TestAttr(Attribute.STATIC)) {
+                FFIParserImpl(this).Java().DiagJavaImplCannotHaveStaticInit(decl)
+                return
+            }
+        }
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+                CheckInitCtorDeclJavaMirror(funcDecl)
+            } else if (funcDecl.TestAttr(Attribute.FINALIZER) && outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+                FFIParserImpl(this).Java().DiagJavaMirrorCannotHaveFinalizer(funcDecl)
+            } else {
+                CheckMemberFuncJavaMirror(funcDecl)
+                FFIParserImpl(this).CheckForeignNameAnnotation(funcDecl)
+            }
+        } else if (let Some(propDecl) <- (decl as PropDecl)) {
+            CheckPropDeclJavaMirror(propDecl)
+            FFIParserImpl(this).CheckForeignNameAnnotation(propDecl)
+        } else if (let Some(primaryCtorDecl) <- (decl as PrimaryCtorDecl)) {
+            CheckPrimaryCtorDeclJavaMirror(primaryCtorDecl)
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:621-649
+    private func CheckMemberFuncJavaMirror(decl: FuncDecl): Unit {
+        if (let Some(outerDecl) <- decl.outerDecl) {
+            if (!outerDecl.TestAttr(Attribute.JAVA_MIRROR)) {
+                return
+            }
+            decl.EnableAttr(Attribute.JAVA_MIRROR)
+            if (decl.TestAttr(Attribute.PRIVATE)) {
+                FFIParserImpl(this).Java().DiagJavaMirrorCannotHavePrivateMember(decl)
+                decl.EnableAttr(Attribute.IS_BROKEN)
+                outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (HasModifierToken(decl.modifiers, TokenKind.CONST)) {
+                FFIParserImpl(this).Java().DiagJavaMirrorCannotHaveConstMember(decl)
+                decl.EnableAttr(Attribute.IS_BROKEN)
+                outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            FFICheckClassLikeFuncBody(decl,
+                DiagKindRefactor.parse_java_mirror_function_must_have_return_type,
+                DiagKindRefactor.parse_java_mirror_function_cannot_have_body)
+            if (outerDecl.astKind == ASTKind.INTERFACE_DECL &&
+                HasAnnotation(decl.annotations, AnnotationKind.JAVA_HAS_DEFAULT)) {
+                decl.EnableAttr(Attribute.JAVA_HAS_DEFAULT)
+            }
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:676-716
+    private func CheckInitCtorDeclJavaMirror(ctor: FuncDecl): Unit {
+        if (!ctor.TestAttr(Attribute.JAVA_MIRROR)) {
+            return
+        }
+        ctor.EnableAttr(Attribute.JAVA_MIRROR)
+        ctor.DisableAttr(Attribute.ABSTRACT)
+        ctor.constructorCall = ConstructorCall.OTHER_INIT
+        let outerDecl = ctor.outerDecl.getOrThrow()
+        if (ctor.TestAttr(Attribute.STATIC)) {
+            FFIParserImpl(this).Java().DiagJavaMirrorCannotHaveStaticInit(ctor)
+            ctor.EnableAttr(Attribute.IS_BROKEN)
+            outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+            outerDecl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (HasModifierToken(ctor.modifiers, TokenKind.CONST)) {
+            FFIParserImpl(this).Java().DiagJavaMirrorCannotHaveConstMember(ctor)
+            ctor.EnableAttr(Attribute.IS_BROKEN)
+            outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+            outerDecl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (ctor.TestAttr(Attribute.PRIVATE)) {
+            FFIParserImpl(this).Java().DiagJavaMirrorCannotHavePrivateMember(ctor)
+            ctor.EnableAttr(Attribute.IS_BROKEN)
+            outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+            outerDecl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (let Some(funcBody) <- ctor.funcBody) {
+            if (let Some(body) <- funcBody.body) {
+                ctor.EnableAttr(Attribute.IS_BROKEN)
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_java_mirror_constructor_cannot_have_body, body.begin).Emit()
+            } else {
+                let body = Block()
+                body.EnableAttr(Attribute.COMPILER_ADD)
+                body.EnableAttr(Attribute.IMPLICIT_ADD)
+                body.begin = ctor.end
+                body.curFile = ctor.curFile
+                body.end = ctor.end
+                if (let Some(ty) <- ctor.GetTy()) {
+                    body.SetTy(ty)
+                }
+                funcBody.body = body
+            }
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:2103-2119
+    private func FFICheckClassLikeFuncBody(decl: FuncDecl, functionMustHaveReturnType: DiagKindRefactor,
+        functionCanNotHaveBody: DiagKindRefactor): Unit {
+        if (let None <- decl.funcBody) {
+            return
+        }
+        let funcBody = decl.funcBody.getOrThrow()
+        if (funcBody.retType.isNone() && !funcBody.TestAttr(Attribute.HAS_BROKEN)) {
+            ParseDiagnoseRefactor(functionMustHaveReturnType, decl).Emit()
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (funcBody.body.isSome()) {
+            ParseDiagnoseRefactor(functionCanNotHaveBody, decl, decl.identifier.Val()).Emit()
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+    }
+
     func CheckConstructorBody(ctor: FuncDecl, scopeKind: ScopeKind, inMacro!: Bool = false): Unit {
         CJC_ASSERT(ctor.TestAttr(Attribute.CONSTRUCTOR))
         if (let Some(funcBody) <- ctor.funcBody) {
@@ -2191,6 +2334,7 @@ extend ParserImpl {
                     } else if (let Some(propDecl) <- (member as PropDecl)) {
                         CheckClassLikePropAbstractness(propDecl)
                     }
+                    CheckJavaInteropMember(member)
                 }
                 AddBodyMember(ret, member)
             }
