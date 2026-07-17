@@ -1676,6 +1676,19 @@ public class MockSupportManager {
         return assignExpr.desugarExpr
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1321-1354.
+    private func ReplaceAssignment(
+        assignment: AssignExpr, isInConstructor: Bool): Option<Expr> {
+        if (assignment.TestAttr(Attribute.GENERATED_TO_MOCK)) {
+            return None
+        }
+        assignment.leftValue.getOrThrow().EnableAttr(Attribute.LEFT_VALUE)
+        if (assignment.isCompound) {
+            return None
+        }
+        return ReplaceFieldSetWithAccessor(assignment, isInConstructor)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
