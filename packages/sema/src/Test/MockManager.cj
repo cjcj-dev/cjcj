@@ -240,6 +240,24 @@ public class MockManager {
         return GeneratedClassResult(mockedDecl, true)
     }
 
+    // C++: Sema/Test/MockManager.cpp:247-266.
+    private func AddMockedMembers(originalDecl: ClassLikeDecl, mockedDecl: ClassDecl,
+        classGenericSubsts: ArrayList<TypeSubst>): Unit {
+        let foundOverrides = HashSet<Decl>()
+        for (superDecl in originalDecl.GetAllSuperDecls()) {
+            for (member in superDecl.GetMemberDecls()) {
+                if (foundOverrides.contains(member)) {
+                    continue
+                }
+                if (EndsWith(member.identifier.Val(), MockUtils.defaultAccessorSuffix)) {
+                    continue
+                }
+                FindOverridesInSuperDecl(superDecl, member, foundOverrides)
+                AddMockedMemberIfNeeded(mockedDecl, member, classGenericSubsts)
+            }
+        }
+    }
+
     public static func GetMockKind(callExpr: CallExpr): MockKind {
         if (callExpr.callKind != CallKind.CALL_INTRINSIC_FUNCTION) {
             return MockKind.NOT_MOCK
