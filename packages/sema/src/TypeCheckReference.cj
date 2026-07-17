@@ -1330,7 +1330,7 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
     return valid
 }
 
-public func TypeCheckReferenceCheckThisOrSuperInInitializer(
+public func CheckThisOrSuperInInitializer(
     diag: BasicDiagnosticEngine,
     node: Node,
     re: RefExpr
@@ -1339,18 +1339,18 @@ public func TypeCheckReferenceCheckThisOrSuperInInitializer(
         return true
     }
     if (node.TestAttr(Attribute.STATIC)) {
-        let builder = diag.Diagnose(
-            re.begin,
-            re.end,
+        let builder = Diagnose(
+            diag,
+            re,
             BasicDiagKind.sema_this_or_super_not_allowed_to_initialize_static_member,
             args: [BasicDiagArgument(re.ref.identifier.Val())])
         builder.Emit()
         return false
     }
     if (re.isSuper || (re.isThis && re.isAlone)) {
-        let builder = diag.Diagnose(
-            re.begin,
-            re.end,
+        let builder = Diagnose(
+            diag,
+            re,
             BasicDiagKind.sema_this_or_super_not_allowed_to_initialize_non_static_member,
             args: [BasicDiagArgument(re.ref.identifier.Val())])
         builder.Emit()
@@ -1485,7 +1485,7 @@ private func CheckUsageOfThis(
     }
     if (referenceInInitializer) {
         let currentNode = ctx.currentCheckingNodes[ctx.currentCheckingNodes.size - 1]
-        valid = TypeCheckReferenceCheckThisOrSuperInInitializer(diag, currentNode, re) && valid
+        valid = CheckThisOrSuperInInitializer(diag, currentNode, re) && valid
     }
     CheckInvalidRefInCFunc(ctx, re, diag)
     return valid
@@ -1537,7 +1537,7 @@ private func CheckUsageOfSuper(
     }
     if (referenceInInitializer) {
         let currentNode = ctx.currentCheckingNodes[ctx.currentCheckingNodes.size - 1]
-        valid = TypeCheckReferenceCheckThisOrSuperInInitializer(diag, currentNode, re) && valid
+        valid = CheckThisOrSuperInInitializer(diag, currentNode, re) && valid
     }
     CheckInvalidRefInCFunc(ctx, re, diag)
     return valid
