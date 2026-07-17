@@ -152,6 +152,14 @@ extern "C" double CJSelfhostStrtoldToFloat32(const char *Value)
     return static_cast<float>(strtold(Value, nullptr));
 }
 
+// Mirror C++ `llvm::ArrayType::get(Type*, uint64_t)` as used by CGVArrayType::GenLLVMType
+// (src/CodeGen/Base/CGTypes/CGVArrayType.cpp:22-44). LLVM 15 has no LLVMArrayType2 C API and
+// the C LLVMArrayType truncates to unsigned; VArray element counts are uint64_t in C++.
+extern "C" LLVMTypeRef LLVMSelfhostArrayType64(LLVMTypeRef ElementType, uint64_t ElementCount)
+{
+    return wrap(ArrayType::get(unwrap(ElementType), ElementCount));
+}
+
 // Mirror C++ `gv->addAttribute(Kind, Val)` (llvm/IR/GlobalVariable.h:239).
 // Val may be empty (KLen/VLen are explicit lengths; no NUL assumption).
 extern "C" void LLVMGlobalObjectAddStringAttribute(
