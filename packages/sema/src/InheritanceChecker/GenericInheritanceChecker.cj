@@ -107,13 +107,12 @@ public func CheckGenericTypeBoundsMapped(
     typeManager: TypeManager
 ): Unit {
     if (parent.GetGenericsCount() != child.GetGenericsCount()) {
-        // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
         Diagnose(
             diag,
             child,
             DiagKind.sema_generic_member_type_argument_different,
             args: [DiagArgument(child.identifier.Val())]
-        )
+        ).Emit()
         return
     }
     let childGeneric = child.GetGeneric()
