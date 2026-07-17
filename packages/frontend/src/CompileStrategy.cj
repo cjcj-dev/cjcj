@@ -302,9 +302,7 @@ private class FullCompileStrategyImpl {
         }
         let pkg = Package(defaultPackageName)
         for (info in fileInfos) {
-            if (!parseRealSourceIntoPackage(pkg, info[0], info[1], info[2])) {
-                success = false
-            }
+            let _ = parseRealSourceIntoPackage(pkg, info[0], info[1], info[2])
         }
         CheckPackageConsistency(pkg)
         AddCurFile(pkg)
