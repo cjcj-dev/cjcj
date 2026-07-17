@@ -34,7 +34,7 @@ public class LookupInfo {
 
 private class LookUpImpl {
     private let typeManager: TypeManager
-    private let importManager: Option<SemaImportManager>
+    public let importManager: Option<SemaImportManager>
     private let resultsWithInstTyV = ArrayList<(Option<Decl>, Option<InterfaceTy>)>()
 
     public init(typeManager: TypeManager, importManager!: Option<SemaImportManager> = None) {
@@ -851,7 +851,7 @@ private func collectResolvedImportedDeclsByName(ctx: ASTContext, node: Node, nam
 public func FieldLookup(typeManager: TypeManager, decl: Option<Decl>, fieldName: String,
     info!: LookupInfo = LookupInfo(), importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
     let results = ArrayList<Decl>()
-    let lookUpImpl = LookUpImpl(typeManager, importManager)
+    let lookUpImpl = LookUpImpl(typeManager, importManager: importManager)
     if (let Some(target) <- decl) {
         let actual = GetSpecificDecl(target)
         if (let Some(classDecl) <- (actual as ClassDecl)) {
@@ -1049,7 +1049,8 @@ public func ExtendFieldLookup(typeManager: TypeManager, file: File, ty: Option<T
     let results = ArrayList<Decl>()
     if (let Some(value) <- ty) {
         if (Ty.IsTyCorrect(value)) {
-            FieldLookupExtend(LookUpImpl(typeManager, importManager), typeManager, value, fieldName, results,
+            FieldLookupExtend(LookUpImpl(typeManager, importManager: importManager), typeManager, value,
+                fieldName, results,
                 LookupInfo(baseTy: value, file: file))
         }
     }
