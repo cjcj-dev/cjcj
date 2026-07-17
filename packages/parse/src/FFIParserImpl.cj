@@ -27,25 +27,8 @@ public open class FFIParserImpl {
         return op
     }
 
-    public func CheckInteropDecl(decl: Decl): Unit {
-        CheckAnnotations(decl.annotations, GuessScopeKind(decl), decl)
-        CheckAnnotationsConflict(decl.annotations, decl)
-        if (decl.astKind == ASTKind.FUNC_DECL || decl.astKind == ASTKind.PROP_DECL ||
-            decl.astKind == ASTKind.VAR_DECL) {
-            CheckForeignNameAnnotation(decl)
-        }
-        if (let Some(funcDecl) <- (decl as FuncDecl)) {
-            let objc = ObjC()
-            objc.CheckMirrorSignature(funcDecl, funcDecl.annotations)
-            objc.CheckInitAnnotation(funcDecl)
-            objc.CheckOptionalAnnotation(funcDecl)
-        }
-        for (member in decl.GetMemberDecls()) {
-            CheckInteropDecl(member)
-        }
-    }
-
-    public func CheckAnnotationsConflict(annos: ArrayList<Annotation>, decl: Decl): Unit {
+    // C++ anchor: cangjie_compiler/src/Parse/NativeFFI/FFIParserImpl.cpp:47-70
+    public func CheckAnnotationsConflict(annos: ArrayList<Annotation>): Unit {
         let candidates = ArrayList<Annotation>()
         for (anno in annos) {
             if (CONFLICTED_FFI_ANNOS.contains(anno.kind)) {
@@ -60,35 +43,36 @@ public open class FFIParserImpl {
         while (index < candidates.size) {
             let current = candidates[index]
             if (first.identifier.Val() != current.identifier.Val()) {
-                DiagConflictingAnnos(parser.diag, first, current, decl.identifier.Val())
-                decl.EnableAttr(Attribute.IS_BROKEN)
+                DiagConflictingAnnos(parser.diag, first, current, parser.lookahead.Value())
             }
             index++
         }
     }
 
-    public func CheckAnnotations(annos: ArrayList<Annotation>, scopeKind: ScopeKind, decl: Decl): Unit {
+    // C++ anchor: cangjie_compiler/src/Parse/NativeFFI/FFIParserImpl.cpp:72-107
+    public func CheckAnnotations(annos: ArrayList<Annotation>, scopeKind: ScopeKind): Unit {
         let java = Java()
         let objc = ObjC()
         for (anno in annos) {
             if (anno.kind == AnnotationKind.JAVA_MIRROR || anno.kind == AnnotationKind.JAVA_IMPL) {
-                java.CheckAnnotation(anno, decl)
+                java.CheckAnnotation(anno)
             } else if (anno.kind == AnnotationKind.FOREIGN_NAME) {
-                CheckForeignNameAnnoArgs(anno, decl)
-                CheckForeignNameAnnoTarget(anno, decl)
+                CheckForeignNameAnnoArgs(anno)
+                CheckForeignNameAnnoTarget(anno)
             } else if (anno.kind == AnnotationKind.FOREIGN_GETTER_NAME ||
                 anno.kind == AnnotationKind.FOREIGN_SETTER_NAME) {
-                CheckForeignGetterSetterNameAnnoArgs(anno, decl)
-                CheckForeignGetterSetterNameAnnoTarget(anno, decl)
+                CheckForeignGetterSetterNameAnnoArgs(anno)
+                CheckForeignGetterSetterNameAnnoTarget(anno)
             } else if (anno.kind == AnnotationKind.JAVA_HAS_DEFAULT) {
-                java.CheckJavaHasDefaultAnnotation(anno, decl)
+                java.CheckJavaHasDefaultAnnotation(anno)
             } else if (anno.kind == AnnotationKind.OBJ_C_MIRROR ||
                 anno.kind == AnnotationKind.OBJ_C_IMPL ||
                 anno.kind == AnnotationKind.OBJ_C_INIT ||
                 anno.kind == AnnotationKind.OBJ_C_OPTIONAL) {
-                objc.CheckAnnotation(anno, scopeKind, decl)
+                objc.CheckAnnotation(anno, scopeKind)
             }
         }
+        CheckAnnotationsConflict(annos)
     }
 
     public func CheckForeignNameAnnotation(decl: Decl): Unit {
@@ -108,19 +92,17 @@ public open class FFIParserImpl {
         }
     }
 
-    public func CheckZeroOrSingleStringLitArgAnnotation(anno: Annotation, annotationName: String, decl: Decl): Unit {
+    public func CheckZeroOrSingleStringLitArgAnnotation(anno: Annotation, annotationName: String): Unit {
         if (anno.args.isEmpty()) {
             return
         }
         if (anno.args.size > 1 || !IsLitStringArg(anno.args[0])) {
-            decl.EnableAttr(Attribute.IS_BROKEN)
             parser.DiagAnnotationMoreThanOneArgs(anno, annotationName, "'String' literal")
         }
     }
 
-    public func CheckNoArgAnnotation(anno: Annotation, annotationName: String, decl: Decl): Unit {
+    public func CheckNoArgAnnotation(anno: Annotation, annotationName: String): Unit {
         if (!anno.args.isEmpty()) {
-            decl.EnableAttr(Attribute.IS_BROKEN)
             parser.DiagAnnotationShouldNotHaveArgs(anno, annotationName)
         }
     }
@@ -144,35 +126,38 @@ public open class FFIParserImpl {
         objc.CheckMirrorSignature(decl, annos)
     }
 
-    private func CheckForeignNameAnnoArgs(anno: Annotation, decl: Decl): Unit {
+    private func CheckForeignNameAnnoArgs(anno: Annotation): Unit {
         if (anno.args.size != 1 || !IsLitStringArg(anno.args[0])) {
-            decl.EnableAttr(Attribute.IS_BROKEN)
             parser.DiagAnnotationExpectsOneArgument(anno, "@ForeignName", "'String' literal")
         }
     }
 
-    private func CheckForeignNameAnnoTarget(anno: Annotation, decl: Decl): Unit {
-        if (decl.astKind == ASTKind.FUNC_DECL || decl.astKind == ASTKind.PROP_DECL ||
-            decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.PRIMARY_CTOR_DECL) {
+    private func CheckForeignNameAnnoTarget(anno: Annotation): Unit {
+        if (parser.SeeingAny([TokenKind.FUNC, TokenKind.PROP, TokenKind.INIT, TokenKind.LET,
+            TokenKind.VAR, TokenKind.CONST])) {
             return
         }
-        decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.DiagUnexpectedAnnoOnKind(anno, decl.keywordPos, anno.identifier.Val(), decl.astKind)
+        if (anno.kind == AnnotationKind.FOREIGN_NAME) {
+            parser.DiagUnexpectedAnnoOn(
+                anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
+        }
     }
 
-    private func CheckForeignGetterSetterNameAnnoArgs(anno: Annotation, decl: Decl): Unit {
+    private func CheckForeignGetterSetterNameAnnoArgs(anno: Annotation): Unit {
         if (anno.args.size != 1 || !IsLitStringArg(anno.args[0]) || !anno.args[0].name.Empty()) {
-            decl.EnableAttr(Attribute.IS_BROKEN)
             parser.DiagAnnotationExpectsOneArgument(anno, "@" + anno.identifier.Val(), "'String' literal")
         }
     }
 
-    private func CheckForeignGetterSetterNameAnnoTarget(anno: Annotation, decl: Decl): Unit {
-        if (decl.astKind == ASTKind.PROP_DECL) {
+    private func CheckForeignGetterSetterNameAnnoTarget(anno: Annotation): Unit {
+        if (parser.Seeing(TokenKind.PROP)) {
             return
         }
-        decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.DiagUnexpectedAnnoOnKind(anno, decl.keywordPos, anno.identifier.Val(), decl.astKind)
+        if (anno.kind == AnnotationKind.FOREIGN_GETTER_NAME ||
+            anno.kind == AnnotationKind.FOREIGN_SETTER_NAME) {
+            parser.DiagUnexpectedAnnoOn(
+                anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
+        }
     }
 }
 
@@ -194,15 +179,4 @@ public func IsLitStringArg(arg: FuncArg): Bool {
         }
     }
     return false
-}
-
-public func GuessScopeKind(decl: Decl): ScopeKind {
-    if (let Some(outer) <- decl.outerDecl) {
-        if (outer.astKind == ASTKind.CLASS_DECL) { return ScopeKind.CLASS_BODY }
-        if (outer.astKind == ASTKind.INTERFACE_DECL) { return ScopeKind.INTERFACE_BODY }
-        if (outer.astKind == ASTKind.STRUCT_DECL) { return ScopeKind.STRUCT_BODY }
-        if (outer.astKind == ASTKind.ENUM_DECL) { return ScopeKind.ENUM_BODY }
-        if (outer.astKind == ASTKind.EXTEND_DECL) { return ScopeKind.EXTEND_BODY }
-    }
-    return ScopeKind.TOPLEVEL
 }

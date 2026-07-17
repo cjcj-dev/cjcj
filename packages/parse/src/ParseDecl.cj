@@ -366,6 +366,7 @@ extend ParserImpl {
         ParseAnnotations(annos)
         ParseModifiers(modifiers)
         CheckOverflowAnnotation(annos, scopeKind)
+        FFIParserImpl(this).CheckAnnotations(annos, scopeKind)
         CheckAnnotationAnno(annos, modifiers)
         if (SeeingEnumConstructor(scopeKind)) {
             return ParseEnumConstructor(modifiers, annos)

@@ -1019,7 +1019,6 @@ extend ParserImpl {
     }
 
     public func FinalizeDeclTree(decl: Decl): Unit {
-        FFIParserImpl(this).CheckInteropDecl(decl)
         MPParserImpl(this).CheckCJMPDecl(decl)
     }
 }

@@ -10,14 +10,14 @@ public class JFFIParserImpl {
         this.parser = parser
     }
 
-    public func CheckAnnotation(anno: Annotation, decl: Decl): Unit {
+    public func CheckAnnotation(anno: Annotation): Unit {
         if (anno.kind == AnnotationKind.JAVA_MIRROR) {
-            CheckMirrorAnnoArgs(anno, decl)
-            CheckMirrorAnnoTarget(anno, decl)
+            CheckMirrorAnnoArgs(anno)
+            CheckMirrorAnnoTarget(anno)
         } else {
             CJC_ASSERT(anno.kind == AnnotationKind.JAVA_IMPL)
-            CheckImplAnnoArgs(anno, decl)
-            CheckImplAnnoTarget(anno, decl)
+            CheckImplAnnoArgs(anno)
+            CheckImplAnnoTarget(anno)
         }
     }
 
@@ -59,11 +59,12 @@ public class JFFIParserImpl {
         }
     }
 
-    public func CheckJavaHasDefaultAnnotation(anno: Annotation, decl: Decl): Unit {
-        if (decl.astKind == ASTKind.FUNC_DECL) {
+    public func CheckJavaHasDefaultAnnotation(anno: Annotation): Unit {
+        if (parser.Seeing(TokenKind.FUNC)) {
             return
         }
-        parser.DiagUnexpectedAnnoOnKind(anno, decl.keywordPos, anno.identifier.Val(), decl.astKind)
+        parser.DiagUnexpectedAnnoOn(
+            anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
     }
 
     public func IsAbstractFunction(fd: FuncDecl, outerDecl: Decl): Bool {
@@ -114,29 +115,31 @@ public class JFFIParserImpl {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_java_impl_cannot_have_static_init, node).Emit()
     }
 
-    private func CheckMirrorAnnoArgs(anno: Annotation, decl: Decl): Unit {
-        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@JavaMirror", decl)
+    private func CheckMirrorAnnoArgs(anno: Annotation): Unit {
+        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@JavaMirror")
     }
 
-    private func CheckImplAnnoArgs(anno: Annotation, decl: Decl): Unit {
-        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@JavaImpl", decl)
+    private func CheckImplAnnoArgs(anno: Annotation): Unit {
+        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@JavaImpl")
     }
 
-    private func CheckMirrorAnnoTarget(anno: Annotation, decl: Decl): Unit {
-        if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL) {
+    private func CheckMirrorAnnoTarget(anno: Annotation): Unit {
+        if (parser.SeeingAny([TokenKind.CLASS, TokenKind.INTERFACE])) {
             return
         }
         if (anno.kind == AnnotationKind.JAVA_MIRROR) {
-            parser.DiagUnexpectedAnnoOnKind(anno, decl.keywordPos, anno.identifier.Val(), decl.astKind)
+            parser.DiagUnexpectedAnnoOn(
+                anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
         }
     }
 
-    private func CheckImplAnnoTarget(anno: Annotation, decl: Decl): Unit {
-        if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL) {
+    private func CheckImplAnnoTarget(anno: Annotation): Unit {
+        if (parser.SeeingAny([TokenKind.CLASS, TokenKind.INTERFACE])) {
             return
         }
         if (anno.kind == AnnotationKind.JAVA_IMPL) {
-            parser.DiagUnexpectedAnnoOnKind(anno, decl.begin, anno.identifier.Val(), decl.astKind)
+            parser.DiagUnexpectedAnnoOn(
+                anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
         }
     }
 }

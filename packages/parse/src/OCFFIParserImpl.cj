@@ -10,20 +10,20 @@ public class OCFFIParserImpl {
         this.parser = parser
     }
 
-    public func CheckAnnotation(anno: Annotation, scopeKind: ScopeKind, decl: Decl): Unit {
+    public func CheckAnnotation(anno: Annotation, scopeKind: ScopeKind): Unit {
         match (anno.kind) {
             case AnnotationKind.OBJ_C_MIRROR =>
-                CheckMirrorAnnoArgs(anno, decl)
-                CheckMirrorAnnoTarget(anno, scopeKind, decl)
+                CheckMirrorAnnoArgs(anno)
+                CheckMirrorAnnoTarget(anno, scopeKind)
             case AnnotationKind.OBJ_C_IMPL =>
-                CheckImplAnnoArgs(anno, decl)
-                CheckImplAnnoTarget(anno, decl)
+                CheckImplAnnoArgs(anno)
+                CheckImplAnnoTarget(anno)
             case AnnotationKind.OBJ_C_INIT =>
-                CheckInitAnnoArgs(anno, decl)
-                CheckInitAnnoTarget(anno, decl)
+                CheckInitAnnoArgs(anno)
+                CheckInitAnnoTarget(anno)
             case AnnotationKind.OBJ_C_OPTIONAL =>
-                CheckOptionalAnnoArgs(anno, decl)
-                CheckOptionalAnnoTarget(anno, decl)
+                CheckOptionalAnnoArgs(anno)
+                CheckOptionalAnnoTarget(anno)
             case _ => CJC_ABORT()
         }
     }
@@ -214,69 +214,64 @@ public class OCFFIParserImpl {
             node.identifier.Val()).Emit()
     }
 
-    private func CheckMirrorAnnoArgs(anno: Annotation, decl: Decl): Unit {
-        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@ObjCMirror", decl)
+    private func CheckMirrorAnnoArgs(anno: Annotation): Unit {
+        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@ObjCMirror")
     }
 
-    private func CheckImplAnnoArgs(anno: Annotation, decl: Decl): Unit {
-        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@ObjCImpl", decl)
+    private func CheckImplAnnoArgs(anno: Annotation): Unit {
+        FFIParserImpl(parser).CheckZeroOrSingleStringLitArgAnnotation(anno, "@ObjCImpl")
     }
 
-    private func CheckInitAnnoArgs(anno: Annotation, decl: Decl): Unit {
-        FFIParserImpl(parser).CheckNoArgAnnotation(anno, "@ObjCInit", decl)
+    private func CheckInitAnnoArgs(anno: Annotation): Unit {
+        FFIParserImpl(parser).CheckNoArgAnnotation(anno, "@ObjCInit")
     }
 
-    private func CheckOptionalAnnoArgs(anno: Annotation, decl: Decl): Unit {
-        FFIParserImpl(parser).CheckNoArgAnnotation(anno, "@ObjCOptional", decl)
+    private func CheckOptionalAnnoArgs(anno: Annotation): Unit {
+        FFIParserImpl(parser).CheckNoArgAnnotation(anno, "@ObjCOptional")
     }
 
-    private func CheckMirrorAnnoTarget(anno: Annotation, scopeKind: ScopeKind, decl: Decl): Unit {
-        if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL) {
+    private func CheckMirrorAnnoTarget(anno: Annotation, scopeKind: ScopeKind): Unit {
+        if (parser.SeeingAny([TokenKind.CLASS, TokenKind.INTERFACE])) {
             return
         }
-        if (decl.astKind == ASTKind.FUNC_DECL && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
+        if (parser.Seeing(TokenKind.FUNC) && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
             return
         }
-        decl.EnableAttr(Attribute.IS_BROKEN)
-        let keyword = match (decl.astKind) {
-            case ASTKind.FUNC_DECL => "func"
-            case ASTKind.MAIN_DECL => "main"
-            case ASTKind.MACRO_DECL => "macro"
-            case ASTKind.CLASS_DECL => "class"
-            case ASTKind.EXTEND_DECL => "extend"
-            case ASTKind.INTERFACE_DECL => "interface"
-            case ASTKind.STRUCT_DECL => "struct"
-            case ASTKind.ENUM_DECL => "enum"
-            case ASTKind.TYPE_ALIAS_DECL => "type"
-            case ASTKind.PROP_DECL => "prop"
-            case _ => "var"
+        if (anno.kind == AnnotationKind.OBJ_C_MIRROR) {
+            let qualifier = if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) { "" } else { "member or local " }
+            parser.DiagUnexpectedAnnoOn(
+                anno, parser.lookahead.Begin(), anno.identifier.Val(), qualifier + parser.lookahead.Value())
         }
-        let qualifier = if (scopeKind == ScopeKind.TOPLEVEL) { "" } else { "member or local " }
-        parser.DiagUnexpectedAnnoOn(anno, decl.begin, anno.identifier.Val(), qualifier + keyword)
     }
 
-    private func CheckImplAnnoTarget(anno: Annotation, decl: Decl): Unit {
-        if (decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL) {
+    private func CheckImplAnnoTarget(anno: Annotation): Unit {
+        if (parser.SeeingAny([TokenKind.CLASS, TokenKind.INTERFACE])) {
             return
         }
-        decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.DiagUnexpectedAnnoOnKind(anno, decl.begin, anno.identifier.Val(), decl.astKind)
+        if (anno.kind == AnnotationKind.OBJ_C_IMPL) {
+            parser.DiagUnexpectedAnnoOn(
+                anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
+        }
     }
 
-    private func CheckInitAnnoTarget(anno: Annotation, decl: Decl): Unit {
-        if (decl.astKind == ASTKind.FUNC_DECL) {
+    private func CheckInitAnnoTarget(anno: Annotation): Unit {
+        if (parser.Seeing(TokenKind.FUNC)) {
             return
         }
-        decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.DiagUnexpectedAnnoOnKind(anno, decl.begin, anno.identifier.Val(), decl.astKind)
+        if (anno.kind == AnnotationKind.OBJ_C_INIT) {
+            parser.DiagUnexpectedAnnoOn(
+                anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
+        }
     }
 
-    private func CheckOptionalAnnoTarget(anno: Annotation, decl: Decl): Unit {
-        if (decl.astKind == ASTKind.FUNC_DECL) {
+    private func CheckOptionalAnnoTarget(anno: Annotation): Unit {
+        if (parser.Seeing(TokenKind.FUNC)) {
             return
         }
-        decl.EnableAttr(Attribute.IS_BROKEN)
-        parser.DiagUnexpectedAnnoOnKind(anno, decl.begin, anno.identifier.Val(), decl.astKind)
+        if (anno.kind == AnnotationKind.OBJ_C_OPTIONAL) {
+            parser.DiagUnexpectedAnnoOn(
+                anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
+        }
     }
 
     private func DiagObjCMirrorCannotBeSealed(node: Node): Unit {
