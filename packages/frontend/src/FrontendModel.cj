@@ -6308,7 +6308,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 if (importSpec.IsImportMulti() || importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
                     continue
                 }
-                let names = importSpec.content.GetPossiblePackageNames()
+                let names = GetPossibleCjoNames(importSpec)
                 if (names.isEmpty()) {
                     continue
                 }
@@ -7013,6 +7013,20 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             return packageNamePair[0]
         }
         return ""
+    }
+
+    public func GetPossibleCjoNames(importSpec: ImportSpec): ArrayList<String> {
+        CJC_ASSERT(importSpec.content.kind != ImportKind.IMPORT_MULTI)
+        let mapped = GetPackageNameByImport(importSpec)
+        let out = ArrayList<String>()
+        if (!mapped.isEmpty()) {
+            out.add(FileUtil.ToCjoFileName(mapped))
+            return out
+        }
+        for (name in importSpec.content.GetPossiblePackageNames()) {
+            out.add(FileUtil.ToCjoFileName(name))
+        }
+        return out
     }
 
     public func IsImportPackage(importSpec: ImportSpec): Bool {
