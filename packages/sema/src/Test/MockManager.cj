@@ -3,7 +3,7 @@ package cjcj::sema.Test
 import std.collection.*
 import cjcj::ast.*
 import cjcj::modules.SemaImportManager
-import cjcj::sema.{CreateInitCall, CreateThrowException, FindInitDecl, GetMemberDecl}
+import cjcj::sema.{AddArrayLitConstructor, CreateInitCall, CreateThrowException, FindInitDecl, GetMemberDecl}
 import cjcj::sema.TypeManager
 import cjcj::utils.{CJC_ASSERT, DynamicCast, GetRootPackageName, OBJECT_NAME, V_COMPILER}
 
@@ -530,6 +530,22 @@ public class MockManager {
         let initDecl = FindInitDecl(parameterInfoDecl.getOrThrow(), typeManager, valueArgs)
         CJC_ASSERT(initDecl.isSome())
         return CreateInitCall(initDecl.getOrThrow(), valueArgs, curFile)
+    }
+
+    // C++: Sema/Test/MockManager.cpp:870-883.
+    private func CreateParamsInfo(decl: FuncDecl, curFile: File): ArrayLit {
+        let paramInfoArgs = ArrayList<Expr>()
+        var paramNumber: Int64 = 1
+        for (param in decl.funcBody.getOrThrow().paramLists[0].params) {
+            paramInfoArgs.add(CreateParamInfo(param, paramNumber, curFile))
+            paramNumber++
+        }
+        let paramInfoArray = CreateArrayLit(paramInfoArgs,
+            typeManager.GetStructTy(mockUtils.arrayDecl.getOrThrow(),
+                [parameterInfoDecl.getOrThrow().GetTy().getOrThrow()]))
+        AddArrayLitConstructor(paramInfoArray)
+        paramInfoArray.curFile = curFile
+        return paramInfoArray
     }
 
     // C++: Sema/Test/MockManager.cpp:972-1023.
