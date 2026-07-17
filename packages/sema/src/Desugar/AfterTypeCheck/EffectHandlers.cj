@@ -842,7 +842,6 @@ private func CreateFrame(typeManager: TypeManager, importManager: SemaImportMana
 
     let lambdaVar = CreateVarDecl(FRAME_LAMBDA_VAR_NAME, tryLambda, None)
     ctx.AddDeclName(Names(FRAME_LAMBDA_VAR_NAME, lambdaVar.scopeName), lambdaVar)
-    CopyGeneratedPosition(tryLambda, lambdaVar)
     nodes.add(lambdaVar)
 
     let frameRef = CreateRefExpr(CLASS_IMMEDIATE_FRAME)
@@ -850,7 +849,7 @@ private func CreateFrame(typeManager: TypeManager, importManager: SemaImportMana
     frameRef.ref.target = frameDecl
     frameRef.SetTy(frameTy)
     frameRef.instTys.add(tryReturnTy)
-    CopyGeneratedPosition(tryLambda, frameRef)
+    CopyNodeScopeInfo(frameRef, tryLambda)
     let frameInit = CreateMemberAccess(frameRef, INIT_METHOD_NAME)
     AddTargetIfFunc(frameInit)
     let frameArgs = ArrayList<FuncArg>()
