@@ -567,6 +567,46 @@ public class TestManager {
         }
     }
 
+    // C++: Sema/Test/TestManager.cpp:517-563.
+    public func ReplaceCallsToForeignFunctions(pkg: Package): Unit {
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (let Some(declNode) <- (node as FuncDecl)) {
+                if (declNode.TestAttr(Attribute.GENERATED_TO_MOCK)) {
+                    return VisitAction.SKIP_CHILDREN
+                }
+            }
+            let refNode = node as RefExpr
+            if (let None <- refNode) {
+                return VisitAction.WALK_CHILDREN
+            }
+            let refExpr = refNode.getOrThrow()
+            let funcDecl = if (let Some(target) <- refExpr.ref.target) { target as FuncDecl } else { None }
+            if (let None <- funcDecl) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            let foreignDecl = funcDecl.getOrThrow()
+            if (!foreignDecl.TestAttr(Attribute.FOREIGN)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            let accessorDecl = mockUtils.getOrThrow().FindMockGlobalDecl(
+                foreignDecl, MockUtils.GetForeignAccessorName(foreignDecl))
+            if (let None <- accessorDecl) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            let accessorFunc = (accessorDecl.getOrThrow() as FuncDecl)
+            CJC_ASSERT(accessorFunc.isSome())
+            refExpr.ref = Reference(accessorFunc.getOrThrow().identifier)
+            refExpr.ref.target = accessorFunc.getOrThrow()
+            if (let Some(callOrPattern) <- refExpr.callOrPattern) {
+                if (let Some(callNode) <- (callOrPattern as CallExpr)) {
+                    callNode.resolvedFunction = accessorFunc.getOrThrow()
+                }
+            }
+            return VisitAction.SKIP_CHILDREN
+        })
+        let _ = walker.Walk()
+    }
+
     // C++: Sema/Test/TestManager.cpp:733-754.
     private func CollectInternalDeclUsages(pkg: Package): Unit {
         let walker = Walker(pkg, visitPre: { node: Node =>
