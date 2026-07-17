@@ -251,7 +251,10 @@ private func IsFinalRuntimeTy(ty: Ty): Bool {
     return false
 }
 
-private func IsNeedRuntimeCheckForPattern(typeManager: TypeManager, srcTy: Ty, targetTy: Ty): Bool {
+private func IsNeedRuntimeCheck(typeManager: TypeManager, srcTy: Ty, targetTy: Ty): Bool {
+    if (targetTy.IsNothing()) {
+        return false
+    }
     if (IsFinalRuntimeTy(srcTy) && IsFinalRuntimeTy(targetTy)) {
         if (let Some(srcDecl) <- RuntimeDeclOfTy(srcTy)) {
             if (let Some(targetDecl) <- RuntimeDeclOfTy(targetTy)) {
@@ -669,7 +672,7 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
                 builder.Emit()
             }
         }
-        pattern.needRuntimeTypeCheck = IsNeedRuntimeCheckForPattern(typeManager, target, patternTy)
+        pattern.needRuntimeTypeCheck = IsNeedRuntimeCheck(typeManager, target, patternTy)
         pattern.matchBeforeRuntime = false
     }
     if (!ChkPattern(typeManager, ctx, patternTy, pattern.pattern.getOrThrow(), exprChecker: exprChecker,

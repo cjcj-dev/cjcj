@@ -46,6 +46,9 @@ private func isFinalRuntimeTy(ty: Ty): Bool {
 }
 
 public func IsNeedRuntimeCheck(typeManager: TypeManager, srcTy: Ty, targetTy: Ty): Bool {
+    if (targetTy.IsNothing()) {
+        return false
+    }
     if (isFinalRuntimeTy(srcTy) && isFinalRuntimeTy(targetTy)) {
         if (let Some(srcDecl) <- declOfTy(srcTy)) {
             if (let Some(targetDecl) <- declOfTy(targetTy)) {
