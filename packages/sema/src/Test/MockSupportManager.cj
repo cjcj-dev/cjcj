@@ -502,6 +502,34 @@ public class MockSupportManager {
         decl.EnableAttr(Attribute.MOCK_SUPPORTED)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:478-505.
+    public func GenerateSpyCallMarker(package: Package): Unit {
+        if (package.files.isEmpty()) {
+            return
+        }
+
+        let file = package.files[0]
+        if (file.isCommon || file.isSpecific) {
+            return
+        }
+
+        if (mockUtils.FindGlobalDecl<VarDecl>(file,
+            MockUtils.spyCallMarkerVarName + MockUtils.mockAccessorSuffix).isSome()) {
+            return
+        }
+
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let type = (MockUtils.CreateType(boolTy) as PrimitiveType).getOrThrow()
+        type.kind = TypeKind.TYPE_BOOLEAN
+        type.str = boolTy.String()
+        let varDecl = CreateVarDecl(
+            MockUtils.spyCallMarkerVarName + MockUtils.mockAccessorSuffix,
+            Some(CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy, true)), Some(type))
+        varDecl.isVar = true
+        varDecl.EnableAttr(Attribute.GLOBAL)
+        mockUtils.AttachGeneratedDecl(varDecl, package)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
