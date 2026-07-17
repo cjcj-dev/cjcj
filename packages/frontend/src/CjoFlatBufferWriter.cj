@@ -5,6 +5,7 @@ import cjcj::ast.DiagnoseRefactor
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.{CANGJIE_VERSION, DiagKindRefactor}
 import cjcj::basic.Linkage
+import cjcj::mangle.ASTMangler
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 import cjcj::modules.SemaCjoManager
@@ -754,7 +755,12 @@ public class ASTWriter {
         let identifier = builder.CreateString(decl.identifier.Val())
         let mangledName = builder.CreateString(SerializedMangledName(decl))
         let exportId = builder.CreateString(decl.exportId)
-        let rawMangle = builder.CreateString(decl.rawMangleName)
+        let rawMangleName = if (!exportForIncr && decl.TestAttr(Attribute.DEFAULT) && decl.rawMangleName.isEmpty()) {
+            ASTMangler(decl.fullPackageName).Mangle(decl)
+        } else {
+            decl.rawMangleName
+        }
+        let rawMangle = builder.CreateString(rawMangleName)
         let generic = SaveGeneric(decl)
         let genericDecl = if (ShouldEmitGenericDecl(decl)) { SaveGenericDeclIndex(decl) } else { 0u32 }
         let attrs = decl.GetAttrs().Clone()
