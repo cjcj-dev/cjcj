@@ -291,17 +291,12 @@ private func collectStaticMembers(decl: InheritableDecl, out: ArrayList<Decl>): 
     }
 }
 
-private func getInstDiagNode(expr: NameReferenceExpr, instTy: Ty): Node {
-    for (typeArg in expr.GetTypeArgs()) {
-        if (!typeArg.TestAttr(Attribute.COMPILER_ADD)) {
-            if (let Some(typeArgTy) <- typeArg.GetTy()) {
-                if (SameTy(typeArgTy, instTy)) {
-                    return typeArg
-                }
-            }
-        }
+private func GetTyArgsIndexMap(typeArgs: ArrayList<Ty>): HashMap<Ty, Int64> {
+    let indexMap = HashMap<Ty, Int64>()
+    for (idx in 0..typeArgs.size) {
+        indexMap[typeArgs[idx]] = idx
     }
-    return expr
+    return indexMap
 }
 
 private func emitIncompleteInstantiation(diag: Option<BasicDiagnosticEngine>, node: Node,
@@ -499,6 +494,8 @@ extend TypeCheckerImpl {
         if (typeMapping.IsEmpty()) {
             return true
         }
+        let indexMap = GetTyArgsIndexMap(expr.instTys)
+        let typeArgs = expr.GetTypeArgs()
         for ((tyVar, ty) in typeMapping.entries) {
             let genericTy = tyVar.value
             var satisfiesConstraints = true
@@ -537,7 +534,8 @@ extend TypeCheckerImpl {
             }
             let isInstByNothing = ty.IsNothing()
             if (isIncompleteInterface || isInstByNothing) {
-                emitIncompleteInstantiation(diag, getInstDiagNode(expr, ty), genericTy, ty, isInstByNothing)
+                let diagNode: Node = if (typeArgs.isEmpty()) { expr } else { typeArgs[indexMap[ty]] }
+                emitIncompleteInstantiation(diag, diagNode, genericTy, ty, isInstByNothing)
                 return false
             }
         }
