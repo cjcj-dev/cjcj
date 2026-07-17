@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::sema.GetUsableGetterForProperty
 import cjcj::sema.GetUsableSetterForProperty
+import cjcj::sema.TypeManager
 
 public class DeclsToPrepare {
     public let functions: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
@@ -152,9 +153,15 @@ private func ContainsDecl(decls: ArrayList<Decl>, target: Decl): Bool {
 }
 
 public class MockSupportManager {
+    private let typeManager: TypeManager
+    private let mockUtils: MockUtils
     private let usedInternalDecls: ArrayList<Decl> = ArrayList<Decl>()
 
-    public init() {}
+    // C++: Sema/Test/MockSupportManager.cpp:49-53.
+    public init(typeManager: TypeManager, mockUtils: MockUtils) {
+        this.typeManager = typeManager
+        this.mockUtils = mockUtils
+    }
 
     public static func IsDeclOpenToMock(decl: Decl): Bool {
         return decl.TestAttr(Attribute.OPEN) && decl.TestAttr(Attribute.OPEN_TO_MOCK)

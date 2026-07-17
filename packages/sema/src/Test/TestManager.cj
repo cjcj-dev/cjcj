@@ -218,7 +218,7 @@ public class TestManager {
         // C++: Sema/Test/TestManager.cpp:74.
         mockUtils = Some(MockUtils(importManager, typeManager, ctx.mangler))
         if (mockCompatible) {
-            mockSupportManager = Some(MockSupportManager())
+            mockSupportManager = Some(MockSupportManager(typeManager, mockUtils.getOrThrow()))
         }
         if (mockCompatible && testEnabled) {
             if (let Some(utils) <- mockUtils) {
