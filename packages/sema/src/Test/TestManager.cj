@@ -477,6 +477,24 @@ public class TestManager {
         }
     }
 
+    // C++: Sema/Test/TestManager.cpp:354-371.
+    public func HandleEnsurePreparedToMock(pkg: Package): Unit {
+        let inLambdaExprs = ArrayList<Expr>()
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (!node.IsSamePackage(pkg)) {
+                return VisitAction.WALK_CHILDREN
+            }
+            if (let Some(lambda) <- (node as LambdaExpr)) {
+                return CollectToMockAnnotatedLambdas(lambda, inLambdaExprs)
+            }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+        for (expr in inLambdaExprs) {
+            mockManager.getOrThrow().HandleMockAnnotatedLambdaValue(expr)
+        }
+    }
+
     // C++: Sema/Test/TestManager.cpp:733-754.
     private func CollectInternalDeclUsages(pkg: Package): Unit {
         let walker = Walker(pkg, visitPre: { node: Node =>
