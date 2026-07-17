@@ -7,7 +7,7 @@ import cjcj::sema.GetUsableSetterForProperty
 import cjcj::sema.{GenerateTypeMapping, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::mangle.ManglerContext
-import cjcj::utils.{CJC_ASSERT, TEST_ENTRY_NAME, V_COMPILER}
+import cjcj::utils.{CJC_ABORT_WITH_MSG, CJC_ASSERT, TEST_ENTRY_NAME, V_COMPILER}
 
 private let OPTION_VALUE_CTOR: String = "Some"
 private let OPTION_NONE_CTOR: String = "None"
@@ -1225,20 +1225,21 @@ public class MockSupportManager {
 
     private func GenerateAccessorCallForField(baseExpr: Option<Expr>, memberDecl: Decl,
         memberRefTy: Ty, kind: AccessorKind, curFile: Option<File>): Option<CallExpr> {
-        let accessorDecl = mockUtils.FindAccessorForMemberAccess(
-            memberDecl.outerDecl.getOrThrow().GetTy(), Some(memberDecl), kind) as Option<FuncDecl>
-        if (accessorDecl.isNone()) {
+        let foundAccessor = mockUtils.FindAccessorForMemberAccess(
+            memberDecl.outerDecl.getOrThrow().GetTy(), Some(memberDecl), kind)
+        if (foundAccessor.isNone()) {
             return None
         }
+        let accessorDecl = (foundAccessor.getOrThrow() as FuncDecl).getOrThrow()
 
         let accessorCall = CallExpr()
         let nameRefExpr: NameReferenceExpr = if (let Some(base) <- baseExpr) {
-            CreateMemberAccess(base, accessorDecl.getOrThrow())
+            CreateMemberAccess(base, accessorDecl)
         } else {
-            CreateRefExpr(accessorDecl.getOrThrow())
+            CreateRefExpr(accessorDecl)
         }
         nameRefExpr.curFile = curFile
-        nameRefExpr.SetTarget(accessorDecl.getOrThrow())
+        nameRefExpr.SetTarget(Some(accessorDecl))
         nameRefExpr.callOrPattern = accessorCall
 
         if (kind == AccessorKind.FIELD_GETTER || kind == AccessorKind.STATIC_FIELD_GETTER) {
@@ -1249,10 +1250,10 @@ public class MockSupportManager {
                 [memberRefTy], TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
             accessorCall.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
         } else {
-            CJC_ABORT()
+            CJC_ABORT_WITH_MSG("Unhadled accessor kind")
         }
 
-        accessorCall.resolvedFunction = accessorDecl.getOrThrow()
+        accessorCall.resolvedFunction = accessorDecl
         accessorCall.baseFunc = nameRefExpr
         accessorCall.callKind = CallKind.CALL_DECLARED_FUNCTION
         accessorCall.curFile = curFile
