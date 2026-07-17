@@ -681,6 +681,25 @@ public class MockSupportManager {
         body.body.add(spyCallMarkerMatch, at: 0)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:661-676.
+    public func PrepareToSpy(decl: Decl): Unit {
+        let classLikeDecl = decl as ClassLikeDecl
+        if (classLikeDecl.isNone() ||
+            (!classLikeDecl.getOrThrow().TestAttr(Attribute.MOCK_SUPPORTED) &&
+                (classLikeDecl.getOrThrow() as InterfaceDecl).isNone())) {
+            return
+        }
+
+        let spiedObjectDecl = GenerateSpiedObjectVar(decl)
+        for (member in classLikeDecl.getOrThrow().GetMemberDecls()) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (!funcDecl.IsFinalizer()) {
+                    GenerateSpyCallHandler(funcDecl, spiedObjectDecl)
+                }
+            }
+        }
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
