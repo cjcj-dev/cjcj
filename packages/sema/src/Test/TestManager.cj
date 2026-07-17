@@ -580,7 +580,9 @@ public class TestManager {
                 return VisitAction.WALK_CHILDREN
             }
             let refExpr = refNode.getOrThrow()
-            let funcDecl = if (let Some(target) <- refExpr.ref.target) { target as FuncDecl } else { None }
+            let funcDecl: Option<FuncDecl> = if (let Some(target) <- refExpr.ref.target) {
+                target as FuncDecl
+            } else { None }
             if (let None <- funcDecl) {
                 return VisitAction.SKIP_CHILDREN
             }
