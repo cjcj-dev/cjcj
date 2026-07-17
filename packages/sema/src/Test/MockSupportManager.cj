@@ -560,7 +560,8 @@ public class MockSupportManager {
         }
 
         let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
-        let typeNode = (MockUtils.CreateType(boolTy) as PrimitiveType).getOrThrow()
+        let typeNode = PrimitiveType()
+        typeNode.SetTy(boolTy)
         typeNode.kind = TypeKind.TYPE_BOOLEAN
         typeNode.str = boolTy.String()
         let varDecl = CreateVarDecl(
