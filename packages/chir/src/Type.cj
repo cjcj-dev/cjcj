@@ -1777,6 +1777,10 @@ public class StructType <: CustomType {
         super(TypeKind.TYPE_STRUCT, def, typeArgs)
     }
 
+    public override func ToString(): String {
+        return "Struct-" + def.GetIdentifierWithoutPrefix() + TypeVecToString("<", argTys, ">")
+    }
+
     public func GetStructDef(): StructDef {
         if (let Some(structDef) <- (def as StructDef)) {
             return structDef
