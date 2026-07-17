@@ -712,7 +712,7 @@ public class MockManager {
         constructorDecl.EnableAttr(Attribute.IN_CLASSLIKE)
 
         let constructorParamLists = ArrayList<FuncParamList>()
-        constructorParamLists.add(CreateFuncParamList(params))
+        constructorParamLists.add(CreateFuncParamList(params, None))
 
         let funcBody = FuncBody()
         funcBody.SetTy(constructorDecl.GetTy().getOrThrow())
