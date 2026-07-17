@@ -140,8 +140,8 @@ public func ExecuteFrontendWithResult(
         let _ = instance.UpdateAndWriteCachedInfoToDisk()
         return FrontendExecutionResult(0, driverOptions: driverOptions)
     }
-    return FrontendExecutionResult(1)
     }
+    return FrontendExecutionResult(1)
 }
 
 public func ExecuteFrontend(
