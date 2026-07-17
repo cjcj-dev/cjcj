@@ -1475,6 +1475,26 @@ public class MockManager {
         }
     }
 
+    // C++: Sema/Test/MockManager.cpp:1628-1646.
+    private func HandleMockAnnotatedLambdaWithRefExpr(
+        refExpr: RefExpr, injectTo: Expr): Unit {
+        let foundTarget = refExpr.GetTarget()
+        CJC_NULLPTR_CHECK(foundTarget)
+        let target = (foundTarget.getOrThrow() as VarDecl).getOrThrow()
+        CJC_ASSERT(target.IsStaticOrGlobal())
+        let targetDecl: Decl = target
+        let getterDecl = mockUtils.FindAccessor(None, Some(targetDecl),
+            AccessorKind.TOP_LEVEL_VARIABLE_GETTER)
+        CJC_NULLPTR_CHECK(getterDecl)
+        GenerateCallHandlerForStaticDecl(getterDecl.getOrThrow(), injectTo)
+        if (target.isVar) {
+            let setter = mockUtils.FindAccessor(None, Some(targetDecl),
+                AccessorKind.TOP_LEVEL_VARIABLE_SETTER)
+            CJC_NULLPTR_CHECK(setter)
+            GenerateCallHandlerForStaticDecl(setter.getOrThrow(), injectTo)
+        }
+    }
+
     // C++: Sema/Test/MockManager.cpp:1204-1238.
     private func CreateMockedProp(originalProp: PropDecl, mockedDecl: ClassDecl,
         classGenericSubsts: ArrayList<TypeSubst>): Option<PropDecl> {
