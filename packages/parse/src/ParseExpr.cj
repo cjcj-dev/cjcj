@@ -354,7 +354,6 @@ extend ParserImpl {
             } else if (Seeing(TokenKind.QUEST) && !SeeingCombinator([TokenKind.QUEST, TokenKind.QUEST])) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_character_after, Peek().Begin(),
                     "'.', '(', '[', '{' or '?'", Peek().Value()).Emit()
-                Next()
                 break
             }
             if (!newlineSkipped && Skip(TokenKind.LPAREN)) {
