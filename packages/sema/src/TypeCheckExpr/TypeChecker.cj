@@ -1085,16 +1085,10 @@ public class TypeChecker {
         } else {
             TypeCheckerImpl(ci: ci, typeManager: tm)
         }
-        mpImpl = if (let Some(diag) <- impl.diag) {
-            MPTypeCheckerImpl(impl.typeManager, diag)
+        mpImpl = if (let Some(instance) <- impl.ci) {
+            MPTypeCheckerImpl(instance)
         } else {
             MPTypeCheckerImpl(impl.typeManager)
-        }
-        if (let Some(instance) <- impl.ci) {
-            let opts = instance.globalOptions
-            mpImpl.compileCommon = opts.outputMode == OptionOutputMode.CHIR
-            mpImpl.compilePlatform = !opts.commonPartCjos.isEmpty()
-            mpImpl.severalParents = opts.commonPartCjos.size > 1
         }
     }
 
