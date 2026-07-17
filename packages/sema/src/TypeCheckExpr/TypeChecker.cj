@@ -6643,7 +6643,6 @@ extend TypeChecker {
                 }
                 let builder = DiagnoseRefactor(impl.diag.getOrThrow(),
                     BasicDiagKindRefactor.sema_ambiguous_match_primitive_extend, ma,
-                    MakeRange(ma.field.Begin(), ma.field.End()),
                     arguments: [ma.field.Val(), JoinStrings(typeStrings, " ")])
                 builder.Emit()
             }
