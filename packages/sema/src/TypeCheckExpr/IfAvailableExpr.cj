@@ -163,8 +163,8 @@ extend TypeChecker {
         } else if (argName.Val() == SYSCAP_IDENTIFIER && desugaredIf.condExpr.isSome()) {
             ChkSyscapArgument(impl.diag.getOrThrow(), impl.importManager.getOrThrow(), iae, desugaredIf, state)
         } else {
-            DiagnoseRefactor(impl.diag.getOrThrow(), BasicDiagKindRefactor.sema_ifavailable_unknow_arg_name,
-                BasicMakeRange(argName.Begin(), argName.End()), arguments: [argName.Val()]).Emit()
+            impl.diag.getOrThrow().DiagnoseRefactor(BasicDiagKindRefactor.sema_ifavailable_unknow_arg_name,
+                BasicMakeRange(argName.Begin(), argName.End()), argName.Val()).Emit()
             state.res = false
             state.hasHardError = true
         }
