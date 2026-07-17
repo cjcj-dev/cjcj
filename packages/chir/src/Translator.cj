@@ -13,6 +13,8 @@ import cjcj::ast.ASTKind
 import cjcj::ast.IsInstanceConstructor as AstIsInstanceConstructor
 import cjcj::ast.IsValidCFuncConstructorCall
 import cjcj::ast.IsCondition as AstIsCondition
+import cjcj::ast.IsCommonWithoutDefault as AstIsCommonWithoutDefault
+import cjcj::ast.IsGlobalOrMember as AstIsGlobalOrMember
 import cjcj::ast.GetVarsInitializationOrderWithPositions as AstGetVarsInitializationOrderWithPositions
 import cjcj::ast.BuiltInDecl
 import cjcj::ast.BuiltInType
@@ -463,6 +465,10 @@ public class Translator {
 
     public func SetTopLevel(decl: AstDecl): Unit {
         topLevelDecl = decl
+    }
+
+    private func IsTopLevel(decl: AstDecl): Bool {
+        return topLevelDecl == Some(decl)
     }
 
     public func SetGenericFuncMap(funcMap: GenericFuncMap): Unit {
@@ -984,7 +990,22 @@ public class Translator {
     }
 
     public func Visit(funcDecl: AstFuncDecl): Option<Value> {
-        if (currentBlock.isSome() && !IsGlobalOrMemberFunc(funcDecl)) {
+        if (funcDecl.TestAnyAttr(AstAttribute.INTRINSIC, AstAttribute.ABSTRACT, AstAttribute.FOREIGN)) {
+            return None
+        }
+        if (AstIsCommonWithoutDefault(funcDecl)) {
+            return None
+        }
+        let isLifted = localConstFuncs.HasElement(funcDecl)
+        if (isLifted && !IsTopLevel(funcDecl)) {
+            return None
+        }
+        let isLocal = if (let Some(ownerFunc) <- funcDecl.ownerFunc) {
+            !AstIsGlobalOrMember(ownerFunc)
+        } else {
+            !AstIsGlobalOrMember(funcDecl)
+        }
+        if (isLocal && !isLifted) {
             return TranslateNestedFunc(funcDecl)
         }
         let value = globalSymbolTable.Get(funcDecl)
