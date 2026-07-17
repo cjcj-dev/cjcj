@@ -18,6 +18,7 @@ private let DECL_ID_STRUCT_NAME: String = "DeclId"
 private let PARAMETER_INFO_STRUCT_NAME: String = "ParameterInfo"
 private let ON_CALL_ENUM_NAME: String = "OnCall"
 private let DECL_KIND_ENUM_NAME: String = "DeclKind"
+private let RETURN_ZERO_ENTRY: String = "ReturnZero"
 private let HAS_DEFAULT_VALUE_FOR_STUB_INTERFACE_NAME: String = "HasDefaultValueForStub"
 private let NO_DEFAULT_VALUE_FOR_MOCK_EXCEPTION_NAME: String = "NoDefaultValueForMockException"
 private let MOCK_RETURN_VALUE_TYPE_MISMATCH_EXCEPTION_NAME: String = "MockReturnValueTypeMismatchException"
@@ -317,6 +318,22 @@ public class MockManager {
                 exprToCast.curFile.getOrThrow(), typeManager)))
 
         return CreateMatchExpr(exprToCast, matchCases, castTy)
+    }
+
+    // C++: Sema/Test/MockManager.cpp:462-472.
+    private func CreateOnCallReturnZeroMatchCase(originalMethod: FuncDecl, zeroValueTy: Ty,
+        enumConstructor: Decl): MatchCase {
+        let pattern = EnumPattern()
+        let constructorTy = enumConstructor.GetTy().getOrThrow()
+        pattern.SetTy(if (constructorTy.IsFunc()) {
+            (constructorTy as FuncTy).getOrThrow().retTy
+        } else {
+            constructorTy
+        })
+        pattern.constructor = mockUtils.CreateRefExprWithInstTys(enumConstructor,
+            constructorTy.typeArgs, RETURN_ZERO_ENTRY, originalMethod.curFile.getOrThrow())
+        return CreateMatchCase(pattern,
+            mockUtils.CreateZeroValue(zeroValueTy, originalMethod.curFile.getOrThrow()))
     }
 
     // C++: Sema/Test/MockManager.cpp:450-460.
