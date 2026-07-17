@@ -6,6 +6,7 @@ import cjcj::sema.GetUsableGetterForProperty
 import cjcj::sema.GetUsableSetterForProperty
 import cjcj::sema.{GenerateTypeMapping, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
+import cjcj::mangle.ManglerContext
 import cjcj::utils.{TEST_ENTRY_NAME, V_COMPILER}
 
 private let OPTION_VALUE_CTOR: String = "Some"
@@ -499,5 +500,96 @@ public class MockSupportManager {
         handlerMatch.curFile = funcDecl.curFile
         body.body.add(handlerMatch, at: 0)
         decl.EnableAttr(Attribute.MOCK_SUPPORTED)
+    }
+
+    // C++: Sema/Test/MockSupportManager.cpp:1869-1972.
+    public func PrepareClassLikeWithDefaults(classLikeDecl: ClassLikeDecl, interfaceDecl: InterfaceDecl,
+        originalExtendDecl: Option<ExtendDecl>): Unit {
+        let accessorInterfaceDecl = mockUtils.FindGlobalDecl<InterfaceDecl>(
+            interfaceDecl.curFile.getOrThrow(),
+            interfaceDecl.identifier.Val() + MockUtils.defaultAccessorSuffix)
+        if (accessorInterfaceDecl.isNone()) {
+            return
+        }
+        if (classLikeDecl.TestAttr(Attribute.GENERIC)) {
+            return
+        }
+
+        if (let Some(extendDecl) <- originalExtendDecl) {
+            extendDecl.inheritedTypes.add(MockUtils.CreateType(accessorInterfaceDecl.getOrThrow().GetTy().getOrThrow()))
+            let pkgName = ManglerContext.ReduceUnitTestPackageName(extendDecl.fullPackageName)
+            let manglerCtx = mockUtils.mangler.manglerCtxTable.get(pkgName)
+            CJC_ASSERT(manglerCtx.isSome())
+            let adapter = mockUtils.mangler.adapter
+            manglerCtx.getOrThrow().SaveExtend2CurFile(
+                adapter.ConvertFile(extendDecl.curFile.getOrThrow()), adapter.ConvertDecl(extendDecl))
+        }
+
+        let outerDecl: Decl = if (let Some(extendDecl) <- originalExtendDecl) {
+            extendDecl
+        } else {
+            classLikeDecl
+        }
+        let accessorDecls = accessorInterfaceDecl.getOrThrow().GetMemberDecls()
+        let originalDecls = interfaceDecl.GetMemberDeclPtrs()
+        var accessorDeclIndex: Int64 = 0
+        var originalDeclIndex: Int64 = 0
+        while (accessorDeclIndex < accessorDecls.size) {
+            CJC_ASSERT(originalDeclIndex < originalDecls.size)
+            if (let Some(originalFunc) <- (originalDecls[originalDeclIndex] as FuncDecl)) {
+                if (!originalFunc.TestAttr(Attribute.DEFAULT)) {
+                    originalDeclIndex++
+                    continue
+                }
+                let accessorDecl = (accessorDecls[accessorDeclIndex] as FuncDecl).getOrThrow()
+                CJC_ASSERT(accessorDecl.identifier.Val() ==
+                    mockUtils.Mangle(originalFunc) + MockUtils.defaultAccessorSuffix)
+                let accessorImplDecl = FuncDecl()
+                let implTypeParamsTy = CloneFuncDecl(accessorDecl, accessorImplDecl,
+                    curFile: outerDecl.curFile, fullPackageName: outerDecl.fullPackageName)
+                accessorImplDecl.identifier = accessorDecl.identifier
+                accessorImplDecl.outerDecl = outerDecl
+                if (accessorDecl.TestAttr(Attribute.STATIC)) {
+                    accessorImplDecl.EnableAttr(Attribute.REDEF)
+                } else {
+                    CJC_ASSERT(accessorImplDecl.TestAttr(Attribute.ABSTRACT))
+                }
+                accessorImplDecl.DisableAttr(Attribute.ABSTRACT)
+                accessorImplDecl.EnableAttr(Attribute.GENERATED_TO_MOCK)
+
+                let args = ArrayList<FuncArg>()
+                for (param in accessorImplDecl.funcBody.getOrThrow().paramLists[0].params) {
+                    args.add(CreateFuncArg(CreateRefExpr(param)))
+                }
+                let receiver = if (accessorDecl.TestAttr(Attribute.STATIC)) {
+                    CreateRefExpr(classLikeDecl)
+                } else {
+                    CreateThisRefForMockSupport(classLikeDecl)
+                }
+                let nameRefExpr: NameReferenceExpr = if (classLikeDecl == interfaceDecl) {
+                    CreateRefExpr(originalFunc)
+                } else {
+                    CreateMemberAccess(receiver, originalFunc)
+                }
+                nameRefExpr.SetTy(typeManager.GetInstantiatedTy(originalFunc.GetTy().getOrThrow(),
+                    GenerateTypeMapping(originalFunc, implTypeParamsTy)))
+                nameRefExpr.instTys.add(all: implTypeParamsTy)
+                nameRefExpr.EnableAttr(Attribute.GENERATED_TO_MOCK)
+                let retTy = accessorImplDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+                let callExpr = CreateCallExpr(nameRefExpr, args, Some(originalFunc),
+                    Some(retTy), CallKind.CALL_DECLARED_FUNCTION)
+                callExpr.EnableAttr(Attribute.GENERATED_TO_MOCK)
+                let body = Block()
+                body.SetTy(retTy)
+                body.body.add(CreateReturnExpr(callExpr))
+                accessorImplDecl.funcBody.getOrThrow().body = body
+                PrepareStaticDecl(accessorImplDecl)
+                mockUtils.AttachGeneratedDecl(accessorImplDecl)
+                accessorDeclIndex++
+                originalDeclIndex++
+            } else {
+                originalDeclIndex++
+            }
+        }
     }
 }
