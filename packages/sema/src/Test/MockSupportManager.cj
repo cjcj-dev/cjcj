@@ -700,6 +700,21 @@ public class MockSupportManager {
         }
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:949-965.
+    private func GenerateFieldGetterAccessorBody(fieldDecl: VarDecl,
+        funcBody: FuncBody, kind: AccessorKind): ArrayList<Node> {
+        let retExpr: Expr = if (kind == AccessorKind.TOP_LEVEL_VARIABLE_GETTER) {
+            CreateRefExpr(fieldDecl)
+        } else {
+            let refExpr = CreateRefForFieldAccess(fieldDecl.outerDecl.getOrThrow(), kind)
+            CreateMemberAccess(refExpr, fieldDecl.identifier)
+        }
+
+        let bodyNodes = ArrayList<Node>()
+        bodyNodes.add(CreateReturnExpr(retExpr, Some(funcBody)))
+        return bodyNodes
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
