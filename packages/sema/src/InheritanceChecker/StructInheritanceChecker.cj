@@ -2141,14 +2141,14 @@ public class StructInheritanceChecker {
                                 CheckAccessVisibility(parentFunc, childFunc, diagNode)
                                 CheckGenericTypeArgInfo(parent, child)
                             } else if (inheritedByExtension || !CheckReturnOverrideByGeneric(parentFuncTy, childFuncTy)) {
-                                let builder = diag.Diagnose(
-                                    childFunc.begin,
-                                    childFunc.end,
+                                let builder = Diagnose(
+                                    diag,
+                                    childFunc,
                                     DiagKind.sema_return_type_invariance,
                                     args: [DiagArgument(childFunc.identifier.Val()), DiagArgument(parentFuncTy.retTy.String())]
                                 )
                                 builder.AddNote(DeclRange(parentFunc), "cannot override/implement the following function")
-                                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                                builder.Emit()
                             } else {
                                 var targetFunc: FuncDecl = parentFunc
                                 var inconsistentTypesText = "'" + parentFuncTy.retTy.String() + "'"
