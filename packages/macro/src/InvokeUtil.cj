@@ -235,11 +235,16 @@ struct RuntimeConfigParamC {
 
 private type RuntimeInitFunc = CFunc<(CPointer<RuntimeConfigParamC>) -> Int64>
 private type RuntimeFiniFunc = CFunc<() -> Int64>
+private type RuntimeInstanceNewFunc = CFunc<(CPointer<RuntimeConcurrencyParamC>) -> CPointer<Unit>>
+private type RuntimeInstanceStopFunc = CFunc<(CPointer<Unit>) -> Int32>
 
 private let CJ_RUNTIME_INIT: String = "InitCJRuntime"
 private let CJ_RUNTIME_FINI: String = "FiniCJRuntime"
 private let CJ_NEW_TASK_FROM_C: String = "RunCJTask"
 private let CJ_RELEASE_HANDLE_FROM_C: String = "ReleaseHandle"
+private let CJCJ_MRT_INSTANCE_NEW: String = "CJCJ_MRT_InstanceNew"
+private let CJCJ_MRT_INSTANCE_RUN_TASK: String = "CJCJ_MRT_InstanceRunTask"
+private let CJCJ_MRT_INSTANCE_STOP: String = "CJCJ_MRT_InstanceStop"
 @When[os == "Windows"]
 private let CJ_HEAP_SIZE: String = "CJHEAPSIZE"
 @When[os != "Windows"]
@@ -555,6 +560,8 @@ public class RuntimeInit {
     private var handle: Option<RuntimeHandle> = None
     public var runtimeMethodFunc: CPointer<Unit> = CPointer<Unit>()
     public var runtimeReleaseFunc: CPointer<Unit> = CPointer<Unit>()
+    public var runtimeInstanceHandle: CPointer<Unit> = CPointer<Unit>()
+    private var runtimeInstanceStopFunc: CPointer<Unit> = CPointer<Unit>()
 
     public init() {}
 
@@ -570,17 +577,43 @@ public class RuntimeInit {
             if (!opened.opened) {
                 return false
             }
-            // GAP_TODO(self-host runtime reuse): C++ initializes the Cangjie runtime here because
-            // the C++ compiler process has no live runtime. The self-host cjc is already running
-            // inside that runtime, so reuse it by taking RunCJTask/ReleaseHandle from the runtime
-            // library handle instead of calling InitCJRuntime again.
-            runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
             runtimeReleaseFunc = GetMethodPointer(opened, CJ_RELEASE_HANDLE_FROM_C)
-            if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
-                return false
+            // RT_ISOLATE_API_SPEC.md §3.2/§5 slice 2: the hybrid runtime exposes an
+            // instance scheduler for the macro task. Its stack values come from the same
+            // ConcurrencyParam assembled by C++ InvokeUtilCJNative.cpp:115-130,159-168.
+            let instanceNewPtr = GetMethodPointer(opened, CJCJ_MRT_INSTANCE_NEW)
+            if (!instanceNewPtr.isNull()) {
+                runtimeMethodFunc = GetMethodPointer(opened, CJCJ_MRT_INSTANCE_RUN_TASK)
+                runtimeInstanceStopFunc = GetMethodPointer(opened, CJCJ_MRT_INSTANCE_STOP)
+                if (runtimeMethodFunc.isNull() || runtimeInstanceStopFunc.isNull() ||
+                    runtimeReleaseFunc.isNull()) {
+                    return false
+                }
+                try (param = LibC.malloc<RuntimeConcurrencyParamC>().asResource()) {
+                    if (param.value.isNull()) {
+                        return false
+                    }
+                    unsafe {
+                        // RT_ISOLATE_API_SPEC.md §3.2 fixes a sub-scheduler to one processor;
+                        // thread/coroutine stack sizes mirror InvokeUtil.h:50-51.
+                        param.value.write(RuntimeConcurrencyParamC(STACK_SIZE, stackSizeFromEnv(initArgs), 1u32))
+                        runtimeInstanceHandle = RuntimeInstanceNewFunc(instanceNewPtr)(param.value)
+                    }
+                } catch (e: Exception) {
+                    return false
+                }
+                if (runtimeInstanceHandle.isNull()) {
+                    return false
+                }
+                initRuntime = true
+            } else {
+                // Official runtime fallback (track 1): keep reusing the process-global scheduler.
+                runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
+                if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
+                    return false
+                }
             }
             handle = Some(opened)
-            initRuntime = false
         }
         return true
     }
@@ -588,7 +621,12 @@ public class RuntimeInit {
     public func CloseRuntime(): Unit {
         if (let Some(opened) <- handle) {
             if (initRuntime) {
-                FinishRuntime(opened)
+                // RT_ISOLATE_API_SPEC.md §3.2: InstanceStop occupies the C++
+                // FinishRuntime position (InvokeUtilCJNative.cpp:181-190).
+                let stopResult = unsafe { RuntimeInstanceStopFunc(runtimeInstanceStopFunc)(runtimeInstanceHandle) }
+                if (stopResult != 0) {
+                    Errorln("runtime finish failed: ")
+                }
             }
             @When[backend == "cjnative" && env != "ohos"]
             let _ = CloseSymbolTable(opened)
@@ -596,6 +634,8 @@ public class RuntimeInit {
         handle = None
         runtimeMethodFunc = CPointer<Unit>()
         runtimeReleaseFunc = CPointer<Unit>()
+        runtimeInstanceHandle = CPointer<Unit>()
+        runtimeInstanceStopFunc = CPointer<Unit>()
         if (initRuntime) {
             @When[backend == "cjnative" && env != "ohos"]
             let _ = CloseMacroDynamicLibrary()
