@@ -716,6 +716,40 @@ public class MockManager {
         return CreateInitCall(initDecl.getOrThrow(), funcInfoItems, curFile)
     }
 
+    // C++: Sema/Test/MockManager.cpp:1025-1062.
+    private func CreateCallInfo(originalFunction: FuncDecl, mockedArgsArray: Expr, typeArgsArray: Expr,
+        curFile: File, objRef: Option<RefExpr>): CallExpr {
+        let objectTy = mockUtils.objectDecl.getOrThrow().GetTy().getOrThrow()
+        let optionObjectTy = typeManager.GetEnumTy(mockUtils.optionDecl.getOrThrow(), typeArgs: [objectTy])
+        let instanceExpr: Expr
+        if (let Some(objectRef) <- objRef) {
+            let someInstanceDecl = LookupEnumMember(
+                mockUtils.optionDecl.getOrThrow(), OPTION_VALUE_CTOR).getOrThrow()
+            let someInstanceRef = CreateRefExpr(someInstanceDecl)
+            someInstanceRef.SetTy(typeManager.GetFunctionTy([objectTy], optionObjectTy))
+            let someInstanceCallArgs = ArrayList<FuncArg>()
+            someInstanceCallArgs.add(CreateFuncArg(objectRef))
+            let instanceCall = CreateCallExpr(someInstanceRef, someInstanceCallArgs)
+            instanceCall.SetTy(optionObjectTy)
+            instanceCall.resolvedFunction = (someInstanceDecl as FuncDecl).getOrThrow()
+            instanceCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+            instanceExpr = instanceCall
+        } else {
+            instanceExpr = CreateRefExpr(LookupEnumMember(
+                mockUtils.optionDecl.getOrThrow(), OPTION_NONE_CTOR).getOrThrow())
+        }
+        instanceExpr.SetTy(optionObjectTy)
+
+        let callInfoItems = ArrayList<Expr>()
+        callInfoItems.add(instanceExpr)
+        callInfoItems.add(typeArgsArray)
+        callInfoItems.add(mockedArgsArray)
+        callInfoItems.add(CreateFuncInfo(originalFunction, curFile))
+        let initDecl = FindInitDecl(callDecl.getOrThrow(), typeManager, callInfoItems)
+        CJC_ASSERT(initDecl.isSome())
+        return CreateInitCall(initDecl.getOrThrow(), callInfoItems, curFile)
+    }
+
     // C++: Sema/Test/MockManager.cpp:972-1023.
     private func CreateDeclKind(decl: FuncDecl): CallExpr {
         let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
