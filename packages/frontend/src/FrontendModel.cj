@@ -20,6 +20,7 @@ import cjcj::chir.Package as RealCHIRPackage
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.SemaImportManager
 import cjcj::modules.MacroHostImportManager
+import cjcj::option.OutputMode
 import cjcj::modules.{GetPackage, PackageFormat_AliasInfo, PackageFormat_Anno, PackageFormat_ArrayInfo,
     PackageFormat_ArrayTyInfo, PackageFormat_ClassInfo, PackageFormat_CompositeTyInfo, PackageFormat_Constraint,
     PackageFormat_Decl, PackageFormat_EnumInfo, PackageFormat_Expr, PackageFormat_ExtendInfo,
