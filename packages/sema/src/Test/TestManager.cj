@@ -495,6 +495,26 @@ public class TestManager {
         }
     }
 
+    // C++: Sema/Test/TestManager.cpp:429-454.
+    public func PrepareDecls(pkg: Package): Unit {
+        let decls = DeclsToPrepare()
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (let None <- node.curFile) {
+                return VisitAction.WALK_CHILDREN
+            }
+            if (!ShouldPrepareDecl(node, pkg)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(decl) <- (node as Decl)) {
+                mockSupportManager.getOrThrow().CollectDeclsToPrepare(decl, decls)
+                return VisitAction.SKIP_CHILDREN
+            }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+        mockSupportManager.getOrThrow().PrepareDecls(decls)
+    }
+
     // C++: Sema/Test/TestManager.cpp:733-754.
     private func CollectInternalDeclUsages(pkg: Package): Unit {
         let walker = Walker(pkg, visitPre: { node: Node =>
