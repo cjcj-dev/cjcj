@@ -869,6 +869,15 @@ public class MockUtils {
         classSubsts.add(subst, at: 0)
     }
 
+    // C++: Sema/Test/MockUtils.cpp:625-632.
+    public func GetInstantiatedTy(ty: Ty, typeSubsts: ArrayList<TypeSubst>): Ty {
+        var substitutedTy = ty
+        for (typeSubst in typeSubsts) {
+            substitutedTy = typeManager.GetInstantiatedTy(substitutedTy, typeSubst)
+        }
+        return substitutedTy
+    }
+
     public static func BuildGenericSubsts(decl: InheritableDecl): ArrayList<TypeSubst> {
         let genericSubsts = ArrayList<TypeSubst>()
         let workList = ArrayList<InheritableDecl>()
