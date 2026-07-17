@@ -70,6 +70,7 @@ import cjcj::codegen.LLVMModuleHandle as LLVMModuleHandle
 import cjcj::codegen.SavePackageModule
 import cjcj::meta_transformation.TryRunCHIRMetaTransforms
 import cjcj::option.OptimizationFlag
+import cjcj::option.CandidateEmitCHIRPhase
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
 import cjcj::option.{TempFileKind, TempFileManager}
@@ -266,6 +267,22 @@ public func BuildRealCHIRForASTPackage(instance: CompilerInstance, pkg: RealASTP
     return result
 }
 
+// C++: CHIR/CHIR.cpp:1037-1054.
+private func EmitCHIR(outputPath: String, pkg: RealCHIRPackage, phase: ToCHIRPhase, dump: Bool): Unit {
+    let path = if (FileUtil.IsDir(outputPath)) {
+        FileUtil.JoinPath(outputPath, pkg.GetName() + CHIR_SERIALIZATION_FILE_EXTENSION)
+    } else {
+        outputPath
+    }
+    CHIRSerializer.Serialize(pkg, path, phase)
+    if (dump) {
+        let dumpFileName = FileUtil.GetFileNameWithoutExtension(path) +
+            "_Emit_Debug" + CHIR_READABLE_FILE_EXTENSION
+        ChirCHIRPrinter.PrintCHIRSerializeInfo(phase, dumpFileName)
+        ChirCHIRPrinter.PrintPackage(pkg, dumpFileName)
+    }
+}
+
 private class ToCHIR {
     private static var clearDumpDir: Bool = false
 
@@ -327,6 +344,11 @@ private class ToCHIR {
             CHIRSerializer.Serialize(lowered, fileName, ToCHIRPhase.RAW)
             return Some(lowered)
         }
+        if (instance.invocation.globalOptions.emitCHIRPhase == CandidateEmitCHIRPhase.RAW) {
+            EmitCHIR(outputPath, lowered, ToCHIRPhase.RAW,
+                instance.invocation.globalOptions.NeedDumpCHIR())
+            return Some(lowered)
+        }
         if (!RulesChecking(lowered, builder, instance.invocation.globalOptions,
             instance.diag.AsBasicDiagnosticEngine(), effectMap, maybeUnreachable)) {
             return None
@@ -363,6 +385,10 @@ private class ToCHIR {
         CFFIFuncWrapper()
         if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
             ChirCHIRPrinter.PrintPackage(lowered)
+        }
+        if (instance.invocation.globalOptions.emitCHIRPhase == CandidateEmitCHIRPhase.OPT) {
+            EmitCHIR(outputPath, lowered, ToCHIRPhase.OPT,
+                instance.invocation.globalOptions.NeedDumpCHIR())
         }
         builder.MergeAllocatedInstance()
         return Some(lowered)
