@@ -1132,6 +1132,51 @@ public class MockManager {
         return Some(mockedMethod)
     }
 
+    // C++: Sema/Test/MockManager.cpp:1269-1312.
+    private func GenerateCallHandlerCases(
+        staticDecl: FuncDecl, injectTo: Expr): ArrayList<MatchCase> {
+        let matchCasesForOnCallReturnedValue = ArrayList<MatchCase>()
+        let handlerRetTy = typeManager.GetAnyTy()
+        let optionFuncRetTy = typeManager.GetEnumTy(
+            mockUtils.optionDecl.getOrThrow(), typeArgs: [handlerRetTy])
+        let optionFuncRet = optionFuncRetTy.decl.getOrThrow()
+
+        for (constructor in onCallEnumDecl.getOrThrow().constructors) {
+            let foundMatchCase = CreateOnCallResultMatchCase(staticDecl, None, constructor)
+            if (let Some(matchCase) <- foundMatchCase) {
+                let someCaseDecl = LookupEnumMember(optionFuncRet, OPTION_VALUE_CTOR).getOrThrow()
+                let someCaseRef = CreateRefExpr(someCaseDecl)
+                someCaseRef.SetTy(typeManager.GetFunctionTy([handlerRetTy], optionFuncRetTy))
+                let firstExpr = (matchCase.exprOrDecls.getOrThrow().body[0] as Expr).getOrThrow()
+                let someCaseCallArgs = ArrayList<FuncArg>()
+                someCaseCallArgs.add(CreateFuncArg(
+                    (ASTCloner.Clone(firstExpr) as Expr).getOrThrow()))
+                let someCaseCall = CreateCallExpr(someCaseRef, someCaseCallArgs)
+                someCaseCall.resolvedFunction = (someCaseDecl as FuncDecl).getOrThrow()
+                someCaseCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+                someCaseCall.SetTy(optionFuncRetTy)
+                firstExpr.desugarExpr = someCaseCall
+                matchCasesForOnCallReturnedValue.add(matchCase)
+            } else {
+                let pattern = EnumPattern()
+                let constructorTy = constructor.GetTy().getOrThrow()
+                pattern.SetTy(if (constructorTy.IsFunc()) {
+                    (constructorTy as FuncTy).getOrThrow().retTy
+                } else {
+                    constructorTy
+                })
+                pattern.constructor = mockUtils.CreateRefExprWithInstTys(
+                    constructor, constructorTy.typeArgs, RETURN_ZERO_ENTRY,
+                    injectTo.curFile.getOrThrow())
+                let none = LookupEnumMember(optionFuncRet, OPTION_NONE_CTOR).getOrThrow()
+                matchCasesForOnCallReturnedValue.add(CreateMatchCase(pattern,
+                    mockUtils.CreateRefExprWithInstTys(none, ArrayList<Ty>([handlerRetTy]),
+                        OPTION_NONE_CTOR, injectTo.curFile.getOrThrow())))
+            }
+        }
+        return matchCasesForOnCallReturnedValue
+    }
+
     // C++: Sema/Test/MockManager.cpp:1204-1238.
     private func CreateMockedProp(originalProp: PropDecl, mockedDecl: ClassDecl,
         classGenericSubsts: ArrayList<TypeSubst>): Option<PropDecl> {
