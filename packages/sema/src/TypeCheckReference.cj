@@ -2278,65 +2278,15 @@ private func TypeCheckReferenceDiagnoseDeprecatedTargetWithContext(
         strictDeprecatedContext: state.strictDeprecatedContext)
 }
 
-private func TypeCheckReferenceCollectCallArgsInSourceOrder(callExpr: CallExpr): ArrayList<FuncArg> {
-    let args = ArrayList<FuncArg>()
-    for (arg in callExpr.args) {
-        args.add(arg)
-    }
-    for (arg in callExpr.defaultArgs) {
-        args.add(arg)
-    }
-    return args
-}
-
-private func TypeCheckReferenceBodyParamList(fd: FuncDecl): Option<FuncParamList> {
-    if (let Some(body) <- fd.funcBody) {
-        if (!body.paramLists.isEmpty()) {
-            return Some(body.paramLists[0])
-        }
-    }
-    return None
-}
-
-private func TypeCheckReferenceCollectParamArgPairs(fd: FuncDecl, callExpr: CallExpr): ArrayList<(FuncParam, FuncArg)> {
-    let out = ArrayList<(FuncParam, FuncArg)>()
-    if (let None <- TypeCheckReferenceBodyParamList(fd)) {
-        return out
-    }
-    let params = TypeCheckReferenceBodyParamList(fd).getOrThrow().params
-    let args = TypeCheckReferenceCollectCallArgsInSourceOrder(callExpr)
-    var namedArgFound = false
-    var pos: Int64 = 0
-    for (arg in args) {
-        let argName = GetArgName(fd, arg)
-        if (argName.isEmpty()) {
-            if (namedArgFound) {
-                break
-            }
-            if (pos < params.size) {
-                out.add((params[pos], arg))
-            }
-            pos++
-            continue
-        }
-        namedArgFound = true
-        var paramIdx: Int64 = 0
-        while (paramIdx < params.size) {
-            if (params[paramIdx].identifier.Val() == argName) {
-                out.add((params[paramIdx], arg))
-                break
-            }
-            paramIdx++
-        }
-    }
-    return out
-}
-
-private func TypeCheckReferenceCheckUsageOfDeprecatedParameters(
+private func CheckUsageOfDeprecatedParameters(
     diag: BasicDiagnosticEngine,
-    callExpr: CallExpr,
+    usage: Node,
     state: TypeCheckReferenceDeprecationState
 ): Unit {
+    if (let None <- (usage as CallExpr)) {
+        return
+    }
+    let callExpr = (usage as CallExpr).getOrThrow()
     if (let None <- callExpr.resolvedFunction) {
         return
     }
@@ -2348,12 +2298,23 @@ private func TypeCheckReferenceCheckUsageOfDeprecatedParameters(
     if (funcBody.paramLists.isEmpty()) {
         return
     }
-    let pairs = TypeCheckReferenceCollectParamArgPairs(funcDecl, callExpr)
-    for (pair in pairs) {
-        let param = pair[0]
-        let arg = pair[1]
-        if (param.HasAnno(AstAnnotationKind.DEPRECATED) && !arg.TestAttr(Attribute.COMPILER_ADD)) {
-            let _ = TypeCheckReferenceDiagnoseDeprecatedWithContext(diag, arg, param, state)
+    if (let None <- callExpr.desugarArgs) {
+        return
+    }
+    let args = callExpr.desugarArgs.getOrThrow()
+    for (paramList in funcBody.paramLists) {
+        let params = paramList.params
+        if (params.size != args.size) {
+            continue
+        }
+        var idx: Int64 = 0
+        while (idx < args.size) {
+            let param = params[idx]
+            let arg = args[idx]
+            if (param.HasAnno(AstAnnotationKind.DEPRECATED) && !arg.TestAnyAttr(Attribute.COMPILER_ADD)) {
+                let _ = TypeCheckReferenceDiagnoseDeprecatedWithContext(diag, arg, param, state)
+            }
+            idx++
         }
     }
 }
@@ -2611,7 +2572,7 @@ public func TypeCheckReferenceCheckUsageOfDeprecated(
             return VisitAction.WALK_CHILDREN
         }
         if (let Some(callExpr) <- (usage as CallExpr)) {
-            TypeCheckReferenceCheckUsageOfDeprecatedParameters(diag, callExpr, state)
+            CheckUsageOfDeprecatedParameters(diag, callExpr, state)
         } else if (let Some(assignExpr) <- (usage as AssignExpr)) {
             TypeCheckReferenceCheckUsageOfDeprecatedSetter(diag, assignExpr, state)
         }
