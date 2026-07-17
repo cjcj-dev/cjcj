@@ -5,6 +5,11 @@ import cjcj::ast.*
 import cjcj::sema.GetUsableGetterForProperty
 import cjcj::sema.GetUsableSetterForProperty
 import cjcj::sema.{GenerateTypeMapping, TypeManager}
+import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
+import cjcj::utils.V_COMPILER
+
+private let OPTION_VALUE_CTOR: String = "Some"
+private let OPTION_NONE_CTOR: String = "None"
 
 public class DeclsToPrepare {
     public let functions: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
@@ -377,5 +382,58 @@ public class MockSupportManager {
         }
         toBody.paramLists.add(paramList)
         return genericTys
+    }
+
+    // C++: Sema/Test/MockSupportManager.cpp:335-395.
+    private func GenerateHandlerMatchCases(funcDecl: FuncDecl, optionFuncTyPattern: EnumPattern,
+        handlerCallExpr: CallExpr): ArrayList<MatchCase> {
+        let nothingTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_NOTHING)
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let handlerRetTy = typeManager.GetAnyTy()
+        let optionFuncRetTy = typeManager.GetEnumTy(mockUtils.optionDecl.getOrThrow(), typeArgs: [handlerRetTy])
+
+        let handlerResultCases = ArrayList<MatchCase>()
+        let handlerResultPattern = EnumPattern()
+        let handlerResultPatternConstructor = LookupEnumMember(
+            mockUtils.optionDecl.getOrThrow(), OPTION_VALUE_CTOR).getOrThrow()
+        handlerResultPattern.SetTy(
+            (handlerResultPatternConstructor.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy)
+        handlerResultPattern.constructor = mockUtils.CreateRefExprWithInstTys(
+            handlerResultPatternConstructor, ArrayList<Ty>([handlerRetTy]),
+            OPTION_VALUE_CTOR, funcDecl.curFile.getOrThrow())
+
+        let handlerResultVarPattern = CreateVarPattern(V_COMPILER, Some(handlerRetTy))
+        let handlerResultRef = CreateRefExpr(handlerResultVarPattern.varDecl.getOrThrow())
+        handlerResultRef.SetTy(handlerRetTy)
+        handlerResultPattern.patterns.add(handlerResultVarPattern)
+
+        let castTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+        let castType = MockUtils.CreateType(castTy)
+        let varPatternForTypeCast = CreateVarPattern(V_COMPILER, Some(castTy))
+        let varPatternForTypeCastRef = CreateRefExpr(varPatternForTypeCast.varDecl.getOrThrow())
+        varPatternForTypeCastRef.SetTy(castTy)
+        varPatternForTypeCastRef.instTys.add(castTy)
+        let matchCasesTypeCast = ArrayList<MatchCase>()
+        let retExprWithCastedType = CreateReturnExpr(varPatternForTypeCastRef)
+        retExprWithCastedType.SetTy(nothingTy)
+        let typePattern = CreateTypePattern(varPatternForTypeCast, castType, handlerResultRef)
+        typePattern.curFile = funcDecl.curFile
+        let typeCastMatchCase = CreateMatchCase(typePattern, retExprWithCastedType)
+        let zeroValueRet = CreateReturnExpr(
+            mockUtils.CreateZeroValue(castTy, funcDecl.curFile.getOrThrow()))
+        zeroValueRet.SetTy(nothingTy)
+        if (!castTy.IsNothing()) {
+            matchCasesTypeCast.add(typeCastMatchCase)
+        }
+        matchCasesTypeCast.add(CreateMatchCase(WildcardPattern(), zeroValueRet))
+        let retExpr = CreateMatchExpr(handlerResultRef, matchCasesTypeCast, nothingTy)
+        handlerResultCases.add(CreateMatchCase(handlerResultPattern, retExpr))
+        handlerResultCases.add(CreateMatchCase(WildcardPattern(), CreateUnitExpr(unitTy)))
+
+        let handlerCases = ArrayList<MatchCase>()
+        handlerCases.add(CreateMatchCase(optionFuncTyPattern,
+            CreateMatchExpr(handlerCallExpr, handlerResultCases, unitTy)))
+        handlerCases.add(CreateMatchCase(WildcardPattern(), CreateUnitExpr(unitTy)))
+        return handlerCases
     }
 }
