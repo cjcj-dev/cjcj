@@ -806,7 +806,7 @@ public class MockSupportManager {
         }
         accessorBody.SetTy(accessorTy)
         if (let Some(outerDecl) <- fieldDecl.outerDecl) {
-            accessorBody.parentClassLike = outerDecl as ClassDecl
+            accessorBody.parentClassLike = (outerDecl as ClassDecl).getOrThrow()
         }
         accessorBody.funcDecl = accessorDecl
         accessorBody.paramLists.add(all: accessorParamLists)
