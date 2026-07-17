@@ -32,6 +32,7 @@ private let FIELD_NAME_TO_STORE_HANDLER: String = "handler"
 private let FIELD_NAME_TO_STORE_OBJ_TO_SPY: String = "objectToSpyOn"
 private let PARAMETER_TO_MATCH_RETURN_ENTRY: String = "value"
 private let PARAMETER_TO_MATCH_THROW_ENTRY: String = "e"
+private let DEFAULT_VALUE_FOR_STUB_METHOD_NAME: String = "defaultValueForStub"
 private let UNITTEST_MOCK_INTERNAL_PACKAGE_NAME: String = "std.unittest.mock.internal"
 
 private func GetDeclFromMockPackage<T>(importManager: SemaImportManager, identifier: String): Option<T> where T <: Decl {
@@ -391,6 +392,38 @@ public class MockManager {
         pattern.constructor = mockUtils.CreateRefExprWithInstTys(enumConstructor,
             constructorTy.typeArgs, THROW_ENTRY, originalMethod.curFile.getOrThrow())
         return CreateMatchCase(pattern, throwExpr)
+    }
+
+    // C++: Sema/Test/MockManager.cpp:625-658.
+    private func FindDefaultValueForStubMethod(retTy: Ty): Option<FuncDecl> {
+        for (extendDecl in typeManager.GetAllExtendsByTy(retTy)) {
+            let extendedTy = extendDecl.extendedType.getOrThrow().GetTy().getOrThrow()
+            var foundHasDefaultValueForStub = false
+            for (interfaceTy in extendDecl.GetSuperInterfaceTys()) {
+                if (let Some(interfaceDecl) <- (Ty.GetDeclOfTy(Some(interfaceTy)) as InterfaceDecl)) {
+                    let requiredDecl = hasDefaultValueForStubDecl.getOrThrow()
+                    if ((interfaceDecl == requiredDecl || interfaceDecl.genericDecl == Some(requiredDecl)) &&
+                        interfaceTy.typeArgs[0] == extendedTy) {
+                        foundHasDefaultValueForStub = true
+                        break
+                    }
+                }
+            }
+            if (!foundHasDefaultValueForStub) {
+                continue
+            }
+            for (extendMember in extendDecl.GetMemberDeclPtrs()) {
+                if (let Some(extendFuncDecl) <- (extendMember as FuncDecl)) {
+                    if (extendMember.identifier.Val() != DEFAULT_VALUE_FOR_STUB_METHOD_NAME) {
+                        continue
+                    }
+                    if (extendFuncDecl.funcBody.getOrThrow().paramLists[0].params.isEmpty()) {
+                        return Some(extendFuncDecl)
+                    }
+                }
+            }
+        }
+        return None
     }
 
     // C++: Sema/Test/MockManager.cpp:450-460.
