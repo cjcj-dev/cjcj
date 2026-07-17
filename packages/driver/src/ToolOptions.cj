@@ -102,6 +102,7 @@ public func OPTSetLTOOptions(setOptionHandler: (String) -> Unit, driverOptions: 
         setOptionHandler("--cangjie-lto")
         setOptionHandler("--module-summary")
         setOptionHandler("--module-hash")
+        setOptionHandler("--preserve-bc-uselistorder=false")
     }
 }
 
