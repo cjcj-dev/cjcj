@@ -8,10 +8,21 @@ import cjcj::ast.IsMirror
 import cjcj::ast.SortModifierByPos
 import cjcj::ast.VisitAction
 import cjcj::ast.Walker
+import cjcj::ast.ConstructorCall
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, FileUtil}
 import std.collection.*
 
 extend ParserImpl {
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:1913-1921
+    public func HasAnnotation(annos: ArrayList<Annotation>, annotationKind: AnnotationKind): Bool {
+        for (anno in annos) {
+            if (anno.kind == annotationKind) {
+                return true
+            }
+        }
+        return false
+    }
+
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:141-164
     private func ParseIrrefutablePattern(attributes: ArrayList<Attribute>, isVar: Bool, inDecl: Bool): Pattern {
         if (Skip(TokenKind.WILDCARD)) {

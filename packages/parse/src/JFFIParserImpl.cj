@@ -22,7 +22,7 @@ public class JFFIParserImpl {
     }
 
     public func CheckMirrorSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
-        CJC_ASSERT(HasAnnotation(annos, AnnotationKind.JAVA_MIRROR))
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.JAVA_MIRROR))
         decl.EnableAttr(Attribute.JAVA_MIRROR)
         if (!decl.inheritedTypes.isEmpty()) {
             decl.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
@@ -34,7 +34,7 @@ public class JFFIParserImpl {
     }
 
     public func CheckImplSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
-        CJC_ASSERT(HasAnnotation(annos, AnnotationKind.JAVA_IMPL))
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.JAVA_IMPL))
         decl.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
         if (let Some(_) <- decl.generic) {
             if (!decl.TestAttr(Attribute.JAVA_CJ_MAPPING)) {
@@ -142,11 +142,4 @@ public class JFFIParserImpl {
                 anno, parser.lookahead.Begin(), anno.identifier.Val(), parser.lookahead.Value())
         }
     }
-}
-
-private func HasAnnotation(annos: ArrayList<Annotation>, kind: AnnotationKind): Bool {
-    for (anno in annos) {
-        if (anno.kind == kind) { return true }
-    }
-    return false
 }

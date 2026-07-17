@@ -71,14 +71,14 @@ public class OCFFIParserImpl {
     }
 
     public func CheckClassLikeSignature(decl: Decl, annos: ArrayList<Annotation>): Unit {
-        if (HasObjCAnnotation(annos, AnnotationKind.OBJ_C_MIRROR)) {
+        if (parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR)) {
             decl.EnableAttr(Attribute.OBJ_C_MIRROR)
             if (decl.TestAttr(Attribute.SEALED)) {
                 DiagObjCMirrorCannotBeSealed(decl)
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
         }
-        if (HasObjCAnnotation(annos, AnnotationKind.OBJ_C_IMPL)) {
+        if (parser.HasAnnotation(annos, AnnotationKind.OBJ_C_IMPL)) {
             decl.EnableAttr(Attribute.OBJ_C_MIRROR_SUBTYPE)
             if (let Some(_) <- decl.generic) {
                 DiagObjCImplCannotBeGeneric(decl)
@@ -100,7 +100,7 @@ public class OCFFIParserImpl {
     }
 
     public func CheckMirrorSignature(decl: FuncDecl, annos: ArrayList<Annotation>): Unit {
-        if (!HasObjCAnnotation(annos, AnnotationKind.OBJ_C_MIRROR)) {
+        if (!parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR)) {
             return
         }
         decl.EnableAttr(Attribute.OBJ_C_MIRROR)
@@ -289,11 +289,4 @@ public class OCFFIParserImpl {
     private func DiagObjCImplCannotBeSealed(node: Node): Unit {
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_impl_cannot_be_sealed, node).Emit()
     }
-}
-
-private func HasObjCAnnotation(annos: ArrayList<Annotation>, kind: AnnotationKind): Bool {
-    for (anno in annos) {
-        if (anno.kind == kind) { return true }
-    }
-    return false
 }
