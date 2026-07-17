@@ -227,7 +227,8 @@ public open class DefaultCompilerInstance {
 
     protected func ShouldSaveCjoForOutputMode(): Bool {
         return invocation.globalOptions.outputMode == OutputMode.STATIC_LIB ||
-            invocation.globalOptions.outputMode == OutputMode.SHARED_LIB
+            invocation.globalOptions.outputMode == OutputMode.SHARED_LIB ||
+            invocation.globalOptions.outputMode == OutputMode.OBJ
     }
 
     private func PublishedCjoPath(pkg: Package): String {
