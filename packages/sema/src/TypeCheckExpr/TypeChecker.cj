@@ -1125,7 +1125,7 @@ extend TypeChecker {
             for (pkg in pkgs) {
                 if (options.enableInteropCJMapping && options.interopCJPackageConfigPath != "./") {
                     pkg.isInteropCJPackageConfig = true
-                    impl.ParsePackageConfigFile(pkg, packagesFullConfig)
+                    ParsePackageConfigFile(impl, pkg, packagesFullConfig)
                 }
                 let ctx = instance.GetASTContextByPackage(Some(pkg)).getOrThrow()
                 PerformDesugarAfterTypeCheck(impl.typeManager, manager, instance.mangler,

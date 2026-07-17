@@ -199,6 +199,13 @@ extend TypeCheckerImpl {
     }
 }
 
+// C++ src/Sema/Desugar/AfterTypeCheck.cpp:304-427. Ownership-split bridge; see
+// ops/design/DESUGAR_PHASE_RULING.md OWNERSHIP_SPLIT_TYPECHECKER_IMPL ruling.
+public func ParsePackageConfigFile(typeChecker: TypeCheckerImpl, pkg: Package,
+    packagesFullConfig: InteropCJPackageConfigReader): Unit {
+    typeChecker.ParsePackageConfigFile(pkg, packagesFullConfig)
+}
+
 public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager: SemaImportManager,
     mangler: BaseMangler, structMemberMap: HashMap<InheritableDecl, MemberMap>, pkg: Package,
     context!: Option<ASTContext> = None, options!: GlobalOptions = GlobalOptions(),
