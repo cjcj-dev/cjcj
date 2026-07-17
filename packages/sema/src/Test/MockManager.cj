@@ -47,6 +47,11 @@ private func GetDeclFromMockPackage<T>(importManager: SemaImportManager, identif
     return None
 }
 
+// C++: Sema/Test/MockManager.cpp:240-243.
+private func EndsWith(s: String, suffix: String): Bool {
+    return s.size >= suffix.size && s.endsWith(suffix)
+}
+
 public func IsDeclAccessibleForMock(currentPackage: Package, decl: Decl): Bool {
     if (decl.TestAttr(Attribute.PUBLIC)) {
         return true
