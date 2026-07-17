@@ -996,6 +996,111 @@ public class MockSupportManager {
         return methodAccessor
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:816-919.
+    private func GenerateFuncAccessor(methodDecl: FuncDecl): FuncDecl {
+        let needEraseTypes = MockSupportManager.NeedEraseAccessorTypes(methodDecl)
+        let outerClassDecl = methodDecl.outerDecl.getOrThrow() as ClassDecl
+        CJC_ASSERT(outerClassDecl.isSome())
+        let methodAccessor = (ASTCloner.Clone(methodDecl) as FuncDecl).getOrThrow()
+        let _ = mockUtils.AddGenericIfNeeded(methodDecl, methodAccessor)
+        let erasedAccessor: Option<FuncDecl> = if (needEraseTypes) {
+            Some(GenerateErasedFuncAccessor(methodDecl))
+        } else {
+            None
+        }
+
+        let typeParamTys = ArrayList<Ty>()
+        let memberAccessOriginal = if (needEraseTypes) {
+            CreateRefExpr(erasedAccessor.getOrThrow())
+        } else {
+            CreateRefExpr(methodDecl)
+        }
+        if (let Some(generic) <- methodAccessor.funcBody.getOrThrow().generic) {
+            for (typeParam in generic.typeParameters) {
+                typeParam.outerDecl = methodAccessor
+                typeParamTys.add(typeParam.GetTy().getOrThrow())
+                memberAccessOriginal.instTys.add(typeParam.GetTy().getOrThrow())
+            }
+        }
+
+        let typeSubst = GenerateTypeMapping(methodDecl, typeParamTys)
+        let originalFuncTy = (typeManager.GetInstantiatedTy(
+            methodDecl.GetTy().getOrThrow(), typeSubst) as FuncTy).getOrThrow()
+        methodAccessor.SetTy(originalFuncTy)
+        memberAccessOriginal.SetTy(if (needEraseTypes) {
+            erasedAccessor.getOrThrow().GetTy().getOrThrow()
+        } else {
+            originalFuncTy
+        })
+
+        let mockedMethodArgRefs = ArrayList<FuncArg>()
+        let accessorParams = methodAccessor.funcBody.getOrThrow().paramLists[0].params
+        for (paramIndex in 0..accessorParams.size) {
+            let param = accessorParams[paramIndex]
+            param.SetTy(typeManager.GetInstantiatedTy(param.GetTy().getOrThrow(), typeSubst))
+            param.typeNode = MockUtils.CreateType(param.GetTy().getOrThrow())
+            param.outerDecl = methodAccessor
+            let refExpr = CreateRefExpr(param)
+            refExpr.curFile = param.curFile
+            if (let Some(_) <- param.desugarDecl) {
+                let originalParam = methodDecl.funcBody.getOrThrow().paramLists[0].params[paramIndex]
+                CJC_ASSERT(originalParam.desugarDecl.isSome())
+                param.desugarDecl = GenerateFuncAccessor(originalParam.desugarDecl.getOrThrow())
+                param.desugarDecl.getOrThrow().ownerFunc = methodAccessor
+            }
+            mockedMethodArgRefs.add(CreateFuncArg(refExpr))
+        }
+
+        let callOriginalMethod = CallExpr()
+        if (needEraseTypes) {
+            callOriginalMethod.SetTy(typeManager.GetAnyTy())
+            callOriginalMethod.resolvedFunction = erasedAccessor.getOrThrow()
+        } else {
+            callOriginalMethod.SetTy(originalFuncTy.retTy)
+            callOriginalMethod.resolvedFunction = methodDecl
+        }
+        callOriginalMethod.baseFunc = memberAccessOriginal
+        callOriginalMethod.args.add(all: mockedMethodArgRefs)
+        callOriginalMethod.callKind = CallKind.CALL_DECLARED_FUNCTION
+        callOriginalMethod.curFile = methodDecl.curFile
+
+        let retValueExpr: Expr = if (needEraseTypes) {
+            mockUtils.CreateTypeCastOrZeroValue(callOriginalMethod, originalFuncTy.retTy)
+        } else {
+            callOriginalMethod
+        }
+        let accessorBody = methodAccessor.funcBody.getOrThrow()
+        accessorBody.body.getOrThrow().body.clear()
+        accessorBody.body.getOrThrow().body.add(CreateReturnExpr(retValueExpr, Some(accessorBody)))
+        accessorBody.funcDecl = methodAccessor
+        accessorBody.SetTy(originalFuncTy)
+        accessorBody.body.getOrThrow().SetTy(originalFuncTy)
+        accessorBody.retType.getOrThrow().SetTy(originalFuncTy.retTy)
+        methodAccessor.identifier = SrcIdentifier(
+            MockUtils.BuildMockAccessorIdentifier(methodDecl, AccessorKind.METHOD))
+        methodAccessor.mangledName = mockUtils.Mangle(methodAccessor)
+
+        if (needEraseTypes) {
+            MockSupportManager.MarkMockAccessorWithAttributes(methodAccessor, GetAccessLevel(methodDecl))
+            methodAccessor.linkage = methodDecl.linkage
+        } else {
+            MockSupportManager.MarkMockAccessorWithAttributes(methodAccessor, AccessLevel.PUBLIC)
+            methodAccessor.linkage = Linkage.EXTERNAL
+            methodDecl.linkage = Linkage.EXTERNAL
+        }
+
+        for (param in accessorParams) {
+            if (let Some(desugarDecl) <- param.desugarDecl) {
+                desugarDecl.mangledName = ""
+                desugarDecl.mangledName = mockUtils.Mangle(desugarDecl)
+            }
+        }
+        if (needEraseTypes) {
+            mockUtils.AttachGeneratedDecl(erasedAccessor.getOrThrow())
+        }
+        return methodAccessor
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
