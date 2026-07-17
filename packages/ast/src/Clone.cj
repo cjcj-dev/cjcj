@@ -1665,10 +1665,8 @@ public class ASTCloner {
                 }
                 targetDecl.identifierForLsp = sourceDecl.identifierForLsp
                 targetDecl.keywordPos = sourceDecl.keywordPos
-                targetDecl.rawMangleName = sourceDecl.rawMangleName
                 targetDecl.hash = sourceDecl.hash
                 targetDecl.toBeCompiled = sourceDecl.toBeCompiled
-                targetDecl.mangledName = sourceDecl.mangledName
                 targetDecl.moduleName = sourceDecl.moduleName
                 targetDecl.fullPackageName = sourceDecl.fullPackageName
                 targetDecl.outerDecl = sourceDecl.outerDecl
