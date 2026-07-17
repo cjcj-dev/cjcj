@@ -375,7 +375,7 @@ extend ParserImpl {
         return true
     }
 
-    private func ParseMacroCallIdentifier(invocation: MacroInvocation, node: Node): Bool {
+    public func ParseMacroCallIdentifier(invocation: MacroInvocation, node: Node): Bool {
         let atToken = Peek()
         if (!Skip(TokenKind.AT)) {
             Skip(TokenKind.AT_EXCL)
