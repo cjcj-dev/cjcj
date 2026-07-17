@@ -133,7 +133,7 @@ public open class DefaultCompilerInstance {
 
     public open func PerformCjoSaving(): Bool {
         return ProfiledBool("Main Stage", "Save cjo", { =>
-            if (!ShouldSaveCjoForOutputMode()) {
+            if (invocation.globalOptions.outputMode == OutputMode.CHIR) {
                 return true
             }
             return SaveCjos(core.GetSourcePackages())
@@ -222,7 +222,7 @@ public open class DefaultCompilerInstance {
 
     private func ShouldPublishCjo(): Bool {
         // C++: FrontendTool/DefaultCompilerInstance.cpp:177-218 DefaultCIImpl::SaveCjo.
-        return invocation.globalOptions.outputMode == OutputMode.CHIR || ShouldSaveCjoForOutputMode()
+        return true
     }
 
     protected func ShouldSaveCjoForOutputMode(): Bool {
