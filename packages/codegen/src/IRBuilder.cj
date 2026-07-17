@@ -3,11 +3,13 @@ package cjcj::codegen
 import std.collection.*
 import cjcj::chir.Apply
 import cjcj::chir.ApplyWithException
+import cjcj::chir.Attribute
 import cjcj::chir.BoolLiteral
 import cjcj::chir.BoxType
 import cjcj::chir.ClassType
 import cjcj::chir.CPointerType
 import cjcj::chir.CustomType
+import cjcj::chir.Debug
 import cjcj::chir.EnumType
 import cjcj::chir.Expression
 import cjcj::chir.ExprKind
@@ -449,6 +451,140 @@ public class IRBuilder2 <: Resource {
             let diLoc = diBuilder.CreateDILoc(debugNode, removable: removable)
             unsafe { LLVMSetCurrentDebugLocation2(builder.raw, diLoc) }
         }
+    }
+
+    public func EmitDeclare(debugNode: Debug, pointerWrapper!: Bool = false): Unit {
+        CJC_ASSERT(cgMod.GetCGContext().GetCompileOptions().enableCompileDebug)
+        cgMod.GetDIBuilder().getOrThrow().EmitDeclare(debugNode, GetInsertBlock(), pointerWrapper: pointerWrapper)
+        EmitLocation(CHIRExprWrapper(debugNode))
+    }
+
+    public func CreateLocalVarPointer(debugNode: Debug, cgValue: CGValue): Unit {
+        CJC_ASSERT(cgMod.GetCGContext().GetCompileOptions().enableCompileDebug)
+        let cgType = cgValue.GetCGType().getOrThrow()
+        let arg = cgValue.GetRawValue()
+        let i8PtrTy1 = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32) }
+        let tmpArg = CreateEntryAlloca(i8PtrTy1, name: debugNode.GetSrcCodeIdentifier() + ".debug")
+        let inst = CreateStore(arg, tmpArg)
+        unsafe {
+            LLVMInstructionSetDebugLoc(tmpArg, LLVMNullMetadata())
+            LLVMInstructionSetDebugLoc(inst, LLVMNullMetadata())
+        }
+        cgMod.SetOrUpdateMappedCGValue(debugNode.GetValue(), CGValue(tmpArg, cgType))
+        EmitDeclare(debugNode)
+        cgMod.SetValuesToLoad(debugNode.GetValue(), i8PtrTy1, tmpArg)
+        cgMod.SetOrUpdateMappedCGValue(debugNode.GetValue(), CGValue(arg, cgType))
+    }
+
+    public func CreateUnBoxDeclare(debugNode: Debug, cgValue: CGValue): Unit {
+        let operandTy = DeRef(debugNode.GetOperand(0).GetType().getOrThrow())
+        CJC_ASSERT(operandTy.IsClass())
+        let capturedTy = (operandTy as ClassType).getOrThrow().GetClassDef().GetDirectInstanceVar(0).ty
+        let capturedCGType = CGType.GetOrCreate(cgMod, capturedTy)
+        let load = CreateLoad(cgValue)
+        let eleType = cgValue.GetCGType().getOrThrow().GetPointerElementType().getOrThrow()
+            .GetPointerElementType().getOrThrow()
+        var ret = GetPayloadFromObject(load)
+        let layoutType = (eleType as CGClassType).getOrThrow().GetLayoutType()
+        ret = CreateBitCast(ret, unsafe { LLVMPointerType(layoutType, 1u32) })
+        ret = CreateStructGEP(layoutType, ret, 0u32)
+        CJC_ASSERT(unsafe { LLVMGetTypeKind(LLVMTypeOf(ret)) } == LLVM_POINTER_TYPE_KIND)
+        let i8PtrTy1 = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32) }
+        let alloca = if (capturedCGType.IsRefType() || capturedCGType.IsStructType()) {
+            let value = CreateEntryAlloca(i8PtrTy1, name: debugNode.GetSrcCodeIdentifier() + ".debug")
+            let bitCast = CreateBitCast(ret, i8PtrTy1)
+            CreateStore(bitCast, value)
+            value
+        } else {
+            let value = CreateEntryAlloca(unsafe { LLVMTypeOf(ret) },
+                name: debugNode.GetSrcCodeIdentifier() + ".debug")
+            CreateStore(ret, value)
+            value
+        }
+        cgMod.GetDIBuilder().getOrThrow().EmitUnBoxDeclare(debugNode, DeRef(capturedTy),
+            debugNode.GetSrcCodeIdentifier(), alloca, GetInsertBlock())
+        EmitLocation(CHIRExprWrapper(debugNode))
+    }
+
+    public func HandleArgPointerType(argType: CGType): LLVMTypeRef {
+        let elementType = argType.GetPointerElementType().getOrThrow().GetLLVMType()
+        return unsafe { LLVMPointerType(elementType, if (argType.IsRefType()) { 1u32 } else { 0u32 }) }
+    }
+
+    public func CreateValuePointer(debugNode: Debug, cgValue: CGValue): Unit {
+        let cgType = cgValue.GetCGType().getOrThrow()
+        let isRefType = cgType.IsRefType()
+        let arg = cgValue.GetRawValue()
+        var argType = unsafe { LLVMTypeOf(arg) }
+        let isDeriveType = unsafe { LLVMGetTypeKind(argType) } == LLVM_POINTER_TYPE_KIND && !isRefType
+        argType = if (cgType.IsPointerType()) { HandleArgPointerType(cgType) } else { argType }
+        let debugArg = if (isDeriveType) { CreateAddrSpaceCast(arg, argType) } else { arg }
+        let argName = LLVMCStringToString(unsafe { LLVMGetValueName(arg) }) ?? ""
+        let tmpArg = CreateEntryAlloca(argType, name: argName + ".debug")
+        let inst = CreateStore(debugArg, tmpArg)
+        unsafe {
+            LLVMInstructionSetDebugLoc(tmpArg, LLVMNullMetadata())
+            LLVMInstructionSetDebugLoc(inst, LLVMNullMetadata())
+        }
+        cgMod.SetOrUpdateMappedCGValue(debugNode.GetValue(), CGValue(tmpArg, cgType))
+        EmitDeclare(debugNode)
+        if (!isDeriveType) {
+            cgMod.SetValuesToLoad(debugNode.GetValue(), argType, tmpArg)
+        }
+        cgMod.SetOrUpdateMappedCGValue(debugNode.GetValue(), CGValue(arg, cgType))
+    }
+
+    public func CreateBoxedValueForValueType(debugNode: Debug, cgValue: CGValue): Unit {
+        let curLoc = unsafe { LLVMGetCurrentDebugLocation2(builder.raw) }
+        unsafe { LLVMSetCurrentDebugLocation2(builder.raw, LLVMNullMetadata()) }
+        let arg = cgValue.GetRawValue()
+        let cgType = cgValue.GetCGType().getOrThrow()
+        let payloadSize = GetLayoutSize_32(debugNode.GetValue().GetType().getOrThrow())
+        let argType = unsafe { LLVMTypeOf(arg) }
+        let argName = LLVMCStringToString(unsafe { LLVMGetValueName(arg) }) ?? ""
+        let tiValue = CreateTypeInfo(DeRef(debugNode.GetValue().GetType().getOrThrow()))
+        let thisDebug = CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([tiValue, payloadSize]))
+        try (nameCString = unsafe { LibC.mallocCString(argName + ".generic.alloca") }.asResource()) {
+            unsafe { LLVMSetValueName2(thisDebug, nameCString.value, UIntNative((argName + ".generic.alloca").size)) }
+        }
+        let ty = DeRef(debugNode.GetValue().GetType().getOrThrow())
+        if (debugNode.GetValue().IsParameter()) {
+            let payload = GetPayloadFromObject(thisDebug)
+            let castedPtr = CreateBitCast(payload, unsafe { LLVMPointerType(argType, 1u32) })
+            let addrType = CGType.GetOrCreate(cgMod,
+                CGType.GetRefTypeOf(cgMod.GetCGContext().GetCHIRBuilder(), debugNode.GetValue().GetType().getOrThrow()),
+                extraInfo: TypeExtraInfo(1u32))
+            CreateStore(cgValue, CGValue(castedPtr, addrType))
+            if (ty.IsStruct()) {
+                let curCHIRFunc = (GetInsertCGFunction().getOrThrow().GetOriginal() as Function).getOrThrow()
+                let shouldUpdateThis = curCHIRFunc.GetSrcCodeIdentifier() == "init" ||
+                    curCHIRFunc.TestAttr(Attribute.MUT)
+                if (shouldUpdateThis && argName == "this") {
+                    cgMod.GetCGContext().debugValue = thisDebug
+                }
+            }
+        }
+        var tempAlloca = thisDebug
+        var pointerWrapper = false
+        let isZeroSize = CGType.GetOrCreate(cgMod, ty).GetSize() == Some(0)
+        if (argName != "this" || unsafe { LLVMGetTypeKind(argType) } != LLVM_POINTER_TYPE_KIND || isZeroSize) {
+            let i8PtrTy1 = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32) }
+            tempAlloca = CreateEntryAlloca(i8PtrTy1, name: argName + ".debug")
+            CreateStore(thisDebug, tempAlloca)
+            pointerWrapper = true
+        } else {
+            try (nameCString = unsafe { LibC.mallocCString(argName + ".debug") }.asResource()) {
+                unsafe { LLVMSetValueName2(thisDebug, nameCString.value, UIntNative((argName + ".debug").size)) }
+            }
+        }
+        cgMod.SetOrUpdateMappedCGValue(debugNode.GetValue(), CGValue(tempAlloca, cgType))
+        EmitDeclare(debugNode, pointerWrapper: pointerWrapper)
+        let isStructThis = ty.IsStruct() && debugNode.GetSrcCodeIdentifier() == "this"
+        if (!debugNode.GetValue().IsParameter() || isStructThis) {
+            cgMod.SetBoxedValuesToLoad(debugNode.GetValue(), argType, thisDebug)
+        }
+        cgMod.SetOrUpdateMappedCGValue(debugNode.GetValue(), CGValue(arg, cgType))
+        unsafe { LLVMSetCurrentDebugLocation2(builder.raw, curLoc) }
     }
 
     public func CreateLoadInstForParameter(chirExpression: Expression): Unit {
