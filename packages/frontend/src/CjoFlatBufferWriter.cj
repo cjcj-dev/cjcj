@@ -52,6 +52,27 @@ private func CollectInstantiatedTys(ty: Option<Ty>, tys: HashSet<Ptr<Ty>>): Unit
     }
 }
 
+// ASTWriter.cpp:253-273 CollectInstantiations.
+private func CollectInstantiations(decl: Decl): HashSet<Ptr<Ty>> {
+    if (decl.TestAttr(Attribute.GENERIC)) {
+        return HashSet<Ptr<Ty>>()
+    }
+    let instTys = HashSet<Ptr<Ty>>()
+    if (let Some(inheritableDecl) <- (decl as InheritableDecl)) {
+        for (inheritedType in inheritableDecl.inheritedTypes) {
+            CollectInstantiatedTys(inheritedType.GetTy(), instTys)
+        }
+        for (member in inheritableDecl.GetMemberDeclPtrs()) {
+            if (!member.TestAttr(Attribute.GENERIC)) {
+                CollectInstantiatedTys(member.GetTy(), instTys)
+            }
+        }
+    } else {
+        CollectInstantiatedTys(decl.GetTy(), instTys)
+    }
+    return instTys
+}
+
 // ASTWriterImpl.h:44-50 NodeInfo.
 private class NodeInfo {
     let begin: ArrayList<UInt8>
