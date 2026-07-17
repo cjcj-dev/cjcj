@@ -4894,7 +4894,8 @@ public class IRBuilder2 <: Resource {
                 LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw),
                     cgMod.GetTypeSize(valueCGType.GetLLVMType()), 0)
             }
-            CallGCWriteStruct(objectValue, typedPayload, sourcePtr, size, valueCGType.GetOriginal().ToString())
+            CallGCWriteAgg(valueCGType.GetLayoutType(),
+                ArrayList<LLVMValueRef>([objectValue, typedPayload, sourcePtr, size]))
             return
         }
         let addrType = CGType.GetOrCreate(cgMod, GetCGContext().GetCHIRBuilder().context.GetRefTy(valueTy),
