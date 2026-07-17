@@ -113,6 +113,45 @@ public class TypeCheckerImpl {
         this.importManager = importManager
     }
 
+    public func FilterSumUpperbound(ma: MemberAccess, typeVar: GenericsTy, decl: Decl): Bool {
+        let constraint = typeManager.constraints.GetOrCreate(typeVar)
+        let sum = constraint.sum
+        var idx: Int64 = 0
+        while (idx < sum.values.size) {
+            let sumTy = sum.values[idx]
+            var hasMemberOfTargetSignature = false
+            for ((foundDecl, upperBounds) in ma.foundUpperBoundMap) {
+                var containsUpperBound = false
+                for (upperBound in upperBounds) {
+                    if (upperBound == sumTy) {
+                        containsUpperBound = true
+                        break
+                    }
+                }
+                if (containsUpperBound && typeManager.IsTyEqual(decl.GetTy().getOrThrow(),
+                    foundDecl.GetTy().getOrThrow())) {
+                    hasMemberOfTargetSignature = true
+                    break
+                }
+            }
+            if (!hasMemberOfTargetSignature) {
+                let _ = sum.Remove(sumTy)
+            } else {
+                idx++
+            }
+        }
+        if (sum.values.size == 1 && !sum.values[0].IsAny()) {
+            let equalTy = sum.values[0]
+            if (constraint.eq.values.isEmpty()) {
+                let _ = constraint.eq.Add(equalTy)
+            }
+            if (!typeManager.IsTyEqual(typeVar, equalTy)) {
+                return false
+            }
+        }
+        return true
+    }
+
     public func PickConstaintFromTys(tv: GenericsTy, tys: TySet, isUB: Bool): MatchResult {
         var result = MatchResult.NONE
         try (cs = typeManager.constraints.CommitScope()) {

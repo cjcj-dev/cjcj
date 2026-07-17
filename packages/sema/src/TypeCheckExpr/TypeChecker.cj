@@ -5047,7 +5047,7 @@ extend TypeChecker {
         try (cs = impl.typeManager.constraints.CommitScope()) {
             if (maybeEnumOrVariadic || mayRetryAsTypeCtor) {
                 try (ds = DiagSuppressor(impl.diag)) {
-                    (result, typeMapping) = MatchFunctionForCall(impl.typeManager, impl.diag, Some(ctx), candidates, ce, target,
+                    (result, typeMapping) = impl.MatchFunctionForCall(Some(ctx), candidates, ce, target,
                         argChecker: Some({ expectedTy5: Ty, arg10: FuncArg => CheckCallArgFromContext(ctx, expectedTy5, arg10) }),
                         declSynthesizer: Some({ fd3: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd3)) }),
                         argSynthesizer: Some({ arg11: FuncArg =>
@@ -5062,7 +5062,7 @@ extend TypeChecker {
                     }
                 }
             } else {
-                (result, typeMapping) = MatchFunctionForCall(impl.typeManager, impl.diag, Some(ctx), candidates, ce, target,
+                (result, typeMapping) = impl.MatchFunctionForCall(Some(ctx), candidates, ce, target,
                     argChecker: Some({ expectedTy7: Ty, arg13: FuncArg => CheckCallArgFromContext(ctx, expectedTy7, arg13) }),
                     declSynthesizer: Some({ fd4: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd4)) }),
                     argSynthesizer: Some({ arg14: FuncArg =>
@@ -5087,8 +5087,7 @@ extend TypeChecker {
                 baseFunc.GetTy().getOrThrow()
             })
             let ret = (maybeEnumOverloadOP && ChkFunctionCallExpr(ctx, target, ce)) ||
-                (maybeVariadicFunction && result.isEmpty() && ChkVariadicCallExpr(impl.typeManager, impl.diag,
-                    impl.importManager.getOrThrow(),
+                (maybeVariadicFunction && result.isEmpty() && impl.ChkVariadicCallExpr(
                     Some(ctx), target, ce, candidates, diagnostics,
                     { call7: CallExpr, arity4: Int64 => DesugarVariadicCallExpr(call7, arity4) },
                     argChecker: Some({ expectedTy11: Ty, arg19: FuncArg => CheckCallArgFromContext(ctx, expectedTy11, arg19) }),
@@ -6866,50 +6865,11 @@ extend TypeChecker {
                 targets.add(target)
             }
         }
-        if (targets.size == 1 && !FilterSumUpperbound(ma, typeVar, targets[0])) {
+        if (targets.size == 1 && !impl.FilterSumUpperbound(ma, typeVar, targets[0])) {
             ma.SetTy(TypeManager.GetInvalidTy())
             DiagMismatchedTypesWithFoundTy(impl.diag.getOrThrow(), ma,
                 targetTy.getOrThrow(), ma.GetTy().getOrThrow())
         }
-    }
-
-    private func FilterSumUpperbound(ma: MemberAccess, typeVar: GenericsTy, decl: Decl): Bool {
-        let constraint = impl.typeManager.constraints.GetOrCreate(typeVar)
-        let sum = constraint.sum
-        var idx: Int64 = 0
-        while (idx < sum.values.size) {
-            let sumTy = sum.values[idx]
-            var hasMemberOfTargetSignature = false
-            for ((foundDecl, upperBounds) in ma.foundUpperBoundMap) {
-                var containsUpperBound = false
-                for (upperBound in upperBounds) {
-                    if (upperBound == sumTy) {
-                        containsUpperBound = true
-                        break
-                    }
-                }
-                if (containsUpperBound && impl.typeManager.IsTyEqual(decl.GetTy().getOrThrow(),
-                    foundDecl.GetTy().getOrThrow())) {
-                    hasMemberOfTargetSignature = true
-                    break
-                }
-            }
-            if (!hasMemberOfTargetSignature) {
-                let _ = sum.Remove(sumTy)
-            } else {
-                idx++
-            }
-        }
-        if (sum.values.size == 1 && !sum.values[0].IsAny()) {
-            let equalTy = sum.values[0]
-            if (constraint.eq.values.isEmpty()) {
-                let _ = constraint.eq.Add(equalTy)
-            }
-            if (!impl.typeManager.IsTyEqual(typeVar, equalTy)) {
-                return false
-            }
-        }
-        return true
     }
 
     private func CheckUpperBoundTargetsCaseOthers(ctx: ASTContext, ma: MemberAccess,

@@ -604,11 +604,10 @@ private func FuncDeclsGroupByFixedPositionalArity(candidates: ArrayList<FuncDecl
 // the desugared call's resolved type/function back onto the original call.
 // `variadicDesugar` is DesugarVariadicCallExpr, threaded in as a callback from the ctx-aware dispatch
 // (sema.TypeCheckExpr subpackage) because this main-sema package cannot import sema.Desugar directly.
-internal func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>,
-    importManager: SemaImportManager,
-    ctx: Option<ASTContext>, target: Option<Ty>, ce: CallExpr, candidates: ArrayList<FuncDecl>,
-    diagnostics: ArrayList<BasicDiagnostic>, variadicDesugar: (CallExpr, Int64) -> Unit,
-    argChecker!: Option<CallArgChecker> = None,
+extend TypeCheckerImpl {
+internal func ChkVariadicCallExpr(ctx: Option<ASTContext>, target: Option<Ty>, ce: CallExpr,
+    candidates: ArrayList<FuncDecl>, diagnostics: ArrayList<BasicDiagnostic>,
+    variadicDesugar: (CallExpr, Int64) -> Unit, argChecker!: Option<CallArgChecker> = None,
     declSynthesizer!: Option<CallDeclSynthesizer> = None, argSynthesizer!: Option<(FuncArg) -> Ty> = None,
     exprSynthesizer!: Option<(Expr) -> Ty> = None, effectiveArgChecker!: Option<CallArgChecker> = None,
     genericChecker!: Option<(Decl, ArrayList<Type>, Expr) -> Bool> = None): Bool {
@@ -622,7 +621,7 @@ internal func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDi
         try (ds = DiagSuppressor(diag)) {
             if (let Some(desugar) <- ce.desugarExpr) {
                 if (let Some(desugarCall) <- (desugar as CallExpr)) {
-                    let (matchResults, _) = MatchFunctionForCall(typeManager, diag, ctx, group, desugarCall, target,
+                    let (matchResults, _) = MatchFunctionForCall(ctx, group, desugarCall, target,
                         argChecker: argChecker, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
                         exprSynthesizer: exprSynthesizer, effectiveArgChecker: effectiveArgChecker)
                     if (matchResults.size == 1) {
@@ -643,7 +642,7 @@ internal func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDi
         variadicDesugar(ce, fixedPositionalArity)
         if (let Some(desugar) <- ce.desugarExpr) {
             if (let Some(desugarCall) <- (desugar as CallExpr)) {
-                let (matchResults, typeMapping) = MatchFunctionForCall(typeManager, diag, ctx, results, desugarCall, target,
+                let (matchResults, typeMapping) = MatchFunctionForCall(ctx, results, desugarCall, target,
                     argChecker: argChecker, declSynthesizer: declSynthesizer, argSynthesizer: argSynthesizer,
                     exprSynthesizer: exprSynthesizer, effectiveArgChecker: effectiveArgChecker)
                 if (matchResults.size == 1 && PostCheckCallExpr(typeManager, diag, ctx, desugarCall,
@@ -666,6 +665,7 @@ internal func ChkVariadicCallExpr(typeManager: TypeManager, diag: Option<BasicDi
     }
     ce.callKind = CallKind.CALL_INVALID
     return false
+}
 }
 
 
@@ -4170,8 +4170,9 @@ private func CheckFunctionMatch(typeManager: TypeManager, diag: Option<BasicDiag
     return (result, unit.typeMapping)
 }
 
-internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
-    candidates: ArrayList<FuncDecl>, ce: CallExpr, target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
+extend TypeCheckerImpl {
+internal func MatchFunctionForCall(ctx: Option<ASTContext>, candidates: ArrayList<FuncDecl>, ce: CallExpr,
+    target: Option<Ty>, argChecker!: Option<CallArgChecker> = None,
     declSynthesizer!: Option<CallDeclSynthesizer> = None, argSynthesizer!: Option<(FuncArg) -> Ty> = None,
     exprSynthesizer!: Option<(Expr) -> Ty> = None,
     effectiveArgChecker!: Option<CallArgChecker> = None): (ArrayList<FuncDecl>, SubstPack) {
@@ -4189,6 +4190,20 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
         fallbackCombinations.add(currentArgs)
         fallbackCombinations
     }
+    let filterSum = { ret: ArrayList<FuncDecl> =>
+        if (let Some(baseFunc) <- ce.baseFunc) {
+            if (let Some(ma) <- (baseFunc as MemberAccess)) {
+                if (let Some(baseExpr) <- ma.baseExpr) {
+                    if (let Some(baseTy) <- baseExpr.GetTy()) {
+                        if (baseTy.IsPlaceholder() && ret.size == 1) {
+                            FilterSumUpperbound(ma, (baseTy as GenericsTy).getOrThrow(), ret[0])
+                        }
+                    }
+                }
+            }
+        }
+        ret
+    }
     if (!ce.args.isEmpty() && argCombinations.isEmpty()) {
         EndTyVarScope(tyVarScope)
         return (ArrayList<FuncDecl>(), SubstPack())
@@ -4201,7 +4216,7 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
         let result = CheckFunctionMatch(typeManager, diag, ctx, candidate, target, argChecker, declSynthesizer,
             argSynthesizer, effectiveArgChecker)
         EndTyVarScope(tyVarScope)
-        return result
+        return (filterSum(result[0]), result[1])
     }
     let fdScopeLevelMap = HashMap<Node, Int64>()
     let orderedCandidates = GetOrderedCandidates(ctx, ce, candidates, fdScopeLevelMap)
@@ -4258,7 +4273,8 @@ internal func MatchFunctionForCall(typeManager: TypeManager, diag: Option<BasicD
         result = CheckMatchResult(typeManager, diag, ctx, ce, legals, illegals, effectiveArgChecker)
     }
     EndTyVarScope(tyVarScope)
-    return result
+    return (filterSum(result[0]), result[1])
+}
 }
 
 private func CheckCallArgs(diag: Option<BasicDiagnosticEngine>, typeManager: TypeManager, ce: CallExpr, funcTy: FuncTy): Option<ArrayList<Ty>> {
