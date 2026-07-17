@@ -3019,6 +3019,7 @@ extend ParserImpl {
                     if (!ret.identifier.Valid()) { "" } else { " '${ret.identifier.Val()}'" },
                     lastToken.End())
             }
+            ParseFuncDeclAnnos(annos, ret)
             if (let Some(body) <- ret.funcBody) {
                 if (let Some(retType) <- body.retType) {
                     ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType,
