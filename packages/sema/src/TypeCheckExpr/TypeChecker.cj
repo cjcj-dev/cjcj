@@ -1109,7 +1109,8 @@ extend TypeChecker {
     }
 
     public func PerformDesugarAfterSema(pkgs: ArrayList<Package>): Unit {
-        try (ts = TyVarScope(impl.typeManager)) {
+        let tyVarScope = BeginTyVarScope(impl.typeManager)
+        try {
             let instance = impl.ci.getOrThrow()
             let options = instance.globalOptions
             let packagesFullConfig = InteropCJPackageConfigReader()
@@ -1157,6 +1158,8 @@ extend TypeChecker {
             if (options.enableCompileDebug || options.displayLineInfo) {
                 UpdatePosForMacroExpandedNodes(pkgs)
             }
+        } finally {
+            EndTyVarScope(tyVarScope)
         }
     }
 
