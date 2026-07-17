@@ -11,6 +11,8 @@ import cjcj::basic.DEFAULT_POSITION as BasicDefaultPosition
 import cjcj::basic.DiagnosticCache
 import cjcj::basic.Diagnostic
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.InteropCJPackageConfigReader
+import cjcj::basic.WriteError
 import cjcj::incremental_compilation.IncreKind
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::option.OutputMode as OptionOutputMode
@@ -35,6 +37,7 @@ import cjcj::utils.MAIN_INVOKE
 import cjcj::utils.OBJECT_NAME
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.RAW_ARRAY_NAME
+import cjcj::utils.STANDARD_LIBS
 import cjcj::utils.VARRAY_NAME
 
 private let INOUT_TEMP_VALUE: String = "temporary value"
@@ -1103,6 +1106,58 @@ extend TypeChecker {
             }
         }
         PostTypeCheck(activeContexts)
+    }
+
+    public func PerformDesugarAfterSema(pkgs: ArrayList<Package>): Unit {
+        try (ts = TyVarScope(impl.typeManager)) {
+            let instance = impl.ci.getOrThrow()
+            let options = instance.globalOptions
+            let packagesFullConfig = InteropCJPackageConfigReader()
+            if (options.enableInteropCJMapping && options.interopCJPackageConfigPath != "./" &&
+                !packagesFullConfig.Parse(options.interopCJPackageConfigPath)) {
+                WriteError("Failed to parse package config file\n")
+            }
+            if (options.enableInteropCJMapping && !packagesFullConfig.Validate()) {
+                WriteError("Package config validation failed\n")
+            }
+            let manager = impl.importManager.getOrThrow()
+            for (pkg in pkgs) {
+                if (options.enableInteropCJMapping && options.interopCJPackageConfigPath != "./") {
+                    pkg.isInteropCJPackageConfig = true
+                    impl.ParsePackageConfigFile(pkg, packagesFullConfig)
+                }
+                let ctx = instance.GetASTContextByPackage(Some(pkg)).getOrThrow()
+                PerformDesugarAfterTypeCheck(impl.typeManager, manager, instance.mangler,
+                    impl.structMemberMap, pkg, context: Some(ctx), options: options,
+                    synthesizer: Some({ synCtx: ASTContext, pos: SynPos, node: Node =>
+                        SynthesizeWithoutRecover(synCtx, pos, node)
+                    }), callChecker: Some({ checkCtx: ASTContext, target: Ty, call: CallExpr =>
+                        ChkCallExpr(checkCtx, Some(target), call)
+                    }), diag: impl.diag)
+                TryDesugarForCoalescing(impl.typeManager, pkg)
+                AddOptionBox(impl.typeManager, pkg)
+            }
+            if (options.enIncrementalCompilation) {
+                instance.CacheSemaUsage(GetSemanticUsage(impl.typeManager, pkgs))
+            }
+            impl.GenerateMainInvoke()
+            CheckInlineFunctions(instance.GetPackages())
+            for (pkg in pkgs) {
+                AnalyzeFunctionLinkage(pkg, options, impl.diag.getOrThrow())
+            }
+            let saveFileWithAbsPath = options.enableCompileDebug || options.enableCoverage
+            for (pkg in pkgs) {
+                let saveAbsPath = if (STANDARD_LIBS.contains(pkg.fullPackageName)) {
+                    options.enableCoverage
+                } else {
+                    saveFileWithAbsPath
+                }
+                manager.ExportDeclsWithContent(saveAbsPath, pkg)
+            }
+            if (options.enableCompileDebug || options.displayLineInfo) {
+                UpdatePosForMacroExpandedNodes(pkgs)
+            }
+        }
     }
 
     public func SetOverflowStrategy(pkgs: ArrayList<Package>): Unit {
@@ -2551,12 +2606,6 @@ extend TypeChecker {
     private func PostTypeCheck(activeContexts: ArrayList<ASTContext>): Unit {
         let recursivePkgs = BuildRecursiveEliminationPackages(activeContexts)
         let implicitUsedDecls = GetImplicitUsedCoreDecls()
-        let activePkgs = ArrayList<Package>()
-        for (ctx in activeContexts) {
-            if (let Some(pkg) <- contextPackage(ctx)) {
-                activePkgs.add(pkg)
-            }
-        }
         for (ctx in activeContexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
                 let manager = impl.importManager.getOrThrow()
@@ -2577,23 +2626,12 @@ extend TypeChecker {
                 // C++ TypeChecker.cpp:2060-2062 desugars property access in sema before const checking.
                 DesugarForPropDecl(impl.typeManager, pkg)
                 CheckConstEvaluation(pkg, impl.diag.getOrThrow())
-                PerformDesugarAfterTypeCheck(impl.typeManager, manager, pkg, context: Some(ctx), options: GlobalOptions(),
-                    synthesizer: Some({ synCtx: ASTContext, pos: SynPos, node: Node =>
-                        SynthesizeWithoutRecover(synCtx, pos, node)
-                    }), callChecker: Some({ checkCtx: ASTContext, target: Ty, call: CallExpr =>
-                        ChkCallExpr(checkCtx, Some(target), call)
-                    }), diag: impl.diag)
                 CollectMainFunctionsFromMainDecls(pkg)
                 let instance = impl.ci.getOrThrow()
                 PluginCustomAnnoChecker(
                     instance, impl.diag.getOrThrow(), impl.importManager.getOrThrow()).Check(pkg)
             }
         }
-        let instance = impl.ci.getOrThrow()
-        if (instance.globalOptions.enIncrementalCompilation) {
-            instance.CacheSemaUsage(GetSemanticUsage(impl.typeManager, activePkgs))
-        }
-        impl.GenerateMainInvoke()
         substituteImportedTypeAliasTy(impl.typeManager, recursivePkgs)
         CheckWhetherHasProgramEntry()
     }

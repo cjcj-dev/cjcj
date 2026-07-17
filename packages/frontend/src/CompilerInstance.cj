@@ -535,26 +535,8 @@ public class CompilerInstance {
     public func PerformDesugarAfterSema(): Bool {
         testManager.MarkDeclsForTestIfNeeded(GetSourcePackages())
         getCompileStrategy().DesugarAfterSema()
-        // Inline checking needs to process source package and imported packages which has source imported decls.
-        CheckInlineFunctionsForPackages(GetPackages(), invocation.globalOptions)
-        // Since the inlined function will affect decls' visibility, analyze linkage after inline decl checking.
-        for (pkg in srcPkgs) {
-            AnalyzeFunctionLinkage(pkg, invocation.globalOptions, diag.AsBasicDiagnosticEngine())
-        }
         if (!invocation.globalOptions.enIncrementalCompilation) {
             testManager.PrepareToMock(GetSourcePackages())
-        }
-        // Sema/Desugar/AfterTypeCheck.cpp:466-476: pre-save full exported
-        // declarations after desugaring and linkage analysis, before generic instantiation.
-        let saveFileWithAbsPath = invocation.globalOptions.enableCompileDebug ||
-            invocation.globalOptions.enableCoverage
-        for (pkg in srcPkgs) {
-            let saveAbsPath = if (STANDARD_LIBS.contains(pkg.fullPackageName)) {
-                invocation.globalOptions.enableCoverage
-            } else {
-                saveFileWithAbsPath
-            }
-            ExportDeclsWithContent(saveAbsPath, pkg)
         }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "desugar")
