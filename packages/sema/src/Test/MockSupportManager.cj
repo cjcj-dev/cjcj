@@ -922,7 +922,7 @@ public class MockSupportManager {
                     None, paramDecl.GetTy())
                 accessorParamList.add(accessorParamDecl)
             }
-            accessorFuncParamLists.add(CreateFuncParamList(accessorParamList))
+            accessorFuncParamLists.add(CreateFuncParamList(accessorParamList, None))
         }
 
         let accessorName = MockUtils.GetForeignAccessorName(funcDecl) + MockUtils.mockAccessorSuffix
