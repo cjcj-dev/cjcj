@@ -195,6 +195,7 @@ public class TestManager {
     private let ctx: MockContext = MockContext()
     private var mockUtils: Option<MockUtils> = None
     private var mockManager: Option<MockManager> = None
+    private var mockSupportManager: Option<MockSupportManager> = None
     private var importManager: SemaImportManager
     private var typeManager: TypeManager
     private var diag: BasicDiagnosticEngine
@@ -216,6 +217,9 @@ public class TestManager {
         exportForTest = compilationOptions.exportForTest
         // C++: Sema/Test/TestManager.cpp:74.
         mockUtils = Some(MockUtils(importManager, typeManager, ctx.mangler))
+        if (mockCompatible) {
+            mockSupportManager = Some(MockSupportManager())
+        }
         if (mockCompatible && testEnabled) {
             if (let Some(utils) <- mockUtils) {
                 mockManager = Some(MockManager(importManager, typeManager, utils))
@@ -343,11 +347,37 @@ public class TestManager {
             ctx.PrepareManglerContext(pkg)
             // C++: Sema/Test/TestManager.cpp:845.
             mockUtils.getOrThrow().SetGetTypeForTypeParamDecl(pkg)
+            CollectInternalDeclUsages(pkg)
             pkg.EnableAttr(Attribute.MOCK_SUPPORTED)
             MarkNodesMockSupported(pkg)
         } else {
             CheckIfNoMockSupportDependencies(pkg)
         }
+    }
+
+    // C++: Sema/Test/TestManager.cpp:733-754.
+    private func CollectInternalDeclUsages(pkg: Package): Unit {
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            var target: Option<Decl> = None
+            if (let Some(memberAccess) <- (node as MemberAccess)) {
+                target = memberAccess.target
+            }
+            if (let Some(refExpr) <- (node as RefExpr)) {
+                target = refExpr.ref.target
+            }
+            if (let None <- target) {
+                return VisitAction.WALK_CHILDREN
+            }
+            let targetDecl = target.getOrThrow()
+            if (targetDecl.fullPackageName != pkg.fullPackageName) {
+                return VisitAction.WALK_CHILDREN
+            }
+            if (MockUtils.IsMockAccessorRequired(targetDecl) && targetDecl.linkage == Linkage.INTERNAL) {
+                mockSupportManager.getOrThrow().WriteUsedInternalDecl(targetDecl)
+            }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
     }
 
     public func HandleCreateMock(pkg: Package): Unit {
