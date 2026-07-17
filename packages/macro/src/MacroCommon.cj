@@ -1,6 +1,7 @@
 package cjcj::macro_pkg
 
 import cjcj::basic.GetLineTerminator
+import cjcj::lex.GetContextualKeyword
 import cjcj::lex.Lexer as RealLexer
 import std.collection.*
 
@@ -278,9 +279,15 @@ public func IsCurFile(sm: SourceManager, token: Token, fileID!: UInt64 = 0): Boo
 }
 
 public func IsIdentifierOrContextualKeyword(kind: TokenKind): Bool {
-    return kind == TokenKind.IDENTIFIER || kind == TokenKind.PACKAGE_IDENTIFIER ||
-        kind == TokenKind.THIS || kind == TokenKind.SUPER || kind == TokenKind.INIT ||
-        kind == TokenKind.MAIN || kind == TokenKind.MACRO || kind == TokenKind.QUOTE
+    if (kind == TokenKind.IDENTIFIER) {
+        return true
+    }
+    for (contextual in GetContextualKeyword()) {
+        if (kind == contextual) {
+            return true
+        }
+    }
+    return false
 }
 
 public func GetTokensFromString(source: String, diag: DiagnosticEngine, pos!: Position = INVALID_POSITION): ArrayList<Token> {
