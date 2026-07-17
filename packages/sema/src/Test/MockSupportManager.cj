@@ -989,7 +989,7 @@ public class MockSupportManager {
         methodAccessor.isSetter = false
         methodAccessor.isGetter = false
         methodAccessor.identifier = SrcIdentifier(
-            MockUtils.BuildMockAccessorIdentifier(methodDecl, AccessorKind.METHOD, true))
+            MockUtils.BuildMockAccessorIdentifier(methodDecl, AccessorKind.METHOD, forErased: true))
         methodAccessor.mangledName = mockUtils.Mangle(methodAccessor)
         MockSupportManager.MarkMockAccessorWithAttributes(methodAccessor, AccessLevel.PUBLIC)
         methodAccessor.linkage = Linkage.EXTERNAL
