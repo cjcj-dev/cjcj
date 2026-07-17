@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::sema.{AddArrayLitConstructor, CreateInitCall, CreateThrowException, FindInitDecl, GetMemberDecl}
+import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.TypeManager
 import cjcj::utils.{CJC_ASSERT, DynamicCast, GetRootPackageName, OBJECT_NAME, V_COMPILER}
 
@@ -563,6 +564,38 @@ public class MockManager {
         AddArrayLitConstructor(typeParamInfoArray)
         typeParamInfoArray.curFile = curFile
         return typeParamInfoArray
+    }
+
+    // C++: Sema/Test/MockManager.cpp:939-970.
+    private func CreateOuterDeclInfo(funcDecl: FuncDecl, curFile: File): Expr {
+        let optionDecl = mockUtils.optionDecl.getOrThrow()
+        let optionOuterIdDeclTy = typeManager.GetEnumTy(optionDecl,
+            [declIdDecl.getOrThrow().GetTy().getOrThrow()])
+        let outerDeclExpr: Expr
+        if (let Some(rawOuterDecl) <- funcDecl.outerDecl) {
+            let someOuterDeclIdDecl = LookupEnumMember(optionDecl, OPTION_VALUE_CTOR).getOrThrow()
+            let someInstanceRef = CreateRefExpr(someOuterDeclIdDecl)
+            someInstanceRef.SetTy(typeManager.GetFunctionTy(
+                [declIdDecl.getOrThrow().GetTy().getOrThrow()], optionOuterIdDeclTy))
+
+            var outerDecl = rawOuterDecl
+            if (funcDecl.TestAttr(Attribute.IN_EXTEND)) {
+                outerDecl = MockUtils.GetExtendedTypeDecl(funcDecl).getOrThrow()
+            }
+
+            let outerDeclId = CreateDeclId(outerDecl, curFile)
+            let someOuterDeclIdCallArgs = ArrayList<FuncArg>()
+            someOuterDeclIdCallArgs.add(CreateFuncArg(outerDeclId))
+            let someOuterDeclIdCall = CreateCallExpr(someInstanceRef, someOuterDeclIdCallArgs)
+            someOuterDeclIdCall.SetTy(optionOuterIdDeclTy)
+            someOuterDeclIdCall.resolvedFunction = (someOuterDeclIdDecl as FuncDecl).getOrThrow()
+            someOuterDeclIdCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+            outerDeclExpr = someOuterDeclIdCall
+        } else {
+            outerDeclExpr = CreateRefExpr(LookupEnumMember(optionDecl, OPTION_NONE_CTOR).getOrThrow())
+        }
+        outerDeclExpr.SetTy(optionOuterIdDeclTy)
+        return outerDeclExpr
     }
 
     // C++: Sema/Test/MockManager.cpp:972-1023.
