@@ -385,7 +385,6 @@ extend ParserImpl {
         if (SeeingMacroCallDecl()) {
             return ParseMacroCall(scopeKind, modifiers, annos)
         }
-        if (SeeingFinalizer()) { return ParseFinalizer(scopeKind, modifiers, annos) }
         if (SeeingPrimaryConstructor(scopeKind)) { return ParsePrimaryConstructor(scopeKind, modifiers, annos) }
         if (Seeing(TokenKind.FUNC)) {
             let decl = ParseFuncDecl(scopeKind, modifiers, annos)
@@ -519,6 +518,7 @@ extend ParserImpl {
             }
             return decl
         }
+        if (SeeingFinalizer()) { return ParseFinalizer(scopeKind, modifiers, annos) }
         let ret = InvalidDecl(lookahead.Begin())
         DiagExpectedDeclaration(scopeKind)
 
