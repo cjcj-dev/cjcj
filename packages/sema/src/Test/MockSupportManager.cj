@@ -555,6 +555,132 @@ public class MockSupportManager {
         return varDecl
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:531-659.
+    private func GenerateSpyCallHandler(funcDecl: FuncDecl, spiedObjectDecl: Decl): Unit {
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+
+        if (funcDecl.TestAttr(Attribute.CONSTRUCTOR) || funcDecl.TestAttr(Attribute.STATIC)) {
+            return
+        }
+        let body = if (let Some(value) <- funcDecl.funcBody.getOrThrow().body) { value } else { return }
+        if (MockUtils.IsMockAccessor(funcDecl)) {
+            return
+        }
+
+        let spiedObjOptionTy = (spiedObjectDecl.GetTy().getOrThrow() as EnumTy).getOrThrow()
+        let spiedObjTy = spiedObjOptionTy.typeArgs[0]
+        let optionSpiedObjTyPattern = EnumPattern()
+        let optionSpiedObjPatternConstructor = LookupEnumMember(
+            spiedObjOptionTy.decl.getOrThrow(), OPTION_VALUE_CTOR).getOrThrow()
+        optionSpiedObjTyPattern.SetTy(
+            (optionSpiedObjPatternConstructor.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy)
+        optionSpiedObjTyPattern.constructor = mockUtils.CreateRefExprWithInstTys(
+            optionSpiedObjPatternConstructor, ArrayList<Ty>([spiedObjTy]),
+            OPTION_VALUE_CTOR, funcDecl.curFile.getOrThrow())
+
+        let spyCallMarker = mockUtils.FindGlobalDecl<Decl>(
+            funcDecl.curFile.getOrThrow().curPackage.getOrThrow(),
+            MockUtils.spyCallMarkerVarName + MockUtils.mockAccessorSuffix)
+        if (spyCallMarker.isNone()) {
+            return
+        }
+
+        let callBaseArgs = ArrayList<FuncArg>()
+        for (param in funcDecl.funcBody.getOrThrow().paramLists[0].params) {
+            callBaseArgs.add(CreateFuncArg(CreateRefExpr(param)))
+        }
+
+        let castTy = funcDecl.outerDecl.getOrThrow().GetTy().getOrThrow()
+        let castType = MockUtils.CreateType(castTy)
+        let varPatternForTypeCast = CreateVarPattern(V_COMPILER, Some(castTy))
+        let varPatternForTypeCastRef = CreateRefExpr(varPatternForTypeCast.varDecl.getOrThrow())
+        varPatternForTypeCastRef.SetTy(castTy)
+        varPatternForTypeCastRef.instTys.add(castTy)
+
+        let memberAccessFuncBaseExpr = CreateMemberAccess(varPatternForTypeCastRef, funcDecl)
+        memberAccessFuncBaseExpr.EnableAttr(Attribute.GENERATED_TO_MOCK)
+        if (let Some(genericInfo) <- funcDecl.funcBody.getOrThrow().generic) {
+            for (typeParam in genericInfo.typeParameters) {
+                memberAccessFuncBaseExpr.instTys.add(typeParam.GetTy().getOrThrow())
+            }
+        }
+        let callMockedMember = CallExpr()
+        callMockedMember.SetTy(
+            (memberAccessFuncBaseExpr.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy)
+        callMockedMember.resolvedFunction =
+            (memberAccessFuncBaseExpr.target.getOrThrow() as FuncDecl).getOrThrow()
+        callMockedMember.baseFunc = memberAccessFuncBaseExpr
+        callMockedMember.args = callBaseArgs
+        callMockedMember.callKind = CallKind.CALL_DECLARED_FUNCTION
+        callMockedMember.curFile = funcDecl.curFile
+        callMockedMember.EnableAttr(Attribute.GENERATED_TO_MOCK)
+
+        let trueLit = CreateLitConstExpr(LitConstKind.BOOL, "true", boolTy)
+        trueLit.curFile = funcDecl.curFile
+        let trueSpyCallMarkerAssign = CreateAssignExpr(
+            CreateRefExpr(spyCallMarker.getOrThrow()), trueLit, Some(unitTy))
+        trueSpyCallMarkerAssign.curFile = funcDecl.curFile
+        trueSpyCallMarkerAssign.EnableAttr(Attribute.GENERATED_TO_MOCK)
+        let falseLit = CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy)
+        falseLit.curFile = funcDecl.curFile
+        let falseSpyCallMarkerAssign = CreateAssignExpr(
+            CreateRefExpr(spyCallMarker.getOrThrow()), falseLit, Some(unitTy))
+        falseSpyCallMarkerAssign.curFile = funcDecl.curFile
+        falseSpyCallMarkerAssign.EnableAttr(Attribute.GENERATED_TO_MOCK)
+
+        let spiedObjVarPattern = CreateVarPattern(V_COMPILER, Some(spiedObjTy))
+        let spiedObjVarRef = CreateRefExpr(spiedObjVarPattern.varDecl.getOrThrow())
+        optionSpiedObjTyPattern.patterns.add(spiedObjVarPattern)
+
+        let callMockedMemberResult = CreateVarDecl(
+            "callBaseResult" + MockUtils.mockAccessorSuffix, Some(callMockedMember), None)
+        callMockedMemberResult.curFile = funcDecl.curFile
+        callMockedMemberResult.fullPackageName = funcDecl.fullPackageName
+        let callMockedMemberResultRef = CreateRefExpr(callMockedMemberResult)
+
+        let typePattern = CreateTypePattern(varPatternForTypeCast, castType, spiedObjVarRef)
+        typePattern.curFile = funcDecl.curFile
+        let typeCastMatchCase = CreateMatchCase(typePattern, trueSpyCallMarkerAssign)
+        typeCastMatchCase.exprOrDecls.getOrThrow().body.add(callMockedMemberResult)
+        typeCastMatchCase.exprOrDecls.getOrThrow().body.add(falseSpyCallMarkerAssign)
+        typeCastMatchCase.exprOrDecls.getOrThrow().body.add(
+            CreateReturnExpr(callMockedMemberResultRef, funcDecl.funcBody))
+
+        let matchCasesTypeCast = ArrayList<MatchCase>()
+        matchCasesTypeCast.add(typeCastMatchCase)
+        matchCasesTypeCast.add(CreateMatchCase(WildcardPattern(), CreateUnitExpr(unitTy)))
+        let typeCastMatch = CreateMatchExpr(spiedObjVarRef, matchCasesTypeCast, unitTy)
+
+        let handlerCases = ArrayList<MatchCase>()
+        handlerCases.add(CreateMatchCase(optionSpiedObjTyPattern, typeCastMatch))
+        handlerCases.add(CreateMatchCase(WildcardPattern(), CreateUnitExpr(unitTy)))
+        let handlerMatch = CreateMatchExpr(
+            CreateRefExpr(spiedObjectDecl), handlerCases, unitTy)
+        handlerMatch.curFile = funcDecl.curFile
+
+        let falseLitBackCall = CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy)
+        falseLitBackCall.curFile = funcDecl.curFile
+        let falseSpyCallMarkerAssignBackCall = CreateAssignExpr(
+            CreateRefExpr(spyCallMarker.getOrThrow()), falseLitBackCall, Some(unitTy))
+        falseSpyCallMarkerAssignBackCall.curFile = funcDecl.curFile
+        falseSpyCallMarkerAssignBackCall.EnableAttr(Attribute.GENERATED_TO_MOCK)
+        let callMarkerCases = ArrayList<MatchCase>()
+        let truePattern = ConstPattern()
+        truePattern.literal = CreateLitConstExpr(LitConstKind.BOOL, "true", boolTy, true)
+        truePattern.SetTy(boolTy)
+        callMarkerCases.add(CreateMatchCase(truePattern, falseSpyCallMarkerAssignBackCall))
+
+        let falsePattern = ConstPattern()
+        falsePattern.SetTy(boolTy)
+        falsePattern.literal = CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy, true)
+        callMarkerCases.add(CreateMatchCase(falsePattern, handlerMatch))
+
+        let spyCallMarkerMatch = CreateMatchExpr(
+            CreateRefExpr(spyCallMarker.getOrThrow()), callMarkerCases, unitTy)
+        body.body.add(spyCallMarkerMatch, at: 0)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
