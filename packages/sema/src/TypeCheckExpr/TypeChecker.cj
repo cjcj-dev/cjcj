@@ -8066,7 +8066,8 @@ extend TypeChecker {
                 }
             }
         }
-        if (!ChkArrayLit(impl.typeManager, target, arrayLit, arrayStruct: arrayStruct, diag: impl.diag)) {
+        if (!ChkArrayLit(impl.typeManager, target, arrayLit, arrayStruct: arrayStruct,
+            synthesizer: Some({ child: Expr => Synthesize(ctx, SynPos.EXPR_ARG, child) }), diag: impl.diag)) {
             matched = false
         }
         return matched
@@ -8392,7 +8393,8 @@ extend TypeChecker {
             if (let Some(manager4) <- impl.importManager) {
                 arrayStruct = manager4.GetCoreDecl<StructDecl>("Array")
             }
-            let arrayTy = SynArrayLit(impl.typeManager, arrayLit, arrayStruct, diag: impl.diag)
+            let arrayTy = SynArrayLit(impl.typeManager, arrayLit, arrayStruct,
+                synthesizer: Some({ child: Expr => Synthesize(ctx, SynPos.EXPR_ARG, child) }), diag: impl.diag)
             return FinishSynthesize(ctx, arrayLit, arrayTy)
         }
         if (let Some(spawnExpr) <- (expr as SpawnExpr)) {

@@ -336,7 +336,7 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit): Ty {
 }
 
 public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruct: Option<StructDecl>,
-    diag!: Option<BasicDiagnosticEngine> = None): Ty {
+    synthesizer!: Option<(Expr) -> Ty> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (arrayLit.children.isEmpty()) {
         if (let Some(diagValue) <- diag) {
             Diagnose(diagValue, arrayLit, BasicDiagKind.sema_empty_arrayLit_type_undefined).Emit()
@@ -345,6 +345,10 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruc
     }
     let elemTys = ArrayList<Ty>()
     for (child in arrayLit.children) {
+        if (let Some(synthesize) <- synthesizer) {
+            let _ = synthesize(child)
+            let _ = ReplaceIdealTy(typeManager, child, diag: diag)
+        }
         if (let Some(ty) <- child.GetTy()) {
             if (!Ty.IsTyCorrect(ty)) {
                 return InvalidExprTy(arrayLit)
@@ -376,7 +380,8 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruc
 }
 
 public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit,
-    arrayStruct!: Option<StructDecl> = None, diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    arrayStruct!: Option<StructDecl> = None, synthesizer!: Option<(Expr) -> Ty> = None,
+    diag!: Option<BasicDiagnosticEngine> = None): Bool {
     var targetTy = UnboxOptionType(target)
     arrayLit.SetTy(TypeManager.GetInvalidTy())
     if (targetTy.IsInterface()) {
@@ -388,7 +393,7 @@ public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit
                 }
                 return false
             }
-            let synTy = SynArrayLit(typeManager, arrayLit, arrayStruct, diag: diag)
+            let synTy = SynArrayLit(typeManager, arrayLit, arrayStruct, synthesizer: synthesizer, diag: diag)
             return typeManager.IsSubtype(synTy, target)
         }
     } else if (!Ty.IsTyCorrect(targetTy) || (!targetTy.IsStructArray() && (let None <- (targetTy as VArrayTy)))) {
@@ -409,7 +414,7 @@ public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit
         hasElementTy = true
     }
     if (!hasElementTy) {
-        let synTy = SynArrayLit(typeManager, arrayLit, None, diag: diag)
+        let synTy = SynArrayLit(typeManager, arrayLit, None, synthesizer: synthesizer, diag: diag)
         return typeManager.CheckTypeCompatibility(targetTy, synTy) != TypeCompatibility.INCOMPATIBLE
     }
     if (let Some(varrayTy) <- (targetTy as VArrayTy)) {
