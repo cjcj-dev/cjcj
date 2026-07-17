@@ -394,15 +394,29 @@ public class ASTWriter {
         }
     }
 
-    // ASTWriter.cpp:720-752 ASTWriterImpl::ExportAST. This writer's existing
-    // top-level traversal is retained until DFSCollectFilesDeclarations is ported.
+    // ASTWriter.cpp:719-752 ASTWriterImpl::ExportAST.
     public func ExportAST(pkg: Package): Unit {
         exportFuncBody = false
         MangleExportId(pkg)
+        let topLevelDeclsOrdered = ArrayList<Decl>()
+        let alreadyVisitedFiles = HashSet<Node>()
+        let usedTys = HashSet<Ptr<Ty>>()
         for (file in pkg.files) {
-            allFileImports.add(SaveFileImports(file))
+            DFSCollectFilesDeclarations(file, alreadyVisitedFiles, topLevelDeclsOrdered, usedTys)
         }
-        SaveTopLevelDecls(pkg)
+        if (exportContent) {
+            CollectInstantiationRecursively(usedTys)
+        }
+        if (diag.GetErrorCount() == 0u64) {
+            CheckForConflictExportId(topLevelDeclsOrdered)
+        }
+        for (decl in topLevelDeclsOrdered) {
+            topLevelDecls.add(decl)
+        }
+        for (decl in topLevelDeclsOrdered) {
+            let _ = GetDeclIndex(decl)
+        }
+        MarkImplicitExportOfImportSpec(pkg)
     }
 
     public func AST2FB(pkg: Package): Array<UInt8> {
@@ -613,33 +627,6 @@ public class ASTWriter {
         mangler.MangleExportIds(pkg)
     }
 
-    private func SaveTopLevelDecls(pkg: Package): Unit {
-        for (file in pkg.files) {
-            for (decl in file.decls) {
-                SaveTopLevelDeclIfNeeded(decl)
-            }
-            for (decl in file.exportedInternalDecls) {
-                SaveTopLevelDeclIfNeeded(decl)
-            }
-        }
-    }
-
-    private func SaveTopLevelDeclIfNeeded(decl: Decl): Unit {
-        if (!NeedToExportDecl(decl)) {
-            return
-        }
-        let targets = ArrayList<Decl>()
-        AppendDecl(decl, targets)
-        for (target in targets) {
-            if (IsSupportedTopLevelDecl(target)) {
-                topLevelDecls.add(target)
-                let _ = GetDeclIndex(target)
-                continue
-            }
-            throw IllegalArgumentException("not yet serialized in faithful .cjo writer: " + ASTKindName(target.astKind))
-        }
-    }
-
     // Mirror C++ ASTWriter AppendDecl (Modules/ASTSerialization/ASTWriter.cpp:99-120): a MainDecl/MacroDecl is exported
     // through its desugared FuncDecl; a VarWithPatternDecl is exported as the VarDecls of its pattern; the synthesized
     // `$mainInvoke` function is not exported; everything else is exported as-is.
@@ -688,34 +675,6 @@ public class ASTWriter {
             return false
         }
         return true
-    }
-
-    private func IsSupportedTopLevelDecl(decl: Decl): Bool {
-        if ((decl as FuncDecl).isSome()) {
-            return true
-        }
-        if ((decl as FuncParam).isSome()) {
-            return false
-        }
-        if ((decl as VarDecl).isSome()) {
-            return true
-        }
-        if ((decl as ClassDecl).isSome()) {
-            return true
-        }
-        if ((decl as InterfaceDecl).isSome()) {
-            return true
-        }
-        if ((decl as EnumDecl).isSome()) {
-            return true
-        }
-        if ((decl as StructDecl).isSome()) {
-            return true
-        }
-        if ((decl as TypeAliasDecl).isSome()) {
-            return true
-        }
-        return (decl as ExtendDecl).isSome()
     }
 
     private func GetDeclIndex(decl: Decl): UInt32 {
