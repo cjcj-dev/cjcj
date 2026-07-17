@@ -89,6 +89,7 @@ public class TypeCheckerImpl {
     public var diag: Option<BasicDiagnosticEngine> = None
     public var importManager: Option<SemaImportManager> = None
     public let scopeManager: ScopeManager = ScopeManager()
+    public var structMemberMap: HashMap<InheritableDecl, MemberMap> = HashMap<InheritableDecl, MemberMap>()
 
     public init(typeManager!: TypeManager = TypeManager(), diag!: Option<BasicDiagnosticEngine> = None,
         importManager!: Option<SemaImportManager> = None) {
