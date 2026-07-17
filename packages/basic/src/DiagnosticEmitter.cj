@@ -664,7 +664,7 @@ public class DiagnosticEmitter {
             if (hanging[k][begin] == g_spaceOfNum(1)) {
                 hanging[k][begin] = GetColoredString(color, MULTI_LINE_SYMBOL)
             }
-            if (end - 1 >= hanging[k].size) {
+            if (end <= 0 || end - 1 >= hanging[k].size) {
                 break
             }
             if (hanging[k][end - 1] == g_spaceOfNum(1)) {
