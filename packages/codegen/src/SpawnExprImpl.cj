@@ -37,12 +37,14 @@ private class SpawnInfo {
     }
 
     public static func FromSpawn(spawnExpr: Spawn): SpawnInfo {
-        return SpawnInfo(spawnExpr.GetExprKind(), spawnExpr.GetFuture(), spawnExpr.GetSpawnArg(),
+        let value = if (spawnExpr.IsExecuteClosure()) { spawnExpr.GetClosure() } else { spawnExpr.GetFuture() }
+        return SpawnInfo(spawnExpr.GetExprKind(), value, spawnExpr.GetSpawnArg(),
             spawnExpr.GetExecuteClosure(), spawnExpr.GetResultType())
     }
 
     public static func FromSpawnWithException(spawnExpr: SpawnWithException): SpawnInfo {
-        return SpawnInfo(spawnExpr.GetExprKind(), spawnExpr.GetFuture(), spawnExpr.GetSpawnArg(),
+        let value = if (spawnExpr.IsExecuteClosure()) { spawnExpr.GetClosure() } else { spawnExpr.GetFuture() }
+        return SpawnInfo(spawnExpr.GetExprKind(), value, spawnExpr.GetSpawnArg(),
             spawnExpr.GetExecuteClosure(), spawnExpr.GetResultType())
     }
 
