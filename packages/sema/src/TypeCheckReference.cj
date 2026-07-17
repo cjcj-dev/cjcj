@@ -1755,6 +1755,14 @@ private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
         if (current.astKind == ASTKind.VAR_DECL) {
             ctx.currentCheckingNodes.add(current)
         }
+        // C++ src/Sema/TypeCheckReference.cpp:819-823.
+        if (let Some(lambdaExpr) <- (current as LambdaExpr)) {
+            if (lambdaExpr.GetTy().getOrThrow().IsCFunc()) {
+                if (let Some(outerDecl) <- GetCurInheritableDecl(ctx, lambdaExpr.scopeName)) {
+                    DesugarStaticRefCall2MemberAccessInCFuncLam(tm, lambdaExpr, outerDecl.GetTy().getOrThrow())
+                }
+            }
+        }
         if (let Some(expr) <- (current as Expr)) {
             return TypeCheckReferenceCheckLegalityForExpr(diag, tm, impl, ctx, walkerID, expr)
         }
@@ -1780,6 +1788,104 @@ private func TypeCheckReferenceCheckLegalityOfReferenceInternal(
         return VisitAction.KEEP_DECISION
     })
     let _ = walker.Walk()
+}
+
+// C++ src/Sema/Desugar/DesugarInTypeCheck.cpp:690-726.
+private func DesugarRef2MemberAccess(
+    typeManager: TypeManager,
+    target: Decl,
+    field: RefExpr,
+    curTopDeclTy: Ty
+): Option<MemberAccess> {
+    let targetOuterDecl = target.outerDecl.getOrThrow()
+    let baseExpr = RefExpr()
+    baseExpr.ref.identifier = targetOuterDecl.identifier
+    let targetOuterDeclTys = Promotion(typeManager).Promote(curTopDeclTy, targetOuterDecl.GetTy().getOrThrow())
+    if (targetOuterDeclTys.values.isEmpty()) {
+        return None
+    }
+    baseExpr.SetTy(targetOuterDeclTys.values.iterator().next().getOrThrow())
+    baseExpr.SetTarget(Some(targetOuterDecl))
+    baseExpr.isAlone = false
+    baseExpr.EnableAttr(Attribute.COMPILER_ADD)
+    CopyBasicInfo(field, baseExpr)
+
+    let baseFunc = MemberAccess()
+    baseFunc.baseExpr = Some(baseExpr)
+    baseFunc.field = field.ref.identifier
+    baseFunc.SetTy(field.GetTy().getOrThrow())
+    baseFunc.SetTarget(Some(target))
+    baseFunc.EnableAttr(Attribute.COMPILER_ADD)
+    baseFunc.leftAnglePos = field.leftAnglePos
+    for (typeArgument in field.typeArguments) {
+        baseFunc.typeArguments.add(typeArgument)
+    }
+    field.typeArguments.clear()
+    baseFunc.rightAnglePos = field.rightAnglePos
+    for (instTy in field.instTys) {
+        baseFunc.instTys.add(instTy)
+    }
+    field.instTys.clear()
+    baseFunc.matchedParentTy = field.matchedParentTy
+    baseFunc.aliasTarget = field.aliasTarget
+    baseFunc.isAlone = field.isAlone
+    baseFunc.compilerAddedTyArgs = field.compilerAddedTyArgs
+    CopyBasicInfo(field, baseFunc)
+    AddCurFile(baseFunc, file: field.curFile)
+    return Some(baseFunc)
+}
+
+// C++ src/Sema/Desugar/DesugarInTypeCheck.cpp:728-761.
+private func DesugarStaticRefCall2MemberAccessInCFuncLam(
+    typeManager: TypeManager,
+    lambdaExpr: LambdaExpr,
+    curTopDeclTy: Ty
+): Unit {
+    if (!lambdaExpr.GetTy().getOrThrow().IsCFunc()) {
+        return
+    }
+    let _ = Walker(lambdaExpr, visitPre: { node: Node =>
+        if (let Some(callExpr) <- (node as CallExpr)) {
+            if (let Some(baseFunc) <- callExpr.baseFunc) {
+                if (baseFunc.astKind == ASTKind.REF_EXPR && (let None <- callExpr.desugarExpr)) {
+                    let target = baseFunc.GetTarget()
+                    var targetIsStaticInOpenDecl = false
+                    if (let Some(targetDecl) <- target) {
+                        if (targetDecl.TestAttr(Attribute.STATIC) && (let Some(outerDecl) <- targetDecl.outerDecl)) {
+                            targetIsStaticInOpenDecl = outerDecl.IsOpen()
+                        }
+                    }
+                    if (!targetIsStaticInOpenDecl) {
+                        return VisitAction.WALK_CHILDREN
+                    }
+                    let refExpr = (baseFunc as RefExpr).getOrThrow()
+                    let clonedCallExpr = (ASTCloner.Clone(callExpr) as CallExpr).getOrThrow()
+                    clonedCallExpr.baseFunc = DesugarRef2MemberAccess(
+                        typeManager, target.getOrThrow(), refExpr, curTopDeclTy)
+                    if (let Some(_) <- clonedCallExpr.baseFunc) {
+                        callExpr.desugarExpr = Some(clonedCallExpr)
+                    }
+                }
+            }
+        } else if (let Some(refExpr) <- (node as RefExpr)) {
+            if (refExpr.isAlone && (let None <- refExpr.desugarExpr)) {
+                let target = refExpr.GetTarget()
+                var targetIsStaticPropInOpenDecl = false
+                if (let Some(targetDecl) <- target) {
+                    if (targetDecl.astKind == ASTKind.PROP_DECL && targetDecl.TestAttr(Attribute.STATIC) &&
+                        (let Some(outerDecl) <- targetDecl.outerDecl)) {
+                        targetIsStaticPropInOpenDecl = outerDecl.IsOpen()
+                    }
+                }
+                if (!targetIsStaticPropInOpenDecl) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                refExpr.desugarExpr = DesugarRef2MemberAccess(
+                    typeManager, target.getOrThrow(), refExpr, curTopDeclTy)
+            }
+        }
+        return VisitAction.WALK_CHILDREN
+    }).Walk()
 }
 
 public func TypeCheckReferenceCheckLegalityOfReference(
