@@ -33,7 +33,15 @@ public class DiagnosticEngineImpl {
     public init() {}
 
     ~init() {
-        close()
+        if (!closed) {
+            closed = true
+            let activeHandler = handler.getOrThrow()
+            if (IsCompilerDiagnosticHandlerKind(activeHandler.GetKind())) {
+                if (activeHandler.IsJsonFormat()) {
+                    activeHandler.EmitDiagnosesInJson()
+                }
+            }
+        }
     }
 
     // C++: src/Basic/DiagnosticEngineImpl.h:21-30, DiagnosticEngineImpl::~DiagnosticEngineImpl.
