@@ -32,6 +32,135 @@ public class LookupInfo {
     }
 }
 
+private class LookUpImpl {
+    private let typeManager: TypeManager
+    private let resultsWithInstTyV = ArrayList<(Option<Decl>, Option<InterfaceTy>)>()
+
+    public init(typeManager: TypeManager) {
+        this.typeManager = typeManager
+    }
+
+    public func InsertResultsWithInstTy(idx: Int64, decl: Decl, interfaceTy: InterfaceTy): Unit {
+        while (idx >= resultsWithInstTyV.size) {
+            resultsWithInstTyV.add((None, None))
+        }
+        resultsWithInstTyV[idx] = (Some(decl), Some(interfaceTy))
+    }
+
+    public func SwapResultsWithInstTy(oldIdx: Int64, newIdx: Int64, decl: Decl,
+        interfaceTy: InterfaceTy): Unit {
+        resultsWithInstTyV.remove(at: oldIdx)
+        InsertResultsWithInstTy(newIdx, decl, interfaceTy)
+    }
+
+    public func ResolveOverrideOrShadow(results: ArrayList<Decl>, decl: Decl, parentTy: InterfaceTy): Unit {
+        if (decl.astKind == ASTKind.PROP_DECL && !decl.TestAttr(Attribute.ABSTRACT)) {
+            var propIdx: Int64 = 0
+            while (propIdx < results.size) {
+                if (results[propIdx].TestAttr(Attribute.ABSTRACT)) {
+                    results.remove(at: propIdx)
+                } else {
+                    propIdx++
+                }
+            }
+        }
+        var idx: Int64 = 0
+        while (idx < results.size) {
+            let inResult = results[idx]
+            if (inResult.astKind != ASTKind.FUNC_DECL && inResult.astKind != ASTKind.PROP_DECL) {
+                idx++
+                continue
+            }
+            var inResultOuter = inResult.outerDecl.getOrThrow().GetTy()
+            if (resultsWithInstTyV.size > idx && resultsWithInstTyV[idx][1].isSome()) {
+                inResultOuter = resultsWithInstTyV[idx][1]
+            } else if (inResult.outerDecl.getOrThrow().astKind == ASTKind.EXTEND_DECL) {
+                var isSubtype = false
+                if (let Some(outerTy) <- inResultOuter) {
+                    isSubtype = typeManager.IsSubtype(outerTy, parentTy)
+                }
+                if (!isSubtype) {
+                    let extendTy = inResult.outerDecl.getOrThrow().GetTy()
+                    if (let Some(extendedDecl) <- Ty.GetDeclPtrOfTy(extendTy)) {
+                        let mappingExtendWithDecl = GenerateTypeMappingByTy(extendTy, extendedDecl.GetTy())
+                        if (let Some(outerTy) <- inResultOuter) {
+                            inResultOuter = Some(typeManager.GetInstantiatedTy(outerTy, mappingExtendWithDecl))
+                        }
+                    }
+                }
+            }
+
+            if (!typeManager.PairIsOverrideOrImpl(inResult, decl, baseTy: inResultOuter,
+                    parentTy: Some(parentTy)) &&
+                !typeManager.PairIsOverrideOrImpl(decl, inResult, baseTy: Some(parentTy),
+                    parentTy: inResultOuter)) {
+                idx++
+                continue
+            }
+            var parentIsSubtype = false
+            var resultIsSubtype = false
+            if (let Some(outerTy) <- inResultOuter) {
+                parentIsSubtype = typeManager.IsSubtype(parentTy, outerTy)
+                resultIsSubtype = typeManager.IsSubtype(outerTy, parentTy)
+            }
+            if (parentIsSubtype ||
+                (inResult.TestAttr(Attribute.ABSTRACT) && !decl.TestAttr(Attribute.ABSTRACT))) {
+                results.remove(at: idx)
+                SwapResultsWithInstTy(idx, results.size, decl, parentTy)
+                results.add(decl)
+            } else if (resultIsSubtype ||
+                (decl.TestAttr(Attribute.ABSTRACT) && !inResult.TestAttr(Attribute.ABSTRACT))) {
+                // Keep the declaration already in results.
+            } else {
+                idx++
+                continue
+            }
+            return
+        }
+        InsertResultsWithInstTy(results.size, decl, parentTy)
+        results.add(decl)
+    }
+
+    public func FieldLookup(idTy: InterfaceTy, fieldName: String, results: ArrayList<Decl>, info: LookupInfo): Unit {
+        let id = (GetSpecificDecl(idTy.declPtr.getOrThrow()) as InterfaceDecl).getOrThrow()
+        if (let Some(body) <- id.body) {
+            for (decl in body.decls) {
+                if (decl.identifier != fieldName) {
+                    continue
+                }
+                if (decl.IsFuncOrProp()) {
+                    ResolveOverrideOrShadow(results, decl, idTy)
+                } else {
+                    InsertResultsWithInstTy(results.size, decl, idTy)
+                    results.add(decl)
+                }
+            }
+        } else {
+            return
+        }
+        if (!info.lookupInherit) {
+            return
+        }
+        for (inheritedType in id.inheritedTypes) {
+            if (let Some(inheritedTy) <- inheritedType.GetTy()) {
+                if (let Some(interfaceTy) <- (inheritedTy as InterfaceTy)) {
+                    if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
+                        if (!interfaceDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
+                            let promotedTys = Promotion(typeManager).Promote(idTy, inheritedTy)
+                            for (promotedTy in promotedTys.values) {
+                                if (let Some(promotedInterfaceTy) <- (promotedTy as InterfaceTy)) {
+                                    FieldLookup(promotedInterfaceTy, fieldName, results,
+                                        LookupInfo(baseTy: info.baseTy))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 private class LookupBoolBox {
     public var value: Bool
 
@@ -301,56 +430,8 @@ private func addMemberIfValidForLookup(results: ArrayList<Decl>, typeManager: Ty
     addDeclUnique(results, decl)
 }
 
-private func resolveOverrideOrShadow(results: ArrayList<Decl>, typeManager: TypeManager, decl: Decl,
-    parentTy: Option<Ty>): Unit {
-    if (decl.astKind == ASTKind.PROP_DECL && !decl.TestAttr(Attribute.ABSTRACT)) {
-        var propIdx: Int64 = 0
-        while (propIdx < results.size) {
-            if (results[propIdx].TestAttr(Attribute.ABSTRACT)) {
-                results.remove(at: propIdx)
-            } else {
-                propIdx++
-            }
-        }
-    }
-    var idx: Int64 = 0
-    while (idx < results.size) {
-        let current = results[idx]
-        if (current.astKind != ASTKind.FUNC_DECL && current.astKind != ASTKind.PROP_DECL) {
-            idx++
-            continue
-        }
-        var currentOuter: Option<Ty> = None
-        if (let Some(outer) <- current.outerDecl) {
-            currentOuter = outer.GetTy()
-        }
-        let currentOverrides = typeManager.PairIsOverrideOrImpl(current, decl, baseTy: currentOuter, parentTy: parentTy)
-        let declOverrides = typeManager.PairIsOverrideOrImpl(decl, current, baseTy: parentTy, parentTy: currentOuter)
-        if (!currentOverrides && !declOverrides) {
-            idx++
-            continue
-        }
-        if (let Some(parent) <- parentTy) {
-            if (let Some(currentTy) <- currentOuter) {
-                if (typeManager.IsSubtype(parent, currentTy)) {
-                    results.remove(at: idx)
-                    addDeclUnique(results, decl)
-                    return
-                }
-            }
-        }
-        if (current.TestAttr(Attribute.ABSTRACT) && !decl.TestAttr(Attribute.ABSTRACT)) {
-            results.remove(at: idx)
-            addDeclUnique(results, decl)
-            return
-        }
-        return
-    }
-    addDeclUnique(results, decl)
-}
-
-private func fieldLookupExtend(typeManager: TypeManager, ty: Ty, fieldName: String, results: ArrayList<Decl>,
-    info: LookupInfo): Unit {
+private func fieldLookupExtend(lookUpImpl: LookUpImpl, typeManager: TypeManager, ty: Ty, fieldName: String,
+    results: ArrayList<Decl>, info: LookupInfo): Unit {
     let extendDecls = ArrayList<Decl>()
     for (extendDecl in typeManager.GetAllExtendsByTy(ty)) {
         extendDecls.add(extendDecl)
@@ -382,7 +463,7 @@ private func fieldLookupExtend(typeManager: TypeManager, ty: Ty, fieldName: Stri
                         let mapping = GenerateTypeMappingByTy(extendDecl.GetTy(), Some(ty))
                         let instantiatedTy = typeManager.GetInstantiatedTy(inheritedTy, mapping)
                         if (let Some(interfaceTy) <- (instantiatedTy as InterfaceTy)) {
-                            fieldLookupInterfaceTy(typeManager, interfaceTy, fieldName, results, info)
+                            lookUpImpl.FieldLookup(interfaceTy, fieldName, results, info)
                         }
                     }
                 }
@@ -391,8 +472,8 @@ private func fieldLookupExtend(typeManager: TypeManager, ty: Ty, fieldName: Stri
     }
 }
 
-private func fieldLookupClass(typeManager: TypeManager, cd: ClassDecl, fieldName: String, results: ArrayList<Decl>,
-    info: LookupInfo): Unit {
+private func fieldLookupClass(lookUpImpl: LookUpImpl, typeManager: TypeManager, cd: ClassDecl, fieldName: String,
+    results: ArrayList<Decl>, info: LookupInfo): Unit {
     if (let Some(body) <- cd.body) {
         for (member in body.decls) {
             if (member.identifier == fieldName && !ignoredMember(member)) {
@@ -419,66 +500,23 @@ private func fieldLookupClass(typeManager: TypeManager, cd: ClassDecl, fieldName
             if (let Some(superClass) <- (superDecl as ClassDecl)) {
                 let superInfo = info.Clone()
                 superInfo.lookupExtend = true
-                fieldLookupClass(typeManager, superClass, fieldName, results, superInfo)
+                fieldLookupClass(lookUpImpl, typeManager, superClass, fieldName, results, superInfo)
             } else if (let Some(inheritedTy) <- inheritedType.GetTy()) {
                 if (let Some(interfaceTy) <- (inheritedTy as InterfaceTy)) {
-                    fieldLookupInterfaceTy(typeManager, interfaceTy, fieldName, results, LookupInfo(baseTy: info.baseTy))
+                    lookUpImpl.FieldLookup(interfaceTy, fieldName, results, LookupInfo(baseTy: info.baseTy))
                 }
             }
         }
     }
     if (info.lookupExtend) {
         if (let Some(ty) <- cd.GetTy()) {
-            fieldLookupExtend(typeManager, ty, fieldName, results, info)
+            fieldLookupExtend(lookUpImpl, typeManager, ty, fieldName, results, info)
         }
     }
 }
 
-private func fieldLookupInterfaceTy(typeManager: TypeManager, idTy: InterfaceTy, fieldName: String,
-    results: ArrayList<Decl>, info: LookupInfo): Unit {
-    if (let Some(rawId) <- idTy.declPtr) {
-        let id = (GetSpecificDecl(rawId) as InterfaceDecl).getOrThrow()
-        if (let Some(body) <- id.body) {
-            for (member in body.decls) {
-                if (member.identifier != fieldName || ignoredMember(member)) {
-                    continue
-                }
-                if (member.IsFuncOrProp()) {
-                    resolveOverrideOrShadow(results, typeManager, member, idTy)
-                } else {
-                    addDeclUnique(results, member)
-                }
-            }
-        }
-        if (!info.lookupInherit) {
-            return
-        }
-        for (inheritedType in id.inheritedTypes) {
-            if (let Some(inheritedTy) <- inheritedType.GetTy()) {
-                if (let Some(interfaceTy) <- (inheritedTy as InterfaceTy)) {
-                    if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
-                        if (!interfaceDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
-                            let promotedTys = Promotion(typeManager).Promote(idTy, inheritedTy)
-                            let parentInfo = LookupInfo(baseTy: info.baseTy)
-                            if (promotedTys.values.isEmpty()) {
-                                fieldLookupInterfaceTy(typeManager, interfaceTy, fieldName, results, parentInfo)
-                            } else {
-                                for (promotedTy in promotedTys.values) {
-                                    if (let Some(promotedInterfaceTy) <- (promotedTy as InterfaceTy)) {
-                                        fieldLookupInterfaceTy(typeManager, promotedInterfaceTy, fieldName, results,
-                                            parentInfo)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private func fieldLookupEnum(typeManager: TypeManager, ed: EnumDecl, fieldName: String, info: LookupInfo): ArrayList<Decl> {
+private func fieldLookupEnum(lookUpImpl: LookUpImpl, typeManager: TypeManager, ed: EnumDecl, fieldName: String,
+    info: LookupInfo): ArrayList<Decl> {
     let results = ArrayList<Decl>()
     for (ctor in ed.constructors) {
         if (ctor.identifier == fieldName && !ignoredMember(ctor)) {
@@ -495,7 +533,7 @@ private func fieldLookupEnum(typeManager: TypeManager, ed: EnumDecl, fieldName: 
             if (let Some(interfaceTy) <- (inheritedTy as InterfaceTy)) {
                 if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
                     if (!interfaceDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
-                        fieldLookupInterfaceTy(typeManager, interfaceTy, fieldName, results, info)
+                        lookUpImpl.FieldLookup(interfaceTy, fieldName, results, info)
                     }
                 }
             }
@@ -503,13 +541,13 @@ private func fieldLookupEnum(typeManager: TypeManager, ed: EnumDecl, fieldName: 
     }
     if (info.lookupExtend) {
         if (let Some(ty) <- ed.GetTy()) {
-            fieldLookupExtend(typeManager, ty, fieldName, results, info)
+            fieldLookupExtend(lookUpImpl, typeManager, ty, fieldName, results, info)
         }
     }
     return results
 }
 
-private func fieldLookupStruct(typeManager: TypeManager, sd: StructDecl, fieldName: String,
+private func fieldLookupStruct(lookUpImpl: LookUpImpl, typeManager: TypeManager, sd: StructDecl, fieldName: String,
     info: LookupInfo): ArrayList<Decl> {
     let results = ArrayList<Decl>()
     if (let Some(body) <- sd.body) {
@@ -524,7 +562,7 @@ private func fieldLookupStruct(typeManager: TypeManager, sd: StructDecl, fieldNa
             if (let Some(interfaceTy) <- (inheritedTy as InterfaceTy)) {
                 if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
                     if (!interfaceDecl.TestAttr(Attribute.IN_REFERENCE_CYCLE)) {
-                        fieldLookupInterfaceTy(typeManager, interfaceTy, fieldName, results, info)
+                        lookUpImpl.FieldLookup(interfaceTy, fieldName, results, info)
                     }
                 }
             }
@@ -532,7 +570,7 @@ private func fieldLookupStruct(typeManager: TypeManager, sd: StructDecl, fieldNa
     }
     if (info.lookupExtend) {
         if (let Some(ty) <- sd.GetTy()) {
-            fieldLookupExtend(typeManager, ty, fieldName, results, info)
+            fieldLookupExtend(lookUpImpl, typeManager, ty, fieldName, results, info)
         }
     }
     return results
@@ -800,25 +838,26 @@ private func collectResolvedImportedDeclsByName(ctx: ASTContext, node: Node, nam
 public func FieldLookup(typeManager: TypeManager, decl: Option<Decl>, fieldName: String,
     info!: LookupInfo = LookupInfo(), importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
     let results = ArrayList<Decl>()
+    let lookUpImpl = LookUpImpl(typeManager)
     if (let Some(target) <- decl) {
         let actual = GetSpecificDecl(target)
         if (let Some(classDecl) <- (actual as ClassDecl)) {
-            fieldLookupClass(typeManager, classDecl, fieldName, results, info)
+            fieldLookupClass(lookUpImpl, typeManager, classDecl, fieldName, results, info)
             return results
         }
         if (let Some(interfaceDecl) <- (actual as InterfaceDecl)) {
             if (let Some(interfaceDeclTy) <- interfaceDecl.GetTy()) {
                 if (let Some(interfaceTy) <- (interfaceDeclTy as InterfaceTy)) {
-                    fieldLookupInterfaceTy(typeManager, interfaceTy, fieldName, results, info)
+                    lookUpImpl.FieldLookup(interfaceTy, fieldName, results, info)
                 }
             }
             return results
         }
         if (let Some(enumDecl) <- (actual as EnumDecl)) {
-            return fieldLookupEnum(typeManager, enumDecl, fieldName, info)
+            return fieldLookupEnum(lookUpImpl, typeManager, enumDecl, fieldName, info)
         }
         if (let Some(structDecl) <- (actual as StructDecl)) {
-            return fieldLookupStruct(typeManager, structDecl, fieldName, info)
+            return fieldLookupStruct(lookUpImpl, typeManager, structDecl, fieldName, info)
         }
         if (let Some(packageDecl) <- (actual as PackageDecl)) {
             return fieldLookupPackage(packageDecl, fieldName, importManager: importManager)
@@ -888,7 +927,7 @@ private func processStructDeclBody(typeManager: TypeManager, ctx: ASTContext, na
                     FieldLookup(typeManager, Some(typeDecl), name, info: info)
                 } else if (let Some(ty) <- currentTy) {
                     let extendResults = ArrayList<Decl>()
-                    fieldLookupExtend(typeManager, ty, name, extendResults, info)
+                    fieldLookupExtend(LookUpImpl(typeManager), typeManager, ty, name, extendResults, info)
                     extendResults
                 } else {
                     ArrayList<Decl>()
@@ -997,7 +1036,8 @@ public func ExtendFieldLookup(typeManager: TypeManager, file: File, ty: Option<T
     let results = ArrayList<Decl>()
     if (let Some(value) <- ty) {
         if (Ty.IsTyCorrect(value)) {
-            fieldLookupExtend(typeManager, value, fieldName, results, LookupInfo(baseTy: value, file: file))
+            fieldLookupExtend(LookUpImpl(typeManager), typeManager, value, fieldName, results,
+                LookupInfo(baseTy: value, file: file))
         }
     }
     return results
