@@ -1939,8 +1939,8 @@ public class Translator {
         let (expectedParamTys, resultTy) = GetMemberFuncParamAndRetInstTypes(expr)
         AppendTranslatedCallArgs(expr, calleeDecl, argValues, expectedParamTys, ArrayList<Value>())
         let instTypeArgs = TranslateFuncInstArgs(expr, calleeDecl)
-        return CreateApplyMaybeWithException(resultTy, callee, FuncCallContext(args: argValues,
-            instTypeArgs: instTypeArgs), loc: TranslateLocation(expr))
+        return CreateAndAppendApplyCallFromCallExpr(resultTy, callee, FuncCallContext(args: argValues,
+            instTypeArgs: instTypeArgs), expr)
     }
 
     private func ProcessMapExpr(originExpr: AstNode, isSubScript: Bool): Unit {
