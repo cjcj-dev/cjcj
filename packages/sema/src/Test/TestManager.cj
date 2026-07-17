@@ -385,7 +385,9 @@ public class TestManager {
         if (let Some(assignExpr) <- (expr as AssignExpr)) {
             lastExprTarget = assignExpr.leftValue.getOrThrow().GetTarget()
         } else if (let Some(callExpr) <- (expr as CallExpr)) {
-            lastExprTarget = callExpr.resolvedFunction
+            if (let Some(resolvedFunction) <- callExpr.resolvedFunction) {
+                lastExprTarget = Some(resolvedFunction)
+            }
         } else {
             lastExprTarget = expr.GetTarget()
         }
