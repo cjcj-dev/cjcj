@@ -434,7 +434,7 @@ public class TestManager {
         let _ = walker.Walk()
     }
 
-    private func CollectToCreateMockCalls(callExpr: CallExpr): VisitAction {
+    private func CollectToCreateMockCalls(callExpr: CallExpr, callExprs: ArrayList<CallExpr>): VisitAction {
         let isMockCall = MockManager.IsMockCall(callExpr)
         if (!isMockCall) {
             return VisitAction.WALK_CHILDREN
@@ -454,6 +454,7 @@ public class TestManager {
         }
 
         if (mockCompatible && testEnabled) {
+            callExprs.add(callExpr)
             return VisitAction.WALK_CHILDREN
         } else if (mockMode == MockMode.RUNTIME_ERROR && testEnabled) {
             callExpr.desugarExpr = MockManager.CreateIllegalMockCallException(
