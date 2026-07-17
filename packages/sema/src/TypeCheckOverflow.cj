@@ -162,16 +162,7 @@ public func SetOverflowStrategyForNode(
 ): Unit {
     let walker = Walker(root, visitPre: { curNode: Node =>
         if (let Some(funcDecl) <- (curNode as FuncDecl)) {
-            var funcHasOverflowStrategy = funcDecl.TestAttr(Attribute.NUMERIC_OVERFLOW)
-            for (annotation in funcDecl.annotations) {
-                if (annotation.kind == AstAnnotationKind.NUMERIC_OVERFLOW) {
-                    funcHasOverflowStrategy = true
-                    funcDecl.EnableAttr(Attribute.NUMERIC_OVERFLOW)
-                    funcDecl.overflowStrategy = annotation.overflowStrategy
-                    break
-                }
-            }
-            if (funcHasOverflowStrategy) {
+            if (funcDecl.TestAttr(Attribute.NUMERIC_OVERFLOW)) {
                 if (let Some(funcBody) <- funcDecl.funcBody) {
                     SetOverflowStrategyForNode(funcBody, funcDecl.overflowStrategy, optionStrategy)
                 }
