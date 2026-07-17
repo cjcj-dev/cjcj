@@ -2443,11 +2443,14 @@ extend TypeChecker {
         if (instance.globalOptions.enIncrementalCompilation) {
             instance.CacheSemaUsage(GetSemanticUsage(impl.typeManager, activePkgs))
         }
-        GenerateMainInvoke()
+        impl.GenerateMainInvoke()
         substituteImportedTypeAliasTy(impl.typeManager, recursivePkgs)
         CheckWhetherHasProgramEntry()
     }
 
+}
+
+// C++ src/Sema/Desugar/AfterTypeCheck.cpp:48-59 CreateConvInt64.
     private func CreateConvInt64(vd: VarDecl, ty: Ty): TypeConvExpr {
         let convType = PrimitiveType()
         convType.kind = TypeKind.TYPE_INT64
@@ -2461,6 +2464,7 @@ extend TypeChecker {
         return numConv
     }
 
+// C++ src/Sema/Desugar/AfterTypeCheck.cpp:61-80 CreateMainInvokeDecl.
     private func CreateMainInvokeDecl(funcBody: FuncBody, mainFunc: FuncDecl, funcTy: Ty): FuncDecl {
         let mainInvokeFunc = FuncDecl()
         funcBody.funcDecl = mainInvokeFunc
@@ -2477,6 +2481,8 @@ extend TypeChecker {
         }
         return mainInvokeFunc
     }
+
+extend TypeChecker {
 
     private func CollectMainFunctionsFromMainDecls(pkg: Package): Unit {
         for (file in pkg.files) {
@@ -2574,12 +2580,15 @@ extend TypeChecker {
         AddMainFunction(file, fd)
     }
 
-    private func GenerateMainInvoke(): Unit {
-        if (impl.mainFunctionMap.size != 1) {
+}
+
+extend TypeCheckerImpl {
+    internal func GenerateMainInvoke(): Unit {
+        if (mainFunctionMap.size != 1) {
             return
         }
         var mainFunctions: Option<ArrayList<Decl>> = None
-        for (values in impl.mainFunctionMap.values()) {
+        for (values in mainFunctionMap.values()) {
             mainFunctions = Some(values)
             break
         }
@@ -2616,11 +2625,11 @@ extend TypeChecker {
             return
         }
         var options = OptionGlobalOptions()
-        if (let Some(instance) <- impl.ci) {
+        if (let Some(instance) <- ci) {
             options = instance.globalOptions
         }
         let outputCHIR = options.outputMode == OptionOutputMode.CHIR
-        let incrementalCompile = if (let Some(instance) <- impl.ci) {
+        let incrementalCompile = if (let Some(instance) <- ci) {
             instance.compileStrategy == StrategyType.INCREMENTAL_COMPILE
         } else {
             false
@@ -2637,7 +2646,7 @@ extend TypeChecker {
 
         let mainTy = funcTy.retTy
         let int64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-        let mainInvokeTy = impl.typeManager.GetFunctionTy(funcTy.paramTys.toArray(), int64Ty)
+        let mainInvokeTy = typeManager.GetFunctionTy(funcTy.paramTys.toArray(), int64Ty)
         let funcBody = FuncBody()
         funcBody.SetTy(mainInvokeTy)
         let block = Block()
@@ -2673,6 +2682,9 @@ extend TypeChecker {
         block.body.add(retExpr)
         mainFile.decls.add(CreateMainInvokeDecl(funcBody, mainFunc, mainInvokeTy))
     }
+}
+
+extend TypeChecker {
 
     private func CheckWhetherHasProgramEntry(): Unit {
         if (let None <- impl.ci) {
