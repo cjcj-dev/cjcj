@@ -796,7 +796,7 @@ public class MacroEvaluation {
             return
         }
 
-        let invokeMethodFuncFromC = InvokeNewTaskFromC(RuntimeInit.GetInstance().runtimeMethodFunc)
+        let runtimeInit = RuntimeInit.GetInstance()
         let mInvoke = MacroInvoke(macCall)
         let id = synchronized(macroInvokeTableLock) {
             let currentId = macroInvokeNextId
@@ -809,8 +809,18 @@ public class MacroEvaluation {
         unsafe { handle.write(id) }
 
         synchronized(mInvoke.mtx) {
-            macCall.coroutineHandle = unsafe {
-                invokeMethodFuncFromC(CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
+            if (runtimeInit.runtimeInstanceHandle.isNull()) {
+                macCall.coroutineHandle = unsafe {
+                    InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
+                        CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
+                }
+            } else {
+                // RT_ISOLATE_API_SPEC.md §3.2: submit the same C++ InvokeMacro task
+                // (MacroEvaluationCJNative.cpp:123-137) to the isolated scheduler.
+                macCall.coroutineHandle = unsafe {
+                    InstanceRunTaskFromC(runtimeInit.runtimeMethodFunc)(runtimeInit.runtimeInstanceHandle,
+                        CPointer<Unit>(InvokeMacro), CPointer<Unit>(handle))
+                }
             }
             CJC_ASSERT(!macCall.coroutineHandle.isNull())
             while (!macCall.isDataReady) {

@@ -4,6 +4,7 @@ import std.collection.HashMap
 import std.sync.*
 
 type InvokeNewTaskFromC = CFunc<(CPointer<Unit>, CPointer<Unit>) -> CPointer<Unit>>
+type InstanceRunTaskFromC = CFunc<(CPointer<Unit>, CPointer<Unit>, CPointer<Unit>) -> CPointer<Unit>>
 type ReleaseHandleFromC = CFunc<(CPointer<Unit>) -> Unit>
 
 // Mirrors src/Macro/MacroEvaluationCJNative.cpp:35-44 MacroInvoke.
