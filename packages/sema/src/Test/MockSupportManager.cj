@@ -7,7 +7,7 @@ import cjcj::sema.GetUsableSetterForProperty
 import cjcj::sema.{GenerateTypeMapping, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::mangle.ManglerContext
-import cjcj::utils.{CJC_ABORT_WITH_MSG, CJC_ASSERT, TEST_ENTRY_NAME, V_COMPILER}
+import cjcj::utils.{CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_NULLPTR_CHECK, TEST_ENTRY_NAME, V_COMPILER}
 
 private let OPTION_VALUE_CTOR: String = "Some"
 private let OPTION_NONE_CTOR: String = "None"
@@ -1732,6 +1732,22 @@ public class MockSupportManager {
         let accessorDecl = mockUtils.FindMemberDecl<FuncDecl>(accessorInterfaceDecl.getOrThrow(),
             mockUtils.Mangle(original) + MockUtils.defaultAccessorSuffix)
         return (accessorInterfaceDecl, accessorDecl)
+    }
+
+    // C++: Sema/Test/MockSupportManager.cpp:2000-2018.
+    private func FindDefaultAccessorImplementation(
+        baseTy: Option<Ty>, accessorDecl: FuncDecl): Option<FuncDecl> {
+        CJC_NULLPTR_CHECK(baseTy)
+        let extendDecl = typeManager.GetExtendDeclByMember(
+            accessorDecl, baseTy.getOrThrow())
+        if (extendDecl.isSome()) {
+            return mockUtils.FindMemberDecl<FuncDecl>(
+                extendDecl.getOrThrow(), accessorDecl.identifier.Val())
+        }
+        if (let Some(decl) <- Ty.GetDeclOfTy(baseTy)) {
+            return mockUtils.FindMemberDecl<FuncDecl>(decl, accessorDecl.identifier.Val())
+        }
+        return None
     }
 
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
