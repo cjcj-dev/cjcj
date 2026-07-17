@@ -538,6 +538,35 @@ public class TestManager {
         }
     }
 
+    // C++: Sema/Test/TestManager.cpp:484-516.
+    public func PrepareToSpy(pkg: Package): Unit {
+        mockSupportManager.getOrThrow().GenerateSpyCallMarker(pkg)
+        let decls = ArrayList<Decl>()
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (!node.IsSamePackage(pkg) || (node as ExtendDecl).isSome()) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            let decl = node as Decl
+            if (let None <- decl) {
+                return VisitAction.WALK_CHILDREN
+            }
+            let value = decl.getOrThrow()
+            if (!MockUtils.CanMock(value)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(file) <- value.curFile) {
+                if (file.curPackage.getOrThrow().fullPackageName == pkg.fullPackageName) {
+                    decls.add(value)
+                }
+            }
+            return VisitAction.SKIP_CHILDREN
+        })
+        let _ = walker.Walk()
+        for (decl in decls) {
+            mockSupportManager.getOrThrow().PrepareToSpy(decl)
+        }
+    }
+
     // C++: Sema/Test/TestManager.cpp:733-754.
     private func CollectInternalDeclUsages(pkg: Package): Unit {
         let walker = Walker(pkg, visitPre: { node: Node =>
