@@ -2787,6 +2787,9 @@ private func CheckCallCompatible(typeManager: TypeManager, diag: Option<BasicDia
         if (!CheckCallArgCompatible(typeManager, diag, ce, idx, paramTy, argChecker)) {
             return false
         }
+        if (!CheckUseTrailingClosureWithFunctionType(diag, ce.args[idx], paramTys[idx], fd)) {
+            return false
+        }
         let argTy = ce.args[idx].GetTy().getOrThrow()
         if (fd.TestAttr(Attribute.C) && argTy.IsUnit()) {
             if (let Some(diagValue) <- diag) {
