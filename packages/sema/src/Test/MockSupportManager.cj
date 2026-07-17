@@ -503,12 +503,12 @@ public class MockSupportManager {
     }
 
     // C++: Sema/Test/MockSupportManager.cpp:478-505.
-    public func GenerateSpyCallMarker(package: Package): Unit {
-        if (package.files.isEmpty()) {
+    public func GenerateSpyCallMarker(pkg: Package): Unit {
+        if (pkg.files.isEmpty()) {
             return
         }
 
-        let file = package.files[0]
+        let file = pkg.files[0]
         if (file.isCommon || file.isSpecific) {
             return
         }
@@ -527,7 +527,7 @@ public class MockSupportManager {
             Some(CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy, true)), Some(type))
         varDecl.isVar = true
         varDecl.EnableAttr(Attribute.GLOBAL)
-        mockUtils.AttachGeneratedDecl(varDecl, package)
+        mockUtils.AttachGeneratedDecl(varDecl, pkg)
     }
 
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
