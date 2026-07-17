@@ -1064,7 +1064,7 @@ public class MockManager {
             funcParam.curFile = mockedDecl.curFile
             mockedMethodParams.add(funcParam)
         }
-        mockedMethodBody.paramLists.add(CreateFuncParamList(mockedMethodParams))
+        mockedMethodBody.paramLists.add(CreateFuncParamList(mockedMethodParams, None))
 
         mockedMethod.outerDecl = mockedDecl
         mockedMethod.SetTy(funcTy)
