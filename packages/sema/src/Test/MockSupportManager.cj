@@ -1470,6 +1470,19 @@ public class MockSupportManager {
         return None
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1371-1384.
+    private func ReplaceCallExpr(callExpr: CallExpr): Option<Expr> {
+        if (callExpr.TestAttr(Attribute.GENERATED_TO_MOCK)) {
+            return None
+        }
+        for (arg in callExpr.args) {
+            if (arg.withInout) {
+                return ReplaceInoutFuncArgWithAccessor(callExpr)
+            }
+        }
+        return None
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
