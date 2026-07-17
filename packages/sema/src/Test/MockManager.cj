@@ -1346,6 +1346,58 @@ public class MockManager {
         return (accessorInterfaceDecl, accessorImplDecl)
     }
 
+    // C++: Sema/Test/MockManager.cpp:1525-1571.
+    private func GenerateCallHandlerForStaticDecl(decl: FuncDecl, injectTo: Expr,
+        declForInfo!: Option<FuncDecl> = None): Unit {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        if (callHandlerDecl.isNone()) {
+            return
+        }
+        let isMethod = !decl.IsStaticOrGlobal()
+        let handlerRetTy = typeManager.GetAnyTy()
+        let optionFuncRetTy = typeManager.GetEnumTy(
+            mockUtils.optionDecl.getOrThrow(), typeArgs: [handlerRetTy])
+        let arrayTy = typeManager.GetStructTy(
+            mockUtils.arrayDecl.getOrThrow(), [typeManager.GetAnyTy()])
+        let toStrArrayTy = typeManager.GetStructTy(mockUtils.arrayDecl.getOrThrow(),
+            [mockUtils.toStringDecl.getOrThrow().GetTy().getOrThrow()])
+        let objectTy = typeManager.GetClassTy(mockUtils.objectDecl.getOrThrow(), [])
+        let funcTy = if (isMethod) {
+            typeManager.GetFunctionTy([objectTy, arrayTy, toStrArrayTy], optionFuncRetTy)
+        } else {
+            typeManager.GetFunctionTy([arrayTy, toStrArrayTy], optionFuncRetTy)
+        }
+        let optionFuncTy = typeManager.GetEnumTy(
+            mockUtils.optionDecl.getOrThrow(), typeArgs: [funcTy])
+        let handlerSomeDecl = LookupEnumMember(
+            optionFuncTy.decl.getOrThrow(), OPTION_VALUE_CTOR).getOrThrow()
+        let handlerSomeRef = CreateRefExpr(handlerSomeDecl)
+        handlerSomeRef.SetTy(typeManager.GetFunctionTy([funcTy], optionFuncTy))
+        let handlerSomeCallArgs = ArrayList<FuncArg>()
+        handlerSomeCallArgs.add(CreateFuncArg(
+            GenerateCallHandlerLambda(decl, injectTo, declForInfo)))
+        let handlerSomeCall = CreateCallExpr(handlerSomeRef, handlerSomeCallArgs)
+        handlerSomeCall.resolvedFunction = (handlerSomeDecl as FuncDecl).getOrThrow()
+        handlerSomeCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+        handlerSomeCall.SetTy(optionFuncTy)
+
+        let genericDecl = mockUtils.GetGenericDecl(decl)
+        let mangledName = mockUtils.Mangle(genericDecl)
+        let foundHandlerDecl = mockUtils.FindMockGlobalDecl(genericDecl, mangledName)
+        CJC_NULLPTR_CHECK(foundHandlerDecl)
+        let handlerDecl = (foundHandlerDecl.getOrThrow() as VarDecl).getOrThrow()
+        let handlerRef = CreateRefExpr(handlerDecl)
+        handlerRef.curFile = injectTo.curFile
+        let handlerAssignExpr = CreateAssignExpr(handlerRef, handlerSomeCall, Some(unitTy))
+        handlerAssignExpr.curFile = injectTo.curFile
+        handlerAssignExpr.EnableAttr(Attribute.IMPLICIT_ADD)
+
+        let replacedExprs = ArrayList<Node>()
+        replacedExprs.add(handlerAssignExpr)
+        replacedExprs.add((ASTCloner.Clone(injectTo) as Expr).getOrThrow())
+        injectTo.desugarExpr = CreateBlock(replacedExprs, injectTo.GetTy())
+    }
+
     // C++: Sema/Test/MockManager.cpp:1204-1238.
     private func CreateMockedProp(originalProp: PropDecl, mockedDecl: ClassDecl,
         classGenericSubsts: ArrayList<TypeSubst>): Option<PropDecl> {
