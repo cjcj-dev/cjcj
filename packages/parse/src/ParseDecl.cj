@@ -1579,7 +1579,7 @@ extend ParserImpl {
         } else {
             param.identifier = ExpectIdentifierWithPos(param)
         }
-        param.begin = Peek().Begin()
+        param.begin = lookahead.Begin()
         if (param.identifier.Val() == INVALID_IDENTIFIER) {
             param.begin = Peek().Begin()
             param.typeNode = InvalidType(Peek().Begin())
