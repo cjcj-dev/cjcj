@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::sema.*
 import cjcj::sema.Desugar.AfterTypeCheck.IsNeedRuntimeCheck
 import cjcj::sema.Test.TestManager as RealTestManager
-import cjcj::utils.{CJC_ASSERT, InternalError}
+import cjcj::utils.{BOX_DECL_PREFIX, CJC_ASSERT, InternalError}
 
 private class GenericInstantiationRecord {
     public var genericDecl: Decl
@@ -1541,10 +1541,10 @@ class GenericInstantiationManagerImpl {
     }
 
     private func CheckNodeInstantiation(node: Node, pkg: Package): VisitAction {
-        if (ShouldSkipInstantiationNode(node)) {
-            return VisitAction.SKIP_CHILDREN
+        let action = CheckVisitedNode(node)
+        if (action != VisitAction.WALK_CHILDREN) {
+            return action
         }
-        PushStructContext(node)
         if (let Some(expr) <- (node as Expr)) {
             if (let Some(desugar) <- expr.desugarExpr) {
                 InstantiateReferencedGenericsInNode(desugar, pkg)
@@ -1586,6 +1586,31 @@ class GenericInstantiationManagerImpl {
         }
     }
 
+    func CheckVisitedNode(node: Node, checkGeneric!: Bool = false): VisitAction {
+        if (ci.diag.getOrThrow().GetErrorCount() != 0u64) {
+            return VisitAction.STOP_NOW
+        }
+        if (!checkGeneric && node.TestAttr(Attribute.GENERIC)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (node.astKind == ASTKind.GENERIC_PARAM_DECL || node.astKind == ASTKind.GENERIC_CONSTRAINT ||
+            node.astKind == ASTKind.PRIMARY_CTOR_DECL || node.astKind == ASTKind.MODIFIER) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (node.astKind == ASTKind.FUNC_ARG && node.TestAttr(Attribute.HAS_INITIAL)) {
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (let Some(decl) <- (node as Decl)) {
+            if (decl.astKind == ASTKind.CLASS_DECL && decl.identifier.Val().startsWith(BOX_DECL_PREFIX)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (NeedSwitchContext(decl)) {
+                structContext.add(decl)
+            }
+        }
+        return VisitAction.WALK_CHILDREN
+    }
+
     func PopStructContext(node: Node): VisitAction {
         if (let Some(decl) <- (node as Decl)) {
             if (!structContext.isEmpty() && NeedSwitchContext(decl) &&
@@ -1614,19 +1639,6 @@ class GenericInstantiationManagerImpl {
         for (typeArg in expr.typeArguments) {
             InstantiateReferencedGenericsInNode(typeArg, pkg)
         }
-    }
-
-    private func ShouldSkipInstantiationNode(node: Node): Bool {
-        if (node.astKind == ASTKind.GENERIC_PARAM_DECL || node.astKind == ASTKind.GENERIC_CONSTRAINT ||
-            node.astKind == ASTKind.PRIMARY_CTOR_DECL || node.astKind == ASTKind.MODIFIER) {
-            return true
-        }
-        if (let Some(decl) <- (node as Decl)) {
-            if (decl.TestAttr(Attribute.GENERIC) && !decl.TestAttr(Attribute.GENERIC_INSTANTIATED)) {
-                return true
-            }
-        }
-        return false
     }
 
     private func GenericTyExtendInstantiate(ty: Ty, pkg: Package): Unit {
@@ -1903,11 +1915,10 @@ class GenericInstantiationManagerImpl {
     }
 
     private func CheckNodeRearrangement(node: Node, pkg: Package): VisitAction {
-        if (node.astKind == ASTKind.GENERIC_PARAM_DECL || node.astKind == ASTKind.GENERIC_CONSTRAINT ||
-            node.astKind == ASTKind.MODIFIER) {
-            return VisitAction.SKIP_CHILDREN
+        let action = CheckVisitedNode(node, checkGeneric: true)
+        if (action != VisitAction.WALK_CHILDREN) {
+            return action
         }
-        PushStructContext(node)
         if (let Some(expr) <- (node as Expr)) {
             if (let Some(desugar) <- expr.desugarExpr) {
                 RearrangeReferencesInNode(desugar, pkg)

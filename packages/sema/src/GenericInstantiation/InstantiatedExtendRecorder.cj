@@ -2,7 +2,7 @@ package cjcj::sema.GenericInstantiation
 
 import cjcj::ast.*
 import cjcj::sema.*
-import cjcj::utils.{BOX_DECL_PREFIX, CJC_ASSERT, InternalError}
+import cjcj::utils.{CJC_ASSERT, InternalError}
 
 class InstantiatedExtendRecorder {
     private var gim: GenericInstantiationManagerImpl
@@ -34,30 +34,11 @@ class InstantiatedExtendRecorder {
         let _ = walker.Walk()
     }
 
-    private func ShouldSkipRecordNode(node: Node): Bool {
-        if (node.astKind == ASTKind.GENERIC_PARAM_DECL || node.astKind == ASTKind.GENERIC_CONSTRAINT ||
-            node.astKind == ASTKind.PRIMARY_CTOR_DECL || node.astKind == ASTKind.MODIFIER) {
-            return true
-        }
-        if (node.astKind == ASTKind.FUNC_ARG && node.TestAttr(Attribute.HAS_INITIAL)) {
-            return true
-        }
-        if (let Some(decl) <- (node as Decl)) {
-            if (decl.TestAttr(Attribute.GENERIC)) {
-                return true
-            }
-            if (decl.astKind == ASTKind.CLASS_DECL && decl.identifier.Val().startsWith(BOX_DECL_PREFIX)) {
-                return true
-            }
-        }
-        return false
-    }
-
     private func RecordUsedExtendDecl(node: Node): VisitAction {
-        if (ShouldSkipRecordNode(node)) {
-            return VisitAction.SKIP_CHILDREN
+        let action = gim.CheckVisitedNode(node)
+        if (action != VisitAction.WALK_CHILDREN) {
+            return action
         }
-        gim.PushStructContext(node)
         if (let Some(expr) <- (node as Expr)) {
             if (let Some(desugarExpr) <- expr.desugarExpr) {
                 Record(desugarExpr)
