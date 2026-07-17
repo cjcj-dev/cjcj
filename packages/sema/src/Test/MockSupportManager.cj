@@ -819,6 +819,16 @@ public class MockSupportManager {
         return accessorDecl
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:469-476.
+    private func GenerateVarDeclAccessors(fieldDecl: VarDecl,
+        getterKind: AccessorKind, setterKind: AccessorKind): Unit {
+        mockUtils.AttachGeneratedDecl(GenerateVarDeclAccessor(fieldDecl, getterKind))
+        if (fieldDecl.isVar) {
+            mockUtils.AttachGeneratedDecl(GenerateVarDeclAccessor(fieldDecl, setterKind))
+        }
+        fieldDecl.EnableAttr(Attribute.MOCK_SUPPORTED)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
