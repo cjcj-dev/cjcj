@@ -6075,34 +6075,6 @@ extend TypeChecker {
         return isWellTyped
     }
 
-    private func SynthesizeMatchChildren(ctx: ASTContext, matchExpr: MatchExpr): ArrayList<Decl> {
-        let allBoundDecls = ArrayList<Decl>()
-        var selectorTy: Option<Ty> = None
-        if (let Some(selector) <- matchExpr.selector) {
-            let _ = Synthesize(ctx, selector)
-            selectorTy = selector.GetTy()
-        }
-        for (matchCase in matchExpr.matchCases) {
-            let boundDecls = ArrayList<Decl>()
-            if (let Some(targetTy) <- selectorTy) {
-                if (Ty.IsTyCorrect(targetTy)) {
-                    matchCase.SetCtxExprForPatterns(matchExpr.selector.getOrThrow())
-                    let _ = ChkMatchCasePatterns(impl.typeManager, ctx, targetTy, matchCase, diag: impl.diag,
-                        exprChecker: Some({ target: Ty, expr: Expr =>
-                            Check(ctx, target, expr)
-                        }), desugarCallExpr: Some({ callExprForDesugar: CallExpr =>
-                            DesugarCallExpr(callExprForDesugar)
-                        }))
-                    BindCollectedConditionDecls(ctx, matchCase.patterns, boundDecls)
-                    for (decl in boundDecls) {
-                        AddUniqueBoundDecl(allBoundDecls, decl)
-                    }
-                }
-            }
-        }
-        return allBoundDecls
-    }
-
     private func CollectPatternBinding(pattern: Pattern, out: ArrayList<Decl>): Unit {
         if (let Some(varPattern) <- (pattern as VarPattern)) {
             if (let Some(varDecl) <- varPattern.varDecl) {
@@ -8302,10 +8274,8 @@ extend TypeChecker {
                 ctx.SkipSynForCorrectTy(matchExpr)
                 return matchTy
             }
-            let boundDecls = SynthesizeMatchChildren(ctx, matchExpr)
             let matchTy = this.SynMatchExpr(ctx, matchExpr)
             ctx.SkipSynForCorrectTy(matchExpr)
-            RemovePatternBindings(ctx, boundDecls)
             return matchTy
         }
         if (let Some(jumpExpr) <- (expr as JumpExpr)) {
@@ -8538,13 +8508,11 @@ extend TypeChecker {
                 typeCheckExprClearTargetType(ctx, matchExpr)
                 return matchOk
             }
-            let boundDecls = SynthesizeMatchChildren(ctx, matchExpr)
             let matchOk = this.ChkMatchExpr(ctx, target, matchExpr)
             if (matchOk) {
                 ctx.SkipSynForCorrectTy(matchExpr)
             }
             typeCheckExprClearTargetType(ctx, matchExpr)
-            RemovePatternBindings(ctx, boundDecls)
             return matchOk
         }
         if (let Some(parenExpr) <- (expr as ParenExpr)) {
