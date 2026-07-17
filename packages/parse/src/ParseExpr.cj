@@ -2037,6 +2037,9 @@ extend ParserImpl {
                 builder.Emit()
             }
             ret.expr = ParseExpr()
+            if (ret.expr.getOrThrow().TestAttr(Attribute.IS_BROKEN)) {
+                ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI])
+            }
         }
         ret.end = ret.expr.getOrThrow().end
         return ret
