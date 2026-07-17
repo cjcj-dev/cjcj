@@ -3,7 +3,6 @@ package cjcj::option
 import std.collection.*
 import std.core.Option as CoreOption
 import std.fs.Directory as FSDirectory
-import cjcj::basic.Errorln
 import cjcj::utils.{FileUtil, GenerateRandomHexString}
 
 @When[os == "Windows"]
@@ -69,7 +68,7 @@ public class TempFileManager {
 
     public func Init(options: GlobalOptions, isFrontend: Bool): Bool {
         isCjcFrontend = isFrontend
-        opts = options
+        opts = GlobalOptions(options)
         deleteState = NOT_DELETED
         deletedFiles.clear()
         if (!InitOutputDir()) {

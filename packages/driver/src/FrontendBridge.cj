@@ -1,25 +1,50 @@
 package cjcj::driver
 
 import std.collection.*
-import cjcj::frontend_tool.DriverOptions as FrontendToolDriverOptions
-import cjcj::frontend_tool.ExecuteFrontendWithResult
+import cjcj::basic.{DiagFormat as BasicDiagFormat, DiagnosticEngine}
+import cjcj::frontend.{CompilerInvocation, DumpAction}
+import cjcj::frontend_tool.{DefaultCompilerInstance, Driver as FrontendToolDriver,
+    DriverOptions as FrontendToolDriverOptions, ExecuteFrontendByDriver, IncrementalCompilerInstance,
+    NeedCreateIncrementalCompilerInstance}
+import cjcj::option.{DiagFormat as OptionDiagFormat, GlobalOptions}
 
 public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (!PrepareFrontendOutputs(driver.driverOptions)) {
         return false
     }
-    let frontendOptions = driver.driverOptions.GenerateFrontendOptions()
-    let frontendArgs = BuildFrontendArgumentVector(driver.cangjieHome, frontendOptions)
-    if (driver.driverOptions.enableVerbose) {
-        PrintFrontendCommand(driver.cangjieHome, frontendOptions)
+    let compilerInvocation = CompilerInvocation()
+    compilerInvocation.globalOptions = GlobalOptions(driver.driverOptions)
+    compilerInvocation.globalOptions.executablePath = driver.executableName
+    if (compilerInvocation.globalOptions.scanDepPkg) {
+        compilerInvocation.frontendOptions.dumpAction = DumpAction.DUMP_DEP_PKG
     }
-    let result = ExecuteFrontendWithResult(driver.executableName, frontendArgs,
-        driver.driverOptions.environment.allVariables, compileTarget: Some(driver.driverOptions.compileTarget),
-        tempFolderPath: Some(TempFileManager.Instance().GetTempFolder()))
-    if (result.exitCode != 0) {
+    let diag = DiagnosticEngine()
+    let errorCountLimit: Option<UInt64> = if (compilerInvocation.globalOptions.errorCountLimit.hasValue) {
+        Some(compilerInvocation.globalOptions.errorCountLimit.value)
+    } else {
+        None
+    }
+    diag.SetErrorCountLimit(errorCountLimit)
+    diag.RegisterHandler(match (compilerInvocation.globalOptions.diagFormat) {
+        case OptionDiagFormat.JSON => BasicDiagFormat.JSON
+        case OptionDiagFormat.NO_COLOR => BasicDiagFormat.NO_COLOR
+        case OptionDiagFormat.DEFAULT => BasicDiagFormat.DEFAULT
+    })
+    let frontendInstance: DefaultCompilerInstance = if (
+        NeedCreateIncrementalCompilerInstance(compilerInvocation.globalOptions)) {
+        IncrementalCompilerInstance(compilerInvocation, diag)
+    } else {
+        DefaultCompilerInstance(compilerInvocation, diag)
+    }
+    let frontendOptions = FrontendToolDriverOptions()
+    let frontendDriver = FrontendToolDriver(driverOptions: frontendOptions)
+    if (!ExecuteFrontendByDriver(frontendInstance, frontendDriver)) {
         return false
     }
-    ApplyFrontendOutputs(driver.driverOptions, result.driverOptions)
+    if (driver.driverOptions.enableVerbose) {
+        PrintFrontendCommand(driver.cangjieHome, driver.driverOptions.GenerateFrontendOptions())
+    }
+    ApplyFrontendOutputs(driver.driverOptions, frontendOptions)
     if (!PublishFrontendBitcodeOutputs(driver.driverOptions)) {
         return false
     }
@@ -29,15 +54,6 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
 private func GetFrontendExecutablePath(cangjieHome: String): String {
     let exeExtension = if (HostOS() == OSType.WINDOWS) { ".exe" } else { "" }
     return FileUtil.JoinPath(FileUtil.JoinPath(cangjieHome, "bin"), "cjc-frontend" + exeExtension)
-}
-
-private func BuildFrontendArgumentVector(cangjieHome: String, options: Array<String>): Array<String> {
-    let args = ArrayList<String>()
-    args.add(GetFrontendExecutablePath(cangjieHome))
-    for (option in options) {
-        args.add(option)
-    }
-    return args.toArray()
 }
 
 private func PrepareFrontendOutputs(opts: DriverOptions): Bool {

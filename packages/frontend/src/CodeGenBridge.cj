@@ -72,6 +72,7 @@ import cjcj::meta_transformation.TryRunCHIRMetaTransforms
 import cjcj::option.OptimizationFlag
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
+import cjcj::option.{TempFileKind, TempFileManager}
 import cjcj::utils.CFFI_FUNC_SUFFIX
 import cjcj::utils.CHIR_READABLE_FILE_EXTENSION
 import cjcj::utils.CHIR_SERIALIZATION_FILE_EXTENSION
@@ -870,7 +871,7 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
             ClearPackageModules(packageModules)
             return false
         }
-        emittedAll = emitPackageModules(instance, realPackage, packageModules, packageIndex) && emittedAll
+        emittedAll = emitPackageModules(instance, realPackage, packageModules) && emittedAll
         ClearPackageModules(packageModules)
         packageIndex++
     }
@@ -1057,8 +1058,7 @@ public func GetVarInitDepMap(chirPkg: RealCHIRPackage): HashMap<String, String> 
 private func emitPackageModules(
     instance: CompilerInstance,
     pkg: RealCHIRPackage,
-    modules: ArrayList<LLVMModuleHandle>,
-    packageIndex: Int64
+    modules: ArrayList<LLVMModuleHandle>
 ): Bool {
     if (modules.isEmpty()) {
         instance.diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION,
@@ -1068,69 +1068,58 @@ private func emitPackageModules(
     var ok = true
     var moduleIndex: Int64 = 0
     while (moduleIndex < modules.size) {
-        let fileName = outputFileNameForModule(instance.invocation.globalOptions, pkg, moduleIndex, modules.size)
-        let path = outputPathForModule(instance.invocation.globalOptions, packageIndex, modules.size, fileName)
-        var saved = false
-        if (!ensureOutputDirectory(path)) {
-            instance.diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION,
-                "failed to create output directory for bitcode file '" + path + "'")
+        let idx = if (modules.size == 1) { "" } else { moduleIndex.toString() }
+        let path = GenerateBCFilePathAndUpdateToInvocation(
+            instance.invocation.globalOptions, TempFileKind.T_BC, pkg.GetName(), idx)
+        if (path.isEmpty()) {
             ok = false
         } else if (!SavePackageModule(modules[moduleIndex], path)) {
             instance.diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION,
                 "failed to write LLVM bitcode file '" + path + "'")
             ok = false
-        } else {
-            saved = true
-            registerFrontendOutput(instance.invocation.globalOptions, fileName, path)
         }
         moduleIndex++
     }
     if (ok && instance.invocation.globalOptions.enIncrementalCompilation) {
-        instance.cachedInfo.bitcodeFilesName.add(
-            outputFileNameForModule(instance.invocation.globalOptions, pkg, 0, 1))
+        instance.cachedInfo.bitcodeFilesName.add(GenerateFileName(instance.invocation.globalOptions, pkg.GetName(), ""))
     }
     return ok
 }
 
-private func registerFrontendOutput(options: GlobalOptions, moduleName: String, path: String): Unit {
-    options.frontendOutputFiles.add(TempFileInfo(
-        fileName: moduleName,
-        filePath: path,
-        rawPath: path,
-        isFrontendOutput: true))
+// C++: FrontendTool/DefaultCompilerInstance.cpp:128-143.
+private func GenerateFileName(options: GlobalOptions, fullPackageName: String, idx: String): String {
+    let pkgNameSuffix = FileUtil.ToCjoFileName(fullPackageName)
+    let prefix = if (idx.isEmpty()) { "" } else { idx + "-" }
+    if (options.compilePackage) {
+        return prefix + pkgNameSuffix
+    }
+    if (fullPackageName != DEFAULT_PACKAGE_NAME) {
+        return prefix + pkgNameSuffix
+    }
+    CJC_ASSERT(!options.srcFiles.isEmpty())
+    return prefix + FileUtil.GetFileNameWithoutExtension(options.srcFiles[0])
 }
 
-private func outputPathForModule(
-    options: GlobalOptions,
-    packageIndex: Int64,
-    moduleCount: Int64,
-    fileName: String
-): String {
-    if (packageIndex == 0 && moduleCount == 1 && !options.output.isEmpty() && !IsDir(options.output)) {
-        return options.output
+// C++: FrontendTool/DefaultCompilerInstance.cpp:145-164.
+private func GenerateBCFilePathAndUpdateToInvocation(options: GlobalOptions, kind: TempFileKind,
+    pkgName: String, idx: String): String {
+    let fileName = GenerateFileName(options, pkgName, idx)
+    let bcFileInfo = TempFileManager.Instance().CreateNewFileInfo(
+        TempFileInfo(fileName: fileName, isFrontendOutput: true), kind)
+    options.frontendOutputFiles.add(bcFileInfo)
+    let bcFilePath = bcFileInfo.filePath
+    if (FileUtil.FileExist(bcFilePath) && !FileUtil.Remove(bcFilePath)) {
+        eprintln("error: The file " + bcFilePath +
+            " already exists, but it fails to be removed before being updated.")
+        return ""
     }
-    return FileUtil.JoinPath(options.tempFolderPath, fileName + ".bc")
-}
-
-private func outputFileNameForModule(options: GlobalOptions, pkg: RealCHIRPackage, moduleIndex: Int64,
-    moduleCount: Int64): String {
-    let prefix = if (moduleCount == 1) { "" } else { moduleIndex.toString() + "-" }
-    if (options.compilePackage || pkg.GetName() != DEFAULT_PACKAGE_NAME) {
-        return prefix + FileUtil.ToCjoFileName(pkg.GetName())
+    let dir = FileUtil.GetDirPath(bcFilePath)
+    if (!FileUtil.FileExist(dir) && FileUtil.CreateDirs(dir + "/") != 0) {
+        eprintln("error: The directory " + dir + " fails to be created before creating " + bcFilePath)
+        return ""
     }
-    if (!options.srcFiles.isEmpty()) {
-        return prefix + FileUtil.GetFileNameWithoutExtension(options.srcFiles[0])
+    if (TempFileManager.Instance().IsDeleted()) {
+        return ""
     }
-    return prefix + FileUtil.ToCjoFileName(pkg.GetName())
-}
-
-private func ensureOutputDirectory(path: String): Bool {
-    let dir = GetDirPath(path)
-    if (dir.isEmpty() || dir == ".") {
-        return true
-    }
-    if (FileExist(dir)) {
-        return IsDir(dir)
-    }
-    return CreateDirs(dir + DIR_SEPARATOR)
+    return bcFilePath
 }
