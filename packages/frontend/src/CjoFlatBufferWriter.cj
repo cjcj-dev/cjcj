@@ -2224,7 +2224,15 @@ public class ASTWriter {
     }
 
     private func SaveParamInfo(param: FuncParam): FlatBufferOffset {
+        var defaultVal = 0u32
+        if (let Some(assignment) <- param.assignment) {
+            if (param.TestAttr(Attribute.TOOL_ADD) || assignment.isConst ||
+                (assignment as LitConstExpr).isSome()) {
+                defaultVal = SaveExpr(assignment)
+            }
+        }
         builder.StartTable(3)
+        builder.AddU32(2, defaultVal)
         builder.AddBool(1, param.isMemberParam)
         builder.AddBool(0, param.isNamedParam)
         return builder.EndTable()
