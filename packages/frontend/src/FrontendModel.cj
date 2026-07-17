@@ -5094,6 +5094,7 @@ private class CjoSignatureMaterializer {
         }
         param.isNamedParam = reader.U8Field(infoTable, 4, 0u8) != 0u8
         param.isMemberParam = reader.U8Field(infoTable, 6, 0u8) != 0u8
+        param.assignment = LoadFlatExpr(reader, reader.U32Field(infoTable, 8, 0u32))
     }
 
     private func LoadFlatPropInfo(reader: CjoFlatBuffer, record: CjoFlatDecl, propDecl: PropDecl): Unit {
