@@ -502,6 +502,58 @@ public class MockManager {
         return fieldDecl
     }
 
+    // C++: Sema/Test/MockManager.cpp:972-1023.
+    private func CreateDeclKind(decl: FuncDecl): CallExpr {
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let declKindArgs = ArrayList<FuncArg>()
+        declKindArgs.add(CreateFuncArg(CreateLitConstExpr(LitConstKind.STRING,
+            MockUtils.GetOriginalIdentifierOfAccessor(decl),
+            mockUtils.stringDecl.getOrThrow().GetTy().getOrThrow(), true)))
+
+        let accessorKind = MockUtils.ComputeAccessorKind(decl)
+        let libAccessorKind = GetMockLibraryAccessorKind(accessorKind)
+        var needToRecordSetterPresence = false
+        var hasSetter = false
+
+        if (accessorKind == AccessorKind.FIELD_GETTER) {
+            needToRecordSetterPresence = true
+            hasSetter = mockUtils.IsGetterForMutField(decl)
+        } else if (accessorKind == AccessorKind.PROP_GETTER) {
+            needToRecordSetterPresence = true
+            hasSetter = decl.propDecl.getOrThrow().isVar
+        }
+
+        if (needToRecordSetterPresence) {
+            declKindArgs.add(CreateFuncArg(CreateLitConstExpr(LitConstKind.BOOL,
+                if (hasSetter) { "true" } else { "false" }, boolTy, true)))
+        }
+
+        for (enumEntry in declKindEnumDecl.getOrThrow().constructors) {
+            if (enumEntry.identifier.Val() != libAccessorKind) {
+                continue
+            }
+
+            let entryRetType = (enumEntry.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+            let enumEntryRef = RefExpr()
+            enumEntryRef.ref = Reference(libAccessorKind)
+            enumEntryRef.ref.target = enumEntry
+            enumEntryRef.SetTy(entryRetType)
+
+            let enumEntryBase = CreateMemberAccess(enumEntryRef, enumEntry)
+            let enumEntryCallExpr = CallExpr()
+            enumEntryCallExpr.SetTy(entryRetType)
+            enumEntryCallExpr.resolvedFunction = (enumEntryBase.target.getOrThrow() as FuncDecl).getOrThrow()
+            enumEntryCallExpr.baseFunc = enumEntryBase
+            enumEntryCallExpr.args.add(all: declKindArgs)
+            enumEntryCallExpr.callKind = CallKind.CALL_DECLARED_FUNCTION
+            enumEntryCallExpr.curFile = decl.curFile
+            return enumEntryCallExpr
+        }
+
+        CJC_ASSERT(false)
+        return CallExpr()
+    }
+
     public static func MockedDeclName(original: ClassLikeDecl, instantiationNumber!: Int64 = 0): String {
         return original.identifier.Val() + MOCKED_DECL_SUFFIX + instantiationNumber.toString()
     }
