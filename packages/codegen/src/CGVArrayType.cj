@@ -45,15 +45,9 @@ public class CGVArrayType <: CGType {
     }
 
     protected override func CalculateSizeAndAlign(): Unit {
-        if (let Some(vArrayTy) <- (chirType as VArrayType)) {
-            let elementType = CGType.GetOrCreate(cgMod, vArrayTy.GetElementType())
-            let elementSize = if (let Some(value) <- elementType.GetSize()) { value } else { 0 }
-            let elementAlign = if (let Some(value) <- elementType.GetAlign()) { value } else { 1 }
-            size = elementSize * Int64(vArrayTy.size)
-            align = elementAlign
-        } else {
-            size = 0
-            align = 1
+        if (let Some(arrayType) <- llvmType) {
+            size = Int64(UInt32(cgMod.GetTypeSize(arrayType) & UInt64(UInt32.Max)))
+            align = Int64(cgMod.GetABITypeAlignment(arrayType))
         }
     }
 }
