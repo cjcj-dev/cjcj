@@ -684,6 +684,26 @@ extend ParserImpl {
         }
     }
 
+    private func ParseFuncDeclAnnos(annos: ArrayList<Annotation>, funcDecl: PrimaryCtorDecl): Unit {
+        for (anno in annos) {
+            funcDecl.annotations.add(anno)
+            if (anno.kind == AnnotationKind.JAVA) {
+                funcDecl.EnableAttr(Attribute.JAVA_APP)
+            }
+            if (anno.kind == AnnotationKind.INTRINSIC) {
+                CheckIntrinsicFunc(funcDecl)
+                funcDecl.EnableAttr(Attribute.INTRINSIC)
+            }
+            if (anno.kind == AnnotationKind.NUMERIC_OVERFLOW) {
+                funcDecl.EnableAttr(Attribute.NUMERIC_OVERFLOW)
+                funcDecl.overflowStrategy = anno.overflowStrategy
+            }
+            if (anno.kind == AnnotationKind.FASTNATIVE) {
+                funcDecl.isFastNative = true
+            }
+        }
+    }
+
     private func CheckIntrinsicFunc(fd: Decl): Unit {
         for (intrinsic in intrinsics) {
             if (let Some(intrinsicDecl) <- (intrinsic as Decl)) {
