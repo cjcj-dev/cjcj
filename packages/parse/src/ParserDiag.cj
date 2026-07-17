@@ -1,5 +1,6 @@
 package cjcj::parse
 
+import cjcj::ast.AddHint as AstAddHint
 import cjcj::basic.{DiagHelp, SubDiagnostic}
 import cjcj::basic.Range as BasicRange
 import cjcj::option.BackendToString as OptionBackendToString
@@ -528,13 +529,13 @@ extend ParserImpl {
 
     public func DiagNamedParameterAfterUnnamed(param: FuncParam, pre: FuncParam): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_named_parameter_after_unnamed, param)
-        builder.AddHint(MakeRange(pre.begin, pre.end))
+        AstAddHint(builder, pre)
         builder.Emit()
     }
 
     public func DiagMemberParameterAfterRegular(param: FuncParam, pre: FuncParam): Unit {
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_member_parameter_after_regular, param)
-        builder.AddHint(MakeRange(pre.begin, pre.end))
+        AstAddHint(builder, pre)
         builder.Emit()
     }
 
