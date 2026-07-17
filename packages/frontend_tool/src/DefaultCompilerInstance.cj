@@ -259,7 +259,7 @@ public open class DefaultCompilerInstance {
                     pkg.fullPackageName, ".frontend_tool.codegen"))
             }
         }
-        return core.PerformCodeGen(enableIncrement: enableIncrement, cachedMangleMap: cachedMangleMap)
+        return EmitLLVMSimilarBytecode(core, enableIncrement, cachedMangleMap)
     }
 
     protected func SaveCjos(pkgs: ArrayList<Package>): Bool {
