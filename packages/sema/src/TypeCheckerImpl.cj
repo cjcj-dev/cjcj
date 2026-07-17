@@ -252,6 +252,91 @@ public class TypeCheckerImpl {
         CheckInstDupSuperInterfaces(decl, decl, TypeSubst(), checkExtend: false)
     }
 
+    // C++ src/Sema/PreCheck.cpp:1334-1347 TypeCheckerImpl::CheckInheritanceCycleHelper.
+    public func CheckInheritanceCycleHelper<T>(ctx: ASTContext, decl: Decl, typeNode: Type,
+        path: ArrayList<Decl>, extendDecl!: Option<ExtendDecl> = None): Unit where T <: Decl {
+        if (typeNode.astKind == ASTKind.REF_TYPE || typeNode.astKind == ASTKind.QUALIFIED_TYPE) {
+            if ((let Some(target) <- typeNode.GetTarget()) &&
+                (let Some(typeAliasDecl) <- (target as TypeAliasDecl)) &&
+                (let Some(aliasedType) <- typeAliasDecl.typeNode)) {
+                CheckInheritanceCycleHelper<T>(ctx, decl, aliasedType, path, extendDecl)
+            } else if (let Some(target) <- typeNode.GetTarget()) {
+                match (target.checkFlag) {
+                    case InheritanceVisitStatus.VISITED => ()
+                    case _ => CheckInheritanceCycleDFS(ctx, target, path, extendDecl)
+                }
+            }
+        } else {
+            Diagnose(diag.getOrThrow(), decl, BasicDiagKind.sema_inheritance_non_ref_type,
+                args: [BasicDiagArgument(decl.identifier.Val())]).Emit()
+        }
+    }
+
+    // C++ src/Sema/PreCheck.cpp:1350-1364 TypeCheckerImpl::CheckInheritanceCycleWithExtend.
+    public func CheckInheritanceCycleWithExtend(ctx: ASTContext, decl: InheritableDecl,
+        path: ArrayList<Decl>): Unit {
+        let extends = typeManager.GetDeclExtends(decl)
+        for (extendDecl in extends) {
+            for (inheritedType in extendDecl.inheritedTypes) {
+                inheritedType.SetTy(GetTyFromASTType(ctx, inheritedType))
+                let target = Ty.GetDeclPtrOfTy(inheritedType.GetTy())
+                if ((let Some(targetDecl) <- target) &&
+                    (let Some(interfaceDecl) <- (targetDecl as InterfaceDecl))) {
+                    match (interfaceDecl.checkFlag) {
+                        case InheritanceVisitStatus.VISITED =>
+                            CheckInheritanceCycleHelper<InterfaceDecl>(ctx, decl, inheritedType, path,
+                                Some(extendDecl))
+                        case _ => CheckInheritanceCycleDFS(ctx, interfaceDecl, path, Some(extendDecl))
+                    }
+                } else {
+                    CheckInheritanceCycleHelper<InterfaceDecl>(ctx, decl, inheritedType, path, Some(extendDecl))
+                }
+            }
+        }
+    }
+
+    // C++ src/Sema/PreCheck.cpp:1367-1391 TypeCheckerImpl::CheckInheritanceCycleDFS.
+    public func CheckInheritanceCycleDFS(ctx: ASTContext, decl: Decl, path: ArrayList<Decl>,
+        extendDecl!: Option<ExtendDecl> = None): Unit {
+        match (decl.checkFlag) {
+            case InheritanceVisitStatus.VISITING =>
+                CheckInheritanceCycleDFSHandleVisiting(decl, path, extendDecl)
+                return
+            case _ => ()
+        }
+
+        decl.checkFlag = InheritanceVisitStatus.VISITING
+        path.add(decl)
+
+        if (let Some(classLikeDecl) <- (decl as ClassLikeDecl)) {
+            for (inheritedType in classLikeDecl.inheritedTypes) {
+                let target = Ty.GetDeclPtrOfTy(inheritedType.GetTy())
+                if ((let Some(targetDecl) <- target) && targetDecl.IsNominalDecl()) {
+                    match (targetDecl.checkFlag) {
+                        case InheritanceVisitStatus.VISITED =>
+                            CheckInheritanceCycleHelper<ClassLikeDecl>(ctx, decl, inheritedType, path, extendDecl)
+                        case _ => CheckInheritanceCycleDFS(ctx, targetDecl, path, extendDecl)
+                    }
+                } else {
+                    CheckInheritanceCycleHelper<ClassLikeDecl>(ctx, decl, inheritedType, path, extendDecl)
+                }
+            }
+            CheckInheritanceCycleWithExtend(ctx, classLikeDecl, path)
+        }
+
+        path.remove(at: path.size - 1)
+        decl.checkFlag = InheritanceVisitStatus.VISITED
+    }
+
+    // C++ src/Sema/PreCheck.cpp:1394-1400 TypeCheckerImpl::CheckInheritanceCycleDFSHandleVisiting.
+    public func CheckInheritanceCycleDFSHandleVisiting(decl: Decl, path: ArrayList<Decl>,
+        extendDecl: Option<ExtendDecl>): Unit {
+        let diagInfo = ConstructDiagInfoForCycle(decl, path)
+        let diagnoseNode: Decl = if (let Some(value) <- extendDecl) { value } else { decl }
+        Diagnose(diag.getOrThrow(), diagnoseNode, BasicDiagKind.sema_inheritance_cycle,
+            args: [BasicDiagArgument(diagInfo)]).Emit()
+    }
+
     public func GetDupInterfaceRecursively(triggerNode: Node, interfaceTy: Ty, instantiateMap: TypeSubst,
         res: ArrayList<InterfaceTy>, passedClassLikeDecls: ArrayList<ClassLikeDecl>): Option<Decl> {
         let insTy = typeManager.GetInstantiatedTy(interfaceTy, instantiateMap)
