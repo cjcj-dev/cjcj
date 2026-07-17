@@ -750,6 +750,18 @@ public class MockManager {
         return CreateInitCall(initDecl.getOrThrow(), callInfoItems, curFile)
     }
 
+    // C++: Sema/Test/MockManager.cpp:1064-1076.
+    private func GetHandlerRefFromClass(decl: ClassDecl): RefExpr {
+        let callHandler = GetMemberDecl<VarDecl>(
+            decl, FIELD_NAME_TO_STORE_HANDLER, ArrayList<Ty>(), typeManager).getOrThrow()
+        let callHandlerRef = RefExpr()
+        callHandlerRef.ref = Reference(FIELD_NAME_TO_STORE_HANDLER)
+        callHandlerRef.ref.target = callHandler
+        callHandlerRef.SetTy(callHandler.GetTy().getOrThrow())
+        callHandlerRef.curFile = decl.curFile
+        return callHandlerRef
+    }
+
     // C++: Sema/Test/MockManager.cpp:972-1023.
     private func CreateDeclKind(decl: FuncDecl): CallExpr {
         let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
