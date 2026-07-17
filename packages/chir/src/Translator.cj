@@ -6919,7 +6919,7 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR match VarPattern has no VarDecl")
         let backup = currentBlock
         currentBlock = block
-        let boundValue = CastValueIfNeeded(value, VarPatternBindingType(pattern, value))
+        let boundValue = TypeCastOrBoxIfNeeded(value, VarPatternBindingType(pattern, value), TranslateLocation(pattern))
         boundValue.EnableAttr(Attribute.READONLY)
         currentBlock = backup
         if (let Some(desugar) <- pattern.desugarExpr) {
