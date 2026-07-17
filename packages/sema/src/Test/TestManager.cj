@@ -611,22 +611,22 @@ public class TestManager {
 
     // C++: Sema/Test/TestManager.cpp:564-640.
     public func ReplaceCallsWithAccessors(pkg: Package): Unit {
-        var isInConstructor = false
-        var isInMockAnnotatedLambda = false
-        var outerTy: Option<Ty> = None
+        let isInConstructor = ArrayList<Bool>([false])
+        let isInMockAnnotatedLambda = ArrayList<Bool>([false])
+        let outerTy = ArrayList<Option<Ty>>([None])
         let walker = Walker(pkg, visitPre: { node: Node =>
             if (node.astKind == ASTKind.PRIMARY_CTOR_DECL) {
                 return VisitAction.SKIP_CHILDREN
             }
             if (IsMockAnnotedLambda(node)) {
-                isInMockAnnotatedLambda = true
+                isInMockAnnotatedLambda[0] = true
             }
             if (let Some(extendDecl) <- (node as ExtendDecl)) {
-                CJC_ASSERT(outerTy.isNone())
-                outerTy = extendDecl.extendedType.getOrThrow().GetTy()
+                CJC_ASSERT(outerTy[0].isNone())
+                outerTy[0] = extendDecl.extendedType.getOrThrow().GetTy()
             } else if (let Some(inheritableDecl) <- (node as InheritableDecl)) {
-                CJC_ASSERT(outerTy.isNone())
-                outerTy = inheritableDecl.GetTy()
+                CJC_ASSERT(outerTy[0].isNone())
+                outerTy[0] = inheritableDecl.GetTy()
             }
             if (node.curFile.isSome() && !node.IsSamePackage(pkg)) {
                 return VisitAction.SKIP_CHILDREN
@@ -635,28 +635,28 @@ public class TestManager {
                 return VisitAction.SKIP_CHILDREN
             }
             if (node.TestAttr(Attribute.CONSTRUCTOR)) {
-                isInConstructor = true
+                isInConstructor[0] = true
                 return VisitAction.WALK_CHILDREN
             }
             if (let Some(expr) <- (node as Expr)) {
-                let _ = mockSupportManager.getOrThrow().ReplaceExprWithAccessor(expr, isInConstructor)
+                let _ = mockSupportManager.getOrThrow().ReplaceExprWithAccessor(expr, isInConstructor[0])
                 mockSupportManager.getOrThrow().ReplaceInterfaceDefaultFunc(
-                    expr, outerTy, isInMockAnnotatedLambda)
+                    expr, outerTy[0], isInMockAnnotatedLambda[0])
             }
             return VisitAction.WALK_CHILDREN
         }, visitPost: { node: Node =>
             if (node.TestAttr(Attribute.CONSTRUCTOR)) {
-                isInConstructor = false
+                isInConstructor[0] = false
             }
             if (IsMockAnnotedLambda(node)) {
-                isInMockAnnotatedLambda = false
+                isInMockAnnotatedLambda[0] = false
             }
             if (let Some(extendDecl) <- (node as ExtendDecl)) {
-                CJC_ASSERT(outerTy == extendDecl.extendedType.getOrThrow().GetTy())
-                outerTy = None
+                CJC_ASSERT(outerTy[0] == extendDecl.extendedType.getOrThrow().GetTy())
+                outerTy[0] = None
             } else if (let Some(inheritableDecl) <- (node as InheritableDecl)) {
-                CJC_ASSERT(outerTy == inheritableDecl.GetTy())
-                outerTy = None
+                CJC_ASSERT(outerTy[0] == inheritableDecl.GetTy())
+                outerTy[0] = None
             }
             return VisitAction.KEEP_DECISION
         })
