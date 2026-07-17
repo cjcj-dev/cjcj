@@ -463,6 +463,7 @@ public func DesugarOperatorOverloadExpr(expr: BinaryExpr, ctx!: Option<ASTContex
                 context2.RemoveTypeCheckCache(callBase)
             }
             callExpr.baseFunc = callBase
+            expr.leftExpr = None
             let arg = FuncArg()
             CopyBasicInfo(right, arg)
             if (let Some(context3) <- ctx) {
@@ -473,6 +474,7 @@ public func DesugarOperatorOverloadExpr(expr: BinaryExpr, ctx!: Option<ASTContex
                 arg.SetTy(rightTy)
             }
             callExpr.args.add(arg)
+            expr.rightExpr = None
             callExpr.sourceExpr = expr
             CopyUnsafeAttr(expr, callExpr)
             AddCurFile(callExpr, file: expr.curFile)
