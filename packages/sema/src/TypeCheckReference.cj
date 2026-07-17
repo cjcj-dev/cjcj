@@ -2060,20 +2060,7 @@ private func TypeCheckReferenceShouldSkipDeprecationDiagnostic(
     return false
 }
 
-public func TypeCheckReferenceShouldDiagnoseDeprecatedUsage(usage: Node, target: Decl): Bool {
-    if (!target.HasAnno(AstAnnotationKind.DEPRECATED)) {
-        return false
-    }
-    if (target.astKind == ASTKind.FUNC_PARAM) {
-        return false
-    }
-    if (target.astKind == ASTKind.VAR_DECL && usage.TestAttr(Attribute.COMPILER_ADD)) {
-        return false
-    }
-    return true
-}
-
-public func TypeCheckReferenceDiagnoseDeprecatedUsage(
+public func DiagnoseDeprecatedUsage(
     diag: BasicDiagnosticEngine,
     usage: Node,
     target: Decl,
@@ -2081,9 +2068,6 @@ public func TypeCheckReferenceDiagnoseDeprecatedUsage(
     deprecatedContext!: Option<Node> = None,
     strictDeprecatedContext!: Option<Node> = None
 ): Bool {
-    if (!TypeCheckReferenceShouldDiagnoseDeprecatedUsage(usage, target)) {
-        return false
-    }
     if (let None <- TypeCheckReferenceFindDeprecatedAnnotation(target)) {
         return false
     }
@@ -2149,7 +2133,7 @@ private func TypeCheckReferenceDeprecatedParentOfConstructor(usage: Node, target
     return None
 }
 
-public func TypeCheckReferenceDiagnoseDeprecatedUsageWithTarget(
+public func CheckUsageOfDeprecatedWithTarget(
     diag: BasicDiagnosticEngine,
     usage: Node,
     target: Decl,
@@ -2157,7 +2141,13 @@ public func TypeCheckReferenceDiagnoseDeprecatedUsageWithTarget(
     strictDeprecatedContext!: Option<Node> = None
 ): Bool {
     if (target.HasAnno(AstAnnotationKind.DEPRECATED)) {
-        return TypeCheckReferenceDiagnoseDeprecatedUsage(
+        if (target.astKind == ASTKind.FUNC_PARAM) {
+            return false
+        }
+        if (target.astKind == ASTKind.VAR_DECL && usage.TestAnyAttr(Attribute.COMPILER_ADD)) {
+            return false
+        }
+        return DiagnoseDeprecatedUsage(
             diag,
             usage,
             target,
@@ -2168,9 +2158,9 @@ public func TypeCheckReferenceDiagnoseDeprecatedUsageWithTarget(
         if (let Some(_) <- (usage as MemberAccess)) {
             return false
         }
-        if (!usage.TestAttr(Attribute.COMPILER_ADD)) {
+        if (!usage.TestAnyAttr(Attribute.COMPILER_ADD)) {
             if (let Some(parentTarget) <- TypeCheckReferenceDeprecatedParentOfConstructor(usage, target)) {
-                return TypeCheckReferenceDiagnoseDeprecatedUsage(
+                return DiagnoseDeprecatedUsage(
                     diag,
                     usage,
                     parentTarget,
@@ -2183,7 +2173,7 @@ public func TypeCheckReferenceDiagnoseDeprecatedUsageWithTarget(
         if (let Some(typeNode) <- aliasDecl.typeNode) {
             if (let Some(aliasedDecl) <- Ty.GetDeclOfTy(typeNode.GetTy())) {
                 if (aliasedDecl.HasAnno(AstAnnotationKind.DEPRECATED)) {
-                    return TypeCheckReferenceDiagnoseDeprecatedUsage(
+                    return DiagnoseDeprecatedUsage(
                         diag,
                         usage,
                         aliasedDecl,
@@ -2248,14 +2238,14 @@ private func TypeCheckReferenceExitDeprecatedContext(node: Node, state: TypeChec
     }
 }
 
-private func TypeCheckReferenceDiagnoseDeprecatedWithContext(
+private func DiagnoseDeprecatedUsageImpl(
     diag: BasicDiagnosticEngine,
     usage: Node,
     target: Decl,
     state: TypeCheckReferenceDeprecationState,
     nameOfDiagnose!: String = ""
 ): Bool {
-    return TypeCheckReferenceDiagnoseDeprecatedUsage(
+    return DiagnoseDeprecatedUsage(
         diag,
         usage,
         target,
@@ -2264,13 +2254,13 @@ private func TypeCheckReferenceDiagnoseDeprecatedWithContext(
         strictDeprecatedContext: state.strictDeprecatedContext)
 }
 
-private func TypeCheckReferenceDiagnoseDeprecatedTargetWithContext(
+private func CheckUsageOfDeprecatedWithTargetImpl(
     diag: BasicDiagnosticEngine,
     usage: Node,
     target: Decl,
     state: TypeCheckReferenceDeprecationState
 ): Bool {
-    return TypeCheckReferenceDiagnoseDeprecatedUsageWithTarget(
+    return CheckUsageOfDeprecatedWithTarget(
         diag,
         usage,
         target,
@@ -2312,7 +2302,7 @@ private func CheckUsageOfDeprecatedParameters(
             let param = params[idx]
             let arg = args[idx]
             if (param.HasAnno(AstAnnotationKind.DEPRECATED) && !arg.TestAnyAttr(Attribute.COMPILER_ADD)) {
-                let _ = TypeCheckReferenceDiagnoseDeprecatedWithContext(diag, arg, param, state)
+                let _ = DiagnoseDeprecatedUsageImpl(diag, arg, param, state)
             }
             idx++
         }
@@ -2341,7 +2331,7 @@ private func TypeCheckReferenceCheckUsageOfDeprecatedSetter(
     }
     if (let Some(setter) <- GetUsableSetterForProperty(propDecl)) {
         if (setter.HasAnno(AstAnnotationKind.DEPRECATED)) {
-            let _ = TypeCheckReferenceDiagnoseDeprecatedWithContext(
+            let _ = DiagnoseDeprecatedUsageImpl(
                 diag,
                 leftValue,
                 setter,
@@ -2542,7 +2532,7 @@ private func TypeCheckReferenceCheckTargetForDeprecatedUsage(
                 return
             }
         }
-        let _ = TypeCheckReferenceDiagnoseDeprecatedTargetWithContext(diag, usage, target, state)
+        let _ = CheckUsageOfDeprecatedWithTargetImpl(diag, usage, target, state)
     }
 }
 
