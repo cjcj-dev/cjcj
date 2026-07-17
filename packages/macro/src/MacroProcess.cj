@@ -431,33 +431,3 @@ public func ProcessMacroCallList(expansion: MacroExpansion, macCalls: ArrayList<
         }
     }
 }
-
-public func AddCurFile(pkg: Package): Unit {
-    for (file in pkg.files) {
-        for (decl in file.decls) {
-            setCurFileRecursive(decl, file)
-        }
-    }
-}
-
-private func setCurFileRecursive(node: Node, file: File): Unit {
-    node.curFile = Some(file)
-    for (child in node.Children()) {
-        setCurFileRecursive(child, file)
-    }
-    if (let Some(decl) <- (node as Decl)) {
-        for (member in decl.GetMemberDecls()) {
-            setCurFileRecursive(member, file)
-        }
-    }
-    if (let Some(funcDecl) <- (node as FuncDecl)) {
-        if (let Some(funcBody) <- funcDecl.funcBody) {
-            for (list in funcBody.paramLists) {
-                setCurFileRecursive(list, file)
-            }
-            if (let Some(body) <- funcBody.body) {
-                setCurFileRecursive(body, file)
-            }
-        }
-    }
-}

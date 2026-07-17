@@ -2,7 +2,7 @@ package cjcj::macro_pkg
 
 import std.collection.*
 import std.sort.*
-import cjcj::ast.{Diagnose, DiagnoseRefactor}
+import cjcj::ast.{AddCurFile, Diagnose, DiagnoseRefactor}
 import cjcj::ast.AnnotationKind as RealAnnotationKind
 import cjcj::ast.ExprKind as ParsedAstExprKind
 import cjcj::ast.Node as ParsedAstNode
