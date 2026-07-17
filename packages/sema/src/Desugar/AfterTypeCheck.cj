@@ -237,6 +237,12 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager
                             diag: diag)
                     }
                 }
+            case ASTKind.LIT_CONST_EXPR =>
+                if (let Some(litConstExpr) <- (node as LitConstExpr)) {
+                    if (litConstExpr.siExpr.isSome() && Ty.IsTyCorrect(litConstExpr.GetTy())) {
+                        DesugarStrInterpolationExpr(typeManager, pkg, litConstExpr, context: context)
+                    }
+                }
             case ASTKind.FUNC_PARAM =>
                 if (let Some(param) <- (node as FuncParam)) {
                     PostProcessFuncParam(param, options)
@@ -294,12 +300,6 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager
                 if (let Some(resumeExpr) <- (node as ResumeExpr)) {
                     DesugarResumeExpr(typeManager, importManager, pkg, resumeExpr,
                         { target: Ty, call: CallExpr => callChecker.getOrThrow()(context.getOrThrow(), target, call) })
-                }
-            case ASTKind.LIT_CONST_EXPR =>
-                if (let Some(litConstExpr) <- (node as LitConstExpr)) {
-                    if (litConstExpr.siExpr.isSome() && Ty.IsTyCorrect(litConstExpr.GetTy())) {
-                        DesugarStrInterpolationExpr(typeManager, pkg, litConstExpr, context: context)
-                    }
                 }
             case _ => ()
         }
