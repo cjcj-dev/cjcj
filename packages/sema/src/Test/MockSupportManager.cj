@@ -1130,6 +1130,64 @@ public class MockSupportManager {
         return propAccessor
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:678-730.
+    public func GenerateAccessors(decl: Decl): Unit {
+        if (!MockUtils.CanMock(decl)) {
+            return
+        }
+        if (let Some(varDecl) <- (decl as VarDecl)) {
+            if (varDecl.TestAttr(Attribute.GLOBAL)) {
+                GenerateVarDeclAccessors(varDecl,
+                    AccessorKind.TOP_LEVEL_VARIABLE_GETTER, AccessorKind.TOP_LEVEL_VARIABLE_SETTER)
+                return
+            }
+        }
+
+        let classDecl = decl as ClassDecl
+        if (classDecl.isNone()) {
+            return
+        }
+
+        for (member in MockUtils.ListExistingMembers(classDecl.getOrThrow())) {
+            if (member.TestAttr(Attribute.CONSTRUCTOR)) {
+                continue
+            }
+            if (member.TestAttr(Attribute.STATIC)) {
+                if (let Some(fieldDecl) <- (member as VarDecl)) {
+                    if ((member as PropDecl).isNone()) {
+                        GenerateVarDeclAccessors(fieldDecl,
+                            AccessorKind.STATIC_FIELD_GETTER, AccessorKind.STATIC_FIELD_SETTER)
+                    }
+                }
+                continue
+            }
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (funcDecl.IsFinalizer() || funcDecl.isFrozen || funcDecl.IsConst()) {
+                    continue
+                }
+            }
+            if (let Some(propDecl) <- (member as PropDecl)) {
+                if (let Some(getter) <- GetUsableGetterForProperty(propDecl)) {
+                    if (getter.isFrozen) {
+                        continue
+                    }
+                }
+            }
+            if (!MockUtils.IsMockAccessorRequired(member)) {
+                continue
+            }
+
+            if (let Some(propDecl) <- (member as PropDecl)) {
+                mockUtils.AttachGeneratedDecl(GeneratePropAccessor(propDecl))
+            } else if (let Some(methodDecl) <- (member as FuncDecl)) {
+                mockUtils.AttachGeneratedDecl(GenerateFuncAccessor(methodDecl))
+            } else if (let Some(fieldDecl) <- (member as VarDecl)) {
+                GenerateVarDeclAccessors(fieldDecl,
+                    AccessorKind.FIELD_GETTER, AccessorKind.FIELD_SETTER)
+            }
+        }
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
