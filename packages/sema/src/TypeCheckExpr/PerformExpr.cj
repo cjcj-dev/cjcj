@@ -1,50 +1,48 @@
 package cjcj::sema.TypeCheckExpr
 
 import cjcj::ast.*
+import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::sema.*
 
-private let COMMAND_TYPE_NAME: String = "Command"
-
-private func invalidPerformExpr(pe: PerformExpr): Ty {
-    let invalidTy = TypeManager.GetInvalidTy()
-    pe.SetTy(invalidTy)
-    return invalidTy
-}
-
-private func commandPayloadTy(ty: Ty): Option<Ty> {
-    if (ty.name == COMMAND_TYPE_NAME && ty.typeArgs.size == 1) {
-        return ty.typeArgs[0]
-    }
-    return None
-}
-
-private func promoteToCommandTy(typeManager: TypeManager, exprTy: Ty, commandTy: Option<Ty>): Option<Ty> {
-    if (exprTy.HasInvalidTy()) {
+// C++ src/Sema/TypeCheckExpr/TryExpr.cpp:129-147.
+public func PromoteToCommandTy(typeManager: TypeManager, cause: Node, cmdTy: Ty, commandTy: Option<Ty>,
+    diag: Option<BasicDiagnosticEngine>): Option<ClassTy> {
+    if (cmdTy.IsInvalid()) {
         return None
     }
-    if (let Some(_) <- commandPayloadTy(exprTy)) {
-        return exprTy
-    }
-    if (let Some(coreCommandTy) <- commandTy) {
-        if (typeManager.IsSubtype(exprTy, coreCommandTy) && coreCommandTy.typeArgs.size == 1) {
-            return coreCommandTy
+    if (let Some(targetTy) <- commandTy) {
+        let promotedTys = Promotion(typeManager).Promote(cmdTy, targetTy)
+        if (promotedTys.values.size != 1) {
+            if (let Some(diagValue) <- diag) {
+                DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_command_incompatible_type,
+                    cause, Ty.ToString(Some(cmdTy))).Emit()
+            }
+            return None
         }
+        return promotedTys.values[0] as ClassTy
     }
     return None
 }
 
-public func SynPerformExpr(typeManager: TypeManager, pe: PerformExpr, commandTy!: Option<Ty> = None): Ty {
+// C++ src/Sema/TypeCheckExpr/PerformExpr.cpp:15-30.
+public func SynPerformExpr(typeManager: TypeManager, pe: PerformExpr, commandTy!: Option<Ty> = None,
+    synthesizer!: Option<(Expr) -> Ty> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (let Some(innerExpr) <- pe.expr) {
-        if (let Some(exprTy) <- innerExpr.GetTy()) {
-            if (let Some(commandExprTy) <- promoteToCommandTy(typeManager, exprTy, commandTy)) {
-                if (let Some(payloadTy) <- commandPayloadTy(commandExprTy)) {
-                    pe.SetTy(payloadTy)
-                    return payloadTy
-                }
-            }
+        let exprTy = synthesizer.getOrThrow()(innerExpr)
+        if (!Ty.IsTyCorrect(exprTy)) {
+            pe.SetTy(TypeManager.GetInvalidTy())
+            return pe.GetTy().getOrThrow()
         }
+        if (let Some(promotedTy) <- PromoteToCommandTy(typeManager, innerExpr, exprTy, commandTy, diag)) {
+            pe.SetTy(promotedTy.typeArgs[0])
+        } else {
+            pe.SetTy(TypeManager.GetInvalidTy())
+        }
+        return pe.GetTy().getOrThrow()
     }
-    return invalidPerformExpr(pe)
+    pe.SetTy(TypeManager.GetInvalidTy())
+    return pe.GetTy().getOrThrow()
 }
 
 extend TypeChecker {
