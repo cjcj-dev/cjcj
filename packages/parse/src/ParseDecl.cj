@@ -500,6 +500,8 @@ extend ParserImpl {
         }
         if (SeeingConsumedConstModifier(modifiers)) {
             let decl = ParseConstVariable(scopeKind, modifiers, annos)
+            SetDeclBeginPos(decl)
+            SetBeginToAnnotationsBegin(decl, annos)
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -1665,15 +1667,19 @@ extend ParserImpl {
         annos: ArrayList<Annotation>
     ): Decl {
         let key = lastToken
+        let ret: Decl
         if (SeeingVarWithPatternStart()) {
-            return ParseVarWithPatternDecl(scopeKind, modifiers, annos, key, false, true)
+            ret = ParseVarWithPatternDecl(scopeKind, modifiers, annos, key, false, true)
+        } else if (SeeingIdentifierLike()) {
+            ret = ParseVarDecl(scopeKind, modifiers, annos, key, false, true)
+        } else {
+            DiagExpectedIdentifierOrPattern(false, key.Begin(), true)
+            ConsumeUntil(TokenKind.NL)
+            ret = InvalidDecl(key.Begin())
         }
-        if (SeeingIdentifierLike()) {
-            return ParseVarDecl(scopeKind, modifiers, annos, key, false, true)
-        }
-        DiagExpectedIdentifierOrPattern(false, key.Begin(), true)
-        ConsumeUntil(TokenKind.NL)
-        return InvalidDecl(key.Begin())
+        // C++ ParseDecl.cpp:248-252 moves annos through ParseVarOrLetOrConst into ret.
+        annos.clear()
+        return ret
     }
 
     private func SeeingVarWithPatternStart(): Bool {
