@@ -872,6 +872,7 @@ public class InitializationChecker {
 
     private func CheckInitInClassDecl(classDecl: ClassDecl): Unit {
         let superClassNonFuncDecls = ArrayList<Decl>()
+        let superClasses = HashSet<Decl>()
         for (typeNode in classDecl.inheritedTypes) {
             if (let Some(target) <- typeNode.GetTarget()) {
                 if (let Some(superClass) <- (target as ClassDecl)) {
@@ -879,7 +880,7 @@ public class InitializationChecker {
                         CheckStaticInitForTypeDecl(classDecl)
                     }
                     CheckInitialization(superClass)
-                    GetNonFuncDeclsInSuperClass(superClass, superClassNonFuncDecls)
+                    GetNonFuncDeclsInSuperClass(superClass, superClassNonFuncDecls, superClasses)
                 } else if (let Some(superInterface) <- (target as InterfaceDecl)) {
                     CheckInitialization(superInterface)
                 }
@@ -2299,7 +2300,9 @@ public class InitializationChecker {
         return info
     }
 
-    private func GetNonFuncDeclsInSuperClass(classDecl: ClassDecl, out: ArrayList<Decl>): Unit {
+    // C++ src/Sema/LegalityOfUsage/InitializationChecker.cpp:1721-1741.
+    private func GetNonFuncDeclsInSuperClass(classDecl: ClassDecl, out: ArrayList<Decl>,
+        superClasses: HashSet<Decl>): Unit {
         for (decl in classDecl.GetMemberDecls()) {
             if (let Some(varDecl) <- (decl as VarDecl)) {
                 if (!varDecl.TestAttr(Attribute.PRIVATE) && varDecl.astKind != ASTKind.PROP_DECL) {
@@ -2307,8 +2310,16 @@ public class InitializationChecker {
                 }
             }
         }
-        if (let Some(superClass) <- classDecl.GetSuperClassDecl()) {
-            GetNonFuncDeclsInSuperClass(superClass, out)
+        for (inheritedType in classDecl.inheritedTypes) {
+            if ((let Some(target) <- inheritedType.GetTarget()) &&
+                (let Some(superClass) <- (target as ClassDecl))) {
+                if (superClasses.contains(superClass)) {
+                    superClasses.add(superClass)
+                    GetNonFuncDeclsInSuperClass(superClass, out, superClasses)
+                } else {
+                    return
+                }
+            }
         }
     }
 }
