@@ -397,6 +397,36 @@ public class TestManager {
         }
     }
 
+    // C++: Sema/Test/TestManager.cpp:374-400.
+    private func GenerateMockClassIfNeededAndGet(callExpr: CallExpr, pkg: Package): Option<ClassDecl> {
+        let typeArgument = callExpr.baseFunc.getOrThrow().GetTy().getOrThrow().typeArgs[1]
+        if (!typeArgument.IsClass() && !typeArgument.IsInterface()) {
+            ReportUnsupportedType(callExpr)
+            return None
+        }
+
+        let declToMock = (Ty.GetDeclOfTy(Some(typeArgument)) as ClassLikeDecl).getOrThrow()
+        if (MockSupportManager.DoesClassLikeSupportMocking(declToMock)) {
+            let result = mockManager.getOrThrow().GenerateMockClassIfNeededAndGet(
+                declToMock, pkg, MockManager.GetMockKind(callExpr))
+            if (result.generated) {
+                if (let Some(ifaceDecl) <- (declToMock as InterfaceDecl)) {
+                    mockSupportManager.getOrThrow().PrepareClassLikeWithDefaults(
+                        result.classDecl, ifaceDecl, None)
+                }
+            }
+            return Some(result.classDecl)
+        }
+
+        let packageName = if (let Some(genericDecl) <- declToMock.genericDecl) {
+            genericDecl.fullPackageName
+        } else {
+            declToMock.fullPackageName
+        }
+        ReportDoesntSupportMocking(callExpr, typeArgument.String(), packageName)
+        return None
+    }
+
     public func HandleCreateMock(pkg: Package): Unit {
         let callExprs = ArrayList<CallExpr>()
         let walker = Walker(pkg, visitPre: { node: Node =>
