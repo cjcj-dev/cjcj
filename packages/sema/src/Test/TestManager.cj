@@ -358,6 +358,67 @@ public class TestManager {
         mockManager.getOrThrow().WrapWithRequireMockObject(memberAccess.getOrThrow().baseExpr.getOrThrow())
     }
 
+    // C++: Sema/Test/TestManager.cpp:268-337.
+    public func CollectToMockAnnotatedLambdas(lambda: LambdaExpr,
+        inLambdaExprs: ArrayList<Expr>): VisitAction {
+        if (!lambda.TestAttr(Attribute.MOCK_SUPPORTED) ||
+            (mockMode == MockMode.RUNTIME_ERROR && testEnabled)) {
+            return VisitAction.WALK_CHILDREN
+        }
+        if (!testEnabled) {
+            ReportNotInTestMode(lambda)
+            return VisitAction.WALK_CHILDREN
+        } else if (!mockCompatible) {
+            ReportMockDisabled(lambda)
+            return VisitAction.WALK_CHILDREN
+        }
+        let lastNode = lambda.funcBody.getOrThrow().body.getOrThrow().GetLastExprOrDecl()
+        if (let None <- lastNode) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let lastExpr = lastNode.getOrThrow() as ReturnExpr
+        if (let None <- lastExpr) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let expr = DeparenthesizeExpr(lastExpr.getOrThrow().expr.getOrThrow())
+        var lastExprTarget: Option<Decl> = None
+        if (let Some(assignExpr) <- (expr as AssignExpr)) {
+            lastExprTarget = assignExpr.leftValue.getOrThrow().GetTarget()
+        } else if (let Some(callExpr) <- (expr as CallExpr)) {
+            lastExprTarget = callExpr.resolvedFunction
+        } else {
+            lastExprTarget = expr.GetTarget()
+        }
+        if (let None <- lastExprTarget) {
+            return VisitAction.WALK_CHILDREN
+        }
+        let target = lastExprTarget.getOrThrow()
+        let outerPrivate = if (let Some(outer) <- target.outerDecl) {
+            outer.TestAttr(Attribute.PRIVATE)
+        } else { false }
+        if (target.TestAnyAttr(Attribute.PRIVATE, Attribute.CONSTRUCTOR) || IsLocalDecl(target) ||
+            target.IsConst() || outerPrivate) {
+            ReportWrongStaticDecl(lambda)
+            return VisitAction.WALK_CHILDREN
+        }
+        if (let Some(funcDecl) <- (target as FuncDecl)) {
+            if (funcDecl.isFrozen) {
+                ReportDoesntSupportFrozen(lambda)
+                return VisitAction.WALK_CHILDREN
+            }
+        }
+        WrapWithRequireMockObjectIfNeeded(expr, target)
+        if (!ShouldHandleMockAnnotatedLambdaValue(target)) {
+            return VisitAction.WALK_CHILDREN
+        }
+        if (!target.TestAttr(Attribute.MOCK_SUPPORTED)) {
+            ReportDoesntSupportMocking(expr, target.identifier.Val(), target.fullPackageName)
+            return VisitAction.SKIP_CHILDREN
+        }
+        inLambdaExprs.add(expr)
+        return VisitAction.WALK_CHILDREN
+    }
+
     // C++: Sema/Test/TestManager.cpp:108-111.
     public func ReportUnsupportedType(reportOn: Expr): Unit {
         DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_unsupported_type, reportOn).Emit()
