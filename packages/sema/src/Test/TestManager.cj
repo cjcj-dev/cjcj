@@ -317,6 +317,17 @@ public class TestManager {
             arguments: [MOCK_ON_COMPILATION_OPTION]).Emit()
     }
 
+    // C++: Sema/Test/TestManager.cpp:123-134.
+    public func ReportWrongStaticDecl(reportOn: Expr): Unit {
+        if (let Some(lambda) <- (reportOn as LambdaExpr)) {
+            let body = lambda.funcBody.getOrThrow().body.getOrThrow()
+            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_wrong_static_decl,
+                MakeRange(body.leftCurlPos, lambda.end))
+            return
+        }
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_wrong_static_decl, reportOn).Emit()
+    }
+
     // C++: Sema/Test/TestManager.cpp:108-111.
     public func ReportUnsupportedType(reportOn: Expr): Unit {
         DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_unsupported_type, reportOn).Emit()
