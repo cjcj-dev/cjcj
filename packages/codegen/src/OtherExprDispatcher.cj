@@ -1,12 +1,16 @@
 package cjcj::codegen
 
+import cjcj::chir.ClassType
+import cjcj::chir.Debug
 import cjcj::chir.Expression
 import cjcj::chir.ExprKind
 import cjcj::chir.GetRTTI
 import cjcj::chir.GetRTTIStatic
 import cjcj::chir.Lambda
 import cjcj::chir.TypeCast
+import cjcj::chir.IsCapturedClass
 import cjcj::chir.`VArray` as CHIRVArray
+import cjcj::utils.CJC_ASSERT
 
 public func HandleStructedControlFlowExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     if (chirExpr.GetExprKind() == ExprKind.LAMBDA) {
@@ -32,7 +36,7 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return LLVMNullValue()
     }
     if (kind == ExprKind.APPLY || kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC ||
-        kind == ExprKind.DEBUGEXPR || kind == ExprKind.FIELD || kind == ExprKind.TYPECAST || kind == ExprKind.TUPLE ||
+        kind == ExprKind.FIELD || kind == ExprKind.TYPECAST || kind == ExprKind.TUPLE ||
         kind == ExprKind.VARRAY || kind == ExprKind.VARRAY_BUILDER || kind == ExprKind.INTRINSIC ||
         kind == ExprKind.RAW_ARRAY_LITERAL_INIT || kind == ExprKind.RAW_ARRAY_ALLOCATE ||
         kind == ExprKind.RAW_ARRAY_INIT_BY_VALUE || kind == ExprKind.INSTANCEOF || kind == ExprKind.SPAWN ||
@@ -83,7 +87,7 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return EmitTypeCastExpression(irBuilder, chirExpr)
     }
     if (kind == ExprKind.DEBUGEXPR) {
-        return LLVMNullValue()
+        return HandleDebugExpr(irBuilder, chirExpr)
     }
     if (kind == ExprKind.GET_EXCEPTION) {
         return irBuilder.CallExceptionIntrinsicGetExceptionValue()
@@ -102,6 +106,39 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return GenerateSpawn(irBuilder, chirExpr)
     }
     return LLVMNullValue()
+}
+
+public func HandleDebugExpr(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
+    let debug = (chirExpr as Debug).getOrThrow()
+    let cgMod = irBuilder.GetCGModule()
+    let cgVal = cgMod.GetMappedCGValue(debug.GetValue())
+    let rawVal = cgVal.GetRawValue()
+    let rawType = unsafe { LLVMTypeOf(rawVal) }
+    if (unsafe { LLVMGetTypeKind(rawType) } != 0 && unsafe { LLVMIsAGlobalObject(rawVal) }.isNull()) {
+        let identifier = debug.GetSrcCodeIdentifier()
+        try (nameCString = unsafe { LibC.mallocCString(identifier) }.asResource()) {
+            unsafe { LLVMSetValueName2(rawVal, nameCString.value, UIntNative(identifier.size)) }
+        }
+    }
+    if (!irBuilder.GetCGContext().GetCompileOptions().enableCompileDebug) {
+        return LLVMNullValue()
+    }
+    let ty = DeRef(debug.GetValue().GetType().getOrThrow())
+    let isBoxClass = ty.IsClass() && IsCapturedClass((ty as ClassType).getOrThrow().GetClassDef())
+    let hasSize = CGType.GetOrCreate(cgMod, ty).GetSize().isSome()
+    if (!IsReferenceType(ty, cgMod) && hasSize && ty.IsGenericRelated()) {
+        irBuilder.CreateBoxedValueForValueType(debug, cgVal)
+    } else if (debug.GetValue().IsParameter()) {
+        irBuilder.CreateValuePointer(debug, cgVal)
+    } else if (unsafe { LLVMIsAAllocaInst(cgVal.GetRawValue()) }.isNull()) {
+        CJC_ASSERT(unsafe { LLVMIsAAllocaInst(cgVal.GetRawValue()) }.isNull() == (!hasSize && !ty.IsClass()))
+        irBuilder.CreateLocalVarPointer(debug, cgVal)
+    } else if (isBoxClass) {
+        irBuilder.CreateUnBoxDeclare(debug, cgVal)
+    } else {
+        irBuilder.EmitDeclare(debug)
+    }
+    return rawVal
 }
 
 private func HandleTypecastExpr(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
