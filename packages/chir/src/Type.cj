@@ -1798,6 +1798,10 @@ public class ClassType <: CustomType {
         super(TypeKind.TYPE_CLASS, def, typeArgs)
     }
 
+    public override func ToString(): String {
+        return "Class-" + def.GetIdentifierWithoutPrefix() + TypeVecToString("<", argTys, ">")
+    }
+
     public func GetClassDef(): ClassDef {
         if (let Some(classDef) <- (def as ClassDef)) {
             return classDef
