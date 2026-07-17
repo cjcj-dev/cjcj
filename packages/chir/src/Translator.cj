@@ -3909,15 +3909,26 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR nested FuncDecl has no FuncBody")
         let astBody = funcBody.body ??
             throw IllegalStateException("faithful AST2CHIR nested FuncDecl has no body")
+        if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
+            TranslateFunctionGenericUpperBounds(funcDecl)
+        }
         let funcTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(funcDecl)))
         let body = builder.CreateBlockGroup(CurrentFunction())
+        let genericTys = ArrayList<GenericType>()
+        if (let Some(generic) <- funcBody.generic) {
+            if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
+                for (typeParam in generic.typeParameters) {
+                    genericTys.add((chirTy.TranslateType(RequireAstTy(typeParam)) as GenericType).getOrThrow())
+                }
+            }
+        }
         let identifier = if (funcDecl.mangledName.isEmpty()) {
             CurrentFunction().GetIdentifierWithoutPrefix() + "$local$" + funcDecl.identifier.Val()
         } else {
             funcDecl.mangledName
         }
         let lambda = builder.CreateLambda(funcTy, funcTy, CurrentBlock(), isLocalFunc: true,
-            identifier: identifier, srcCodeIdentifier: funcDecl.identifier.Val())
+            identifier: identifier, srcCodeIdentifier: funcDecl.identifier.Val(), genericTypeParams: genericTys)
         lambda.InitBody(body)
         if (funcDecl.isConst) {
             lambda.SetCompileTimeValue()
@@ -3985,6 +3996,19 @@ public class Translator {
         }
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return Some(lambdaValue)
+    }
+
+    private func TranslateFunctionGenericUpperBounds(funcDecl: AstFuncDecl): Unit {
+        let funcBody = funcDecl.funcBody ??
+            throw IllegalStateException("faithful generic function has no body")
+        if (let Some(generic) <- funcBody.generic) {
+            for (typeParam in generic.typeParameters) {
+                let _ = chirTy.TranslateType(RequireAstTy(typeParam))
+            }
+            for (typeParam in generic.typeParameters) {
+                chirTy.FillGenericArgType((RequireAstTy(typeParam) as AstGenericsTy).getOrThrow())
+            }
+        }
     }
 
     private func TranslateClassLikeDecl(def: ClassDef, decl: AstClassLikeDecl): Unit {
