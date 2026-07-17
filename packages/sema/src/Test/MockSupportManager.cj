@@ -502,6 +502,57 @@ public class MockSupportManager {
         decl.EnableAttr(Attribute.MOCK_SUPPORTED)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
+    private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
+        if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
+            return
+        }
+
+        let funcDeclsWithDefault = ArrayList<FuncDecl>()
+        for (decl in interfaceDecl.GetMemberDecls()) {
+            if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                if (funcDecl.TestAttr(Attribute.DEFAULT)) {
+                    funcDeclsWithDefault.add(funcDecl)
+                }
+            }
+        }
+
+        if (funcDeclsWithDefault.isEmpty()) {
+            return
+        }
+
+        let accessorInterface = InterfaceDecl()
+        CopyBasicInfo(interfaceDecl, accessorInterface)
+        accessorInterface.CloneAttrs(interfaceDecl)
+        accessorInterface.identifier = SrcIdentifier(
+            interfaceDecl.identifier.Val() + MockUtils.defaultAccessorSuffix)
+        accessorInterface.SetTy(typeManager.GetInterfaceTy(accessorInterface, []))
+        accessorInterface.fullPackageName = interfaceDecl.fullPackageName
+        accessorInterface.linkage = interfaceDecl.linkage
+
+        accessorInterface.body = InterfaceBody()
+        CopyBasicInfo(interfaceDecl.body.getOrThrow(), accessorInterface.body.getOrThrow())
+
+        for (funcDecl in funcDeclsWithDefault) {
+            let accessorDecl = FuncDecl()
+            let _ = CloneFuncDecl(funcDecl, accessorDecl)
+            accessorDecl.outerDecl = accessorInterface
+            accessorDecl.funcBody.getOrThrow().parentClassLike = accessorInterface
+            accessorDecl.identifier = SrcIdentifier(
+                mockUtils.Mangle(funcDecl) + MockUtils.defaultAccessorSuffix)
+
+            CJC_ASSERT(accessorDecl.TestAttr(Attribute.DEFAULT))
+            accessorDecl.DisableAttr(Attribute.DEFAULT)
+            accessorDecl.EnableAttr(Attribute.ABSTRACT)
+
+            mockUtils.AttachGeneratedDecl(accessorDecl)
+        }
+
+        interfaceDecl.EnableAttr(Attribute.MOCK_SUPPORTED)
+        interfaceDecl.inheritedTypes.add(MockUtils.CreateType(accessorInterface.GetTy().getOrThrow()))
+        mockUtils.AttachGeneratedDecl(accessorInterface)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1869-1972.
     public func PrepareClassLikeWithDefaults(classLikeDecl: ClassLikeDecl, interfaceDecl: InterfaceDecl,
         originalExtendDecl: Option<ExtendDecl>): Unit {
