@@ -117,10 +117,4 @@ public class ClassDef <: CustomTypeDef {
         return "AnnoTargets: " + targetStr
     }
 
-    public override func ToString(indent: Int64): String {
-        if (IsInterface()) {
-            return IndentToString(indent) + "interface " + GetFullName()
-        }
-        return IndentToString(indent) + "class " + GetFullName()
-    }
 }
