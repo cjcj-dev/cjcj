@@ -1,7 +1,8 @@
 package cjcj::driver
 
 import std.collection.*
-import cjcj::basic.{DEFAULT_POSITION, DiagnosticEngine, DiagKindRefactor, PrintVersion}
+import cjcj::basic.{DEFAULT_POSITION, DiagKindRefactor, PrintVersion}
+import cjcj::frontend.DiagnosticEngine
 import cjcj::option.{ArgInstanceType, ArgList, ArgListEntry, CreateOptionTable, Group}
 import cjcj::utils.{ProfileRecorder, ProfileRecorderType}
 
@@ -12,13 +13,16 @@ private func IsWarningArg(arg: String): Bool {
 
 public class Driver {
     public let args: Array<String>
+    public let diag: DiagnosticEngine
     public let driverOptions: DriverOptions = DriverOptions()
     public let argList: ArgList = ArgList()
     public let executableName: String
     public var cangjieHome: String
 
-    public init(args: Array<String>, executableName!: String = "cjc") {
+    // C++: src/Driver/Driver.cpp:41-43, Driver::Driver stores the main DiagnosticEngine reference.
+    public init(args: Array<String>, diag: DiagnosticEngine, executableName!: String = "cjc") {
         this.args = args
+        this.diag = diag
         this.executableName = executableName
         driverOptions.executablePath = executableName
         let exeDir = FileUtil.GetDirPath(FileUtil.GetAbsPath(executableName) ?? executableName)
@@ -55,7 +59,6 @@ public class Driver {
     }
 
     public func ExtractBCPackageNames(): Bool {
-        let diag = DiagnosticEngine()
         for (bcPath in driverOptions.bcInputFiles) {
             let (ok, packageName, error, message) = ExtractBitcodePackageNameFromLLVM(bcPath)
             if (!ok) {
@@ -64,15 +67,15 @@ public class Driver {
                         DiagKindRefactor.bc_file_open_failed,
                         DEFAULT_POSITION,
                         arguments: [bcPath, message]
-                    ).Emit()
+                    )
                 } else if (error == DiagKindRefactor.bc_parse_failed) {
-                    diag.DiagnoseRefactor(DiagKindRefactor.bc_parse_failed, DEFAULT_POSITION, arguments: [bcPath]).Emit()
+                    diag.DiagnoseRefactor(DiagKindRefactor.bc_parse_failed, DEFAULT_POSITION, arguments: [bcPath])
                 } else {
                     diag.DiagnoseRefactor(
                         DiagKindRefactor.bc_invalid_package_name,
                         DEFAULT_POSITION,
                         arguments: [bcPath]
-                    ).Emit()
+                    )
                 }
                 return false
             }
