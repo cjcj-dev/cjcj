@@ -1750,6 +1750,89 @@ public class MockSupportManager {
         return None
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:2105-2186.
+    private func ReplaceInterfaceDefaultFuncInCall(
+        node: Node, outerTy: Option<Ty>, isInMockAnnotatedLambda: Bool): Unit {
+        if (isInMockAnnotatedLambda) {
+            return
+        }
+        let originalExpr = node as Expr
+        if (originalExpr.isNone()) {
+            return
+        }
+        let expr = ExtractLastDesugaredExpr(originalExpr.getOrThrow())
+        if (expr.TestAttr(Attribute.GENERATED_TO_MOCK)) {
+            return
+        }
+        let callExpr = expr as CallExpr
+        if (callExpr.isNone() || callExpr.getOrThrow().resolvedFunction.isNone()) {
+            return
+        }
+        let resolvedFunction = callExpr.getOrThrow().resolvedFunction.getOrThrow()
+        let (buddyInterfaceDecl, foundBuddyFuncDecl) =
+            FindDefaultAccessorInterfaceAndFunction(resolvedFunction)
+        if (buddyInterfaceDecl.isNone() || foundBuddyFuncDecl.isNone()) {
+            return
+        }
+        var buddyFuncDecl = foundBuddyFuncDecl
+
+        if (let Some(maExpr) <- (callExpr.getOrThrow().baseFunc.getOrThrow() as MemberAccess)) {
+            if (resolvedFunction.TestAttr(Attribute.STATIC) &&
+                (maExpr.baseExpr.getOrThrow().GetTy().getOrThrow() as GenericsTy).isNone()) {
+                buddyFuncDecl = FindDefaultAccessorImplementation(
+                    maExpr.baseExpr.getOrThrow().GetTy(), buddyFuncDecl.getOrThrow())
+                if (buddyFuncDecl.isNone()) {
+                    return
+                }
+            }
+            if (!resolvedFunction.TestAttr(Attribute.STATIC) &&
+                !IsClassLikeOrGeneric(maExpr.baseExpr.getOrThrow().GetTy().getOrThrow())) {
+                return
+            }
+            let buddyMa = CreateMemberAccess(
+                (ASTCloner.Clone(maExpr.baseExpr.getOrThrow()) as Expr).getOrThrow(),
+                buddyFuncDecl.getOrThrow())
+            CopyBasicInfo(maExpr, buddyMa)
+            buddyMa.EnableAttr(Attribute.GENERATED_TO_MOCK)
+            buddyMa.SetTy(typeManager.GetInstantiatedTy(
+                buddyFuncDecl.getOrThrow().GetTy().getOrThrow(),
+                GenerateTypeMapping(buddyFuncDecl.getOrThrow(), maExpr.instTys)))
+            buddyMa.instTys.add(all: maExpr.instTys)
+
+            let buddyCall = (ASTCloner.Clone(callExpr.getOrThrow()) as CallExpr).getOrThrow()
+            buddyCall.baseFunc = buddyMa
+            buddyCall.resolvedFunction = buddyFuncDecl.getOrThrow()
+            callExpr.getOrThrow().desugarExpr = buddyCall
+            return
+        }
+
+        if (let Some(refExpr) <- (callExpr.getOrThrow().baseFunc.getOrThrow() as RefExpr)) {
+            if (resolvedFunction.TestAttr(Attribute.STATIC)) {
+                buddyFuncDecl = FindDefaultAccessorImplementation(
+                    outerTy, buddyFuncDecl.getOrThrow())
+                if (buddyFuncDecl.isNone()) {
+                    return
+                }
+            }
+            if (!resolvedFunction.TestAttr(Attribute.STATIC) &&
+                (outerTy.isNone() || !IsClassLikeOrGeneric(outerTy.getOrThrow()))) {
+                return
+            }
+            let buddyFuncRef = CreateRefExpr(buddyFuncDecl.getOrThrow())
+            CopyBasicInfo(refExpr, buddyFuncRef)
+            buddyFuncRef.EnableAttr(Attribute.GENERATED_TO_MOCK)
+            buddyFuncRef.SetTy(typeManager.GetInstantiatedTy(
+                buddyFuncDecl.getOrThrow().GetTy().getOrThrow(),
+                GenerateTypeMapping(buddyFuncDecl.getOrThrow(), refExpr.instTys)))
+            buddyFuncRef.instTys.add(all: refExpr.instTys)
+
+            let buddyCall = (ASTCloner.Clone(callExpr.getOrThrow()) as CallExpr).getOrThrow()
+            buddyCall.baseFunc = buddyFuncRef
+            buddyCall.resolvedFunction = buddyFuncDecl.getOrThrow()
+            callExpr.getOrThrow().desugarExpr = buddyCall
+        }
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
