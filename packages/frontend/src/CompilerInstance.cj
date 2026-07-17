@@ -697,6 +697,9 @@ public class CompilerInstance {
             }
         }
         for (importedPackage in importManager.GetAllImportedPackages()) {
+            if (!importedPackage.TestAttr(Attribute.IMPORTED)) {
+                continue
+            }
             if (let Some(packageDecl) <- importManager.GetPackageDecl(importedPackage.fullPackageName)) {
                 semaInstance.packageDecls.add(packageDecl)
                 semaInstance.importedPackageDecls.add(packageDecl)
