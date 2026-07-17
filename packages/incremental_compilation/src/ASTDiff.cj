@@ -497,7 +497,9 @@ private class ASTDiffImpl {
 public func ASTDiff(args: ASTDiffArgs): ASTDiffResult {
     let impl = ASTDiffImpl((args.op.enableCompileDebug, args.op.displayLineInfo))
     for ((mangled, decl) in args.rawMangleName2DeclMap) {
-        args.importedMangled2Decl[mangled] = decl
+        if (!args.importedMangled2Decl.contains(mangled)) {
+            args.importedMangled2Decl[mangled] = decl
+        }
     }
     impl.mangled2Decl = args.importedMangled2Decl
     impl.CompareCurPkgASTCache(args.prevCache.curPkgASTCache, args.astCacheInfo, args.prevCache.fileMap,
