@@ -20,7 +20,7 @@ import cjcj::modules.{CreateArrayInfo, CreateAssignInfo, CreateBinaryInfo, Creat
 import cjcj::option.OptimizationLevel
 import cjcj::sema.TypeManager as FaithfulSemaTypeManager
 import cjcj::utils.FileUtil
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, InternalError}
 import cjcj::utils.{MAIN_INVOKE, STATIC_INIT_FUNC}
 
 private let CJO_FILE_IDENTIFIER: String = "CJOF"
@@ -128,6 +128,31 @@ private func GetImportPackageNameByImportSpec(importSpec: ImportSpec): String {
         builder.append(importSpec.content.identifier.Val())
     }
     return builder.toString()
+}
+
+// ASTWriter.cpp:122-149 CheckForConflictExportId.
+private func CheckForConflictExportId(decls: ArrayList<Decl>): Unit {
+    let exportIdDeclMap = HashMap<String, Decl>()
+    for (decl in decls) {
+        if (!decl.TestAttr(Attribute.GLOBAL) || decl.astKind == ASTKind.EXTEND_DECL) {
+            continue
+        }
+        if (exportIdDeclMap.contains(decl.exportId)) {
+            InternalError("Found same exportID when export the package.")
+            return
+        }
+        exportIdDeclMap[decl.exportId] = decl
+        for (member in decl.GetMemberDeclPtrs()) {
+            if (member.doNotExport) {
+                continue
+            }
+            if (exportIdDeclMap.contains(member.exportId)) {
+                InternalError("Found same exportID when export the package.")
+                return
+            }
+            exportIdDeclMap[member.exportId] = member
+        }
+    }
 }
 
 // ASTWriterImpl.h:44-50 NodeInfo.
