@@ -61,10 +61,15 @@ foreign {
     func CJOFVerifyPackageBuffer(data: CPointer<UInt8>, size: UIntNative): Int32
 }
 
-public class DiagnosticEngine {
+public class DiagnosticEngine <: Resource {
     private let impl: BasicDiagnosticEngine = BasicDiagnosticEngine()
 
     public init() {}
+
+    // C++: src/Basic/DiagnosticEngine.cpp:715-718, DiagnosticEngine::~DiagnosticEngine.
+    public func close(): Unit { impl.close() }
+
+    public func isClosed(): Bool { return impl.isClosed() }
 
     public func SetSourceManager(sourceManager: SourceManager): Unit {
         impl.SetSourceManager(sourceManager)
