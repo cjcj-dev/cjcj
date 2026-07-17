@@ -2319,9 +2319,9 @@ extend ParserImpl {
 
     // C++ anchor: cangjie_compiler/src/Parse/Parser.cpp:505-516
     private func ParseExtendedType(extendDecl: ExtendDecl): Unit {
-        if (let Some(generic) <- ParseOptionalGeneric()) {
+        if (Skip(TokenKind.LT)) {
             extendDecl.EnableAttr(Attribute.GENERIC)
-            extendDecl.generic = generic
+            extendDecl.generic = Some(ParseGeneric())
         }
         let extendedType = ParseType()
         extendDecl.extendedType = extendedType
