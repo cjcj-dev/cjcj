@@ -306,6 +306,11 @@ public class TestManager {
             arguments: [name, pkg, MOCK_ON_COMPILATION_OPTION]).Emit()
     }
 
+    // C++: Sema/Test/TestManager.cpp:98-101.
+    public func ReportDoesntSupportFrozen(reportOn: Expr): Unit {
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_frozen_unsupported, reportOn).Emit()
+    }
+
     // C++: Sema/Test/TestManager.cpp:118-121.
     public func ReportMockDisabled(reportOn: Expr): Unit {
         DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_disabled, reportOn,
