@@ -33,8 +33,9 @@ extend ParserImpl {
             ret.end = token.End()
             return ret
         }
+        if (Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)) { return ParseThisOrSuper() }
         if (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword() ||
-            Seeing(TokenKind.PACKAGE_IDENTIFIER) || Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)) {
+            Seeing(TokenKind.PACKAGE_IDENTIFIER)) {
             return ParseRefExpr(ek)
         }
         if (Seeing(TokenKind.WILDCARD)) {
@@ -288,6 +289,13 @@ extend ParserImpl {
 
     public func ParseRefExpr(): RefExpr {
         return ParseRefExpr(ExprKind.ALL)
+    }
+
+    public func ParseThisOrSuper(): RefExpr {
+        let token = Peek()
+        let identifier = ParseIdentifierFromToken(token)
+        Next()
+        return RefExpr(identifier)
     }
 
     public func ParseRefExpr(ek: ExprKind): RefExpr {
