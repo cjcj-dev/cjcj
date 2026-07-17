@@ -1398,6 +1398,43 @@ public class MockManager {
         injectTo.desugarExpr = CreateBlock(replacedExprs, injectTo.GetTy())
     }
 
+    // C++: Sema/Test/MockManager.cpp:1485-1523.
+    private func GenerateCallHandlerForMethodWithDefault(callExpr: CallExpr): Unit {
+        let maExpr = callExpr.baseFunc.getOrThrow() as MemberAccess
+        CJC_ASSERT(maExpr.isSome())
+        let funcDecl = callExpr.resolvedFunction
+        CJC_ASSERT(funcDecl.isSome())
+        let (accessorInterfaceDecl, accessorDecl) = FindDefaultAccessorInterfaceAndFunction(
+            funcDecl.getOrThrow(), maExpr.getOrThrow())
+        if (accessorInterfaceDecl.isNone()) {
+            let target = funcDecl.getOrThrow()
+            if (target.TestAttr(Attribute.STATIC) ||
+                (target.outerDecl.isSome() &&
+                    target.outerDecl.getOrThrow().astKind == ASTKind.EXTEND_DECL)) {
+                GenerateCallHandlerForStaticDecl(target, callExpr)
+            }
+            return
+        }
+        CJC_ASSERT(accessorDecl.isSome())
+        let accessorMa = CreateMemberAccess(
+            (ASTCloner.Clone(maExpr.getOrThrow().baseExpr.getOrThrow()) as Expr).getOrThrow(),
+            accessorDecl.getOrThrow())
+        accessorMa.SetTy(typeManager.GetInstantiatedTy(
+            accessorDecl.getOrThrow().GetTy().getOrThrow(),
+            GenerateTypeMapping(accessorDecl.getOrThrow(), maExpr.getOrThrow().instTys)))
+        accessorMa.instTys.add(all: maExpr.getOrThrow().instTys)
+        let call = (ASTCloner.Clone(callExpr) as CallExpr).getOrThrow()
+        call.baseFunc = accessorMa
+        call.resolvedFunction = accessorDecl.getOrThrow()
+        if (callExpr.resolvedFunction.getOrThrow().TestAttr(Attribute.STATIC)) {
+            GenerateCallHandlerForStaticDecl(accessorDecl.getOrThrow(), call)
+        } else {
+            GenerateCallHandlerForStaticDecl(accessorDecl.getOrThrow(), call,
+                declForInfo: callExpr.resolvedFunction)
+        }
+        callExpr.desugarExpr = call
+    }
+
     // C++: Sema/Test/MockManager.cpp:1204-1238.
     private func CreateMockedProp(originalProp: PropDecl, mockedDecl: ClassDecl,
         classGenericSubsts: ArrayList<TypeSubst>): Option<PropDecl> {
