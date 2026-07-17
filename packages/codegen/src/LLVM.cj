@@ -191,6 +191,7 @@ foreign {
     func LLVMTokenTypeInContext(context: LLVMContextRef): LLVMTypeRef
     func LLVMPointerType(elementType: LLVMTypeRef, addressSpace: UInt32): LLVMTypeRef
     func LLVMArrayType(elementType: LLVMTypeRef, elementCount: UInt32): LLVMTypeRef
+    func LLVMSelfhostArrayType64(elementType: LLVMTypeRef, elementCount: UInt64): LLVMTypeRef
     func LLVMVectorType(elementType: LLVMTypeRef, elementCount: UInt32): LLVMTypeRef
     func LLVMStructTypeInContext(context: LLVMContextRef, elementTypes: CPointer<LLVMTypeRef>,
         elementCount: UInt32, packed: Int32): LLVMTypeRef
