@@ -16,6 +16,9 @@ if ! command -v "$CXX" >/dev/null 2>&1 && command -v clang++-15 >/dev/null 2>&1;
 fi
 CC="${CC:-cc}"
 
+"$CC" -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L \
+  -c "$HERE/cjc_runtime_config.c" -o "$HERE/cjc_runtime_config.o"
+
 if [ -d "$LLVM_SRC_INC" ] && [ -d "$LLVM_GEN_INC" ]; then
     LLVM_INCLUDE_ARGS=(-I"$LLVM_SRC_INC" -I"$LLVM_GEN_INC")
 elif command -v llvm-config-15 >/dev/null 2>&1; then
@@ -29,7 +32,7 @@ fi
 # binsecinfo_llvmshim.o failed the top-level link with an error that pointed
 # nowhere near the real cause (it cost a full migration dry-run to find).
 # -fno-rtti / -fno-exceptions to match the LLVM build ABI.
-if [ -d "$FLATBUFFERS_INC" ] && [ -d "$SCHEMA_GEN_INC/flatbuffers" ]; then
+if [ ! -f "$HERE/cjselfhost_llvmshim.o" ] && [ -d "$FLATBUFFERS_INC" ] && [ -d "$SCHEMA_GEN_INC/flatbuffers" ]; then
     "$CXX" -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
       -c "$HERE/cjselfhost_llvmshim.cpp" -o "$HERE/cjselfhost_llvmshim.o" \
       "${LLVM_INCLUDE_ARGS[@]}" -I"$FLATBUFFERS_INC" -I"$SCHEMA_GEN_INC"
@@ -37,9 +40,6 @@ elif [ ! -f "$HERE/cjselfhost_llvmshim.o" ]; then
     echo "ERR: generated FlatBuffers headers and existing cjselfhost_llvmshim.o are both absent" >&2
     exit 1
 fi
-
-"$CC" -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L \
-  -c "$HERE/cjc_runtime_config.c" -o "$HERE/cjc_runtime_config.o"
 
 echo "built: $HERE/cjselfhost_llvmshim.o"
 echo "built: $HERE/cjc_runtime_config.o"
