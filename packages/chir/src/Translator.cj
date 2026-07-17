@@ -4617,6 +4617,7 @@ public class Translator {
 
     private func InitForInExprSkeleton(expr: AstForInExpr, inductiveVar: Value, condVar: Value,
         isIter!: Bool): ForIn {
+        let forInLoc = TranslateLocation(expr)
         let parentFunc = CurrentFunction()
         let bodyBlockGroup = builder.CreateBlockGroup(parentFunc)
         let latchBlockGroup = builder.CreateBlockGroup(parentFunc)
@@ -4627,11 +4628,18 @@ public class Translator {
         } else {
             builder.CreateForInRange(resultTy, inductiveVar, condVar, CurrentBlock())
         }
+        forIn.SetDebugLocation(forInLoc)
         forIn.InitBlockGroups(bodyBlockGroup, latchBlockGroup, condBlockGroup)
-        bodyBlockGroup.SetEntryBlock(builder.CreateBlock(bodyBlockGroup))
-        latchBlockGroup.SetEntryBlock(builder.CreateBlock(latchBlockGroup))
+        let bodyEntryBlock = builder.CreateBlock(bodyBlockGroup)
+        let bodyLoc = TranslateLocation(expr.body.getOrThrow())
+        bodyEntryBlock.SetDebugLocation(bodyLoc)
+        bodyBlockGroup.SetEntryBlock(bodyEntryBlock)
+        let latchEntryBlock = builder.CreateBlock(latchBlockGroup)
+        latchEntryBlock.SetDebugLocation(inductiveVar.GetDebugLocation())
+        latchBlockGroup.SetEntryBlock(latchEntryBlock)
         let condEntryBlock = builder.CreateBlock(condBlockGroup)
         condBlockGroup.SetEntryBlock(condEntryBlock)
+        condEntryBlock.SetDebugLocation(bodyLoc)
         return forIn
     }
 
