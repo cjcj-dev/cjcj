@@ -944,7 +944,9 @@ private func preCheckFuncRedefinitionForEnum(diag: BasicDiagnosticEngine, funcs:
     let paramNum = HashSet<UInt64>()
     let ctorNames = HashMap<String, Decl>()
     for (constructor in enumDecl.constructors) {
-        ctorNames[constructor.identifier.Val()] = constructor
+        if (!ctorNames.contains(constructor.identifier.Val())) {
+            ctorNames[constructor.identifier.Val()] = constructor
+        }
     }
     for (funcDecl in funcs) {
         if (!funcDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
