@@ -1188,6 +1188,29 @@ public class MockSupportManager {
         }
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1660-1686.
+    private func GenerateAccessorCallForTopLevelVariable(
+        nameRefExpr: NameReferenceExpr, kind: AccessorKind): Option<CallExpr> {
+        return GenerateAccessorCallForTopLevelVariable(
+            nameRefExpr.GetTarget().getOrThrow(), kind, nameRefExpr.curFile)
+    }
+
+    private func GenerateAccessorCallForTopLevelVariable(globalDecl: Decl,
+        kind: AccessorKind, curFile: Option<File>): Option<CallExpr> {
+        let accessorDecl = mockUtils.FindTopLevelAccessor(globalDecl, kind)
+        if (accessorDecl.isNone()) {
+            return None
+        }
+
+        let accessorCall = CallExpr()
+        accessorCall.SetTy((accessorDecl.getOrThrow().GetTy().getOrThrow() as FuncTy).getOrThrow().retTy)
+        accessorCall.resolvedFunction = accessorDecl.getOrThrow()
+        accessorCall.baseFunc = CreateRefExpr(accessorDecl.getOrThrow())
+        accessorCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+        accessorCall.curFile = curFile
+        return Some(accessorCall)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
