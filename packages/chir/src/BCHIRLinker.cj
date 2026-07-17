@@ -124,7 +124,7 @@ public class BCHIRLinker {
             if (!globalIds.contains(entry.name)) {
                 let id = FreshGlobalId()
                 globalIds[entry.name] = id
-                globalInitValues[id] = ByteCodeToIVal(entry.definition, pkg)
+                globalInitValues[id] = ByteCodeToIval(entry.definition, pkg)
             }
         }
     }
@@ -141,7 +141,8 @@ public class BCHIRLinker {
         }
     }
 
-    private func ByteCodeToIVal(definition: BCHIRDefinition, bchir: BCHIR): InterpreterValue {
+    // C++: Interpreter/Utils.cpp:150-211 Interpreter::ByteCodeToIval.
+    private func ByteCodeToIval(definition: BCHIRDefinition, bchir: BCHIR): InterpreterValue {
         let opCode = OpCodeFromIndex(definition.Get(0))
         return match (opCode) {
             case OpCode.UINT8 => InterpreterValue.MakeUInt(InterpreterValueKind.IUINT8, definition.Get(1))
@@ -154,9 +155,14 @@ public class BCHIRLinker {
             case OpCode.INT32 => InterpreterValue.MakeInt(InterpreterValueKind.IINT32, definition.Get(1))
             case OpCode.INT64 => InterpreterValue.MakeInt(InterpreterValueKind.IINT64, definition.Get8Bytes(1))
             case OpCode.INTNAT => IValUtils.PrimitiveIntNat(definition.Get8Bytes(1))
-            case OpCode.FLOAT16 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT16, Float64(definition.Get(1)))
-            case OpCode.FLOAT32 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT32, Float64(definition.Get(1)))
-            case OpCode.FLOAT64 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64, Float64(definition.Get8Bytes(1)))
+            case OpCode.FLOAT16 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT16,
+                Float64(Float32.fromBits(UInt32(definition.Get(1)))))
+            case OpCode.FLOAT32 => InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT32,
+                Float64(Float32.fromBits(UInt32(definition.Get(1)))))
+            case OpCode.FLOAT64 =>
+                let raw = definition.Get8Bytes(1)
+                let bits = if (raw >= 0) { UInt64(raw) } else { UInt64.Max - UInt64(-(raw + 1)) }
+                InterpreterValue.MakeFloat(InterpreterValueKind.IFLOAT64, Float64.fromBits(bits))
             case OpCode.RUNE => InterpreterValue.MakeRune(Rune(definition.Get(1)))
             case OpCode.BOOL => InterpreterValue.MakeBool(definition.Get(1) != 0)
             case OpCode.UNIT => InterpreterValue.MakeUnit()
