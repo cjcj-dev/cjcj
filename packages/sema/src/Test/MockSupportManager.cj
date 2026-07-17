@@ -1619,6 +1619,25 @@ public class MockSupportManager {
         return Some(memberAccess)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1300-1319.
+    private func ReplaceMemberAccess(member: MemberAccess,
+        isInConstructor: Bool, isSubMemberAccess: Bool): Option<Expr> {
+        if (member.target.isNone()) {
+            return None
+        }
+        let isField = member.target.getOrThrow().astKind == ASTKind.VAR_DECL &&
+            member.target.getOrThrow().astKind != ASTKind.PROP_DECL
+        if (isField) {
+            let isLeftValue = member.TestAttr(Attribute.LEFT_VALUE) ||
+                (!member.isAlone && !isSubMemberAccess)
+            if (isLeftValue) {
+                return None
+            }
+            return ReplaceFieldGetWithAccessor(member, isInConstructor)
+        }
+        return ReplaceMemberAccessWithAccessor(member, isInConstructor)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
