@@ -1402,6 +1402,74 @@ public class MockSupportManager {
         return ret
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1433-1510.
+    private func ReplaceInoutFuncArgWithAccessor(callExpr: CallExpr): Option<Expr> {
+        let accessorGetCalls = ArrayList<Node>()
+        let accessorSetCalls = ArrayList<Expr>()
+        let exprClonedExpr = (ASTCloner.Clone(callExpr) as CallExpr).getOrThrow()
+        exprClonedExpr.EnableAttr(Attribute.GENERATED_TO_MOCK)
+        exprClonedExpr.EnableAttr(Attribute.COMPILER_ADD)
+
+        for (index in 0..callExpr.args.size) {
+            let arg = callExpr.args[index]
+            if (!arg.withInout) {
+                continue
+            }
+            var accessorGet: Option<CallExpr> = None
+            var accessorSet: Option<CallExpr> = None
+            if (let Some(memberAccess) <- (arg.expr.getOrThrow() as MemberAccess)) {
+                if (IsStaticClassMember(memberAccess.GetTarget())) {
+                    accessorGet = GenerateGetterCall(memberAccess)
+                    accessorSet = GenerateSetterCall(memberAccess)
+                    CJC_ASSERT(accessorGet.isSome() && accessorSet.isSome())
+                }
+            } else if (let Some(refExpr) <- (arg.expr.getOrThrow() as RefExpr)) {
+                let target = refExpr.GetTarget()
+                if (target.isSome() && (IsStaticClassMember(target) ||
+                    target.getOrThrow().TestAttr(Attribute.GLOBAL))) {
+                    accessorGet = GenerateGetterCall(refExpr)
+                    accessorSet = GenerateSetterCall(refExpr)
+                    CJC_ASSERT(accessorGet.isSome() && accessorSet.isSome())
+                }
+            }
+
+            if (accessorGet.isNone() || accessorSet.isNone()) {
+                continue
+            }
+            let tmpVarDecl = CreateTmpVarDecl(
+                Some(MockUtils.CreateType(arg.GetTy().getOrThrow())), Some(accessorGet.getOrThrow()))
+            tmpVarDecl.isVar = true
+            let tmpVarRef = CreateRefExpr(tmpVarDecl)
+            tmpVarRef.curFile = tmpVarDecl.curFile
+            accessorSet.getOrThrow().args.add(CreateFuncArg(
+                (ASTCloner.Clone(tmpVarRef) as Expr).getOrThrow()))
+            let replacedFuncArg = CreateFuncArg(
+                (ASTCloner.Clone(tmpVarRef) as Expr).getOrThrow())
+            replacedFuncArg.withInout = arg.withInout
+            accessorSetCalls.add(accessorSet.getOrThrow())
+
+            if (let Some(args) <- exprClonedExpr.desugarArgs) {
+                args[index] = GenerateDesugarFuncArg(replacedFuncArg, tmpVarDecl)
+            }
+            exprClonedExpr.args[index] = replacedFuncArg
+            accessorGetCalls.add(tmpVarDecl)
+        }
+
+        let callExprResult = CreateTmpVarDecl(
+            Some(MockUtils.CreateType(exprClonedExpr.GetTy().getOrThrow())), Some(exprClonedExpr))
+        let refExprResult = CreateRefExpr(callExprResult)
+        refExprResult.curFile = callExprResult.curFile
+        let blockNodes = ArrayList<Node>()
+        blockNodes.add(all: accessorGetCalls)
+        blockNodes.add(callExprResult)
+        for (setterCall in accessorSetCalls) {
+            blockNodes.add(setterCall)
+        }
+        blockNodes.add(refExprResult)
+        callExpr.desugarExpr = CreateBlock(blockNodes, callExpr.GetTy())
+        return None
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
