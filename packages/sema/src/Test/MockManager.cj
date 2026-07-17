@@ -826,7 +826,7 @@ public class MockManager {
         funcInfoItems.add(CreateLitConstExpr(LitConstKind.BOOL,
             if (IsDeclAccessibleForMock(curFile.curPackage.getOrThrow(), funcDecl)) { "true" } else { "false" },
             boolTy, true))
-        funcInfoItems.add(CreateDeclKind(funcDecl))
+        funcInfoItems.add(CreateDeclKind(funcDecl).getOrThrow())
         let initDecl = FindInitDecl(funcInfoDecl.getOrThrow(), typeManager, funcInfoItems)
         CJC_ASSERT(initDecl.isSome())
         return CreateInitCall(initDecl.getOrThrow(), funcInfoItems, curFile)
@@ -897,7 +897,7 @@ public class MockManager {
     }
 
     // C++: Sema/Test/MockManager.cpp:972-1023.
-    private func CreateDeclKind(decl: FuncDecl): CallExpr {
+    private func CreateDeclKind(decl: FuncDecl): Option<CallExpr> {
         let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
         let declKindArgs = ArrayList<FuncArg>()
         declKindArgs.add(CreateFuncArg(CreateLitConstExpr(LitConstKind.STRING,
@@ -941,11 +941,9 @@ public class MockManager {
             enumEntryCallExpr.args.add(all: declKindArgs)
             enumEntryCallExpr.callKind = CallKind.CALL_DECLARED_FUNCTION
             enumEntryCallExpr.curFile = decl.curFile
-            return enumEntryCallExpr
+            return Some(enumEntryCallExpr)
         }
-
-        CJC_ASSERT(false)
-        return CallExpr()
+        return None
     }
 
     // C++: Sema/Test/MockManager.cpp:1158-1202.
