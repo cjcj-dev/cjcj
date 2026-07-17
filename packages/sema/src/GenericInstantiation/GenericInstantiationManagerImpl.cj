@@ -154,12 +154,37 @@ private func markNoReflectInfo(decl: Decl): Unit {
 }
 
 // C++: Sema/GenericInstantiation/GenericInstantiationManagerImpl.cpp:496-535.
-private func PerformUpdateAttrDuringClone(decl: Decl, pkg: Package): Unit {
-    decl.fullPackageName = pkg.fullPackageName
-    decl.moduleName = GetRootPackageName(pkg.fullPackageName)
-    decl.curFile = pkg.files[0]
-    decl.toBeCompiled = true
-    decl.DisableAttr(Attribute.IMPORTED)
+private func PerformUpdateAttrDuringClone(genericNode: Node, clonedNode: Node, pkg: Package): Unit {
+    if (let None <- (clonedNode as Decl)) {
+        return
+    }
+    let clonedDecl = (clonedNode as Decl).getOrThrow()
+    let genericDecl = (genericNode as Decl).getOrThrow()
+    clonedDecl.moduleName = GetRootPackageName(pkg.fullPackageName)
+    clonedDecl.fullPackageName = pkg.fullPackageName
+    clonedDecl.curFile = pkg.files[0]
+    // The selfhost manager has no incremental-package walk, so C++ needCompile remains its default true.
+    clonedDecl.toBeCompiled = true
+    clonedDecl.DisableAttr(Attribute.IMPORTED)
+    if (let None <- clonedDecl.GetGeneric()) {
+        return
+    }
+    var result = false
+    for (typeParameter in clonedDecl.GetGeneric().getOrThrow().typeParameters) {
+        result = result || typeParameter.GetTy().getOrThrow().IsGeneric()
+    }
+    if (result && clonedNode.TestAttr(Attribute.GENERIC)) {
+        if (let Some(outerDecl) <- clonedDecl.outerDecl) {
+            if (outerDecl.IsFunc()) {
+                return
+            }
+        }
+        clonedNode.EnableAttr(Attribute.GENERIC_INSTANTIATED)
+        clonedDecl.genericDecl = genericDecl
+    } else if (!result && clonedNode.TestAttr(Attribute.GENERIC)) {
+        clonedNode.DisableAttr(Attribute.GENERIC)
+        clonedNode.EnableAttr(Attribute.GENERIC_INSTANTIATED)
+    }
 }
 
 private func buildDefaultParamGenericsTyMap(funcDecl: FuncDecl): TypeSubst {
@@ -296,7 +321,7 @@ private func updateClonedNode(genericNode: Node, clonedNode: Node, typeManager: 
     g2gTyMap: TypeSubst, pkg: Package): Unit {
     PerformTyInstantiationDuringClone(genericNode, clonedNode, typeManager, GenericInfo(None, typeMapping), g2gTyMap)
     if (let Some(clonedDecl) <- (clonedNode as Decl)) {
-        PerformUpdateAttrDuringClone(clonedDecl, pkg)
+        PerformUpdateAttrDuringClone(genericNode, clonedNode, pkg)
     }
 }
 
