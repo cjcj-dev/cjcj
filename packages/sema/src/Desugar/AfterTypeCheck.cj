@@ -5,12 +5,16 @@ import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.InteropCJPackageConfigReader
 import cjcj::basic.WriteError
+import cjcj::mangle.BaseMangler
 import cjcj::option.GlobalOptions
 import cjcj::sema.*
 import cjcj::sema.Desugar.AfterTypeCheck.*
-import cjcj::modules.SemaImportManager
+import cjcj::sema.NativeFFI.Java.JavaInteropManager
+import cjcj::sema.NativeFFI.ObjC.InteropContext
+import cjcj::sema.NativeFFI.ObjC.Desugar as DesugarObjC
+import cjcj::modules.{ImportManager, SemaImportManager}
 
-private func UpdatePosForMacroExpandedNodes(pkgs: ArrayList<Package>): Unit {
+public func UpdatePosForMacroExpandedNodes(pkgs: ArrayList<Package>): Unit {
     let visit = { curNode: Node =>
         if (let None <- curNode.curMacroCall) {
             return VisitAction.WALK_CHILDREN
@@ -22,17 +26,6 @@ private func UpdatePosForMacroExpandedNodes(pkgs: ArrayList<Package>): Unit {
     for (pkg in pkgs) {
         let walker = Walker(pkg, visitPre: visit)
         walker.Walk()
-    }
-}
-
-private func CheckExtendDecl(diag: BasicDiagnosticEngine, decl: ExtendDecl): Unit {
-    let ty = decl.extendedType.getOrThrow().GetTy().getOrThrow()
-    if (!IsMirror(ty) && !IsImpl(ty)) {
-        return
-    }
-    if (!decl.inheritedTypes.isEmpty()) {
-        DiagJavaDeclCannotBeExtendedWithInterface(diag, decl)
-        decl.EnableAttr(Attribute.IS_BROKEN)
     }
 }
 
@@ -206,27 +199,34 @@ extend TypeCheckerImpl {
     }
 }
 
-public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager: SemaImportManager, pkg: Package,
+public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager: SemaImportManager,
+    mangler: BaseMangler, structMemberMap: HashMap<InheritableDecl, MemberMap>, pkg: Package,
     context!: Option<ASTContext> = None, options!: GlobalOptions = GlobalOptions(),
     synthesizer!: Option<(ASTContext, SynPos, Node) -> Ty> = None,
     callChecker!: Option<(ASTContext, Ty, CallExpr) -> Bool> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Unit {
-    if (let Some(diagValue) <- diag) {
-        for (file in pkg.files) {
-            for (decl in file.decls) {
-                if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-                    CheckExtendDecl(diagValue, extendDecl)
-                }
-            }
-        }
+    let diagValue = diag.getOrThrow()
+    let javaInteropManager = JavaInteropManager(importManager, typeManager, diagValue, mangler,
+        options.outputJavaGenDir, options.output, options.targetInteropLanguage)
+    javaInteropManager.CheckImplRedefinition(pkg)
+    for (file in pkg.files) {
+        javaInteropManager.CheckTypes(file)
     }
+    javaInteropManager.DesugarPackage(pkg, structMemberMap,
+        { node: Node => DesugarForPropDecl(typeManager, node) })
+    let activeImportManager = (importManager as ImportManager).getOrThrow()
+    DesugarObjC(InteropContext(pkg, typeManager, activeImportManager, diagValue, mangler, options.output,
+        options.outputObjCGenDir, structMemberMap, options.target.os))
     DesugarDeclsForPackage(pkg, options.enableCoverage)
     let walker = Walker(pkg, visitPre: { node: Node =>
         match (node.astKind) {
             case ASTKind.FOR_IN_EXPR =>
                 if (let Some(forInExpr) <- (node as ForInExpr)) {
-                    ReArrangeForInExpr(typeManager, forInExpr, context: context, synthesizer: synthesizer,
-                        diag: diag)
+                    if (forInExpr.inExpression.isSome()) {
+                        @When[backend == "cjnative"]
+                        ReArrangeForInExpr(typeManager, forInExpr, context: context, synthesizer: synthesizer,
+                            diag: diag)
+                    }
                 }
             case ASTKind.FUNC_PARAM =>
                 if (let Some(param) <- (node as FuncParam)) {
@@ -248,9 +248,6 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager
             case ASTKind.BINARY_EXPR =>
                 if (let Some(binaryExpr) <- (node as BinaryExpr)) {
                     DesugarBinaryExpr(binaryExpr)
-                    if (binaryExpr.op == TokenKind.COALESCING) {
-                        DesugarForCoalescing(typeManager, binaryExpr)
-                    }
                 }
             case ASTKind.IS_EXPR =>
                 if (let Some(isExpr) <- (node as IsExpr)) {
@@ -300,10 +297,4 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager
         VisitAction.WALK_CHILDREN
     })
     let _ = walker.Walk()
-    AddOptionBox(typeManager, pkg)
-    if (options.enableCompileDebug || options.displayLineInfo) {
-        let pkgs = ArrayList<Package>()
-        pkgs.add(pkg)
-        UpdatePosForMacroExpandedNodes(pkgs)
-    }
 }
