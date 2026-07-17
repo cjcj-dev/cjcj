@@ -393,6 +393,10 @@ private class ToCHIR {
         if (instance.invocation.globalOptions.emitCHIRPhase == CandidateEmitCHIRPhase.OPT) {
             EmitCHIR(outputPath, lowered, ToCHIRPhase.OPT,
                 instance.invocation.globalOptions.NeedDumpCHIR())
+        } else if (instance.invocation.globalOptions.saveTemps) {
+            let tempFileInfo = TempFileManager.Instance().CreateNewFileInfo(
+                TempFileInfo(fileName: lowered.GetName()), TempFileKind.O_CHIR)
+            CHIRSerializer.Serialize(lowered, tempFileInfo.filePath, ToCHIRPhase.OPT)
         }
         builder.MergeAllocatedInstance()
         return Some(lowered)
