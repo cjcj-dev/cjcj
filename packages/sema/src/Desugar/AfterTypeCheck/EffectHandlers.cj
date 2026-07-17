@@ -720,8 +720,8 @@ private func UpdateHandlerLambdaReturnTy(typeManager: TypeManager, lambda: Lambd
     }
 }
 
-private func WrapHandlerLambda(typeManager: TypeManager, importManager: SemaImportManager,
-    callChecker: (Ty, CallExpr) -> Bool, pkg: Package, handler: Handler,
+private func CreateSetHandlerImpl(typeManager: TypeManager, importManager: SemaImportManager,
+    synthesizer: (SynPos, Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool, pkg: Package, handler: Handler,
     lambda: LambdaExpr, tryResultTy: Ty): Bool {
     if (let None <- lambda.funcBody) {
         return false
@@ -784,6 +784,7 @@ private func WrapHandlerLambda(typeManager: TypeManager, importManager: SemaImpo
     } else {
         return false
     }
+    let _ = synthesizer(SynPos.NONE, wrappedTry)
 
     let resultVar = CreateVarDecl(V_COMPILER_NAME, wrappedTry, None)
     resultVar.SetTy(originalReturnTy)
@@ -802,6 +803,7 @@ private func WrapHandlerLambda(typeManager: TypeManager, importManager: SemaImpo
             resultNodes.add(CreateThrowExprFromCall(sourceBlock, earlyReturnCall))
             let resultBlock = CreateBlock(resultNodes, Some(TypeManager.GetNothingTy()))
             AddCurFile(resultBlock, file: sourceBlock.curFile)
+            let _ = synthesizer(SynPos.EXPR_ARG, resultBlock)
             funcBody.body = resultBlock
             UpdateHandlerLambdaReturnTy(typeManager, lambda, resultTy)
             return true
@@ -811,7 +813,7 @@ private func WrapHandlerLambda(typeManager: TypeManager, importManager: SemaImpo
 }
 
 private func CreateFrame(typeManager: TypeManager, importManager: SemaImportManager,
-    ctx: ASTContext, synthesizer: (Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool, pkg: Package,
+    ctx: ASTContext, synthesizer: (SynPos, Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool, pkg: Package,
     tryExpr: TryExpr, nodes: ArrayList<Node>):
     Option<VarDecl> {
     if (let None <- tryExpr.tryLambda) {
@@ -835,7 +837,8 @@ private func CreateFrame(typeManager: TypeManager, importManager: SemaImportMana
     frameTypeArgs.add(tryReturnTy)
     let frameTy = typeManager.GetClassTy(frameDecl, frameTypeArgs.toArray())
 
-    if (!EncloseTryLambdaForImmediateWrappers(typeManager, importManager, synthesizer, callChecker,
+    if (!EncloseTryLambdaForImmediateWrappers(typeManager, importManager,
+        { node: Node => synthesizer(SynPos.EXPR_ARG, node) }, callChecker,
         pkg, tryLambda, tryReturnTy)) {
         return None
     }
@@ -893,8 +896,8 @@ private func AddSetFinally(typeManager: TypeManager, callChecker: (Ty, CallExpr)
     return true
 }
 
-private func AddSetHandler(typeManager: TypeManager, importManager: SemaImportManager,
-    ctx: ASTContext, callChecker: (Ty, CallExpr) -> Bool,
+private func CreateSetHandlerPart2(typeManager: TypeManager, importManager: SemaImportManager,
+    ctx: ASTContext, synthesizer: (SynPos, Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool,
     pkg: Package, tryExpr: TryExpr, frame: VarDecl,
     handler: Handler, commandPattern: CommandTypePattern, nodes: ArrayList<Node>): Bool {
     if (commandPattern.types.size != 1) {
@@ -914,7 +917,8 @@ private func AddSetHandler(typeManager: TypeManager, importManager: SemaImportMa
     }
     let handlerLambda = handler.desugaredLambda.getOrThrow()
     let tryResultTy = tryExpr.GetTy().getOrThrow()
-    if (!WrapHandlerLambda(typeManager, importManager, callChecker, pkg, handler, handlerLambda, tryResultTy)) {
+    if (!CreateSetHandlerImpl(typeManager, importManager, synthesizer, callChecker, pkg, handler,
+        handlerLambda, tryResultTy)) {
         return false
     }
 
@@ -947,8 +951,9 @@ private func AddSetHandler(typeManager: TypeManager, importManager: SemaImportMa
     return true
 }
 
-private func AddSetHandlers(typeManager: TypeManager, importManager: SemaImportManager,
-    ctx: ASTContext, callChecker: (Ty, CallExpr) -> Bool, pkg: Package, tryExpr: TryExpr,
+private func CreateSetHandler(typeManager: TypeManager, importManager: SemaImportManager,
+    ctx: ASTContext, synthesizer: (SynPos, Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool,
+    pkg: Package, tryExpr: TryExpr,
     frame: VarDecl, nodes: ArrayList<Node>): Bool {
     for (handler in tryExpr.handlers) {
         if (let None <- handler.commandPattern) {
@@ -958,7 +963,7 @@ private func AddSetHandlers(typeManager: TypeManager, importManager: SemaImportM
             return false
         }
         let commandPattern = (handler.commandPattern.getOrThrow() as CommandTypePattern).getOrThrow()
-        if (!AddSetHandler(typeManager, importManager, ctx, callChecker, pkg, tryExpr,
+        if (!CreateSetHandlerPart2(typeManager, importManager, ctx, synthesizer, callChecker, pkg, tryExpr,
             frame, handler, commandPattern, nodes)) {
             return false
         }
@@ -1010,7 +1015,7 @@ private func ClearOriginalTryHandleSurface(tryExpr: TryExpr): Unit {
 
 public func DesugarTryToFrame(typeManager: TypeManager, importManager: SemaImportManager,
     ctx: ASTContext, pkg: Package, tryExpr: TryExpr,
-    synthesizer: (Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool): Unit {
+    synthesizer: (SynPos, Node) -> Ty, callChecker: (Ty, CallExpr) -> Bool): Unit {
     if (tryExpr.handlers.isEmpty() || !Ty.IsTyCorrect(tryExpr.GetTy())) {
         return
     }
@@ -1020,7 +1025,8 @@ public func DesugarTryToFrame(typeManager: TypeManager, importManager: SemaImpor
     let nodes = ArrayList<Node>()
     if (let Some(frameVar) <- CreateFrame(typeManager, importManager, ctx, synthesizer,
         callChecker, pkg, tryExpr, nodes)) {
-        if (!AddSetHandlers(typeManager, importManager, ctx, callChecker, pkg, tryExpr, frameVar, nodes)) {
+        if (!CreateSetHandler(typeManager, importManager, ctx, synthesizer, callChecker, pkg,
+            tryExpr, frameVar, nodes)) {
             return
         }
         if (!AddSetFinally(typeManager, callChecker, tryExpr, frameVar, nodes)) {
