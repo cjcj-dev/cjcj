@@ -57,7 +57,7 @@ extend ParserImpl {
         if (!IsMacroIdentifierStart(kind)) {
             return false
         }
-        if (Seeing(TokenKind.AT) && kind == TokenKind.IDENTIFIER && IsBuiltinAnnotation(moduleName, ahead[0].Value())) {
+        if (kind == TokenKind.IDENTIFIER && IsBuiltinAnnotation(moduleName, ahead[0].Value())) {
             return false
         }
         return true
