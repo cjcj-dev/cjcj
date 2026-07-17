@@ -270,11 +270,11 @@ public class TypeCheckerImpl {
             if ((let Some(target) <- typeNode.GetTarget()) &&
                 (let Some(typeAliasDecl) <- (target as TypeAliasDecl)) &&
                 (let Some(aliasedType) <- typeAliasDecl.typeNode)) {
-                CheckInheritanceCycleHelper<T>(ctx, decl, aliasedType, path, extendDecl)
+                CheckInheritanceCycleHelper<T>(ctx, decl, aliasedType, path, extendDecl: extendDecl)
             } else if (let Some(target) <- typeNode.GetTarget()) {
                 match (target.checkFlag) {
                     case InheritanceVisitStatus.VISITED => ()
-                    case _ => CheckInheritanceCycleDFS(ctx, target, path, extendDecl)
+                    case _ => CheckInheritanceCycleDFS(ctx, target, path, extendDecl: extendDecl)
                 }
             }
         } else {
@@ -296,11 +296,13 @@ public class TypeCheckerImpl {
                     match (interfaceDecl.checkFlag) {
                         case InheritanceVisitStatus.VISITED =>
                             CheckInheritanceCycleHelper<InterfaceDecl>(ctx, decl, inheritedType, path,
-                                Some(extendDecl))
-                        case _ => CheckInheritanceCycleDFS(ctx, interfaceDecl, path, Some(extendDecl))
+                                extendDecl: Some(extendDecl))
+                        case _ => CheckInheritanceCycleDFS(ctx, interfaceDecl, path,
+                            extendDecl: Some(extendDecl))
                     }
                 } else {
-                    CheckInheritanceCycleHelper<InterfaceDecl>(ctx, decl, inheritedType, path, Some(extendDecl))
+                    CheckInheritanceCycleHelper<InterfaceDecl>(ctx, decl, inheritedType, path,
+                        extendDecl: Some(extendDecl))
                 }
             }
         }
@@ -325,11 +327,13 @@ public class TypeCheckerImpl {
                 if ((let Some(targetDecl) <- target) && targetDecl.IsNominalDecl()) {
                     match (targetDecl.checkFlag) {
                         case InheritanceVisitStatus.VISITED =>
-                            CheckInheritanceCycleHelper<ClassLikeDecl>(ctx, decl, inheritedType, path, extendDecl)
-                        case _ => CheckInheritanceCycleDFS(ctx, targetDecl, path, extendDecl)
+                            CheckInheritanceCycleHelper<ClassLikeDecl>(ctx, decl, inheritedType, path,
+                                extendDecl: extendDecl)
+                        case _ => CheckInheritanceCycleDFS(ctx, targetDecl, path, extendDecl: extendDecl)
                     }
                 } else {
-                    CheckInheritanceCycleHelper<ClassLikeDecl>(ctx, decl, inheritedType, path, extendDecl)
+                    CheckInheritanceCycleHelper<ClassLikeDecl>(ctx, decl, inheritedType, path,
+                        extendDecl: extendDecl)
                 }
             }
             CheckInheritanceCycleWithExtend(ctx, classLikeDecl, path)
