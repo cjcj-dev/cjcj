@@ -502,6 +502,19 @@ public class MockManager {
         return fieldDecl
     }
 
+    // C++: Sema/Test/MockManager.cpp:840-850.
+    private func CreateDeclId(decl: Decl, curFile: File): CallExpr {
+        let valueArgs = ArrayList<Expr>()
+        let mangledName = mockUtils.Mangle(mockUtils.GetGenericDecl(decl))
+        let stringTy = mockUtils.stringDecl.getOrThrow().GetTy().getOrThrow()
+        valueArgs.add(CreateLitConstExpr(LitConstKind.STRING, mangledName, stringTy, true))
+        valueArgs.add(CreateLitConstExpr(LitConstKind.STRING,
+            MockUtils.GetOriginalIdentifierOfMockAccessor(decl), stringTy, true))
+        let initDecl = FindInitDecl(declIdDecl.getOrThrow(), typeManager, valueArgs)
+        CJC_ASSERT(initDecl.isSome())
+        return CreateInitCall(initDecl.getOrThrow(), valueArgs, curFile)
+    }
+
     // C++: Sema/Test/MockManager.cpp:972-1023.
     private func CreateDeclKind(decl: FuncDecl): CallExpr {
         let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
