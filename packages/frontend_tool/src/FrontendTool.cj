@@ -100,7 +100,8 @@ public func ExecuteFrontendWithResult(
     compileTarget!: Option<CompileTarget> = None,
     tempFolderPath!: Option<String> = None
 ): FrontendExecutionResult {
-    let diag = DiagnosticEngine()
+    // C++: src/FrontendTool/FrontendTool.cpp:160-213, stack DiagnosticEngine lifetime.
+    try (diag = DiagnosticEngine()) {
     let invocation = CompilerInvocation()
     ConfigureInvocationPaths(invocation, exePath, environmentVars)
     if (!InitializeCompilerInvocation(invocation, args)) {
@@ -140,6 +141,7 @@ public func ExecuteFrontendWithResult(
         return FrontendExecutionResult(0, driverOptions: driverOptions)
     }
     return FrontendExecutionResult(1)
+    }
 }
 
 public func ExecuteFrontend(
