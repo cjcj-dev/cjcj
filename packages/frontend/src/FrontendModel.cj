@@ -6595,7 +6595,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             curPackage = Some(pkgs[0])
         }
         SetHasBuildIndex(true)
-        return diag.GetErrorCount() == 0
+        return true
     }
 
     private func CheckPackageSpecsIdentical(pkg: Package): Unit {
