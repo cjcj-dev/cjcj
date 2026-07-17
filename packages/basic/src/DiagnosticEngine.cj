@@ -1118,13 +1118,18 @@ private func convertOldDiagToNew(diagnostic: Diagnostic): Unit {
     diagnostic.rKind = DiagKindRefactor.lex_diag_begin
 }
 
-public class DiagnosticEngine {
+public class DiagnosticEngine <: Resource {
     let impl: DiagnosticEngineImpl = DiagnosticEngineImpl()
     public var ignoreScopeCheck: Bool = false
 
     public init() {
         RegisterHandler(DiagFormat.DEFAULT)
     }
+
+    // C++: src/Basic/DiagnosticEngine.cpp:715-718, DiagnosticEngine::~DiagnosticEngine.
+    public func close(): Unit { impl.close() }
+
+    public func isClosed(): Bool { return impl.isClosed() }
 
     public func SetIsEmitter(emitter: Bool): Unit { impl.SetIsEmitter(emitter) }
     public func SetDisableWarning(dis: Bool): Unit { impl.SetDisableWarning(dis) }
