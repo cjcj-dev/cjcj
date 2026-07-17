@@ -19,20 +19,21 @@
 
 static size_t GetSizeFromEnv(const char* value)
 {
-    char compact[64];
+    char* compact = malloc(strlen(value) + 1);
+    if (compact == NULL) {
+        return SIZE_MAX;
+    }
     size_t src = 0;
     size_t dst = 0;
     while (value[src] != '\0') {
         if (!isspace((unsigned char)value[src])) {
-            if (dst + 1 >= sizeof(compact)) {
-                return SIZE_MAX;
-            }
             compact[dst++] = value[src];
         }
         ++src;
     }
     compact[dst] = '\0';
     if (dst <= UNIT_LEN) {
+        free(compact);
         return SIZE_MAX;
     }
 
@@ -40,6 +41,7 @@ static size_t GetSizeFromEnv(const char* value)
     unit[0] = (char)tolower((unsigned char)unit[0]);
     unit[1] = (char)tolower((unsigned char)unit[1]);
     if (strcmp(unit, "kb") != 0 && strcmp(unit, "mb") != 0 && strcmp(unit, "gb") != 0) {
+        free(compact);
         return SIZE_MAX;
     }
     char unitKind = unit[0];
@@ -48,18 +50,26 @@ static size_t GetSizeFromEnv(const char* value)
     char* end = NULL;
     long number = strtol(compact, &end, 10);
     if (end == compact || *end != '\0' || number > INT32_MAX) {
+        free(compact);
         return SIZE_MAX;
     }
     if (number <= 0) {
+        free(compact);
         return 0;
     }
     if (unitKind == 'm') {
-        return (size_t)number * KB;
+        size_t size = (size_t)number * KB;
+        free(compact);
+        return size;
     }
     if (unitKind == 'g') {
-        return (size_t)number * MB;
+        size_t size = (size_t)number * MB;
+        free(compact);
+        return size;
     }
-    return (size_t)number;
+    size_t size = (size_t)number;
+    free(compact);
+    return size;
 }
 
 static size_t GetStackSizeFromEnv(const char* name)
