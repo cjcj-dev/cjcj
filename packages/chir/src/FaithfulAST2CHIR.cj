@@ -2911,9 +2911,7 @@ public class FaithfulAST2CHIR {
     private func AnalysisFileDependencyImpl(rootDecl: AstDecl, curDecl: AstDecl, visited: FaithfulInitDeclSet,
         funcsAndVarsDepMap: DeclDepMap, fileDependencyMap: FileDepMap, var2varDepsInFile: DeclDepMap): Unit {
         if (!funcsAndVarsDepMap.Contains(curDecl)) {
-            if (!curDecl.TestAttr(AstAttribute.SRC_IMPORTED)) {
-                throw IllegalStateException("faithful GlobalDeclAnalysis expected source imported decl")
-            }
+            CJC_ASSERT(curDecl.TestAttr(AstAttribute.SRC_IMPORTED))
             return
         }
         let directDepsOfCurDecl = funcsAndVarsDepMap.GetDep(curDecl)
