@@ -406,6 +406,7 @@ foreign {
     func LLVMDisposeBuilder(builder: LLVMBuilderRef): Unit
     func LLVMGetCurrentDebugLocation2(builder: LLVMBuilderRef): LLVMMetadataRef
     func LLVMSetCurrentDebugLocation2(builder: LLVMBuilderRef, location: LLVMMetadataRef): Unit
+    func LLVMInstructionSetDebugLoc(inst: LLVMValueRef, location: LLVMMetadataRef): Unit
     func LLVMGetInsertBlock(builder: LLVMBuilderRef): LLVMBasicBlockRef
     func LLVMClearInsertionPosition(builder: LLVMBuilderRef): Unit
     func LLVMAppendBasicBlockInContext(context: LLVMContextRef, fn: LLVMValueRef, name: CString): LLVMBasicBlockRef
