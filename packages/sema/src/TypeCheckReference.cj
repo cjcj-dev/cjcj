@@ -1860,9 +1860,9 @@ private func DesugarStaticRefCall2MemberAccessInCFuncLam(
                     }
                     let refExpr = (baseFunc as RefExpr).getOrThrow()
                     let clonedCallExpr = (ASTCloner.Clone(callExpr) as CallExpr).getOrThrow()
-                    clonedCallExpr.baseFunc = DesugarRef2MemberAccess(
-                        typeManager, target.getOrThrow(), refExpr, curTopDeclTy)
-                    if (let Some(_) <- clonedCallExpr.baseFunc) {
+                    if (let Some(desugaredBaseFunc) <- DesugarRef2MemberAccess(
+                        typeManager, target.getOrThrow(), refExpr, curTopDeclTy)) {
+                        clonedCallExpr.baseFunc = Some(desugaredBaseFunc)
                         callExpr.desugarExpr = Some(clonedCallExpr)
                     }
                 }
@@ -1880,8 +1880,10 @@ private func DesugarStaticRefCall2MemberAccessInCFuncLam(
                 if (!targetIsStaticPropInOpenDecl) {
                     return VisitAction.WALK_CHILDREN
                 }
-                refExpr.desugarExpr = DesugarRef2MemberAccess(
-                    typeManager, target.getOrThrow(), refExpr, curTopDeclTy)
+                if (let Some(desugaredRef) <- DesugarRef2MemberAccess(
+                    typeManager, target.getOrThrow(), refExpr, curTopDeclTy)) {
+                    refExpr.desugarExpr = Some(desugaredRef)
+                }
             }
         }
         return VisitAction.WALK_CHILDREN
