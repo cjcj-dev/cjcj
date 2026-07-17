@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::modules.SemaImportManager
+import cjcj::mangle.{BaseMangler, MangleAstAdapter}
 import cjcj::sema.TypeManager
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
@@ -234,12 +235,49 @@ public class TestManager {
     }
 
     public func MarkDeclsForTestIfNeeded(pkgs: ArrayList<Package>): Unit {
+        HandleDeclsToExportForTest(pkgs)
         for (pkg in pkgs) {
             MarkMockCreationContainingGenericFuncsInPackage(pkg)
             if (ShouldMarkMockSupported(pkg)) {
                 MarkNodesMockSupported(pkg)
             }
             markGeneratedTestDecls(pkg)
+        }
+    }
+
+    // C++: Sema/Test/TestManager.cpp:697-731.
+    private func HandleDeclsToExportForTest(pkgs: ArrayList<Package>): Unit {
+        if (!exportForTest) {
+            return
+        }
+        for (pkg in pkgs) {
+            let mangler = BaseMangler()
+            let adapter = MangleAstAdapter()
+            let manglerCtx = mangler.PrepareContextForPackage(adapter.ConvertPackage(pkg))
+            adapter.CollectLocalDecls(manglerCtx, pkg)
+            var isInExtend = false
+
+            let walker = Walker(pkg, visitPre: { node: Node =>
+                if (let Some(extendDecl) <- (node as ExtendDecl)) {
+                    if (!extendDecl.TestAttr(Attribute.IMPORTED)) {
+                        isInExtend = true
+                    }
+                }
+                if (let Some(decl) <- (node as Decl)) {
+                    if (!decl.TestAttr(Attribute.PRIVATE) &&
+                        (decl.IsFuncOrProp() || (decl as FuncParam).isSome() || (decl as ExtendDecl).isSome()) &&
+                        (isInExtend || decl.TestAttr(Attribute.FOREIGN))) {
+                        decl.mangledName = mangler.Mangle(decl)
+                    }
+                }
+                return VisitAction.WALK_CHILDREN
+            }, visitPost: { node: Node =>
+                if ((node as ExtendDecl).isSome() && !node.TestAttr(Attribute.IMPORTED)) {
+                    isInExtend = false
+                }
+                return VisitAction.KEEP_DECISION
+            })
+            let _ = walker.Walk()
         }
     }
 
