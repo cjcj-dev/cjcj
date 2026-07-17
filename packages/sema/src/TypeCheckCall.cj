@@ -4818,6 +4818,7 @@ private func CheckUseTrailingClosureWithFunctionType(diag: Option<BasicDiagnosti
             arg, arguments: [message])
         builder.AddMainHintArguments(originalTy.String())
         AddNote(builder, candidate, MakeRangeForDeclIdentifier(candidate), "found candidate")
+        builder.Emit()
     }
     return false
 }
