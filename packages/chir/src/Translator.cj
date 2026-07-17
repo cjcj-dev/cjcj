@@ -3934,6 +3934,7 @@ public class Translator {
         }
         let lambda = builder.CreateLambda(funcTy, funcTy, CurrentBlock(), isLocalFunc: true,
             identifier: identifier, srcCodeIdentifier: funcDecl.identifier.Val(), genericTypeParams: genericTys)
+        lambda.SetDebugLocation(TranslateLocation(funcDecl))
         lambda.InitBody(body)
         if (funcDecl.isConst) {
             lambda.SetCompileTimeValue()
