@@ -127,10 +127,15 @@ public class ExtendBoxMarker {
         if (let Some(base) <- callExpr.baseFunc) {
             if (let Some(baseTy) <- base.GetTy()) {
                 if (let Some(funcTy) <- (baseTy as FuncTy)) {
-                    let argsToCheck = if (let Some(desugarArgs) <- callExpr.desugarArgs) {
-                        desugarArgs
+                    let argsToCheck = ArrayList<Option<FuncArg>>()
+                    if (let Some(desugarArgs) <- callExpr.desugarArgs) {
+                        for (arg in desugarArgs) {
+                            argsToCheck.add(arg)
+                        }
                     } else {
-                        callExpr.args
+                        for (arg in callExpr.args) {
+                            argsToCheck.add(Some(arg))
+                        }
                     }
                     var count: Int64 = 0
                     while (count < argsToCheck.size && count < funcTy.paramTys.size) {
