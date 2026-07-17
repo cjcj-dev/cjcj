@@ -335,7 +335,7 @@ private func collectDeclsFromDecl(decl: Decl, collector: DeclCollectorForTypeChe
 }
 
 // C++ src/Sema/PreCheck.cpp:40-58 ConstructDiagInfoForCycle.
-private func ConstructDiagInfoForCycle(root: TypeAliasDecl, path: ArrayList<Decl>): String {
+public func ConstructDiagInfoForCycle(root: Decl, path: ArrayList<Decl>): String {
     var inCycle = false
     var diagInfo = ""
     for (decl in path) {
