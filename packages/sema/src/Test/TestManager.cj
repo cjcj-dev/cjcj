@@ -348,6 +348,16 @@ public class TestManager {
         return None
     }
 
+    // C++: Sema/Test/TestManager.cpp:224-233.
+    public func WrapWithRequireMockObjectIfNeeded(expr: Expr, target: Decl): Unit {
+        if (target.IsStaticOrGlobal()) {
+            return
+        }
+        let memberAccess = ExtractMemberAccessFromExpr(expr)
+        CJC_ASSERT(memberAccess.isSome())
+        mockManager.getOrThrow().WrapWithRequireMockObject(memberAccess.getOrThrow().baseExpr.getOrThrow())
+    }
+
     // C++: Sema/Test/TestManager.cpp:108-111.
     public func ReportUnsupportedType(reportOn: Expr): Unit {
         DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_unsupported_type, reportOn).Emit()
