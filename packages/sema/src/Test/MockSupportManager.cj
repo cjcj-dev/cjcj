@@ -1713,6 +1713,27 @@ public class MockSupportManager {
         return None
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1974-1998.
+    private func FindDefaultAccessorInterfaceAndFunction(
+        original: FuncDecl): (Option<InterfaceDecl>, Option<FuncDecl>) {
+        if (original.outerDecl.isNone()) {
+            return (None, None)
+        }
+        let interfaceDecl = original.outerDecl.getOrThrow() as InterfaceDecl
+        if (interfaceDecl.isNone() || !original.TestAttr(Attribute.DEFAULT)) {
+            return (None, None)
+        }
+        let accessorInterfaceDecl = mockUtils.FindGlobalDecl<InterfaceDecl>(
+            interfaceDecl.getOrThrow().curFile.getOrThrow(),
+            interfaceDecl.getOrThrow().identifier.Val() + MockUtils.defaultAccessorSuffix)
+        if (accessorInterfaceDecl.isNone()) {
+            return (None, None)
+        }
+        let accessorDecl = mockUtils.FindMemberDecl<FuncDecl>(accessorInterfaceDecl.getOrThrow(),
+            mockUtils.Mangle(original) + MockUtils.defaultAccessorSuffix)
+        return (accessorInterfaceDecl, accessorDecl)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
