@@ -397,7 +397,7 @@ extend ParserImpl {
             invocation.macroCallDiagInfo.fullName += "."
             invocation.fullNameDotPos.add(lastToken.Begin())
             item = ExpectIdentifierWithPos(node)
-            if (item.Empty()) {
+            if (item.Val() == INVALID_IDENTIFIER) {
                 if (node.astKind == ASTKind.MACRO_EXPAND_EXPR) {
                     ConsumeUntilAny([TokenKind.NL, TokenKind.SEMI])
                 } else {
