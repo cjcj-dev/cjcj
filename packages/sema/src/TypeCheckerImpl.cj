@@ -7,9 +7,20 @@ import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::modules.SemaImportManager
 import cjcj::option.GetHardwareConcurrency
-import cjcj::utils.ProfileRecorder
+import cjcj::utils.{CJC_ASSERT, ProfileRecorder}
 
 private let CORES_REQUIRED_WARMUP: UInt64 = 8u64
+
+// C++ src/Sema/PreCheck.cpp:60-69 MarkInvalidInheritanceForNonClassLike.
+public func MarkInvalidInheritanceForNonClassLike(decl: InheritableDecl): Unit {
+    CJC_ASSERT(!decl.IsClassLikeDecl())
+    for (inheritedType in decl.inheritedTypes) {
+        if ((let Some(inheritedDecl) <- Ty.GetDeclPtrOfTy(inheritedType.GetTy())) &&
+            !inheritedDecl.IsClassLikeDecl()) {
+            decl.EnableAttr(Attribute.IN_REFERENCE_CYCLE)
+        }
+    }
+}
 
 public enum SynPos {
     | NONE
