@@ -723,7 +723,7 @@ private func CheckAssumption(typeManager: TypeManager, ctx: ASTContext, diag: Ba
     }
 }
 
-private func CollectAndCheckAssumption(typeManager: TypeManager, ctx: ASTContext, pkg: Package,
+public func CollectAndCheckAssumption(typeManager: TypeManager, ctx: ASTContext, pkg: Package,
     diag: BasicDiagnosticEngine): Unit {
     let decls = collectPackageDeclsForAssumption(pkg)
     for (decl in decls) {
@@ -776,7 +776,7 @@ private func preCheckAddObjectSuperClass(ctx: ASTContext, pkg: Package, classDec
     }
 }
 
-private func AddSuperClassObjectForClassDecl(
+public func AddSuperClassObjectForClassDecl(
     ctx: ASTContext,
     pkg: Package,
     diag: BasicDiagnosticEngine,
@@ -820,8 +820,6 @@ public func PreCheckPackage(ctx: ASTContext, pkg: Package, typeManager!: TypeMan
     }
     collectLetPatternDecls(ctx, pkg)
     PreSetDeclType(typeManager, ctx, importManager: importManager, diag: diag, backendType: backendType)
-    AddSuperClassObjectForClassDecl(ctx, pkg, diag.getOrThrow(), importManager)
-    CollectAndCheckAssumption(typeManager, ctx, pkg, diag.getOrThrow())
     return valid
 }
 
