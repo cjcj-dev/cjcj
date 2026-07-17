@@ -1339,6 +1339,16 @@ public class MockSupportManager {
         return None
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1599-1608.
+    private func ReplaceMemberAccessFieldSetWithAccessor(
+        memberAccess: MemberAccess, isInConstructor: Bool): Option<CallExpr> {
+        if (memberAccess.target.isNone() ||
+            (isInConstructor && IsMemberAccessOnThis(memberAccess))) {
+            return None
+        }
+        return GenerateSetterCall(memberAccess)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
