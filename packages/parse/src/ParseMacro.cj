@@ -102,12 +102,17 @@ extend ParserImpl {
                 file.hasMacro = true
             }
             expr.begin = Peek().Begin()
-            ParseMacroInvocation(ScopeKind.UNKNOWN_SCOPE, ArrayList<Modifier>(), expr.invocation, expr)
+            if (!ParseMacroCallIdentifier(expr.invocation, expr)) {
+                expr.EnableAttr(Attribute.IS_BROKEN)
+                expr.end = lastToken.End()
+                return expr
+            }
             expr.identifier = AstIdentifier(
                 expr.invocation.macroCallDiagInfo.identifier,
-                expr.invocation.macroNamePos,
-                expr.invocation.macroNamePos + expr.invocation.macroCallDiagInfo.identifier.size)
-            expr.end = lastToken.End()
+                expr.invocation.macroCallDiagInfo.identifierPos,
+                expr.invocation.macroCallDiagInfo.identifierPos + expr.invocation.macroCallDiagInfo.identifier.size)
+            ParseMacroInvocation(ScopeKind.UNKNOWN_SCOPE, ArrayList<Modifier>(), expr.invocation)
+            expr.end = if (let Some(inputDecl) <- expr.invocation.decl) { inputDecl.end } else { lastToken.End() }
         }
         return expr
     }
@@ -121,16 +126,26 @@ extend ParserImpl {
                 file.hasMacro = true
             }
             macroCall.begin = Peek().Begin()
-            ParseMacroInvocation(scopeKind, ArrayList<Modifier>(), macroCall.invocation, macroCall)
+            if (!ParseMacroCallIdentifier(macroCall.invocation, macroCall)) {
+                macroCall.EnableAttr(Attribute.IS_BROKEN)
+                macroCall.end = lastToken.End()
+                return macroCall
+            }
             macroCall.identifier = SrcIdentifier(
                 macroCall.invocation.macroCallDiagInfo.identifier,
                 macroCall.invocation.macroCallDiagInfo.identifier,
-                macroCall.invocation.macroNamePos,
-                macroCall.invocation.macroNamePos + macroCall.invocation.macroCallDiagInfo.identifier.size,
+                macroCall.invocation.macroCallDiagInfo.identifierPos,
+                macroCall.invocation.macroCallDiagInfo.identifierPos + macroCall.invocation.macroCallDiagInfo.identifier.size,
                 false)
+            ParseMacroInvocation(scopeKind, ArrayList<Modifier>(), macroCall.invocation)
             macroCall.end = if (let Some(inputDecl) <- macroCall.invocation.decl) { inputDecl.end } else { lastToken.End() }
+            let inputIsEnumConstructor = if (let Some(inputDecl) <- macroCall.invocation.decl) {
+                inputDecl.TestAttr(Attribute.ENUM_CONSTRUCTOR)
+            } else {
+                false
+            }
             if (ScopeKindEquals(scopeKind, ScopeKind.ENUM_CONSTRUCTOR) &&
-                (macroCall.invocation.hasParenthesis || macroCall.invocation.decl.isSome())) {
+                (macroCall.invocation.hasParenthesis || inputIsEnumConstructor)) {
                 macroCall.EnableAttr(Attribute.ENUM_CONSTRUCTOR)
             }
         }
@@ -171,22 +186,27 @@ extend ParserImpl {
                 DiagExpectNoModifierBefore(firstModifier, "macro call")
                 decl.begin = firstModifier.begin
             }
-            ParseMacroInvocation(scopeKind, modifiers, decl.invocation, decl)
-            if (!decl.invocation.hasParenthesis && decl.invocation.decl.isNone() &&
-                (SeeingDeclInScope(scopeKind) || SeeingMacroCallDecl())) {
-                ParseMacroCallArgsWithoutParen(scopeKind, modifiers, decl.invocation)
+            if (!ParseMacroCallIdentifier(decl.invocation, decl)) {
+                decl.EnableAttr(Attribute.IS_BROKEN)
+                decl.end = lastToken.End()
+                return decl
             }
             decl.identifier = SrcIdentifier(
                 decl.invocation.macroCallDiagInfo.identifier,
                 decl.invocation.macroCallDiagInfo.identifier,
-                decl.invocation.macroNamePos,
-                decl.invocation.macroNamePos + decl.invocation.macroCallDiagInfo.identifier.size,
+                decl.invocation.macroCallDiagInfo.identifierPos,
+                decl.invocation.macroCallDiagInfo.identifierPos + decl.invocation.macroCallDiagInfo.identifier.size,
                 false)
             if (!annos.isEmpty()) {
                 for (anno in annos) {
                     decl.annotations.add(anno)
                 }
                 SetBeginToAnnotationsBegin(decl, decl.annotations)
+            }
+            ParseMacroInvocation(scopeKind, modifiers, decl.invocation)
+            if (!decl.invocation.hasParenthesis && decl.invocation.decl.isNone() &&
+                (SeeingDeclInScope(scopeKind) || SeeingMacroCallDecl())) {
+                ParseMacroCallArgsWithoutParen(scopeKind, modifiers, decl.invocation)
             }
             if (let Some(innerDecl) <- decl.invocation.decl) {
                 CheckAnnotationAnno(decl.annotations, innerDecl)
@@ -208,15 +228,8 @@ extend ParserImpl {
     public func ParseMacroInvocation(
         scopeKind: ScopeKind,
         modifiers: ArrayList<Modifier>,
-        invocation: MacroInvocation,
-        node: Node
+        invocation: MacroInvocation
     ): Unit {
-        if (!ParseMacroCallIdentifier(invocation, node)) {
-            node.EnableAttr(Attribute.IS_BROKEN)
-            invocation.macroCallDiagInfo.macroCallEnd = lastToken.End()
-            return
-        }
-
         if (Skip(TokenKind.LSQUARE)) {
             if (IsBuiltinMacro(invocation.macroCallDiagInfo.identifier)) {
                 ParseDiagnoseRefactor(

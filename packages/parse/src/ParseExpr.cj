@@ -1325,11 +1325,16 @@ extend ParserImpl {
                     file.hasMacro = true
                 }
                 expr.begin = Peek().Begin()
-                ParseMacroInvocation(scopeKind, ArrayList<Modifier>(), expr.invocation, expr)
+                if (!ParseMacroCallIdentifier(expr.invocation, expr)) {
+                    expr.EnableAttr(Attribute.IS_BROKEN)
+                    expr.end = lastToken.End()
+                    return expr
+                }
                 expr.identifier = Identifier(
                     expr.invocation.macroCallDiagInfo.identifier,
-                    expr.invocation.macroNamePos,
-                    expr.invocation.macroNamePos + expr.invocation.macroCallDiagInfo.identifier.size)
+                    expr.invocation.macroCallDiagInfo.identifierPos,
+                    expr.invocation.macroCallDiagInfo.identifierPos + expr.invocation.macroCallDiagInfo.identifier.size)
+                ParseMacroInvocation(scopeKind, ArrayList<Modifier>(), expr.invocation)
                 expr.end = if (let Some(inputDecl) <- expr.invocation.decl) { inputDecl.end } else { lastToken.End() }
             }
             return ParseExprRhs(0, ParseBaseExpr(expr, ExprKind.ALL), ExprKind.ALL)
