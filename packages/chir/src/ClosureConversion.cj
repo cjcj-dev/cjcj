@@ -1403,6 +1403,7 @@ public class ClosureConversion {
             throw IllegalStateException("ClosureConversion CFunc lambda result is not a function type")
         let globalFunc = CreateCCFunction(funcTy, GenerateGlobalFuncIdentifier(lambda), lambda.GetSrcCodeIdentifier(),
             genericTypeParams: lambda.GetGenericTypeParams())
+        globalFunc.SetDebugLocation(result.GetDebugLocation())
         SetLiftedLambdaAttr(globalFunc, lambda)
         let sigInfo = FuncSigInfo(lambda.GetFuncType().getOrThrow(), funcName: lambda.GetSrcCodeIdentifier(),
             genericTypeParams: lambda.GetGenericTypeParams())
