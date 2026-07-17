@@ -1,5 +1,6 @@
 package cjcj::parse
 
+import cjcj::ast.DiagnoseRefactor as AstDiagnoseRefactor
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticBuilder as BasicDiagnosticBuilder
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
@@ -457,7 +458,7 @@ public class ParserImpl {
         if (let Some(macroCall) <- curMacroCall) {
             diagnosticNode.curMacroCall = macroCall
         }
-        return ParseDiagnoseRefactor(kind, diagnosticNode, MakeRange(node.begin, node.end), arguments: arguments)
+        return AstDiagnoseRefactor(diag, kind, diagnosticNode, arguments: arguments)
     }
 
     public func ParseDiagnoseRefactor(kind: BasicDiagKindRefactor, node: Node, argument: String): BasicDiagnosticBuilder {
