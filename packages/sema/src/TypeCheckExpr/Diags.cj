@@ -40,14 +40,6 @@ private func IsOverloadableOperator(op: TokenKind): Bool {
         op == TokenKind.NOTEQ || op == TokenKind.RSHIFT || op == TokenKind.SUB
 }
 
-private func TypeListString(indexTys: ArrayList<Ty>): String {
-    let parts = ArrayList<String>()
-    for (ty in indexTys) {
-        parts.add(ty.String())
-    }
-    return JoinStrings(parts, "', '")
-}
-
 private func IndexParameterString(indexTys: ArrayList<Ty>): String {
     let parts = ArrayList<String>()
     var idx: Int64 = 0
@@ -203,7 +195,7 @@ public func DiagInvalidSubscriptExpr(
         return
     }
     let indexPrefix = if (indexTys.size > 1) { "types " } else { "type " }
-    let indexStr = indexPrefix + "'" + TypeListString(indexTys) + "'"
+    let indexStr = indexPrefix + "'" + Ty.GetTypesToStr(indexTys, "', ") + "'"
     let builder = DiagnoseRefactor(
         diag,
         BasicDiagKindRefactor.sema_invalid_subscript_expr,
