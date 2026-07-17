@@ -658,6 +658,7 @@ extend ParserImpl {
     }
 
     private func ParseFuncDeclAnnos(annos: ArrayList<Annotation>, funcDecl: FuncDecl): Unit {
+        funcDecl.annotations.clear()
         for (anno in annos) {
             funcDecl.annotations.add(anno)
             if (anno.kind == AnnotationKind.JAVA) {
@@ -685,6 +686,7 @@ extend ParserImpl {
     }
 
     private func ParseFuncDeclAnnos(annos: ArrayList<Annotation>, funcDecl: PrimaryCtorDecl): Unit {
+        funcDecl.annotations.clear()
         for (anno in annos) {
             funcDecl.annotations.add(anno)
             if (anno.kind == AnnotationKind.JAVA) {
