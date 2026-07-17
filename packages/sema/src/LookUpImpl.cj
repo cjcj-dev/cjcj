@@ -174,46 +174,19 @@ private class LookupBoolBox {
 
 private func addDeclUnique(values: ArrayList<Decl>, decl: Decl): Unit {
     for (value in values) {
-        if (sameImportedAwareDecl(value, decl)) {
+        if (value == decl) {
             return
         }
     }
     values.add(decl)
 }
 
-private func sameImportedAwareDecl(left: Decl, right: Decl): Bool {
-    if (left.TestAttr(Attribute.IMPORTED) && right.TestAttr(Attribute.IMPORTED)) {
-        if (!left.rawMangleName.isEmpty() || !right.rawMangleName.isEmpty()) {
-            return left.rawMangleName == right.rawMangleName
-        }
-        if (!left.mangledName.isEmpty() || !right.mangledName.isEmpty()) {
-            return left.mangledName == right.mangledName
-        }
-    }
-    return SameDecl(left, right)
-}
-
-private func importedAwareDeclKey(decl: Decl): String {
-    if (decl.TestAttr(Attribute.IMPORTED)) {
-        if (!decl.rawMangleName.isEmpty()) {
-            return "raw|" + decl.rawMangleName
-        }
-        if (!decl.mangledName.isEmpty()) {
-            return "mangled|" + decl.mangledName
-        }
-    }
-    return "decl|" + ASTKindName(decl.astKind) + "|" + decl.fullPackageName + "|" + decl.identifier.Val() + "|" +
-        decl.begin.fileID.toString() + ":" + decl.begin.line.toString() + ":" + decl.begin.column.toString() + "|" +
-        decl.end.fileID.toString() + ":" + decl.end.line.toString() + ":" + decl.end.column.toString()
-}
-
-private func addDeclUnique(values: ArrayList<Decl>, keys: HashSet<String>, decl: Decl): Unit {
-    let key = importedAwareDeclKey(decl)
-    if (keys.contains(key)) {
+private func addDeclUnique(values: ArrayList<Decl>, keys: HashSet<Decl>, decl: Decl): Unit {
+    if (keys.contains(decl)) {
         return
     }
     values.add(decl)
-    keys.add(key)
+    keys.add(decl)
 }
 
 private func insertDeclByPosition(values: ArrayList<Decl>, decl: Decl): Unit {
@@ -835,7 +808,7 @@ private func collectImportedDeclsByName(ctx: ASTContext, node: Node, name: Strin
 
 private func collectResolvedImportedDeclsByName(ctx: ASTContext, node: Node, name: String): ArrayList<Decl> {
     let results = ArrayList<Decl>()
-    let keys = HashSet<String>()
+    let keys = HashSet<Decl>()
     if (let Some(file) <- node.curFile) {
         if (let Some(fileMap) <- ctx.resolvedImportedDeclsMap.get(file.fileHash)) {
             if (let Some(decls) <- fileMap.get(name)) {
