@@ -118,7 +118,16 @@ public class EnumDef <: CustomTypeDef {
         return None
     }
 
-    public override func ToString(indent: Int64): String {
-        return IndentToString(indent) + "enum " + GetFullName()
+    protected override func LocalVarToString(): String {
+        var out = ""
+        for (ctor in ctors) {
+            out += AddNewLineOrNot(ctor.annoInfo.ToString(indent: 1))
+            out += IndentToString(1) + "| " + ctor.name +
+                TypeVecToString("(", ctor.funcType.getOrThrow().GetParamTypes(), ")") + "\n"
+        }
+        if (nonExhaustive) {
+            out += IndentToString(1) + "| ...\n"
+        }
+        return out
     }
 }
