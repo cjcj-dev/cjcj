@@ -707,7 +707,7 @@ public class MockSupportManager {
             CreateRefExpr(fieldDecl)
         } else {
             let refExpr = CreateRefForFieldAccess(fieldDecl.outerDecl.getOrThrow(), kind)
-            CreateMemberAccess(refExpr, fieldDecl.identifier)
+            CreateMemberAccess(refExpr, fieldDecl.identifier.Val())
         }
 
         let bodyNodes = ArrayList<Node>()
