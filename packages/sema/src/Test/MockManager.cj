@@ -548,6 +548,23 @@ public class MockManager {
         return paramInfoArray
     }
 
+    // C++: Sema/Test/MockManager.cpp:885-899.
+    private func CreateTypeParamsInfo(decl: FuncDecl, curFile: File): ArrayLit {
+        let typeParamInfoArgs = ArrayList<Expr>()
+        if (let Some(generic) <- decl.funcBody.getOrThrow().generic) {
+            for (typeParam in generic.typeParameters) {
+                typeParamInfoArgs.add(CreateLitConstExpr(LitConstKind.STRING,
+                    typeParam.identifier.Val(), mockUtils.stringDecl.getOrThrow().GetTy().getOrThrow(), true))
+            }
+        }
+        let typeParamInfoArray = CreateArrayLit(typeParamInfoArgs,
+            typeManager.GetStructTy(mockUtils.arrayDecl.getOrThrow(),
+                [mockUtils.stringDecl.getOrThrow().GetTy().getOrThrow()]))
+        AddArrayLitConstructor(typeParamInfoArray)
+        typeParamInfoArray.curFile = curFile
+        return typeParamInfoArray
+    }
+
     // C++: Sema/Test/MockManager.cpp:972-1023.
     private func CreateDeclKind(decl: FuncDecl): CallExpr {
         let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
