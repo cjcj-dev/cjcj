@@ -7263,9 +7263,16 @@ public class Translator {
         let initFnTy = builder.context.GetFuncTy(TypesFromValues(args), builder.context.GetUnitTy())
         let thisTy = result.GetType() ??
             throw IllegalStateException("faithful AST2CHIR std.core.Array literal result has no type")
-        let _ = CreateApplyMaybeWithException(initFnTy.GetReturnType(), GetSymbolTable(initFunc),
-            FuncCallContext(args: args, thisType: thisTy))
+        let _ = CreateAndAppendApplyCallFromArray(GetSymbolTable(initFunc),
+            FuncCallContext(args: args, thisType: thisTy), initFnTy, expr)
         return RequireResult(builder.CreateLoad(arrayTy, result, CurrentBlock()))
+    }
+
+    private func CreateAndAppendApplyCallFromArray(callee: Value, callContext: FuncCallContext,
+        instFuncTy: FuncType, array: AstExpr): Expression {
+        let funcCall = TryCreate(CurrentBlock(), instFuncTy.GetReturnType(), callee, callContext)
+        funcCall.SetDebugLocation(TranslateLocation(array))
+        return funcCall
     }
 
     private func TryCreate(parent: Block, loc: DebugLocation, resultTy: Type, elementTy: Type,
