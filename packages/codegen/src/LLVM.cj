@@ -391,6 +391,8 @@ foreign {
     func LLVMIsAMDNode(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAMDString(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAGlobalVariable(value: LLVMValueRef): LLVMValueRef
+    func LLVMIsAGlobalObject(value: LLVMValueRef): LLVMValueRef
+    func LLVMIsAAllocaInst(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAFunction(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAArgument(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAInstruction(value: LLVMValueRef): LLVMValueRef
@@ -551,6 +553,17 @@ foreign {
         nameLen: UIntNative, exportSymbols: Int32): LLVMMetadataRef
     func LLVMDIBuilderCreateDebugLocation(context: LLVMContextRef, line: UInt32, column: UInt32,
         scope: LLVMMetadataRef, inlinedAt: LLVMMetadataRef): LLVMMetadataRef
+    func LLVMDIBuilderCreateExpression(builder: LLVMDIBuilderRef, addr: CPointer<UInt64>,
+        length: UIntNative): LLVMMetadataRef
+    func LLVMDIBuilderInsertDeclareAtEnd(builder: LLVMDIBuilderRef, storage: LLVMValueRef,
+        varInfo: LLVMMetadataRef, expr: LLVMMetadataRef, debugLoc: LLVMMetadataRef,
+        block: LLVMBasicBlockRef): LLVMValueRef
+    func LLVMDIBuilderCreateAutoVariable(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, name: CString,
+        nameLen: UIntNative, file: LLVMMetadataRef, lineNo: UInt32, ty: LLVMMetadataRef,
+        alwaysPreserve: Int32, flags: UInt32, alignInBits: UInt32): LLVMMetadataRef
+    func LLVMDIBuilderCreateParameterVariable(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, name: CString,
+        nameLen: UIntNative, argNo: UInt32, file: LLVMMetadataRef, lineNo: UInt32, ty: LLVMMetadataRef,
+        alwaysPreserve: Int32, flags: UInt32): LLVMMetadataRef
     func LLVMDIBuilderGetOrCreateTypeArray(builder: LLVMDIBuilderRef, data: CPointer<LLVMMetadataRef>,
         numElements: UIntNative): LLVMMetadataRef
     func LLVMDIBuilderCreateLexicalBlock(builder: LLVMDIBuilderRef, scope: LLVMMetadataRef, file: LLVMMetadataRef,
