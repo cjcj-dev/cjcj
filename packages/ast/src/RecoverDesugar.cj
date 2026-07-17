@@ -123,7 +123,9 @@ public func RecoverToBinaryExpr(be: BinaryExpr): Unit {
                 CJC_ASSERT((baseFunc as MemberAccess).isSome())
                 if (let Some(member) <- (baseFunc as MemberAccess)) {
                     be.leftExpr = member.baseExpr
+                    member.baseExpr = None
                     be.rightExpr = callExpr.args[0].expr
+                    callExpr.args[0].expr = None
                     if (let Some(left) <- be.leftExpr) {
                         UnsetCallExprOfNode(left)
                     }
