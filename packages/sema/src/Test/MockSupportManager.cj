@@ -296,6 +296,47 @@ public class MockSupportManager {
         decl.EnableAttr(Attribute.IN_CLASSLIKE)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:177-221.
+    public func PrepareDecls(decls: DeclsToPrepare): Unit {
+        for (decl in decls.interfacesWithDefaults) {
+            if (decl.fullPackageName.startsWith("std.")) {
+                continue
+            }
+            PrepareInterfaceDecl(decl)
+        }
+
+        for (decl in decls.properties) {
+            let getter = GetUsableGetterForProperty(decl).getOrThrow()
+            if (getter.outerDecl != decl.outerDecl) {
+                continue
+            }
+            PrepareStaticDecl(getter)
+            if (decl.isVar) {
+                let setter = GetUsableSetterForProperty(decl).getOrThrow()
+                if (setter.outerDecl != decl.outerDecl) {
+                    continue
+                }
+                PrepareStaticDecl(setter)
+            }
+            decl.EnableAttr(Attribute.MOCK_SUPPORTED)
+        }
+
+        for ((classDecl, interfaceDecl, extendDecl) in decls.classWithInterfaceDefaults) {
+            PrepareClassLikeWithDefaults(classDecl, interfaceDecl, extendDecl)
+        }
+
+        for (decl in decls.functions) {
+            if (decl.TestAttr(Attribute.FOREIGN) && IsUsedInternalDecl(decl) &&
+                !decl.funcBody.getOrThrow().paramLists[0].hasVariableLenArg) {
+                let wrapperDecl = CreateForeignFunctionAccessorDecl(decl)
+                mockUtils.AttachGeneratedDecl(wrapperDecl, decl)
+                PrepareStaticDecl(wrapperDecl)
+            } else {
+                PrepareStaticDecl(decl)
+            }
+        }
+    }
+
     public func CollectDeclsToPrepare(decl: Decl, decls: DeclsToPrepare): Unit {
         for (member in decl.GetMemberDecls()) {
             if (let Some(propDecl) <- (member as PropDecl)) {
