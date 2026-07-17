@@ -609,6 +609,60 @@ public class TestManager {
         let _ = walker.Walk()
     }
 
+    // C++: Sema/Test/TestManager.cpp:564-640.
+    public func ReplaceCallsWithAccessors(pkg: Package): Unit {
+        var isInConstructor = false
+        var isInMockAnnotatedLambda = false
+        var outerTy: Option<Ty> = None
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (node.astKind == ASTKind.PRIMARY_CTOR_DECL) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (IsMockAnnotedLambda(node)) {
+                isInMockAnnotatedLambda = true
+            }
+            if (let Some(extendDecl) <- (node as ExtendDecl)) {
+                CJC_ASSERT(outerTy.isNone())
+                outerTy = extendDecl.extendedType.getOrThrow().GetTy()
+            } else if (let Some(inheritableDecl) <- (node as InheritableDecl)) {
+                CJC_ASSERT(outerTy.isNone())
+                outerTy = inheritableDecl.GetTy()
+            }
+            if (node.curFile.isSome() && !node.IsSamePackage(pkg)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (!MockSupportManager.NeedToSearchCallsToReplaceWithAccessors(node)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (node.TestAttr(Attribute.CONSTRUCTOR)) {
+                isInConstructor = true
+                return VisitAction.WALK_CHILDREN
+            }
+            if (let Some(expr) <- (node as Expr)) {
+                let _ = mockSupportManager.getOrThrow().ReplaceExprWithAccessor(expr, isInConstructor)
+                mockSupportManager.getOrThrow().ReplaceInterfaceDefaultFunc(
+                    expr, outerTy, isInMockAnnotatedLambda)
+            }
+            return VisitAction.WALK_CHILDREN
+        }, visitPost: { node: Node =>
+            if (node.TestAttr(Attribute.CONSTRUCTOR)) {
+                isInConstructor = false
+            }
+            if (IsMockAnnotedLambda(node)) {
+                isInMockAnnotatedLambda = false
+            }
+            if (let Some(extendDecl) <- (node as ExtendDecl)) {
+                CJC_ASSERT(outerTy == extendDecl.extendedType.getOrThrow().GetTy())
+                outerTy = None
+            } else if (let Some(inheritableDecl) <- (node as InheritableDecl)) {
+                CJC_ASSERT(outerTy == inheritableDecl.GetTy())
+                outerTy = None
+            }
+            return VisitAction.KEEP_DECISION
+        })
+        let _ = walker.Walk()
+    }
+
     // C++: Sema/Test/TestManager.cpp:733-754.
     private func CollectInternalDeclUsages(pkg: Package): Unit {
         let walker = Walker(pkg, visitPre: { node: Node =>
