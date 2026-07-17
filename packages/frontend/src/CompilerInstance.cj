@@ -539,7 +539,7 @@ public class CompilerInstance {
         CheckInlineFunctionsForPackages(GetPackages(), invocation.globalOptions)
         // Since the inlined function will affect decls' visibility, analyze linkage after inline decl checking.
         for (pkg in srcPkgs) {
-            AnalyzeFunctionLinkage(pkg, invocation.globalOptions)
+            AnalyzeFunctionLinkage(pkg, invocation.globalOptions, diag)
         }
         if (!invocation.globalOptions.enIncrementalCompilation) {
             testManager.PrepareToMock(GetSourcePackages())

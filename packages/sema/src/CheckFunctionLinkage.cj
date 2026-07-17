@@ -3,6 +3,7 @@ package cjcj::sema
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
+import cjcj::basic.{DiagnosticEngine, DiagKindRefactor, MakeRange}
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 
 private let CORE_PACKAGE_NAME: String = "std.core"
@@ -575,12 +576,25 @@ private func FinalizeInternalNominalMembers(pkg: Package): Unit {
     })
 }
 
-public func AnalyzeFunctionLinkage(pkg: Package, opt: OptionGlobalOptions): Unit {
+public func AnalyzeFunctionLinkage(pkg: Package, opt: OptionGlobalOptions, diag: DiagnosticEngine): Unit {
     AnalyzeLinkageBasedOnModifier(pkg, opt)
     ExternalLinkageAnalyzer(pkg).Run()
     FinalizeInternalNominalMembers(pkg)
-}
-
-public func AnalyzeFunctionLinkage(pkg: Package): Unit {
-    AnalyzeFunctionLinkage(pkg, OptionGlobalOptions())
+    let privateDeclMap = HashMap<String, Decl>()
+    IterateToplevelDecls(pkg, { decl: Decl =>
+        if (decl.IsNominalDecl() && decl.TestAttr(Attribute.PRIVATE) && decl.linkage != Linkage.INTERNAL) {
+            let name = decl.identifier.Val()
+            if (let Some(previous) <- privateDeclMap.get(name)) {
+                let builder = diag.DiagnoseRefactor(
+                    DiagKindRefactor.sema_export_same_private_decl,
+                    MakeRange(previous.identifier.Begin(), previous.identifier.Val())
+                )
+                builder.AddNote(MakeRange(decl.identifier.Begin(), decl.identifier.Val()),
+                    "same with private declaration")
+                builder.Emit()
+            } else {
+                privateDeclMap[name] = decl
+            }
+        }
+    })
 }
