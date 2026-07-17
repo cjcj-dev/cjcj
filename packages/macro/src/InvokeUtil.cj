@@ -1,6 +1,6 @@
 package cjcj::macro_pkg
 
-import cjcj::basic.Errorln
+import cjcj::basic.{Errorln, Warningln}
 import std.collection.*
 import std.convert.*
 import std.sync.*
@@ -370,7 +370,10 @@ private func heapSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative {
             if (size >= MIN_HEAP_SIZE) {
                 return size
             }
+            Warningln("unsupported cjHeapSize for macro, must >= 4MB, using 1GB as default size")
+            return HEAP_SIZE
         }
+        Warningln("unsupported cjHeapSize for macro, using 1GB as default size")
     }
     return HEAP_SIZE
 }
@@ -381,7 +384,10 @@ private func stackSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative {
             if (size >= MIN_STACK_SIZE && size <= MAX_STACK_SIZE) {
                 return size
             }
+            Warningln("unsupported cjStackSize for macro, the valid range is [64KB, 1GB], using 4MB as default size")
+            return CO_STACK_SIZE
         }
+        Warningln("unsupported cjStackSize for macro, using 4MB as default size")
     }
     return CO_STACK_SIZE
 }
@@ -589,6 +595,10 @@ public class RuntimeInit {
                     runtimeReleaseFunc.isNull()) {
                     return false
                 }
+                // C++ CallRuntime assembles heap before concurrency (InvokeUtilCJNative.cpp:159-168).
+                // InstanceNew consumes only ConcurrencyParam, but heap parsing still emits the
+                // exact C++ validation diagnostics before the shared-heap value is discarded.
+                let _ = heapSizeFromEnv(initArgs)
                 try (param = LibC.malloc<RuntimeConcurrencyParamC>().asResource()) {
                     if (param.value.isNull()) {
                         return false
