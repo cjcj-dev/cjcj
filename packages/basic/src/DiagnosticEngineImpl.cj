@@ -50,6 +50,8 @@ public class DiagnosticEngineImpl {
         }
     }
 
+    public func isClosed(): Bool { return closed }
+
     public func HasSourceManager(): Bool {
         if (let Some(_) <- sourceManager) {
             return true
