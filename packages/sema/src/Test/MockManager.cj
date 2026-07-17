@@ -583,7 +583,11 @@ public class MockManager {
             let extendedTy = extendDecl.extendedType.getOrThrow().GetTy().getOrThrow()
             var foundHasDefaultValueForStub = false
             for (interfaceTy in extendDecl.GetSuperInterfaceTys()) {
-                if (let Some(interfaceDecl) <- (Ty.GetDeclOfTy(Some(interfaceTy)) as InterfaceDecl)) {
+                if (let Some(rawInterfaceDecl) <- Ty.GetDeclOfTy(Some(interfaceTy))) {
+                    if (let None <- (rawInterfaceDecl as InterfaceDecl)) {
+                        continue
+                    }
+                    let interfaceDecl = (rawInterfaceDecl as InterfaceDecl).getOrThrow()
                     let requiredDecl = hasDefaultValueForStubDecl.getOrThrow()
                     if ((interfaceDecl == requiredDecl || interfaceDecl.genericDecl == Some(requiredDecl)) &&
                         interfaceTy.typeArgs[0] == extendedTy) {
