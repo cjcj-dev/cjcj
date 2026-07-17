@@ -2195,7 +2195,16 @@ public class ASTWriter {
             builder.CreateVectorOffsets(ArrayList<FlatBufferOffset>())
         }
         let identifier = builder.CreateString(annotation.identifier.Val())
+        var target = 0u32
+        if (annotation.kind == AstAnnotationKind.CUSTOM) {
+            if (let Some(baseExpr) <- annotation.baseExpr) {
+                if (let Some(targetDecl) <- baseExpr.GetTarget()) {
+                    target = CreateFullIdForDecl(targetDecl)
+                }
+            }
+        }
         builder.StartTable(4)
+        builder.AddOffset(3, target)
         builder.AddOffset(2, argsVec)
         builder.AddOffset(1, identifier)
         builder.AddU16(0, annoKind)
