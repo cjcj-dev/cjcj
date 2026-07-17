@@ -128,7 +128,7 @@ func IsBuiltInOperatorFuncInExtend(
                                             structDecl,
                                             MakeRange(fd.identifier.Begin(), fd.identifier.End()),
                                             fd.identifier.Val()
-                                        )
+                                        ).Emit()
                                     }
                                     return true
                                 } else if (realFuncTy.paramTys.isEmpty()) {
@@ -146,7 +146,7 @@ func IsBuiltInOperatorFuncInExtend(
                                             structDecl,
                                             MakeRange(fd.identifier.Begin(), fd.identifier.End()),
                                             fd.identifier.Val()
-                                        )
+                                        ).Emit()
                                     }
                                     return true
                                 }
