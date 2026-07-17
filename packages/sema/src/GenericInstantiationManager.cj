@@ -43,6 +43,8 @@ public class CompilerInstance {
     public var frontendDumpActionIsTypeCheck: Bool = false
     public var diag: Option<BasicDiagnosticEngine> = None
     public var importManager: Option<SemaImportManager> = None
+    // CompilerInstance.h:573-574: merged source and imported packages.
+    public let packages: ArrayList<Package> = ArrayList<Package>()
     public let sourcePackages: ArrayList<Package> = ArrayList<Package>()
     public let packageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
     public let importedPackageDecls: ArrayList<PackageDecl> = ArrayList<PackageDecl>()
@@ -62,6 +64,24 @@ public class CompilerInstance {
     public let pkgCtxMap: HashMap<Node, ASTContext> = HashMap<Node, ASTContext>()
     public var cacheSemaUsage: Option<(SemanticInfo) -> Unit> = None
     public init() {}
+
+    // CompilerInstance.h:260-268 CompilerInstance::GetPackages.
+    public func GetPackages(): ArrayList<Package> {
+        let result = ArrayList<Package>()
+        for (pkg in packages) {
+            result.add(pkg)
+        }
+        return result
+    }
+
+    // CompilerInstance.cpp:1095-1102 CompilerInstance::GetSourcePackages.
+    public func GetSourcePackages(): ArrayList<Package> {
+        let result = ArrayList<Package>()
+        for (pkg in sourcePackages) {
+            result.add(pkg)
+        }
+        return result
+    }
 
     // C++ CompilerInstance.h:563. The closure preserves the frontend-owned cache across the package boundary.
     public func CacheSemaUsage(info: SemanticInfo): Unit {
