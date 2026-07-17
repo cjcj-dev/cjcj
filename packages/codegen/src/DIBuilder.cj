@@ -3,8 +3,10 @@ package cjcj::codegen
 import std.collection.*
 import cjcj::basic.SourceManager
 import cjcj::chir.Attribute
+import cjcj::chir.Debug
 import cjcj::chir.DebugLocation
 import cjcj::chir.ExprKind
+import cjcj::chir.Expression
 import cjcj::chir.FuncType
 import cjcj::chir.FuncKind
 import cjcj::chir.Function
@@ -58,6 +60,7 @@ private let DW_ATE_unsigned_char: UInt32 = 8u32
 private let DW_ATE_float: UInt32 = 4u32
 private let DW_ATE_boolean: UInt32 = 2u32
 private let DW_ATE_UTF: UInt32 = 16u32
+private let DW_OP_deref: UInt64 = 0x06u64
 private let DW_TAG_const_type: UInt32 = 0x26u32
 private let DW_TAG_typedef: UInt32 = 0x16u32
 private let DW_TAG_subprogram: UInt32 = 0x2eu32
@@ -275,6 +278,178 @@ public class DIBuilder {
             unsafe { LLVMSetSubprogram(function, LLVMNullMetadata()) }
         }
         needSubprogram = false
+    }
+
+    public func EmitDeclare(debugNode: Debug, curBB: LLVMBasicBlockRef, pointerWrapper!: Bool = false): Unit {
+        CJC_ASSERT(cgMod.GetCGContext().GetCompileOptions().enableCompileDebug)
+        let parent = unsafe { LLVMGetBasicBlockParent(curBB) }
+        let subprogram = unsafe { LLVMGetSubprogram(parent) }
+        if (subprogram.isNull()) {
+            return
+        }
+        if (debugNode.GetValue().IsParameter()) {
+            CreateParameter(debugNode, curBB, pointerWrapper)
+            return
+        }
+        let identifier = debugNode.GetSrcCodeIdentifier()
+        let position = debugNode.GetDebugLocation()
+        let scope = GetOrCreateScope(position, subprogram)
+        let diFile = GetOrCreateFile(position)
+        let ty = DeRef(debugNode.GetValue().GetType().getOrThrow())
+        let isReadOnly = debugNode.GetValue().TestAttr(Attribute.READONLY)
+        var type = GetOrCreateType(ty, isReadOnly: isReadOnly)
+        let expr = ArrayList<UInt64>()
+        var flags = FlagZero
+        let hasSize = CGType.GetOrCreate(cgMod, ty).GetSize().isSome()
+        if (IsReferenceType(ty, cgMod) || ty.IsGeneric() || !hasSize) {
+            if (IsOptionOrOptionLike(ty) && hasSize) {
+                if (!IsOption(ty)) {
+                    type = CreatePointerType(type)
+                }
+            } else {
+                flags |= FlagObjectPointer
+                expr.add(DW_OP_deref)
+            }
+        } else if (pointerWrapper) {
+            expr.add(DW_OP_deref)
+        }
+        let llvmValue = cgMod.GetMappedCGValue(debugNode.GetValue()).GetRawValue()
+        let begin = position.GetBeginPos()
+        let localVariable = createAutoVariable(scope, identifier, diFile, begin.line, type, true, flags, 0u32)
+        let location = unsafe {
+            LLVMDIBuilderCreateDebugLocation(cgMod.GetLLVMContext().raw, begin.line, begin.column, scope,
+                LLVMNullMetadata())
+        }
+        insertDeclare(llvmValue, localVariable, createExpression(expr), location, curBB)
+    }
+
+    public func EmitUnBoxDeclare(exprNode: Expression, ty: Type, name: String, value: LLVMValueRef,
+        curBB: LLVMBasicBlockRef): Unit {
+        let position = exprNode.GetDebugLocation()
+        let parent = unsafe { LLVMGetBasicBlockParent(curBB) }
+        let scope = GetOrCreateScope(position, unsafe { LLVMGetSubprogram(parent) })
+        let diFile = GetOrCreateFile(position)
+        var type = GetOrCreateType(ty)
+        let flags = FlagObjectPointer
+        let expr = ArrayList<UInt64>([DW_OP_deref])
+        if (IsReferenceType(ty, cgMod)) {
+            type = CreatePointerType(type)
+            if (!ty.IsEnum()) {
+                expr.add(DW_OP_deref)
+            }
+        }
+        let begin = position.GetBeginPos()
+        let localVariable = createAutoVariable(scope, name, diFile, begin.line, type, true, flags, 0u32)
+        let location = unsafe {
+            LLVMDIBuilderCreateDebugLocation(cgMod.GetLLVMContext().raw, begin.line, begin.column, scope,
+                LLVMNullMetadata())
+        }
+        insertDeclare(value, localVariable, createExpression(expr), location, curBB)
+    }
+
+    private func CreateParameter(debugNode: Debug, curBB: LLVMBasicBlockRef, pointerWrapper: Bool): Unit {
+        let isEnv = debugNode.GetSrcCodeIdentifier() == "$env"
+        let paraTy = DeRef(debugNode.GetValue().GetType().getOrThrow())
+        if (isEnv && IsCoreObject((paraTy as ClassType).getOrThrow().GetClassDef())) {
+            return
+        }
+        let parent = unsafe { LLVMGetBasicBlockParent(curBB) }
+        CJC_ASSERT(!parent.isNull())
+        let scope = unsafe { LLVMGetSubprogram(parent) }
+        let expr = ArrayList<UInt64>()
+        let position = debugNode.GetDebugLocation()
+        let file = GetOrCreateFile(position)
+        var type = GetOrCreateType(paraTy, isReadOnly: true)
+        var name = debugNode.GetSrcCodeIdentifier()
+        let llvmValue = cgMod.GetMappedCGValue(debugNode.GetValue()).GetRawValue()
+        if (name == "this") {
+            let isTrivialEnum = paraTy.IsEnum() &&
+                (paraTy as EnumType).getOrThrow().GetEnumDef().IsAllCtorsTrivial()
+            let isSizeableGenericStruct = paraTy.IsStruct() &&
+                CGType.GetOrCreate(cgMod, paraTy).GetSize().isSome() && paraTy.IsGenericRelated()
+            if ((!isTrivialEnum && !isSizeableGenericStruct) || pointerWrapper) {
+                expr.add(DW_OP_deref)
+            }
+            let flag = FlagObjectPointer | FlagArtificial
+            let localVariable = createParameterVariable(scope, name, 1u32, file, 0u32, type, true, flag)
+            let location = unsafe {
+                LLVMDIBuilderCreateDebugLocation(cgMod.GetLLVMContext().raw, 0u32, 0u32, scope,
+                    LLVMNullMetadata())
+            }
+            insertDeclare(llvmValue, localVariable, createExpression(expr), location, curBB)
+        } else {
+            let isRefEnum = paraTy.IsEnum() &&
+                !(paraTy as EnumType).getOrThrow().GetEnumDef().IsAllCtorsTrivial() &&
+                !IsReferenceType(paraTy, cgMod)
+            let isTrivialEnum = paraTy.IsEnum() &&
+                (paraTy as EnumType).getOrThrow().GetEnumDef().IsAllCtorsTrivial()
+            let isSizeableGenericStruct = paraTy.IsStruct() &&
+                CGType.GetOrCreate(cgMod, paraTy).GetSize().isSome() && paraTy.IsGenericRelated()
+            let isPointerType = IsReferenceType(paraTy, cgMod) || paraTy.IsStruct() || isRefEnum ||
+                paraTy.IsVArray() || paraTy.IsTuple() || paraTy.IsGeneric()
+            if (!isTrivialEnum && !isSizeableGenericStruct && isPointerType) {
+                let cgType = CGType.GetOrCreate(cgMod, paraTy)
+                let isRefOption = paraTy.IsEnum() && (cgType.IsOptionLikeRef() ||
+                    (cgType as CGEnumType).getOrThrow().IsOptionLikeT())
+                if (isEnv) {
+                    type = CreatePointerType(type)
+                } else if (!isRefOption) {
+                    expr.add(DW_OP_deref)
+                }
+            } else if (pointerWrapper) {
+                expr.add(DW_OP_deref)
+            }
+            name = if (isEnv) { "$CapturedVars" } else { name }
+            let localVariable = createParameterVariable(scope, name, UInt32(paramNo), file,
+                unsafe { LLVMDISubprogramGetLine(scope) }, type, true, FlagZero)
+            let begin = position.GetBeginPos()
+            let location = unsafe {
+                LLVMDIBuilderCreateDebugLocation(cgMod.GetLLVMContext().raw, begin.line, begin.column, scope,
+                    LLVMNullMetadata())
+            }
+            insertDeclare(llvmValue, localVariable, createExpression(expr), location, curBB)
+        }
+        paramNo++
+    }
+
+    private func createExpression(expr: ArrayList<UInt64>): LLVMMetadataRef {
+        if (expr.isEmpty()) {
+            return unsafe { LLVMDIBuilderCreateExpression(raw, CPointer<UInt64>(), 0) }
+        }
+        try (data = LibC.malloc<UInt64>(count: expr.size).asResource()) {
+            var index: Int64 = 0
+            while (index < expr.size) {
+                unsafe { (data.value + index).write(expr[index]) }
+                index++
+            }
+            return unsafe { LLVMDIBuilderCreateExpression(raw, data.value, UIntNative(expr.size)) }
+        }
+    }
+
+    private func createAutoVariable(scope: LLVMMetadataRef, name: String, file: LLVMMetadataRef, lineNo: UInt32,
+        ty: LLVMMetadataRef, alwaysPreserve: Bool, flags: UInt32, alignInBits: UInt32): LLVMMetadataRef {
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            return unsafe {
+                LLVMDIBuilderCreateAutoVariable(raw, scope, nameCString.value, UIntNative(name.size), file, lineNo,
+                    ty, if (alwaysPreserve) { 1 } else { 0 }, flags, alignInBits)
+            }
+        }
+    }
+
+    private func createParameterVariable(scope: LLVMMetadataRef, name: String, argNo: UInt32,
+        file: LLVMMetadataRef, lineNo: UInt32, ty: LLVMMetadataRef, alwaysPreserve: Bool,
+        flags: UInt32): LLVMMetadataRef {
+        try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            return unsafe {
+                LLVMDIBuilderCreateParameterVariable(raw, scope, nameCString.value, UIntNative(name.size), argNo,
+                    file, lineNo, ty, if (alwaysPreserve) { 1 } else { 0 }, flags)
+            }
+        }
+    }
+
+    private func insertDeclare(storage: LLVMValueRef, varInfo: LLVMMetadataRef, expr: LLVMMetadataRef,
+        debugLoc: LLVMMetadataRef, block: LLVMBasicBlockRef): LLVMValueRef {
+        return unsafe { LLVMDIBuilderInsertDeclareAtEnd(raw, storage, varInfo, expr, debugLoc, block) }
     }
 
     public func CreateDILoc(chirNode: CHIRExprWrapper, removable!: Bool = false): LLVMMetadataRef {
