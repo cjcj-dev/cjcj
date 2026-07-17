@@ -1502,30 +1502,49 @@ public class Function <: GlobalValue & Hashable & Equatable<Function> {
     }
 
     public override func ToString(indent: Int64): String {
-        let typeText = if (let Some(valueTy) <- GetType()) { valueTy.ToString() } else { "<none>" }
-        var out = IndentToString(indent) + GetAttributeInfo().ToString() + "func " + GetIdentifier() +
-            " [" + FuncKindName(funcKind) + "]: " + typeText
-        let comments = ArrayList<String>()
-        if (let Some(rawMethod) <- GetWrappedRawMethod()) {
-            if (rawMethod.GetBody().isSome()) {
-                comments.add("wrapped raw method: " + rawMethod.GetIdentifier())
-            }
+        var out = AddNewLineOrNot(GetAnnoInfo().ToString(indent: indent))
+        out += IndentToString(indent) + GetAttributeInfo().ToString()
+        if (IsFastNative()) {
+            out += "[fastNative] "
         }
-        if (let Some(funcTy) <- GetOverrideSrcFuncType()) {
-            comments.add("OverrideSrcFuncType: " + funcTy.ToString())
+        if (IsCFFIWrapper()) {
+            out += "[CFFIWrapper] "
         }
-        if (!comments.isEmpty()) {
-            out += " // " + JoinStrings(comments, ", ")
+        out += "Func " + GetIdentifier() + TypeVecToString("<", genericTypeParams, ">") + "("
+        for (param in params) {
+            out += "\n" + param.ToString(indent + 1)
         }
         if (!params.isEmpty()) {
-            let paramTexts = ArrayList<String>()
-            for (param in params) {
-                paramTexts.add(param.ToString(0))
-            }
-            out += "\n" + IndentToString(indent + 2) + "params: " + JoinStrings(paramTexts, ", ")
+            out += "\n" + IndentToString(indent)
         }
+        out += "): " + GetReturnType().getOrThrow().ToString()
+        let comments = ArrayList<String>()
+        let globalValueComment = GlobalValueCommentToString()
+        if (!globalValueComment.isEmpty()) {
+            comments.add(globalValueComment)
+        }
+        let genericConstraints = GetGenericTypeConstaintsStr(genericTypeParams)
+        if (!genericConstraints.isEmpty()) {
+            comments.add(genericConstraints)
+        }
+        if (funcKind != FuncKind.DEFAULT) {
+            comments.add("kind: " + FuncKindName(funcKind))
+        }
+        if (let Some(genericFunction) <- genericDecl) {
+            comments.add("genericDecl: " + genericFunction.GetIdentifier())
+        }
+        if (let Some(hostFunction) <- paramDftValHostFunc) {
+            comments.add("paramDftValHostFunc: " + hostFunction.GetIdentifier())
+        }
+        if (funcKind == FuncKind.LAMBDA) {
+            comments.add("originalLambdaInfo: " + originalLambdaInfo.getOrThrow().ToString())
+        }
+        if (!propLocation.IsInvalidPos()) {
+            comments.add("propLoc: " + propLocation.ToString())
+        }
+        out += CommentToString(comments)
         if (let Some(funcBody) <- body) {
-            out += "\n" + funcBody.ToString(indent + 2)
+            out += "\n" + funcBody.ToString(indent)
         }
         return out
     }
