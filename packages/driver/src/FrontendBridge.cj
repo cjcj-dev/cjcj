@@ -23,9 +23,6 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (!PublishFrontendBitcodeOutputs(driver.driverOptions)) {
         return false
     }
-    if (!ReconcileFrontendOutputs(driver.driverOptions)) {
-        return false
-    }
     return PublishFrontendCjoOutputs(driver.driverOptions)
 }
 
@@ -118,16 +115,6 @@ private func PrintFrontendCommand(cangjieHome: String, args: Array<String>): Uni
     println(FileUtil.Normalize(builder.toString()))
 }
 
-private func ReconcileFrontendOutputs(opts: DriverOptions): Bool {
-    if (!HasFrontendSourceInput(opts)) {
-        return true
-    }
-    if (opts.IsEmitCHIREnable()) {
-        return true
-    }
-    return VerifyFrontendOutputs(opts)
-}
-
 private func PublishFrontendCjoOutputs(opts: DriverOptions): Bool {
     // C++: Option/Option.h:1199-1202 and FrontendTool/FrontendTool.cpp:108,152-155.
     if (!HasFrontendSourceInput(opts) || (opts.IsEmitCHIREnable() && opts.outputMode != OutputMode.CHIR) ||
@@ -179,14 +166,4 @@ private func PublishFrontendBitcodeOutputs(opts: DriverOptions): Bool {
 
 private func HasFrontendSourceInput(opts: DriverOptions): Bool {
     return !opts.srcFiles.isEmpty() || opts.compilePackage || opts.scanDepPkg || opts.IsCompilingCJMPSpecific()
-}
-
-private func VerifyFrontendOutputs(opts: DriverOptions): Bool {
-    for (output in opts.frontendOutputFiles) {
-        if (!FileUtil.FileExist(output.filePath) || FileUtil.IsDir(output.filePath)) {
-            eprintln("error: self-host frontend did not produce native bitcode output: " + output.filePath)
-            return false
-        }
-    }
-    return true
 }
