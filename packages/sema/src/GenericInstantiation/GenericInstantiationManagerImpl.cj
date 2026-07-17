@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::sema.*
 import cjcj::sema.Desugar.AfterTypeCheck.IsNeedRuntimeCheck
 import cjcj::sema.Test.TestManager as RealTestManager
-import cjcj::utils.{BOX_DECL_PREFIX, CJC_ASSERT, InternalError}
+import cjcj::utils.{BOX_DECL_PREFIX, CJC_ASSERT, GetRootPackageName, InternalError}
 
 private class GenericInstantiationRecord {
     public var genericDecl: Decl
@@ -153,9 +153,11 @@ private func markNoReflectInfo(decl: Decl): Unit {
     }
 }
 
-private func applyPackageAttrs(decl: Decl, pkg: Package): Unit {
+// C++: Sema/GenericInstantiation/GenericInstantiationManagerImpl.cpp:496-535.
+private func PerformUpdateAttrDuringClone(decl: Decl, pkg: Package): Unit {
     decl.fullPackageName = pkg.fullPackageName
-    decl.moduleName = pkg.fullPackageName
+    decl.moduleName = GetRootPackageName(pkg.fullPackageName)
+    decl.curFile = pkg.files[0]
     decl.toBeCompiled = true
     decl.DisableAttr(Attribute.IMPORTED)
 }
@@ -294,7 +296,7 @@ private func updateClonedNode(genericNode: Node, clonedNode: Node, typeManager: 
     g2gTyMap: TypeSubst, pkg: Package): Unit {
     PerformTyInstantiationDuringClone(genericNode, clonedNode, typeManager, GenericInfo(None, typeMapping), g2gTyMap)
     if (let Some(clonedDecl) <- (clonedNode as Decl)) {
-        applyPackageAttrs(clonedDecl, pkg)
+        PerformUpdateAttrDuringClone(clonedDecl, pkg)
     }
 }
 
