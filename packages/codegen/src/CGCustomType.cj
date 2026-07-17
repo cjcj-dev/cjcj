@@ -1,7 +1,8 @@
 package cjcj::codegen
 
 import std.collection.*
-import cjcj::chir.{CustomType, LinkTypeInfo, Linkage, Type}
+import cjcj::basic.Linkage
+import cjcj::chir.{CustomType, LinkTypeInfo, Type}
 import cjcj::utils.{CJC_ASSERT_WITH_MSG, StaticCast}
 
 public open class CGCustomType <: CGType {
