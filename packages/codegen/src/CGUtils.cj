@@ -92,7 +92,7 @@ public func UnwindGenericRelateType(llvmCtx: LLVMContextHandle, ty: Type): Array
     if (!typeArgs.isEmpty()) {
         tyArgMeta.add(LLVMCreateMDString(llvmCtx, CGType.GetNameOfTypeTemplateGV(ty)))
         let tyArg = typeArgs[0]
-        if (tyArg.IsValueType()) {
+        if (CGType.GetCGGenericKind(tyArg) == CGGenericKind.CONCRETE) {
             tyArgMeta.add(LLVMCreateMDString(llvmCtx, CGType.GetNameOfTypeInfoGV(tyArg)))
         } else {
             let nestedTyArgMeta = UnwindGenericRelateType(llvmCtx, tyArg.StripAllRefs())
