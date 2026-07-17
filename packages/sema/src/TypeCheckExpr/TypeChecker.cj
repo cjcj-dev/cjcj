@@ -56,6 +56,140 @@ private func CollectVariables(ctx: ASTContext, node: Node): ArrayList<Node> {
     return varPatterns
 }
 
+// C++ src/Sema/Desugar/AfterTypeCheck.cpp:48-59 CreateConvInt64.
+private func CreateConvInt64(vd: VarDecl, ty: Ty): TypeConvExpr {
+    let convType = PrimitiveType()
+    convType.kind = TypeKind.TYPE_INT64
+    convType.SetTy(ty)
+    let numConv = TypeConvExpr()
+    numConv.typeNode = convType
+    let refExpr = CreateRefExpr(vd)
+    refExpr.SetTy(ty)
+    numConv.expr = refExpr
+    numConv.SetTy(ty)
+    return numConv
+}
+
+// C++ src/Sema/Desugar/AfterTypeCheck.cpp:61-80 CreateMainInvokeDecl.
+private func CreateMainInvokeDecl(funcBody: FuncBody, mainFunc: FuncDecl, funcTy: Ty): FuncDecl {
+    let mainInvokeFunc = FuncDecl()
+    funcBody.funcDecl = mainInvokeFunc
+    mainInvokeFunc.toBeCompiled = mainFunc.toBeCompiled
+    mainInvokeFunc.SetTy(funcTy)
+    mainInvokeFunc.identifier = SrcIdentifier(MAIN_INVOKE)
+    mainInvokeFunc.funcBody = funcBody
+    mainInvokeFunc.moduleName = mainFunc.moduleName
+    mainInvokeFunc.fullPackageName = mainFunc.fullPackageName
+    mainInvokeFunc.EnableAttr(Attribute.GLOBAL)
+    AddCurFile(mainInvokeFunc, file: mainFunc.curFile)
+    if (mainFunc.TestAttr(Attribute.INCRE_COMPILE)) {
+        mainInvokeFunc.EnableAttr(Attribute.INCRE_COMPILE)
+    }
+    return mainInvokeFunc
+}
+
+extend TypeCheckerImpl {
+    internal func GenerateMainInvoke(): Unit {
+        if (mainFunctionMap.size != 1) {
+            return
+        }
+        var mainFunctions: Option<ArrayList<Decl>> = None
+        for (values in mainFunctionMap.values()) {
+            mainFunctions = Some(values)
+            break
+        }
+        if (let None <- mainFunctions) {
+            return
+        }
+        let mainFunctionList = mainFunctions.getOrThrow()
+        if (mainFunctionList.size != 1) {
+            return
+        }
+        let mainFunc = if (let Some(value) <- (mainFunctionList[0] as FuncDecl)) {
+            value
+        } else {
+            return
+        }
+        let mainFile = if (let Some(value2) <- mainFunc.curFile) {
+            value2
+        } else {
+            return
+        }
+        let packageHasMain = if (let Some(value3) <- mainFile.curPackage) {
+            value3
+        } else {
+            return
+        }
+        let rawFuncTy = if (let Some(value4) <- mainFunc.GetTy()) {
+            value4
+        } else {
+            return
+        }
+        let funcTy = if (let Some(value5) <- (rawFuncTy as FuncTy)) {
+            value5
+        } else {
+            return
+        }
+        var options = OptionGlobalOptions()
+        if (let Some(instance) <- ci) {
+            options = instance.globalOptions
+        }
+        let outputCHIR = options.outputMode == OptionOutputMode.CHIR
+        let incrementalCompile = if (let Some(instance) <- ci) {
+            instance.compileStrategy == StrategyType.INCREMENTAL_COMPILE
+        } else {
+            false
+        }
+        let mainBody = if (let Some(value6) <- mainFunc.funcBody) {
+            value6
+        } else {
+            return
+        }
+        if ((!options.CompileExecutable() && !outputCHIR) || packageHasMain.TestAttr(Attribute.IMPORTED) ||
+            incrementalCompile || !Ty.IsTyCorrect(funcTy.retTy) || mainBody.paramLists.isEmpty()) {
+            return
+        }
+
+        let mainTy = funcTy.retTy
+        let int64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+        let mainInvokeTy = typeManager.GetFunctionTy(funcTy.paramTys.toArray(), int64Ty)
+        let funcBody = FuncBody()
+        funcBody.SetTy(mainInvokeTy)
+        let block = Block()
+        block.SetTy(mainInvokeTy)
+        funcBody.body = block
+        let funcParamList = FuncParamList()
+        var argPtr: Option<VarDecl> = None
+        if (!mainBody.paramLists[0].params.isEmpty()) {
+            let param = mainBody.paramLists[0].params[0]
+            var paramType: Option<Type> = None
+            if (let Some(typeNode) <- param.typeNode) {
+                paramType = ASTCloner.Clone(typeNode) as Type
+            }
+            let newParam = CreateFuncParam("v", paramType, None, param.GetTy())
+            argPtr = newParam
+            funcParamList.params.add(newParam)
+        }
+        funcBody.paramLists.add(funcParamList)
+
+        let args = ArrayList<FuncArg>()
+        if (let Some(argDecl) <- argPtr) {
+            args.add(CreateFuncArg(CreateRefExpr(argDecl), "", argDecl.GetTy()))
+        }
+        let callMain = CreateCallExpr(CreateRefExpr(mainFunc), args, mainFunc, mainTy, CallKind.CALL_DECLARED_FUNCTION)
+        let retVal = CreateVarDecl("retVal", callMain, None)
+        let retExpr = if (mainTy.IsInteger()) {
+            CreateReturnExpr(CreateConvInt64(retVal, int64Ty), funcBody)
+        } else {
+            CreateReturnExpr(CreateLitConstExpr(LitConstKind.INTEGER, "0", int64Ty), funcBody)
+        }
+        retExpr.SetTy(TypeManager.GetNothingTy())
+        block.body.add(retVal)
+        block.body.add(retExpr)
+        mainFile.decls.add(CreateMainInvokeDecl(funcBody, mainFunc, mainInvokeTy))
+    }
+}
+
 // C++ src/Sema/TypeCheckExpr.cpp:22-30.
 private func IsLocalDeclOutOfFuncBody(decl: Decl, curFuncBody: FuncBody): Bool {
     if (let Some(outerDecl) <- decl.outerDecl) {
@@ -2448,42 +2582,6 @@ extend TypeChecker {
         CheckWhetherHasProgramEntry()
     }
 
-}
-
-// C++ src/Sema/Desugar/AfterTypeCheck.cpp:48-59 CreateConvInt64.
-    private func CreateConvInt64(vd: VarDecl, ty: Ty): TypeConvExpr {
-        let convType = PrimitiveType()
-        convType.kind = TypeKind.TYPE_INT64
-        convType.SetTy(ty)
-        let numConv = TypeConvExpr()
-        numConv.typeNode = convType
-        let refExpr = CreateRefExpr(vd)
-        refExpr.SetTy(ty)
-        numConv.expr = refExpr
-        numConv.SetTy(ty)
-        return numConv
-    }
-
-// C++ src/Sema/Desugar/AfterTypeCheck.cpp:61-80 CreateMainInvokeDecl.
-    private func CreateMainInvokeDecl(funcBody: FuncBody, mainFunc: FuncDecl, funcTy: Ty): FuncDecl {
-        let mainInvokeFunc = FuncDecl()
-        funcBody.funcDecl = mainInvokeFunc
-        mainInvokeFunc.toBeCompiled = mainFunc.toBeCompiled
-        mainInvokeFunc.SetTy(funcTy)
-        mainInvokeFunc.identifier = SrcIdentifier(MAIN_INVOKE)
-        mainInvokeFunc.funcBody = funcBody
-        mainInvokeFunc.moduleName = mainFunc.moduleName
-        mainInvokeFunc.fullPackageName = mainFunc.fullPackageName
-        mainInvokeFunc.EnableAttr(Attribute.GLOBAL)
-        AddCurFile(mainInvokeFunc, file: mainFunc.curFile)
-        if (mainFunc.TestAttr(Attribute.INCRE_COMPILE)) {
-            mainInvokeFunc.EnableAttr(Attribute.INCRE_COMPILE)
-        }
-        return mainInvokeFunc
-    }
-
-extend TypeChecker {
-
     private func CollectMainFunctionsFromMainDecls(pkg: Package): Unit {
         for (file in pkg.files) {
             for (decl in file.decls) {
@@ -2579,112 +2677,6 @@ extend TypeChecker {
         }
         AddMainFunction(file, fd)
     }
-
-}
-
-extend TypeCheckerImpl {
-    internal func GenerateMainInvoke(): Unit {
-        if (mainFunctionMap.size != 1) {
-            return
-        }
-        var mainFunctions: Option<ArrayList<Decl>> = None
-        for (values in mainFunctionMap.values()) {
-            mainFunctions = Some(values)
-            break
-        }
-        if (let None <- mainFunctions) {
-            return
-        }
-        let mainFunctionList = mainFunctions.getOrThrow()
-        if (mainFunctionList.size != 1) {
-            return
-        }
-        let mainFunc = if (let Some(value) <- (mainFunctionList[0] as FuncDecl)) {
-            value
-        } else {
-            return
-        }
-        let mainFile = if (let Some(value2) <- mainFunc.curFile) {
-            value2
-        } else {
-            return
-        }
-        let packageHasMain = if (let Some(value3) <- mainFile.curPackage) {
-            value3
-        } else {
-            return
-        }
-        let rawFuncTy = if (let Some(value4) <- mainFunc.GetTy()) {
-            value4
-        } else {
-            return
-        }
-        let funcTy = if (let Some(value5) <- (rawFuncTy as FuncTy)) {
-            value5
-        } else {
-            return
-        }
-        var options = OptionGlobalOptions()
-        if (let Some(instance) <- ci) {
-            options = instance.globalOptions
-        }
-        let outputCHIR = options.outputMode == OptionOutputMode.CHIR
-        let incrementalCompile = if (let Some(instance) <- ci) {
-            instance.compileStrategy == StrategyType.INCREMENTAL_COMPILE
-        } else {
-            false
-        }
-        let mainBody = if (let Some(value6) <- mainFunc.funcBody) {
-            value6
-        } else {
-            return
-        }
-        if ((!options.CompileExecutable() && !outputCHIR) || packageHasMain.TestAttr(Attribute.IMPORTED) ||
-            incrementalCompile || !Ty.IsTyCorrect(funcTy.retTy) || mainBody.paramLists.isEmpty()) {
-            return
-        }
-
-        let mainTy = funcTy.retTy
-        let int64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-        let mainInvokeTy = typeManager.GetFunctionTy(funcTy.paramTys.toArray(), int64Ty)
-        let funcBody = FuncBody()
-        funcBody.SetTy(mainInvokeTy)
-        let block = Block()
-        block.SetTy(mainInvokeTy)
-        funcBody.body = block
-        let funcParamList = FuncParamList()
-        var argPtr: Option<VarDecl> = None
-        if (!mainBody.paramLists[0].params.isEmpty()) {
-            let param = mainBody.paramLists[0].params[0]
-            var paramType: Option<Type> = None
-            if (let Some(typeNode) <- param.typeNode) {
-                paramType = ASTCloner.Clone(typeNode) as Type
-            }
-            let newParam = CreateFuncParam("v", paramType, None, param.GetTy())
-            argPtr = newParam
-            funcParamList.params.add(newParam)
-        }
-        funcBody.paramLists.add(funcParamList)
-
-        let args = ArrayList<FuncArg>()
-        if (let Some(argDecl) <- argPtr) {
-            args.add(CreateFuncArg(CreateRefExpr(argDecl), "", argDecl.GetTy()))
-        }
-        let callMain = CreateCallExpr(CreateRefExpr(mainFunc), args, mainFunc, mainTy, CallKind.CALL_DECLARED_FUNCTION)
-        let retVal = CreateVarDecl("retVal", callMain, None)
-        let retExpr = if (mainTy.IsInteger()) {
-            CreateReturnExpr(CreateConvInt64(retVal, int64Ty), funcBody)
-        } else {
-            CreateReturnExpr(CreateLitConstExpr(LitConstKind.INTEGER, "0", int64Ty), funcBody)
-        }
-        retExpr.SetTy(TypeManager.GetNothingTy())
-        block.body.add(retVal)
-        block.body.add(retExpr)
-        mainFile.decls.add(CreateMainInvokeDecl(funcBody, mainFunc, mainInvokeTy))
-    }
-}
-
-extend TypeChecker {
 
     private func CheckWhetherHasProgramEntry(): Unit {
         if (let None <- impl.ci) {
