@@ -189,6 +189,17 @@ public class JavaInteropManager {
         // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:327-330.
     }
 
+    // C++ TypeCheckJavaInterop.cpp:333-349.
+    public func CheckJavaMirrorTypes(decl: ClassLikeDecl): Unit {
+        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
+        // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:335-339.
+    }
+
+    public func CheckJavaImplTypes(decl: ClassLikeDecl): Unit {
+        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
+        // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:344-348.
+    }
+
     // C++ TypeCheckJavaInterop.cpp:377-390.
     public func CheckTypes(file: File): Unit {
         for (decl in file.decls) {
@@ -211,6 +222,12 @@ public class JavaInteropManager {
         hasMirrorOrImpl = true
         // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
         // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:400-417.
+    }
+
+    // C++ TypeCheckJavaInterop.cpp:420-434.
+    public func CheckCJMappingDeclSupportRange(decl: Decl): Unit {
+        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
+        // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:422-433.
     }
 
     // C++ TypeCheckJavaInterop.cpp:436-460.
