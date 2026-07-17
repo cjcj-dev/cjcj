@@ -1,5 +1,6 @@
 package cjcj::frontend
 
+import cjcj::option.OutputMode
 import cjcj::ast.Package as RealASTPackage
 import cjcj::ast.PackageDecl as RealASTPackageDecl
 import cjcj::ast.StructTy as RealASTStructTy
