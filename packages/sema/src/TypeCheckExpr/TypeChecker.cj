@@ -1896,6 +1896,7 @@ extend TypeChecker {
         funcParams: ArrayList<FuncParam>): FuncDecl {
         fp.EnableAttr(Attribute.HAS_INITIAL)
         let ret = FuncDecl()
+        ret.EnableAttr(Attribute.COMPILER_ADD)
         if (let Some(assignment) <- fp.assignment) {
             CopyBasicInfo(assignment, ret)
         } else {
@@ -1906,10 +1907,13 @@ extend TypeChecker {
         ret.identifier = SrcIdentifier(fp.identifier.Val() + "." + "${funcParams.size}")
 
         let funcBody = FuncBody()
+        funcBody.EnableAttr(Attribute.COMPILER_ADD)
         CopyNodeScopeInfo(funcBody, ret)
         let block = Block()
+        block.EnableAttr(Attribute.COMPILER_ADD)
         CopyNodeScopeInfo(block, ret)
         let paramList = FuncParamList()
+        paramList.EnableAttr(Attribute.COMPILER_ADD)
         CopyNodeScopeInfo(paramList, ret)
         for (param in funcParams) {
             paramList.params.add(CreateFuncParamForOptional(param))
