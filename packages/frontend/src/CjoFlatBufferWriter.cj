@@ -241,7 +241,7 @@ public class ASTWriter {
         serializingCommon!: Bool,
         exportContent!: Bool,
         exportForIncr!: Bool,
-        exportForTest!: Bool,
+        exportForTest!: Bool = false,
         exportFuncBody!: Bool,
         compileCjd!: Bool = false
     ) {
@@ -2732,6 +2732,15 @@ public class ASTWriter {
 
     private func SerializedMangledName(decl: Decl): String {
         if (ShouldOmitMangledName(decl)) {
+            // ASTWriter.cpp:1635-1639: test export preserves public members of source extensions.
+            if (exportForTest && !decl.TestAttr(Attribute.PRIVATE)) {
+                if (let Some(outer) <- decl.outerDecl) {
+                    if ((outer as ExtendDecl).isSome() && !outer.TestAttr(Attribute.IMPORTED) &&
+                        !outer.TestAttr(Attribute.COMPILER_ADD)) {
+                        return decl.mangledName
+                    }
+                }
+            }
             return ""
         }
         return EnsureMangledName(decl)
