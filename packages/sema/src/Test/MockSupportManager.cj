@@ -530,6 +530,31 @@ public class MockSupportManager {
         mockUtils.AttachGeneratedDecl(varDecl, pkg)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:507-529.
+    private func GenerateSpiedObjectVar(decl: Decl): Decl {
+        let declTy = typeManager.GetAnyTy()
+        let mangledName = mockUtils.Mangle(decl)
+        let optionDeclTy = typeManager.GetEnumTy(mockUtils.optionDecl.getOrThrow(), typeArgs: [declTy])
+        let noneRef = CreateRefExpr(LookupEnumMember(
+            optionDeclTy.decl, OPTION_NONE_CTOR).getOrThrow())
+        noneRef.SetTy(optionDeclTy)
+
+        if (let Some(varDecl) <- mockUtils.FindGlobalDecl<VarDecl>(
+            decl.curFile.getOrThrow().curPackage.getOrThrow(),
+            MockUtils.spyObjVarName + "$" + mangledName + MockUtils.mockAccessorSuffix)) {
+            return varDecl
+        }
+
+        let varDecl = CreateVarDecl(
+            MockUtils.spyObjVarName + "$" + mangledName + MockUtils.mockAccessorSuffix,
+            Some(noneRef), None)
+        varDecl.isVar = true
+        varDecl.EnableAttr(Attribute.GLOBAL)
+        varDecl.linkage = decl.linkage
+        mockUtils.AttachGeneratedDecl(varDecl, decl)
+        return varDecl
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
