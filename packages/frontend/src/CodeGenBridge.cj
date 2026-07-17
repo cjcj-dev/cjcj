@@ -836,21 +836,18 @@ private func RunConstantEvaluation(pkg: RealCHIRPackage, builder: ChirBuilder, d
 }
 
 public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
-    cachedMangleMap: CachedMangleMap): Bool {
+    cachedMangleMap: CachedMangleMap): ArrayList<LLVMModuleHandle> {
+    let llvmModules = ArrayList<LLVMModuleHandle>()
     if (instance.diag.GetErrorCount() != 0) {
-        return false
+        return llvmModules
     }
     let realPackages = instance.chirData.GetAllRealCHIRPackages()
     if (realPackages.isEmpty()) {
-        return true
+        return llvmModules
     }
     let packagesToEmit = BuildRealCodeGenPackages(realPackages)
     let codegenOptions = ConvertFrontendOptionsToCodegenOptions(instance.invocation.globalOptions)
     codegenOptions.frontendOutputFiles.clear()
-    if (instance.invocation.globalOptions.enIncrementalCompilation) {
-        instance.cachedInfo.bitcodeFilesName.clear()
-    }
-    var emittedAll = true
     var packageIndex: Int64 = 0
     while (packageIndex < packagesToEmit.size) {
         let realPackage = packagesToEmit[packageIndex]
@@ -869,13 +866,78 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
         if (instance.diag.GetErrorCount() != 0) {
             instance.diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
             ClearPackageModules(packageModules)
-            return false
+            ClearPackageModules(llvmModules)
+            return llvmModules
         }
-        emittedAll = emitPackageModules(instance, realPackage, packageModules) && emittedAll
-        ClearPackageModules(packageModules)
+        for (moduleHandle in packageModules) {
+            llvmModules.add(moduleHandle)
+        }
+        packageModules.clear()
         packageIndex++
     }
-    return emittedAll
+    return llvmModules
+}
+
+// C++: FrontendTool/DefaultCompilerInstance.cpp:252-299.
+public func EmitLLVMSimilarBytecode(instance: CompilerInstance, enableIncrement: Bool,
+    cachedMangleMap: CachedMangleMap): Bool {
+    let curPackage = instance.chirData.GetCurrentRealCHIRPackage()
+    if (let None <- curPackage) {
+        return true
+    }
+    let fullPackageName = curPackage.getOrThrow().GetName()
+    let llvmModules = GenPackageModules(instance, enableIncrement, cachedMangleMap)
+    if (instance.diag.GetErrorCount() != 0) {
+        ClearPackageModules(llvmModules)
+        return false
+    }
+
+    let recorder = ProfileRecorder("CodeGen", "Save bc file")
+    instance.invocation.globalOptions.UpdateCachedDirName(fullPackageName)
+    if (llvmModules.size == 1) {
+        let filePath = GenerateBCFilePathAndUpdateToInvocation(
+            instance.invocation.globalOptions, TempFileKind.T_BC, fullPackageName, "")
+        if (filePath.isEmpty()) {
+            ClearPackageModules(llvmModules)
+            recorder.close()
+            return false
+        }
+        let _ = SavePackageModule(llvmModules[0], filePath)
+    } else {
+        let taskQueueSaveBitcode = TaskQueue(llvmModules.size)
+        let allBCFilePath = ArrayList<String>()
+        var index: Int64 = 0
+        while (index < llvmModules.size) {
+            let filePath = GenerateBCFilePathAndUpdateToInvocation(instance.invocation.globalOptions,
+                TempFileKind.T_BC, fullPackageName, index.toString())
+            if (filePath.isEmpty()) {
+                ClearPackageModules(llvmModules)
+                recorder.close()
+                return false
+            }
+            allBCFilePath.add(filePath)
+            index++
+        }
+        index = 0
+        while (index < llvmModules.size) {
+            let module = llvmModules[index]
+            let bcFilePath = allBCFilePath[index]
+            let _ = taskQueueSaveBitcode.AddTask<Unit>({ =>
+                let _ = SavePackageModule(module, bcFilePath)
+            })
+            index++
+        }
+        taskQueueSaveBitcode.RunAndWaitForAllTasksCompleted()
+    }
+    ClearPackageModules(llvmModules)
+
+    if (instance.invocation.globalOptions.enIncrementalCompilation) {
+        let fileName = GenerateFileName(instance.invocation.globalOptions, fullPackageName, "")
+        instance.cachedInfo.bitcodeFilesName.clear()
+        instance.cachedInfo.bitcodeFilesName.add(fileName)
+    }
+    recorder.close()
+    return true
 }
 
 private func BuildRealCodeGenPackages(realPackages: ArrayList<RealCHIRPackage>): ArrayList<RealCHIRPackage> {
@@ -1053,37 +1115,6 @@ public func GetVarInitDepMap(chirPkg: RealCHIRPackage): HashMap<String, String> 
         }
     }
     return dep
-}
-
-private func emitPackageModules(
-    instance: CompilerInstance,
-    pkg: RealCHIRPackage,
-    modules: ArrayList<LLVMModuleHandle>
-): Bool {
-    if (modules.isEmpty()) {
-        instance.diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION,
-            "codegen produced no LLVM module for package '" + pkg.GetName() + "'")
-        return false
-    }
-    var ok = true
-    var moduleIndex: Int64 = 0
-    while (moduleIndex < modules.size) {
-        let idx = if (modules.size == 1) { "" } else { moduleIndex.toString() }
-        let path = GenerateBCFilePathAndUpdateToInvocation(
-            instance.invocation.globalOptions, TempFileKind.T_BC, pkg.GetName(), idx)
-        if (path.isEmpty()) {
-            ok = false
-        } else if (!SavePackageModule(modules[moduleIndex], path)) {
-            instance.diag.Diagnose(DiagCategory.OTHER, DEFAULT_POSITION,
-                "failed to write LLVM bitcode file '" + path + "'")
-            ok = false
-        }
-        moduleIndex++
-    }
-    if (ok && instance.invocation.globalOptions.enIncrementalCompilation) {
-        instance.cachedInfo.bitcodeFilesName.add(GenerateFileName(instance.invocation.globalOptions, pkg.GetName(), ""))
-    }
-    return ok
 }
 
 // C++: FrontendTool/DefaultCompilerInstance.cpp:128-143.
