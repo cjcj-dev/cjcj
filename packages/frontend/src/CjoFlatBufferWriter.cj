@@ -2766,7 +2766,7 @@ public class ASTWriter {
             }
             return ""
         }
-        return EnsureMangledName(decl)
+        return decl.mangledName
     }
 
     private func ShouldOmitMangledName(decl: Decl): Bool {
@@ -2802,31 +2802,6 @@ public class ASTWriter {
             current = value.outerDecl
         }
         return false
-    }
-
-    private func EnsureMangledName(decl: Decl): String {
-        if (!decl.mangledName.isEmpty()) {
-            return decl.mangledName
-        }
-        if (let Some(param) <- (decl as FuncParam)) {
-            if (let Some(ownerMangle) <- paramOwnerMangles.get(DeclKey(param))) {
-                if (!ownerMangle.isEmpty()) {
-                    return ownerMangle + "E" + param.identifier.Val().size.toString() + param.identifier.Val() + "E"
-                }
-            }
-            return ""
-        }
-        if (!decl.rawMangleName.isEmpty()) {
-            return decl.rawMangleName
-        }
-        if (!Ty.IsTyCorrect(decl.GetTy())) {
-            return ""
-        }
-        if (IsSupportedSerializedDecl(decl)) {
-            decl.mangledName = mangler.Mangle(decl)
-            return decl.mangledName
-        }
-        return ""
     }
 
     private func ExistingMangledName(decl: Decl): String {
