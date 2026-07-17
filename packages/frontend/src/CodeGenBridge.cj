@@ -1082,10 +1082,11 @@ private func emitPackageModules(
             saved = true
             registerFrontendOutput(instance.invocation.globalOptions, fileName, path)
         }
-        if (saved && instance.invocation.globalOptions.enIncrementalCompilation) {
-            instance.cachedInfo.bitcodeFilesName.add(fileName)
-        }
         moduleIndex++
+    }
+    if (ok && instance.invocation.globalOptions.enIncrementalCompilation) {
+        instance.cachedInfo.bitcodeFilesName.add(
+            outputFileNameForModule(instance.invocation.globalOptions, pkg, 0, 1))
     }
     return ok
 }
