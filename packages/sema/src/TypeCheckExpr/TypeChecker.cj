@@ -5749,41 +5749,17 @@ extend TypeChecker {
         decls.add(decl)
     }
 
-    private func PropagateConditionCtxExpr(pattern: Pattern, initializer: Expr): Unit {
-        pattern.ctxExpr = initializer
-        if (let Some(varPattern) <- (pattern as VarPattern)) {
-            varPattern.ctxExpr = initializer
-            return
-        }
-        if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
-            for (subPattern in tuplePattern.patterns) {
-                PropagateConditionCtxExpr(subPattern, initializer)
+    private func PropagateCtxExpr(pattern: Pattern, initializer: Expr): Unit {
+        let walker = Walker(pattern, visitPre: { node: Node =>
+            if (let Some(varPattern) <- (node as VarPattern)) {
+                varPattern.ctxExpr = initializer
             }
-            return
-        }
-        if (let Some(enumPattern) <- (pattern as EnumPattern)) {
-            for (subPattern2 in enumPattern.patterns) {
-                PropagateConditionCtxExpr(subPattern2, initializer)
+            if (let None <- (node as Pattern)) {
+                return VisitAction.SKIP_CHILDREN
             }
-            return
-        }
-        if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
-            if (let Some(inner) <- varOrEnum.pattern) {
-                PropagateConditionCtxExpr(inner, initializer)
-            }
-            return
-        }
-        if (let Some(typePattern) <- (pattern as TypePattern)) {
-            if (let Some(inner2) <- typePattern.pattern) {
-                PropagateConditionCtxExpr(inner2, initializer)
-            }
-            return
-        }
-        if (let Some(exceptPattern) <- (pattern as ExceptTypePattern)) {
-            if (let Some(inner3) <- exceptPattern.pattern) {
-                PropagateConditionCtxExpr(inner3, initializer)
-            }
-        }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
     }
 
     private func BindCollectedConditionDecls(ctx: ASTContext, patterns: ArrayList<Pattern>,
@@ -5804,7 +5780,8 @@ extend TypeChecker {
         }
         let initializer = letPattern.initializer.getOrThrow()
         for (pattern in letPattern.patterns) {
-            PropagateConditionCtxExpr(pattern, initializer)
+            pattern.ctxExpr = initializer
+            PropagateCtxExpr(pattern, initializer)
         }
         let _ = Synthesize(ctx, initializer)
         let selectorTy = if (Ty.IsTyCorrect(initializer.GetTy())) {
