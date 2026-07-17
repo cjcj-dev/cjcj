@@ -320,9 +320,7 @@ private func disableDefaultParamDesugarGenericAttr(decl: Decl): Unit {
 private func updateClonedNode(genericNode: Node, clonedNode: Node, typeManager: TypeManager, typeMapping: TypeSubst,
     g2gTyMap: TypeSubst, pkg: Package): Unit {
     PerformTyInstantiationDuringClone(genericNode, clonedNode, typeManager, GenericInfo(None, typeMapping), g2gTyMap)
-    if (let Some(clonedDecl) <- (clonedNode as Decl)) {
-        PerformUpdateAttrDuringClone(genericNode, clonedNode, pkg)
-    }
+    PerformUpdateAttrDuringClone(genericNode, clonedNode, pkg)
 }
 
 private func appendGenericInstantiation(pkg: Package, decl: Decl): Unit {
