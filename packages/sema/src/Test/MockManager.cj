@@ -6,7 +6,7 @@ import cjcj::modules.SemaImportManager
 import cjcj::sema.{AddArrayLitConstructor, CreateInitCall, CreateThrowException, FindInitDecl, GetMemberDecl}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.{GenerateTypeMapping, TypeManager, TypeSubst}
-import cjcj::utils.{CJC_ASSERT, DynamicCast, GetRootPackageName, OBJECT_NAME, V_COMPILER}
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, DynamicCast, GetRootPackageName, OBJECT_NAME, V_COMPILER}
 
 private let CREATE_MOCK_FUNC_NAME: String = "createMock"
 private let CREATE_SPY_FUNC_NAME: String = "createSpy"
@@ -1175,6 +1175,48 @@ public class MockManager {
             }
         }
         return matchCasesForOnCallReturnedValue
+    }
+
+    // C++: Sema/Test/MockManager.cpp:1314-1354.
+    private func GetMockedObjectHandler(objRef: RefExpr, curFile: File): Expr {
+        let nothingTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_NOTHING)
+        let handlerRetTy = typeManager.GetAnyTy()
+        let optionFuncRetTy = typeManager.GetEnumTy(
+            mockUtils.optionDecl.getOrThrow(), typeArgs: [handlerRetTy])
+        let noneRef = CreateRefExpr(LookupEnumMember(
+            mockUtils.optionDecl.getOrThrow(), OPTION_NONE_CTOR).getOrThrow())
+        noneRef.SetTy(optionFuncRetTy)
+        let returnNoneExpr = CreateReturnExpr(noneRef)
+        returnNoneExpr.SetTy(nothingTy)
+
+        let mockedObjVarPattern = CreateVarPattern(
+            V_COMPILER, mockedInterfaceDecl.getOrThrow().GetTy())
+        let mockedObjRef = CreateRefExpr(mockedObjVarPattern.varDecl.getOrThrow())
+        mockedObjRef.SetTy(mockedInterfaceDecl.getOrThrow().GetTy().getOrThrow())
+        let getHandlerMethodDecl = GetMemberDecl<FuncDecl>(mockedInterfaceDecl.getOrThrow(),
+            GET_HANDLER_METHOD_NAME, ArrayList<Ty>(), typeManager)
+        CJC_NULLPTR_CHECK(getHandlerMethodDecl)
+
+        let getHandlerMa = CreateMemberAccess(
+            (ASTCloner.Clone(mockedObjRef) as Expr).getOrThrow(), getHandlerMethodDecl.getOrThrow())
+        let getHandlerCall = CallExpr()
+        getHandlerCall.SetTy(callHandlerDecl.getOrThrow().GetTy().getOrThrow())
+        getHandlerCall.resolvedFunction = (getHandlerMa.target.getOrThrow() as FuncDecl).getOrThrow()
+        getHandlerCall.baseFunc = getHandlerMa
+        getHandlerCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+        getHandlerCall.curFile = curFile
+
+        let mockedObjTypePattern = CreateTypePattern(mockedObjVarPattern,
+            CreateRefType(mockedInterfaceDecl.getOrThrow()), objRef)
+        mockedObjTypePattern.matchBeforeRuntime = false
+        mockedObjTypePattern.needRuntimeTypeCheck = true
+        let mockedCastMatchCases = ArrayList<MatchCase>()
+        mockedCastMatchCases.add(CreateMatchCase(mockedObjTypePattern, getHandlerCall))
+        mockedCastMatchCases.add(CreateMatchCase(WildcardPattern(), returnNoneExpr))
+        let mockedObjMatch = CreateMatchExpr(
+            objRef, mockedCastMatchCases, callHandlerDecl.getOrThrow().GetTy().getOrThrow())
+        mockedObjMatch.curFile = curFile
+        return mockedObjMatch
     }
 
     // C++: Sema/Test/MockManager.cpp:1204-1238.
