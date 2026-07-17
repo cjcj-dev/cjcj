@@ -5,6 +5,7 @@ import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::incremental_compilation.IncreKind
 import cjcj::incremental_compilation.SemanticInfo
+import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
@@ -43,6 +44,7 @@ public class CompilerInstance {
     public var frontendDumpActionIsTypeCheck: Bool = false
     public var diag: Option<BasicDiagnosticEngine> = None
     public var importManager: Option<SemaImportManager> = None
+    public var mangler: BaseMangler = BaseMangler()
     // CompilerInstance.h:573-574: merged source and imported packages.
     public let packages: ArrayList<Package> = ArrayList<Package>()
     public let sourcePackages: ArrayList<Package> = ArrayList<Package>()
