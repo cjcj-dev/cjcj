@@ -1,8 +1,7 @@
 package cjcj::codegen
 
 import std.collection.*
-import cjcj::chir.CustomType
-import cjcj::chir.Type
+import cjcj::chir.{CustomType, LinkTypeInfo, Linkage, Type}
 import cjcj::utils.{CJC_ASSERT_WITH_MSG, StaticCast}
 
 public open class CGCustomType <: CGType {
@@ -139,6 +138,15 @@ public open class CGCustomType <: CGType {
         if (let Some(rawTypeTemplate) <- typeTemplate) {
             PreActionOfGenTypeTemplate()
             if (unsafe { LLVMIsDeclaration(rawTypeTemplate) } == 0) {
+                return
+            }
+            // C++ CGCustomType::GenTypeTemplate (CGCustomType.cpp:284-289) returns before
+            // creating anonymous debug types for imported/other-module and auto-env-base types.
+            if (cgMod.GetCGContext().IsCustomTypeOfOtherLLVMModule(customType) ||
+                IsAutoEnvBaseType(chirType)) {
+                if (customTypeDef.Get<LinkTypeInfo, Linkage>() == Linkage.EXTERNAL_WEAK) {
+                    unsafe { LLVMSetLinkage(rawTypeTemplate, LLVMLinkageValue(LLVMLinkage.ExternalWeak)) }
+                }
                 return
             }
             DefineCustomTypeTemplateIfNeeded(cgMod, customType, rawTypeTemplate)
