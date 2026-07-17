@@ -22,6 +22,7 @@ private let DECL_KIND_ENUM_NAME: String = "DeclKind"
 private let RETURN_ZERO_ENTRY: String = "ReturnZero"
 private let RETURN_ENTRY: String = "Return"
 private let THROW_ENTRY: String = "Throw"
+private let CALL_BASE_ENTRY: String = "CallBase"
 private let RETURN_DEFAULT_ENTRY: String = "ReturnDefault"
 private let HAS_DEFAULT_VALUE_FOR_STUB_INTERFACE_NAME: String = "HasDefaultValueForStub"
 private let NO_DEFAULT_VALUE_FOR_MOCK_EXCEPTION_NAME: String = "NoDefaultValueForMockException"
@@ -397,6 +398,93 @@ public class MockManager {
         pattern.constructor = mockUtils.CreateRefExprWithInstTys(enumConstructor,
             constructorTy.typeArgs, THROW_ENTRY, originalMethod.curFile.getOrThrow())
         return CreateMatchCase(pattern, throwExpr)
+    }
+
+    // C++: Sema/Test/MockManager.cpp:525-623.
+    private func CreateOnCallCallBaseMatchCase(originalFunc: FuncDecl, mockedFunc: FuncDecl,
+        enumConstructor: Decl): MatchCase {
+        let mockedClass = (mockedFunc.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+        let objToSpyDecl = GetMemberDecl<VarDecl>(mockedClass,
+            FIELD_NAME_TO_STORE_OBJ_TO_SPY, ArrayList<Ty>(), typeManager).getOrThrow()
+        let callBaseArgs = ArrayList<FuncArg>()
+        for (param in mockedFunc.funcBody.getOrThrow().paramLists[0].params) {
+            callBaseArgs.add(CreateFuncArg(CreateRefExpr(param)))
+        }
+
+        let memberAccessFuncBaseExpr = CreateMemberAccess(CreateRefExpr(objToSpyDecl), originalFunc)
+        memberAccessFuncBaseExpr.SetTy(mockedFunc.GetTy().getOrThrow())
+        memberAccessFuncBaseExpr.EnableAttr(Attribute.GENERATED_TO_MOCK)
+        if (let Some(genericInfo) <- mockedFunc.funcBody.getOrThrow().generic) {
+            for (typeParam in genericInfo.typeParameters) {
+                memberAccessFuncBaseExpr.instTys.add(typeParam.GetTy().getOrThrow())
+            }
+        }
+
+        let retTy = mockedFunc.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        let callBaseFunc = CreateCallExpr(memberAccessFuncBaseExpr, callBaseArgs,
+            Some(originalFunc), Some(retTy), CallKind.CALL_DECLARED_FUNCTION)
+        callBaseFunc.EnableAttr(Attribute.GENERATED_TO_MOCK)
+        let accessorKind = MockUtils.ComputeAccessorKind(originalFunc)
+        if (accessorKind == AccessorKind.METHOD || accessorKind == AccessorKind.PROP_GETTER ||
+            accessorKind == AccessorKind.PROP_SETTER) {
+            callBaseFunc.EnableAttr(Attribute.MOCK_SUPPORTED)
+        }
+
+        let pattern = EnumPattern()
+        let constructorTy = enumConstructor.GetTy().getOrThrow()
+        pattern.SetTy(if (constructorTy.IsFunc()) {
+            (constructorTy as FuncTy).getOrThrow().retTy
+        } else { constructorTy })
+        pattern.constructor = mockUtils.CreateRefExprWithInstTys(enumConstructor,
+            constructorTy.typeArgs, CALL_BASE_ENTRY, originalFunc.curFile.getOrThrow())
+
+        let mangledName = mockUtils.Mangle(originalFunc.outerDecl.getOrThrow())
+        let spiedInstanceDecl = mockUtils.FindMockGlobalDecl(
+            mockedClass, MockUtils.spyObjVarName + "$" + mangledName)
+        if (spiedInstanceDecl.isNone() || originalFunc.funcBody.getOrThrow().body.isNone()) {
+            return CreateMatchCase(pattern, callBaseFunc)
+        }
+
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let thisRef = CreateRefExpr(SrcIdentifier("this"),
+            Some(typeManager.GetClassThisTy(mockedClass, mockedClass.GetTy().getOrThrow().typeArgs.toArray())),
+            DEFAULT_POSITION, ArrayList<Type>())
+        thisRef.ref.target = mockedClass
+        let someOuterDecl = LookupEnumMember(mockUtils.optionDecl.getOrThrow(), OPTION_VALUE_CTOR).getOrThrow()
+        let someOuterDeclRef = CreateRefExpr(someOuterDecl)
+        let optionOuterDeclTy = typeManager.GetEnumTy(mockUtils.optionDecl.getOrThrow(),
+            typeArgs: [typeManager.GetAnyTy()])
+        someOuterDeclRef.SetTy(typeManager.GetFunctionTy([typeManager.GetAnyTy()], optionOuterDeclTy))
+        let someOuterDeclCallArgs = ArrayList<FuncArg>()
+        someOuterDeclCallArgs.add(CreateFuncArg(thisRef))
+        let someOuterDeclCall = CreateCallExpr(someOuterDeclRef, someOuterDeclCallArgs)
+        someOuterDeclCall.SetTy(optionOuterDeclTy)
+        someOuterDeclCall.resolvedFunction = (someOuterDecl as FuncDecl).getOrThrow()
+        someOuterDeclCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+        let noneRef = CreateRefExpr(LookupEnumMember(
+            mockUtils.optionDecl.getOrThrow(), OPTION_NONE_CTOR).getOrThrow())
+        noneRef.SetTy(optionOuterDeclTy)
+
+        let spiedDecl = spiedInstanceDecl.getOrThrow()
+        let callBaseMatch = CreateMatchCase(pattern,
+            CreateAssignExpr(CreateRefExpr(spiedDecl), someOuterDeclCall, Some(unitTy)))
+        let callBaseResult = CreateVarDecl(
+            "callBaseResult" + MockUtils.mockAccessorSuffix, Some(callBaseFunc), None)
+        callBaseResult.curFile = mockedClass.curFile
+        callBaseResult.fullPackageName = mockedClass.fullPackageName
+        let callBaseResultRef = CreateRefExpr(callBaseResult)
+        let trueLit = CreateLitConstExpr(LitConstKind.BOOL, "true", boolTy)
+        trueLit.curFile = mockedClass.curFile
+        let trueSpyCallMarkerAssign = CreateAssignExpr(CreateRefExpr(mockUtils.FindMockGlobalDecl(
+            mockedClass, MockUtils.spyCallMarkerVarName).getOrThrow()), trueLit, Some(unitTy))
+        let matchBody = callBaseMatch.exprOrDecls.getOrThrow()
+        matchBody.body.add(trueSpyCallMarkerAssign)
+        matchBody.body.add(callBaseResult)
+        matchBody.body.add(CreateAssignExpr(CreateRefExpr(spiedDecl), noneRef, Some(unitTy)))
+        matchBody.body.add(callBaseResultRef)
+        matchBody.SetTy(retTy)
+        return callBaseMatch
     }
 
     // C++: Sema/Test/MockManager.cpp:625-658.
