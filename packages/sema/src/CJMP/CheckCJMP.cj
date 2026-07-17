@@ -294,7 +294,9 @@ private func MergeCommonIntoSpecific(checker: MPTypeCheckerImpl, commonDecl: Dec
         if (IsInstanceVar(commonMember)) {
             if (let Some(varDecl) <- (commonMember as VarDecl)) {
                 if (varDecl.TestAttr(Attribute.COMMON)) {
-                    commonVariablesIds[varDecl.identifier.Val()] = id
+                    if (!commonVariablesIds.contains(varDecl.identifier.Val())) {
+                        commonVariablesIds[varDecl.identifier.Val()] = id
+                    }
                 } else if (varDecl.isMemberParam) {
                     memberParamIds[varDecl.identifier.Val()] = id
                 }
