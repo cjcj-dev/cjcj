@@ -6173,7 +6173,7 @@ extend TypeChecker {
         }
         if (let Some(diagValue) <- impl.diag) {
             let tyStr = expr.GetTy().getOrThrow().String()
-            let builder = diagValue.Diagnose(expr.begin, expr.end,
+            let builder = Diagnose(diagValue, expr,
                 BasicDiagKind.sema_expr_in_forin_must_has_iterator, args: [BasicDiagArgument(tyStr)])
             builder.Emit()
         }
@@ -6184,14 +6184,14 @@ extend TypeChecker {
             return
         }
         if (let Some(diagValue) <- impl.diag) {
-            let builder = diagValue.Diagnose(expr.begin, expr.end, BasicDiagKind.sema_wrong_forin_guard)
+            let builder = Diagnose(diagValue, expr, BasicDiagKind.sema_wrong_forin_guard)
             builder.Emit()
         }
     }
 
     private func DiagnoseForInPattern(forInExpr: ForInExpr): Unit {
         if (let Some(diagValue) <- impl.diag) {
-            let builder = diagValue.Diagnose(forInExpr.begin, forInExpr.end,
+            let builder = Diagnose(diagValue, forInExpr,
                 BasicDiagKind.sema_forin_pattern_must_be_irrefutable)
             builder.Emit()
         }
