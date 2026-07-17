@@ -785,7 +785,11 @@ public class MockSupportManager {
         accessorDecl.identifier.SetPos(fieldDecl.identifier.Begin(), fieldDecl.identifier.End())
         accessorDecl.moduleName = fieldDecl.moduleName
         accessorDecl.fullPackageName = fieldDecl.fullPackageName
-        accessorDecl.outerDecl = (fieldDecl.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+        if (let Some(outerDecl) <- fieldDecl.outerDecl) {
+            if (let Some(classDecl) <- (outerDecl as ClassDecl)) {
+                accessorDecl.outerDecl = classDecl
+            }
+        }
         accessorDecl.SetTy(accessorTy)
         accessorDecl.identifier = SrcIdentifier(MockUtils.BuildMockAccessorIdentifier(fieldDecl, kind),
             fieldDecl.identifier.Begin(), fieldDecl.identifier.End(), false)
