@@ -1269,6 +1269,15 @@ public class MockSupportManager {
         return GenerateAccessorCallForField(nameRefExpr, kind)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1697-1704.
+    private func GenerateSetterCall(nameRefExpr: NameReferenceExpr): Option<CallExpr> {
+        let kind = GetVarDeclSetterAccessorKind(nameRefExpr.GetTarget().getOrThrow())
+        if (kind == AccessorKind.TOP_LEVEL_VARIABLE_SETTER) {
+            return GenerateAccessorCallForTopLevelVariable(nameRefExpr, kind)
+        }
+        return GenerateAccessorCallForField(nameRefExpr, kind)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
