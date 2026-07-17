@@ -2390,10 +2390,14 @@ extend TypeChecker {
                 // C++ src/Sema/PreCheck.cpp:1281-1321,1843-1844 checks nominal declarations after name resolution.
                 for (sym in impl.GetAllStructDecls(ctx)) {
                     if (let Some(node) <- sym.node) {
-                        if ((node.astKind == ASTKind.CLASS_DECL || node.astKind == ASTKind.INTERFACE_DECL ||
-                            node.astKind == ASTKind.STRUCT_DECL || node.astKind == ASTKind.ENUM_DECL) &&
+                        if ((node.astKind == ASTKind.CLASS_DECL || node.astKind == ASTKind.INTERFACE_DECL) &&
                             (let Some(inheritableDecl) <- (node as InheritableDecl))) {
                             impl.CheckDupInterfaceInStructDecl(inheritableDecl)
+                            impl.CheckInheritanceCycleDFS(ctx, inheritableDecl, ArrayList<Decl>())
+                        } else if ((node.astKind == ASTKind.STRUCT_DECL || node.astKind == ASTKind.ENUM_DECL) &&
+                            (let Some(inheritableDecl) <- (node as InheritableDecl))) {
+                            impl.CheckDupInterfaceInStructDecl(inheritableDecl)
+                            MarkInvalidInheritanceForNonClassLike(inheritableDecl)
                         }
                     }
                 }
