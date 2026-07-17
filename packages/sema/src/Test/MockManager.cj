@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::sema.{CreateInitCall, CreateThrowException, FindInitDecl, GetMemberDecl}
 import cjcj::sema.TypeManager
-import cjcj::utils.{CJC_ASSERT, DynamicCast, GetRootPackageName, OBJECT_NAME}
+import cjcj::utils.{CJC_ASSERT, DynamicCast, GetRootPackageName, OBJECT_NAME, V_COMPILER}
 
 private let CREATE_MOCK_FUNC_NAME: String = "createMock"
 private let CREATE_SPY_FUNC_NAME: String = "createSpy"
@@ -296,6 +296,27 @@ public class MockManager {
             instantiationCounters[decl] = 1
         }
         return instantiationCounters[decl]
+    }
+
+    // C++: Sema/Test/MockManager.cpp:424-448.
+    private func CreateTypeCastForOnCallReturnValue(exprToCast: Expr, castTy: Ty): MatchExpr {
+        let castType = MockUtils.CreateType(castTy)
+        let varPattern = CreateVarPattern(V_COMPILER, Some(castTy))
+        let varPatternRef = CreateRefExpr(varPattern.varDecl.getOrThrow())
+
+        let matchCases = ArrayList<MatchCase>()
+        let typePattern = CreateTypePattern(varPattern, castType, exprToCast)
+        typePattern.matchBeforeRuntime = false
+        matchCases.add(CreateMatchCase(typePattern, varPatternRef))
+
+        let exceptionCallArgs = ArrayList<Expr>()
+        exceptionCallArgs.add(CreateLitConstExpr(LitConstKind.STRING, castTy.String(),
+            mockUtils.stringDecl.getOrThrow().GetTy().getOrThrow(), true))
+        matchCases.add(CreateMatchCase(WildcardPattern(),
+            CreateThrowException(mockReturnValueTypeMismatchException.getOrThrow(), exceptionCallArgs,
+                exprToCast.curFile.getOrThrow(), typeManager)))
+
+        return CreateMatchExpr(exprToCast, matchCases, castTy)
     }
 
     // C++: Sema/Test/MockManager.cpp:450-460.
