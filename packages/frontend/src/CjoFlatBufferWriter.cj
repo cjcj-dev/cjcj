@@ -198,6 +198,7 @@ public class ASTWriter {
     private let allDecls: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allExprs: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let topLevelDecls: HashSet<Decl> = HashSet<Decl>()
+    private let importedDeclPkgNames: HashSet<String> = HashSet<String>()
     // ASTWriterImpl.h:120 savedExprMap. Node Hashable/Equatable preserves AST object identity.
     private let savedExprMap: HashMap<Node, UInt32> = HashMap<Node, UInt32>()
     private let paramOwnerMangles: HashMap<String, String> = HashMap<String, String>()
@@ -340,6 +341,31 @@ public class ASTWriter {
 
         for (decl in topLevelDeclsOfFile) {
             topLevelDeclsOrdered.add(decl)
+        }
+    }
+
+    // ASTWriter.cpp:691-717 ASTWriterImpl::MarkImplicitExportOfImportSpec.
+    private func MarkImplicitExportOfImportSpec(pkg: Package): Unit {
+        for (file in pkg.files) {
+            for (importSpec in file.imports) {
+                if (importSpec.IsImportMulti()) {
+                    continue
+                }
+                let importPkgName = GetImportPackageNameByImportSpec(importSpec)
+                if (!importedDeclPkgNames.contains(importPkgName) && !importSpec.IsReExport(pkg.noSubPkg) &&
+                    !serializingCommon) {
+                    importSpec.withImplicitExport = false
+                } else {
+                    importedDeclPkgNames.remove(importPkgName)
+                }
+            }
+        }
+        for (implicitAddedPkgName in importedDeclPkgNames) {
+            pkg.files[0].imports.add(CreateImportSpec(implicitAddedPkgName))
+        }
+        importedDeclPkgNames.clear()
+        for (file in pkg.files) {
+            allFileImports.add(SaveFileImports(file))
         }
     }
 
@@ -2625,6 +2651,9 @@ public class ASTWriter {
             return CreateFullId(LOCAL_PACKAGE_INDEX, "", PreSaveDecl(decl))
         }
         let packageIndex = SavePackageName(pkgName)
+        if (decl.TestAttr(Attribute.IMPORTED)) {
+            importedDeclPkgNames.add(pkgName)
+        }
         let id = if (decl.exportId.isEmpty()) { decl.identifier.Val() } else { decl.exportId }
         return CreateFullId(Int64(packageIndex), id, 0u32)
     }
