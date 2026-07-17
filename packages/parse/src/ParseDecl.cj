@@ -389,6 +389,7 @@ extend ParserImpl {
         if (SeeingPrimaryConstructor(scopeKind)) { return ParsePrimaryConstructor(scopeKind, modifiers, annos) }
         if (Seeing(TokenKind.FUNC)) {
             let decl = ParseFuncDecl(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -401,6 +402,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.MACRO)) {
             let decl = ParseMacroDecl(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -410,6 +412,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.MAIN)) {
             let decl = ParseMainDecl(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -419,6 +422,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.LET) || Seeing(TokenKind.VAR) || Seeing(TokenKind.CONST)) {
             let decl = ParseVarOrLet(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -428,6 +432,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.CLASS)) {
             let decl = ParseClassDecl(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -437,6 +442,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.INTERFACE)) {
             let decl = ParseInterfaceDecl(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -446,6 +452,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.STRUCT)) {
             let decl = ParseStructDecl(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -455,6 +462,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.ENUM)) {
             let decl = ParseEnumDecl(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -464,6 +472,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.EXTEND)) {
             let decl = ParseExtendDecl(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -473,6 +482,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.TYPE)) {
             let decl = ParseTypeAlias(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -482,6 +492,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.PROP)) {
             let decl = ParsePropDecl(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
@@ -491,6 +502,7 @@ extend ParserImpl {
         }
         if (Seeing(TokenKind.INIT)) {
             let decl = ParseConstructor(scopeKind, modifiers, annos)
+            annos.clear()
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
