@@ -377,7 +377,8 @@ public class ASTWriter {
                     continue
                 }
                 let importPkgName = GetImportPackageNameByImportSpec(importSpec)
-                if (!importedDeclPkgNames.contains(importPkgName) && !importSpec.IsReExport(pkg.noSubPkg) &&
+                if (!importedDeclPkgNames.contains(importPkgName) &&
+                    !importSpec.IsReExport(noSubPkg: pkg.noSubPkg) &&
                     !serializingCommon) {
                     importSpec.withImplicitExport = false
                 } else {
