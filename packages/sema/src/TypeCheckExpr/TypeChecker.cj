@@ -32,6 +32,7 @@ import cjcj::utils.CPOINTER_NAME
 import cjcj::utils.CSTRING_NAME
 import cjcj::utils.CTYPE_NAME as UtilsCTypeName
 import cjcj::utils.CJC_ASSERT
+import cjcj::utils.CJC_ASSERT_WITH_MSG
 import cjcj::utils.CJC_ABORT
 import cjcj::utils.MAIN_INVOKE
 import cjcj::utils.OBJECT_NAME
@@ -92,6 +93,19 @@ private func CreateMainInvokeDecl(funcBody: FuncBody, mainFunc: FuncDecl, funcTy
 }
 
 extend TypeCheckerImpl {
+    // C++ src/Sema/InheritanceChecker/StructInheritanceChecker.cpp:284-295.
+    internal func CheckInheritance(pkg: Package): Unit {
+        let checker = StructInheritanceChecker(
+            diag.getOrThrow(), typeManager, pkg, importManager.getOrThrow(),
+            opts: ci.getOrThrow().globalOptions)
+        checker.Check()
+
+        let movedMembers = checker.MoveStructInheritedMembers()
+        CJC_ASSERT_WITH_MSG(structMemberMap.isEmpty(),
+            "structMemberMap should be empty when moving inherited members")
+        structMemberMap = movedMembers
+    }
+
     internal func GenerateMainInvoke(): Unit {
         if (mainFunctionMap.size != 1) {
             return
@@ -2802,15 +2816,7 @@ extend TypeChecker {
     }
 
     private func RunInheritanceCheck(pkg: Package): Unit {
-        if (let Some(diagValue) <- impl.diag) {
-            StructInheritanceChecker(
-                diagValue,
-                impl.typeManager,
-                pkg,
-                impl.importManager.getOrThrow(),
-                opts: GlobalOptions()
-            ).Check()
-        }
+        impl.CheckInheritance(pkg)
     }
 
     private func CheckLegalityOfUsage(ctx: ASTContext, pkg: Package): Unit {
