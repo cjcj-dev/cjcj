@@ -2522,7 +2522,13 @@ extend ParserImpl {
             }
             ret.identifier = ExpectIdentifierWithPos(ret)
             if (let Some(generic) <- ParseOptionalGeneric()) { ret.generic = generic }
-            ret.assignPos = Expect(TokenKind.ASSIGN, "expected '=' in type alias").Begin()
+            if (Skip(TokenKind.ASSIGN)) {
+                ret.assignPos = lookahead.Begin()
+            } else {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_assignment,
+                    lookahead, ConvertToken(lookahead)).Emit()
+                ConsumeUntilDecl()
+            }
             ret.typeNode = ParseType()
             ret.end = if (let Some(ty) <- ret.typeNode) { ty.end } else { ret.identifier.End() }
         }
