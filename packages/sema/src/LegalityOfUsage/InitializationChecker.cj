@@ -1389,24 +1389,30 @@ public class InitializationChecker {
     }
 
     private func CheckIllegalMemberAccess(expr: Expr, target: Decl, targetStruct: Node): Bool {
-        if (let None <- CurrentFuncBody()) {
+        let curFuncBody = GetCurFuncBody(ctx, expr.scopeName)
+        if (let None <- curFuncBody) {
             if (target.IsFuncOrProp()) {
                 AddIllegalMemberUse(expr, target)
                 return false
             }
             return true
         }
-        if (let None <- CurrentOutermostNamedFuncDecl()) {
+        let outerMostFunc: Option<FuncDecl> = if (let Some(symbol) <- ScopeManager.GetOutMostSymbol(
+            ctx, SymbolKind.FUNC, expr.scopeName)) {
+            symbol.node.getOrThrow() as FuncDecl
+        } else {
+            None
+        }
+        if (let None <- outerMostFunc) {
             AddIllegalMemberUse(expr, target)
             return false
         }
-        let outerMostFunc = CurrentOutermostNamedFuncDecl().getOrThrow()
-        if (let Some(owner) <- outerMostFunc.outerDecl) {
-            if (!owner.IsNominalDecl()) {
-                AddIllegalMemberUse(expr, target)
-                return false
-            }
-        } else {
+        let outerMostFuncDecl = outerMostFunc.getOrThrow()
+        if (let None <- outerMostFuncDecl.outerDecl) {
+            AddIllegalMemberUse(expr, target)
+            return false
+        }
+        if (!outerMostFuncDecl.outerDecl.getOrThrow().IsNominalDecl()) {
             AddIllegalMemberUse(expr, target)
             return false
         }
@@ -1414,10 +1420,18 @@ public class InitializationChecker {
         if (IsAllMembersInitialized(targetStruct) || leftVariable) {
             return true
         }
-        if (!IsInstanceConstructor(outerMostFunc)) {
+        if (!IsInstanceConstructor(outerMostFuncDecl)) {
             return true
         }
-        if (target.IsFuncOrProp() || !CurrentFuncBodySameAs(outerMostFunc)) {
+        if (target.IsFuncOrProp()) {
+            AddIllegalMemberUse(expr, target)
+            return false
+        }
+        if (let None <- curFuncBody.getOrThrow().funcDecl) {
+            AddIllegalMemberUse(expr, target)
+            return false
+        }
+        if (curFuncBody.getOrThrow().funcDecl.getOrThrow() != outerMostFuncDecl) {
             AddIllegalMemberUse(expr, target)
             return false
         }
