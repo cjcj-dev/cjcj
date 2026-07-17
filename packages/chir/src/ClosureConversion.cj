@@ -283,7 +283,7 @@ public class ClosureConversion {
     private let instAutoEnvBaseDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let instAutoEnvWrapperDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
     private let autoEnvImplDefs: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
-    private let boxClassMap: HashMap<String, ClassDef> = HashMap<String, ClassDef>()
+    private let boxClassMap: HashMap<Type, ClassDef> = HashMap<Type, ClassDef>()
     private let convertedCache: HashMap<Int64, Function> = HashMap<Int64, Function>()
     private let duplicateLambdaName: HashMap<String, Int64> = HashMap<String, Int64>()
     // C++: CHIR/Transformation/ClosureConversion.h:147.
@@ -1842,10 +1842,10 @@ public class ClosureConversion {
     }
 
     private func CreateBoxClassDef(valueTy: Type): ClassDef {
-        let className = CC_CAPTURED_PREFIX + TypeKey(valueTy)
-        if (let Some(found) <- boxClassMap.get(className)) {
+        if (let Some(found) <- boxClassMap.get(valueTy)) {
             return found
         }
+        let className = CC_CAPTURED_PREFIX + valueTy.ToString()
         let classDef = builder.CreateClassDef(CurrentPackage().GetName(), className)
         SetObjectSuperClass(classDef)
         let genericTypes = ArrayList<GenericType>()
@@ -1857,12 +1857,17 @@ public class ClosureConversion {
         }
         let classTy = builder.context.GetClassTy(classDef, typeArgs)
         classDef.SetType(classTy)
+        classDef.Set<IsCapturedClassInCC, Bool>(true)
+        classDef.EnableAttr(Attribute.COMPILER_ADD)
+        classDef.EnableAttr(Attribute.NO_REFLECT_INFO)
+        if (!genericTypes.isEmpty()) {
+            classDef.EnableAttr(Attribute.GENERIC)
+        }
         let memberInfo = MemberVarInfo("value", valueTy, isStatic: false, isReadOnly: false, rawMangledName: "value")
         memberInfo.attributeInfo.Enable(Attribute.PUBLIC)
         classDef.AddInstanceVar(memberInfo)
-        classDef.EnableAttr(Attribute.PUBLIC)
         AddClassToPackage(classDef)
-        boxClassMap[className] = classDef
+        boxClassMap[valueTy] = classDef
         return classDef
     }
 
