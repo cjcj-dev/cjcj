@@ -829,6 +829,37 @@ public class MockSupportManager {
         fieldDecl.EnableAttr(Attribute.MOCK_SUPPORTED)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1040-1077.
+    private func CreateForeignFunctionAccessorBody(funcDecl: FuncDecl,
+        accessorFuncParamLists: ArrayList<FuncParamList>): FuncBody {
+        let nothingTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_NOTHING)
+        CJC_ASSERT(funcDecl.TyKind() == TypeKind.TYPE_FUNC)
+        let funcTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let funcBody = funcDecl.funcBody.getOrThrow()
+
+        let args = ArrayList<FuncArg>()
+        for (paramList in accessorFuncParamLists) {
+            for (param in paramList.params) {
+                let funcArg = CreateFuncArg(CreateRefExpr(param))
+                if (let Some(varray) <- (funcArg.GetTy().getOrThrow() as VArrayTy)) {
+                    funcArg.withInout = true
+                    funcArg.SetTy(typeManager.GetPointerTy(varray.typeArgs[0]))
+                }
+                args.add(funcArg)
+            }
+        }
+
+        let accessorFuncRetStmt = CreateReturnExpr(CreateCallExpr(
+            CreateRefExpr(funcDecl), args, None, Some(funcTy.retTy), CallKind.CALL_INVALID))
+        accessorFuncRetStmt.SetTy(nothingTy)
+        let accessorFuncBodyStmts = ArrayList<Node>()
+        accessorFuncBodyStmts.add(accessorFuncRetStmt)
+        let accessorFuncBodyBlock = CreateBlock(accessorFuncBodyStmts, Some(nothingTy))
+        return CreateFuncBody(accessorFuncParamLists,
+            Some((ASTCloner.Clone(funcBody.retType.getOrThrow()) as Type).getOrThrow()),
+            Some(accessorFuncBodyBlock), Some(funcTy))
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
