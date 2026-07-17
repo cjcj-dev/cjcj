@@ -932,7 +932,6 @@ private func AddSetHandler(typeManager: TypeManager, importManager: SemaImportMa
 
     let lambdaVar = CreateVarDecl(HANDLER_LAMBDA_VAR_NAME, handlerLambda, None)
     ctx.AddDeclName(Names(HANDLER_LAMBDA_VAR_NAME, lambdaVar.scopeName), lambdaVar)
-    CopyGeneratedPosition(handlerLambda, lambdaVar)
     nodes.add(lambdaVar)
     let args = ArrayList<FuncArg>()
     let lambdaVarRef = CreateRefExpr(lambdaVar)
