@@ -1689,6 +1689,25 @@ public class MockSupportManager {
         return ReplaceFieldSetWithAccessor(assignment, isInConstructor)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1274-1298.
+    public func ReplaceExprWithAccessor(originalExpr: Expr,
+        isInConstructor: Bool, isSubMemberAccess!: Bool = false): Option<Expr> {
+        let expr = ExtractLastDesugaredExpr(originalExpr)
+        if (let Some(member) <- (expr as MemberAccess)) {
+            return ReplaceMemberAccess(member, isInConstructor, isSubMemberAccess)
+        }
+        if (let Some(assignment) <- (expr as AssignExpr)) {
+            return ReplaceAssignment(assignment, isInConstructor)
+        }
+        if (let Some(refExpr) <- (expr as RefExpr)) {
+            return ReplaceRefExpr(refExpr)
+        }
+        if (let Some(callExpr) <- (expr as CallExpr)) {
+            return ReplaceCallExpr(callExpr)
+        }
+        return None
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
