@@ -104,11 +104,23 @@ extend MockKind <: Equatable<MockKind> {
     }
 }
 
+// C++: Sema/Test/MockManager.h:31-34.
+public class GeneratedClassResult {
+    public let classDecl: ClassDecl
+    public let generated: Bool
+
+    public init(classDecl: ClassDecl, generated: Bool) {
+        this.classDecl = classDecl
+        this.generated = generated
+    }
+}
+
 public class MockManager {
     private let typeManager: TypeManager
     private let importManager: SemaImportManager
     private let mockUtils: MockUtils
 
+    private let mockedClassDecls: HashMap<ClassLikeDecl, ClassDecl> = HashMap<ClassLikeDecl, ClassDecl>()
     private let instantiationCounters: HashMap<Decl, Int64> = HashMap<Decl, Int64>()
     private let defaultForTypePresence: HashMap<Decl, Bool> = HashMap<Decl, Bool>()
 
