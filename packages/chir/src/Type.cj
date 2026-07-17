@@ -246,8 +246,7 @@ public open class Type <: Hashable & Equatable<Type> {
 
     public func IsCType(): Bool {
         if (let Some(classTy) <- (this as ClassType)) {
-            let def = classTy.GetCustomTypeDef()
-            return def.GetPackageName() == "std.core" && def.GetIdentifier() == "CType"
+            return CheckCustomTypeDefIsExpected(classTy.GetCustomTypeDef(), "std.core", "CType")
         }
         return false
     }
