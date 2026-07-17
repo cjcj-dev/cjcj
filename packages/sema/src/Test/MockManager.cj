@@ -1234,6 +1234,81 @@ public class MockManager {
         return currentStaticCall
     }
 
+    // C++: Sema/Test/MockManager.cpp:1371-1445.
+    private func GenerateCallHandlerLambda(decl: FuncDecl, injectTo: Expr,
+        declForInfo: Option<FuncDecl>): LambdaExpr {
+        let typeParamsParamNameForHandlerLambda = "typeParams"
+        let paramsParamNameForHandlerLambda = "args"
+        let objectParamNameForHandlerLambda = "obj"
+        let nothingTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_NOTHING)
+        let isMethod = !decl.IsStaticOrGlobal()
+
+        let handlerRetTy = typeManager.GetAnyTy()
+        let optionFuncRetTy = typeManager.GetEnumTy(
+            mockUtils.optionDecl.getOrThrow(), typeArgs: [handlerRetTy])
+        let arrayTy = typeManager.GetStructTy(
+            mockUtils.arrayDecl.getOrThrow(), [typeManager.GetAnyTy()])
+        let toStrArrayTy = typeManager.GetStructTy(mockUtils.arrayDecl.getOrThrow(),
+            [mockUtils.toStringDecl.getOrThrow().GetTy().getOrThrow()])
+        let objectTy = typeManager.GetClassTy(mockUtils.objectDecl.getOrThrow(), [])
+        let funcTy = if (isMethod) {
+            typeManager.GetFunctionTy([objectTy, arrayTy, toStrArrayTy], optionFuncRetTy)
+        } else {
+            typeManager.GetFunctionTy([arrayTy, toStrArrayTy], optionFuncRetTy)
+        }
+
+        let funcParamObj = CreateFuncParam(
+            objectParamNameForHandlerLambda, None, None, Some(objectTy))
+        let funcParamObjRef = RefExpr()
+        funcParamObjRef.ref = Reference(objectParamNameForHandlerLambda)
+        funcParamObjRef.ref.target = funcParamObj
+        funcParamObjRef.SetTy(funcParamObj.GetTy().getOrThrow())
+        funcParamObjRef.curFile = injectTo.curFile
+
+        let funcParam = CreateFuncParam(
+            paramsParamNameForHandlerLambda, None, None, Some(arrayTy))
+        let funcParamRef = RefExpr()
+        funcParamRef.ref = Reference(paramsParamNameForHandlerLambda)
+        funcParamRef.ref.target = funcParam
+        funcParamRef.SetTy(funcParam.GetTy().getOrThrow())
+        funcParamRef.curFile = injectTo.curFile
+
+        let funcTypeParam = CreateFuncParam(
+            typeParamsParamNameForHandlerLambda, None, None, Some(toStrArrayTy))
+        let funcTypeParamRef = RefExpr()
+        funcTypeParamRef.ref = Reference(typeParamsParamNameForHandlerLambda)
+        funcTypeParamRef.ref.target = funcTypeParam
+        funcTypeParamRef.SetTy(funcTypeParam.GetTy().getOrThrow())
+        funcTypeParamRef.curFile = injectTo.curFile
+
+        let handlerCallParams = ArrayList<FuncParam>()
+        if (isMethod) {
+            handlerCallParams.add(funcParamObj)
+        }
+        handlerCallParams.add(funcParam)
+        handlerCallParams.add(funcTypeParam)
+        let handlerCallParamLists = ArrayList<FuncParamList>()
+        handlerCallParamLists.add(CreateFuncParamList(handlerCallParams))
+
+        let handler: Expr = if (isMethod) {
+            GetMockedObjectHandler(funcParamObjRef, injectTo.curFile.getOrThrow())
+        } else {
+            GetCurrentStaticHandler(injectTo.curFile.getOrThrow())
+        }
+        let onCallDecl = if (let Some(value) <- declForInfo) { value } else { decl }
+        let onCallInvocation = CreateOnCallInvocation(
+            funcParamRef, funcTypeParamRef, onCallDecl, None, handler)
+        let matchExpr = CreateMatchExpr(onCallInvocation,
+            GenerateCallHandlerCases(decl, injectTo), optionFuncRetTy)
+        let handlerBodyReturn = CreateReturnExpr(matchExpr, None)
+        handlerBodyReturn.SetTy(nothingTy)
+        let handlerBody = ArrayList<Node>()
+        handlerBody.add(handlerBodyReturn)
+        return CreateLambdaExpr(CreateFuncBody(handlerCallParamLists,
+            Some(MockUtils.CreateType(optionFuncRetTy)),
+            Some(CreateBlock(handlerBody, Some(nothingTy))), Some(funcTy)))
+    }
+
     // C++: Sema/Test/MockManager.cpp:1204-1238.
     private func CreateMockedProp(originalProp: PropDecl, mockedDecl: ClassDecl,
         classGenericSubsts: ArrayList<TypeSubst>): Option<PropDecl> {
