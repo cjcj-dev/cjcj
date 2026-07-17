@@ -17,7 +17,8 @@ private func TypeCheckTypeRange(node: Node): BasicRange {
 }
 
 private func TypeCheckTypeEmitOld(diag: BasicDiagnosticEngine, node: Node, kind: BasicDiagKind): Unit {
-    let builder = Diagnose(diag, node, kind)
+    // C++ src/Sema/FFI/CFFICheck.cpp:317-324 passes type.begin/type.end to the range overload.
+    let builder = diag.Diagnose(node.begin, node.end, kind)
     builder.Emit()
 }
 
