@@ -6565,6 +6565,9 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 return false
             }
             CheckPackageSpecsIdentical(pkg)
+            if (opts.compileTestsOnly) {
+                pkg.fullPackageName = pkg.fullPackageName + SourceManager.testPkgSuffix
+            }
             AddImplicitImports(pkg, opts)
             sourcePackagesForMembers.add(pkg)
             AddSourcePackage(pkg)
