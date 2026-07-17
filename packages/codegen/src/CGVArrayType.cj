@@ -17,11 +17,11 @@ public class CGVArrayType <: CGType {
             unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
         }
         let elementCount = if (let Some(vArrayTy) <- (chirType as VArrayType)) {
-            UInt32(vArrayTy.size)
+            UInt64(vArrayTy.size)
         } else {
-            0u32
+            0u64
         }
-        let arrayType = unsafe { LLVMArrayType(elementTy, elementCount) }
+        let arrayType = unsafe { LLVMSelfhostArrayType64(elementTy, elementCount) }
         let layoutName = if (let Some(vArrayTy) <- (chirType as VArrayType)) {
             "VArray.${vArrayTy.size}" + MangleType(vArrayTy.GetElementType())
         } else {
