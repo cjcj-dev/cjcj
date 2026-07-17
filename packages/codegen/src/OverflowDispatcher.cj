@@ -104,7 +104,11 @@ public func GenerateOverflowBinary(irBuilder: IRBuilder2, strategy: OverflowStra
     if (strategy == OverflowStrategy.SATURATING) {
         return GenerateCheckedOverflowBinary(irBuilder, kind, lhs, lhsValue, rhsValue, resultType, strategy: strategy)
     }
-    if (strategy == OverflowStrategy.THROWING || strategy == OverflowStrategy.CHECKED) {
+    if (strategy == OverflowStrategy.CHECKED) {
+        return GenerateCheckedOverflowBinary(irBuilder, kind, lhs, lhsValue, rhsValue, resultType,
+            strategy: strategy)
+    }
+    if (strategy == OverflowStrategy.THROWING) {
         return GenerateThrowingBinaryIntOp(irBuilder, kind, lhs, rhs, lhsValue, rhsValue, resultType)
     }
     return LLVMNullValue()
@@ -143,7 +147,10 @@ public func GenerateOverflowUnary(irBuilder: IRBuilder2, strategy: OverflowStrat
         }
         return GenerateCheckedOverflowUnary(irBuilder, kind, operand, operandValue, resultType, strategy: strategy)
     }
-    if (strategy == OverflowStrategy.THROWING || strategy == OverflowStrategy.CHECKED) {
+    if (strategy == OverflowStrategy.CHECKED) {
+        return GenerateCheckedOverflowUnary(irBuilder, kind, operand, operandValue, resultType, strategy: strategy)
+    }
+    if (strategy == OverflowStrategy.THROWING) {
         return GenerateThrowingUnaryIntOp(irBuilder, kind, operand, operandValue, resultType)
     }
     return LLVMNullValue()
