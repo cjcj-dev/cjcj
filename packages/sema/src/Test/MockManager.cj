@@ -515,6 +515,23 @@ public class MockManager {
         return CreateInitCall(initDecl.getOrThrow(), valueArgs, curFile)
     }
 
+    // C++: Sema/Test/MockManager.cpp:852-868.
+    private func CreateParamInfo(param: FuncParam, position: Int64, curFile: File): CallExpr {
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let intTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+        let stringTy = mockUtils.stringDecl.getOrThrow().GetTy().getOrThrow()
+        let valueArgs = ArrayList<Expr>()
+        valueArgs.add(CreateLitConstExpr(LitConstKind.STRING, param.identifier.Val(), stringTy, true))
+        valueArgs.add(CreateLitConstExpr(LitConstKind.INTEGER, position.toString(), intTy, true))
+        valueArgs.add(CreateLitConstExpr(LitConstKind.BOOL,
+            if (param.isNamedParam) { "true" } else { "false" }, boolTy, true))
+        valueArgs.add(CreateLitConstExpr(LitConstKind.BOOL,
+            if (param.assignment.isSome()) { "true" } else { "false" }, boolTy, true))
+        let initDecl = FindInitDecl(parameterInfoDecl.getOrThrow(), typeManager, valueArgs)
+        CJC_ASSERT(initDecl.isSome())
+        return CreateInitCall(initDecl.getOrThrow(), valueArgs, curFile)
+    }
+
     // C++: Sema/Test/MockManager.cpp:972-1023.
     private func CreateDeclKind(decl: FuncDecl): CallExpr {
         let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
