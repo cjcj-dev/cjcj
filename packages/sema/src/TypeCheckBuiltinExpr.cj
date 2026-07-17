@@ -394,7 +394,15 @@ public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit
                 return false
             }
             let synTy = SynArrayLit(typeManager, arrayLit, arrayStruct, synthesizer: synthesizer, diag: diag)
-            return typeManager.IsSubtype(synTy, target)
+            if (typeManager.IsSubtype(synTy, target)) {
+                return true
+            }
+            if (Ty.IsTyCorrect(synTy)) {
+                if (let Some(diagValue) <- diag) {
+                    DiagMismatchedTypes(diagValue, arrayLit, target)
+                }
+            }
+            return false
         }
     } else if (!Ty.IsTyCorrect(targetTy) || (!targetTy.IsStructArray() && (let None <- (targetTy as VArrayTy)))) {
         arrayLit.SetTy(TypeManager.GetInvalidTy())
