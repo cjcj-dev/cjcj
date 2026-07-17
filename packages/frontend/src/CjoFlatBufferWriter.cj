@@ -300,6 +300,49 @@ public class ASTWriter {
         }
     }
 
+    // ASTWriter.cpp:646-689 ASTWriterImpl::DFSCollectFilesDeclarations.
+    private func DFSCollectFilesDeclarations(file: File, alreadyVisitedFiles: HashSet<Node>,
+        topLevelDeclsOrdered: ArrayList<Decl>, usedTys: HashSet<Ptr<Ty>>): Unit {
+        if (alreadyVisitedFiles.contains(file)) {
+            return
+        }
+        alreadyVisitedFiles.add(file)
+
+        let topLevelDeclsOfFile = ArrayList<Decl>()
+        for (decl in file.decls) {
+            if (!NeedToExportDecl(decl)) {
+                continue
+            }
+            AppendDecl(decl, topLevelDeclsOfFile)
+
+            let dependentFiles = HashSet<Node>()
+            for (dependency in decl.dependencies) {
+                dependentFiles.add(dependency.getOrThrow().curFile.getOrThrow())
+            }
+            for (dependentFileNode in dependentFiles) {
+                let dependentFile = (dependentFileNode as File).getOrThrow()
+                if (alreadyVisitedFiles.contains(dependentFile)) {
+                    continue
+                }
+                if (dependentFile.curPackage.getOrThrow() != file.curPackage.getOrThrow()) {
+                    continue
+                }
+                DFSCollectFilesDeclarations(dependentFile, alreadyVisitedFiles, topLevelDeclsOrdered, usedTys)
+            }
+
+            if (exportContent) {
+                for (typeIdentity in CollectInstantiations(decl)) {
+                    usedTys.add(typeIdentity)
+                }
+            }
+            AddCurFile(decl, file: Some(file))
+        }
+
+        for (decl in topLevelDeclsOfFile) {
+            topLevelDeclsOrdered.add(decl)
+        }
+    }
+
     // ASTWriter.cpp:720-752 ASTWriterImpl::ExportAST. This writer's existing
     // top-level traversal is retained until DFSCollectFilesDeclarations is ported.
     public func ExportAST(pkg: Package): Unit {
