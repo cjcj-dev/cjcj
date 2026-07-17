@@ -375,7 +375,7 @@ public class ASTMangler {
                 if (decl.TestAttr(Attribute.CONSTRUCTOR) && decl.TestAttr(Attribute.STATIC)) {
                     let initNameAndEnd: Int64 = 8
                     mangledRef.value = mangledRef.value[0..mangledRef.value.size - initNameAndEnd] +
-                        MangleName(STATIC_INIT_FUNC)
+                        MangleName("<clinit>")
                 }
                 mangledRef.value += MANGLE_DIDOLLAR_PREFIX
                 if (let Some(retType) <- body.retType) {
