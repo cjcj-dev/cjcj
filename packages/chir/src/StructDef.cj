@@ -35,7 +35,4 @@ public class StructDef <: CustomTypeDef {
         isC = value
     }
 
-    public override func ToString(indent: Int64): String {
-        return IndentToString(indent) + "struct " + GetFullName()
-    }
 }
