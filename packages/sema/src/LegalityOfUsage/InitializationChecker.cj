@@ -1694,7 +1694,7 @@ public class InitializationChecker {
                     var result = CheckExprOption(call.baseFunc)
                     if (let Some(desugarArgs) <- call.desugarArgs) {
                         for (arg in desugarArgs) {
-                            result = result && CheckExprOption(arg.expr)
+                            result = result && CheckExprOption(arg.getOrThrow().expr)
                         }
                     } else {
                         for (arg in call.args) {

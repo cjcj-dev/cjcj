@@ -4036,9 +4036,9 @@ private class CjoSignatureMaterializer {
                 }
                 argIdx++
             }
-            let desugarArgs = ArrayList<FuncArg>()
+            let desugarArgs = ArrayList<Option<FuncArg>>()
             for (arg in ce.args) {
-                desugarArgs.add(arg)
+                desugarArgs.add(Some(arg))
             }
             ce.desugarArgs = Some(desugarArgs)
             let infoTable = reader.OffsetField(exprTable, 20)

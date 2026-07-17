@@ -134,7 +134,7 @@ public class ExtendBoxMarker {
                     }
                     var count: Int64 = 0
                     while (count < argsToCheck.size && count < funcTy.paramTys.size) {
-                        if (let Some(argExpr) <- argsToCheck[count].expr) {
+                        if (let Some(argExpr) <- argsToCheck[count].getOrThrow().expr) {
                             if (NeedAutoBox(argExpr.GetTy(), Some(funcTy.paramTys[count]))) {
                                 callExpr.EnableAttr(Attribute.NEED_AUTO_BOX)
                             }

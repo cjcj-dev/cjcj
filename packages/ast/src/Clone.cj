@@ -1156,9 +1156,13 @@ public class ASTCloner {
                 target.defaultArgs.add(cloned)
                 cloneTable[arg] = cloned
             }
-            let clonedDesugarArgs = ArrayList<FuncArg>()
+            let clonedDesugarArgs = ArrayList<Option<FuncArg>>()
             for (sourceArg in sourceDesugarArgs) {
-                clonedDesugarArgs.add(cloneTable.get(sourceArg).getOrThrow())
+                if (let Some(arg) <- sourceArg) {
+                    clonedDesugarArgs.add(cloneTable.get(arg))
+                } else {
+                    clonedDesugarArgs.add(None)
+                }
             }
             target.desugarArgs = Some(clonedDesugarArgs)
         }
@@ -2429,9 +2433,13 @@ public class ASTCloner {
                             cloneTable[arg] = cloned
                         }
                     }
-                    let clonedDesugarArgs = ArrayList<FuncArg>()
+                    let clonedDesugarArgs = ArrayList<Option<FuncArg>>()
                     for (sourceArg in sourceDesugarArgs) {
-                        clonedDesugarArgs.add(cloneTable.get(sourceArg).getOrThrow())
+                        if (let Some(arg) <- sourceArg) {
+                            clonedDesugarArgs.add(cloneTable.get(arg))
+                        } else {
+                            clonedDesugarArgs.add(None)
+                        }
                     }
                     dst.desugarArgs = Some(clonedDesugarArgs)
                 }

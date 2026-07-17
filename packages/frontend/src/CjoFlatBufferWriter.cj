@@ -1849,7 +1849,7 @@ public class ASTWriter {
         operands.add(SaveExpr(ce.baseFunc.getOrThrow()))
         if (let Some(desugarArgs) <- ce.desugarArgs) {
             for (arg in desugarArgs) {
-                operands.add(SaveFuncArg(arg))
+                operands.add(SaveFuncArg(arg.getOrThrow()))
             }
         } else {
             for (arg in ce.args) {

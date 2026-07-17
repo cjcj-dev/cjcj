@@ -1345,7 +1345,7 @@ private func ResolveOverload(typeManager: TypeManager, candidates: ArrayList<Fun
     return out
 }
 
-private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr, out: ArrayList<FuncArg>): Unit {
+private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr, out: ArrayList<Option<FuncArg>>): Unit {
     let body = fd.funcBody.getOrThrow()
     CJC_ASSERT(!body.paramLists.isEmpty())
     let params = body.paramLists[0].params
@@ -1360,9 +1360,9 @@ private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr, out: Array
                 break
             }
             if (pos < out.size) {
-                out[pos] = arg
+                out[pos] = Some(arg)
             } else {
-                out.add(arg)
+                out.add(Some(arg))
             }
             pos++
             continue
@@ -1371,7 +1371,7 @@ private func SortCallArgumentByParamOrder(fd: FuncDecl, ce: CallExpr, out: Array
         var paramIdx: Int64 = 0
         while (paramIdx < params.size) {
             if (params[paramIdx].identifier.Val() == argName) {
-                out[paramIdx] = arg
+                out[paramIdx] = Some(arg)
                 break
             }
             paramIdx++
@@ -1402,7 +1402,7 @@ private func ReorderCallArgument(typeManager: TypeManager, ctx: Option<ASTContex
     let out = ArrayList<FuncDecl>()
     ce.defaultArgs.clear()
     let bodyParams = BodyParamList(fmu.fd).getOrThrow().params
-    let desugarArgs = ArrayList<FuncArg>()
+    let desugarArgs = ArrayList<Option<FuncArg>>()
     for (param in bodyParams) {
         if (param.TestAttr(Attribute.HAS_INITIAL)) {
             let defaultArg = CreateFuncArgForOptional(param)
@@ -1416,9 +1416,9 @@ private func ReorderCallArgument(typeManager: TypeManager, ctx: Option<ASTContex
             }
             SpreadInstantiationTy(typeManager, defaultArg, fmu.typeMapping)
             ce.defaultArgs.add(defaultArg)
-            desugarArgs.add(defaultArg)
+            desugarArgs.add(Some(defaultArg))
         } else {
-            desugarArgs.add(FuncArg())
+            desugarArgs.add(None)
         }
     }
     SortCallArgumentByParamOrder(fmu.fd, ce, desugarArgs)
@@ -1429,7 +1429,7 @@ private func ReorderCallArgument(typeManager: TypeManager, ctx: Option<ASTContex
     }
     var idx: Int64 = 0
     while (idx < funcTy.paramTys.size) {
-        let arg = desugarArgs[idx]
+        let arg = desugarArgs[idx].getOrThrow()
         if (arg.TestAttr(Attribute.HAS_INITIAL)) {
             idx++
             continue
@@ -3725,7 +3725,7 @@ private func UpdateFuncGenericType(typeManager: TypeManager, ctx: Option<ASTCont
         case None => return out
     }
     for (arg in desugarArgs) {
-        if (let Some(argExpr) <- arg.expr) {
+        if (let Some(argExpr) <- arg.getOrThrow().expr) {
             if (let Some(argTy) <- argExpr.GetTy()) {
                 if (argTy.HasIdealTy()) {
                     return out

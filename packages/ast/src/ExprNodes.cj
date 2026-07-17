@@ -1119,7 +1119,7 @@ public class CallExpr <: Expr {
     public var rightParenPos: Position = INVALID_POSITION
     public var resolvedFunction: Option<FuncDecl> = None
     public var callKind: CallKind = CallKind.CALL_INVALID
-    public var desugarArgs: Option<ArrayList<FuncArg>> = None
+    public var desugarArgs: Option<ArrayList<Option<FuncArg>>> = None
     public let defaultArgs: ArrayList<FuncArg> = ArrayList<FuncArg>()
     public var needCheckToTokens: Bool = false
     public var sugarKind: SugarKind = SugarKind.NO_SUGAR

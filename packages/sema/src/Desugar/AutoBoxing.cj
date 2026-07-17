@@ -259,17 +259,18 @@ private func AddOptionBoxHandleArrayExpr(typeManager: TypeManager, arrayExpr: Ar
     }
 }
 
-private func AddOptionBoxHandleCallArgs(typeManager: TypeManager, args: ArrayList<FuncArg>, funcTy: FuncTy): Unit {
+private func AddOptionBoxHandleCallArgs(typeManager: TypeManager, args: ArrayList<Option<FuncArg>>, funcTy: FuncTy): Unit {
     var idx: Int64 = 0
     while (idx < args.size && idx < funcTy.paramTys.size) {
-        if (let Some(expr) <- args[idx].expr) {
+        let arg = args[idx].getOrThrow()
+        if (let Some(expr) <- arg.expr) {
             if (let Some(exprTy) <- expr.GetTy()) {
                 let paramTy = funcTy.paramTys[idx]
                 if (NeedBoxOption(typeManager, exprTy, paramTy)) {
                     if (let Some(optionTarget) <- (paramTy as EnumTy)) {
                         TryOptionBox(typeManager, optionTarget, expr)
                         if (let Some(boxedTy) <- expr.GetTy()) {
-                            args[idx].SetTy(boxedTy)
+                            arg.SetTy(boxedTy)
                         }
                     }
                 }
@@ -286,7 +287,11 @@ private func AddOptionBoxHandleCallExpr(typeManager: TypeManager, callExpr: Call
                 if (let Some(desugarArgs) <- callExpr.desugarArgs) {
                     AddOptionBoxHandleCallArgs(typeManager, desugarArgs, funcTy)
                 } else {
-                    AddOptionBoxHandleCallArgs(typeManager, callExpr.args, funcTy)
+                    let args = ArrayList<Option<FuncArg>>()
+                    for (arg in callExpr.args) {
+                        args.add(Some(arg))
+                    }
+                    AddOptionBoxHandleCallArgs(typeManager, args, funcTy)
                 }
             }
         }

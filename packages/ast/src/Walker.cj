@@ -632,7 +632,9 @@ public class Walker {
                     if (stopIf(walkExprOption(call.baseFunc))) { return VisitAction.STOP_NOW }
                     if (let Some(desugarArgs) <- call.desugarArgs) {
                         for (arg in desugarArgs) {
-                            if (stopIf(WalkNode(arg))) { return VisitAction.STOP_NOW }
+                            if (let Some(value) <- arg) {
+                                if (stopIf(WalkNode(value))) { return VisitAction.STOP_NOW }
+                            }
                         }
                     } else {
                         for (arg in call.args) {

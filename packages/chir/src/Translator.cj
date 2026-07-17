@@ -2007,7 +2007,7 @@ public class Translator {
             CJC_ASSERT(!args.isEmpty())
             var idx: Int64 = 0
             while (idx + 1 < args.size) {
-                ProcessMapExpr(RequireFuncArgExpr(args[idx], "subscript side-effect argument"), isSubScript)
+                ProcessMapExpr(RequireFuncArgExpr(args[idx].getOrThrow(), "subscript side-effect argument"), isSubScript)
                 idx++
             }
         }
@@ -7624,11 +7624,15 @@ public class Translator {
         currentBlock = successBlock
     }
 
-    private func ActiveCallArgs(expr: AstCallExpr): ArrayList<AstFuncArg> {
+    private func ActiveCallArgs(expr: AstCallExpr): ArrayList<Option<AstFuncArg>> {
         if (let Some(desugarArgs) <- expr.desugarArgs) {
             return desugarArgs
         }
-        return expr.args
+        let args = ArrayList<Option<AstFuncArg>>()
+        for (arg in expr.args) {
+            args.add(Some(arg))
+        }
+        return args
     }
 
     // Faithful port of Translator::TranslateIntrinsicCall
@@ -7682,7 +7686,7 @@ public class Translator {
             AppendTranslatedCallArgs(expr, callee, args, ArrayList<Type>(), previousDefaultArgs)
         } else {
             for (arg in ActiveCallArgs(expr)) {
-                args.add(TranslateTrivialArgWithNoSugar(arg, None))
+                args.add(TranslateTrivialArgWithNoSugar(arg.getOrThrow(), None))
             }
         }
 
@@ -8024,10 +8028,11 @@ public class Translator {
         let args = ActiveCallArgs(expr)
         var idx: Int64 = 0
         for (arg in args) {
+            let funcArg = arg.getOrThrow()
             let value = if (idx < expectedParamTys.size) {
-                TranslateOneCallArg(expr, calleeDecl, arg, idx, Some(expectedParamTys[idx]), previousDefaultArgs)
+                TranslateOneCallArg(expr, calleeDecl, funcArg, idx, Some(expectedParamTys[idx]), previousDefaultArgs)
             } else {
-                TranslateOneCallArg(expr, calleeDecl, arg, idx, None, previousDefaultArgs)
+                TranslateOneCallArg(expr, calleeDecl, funcArg, idx, None, previousDefaultArgs)
             }
             out.add(value)
             previousDefaultArgs.add(value)
@@ -8084,9 +8089,10 @@ public class Translator {
         let argValues = ArrayList<Value>()
         var idx: Int64 = 0
         for (arg in ActiveCallArgs(expr)) {
-            if (arg.expr.isSome()) {
+            let funcArg = arg.getOrThrow()
+            if (funcArg.expr.isSome()) {
                 let expectedTy: Option<Type> = if (idx < paramInstTys.size) { Some(paramInstTys[idx]) } else { None }
-                argValues.add(TranslateTrivialArgWithNoSugar(arg, expectedTy))
+                argValues.add(TranslateTrivialArgWithNoSugar(funcArg, expectedTy))
             }
             idx++
         }

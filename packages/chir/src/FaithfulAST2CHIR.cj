@@ -3244,7 +3244,7 @@ public class FaithfulAST2CHIR {
         let argExprs = callExpr.desugarArgs.getOrThrow()
         var argIndex: Int64 = 0
         while (argIndex < argExprs.size) {
-            if (argExprs[argIndex].TestAttr(AstAttribute.HAS_INITIAL)) {
+            if (argExprs[argIndex].getOrThrow().TestAttr(AstAttribute.HAS_INITIAL)) {
                 let resolved = callExpr.resolvedFunction ??
                     throw IllegalStateException("faithful GlobalDeclAnalysis default arg call has no resolved function")
                 let funcBody = resolved.funcBody ??

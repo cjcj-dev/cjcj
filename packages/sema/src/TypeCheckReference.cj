@@ -2300,7 +2300,7 @@ private func CheckUsageOfDeprecatedParameters(
         var idx: Int64 = 0
         while (idx < args.size) {
             let param = params[idx]
-            let arg = args[idx]
+            let arg = args[idx].getOrThrow()
             if (param.HasAnno(AstAnnotationKind.DEPRECATED) && !arg.TestAnyAttr(Attribute.COMPILER_ADD)) {
                 let _ = DiagnoseDeprecatedUsageImpl(diag, arg, param, state)
             }
