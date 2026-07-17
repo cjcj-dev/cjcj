@@ -12,8 +12,6 @@ import cjcj::mangle.ManglerContext as RealManglerContext
 import cjcj::sema.CompilerInstance as FaithfulSemaCompilerInstance
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
 import cjcj::sema.Desugar.DesugarBeforeTypeCheck as FaithfulDesugarBeforeTypeCheck
-import cjcj::sema.AnalyzeFunctionLinkage
-import cjcj::sema.CheckInlineFunctionsForPackages
 import cjcj::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cjcj::sema.TypeCheckReferenceRemoveTargetNotMeetExtendConstraint
 import cjcj::meta_transformation.MetaTransformPluginBuilder
@@ -21,7 +19,6 @@ import cjcj::meta_transformation.NativeMetaTransformPlugin
 import cjcj::lex.Lexer as CangjieLexer
 import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
-import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::incremental_compilation.IncreKind
 import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
     MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, SemanticInfo, TopLevelDeclCache, VarInitDepMap,
@@ -31,7 +28,6 @@ import cjcj::option.OutputMode
 import cjcj::parse.ASTHasher
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
-import cjcj::utils.STANDARD_LIBS
 import cjcj::utils.IncrementalCompilationLogger
 import cjcj::utils.InternalError
 import cjcj::utils.CJC_ABORT
@@ -534,26 +530,8 @@ public class CompilerInstance {
     public func PerformDesugarAfterSema(): Bool {
         testManager.MarkDeclsForTestIfNeeded(GetSourcePackages())
         getCompileStrategy().DesugarAfterSema()
-        // Inline checking needs to process source package and imported packages which has source imported decls.
-        CheckInlineFunctionsForPackages(GetPackages(), invocation.globalOptions)
-        // Since the inlined function will affect decls' visibility, analyze linkage after inline decl checking.
-        for (pkg in srcPkgs) {
-            AnalyzeFunctionLinkage(pkg, invocation.globalOptions)
-        }
         if (!invocation.globalOptions.enIncrementalCompilation) {
             testManager.PrepareToMock(GetSourcePackages())
-        }
-        // Sema/Desugar/AfterTypeCheck.cpp:466-476: pre-save full exported
-        // declarations after desugaring and linkage analysis, before generic instantiation.
-        let saveFileWithAbsPath = invocation.globalOptions.enableCompileDebug ||
-            invocation.globalOptions.enableCoverage
-        for (pkg in srcPkgs) {
-            let saveAbsPath = if (STANDARD_LIBS.contains(pkg.fullPackageName)) {
-                invocation.globalOptions.enableCoverage
-            } else {
-                saveFileWithAbsPath
-            }
-            importManager.ExportDeclsWithContent(saveAbsPath, pkg)
         }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "desugar")
@@ -640,8 +618,9 @@ public class CompilerInstance {
         if (pkgs.isEmpty()) {
             return true
         }
+        let compatibleSDKVersion = invocation.globalOptions.passedWhenKeyValue.get("APILevel_level") ?? ""
         for (pkg in pkgs) {
-            FaithfulDesugarBeforeTypeCheck(pkg)
+            FaithfulDesugarBeforeTypeCheck(pkg, compatibleSDKVersion: compatibleSDKVersion)
         }
         let semaInstance = FaithfulSemaCompilerInstance()
         semaInstance.typeManager = typeManager.AsFaithfulSemaTypeManager()
@@ -651,6 +630,7 @@ public class CompilerInstance {
         semaInstance.buildTrie = buildTrie
         semaInstance.frontendDumpActionIsTypeCheck = invocation.frontendOptions.dumpAction == DumpAction.TYPE_CHECK
         semaInstance.diag = Some(diag.AsBasicDiagnosticEngine())
+        semaInstance.mangler = mangler
         for (pkg in this.pkgs) {
             semaInstance.packages.add(pkg)
         }
@@ -862,15 +842,8 @@ public class CompilerInstance {
         }
     }
 
-    public func PerformCodeGen(enableIncrement!: Bool = false,
-        cachedMangleMap!: CachedMangleMap = CachedMangleMap()): Bool {
-        if (diag.GetErrorCount() != 0) {
-            return false
-        }
-        if (let Some(pkg) <- chirData.GetCurrentCHIRPackage()) {
-            chirData.ActivateCodegenFuncsForPackage(pkg)
-        }
-        return GenPackageModules(this, enableIncrement, cachedMangleMap)
+    public func PerformCodeGen(): Bool {
+        return true
     }
 
     public func PerformCjoSaving(): Bool {
