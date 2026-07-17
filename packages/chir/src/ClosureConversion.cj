@@ -1837,12 +1837,9 @@ public class ClosureConversion {
     private func ConvertApplyToInvoke(apply: Apply): Unit {
         let callee = apply.GetCallee()
         let instParentType = ResolveAutoEnvCallParentType(callee, apply)
-        let method = ResolveAutoEnvVirtualMethod(instParentType)
+        let (methodName, originalFuncType) = GetFuncTypeFromAutoEnvBaseDef(instParentType.GetClassDef())
         let funcContext = FuncCallContext(args: apply.GetArgs(), thisType: Some(instParentType))
-        let methodTy = method.GetFuncType() ??
-            throw IllegalStateException("ClosureConversion AutoEnv method has no type")
-        let methodContext = FuncSigInfo(methodTy,
-            funcName: method.GetSrcCodeIdentifier(), genericTypeParams: method.GetGenericTypeParams())
+        let methodContext = FuncSigInfo(originalFuncType, funcName: methodName)
         let invokeContext = InvokeCallContext(callee, funcContext, methodContext)
         let retTy = apply.GetResultType() ??
             throw IllegalStateException("ClosureConversion apply has no result type")
@@ -1856,11 +1853,9 @@ public class ClosureConversion {
     private func ConvertApplyWithExceptionToInvokeWithException(apply: ApplyWithException): Unit {
         let callee = apply.GetCallee()
         let instParentType = ResolveAutoEnvCallParentType(callee, apply)
-        let method = ResolveAutoEnvVirtualMethod(instParentType)
+        let (methodName, originalFuncType) = GetFuncTypeFromAutoEnvBaseDef(instParentType.GetClassDef())
         let funcContext = FuncCallContext(args: apply.GetArgs(), thisType: Some(instParentType))
-        let methodContext = FuncSigInfo(method.GetFuncType() ??
-            throw IllegalStateException("ClosureConversion AutoEnv method has no type"),
-            funcName: method.GetSrcCodeIdentifier(), genericTypeParams: method.GetGenericTypeParams())
+        let methodContext = FuncSigInfo(originalFuncType, funcName: methodName)
         let invokeContext = InvokeCallContext(callee, funcContext, methodContext)
         let retTy = apply.GetResultType() ??
             throw IllegalStateException("ClosureConversion apply-with-exception has no result type")
@@ -1924,20 +1919,6 @@ public class ClosureConversion {
             idx++
         }
         return (ReplaceRawGenericArgType(closureType, replaceTable, builder) as ClassType).getOrThrow()
-    }
-
-    private func ResolveAutoEnvVirtualMethod(classTy: ClassType): Function {
-        let def = classTy.GetClassDef()
-        let methodName = if (IsInstAutoEnvBaseDef(def)) { INST_VIRTUAL_FUNC } else { GENERIC_VIRTUAL_FUNC }
-        if (let Some(method) <- FindMethodBySrcName(def, methodName)) {
-            return method
-        }
-        if (let Some(superDef) <- def.GetSuperClassDef()) {
-            if (let Some(method2) <- FindMethodBySrcName(superDef, methodName)) {
-                return method2
-            }
-        }
-        throw IllegalStateException("ClosureConversion AutoEnv method not found: " + methodName)
     }
 
     private func ApplyNeedConvertToInvoke(apply: Apply): Bool {
