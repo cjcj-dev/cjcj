@@ -6,7 +6,7 @@ import cjcj::sema.GetUsableGetterForProperty
 import cjcj::sema.GetUsableSetterForProperty
 import cjcj::sema.{GenerateTypeMapping, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::utils.V_COMPILER
+import cjcj::utils.{TEST_ENTRY_NAME, V_COMPILER}
 
 private let OPTION_VALUE_CTOR: String = "Some"
 private let OPTION_NONE_CTOR: String = "None"
@@ -435,5 +435,69 @@ public class MockSupportManager {
             CreateMatchExpr(handlerCallExpr, handlerResultCases, unitTy)))
         handlerCases.add(CreateMatchCase(WildcardPattern(), CreateUnitExpr(unitTy)))
         return handlerCases
+    }
+
+    // C++: Sema/Test/MockSupportManager.cpp:397-468.
+    private func PrepareStaticDecl(decl: Decl): Unit {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let funcDecl = if (let Some(func) <- (decl as FuncDecl)) { func } else { return }
+        if (funcDecl.identifier.Val() == TEST_ENTRY_NAME) {
+            return
+        }
+        let body = if (let Some(value) <- funcDecl.funcBody.getOrThrow().body) { value } else { return }
+        let isMethod = decl.outerDecl.isSome() && !decl.IsStaticOrGlobal()
+
+        let handlerRetTy = typeManager.GetAnyTy()
+        let optionFuncRetTy = typeManager.GetEnumTy(mockUtils.optionDecl.getOrThrow(), typeArgs: [handlerRetTy])
+        let arrayTy = typeManager.GetStructTy(mockUtils.arrayDecl.getOrThrow(), [typeManager.GetAnyTy()])
+        let toStrArrayTy = typeManager.GetStructTy(mockUtils.arrayDecl.getOrThrow(),
+            [mockUtils.toStringDecl.getOrThrow().GetTy().getOrThrow()])
+        let objectTy = typeManager.GetClassTy(mockUtils.objectDecl.getOrThrow(), [])
+        let funcTy = if (isMethod) {
+            typeManager.GetFunctionTy([objectTy, arrayTy, toStrArrayTy], optionFuncRetTy)
+        } else {
+            typeManager.GetFunctionTy([arrayTy, toStrArrayTy], optionFuncRetTy)
+        }
+        let optionFuncTy = typeManager.GetEnumTy(mockUtils.optionDecl.getOrThrow(), typeArgs: [funcTy])
+        let noneCtor = CreateRefExpr(LookupEnumMember(
+            mockUtils.optionDecl.getOrThrow(), OPTION_NONE_CTOR).getOrThrow())
+        noneCtor.curFile = decl.curFile
+        noneCtor.SetTy(optionFuncTy)
+
+        let varMangledName = mockUtils.Mangle(decl)
+        let varDecl = CreateVarDecl(varMangledName + MockUtils.mockAccessorSuffix, Some(noneCtor), None)
+        varDecl.isVar = true
+        varDecl.EnableAttr(Attribute.GLOBAL)
+        let varDeclRef = CreateRefExpr(varDecl)
+        varDeclRef.SetTy(optionFuncTy)
+        mockUtils.AttachGeneratedDecl(varDecl, decl)
+
+        let optionFuncTyPattern = EnumPattern()
+        let optionFuncTyPatternConstructor = LookupEnumMember(
+            mockUtils.optionDecl.getOrThrow(), OPTION_VALUE_CTOR).getOrThrow()
+        optionFuncTyPattern.SetTy(
+            (optionFuncTyPatternConstructor.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy)
+        optionFuncTyPattern.constructor = mockUtils.CreateRefExprWithInstTys(
+            optionFuncTyPatternConstructor, ArrayList<Ty>([funcTy]),
+            OPTION_VALUE_CTOR, decl.curFile.getOrThrow())
+        let optionFuncTyVarPattern = CreateVarPattern(V_COMPILER, Some(funcTy))
+        let varPatternRef = CreateRefExpr(optionFuncTyVarPattern.varDecl.getOrThrow())
+        varPatternRef.SetTy(funcTy)
+        optionFuncTyPattern.patterns.add(optionFuncTyVarPattern)
+
+        let handlerCallArgs = ArrayList<FuncArg>()
+        if (isMethod) {
+            handlerCallArgs.add(CreateFuncArg(CreateThisRefForMockSupport(objectTy.decl.getOrThrow())))
+        }
+        handlerCallArgs.add(CreateFuncArg(mockUtils.WrapCallArgsIntoArray(funcDecl)))
+        handlerCallArgs.add(CreateFuncArg(mockUtils.WrapCallTypeArgsIntoArray(funcDecl)))
+        let handlerCallExpr = CreateCallExpr(varPatternRef, handlerCallArgs, None,
+            Some(optionFuncRetTy), CallKind.CALL_INVALID)
+        handlerCallExpr.callKind = CallKind.CALL_FUNCTION_PTR
+        let handlerCases = GenerateHandlerMatchCases(funcDecl, optionFuncTyPattern, handlerCallExpr)
+        let handlerMatch = CreateMatchExpr(varDeclRef, handlerCases, unitTy)
+        handlerMatch.curFile = funcDecl.curFile
+        body.body.add(handlerMatch, at: 0)
+        decl.EnableAttr(Attribute.MOCK_SUPPORTED)
     }
 }
