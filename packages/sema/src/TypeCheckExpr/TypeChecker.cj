@@ -8356,6 +8356,16 @@ extend TypeChecker {
         if (let Some(tryExpr) <- (expr as TryExpr)) {
             return SynTryExpr(ctx, tryExpr)
         }
+        if (let Some(performExpr) <- (expr as PerformExpr)) {
+            let commandTy: Option<Ty> = if (let Some(commandDecl) <-
+                lookupResolvedPackageDecl(ctx, "stdx.effect", "Command")) {
+                commandDecl.GetTy()
+            } else { None }
+            return FinishSynthesize(ctx, performExpr, SynPerformExpr(impl.typeManager, performExpr,
+                commandTy: commandTy,
+                synthesizer: Some({ innerExpr: Expr => Synthesize(ctx, SynPos.EXPR_ARG, innerExpr) }),
+                diag: impl.diag))
+        }
         if (let Some(resumeExpr) <- (expr as ResumeExpr)) {
             return FinishSynthesize(ctx, resumeExpr, SynResumeExpr(impl.typeManager, resumeExpr,
                 exceptionTy: LookupCoreTy(ctx, "Exception"), errorTy: LookupCoreTy(ctx, "Error"),
