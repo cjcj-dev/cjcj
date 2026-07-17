@@ -1450,6 +1450,30 @@ public class MockManager {
         GenerateCallHandlerForStaticDecl(target, callExpr)
     }
 
+    // C++: Sema/Test/MockManager.cpp:1603-1626.
+    private func HandleMockAnnotatedLambdaWithMemberAccess(
+        ma: MemberAccess, injectTo: Expr): Unit {
+        let target = (ma.target.getOrThrow() as VarDeclAbstract).getOrThrow()
+        CJC_ASSERT(target.IsStaticOrGlobal())
+        let getterDecl: FuncDecl = if (let Some(propDecl) <- (target as PropDecl)) {
+            GetUsableGetterForProperty(propDecl).getOrThrow()
+        } else {
+            mockUtils.FindAccessor(Some(ma), Some(target),
+                GetVarDeclGetterAccessorKind(target)).getOrThrow()
+        }
+        GenerateCallHandlerForStaticDecl(getterDecl, injectTo)
+
+        if (target.isVar) {
+            let setter: FuncDecl = if (let Some(propDecl) <- (ma.target.getOrThrow() as PropDecl)) {
+                GetUsableSetterForProperty(propDecl).getOrThrow()
+            } else {
+                mockUtils.FindAccessor(Some(ma), ma.target,
+                    GetVarDeclSetterAccessorKind(target)).getOrThrow()
+            }
+            GenerateCallHandlerForStaticDecl(setter, injectTo)
+        }
+    }
+
     // C++: Sema/Test/MockManager.cpp:1204-1238.
     private func CreateMockedProp(originalProp: PropDecl, mockedDecl: ClassDecl,
         classGenericSubsts: ArrayList<TypeSubst>): Option<PropDecl> {
