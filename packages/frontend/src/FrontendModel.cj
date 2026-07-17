@@ -1605,7 +1605,7 @@ private class CjoSignatureMaterializer {
         } else {
             allTypes[Int64(index)] = Some(FaithfulSemaTypeManager.GetInvalidTy())
         }
-        return allTypes[Int64(index)].getOrThrow()
+        return allTypes[Int64(index)] ?? FaithfulSemaTypeManager.GetInvalidTy()
     }
 
     // ReferenceLoader.cpp:293-304 GetPrimitiveTy.
