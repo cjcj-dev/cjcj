@@ -411,7 +411,7 @@ extend TypeChecker {
                 currentFuncSymbol.scopeName
             }
             for (decl in ctx.GetDeclsByName(Names(target.identifier.Val(), funcScope))) {
-                if (decl.astKind != ASTKind.VAR_DECL || decl.identifier != target.identifier) {
+                if ((let None <- (decl as VarDecl)) || decl.identifier != target.identifier) {
                     continue
                 }
                 if (let Some(diagValue) <- impl.diag) {
