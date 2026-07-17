@@ -579,7 +579,7 @@ public class TypeCheckerImpl {
 
     public func ExtendFieldLookup(ctx: ASTContext, file: File, ty: Option<Ty>, fieldName: String): ArrayList<Decl> {
         let _ = ctx
-        return ExtendFieldLookup(typeManager, file, ty, fieldName)
+        return ExtendFieldLookup(typeManager, file, ty, fieldName, importManager: importManager)
     }
 
     public func SynReferenceSeparately(ctx: ASTContext, scopeName: String, expr: Expr,

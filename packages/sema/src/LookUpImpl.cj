@@ -34,10 +34,12 @@ public class LookupInfo {
 
 private class LookUpImpl {
     private let typeManager: TypeManager
+    private let importManager: Option<SemaImportManager>
     private let resultsWithInstTyV = ArrayList<(Option<Decl>, Option<InterfaceTy>)>()
 
-    public init(typeManager: TypeManager) {
+    public init(typeManager: TypeManager, importManager!: Option<SemaImportManager> = None) {
         this.typeManager = typeManager
+        this.importManager = importManager
     }
 
     public func InsertResultsWithInstTy(idx: Int64, decl: Decl, interfaceTy: InterfaceTy): Unit {
@@ -431,7 +433,7 @@ private func addMemberIfValidForLookup(results: ArrayList<Decl>, typeManager: Ty
     addDeclUnique(results, decl)
 }
 
-private func fieldLookupExtend(lookUpImpl: LookUpImpl, typeManager: TypeManager, ty: Ty, fieldName: String,
+private func FieldLookupExtend(lookUpImpl: LookUpImpl, typeManager: TypeManager, ty: Ty, fieldName: String,
     results: ArrayList<Decl>, info: LookupInfo): Unit {
     let extendDecls = ArrayList<Decl>()
     for (extendDecl in typeManager.GetAllExtendsByTy(ty)) {
@@ -440,7 +442,12 @@ private func fieldLookupExtend(lookUpImpl: LookUpImpl, typeManager: TypeManager,
     let orderedExtends = sortedDecls(extendDecls)
     for (decl in orderedExtends) {
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-            if (!extendAccessibleForLookup(typeManager, info, extendDecl)) {
+            let isAccessible = if (let Some(manager) <- lookUpImpl.importManager) {
+                manager.IsExtendAccessible(info.file.getOrThrow(), extendDecl, None)
+            } else {
+                extendAccessibleForLookup(typeManager, info, extendDecl)
+            }
+            if (!isAccessible) {
                 continue
             }
             for (member in extendDecl.members) {
@@ -452,7 +459,12 @@ private func fieldLookupExtend(lookUpImpl: LookUpImpl, typeManager: TypeManager,
     }
     for (decl in orderedExtends) {
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-            if (!extendAccessibleForLookup(typeManager, info, extendDecl)) {
+            let isAccessible = if (let Some(manager) <- lookUpImpl.importManager) {
+                manager.IsExtendAccessible(info.file.getOrThrow(), extendDecl, None)
+            } else {
+                extendAccessibleForLookup(typeManager, info, extendDecl)
+            }
+            if (!isAccessible) {
                 continue
             }
             for (inheritedType in extendDecl.inheritedTypes) {
@@ -511,7 +523,7 @@ private func fieldLookupClass(lookUpImpl: LookUpImpl, typeManager: TypeManager, 
     }
     if (info.lookupExtend) {
         if (let Some(ty) <- cd.GetTy()) {
-            fieldLookupExtend(lookUpImpl, typeManager, ty, fieldName, results, info)
+            FieldLookupExtend(lookUpImpl, typeManager, ty, fieldName, results, info)
         }
     }
 }
@@ -542,7 +554,7 @@ private func fieldLookupEnum(lookUpImpl: LookUpImpl, typeManager: TypeManager, e
     }
     if (info.lookupExtend) {
         if (let Some(ty) <- ed.GetTy()) {
-            fieldLookupExtend(lookUpImpl, typeManager, ty, fieldName, results, info)
+            FieldLookupExtend(lookUpImpl, typeManager, ty, fieldName, results, info)
         }
     }
     return results
@@ -571,7 +583,7 @@ private func fieldLookupStruct(lookUpImpl: LookUpImpl, typeManager: TypeManager,
     }
     if (info.lookupExtend) {
         if (let Some(ty) <- sd.GetTy()) {
-            fieldLookupExtend(lookUpImpl, typeManager, ty, fieldName, results, info)
+            FieldLookupExtend(lookUpImpl, typeManager, ty, fieldName, results, info)
         }
     }
     return results
@@ -839,7 +851,7 @@ private func collectResolvedImportedDeclsByName(ctx: ASTContext, node: Node, nam
 public func FieldLookup(typeManager: TypeManager, decl: Option<Decl>, fieldName: String,
     info!: LookupInfo = LookupInfo(), importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
     let results = ArrayList<Decl>()
-    let lookUpImpl = LookUpImpl(typeManager)
+    let lookUpImpl = LookUpImpl(typeManager, importManager)
     if (let Some(target) <- decl) {
         let actual = GetSpecificDecl(target)
         if (let Some(classDecl) <- (actual as ClassDecl)) {
@@ -928,7 +940,7 @@ private func processStructDeclBody(typeManager: TypeManager, ctx: ASTContext, na
                     FieldLookup(typeManager, Some(typeDecl), name, info: info)
                 } else if (let Some(ty) <- currentTy) {
                     let extendResults = ArrayList<Decl>()
-                    fieldLookupExtend(LookUpImpl(typeManager), typeManager, ty, name, extendResults, info)
+                    FieldLookupExtend(LookUpImpl(typeManager), typeManager, ty, name, extendResults, info)
                     extendResults
                 } else {
                     ArrayList<Decl>()
@@ -1032,12 +1044,12 @@ private func lookupCommon(typeManager: TypeManager, ctx: ASTContext, name: Strin
     return results
 }
 
-public func ExtendFieldLookup(typeManager: TypeManager, file: File, ty: Option<Ty>,
-    fieldName: String): ArrayList<Decl> {
+public func ExtendFieldLookup(typeManager: TypeManager, file: File, ty: Option<Ty>, fieldName: String,
+    importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
     let results = ArrayList<Decl>()
     if (let Some(value) <- ty) {
         if (Ty.IsTyCorrect(value)) {
-            fieldLookupExtend(LookUpImpl(typeManager), typeManager, value, fieldName, results,
+            FieldLookupExtend(LookUpImpl(typeManager, importManager), typeManager, value, fieldName, results,
                 LookupInfo(baseTy: value, file: file))
         }
     }
