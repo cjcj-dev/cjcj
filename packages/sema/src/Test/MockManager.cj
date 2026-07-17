@@ -22,6 +22,7 @@ private let DECL_KIND_ENUM_NAME: String = "DeclKind"
 private let RETURN_ZERO_ENTRY: String = "ReturnZero"
 private let RETURN_ENTRY: String = "Return"
 private let THROW_ENTRY: String = "Throw"
+private let RETURN_DEFAULT_ENTRY: String = "ReturnDefault"
 private let HAS_DEFAULT_VALUE_FOR_STUB_INTERFACE_NAME: String = "HasDefaultValueForStub"
 private let NO_DEFAULT_VALUE_FOR_MOCK_EXCEPTION_NAME: String = "NoDefaultValueForMockException"
 private let MOCK_RETURN_VALUE_TYPE_MISMATCH_EXCEPTION_NAME: String = "MockReturnValueTypeMismatchException"
@@ -105,6 +106,7 @@ public class MockManager {
     private let mockUtils: MockUtils
 
     private let instantiationCounters: HashMap<Decl, Int64> = HashMap<Decl, Int64>()
+    private let defaultForTypePresence: HashMap<Decl, Bool> = HashMap<Decl, Bool>()
 
     private var callHandlerDecl: Option<InterfaceDecl> = None
     private var mockedInterfaceDecl: Option<InterfaceDecl> = None
@@ -424,6 +426,53 @@ public class MockManager {
             }
         }
         return None
+    }
+
+    // C++: Sema/Test/MockManager.cpp:660-703.
+    private func CreateOnCallReturnDefaultMatchCase(originalMethod: FuncDecl, retTy: Ty,
+        enumConstructor: Decl): MatchCase {
+        let rhsExpr: Expr
+        if (let Some(defaultValueProviderDecl) <- FindDefaultValueForStubMethod(retTy)) {
+            defaultForTypePresence[originalMethod] = true
+            let defaultValueProviderRef = RefExpr()
+            defaultValueProviderRef.ref = Reference(retTy.String())
+            defaultValueProviderRef.ref.target = Ty.GetDeclOfTy(Some(retTy))
+            defaultValueProviderRef.instTys.add(all: retTy.typeArgs)
+            defaultValueProviderRef.SetTy(retTy)
+
+            let defaultValueProviderMemberAccess =
+                CreateMemberAccess(defaultValueProviderRef, DEFAULT_VALUE_FOR_STUB_METHOD_NAME)
+            defaultValueProviderMemberAccess.SetTy(typeManager.GetFunctionTy([], retTy))
+            defaultValueProviderMemberAccess.target = defaultValueProviderDecl
+
+            let defaultValueProviderCall = CallExpr()
+            defaultValueProviderCall.SetTy(retTy)
+            defaultValueProviderCall.resolvedFunction = defaultValueProviderDecl
+            defaultValueProviderCall.baseFunc = defaultValueProviderMemberAccess
+            defaultValueProviderCall.callKind = CallKind.CALL_DECLARED_FUNCTION
+            defaultValueProviderCall.curFile = originalMethod.curFile
+            rhsExpr = defaultValueProviderCall
+        } else {
+            defaultForTypePresence[originalMethod] = false
+            let exceptionCallArgs = ArrayList<Expr>()
+            let stringTy = mockUtils.stringDecl.getOrThrow().GetTy().getOrThrow()
+            exceptionCallArgs.add(CreateLitConstExpr(LitConstKind.STRING, retTy.String(), stringTy, true))
+            exceptionCallArgs.add(CreateLitConstExpr(LitConstKind.STRING,
+                HAS_DEFAULT_VALUE_FOR_STUB_INTERFACE_NAME, stringTy, true))
+            rhsExpr = CreateThrowException(noDefaultValueForMockException.getOrThrow(), exceptionCallArgs,
+                originalMethod.curFile.getOrThrow(), typeManager)
+        }
+
+        let pattern = EnumPattern()
+        let constructorTy = enumConstructor.GetTy().getOrThrow()
+        pattern.SetTy(if (constructorTy.IsFunc()) {
+            (constructorTy as FuncTy).getOrThrow().retTy
+        } else {
+            constructorTy
+        })
+        pattern.constructor = mockUtils.CreateRefExprWithInstTys(enumConstructor,
+            constructorTy.typeArgs, RETURN_DEFAULT_ENTRY, originalMethod.curFile.getOrThrow())
+        return CreateMatchCase(pattern, rhsExpr)
     }
 
     // C++: Sema/Test/MockManager.cpp:450-460.
