@@ -4,7 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::sema.GetUsableGetterForProperty
 import cjcj::sema.GetUsableSetterForProperty
-import cjcj::sema.TypeManager
+import cjcj::sema.{GenerateTypeMapping, TypeManager}
 
 public class DeclsToPrepare {
     public let functions: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
@@ -331,5 +331,51 @@ public class MockSupportManager {
             }
             decls.functions.add(funcDecl)
         }
+    }
+
+    // C++: Sema/Test/MockSupportManager.cpp:1769-1817.
+    private func CloneFuncDecl(fromDecl: FuncDecl, toDecl: FuncDecl,
+        curFile!: Option<File> = None, fullPackageName!: String = ""): ArrayList<Ty> {
+        CopyBasicInfo(fromDecl, toDecl)
+        toDecl.CloneAttrs(fromDecl)
+        toDecl.linkage = fromDecl.linkage
+        toDecl.fullPackageName = fromDecl.fullPackageName
+        toDecl.identifier = fromDecl.identifier
+        toDecl.outerDecl = fromDecl.outerDecl
+        if (let Some(file) <- curFile) {
+            toDecl.curFile = file
+        }
+        if (!fullPackageName.isEmpty()) {
+            toDecl.fullPackageName = fullPackageName
+        }
+
+        toDecl.funcBody = FuncBody()
+        let genericTys = mockUtils.AddGenericIfNeeded(fromDecl, toDecl)
+        let typeSubsts = GenerateTypeMapping(fromDecl, genericTys)
+        toDecl.SetTy(typeManager.GetInstantiatedTy(fromDecl.GetTy().getOrThrow(), typeSubsts))
+        let toBody = toDecl.funcBody.getOrThrow()
+        let fromBody = fromDecl.funcBody.getOrThrow()
+        toBody.SetTy(toDecl.GetTy().getOrThrow())
+        toBody.retType = (ASTCloner.Clone(fromBody.retType.getOrThrow()) as Type).getOrThrow()
+        toBody.retType.getOrThrow().SetTy((toDecl.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy)
+        toBody.funcDecl = toDecl
+        toBody.parentClassLike = toBody.parentClassLike
+
+        let paramList = FuncParamList()
+        CopyBasicInfo(fromBody.paramLists[0], paramList)
+        for (param in fromBody.paramLists[0].params) {
+            let clonedParam = FuncParam()
+            CopyBasicInfo(param, clonedParam)
+            clonedParam.CloneAttrs(param)
+            clonedParam.SetTy(typeManager.GetInstantiatedTy(param.GetTy().getOrThrow(), typeSubsts))
+            clonedParam.typeNode = MockUtils.CreateType(clonedParam.GetTy().getOrThrow())
+            clonedParam.outerDecl = toDecl
+            clonedParam.identifier = param.identifier
+            clonedParam.curFile = toDecl.curFile
+            clonedParam.fullPackageName = toDecl.fullPackageName
+            paramList.params.add(clonedParam)
+        }
+        toBody.paramLists.add(paramList)
+        return genericTys
     }
 }
