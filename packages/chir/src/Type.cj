@@ -1854,6 +1854,10 @@ public class EnumType <: CustomType {
         super(TypeKind.TYPE_ENUM, def, typeArgs)
     }
 
+    public override func ToString(): String {
+        return "Enum-" + def.GetIdentifierWithoutPrefix() + TypeVecToString("<", argTys, ">")
+    }
+
     public func GetEnumDef(): EnumDef {
         if (let Some(enumDef) <- (def as EnumDef)) {
             return enumDef
