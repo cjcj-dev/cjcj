@@ -611,7 +611,7 @@ public class MockSupportManager {
         callMockedMember.resolvedFunction =
             (memberAccessFuncBaseExpr.target.getOrThrow() as FuncDecl).getOrThrow()
         callMockedMember.baseFunc = memberAccessFuncBaseExpr
-        callMockedMember.args = callBaseArgs
+        callMockedMember.args.add(all: callBaseArgs)
         callMockedMember.callKind = CallKind.CALL_DECLARED_FUNCTION
         callMockedMember.curFile = funcDecl.curFile
         callMockedMember.EnableAttr(Attribute.GENERATED_TO_MOCK)
