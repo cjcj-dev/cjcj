@@ -254,13 +254,17 @@ private class ImportPackageWalker {
             for (decl in GetAllDecls(packageDecl)) {
                 if (decl.rawMangleName.isEmpty()) { continue }
                 walker.UpdateMangleNameAndCollectDep(decl)
-                retMap[decl.rawMangleName] = decl
+                if (!retMap.contains(decl.rawMangleName)) {
+                    retMap[decl.rawMangleName] = decl
+                }
                 collectedDecls.add(decl)
             }
         }
         for (decl in collectedDecls) {
             let declCache = walker.VisitTopLevel(decl)
-            ret[decl.rawMangleName] = declCache
+            if (!ret.contains(decl.rawMangleName)) {
+                ret[decl.rawMangleName] = declCache
+            }
             relations.CollectImportedDeclExtraRelation(decl)
         }
         return (ret, retMap, srcImportedDeclDeps, relations)
@@ -313,7 +317,9 @@ private class ImportPackageWalker {
     }
 
     private func VisitTopLevel(decl: Decl): TopLevelDeclCache {
-        map[decl.rawMangleName] = decl
+        if (!map.contains(decl.rawMangleName)) {
+            map[decl.rawMangleName] = decl
+        }
         let result = TopLevelDeclCache()
         for (member in GetMembers(decl)) {
             if (member.rawMangleName.isEmpty()) { continue }
@@ -328,7 +334,9 @@ private class ImportPackageWalker {
     }
 
     private func VisitMember(decl: Decl): MemberDeclCache {
-        map[decl.rawMangleName] = decl
+        if (!map.contains(decl.rawMangleName)) {
+            map[decl.rawMangleName] = decl
+        }
         let result = MemberDeclCache()
         for (member in GetMembers(decl)) {
             if (member.rawMangleName.isEmpty()) { continue }
