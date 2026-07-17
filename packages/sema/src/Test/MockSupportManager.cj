@@ -1553,6 +1553,22 @@ public class MockSupportManager {
         }
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1533-1548.
+    private func ReplaceFieldGetWithAccessor(
+        memberAccess: MemberAccess, isInConstructor: Bool): Option<Expr> {
+        ReplaceSubMemberAccessWithAccessor(memberAccess, isInConstructor)
+        if (memberAccess.target.isNone() ||
+            (isInConstructor && IsMemberAccessOnThis(memberAccess))) {
+            return None
+        }
+        if (let Some(accessorCall) <- GenerateGetterCall(memberAccess)) {
+            accessorCall.sourceExpr = memberAccess
+            memberAccess.desugarExpr = accessorCall
+            return memberAccess.desugarExpr
+        }
+        return None
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
