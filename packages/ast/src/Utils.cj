@@ -289,13 +289,7 @@ public func InitializeLitConstValue(lce: LitConstExpr): Unit {
         return
     }
     if (primitiveTy.IsFloating()) {
-        let builder = StringBuilder()
-        for (byte in lce.stringValue.toArray()) {
-            if (byte != b'_') {
-                builder.append(String.fromUtf8([byte]))
-            }
-        }
-        let stringValue = builder.toString()
+        let stringValue = lce.stringValue.replace("_", "")
         if (let Some(value) <- Stold(stringValue)) {
             lce.constNumValue.asFloat.value = value
         } else if (FloatFormat.IsUnderFlowFloat(stringValue)) {
