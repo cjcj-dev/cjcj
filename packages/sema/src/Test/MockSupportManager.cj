@@ -1569,6 +1569,56 @@ public class MockSupportManager {
         return None
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1512-1531.
+    private func ReplaceMemberAccessWithAccessor(
+        memberAccess: MemberAccess, isInConstructor: Bool): Option<Expr> {
+        var parentMutExpr: Option<Expr> = None
+        if (let Some(callOrPattern) <- memberAccess.callOrPattern) {
+            if (let Some(callExpr) <- (callOrPattern as CallExpr)) {
+                if (let Some(resolvedFunction) <- callExpr.resolvedFunction) {
+                    if (let Some(outerDecl) <- MockUtils.GetOuterDecl(resolvedFunction)) {
+                        if (resolvedFunction.TestAttr(Attribute.MUT) &&
+                            (outerDecl as StructDecl).isSome()) {
+                            parentMutExpr = callExpr
+                        }
+                    }
+                }
+            }
+        }
+        ReplaceSubMemberAccessWithAccessor(memberAccess, isInConstructor, parentMutExpr)
+        if (isInConstructor && IsMemberAccessOnThis(memberAccess)) {
+            return None
+        }
+
+        if (let Some(funcDecl) <- (memberAccess.target.getOrThrow() as FuncDecl)) {
+            if (funcDecl.propDecl.isSome()) {
+                let foundProp = mockUtils.FindAccessorForMemberAccess(
+                    memberAccess.baseExpr.getOrThrow().GetTy(), funcDecl.propDecl, AccessorKind.METHOD)
+                if (foundProp.isNone() || (foundProp.getOrThrow() as PropDecl).isNone()) {
+                    return None
+                }
+                let propDeclToMock = (foundProp.getOrThrow() as PropDecl).getOrThrow()
+                if (funcDecl.isGetter) {
+                    memberAccess.target = GetUsableGetterForProperty(propDeclToMock).getOrThrow()
+                } else if (funcDecl.isSetter) {
+                    memberAccess.target = GetUsableSetterForProperty(propDeclToMock).getOrThrow()
+                }
+                return Some(memberAccess)
+            }
+        }
+        let funcDeclToMock = mockUtils.FindAccessorForMemberAccess(
+            memberAccess.baseExpr.getOrThrow().GetTy(), memberAccess.target, AccessorKind.METHOD)
+        if (funcDeclToMock.isSome()) {
+            memberAccess.target = funcDeclToMock.getOrThrow()
+            if (let Some(callOrPattern) <- memberAccess.callOrPattern) {
+                if (let Some(callExpr) <- (callOrPattern as CallExpr)) {
+                    callExpr.resolvedFunction = (funcDeclToMock.getOrThrow() as FuncDecl).getOrThrow()
+                }
+            }
+        }
+        return Some(memberAccess)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
