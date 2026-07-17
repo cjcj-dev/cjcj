@@ -505,7 +505,8 @@ public class DiagnosticEmitter {
             let ptr = multiLineHangingPtrVec[loc]
             let line = ptr[0]
             let column = ptr[1]
-            if (column >= multiLineHangingVec.size || line >= multiLineHangingVec[column].size) {
+            if (column < 0 || column >= multiLineHangingVec.size || line < 0 ||
+                line >= multiLineHangingVec[column].size) {
                 return
             }
             let old = multiLineHangingVec[column][line]
