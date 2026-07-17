@@ -7,6 +7,7 @@ import cjcj::utils.{CreateAltSignalStack, RegisterCrashSignalHandler}
 @When[!debug && os == "Windows"]
 import cjcj::utils.{RegisterCrashExceptionHandler, RegisterCrashSignalHandler}
 import cjcj::macro_pkg.RuntimeInit
+import cjcj::frontend.{DiagnosticEngine, SourceManager}
 import cjcj::utils.{InternalError, NullPointerException, RegisterCrtlCSignalHandler, TriggerPointSetter}
 
 @When[!debug && os != "Windows"]
@@ -30,6 +31,10 @@ public func RunDriverMain(args: Array<String>): Int64 {
         if (args.isEmpty()) {
             return 1
         }
+        let sourceManager = SourceManager()
+        // C++: src/main.cpp:62-64, main-scope SourceManager and DiagnosticEngine lifetime.
+        try (diag = DiagnosticEngine()) {
+        diag.SetSourceManager(sourceManager)
         @When[os == "Windows"]
         let maybeExePath = GetApplicationPath()
         @When[os != "Windows"]
@@ -45,7 +50,7 @@ public func RunDriverMain(args: Array<String>): Int64 {
             TempFileManager.Instance().DeleteTempFiles()
             return exitCode
         }
-        let driver = Driver(args, executableName: executablePath)
+        let driver = Driver(args, diag, executableName: executablePath)
         driver.EnvironmentSetup(environmentVars)
         if (!driver.ParseArgs()) {
             eprintln("Invalid options. Try: 'cjc --help' for more information.")
@@ -58,6 +63,7 @@ public func RunDriverMain(args: Array<String>): Int64 {
             return 1
         }
         RuntimeInit.GetInstance().CloseRuntime()
+        }
     } catch (nullPointerException: NullPointerException) {
         try (iceSetter = TriggerPointSetter(nullPointerException.GetTriggerPoint())) {
             InternalError("null pointer")
