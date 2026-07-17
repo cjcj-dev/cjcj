@@ -3901,11 +3901,6 @@ public class Translator {
         currentBlock = savedBlock
     }
 
-    private func IsGlobalOrMemberFunc(funcDecl: AstFuncDecl): Bool {
-        return funcDecl.TestAnyAttr(AstAttribute.GLOBAL, AstAttribute.IN_CLASSLIKE, AstAttribute.IN_ENUM) ||
-            funcDecl.TestAnyAttr(AstAttribute.IN_STRUCT, AstAttribute.IN_EXTEND)
-    }
-
     private func TranslateNestedFunc(funcDecl: AstFuncDecl): Option<Value> {
         if (funcDecl.TestAnyAttr(AstAttribute.INTRINSIC, AstAttribute.ABSTRACT, AstAttribute.FOREIGN)) {
             return None
