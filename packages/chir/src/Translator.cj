@@ -6196,8 +6196,7 @@ public class Translator {
         }
         let tuplePattern = pattern as AstTuplePattern
         if (tuplePattern.isNone() || isEnumField) {
-            let elementAstTy = if (ty.HasGeneric()) { RequireAstTy(pattern) } else { ty }
-            let elementTy = chirTy.TranslateType(elementAstTy)
+            let elementTy = chirTy.TranslateType(ty)
             let elementVal = RequireResult(builder.CreateField(elementTy, value, indexes, CurrentBlock()))
             queue.add((pattern, elementVal))
             return
