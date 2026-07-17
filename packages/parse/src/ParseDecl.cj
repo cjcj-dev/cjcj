@@ -2340,7 +2340,7 @@ extend ParserImpl {
                 }
             }
             if (!member.IsInvalid()) {
-                member.outerDecl = ret
+                SetMemberParentInheritableDecl(ret, member)
                 if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) ||
                     ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) {
                     if (let Some(funcDecl) <- (member as FuncDecl)) {
