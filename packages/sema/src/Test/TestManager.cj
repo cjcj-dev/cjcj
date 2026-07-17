@@ -98,16 +98,6 @@ public func IsMockAnnotedLambda(node: Node): Bool {
     return node.astKind == ASTKind.LAMBDA_EXPR && node.TestAttr(Attribute.MOCK_SUPPORTED)
 }
 
-private func NodeBelongsToPackage(node: Node, pkg: Package): Bool {
-    if (let Some(fileNode) <- node.curFile) {
-        if (let Some(curPkg) <- fileNode.curPackage) {
-            return curPkg.fullPackageName == pkg.fullPackageName
-        }
-        return false
-    }
-    return true
-}
-
 private class MockUsageFoundBox {
     public var value: Bool = false
     public init() {}
@@ -167,7 +157,7 @@ public func IsThereMockUsageInPackage(pkg: Package): Bool {
     let mockUsageFound = MockUsageFoundBox()
     let walker = Walker(pkg, visitPre: { node: Node =>
         if (let Some(callExpr) <- (node as CallExpr)) {
-            if (NodeBelongsToPackage(callExpr, pkg)) {
+            if (callExpr.IsSamePackage(pkg)) {
                 let markedResolved = if (let Some(resolvedFunc) <- callExpr.resolvedFunction) {
                     resolvedFunc.TestAttr(Attribute.CONTAINS_MOCK_CREATION_CALL)
                 } else {
@@ -180,7 +170,7 @@ public func IsThereMockUsageInPackage(pkg: Package): Bool {
             }
         }
         if (let Some(lambdaExpr) <- (node as LambdaExpr)) {
-            if (NodeBelongsToPackage(lambdaExpr, pkg) && lambdaExpr.TestAttr(Attribute.MOCK_SUPPORTED)) {
+            if (lambdaExpr.IsSamePackage(pkg) && lambdaExpr.TestAttr(Attribute.MOCK_SUPPORTED)) {
                 mockUsageFound.value = true
                 return VisitAction.STOP_NOW
             }
@@ -430,7 +420,7 @@ public class TestManager {
     public func HandleCreateMock(pkg: Package): Unit {
         let callExprs = ArrayList<CallExpr>()
         let walker = Walker(pkg, visitPre: { node: Node =>
-            if (!NodeBelongsToPackage(node, pkg)) {
+            if (!node.IsSamePackage(pkg)) {
                 return VisitAction.WALK_CHILDREN
             }
             if (let Some(callExpr) <- (node as CallExpr)) {
@@ -473,9 +463,6 @@ public class TestManager {
 
     private func MarkNodesMockSupported(pkg: Package): Unit {
         let walker = Walker(pkg, visitPre: { node: Node =>
-            if (!NodeBelongsToPackage(node, pkg)) {
-                return VisitAction.SKIP_CHILDREN
-            }
             MockSupportManager.MarkNodeMockSupportedIfNeeded(node)
             return VisitAction.WALK_CHILDREN
         })
