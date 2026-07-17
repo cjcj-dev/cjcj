@@ -157,7 +157,7 @@ private func CreateClassConstructorCall(typeManager: TypeManager, source: Node,
         }
         CopyGeneratedPosition(source, ctorRef)
         let callExpr = CreateCallExpr(ctorRef, args, Some(initDecl), Some(classTy), CallKind.CALL_OBJECT_CREATION)
-        callExpr.desugarArgs = Some(ArrayList<FuncArg>())
+        callExpr.desugarArgs = None
         callExpr.callKind = CallKind.CALL_OBJECT_CREATION
         callExpr.SetTy(classTy)
         AddCurFile(callExpr, file: source.curFile)
@@ -860,7 +860,7 @@ private func CreateFrame(typeManager: TypeManager, importManager: SemaImportMana
     CopyNodeScopeInfo(lambdaVarRef, frameRef)
     frameArgs.add(CreateFuncArg(lambdaVarRef))
     let frameCreation = CreateCallExpr(frameInit, frameArgs, None, Some(frameTy), CallKind.CALL_OBJECT_CREATION)
-    frameCreation.desugarArgs = Some(ArrayList<FuncArg>())
+    frameCreation.desugarArgs = None
     if (!callChecker(frameTy, frameCreation)) {
         return None
     }
