@@ -932,7 +932,7 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
         if (!extra.isEmpty()) {
             comments.add(extra)
         }
-        return cjcj::chir.CommentToString(comments)
+        return CommentToString(comments)
     }
 
     protected open func LocalVarToString(): String {
@@ -952,7 +952,7 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
             if (!localVar.rawMangledName.isEmpty()) {
                 comments.add("rawMangledName: " + localVar.rawMangledName)
             }
-            out += cjcj::chir.CommentToString(comments) + "\n"
+            out += CommentToString(comments) + "\n"
         }
         return out
     }
