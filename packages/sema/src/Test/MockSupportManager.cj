@@ -1371,6 +1371,24 @@ public class MockSupportManager {
         return block
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1356-1384.
+    private func ReplaceRefExpr(refExpr: RefExpr): Option<Expr> {
+        if (refExpr.GetTarget().isNone() || refExpr.TestAttr(Attribute.LEFT_VALUE)) {
+            return None
+        }
+        let target = refExpr.GetTarget().getOrThrow()
+        if (target.astKind != ASTKind.VAR_DECL) {
+            return None
+        }
+        if (target.TestAttr(Attribute.GLOBAL)) {
+            return ReplaceTopLevelVariableGetWithAccessor(refExpr)
+        }
+        if (target.TestAttr(Attribute.STATIC)) {
+            return ReplaceRefExprWithGetAccessor(refExpr)
+        }
+        return ReplaceVarRefExprWithGetAccessor(refExpr)
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
