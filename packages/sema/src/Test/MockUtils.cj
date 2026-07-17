@@ -133,6 +133,14 @@ public class MockUtils {
         return mangler.Mangle(decl)
     }
 
+    // C++: Sema/Test/MockUtils.h:214-222.
+    public func GetGenericDecl(decl: Decl): Decl {
+        if (let Some(genericDecl) <- decl.genericDecl) {
+            return genericDecl
+        }
+        return decl
+    }
+
     // C++: Sema/Test/MockUtils.h:61-66.
     public func WrapTy2CPointer(ty: Ty): PointerTy {
         return typeManager.GetPointerTy(ty)
