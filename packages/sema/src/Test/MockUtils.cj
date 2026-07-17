@@ -97,7 +97,8 @@ public class MockUtils {
     // C++: Sema/Test/MockUtils.h:163-175.
     private let importManager: SemaImportManager
     private let typeManager: TypeManager
-    private let mangler: BaseMangler
+    // C++ MockUtils.h:163,233-235: MockSupportManager has friend access.
+    internal let mangler: BaseMangler
     // C++ MockUtils.h:163-175,233-235: these fields are private but MockManager,
     // MockSupportManager, and TestManager are friends.
     internal var getTypeForTypeParamDecl: Option<FuncDecl> = None
