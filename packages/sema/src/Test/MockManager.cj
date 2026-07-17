@@ -1157,6 +1157,33 @@ public class MockManager {
         return Some(mockedProp)
     }
 
+    // C++: Sema/Test/MockManager.cpp:1240-1267.
+    private func AddMockedMemberIfNeeded(mockedDecl: ClassDecl, member: Decl,
+        classGenericSubsts: ArrayList<TypeSubst>): Unit {
+        if (member.TestAttr(Attribute.CONSTRUCTOR)) {
+            return
+        }
+        if (member.TestAttr(Attribute.STATIC)) {
+            if (let Some(originalMethod) <- (member as FuncDecl)) {
+                if (originalMethod.funcBody.getOrThrow().body.isNone()) {
+                    mockedDecl.body.getOrThrow().decls.add(
+                        CreateStaticMethodStub(originalMethod, mockedDecl, classGenericSubsts))
+                }
+            }
+            return
+        }
+        if (let Some(originalProp) <- (member as PropDecl)) {
+            if (let Some(mockedProp) <- CreateMockedProp(originalProp, mockedDecl, classGenericSubsts)) {
+                mockedDecl.body.getOrThrow().decls.add(mockedProp)
+            }
+        }
+        if (let Some(originalMethod) <- (member as FuncDecl)) {
+            if (let Some(mockedMethod) <- CreateMockedMethod(originalMethod, mockedDecl, classGenericSubsts)) {
+                mockedDecl.body.getOrThrow().decls.add(mockedMethod)
+            }
+        }
+    }
+
     public static func MockedDeclName(original: ClassLikeDecl, instantiationNumber!: Int64 = 0): String {
         return original.identifier.Val() + MOCKED_DECL_SUFFIX + instantiationNumber.toString()
     }
