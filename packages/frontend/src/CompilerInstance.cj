@@ -225,7 +225,7 @@ public class CompilerInstance {
     public var isCJLint: Bool = false
     public var buildTrie: Bool = true
     public let srcPkgs: ArrayList<Package> = ArrayList<Package>()
-    public let realASTPkgs: HashMap<Package, RealASTPackage> = HashMap<Package, RealASTPackage>()
+    public let realASTPkgs: HashMap<Node, RealASTPackage> = HashMap<Node, RealASTPackage>()
     public let chirData: CHIRData = CHIRData()
     public var faithfulSemaInstance: Option<FaithfulSemaCompilerInstance> = None
     private var faithfulTypeChecker: Option<FaithfulSemaTypeChecker> = None
