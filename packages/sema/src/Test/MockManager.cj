@@ -1289,7 +1289,7 @@ public class MockManager {
         handlerCallParams.add(funcParam)
         handlerCallParams.add(funcTypeParam)
         let handlerCallParamLists = ArrayList<FuncParamList>()
-        handlerCallParamLists.add(CreateFuncParamList(handlerCallParams))
+        handlerCallParamLists.add(CreateFuncParamList(handlerCallParams, None))
 
         let handler: Expr = if (isMethod) {
             GetMockedObjectHandler(funcParamObjRef, injectTo.curFile.getOrThrow())
