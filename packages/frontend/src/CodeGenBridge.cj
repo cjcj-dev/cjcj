@@ -854,6 +854,7 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
     while (packageIndex < packagesToEmit.size) {
         let realPackage = packagesToEmit[packageIndex]
         instance.chirData.SetCurrentRealCHIRPackage(Some(realPackage))
+        instance.invocation.globalOptions.UpdateCachedDirName(realPackage.GetName())
         let codegenData = CodegenCHIRData(instance.chirData.GetRealCHIRContext(), realPackage)
         for ((mangledName, fn) in instance.chirData.GetImplicitFuncs(realPackage)) {
             codegenData.AddImplicitFunc(mangledName, fn)
