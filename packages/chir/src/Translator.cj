@@ -9189,14 +9189,11 @@ public class Translator {
         let baseExpr = RequireExpr(subscriptExpr.baseExpr, "VArray assign base")
         let baseTy = chirTy.TranslateType(RequireAstTy(baseExpr))
         if (!IsCompoundAssignOp(assign.op)) {
-            let rhsValue = Translator.TranslateASTNode(rightExpr, this) ??
-                throw IllegalStateException("faithful AST2CHIR VArray assignment rhs produced no value")
-            let rhs = GetDerefedValue(rhsValue)
+            let rhs = GetDerefedValue(TranslateExprArg(rightExpr))
             let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
             let lhsBase = AddressOfLeftValue(baseLeftValueInfo, baseTy)
-            let indexValue = Translator.TranslateASTNode(subscriptExpr.indexExprs[0], this) ??
-                throw IllegalStateException("faithful AST2CHIR VArray assignment index produced no value")
-            CreateVArraySet(lhsBase, rhs, GetDerefedValue(indexValue), elementTy)
+            let index = TranslateExprArg(subscriptExpr.indexExprs[0])
+            CreateVArraySet(lhsBase, rhs, index, elementTy)
             return
         }
 
