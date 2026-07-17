@@ -20,13 +20,10 @@
 static size_t GetSizeFromEnv(const char* value)
 {
     char* compact = malloc(strlen(value) + 1);
-    if (compact == NULL) {
-        return SIZE_MAX;
-    }
     size_t src = 0;
     size_t dst = 0;
     while (value[src] != '\0') {
-        if (!isspace((unsigned char)value[src])) {
+        if (value[src] != ' ') {
             compact[dst++] = value[src];
         }
         ++src;
@@ -49,7 +46,7 @@ static size_t GetSizeFromEnv(const char* value)
 
     char* end = NULL;
     long number = strtol(compact, &end, 10);
-    if (end == compact || *end != '\0' || number > INT32_MAX) {
+    if (end == compact || *end != '\0' || number < INT32_MIN || number > INT32_MAX) {
         free(compact);
         return SIZE_MAX;
     }
