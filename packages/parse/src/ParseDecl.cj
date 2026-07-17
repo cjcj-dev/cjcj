@@ -1579,7 +1579,7 @@ extend ParserImpl {
         } else {
             param.identifier = ExpectIdentifierWithPos(param)
         }
-        param.begin = param.identifier.Begin()
+        param.begin = Peek().Begin()
         if (param.identifier.Val() == INVALID_IDENTIFIER) {
             param.begin = Peek().Begin()
             param.typeNode = InvalidType(Peek().Begin())
@@ -1588,9 +1588,6 @@ extend ParserImpl {
             param.EnableAttr(Attribute.HAS_BROKEN)
             param.EnableAttr(Attribute.IS_BROKEN)
             return param
-        }
-        if (param.isMemberParam) {
-            param.begin = memberStart
         }
         if (!ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_SETTER_BODY) &&
             !ScopeKindEquals(scopeKind, ScopeKind.PROP_MEMBER_GETTER_BODY) && Skip(TokenKind.NOT)) {
@@ -1642,6 +1639,9 @@ extend ParserImpl {
             ty.end
         } else {
             param.identifier.End()
+        }
+        if (param.isMemberParam) {
+            param.begin = memberStart
         }
         }
         return param
