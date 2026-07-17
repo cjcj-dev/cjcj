@@ -682,6 +682,40 @@ public class MockManager {
         return outerDeclExpr
     }
 
+    // C++: Sema/Test/MockManager.cpp:901-937.
+    private func CreateFuncInfo(funcDecl: FuncDecl, curFile: File): CallExpr {
+        let intTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let stringTy = mockUtils.stringDecl.getOrThrow().GetTy().getOrThrow()
+        let positionInfo = ArrayList<Expr>()
+        positionInfo.add(CreateLitConstExpr(LitConstKind.STRING,
+            funcDecl.curFile.getOrThrow().fileName, stringTy, true))
+        positionInfo.add(CreateLitConstExpr(LitConstKind.INTEGER,
+            funcDecl.identifier.Begin().line.toString(), intTy, true))
+        positionInfo.add(CreateLitConstExpr(LitConstKind.INTEGER,
+            funcDecl.identifier.Begin().column.toString(), intTy, true))
+
+        let funcInfoItems = ArrayList<Expr>()
+        funcInfoItems.add(CreateDeclId(funcDecl, curFile))
+        funcInfoItems.add(CreateParamsInfo(funcDecl, curFile))
+        funcInfoItems.add(CreateTypeParamsInfo(funcDecl, curFile))
+        funcInfoItems.add(CreateTupleLit(positionInfo, typeManager.GetTupleTy([stringTy, intTy, intTy])))
+        funcInfoItems.add(CreateLitConstExpr(LitConstKind.BOOL,
+            if (funcDecl.funcBody.getOrThrow().body.isSome()) { "true" } else { "false" }, boolTy, true))
+        funcInfoItems.add(CreateOuterDeclInfo(funcDecl, curFile))
+        funcInfoItems.add(CreateLitConstExpr(LitConstKind.BOOL,
+            if (defaultForTypePresence[funcDecl]) { "true" } else { "false" }, boolTy, true))
+        let retTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+        funcInfoItems.add(CreateLitConstExpr(LitConstKind.STRING, retTy.String(), stringTy, true))
+        funcInfoItems.add(CreateLitConstExpr(LitConstKind.BOOL,
+            if (IsDeclAccessibleForMock(curFile.curPackage.getOrThrow(), funcDecl)) { "true" } else { "false" },
+            boolTy, true))
+        funcInfoItems.add(CreateDeclKind(funcDecl))
+        let initDecl = FindInitDecl(funcInfoDecl.getOrThrow(), typeManager, funcInfoItems)
+        CJC_ASSERT(initDecl.isSome())
+        return CreateInitCall(initDecl.getOrThrow(), funcInfoItems, curFile)
+    }
+
     // C++: Sema/Test/MockManager.cpp:972-1023.
     private func CreateDeclKind(decl: FuncDecl): CallExpr {
         let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
