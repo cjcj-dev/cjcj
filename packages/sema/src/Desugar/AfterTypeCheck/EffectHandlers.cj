@@ -758,11 +758,11 @@ private func CreateSetHandlerImpl(typeManager: TypeManager, importManager: SemaI
     let sourceBlock = funcBody.body.getOrThrow()
     let originalReturnTy = HandlerLambdaOriginalReturnTy(lambda, tryResultTy)
     ReplaceTrailingReturnWithExpr(sourceBlock)
+    sourceBlock.SetTy(Ty.GetInitialTy())
 
     let wrappedTry = TryExpr()
     CopyBasicInfo(sourceBlock, wrappedTry)
     wrappedTry.tryBlock = sourceBlock
-    wrappedTry.SetTy(originalReturnTy)
 
     let exceptionDecl = FindCoreClassDecl(importManager, CLASS_EXCEPTION_NAME).getOrThrow()
     let exceptionWrapper = FindEffectClassDecl(importManager, CLASS_FRAME_EXCEPTION_WRAPPER).getOrThrow()
@@ -801,7 +801,7 @@ private func CreateSetHandlerImpl(typeManager: TypeManager, importManager: SemaI
             let resultNodes = ArrayList<Node>()
             resultNodes.add(resultVar)
             resultNodes.add(CreateThrowExprFromCall(sourceBlock, earlyReturnCall))
-            let resultBlock = CreateBlock(resultNodes, Some(TypeManager.GetNothingTy()))
+            let resultBlock = CreateBlock(resultNodes)
             AddCurFile(resultBlock, file: sourceBlock.curFile)
             let _ = synthesizer(SynPos.EXPR_ARG, resultBlock)
             funcBody.body = resultBlock
