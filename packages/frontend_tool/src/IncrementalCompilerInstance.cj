@@ -286,6 +286,9 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             return true
         }
         let ret = CodegenOnePackage(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)
+        if (ret && ShouldSaveCjoForOutputMode()) {
+            RegisterCjoOutputs(core.GetSourcePackages())
+        }
         recorder.close()
         return ret
     }
