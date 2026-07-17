@@ -1504,6 +1504,19 @@ public class MockManager {
         }
     }
 
+    // C++: Sema/Test/MockManager.cpp:1573-1584.
+    public func HandleMockAnnotatedLambdaValue(expr: Expr): Unit {
+        if (let Some(callExpr) <- (expr as CallExpr)) {
+            HandleMockAnnotatedLambdaWithCall(callExpr)
+        } else if (let Some(memberAccess) <- (expr as MemberAccess)) {
+            HandleMockAnnotatedLambdaWithMemberAccess(memberAccess, memberAccess)
+        } else if (let Some(refExpr) <- (expr as RefExpr)) {
+            HandleMockAnnotatedLambdaWithRefExpr(refExpr, refExpr)
+        } else if (let Some(assignExpr) <- (expr as AssignExpr)) {
+            HandleMockAnnotatedLambdaWithAssignExpr(assignExpr)
+        }
+    }
+
     // C++: Sema/Test/MockManager.cpp:1204-1238.
     private func CreateMockedProp(originalProp: PropDecl, mockedDecl: ClassDecl,
         classGenericSubsts: ArrayList<TypeSubst>): Option<PropDecl> {
