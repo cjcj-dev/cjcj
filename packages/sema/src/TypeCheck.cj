@@ -728,6 +728,19 @@ public func SetTypeAliasDeclTy(typeManager: TypeManager, ctx: ASTContext, tad: T
     SetDeclTy(typeManager, tad)
     if (let Some(typeNode) <- tad.typeNode) {
         typeNode.SetTy(GetTyFromASTType(typeManager, ctx, typeNode, importManager: importManager, diag: diag))
+        if (!Ty.IsTyCorrect(typeNode.GetTy())) {
+            let name = if (let Some(refType) <- (typeNode as RefType)) {
+                refType.ref.identifier.Val()
+            } else if (let Some(qualifiedType) <- (typeNode as QualifiedType)) {
+                qualifiedType.field.Val()
+            } else {
+                "Unknown type"
+            }
+            if (let Some(diagValue) <- diag) {
+                Diagnose(diagValue, typeNode, BasicDiagKind.sema_not_a_type,
+                    args: [BasicDiagArgument(name)]).Emit()
+            }
+        }
     }
 }
 
