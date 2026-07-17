@@ -33,12 +33,14 @@ public class CommonChange {
         let out = StringBuilder()
         out.append(decl.rawMangleName + ": ")
         if (!HasChange()) {
-            return out.append("no change\n").toString()
+            out.append("no change\n")
+            return out.toString()
         }
         if (sig) { out.append("sig ") }
         if (srcUse) { out.append("srcuse ") }
         if (body) { out.append("body ") }
-        return out.append("\n").toString()
+        out.append("\n")
+        return out.toString()
     }
 }
 
