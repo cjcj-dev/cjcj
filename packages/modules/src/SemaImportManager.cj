@@ -17,6 +17,7 @@ public interface SemaCjoManager {
 }
 
 public interface SemaImportManager {
+    func ExportDeclsWithContent(saveFileWithAbsPath: Bool, pkg: ASTPackage): Unit
     func GetCjoManager(): SemaCjoManager
     func GetAllImportedPackages(includeMacroPkg: Bool): ArrayList<ASTPackageDecl>
     func GetPackageDecl(fullPackageName: String): Option<ASTPackageDecl>

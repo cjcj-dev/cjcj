@@ -6244,6 +6244,8 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         HashMap<UInt64, TreeMap<String, ArrayList<Decl>>>()
     private let declsImportedByNodeMap: HashMap<String, HashMap<Decl, ArrayList<ImportSpec>>> =
         HashMap<String, HashMap<Decl, ArrayList<ImportSpec>>>()
+    // ImportManager.h:392 astWriters. Package inherits Node, preserving Package* identity.
+    private let astWriters: HashMap<Node, ASTWriter> = HashMap<Node, ASTWriter>()
     private let fileUsedMacroDeclsMap: HashMap<UInt64, TreeMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, TreeMap<String, ArrayList<Decl>>>()
     // Macro packages directly imported by a source package (keyed by full package name to dedupe).
@@ -6723,6 +6725,43 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
 
     public func GetCjoManager(): SemaCjoManager {
         return this
+    }
+
+    // ImportManager.cpp:342-363 ImportManager::ExportDeclsWithContent.
+    public func ExportDeclsWithContent(saveFileWithAbsPath: Bool, pkg: Package): Unit {
+        let writer = ASTWriter(GeneratePkgDepInfo(pkg), GetCjoManager(),
+            globalOptions.enableCompileDebug, globalOptions.optimizationLevel,
+            saveFileWithAbsPath: saveFileWithAbsPath, diag: diag,
+            serializingCommon: globalOptions.outputMode == OutputMode.CHIR,
+            exportContent: importSrcCode, exportForIncr: false,
+            exportForTest: globalOptions.exportForTest, exportFuncBody: true,
+            compileCjd: globalOptions.compileCjd)
+        writer.PreSaveFullExportDecls(pkg)
+        astWriters[pkg] = writer
+    }
+
+    // ImportManager.cpp:289-320 ImportManager::ExportAST.
+    public func ExportAST(saveFileWithAbsPath: Bool, pkg: Package): Array<UInt8> {
+        let writer = if (let Some(savedWriter) <- astWriters.get(pkg)) {
+            savedWriter
+        } else {
+            let newWriter = ASTWriter(GeneratePkgDepInfo(pkg), GetCjoManager(),
+                globalOptions.enableCompileDebug, globalOptions.optimizationLevel,
+                saveFileWithAbsPath: saveFileWithAbsPath, diag: diag,
+                serializingCommon: globalOptions.outputMode == OutputMode.CHIR,
+                exportContent: importSrcCode, exportForIncr: false,
+                exportForTest: globalOptions.exportForTest, exportFuncBody: true,
+                compileCjd: globalOptions.compileCjd)
+            newWriter.PreSaveFullExportDecls(pkg)
+            newWriter
+        }
+        writer.ExportAST(pkg)
+        return writer.AST2FB(pkg)
+    }
+
+    // ImportManager.cpp:578-586 ImportManager::DeleteASTWriters.
+    public func DeleteASTWriters(): Unit {
+        astWriters.clear()
     }
 
     public func GetAllImportedPackages(includeMacroPkg: Bool): ArrayList<PackageDecl> {

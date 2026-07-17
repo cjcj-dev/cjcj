@@ -1,6 +1,5 @@
 package cjcj::frontend
 
-import cjcj::option.OutputMode
 import cjcj::ast.Package as RealASTPackage
 import cjcj::ast.PackageDecl as RealASTPackageDecl
 import cjcj::ast.StructTy as RealASTStructTy
@@ -22,11 +21,13 @@ import cjcj::meta_transformation.NativeMetaTransformPlugin
 import cjcj::lex.Lexer as CangjieLexer
 import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
+import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::incremental_compilation.IncreKind
 import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
     MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, SemanticInfo, TopLevelDeclCache, VarInitDepMap,
     VirtualWrapperDepMap, WriteCache}
 import cjcj::macro_pkg.{GetMethodPointer, OpenSymbolTable, OpenSymbolTableSafely, RuntimeInit}
+import cjcj::option.OutputMode
 import cjcj::parse.ASTHasher
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
@@ -235,9 +236,6 @@ public class CompilerInstance {
     private let pkgs: ArrayList<Package> = ArrayList<Package>()
     private let pkgCtxMap: HashMap<String, ASTContext> = HashMap<String, ASTContext>()
     private let depPackageInfo: ArrayList<String> = ArrayList<String>()
-    // ImportManager.h:392 astWriters. Package inherits Node, so this preserves
-    // the C++ map's Package* identity semantics.
-    private let astWriters: HashMap<Node, ASTWriter> = HashMap<Node, ASTWriter>()
     private var astResourcesDestroyed: Bool = false
     private var compileStrategy: Option<CompileStrategy> = None
     private var hasTypeCheckerFlag: Bool = false
@@ -280,6 +278,7 @@ public class CompilerInstance {
         realASTPkgs.clear()
         pkgs.clear()
         pkgCtxMap.clear()
+        importManager.DeleteASTWriters()
         gim = None
         hasTypeCheckerFlag = false
     }
@@ -535,8 +534,26 @@ public class CompilerInstance {
     public func PerformDesugarAfterSema(): Bool {
         testManager.MarkDeclsForTestIfNeeded(GetSourcePackages())
         getCompileStrategy().DesugarAfterSema()
+        // Inline checking needs to process source package and imported packages which has source imported decls.
+        CheckInlineFunctionsForPackages(GetPackages(), invocation.globalOptions)
+        // Since the inlined function will affect decls' visibility, analyze linkage after inline decl checking.
+        for (pkg in srcPkgs) {
+            AnalyzeFunctionLinkage(pkg, invocation.globalOptions)
+        }
         if (!invocation.globalOptions.enIncrementalCompilation) {
             testManager.PrepareToMock(GetSourcePackages())
+        }
+        // Sema/Desugar/AfterTypeCheck.cpp:466-476: pre-save full exported
+        // declarations after desugaring and linkage analysis, before generic instantiation.
+        let saveFileWithAbsPath = invocation.globalOptions.enableCompileDebug ||
+            invocation.globalOptions.enableCoverage
+        for (pkg in srcPkgs) {
+            let saveAbsPath = if (STANDARD_LIBS.contains(pkg.fullPackageName)) {
+                invocation.globalOptions.enableCoverage
+            } else {
+                saveFileWithAbsPath
+            }
+            importManager.ExportDeclsWithContent(saveAbsPath, pkg)
         }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "desugar")
@@ -544,36 +561,9 @@ public class CompilerInstance {
         return true
     }
 
-    // ImportManager.cpp:342-363 ImportManager::ExportDeclsWithContent.
-    public func ExportDeclsWithContent(saveFileWithAbsPath: Bool, pkg: Package): Unit {
-        let packageDepInfo = importManager.GeneratePkgDepInfo(pkg)
-        let writer = ASTWriter(packageDepInfo, importManager.GetCjoManager(),
-            invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel,
-            saveFileWithAbsPath: saveFileWithAbsPath, diag: diag,
-            serializingCommon: invocation.globalOptions.outputMode == OutputMode.CHIR,
-            exportContent: importManager.IsSourceCodeImported(), exportForIncr: false,
-            exportForTest: invocation.globalOptions.exportForTest, exportFuncBody: true)
-        writer.PreSaveFullExportDecls(pkg)
-        astWriters[pkg] = writer
-    }
-
     // ImportManager.cpp:291-320 ImportManager::ExportAST.
     public func ExportAST(saveFileWithAbsPath: Bool, pkg: Package): Array<UInt8> {
-        let writer = if (let Some(savedWriter) <- astWriters.get(pkg)) {
-            savedWriter
-        } else {
-            let packageDepInfo = importManager.GeneratePkgDepInfo(pkg)
-            let newWriter = ASTWriter(packageDepInfo, importManager.GetCjoManager(),
-                invocation.globalOptions.enableCompileDebug, invocation.globalOptions.optimizationLevel,
-                saveFileWithAbsPath: saveFileWithAbsPath, diag: diag,
-                serializingCommon: invocation.globalOptions.outputMode == OutputMode.CHIR,
-                exportContent: importManager.IsSourceCodeImported(), exportForIncr: false,
-                exportForTest: invocation.globalOptions.exportForTest, exportFuncBody: true)
-            newWriter.PreSaveFullExportDecls(pkg)
-            newWriter
-        }
-        writer.ExportAST(pkg)
-        return writer.AST2FB(pkg)
+        return importManager.ExportAST(saveFileWithAbsPath, pkg)
     }
 
     public func PerformGenericInstantiation(): Bool {
@@ -650,9 +640,8 @@ public class CompilerInstance {
         if (pkgs.isEmpty()) {
             return true
         }
-        let compatibleSDKVersion = invocation.globalOptions.passedWhenKeyValue.get("APILevel_level") ?? ""
         for (pkg in pkgs) {
-            FaithfulDesugarBeforeTypeCheck(pkg, compatibleSDKVersion: compatibleSDKVersion)
+            FaithfulDesugarBeforeTypeCheck(pkg)
         }
         let semaInstance = FaithfulSemaCompilerInstance()
         semaInstance.typeManager = typeManager.AsFaithfulSemaTypeManager()
@@ -662,7 +651,6 @@ public class CompilerInstance {
         semaInstance.buildTrie = buildTrie
         semaInstance.frontendDumpActionIsTypeCheck = invocation.frontendOptions.dumpAction == DumpAction.TYPE_CHECK
         semaInstance.diag = Some(diag.AsBasicDiagnosticEngine())
-        semaInstance.mangler = mangler
         for (pkg in this.pkgs) {
             semaInstance.packages.add(pkg)
         }
@@ -874,8 +862,15 @@ public class CompilerInstance {
         }
     }
 
-    public func PerformCodeGen(): Bool {
-        return true
+    public func PerformCodeGen(enableIncrement!: Bool = false,
+        cachedMangleMap!: CachedMangleMap = CachedMangleMap()): Bool {
+        if (diag.GetErrorCount() != 0) {
+            return false
+        }
+        if (let Some(pkg) <- chirData.GetCurrentCHIRPackage()) {
+            chirData.ActivateCodegenFuncsForPackage(pkg)
+        }
+        return GenPackageModules(this, enableIncrement, cachedMangleMap)
     }
 
     public func PerformCjoSaving(): Bool {
