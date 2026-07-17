@@ -1916,6 +1916,11 @@ public class Translator {
         if (let Some(cstrCtor) <- TranslateCStringCtorCall(expr)) {
             return Some(cstrCtor)
         }
+        // C++: TranslateCallExpr.cpp:1145-1148 Translator::ProcessCallExpr.
+        if (expr.resolvedFunction.isNone() &&
+            RequireAstTy(RequireExpr(expr.baseFunc, "Nothing call base")).IsNothing()) {
+            return Some(TranslateExprArg(RequireExpr(expr.baseFunc, "Nothing call base")))
+        }
         if (let Some(funcTypeValueCall) <- TranslateFuncTypeValueCall(expr)) {
             return Some(funcTypeValueCall)
         }
