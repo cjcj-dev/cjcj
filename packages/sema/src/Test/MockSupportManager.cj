@@ -1540,6 +1540,19 @@ public class MockSupportManager {
             Some(ty), CallKind.CALL_INVALID)
     }
 
+    // C++: Sema/Test/MockSupportManager.cpp:1262-1272.
+    private func ReplaceSubMemberAccessWithAccessor(memberAccess: MemberAccess,
+        isInConstructor: Bool, topLevelMutExpr!: Option<Expr> = None): Unit {
+        let baseExpr = memberAccess.baseExpr.getOrThrow()
+        if (let Some(nre) <- (ExtractLastDesugaredExpr(baseExpr) as NameReferenceExpr)) {
+            let replacedNre = ReplaceExprWithAccessor(nre, isInConstructor, true)
+            if (topLevelMutExpr.isSome() && replacedNre.isSome()) {
+                TransformAccessorCallForMutOperation(
+                    nre, replacedNre.getOrThrow(), topLevelMutExpr.getOrThrow())
+            }
+        }
+    }
+
     // C++: Sema/Test/MockSupportManager.cpp:1818-1867.
     private func PrepareInterfaceDecl(interfaceDecl: InterfaceDecl): Unit {
         if (interfaceDecl.TestAttr(Attribute.GENERIC)) {
