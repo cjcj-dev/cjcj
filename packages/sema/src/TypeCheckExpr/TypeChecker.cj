@@ -4987,7 +4987,9 @@ extend TypeChecker {
                     (result, typeMapping) = MatchFunctionForCall(impl.typeManager, impl.diag, Some(ctx), candidates, ce, target,
                         argChecker: Some({ expectedTy5: Ty, arg10: FuncArg => CheckCallArgFromContext(ctx, expectedTy5, arg10) }),
                         declSynthesizer: Some({ fd3: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd3)) }),
-                        argSynthesizer: Some({ arg11: FuncArg => SynthesizeFuncArg(ctx, arg11) }),
+                        argSynthesizer: Some({ arg11: FuncArg =>
+                            SynthesizeWithCache(ctx, SynPos.EXPR_ARG, arg11)
+                        }),
                         exprSynthesizer: Some({ child3: Expr => SynthesizeWithCache(ctx, SynPos.EXPR_ARG, child3) }),
                         effectiveArgChecker: Some({ expectedTy6: Ty, arg12: FuncArg =>
                             CheckWithEffectiveCache(ctx, expectedTy6, arg12, false)
@@ -5000,7 +5002,9 @@ extend TypeChecker {
                 (result, typeMapping) = MatchFunctionForCall(impl.typeManager, impl.diag, Some(ctx), candidates, ce, target,
                     argChecker: Some({ expectedTy7: Ty, arg13: FuncArg => CheckCallArgFromContext(ctx, expectedTy7, arg13) }),
                     declSynthesizer: Some({ fd4: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd4)) }),
-                    argSynthesizer: Some({ arg14: FuncArg => SynthesizeFuncArg(ctx, arg14) }),
+                    argSynthesizer: Some({ arg14: FuncArg =>
+                        SynthesizeWithCache(ctx, SynPos.EXPR_ARG, arg14)
+                    }),
                     exprSynthesizer: Some({ child4: Expr => SynthesizeWithCache(ctx, SynPos.EXPR_ARG, child4) }),
                     effectiveArgChecker: Some({ expectedTy8: Ty, arg15: FuncArg =>
                         CheckWithEffectiveCache(ctx, expectedTy8, arg15, false)
@@ -5026,7 +5030,9 @@ extend TypeChecker {
                     { call7: CallExpr, arity4: Int64 => DesugarVariadicCallExpr(call7, arity4) },
                     argChecker: Some({ expectedTy11: Ty, arg19: FuncArg => CheckCallArgFromContext(ctx, expectedTy11, arg19) }),
                     declSynthesizer: Some({ fd6: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd6)) }),
-                    argSynthesizer: Some({ arg20: FuncArg => SynthesizeFuncArg(ctx, arg20) }),
+                    argSynthesizer: Some({ arg20: FuncArg =>
+                        SynthesizeWithCache(ctx, SynPos.EXPR_ARG, arg20)
+                    }),
                     exprSynthesizer: Some({ child6: Expr => SynthesizeWithCache(ctx, SynPos.EXPR_ARG, child6) }),
                     effectiveArgChecker: Some({ expectedTy12: Ty, arg21: FuncArg =>
                         CheckWithEffectiveCache(ctx, expectedTy12, arg21, false)
@@ -7573,6 +7579,25 @@ extend TypeChecker {
         return ret
     }
 
+    // C++ TypeChecker.cpp:1489-1502 SynthesizeAndCache for a FuncArg node.
+    private func SynthesizeAndCache(ctx: ASTContext, pos: SynPos, arg: FuncArg, key: CacheKey): Ty {
+        let dc = DiagnosticCache()
+        if (let Some(diagValue) <- impl.diag) {
+            dc.ToExclude(diagValue)
+        }
+        let ret = SynthesizeFuncArg(ctx, arg)
+        if (let Some(diagValue2) <- impl.diag) {
+            dc.BackUp(diagValue2)
+        }
+        let entry = CacheEntry()
+        entry.successful = Ty.IsTyCorrect(ret) && dc.NoError()
+        entry.result = Some(ret)
+        entry.diags = dc
+        entry.targets = CollectTargets(arg)
+        GetTypeCheckCache(ctx, arg).synCache[key] = entry
+        return ret
+    }
+
     private func CheckAndCache(ctx: ASTContext, target: Ty, expr: Expr, key: CacheKey): Bool {
         let dc = DiagnosticCache()
         if (let Some(diagValue) <- impl.diag) {
@@ -7621,6 +7646,20 @@ extend TypeChecker {
             return cache.result ?? TypeManager.GetInvalidTy()
         }
         return SynthesizeAndCache(ctx, pos, expr, key)
+    }
+
+    // C++ TypeChecker.cpp:1383-1397 SynthesizeWithCache for a FuncArg node.
+    private func SynthesizeWithCache(ctx: ASTContext, pos: SynPos, arg: FuncArg): Ty {
+        if (!impl.typeManager.GetUnsolvedTyVars().isEmpty()) {
+            return SynthesizeFuncArg(ctx, arg)
+        }
+        let key = GetCacheKeyForSyn(ctx, arg)
+        let nodeCache = GetTypeCheckCache(ctx, arg)
+        if (let Some(cache) <- nodeCache.synCache.get(key)) {
+            RestoreCached(ctx, arg, cache)
+            return cache.result ?? TypeManager.GetInvalidTy()
+        }
+        return SynthesizeAndCache(ctx, pos, arg, key)
     }
 
     private func CheckWithCache(ctx: ASTContext, target: Ty, expr: Expr): Bool {
