@@ -6007,18 +6007,36 @@ extend TypeChecker {
             RemovePatternBindings(ctx, conditionBindings)
             isWellTyped = branchOk && isWellTyped
         } else {
+            var thenTyCorrect = false
             if (let Some(thenBody) <- ifExpr.thenBody) {
-                isWellTyped = Check(ctx, target, thenBody) && isWellTyped
-            } else {
-                isWellTyped = false
+                if (!Check(ctx, target, thenBody) && ifExpr.ShouldDiagnose() && !CanSkipDiag(thenBody)) {
+                    if (let Some(thenTy) <- thenBody.GetTy()) {
+                        if (!impl.typeManager.IsSubtype(thenTy, target)) {
+                            if (let Some(diagValue) <- impl.diag) {
+                                DiagMismatchedTypes(diagValue, thenBody, target)
+                            }
+                        }
+                    }
+                }
+                thenTyCorrect = Ty.IsTyCorrect(thenBody.GetTy())
             }
             RemovePatternBindings(ctx, conditionBindings)
+            var elseTyCorrect = false
             if (let Some(elseBody) <- ifExpr.elseBody) {
-                isWellTyped = Check(ctx, target, elseBody) && isWellTyped
-            } else {
-                isWellTyped = false
+                if (!Check(ctx, target, elseBody) && ifExpr.ShouldDiagnose() && !CanSkipDiag(elseBody)) {
+                    if (let Some(elseTy) <- elseBody.GetTy()) {
+                        if (!impl.typeManager.IsSubtype(elseTy, target)) {
+                            if (let Some(diagValue2) <- impl.diag) {
+                                DiagMismatchedTypes(diagValue2, elseBody, target)
+                            }
+                        }
+                    }
+                }
+                elseTyCorrect = Ty.IsTyCorrect(elseBody.GetTy())
             }
-            if (isWellTyped) {
+            let branchesWellTyped = thenTyCorrect && elseTyCorrect
+            isWellTyped = branchesWellTyped && isWellTyped
+            if (branchesWellTyped) {
                 ifExpr.SetTy(target)
             }
         }
