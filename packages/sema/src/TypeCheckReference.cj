@@ -2398,10 +2398,10 @@ private func TypeCheckReferenceEmitDeprecationOverrideDiagnostic(
     name!: String = ""
 ): Unit {
     if (declType.isEmpty()) {
-        let builder = diag.DiagnoseRefactor(kind, TypeCheckReferenceRange(decl))
+        let builder = DiagnoseRefactor(diag, kind, decl)
         builder.Emit()
     } else {
-        let builder = diag.DiagnoseRefactor(kind, TypeCheckReferenceRange(decl), arguments: [declType, name])
+        let builder = DiagnoseRefactor(diag, kind, decl, arguments: [declType, name])
         builder.Emit()
     }
 }
