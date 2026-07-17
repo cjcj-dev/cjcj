@@ -112,8 +112,9 @@ private class LookUpImpl {
                 (decl.TestAttr(Attribute.ABSTRACT) && !inResult.TestAttr(Attribute.ABSTRACT))) {
                 // Keep the declaration already in results.
             } else {
-                idx++
-                continue
+                // Preserve the existing selfhost behavior until the acceptance compiler and
+                // LookUpImpl.cpp:252-254 agree on unrelated static class/interface members.
+                return
             }
             return
         }
