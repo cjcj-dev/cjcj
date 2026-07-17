@@ -382,7 +382,11 @@ public class BCHIRInterpreter {
                 }
                 pc += 1 + GetOpCodeArgSize(opCode)
             } else if (IsBinaryOp(opCode)) {
-                if (!BinOp(opCode, pc)) {
+                let typeKind = TypeKindFromCell(code.Get(pc + 1)) ??
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
+                let strategy = OverflowStrategyFromCell(code.Get(pc + 2)) ??
+                    return Finish(IException(InterpreterValue.MakeInvalid()))
+                if (!BinOp(opCode, pc, typeKind, strategy)) {
                     return Finish(IException(InterpreterValue.MakeInvalid()))
                 }
                 pc += 1 + GetOpCodeArgSize(opCode)
@@ -1054,11 +1058,12 @@ public class BCHIRInterpreter {
         return false
     }
 
-    private func BinOp(opCode: OpCode, opIndex: Int64): Bool {
+    private func BinOp(opCode: OpCode, opIndex: Int64, typeKind: TypeKind,
+        strategy: OverflowStrategy): Bool {
         let right = interpStack.ArgsPopIVal()
         let left = interpStack.ArgsPopIVal()
         if (left.IsIntLike() && right.IsIntLike()) {
-            return BinRegOpInt(opCode, left, right, opIndex)
+            return BinRegOpInt(opCode, left, right, opIndex, typeKind, strategy)
         }
         if (left.IsFloatLike() && right.IsFloatLike()) {
             return EvaluateFloatBinary(opCode, left, right)
@@ -1085,7 +1090,8 @@ public class BCHIRInterpreter {
     }
 
     private func BinRegOpInt(
-        opCode: OpCode, left: InterpreterValue, right: InterpreterValue, opIndex: Int64
+        opCode: OpCode, left: InterpreterValue, right: InterpreterValue, opIndex: Int64,
+        typeKind: TypeKind, strategy: OverflowStrategy
     ): Bool {
         let lhs = left.GetInt()
         let rhs = right.GetInt()
@@ -1098,19 +1104,42 @@ public class BCHIRInterpreter {
             RaiseArithmeticException(opIndex)
             return false
         }
+        if (opCode == OpCode.BIN_ADD || opCode == OpCode.BIN_ADD_EXC ||
+            opCode == OpCode.BIN_SUB || opCode == OpCode.BIN_SUB_EXC ||
+            opCode == OpCode.BIN_MUL || opCode == OpCode.BIN_MUL_EXC ||
+            opCode == OpCode.BIN_DIV || opCode == OpCode.BIN_DIV_EXC ||
+            opCode == OpCode.BIN_MOD || opCode == OpCode.BIN_MOD_EXC) {
+            let exprKind = if (opCode == OpCode.BIN_ADD || opCode == OpCode.BIN_ADD_EXC) {
+                ExprKind.ADD
+            } else if (opCode == OpCode.BIN_SUB || opCode == OpCode.BIN_SUB_EXC) {
+                ExprKind.SUB
+            } else if (opCode == OpCode.BIN_MUL || opCode == OpCode.BIN_MUL_EXC) {
+                ExprKind.MUL
+            } else if (opCode == OpCode.BIN_DIV || opCode == OpCode.BIN_DIV_EXC) {
+                ExprKind.DIV
+            } else {
+                ExprKind.MOD
+            }
+            if (IsUnsignedIntegerTypeKind(typeKind)) {
+                let unsignedLhs = if (lhs >= 0) { UInt64(lhs) } else { UInt64.Max - UInt64(-(lhs + 1)) }
+                let unsignedRhs = if (rhs >= 0) { UInt64(rhs) } else { UInt64.Max - UInt64(-(rhs + 1)) }
+                let checked = OverflowChecker.IsUIntOverflow(typeKind, exprKind, unsignedLhs, unsignedRhs, strategy)
+                let value = if (checked.value <= UInt64(Int64.Max)) {
+                    Int64(checked.value)
+                } else {
+                    -Int64(UInt64.Max - checked.value) - 1
+                }
+                return PushIfNotOverflow(checked.isOverflow, value, strategy, left.kind, true, opIndex)
+            }
+            let checked = OverflowChecker.IsIntOverflow(typeKind, exprKind, lhs, rhs, strategy)
+            return PushIfNotOverflow(checked.isOverflow, checked.value, strategy, left.kind, false, opIndex)
+        }
+        if (opCode == OpCode.BIN_EXP || opCode == OpCode.BIN_EXP_EXC) {
+            let unsignedRhs = if (rhs >= 0) { UInt64(rhs) } else { UInt64.Max - UInt64(-(rhs + 1)) }
+            let checked = OverflowChecker.IsExpOverflow(lhs, unsignedRhs, strategy)
+            return PushIfNotOverflow(checked.isOverflow, checked.value, strategy, left.kind, false, opIndex)
+        }
         let result = match (opCode) {
-            case OpCode.BIN_ADD => InterpreterValue.MakeInt(left.kind, lhs + rhs)
-            case OpCode.BIN_ADD_EXC => InterpreterValue.MakeInt(left.kind, lhs + rhs)
-            case OpCode.BIN_SUB => InterpreterValue.MakeInt(left.kind, lhs - rhs)
-            case OpCode.BIN_SUB_EXC => InterpreterValue.MakeInt(left.kind, lhs - rhs)
-            case OpCode.BIN_MUL => InterpreterValue.MakeInt(left.kind, lhs * rhs)
-            case OpCode.BIN_MUL_EXC => InterpreterValue.MakeInt(left.kind, lhs * rhs)
-            case OpCode.BIN_DIV => if (rhs == 0) { InterpreterValue.MakeInvalid() } else { InterpreterValue.MakeInt(left.kind, lhs / rhs) }
-            case OpCode.BIN_DIV_EXC => if (rhs == 0) { InterpreterValue.MakeInvalid() } else { InterpreterValue.MakeInt(left.kind, lhs / rhs) }
-            case OpCode.BIN_MOD => if (rhs == 0) { InterpreterValue.MakeInvalid() } else { InterpreterValue.MakeInt(left.kind, lhs % rhs) }
-            case OpCode.BIN_MOD_EXC => if (rhs == 0) { InterpreterValue.MakeInvalid() } else { InterpreterValue.MakeInt(left.kind, lhs % rhs) }
-            case OpCode.BIN_EXP => IntPowValue(left.kind, lhs, rhs)
-            case OpCode.BIN_EXP_EXC => IntPowValue(left.kind, lhs, rhs)
             case OpCode.BIN_BITAND => InterpreterValue.MakeInt(left.kind, lhs & rhs)
             case OpCode.BIN_BITOR => InterpreterValue.MakeInt(left.kind, lhs | rhs)
             case OpCode.BIN_BITXOR => InterpreterValue.MakeInt(left.kind, lhs ^ rhs)
@@ -1126,6 +1155,31 @@ public class BCHIRInterpreter {
             return false
         }
         interpStack.ArgsPush(result)
+        return true
+    }
+
+    // C++: BCHIRInterpreter.cpp:1094-1117 BCHIRInterpreter::PushIfNotOverflow.
+    private func PushIfNotOverflow(overflow: Bool, result: Int64, strategy: OverflowStrategy,
+        kind: InterpreterValueKind, isUnsigned: Bool, opIndex: Int64): Bool {
+        if (overflow && strategy == OverflowStrategy.THROWING) {
+            RaiseOverflowException(opIndex)
+            return false
+        }
+        let value = if (isUnsigned) {
+            InterpreterValue.MakeUInt(kind, result)
+        } else {
+            InterpreterValue.MakeInt(kind, result)
+        }
+        if (strategy == OverflowStrategy.CHECKED) {
+            let fields = ArrayList<InterpreterValue>()
+            fields.add(InterpreterValue.MakeBool(overflow))
+            if (!overflow) {
+                fields.add(value)
+            }
+            interpStack.ArgsPush(InterpreterValue.MakeTuple(fields))
+        } else {
+            interpStack.ArgsPush(value)
+        }
         return true
     }
 
