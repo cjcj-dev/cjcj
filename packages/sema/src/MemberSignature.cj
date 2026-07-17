@@ -1,8 +1,7 @@
-package cjcj::sema.InheritanceChecker
+package cjcj::sema
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::sema.*
 
 public class MemberSignature {
     public var decl: Option<Decl> = None
