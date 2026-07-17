@@ -567,9 +567,13 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                 args.add(payloadPtr)
                 args.add(storeValue.GetRawValue())
                 args.add(size)
-                return irBuilder.CallGCWriteAgg(srcCGType.GetLayoutType(), args)
+                irBuilder.CallGCWriteAgg(srcCGType.GetLayoutType(), args)
+            } else {
+                irBuilder.CreateMemCpy(payloadPtr, 0u32, storeValue.GetRawValue(), 0u32, size)
             }
-            return irBuilder.CreateMemCpy(payloadPtr, 0u32, storeValue.GetRawValue(), 0u32, size)
+            let destAddr = irBuilder.CreateGEP(storePlace, path)
+            let destElementType = destAddr.GetCGType().getOrThrow().GetPointerElementType().getOrThrow()
+            return irBuilder.CreateStore(CGValue(tmp, destElementType), destAddr)
         }
         if (ShouldSkipNoOpStore(rhs, lhs)) {
             return LLVMNullValue()
