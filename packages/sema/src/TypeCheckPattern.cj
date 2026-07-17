@@ -783,11 +783,12 @@ public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
                 }
             }
             if (let Some(funcTy) <- ((constructor.GetTy() ?? TypeManager.GetInvalidTy()) as FuncTy)) {
-                if (IsFuncTyEnumPatternMatched(typeManager, ctx, target, funcTy, pattern,
+                if (!IsFuncTyEnumPatternMatched(typeManager, ctx, target, funcTy, pattern,
                     exprChecker: exprChecker, desugarCallExpr: desugarCallExpr, diag: diag)) {
-                    pattern.SetTy(funcTy.retTy)
-                    return true
+                    return InvalidPatternTy(pattern)
                 }
+                pattern.SetTy(funcTy.retTy)
+                return true
             }
         }
     }
