@@ -837,7 +837,7 @@ public class MockSupportManager {
         }
 
         let accessorParamLists = ArrayList<FuncParamList>()
-        accessorParamLists.add(CreateFuncParamList(accessorParams))
+        accessorParamLists.add(CreateFuncParamList(accessorParams, None))
         let retType: Type = if (isGetter) {
             fieldType
         } else {
