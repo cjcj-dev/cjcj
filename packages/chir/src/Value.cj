@@ -1097,13 +1097,15 @@ public class GlobalVar <: GlobalValue & Hashable & Equatable<GlobalVar> {
     }
 
     public override func ToString(indent: Int64): String {
-        let typeText = if (let Some(valueTy) <- GetType()) { valueTy.ToString() } else { "<none>" }
-        var out = IndentToString(indent) + GetAttributeInfo().ToString() + "global " + GetIdentifier() + ": " + typeText
+        var out = AddNewLineOrNot(GetAnnoInfo().ToString(indent: indent))
+        out += IndentToString(indent) + GetAttributeInfo().ToString() + GetIdentifier() + ": " +
+            GetType().getOrThrow().ToString()
         if (let Some(initValue) <- GetInitializer()) {
             out += " = " + initValue.ToString(0)
         } else if (let Some(fn) <- GetInitFunc()) {
             out += " = " + fn.GetIdentifier() + "()"
         }
+        out += CommentToString(GlobalValueCommentToString())
         return out
     }
 }
