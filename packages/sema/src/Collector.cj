@@ -398,9 +398,6 @@ public class Collector {
     private func AssignFileScopes(ctx: ASTContext, file: File): Unit {
         file.scopeName = TOPLEVEL_SCOPE_NAME
         file.scopeLevel = 0u32
-        for (importSpec in file.imports) {
-            AssignPlainSubtree(ctx, importSpec)
-        }
         var idx: Int64 = 0
         while (idx < file.decls.size) {
             AssignNode(ctx, file.decls[idx])
