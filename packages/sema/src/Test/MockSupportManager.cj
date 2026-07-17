@@ -536,7 +536,7 @@ public class MockSupportManager {
         let mangledName = mockUtils.Mangle(decl)
         let optionDeclTy = typeManager.GetEnumTy(mockUtils.optionDecl.getOrThrow(), typeArgs: [declTy])
         let noneRef = CreateRefExpr(LookupEnumMember(
-            optionDeclTy.decl, OPTION_NONE_CTOR).getOrThrow())
+            optionDeclTy.decl.getOrThrow(), OPTION_NONE_CTOR).getOrThrow())
         noneRef.SetTy(optionDeclTy)
 
         if (let Some(varDecl) <- mockUtils.FindGlobalDecl<VarDecl>(
