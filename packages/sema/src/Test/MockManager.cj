@@ -233,7 +233,7 @@ public class MockManager {
 
         AddObjectSuperTypeIfNeeded(originalDecl, mockedDecl)
         AddMockedMembers(originalDecl, mockedDecl, genericSubsts)
-        AddCurFile(mockedDecl, curFile)
+        AddCurFile(mockedDecl, file: curFile)
 
         mockedClassDecls[originalDecl] = mockedDecl
         mockUtils.AttachGeneratedDecl(mockedDecl)
