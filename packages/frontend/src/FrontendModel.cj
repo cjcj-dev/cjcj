@@ -50,7 +50,7 @@ public import cjcj::mangle.BaseMangler
 import cjcj::sema.TypeManager as FaithfulSemaTypeManager
 import cjcj::sema.Test.TestManager as RealTestManager
 import cjcj::utils.{AST_PACKAGE_NAME, CORE_PACKAGE_NAME, DynamicCast, EraseIf, JoinStrings, MAIN_INVOKE,
-    SERIALIZED_FILE_EXTENSION, SYNC_PACKAGE_NAME, CJC_ASSERT, IncrementalCompilationLogger}
+    SERIALIZED_FILE_EXTENSION, SYNC_PACKAGE_NAME, CJC_ASSERT, IncrementalCompilationLogger, InternalError}
 import cjcj::utils.FileUtil
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.STANDARD_LIBS
@@ -7169,15 +7169,76 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
 
     private func AddImportedDeclsForSourcePackage(pkg: Package): Unit {
         for (file in pkg.files) {
-            for (importSpec in file.imports) {
-                let declMap = if (importSpec.IsReExport()) {
-                    importedDeclsMap
-                } else {
-                    GetFileImportedDeclMap(file.fileHash)
+            AddImportedDeclsForFile(pkg, file)
+        }
+    }
+
+    private func AddImportedDeclsForFile(pkg: Package, file: File): Unit {
+        for (importSpec in file.imports) {
+            let declMap = if (importSpec.IsReExport()) { importedDeclsMap } else {
+                GetFileImportedDeclMap(file.fileHash)
+            }
+            CollectDeclsFromImportToMap(pkg.fullPackageName, importSpec, declMap)
+        }
+    }
+
+    private func RemoveImportedPackageNames(imports: ArrayList<ImportSpec>): Unit {
+        for (importSpec in imports) {
+            importedPackageNameMap.remove(importSpec)
+        }
+    }
+
+    private func RemoveDeclsImportedByImports(fullPackageName: String, imports: ArrayList<ImportSpec>): Unit {
+        if (imports.isEmpty()) {
+            return
+        }
+        if (let Some(declImports) <- declsImportedByNodeMap.get(fullPackageName)) {
+            let staleImports = HashSet<ImportSpec>()
+            for (importSpec in imports) {
+                staleImports.add(importSpec)
+            }
+            for (importSpecs in declImports.values()) {
+                var idx: Int64 = importSpecs.size - 1
+                while (idx >= 0) {
+                    if (staleImports.contains(importSpecs[idx])) {
+                        importSpecs.remove(at: idx)
+                    }
+                    idx--
                 }
-                CollectDeclsFromImportToMap(pkg.fullPackageName, importSpec, declMap)
             }
         }
+    }
+
+    public func UpdateFileNodeImportInfo(pkg: Package, file: File, newFile: File): Unit {
+        CJC_ASSERT(file.fileHash != newFile.fileHash)
+        newFile.curPackage = Some(pkg)
+        for (importSpec in file.imports) {
+            if (importSpec.TestAttr(Attribute.IMPLICIT_ADD)) {
+                newFile.imports.add((ASTCloner.Clone(importSpec) as ImportSpec).getOrThrow())
+            }
+        }
+        RemoveImportedPackageNames(file.imports)
+        for (importSpec in newFile.imports) {
+            if (importSpec.IsImportMulti()) {
+                continue
+            }
+            let cjoPath = GetPackageCjo(importSpec)[1]
+            if (cjoPath.isEmpty()) {
+                InternalError("Failed to resolve imports for macro file")
+            }
+            if (!importSpec.IsImportAll() && !IsImportPackage(importSpec)) {
+                importSpec.content.isDecl = true
+            }
+        }
+        if (let Some(found) <- fileImportedDeclsMap.get(file.fileHash)) {
+            fileImportedDeclsMap[newFile.fileHash] = found
+            fileImportedDeclsMap.remove(file.fileHash)
+        }
+        let index = file.indexOfPackage
+        newFile.indexOfPackage = index
+        RemoveDeclsImportedByImports(pkg.fullPackageName, file.imports)
+        pkg.files[Int64(index)] = newFile
+        AddImportedDeclsForFile(pkg, pkg.files[Int64(index)])
     }
 
     private func GetPackageMembersByName(fullPackageName: String, name: String): ArrayList<Decl> {
