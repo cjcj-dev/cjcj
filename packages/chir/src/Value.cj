@@ -635,7 +635,11 @@ public class Block <: Value & Hashable & Equatable<Block> {
         out += "Block " + GetIdentifier() + ": "
         let comments = ArrayList<String>()
         if (!predecessors.isEmpty()) {
-            comments.add("predecessors: " + ValueIdVecToString("[", predecessors, "]"))
+            let predecessorValues = ArrayList<Value>()
+            for (predecessor in predecessors) {
+                predecessorValues.add(predecessor)
+            }
+            comments.add("predecessors: " + ValueIdVecToString("[", predecessorValues, "]"))
         }
         let baseComment = BaseCommentToString()
         if (!baseComment.isEmpty()) {
