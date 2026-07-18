@@ -442,17 +442,29 @@ public class TypeManager {
     }
 
     private func RecordTypeAlias(decl: Decl, alias: String): Unit {
-        let key = DeclAliasKey(decl)
+        var keyDecl = decl
+        var redirectedTypeAlias = false
+        if (let Some(typeAliasDecl) <- (decl as TypeAliasDecl)) {
+            if (let typeNode <- typeAliasDecl.typeNode) {
+                if (let originDecl <- typeNode.GetTarget()) {
+                    // C++ src/Modules/ImportManager.cpp:1171-1175: imported TypeAliasDecl names
+                    // are indexed by the aliased declaration so extend visibility can find them.
+                    keyDecl = originDecl
+                    redirectedTypeAlias = true
+                }
+            }
+        }
+        let key = DeclAliasKey(keyDecl)
         if (!declToTypeAlias.contains(key)) {
             declToTypeAlias[key] = HashSet<String>()
         }
         if (let Some(values) <- declToTypeAlias.get(key)) {
             values.add(alias)
-            // Mirror C++ ImportManager.cpp:1146-1148: when the imported name differs from the
+            // Mirror C++ ImportManager.cpp:1176-1179: when a non-typealias imported name differs from the
             // decl's own identifier, record BOTH so cross-package extend-member visibility
             // (IsDeclAccessible's type-alias fallback) can resolve via the decl's real name.
             let ident = decl.identifier.Val()
-            if (ident != alias) {
+            if (!redirectedTypeAlias && ident != alias) {
                 values.add(ident)
             }
         }
