@@ -917,7 +917,7 @@ public class MockManager {
             if (funcDecl.funcBody.getOrThrow().body.isSome()) { "true" } else { "false" }, boolTy, true))
         funcInfoItems.add(CreateOuterDeclInfo(funcDecl, curFile))
         funcInfoItems.add(CreateLitConstExpr(LitConstKind.BOOL,
-            if (defaultForTypePresence[funcDecl]) { "true" } else { "false" }, boolTy, true))
+            if (defaultForTypePresence.get(funcDecl) ?? false) { "true" } else { "false" }, boolTy, true))
         let retTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
         funcInfoItems.add(CreateLitConstExpr(LitConstKind.STRING, retTy.String(), stringTy, true))
         funcInfoItems.add(CreateLitConstExpr(LitConstKind.BOOL,
