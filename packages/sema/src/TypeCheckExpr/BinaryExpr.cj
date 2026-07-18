@@ -1896,7 +1896,8 @@ extend TypeChecker {
             ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)) {
             resultTy
         } else {
-            ClearExprKeepTargets(be)
+            // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:646 clears both operands before retrying from the left.
+            be.Clear()
             SynBuiltinBinaryFromLeft(implValue.typeManager, be, isArithmetic, ctx: ctx,
                 synthesizer: synthesizer, checker: checker, diag: diag)
         }
