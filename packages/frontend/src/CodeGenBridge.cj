@@ -327,7 +327,7 @@ private class ToCHIR {
             chirWFC: instance.invocation.globalOptions.chirWFC,
             chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2(),
             diag: Some(instance.diag.AsBasicDiagnosticEngine()))
-        if (!ast2chir.ToCHIRPackage(pkg)) {
+        if (!ast2chir.ToCHIRPackage(pkg) || instance.diag.GetErrorCount() != 0) {
             return None
         }
         let lowered = match (ast2chir.GetPackage()) {
