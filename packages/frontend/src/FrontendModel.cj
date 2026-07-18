@@ -6679,15 +6679,14 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         var anno = false
         for (file in pkg.files) {
             if (let Some(featureDirective) <- file.feature) {
-                if (let Some(featuresSet) <- featureDirective.featuresSet) {
-                    for (feature in featuresSet.content) {
-                        let featureName = feature.ToString()
-                        let current = MakeRange(feature.begin, feature.end)
-                        if (let Some(previous) <- rangeMap.get(featureName)) {
-                            WarnRepeatedFeatureName(diag, featureName, current, previous)
-                        } else {
-                            rangeMap[featureName] = current
-                        }
+                let featuresSet = featureDirective.featuresSet.getOrThrow()
+                for (feature in featuresSet.content) {
+                    let featureName = feature.ToString()
+                    let current = MakeRange(feature.begin, feature.end)
+                    if (let Some(previous) <- rangeMap.get(featureName)) {
+                        WarnRepeatedFeatureName(diag, featureName, current, previous)
+                    } else {
+                        rangeMap[featureName] = current
                     }
                 }
                 if (!featureDirective.annotations.isEmpty()) {
@@ -6702,10 +6701,9 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
         let referenceFile = refFile.getOrThrow()
         let featureDirective = referenceFile.feature.getOrThrow()
-        if (let Some(featuresSet) <- featureDirective.featuresSet) {
-            for (feature in featuresSet.content) {
-                refMap[feature.ToString()] = false
-            }
+        let featuresSet = featureDirective.featuresSet.getOrThrow()
+        for (feature in featuresSet.content) {
+            refMap[feature.ToString()] = false
         }
         return (referenceFile, anno)
     }
@@ -6723,16 +6721,15 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             }
             let featureDirective = file.feature.getOrThrow()
             var hasInvalidName = false
-            if (let Some(featuresSet) <- featureDirective.featuresSet) {
-                for (feature in featuresSet.content) {
-                    let featureName = feature.ToString()
-                    if (refMap.contains(featureName)) {
-                        refMap[featureName] = true
-                    } else {
-                        hasInvalidName = true
-                        invalidFeatures.add(file)
-                        break
-                    }
+            let featuresSet = featureDirective.featuresSet.getOrThrow()
+            for (feature in featuresSet.content) {
+                let featureName = feature.ToString()
+                if (refMap.contains(featureName)) {
+                    refMap[featureName] = true
+                } else {
+                    hasInvalidName = true
+                    invalidFeatures.add(file)
+                    break
                 }
             }
             if (!hasInvalidName) {
@@ -6754,26 +6751,25 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         let invalidFeatures = ArrayList<File>()
         let (refFile, hasAnno) = ValidateFileFeatureSpec(pkg, refMap)
         CollectInvalidFeatureFiles(pkg, invalidFeatures, refMap, hasAnno)
-        if (invalidFeatures.isEmpty()) {
-            return
-        }
-        let refFeature = refFile.feature.getOrThrow()
-        var counter: UInt8 = 0
-        for (file in invalidFeatures) {
-            if (counter > 1) {
-                return
+        if (!invalidFeatures.isEmpty()) {
+            let refFeature = refFile.feature.getOrThrow()
+            var counter: UInt8 = 0
+            for (file in invalidFeatures) {
+                if (counter > 1) {
+                    return
+                }
+                if (let None <- file.feature) {
+                    DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), refFeature)
+                } else {
+                    DiagForDifferentPackageFeatureConsistency(
+                        diag,
+                        file.feature.getOrThrow(),
+                        refFeature,
+                        hasAnno
+                    )
+                }
+                counter++
             }
-            if (let None <- file.feature) {
-                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), refFeature)
-            } else {
-                DiagForDifferentPackageFeatureConsistency(
-                    diag,
-                    file.feature.getOrThrow(),
-                    refFeature,
-                    hasAnno
-                )
-            }
-            counter++
         }
     }
 
