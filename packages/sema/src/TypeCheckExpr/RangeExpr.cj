@@ -40,7 +40,7 @@ extend TypeChecker {
         let inconsistent = !ctx.HasTargetTy(re) && re.startExpr.isSome() && re.stopExpr.isSome() && !isWellTyped
         if (inconsistent && !CanSkipDiag(re.startExpr.getOrThrow()) && !CanSkipDiag(re.stopExpr.getOrThrow())) {
             if (let Some(diag) <- impl.diag) {
-                diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_inconsistency_range_elemType).Emit()
+                Diagnose(diag, re, BasicDiagKind.sema_inconsistency_range_elemType).Emit()
             }
         }
         let typeArgs = ArrayList<Ty>()
@@ -56,13 +56,13 @@ extend TypeChecker {
             if (!Check(ctx, TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64), stepExpr)) {
                 if (!CanSkipDiag(stepExpr)) {
                     if (let Some(diag2) <- impl.diag) {
-                        diag2.Diagnose(re.begin, re.end, BasicDiagKind.sema_range_step_not_int64).Emit()
+                        Diagnose(diag2, re, BasicDiagKind.sema_range_step_not_int64).Emit()
                     }
                 }
                 isWellTyped = false
             } else if (stepExpr.isConst && stepExpr.constNumValue.asInt.Uint64() == 0u64) {
                 if (let Some(diag3) <- impl.diag) {
-                    diag3.Diagnose(stepExpr.begin, stepExpr.end, BasicDiagKind.sema_step_non_zero_range).Emit()
+                    Diagnose(diag3, stepExpr, BasicDiagKind.sema_step_non_zero_range).Emit()
                 }
             }
         }
@@ -96,7 +96,7 @@ extend TypeChecker {
         } else { GetCoreDecl(ctx, "Range") as StructDecl }
         if (re.decl.isNone()) {
             if (let Some(diag) <- impl.diag) {
-                diag.Diagnose(re.begin, re.end, BasicDiagKind.sema_no_core_object).Emit()
+                Diagnose(diag, re, BasicDiagKind.sema_no_core_object).Emit()
             }
             return false
         }
