@@ -4444,6 +4444,7 @@ public class Translator {
         let recordBlock = CurrentBlock()
         let parentGroup = RequireParentBlockGroup(recordBlock, "for-in range")
         let forInEntryBlock = builder.CreateBlock(parentGroup)
+        forInEntryBlock.SetDebugLocation(TranslateLocation(expr.body.getOrThrow().begin, expr.body.getOrThrow().end))
         currentBlock = forInEntryBlock
         let condVar = InitializeForInCondVar()
         InitializeDelayExitSignal(condLoc)
