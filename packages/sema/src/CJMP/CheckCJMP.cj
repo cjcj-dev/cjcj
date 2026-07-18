@@ -170,8 +170,9 @@ private func DeclInfo(decl: Decl): String {
         return "variable with pattern"
     }
     if (let Some(extendDecl) <- (decl as ExtendDecl)) {
-        if (let Some(extendedType) <- extendDecl.extendedType) {
-            return DeclKindToString(decl) + " '" + extendedType.ToString() + "'"
+        if (Ty.IsTyCorrect(extendDecl.GetTy())) {
+            return DeclKindToString(decl) + " '" + GetTypeNameFromTy(
+                extendDecl.extendedType.getOrThrow().GetTy().getOrThrow(), false, HashMap<Ptr<Ty>, UInt32>()) + "'"
         }
     }
     return DeclKindToString(decl) + " '" + decl.identifier.GetRawText() + "'"
