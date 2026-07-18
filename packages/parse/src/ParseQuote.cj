@@ -102,7 +102,7 @@ extend ParserImpl {
             }
             if (Seeing(TokenKind.ILLEGAL) && Peek().Value() == "\\") {
                 ParseQuoteEscapeToken(tokens)
-            } else if (Seeing([TokenKind.DOLLAR, TokenKind.LPAREN], skipNewline: false)) {
+            } else if (Seeing([TokenKind.DOLLAR, TokenKind.LPAREN])) {
                 GenerateTokenPart(qe, tokens)
                 ParseQuoteDollarInterpolationWithParen(qe)
             } else if (Seeing(TokenKind.DOLLAR_IDENTIFIER)) {
