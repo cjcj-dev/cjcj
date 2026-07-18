@@ -6575,6 +6575,9 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "empty package name")
                 return false
             }
+            if (pkg.HasFtrDirective()) {
+                CheckPackageFeatureSpec(pkg)
+            }
             CheckPackageSpecsIdentical(pkg)
             if (opts.compileTestsOnly) {
                 pkg.fullPackageName = pkg.fullPackageName + SourceManager.testPkgSuffix
@@ -6610,6 +6613,119 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
         SetHasBuildIndex(true)
         return true
+    }
+
+    private func ValidateFileFeatureSpec(
+        pkg: Package,
+        refMap: HashMap<String, Bool>
+    ): (Option<File>, Bool) {
+        var refSize: Int64 = 0
+        let rangeMap = HashMap<String, Range>()
+        var refFile: Option<File> = None
+        var anno = false
+        for (file in pkg.files) {
+            if (let Some(featureDirective) <- file.feature) {
+                if (let Some(featuresSet) <- featureDirective.featuresSet) {
+                    for (feature in featuresSet.content) {
+                        let featureName = feature.ToString()
+                        let current = MakeRange(feature.begin, feature.end)
+                        if (let Some(previous) <- rangeMap.get(featureName)) {
+                            WarnRepeatedFeatureName(diag, featureName, current, previous)
+                        } else {
+                            rangeMap[featureName] = current
+                        }
+                    }
+                }
+                if (!featureDirective.annotations.isEmpty()) {
+                    anno = true
+                }
+                if ((let None <- refFile) || refSize < rangeMap.size) {
+                    refSize = rangeMap.size
+                    refFile = Some(file)
+                }
+                rangeMap.clear()
+            }
+        }
+        if (let Some(file) <- refFile) {
+            let featureDirective = file.feature.getOrThrow()
+            if (let Some(featuresSet) <- featureDirective.featuresSet) {
+                for (feature in featuresSet.content) {
+                    refMap[feature.ToString()] = false
+                }
+            }
+        }
+        return (refFile, anno)
+    }
+
+    private func CollectInvalidFeatureFiles(
+        pkg: Package,
+        invalidFeatures: ArrayList<File>,
+        refMap: HashMap<String, Bool>,
+        hasAnno: Bool
+    ): Unit {
+        for (file in pkg.files) {
+            if ((let None <- file.feature) || (hasAnno && file.feature.getOrThrow().annotations.isEmpty())) {
+                invalidFeatures.add(file)
+                continue
+            }
+            let featureDirective = file.feature.getOrThrow()
+            var hasInvalidName = false
+            if (let Some(featuresSet) <- featureDirective.featuresSet) {
+                for (feature in featuresSet.content) {
+                    let featureName = feature.ToString()
+                    if (refMap.contains(featureName)) {
+                        refMap[featureName] = true
+                    } else {
+                        hasInvalidName = true
+                        invalidFeatures.add(file)
+                        break
+                    }
+                }
+            }
+            if (!hasInvalidName) {
+                for (featureName in refMap.keys()) {
+                    if (!refMap.get(featureName).getOrThrow()) {
+                        invalidFeatures.add(file)
+                        break
+                    }
+                }
+            }
+            for (featureName in refMap.keys()) {
+                refMap[featureName] = false
+            }
+        }
+    }
+
+    private func CheckPackageFeatureSpec(pkg: Package): Unit {
+        let refMap = HashMap<String, Bool>()
+        let invalidFeatures = ArrayList<File>()
+        let (refFileOption, hasAnno) = ValidateFileFeatureSpec(pkg, refMap)
+        if (let None <- refFileOption) {
+            return
+        }
+        CollectInvalidFeatureFiles(pkg, invalidFeatures, refMap, hasAnno)
+        if (invalidFeatures.isEmpty()) {
+            return
+        }
+        let refFile = refFileOption.getOrThrow()
+        let refFeature = refFile.feature.getOrThrow()
+        var counter: UInt8 = 0
+        for (file in invalidFeatures) {
+            if (counter > 1) {
+                return
+            }
+            if (let None <- file.feature) {
+                DiagForNullPackageFeature(diag, MakeRange(file.begin, file.end), refFeature)
+            } else {
+                DiagForDifferentPackageFeatureConsistency(
+                    diag,
+                    file.feature.getOrThrow(),
+                    refFeature,
+                    hasAnno
+                )
+            }
+            counter++
+        }
     }
 
     private func CheckPackageSpecsIdentical(pkg: Package): Unit {
