@@ -81,7 +81,11 @@ public class MemberMap {
     public init() {}
 
     public func Add(name: String, signature: MemberSignature): Unit {
-        entries.add(MemberMapEntry(name, signature))
+        var idx: Int64 = 0
+        while (idx < entries.size && entries[idx].name <= name) {
+            idx++
+        }
+        entries.add(MemberMapEntry(name, signature), at: idx)
     }
 
     public func Add(signature: MemberSignature): Unit {
