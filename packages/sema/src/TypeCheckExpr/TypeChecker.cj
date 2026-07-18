@@ -5780,9 +5780,13 @@ extend TypeChecker {
             }
         }
         let synTy = SynthesizeSpawnExpr(ctx, expr)
-        if (Ty.IsTyCorrect(synTy) &&
-            impl.typeManager.CheckTypeCompatibility(target, synTy) != TypeCompatibility.INCOMPATIBLE) {
-            return true
+        if (Ty.IsTyCorrect(synTy)) {
+            if (impl.typeManager.CheckTypeCompatibility(target, synTy) != TypeCompatibility.INCOMPATIBLE) {
+                return true
+            }
+            if (let Some(diagValue) <- impl.diag) {
+                DiagMismatchedTypes(diagValue, expr, target)
+            }
         }
         expr.SetTy(TypeManager.GetInvalidTy())
         return false
