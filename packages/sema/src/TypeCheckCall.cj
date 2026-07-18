@@ -2815,11 +2815,11 @@ private func CheckGenericDeclInstantiation(typeManager: TypeManager, diag: Optio
         }
         return false
     }
-    let instantiateMap = if (let Some(expr) <- (checkNode as Expr)) {
-        GenerateGenericTypeMapping(typeManager, expr).u2i
-    } else {
-        TypeSubst()
+    let instMap = MultiTypeSubst()
+    if (let Some(memberAccess) <- (checkNode as MemberAccess)) {
+        GenerateTypeMappingForBaseExpr(typeManager, memberAccess, instMap)
     }
+    let instantiateMap = MultiTypeSubstToTypeSubst(instMap)
     let generic = decl.GetGeneric()
     if (let None <- generic) {
         return true
