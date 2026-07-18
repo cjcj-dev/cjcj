@@ -7480,30 +7480,12 @@ extend TypeChecker {
         re.SetTy(resTy)
     }
 
-    private func SynthesizeDesugarIfNeeded(ctx: ASTContext, expr: Expr): Unit {
-        if (let Some(desugar) <- expr.desugarExpr) {
-            let _ = Synthesize(ctx, desugar)
-        }
-    }
-
-    private func SynthesizeDesugarsInTree(ctx: ASTContext, expr: Expr): Unit {
-        let walker = Walker(expr, visitPre: { node: Node =>
-            if (let Some(innerExpr) <- (node as Expr)) {
-                SynthesizeDesugarIfNeeded(ctx, innerExpr)
-            }
-            VisitAction.WALK_CHILDREN
-        })
-        let _ = walker.Walk()
-    }
-
     internal func FinishSynthesize(ctx: ASTContext, expr: Expr, ty: Ty): Ty {
-        SynthesizeDesugarsInTree(ctx, expr)
         ctx.SkipSynForCorrectTy(expr)
         return ty
     }
 
     private func FinishCheck(ctx: ASTContext, expr: Expr, ok: Bool): Bool {
-        SynthesizeDesugarsInTree(ctx, expr)
         if (ok) {
             ctx.SkipSynForCorrectTy(expr)
         }
