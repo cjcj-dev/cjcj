@@ -901,14 +901,10 @@ public class Apply <: FuncCall {
     }
 
     public override func OperandsToString(): String {
-        let parts = ArrayList<String>()
-        parts.add(CallTargetPrefix() + GetCallee().GetIdentifier() + InstantiatedTypeArgsToString())
-        let argNames = ArrayList<String>()
-        for (arg in GetArgs()) {
-            argNames.add(arg.GetIdentifier())
-        }
-        parts.add(JoinStrings(argNames, ", "))
-        return JoinStrings(parts, ", ")
+        let operandsText = ArrayList<String>()
+        operandsText.add(CallTargetPrefix() + GetCallee().GetIdentifier() + InstantiatedTypeArgsToString())
+        operandsText.add(ValueIdVecToString("", GetArgs(), ""))
+        return StringJoin(operandsText, ", ")
     }
 
     public override func AddExtraComment(): String {
