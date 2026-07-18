@@ -190,10 +190,7 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: MacroHost): U
             if (token.kind == TokenKind.NL || token.kind == TokenKind.COMMENT) {
                 token.SetCurFile(true)
                 invocation.newTokens[tokenIdx] = token
-                tokenIdx++
-                continue
-            }
-            if (mcPos.fileID != token.Begin().fileID) {
+            } else if (mcPos.fileID != token.Begin().fileID) {
                 token.SetCurFile(false)
             } else {
                 var isAtMacroPosition = false
