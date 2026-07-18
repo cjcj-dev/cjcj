@@ -387,7 +387,8 @@ public class MockSupportManager {
         toDecl.CloneAttrs(fromDecl)
         toDecl.linkage = fromDecl.linkage
         toDecl.fullPackageName = fromDecl.fullPackageName
-        toDecl.identifier = fromDecl.identifier
+        toDecl.identifier = SrcIdentifier(fromDecl.identifier.Val(), fromDecl.identifier.Begin(),
+            fromDecl.identifier.End(), fromDecl.identifier.IsRaw())
         toDecl.outerDecl = fromDecl.outerDecl
         if (let Some(file) <- curFile) {
             toDecl.curFile = file
@@ -417,7 +418,8 @@ public class MockSupportManager {
             clonedParam.SetTy(typeManager.GetInstantiatedTy(param.GetTy().getOrThrow(), typeSubsts))
             clonedParam.typeNode = MockUtils.CreateType(clonedParam.GetTy().getOrThrow())
             clonedParam.outerDecl = toDecl
-            clonedParam.identifier = param.identifier
+            clonedParam.identifier = SrcIdentifier(param.identifier.Val(), param.identifier.Begin(),
+                param.identifier.End(), param.identifier.IsRaw())
             clonedParam.curFile = toDecl.curFile
             clonedParam.fullPackageName = toDecl.fullPackageName
             paramList.params.add(clonedParam)
