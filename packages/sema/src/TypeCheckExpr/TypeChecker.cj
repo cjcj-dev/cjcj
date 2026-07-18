@@ -2837,6 +2837,7 @@ extend TypeChecker {
             impl.CheckValueTypeRecursive(pkg)
             let result = CheckLegalityOfUsage(
                 ctx, pkg, diagValue, impl.typeManager, impl,
+                { inheritancePkg: Package => impl.CheckInheritance(inheritancePkg) },
                 { closureCtx: ASTContext, node: Node => CheckClosures(closureCtx, node) },
                 opts: GlobalOptions())
             EmitLegalityOfUsage(diagValue, result)

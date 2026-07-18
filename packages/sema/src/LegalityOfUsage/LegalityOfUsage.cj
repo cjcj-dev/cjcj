@@ -578,6 +578,7 @@ public func CheckLegalityOfUsage(
     diag: BasicDiagnosticEngine,
     typeManager: TypeManager,
     impl: TypeCheckerImpl,
+    checkInheritance: (Package) -> Unit,
     checkClosures: (ASTContext, Node) -> Unit,
     opts!: OptionGlobalOptions = OptionGlobalOptions()
 ): LegalityOfUsageResult {
@@ -594,7 +595,7 @@ public func CheckLegalityOfUsage(
     result.globalVarInitializationIssues.clear()
     CheckLegalityOfUnsafeAndInout(pkg, diag, backendType: opts.backend)
     // C++ src/Sema/LegalityOfUsage/LegalityOfUsage.cpp:90-93.
-    impl.CheckInheritance(pkg)
+    checkInheritance(pkg)
     checkClosures(ctx, pkg)
     CheckAccessLevelValidity(pkg, diag)
     CheckAllInvocationHasImpl(ctx, pkg, diag, typeManager)
