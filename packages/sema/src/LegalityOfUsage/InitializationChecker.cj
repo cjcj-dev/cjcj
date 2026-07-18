@@ -1589,8 +1589,8 @@ public class InitializationChecker {
                 return result
             }
             if (target.TestAttr(Attribute.GLOBAL) && IsSameFile(member, target) && member.begin < target.begin) {
-                AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, member, target: target,
-                    message: target.identifier.Val())
+                DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_undefined_variable,
+                    member, arguments: [target.identifier.Val()]).Emit()
                 return false
             }
             let memberStruct = ScopeManager.GetCurSymbolByKind(SymbolKind.STRUCT, ctx, member.scopeName)
@@ -1602,8 +1602,8 @@ public class InitializationChecker {
                 false
             }
             if (isInSameDecl && !IsInitialized(member)) {
-                AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, member, target: target,
-                    message: target.identifier.Val())
+                Diagnose(diag, member, BasicDiagKind.sema_used_before_initialization,
+                    args: [BasicDiagArgument(target.identifier.Val())]).Emit()
                 return false
             }
         }
