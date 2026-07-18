@@ -2555,7 +2555,7 @@ public class LexerImpl {
     }
 
     private func GetSymbolToken(pStart: Int64): Token {
-        let literal = input[pStart..pNext]
+        let literal = unsafe { String.fromUtf8Unchecked(bytes[pStart..pNext]) }
         let kind = LookupKeyword(literal)
         if (kind == TokenKind.IDENTIFIER) {
             if (success) {
