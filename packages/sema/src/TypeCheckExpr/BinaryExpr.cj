@@ -1699,6 +1699,82 @@ extend TypeChecker {
         return false
     }
 
+    // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:1068-1135 TypeCheckerImpl::ChkFlowExpr.
+    private func ChkFlowExpr(ctx: ASTContext, target: Option<Ty>, be: BinaryExpr): Bool {
+        if (let Some(existingTy) <- be.GetTy()) {
+            if (Ty.IsTyCorrect(existingTy)) {
+                return target.isNone() || impl.typeManager.CheckTypeCompatibility(existingTy,
+                    target.getOrThrow()) != TypeCompatibility.INCOMPATIBLE
+            }
+        }
+        let rightExpr = be.rightExpr.getOrThrow()
+        let leftExpr = be.leftExpr.getOrThrow()
+        rightExpr.isInFlowExpr = true
+        try (cs = impl.typeManager.constraints.CommitScope()) {
+            try (ds = DiagSuppressor(impl.diag)) {
+                let _ = SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, leftExpr)
+                let _ = SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, rightExpr)
+                if (ds.HasError()) {
+                    if (be.op == TokenKind.COMPOSITION) {
+                        be.SetTy(TypeManager.GetInvalidTy())
+                        ds.ReportDiag()
+                        return false
+                    }
+                    leftExpr.Clear()
+                    rightExpr.Clear()
+                    impl.typeManager.constraints.Reset()
+                }
+            }
+            let isThisExpr = { expr: Expr =>
+                if (let Some(refExpr) <- (expr as RefExpr)) {
+                    if (refExpr.isAlone && refExpr.isThis) {
+                        if (let Some(diag) <- impl.diag) {
+                            Diagnose(diag, refExpr, BasicDiagKind.sema_flow_expressions_use_this_or_super,
+                                args: [BasicDiagArgument(refExpr.ref.identifier.Val())]).Emit()
+                        }
+                        return false
+                    }
+                }
+                return true
+            }
+            if ((be.op == TokenKind.COMPOSITION && !isThisExpr(leftExpr)) || !isThisExpr(rightExpr)) {
+                be.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
+            DesugarFlowExpr(ctx, be)
+            let desugar = be.desugarExpr.getOrThrow()
+            let callExpr = (desugar as CallExpr).getOrThrow()
+            try (ds = DiagSuppressor(impl.diag)) {
+                if (!ChkCallExpr(ctx, target, callExpr)) {
+                    let _ = ds.GetSuppressedDiag()
+                    RecoverToBinaryExpr(be)
+                    be.SetTy(TypeManager.GetInvalidTy())
+                    DiagnoseForBinaryExpr(impl.typeManager, be,
+                        Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }), impl.diag)
+                    ds.ReportDiag()
+                    return false
+                }
+                ds.ReportDiag()
+            }
+            if (CheckFlowOperandsHaveNamedParam(callExpr, impl.diag)) {
+                RecoverToBinaryExpr(be)
+                be.SetTy(TypeManager.GetInvalidTy())
+                return false
+            }
+            be.SetTy(desugar.GetTy().getOrThrow())
+            return true
+        }
+        return false
+    }
+
+    // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:1137-1143 TypeCheckerImpl::SynFlowExpr.
+    private func SynFlowExpr(ctx: ASTContext, be: BinaryExpr): Ty {
+        if (!ChkFlowExpr(ctx, None, be)) {
+            be.SetTy(TypeManager.GetInvalidTy())
+        }
+        return be.GetTy().getOrThrow()
+    }
+
     func SynBinaryExpr(ctx: ASTContext, be: BinaryExpr): Ty {
         if (let Some(desugar) <- be.desugarExpr) {
             return desugar.GetTy().getOrThrow()
@@ -1796,7 +1872,7 @@ extend TypeChecker {
         } else if (IsShiftOperator(be.op)) {
             inferRet = SynShiftExpr(impl.typeManager, be, synthesizer: Some(synthesizer))
         } else if (IsFlowOperator(be.op)) {
-            inferRet = SynFlowExpr(impl.typeManager, ctx, be, synthesizer: Some(synthesizer), diag: impl.diag)
+            inferRet = SynFlowExpr(ctx, be)
             return (Some(be.GetTy().getOrThrow()), inferRet)
         } else if (be.op == TokenKind.COALESCING) {
             let ty = SynCoalescingExpr(impl, be, ctx: Some(ctx), synthesizer: Some(synthesizer),
