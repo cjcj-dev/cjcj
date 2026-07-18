@@ -41,7 +41,13 @@ public class Parser {
         modifiers!: ArrayList<Modifier> = ArrayList<Modifier>(),
         annos!: ArrayList<Annotation> = ArrayList<Annotation>()
     ): ArrayList<Node> {
-        return impl.ParseNodes(scope, currentMacroCall, modifiers: modifiers, annos: annos)
+        let nodes = impl.ParseNodes(scope, currentMacroCall, modifiers: modifiers, annos: annos)
+        for (node in nodes) {
+            if (let Some(decl) <- (node as Decl)) {
+                impl.FinalizeDeclTree(decl)
+            }
+        }
+        return nodes
     }
 
     public func ParseNodes(
@@ -50,7 +56,13 @@ public class Parser {
         modifiers!: ArrayList<Modifier> = ArrayList<Modifier>(),
         annos!: ArrayList<Annotation> = ArrayList<Annotation>()
     ): ArrayList<Node> {
-        return impl.ParseNodes(scope, currentMacroCall, modifiers: modifiers, annos: annos)
+        let nodes = impl.ParseNodes(scope, currentMacroCall, modifiers: modifiers, annos: annos)
+        for (node in nodes) {
+            if (let Some(decl) <- (node as Decl)) {
+                impl.FinalizeDeclTree(decl)
+            }
+        }
+        return nodes
     }
 
     public func EnableCustomAnno(): Parser {
