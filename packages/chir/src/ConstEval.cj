@@ -270,16 +270,17 @@ private class IVal2CHIR {
         if (len < 0 || arrData.size <= len) {
             return None
         }
-        var out = ""
+        let out = ArrayList<UInt8>()
         var idx: Int64 = 0
         while (idx < len) {
             if (!arrData[idx + 1].IsIntLike()) {
                 return None
             }
-            out += String.fromUtf8([UInt8(arrData[idx + 1].GetInt())])
+            out.add(UInt8(arrData[idx + 1].GetInt()))
             idx++
         }
-        return ExprResultAsValue(builder.CreateConstant(ty, StringLiteral(out), parent))
+        return ExprResultAsValue(builder.CreateConstant(ty,
+            StringLiteral(unsafe { String.fromUtf8Unchecked(out.toArray()) }), parent))
     }
 
     private func ConvertTupleToChir(ty: Type, val: InterpreterValue, parent: Block): Option<Value> {
