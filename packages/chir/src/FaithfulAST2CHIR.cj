@@ -708,11 +708,12 @@ private abstract class TarjanSort<T> where T <: AstNode {
 }
 
 private class FileCirDepsChecker <: TarjanSort<AstFile> {
-    public var hasCircularDependency: Bool = false
+    private let diag: BasicDiagnosticEngine
     private let diagLog: ArrayList<String>
 
-    public init(diagLog: ArrayList<String>) {
+    public init(diag: BasicDiagnosticEngine, diagLog: ArrayList<String>) {
         super()
+        this.diag = diag
         this.diagLog = diagLog
     }
 
@@ -728,7 +729,17 @@ private class FileCirDepsChecker <: TarjanSort<AstFile> {
         if (diagUnits.size <= 1) {
             return
         }
-        hasCircularDependency = true
+        var diagStr = ""
+        for (unit in diagUnits) {
+            let fileName = unit.element.fileName
+            if (diagStr.isEmpty()) {
+                diagStr = fileName
+            } else {
+                diagStr += " and " + fileName
+            }
+        }
+        diag.Diagnose(BasicDiagKind.chir_file_might_circular_dependency,
+            args: [BasicDiagArgument(diagStr)]).Emit()
     }
 
     public override func GetEleStr(node: AstFile): String {
@@ -2845,16 +2856,11 @@ public class FaithfulAST2CHIR {
         let var2varDepsInFile = DeclDepMap()
         AnalysisFileDependency(funcsAndVarsDepMap, fileDependencyMap, var2varDepsInFile)
 
-        let fileChecker = FileCirDepsChecker(ArrayList<String>())
+        let fileChecker = FileCirDepsChecker(diag.getOrThrow(), ArrayList<String>())
         fileChecker.InitFileDep(fileDependencyMap)
         fileChecker.DoTarjanSort()
         fileChecker.UpdateSccUnit(fileDependencyMap)
         let sortedFiles = fileChecker.GetOrderElement()
-        if (fileChecker.hasCircularDependency) {
-            failure = true
-            failureReason = "chir file might circular dependency"
-            return ArrayList<AstFile>()
-        }
         if (kind == IncreKind.INCR) {
             for (fileVars in fileAndVarMap) {
                 CheckUseBeforeInit(fileVars.vars, var2varDepsInFile)
