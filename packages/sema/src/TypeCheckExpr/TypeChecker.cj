@@ -4995,7 +4995,7 @@ extend TypeChecker {
     }
 
     // C++ src/Sema/TypeCheckCall.cpp:3148-3287 TypeCheckerImpl::ChkCallExpr.
-    private func ChkCallExpr(ctx: ASTContext, target: Option<Ty>, ce: CallExpr): Bool {
+    internal func ChkCallExpr(ctx: ASTContext, target: Option<Ty>, ce: CallExpr): Bool {
         if (ce.desugarExpr.isSome()) {
             return ChkDesugarExprOfCallExpr(ctx, target, ce)
         }
