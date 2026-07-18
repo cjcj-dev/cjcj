@@ -437,6 +437,16 @@ class GenericInstantiationManagerImpl {
     }
 
     public func GetInstantiatedDeclWithGenericInfo(genericInfo: GenericInfo, pkg: Package): Option<Decl> {
+        curPkg = Some(pkg)
+        let instantiatedDecl = GetInstantiatedDeclWithGenericInfo(genericInfo)
+        if (let Some(decl) <- instantiatedDecl) {
+            RearrangeReferencesInNode(decl, pkg)
+        }
+        return instantiatedDecl
+    }
+
+    private func GetInstantiatedDeclWithGenericInfo(genericInfo: GenericInfo): Option<Decl> {
+        let pkg = curPkg.getOrThrow()
         if (let Some(cached) <- FindInCache(genericInfo, pkg)) {
             return cached
         }
@@ -450,9 +460,6 @@ class GenericInstantiationManagerImpl {
                 appendGenericInstantiation(pkg, instantiatedDecl)
                 InstantiatedExtendRecorder(this, ci.typeManager).Record(instantiatedDecl)
                 InstantiateReferencedGenericsInNode(instantiatedDecl, pkg)
-                RearrangeReferencesInNode(instantiatedDecl, pkg)
-                updateInstantiatedExtendMap(ci.typeManager, pkg)
-                updateInstantiatedDeclsLinkage(pkg)
             }
             return instantiatedDecl
         }
@@ -1015,9 +1022,7 @@ class GenericInstantiationManagerImpl {
         var structDecl = FindInCache(genericInfo)
         if ((let None <- structDecl) && (let Some(triggerNode) <- curTriggerNode) &&
             triggerNode.visitedByWalkerID == instantiationWalkerID) {
-            if (let Some(currentPkg) <- curPkg) {
-                structDecl = GetInstantiatedDeclWithGenericInfo(genericInfo, currentPkg)
-            }
+            structDecl = GetInstantiatedDeclWithGenericInfo(genericInfo)
         }
         let realMemberDecl = GetRealMemberDecl(target)
         let targetToFind = realMemberDecl.decl
@@ -1912,7 +1917,7 @@ class GenericInstantiationManagerImpl {
         }
         let genericInfo = ConstructGenericInfo(generalDecl, instTys)
         if (!genericInfo.gTyToTyMap.IsEmpty()) {
-            let _ = GetInstantiatedDeclWithGenericInfo(genericInfo, pkg)
+            let _ = GetInstantiatedDeclWithGenericInfo(genericInfo)
         }
     }
 
