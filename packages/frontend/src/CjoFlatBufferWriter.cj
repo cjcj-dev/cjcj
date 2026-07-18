@@ -2674,6 +2674,9 @@ public class ASTWriter {
     }
 
     private func CreateFullIdForDecl(decl: Decl): FlatBufferOffset {
+        if (decl.doNotExport) {
+            return CreateInvalidFullId()
+        }
         let pkgName = if (decl.fullPackageName.isEmpty()) { currentPackageName } else { decl.fullPackageName }
         if (pkgName == currentPackageName) {
             if (!IsSupportedSerializedDecl(decl)) {
