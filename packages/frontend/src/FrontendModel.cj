@@ -51,7 +51,8 @@ public import cjcj::mangle.BaseMangler
 import cjcj::sema.TypeManager as FaithfulSemaTypeManager
 import cjcj::sema.Test.TestManager as RealTestManager
 import cjcj::utils.{AST_PACKAGE_NAME, CORE_PACKAGE_NAME, DynamicCast, EraseIf, JoinStrings, MAIN_INVOKE,
-    SERIALIZED_FILE_EXTENSION, SYNC_PACKAGE_NAME, CJC_ASSERT, IncrementalCompilationLogger, InternalError}
+    CJ_D_FILE_EXTENSION, SERIALIZED_FILE_EXTENSION, SYNC_PACKAGE_NAME, CJC_ASSERT, IncrementalCompilationLogger,
+    InternalError}
 import cjcj::utils.FileUtil
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.STANDARD_LIBS
@@ -7950,7 +7951,8 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         if (!cjoFilePaths.contains(fullPackageName)) {
             cjoFilePaths[fullPackageName] = cjoPath
         }
-        depPkgCjdPaths[fullPackageName] = cjoPath
+        let end = cjoPath.lastIndexOf(SERIALIZED_FILE_EXTENSION) ?? cjoPath.size
+        depPkgCjdPaths[fullPackageName] = cjoPath[0..end] + CJ_D_FILE_EXTENSION
     }
 
     private func GetPackageCjo(importSpec: ImportSpec): (String, String) {
