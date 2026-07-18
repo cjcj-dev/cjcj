@@ -309,10 +309,12 @@ private func collectDeclsFromPackage(pkg: Package): ArrayList<Decl> {
 
 private func collectDeclsFromDecl(decl: Decl, collector: DeclCollectorForTypeCheck): Unit {
     collector.Add(decl)
-    if (let Some(generic) <- decl.generic) {
-        for (param in generic.typeParameters) {
-            param.outerDecl = Some(decl)
-            collectDeclsFromDecl(param, collector)
+    if (!decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+        if (let Some(generic) <- decl.GetGeneric()) {
+            for (param in generic.typeParameters) {
+                param.outerDecl = Some(decl)
+                collectDeclsFromDecl(param, collector)
+            }
         }
     }
     if (let Some(enumDecl) <- (decl as EnumDecl)) {
