@@ -390,6 +390,7 @@ private func FaithfulTranslatorGenerateLambdaFuncMangleName(baseFunc: Function, 
 public class Translator {
     private let builder: CHIRBuilder
     private let chirTy: CHIRType
+    private let gim: Option<GenericInstantiationManager>
     private let globalSymbolTable: FaithfulAST2CHIRNodeMap
     private let localConstVars: ElementList
     private let localConstFuncs: ElementList
@@ -427,6 +428,7 @@ public class Translator {
     public init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
         localConstVars!: ElementList = ElementList(), localConstFuncs!: ElementList = ElementList(),
         deserializedVals!: HashMap<String, Value>,
+        gim!: Option<GenericInstantiationManager> = None,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>> = None,
         opts!: GlobalOptions = GlobalOptions(),
         increKind!: IncreKind = IncreKind.INVALID,
@@ -435,7 +437,7 @@ public class Translator {
         isComputingAnnos!: Bool = false,
         initFuncsForAnnoFactory!: ArrayList<Function> = ArrayList<Function>()) {
         this(builder, chirTy, globalSymbolTable, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
-            deserializedVals: deserializedVals, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
+            deserializedVals: deserializedVals, gim: gim, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
             increKind: increKind, mergingSpecific: opts.IsCompilingCJMPSpecific(), annoFactoryFuncs: annoFactoryFuncs,
             maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos, initFuncsForAnnoFactory: initFuncsForAnnoFactory)
@@ -443,12 +445,14 @@ public class Translator {
 
     private init(builder: CHIRBuilder, chirTy: CHIRType, globalSymbolTable: FaithfulAST2CHIRNodeMap,
         localConstVars!: ElementList, localConstFuncs!: ElementList, deserializedVals!: HashMap<String, Value>,
+        gim!: Option<GenericInstantiationManager>,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>>, opts!: GlobalOptions,
         increKind!: IncreKind, mergingSpecific!: Bool, annoFactoryFuncs!: ArrayList<(AstDecl, Function)>,
         maybeUnreachable!: HashMap<Block, Terminator>, isComputingAnnos!: Bool,
         initFuncsForAnnoFactory!: ArrayList<Function>) {
         this.builder = builder
         this.chirTy = chirTy
+        this.gim = gim
         this.globalSymbolTable = globalSymbolTable
         this.localConstVars = localConstVars
         this.localConstFuncs = localConstFuncs
@@ -482,6 +486,7 @@ public class Translator {
     public func Copy(): Translator {
         return Translator(builder, chirTy, globalSymbolTable, localConstVars: localConstVars,
             localConstFuncs: localConstFuncs, deserializedVals: deserializedVals,
+            gim: gim,
             overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, increKind: increKind,
             annoFactoryFuncs: annoFactoryFuncs,
             maybeUnreachable: maybeUnreachable,
@@ -491,6 +496,7 @@ public class Translator {
     private func CopyForFork(): Translator {
         let copied = Translator(builder, chirTy, globalSymbolTable, localConstVars: localConstVars,
             localConstFuncs: localConstFuncs, deserializedVals: deserializedVals,
+            gim: gim,
             overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, increKind: increKind,
             mergingSpecific: mergingSpecific,
             annoFactoryFuncs: annoFactoryFuncs, maybeUnreachable: maybeUnreachable,
