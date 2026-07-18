@@ -40,6 +40,13 @@ func GetMemberAccessEndPos(memberAccess: MemberAccess): Unit {
 }
 
 extend ParserImpl {
+    public func SeeingNamedFuncArgs(): Bool {
+        if (SeeingContextualKeyword() || Seeing(TokenKind.IDENTIFIER)) {
+            return lexer.Seeing([TokenKind.COLON], skipNewline: true)
+        }
+        return false
+    }
+
     public func LookupExprsFollowedCommas(ek: ExprKind): Option<(TokenKind, TokenKind)> {
         if (ExprKindEquals(ek, ExprKind.EXPR_IN_TUPLE)) {
             return Some((TokenKind.LPAREN, TokenKind.RPAREN))
