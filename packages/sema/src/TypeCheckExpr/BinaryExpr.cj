@@ -1686,7 +1686,7 @@ public func ChkBinaryExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr,
     if (TryChkBinaryOverload(typeManager, target, be, ctx: ctx, synthesizer: synthesizer, checker: checker)) {
         return true
     }
-    ClearExprKeepTargets(be)
+    be.Clear()
     let actualTy = SynBinaryExpr(typeManager, be, ctx: ctx, synthesizer: synthesizer, checker: checker, diag: diag)
     if (Ty.IsTyCorrect(actualTy)) {
         if (let Some(diagValue) <- diag) {
