@@ -1178,9 +1178,10 @@ private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatch
     }
     if (let Some(leftOuter) <- left.fd.outerDecl) {
         if (let Some(rightOuter) <- right.fd.outerDecl) {
-            let sameParamTys = left.tysInArgOrder.size == right.tysInArgOrder.size &&
-                typeManager.IsFuncParameterTypesIdentical(left.tysInArgOrder, right.tysInArgOrder)
-            if (sameParamTys) {
+            let sameNumberOfParams = right.fd.GetTy().getOrThrow().typeArgs.size ==
+                left.fd.GetTy().getOrThrow().typeArgs.size
+            if (sameNumberOfParams &&
+                typeManager.IsFuncParameterTypesIdentical(left.tysInArgOrder, right.tysInArgOrder)) {
                 let rightImplementable = rightOuter.astKind == ASTKind.INTERFACE_DECL || right
                     .fd
                     .TestAttr(Attribute.ABSTRACT)
