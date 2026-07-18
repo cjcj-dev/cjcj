@@ -51,7 +51,8 @@ private class MangleAdapterIdAllocator {
 }
 
 public class MangleAstAdapter {
-    private let declCache: HashMap<Int64, MangleDecl> = HashMap<Int64, MangleDecl>()
+    private let declCache: HashMap<Int64, HashMap<Int64, MangleDecl>> =
+        HashMap<Int64, HashMap<Int64, MangleDecl>>()
     private let lambdaCache: HashMap<Int64, MangleDecl> = HashMap<Int64, MangleDecl>()
     private let annotationArrayCache: HashMap<Int64, MangleDecl> = HashMap<Int64, MangleDecl>()
     private let tyCache: HashMap<Int64, MangleType> = HashMap<Int64, MangleType>()
@@ -74,11 +75,23 @@ public class MangleAstAdapter {
         if (source.mangleAdapterId < 0) {
             return None
         }
-        return declCache.get(source.mangleAdapterId)
+        let ownerId = if (let Some(owner) <- source.outerDecl) { EnsureAdapterId(owner) } else { -1 }
+        if (let Some(ownerCache) <- declCache.get(source.mangleAdapterId)) {
+            return ownerCache.get(ownerId)
+        }
+        return None
     }
 
     private func StoreDecl(source: Decl, target: MangleDecl): Unit {
-        declCache[EnsureAdapterId(source)] = target
+        let sourceId = EnsureAdapterId(source)
+        let ownerId = if (let Some(owner) <- source.outerDecl) { EnsureAdapterId(owner) } else { -1 }
+        if (let Some(ownerCache) <- declCache.get(sourceId)) {
+            ownerCache[ownerId] = target
+        } else {
+            let ownerCache = HashMap<Int64, MangleDecl>()
+            ownerCache[ownerId] = target
+            declCache[sourceId] = ownerCache
+        }
         declPairs.add(AstDeclPair(source, target))
     }
 
