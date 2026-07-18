@@ -4802,17 +4802,25 @@ public class FaithfulAST2CHIR {
             globalVar.SetDebugLocation(GetDeclLoc(builder.context, decl))
             return globalVar
         }
+        let loc = TranslateLocationWithoutScope(builder.context, decl.begin, decl.end)
         let varTy = chirType.TranslateType(RequireAstTy(decl))
         let globalVar = builder.CreateGlobalVar(builder.context.GetRefTy(varTy), EffectiveMangledName(decl),
             srcCodeIdentifier: decl.identifier.Val(), rawMangledName: EffectiveRawMangledName(decl),
             packageName: EffectivePackageName(decl))
-        globalVar.SetDebugLocation(TranslateLocationWithoutScope(builder.context, decl.begin, decl.end))
+        if (kind == IncreKind.INCR && !decl.toBeCompiled && !IsSrcCodeImportedGlobalDecl(decl)) {
+            globalVar.EnableAttr(Attribute.IMPORTED)
+        } else {
+            globalVar.SetDebugLocation(loc)
+            if (isLocalConst) {
+                globalVar.EnableAttr(Attribute.COMPILER_ADD)
+            }
+        }
+        if (kind == IncreKind.INCR && !decl.toBeCompiled) {
+            globalVar.EnableAttr(Attribute.NON_RECOMPILE)
+        }
         globalVar.SetDebugLocationInfoForWarning(GetDeclLoc(builder.context, decl))
         globalVar.AppendAttributeInfo(BuildVarDeclAttr(decl))
         SetGlobalVarLinkageType(globalVar, decl, isLocalConst, opts.target.os == OSType.WINDOWS)
-        if (isLocalConst) {
-            globalVar.EnableAttr(Attribute.COMPILER_ADD)
-        }
         if (decl.IsConst()) {
             globalVar.EnableAttr(Attribute.CONST)
         }
