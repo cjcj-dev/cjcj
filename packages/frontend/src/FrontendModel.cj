@@ -6672,7 +6672,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     private func ValidateFileFeatureSpec(
         pkg: Package,
         refMap: HashMap<String, Bool>
-    ): (Option<File>, Bool) {
+    ): (File, Bool) {
         var refSize: Int64 = 0
         let rangeMap = HashMap<String, BasicRange>()
         var refFile: Option<File> = None
@@ -6700,15 +6700,14 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 rangeMap.clear()
             }
         }
-        if (let Some(file) <- refFile) {
-            let featureDirective = file.feature.getOrThrow()
-            if (let Some(featuresSet) <- featureDirective.featuresSet) {
-                for (feature in featuresSet.content) {
-                    refMap[feature.ToString()] = false
-                }
+        let referenceFile = refFile.getOrThrow()
+        let featureDirective = referenceFile.feature.getOrThrow()
+        if (let Some(featuresSet) <- featureDirective.featuresSet) {
+            for (feature in featuresSet.content) {
+                refMap[feature.ToString()] = false
             }
         }
-        return (refFile, anno)
+        return (referenceFile, anno)
     }
 
     private func CollectInvalidFeatureFiles(
@@ -6753,15 +6752,11 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     private func CheckPackageFeatureSpec(pkg: Package): Unit {
         let refMap = HashMap<String, Bool>()
         let invalidFeatures = ArrayList<File>()
-        let (refFileOption, hasAnno) = ValidateFileFeatureSpec(pkg, refMap)
-        if (let None <- refFileOption) {
-            return
-        }
+        let (refFile, hasAnno) = ValidateFileFeatureSpec(pkg, refMap)
         CollectInvalidFeatureFiles(pkg, invalidFeatures, refMap, hasAnno)
         if (invalidFeatures.isEmpty()) {
             return
         }
-        let refFile = refFileOption.getOrThrow()
         let refFeature = refFile.feature.getOrThrow()
         var counter: UInt8 = 0
         for (file in invalidFeatures) {
