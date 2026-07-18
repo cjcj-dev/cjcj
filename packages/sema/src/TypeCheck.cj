@@ -311,7 +311,6 @@ private func collectDeclsFromDecl(decl: Decl, collector: DeclCollectorForTypeChe
     collector.Add(decl)
     if (let Some(generic) <- decl.GetGeneric()) {
         for (param in generic.typeParameters) {
-            param.outerDecl = Some(decl)
             collectDeclsFromDecl(param, collector)
         }
     }
