@@ -234,8 +234,8 @@ private func isUnitFunction(fd: FuncDecl): Bool {
 }
 
 private func IsRightClassConstructor(classDecl: ClassDecl): Bool {
-    var hasConstructorWithInput = false
-    var hasConstructorWithoutInput = false
+    let hasConstructorWithInput = Box<Bool>(false)
+    let hasConstructorWithoutInput = Box<Bool>(false)
     let primaryConstructor = classDecl.identifier
     let preVisit = {node: Node =>
         if (node.TestAttr(Attribute.IS_BROKEN)) {
@@ -245,11 +245,11 @@ private func IsRightClassConstructor(classDecl: ClassDecl): Bool {
             let funcDecl = (node as FuncDecl).getOrThrow()
             let paramLists = funcDecl.funcBody.getOrThrow().paramLists
             if (funcDecl.TestAttr(Attribute.CONSTRUCTOR) && !paramLists.isEmpty() && paramLists[0].params.isEmpty()) {
-                hasConstructorWithoutInput = true
+                hasConstructorWithoutInput.value = true
                 return VisitAction.STOP_NOW
             }
             if (funcDecl.TestAttr(Attribute.CONSTRUCTOR) && !paramLists.isEmpty() && !paramLists[0].params.isEmpty()) {
-                hasConstructorWithInput = true
+                hasConstructorWithInput.value = true
             }
             return VisitAction.SKIP_CHILDREN
         }
@@ -257,21 +257,21 @@ private func IsRightClassConstructor(classDecl: ClassDecl): Bool {
             let primaryCtorDecl = (node as PrimaryCtorDecl).getOrThrow()
             let paramLists = primaryCtorDecl.funcBody.getOrThrow().paramLists
             if (primaryCtorDecl.identifier == primaryConstructor && !paramLists.isEmpty() && paramLists[0].params.isEmpty()) {
-                hasConstructorWithoutInput = true
+                hasConstructorWithoutInput.value = true
                 return VisitAction.STOP_NOW
             }
             if (primaryCtorDecl.identifier == primaryConstructor && !paramLists.isEmpty() && !paramLists[0].params.isEmpty()) {
-                hasConstructorWithInput = true
+                hasConstructorWithInput.value = true
             }
             return VisitAction.SKIP_CHILDREN
         }
         return VisitAction.WALK_CHILDREN
     }
     let _ = Walker(classDecl.body.getOrThrow(), visitPre: preVisit).Walk()
-    if (hasConstructorWithoutInput) {
+    if (hasConstructorWithoutInput.value) {
         return true
     }
-    if (hasConstructorWithInput) {
+    if (hasConstructorWithInput.value) {
         return false
     }
     return true

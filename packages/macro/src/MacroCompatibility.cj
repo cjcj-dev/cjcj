@@ -32,7 +32,7 @@ public import cjcj::ast.{
     IfExpr, ImportContent, ImportSpec, IncOrDecExpr, InterfaceDecl, InterpolationExpr, IsExpr, JumpExpr,
     LambdaExpr, LetPatternDestructor, LitConstExpr, MacroDecl, MacroExpandDecl, MacroExpandExpr,
     MacroExpandParam, MacroInvocation, MatchCase, MatchCaseOther, MatchExpr, MemberAccess, Node,
-    OptionType, OptionalChainExpr, OptionalExpr, Package, PackageDecl, ParenExpr, ParenType, Pattern,
+    OptionType, OptionalChainExpr, OptionalExpr, Package, PackageDecl, ParenExpr, ParenType, Pattern, PrimaryCtorDecl,
     PerformExpr, PrimitiveType, PrimitiveTypeExpr, QualifiedType, QuoteExpr, RangeExpr, RefExpr, RefType,
     ResumeExpr, ReturnExpr, SpawnExpr, StrInterpolationExpr, StructDecl, SubscriptExpr, SynchronizedExpr,
     ThisType, ThrowExpr, TokenPart, TrailingClosureExpr, TryExpr, TupleLit, TuplePattern, TupleType, Type,
