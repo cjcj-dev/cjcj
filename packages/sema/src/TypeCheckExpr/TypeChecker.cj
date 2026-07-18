@@ -8382,9 +8382,13 @@ extend TypeChecker {
             return FinishSynthesize(ctx, typeConv, SynTypeConvExpr(ctx, typeConv))
         }
         if (let Some(isExpr) <- (expr as IsExpr)) {
-            SynthesizeTypeNode(ctx, isExpr.isType)
             if (let Some(leftExpr) <- isExpr.leftExpr) {
-                let _ = Synthesize(ctx, leftExpr)
+                if (Ty.IsTyCorrect(Synthesize(ctx, SynPos.EXPR_ARG, leftExpr))) {
+                    SynthesizeTypeNode(ctx, isExpr.isType)
+                    if (Ty.IsTyCorrect(isExpr.isType.flatMap({ typeNode => typeNode.GetTy() }))) {
+                        let _ = ReplaceIdealTy(impl.typeManager, leftExpr, diag: impl.diag)
+                    }
+                }
             }
             return FinishSynthesize(ctx, isExpr, SynIsExpr(impl.typeManager, isExpr))
         }
