@@ -29,7 +29,8 @@ extend TypeChecker {
             return SynMatchExprHasSelector(impl.typeManager, ctx, impl.diag, me,
                 exprChecker: Some({ target: Ty, expr: Expr => Check(ctx, target, expr) }),
                 exprSynthesizer: Some({ expr: Expr => Synthesize(ctx, SynPos.NONE, expr) }),
-                desugarCallExpr: Some({ callExpr: CallExpr => DesugarCallExpr(callExpr) }))
+                desugarCallExpr: Some({ callExpr: CallExpr => DesugarCallExpr(callExpr) }),
+                refInferer: Some({ refExpr: RefExpr => InferRefExpr(ctx, refExpr) }))
         }
         return SynMatchExprNoSelector(ctx, me)
     }
@@ -40,7 +41,8 @@ extend TypeChecker {
             let _ = Synthesize(ctx, SynPos.EXPR_ARG, selector)
             return ChkMatchExprHasSelector(impl.typeManager, ctx, impl.diag, target, me,
                 exprChecker: Some({ target2: Ty, expr: Expr => Check(ctx, target2, expr) }),
-                desugarCallExpr: Some({ callExpr: CallExpr => DesugarCallExpr(callExpr) }))
+                desugarCallExpr: Some({ callExpr: CallExpr => DesugarCallExpr(callExpr) }),
+                refInferer: Some({ refExpr: RefExpr => InferRefExpr(ctx, refExpr) }))
         }
         return ChkMatchExprNoSelector(ctx, target, me)
     }

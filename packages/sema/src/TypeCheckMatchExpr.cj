@@ -159,7 +159,8 @@ public func ChkPatternsSameASTKind(ctx: ASTContext, patterns: ArrayList<Pattern>
 
 public func ChkMatchCasePatterns(typeManager: TypeManager, ctx: ASTContext, target: Ty, mc: MatchCase,
     diag!: Option<BasicDiagnosticEngine> = None, exprChecker!: Option<ConstPatternExprChecker> = None,
-    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Bool {
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    refInferer!: Option<(RefExpr) -> Unit> = None): Bool {
     if (!ChkNoVarPatternInOrPattern(ctx, mc.patterns, diag: diag) ||
         !ChkPatternsSameASTKind(ctx, mc.patterns, diag: diag)) {
         for (pattern in mc.patterns) {
@@ -170,7 +171,7 @@ public func ChkMatchCasePatterns(typeManager: TypeManager, ctx: ASTContext, targ
     var ok = true
     for (pattern in mc.patterns) {
         if (!ChkPattern(typeManager, ctx, target, pattern, isPatternInMatch: true, exprChecker: exprChecker,
-            desugarCallExpr: desugarCallExpr, diag: diag)) {
+            desugarCallExpr: desugarCallExpr, refInferer: refInferer, diag: diag)) {
             ok = false
         }
     }
@@ -264,7 +265,8 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
     diag: Option<BasicDiagnosticEngine>, me: MatchExpr,
     exprChecker!: Option<ConstPatternExprChecker> = None,
     exprSynthesizer!: Option<(Expr) -> Ty> = None,
-    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    refInferer!: Option<(RefExpr) -> Unit> = None): Ty {
     if (let None <- me.selector) {
         return InvalidMatchTy(me)
     }
@@ -278,7 +280,7 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
     for (mc in me.matchCases) {
         mc.SetCtxExprForPatterns(selector)
         let patternOk = ChkMatchCasePatterns(typeManager, ctx, selectorTy, mc, diag: diag,
-            exprChecker: exprChecker, desugarCallExpr: desugarCallExpr)
+            exprChecker: exprChecker, desugarCallExpr: desugarCallExpr, refInferer: refInferer)
         let guardOk = ChkMatchCasePatGuard(typeManager, ctx, mc, exprChecker: exprChecker)
         let actionOk = ChkMatchCaseActions(typeManager, None, mc, exprChecker: exprChecker,
             exprSynthesizer: exprSynthesizer)
@@ -297,7 +299,7 @@ public func SynNormalMatchCaseBody(typeManager: TypeManager, ctx: ASTContext,
         selector.SetTy(typeManager.TryGreedySubst(selector.GetTy().getOrThrow()))
         for (mc in me.matchCases) {
             let _ = ChkMatchCasePatterns(typeManager, ctx, selector.GetTy().getOrThrow(), mc, diag: diag,
-                exprChecker: exprChecker, desugarCallExpr: desugarCallExpr)
+                exprChecker: exprChecker, desugarCallExpr: desugarCallExpr, refInferer: refInferer)
         }
     }
     let joinRes = JoinCaseTys(typeManager, caseTys, me.curFile)
@@ -332,7 +334,8 @@ public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext
     diag: Option<BasicDiagnosticEngine>, me: MatchExpr,
     exprChecker!: Option<ConstPatternExprChecker> = None,
     exprSynthesizer!: Option<(Expr) -> Ty> = None,
-    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    refInferer!: Option<(RefExpr) -> Unit> = None): Ty {
     if (let None <- me.selector) {
         return InvalidMatchTy(me)
     }
@@ -358,12 +361,12 @@ public func SynQuestSugarMatchCaseBody(typeManager: TypeManager, ctx: ASTContext
     firstCase.SetCtxExprForPatterns(selector)
     secondCase.SetCtxExprForPatterns(selector)
     let _ = ChkMatchCasePatterns(typeManager, ctx, selectorTy, firstCase, exprChecker: exprChecker,
-        desugarCallExpr: desugarCallExpr)
+        desugarCallExpr: desugarCallExpr, refInferer: refInferer)
     let _ = ChkMatchCaseActions(typeManager, None, firstCase, exprChecker: exprChecker,
         exprSynthesizer: exprSynthesizer)
     if (let Some(firstTy) <- firstCase.GetTy()) {
         let _ = ChkMatchCasePatterns(typeManager, ctx, selectorTy, secondCase, exprChecker: exprChecker,
-            desugarCallExpr: desugarCallExpr)
+            desugarCallExpr: desugarCallExpr, refInferer: refInferer)
         let _ = ChkMatchCaseActions(typeManager, firstTy, secondCase, exprChecker: exprChecker)
         me.SetTy(firstTy)
         return firstTy
@@ -375,22 +378,24 @@ public func SynMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     diag: Option<BasicDiagnosticEngine>, me: MatchExpr,
     exprChecker!: Option<ConstPatternExprChecker> = None,
     exprSynthesizer!: Option<(Expr) -> Ty> = None,
-    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Ty {
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    refInferer!: Option<(RefExpr) -> Unit> = None): Ty {
     let selector = me.selector.getOrThrow()
     let _ = exprSynthesizer.getOrThrow()(selector)
     let _ = ReplaceIdealTy(typeManager, selector, diag: diag)
     if (SugarKindEq(me.sugarKind, SugarKind.QUEST)) {
         return SynQuestSugarMatchCaseBody(typeManager, ctx, diag, me, exprChecker: exprChecker,
-            exprSynthesizer: exprSynthesizer, desugarCallExpr: desugarCallExpr)
+            exprSynthesizer: exprSynthesizer, desugarCallExpr: desugarCallExpr, refInferer: refInferer)
     }
     return SynNormalMatchCaseBody(typeManager, ctx, diag, me, exprChecker: exprChecker,
-        exprSynthesizer: exprSynthesizer, desugarCallExpr: desugarCallExpr)
+        exprSynthesizer: exprSynthesizer, desugarCallExpr: desugarCallExpr, refInferer: refInferer)
 }
 
 public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     diag: Option<BasicDiagnosticEngine>, target: Ty, me: MatchExpr,
     exprChecker!: Option<ConstPatternExprChecker> = None,
-    desugarCallExpr!: Option<(CallExpr) -> Unit> = None): Bool {
+    desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    refInferer!: Option<(RefExpr) -> Unit> = None): Bool {
     if (let None <- me.selector) {
         let _ = InvalidMatchTy(me)
         return false
@@ -408,7 +413,7 @@ public func ChkMatchExprHasSelector(typeManager: TypeManager, ctx: ASTContext,
     for (mc in me.matchCases) {
         mc.SetCtxExprForPatterns(selector)
         let patternOk = ChkMatchCasePatterns(typeManager, ctx, selectorTy, mc, diag: diag,
-            exprChecker: exprChecker, desugarCallExpr: desugarCallExpr)
+            exprChecker: exprChecker, desugarCallExpr: desugarCallExpr, refInferer: refInferer)
         let guardOk = ChkMatchCasePatGuard(typeManager, ctx, mc, exprChecker: exprChecker)
         let actionOk = ChkMatchCaseActions(typeManager, target, mc, exprChecker: exprChecker)
         if (patternOk && guardOk && actionOk) {

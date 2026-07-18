@@ -4090,7 +4090,7 @@ extend TypeChecker {
                 patternMatches = ChkPattern(impl.typeManager, ctx, declTy, pattern, isPatternInMatch: false,
                     exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
                         Check(ctx, patternExpectedTy, patternExpr)
-                    }), diag: impl.diag)
+                    }), refInferer: Some({ refExpr: RefExpr => InferRefExpr(ctx, refExpr) }), diag: impl.diag)
                 if (!patternMatches) {
                     if (let Some(diagValue) <- impl.diag) {
                         Diagnose(diagValue, pattern,
@@ -5750,7 +5750,7 @@ extend TypeChecker {
             subpatternsGood = ChkPattern(impl.typeManager, ctx, selectorTy, pattern, diag: impl.diag,
                 exprChecker: Some({ target: Ty, expr: Expr =>
                     Check(ctx, target, expr)
-                })) && subpatternsGood
+                }), refInferer: Some({ refExpr: RefExpr => InferRefExpr(ctx, refExpr) })) && subpatternsGood
         }
         if (Ty.IsTyCorrect(selectorTy) && subpatternsGood) {
             letPattern.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))
@@ -6133,7 +6133,7 @@ extend TypeChecker {
             let patternOk = ChkPattern(impl.typeManager, ctx, inPatternTy, pattern, isPatternInMatch: false,
                 exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
                     Check(ctx, patternExpectedTy, patternExpr)
-                }), diag: impl.diag)
+                }), refInferer: Some({ refExpr: RefExpr => InferRefExpr(ctx, refExpr) }), diag: impl.diag)
             isWellTyped = patternOk && isWellTyped
         } else {
             isWellTyped = false
@@ -8858,7 +8858,7 @@ extend TypeChecker {
                 ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false,
                     exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
                         Check(ctx, patternExpectedTy, patternExpr)
-                    }), diag: impl.diag)
+                    }), refInferer: Some({ refExpr: RefExpr => InferRefExpr(ctx, refExpr) }), diag: impl.diag)
             }), resourceSynthesizer: Some({ resource: VarDecl =>
                 SynthesizeAndReplaceIdealTy(ctx, SynPos.NONE, resource)
             }), synthesizer: Some({ pos: SynPos, expr: Expr => Synthesize(ctx, pos, expr) }),
@@ -8891,7 +8891,7 @@ extend TypeChecker {
                 ChkPattern(impl.typeManager, ctx, targetTy, pattern, isPatternInMatch: false,
                     exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
                         Check(ctx, patternExpectedTy, patternExpr)
-                    }), diag: impl.diag)
+                    }), refInferer: Some({ refExpr: RefExpr => InferRefExpr(ctx, refExpr) }), diag: impl.diag)
             }), resourceSynthesizer: Some({ resource: VarDecl =>
                 SynthesizeAndReplaceIdealTy(ctx, SynPos.NONE, resource)
             }), synthesizer: Some({ pos: SynPos, expr: Expr => Synthesize(ctx, pos, expr) }),

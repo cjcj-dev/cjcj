@@ -417,7 +417,8 @@ private func CandidateMatchesEnumPattern(decl: Decl, pattern: EnumPattern): Bool
 }
 
 private func FindEnumPatternTargets(typeManager: TypeManager, ctx: ASTContext,
-    enumDecl: Option<EnumDecl>, pattern: EnumPattern): ArrayList<Decl> {
+    enumDecl: Option<EnumDecl>, pattern: EnumPattern,
+    refInferer: Option<(RefExpr) -> Unit>): ArrayList<Decl> {
     if (let Some(constructor) <- pattern.constructor) {
         if (let Some(member) <- (constructor as MemberAccess)) {
             ResolveEnumPatternMemberAccess(typeManager, ctx, member)
@@ -435,9 +436,18 @@ private func FindEnumPatternTargets(typeManager: TypeManager, ctx: ASTContext,
         }
         if (let Some(refExpr) <- (constructor as RefExpr)) {
             refExpr.callOrPattern = pattern
-            let found = ctx.FindEnumConstructor(refExpr.ref.identifier.Val(), UInt64(pattern.patterns.size))
-            if (!found.isEmpty()) {
-                return found
+            if (let Some(infer) <- refInferer) {
+                infer(refExpr)
+                let target = refExpr.ref.target ?? return ArrayList<Decl>()
+                let outerDecl = target.outerDecl ?? return ArrayList<Decl>()
+                if (outerDecl.astKind != ASTKind.ENUM_DECL) {
+                    return ArrayList<Decl>()
+                }
+            } else {
+                let found = ctx.FindEnumConstructor(refExpr.ref.identifier.Val(), UInt64(pattern.patterns.size))
+                if (!found.isEmpty()) {
+                    return found
+                }
             }
             let result = ArrayList<Decl>()
             if (let Some(target) <- refExpr.ref.target) {
@@ -526,13 +536,14 @@ private func SetTyForEnumPatternConstructor(typeManager: TypeManager, targetTy: 
 
 public func FindEnumPatternTarget(typeManager: TypeManager, ctx: ASTContext,
     enumDecl: Option<EnumDecl>, pattern: EnumPattern,
+    refInferer!: Option<(RefExpr) -> Unit> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- pattern.constructor) {
         pattern.SetTy(TypeManager.GetInvalidTy())
         return false
     }
     let constructor = pattern.constructor.getOrThrow()
-    let candidates = FindEnumPatternTargets(typeManager, ctx, enumDecl, pattern)
+    let candidates = FindEnumPatternTargets(typeManager, ctx, enumDecl, pattern, refInferer)
     // C++: TypeCheckPattern.cpp:526-530 TypeCheckerImpl::FindEnumPatternTarget.
     if (candidates.isEmpty()) {
         if (let Some(diagValue) <- diag) {
@@ -560,7 +571,7 @@ public func FindEnumPatternTarget(typeManager: TypeManager, ctx: ASTContext,
                                         if (let Some(subEnumDecl) <- (paramDecl as EnumDecl)) {
                                             if (let Some(subEnumPattern) <- (pattern.patterns[idx] as EnumPattern)) {
                                                 let _ = FindEnumPatternTarget(typeManager, ctx, subEnumDecl,
-                                                    subEnumPattern, diag: diag)
+                                                    subEnumPattern, refInferer: refInferer, diag: diag)
                                             }
                                         }
                                     }
@@ -648,6 +659,7 @@ public func ChkConstPattern(typeManager: TypeManager, ctx: ASTContext, target: T
 public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: TypePattern,
     exprChecker!: Option<ConstPatternExprChecker> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    refInferer!: Option<(RefExpr) -> Unit> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let None <- pattern.pattern) {
         return InvalidPatternTy(pattern)
@@ -676,7 +688,7 @@ public func ChkTypePattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
         pattern.matchBeforeRuntime = false
     }
     if (!ChkPattern(typeManager, ctx, patternTy, pattern.pattern.getOrThrow(), exprChecker: exprChecker,
-        desugarCallExpr: desugarCallExpr, diag: diag)) {
+        desugarCallExpr: desugarCallExpr, refInferer: refInferer, diag: diag)) {
         return InvalidPatternTy(pattern)
     }
     pattern.SetTy(patternTy)
@@ -718,6 +730,7 @@ public func IsFuncTyEnumPatternMatched(typeManager: TypeManager, ctx: ASTContext
     target: Ty, funcTy: FuncTy, pattern: EnumPattern,
     exprChecker!: Option<ConstPatternExprChecker> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    refInferer!: Option<(RefExpr) -> Unit> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (funcTy.paramTys.size != pattern.patterns.size) {
         if (let Some(diagValue) <- diag) {
@@ -729,7 +742,7 @@ public func IsFuncTyEnumPatternMatched(typeManager: TypeManager, ctx: ASTContext
     var idx: Int64 = 0
     while (idx < pattern.patterns.size) {
         if (!ChkPattern(typeManager, ctx, funcTy.paramTys[idx], pattern.patterns[idx],
-            exprChecker: exprChecker, desugarCallExpr: desugarCallExpr, diag: diag)) {
+            exprChecker: exprChecker, desugarCallExpr: desugarCallExpr, refInferer: refInferer, diag: diag)) {
             return false
         }
         idx++
@@ -747,15 +760,18 @@ public func IsFuncTyEnumPatternMatched(typeManager: TypeManager, ctx: ASTContext
 public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty, pattern: EnumPattern,
     exprChecker!: Option<ConstPatternExprChecker> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    refInferer!: Option<(RefExpr) -> Unit> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     var mayMatch = false
     let maybeInferred = typeManager.TryGreedySubst(target)
     if (let Some(enumTy) <- (maybeInferred as EnumTy)) {
-        let _ = FindEnumPatternTarget(typeManager, ctx, enumTy.declPtr, pattern, diag: diag)
+        let _ = FindEnumPatternTarget(typeManager, ctx, enumTy.declPtr, pattern,
+            refInferer: refInferer, diag: diag)
         SetTyForEnumPatternConstructor(typeManager, enumTy, pattern)
         mayMatch = true
     } else if (target.IsPlaceholder()) {
-        mayMatch = FindEnumPatternTarget(typeManager, ctx, None, pattern, diag: diag)
+        mayMatch = FindEnumPatternTarget(typeManager, ctx, None, pattern,
+            refInferer: refInferer, diag: diag)
         if (mayMatch) {
             if (let Some(constructor) <- pattern.constructor) {
                 let constructorTy = constructor.GetTy() ?? TypeManager.GetInvalidTy()
@@ -784,7 +800,8 @@ public func ChkEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty
             }
             if (let Some(funcTy) <- ((constructor.GetTy() ?? TypeManager.GetInvalidTy()) as FuncTy)) {
                 if (!IsFuncTyEnumPatternMatched(typeManager, ctx, target, funcTy, pattern,
-                    exprChecker: exprChecker, desugarCallExpr: desugarCallExpr, diag: diag)) {
+                    exprChecker: exprChecker, desugarCallExpr: desugarCallExpr,
+                    refInferer: refInferer, diag: diag)) {
                     return InvalidPatternTy(pattern)
                 }
                 pattern.SetTy(funcTy.retTy)
@@ -830,10 +847,11 @@ private func VarOrEnumPatternToVarPattern(pattern: VarOrEnumPattern): VarPattern
 public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
     pattern: VarOrEnumPattern, exprChecker!: Option<ConstPatternExprChecker> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    refInferer!: Option<(RefExpr) -> Unit> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let Some(inner) <- pattern.pattern) {
         if (!ChkPattern(typeManager, ctx, target, inner, exprChecker: exprChecker,
-            desugarCallExpr: desugarCallExpr, diag: diag)) {
+            desugarCallExpr: desugarCallExpr, refInferer: refInferer, diag: diag)) {
             return InvalidPatternTy(pattern)
         }
         pattern.SetTy(target)
@@ -843,7 +861,7 @@ public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, targe
         let enumPattern = VarOrEnumPatternToEnumPattern(pattern)
         pattern.pattern = enumPattern
         if (!ChkPattern(typeManager, ctx, target, enumPattern, exprChecker: exprChecker,
-            desugarCallExpr: desugarCallExpr, diag: diag)) {
+            desugarCallExpr: desugarCallExpr, refInferer: refInferer, diag: diag)) {
             return InvalidPatternTy(pattern)
         }
         if (let Some(constructor) <- enumPattern.constructor) {
@@ -856,7 +874,7 @@ public func ChkVarOrEnumPattern(typeManager: TypeManager, ctx: ASTContext, targe
             ctx.AddDeclName(Names(pattern.identifier.Val(), varDecl.scopeName), varDecl)
         }
         if (!ChkPattern(typeManager, ctx, target, varPattern, exprChecker: exprChecker,
-            desugarCallExpr: desugarCallExpr, diag: diag)) {
+            desugarCallExpr: desugarCallExpr, refInferer: refInferer, diag: diag)) {
             if (let Some(varDecl) <- varPattern.varDecl) {
                 ctx.RemoveDeclByName(Names(pattern.identifier.Val(), varDecl.scopeName), varDecl)
             }
@@ -871,6 +889,7 @@ public func ChkTuplePattern(typeManager: TypeManager, ctx: ASTContext, target: T
     pattern: TuplePattern, isPatternInMatch!: Bool = true,
     exprChecker!: Option<ConstPatternExprChecker> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    refInferer!: Option<(RefExpr) -> Unit> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     // C++: src/Sema/TypeCheckPattern.cpp:467-492 TypeCheckerImpl::ChkTuplePattern.
     if (let Some(tupleTy) <- (target as TupleTy)) {
@@ -883,7 +902,8 @@ public func ChkTuplePattern(typeManager: TypeManager, ctx: ASTContext, target: T
         var idx: Int64 = 0
         while (idx < pattern.patterns.size) {
             if (!ChkPattern(typeManager, ctx, tupleTy.typeArgs[idx], pattern.patterns[idx],
-                exprChecker: exprChecker, desugarCallExpr: desugarCallExpr, diag: diag)) {
+                exprChecker: exprChecker, desugarCallExpr: desugarCallExpr,
+                refInferer: refInferer, diag: diag)) {
                 return InvalidPatternTy(pattern)
             }
             idx++
@@ -905,6 +925,7 @@ public func ChkTuplePattern(typeManager: TypeManager, ctx: ASTContext, target: T
 public func ChkPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
     pattern: Pattern, isPatternInMatch!: Bool = true, exprChecker!: Option<ConstPatternExprChecker> = None,
     desugarCallExpr!: Option<(CallExpr) -> Unit> = None,
+    refInferer!: Option<(RefExpr) -> Unit> = None,
     diag!: Option<BasicDiagnosticEngine> = None): Bool {
     if (let Some(wildcard) <- (pattern as WildcardPattern)) {
         return ChkWildcardPattern(target, wildcard)
@@ -915,22 +936,23 @@ public func ChkPattern(typeManager: TypeManager, ctx: ASTContext, target: Ty,
     }
     if (let Some(typePattern) <- (pattern as TypePattern)) {
         return ChkTypePattern(typeManager, ctx, target, typePattern, exprChecker: exprChecker,
-            desugarCallExpr: desugarCallExpr, diag: diag)
+            desugarCallExpr: desugarCallExpr, refInferer: refInferer, diag: diag)
     }
     if (let Some(varPattern) <- (pattern as VarPattern)) {
         return ChkVarPattern(ctx, target, varPattern, diag: diag)
     }
     if (let Some(enumPattern) <- (pattern as EnumPattern)) {
         return ChkEnumPattern(typeManager, ctx, target, enumPattern, exprChecker: exprChecker,
-            desugarCallExpr: desugarCallExpr, diag: diag)
+            desugarCallExpr: desugarCallExpr, refInferer: refInferer, diag: diag)
     }
     if (let Some(varOrEnum) <- (pattern as VarOrEnumPattern)) {
         return ChkVarOrEnumPattern(typeManager, ctx, target, varOrEnum, exprChecker: exprChecker,
-            desugarCallExpr: desugarCallExpr, diag: diag)
+            desugarCallExpr: desugarCallExpr, refInferer: refInferer, diag: diag)
     }
     if (let Some(tuplePattern) <- (pattern as TuplePattern)) {
         return ChkTuplePattern(typeManager, ctx, target, tuplePattern, isPatternInMatch: isPatternInMatch,
-            exprChecker: exprChecker, desugarCallExpr: desugarCallExpr, diag: diag)
+            exprChecker: exprChecker, desugarCallExpr: desugarCallExpr,
+            refInferer: refInferer, diag: diag)
     }
     return InvalidPatternTy(pattern)
 }
