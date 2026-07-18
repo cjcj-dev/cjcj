@@ -757,7 +757,6 @@ extend ParserImpl {
         if (!node.hasBroken) {
             pos = lastToken.Begin()
             DiagExpectedIdentifierWithNode(node)
-            node.hasBroken = true
         }
         return SrcIdentifier(INVALID_IDENTIFIER, INVALID_IDENTIFIER, pos, pos, false)
     }
