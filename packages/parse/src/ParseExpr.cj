@@ -959,8 +959,9 @@ extend ParserImpl {
         arg.begin = Peek().Begin()
         if (SeeingNamedFuncArgs()) {
             arg.name = ExpectIdentifierWithPos(arg)
-            Next()
-            arg.colonPos = Peek().Begin()
+            arg.colonPos = Expect(TokenKind.COLON, "expected ':' after argument name").Begin()
+            lastToken.kind = TokenKind.SENTINEL
+            lastNoneNLToken.kind = TokenKind.SENTINEL
         } else if (Skip(TokenKind.INOUT)) {
             arg.withInout = true
             arg.inoutPos = lastToken.Begin()
