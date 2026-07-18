@@ -8645,27 +8645,8 @@ public class Translator {
         return instanceMethodIsOpen || staticMethodIsOpen
     }
 
-    private func IsInsideCFuncLambda(): Bool {
-        var ownerBlockGroup = CurrentBlock().GetParentBlockGroup()
-        while (let Some(blockGroup) <- ownerBlockGroup) {
-            if (let Some(ownerExpr) <- blockGroup.GetOwnerExpression()) {
-                if (let Some(lambda) <- (ownerExpr as Lambda)) {
-                    if (let Some(funcTy) <- lambda.GetFuncType()) {
-                        if (funcTy.IsCFunc()) {
-                            return true
-                        }
-                    }
-                }
-                ownerBlockGroup = ownerExpr.GetParentBlockGroup()
-                continue
-            }
-            return false
-        }
-        return false
-    }
-
     private func IsVirtualFuncCall(owner: CustomTypeDef, funcDecl: AstFuncDecl, baseExprIsSuper: Bool): Bool {
-        if (baseExprIsSuper || IsInsideCFuncLambda()) {
+        if (baseExprIsSuper) {
             return false
         }
         if (owner.CanBeInherited() && FuncDeclIsOpen(funcDecl)) {
