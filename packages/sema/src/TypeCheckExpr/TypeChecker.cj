@@ -1229,6 +1229,14 @@ extend TypeChecker {
         }
         for (ctx in contexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
+                if (let Some(diagValue) <- impl.diag) {
+                    PreCheckFuncRedefinition(pkg, impl.GetSymsByASTKind(ctx, ASTKind.FUNC_DECL), diagValue,
+                        impl.typeManager)
+                }
+            }
+        }
+        for (ctx in contexts) {
+            if (let Some(pkg) <- contextPackage(ctx)) {
                 // C++ src/Sema/PreCheck.cpp:1281-1321,1842-1854 checks nominal declarations after
                 // BuildExtendMap and UpdateSpecificMemberGenericTy, before assumptions are collected.
                 for (sym in impl.GetAllStructDecls(ctx)) {
@@ -2482,12 +2490,6 @@ extend TypeChecker {
                 let _ = PreCheckPackage(ctx, pkg, typeManager: impl.typeManager,
                     importManager: impl.importManager, diag: impl.diag, backendType: GlobalOptions().backend)
                 let _ = CheckDeclAttributesForPackage(pkg, impl.diag.getOrThrow(), opts: GlobalOptions())
-                // C2e[A]: overload-conflict detection runs after PreCheckPackage so parameter types
-                // are resolved (the func return type may still be uninferred, matching C++).
-                if (let Some(diagValue) <- impl.diag) {
-                    PreCheckFuncRedefinition(pkg, impl.GetSymsByASTKind(ctx, ASTKind.FUNC_DECL), diagValue,
-                        impl.typeManager)
-                }
                 CheckReturnAndJump(ctx)
                 impl.PreCheckInvalidInherit(ctx, pkg)
                 // C++ src/Sema/PreCheck.cpp:1865-1866 TypeCheckerImpl::PreCheck.
