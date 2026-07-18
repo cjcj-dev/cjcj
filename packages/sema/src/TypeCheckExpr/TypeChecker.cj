@@ -3921,7 +3921,16 @@ extend TypeChecker {
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             if (funcDecl.funcBody.isSome()) {
-                CheckFuncDecl(ctx, funcDecl)
+                // C++ src/Sema/TypeChecker.cpp:793-801 restores the outer diagnostic state while checking a function.
+                try (stashDiagnoseStatus = impl.diag.getOrThrow().AutoStashDisableDiagnoseStatus()) {
+                    if (funcDecl.ownerFunc.isSome()) {
+                        try (ds = DiagSuppressor(impl.diag)) {
+                            CheckFuncDecl(ctx, funcDecl)
+                        }
+                    } else {
+                        CheckFuncDecl(ctx, funcDecl)
+                    }
+                }
                 return funcDecl.GetTy() ?? TypeManager.GetInvalidTy()
             }
         }
