@@ -5733,7 +5733,7 @@ extend TypeChecker {
             pattern.ctxExpr = initializer
             PropagateCtxExpr(pattern, initializer)
         }
-        let _ = Synthesize(ctx, initializer)
+        let _ = Synthesize(ctx, SynPos.EXPR_ARG, initializer)
         let selectorTy = if (Ty.IsTyCorrect(initializer.GetTy())) {
             TcReplaceIdeal(impl.typeManager, initializer)
         } else {
