@@ -1390,7 +1390,8 @@ public class InitializationChecker {
     }
 
     private func AddIllegalMemberUse(expr: Expr, target: Decl): Unit {
-        AddIssue(InitializationIssueKind.ILLEGAL_MEMBER_USE, expr, target: target, message: target.identifier.Val())
+        Diagnose(diag, expr, BasicDiagKind.sema_illegal_usage_of_member,
+            args: [BasicDiagArgument(target.identifier.Val())]).Emit()
     }
 
     private func CheckIllegalMemberAccess(expr: Expr, target: Decl, targetStruct: Node): Bool {
