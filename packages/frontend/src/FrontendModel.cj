@@ -44,6 +44,7 @@ import cjcj::modules.{GetPackage, PackageFormat_AliasInfo, PackageFormat_Anno, P
     MF_TYPE_KIND_INTERFACE, MF_TYPE_KIND_INT_NATIVE, MF_TYPE_KIND_NOTHING, MF_TYPE_KIND_RUNE,
     MF_TYPE_KIND_STRUCT, MF_TYPE_KIND_TUPLE, MF_TYPE_KIND_TYPE, MF_TYPE_KIND_UINT16, MF_TYPE_KIND_UINT32,
     MF_TYPE_KIND_UINT64, MF_TYPE_KIND_UINT8, MF_TYPE_KIND_UINT_NATIVE, MF_TYPE_KIND_UNIT, MF_TYPE_KIND_V_ARRAY}
+import cjcj::modules.SplitQualifiedName
 import cjcj::option.OptimizationLevel
 import cjcj::option.enumIndex
 public import cjcj::mangle.BaseMangler
@@ -7151,7 +7152,8 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             let importedName = if (importSpec.IsImportAlias()) {
                 importSpec.content.aliasName.Val()
             } else {
-                LastPackageName(targetPackageName)
+                let names = SplitQualifiedName(targetPackageName, splitDc: true)
+                names[names.size - 1]
             }
             let packageDecl = packageDeclOpt.getOrThrow()
             PutImportedDecl(targetMap, importedName, packageDecl)
@@ -7622,30 +7624,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             }
             ReplaceTypeAliasInNode(file)
         }
-    }
-
-    private func LastPackageName(fullPackageName: String): String {
-        let parts = SplitQualifiedName(fullPackageName)
-        if (parts.isEmpty()) {
-            return fullPackageName
-        }
-        return parts[parts.size - 1]
-    }
-
-    private func SplitQualifiedName(fullPackageName: String): ArrayList<String> {
-        let out = ArrayList<String>()
-        var start: Int64 = 0
-        var idx: Int64 = 0
-        while (idx <= fullPackageName.size) {
-            if (idx == fullPackageName.size || fullPackageName[idx] == UInt8(46)) {
-                if (idx > start) {
-                    out.add(fullPackageName[start..idx])
-                }
-                start = idx + 1
-            }
-            idx++
-        }
-        return out
     }
 
     public func GetPackage(name: String): Option<Package> {
