@@ -39,10 +39,11 @@ public class InheritanceInfo {
 public class DevirtualizationInfo {
     private let chirPackage: Package
     private let opts: GlobalOptions
-    private let subtypeMap: HashMap<Int64, ArrayList<InheritanceInfo>> = HashMap<Int64, ArrayList<InheritanceInfo>>()
+    private let subtypeMap: HashMap<CustomTypeDef, ArrayList<InheritanceInfo>> =
+        HashMap<CustomTypeDef, ArrayList<InheritanceInfo>>()
     private let realRuntimeRetTyMap: HashMap<Int64, Type> = HashMap<Int64, Type>()
     private let constMemberTypeMap: HashMap<Int64, HashMap<Int64, Type>> = HashMap<Int64, HashMap<Int64, Type>>()
-    public let defsMap: HashMap<Int64, ArrayList<CustomTypeDef>> = HashMap<Int64, ArrayList<CustomTypeDef>>()
+    public let defsMap: HashMap<Type, ArrayList<CustomTypeDef>> = HashMap<Type, ArrayList<CustomTypeDef>>()
 
     public init(chirPackage: Package, opts: GlobalOptions) {
         this.chirPackage = chirPackage
@@ -69,12 +70,12 @@ public class DevirtualizationInfo {
                 }
             }
 
-            if (let Some(values) <- defsMap.get(thisType.objectId)) {
+            if (let Some(values) <- defsMap.get(thisType)) {
                 values.add(customDef)
             } else {
                 let values = ArrayList<CustomTypeDef>()
                 values.add(customDef)
-                defsMap[thisType.objectId] = values
+                defsMap[thisType] = values
             }
 
             for (parentTy in customDef.GetSuperTypesInCurDef()) {
@@ -84,12 +85,12 @@ public class DevirtualizationInfo {
                 }
                 if (CheckCustomTypeInternal(parentDef)) {
                     let info = InheritanceInfo(parentTy, thisType)
-                    if (let Some(infos) <- subtypeMap.get(parentDef.nodeId)) {
+                    if (let Some(infos) <- subtypeMap.get(parentDef)) {
                         infos.add(info)
                     } else {
                         let infos = ArrayList<InheritanceInfo>()
                         infos.add(info)
-                        subtypeMap[parentDef.nodeId] = infos
+                        subtypeMap[parentDef] = infos
                     }
                 }
             }
@@ -134,7 +135,7 @@ public class DevirtualizationInfo {
         }
     }
 
-    public func GetSubtypeMap(): HashMap<Int64, ArrayList<InheritanceInfo>> {
+    public func GetSubtypeMap(): HashMap<CustomTypeDef, ArrayList<InheritanceInfo>> {
         return subtypeMap
     }
 
