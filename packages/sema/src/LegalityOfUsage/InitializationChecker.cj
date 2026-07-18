@@ -1250,29 +1250,24 @@ public class InitializationChecker {
     }
 
     private func IsInDifferentFunction(usage: Expr, target: Decl): Bool {
-        if (IsGlobalOrStaticVar(target)) {
+        let usageSymbol = ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, usage.scopeName)
+        if (usageSymbol.isNone() || IsGlobalOrStaticVar(target)) {
             return false
         }
-        if (let Some(usageBody) <- CurrentFuncBody()) {
-            if (let Some(targetBody) <- GetOwningFuncBodyForScope(target.scopeName)) {
-                return !SameFuncBody(usageBody, targetBody)
-            }
-            if (let Some(targetOuter) <- target.outerDecl) {
-                if (targetOuter.IsNominalDecl()) {
-                    if (let Some(currentFunc) <- CurrentNamedFuncDecl()) {
-                        if (let Some(currentOuter) <- currentFunc.outerDecl) {
-                            if (currentFunc.TestAttr(Attribute.CONSTRUCTOR)) {
-                                return !IsRelatedTypeDecl(currentOuter, targetOuter)
-                            }
-                            return !SameDecl(currentOuter, targetOuter)
-                        }
-                    }
-                }
-                return false
-            }
-            return !ScopeContains(FuncBodyScopeName(usageBody), usage.scopeName)
+        let usageSym = usageSymbol.getOrThrow()
+        if (let Some(declSym) <- ScopeManager.GetCurSymbolByKind(SymbolKind.FUNC_LIKE, ctx, target.scopeName)) {
+            return !SameSymbol(usageSym, declSym)
         }
-        return false
+        if (let None <- target.outerDecl) {
+            return true
+        }
+        let usageNode = usageSym.node.getOrThrow()
+        if (let Some(usageDecl) <- (usageNode as FuncDecl)) {
+            if (!usageDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+                return target.outerDecl != usageDecl.outerDecl
+            }
+        }
+        return usageNode.astKind == ASTKind.LAMBDA_EXPR
     }
 
     private func IsVarUsedBeforeDefinition(checkNode: Node, targetNode: Node): Bool {
