@@ -2542,7 +2542,16 @@ extend ParserImpl {
             }
             ParseExtendedType(ret)
             if (Skip(TokenKind.UPPERBOUND)) {
-                ParseInheritedTypes(ret)
+                ret.upperBoundPos = lastToken.Begin()
+                while (true) {
+                    if (lastToken.kind == TokenKind.BITAND && !ret.inheritedTypes.isEmpty()) {
+                        ret.inheritedTypes[ret.inheritedTypes.size - 1].bitAndPos = lastToken.Begin()
+                    }
+                    ret.inheritedTypes.add(ParseType())
+                    if (!Skip(TokenKind.BITAND)) {
+                        break
+                    }
+                }
             }
             if (Skip(TokenKind.WHERE)) {
                 ParseConstraints(ret)
