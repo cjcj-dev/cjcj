@@ -2925,8 +2925,9 @@ private class CjoSignatureMaterializer {
         if (allFileImports < 0) {
             return
         }
+        let allFiles = reader.VectorField(root, 14)
         var fileIdx: Int64 = 0
-        while (fileIdx < reader.VectorLength(allFileImports)) {
+        while (fileIdx < reader.VectorLength(allFiles)) {
             let importsTable = reader.VectorOffsetElement(allFileImports, fileIdx)
             if (importsTable >= 0) {
                 MaterializeFlatImports(reader, importsTable, FileByFlatIndex(UInt32(fileIdx + 1)))
