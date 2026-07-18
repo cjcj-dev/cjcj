@@ -139,7 +139,6 @@ public class MPParserImpl {
         }
         for (member in decl.GetMemberDecls()) {
             ok = CheckCJMPModifiersBetween(member, decl) && ok
-            CheckCJMPDecl(member)
         }
         return ok
     }
