@@ -3,6 +3,7 @@ package cjcj::macro_pkg
 import std.collection.*
 import std.sort.*
 import cjcj::ast.{AddCurFile, Diagnose, DiagnoseRefactor}
+import cjcj::conditional_compilation.ConditionalCompilation
 import cjcj::ast.AnnotationKind as RealAnnotationKind
 import cjcj::ast.ExprKind as ParsedAstExprKind
 import cjcj::ast.Node as ParsedAstNode
@@ -32,6 +33,7 @@ import cjcj::parse.ExprKind as ParsedExprKind
 import cjcj::parse.ScopeKind as ParsedScopeKind
 import cjcj::parse.StringKind as ParsedStringKind
 import cjcj::parse.Type as ParsedType
+import cjcj::utils.SplitQualifiedName
 
 private func hasNoMacros(mc: MacroCollector): Bool {
     return mc.macroDefFuncs.isEmpty() && mc.macCalls.isEmpty()
@@ -759,7 +761,6 @@ public class MacroExpansion {
     }
 
     public func ReplaceAST(pkg: Package): Unit {
-        let _ = pkg
         var idx = macroCollector.macCalls.size - 1
         while (idx >= 0) {
             ReplaceEachMacro(macroCollector.macCalls[idx])
@@ -770,6 +771,29 @@ public class MacroExpansion {
         }
         if (ci.GetDiag().GetErrorCount() != 0u64) {
             ci.GetDiag().EmitCategoryGroup()
+        }
+        if (ci.GetDiag().GetErrorCount() == 0u64 && ci.GetGlobalOptions().enableMacroDebug) {
+            for (file in pkg.files) {
+                ReplaceEachFileNode(file)
+            }
+        }
+    }
+
+    public func ReplaceEachFileNode(file: File): Unit {
+        if (let Some(debugFileID) <- ci.GetSourceManager().TryGetFileID(file.macroCallFilePath)) {
+            let newBuffer = ci.GetSourceManager().GetSource(debugFileID).buffer
+            let newParser = GeneratedParser(debugFileID, newBuffer, ci.GetDiag(), ci.GetDiag().GetSourceManager(),
+                attachComment: ci.GetGlobalOptions().enableAddCommentToAst)
+            newParser.SetCompileOptions(ci.GetGlobalOptions())
+            let names = SplitQualifiedName(file.curPackage.getOrThrow().fullPackageName)
+            let moduleName = if (names.size > 1) { names[0] } else { "" }
+            newParser.SetModuleName(moduleName).EnableCustomAnno()
+            let newFile = newParser.ParseTopLevel()
+            let cc = ConditionalCompilation(ci.GetGlobalOptions(), ci.GetDiag())
+            cc.HandleFileConditionalCompilation(newFile)
+            if (let Some(pkg) <- curPackage) {
+                ci.importManager.UpdateFileNodeImportInfo(pkg, file, newFile)
+            }
         }
     }
 

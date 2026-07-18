@@ -17,6 +17,7 @@
   "cjcj::flatbuffers" = { path = "../flatbuffers" }
   "cjcj::ast" = { path = "../ast" }
   "cjcj::basic" = { path = "../basic" }
+  "cjcj::conditional_compilation" = { path = "../conditional_compilation" }
   "cjcj::lex" = { path = "../lex" }
   "cjcj::modules" = { path = "../modules" }
   "cjcj::option" = { path = "../option" }

@@ -20,6 +20,7 @@ public interface MacroHostImportManager <: SemaImportManager {
     func GetImportedStdMacroPackages(): ArrayList<String>
     func GetSearchPath(): ArrayList<String>
     func AddUsedMacroDecls(file: ASTFile, decl: ASTDecl): Unit
+    func UpdateFileNodeImportInfo(pkg: ASTPackage, file: ASTFile, newFile: ASTFile): Unit
 }
 
 public interface MacroHost {
