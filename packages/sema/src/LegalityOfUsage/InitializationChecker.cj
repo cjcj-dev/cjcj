@@ -1488,7 +1488,8 @@ public class InitializationChecker {
             let invalidThis = refExpr.isThis && refExpr.isAlone && target.IsStructOrClassDecl() &&
                 !IsAllMembersInitialized(target)
             if (invalidThis) {
-                AddIssue(InitializationIssueKind.ILLEGAL_MEMBER_USE, refExpr, target: target, message: "this")
+                Diagnose(diag, refExpr, BasicDiagKind.sema_illegal_usage_of_member,
+                    args: [BasicDiagArgument("this")]).Emit()
                 return false
             }
             RecordInstanceVariableUsage(target)
@@ -1527,8 +1528,8 @@ public class InitializationChecker {
             }
             if (refExpr.ShouldDiagnose(allowCompilerAdd: true) && target.TestAttr(Attribute.GLOBAL) &&
                 IsSameFile(refExpr, target) && refExpr.begin < target.begin) {
-                AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, refExpr, target: target,
-                    message: refExpr.ref.identifier.Val())
+                DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_undefined_variable,
+                    refExpr, arguments: [refExpr.ref.identifier.Val()]).Emit()
                 return false
             }
             if (!target.TestAttr(Attribute.INITIALIZED)) {
@@ -1542,8 +1543,8 @@ public class InitializationChecker {
                         return false
                     }
                     if (!refExpr.TestAttr(Attribute.LEFT_VALUE)) {
-                        AddIssue(InitializationIssueKind.USED_BEFORE_INITIALIZATION, refExpr, target: target,
-                            message: target.identifier.Val())
+                        Diagnose(diag, refExpr, BasicDiagKind.sema_used_before_initialization,
+                            args: [BasicDiagArgument(refExpr.ref.identifier.Val())]).Emit()
                         return false
                     }
                 }
