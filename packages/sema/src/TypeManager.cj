@@ -1839,7 +1839,7 @@ public class TypeManager {
     }
 
     public func GetAllExtendsByTy(ty: Ty): ArrayList<ExtendDecl> {
-        if (let Some(decl) <- declOfInheritableTy(ty)) {
+        if (let Some(decl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
             return GetDeclExtends(decl)
         }
         return GetBuiltinTyExtends(GetTyForExtendMap(ty))
