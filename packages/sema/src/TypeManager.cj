@@ -445,8 +445,8 @@ public class TypeManager {
         var keyDecl = decl
         var redirectedTypeAlias = false
         if (let Some(typeAliasDecl) <- (decl as TypeAliasDecl)) {
-            if (let typeNode <- typeAliasDecl.typeNode) {
-                if (let originDecl <- typeNode.GetTarget()) {
+            if (let Some(typeNode) <- typeAliasDecl.typeNode) {
+                if (let Some(originDecl) <- typeNode.GetTarget()) {
                     // C++ src/Modules/ImportManager.cpp:1171-1175: imported TypeAliasDecl names
                     // are indexed by the aliased declaration so extend visibility can find them.
                     keyDecl = originDecl
