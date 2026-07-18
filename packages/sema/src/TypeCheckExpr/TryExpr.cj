@@ -586,7 +586,13 @@ public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr,
             ok = false
         }
     } else if (let Some(tryBlock) <- te.tryBlock) {
-        ok = checker.getOrThrow()(target, tryBlock) && ok
+        if (!checker.getOrThrow()(target, tryBlock)) {
+            ok = false
+            let tryBlockTy = tryBlock.GetTy().getOrThrow()
+            if (!CanSkipDiag(tryBlock) && !typeManager.IsSubtype(tryBlockTy, target)) {
+                DiagMismatchedTypes(diag.getOrThrow(), tryBlock, target)
+            }
+        }
     } else {
         ok = false
     }
