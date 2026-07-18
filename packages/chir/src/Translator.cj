@@ -8287,8 +8287,15 @@ public class Translator {
         if (calleeInfo.isVirtualFuncCall) {
             if (calleeDecl.TestAttr(AstAttribute.STATIC)) {
                 let parentTy = thisType ?? TranslateMemberOwnerType(calleeDecl)
-                let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
-                    parentTy.StripAllRefs(), CurrentBlock()))
+                let topLevelFunc = CurrentBlock().GetTopLevelFunc() ?? CurrentFunction()
+                let rtti = if (RequireExpr(expr.baseFunc, "member call base").astKind == ASTKind.REF_EXPR &&
+                    !topLevelFunc.TestAttr(Attribute.STATIC)) {
+                    RequireResult(builder.CreateGetRTTI(builder.context.GetUnitTy(),
+                        topLevelFunc.GetParam(0), CurrentBlock()))
+                } else {
+                    RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
+                        parentTy.StripAllRefs(), CurrentBlock()))
+                }
                 // C++ TranslateCallExpr.cpp:910-911 delegates overflow-name selection to GenerateInvokeCallContext.
                 let invokeCtx = GenerateInvokeCallContext(calleeInfo, rtti, calleeDecl, argValues,
                     strategy: expr.overflowStrategy)
