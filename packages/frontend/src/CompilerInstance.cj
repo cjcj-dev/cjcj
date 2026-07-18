@@ -481,6 +481,7 @@ public class CompilerInstance {
         if (invocation.globalOptions.compileCjd) {
             return true
         }
+        let recorder = ProfileRecorder("Main Stage", "AST Diff")
         CalculateASTCache()
         return true
     }
