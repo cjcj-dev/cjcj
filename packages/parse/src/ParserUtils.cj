@@ -591,20 +591,9 @@ extend ParserImpl {
     }
 
     public func SeeingPrimaryIdentifier(): Bool {
-        if (curPrimaryDeclIdent.isEmpty() || !SeeingIdentifierLike()) {
-            return false
-        }
-        let distance = LevenshteinDistance(Peek().Value(), GetPrimaryDeclIdentRawValue())
-        if (distance > 1u64) {
-            return false
-        }
-        let ahead = lexer.LookAheadSkipNL(1)
-        if (ahead.isEmpty()) {
-            return false
-        }
-        let nextKind = ahead[0].kind
-        return nextKind == TokenKind.LT || nextKind == TokenKind.LPAREN ||
-            nextKind == TokenKind.LSQUARE || nextKind == TokenKind.LCURL
+        return SeeingIdentifierAndTargetOp(
+            [TokenKind.LT, TokenKind.LPAREN, TokenKind.LSQUARE, TokenKind.LCURL]) &&
+            LevenshteinDistance(Peek().Value(), GetPrimaryDeclIdentRawValue()) <= 1u64
     }
 
     public func SeeingPrimaryConstructor(scopeKind: ScopeKind): Bool {
