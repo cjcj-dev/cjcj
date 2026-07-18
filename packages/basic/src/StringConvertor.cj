@@ -193,7 +193,7 @@ public class StringConvertor {
             let current = bytes[idx]
             if (current == b'\\' && idx + 1 < bytes.size && !isRawString) {
                 if (spanBegin < idx) {
-                    builder.append(String.fromUtf8(bytes[spanBegin..idx]))
+                    builder.append(unsafe { String.fromUtf8Unchecked(bytes[spanBegin..idx]) })
                 }
                 if (idx + 2 < bytes.size && bytes[idx + 1] == b'u' && bytes[idx + 2] == b'{') {
                     idx += 3
@@ -223,7 +223,7 @@ public class StringConvertor {
             }
             if (current == b'\r') {
                 if (spanBegin < idx) {
-                    builder.append(String.fromUtf8(bytes[spanBegin..idx]))
+                    builder.append(unsafe { String.fromUtf8Unchecked(bytes[spanBegin..idx]) })
                 }
                 if (idx + 1 < bytes.size && bytes[idx + 1] == b'\n') {
                     builder.append("\n")
@@ -238,7 +238,7 @@ public class StringConvertor {
             }
         }
         if (spanBegin < bytes.size) {
-            builder.append(String.fromUtf8(bytes[spanBegin..bytes.size]))
+            builder.append(unsafe { String.fromUtf8Unchecked(bytes[spanBegin..bytes.size]) })
         }
         return builder.toString()
     }
