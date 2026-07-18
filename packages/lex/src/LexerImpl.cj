@@ -1151,7 +1151,7 @@ public class LexerImpl {
         pCurrent = pNext
         let decoded = DecodeUTF8At(pNext)
         if (!decoded[2]) {
-            currentChar = decoded[0]
+            currentChar = Int64(bytes[pCurrent])
             pNext = pCurrent + 1
             DiagIllegalUnicode()
             success = false
