@@ -1007,6 +1007,11 @@ extend ParserImpl {
     }
 
     public func FinalizeDeclTree(decl: Decl): Unit {
+        if (let Some(macroDecl) <- (decl as MacroExpandDecl)) {
+            if (let Some(inputDecl) <- macroDecl.invocation.decl) {
+                FinalizeDeclTree(inputDecl)
+            }
+        }
         for (member in decl.GetMemberDecls()) {
             FinalizeDeclTree(member)
         }
