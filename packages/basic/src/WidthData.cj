@@ -1,4 +1,4 @@
-package cjcj::utils
+package cjcj::basic
 
 // Generated from cangjie_compiler/src/Utils/UnicodeTables/WidthData.generated.inc.
 
