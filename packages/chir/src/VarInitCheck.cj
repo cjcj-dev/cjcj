@@ -396,7 +396,11 @@ public class VarInitCheck {
                 checkResult.AddError("super member '${members[index].name}' is not allowed to be used before calling super()")
             case MaybeUninitMemberKind.LOCAL_MEMBER =>
                 if (!onlyCheckSuper) {
-                    AddUseBeforeInitError(expr, members[index].name, state.GetMaybeInitedPos(index), checkResult)
+                    let identifier = members[index].name
+                    let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_used_before_initialization,
+                        ToPosition(expr.GetDebugLocation()), identifier)
+                    AddMaybeInitedPosNote(builder, identifier, state.GetMaybeInitedPos(index))
+                    builder.Emit()
                 }
             case MaybeUninitMemberKind.NA => return
         }
