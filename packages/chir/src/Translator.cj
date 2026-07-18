@@ -9,6 +9,7 @@ import cjcj::mangle.{DecimalToManglingNumber, MANGLE_COUNT_PREFIX}
 import cjcj::mangle.MANGLE_SUFFIX as MANGLE_ANNOTATION_SUFFIX
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::incremental_compilation.IncreKind
+import cjcj::sema.GenericInstantiation.GenericInstantiationManager
 import cjcj::ast.ASTKind
 import cjcj::ast.IsInstanceConstructor as AstIsInstanceConstructor
 import cjcj::ast.IsValidCFuncConstructorCall
