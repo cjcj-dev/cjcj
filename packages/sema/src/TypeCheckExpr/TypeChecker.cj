@@ -7295,11 +7295,11 @@ extend TypeChecker {
     }
 
     private func FinishCheck(ctx: ASTContext, expr: Expr, ok: Bool): Bool {
+        expr.SetTy(impl.typeManager.TryGreedySubst(expr.GetTy().getOrThrow()))
         if (ok) {
             ctx.SkipSynForCorrectTy(expr)
         }
         typeCheckExprClearTargetType(ctx, expr)
-        expr.SetTy(impl.typeManager.TryGreedySubst(expr.GetTy().getOrThrow()))
         return ok
     }
 
