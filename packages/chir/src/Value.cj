@@ -631,9 +631,27 @@ public class Block <: Value & Hashable & Equatable<Block> {
     }
 
     public override func ToString(indent: Int64): String {
-        var out = IndentToString(indent) + GetIdentifier() + ":"
+        var out = IndentToString(indent) + GetAttributeInfo().ToString()
+        out += "Block " + GetIdentifier() + ": "
+        let comments = ArrayList<String>()
+        if (!predecessors.isEmpty()) {
+            comments.add("predecessors: " + ValueIdVecToString("[", predecessors, "]"))
+        }
+        let baseComment = BaseCommentToString()
+        if (!baseComment.isEmpty()) {
+            comments.add(baseComment)
+        }
+        if (IsLandingPadBlock()) {
+            let exceptionText = TypeVecToString("[", GetExceptions(), "]")
+            if (exceptionText.isEmpty()) {
+                comments.add("exceptions: [All]")
+            } else {
+                comments.add(exceptionText)
+            }
+        }
+        out += CommentToString(comments)
         for (expr in exprs) {
-            out += "\n" + expr.ToString(indent + 2)
+            out += "\n" + expr.ToString(indent + 1)
         }
         return out
     }
