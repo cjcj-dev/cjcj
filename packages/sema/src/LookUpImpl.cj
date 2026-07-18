@@ -56,13 +56,15 @@ private class LookUpImpl {
     }
 
     public func ResolveOverrideOrShadow(results: ArrayList<Decl>, decl: Decl, parentTy: InterfaceTy): Unit {
-        if (decl.astKind == ASTKind.PROP_DECL && !decl.TestAttr(Attribute.ABSTRACT)) {
-            var propIdx: Int64 = 0
-            while (propIdx < results.size) {
-                if (results[propIdx].TestAttr(Attribute.ABSTRACT)) {
-                    results.remove(at: propIdx)
-                } else {
-                    propIdx++
+        if (decl.astKind == ASTKind.PROP_DECL) {
+            if (!decl.TestAttr(Attribute.ABSTRACT)) {
+                var propIdx: Int64 = 0
+                while (propIdx < results.size) {
+                    if (results[propIdx].TestAttr(Attribute.ABSTRACT)) {
+                        results.remove(at: propIdx)
+                    } else {
+                        propIdx++
+                    }
                 }
             }
         }
@@ -100,23 +102,26 @@ private class LookUpImpl {
                 continue
             }
             var parentIsSubtype = false
-            var resultIsSubtype = false
             if (let Some(outerTy) <- inResultOuter) {
                 parentIsSubtype = typeManager.IsSubtype(parentTy, outerTy)
-                resultIsSubtype = typeManager.IsSubtype(outerTy, parentTy)
             }
             if (parentIsSubtype ||
                 (inResult.TestAttr(Attribute.ABSTRACT) && !decl.TestAttr(Attribute.ABSTRACT))) {
                 results.remove(at: idx)
                 SwapResultsWithInstTy(idx, results.size, decl, parentTy)
                 results.add(decl)
-            } else if (resultIsSubtype ||
-                (decl.TestAttr(Attribute.ABSTRACT) && !inResult.TestAttr(Attribute.ABSTRACT))) {
-                // Keep the declaration already in results.
             } else {
-                // Preserve the existing selfhost behavior until the acceptance compiler and
-                // LookUpImpl.cpp:252-254 agree on unrelated static class/interface members.
-                return
+                var resultIsSubtype = false
+                if (let Some(outerTy) <- inResultOuter) {
+                    resultIsSubtype = typeManager.IsSubtype(outerTy, parentTy)
+                }
+                if (resultIsSubtype ||
+                    (decl.TestAttr(Attribute.ABSTRACT) && !inResult.TestAttr(Attribute.ABSTRACT))) {
+                    // Keep the declaration already in results.
+                } else {
+                    idx++
+                    continue
+                }
             }
             return
         }
