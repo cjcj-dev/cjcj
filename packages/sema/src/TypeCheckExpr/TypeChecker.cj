@@ -4692,7 +4692,7 @@ extend TypeChecker {
         try (ds = DiagSuppressor(impl.diag)) {
             for (arg in ce.args) {
                 if (Ty.IsInitialTy(arg.GetTy())) {
-                    let _ = SynthesizeWithCache(ctx, SynPos.EXPR_ARG, arg.expr.getOrThrow())
+                    let _ = SynthesizeWithCache(ctx, SynPos.EXPR_ARG, arg)
                 }
                 if (Ty.IsTyCorrect(arg.GetTy())) {
                     paramTys.add(arg.GetTy().getOrThrow())
