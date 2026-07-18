@@ -900,7 +900,7 @@ private func findRealResult(ctx: ASTContext, node: Node, isSetter: Bool, results
 }
 
 private func processStructDeclBody(typeManager: TypeManager, ctx: ASTContext, name: String, scopeName: String,
-    node: Node, results: ArrayList<Decl>): Unit {
+    node: Node, results: ArrayList<Decl>, importManager!: Option<SemaImportManager> = None): Unit {
     let parentScopeName = GetParentScopeName(scopeName)
     let parentScopeGateName = GetScopeGateName(parentScopeName)
     if (let Some(parentScopeGateSym) <- GetScopeGate(ctx, parentScopeGateName)) {
@@ -924,7 +924,8 @@ private func processStructDeclBody(typeManager: TypeManager, ctx: ASTContext, na
                             continue
                         }
                     }
-                    if (IsTargetMemberVisibleToNode(typeManager, ctx, field, node)) {
+                    if (IsTargetMemberVisibleToNode(typeManager, ctx, field, node,
+                        importManager: importManager)) {
                         addDeclUnique(results, field)
                     }
                 }
@@ -934,7 +935,8 @@ private func processStructDeclBody(typeManager: TypeManager, ctx: ASTContext, na
 }
 
 private func lookupImpl(typeManager: TypeManager, ctx: ASTContext, name: String, startScopeName: String,
-    node: Node, onlyLookUpTopLevel: Bool, isSetter: Bool, results: ArrayList<Decl>): Bool {
+    node: Node, onlyLookUpTopLevel: Bool, isSetter: Bool, results: ArrayList<Decl>,
+    importManager!: Option<SemaImportManager> = None): Bool {
     var scopeName = startScopeName
     while (!scopeName.isEmpty()) {
         let targetDecls = ArrayList<Decl>()
@@ -958,7 +960,8 @@ private func lookupImpl(typeManager: TypeManager, ctx: ASTContext, name: String,
         if (let Some(sym) <- scopeGateSym) {
             if (let Some(symNode) <- sym.node) {
                 if (symNode.IsNominalDeclBody() && !onlyLookUpTopLevel) {
-                    processStructDeclBody(typeManager, ctx, name, scopeName, node, results)
+                    processStructDeclBody(typeManager, ctx, name, scopeName, node, results,
+                        importManager: importManager)
                 }
             }
         }
@@ -991,7 +994,8 @@ private func lookupCommon(typeManager: TypeManager, ctx: ASTContext, name: Strin
     if (!results.isEmpty() || name == INVALID_IDENTIFIER || scopeName.isEmpty()) {
         return results
     }
-    if (lookupImpl(typeManager, ctx, name, scopeName, node, onlyLookUpTopLevel, isSetter, results)) {
+    if (lookupImpl(typeManager, ctx, name, scopeName, node, onlyLookUpTopLevel, isSetter, results,
+        importManager: importManager)) {
         return results
     }
     if (!results.isEmpty() && !isAllFuncDecl(results)) {
