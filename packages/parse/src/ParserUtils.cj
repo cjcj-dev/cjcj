@@ -724,7 +724,7 @@ extend ParserImpl {
     }
 
     public func ParseNameFromRawIdentifier(rawIdentifier: String): String {
-        return rawIdentifier[1..(rawIdentifier.size - 1)]
+        return unsafe { String.fromUtf8Unchecked(rawIdentifier.toArray()[1..(rawIdentifier.size - 1)]) }
     }
 
     public func ParseIdentifierFromToken(token: Token): SrcIdentifier {
