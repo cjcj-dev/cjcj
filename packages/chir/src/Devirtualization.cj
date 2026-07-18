@@ -190,7 +190,8 @@ public class Devirtualization {
     private let devirtFuncInfo: DevirtualizationInfo
     private let rewriteInfos: ArrayList<DevirtualizationRewriteInfo> = ArrayList<DevirtualizationRewriteInfo>()
     private let frozenInstFuns: ArrayList<Function> = ArrayList<Function>()
-    private let frozenStates: HashMap<Function, Results<TypeDomain>> = HashMap<Function, Results<TypeDomain>>()
+    private let frozenStates: HashMap<Function, Option<Results<TypeDomain>>> =
+        HashMap<Function, Option<Results<TypeDomain>>>()
     private let frozenInstFuncMap: HashMap<String, Function> = HashMap<String, Function>()
 
     public init(typeAnalysisWrapper: AnalysisWrapper<TypeAnalysis, TypeDomain>,
@@ -213,7 +214,7 @@ public class Devirtualization {
     private func RunOnFunc(fn: Function, builder: CHIRBuilder): Unit {
         var result = analysisWrapper.CheckFuncResult(fn)
         if (result.isNone()) {
-            result = frozenStates.get(fn)
+            result = frozenStates.get(fn) ?? None
         }
         let analysisResult = result ?? return
         let visibleGenericTypes = CoreBox<Option<HashSet<GenericType>>>(None)
@@ -377,7 +378,7 @@ public class Devirtualization {
     }
 
     // C++ Devirtualization.cpp:278-281.
-    public func AppendFrozenFuncState(fn: Function, analysisRes: Results<TypeDomain>): Unit {
+    public func AppendFrozenFuncState(fn: Function, analysisRes: Option<Results<TypeDomain>>): Unit {
         frozenStates[fn] = analysisRes
     }
 
