@@ -462,27 +462,28 @@ extend ParserImpl {
 
     public func DiagExpectedIdentifierWithNode(node: Node): Unit {
         let handlerName = LookupDiagExpectedIdentifierHandler(node.astKind)
-        if (handlerName == "DiagExpectedIdentifierEnumDecl") { DiagExpectedIdentifierEnumDecl(node); return }
-        if (handlerName == "DiagExpectedIdentifierGeneric") { DiagExpectedIdentifierGeneric(node); return }
-        if (handlerName == "DiagExpectedIdentifierGenericConstraint") { DiagExpectedIdentifierGenericConstraint(node); return }
-        if (handlerName == "DiagExpectedIdentifierImportContent") { DiagExpectedIdentifierImportContent(node); return }
-        if (handlerName == "DiagExpectedIdentifierImportSpec") { DiagExpectedIdentifierImportSpec(node); return }
-        if (handlerName == "DiagExpectedIdentifierPackageSpec") { DiagExpectedIdentifierPackageSpec(node); return }
-        if (handlerName == "DiagExpectedIdentifierPropDecl") { DiagExpectedIdentifierPropDecl(node); return }
-        if (handlerName == "DiagExpectedIdentifierRefType") { DiagExpectedIdentifierRefType(node); return }
-        if (handlerName == "DiagExpectedIdentifierFuncParam") { DiagExpectedIdentifierFuncParam(node); return }
-        if (handlerName == "DiagExpectedIdentifierQualifiedType") { DiagExpectedIdentifierQualifiedType(node); return }
-        if (handlerName == "DiagExpectedIdentifierMemberAccess") { DiagExpectedIdentifierMemberAccess(node); return }
-        if (handlerName == "DiagExpectedIdentifierMacroDecl") { DiagExpectedIdentifierMacroDecl(node); return }
-        if (handlerName == "DiagExpectedIdentifierFuncBody") { DiagExpectedIdentifierFuncBody(node); return }
-        if (handlerName == "DiagExpectedIdentifierFuncDecl") { DiagExpectedIdentifierFuncDecl(node); return }
-        if (handlerName == "DiagExpectedIdentifierClassDecl") { DiagExpectedIdentifierClassDecl(node); return }
-        if (handlerName == "DiagExpectedIdentifierInterfaceDecl") { DiagExpectedIdentifierInterfaceDecl(node); return }
-        if (handlerName == "DiagExpectedIdentifierStructDecl") { DiagExpectedIdentifierStructDecl(node); return }
-        if (handlerName == "DiagExpectedIdentifierTypeAliasDecl") { DiagExpectedIdentifierTypeAliasDecl(node); return }
-        if (handlerName == "DiagExpectedIdentifierMacroExpandDecl") { DiagExpectedIdentifierMacroExpandDecl(node); return }
-        if (handlerName == "DiagExpectedIdentifierMacroExpandExpr") { DiagExpectedIdentifierMacroExpandExpr(node); return }
-        DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.End()))
+        if (handlerName == "DiagExpectedIdentifierEnumDecl") { DiagExpectedIdentifierEnumDecl(node) }
+        else if (handlerName == "DiagExpectedIdentifierGeneric") { DiagExpectedIdentifierGeneric(node) }
+        else if (handlerName == "DiagExpectedIdentifierGenericConstraint") { DiagExpectedIdentifierGenericConstraint(node) }
+        else if (handlerName == "DiagExpectedIdentifierImportContent") { DiagExpectedIdentifierImportContent(node) }
+        else if (handlerName == "DiagExpectedIdentifierImportSpec") { DiagExpectedIdentifierImportSpec(node) }
+        else if (handlerName == "DiagExpectedIdentifierPackageSpec") { DiagExpectedIdentifierPackageSpec(node) }
+        else if (handlerName == "DiagExpectedIdentifierPropDecl") { DiagExpectedIdentifierPropDecl(node) }
+        else if (handlerName == "DiagExpectedIdentifierRefType") { DiagExpectedIdentifierRefType(node) }
+        else if (handlerName == "DiagExpectedIdentifierFuncParam") { DiagExpectedIdentifierFuncParam(node) }
+        else if (handlerName == "DiagExpectedIdentifierQualifiedType") { DiagExpectedIdentifierQualifiedType(node) }
+        else if (handlerName == "DiagExpectedIdentifierMemberAccess") { DiagExpectedIdentifierMemberAccess(node) }
+        else if (handlerName == "DiagExpectedIdentifierMacroDecl") { DiagExpectedIdentifierMacroDecl(node) }
+        else if (handlerName == "DiagExpectedIdentifierFuncBody") { DiagExpectedIdentifierFuncBody(node) }
+        else if (handlerName == "DiagExpectedIdentifierFuncDecl") { DiagExpectedIdentifierFuncDecl(node) }
+        else if (handlerName == "DiagExpectedIdentifierClassDecl") { DiagExpectedIdentifierClassDecl(node) }
+        else if (handlerName == "DiagExpectedIdentifierInterfaceDecl") { DiagExpectedIdentifierInterfaceDecl(node) }
+        else if (handlerName == "DiagExpectedIdentifierStructDecl") { DiagExpectedIdentifierStructDecl(node) }
+        else if (handlerName == "DiagExpectedIdentifierTypeAliasDecl") { DiagExpectedIdentifierTypeAliasDecl(node) }
+        else if (handlerName == "DiagExpectedIdentifierMacroExpandDecl") { DiagExpectedIdentifierMacroExpandDecl(node) }
+        else if (handlerName == "DiagExpectedIdentifierMacroExpandExpr") { DiagExpectedIdentifierMacroExpandExpr(node) }
+        else { DiagExpectedIdentifier(MakeRange(lastToken.Begin(), lastToken.End())) }
+        node.EnableAttr(Attribute.HAS_BROKEN)
     }
 
     public func DiagNameLengthOverflow(range: BasicRange, target: String, maxLength: Int64, realLength: Int64): Unit {
