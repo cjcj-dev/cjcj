@@ -8,6 +8,24 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Range as BasicRange
 
+// C++ src/Sema/CJMP/CheckCJMP.cpp:1342-1357.
+public func GetInheritedTypesWithSpecificImpl(
+    inheritedTypes: ArrayList<Type>, hasSpecificImpl: Bool, compilePlatform: Bool
+): Unit {
+    if (!compilePlatform || hasSpecificImpl) {
+        return
+    }
+    for (inheritedType in inheritedTypes) {
+        if (let Some(decl) <- Ty.GetDeclOfTy(inheritedType.GetTy())) {
+            if (let Some(specificDecl) <- decl.specificImplementation) {
+                if (let Some(specificTy) <- specificDecl.GetTy()) {
+                    inheritedType.SetTy(specificTy)
+                }
+            }
+        }
+    }
+}
+
 private func GetCycleOnPath(root: Decl, path: ArrayList<Decl>): ArrayList<Decl> {
     let cycle = ArrayList<Decl>()
     var foundCycleStart = false

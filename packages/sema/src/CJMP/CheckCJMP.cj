@@ -1245,26 +1245,6 @@ extend MPTypeCheckerImpl {
         }
     }
 
-    public func GetInheritedTypesWithSpecificImpl(inheritedTypes: ArrayList<Type>, hasSpecificImpl: Bool): Unit {
-        GetInheritedTypesWithSpecificImpl(inheritedTypes, hasSpecificImpl, compilePlatform)
-    }
-
-    public func GetInheritedTypesWithSpecificImpl(
-        inheritedTypes: ArrayList<Type>, hasSpecificImpl: Bool, compilePlatformFlag: Bool): Unit {
-        if (!compilePlatformFlag || hasSpecificImpl) {
-            return
-        }
-        for (inheritedType in inheritedTypes) {
-            if (let Some(decl) <- Ty.GetDeclOfTy(inheritedType.GetTy())) {
-                if (let Some(specificDecl) <- decl.specificImplementation) {
-                    if (let Some(specificTy) <- specificDecl.GetTy()) {
-                        inheritedType.SetTy(specificTy)
-                    }
-                }
-            }
-        }
-    }
-
     public func CheckMatchedFunctionReturnTypes(specificFunc: FuncDecl, commonFunc: FuncDecl): Unit {
         let commonType = commonFunc.funcBody.getOrThrow().GetTy()
         let specificType = specificFunc.funcBody.getOrThrow().GetTy()
