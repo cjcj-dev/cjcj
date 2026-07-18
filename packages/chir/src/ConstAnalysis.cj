@@ -199,7 +199,8 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
             case ExprKind.EXP =>
                 return HandleExpOp(state, binaryExpr)
             case ExprKind.LSHIFT | ExprKind.RSHIFT | ExprKind.BITAND | ExprKind.BITXOR | ExprKind.BITOR =>
-                return HandleBitwiseOp(state, binaryExpr, kind)
+                let _ = HandleBitwiseOp(state, binaryExpr, kind)
+                return ConstExceptionKind.NA
             case ExprKind.LT | ExprKind.GT | ExprKind.LE | ExprKind.GE | ExprKind.EQUAL | ExprKind.NOTEQUAL =>
                 HandleRelationalOp(state, binaryExpr)
                 return ConstExceptionKind.NA
