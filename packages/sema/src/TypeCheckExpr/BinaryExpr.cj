@@ -603,7 +603,8 @@ private func SynBuiltinBinaryFromRight(typeManager: TypeManager, be: BinaryExpr,
         return Some(TypeManager.GetInvalidTy())
     }
     try (ds = DiagSuppressor(diag)) {
-        ClearExprKeepTargets(leftExpr)
+        // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:696-699 clears resolved targets before the checked retry.
+        leftExpr.Clear()
         if (ChkBinaryOperand(typeManager, targetRight, leftExpr, ctx, checker)) {
             ds.ReportDiag()
             let solvedRight = typeManager.TryGreedySubst(targetRight)
@@ -786,7 +787,8 @@ private func SynArithmeticOrRelationalExpr(impl: TypeCheckerImpl, be: BinaryExpr
         synthesizer: synthesizer, checker: checker, diag: diag)) {
         resultTy
     } else {
-        ClearExprKeepTargets(be)
+        // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:646 clears both operands before retrying from the left.
+        be.Clear()
         SynBuiltinBinaryFromLeft(typeManager, be, isArithmetic, ctx: ctx,
             synthesizer: synthesizer, checker: checker, diag: diag)
     }
