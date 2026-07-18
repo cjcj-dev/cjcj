@@ -6356,7 +6356,8 @@ extend TypeChecker {
         if (sum.values.size != 1 || !sum.values[0].IsAny()) {
             return
         }
-        let signature = if (let Some(callExpr) <- (ma.callOrPattern as CallExpr)) {
+        let signature = if ((let Some(callOrPattern) <- ma.callOrPattern) &&
+            (let Some(callExpr) <- (callOrPattern as CallExpr))) {
             MemSig(ma.field.Val(), false, UInt64(callExpr.args.size), UInt64(ma.typeArguments.size))
         } else {
             MemSig(ma.field.Val(), true, 0u64, 0u64)
