@@ -177,7 +177,7 @@ public func MarkOutermostBinaryExpressions(pkg: Package): Unit {
     MarkOutermostBinaryExpr(true, pkg)
 }
 
-private func SynBinaryLeafs(typeManager: TypeManager, be: BinaryExpr,
+internal func SynBinaryLeafs(typeManager: TypeManager, be: BinaryExpr,
     synthesizer: Option<BinaryOperandSynthesizer>): Unit {
     let stack = ArrayList<Node>()
     stack.add(be)
@@ -1491,7 +1491,7 @@ private func ChkShiftExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     return false
 }
 
-private func CheckBinaryExprCaseBuiltIn(typeManager: TypeManager, target: Ty, be: BinaryExpr,
+internal func CheckBinaryExprCaseBuiltIn(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     ctx!: Option<ASTContext> = None, synthesizer!: Option<BinaryOperandSynthesizer> = None,
     checker!: Option<BinaryOperandChecker> = None, diag!: Option<BasicDiagnosticEngine> = None): Option<Bool> {
     var checkRet = false
@@ -1709,7 +1709,7 @@ public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
 }
 
 extend TypeChecker {
-    private func TryCheckOperatorOverload(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
+    internal func TryCheckOperatorOverload(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
         DesugarOperatorOverloadExpr(be, ctx: Some(ctx))
         let desugar = be.desugarExpr.getOrThrow()
         try (ds = DiagSuppressor(impl.diag)) {
