@@ -1400,9 +1400,9 @@ private func SpreadInstantiationTy(typeManager: TypeManager, node: Node, typeMap
 private func ReorderCallArgument(typeManager: TypeManager, ctx: Option<ASTContext>, fmu: FunctionMatchingUnit,
     ce: CallExpr, argChecker: Option<CallArgChecker>): ArrayList<FuncDecl> {
     let out = ArrayList<FuncDecl>()
-    ce.defaultArgs.clear()
     let bodyParams = BodyParamList(fmu.fd).getOrThrow().params
     let desugarArgs = ArrayList<Option<FuncArg>>()
+    let defaultArgs = ArrayList<FuncArg>()
     for (param in bodyParams) {
         if (param.TestAttr(Attribute.HAS_INITIAL)) {
             let defaultArg = CreateFuncArgForOptional(param)
@@ -1415,7 +1415,7 @@ private func ReorderCallArgument(typeManager: TypeManager, ctx: Option<ASTContex
                 CJC_ASSERT(checked)
             }
             SpreadInstantiationTy(typeManager, defaultArg, fmu.typeMapping)
-            ce.defaultArgs.add(defaultArg)
+            defaultArgs.add(defaultArg)
             desugarArgs.add(Some(defaultArg))
         } else {
             desugarArgs.add(None)
@@ -1423,6 +1423,10 @@ private func ReorderCallArgument(typeManager: TypeManager, ctx: Option<ASTContex
     }
     SortCallArgumentByParamOrder(fmu.fd, ce, desugarArgs)
     ce.desugarArgs = Some(desugarArgs)
+    ce.defaultArgs.clear()
+    for (defaultArg in defaultArgs) {
+        ce.defaultArgs.add(defaultArg)
+    }
     let funcTy = (fmu.fd.GetTy().getOrThrow() as FuncTy).getOrThrow()
     if (IsGenericCall(ctx, ce, fmu.fd)) {
         return UpdateFuncGenericType(typeManager, ctx, fmu, ce)
