@@ -6248,6 +6248,8 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         HashMap<UInt64, TreeMap<String, ArrayList<Decl>>>()
     private let declsImportedByNodeMap: HashMap<String, HashMap<Decl, ArrayList<ImportSpec>>> =
         HashMap<String, HashMap<Decl, ArrayList<ImportSpec>>>()
+    // ImportManager.h:401-402: imported alias declarations and alias-imports by target Decl identity.
+    private let declToTypeAlias: HashMap<Decl, HashSet<String>> = HashMap<Decl, HashSet<String>>()
     // ImportManager.h:392 astWriters. Package inherits Node, preserving Package* identity.
     private let astWriters: HashMap<Node, ASTWriter> = HashMap<Node, ASTWriter>()
     private let fileUsedMacroDeclsMap: HashMap<UInt64, TreeMap<String, ArrayList<Decl>>> =
@@ -6561,6 +6563,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         importedDeclsMap.clear()
         fileImportedDeclsMap.clear()
         declsImportedByNodeMap.clear()
+        declToTypeAlias.clear()
         fileUsedMacroDeclsMap.clear()
         directMacroDeps.clear()
         for (pkg in pkgs) {
@@ -6671,6 +6674,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         importedDeclsMap.clear()
         fileImportedDeclsMap.clear()
         declsImportedByNodeMap.clear()
+        declToTypeAlias.clear()
         for (pkg in pkgs) {
             AddImportedDeclsForSourcePackage(pkg)
         }
@@ -6715,6 +6719,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         importedDeclsMap.clear()
         fileImportedDeclsMap.clear()
         declsImportedByNodeMap.clear()
+        declToTypeAlias.clear()
         fileUsedMacroDeclsMap.clear()
     }
     public func SetSourceCodeImportStatus(shouldImport: Bool): Unit {
@@ -7131,6 +7136,12 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                             }
                             declImports.get(decl).getOrThrow().add(importSpec)
                         }
+                        if (decl.identifier.Val() != name) {
+                            if (!declToTypeAlias.contains(decl)) {
+                                declToTypeAlias[decl] = HashSet<String>()
+                            }
+                            declToTypeAlias.get(decl).getOrThrow().add(decl.identifier.Val())
+                        }
                     }
                 }
             }
@@ -7155,6 +7166,23 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
                 importSpec.content.identifier.Val()
             }
             for (decl in GetPackageMembersByName(targetPackageName, importSpec.content.identifier.Val())) {
+                if (let Some(typeAliasDecl) <- (decl as TypeAliasDecl)) {
+                    if (let Some(typeNode) <- typeAliasDecl.typeNode) {
+                        if (let Some(originDecl) <- typeNode.GetTarget()) {
+                            if (!declToTypeAlias.contains(originDecl)) {
+                                declToTypeAlias[originDecl] = HashSet<String>()
+                            }
+                            declToTypeAlias.get(originDecl).getOrThrow().add(importedName)
+                        }
+                    }
+                } else if (decl.identifier.Val() != importedName) {
+                    if (!declToTypeAlias.contains(decl)) {
+                        declToTypeAlias[decl] = HashSet<String>()
+                    }
+                    let aliases = declToTypeAlias.get(decl).getOrThrow()
+                    aliases.add(importedName)
+                    aliases.add(decl.identifier.Val())
+                }
                 if (IsVisibleImportedDecl(importLevel, relation, decl)) {
                     PutImportedDecl(targetMap, importedName, decl)
                     if (!declImports.contains(decl)) {
@@ -8525,11 +8553,44 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return decl
     }
 
+    // ImportManager.cpp:1397-1417 ImportManager::IsDeclAccessible.
+    public func IsDeclAccessible(file: File, decl: Decl): Bool {
+        let filePackage = file.curPackage.getOrThrow()
+        var accessible = decl.fullPackageName == filePackage.fullPackageName
+        let relation = GetFrontendPackageRelation(filePackage.fullPackageName, decl.fullPackageName)
+        var importedDirectly = false
+        for (importedDecl in GetImportedDeclsByName(file, decl.identifier.Val())) {
+            if (importedDecl == decl) {
+                importedDirectly = true
+                break
+            }
+        }
+        if (importedDirectly) {
+            return true
+        }
+        let packageNames = SplitQualifiedName(decl.fullPackageName)
+        var idx = packageNames.size - 1
+        while (idx >= 0) {
+            if (!GetImportedDeclsByName(file, packageNames[idx]).isEmpty() && IsFrontendVisible(decl, relation)) {
+                accessible = true
+            }
+            idx--
+        }
+        if (let Some(aliases) <- declToTypeAlias.get(decl)) {
+            for (aliasName in aliases) {
+                if (!GetImportedDeclsByName(file, aliasName).isEmpty()) {
+                    accessible = true
+                }
+            }
+        }
+        return accessible
+    }
+
     public func IsTypeAccessible(file: File, typeNode: Type): Bool {
         // NOTE: For compatibility reason, extension declaration's visibility does not depend on alias declarations.
         if (let Some(target) <- typeNode.GetTarget()) {
             let decl = GetExtendTypeAliasRealTarget(target)
-            return typeManager.IsDeclAccessible(file, decl)
+            return IsDeclAccessible(file, decl)
         }
         // Builtin type and primitive type is always accessible.
         return true
