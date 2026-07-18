@@ -1102,24 +1102,9 @@ private func SourceCustomTypeForDef(def: CustomTypeDef, fallback: CustomType): C
 private func TypeTemplateGenericParams(customTy: CustomType): ArrayList<GenericType> {
     let result = ArrayList<GenericType>()
     for (param in customTy.GetCustomTypeDef().GetGenericTypeParams()) {
-        AddGenericParamIfAbsent(result, param)
-    }
-    for (arg in customTy.GetGenericArgs()) {
-        if (let Some(genericArg) <- (arg as GenericType)) {
-            AddGenericParamIfAbsent(result, genericArg)
-        }
+        result.add(param)
     }
     return result
-}
-
-private func AddGenericParamIfAbsent(params: ArrayList<GenericType>, candidate: GenericType): Unit {
-    for (param in params) {
-        if (candidate.IsEqual(param) || candidate.GetIdentifier() == param.GetIdentifier() ||
-            candidate.GetSrcCodeIdentifier() == param.GetSrcCodeIdentifier()) {
-            return
-        }
-    }
-    params.add(candidate)
 }
 
 private func LinkageOfCustomTypeDef(def: CustomTypeDef): Linkage {
