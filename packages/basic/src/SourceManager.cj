@@ -36,9 +36,9 @@ func basicLastDirSplit(str: String): Option<Int64> {
 }
 
 func BasicNormalizePath(input: String, toUnix!: Bool = false): String {
-    let builder = StringBuilder()
+    let result = ArrayList<UInt8>()
     var previousIsSlash = false
-    let slash = basicPreferredDirSeparator(toUnix)
+    let slash = basicPreferredDirSeparator(toUnix).toArray()[0]
     for (byte in input.toArray()) {
         if (byte == 0u8) {
             break
@@ -48,14 +48,14 @@ func BasicNormalizePath(input: String, toUnix!: Bool = false): String {
             continue
         }
         if (isSlashByte) {
-            builder.append(slash)
+            result.add(slash)
             previousIsSlash = true
         } else {
-            builder.append(String.fromUtf8([byte]))
+            result.add(byte)
             previousIsSlash = false
         }
     }
-    return builder.toString()
+    return unsafe { String.fromUtf8Unchecked(result.toArray()) }
 }
 
 func BasicGetFileName(filePath: String): String {
