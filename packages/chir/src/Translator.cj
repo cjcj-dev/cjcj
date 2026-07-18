@@ -1416,11 +1416,16 @@ public class Translator {
         if (let Some(astTy) <- enumDecl.GetTy()) {
             def.SetType(RequireEnumType(chirTy.TranslateType(astTy)))
         }
-        def.SetLinkTypeInfo(if (enumDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
+        var enumTiLinkage = if (enumDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
             BasicLinkage.INTERNAL
         } else {
             enumDecl.linkage
-        })
+        }
+        // C++: b7bdc1d8 TranslateEnumDecl.cpp:44-55.
+        if (enumTiLinkage == BasicLinkage.INTERNAL) {
+            enumTiLinkage = BasicLinkage.LINKONCE_ODR
+        }
+        def.SetLinkTypeInfo(enumTiLinkage)
         SetImplementedInterfaces(def, enumDecl)
         for (ctor in enumDecl.constructors) {
             CJC_ASSERT(ctor.astKind == ASTKind.VAR_DECL || ctor.astKind == ASTKind.FUNC_DECL)
@@ -4015,11 +4020,16 @@ public class Translator {
         }
         let isImportedInstantiated = decl.TestAttr(AstAttribute.IMPORTED) &&
             decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)
-        def.SetLinkTypeInfo(if (isImportedInstantiated) {
+        var tiLinkage = if (isImportedInstantiated) {
             BasicLinkage.INTERNAL
         } else {
             decl.linkage
-        })
+        }
+        // C++: b7bdc1d8 TranslateClassDecl.cpp:53-71.
+        if (tiLinkage == BasicLinkage.INTERNAL) {
+            tiLinkage = BasicLinkage.LINKONCE_ODR
+        }
+        def.SetLinkTypeInfo(tiLinkage)
         let needInitialSuperClassSetup = !decl.TestAttr(AstAttribute.SPECIFIC) ||
             decl.TestAttr(AstAttribute.IMPORTED) || decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)
         if (needInitialSuperClassSetup) {
