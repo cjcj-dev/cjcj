@@ -1982,7 +1982,7 @@ extend ParserImpl {
             return ret
         }
         ret.leftParenPos = lastToken.Begin()
-        ret.pattern = ParsePattern()
+        ret.pattern = ParsePattern(ArrayList<Attribute>(), false, true)
         if (!Skip(TokenKind.IN)) {
             ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_in_forin_expression, lookahead,
                 ConvertToken(lookahead)).Emit()
