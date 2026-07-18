@@ -830,37 +830,11 @@ private class FaithfulInitDeclOwnerMap {
 }
 
 private func FaithfulInitDeclHash(decl: AstDecl): Int64 {
-    if (let Some(defaultKey) <- FaithfulInitDefaultParamDeclIdentity(decl)) {
-        return defaultKey.hashCode()
-    }
     return decl.hashCode()
 }
 
 private func FaithfulInitSameDecl(left: AstDecl, right: AstDecl): Bool {
-    if (let Some(leftKey) <- FaithfulInitDefaultParamDeclIdentity(left)) {
-        if (let Some(rightKey) <- FaithfulInitDefaultParamDeclIdentity(right)) {
-            return leftKey == rightKey
-        }
-        return false
-    }
-    if (FaithfulInitDefaultParamDeclIdentity(right).isSome()) {
-        return false
-    }
     return left == right
-}
-
-private func FaithfulInitDefaultParamDeclIdentity(decl: AstDecl): Option<String> {
-    if (!decl.TestAttr(AstAttribute.HAS_INITIAL)) {
-        return None
-    }
-    if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
-        if (let Some(owner) <- funcDecl.ownerFunc) {
-            return Some(ASTKindIndex(owner.astKind).toString() + ":" + owner.fullPackageName + ":" +
-                owner.identifier.Val() + ":" + owner.begin.hashCode().toString() + ":" +
-                owner.end.hashCode().toString() + ":default-param:" + decl.identifier.Val())
-        }
-    }
-    return None
 }
 
 private let FAITHFUL_MANGLE_CANGJIE_PREFIX: String = "_C"
