@@ -2522,7 +2522,9 @@ extend ParserImpl {
         let ret = ExtendDecl()
         try (cs = ChainScope(this, ret)) {
             CheckNoDeprecatedAnno(annos, "extend")
-            ApplyModifiersAndAnnotations(ret, modifiers, annos)
+            for (anno in annos) {
+                ret.annotations.add(anno)
+            }
             let key = Expect(TokenKind.EXTEND, "expected 'extend'")
             ret.keywordPos = key.Begin()
             ret.begin = lookahead.Begin()
@@ -2537,6 +2539,7 @@ extend ParserImpl {
             }
             if (hasOneModifierKind && MPParserImpl(this).HasCJMPModifiers(modifiers[0])) {
                 MPParserImpl(this).CheckCJMPModifiers(modifiers)
+                ret.EnableAttr(GetAttributeByModifier(modifiers[0].modifier).getOrThrow())
             } else if (!modifiers.isEmpty() && !ret.TestAttr(Attribute.IS_BROKEN)) {
                 DiagExpectNoModifier(modifiers[0])
             }
