@@ -141,10 +141,10 @@ public open class DefaultCompilerInstance {
     }
 
     public open func PerformResultsSaving(): Bool {
+        if (invocation.globalOptions.outputMode != OutputMode.CHIR) {
+            return true
+        }
         return ProfiledBool("Main Stage", "Save results", { =>
-            if (invocation.globalOptions.outputMode != OutputMode.CHIR) {
-                return true
-            }
             if (invocation.globalOptions.outputMode == OutputMode.CHIR || invocation.frontendOptions.chirDeserialize) {
                 let pkgs = core.GetSourcePackages()
                 let saved = SaveCjos(pkgs)
