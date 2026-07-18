@@ -2655,7 +2655,7 @@ extend TypeChecker {
 
     // C++ src/Sema/TypeChecker.cpp:2725-2743 TypeCheckerImpl::CheckOverflow.
     private func CheckOverflow(node: Node): Unit {
-        let walker = Walker(node, visitPre: { current: Node =>
+        let walker = Walker(node, visitPost: { current: Node =>
             if (let Some(lce) <- (current as LitConstExpr)) {
                 if (lce.desugarExpr.isNone() && Ty.IsTyCorrect(lce.GetTy())) {
                     let _ = ChkLitConstExprRange(lce, diag: impl.diag)
