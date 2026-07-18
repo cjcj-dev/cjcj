@@ -4905,14 +4905,20 @@ extend TypeChecker {
             return CheckNonNormalCall(impl.typeManager, impl.diag, target, ce,
                 { targetTy, callExpr => ChkFunctionCallExpr(ctx, targetTy, callExpr) },
                 { callExpr, arity => DesugarVariadicCallExpr(callExpr, arity) },
-                argChecker: Some({ expectedTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, expectedTy, arg) }))
+                argChecker: Some({ expectedTy: Ty, arg: FuncArg =>
+                    GetTypeCheckCache(ctx, arg).lastKey = GetCacheKeyForChk(ctx, arg, expectedTy)
+                    ChkFuncArg(ctx, expectedTy, arg)
+                }))
         }
         let decl = baseResult[1].getOrThrow()
         if (!CheckCallKind(impl.diag, ce, decl)) {
             return CheckNonNormalCall(impl.typeManager, impl.diag, target, ce,
                 { targetTy, callExpr => ChkFunctionCallExpr(ctx, targetTy, callExpr) },
                 { callExpr, arity => DesugarVariadicCallExpr(callExpr, arity) },
-                argChecker: Some({ expectedTy4: Ty, arg9: FuncArg => CheckCallArgFromContext(ctx, expectedTy4, arg9) }))
+                argChecker: Some({ expectedTy4: Ty, arg9: FuncArg =>
+                    GetTypeCheckCache(ctx, arg9).lastKey = GetCacheKeyForChk(ctx, arg9, expectedTy4)
+                    ChkFuncArg(ctx, expectedTy4, arg9)
+                }))
         }
         if (ce.callKind == CallKind.CALL_INVALID) {
             return false
