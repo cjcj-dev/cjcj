@@ -237,7 +237,7 @@ public class ASTWriter {
     private let savedTypeMap: HashMap<Ptr<Ty>, UInt32> = HashMap<Ptr<Ty>, UInt32>()
     private let allTypes: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let declKeyToIndex: HashMap<Node, UInt32> = HashMap<Node, UInt32>()
-    private let completedDeclKeys: HashSet<Node> = HashSet<Node>()
+    private let preSavedDecls: HashSet<Node> = HashSet<Node>()
     private let allDecls: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let allExprs: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private let topLevelDecls: HashSet<Decl> = HashSet<Decl>()
@@ -706,7 +706,7 @@ public class ASTWriter {
         let isTopLevel = isGlobal || topLevelDecls.contains(decl)
         let key: Node = decl
         if (let Some(existing) <- declKeyToIndex.get(key)) {
-            if (!completedDeclKeys.contains(key)) {
+            if (preSavedDecls.contains(key)) {
                 SaveDecl(decl, key, existing, isTopLevel)
             }
             return existing
@@ -726,6 +726,7 @@ public class ASTWriter {
         let next = UInt32(allDecls.size + 1)
         declKeyToIndex[key] = next
         allDecls.add(0u32)
+        preSavedDecls.add(key)
         return next
     }
 
@@ -760,9 +761,7 @@ public class ASTWriter {
     }
 
     private func SaveDecl(decl: Decl, key: Node, index: UInt32, isTopLevel: Bool): Unit {
-        if (completedDeclKeys.contains(key)) {
-            return
-        }
+        preSavedDecls.remove(key)
         let fullPkgName = builder.CreateString(if (decl.fullPackageName.isEmpty()) { currentPackageName } else {
             decl.fullPackageName
         })
@@ -847,7 +846,6 @@ public class ASTWriter {
         builder.AddU16(0, declKind)
         let offset = builder.EndTable()
         allDecls[Int64(index) - 1] = offset
-        completedDeclKeys.add(key)
     }
 
     private func SaveDeclType(decl: Decl): UInt32 {
