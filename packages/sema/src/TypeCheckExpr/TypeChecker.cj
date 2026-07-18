@@ -7349,33 +7349,7 @@ extend TypeChecker {
                 BasicDiagKindRefactor.sema_undeclared_identifier, ma, memberRange, arguments: [ma.field.Val()])
             builder.Emit()
         } else {
-            var shadowedType: Option<Decl> = None
-            try (diagSuppressor = DiagSuppressor(impl.diag)) {
-                InferInstanceAccess(ctx, ma)
-                if (ma.target.isNone() && ma.targets.isEmpty()) {
-                    if (let Some(baseRef) <- (baseExpr as RefExpr)) {
-                        if (let Some(typeDecl) <- LookupShadowedTopLevelType(ctx, baseRef)) {
-                            if (Ty.IsTyCorrect(typeDecl.GetTy())) {
-                                shadowedType = Some(typeDecl)
-                            }
-                        }
-                    }
-                }
-                if (shadowedType.isNone()) {
-                    diagSuppressor.ReportDiag()
-                }
-            }
-            if (let Some(typeDecl) <- shadowedType) {
-                let baseRef = (baseExpr as RefExpr).getOrThrow()
-                ReplaceTarget(baseRef, Some(typeDecl))
-                baseRef.aliasTarget = None
-                baseRef.ref.targets.clear()
-                baseRef.SetTy(typeDecl.GetTy().getOrThrow())
-                ma.targets.clear()
-                ReplaceTarget(ma, None)
-                ma.SetTy(Ty.GetInitialTy())
-                InferStaticAccess(ctx, ma, typeDecl)
-            }
+            InferInstanceAccess(ctx, ma)
         }
         if (ma.target.isNone()) {
             return
