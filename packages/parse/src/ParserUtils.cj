@@ -1008,6 +1008,9 @@ extend ParserImpl {
     }
 
     public func FinalizeDeclTree(decl: Decl): Unit {
+        for (member in decl.GetMemberDecls()) {
+            FinalizeDeclTree(member)
+        }
         MPParserImpl(this).CheckCJMPDecl(decl)
     }
 }
