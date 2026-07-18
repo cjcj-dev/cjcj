@@ -1229,14 +1229,6 @@ extend TypeChecker {
         }
         for (ctx in contexts) {
             if (let Some(pkg) <- contextPackage(ctx)) {
-                if (let Some(diagValue) <- impl.diag) {
-                    PreCheckFuncRedefinition(pkg, impl.GetSymsByASTKind(ctx, ASTKind.FUNC_DECL), diagValue,
-                        impl.typeManager)
-                }
-            }
-        }
-        for (ctx in contexts) {
-            if (let Some(pkg) <- contextPackage(ctx)) {
                 // C++ src/Sema/PreCheck.cpp:1281-1321,1842-1854 checks nominal declarations after
                 // BuildExtendMap and UpdateSpecificMemberGenericTy, before assumptions are collected.
                 for (sym in impl.GetAllStructDecls(ctx)) {
@@ -1258,6 +1250,16 @@ extend TypeChecker {
         }
         for (ctx in contexts) {
             impl.CheckExtendRules(ctx)
+        }
+        // C++ src/Sema/PreCheck.cpp:1839-1857 checks function redefinition only after the complete
+        // BuildExtendMap -> UpdateSpecificMemberGenericTy -> inheritance/assumption -> CheckExtendRules sequence.
+        for (ctx in contexts) {
+            if (let Some(pkg) <- contextPackage(ctx)) {
+                if (let Some(diagValue) <- impl.diag) {
+                    PreCheckFuncRedefinition(pkg, impl.GetSymsByASTKind(ctx, ASTKind.FUNC_DECL), diagValue,
+                        impl.typeManager)
+                }
+            }
         }
         // C++ src/Sema/PreCheck.cpp:2028-2035 runs this only after every PreCheckUsage phase.
         impl.PreCheckAllExtendInterface()
