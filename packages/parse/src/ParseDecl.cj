@@ -2557,9 +2557,43 @@ extend ParserImpl {
             if (Skip(TokenKind.WHERE)) {
                 ParseConstraints(ret)
             }
-            ParseClassLikeBody(ret, ScopeKind.EXTEND_BODY)
+            ParseExtendBody(ret)
+            ret.end = lastToken.End()
+            ret.bodyScope.getOrThrow().end = ret.end
         }
         return ret
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/Parser.cpp:522-554
+    private func ParseExtendBody(ed: ExtendDecl): Unit {
+        ed.bodyScope = DummyBody()
+        if (!Skip(TokenKind.LCURL)) {
+            DiagExpectCharacter("'{'", noteStr: "extend declaration must have body")
+            ed.EnableAttr(Attribute.HAS_BROKEN)
+            return
+        } else {
+            ed.leftCurlPos = lookahead.Begin()
+            ed.bodyScope.getOrThrow().begin = lookahead.Begin()
+        }
+        SkipBlank(TokenKind.SEMI)
+        while (true) {
+            SkipBlank(TokenKind.SEMI)
+            if (Skip(TokenKind.RCURL)) {
+                ed.rightCurlPos = lastToken.Begin()
+                break
+            }
+            if (DetectPrematureEnd()) {
+                ed.EnableAttr(Attribute.IS_BROKEN)
+                DiagExpectedRightDelimiter("{", ed.leftCurlPos)
+                break
+            }
+            let decl = ParseDecl(ScopeKind.EXTEND_BODY)
+            if (decl.IsInvalid()) {
+                continue
+            }
+            SetMemberParentInheritableDecl(ed, decl)
+            ed.members.add(decl)
+        }
     }
 
     // C++ anchor: cangjie_compiler/src/Parse/Parser.cpp:505-516
