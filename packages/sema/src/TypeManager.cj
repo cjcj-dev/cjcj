@@ -1521,7 +1521,7 @@ public class TypeManager {
         if (!Ty.IsTyCorrect(targetTy)) {
             return
         }
-        generateDeclGenericMapping(m, decl, targetTy)
+        MergeTypeSubstToMultiTypeSubst(m, GenerateTypeMapping(decl, targetTy.typeArgs))
         for (inheritedType in decl.inheritedTypes) {
             if (let Some(inheritedTy) <- inheritedType.GetTy()) {
                 if (IsInheritableType(inheritedTy)) {
@@ -3765,20 +3765,6 @@ public class TypeManager {
             }
         }
         return out
-    }
-
-    private func generateDeclGenericMapping(m: MultiTypeSubst, decl: InheritableDecl, targetTy: Ty): Unit {
-        if (let Some(generic) <- decl.GetGeneric()) {
-            var idx: Int64 = 0
-            while (idx < generic.typeParameters.size && idx < targetTy.typeArgs.size) {
-                if (let Some(paramTy) <- generic.typeParameters[idx].GetTy()) {
-                    if (let Some(genTy) <- (paramTy as GenericsTy)) {
-                        m.Put(genTy, targetTy.typeArgs[idx])
-                    }
-                }
-                idx++
-            }
-        }
     }
 
     private func CheckGenericConstraints(decl: Decl, instantiateMap: TypeSubst): Bool {
