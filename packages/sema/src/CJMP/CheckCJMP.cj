@@ -420,7 +420,8 @@ private func MustMatchWithPlatform(decl: Decl, compilingCommon: Bool): Bool {
     if (decl.astKind == ASTKind.VAR_DECL && decl.TestAttr(Attribute.INITIALIZED)) {
         return false
     }
-    if (let Some(varDecl) <- (decl as VarDecl)) {
+    if (decl.astKind == ASTKind.VAR_DECL) {
+        let varDecl = (decl as VarDecl).getOrThrow()
         if (!varDecl.IsStaticOrGlobal()) {
             if (let Some(outer) <- varDecl.outerDecl) {
                 return outer.astKind == ASTKind.ENUM_DECL
