@@ -37,63 +37,6 @@ private func BinaryInvalid(be: BinaryExpr): Ty {
     return TcInvalid(be)
 }
 
-private class TargetSnapshot {
-    let node: Node
-    let target: Option<Decl>
-    let targets: ArrayList<Option<Decl>> = ArrayList<Option<Decl>>()
-
-    init(node: Node) {
-        this.node = node
-        this.target = node.GetTarget()
-        for (value in node.GetTargets()) {
-            targets.add(value)
-        }
-    }
-
-    func Restore(): Unit {
-        node.SetTarget(target)
-        if (let Some(refExpr) <- (node as RefExpr)) {
-            refExpr.ref.targets.clear()
-            for (value in targets) {
-                refExpr.ref.targets.add(value)
-            }
-        } else if (let Some(memberAccess) <- (node as MemberAccess)) {
-            memberAccess.targets.clear()
-            for (value2 in targets) {
-                match (value2) {
-                    case Some(decl) => memberAccess.targets.add(Some((decl as FuncDecl).getOrThrow()))
-                    case None => memberAccess.targets.add(None)
-                }
-            }
-        } else if (let Some(refType) <- (node as RefType)) {
-            refType.ref.targets.clear()
-            for (value3 in targets) {
-                refType.ref.targets.add(value3)
-            }
-        }
-    }
-}
-
-private func CollectTargetSnapshots(node: Node): ArrayList<TargetSnapshot> {
-    let snapshots = ArrayList<TargetSnapshot>()
-    let walker = Walker(node, visitPre: { current: Node =>
-        if ((let Some(_) <- current.GetTarget()) || !current.GetTargets().isEmpty()) {
-            snapshots.add(TargetSnapshot(current))
-        }
-        VisitAction.WALK_CHILDREN
-    })
-    let _ = walker.Walk()
-    return snapshots
-}
-
-private func ClearExprKeepTargets(expr: Expr): Unit {
-    let snapshots = CollectTargetSnapshots(expr)
-    expr.Clear()
-    for (snapshot in snapshots) {
-        snapshot.Restore()
-    }
-}
-
 private func GetChildBinaryExpr(child: Expr): Option<BinaryExpr> {
     if (let Some(binary) <- (child as BinaryExpr)) {
         if (let None <- binary.desugarExpr) {
@@ -437,8 +380,8 @@ private func SynFlowExpr(typeManager: TypeManager, ctx: ASTContext, be: BinaryEx
                     ds.ReportDiag()
                     return (true, invalidTy)
                 }
-                ClearExprKeepTargets(leftExpr)
-                ClearExprKeepTargets(rightExpr)
+                leftExpr.Clear()
+                rightExpr.Clear()
                 typeManager.constraints.Reset()
             }
         }
@@ -1288,8 +1231,8 @@ private func ChkConcreteBinaryOperandPair(typeManager: TypeManager, candidateTy:
     }
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
-    ClearExprKeepTargets(leftExpr)
-    ClearExprKeepTargets(rightExpr)
+    leftExpr.Clear()
+    rightExpr.Clear()
     let leftOk = ChkBinaryOperand(typeManager, candidateTy, leftExpr, ctx, checker)
     let rightOk = ChkBinaryOperand(typeManager, candidateTy, rightExpr, ctx, checker)
     if (leftOk && rightOk) {
@@ -1453,8 +1396,8 @@ private func ChkLogicalExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr
     let boolTy = TcBoolTy()
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
-    ClearExprKeepTargets(leftExpr)
-    ClearExprKeepTargets(rightExpr)
+    leftExpr.Clear()
+    rightExpr.Clear()
     let leftOk = ChkBinaryOperand(typeManager, boolTy, leftExpr, ctx, checker)
     let rightOk = ChkBinaryOperand(typeManager, boolTy, rightExpr, ctx, checker)
     if (leftOk && rightOk) {
@@ -1474,8 +1417,8 @@ private func ChkShiftExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
     }
     let leftExpr = be.leftExpr.getOrThrow()
     let rightExpr = be.rightExpr.getOrThrow()
-    ClearExprKeepTargets(leftExpr)
-    ClearExprKeepTargets(rightExpr)
+    leftExpr.Clear()
+    rightExpr.Clear()
     let leftOk = ChkBinaryOperand(typeManager, target, leftExpr, ctx, checker)
     let leftTy = leftExpr.GetTy() ?? TypeManager.GetInvalidTy()
     let rightTy = SynBinaryOperand(typeManager, rightExpr, synthesizer)
