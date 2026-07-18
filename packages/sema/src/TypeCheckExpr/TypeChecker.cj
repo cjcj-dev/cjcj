@@ -7290,8 +7290,9 @@ extend TypeChecker {
     }
 
     internal func FinishSynthesize(ctx: ASTContext, expr: Expr, ty: Ty): Ty {
+        expr.SetTy(impl.typeManager.TryGreedySubst(ty))
         ctx.SkipSynForCorrectTy(expr)
-        return ty
+        return expr.GetTy().getOrThrow()
     }
 
     private func FinishCheck(ctx: ASTContext, expr: Expr, ok: Bool): Bool {
