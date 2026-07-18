@@ -2669,7 +2669,7 @@ public class ASTWriter {
 
     private func SaveArrayTyInfo(dimsOrSize: Int64): FlatBufferOffset {
         builder.StartTable(1)
-        builder.AddI64(0, dimsOrSize, defaultValue: 1)
+        builder.AddI64(0, dimsOrSize, defaultValue: 0)
         return builder.EndTable()
     }
 
