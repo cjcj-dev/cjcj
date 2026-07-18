@@ -62,7 +62,9 @@ public func StartsWith(value: String, prefix: String): Bool {
 }
 
 public func EndsWith(value: String, suffix: String): Bool {
-    return value.size >= suffix.size && value[value.size - suffix.size..] == suffix
+    let valueBytes = value.toArray()
+    let suffixBytes = suffix.toArray()
+    return valueBytes.size >= suffixBytes.size && valueBytes[valueBytes.size - suffixBytes.size..] == suffixBytes
 }
 
 public func MangleName(str: String): String {
