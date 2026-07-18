@@ -8248,7 +8248,6 @@ extend TypeChecker {
             }
             return FinishSynthesize(ctx, tupleLit, SynTupleLit(impl.typeManager, tupleLit))
         }
-        SynthesizeNodeChildren(ctx, expr)
         if (let Some(rangeExpr) <- (expr as RangeExpr)) {
             return FinishSynthesize(ctx, rangeExpr, SynRangeExpr(ctx, rangeExpr))
         }
