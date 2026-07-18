@@ -206,7 +206,7 @@ extend ParserImpl {
         let ret = InterpolationExpr()
         try (cs = ChainScope(this, ret)) {
             ret.begin = part.begin
-            ret.end = part.end
+            ret.end = part.begin
             ret.dollarPos = part.begin
             ret.rawString = part.value
             let lines = SplitLines(part.value)
