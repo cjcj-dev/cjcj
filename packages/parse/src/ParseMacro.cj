@@ -407,10 +407,17 @@ extend ParserImpl {
     }
 
     private func ParseMacroCallAttr(invocation: MacroInvocation): Unit {
-        invocation.leftSquarePos = lastToken.Begin()
-        if (ParseMacroCallTokens(TokenKind.LSQUARE, TokenKind.RSQUARE, invocation.attrs, true)) {
-            invocation.rightSquarePos = Expect(TokenKind.RSQUARE, "expected ']' after macro call attributes").Begin()
+        invocation.leftSquarePos = lookahead.Begin()
+        let leftSquarePos = lookahead.Begin()
+        if (!ParseMacroCallTokens(TokenKind.LSQUARE, TokenKind.RSQUARE, invocation.attrs, true)) {
+            return
         }
+        if (!Skip(TokenKind.RSQUARE)) {
+            DiagExpectedRightDelimiter("[", leftSquarePos)
+            invocation.attrs.clear()
+            return
+        }
+        invocation.rightSquarePos = lookahead.Begin()
     }
 
     private func ParseMacroCallArgsWithParen(invocation: MacroInvocation): Unit {
