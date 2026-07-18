@@ -756,15 +756,25 @@ public open class Ty <: Identifiable & Hashable & Equatable<Ty> {
         var decl: Option<Decl> = None
         if (let Some(value) <- ty) {
             if (let Some(classTy) <- (value as ClassTy)) {
-                decl = classTy.declPtr
+                if (let Some(valueDecl) <- classTy.declPtr) {
+                    decl = Some(valueDecl)
+                }
             } else if (let Some(interfaceTy) <- (value as InterfaceTy)) {
-                decl = interfaceTy.declPtr
+                if (let Some(valueDecl) <- interfaceTy.declPtr) {
+                    decl = Some(valueDecl)
+                }
             } else if (let Some(structTy) <- (value as StructTy)) {
-                decl = structTy.declPtr
+                if (let Some(valueDecl) <- structTy.declPtr) {
+                    decl = Some(valueDecl)
+                }
             } else if (let Some(enumTy) <- (value as EnumTy)) {
-                decl = enumTy.declPtr
+                if (let Some(valueDecl) <- enumTy.declPtr) {
+                    decl = Some(valueDecl)
+                }
             } else if (let Some(aliasTy) <- (value as TypeAliasTy)) {
-                decl = aliasTy.declPtr
+                if (let Some(valueDecl) <- aliasTy.declPtr) {
+                    decl = Some(valueDecl)
+                }
             }
         }
         if (let Some(genericDecl) <- decl) {
