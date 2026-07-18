@@ -886,7 +886,7 @@ public class MacroEvaluation {
                     }
                     replacement = Token(macCall.strKind, fileName, pos, pos + fileName.size)
                 } else {
-                    let lineStr = pos.line.toString()
+                    let lineStr = attrTokens[idx].Begin().line.toString()
                     replacement = Token(TokenKind.INTEGER_LITERAL, lineStr, pos, pos + lineStr.size)
                 }
                 replaceTokenSpan(attrTokens, idx, 4, replacement)
