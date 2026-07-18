@@ -2528,7 +2528,14 @@ extend ParserImpl {
             ret.begin = key.Begin()
             ret.identifier.SetPos(key.Begin(), key.Begin())
             CheckDeclarationInScope(scopeKind, DefKind.EXTEND)
-            if (modifiers.size == 1 && MPParserImpl(this).HasCJMPModifiers(modifiers[0])) {
+            var hasOneModifierKind = !modifiers.isEmpty()
+            for (modifier in modifiers) {
+                if (modifier.modifier != modifiers[0].modifier) {
+                    hasOneModifierKind = false
+                    break
+                }
+            }
+            if (hasOneModifierKind && MPParserImpl(this).HasCJMPModifiers(modifiers[0])) {
                 MPParserImpl(this).CheckCJMPModifiers(modifiers)
             } else if (!modifiers.isEmpty() && !ret.TestAttr(Attribute.IS_BROKEN)) {
                 DiagExpectNoModifier(modifiers[0])
