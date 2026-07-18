@@ -979,6 +979,16 @@ public class Collector {
             }
             return true
         }
+        // C++ src/Sema/Collector.cpp:704-712 Collector::BuildSymbolTable BUILTIN_DECL.
+        if (let Some(builtInDecl) <- (node as BuiltInDecl)) {
+            SetScopeGate(ctx, builtInDecl)
+            if (let Some(generic) <- builtInDecl.generic) {
+                scopeManager.InitializeScope(ctx)
+                AssignGeneric(ctx, generic)
+                scopeManager.FinalizeScope(ctx)
+            }
+            return true
+        }
         if (let Some(classDecl) <- (node as ClassDecl)) {
             AssignClassDecl(ctx, classDecl)
             return true
