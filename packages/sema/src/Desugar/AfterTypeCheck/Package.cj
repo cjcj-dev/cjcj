@@ -160,7 +160,7 @@ private func AddStaticInitForTypeDecl(decl: InheritableDecl): Unit {
     }
     if (let Some(body) <- staticInitBody) {
         if (let Some(funcDecl) <- body.funcDecl) {
-            funcDecl.identifier = SrcIdentifier(STATIC_INIT_FUNC_NAME)
+            funcDecl.identifier.SetValue(STATIC_INIT_FUNC_NAME)
             InsertStaticInitCall(decl, funcDecl)
         }
     }
