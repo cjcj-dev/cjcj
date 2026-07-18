@@ -309,8 +309,9 @@ private func collectDeclsFromPackage(pkg: Package): ArrayList<Decl> {
 
 private func collectDeclsFromDecl(decl: Decl, collector: DeclCollectorForTypeCheck): Unit {
     collector.Add(decl)
-    if (let Some(generic) <- decl.GetGeneric()) {
+    if (let Some(generic) <- decl.generic) {
         for (param in generic.typeParameters) {
+            param.outerDecl = Some(decl)
             collectDeclsFromDecl(param, collector)
         }
     }
