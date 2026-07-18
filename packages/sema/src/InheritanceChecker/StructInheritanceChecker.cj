@@ -1133,16 +1133,17 @@ public class StructInheritanceChecker {
             }
             if (let Some(subTy) <- hasSubImpl) {
                 if (let Some(superTy) <- hasSuperImpl) {
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         DiagKindRefactor.sema_extend_check_sequence_cannot_decide,
-                        DeclRange(curDecl)
+                        curDecl
                     )
                     let inherChain = subTy.String() + " <: " + curDeclSuperTy.String() + " <: " + superTy.String()
                     builder.AddNote(
                         DeclIdentifierRange(otherExtend),
                         "conflict with this extension, beacase of '" + inherChain + "'"
                     )
-                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                    builder.Emit()
                     return None
                 }
             }
@@ -1159,9 +1160,10 @@ public class StructInheritanceChecker {
             let nextSkip = if (let Some(_) <- hasSubImpl) { true } else { false }
             if (let Some(previousSkip) <- skipExtend) {
                 if (previousSkip != nextSkip) {
-                    let builder = diag.DiagnoseRefactor(
+                    let builder = DiagnoseRefactor(
+                        diag,
                         DiagKindRefactor.sema_extend_check_sequence_cannot_decide,
-                        DeclRange(curDecl)
+                        curDecl
                     )
                     let lastInherit = if ((let Some(leftTy) <- lastLeft) && (let Some(rightTy) <- lastRight)) {
                         leftTy.String() + " <: " + rightTy.String()
@@ -1179,7 +1181,7 @@ public class StructInheritanceChecker {
                         DeclIdentifierRange(otherExtend),
                         "conflict with this extension, beacase of '" + lastInherit + "' and '" + currentInherit + "'"
                     )
-                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
+                    builder.Emit()
                     return None
                 }
             }
