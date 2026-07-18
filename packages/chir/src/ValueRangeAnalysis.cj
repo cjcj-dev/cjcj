@@ -397,11 +397,7 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
 
     public func HandleOthersExpr(state: RangeDomain, expression: Expression): Unit {
         match (expression.GetExprKind()) {
-            case ExprKind.CONSTANT => if (let Some(constantExpr) <- (expression as Constant)) {
-                if (let Some(dest) <- constantExpr.GetResult()) {
-                    state.Update(dest, HandleNonNullLiteralValue(constantExpr))
-                }
-            }
+            case ExprKind.CONSTANT => return
             case ExprKind.TYPECAST => HandleTypeCastExpression(state, expression)
             case ExprKind.APPLY => return
             case ExprKind.FIELD => return
