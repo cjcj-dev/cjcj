@@ -2337,7 +2337,6 @@ private func PropagatePlaceholderAndSolve(typeManager: TypeManager, ce: CallExpr
         }
     }
     for (idx in 0..ce.args.size) {
-        ce.args[idx].Clear()
         if (!checker(paramTys[idx], ce.args[idx])) {
             return None
         }
