@@ -3831,6 +3831,52 @@ extend TypeChecker {
         return propTy
     }
 
+    // Mirrors C++ src/Sema/TypeCheckDecl.cpp:248-262 and :301-357.
+    private func CheckVarDecl(ctx: ASTContext, vd: VarDeclAbstract): Ty {
+        if (vd.TestAttr(Attribute.IS_CHECK_VISITED)) {
+            if (IsGlobalOrMember(vd) && Ty.IsInitialTy(vd.GetTy())) {
+                if (let Some(diagValue) <- impl.diag) {
+                    TypeCheckDeclDiagUnableToInferDecl(diagValue, vd)
+                }
+                vd.SetTy(TypeManager.GetInvalidTy())
+            }
+            return vd.GetTy() ?? TypeManager.GetInvalidTy()
+        }
+        vd.EnableAttr(Attribute.IS_CHECK_VISITED)
+        SynthesizeTypeNode(ctx, vd.typeNode)
+        if (let Some(initializer) <- vd.initializer) {
+            if (let Some(typeNode) <- vd.typeNode) {
+                if (!Ty.IsTyCorrect(typeNode.GetTy())) {
+                    let _ = Synthesize(ctx, SynPos.EXPR_ARG, initializer)
+                }
+            } else {
+                let _ = SynthesizeAndReplaceIdealTy(ctx, SynPos.EXPR_ARG, initializer)
+                if (!Ty.IsTyCorrect(initializer.GetTy()) && !IsGlobalOrMember(vd)) {
+                    vd.DisableAttr(Attribute.IS_CHECK_VISITED)
+                }
+            }
+        }
+        let declTy = TypeCheckDeclSynchronizeTypeAndInitializer(impl.typeManager, vd, diag: impl.diag,
+            checker: Some({ targetTy: Ty, initializer: Expr =>
+                let isWellTyped = Check(ctx, targetTy, initializer)
+                if (!isWellTyped && !IsGlobalOrMember(vd)) {
+                    vd.DisableAttr(Attribute.IS_CHECK_VISITED)
+                }
+                isWellTyped
+            }))
+        if (let Some(varDecl) <- (vd as VarDecl)) {
+            if (let Some(initializer) <- varDecl.initializer) {
+                if (!Ty.IsInitialTy(initializer.GetTy())) {
+                    if (let Some(diagValue) <- impl.diag) {
+                        CheckStaticVarAccessNonStatic(diagValue, varDecl)
+                    }
+                }
+            }
+        }
+        BindLocalDeclIfNeeded(ctx, vd)
+        return declTy
+    }
+
     private func SynthesizeDecl(ctx: ASTContext, decl: Decl): Ty {
         if (let Some(result) <- PerformBasicChecksForSynthesize(ctx, Some(decl))) {
             return result
@@ -3861,48 +3907,13 @@ extend TypeChecker {
             return SynthesizePropDecl(ctx, propDecl)
         }
         if (let Some(vd) <- (decl as VarDeclAbstract)) {
-            if (vd.TestAttr(Attribute.IS_CHECK_VISITED)) {
-                if (IsGlobalOrMember(vd) && Ty.IsInitialTy(vd.GetTy())) {
-                    if (let Some(diagValue) <- impl.diag) {
-                        TypeCheckDeclDiagUnableToInferDecl(diagValue, vd)
-                    }
-                    vd.SetTy(TypeManager.GetInvalidTy())
-                }
-                return vd.GetTy() ?? TypeManager.GetInvalidTy()
-            }
-            vd.EnableAttr(Attribute.IS_CHECK_VISITED)
-            SynthesizeTypeNode(ctx, vd.typeNode)
-            if (let Some(initializer) <- vd.initializer) {
-                if (let Some(typeNode) <- vd.typeNode) {
-                    if (!Ty.IsTyCorrect(typeNode.GetTy())) {
-                        let _ = Synthesize(ctx, SynPos.EXPR_ARG, initializer)
-                    }
-                } else {
-                    let _ = SynthesizeAndReplaceIdealTy(ctx, SynPos.EXPR_ARG, initializer)
-                    if (!Ty.IsTyCorrect(initializer.GetTy()) && !IsGlobalOrMember(vd)) {
-                        vd.DisableAttr(Attribute.IS_CHECK_VISITED)
-                    }
+            // C++ src/Sema/TypeChecker.cpp:1018-1026 restores the outer diagnostic state around global/member checks.
+            if (IsGlobalOrMember(vd)) {
+                try (stashDiagnoseStatus = impl.diag.getOrThrow().AutoStashDisableDiagnoseStatus()) {
+                    return CheckVarDecl(ctx, vd)
                 }
             }
-            let declTy = TypeCheckDeclSynchronizeTypeAndInitializer(impl.typeManager, vd, diag: impl.diag,
-                checker: Some({ targetTy: Ty, initializer: Expr =>
-                    let isWellTyped = Check(ctx, targetTy, initializer)
-                    if (!isWellTyped && !IsGlobalOrMember(vd)) {
-                        vd.DisableAttr(Attribute.IS_CHECK_VISITED)
-                    }
-                    isWellTyped
-                }))
-            if (let Some(varDecl) <- (vd as VarDecl)) {
-                if (let Some(initializer) <- varDecl.initializer) {
-                    if (!Ty.IsInitialTy(initializer.GetTy())) {
-                        if (let Some(diagValue) <- impl.diag) {
-                            CheckStaticVarAccessNonStatic(diagValue, varDecl)
-                        }
-                    }
-                }
-            }
-            BindLocalDeclIfNeeded(ctx, decl)
-            return declTy
+            return CheckVarDecl(ctx, vd)
         }
         if (let Some(funcDecl) <- (decl as FuncDecl)) {
             if (funcDecl.funcBody.isSome()) {
