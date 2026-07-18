@@ -4484,7 +4484,8 @@ extend TypeChecker {
             for (candidate in inCandidates) {
                 candidates.add(candidate.getOrThrow())
             }
-            return FilterCandidates(impl.typeManager, impl.diag, Some(ctx), ce, candidates)
+            return FilterCandidates(impl.typeManager, impl.diag, Some(ctx), ce, candidates,
+                importManager: impl.importManager)
         }
         let reExportFuncTargets = ArrayList<FuncDecl>()
         let importedFuncTargets = ArrayList<FuncDecl>()
@@ -4498,8 +4499,10 @@ extend TypeChecker {
             importedFuncTargets.add(inCandidates[idx].getOrThrow())
             idx++
         }
-        let filteredImported = FilterCandidates(impl.typeManager, impl.diag, Some(ctx), ce, importedFuncTargets)
-        let filteredReExport = FilterCandidates(impl.typeManager, impl.diag, Some(ctx), ce, reExportFuncTargets)
+        let filteredImported = FilterCandidates(impl.typeManager, impl.diag, Some(ctx), ce, importedFuncTargets,
+            importManager: impl.importManager)
+        let filteredReExport = FilterCandidates(impl.typeManager, impl.diag, Some(ctx), ce, reExportFuncTargets,
+            importManager: impl.importManager)
         if (!(filteredImported.isEmpty() && filteredReExport.isEmpty())) {
             for (candidate in filteredImported) {
                 filteredReExport.add(candidate)
