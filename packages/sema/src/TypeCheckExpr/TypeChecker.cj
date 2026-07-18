@@ -5887,8 +5887,7 @@ extend TypeChecker {
             ChkNoVarPatternInOrPattern(ctx, letPattern.patterns, diag: impl.diag)
         var subpatternsGood = true
         for (pattern in letPattern.patterns) {
-            subpatternsGood = ChkPattern(impl.typeManager, ctx, selectorTy, pattern, isPatternInMatch: false,
-                diag: impl.diag,
+            subpatternsGood = ChkPattern(impl.typeManager, ctx, selectorTy, pattern, diag: impl.diag,
                 exprChecker: Some({ target: Ty, expr: Expr =>
                     Check(ctx, target, expr)
                 })) && subpatternsGood
