@@ -852,6 +852,17 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
         return GetWellMatchingResults(res, candidateTypes, builder)
     }
 
+    // C++ CustomTypeDef::GetFuncIndexInVTable accepts GenericType* keys. This overload preserves that
+    // interface for callers while the serialized-ID representation remains in the existing implementation.
+    public func GetFuncIndexInVTable(funcCallType: FuncCallType, replaceTable: HashMap<GenericType, Type>,
+        builder: CHIRBuilder): ArrayList<VTableSearchRes> {
+        let idReplaceTable = HashMap<Int64, Type>()
+        for ((genericTy, instTy) in replaceTable) {
+            idReplaceTable[genericTy.objectId] = instTy
+        }
+        return GetFuncIndexInVTable(funcCallType, idReplaceTable, builder)
+    }
+
     public func GetGenericDecl(): Option<CustomTypeDef> {
         return genericDecl
     }
