@@ -3013,6 +3013,11 @@ extend ParserImpl {
                     ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType, "finalizer").Emit()
                     ret.EnableAttr(Attribute.IS_BROKEN)
                 }
+            } else {
+                DiagMissingBody("finalizer", "", ret.end)
+                if (!parseDeclFile) {
+                    ret.EnableAttr(Attribute.HAS_BROKEN)
+                }
             }
             CheckNoDeprecatedAnno(annos, "~init")
             if (HasModifierToken(modifiers, TokenKind.UNSAFE)) {
