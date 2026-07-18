@@ -7299,6 +7299,7 @@ extend TypeChecker {
             ctx.SkipSynForCorrectTy(expr)
         }
         typeCheckExprClearTargetType(ctx, expr)
+        expr.SetTy(impl.typeManager.TryGreedySubst(expr.GetTy().getOrThrow()))
         return ok
     }
 
