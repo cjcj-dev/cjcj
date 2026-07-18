@@ -565,12 +565,15 @@ public func ChkTryExpr(typeManager: TypeManager, target: Ty, te: TryExpr,
         let actualTy = SynTryWithResourcesExpr(typeManager, te, resourceTy: resourceTy,
             exceptionTy: exceptionTy, errorTy: errorTy, diag: diag, patternChecker: patternChecker,
             resourceSynthesizer: resourceSynthesizer, synthesizer: synthesizer, checker: checker)
-        if (Ty.IsTyCorrect(actualTy) &&
-            typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
-            return true
+        if (!Ty.IsTyCorrect(actualTy)) {
+            return false
         }
-        let _ = TryInvalid(te)
-        return false
+        if (!typeManager.IsSubtype(actualTy, target)) {
+            DiagMismatchedTypes(diag.getOrThrow(), te, target,
+                note: "try-with-resources expressions are of type 'Unit'")
+            return false
+        }
+        return true
     }
     var ok = true
     if (!te.handlers.isEmpty()) {
