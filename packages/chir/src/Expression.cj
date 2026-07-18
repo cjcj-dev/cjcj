@@ -346,11 +346,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     }
 
     public open func OperandsToString(): String {
-        let parts = ArrayList<String>()
-        for (operand in operands) {
-            parts.add(operand.GetIdentifier())
-        }
-        return JoinStrings(parts, ", ")
+        return ValueIdVecToString("", operands, "", hasExceptionBranch: HasExceptionBranch())
     }
 
     public open func AddExtraComment(): String {
