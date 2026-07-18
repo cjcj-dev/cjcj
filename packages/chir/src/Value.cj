@@ -3,6 +3,7 @@ package cjcj::chir
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::utils.CJC_ASSERT
 import std.collection.*
+import std.sort.*
 
 public open class Value <: Base & Hashable & Equatable<Value> {
     private var ty: Option<Type>
