@@ -1729,16 +1729,8 @@ public class ClosureConversion {
     private func GetFuncTypeWithoutThisPtrFromAutoEnvType(autoEnvType: ClassType): FuncType {
         CJC_ASSERT(autoEnvType.IsAutoEnv())
         if (autoEnvType.IsAutoEnvBase()) {
-            let (_, methodTy) = GetFuncTypeFromAutoEnvBaseDef(autoEnvType.GetClassDef())
-            let params = methodTy.GetParamTypes()
-            let newParams = ArrayList<Type>()
-            var idx: Int64 = 1
-            while (idx < params.size) {
-                newParams.add(params[idx])
-                idx++
-            }
-            return builder.context.GetFuncTy(newParams, methodTy.GetReturnType(),
-                hasVarLenParam: methodTy.HasVarArg(), isCFunc: methodTy.IsCFunc())
+            let (paramTypes, retType) = GetFuncTypeWithoutThisPtrFromAutoEnvBaseType(autoEnvType)
+            return builder.context.GetFuncTy(paramTypes, retType)
         }
         return GetFuncTypeWithoutThisPtrFromAutoEnvType(autoEnvType.GetSuperClassTy(builder: builder).getOrThrow())
     }
