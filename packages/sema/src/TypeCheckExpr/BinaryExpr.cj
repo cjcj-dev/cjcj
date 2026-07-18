@@ -1785,8 +1785,9 @@ extend TypeChecker {
                 be.SetTy(TypeManager.GetInvalidTy())
             }
             if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+                // C++ src/Sema/TypeCheckExpr/BinaryExpr.cpp:948-950,958-984.
                 let synthesizer: BinaryOperandSynthesizer = { operand: Expr =>
-                    SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand)
+                    Synthesize(ctx, SynPos.EXPR_ARG, operand)
                 }
                 SynBinaryLeafs(impl.typeManager, be, Some(synthesizer))
             }
