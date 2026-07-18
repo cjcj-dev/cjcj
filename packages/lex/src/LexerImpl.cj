@@ -2551,7 +2551,7 @@ public class LexerImpl {
         } else if (first == b':') {
             ScanSymbolColon()
         }
-        return input[start..pNext]
+        return unsafe { String.fromUtf8Unchecked(bytes[start..pNext]) }
     }
 
     private func GetSymbolToken(pStart: Int64): Token {
