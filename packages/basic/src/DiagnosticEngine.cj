@@ -562,6 +562,8 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     private var jsonFormat: Bool = false
     private let diagnostics: HashMap<Int64, HashSet<Diagnostic>> =
         HashMap<Int64, HashSet<Diagnostic>>()
+    private let diagnosticOrder: HashMap<Int64, ArrayList<Diagnostic>> =
+        HashMap<Int64, ArrayList<Diagnostic>>()
     private let diagsJsonBuff: ArrayList<String> = ArrayList<String>()
     private var diagNumJsonBuff: String = ""
     private var outToStringStream: Bool = false
@@ -592,12 +594,13 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     public override func Clear(): Unit {
         super.Clear()
         diagnostics.clear()
+        diagnosticOrder.clear()
         diagsJsonBuff.clear()
         diagNumJsonBuff = ""
     }
 
     public override func GetCategoryDiagnostic(cate: DiagCategory): Array<Diagnostic> {
-        if (let Some(categoryDiagnostics) <- diagnostics.get(DiagCategoryIndex(cate))) {
+        if (let Some(categoryDiagnostics) <- diagnosticOrder.get(DiagCategoryIndex(cate))) {
             return categoryDiagnostics.toArray()
         }
         return Array<Diagnostic>()
@@ -609,8 +612,12 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
             let category = DiagCategoryIndex(diagnostic.diagCategory)
             if (!diagnostics.contains(category)) {
                 diagnostics[category] = HashSet<Diagnostic>()
+                diagnosticOrder[category] = ArrayList<Diagnostic>()
             }
             success = diagnostics.get(category).getOrThrow().add(diagnostic)
+            if (success) {
+                diagnosticOrder.get(category).getOrThrow().add(diagnostic, at: 0)
+            }
         }
         return success
     }
@@ -791,7 +798,9 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     }
 
     private func removeCategory(cate: DiagCategory): Unit {
-        diagnostics.remove(DiagCategoryIndex(cate))
+        let category = DiagCategoryIndex(cate)
+        diagnostics.remove(category)
+        diagnosticOrder.remove(category)
     }
 }
 
