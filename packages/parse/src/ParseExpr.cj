@@ -1751,9 +1751,9 @@ extend ParserImpl {
         if (Skip(TokenKind.LPAREN)) {
             leftParenPos = lastToken.Begin()
             ret.catchLParenPosVector.add(leftParenPos)
-        } else {
+        } else if (!ret.hasBroken) {
             DiagExpectedLeftParenAfter(ret.catchPosVector[ret.catchPosVector.size - 1], "catch")
-            ret.isBroken = true
+            ret.hasBroken = true
         }
         ret.catchPatterns.add(ParseExceptTypePattern())
         if (Skip(TokenKind.RPAREN)) {
