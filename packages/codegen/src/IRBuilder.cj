@@ -40,7 +40,6 @@ import cjcj::utils.{CJC_ABORT, CJC_ASSERT, StaticCast}
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
 private let THROW_EXCEPTION_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "ThrowException"
-private let THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME: String = "rt$ThrowNegativeArraySizeException"
 private let THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.throw.exception"
 private let GET_EXCEPTION_WRAPPER_INTRINSIC_NAME: String = "llvm.cj.get.exception.wrapper"
 private let POST_THROW_EXCEPTION_INTRINSIC_NAME: String = "llvm.cj.post.throw.exception"
@@ -4749,7 +4748,9 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateSpawnException(): Unit {
-        CreateImplicitExceptionAndThrow("_CNat14SpawnException6<init>Hv")
+        let spawnExceptionClassName = "_CNat14SpawnExceptionE"
+        let spawnExceptionInitFuncName = "_CNat14SpawnException6<init>Hv"
+        CreateExceptionAndThrow(this, spawnExceptionClassName, spawnExceptionInitFuncName)
     }
 
     public func CreateSetRuntimeCJThreadHandleCall(args: ArrayList<LLVMValueRef>): LLVMValueRef {
@@ -4904,21 +4905,21 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateNegativeArraySizeException(): Unit {
-        let helperType = MakeFunctionType(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, ArrayList<LLVMTypeRef>())
-        let helper = if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME)) {
-            cgMod.GetOrInsertCGFunction(helperNode).GetRawFunction()
-        } else {
-            GetOrInsertRuntimeFunction(THROW_NEGATIVE_ARRAY_SIZE_EXCEPTION_FUNC_NAME, helperType)
-        }
-        let _ = CreateCallOrInvoke(helper, ArrayList<LLVMValueRef>())
+        let negativeArraySizeExceptionClassName = "_CNat26NegativeArraySizeExceptionE"
+        let negativeArraySizeExceptionInitFuncName = "_CNat26NegativeArraySizeException6<init>Hv"
+        CreateExceptionAndThrow(this, negativeArraySizeExceptionClassName, negativeArraySizeExceptionInitFuncName)
     }
 
     public func CreateOutOfBoundException(): Unit {
-        CreateImplicitExceptionAndThrow("_CNat25IndexOutOfBoundsException6<init>Hv")
+        let indexOutOfBoundsExceptionClassName = "_CNat25IndexOutOfBoundsExceptionE"
+        let indexOutOfBoundsExceptionInitFuncName = "_CNat25IndexOutOfBoundsException6<init>Hv"
+        CreateExceptionAndThrow(this, indexOutOfBoundsExceptionClassName, indexOutOfBoundsExceptionInitFuncName)
     }
 
     public func CreateRunTimeInvalidGenericParamException(): Unit {
-        CreateImplicitExceptionAndThrow("_CNat9Exception6<init>Hv")
+        let invalidGenericParamExceptionClassName = "_CNat9ExceptionE"
+        let invalidGenericParamExceptionInitFuncName = "_CNat9Exception6<init>Hv"
+        CreateExceptionAndThrow(this, invalidGenericParamExceptionClassName, invalidGenericParamExceptionInitFuncName)
     }
 
     public func AllocateArray(rawArrayTy: RawArrayType, length: LLVMValueRef): LLVMValueRef {
@@ -4958,22 +4959,6 @@ public class IRBuilder2 <: Resource {
         return (GetOrInsertRuntimeFunction(funcName, fallbackType), fallbackType)
     }
 
-    private func CreateImplicitExceptionAndThrow(initFuncName: String): Unit {
-        if (let Some(initFuncNode) <- GetCGContext().GetImplicitUsedFunc(initFuncName)) {
-            if (let Some(exceptionTy) <- TryGetFirstParamClassType(initFuncNode)) {
-                let exceptionValue = CallClassIntrinsicAlloc(exceptionTy)
-                let initArgs = ArrayList<LLVMValueRef>()
-                initArgs.add(exceptionValue)
-                initArgs.add(CGType.GetOrCreate(cgMod, exceptionTy).GetOrCreateTypeInfo())
-                let initFunc = cgMod.GetOrInsertCGFunction(initFuncNode)
-                let _ = CreateCallOrInvoke(initFunc.GetRawFunction(), initArgs)
-                CallExceptionIntrinsicThrow(exceptionValue)
-                return
-            }
-        }
-        CreateUnreachable()
-    }
-
     private func CreateImplicitUsedFunctionCall(helperName: String, args: ArrayList<LLVMValueRef>): LLVMValueRef {
         if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
             let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
@@ -4983,19 +4968,6 @@ public class IRBuilder2 <: Resource {
         }
         let helperType = MakeFunctionTypeFromArgs(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) }, args)
         return CreateCallOrInvoke(GetOrInsertRuntimeFunction(helperName, helperType), args)
-    }
-
-    private func TryGetFirstParamClassType(fn: Function): Option<Type> {
-        if (let Some(funcTy) <- fn.GetFuncType()) {
-            let params = funcTy.GetParamTypes()
-            if (!params.isEmpty()) {
-                let strippedTy = params[0].StripAllRefs()
-                if (strippedTy.IsClass()) {
-                    return strippedTy
-                }
-            }
-        }
-        return None
     }
 
     public func CallClassIntrinsicAlloc(classTy: Type): LLVMValueRef {
@@ -5882,4 +5854,30 @@ public class TemporarilySetDebugLocInThisScope <: Resource {
     public func isClosed(): Bool {
         return closed
     }
+}
+
+private func GetTypeDefFromImplicitUsedFuncParam(cgModule: CGModule, funcName: String,
+    paramIndex: Int64): Type {
+    let functionValue = cgModule.GetCGContext().GetImplicitUsedFunc(funcName).getOrThrow()
+    let functionType = functionValue.GetFuncType().getOrThrow()
+    let classBaseType = functionType.GetParamType(paramIndex).StripAllRefs()
+    CJC_ASSERT(classBaseType.IsClass())
+    return classBaseType
+}
+
+private func CreateImplicitUsedFuncCall(irBuilder: IRBuilder2, funcMangledName: String,
+    args: ArrayList<LLVMValueRef>): Unit {
+    let implicitImportedFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(
+        irBuilder.GetCGContext().GetImplicitUsedFunc(funcMangledName).getOrThrow())
+    let _ = irBuilder.CreateCallOrInvoke(implicitImportedFunc.GetRawFunction(), args)
+}
+
+private func CreateExceptionAndThrow(irBuilder: IRBuilder2, exceptionClassName: String,
+    exceptionInitFuncName: String): Unit {
+    let exceptionClassType = GetTypeDefFromImplicitUsedFuncParam(
+        irBuilder.GetCGModule(), exceptionInitFuncName, 0)
+    let exceptionValue = irBuilder.CallClassIntrinsicAlloc(exceptionClassType)
+    CreateImplicitUsedFuncCall(irBuilder, exceptionInitFuncName,
+        ArrayList<LLVMValueRef>([exceptionValue, irBuilder.CreateTypeInfo(exceptionClassType)]))
+    irBuilder.CallExceptionIntrinsicThrow(exceptionValue)
 }
