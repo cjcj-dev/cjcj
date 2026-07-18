@@ -8233,10 +8233,15 @@ extend TypeChecker {
                         checker: Some({ targetTy: Ty, partExpr: Expr => Check(ctx, targetTy, partExpr) }),
                         diag: impl.diag))
         }
-        SynthesizeNodeChildren(ctx, expr)
         if (let Some(tupleLit) <- (expr as TupleLit)) {
+            for (child in tupleLit.children) {
+                if (!Ty.IsTyCorrect(child.GetTy())) {
+                    let _ = Synthesize(ctx, SynPos.EXPR_ARG, child)
+                }
+            }
             return FinishSynthesize(ctx, tupleLit, SynTupleLit(impl.typeManager, tupleLit))
         }
+        SynthesizeNodeChildren(ctx, expr)
         if (let Some(rangeExpr) <- (expr as RangeExpr)) {
             return FinishSynthesize(ctx, rangeExpr, SynRangeExpr(ctx, rangeExpr))
         }
