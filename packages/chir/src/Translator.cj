@@ -2140,14 +2140,15 @@ public class Translator {
     }
 
     // C++: CHIR/AST2CHIR/TranslateASTNode/TranslateLambdaExpr.cpp:105-124.
-    private func TranslateLambdaBody(lambda: Lambda, funcBody: AstFuncBody): Option<Value> {
+    private func TranslateLambdaBody(lambda: Lambda, funcBody: AstFuncBody,
+        hasInitial!: Bool = false): Option<Value> {
         let body = lambda.GetBody().getOrThrow()
         blockGroupStack.add(body)
         currentLambda = lambda
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         currentBlock = entry
-        CreateLambdaParamDebugs(funcBody, lambda, entry)
+        CreateLambdaParamDebugs(funcBody, lambda, entry, hasInitial: hasInitial)
         let retType = lambda.GetReturnType().getOrThrow()
         let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry))
         lambda.SetReturnValue(retSlot)
@@ -3946,6 +3947,7 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR nested FuncDecl has no FuncBody")
         let astBody = funcBody.body ??
             throw IllegalStateException("faithful AST2CHIR nested FuncDecl has no body")
+        let lambdaTrans = SetupContextForLambda(astBody)
         if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
             TranslateFunctionGenericUpperBounds(funcDecl)
         }
@@ -3974,7 +3976,7 @@ public class Translator {
         let lambdaValue = lambda.GetResult() ??
             throw IllegalStateException("faithful AST2CHIR nested FuncDecl lambda has no result")
         localValSymbolTable.Set(funcDecl, lambdaValue)
-        BindLambdaParams(funcBody, lambda, funcTy)
+        lambdaTrans.BindLambdaParams(funcBody, lambda, funcTy)
         for (param in funcBody.paramLists[0].params) {
             if (let Some(desugarDecl) <- param.desugarDecl) {
                 // C++ Translator::TranslateNestedFunc recursively translates a local function's default-parameter
@@ -3983,57 +3985,12 @@ public class Translator {
                 let defaultArgLambda = (defaultArgFunc.AsLocalVar().getOrThrow().GetExpr().getOrThrow() as Lambda)
                     .getOrThrow()
                 defaultArgLambda.SetParamDftValHostFunc(lambda)
+                lambdaTrans.SetSymbolTable(desugarDecl, defaultArgFunc)
             }
         }
-
-        let savedBlock = currentBlock
-        let savedLambda = currentLambda
-        let savedAstFuncDecl = currentAstFuncDecl
-        let savedDelayExitSignal = delayExitSignal
-        let savedTryCatchContext = tryCatchContext.clone()
-        let savedTryBodyContext = tryBodyContext.clone()
-        let savedFinallyContext = finallyContext.clone()
-        delayExitSignal = None
-        tryCatchContext.clear()
-        tryBodyContext.clear()
-        finallyContext.clear()
-        blockGroupStack.add(body)
-        currentLambda = lambda
-        currentAstFuncDecl = funcDecl
-        let entry = builder.CreateBlock(body)
-        body.SetEntryBlock(entry)
-        currentBlock = entry
-        CreateLambdaParamDebugs(funcBody, lambda, entry, hasInitial: funcDecl.TestAttr(AstAttribute.HAS_INITIAL))
-        let retTy = funcTy.GetReturnType()
-        if (!retTy.IsUnit() && !retTy.IsNothing() && !retTy.IsVoid()) {
-            let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retTy), retTy, entry))
-            lambda.SetReturnValue(retSlot)
-        }
-        let result = Translator.TranslateASTNode(astBody, this)
-        if (entry.GetTerminator().isNone()) {
-            builder.CreateGoTo(GetBlockByAST(astBody), entry)
-        }
-        if (CurrentBlock().GetTerminator().isNone()) {
-            EmitImplicitLambdaExit(lambda, result)
-        }
-        currentBlock = savedBlock
-        currentLambda = savedLambda
-        currentAstFuncDecl = savedAstFuncDecl
-        delayExitSignal = savedDelayExitSignal
-        tryCatchContext.clear()
-        for (block in savedTryCatchContext) {
-            tryCatchContext.add(block)
-        }
-        tryBodyContext.clear()
-        for (tryExpr in savedTryBodyContext) {
-            tryBodyContext.add(tryExpr)
-        }
-        finallyContext.clear()
-        for (context in savedFinallyContext) {
-            finallyContext.add(context)
-        }
-        blockGroupStack.remove(at: blockGroupStack.size - 1)
-        return Some(lambdaValue)
+        lambdaTrans.SetSymbolTable(funcDecl, lambdaValue)
+        return lambdaTrans.TranslateLambdaBody(lambda, funcBody,
+            hasInitial: funcDecl.TestAttr(AstAttribute.HAS_INITIAL))
     }
 
     private func TranslateFunctionGenericUpperBounds(funcDecl: AstFuncDecl): Unit {
