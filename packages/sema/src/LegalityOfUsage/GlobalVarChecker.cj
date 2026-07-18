@@ -140,10 +140,13 @@ private struct CmpNodeByPos <: Comparable<CmpNodeByPos> {
         if (node.begin.fileID != right.node.begin.fileID) {
             return node.begin.fileID.compare(right.node.begin.fileID)
         }
-        if (node.begin != right.node.begin) {
-            return node.begin.compare(right.node.begin)
+        if (node.begin < right.node.begin) {
+            return Ordering.LT
         }
-        return Ptr<Decl>(node).compare(Ptr<Decl>(right.node))
+        if (right.node.begin < node.begin) {
+            return Ordering.GT
+        }
+        return node.objectId.compare(right.node.objectId)
     }
 }
 
