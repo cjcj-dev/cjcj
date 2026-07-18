@@ -1140,7 +1140,7 @@ public class StructInheritanceChecker {
                     )
                     let inherChain = subTy.String() + " <: " + curDeclSuperTy.String() + " <: " + superTy.String()
                     builder.AddNote(
-                        DeclIdentifierRange(otherExtend),
+                        MakeRange(otherExtend.identifier.Begin(), otherExtend.identifier.End()),
                         "conflict with this extension, beacase of '" + inherChain + "'"
                     )
                     builder.Emit()
@@ -1178,7 +1178,7 @@ public class StructInheritanceChecker {
                         ""
                     }
                     builder.AddNote(
-                        DeclIdentifierRange(otherExtend),
+                        MakeRange(otherExtend.identifier.Begin(), otherExtend.identifier.End()),
                         "conflict with this extension, beacase of '" + lastInherit + "' and '" + currentInherit + "'"
                     )
                     builder.Emit()
