@@ -1099,6 +1099,12 @@ public class StructInheritanceChecker {
             }
             var hasSubImpl: Option<Ty> = None
             var hasSuperImpl: Option<Ty> = None
+            // C++ src/Sema/InheritanceChecker/StructInheritanceChecker.cpp:592-593.
+            GetInheritedTypesWithSpecificImpl(
+                otherExtend.inheritedTypes,
+                otherExtend.specificImplementation.isSome(),
+                !opts.commonPartCjos.isEmpty()
+            )
             for (otherSuper in otherExtend.inheritedTypes) {
                 if (let None <- otherSuper.GetTy()) {
                     continue
