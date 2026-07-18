@@ -2992,7 +2992,8 @@ extend TypeChecker {
         if (let Some(typeNode) <- (node as Type)) {
             impl.SetTypeTy(ctx, typeNode)
             if (let Some(diagValue) <- impl.diag) {
-                let _ = TypeCheckTypeCheckReferenceTypeLegality(diagValue, impl.typeManager, typeNode)
+                let _ = TypeCheckTypeCheckReferenceTypeLegality(diagValue, impl.typeManager, typeNode,
+                    importManager: impl.importManager)
             }
             return tyOrInvalid(typeNode)
         }
