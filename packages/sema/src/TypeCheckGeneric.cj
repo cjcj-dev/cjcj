@@ -130,7 +130,7 @@ private func generateTypeMappingForBaseExpr(typeManager: TypeManager, memberAcce
         return
     }
 
-    let realBaseOpt = GetRealTarget(baseExpr.GetTarget())
+    let realBaseOpt = GetRealTarget(typeManager, baseExpr, baseExpr.GetTarget())
     if (let Some(realBase) <- realBaseOpt) {
         if (realBase.astKind == ASTKind.PACKAGE_DECL) {
             return
