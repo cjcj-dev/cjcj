@@ -153,10 +153,12 @@ private func collectDecl(ctx: ASTContext, decl: Decl): Bool {
     if (decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
         ctx.InsertEnumConstructor(name, enumCtorArity(decl), decl)
     }
-    if (let Some(generic) <- decl.generic) {
-        for (param in generic.typeParameters) {
-            param.outerDecl = Some(decl)
-            valid = collectDecl(ctx, param) && valid
+    if (!decl.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
+        if (let Some(generic) <- decl.GetGeneric()) {
+            for (param in generic.typeParameters) {
+                param.outerDecl = Some(decl)
+                valid = collectDecl(ctx, param) && valid
+            }
         }
     }
     if (let Some(enumDecl) <- (decl as EnumDecl)) {
