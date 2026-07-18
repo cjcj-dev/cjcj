@@ -933,7 +933,8 @@ private func FilterExtendImplAbstractFunc(typeManager: TypeManager, candidates: 
 }
 
 internal func FilterCandidates(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
-    ce: CallExpr, inCandidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
+    ce: CallExpr, inCandidates: ArrayList<FuncDecl>,
+    importManager!: Option<SemaImportManager> = None): ArrayList<FuncDecl> {
     let visibleCandidates = ArrayList<FuncDecl>()
     let baseFunc = match (ce.baseFunc) {
         case Some(value) => value
@@ -947,7 +948,7 @@ internal func FilterCandidates(typeManager: TypeManager, diag: Option<BasicDiagn
         if (let None <- BodyParamList(fd)) {
             continue
         }
-        if (!IsLegalAccess(typeManager, curStructSymbol, fd, baseFunc)) {
+        if (!IsLegalAccess(typeManager, curStructSymbol, fd, baseFunc, importManager: importManager)) {
             continue
         }
         visibleCandidates.add(fd)
