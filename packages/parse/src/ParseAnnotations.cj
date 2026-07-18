@@ -118,7 +118,7 @@ extend ParserImpl {
         anno.lsquarePos = pos
         var backArgsIsInvalid = false
         while (true) {
-            if (Seeing(TokenKind.END)) {
+            if (DetectPrematureEnd()) {
                 DiagExpectedRightDelimiter("[", pos)
                 anno.isBroken = true
                 break
