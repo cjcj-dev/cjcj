@@ -7193,7 +7193,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             return
         }
         if (let Some(declImports) <- declsImportedByNodeMap.get(fullPackageName)) {
-            let staleImports = HashSet<ImportSpec>()
+            let staleImports = HashSet<Node>()
             for (importSpec in imports) {
                 staleImports.add(importSpec)
             }
