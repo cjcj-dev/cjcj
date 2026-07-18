@@ -29,40 +29,40 @@ public class InstantiatedMemberDiagnosticPair {
     }
 }
 
-public class InstantiatedMemberDiagnosticRecord {
-    public var key: String
-    public let pairs: ArrayList<InstantiatedMemberDiagnosticPair> = ArrayList<InstantiatedMemberDiagnosticPair>()
+// C++ StructInheritanceChecker.h:156-165 uses (Decl*, vector<Ty*>) for all three instantiation caches.
+public class DeclTySeqKey <: Hashable & Equatable<DeclTySeqKey> {
+    public let decl: Decl
+    public let tys: Array<Ty>
 
-    public init(key: String) {
-        this.key = key
+    public init(decl: Decl, tys: Array<Ty>) {
+        this.decl = decl
+        this.tys = tys
     }
-}
 
-public class InstantiatedTyCacheEntry {
-    public var source: Ty
-    public var instantiated: Ty
-
-    public init(source: Ty, instantiated: Ty) {
-        this.source = source
-        this.instantiated = instantiated
+    public operator func ==(right: DeclTySeqKey): Bool {
+        if (decl.objectId != right.decl.objectId || tys.size != right.tys.size) {
+            return false
+        }
+        for (idx in 0..tys.size) {
+            if (tys[idx].objectId != right.tys[idx].objectId) {
+                return false
+            }
+        }
+        return true
     }
-}
 
-public class InstantiatedTyCacheRecord {
-    public var key: String
-    public let entries: ArrayList<InstantiatedTyCacheEntry> = ArrayList<InstantiatedTyCacheEntry>()
-
-    public init(key: String) {
-        this.key = key
+    public operator func !=(right: DeclTySeqKey): Bool {
+        return !(this == right)
     }
-}
 
-func InstantiationKey(decl: Decl, instTys: ArrayList<Ty>): String {
-    let parts = ArrayList<String>()
-    for (ty in instTys) {
-        parts.add(ty.String())
+    @OverflowWrapping
+    public func hashCode(): Int64 {
+        var out = decl.objectId.hashCode()
+        for (ty in tys) {
+            out = out * 131 + ty.objectId.hashCode()
+        }
+        return out
     }
-    return "${decl.fullPackageName}:${decl.identifier.Val()}:${decl.begin.ToString()}:${JoinStrings(parts, ",")}"
 }
 
 private func GetReferenceTyAndTarget(node: Node): (Option<Ty>, Option<Decl>) {
@@ -160,7 +160,7 @@ func CheckInstMemberSignatures(
     if (!checker.HasInstantiationTrigger()) {
         return
     }
-    let key = InstantiationKey(decl, instTys)
+    let key = DeclTySeqKey(decl, instTys.toArray())
     if (checker.HasInstantiatedKey(key)) {
         checker.ReplayInstantiatedMemberDiagnostics(key)
         return
@@ -363,7 +363,7 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
             if (let Some(baseTy) <- refInfo[0]) {
                 if (target.IsNominalDecl() && target.TestAttr(Attribute.GENERIC)) {
                     let emptyInstTys = ArrayList<Ty>()
-                    let emptyKey = InstantiationKey(target, emptyInstTys)
+                    let emptyKey = DeclTySeqKey(target, emptyInstTys.toArray())
                     if (!checker.HasInstantiatedKey(emptyKey)) {
                         checker.AddInstantiatedKey(emptyKey)
                         WalkInstDupFuncsInDecl(checker, target)
@@ -392,7 +392,7 @@ func CheckInstDupFuncsRecursively(checker: StructInheritanceChecker, node: Node)
             if (let Some(inheritable) <- (target as InheritableDecl)) {
                 CheckInstMemberSignatures(checker, inheritable, instTys)
             }
-            let targetKey = InstantiationKey(target, instTys)
+            let targetKey = DeclTySeqKey(target, instTys.toArray())
             for (extendDecl in GetVisibleExtendsForInstantiation(checker, target, instTys)) {
                 CheckInstMemberSignatures(checker, extendDecl, instTys)
                 if (!checker.HasInstantiatedKey(targetKey)) {
@@ -428,7 +428,7 @@ func CheckInstDupFuncsInNominalDecls(checker: StructInheritanceChecker): Unit {
     for (file in checker.pkg.files) {
         for (decl in file.decls) {
             let empty = ArrayList<Ty>()
-            let emptyKey = InstantiationKey(decl, empty)
+            let emptyKey = DeclTySeqKey(decl, empty.toArray())
             if (!checker.HasInstantiatedKey(emptyKey)) {
                 checker.AddInstantiatedKey(emptyKey)
                 WalkInstDupFuncsInDecl(checker, decl)

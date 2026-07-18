@@ -528,10 +528,12 @@ public class StructInheritanceChecker {
 
     private let structInheritedMembers: HashMap<InheritableDecl, MemberMap> = HashMap<InheritableDecl, MemberMap>()
     private let checkingDecls: ArrayList<InheritableDecl> = ArrayList<InheritableDecl>()
-    private let instantiatedKeys: HashSet<String> = HashSet<String>()
-    private let instantiatedMemberDiagnostics: ArrayList<InstantiatedMemberDiagnosticRecord> =
-        ArrayList<InstantiatedMemberDiagnosticRecord>()
-    private let instantiatedTyCaches: ArrayList<InstantiatedTyCacheRecord> = ArrayList<InstantiatedTyCacheRecord>()
+    private let instantiatedKeys: HashSet<DeclTySeqKey> = HashSet<DeclTySeqKey>()
+    private let instantiatedMemberDiagnostics:
+        HashMap<DeclTySeqKey, ArrayList<InstantiatedMemberDiagnosticPair>> =
+        HashMap<DeclTySeqKey, ArrayList<InstantiatedMemberDiagnosticPair>>()
+    private let instantiatedTyCaches: HashMap<DeclTySeqKey, HashMap<Ptr<Ty>, Ty>> =
+        HashMap<DeclTySeqKey, HashMap<Ptr<Ty>, Ty>>()
     private let instantiationTriggers: ArrayList<InstantiationTriggerInfo> = ArrayList<InstantiationTriggerInfo>()
     private let instantiationTypeMaps: ArrayList<TypeSubst> = ArrayList<TypeSubst>()
     private var infiniteInstantiationOccurred: Bool = false
@@ -645,69 +647,50 @@ public class StructInheritanceChecker {
         return out
     }
 
-    public func HasInstantiatedKey(key: String): Bool {
+    public func HasInstantiatedKey(key: DeclTySeqKey): Bool {
         return instantiatedKeys.contains(key)
     }
 
-    public func AddInstantiatedKey(key: String): Unit {
+    public func AddInstantiatedKey(key: DeclTySeqKey): Unit {
         instantiatedKeys.add(key)
     }
 
-    private func FindInstantiatedMemberDiagnosticRecord(key: String): Option<InstantiatedMemberDiagnosticRecord> {
-        for (record in instantiatedMemberDiagnostics) {
-            if (record.key == key) {
-                return record
-            }
-        }
-        return None
-    }
-
-    public func ReplayInstantiatedMemberDiagnostics(key: String): Unit {
-        if (let Some(record) <- FindInstantiatedMemberDiagnosticRecord(key)) {
-            for (pair in record.pairs) {
+    public func ReplayInstantiatedMemberDiagnostics(key: DeclTySeqKey): Unit {
+        if (let Some(pairs) <- instantiatedMemberDiagnostics.get(key)) {
+            for (pair in pairs) {
                 DiagnoseForInstantiatedMember(pair.parent, pair.child)
             }
         }
     }
 
     public func RecordInstantiatedMemberDiagnostic(
-        key: String,
+        key: DeclTySeqKey,
         parent: MemberSignature,
         child: MemberSignature
     ): Unit {
-        if (let Some(record) <- FindInstantiatedMemberDiagnosticRecord(key)) {
-            record.pairs.add(InstantiatedMemberDiagnosticPair(parent, child))
+        if (let Some(pairs) <- instantiatedMemberDiagnostics.get(key)) {
+            pairs.add(InstantiatedMemberDiagnosticPair(parent, child))
             return
         }
-        let record = InstantiatedMemberDiagnosticRecord(key)
-        record.pairs.add(InstantiatedMemberDiagnosticPair(parent, child))
-        instantiatedMemberDiagnostics.add(record)
+        let pairs = ArrayList<InstantiatedMemberDiagnosticPair>()
+        pairs.add(InstantiatedMemberDiagnosticPair(parent, child))
+        instantiatedMemberDiagnostics[key] = pairs
     }
 
-    private func FindInstantiatedTyCacheRecord(key: String): Option<InstantiatedTyCacheRecord> {
-        for (record in instantiatedTyCaches) {
-            if (record.key == key) {
-                return record
-            }
-        }
-        return None
-    }
-
-    public func GetCachedInstantiatedTy(key: String, ty: Ty, typeMapping: TypeSubst): Ty {
-        if (let Some(record) <- FindInstantiatedTyCacheRecord(key)) {
-            for (entry in record.entries) {
-                if (SameTy(entry.source, ty)) {
-                    return entry.instantiated
-                }
+    public func GetCachedInstantiatedTy(key: DeclTySeqKey, ty: Ty, typeMapping: TypeSubst): Ty {
+        let tyKey = Ptr<Ty>(ty)
+        if (let Some(cache) <- instantiatedTyCaches.get(key)) {
+            if (let Some(instantiatedTy) <- cache.get(tyKey)) {
+                return instantiatedTy
             }
             let instantiatedTy = typeManager.GetInstantiatedTy(ty, typeMapping)
-            record.entries.add(InstantiatedTyCacheEntry(ty, instantiatedTy))
+            cache[tyKey] = instantiatedTy
             return instantiatedTy
         }
-        let record = InstantiatedTyCacheRecord(key)
+        let cache = HashMap<Ptr<Ty>, Ty>()
         let instantiatedTy = typeManager.GetInstantiatedTy(ty, typeMapping)
-        record.entries.add(InstantiatedTyCacheEntry(ty, instantiatedTy))
-        instantiatedTyCaches.add(record)
+        cache[tyKey] = instantiatedTy
+        instantiatedTyCaches[key] = cache
         return instantiatedTy
     }
 
