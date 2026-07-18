@@ -3002,11 +3002,17 @@ extend ParserImpl {
                         body.paramLists[0]).Emit()
                     ret.EnableAttr(Attribute.IS_BROKEN)
                 }
+                ret.end = body.end
+                if (let None <- body.body) {
+                    DiagMissingBody("finalizer", "", ret.end)
+                    if (!parseDeclFile) {
+                        ret.EnableAttr(Attribute.HAS_BROKEN)
+                    }
+                }
                 if (let Some(retType) <- body.retType) {
                     ParseDiagnoseRefactor(DiagKindRefactor.parse_invalid_return_type, retType, "finalizer").Emit()
                     ret.EnableAttr(Attribute.IS_BROKEN)
                 }
-                ret.end = body.end
             }
             CheckNoDeprecatedAnno(annos, "~init")
             if (HasModifierToken(modifiers, TokenKind.UNSAFE)) {
