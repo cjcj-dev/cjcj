@@ -2,6 +2,7 @@ package cjcj::driver
 
 import std.collection.*
 import std.sync.*
+import cjcj::utils.ProfileRecorder
 
 private func NormalizeJobLimit(jobs: Option<UInt64>): Int64 {
     if (let Some(rawLimit) <- jobs) {
@@ -154,6 +155,10 @@ public class Job {
         }
         let commandList = (backend.getOrThrow()).GetBackendCmds()
         for (cmdBatch in commandList) {
+            if (cmdBatch.isEmpty()) {
+                continue
+            }
+            let recorder = ProfileRecorder("Main Stage", "Execute " + FileUtil.GetFileName(cmdBatch[0].GetName()))
             let runner = ToolBatchRunner(cmdBatch, verbose)
             if (let Some(failure) <- runner.Run(jobLimit)) {
                 PrintToolFailure(failure)
