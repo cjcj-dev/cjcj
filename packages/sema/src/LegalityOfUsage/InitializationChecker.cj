@@ -763,6 +763,14 @@ public class InitializationChecker {
                         CheckInitInFuncBody(body)
                     }
                 }
+            case ASTKind.MACRO_DECL =>
+                if (let Some(macroDecl) <- (node as MacroDecl)) {
+                    if (let Some(desugarDecl) <- macroDecl.desugarDecl) {
+                        CheckInitialization(desugarDecl)
+                    } else if (let Some(body) <- macroDecl.funcBody) {
+                        CheckInitInFuncBody(body)
+                    }
+                }
             case ASTKind.FUNC_DECL =>
                 if (let Some(funcDecl) <- (node as FuncDecl)) {
                     if (funcDecl.TestAttr(Attribute.HAS_INITIAL)) {
