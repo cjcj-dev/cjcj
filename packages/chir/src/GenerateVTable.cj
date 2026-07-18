@@ -58,7 +58,7 @@ private func TypeCastIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuild
     if (valueTy.IsNothing()) {
         return value
     }
-    if (!valueTy.IsEqual(expectedTy)) {
+    if (valueTy != expectedTy) {
         var tmpValue = value
         if (valueTy.StripAllRefs().IsGeneric() && valueTy.IsRef()) {
             let load = builder.CreateLoad(valueTy.StripAllRefs(), value, parentBlock)
@@ -104,7 +104,7 @@ private func LeftTypeIsBoxOfRightType(left: Type, right: Type): Bool {
     }
     let refTy = (left as RefType).getOrThrow()
     let boxType = (refTy.GetBaseType() as BoxType) ?? return false
-    return right.IsEqual(boxType.GetBaseType())
+    return right == boxType.GetBaseType()
 }
 
 private func BoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, parentBlock: Block,

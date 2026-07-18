@@ -3166,14 +3166,14 @@ public class Translator {
     private func TransformThisType(rawThis: Value, expectedTy: Type, curLambda: Lambda): Value {
         let rawThisTy = rawThis.GetType() ??
             throw IllegalStateException("faithful AST2CHIR member wrapper receiver has no type")
-        if (rawThisTy.IsEqual(expectedTy)) {
+        if (rawThisTy == expectedTy) {
             return rawThis
         }
         let parentBlock = curLambda.GetParentBlock() ??
             throw IllegalStateException("faithful AST2CHIR member wrapper lambda has no parent block")
         var result: Value
         if (let Some(refTy) <- (rawThisTy as RefType)) {
-            if (refTy.GetBaseType().IsStruct() && refTy.GetBaseType().IsEqual(expectedTy)) {
+            if (refTy.GetBaseType().IsStruct() && refTy.GetBaseType() == expectedTy) {
                 result = RequireResult(builder.CreateLoad(expectedTy, rawThis, parentBlock))
             } else {
                 result = TypeCastOrBoxIfNeeded(rawThis, expectedTy, builder, parentBlock)
