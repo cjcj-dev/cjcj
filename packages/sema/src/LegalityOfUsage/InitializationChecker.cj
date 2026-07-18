@@ -1467,8 +1467,8 @@ public class InitializationChecker {
                 hasInheritableOuter = true
             }
             if (!hasInheritableOuter) {
-                AddIssue(InitializationIssueKind.ILLEGAL_SUPER_MEMBER_USE, refExpr, target: target,
-                    message: refExpr.ref.identifier.Val())
+                Diagnose(diag, refExpr, BasicDiagKind.sema_illegal_usage_of_super_member,
+                    args: [BasicDiagArgument(refExpr.ref.identifier.Val())]).Emit()
                 return false
             }
         } else if (target.IsFuncOrProp()) {
