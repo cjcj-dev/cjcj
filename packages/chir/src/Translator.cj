@@ -1563,9 +1563,34 @@ public class Translator {
         return false
     }
 
+    // C++: TranslateBlock.cpp:12-23 CollectInstantiatedFuncNodes.
+    private func CollectInstantiatedFuncNodes(nodes: ArrayList<AstNode>, genericFunc: AstFuncDecl,
+        manager: GenericInstantiationManager): Unit {
+        var decls = manager.GetInstantiatedDecls(genericFunc)
+        if (decls.isEmpty()) {
+            if (let Some(genericDecl) <- genericFunc.genericDecl) {
+                // 'genericFunc' may be partially instantiated decl which cannot be found in map.
+                decls = manager.GetInstantiatedDecls(genericDecl)
+            }
+        }
+        for (instantiatedDecl in decls) {
+            nodes.add(instantiatedDecl)
+        }
+    }
+
+    // C++: TranslateBlock.cpp:39-59 CollectBlockBodyNodes.
     private func CollectBlockBodyNodes(block: AstBlock): ArrayList<AstNode> {
         let nodes = ArrayList<AstNode>()
         for (body in block.body) {
+            if (let Some(funcDecl) <- (body as AstFuncDecl)) {
+                if (funcDecl.TestAttr(AstAttribute.GENERIC)) {
+                    if (let Some(manager) <- gim) {
+                        CollectInstantiatedFuncNodes(nodes, funcDecl, manager)
+                    }
+                    nodes.add(funcDecl)
+                    continue
+                }
+            }
             if (IsUnnecessarySuperCall(body)) {
                 continue
             }
