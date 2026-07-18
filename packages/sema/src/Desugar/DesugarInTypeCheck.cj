@@ -223,8 +223,7 @@ private func CreatePrimaryCtorMemberAssign(ctor: PrimaryCtorDecl, param: FuncPar
     left.EnableAttr(Attribute.IMPLICIT_ADD)
     CopyBasicInfo(param, left)
 
-    let right = CreateRefExpr(param.identifier.Val())
-    right.ref.identifier = CloneSrcIdentifier(param.identifier)
+    let right = CreateRefExpr(CloneSrcIdentifier(param.identifier), None, INVALID_POSITION, ArrayList<Type>())
     right.EnableAttr(Attribute.IMPLICIT_ADD)
     if (let Some(typeNode) <- param.typeNode) {
         CopyBasicInfo(typeNode, right)
