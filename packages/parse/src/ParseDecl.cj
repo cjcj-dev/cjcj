@@ -2371,10 +2371,12 @@ extend ParserImpl {
                     DiagExpectSemiOrNewline()
                 }
             } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+                SkipBlank(TokenKind.SEMI)
                 if (CheckSkipRcurOrPrematureEnd(interfaceDecl.body.getOrThrow())) {
                     break
                 }
             } else if (let Some(structDecl) <- (ret as StructDecl)) {
+                SkipBlank(TokenKind.SEMI)
                 if (CheckSkipRcurOrPrematureEnd(structDecl.body.getOrThrow())) {
                     break
                 }
@@ -2420,9 +2422,6 @@ extend ParserImpl {
                     CheckJavaInteropMember(member)
                 }
                 AddBodyMember(ret, member)
-            }
-            if (let None <- (ret as ClassDecl)) {
-                SkipNLOrSemi()
             }
         }
         if (let Some(classDecl) <- (ret as ClassDecl)) {
