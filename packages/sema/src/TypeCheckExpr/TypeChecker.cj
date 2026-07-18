@@ -3599,7 +3599,8 @@ extend TypeChecker {
         fb.SetTy(funcTy)
 
         if (!CheckBodyRetType(ctx, fb)) {
-            fb.SetTy(impl.typeManager.GetFunctionTy(paramTys.toArray(), retType.GetTy().getOrThrow(), cfg: cfg))
+            fb.SetTy(impl.typeManager.GetFunctionTy(
+                paramTys.toArray(), fb.retType.getOrThrow().GetTy().getOrThrow(), cfg: cfg))
             return false
         }
 
@@ -3607,7 +3608,8 @@ extend TypeChecker {
             UnsafeCheck(fb)
         }
 
-        funcTy = impl.typeManager.GetFunctionTy(paramTys.toArray(), retType.GetTy().getOrThrow(), cfg: cfg)
+        funcTy = impl.typeManager.GetFunctionTy(
+            paramTys.toArray(), fb.retType.getOrThrow().GetTy().getOrThrow(), cfg: cfg)
         if (let Some(funcDecl4) <- fb.funcDecl) {
             funcDecl4.SetTy(funcTy)
         }
