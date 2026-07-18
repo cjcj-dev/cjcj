@@ -8482,58 +8482,78 @@ extend TypeChecker {
             return false
         }
         GetTypeCheckCache(ctx, expr).lastKey = GetCacheKeyForChk(ctx, expr, target)
+        let realTarget = impl.typeManager.TryGreedySubst(target)
+        if (realTarget.IsPlaceholder() && !AcceptPlaceholderTarget(expr)) {
+            let placeholder = (realTarget as GenericsTy).getOrThrow()
+            let upperBounds = impl.typeManager.constraints.GetOrCreate(placeholder).ubs
+            var lub: Option<Ty> = None
+            if (!upperBounds.IsEmpty()) {
+                if (let ErrOrTy.TY(metTy) <- MeetAsVisibleTy(impl.typeManager, upperBounds,
+                    ignoredTyVars: ToTySet(impl.typeManager.GetUnsolvedTyVars()))) {
+                    lub = Some(metTy)
+                }
+            }
+            let checkRet = if (let Some(upperBound) <- lub) {
+                Check(ctx, upperBound, expr) && impl.typeManager.IsSubtype(expr.GetTy().getOrThrow(), realTarget)
+            } else {
+                let _ = Synthesize(ctx, SynPos.NONE, expr)
+                let _ = ReplaceIdealTy(impl.typeManager, expr, diag: impl.diag)
+                impl.typeManager.IsSubtype(expr.GetTy().getOrThrow(), realTarget)
+            }
+            return FinishCheck(ctx, expr, checkRet)
+        }
         if (let Some(lambda) <- (expr as LambdaExpr)) {
-            return FinishCheck(ctx, lambda, ChkLamExpr(ctx, target, lambda))
+            return FinishCheck(ctx, lambda, ChkLamExpr(ctx, realTarget, lambda))
         }
         if (let Some(block) <- (expr as Block)) {
             MarkUnsafeBlockChildren(block)
-            let ok = ChkBlock(ctx, target, block)
+            let ok = ChkBlock(ctx, realTarget, block)
             typeCheckExprClearTargetType(ctx, expr)
             return ok
         }
         if (let Some(nameRef) <- (expr as NameReferenceExpr)) {
-            typeCheckExprPutTargetType(ctx, nameRef, target)
+            typeCheckExprPutTargetType(ctx, nameRef, realTarget)
             if (let Some(refExpr) <- (nameRef as RefExpr)) {
                 InferRefExpr(ctx, refExpr)
             } else {
                 let _ = SynthesizeNameReference(ctx, nameRef)
             }
-            let ok = this.ChkRefExpr(ctx, target, nameRef)
+            let ok = this.ChkRefExpr(ctx, realTarget, nameRef)
             if (ok) {
                 ctx.SkipSynForCorrectTy(nameRef)
             }
             return FinishCheck(ctx, expr, ok)
         }
         if (let Some(subscript) <- (expr as SubscriptExpr)) {
-            return FinishCheck(ctx, subscript, ChkSubscriptExpr(impl.typeManager, ctx, Some(target), subscript,
+            return FinishCheck(ctx, subscript, ChkSubscriptExpr(impl.typeManager, ctx, Some(realTarget), subscript,
                 { subscriptPos: SynPos, child: Expr => Synthesize(ctx, subscriptPos, child) },
                 { subscriptTarget: Ty, child2: Expr => Check(ctx, subscriptTarget, child2) },
                 impl.diag.getOrThrow()))
         }
         if (let Some(assign) <- (expr as AssignExpr)) {
-            return FinishCheck(ctx, assign, ChkAssignExpr(ctx, target, assign))
+            return FinishCheck(ctx, assign, ChkAssignExpr(ctx, realTarget, assign))
         }
         if (let Some(callExpr) <- (expr as CallExpr)) {
-            typeCheckExprPutTargetType(ctx, callExpr, target)
-            let ok = ChkCallExpr(ctx, Some(target), callExpr)
+            typeCheckExprPutTargetType(ctx, callExpr, realTarget)
+            let ok = ChkCallExpr(ctx, Some(realTarget), callExpr)
             return FinishCheck(ctx, callExpr, ok)
         }
         if (let Some(trailingClosure) <- (expr as TrailingClosureExpr)) {
-            return FinishCheck(ctx, trailingClosure, ChkTrailingClosureExpr(ctx, target, trailingClosure))
+            return FinishCheck(ctx, trailingClosure, ChkTrailingClosureExpr(ctx, realTarget, trailingClosure))
         }
         if (let Some(ifExpr) <- (expr as IfExpr)) {
-            return FinishCheck(ctx, ifExpr, ChkIfExpr(ctx, target, ifExpr))
+            return FinishCheck(ctx, ifExpr, ChkIfExpr(ctx, realTarget, ifExpr))
         }
         if (let Some(matchExpr) <- (expr as MatchExpr)) {
             if (let None <- matchExpr.selector) {
-                let matchOk = this.ChkMatchExpr(ctx, target, matchExpr)
+                let matchOk = this.ChkMatchExpr(ctx, realTarget, matchExpr)
                 if (matchOk) {
                     ctx.SkipSynForCorrectTy(matchExpr)
                 }
                 typeCheckExprClearTargetType(ctx, matchExpr)
                 return matchOk
             }
-            let matchOk = this.ChkMatchExpr(ctx, target, matchExpr)
+            let matchOk = this.ChkMatchExpr(ctx, realTarget, matchExpr)
             if (matchOk) {
                 ctx.SkipSynForCorrectTy(matchExpr)
             }
@@ -8541,23 +8561,23 @@ extend TypeChecker {
             return matchOk
         }
         if (let Some(parenExpr) <- (expr as ParenExpr)) {
-            return FinishCheck(ctx, parenExpr, ChkParenExpr(impl.typeManager, target, parenExpr,
+            return FinishCheck(ctx, parenExpr, ChkParenExpr(impl.typeManager, realTarget, parenExpr,
                 checker: Some({ targetTy: Ty, innerExpr: Expr => Check(ctx, targetTy, innerExpr) })))
         }
         if (let Some(jumpExpr) <- (expr as JumpExpr)) {
             return FinishCheck(ctx, jumpExpr, ChkLoopControlExpr(ctx, jumpExpr))
         }
         if (let Some(forInExpr) <- (expr as ForInExpr)) {
-            return FinishCheck(ctx, forInExpr, ChkForInExpr(ctx, target, forInExpr))
+            return FinishCheck(ctx, forInExpr, ChkForInExpr(ctx, realTarget, forInExpr))
         }
         if (let Some(whileExpr) <- (expr as WhileExpr)) {
-            return FinishCheck(ctx, whileExpr, ChkWhileExpr(ctx, target, whileExpr))
+            return FinishCheck(ctx, whileExpr, ChkWhileExpr(ctx, realTarget, whileExpr))
         }
         if (let Some(doWhileExpr) <- (expr as DoWhileExpr)) {
-            return FinishCheck(ctx, doWhileExpr, ChkDoWhileExpr(ctx, target, doWhileExpr))
+            return FinishCheck(ctx, doWhileExpr, ChkDoWhileExpr(ctx, realTarget, doWhileExpr))
         }
         if (let Some(rangeExpr) <- (expr as RangeExpr)) {
-            return FinishCheck(ctx, rangeExpr, ChkRangeExpr(ctx, target, rangeExpr))
+            return FinishCheck(ctx, rangeExpr, ChkRangeExpr(ctx, realTarget, rangeExpr))
         }
         if (let Some(lit) <- (expr as LitConstExpr)) {
             var stringTy: Option<Ty> = None
@@ -8574,7 +8594,7 @@ extend TypeChecker {
                     }
                 }
             }
-            let chkRet = ChkLitConstExpr(impl.typeManager, target, lit, stringTy: stringTy,
+            let chkRet = ChkLitConstExpr(impl.typeManager, realTarget, lit, stringTy: stringTy,
                 toStringTy: toStringTy, ctx: Some(ctx),
                 synthesizer: Some({ block: Block => Synthesize(ctx, SynPos.EXPR_ARG, block) }),
                 checker: Some({ targetTy: Ty, partExpr: Expr => Check(ctx, targetTy, partExpr) }),
@@ -8583,25 +8603,25 @@ extend TypeChecker {
             return FinishCheck(ctx, lit, chkRet)
         }
         if (let Some(arrayLit) <- (expr as ArrayLit)) {
-            return FinishCheck(ctx, arrayLit, ChkArrayLit(ctx, target, arrayLit))
+            return FinishCheck(ctx, arrayLit, ChkArrayLit(ctx, realTarget, arrayLit))
         }
         if (let Some(tupleLit) <- (expr as TupleLit)) {
-            return FinishCheck(ctx, tupleLit, CheckTupleLit(ctx, target, tupleLit))
+            return FinishCheck(ctx, tupleLit, CheckTupleLit(ctx, realTarget, tupleLit))
         }
         if (let Some(binaryExpr) <- (expr as BinaryExpr)) {
-            return FinishCheck(ctx, binaryExpr, CheckBinaryExpr(ctx, target, binaryExpr))
+            return FinishCheck(ctx, binaryExpr, CheckBinaryExpr(ctx, realTarget, binaryExpr))
         }
         if (let Some(quoteExpr) <- (expr as QuoteExpr)) {
-            return FinishCheck(ctx, quoteExpr, this.ChkQuoteExpr(ctx, target, quoteExpr))
+            return FinishCheck(ctx, quoteExpr, this.ChkQuoteExpr(ctx, realTarget, quoteExpr))
         }
         if (let Some(incOrDec) <- (expr as IncOrDecExpr)) {
-            return FinishCheck(ctx, incOrDec, ChkIncOrDecExpr(impl.typeManager, target, incOrDec,
+            return FinishCheck(ctx, incOrDec, ChkIncOrDecExpr(impl.typeManager, realTarget, incOrDec,
                 { leftValue: Expr => Synthesize(ctx, SynPos.LEFT_VALUE, leftValue) },
                 { desugar: Expr => Synthesize(ctx, SynPos.UNUSED, desugar) },
                 diag: impl.diag))
         }
         if (let Some(unaryExpr) <- (expr as UnaryExpr)) {
-            return FinishCheck(ctx, unaryExpr, ChkUnaryExpr(ctx, target, unaryExpr))
+            return FinishCheck(ctx, unaryExpr, ChkUnaryExpr(ctx, realTarget, unaryExpr))
         }
         if (let Some(returnExpr) <- (expr as ReturnExpr)) {
             return FinishCheck(ctx, returnExpr, Ty.IsTyCorrect(SynthesizeReturnExpr(ctx, returnExpr)))
