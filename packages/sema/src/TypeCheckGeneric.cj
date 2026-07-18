@@ -112,7 +112,7 @@ private func generateTypeMappingForUpperBounds(typeManager: TypeManager, memberA
     }
 }
 
-private func generateTypeMappingForBaseExpr(typeManager: TypeManager, memberAccess: MemberAccess,
+public func GenerateTypeMappingForBaseExpr(typeManager: TypeManager, memberAccess: MemberAccess,
     typeMapping: MultiTypeSubst): Unit {
     if (let None <- memberAccess.baseExpr) {
         return
@@ -158,7 +158,7 @@ private func generateTypeMappingForMemberAccess(typeManager: TypeManager, member
     if (memberAccess.isExposedAccess && isGenericUpperBoundCall(memberAccess, target)) {
         generateTypeMappingForUpperBounds(typeManager, memberAccess, target, instMap)
     } else {
-        generateTypeMappingForBaseExpr(typeManager, memberAccess, instMap)
+        GenerateTypeMappingForBaseExpr(typeManager, memberAccess, instMap)
     }
     return MultiTypeSubstToTypeSubst(instMap)
 }
