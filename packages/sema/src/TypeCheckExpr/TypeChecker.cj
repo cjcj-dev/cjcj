@@ -6585,7 +6585,8 @@ extend TypeChecker {
             ctx, ma, targets, importManager: impl.importManager)) {
             return
         }
-        let target = GetAccessibleDecl(impl.typeManager, ctx, ma, targets) ?? targets[0]
+        let target = GetAccessibleDecl(impl.typeManager, ctx, ma, targets,
+            importManager: impl.importManager) ?? targets[0]
         ReplaceTarget(ma, Some(target))
         AddFuncTargetsForMemberAccess(ma, targets)
     }
@@ -6614,7 +6615,8 @@ extend TypeChecker {
             ctx, ma, targets, importManager: impl.importManager)) {
             return
         }
-        let target = GetAccessibleDecl(impl.typeManager, ctx, ma, targets) ?? targets[0]
+        let target = GetAccessibleDecl(impl.typeManager, ctx, ma, targets,
+            importManager: impl.importManager) ?? targets[0]
         ReplaceTarget(ma, Some(target))
         AddFuncTargetsForMemberAccess(ma, targets)
     }
@@ -7112,7 +7114,8 @@ extend TypeChecker {
                 ctx, ma, targets, importManager: impl.importManager)) {
                 return
             }
-            let target = GetAccessibleDecl(impl.typeManager, ctx, ma, targets) ?? targets[0]
+            let target = GetAccessibleDecl(impl.typeManager, ctx, ma, targets,
+                importManager: impl.importManager) ?? targets[0]
             ReplaceTarget(ma, Some(target))
             AddFuncTargetsForMemberAccess(ma, targets)
             return
@@ -8860,7 +8863,8 @@ extend TypeChecker {
         for (candidate in targets) {
             if (let Some(value) <- candidate) { nonNullTargets.add(value) }
         }
-        var decl = GetAccessibleDecl(impl.typeManager, ctx, re, nonNullTargets)
+        var decl = GetAccessibleDecl(impl.typeManager, ctx, re, nonNullTargets,
+            importManager: impl.importManager)
         if (let None <- decl) {
             decl = targets[0]
         }
