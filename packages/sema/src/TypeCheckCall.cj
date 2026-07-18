@@ -3112,9 +3112,7 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
     }
     if (let Some(targetTy) <- target) {
         let instRetTy = typeManager.ApplySubstPack(GetCallTy(typeManager, ctx, ce, fd), typeMapping)
-        let normalizedRetTy = typeManager.SubstituteTypeAliasInTy(instRetTy)
-        let normalizedTargetTy = typeManager.SubstituteTypeAliasInTy(targetTy)
-        if (!instRetTy.HasIdealTy() && !typeManager.IsSubtype(normalizedRetTy, normalizedTargetTy)) {
+        if (!instRetTy.HasIdealTy() && !typeManager.IsSubtype(instRetTy, targetTy)) {
             if (ce.sourceExpr.isNone()) {
                 if (let Some(diagValue) <- diag) {
                     DiagMismatchedTypesWithFoundTy(diagValue, ce, targetTy, instRetTy)
