@@ -407,7 +407,7 @@ public class GlobalVarInitializationChecker {
         let walker = Walker(root, visitPre: { node: Node =>
             if (let Some(expr) <- (node as Expr)) {
                 if (let Some(desugar) <- expr.desugarExpr) {
-                    worklist.add(desugar)
+                    CollectVarUsageBFSImpl(desugar, worklist)
                     return VisitAction.SKIP_CHILDREN
                 }
             }
