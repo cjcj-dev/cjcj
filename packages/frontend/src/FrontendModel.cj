@@ -3083,6 +3083,9 @@ private class CjoSignatureMaterializer {
     }
 
     private func AddFlatTopLevelDecl(decl: Decl): Unit {
+        if (let Some(file) <- idToFileMap.get(decl.begin.fileID)) {
+            decl.curFile = Some(file)
+        }
         let targetFile = decl.curFile ??
             throw IllegalStateException("imported decl '${decl.identifier.Val()}' has no current file")
         AddCurFile(decl, file: Some(targetFile))
@@ -3415,11 +3418,6 @@ private class CjoSignatureMaterializer {
     }
 
     private func MarkFlatImportedDecl(decl: Decl): Unit {
-        if (let Some(file) <- idToFileMap.get(decl.begin.fileID)) {
-            decl.curFile = Some(file)
-        } else if (decl.begin.fileID == 0u64 && !pkg.files.isEmpty()) {
-            decl.curFile = Some(pkg.files[0])
-        }
         if (!decl.TestAttr(Attribute.FROM_COMMON_PART) || !deserializingCommon) {
             decl.EnableAttr(Attribute.IMPORTED)
         }
