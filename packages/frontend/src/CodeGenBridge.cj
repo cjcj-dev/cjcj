@@ -58,6 +58,7 @@ import cjcj::chir.Terminator as ChirTerminator
 import cjcj::chir.TypeAnalysis
 import cjcj::chir.TypeDomain
 import cjcj::chir.TypeValue
+import cjcj::chir.globalState as typeAnalysisGlobals
 import cjcj::chir.ToCHIRPhase
 import cjcj::chir.UnitUnify
 import cjcj::chir.UpdateMemberVarPath
@@ -537,7 +538,11 @@ private class ToCHIR {
             }
             let threadNum = Int64(options.GetJobs())
             TypeValue.SetCHIRBuilder(builder)
-            let typeAnalysisWrapper = AnalysisWrapper<TypeAnalysis, TypeDomain>(builder)
+            let typeAnalysisWrapper = AnalysisWrapper<TypeAnalysis, TypeDomain>(builder,
+                { analysisPackage: RealCHIRPackage, analysisBuilder: ChirBuilder =>
+                    TypeAnalysis.InitialiseLetGVState(analysisPackage, analysisBuilder, typeAnalysisGlobals,
+                        { globalVar => TypeAnalysis.IsTrackedGV(globalVar) })
+                })
             typeAnalysisWrapper.RunOnPackage(currentPackage, options.chirDebugOptimizer, threadNum,
                 { fn: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
                     TypeAnalysis(fn, analysisBuilder, isDebug, devirtInfo)
