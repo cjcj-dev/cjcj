@@ -2242,8 +2242,14 @@ public class InitializationChecker {
                 !ContainsInitDecl(definitelyUninitVars, decl)) {
                 continue
             }
-            AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, fd, target: decl,
-                message: decl.identifier.Val())
+            if (fd.TestAttr(Attribute.COMPILER_ADD) && fd.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
+                Diagnose(diag, fd, BasicDiagKind.sema_class_uninitialized_field,
+                    args: [BasicDiagArgument(decl.identifier.Val())]).Emit()
+            } else {
+                let diagNode: Node = if (fd.TestAttr(Attribute.COMPILER_ADD)) { decl } else { fd }
+                Diagnose(diag, diagNode, BasicDiagKind.sema_class_uninitialized_field,
+                    args: [BasicDiagArgument(decl.identifier.Val())]).Emit()
+            }
         }
     }
 
