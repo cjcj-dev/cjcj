@@ -729,11 +729,17 @@ private func preCheckGetCoreDecl(ctx: ASTContext, pkg: Package, name: String): O
     return None
 }
 
-private func preCheckAddObjectSuperClass(ctx: ASTContext, pkg: Package, classDecl: ClassDecl): Unit {
+private func AddObjectSuperClass(ctx: ASTContext, pkg: Package, classDecl: ClassDecl,
+    importManager: Option<SemaImportManager>): Unit {
     if (pkg.fullPackageName == PRECHECK_CORE_PACKAGE_NAME && classDecl.identifier.Val() == PRECHECK_OBJECT_NAME) {
         return
     }
-    if (let Some(rawObjectDecl) <- preCheckGetCoreDecl(ctx, pkg, PRECHECK_OBJECT_NAME)) {
+    let objectDecl = if (let Some(manager) <- importManager) {
+        manager.GetCoreDecl<Decl>(PRECHECK_OBJECT_NAME)
+    } else {
+        preCheckGetCoreDecl(ctx, pkg, PRECHECK_OBJECT_NAME)
+    }
+    if (let Some(rawObjectDecl) <- objectDecl) {
         let objectDecl = (rawObjectDecl as ClassDecl) ?? return
         let objectType = CreateRefType(objectDecl)
         objectType.curFile = classDecl.curFile
@@ -760,10 +766,10 @@ public func AddSuperClassObjectForClassDecl(
         }
         if (classDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
             if (!AddJObjectSuperClassJavaInterop(importManager.getOrThrow(), diag, ctx, classDecl)) {
-                preCheckAddObjectSuperClass(ctx, pkg, classDecl)
+                AddObjectSuperClass(ctx, pkg, classDecl, importManager)
             }
         } else {
-            preCheckAddObjectSuperClass(ctx, pkg, classDecl)
+            AddObjectSuperClass(ctx, pkg, classDecl, importManager)
         }
     }
 }
