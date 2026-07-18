@@ -641,7 +641,14 @@ public open class CGType {
     }
 
     public static func GetOrCreateTypeInfoType(context: LLVMContextHandle): LLVMTypeRef {
-        let result = GetOrCreateNamedStructType(context, "TypeInfo")
+        var result = LLVMNullType()
+        try (nameCString = unsafe { LibC.mallocCString("TypeInfo") }.asResource()) {
+            result = unsafe { LLVMGetTypeByName2(context.raw, nameCString.value) }
+            if (!result.isNull()) {
+                return result
+            }
+            result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
+        }
         let i8Ty = unsafe { LLVMInt8TypeInContext(context.raw) }
         let i16Ty = unsafe { LLVMInt16TypeInContext(context.raw) }
         let i32Ty = unsafe { LLVMInt32TypeInContext(context.raw) }
