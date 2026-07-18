@@ -7,6 +7,7 @@ import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Range as BasicRange
+import cjcj::modules.SemaImportManager
 
 private func TypeCheckTypeRange(node: Node): BasicRange {
     var rangeEnd = node.end
@@ -36,9 +37,10 @@ private func TypeCheckTypeCheckAccessLegality(
     tm: TypeManager,
     typeNode: Type,
     target: Decl,
-    clearTargetOnFail!: Bool = false
+    clearTargetOnFail!: Bool = false,
+    importManager!: Option<SemaImportManager> = None
 ): Bool {
-    if (IsLegalAccess(tm, None, target, typeNode)) {
+    if (IsLegalAccess(tm, None, target, typeNode, importManager: importManager)) {
         return true
     }
     let builder = Diagnose(diag, typeNode,
@@ -76,7 +78,8 @@ public class VArrayReferenceCheckResult {
 public func TypeCheckTypeCheckReferenceTypeLegality(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
-    typeNode: Type
+    typeNode: Type,
+    importManager!: Option<SemaImportManager> = None
 ): Bool {
     if (typeNode.TestAttr(Attribute.TOOL_ADD)) {
         return true
@@ -84,19 +87,19 @@ public func TypeCheckTypeCheckReferenceTypeLegality(
     var valid = true
     let typeArgs = typeNode.GetTypeArgs()
     for (arg in typeArgs) {
-        if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, arg)) {
+        if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, arg, importManager: importManager)) {
             valid = false
         }
     }
     if (typeNode.astKind == ASTKind.REF_TYPE) {
         if (let Some(refType) <- (typeNode as RefType)) {
-            if (!CheckRefType(diag, tm, refType)) {
+            if (!CheckRefType(diag, tm, refType, importManager: importManager)) {
                 valid = false
             }
         }
     } else if (typeNode.astKind == ASTKind.QUALIFIED_TYPE) {
         if (let Some(qualifiedType) <- (typeNode as QualifiedType)) {
-            if (!TypeCheckTypeCheckQualifiedType(diag, tm, qualifiedType)) {
+            if (!TypeCheckTypeCheckQualifiedType(diag, tm, qualifiedType, importManager: importManager)) {
                 valid = false
             }
         }
@@ -108,21 +111,21 @@ public func TypeCheckTypeCheckReferenceTypeLegality(
         }
     } else if (typeNode.astKind == ASTKind.FUNC_TYPE) {
         if (let Some(funcType) <- (typeNode as FuncType)) {
-            if (!TypeCheckTypeCheckFuncType(diag, tm, funcType)) {
+            if (!TypeCheckTypeCheckFuncType(diag, tm, funcType, importManager: importManager)) {
                 valid = false
             }
         }
     } else if (typeNode.astKind == ASTKind.PAREN_TYPE) {
         if (let Some(parenType) <- (typeNode as ParenType)) {
             if (let Some(inner) <- parenType.innerType) {
-                if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, inner)) {
+                if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, inner, importManager: importManager)) {
                     valid = false
                 }
             }
         }
     } else if (typeNode.astKind == ASTKind.OPTION_TYPE) {
         if (let Some(optionType) <- (typeNode as OptionType)) {
-            if (!TypeCheckTypeCheckOptionType(diag, tm, optionType)) {
+            if (!TypeCheckTypeCheckOptionType(diag, tm, optionType, importManager: importManager)) {
                 valid = false
             }
         }
@@ -148,10 +151,11 @@ public func TypeCheckTypeCheckReferenceTypeLegality(
 public func TypeCheckTypeCheckOptionType(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
-    optionType: OptionType
+    optionType: OptionType,
+    importManager!: Option<SemaImportManager> = None
 ): Bool {
     if (let Some(desugar) <- optionType.desugarType) {
-        return TypeCheckTypeCheckReferenceTypeLegality(diag, tm, desugar)
+        return TypeCheckTypeCheckReferenceTypeLegality(diag, tm, desugar, importManager: importManager)
     }
     return true
 }
@@ -447,13 +451,15 @@ private func CheckRefTypeWithRealTarget(diag: BasicDiagnosticEngine, tm: TypeMan
 public func CheckRefType(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
-    refType: RefType
+    refType: RefType,
+    importManager!: Option<SemaImportManager> = None
 ): Bool {
     if (let None <- refType.ref.target) {
         return true
     }
     let target = refType.ref.target.getOrThrow()
-    if (!TypeCheckTypeCheckAccessLegality(diag, tm, refType, target, clearTargetOnFail: true)) {
+    if (!TypeCheckTypeCheckAccessLegality(diag, tm, refType, target, clearTargetOnFail: true,
+        importManager: importManager)) {
         return false
     }
     if (let Some(builtinDecl) <- (target as BuiltInDecl)) {
@@ -498,13 +504,15 @@ private func TypeCheckTypeCheckCFuncRefType(
 public func TypeCheckTypeCheckQualifiedType(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
-    qualifiedType: QualifiedType
+    qualifiedType: QualifiedType,
+    importManager!: Option<SemaImportManager> = None
 ): Bool {
     if (let None <- qualifiedType.target) {
         return true
     }
     var valid = true
-    if (!TypeCheckTypeCheckAccessLegality(diag, tm, qualifiedType, qualifiedType.target.getOrThrow())) {
+    if (!TypeCheckTypeCheckAccessLegality(diag, tm, qualifiedType, qualifiedType.target.getOrThrow(),
+        importManager: importManager)) {
         valid = false
     }
     if (!IsGenericTypeWithTypeArgs(qualifiedType)) {
@@ -539,16 +547,17 @@ public func TypeCheckTypeCheckTupleType(diag: BasicDiagnosticEngine, tupleType: 
 public func TypeCheckTypeCheckFuncType(
     diag: BasicDiagnosticEngine,
     tm: TypeManager,
-    funcType: FuncType
+    funcType: FuncType,
+    importManager!: Option<SemaImportManager> = None
 ): Bool {
     var valid = true
     for (paramType in funcType.paramTypes) {
-        if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, paramType)) {
+        if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, paramType, importManager: importManager)) {
             valid = false
         }
     }
     if (let Some(retType) <- funcType.retType) {
-        if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, retType)) {
+        if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, retType, importManager: importManager)) {
             valid = false
         }
         if (funcType.isC && Ty.IsTyCorrect(retType.GetTy())) {
