@@ -185,7 +185,9 @@ public class EnumSugarTargetsFinder {
 
     private func FindGlobalEnumConstructors(): Unit {
         let argSize = refExpr.OuterArgSize()
-        let decls = ctx.FindEnumConstructor(refExpr.ref.identifier.Val(), UInt64(argSize))
+        // C++ EnumSugarTargetsFinder.cpp:42 copies the const vector returned by FindEnumConstructor
+        // before filtering it below; keep the ASTContext constructor map unchanged as well.
+        let decls = CloneDeclList(ctx.FindEnumConstructor(refExpr.ref.identifier.Val(), UInt64(argSize)))
         if (argSize != 0) {
             let varDecls = ctx.FindEnumConstructor(refExpr.ref.identifier.Val(), 0u64)
             for (decl in varDecls) {
