@@ -392,6 +392,6 @@ public func GetSpaceBeforeTarget(content: String, column: Int64): String {
         return ""
     }
     let endColumn = if (column - 1 < content.size) { column - 1 } else { content.size }
-    let length = DisplayWidth(content.toArray()[0..endColumn])
+    let length = Unicode.DisplayWidth(unsafe { String.fromUtf8Unchecked(content.toArray()[0..endColumn]) })
     return repeatString(" ", length)
 }
