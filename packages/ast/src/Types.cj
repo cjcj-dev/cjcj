@@ -405,7 +405,6 @@ public open class Ty <: Identifiable & Hashable & Equatable<Ty> {
             if (hasCoreEnumDecl(enumTy.declPtr, STD_LIB_OPTION) && enumTy.typeArgs.size == 1) {
                 return true
             }
-            return enumTy.name == STD_LIB_OPTION && enumTy.typeArgs.size == 1
         }
         return false
     }
