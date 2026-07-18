@@ -300,8 +300,8 @@ public class SubDiagnostic {
 }
 
 public class Diagnostic {
-    public var start: Position = DEFAULT_POSITION
-    public var end: Position = DEFAULT_POSITION
+    public var start: Position = Position()
+    public var end: Position = Position()
     public var kind: DiagKind = DEFAULT_KIND
     public var printSourceCode: Bool = true
     public var isRefactor: Bool = false
