@@ -233,20 +233,41 @@ private func isUnitFunction(fd: FuncDecl): Bool {
     return true
 }
 
-private func hasParameterlessConstructor(classDecl: ClassDecl): Bool {
+private func IsRightClassConstructor(classDecl: ClassDecl): Bool {
     var hasConstructorWithInput = false
     var hasConstructorWithoutInput = false
-    for (member in classDeclMembers(classDecl)) {
-        if (let Some(funcDecl) <- (member as FuncDecl)) {
-            if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
-                if (!funcDecl.funcBody.getOrThrow().paramLists.isEmpty() && funcDecl.funcBody.getOrThrow().paramLists[0].params.isEmpty()) {
-                    hasConstructorWithoutInput = true
-                } else if (!funcDecl.funcBody.getOrThrow().paramLists.isEmpty()) {
-                    hasConstructorWithInput = true
-                }
-            }
+    let primaryConstructor = classDecl.identifier
+    let preVisit = {node: Node =>
+        if (node.TestAttr(Attribute.IS_BROKEN)) {
+            return VisitAction.SKIP_CHILDREN
         }
+        if (ASTKindEquals(node.astKind, ASTKind.FUNC_DECL)) {
+            let funcDecl = (node as FuncDecl).getOrThrow()
+            let paramLists = funcDecl.funcBody.getOrThrow().paramLists
+            if (funcDecl.TestAttr(Attribute.CONSTRUCTOR) && !paramLists.isEmpty() && paramLists[0].params.isEmpty()) {
+                hasConstructorWithoutInput = true
+                return VisitAction.STOP_NOW
+            }
+            if (funcDecl.TestAttr(Attribute.CONSTRUCTOR) && !paramLists.isEmpty() && !paramLists[0].params.isEmpty()) {
+                hasConstructorWithInput = true
+            }
+            return VisitAction.SKIP_CHILDREN
+        }
+        if (ASTKindEquals(node.astKind, ASTKind.PRIMARY_CTOR_DECL)) {
+            let primaryCtorDecl = (node as PrimaryCtorDecl).getOrThrow()
+            let paramLists = primaryCtorDecl.funcBody.getOrThrow().paramLists
+            if (primaryCtorDecl.identifier == primaryConstructor && !paramLists.isEmpty() && paramLists[0].params.isEmpty()) {
+                hasConstructorWithoutInput = true
+                return VisitAction.STOP_NOW
+            }
+            if (primaryCtorDecl.identifier == primaryConstructor && !paramLists.isEmpty() && !paramLists[0].params.isEmpty()) {
+                hasConstructorWithInput = true
+            }
+            return VisitAction.SKIP_CHILDREN
+        }
+        return VisitAction.WALK_CHILDREN
     }
+    let _ = Walker(classDecl.body.getOrThrow(), visitPre: preVisit).Walk()
     if (hasConstructorWithoutInput) {
         return true
     }
@@ -386,7 +407,7 @@ public class TestEntryConstructor {
                 Diagnose(diag, getMacroDecl(med, "TestCase"), DiagKind.macro_using_error,
                     args: [DiagArgument("@TestCase modified foreign class")]).Emit()
             }
-            if (findMacro(med, "Test") && !hasParameterlessConstructor(classDecl)) {
+            if (findMacro(med, "Test") && !IsRightClassConstructor(classDecl)) {
                 Diagnose(diag, getMacroDecl(med, "Test"), DiagKind.macro_using_error,
                     args: [DiagArgument("Class modified by @Test must contain a parameterless construction.")]).Emit()
             }
