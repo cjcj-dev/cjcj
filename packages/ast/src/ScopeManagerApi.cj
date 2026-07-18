@@ -84,7 +84,6 @@ private func indexOf(value: String, needle: String): Int64 {
 
 public func CopyNodeScopeInfo(target: Node, source: Node): Unit {
     target.scopeName = source.scopeName
-    target.exportId = source.exportId
     target.scopeLevel = source.scopeLevel
     target.curFile = source.curFile
 }
