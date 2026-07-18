@@ -359,7 +359,9 @@ foreign {
     func LLVMMoveBasicBlockAfter(block: LLVMBasicBlockRef, movePos: LLVMBasicBlockRef): Unit
     func LLVMConstNull(valueType: LLVMTypeRef): LLVMValueRef
     func LLVMGetUndef(valueType: LLVMTypeRef): LLVMValueRef
+    func LLVMGetPoison(valueType: LLVMTypeRef): LLVMValueRef
     func LLVMConstInt(intType: LLVMTypeRef, value: UInt64, signExtend: Int32): LLVMValueRef
+    func LLVMConstVector(scalarConstantVals: CPointer<LLVMValueRef>, size: UInt32): LLVMValueRef
     func LLVMConstIntGetZExtValue(constantVal: LLVMValueRef): UInt64
     func LLVMConstReal(realType: LLVMTypeRef, value: Float64): LLVMValueRef
     func LLVMConstStringInContext(context: LLVMContextRef, str: CString, length: UInt32, dontNullTerminate: Int32): LLVMValueRef
@@ -474,6 +476,10 @@ foreign {
     func LLVMBuildAddrSpaceCast(builder: LLVMBuilderRef, value: LLVMValueRef, destType: LLVMTypeRef, name: CString): LLVMValueRef
     func LLVMBuildInsertValue(builder: LLVMBuilderRef, aggregate: LLVMValueRef, element: LLVMValueRef, index: UInt32, name: CString): LLVMValueRef
     func LLVMBuildExtractValue(builder: LLVMBuilderRef, aggregate: LLVMValueRef, index: UInt32, name: CString): LLVMValueRef
+    func LLVMBuildInsertElement(builder: LLVMBuilderRef, vector: LLVMValueRef, element: LLVMValueRef,
+        index: LLVMValueRef, name: CString): LLVMValueRef
+    func LLVMBuildShuffleVector(builder: LLVMBuilderRef, vector1: LLVMValueRef, vector2: LLVMValueRef,
+        mask: LLVMValueRef, name: CString): LLVMValueRef
     func LLVMBuildCall2(builder: LLVMBuilderRef, functionType: LLVMTypeRef, fn: LLVMValueRef, args: CPointer<LLVMValueRef>, numArgs: UInt32, name: CString): LLVMValueRef
     func LLVMBuildInvoke2(builder: LLVMBuilderRef, functionType: LLVMTypeRef, fn: LLVMValueRef,
         args: CPointer<LLVMValueRef>, numArgs: UInt32, thenBlock: LLVMBasicBlockRef, catchBlock: LLVMBasicBlockRef,

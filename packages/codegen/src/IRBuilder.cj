@@ -4573,6 +4573,74 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
+    public func EmitVectorCompare32(arr1: LLVMValueRef, offset1: LLVMValueRef,
+        arr2: LLVMValueRef, offset2: LLVMValueRef): LLVMValueRef {
+        let context = GetLLVMContext().raw
+        let i8Type = unsafe { LLVMInt8TypeInContext(context) }
+        let i32Type = unsafe { LLVMInt32TypeInContext(context) }
+        let arrayType = CGArrayType.GenerateArrayLayoutTypeInfo(GetCGContext(), ARRAY_LAYOUT_PREFIX + "UInt8", i8Type)
+        let vectorType = unsafe { LLVMVectorType(i8Type, 32u32) }
+        let vectorPtrType = unsafe { LLVMPointerType(vectorType, 1u32) }
+        let arrayPtrType = unsafe { LLVMPointerType(arrayType, 1u32) }
+        let indices1 = ArrayList<LLVMValueRef>([GetInt32(0), GetInt32(1), offset1])
+        let ptr1 = CreateGEP(arrayType, CreateBitCast(GetPayloadFromObject(arr1), arrayPtrType), indices1)
+        let vector1 = CreateLoad(vectorType, CreateBitCast(ptr1, vectorPtrType), name: "vec1")
+        unsafe { LLVMSetAlignment(vector1, 1u32) }
+        let indices2 = ArrayList<LLVMValueRef>([GetInt32(0), GetInt32(1), offset2])
+        let ptr2 = CreateGEP(arrayType, CreateBitCast(GetPayloadFromObject(arr2), arrayPtrType), indices2)
+        let vector2 = CreateLoad(vectorType, CreateBitCast(ptr2, vectorPtrType), name: "vec2")
+        unsafe { LLVMSetAlignment(vector2, 1u32) }
+        let compared = CreateICmp(LLVMIntPredicate.NE, vector1, vector2)
+        let bitVector = CreateTrunc(compared, unsafe { LLVMVectorType(LLVMInt1TypeInContext(context), 32u32) })
+        let bits = CreateBitCast(bitVector, i32Type)
+        let result = CreateIntrinsicCallNoInvoke("llvm.cttz", ArrayList<LLVMTypeRef>([i32Type]),
+            ArrayList<LLVMValueRef>([bits, GetFalse()]))
+        return CreateZExt(result, unsafe { LLVMInt64TypeInContext(context) })
+    }
+
+    public func EmitVectorIndexByte32(arr: LLVMValueRef, offset: LLVMValueRef,
+        byte: LLVMValueRef): LLVMValueRef {
+        let context = GetLLVMContext().raw
+        let i8Type = unsafe { LLVMInt8TypeInContext(context) }
+        let i32Type = unsafe { LLVMInt32TypeInContext(context) }
+        let arrayType = CGArrayType.GenerateArrayLayoutTypeInfo(GetCGContext(), ARRAY_LAYOUT_PREFIX + "UInt8", i8Type)
+        let vectorType = unsafe { LLVMVectorType(i8Type, 32u32) }
+        let vectorPtrType = unsafe { LLVMPointerType(vectorType, 1u32) }
+        let arrayPtrType = unsafe { LLVMPointerType(arrayType, 1u32) }
+        let indices = ArrayList<LLVMValueRef>([GetInt32(0), GetInt32(1), offset])
+        let ptr = CreateGEP(arrayType, CreateBitCast(GetPayloadFromObject(arr), arrayPtrType), indices)
+        let vector1 = CreateLoad(vectorType, CreateBitCast(ptr, vectorPtrType), name: "vec1")
+        unsafe { LLVMSetAlignment(vector1, 1u32) }
+        let poison = unsafe { LLVMGetPoison(vectorType) }
+        var inserted = LLVMNullValue()
+        try (name = unsafe { LibC.mallocCString("") }.asResource()) {
+            inserted = unsafe { LLVMBuildInsertElement(builder.raw, poison, byte, GetInt32(0), name.value) }
+        }
+        let maskValues = ArrayList<LLVMValueRef>()
+        var index: Int64 = 0
+        while (index < 32) {
+            maskValues.add(GetInt32(0))
+            index++
+        }
+        var vector2 = LLVMNullValue()
+        try (maskPtr = LibC.malloc<LLVMValueRef>(count: maskValues.size).asResource(),
+            name = unsafe { LibC.mallocCString("vec2") }.asResource()) {
+            var maskIndex: Int64 = 0
+            while (maskIndex < maskValues.size) {
+                unsafe { (maskPtr.value + maskIndex).write(maskValues[maskIndex]) }
+                maskIndex++
+            }
+            let mask = unsafe { LLVMConstVector(maskPtr.value, UInt32(maskValues.size)) }
+            vector2 = unsafe { LLVMBuildShuffleVector(builder.raw, inserted, poison, mask, name.value) }
+        }
+        let compared = CreateICmp(LLVMIntPredicate.EQ, vector1, vector2)
+        let bitVector = CreateTrunc(compared, unsafe { LLVMVectorType(LLVMInt1TypeInContext(context), 32u32) })
+        let bits = CreateBitCast(bitVector, i32Type)
+        let result = CreateIntrinsicCallNoInvoke("llvm.cttz", ArrayList<LLVMTypeRef>([i32Type]),
+            ArrayList<LLVMValueRef>([bits, GetFalse()]))
+        return CreateZExt(result, unsafe { LLVMInt64TypeInContext(context) })
+    }
+
     public func CreateOverflowOrArithmeticException(ident: String, isOverflow!: Bool = true): Unit {
         let helperName = if (isOverflow) { CREATE_OVERFLOW_EXCEPTION_FUNC_NAME } else {
             CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME

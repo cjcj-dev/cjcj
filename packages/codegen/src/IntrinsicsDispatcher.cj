@@ -147,6 +147,9 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     if (IsVArrayIntrinsic(kind)) {
         return GenerateVarrayIntrinsics(irBuilder, kind, args, resultType, needArrayBoundCheck)
     }
+    if (IsVectorIntrinsic(kind)) {
+        return GenerateVectorIntrinsics(irBuilder, kind, args)
+    }
     if (IsMathIntrinsic(kind)) {
         return irBuilder.CallMathIntrinsics(kind, args)
     }
@@ -196,6 +199,26 @@ private func IsFutureIntrinsic(kind: IntrinsicKind): Bool {
         kind == IntrinsicKind.IS_THREAD_OBJECT_INITED ||
         kind == IntrinsicKind.GET_THREAD_OBJECT ||
         kind == IntrinsicKind.SET_THREAD_OBJECT
+}
+
+private func IsVectorIntrinsic(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.VECTOR_COMPARE_32 || kind == IntrinsicKind.VECTOR_INDEX_BYTE_32
+}
+
+private func GenerateVectorIntrinsics(irBuilder: IRBuilder2, kind: IntrinsicKind,
+    args: ArrayList<Value>): LLVMValueRef {
+    let parameters = ArrayList<LLVMValueRef>()
+    for (arg in args) {
+        parameters.add(irBuilder.GetCGModule().GetMappedCGValue(arg).GetRawValue())
+    }
+    if (kind == IntrinsicKind.VECTOR_COMPARE_32) {
+        return irBuilder.EmitVectorCompare32(parameters[0], parameters[1], parameters[2], parameters[3])
+    }
+    if (kind == IntrinsicKind.VECTOR_INDEX_BYTE_32) {
+        return irBuilder.EmitVectorIndexByte32(parameters[0], parameters[1], parameters[2])
+    }
+    CJC_ASSERT(false)
+    return LLVMNullValue()
 }
 
 private func IsSyncIntrinsic(kind: IntrinsicKind): Bool {
