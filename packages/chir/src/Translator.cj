@@ -3171,18 +3171,21 @@ public class Translator {
         }
         let parentBlock = curLambda.GetParentBlock() ??
             throw IllegalStateException("faithful AST2CHIR member wrapper lambda has no parent block")
-        var expr: Expression
+        var result: Value
         if (let Some(refTy) <- (rawThisTy as RefType)) {
             if (refTy.GetBaseType().IsStruct() && refTy.GetBaseType().IsEqual(expectedTy)) {
-                expr = builder.CreateLoad(expectedTy, rawThis, parentBlock)
+                result = RequireResult(builder.CreateLoad(expectedTy, rawThis, parentBlock))
             } else {
-                expr = builder.CreateTypeCast(expectedTy, rawThis, parentBlock)
+                result = TypeCastOrBoxIfNeeded(rawThis, expectedTy, builder, parentBlock)
             }
         } else {
-            expr = builder.CreateTypeCast(expectedTy, rawThis, parentBlock)
+            result = TypeCastOrBoxIfNeeded(rawThis, expectedTy, builder, parentBlock)
         }
-        expr.MoveBefore(curLambda)
-        return RequireResult(expr)
+        let expr = result.AsLocalVar().getOrThrow().GetExpr().getOrThrow()
+        if (result != rawThis) {
+            expr.MoveBefore(curLambda)
+        }
+        return result
     }
 
     private func GetWrapperFuncFromMemberAccess(thisType: Type, funcName: String, instFuncType: FuncType,
