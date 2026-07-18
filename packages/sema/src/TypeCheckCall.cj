@@ -3167,9 +3167,6 @@ private func CheckCandidate(typeManager: TypeManager, diag: Option<BasicDiagnost
             return None
         }
     }
-    if (!isGeneric && !CheckCandidateConstrains(typeManager, diag, ce, fd, typeMapping)) {
-        return None
-    }
     return if (candidate.stat.argNameValid) {
         Some(unit)
     } else {
