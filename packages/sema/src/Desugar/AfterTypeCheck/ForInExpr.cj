@@ -443,8 +443,6 @@ private func CreateUpdate(forInExpr: ForInExpr, rangeExpr: RangeExpr, index: Var
     update.isCompound = true
     update.begin = rangeExpr.begin
     update.end = rangeExpr.end
-    update.SetTy(UnitTy())
-    update.EnableAttr(Attribute.COMPILER_ADD)
     return update
 }
 
