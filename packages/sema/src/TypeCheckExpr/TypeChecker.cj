@@ -8632,21 +8632,21 @@ extend TypeChecker {
             } else {
                 let _ = SynthesizeNameReference(ctx, nameRef)
             }
-            return FinishCheck(ctx, expr, this.ChkRefExpr(ctx, target, nameRef))
+            return FinishCheck(ctx, expr, this.ChkRefExpr(ctx, realTarget, nameRef))
         }
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             let throwTy = SynthesizeThrowExpr(ctx, throwExpr)
             return FinishCheck(ctx, throwExpr, Ty.IsTyCorrect(throwTy) &&
-                impl.typeManager.CheckTypeCompatibility(target, throwTy) != TypeCompatibility.INCOMPATIBLE)
+                impl.typeManager.CheckTypeCompatibility(realTarget, throwTy) != TypeCompatibility.INCOMPATIBLE)
         }
         if (let Some(tryExpr) <- (expr as TryExpr)) {
-            return FinishCheck(ctx, tryExpr, ChkTryExpr(ctx, target, tryExpr))
+            return FinishCheck(ctx, tryExpr, ChkTryExpr(ctx, realTarget, tryExpr))
         }
         if (let Some(ifAvailableExpr) <- (expr as IfAvailableExpr)) {
-            return FinishCheck(ctx, ifAvailableExpr, ChkIfAvailableExpr(ctx, target, ifAvailableExpr))
+            return FinishCheck(ctx, ifAvailableExpr, ChkIfAvailableExpr(ctx, realTarget, ifAvailableExpr))
         }
         if (let Some(typeConv) <- (expr as TypeConvExpr)) {
-            return FinishCheck(ctx, typeConv, ChkTypeConvExpr(ctx, target, typeConv))
+            return FinishCheck(ctx, typeConv, ChkTypeConvExpr(ctx, realTarget, typeConv))
         }
         if (let Some(syncExpr) <- (expr as SynchronizedExpr)) {
             var lockTy: Option<Ty> = None
@@ -8656,7 +8656,7 @@ extend TypeChecker {
                 }
             }
             return FinishCheck(ctx, syncExpr, ChkSyncExpr(impl.typeManager, syncExpr, lockTy: lockTy,
-                targetTy: Some(target), diag: impl.diag,
+                targetTy: Some(realTarget), diag: impl.diag,
                 checker: Some({ targetTy2: Ty, mutexExpr: Expr => Check(ctx, targetTy2, mutexExpr) }),
                 synthesizer: Some({ node: Node => SynthesizeNode(ctx, SynPos.EXPR_ARG, node) }),
                 tryChecker: Some({ targetTy3: Ty, tryExpr2: TryExpr => Check(ctx, targetTy3, tryExpr2) })))
@@ -8664,11 +8664,11 @@ extend TypeChecker {
         if (let Some(arrayExpr) <- (expr as ArrayExpr)) {
             SynthesizeTypeNode(ctx, arrayExpr.typeNode)
             if (arrayExpr.isValueArray) {
-                return FinishCheck(ctx, arrayExpr, ChkVArrayExpr(impl.typeManager, target, arrayExpr,
+                return FinishCheck(ctx, arrayExpr, ChkVArrayExpr(impl.typeManager, realTarget, arrayExpr,
                     checker: Some({ targetTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, targetTy, arg) }),
                     diag: impl.diag))
             }
-            return FinishCheck(ctx, arrayExpr, ChkArrayExpr(impl.typeManager, target, arrayExpr,
+            return FinishCheck(ctx, arrayExpr, ChkArrayExpr(impl.typeManager, realTarget, arrayExpr,
                 impl.importManager.getOrThrow(),
                 { targetTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, targetTy, arg) },
                 { typeNode: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode) },
@@ -8676,7 +8676,7 @@ extend TypeChecker {
                 { fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }, impl.diag.getOrThrow()))
         }
         if (let Some(pointerExpr) <- (expr as PointerExpr)) {
-            return FinishCheck(ctx, pointerExpr, ChkPointerExpr(impl.typeManager, target, pointerExpr,
+            return FinishCheck(ctx, pointerExpr, ChkPointerExpr(impl.typeManager, realTarget, pointerExpr,
                 typeChecker: Some({ targetTy: Ty, typeNode: Type =>
                     if (!Ty.IsTyCorrect(targetTy)) {
                         typeNode.SetTy(TypeManager.GetInvalidTy())
@@ -8700,23 +8700,23 @@ extend TypeChecker {
                 }), argSynthesizer: Some({ arg: FuncArg => SynthesizeFuncArg(ctx, arg) }), diag: impl.diag))
         }
         if (let Some(spawnExpr) <- (expr as SpawnExpr)) {
-            return FinishCheck(ctx, spawnExpr, CheckSpawnExprWithTarget(ctx, target, spawnExpr))
+            return FinishCheck(ctx, spawnExpr, CheckSpawnExprWithTarget(ctx, realTarget, spawnExpr))
         }
         if (let Some(asExpr) <- (expr as AsExpr)) {
             SynthesizeTypeNode(ctx, asExpr.asType)
             if (let Some(leftExpr) <- asExpr.leftExpr) {
                 let _ = Synthesize(ctx, leftExpr)
             }
-            return FinishCheck(ctx, asExpr, ChkAsExpr(impl.typeManager, target, asExpr,
+            return FinishCheck(ctx, asExpr, ChkAsExpr(impl.typeManager, realTarget, asExpr,
                 LookupCoreEnumDecl(ctx, "Option"), diag: impl.diag))
         }
         if (let Some(optionalChain) <- (expr as OptionalChainExpr)) {
-            return FinishCheck(ctx, optionalChain, ChkOptionalChainExpr(ctx, target, optionalChain))
+            return FinishCheck(ctx, optionalChain, ChkOptionalChainExpr(ctx, realTarget, optionalChain))
         }
         let actualTy = Synthesize(ctx, expr)
-        let ok = Ty.IsTyCorrect(actualTy) && impl.typeManager.IsSubtype(actualTy, target)
+        let ok = Ty.IsTyCorrect(actualTy) && impl.typeManager.IsSubtype(actualTy, realTarget)
         if (!ok && Ty.IsTyCorrect(actualTy)) {
-            if (let Some(diag) <- impl.diag) { DiagMismatchedTypes(diag, expr, target) }
+            if (let Some(diag) <- impl.diag) { DiagMismatchedTypes(diag, expr, realTarget) }
         }
         return FinishCheck(ctx, expr, ok)
     }
