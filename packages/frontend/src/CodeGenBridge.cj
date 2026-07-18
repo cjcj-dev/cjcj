@@ -23,6 +23,7 @@ import cjcj::chir.ConstPropagation
 import cjcj::chir.CustomTypeDef as ChirCustomTypeDef
 import cjcj::chir.DeadCodeElimination
 import cjcj::chir.DebugLocation as ChirDebugLocation
+import cjcj::chir.Devirtualization as ChirDevirtualization
 import cjcj::chir.DevirtualizationInfo
 import cjcj::chir.ExprKind as ChirExprKind
 import cjcj::chir.FaithfulAST2CHIR
@@ -54,6 +55,9 @@ import cjcj::chir.ReplaceUsesWithWrapper
 import cjcj::chir.SanitizerCoverage
 import cjcj::chir.ShouldReportUnusedCodeWarnings
 import cjcj::chir.Terminator as ChirTerminator
+import cjcj::chir.TypeAnalysis
+import cjcj::chir.TypeDomain
+import cjcj::chir.TypeValue
 import cjcj::chir.ToCHIRPhase
 import cjcj::chir.UnitUnify
 import cjcj::chir.UpdateMemberVarPath
@@ -495,7 +499,7 @@ private class ToCHIR {
             if (options.IsCHIROptimizationLevelOverO2()) {
                 UselessAllocateElimination.RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
             }
-            // GAP_TODO: Devirtualization is unported; C++ call is CHIR.cpp:648.
+            Devirtualization(currentPackage, devirtInfo)
             RunArrayLambdaOpt(currentPackage)
             if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_FUTURE)) {
                 RedundantFutureRemoval(currentPackage, isDebug: options.chirDebugOptimizer).RunOnPackage()
@@ -514,6 +518,48 @@ private class ToCHIR {
         try (recorder = ProfileRecorder("CHIR Opt", "ArrayLambdaOpt")) {
             ArrayLambdaOpt(builder).RunOnPackage(currentPackage, options.chirDebugOptimizer)
             DumpCHIRToFile("ArrayLambdaOpt")
+        }
+    }
+
+    // C++ CHIR.cpp:349-386.
+    private func Devirtualization(currentPackage: RealCHIRPackage, devirtInfo: DevirtualizationInfo): Unit {
+        let options = instance.invocation.globalOptions
+        if (!options.IsOptimizationExisted(OptimizationFlag.DEVIRTUALIZATION) ||
+            options.enIncrementalCompilation) {
+            return
+        }
+        try (recorder = ProfileRecorder("CHIR Opt", "Devirtualization")) {
+            devirtInfo.FreshRetMap()
+            devirtInfo.CollectConstMemberVarType()
+            let funcs = ChirDevirtualization.CollectContainInvokeExprFuncs(currentPackage)
+            if (funcs.isEmpty()) {
+                return
+            }
+            let threadNum = Int64(options.GetJobs())
+            TypeValue.SetCHIRBuilder(builder)
+            let typeAnalysisWrapper = AnalysisWrapper<TypeAnalysis, TypeDomain>(builder)
+            typeAnalysisWrapper.RunOnPackage(currentPackage, options.chirDebugOptimizer, threadNum,
+                { fn: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
+                    TypeAnalysis(fn, analysisBuilder, isDebug, devirtInfo)
+                })
+            let devirt = ChirDevirtualization(typeAnalysisWrapper, devirtInfo)
+            devirt.RunOnFuncs(funcs, builder, options.chirDebugOptimizer)
+            if (!devirt.GetFrozenInstFuns().isEmpty()) {
+                let frozenFuncs = devirt.GetFrozenInstFuns()
+                for (fn in frozenFuncs) {
+                    let result = typeAnalysisWrapper.RunOnFunc(fn, options.chirDebugOptimizer,
+                        { frozenFn: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
+                            TypeAnalysis(frozenFn, analysisBuilder, isDebug, devirtInfo)
+                        })
+                    devirt.AppendFrozenFuncState(fn, result)
+                }
+                devirt.RunOnFuncs(frozenFuncs, builder, options.chirDebugOptimizer)
+                let pass = FunctionInline(builder, options.optimizationLevel, options.chirDebugOptimizer)
+                for (fn in frozenFuncs) {
+                    pass.Run(fn)
+                }
+            }
+            DumpCHIRToFile("Devirtualization")
         }
     }
 
