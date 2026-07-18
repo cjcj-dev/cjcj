@@ -3,6 +3,8 @@ package cjcj::sema.LegalityOfUsage
 import std.collection.*
 import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
+import cjcj::basic.DiagArgument as BasicDiagArgument
+import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::sema.*
 import cjcj::sema.DiagCJMPCannotAssignToImmutableCommonInCtor
@@ -2225,12 +2227,12 @@ public class InitializationChecker {
                 continue
             }
             if (fd.TestAttr(Attribute.COMPILER_ADD) && fd.TestAttr(Attribute.PRIMARY_CONSTRUCTOR)) {
-                AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, fd,
-                    target: decl, message: decl.identifier.Val())
+                Diagnose(diag, fd, BasicDiagKind.sema_class_uninitialized_field,
+                    args: [BasicDiagArgument(decl.identifier.Val())]).Emit()
             } else {
                 let diagNode: Node = if (fd.TestAttr(Attribute.COMPILER_ADD)) { decl } else { fd }
-                AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, diagNode,
-                    target: decl, message: decl.identifier.Val())
+                Diagnose(diag, diagNode, BasicDiagKind.sema_class_uninitialized_field,
+                    args: [BasicDiagArgument(decl.identifier.Val())]).Emit()
             }
         }
     }
