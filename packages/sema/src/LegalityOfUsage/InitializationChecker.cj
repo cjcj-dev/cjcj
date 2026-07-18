@@ -2136,8 +2136,8 @@ public class InitializationChecker {
         for (decl in info.nonFuncDecls) {
             if (let Some(varDecl) <- (decl as VarDecl)) {
                 if (!varDecl.TestAttr(Attribute.COMMON) && (let None <- varDecl.initializer)) {
-                    AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, decl, target: decl,
-                        message: decl.identifier.Val())
+                    Diagnose(diag, decl, BasicDiagKind.sema_class_uninitialized_field,
+                        args: [BasicDiagArgument(decl.identifier.Val())]).Emit()
                 }
             }
         }
