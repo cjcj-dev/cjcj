@@ -927,7 +927,7 @@ public class FileUtil {
                 content = content[BOM_ENCODING_LEN..]
             }
             failedReason.value = ""
-            return String.fromUtf8(content)
+            return unsafe { String.fromUtf8Unchecked(content) }
         } catch (e: Exception) {
             failedReason.value = "open file failed"
             return None
