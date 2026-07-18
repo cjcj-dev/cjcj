@@ -2199,9 +2199,6 @@ extend TypeChecker {
         ctx.resolvedCjoPackageMemberDeclsMap.clear()
         ctx.resolvedUsedMacroDeclsMap.clear()
         if (let Some(instance) <- impl.ci) {
-            for (packageDecl in instance.packageDecls) {
-                ctx.packageDecls.add(packageDecl)
-            }
             for (fileHash in instance.resolvedImportedDeclsMap.keys()) {
                 if (let Some(fileMap) <- instance.resolvedImportedDeclsMap.get(fileHash)) {
                     let ctxFileMap = HashMap<String, ArrayList<Decl>>()
