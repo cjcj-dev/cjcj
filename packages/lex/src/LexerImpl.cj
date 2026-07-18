@@ -1684,7 +1684,7 @@ public class LexerImpl {
                 break
             }
         }
-        var value = input[pStart..pNext]
+        var value = unsafe { String.fromUtf8Unchecked(bytes[pStart..pNext]) }
         if (res.kind == TokenKind.IDENTIFIER) {
             value = NormalizeIdentifierNFC(value)
         }
