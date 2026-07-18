@@ -993,7 +993,7 @@ public class MockSupportManager {
         methodAccessor.propDecl = None
         methodAccessor.isSetter = false
         methodAccessor.isGetter = false
-        methodAccessor.identifier = SrcIdentifier(
+        methodAccessor.identifier.SetValue(
             MockUtils.BuildMockAccessorIdentifier(methodDecl, AccessorKind.METHOD, forErased: true))
         methodAccessor.mangledName = mockUtils.Mangle(methodAccessor)
         MockSupportManager.MarkMockAccessorWithAttributes(methodAccessor, AccessLevel.PUBLIC)
@@ -1081,7 +1081,7 @@ public class MockSupportManager {
         accessorBody.SetTy(originalFuncTy)
         accessorBody.body.getOrThrow().SetTy(originalFuncTy)
         accessorBody.retType.getOrThrow().SetTy(originalFuncTy.retTy)
-        methodAccessor.identifier = SrcIdentifier(
+        methodAccessor.identifier.SetValue(
             MockUtils.BuildMockAccessorIdentifier(methodDecl, AccessorKind.METHOD))
         methodAccessor.mangledName = mockUtils.Mangle(methodAccessor)
 
@@ -1122,7 +1122,7 @@ public class MockSupportManager {
             propSetter.propDecl = propAccessor
             propAccessor.setters.add(propSetter)
         }
-        propAccessor.identifier = SrcIdentifier(
+        propAccessor.identifier.SetValue(
             MockUtils.BuildMockAccessorIdentifier(propDecl, AccessorKind.PROP))
         propAccessor.mangledName = mockUtils.Mangle(propAccessor)
         if (MockSupportManager.NeedEraseAccessorTypes(propDecl)) {
@@ -1941,7 +1941,7 @@ public class MockSupportManager {
         let accessorInterface = InterfaceDecl()
         CopyBasicInfo(interfaceDecl, accessorInterface)
         accessorInterface.CloneAttrs(interfaceDecl)
-        accessorInterface.identifier = SrcIdentifier(
+        accessorInterface.identifier.SetValue(
             interfaceDecl.identifier.Val() + MockUtils.defaultAccessorSuffix)
         accessorInterface.SetTy(typeManager.GetInterfaceTy(accessorInterface, []))
         accessorInterface.fullPackageName = interfaceDecl.fullPackageName
@@ -1955,7 +1955,7 @@ public class MockSupportManager {
             let _ = CloneFuncDecl(funcDecl, accessorDecl)
             accessorDecl.outerDecl = accessorInterface
             accessorDecl.funcBody.getOrThrow().parentClassLike = accessorInterface
-            accessorDecl.identifier = SrcIdentifier(
+            accessorDecl.identifier.SetValue(
                 mockUtils.Mangle(funcDecl) + MockUtils.defaultAccessorSuffix)
 
             CJC_ASSERT(accessorDecl.TestAttr(Attribute.DEFAULT))
