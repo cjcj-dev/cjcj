@@ -1181,8 +1181,10 @@ private func GetDeclGenericParamVec(decl: Decl): ArrayList<GenericsTy> {
     let result = ArrayList<GenericsTy>()
     if (let Some(generic) <- decl.GetGeneric()) {
         for (typeParameter in generic.typeParameters) {
-            if (let Some(genericTy) <- (typeParameter.GetTy() as GenericsTy)) {
-                result.add(genericTy)
+            if (let Some(typeParameterTy) <- typeParameter.GetTy()) {
+                if (let Some(genericTy) <- (typeParameterTy as GenericsTy)) {
+                    result.add(genericTy)
+                }
             }
         }
     }
