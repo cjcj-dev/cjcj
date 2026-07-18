@@ -150,6 +150,18 @@ public func SameTy(lhs: Ty, rhs: Ty): Bool {
             }
         }
     }
+    if (let Some(leftUnion) <- (lhs as UnionTy)) {
+        if (let Some(rightUnion) <- (rhs as UnionTy)) {
+            return leftUnion == rightUnion
+        }
+        return false
+    }
+    if (let Some(leftIntersection) <- (lhs as IntersectionTy)) {
+        if (let Some(rightIntersection) <- (rhs as IntersectionTy)) {
+            return leftIntersection == rightIntersection
+        }
+        return false
+    }
     if (lhs.Hash() == rhs.Hash() && lhs.String() == rhs.String()) {
         return true
     }
