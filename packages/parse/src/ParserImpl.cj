@@ -10,7 +10,7 @@ import std.collection.*
 public class ParserImpl {
     public let diag: BasicDiagnosticEngine
     public let sourceManager: SourceManager
-    public let lexer: Lexer
+    public var lexer: Lexer
     // C++ anchor: cangjie_compiler/src/Parse/ParserImpl.h:150
     var inputString: String = ""
     private let tokenLines: HashSet<Int64> = HashSet<Int64>()

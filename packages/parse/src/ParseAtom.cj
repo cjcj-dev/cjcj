@@ -1,7 +1,8 @@
 package cjcj::parse
 
 import std.collection.*
-import cjcj::basic.StringConvertor
+import cjcj::ast.{VisitAction, Walker}
+import cjcj::basic.{SplitLines, StringConvertor}
 
 extend ParserImpl {
     public func SeeingLiteral(): Bool {
@@ -208,21 +209,48 @@ extend ParserImpl {
             ret.end = part.end
             ret.dollarPos = part.begin
             ret.rawString = part.value
-            if (part.value.size >= 2) {
-                let nested = ParserImpl(part.value[1..], diag, sourceManager, part.begin + 1, enableAttachComment, parseDeclFile)
-                nested.SetCompileOptions(compileOptions)
-                ret.block = nested.ParseBlock(ScopeKind.FUNC_BODY)
-                if ((let None <- ret.block) || ret.block.getOrThrow().body.isEmpty() ||
-                    nested.Peek().kind != TokenKind.END) {
-                    ParseDiagnoseRefactor(
-                        DiagKindRefactor.parse_empty_string_interpolation,
-                        MakeRange(part.begin, ret.end)
-                    ).Emit()
-                    return InvalidExpr(part.begin)
-                }
+            let lines = SplitLines(part.value)
+            ret.end.line += lines.size - 1
+            if (lines.size == 1) {
+                ret.end.column += part.value.size
             } else {
-                ret.isBroken = true
+                ret.end.column = lines[lines.size - 1].size + 1
             }
+            let currentLookahead = lookahead
+            let currentLastToken = lastToken
+            let currentLastNoneNLToken = lastNoneNLToken
+            let hasSkippedNewline = newlineSkipped
+            let currentLexer = lexer
+            lexer = Lexer(part.value[1..], diag, sourceManager, part.begin + 1,
+                cts: enableAttachComment)
+            if (enableEH) {
+                lexer.SetEHEnabled(true)
+            }
+            ret.block = ParseBlock(ScopeKind.FUNC_BODY)
+            if ((let None <- ret.block) || ret.block.getOrThrow().body.isEmpty() || Peek().kind != TokenKind.END) {
+                lexer = currentLexer
+                newlineSkipped = hasSkippedNewline
+                lastNoneNLToken = currentLastNoneNLToken
+                lastToken = currentLastToken
+                lookahead = currentLookahead
+                ParseDiagnoseRefactor(
+                    DiagKindRefactor.parse_empty_string_interpolation,
+                    MakeRange(part.begin, ret.end)
+                ).Emit()
+                return InvalidExpr(part.begin)
+            }
+            lexer = currentLexer
+            newlineSkipped = hasSkippedNewline
+            lastNoneNLToken = currentLastNoneNLToken
+            lastToken = currentLastToken
+            lookahead = currentLookahead
+            let block = ret.block.getOrThrow()
+            Walker(block, visitPre: { node: Node =>
+                if (node != block) {
+                    node.EnableAttr(Attribute.IS_CLONED_SOURCE_CODE)
+                }
+                return VisitAction.WALK_CHILDREN
+            }).Walk()
         }
         return ret
     }
