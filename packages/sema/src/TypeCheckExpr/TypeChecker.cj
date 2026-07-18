@@ -8749,6 +8749,7 @@ extend TypeChecker {
             be.SetTy(TypeManager.GetInvalidTy())
             return false
         }
+        return false
     }
 
     func ReplaceWithGenericTyInInheritableDecl(
