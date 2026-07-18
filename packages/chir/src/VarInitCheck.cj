@@ -1,7 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
-import cjcj::basic.{DiagnosticEngine, DiagKindRefactor}
+import cjcj::basic.{DiagnosticBuilder, DiagnosticEngine, DiagKindRefactor}
 import cjcj::utils.{STATIC_INIT_FUNC, TaskQueue, TaskResult}
 
 private class VarInitConstructorContext {
@@ -203,7 +203,7 @@ public class VarInitCheck {
             }
             let uninitedMembers = state.GetMaybeUninitedLocalMembers()
             if (!uninitedMembers.isEmpty()) {
-                RaiseUninitedDefMemberError(state, fn, members, uninitedMembers, checkResult)
+                RaiseUninitedDefMemberError(state, fn, members, uninitedMembers)
             }
             return
         }
@@ -359,8 +359,7 @@ public class VarInitCheck {
         state: MaybeUninitDomain,
         fn: Function,
         members: ArrayList<MemberVarInfo>,
-        uninitedMemberIdx: ArrayList<Int64>,
-        checkResult: CHIRCheckResult
+        uninitedMemberIdx: ArrayList<Int64>
     ): Unit {
         var allCommonNotDeserialized = true
         for (index in uninitedMemberIdx) {
@@ -373,13 +372,15 @@ public class VarInitCheck {
         if (allCommonNotDeserialized) {
             return
         }
-        checkResult.AddError("not all the member variables are initialized in this constructor")
+        let builder = diag.DiagnoseRefactor(DiagKindRefactor.chir_class_uninitialized_field,
+            ToPosition(fn.GetDebugLocation()))
         for (index in uninitedMemberIdx) {
             let identifier = members[index].name
-            checkResult.AddNote("in line ${members[index].loc.GetBeginPos().line}, variable '${identifier}' " +
+            builder.AddNote("in line ${members[index].loc.GetBeginPos().line}, variable '${identifier}' " +
                 "need to be initialized")
-            AddMaybeInitedPosNote(checkResult, identifier, state.GetMaybeInitedPos(index))
+            AddMaybeInitedPosNote(builder, identifier, state.GetMaybeInitedPos(index))
         }
+        builder.Emit()
     }
 
     private func CheckUninitedDefMember(
@@ -533,6 +534,22 @@ private func AddUseBeforeInitError(
 
 private func AddMaybeInitedPosNote(
     builder: CHIRCheckResult,
+    identifier: String,
+    maybeInitedPos: TreeSet<Int64>
+): Unit {
+    if (maybeInitedPos.isEmpty()) {
+        return
+    }
+    var message = "we detected variable '${identifier}' is assigned in line "
+    for (pos in maybeInitedPos) {
+        message += "${pos}, "
+    }
+    message += "but in runtime, these codes might not be executed."
+    builder.AddNote(message)
+}
+
+private func AddMaybeInitedPosNote(
+    builder: DiagnosticBuilder,
     identifier: String,
     maybeInitedPos: TreeSet<Int64>
 ): Unit {
