@@ -374,25 +374,31 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     public open func AsTerminator(): Option<Terminator> { return None }
 
     public func ToString(indent: Int64): String {
-        var prefix = IndentToString(indent)
+        var out = IndentToString(indent)
         if (let Some(res) <- result) {
-            prefix += res.GetIdentifier() + " = "
-        }
-        var out = prefix + GetExprKindName()
-        let operandsText = OperandsToString()
-        if (!operandsText.isEmpty()) {
-            out += "(" + operandsText + ")"
-        }
-        if (!blockGroups.isEmpty()) {
-            let groupNames = ArrayList<String>()
-            for (group in blockGroups) {
-                groupNames.add(group.GetIdentifier())
+            if (res.IsRetValue()) {
+                out += "[ret] "
             }
-            out += " {" + JoinStrings(groupNames, ", ") + "}"
+            out += res.GetIdentifier()
+            let srcName = res.GetSrcCodeIdentifier()
+            if (!srcName.isEmpty()) {
+                out += "[" + srcName + "]"
+            }
+            out += ": " + res.GetType().getOrThrow().ToString() + " = "
         }
-        let extra = AddExtraComment()
-        if (!extra.isEmpty()) {
-            out += " // " + extra
+        if (kind == ExprKind.INT_OP_WITH_EXCEPTION) {
+            out += (this as IntOpWithException).getOrThrow().GetOpKindName()
+        } else {
+            out += GetExprKindName()
+        }
+        if (kind == ExprKind.LAMBDA) {
+            out += (this as Lambda).getOrThrow().LambdaOperandsToString(indent)
+        } else {
+            out += "(" + OperandsToString() + ")"
+        }
+        out += CommentToString()
+        for (group in blockGroups) {
+            out += "\n" + group.ToString(indent)
         }
         return out
     }
