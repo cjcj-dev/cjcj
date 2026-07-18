@@ -593,6 +593,8 @@ public func CheckLegalityOfUsage(
     result.initializationIssues.clear()
     result.globalVarInitializationIssues.clear()
     CheckLegalityOfUnsafeAndInout(pkg, diag, backendType: opts.backend)
+    // C++ src/Sema/LegalityOfUsage/LegalityOfUsage.cpp:90-93.
+    impl.CheckInheritance(pkg)
     checkClosures(ctx, pkg)
     CheckAccessLevelValidity(pkg, diag)
     CheckAllInvocationHasImpl(ctx, pkg, diag, typeManager)

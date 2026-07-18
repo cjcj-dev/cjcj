@@ -2631,7 +2631,6 @@ extend TypeChecker {
                 } else {
                     let _ = CollectUnusedImports(pkg, manager)
                 }
-                RunInheritanceCheck(pkg)
                 SetConstructorCalls(pkg)
                 // C++ src/Sema/TypeChecker.cpp:2050-2051 checks instantiated duplicate super interfaces.
                 impl.CheckInstDupSuperInterfacesEntry(pkg)
