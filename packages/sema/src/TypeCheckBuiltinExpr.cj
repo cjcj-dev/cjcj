@@ -7,7 +7,8 @@ import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagArgument as BasicDiagArgument
 import cjcj::basic.Position as BasicPosition
-import cjcj::utils.CSTRING_NAME
+import cjcj::modules.SemaImportManager
+import cjcj::utils.{CSTRING_NAME, PData}
 
 private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)
@@ -64,6 +65,26 @@ private func GetArrayElementTy(typeManager: TypeManager, arrayTy: ArrayTy): Ty {
         return TypeManager.GetInvalidTy()
     }
     return typeManager.GetArrayTy(arrayTy.typeArgs[0], arrayTy.dims - 1u64)
+}
+
+// C++ src/Sema/TypeCheckBuiltinExpr.cpp:47-63 HasInheritGivenDecl.
+private func HasInheritGivenDecl(superTys: TySet, decl: ClassLikeDecl): Bool {
+    for (ty in superTys.values) {
+        if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+            if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
+                if (interfaceDecl == decl) {
+                    return true
+                }
+            }
+        } else if (let Some(classTy) <- (ty as ClassTy)) {
+            if (let Some(classDecl) <- classTy.declPtr) {
+                if (classDecl == decl) {
+                    return true
+                }
+            }
+        }
+    }
+    return false
 }
 
 private func GetArrayTypeByInterface(typeManager: TypeManager, arrayStruct: Option<StructDecl>,
@@ -451,146 +472,230 @@ public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit
     return true
 }
 
-public func ChkSizedArrayElement(typeManager: TypeManager, elemTargetTy: Ty, arrayExpr: ArrayExpr): Bool {
-    if (arrayExpr.args.size != 2) {
-        return false
+// C++ src/Sema/TypeCheckBuiltinExpr.cpp:170-191 TypeCheckerImpl::ChkSizedArrayElement.
+public func ChkSizedArrayElement(typeManager: TypeManager, elemTargetTy: Ty, arrayExpr: ArrayExpr,
+    checker: CallArgChecker, diag: BasicDiagnosticEngine): Bool {
+    try (scope = PData.CommitScope(typeManager.constraints)) {
+        try (suppressor = DiagSuppressor(diag)) {
+            if (checker(elemTargetTy, arrayExpr.args[1])) {
+                suppressor.ReportDiag()
+                arrayExpr.initFunc = None
+                return true
+            }
+        }
     }
-    let secondTy = FuncArgTy(arrayExpr.args[1])
-    if (typeManager.CheckTypeCompatibility(elemTargetTy, secondTy) != TypeCompatibility.INCOMPATIBLE) {
-        arrayExpr.initFunc = None
+    let sizeTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+    let expectedExprTy = typeManager.GetFunctionTy([sizeTy], elemTargetTy)
+    if (checker(expectedExprTy, arrayExpr.args[1])) {
         return true
     }
-    let sizeTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-    let expectedFuncTy = typeManager.GetFunctionTy([sizeTy], elemTargetTy)
-    return typeManager.CheckTypeCompatibility(expectedFuncTy, secondTy) != TypeCompatibility.INCOMPATIBLE
-}
-
-public func ChkSizedArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr): Bool {
-    if (let None <- arrayExpr.typeNode) {
-        return false
-    }
-    if (arrayExpr.args.size != 2) {
-        return false
-    }
-    let arrayTy = arrayExpr.typeNode.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
-    if (let None <- (arrayTy as ArrayTy)) {
-        return false
-    }
-    let rawArrayTy = (arrayTy as ArrayTy).getOrThrow()
-    let sizeTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
-    if (typeManager.CheckTypeCompatibility(sizeTy, FuncArgTy(arrayExpr.args[0])) == TypeCompatibility.INCOMPATIBLE) {
-        return false
-    }
-    if (rawArrayTy.typeArgs.isEmpty() || rawArrayTy.typeArgs[0].IsInvalid()) {
-        let secondTy = FuncArgTy(arrayExpr.args[1])
-        if (let Some(funcTy) <- (secondTy as FuncTy)) {
-            if (funcTy.paramTys.size == 1 && typeManager.IsSubtype(funcTy.paramTys[0], sizeTy)) {
-                arrayExpr.SetTy(typeManager.GetArrayTy(funcTy.retTy, rawArrayTy.dims))
-                return target.IsInvalid() ||
-                    typeManager.CheckTypeCompatibility(target, arrayExpr.GetTy().getOrThrow()) !=
-                    TypeCompatibility.INCOMPATIBLE
-            }
-        }
-        arrayExpr.SetTy(typeManager.GetArrayTy(secondTy, rawArrayTy.dims))
-        return target.IsInvalid() ||
-            typeManager.CheckTypeCompatibility(target, arrayExpr.GetTy().getOrThrow()) != TypeCompatibility.INCOMPATIBLE
-    }
-    let elemTy = GetArrayElementTy(typeManager, rawArrayTy)
-    if (!ChkSizedArrayElement(typeManager, elemTy, arrayExpr)) {
-        return false
-    }
-    arrayExpr.SetTy(rawArrayTy)
-    if (!target.IsInvalid()) {
-        return typeManager.CheckTypeCompatibility(target, rawArrayTy) != TypeCompatibility.INCOMPATIBLE
-    }
-    return true
-}
-
-public func ChkSingleArgArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr): Bool {
-    return ChkSingleArgArrayExpr(typeManager, target, arrayExpr, diag: None)
-}
-
-public func ChkSingleArgArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
-    if (let None <- arrayExpr.typeNode) {
-        return false
-    }
-    if (arrayExpr.args.size != 1) {
-        return false
-    }
-    let arrayTy = arrayExpr.typeNode.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
-    if (let Some(rawArrayTy) <- (arrayTy as ArrayTy)) {
-        let argElemTyOpt = CollectionElementTy(typeManager, FuncArgTy(arrayExpr.args[0]))
-        if (let None <- argElemTyOpt) {
-            if (let Some(diagValue) <- diag) {
-                DiagOld(diagValue, arrayExpr.args[0], BasicDiagKind.sema_array_single_element_type_error)
-            }
-            arrayExpr.SetTy(TypeManager.GetInvalidTy())
-            return false
-        }
-        let argElemTy = argElemTyOpt.getOrThrow()
-        if (rawArrayTy.typeArgs.isEmpty() || rawArrayTy.typeArgs[0].IsInvalid()) {
-            arrayExpr.SetTy(typeManager.GetArrayTy(argElemTy, rawArrayTy.dims))
-        } else {
-            let elemTy = GetArrayElementTy(typeManager, rawArrayTy)
-            if (typeManager.CheckTypeCompatibility(elemTy, argElemTy) == TypeCompatibility.INCOMPATIBLE) {
-                if (let Some(diagValue) <- diag) {
-                    DiagOld(diagValue, arrayExpr.args[0], BasicDiagKind.sema_array_single_element_type_error)
-                }
-                arrayExpr.SetTy(TypeManager.GetInvalidTy())
-                return false
-            }
-            arrayExpr.SetTy(rawArrayTy)
-        }
-        return target.IsInvalid() ||
-            typeManager.CheckTypeCompatibility(target, arrayExpr.GetTy().getOrThrow()) != TypeCompatibility.INCOMPATIBLE
-    }
+    DiagOld(diag, arrayExpr.args[1], BasicDiagKind.sema_array_expression_type_error)
     return false
 }
 
-public func ChkArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
-    if (let None <- arrayExpr.typeNode) {
-        return false
+// C++ src/Sema/TypeCheckBuiltinExpr.cpp:194-241 TypeCheckerImpl::ChkSizedArrayWithoutElemTy.
+public func ChkSizedArrayWithoutElemTy(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr,
+    checker: CallArgChecker, argSynthesizer: (FuncArg) -> Ty, diag: BasicDiagnosticEngine): Bool {
+    let arrayTy = (arrayExpr.typeNode.getOrThrow().GetTy().getOrThrow() as ArrayTy).getOrThrow()
+    let sizeTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+    let isArgLambda = arrayExpr.args[1].name.Empty()
+    if (!isArgLambda) {
+        arrayExpr.initFunc = None
     }
-    let targetTy = UnboxOptionType(target)
-    let arrayTy = arrayExpr.typeNode.getOrThrow().GetTy() ?? TypeManager.GetInvalidTy()
-    if (let None <- (arrayTy as ArrayTy)) {
-        arrayExpr.SetTy(TypeManager.GetInvalidTy())
-        return false
-    }
-    arrayExpr.SetTy(arrayTy)
-    var ok = true
-    if (arrayExpr.args.isEmpty()) {
-        ok = targetTy.IsInvalid() || typeManager.CheckTypeCompatibility(targetTy, arrayTy) != TypeCompatibility.INCOMPATIBLE
-    } else if (arrayExpr.args.size == 1) {
-        ok = ChkSingleArgArrayExpr(typeManager, targetTy, arrayExpr, diag: diag)
-    } else if (arrayExpr.args.size == 2) {
-        ok = ChkSizedArrayExpr(typeManager, targetTy, arrayExpr)
-    } else {
-        if (let Some(diagValue) <- diag) {
-            DiagOld(diagValue, arrayExpr, BasicDiagKind.sema_array_too_much_argument)
+    if (target.IsInvalid() || target.IsInterface()) {
+        let _ = argSynthesizer(arrayExpr.args[1])
+        let _ = ReplaceIdealTy(typeManager, arrayExpr.args[1], diag: Some(diag))
+        if (let Some(expr) <- arrayExpr.args[1].expr) {
+            let _ = ReplaceIdealTy(typeManager, expr, diag: Some(diag))
         }
-        ok = false
+        let exprTy = arrayExpr.args[1].GetTy() ?? TypeManager.GetInvalidTy()
+        if (!Ty.IsTyCorrect(exprTy) || (isArgLambda && !exprTy.IsFunc())) {
+            DiagOld(diag, arrayExpr.args[0], BasicDiagKind.sema_array_expression_type_error)
+            return false
+        }
+        var elementTy = exprTy
+        if (isArgLambda) {
+            let funcTy = (exprTy as FuncTy).getOrThrow()
+            if (funcTy.paramTys.size != 1 || !typeManager.IsSubtype(funcTy.paramTys[0], sizeTy)) {
+                DiagOld(diag, arrayExpr.args[0], BasicDiagKind.sema_array_expression_param_type_error)
+                return false
+            }
+            elementTy = funcTy.retTy
+        }
+        arrayExpr.SetTy(typeManager.GetArrayTy(elementTy, arrayTy.dims))
+        return target.IsInvalid() || typeManager.IsSubtype(arrayExpr.GetTy().getOrThrow(), target)
     }
-    if (!ChkArrayArgs(arrayExpr, diag: diag)) {
-        ok = false
+    let elementTy = GetArrayElementTy(typeManager, (target as ArrayTy).getOrThrow())
+    let expectedExprTy = if (isArgLambda) { typeManager.GetFunctionTy([sizeTy], elementTy) } else { elementTy }
+    if (!checker(expectedExprTy, arrayExpr.args[1])) {
+        DiagOld(diag, arrayExpr.args[1], BasicDiagKind.sema_array_element_type_error)
+        return false
     }
-    if (ok && Ty.IsTyCorrect(arrayExpr.GetTy()) && !Ty.IsTyCorrect(arrayExpr.typeNode.getOrThrow().GetTy())) {
-        arrayExpr.typeNode.getOrThrow().SetTy(arrayExpr.GetTy().getOrThrow())
-    }
-    if (!ok) {
-        arrayExpr.SetTy(TypeManager.GetInvalidTy())
-    }
-    return ok
+    arrayExpr.SetTy(target)
+    return true
 }
 
-public func SynArrayExpr(typeManager: TypeManager, arrayExpr: ArrayExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Ty {
-    if (ChkArrayExpr(typeManager, TypeManager.GetInvalidTy(), arrayExpr, diag: diag)) {
-        return arrayExpr.GetTy() ?? TypeManager.GetInvalidTy()
+// C++ src/Sema/TypeCheckBuiltinExpr.cpp:244-273 TypeCheckerImpl::ChkSizedArrayExpr.
+public func ChkSizedArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr,
+    importManager: SemaImportManager, checker: CallArgChecker, argSynthesizer: (FuncArg) -> Ty,
+    declSynthesizer: CallDeclSynthesizer, diag: BasicDiagnosticEngine): Bool {
+    let arrayTy = (arrayExpr.typeNode.getOrThrow().GetTy().getOrThrow() as ArrayTy).getOrThrow()
+    let sizeTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+    if (!checker(sizeTy, arrayExpr.args[0])) {
+        DiagOld(diag, arrayExpr.args[0], BasicDiagKind.sema_array_size_type_error)
+        return false
     }
-    return InvalidExprTy(arrayExpr)
+    arrayExpr.initFunc = importManager.GetCoreDecl<FuncDecl>("arrayInitByFunction")
+    let initFunc = arrayExpr.initFunc.getOrThrow()
+    let _ = declSynthesizer(initFunc)
+    if (arrayTy.typeArgs[0].IsInvalid()) {
+        return ChkSizedArrayWithoutElemTy(typeManager, target, arrayExpr, checker, argSynthesizer, diag)
+    }
+    let elemTy = GetArrayElementTy(typeManager, arrayTy)
+    var ret = ChkSizedArrayElement(typeManager, elemTy, arrayExpr, checker, diag)
+    if (!target.IsInvalid() && ret) {
+        ret = typeManager.IsSubtype(arrayTy, target, implicitBoxed: true, allowOptionBox: false)
+        if (ret && target.IsArray()) {
+            arrayExpr.SetTy(target)
+        }
+    }
+    return ret
+}
+
+// C++ src/Sema/TypeCheckBuiltinExpr.cpp:276-301 TypeCheckerImpl::ChkSingeArgArrayWithoutElemTy.
+public func ChkSingeArgArrayWithoutElemTy(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr,
+    importManager: SemaImportManager, argSynthesizer: (FuncArg) -> Ty,
+    declSynthesizer: CallDeclSynthesizer, diag: BasicDiagnosticEngine): Bool {
+    let collectionDecl = importManager.GetCoreDecl<InterfaceDecl>("Collection").getOrThrow()
+    let arrayTy = (arrayExpr.typeNode.getOrThrow().GetTy().getOrThrow() as ArrayTy).getOrThrow()
+    let exprTy = argSynthesizer(arrayExpr.args[0])
+    if (!Ty.IsTyCorrect(exprTy)) {
+        DiagOld(diag, arrayExpr.args[0], BasicDiagKind.sema_array_single_element_type_error)
+        return false
+    }
+    let superTys = typeManager.GetAllSuperTys(exprTy)
+    if (HasInheritGivenDecl(superTys, collectionDecl)) {
+        let promotedTys = Promotion(typeManager).Promote(exprTy, collectionDecl.GetTy().getOrThrow())
+        let collectionTy = promotedTys.values[0]
+        arrayExpr.SetTy(typeManager.GetArrayTy(collectionTy.typeArgs[0], arrayTy.dims))
+        arrayExpr.initFunc = importManager.GetCoreDecl<FuncDecl>("arrayInitByCollection")
+        let _ = declSynthesizer(arrayExpr.initFunc.getOrThrow())
+    } else {
+        DiagOld(diag, arrayExpr.args[0], BasicDiagKind.sema_array_single_element_type_error)
+        return false
+    }
+    return target.IsInvalid() || typeManager.IsSubtype(arrayExpr.GetTy().getOrThrow(), target)
+}
+
+// C++ src/Sema/TypeCheckBuiltinExpr.cpp:304-327 TypeCheckerImpl::ChkSingeArgArrayExpr.
+public func ChkSingeArgArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr,
+    importManager: SemaImportManager, checker: CallArgChecker, argSynthesizer: (FuncArg) -> Ty,
+    declSynthesizer: CallDeclSynthesizer, diag: BasicDiagnosticEngine): Bool {
+    let collectionDecl = if (let Some(value) <- importManager.GetCoreDecl<InterfaceDecl>("Collection")) {
+        value
+    } else {
+        return false
+    }
+    let arrayTy = (arrayExpr.typeNode.getOrThrow().GetTy().getOrThrow() as ArrayTy).getOrThrow()
+    if (arrayTy.typeArgs[0].IsInvalid()) {
+        return ChkSingeArgArrayWithoutElemTy(typeManager, target, arrayExpr, importManager,
+            argSynthesizer, declSynthesizer, diag)
+    }
+    let elemTy = if (arrayTy.dims > 1u64) {
+        typeManager.GetArrayTy(arrayTy.typeArgs[0], arrayTy.dims - 1u64)
+    } else {
+        arrayTy.typeArgs[0]
+    }
+    let collectionTy = typeManager.GetInterfaceTy(collectionDecl, [elemTy])
+    if (checker(collectionTy, arrayExpr.args[0])) {
+        arrayExpr.initFunc = importManager.GetCoreDecl<FuncDecl>("arrayInitByCollection")
+        let _ = declSynthesizer(arrayExpr.initFunc.getOrThrow())
+        return target.IsInvalid() || typeManager.IsSubtype(arrayExpr.GetTy().getOrThrow(), target)
+    }
+    DiagOld(diag, arrayExpr.args[0], BasicDiagKind.sema_array_single_element_type_error)
+    return false
+}
+
+// C++ src/Sema/TypeCheckBuiltinExpr.cpp:330-368 TypeCheckerImpl::ChkArrayExpr.
+public func ChkArrayExpr(typeManager: TypeManager, target: Ty, arrayExpr: ArrayExpr,
+    importManager: SemaImportManager, checker: CallArgChecker, typeSynthesizer: (Type) -> Ty,
+    argSynthesizer: (FuncArg) -> Ty, declSynthesizer: CallDeclSynthesizer,
+    diag: BasicDiagnosticEngine): Bool {
+    let targetTy = UnboxOptionType(target)
+    let isWellTyped = Ty.IsTyCorrect(targetTy) && (targetTy.IsArray() || targetTy.IsInterface())
+    if (!isWellTyped) {
+        let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mismatched_types, arrayExpr)
+        builder.AddMainHintArguments([targetTy.String(), "Array"])
+        builder.Emit()
+        arrayExpr.SetTy(TypeManager.GetNonNullTy(arrayExpr.GetTy() ?? TypeManager.GetInvalidTy()))
+        return false
+    }
+    let typeNode = arrayExpr.typeNode.getOrThrow()
+    typeNode.SetTy(typeSynthesizer(typeNode))
+    if (!typeNode.GetTy().getOrThrow().IsArray()) {
+        arrayExpr.SetTy(TypeManager.GetNonNullTy(arrayExpr.GetTy() ?? TypeManager.GetInvalidTy()))
+        return false
+    }
+    arrayExpr.SetTy(typeNode.GetTy().getOrThrow())
+    let arrayTy = (typeNode.GetTy().getOrThrow() as ArrayTy).getOrThrow()
+    var ret = true
+    if (arrayExpr.args.isEmpty()) {
+        if (!arrayTy.typeArgs[0].IsInvalid()) {
+            ret = typeManager.IsSubtype(arrayExpr.GetTy().getOrThrow(), targetTy,
+                implicitBoxed: true, allowOptionBox: false)
+        }
+        arrayExpr.SetTy(if (target.IsInterface()) { arrayTy } else { targetTy })
+    } else if (arrayExpr.args.size == 1) {
+        ret = ChkSingeArgArrayExpr(typeManager, targetTy, arrayExpr, importManager, checker,
+            argSynthesizer, declSynthesizer, diag)
+    } else if (arrayExpr.args.size == 2) {
+        ret = ChkSizedArrayExpr(typeManager, targetTy, arrayExpr, importManager, checker,
+            argSynthesizer, declSynthesizer, diag)
+    } else {
+        DiagOld(diag, arrayExpr, BasicDiagKind.sema_array_too_much_argument)
+        ret = false
+    }
+    if (Ty.IsTyCorrect(arrayExpr.GetTy()) && !Ty.IsTyCorrect(typeNode.GetTy())) {
+        typeNode.SetTy(arrayExpr.GetTy().getOrThrow())
+    }
+    let _ = ChkArrayArgs(arrayExpr, diag: Some(diag))
+    return ret
+}
+
+// C++ src/Sema/TypeCheckBuiltinExpr.cpp:424-453 TypeCheckerImpl::SynArrayExpr.
+public func SynArrayExpr(typeManager: TypeManager, arrayExpr: ArrayExpr,
+    importManager: SemaImportManager, checker: CallArgChecker, typeSynthesizer: (Type) -> Ty,
+    argSynthesizer: (FuncArg) -> Ty, declSynthesizer: CallDeclSynthesizer,
+    diag: BasicDiagnosticEngine): Ty {
+    let typeNode = arrayExpr.typeNode.getOrThrow()
+    typeNode.SetTy(typeSynthesizer(typeNode))
+    if (!typeNode.GetTy().getOrThrow().IsArray()) {
+        return InvalidExprTy(arrayExpr)
+    }
+    arrayExpr.SetTy(typeNode.GetTy().getOrThrow())
+    let arrayTy = (typeNode.GetTy().getOrThrow() as ArrayTy).getOrThrow()
+    var checkRet = true
+    if (arrayExpr.args.isEmpty()) {
+        if (arrayTy.typeArgs[0].IsInvalid()) {
+            DiagOld(diag, arrayExpr, BasicDiagKind.sema_empty_arrayLit_type_undefined)
+            checkRet = false
+        }
+    } else if (arrayExpr.args.size == 1) {
+        checkRet = ChkSingeArgArrayExpr(typeManager, TypeManager.GetInvalidTy(), arrayExpr, importManager,
+            checker, argSynthesizer, declSynthesizer, diag)
+    } else if (arrayExpr.args.size == 2) {
+        checkRet = ChkSizedArrayExpr(typeManager, TypeManager.GetInvalidTy(), arrayExpr, importManager,
+            checker, argSynthesizer, declSynthesizer, diag)
+    } else {
+        DiagOld(diag, arrayExpr, BasicDiagKind.sema_array_too_much_argument)
+        checkRet = false
+    }
+    if (!checkRet || !ChkArrayArgs(arrayExpr, diag: Some(diag))) {
+        arrayExpr.SetTy(TypeManager.GetInvalidTy())
+    } else {
+        typeNode.SetTy(arrayExpr.GetTy().getOrThrow())
+    }
+    return arrayExpr.GetTy().getOrThrow()
 }
 
 public func ChkVArrayArg(typeManager: TypeManager, arrayExpr: ArrayExpr,
@@ -864,7 +969,9 @@ public func ChkCStringCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
 }
 
 public func ChkArrayCall(typeManager: TypeManager, ctx: Option<ASTContext>, target: Ty, ce: CallExpr,
-    diag!: Option<BasicDiagnosticEngine> = None): Bool {
+    importManager: SemaImportManager, checker: CallArgChecker, typeSynthesizer: (Type) -> Ty,
+    argSynthesizer: (FuncArg) -> Ty, declSynthesizer: CallDeclSynthesizer,
+    diag: BasicDiagnosticEngine): Bool {
     if (!IsCallOfBuiltInType(ce, TypeKind.TYPE_ARRAY)) {
         ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy() ?? TypeManager.GetInvalidTy()))
         return false
@@ -873,10 +980,12 @@ public func ChkArrayCall(typeManager: TypeManager, ctx: Option<ASTContext>, targ
     DesugarArrayCall(typeManager, ctx, ce)
     let arrayExpr = (ce.desugarExpr.getOrThrow() as ArrayExpr).getOrThrow()
     let ret = if (target.IsInvalid()) {
-        resultTy = SynArrayExpr(typeManager, arrayExpr, diag: diag)
+        resultTy = SynArrayExpr(typeManager, arrayExpr, importManager, checker, typeSynthesizer,
+            argSynthesizer, declSynthesizer, diag)
         Ty.IsTyCorrect(resultTy)
     } else {
-        let checked = ChkArrayExpr(typeManager, target, arrayExpr, diag: diag)
+        let checked = ChkArrayExpr(typeManager, target, arrayExpr, importManager, checker, typeSynthesizer,
+            argSynthesizer, declSynthesizer, diag)
         resultTy = arrayExpr.GetTy() ?? TypeManager.GetInvalidTy()
         checked
     }
@@ -970,23 +1079,24 @@ public func ChkCFuncCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
 }
 
 public func ChkBuiltinCall(typeManager: TypeManager, ctx: Option<ASTContext>, target: Ty, ce: CallExpr,
-    diag!: Option<BasicDiagnosticEngine> = None, checker!: Option<CallArgChecker> = None,
-    typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None,
-    argSynthesizer!: Option<(FuncArg) -> Ty> = None): Bool {
+    importManager: SemaImportManager, diag: BasicDiagnosticEngine, checker: CallArgChecker,
+    argSynthesizer: (FuncArg) -> Ty, declSynthesizer: CallDeclSynthesizer,
+    typeChecker!: Option<(Ty, Type) -> Bool> = None, typeSynthesizer!: Option<(Type) -> Ty> = None): Bool {
     if (ChkPointerCall(typeManager, ctx, target, ce, typeChecker: typeChecker,
-        typeSynthesizer: typeSynthesizer, argSynthesizer: argSynthesizer, diag: diag)) {
+        typeSynthesizer: typeSynthesizer, argSynthesizer: Some(argSynthesizer), diag: Some(diag))) {
         return true
     }
-    if (ChkCStringCall(typeManager, target, ce, checker: checker, diag: diag)) {
+    if (ChkCStringCall(typeManager, target, ce, checker: Some(checker), diag: Some(diag))) {
         return true
     }
-    if (ChkArrayCall(typeManager, ctx, target, ce, diag: diag)) {
+    if (ChkArrayCall(typeManager, ctx, target, ce, importManager, checker,
+        typeSynthesizer.getOrThrow(), argSynthesizer, declSynthesizer, diag)) {
         return true
     }
-    if (ChkVArrayCall(typeManager, ctx, target, ce, checker: checker, diag: diag)) {
+    if (ChkVArrayCall(typeManager, ctx, target, ce, checker: Some(checker), diag: Some(diag))) {
         return true
     }
-    if (ChkCFuncCall(typeManager, target, ce, argSynthesizer: argSynthesizer, diag: diag)) {
+    if (ChkCFuncCall(typeManager, target, ce, argSynthesizer: Some(argSynthesizer), diag: Some(diag))) {
         return true
     }
     return false

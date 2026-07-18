@@ -5040,11 +5040,13 @@ extend TypeChecker {
                 case None => TypeManager.GetInvalidTy()
             }
             return ChkBuiltinCall(impl.typeManager, Some(ctx),
-                TypeManager.GetNonNullTy(builtinTarget), ce, diag: impl.diag,
-                checker: Some({ expectedTy2: Ty, arg4: FuncArg => CheckCallArgFromContext(ctx, expectedTy2, arg4) }),
+                TypeManager.GetNonNullTy(builtinTarget), ce, impl.importManager.getOrThrow(),
+                impl.diag.getOrThrow(),
+                { expectedTy2: Ty, arg4: FuncArg => CheckCallArgFromContext(ctx, expectedTy2, arg4) },
+                { arg5: FuncArg => SynthesizeFuncArg(ctx, arg5) },
+                { fd2: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd2)) },
                 typeChecker: Some({ targetTy3: Ty, typeNode3: Type => Check(ctx, targetTy3, typeNode3) }),
-                typeSynthesizer: Some({ typeNode4: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode4) }),
-                argSynthesizer: Some({ arg5: FuncArg => SynthesizeFuncArg(ctx, arg5) }))
+                typeSynthesizer: Some({ typeNode4: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode4) }))
         }
         let baseFunc = ce.baseFunc.getOrThrow()
         if (!Ty.IsTyCorrect(baseFunc.GetTy())) {
@@ -8405,10 +8407,12 @@ extend TypeChecker {
                     checker: Some({ target: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, target, arg) }),
                     diag: impl.diag))
             }
-            for (arg in arrayExpr.args) {
-                let _ = SynthesizeFuncArg(ctx, arg)
-            }
-            return FinishSynthesize(ctx, arrayExpr, SynArrayExpr(impl.typeManager, arrayExpr, diag: impl.diag))
+            return FinishSynthesize(ctx, arrayExpr, SynArrayExpr(impl.typeManager, arrayExpr,
+                impl.importManager.getOrThrow(),
+                { targetTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, targetTy, arg) },
+                { typeNode: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode) },
+                { arg: FuncArg => SynthesizeFuncArg(ctx, arg) },
+                { fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }, impl.diag.getOrThrow()))
         }
         if (let Some(pointerExpr) <- (expr as PointerExpr)) {
             return FinishSynthesize(ctx, pointerExpr, SynPointerExpr(impl.typeManager, pointerExpr,
@@ -8640,10 +8644,12 @@ extend TypeChecker {
                     checker: Some({ targetTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, targetTy, arg) }),
                     diag: impl.diag))
             }
-            for (arg in arrayExpr.args) {
-                let _ = SynthesizeFuncArg(ctx, arg)
-            }
-            return FinishCheck(ctx, arrayExpr, ChkArrayExpr(impl.typeManager, target, arrayExpr, diag: impl.diag))
+            return FinishCheck(ctx, arrayExpr, ChkArrayExpr(impl.typeManager, target, arrayExpr,
+                impl.importManager.getOrThrow(),
+                { targetTy: Ty, arg: FuncArg => CheckCallArgFromContext(ctx, targetTy, arg) },
+                { typeNode: Type => SynthesizeNode(ctx, SynPos.NONE, typeNode) },
+                { arg: FuncArg => SynthesizeFuncArg(ctx, arg) },
+                { fd: FuncDecl => Ty.IsTyCorrect(SynthesizeDecl(ctx, fd)) }, impl.diag.getOrThrow()))
         }
         if (let Some(pointerExpr) <- (expr as PointerExpr)) {
             return FinishCheck(ctx, pointerExpr, ChkPointerExpr(impl.typeManager, target, pointerExpr,
