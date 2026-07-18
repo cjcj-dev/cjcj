@@ -1192,38 +1192,6 @@ private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatch
     return CompareParamTys(typeManager, left.tysInArgOrder, right.tysInArgOrder)
 }
 
-private func AppliedDeclTy(typeManager: TypeManager, decl: Decl, typeMapping: SubstPack): Option<Ty> {
-    if (let Some(ty) <- decl.GetTy()) {
-        return Some(typeManager.ApplySubstPack(ty, typeMapping))
-    }
-    return None
-}
-
-private func FuncGenericParamSize(fd: FuncDecl): Int64 {
-    if (let Some(body) <- fd.funcBody) {
-        if (let Some(generic) <- body.generic) {
-            return generic.typeParameters.size
-        }
-    }
-    return 0
-}
-
-private func HasFuncGeneric(fd: FuncDecl): Bool {
-    if (let Some(body) <- fd.funcBody) {
-        if (let Some(_) <- body.generic) {
-            return true
-        }
-    }
-    return false
-}
-
-private func SameGenericShape(left: FuncDecl, right: FuncDecl): Bool {
-    if (HasFuncGeneric(left) != HasFuncGeneric(right)) {
-        return false
-    }
-    return FuncGenericParamSize(left) == FuncGenericParamSize(right)
-}
-
 private func GenerateTypeMappingBetweenFuncs(typeManager: TypeManager, src: FuncDecl, target: FuncDecl): MultiTypeSubst {
     let out = MultiTypeSubst()
     if (let Some(outer) <- src.outerDecl) {
@@ -1237,31 +1205,6 @@ private func GenerateTypeMappingBetweenFuncs(typeManager: TypeManager, src: Func
     return out
 }
 
-private func SameInstantiatedOverrideSignature(typeManager: TypeManager, left: FunctionMatchingUnit,
-    right: FunctionMatchingUnit): Bool {
-    if (!SameGenericShape(left.fd, right.fd)) {
-        return false
-    }
-    if (let Some(leftTy) <- left.fd.GetTy()) {
-        if (let Some(rightTy) <- right.fd.GetTy()) {
-            let instLeftTy = typeManager.ApplySubstPack(leftTy, left.typeMapping)
-            let instRightTy = typeManager.ApplySubstPack(rightTy, right.typeMapping)
-            if (SameTy(instLeftTy, instRightTy)) {
-                return true
-            }
-            if (FuncGenericParamSize(left.fd) > 0) {
-                let mapping = GenerateTypeMappingBetweenFuncs(typeManager, left.fd, right.fd)
-                for (subFunc in typeManager.GetInstantiatedTys(leftTy, mapping).values) {
-                    if (SameTy(rightTy, subFunc) || SameTy(instRightTy, subFunc)) {
-                        return true
-                    }
-                }
-            }
-        }
-    }
-    return false
-}
-
 private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<FunctionMatchingUnit>,
     targetMark: ArrayList<Bool>): Unit {
     var idx: Int64 = 0
@@ -1270,14 +1213,13 @@ private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<Fun
             return
         }
         let outerDecl = candidates[idx].fd.outerDecl.getOrThrow()
-        let instOuterOpt = AppliedDeclTy(typeManager, outerDecl, candidates[idx].typeMapping)
-        if (let None <- instOuterOpt) {
-            return
-        }
-        let instOuter = instOuterOpt.getOrThrow()
+        let instOuter = typeManager.ApplySubstPack(outerDecl.GetTy().getOrThrow(), candidates[idx].typeMapping)
         if (!Ty.IsTyCorrect(instOuter)) {
             return
         }
+        let instFuncTy = typeManager.ApplySubstPack(candidates[idx].fd.GetTy().getOrThrow(),
+            candidates[idx].typeMapping)
+        let funcBody = candidates[idx].fd.funcBody.getOrThrow()
         var otherIdx: Int64 = 0
         while (otherIdx < candidates.size) {
             if (idx == otherIdx || (let None <- candidates[otherIdx].fd.outerDecl)) {
@@ -1285,13 +1227,29 @@ private func FilterOverriden(typeManager: TypeManager, candidates: ArrayList<Fun
                 continue
             }
             let otherOuterDecl = candidates[otherIdx].fd.outerDecl.getOrThrow()
-            let otherOuterOpt = AppliedDeclTy(typeManager, otherOuterDecl, candidates[otherIdx].typeMapping)
-            if (let Some(otherOuter) <- otherOuterOpt) {
-                if (Ty.IsTyCorrect(otherOuter) && !SameTy(instOuter, otherOuter) && typeManager.IsSubtype(instOuter,
-                    otherOuter) && SameInstantiatedOverrideSignature(typeManager, candidates[idx], candidates[otherIdx])) {
-                    targetMark[otherIdx] = false
-                    break
+            let otherOuter = typeManager.ApplySubstPack(otherOuterDecl.GetTy().getOrThrow(),
+                candidates[otherIdx].typeMapping)
+            if (!Ty.IsTyCorrect(otherOuter) || SameTy(instOuter, otherOuter)) {
+                otherIdx++
+                continue
+            }
+            let otherInstFuncTy = typeManager.ApplySubstPack(candidates[otherIdx].fd.GetTy().getOrThrow(),
+                candidates[otherIdx].typeMapping)
+            let otherFuncBody = candidates[otherIdx].fd.funcBody.getOrThrow()
+            var sameSig = SameTy(instFuncTy, otherInstFuncTy)
+            sameSig = sameSig && (funcBody.generic.isNone() == otherFuncBody.generic.isNone())
+            if (sameSig) {
+                if (let Some(generic) <- funcBody.generic) {
+                    sameSig = generic.typeParameters.size == otherFuncBody.generic.getOrThrow().typeParameters.size
+                    let mapping = GenerateTypeMappingBetweenFuncs(typeManager, candidates[idx].fd,
+                        candidates[otherIdx].fd)
+                    let subFuncs = typeManager.GetInstantiatedTys(candidates[idx].fd.GetTy().getOrThrow(), mapping)
+                    sameSig = sameSig && subFuncs.Contains(candidates[otherIdx].fd.GetTy().getOrThrow())
                 }
+            }
+            if (typeManager.IsSubtype(instOuter, otherOuter) && sameSig) {
+                targetMark[otherIdx] = false
+                break
             }
             otherIdx++
         }
