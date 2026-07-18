@@ -1013,6 +1013,18 @@ public class Collector {
             AssignTypeAliasDecl(ctx, typeAlias)
             return true
         }
+        if (let Some(primaryCtorDecl) <- (node as PrimaryCtorDecl)) {
+            for (annotation in primaryCtorDecl.annotations) {
+                AssignNode(ctx, annotation)
+            }
+            SetScopeGate(ctx, primaryCtorDecl)
+            scopeManager.InitializeScope(ctx)
+            if (let Some(funcBody) <- primaryCtorDecl.funcBody) {
+                AssignFuncBody(ctx, funcBody)
+            }
+            scopeManager.FinalizeScope(ctx)
+            return true
+        }
         if (let Some(funcDecl) <- (node as FuncDecl)) {
             AssignFuncDecl(ctx, funcDecl)
             return true
