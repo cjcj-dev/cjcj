@@ -192,7 +192,6 @@ public func TypeCheckClassLikeCheckThreadContextInheritance(
         let builder = DiagnoseRefactor(diag,
             BasicDiagKindRefactor.sema_inherit_thread_context_not_open,
             decl,
-            TypeCheckClassLikeIdentifierRange(decl),
             arguments: [decl.identifier.Val()])
         builder.Emit()
         return false
@@ -208,7 +207,6 @@ public func TypeCheckClassLikeCheckThreadContextInheritance(
         let builder = DiagnoseRefactor(diag,
             BasicDiagKindRefactor.sema_inherit_thread_context_invalid,
             decl,
-            TypeCheckClassLikeIdentifierRange(decl),
             arguments: [decl.identifier.Val()])
         builder.Emit()
         return false
