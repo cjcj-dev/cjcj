@@ -1185,9 +1185,7 @@ private func CompareFuncCandidates(typeManager: TypeManager, left: FunctionMatch
                     .fd
                     .TestAttr(Attribute.ABSTRACT)
                 let leftImpl = leftOuter.astKind != ASTKind.INTERFACE_DECL && !left.fd.TestAttr(Attribute.ABSTRACT)
-                if (rightImplementable && leftImpl) {
-                    return true
-                }
+                return rightImplementable && leftImpl
             }
         }
     }
