@@ -630,7 +630,7 @@ public class DiagnosticEmitter {
                 }
                 backwardOffset++
             }
-            combinedLine.meta = String.fromUtf8(result.toArray())
+            combinedLine.meta = unsafe { String.fromUtf8Unchecked(result.toArray()) }
             combinedVec[combinedIndex] = combinedLine
             combinedIndex++
         }
