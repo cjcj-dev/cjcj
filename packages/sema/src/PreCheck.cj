@@ -155,7 +155,6 @@ private func collectDecl(ctx: ASTContext, decl: Decl): Bool {
     }
     if (let Some(generic) <- decl.GetGeneric()) {
         for (param in generic.typeParameters) {
-            param.outerDecl = Some(decl)
             valid = collectDecl(ctx, param) && valid
         }
     }
