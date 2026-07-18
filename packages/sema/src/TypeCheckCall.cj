@@ -2824,7 +2824,9 @@ private func CheckGenericDeclInstantiation(typeManager: TypeManager, diag: Optio
     if (let None <- generic) {
         return true
     }
-    mergeTypeSubst(instantiateMap, GenerateTypeMapping(decl, typeArgs))
+    for ((tyVar, ty) in GenerateTypeMapping(decl, typeArgs).entries) {
+        instantiateMap.Put(tyVar.value, ty)
+    }
     for (constraint in generic.getOrThrow().genericConstraints) {
         let refType = constraint.refType ?? return false
         let refTy = refType.GetTy() ?? return false
