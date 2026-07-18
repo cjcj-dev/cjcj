@@ -11,6 +11,7 @@ import cjcj::modules.GetMainPartPkgNameForTestPkg as ModulesGetMainPartPkgNameFo
 import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
 import cjcj::modules.IsTestPackage as ModulesIsTestPackage
 import cjcj::modules.PackageRelation as ModulesPackageRelation
+import cjcj::modules.SemaImportManager
 
 private class InoutUseCacheEntry {
     public var decl: Decl
@@ -340,7 +341,8 @@ private func AccessCurCompositeDecl(curComposite: Option<Symbol>): Option<Decl> 
     return None
 }
 
-public func IsLegalAccess(typeManager: TypeManager, curComposite: Option<Symbol>, target: Decl, accessSite: Node): Bool {
+public func IsLegalAccess(typeManager: TypeManager, curComposite: Option<Symbol>, target: Decl, accessSite: Node,
+    importManager!: Option<SemaImportManager> = None): Bool {
     if ((let None <- (target as VarDecl)) && (let None <- (target as FuncDecl)) &&
         (let None <- (target as ClassLikeDecl))) {
         return true
@@ -353,7 +355,12 @@ public func IsLegalAccess(typeManager: TypeManager, curComposite: Option<Symbol>
             if (let Some(memberAccess) <- (accessSite as MemberAccess)) {
                 if (let Some(baseExpr) <- memberAccess.baseExpr) {
                     if (let Some(baseTy) <- baseExpr.GetTy()) {
-                        if (!AccessIsExtendMemberAccessible(typeManager, file, target, baseTy)) {
+                        let accessible = if (let Some(manager) <- importManager) {
+                            manager.IsExtendMemberAccessible(file, target, baseTy, None)
+                        } else {
+                            AccessIsExtendMemberAccessible(typeManager, file, target, baseTy)
+                        }
+                        if (!accessible) {
                             return false
                         }
                     }
@@ -417,20 +424,21 @@ public func IsLegalAccess(typeManager: TypeManager, curComposite: Option<Symbol>
     return false
 }
 
-public func IsTargetMemberVisibleToNode(typeManager: TypeManager, ctx: ASTContext, target: Decl, node: Node): Bool {
+public func IsTargetMemberVisibleToNode(typeManager: TypeManager, ctx: ASTContext, target: Decl, node: Node,
+    importManager!: Option<SemaImportManager> = None): Bool {
     if (IsSameFile(node, target)) {
         return true
     }
     let sym = GetCurStructSymbol(ctx, node.scopeName)
-    return IsLegalAccess(typeManager, sym, target, node)
+    return IsLegalAccess(typeManager, sym, target, node, importManager: importManager)
 }
 
 public func GetAccessibleDecls(typeManager: TypeManager, ctx: ASTContext, accessSite: Expr,
-    targets: ArrayList<Decl>): ArrayList<Decl> {
+    targets: ArrayList<Decl>, importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
     let out = ArrayList<Decl>()
     let sym = GetCurStructSymbol(ctx, accessSite.scopeName)
     for (target in targets) {
-        if (IsLegalAccess(typeManager, sym, target, accessSite)) {
+        if (IsLegalAccess(typeManager, sym, target, accessSite, importManager: importManager)) {
             out.add(target)
         }
     }
@@ -438,8 +446,8 @@ public func GetAccessibleDecls(typeManager: TypeManager, ctx: ASTContext, access
 }
 
 public func GetAccessibleDecl(typeManager: TypeManager, ctx: ASTContext, accessSite: Expr,
-    targets: ArrayList<Decl>): Option<Decl> {
-    let accessible = GetAccessibleDecls(typeManager, ctx, accessSite, targets)
+    targets: ArrayList<Decl>, importManager!: Option<SemaImportManager> = None): Option<Decl> {
+    let accessible = GetAccessibleDecls(typeManager, ctx, accessSite, targets, importManager: importManager)
     if (accessible.isEmpty()) {
         return None
     }
@@ -447,8 +455,8 @@ public func GetAccessibleDecl(typeManager: TypeManager, ctx: ASTContext, accessS
 }
 
 public func CheckFuncAccessControl(diag: BasicDiagnosticEngine, typeManager: TypeManager, ctx: ASTContext, accessSite: Expr,
-    targets: ArrayList<Decl>): Option<Decl> {
-    let accessibleDecl = GetAccessibleDecl(typeManager, ctx, accessSite, targets)
+    targets: ArrayList<Decl>, importManager!: Option<SemaImportManager> = None): Option<Decl> {
+    let accessibleDecl = GetAccessibleDecl(typeManager, ctx, accessSite, targets, importManager: importManager)
     if (let Some(_) <- accessibleDecl) {
         return accessibleDecl
     }
@@ -462,9 +470,9 @@ public func CheckFuncAccessControl(diag: BasicDiagnosticEngine, typeManager: Typ
 }
 
 public func CheckNonFuncAccessControl(diag: BasicDiagnosticEngine, typeManager: TypeManager, ctx: ASTContext,
-    accessSite: Expr, target: Decl): Bool {
+    accessSite: Expr, target: Decl, importManager!: Option<SemaImportManager> = None): Bool {
     let sym = GetCurStructSymbol(ctx, accessSite.scopeName)
-    if (IsLegalAccess(typeManager, sym, target, accessSite)) {
+    if (IsLegalAccess(typeManager, sym, target, accessSite, importManager: importManager)) {
         return true
     }
     let builder = Diagnose(diag, accessSite,
