@@ -792,7 +792,6 @@ extend ParserImpl {
             body.end = invalidBlock.end
             DiagMissingBody("macro", if (!macroDecl.identifier.Valid()) { "" } else { " '" + macroDecl.identifier.Val() + "'" },
                 Peek().End())
-            macroDecl.EnableAttr(Attribute.IS_BROKEN)
         }
         return body
     }
