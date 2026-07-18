@@ -1941,7 +1941,7 @@ public class MockSupportManager {
         let accessorInterface = InterfaceDecl()
         CopyBasicInfo(interfaceDecl, accessorInterface)
         accessorInterface.CloneAttrs(interfaceDecl)
-        accessorInterface.identifier.SetValue(
+        accessorInterface.identifier = SrcIdentifier(
             interfaceDecl.identifier.Val() + MockUtils.defaultAccessorSuffix)
         accessorInterface.SetTy(typeManager.GetInterfaceTy(accessorInterface, []))
         accessorInterface.fullPackageName = interfaceDecl.fullPackageName
@@ -1955,7 +1955,7 @@ public class MockSupportManager {
             let _ = CloneFuncDecl(funcDecl, accessorDecl)
             accessorDecl.outerDecl = accessorInterface
             accessorDecl.funcBody.getOrThrow().parentClassLike = accessorInterface
-            accessorDecl.identifier.SetValue(
+            accessorDecl.identifier = SrcIdentifier(
                 mockUtils.Mangle(funcDecl) + MockUtils.defaultAccessorSuffix)
 
             CJC_ASSERT(accessorDecl.TestAttr(Attribute.DEFAULT))
