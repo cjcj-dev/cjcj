@@ -1506,6 +1506,7 @@ public class ClosureConversion {
                     throw IllegalStateException("ClosureConversion apply has no result type")
                 let newApply = builder.CreateApply(retTy, method, FuncCallContext(args: args,
                     thisType: autoEnvObj.GetType()), parent)
+                newApply.SetDebugLocation(apply.GetDebugLocation())
                 apply.ReplaceWith(newApply)
                 return
             }
@@ -1521,6 +1522,7 @@ public class ClosureConversion {
                 let newApply = builder.CreateApplyWithException(retTy, method, FuncCallContext(args: args,
                     thisType: autoEnvObj.GetType()), applyWithException.GetSuccessBlock(),
                     applyWithException.GetErrorBlock(), parent)
+                newApply.SetDebugLocation(applyWithException.GetDebugLocation())
                 applyWithException.ReplaceWith(newApply)
                 return
             }
@@ -1535,8 +1537,6 @@ public class ClosureConversion {
         let instantiateClassTy = GenerateInstantiatedClassType(autoEnvImplType, user, srcFunc)
         let refType = builder.context.GetRefTy(instantiateClassTy)
         let allocate = builder.CreateAllocate(refType, instantiateClassTy, parent)
-        allocate.SetDebugLocation(user.GetDebugLocation())
-        allocate.SetDebugLocationInfoForWarning(user.GetDebugLocationInfoForWarning())
         let obj = RequireResult(allocate)
         var idx: UInt64 = 0u64
         for (env in envs) {
@@ -1883,6 +1883,7 @@ public class ClosureConversion {
         let parent = apply.GetParentBlock() ??
             throw IllegalStateException("ClosureConversion apply has no parent block")
         let invoke = builder.CreateInvoke(retTy, invokeContext, parent)
+        invoke.SetDebugLocation(apply.GetDebugLocation())
         invoke.SetVirtualMethodOffset(0u64)
         apply.ReplaceWith(invoke)
     }
@@ -1899,6 +1900,7 @@ public class ClosureConversion {
         let invoke = builder.CreateInvokeWithException(retTy, invokeContext, apply.GetSuccessBlock(),
             apply.GetErrorBlock(), apply.GetParentBlock() ??
                 throw IllegalStateException("ClosureConversion apply-with-exception has no parent block"))
+        invoke.SetDebugLocation(apply.GetDebugLocation())
         invoke.SetVirtualMethodOffset(0u64)
         apply.ReplaceWith(invoke)
     }
