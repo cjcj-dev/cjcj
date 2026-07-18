@@ -158,11 +158,12 @@ public class Job {
             if (cmdBatch.isEmpty()) {
                 continue
             }
-            let recorder = ProfileRecorder("Main Stage", "Execute " + FileUtil.GetFileName(cmdBatch[0].GetName()))
-            let runner = ToolBatchRunner(cmdBatch, verbose)
-            if (let Some(failure) <- runner.Run(jobLimit)) {
-                PrintToolFailure(failure)
-                return false
+            try (recorder = ProfileRecorder("Main Stage", "Execute " + FileUtil.GetFileName(cmdBatch[0].GetName()))) {
+                let runner = ToolBatchRunner(cmdBatch, verbose)
+                if (let Some(failure) <- runner.Run(jobLimit)) {
+                    PrintToolFailure(failure)
+                    return false
+                }
             }
         }
         return true
