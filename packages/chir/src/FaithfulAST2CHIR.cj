@@ -4477,6 +4477,12 @@ public class FaithfulAST2CHIR {
             packageName: GetNameOfDefinedPackage(funcDecl))
         fn.SetDebugLocation(TranslateLocationWithoutScope(builder.context, funcDecl.begin, funcDecl.end))
         AttachFunctionGenericParams(funcDecl, fn)
+        if (funcDecl.TestAttr(AstAttribute.COMMON)) {
+            fn.EnableAttr(Attribute.COMMON)
+            if (OutputCHIR() && !funcDecl.TestAttr(AstAttribute.COMMON_WITH_DEFAULT)) {
+                fn.EnableAttr(Attribute.SKIP_ANALYSIS)
+            }
+        }
         if (!funcDecl.TestAttr(AstAttribute.ABSTRACT)) {
             let body = builder.CreateBlockGroup(fn)
             fn.InitBody(body)
