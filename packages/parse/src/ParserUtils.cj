@@ -712,8 +712,7 @@ extend ParserImpl {
     }
 
     public func SeeingPrimitiveTypeAndDot(): Bool {
-        return SeeingPrimitiveTypeToken(Peek().kind) &&
-            lexer.LookAhead(1).size > 0 && lexer.LookAhead(1)[0].kind == TokenKind.DOT
+        return SeeingPrimitiveTypeToken(Peek().kind) && Seeing([Peek().kind, TokenKind.DOT])
     }
 
     public func IsRawIdentifier(identifier: String): Bool {
