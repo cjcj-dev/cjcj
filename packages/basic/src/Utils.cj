@@ -114,7 +114,7 @@ public func SplitLines(str: String): Array<String> {
                 curIndex++
             }
         }
-        res.add(String.fromUtf8(bytes[newLineStartPos..lineTerminatorPos]))
+        res.add(unsafe { String.fromUtf8Unchecked(bytes[newLineStartPos..lineTerminatorPos]) })
         newLineStartPos = curIndex
     }
     if (bytes[length - 1] == b'\n') {
