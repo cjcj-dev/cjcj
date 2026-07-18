@@ -8488,8 +8488,12 @@ extend TypeChecker {
             let upperBounds = impl.typeManager.constraints.GetOrCreate(placeholder).ubs
             var lub: Option<Ty> = None
             if (!upperBounds.IsEmpty()) {
+                let ignoredTyVars = TySet()
+                for (unsolvedTyVar in impl.typeManager.GetUnsolvedTyVars()) {
+                    ignoredTyVars.Add(unsolvedTyVar)
+                }
                 if (let ErrOrTy.TY(metTy) <- MeetAsVisibleTy(impl.typeManager, upperBounds,
-                    ignoredTyVars: ToTySet(impl.typeManager.GetUnsolvedTyVars()))) {
+                    ignoredTyVars: ignoredTyVars)) {
                     lub = Some(metTy)
                 }
             }
