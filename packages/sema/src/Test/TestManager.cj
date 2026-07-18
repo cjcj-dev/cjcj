@@ -334,6 +334,12 @@ public class TestManager {
         DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_frozen_unsupported, reportOn).Emit()
     }
 
+    // C++: Sema/Test/TestManager.cpp:103-106, TestManager::ReportFrozenRequired.
+    public func ReportFrozenRequired(reportOn: FuncDecl): Unit {
+        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_frozen_required, reportOn,
+            arguments: [reportOn.identifier.Val()]).Emit()
+    }
+
     // C++: Sema/Test/TestManager.cpp:118-121.
     public func ReportMockDisabled(reportOn: Expr): Unit {
         DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_disabled, reportOn,
@@ -344,8 +350,8 @@ public class TestManager {
     public func ReportWrongStaticDecl(reportOn: Expr): Unit {
         if (let Some(lambda) <- (reportOn as LambdaExpr)) {
             let body = lambda.funcBody.getOrThrow().body.getOrThrow()
-            let _ = diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_wrong_static_decl,
-                MakeRange(body.leftCurlPos, lambda.end))
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.sema_mock_wrong_static_decl,
+                MakeRange(body.leftCurlPos, lambda.end)).Emit()
             return
         }
         DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_mock_wrong_static_decl, reportOn).Emit()
@@ -750,13 +756,7 @@ public class TestManager {
             if (let Some(funcDecl) <- (node as FuncDecl)) {
                 if (funcDecl.TestAttr(Attribute.CONTAINS_MOCK_CREATION_CALL) && IsGenericFuncDecl(funcDecl) &&
                     !funcDecl.HasAnno(AstAnnotationKind.FROZEN)) {
-                    // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                    let _ = DiagnoseRefactor(diag,
-                        BasicDiagKindRefactor.sema_mock_frozen_required,
-                        funcDecl,
-                        MakeRange(funcDecl.identifier.Begin(), funcDecl.identifier.End()),
-                        arguments: [funcDecl.identifier.Val()]
-                    )
+                    ReportFrozenRequired(funcDecl)
                 }
             }
             return VisitAction.WALK_CHILDREN
