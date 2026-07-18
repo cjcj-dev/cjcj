@@ -1549,7 +1549,11 @@ class CHIRSerializerImpl {
             UInt8(AccessLevelIndex(chirPackage.GetPackageAccessLevel())), Some(typeKind), Some(allType),
             Some(valueKind), Some(allValue), Some(exprKind), Some(allExpression), Some(defKind),
             Some(allCustomTypeDef), packageInitFunc, ToCHIRPhaseIndex(phase), packageLiteralInitFunc)
-        File.writeTo(filename, builder.Finish(serializedPackage))
+        try {
+            File.writeTo(filename, builder.Finish(serializedPackage))
+        } catch (_: Exception) {
+            CJC_ASSERT(false)
+        }
     }
 
     func ConvertToMemoryData(): Array<UInt8> {
