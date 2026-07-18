@@ -1795,15 +1795,15 @@ extend ParserImpl {
     ): VarWithPatternDecl {
         let decl = VarWithPatternDecl()
         try (cs = ChainScope(this, decl)) {
+            decl.isVar = isVar
+            decl.isConst = isConst
+            decl.keywordPos = key.Begin()
+            decl.begin = key.Begin()
             let attrs = CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE)
             let pattern = ParseIrrefutablePattern(attrs, isVar, true)
             ApplyModifiersAndAnnotations(decl, modifiers, annos)
             EnableModifierAttrs(decl, attrs)
-            decl.keywordPos = key.Begin()
             decl.irrefutablePattern = pattern
-            decl.isVar = isVar
-            decl.isConst = isConst
-            decl.begin = key.Begin()
             ParseTypeAndExpr(decl)
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 let setGlobalAttr = { node: Node =>
