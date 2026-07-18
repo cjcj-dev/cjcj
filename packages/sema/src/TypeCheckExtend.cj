@@ -286,9 +286,6 @@ public func PreCheckExtend(
             valid = false
         }
     }
-    if (!CheckExtendGenerics(diag, extendDecl)) {
-        valid = false
-    }
     let _ = tm
     return valid
 }
