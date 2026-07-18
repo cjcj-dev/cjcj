@@ -359,7 +359,6 @@ public open class DefaultCompilerInstance {
         }
         if (let Some(generic) <- decl.generic) {
             for (typeParam in generic.typeParameters) {
-                typeParam.outerDecl = Some(decl)
                 PreMangleDeclTree(mangler, pkgName, typeParam, seen)
             }
         }
@@ -367,7 +366,6 @@ public open class DefaultCompilerInstance {
             if (let Some(body) <- funcDecl.funcBody) {
                 if (let Some(bodyGeneric) <- body.generic) {
                     for (typeParam2 in bodyGeneric.typeParameters) {
-                        typeParam2.outerDecl = Some(decl)
                         PreMangleDeclTree(mangler, pkgName, typeParam2, seen)
                     }
                 }
