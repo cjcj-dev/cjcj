@@ -753,39 +753,26 @@ public open class Ty <: Identifiable & Hashable & Equatable<Ty> {
     }
 
     public static func GetDeclPtrOfTy(ty: Option<Ty>): Option<Decl> {
+        var decl: Option<Decl> = None
         if (let Some(value) <- ty) {
             if (let Some(classTy) <- (value as ClassTy)) {
-                if (let Some(decl) <- classTy.declPtr) {
-                    return decl
-                }
-                return None
-            }
-            if (let Some(interfaceTy) <- (value as InterfaceTy)) {
-                if (let Some(decl) <- interfaceTy.declPtr) {
-                    return decl
-                }
-                return None
-            }
-            if (let Some(structTy) <- (value as StructTy)) {
-                if (let Some(decl) <- structTy.declPtr) {
-                    return decl
-                }
-                return None
-            }
-            if (let Some(enumTy) <- (value as EnumTy)) {
-                if (let Some(decl) <- enumTy.declPtr) {
-                    return decl
-                }
-                return None
-            }
-            if (let Some(aliasTy) <- (value as TypeAliasTy)) {
-                if (let Some(decl) <- aliasTy.declPtr) {
-                    return decl
-                }
-                return None
+                decl = classTy.declPtr
+            } else if (let Some(interfaceTy) <- (value as InterfaceTy)) {
+                decl = interfaceTy.declPtr
+            } else if (let Some(structTy) <- (value as StructTy)) {
+                decl = structTy.declPtr
+            } else if (let Some(enumTy) <- (value as EnumTy)) {
+                decl = enumTy.declPtr
+            } else if (let Some(aliasTy) <- (value as TypeAliasTy)) {
+                decl = aliasTy.declPtr
             }
         }
-        return None
+        if (let Some(genericDecl) <- decl) {
+            if (let Some(specificDecl) <- genericDecl.specificImplementation) {
+                decl = Some(specificDecl)
+            }
+        }
+        return decl
     }
 
     public static func GetInheritableDeclPtrOfTy(ty: Option<Ty>): Option<InheritableDecl> {
