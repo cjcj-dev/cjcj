@@ -219,7 +219,8 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: MacroHost): U
             let begin = Position(mcPos.fileID, mcPos.line, lastColumn, token.Begin().isCurFile)
             let end = Position(mcPos.fileID, mcPos.line, lastColumn + getTokenLengthForMap(token), token.End().isCurFile)
             token.SetValuePos(token.Value(), begin, end)
-            if (!hasPosition64(invocation.origin2newPosMap, originalKey)) {
+            if (token.kind != TokenKind.NL && token.kind != TokenKind.COMMENT &&
+                !hasPosition64(invocation.origin2newPosMap, originalKey)) {
                 putPosition64(invocation.origin2newPosMap, originalKey, token.Begin())
             }
             lastColumn = end.column
