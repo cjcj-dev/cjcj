@@ -20,6 +20,8 @@ import cjcj::chir.Package as RealCHIRPackage
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.SemaImportManager
 import cjcj::modules.MacroHostImportManager
+import cjcj::modules.{DiagForDifferentPackageFeatureConsistency, DiagForNullPackageFeature,
+    WarnRepeatedFeatureName}
 import cjcj::option.OutputMode
 import cjcj::modules.{GetPackage, PackageFormat_AliasInfo, PackageFormat_Anno, PackageFormat_ArrayInfo,
     PackageFormat_ArrayTyInfo, PackageFormat_ClassInfo, PackageFormat_CompositeTyInfo, PackageFormat_Constraint,
@@ -6620,7 +6622,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         refMap: HashMap<String, Bool>
     ): (Option<File>, Bool) {
         var refSize: Int64 = 0
-        let rangeMap = HashMap<String, Range>()
+        let rangeMap = HashMap<String, BasicRange>()
         var refFile: Option<File> = None
         var anno = false
         for (file in pkg.files) {
