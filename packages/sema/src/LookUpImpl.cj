@@ -101,27 +101,18 @@ private class LookUpImpl {
                 idx++
                 continue
             }
-            var parentIsSubtype = false
-            if (let Some(outerTy) <- inResultOuter) {
-                parentIsSubtype = typeManager.IsSubtype(parentTy, outerTy)
-            }
-            if (parentIsSubtype ||
+            if ((inResultOuter.isSome() && typeManager.IsSubtype(parentTy, inResultOuter.getOrThrow())) ||
                 (inResult.TestAttr(Attribute.ABSTRACT) && !decl.TestAttr(Attribute.ABSTRACT))) {
                 results.remove(at: idx)
                 SwapResultsWithInstTy(idx, results.size, decl, parentTy)
                 results.add(decl)
+            } else if ((inResultOuter.isSome() &&
+                typeManager.IsSubtype(inResultOuter.getOrThrow(), parentTy)) ||
+                (decl.TestAttr(Attribute.ABSTRACT) && !inResult.TestAttr(Attribute.ABSTRACT))) {
+                // Keep the declaration already in results.
             } else {
-                var resultIsSubtype = false
-                if (let Some(outerTy) <- inResultOuter) {
-                    resultIsSubtype = typeManager.IsSubtype(outerTy, parentTy)
-                }
-                if (resultIsSubtype ||
-                    (decl.TestAttr(Attribute.ABSTRACT) && !inResult.TestAttr(Attribute.ABSTRACT))) {
-                    // Keep the declaration already in results.
-                } else {
-                    idx++
-                    continue
-                }
+                idx++
+                continue
             }
             return
         }
