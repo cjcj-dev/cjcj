@@ -433,11 +433,8 @@ private func CreateUpdate(forInExpr: ForInExpr, rangeExpr: RangeExpr, index: Var
     update.curFile = forInExpr.curFile
     update.leftValue = CreateVarRef(index, rangeExpr)
     if (let Some(stepExpr) <- rangeExpr.stepExpr) {
-        if (let Some(clonedStep) <- CloneExpr(stepExpr)) {
-            update.rightExpr = clonedStep
-        } else {
-            return None
-        }
+        update.rightExpr = stepExpr
+        rangeExpr.stepExpr = None
     } else {
         let stepTy = if (let Some(indexTy) <- index.GetTy()) { indexTy } else { TypeManager.GetInvalidTy() }
         update.rightExpr = CreateLitConstExpr(LitConstKind.INTEGER, "1", stepTy)
