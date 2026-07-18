@@ -1026,6 +1026,9 @@ extend ParserImpl {
 public func LevenshteinDistance(source: String, target: String): UInt64 {
     let s = source.toArray()
     let t = target.toArray()
+    if (t.isEmpty()) {
+        return UInt64(t.size)
+    }
     var prev = ArrayList<UInt64>()
     var cur = ArrayList<UInt64>()
     var j: Int64 = 0
