@@ -353,6 +353,19 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         return ""
     }
 
+    protected func CommentToString(): String {
+        let comments = ArrayList<String>()
+        let baseComment = BaseCommentToString()
+        if (!baseComment.isEmpty()) {
+            comments.add(baseComment)
+        }
+        let extra = AddExtraComment()
+        if (!extra.isEmpty()) {
+            comments.add(extra)
+        }
+        return CommentToString(comments)
+    }
+
     public open func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let clonedOperands = GetOperands()
         return builder.CreateExpression(kind, None, clonedOperands, parent)
