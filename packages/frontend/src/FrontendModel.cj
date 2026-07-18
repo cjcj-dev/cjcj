@@ -6922,7 +6922,8 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             return false
         }
         cjoFilePaths[fullPackageName] = cjoPath
-        depPkgCjdPaths[fullPackageName] = cjoPath
+        let end = cjoPath.lastIndexOf(SERIALIZED_FILE_EXTENSION) ?? cjoPath.size
+        depPkgCjdPaths[fullPackageName] = cjoPath[0..end] + CJ_D_FILE_EXTENSION
         for (depStdPkg in ReadAllDependentStdPkgs(data)) {
             let depCjoPath = FindAndSaveDepStdCjoPath(depStdPkg)
             HandleStdPackage(depStdPkg, depCjoPath, isRecursive: true)
