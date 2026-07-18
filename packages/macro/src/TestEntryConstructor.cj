@@ -355,10 +355,11 @@ public class TestEntryConstructor {
     }
 
     private func CheckTestSuiteConstraints(root: Node, funcs: ArrayList<FuncDecl>): Unit {
-        if (root.TestAttr(Attribute.IS_BROKEN)) {
-            return
-        }
-        if (let Some(med) <- (root as MacroExpandDecl)) {
+        let preVisit = {node: Node =>
+            if (node.TestAttr(Attribute.IS_BROKEN)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            let med = (node as MacroExpandDecl) ?? return VisitAction.WALK_CHILDREN
             CheckFunctionWithAtTest(med, funcs, "Test")
             CheckFunctionWithAtTest(med, funcs, "TestCase")
             CheckClassWithMacro(med)
@@ -367,15 +368,9 @@ public class TestEntryConstructor {
                     CheckTestSuiteConstraints(expandedDecl, funcs)
                 }
             }
+            return VisitAction.WALK_CHILDREN
         }
-        if (let Some(decl) <- (root as Decl)) {
-            for (member in decl.GetMemberDecls()) {
-                CheckTestSuiteConstraints(member, funcs)
-            }
-        }
-        for (child in root.Children()) {
-            CheckTestSuiteConstraints(child, funcs)
-        }
+        let _ = Walker(root, visitPre: preVisit).Walk()
     }
 
     private func CheckClassWithMacro(med: MacroExpandDecl): Unit {
