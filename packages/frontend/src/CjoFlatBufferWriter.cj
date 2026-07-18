@@ -156,6 +156,20 @@ private func CheckForConflictExportId(decls: ArrayList<Decl>): Unit {
     }
 }
 
+// ASTSerializeUtils.h:69-81 GetFileIndexInPkg.
+private func GetFileIndexInPkg(decl: Decl): UInt32 {
+    if ((let None <- decl.curFile) || (let None <- decl.curFile.getOrThrow().curPackage)) {
+        return 0u32
+    }
+    let pkg = decl.curFile.getOrThrow().curPackage.getOrThrow()
+    for (i in 0..pkg.files.size) {
+        if (pkg.files[i] == decl.curFile.getOrThrow()) {
+            return UInt32(i)
+        }
+    }
+    return 0u32
+}
+
 // ASTWriterImpl.h:44-50 NodeInfo.
 private class NodeInfo {
     let begin: ArrayList<UInt8>
@@ -792,6 +806,13 @@ public class ASTWriter {
         let annotations = SaveAnnotations(decl)
         let typeIndex = SaveDeclType(decl)
         let info = SaveDeclInfo(decl)
+        if (!fileIdToIndex.contains(decl.begin.fileID)) {
+            let declFile = decl.curFile.getOrThrow()
+            let declPackage = declFile.curPackage.getOrThrow()
+            let fileIndex = GetFileIndexInPkg(decl)
+            let packageIndex = SavePackageName(declPackage.fullPackageName) + 1u32
+            fileIdToIndex[decl.begin.fileID] = (packageIndex, fileIndex)
+        }
         let begin = PositionBytes(decl.begin)
         let end = PositionBytes(decl.end)
         let identifierPos = PositionBytes(decl.GetIdentifierPos())
