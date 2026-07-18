@@ -8020,38 +8020,11 @@ extend TypeChecker {
             for (typeNode in exceptPattern.types) {
                 SynthesizeTypeNode(ctx, Some(typeNode))
             }
-            if (let Some(inner) <- exceptPattern.pattern) {
-                let target = CatchPatternBindingTargetTy(ctx, exceptPattern)
-                let _ = ChkPattern(impl.typeManager, ctx, target, inner, isPatternInMatch: false,
-                    exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
-                        Check(ctx, patternExpectedTy, patternExpr)
-                    }), diag: impl.diag)
-            }
             return
         }
         if (let Some(commandPattern) <- (pattern as CommandTypePattern)) {
             for (typeNode in commandPattern.types) {
                 SynthesizeTypeNode(ctx, Some(typeNode))
-            }
-            if (let Some(innerCommandPattern) <- commandPattern.pattern) {
-                let commandTarget = if (let Some(patternTy) <- commandPattern.GetTy()) {
-                    if (Ty.IsTyCorrect(patternTy)) {
-                        patternTy
-                    } else if (!commandPattern.types.isEmpty()) {
-                        commandPattern.types[0].GetTy() ?? TypeManager.GetInvalidTy()
-                    } else {
-                        TypeManager.GetInvalidTy()
-                    }
-                } else if (!commandPattern.types.isEmpty()) {
-                    commandPattern.types[0].GetTy() ?? TypeManager.GetInvalidTy()
-                } else {
-                    TypeManager.GetInvalidTy()
-                }
-                let _ = ChkPattern(impl.typeManager, ctx, commandTarget, innerCommandPattern,
-                    isPatternInMatch: false,
-                    exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
-                        Check(ctx, patternExpectedTy, patternExpr)
-                    }), diag: impl.diag)
             }
             return
         }
@@ -8061,27 +8034,6 @@ extend TypeChecker {
                 return
             }
         }
-        let catchTarget = LookupCoreTy(ctx, "Exception") ?? impl.typeManager.GetAnyTy()
-        let _ = ChkPattern(impl.typeManager, ctx, catchTarget, pattern, isPatternInMatch: false,
-            exprChecker: Some({ patternExpectedTy: Ty, patternExpr: Expr =>
-                Check(ctx, patternExpectedTy, patternExpr)
-            }), diag: impl.diag)
-    }
-
-    private func CatchPatternBindingTargetTy(ctx: ASTContext, pattern: ExceptTypePattern): Ty {
-        if (let Some(patternTy) <- pattern.GetTy()) {
-            if (Ty.IsTyCorrect(patternTy)) {
-                return patternTy
-            }
-        }
-        for (typeNode in pattern.types) {
-            if (let Some(typeTy) <- typeNode.GetTy()) {
-                if (Ty.IsTyCorrect(typeTy)) {
-                    return typeTy
-                }
-            }
-        }
-        return LookupCoreTy(ctx, "Exception") ?? impl.typeManager.GetAnyTy()
     }
 
     // C++ src/Sema/TypeCheckBuiltinExpr.cpp:64-78.
@@ -9047,32 +8999,17 @@ extend TypeChecker {
     }
 
     func SynTryExpr(ctx: ASTContext, te: TryExpr): Ty {
-        let boundDecls = ArrayList<Decl>()
         let _ = LookupCoreTy(ctx, "Object")
         let _ = LookupCoreTy(ctx, "Exception")
         let _ = LookupCoreTy(ctx, "Error")
-        if (let Some(tryBlock) <- te.tryBlock) { let _ = SynthesizeBlock(ctx, tryBlock) }
-        var idx: Int64 = 0
-        while (idx < te.catchPatterns.size) {
-            let pattern = te.catchPatterns[idx]
+        for (pattern in te.catchPatterns) {
             SynthesizeTryCatchPatternTypes(ctx, pattern)
-            let patternBindings = ArrayList<Decl>()
-            CollectPatternBinding(pattern, patternBindings)
-            for (decl in patternBindings) {
-                BindLocalDeclIfAbsent(ctx, decl)
-                AddUniqueBoundDecl(boundDecls, decl)
-            }
-            if (idx < te.catchBlocks.size) { let _ = SynthesizeBlock(ctx, te.catchBlocks[idx]) }
-            idx++
         }
         for (handler in te.handlers) {
             if (let Some(commandPattern) <- handler.commandPattern) {
                 SynthesizeTryCatchPatternTypes(ctx, commandPattern)
             }
         }
-        if (let Some(finallyBlock) <- te.finallyBlock) { let _ = SynthesizeBlock(ctx, finallyBlock) }
-        if (let Some(tryLambda) <- te.tryLambda) { let _ = Synthesize(ctx, tryLambda) }
-        if (let Some(finallyLambda) <- te.finallyLambda) { let _ = Synthesize(ctx, finallyLambda) }
         let commandTy: Option<Ty> = if (let Some(commandDecl) <-
             lookupResolvedPackageDecl(ctx, "stdx.effect", "Command")) {
             commandDecl.GetTy()
@@ -9090,37 +9027,21 @@ extend TypeChecker {
                 SynthesizeAndReplaceIdealTy(ctx, SynPos.NONE, resource)
             }), synthesizer: Some({ pos: SynPos, expr: Expr => Synthesize(ctx, pos, expr) }),
             checker: Some({ target: Ty, expr: Expr => Check(ctx, target, expr) }))
-        RemovePatternBindings(ctx, boundDecls)
         return FinishSynthesize(ctx, te, tryTy)
     }
 
     func ChkTryExpr(ctx: ASTContext, target: Ty, te: TryExpr): Bool {
-        let boundDecls = ArrayList<Decl>()
         let _ = LookupCoreTy(ctx, "Object")
         let _ = LookupCoreTy(ctx, "Exception")
         let _ = LookupCoreTy(ctx, "Error")
-        if (let Some(tryBlock) <- te.tryBlock) { let _ = SynthesizeBlock(ctx, tryBlock) }
-        var idx: Int64 = 0
-        while (idx < te.catchPatterns.size) {
-            let pattern = te.catchPatterns[idx]
+        for (pattern in te.catchPatterns) {
             SynthesizeTryCatchPatternTypes(ctx, pattern)
-            let patternBindings = ArrayList<Decl>()
-            CollectPatternBinding(pattern, patternBindings)
-            for (decl in patternBindings) {
-                BindLocalDeclIfAbsent(ctx, decl)
-                AddUniqueBoundDecl(boundDecls, decl)
-            }
-            if (idx < te.catchBlocks.size) { let _ = SynthesizeBlock(ctx, te.catchBlocks[idx]) }
-            idx++
         }
         for (handler in te.handlers) {
             if (let Some(commandPattern) <- handler.commandPattern) {
                 SynthesizeTryCatchPatternTypes(ctx, commandPattern)
             }
         }
-        if (let Some(finallyBlock) <- te.finallyBlock) { let _ = SynthesizeBlock(ctx, finallyBlock) }
-        if (let Some(tryLambda) <- te.tryLambda) { let _ = Synthesize(ctx, tryLambda) }
-        if (let Some(finallyLambda) <- te.finallyLambda) { let _ = Synthesize(ctx, finallyLambda) }
         let commandTy: Option<Ty> = if (let Some(manager) <- impl.importManager) {
             if (let Some(commandDecl) <- manager.GetImportedDecl("stdx.effect", "Command")) {
                 commandDecl.GetTy()
@@ -9139,7 +9060,6 @@ extend TypeChecker {
                 SynthesizeAndReplaceIdealTy(ctx, SynPos.NONE, resource)
             }), synthesizer: Some({ pos: SynPos, expr: Expr => Synthesize(ctx, pos, expr) }),
             checker: Some({ expected: Ty, expr: Expr => Check(ctx, expected, expr) }))
-        RemovePatternBindings(ctx, boundDecls)
         return ok
     }
 }
