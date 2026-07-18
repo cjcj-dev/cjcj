@@ -33,7 +33,7 @@ public func ChkFloatTypeOverflow(expr: LitConstExpr, diag!: Option<BasicDiagnost
     match (expr.TyKind()) {
         case TypeKind.TYPE_FLOAT16 =>
             let f32 = Float32(expr.constNumValue.asFloat.value)
-            value = UInt64(FloatFormat.Float32ToFloat16(f32) << 1u16)
+            value = UInt64(FloatFormat.Float32ToFloat16(f32)) << 1u64
         case TypeKind.TYPE_FLOAT32 =>
             let f32 = Float32(expr.constNumValue.asFloat.value)
             value = UInt64(f32.toBits() << 1u32)
