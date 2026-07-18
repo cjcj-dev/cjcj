@@ -1529,8 +1529,8 @@ public class InitializationChecker {
                 }
                 if (refExpr.ShouldDiagnose(allowCompilerAdd: true)) {
                     if (IsInDifferentFunction(refExpr, target)) {
-                        AddIssue(InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION, refExpr, target: target,
-                            message: target.identifier.Val())
+                        DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_capture_before_initialization,
+                            refExpr, arguments: [target.identifier.Val()]).Emit()
                         return false
                     }
                     if (!refExpr.TestAttr(Attribute.LEFT_VALUE)) {
