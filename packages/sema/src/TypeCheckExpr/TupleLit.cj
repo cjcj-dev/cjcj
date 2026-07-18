@@ -26,9 +26,6 @@ private func unboxOptionType(ty: Ty): Ty {
 
 private func replaceIdealChildTy(typeManager: TypeManager, expr: Expr): Option<Ty> {
     if (let Some(exprTy) <- expr.GetTy()) {
-        if (exprTy.HasInvalidTy()) {
-            return None
-        }
         if (exprTy.IsIdeal()) {
             let concreteTy = typeManager.ReplaceIdealTy(exprTy)
             expr.SetTy(concreteTy)
