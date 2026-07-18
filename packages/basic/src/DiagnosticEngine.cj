@@ -292,7 +292,7 @@ public class SubDiagnostic {
     }
 }
 
-public class Diagnostic {
+public class Diagnostic <: Hashable & Equatable<Diagnostic> {
     public var start: Position = Position()
     public var end: Position = Position()
     public var kind: DiagKind = DEFAULT_KIND
@@ -338,6 +338,20 @@ public class Diagnostic {
         errorMessage = Diagnostic.InsertArguments(errData.message, arguments)
         mainHint = IntegratedString(range, errData.mainHint, severityColor(diagSeverity))
         diagCategory = GetDiagnoseCategory(kind)
+    }
+
+    public operator func ==(right: Diagnostic): Bool {
+        return mainHint.range.EqualForHash(right.mainHint.range) && diagSeverity == right.diagSeverity
+    }
+
+    public operator func !=(right: Diagnostic): Bool {
+        return !(this == right)
+    }
+
+    @OverflowWrapping
+    public func hashCode(): Int64 {
+        return Int64((mainHint.range.Hash() >> 1) ^
+            if (diagSeverity == DiagSeverity.DS_ERROR) { 1u64 } else { 0u64 })
     }
 
     private func setLegacyMetadata(kind: DiagKind): Unit {
@@ -546,7 +560,8 @@ public open class DiagnosticHandler {
 public class CompilerDiagnosticHandler <: DiagnosticHandler {
     private var noColor: Bool = false
     private var jsonFormat: Bool = false
-    private let diagnostics: ArrayList<Diagnostic> = ArrayList<Diagnostic>()
+    private let diagnostics: HashMap<DiagCategory, HashSet<Diagnostic>> =
+        HashMap<DiagCategory, HashSet<Diagnostic>>()
     private let diagsJsonBuff: ArrayList<String> = ArrayList<String>()
     private var diagNumJsonBuff: String = ""
     private var outToStringStream: Bool = false
@@ -582,29 +597,19 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     }
 
     public override func GetCategoryDiagnostic(cate: DiagCategory): Array<Diagnostic> {
-        let list = ArrayList<Diagnostic>()
-        for (diagnostic in diagnostics) {
-            if (diagnostic.diagCategory == cate) {
-                list.add(diagnostic)
-            }
+        if (let Some(categoryDiagnostics) <- diagnostics.get(cate)) {
+            return categoryDiagnostics.toArray()
         }
-        return list.toArray()
+        return Array<Diagnostic>()
     }
 
     public func SaveCategoryDiagnostic(diagnostic: Diagnostic): Bool {
-        var success = true
+        var success = false
         synchronized(mtx) {
-            for (oldDiag in diagnostics) {
-                if (oldDiag.diagCategory == diagnostic.diagCategory &&
-                    oldDiag.mainHint.range.EqualForHash(diagnostic.mainHint.range) &&
-                    oldDiag.diagSeverity == diagnostic.diagSeverity) {
-                    success = false
-                    break
-                }
+            if (!diagnostics.contains(diagnostic.diagCategory)) {
+                diagnostics[diagnostic.diagCategory] = HashSet<Diagnostic>()
             }
-            if (success) {
-                diagnostics.add(diagnostic)
-            }
+            success = diagnostics.get(diagnostic.diagCategory).getOrThrow().add(diagnostic)
         }
         return success
     }
@@ -785,14 +790,7 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     }
 
     private func removeCategory(cate: DiagCategory): Unit {
-        var idx: Int64 = 0
-        while (idx < diagnostics.size) {
-            if (diagnostics[idx].diagCategory == cate) {
-                diagnostics.remove(at: idx)
-            } else {
-                idx++
-            }
-        }
+        diagnostics.remove(cate)
     }
 }
 
