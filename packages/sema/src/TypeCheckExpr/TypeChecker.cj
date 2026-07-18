@@ -8711,15 +8711,44 @@ extend TypeChecker {
     }
 
     private func CheckBinaryExpr(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
-        if (let Some(desugar) <- be.desugarExpr) {
-            if (let Some(desugarTy) <- desugar.GetTy()) {
-                return impl.typeManager.CheckTypeCompatibility(target, desugarTy) != TypeCompatibility.INCOMPATIBLE
+        try (cs = impl.typeManager.constraints.CommitScope()) {
+            if (let Some(desugar) <- be.desugarExpr) {
+                return impl.typeManager.IsSubtype(desugar.GetTy().getOrThrow(), target)
             }
+            if ((let None <- be.leftExpr) || (let None <- be.rightExpr)) {
+                be.SetTy(TypeManager.GetNonNullTy(be.GetTy().getOrThrow()))
+                return false
+            }
+            try (ds = DiagSuppressor(impl.diag)) {
+                let checkRet = CheckBinaryExprCaseBuiltIn(impl.typeManager, target, be, ctx: Some(ctx),
+                    synthesizer: Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }),
+                    checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }),
+                    diag: impl.diag)
+                if (let Some(result) <- checkRet) {
+                    ds.ReportDiag()
+                    return result
+                }
+                impl.typeManager.constraints.Reset()
+            }
+            if (IsOverloadableOperator(be.op) && TryCheckOperatorOverload(ctx, target, be)) {
+                return true
+            }
+            be.Clear()
+            if (Ty.IsTyCorrect(SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, be))) {
+                if (let Some(diagValue) <- impl.diag) {
+                    DiagMismatchedTypes(diagValue, be, target)
+                }
+                RecoverToBinaryExpr(be)
+            }
+            if (be.TestAttr(Attribute.IS_OUTERMOST)) {
+                let synthesizer: BinaryOperandSynthesizer = { operand3: Expr =>
+                    SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand3)
+                }
+                SynBinaryLeafs(impl.typeManager, be, Some(synthesizer))
+            }
+            be.SetTy(TypeManager.GetInvalidTy())
+            return false
         }
-        return ChkBinaryExpr(impl, target, be, ctx: Some(ctx),
-            synthesizer: Some({ operand: Expr => SynthesizeWithNegCache(ctx, SynPos.EXPR_ARG, operand) }),
-            checker: Some({ targetTy: Ty, operand2: Expr => CheckWithNegCache(ctx, targetTy, operand2) }),
-            diag: impl.diag)
     }
 
     func ReplaceWithGenericTyInInheritableDecl(
