@@ -1106,19 +1106,19 @@ extend ParserImpl {
 
     public func ParseFuncArg(): FuncArg {
         let arg = FuncArg()
-        let first = Peek()
-        if (IsIdentifierOrContextualKeyword(first.kind) &&
-            lexer.LookAheadSkipNL(1).size > 0 && lexer.LookAheadSkipNL(1)[0].kind == TokenKind.COLON) {
-            arg.name = ParseIdentifierFromToken(first)
+        arg.begin = Peek().Begin()
+        if (SeeingNamedFuncArgs()) {
+            arg.name = ExpectIdentifierWithPos(arg)
             Next()
-            arg.colonPos = Expect(TokenKind.COLON, "expected ':' after argument name").Begin()
+            arg.colonPos = Peek().Begin()
         } else if (Skip(TokenKind.INOUT)) {
             arg.withInout = true
             arg.inoutPos = lastToken.Begin()
         }
         arg.expr = ParseExpr(ExprKind.EXPR_IN_CALLSUFFIX)
-        arg.begin = first.Begin()
-        MarkEndFromLast(arg)
+        if (let Some(expr) <- arg.expr) {
+            arg.end = expr.end
+        }
         return arg
     }
 
