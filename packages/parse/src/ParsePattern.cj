@@ -125,31 +125,16 @@ extend ParserImpl {
 
     public func ParseEnumPattern(attributes: ArrayList<Attribute>, isVar: Bool, inDecl: Bool): EnumPattern {
         let enumPat = EnumPattern()
-        let first = ExpectIdentifierWithPos(enumPat)
-        let refExpr = AstRefExpr()
-        refExpr.ref.identifier = first
-        refExpr.begin = first.Begin()
-        refExpr.end = first.End()
-        var constructor: AstExpr = refExpr
-        enumPat.begin = first.Begin()
-        enumPat.end = first.End()
-        ParseEnumPatternTypeArguments(constructor, enumPat)
+        var constructor = ParseAtom()
         while (Skip(TokenKind.DOT)) {
-            let dotPos = lastToken.Begin()
-            let field = ExpectIdentifierWithPos(enumPat)
-            let member = AstMemberAccess()
-            member.baseExpr = Some(constructor)
-            member.dotPos = dotPos
-            member.field = field
-            member.begin = constructor.begin
-            member.end = field.End()
+            let member = ParseMemberAccess(constructor, ExprKind.ALL)
             member.isPattern = true
             constructor = member
-            enumPat.end = field.End()
-            ParseEnumPatternTypeArguments(constructor, enumPat)
         }
         enumPat.constructor = Some(constructor)
         CheckTypeArgumentsInEnumPattern(enumPat)
+        enumPat.begin = constructor.begin
+        enumPat.end = constructor.end
         if (Seeing(TokenKind.LPAREN)) {
             let tuplePattern = ParseTuplePattern(true, attributes, isVar, inDecl)
             enumPat.leftParenPos = tuplePattern.leftParenPos
