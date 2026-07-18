@@ -555,14 +555,14 @@ private func ReArrangeForInRangeExpr(forInExpr: ForInExpr, rangeExpr: RangeExpr,
     context: Option<ASTContext>, synthesizer: Option<(ASTContext, SynPos, Node) -> Ty>): Unit {
     if (let Some(index) <- CreateIndexVar(forInExpr, rangeExpr)) {
         if (let Some(stop) <- CreateStopVar(rangeExpr)) {
+            let increasing = RangeIsIncreasing(rangeExpr)
+            let op = if (rangeExpr.isClosed) {
+                if (increasing) { TokenKind.LE } else { TokenKind.GE }
+            } else {
+                if (increasing) { TokenKind.LT } else { TokenKind.GT }
+            }
+            let rangeCond = CreateRangeCond(forInExpr, index, stop, op)
             if (let Some(update) <- CreateUpdate(forInExpr, rangeExpr, index)) {
-                let increasing = RangeIsIncreasing(rangeExpr)
-                let op = if (rangeExpr.isClosed) {
-                    if (increasing) { TokenKind.LE } else { TokenKind.GE }
-                } else {
-                    if (increasing) { TokenKind.LT } else { TokenKind.GT }
-                }
-                let rangeCond = CreateRangeCond(forInExpr, index, stop, op)
                 if (let Some(inExpr) <- forInExpr.inExpression) {
                     CopyBasicInfo(inExpr, update)
                 }
