@@ -333,7 +333,7 @@ public class DiagnosticEmitter {
             end = start
         }
         let substr = source.toArray()[start - 1..end - 1]
-        let disWidth = DisplayWidth(substr)
+        let disWidth = Unicode.DisplayWidth(unsafe { String.fromUtf8Unchecked(substr) })
         return if (disWidth > 0) { disWidth } else { defaultWidth }
     }
 
