@@ -913,11 +913,12 @@ extend ParserImpl {
     public func DiagExpectedNoNewLine(): Unit {
         let old = skipNL
         skipNL = false
+        let operatorToken = Peek()
         Next()
         let newline = Peek()
         let builder = ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_no_newline_after, newline,
-            ConvertToken(lastToken))
-        builder.AddHint(MakeRange(lastToken.Begin(), lastToken.End()), arguments: [ConvertToken(lastToken)])
+            ConvertToken(operatorToken))
+        builder.AddHint(MakeRange(operatorToken.Begin(), operatorToken.End()), arguments: [ConvertToken(operatorToken)])
         skipNL = old
         builder.Emit()
     }
