@@ -35,8 +35,7 @@ private func ChkTryWildcardPattern(target: Ty, pattern: WildcardPattern, include
         for (includedTy in included) {
             if (refEq(includedTy, target)) {
                 if (let Some(diagValue) <- diag) {
-                    let builder = diagValue.Diagnose(pattern.begin, pattern.end,
-                        BasicDiagKind.sema_useless_exception_type)
+                    let builder = Diagnose(diagValue, pattern, BasicDiagKind.sema_useless_exception_type)
                     builder.Emit()
                 }
                 break
@@ -66,8 +65,7 @@ private func ChkExceptTypePattern(typeManager: TypeManager, exceptPattern: Excep
                 false
             }))) {
             if (let Some(diagValue) <- diag) {
-                let builder = diagValue.Diagnose(typeNode.begin, typeNode.end,
-                    BasicDiagKind.sema_except_catch_type_error)
+                let builder = Diagnose(diagValue, typeNode, BasicDiagKind.sema_except_catch_type_error)
                 builder.Emit()
             }
             result = false
@@ -82,8 +80,7 @@ private func ChkExceptTypePattern(typeManager: TypeManager, exceptPattern: Excep
         }
         if (includedBySubtype) {
             if (let Some(diagValue2) <- diag) {
-                let builder2 = diagValue2.Diagnose(typeNode.begin, typeNode.end,
-                    BasicDiagKind.sema_useless_exception_type)
+                let builder2 = Diagnose(diagValue2, typeNode, BasicDiagKind.sema_useless_exception_type)
                 builder2.Emit()
             }
         } else {
