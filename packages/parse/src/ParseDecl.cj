@@ -1374,7 +1374,7 @@ extend ParserImpl {
 
     public func ParseFuncBody(scopeKind: ScopeKind): FuncBody {
         let body = FuncBody()
-        body.begin = Peek().Begin()
+        body.begin = lastToken.Begin()
         try (cs = ChainScope(this, body)) {
             // C++: Parse/ParseDecl.cpp:2304-2307 ParserImpl::ParseFuncBody.
             if (!ScopeKindEquals(scopeKind, ScopeKind.MAIN_BODY) && Skip(TokenKind.LT)) {
