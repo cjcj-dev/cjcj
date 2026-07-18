@@ -2525,8 +2525,8 @@ extend ParserImpl {
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
             let key = Expect(TokenKind.EXTEND, "expected 'extend'")
             ret.keywordPos = key.Begin()
-            ret.begin = key.Begin()
-            ret.identifier.SetPos(key.Begin(), key.Begin())
+            ret.begin = lookahead.Begin()
+            ret.identifier.SetPos(lookahead.Begin(), lookahead.Begin())
             CheckDeclarationInScope(scopeKind, DefKind.EXTEND)
             var hasOneModifierKind = !modifiers.isEmpty()
             for (modifier in modifiers) {
