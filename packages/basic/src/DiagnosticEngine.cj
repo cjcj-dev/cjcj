@@ -200,13 +200,6 @@ public func MakeRange(begin: Position, end: Position): Range {
 }
 
 public func MakeRange(identifierPos: Position, identifier: String): Range {
-    var index: Int64 = 0
-    while (index < identifier.size) {
-        if (identifier[index] > UInt8(0x7f)) {
-            throw IllegalStateException("identifier character is not ASCII")
-        }
-        index++
-    }
     return MakeRange(identifierPos, identifierPos + identifier.size)
 }
 
