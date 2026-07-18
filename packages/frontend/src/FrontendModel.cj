@@ -3699,7 +3699,9 @@ private class CjoSignatureMaterializer {
             LoadFlatFuncDeclAdvancedInfo(reader, record, funcDecl)
             return Some(funcDecl)
         }
-        SetFlatGeneric(reader, record, decl)
+        if (IsFlatInheritableDeclKind(record.kind) || record.kind == 11u16 || record.kind == 13u16) {
+            SetFlatGeneric(reader, record, decl)
+        }
         if (record.kind == 5u16) {
             if (let Some(varDecl) <- (decl as VarDecl)) {
                 LoadFlatVarInfo(reader, record, varDecl)
