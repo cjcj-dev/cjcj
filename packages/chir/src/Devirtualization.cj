@@ -1,6 +1,8 @@
 package cjcj::chir
 
 import std.collection.*
+import std.core.Box as CoreBox
+import cjcj::basic.Linkage as BasicLinkage
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK}
 
 // C++ Devirtualization.cpp:19-31.
@@ -20,7 +22,7 @@ private func GetEntryBlock(oldBG: BlockGroup, blocks: ArrayList<Block>): Block {
 }
 
 // C++ Devirtualization.h:28-34.
-public class RewriteInfo {
+public class DevirtualizationRewriteInfo {
     public let invoke: Invoke
     public let realCallee: Function
     public let thisType: Type
@@ -186,7 +188,7 @@ private func FindFunctionInVtable(parentTy: ClassType, infos: ArrayList<VirtualM
 public class Devirtualization {
     private let analysisWrapper: AnalysisWrapper<TypeAnalysis, TypeDomain>
     private let devirtFuncInfo: DevirtualizationInfo
-    private let rewriteInfos: ArrayList<RewriteInfo> = ArrayList<RewriteInfo>()
+    private let rewriteInfos: ArrayList<DevirtualizationRewriteInfo> = ArrayList<DevirtualizationRewriteInfo>()
     private let frozenInstFuns: ArrayList<Function> = ArrayList<Function>()
     private let frozenStates: HashMap<Function, Results<TypeDomain>> = HashMap<Function, Results<TypeDomain>>()
     private let frozenInstFuncMap: HashMap<String, Function> = HashMap<String, Function>()
@@ -214,7 +216,7 @@ public class Devirtualization {
             result = frozenStates.get(fn)
         }
         let analysisResult = result ?? return
-        var visibleGenericTypes: Option<HashSet<GenericType>> = None
+        let visibleGenericTypes = CoreBox<Option<HashSet<GenericType>>>(None)
         let actionBeforeVisitExpr = { state: TypeDomain, expr: Expression, _: Int64 =>
             if (expr.GetExprKind() != ExprKind.INVOKE) {
                 return
@@ -231,19 +233,20 @@ public class Devirtualization {
             let realCallee = found[0] ?? return
             let thisType = found[1].getOrThrow()
             if (thisType.IsGenericRelated()) {
-                if (visibleGenericTypes.isNone()) {
+                if (visibleGenericTypes.value.isNone()) {
                     let types = GetVisiableGenericTypes(fn)
                     let visible = HashSet<GenericType>()
                     for (ty in types) {
                         visible.add(ty)
                     }
-                    visibleGenericTypes = Some(visible)
+                    visibleGenericTypes.value = Some(visible)
                 }
-                if (!CheckAllGenericTypeVisible(thisType, visibleGenericTypes.getOrThrow())) {
+                if (!CheckAllGenericTypeVisible(thisType, visibleGenericTypes.value.getOrThrow())) {
                     return
                 }
             }
-            rewriteInfos.add(RewriteInfo(invoke, realCallee, thisType, invoke.GetInstantiatedTypeArgs()))
+            rewriteInfos.add(DevirtualizationRewriteInfo(invoke, realCallee, thisType,
+                invoke.GetInstantiatedTypeArgs()))
         }
         let actionAfterVisitExpr = { _: TypeDomain, _: Expression, _: Int64 => }
         let actionOnTerminator = { _: TypeDomain, _: Terminator, _: Option<Block> => }
@@ -251,7 +254,8 @@ public class Devirtualization {
     }
 
     // C++ Devirtualization.cpp:155-216.
-    private static func RewriteToBuiltinOp(builder: CHIRBuilder, info: RewriteInfo, isDebug: Bool): Bool {
+    private static func RewriteToBuiltinOp(builder: CHIRBuilder, info: DevirtualizationRewriteInfo,
+        isDebug: Bool): Bool {
         let invoke = info.invoke
         let fn = info.realCallee.GetWrappedRawMethod() ?? info.realCallee
         var targetExprKind = ExprKind.INVALID
@@ -313,7 +317,8 @@ public class Devirtualization {
     }
 
     // C++ Devirtualization.cpp:218-271.
-    private static func RewriteToApply(builder: CHIRBuilder, rewriteInfos: ArrayList<RewriteInfo>,
+    private static func RewriteToApply(builder: CHIRBuilder,
+        rewriteInfos: ArrayList<DevirtualizationRewriteInfo>,
         isDebug: Bool): Unit {
         var index = rewriteInfos.size - 1
         while (index >= 0) {
@@ -377,7 +382,8 @@ public class Devirtualization {
     }
 
     // C++ Devirtualization.cpp:303-370.
-    private func InstantiateFuncIfPossible(builder: CHIRBuilder, rewriteInfoList: ArrayList<RewriteInfo>): Unit {
+    private func InstantiateFuncIfPossible(builder: CHIRBuilder,
+        rewriteInfoList: ArrayList<DevirtualizationRewriteInfo>): Unit {
         var rewriteIndex = rewriteInfoList.size - 1
         while (rewriteIndex >= 0) {
             let rewriteInfo = rewriteInfoList[rewriteIndex]
@@ -454,7 +460,9 @@ public class Devirtualization {
         let possibleParentTys = HashSet<Type>()
         for (def in devirtFuncInfo.defsMap.get(instantiated) ?? ArrayList<CustomTypeDef>()) {
             for (parentTy in def.GetSuperTypesInCurDef()) {
-                possibleParentTys.add(all: parentTy.GetSuperTypesRecusively(builder))
+                for (possibleParentTy in parentTy.GetSuperTypesRecusively(builder)) {
+                    possibleParentTys.add(possibleParentTy)
+                }
             }
         }
         for (upperBound in generic.GetUpperBounds()) {
