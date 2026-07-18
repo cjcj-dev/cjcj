@@ -4560,8 +4560,6 @@ private func ResolveDeclForCallBase(ce: CallExpr, candidates: ArrayList<FuncDecl
     return None
 }
 
-// C++ src/Sema/TypeCheckExpr/NameReferenceExpr.cpp:538 TypeCheckerImpl::LookupShadowedTopLevelTypeByName.
-
 public func SelfhostPortStatus_TypeCheckCall(): Bool {
     return true
 }
