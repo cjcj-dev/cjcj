@@ -1472,8 +1472,13 @@ public class ClosureConversion {
             throw IllegalStateException("ClosureConversion function user has no parent block")
         let envs = ArrayList<Value>()
         let obj = CreateAutoEnvImplObject(parent, RequireClassType(autoEnvImplDef), envs, user, fn)
-        let baseObj = CastAutoEnvObjToSuper(obj, autoEnvImplDef, user)
-        let converted = CastTypeFromAutoEnvRefToFuncType(fn.GetFuncType().getOrThrow(), baseObj, user,
+        let curClassTy = (((obj.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType() as ClassType).getOrThrow())
+        let superClassTy = curClassTy.GetSuperClassTy(builder: builder).getOrThrow()
+        let superClassRefTy = builder.context.GetRefTy(superClassTy)
+        let castToBaseType = builder.CreateTypeCast(superClassRefTy, obj, parent)
+        castToBaseType.MoveBefore(user)
+        let converted = CastTypeFromAutoEnvRefToFuncType(fn.GetFuncType().getOrThrow(),
+            RequireResult(castToBaseType), user,
             GetOutDefDeclaredTypes(fn))
         user.ReplaceOperand(fn, converted)
     }
@@ -1675,18 +1680,6 @@ public class ClosureConversion {
             return false
         }
         return outerDecl.CanBeInherited()
-    }
-
-    private func CastAutoEnvObjToSuper(autoEnvObj: Value, autoEnvImplDef: ClassDef, user: Expression): Value {
-        if (let Some(superTy) <- autoEnvImplDef.GetSuperClassTy()) {
-            let parent = user.GetParentBlock() ??
-                throw IllegalStateException("ClosureConversion user has no parent block")
-            let superRefTy = builder.context.GetRefTy(superTy)
-            let castToBase = builder.CreateTypeCast(superRefTy, autoEnvObj, parent)
-            castToBase.MoveBefore(user)
-            return RequireResult(castToBase)
-        }
-        return autoEnvObj
     }
 
     private func RemoveGetInstantiateValue(maybeGetInsValue: ArrayList<Expression>): Unit {
