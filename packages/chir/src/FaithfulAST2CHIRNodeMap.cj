@@ -2,9 +2,7 @@ package cjcj::chir
 
 import std.collection.*
 
-import cjcj::ast.ASTKindIndex
 import cjcj::ast.ASTKindName
-import cjcj::ast.Attribute as AstAttribute
 import cjcj::ast.Decl as AstDecl
 import cjcj::ast.FuncDecl as AstFuncDecl
 import cjcj::ast.Node as AstNode
@@ -70,40 +68,11 @@ public class AST2CHIRNodeMap<T> {
 
 }
 
-private func FaithfulAstDeclStructuralKey(decl: AstDecl): String {
-    return "${ASTKindIndex(decl.astKind)}:" + decl.fullPackageName + ":" + decl.identifier.Val() + ":" +
-        decl.begin.hashCode().toString() + ":" + decl.end.hashCode().toString()
-}
-
 private func FaithfulAstDeclHash(decl: AstDecl): Int64 {
-    if (let Some(defaultKey) <- DefaultParamFunctionIdentity(decl)) {
-        return defaultKey.hashCode()
-    }
     return decl.objectId
 }
 
-private func DefaultParamFunctionIdentity(decl: AstDecl): Option<String> {
-    if (!decl.TestAttr(AstAttribute.HAS_INITIAL)) {
-        return None
-    }
-    if (let Some(funcDecl) <- (decl as AstFuncDecl)) {
-        if (let Some(owner) <- funcDecl.ownerFunc) {
-            return Some(FaithfulAstDeclStructuralKey(owner) + ":default-param:" + decl.identifier.Val())
-        }
-    }
-    return None
-}
-
 private func SameFaithfulAstDecl(left: AstDecl, right: AstDecl): Bool {
-    if (let Some(leftKey) <- DefaultParamFunctionIdentity(left)) {
-        if (let Some(rightKey) <- DefaultParamFunctionIdentity(right)) {
-            return leftKey == rightKey
-        }
-        return false
-    }
-    if (DefaultParamFunctionIdentity(right).isSome()) {
-        return false
-    }
     // Decls are matched by stable object identity, faithfully mirroring C++ AST2CHIRNodeMap's
     // std::unordered_map<const AST::Node*, T*> (include/cangjie/CHIR/AST2CHIR/AST2CHIRNodeMap.h:66).
     // A structural (kind+name+position) key wrongly merges distinct COMPILER_ADD desugar temporaries
