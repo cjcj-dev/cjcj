@@ -4,6 +4,22 @@ import cjcj::utils.CJC_ASSERT
 import cjcj::utils.CJC_NULLPTR_CHECK
 import std.collection.*
 
+private func NextSpan(str: String, begin: Position, end: Position, offset!: Int64 = 0): String {
+    let numNewLine = end.line - begin.line
+    let width = (if (numNewLine > 0) { end.column - 1 } else { end.column - begin.column }) + offset
+    let builder = StringBuilder()
+    for (_ in 0..numNewLine) {
+        builder.append("\n")
+    }
+    if (width > str.size) {
+        for (_ in 0..(width - str.size)) {
+            builder.append(" ")
+        }
+    }
+    builder.append(str)
+    return builder.toString()
+}
+
 public open class Type <: Node {
     public var commaPos: Position = INVALID_POSITION
     public var bitAndPos: Position = INVALID_POSITION
@@ -99,14 +115,18 @@ public class RefType <: Type {
     }
 
     public override func ToString(): String {
-        if (typeArguments.isEmpty()) {
-            return ref.identifier.Val()
+        let builder = StringBuilder(ref.identifier.Val())
+        var curSpanBegin = ref.identifier.End()
+        if (!typeArguments.isEmpty()) {
+            builder.append(NextSpan("<", curSpanBegin, leftAnglePos, offset: 1))
+            curSpanBegin = leftAnglePos + Position(0, 0, 1)
+            for (arg in typeArguments) {
+                builder.append(NextSpan(arg.ToString(), curSpanBegin, arg.end))
+                curSpanBegin = arg.end
+            }
+            builder.append(NextSpan(">", curSpanBegin, rightAnglePos, offset: 1))
         }
-        let parts = ArrayList<String>()
-        for (arg in typeArguments) {
-            parts.add(arg.ToString())
-        }
-        return ref.identifier.Val() + "<" + JoinStrings(parts, ", ") + ">"
+        return builder.toString()
     }
 }
 
