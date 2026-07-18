@@ -913,11 +913,36 @@ public class BlockGroup <: Value & Hashable & Equatable<BlockGroup> {
     }
 
     public override func ToString(indent: Int64): String {
-        var out = IndentToString(indent) + GetIdentifier() + " {"
-        for (block in blocks) {
-            out += "\n" + block.ToString(indent + 2)
+        var out = IndentToString(indent) + "{ Block Group: " + GetIdentifier()
+        out += CommentToString(BaseCommentToString()) + "\n"
+        if (!blocks.isEmpty()) {
+            let blockSet = blocks.clone()
+            sort(blockSet, by: { left: Block, right: Block =>
+                if (left.GetIdentifier() < right.GetIdentifier()) {
+                    Ordering.LT
+                } else if (left.GetIdentifier() > right.GetIdentifier()) {
+                    Ordering.GT
+                } else {
+                    Ordering.EQ
+                }
+            })
+            let sortedBlocks = TopologicalSort(entryBlock.getOrThrow())
+            for (block in sortedBlocks) {
+                out += block.ToString(indent) + "\n"
+                var idx: Int64 = 0
+                while (idx < blockSet.size) {
+                    if (blockSet[idx] == block) {
+                        blockSet.remove(at: idx)
+                        break
+                    }
+                    idx++
+                }
+            }
+            for (block in blockSet) {
+                out += block.ToString(indent) + "\n"
+            }
         }
-        return out + "\n" + IndentToString(indent) + "}"
+        return out + IndentToString(indent) + "}"
     }
 }
 
