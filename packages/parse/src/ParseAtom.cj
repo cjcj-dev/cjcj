@@ -15,16 +15,65 @@ extend ParserImpl {
         return ParseAtom(ExprKind.ALL)
     }
 
+    public func LookupExprHandler(kind: TokenKind): Option<() -> Expr> {
+        let firstKind = TokenKindIndex(TokenKind.LPAREN)
+        let lastKind = TokenKindIndex(TokenKind.RESUME)
+        let handlers = Array<Option<() -> Expr>>(lastKind - firstKind + 1, repeat: None)
+        handlers[TokenKindIndex(TokenKind.LPAREN) - firstKind] = Some({ => ParseLeftParenExpr() })
+        handlers[TokenKindIndex(TokenKind.LSQUARE) - firstKind] = Some({ => ParseArrayLitExpr() })
+        handlers[TokenKindIndex(TokenKind.LCURL) - firstKind] = Some({ =>
+            Next()
+            ParseLambdaExpr()
+        })
+        handlers[TokenKindIndex(TokenKind.VARRAY) - firstKind] = Some({ => ParseVArrayExpr() })
+        handlers[TokenKindIndex(TokenKind.QUOTE) - firstKind] = Some({ => ParseQuoteExpr() })
+        handlers[TokenKindIndex(TokenKind.THIS) - firstKind] = Some({ => ParseThisOrSuper() })
+        handlers[TokenKindIndex(TokenKind.SUPER) - firstKind] = Some({ => ParseThisOrSuper() })
+        handlers[TokenKindIndex(TokenKind.IF) - firstKind] = Some({ => ParseIfExpr() })
+        handlers[TokenKindIndex(TokenKind.TRY) - firstKind] = Some({ => ParseTryExpr() })
+        handlers[TokenKindIndex(TokenKind.FOR) - firstKind] = Some({ => ParseForInExpr() })
+        handlers[TokenKindIndex(TokenKind.DO) - firstKind] = Some({ => ParseDoWhileExpr() })
+        handlers[TokenKindIndex(TokenKind.WHILE) - firstKind] = Some({ => ParseWhileExpr() })
+        handlers[TokenKindIndex(TokenKind.THROW) - firstKind] = Some({ => ParseThrowExpr() })
+        handlers[TokenKindIndex(TokenKind.RETURN) - firstKind] = Some({ => ParseReturnExpr() })
+        handlers[TokenKindIndex(TokenKind.CONTINUE) - firstKind] = Some({ => ParseContinueJumpExpr() })
+        handlers[TokenKindIndex(TokenKind.BREAK) - firstKind] = Some({ => ParseBreakJumpExpr() })
+        handlers[TokenKindIndex(TokenKind.MATCH) - firstKind] = Some({ => ParseMatchExpr() })
+        handlers[TokenKindIndex(TokenKind.UNSAFE) - firstKind] = Some({ => ParseUnsafeBlock() })
+        handlers[TokenKindIndex(TokenKind.SPAWN) - firstKind] = Some({ => ParseSpawnExpr() })
+        handlers[TokenKindIndex(TokenKind.SYNCHRONIZED) - firstKind] = Some({ => ParseSynchronizedExpr() })
+        handlers[TokenKindIndex(TokenKind.PERFORM) - firstKind] = Some({ => ParsePerformExpr() })
+        handlers[TokenKindIndex(TokenKind.RESUME) - firstKind] = Some({ => ParseResumeExpr() })
+        let index = TokenKindIndex(kind) - firstKind
+        if (index < 0 || index >= handlers.size) {
+            return None
+        }
+        return handlers[index]
+    }
+
     public func ParseAtom(ek: ExprKind): Expr {
-        if (IsConditionExprKind(ek) && Seeing(TokenKind.LPAREN)) {
+        if (IsConditionExpr(ek) && Seeing(TokenKind.LPAREN)) {
             return ParseLeftParenExprInKind(ek)
         }
-        if (SeeingLiteral()) { return ParseLitConst() }
-        if ((IsConditionExprKind(ek) || ExprKindEquals(ek, ExprKind.UNKNOWN_EXPR)) && Seeing(TokenKind.LET)) {
-            return ParseLetPattern(ek)
+        let tokenKind = Peek().kind
+        if (let Some(handler) <- LookupExprHandler(tokenKind)) {
+            lastToken = lookahead
+            if (tokenKind == TokenKind.QUOTE) {
+                EnterQuoteExprMod()
+                Next()
+            }
+            let ret = handler()
+            if (tokenKind == TokenKind.QUOTE) {
+                ExitQuoteExprMod()
+            }
+            return ret
         }
-        if (Seeing([TokenKind.UNSAFE, TokenKind.LCURL])) { return ParseUnsafeBlock() }
-        if (Seeing(TokenKind.VARRAY)) { return ParseVArrayExpr() }
+        if (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword() ||
+            Seeing(TokenKind.PACKAGE_IDENTIFIER)) {
+            return ParseRefExpr(ek)
+        }
+        if (SeeingMacroCall() || SeeingBuiltinAnnotation()) { return ParseMacroExprOrLambdaExpr() }
+        if (SeeingLiteral()) { return ParseLitConst() }
         if (SeeingPrimitiveTypeAndLParen()) { return ParseTypeConvExpr() }
         if (SeeingPrimitiveTypeAndDot()) {
             let token = Peek()
@@ -34,45 +83,32 @@ extend ParserImpl {
             ret.end = token.End()
             return ret
         }
-        if (Seeing(TokenKind.THIS) || Seeing(TokenKind.SUPER)) { return ParseThisOrSuper() }
-        if (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword() ||
-            Seeing(TokenKind.PACKAGE_IDENTIFIER)) {
-            return ParseRefExpr(ek)
-        }
         if (Seeing(TokenKind.WILDCARD)) {
             let token = Peek()
             Next()
             return WildcardExpr(token.Begin())
         }
-        if (Seeing(TokenKind.LPAREN)) { return ParseLeftParenExpr() }
-        if (Seeing(TokenKind.LSQUARE)) { return ParseArrayLitExpr() }
-        if (Skip(TokenKind.LCURL)) { return ParseLambdaExpr() }
-        if (Seeing(TokenKind.IF)) { return ParseIfExpr() }
-        if (Seeing(TokenKind.MATCH)) { return ParseMatchExpr() }
-        if (Seeing(TokenKind.TRY)) { return ParseTryExpr() }
-        if (Seeing(TokenKind.WHILE)) { return ParseWhileExpr() }
-        if (Seeing(TokenKind.DO)) { return ParseDoWhileExpr() }
-        if (Seeing(TokenKind.FOR)) { return ParseForInExpr() }
-        if (Seeing(TokenKind.RETURN)) { return ParseReturnExpr() }
-        if (Seeing(TokenKind.BREAK) || Seeing(TokenKind.CONTINUE)) {
-            let token = Peek()
-            Next()
-            return JumpExpr(token)
-        }
-        if (Seeing(TokenKind.THROW)) { return ParseThrowExpr() }
-        if (Seeing(TokenKind.PERFORM)) { return ParsePerformExpr() }
-        if (Seeing(TokenKind.RESUME)) { return ParseResumeExpr() }
-        if (Seeing(TokenKind.SPAWN)) { return ParseSpawnExpr() }
-        if (Seeing(TokenKind.SYNCHRONIZED)) { return ParseSynchronizedExpr() }
-        if (Seeing(TokenKind.QUOTE)) {
-            EnterQuoteExprMod()
-            Next()
-            let ret = ParseQuoteExpr()
-            ExitQuoteExprMod()
-            return ret
-        }
-        if (SeeingMacroCall() || SeeingBuiltinAnnotation()) { return ParseMacroExprOrLambdaExpr() }
         return GetInvalidExprInAtom(Peek().Begin())
+    }
+
+    public func ParseBreakJumpExpr(): Expr {
+        let token = Peek()
+        Next()
+        let ret = JumpExpr()
+        ret.isBreak = true
+        ret.begin = token.Begin()
+        ret.end = lastToken.End()
+        return ret
+    }
+
+    public func ParseContinueJumpExpr(): Expr {
+        let token = Peek()
+        Next()
+        let ret = JumpExpr()
+        ret.isBreak = false
+        ret.begin = token.Begin()
+        ret.end = lastToken.End()
+        return ret
     }
 
     public func GetInvalidExprInAtom(pos: Position): Expr {
