@@ -84,68 +84,51 @@ public func TypeCheckTypeCheckReferenceTypeLegality(
     if (typeNode.TestAttr(Attribute.TOOL_ADD)) {
         return true
     }
-    var valid = true
     let typeArgs = typeNode.GetTypeArgs()
     for (arg in typeArgs) {
-        if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, arg, importManager: importManager)) {
-            valid = false
-        }
+        let _ = TypeCheckTypeCheckReferenceTypeLegality(diag, tm, arg, importManager: importManager)
     }
     if (typeNode.astKind == ASTKind.REF_TYPE) {
         if (let Some(refType) <- (typeNode as RefType)) {
-            if (!CheckRefType(diag, tm, refType, importManager: importManager)) {
-                valid = false
-            }
+            let _ = CheckRefType(diag, tm, refType, importManager: importManager)
         }
     } else if (typeNode.astKind == ASTKind.QUALIFIED_TYPE) {
         if (let Some(qualifiedType) <- (typeNode as QualifiedType)) {
-            if (!TypeCheckTypeCheckQualifiedType(diag, tm, qualifiedType, importManager: importManager)) {
-                valid = false
-            }
+            let _ = TypeCheckTypeCheckQualifiedType(diag, tm, qualifiedType, importManager: importManager)
         }
     } else if (typeNode.astKind == ASTKind.TUPLE_TYPE) {
         if (let Some(tupleType) <- (typeNode as TupleType)) {
-            if (!TypeCheckTypeCheckTupleType(diag, tupleType)) {
-                valid = false
-            }
+            let _ = TypeCheckTypeCheckTupleType(diag, tupleType)
         }
     } else if (typeNode.astKind == ASTKind.FUNC_TYPE) {
         if (let Some(funcType) <- (typeNode as FuncType)) {
-            if (!TypeCheckTypeCheckFuncType(diag, tm, funcType, importManager: importManager)) {
-                valid = false
-            }
+            let _ = TypeCheckTypeCheckFuncType(diag, tm, funcType, importManager: importManager)
         }
     } else if (typeNode.astKind == ASTKind.PAREN_TYPE) {
         if (let Some(parenType) <- (typeNode as ParenType)) {
             if (let Some(inner) <- parenType.innerType) {
-                if (!TypeCheckTypeCheckReferenceTypeLegality(diag, tm, inner, importManager: importManager)) {
-                    valid = false
-                }
+                let _ = TypeCheckTypeCheckReferenceTypeLegality(diag, tm, inner, importManager: importManager)
             }
         }
     } else if (typeNode.astKind == ASTKind.OPTION_TYPE) {
         if (let Some(optionType) <- (typeNode as OptionType)) {
-            if (!TypeCheckTypeCheckOptionType(diag, tm, optionType, importManager: importManager)) {
-                valid = false
-            }
+            let _ = TypeCheckTypeCheckOptionType(diag, tm, optionType, importManager: importManager)
         }
     } else if (typeNode.astKind == ASTKind.VARRAY_TYPE) {
         if (let Some(varrayType) <- (typeNode as VArrayType)) {
             TypeCheckTypeCheckVArrayType(diag, tm, varrayType)
         }
     }
-    if (!Ty.IsTyCorrect(typeNode.GetTy())) {
-        valid = false
-    }
+    var hasInvalidTy = !Ty.IsTyCorrect(typeNode.GetTy())
     for (arg in typeArgs) {
         if (!Ty.IsTyCorrect(arg.GetTy())) {
-            valid = false
+            hasInvalidTy = true
         }
     }
-    if (!valid) {
+    if (hasInvalidTy) {
         typeNode.SetTy(TypeManager.GetInvalidTy())
     }
-    return valid
+    return !hasInvalidTy
 }
 
 public func TypeCheckTypeCheckOptionType(
