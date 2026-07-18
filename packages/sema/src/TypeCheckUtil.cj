@@ -1057,10 +1057,8 @@ public func AcceptPlaceholderTarget(node: Node): Bool {
 }
 
 private func IsTypeObjectCreation(fd: FuncDecl, ce: CallExpr): Bool {
-    if (ce.callKind == CallKind.CALL_OBJECT_CREATION || ce.callKind == CallKind.CALL_STRUCT_CREATION) {
-        return true
-    }
-    return fd.TestAnyAttr(Attribute.CONSTRUCTOR, Attribute.ENUM_CONSTRUCTOR)
+    let isTypeNameCall = ce.callKind == CallKind.CALL_OBJECT_CREATION || ce.callKind == CallKind.CALL_STRUCT_CREATION
+    return (isTypeNameCall && fd.TestAttr(Attribute.CONSTRUCTOR)) || fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)
 }
 
 private func HasJavaAttr(fd: FuncDecl): Bool {
