@@ -129,28 +129,22 @@ private func ContainsNode(values: ArrayList<Node>, node: Node): Bool {
     return false
 }
 
-private func DeclLessBySource(left: Decl, right: Decl): Bool {
-    if (left.begin.fileID < right.begin.fileID) {
-        return true
+private struct CmpNodeByPos <: Comparable<CmpNodeByPos> {
+    private let node: Decl
+
+    public init(node: Decl) {
+        this.node = node
     }
-    if (left.begin.fileID > right.begin.fileID) {
-        return false
+
+    public func compare(right: CmpNodeByPos): Ordering {
+        if (node.begin.fileID != right.node.begin.fileID) {
+            return node.begin.fileID.compare(right.node.begin.fileID)
+        }
+        if (node.begin != right.node.begin) {
+            return node.begin.compare(right.node.begin)
+        }
+        return Ptr<Decl>(node).compare(Ptr<Decl>(right.node))
     }
-    if (left.begin < right.begin) {
-        return true
-    }
-    if (right.begin < left.begin) {
-        return false
-    }
-    let leftKind = ASTKindIndex(left.astKind)
-    let rightKind = ASTKindIndex(right.astKind)
-    if (leftKind < rightKind) {
-        return true
-    }
-    if (rightKind < leftKind) {
-        return false
-    }
-    return left.end < right.end
 }
 
 private func IsGlobalOrStaticOrConstVar(decl: Decl): Bool {
@@ -225,7 +219,7 @@ private class VarWithPatternDeclMap {
 }
 
 private class DefUseGraph {
-    public let nodes: ArrayList<DefNode> = ArrayList<DefNode>()
+    public let nodes: TreeMap<CmpNodeByPos, DefNode> = TreeMap<CmpNodeByPos, DefNode>()
     private let vpdMap: VarWithPatternDeclMap = VarWithPatternDeclMap()
 
     public func GetOrBuildNode(decl: Decl): DefNode {
@@ -237,21 +231,12 @@ private class DefUseGraph {
                 owner = outer
             }
         }
-        for (node in nodes) {
-            if (SameDecl(node.variable, owner)) {
-                return node
-            }
+        let key = CmpNodeByPos(owner)
+        if (let Some(node) <- nodes.get(key)) {
+            return node
         }
         let newNode = DefNode(owner)
-        var idx: Int64 = 0
-        while (idx < nodes.size) {
-            if (DeclLessBySource(owner, nodes[idx].variable)) {
-                nodes.add(newNode, at: idx)
-                return newNode
-            }
-            idx++
-        }
-        nodes.add(newNode)
+        nodes[key] = newNode
         return newNode
     }
 
@@ -541,7 +526,7 @@ public class GlobalVarInitializationChecker {
 
     private func CheckInSameFile(): Bool {
         var result = true
-        for (node in graph.nodes) {
+        for ((_, node) in graph.nodes) {
             if (!CheckVarUsageForDefNode(node)) {
                 result = false
             }
@@ -590,7 +575,7 @@ public class GlobalVarInitializationChecker {
     }
 
     private func CheckByToposort(): Unit {
-        for (node in graph.nodes) {
+        for ((_, node) in graph.nodes) {
             if (node.color == DefColor.WHITE) {
                 if (!ToposortDFS(node)) {
                     return
