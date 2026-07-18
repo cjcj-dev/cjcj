@@ -946,7 +946,7 @@ public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
         if (targets.isEmpty()) {
             return None
         }
-        let accessibleDecls = GetAccessibleDecls(tm, ctx, ma, targets)
+        let accessibleDecls = GetAccessibleDecls(tm, ctx, ma, targets, importManager: importManager)
         if (!accessibleDecls.isEmpty()) {
             let nullableAccessibleDecls = ArrayList<Option<Decl>>()
             for (candidate in accessibleDecls) { nullableAccessibleDecls.add(Some(candidate)) }
@@ -959,7 +959,7 @@ public func TypeCheckReferenceFilterAndGetTargetsOfObjAccess(
         }
         return if (accessibleDecls.isEmpty()) { Some(targets[0]) } else { Some(accessibleDecls[0]) }
     }
-    var target = GetAccessibleDecl(tm, ctx, ma, targets)
+    var target = GetAccessibleDecl(tm, ctx, ma, targets, importManager: importManager)
     if (let None <- target) {
         if (targets.isEmpty()) {
             return None
@@ -1216,7 +1216,8 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
         if (ma.isAlone) {
             let candidates = ArrayList<Decl>()
             candidates.add(decl)
-            if (let None <- CheckFuncAccessControl(diag, tm, ctx, ma, candidates)) {
+            if (let None <- CheckFuncAccessControl(diag, tm, ctx, ma, candidates,
+                importManager: impl.importManager)) {
                 valid = false
             }
             if (decl.TestAttr(Attribute.UNSAFE) && !ma.isInFlowExpr) {
@@ -1226,7 +1227,8 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
                 valid = false
             }
         }
-    } else if (!CheckNonFuncAccessControl(diag, tm, ctx, ma, decl)) {
+    } else if (!CheckNonFuncAccessControl(diag, tm, ctx, ma, decl,
+        importManager: impl.importManager)) {
         valid = false
     }
 
@@ -1305,7 +1307,8 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
     if (decl.IsFunc()) {
         if (re.isAlone) {
             let candidates = TypeCheckReferenceCopyTargetsOrSingle(re.ref.targets, decl)
-            if (let None <- CheckFuncAccessControl(diag, tm, ctx, re, candidates)) {
+            if (let None <- CheckFuncAccessControl(diag, tm, ctx, re, candidates,
+                importManager: impl.importManager)) {
                 valid = false
             }
             if (decl.TestAttr(Attribute.UNSAFE) && !re.isInFlowExpr) {
@@ -1315,7 +1318,8 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
                 valid = false
             }
         }
-    } else if (!CheckNonFuncAccessControl(diag, tm, ctx, re, decl)) {
+    } else if (!CheckNonFuncAccessControl(diag, tm, ctx, re, decl,
+        importManager: impl.importManager)) {
         valid = false
     }
     // C++ src/Sema/TypeCheckReference.cpp:621-628 CheckAccessLegalityOfRefExpr.
