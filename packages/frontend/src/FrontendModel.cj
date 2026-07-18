@@ -20,8 +20,6 @@ import cjcj::chir.Package as RealCHIRPackage
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.SemaImportManager
 import cjcj::modules.MacroHostImportManager
-import cjcj::modules.{DiagForDifferentPackageFeatureConsistency, DiagForNullPackageFeature,
-    WarnRepeatedFeatureName}
 import cjcj::option.OutputMode
 import cjcj::modules.{GetPackage, PackageFormat_AliasInfo, PackageFormat_Anno, PackageFormat_ArrayInfo,
     PackageFormat_ArrayTyInfo, PackageFormat_ClassInfo, PackageFormat_CompositeTyInfo, PackageFormat_Constraint,
@@ -193,6 +191,60 @@ private func WarnConflictImport(diag: DiagnosticEngine, name: String, current: B
         DiagKindRefactor.package_conflict_import, current, arguments: [name])
     builder.AddNote(previous, "The previous was imported here")
     builder.Emit()
+}
+
+private func WarnRepeatedFeatureName(
+    diag: DiagnosticEngine,
+    name: String,
+    current: BasicRange,
+    previous: BasicRange
+): Unit {
+    let builder = diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+        DiagKindRefactor.feature_already_seen_name, current)
+    builder.AddNote(previous, "feature '" + name + "' previously used here")
+    builder.Emit()
+}
+
+private func DiagForNullPackageFeature(
+    diag: DiagnosticEngine,
+    current: BasicRange,
+    refFeature: FeaturesDirective
+): Unit {
+    let builder = diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+        DiagKindRefactor.feature_null_declaration, current)
+    let refFeaturesSet = refFeature.featuresSet.getOrThrow()
+    builder.AddNote(
+        MakeRange(refFeaturesSet.begin, refFeaturesSet.end),
+        "perhaps you meant these features"
+    )
+    builder.Emit()
+}
+
+private func DiagForDifferentPackageFeatureConsistency(
+    diag: DiagnosticEngine,
+    feature: FeaturesDirective,
+    refFeature: FeaturesDirective,
+    hasAnno: Bool
+): Unit {
+    if (feature.annotations.isEmpty() && hasAnno) {
+        diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+            DiagKindRefactor.parse_fail_expected_annotation,
+            MakeRange(feature.featuresPos, "features"),
+            arguments: ["@NonProduct"]
+        ).Emit()
+    } else {
+        let featuresSet = feature.featuresSet.getOrThrow()
+        let builder = diag.AsBasicDiagnosticEngine().DiagnoseRefactor(
+            DiagKindRefactor.feature_different_consistency,
+            MakeRange(featuresSet.begin, featuresSet.end)
+        )
+        let refFeaturesSet = refFeature.featuresSet.getOrThrow()
+        builder.AddNote(
+            MakeRange(refFeaturesSet.begin, refFeaturesSet.end),
+            "perhaps you meant these features"
+        )
+        builder.Emit()
+    }
 }
 
 private func IsSamePosition(pos1: Position, pos2: Position): Bool {
