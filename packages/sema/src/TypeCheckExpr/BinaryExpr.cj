@@ -1709,6 +1709,28 @@ public func ChkBinaryExpr(typeManager: TypeManager, target: Ty, be: BinaryExpr,
 }
 
 extend TypeChecker {
+    private func TryCheckOperatorOverload(ctx: ASTContext, target: Ty, be: BinaryExpr): Bool {
+        DesugarOperatorOverloadExpr(be, ctx: Some(ctx))
+        let desugar = be.desugarExpr.getOrThrow()
+        try (ds = DiagSuppressor(impl.diag)) {
+            if (Check(ctx, target, desugar)) {
+                ds.ReportDiag()
+                be.SetTy(desugar.GetTy().getOrThrow())
+                let callExpr = (desugar as CallExpr).getOrThrow()
+                if (let Some(resolvedFunction) <- callExpr.resolvedFunction) {
+                    ReplaceTarget(be, Some<Decl>(resolvedFunction))
+                } else {
+                    ReplaceTarget(be, None)
+                }
+                return true
+            }
+        }
+        let _ = ChkOperatorFuncIfTyCannotBeInferred(ctx, be)
+        RecoverToBinaryExpr(be)
+        impl.typeManager.constraints.Reset()
+        return false
+    }
+
     private func TrySynthesizeOperatorOverload(ctx: ASTContext, be: BinaryExpr): Bool {
         DesugarOperatorOverloadExpr(be, ctx: Some(ctx))
         let desugar = be.desugarExpr.getOrThrow()
