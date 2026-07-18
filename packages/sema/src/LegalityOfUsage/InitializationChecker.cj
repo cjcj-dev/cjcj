@@ -873,17 +873,13 @@ public class InitializationChecker {
             if (member.TestAnyAttr(Attribute.INITIALIZED, Attribute.TOOL_ADD, Attribute.COMMON) || opts.compileCjd) {
                 continue
             }
-            let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_type_uninitialized_static_field,
-                member, arguments: [member.identifier.Val()])
-            let note = "you may add an initializer inline or "
             if (let Some(initFunc) <- staticInit) {
-                builder.AddNote(note + "initialize the variable in the 'static init'")
-                AddNote(builder, initFunc, MakeRange(initFunc.identifier.Begin(), initFunc.identifier.End()),
-                    "static init defined here")
+                AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, initFunc, target: member,
+                    message: member.identifier.Val())
             } else {
-                builder.AddNote(note + "define a 'static init' to perform initialization")
+                AddIssue(InitializationIssueKind.UNINITIALIZED_FIELD, member, target: member,
+                    message: member.identifier.Val())
             }
-            builder.Emit()
         }
     }
 
