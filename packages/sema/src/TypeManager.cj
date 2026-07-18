@@ -2073,22 +2073,23 @@ public class TypeManager {
     }
 
     public func IsExtendInheritRelation(r: ExtendDecl, l: ExtendDecl): (Bool, Bool) {
-        let rInterfaces = collectExtendInterfaces(r)
-        let lInterfaces = collectExtendInterfaces(l)
-        for (rightTy in rInterfaces.values) {
-            for (leftTy in lInterfaces.values) {
-                if (SameTy(rightTy, leftTy)) {
-                    return (true, false)
+        var hasInheritRelat = false
+        var isRSuper = false
+        let mapping = GenerateTypeMappingByTy(r.GetTy(), l.GetTy())
+        for (lSuper in l.inheritedTypes) {
+            for (rSuper in r.inheritedTypes) {
+                let lTy = GetInstantiatedTy(lSuper.GetTy().getOrThrow(), mapping)
+                let rTy = GetInstantiatedTy(rSuper.GetTy().getOrThrow(), mapping)
+                if (IsSubtype(lTy, rTy)) {
+                    isRSuper = true
                 }
-                if (IsSubtype(leftTy, rightTy)) {
-                    return (true, true)
-                }
-                if (IsSubtype(rightTy, leftTy)) {
-                    return (true, false)
+                if (isRSuper || IsSubtype(rTy, lTy)) {
+                    hasInheritRelat = true
+                    break
                 }
             }
         }
-        return (false, false)
+        return (hasInheritRelat, isRSuper)
     }
 
     public func PairIsOverrideOrImpl(child: Decl, parent: Decl, baseTy!: Option<Ty> = None,
