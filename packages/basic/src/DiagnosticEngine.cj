@@ -560,8 +560,8 @@ public open class DiagnosticHandler {
 public class CompilerDiagnosticHandler <: DiagnosticHandler {
     private var noColor: Bool = false
     private var jsonFormat: Bool = false
-    private let diagnostics: HashMap<DiagCategory, HashSet<Diagnostic>> =
-        HashMap<DiagCategory, HashSet<Diagnostic>>()
+    private let diagnostics: HashMap<Int64, HashSet<Diagnostic>> =
+        HashMap<Int64, HashSet<Diagnostic>>()
     private let diagsJsonBuff: ArrayList<String> = ArrayList<String>()
     private var diagNumJsonBuff: String = ""
     private var outToStringStream: Bool = false
@@ -597,7 +597,7 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     }
 
     public override func GetCategoryDiagnostic(cate: DiagCategory): Array<Diagnostic> {
-        if (let Some(categoryDiagnostics) <- diagnostics.get(cate)) {
+        if (let Some(categoryDiagnostics) <- diagnostics.get(DiagCategoryIndex(cate))) {
             return categoryDiagnostics.toArray()
         }
         return Array<Diagnostic>()
@@ -606,10 +606,11 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     public func SaveCategoryDiagnostic(diagnostic: Diagnostic): Bool {
         var success = false
         synchronized(mtx) {
-            if (!diagnostics.contains(diagnostic.diagCategory)) {
-                diagnostics[diagnostic.diagCategory] = HashSet<Diagnostic>()
+            let category = DiagCategoryIndex(diagnostic.diagCategory)
+            if (!diagnostics.contains(category)) {
+                diagnostics[category] = HashSet<Diagnostic>()
             }
-            success = diagnostics.get(diagnostic.diagCategory).getOrThrow().add(diagnostic)
+            success = diagnostics.get(category).getOrThrow().add(diagnostic)
         }
         return success
     }
@@ -790,7 +791,7 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     }
 
     private func removeCategory(cate: DiagCategory): Unit {
-        diagnostics.remove(cate)
+        diagnostics.remove(DiagCategoryIndex(cate))
     }
 }
 
