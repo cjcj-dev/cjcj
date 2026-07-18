@@ -75,7 +75,11 @@ public class MangleAstAdapter {
         if (source.mangleAdapterId < 0) {
             return None
         }
-        let ownerId = if (let Some(owner) <- source.outerDecl) { EnsureAdapterId(owner) } else { -1 }
+        let ownerId = if (let Some(funcDecl) <- (source as FuncDecl)) {
+            if (let Some(owner) <- funcDecl.ownerFunc) { EnsureAdapterId(owner) } else { -1 }
+        } else {
+            -1
+        }
         if (let Some(ownerCache) <- declCache.get(source.mangleAdapterId)) {
             return ownerCache.get(ownerId)
         }
@@ -84,7 +88,11 @@ public class MangleAstAdapter {
 
     private func StoreDecl(source: Decl, target: MangleDecl): Unit {
         let sourceId = EnsureAdapterId(source)
-        let ownerId = if (let Some(owner) <- source.outerDecl) { EnsureAdapterId(owner) } else { -1 }
+        let ownerId = if (let Some(funcDecl) <- (source as FuncDecl)) {
+            if (let Some(owner) <- funcDecl.ownerFunc) { EnsureAdapterId(owner) } else { -1 }
+        } else {
+            -1
+        }
         if (let Some(ownerCache) <- declCache.get(sourceId)) {
             ownerCache[ownerId] = target
         } else {
