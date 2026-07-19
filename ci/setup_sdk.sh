@@ -2,7 +2,7 @@
 # Install the Cangjie bootstrap SDK and export the build env.
 #   1. bootstrap cjv (github.com/Zxilly/cjv)
 #   2. cjv install <pinned-nightly> -c stdx
-#   3. symlink the libLLVM-15.so path hardcoded in packages/cjc/cjpm.toml to the SDK
+#   3. repoint the libLLVM path hardcoded in packages/cjc/cjpm.toml at the SDK (CI checkout only)
 #   4. write CANGJIE_HOME / CANGJIE_STDX_PATH / lib path / cjHeapSize / PATH to $GITHUB_ENV
 #
 # Env:
@@ -55,14 +55,17 @@ CANGJIE_HOME="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
 [ -d "$CANGJIE_HOME" ] || { log "toolchain dir missing: $CANGJIE_HOME"; exit 3; }
 STDX_PATH="$HOME/.cjv/stdx/$CJCJ_TOOLCHAIN/static/stdx"
 
-# 3. symlink the libLLVM path hardcoded in cjpm.toml to this SDK (read from toml to stay in sync)
-LLVM_HARD="$(grep -oE '/[^ ]*/third_party/llvm/lib/libLLVM-15\.so' "$REPO_ROOT/packages/cjc/cjpm.toml" | head -1 || true)"
-SDK_LLVM="$CANGJIE_HOME/third_party/llvm/lib/libLLVM-15.so"
-if [ -n "$LLVM_HARD" ] && [ ! -e "$LLVM_HARD" ]; then
-    LLVM_HARD_DIR="$(dirname "$LLVM_HARD")"
-    log "symlink $LLVM_HARD -> $SDK_LLVM"
-    if mkdir -p "$LLVM_HARD_DIR" 2>/dev/null; then :; else sudo mkdir -p "$LLVM_HARD_DIR"; fi
-    if ln -sfn "$SDK_LLVM" "$LLVM_HARD" 2>/dev/null; then :; else sudo ln -sfn "$SDK_LLVM" "$LLVM_HARD"; fi
+# 3. Repoint the libLLVM dir hardcoded in cjpm.toml (a /root/.cjv/... path unreadable to the
+#    runner user, mode 0700) at this SDK. CI checkout only; repo file untouched, local dev unaffected.
+if [ -n "${GITHUB_ENV:-}${CI:-}" ]; then
+    CJPM_TOML="$REPO_ROOT/packages/cjc/cjpm.toml"
+    SDK_LLVM_DIR="$CANGJIE_HOME/third_party/llvm/lib"
+    HARD_DIR="$(grep -oE "/[^ '\"]*/third_party/llvm/lib" "$CJPM_TOML" 2>/dev/null | head -1 || true)"
+    if [ -n "$HARD_DIR" ] && [ "$HARD_DIR" != "$SDK_LLVM_DIR" ]; then
+        # portable in-place edit (BSD/GNU sed); replaces both the .so path and the -rpath
+        sed "s#${HARD_DIR}#${SDK_LLVM_DIR}#g" "$CJPM_TOML" > "$CJPM_TOML.tmp" && mv "$CJPM_TOML.tmp" "$CJPM_TOML"
+        log "repoint cjpm.toml LLVM dir -> $SDK_LLVM_DIR"
+    fi
 fi
 
 # 4. export env (DYLD_LIBRARY_PATH on macOS, LD_LIBRARY_PATH on Linux)
