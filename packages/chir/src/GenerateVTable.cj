@@ -1054,6 +1054,31 @@ private func CollectReplaceTable(curDef: CustomTypeDef, targetParent: ClassType,
     return replaceTable
 }
 
+private func CreateWrapperFuncGenericParams(rawFunc: Function, funcIdentifier: String,
+    replaceTable: HashMap<GenericType, Type>, builder: CHIRBuilder): ArrayList<GenericType> {
+    let wrapperGenericParams = ArrayList<GenericType>()
+    let rawFuncGenericParams = rawFunc.GetGenericTypeParams()
+    var idx: Int64 = 0
+    while (idx < rawFuncGenericParams.size) {
+        let srcIdentifier = "fT" + idx.toString()
+        let tyIdentifier = funcIdentifier + "_" + srcIdentifier
+        let wrapperGenericParam = builder.context.GetGenericTy(tyIdentifier, srcIdentifier)
+        wrapperGenericParams.add(wrapperGenericParam)
+        replaceTable[rawFuncGenericParams[idx]] = wrapperGenericParam
+        idx++
+    }
+    idx = 0
+    while (idx < wrapperGenericParams.size) {
+        let newUpperBounds = ArrayList<Type>()
+        for (ty in rawFuncGenericParams[idx].GetUpperBounds()) {
+            newUpperBounds.add(ReplaceRawGenericArgType(ty, replaceTable, builder))
+        }
+        wrapperGenericParams[idx].SetUpperBounds(newUpperBounds)
+        idx++
+    }
+    return wrapperGenericParams
+}
+
 public class WrapMutFunc {
     private let builder: CHIRBuilder
     private let wrapperFuncs: HashMap<String, Function> = HashMap<String, Function>()
@@ -1064,6 +1089,8 @@ public class WrapMutFunc {
 
     private func CreateMutFuncWrapper(rawFunc: Function, curDef: CustomTypeDef, srcClassTy: ClassType): Unit {
         let replaceTable = CollectReplaceTable(curDef, srcClassTy, rawFunc, builder)
+        let funcIdentifier = GenerateVirtualFuncMangleName(rawFunc, curDef, srcClassTy, false)
+        let wrapperGenericParams = CreateWrapperFuncGenericParams(rawFunc, funcIdentifier, replaceTable, builder)
         let instFuncTy = (ReplaceRawGenericArgType(rawFunc.GetFuncType().getOrThrow(), replaceTable, builder) as FuncType)
             .getOrThrow()
         let wrapperParamsTy = instFuncTy.GetParamTypes()
@@ -1071,10 +1098,9 @@ public class WrapMutFunc {
         wrapperParamsTy[0] = builder.context.GetRefTy(parentDefType)
         let retTy = instFuncTy.GetReturnType()
         let wrapperFuncTy = builder.context.GetFuncTy(wrapperParamsTy, retTy)
-        let funcIdentifier = GenerateVirtualFuncMangleName(rawFunc, curDef, srcClassTy, false)
         let pkgName = curDef.GetPackageName()
         let wrapperFn = builder.CreateFunction(wrapperFuncTy, funcIdentifier, srcCodeIdentifier: "",
-            rawMangledName: "", packageName: pkgName)
+            rawMangledName: "", packageName: pkgName, genericTypeParams: wrapperGenericParams)
         wrapperFuncs[funcIdentifier] = wrapperFn
         wrapperFn.SetWrappedRawMethod(rawFunc)
         wrapperFn.AppendAttributeInfo(rawFunc.GetAttributeInfo())
@@ -1102,8 +1128,13 @@ public class WrapMutFunc {
             firstArgType = builder.context.GetRefTy(firstArgType)
         }
         args[0] = TypeCastOrBoxIfNeeded(args[0], firstArgType, builder, entry)
+        let instArgTypes = ArrayList<Type>()
+        for (wrapperGenericParam in wrapperGenericParams) {
+            instArgTypes.add(wrapperGenericParam)
+        }
         let apply = builder.CreateApply(retTy, rawFunc,
-            FuncCallContext(args: args, thisType: Some(curDef.GetType().getOrThrow())), entry)
+            FuncCallContext(args: args, instTypeArgs: instArgTypes,
+                thisType: Some(curDef.GetType().getOrThrow())), entry)
         builder.CreateStore(apply.GetResult().getOrThrow(), wrapperFn.GetReturnValue().getOrThrow(), entry)
         let tempThis = TypeCastOrBoxIfNeeded(args[0], wrapperParamsTy[0], builder, entry)
         let load = builder.CreateLoad(parentDefType, tempThis, entry).GetResult().getOrThrow()
