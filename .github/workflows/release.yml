@@ -48,16 +48,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Cangjie SDK
-        uses: actions/cache@v4
+      - name: Restore Cangjie SDK cache
+        id: sdkcache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
 
       - name: 准备工具链
+        id: setup
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
         run: bash ci/setup_sdk.sh
+
+      - name: Save Cangjie SDK cache
+        if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cjv
+          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
 
       - name: 安装 patchelf(打包时修正 RUNPATH 为 $ORIGIN 相对)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq patchelf
