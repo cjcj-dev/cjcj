@@ -1,0 +1,132 @@
+# cjcj 发布流水线(手动触发)
+# ------------------------------------------------------------------------------
+# 打出「官方仓颉 SDK 同款目录树」的发行包,唯一区别:bin/cjc 被换成本仓自举产出的 bin/cjcj。
+# 版本号由 workflow_dispatch 的 version 输入决定,写进包名 cjcj-<version>-<platform>.tar.gz,
+# 附 .sha256,创建 GitHub Release(tag=v<version>)并挂载产物。
+#
+# 平台现实(同 CI):cjcj 本体最终链接需 per-platform 预编译 shim .o,目前只有 linux-x64。
+# 故发布矩阵当前仅 linux-x64;其余平台的 stub 见文末,补齐 prebuilt shim 后启用,绝不发假包。
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号(不带 v,例 0.0.1)"
+        required: true
+        type: string
+      prerelease:
+        description: "标记为 pre-release"
+        required: false
+        type: boolean
+        default: true
+      draft:
+        description: "创建为 draft(不公开)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # 创建 Release / 打 tag 需要
+
+env:
+  CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260712020030
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 逐平台构建 + 打包。当前矩阵只含 linux-x64(唯一有 shim .o、能完整链接 cjcj 的平台)。
+  # ---------------------------------------------------------------------------
+  build:
+    name: build+package ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, platform: linux-x64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cangjie SDK
+        uses: actions/cache@v4
+        with:
+          path: ~/.cjv
+          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+
+      - name: 准备工具链
+        env:
+          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
+        run: bash ci/setup_sdk.sh
+
+      - name: 安装 patchelf(打包时修正 RUNPATH 为 $ORIGIN 相对)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq patchelf
+
+      - name: 构建 runtime shim(vendored 预编译 .o)
+        run: bash runtime_shim/build_shim.sh
+
+      - name: cjpm build(全 workspace)
+        run: cjpm build
+
+      - name: 部署 cjcj 二进制(禁名 cjc)
+        run: |
+          test -f "target/release/bin/cjcj::cjc"
+          cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
+
+      - name: 发布前冒烟(确保产出可用)
+        run: bash ci/smoke/run_smoke.sh "$PWD/target/release/bin/cjcj"
+
+      - name: 打包为官方 SDK 同款发行包
+        run: |
+          bash scripts/package_sdk.sh \
+            --sdk "$CANGJIE_HOME" \
+            --binary "$PWD/target/release/bin/cjcj::cjc" \
+            --version "${{ inputs.version }}" \
+            --platform "${{ matrix.platform }}" \
+            --outdir "$PWD/dist"
+          ls -l dist/
+
+      - name: 上传产物(供 publish 汇总)
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.platform }}
+          path: |
+            dist/cjcj-${{ inputs.version }}-${{ matrix.platform }}.tar.gz
+            dist/cjcj-${{ inputs.version }}-${{ matrix.platform }}.tar.gz.sha256
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 汇总所有平台产物 → 创建 GitHub Release(tag=v<version>)。
+  # ---------------------------------------------------------------------------
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载全部平台产物
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 列出待发布产物
+        run: ls -R dist
+      - name: 创建 Release 并挂载产物
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          flags=(--title "cjcj v${{ inputs.version }}" --notes "自举仓颉编译器 cjcj v${{ inputs.version }}(官方 SDK 同款布局,bin/cjc → bin/cjcj)。")
+          if [ "${{ inputs.prerelease }}" = "true" ]; then flags+=(--prerelease); fi
+          if [ "${{ inputs.draft }}" = "true" ]; then flags+=(--draft); fi
+          mapfile -t assets < <(find dist -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.zip' \) | sort)
+          gh release create "v${{ inputs.version }}" "${flags[@]}" "${assets[@]}"
+
+# ==============================================================================
+# 待启用平台(补齐 runtime_shim/prebuilt/<plat>/ 后加入 build.matrix):
+#   - { runner: ubuntu-24.04-arm, platform: linux-aarch64 }   需 linux_aarch64 shim
+#   - { runner: macos-latest,     platform: mac-aarch64 }      需 darwin_aarch64 shim + install_name_tool 打包分支
+#   - { runner: macos-15-intel,   platform: mac-x64 }          需 darwin_x86_64 shim
+#   - { runner: windows-latest,   platform: windows-x64 }      需 windows shim + DLL/PATH 链接方案(package_sdk.sh 已留 zip 分支)
+# 在此之前不为这些平台产出发行包(避免发不能用的假包)。
+# ==============================================================================

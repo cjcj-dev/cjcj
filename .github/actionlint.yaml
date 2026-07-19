@@ -1,0 +1,11 @@
+# actionlint 配置:登记 2026-07 已上线、但 actionlint 内置 DB 尚未收录的 GitHub-hosted
+# runner 标签(否则会被误报为 unknown label)。这些均为官方 hosted runner,非 self-hosted。
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04
+    - ubuntu-26.04-arm
+    - windows-2025-vs2026
+    - windows-11-arm
+    - windows-11-vs2026-arm
+    - macos-26
+    - macos-26-intel
