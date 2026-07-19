@@ -78,13 +78,17 @@ jobs:
       - uses: actions/checkout@v4
 
       # 缓存已安装的 SDK 工具链(~/.cjv),key 锁 toolchain 版本,省去每次数百 MB 下载。
-      - name: Cache Cangjie SDK
-        uses: actions/cache@v4
+      # 用 restore/save 拆分:save 只在 setup 成功后跑(见下方 Save 步),避免把「半装的 ~/.cjv」
+      # 缓存进去污染后续重跑(combined cache 的 post 虽会在 job 失败时仍保存,但会连半成品一起存)。
+      - name: Restore Cangjie SDK cache
+        id: sdkcache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
 
       # 缓存 cjpm 增量产物(target/ 内含 .cjpm-history / .dep-cache / incremental-cache.json)。
+      # 这里保留 combined cache:其 post 步在 job 失败时也会保存,部分构建缓存留给重跑加速,安全。
       - name: Cache cjpm build
         uses: actions/cache@v4
         with:
@@ -94,9 +98,18 @@ jobs:
             cjpm-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-
 
       - name: 准备工具链(cjv + pinned nightly + stdx + LLVM symlink + 环境)
+        id: setup
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
         run: bash ci/setup_sdk.sh
+
+      # setup 成功后才保存 SDK 缓存(且未命中时);紧跟 setup,后续步骤失败与否都已保存。
+      - name: Save Cangjie SDK cache
+        if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cjv
+          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
 
       - name: 构建 runtime shim(用 vendored 预编译 .o;.c 现编)
         run: bash runtime_shim/build_shim.sh
@@ -133,19 +146,44 @@ jobs:
         runner: [ubuntu-24.04-arm, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - name: Cache Cangjie SDK
-        uses: actions/cache@v4
+      - name: Restore Cangjie SDK cache
+        id: sdkcache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: 取 SDK 并验证官方 cjc 可用(不构建 cjcj)
+      # 独立步骤:setup_sdk 把 CANGJIE_HOME 写进 $GITHUB_ENV,只对**后续**步骤可见,
+      # 故必须与「用到 CANGJIE_HOME」的步骤分开(此前同一步里用 $CANGJIE_HOME 为空 → cjc 127)。
+      - name: 取 SDK(cjv install)
+        id: setup
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
+        run: bash ci/setup_sdk.sh
+      - name: Save Cangjie SDK cache
+        if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cjv
+          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+      - name: 诊断 SDK 布局(定位跨平台 cjc 127/loader 问题)
         run: |
-          bash ci/setup_sdk.sh
-          echo 'main(): Int64 { println("provision ok"); return 0 }' > /tmp/p.cj
-          # 用官方引导 cjc(此平台无 cjcj shim,故只证明 SDK 供给链路 + 官方编译器就绪)
-          "$CANGJIE_HOME/bin/cjc" /tmp/p.cj -o /tmp/p && /tmp/p
+          echo "== CANGJIE_HOME=$CANGJIE_HOME =="
+          ls -la "$CANGJIE_HOME/bin" || true
+          file "$CANGJIE_HOME/bin/cjc" || true
+          echo "== runtime/lib =="; ls "$CANGJIE_HOME/runtime/lib" || true
+          echo "== envsetup head =="; sed -n '1,5p' "$CANGJIE_HOME/envsetup.sh" || true
+      - name: 验证官方 cjc 可用(source envsetup,不构建 cjcj)
+        run: |
+          set -x
+          # macOS:清除下载物的隔离属性,否则动态库/可执行可能被 Gatekeeper 拦(exit 1)
+          if [ "$(uname -s)" = "Darwin" ]; then xattr -dr com.apple.quarantine "$CANGJIE_HOME" || true; fi
+          # 优先 source 该平台 SDK 自带的 envsetup.sh(自带 per-OS PATH/LD/DYLD 分支),最稳。
+          # shellcheck disable=SC1091
+          source "$CANGJIE_HOME/envsetup.sh"
+          command -v cjc; file "$(command -v cjc)" || true
+          echo 'main(): Int64 { println("provision ok"); return 0 }' > "$RUNNER_TEMP/p.cj"
+          # 此平台无 cjcj shim,只证明 SDK 供给链路 + 官方引导编译器就绪(不构建 cjcj)
+          cjc "$RUNNER_TEMP/p.cj" -o "$RUNNER_TEMP/p" && "$RUNNER_TEMP/p"
 
 # ==============================================================================
 # 待启用:其它平台的 cjcj 本体构建(当前被 per-platform shim .o 缺失阻塞)。

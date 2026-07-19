@@ -9,7 +9,8 @@
 #   4. 把构建环境五件套 + cjHeapSize 写进 $GITHUB_ENV(无则打印)
 #
 # 需要的环境变量:
-#   GITCODE_API_KEY   （必需)拉取 nightly SDK 用;CI 里来自 secrets.GITCODE_API_KEY
+#   GITCODE_API_KEY   （可选)nightly SDK+stdx 实测无 key 也能公开下载成功;仅在 GitCode 限流
+#                      时作加速/提额,配了就用(CI 里来自 secrets.GITCODE_API_KEY),没有不阻塞。
 #   CJCJ_TOOLCHAIN    （可选)默认锁定 nightly-1.2.0-alpha.20260712020030
 #   CJV_VERSION       （可选)默认 v0.2.20
 #   CJ_HEAP_SIZE      （可选)默认 12GB(16GB runner;⚠不设会在解析阶段 OOM)
@@ -47,10 +48,12 @@ fi
 log "cjv: $(command -v cjv) $(cjv --version 2>/dev/null || true)"
 
 # --- 2. 安装 pinned nightly + stdx ----------------------------------------------
+# 实测:nightly toolchain + stdx 在无 key 下全平台公开下载成功,故 key 只是可选加速/防限流。
 if [ -n "${GITCODE_API_KEY:-}" ]; then
     cjv set gitcode-api-key "$GITCODE_API_KEY" >/dev/null 2>&1 || true
+    log "GITCODE_API_KEY set (optional accelerator/anti-throttle)"
 else
-    log "WARN: GITCODE_API_KEY 未设置,nightly SDK 拉取很可能失败(请在仓库 Secrets 里配置)"
+    log "GITCODE_API_KEY not set — proceeding with public download (fine; key is optional)"
 fi
 log "installing toolchain $CJCJ_TOOLCHAIN (+stdx component)"
 cjv install "$CJCJ_TOOLCHAIN" -c stdx
@@ -72,23 +75,27 @@ if [ -n "$LLVM_HARD" ] && [ ! -e "$LLVM_HARD" ]; then
 fi
 
 # --- 4. 导出环境 -----------------------------------------------------------------
+# macOS 用 DYLD_LIBRARY_PATH,Linux 用 LD_LIBRARY_PATH。
+if [ "$OS" = "Darwin" ]; then LD_VAR="DYLD_LIBRARY_PATH"; else LD_VAR="LD_LIBRARY_PATH"; fi
 LD_PATH="$CANGJIE_HOME/third_party/llvm/lib:$CANGJIE_HOME/runtime/lib/$RT_DIR:$CANGJIE_HOME/tools/lib"
 if [ -n "${GITHUB_ENV:-}" ]; then
     {
         echo "CANGJIE_HOME=$CANGJIE_HOME"
         echo "CANGJIE_STDX_PATH=$STDX_PATH"
-        echo "LD_LIBRARY_PATH=$LD_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        echo "${LD_VAR}=$LD_PATH"
         echo "cjHeapSize=$CJ_HEAP_SIZE"
     } >> "$GITHUB_ENV"
+    # ⚠cjpm 真身在 $CANGJIE_HOME/tools/bin(bin/ 只有 cjc/cjc-frontend);两者都必须进 PATH。
     echo "$CANGJIE_HOME/bin" >> "$GITHUB_PATH"
+    echo "$CANGJIE_HOME/tools/bin" >> "$GITHUB_PATH"
     echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-    log "exported env to \$GITHUB_ENV"
+    log "exported env to \$GITHUB_ENV (${LD_VAR}; PATH += bin,tools/bin)"
 else
     cat <<EOF
 # eval these:
 export CANGJIE_HOME=$CANGJIE_HOME
-export PATH=$CANGJIE_HOME/bin:\$PATH
-export LD_LIBRARY_PATH=$LD_PATH
+export PATH=$CANGJIE_HOME/bin:$CANGJIE_HOME/tools/bin:\$PATH
+export ${LD_VAR}=$LD_PATH
 export CANGJIE_STDX_PATH=$STDX_PATH
 export cjHeapSize=$CJ_HEAP_SIZE
 EOF

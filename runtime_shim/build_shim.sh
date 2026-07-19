@@ -37,32 +37,34 @@ PREBUILT_O="$HERE/prebuilt/${PREBUILT_PLAT}/cjselfhost_llvmshim.o"
 "$CC" -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L \
   -c "$HERE/cjc_runtime_config.c" -o "$HERE/cjc_runtime_config.o"
 
-if [ -d "$LLVM_SRC_INC" ] && [ -d "$LLVM_GEN_INC" ]; then
-    LLVM_INCLUDE_ARGS=(-I"$LLVM_SRC_INC" -I"$LLVM_GEN_INC")
-elif command -v llvm-config-15 >/dev/null 2>&1; then
-    LLVM_INCLUDE_ARGS=(-I"$(llvm-config-15 --includedir)")
-else
-    echo "ERR: LLVM 15 headers not found" >&2
-    exit 1
-fi
-
-# 0713: single object. The shim used to build two .o files; a missing
-# binsecinfo_llvmshim.o failed the top-level link with an error that pointed
-# nowhere near the real cause (it cost a full migration dry-run to find).
-# -fno-rtti / -fno-exceptions to match the LLVM build ABI.
-if [ ! -f "$HERE/cjselfhost_llvmshim.o" ] && [ -d "$FLATBUFFERS_INC" ] && [ -d "$SCHEMA_GEN_INC/flatbuffers" ]; then
+# 获取 cjselfhost_llvmshim.o(按优先级),关键:**只有真要从源码编 .cpp 时才探测 LLVM 头**。
+# 干净 CI 机既无补丁版 LLVM 头也无 C++ 源码树,必须能走到 vendored 预编译分支而不被头探测拦下。
+# 0719 修复:此前头探测在 fallback 之前无条件运行并 exit 1,把预编译路径挡死(本机装了 llvm-15
+# 头恰好掩盖了此 bug)。故把头探测下沉进「源码编译」分支内部。
+# 0713: single object(见文件头历史)。-fno-rtti / -fno-exceptions 对齐 LLVM 构建 ABI。
+if [ -f "$HERE/cjselfhost_llvmshim.o" ]; then
+    echo "reusing existing cjselfhost_llvmshim.o"
+elif [ -d "$FLATBUFFERS_INC" ] && [ -d "$SCHEMA_GEN_INC/flatbuffers" ]; then
+    # 源码编译(开发机,带补丁版 LLVM 的 C++ 构建树)。仅此分支才需要 LLVM 头,探测放这里。
+    if [ -d "$LLVM_SRC_INC" ] && [ -d "$LLVM_GEN_INC" ]; then
+        LLVM_INCLUDE_ARGS=(-I"$LLVM_SRC_INC" -I"$LLVM_GEN_INC")
+    elif command -v llvm-config-15 >/dev/null 2>&1; then
+        LLVM_INCLUDE_ARGS=(-I"$(llvm-config-15 --includedir)")
+    else
+        echo "ERR: LLVM 15 headers not found (needed only to compile the shim from source)" >&2
+        exit 1
+    fi
     "$CXX" -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
       -c "$HERE/cjselfhost_llvmshim.cpp" -o "$HERE/cjselfhost_llvmshim.o" \
       "${LLVM_INCLUDE_ARGS[@]}" -I"$FLATBUFFERS_INC" -I"$SCHEMA_GEN_INC"
-elif [ ! -f "$HERE/cjselfhost_llvmshim.o" ] && [ -n "$PREBUILT_PLAT" ] && [ -f "$PREBUILT_O" ]; then
-    # Third fallback (0719): no patched-LLVM source tree available (CI) — use the vendored
-    # prebuilt object for this host platform. See runtime_shim/prebuilt/README.md.
+elif [ -n "$PREBUILT_PLAT" ] && [ -f "$PREBUILT_O" ]; then
+    # Vendored 预编译(CI):无 C++ 源码树,直接拷对应平台的 .o。见 runtime_shim/prebuilt/README.md。
     cp "$PREBUILT_O" "$HERE/cjselfhost_llvmshim.o"
     echo "used vendored prebuilt shim: $PREBUILT_O"
-elif [ ! -f "$HERE/cjselfhost_llvmshim.o" ]; then
-    echo "ERR: cannot obtain cjselfhost_llvmshim.o — none of: (1) patched-LLVM C++ source tree" >&2
-    echo "     headers, (2) a pre-existing local .o, (3) a vendored prebuilt for ${HOST_OS}/${HOST_ARCH}" >&2
-    echo "     (expected at $PREBUILT_O) is available." >&2
+else
+    echo "ERR: cannot obtain cjselfhost_llvmshim.o — none of: (1) a pre-existing local .o," >&2
+    echo "     (2) the patched-LLVM C++ source tree (to compile from source), (3) a vendored" >&2
+    echo "     prebuilt for ${HOST_OS}/${HOST_ARCH} (expected at $PREBUILT_O) is available." >&2
     exit 1
 fi
 
