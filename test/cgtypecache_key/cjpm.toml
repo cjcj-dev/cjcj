@@ -1,0 +1,12 @@
+[package]
+  cjc-version = "1.1.0"
+  name = "cgtypecache_key"
+  organization = "cjcj_test"
+  description = "Focused identity-key regression test for the codegen CGType cache"
+  version = "0.1.0"
+  src-dir = "src"
+  output-type = "executable"
+
+[dependencies]
+  "cjcj::chir" = { path = "../../packages/chir" }
+  "cjcj::codegen" = { path = "../../packages/codegen" }
