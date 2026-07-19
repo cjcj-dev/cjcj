@@ -22,7 +22,7 @@ public class MaybeInitDomain <: GenKillDomain<MaybeInitDomain> {
         return out
     }
 
-    public func CopyFrom(rhs: MaybeInitDomain): Unit {
+    public override func CopyFrom(rhs: MaybeInitDomain): Unit {
         CopyBaseFrom(rhs)
     }
 

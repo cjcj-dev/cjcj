@@ -41,6 +41,11 @@ public class ExpressionFlatSet {
         return ExpressionFlatSet(kind, elem)
     }
 
+    public func CopyFrom(rhs: ExpressionFlatSet): Unit {
+        kind = rhs.kind
+        elem = rhs.elem
+    }
+
     public func IsTop(): Bool {
         return kind == ExpressionFlatSetKind.TOP
     }

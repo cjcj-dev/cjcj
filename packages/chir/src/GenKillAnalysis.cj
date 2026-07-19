@@ -75,9 +75,17 @@ public abstract class GenKillDomain<Domain> <: AbstractDomain<Domain> {
     public func CopyBaseFrom(rhs: GenKillDomain<Domain>): Unit {
         reachable = rhs.reachable
         kind = rhs.kind
-        states.clear()
-        for (state in rhs.states) {
-            states.add(state)
+        var idx: Int64 = 0
+        while (idx < rhs.states.size) {
+            if (idx < states.size) {
+                states[idx] = rhs.states[idx]
+            } else {
+                states.add(rhs.states[idx])
+            }
+            idx++
+        }
+        while (states.size > rhs.states.size) {
+            states.remove(at: states.size - 1)
         }
     }
 

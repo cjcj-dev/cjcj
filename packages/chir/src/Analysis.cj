@@ -11,6 +11,8 @@ public abstract class AbstractDomain<Domain> {
 
     public func Clone(): Domain
 
+    public func CopyFrom(rhs: Domain): Unit
+
     public open func Join(rhs: Domain): Bool {
         let _ = rhs
         return false

@@ -35,6 +35,25 @@ public class ReachingDefinitionDomain <: AbstractDomain<ReachingDefinitionDomain
         return ReachingDefinitionDomain(allocateIdxMap, reachingDefs, reachingLoadDefs, kind)
     }
 
+    public override func CopyFrom(rhs: ReachingDefinitionDomain): Unit {
+        kind = rhs.kind
+        var idx: Int64 = 0
+        while (idx < rhs.reachingDefs.size) {
+            if (idx < reachingDefs.size) {
+                reachingDefs[idx].CopyFrom(rhs.reachingDefs[idx])
+                reachingLoadDefs[idx].CopyFrom(rhs.reachingLoadDefs[idx])
+            } else {
+                reachingDefs.add(rhs.reachingDefs[idx].Clone())
+                reachingLoadDefs.add(rhs.reachingLoadDefs[idx].Clone())
+            }
+            idx++
+        }
+        while (reachingDefs.size > rhs.reachingDefs.size) {
+            reachingDefs.remove(at: reachingDefs.size - 1)
+            reachingLoadDefs.remove(at: reachingLoadDefs.size - 1)
+        }
+    }
+
     public func IsReachable(): Bool {
         return !IsBottom()
     }

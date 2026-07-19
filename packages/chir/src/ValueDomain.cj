@@ -320,7 +320,7 @@ public class ValueDomain<AV> <: AbstractDomain<ValueDomain<AV>> & ValueDomainAcc
         }
     }
 
-    private func CopyFrom(rhs: ValueDomain<AV>): Unit {
+    public override func CopyFrom(rhs: ValueDomain<AV>): Unit {
         valueKind = rhs.valueKind
         ref = rhs.ref
         if (let Some(value) <- rhs.absVal) {

@@ -45,15 +45,22 @@ public class MaybeUninitDomain <: GenKillDomain<MaybeUninitDomain> {
         return out
     }
 
-    public func CopyFrom(rhs: MaybeUninitDomain): Unit {
+    public override func CopyFrom(rhs: MaybeUninitDomain): Unit {
         CopyBaseFrom(rhs)
-        maybeInitedPos.clear()
-        for (positions in rhs.maybeInitedPos) {
-            let copied = TreeSet<Int64>()
-            for (line in positions) {
-                copied.add(line)
+        var idx: Int64 = 0
+        while (idx < rhs.maybeInitedPos.size) {
+            if (idx >= maybeInitedPos.size) {
+                maybeInitedPos.add(TreeSet<Int64>())
             }
-            maybeInitedPos.add(copied)
+            let positions = maybeInitedPos[idx]
+            positions.clear()
+            for (line in rhs.maybeInitedPos[idx]) {
+                positions.add(line)
+            }
+            idx++
+        }
+        while (maybeInitedPos.size > rhs.maybeInitedPos.size) {
+            maybeInitedPos.remove(at: maybeInitedPos.size - 1)
         }
     }
 

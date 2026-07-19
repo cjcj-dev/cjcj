@@ -24,6 +24,7 @@ public interface ValueStatePool<VD, Pool> where VD <: AbstractDomain<VD> & Value
     static func IsInstanceOfValue(): Bool
     static func Create(): Pool
     func Clone(): Pool
+    func CopyFrom(rhs: Pool): Unit
     func Size(): Int64
     func Clear(): Unit
     func Find(value: Value): Option<VD>
@@ -64,6 +65,25 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
 
     public func Clone(): FullStatePool<VD> {
         return FullStatePool<VD>(this)
+    }
+
+    public func CopyFrom(rhs: FullStatePool<VD>): Unit {
+        // Rebuild the observable insertion order in keys, while retaining the
+        // pass-local backing storage and matching domain objects.
+        for (key in keys) {
+            if (!rhs.data.contains(key)) {
+                data.remove(key)
+            }
+        }
+        keys.clear()
+        for (key in rhs.keys) {
+            if (let Some(domain) <- data.get(key)) {
+                domain.CopyFrom(rhs.data[key])
+            } else {
+                data[key] = rhs.data[key].Clone()
+            }
+            keys.add(key)
+        }
     }
 
     public func Size(): Int64 {
@@ -201,6 +221,34 @@ public class ActiveStatePool<VD> <: ValueStatePool<VD, ActiveStatePool<VD>>
 
     public func Clone(): ActiveStatePool<VD> {
         return ActiveStatePool<VD>(this)
+    }
+
+    public func CopyFrom(rhs: ActiveStatePool<VD>): Unit {
+        Clear()
+        if (rhs.first.isNone()) {
+            return
+        }
+        for (key in rhs.keys) {
+            data[key] = rhs.data[key].Clone()
+            keys.add(key)
+            obj2StateNode[key] = ActiveStateNode(key)
+        }
+        for (key in rhs.keys) {
+            let newNode = obj2StateNode[key]
+            let node = rhs.obj2StateNode[key]
+            if (let Some(prevNode) <- node.prev) {
+                newNode.prev = Some(obj2StateNode[prevNode.value])
+            }
+            if (let Some(nextNode) <- node.next) {
+                newNode.next = Some(obj2StateNode[nextNode.value])
+            }
+        }
+        if (let Some(firstNode) <- rhs.first) {
+            first = Some(obj2StateNode[firstNode.value])
+        }
+        if (let Some(tailNode) <- rhs.tails) {
+            tails = Some(obj2StateNode[tailNode.value])
+        }
     }
 
     public func Size(): Int64 {
@@ -344,6 +392,26 @@ public class RefMap {
 
     public func Clone(): RefMap {
         return RefMap(this)
+    }
+
+    public func CopyFrom(rhs: RefMap): Unit {
+        // RefMap is insertion ordered; overwrite the two parallel buffers in
+        // place so CopyFrom is byte-equivalent to Clone without new buffers.
+        var idx: Int64 = 0
+        while (idx < rhs.keys.size) {
+            if (idx < keys.size) {
+                keys[idx] = rhs.keys[idx]
+                values[idx] = rhs.values[idx]
+            } else {
+                keys.add(rhs.keys[idx])
+                values.add(rhs.values[idx])
+            }
+            idx++
+        }
+        while (keys.size > rhs.keys.size) {
+            keys.remove(at: keys.size - 1)
+            values.remove(at: values.size - 1)
+        }
     }
 
     public func Size(): Int64 {
@@ -557,10 +625,16 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
         kind = if (value) { ReachableKind.REACHABLE } else { ReachableKind.UNREACHABLE }
     }
 
-    public func CopyFrom(rhs: State<VD, Pool>): Unit {
+    public override func CopyFrom(rhs: State<VD, Pool>): Unit {
         kind = rhs.kind
-        programState = rhs.programState.Clone()
-        refMap = rhs.refMap.Clone()
+        if (IsInstanceOfValue<VD, Pool>()) {
+            // ActiveStatePool.Join iterates its HashMap directly. Keep the old
+            // fresh-clone path so retained bucket capacity cannot change eviction.
+            programState = rhs.programState.Clone()
+        } else {
+            programState.CopyFrom(rhs.programState)
+        }
+        refMap.CopyFrom(rhs.refMap)
     }
 
     public override func Join(rhs: State<VD, Pool>): Bool {

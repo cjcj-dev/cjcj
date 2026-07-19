@@ -69,6 +69,9 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
         for (block in worklist) {
             worklistSet.add(block)
         }
+        // C++ Engine.h:176,190 keeps one scratch Domain outside the worklist
+        // loop and copy-assigns each block's entry state into it.
+        let state = analysis.Bottom()
         var worklistIdx: Int64 = 0
         while (worklistIdx < worklist.size) {
             let block = worklist[worklistIdx]
@@ -78,8 +81,9 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
                 continue
             }
 
-            let state = (entryStates.get(block.nodeId) ??
-                throw IllegalStateException("Engine IterateSingleUnitToFixpoint expected block state")).Clone()
+            let entryState = entryStates.get(block.nodeId) ??
+                throw IllegalStateException("Engine IterateSingleUnitToFixpoint expected block state")
+            state.CopyFrom(entryState)
             if (state.IsBottom()) {
                 continue
             }
