@@ -127,7 +127,7 @@ jobs:
           git -C "$llvm_src" fetch --depth=1 origin "$LLVM_REF"
           git -C "$llvm_src" checkout --detach FETCH_HEAD
           test "$(git -C "$llvm_src" rev-parse HEAD)" = "$LLVM_REF"
-          rg -q 'ERT_CTOR_ANNOTATIONS' \
+          grep -q 'ERT_CTOR_ANNOTATIONS' \
             "$llvm_src/llvm/include/llvm/Transforms/Scalar/ReflectionInfo.h"
 
       - name: Build C++ compiler oracle
