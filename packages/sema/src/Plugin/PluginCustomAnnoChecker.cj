@@ -282,16 +282,6 @@ private func ClearAnnoInfoOfDepPkg(importManager: SemaImportManager): Unit {
     }
 }
 
-private class PluginAnnoCacheEntry {
-    public var decl: Decl
-    public var info: PluginCustomAnnoInfo
-
-    public init(decl: Decl, info: PluginCustomAnnoInfo) {
-        this.decl = decl
-        this.info = info
-    }
-}
-
 public class PluginCustomAnnoChecker {
     private var ci: Option<CompilerInstance> = None
     private var diag: BasicDiagnosticEngine
@@ -300,7 +290,7 @@ public class PluginCustomAnnoChecker {
     private var typeManager: Option<TypeManager> = None
     private var globalOptions: OptionGlobalOptions = OptionGlobalOptions()
     private var curModuleName: String = ""
-    private let levelCache: ArrayList<PluginAnnoCacheEntry> = ArrayList<PluginAnnoCacheEntry>()
+    private let levelCache: HashMap<Decl, PluginCustomAnnoInfo> = HashMap<Decl, PluginCustomAnnoInfo>()
     private var globalLevel: APILevelVersion = APILevelVersion()
     private var optionWithLevel: Bool = false
     private var optionWithSyscap: Bool = false
@@ -450,15 +440,6 @@ public class PluginCustomAnnoChecker {
         if (let Some(value) <- cached.hasHideAnno) {
             annoInfo.hasHideAnno = Some(value)
         }
-    }
-
-    private func FindCachedInfo(decl: Decl): Option<PluginCustomAnnoInfo> {
-        for (entry in levelCache) {
-            if (SameDecl(entry.decl, decl)) {
-                return Some(entry.info)
-            }
-        }
-        return None
     }
 
     private func IsKnownIfAvailableArg(argName: String): Bool {
@@ -1080,7 +1061,7 @@ public class PluginCustomAnnoChecker {
     }
 
     public func Parse(decl: Decl, annoInfo: PluginCustomAnnoInfo): Unit {
-        if (let Some(cached) <- FindCachedInfo(decl)) {
+        if (let Some(cached) <- levelCache.get(decl)) {
             PluginCustomAnnoChecker.MergeCachedAnnoInfo(cached, annoInfo)
             return
         }
@@ -1088,7 +1069,7 @@ public class PluginCustomAnnoChecker {
         for (annotation in decl.annotations) {
             ProcessOneAnnotation(decl, annotation, hideSeen, annoInfo)
         }
-        levelCache.add(PluginAnnoCacheEntry(decl, CopyAnnoInfo(annoInfo)))
+        levelCache[decl] = CopyAnnoInfo(annoInfo)
         CheckHideOfExtendDecl(decl, annoInfo)
         CheckHideOfOverrideFunction(decl, annoInfo)
     }
