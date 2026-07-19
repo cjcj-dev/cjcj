@@ -1633,9 +1633,7 @@ public class InitializationChecker {
             let needCheck = target.scopeLevel == 0u32 || (target.astKind != ASTKind.VAR_DECL && hasNominalOuter) ||
                 (left.astKind == ASTKind.REF_EXPR && !target.TestAttr(Attribute.INITIALIZED))
             if (!assign.isCompound && needCheck) {
-                left.EnableAttr(Attribute.LEFT_VALUE)
                 CheckInitInExpr(left)
-                left.DisableAttr(Attribute.LEFT_VALUE)
             }
             if (target.TestAttr(Attribute.INITIALIZATION_CHECKED) && !IsInDifferentFunction(assign, target)) {
                 UpdateInitializationStatus(assign, target)
