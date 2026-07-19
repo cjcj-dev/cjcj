@@ -60,23 +60,27 @@ jobs:
           sparse-checkout: demangler
           path: cangjie_compiler
 
-      - name: Build cangjie-demangle (from source)
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          cmake -G Ninja -B demangle-build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_COMPILER=clang++ cangjie_compiler/demangler
-          ninja -C demangle-build cangjie-demangle
-          mkdir -p demangle-dir
-          cp demangle-build/libcangjie-demangle.a demangle-dir/
-          cp cangjie_compiler/demangler/CangjieDemangle.h demangle-dir/
-          echo "demangle sha: $(sha256sum demangle-dir/libcangjie-demangle.a | cut -c1-16)"
-
       - name: Checkout llvm fork @ fixed commit
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           git clone --filter=blob:none --branch "$FORK_REF" "$FORK_URL" llvm-fork
           git -C llvm-fork checkout "$FORK_SHA"
           test "$(git -C llvm-fork rev-parse HEAD)" = "$FORK_SHA"
+
+      - name: Build cangjie-demangle (from source) into the fork's utils/demangle
+        if: steps.cache.outputs.cache-hit != 'true'
+        # The fork's LLVM CMake resolves CANGJIE_DEMANGLE_DIR to <fork>/utils/demangle
+        # (llvm/lib/CMakeLists.txt), overriding any -D, and LLVMCore/Analysis both
+        # #include CangjieDemangle.h + ar-merge libcangjie-demangle.a from there. So the
+        # from-source demangle artifacts must land in that exact directory.
+        run: |
+          cmake -G Ninja -B demangle-build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=clang++ cangjie_compiler/demangler
+          ninja -C demangle-build cangjie-demangle
+          mkdir -p llvm-fork/utils/demangle
+          cp demangle-build/libcangjie-demangle.a llvm-fork/utils/demangle/
+          cp cangjie_compiler/demangler/CangjieDemangle.h llvm-fork/utils/demangle/
+          echo "demangle sha: $(sha256sum llvm-fork/utils/demangle/libcangjie-demangle.a | cut -c1-16)"
 
       - name: Configure + build llc (from source)
         if: steps.cache.outputs.cache-hit != 'true'
@@ -91,7 +95,6 @@ jobs:
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string" \
-            -DCANGJIE_DEMANGLE_DIR="$PWD/demangle-dir" \
             llvm-fork/llvm
           ninja -C llc-build llc
           mkdir -p fixed-llc
