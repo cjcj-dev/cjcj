@@ -1,10 +1,11 @@
 # Build the -O2-fixed llc from source (no binaries in git; task#15).
 # The stock nightly llc miscompiles cjcj's relocate-of-undef at -O2 (materializes a
 # 0xFEFEFEFE sentinel into a callee-saved GC-root register -> runtime GC SIGSEGV).
-# The fix (getUNDEF lowering) lives in the cjcj_llvm fork; this job builds llc entirely
-# from source (LLVM 15 + fork patch + the Cangjie demangle lib, itself built from source)
-# and caches the result keyed by the fork commit, so the ~1h cold build runs only when
-# the fork commit changes.
+# The fix (getUNDEF lowering) lives in the cjcj_llvm fork. As of fork tip 4f61703c the
+# whole llc builds PURE from source: the Cangjie demangler is an in-tree passthrough stub,
+# so no prebuilt libcangjie-demangle.a and no CANGJIE_DEMANGLE_DIR are needed. Cache the
+# result keyed by the fork commit so the ~1h cold build runs only when the fork changes.
+# Recipe: reports/llvmfix/getundef/CI_LLC_FROM_SOURCE.md
 name: build-fixed-llc
 
 on:
@@ -22,10 +23,9 @@ permissions:
 env:
   FORK_URL: https://github.com/cjcj-dev/cjcj_llvm.git
   FORK_REF: fix/scheddag-memcorrupt
-  FORK_SHA: 2b96e7189147006ed7dac16720e86d7dbed2a7ec
-  # cangjie_compiler holds the Cangjie demangle source (Apache-2.0, self-contained C++17).
-  DEMANGLE_REPO: CangjieFork/cangjie_compiler
-  DEMANGLE_SHA: 7a1666e760445edd6ca72da250d9c9e4ee30adcd
+  # tip = getUNDEF (2b96e718) + IRBuilder<> clang-CTAD fix (5ca4a192)
+  #     + demangler-from-source stub (4f61703c, drops the prebuilt .a)
+  FORK_SHA: 4f61703c3225d60a7dc839718d822911628e6740
 
 jobs:
   build-llc:
@@ -51,15 +51,6 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang ninja-build cmake
 
-      - name: Checkout demangle source (sparse)
-        if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.DEMANGLE_REPO }}
-          ref: ${{ env.DEMANGLE_SHA }}
-          sparse-checkout: demangler
-          path: cangjie_compiler
-
       - name: Checkout llvm fork @ fixed commit
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -67,22 +58,7 @@ jobs:
           git -C llvm-fork checkout "$FORK_SHA"
           test "$(git -C llvm-fork rev-parse HEAD)" = "$FORK_SHA"
 
-      - name: Build cangjie-demangle (from source) into the fork's utils/demangle
-        if: steps.cache.outputs.cache-hit != 'true'
-        # The fork's LLVM CMake resolves CANGJIE_DEMANGLE_DIR to <fork>/utils/demangle
-        # (llvm/lib/CMakeLists.txt), overriding any -D, and LLVMCore/Analysis both
-        # #include CangjieDemangle.h + ar-merge libcangjie-demangle.a from there. So the
-        # from-source demangle artifacts must land in that exact directory.
-        run: |
-          cmake -G Ninja -B demangle-build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_COMPILER=clang++ cangjie_compiler/demangler
-          ninja -C demangle-build cangjie-demangle
-          mkdir -p llvm-fork/utils/demangle
-          cp demangle-build/libcangjie-demangle.a llvm-fork/utils/demangle/
-          cp cangjie_compiler/demangler/CangjieDemangle.h llvm-fork/utils/demangle/
-          echo "demangle sha: $(sha256sum llvm-fork/utils/demangle/libcangjie-demangle.a | cut -c1-16)"
-
-      - name: Configure + build llc (from source)
+      - name: Configure + build llc (pure source, in-tree demangle stub)
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           cmake -G Ninja -B llc-build \
