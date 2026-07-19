@@ -1,0 +1,111 @@
+# Build the -O2-fixed llc from source (no binaries in git; task#15).
+# The stock nightly llc miscompiles cjcj's relocate-of-undef at -O2 (materializes a
+# 0xFEFEFEFE sentinel into a callee-saved GC-root register -> runtime GC SIGSEGV).
+# The fix (getUNDEF lowering) lives in the cjcj_llvm fork; this job builds llc entirely
+# from source (LLVM 15 + fork patch + the Cangjie demangle lib, itself built from source)
+# and caches the result keyed by the fork commit, so the ~1h cold build runs only when
+# the fork commit changes.
+name: build-fixed-llc
+
+on:
+  push:
+    branches: [debug/llc-build]
+  workflow_call:
+    outputs:
+      cache-key:
+        description: actions/cache key holding fixed-llc/llc.gz
+        value: ${{ jobs.build-llc.outputs.cache-key }}
+
+permissions:
+  contents: read
+
+env:
+  FORK_URL: https://github.com/cjcj-dev/cjcj_llvm.git
+  FORK_REF: fix/scheddag-memcorrupt
+  FORK_SHA: 2b96e7189147006ed7dac16720e86d7dbed2a7ec
+  # cangjie_compiler holds the Cangjie demangle source (Apache-2.0, self-contained C++17).
+  DEMANGLE_REPO: CangjieFork/cangjie_compiler
+  DEMANGLE_SHA: 7a1666e760445edd6ca72da250d9c9e4ee30adcd
+
+jobs:
+  build-llc:
+    name: build fixed llc (x86_64)
+    # ubuntu-24.04 = glibc 2.39 (>= 2.38) so the __isoc23_strto* shim is unnecessary.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      cache-key: ${{ steps.key.outputs.key }}
+    steps:
+      - name: Compute cache key
+        id: key
+        run: echo "key=fixed-llc-x86_64-${FORK_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached llc
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: fixed-llc/llc.gz
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Install build deps
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang ninja-build cmake
+
+      - name: Checkout demangle source (sparse)
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DEMANGLE_REPO }}
+          ref: ${{ env.DEMANGLE_SHA }}
+          sparse-checkout: demangler
+          path: cangjie_compiler
+
+      - name: Build cangjie-demangle (from source)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cmake -G Ninja -B demangle-build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=clang++ cangjie_compiler/demangler
+          ninja -C demangle-build cangjie-demangle
+          mkdir -p demangle-dir
+          cp demangle-build/libcangjie-demangle.a demangle-dir/
+          cp cangjie_compiler/demangler/CangjieDemangle.h demangle-dir/
+          echo "demangle sha: $(sha256sum demangle-dir/libcangjie-demangle.a | cut -c1-16)"
+
+      - name: Checkout llvm fork @ fixed commit
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --filter=blob:none --branch "$FORK_REF" "$FORK_URL" llvm-fork
+          git -C llvm-fork checkout "$FORK_SHA"
+          test "$(git -C llvm-fork rev-parse HEAD)" = "$FORK_SHA"
+
+      - name: Configure + build llc (from source)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cmake -G Ninja -B llc-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DLLVM_ENABLE_RTTI=OFF \
+            -DLLVM_TARGETS_TO_BUILD=X86 \
+            -DLLVM_ENABLE_PROJECTS="" \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string" \
+            -DCANGJIE_DEMANGLE_DIR="$PWD/demangle-dir" \
+            llvm-fork/llvm
+          ninja -C llc-build llc
+          mkdir -p fixed-llc
+          gzip -c -9 llc-build/bin/llc > fixed-llc/llc.gz
+
+      - name: Verify llc runs
+        run: |
+          gunzip -c fixed-llc/llc.gz > /tmp/llc && chmod +x /tmp/llc
+          /tmp/llc --version | head -5
+          echo "fixed llc.gz sha256(top16): $(sha256sum fixed-llc/llc.gz | cut -c1-16)"
+
+      - name: Upload llc artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixed-llc-x86_64
+          path: fixed-llc/llc.gz
+          retention-days: 7
