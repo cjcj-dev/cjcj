@@ -44,7 +44,8 @@ public class TypeValue <: HasEqual<TypeValue> {
     }
 
     public func Clone(): TypeValue {
-        return TypeValue(kind, baseLineType)
+        // TypeValue is immutable; Join constructs a replacement on change.
+        return this
     }
 
     public func GetTypeKind(): DevirtualTyKind {

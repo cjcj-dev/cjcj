@@ -76,7 +76,8 @@ public class BoolRange <: ValueRange {
     }
 
     public override func Clone(): ValueRange {
-        return BoolRange(domain)
+        // BoolRange and BoolDomain are immutable value payloads.
+        return this
     }
 
     public override func ToString(): String {
@@ -112,7 +113,9 @@ public class SIntRange <: ValueRange {
     }
 
     public override func Clone(): ValueRange {
-        return SIntRange(SIntDomain(domain.NumericBound(), domain.SymbolicBounds(), domain.IsUnsigned()))
+        // SIntDomain mutates symbolics only while constructing itself; all
+        // range operations return a new domain, so sharing this payload is safe.
+        return this
     }
 
     public override func ToString(): String {

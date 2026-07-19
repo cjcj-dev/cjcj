@@ -27,6 +27,9 @@ extend ConstKind <: Equatable<ConstKind> {
     }
 }
 
+// Const payloads are immutable values: every concrete field is `let`, and
+// Join returns a replacement instead of mutating either operand. State clones
+// can therefore share a payload while their mutable ValueDomain stays unique.
 public abstract class ConstValue <: HasEqual<ConstValue> {
     protected let kind: ConstKind
 
@@ -66,7 +69,7 @@ public class ConstBoolVal <: ConstValue {
     }
 
     public override func Clone(): ConstValue {
-        return ConstBoolVal(val)
+        return this
     }
 
     public func GetVal(): Bool {
@@ -94,7 +97,7 @@ public class ConstRuneVal <: ConstValue {
     }
 
     public override func Clone(): ConstValue {
-        return ConstRuneVal(val)
+        return this
     }
 
     public func GetVal(): Rune {
@@ -122,7 +125,7 @@ public class ConstStrVal <: ConstValue {
     }
 
     public override func Clone(): ConstValue {
-        return ConstStrVal(val)
+        return this
     }
 
     public func GetVal(): String {
@@ -150,7 +153,7 @@ public class ConstUIntVal <: ConstValue {
     }
 
     public override func Clone(): ConstValue {
-        return ConstUIntVal(val)
+        return this
     }
 
     public func GetVal(): UInt64 {
@@ -178,7 +181,7 @@ public class ConstIntVal <: ConstValue {
     }
 
     public override func Clone(): ConstValue {
-        return ConstIntVal(val)
+        return this
     }
 
     public func GetVal(): Int64 {
@@ -206,7 +209,7 @@ public class ConstFloatVal <: ConstValue {
     }
 
     public override func Clone(): ConstValue {
-        return ConstFloatVal(val)
+        return this
     }
 
     public func GetVal(): Float64 {

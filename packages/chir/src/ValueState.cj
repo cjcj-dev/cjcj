@@ -118,9 +118,10 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
     }
 
     public func Insert(value: Value, domain: VD): Unit {
-        if (data.contains(value)) {
-            // C++ ValueAnalysis.h:174-178 updates an existing iterator entry.
-            data[value] = domain.Clone()
+        if (let Some(current) <- data.get(value)) {
+            // The map owns the mutable domain. Updating it in place avoids a
+            // short-lived domain allocation and a HashMap reference write.
+            current.CopyFrom(domain)
             return
         }
         // C++ ActiveStatePool.h:91-94: data.emplace(value, domain).
