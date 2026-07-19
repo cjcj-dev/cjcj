@@ -2,6 +2,7 @@
 # Install the Cangjie bootstrap SDK and export the build env.
 #   1. bootstrap cjv (github.com/Zxilly/cjv)
 #   2. cjv install <pinned-nightly> -c stdx
+#   2.5 swap the SDK's llc with the -O2-fixed static llc (ci/prebuilt/llc)
 #   3. repoint the libLLVM path hardcoded in packages/cjc/cjpm.toml at the SDK (CI checkout only)
 #   4. write CANGJIE_HOME / CANGJIE_STDX_PATH / lib path / cjHeapSize / PATH to $GITHUB_ENV
 #
@@ -54,6 +55,36 @@ cjv install "$CJCJ_TOOLCHAIN" -c stdx
 CANGJIE_HOME="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
 [ -d "$CANGJIE_HOME" ] || { log "toolchain dir missing: $CANGJIE_HOME"; exit 3; }
 STDX_PATH="$HOME/.cjv/stdx/$CJCJ_TOOLCHAIN/static/stdx"
+
+# 2.5 Swap the SDK's llc with the -O2-fixed static llc.
+#     The stock nightly llc miscompiles -O2 (SelectionDAG relocate-of-undef memory corruption;
+#     cjcj_llvm fix/scheddag-memcorrupt edd69670+17c6e735). The fix is in llc (backend) only;
+#     opt/libLLVM are untouched (cjc's opt IR-O2 needs no fix). This static llc is
+#     self-contained (no libLLVM dependency). Idempotent: skips if already fixed; keeps the
+#     original as llc.orig once. Required for ANY -O2 build of cjcj, so it runs in CI and local.
+case "$OS/$ARCH" in
+    Linux/x86_64) LLC_PLATFORM="linux_x86_64" ;;
+    *)            LLC_PLATFORM="" ;;
+esac
+FIXED_LLC_GZ="$REPO_ROOT/ci/prebuilt/llc/$LLC_PLATFORM/llc.gz"
+FIXED_LLC_SHA="98fba7b69e344da812d3a4d74289819417c99a14e110c8caa434abffcfbb6b83"
+SDK_LLC="$CANGJIE_HOME/third_party/llvm/bin/llc"
+if [ -n "$LLC_PLATFORM" ] && [ -f "$FIXED_LLC_GZ" ] && [ -f "$SDK_LLC" ]; then
+    cur_sha="$(sha256sum "$SDK_LLC" | awk '{print $1}')"
+    if [ "$cur_sha" != "$FIXED_LLC_SHA" ]; then
+        [ -f "$SDK_LLC.orig" ] || cp -f "$SDK_LLC" "$SDK_LLC.orig"   # capture the true original once
+        rm -f "$SDK_LLC"                                            # break any hardlink; don't overwrite in place
+        gunzip -c "$FIXED_LLC_GZ" > "$SDK_LLC"
+        chmod 0755 "$SDK_LLC"
+        got_sha="$(sha256sum "$SDK_LLC" | awk '{print $1}')"
+        [ "$got_sha" = "$FIXED_LLC_SHA" ] || { log "FATAL: fixed llc sha mismatch ($got_sha)"; exit 4; }
+        log "swapped SDK llc -> -O2-fixed (backend relocate-of-undef fix)"
+    else
+        log "SDK llc already -O2-fixed; skip"
+    fi
+else
+    log "no fixed llc for $OS/$ARCH; keeping stock llc (aarch64 fixed llc: TODO, task#7)"
+fi
 
 # 3. Repoint the libLLVM dir hardcoded in cjpm.toml (a /root/.cjv/... path unreadable to the
 #    runner user, mode 0700) at this SDK. CI checkout only; repo file untouched, local dev unaffected.
