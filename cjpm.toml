@@ -70,11 +70,11 @@
     "packages/compiler_unittest",
     "packages/cjc"
   ]
-  # -O1 globally: the patched LLVM 15 llc has a nondeterministic SelectionDAG memory-corruption
-  # bug at -O2 (heap-layout dependent; package `basic` crashed on a 4-core CI runner after
-  # surviving two clean 384-core builds). -O1 skips the pathological giant-function isel path.
-  # Restore -O2 once cjcj_llvm fix/scheddag-memcorrupt lands. Evidence: reports/REPORT-o2root.md.
-  compile-option = "-O1"
+  # -O2 restored: the patched LLVM 15 llc SelectionDAG memory-corruption bug (relocate(undef)
+  # producing an unusable TargetConstant, StatepointLowering.cpp) is fixed in cjcj_llvm
+  # fix/scheddag-memcorrupt (edd69670 + 17c6e735). The fixed static llc is swapped into the SDK
+  # toolchain via ci/setup_sdk.sh. Evidence: reports/REPORT-llvmfix.md, reports/REPORT-o2root.md.
+  compile-option = "-O2"
   override-compile-option = ""
   link-option = ""
   target-dir = ""
