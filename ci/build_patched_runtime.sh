@@ -39,7 +39,8 @@ for p in "$PATCH_DIR"/0*.diff; do
 done
 
 log "build (native, release)"
-python3 "$WORK/runtime/build.py" build --target native --build-type release -v "$VERSION"
+# build.py drives cmake with `-S .`, so it must run from the runtime source dir.
+( cd "$WORK/runtime" && python3 build.py build --target native --build-type release -v "$VERSION" )
 
 SO="$(find "$WORK/runtime/output" -path '*Release*' -name 'libcangjie-runtime.so' | head -1)"
 [ -n "$SO" ] && [ -f "$SO" ] || { log "ERROR: built libcangjie-runtime.so not found"; exit 1; }
@@ -48,7 +49,8 @@ mkdir -p "$OUT"
 cp "$SO" "$OUT/libcangjie-runtime.so"
 log "wrote $OUT/libcangjie-runtime.so"
 # Fail loudly if the .cjmetadata discriminator (the whole point of the patch) is absent.
-if ! strings "$OUT/libcangjie-runtime.so" | grep -q '\.cjmetadata'; then
+# grep -a reads the object directly (no `strings | grep -q`, which trips pipefail via SIGPIPE).
+if ! grep -qa '\.cjmetadata' "$OUT/libcangjie-runtime.so"; then
     log "ERROR: built runtime lacks the .cjmetadata discriminator; patch did not take"
     exit 1
 fi
