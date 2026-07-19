@@ -65,22 +65,15 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
 
     public func IterateSingleUnitToFixpoint(entryBlock: Block, entryStates: HashMap<Int64, Domain>): Unit {
         let worklist = TopologicalSort(entryBlock)
-        let worklistSet = ArrayList<Int64>()
+        let worklistSet = HashSet<Block>()
         for (block in worklist) {
-            worklistSet.add(block.nodeId)
+            worklistSet.add(block)
         }
         var worklistIdx: Int64 = 0
         while (worklistIdx < worklist.size) {
             let block = worklist[worklistIdx]
             worklistIdx++
-            var setIdx: Int64 = 0
-            while (setIdx < worklistSet.size) {
-                if (worklistSet[setIdx] == block.nodeId) {
-                    worklistSet.remove(at: setIdx)
-                    break
-                }
-                setIdx++
-            }
+            worklistSet.remove(block)
             if (block.TestAttr(Attribute.UNREACHABLE)) {
                 continue
             }
@@ -143,16 +136,9 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
                     throw IllegalStateException("Engine IterateSingleUnitToFixpoint expected successor state")
                 let hasChanged = successorState.Join(state)
                 if (hasChanged) {
-                    var inWorklist = false
-                    for (id in worklistSet) {
-                        if (id == successor.nodeId) {
-                            inWorklist = true
-                            break
-                        }
-                    }
-                    if (!inWorklist) {
+                    if (!worklistSet.contains(successor)) {
                         worklist.add(successor)
-                        worklistSet.add(successor.nodeId)
+                        worklistSet.add(successor)
                     }
                 }
             }
