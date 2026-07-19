@@ -8,12 +8,7 @@
   script-dir = ""
   src-dir = "src"
   output-type = "static"
-  # -O1: patched LLVM 15 llc has a nondeterministic SelectionDAG memory-corruption bug on the
-  # O2-inlined 19k-line VisitChildren (485 allocas + 113-way switch); official cjc -O2 crashes
-  # identically on this package. Evidence: reports/REPORT-o2root.md.
-  # NOTE: member override-compile-option is ignored for non-entry modules (cjpm manual);
-  # member compile-option appends after the workspace-level flags, so -O1 wins last.
-  compile-option = "-O1"
+  compile-option = ""
   override-compile-option = ""
   link-option = ""
   package-configuration = {}

@@ -70,7 +70,11 @@
     "packages/compiler_unittest",
     "packages/cjc"
   ]
-  compile-option = "-O2"
+  # -O1 globally: the patched LLVM 15 llc has a nondeterministic SelectionDAG memory-corruption
+  # bug at -O2 (heap-layout dependent; package `basic` crashed on a 4-core CI runner after
+  # surviving two clean 384-core builds). -O1 skips the pathological giant-function isel path.
+  # Restore -O2 once cjcj_llvm fix/scheddag-memcorrupt lands. Evidence: reports/REPORT-o2root.md.
+  compile-option = "-O1"
   override-compile-option = ""
   link-option = ""
   target-dir = ""

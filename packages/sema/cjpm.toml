@@ -8,10 +8,7 @@
   script-dir = ""
   src-dir = "src"
   output-type = "static"
-  # -O1: patched LLVM 15 llc nondeterministic SelectionDAG memory corruption on O2-inlined
-  # giant functions; probed 0719 (o2probe2): this package hits llc exit 139 at -O2.
-  # Evidence: reports/REPORT-o2root.md + MERGE_QUEUE o2probe2 rounds.
-  compile-option = "-O1"
+  compile-option = ""
   override-compile-option = ""
   link-option = ""
   package-configuration = {}
