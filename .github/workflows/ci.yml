@@ -38,6 +38,7 @@ jobs:
           test -f ci/smoke/macro_demo/mymacros/def.cj
           test -f ci/smoke/macro_demo/app/main.cj
           test -f runtime_shim/prebuilt/linux_x86_64/cjselfhost_llvmshim.o
+          test -f ci/prebuilt/llc/linux_x86_64/llc.gz
 
   build:
     name: build ${{ matrix.runner }}
