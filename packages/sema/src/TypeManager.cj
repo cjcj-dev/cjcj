@@ -268,12 +268,10 @@ private class CheckedTyExtendRelation {
 }
 
 private class DeclInstantiationStatusEntry {
-    public var decl: Decl
     public let typeArgs: ArrayList<Ty> = ArrayList<Ty>()
     public var value: Bool
 
-    public init(decl: Decl, typeArgs: ArrayList<Ty>, value: Bool) {
-        this.decl = decl
+    public init(typeArgs: ArrayList<Ty>, value: Bool) {
         for (ty in typeArgs) {
             this.typeArgs.add(ty)
         }
@@ -370,8 +368,8 @@ public class TypeManager {
     private let tyToSuperTysMap: HashMap<String, TySet> = HashMap<String, TySet>()
     private let subtypeCache: HashMap<Int64, HashMap<Int64, HashMap<Int64, Bool>>> =
         HashMap<Int64, HashMap<Int64, HashMap<Int64, Bool>>>()
-    private let declInstantiationStatus: ArrayList<DeclInstantiationStatusEntry> =
-        ArrayList<DeclInstantiationStatusEntry>()
+    private let declInstantiationStatus: HashMap<Decl, ArrayList<DeclInstantiationStatusEntry>> =
+        HashMap<Decl, ArrayList<DeclInstantiationStatusEntry>>()
     private let allocatedTys: HashMap<TypePointer, Ty> = HashMap<TypePointer, Ty>()
     private var allocatedTyConstructionTraces: Option<HashMap<Int64, String>> = None
     private let allocatedClassLikeTys: ArrayList<Ty> = ArrayList<Ty>()
@@ -2821,15 +2819,12 @@ public class TypeManager {
         return true
     }
 
-    private func sameDeclInstantiationStatusKey(entry: DeclInstantiationStatusEntry, decl: Decl,
-        typeArgs: ArrayList<Ty>): Bool {
-        return SameDecl(entry.decl, decl) && sameDeclInstantiationTypeArgs(entry.typeArgs, typeArgs)
-    }
-
     private func getDeclInstantiationStatus(decl: Decl, typeArgs: ArrayList<Ty>): Option<Bool> {
-        for (entry in declInstantiationStatus) {
-            if (sameDeclInstantiationStatusKey(entry, decl, typeArgs)) {
-                return entry.value
+        if (let Some(entries) <- declInstantiationStatus.get(decl)) {
+            for (entry in entries) {
+                if (sameDeclInstantiationTypeArgs(entry.typeArgs, typeArgs)) {
+                    return entry.value
+                }
             }
         }
         return None
@@ -2837,7 +2832,13 @@ public class TypeManager {
 
     private func addDeclInstantiationStatus(decl: Decl, typeArgs: ArrayList<Ty>, value: Bool): Unit {
         if (let None <- getDeclInstantiationStatus(decl, typeArgs)) {
-            declInstantiationStatus.add(DeclInstantiationStatusEntry(decl, typeArgs, value))
+            if (let Some(entries) <- declInstantiationStatus.get(decl)) {
+                entries.add(DeclInstantiationStatusEntry(typeArgs, value))
+            } else {
+                let entries = ArrayList<DeclInstantiationStatusEntry>()
+                entries.add(DeclInstantiationStatusEntry(typeArgs, value))
+                declInstantiationStatus.add(decl, entries)
+            }
         }
     }
 
