@@ -1205,6 +1205,14 @@ private func IsLocalLinkageValue(linkage: Int32): Bool {
 
 private func TopologicalSortStaticGIs(cgMod: CGModule, content: ArrayList<LLVMValueRef>): ArrayList<LLVMValueRef> {
     let partialOrder = cgMod.GetCGContext().GetDependentPartialOrderOfTypes()
+    let partialOrderSet = HashMap<UIntNative, HashSet<UIntNative>>()
+    for (pair in partialOrder) {
+        let smaller = pair.smaller.toUIntNative()
+        if (!partialOrderSet.contains(smaller)) {
+            partialOrderSet[smaller] = HashSet<UIntNative>()
+        }
+        partialOrderSet[smaller].add(pair.bigger.toUIntNative())
+    }
     let indegrees = ArrayList<Int64>()
     for (_ in content) {
         indegrees.add(0)
@@ -1231,7 +1239,7 @@ private func TopologicalSortStaticGIs(cgMod: CGModule, content: ArrayList<LLVMVa
         result.add(current)
         var targetIdx: Int64 = 0
         while (targetIdx < content.size) {
-            if (HasStaticGIPartialOrder(partialOrder, current, content[targetIdx])) {
+            if (HasStaticGIPartialOrder(partialOrderSet, current, content[targetIdx])) {
                 indegrees[targetIdx] = indegrees[targetIdx] - 1
                 if (indegrees[targetIdx] == 0) {
                     queue.add(content[targetIdx])
@@ -1255,15 +1263,13 @@ private func IndexOfStaticGI(content: ArrayList<LLVMValueRef>, value: LLVMValueR
     return -1
 }
 
-private func HasStaticGIPartialOrder(partialOrder: ArrayList<PartialOrderPair>, smaller: LLVMValueRef,
+private func HasStaticGIPartialOrder(partialOrder: HashMap<UIntNative, HashSet<UIntNative>>, smaller: LLVMValueRef,
     bigger: LLVMValueRef): Bool {
-    for (pair in partialOrder) {
-        if (pair.smaller.toUIntNative() == smaller.toUIntNative() &&
-            pair.bigger.toUIntNative() == bigger.toUIntNative()) {
-            return true
-        }
+    let smallerKey = smaller.toUIntNative()
+    if (!partialOrder.contains(smallerKey)) {
+        return false
     }
-    return false
+    return partialOrder[smallerKey].contains(bigger.toUIntNative())
 }
 
 private func ConstLLVMArray(elementType: LLVMTypeRef, values: ArrayList<LLVMValueRef>): LLVMValueRef {
