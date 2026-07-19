@@ -132,4 +132,80 @@ class FlatBufferBuilderTest {
         let secondDedup = Item(dedupBytes, (dedupItems.Get(1u32) as Int64).getOrThrow())
         @Expect(firstDedup.GetVTable(), secondDedup.GetVTable())
     }
+
+    // Covers vector_downward growth, bulk string push, shared-string pop and
+    // the tail-relative vtable backpatch with a wire fixture larger than 1 KiB.
+    @TestCase
+    func largeSharedStringMatchesExactWireAfterGrowth(): Unit {
+        let payloadBytes = Array<UInt8>(4097, { idx: Int64 => UInt8(65 + idx % 26) })
+        let payload = String.fromUtf8(payloadBytes)
+        let builder = FlatBufferBuilder()
+        let first = builder.CreateSharedString(payload)
+        let sizeAfterFirst = builder.GetSize()
+        let second = builder.CreateSharedString(payload)
+        @Expect(second, first)
+        @Expect(builder.GetSize(), sizeAfterFirst)
+        @Expect(sizeAfterFirst, 4104)
+
+        builder.StartTable(1)
+        builder.AddOffset(0, second)
+        let rootOffset = builder.EndTable()
+        let bytes = builder.Finish(rootOffset)
+
+        let expected = Array<UInt8>(4124, repeat: 0u8)
+        expected[0] = 12u8
+        expected[6] = 6u8
+        expected[8] = 8u8
+        expected[10] = 4u8
+        expected[12] = 6u8
+        expected[16] = 4u8
+        expected[20] = 1u8
+        expected[21] = 16u8
+        payloadBytes.copyTo(expected, 0, 24, payloadBytes.size)
+        @Expect(bytes == expected)
+        @Expect(builder.GetBufferPointer() == expected)
+
+        let root = Root(bytes, Int64(ReadScalar<UInt32>(bytes, 0)))
+        @Expect(root.title(), payload)
+    }
+
+    // flatbuffer_builder.h:900-918 uses one PushBytes for a struct vector.
+    // This exact fixture crosses the initial reserve several times and then
+    // verifies Clear reuses the carrier without retaining the finished view.
+    @TestCase
+    func largeStructVectorBulkPushMatchesExactWireAndClear(): Unit {
+        let values = ArrayList<ArrayList<UInt8>>()
+        let flat = Array<UInt8>(513 * 8, { idx: Int64 => UInt8(idx % 251) })
+        for (idx in 0..513) {
+            let element = ArrayList<UInt8>()
+            for (byteIdx in 0..8) {
+                element.add(flat[idx * 8 + byteIdx])
+            }
+            values.add(element)
+        }
+
+        let builder = FlatBufferBuilder()
+        let vector = builder.CreateVectorOfStructs(values, elementSize: 8, alignment: 8)
+        let bytes = builder.Finish(vector)
+        let expected = Array<UInt8>(4112, repeat: 0u8)
+        expected[0] = 4u8
+        expected[4] = 1u8
+        expected[5] = 2u8
+        flat.copyTo(expected, 0, 8, flat.size)
+        @Expect(bytes == expected)
+        @Expect(builder.GetSize(), 4112)
+
+        builder.Clear()
+        let smallValues = ArrayList<UInt8>()
+        smallValues.add(7u8)
+        smallValues.add(8u8)
+        smallValues.add(9u8)
+        let smallVector = builder.CreateVectorU8(smallValues)
+        let afterClear = builder.Finish(smallVector)
+        let expectedAfterClear: Array<UInt8> = [
+            4u8, 0u8, 0u8, 0u8, 3u8, 0u8, 0u8, 0u8, 7u8, 8u8, 9u8, 0u8
+        ]
+        @Expect(afterClear == expectedAfterClear)
+        @Expect(builder.GetBufferPointer() == expectedAfterClear)
+    }
 }
