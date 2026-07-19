@@ -15,21 +15,16 @@ private func declFromSymbol(symbol: Symbol): Option<Decl> {
 
 private func symbolsToDecls(symbols: ArrayList<Symbol>): ArrayList<Decl> {
     let out = ArrayList<Decl>()
+    let seen = HashSet<Decl>()
     for (symbol in symbols) {
         if (let Some(decl) <- declFromSymbol(symbol)) {
-            addDeclUnique(out, decl)
+            if (!seen.contains(decl)) {
+                seen.add(decl)
+                out.add(decl)
+            }
         }
     }
     return out
-}
-
-private func addDeclUnique(values: ArrayList<Decl>, decl: Decl): Unit {
-    for (value in values) {
-        if (SameDecl(value, decl)) {
-            return
-        }
-    }
-    values.add(decl)
 }
 
 public func GetToplevelDecls(ctx: ASTContext): ArrayList<Decl> {
