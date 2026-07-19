@@ -61,7 +61,7 @@ jobs:
         run: bash runtime_shim/build_shim.sh
       - name: Build workspace
         run: cjpm build
-      - name: Deploy cjcj binary
+      - name: Deploy compiler
         run: |
           test -f "target/release/bin/cjcj::cjc"
           cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"

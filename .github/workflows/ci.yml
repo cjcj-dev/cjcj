@@ -83,7 +83,7 @@ jobs:
       - name: Build workspace
         run: cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
-      - name: Deploy cjcj binary
+      - name: Deploy compiler
         run: |
           test -f "target/release/bin/cjcj::cjc"
           cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
@@ -124,7 +124,7 @@ jobs:
           ls -la "$CANGJIE_HOME/bin" || true
           file "$CANGJIE_HOME/bin/cjc" || true
           ls "$CANGJIE_HOME/runtime/lib" || true
-      - name: Verify bootstrap cjc
+      - name: Verify official cjc
         run: |
           set -x
           if [ "$(uname -s)" = "Darwin" ]; then xattr -dr com.apple.quarantine "$CANGJIE_HOME" || true; fi
