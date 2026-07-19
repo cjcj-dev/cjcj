@@ -58,16 +58,20 @@ STDX_PATH="$HOME/.cjv/stdx/$CJCJ_TOOLCHAIN/static/stdx"
 
 # 2.5 Swap the SDK's llc with the -O2-fixed static llc.
 #     The stock nightly llc miscompiles -O2 (SelectionDAG relocate-of-undef memory corruption;
-#     cjcj_llvm fix/scheddag-memcorrupt edd69670+17c6e735). The fix is in llc (backend) only;
-#     opt/libLLVM are untouched (cjc's opt IR-O2 needs no fix). This static llc is
-#     self-contained (no libLLVM dependency). Idempotent: skips if already fixed; keeps the
-#     original as llc.orig once. Required for ANY -O2 build of cjcj, so it runs in CI and local.
+#     cjcj_llvm fix/scheddag-memcorrupt). The backend lowered relocate-of-undef to a
+#     materialized 0xFEFEFEFE sentinel in a callee-saved register; the compressed GC stackmap
+#     records that register as a live root, so runtime GC dereferenced 0xFEFEFEFE and crashed
+#     non-deterministically on 26.04/few-core heaps (task#11). Fix: lower relocate-of-undef to
+#     getUNDEF (no register materialization, no phantom root) + filterGCPointer tolerates a
+#     ConstantOp GC pointer. The fix is in llc (backend) only; opt/libLLVM are untouched. This
+#     static llc is self-contained (no libLLVM dependency). Idempotent: skips if already fixed;
+#     keeps the original as llc.orig once. Required for ANY -O2 build of cjcj, so it runs in CI and local.
 case "$OS/$ARCH" in
     Linux/x86_64) LLC_PLATFORM="linux_x86_64" ;;
     *)            LLC_PLATFORM="" ;;
 esac
 FIXED_LLC_GZ="$REPO_ROOT/ci/prebuilt/llc/$LLC_PLATFORM/llc.gz"
-FIXED_LLC_SHA="98fba7b69e344da812d3a4d74289819417c99a14e110c8caa434abffcfbb6b83"
+FIXED_LLC_SHA="9f203753f8682ab14e2c0dc12a0f13a2af14783d3a09bc9f2626d633327fe943"
 SDK_LLC="$CANGJIE_HOME/third_party/llvm/bin/llc"
 if [ -n "$LLC_PLATFORM" ] && [ -f "$FIXED_LLC_GZ" ] && [ -f "$SDK_LLC" ]; then
     cur_sha="$(sha256sum "$SDK_LLC" | awk '{print $1}')"
