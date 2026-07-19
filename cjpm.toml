@@ -70,7 +70,7 @@
     "packages/compiler_unittest",
     "packages/cjc"
   ]
-  compile-option = ""
+  compile-option = "-O2"
   override-compile-option = ""
   link-option = ""
   target-dir = ""
