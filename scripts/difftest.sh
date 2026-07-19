@@ -9,8 +9,8 @@ TC=${DIFFTEST_TC:-/root/.cjv/toolchains/nightly-1.2.0-alpha.20260712020030}
 export CANGJIE_HOME=$TC
 export LD_LIBRARY_PATH="$CANGJIE_HOME/third_party/llvm/lib:$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative:$CANGJIE_HOME/tools/lib:${LD_LIBRARY_PATH:-}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-SELF="$REPO/target/release/bin/cjcj::cjc"
-REF=/root/.cjv/bin/cjc
+SELF=${DIFFTEST_SELF:-$REPO/target/release/bin/cjcj::cjc}
+REF=${DIFFTEST_REF:-$TC/bin/cjc}
 
 # ---- single-sample worker: prints exactly one TAB-separated line: STATUS<TAB>name<TAB>detail ----
 if [ "${1:-}" = "--one" ]; then

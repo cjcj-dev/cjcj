@@ -1,0 +1,206 @@
+# Linux-x64 bootstrap closure:
+# C++ compiler/runtime/stdlib/stdx/tools -> self-host cjcj -> combined SDK -> four gates.
+name: Full source SDK (linux-x64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      cangjie_ref:
+        description: Optional shared tag/branch for the four upstream repositories
+        required: false
+        type: string
+      build_type:
+        description: C++ SDK build type
+        required: true
+        default: relwithdebinfo
+        type: choice
+        options: [release, relwithdebinfo, debug]
+  schedule:
+    - cron: "17 18 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: srcbuild-linux-x64-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fixed-llc:
+    uses: ./.github/workflows/build-fixed-llc.yml
+
+  srcbuild:
+    name: source build + compose + verify
+    needs: fixed-llc
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      BUILDER: ${{ github.workspace }}/cangjie-build
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
+      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"
+      SCCACHE_DIR: ${{ github.workspace }}/.srcbuild/sccache
+      SCCACHE_CACHE_SIZE: 5G
+      cjHeapSize: 12GB
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v4
+
+      - name: Checkout cangjie-build base
+        uses: actions/checkout@v4
+        with:
+          repository: Zxilly/cangjie-build
+          ref: f58cbc4eb1fcca55b99730f84547bac3a6be0037
+          path: cangjie-build
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: cangjie-build/uv.lock
+
+      - name: Install cangjie-build harness
+        working-directory: cangjie-build
+        run: uv sync --frozen
+
+      - name: Install source-build dependencies
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 install-system-deps
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Restore C/C++ support-library cache
+        id: support-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CANGJIE_BUILD_ROOT }}
+          key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('cangjie-build/src/cangjie_build/toolchain/static_libs.py') }}
+
+      - name: Build static support libraries from source
+        if: steps.support-cache.outputs.cache-hit != 'true'
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 install-static-libs
+
+      - name: Save C/C++ support-library cache
+        if: steps.support-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CANGJIE_BUILD_ROOT }}
+          key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('cangjie-build/src/cangjie_build/toolchain/static_libs.py') }}
+
+      - name: Resolve source SDK version
+        id: version
+        working-directory: cangjie-build
+        env:
+          REQUESTED_REF: ${{ inputs.cangjie_ref }}
+        run: |
+          value=$(uv run cangjie-build --cangjie-version "$REQUESTED_REF" print-version)
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch upstream source
+        working-directory: cangjie-build
+        env:
+          REQUESTED_REF: ${{ inputs.cangjie_ref }}
+        run: |
+          args=()
+          if [ -n "$REQUESTED_REF" ]; then args+=(--tag "$REQUESTED_REF"); fi
+          uv run cangjie-build \
+            --target linux-x64 \
+            --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" \
+            --cangjie-version "${{ steps.version.outputs.value }}" \
+            fetch "${args[@]}"
+
+      - name: Build C++ compiler oracle
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
+
+      - name: Build runtime from source
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build runtime
+
+      - name: Build stdlib from source
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdlib
+
+      - name: Build stdx from source
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdx
+
+      - name: Build SDK tools from source
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
+
+      - name: Package and verify C++ SDK
+        working-directory: cangjie-build
+        run: |
+          uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
+          uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
+
+      - name: Download source-built fixed llc
+        uses: actions/download-artifact@v4
+        with:
+          name: fixed-llc-linux-x64
+          path: .srcbuild/fixed-llc
+
+      - name: Activate synthesized source SDK
+        run: |
+          sdk="$CANGJIE_WORKSPACE/software/cangjie"
+          gunzip -c .srcbuild/fixed-llc/llc.gz > "$sdk/third_party/llvm/bin/llc.fixed"
+          chmod 0755 "$sdk/third_party/llvm/bin/llc.fixed"
+          "$sdk/third_party/llvm/bin/llc.fixed" --version | head -5
+          mv "$sdk/third_party/llvm/bin/llc.fixed" "$sdk/third_party/llvm/bin/llc"
+          llvm_dir="$sdk/third_party/llvm/lib"
+          hard_dir=$(grep -oE "/[^ '\"]*/third_party/llvm/lib" packages/cjc/cjpm.toml | head -1)
+          sed "s#${hard_dir}#${llvm_dir}#g" packages/cjc/cjpm.toml > packages/cjc/cjpm.toml.tmp
+          mv packages/cjc/cjpm.toml.tmp packages/cjc/cjpm.toml
+          {
+            echo "CANGJIE_HOME=$sdk"
+            echo "CANGJIE_STDX_PATH=$CANGJIE_WORKSPACE/cangjie_stdx/target/linux_x86_64_cjnative/static/stdx"
+            echo "LD_LIBRARY_PATH=$llvm_dir:$sdk/runtime/lib/linux_x86_64_cjnative:$sdk/tools/lib"
+          } >> "$GITHUB_ENV"
+          echo "$sdk/bin" >> "$GITHUB_PATH"
+          echo "$sdk/tools/bin" >> "$GITHUB_PATH"
+
+      - name: Build shim from C++ compiler source tree
+        env:
+          CANGJIE_CPP_SRC: ${{ env.CANGJIE_WORKSPACE }}/cangjie_compiler
+        run: |
+          rm -f runtime_shim/cjselfhost_llvmshim.o runtime_shim/cjc_runtime_config.o
+          bash runtime_shim/build_shim.sh | tee .srcbuild/shim-build.log
+          if grep -q 'used vendored prebuilt shim' .srcbuild/shim-build.log; then
+            echo 'shim source build unexpectedly fell back to a vendored object' >&2
+            exit 1
+          fi
+          test -s runtime_shim/cjselfhost_llvmshim.o
+
+      - name: Build cjcj with source SDK
+        run: cjpm build
+
+      - name: Compose cjc + cjcj SDK
+        run: |
+          sdk="$CANGJIE_WORKSPACE/software/cangjie"
+          test -x target/release/bin/cjcj::cjc
+          cp "$sdk/bin/cjc" "$sdk/bin/cjc-oracle"
+          install -m0755 target/release/bin/cjcj::cjc "$sdk/bin/cjcj"
+          tar -C "$CANGJIE_WORKSPACE/software" -czf \
+            "$CANGJIE_WORKSPACE/software/cangjie-sdk-linux-x64-${{ steps.version.outputs.value }}-cjcj.tar.gz" \
+            cangjie
+          sha256sum "$CANGJIE_WORKSPACE/software/cangjie-sdk-linux-x64-${{ steps.version.outputs.value }}-cjcj.tar.gz" \
+            > "$CANGJIE_WORKSPACE/software/cangjie-sdk-linux-x64-${{ steps.version.outputs.value }}-cjcj.tar.gz.sha256"
+
+      - name: Verify combined SDK with four rulers
+        run: bash ci/srcbuild/verify.sh "$CANGJIE_WORKSPACE/software/cangjie"
+
+      - name: Upload combined SDK and gate logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cjcj-srcbuild-linux-x64-${{ steps.version.outputs.value }}
+          path: |
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-linux-x64-${{ steps.version.outputs.value }}-cjcj.tar.gz
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-linux-x64-${{ steps.version.outputs.value }}-cjcj.tar.gz.sha256
+            ${{ runner.temp }}/cjcj-srcbuild-verify/*.log
+            .srcbuild/shim-build.log
+          if-no-files-found: warn
