@@ -2,6 +2,7 @@ package cjcj::ast
 
 import cjcj::utils.{CJC_ASSERT, FileUtil}
 import std.collection.*
+import std.sort.*
 
 public class TrieNode {
     public var c: UInt8 = 0u8
@@ -495,9 +496,26 @@ public class Searcher {
         for (id in ids) {
             let symbol = id.value
             if (!symbol.invertedIndexBeenDeleted && InFiles(query, symbol)) {
-                insertByPosition(out, symbol, order: order)
+                out.add(symbol)
             }
         }
+        sort(out, by: { left: Symbol, right: Symbol =>
+            let leftBeforeRight = if (order == SearchOrder.POS_ASC) {
+                Sort.PosAsc(left, right)
+            } else {
+                Sort.PosDesc(left, right)
+            }
+            if (leftBeforeRight) {
+                Ordering.LT
+            } else {
+                let rightBeforeLeft = if (order == SearchOrder.POS_ASC) {
+                    Sort.PosAsc(right, left)
+                } else {
+                    Sort.PosDesc(right, left)
+                }
+                if (rightBeforeLeft) { Ordering.GT } else { Ordering.EQ }
+            }
+        }, stable: true)
         return out
     }
 
@@ -809,23 +827,4 @@ public class Searcher {
         out.add(value)
     }
 
-    private func symbolBefore(left: Symbol, right: Symbol, order: SearchOrder): Bool {
-        if (order == SearchOrder.POS_ASC) {
-            return Sort.PosAsc(left, right)
-        }
-        return Sort.PosDesc(left, right)
-    }
-
-    private func insertByPosition(out: ArrayList<Symbol>, symbol: Symbol,
-        order!: SearchOrder = SearchOrder.POS_DESC): Unit {
-        var idx: Int64 = 0
-        while (idx < out.size) {
-            if (symbolBefore(symbol, out[idx], order)) {
-                out.add(symbol, at: idx)
-                return
-            }
-            idx++
-        }
-        out.add(symbol)
-    }
 }
