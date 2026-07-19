@@ -26,7 +26,7 @@ public interface ValueStatePool<VD, Pool> where VD <: AbstractDomain<VD> & Value
     func Clone(): Pool
     func Size(): Int64
     func Clear(): Unit
-    func Find(value: Value): Option<Int64>
+    func Find(value: Value): Option<VD>
     func Contains(value: Value): Bool
     func At(value: Value): VD
     func GetAt(index: Int64): (Value, VD)
@@ -38,16 +38,20 @@ public interface ValueStatePool<VD, Pool> where VD <: AbstractDomain<VD> & Value
 
 public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
     where VD <: AbstractDomain<VD> & ValueDomainAccess<VD> {
+    // C++ ActiveStatePool.h:41-42,71-83,129-130: the pool is backed by
+    // unordered_map<Value*, ValueDomain>. keys only preserves the existing
+    // selfhost GetAt(index) iteration adapter.
+    private let data: HashMap<Value, VD> = HashMap<Value, VD>()
     private let keys: ArrayList<Value> = ArrayList<Value>()
-    private let values: ArrayList<VD> = ArrayList<VD>()
 
     public init() {}
 
     public init(other: FullStatePool<VD>) {
         var idx: Int64 = 0
         while (idx < other.keys.size) {
-            keys.add(other.keys[idx])
-            values.add(other.values[idx].Clone())
+            let key = other.keys[idx]
+            keys.add(key)
+            data[key] = other.data[key].Clone()
             idx++
         }
     }
@@ -61,47 +65,45 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
     }
 
     public func Size(): Int64 {
-        return keys.size
+        return data.size
     }
 
     public func Clear(): Unit {
+        data.clear()
         keys.clear()
-        values.clear()
     }
 
-    public func Find(value: Value): Option<Int64> {
-        var idx: Int64 = 0
-        while (idx < keys.size) {
-            if (refEq(keys[idx], value)) {
-                return idx
-            }
-            idx++
-        }
-        return None
+    public func Find(value: Value): Option<VD> {
+        // C++ ActiveStatePool.h:71-83: data.find(value).
+        return data.get(value)
     }
 
     public func Contains(value: Value): Bool {
-        return Find(value).isSome()
+        return data.contains(value)
     }
 
     public func At(value: Value): VD {
-        if (let Some(idx) <- Find(value)) {
-            return values[idx]
+        // C++ ActiveStatePool.h:100-107: data.at(value).
+        if (let Some(domain) <- data.get(value)) {
+            return domain
         }
         throw IllegalStateException("ValueAnalysis state missing value: " + value.GetIdentifier())
     }
 
     public func GetAt(index: Int64): (Value, VD) {
-        return (keys[index], values[index])
+        let key = keys[index]
+        return (key, data[key])
     }
 
     public func Insert(value: Value, domain: VD): Unit {
-        if (let Some(idx) <- Find(value)) {
-            values[idx] = domain.Clone()
+        if (data.contains(value)) {
+            // C++ ValueAnalysis.h:174-178 updates an existing iterator entry.
+            data[value] = domain.Clone()
             return
         }
+        // C++ ActiveStatePool.h:91-94: data.emplace(value, domain).
+        data[value] = domain.Clone()
         keys.add(value)
-        values.add(domain.Clone())
     }
 
     public func SetRef(value: Value, refValue: Ref): Unit {
@@ -109,12 +111,12 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
     }
 
     public func SetBound(value: Value, isTop: Bool): Unit {
-        if (let Some(idx) <- Find(value)) {
-            values[idx].SetSelfToBound(isTop)
+        if (let Some(domain) <- data.get(value)) {
+            domain.SetSelfToBound(isTop)
             return
         }
+        data[value] = VD.Create(isTop)
         keys.add(value)
-        values.add(VD.Create(isTop))
     }
 
     public func Join(rhs: FullStatePool<VD>): Bool {
@@ -122,12 +124,13 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
         var idx: Int64 = 0
         while (idx < rhs.keys.size) {
             let rhsKey = rhs.keys[idx]
-            let rhsValue = rhs.values[idx]
-            if (let Some(lhsIdx) <- Find(rhsKey)) {
-                changed = values[lhsIdx].Join(rhsValue) || changed
+            let rhsValue = rhs.data[rhsKey]
+            // C++ Utils.h:33-40, ActiveStatePool.h:115-118: MapJoin on data.
+            if (let Some(lhsValue) <- data.get(rhsKey)) {
+                changed = lhsValue.Join(rhsValue) || changed
             } else {
+                data[rhsKey] = rhsValue.Clone()
                 keys.add(rhsKey)
-                values.add(rhsValue.Clone())
                 changed = true
             }
             idx++
@@ -208,15 +211,8 @@ public class ActiveStatePool<VD> <: ValueStatePool<VD, ActiveStatePool<VD>>
         obj2StateNode.clear()
     }
 
-    public func Find(value: Value): Option<Int64> {
-        var idx: Int64 = 0
-        while (idx < keys.size) {
-            if (refEq(keys[idx], value)) {
-                return idx
-            }
-            idx++
-        }
-        return None
+    public func Find(value: Value): Option<VD> {
+        return data.get(value)
     }
 
     public func Contains(value: Value): Bool {
@@ -301,8 +297,14 @@ public class ActiveStatePool<VD> <: ValueStatePool<VD, ActiveStatePool<VD>>
             let value = stateFirst.value
             obj2StateNode.remove(value)
             data.remove(value)
-            let keyIndex = Find(value).getOrThrow()
-            keys.remove(at: keyIndex)
+            var keyIndex: Int64 = 0
+            while (keyIndex < keys.size) {
+                if (keys[keyIndex] == value) {
+                    keys.remove(at: keyIndex)
+                    break
+                }
+                keyIndex++
+            }
         }
     }
 
@@ -639,10 +641,7 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
     }
 
     public func CheckAbstractValueWithTopBottom(obj: Value): Option<VD> {
-        if (let Some(idx) <- programState.Find(obj)) {
-            return programState.GetAt(idx)[1]
-        }
-        return None
+        return programState.Find(obj)
     }
 
     public func Propagate(src: Value, dest: Value, state!: Option<State<VD, Pool>> = None): Unit {
@@ -1035,8 +1034,8 @@ extend<AV, Pool> State<ValueDomain<AV>, Pool> where AV <: HasEqual<AV>,
     }
 
     public func CheckAbstractValue(obj: Value): Option<AV> {
-        if (let Some(idx) <- programState.Find(obj)) {
-            return programState.GetAt(idx)[1].CheckAbsVal()
+        if (let Some(domain) <- programState.Find(obj)) {
+            return domain.CheckAbsVal()
         }
         return None
     }
