@@ -1,17 +1,6 @@
-# cjcj 持续集成(CI)
-# ------------------------------------------------------------------------------
-# 真实测试口径(见 reports/REPORT-ci-pipelines.md):
-#   ① cjpm build 全仓成功(= 66 包 / 21 workspace member 编译通过,本身就是最强的构建门)
-#   ② 用产出的 cjcj 二进制跑 ci/smoke 冒烟套件(泛型/闭包/接口+枚举+匹配/FFI/宏,逐个校验输出)
-# 全量 difftest/bcgate 依赖官方对照与大语料,CI 跑不动,不纳入(留给本地/远端 sweep)。
-#
-# 平台现实:cjcj 本体的最终链接需要 runtime_shim 的预编译 .o,而该 .o 只能在带「仓颉补丁版
-# LLVM 头」的机器上生成 —— 干净 runner 无法重建(stock LLVM-15 头缺 cj_gc*_static_struct
-# intrinsic)。目前只 vendor 了 linux_x86_64 一份,故 **cjcj 只能在 linux-x64 上真实构建**。
-# 其余官方 SDK 支持的平台(linux-arm64 / macOS / Windows)在此显式说明并降级处理,绝不放假绿:
-#   - sdk-provision:在 arm64-linux / macOS 上真实验证 setup_sdk.sh 能取到官方 SDK(为将来
-#     跨平台构建铺路),但**不构建 cjcj**,且 continue-on-error,不作为门。
-#   - Windows / linux-arm64 的 cjcj 构建:待补 prebuilt shim 后启用(见文末注释块)。
+# CI. Build+smoke run on linux-x64 only (per-platform prebuilt shim .o);
+# other platforms run a non-gating SDK provisioning check.
+# Rationale and platform matrix: reports/REPORT-ci-pipelines.md.
 name: CI
 
 on:
@@ -25,45 +14,33 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # cjcj 开发所锚定的确切引导工具链(与本地一致);更新时同步 setup_sdk.sh 的默认值。
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260712020030
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # 轻活(ubuntu-slim 1c5g):workflow / shell 脚本静态检查 + 冒烟资产完整性。
-  # 不下载 SDK、不构建,秒级完成;作为最省资源的第一道门。
-  # ---------------------------------------------------------------------------
   lint:
-    name: lint (workflows + shell)
+    name: lint
     runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: actionlint(校验 workflow 语法)
+      - name: Lint workflows
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           ./actionlint -color
-      - name: shellcheck(校验 CI/打包/冒烟脚本)
+      - name: Shellcheck scripts
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck --severity=error \
             ci/setup_sdk.sh scripts/package_sdk.sh ci/smoke/run_smoke.sh runtime_shim/build_shim.sh
-      - name: 冒烟资产完整性(至少 5 个单文件样本 + 宏样本)
+      - name: Check smoke assets
         run: |
-          n=$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)
-          echo "single-file smoke samples: $n"
-          test "$n" -ge 5
+          test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5
           test -f ci/smoke/macro_demo/mymacros/def.cj
           test -f ci/smoke/macro_demo/app/main.cj
           test -f runtime_shim/prebuilt/linux_x86_64/cjselfhost_llvmshim.o
 
-  # ---------------------------------------------------------------------------
-  # 核心门:linux-x64 上真实全量构建 + 冒烟。这是唯一能完整链接出 cjcj 的平台。
-  #   - ubuntu-24.04 / ubuntu-22.04:稳定基线,必过(验证跨 Ubuntu/glibc 版本可移植)。
-  #   - ubuntu-26.04:preview 标签,experimental(continue-on-error),不阻塞合并。
-  # ---------------------------------------------------------------------------
-  build-linux-x64:
-    name: build+smoke ${{ matrix.runner }}
+  build:
+    name: build ${{ matrix.runner }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     continue-on-error: ${{ matrix.experimental }}
@@ -73,22 +50,15 @@ jobs:
         include:
           - { runner: ubuntu-24.04, experimental: false }
           - { runner: ubuntu-22.04, experimental: false }
-          - { runner: ubuntu-26.04, experimental: true }   # preview runner
+          - { runner: ubuntu-26.04, experimental: true }
     steps:
       - uses: actions/checkout@v4
-
-      # 缓存已安装的 SDK 工具链(~/.cjv),key 锁 toolchain 版本,省去每次数百 MB 下载。
-      # 用 restore/save 拆分:save 只在 setup 成功后跑(见下方 Save 步),避免把「半装的 ~/.cjv」
-      # 缓存进去污染后续重跑(combined cache 的 post 虽会在 job 失败时仍保存,但会连半成品一起存)。
-      - name: Restore Cangjie SDK cache
+      - name: Restore SDK cache
         id: sdkcache
         uses: actions/cache/restore@v4
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-
-      # 缓存 cjpm 增量产物(target/ 内含 .cjpm-history / .dep-cache / incremental-cache.json)。
-      # 这里保留 combined cache:其 post 步在 job 失败时也会保存,部分构建缓存留给重跑加速,安全。
       - name: Cache cjpm build
         uses: actions/cache@v4
         with:
@@ -96,47 +66,33 @@ jobs:
           key: cjpm-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-${{ github.sha }}
           restore-keys: |
             cjpm-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-
-
-      - name: 准备工具链(cjv + pinned nightly + stdx + LLVM symlink + 环境)
+      - name: Install SDK
         id: setup
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
         run: bash ci/setup_sdk.sh
-
-      # setup 成功后才保存 SDK 缓存(且未命中时);紧跟 setup,后续步骤失败与否都已保存。
-      - name: Save Cangjie SDK cache
+      # Save only after a successful install so a partial ~/.cjv is never cached.
+      - name: Save SDK cache
         if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-
-      - name: 构建 runtime shim(用 vendored 预编译 .o;.c 现编)
+      - name: Build runtime shim
         run: bash runtime_shim/build_shim.sh
-
-      - name: cjpm build(全 workspace,21 member)
+      - name: Build workspace
         run: cjpm build
-
-      # 部署命名:二进制必须叫 cjcj(叫 cjc 会触发 runtime 按进程名排除 GC 栈根 → SEGV)。
-      # 冒烟要求「已部署布局」——二进制的 ../runtime 存在;build_shim.sh 已建
-      # target/release/runtime 软链,这里把产出的 cjcj::cjc 复制成同目录下的 cjcj。
-      - name: 部署 cjcj 二进制
+      # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
+      - name: Deploy cjcj binary
         run: |
           test -f "target/release/bin/cjcj::cjc"
           cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
-          ls -l target/release/bin/ target/release/runtime
-
-      - name: 冒烟套件(泛型/闭包/接口/枚举/匹配/FFI/宏)
+      - name: Run smoke tests
         run: bash ci/smoke/run_smoke.sh "$PWD/target/release/bin/cjcj"
 
-  # ---------------------------------------------------------------------------
-  # SDK 供给链路验证(非门,experimental):在官方 SDK 有发行的其它 *nix 平台上,验证
-  # setup_sdk.sh 能真实取到 SDK 且官方引导 cjc 可用。**不构建 cjcj**(缺该平台 shim .o),
-  # 因此不冒充 cjcj 通过——这是一个诚实、范围明确的 provisioning 检查,为跨平台构建铺路。
-  # Windows 不在此列:setup_sdk.sh 是 bash/unix 取向,Windows 供给需独立 PowerShell 路径(待办)。
-  # ---------------------------------------------------------------------------
-  sdk-provision:
-    name: sdk-provision ${{ matrix.runner }}
+  # Non-gating: verifies SDK provisioning on non-x64 platforms; does not build cjcj.
+  provision:
+    name: provision ${{ matrix.runner }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     continue-on-error: true
@@ -146,51 +102,35 @@ jobs:
         runner: [ubuntu-24.04-arm, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - name: Restore Cangjie SDK cache
+      - name: Restore SDK cache
         id: sdkcache
         uses: actions/cache/restore@v4
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      # 独立步骤:setup_sdk 把 CANGJIE_HOME 写进 $GITHUB_ENV,只对**后续**步骤可见,
-      # 故必须与「用到 CANGJIE_HOME」的步骤分开(此前同一步里用 $CANGJIE_HOME 为空 → cjc 127)。
-      - name: 取 SDK(cjv install)
+      - name: Install SDK
         id: setup
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
         run: bash ci/setup_sdk.sh
-      - name: Save Cangjie SDK cache
+      - name: Save SDK cache
         if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: 诊断 SDK 布局(定位跨平台 cjc 127/loader 问题)
+      - name: Diagnose SDK layout
         run: |
-          echo "== CANGJIE_HOME=$CANGJIE_HOME =="
           ls -la "$CANGJIE_HOME/bin" || true
           file "$CANGJIE_HOME/bin/cjc" || true
-          echo "== runtime/lib =="; ls "$CANGJIE_HOME/runtime/lib" || true
-          echo "== envsetup head =="; sed -n '1,5p' "$CANGJIE_HOME/envsetup.sh" || true
-      - name: 验证官方 cjc 可用(source envsetup,不构建 cjcj)
+          ls "$CANGJIE_HOME/runtime/lib" || true
+      - name: Verify bootstrap cjc
         run: |
           set -x
-          # macOS:清除下载物的隔离属性,否则动态库/可执行可能被 Gatekeeper 拦(exit 1)
           if [ "$(uname -s)" = "Darwin" ]; then xattr -dr com.apple.quarantine "$CANGJIE_HOME" || true; fi
-          # 优先 source 该平台 SDK 自带的 envsetup.sh(自带 per-OS PATH/LD/DYLD 分支),最稳。
           # shellcheck disable=SC1091
           source "$CANGJIE_HOME/envsetup.sh"
-          command -v cjc; file "$(command -v cjc)" || true
           echo 'main(): Int64 { println("provision ok"); return 0 }' > "$RUNNER_TEMP/p.cj"
-          # 此平台无 cjcj shim,只证明 SDK 供给链路 + 官方引导编译器就绪(不构建 cjcj)
           cjc "$RUNNER_TEMP/p.cj" -o "$RUNNER_TEMP/p" && "$RUNNER_TEMP/p"
 
-# ==============================================================================
-# 待启用:其它平台的 cjcj 本体构建(当前被 per-platform shim .o 缺失阻塞)。
-# 补齐 runtime_shim/prebuilt/<plat>/cjselfhost_llvmshim.o 后,把对应条目加入
-# build 矩阵即可(macOS 需在 package/link 阶段换 install_name_tool;Windows 需 .dll/PATH 方案):
-#   - linux-arm64  runner: ubuntu-24.04-arm      需 prebuilt/linux_aarch64/
-#   - macOS arm64  runner: macos-latest          需 prebuilt/darwin_aarch64/
-#   - Windows x64  runner: windows-latest         需 prebuilt/windows_x86_64/ + 链接方案改造
-# 在此之前绝不为这些平台放 cjcj 构建 job(避免假绿)。
-# ==============================================================================
+# Adding a platform to the build matrix requires runtime_shim/prebuilt/<plat>/cjselfhost_llvmshim.o.
