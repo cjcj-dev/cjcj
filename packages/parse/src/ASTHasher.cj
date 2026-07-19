@@ -1071,6 +1071,7 @@ private class ASTHasherImpl {
 
     public func Hash(node: Node, whatTypeToHash!: Int64 = ALL): UInt64 {
         match (node.astKind) {
+            case ASTKind.ANNOTATION => HashAnnotation((node as Annotation).getOrThrow(), whatTypeToHash: whatTypeToHash)
             case ASTKind.ARRAY_EXPR => HashArrayExpr((node as ArrayExpr).getOrThrow(), whatTypeToHash: whatTypeToHash)
             case ASTKind.ARRAY_LIT => HashArrayLit((node as ArrayLit).getOrThrow(), whatTypeToHash: whatTypeToHash)
             case ASTKind.AS_EXPR => HashAsExpr((node as AsExpr).getOrThrow(), whatTypeToHash: whatTypeToHash)
