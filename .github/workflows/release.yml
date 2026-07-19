@@ -1,5 +1,8 @@
-# Release. Repackages the official SDK tree with bin/cjc replaced by bin/cjcj.
-# linux-x64 only (per-platform prebuilt shim .o). Details: reports/REPORT-ci-pipelines.md.
+# Release. Repackages the official SDK tree as a cjcj SDK: bin/cjc is our
+# Cangjie-built compiler and runtime/lib/<plat>/libcangjie-runtime.so is rebuilt
+# from source with the cjc-detect patch (runtime_patch/). Smoke runs against the
+# packaged bin/cjc. Linux x64 + aarch64; macOS/Windows are BLOCKED (see
+# reports/REPORT-relmatrix.md). Set dry_run to build artifacts without publishing.
 name: Release
 
 on:
@@ -19,23 +22,30 @@ on:
         required: false
         type: boolean
         default: false
+      dry_run:
+        description: "Build artifacts only, skip GitHub release"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260712020030
+  RUNTIME_BASE_SHA: 18cd0af893b06bfd0aedcef82aaa9eaf31cc40d2
 
 jobs:
   build:
     name: build ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
         include:
           - { runner: ubuntu-24.04, platform: linux-x64 }
+          - { runner: ubuntu-24.04-arm, platform: linux-aarch64 }
     steps:
       - uses: actions/checkout@v4
       - name: Restore SDK cache
@@ -55,26 +65,48 @@ jobs:
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Install patchelf
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq patchelf
+      - name: Install build deps
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq patchelf clang cmake make
       - name: Build runtime shim
         run: bash runtime_shim/build_shim.sh
+      - name: Restore patched runtime cache
+        id: rtcache
+        uses: actions/cache/restore@v4
+        with:
+          path: dist-runtime
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_BASE_SHA }}-${{ hashFiles('runtime_patch/**') }}
+      - name: Build patched runtime
+        if: steps.rtcache.outputs.cache-hit != 'true'
+        env:
+          RUNTIME_VERSION: ${{ inputs.version }}
+        run: bash ci/build_patched_runtime.sh "$PWD/dist-runtime"
+      - name: Save patched runtime cache
+        if: steps.rtcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dist-runtime
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_BASE_SHA }}-${{ hashFiles('runtime_patch/**') }}
       - name: Build workspace
         run: cjpm build
-      - name: Deploy compiler
-        run: |
-          test -f "target/release/bin/cjcj::cjc"
-          cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
-      - name: Run smoke tests
-        run: bash ci/smoke/run_smoke.sh "$PWD/target/release/bin/cjcj"
       - name: Package SDK
         run: |
           bash scripts/package_sdk.sh \
             --sdk "$CANGJIE_HOME" \
             --binary "$PWD/target/release/bin/cjcj::cjc" \
+            --runtime-so "$PWD/dist-runtime/libcangjie-runtime.so" \
             --version "${{ inputs.version }}" \
             --platform "${{ matrix.platform }}" \
             --outdir "$PWD/dist"
+      # Smoke the shipped artifact: packaged bin/cjc (renamed) + packaged patched runtime.
+      - name: Smoke packaged SDK
+        run: |
+          set -e
+          pkg="cjcj-${{ inputs.version }}-${{ matrix.platform }}"
+          mkdir -p pkgtest && tar -C pkgtest -xzf "dist/${pkg}.tar.gz"
+          # shellcheck disable=SC1090,SC1091
+          source "$PWD/pkgtest/${pkg}/envsetup.sh"
+          export cjHeapSize=12GB
+          bash ci/smoke/run_smoke.sh "$PWD/pkgtest/${pkg}/bin/cjc"
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -87,6 +119,7 @@ jobs:
   publish:
     name: publish
     needs: build
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -106,4 +139,6 @@ jobs:
           mapfile -t assets < <(find dist -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.zip' \) | sort)
           gh release create "v${{ inputs.version }}" "${flags[@]}" "${assets[@]}"
 
-# Adding a platform to the build matrix requires runtime_shim/prebuilt/<plat>/cjselfhost_llvmshim.o.
+# macOS/Windows are intentionally absent: no per-platform shim .o and the cjc-name GC
+# exclusion is ungated on Darwin/PE (needs the runtime patch extended). BLOCKED-REPORT:
+# reports/REPORT-relmatrix.md. Adding a Linux platform needs a prebuilt shim .o.
