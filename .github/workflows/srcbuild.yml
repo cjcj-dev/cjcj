@@ -3,6 +3,8 @@
 name: Full source SDK (linux-x64)
 
 on:
+  push:
+    branches: [fix/srcbuildci]  # 临时:CI 验证用,合前删
   workflow_dispatch:
     inputs:
       cangjie_ref:
