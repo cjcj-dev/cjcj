@@ -122,7 +122,7 @@ public open class DefaultCompilerInstance {
             if (pkg.IsEmpty()) {
                 continue
             }
-            let cjoPath = invocation.globalOptions.GenerateCachedPathName(pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
+            let cjoPath = PublishedCjoPath(pkg)
             invocation.globalOptions.cjoOutputFiles.add(TempFileInfo(
                 fileName: FileUtil.ToCjoFileName(pkg.fullPackageName),
                 filePath: cjoPath,
