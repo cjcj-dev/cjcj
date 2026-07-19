@@ -20,3 +20,8 @@ scripts/__pycache__/
 
 # Stray local binaries
 /main
+
+# Vendored prebuilt shim objects are tracked despite the global *.o rule above.
+# They cannot be rebuilt on a clean machine (patched-LLVM headers required) —
+# see runtime_shim/prebuilt/README.md.
+!/runtime_shim/prebuilt/**/*.o
