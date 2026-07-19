@@ -18,7 +18,6 @@ private class BoolBox {
 }
 
 public class LegalityOfUsageResult {
-    public let initializationIssues: ArrayList<InitializationIssue> = ArrayList<InitializationIssue>()
     public let globalVarInitializationIssues: ArrayList<GlobalVarInitializationIssue> =
         ArrayList<GlobalVarInitializationIssue>()
     public let subscriptLegalityIssues: ArrayList<SubscriptLegalityIssue> = ArrayList<SubscriptLegalityIssue>()
@@ -234,12 +233,6 @@ public func SetFuncBodyCaptureKind(fb: FuncBody): Unit {
             SetTransitiveCaptureKind(fb, mutableVars, node)
         })
         walker.Walk()
-    }
-}
-
-private func AppendInitializationIssues(dst: ArrayList<InitializationIssue>, src: ArrayList<InitializationIssue>): Unit {
-    for (issue in src) {
-        dst.add(issue)
     }
 }
 
@@ -588,10 +581,9 @@ public func CheckLegalityOfUsage(
     EmitLegalityOfUsage(diag, result)
     result.staticMemberGenericIssues.clear()
     TypeCheckReferenceCheckUsageOfDeprecated(diag, typeManager, pkg)
-    AppendInitializationIssues(result.initializationIssues, CheckInitialization(ctx, diag, pkg, opts: opts))
+    CheckInitialization(ctx, diag, pkg, opts: opts)
     AppendGlobalIssues(result.globalVarInitializationIssues, CheckGlobalVarInitialization(pkg))
     EmitLegalityOfUsage(diag, result)
-    result.initializationIssues.clear()
     result.globalVarInitializationIssues.clear()
     CheckLegalityOfUnsafeAndInout(pkg, diag, backendType: opts.backend)
     // C++ src/Sema/LegalityOfUsage/LegalityOfUsage.cpp:90-93.

@@ -11,48 +11,6 @@ import cjcj::sema.*
 import cjcj::sema.DiagCJMPCannotAssignToImmutableCommonInCtor
 import cjcj::utils.JAVA_REF_FIELD_NAME
 
-public enum InitializationIssueKind {
-    | USED_BEFORE_INITIALIZATION
-    | CAPTURE_BEFORE_INITIALIZATION
-    | ILLEGAL_MEMBER_USE
-    | ILLEGAL_SUPER_MEMBER_USE
-    | UNINITIALIZED_FIELD
-}
-
-private func InitializationIssueKindIndex(kind: InitializationIssueKind): Int64 {
-    return match (kind) {
-        case InitializationIssueKind.USED_BEFORE_INITIALIZATION => 0
-        case InitializationIssueKind.CAPTURE_BEFORE_INITIALIZATION => 1
-        case InitializationIssueKind.ILLEGAL_MEMBER_USE => 2
-        case InitializationIssueKind.ILLEGAL_SUPER_MEMBER_USE => 3
-        case InitializationIssueKind.UNINITIALIZED_FIELD => 4
-    }
-}
-
-extend InitializationIssueKind <: Equatable<InitializationIssueKind> {
-    public operator func ==(right: InitializationIssueKind): Bool {
-        return InitializationIssueKindIndex(this) == InitializationIssueKindIndex(right)
-    }
-
-    public operator func !=(right: InitializationIssueKind): Bool {
-        return !(this == right)
-    }
-}
-
-public class InitializationIssue {
-    public var kind: InitializationIssueKind
-    public var node: Node
-    public var target: Option<Decl>
-    public var message: String
-
-    public init(kind: InitializationIssueKind, node: Node, target!: Option<Decl> = None, message!: String = "") {
-        this.kind = kind
-        this.node = node
-        this.target = target
-        this.message = message
-    }
-}
-
 private class CollectDeclsInfo {
     public let nonFuncDecls: ArrayList<Decl> = ArrayList<Decl>()
     public let funcDecls: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
@@ -634,7 +592,6 @@ public class InitializationChecker {
     private let ctx: ASTContext
     private let diag: BasicDiagnosticEngine
     private let opts: OptionGlobalOptions
-    private let issues: ArrayList<InitializationIssue> = ArrayList<InitializationIssue>()
     private var currentInitializingVarDependencies: Option<ArrayList<Decl>> = None
     private let currentFuncBodies: ArrayList<FuncBody> = ArrayList<FuncBody>()
     private let contextVariables: ArrayList<ScopedDecls> = ArrayList<ScopedDecls>()
@@ -649,14 +606,8 @@ public class InitializationChecker {
         this.opts = opts
     }
 
-    public func Check(root: Node): ArrayList<InitializationIssue> {
+    public func Check(root: Node): Unit {
         CheckInitialization(root)
-        return issues
-    }
-
-    private func AddIssue(kind: InitializationIssueKind, node: Node, target!: Option<Decl> = None,
-        message!: String = ""): Unit {
-        issues.add(InitializationIssue(kind, node, target: target, message: message))
     }
 
     private func ClearScopeStatus(scopeName: String): Unit {
@@ -2341,8 +2292,8 @@ public func CheckInitialization(
     diag: BasicDiagnosticEngine,
     root: Node,
     opts!: OptionGlobalOptions = OptionGlobalOptions()
-): ArrayList<InitializationIssue> {
-    return InitializationChecker(ctx, diag, opts: opts).Check(root)
+): Unit {
+    InitializationChecker(ctx, diag, opts: opts).Check(root)
 }
 
 public func SelfhostPortStatus_LegalityOfUsage_InitializationChecker(): Bool {
