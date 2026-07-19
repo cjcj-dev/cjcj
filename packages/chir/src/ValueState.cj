@@ -48,8 +48,15 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
     public init() {}
 
     public init(other: FullStatePool<VD>) {
+        // C++ FullStatePool (ActiveStatePool.h:38-131) holds only unordered_map
+        // data (L130); its compiler-generated copy ctor bulk-copies data in one
+        // shot (implicit reserve). Preallocate data/keys to avoid rehash/realloc
+        // churn while cloning entry-by-entry. Capacity-only: no order/content change.
+        let count = other.keys.size
+        data.reserve(count)
+        keys.reserve(count)
         var idx: Int64 = 0
-        while (idx < other.keys.size) {
+        while (idx < count) {
             let key = other.keys[idx]
             keys.add(key)
             data[key] = other.data[key].Clone()
@@ -201,6 +208,16 @@ public class ActiveStatePool<VD> <: ValueStatePool<VD, ActiveStatePool<VD>>
         if (other.first.isNone()) {
             return
         }
+        // C++ ActiveStatePool copy ctor (ActiveStatePool.h:187-211) bulk-copies
+        // data and obj2StateNode (L193-194), each an implicit reserve. Preallocate
+        // keys/obj2StateNode to cut rehash/realloc churn. data is intentionally NOT
+        // reserved: it is the only map iterated directly (in Join, below), where a
+        // changed bucket layout would alter insertion order into keys -> eviction
+        // victims -> emitted bytes. keys is insertion-ordered (capacity-independent);
+        // obj2StateNode is never iterated (keyed lookup/remove only).
+        let count = other.keys.size
+        keys.reserve(count)
+        obj2StateNode.reserve(count)
         for (key in other.keys) {
             data[key] = other.data[key].Clone()
             keys.add(key)
@@ -393,8 +410,15 @@ public class RefMap {
     public init() {}
 
     public init(other: RefMap) {
+        // RefMap is cloned once per State.Clone (fixpoint hot path). keys/values are
+        // insertion-ordered ArrayLists, so reserving capacity only preallocates the
+        // backing storage (no order/content change) and avoids realloc churn while
+        // copying entry-by-entry.
+        let count = other.keys.size
+        keys.reserve(count)
+        values.reserve(count)
         var idx: Int64 = 0
-        while (idx < other.keys.size) {
+        while (idx < count) {
             keys.add(other.keys[idx])
             values.add(other.values[idx])
             idx++
