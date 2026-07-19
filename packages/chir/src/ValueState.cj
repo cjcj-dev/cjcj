@@ -75,14 +75,24 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
                 data.remove(key)
             }
         }
-        keys.clear()
+        var keyIdx: Int64 = 0
         for (key in rhs.keys) {
             if (let Some(domain) <- data.get(key)) {
                 domain.CopyFrom(rhs.data[key])
             } else {
                 data[key] = rhs.data[key].Clone()
             }
-            keys.add(key)
+            if (keyIdx < keys.size) {
+                if (!refEq(keys[keyIdx], key)) {
+                    keys[keyIdx] = key
+                }
+            } else {
+                keys.add(key)
+            }
+            keyIdx++
+        }
+        while (keys.size > rhs.keys.size) {
+            keys.remove(at: keys.size - 1)
         }
     }
 
@@ -401,8 +411,12 @@ public class RefMap {
         var idx: Int64 = 0
         while (idx < rhs.keys.size) {
             if (idx < keys.size) {
-                keys[idx] = rhs.keys[idx]
-                values[idx] = rhs.values[idx]
+                if (!refEq(keys[idx], rhs.keys[idx])) {
+                    keys[idx] = rhs.keys[idx]
+                }
+                if (!RefMapValuesAreSame(values[idx], rhs.values[idx])) {
+                    values[idx] = rhs.values[idx]
+                }
             } else {
                 keys.add(rhs.keys[idx])
                 values.add(rhs.values[idx])
@@ -412,6 +426,14 @@ public class RefMap {
         while (keys.size > rhs.keys.size) {
             keys.remove(at: keys.size - 1)
             values.remove(at: values.size - 1)
+        }
+    }
+
+    private func RefMapValuesAreSame(lhs: RefMapValue, rhs: RefMapValue): Bool {
+        return match ((lhs, rhs)) {
+            case (RefMapValue.RefTarget(left), RefMapValue.RefTarget(right)) => refEq(left, right)
+            case (RefMapValue.ObjectTarget(left), RefMapValue.ObjectTarget(right)) => refEq(left, right)
+            case _ => false
         }
     }
 

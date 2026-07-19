@@ -100,7 +100,14 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
                 if (expr.GetExprKind() == ExprKind.LAMBDA) {
                     let lambda = (expr as Lambda).getOrThrow()
                     analysis.PreHandleLambdaExpression(state, lambda)
-                    lambdaEnvState[lambda.nodeId] = state.Clone()
+                    if (let Some(envState) <- lambdaEnvState.get(lambda.nodeId)) {
+                        // A lambda environment is consumed only after the
+                        // enclosing unit reaches its fixpoint. Reuse its slot
+                        // when the same expression is revisited meanwhile.
+                        envState.CopyFrom(state)
+                    } else {
+                        lambdaEnvState[lambda.nodeId] = state.Clone()
+                    }
                     var isInLambdaWorklist = false
                     for (lambdaId in lambdaWorklistSet) {
                         if (lambdaId == lambda.nodeId) {
