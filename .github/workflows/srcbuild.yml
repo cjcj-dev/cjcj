@@ -114,6 +114,22 @@ jobs:
             --cangjie-version "${{ steps.version.outputs.value }}" \
             fetch "${args[@]}"
 
+      - name: Pin compiler LLVM source
+        # compiler main(87fff87a,a0171e4f)emit 7-operand enum reflection,但其 third_party
+        # CMake 硬编码 LLVM_TAG dev(2429f2f,ERT_MAX=6)→verifier 拒 7-operand(Broken global value)。
+        # 固定到 LLVM main b462fbd9(ERT_MAX=7,含 ERT_CTOR_ANNOTATIONS),预置 source override 绕过内部 git clone -b dev。
+        env:
+          LLVM_REF: b462fbd9fb53440aa4736a8cf9f9e97324e0623a
+        run: |
+          llvm_src="$CANGJIE_WORKSPACE/cangjie_compiler/third_party/llvm-project"
+          git init "$llvm_src"
+          git -C "$llvm_src" remote add origin https://gitcode.com/Cangjie/llvm-project.git
+          git -C "$llvm_src" fetch --depth=1 origin "$LLVM_REF"
+          git -C "$llvm_src" checkout --detach FETCH_HEAD
+          test "$(git -C "$llvm_src" rev-parse HEAD)" = "$LLVM_REF"
+          rg -q 'ERT_CTOR_ANNOTATIONS' \
+            "$llvm_src/llvm/include/llvm/Transforms/Scalar/ReflectionInfo.h"
+
       - name: Build C++ compiler oracle
         working-directory: cangjie-build
         run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
