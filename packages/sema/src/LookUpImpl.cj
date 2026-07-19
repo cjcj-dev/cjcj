@@ -1,6 +1,7 @@
 package cjcj::sema
 
 import std.collection.*
+import std.sort.*
 import cjcj::ast.*
 import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
 import cjcj::modules.PackageRelation as ModulesPackageRelation
@@ -185,24 +186,27 @@ private func addDeclUnique(values: ArrayList<Decl>, keys: HashSet<Decl>, decl: D
     keys.add(decl)
 }
 
-private func insertDeclByPosition(values: ArrayList<Decl>, decl: Decl): Unit {
-    var idx: Int64 = 0
-    while (idx < values.size) {
-        if (decl.begin < values[idx].begin ||
-            (decl.begin == values[idx].begin && ASTKindIndex(decl.astKind) < ASTKindIndex(values[idx].astKind))) {
-            values.add(decl, at: idx)
-            return
-        }
-        idx++
-    }
-    values.add(decl)
-}
-
 private func sortedDecls(decls: ArrayList<Decl>): ArrayList<Decl> {
     let out = ArrayList<Decl>()
     for (decl in decls) {
-        insertDeclByPosition(out, decl)
+        out.add(decl)
     }
+    if (out.size < 2) {
+        return out
+    }
+    sort(out, by: { left: Decl, right: Decl =>
+        if (left.begin < right.begin) {
+            Ordering.LT
+        } else if (right.begin < left.begin) {
+            Ordering.GT
+        } else {
+            let leftKind = ASTKindIndex(left.astKind)
+            let rightKind = ASTKindIndex(right.astKind)
+            if (leftKind < rightKind) { Ordering.LT } else if (rightKind < leftKind) { Ordering.GT } else {
+                Ordering.EQ
+            }
+        }
+    }, stable: true)
     return out
 }
 
@@ -854,6 +858,15 @@ private func findRealResult(ctx: ASTContext, node: Node, isSetter: Bool, results
     if (!results.isEmpty() && !wasAllFunction) {
         return true
     }
+    let resultKeys: Option<HashSet<Decl>> = if (results.size + resultDecls.size > 1) {
+        let keys = HashSet<Decl>()
+        for (result in results) {
+            keys.add(result)
+        }
+        Some(keys)
+    } else {
+        None
+    }
     for (targetDecl in sortedDecls(resultDecls)) {
         let initFuncParam = targetDecl.begin == INVALID_POSITION && node.begin == INVALID_POSITION
         var initAssignLHS = node.begin == INVALID_POSITION && node.scopeLevel > targetDecl.scopeLevel
@@ -882,7 +895,11 @@ private func findRealResult(ctx: ASTContext, node: Node, isSetter: Bool, results
                 (isNodeInVarDecl(ctx, node, varDecl) || isNodeInDestructed(node, varDecl))) {
                 continue
             }
-            addDeclUnique(results, varDecl)
+            if (let Some(keys) <- resultKeys) {
+                addDeclUnique(results, keys, varDecl)
+            } else {
+                results.add(varDecl)
+            }
             if (let Some(refExpr) <- (node as RefExpr)) {
                 if (let Some(_) <- refExpr.callOrPattern) {
                     continue
@@ -890,7 +907,11 @@ private func findRealResult(ctx: ASTContext, node: Node, isSetter: Bool, results
             }
             return true
         }
-        addDeclUnique(results, targetDecl)
+        if (let Some(keys) <- resultKeys) {
+            addDeclUnique(results, keys, targetDecl)
+        } else {
+            results.add(targetDecl)
+        }
     }
     return false
 }
@@ -936,9 +957,16 @@ private func lookupImpl(typeManager: TypeManager, ctx: ASTContext, name: String,
     var scopeName = startScopeName
     while (!scopeName.isEmpty()) {
         let targetDecls = ArrayList<Decl>()
-        for (decl in ctx.GetDeclsByName(Names(name, scopeName))) {
+        let declsByName = ctx.GetDeclsByName(Names(name, scopeName))
+        let targetDeclKeys: Option<HashSet<Decl>> =
+            if (declsByName.size > 1) { Some(HashSet<Decl>()) } else { None }
+        for (decl in declsByName) {
             if (isTargetVisibleToNode(decl, node)) {
-                addDeclUnique(targetDecls, decl)
+                if (let Some(keys) <- targetDeclKeys) {
+                    addDeclUnique(targetDecls, keys, decl)
+                } else {
+                    targetDecls.add(decl)
+                }
             }
         }
         let scopeGateName = GetScopeGateName(scopeName)
