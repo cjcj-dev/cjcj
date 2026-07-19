@@ -1917,7 +1917,7 @@ public class TypeManager {
     }
 
     public func GetAllBoxedTys(): ArrayList<Ty> {
-        return boxedTys
+        return boxedTys.clone()
     }
 
     public func Clear(): Unit {
