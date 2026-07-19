@@ -4,6 +4,137 @@ import std.collection.*
 
 public type FlatBufferOffset = UInt32
 
+// vector_downward.h:35-49,141-156,162-176,193-227,269-284. The serialized
+// bytes occupy [cur, reserved); offsets are measured from the fixed high end.
+private class VectorDownward {
+    private static let INITIAL_SIZE: Int64 = 1024
+    private static let MIN_ALIGNMENT: Int64 = 8
+
+    private var storage: Array<UInt8> = Array<UInt8>()
+    public var reserved: Int64 = 0
+    public var cur: Int64 = 0
+    public var size: Int64 = 0
+
+    public init() {}
+
+    public func clear(): Unit {
+        cur = reserved
+        size = 0
+    }
+
+    // vector_downward.h:141-156 (ensure_space/make_space).
+    public func makeSpace(len: Int64): Int64 {
+        if (len < 0) {
+            throw IllegalArgumentException("flatbuffer space length must not be negative")
+        }
+        if (len > cur) {
+            reallocate(len)
+        }
+        cur -= len
+        size += len
+        return cur
+    }
+
+    // vector_downward.h:193-203 (data_at/push/push_small).
+    public func dataAt(offset: Int64): Int64 {
+        return reserved - offset
+    }
+
+    public func push(bytes: Array<UInt8>): Unit {
+        if (bytes.isEmpty()) {
+            return
+        }
+        let start = makeSpace(bytes.size)
+        bytes.copyTo(storage, 0, start, bytes.size)
+    }
+
+    public func pushSmall(value: UInt8): Unit {
+        storage[makeSpace(1)] = value
+    }
+
+    public func pushSmall(value: UInt16): Unit {
+        let start = makeSpace(2)
+        storage[start] = UInt8(value & 0xffu16)
+        storage[start + 1] = UInt8((value >> 8) & 0xffu16)
+    }
+
+    public func pushSmall(value: UInt32): Unit {
+        let start = makeSpace(4)
+        storage[start] = UInt8(value & 0xffu32)
+        storage[start + 1] = UInt8((value >> 8) & 0xffu32)
+        storage[start + 2] = UInt8((value >> 16) & 0xffu32)
+        storage[start + 3] = UInt8((value >> 24) & 0xffu32)
+    }
+
+    public func pushSmall(value: UInt64): Unit {
+        let start = makeSpace(8)
+        storage[start] = UInt8(value & 0xffu64)
+        storage[start + 1] = UInt8((value >> 8) & 0xffu64)
+        storage[start + 2] = UInt8((value >> 16) & 0xffu64)
+        storage[start + 3] = UInt8((value >> 24) & 0xffu64)
+        storage[start + 4] = UInt8((value >> 32) & 0xffu64)
+        storage[start + 5] = UInt8((value >> 40) & 0xffu64)
+        storage[start + 6] = UInt8((value >> 48) & 0xffu64)
+        storage[start + 7] = UInt8((value >> 56) & 0xffu64)
+    }
+
+    // vector_downward.h:211-227 (fill/pop).
+    public func fill(zeroBytes: Int64): Unit {
+        let start = makeSpace(zeroBytes)
+        var idx: Int64 = 0
+        while (idx < zeroBytes) {
+            storage[start + idx] = 0u8
+            idx++
+        }
+    }
+
+    public func pop(bytesToRemove: Int64): Unit {
+        if (bytesToRemove < 0 || bytesToRemove > size) {
+            throw IllegalArgumentException("flatbuffer pop length out of range")
+        }
+        cur += bytesToRemove
+        size -= bytesToRemove
+    }
+
+    public func readAt(offset: Int64, displacement: Int64): UInt8 {
+        return storage[dataAt(offset) + displacement]
+    }
+
+    public func writeAt(offset: Int64, displacement: Int64, value: UInt8): Unit {
+        storage[dataAt(offset) + displacement] = value
+    }
+
+    // FlatBufferBuilder's Array carrier owns the only copy exposed to callers.
+    public func toArray(): Array<UInt8> {
+        if (size == 0) {
+            return Array<UInt8>()
+        }
+        let result = Array<UInt8>(size, repeat: 0u8)
+        storage.copyTo(result, cur, 0, size)
+        return result
+    }
+
+    // vector_downward.h:269-284. Existing serialized bytes stay adjacent to
+    // the high end, so every tail-relative offset remains valid after growth.
+    private func reallocate(len: Int64): Unit {
+        let growth = if (reserved == 0) {
+            if (len > INITIAL_SIZE) { len } else { INITIAL_SIZE }
+        } else {
+            let geometric = reserved / 2
+            reserved + if (len > geometric) { len } else { geometric }
+        }
+        let remainder = growth % MIN_ALIGNMENT
+        let newReserved = if (remainder == 0) { growth } else { growth + MIN_ALIGNMENT - remainder }
+        let newStorage = Array<UInt8>(newReserved, repeat: 0u8)
+        if (size > 0) {
+            storage.copyTo(newStorage, cur, newReserved - size, size)
+        }
+        storage = newStorage
+        reserved = newReserved
+        cur = reserved - size
+    }
+}
+
 private class FlatBufferTableState {
     public let fieldLocations: ArrayList<Int64> = ArrayList<Int64>()
     public let objectStart: Int64
@@ -18,12 +149,13 @@ private class FlatBufferTableState {
 }
 
 public class FlatBufferBuilder {
-    private let buffer: ArrayList<UInt8> = ArrayList<UInt8>()
+    private let buffer: VectorDownward = VectorDownward()
     private var stringPool: Option<HashMap<String, FlatBufferOffset>> = None
     private let vtableOffsets: ArrayList<FlatBufferOffset> = ArrayList<FlatBufferOffset>()
     private var minAlign: Int64 = 1
     private var currentTable: Option<FlatBufferTableState> = None
     private var finished: Bool = false
+    private var finishedBuffer: Option<Array<UInt8>> = None
 
     // flatbuffer_builder.h:84-112 (FlatBufferBuilderImpl constructor state).
     public init() {}
@@ -38,6 +170,7 @@ public class FlatBufferBuilder {
         minAlign = 1
         currentTable = None
         finished = false
+        finishedBuffer = None
     }
 
     // flatbuffer_builder.h:178-180 (GetSize).
@@ -50,19 +183,20 @@ public class FlatBufferBuilder {
         if (!finished) {
             throw IllegalStateException("flatbuffer is not finished")
         }
-        return buffer.toArray()
+        if (let Some(bytes) <- finishedBuffer) {
+            return bytes
+        }
+        let bytes = buffer.toArray()
+        finishedBuffer = Some(bytes)
+        return bytes
     }
 
     // flatbuffer_builder.h:530-563,1375-1385 (CreateString/CreateStringImpl).
     public func CreateString(value: String): FlatBufferOffset {
         let bytes = value.toArray()
         StartVector(1, bytes.size + 1, 1)
-        PrependRawByte(0u8)
-        var idx = bytes.size - 1
-        while (idx >= 0) {
-            PrependRawByte(bytes[idx])
-            idx--
-        }
+        buffer.fill(1)
+        buffer.push(bytes)
         PrependU32(UInt32(bytes.size))
         return UInt32(buffer.size)
     }
@@ -108,16 +242,18 @@ public class FlatBufferBuilder {
     public func CreateVectorOfStructs(values: ArrayList<ArrayList<UInt8>>, elementSize!: Int64, alignment!: Int64):
         FlatBufferOffset {
         StartVector(elementSize, values.size, alignment)
-        var idx = values.size - 1
-        while (idx >= 0) {
-            let bytes = values[idx]
-            var byteIdx = bytes.size - 1
-            while (byteIdx >= 0) {
-                PrependRawByte(bytes[byteIdx])
-                byteIdx--
-            }
-            idx--
+        var byteCount: Int64 = 0
+        for (value in values) {
+            byteCount += value.size
         }
+        let bytes = Array<UInt8>(byteCount, repeat: 0u8)
+        var target: Int64 = 0
+        for (value in values) {
+            let element = value.toArray()
+            element.copyTo(bytes, 0, target, element.size)
+            target += element.size
+        }
+        buffer.push(bytes)
         PrependU32(UInt32(values.size))
         return UInt32(buffer.size)
     }
@@ -137,11 +273,7 @@ public class FlatBufferBuilder {
     // flatbuffer_builder.h:727-761,798-800 (CreateVector scalar overload).
     public func CreateVectorU8(values: ArrayList<UInt8>): FlatBufferOffset {
         StartVector(1, values.size, 1)
-        var idx = values.size - 1
-        while (idx >= 0) {
-            PrependRawByte(values[idx])
-            idx--
-        }
+        buffer.push(values.toArray())
         PrependU32(UInt32(values.size))
         return UInt32(buffer.size)
     }
@@ -302,11 +434,7 @@ public class FlatBufferBuilder {
             throw IllegalStateException("flatbuffer object is nested")
         }
         Prep(alignment, bytes.size)
-        var idx = bytes.size - 1
-        while (idx >= 0) {
-            PrependRawByte(bytes[idx])
-            idx--
-        }
+        buffer.push(bytes.toArray())
         return UInt32(buffer.size)
     }
 
@@ -316,11 +444,7 @@ public class FlatBufferBuilder {
             return
         }
         Prep(alignment, bytes.size)
-        var idx = bytes.size - 1
-        while (idx >= 0) {
-            PrependRawByte(bytes[idx])
-            idx--
-        }
+        buffer.push(bytes.toArray())
         Slot(field)
     }
 
@@ -362,14 +486,10 @@ public class FlatBufferBuilder {
             }
         }
         if (vtableUse == UInt32(buffer.size + vtableSize)) {
-            var byteIdx = vtable.size - 1
-            while (byteIdx >= 0) {
-                PrependRawByte(vtable[byteIdx])
-                byteIdx--
-            }
+            buffer.push(vtable.toArray())
             vtableOffsets.add(vtableUse)
         }
-        PatchI32(buffer.size - tableOffset, Int32(vtableUse) - Int32(tableOffset))
+        PatchI32(tableOffset, Int32(vtableUse) - Int32(tableOffset))
         currentTable = None
         return UInt32(tableOffset)
     }
@@ -380,25 +500,31 @@ public class FlatBufferBuilder {
     // buffer); its soffset points back to the vtable, matching GetOptionalFieldOffset.
     @OverflowWrapping
     public func Required(table: FlatBufferOffset, field: UInt16): Unit {
-        let tablePos = buffer.size - Int64(table)
-        let soffset = Int32(BufferReadU32(tablePos))
-        let vtable = tablePos - Int64(soffset)
-        let vtsize = BufferReadU16(vtable)
-        let fieldOffset = if (field < vtsize) { BufferReadU16(vtable + Int64(field)) } else { 0u16 }
+        let soffset = Int32(BufferReadU32AtOffset(Int64(table), 0))
+        let vtable = Int64(table) + Int64(soffset)
+        let vtsize = BufferReadU16AtOffset(vtable, 0)
+        let fieldOffset = if (field < vtsize) {
+            BufferReadU16AtOffset(vtable, Int64(field))
+        } else {
+            0u16
+        }
         if (fieldOffset == 0u16) {
             throw IllegalStateException("flatbuffer required field missing")
         }
     }
 
-    // base.h:416-422 little-endian scalar reads over the in-progress buffer.
-    private func BufferReadU16(pos: Int64): UInt16 {
-        return UInt16(buffer[pos]) | (UInt16(buffer[pos + 1]) << 8)
+    // base.h:416-422 little-endian scalar reads over vector_downward::data_at.
+    private func BufferReadU16AtOffset(offset: Int64, displacement: Int64): UInt16 {
+        return UInt16(buffer.readAt(offset, displacement)) |
+            (UInt16(buffer.readAt(offset, displacement + 1)) << 8)
     }
 
     @OverflowWrapping
-    private func BufferReadU32(pos: Int64): UInt32 {
-        return UInt32(buffer[pos]) | (UInt32(buffer[pos + 1]) << 8) |
-            (UInt32(buffer[pos + 2]) << 16) | (UInt32(buffer[pos + 3]) << 24)
+    private func BufferReadU32AtOffset(offset: Int64, displacement: Int64): UInt32 {
+        return UInt32(buffer.readAt(offset, displacement)) |
+            (UInt32(buffer.readAt(offset, displacement + 1)) << 8) |
+            (UInt32(buffer.readAt(offset, displacement + 2)) << 16) |
+            (UInt32(buffer.readAt(offset, displacement + 3)) << 24)
     }
 
     // flatbuffer_builder.h:1224-1229,1258-1282 (Finish with four-byte identifier).
@@ -409,14 +535,10 @@ public class FlatBufferBuilder {
         }
         Prep(minAlign, 8)
         let ident = fileIdentifier.toArray()
-        var idx = ident.size - 1
-        while (idx >= 0) {
-            PrependRawByte(ident[idx])
-            idx--
-        }
+        buffer.push(ident)
         PrependUOffset(root)
         finished = true
-        return buffer.toArray()
+        return GetBufferPointer()
     }
 
     // flatbuffer_builder.h:1224-1229,1258-1282 (Finish without identifier).
@@ -425,7 +547,7 @@ public class FlatBufferBuilder {
         Prep(minAlign, 4)
         PrependUOffset(root)
         finished = true
-        return buffer.toArray()
+        return GetBufferPointer()
     }
 
     // flatbuffer_builder.h:676-684 (StartVector).
@@ -449,13 +571,12 @@ public class FlatBufferBuilder {
 
     // flatbuffer_builder.h:453-468 (vt size check and memcmp during vtable dedup).
     private func VTableEquals(vtable: ArrayList<UInt8>, vtableOffset: FlatBufferOffset): Bool {
-        let start = buffer.size - Int64(vtableOffset)
-        if (start < 0 || start + vtable.size > buffer.size) {
+        if (Int64(vtableOffset) < vtable.size || Int64(vtableOffset) > buffer.size) {
             return false
         }
         var idx: Int64 = 0
         while (idx < vtable.size) {
-            if (buffer[start + idx] != vtable[idx]) {
+            if (buffer.readAt(Int64(vtableOffset), idx) != vtable[idx]) {
                 return false
             }
             idx++
@@ -465,9 +586,7 @@ public class FlatBufferBuilder {
 
     // flatbuffer_builder.h:301 (PopBytes) and vector_downward.h:204-207 (pop).
     private func PopBytes(amount: Int64): Unit {
-        for (_ in 0..amount) {
-            buffer.remove(at: 0)
-        }
+        buffer.pop(amount)
     }
 
     // flatbuffer_builder.h:325-341 (TrackField/AddElement field-location recording).
@@ -486,9 +605,7 @@ public class FlatBufferBuilder {
         }
         let remainder = (buffer.size + additionalBytes) % alignment
         let padding = if (remainder == 0) { 0 } else { alignment - remainder }
-        for (_ in 0..padding) {
-            PrependRawByte(0u8)
-        }
+        buffer.fill(padding)
     }
 
     // flatbuffer_builder.h:317-321,364-390 (PushElement(Offset)/ReferTo).
@@ -549,28 +666,17 @@ public class FlatBufferBuilder {
 
     // base.h:416-422,441-444 (EndianScalar/WriteScalar<uint16_t>).
     private func PrependU16Raw(value: UInt16): Unit {
-        PrependRawByte(UInt8((value >> 8) & 0xffu16))
-        PrependRawByte(UInt8(value & 0xffu16))
+        buffer.pushSmall(value)
     }
 
     // base.h:416-422,441-444 (EndianScalar/WriteScalar<uint32_t>).
     private func PrependU32Raw(value: UInt32): Unit {
-        PrependRawByte(UInt8((value >> 24) & 0xffu32))
-        PrependRawByte(UInt8((value >> 16) & 0xffu32))
-        PrependRawByte(UInt8((value >> 8) & 0xffu32))
-        PrependRawByte(UInt8(value & 0xffu32))
+        buffer.pushSmall(value)
     }
 
     // base.h:416-422,441-444 (EndianScalar/WriteScalar<uint64_t>).
     private func PrependU64Raw(value: UInt64): Unit {
-        PrependRawByte(UInt8((value >> 56) & 0xffu64))
-        PrependRawByte(UInt8((value >> 48) & 0xffu64))
-        PrependRawByte(UInt8((value >> 40) & 0xffu64))
-        PrependRawByte(UInt8((value >> 32) & 0xffu64))
-        PrependRawByte(UInt8((value >> 24) & 0xffu64))
-        PrependRawByte(UInt8((value >> 16) & 0xffu64))
-        PrependRawByte(UInt8((value >> 8) & 0xffu64))
-        PrependRawByte(UInt8(value & 0xffu64))
+        buffer.pushSmall(value)
     }
 
     @OverflowWrapping
@@ -587,17 +693,17 @@ public class FlatBufferBuilder {
 
     // vector_downward.h:185-189 (push_small into downward-growing buffer).
     private func PrependRawByte(value: UInt8): Unit {
-        buffer.add(value, at: 0)
+        buffer.pushSmall(value)
     }
 
     @OverflowWrapping
     // flatbuffer_builder.h:474-481 and base.h:441-444 (vtable soffset backpatch).
-    private func PatchI32(pos: Int64, value: Int32): Unit {
+    private func PatchI32(offset: Int64, value: Int32): Unit {
         let bits = UInt32(value)
-        buffer[pos] = UInt8(bits & 0xffu32)
-        buffer[pos + 1] = UInt8((bits >> 8) & 0xffu32)
-        buffer[pos + 2] = UInt8((bits >> 16) & 0xffu32)
-        buffer[pos + 3] = UInt8((bits >> 24) & 0xffu32)
+        buffer.writeAt(offset, 0, UInt8(bits & 0xffu32))
+        buffer.writeAt(offset, 1, UInt8((bits >> 8) & 0xffu32))
+        buffer.writeAt(offset, 2, UInt8((bits >> 16) & 0xffu32))
+        buffer.writeAt(offset, 3, UInt8((bits >> 24) & 0xffu32))
     }
 }
 
