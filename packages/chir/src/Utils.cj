@@ -988,9 +988,9 @@ public func TopologicalSort(entryBlock: Block): ArrayList<Block> {
     if (entryBlock.TestAttr(Attribute.UNREACHABLE)) {
         return result
     }
-    let visited = ArrayList<Int64>()
+    let visited = HashSet<Block>()
     let visitStack = ArrayList<VisitStackElem>()
-    visited.add(entryBlock.nodeId)
+    visited.add(entryBlock)
     visitStack.add(VisitStackElem(entryBlock, GetReachableSuccessors(entryBlock)))
 
     while (!visitStack.isEmpty()) {
@@ -998,15 +998,8 @@ public func TopologicalSort(entryBlock: Block): ArrayList<Block> {
             let top = visitStack[visitStack.size - 1]
             let lastSuccessor = top.successors[top.successors.size - 1]
             top.successors.remove(at: top.successors.size - 1)
-            var hasVisited = false
-            for (id in visited) {
-                if (id == lastSuccessor.nodeId) {
-                    hasVisited = true
-                    break
-                }
-            }
-            if (!hasVisited) {
-                visited.add(lastSuccessor.nodeId)
+            if (!visited.contains(lastSuccessor)) {
+                visited.add(lastSuccessor)
                 visitStack.add(VisitStackElem(lastSuccessor, GetReachableSuccessors(lastSuccessor)))
             }
         }
