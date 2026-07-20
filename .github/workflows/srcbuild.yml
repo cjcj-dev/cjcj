@@ -218,7 +218,15 @@ jobs:
           # (cjcj finds its runtime relative to the binary path). Save the upstream cjc
           # as the difftest oracle first.
           cp "$sdk/bin/cjc" "$sdk/bin/cjc-upstream-oracle"
-          install -m0755 target/release/bin/cjcj::cjc "$sdk/bin/cjc"
+          # Keep the managed seed's real mapped name different from "cjc": the Linux
+          # runtime reserves that basename for native C++ cjc and otherwise excludes its
+          # managed frames from GC stack-root scanning (GC corruption on first real GC).
+          install -m0755 target/release/bin/cjcj::cjc "$sdk/bin/cjcj-stage1"
+          rm -f "$sdk/bin/cjc"
+          ln -s cjcj-stage1 "$sdk/bin/cjc"
+          scan_json=$(mktemp)
+          cjc -p "$GITHUB_WORKSPACE/packages/basic/src" --scan-dependency > "$scan_json"
+          grep -q '"package":"cjcj::basic"' "$scan_json"
           mv cjpm.toml.O2bak cjpm.toml
           cjpm clean
 
@@ -235,6 +243,7 @@ jobs:
           test -x target/release/bin/cjcj::cjc
           # stage1 replaced $sdk/bin/cjc with the seed cjcj; restore the upstream cjc and
           # expose it as the difftest oracle. Install the final self-built cjcj (stage2).
+          rm -f "$sdk/bin/cjc"   # drop the stage1 seed symlink
           install -m0755 "$sdk/bin/cjc-upstream-oracle" "$sdk/bin/cjc"
           cp "$sdk/bin/cjc" "$sdk/bin/cjc-oracle"
           install -m0755 target/release/bin/cjcj::cjc "$sdk/bin/cjcj"
