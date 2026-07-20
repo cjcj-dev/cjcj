@@ -595,6 +595,7 @@ public class CompilerInstance {
         ManglingHelpFunction(mangler, adapter)
         cachedInfo.lambdaCounter = UInt64(mangler.lambdaCounter)
         mangler.adapter = RealMangleAstAdapter()
+        mangler.manglerCtxTable.clear()
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpAST()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "mangle", dumpToScreen: invocation.globalOptions.dumpToScreen)
         }
