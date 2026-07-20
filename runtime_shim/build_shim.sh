@@ -16,27 +16,23 @@ if ! command -v "$CXX" >/dev/null 2>&1 && command -v clang++-15 >/dev/null 2>&1;
 fi
 CC="${CC:-cc}"
 
-# Host -> vendored prebuilt .o dir (shim needs patched-LLVM headers absent on CI; see
-# runtime_shim/prebuilt/README.md).
-HOST_OS="$(uname -s)"
-HOST_ARCH="$(uname -m)"
-case "${HOST_OS}/${HOST_ARCH}" in
-    Linux/x86_64)           PREBUILT_PLAT="linux_x86_64" ;;
-    Linux/aarch64|Linux/arm64) PREBUILT_PLAT="linux_aarch64" ;;
-    Darwin/arm64|Darwin/aarch64) PREBUILT_PLAT="darwin_aarch64" ;;
-    Darwin/x86_64)          PREBUILT_PLAT="darwin_x86_64" ;;
-    *)                      PREBUILT_PLAT="" ;;
-esac
-PREBUILT_O="$HERE/prebuilt/${PREBUILT_PLAT}/cjselfhost_llvmshim.o"
+SOURCE_BUILT_O="${CJCJ_LLVM_SHIM_O:-}"
 
 "$CC" -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L \
   -c "$HERE/cjc_runtime_config.c" -o "$HERE/cjc_runtime_config.o"
 
-# Resolve the shim .o in priority order. The LLVM-header probe lives inside the
-# source-compile branch so a CI machine (no headers, no C++ tree) reaches the prebuilt
-# branch instead of failing the probe. -fno-rtti/-fno-exceptions match the LLVM ABI.
+# Resolve the shim .o in priority order. CI obtains SOURCE_BUILT_O from the pinned
+# cjcj-llvm source-build workflow; local development may compile against a complete
+# patched C++ compiler build tree. -fno-rtti/-fno-exceptions match the LLVM ABI.
 if [ -f "$HERE/cjselfhost_llvmshim.o" ]; then
     echo "reusing existing cjselfhost_llvmshim.o"
+elif [ -n "$SOURCE_BUILT_O" ]; then
+    [ -f "$SOURCE_BUILT_O" ] || {
+        echo "ERR: source-built shim artifact missing: $SOURCE_BUILT_O" >&2
+        exit 1
+    }
+    cp "$SOURCE_BUILT_O" "$HERE/cjselfhost_llvmshim.o"
+    echo "used source-built shim artifact: $SOURCE_BUILT_O"
 elif [ -d "$FLATBUFFERS_INC" ] && [ -d "$SCHEMA_GEN_INC/flatbuffers" ]; then
     # source build (dev machine with the patched-LLVM C++ tree)
     if [ -d "$LLVM_SRC_INC" ] && [ -d "$LLVM_GEN_INC" ]; then
@@ -50,14 +46,10 @@ elif [ -d "$FLATBUFFERS_INC" ] && [ -d "$SCHEMA_GEN_INC/flatbuffers" ]; then
     "$CXX" -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
       -c "$HERE/cjselfhost_llvmshim.cpp" -o "$HERE/cjselfhost_llvmshim.o" \
       "${LLVM_INCLUDE_ARGS[@]}" -I"$FLATBUFFERS_INC" -I"$SCHEMA_GEN_INC"
-elif [ -n "$PREBUILT_PLAT" ] && [ -f "$PREBUILT_O" ]; then
-    # vendored prebuilt (CI)
-    cp "$PREBUILT_O" "$HERE/cjselfhost_llvmshim.o"
-    echo "used vendored prebuilt shim: $PREBUILT_O"
 else
     echo "ERR: cannot obtain cjselfhost_llvmshim.o — none of: (1) a pre-existing local .o," >&2
-    echo "     (2) the patched-LLVM C++ source tree (to compile from source), (3) a vendored" >&2
-    echo "     prebuilt for ${HOST_OS}/${HOST_ARCH} (expected at $PREBUILT_O) is available." >&2
+    echo "     (2) CJCJ_LLVM_SHIM_O from the source-build artifact, (3) a complete patched" >&2
+    echo "     LLVM/Cangjie C++ build tree for a local source compile is available." >&2
     exit 1
 fi
 

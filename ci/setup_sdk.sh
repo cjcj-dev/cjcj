@@ -2,7 +2,7 @@
 # Install the Cangjie bootstrap SDK and export the build env.
 #   1. bootstrap cjv (github.com/Zxilly/cjv)
 #   2. cjv install <pinned-nightly> -c stdx
-#   2.5 swap the SDK's llc with the -O2-fixed static llc (ci/prebuilt/llc)
+#   2.5 swap the SDK's llc with the CI-built -O2-fixed llc artifact
 #   3. repoint the libLLVM path hardcoded in packages/cjc/cjpm.toml at the SDK (CI checkout only)
 #   4. write CANGJIE_HOME / CANGJIE_STDX_PATH / lib path / cjHeapSize / PATH to $GITHUB_ENV
 #
@@ -12,6 +12,7 @@
 #   CJV_VERSION      default v0.2.20
 #   CJ_HEAP_SIZE     default 12GB (unset -> parse-phase OOM)
 #   REPO_ROOT        default the script's parent dir
+#   FIXED_LLC_GZ     source-built llc.gz artifact (required by Linux x86_64 CI)
 set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -56,7 +57,7 @@ CANGJIE_HOME="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
 [ -d "$CANGJIE_HOME" ] || { log "toolchain dir missing: $CANGJIE_HOME"; exit 3; }
 STDX_PATH="$HOME/.cjv/stdx/$CJCJ_TOOLCHAIN/static/stdx"
 
-# 2.5 Swap the SDK's llc with the -O2-fixed static llc.
+# 2.5 Swap the SDK's llc with the source-built -O2-fixed static llc.
 #     The stock nightly llc miscompiles -O2 (SelectionDAG relocate-of-undef memory corruption;
 #     cjcj-llvm fix/scheddag-memcorrupt). The backend lowered relocate-of-undef to a
 #     materialized 0xFEFEFEFE sentinel in a callee-saved register; the compressed GC stackmap
@@ -65,15 +66,17 @@ STDX_PATH="$HOME/.cjv/stdx/$CJCJ_TOOLCHAIN/static/stdx"
 #     getUNDEF (no register materialization, no phantom root) + filterGCPointer tolerates a
 #     ConstantOp GC pointer. The fix is in llc (backend) only; opt/libLLVM are untouched. This
 #     static llc is self-contained (no libLLVM dependency). Idempotent: skips if already fixed;
-#     keeps the original as llc.orig once. Required for ANY -O2 build of cjcj, so it runs in CI and local.
+#     keeps the original as llc.orig once. CI downloads this file from the source-build artifact.
 case "$OS/$ARCH" in
     Linux/x86_64) LLC_PLATFORM="linux_x86_64" ;;
     *)            LLC_PLATFORM="" ;;
 esac
-FIXED_LLC_GZ="$REPO_ROOT/ci/prebuilt/llc/$LLC_PLATFORM/llc.gz"
-FIXED_LLC_SHA="9f203753f8682ab14e2c0dc12a0f13a2af14783d3a09bc9f2626d633327fe943"
+FIXED_LLC_GZ="${FIXED_LLC_GZ:-}"
 SDK_LLC="$CANGJIE_HOME/third_party/llvm/bin/llc"
-if [ -n "$LLC_PLATFORM" ] && [ -f "$FIXED_LLC_GZ" ] && [ -f "$SDK_LLC" ]; then
+if [ -n "$LLC_PLATFORM" ] && [ -n "$FIXED_LLC_GZ" ]; then
+    [ -f "$FIXED_LLC_GZ" ] || { log "FATAL: fixed llc artifact missing: $FIXED_LLC_GZ"; exit 4; }
+    [ -f "$SDK_LLC" ] || { log "FATAL: SDK llc missing: $SDK_LLC"; exit 4; }
+    FIXED_LLC_SHA="$(gunzip -c "$FIXED_LLC_GZ" | sha256sum | awk '{print $1}')"
     cur_sha="$(sha256sum "$SDK_LLC" | awk '{print $1}')"
     if [ "$cur_sha" != "$FIXED_LLC_SHA" ]; then
         [ -f "$SDK_LLC.orig" ] || cp -f "$SDK_LLC" "$SDK_LLC.orig"   # capture the true original once
@@ -81,13 +84,16 @@ if [ -n "$LLC_PLATFORM" ] && [ -f "$FIXED_LLC_GZ" ] && [ -f "$SDK_LLC" ]; then
         gunzip -c "$FIXED_LLC_GZ" > "$SDK_LLC"
         chmod 0755 "$SDK_LLC"
         got_sha="$(sha256sum "$SDK_LLC" | awk '{print $1}')"
-        [ "$got_sha" = "$FIXED_LLC_SHA" ] || { log "FATAL: fixed llc sha mismatch ($got_sha)"; exit 4; }
-        log "swapped SDK llc -> -O2-fixed (backend relocate-of-undef fix)"
+        [ "$got_sha" = "$FIXED_LLC_SHA" ] || { log "FATAL: fixed llc artifact sha mismatch ($got_sha)"; exit 4; }
+        log "swapped SDK llc -> source-built -O2-fixed ($FIXED_LLC_SHA)"
     else
         log "SDK llc already -O2-fixed; skip"
     fi
+elif [ -n "$LLC_PLATFORM" ] && [ -n "${CI:-}" ]; then
+    log "FATAL: FIXED_LLC_GZ is required for Linux x86_64 CI"
+    exit 4
 else
-    log "no fixed llc for $OS/$ARCH; keeping stock llc (aarch64 fixed llc: TODO, task#7)"
+    log "no source-built fixed llc artifact for $OS/$ARCH; keeping stock llc"
 fi
 
 # 3. Repoint the libLLVM dir hardcoded in cjpm.toml (a /root/.cjv/... path unreadable to the
