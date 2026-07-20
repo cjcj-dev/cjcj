@@ -549,6 +549,9 @@ public class CompilerInstance {
         if (let None <- gim) {
             gim = Some(GenericInstantiationManager(faithfulSemaInstance.getOrThrow(), testManager.GetImpl()))
         }
+        let semaInstance = faithfulSemaInstance.getOrThrow()
+        semaInstance.mangler.adapter = RealMangleAstAdapter()
+        semaInstance.mangler.manglerCtxTable.clear()
         if (!invocation.globalOptions.enIncrementalCompilation) {
             if (let Some(genericInstantiationManager) <- gim) {
                 genericInstantiationManager.ResetGenericInstantiationStage()
@@ -562,7 +565,6 @@ public class CompilerInstance {
                 }
             }
         }
-        let semaInstance = faithfulSemaInstance.getOrThrow()
         let typeChecker = FaithfulSemaTypeChecker(Some(semaInstance))
         for (pkg in srcPkgs) {
             let astCtx = semaInstance.GetASTContextByPackage(Some(pkg)).getOrThrow()
@@ -571,8 +573,6 @@ public class CompilerInstance {
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "genericinst")
         }
-        semaInstance.mangler.adapter = RealMangleAstAdapter()
-        semaInstance.mangler.manglerCtxTable.clear()
         return true
     }
 
