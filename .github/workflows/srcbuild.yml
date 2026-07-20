@@ -134,6 +134,17 @@ jobs:
         working-directory: cangjie-build
         run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
 
+      - name: Apply cjcj runtime patches (Front A — align runtime to upstream + cjcj patches)
+        # rebased runtime = upstream 14f32bf2 + 2 cjcj patches (mutator-lock writer-preference
+        # to stop GC starvation; toregion2fix for the toRegion2Idx GC assertion). Both cherry
+        # clean onto 14f32bf2 (verified). cjc-name GC exclusion is already upstream.
+        run: |
+          rt="$CANGJIE_WORKSPACE/cangjie_runtime"
+          for p in "$GITHUB_WORKSPACE"/ci/srcbuild/runtime-patches/*.patch; do
+            echo "== applying $(basename "$p") =="
+            git -C "$rt" apply --verbose "$p"
+          done
+
       - name: Build runtime from source
         working-directory: cangjie-build
         run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build runtime
@@ -193,8 +204,27 @@ jobs:
           fi
           test -s runtime_shim/cjselfhost_llvmshim.o
 
-      - name: Build cjcj with source SDK
-        run: cjpm build
+      - name: Build cjcj — stage1 (upstream cjc @ -O1, seed)
+        # Upstream cjc (14f32bf2) miscompiles cjcj at -O2: generic HashMap<TypeInfo,
+        # AnnotationBase>.iterator() instantiation loses the concrete->interface upcast,
+        # rejected by the CHIR checker (chirdiag: -O0 passes, -O2 fails; no cjcj-side
+        # workaround). Build a seed cjcj at -O1 with the upstream cjc to avoid the bug.
+        run: |
+          cp cjpm.toml cjpm.toml.O2bak
+          sed -i 's/compile-option = "-O2"/compile-option = "-O1"/' cjpm.toml
+          cjpm build
+          install -D -m0755 target/release/bin/cjcj::cjc "$RUNNER_TEMP/stage1/cjc"
+          mv cjpm.toml.O2bak cjpm.toml
+          cjpm clean
+
+      - name: Build cjcj — stage2 (cjcj-stage1 @ -O2, self-host)
+        # cjcj (our compiler) has no upstream -O2 CHIR bug; self-build the final cjcj at
+        # -O2. The fixed static llc (activated earlier) handles the LLVM -O2 backend bug.
+        # Upstream cjc stays at $sdk/bin/cjc as the difftest oracle (compose renames it).
+        run: |
+          export PATH="$RUNNER_TEMP/stage1:$PATH"
+          echo "stage2 compiler: $(command -v cjc)"; cjc --version | head -2
+          cjpm build
 
       - name: Compose cjc + cjcj SDK
         run: |
