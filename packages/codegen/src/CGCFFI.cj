@@ -350,6 +350,7 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         if (let Some(foundRet) <- FindABIArgInfo(typeMap, chirFuncTy.GetReturnType())) {
             if (foundRet.IsIndirect()) {
                 AddSRetAttribute(llvmFunc, GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(llvmFunc, 0u32)) }))
+                AddAlignAttributeAtIndex(llvmFunc, 1u32, GetTypeAlignment(cgMod, chirFuncTy.GetReturnType()))
                 argIdx++
             } else if (isIntegerTy(unsafe { LLVMGetReturnType(found.llvmFunctionType) }, 1u32)) {
                 AddRetAttr(llvmFunc, "zeroext")
@@ -380,7 +381,8 @@ public class LinuxAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
             }
             if (kinds[kindIdx] == ProcessKind.INDIRECT) {
                 CJC_ASSERT(IsStructPtrTy(argType))
-                AddByValAttribute(llvmFunc, argIdx, GetPointerElementType(argType), align: GetTypeAlignment(cgMod, argType))
+                AddByValAttribute(llvmFunc, argIdx, GetPointerElementType(argType),
+                    align: GetTypeAlignment(cgMod, chirFuncTy.GetParamTypes()[kindIdx]))
             }
             kindIdx++
             argIdx++
@@ -873,6 +875,7 @@ public open class LinuxAarch64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         if (let Some(foundRet) <- FindABIArgInfo(typeMap, chirFuncTy.GetReturnType())) {
             if (foundRet.IsIndirect()) {
                 AddSRetAttribute(llvmFunc, GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(llvmFunc, 0u32)) }))
+                AddAlignAttributeAtIndex(llvmFunc, 1u32, GetTypeAlignment(cgMod, chirFuncTy.GetReturnType()))
             }
         }
         AddFnAttr(llvmFunc, CFUNC_ATTR)
@@ -1085,6 +1088,7 @@ public class MacAArch64CJNativeCGCFFI <: LinuxAarch64CJNativeCGCFFI {
         if (let Some(foundRet) <- FindABIArgInfo(typeMap, chirFuncTy.GetReturnType())) {
             if (foundRet.IsIndirect()) {
                 AddSRetAttribute(llvmFunc, GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(llvmFunc, 0u32)) }))
+                AddAlignAttributeAtIndex(llvmFunc, 1u32, GetTypeAlignment(cgMod, chirFuncTy.GetReturnType()))
                 argIdx++
             }
         }
@@ -1271,7 +1275,7 @@ public class WindowsAmd64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
                 let sretArgType = unsafe { LLVMTypeOf(LLVMGetParam(llvmFunc, 0u32)) }
                 AddSRetAttribute(llvmFunc, GetPointerElementType(sretArgType))
                 AddNoAliasAttribute(llvmFunc)
-                AddAlignAttributeAtIndex(llvmFunc, 1u32, GetTypeAlignment(cgMod, GetPointerElementType(sretArgType)))
+                AddAlignAttributeAtIndex(llvmFunc, 1u32, GetTypeAlignment(cgMod, chirFuncTy.GetReturnType()))
             }
         }
         let paramCount = unsafe { LLVMCountParams(llvmFunc) }

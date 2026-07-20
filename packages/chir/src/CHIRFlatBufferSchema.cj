@@ -978,6 +978,8 @@ const CHIRFB_ENUM_DEF_VT_NONEXHAUSTIVE: UInt16 = 8u16
 // PackageFormat_generated.h:6133-6136 (StructDef::FlatBuffersVTableOffset).
 const CHIRFB_STRUCT_DEF_VT_BASE: UInt16 = 4u16
 const CHIRFB_STRUCT_DEF_VT_ISCSTRUCT: UInt16 = 6u16
+const CHIRFB_STRUCT_DEF_VT_ALIGNMENT: UInt16 = 8u16
+const CHIRFB_STRUCT_DEF_VT_ISPACKED: UInt16 = 10u16
 
 // ExtendDef table field slot offsets. PackageFormat.fbs:482-486;
 // PackageFormat_generated.h:6185-6189 (ExtendDef::FlatBuffersVTableOffset).

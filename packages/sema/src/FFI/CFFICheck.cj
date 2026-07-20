@@ -15,6 +15,8 @@ import cjcj::option.GlobalOptions as OptionGlobalOptions
 import cjcj::option.IsUnsafeBackend as OptionIsUnsafeBackend
 
 private let CFUNC_NAME: String = "CFunc"
+// Runtime TypeInfo stores alignment in one byte; 128 is the largest representable power of two.
+private let MAX_C_ALIGNMENT: UInt64 = 128u64
 
 private func ToBasicPosition(pos: Position): BasicPosition {
     return BasicPosition(pos.fileID, pos.line, pos.column)
@@ -145,11 +147,14 @@ public func IsZeroSizedTy(ty: Ty): Bool {
 
 public func CheckAnnoC(decl: Decl, annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
     if (!annotation.args.isEmpty()) {
-        EmitLegacy(
-            diag,
-            BasicDiagKind.sema_annotation_error_arg_num,
-            annotation.args[0],
-            args: [BasicDiagArgument("@C"), BasicDiagArgument("no")])
+        if (decl.astKind != ASTKind.STRUCT_DECL) {
+            let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_annotation_invalid_args_type,
+                annotation, arguments: ["@C"])
+            builder.AddNote("@C layout arguments are only valid on @C structs")
+            builder.Emit()
+        } else {
+            CheckCStructLayoutArgs(annotation, diag)
+        }
     }
     if (decl.astKind == ASTKind.FUNC_DECL) {
         if (let Some(generic) <- decl.GetGeneric()) {
@@ -168,6 +173,67 @@ public func CheckAnnoC(decl: Decl, annotation: Annotation, diag: BasicDiagnostic
             args: [BasicDiagArgument(DeclKindToString(decl)), BasicDiagArgument("@C")])
     } else if (!IsTopLevelDecl(decl)) {
         EmitRefactor(diag, BasicDiagKindRefactor.sema_illegal_scope_use_of_annotation, annotation, args: ["@C"])
+    }
+}
+
+private func EmitInvalidCLayoutArg(diag: BasicDiagnosticEngine, node: Node, message: String): Unit {
+    let builder = DiagnoseRefactor(diag, BasicDiagKindRefactor.sema_annotation_invalid_args_type,
+        node, arguments: ["@C"])
+    builder.AddNote(message)
+    builder.Emit()
+}
+
+private func ParseCAlignment(expr: Expr): Option<UInt64> {
+    let literal = (expr as LitConstExpr) ?? return None
+    if (literal.kind != LitConstKind.INTEGER) {
+        return None
+    }
+    literal.constNumValue.asInt.InitIntLiteral(literal.stringValue, TypeKind.TYPE_UINT64)
+    if (literal.constNumValue.asInt.IsOutOfRange() || literal.constNumValue.asInt.IsNegativeNum()) {
+        return None
+    }
+    return Some(literal.constNumValue.asInt.Uint64())
+}
+
+private func CheckCStructLayoutArgs(annotation: Annotation, diag: BasicDiagnosticEngine): Unit {
+    var seenAlign = false
+    var seenPacked = false
+    for (arg in annotation.args) {
+        let expr = arg.expr ?? continue
+        let argName = arg.name.Val()
+        if (argName == "align" || argName == "packed") {
+            if ((argName == "align" && seenAlign) || (argName == "packed" && seenPacked)) {
+                EmitInvalidCLayoutArg(diag, arg, "duplicate @C layout argument '" + argName + "'")
+                continue
+            }
+            if (argName == "align") { seenAlign = true } else { seenPacked = true }
+            let alignment = ParseCAlignment(expr)
+            if (alignment.isNone()) {
+                EmitInvalidCLayoutArg(diag, arg,
+                    "@C " + argName + " requires a non-negative integer alignment")
+                continue
+            }
+            let value = alignment.getOrThrow()
+            if (value == 0u64 || (value & (value - 1u64)) != 0u64 || value > MAX_C_ALIGNMENT) {
+                EmitInvalidCLayoutArg(diag, arg,
+                    "@C " + argName + " value must be a power of two between 1 and " +
+                    MAX_C_ALIGNMENT.toString())
+            }
+            continue
+        }
+        if (argName.isEmpty()) {
+            if (let Some(refExpr) <- (expr as RefExpr)) {
+                if (refExpr.ref.identifier.Val() == "packed") {
+                    if (seenPacked) {
+                        EmitInvalidCLayoutArg(diag, arg, "duplicate @C layout argument 'packed'")
+                    }
+                    seenPacked = true
+                    continue
+                }
+            }
+        }
+        EmitInvalidCLayoutArg(diag, arg,
+            "@C accepts only align: N, packed, or packed: N layout arguments")
     }
 }
 

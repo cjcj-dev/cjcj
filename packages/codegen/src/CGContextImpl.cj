@@ -85,6 +85,7 @@ public class CGContextImpl {
         HashMap<Int64, ArrayList<(CGTypeCacheKey, HashMap<Type, CGType>)>>()
     private let valueAndBasePtrMap: HashMap<UIntNative, LLVMValueRef> = HashMap<UIntNative, LLVMValueRef>()
     private let nullableReferences: HashSet<UIntNative> = HashSet<UIntNative>()
+    private let llvmTypeAlignments: HashMap<UIntNative, UInt32> = HashMap<UIntNative, UInt32>()
 
     public init() {}
 
@@ -93,10 +94,20 @@ public class CGContextImpl {
         chirType2CGTypeMap.clear()
         valueAndBasePtrMap.clear()
         nullableReferences.clear()
+        llvmTypeAlignments.clear()
     }
 
     public func AddCGType(cgType: CGType): Unit {
         cgTypePool.add(cgType)
+    }
+
+    public func SetLLVMTypeAlignment(llvmType: LLVMTypeRef, alignment: UInt32): Unit {
+        if (!llvmType.isNull()) { llvmTypeAlignments[llvmType.toUIntNative()] = alignment }
+    }
+
+    public func GetLLVMTypeAlignment(llvmType: LLVMTypeRef): Option<UInt32> {
+        if (llvmType.isNull()) { return None }
+        return llvmTypeAlignments.get(llvmType.toUIntNative())
     }
 
     public func FindCGType(extraInfo: TypeExtraInfo, chirTy: Type): Option<CGType> {
