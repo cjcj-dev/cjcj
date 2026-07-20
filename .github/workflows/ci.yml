@@ -37,6 +37,8 @@ jobs:
           test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5
           test -f ci/smoke/macro_demo/mymacros/def.cj
           test -f ci/smoke/macro_demo/app/main.cj
+      - name: Reject vendored LLVM binaries
+        run: test -z "$(git ls-files 'ci/prebuilt/**' 'runtime_shim/prebuilt/**')"
 
   fixed-llvm-tools:
     name: source-build fixed LLVM tools
