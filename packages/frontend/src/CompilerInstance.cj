@@ -37,6 +37,10 @@ import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
 import std.core.Box as CoreBox
 
+foreign {
+    func CJ_MCC_InvokeGC(sync: Bool): Unit
+}
+
 // Faithful port of C++ RegisterMacroCallDiagInfos (Frontend/CompilerInstance.cpp:935-947).
 func RegisterMacroCallDiagInfos(diag: DiagnosticEngine, pkg: Package): Unit {
     for (file in pkg.files) {
@@ -553,6 +557,9 @@ public class CompilerInstance {
         semaInstance.mangler.adapter = RealMangleAstAdapter()
         semaInstance.mangler.manglerCtxTable.clear()
         semaInstance.typeManager.ReleaseSemaQueryCaches()
+        unsafe {
+            CJ_MCC_InvokeGC(true)
+        }
         if (!invocation.globalOptions.enIncrementalCompilation) {
             if (let Some(genericInstantiationManager) <- gim) {
                 genericInstantiationManager.ResetGenericInstantiationStage()
@@ -779,6 +786,9 @@ public class CompilerInstance {
     public func PerformCHIRCompilation(): Bool {
         mangler.manglerCtxTable.clear()
         typeManager.ReleasePostSemaCaches()
+        unsafe {
+            CJ_MCC_InvokeGC(true)
+        }
         FreeIdleMemoryToOS()
         chirData.ClearRealPackages()
         var ret = true
