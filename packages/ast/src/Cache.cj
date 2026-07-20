@@ -3,7 +3,7 @@ package cjcj::ast
 import cjcj::basic.DiagnosticCache
 import std.collection.*
 
-public class TargetCache {
+public struct TargetCache {
     public var first: Option<Decl> = None
     public var second: Option<Decl> = None
 
@@ -15,7 +15,7 @@ public class TargetCache {
     }
 }
 
-public class CacheEntry {
+public struct CacheEntry {
     public var successful: Bool
     public var result: Option<Ty>
     public var diags: DiagnosticCache
@@ -29,7 +29,7 @@ public class CacheEntry {
     }
 }
 
-public class CacheKey <: Hashable & Equatable<CacheKey> {
+public struct CacheKey <: Hashable & Equatable<CacheKey> {
     public var target: Option<Ty> = None
     public var isDesugared: Bool = false
     public var diagKey: Int64 = 0
