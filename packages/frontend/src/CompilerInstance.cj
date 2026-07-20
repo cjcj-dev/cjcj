@@ -786,11 +786,11 @@ public class CompilerInstance {
     public func PerformCHIRCompilation(): Bool {
         mangler.manglerCtxTable.clear()
         typeManager.ReleasePostSemaCaches()
+        chirData.ClearRealPackages()
         unsafe {
             CJ_MCC_InvokeGC(true)
         }
         FreeIdleMemoryToOS()
-        chirData.ClearRealPackages()
         var ret = true
         let sourcePackagesCHIR = GetSourcePackages()
         let pkgsOrderedCHIR = packageManager.GetBuildOrders(sourcePackagesCHIR)
