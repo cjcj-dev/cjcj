@@ -1,6 +1,6 @@
 # Release. Repackages the official SDK tree as a cjcj SDK: bin/cjc is our
 # Cangjie-built compiler and runtime/lib/<plat>/libcangjie-runtime.so is rebuilt
-# from source with the cjc-detect patch (runtime_patch/). Smoke runs against the
+# from the pinned CangjieFork source commit. Smoke runs against the
 # packaged bin/cjc. Linux x64 + aarch64; macOS/Windows are BLOCKED (see
 # reports/REPORT-relmatrix.md). Set dry_run to build artifacts without publishing.
 name: Release
@@ -33,7 +33,7 @@ permissions:
 
 env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260712020030
-  RUNTIME_BASE_SHA: 18cd0af893b06bfd0aedcef82aaa9eaf31cc40d2
+  RUNTIME_REF: f56e60bfb05121f138f39dec46d7e0b38eb3165a
 
 jobs:
   build:
@@ -80,8 +80,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_BASE_SHA }}-${{ hashFiles('runtime_patch/**') }}
-      - name: Build patched runtime
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_REF }}
+      - name: Build fork runtime
         if: steps.rtcache.outputs.cache-hit != 'true'
         env:
           RUNTIME_VERSION: ${{ inputs.version }}
@@ -91,7 +91,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_BASE_SHA }}-${{ hashFiles('runtime_patch/**') }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_REF }}
       - name: Build workspace
         run: cjpm build
       - name: Package SDK
@@ -103,7 +103,7 @@ jobs:
             --version "${{ inputs.version }}" \
             --platform "${{ matrix.platform }}" \
             --outdir "$PWD/dist"
-      # Smoke the shipped artifact: packaged bin/cjc (renamed) + packaged patched runtime.
+      # Smoke the shipped artifact: packaged bin/cjc (renamed) + fork-built runtime.
       - name: Smoke packaged SDK
         run: |
           set -e
