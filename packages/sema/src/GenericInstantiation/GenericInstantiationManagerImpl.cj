@@ -1089,8 +1089,6 @@ class GenericInstantiationManagerImpl {
 
     private func BuildAbstractFuncMap(): Unit {
         abstractFuncToDeclMap.Clear()
-        inheritedMemberFuncsCache.clear()
-        inheritedInterfacesCache.clear()
         membersIndexMap.clear()
         skippedMemberOffsets.clear()
         for (entry in ci.typeManager.builtinTyToExtendMap) {
