@@ -61,7 +61,6 @@ import cjcj::chir.TypeValue
 import cjcj::chir.globalState as typeAnalysisGlobals
 import cjcj::chir.ToCHIRPhase
 import cjcj::chir.UnitUnify
-import cjcj::chir.UpdateMemberVarPath
 import cjcj::chir.UselessAllocateElimination
 import cjcj::chir.VarInitCheck
 import cjcj::chir.Value as ChirValue
@@ -865,12 +864,6 @@ private class ToCHIR {
 private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
     diag: BasicDiagnosticEngine, effectMap: ChirOptEffectCHIRMap,
     maybeUnreachable: HashMap<ChirBlock, ChirTerminator>): Bool {
-    // Canonicalize member-var paths over the whole package before analysis, mirroring C++
-    // ToCHIR::Canonicalization() at CHIR.cpp:1150 ("after this pass, the CHIR is ready for
-    // analysis and optimization"). Generic instantiation adds function bodies after
-    // FaithfulAST2CHIR ran UpdateMemberVarPath, so their GetElementByName/StoreElementByName/
-    // FieldByName nodes would otherwise reach ConstAnalysis (memory-major but unhandled).
-    UpdateMemberVarPath(builder).RunOnPackage(pkg)
     DeadCodeElimination(builder, diag, pkg).UnreachableBlockWarningReporter(pkg,
         Int64(options.GetJobs()), maybeUnreachable)
     DeadCodeElimination(builder).ClearUnreachableMarkBlock(pkg)
