@@ -580,6 +580,11 @@ class CHIRDeserializerImpl {
                 if (!CHIRFieldAt(fields, 24).isEmpty()) {
                     structDef.SetCStruct(CHIRWireToBool(CHIRFieldAt(fields, 24)))
                 }
+                let alignment = CHIRSafeI64(CHIRFieldAt(fields, 28))
+                if (alignment > 0) { structDef.SetAlignment(Some(alignment)) }
+                if (!CHIRFieldAt(fields, 29).isEmpty()) {
+                    structDef.SetPacked(CHIRWireToBool(CHIRFieldAt(fields, 29)))
+                }
             }
             for (extendId in CHIRWireSplitList(CHIRFieldAt(fields, 12))) {
                 if (let Some(extendValue) <- customDefsById.get(extendId)) {
@@ -3011,6 +3016,9 @@ class CHIRDeserializerImpl {
         if (obj.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) { return }
         ConfigCustomTypeDef(buffer.GetBase().getOrThrow(), obj)
         obj.SetCStruct(buffer.GetIsCStruct())
+        let alignment = buffer.GetAlignment()
+        if (alignment > 0) { obj.SetAlignment(Some(alignment)) }
+        obj.SetPacked(buffer.GetIsPacked())
     }
 
     private func Config(buffer: PackageFormat_ClassDef, obj: ClassDef): Unit {

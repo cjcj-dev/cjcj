@@ -1078,7 +1078,12 @@ private func KeepSomeTypesManually(cgMod: CGModule): Unit {
                 try (typeName = unsafe { LibC.mallocCString(structTypeName) }.asResource()) {
                     let structType = unsafe { LLVMGetTypeByName2(llvmContext, typeName.value) }
                     if (!structType.isNull() && unsafe { LLVMTypeIsSized(structType) } != 0) {
-                        let _ = unsafe { LLVMBuildAlloca(builder, structType, allocaName.value) }
+                        let allocaInst = unsafe { LLVMBuildAlloca(builder, structType, allocaName.value) }
+                        if (let Some(requestedAlign) <- cgMod.GetCGContext().GetLLVMTypeAlignment(structType)) {
+                            if (requestedAlign > cgMod.GetABITypeAlignment(structType)) {
+                                unsafe { LLVMSetAlignment(allocaInst, requestedAlign) }
+                            }
+                        }
                     }
                 }
             }

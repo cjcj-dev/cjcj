@@ -16,11 +16,17 @@ public class TargetCache {
 }
 
 public class CacheEntry {
-    public var successful: Bool = false
-    public var result: Option<Ty> = None
-    public var diags: DiagnosticCache = DiagnosticCache()
-    public var targets: TargetCache = TargetCache()
-    public init() {}
+    public var successful: Bool
+    public var result: Option<Ty>
+    public var diags: DiagnosticCache
+    public var targets: TargetCache
+
+    public init(successful: Bool, result: Option<Ty>, diags: DiagnosticCache, targets: TargetCache) {
+        this.successful = successful
+        this.result = result
+        this.diags = diags
+        this.targets = targets
+    }
 }
 
 public class CacheKey <: Hashable & Equatable<CacheKey> {

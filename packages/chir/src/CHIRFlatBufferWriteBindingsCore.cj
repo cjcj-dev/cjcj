@@ -1021,7 +1021,7 @@ class StructDefBuilder {
 
     public init(builder: FlatBufferBuilder) {
         this.builder = builder
-        builder.StartTable(2)
+        builder.StartTable(4)
     }
 
     public func add_base(base: FlatBufferOffset): Unit {
@@ -1032,15 +1032,26 @@ class StructDefBuilder {
         builder.AddBool(1, isCStruct, defaultValue: false)
     }
 
+    public func add_alignment(alignment: Int64): Unit {
+        builder.AddI64(2, alignment, defaultValue: 0)
+    }
+
+    public func add_isPacked(isPacked: Bool): Unit {
+        builder.AddBool(3, isPacked, defaultValue: false)
+    }
+
     public func Finish(): FlatBufferOffset {
         return builder.EndTable()
     }
 }
 
-func CreateStructDef(builder: FlatBufferBuilder, base: FlatBufferOffset, isCStruct: Bool): FlatBufferOffset {
+func CreateStructDef(builder: FlatBufferBuilder, base: FlatBufferOffset, isCStruct: Bool,
+    alignment: Int64, isPacked: Bool): FlatBufferOffset {
     let tableBuilder = StructDefBuilder(builder)
     tableBuilder.add_base(base)
     tableBuilder.add_isCStruct(isCStruct)
+    tableBuilder.add_alignment(alignment)
+    tableBuilder.add_isPacked(isPacked)
     return tableBuilder.Finish()
 }
 

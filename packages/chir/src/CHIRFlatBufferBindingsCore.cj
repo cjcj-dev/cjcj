@@ -829,11 +829,21 @@ class PackageFormat_StructDef <: Table {
         return GetField<Bool>(CHIRFB_STRUCT_DEF_VT_ISCSTRUCT, false)
     }
 
+    func GetAlignment(): Int64 {
+        return GetField<Int64>(CHIRFB_STRUCT_DEF_VT_ALIGNMENT, 0)
+    }
+
+    func GetIsPacked(): Bool {
+        return GetField<Bool>(CHIRFB_STRUCT_DEF_VT_ISPACKED, false)
+    }
+
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, CHIRFB_STRUCT_DEF_VT_BASE) &&
             verifier.VerifyTable(GetPointer(CHIRFB_STRUCT_DEF_VT_BASE), {tablePos: Int64, active: VerifierTemplate => PackageFormat_CustomTypeDef(data, tablePos).Verify(active)}) &&
             VerifyField<Bool>(verifier, CHIRFB_STRUCT_DEF_VT_ISCSTRUCT, 1) &&
+            VerifyField<Int64>(verifier, CHIRFB_STRUCT_DEF_VT_ALIGNMENT, 8) &&
+            VerifyField<Bool>(verifier, CHIRFB_STRUCT_DEF_VT_ISPACKED, 1) &&
             verifier.EndTable()
     }
 }

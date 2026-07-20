@@ -3584,6 +3584,9 @@ public class FaithfulAST2CHIR {
         if (createdPackageInit && suffix != "_literal") {
             AddGenericInstantiatedInit(initBlock)
         }
+        if (suffix != "_literal") {
+            InsertAnnoFactoryInitsIntoPackageInit(packageInit)
+        }
         for (fileVars in nodeInitOrder) {
             if (suffix == "_literal") {
                 if (fileVars.vars.isEmpty()) {
@@ -3765,6 +3768,32 @@ public class FaithfulAST2CHIR {
         let trans = CreateTranslator()
         trans.SetCurrentBlock(block)
         let _ = trans.CreateAndAppendGVInitFuncCall(initFn)
+    }
+
+    private func InsertAnnoFactoryInitsIntoPackageInit(packageInit: Function): Unit {
+        if (initFuncsForAnnoFactory.isEmpty()) {
+            return
+        }
+        let block = GetBlockWithInitializers(packageInit)
+        var insertAfter: Option<Expression> = None
+        for (expression in block.GetExpressions()) {
+            if (let Some(intrinsic) <- (expression as Intrinsic)) {
+                if (intrinsic.GetIntrinsicKind() == IntrinsicKind.PREINITIALIZE) {
+                    insertAfter = Some(expression)
+                    break
+                }
+            }
+        }
+        let trans = CreateTranslator()
+        trans.SetCurrentBlock(block)
+        var previous = insertAfter ??
+            throw IllegalStateException("faithful AST2CHIR package init has no preinitialize intrinsic")
+        for (initFunc in initFuncsForAnnoFactory) {
+            let initCallExpr = FindApplyIn(block, initFunc) ??
+                (trans.CreateAndAppendGVInitFuncCall(initFunc) as Apply).getOrThrow()
+            initCallExpr.MoveAfter(previous)
+            previous = initCallExpr
+        }
     }
 
     private func FindApplyIn(block: Block, applyCallee: Function): Option<Apply> {
@@ -4938,6 +4967,7 @@ public class FaithfulAST2CHIR {
         if (decl.TestAttr(AstAttribute.C)) {
             if (let Some(structDef) <- (target as StructDef)) {
                 structDef.SetCStruct(true)
+                ApplyCStructLayoutAttrs(structDef, decl)
             }
         }
         if (let Some(customTypeDef) <- (target as CustomTypeDef)) {
@@ -4946,6 +4976,32 @@ public class FaithfulAST2CHIR {
             } else if (AstIsMirror(decl)) {
                 customTypeDef.EnableAttr(Attribute.JAVA_MIRROR)
             }
+        }
+    }
+
+    private func ApplyCStructLayoutAttrs(structDef: StructDef, decl: AstDecl): Unit {
+        for (annotation in decl.annotations) {
+            if (annotation.kind != AstAnnotationKind.C) { continue }
+            for (arg in annotation.args) {
+                let expr = arg.expr ?? continue
+                let name = arg.name.Val()
+                if (name == "align" || name == "packed") {
+                    let literal = (expr as AstLitConstExpr) ?? continue
+                    literal.constNumValue.asInt.InitIntLiteral(literal.stringValue, AstTypeKind.TYPE_INT64)
+                    let value = literal.constNumValue.asInt.`Int64`()
+                    if (let Some(current) <- structDef.GetAlignment()) {
+                        structDef.SetAlignment(Some(if (value > current) { value } else { current }))
+                    } else {
+                        structDef.SetAlignment(Some(value))
+                    }
+                    if (name == "packed") { structDef.SetPacked(true) }
+                } else if (name.isEmpty()) {
+                    if (let Some(refExpr) <- (expr as AstRefExpr)) {
+                        if (refExpr.ref.identifier.Val() == "packed") { structDef.SetPacked(true) }
+                    }
+                }
+            }
+            return
         }
     }
 

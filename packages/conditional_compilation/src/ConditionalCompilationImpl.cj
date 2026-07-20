@@ -9,11 +9,9 @@ import cjcj::option.BackendToString
 import cjcj::option.BackendType
 import cjcj::option.OSType
 import cjcj::option.TripleInfo
-import cjcj::utils.{CJC_ASSERT, DynamicCast, EraseIf as UtilsEraseIf}
+import cjcj::utils.{DynamicCast, EraseIf as UtilsEraseIf}
 import std.collection.*
-import std.convert.*
 
-let CJC_VERSION_LENGTH: Int64 = 6
 let BACKEND_STR: String = "backend"
 let ARCH_STR: String = "arch"
 let OS_STR: String = "os"
@@ -23,58 +21,41 @@ let TEST_STR: String = "test"
 let ENV_STR: String = "env"
 let CONDITION_TRUE: String = "1"
 
-class JudgeConditionInfo {
-    public let conditionStr: String
-    public let rightValue: String
-    public let relatedInfo: Option<String>
+private class VersionInfo {
+    public var major: UInt32 = 0u32
+    public var minor: UInt32 = 0u32
+    public var patch: UInt32 = 0u32
+    public var isValid: Bool = false
 
-    public init(conditionStr: String, rightValue: String, relatedInfo: Option<String>) {
-        this.conditionStr = conditionStr
-        this.rightValue = rightValue
-        this.relatedInfo = relatedInfo
-    }
-}
+    public init() {}
 
-class UnaryConditionInfo {
-    public let relatedInfo: String
-    public init(relatedInfo: String) {
-        this.relatedInfo = relatedInfo
+    public init(major: UInt32, minor: UInt32, patch: UInt32) {
+        this.major = major
+        this.minor = minor
+        this.patch = patch
+        isValid = true
     }
 }
 
 class ConditionalCompilationImpl {
     private var backendType: BackendType = BackendType.CJNATIVE
     private var triple: TripleInfo = TripleInfo()
-    private var cjcVersion: UInt64 = 0u64
+    private var cjcVersionInfo: VersionInfo = VersionInfo()
     private var debug: Bool = false
     private var test: Bool = false
     private let diag: BasicDiagnosticEngine
     private let passedCondition: HashMap<String, String> = HashMap<String, String>()
-    private let builtinConditionCache: HashMap<String, String> = HashMap<String, String>()
-    private let judgeConditionCache: HashMap<String, Bool> = HashMap<String, Bool>()
-    private let conditionExprCache: HashMap<String, Bool> = HashMap<String, Bool>()
 
     public init(config: ConditionalCompilationConfig) {
         backendType = config.backendType
         triple = CopyTripleInfo(config.target)
-        cjcVersion = GetVersionUInt(config.cjcVersion)
+        cjcVersionInfo = ParseVersion(config.cjcVersion)
         debug = config.debug
         test = config.test
         diag = config.diag
         for ((key, value) in config.passedCondition) {
             passedCondition.add(key, value)
         }
-        InitBuiltinConditionCache()
-    }
-
-    private func InitBuiltinConditionCache(): Unit {
-        builtinConditionCache.add(ARCH_STR, GetArchType())
-        builtinConditionCache.add(BACKEND_STR, GetBackendType())
-        builtinConditionCache.add(CJC_VERSION_STR, GetCJCVersion())
-        builtinConditionCache.add(DEBUG_STR, GetDebug())
-        builtinConditionCache.add(ENV_STR, GetEnv())
-        builtinConditionCache.add(TEST_STR, GetTest())
-        builtinConditionCache.add(OS_STR, GetOSType())
     }
 
     private func GetBackendType(): String {
@@ -103,7 +84,8 @@ class ConditionalCompilationImpl {
     }
 
     private func GetCJCVersion(): String {
-        return RefreshVersionStr(cjcVersion.toString())
+        return cjcVersionInfo.major.toString() + "." + cjcVersionInfo.minor.toString() + "." +
+            cjcVersionInfo.patch.toString()
     }
 
     private func GetDebug(): String {
@@ -119,47 +101,14 @@ class ConditionalCompilationImpl {
     }
 
     private func GetRelatedInfo(target: String): Option<String> {
-        if (let Some(value) <- builtinConditionCache.get(target)) {
-            return value
-        }
+        if (target == ARCH_STR) { return Some(GetArchType()) }
+        if (target == BACKEND_STR) { return Some(GetBackendType()) }
+        if (target == CJC_VERSION_STR) { return Some(GetCJCVersion()) }
+        if (target == DEBUG_STR) { return Some(GetDebug()) }
+        if (target == ENV_STR) { return Some(GetEnv()) }
+        if (target == TEST_STR) { return Some(GetTest()) }
+        if (target == OS_STR) { return Some(GetOSType()) }
         return GetUserDefinedInfoByName(target)
-    }
-
-    public func CheckConditionExpr(condition: Expr): Bool {
-        match (condition.astKind) {
-            case ASTKind.BINARY_EXPR =>
-                return CheckBinaryExpr((condition as BinaryExpr).getOrThrow())
-            case ASTKind.UNARY_EXPR =>
-                return CheckUnaryExpr((condition as UnaryExpr).getOrThrow())
-            case ASTKind.REF_EXPR =>
-                return CheckRefExpr((condition as RefExpr).getOrThrow())
-            case ASTKind.PAREN_EXPR =>
-                return CheckParenExpr((condition as ParenExpr).getOrThrow())
-            case _ =>
-                diag.DiagnoseRefactor(
-                    BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin).Emit()
-                return false
-        }
-    }
-
-    public func EvalCachedConditionExpr(condition: Expr): Bool {
-        let cacheKey = MakeConditionExprCacheKey(condition)
-        if (let Some(key) <- cacheKey) {
-            if (let Some(cached) <- conditionExprCache.get(key)) {
-                return cached
-            }
-        }
-        let beforeErrCnt = diag.GetErrorCount()
-        if (!CheckConditionExpr(condition)) {
-            return false
-        }
-        let result = EvalConditionExpr(condition)
-        if (let Some(key) <- cacheKey) {
-            if (beforeErrCnt == diag.GetErrorCount()) {
-                conditionExprCache.add(key, result)
-            }
-        }
-        return result
     }
 
     private func EvalConditionExpr(condition: Expr): Bool {
@@ -191,29 +140,61 @@ class ConditionalCompilationImpl {
     }
 
     private func EvalLogicBinaryExpr(be: BinaryExpr): Bool {
+        let left = EvalConditionExpr(be.leftExpr.getOrThrow())
+        let right = EvalConditionExpr(be.rightExpr.getOrThrow())
         if (be.op == TokenKind.AND) {
-            return EvalConditionExpr(be.leftExpr.getOrThrow()) && EvalConditionExpr(be.rightExpr.getOrThrow())
+            return left && right
         } else {
-            return EvalConditionExpr(be.leftExpr.getOrThrow()) || EvalConditionExpr(be.rightExpr.getOrThrow())
+            return left || right
         }
     }
 
     private func EvalJudgeBinaryExpr(be: BinaryExpr): Bool {
-        let conditionInfo = GetJudgeConditionInfo(be)
-        let cacheKey = MakeJudgeConditionCacheKey(conditionInfo.conditionStr, be.op, conditionInfo.rightValue)
-        if (let Some(cached) <- judgeConditionCache.get(cacheKey)) {
-            return cached
+        if (be.leftExpr.isNone() || be.rightExpr.isNone()) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
+            return false
         }
-        if (let Some(relatedInfo) <- conditionInfo.relatedInfo) {
-            var evalRightValue = conditionInfo.rightValue
-            if (conditionInfo.conditionStr == CJC_VERSION_STR) {
-                evalRightValue = RefreshVersionStr(GetVersionUInt(conditionInfo.rightValue).toString())
+        let leftExpr = be.leftExpr.getOrThrow()
+        let rightExpr = be.rightExpr.getOrThrow()
+        if (leftExpr.astKind != ASTKind.REF_EXPR) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
+            return false
+        }
+        if (rightExpr.astKind != ASTKind.LIT_CONST_EXPR) {
+            diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, rightExpr.begin).Emit()
+            return false
+        }
+        let right = (rightExpr as LitConstExpr).getOrThrow()
+        if (right.kind != LitConstKind.STRING || right.siExpr.isSome()) {
+            diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, rightExpr.begin).Emit()
+            return false
+        }
+        let left = (leftExpr as RefExpr).getOrThrow()
+        let conditionStr = left.ref.identifier.Val()
+        if (!ConditionCheck(conditionStr, be.begin, right.stringValue)) {
+            return false
+        }
+        let relatedInfo = GetRelatedInfo(conditionStr)
+        if (relatedInfo.isNone()) {
+            return false
+        }
+        if (!ConditionSupportsOp(conditionStr, be.op)) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_not_support_op,
+                be.begin, arguments: [conditionStr, TokenKindText(be.op)]).Emit()
+            return false
+        }
+        if (conditionStr == CJC_VERSION_STR) {
+            let rightVersion = ParseVersion(right.stringValue)
+            if (!rightVersion.isValid) {
+                diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.conditional_compilation_not_support_cjc_version_format, be.begin).Emit()
+                return false
             }
-            let evalResult = Eval(be, relatedInfo, evalRightValue)
-            judgeConditionCache.add(cacheKey, evalResult)
-            return evalResult
+            return EvalVersion(be, cjcVersionInfo, rightVersion)
         }
-        return false
+        return Eval(be, relatedInfo.getOrThrow(), right.stringValue)
     }
 
     private func EvalParenExpr(pe: ParenExpr): Bool {
@@ -224,14 +205,36 @@ class ConditionalCompilationImpl {
     }
 
     private func EvalUnaryExpr(ue: UnaryExpr): Bool {
-        if (let Some(info) <- CheckAndGetUnaryConditionInfo(ue)) {
-            return info.relatedInfo != CONDITION_TRUE
+        if (ue.expr.isNone() || ue.expr.getOrThrow().astKind != ASTKind.REF_EXPR) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin).Emit()
+            return false
+        }
+        let conditionExpr = (ue.expr.getOrThrow() as RefExpr).getOrThrow()
+        let name = conditionExpr.ref.identifier.Val()
+        if (name != DEBUG_STR && name != TEST_STR) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin).Emit()
+            return false
+        }
+        if (ue.op != TokenKind.NOT) {
+            let builder = diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin)
+            builder.AddNote("debug and test builtin conditions only support the logic ! operator")
+            builder.Emit()
+            return false
+        }
+        if (let Some(relatedInfo) <- GetRelatedInfo(name)) {
+            return relatedInfo != CONDITION_TRUE
         }
         return false
     }
 
     private func EvalRefExpr(re: RefExpr): Bool {
-        if (let Some(relatedInfo) <- GetDebugOrTestRelatedInfo(re, re.begin)) {
+        let name = re.ref.identifier.Val()
+        if (name != DEBUG_STR && name != TEST_STR) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, re.begin).Emit()
+            return false
+        }
+        if (let Some(relatedInfo) <- GetRelatedInfo(name)) {
             return relatedInfo == CONDITION_TRUE
         }
         return false
@@ -248,133 +251,17 @@ class ConditionalCompilationImpl {
         }
     }
 
-    private func CheckBinaryExpr(be: BinaryExpr): Bool {
-        if (be.leftExpr.isNone() || be.rightExpr.isNone()) {
-            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
-            return false
+    private func EvalVersion(expr: BinaryExpr, left: VersionInfo, right: VersionInfo): Bool {
+        let cmp = CompareVersion(left, right)
+        match (expr.op) {
+            case TokenKind.EQUAL => return cmp == 0
+            case TokenKind.NOTEQ => return cmp != 0
+            case TokenKind.GT => return cmp > 0
+            case TokenKind.LT => return cmp < 0
+            case TokenKind.GE => return cmp >= 0
+            case TokenKind.LE => return cmp <= 0
+            case _ => return false
         }
-        if (IsLogicBinaryExpr(be.op)) {
-            let leftValid = CheckConditionExpr(be.leftExpr.getOrThrow())
-            let rightValid = CheckConditionExpr(be.rightExpr.getOrThrow())
-            return leftValid && rightValid
-        }
-        if (IsJudgeBinaryExpr(be.op) || IsRangeBinaryExpr(be.op)) {
-            return CheckJudgeConditionExpr(be)
-        }
-        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
-        return false
-    }
-
-    private func CheckParenExpr(pe: ParenExpr): Bool {
-        if (let Some(expr) <- pe.expr) {
-            return CheckConditionExpr(expr)
-        }
-        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, pe.begin).Emit()
-        return false
-    }
-
-    private func CheckUnaryExpr(ue: UnaryExpr): Bool {
-        if (let Some(_) <- CheckAndGetUnaryConditionInfo(ue)) {
-            return true
-        }
-        return false
-    }
-
-    private func CheckRefExpr(re: RefExpr): Bool {
-        if (let Some(_) <- GetDebugOrTestRelatedInfo(re, re.begin)) {
-            return true
-        }
-        return false
-    }
-
-    private func CheckJudgeConditionExpr(be: BinaryExpr): Bool {
-        if (let Some(_) <- CheckAndGetJudgeConditionInfo(be)) {
-            return true
-        }
-        return false
-    }
-
-    private func CheckJudgeBinaryExpr(be: BinaryExpr): Bool {
-        if (be.leftExpr.isNone() || be.rightExpr.isNone()) {
-            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
-            return false
-        }
-        let left = be.leftExpr.getOrThrow()
-        let right = be.rightExpr.getOrThrow()
-        if (left.astKind != ASTKind.REF_EXPR) {
-            diag.DiagnoseRefactor(
-                BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
-            return false
-        }
-        if (right.astKind != ASTKind.LIT_CONST_EXPR) {
-            diag.DiagnoseRefactor(
-                BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, right.begin).Emit()
-            return false
-        }
-        let lit = (right as LitConstExpr).getOrThrow()
-        if (lit.kind != LitConstKind.STRING || lit.siExpr.isSome()) {
-            diag.DiagnoseRefactor(
-                BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, right.begin).Emit()
-            return false
-        }
-        return true
-    }
-
-    private func GetJudgeConditionInfo(be: BinaryExpr): JudgeConditionInfo {
-        let right = (be.rightExpr.getOrThrow() as LitConstExpr).getOrThrow()
-        let left = (be.leftExpr.getOrThrow() as RefExpr).getOrThrow()
-        let conditionStr = left.ref.identifier.Val()
-        let rightValue = right.stringValue
-        return JudgeConditionInfo(conditionStr, rightValue, GetRelatedInfo(conditionStr))
-    }
-
-    private func CheckAndGetJudgeConditionInfo(be: BinaryExpr): Option<JudgeConditionInfo> {
-        if (!CheckJudgeBinaryExpr(be)) {
-            return None
-        }
-        let conditionInfo = GetJudgeConditionInfo(be)
-        if (!ConditionCheck(conditionInfo.conditionStr, be.begin, conditionInfo.rightValue)) {
-            return None
-        }
-        if (conditionInfo.relatedInfo.isNone()) {
-            return None
-        }
-        if (!CheckConditionOp(be, conditionInfo.conditionStr)) {
-            return None
-        }
-        return conditionInfo
-    }
-
-    private func CheckAndGetUnaryConditionInfo(ue: UnaryExpr): Option<UnaryConditionInfo> {
-        if (ue.expr.isNone() || ue.expr.getOrThrow().astKind != ASTKind.REF_EXPR) {
-            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin).Emit()
-            return None
-        }
-        if (let Some(conditionExpr) <- (ue.expr.getOrThrow() as RefExpr)) {
-            if (let Some(relatedInfo) <- GetDebugOrTestRelatedInfo(conditionExpr, ue.begin)) {
-                if (ue.op != TokenKind.NOT) {
-                    let builder = diag.DiagnoseRefactor(
-                        BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin)
-                    builder.AddNote("debug and test builtin conditions only support the logic ! operator")
-                    builder.Emit()
-                    return None
-                }
-                return UnaryConditionInfo(relatedInfo)
-            }
-            return None
-        }
-        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin).Emit()
-        return None
-    }
-
-    private func GetDebugOrTestRelatedInfo(re: RefExpr, diagnosePos: Position): Option<String> {
-        let name = re.ref.identifier.Val()
-        if (name != DEBUG_STR && name != TEST_STR) {
-            diag.DiagnoseRefactor(
-                BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, diagnosePos).Emit()
-            return None
-        }
-        return GetRelatedInfo(name)
     }
 
     private func ConditionCheck(conditionStr: String, begin: Position, right: String): Bool {
@@ -393,15 +280,6 @@ class ConditionalCompilationImpl {
         if (conditionStr == CJC_VERSION_STR && !IsCJCVersionLiteral(right)) {
             diag.DiagnoseRefactor(
                 BasicDiagKindRefactor.conditional_compilation_not_support_cjc_version_format, begin).Emit()
-            return false
-        }
-        return true
-    }
-
-    private func CheckConditionOp(be: BinaryExpr, conditionStr: String): Bool {
-        if (!ConditionSupportsOp(conditionStr, be.op)) {
-            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_not_support_op,
-                be.begin, arguments: [conditionStr, TokenKindText(be.op)]).Emit()
             return false
         }
         return true
@@ -486,7 +364,7 @@ class ConditionalCompilationImpl {
                 return false
             }
             if (let Some(condExpr) <- anno.condExpr) {
-                evalResult[0] = EvalCachedConditionExpr(condExpr)
+                evalResult[0] = EvalConditionExpr(condExpr)
             } else {
                 diag.DiagnoseRefactor(
                     BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin).Emit()
@@ -504,7 +382,7 @@ class ConditionalCompilationImpl {
                 return false
             }
             if (let Some(condExpr) <- anno.condExpr) {
-                evalResult[0] = EvalCachedConditionExpr(condExpr)
+                evalResult[0] = EvalConditionExpr(condExpr)
             } else {
                 diag.DiagnoseRefactor(
                     BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin).Emit()
@@ -522,7 +400,7 @@ class ConditionalCompilationImpl {
                 return false
             }
             if (let Some(condExpr) <- anno.condExpr) {
-                evalResult[0] = EvalCachedConditionExpr(condExpr)
+                evalResult[0] = EvalConditionExpr(condExpr)
             } else {
                 diag.DiagnoseRefactor(
                     BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin).Emit()
@@ -564,25 +442,77 @@ private func IsCJCVersionLiteral(value: String): Bool {
     return true
 }
 
-private func GetVersionUInt(version: String): UInt64 {
-    var res = ""
-    let digitSize: Int64 = 2
-    for (part in SplitString(version, ".")) {
-        if (part.size == digitSize) {
-            res += part
-        } else if (part.size == 1) {
-            res += "0" + part
-        }
+private func ParseVersionNumber(version: String, begin: Int64, end: Int64): Option<UInt32> {
+    if (begin == end) {
+        return None
     }
-    let iRes = Int64.parse(res)
-    CJC_ASSERT(iRes >= 0)
-    return UInt64(iRes)
+    var value = 0u32
+    var idx = begin
+    while (idx < end) {
+        value = value * 10u32 + UInt32(version[idx] - b'0')
+        if (value > 99u32) {
+            return None
+        }
+        idx++
+    }
+    return Some(value)
 }
 
-private func RefreshVersionStr(version: String): String {
-    var out = version
-    while (out.size < CJC_VERSION_LENGTH) {
-        out = "0" + out
+// Parse the first major.minor.patch sequence and ignore a following prerelease suffix.
+private func ParseVersion(version: String): VersionInfo {
+    var searchBegin: Int64 = 0
+    while (searchBegin < version.size) {
+        while (searchBegin < version.size && (version[searchBegin] < b'0' || version[searchBegin] > b'9')) {
+            searchBegin++
+        }
+        let majorBegin = searchBegin
+        var majorEnd = majorBegin
+        while (majorEnd < version.size && version[majorEnd] >= b'0' && version[majorEnd] <= b'9') {
+            majorEnd++
+        }
+        if (majorEnd >= version.size || version[majorEnd] != b'.') {
+            searchBegin = majorEnd
+            continue
+        }
+        let minorBegin = majorEnd + 1
+        var minorEnd = minorBegin
+        while (minorEnd < version.size && version[minorEnd] >= b'0' && version[minorEnd] <= b'9') {
+            minorEnd++
+        }
+        if (minorBegin == minorEnd || minorEnd >= version.size || version[minorEnd] != b'.') {
+            searchBegin = majorEnd + 1
+            continue
+        }
+        let patchBegin = minorEnd + 1
+        var patchEnd = patchBegin
+        while (patchEnd < version.size && version[patchEnd] >= b'0' && version[patchEnd] <= b'9') {
+            patchEnd++
+        }
+        if (patchBegin == patchEnd) {
+            searchBegin = minorEnd + 1
+            continue
+        }
+        if (let Some(major) <- ParseVersionNumber(version, majorBegin, majorEnd)) {
+            if (let Some(minor) <- ParseVersionNumber(version, minorBegin, minorEnd)) {
+                if (let Some(patch) <- ParseVersionNumber(version, patchBegin, patchEnd)) {
+                    return VersionInfo(major, minor, patch)
+                }
+            }
+        }
+        return VersionInfo()
     }
-    return out
+    return VersionInfo()
+}
+
+private func CompareVersion(left: VersionInfo, right: VersionInfo): Int64 {
+    if (left.major != right.major) {
+        return if (left.major < right.major) { -1 } else { 1 }
+    }
+    if (left.minor != right.minor) {
+        return if (left.minor < right.minor) { -1 } else { 1 }
+    }
+    if (left.patch != right.patch) {
+        return if (left.patch < right.patch) { -1 } else { 1 }
+    }
+    return 0
 }
