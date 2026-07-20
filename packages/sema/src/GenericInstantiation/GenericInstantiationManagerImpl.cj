@@ -388,10 +388,6 @@ class GenericInstantiationManagerImpl {
         HashMap<String, ArrayList<GenericInstantiationRecord>>()
     private let instantiatedDeclsMap: HashMap<Int64, ArrayList<Decl>> = HashMap<Int64, ArrayList<Decl>>()
     let abstractFuncToDeclMap: AbstractFuncMap = AbstractFuncMap()
-    private let inheritedMemberFuncsCache: HashMap<Int64, ArrayList<FuncDecl>> =
-        HashMap<Int64, ArrayList<FuncDecl>>()
-    private let inheritedInterfacesCache: HashMap<Int64, ArrayList<InheritableDecl>> =
-        HashMap<Int64, ArrayList<InheritableDecl>>()
     private let membersIndexMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let skippedMemberOffsets: HashMap<Int64, ArrayList<Int64>> = HashMap<Int64, ArrayList<Int64>>()
     private let structContext: ArrayList<Decl> = ArrayList<Decl>()
@@ -594,9 +590,6 @@ class GenericInstantiationManagerImpl {
     }
 
     private func GetInheritedMemberFuncs(ty: Ty): ArrayList<FuncDecl> {
-        if (let Some(cached) <- inheritedMemberFuncsCache.get(ty.objectId)) {
-            return cached
-        }
         var funcs = ArrayList<FuncDecl>()
         if (let Some(baseDecl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
             funcs = CollectInheritedMembers(ty, baseDecl)
@@ -611,7 +604,6 @@ class GenericInstantiationManagerImpl {
             }
             CollectDeclMemberFuncs(extendDecl, funcs, funcSet)
         }
-        inheritedMemberFuncsCache[ty.objectId] = funcs
         return funcs
     }
 
@@ -638,9 +630,6 @@ class GenericInstantiationManagerImpl {
     }
 
     private func GetInheritedInterfaces(ty: Ty): ArrayList<InheritableDecl> {
-        if (let Some(cached) <- inheritedInterfacesCache.get(ty.objectId)) {
-            return cached
-        }
         let inheritableType = ArrayList<InheritableDecl>()
         let inheritableTypeSet = HashSet<Int64>()
         for (extendDecl in GetAllRelatedExtendsByTy(ci.typeManager, ty)) {
@@ -668,7 +657,6 @@ class GenericInstantiationManagerImpl {
                 }
             }
         }
-        inheritedInterfacesCache[ty.objectId] = inheritableType
         return inheritableType
     }
 
