@@ -1,0 +1,263 @@
+name: Build Cangjie SDK
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Global tag/branch applied to all four upstream repos (default = dev)."
+        required: false
+        default: "dev"
+      build_type:
+        description: "Build type."
+        required: true
+        default: "relwithdebinfo"
+        type: choice
+        options:
+          - release
+          - debug
+          - relwithdebinfo
+      compiler_source:
+        description: "Override compiler source: https://host/owner/repo.git:branch (branch optional)."
+        required: false
+        default: ""
+      runtime_source:
+        description: "Override runtime source: https://host/owner/repo.git:branch (branch optional)."
+        required: false
+        default: ""
+      tools_source:
+        description: "Override tools source: https://host/owner/repo.git:branch (branch optional)."
+        required: false
+        default: ""
+      stdx_source:
+        description: "Override stdx source: https://host/owner/repo.git:branch (branch optional)."
+        required: false
+        default: ""
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+  actions: write   # required by sccache GHA cache backend
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint-and-test:
+    name: Lint & test (Python harness)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+
+      - name: Install dev dependencies
+        run: uv sync --frozen
+
+      - name: Install shell tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          go install mvdan.cc/sh/v3/cmd/shfmt@v3.11.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: Shell lint
+        run: shellcheck .github/scripts/*.sh
+
+      - name: Shell format
+        run: shfmt -d .github/scripts
+
+      - name: ty
+        run: uv run ty check
+
+      - name: Pyright
+        run: uv run pyright
+
+      - name: Pytest
+        run: uv run pytest
+
+  build-sdk:
+    name: Build SDK (${{ matrix.target }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - linux-x64
+          - windows-x64
+
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/buildtools
+      # Multi-level sccache: disk (L0, intra-job) + GitHub Actions cache (L1, inter-job).
+      # See https://github.com/mozilla/sccache/blob/main/docs/MultiLevel.md
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
+      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"
+      SCCACHE_DIR: ${{ github.workspace }}/.sccache
+      SCCACHE_CACHE_SIZE: "5G"
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+
+      - name: Install Python harness dependencies
+        run: uv sync --frozen
+
+      - name: Install Ubuntu system packages
+        run: uv run cangjie-build install-system-deps
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+      - name: Compute toolchain cache key
+        id: tc-key
+        run: |
+          set -euo pipefail
+          echo "key=$(.github/scripts/toolchain-cache-key.sh ${{ matrix.target }})" >> "$GITHUB_OUTPUT"
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            echo "path=${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=${{ env.CANGJIE_BUILD_ROOT }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore toolchain cache
+        id: tc-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ steps.tc-key.outputs.path }}
+          key: ${{ steps.tc-key.outputs.key }}
+
+      - name: Build static libs (linux-x64)
+        if: matrix.target == 'linux-x64' && steps.tc-cache.outputs.cache-hit != 'true'
+        run: uv run cangjie-build --target ${{ matrix.target }} install-static-libs
+
+      - name: Build MinGW toolchain (windows-x64)
+        if: matrix.target == 'windows-x64' && steps.tc-cache.outputs.cache-hit != 'true'
+        # mingw.py passes -DLLVM_USE_LINKER=lld for the host LLVM bootstrap
+        # when apt's 'lld' package is installed (it is — see system_deps.py).
+        run: uv run cangjie-build --target ${{ matrix.target }} install-mingw
+
+      # Save the toolchain cache as soon as it's built — independent of
+      # whether subsequent build stages succeed. Without this, a Cangjie
+      # compile failure later would lose the 30-60 min of toolchain work.
+      - name: Save toolchain cache
+        if: always() && steps.tc-cache.outputs.cache-hit != 'true' && hashFiles(format('{0}/**', steps.tc-key.outputs.path)) != ''
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ steps.tc-key.outputs.path }}
+          key: ${{ steps.tc-key.outputs.key }}
+
+      - name: Resolve effective Cangjie version
+        id: cjver
+        # Defer the normalisation to cangjie-build's print-version subcommand
+        # so the artifact-name glob below uses the exact same SemVer the
+        # Python harness will bake into the produced filenames (no drift
+        # between shell-side and Python-side rules).
+        run: |
+          set -euo pipefail
+          value=$(uv run cangjie-build --cangjie-version "${{ inputs.tag }}" print-version)
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch Cangjie source repositories
+        env:
+          TAG: ${{ inputs.tag }}
+          COMPILER_SOURCE: ${{ inputs.compiler_source }}
+          RUNTIME_SOURCE: ${{ inputs.runtime_source }}
+          TOOLS_SOURCE: ${{ inputs.tools_source }}
+          STDX_SOURCE: ${{ inputs.stdx_source }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "$TAG" ]]; then args+=(--tag "$TAG"); fi
+          mapfile -t override_args < <(.github/scripts/build-fetch-args.sh)
+          args+=("${override_args[@]}")
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            fetch "${args[@]}"
+
+      # Stages are split into separate steps so each gets its own log group
+      # in the GH Actions UI — a single combined log for all five stages
+      # crosses the size threshold where the live-log viewer fails to load.
+      - name: Build compiler
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build compiler
+
+      - name: Build runtime
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build runtime
+
+      - name: Build stdlib
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build stdlib
+
+      - name: Build stdx
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build stdx
+
+      - name: Build tools
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build tools
+
+      - name: Package SDK
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            package
+
+      - name: Verify SDK
+        run: |
+          uv run cangjie-build \
+            --target ${{ matrix.target }} \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            verify
+
+      - name: Upload SDK + STDX artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cangjie-${{ matrix.target }}-${{ steps.cjver.outputs.value }}
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-*-${{ matrix.target }}-${{ steps.cjver.outputs.value }}*.*
+          if-no-files-found: error

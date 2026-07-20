@@ -1,0 +1,354 @@
+name: Build Cangjie SDK on GCP VM
+
+# Spin up an ephemeral Google Compute Engine VM, register it as a just-in-time
+# GitHub self-hosted runner, run the Cangjie windows-x64 cross build there, then
+# delete the VM and force-remove the runner registration.
+#
+# Required repo secrets:
+#   GCP_WORKLOAD_IDENTITY_PROVIDER - Workload Identity provider resource name.
+#   GCP_SERVICE_ACCOUNT            - Service account that may create/delete the VM.
+#   RUNNER_REGISTRATION_PAT        - Fine-grained PAT or GitHub App token with
+#                                    repo "Administration: Write".
+#
+# The VM writes sccache objects to the GCS bucket selected by the workflow
+# input. The default bucket is gs://default-490702-cangjie-sccache.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Global Cangjie tag/branch (default = dev)."
+        required: false
+        default: "dev"
+      build_type:
+        description: "Build type."
+        required: true
+        default: "relwithdebinfo"
+        type: choice
+        options:
+          - release
+          - debug
+          - relwithdebinfo
+      compiler_source:
+        description: "Override compiler source: https://host/owner/repo.git:branch (branch optional)."
+        required: false
+        default: ""
+      runtime_source:
+        description: "Override runtime source: https://host/owner/repo.git:branch (branch optional)."
+        required: false
+        default: ""
+      tools_source:
+        description: "Override tools source: https://host/owner/repo.git:branch (branch optional)."
+        required: false
+        default: ""
+      stdx_source:
+        description: "Override stdx source: https://host/owner/repo.git:branch (branch optional)."
+        required: false
+        default: ""
+      machine_type:
+        description: "GCE machine type."
+        required: true
+        default: "t2d-standard-16"
+      vm_region:
+        description: "GCE region."
+        required: true
+        default: "asia-east1"
+      vm_zones:
+        description: "Space-separated zone suffixes or full zone names. First allocation wins."
+        required: true
+        default: "a b c"
+      boot_disk_size_gb:
+        description: "Runner boot disk size in GB."
+        required: true
+        default: "256"
+      sccache_gcs_bucket:
+        description: "GCS bucket used by sccache."
+        required: true
+        default: "default-490702-cangjie-sccache"
+
+permissions:
+  id-token: write
+  contents: read
+  actions: write    # required by actions/cache/save for the toolchain cache
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GCP_PROJECT_ID: default-490702
+  INSTANCE_NAME: cangjie-${{ github.run_id }}-${{ github.run_attempt }}
+  RUNNER_LABEL: cangjie-${{ github.run_id }}-${{ github.run_attempt }}
+  RUNNER_VERSION: "2.334.0"
+
+jobs:
+  provision:
+    name: Provision ephemeral GCP VM
+    runs-on: ubuntu-22.04
+    outputs:
+      runner_label: ${{ steps.vm.outputs.runner_label }}
+      instance_name: ${{ steps.vm.outputs.instance_name }}
+      region: ${{ steps.vm.outputs.region }}
+      zone: ${{ steps.vm.outputs.zone }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Generate JIT runner config
+        id: jit
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_REGISTRATION_PAT }}
+        run: |
+          set -euo pipefail
+          jit=$(.github/scripts/generate-jit.sh "${{ github.repository }}" "$RUNNER_LABEL")
+          echo "::add-mask::$jit"
+          {
+            echo 'jit<<__JIT_EOF__'
+            echo "$jit"
+            echo '__JIT_EOF__'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Render cloud-init
+        env:
+          JIT: ${{ steps.jit.outputs.jit }}
+        run: |
+          .github/scripts/render-cloud-init.sh \
+            .github/cloud-init/runner.template.yml \
+            cloud-init.yml
+
+      - name: Provision VM
+        id: vm
+        env:
+          INSTANCE_NAME: ${{ env.INSTANCE_NAME }}
+          RUNNER_LABEL: ${{ env.RUNNER_LABEL }}
+          REGION: ${{ inputs.vm_region }}
+          ZONES: ${{ inputs.vm_zones }}
+          MACHINE_TYPE: ${{ inputs.machine_type }}
+          BOOT_DISK_SIZE_GB: ${{ inputs.boot_disk_size_gb }}
+          CLOUD_INIT: cloud-init.yml
+        run: bash .github/scripts/gcp-provision-vm.sh | tee -a "$GITHUB_OUTPUT"
+
+      - name: Wait for runner registration
+        id: wait-runner
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_REGISTRATION_PAT }}
+        run: .github/scripts/wait-for-runner.sh "${{ github.repository }}" "$RUNNER_LABEL" 900
+
+      - name: Dump serial console on runner-registration timeout
+        if: failure() && steps.wait-runner.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          gcloud compute instances get-serial-port-output "${{ steps.vm.outputs.instance_name }}" \
+            --zone "${{ steps.vm.outputs.zone }}" \
+            --port 1 \
+            | tail -240
+
+  build:
+    name: Build SDK (windows-x64)
+    needs: provision
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - ${{ needs.provision.outputs.runner_label }}
+    timeout-minutes: 240
+    env:
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/buildtools
+      # Single-tier GCS backend. We deliberately do NOT set SCCACHE_DIR /
+      # SCCACHE_MULTILEVEL_CHAIN: with a local disk L0, sccache writes the
+      # GCS layer asynchronously via tokio::spawn, decoupled from any client
+      # connection. When the build process exits, the VM is torn down before
+      # the spawned uploads drain — past runs lost ~50% of writes that way
+      # (12118 misses on cold run produced only 5815 GCS objects). Going
+      # single-tier makes uploads synchronous on the client path, so each
+      # compile blocks until its cache entry is durably in GCS.
+      #
+      # Side effect: this changes use_preprocessor_cache_mode from true
+      # (multilevel auto-enables it) to false (direct mode). Cache keys are
+      # incompatible across modes, so the existing ~9k GCS objects under the
+      # cangjie-build/ prefix are dead weight after this change. Consider
+      # setting a 30-day lifecycle rule on the bucket; sccache itself never
+      # evicts from GCS.
+      SCCACHE_GCS_BUCKET: ${{ inputs.sccache_gcs_bucket }}
+      SCCACHE_GCS_KEY_PREFIX: cangjie-build
+      SCCACHE_GCS_RW_MODE: READ_WRITE
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: false
+
+      - name: Install Python harness dependencies
+        run: uv sync --frozen
+
+      - name: Install Ubuntu system packages
+        run: uv run cangjie-build install-system-deps
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+      - name: Compute toolchain cache key
+        id: tc-key
+        run: |
+          set -euo pipefail
+          echo "key=$(.github/scripts/toolchain-cache-key.sh windows-x64)" >> "$GITHUB_OUTPUT"
+          echo "path=${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64" >> "$GITHUB_OUTPUT"
+
+      - name: Restore toolchain cache
+        id: tc-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ steps.tc-key.outputs.path }}
+          key: ${{ steps.tc-key.outputs.key }}
+
+      - name: Build MinGW toolchain
+        if: steps.tc-cache.outputs.cache-hit != 'true'
+        run: uv run cangjie-build --target windows-x64 install-mingw
+
+      - name: Save toolchain cache
+        if: always() && steps.tc-cache.outputs.cache-hit != 'true' && hashFiles(format('{0}/llvm-mingw-w64/bin/x86_64-w64-mingw32-clang', env.CANGJIE_BUILD_ROOT)) != ''
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ steps.tc-key.outputs.path }}
+          key: ${{ steps.tc-key.outputs.key }}
+
+      - name: Resolve effective Cangjie version
+        id: cjver
+        # Defer the normalisation to cangjie-build's print-version subcommand
+        # so the artifact-name glob below uses the exact same SemVer the
+        # Python harness will bake into the produced filenames (no drift
+        # between shell-side and Python-side rules).
+        run: |
+          set -euo pipefail
+          value=$(uv run cangjie-build --cangjie-version "${{ inputs.tag }}" print-version)
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch Cangjie source repositories
+        env:
+          TAG: ${{ inputs.tag }}
+          COMPILER_SOURCE: ${{ inputs.compiler_source }}
+          RUNTIME_SOURCE: ${{ inputs.runtime_source }}
+          TOOLS_SOURCE: ${{ inputs.tools_source }}
+          STDX_SOURCE: ${{ inputs.stdx_source }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "$TAG" ]]; then args+=(--tag "$TAG"); fi
+          mapfile -t override_args < <(.github/scripts/build-fetch-args.sh)
+          args+=("${override_args[@]}")
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            fetch "${args[@]}"
+
+      - name: Build compiler
+        run: |
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build compiler
+
+      - name: Build runtime
+        run: |
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build runtime
+
+      - name: Build stdlib
+        run: |
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build stdlib
+
+      - name: Build stdx
+        run: |
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build stdx
+
+      - name: Build tools
+        run: |
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            build tools
+
+      - name: Package SDK
+        run: |
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            package
+
+      - name: Verify SDK
+        run: |
+          uv run cangjie-build \
+            --target windows-x64 \
+            --build-type ${{ inputs.build_type }} \
+            --cangjie-version "${{ steps.cjver.outputs.value }}" \
+            verify
+
+      - name: Upload SDK + STDX artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cangjie-windows-x64-${{ steps.cjver.outputs.value }}
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-*-windows-x64-${{ steps.cjver.outputs.value }}*.*
+          if-no-files-found: error
+
+      # Belt-and-suspenders flush: even on single-tier GCS the server may
+      # have a small backlog of in-flight uploads (sccache uses a worker
+      # pool). --stop-server triggers the graceful shutdown path which waits
+      # up to 10s for SccacheService instances to drain before dropping the
+      # tokio runtime. Print stats first because mozilla-actions/sccache-action's
+      # post hook will spawn a fresh empty server after this and report zeros.
+      - name: Flush sccache and stop server
+        if: always()
+        run: |
+          set +e
+          "${SCCACHE_PATH:-sccache}" --show-stats || true
+          "${SCCACHE_PATH:-sccache}" --stop-server || true
+
+  cleanup:
+    name: Tear down VM
+    needs: [provision, build]
+    if: always() && needs.provision.outputs.instance_name != ''
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Tear down GCP VM + runner registration
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_REGISTRATION_PAT }}
+        run: |
+          bash .github/scripts/gcp-teardown.sh \
+            "${{ github.repository }}" \
+            "${{ needs.provision.outputs.runner_label }}" \
+            "${{ needs.provision.outputs.instance_name }}" \
+            "${{ needs.provision.outputs.zone }}"
