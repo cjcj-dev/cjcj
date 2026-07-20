@@ -148,12 +148,12 @@ public func GetLLVMStructType(cgMod: CGModule, elementTypes: ArrayList<Type>, na
     return layoutType
 }
 
-public func SetStructTypeBody(structType: LLVMTypeRef, body: ArrayList<LLVMTypeRef>): Unit {
+public func SetStructTypeBody(structType: LLVMTypeRef, body: ArrayList<LLVMTypeRef>, packed!: Bool = false): Unit {
     if (structType.isNull()) {
         return
     }
     if (body.isEmpty()) {
-        unsafe { LLVMStructSetBody(structType, CPointer<LLVMTypeRef>(), 0u32, 0) }
+        unsafe { LLVMStructSetBody(structType, CPointer<LLVMTypeRef>(), 0u32, if (packed) { 1 } else { 0 }) }
         return
     }
     try (bodyPtr = LibC.malloc<LLVMTypeRef>(count: body.size).asResource()) {
@@ -162,7 +162,7 @@ public func SetStructTypeBody(structType: LLVMTypeRef, body: ArrayList<LLVMTypeR
             unsafe { (bodyPtr.value + idx).write(body[idx]) }
             idx++
         }
-        unsafe { LLVMStructSetBody(structType, bodyPtr.value, UInt32(body.size), 0) }
+        unsafe { LLVMStructSetBody(structType, bodyPtr.value, UInt32(body.size), if (packed) { 1 } else { 0 }) }
     }
 }
 
@@ -221,7 +221,8 @@ public func GetTypeSize(cgMod: CGModule, chirTy: Type): UInt64 {
     if (chirTy.IsUnit() || chirTy.IsNothing()) {
         return 0u64
     }
-    return GetTypeSize(cgMod, CGType.GetOrCreate(cgMod, chirTy).GetLLVMType())
+    let cgType = CGType.GetOrCreate(cgMod, chirTy)
+    return if (let Some(size) <- cgType.GetSize()) { UInt64(size) } else { GetTypeSize(cgMod, cgType.GetLLVMType()) }
 }
 
 public func GetTypeAlignment(cgMod: CGModule, llvmType: LLVMTypeRef): UInt64 {
@@ -232,7 +233,10 @@ public func GetTypeAlignment(cgMod: CGModule, chirTy: Type): UInt64 {
     if (chirTy.IsUnit() || chirTy.IsNothing()) {
         return 1u64
     }
-    return GetTypeAlignment(cgMod, CGType.GetOrCreate(cgMod, chirTy).GetLLVMType())
+    let cgType = CGType.GetOrCreate(cgMod, chirTy)
+    return if (let Some(align) <- cgType.GetAlign()) { UInt64(align) } else {
+        GetTypeAlignment(cgMod, cgType.GetLLVMType())
+    }
 }
 
 public func IsZeroSizedTypeInC(cgMod: CGModule, chirTy: Type): Bool {
