@@ -68,19 +68,6 @@ public class AST2CHIRNodeMap<T> {
 
 }
 
-private func FaithfulAstDeclHash(decl: AstDecl): Int64 {
-    return decl.objectId
-}
-
-private func SameFaithfulAstDecl(left: AstDecl, right: AstDecl): Bool {
-    // Decls are matched by stable object identity, faithfully mirroring C++ AST2CHIRNodeMap's
-    // std::unordered_map<const AST::Node*, T*> (include/cangjie/CHIR/AST2CHIR/AST2CHIRNodeMap.h:66).
-    // A structural (kind+name+position) key wrongly merges distinct COMPILER_ADD desugar temporaries
-    // that share an identifier and a (0,0,0) position (e.g. the `v-compiler` temps from `as`-cast
-    // desugar), corrupting the value table.
-    return left == right
-}
-
 public class FaithfulAST2CHIRNodeMapEntry {
     public let decl: AstDecl
     public var value: Value
@@ -92,43 +79,19 @@ public class FaithfulAST2CHIRNodeMapEntry {
 }
 
 public class FaithfulAST2CHIRNodeMap {
-    private let values: ArrayList<FaithfulAST2CHIRNodeMapEntry> = ArrayList<FaithfulAST2CHIRNodeMapEntry>()
-    private let buckets: HashMap<Int64, ArrayList<FaithfulAST2CHIRNodeMapEntry>> =
-        HashMap<Int64, ArrayList<FaithfulAST2CHIRNodeMapEntry>>()
+    private let cache: HashMap<AstDecl, Value> = HashMap<AstDecl, Value>()
 
     public init() {}
 
     public func Set(decl: AstDecl, value: Value): Unit {
-        let key = FaithfulAstDeclHash(decl)
-        if (let Some(bucket) <- buckets.get(key)) {
-            for (entry in bucket) {
-                if (SameFaithfulAstDecl(entry.decl, decl)) {
-                    entry.value = value
-                    return
-                }
-            }
-            let entry = FaithfulAST2CHIRNodeMapEntry(decl, value)
-            bucket.add(entry)
-            values.add(entry)
-            return
+        if (cache.contains(decl)) {
+            throw IllegalStateException("AST2CHIRNodeMap duplicate node: ${ASTKindName(decl.astKind)}")
         }
-        let entry = FaithfulAST2CHIRNodeMapEntry(decl, value)
-        let bucket = ArrayList<FaithfulAST2CHIRNodeMapEntry>()
-        bucket.add(entry)
-        buckets[key] = bucket
-        values.add(entry)
+        cache[decl] = value
     }
 
     public func TryGet(decl: AstDecl): Option<Value> {
-        let key = FaithfulAstDeclHash(decl)
-        if (let Some(bucket) <- buckets.get(key)) {
-            for (entry in bucket) {
-                if (SameFaithfulAstDecl(entry.decl, decl)) {
-                    return entry.value
-                }
-            }
-        }
-        return None
+        return cache.get(decl)
     }
 
     public func Get(decl: AstDecl): Value {
@@ -137,21 +100,13 @@ public class FaithfulAST2CHIRNodeMap {
     }
 
     public func Has(decl: AstDecl): Bool {
-        let key = FaithfulAstDeclHash(decl)
-        if (let Some(bucket) <- buckets.get(key)) {
-            for (entry in bucket) {
-                if (SameFaithfulAstDecl(entry.decl, decl)) {
-                    return true
-                }
-            }
-        }
-        return false
+        return cache.contains(decl)
     }
 
     public func Entries(): ArrayList<FaithfulAST2CHIRNodeMapEntry> {
         let out = ArrayList<FaithfulAST2CHIRNodeMapEntry>()
-        for (entry in values) {
-            out.add(entry)
+        for ((decl, value) in cache) {
+            out.add(FaithfulAST2CHIRNodeMapEntry(decl, value))
         }
         return out
     }
