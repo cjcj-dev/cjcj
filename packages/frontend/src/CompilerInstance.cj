@@ -552,6 +552,7 @@ public class CompilerInstance {
         let semaInstance = faithfulSemaInstance.getOrThrow()
         semaInstance.mangler.adapter = RealMangleAstAdapter()
         semaInstance.mangler.manglerCtxTable.clear()
+        semaInstance.typeManager.ReleaseSemaQueryCaches()
         if (!invocation.globalOptions.enIncrementalCompilation) {
             if (let Some(genericInstantiationManager) <- gim) {
                 genericInstantiationManager.ResetGenericInstantiationStage()
