@@ -70,6 +70,7 @@ import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASS
 
 foreign {
     func CJSelfhostStrtoldToFloat32(value: CString): Float64
+    func CJ_MCC_InvokeGC(sync: Bool): Unit
 }
 
 private let USER_MAIN_MANGLED_NAME: String = "user.main"
@@ -1192,6 +1193,9 @@ public class FaithfulAST2CHIR {
         }
         CacheTopLevelDeclToGlobalSymbolTable()
         TranslateNominalDecls(node)
+        unsafe {
+            CJ_MCC_InvokeGC(true)
+        }
         TranslateInitOfGlobalVars(initOrder)
         for ((decl, def) in classDeclWithAnnotation) {
             SetAnnotationTargets(def, decl)
