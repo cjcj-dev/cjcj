@@ -411,6 +411,8 @@ public class TypeManager {
     private let tyVarScopeDepth: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let instCtxScopes: ArrayList<InstCtxScope> = ArrayList<InstCtxScope>()
     private var nextUniqId: UInt64 = 0u64
+    private let tyVarPool: HashSet<Ptr<GenericsTy>> = HashSet<Ptr<GenericsTy>>()
+    private let dummyGenDecls: ArrayList<GenericParamDecl> = ArrayList<GenericParamDecl>()
     private let resolvedImportedDeclsMap: HashMap<UInt64, HashMap<String, ArrayList<Decl>>> =
         HashMap<UInt64, HashMap<String, ArrayList<Decl>>>()
     private let declToTypeAlias: HashMap<Int64, HashSet<String>> = HashMap<Int64, HashSet<String>>()
@@ -2501,22 +2503,26 @@ public class TypeManager {
 
     public func AllocTyVar(srcId!: String = "Ti", needSolving!: Bool = false,
         derivedFrom!: Option<GenericsTy> = None): GenericsTy {
-        let decl = GenericParamDecl()
-        decl.identifier = SrcIdentifier("${srcId}${nextUniqId}")
-        nextUniqId++
-        let tv = GetGenericsTy(decl)
-        tv.isPlaceholder = true
-        if (let Some(parent) <- derivedFrom) {
-            for (upper in parent.upperBounds) {
-                tv.upperBounds.add(upper)
-            }
-            tv.lowerBound = parent.lowerBound
+        let tv = if (tyVarPool.isEmpty()) {
+            let decl = GenericParamDecl()
+            let newVar = GetGenericsTy(decl)
+            dummyGenDecls.add(decl)
+            newVar.isPlaceholder = true
+            nextUniqId++
+            let name = "${srcId}-${nextUniqId}"
+            decl.identifier = SrcIdentifier(name)
+            newVar.name = name
+            newVar
+        } else {
+            let pooled = tyVarPool.iterator().next().getOrThrow()
+            let _ = tyVarPool.remove(pooled)
+            pooled.value
         }
         if (let Some(parent) <- derivedFrom) {
             if (let Some(parentDepth) <- findTyVarScopeDepth(parent)) {
                 addTyVarToScope(tv, parentDepth)
             } else {
-                addTyVarToScope(tv, currentTyVarScopeDepth())
+                addTyVarToScope(tv, 0)
             }
         } else {
             addTyVarToScope(tv, currentTyVarScopeDepth())
@@ -2552,17 +2558,28 @@ public class TypeManager {
     }
 
     public func ReleaseTyVar(tv: GenericsTy): Unit {
+        let pooled = Ptr<GenericsTy>(tv)
+        CJC_ASSERT(!tyVarPool.contains(pooled))
         tv.upperBounds.clear()
-        tv.lowerBound = None
+        tyVarPool.add(pooled)
+        removeTyVarScopeDepth(tv)
         var idx: Int64 = 0
         while (idx < unsolvedTyVars.size) {
             if (Ptr<GenericsTy>(unsolvedTyVars[idx]) == Ptr<GenericsTy>(tv)) {
                 unsolvedTyVars.remove(at: idx)
+                break
             } else {
                 idx++
             }
         }
-        removeTyVarScopeDepth(tv)
+        idx = 0
+        while (idx < constraints.entries.size) {
+            if (Ptr<GenericsTy>(constraints.entries[idx].tyVar) == pooled) {
+                constraints.entries.remove(at: idx)
+                break
+            }
+            idx++
+        }
     }
 
     public func ScopeDepthOfTyVar(tyVar: GenericsTy): Int64 {
