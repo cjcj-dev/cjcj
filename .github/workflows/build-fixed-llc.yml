@@ -18,7 +18,7 @@ env:
   # getUNDEF lowering + clang CTAD fix + in-tree demangler source stub.
   LLVM_FORK_SHA: 4f61703c3225d60a7dc839718d822911628e6740
   # Supplies ModuleFormat.fbs and its matching FlatBuffers source generator.
-  CANGJIE_COMPILER_URL: https://github.com/CangjieFork/cangjie_compiler.git
+  CANGJIE_COMPILER_URL: https://gitcode.com/Cangjie/cangjie_compiler.git
   CANGJIE_COMPILER_SHA: 87fff87a1883da9bfe5956296d8079e8a7f9d15f
 
 jobs:
