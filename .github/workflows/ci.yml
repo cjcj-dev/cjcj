@@ -1,4 +1,4 @@
-# CI. Build+smoke run on linux-x64 only (per-platform prebuilt shim .o);
+# CI. Build+smoke run on linux-x64 with llc+shim built from pinned sources;
 # other platforms run a non-gating SDK provisioning check.
 # Rationale and platform matrix: reports/REPORT-ci-pipelines.md.
 name: CI
@@ -37,11 +37,14 @@ jobs:
           test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5
           test -f ci/smoke/macro_demo/mymacros/def.cj
           test -f ci/smoke/macro_demo/app/main.cj
-          test -f runtime_shim/prebuilt/linux_x86_64/cjselfhost_llvmshim.o
-          test -f ci/prebuilt/llc/linux_x86_64/llc.gz
+
+  fixed-llvm-tools:
+    name: source-build fixed LLVM tools
+    uses: ./.github/workflows/build-fixed-llc.yml
 
   build:
     name: build ${{ matrix.runner }}
+    needs: fixed-llvm-tools
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     continue-on-error: ${{ matrix.experimental }}
@@ -54,6 +57,11 @@ jobs:
           - { runner: ubuntu-26.04, experimental: true }
     steps:
       - uses: actions/checkout@v4
+      - name: Download source-built LLVM tools
+        uses: actions/download-artifact@v4
+        with:
+          name: fixed-llvm-tools-linux_x86_64
+          path: fixed-toolchain/linux_x86_64
       - name: Restore SDK cache
         id: sdkcache
         uses: actions/cache/restore@v4
@@ -71,6 +79,7 @@ jobs:
         id: setup
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
+          FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/llc.gz
         run: bash ci/setup_sdk.sh
       # Save only after a successful install so a partial ~/.cjv is never cached.
       - name: Save SDK cache
@@ -80,6 +89,8 @@ jobs:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       - name: Build runtime shim
+        env:
+          CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/cjselfhost_llvmshim.o
         run: bash runtime_shim/build_shim.sh
       - name: Build workspace
         run: cjpm build
@@ -134,4 +145,5 @@ jobs:
           echo 'main(): Int64 { println("provision ok"); return 0 }' > "$RUNNER_TEMP/p.cj"
           cjc "$RUNNER_TEMP/p.cj" -o "$RUNNER_TEMP/p" && "$RUNNER_TEMP/p"
 
-# Adding a platform to the build matrix requires runtime_shim/prebuilt/<plat>/cjselfhost_llvmshim.o.
+# Adding a build platform requires a matching matrix item in build-fixed-llc.yml and
+# downloading that platform's fixed-llvm-tools artifact above.
