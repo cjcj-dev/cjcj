@@ -1,70 +1,73 @@
-# Build the -O2-fixed llc from source (no binaries in git; task#15).
-# The stock nightly llc miscompiles cjcj's relocate-of-undef at -O2 (materializes a
-# 0xFEFEFEFE sentinel into a callee-saved GC-root register -> runtime GC SIGSEGV).
-# The fix (getUNDEF lowering) lives in the cjcj_llvm fork. As of fork tip 4f61703c the
-# whole llc builds PURE from source: the Cangjie demangler is an in-tree passthrough stub,
-# so no prebuilt libcangjie-demangle.a and no CANGJIE_DEMANGLE_DIR are needed. Cache the
-# result keyed by the fork commit so the ~1h cold build runs only when the fork changes.
-# Recipe: reports/llvmfix/getundef/CI_LLC_FROM_SOURCE.md
-name: build-fixed-llc
+# Build the patched LLVM tools needed by cjcj from source. No generated binary
+# from this workflow is checked into git: callers consume the artifact, while the
+# cache avoids repeating the cold LLVM build when its inputs have not changed.
+name: build-fixed-llvm-tools
 
 on:
   push:
     branches: [debug/llc-build]
+  workflow_dispatch:
   workflow_call:
-    outputs:
-      cache-key:
-        description: actions/cache key holding fixed-llc/llc.gz
-        value: ${{ jobs.build-llc.outputs.cache-key }}
 
 permissions:
   contents: read
 
 env:
-  FORK_URL: https://github.com/cjcj-dev/cjcj_llvm.git
-  FORK_REF: fix/scheddag-memcorrupt
-  # tip = getUNDEF (2b96e718) + IRBuilder<> clang-CTAD fix (5ca4a192)
-  #     + demangler-from-source stub (4f61703c, drops the prebuilt .a)
-  FORK_SHA: 4f61703c3225d60a7dc839718d822911628e6740
+  LLVM_FORK_URL: https://github.com/cjcj-dev/cjcj-llvm.git
+  LLVM_FORK_REF: fix/scheddag-memcorrupt
+  # getUNDEF lowering + clang CTAD fix + in-tree demangler source stub.
+  LLVM_FORK_SHA: 4f61703c3225d60a7dc839718d822911628e6740
+  # Supplies ModuleFormat.fbs and its matching FlatBuffers source generator.
+  CANGJIE_COMPILER_URL: https://github.com/CangjieFork/cangjie_compiler.git
+  CANGJIE_COMPILER_SHA: 87fff87a1883da9bfe5956296d8079e8a7f9d15f
 
 jobs:
-  build-llc:
-    name: build fixed llc (x86_64)
-    # ubuntu-22.04 = glibc 2.35 + clang-14 (llvmfix's validated build config; the
-    # -include list was tuned for clang-14). Building here yields a portable llc that
-    # loads on all cjcj build runners (22.04/24.04/26.04) — a 24.04-built llc links
-    # glibc 2.38 and fails to load on the 22.04 gating build job.
-    runs-on: ubuntu-22.04
+  build-tools:
+    name: build LLVM tools (${{ matrix.platform }})
     timeout-minutes: 120
-    outputs:
-      cache-key: ${{ steps.key.outputs.key }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Add a native runner/platform/LLVM target tuple here to extend the mechanism.
+          - runner: ubuntu-22.04
+            platform: linux_x86_64
+            llvm-targets: X86
+            portability-tag: glibc2.35
+    runs-on: ${{ matrix.runner }}
     steps:
-      - name: Compute cache key
-        id: key
-        # glibc2.35 = built on 22.04 so the llc runs on every build runner
-        # (22.04/24.04/26.04); a 24.04-built llc links glibc 2.38 and cannot
-        # load on the 22.04 gating build job.
-        run: echo "key=fixed-llc-x86_64-glibc2.35-${FORK_SHA}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
 
-      - name: Restore cached llc
+      - name: Restore source-built tool cache
         id: cache
         uses: actions/cache@v4
         with:
-          path: fixed-llc/llc.gz
-          key: ${{ steps.key.outputs.key }}
+          path: fixed-toolchain/${{ matrix.platform }}
+          key: >-
+            fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-
+            ${{ env.LLVM_FORK_SHA }}-${{ env.CANGJIE_COMPILER_SHA }}-
+            ${{ hashFiles('runtime_shim/cjselfhost_llvmshim.cpp') }}
 
-      - name: Install build deps
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang ninja-build cmake
-
-      - name: Checkout llvm fork @ fixed commit
+      - name: Install source build dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          git clone --filter=blob:none --branch "$FORK_REF" "$FORK_URL" llvm-fork
-          git -C llvm-fork checkout "$FORK_SHA"
-          test "$(git -C llvm-fork rev-parse HEAD)" = "$FORK_SHA"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang ninja-build cmake
 
-      - name: Configure + build llc (pure source, in-tree demangle stub)
+      - name: Checkout pinned source trees
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --filter=blob:none --branch "$LLVM_FORK_REF" "$LLVM_FORK_URL" llvm-fork
+          git -C llvm-fork checkout --detach "$LLVM_FORK_SHA"
+          test "$(git -C llvm-fork rev-parse HEAD)" = "$LLVM_FORK_SHA"
+
+          git clone --filter=blob:none --no-checkout "$CANGJIE_COMPILER_URL" cangjie-compiler
+          git -C cangjie-compiler sparse-checkout set schema third_party/flatbuffers
+          git -C cangjie-compiler fetch --depth=1 origin "$CANGJIE_COMPILER_SHA"
+          git -C cangjie-compiler checkout --detach "$CANGJIE_COMPILER_SHA"
+          test "$(git -C cangjie-compiler rev-parse HEAD)" = "$CANGJIE_COMPILER_SHA"
+
+      - name: Configure and build fixed llc
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           cmake -G Ninja -B llc-build \
@@ -72,25 +75,53 @@ jobs:
             -DLLVM_ENABLE_ASSERTIONS=OFF \
             -DBUILD_SHARED_LIBS=OFF \
             -DLLVM_ENABLE_RTTI=OFF \
-            -DLLVM_TARGETS_TO_BUILD=X86 \
+            -DLLVM_TARGETS_TO_BUILD="${{ matrix.llvm-targets }}" \
             -DLLVM_ENABLE_PROJECTS="" \
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string" \
             llvm-fork/llvm
           ninja -C llc-build llc
-          mkdir -p fixed-llc
-          gzip -c -9 llc-build/bin/llc > fixed-llc/llc.gz
+          mkdir -p "fixed-toolchain/${{ matrix.platform }}"
+          gzip -n -c -9 llc-build/bin/llc > "fixed-toolchain/${{ matrix.platform }}/llc.gz"
 
-      - name: Verify llc runs
+      - name: Generate ModuleFormat header and build LLVM shim
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          gunzip -c fixed-llc/llc.gz > /tmp/llc && chmod +x /tmp/llc
-          /tmp/llc --version | head -5
-          echo "fixed llc.gz sha256(top16): $(sha256sum fixed-llc/llc.gz | cut -c1-16)"
+          cmake -G Ninja -B flatbuffers-build \
+            -DFLATBUFFERS_BUILD_TESTS=OFF \
+            -DFLATBUFFERS_BUILD_FLATLIB=OFF \
+            -DFLATBUFFERS_BUILD_SHAREDLIB=OFF \
+            cangjie-compiler/third_party/flatbuffers
+          ninja -C flatbuffers-build flatc
+          mkdir -p shim-generated/flatbuffers
+          flatbuffers-build/flatc --no-warnings -c -o shim-generated/flatbuffers \
+            cangjie-compiler/schema/ModuleFormat.fbs
+          clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
+            -Illvm-fork/llvm/include -Illc-build/include \
+            -Icangjie-compiler/third_party/flatbuffers/include -Ishim-generated \
+            -c runtime_shim/cjselfhost_llvmshim.cpp \
+            -o "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
 
-      - name: Upload llc artifact
+      - name: Verify generated tools
+        run: |
+          mkdir -p "$RUNNER_TEMP/fixed-llvm-tools"
+          gunzip -c "fixed-toolchain/${{ matrix.platform }}/llc.gz" \
+            > "$RUNNER_TEMP/fixed-llvm-tools/llc"
+          chmod +x "$RUNNER_TEMP/fixed-llvm-tools/llc"
+          "$RUNNER_TEMP/fixed-llvm-tools/llc" --version | head -5
+          file "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
+          shim_exports="$(nm -C "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" \
+            | grep -cE ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
+          test "$shim_exports" -ge 90
+          echo "shim exported symbols: $shim_exports"
+          sha256sum "fixed-toolchain/${{ matrix.platform }}/llc.gz" \
+            "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
+
+      - name: Upload source-built tool artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fixed-llc-x86_64
-          path: fixed-llc/llc.gz
+          name: fixed-llvm-tools-${{ matrix.platform }}
+          path: fixed-toolchain/${{ matrix.platform }}
+          if-no-files-found: error
           retention-days: 7
