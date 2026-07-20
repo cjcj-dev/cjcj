@@ -54,7 +54,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Zxilly/cangjie-build
-          ref: f58cbc4eb1fcca55b99730f84547bac3a6be0037
+          ref: 60c485cad4c3425772b7b9a9e5d6a5fd457527c2
           path: cangjie-build
 
       - uses: astral-sh/setup-uv@v6
