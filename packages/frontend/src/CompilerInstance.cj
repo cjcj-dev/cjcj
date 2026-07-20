@@ -571,6 +571,8 @@ public class CompilerInstance {
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "genericinst")
         }
+        semaInstance.mangler.adapter = RealMangleAstAdapter()
+        semaInstance.mangler.manglerCtxTable.clear()
         return true
     }
 
