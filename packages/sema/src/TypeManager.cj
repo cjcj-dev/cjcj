@@ -324,6 +324,38 @@ private struct TypePointer <: Hashable & Equatable<TypePointer> {
     }
 }
 
+// C++ TypeManager.h:483-512 SubtypeCacheKey, SubtypeCacheKeyHash and SubtypeCacheKeyEqual.
+private struct SubtypeCacheKey <: Hashable & Equatable<SubtypeCacheKey> {
+    private let leaf: Ty
+    private let root: Ty
+    private let implicitBoxed: Bool
+    private let allowOptionBox: Bool
+
+    public init(leaf: Ty, root: Ty, implicitBoxed!: Bool = true, allowOptionBox!: Bool = true) {
+        this.leaf = leaf
+        this.root = root
+        this.implicitBoxed = implicitBoxed
+        this.allowOptionBox = allowOptionBox
+    }
+
+    public operator func ==(right: SubtypeCacheKey): Bool {
+        return leaf == right.leaf && root == right.root && implicitBoxed == right.implicitBoxed &&
+            allowOptionBox == right.allowOptionBox
+    }
+
+    public operator func !=(right: SubtypeCacheKey): Bool {
+        return !(this == right)
+    }
+
+    @OverflowWrapping
+    public func hashCode(): Int64 {
+        var out = leaf.hashCode()
+        out = (out * 131) + root.hashCode()
+        out = (out * 131) + (if (implicitBoxed) { 1 } else { 0 })
+        return (out * 131) + (if (allowOptionBox) { 1 } else { 0 })
+    }
+}
+
 public class TypeManager {
     private static let theInvalidTy: InvalidTy = InvalidTy()
     private static let theAnyTy: AnyTy = AnyTy()
@@ -366,8 +398,7 @@ public class TypeManager {
     private let checkedTyExtendRelation: ArrayList<CheckedTyExtendRelation> = ArrayList<CheckedTyExtendRelation>()
     private let tyExtendInterfaceTyMap: HashMap<Int64, TySet> = HashMap<Int64, TySet>()
     private let tyToSuperTysMap: HashMap<String, TySet> = HashMap<String, TySet>()
-    private let subtypeCache: HashMap<Int64, HashMap<Int64, HashMap<Int64, Bool>>> =
-        HashMap<Int64, HashMap<Int64, HashMap<Int64, Bool>>>()
+    private let subtypeCache: HashMap<SubtypeCacheKey, Bool> = HashMap<SubtypeCacheKey, Bool>()
     private let declInstantiationStatus: HashMap<Decl, ArrayList<DeclInstantiationStatusEntry>> =
         HashMap<Decl, ArrayList<DeclInstantiationStatusEntry>>()
     private let allocatedTys: HashMap<TypePointer, Ty> = HashMap<TypePointer, Ty>()
@@ -2842,24 +2873,9 @@ public class TypeManager {
         }
     }
 
-    private func subtypeCacheFlagKey(implicitBoxed: Bool, allowOptionBox: Bool): Int64 {
-        var key: Int64 = 0
-        if (implicitBoxed) {
-            key += 1
-        }
-        if (allowOptionBox) {
-            key += 2
-        }
-        return key
-    }
-
     private func getSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Option<Bool> {
-        if (let Some(rootMap) <- subtypeCache.get(leaf.objectId)) {
-            if (let Some(flagMap) <- rootMap.get(root.objectId)) {
-                return flagMap.get(subtypeCacheFlagKey(implicitBoxed, allowOptionBox))
-            }
-        }
-        return None
+        return subtypeCache.get(SubtypeCacheKey(leaf, root,
+            implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox))
     }
 
     private func addSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool, value: Bool): Unit {
@@ -2867,27 +2883,13 @@ public class TypeManager {
     }
 
     private func setSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool, value: Bool): Unit {
-        let leafKey = leaf.objectId
-        if (let None <- subtypeCache.get(leafKey)) {
-            subtypeCache[leafKey] = HashMap<Int64, HashMap<Int64, Bool>>()
-        }
-        if (let Some(rootMap) <- subtypeCache.get(leafKey)) {
-            let rootKey = root.objectId
-            if (let None <- rootMap.get(rootKey)) {
-                rootMap[rootKey] = HashMap<Int64, Bool>()
-            }
-            if (let Some(flagMap) <- rootMap.get(rootKey)) {
-                flagMap[subtypeCacheFlagKey(implicitBoxed, allowOptionBox)] = value
-            }
-        }
+        subtypeCache[SubtypeCacheKey(leaf, root,
+            implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox)] = value
     }
 
     private func removeSubtypeCache(leaf: Ty, root: Ty, implicitBoxed: Bool, allowOptionBox: Bool): Unit {
-        if (let Some(rootMap) <- subtypeCache.get(leaf.objectId)) {
-            if (let Some(flagMap) <- rootMap.get(root.objectId)) {
-                flagMap.remove(subtypeCacheFlagKey(implicitBoxed, allowOptionBox))
-            }
-        }
+        subtypeCache.remove(SubtypeCacheKey(leaf, root,
+            implicitBoxed: implicitBoxed, allowOptionBox: allowOptionBox))
     }
 
     private func isPlaceholderSubtype(leaf: Ty, root: Ty): Bool {
