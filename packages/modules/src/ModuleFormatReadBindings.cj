@@ -1337,6 +1337,39 @@ public class PackageFormat_SemaTy <: Table {
     }
 }
 
+// Writer-side semantic gate for the SemaTy kind/union contract. This is kept separate from
+// PackageFormat_SemaTy.Verify: flatc's generated verifier intentionally validates only the
+// structural union shape and accepts NONE with a non-null union offset.
+public func VerifySemaTyContracts(data: Array<UInt8>): Bool {
+    let allTypes = GetPackage(data).GetAllTypes()
+    if (let None <- allTypes) {
+        return true
+    }
+    let types = allTypes.getOrThrow()
+    for (index in 0u32..types.size()) {
+        let ty = PackageFormat_SemaTy(data, (types.Get(index) as Int64).getOrThrow())
+        let kind = ty.GetKind()
+        let infoType = ty.GetInfoType()
+        let hasInfo = ty.GetInfo().isSome()
+        let expectedInfoType = if (kind == MF_TYPE_KIND_FUNC) {
+            MF_SEMA_TY_INFO_FUNC_TY_INFO
+        } else if (kind == MF_TYPE_KIND_ENUM || kind == MF_TYPE_KIND_STRUCT ||
+            kind == MF_TYPE_KIND_CLASS || kind == MF_TYPE_KIND_INTERFACE || kind == MF_TYPE_KIND_TYPE) {
+            MF_SEMA_TY_INFO_COMPOSITE_TY_INFO
+        } else if (kind == MF_TYPE_KIND_GENERIC) {
+            MF_SEMA_TY_INFO_GENERIC_TY_INFO
+        } else if (kind == MF_TYPE_KIND_ARRAY || kind == MF_TYPE_KIND_V_ARRAY) {
+            MF_SEMA_TY_INFO_ARRAY_TY_INFO
+        } else {
+            MF_SEMA_TY_INFO_NONE
+        }
+        if (infoType != expectedInfoType || hasInfo != (expectedInfoType != MF_SEMA_TY_INFO_NONE)) {
+            return false
+        }
+    }
+    return true
+}
+
 // ModuleFormat_generated.h:6150-6299 (ImportSpec).
 class PackageFormat_ImportSpec <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }

@@ -281,11 +281,11 @@ public const MF_TYPE_KIND_TYPE: UInt16 = 28u16
 public const MF_TYPE_KIND_GENERIC: UInt16 = 29u16
 
 // SemaTyInfo union type ordinals. ModuleFormat.fbs:653-658; ModuleFormat_generated.h:1467-1477.
-const MF_SEMA_TY_INFO_NONE: UInt8 = 0u8
-const MF_SEMA_TY_INFO_FUNC_TY_INFO: UInt8 = 1u8
-const MF_SEMA_TY_INFO_COMPOSITE_TY_INFO: UInt8 = 2u8
-const MF_SEMA_TY_INFO_GENERIC_TY_INFO: UInt8 = 3u8
-const MF_SEMA_TY_INFO_ARRAY_TY_INFO: UInt8 = 4u8
+public const MF_SEMA_TY_INFO_NONE: UInt8 = 0u8
+public const MF_SEMA_TY_INFO_FUNC_TY_INFO: UInt8 = 1u8
+public const MF_SEMA_TY_INFO_COMPOSITE_TY_INFO: UInt8 = 2u8
+public const MF_SEMA_TY_INFO_GENERIC_TY_INFO: UInt8 = 3u8
+public const MF_SEMA_TY_INFO_ARRAY_TY_INFO: UInt8 = 4u8
 
 // AccessModifier enum ordinals. ModuleFormat.fbs:686-691; ModuleFormat_generated.h:1529-1537.
 const MF_ACCESS_MODIFIER_PRIVATE: UInt8 = 0u8
