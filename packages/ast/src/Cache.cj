@@ -76,8 +76,8 @@ public class CacheKey <: Hashable & Equatable<CacheKey> {
 }
 
 public class TypeCheckCache {
-    public let synCache: HashMap<CacheKey, CacheEntry> = HashMap<CacheKey, CacheEntry>()
-    public let chkCache: HashMap<CacheKey, CacheEntry> = HashMap<CacheKey, CacheEntry>()
+    public let synCache: HashMap<CacheKey, CacheEntry> = HashMap<CacheKey, CacheEntry>(0)
+    public let chkCache: HashMap<CacheKey, CacheEntry> = HashMap<CacheKey, CacheEntry>(0)
     public var lastKey: Option<CacheKey> = None
     public init() {}
 }
