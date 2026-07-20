@@ -164,7 +164,9 @@ private open class MetadataInfo {
             case ExtraAttribute.METHOD_FROM_INTERFACE => attrsStr.add("abstract")
             case ExtraAttribute.IMMUTABLE_FIELD => attrsStr.add(ATTR_IMMUTABLE)
             case ExtraAttribute.INTERFACE => attrsStr.add(METADATA_ATTR_OPEN)
-            case ExtraAttribute.ENUM => attrsStr.add(enumKind)
+            case ExtraAttribute.ENUM =>
+                attrsStr.add(enumKind)
+                attrsStr.add("reflectVersion2")
             case ExtraAttribute.BOX_CLASS => attrsStr.add("box")
             case _ => ()
         }
@@ -673,6 +675,7 @@ private class EnumMetadataInfo <: MetadataInfo {
             .Concat(declaredGenericTi)
             .Concat(LLVMCreateMDTuple(llvmCtx, methodsVec))
             .Concat(LLVMCreateMDTuple(llvmCtx, staticMethodsVec))
+            .Concat(GenerateEnumCtorAnnoMetadata(ed))
             .Concat(GenerateAttrsMetadata(ed.GetAttributeInfo(), ExtraAttribute.ENUM, ed.GetAnnoInfo(),
                 hasSRetMode: SRetMode.NO_SRET, enumKind: GetEnumKindName(module, ed)))
             .CreateMDTuple()
@@ -698,6 +701,15 @@ private class EnumMetadataInfo <: MetadataInfo {
             index++
         }
         return fieldsVec.CreateMDTuple()
+    }
+
+    private func GenerateEnumCtorAnnoMetadata(ed: EnumDef): LLVMMetadataRef {
+        let annoVec = MetadataVector(module.GetLLVMContext())
+        for (ctor in ed.GetCtors()) {
+            let mangledName = ctor.annoInfo.GetAnnoFactoryFuncMangledName()
+            annoVec.Concat(if (mangledName == "none") { "" } else { mangledName })
+        }
+        return annoVec.CreateMDTuple()
     }
 
     private func GenerateCtorFn(enumDef: EnumDef, index: Int64, qualifiedName: String): String {

@@ -3584,6 +3584,9 @@ public class FaithfulAST2CHIR {
         if (createdPackageInit && suffix != "_literal") {
             AddGenericInstantiatedInit(initBlock)
         }
+        if (suffix != "_literal") {
+            InsertAnnoFactoryInitsIntoPackageInit(packageInit)
+        }
         for (fileVars in nodeInitOrder) {
             if (suffix == "_literal") {
                 if (fileVars.vars.isEmpty()) {
@@ -3765,6 +3768,32 @@ public class FaithfulAST2CHIR {
         let trans = CreateTranslator()
         trans.SetCurrentBlock(block)
         let _ = trans.CreateAndAppendGVInitFuncCall(initFn)
+    }
+
+    private func InsertAnnoFactoryInitsIntoPackageInit(packageInit: Function): Unit {
+        if (initFuncsForAnnoFactory.isEmpty()) {
+            return
+        }
+        let block = GetBlockWithInitializers(packageInit)
+        var insertAfter: Option<Expression> = None
+        for (expression in block.GetExpressions()) {
+            if (let Some(intrinsic) <- (expression as Intrinsic)) {
+                if (intrinsic.GetIntrinsicKind() == IntrinsicKind.PREINITIALIZE) {
+                    insertAfter = Some(expression)
+                    break
+                }
+            }
+        }
+        let trans = CreateTranslator()
+        trans.SetCurrentBlock(block)
+        var previous = insertAfter ??
+            throw IllegalStateException("faithful AST2CHIR package init has no preinitialize intrinsic")
+        for (initFunc in initFuncsForAnnoFactory) {
+            let initCallExpr = FindApplyIn(block, initFunc) ??
+                (trans.CreateAndAppendGVInitFuncCall(initFunc) as Apply).getOrThrow()
+            initCallExpr.MoveAfter(previous)
+            previous = initCallExpr
+        }
     }
 
     private func FindApplyIn(block: Block, applyCallee: Function): Option<Apply> {
