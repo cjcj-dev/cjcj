@@ -43,7 +43,7 @@ public class Comment {
 }
 
 public class CommentGroup {
-    public let cms: ArrayList<Comment> = ArrayList<Comment>()
+    public let cms: ArrayList<Comment> = ArrayList<Comment>(Array<Comment>(0, { _: Int64 => Comment() }))
 
     public init() {}
 
@@ -64,9 +64,12 @@ public class CommentGroup {
 }
 
 public class CommentGroups {
-    public let leadingComments: ArrayList<CommentGroup> = ArrayList<CommentGroup>()
-    public let innerComments: ArrayList<CommentGroup> = ArrayList<CommentGroup>()
-    public let trailingComments: ArrayList<CommentGroup> = ArrayList<CommentGroup>()
+    public let leadingComments: ArrayList<CommentGroup> =
+        ArrayList<CommentGroup>(Array<CommentGroup>(0, { _: Int64 => CommentGroup() }))
+    public let innerComments: ArrayList<CommentGroup> =
+        ArrayList<CommentGroup>(Array<CommentGroup>(0, { _: Int64 => CommentGroup() }))
+    public let trailingComments: ArrayList<CommentGroup> =
+        ArrayList<CommentGroup>(Array<CommentGroup>(0, { _: Int64 => CommentGroup() }))
 
     public init() {}
 
