@@ -550,7 +550,7 @@ public class OverrideSrcFuncType <: Annotation<Option<FuncType>> {
 }
 
 public class AnnotationMap {
-    private let annotations: HashMap<TypeInfo, AnnotationBase> = HashMap<TypeInfo, AnnotationBase>()
+    private let annotations: HashMap<TypeInfo, AnnotationBase> = HashMap<TypeInfo, AnnotationBase>(0)
 
     public init() {}
 
