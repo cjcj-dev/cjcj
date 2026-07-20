@@ -5,6 +5,7 @@ import cjcj::chir.Attribute
 import cjcj::chir.Constant
 import cjcj::chir.CustomType
 import cjcj::chir.Box as ChirBox
+import cjcj::chir.EnumType
 import cjcj::chir.Expression
 import cjcj::chir.GetElementByName
 import cjcj::chir.GetElementRef
@@ -16,7 +17,7 @@ import cjcj::chir.StoreElementByName
 import cjcj::chir.StoreElementRef
 import cjcj::chir.Type
 import cjcj::chir.Value
-import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
 private let LLVM_ARRAY_TYPE_KIND: Int32 = 11
@@ -522,6 +523,57 @@ public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): 
         if (path.isEmpty()) {
             return LLVMNullValue()
         }
+        let base = staticElementRef.GetLocation()
+        CJC_ASSERT(base.GetType().getOrThrow().IsRef() || base.GetType().getOrThrow().IsGeneric())
+        if (let Some(enumType) <- (DeRef(base.GetType().getOrThrow()) as EnumType)) {
+            CJC_ASSERT(path[0] == 0u64)
+            let cgEnumType = (CGType.GetOrCreate(irBuilder.GetCGModule(), enumType) as CGEnumType).getOrThrow()
+            let layoutType = cgEnumType.GetLayoutType()
+            let value = irBuilder.CreateLoad(baseValue)
+            if (cgEnumType.IsCommonEnum()) {
+                let payload = irBuilder.GetPayloadFromObject(value)
+                let tagLLVMType = unsafe {
+                    LLVMPointerType(LLVMInt32TypeInContext(irBuilder.GetLLVMContext().raw), 1u32)
+                }
+                return irBuilder.CreateBitCast(payload, tagLLVMType)
+            }
+            if (cgEnumType.IsOptionLikeNonRef()) {
+                let payload = if (cgEnumType.GetSize().isSome()) {
+                    value
+                } else {
+                    irBuilder.CreateBitCast(irBuilder.GetPayloadFromObject(value),
+                        unsafe { LLVMPointerType(layoutType, 1u32) })
+                }
+                return irBuilder.CreateStructGEP(layoutType, payload, 0u32)
+            }
+            if (cgEnumType.IsOptionLikeRef()) {
+                let retValue = irBuilder.CreateEntryAlloca(
+                    unsafe { LLVMInt1TypeInContext(irBuilder.GetLLVMContext().raw) })
+                let tag = if (cgEnumType.IsAntiOptionLike()) {
+                    irBuilder.CallIntrinsicIsNonNull(value)
+                } else {
+                    irBuilder.CallIntrinsicIsNull(value)
+                }
+                irBuilder.CreateStore(tag, retValue)
+                return retValue
+            }
+            if (cgEnumType.IsOptionLikeT()) {
+                return GetElementRefOfOptionLikeT(irBuilder, enumType, cgEnumType.IsAntiOptionLike(), value)
+            }
+            if (cgEnumType.IsAllAssociatedValuesAreNonRef()) {
+                let tagLLVMType = unsafe {
+                    LLVMPointerType(LLVMInt32TypeInContext(irBuilder.GetLLVMContext().raw), 0u32)
+                }
+                return irBuilder.CreateBitCast(value, tagLLVMType)
+            }
+            if (cgEnumType.IsZeroSizeEnum()) {
+                let i32Type = unsafe { LLVMInt32TypeInContext(irBuilder.GetLLVMContext().raw) }
+                let retValue = irBuilder.CreateEntryAlloca(i32Type)
+                irBuilder.CreateStore(unsafe { LLVMConstInt(i32Type, 0u64, 0) }, retValue)
+                return retValue
+            }
+            CJC_ABORT()
+        }
         return irBuilder.CreateGEP(baseValue, path, name: "gep").GetRawValue()
     }
     if (let Some(elementByName) <- (chirExpr as GetElementByName)) {
@@ -541,6 +593,36 @@ public func GenerateGetElementRef(irBuilder: IRBuilder2, chirExpr: Expression): 
         return LLVMNullValue()
     }
     return CreateElementAddress(irBuilder, baseValue, indices, "gep")
+}
+
+private func GetElementRefOfOptionLikeT(irBuilder: IRBuilder2, chirEnumType: EnumType,
+    isAntiOptionLike: Bool, enumValue: LLVMValueRef): LLVMValueRef {
+    let i1Type = unsafe { LLVMInt1TypeInContext(irBuilder.GetLLVMContext().raw) }
+    let retValue = irBuilder.CreateEntryAlloca(i1Type)
+    let payload = irBuilder.GetPayloadFromObject(enumValue)
+    let isRef = irBuilder.CreateTypeInfoIsReferenceCall(chirEnumType.GetTypeArgs()[0])
+    let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>(["ref", "nonRef", "end"]))
+    CJC_ASSERT(blocks.size == 3)
+    irBuilder.CreateCondBr(isRef, blocks[0], blocks[1])
+
+    irBuilder.SetInsertPoint(blocks[0])
+    let refPayload = irBuilder.CallGCRead(ArrayList<LLVMValueRef>([enumValue, payload]))
+    let refResult = if (isAntiOptionLike) {
+        irBuilder.CallIntrinsicIsNonNull(refPayload)
+    } else {
+        irBuilder.CallIntrinsicIsNull(refPayload)
+    }
+    irBuilder.CreateStore(refResult, retValue)
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[1])
+    let i1PtrType = unsafe { LLVMPointerType(i1Type, 1u32) }
+    let nonRefResult = irBuilder.CreateLoad(i1Type, irBuilder.CreateBitCast(payload, i1PtrType))
+    irBuilder.CreateStore(nonRefResult, retValue)
+    irBuilder.CreateBr(blocks[2])
+
+    irBuilder.SetInsertPoint(blocks[2])
+    return retValue
 }
 
 public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
