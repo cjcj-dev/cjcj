@@ -1,5 +1,5 @@
 # Build the -O2-fixed llc from source. cjcj's stock LLVM 15 llc mishandles
-# relocate(undef); the fixed backend is maintained in cjcj-dev/cjcj_llvm.
+# relocate(undef); the fixed backend is maintained in cjcj-dev/cjcj-llvm.
 name: build-fixed-llc
 
 on:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  FORK_URL: https://github.com/cjcj-dev/cjcj_llvm.git
+  FORK_URL: https://github.com/cjcj-dev/cjcj-llvm.git
   FORK_REF: fix/scheddag-memcorrupt
   FORK_SHA: 4f61703c3225d60a7dc839718d822911628e6740
 

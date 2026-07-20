@@ -13,7 +13,7 @@ static build here. `ci/setup_sdk.sh` does this idempotently.
 
 ## Source
 
-- fork: https://github.com/cjcj-dev/cjcj_llvm  branch `fix/scheddag-memcorrupt`
+- fork: https://github.com/cjcj-dev/cjcj-llvm  branch `fix/scheddag-memcorrupt`
   - `edd69670`  [SelectionDAG] Fix relocate of undef producing an unusable TargetConstant
   - `17c6e735`  [CJStackPointerInserter] Skip constant GC-pointer operands in filterGCPointer
 - base `2429f2f48` = gitcode Cangjie/llvm-project dev (LLVM 15.0.4 patched).
