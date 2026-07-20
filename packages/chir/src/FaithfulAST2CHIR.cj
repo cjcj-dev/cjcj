@@ -4938,6 +4938,7 @@ public class FaithfulAST2CHIR {
         if (decl.TestAttr(AstAttribute.C)) {
             if (let Some(structDef) <- (target as StructDef)) {
                 structDef.SetCStruct(true)
+                ApplyCStructLayoutAttrs(structDef, decl)
             }
         }
         if (let Some(customTypeDef) <- (target as CustomTypeDef)) {
@@ -4946,6 +4947,32 @@ public class FaithfulAST2CHIR {
             } else if (AstIsMirror(decl)) {
                 customTypeDef.EnableAttr(Attribute.JAVA_MIRROR)
             }
+        }
+    }
+
+    private func ApplyCStructLayoutAttrs(structDef: StructDef, decl: AstDecl): Unit {
+        for (annotation in decl.annotations) {
+            if (annotation.kind != AstAnnotationKind.C) { continue }
+            for (arg in annotation.args) {
+                let expr = arg.expr ?? continue
+                let name = arg.name.Val()
+                if (name == "align" || name == "packed") {
+                    let literal = (expr as AstLitConstExpr) ?? continue
+                    literal.constNumValue.asInt.InitIntLiteral(literal.stringValue, AstTypeKind.TYPE_INT64)
+                    let value = literal.constNumValue.asInt.`Int64`()
+                    if (let Some(current) <- structDef.GetAlignment()) {
+                        structDef.SetAlignment(Some(if (value > current) { value } else { current }))
+                    } else {
+                        structDef.SetAlignment(Some(value))
+                    }
+                    if (name == "packed") { structDef.SetPacked(true) }
+                } else if (name.isEmpty()) {
+                    if (let Some(refExpr) <- (expr as AstRefExpr)) {
+                        if (refExpr.ref.identifier.Val() == "packed") { structDef.SetPacked(true) }
+                    }
+                }
+            }
+            return
         }
     }
 

@@ -19,7 +19,19 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
         let globalValue = cgMod.GetOrInsertGlobalVariable(chirGV)
         cgValue = globalValue
         let rawGlobal = globalValue.GetRawValue()
-        let preferredAlignment = cgMod.GetModuleTargetData().GetPrefTypeAlignment(unsafe { LLVMTypeOf(rawGlobal) })
+        var preferredAlignment = cgMod.GetModuleTargetData().GetPrefTypeAlignment(unsafe { LLVMTypeOf(rawGlobal) })
+        if (let Some(chirTy) <- chirGV.GetType()) {
+            if (let Some(typeAlignment) <- CGType.GetOrCreate(cgMod, chirTy).GetAlign()) {
+                if (UInt32(typeAlignment) > preferredAlignment) { preferredAlignment = UInt32(typeAlignment) }
+            }
+        }
+        let rawGlobalType = unsafe { LLVMTypeOf(rawGlobal) }
+        if (!rawGlobalType.isNull() && unsafe { LLVMGetTypeKind(rawGlobalType) } == 12) {
+            if (let Some(typeAlignment) <- cgMod.GetCGContext().GetLLVMTypeAlignment(
+                GetPointerElementType(rawGlobalType))) {
+                if (typeAlignment > preferredAlignment) { preferredAlignment = typeAlignment }
+            }
+        }
         if (preferredAlignment != 0u32) {
             unsafe { LLVMSetAlignment(rawGlobal, preferredAlignment) }
         }

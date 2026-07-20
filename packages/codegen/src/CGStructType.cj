@@ -16,6 +16,7 @@ public class CGStructType <: CGCustomType {
             return unsafe { LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw) }
         }
         let structType = StaticCast<StructType>(chirType)
+        let structDef = structType.GetStructDef()
         var layoutName = STRUCT_TYPE_PREFIX
         if (let Some(defTy) <- structType.GetStructDef().GetType()) {
             if (chirType != defTy && CGType.GetOrCreate(cgMod, defTy).GetSize().isSome()) {
@@ -43,12 +44,22 @@ public class CGStructType <: CGCustomType {
                 }
                 idx++
             }
-            SetStructTypeBody(structLayout, fieldTypes)
+            SetStructTypeBody(structLayout, fieldTypes, packed: structDef.IsPacked())
             for (litStructPtrIdx in litStructPtrIndices) {
                 fieldTypes[litStructPtrIdx] =
                     CGType.GetOrCreate(cgMod, memberVarTypes[litStructPtrIdx]).GetLLVMType()
             }
-            SetStructTypeBody(structLayout, fieldTypes)
+            SetStructTypeBody(structLayout, fieldTypes, packed: structDef.IsPacked())
+            if (let Some(requestedAlign) <- structDef.GetAlignment()) {
+                let rawSize = UInt64(cgMod.GetTypeSize(structLayout))
+                let paddedSize = AlignedUpTo(rawSize, UInt64(requestedAlign))
+                if (paddedSize > rawSize) {
+                    fieldTypes.add(unsafe {
+                        LLVMArrayType(LLVMInt8TypeInContext(cgCtx.GetLLVMContext().raw), UInt32(paddedSize - rawSize))
+                    })
+                    SetStructTypeBody(structLayout, fieldTypes, packed: structDef.IsPacked())
+                }
+            }
         }
         return structLayout
     }
@@ -65,6 +76,11 @@ public class CGStructType <: CGCustomType {
             if (!rawTy.isNull() && unsafe { LLVMGetTypeKind(rawTy) } == 10) {
                 size = Int64(cgMod.GetTypeSize(rawTy))
                 align = Int64(cgMod.GetABITypeAlignment(rawTy))
+                if (let Some(requestedAlign) <- StaticCast<StructType>(chirType).GetStructDef().GetAlignment()) {
+                    if (requestedAlign > align.getOrThrow()) { align = requestedAlign }
+                    size = Int64(AlignedUpTo(UInt64(size.getOrThrow()), UInt64(align.getOrThrow())))
+                    cgCtx.SetLLVMTypeAlignment(rawTy, UInt32(align.getOrThrow()))
+                }
             }
         }
     }

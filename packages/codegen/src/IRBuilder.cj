@@ -750,6 +750,11 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildAlloca(builder.raw, valueType, nameCString.value) }
         }
+        if (let Some(requestedAlign) <- cgMod.GetCGContext().GetLLVMTypeAlignment(valueType)) {
+            if (requestedAlign > cgMod.GetABITypeAlignment(valueType)) {
+                unsafe { LLVMSetAlignment(result, requestedAlign) }
+            }
+        }
         return result
     }
 
@@ -761,6 +766,12 @@ public class IRBuilder2 <: Resource {
                 cgType.GetLLVMType()
             }
             let allocaInst = CreateEntryAlloca(allocatedType, name: name)
+            if (let Some(requestedAlign) <- cgType.GetAlign()) {
+                let abiAlign = Int64(cgMod.GetABITypeAlignment(allocatedType))
+                if (requestedAlign > abiAlign) {
+                    unsafe { LLVMSetAlignment(allocaInst, UInt32(requestedAlign)) }
+                }
+            }
             let options = cgMod.GetCGContext().GetCompileOptions()
             let isOptionLikeNonRef = if (let Some(enumCGType) <- (cgType as CGEnumType)) {
                 enumCGType.IsOptionLikeNonRef()
