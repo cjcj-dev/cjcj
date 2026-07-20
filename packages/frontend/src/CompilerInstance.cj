@@ -773,6 +773,7 @@ public class CompilerInstance {
     }
 
     public func PerformCHIRCompilation(): Bool {
+        mangler.manglerCtxTable.clear()
         typeManager.ReleasePostSemaCaches()
         FreeIdleMemoryToOS()
         chirData.ClearRealPackages()
