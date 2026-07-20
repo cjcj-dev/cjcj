@@ -38,7 +38,11 @@ _CJPM_EDITS: tuple[tuple[str, str], ...] = (
 def _build_args_for(name: str, cfg: BuildConfig) -> list[CommandPart]:
     if cfg.target.spec.cross_compile:
         return ["build", "-t", cfg.cross_build_type, "--target", "windows-x86_64"]
-    args: list[CommandPart] = ["build", "-t", cfg.build_type]
+    # cjpm/cjfmt build.py only accept 'debug'/'release'; map relwithdebinfo -> release
+    # (tools need no debuginfo). rpath below keeps cfg.build_type: the runtime lib it
+    # points at was built with the full build_type.
+    tools_build_type = "release" if cfg.build_type == "relwithdebinfo" else cfg.build_type
+    args: list[CommandPart] = ["build", "-t", tools_build_type]
     if name == "cjpm":
         rpath = f"$ORIGIN/../../runtime/lib/{cfg.target.runtime_lib_subdir(cfg.build_type)}"
         args += ["--set-rpath", rpath]
