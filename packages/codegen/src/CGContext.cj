@@ -496,6 +496,14 @@ public class CGContext {
         impl.AddCGType(cgType)
     }
 
+    public func SetLLVMTypeAlignment(llvmType: LLVMTypeRef, alignment: UInt32): Unit {
+        impl.SetLLVMTypeAlignment(llvmType, alignment)
+    }
+
+    public func GetLLVMTypeAlignment(llvmType: LLVMTypeRef): Option<UInt32> {
+        return impl.GetLLVMTypeAlignment(llvmType)
+    }
+
     public func GetOrCreateCGType(cgMod: CGModule, chirTy: Type, extraInfo: TypeExtraInfo): CGType {
         var normalizedTy = chirTy
         let classTyOpt = DynamicCast<ClassType>(normalizedTy)

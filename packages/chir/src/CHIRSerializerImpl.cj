@@ -1467,7 +1467,9 @@ class CHIRSerializerImpl {
     }
 
     private func Serialize(obj: StructDef): FlatBufferOffset {
-        return CreateStructDef(builder, Serialize((obj as CustomTypeDef).getOrThrow()), obj.IsCStruct())
+        let alignment = if (let Some(value) <- obj.GetAlignment()) { value } else { 0 }
+        return CreateStructDef(builder, Serialize((obj as CustomTypeDef).getOrThrow()), obj.IsCStruct(),
+            alignment, obj.IsPacked())
     }
 
     private func Serialize(obj: ClassDef): FlatBufferOffset {
@@ -1721,6 +1723,10 @@ class CHIRSerializerImpl {
         fields.add(if (let Some(enumDef) <- (def as EnumDef)) { CHIRBoolToWire(!enumDef.IsExhaustive()) } else { "" })
         fields.add(SerializeVTable(def.GetDefVTable()))
         fields.add(if (let Some(ty) <- def.GetType()) { CHIRSerializeType(ty) } else { "" })
+        fields.add(if (let Some(structDef) <- (def as StructDef)) {
+            if (let Some(value) <- structDef.GetAlignment()) { value.toString() } else { "" }
+        } else { "" })
+        fields.add(if (let Some(structDef) <- (def as StructDef)) { CHIRBoolToWire(structDef.IsPacked()) } else { "" })
         lines.add(CHIRWireJoinFields(fields))
     }
 

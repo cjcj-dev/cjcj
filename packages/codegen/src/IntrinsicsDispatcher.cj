@@ -654,7 +654,7 @@ private func CPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>,
             LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw),
                 irBuilder.GetCGModule().GetTypeSize(elementType), 0)
         }
-        let align = irBuilder.GetCGModule().GetABITypeAlignment(elementType)
+        let align = UInt32(GetTypeAlignment(irBuilder.GetCGModule(), valueTy))
         irBuilder.CreateMemCpy(addr, align, rawValue, align, size)
     } else {
         irBuilder.CreateStore(rawValue, addr)

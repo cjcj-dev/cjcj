@@ -1258,9 +1258,11 @@ public class DIBuilder {
             return fwdDecl
         }
         let cgType = cgStructType.GetLLVMType()
+        let structSize = UInt64(cgStructType.GetSize().getOrThrow()) * 8u64
+        let structAlign = UInt32(cgStructType.GetAlign().getOrThrow())
         let boxOffset = if (boxTy.isSome()) { 64u64 } else { 0u64 }
         var fwdDecl = createStructType(defPackage, name, diFile, position.GetBeginPos().line,
-            GetTypeSize(cgType) + boxOffset, 0u32, FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(),
+            structSize + boxOffset, structAlign, FlagZero, LLVMNullMetadata(), ArrayList<LLVMMetadataRef>(),
             0u32, LLVMNullMetadata(), "$" + boxOffset.toString() + "_" + identifier)
         if (let Some(box) <- boxTy) {
             typeCache[box.objectId] = fwdDecl
@@ -1288,7 +1290,7 @@ public class DIBuilder {
         let memberTys = structTy.GetInstantiatedMemberTys(cgMod.GetCGContext().GetCHIRBuilder())
         CJC_ASSERT(memberTys.size == structDef.GetAllInstanceVars().size)
         let boxOffset = if (boxTy.isSome()) { 64u64 } else { 0u64 }
-        let align = cgMod.GetABITypeAlignment(cgType)
+        let align = UInt32(CGType.GetOrCreate(cgMod, structTy).GetAlign().getOrThrow())
         var idx: Int64 = 0
         for (member in structDef.GetAllInstanceVars()) {
             let elementTy = memberTys[idx]
