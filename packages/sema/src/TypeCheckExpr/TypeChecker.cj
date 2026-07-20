@@ -7370,11 +7370,7 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry()
-        entry.successful = Ty.IsTyCorrect(ret) && dc.NoError()
-        entry.result = Some(ret)
-        entry.diags = dc
-        entry.targets = CollectTargets(expr)
+        let entry = CacheEntry(Ty.IsTyCorrect(ret) && dc.NoError(), Some(ret), dc, CollectTargets(expr))
         GetTypeCheckCache(ctx, expr).synCache[key] = entry
         return ret
     }
@@ -7389,11 +7385,7 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry()
-        entry.successful = Ty.IsTyCorrect(ret) && dc.NoError()
-        entry.result = Some(ret)
-        entry.diags = dc
-        entry.targets = CollectTargets(arg)
+        let entry = CacheEntry(Ty.IsTyCorrect(ret) && dc.NoError(), Some(ret), dc, CollectTargets(arg))
         GetTypeCheckCache(ctx, arg).synCache[key] = entry
         return ret
     }
@@ -7407,11 +7399,7 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry()
-        entry.successful = ret
-        entry.result = expr.GetTy()
-        entry.diags = dc
-        entry.targets = CollectTargets(expr)
+        let entry = CacheEntry(ret, expr.GetTy(), dc, CollectTargets(expr))
         GetTypeCheckCache(ctx, expr).chkCache[key] = entry
         return ret
     }
@@ -7426,11 +7414,7 @@ extend TypeChecker {
         if (let Some(diagValue2) <- impl.diag) {
             dc.BackUp(diagValue2)
         }
-        let entry = CacheEntry()
-        entry.successful = ret
-        entry.result = arg.GetTy()
-        entry.diags = dc
-        entry.targets = CollectTargets(arg)
+        let entry = CacheEntry(ret, arg.GetTy(), dc, CollectTargets(arg))
         GetTypeCheckCache(ctx, arg).chkCache[key] = entry
         return ret
     }
