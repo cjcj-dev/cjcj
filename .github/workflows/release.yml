@@ -36,24 +36,34 @@ env:
   RUNTIME_BASE_SHA: 18cd0af893b06bfd0aedcef82aaa9eaf31cc40d2
 
 jobs:
+  fixed-llvm-tools:
+    name: source-build fixed LLVM tools
+    uses: ./.github/workflows/build-fixed-llc.yml
+
   build:
     name: build ${{ matrix.platform }}
+    needs: fixed-llvm-tools
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { runner: ubuntu-24.04, platform: linux-x64 }
+          - { runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64 }
           # linux-aarch64 is validated through build + package (the cross-compiled shim
           # links, the native patched runtime builds), but the packaged compiler livelocks
           # the GC mutator-list lock on the oversubscribed 4-core arm runner
           # (04_iface_enum / 06_macro spin to the 240s watchdog and SIGABRT). Held until the
-          # runtime aarch64 mutator-lock issue is fixed; re-enable this line then. The
-          # vendored shim stays at runtime_shim/prebuilt/linux_aarch64/. See REPORT-relmatrix.
-          # - { runner: ubuntu-24.04-arm, platform: linux-aarch64 }
+          # runtime aarch64 mutator-lock issue is fixed; then add an aarch64 source-build
+          # tuple in build-fixed-llc.yml and re-enable this line. See REPORT-relmatrix.
+          # - { runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64 }
     steps:
       - uses: actions/checkout@v4
+      - name: Download source-built LLVM tools
+        uses: actions/download-artifact@v4
+        with:
+          name: fixed-llvm-tools-${{ matrix.llvm_platform }}
+          path: fixed-toolchain/${{ matrix.llvm_platform }}
       - name: Restore SDK cache
         id: sdkcache
         uses: actions/cache/restore@v4
@@ -64,6 +74,7 @@ jobs:
         id: setup
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
+          FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/llc.gz
         run: bash ci/setup_sdk.sh
       - name: Save SDK cache
         if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
@@ -74,6 +85,8 @@ jobs:
       - name: Install build deps
         run: sudo apt-get update -qq && sudo apt-get install -y -qq patchelf clang cmake make
       - name: Build runtime shim
+        env:
+          CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/cjselfhost_llvmshim.o
         run: bash runtime_shim/build_shim.sh
       - name: Restore patched runtime cache
         id: rtcache
@@ -148,4 +161,5 @@ jobs:
 # linux-aarch64 is held (see the matrix comment). macOS/Windows are intentionally absent:
 # no per-platform shim .o and the cjc-name GC exclusion is ungated on Darwin/PE (needs the
 # runtime patch extended). BLOCKED-REPORT: reports/REPORT-relmatrix.md.
-# Adding a Linux platform needs a prebuilt shim .o under runtime_shim/prebuilt/<plat>/.
+# Adding a build platform needs a matching source-build matrix item in
+# build-fixed-llc.yml and its llvm_platform value in the release matrix.
