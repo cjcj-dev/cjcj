@@ -53,7 +53,7 @@ jobs:
       - name: Checkout cangjie-build base
         uses: actions/checkout@v4
         with:
-          repository: Zxilly/cangjie-build
+          repository: cjcj-dev/cjcj-build
           ref: 60c485cad4c3425772b7b9a9e5d6a5fd457527c2
           path: cangjie-build
 
