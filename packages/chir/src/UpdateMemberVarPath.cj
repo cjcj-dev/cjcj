@@ -98,13 +98,14 @@ public class UpdateMemberVarPath {
 
     private func GetIndexByName(baseType: CustomType, name: String): (Type, UInt64) {
         var memberVarInstType: Option<Type> = None
+        let instMap = HashMap<Int64, (GenericType, Type)>()
+        baseType.GetInstMap(instMap, builder)
         let allMemberVars = baseType.GetCustomTypeDef().GetAllInstanceVars()
-        let memberVarInstTypes = baseType.GetInstantiatedMemberTys(builder)
         var index = allMemberVars.size
         while (index > 0) {
             index--
             if (allMemberVars[index].name == name) {
-                memberVarInstType = memberVarInstTypes[index]
+                memberVarInstType = ReplaceRawGenericArgType(allMemberVars[index].ty, instMap, builder)
                 break
             }
         }
