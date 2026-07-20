@@ -46,6 +46,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.srcbuild/sccache
       SCCACHE_CACHE_SIZE: 5G
       cjHeapSize: 12GB
+      RUNTIME_REPOSITORY: https://github.com/CangjieFork/cangjie_runtime.git
+      RUNTIME_BRANCH: integration/cjcj-beta-20260718
+      RUNTIME_REF: 1a1d013102dca33b4c006964e27883f1efde4af8
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v4
@@ -134,16 +137,12 @@ jobs:
         working-directory: cangjie-build
         run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
 
-      - name: Apply cjcj runtime patches (Front A — align runtime to upstream + cjcj patches)
-        # rebased runtime = upstream 14f32bf2 + 2 cjcj patches (mutator-lock writer-preference
-        # to stop GC starvation; toregion2fix for the toRegion2Idx GC assertion). Both cherry
-        # clean onto 14f32bf2 (verified). cjc-name GC exclusion is already upstream.
+      - name: Checkout CangjieFork runtime integration source
         run: |
           rt="$CANGJIE_WORKSPACE/cangjie_runtime"
-          for p in "$GITHUB_WORKSPACE"/ci/srcbuild/runtime-patches/*.patch; do
-            echo "== applying $(basename "$p") =="
-            git -C "$rt" apply --verbose "$p"
-          done
+          rm -rf "$rt"
+          git clone --depth 1 --branch "$RUNTIME_BRANCH" "$RUNTIME_REPOSITORY" "$rt"
+          test "$(git -C "$rt" rev-parse HEAD)" = "$RUNTIME_REF"
 
       - name: Build runtime from source
         working-directory: cangjie-build
