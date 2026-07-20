@@ -252,6 +252,7 @@ private func flattenVarWithPattern(pattern: ManglePattern, out: ArrayList<Mangle
 public class ASTMangler {
     private var fullPackageName: String
     private let wildcardMap: HashMap<String, Int64> = HashMap<String, Int64>()
+    private let adapter: MangleAstAdapter = MangleAstAdapter()
 
     public init(fullPackageName: String) {
         this.fullPackageName = fullPackageName
@@ -268,7 +269,6 @@ public class ASTMangler {
     }
 
     public func Mangle(decl: Decl): String {
-        let adapter = MangleAstAdapter()
         return Mangle(adapter.ConvertDecl(decl))
     }
 
