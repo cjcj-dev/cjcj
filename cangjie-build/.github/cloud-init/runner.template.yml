@@ -1,0 +1,44 @@
+#cloud-config
+# cloud-init template for the ephemeral cangjie-build self-hosted runner.
+# Rendered by .github/scripts/render-cloud-init.sh; the placeholders below
+# (double-underscore tokens in the file body) are replaced at render time.
+package_update: true
+package_upgrade: false
+packages:
+  - curl
+  - jq
+  - tar
+  - ca-certificates
+
+write_files:
+  - path: /opt/runner-bootstrap/jit
+    permissions: '0600'
+    owner: root:root
+    content: |
+      __JIT__
+
+  - path: /opt/runner-bootstrap/start.sh
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      useradd -m -s /bin/bash -G sudo runner || true
+      echo 'runner ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/runner
+      chmod 440 /etc/sudoers.d/runner
+      install -d -o runner -g runner -m 0750 /home/runner/actions-runner
+      cd /home/runner/actions-runner
+      curl -fsSL -o runner.tar.gz \
+        "https://github.com/actions/runner/releases/download/v__RUNNER_VERSION__/actions-runner-linux-x64-__RUNNER_VERSION__.tar.gz"
+      tar xzf runner.tar.gz
+      rm runner.tar.gz
+      ./bin/installdependencies.sh
+      chown -R runner:runner /home/runner/actions-runner
+      # JIT-config is one-shot; runner exits after the single job.
+      sudo -u runner -H bash -lc "./run.sh --jitconfig '$(cat /opt/runner-bootstrap/jit)'"
+      # Safety net: shut down ~2 min after the runner exits, so even if the
+      # cleanup job in the GitHub workflow gets cancelled we stop billing.
+      shutdown -h +2
+
+runcmd:
+  - bash /opt/runner-bootstrap/start.sh

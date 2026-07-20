@@ -25,3 +25,9 @@ See `docs/PORTING_PLAN.md` for the detailed architecture map and per-module stat
 
 Work in progress — generated incrementally by an orchestrated Codex pipeline.
 Per-module completeness and remaining work are tracked in `docs/STATUS.md`.
+
+## Build orchestration
+
+The Python build orchestration project formerly maintained as the standalone
+`cangjie-build` repository now lives in [`cangjie-build/`](cangjie-build/).
+Run its `uv` commands and developer checks from that directory.
