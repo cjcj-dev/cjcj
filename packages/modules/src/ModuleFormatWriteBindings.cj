@@ -490,7 +490,7 @@ func CreateArrayTyInfo(builder: FlatBufferBuilder, dimsOrSize: Int64): FlatBuffe
 }
 
 // ModuleFormat_generated.h (CreateSemaTy). kind default TypeKind.Unit(1). info is SemaTyInfo union.
-func CreateSemaTy(builder: FlatBufferBuilder, kind: UInt16, typeArgs: FlatBufferOffset, infoType: UInt8,
+public func CreateSemaTy(builder: FlatBufferBuilder, kind: UInt16, typeArgs: FlatBufferOffset, infoType: UInt8,
     info: FlatBufferOffset): FlatBufferOffset {
     builder.StartTable(4)
     builder.AddOffset(3, info)

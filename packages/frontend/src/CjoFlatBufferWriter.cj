@@ -18,6 +18,9 @@ import cjcj::modules.{CreateArrayInfo, CreateAssignInfo, CreateBinaryInfo, Creat
     CreateExpr, CreateForInInfo, CreateFuncArgInfo, CreateIncOrDecInfo, CreateJumpInfo, CreateLambdaInfo,
     CreateLetPatternDestructorInfo, CreateLitConstInfo, CreateMatchCaseInfo, CreateMatchInfo, CreatePattern,
     CreateReferenceInfo, CreateSpawnInfo, CreateSubscriptInfo, CreateTryInfo, CreateUnaryInfo}
+import cjcj::modules.{CreateSemaTy, VerifySemaTyContracts, MF_SEMA_TY_INFO_NONE,
+    MF_SEMA_TY_INFO_FUNC_TY_INFO, MF_SEMA_TY_INFO_COMPOSITE_TY_INFO, MF_SEMA_TY_INFO_GENERIC_TY_INFO,
+    MF_SEMA_TY_INFO_ARRAY_TY_INFO}
 import cjcj::option.OptimizationLevel
 import cjcj::sema.TypeManager as FaithfulSemaTypeManager
 import cjcj::utils.FileUtil
@@ -475,7 +478,11 @@ public class ASTWriter {
         builder.AddStruct(1, cjoVersion, 1)
         builder.AddOffset(0, version)
         let root = builder.EndTable()
-        return builder.Finish(root, CJO_FILE_IDENTIFIER)
+        let data = builder.Finish(root, CJO_FILE_IDENTIFIER)
+        if (!VerifySemaTyContracts(data)) {
+            throw IllegalStateException("serialized CJO violates the SemaTy kind/info union contract")
+        }
+        return data
     }
 
     // ASTWriter.cpp:907-930 ASTWriterImpl::SaveFileInfo.
@@ -2555,58 +2562,96 @@ public class ASTWriter {
             savedTypeMap[Ptr<Ty>(specificTy2)] = index
         }
         allTypes.add(0u32)
-        allTypes[Int64(index) - 1] = SaveTypeTable(ty)
+        allTypes[Int64(index) - 1] = match (ty.kind) {
+            case TypeKind.TYPE => SaveNominalTy(ty)
+            case TypeKind.TYPE_ENUM => SaveNominalTy(ty)
+            case TypeKind.TYPE_STRUCT => SaveNominalTy(ty)
+            case TypeKind.TYPE_CLASS => SaveNominalTy(ty)
+            case TypeKind.TYPE_INTERFACE => SaveNominalTy(ty)
+            case TypeKind.TYPE_POINTER => SavePointerTy((ty as PointerTy).getOrThrow())
+            case TypeKind.TYPE_ARRAY => SaveArrayTy((ty as ArrayTy).getOrThrow())
+            case TypeKind.TYPE_VARRAY => SaveVArrayTy((ty as VArrayTy).getOrThrow())
+            case TypeKind.TYPE_TUPLE => SaveTupleTy((ty as TupleTy).getOrThrow())
+            case TypeKind.TYPE_FUNC => SaveFuncTy((ty as FuncTy).getOrThrow())
+            case TypeKind.TYPE_GENERICS => SaveGenericsTy((ty as GenericsTy).getOrThrow())
+            case _ => SaveSimpleTy(ty)
+        }
         return index
     }
 
-    private func SaveTypeTable(ty: Ty): FlatBufferOffset {
+    // ASTWriter.cpp:1067-1103 SaveNominalTy/SaveGenericsTy.
+    private func SaveNominalTy(ty: Ty): FlatBufferOffset {
+        let fullId = CompositeTyFullId(ty)
         let typeArgs = ArrayList<UInt32>()
-        var infoType: UInt8 = 0u8
-        var info: FlatBufferOffset = 0u32
-        let kind = TypeKindToFlat(ty.kind)
-
-        if (let Some(funcTy) <- (ty as FuncTy)) {
-            for (paramTy in funcTy.paramTys) {
-                typeArgs.add(SaveType(paramTy))
-            }
-            infoType = 1u8
-            info = SaveFuncTyInfo(funcTy)
-        } else if (let Some(arrayTy) <- (ty as ArrayTy)) {
-            for (arg in ty.typeArgs) {
-                typeArgs.add(SaveType(arg))
-            }
-            infoType = 4u8
-            info = SaveArrayTyInfo(Int64(arrayTy.dims))
-        } else if (let Some(varrayTy) <- (ty as VArrayTy)) {
-            for (arg2 in ty.typeArgs) {
-                typeArgs.add(SaveType(arg2))
-            }
-            infoType = 4u8
-            info = SaveArrayTyInfo(varrayTy.size)
-        } else if (let Some(genericTy) <- (ty as GenericsTy)) {
-            infoType = 3u8
-            info = SaveGenericTyInfo(genericTy)
-        } else if (IsCompositeType(ty)) {
-            for (arg3 in ty.typeArgs) {
-                typeArgs.add(SaveType(arg3))
-            }
-            infoType = 2u8
-            info = SaveCompositeTyInfo(ty)
-        } else {
-            for (arg4 in ty.typeArgs) {
-                typeArgs.add(SaveType(arg4))
-            }
+        for (arg in ty.typeArgs) {
+            typeArgs.add(SaveType(arg))
         }
+        let argsVec = builder.CreateVectorU32(typeArgs)
+        let info = SaveCompositeTyInfo(ty, fullId)
+        return CreateSemaTy(builder, TypeKindToFlat(ty.kind), argsVec,
+            MF_SEMA_TY_INFO_COMPOSITE_TY_INFO, info)
+    }
 
-        let argsVec = if (ShouldEmitTypeArgsVector(kind, infoType, typeArgs)) { builder.CreateVectorU32(typeArgs) } else {
-            0u32
+    private func SaveGenericsTy(genericTy: GenericsTy): FlatBufferOffset {
+        let info = SaveGenericTyInfo(genericTy)
+        return CreateSemaTy(builder, TypeKindToFlat(genericTy.kind), 0u32,
+            MF_SEMA_TY_INFO_GENERIC_TY_INFO, info)
+    }
+
+    // ASTWriter.cpp:1105-1123 SaveFuncTy.
+    private func SaveFuncTy(funcTy: FuncTy): FlatBufferOffset {
+        let paramTypes = ArrayList<UInt32>()
+        for (paramTy in funcTy.paramTys) {
+            paramTypes.add(SaveType(paramTy))
         }
-        builder.StartTable(4)
-        builder.AddOffset(3, info)
-        builder.AddU8(2, infoType)
-        builder.AddOffset(1, argsVec)
-        builder.AddU16(0, kind, defaultValue: 1u16)
-        return builder.EndTable()
+        let paramsVec = builder.CreateVectorU32(paramTypes)
+        let info = SaveFuncTyInfo(funcTy)
+        return CreateSemaTy(builder, TypeKindToFlat(funcTy.kind), paramsVec,
+            MF_SEMA_TY_INFO_FUNC_TY_INFO, info)
+    }
+
+    // ASTWriter.cpp:1125-1137 SaveTupleTy.
+    private func SaveTupleTy(tupleTy: TupleTy): FlatBufferOffset {
+        let typeArgs = ArrayList<UInt32>()
+        for (arg in tupleTy.typeArgs) {
+            typeArgs.add(SaveType(arg))
+        }
+        let argsVec = builder.CreateVectorU32(typeArgs)
+        return CreateSemaTy(builder, TypeKindToFlat(tupleTy.kind), argsVec, MF_SEMA_TY_INFO_NONE, 0u32)
+    }
+
+    // ASTWriter.cpp:1139-1165 SaveArrayTy/SaveVArrayTy.
+    private func SaveArrayTy(arrayTy: ArrayTy): FlatBufferOffset {
+        let elemTy = SaveType(arrayTy.typeArgs[0])
+        let typeArgs = ArrayList<UInt32>()
+        typeArgs.add(elemTy)
+        let argsVec = builder.CreateVectorU32(typeArgs)
+        let info = SaveArrayTyInfo(Int64(arrayTy.dims))
+        return CreateSemaTy(builder, TypeKindToFlat(arrayTy.kind), argsVec,
+            MF_SEMA_TY_INFO_ARRAY_TY_INFO, info)
+    }
+
+    private func SaveVArrayTy(varrayTy: VArrayTy): FlatBufferOffset {
+        let elemTy = SaveType(varrayTy.typeArgs[0])
+        let typeArgs = ArrayList<UInt32>()
+        typeArgs.add(elemTy)
+        let argsVec = builder.CreateVectorU32(typeArgs)
+        let info = SaveArrayTyInfo(varrayTy.size)
+        return CreateSemaTy(builder, TypeKindToFlat(varrayTy.kind), argsVec,
+            MF_SEMA_TY_INFO_ARRAY_TY_INFO, info)
+    }
+
+    // ASTWriter.cpp:1167-1175 SavePointerTy.
+    private func SavePointerTy(pointerTy: PointerTy): FlatBufferOffset {
+        let elemTy = SaveType(pointerTy.typeArgs[0])
+        let typeArgs = ArrayList<UInt32>()
+        typeArgs.add(elemTy)
+        let argsVec = builder.CreateVectorU32(typeArgs)
+        return CreateSemaTy(builder, TypeKindToFlat(pointerTy.kind), argsVec, MF_SEMA_TY_INFO_NONE, 0u32)
+    }
+
+    private func SaveSimpleTy(ty: Ty): FlatBufferOffset {
+        return CreateSemaTy(builder, TypeKindToFlat(ty.kind), 0u32, MF_SEMA_TY_INFO_NONE, 0u32)
     }
 
     private func SaveFuncTyInfo(funcTy: FuncTy): FlatBufferOffset {
@@ -2623,9 +2668,9 @@ public class ASTWriter {
             throw IllegalArgumentException("not yet serialized in faithful .cjo writer: generic type without declaration " +
                 genericTy.String())
         }
-        let decl = CreateFullIdForDecl(genericTy.decl.getOrThrow())
         let uppers = SaveSortedUpperBounds(genericTy)
         let upperVec = builder.CreateVectorU32(uppers)
+        let decl = CreateFullIdForDecl(genericTy.decl.getOrThrow())
         // ModuleFormat.fbs GenericTyInfo fields: 0 declPtr, 1 upperBounds.
         builder.StartTable(2)
         builder.AddOffset(1, upperVec)
@@ -2653,13 +2698,16 @@ public class ASTWriter {
         values.add(value, at: index)
     }
 
-    private func SaveCompositeTyInfo(ty: Ty): FlatBufferOffset {
+    private func CompositeTyFullId(ty: Ty): FlatBufferOffset {
         if (let None <- Ty.GetDeclPtrOfTy(Some(ty))) {
             throw IllegalArgumentException("not yet serialized in faithful .cjo writer: composite type without declaration " +
                 ty.String())
         }
         let decl = Ty.GetDeclPtrOfTy(Some(ty)).getOrThrow()
-        let fullId = CreateFullIdForDecl(decl)
+        return CreateFullIdForDecl(decl)
+    }
+
+    private func SaveCompositeTyInfo(ty: Ty, fullId: FlatBufferOffset): FlatBufferOffset {
         // ModuleFormat.fbs CompositeTyInfo fields: 0 declPtr, 1 isThisTy.
         builder.StartTable(2)
         builder.AddBool(1, (ty as ClassThisTy).isSome())
@@ -2973,18 +3021,6 @@ private func TypeKindToFlat(kind: TypeKind): UInt16 {
         // PackageFormat::TypeKind_Invalid rather than inventing extra ModuleFormat.fbs kinds.
         case _ => 0u16
     }
-}
-
-private func IsCompositeType(ty: Ty): Bool {
-    return ty.kind == TypeKind.TYPE_ENUM || ty.kind == TypeKind.TYPE_STRUCT || ty.kind == TypeKind.TYPE_CLASS ||
-        ty.kind == TypeKind.TYPE_INTERFACE || ty.kind == TypeKind.TYPE
-}
-
-private func ShouldEmitTypeArgsVector(kind: UInt16, infoType: UInt8, typeArgs: ArrayList<UInt32>): Bool {
-    if (!typeArgs.isEmpty()) {
-        return true
-    }
-    return infoType == 1u8 || infoType == 2u8 || infoType == 4u8 || kind == 18u16 || kind == 24u16
 }
 
 private func OverflowPolicyToFlat(strategy: OverflowStrategy): UInt8 {
