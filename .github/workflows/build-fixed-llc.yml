@@ -43,10 +43,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: fixed-toolchain/${{ matrix.platform }}
-          key: >-
-            fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-
-            ${{ env.LLVM_FORK_SHA }}-${{ env.CANGJIE_COMPILER_SHA }}-
-            ${{ hashFiles('runtime_shim/cjselfhost_llvmshim.cpp') }}
+          key: fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ env.LLVM_FORK_SHA }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('runtime_shim/cjselfhost_llvmshim.cpp') }}
 
       - name: Install source build dependencies
         if: steps.cache.outputs.cache-hit != 'true'
