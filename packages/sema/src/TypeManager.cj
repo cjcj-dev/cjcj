@@ -1132,19 +1132,21 @@ public class TypeManager {
         if (Ty.IsTyCorrect(firstWithSelf)) {
             supers.Add(firstWithSelf)
         }
+        let supersNext = TySet()
         for (ty in tys.values) {
             let supersCur = TySet()
             if (Ty.IsTyCorrect(ty)) {
                 supersCur.AddAll(GetAllSuperTys(ty))
                 supersCur.Add(ty)
             }
-            let supersNext = TySet()
             for (candidate in supersCur.values) {
                 if (supers.Contains(candidate)) {
                     supersNext.Add(candidate)
                 }
             }
-            supers = supersNext
+            supers.Clear()
+            supers.AddAll(supersNext)
+            supersNext.Clear()
         }
         return supers
     }
