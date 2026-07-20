@@ -604,7 +604,7 @@ public open class BaseMangler {
     public var lambdaCounter: Int64 = 0
     public var exportIdMode: Bool = false
     public let manglerCtxTable: HashMap<String, ManglerContext> = HashMap<String, ManglerContext>()
-    public let adapter: MangleAstAdapter = MangleAstAdapter()
+    public var adapter: MangleAstAdapter = MangleAstAdapter()
 
     public init() {}
 
