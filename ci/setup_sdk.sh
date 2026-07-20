@@ -58,7 +58,7 @@ STDX_PATH="$HOME/.cjv/stdx/$CJCJ_TOOLCHAIN/static/stdx"
 
 # 2.5 Swap the SDK's llc with the -O2-fixed static llc.
 #     The stock nightly llc miscompiles -O2 (SelectionDAG relocate-of-undef memory corruption;
-#     cjcj_llvm fix/scheddag-memcorrupt). The backend lowered relocate-of-undef to a
+#     cjcj-llvm fix/scheddag-memcorrupt). The backend lowered relocate-of-undef to a
 #     materialized 0xFEFEFEFE sentinel in a callee-saved register; the compressed GC stackmap
 #     records that register as a live root, so runtime GC dereferenced 0xFEFEFEFE and crashed
 #     non-deterministically on 26.04/few-core heaps (task#11). Fix: lower relocate-of-undef to
