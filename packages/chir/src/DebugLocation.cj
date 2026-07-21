@@ -37,7 +37,8 @@ public struct DebugLocation <: Equatable<DebugLocation> {
     private var fileID: UInt32 = 0u32
     private var beginPos: Position = Position()
     private var endPos: Position = Position()
-    private var scopeInfo: ArrayList<Int64> = ArrayList<Int64>()
+    private var scopeInfo: ArrayList<Int64> =
+        ArrayList<Int64>(Array<Int64>(0, { _: Int64 => 0 }))
 
     public init() {}
 
@@ -130,7 +131,7 @@ public struct DebugLocation <: Equatable<DebugLocation> {
 public let INVALID_LOCATION: DebugLocation = DebugLocation()
 
 private func CopyScopeInfo(scope: ArrayList<Int64>): ArrayList<Int64> {
-    let out = ArrayList<Int64>()
+    let out = ArrayList<Int64>(Array<Int64>(0, { _: Int64 => 0 }))
     for (entry in scope) {
         out.add(entry)
     }
