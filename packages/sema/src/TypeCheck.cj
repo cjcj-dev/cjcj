@@ -413,15 +413,28 @@ public func TypeAliasCircleCheck(diag: Option<BasicDiagnosticEngine>, ctx: ASTCo
         if (pkg.TestAttr(Attribute.IMPORTED)) {
             return
         }
+        let decls = collectDeclsFromPackage(pkg)
+        for (decl in decls) {
+            if (let Some(tad) <- (decl as TypeAliasDecl)) {
+                tad.checkFlag = InheritanceVisitStatus.UNVISITED
+            }
+        }
+        for (decl in decls) {
+            if (let Some(tad) <- (decl as TypeAliasDecl)) {
+                let path = ArrayList<Decl>()
+                CheckTypeAliasCycleForOneDecl(diag, tad, path)
+            }
+        }
+        return
     }
-    let decls = if (let Some(pkg) <- ctx.curPackage) { collectDeclsFromPackage(pkg) } else { GetAllDecls(ctx) }
-    for (decl in decls) {
-        if (let Some(tad) <- (decl as TypeAliasDecl)) {
+    let symbols = GetAllDecls(ctx)
+    for (symbol in symbols) {
+        if ((let Some(node) <- symbol.node) && (let Some(tad) <- (node as TypeAliasDecl))) {
             tad.checkFlag = InheritanceVisitStatus.UNVISITED
         }
     }
-    for (decl in decls) {
-        if (let Some(tad) <- (decl as TypeAliasDecl)) {
+    for (symbol in symbols) {
+        if ((let Some(node) <- symbol.node) && (let Some(tad) <- (node as TypeAliasDecl))) {
             let path = ArrayList<Decl>()
             CheckTypeAliasCycleForOneDecl(diag, tad, path)
         }
@@ -794,14 +807,18 @@ public func ResolveOneDecl(typeManager: TypeManager, ctx: ASTContext, decl: Decl
 
 public func ResolveDecls(typeManager: TypeManager, ctx: ASTContext,
     importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
-    let decls = GetAllDecls(ctx)
-    for (decl in decls) {
-        if (decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.FUNC_DECL) {
+    let symbols = GetAllDecls(ctx)
+    for (symbol in symbols) {
+        if ((let Some(node) <- symbol.node) &&
+            (node.astKind == ASTKind.VAR_DECL || node.astKind == ASTKind.FUNC_DECL) &&
+            (let Some(decl) <- (node as Decl))) {
             SetOuterFunctionDecl(decl)
         }
     }
-    for (decl in decls) {
-        ResolveOneDecl(typeManager, ctx, decl, importManager: importManager, diag: diag)
+    for (symbol in symbols) {
+        if ((let Some(node) <- symbol.node) && (let Some(decl) <- (node as Decl))) {
+            ResolveOneDecl(typeManager, ctx, decl, importManager: importManager, diag: diag)
+        }
     }
 }
 
@@ -844,15 +861,30 @@ public func SubstituteTypeAliasForAlias(typeManager: TypeManager, tad: TypeAlias
 
 public func ResolveTypeAlias(typeManager: TypeManager, ctx: ASTContext,
     importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Unit {
-    let decls = if (let Some(pkg) <- ctx.curPackage) { collectDeclsFromPackage(pkg) } else { GetAllDecls(ctx) }
-    for (decl in decls) {
-        if (let Some(tad) <- (decl as TypeAliasDecl)) {
+    if (let Some(pkg) <- ctx.curPackage) {
+        let decls = collectDeclsFromPackage(pkg)
+        for (decl in decls) {
+            if (let Some(tad) <- (decl as TypeAliasDecl)) {
+                SetTypeAliasDeclTy(typeManager, ctx, tad, importManager: importManager, diag: diag)
+            }
+        }
+        TypeAliasCircleCheck(diag, ctx)
+        for (decl in decls) {
+            if (let Some(tad) <- (decl as TypeAliasDecl)) {
+                SubstituteTypeAliasForAlias(typeManager, tad)
+            }
+        }
+        return
+    }
+    let symbols = GetAllDecls(ctx)
+    for (symbol in symbols) {
+        if ((let Some(node) <- symbol.node) && (let Some(tad) <- (node as TypeAliasDecl))) {
             SetTypeAliasDeclTy(typeManager, ctx, tad, importManager: importManager, diag: diag)
         }
     }
     TypeAliasCircleCheck(diag, ctx)
-    for (decl in decls) {
-        if (let Some(tad) <- (decl as TypeAliasDecl)) {
+    for (symbol in symbols) {
+        if ((let Some(node) <- symbol.node) && (let Some(tad) <- (node as TypeAliasDecl))) {
             SubstituteTypeAliasForAlias(typeManager, tad)
         }
     }
@@ -876,9 +908,16 @@ private func markAliasGenericParameter(decl: Decl): Unit {
 }
 
 public func MarkAliasGenericParameters(ctx: ASTContext): Unit {
-    let decls = if (let Some(pkg) <- ctx.curPackage) { collectDeclsFromPackage(pkg) } else { GetAllDecls(ctx) }
-    for (decl in decls) {
-        markAliasGenericParameter(decl)
+    if (let Some(pkg) <- ctx.curPackage) {
+        for (decl in collectDeclsFromPackage(pkg)) {
+            markAliasGenericParameter(decl)
+        }
+        return
+    }
+    for (symbol in GetAllDecls(ctx)) {
+        if ((let Some(node) <- symbol.node) && (let Some(decl) <- (node as Decl))) {
+            markAliasGenericParameter(decl)
+        }
     }
 }
 
