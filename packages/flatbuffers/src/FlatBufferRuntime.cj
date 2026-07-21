@@ -123,6 +123,7 @@ public func ReadScalar(data: Array<UInt8>, pos: Int64, _: UInt8): UInt8 {
     return EndianScalar(data[pos])
 }
 
+@OverflowWrapping
 public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Int8): Int8 {
     return EndianScalar(Int8(data[pos]))
 }
@@ -136,6 +137,7 @@ public func ReadScalar(data: Array<UInt8>, pos: Int64, _: UInt16): UInt16 {
     return EndianScalar(UInt16(data[pos]) | (UInt16(data[pos + 1]) << 8))
 }
 
+@OverflowWrapping
 public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Int16): Int16 {
     return EndianScalar(Int16(ReadScalar(data, pos, 0u16)))
 }
@@ -150,6 +152,7 @@ public func ReadScalar(data: Array<UInt8>, pos: Int64, _: UInt32): UInt32 {
         (UInt32(data[pos + 2]) << 16) | (UInt32(data[pos + 3]) << 24))
 }
 
+@OverflowWrapping
 public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Int32): Int32 {
     return EndianScalar(Int32(ReadScalar(data, pos, 0u32)))
 }
@@ -158,6 +161,7 @@ public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Float32): Float32 {
     return EndianScalar(Float32.fromBits(ReadScalar(data, pos, 0u32)))
 }
 
+@OverflowWrapping
 public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Rune): Rune {
     return EndianScalar(Rune(ReadScalar(data, pos, 0u32)))
 }
@@ -170,6 +174,7 @@ public func ReadScalar(data: Array<UInt8>, pos: Int64, _: UInt64): UInt64 {
         (UInt64(data[pos + 6]) << 48) | (UInt64(data[pos + 7]) << 56))
 }
 
+@OverflowWrapping
 public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Int64): Int64 {
     return EndianScalar(Int64(ReadScalar(data, pos, 0u64)))
 }
