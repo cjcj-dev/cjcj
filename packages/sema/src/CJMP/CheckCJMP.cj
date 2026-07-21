@@ -672,6 +672,33 @@ extend MPTypeCheckerImpl {
         }
     }
 
+    // C++ src/Sema/CJMP/CheckCJMP.cpp:524-539 MPTypeCheckerImpl::RemoveCommonCandidatesIfHasSpecific.
+    public func RemoveCommonNullableCandidatesIfHasSpecific(candidates: ArrayList<Option<FuncDecl>>): Unit {
+        var idx: Int64 = 0
+        while (idx < candidates.size) {
+            var shouldRemove = false
+            if (let Some(candidate) <- candidates[idx]) {
+                if (candidate.TestAttr(Attribute.COMMON)) {
+                    if (let Some(specificImpl) <- candidate.specificImplementation) {
+                        for (other in candidates) {
+                            if (let Some(otherCandidate) <- other) {
+                                if (SameDecl(otherCandidate, specificImpl)) {
+                                    shouldRemove = true
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (shouldRemove) {
+                candidates.remove(at: idx)
+            } else {
+                idx++
+            }
+        }
+    }
+
     public func IsCJMPDeclMatchable(leftDecl: Decl, rightDecl: Decl): Bool {
         let commonDecl = if (leftDecl.TestAttr(Attribute.COMMON)) { leftDecl } else { rightDecl }
         let specificDecl = if (leftDecl.TestAttr(Attribute.COMMON)) { rightDecl } else { leftDecl }

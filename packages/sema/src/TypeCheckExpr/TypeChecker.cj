@@ -4529,49 +4529,25 @@ extend TypeChecker {
         if (IsInstanceConstructor(target) && target.outerDecl.isSome()) {
             target = target.outerDecl.getOrThrow()
         }
-        let nullableCandidates = ArrayList<Option<FuncDecl>>()
-        if (target.IsStructOrClassDecl()) {
+        let nullableCandidates = if (target.IsStructOrClassDecl()) {
+            let ctorCandidates = ArrayList<Option<FuncDecl>>()
             for (member in target.GetMemberDeclPtrs()) {
                 let originalCtor = IsInstanceConstructor(member) && member.astKind == ASTKind.FUNC_DECL &&
                     member.identifier.Val() == "init"
                 if (originalCtor) {
-                    nullableCandidates.add(Some((member as FuncDecl).getOrThrow()))
+                    ctorCandidates.add(Some((member as FuncDecl).getOrThrow()))
                 }
             }
             isFunctionCall = false
+            ctorCandidates
         } else {
-            for (candidate in GetFuncTargets(expr)) {
-                nullableCandidates.add(candidate)
-            }
+            GetFuncTargets(expr)
         }
         RemoveDuplicateElements(nullableCandidates)
         if (ce.callKind == CallKind.CALL_ANNOTATION) {
             RemoveNonAnnotationCandidates(nullableCandidates)
         }
-        let cjmpCandidates = ArrayList<FuncDecl>()
-        for (candidate in nullableCandidates) {
-            if (let Some(funcDecl) <- candidate) {
-                cjmpCandidates.add(funcDecl)
-            }
-        }
-        mpImpl.RemoveCommonCandidatesIfHasSpecific(cjmpCandidates)
-        var candidateIdx: Int64 = 0
-        while (candidateIdx < nullableCandidates.size) {
-            if (let Some(funcDecl2) <- nullableCandidates[candidateIdx]) {
-                var retained = false
-                for (cjmpCandidate in cjmpCandidates) {
-                    if (cjmpCandidate == funcDecl2) {
-                        retained = true
-                        break
-                    }
-                }
-                if (!retained) {
-                    nullableCandidates.remove(at: candidateIdx)
-                    continue
-                }
-            }
-            candidateIdx++
-        }
+        mpImpl.RemoveCommonNullableCandidatesIfHasSpecific(nullableCandidates)
         var candidates = ArrayList<FuncDecl>()
         var hasError = false
         try (ds = DiagSuppressor(impl.diag)) {

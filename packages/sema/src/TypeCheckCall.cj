@@ -731,21 +731,26 @@ private func SyntaxFilterCandidates(ce: CallExpr, candidates: ArrayList<FuncDecl
 
 private func FilterIncompatibleCandidatesForCall(diag: Option<BasicDiagnosticEngine>, ce: CallExpr,
     candidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
-    let syntacticCandidates = SyntaxFilterCandidates(ce, candidates)
-    let out = ArrayList<FuncDecl>()
+    if (candidates.isEmpty()) {
+        return candidates
+    }
+    let filtered = SyntaxFilterCandidates(ce, candidates)
     var badCandidate: Option<FuncDecl> = None
-    for (fd in syntacticCandidates) {
+    var idx: Int64 = 0
+    while (idx < filtered.size) {
+        let fd = filtered[idx]
         if (fd.hasVariableLenArg || IsPossibleVariadicFunction(fd, ce)) {
-            out.add(fd)
+            idx++
             continue
         }
         if (HasSamePositionalArgsSize(fd, ce) && CheckArgsWithParamName(None, ce, fd)) {
-            out.add(fd)
+            idx++
         } else {
             badCandidate = Some(fd)
+            filtered.remove(at: idx)
         }
     }
-    if (out.isEmpty()) {
+    if (filtered.isEmpty()) {
         if (let Some(bad) <- badCandidate) {
             let initializedParamSize = GetInitializedlNameParamSize(bad)
             let paramSize = if (let Some(params) <- BodyParamList(bad)) {
@@ -760,7 +765,7 @@ private func FilterIncompatibleCandidatesForCall(diag: Option<BasicDiagnosticEng
             }
         }
     }
-    return out
+    return filtered
 }
 
 private func FuncParamTysValid(fd: FuncDecl): Bool {
@@ -800,7 +805,8 @@ private func RemoveShadowedFunc(typeManager: TypeManager, fd: FuncDecl, currentL
     }
 }
 
-private func FilterShadowedFunc(typeManager: TypeManager, candidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
+// C++ src/Sema/TypeCheckCall.cpp:1755-1794 TypeCheckerImpl::FilterShadowedFunc.
+private func FilterShadowedFuncInPlace(typeManager: TypeManager, candidates: ArrayList<FuncDecl>): Unit {
     let levelMap = HashMap<Int64, ArrayList<FuncDecl>>()
     for (fd in candidates) {
         let scopeLevel = if (fd.TestAttr(Attribute.IMPORTED) && fd.TestAttr(Attribute.GLOBAL)) {
@@ -822,8 +828,9 @@ private func FilterShadowedFunc(typeManager: TypeManager, candidates: ArrayList<
             }
         }
     }
-    let out = ArrayList<FuncDecl>()
-    for (fd in candidates) {
+    var idx: Int64 = 0
+    while (idx < candidates.size) {
+        let fd = candidates[idx]
         let scopeLevel = if (fd.TestAttr(Attribute.IMPORTED) && fd.TestAttr(Attribute.GLOBAL)) {
             -1
         } else if (fd.TestAttr(Attribute.ENUM_CONSTRUCTOR)) {
@@ -832,10 +839,20 @@ private func FilterShadowedFunc(typeManager: TypeManager, candidates: ArrayList<
             Int64(fd.scopeLevel)
         }
         if (ContainsFuncDecl(levelMap.get(scopeLevel).getOrThrow(), fd)) {
-            out.add(fd)
+            idx++
+        } else {
+            candidates.remove(at: idx)
         }
     }
-    return out
+}
+
+private func FilterShadowedFunc(typeManager: TypeManager, candidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
+    let filtered = ArrayList<FuncDecl>()
+    for (candidate in candidates) {
+        filtered.add(candidate)
+    }
+    FilterShadowedFuncInPlace(typeManager, filtered)
+    return filtered
 }
 
 private func CheckAndObtainTypeMappingBetweenInterfaceAndExtend(typeManager: TypeManager, extendDecl: ExtendDecl,
@@ -899,7 +916,7 @@ private func IsInterfaceAbstractImplementedByExtend(typeManager: TypeManager, in
         extendTy.retTy, interfaceTy.retTy)
 }
 
-private func FilterExtendImplAbstractFunc(typeManager: TypeManager, candidates: ArrayList<FuncDecl>): ArrayList<FuncDecl> {
+private func FilterExtendImplAbstractFunc(typeManager: TypeManager, candidates: ArrayList<FuncDecl>): Unit {
     let implemented = ArrayList<FuncDecl>()
     for (fd1 in candidates) {
         if (let None <- fd1.outerDecl) {
@@ -921,46 +938,53 @@ private func FilterExtendImplAbstractFunc(typeManager: TypeManager, candidates: 
         }
     }
     if (implemented.isEmpty()) {
-        return candidates
+        return
     }
-    let out = ArrayList<FuncDecl>()
-    for (fd in candidates) {
-        if (!ContainsFuncDecl(implemented, fd)) {
-            out.add(fd)
+    var idx: Int64 = 0
+    while (idx < candidates.size) {
+        if (ContainsFuncDecl(implemented, candidates[idx])) {
+            candidates.remove(at: idx)
+        } else {
+            idx++
         }
     }
-    return out
 }
 
 internal func FilterCandidates(typeManager: TypeManager, diag: Option<BasicDiagnosticEngine>, ctx: Option<ASTContext>,
-    ce: CallExpr, inCandidates: ArrayList<FuncDecl>,
+    ce: CallExpr, candidates: ArrayList<FuncDecl>,
     importManager!: Option<SemaImportManager> = None): ArrayList<FuncDecl> {
-    let visibleCandidates = ArrayList<FuncDecl>()
     let baseFunc = match (ce.baseFunc) {
         case Some(value) => value
-        case None => return visibleCandidates
+        case None =>
+            candidates.clear()
+            return candidates
     }
     var curStructSymbol: Option<Symbol> = None
     if (let Some(ctxValue) <- ctx) {
         curStructSymbol = GetCurStructSymbol(ctxValue, baseFunc.scopeName)
     }
-    for (fd in inCandidates) {
-        if (let None <- BodyParamList(fd)) {
-            continue
-        }
-        if (!IsLegalAccess(typeManager, curStructSymbol, fd, baseFunc, importManager: importManager)) {
-            continue
-        }
-        visibleCandidates.add(fd)
-    }
-    let argFiltered = FilterIncompatibleCandidatesForCall(diag, ce, visibleCandidates)
-    let typeFiltered = ArrayList<FuncDecl>()
-    for (fd in argFiltered) {
-        if (FuncParamTysValid(fd)) {
-            typeFiltered.add(fd)
+    var idx: Int64 = 0
+    while (idx < candidates.size) {
+        let fd = candidates[idx]
+        if ((let None <- BodyParamList(fd)) ||
+            !IsLegalAccess(typeManager, curStructSymbol, fd, baseFunc, importManager: importManager)) {
+            candidates.remove(at: idx)
+        } else {
+            idx++
         }
     }
-    return FilterExtendImplAbstractFunc(typeManager, FilterShadowedFunc(typeManager, typeFiltered))
+    let filtered = FilterIncompatibleCandidatesForCall(diag, ce, candidates)
+    idx = 0
+    while (idx < filtered.size) {
+        if (FuncParamTysValid(filtered[idx])) {
+            idx++
+        } else {
+            filtered.remove(at: idx)
+        }
+    }
+    FilterShadowedFuncInPlace(typeManager, filtered)
+    FilterExtendImplAbstractFunc(typeManager, filtered)
+    return filtered
 }
 
 private func CalculateEnumCtorScopeLevel(ctx: ASTContext, ce: CallExpr, fd: FuncDecl): Int64 {
