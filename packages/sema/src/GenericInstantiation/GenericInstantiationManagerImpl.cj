@@ -1558,7 +1558,7 @@ class GenericInstantiationManagerImpl {
 
     private func CheckNodeInstantiation(node: Node, pkg: Package): VisitAction {
         let action = CheckVisitedNode(node)
-        if (action != VisitAction.WALK_CHILDREN) {
+        if (!action.isWalkChildren()) {
             return action
         }
         if (let Some(expr) <- (node as Expr)) {
@@ -1932,7 +1932,7 @@ class GenericInstantiationManagerImpl {
 
     private func CheckNodeRearrangement(node: Node, pkg: Package): VisitAction {
         let action = CheckVisitedNode(node, checkGeneric: true)
-        if (action != VisitAction.WALK_CHILDREN) {
+        if (!action.isWalkChildren()) {
             return action
         }
         if (let Some(expr) <- (node as Expr)) {

@@ -266,7 +266,7 @@ private func ValidateBlockInTryHandle(block: Block, diag!: Option<BasicDiagnosti
         }
         VisitAction.WALK_CHILDREN
     })
-    return walker.Walk() != VisitAction.STOP_NOW
+    return !walker.Walk().isStopNow()
 }
 
 private func ValidateHandler(handler: Handler, diag!: Option<BasicDiagnosticEngine> = None): Bool {

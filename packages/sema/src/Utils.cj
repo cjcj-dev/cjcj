@@ -129,7 +129,7 @@ private func CheckRecursiveCtorFoundCycle(ctx: RecursiveCtorCtx, decl: Node): Bo
                 return VisitAction.STOP_NOW
             }
             let action = VisitRecursiveCtorCtx(ctx, initDecl)
-            if (action != VisitAction.WALK_CHILDREN) {
+            if (!action.isWalkChildren()) {
                 return action
             }
             for (refNode in ctx.GetDependencies(initDecl)) {
@@ -139,7 +139,7 @@ private func CheckRecursiveCtorFoundCycle(ctx: RecursiveCtorCtx, decl: Node): Bo
             }
         } else if (IsInitRef(node)) {
             let action = VisitRecursiveCtorCtx(ctx, node)
-            if (action != VisitAction.WALK_CHILDREN) {
+            if (!action.isWalkChildren()) {
                 return action
             }
             let target = node.GetTarget().getOrThrow()

@@ -60,7 +60,7 @@ public class Collector {
                     if (let Some(desugarExpr) <- expr.desugarExpr) {
                         if (let Some(currentWalker) <- walkerBox.value) {
                             let action = currentWalker.WalkNode(desugarExpr)
-                            if (action == VisitAction.STOP_NOW) {
+                            if (action.isStopNow()) {
                                 return action
                             }
                         }
@@ -73,7 +73,7 @@ public class Collector {
                 if (let Some(currentWalker) <- walkerBox.value) {
                     for (annotation in macroDecl.annotations) {
                         let action = currentWalker.WalkNode(annotation)
-                        if (action == VisitAction.STOP_NOW) {
+                        if (action.isStopNow()) {
                             return action
                         }
                     }
@@ -97,7 +97,7 @@ public class Collector {
                 }
                 let currentWalker = walkerBox.value.getOrThrow()
                 for (annotation in enumDecl.annotations) {
-                    if (currentWalker.WalkNode(annotation) == VisitAction.STOP_NOW) {
+                    if (currentWalker.WalkNode(annotation).isStopNow()) {
                         return VisitAction.STOP_NOW
                     }
                 }
@@ -105,18 +105,18 @@ public class Collector {
                 if (let Some(generic) <- enumDecl.generic) {
                     for (typeParameter in generic.typeParameters) {
                         typeParameter.outerDecl = Some(enumDecl)
-                        if (currentWalker.WalkNode(typeParameter) == VisitAction.STOP_NOW) {
+                        if (currentWalker.WalkNode(typeParameter).isStopNow()) {
                             return VisitAction.STOP_NOW
                         }
                     }
                     for (constraint in generic.genericConstraints) {
-                        if (currentWalker.WalkNode(constraint) == VisitAction.STOP_NOW) {
+                        if (currentWalker.WalkNode(constraint).isStopNow()) {
                             return VisitAction.STOP_NOW
                         }
                     }
                 }
                 for (inheritedType in enumDecl.inheritedTypes) {
-                    if (currentWalker.WalkNode(inheritedType) == VisitAction.STOP_NOW) {
+                    if (currentWalker.WalkNode(inheritedType).isStopNow()) {
                         return VisitAction.STOP_NOW
                     }
                 }
@@ -125,12 +125,12 @@ public class Collector {
                     if (let Some(funcDecl) <- (constructor as FuncDecl)) {
                         funcDecl.funcBody.getOrThrow().parentEnum = Some(enumDecl)
                     }
-                    if (currentWalker.WalkNode(constructor) == VisitAction.STOP_NOW) {
+                    if (currentWalker.WalkNode(constructor).isStopNow()) {
                         return VisitAction.STOP_NOW
                     }
                 }
                 for (member in enumDecl.members) {
-                    if (currentWalker.WalkNode(member) == VisitAction.STOP_NOW) {
+                    if (currentWalker.WalkNode(member).isStopNow()) {
                         return VisitAction.STOP_NOW
                     }
                     if (let Some(funcDecl) <- (member as FuncDecl)) {
@@ -145,7 +145,7 @@ public class Collector {
                 }
                 let currentWalker = walkerBox.value.getOrThrow()
                 for (annotation in extendDecl.annotations) {
-                    if (currentWalker.WalkNode(annotation) == VisitAction.STOP_NOW) {
+                    if (currentWalker.WalkNode(annotation).isStopNow()) {
                         return VisitAction.STOP_NOW
                     }
                 }
@@ -153,29 +153,29 @@ public class Collector {
                 if (let Some(generic) <- extendDecl.generic) {
                     for (typeParameter in generic.typeParameters) {
                         typeParameter.outerDecl = Some(extendDecl)
-                        if (currentWalker.WalkNode(typeParameter) == VisitAction.STOP_NOW) {
+                        if (currentWalker.WalkNode(typeParameter).isStopNow()) {
                             return VisitAction.STOP_NOW
                         }
                     }
                     for (constraint in generic.genericConstraints) {
-                        if (currentWalker.WalkNode(constraint) == VisitAction.STOP_NOW) {
+                        if (currentWalker.WalkNode(constraint).isStopNow()) {
                             return VisitAction.STOP_NOW
                         }
                     }
                 }
                 if (let Some(extendedType) <- extendDecl.extendedType) {
-                    if (currentWalker.WalkNode(extendedType) == VisitAction.STOP_NOW) {
+                    if (currentWalker.WalkNode(extendedType).isStopNow()) {
                         return VisitAction.STOP_NOW
                     }
                 }
                 for (inheritedType in extendDecl.inheritedTypes) {
-                    if (currentWalker.WalkNode(inheritedType) == VisitAction.STOP_NOW) {
+                    if (currentWalker.WalkNode(inheritedType).isStopNow()) {
                         return VisitAction.STOP_NOW
                     }
                 }
                 collector.AddSymbol(ctx, extendDecl.bodyScope.getOrThrow(), buildTrie: buildTrie)
                 for (member in extendDecl.members) {
-                    if (currentWalker.WalkNode(member) == VisitAction.STOP_NOW) {
+                    if (currentWalker.WalkNode(member).isStopNow()) {
                         return VisitAction.STOP_NOW
                     }
                 }
@@ -197,13 +197,13 @@ public class Collector {
                 if (let Some(currentWalker2) <- walkerBox.value) {
                     if (let Some(mutex) <- syncExpr.mutex) {
                         let action = currentWalker2.WalkNode(mutex)
-                        if (action == VisitAction.STOP_NOW) {
+                        if (action.isStopNow()) {
                             return action
                         }
                     }
                     if (let Some(desugarExpr) <- syncExpr.desugarExpr) {
                         let action = currentWalker2.WalkNode(desugarExpr)
-                        if (action == VisitAction.STOP_NOW) {
+                        if (action.isStopNow()) {
                             return action
                         }
                     }
@@ -219,7 +219,7 @@ public class Collector {
                     if (let Some(currentWalker) <- walkerBox.value) {
                         for (macroCall in file.originalMacroCallNodes) {
                             let action = currentWalker.WalkNode(macroCall)
-                            if (action == VisitAction.STOP_NOW) {
+                            if (action.isStopNow()) {
                                 return action
                             }
                             AddCurFile(macroCall, file: file)

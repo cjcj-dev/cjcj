@@ -69,13 +69,13 @@ public class ASTTypeValidator {
             if (let Some(desugar) <- expr.desugarExpr) {
                 let desugarAction = Walker(desugar, walkerID, visitPre: { child: Node => PreVisitor(child) },
                     visitPost: { child: Node => PostVisitor(child) }).Walk()
-                if (desugarAction == VisitAction.STOP_NOW) {
+                if (desugarAction.isStopNow()) {
                     return VisitAction.STOP_NOW
                 }
                 action = VisitAction.SKIP_CHILDREN
             }
         }
-        if (action == VisitAction.SKIP_CHILDREN) {
+        if (action.isSkipChildren()) {
             needCheck = false
         }
         checkStatus.add(needCheck)

@@ -36,7 +36,7 @@ class InstantiatedExtendRecorder {
 
     private func RecordUsedExtendDecl(node: Node): VisitAction {
         let action = gim.CheckVisitedNode(node)
-        if (action != VisitAction.WALK_CHILDREN) {
+        if (!action.isWalkChildren()) {
             return action
         }
         if (let Some(expr) <- (node as Expr)) {

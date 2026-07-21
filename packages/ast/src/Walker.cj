@@ -3,30 +3,34 @@ package cjcj::ast
 import cjcj::utils.CJC_ASSERT
 import std.sync.AtomicUInt32
 
-public enum VisitAction {
-    | WALK_CHILDREN
-    | SKIP_CHILDREN
-    | STOP_NOW
-    | KEEP_DECISION
-}
+// C++ Walker.h:32-37 represents VisitAction as `enum class : uint8_t`. A Cangjie enum is a
+// managed tagged object even when none of its constructors has a payload, so returning an enum
+// constructor from every node visit allocates. The Walker callback ABI also boxes struct returns;
+// keep the same four UInt8 values in shared immutable objects so neither return path allocates.
+public class VisitAction <: Equatable<VisitAction> {
+    private let value: UInt8
 
-private func VisitActionIndex(action: VisitAction): Int64 {
-    return match (action) {
-        case VisitAction.WALK_CHILDREN => 0
-        case VisitAction.SKIP_CHILDREN => 1
-        case VisitAction.STOP_NOW => 2
-        case VisitAction.KEEP_DECISION => 3
+    private init(value: UInt8) {
+        this.value = value
     }
-}
 
-extend VisitAction <: Equatable<VisitAction> {
+    public static let WALK_CHILDREN: VisitAction = VisitAction(0u8)
+    public static let SKIP_CHILDREN: VisitAction = VisitAction(1u8)
+    public static let STOP_NOW: VisitAction = VisitAction(2u8)
+    public static let KEEP_DECISION: VisitAction = VisitAction(3u8)
+
     public operator func ==(right: VisitAction): Bool {
-        return VisitActionIndex(this) == VisitActionIndex(right)
+        return value == right.value
     }
 
     public operator func !=(right: VisitAction): Bool {
         return !(this == right)
     }
+
+    public func isWalkChildren(): Bool { return value == 0u8 }
+    public func isSkipChildren(): Bool { return value == 1u8 }
+    public func isStopNow(): Bool { return value == 2u8 }
+    public func isKeepDecision(): Bool { return value == 3u8 }
 }
 
 private let nextWalkerID = AtomicUInt32(1u32)
@@ -89,30 +93,30 @@ public class Walker {
         if (let Some(pre) <- visitPre) {
             action = pre(curNode)
         }
-        if (action == VisitAction.STOP_NOW) {
+        if (action.isStopNow()) {
             return action
         }
-        if (action == VisitAction.WALK_CHILDREN) {
+        if (action.isWalkChildren()) {
             let childAction = WalkChildren(curNode)
-            if (childAction == VisitAction.STOP_NOW) {
+            if (childAction.isStopNow()) {
                 return childAction
             }
         }
         if (let Some(post) <- visitPost) {
             let postAction = post(curNode)
-            if (postAction == VisitAction.STOP_NOW) {
+            if (postAction.isStopNow()) {
                 return postAction
             }
-            if (postAction != VisitAction.KEEP_DECISION) {
+            if (!postAction.isKeepDecision()) {
                 action = postAction
             }
         }
-        CJC_ASSERT(action != VisitAction.KEEP_DECISION)
+        CJC_ASSERT(!action.isKeepDecision())
         return action
     }
 
     private func stopIf(action: VisitAction): Bool {
-        return action == VisitAction.STOP_NOW
+        return action.isStopNow()
     }
 
     private func walkExprOption(node: Option<Expr>): VisitAction {
