@@ -8,7 +8,7 @@ import cjcj::flatbuffers.ReadScalar
 // GlobalVarIndex, UseInfo, and SemanticInfo.
 
 public func GetHashedPackage(data: Array<UInt8>): CachedASTFormat_HashedPackage {
-    return CachedASTFormat_HashedPackage(data, Int64(ReadScalar<UInt32>(data, 0)))
+    return CachedASTFormat_HashedPackage(data, Int64(ReadScalar(data, 0, 0u32)))
 }
 
 public func HashedPackageIdentifier(): String {

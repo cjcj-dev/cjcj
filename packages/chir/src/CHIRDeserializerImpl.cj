@@ -134,7 +134,7 @@ class CHIRDeserializerImpl {
         let valueKinds = pkg.GetValues_type().getOrThrow()
         id = 1u32
         while (id <= values.size()) {
-            let kind = (valueKinds.Get(id - 1u32) as UInt8).getOrThrow()
+            let kind = valueKinds.Get(id - 1u32, 0u8)
             if (kind == CHIRFB_VALUE_ELEM_FUNCTION || kind == CHIRFB_VALUE_ELEM_GLOBAL_VAR) {
                 GetValue<Value>(id)
             }
@@ -143,7 +143,7 @@ class CHIRDeserializerImpl {
         let defKinds = pkg.GetDefs_type().getOrThrow()
         id = 1u32
         while (id <= defs.size()) {
-            let kind = (defKinds.Get(id - 1u32) as UInt8).getOrThrow()
+            let kind = defKinds.Get(id - 1u32, 0u8)
             let position = (defs.Get(id - 1u32) as Int64).getOrThrow()
             if (kind == CHIRFB_CUSTOM_TYPE_DEF_ELEM_ENUM_DEF) {
                 Config(PackageFormat_EnumDef(defs.data, position), GetCustomTypeDef<EnumDef>(id).getOrThrow())
@@ -158,7 +158,7 @@ class CHIRDeserializerImpl {
         }
         id = 1u32
         while (id <= values.size()) {
-            let kind = (valueKinds.Get(id - 1u32) as UInt8).getOrThrow()
+            let kind = valueKinds.Get(id - 1u32, 0u8)
             let position = (values.Get(id - 1u32) as Int64).getOrThrow()
             if (kind == CHIRFB_VALUE_ELEM_GLOBAL_VAR) {
                 Config(PackageFormat_GlobalVar(values.data, position), GetValue<GlobalVar>(id).getOrThrow())
@@ -173,7 +173,7 @@ class CHIRDeserializerImpl {
         }
         id = 1u32
         while (id <= values.size()) {
-            let kind = (valueKinds.Get(id - 1u32) as UInt8).getOrThrow()
+            let kind = valueKinds.Get(id - 1u32, 0u8)
             if (kind == CHIRFB_VALUE_ELEM_LOCAL_VAR) {
                 GetValue<Value>(id)
             } else if (kind == CHIRFB_VALUE_ELEM_FUNCTION) {
@@ -1371,7 +1371,7 @@ class CHIRDeserializerImpl {
         if (let Some(vector) <- ids) {
             var index = 0u32
             while (index < vector.size()) {
-                let id = (vector.Get(index) as UInt32).getOrThrow()
+                let id = vector.Get(index, 0u32)
                 if (let Some(ty) <- GetType<T>(id)) {
                     result.add(ty)
                 }
@@ -1408,7 +1408,7 @@ class CHIRDeserializerImpl {
         if (kind == CHIRFB_CHIR_TYPE_KIND_THIS) { return builder.context.GetThisTy() }
         let argTys = obj.GetArgTys().getOrThrow()
         CJC_ASSERT(argTys.size() >= 1u32)
-        let argTy = GetType<Type>((argTys.Get(0u32) as UInt32).getOrThrow()).getOrThrow()
+        let argTy = GetType<Type>(argTys.Get(0u32, 0u32)).getOrThrow()
         if (kind == CHIRFB_CHIR_TYPE_KIND_C_POINTER) { return builder.context.GetCPointerTy(argTy) }
         if (kind == CHIRFB_CHIR_TYPE_KIND_REFTYPE) { return builder.context.GetRefTy(argTy) }
         if (kind == CHIRFB_CHIR_TYPE_KIND_BOXTYPE) { return builder.context.GetBoxTy(argTy) }
@@ -1418,25 +1418,25 @@ class CHIRDeserializerImpl {
 
     private func Deserialize(obj: PackageFormat_RawArrayType): RawArrayType {
         let argTys = obj.GetBase().getOrThrow().GetArgTys().getOrThrow()
-        let elemTy = GetType<Type>((argTys.Get(0u32) as UInt32).getOrThrow()).getOrThrow()
+        let elemTy = GetType<Type>(argTys.Get(0u32, 0u32)).getOrThrow()
         return builder.context.GetRawArrayTy(elemTy, dims: UInt64(obj.GetDims()))
     }
 
     private func Deserialize(obj: PackageFormat_VArrayType): VArrayType {
         let argTys = obj.GetBase().getOrThrow().GetArgTys().getOrThrow()
-        let elemTy = GetType<Type>((argTys.Get(0u32) as UInt32).getOrThrow()).getOrThrow()
+        let elemTy = GetType<Type>(argTys.Get(0u32, 0u32)).getOrThrow()
         return builder.context.GetVArrayTy(elemTy, UInt64(obj.GetSize()))
     }
 
     private func Deserialize(obj: PackageFormat_FuncType): FuncType {
         let argTys = obj.GetBase().getOrThrow().GetArgTys().getOrThrow()
         CJC_ASSERT(argTys.size() > 0u32)
-        let retTyId = (argTys.Get(argTys.size() - 1u32) as UInt32).getOrThrow()
+        let retTyId = argTys.Get(argTys.size() - 1u32, 0u32)
         let retTy = GetType<Type>(retTyId).getOrThrow()
         let paramTys = ArrayList<Type>()
         var index = 0u32
         while (index + 1u32 < argTys.size()) {
-            paramTys.add(GetType<Type>((argTys.Get(index) as UInt32).getOrThrow()).getOrThrow())
+            paramTys.add(GetType<Type>(argTys.Get(index, 0u32)).getOrThrow())
             index++
         }
         return builder.context.GetFuncTy(paramTys, retTy, hasVarLenParam: obj.GetHasVarArg(),
@@ -1474,7 +1474,7 @@ class CHIRDeserializerImpl {
         let rawPackage = pool.getOrThrow()
         let types = rawPackage.GetTypes().getOrThrow()
         let kinds = rawPackage.GetTypes_type().getOrThrow()
-        let kind = (kinds.Get(id - 1u32) as UInt8).getOrThrow()
+        let kind = kinds.Get(id - 1u32, 0u8)
         if (kind == CHIRFB_TYPE_ELEM_NONE) { return None }
         let position = (types.Get(id - 1u32) as Int64).getOrThrow()
         let ty: Type
@@ -1573,7 +1573,7 @@ class CHIRDeserializerImpl {
         let rawPackage = pool.getOrThrow()
         let defs = rawPackage.GetDefs().getOrThrow()
         let kinds = rawPackage.GetDefs_type().getOrThrow()
-        let kind = (kinds.Get(id - 1u32) as UInt8).getOrThrow()
+        let kind = kinds.Get(id - 1u32, 0u8)
         let position = (defs.Get(id - 1u32) as Int64).getOrThrow()
         let def: CustomTypeDef
         if (kind == CHIRFB_CUSTOM_TYPE_DEF_ELEM_ENUM_DEF) {
@@ -1605,7 +1605,7 @@ class CHIRDeserializerImpl {
         if (let Some(values) <- obj.GetScope()) {
             var index = 0u32
             while (index < values.size()) {
-                scope.add(Int64((values.Get(index) as Int32).getOrThrow()))
+                scope.add(Int64(values.Get(index, 0i32)))
                 index++
             }
         }
@@ -1697,7 +1697,7 @@ class CHIRDeserializerImpl {
         var index = 0u32
         while (index < annos.size()) {
             let position = (annos.Get(index) as Int64).getOrThrow()
-            let annoType = (annoTypes.Get(index) as UInt8).getOrThrow()
+            let annoType = annoTypes.Get(index, 0u8)
             match (annoType) {
                 case 1u8 =>
                     let anno = PackageFormat_NeedCheckArrayBound(annos.data, position)
@@ -1930,7 +1930,7 @@ class CHIRDeserializerImpl {
         if (let Some(vector) <- ids) {
             var index = 0u32
             while (index < vector.size()) {
-                let id = (vector.Get(index) as UInt32).getOrThrow()
+                let id = vector.Get(index, 0u32)
                 if (let Some(value) <- GetValue<T>(id)) {
                     result.add(value)
                 }
@@ -1950,7 +1950,7 @@ class CHIRDeserializerImpl {
         let rawPackage = pool.getOrThrow()
         let values = rawPackage.GetValues().getOrThrow()
         let kinds = rawPackage.GetValues_type().getOrThrow()
-        let kind = (kinds.Get(id - 1u32) as UInt8).getOrThrow()
+        let kind = kinds.Get(id - 1u32, 0u8)
         let position = (values.Get(id - 1u32) as Int64).getOrThrow()
         let value: Value
         match (kind) {
@@ -2027,7 +2027,7 @@ class CHIRDeserializerImpl {
         if (let Some(vector) <- ids) {
             var index = 0u32
             while (index < vector.size()) {
-                let id = (vector.Get(index) as UInt32).getOrThrow()
+                let id = vector.Get(index, 0u32)
                 if (let Some(expression) <- GetExpression<T>(id)) {
                     result.add(expression)
                 }
@@ -2040,7 +2040,7 @@ class CHIRDeserializerImpl {
     private func Deserialize(obj: PackageFormat_UnaryExpressionBase): Expression {
         let base = obj.GetBase().getOrThrow()
         let operands = base.GetOperands().getOrThrow()
-        let operandId = (operands.Get(0u32) as UInt32).getOrThrow()
+        let operandId = operands.Get(0u32, 0u32)
         let operand = GetValue<Value>(operandId).getOrThrow()
         let parentBlock = GetValue<Block>(base.GetOwner()).getOrThrow()
         let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
@@ -2056,8 +2056,8 @@ class CHIRDeserializerImpl {
         }
         let (kind, isException) = CHIRExprKindToExprKind(base.GetKind())
         if (isException) {
-            let normalId = (operands.Get(1u32) as UInt32).getOrThrow()
-            let exceptionId = (operands.Get(2u32) as UInt32).getOrThrow()
+            let normalId = operands.Get(1u32, 0u32)
+            let exceptionId = operands.Get(2u32, 0u32)
             let result = builder.CreateUnaryIntOpWithException(resultTy, kind, operand,
                 GetValue<Block>(normalId).getOrThrow(), GetValue<Block>(exceptionId).getOrThrow(), parentBlock)
             result.SetOverflowStrategy(overflowStrategy)
@@ -2070,8 +2070,8 @@ class CHIRDeserializerImpl {
     private func Deserialize(obj: PackageFormat_BinaryExpressionBase): Expression {
         let base = obj.GetBase().getOrThrow()
         let operands = base.GetOperands().getOrThrow()
-        let lhs = GetValue<Value>((operands.Get(0u32) as UInt32).getOrThrow()).getOrThrow()
-        let rhs = GetValue<Value>((operands.Get(1u32) as UInt32).getOrThrow()).getOrThrow()
+        let lhs = GetValue<Value>(operands.Get(0u32, 0u32)).getOrThrow()
+        let rhs = GetValue<Value>(operands.Get(1u32, 0u32)).getOrThrow()
         let parentBlock = GetValue<Block>(base.GetOwner()).getOrThrow()
         let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
         let overflowStrategy = match (obj.GetOverflowStrategy()) {
@@ -2086,8 +2086,8 @@ class CHIRDeserializerImpl {
         }
         let (kind, isException) = CHIRExprKindToExprKind(base.GetKind())
         if (isException) {
-            let normalId = (operands.Get(2u32) as UInt32).getOrThrow()
-            let exceptionId = (operands.Get(3u32) as UInt32).getOrThrow()
+            let normalId = operands.Get(2u32, 0u32)
+            let exceptionId = operands.Get(3u32, 0u32)
             let result = builder.CreateBinaryIntOpWithException(resultTy, kind, lhs, rhs,
                 GetValue<Block>(normalId).getOrThrow(), GetValue<Block>(exceptionId).getOrThrow(), parentBlock)
             result.SetOverflowStrategy(overflowStrategy)
@@ -2206,7 +2206,7 @@ class CHIRDeserializerImpl {
         let rawPath = obj.GetPath().getOrThrow()
         var index = 0u32
         while (index < rawPath.size()) {
-            path.add((rawPath.Get(index) as UInt64).getOrThrow())
+            path.add(rawPath.Get(index, 0u64))
             index++
         }
         return builder.CreateGetElementRef(GetType<Type>(base.GetResultTy()).getOrThrow(), operands[0], path,
@@ -2234,7 +2234,7 @@ class CHIRDeserializerImpl {
         let rawPath = obj.GetPath().getOrThrow()
         var index = 0u32
         while (index < rawPath.size()) {
-            path.add((rawPath.Get(index) as UInt64).getOrThrow())
+            path.add(rawPath.Get(index, 0u64))
             index++
         }
         return builder.CreateStoreElementRef(operands[0], operands[1], path,
@@ -2375,7 +2375,7 @@ class CHIRDeserializerImpl {
         let path = obj.GetPath().getOrThrow()
         var index = 0u32
         while (index < path.size()) {
-            indexes.add((path.Get(index) as UInt64).getOrThrow())
+            indexes.add(path.Get(index, 0u64))
             index++
         }
         return builder.CreateField(GetType<Type>(base.GetResultTy()).getOrThrow(), operands[0], indexes,
@@ -2441,7 +2441,7 @@ class CHIRDeserializerImpl {
         let rawValues = obj.GetCaseValues().getOrThrow()
         var index = 0u32
         while (index < rawValues.size()) {
-            caseValues.add((rawValues.Get(index) as UInt64).getOrThrow())
+            caseValues.add(rawValues.Get(index, 0u64))
             index++
         }
         return builder.CreateMultiBranch(cond, defaultBlock, caseValues, caseBlocks,
@@ -3044,7 +3044,7 @@ class CHIRDeserializerImpl {
         let rawPackage = pool.getOrThrow()
         let expressions = rawPackage.GetExprs().getOrThrow()
         let kinds = rawPackage.GetExprs_type().getOrThrow()
-        let kind = (kinds.Get(id - 1u32) as UInt8).getOrThrow()
+        let kind = kinds.Get(id - 1u32, 0u8)
         let position = (expressions.Get(id - 1u32) as Int64).getOrThrow()
         let expression: Expression
         match (kind) {

@@ -253,7 +253,7 @@ public class CachedASTFormat_GlobalVarIndex <: Table {
     public func file(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(4u16)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    public func id(): Int32 { return GetField<Int32>(6u16, 0i32) }
+    public func id(): Int32 { return GetField(6u16, 0i32) }
 
     public func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -270,11 +270,11 @@ public class CachedASTFormat_MemberDecl <: Table {
     public func mangle(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(4u16)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    public func sig(): UInt64 { return GetField<UInt64>(6u16, 0u64) }
-    public func srcUse(): UInt64 { return GetField<UInt64>(8u16, 0u64) }
-    public func body(): UInt64 { return GetField<UInt64>(10u16, 0u64) }
-    public func `type`(): UInt8 { return GetField<UInt8>(12u16, 0u8) }
-    public func isGV(): Bool { return GetField<Bool>(14u16, false) }
+    public func sig(): UInt64 { return GetField(6u16, 0u64) }
+    public func srcUse(): UInt64 { return GetField(8u16, 0u64) }
+    public func body(): UInt64 { return GetField(10u16, 0u64) }
+    public func `type`(): UInt8 { return GetField(12u16, 0u8) }
+    public func isGV(): Bool { return GetField(14u16, false) }
     public func gvid(): Option<CachedASTFormat_GlobalVarIndex> {
         return if (let Some(p) <- GetPointer(16u16)) { Some(CachedASTFormat_GlobalVarIndex(data, p)) } else { None }
     }
@@ -313,13 +313,13 @@ public class CachedASTFormat_TopDecl <: Table {
     public func mangle(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(4u16)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    public func sig(): UInt64 { return GetField<UInt64>(6u16, 0u64) }
-    public func srcUse(): UInt64 { return GetField<UInt64>(8u16, 0u64) }
-    public func body(): UInt64 { return GetField<UInt64>(10u16, 0u64) }
-    public func `type`(): UInt8 { return GetField<UInt8>(12u16, 0u8) }
-    public func isGV(): Bool { return GetField<Bool>(14u16, false) }
-    public func instVar(): UInt64 { return GetField<UInt64>(16u16, 0u64) }
-    public func virt(): UInt64 { return GetField<UInt64>(18u16, 0u64) }
+    public func sig(): UInt64 { return GetField(6u16, 0u64) }
+    public func srcUse(): UInt64 { return GetField(8u16, 0u64) }
+    public func body(): UInt64 { return GetField(10u16, 0u64) }
+    public func `type`(): UInt8 { return GetField(12u16, 0u8) }
+    public func isGV(): Bool { return GetField(14u16, false) }
+    public func instVar(): UInt64 { return GetField(16u16, 0u64) }
+    public func virt(): UInt64 { return GetField(18u16, 0u64) }
     public func gvid(): Option<CachedASTFormat_GlobalVarIndex> {
         return if (let Some(p) <- GetPointer(20u16)) { Some(CachedASTFormat_GlobalVarIndex(data, p)) } else { None }
     }
@@ -369,7 +369,7 @@ public class CachedASTFormat_HashedPackage <: Table {
     public func packageName(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(6u16)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    public func specs(): UInt64 { return GetField<UInt64>(8u16, 0u64) }
+    public func specs(): UInt64 { return GetField(8u16, 0u64) }
     public func compileOptionArgs(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(10u16)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
@@ -394,9 +394,9 @@ public class CachedASTFormat_HashedPackage <: Table {
     public func ccOutFuncs(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(24u16)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
-    public func lambdaCounter(): UInt64 { return GetField<UInt64>(26u16, 0u64) }
-    public func envClassCounter(): UInt64 { return GetField<UInt64>(28u16, 0u64) }
-    public func strLitCounter(): UInt64 { return GetField<UInt64>(30u16, 0u64) }
+    public func lambdaCounter(): UInt64 { return GetField(26u16, 0u64) }
+    public func envClassCounter(): UInt64 { return GetField(28u16, 0u64) }
+    public func strLitCounter(): UInt64 { return GetField(30u16, 0u64) }
     public func semanticInfo(): Option<CachedASTFormat_SemanticInfo> {
         return if (let Some(p) <- GetPointer(32u16)) { Some(CachedASTFormat_SemanticInfo(data, p)) } else { None }
     }

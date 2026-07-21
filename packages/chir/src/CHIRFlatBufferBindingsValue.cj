@@ -13,7 +13,7 @@ class PackageFormat_Value <: Table {
     }
 
     func GetType(): UInt32 {
-        return GetField<UInt32>(CHIRFB_VALUE_VT_TYPE, 0u32)
+        return GetField(CHIRFB_VALUE_VT_TYPE, 0u32)
     }
 
     func GetIdentifier(): Option<FlatBufferString> {
@@ -21,7 +21,7 @@ class PackageFormat_Value <: Table {
     }
 
     func GetKind(): UInt8 {
-        return GetField<UInt8>(CHIRFB_VALUE_VT_KIND, 0u8)
+        return GetField(CHIRFB_VALUE_VT_KIND, 0u8)
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -47,7 +47,7 @@ class PackageFormat_LiteralValue <: Table {
     }
 
     func GetLiteralKind(): UInt8 {
-        return GetField<UInt8>(CHIRFB_LITERAL_VALUE_VT_LITERALKIND, 0u8)
+        return GetField(CHIRFB_LITERAL_VALUE_VT_LITERALKIND, 0u8)
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -70,7 +70,7 @@ class PackageFormat_BoolLiteral <: Table {
     }
 
     func GetVal(): Bool {
-        return GetField<Bool>(CHIRFB_BOOL_LITERAL_VT_VAL, false)
+        return GetField(CHIRFB_BOOL_LITERAL_VT_VAL, false)
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -117,7 +117,7 @@ class PackageFormat_RuneLiteral <: Table {
     }
 
     func GetVal(): UInt32 {
-        return GetField<UInt32>(CHIRFB_RUNE_LITERAL_VT_VAL, 0u32)
+        return GetField(CHIRFB_RUNE_LITERAL_VT_VAL, 0u32)
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -140,7 +140,7 @@ class PackageFormat_IntLiteral <: Table {
     }
 
     func GetVal(): UInt64 {
-        return GetField<UInt64>(CHIRFB_INT_LITERAL_VT_VAL, 0u64)
+        return GetField(CHIRFB_INT_LITERAL_VT_VAL, 0u64)
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -163,7 +163,7 @@ class PackageFormat_FloatLiteral <: Table {
     }
 
     func GetVal(): Float64 {
-        return GetField<Float64>(CHIRFB_FLOAT_LITERAL_VT_VAL, 1.0f64)
+        return GetField(CHIRFB_FLOAT_LITERAL_VT_VAL, 1.0f64)
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -222,11 +222,11 @@ class PackageFormat_Parameter <: Table {
     }
 
     func GetOwnedFunc(): UInt32 {
-        return GetField<UInt32>(CHIRFB_PARAMETER_VT_OWNEDFUNC, 0u32)
+        return GetField(CHIRFB_PARAMETER_VT_OWNEDFUNC, 0u32)
     }
 
     func GetOwnedLambda(): UInt32 {
-        return GetField<UInt32>(CHIRFB_PARAMETER_VT_OWNEDLAMBDA, 0u32)
+        return GetField(CHIRFB_PARAMETER_VT_OWNEDLAMBDA, 0u32)
     }
 
     func GetSrcCodeIdentifier(): Option<FlatBufferString> {
@@ -262,11 +262,11 @@ class PackageFormat_LocalVar <: Table {
     }
 
     func GetAssociatedExpr(): UInt32 {
-        return GetField<UInt32>(CHIRFB_LOCAL_VAR_VT_ASSOCIATEDEXPR, 0u32)
+        return GetField(CHIRFB_LOCAL_VAR_VT_ASSOCIATEDEXPR, 0u32)
     }
 
     func GetIsRetVal(): Bool {
-        return GetField<Bool>(CHIRFB_LOCAL_VAR_VT_ISRETVAL, false)
+        return GetField(CHIRFB_LOCAL_VAR_VT_ISRETVAL, false)
     }
 
     func GetSrcCodeIdentifier(): Option<FlatBufferString> {
@@ -308,7 +308,7 @@ class PackageFormat_GlobalValue <: Table {
     }
 
     func GetDeclaredParent(): UInt32 {
-        return GetField<UInt32>(CHIRFB_GLOBAL_VALUE_VT_DECLAREDPARENT, 0u32)
+        return GetField(CHIRFB_GLOBAL_VALUE_VT_DECLAREDPARENT, 0u32)
     }
 
     func GetFeatures(): Option<Vector<Offset<FlatBufferString>>> {
@@ -350,7 +350,7 @@ class PackageFormat_GlobalVar <: Table {
     }
 
     func GetInitializer(): UInt32 {
-        return GetField<UInt32>(CHIRFB_GLOBAL_VAR_VT_INITIALIZER, 0u32)
+        return GetField(CHIRFB_GLOBAL_VAR_VT_INITIALIZER, 0u32)
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -373,7 +373,7 @@ class PackageFormat_FuncSigInfo <: Table {
     }
 
     func GetFuncType(): UInt32 {
-        return GetField<UInt32>(CHIRFB_FUNC_SIG_INFO_VT_FUNCTYPE, 0u32)
+        return GetField(CHIRFB_FUNC_SIG_INFO_VT_FUNCTYPE, 0u32)
     }
 
     func GetGenericTypeParams(): Option<Vector<UInt32>> {
@@ -402,19 +402,19 @@ class PackageFormat_Function <: Table {
     }
 
     func GetGenericDecl(): UInt32 {
-        return GetField<UInt32>(CHIRFB_FUNCTION_VT_GENERICDECL, 0u32)
+        return GetField(CHIRFB_FUNCTION_VT_GENERICDECL, 0u32)
     }
 
     func GetFuncKind(): UInt8 {
-        return GetField<UInt8>(CHIRFB_FUNCTION_VT_FUNCKIND, 0u8)
+        return GetField(CHIRFB_FUNCTION_VT_FUNCKIND, 0u8)
     }
 
     func GetIsFastNative(): Bool {
-        return GetField<Bool>(CHIRFB_FUNCTION_VT_ISFASTNATIVE, false)
+        return GetField(CHIRFB_FUNCTION_VT_ISFASTNATIVE, false)
     }
 
     func GetIsCFFIWrapper(): Bool {
-        return GetField<Bool>(CHIRFB_FUNCTION_VT_ISCFFIWRAPPER, false)
+        return GetField(CHIRFB_FUNCTION_VT_ISCFFIWRAPPER, false)
     }
 
     func GetOriginalLambdaInfo(): Option<PackageFormat_FuncSigInfo> {
@@ -426,11 +426,11 @@ class PackageFormat_Function <: Table {
     }
 
     func GetParamDftValHostFunc(): UInt32 {
-        return GetField<UInt32>(CHIRFB_FUNCTION_VT_PARAMDFTVALHOSTFUNC, 0u32)
+        return GetField(CHIRFB_FUNCTION_VT_PARAMDFTVALHOSTFUNC, 0u32)
     }
 
     func GetBody(): UInt32 {
-        return GetField<UInt32>(CHIRFB_FUNCTION_VT_BODY, 0u32)
+        return GetField(CHIRFB_FUNCTION_VT_BODY, 0u32)
     }
 
     func GetParams(): Option<Vector<UInt32>> {
@@ -438,7 +438,7 @@ class PackageFormat_Function <: Table {
     }
 
     func GetRetVal(): UInt32 {
-        return GetField<UInt32>(CHIRFB_FUNCTION_VT_RETVAL, 0u32)
+        return GetField(CHIRFB_FUNCTION_VT_RETVAL, 0u32)
     }
 
     func GetPropLoc(): Option<PackageFormat_DebugLocation> {
@@ -446,15 +446,15 @@ class PackageFormat_Function <: Table {
     }
 
     func GetLocalId(): UInt64 {
-        return GetField<UInt64>(CHIRFB_FUNCTION_VT_LOCALID, 0u64)
+        return GetField(CHIRFB_FUNCTION_VT_LOCALID, 0u64)
     }
 
     func GetBlockId(): UInt64 {
-        return GetField<UInt64>(CHIRFB_FUNCTION_VT_BLOCKID, 0u64)
+        return GetField(CHIRFB_FUNCTION_VT_BLOCKID, 0u64)
     }
 
     func GetBlockGroupId(): UInt64 {
-        return GetField<UInt64>(CHIRFB_FUNCTION_VT_BLOCKGROUPID, 0u64)
+        return GetField(CHIRFB_FUNCTION_VT_BLOCKGROUPID, 0u64)
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -494,7 +494,7 @@ class PackageFormat_Block <: Table {
     }
 
     func GetParentGroup(): UInt32 {
-        return GetField<UInt32>(CHIRFB_BLOCK_VT_PARENTGROUP, 0u32)
+        return GetField(CHIRFB_BLOCK_VT_PARENTGROUP, 0u32)
     }
 
     func GetExprs(): Option<Vector<UInt32>> {
@@ -506,7 +506,7 @@ class PackageFormat_Block <: Table {
     }
 
     func GetIsLandingPadBlock(): Bool {
-        return GetField<Bool>(CHIRFB_BLOCK_VT_ISLANDINGPADBLOCK, false)
+        return GetField(CHIRFB_BLOCK_VT_ISLANDINGPADBLOCK, false)
     }
 
     func GetExceptionCatchList(): Option<Vector<UInt32>> {
@@ -540,7 +540,7 @@ class PackageFormat_BlockGroup <: Table {
     }
 
     func GetEntryBlock(): UInt32 {
-        return GetField<UInt32>(CHIRFB_BLOCK_GROUP_VT_ENTRYBLOCK, 0u32)
+        return GetField(CHIRFB_BLOCK_GROUP_VT_ENTRYBLOCK, 0u32)
     }
 
     func GetBlocks(): Option<Vector<UInt32>> {
@@ -548,11 +548,11 @@ class PackageFormat_BlockGroup <: Table {
     }
 
     func GetOwnedFunc(): UInt32 {
-        return GetField<UInt32>(CHIRFB_BLOCK_GROUP_VT_OWNEDFUNC, 0u32)
+        return GetField(CHIRFB_BLOCK_GROUP_VT_OWNEDFUNC, 0u32)
     }
 
     func GetOwnedExpression(): UInt32 {
-        return GetField<UInt32>(CHIRFB_BLOCK_GROUP_VT_OWNEDEXPRESSION, 0u32)
+        return GetField(CHIRFB_BLOCK_GROUP_VT_OWNEDEXPRESSION, 0u32)
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
@@ -603,7 +603,7 @@ func VerifyValueElemVector(data: Array<UInt8>, verifier: VerifierTemplate, value
     }
     var index = 0u32
     while (index < valueVector.size()) {
-        if (!VerifyValueElem(data, verifier, Some((valueVector.Get(index) as Int64).getOrThrow()), (typeVector.Get(index) as UInt8).getOrThrow())) {
+        if (!VerifyValueElem(data, verifier, Some((valueVector.Get(index) as Int64).getOrThrow()), typeVector.Get(index, 0u8))) {
             return false
         }
         index++

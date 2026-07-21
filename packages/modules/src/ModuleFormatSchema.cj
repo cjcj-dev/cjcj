@@ -17,7 +17,7 @@ const MF_FIRST_INDEX: UInt32 = 1u32
 // Reads the root Package table offset from the buffer front (uoffset_t).
 // ModuleFormat_generated.h:6701-6704 (GetPackage).
 public func GetPackage(data: Array<UInt8>): PackageFormat_Package {
-    return PackageFormat_Package(data, Int64(ReadScalar<UInt32>(data, 0)))
+    return PackageFormat_Package(data, Int64(ReadScalar(data, 0, 0u32)))
 }
 
 // DeclKind enum ordinals. ModuleFormat.fbs:20-35; ModuleFormat_generated.h:220-251.

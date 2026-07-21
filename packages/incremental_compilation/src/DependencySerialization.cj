@@ -121,8 +121,8 @@ func GetNameUsage(info: Option<CachedASTFormat_NameInfo>): NameUsage {
     for (qualifier in GetSetStrings(nameInfo.qualifiers())) { usage.packageQualifiers.add(qualifier) }
     let conditions = nameInfo.conditions().getOrThrow()
     CJC_ASSERT(conditions.size() == NAME_INFO_CONDITION_SIZE)
-    usage.hasUnqualifiedUsage = (conditions.Get(0u32) as Bool).getOrThrow()
-    usage.hasUnqualifiedUsageOfImported = (conditions.Get(1u32) as Bool).getOrThrow()
+    usage.hasUnqualifiedUsage = conditions.Get(0u32, false)
+    usage.hasUnqualifiedUsageOfImported = conditions.Get(1u32, false)
     return usage
 }
 

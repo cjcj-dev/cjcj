@@ -6,14 +6,14 @@ import std.unittest.testmacro.*
 
 private class Payload <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    public func value(): Int64 { return GetField<Int64>(4u16, 0) }
+    public func value(): Int64 { return GetField(4u16, 0) }
 }
 
 private class Item <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
     public func name(): String { return FlatBufferString(data, GetPointer(4u16).getOrThrow()).str() }
     public func values(): Vector<UInt32> { return Vector<UInt32>(data, GetPointer(6u16).getOrThrow()) }
-    public func payload_type(): UInt8 { return GetField<UInt8>(8u16, 0u8) }
+    public func payload_type(): UInt8 { return GetField(8u16, 0u8) }
     public func payload(): Payload { return Payload(data, GetPointer(10u16).getOrThrow()) }
 }
 

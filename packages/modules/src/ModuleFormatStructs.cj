@@ -56,23 +56,23 @@ public class PackageFormat_Position {
     }
 
     public func GetFile(): UInt32 {
-        return ReadScalar<UInt32>(data, pos + 0)
+        return ReadScalar(data, pos + 0, 0u32)
     }
 
     public func GetPkgId(): UInt32 {
-        return ReadScalar<UInt32>(data, pos + 4)
+        return ReadScalar(data, pos + 4, 0u32)
     }
 
     public func GetLine(): Int32 {
-        return ReadScalar<Int32>(data, pos + 8)
+        return ReadScalar(data, pos + 8, 0i32)
     }
 
     public func GetColumn(): Int32 {
-        return ReadScalar<Int32>(data, pos + 12)
+        return ReadScalar(data, pos + 12, 0i32)
     }
 
     public func GetIgnore(): Bool {
-        return ReadScalar<UInt8>(data, pos + 16) != 0u8
+        return ReadScalar(data, pos + 16, 0u8) != 0u8
     }
 }
 
@@ -100,23 +100,23 @@ class PackageFormat_DeclHash {
     }
 
     func GetInstVar(): UInt64 {
-        return ReadScalar<UInt64>(data, pos + 0)
+        return ReadScalar(data, pos + 0, 0u64)
     }
 
     func GetVirt(): UInt64 {
-        return ReadScalar<UInt64>(data, pos + 8)
+        return ReadScalar(data, pos + 8, 0u64)
     }
 
     func GetSig(): UInt64 {
-        return ReadScalar<UInt64>(data, pos + 16)
+        return ReadScalar(data, pos + 16, 0u64)
     }
 
     func GetSrcUse(): UInt64 {
-        return ReadScalar<UInt64>(data, pos + 24)
+        return ReadScalar(data, pos + 24, 0u64)
     }
 
     func GetBodyHash(): UInt64 {
-        return ReadScalar<UInt64>(data, pos + 32)
+        return ReadScalar(data, pos + 32, 0u64)
     }
 }
 
@@ -136,7 +136,7 @@ class PackageFormat_Int8Value {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetVal(): Int8 { return ReadScalar<Int8>(data, pos + 0) }
+    func GetVal(): Int8 { return ReadScalar(data, pos + 0, 0i8) }
 }
 func PackInt8Value(val: Int8): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()
@@ -148,7 +148,7 @@ class PackageFormat_UInt8Value {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetVal(): UInt8 { return ReadScalar<UInt8>(data, pos + 0) }
+    func GetVal(): UInt8 { return ReadScalar(data, pos + 0, 0u8) }
 }
 func PackUInt8Value(val: UInt8): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()
@@ -160,7 +160,7 @@ class PackageFormat_Int16Value {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetVal(): Int16 { return ReadScalar<Int16>(data, pos + 0) }
+    func GetVal(): Int16 { return ReadScalar(data, pos + 0, 0i16) }
 }
 func PackInt16Value(val: Int16): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()
@@ -172,7 +172,7 @@ class PackageFormat_UInt16Value {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetVal(): UInt16 { return ReadScalar<UInt16>(data, pos + 0) }
+    func GetVal(): UInt16 { return ReadScalar(data, pos + 0, 0u16) }
 }
 func PackUInt16Value(val: UInt16): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()
@@ -184,7 +184,7 @@ class PackageFormat_Int32Value {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetVal(): Int32 { return ReadScalar<Int32>(data, pos + 0) }
+    func GetVal(): Int32 { return ReadScalar(data, pos + 0, 0i32) }
 }
 func PackInt32Value(val: Int32): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()
@@ -196,7 +196,7 @@ class PackageFormat_UInt32Value {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetVal(): UInt32 { return ReadScalar<UInt32>(data, pos + 0) }
+    func GetVal(): UInt32 { return ReadScalar(data, pos + 0, 0u32) }
 }
 func PackUInt32Value(val: UInt32): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()
@@ -208,7 +208,7 @@ class PackageFormat_Int64Value {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetVal(): Int64 { return ReadScalar<Int64>(data, pos + 0) }
+    func GetVal(): Int64 { return ReadScalar(data, pos + 0, 0) }
 }
 func PackInt64Value(val: Int64): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()
@@ -220,7 +220,7 @@ class PackageFormat_UInt64Value {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetVal(): UInt64 { return ReadScalar<UInt64>(data, pos + 0) }
+    func GetVal(): UInt64 { return ReadScalar(data, pos + 0, 0u64) }
 }
 func PackUInt64Value(val: UInt64): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()
@@ -232,7 +232,7 @@ class PackageFormat_Float32Value {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetVal(): Float32 { return ReadScalar<Float32>(data, pos + 0) }
+    func GetVal(): Float32 { return ReadScalar(data, pos + 0, 0.0f32) }
 }
 func PackFloat32Value(val: Float32): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()
@@ -244,7 +244,7 @@ class PackageFormat_Float64Value {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetVal(): Float64 { return ReadScalar<Float64>(data, pos + 0) }
+    func GetVal(): Float64 { return ReadScalar(data, pos + 0, 0.0f64) }
 }
 func PackFloat64Value(val: Float64): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()
@@ -257,7 +257,7 @@ class PackageFormat_CompositeValueIndex {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetIdx(): UInt32 { return ReadScalar<UInt32>(data, pos + 0) }
+    func GetIdx(): UInt32 { return ReadScalar(data, pos + 0, 0u32) }
 }
 func PackCompositeValueIndex(idx: UInt32): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()
@@ -270,9 +270,9 @@ class PackageFormat_CjoVersion {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetMajorNum(): UInt8 { return ReadScalar<UInt8>(data, pos + 0) }
-    func GetMinorNum(): UInt8 { return ReadScalar<UInt8>(data, pos + 1) }
-    func GetPatchNum(): UInt8 { return ReadScalar<UInt8>(data, pos + 2) }
+    func GetMajorNum(): UInt8 { return ReadScalar(data, pos + 0, 0u8) }
+    func GetMinorNum(): UInt8 { return ReadScalar(data, pos + 1, 0u8) }
+    func GetPatchNum(): UInt8 { return ReadScalar(data, pos + 2, 0u8) }
 }
 func PackCjoVersion(majorNum: UInt8, minorNum: UInt8, patchNum: UInt8): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()

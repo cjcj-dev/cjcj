@@ -13,11 +13,11 @@ import cjcj::flatbuffers.{FlatBufferString, Offset, Table, Vector, VerifierTempl
 public class PackageFormat_FullId <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    public func GetPkgId(): Int32 { return GetField<Int32>(MF_FULL_ID_VT_PKGID, 0) }
+    public func GetPkgId(): Int32 { return GetField(MF_FULL_ID_VT_PKGID, 0i32) }
     public func GetDecl(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_FULL_ID_VT_DECL)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    public func GetIndex(): UInt32 { return GetField<UInt32>(MF_FULL_ID_VT_INDEX, 0u32) }
+    public func GetIndex(): UInt32 { return GetField(MF_FULL_ID_VT_INDEX, 0u32) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -39,11 +39,11 @@ public class PackageFormat_Constraint <: Table {
     public func GetEnd(): Option<PackageFormat_Position> {
         return if (let Some(p) <- GetStruct(MF_CONSTRAINT_VT_END)) { Some(PackageFormat_Position(data, p)) } else { None }
     }
-    public func GetType(): UInt32 { return GetField<UInt32>(MF_CONSTRAINT_VT_TYPE, 0u32) }
+    public func GetType(): UInt32 { return GetField(MF_CONSTRAINT_VT_TYPE, 0u32) }
     public func GetUppers(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_CONSTRAINT_VT_UPPERS)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
-    public func GetIsImplicitlyIntroduced(): Bool { return GetField<Bool>(MF_CONSTRAINT_VT_ISIMPLICITLYINTRODUCED, false) }
+    public func GetIsImplicitlyIntroduced(): Bool { return GetField(MF_CONSTRAINT_VT_ISIMPLICITLYINTRODUCED, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -108,10 +108,10 @@ public class PackageFormat_FuncBody <: Table {
     public func GetParamLists(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_FUNC_BODY_VT_PARAMLISTS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
-    public func GetRetType(): UInt32 { return GetField<UInt32>(MF_FUNC_BODY_VT_RETTYPE, 0u32) }
-    func GetBody(): UInt32 { return GetField<UInt32>(MF_FUNC_BODY_VT_BODY, 0u32) }
-    func GetAlways(): Bool { return GetField<Bool>(MF_FUNC_BODY_VT_ALWAYS, false) }
-    func GetCaptureKind(): UInt8 { return GetField<UInt8>(MF_FUNC_BODY_VT_CAPTUREKIND, 0u8) }
+    public func GetRetType(): UInt32 { return GetField(MF_FUNC_BODY_VT_RETTYPE, 0u32) }
+    func GetBody(): UInt32 { return GetField(MF_FUNC_BODY_VT_BODY, 0u32) }
+    func GetAlways(): Bool { return GetField(MF_FUNC_BODY_VT_ALWAYS, false) }
+    func GetCaptureKind(): UInt8 { return GetField(MF_FUNC_BODY_VT_CAPTUREKIND, 0u8) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -156,8 +156,8 @@ class PackageFormat_MemberValue <: Table {
     func GetField_(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_MEMBER_VALUE_VT_FIELD)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    func GetType(): UInt32 { return GetField<UInt32>(MF_MEMBER_VALUE_VT_TYPE, 0u32) }
-    func GetValueType(): UInt8 { return GetField<UInt8>(MF_MEMBER_VALUE_VT_VALUE_TYPE, 0u8) }
+    func GetType(): UInt32 { return GetField(MF_MEMBER_VALUE_VT_TYPE, 0u32) }
+    func GetValueType(): UInt8 { return GetField(MF_MEMBER_VALUE_VT_VALUE_TYPE, 0u8) }
     func GetValue(): Option<Int64> { return GetPointer(MF_MEMBER_VALUE_VT_VALUE) }
 
     func GetValueAsInt8Value(): Option<PackageFormat_Int8Value> {
@@ -216,7 +216,7 @@ class PackageFormat_MemberValue <: Table {
 class PackageFormat_CompositeValue <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetType(): UInt32 { return GetField<UInt32>(MF_COMPOSITE_VALUE_VT_TYPE, 0u32) }
+    func GetType(): UInt32 { return GetField(MF_COMPOSITE_VALUE_VT_TYPE, 0u32) }
     func GetFields(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_COMPOSITE_VALUE_VT_FIELDS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
@@ -236,8 +236,8 @@ class PackageFormat_CompositeValue <: Table {
 class PackageFormat_AutoDiffInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetIsDiff(): Bool { return GetField<Bool>(MF_AUTO_DIFF_INFO_VT_ISDIFF, false) }
-    func GetIsAdj(): Bool { return GetField<Bool>(MF_AUTO_DIFF_INFO_VT_ISADJ, false) }
+    func GetIsDiff(): Bool { return GetField(MF_AUTO_DIFF_INFO_VT_ISDIFF, false) }
+    func GetIsAdj(): Bool { return GetField(MF_AUTO_DIFF_INFO_VT_ISADJ, false) }
     func GetPrimal(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_AUTO_DIFF_INFO_VT_PRIMAL)) { Some(FlatBufferString(data, p)) } else { None }
     }
@@ -247,7 +247,7 @@ class PackageFormat_AutoDiffInfo <: Table {
     func GetIncludes(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_AUTO_DIFF_INFO_VT_INCLUDES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
-    func GetStage(): UInt64 { return GetField<UInt64>(MF_AUTO_DIFF_INFO_VT_STAGE, 0u64) }
+    func GetStage(): UInt64 { return GetField(MF_AUTO_DIFF_INFO_VT_STAGE, 0u64) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -279,10 +279,10 @@ public class PackageFormat_ClassInfo <: Table {
     func GetAdInfo(): Option<PackageFormat_AutoDiffInfo> {
         return if (let Some(p) <- GetPointer(MF_CLASS_INFO_VT_ADINFO)) { Some(PackageFormat_AutoDiffInfo(data, p)) } else { None }
     }
-    func GetIsAnno(): Bool { return GetField<Bool>(MF_CLASS_INFO_VT_ISANNO, false) }
-    public func GetAnnoTargets(): UInt8 { return GetField<UInt8>(MF_CLASS_INFO_VT_ANNOTARGETS, 0u8) }
-    public func GetRuntimeVisible(): Bool { return GetField<Bool>(MF_CLASS_INFO_VT_RUNTIMEVISIBLE, false) }
-    func GetAnnoTargets2(): UInt8 { return GetField<UInt8>(MF_CLASS_INFO_VT_ANNOTARGETS2, 0u8) }
+    func GetIsAnno(): Bool { return GetField(MF_CLASS_INFO_VT_ISANNO, false) }
+    public func GetAnnoTargets(): UInt8 { return GetField(MF_CLASS_INFO_VT_ANNOTARGETS, 0u8) }
+    public func GetRuntimeVisible(): Bool { return GetField(MF_CLASS_INFO_VT_RUNTIMEVISIBLE, false) }
+    func GetAnnoTargets2(): UInt8 { return GetField(MF_CLASS_INFO_VT_ANNOTARGETS2, 0u8) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -362,8 +362,8 @@ public class PackageFormat_EnumInfo <: Table {
     func GetAdInfo(): Option<PackageFormat_AutoDiffInfo> {
         return if (let Some(p) <- GetPointer(MF_ENUM_INFO_VT_ADINFO)) { Some(PackageFormat_AutoDiffInfo(data, p)) } else { None }
     }
-    func GetHasArguments(): Bool { return GetField<Bool>(MF_ENUM_INFO_VT_HASARGUMENTS, false) }
-    func GetNonExhaustive(): Bool { return GetField<Bool>(MF_ENUM_INFO_VT_NONEXHAUSTIVE, false) }
+    func GetHasArguments(): Bool { return GetField(MF_ENUM_INFO_VT_HASARGUMENTS, false) }
+    func GetNonExhaustive(): Bool { return GetField(MF_ENUM_INFO_VT_NONEXHAUSTIVE, false) }
     func GetEllipsisPos(): Option<PackageFormat_Position> {
         return if (let Some(p) <- GetStruct(MF_ENUM_INFO_VT_ELLIPSISPOS)) { Some(PackageFormat_Position(data, p)) } else { None }
     }
@@ -409,11 +409,11 @@ public class PackageFormat_ExtendInfo <: Table {
 public class PackageFormat_VarInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetIsVar(): Bool { return GetField<Bool>(MF_VAR_INFO_VT_ISVAR, false) }
-    func GetIsConst(): Bool { return GetField<Bool>(MF_VAR_INFO_VT_ISCONST, false) }
-    func GetIsMemberParam(): Bool { return GetField<Bool>(MF_VAR_INFO_VT_ISMEMBERPARAM, false) }
-    public func GetInitializer(): UInt32 { return GetField<UInt32>(MF_VAR_INFO_VT_INITIALIZER, 0u32) }
-    func GetValueType(): UInt8 { return GetField<UInt8>(MF_VAR_INFO_VT_VALUE_TYPE, 0u8) }
+    func GetIsVar(): Bool { return GetField(MF_VAR_INFO_VT_ISVAR, false) }
+    func GetIsConst(): Bool { return GetField(MF_VAR_INFO_VT_ISCONST, false) }
+    func GetIsMemberParam(): Bool { return GetField(MF_VAR_INFO_VT_ISMEMBERPARAM, false) }
+    public func GetInitializer(): UInt32 { return GetField(MF_VAR_INFO_VT_INITIALIZER, 0u32) }
+    func GetValueType(): UInt8 { return GetField(MF_VAR_INFO_VT_VALUE_TYPE, 0u8) }
     func GetValue(): Option<Int64> { return GetPointer(MF_VAR_INFO_VT_VALUE) }
 
     func GetValueAsInt8Value(): Option<PackageFormat_Int8Value> {
@@ -473,12 +473,12 @@ public class PackageFormat_VarInfo <: Table {
 public class PackageFormat_VarWithPatternInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetIsVar(): Bool { return GetField<Bool>(MF_VAR_WITH_PATTERN_INFO_VT_ISVAR, false) }
-    func GetIsConst(): Bool { return GetField<Bool>(MF_VAR_WITH_PATTERN_INFO_VT_ISCONST, false) }
+    func GetIsVar(): Bool { return GetField(MF_VAR_WITH_PATTERN_INFO_VT_ISVAR, false) }
+    func GetIsConst(): Bool { return GetField(MF_VAR_WITH_PATTERN_INFO_VT_ISCONST, false) }
     public func GetIrrefutablePattern(): Option<PackageFormat_Pattern> {
         return if (let Some(p) <- GetPointer(MF_VAR_WITH_PATTERN_INFO_VT_IRREFUTABLEPATTERN)) { Some(PackageFormat_Pattern(data, p)) } else { None }
     }
-    public func GetInitializer(): UInt32 { return GetField<UInt32>(MF_VAR_WITH_PATTERN_INFO_VT_INITIALIZER, 0u32) }
+    public func GetInitializer(): UInt32 { return GetField(MF_VAR_WITH_PATTERN_INFO_VT_INITIALIZER, 0u32) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -499,14 +499,14 @@ public class PackageFormat_FuncInfo <: Table {
     public func GetFuncBody(): Option<PackageFormat_FuncBody> {
         return if (let Some(p) <- GetPointer(MF_FUNC_INFO_VT_FUNCBODY)) { Some(PackageFormat_FuncBody(data, p)) } else { None }
     }
-    func GetOverflowPolicy(): UInt8 { return GetField<UInt8>(MF_FUNC_INFO_VT_OVERFLOWPOLICY, 0u8) }
-    func GetOp(): UInt8 { return GetField<UInt8>(MF_FUNC_INFO_VT_OP, MF_OPERATOR_KIND_NA) }
+    func GetOverflowPolicy(): UInt8 { return GetField(MF_FUNC_INFO_VT_OVERFLOWPOLICY, 0u8) }
+    func GetOp(): UInt8 { return GetField(MF_FUNC_INFO_VT_OP, MF_OPERATOR_KIND_NA) }
     func GetAdInfo(): Option<PackageFormat_AutoDiffInfo> {
         return if (let Some(p) <- GetPointer(MF_FUNC_INFO_VT_ADINFO)) { Some(PackageFormat_AutoDiffInfo(data, p)) } else { None }
     }
-    func GetIsConst(): Bool { return GetField<Bool>(MF_FUNC_INFO_VT_ISCONST, false) }
-    public func GetIsInline(): Bool { return GetField<Bool>(MF_FUNC_INFO_VT_ISINLINE, false) }
-    func GetIsFastNative(): Bool { return GetField<Bool>(MF_FUNC_INFO_VT_ISFASTNATIVE, false) }
+    func GetIsConst(): Bool { return GetField(MF_FUNC_INFO_VT_ISCONST, false) }
+    public func GetIsInline(): Bool { return GetField(MF_FUNC_INFO_VT_ISINLINE, false) }
+    func GetIsFastNative(): Bool { return GetField(MF_FUNC_INFO_VT_ISFASTNATIVE, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -529,9 +529,9 @@ public class PackageFormat_FuncInfo <: Table {
 public class PackageFormat_ParamInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetIsNamedParam(): Bool { return GetField<Bool>(MF_PARAM_INFO_VT_ISNAMEDPARAM, false) }
-    func GetIsMemberParam(): Bool { return GetField<Bool>(MF_PARAM_INFO_VT_ISMEMBERPARAM, false) }
-    public func GetDefaultVal(): UInt32 { return GetField<UInt32>(MF_PARAM_INFO_VT_DEFAULTVAL, 0u32) }
+    func GetIsNamedParam(): Bool { return GetField(MF_PARAM_INFO_VT_ISNAMEDPARAM, false) }
+    func GetIsMemberParam(): Bool { return GetField(MF_PARAM_INFO_VT_ISMEMBERPARAM, false) }
+    public func GetDefaultVal(): UInt32 { return GetField(MF_PARAM_INFO_VT_DEFAULTVAL, 0u32) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -546,8 +546,8 @@ public class PackageFormat_ParamInfo <: Table {
 public class PackageFormat_PropInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetIsConst(): Bool { return GetField<Bool>(MF_PROP_INFO_VT_ISCONST, false) }
-    func GetIsMutable(): Bool { return GetField<Bool>(MF_PROP_INFO_VT_ISMUTABLE, false) }
+    func GetIsConst(): Bool { return GetField(MF_PROP_INFO_VT_ISCONST, false) }
+    func GetIsMutable(): Bool { return GetField(MF_PROP_INFO_VT_ISMUTABLE, false) }
     public func GetSetters(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_PROP_INFO_VT_SETTERS)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
@@ -571,7 +571,7 @@ public class PackageFormat_PropInfo <: Table {
 class PackageFormat_BuiltInInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetBuiltInType(): UInt8 { return GetField<UInt8>(MF_BUILT_IN_INFO_VT_BUILTINTYPE, 0u8) }
+    func GetBuiltInType(): UInt8 { return GetField(MF_BUILT_IN_INFO_VT_BUILTINTYPE, 0u8) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -584,7 +584,7 @@ class PackageFormat_BuiltInInfo <: Table {
 public class PackageFormat_AliasInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    public func GetAliasedTy(): UInt32 { return GetField<UInt32>(MF_ALIAS_INFO_VT_ALIASEDTY, 0u32) }
+    public func GetAliasedTy(): UInt32 { return GetField(MF_ALIAS_INFO_VT_ALIASEDTY, 0u32) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -597,8 +597,8 @@ public class PackageFormat_AliasInfo <: Table {
 public class PackageFormat_Decl <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    public func GetKind(): UInt16 { return GetField<UInt16>(MF_DECL_VT_KIND, MF_DECL_KIND_INVALID_DECL) }
-    func GetIsTopLevel(): Bool { return GetField<Bool>(MF_DECL_VT_ISTOPLEVEL, false) }
+    public func GetKind(): UInt16 { return GetField(MF_DECL_VT_KIND, MF_DECL_KIND_INVALID_DECL) }
+    func GetIsTopLevel(): Bool { return GetField(MF_DECL_VT_ISTOPLEVEL, false) }
     func GetFullPkgName(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_DECL_VT_FULLPKGNAME)) { Some(FlatBufferString(data, p)) } else { None }
     }
@@ -626,7 +626,7 @@ public class PackageFormat_Decl <: Table {
     public func GetAnnotations(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_DECL_VT_ANNOTATIONS)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
-    public func GetType(): UInt32 { return GetField<UInt32>(MF_DECL_VT_TYPE, 0u32) }
+    public func GetType(): UInt32 { return GetField(MF_DECL_VT_TYPE, 0u32) }
     public func GetMangledName(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_DECL_VT_MANGLEDNAME)) { Some(FlatBufferString(data, p)) } else { None }
     }
@@ -639,7 +639,7 @@ public class PackageFormat_Decl <: Table {
     func GetHash(): Option<PackageFormat_DeclHash> {
         return if (let Some(p) <- GetStruct(MF_DECL_VT_HASH)) { Some(PackageFormat_DeclHash(data, p)) } else { None }
     }
-    func GetInfoType(): UInt8 { return GetField<UInt8>(MF_DECL_VT_INFO_TYPE, 0u8) }
+    func GetInfoType(): UInt8 { return GetField(MF_DECL_VT_INFO_TYPE, 0u8) }
     func GetInfo(): Option<Int64> { return GetPointer(MF_DECL_VT_INFO) }
     public func GetDependencies(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_DECL_VT_DEPENDENCIES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
@@ -728,7 +728,7 @@ public class PackageFormat_Decl <: Table {
 public class PackageFormat_Anno <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetKind(): UInt16 { return GetField<UInt16>(MF_ANNO_VT_KIND, 0u16) }
+    func GetKind(): UInt16 { return GetField(MF_ANNO_VT_KIND, 0u16) }
     func GetIdentifier(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_ANNO_VT_IDENTIFIER)) { Some(FlatBufferString(data, p)) } else { None }
     }
@@ -762,7 +762,7 @@ class PackageFormat_AnnoArg <: Table {
     func GetName(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_ANNO_ARG_VT_NAME)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    func GetExpr(): UInt32 { return GetField<UInt32>(MF_ANNO_ARG_VT_EXPR, 0u32) }
+    func GetExpr(): UInt32 { return GetField(MF_ANNO_ARG_VT_EXPR, 0u32) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -777,8 +777,8 @@ class PackageFormat_AnnoArg <: Table {
 class PackageFormat_CallInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetHasSideEffect(): Bool { return GetField<Bool>(MF_CALL_INFO_VT_HASSIDEEFFECT, false) }
-    func GetCallKind(): UInt8 { return GetField<UInt8>(MF_CALL_INFO_VT_CALLKIND, MF_CALL_KIND_NA) }
+    func GetHasSideEffect(): Bool { return GetField(MF_CALL_INFO_VT_HASSIDEEFFECT, false) }
+    func GetCallKind(): UInt8 { return GetField(MF_CALL_INFO_VT_CALLKIND, MF_CALL_KIND_NA) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -791,7 +791,7 @@ class PackageFormat_CallInfo <: Table {
 // ModuleFormat_generated.h:4430-4462 (UnaryInfo).
 class PackageFormat_UnaryInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetOp(): UInt8 { return GetField<UInt8>(MF_UNARY_INFO_VT_OP, 0u8) }
+    func GetOp(): UInt8 { return GetField(MF_UNARY_INFO_VT_OP, 0u8) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<UInt8>(verifier, MF_UNARY_INFO_VT_OP, 1) &&
@@ -802,7 +802,7 @@ class PackageFormat_UnaryInfo <: Table {
 // ModuleFormat_generated.h:4471-4503 (BinaryInfo).
 class PackageFormat_BinaryInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetOp(): UInt8 { return GetField<UInt8>(MF_BINARY_INFO_VT_OP, 0u8) }
+    func GetOp(): UInt8 { return GetField(MF_BINARY_INFO_VT_OP, 0u8) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<UInt8>(verifier, MF_BINARY_INFO_VT_OP, 1) &&
@@ -813,7 +813,7 @@ class PackageFormat_BinaryInfo <: Table {
 // ModuleFormat_generated.h:4512-4544 (IncOrDecInfo).
 class PackageFormat_IncOrDecInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetOp(): UInt8 { return GetField<UInt8>(MF_INC_OR_DEC_INFO_VT_OP, 0u8) }
+    func GetOp(): UInt8 { return GetField(MF_INC_OR_DEC_INFO_VT_OP, 0u8) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<UInt8>(verifier, MF_INC_OR_DEC_INFO_VT_OP, 1) &&
@@ -828,8 +828,8 @@ class PackageFormat_LitConstInfo <: Table {
     func GetStrValue(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_LIT_CONST_INFO_VT_STRVALUE)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    func GetConstKind(): UInt8 { return GetField<UInt8>(MF_LIT_CONST_INFO_VT_CONSTKIND, 0u8) }
-    func GetStrKind(): UInt8 { return GetField<UInt8>(MF_LIT_CONST_INFO_VT_STRKIND, 0u8) }
+    func GetConstKind(): UInt8 { return GetField(MF_LIT_CONST_INFO_VT_CONSTKIND, 0u8) }
+    func GetStrKind(): UInt8 { return GetField(MF_LIT_CONST_INFO_VT_STRKIND, 0u8) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -854,7 +854,7 @@ public class PackageFormat_ReferenceInfo <: Table {
     public func GetInstTys(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_REFERENCE_INFO_VT_INSTTYS)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
-    public func GetMatchedParentTy(): UInt32 { return GetField<UInt32>(MF_REFERENCE_INFO_VT_MATCHEDPARENTTY, 0u32) }
+    public func GetMatchedParentTy(): UInt32 { return GetField(MF_REFERENCE_INFO_VT_MATCHEDPARENTTY, 0u32) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -877,7 +877,7 @@ class PackageFormat_LambdaInfo <: Table {
     func GetFuncBody(): Option<PackageFormat_FuncBody> {
         return if (let Some(p) <- GetPointer(MF_LAMBDA_INFO_VT_FUNCBODY)) { Some(PackageFormat_FuncBody(data, p)) } else { None }
     }
-    func GetSupportMock(): Bool { return GetField<Bool>(MF_LAMBDA_INFO_VT_SUPPORTMOCK, false) }
+    func GetSupportMock(): Bool { return GetField(MF_LAMBDA_INFO_VT_SUPPORTMOCK, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -893,8 +893,8 @@ class PackageFormat_LambdaInfo <: Table {
 class PackageFormat_AssignInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetIsCompound(): Bool { return GetField<Bool>(MF_ASSIGN_INFO_VT_ISCOMPOUND, false) }
-    func GetOp(): UInt8 { return GetField<UInt8>(MF_ASSIGN_INFO_VT_OP, 0u8) }
+    func GetIsCompound(): Bool { return GetField(MF_ASSIGN_INFO_VT_ISCOMPOUND, false) }
+    func GetOp(): UInt8 { return GetField(MF_ASSIGN_INFO_VT_OP, 0u8) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -911,7 +911,7 @@ public class PackageFormat_ArrayInfo <: Table {
     public func GetInitFunc(): Option<PackageFormat_FullId> {
         return if (let Some(p) <- GetPointer(MF_ARRAY_INFO_VT_INITFUNC)) { Some(PackageFormat_FullId(data, p)) } else { None }
     }
-    func GetIsValueArray(): Bool { return GetField<Bool>(MF_ARRAY_INFO_VT_ISVALUEARRAY, false) }
+    func GetIsValueArray(): Bool { return GetField(MF_ARRAY_INFO_VT_ISVALUEARRAY, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -926,7 +926,7 @@ public class PackageFormat_ArrayInfo <: Table {
 // ModuleFormat_generated.h:4874-4906 (JumpInfo).
 class PackageFormat_JumpInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetIsBreak(): Bool { return GetField<Bool>(MF_JUMP_INFO_VT_ISBREAK, false) }
+    func GetIsBreak(): Bool { return GetField(MF_JUMP_INFO_VT_ISBREAK, false) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<Bool>(verifier, MF_JUMP_INFO_VT_ISBREAK, 1) &&
@@ -938,8 +938,8 @@ class PackageFormat_JumpInfo <: Table {
 class PackageFormat_FuncArgInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetWithInout(): Bool { return GetField<Bool>(MF_FUNC_ARG_INFO_VT_WITHINOUT, false) }
-    func GetIsDefaultVal(): Bool { return GetField<Bool>(MF_FUNC_ARG_INFO_VT_ISDEFAULTVAL, false) }
+    func GetWithInout(): Bool { return GetField(MF_FUNC_ARG_INFO_VT_WITHINOUT, false) }
+    func GetIsDefaultVal(): Bool { return GetField(MF_FUNC_ARG_INFO_VT_ISDEFAULTVAL, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -952,7 +952,7 @@ class PackageFormat_FuncArgInfo <: Table {
 // ModuleFormat_generated.h:4966-4998 (SubscriptInfo).
 class PackageFormat_SubscriptInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetIsTupleAccess(): Bool { return GetField<Bool>(MF_SUBSCRIPT_INFO_VT_ISTUPLEACCESS, false) }
+    func GetIsTupleAccess(): Bool { return GetField(MF_SUBSCRIPT_INFO_VT_ISTUPLEACCESS, false) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<Bool>(verifier, MF_SUBSCRIPT_INFO_VT_ISTUPLEACCESS, 1) &&
@@ -963,7 +963,7 @@ class PackageFormat_SubscriptInfo <: Table {
 // ModuleFormat_generated.h:5007-5039 (MatchInfo).
 class PackageFormat_MatchInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
-    func GetMatchMode(): Bool { return GetField<Bool>(MF_MATCH_INFO_VT_MATCHMODE, false) }
+    func GetMatchMode(): Bool { return GetField(MF_MATCH_INFO_VT_MATCHMODE, false) }
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyField<Bool>(verifier, MF_MATCH_INFO_VT_MATCHMODE, 1) &&
@@ -1035,7 +1035,7 @@ public class PackageFormat_ForInInfo <: Table {
     public func GetPattern(): Option<PackageFormat_Pattern> {
         return if (let Some(p) <- GetPointer(MF_FOR_IN_INFO_VT_PATTERN)) { Some(PackageFormat_Pattern(data, p)) } else { None }
     }
-    func GetForInKind(): UInt8 { return GetField<UInt8>(MF_FOR_IN_INFO_VT_FORINKIND, MF_FOR_IN_KIND_NA) }
+    func GetForInKind(): UInt8 { return GetField(MF_FOR_IN_INFO_VT_FORINKIND, MF_FOR_IN_KIND_NA) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -1086,20 +1086,20 @@ class PackageFormat_SpawnInfo <: Table {
 public class PackageFormat_Expr <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    public func GetKind(): UInt16 { return GetField<UInt16>(MF_EXPR_VT_KIND, MF_EXPR_KIND_INVALID_EXPR) }
+    public func GetKind(): UInt16 { return GetField(MF_EXPR_VT_KIND, MF_EXPR_KIND_INVALID_EXPR) }
     func GetBegin(): Option<PackageFormat_Position> {
         return if (let Some(p) <- GetStruct(MF_EXPR_VT_BEGIN)) { Some(PackageFormat_Position(data, p)) } else { None }
     }
     func GetEnd(): Option<PackageFormat_Position> {
         return if (let Some(p) <- GetStruct(MF_EXPR_VT_END)) { Some(PackageFormat_Position(data, p)) } else { None }
     }
-    public func GetMapExpr(): UInt32 { return GetField<UInt32>(MF_EXPR_VT_MAPEXPR, 0u32) }
+    public func GetMapExpr(): UInt32 { return GetField(MF_EXPR_VT_MAPEXPR, 0u32) }
     public func GetOperands(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_EXPR_VT_OPERANDS)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
-    public func GetType(): UInt32 { return GetField<UInt32>(MF_EXPR_VT_TYPE, 0u32) }
-    func GetOverflowPolicy(): UInt8 { return GetField<UInt8>(MF_EXPR_VT_OVERFLOWPOLICY, 0u8) }
-    func GetInfoType(): UInt8 { return GetField<UInt8>(MF_EXPR_VT_INFO_TYPE, 0u8) }
+    public func GetType(): UInt32 { return GetField(MF_EXPR_VT_TYPE, 0u32) }
+    func GetOverflowPolicy(): UInt8 { return GetField(MF_EXPR_VT_OVERFLOWPOLICY, 0u8) }
+    func GetInfoType(): UInt8 { return GetField(MF_EXPR_VT_INFO_TYPE, 0u8) }
     func GetInfo(): Option<Int64> { return GetPointer(MF_EXPR_VT_INFO) }
 
     func GetInfoAsCallInfo(): Option<PackageFormat_CallInfo> {
@@ -1181,7 +1181,7 @@ public class PackageFormat_Expr <: Table {
 public class PackageFormat_Pattern <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    public func GetKind(): Int8 { return GetField<Int8>(MF_PATTERN_VT_KIND, MF_PATTERN_KIND_INVALID_PATTERN) }
+    public func GetKind(): Int8 { return GetField(MF_PATTERN_VT_KIND, MF_PATTERN_KIND_INVALID_PATTERN) }
     func GetBegin(): Option<PackageFormat_Position> {
         return if (let Some(p) <- GetStruct(MF_PATTERN_VT_BEGIN)) { Some(PackageFormat_Position(data, p)) } else { None }
     }
@@ -1203,8 +1203,8 @@ public class PackageFormat_Pattern <: Table {
     func GetValues(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_PATTERN_VT_VALUES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
-    func GetMatchBeforeRuntime(): Bool { return GetField<Bool>(MF_PATTERN_VT_MATCHBEFORERUNTIME, false) }
-    func GetNeedRuntimeTypeCheck(): Bool { return GetField<Bool>(MF_PATTERN_VT_NEEDRUNTIMETYPECHECK, false) }
+    func GetMatchBeforeRuntime(): Bool { return GetField(MF_PATTERN_VT_MATCHBEFORERUNTIME, false) }
+    func GetNeedRuntimeTypeCheck(): Bool { return GetField(MF_PATTERN_VT_NEEDRUNTIMETYPECHECK, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -1234,9 +1234,9 @@ public class PackageFormat_Pattern <: Table {
 public class PackageFormat_FuncTyInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    public func GetRetType(): UInt32 { return GetField<UInt32>(MF_FUNC_TY_INFO_VT_RETTYPE, 0u32) }
-    public func GetIsC(): Bool { return GetField<Bool>(MF_FUNC_TY_INFO_VT_ISC, false) }
-    public func GetHasVariableLenArg(): Bool { return GetField<Bool>(MF_FUNC_TY_INFO_VT_HASVARIABLELENARG, false) }
+    public func GetRetType(): UInt32 { return GetField(MF_FUNC_TY_INFO_VT_RETTYPE, 0u32) }
+    public func GetIsC(): Bool { return GetField(MF_FUNC_TY_INFO_VT_ISC, false) }
+    public func GetHasVariableLenArg(): Bool { return GetField(MF_FUNC_TY_INFO_VT_HASVARIABLELENARG, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -1254,7 +1254,7 @@ public class PackageFormat_CompositeTyInfo <: Table {
     public func GetDeclPtr(): Option<PackageFormat_FullId> {
         return if (let Some(p) <- GetPointer(MF_COMPOSITE_TY_INFO_VT_DECLPTR)) { Some(PackageFormat_FullId(data, p)) } else { None }
     }
-    public func GetIsThisTy(): Bool { return GetField<Bool>(MF_COMPOSITE_TY_INFO_VT_ISTHISTY, false) }
+    public func GetIsThisTy(): Bool { return GetField(MF_COMPOSITE_TY_INFO_VT_ISTHISTY, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -1292,7 +1292,7 @@ public class PackageFormat_GenericTyInfo <: Table {
 public class PackageFormat_ArrayTyInfo <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    public func GetDimsOrSize(): Int64 { return GetField<Int64>(MF_ARRAY_TY_INFO_VT_DIMSORSIZE, 0) }
+    public func GetDimsOrSize(): Int64 { return GetField(MF_ARRAY_TY_INFO_VT_DIMSORSIZE, 0) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -1305,11 +1305,11 @@ public class PackageFormat_ArrayTyInfo <: Table {
 public class PackageFormat_SemaTy <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    public func GetKind(): UInt16 { return GetField<UInt16>(MF_SEMA_TY_VT_KIND, MF_TYPE_KIND_UNIT) }
+    public func GetKind(): UInt16 { return GetField(MF_SEMA_TY_VT_KIND, MF_TYPE_KIND_UNIT) }
     public func GetTypeArgs(): Option<Vector<UInt32>> {
         return if (let Some(p) <- GetPointer(MF_SEMA_TY_VT_TYPEARGS)) { Some(Vector<UInt32>(data, p)) } else { None }
     }
-    func GetInfoType(): UInt8 { return GetField<UInt8>(MF_SEMA_TY_VT_INFO_TYPE, 0u8) }
+    func GetInfoType(): UInt8 { return GetField(MF_SEMA_TY_VT_INFO_TYPE, 0u8) }
     func GetInfo(): Option<Int64> { return GetPointer(MF_SEMA_TY_VT_INFO) }
 
     public func GetInfoAsFuncTyInfo(): Option<PackageFormat_FuncTyInfo> {
@@ -1356,10 +1356,10 @@ class PackageFormat_ImportSpec <: Table {
     func GetAsIdentifier(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_IMPORT_SPEC_VT_ASIDENTIFIER)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    func GetReExport(): UInt8 { return GetField<UInt8>(MF_IMPORT_SPEC_VT_REEXPORT, MF_ACCESS_MODIFIER_PRIVATE) }
-    func GetIsDecl(): Bool { return GetField<Bool>(MF_IMPORT_SPEC_VT_ISDECL, false) }
-    func GetHasDoubleColon(): Bool { return GetField<Bool>(MF_IMPORT_SPEC_VT_HASDOUBLECOLON, false) }
-    func GetWithImplicitExport(): Bool { return GetField<Bool>(MF_IMPORT_SPEC_VT_WITHIMPLICITEXPORT, true) }
+    func GetReExport(): UInt8 { return GetField(MF_IMPORT_SPEC_VT_REEXPORT, MF_ACCESS_MODIFIER_PRIVATE) }
+    func GetIsDecl(): Bool { return GetField(MF_IMPORT_SPEC_VT_ISDECL, false) }
+    func GetHasDoubleColon(): Bool { return GetField(MF_IMPORT_SPEC_VT_HASDOUBLECOLON, false) }
+    func GetWithImplicitExport(): Bool { return GetField(MF_IMPORT_SPEC_VT_WITHIMPLICITEXPORT, true) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -1454,7 +1454,7 @@ class PackageFormat_FeaturesDirective <: Table {
 class PackageFormat_FileInfo <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetFileID(): UInt32 { return GetField<UInt32>(MF_FILE_INFO_VT_FILEID, 0u32) }
+    func GetFileID(): UInt32 { return GetField(MF_FILE_INFO_VT_FILEID, 0u32) }
     func GetBegin(): Option<PackageFormat_Position> {
         return if (let Some(p) <- GetStruct(MF_FILE_INFO_VT_BEGIN)) { Some(PackageFormat_Position(data, p)) } else { None }
     }
@@ -1481,8 +1481,8 @@ class PackageFormat_FileInfo <: Table {
 class PackageFormat_CompilationOptions <: Table {
     init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetOptimizationLevel(): UInt8 { return GetField<UInt8>(MF_COMPILATION_OPTIONS_VT_OPTIMIZATION_LEVEL, 0u8) }
-    func GetDebug(): Bool { return GetField<Bool>(MF_COMPILATION_OPTIONS_VT_DEBUG, false) }
+    func GetOptimizationLevel(): UInt8 { return GetField(MF_COMPILATION_OPTIONS_VT_OPTIMIZATION_LEVEL, 0u8) }
+    func GetDebug(): Bool { return GetField(MF_COMPILATION_OPTIONS_VT_DEBUG, false) }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
@@ -1529,8 +1529,8 @@ public class PackageFormat_Package <: Table {
     func GetAllValues(): Option<Vector<Offset<Any>>> {
         return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_ALLVALUES)) { Some(Vector<Offset<Any>>(data, p)) } else { None }
     }
-    func GetKind(): UInt8 { return GetField<UInt8>(MF_PACKAGE_VT_KIND, MF_PACKAGE_KIND_NORMAL) }
-    func GetAccess(): UInt8 { return GetField<UInt8>(MF_PACKAGE_VT_ACCESS, MF_ACCESS_LEVEL_PUBLIC) }
+    func GetKind(): UInt8 { return GetField(MF_PACKAGE_VT_KIND, MF_PACKAGE_KIND_NORMAL) }
+    func GetAccess(): UInt8 { return GetField(MF_PACKAGE_VT_ACCESS, MF_ACCESS_LEVEL_PUBLIC) }
     func GetModuleName(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_MODULENAME)) { Some(FlatBufferString(data, p)) } else { None }
     }
@@ -1683,7 +1683,7 @@ func VerifyConstValueVector(data: Array<UInt8>, verifier: VerifierTemplate, valu
             var i = 0u32
             while (i < valueVec.size()) {
                 let elemPos = (valueVec.Get(i) as Int64).getOrThrow()
-                let elemType = (typeVec.Get(i) as UInt8).getOrThrow()
+                let elemType = typeVec.Get(i, 0u8)
                 if (!VerifyConstValue(data, verifier, Some(elemPos), elemType)) {
                     return false
                 }

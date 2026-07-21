@@ -17,7 +17,7 @@ class PackageFormat_CHIRPackage <: Table {
     }
 
     func GetPkgAccessLevel(): UInt8 {
-        return GetField<UInt8>(CHIRFB_CHIR_PACKAGE_VT_PKGACCESSLEVEL, 0u8)
+        return GetField(CHIRFB_CHIR_PACKAGE_VT_PKGACCESSLEVEL, 0u8)
     }
 
     func GetTypes_type(): Option<Vector<UInt8>> {
@@ -53,15 +53,15 @@ class PackageFormat_CHIRPackage <: Table {
     }
 
     func GetPackageInitFunc(): UInt32 {
-        return GetField<UInt32>(CHIRFB_CHIR_PACKAGE_VT_PACKAGEINITFUNC, 0u32)
+        return GetField(CHIRFB_CHIR_PACKAGE_VT_PACKAGEINITFUNC, 0u32)
     }
 
     func GetPhase(): UInt8 {
-        return GetField<UInt8>(CHIRFB_CHIR_PACKAGE_VT_PHASE, 0u8)
+        return GetField(CHIRFB_CHIR_PACKAGE_VT_PHASE, 0u8)
     }
 
     func GetPackageLiteralInitFunc(): UInt32 {
-        return GetField<UInt32>(CHIRFB_CHIR_PACKAGE_VT_PACKAGELITERALINITFUNC, 0u32)
+        return GetField(CHIRFB_CHIR_PACKAGE_VT_PACKAGELITERALINITFUNC, 0u32)
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
