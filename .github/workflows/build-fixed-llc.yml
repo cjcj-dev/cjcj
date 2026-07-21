@@ -17,9 +17,12 @@ env:
   LLVM_FORK_REF: fix/scheddag-memcorrupt
   # getUNDEF lowering + clang CTAD fix + in-tree demangler source stub.
   LLVM_FORK_SHA: 4f61703c3225d60a7dc839718d822911628e6740
-  # Supplies ModuleFormat.fbs and its matching FlatBuffers source generator.
+  # Supplies ModuleFormat.fbs.
   CANGJIE_COMPILER_URL: https://gitcode.com/Cangjie/cangjie_compiler.git
   CANGJIE_COMPILER_SHA: 87fff87a1883da9bfe5956296d8079e8a7f9d15f
+  # Matches the FlatBuffers revision pinned by cangjie_compiler.
+  FLATBUFFERS_URL: https://gitcode.com/openharmony/third_party_flatbuffers.git
+  FLATBUFFERS_SHA: c3e4d69cbd5950e43f775ba76eadb30750d6e0b7
 
 jobs:
   build-tools:
@@ -59,15 +62,20 @@ jobs:
           test "$(git -C llvm-fork rev-parse HEAD)" = "$LLVM_FORK_SHA"
 
           git clone --filter=blob:none --no-checkout "$CANGJIE_COMPILER_URL" cangjie-compiler
-          git -C cangjie-compiler sparse-checkout set schema third_party/flatbuffers
+          git -C cangjie-compiler sparse-checkout set schema
           git -C cangjie-compiler fetch --depth=1 origin "$CANGJIE_COMPILER_SHA"
           git -C cangjie-compiler checkout --detach "$CANGJIE_COMPILER_SHA"
           test "$(git -C cangjie-compiler rev-parse HEAD)" = "$CANGJIE_COMPILER_SHA"
 
+          git clone --filter=blob:none --no-checkout "$FLATBUFFERS_URL" flatbuffers
+          git -C flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
+          git -C flatbuffers checkout --detach "$FLATBUFFERS_SHA"
+          test "$(git -C flatbuffers rev-parse HEAD)" = "$FLATBUFFERS_SHA"
+
       - name: Configure and build fixed llc
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cmake -G Ninja -B llc-build \
+          cmake -G Ninja -S llvm-fork/llvm -B llc-build \
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_ENABLE_ASSERTIONS=OFF \
             -DBUILD_SHARED_LIBS=OFF \
@@ -76,8 +84,7 @@ jobs:
             -DLLVM_ENABLE_PROJECTS="" \
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string" \
-            llvm-fork/llvm
+            -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string"
           ninja -C llc-build llc
           mkdir -p "fixed-toolchain/${{ matrix.platform }}"
           gzip -n -c -9 llc-build/bin/llc > "fixed-toolchain/${{ matrix.platform }}/llc.gz"
@@ -85,18 +92,17 @@ jobs:
       - name: Generate ModuleFormat header and build LLVM shim
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cmake -G Ninja -B flatbuffers-build \
+          cmake -G Ninja -S flatbuffers -B flatbuffers-build \
             -DFLATBUFFERS_BUILD_TESTS=OFF \
             -DFLATBUFFERS_BUILD_FLATLIB=OFF \
-            -DFLATBUFFERS_BUILD_SHAREDLIB=OFF \
-            cangjie-compiler/third_party/flatbuffers
+            -DFLATBUFFERS_BUILD_SHAREDLIB=OFF
           ninja -C flatbuffers-build flatc
           mkdir -p shim-generated/flatbuffers
           flatbuffers-build/flatc --no-warnings -c -o shim-generated/flatbuffers \
             cangjie-compiler/schema/ModuleFormat.fbs
           clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
             -Illvm-fork/llvm/include -Illc-build/include \
-            -Icangjie-compiler/third_party/flatbuffers/include -Ishim-generated \
+            -Iflatbuffers/include -Ishim-generated \
             -c runtime_shim/cjselfhost_llvmshim.cpp \
             -o "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
 
