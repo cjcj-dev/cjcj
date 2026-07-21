@@ -116,6 +116,68 @@ public func ReadScalar<T>(data: Array<UInt8>, pos: Int64): T {
     return (UInt8(0) as T).getOrThrow()
 }
 
+// flatbuffers/base.h:416-429. These overloads are the Cangjie spelling of
+// ReadScalar<T> template instantiations: the third argument selects T at
+// compile time and the generated bindings never enter the generic fallback.
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: UInt8): UInt8 {
+    return EndianScalar(data[pos])
+}
+
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Int8): Int8 {
+    return EndianScalar(Int8(data[pos]))
+}
+
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Bool): Bool {
+    return EndianScalar(data[pos] != 0u8)
+}
+
+@OverflowWrapping
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: UInt16): UInt16 {
+    return EndianScalar(UInt16(data[pos]) | (UInt16(data[pos + 1]) << 8))
+}
+
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Int16): Int16 {
+    return EndianScalar(Int16(ReadScalar(data, pos, 0u16)))
+}
+
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Float16): Float16 {
+    return EndianScalar(Float16.fromBits(ReadScalar(data, pos, 0u16)))
+}
+
+@OverflowWrapping
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: UInt32): UInt32 {
+    return EndianScalar(UInt32(data[pos]) | (UInt32(data[pos + 1]) << 8) |
+        (UInt32(data[pos + 2]) << 16) | (UInt32(data[pos + 3]) << 24))
+}
+
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Int32): Int32 {
+    return EndianScalar(Int32(ReadScalar(data, pos, 0u32)))
+}
+
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Float32): Float32 {
+    return EndianScalar(Float32.fromBits(ReadScalar(data, pos, 0u32)))
+}
+
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Rune): Rune {
+    return EndianScalar(Rune(ReadScalar(data, pos, 0u32)))
+}
+
+@OverflowWrapping
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: UInt64): UInt64 {
+    return EndianScalar(UInt64(data[pos]) | (UInt64(data[pos + 1]) << 8) |
+        (UInt64(data[pos + 2]) << 16) | (UInt64(data[pos + 3]) << 24) |
+        (UInt64(data[pos + 4]) << 32) | (UInt64(data[pos + 5]) << 40) |
+        (UInt64(data[pos + 6]) << 48) | (UInt64(data[pos + 7]) << 56))
+}
+
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Int64): Int64 {
+    return EndianScalar(Int64(ReadScalar(data, pos, 0u64)))
+}
+
+public func ReadScalar(data: Array<UInt8>, pos: Int64, _: Float64): Float64 {
+    return EndianScalar(Float64.fromBits(ReadScalar(data, pos, 0u64)))
+}
+
 // flatbuffers/buffer.h:28-37. Offset<T> is the four-byte uoffset_t wrapper
 // used to select IndirectHelper's vector-of-offsets read specialization.
 public struct Offset<T> {
@@ -198,6 +260,71 @@ public open class Table {
         }
     }
 
+    public func GetField(field: UInt16, defaultval: UInt8): UInt8 {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: Int8): Int8 {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: Bool): Bool {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: UInt16): UInt16 {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: Int16): Int16 {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: Float16): Float16 {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: UInt32): UInt32 {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: Int32): Int32 {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: Float32): Float32 {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: Rune): Rune {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: UInt64): UInt64 {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: Int64): Int64 {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
+    public func GetField(field: UInt16, defaultval: Float64): Float64 {
+        let fieldOffset = GetOptionalFieldOffset(field)
+        return if (fieldOffset != 0u16) { ReadScalar(data, pos + Int64(fieldOffset), defaultval) } else { defaultval }
+    }
+
     public func GetPointer(field: UInt16): Option<Int64> {
         let fieldOffset = GetOptionalFieldOffset(field)
         let pointerPos = pos + Int64(fieldOffset)
@@ -233,6 +360,71 @@ public open class Vector<T> {
     public func Get(i: UInt32): Any {
         CJC_ASSERT(i < size())
         return IndirectHelper<T>.Read(data, Data(), i)
+    }
+
+    public func Get(i: UInt32, defaultval: UInt8): UInt8 {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i), defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: Int8): Int8 {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i), defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: Bool): Bool {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i), defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: UInt16): UInt16 {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i) * 2, defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: Int16): Int16 {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i) * 2, defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: Float16): Float16 {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i) * 2, defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: UInt32): UInt32 {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i) * 4, defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: Int32): Int32 {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i) * 4, defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: Float32): Float32 {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i) * 4, defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: Rune): Rune {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i) * 4, defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: UInt64): UInt64 {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i) * 8, defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: Int64): Int64 {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i) * 8, defaultval)
+    }
+
+    public func Get(i: UInt32, defaultval: Float64): Float64 {
+        CJC_ASSERT(i < size())
+        return ReadScalar(data, Data() + Int64(i) * 8, defaultval)
     }
 
     public func Data(): Int64 {
