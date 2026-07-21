@@ -25,11 +25,11 @@ public class MangleFile {
 public class MangleType {
     public var kind: TypeKind
     public var name: String = ""
-    public let typeArgs: ArrayList<MangleType> = ArrayList<MangleType>()
+    public let typeArgs: ArrayList<MangleType> = ArrayList<MangleType>(Array<MangleType>())
     public var dims: UInt64 = 0u64
     public var size: Int64 = 0
     public var retTy: Option<MangleType> = None
-    public let paramTys: ArrayList<MangleType> = ArrayList<MangleType>()
+    public let paramTys: ArrayList<MangleType> = ArrayList<MangleType>(Array<MangleType>())
     public var isCFunc: Bool = false
     public var decl: Option<MangleDecl> = None
 
@@ -57,7 +57,8 @@ public class MangleType {
 public class MangleTypeAnnotation {
     public var astKind: ASTKind
     public var name: String = ""
-    public let typeArguments: ArrayList<MangleTypeAnnotation> = ArrayList<MangleTypeAnnotation>()
+    public let typeArguments: ArrayList<MangleTypeAnnotation> =
+        ArrayList<MangleTypeAnnotation>(Array<MangleTypeAnnotation>())
     public var innerType: Option<MangleTypeAnnotation> = None
     public var componentType: Option<MangleTypeAnnotation> = None
     public var baseType: Option<MangleTypeAnnotation> = None
@@ -66,9 +67,11 @@ public class MangleTypeAnnotation {
     public var constantValue: String = ""
     public var typeArgument: Option<MangleTypeAnnotation> = None
     public var constantType: Option<MangleTypeAnnotation> = None
-    public let paramTypes: ArrayList<MangleTypeAnnotation> = ArrayList<MangleTypeAnnotation>()
+    public let paramTypes: ArrayList<MangleTypeAnnotation> =
+        ArrayList<MangleTypeAnnotation>(Array<MangleTypeAnnotation>())
     public var retType: Option<MangleTypeAnnotation> = None
-    public let fieldTypes: ArrayList<MangleTypeAnnotation> = ArrayList<MangleTypeAnnotation>()
+    public let fieldTypes: ArrayList<MangleTypeAnnotation> =
+        ArrayList<MangleTypeAnnotation>(Array<MangleTypeAnnotation>())
     public var isC: Bool = false
     public var ty: Option<MangleType> = None
 
@@ -84,14 +87,16 @@ public class MangleTypeAnnotation {
 
 public class MangleGenericConstraint {
     public var typeAnnotation: Option<MangleTypeAnnotation> = None
-    public let upperBounds: ArrayList<MangleTypeAnnotation> = ArrayList<MangleTypeAnnotation>()
+    public let upperBounds: ArrayList<MangleTypeAnnotation> =
+        ArrayList<MangleTypeAnnotation>(Array<MangleTypeAnnotation>())
 
     public init() {}
 }
 
 public class MangleGeneric {
-    public let typeParameters: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
-    public let genericConstraints: ArrayList<MangleGenericConstraint> = ArrayList<MangleGenericConstraint>()
+    public let typeParameters: ArrayList<MangleDecl> = ArrayList<MangleDecl>(Array<MangleDecl>())
+    public let genericConstraints: ArrayList<MangleGenericConstraint> =
+        ArrayList<MangleGenericConstraint>(Array<MangleGenericConstraint>())
 
     public init() {}
 }
@@ -107,7 +112,7 @@ public class MangleFuncParam {
     public var isVar: Bool = false
     public var hasAccessibilityModifiers: Bool = false
     public var accessibilityModifiers: String = ""
-    public let attrs: ArrayList<Attribute> = ArrayList<Attribute>()
+    public let attrs: ArrayList<Attribute> = ArrayList<Attribute>(Array<Attribute>())
 
     public init() {}
 
@@ -126,7 +131,7 @@ public class MangleFuncParam {
 }
 
 public class MangleFuncBody {
-    public let params: ArrayList<MangleFuncParam> = ArrayList<MangleFuncParam>()
+    public let params: ArrayList<MangleFuncParam> = ArrayList<MangleFuncParam>(Array<MangleFuncParam>())
     public var retType: Option<MangleTypeAnnotation> = None
     public var generic: () -> Option<MangleGeneric> = { => None }
     public var parentClassLike: Option<MangleDecl> = None
@@ -139,7 +144,7 @@ public class MangleFuncBody {
 public class ManglePattern {
     public var astKind: ASTKind
     public var varDecl: Option<MangleDecl> = None
-    public let patterns: ArrayList<ManglePattern> = ArrayList<ManglePattern>()
+    public let patterns: ArrayList<ManglePattern> = ArrayList<ManglePattern>(Array<ManglePattern>())
 
     public init(astKind: ASTKind) {
         this.astKind = astKind
@@ -167,10 +172,11 @@ public class MangleDecl {
     public var irrefutablePattern: Option<ManglePattern> = None
     public var extendedType: Option<MangleTypeAnnotation> = None
     public var isMemberParam: Bool = false
-    public let inheritedTypes: ArrayList<MangleTypeAnnotation> = ArrayList<MangleTypeAnnotation>()
-    public let members: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
-    public let getters: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
-    public let setters: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
+    public let inheritedTypes: ArrayList<MangleTypeAnnotation> =
+        ArrayList<MangleTypeAnnotation>(Array<MangleTypeAnnotation>())
+    public let members: ArrayList<MangleDecl> = ArrayList<MangleDecl>(Array<MangleDecl>())
+    public let getters: ArrayList<MangleDecl> = ArrayList<MangleDecl>(Array<MangleDecl>())
+    public let setters: ArrayList<MangleDecl> = ArrayList<MangleDecl>(Array<MangleDecl>())
     public var attrs: (Attribute) -> Bool = { _ => false }
 
     public init(astKind: ASTKind) {
