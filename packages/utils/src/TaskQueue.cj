@@ -43,7 +43,9 @@ public class TaskResult<T> {
         if (let Some(e) <- failure) {
             throw e
         }
-        return value.getOrThrow()
+        let result = value.getOrThrow()
+        value = None
+        return result
     }
 
     public func isCompleted(): Bool {
