@@ -6163,9 +6163,12 @@ extend TypeChecker {
                 }
             }
         }
-        for ((tyVar, ty) in typeMapping.entries) {
-            typeMapping.entries[tyVar] = impl.typeManager.SubstituteTypeAliasInTy(ty, needSubstituteGeneric: true,
-                typeMapping: aliasParamMapping)
+        var mapIdx: Int64 = 0
+        while (mapIdx < typeMapping.entries.size) {
+            typeMapping.entries.SetValueAt(mapIdx, impl.typeManager.SubstituteTypeAliasInTy(
+                typeMapping.entries.ValueAt(mapIdx), needSubstituteGeneric: true,
+                typeMapping: aliasParamMapping))
+            mapIdx++
         }
     }
 
@@ -6222,8 +6225,10 @@ extend TypeChecker {
         let nestedMapping = GenerateTypeMappingForTypeAliasDecl(tad)
         SubstituteTypeForTypeAliasTypeMapping(tad, typeArgs, nestedMapping)
         let directMapping = GenerateTypeMapping(tad, typeArgs)
-        for ((tyVar, ty) in directMapping.entries) {
-            nestedMapping.Put(tyVar.value, ty)
+        var mapIdx: Int64 = 0
+        while (mapIdx < directMapping.entries.size) {
+            nestedMapping.Put(directMapping.entries.KeyAt(mapIdx).value, directMapping.entries.ValueAt(mapIdx))
+            mapIdx++
         }
         return nestedMapping
     }

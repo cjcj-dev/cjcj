@@ -1033,8 +1033,10 @@ public class StructInheritanceChecker {
     }
 
     private func MergeTypeSubstForExtendOrdering(target: TypeSubst, source: TypeSubst): Unit {
-        for ((tyVar, ty) in source.entries) {
-            target.Put(tyVar.value, ty)
+        var mapIdx: Int64 = 0
+        while (mapIdx < source.entries.size) {
+            target.Put(source.entries.KeyAt(mapIdx).value, source.entries.ValueAt(mapIdx))
+            mapIdx++
         }
     }
 

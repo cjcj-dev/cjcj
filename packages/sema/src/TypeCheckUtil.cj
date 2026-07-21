@@ -1074,7 +1074,9 @@ private func TypeCheckUtilDeclKey(decl: Decl): String {
 
 // C++ src/Sema/TypeCheckUtil.cpp:723 HasTyVarsToSolve.
 public func HasTyVarsToSolve(maps: SubstPack): Bool {
-    for ((_, ty) in maps.u2i.entries) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < maps.u2i.entries.size) {
+        let ty = maps.u2i.entries.ValueAt(mapIdx)
         let solved = if (let Some(tv) <- (ty as GenericsTy)) {
             maps.inst.Get(tv).isSome()
         } else {
@@ -1083,6 +1085,7 @@ public func HasTyVarsToSolve(maps: SubstPack): Bool {
         if (!solved) {
             return true
         }
+        mapIdx++
     }
     return false
 }
@@ -1093,10 +1096,12 @@ public func HasUnsolvedTyVars(subst: TypeSubst, tyVars: ArrayList<GenericsTy>): 
         if (let None <- subst.Get(tyVar)) {
             return true
         }
-        for ((_, ty) in subst.entries) {
-            if (ty.Contains(tyVar)) {
+        var mapIdx: Int64 = 0
+        while (mapIdx < subst.entries.size) {
+            if (subst.entries.ValueAt(mapIdx).Contains(tyVar)) {
                 return true
             }
+            mapIdx++
         }
     }
     return false
@@ -1105,12 +1110,15 @@ public func HasUnsolvedTyVars(subst: TypeSubst, tyVars: ArrayList<GenericsTy>): 
 // C++ src/Sema/TypeCheckUtil.cpp:743 GetTyVarsToSolve.
 public func GetTyVarsToSolve(maps: SubstPack): ArrayList<GenericsTy> {
     let ret = ArrayList<GenericsTy>()
-    for ((_, ty) in maps.u2i.entries) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < maps.u2i.entries.size) {
+        let ty = maps.u2i.entries.ValueAt(mapIdx)
         if (let Some(tv) <- (ty as GenericsTy)) {
             if (let None <- maps.inst.Get(tv)) {
                 ret.add(tv)
             }
         }
+        mapIdx++
     }
     return ret
 }

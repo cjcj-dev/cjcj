@@ -53,8 +53,10 @@ private func sameDeclOpt(left: Option<Decl>, right: Option<Decl>): Bool {
 
 private func keySet(mapping: MultiTypeSubst): ArrayList<GenericsTy> {
     let out = ArrayList<GenericsTy>()
-    for ((tyVar, _) in mapping.entries) {
-        let _ = addGenericUnique(out, tyVar.value)
+    var idx: Int64 = 0
+    while (idx < mapping.entries.size) {
+        let _ = addGenericUnique(out, mapping.entries.KeyAt(idx).value)
+        idx++
     }
     return out
 }
@@ -82,8 +84,10 @@ private func getDirectMappingTys(tyVar: GenericsTy, mts: MultiTypeSubst): TySet 
         if (let Some(targetTys) <- mapping.Get(curTy)) {
             removeMapping(mapping, curTy)
             let candidates = TySet()
-            for (targetTy in targetTys) {
-                candidates.Add(targetTy.value)
+            var tyIdx: Int64 = 0
+            while (tyIdx < targetTys.size) {
+                candidates.Add(targetTys.ValueAt(tyIdx).value)
+                tyIdx++
             }
             let _ = candidates.Remove(curTy)
             if (candidates.IsEmpty()) {
@@ -117,22 +121,30 @@ private func FilterUnusedMapping(mapping: MultiTypeSubst, tys: TySet): MultiType
         let tv = worklist[workIdx]
         workIdx++
         if (let Some(instTys) <- mapping.Get(tv)) {
-            for (instTy in instTys) {
-                for (used in instTy.value.GetGenericTyArgs(all)) {
+            var tyIdx: Int64 = 0
+            while (tyIdx < instTys.size) {
+                for (used in instTys.ValueAt(tyIdx).value.GetGenericTyArgs(all)) {
                     let _ = addGenericUnique(reachable, used)
                 }
+                tyIdx++
             }
         }
     }
     let ret = MultiTypeSubst()
-    for ((tyVar, tys) in mapping.entries) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < mapping.entries.size) {
+        let tyVar = mapping.entries.KeyAt(mapIdx)
+        let tys = mapping.entries.ValueAt(mapIdx)
         if (containsGeneric(reachable, tyVar.value)) {
-            let retained = TreeSet<Ptr<Ty>>()
-            for (ty in tys) {
-                retained.add(ty)
+            let retained = SubstTySet()
+            var tyIdx: Int64 = 0
+            while (tyIdx < tys.size) {
+                retained.add(tys.ValueAt(tyIdx))
+                tyIdx++
             }
-            ret.entries[tyVar] = retained
+            ret.entries.Set(tyVar, retained)
         }
+        mapIdx++
     }
     return ret
 }
@@ -140,11 +152,15 @@ private func FilterUnusedMapping(mapping: MultiTypeSubst, tys: TySet): MultiType
 private func FilterUnusedMapping(mapping: SubstPack, tys: TySet): SubstPack {
     let allUniversal = ArrayList<GenericsTy>()
     let allInst = ArrayList<GenericsTy>()
-    for ((tyVar, ty) in mapping.u2i.entries) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < mapping.u2i.entries.size) {
+        let tyVar = mapping.u2i.entries.KeyAt(mapIdx)
+        let ty = mapping.u2i.entries.ValueAt(mapIdx)
         let _ = addGenericUnique(allUniversal, tyVar.value)
         if (let Some(instTyVar) <- (ty as GenericsTy)) {
             let _ = addGenericUnique(allInst, instTyVar)
         }
+        mapIdx++
     }
 
     let reachable = ArrayList<GenericsTy>()
@@ -166,30 +182,42 @@ private func FilterUnusedMapping(mapping: SubstPack, tys: TySet): SubstPack {
         let instTyVar = worklist[workIdx]
         workIdx++
         if (let Some(instTys) <- mapping.inst.Get(instTyVar)) {
-            for (instTy in instTys) {
-                for (used in instTy.value.GetGenericTyArgs(allInst)) {
+            var tyIdx: Int64 = 0
+            while (tyIdx < instTys.size) {
+                for (used in instTys.ValueAt(tyIdx).value.GetGenericTyArgs(allInst)) {
                     let _ = addGenericUnique(reachable, used)
                 }
+                tyIdx++
             }
         }
     }
 
     let ret = SubstPack()
-    for ((tyVar, ty) in mapping.u2i.entries) {
+    mapIdx = 0
+    while (mapIdx < mapping.u2i.entries.size) {
+        let tyVar = mapping.u2i.entries.KeyAt(mapIdx)
+        let ty = mapping.u2i.entries.ValueAt(mapIdx)
         if (let Some(instTyVar) <- (ty as GenericsTy)) {
             if (containsGeneric(reachable, instTyVar)) {
                 ret.u2i.Put(tyVar.value, ty)
             }
         }
+        mapIdx++
     }
-    for ((tyVar, tys) in mapping.inst.entries) {
+    mapIdx = 0
+    while (mapIdx < mapping.inst.entries.size) {
+        let tyVar = mapping.inst.entries.KeyAt(mapIdx)
+        let tys = mapping.inst.entries.ValueAt(mapIdx)
         if (containsGeneric(reachable, tyVar.value)) {
-            let retained = TreeSet<Ptr<Ty>>()
-            for (ty in tys) {
-                retained.add(ty)
+            let retained = SubstTySet()
+            var tyIdx: Int64 = 0
+            while (tyIdx < tys.size) {
+                retained.add(tys.ValueAt(tyIdx))
+                tyIdx++
             }
-            ret.inst.entries[tyVar] = retained
+            ret.inst.entries.Set(tyVar, retained)
         }
+        mapIdx++
     }
     return ret
 }
@@ -197,19 +225,26 @@ private func FilterUnusedMapping(mapping: SubstPack, tys: TySet): SubstPack {
 private func ExpandFilteredMultiTypeSubst(mts: MultiTypeSubst): ArrayList<TypeSubst> {
     let res = ArrayList<TypeSubst>()
     res.add(TypeSubst())
-    for ((tyVar, tys) in mts.entries) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < mts.entries.size) {
+        let tyVar = mts.entries.KeyAt(mapIdx)
+        let tys = mts.entries.ValueAt(mapIdx)
         let next = ArrayList<TypeSubst>()
         for (mapping in res) {
-            for (ty in tys) {
+            var tyIdx: Int64 = 0
+            while (tyIdx < tys.size) {
+                let ty = tys.ValueAt(tyIdx)
                 let cloned = mapping.Clone()
                 cloned.Put(tyVar.value, ty.value)
                 next.add(cloned)
+                tyIdx++
             }
         }
         res.clear()
         for (mapping in next) {
             res.add(mapping)
         }
+        mapIdx++
     }
     return res
 }
@@ -240,8 +275,10 @@ private func generateTypeMappingByArgs(srcArgs: ArrayList<Ty>, instantiateArgs: 
                 continue
             }
             let nested = generateTypeMappingByArgs(srcTy.typeArgs, instantiateTy.typeArgs)
-            for ((tyVar, ty) in nested.entries) {
-                typeMapping.Put(tyVar.value, ty)
+            var mapIdx: Int64 = 0
+            while (mapIdx < nested.entries.size) {
+                typeMapping.Put(nested.entries.KeyAt(mapIdx).value, nested.entries.ValueAt(mapIdx))
+                mapIdx++
             }
         }
     }
@@ -276,17 +313,23 @@ private func genericParamType(param: GenericParamDecl): Option<GenericsTy> {
 
 public func MultiTypeSubstToTypeSubst(mts: MultiTypeSubst): TypeSubst {
     let out = TypeSubst()
-    for ((tyVar, tys) in mts.entries) {
-        var chosen = tys.iterator().next().getOrThrow().value
+    var mapIdx: Int64 = 0
+    while (mapIdx < mts.entries.size) {
+        let tyVar = mts.entries.KeyAt(mapIdx)
+        let tys = mts.entries.ValueAt(mapIdx)
+        var chosen = tys.ValueAt(0).value
         if (tys.size > 1) {
-            let candidates = TreeSet<Ptr<Ty>>()
-            for (ty in tys) {
-                candidates.add(ty)
+            let candidates = SubstTySet()
+            var tyIdx: Int64 = 0
+            while (tyIdx < tys.size) {
+                candidates.add(tys.ValueAt(tyIdx))
+                tyIdx++
             }
             candidates.remove(Ptr<Ty>(tyVar.value))
-            chosen = candidates.iterator().next().getOrThrow().value
+            chosen = candidates.ValueAt(0).value
         }
         out.Put(tyVar.value, chosen)
+        mapIdx++
     }
     return out
 }
@@ -339,9 +382,15 @@ public func ReduceMultiTypeSubst(typeManager: TypeManager, tyVars: ArrayList<Gen
     }
     let mapping = mts.Clone()
     let visited = ArrayList<Ty>()
-    for ((tyVar, tys) in mts.entries) {
-        for (ty in tys) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < mts.entries.size) {
+        let tyVar = mts.entries.KeyAt(mapIdx)
+        let tys = mts.entries.ValueAt(mapIdx)
+        var tyIdx: Int64 = 0
+        while (tyIdx < tys.size) {
+            let ty = tys.ValueAt(tyIdx)
             if (!addTyUnique(visited, ty.value)) {
+                tyIdx++
                 continue
             }
             for (genTy in GetAllGenericTys(ty.value)) {
@@ -350,7 +399,9 @@ public func ReduceMultiTypeSubst(typeManager: TypeManager, tyVars: ArrayList<Gen
                     break
                 }
             }
+            tyIdx++
         }
+        mapIdx++
     }
 
     let res = MultiTypeSubst()
@@ -361,14 +412,20 @@ public func ReduceMultiTypeSubst(typeManager: TypeManager, tyVars: ArrayList<Gen
             res.PutAll(tyVar, targetTys)
         }
     }
-    for ((tyVar, tys) in res.entries) {
-        let targetRes = TreeSet<Ptr<Ty>>()
-        for (ty in tys) {
+    mapIdx = 0
+    while (mapIdx < res.entries.size) {
+        let tys = res.entries.ValueAt(mapIdx)
+        let targetRes = SubstTySet()
+        var tyIdx: Int64 = 0
+        while (tyIdx < tys.size) {
+            let ty = tys.ValueAt(tyIdx)
             for (instTy in typeManager.GetInstantiatedTys(ty.value, mapping).values) {
                 targetRes.add(Ptr<Ty>(instTy))
             }
+            tyIdx++
         }
-        res.entries[tyVar] = targetRes
+        res.entries.SetValueAt(mapIdx, targetRes)
+        mapIdx++
     }
     return res
 }
@@ -391,10 +448,13 @@ public func ExpandMultiTypeSubst(mts: MultiTypeSubst, usefulTys: TySet): ArrayLi
 
 public func GetMappedTy(mts: MultiTypeSubst, tyVar: GenericsTy): Ty {
     if (let Some(tys) <- mts.Get(tyVar)) {
-        for (ty in tys) {
+        var tyIdx: Int64 = 0
+        while (tyIdx < tys.size) {
+            let ty = tys.ValueAt(tyIdx)
             if (!SameTy(ty.value, tyVar)) {
                 return ty.value
             }
+            tyIdx++
         }
     }
     return tyVar
@@ -488,27 +548,39 @@ public func GenerateTypeMapping(decl: Decl, typeArgs: ArrayList<Ty>): TypeSubst 
 
 public func InverseMapping(typeMapping: TypeSubst): TypeSubst {
     let inversed = TypeSubst()
-    for ((tyVar, ty) in typeMapping.entries) {
+    var idx: Int64 = 0
+    while (idx < typeMapping.entries.size) {
+        let tyVar = typeMapping.entries.KeyAt(idx)
+        let ty = typeMapping.entries.ValueAt(idx)
         if (let Some(genTo) <- (ty as GenericsTy)) {
             if (!inversed.Contains(genTo)) {
                 inversed.Put(genTo, tyVar.value)
             }
         }
+        idx++
     }
     return inversed
 }
 
 public func MergeTypeSubstToMultiTypeSubst(mts: MultiTypeSubst, typeMapping: TypeSubst): Unit {
-    for ((tyVar, ty) in typeMapping.entries) {
-        mts.Put(tyVar.value, ty)
+    var idx: Int64 = 0
+    while (idx < typeMapping.entries.size) {
+        mts.Put(typeMapping.entries.KeyAt(idx).value, typeMapping.entries.ValueAt(idx))
+        idx++
     }
 }
 
 public func MergeMultiTypeSubsts(target: MultiTypeSubst, src: MultiTypeSubst): Unit {
-    for ((tyVar, tys) in src.entries) {
-        for (ty in tys) {
-            target.Put(tyVar.value, ty.value)
+    var mapIdx: Int64 = 0
+    while (mapIdx < src.entries.size) {
+        let tyVar = src.entries.KeyAt(mapIdx)
+        let tys = src.entries.ValueAt(mapIdx)
+        var tyIdx: Int64 = 0
+        while (tyIdx < tys.size) {
+            target.Put(tyVar.value, tys.ValueAt(tyIdx).value)
+            tyIdx++
         }
+        mapIdx++
     }
 }
 
@@ -519,13 +591,17 @@ public func MergeMultiTypeSubst(lhs: MultiTypeSubst, rhs: MultiTypeSubst): Multi
 }
 
 public func HaveCyclicSubstitution(typeManager: TypeManager, typeMapping: TypeSubst): Bool {
-    for ((tyVar, ty) in typeMapping.entries) {
+    var idx: Int64 = 0
+    while (idx < typeMapping.entries.size) {
+        let tyVar = typeMapping.entries.KeyAt(idx)
+        let ty = typeMapping.entries.ValueAt(idx)
         let mapping = typeMapping.Clone()
         removeTypeSubst(mapping, tyVar.value)
         let substitutedTy = typeManager.GetInstantiatedTy(ty, mapping)
         if (!SameTy(substitutedTy, tyVar.value) && substitutedTy.Contains(tyVar.value)) {
             return true
         }
+        idx++
     }
     return false
 }

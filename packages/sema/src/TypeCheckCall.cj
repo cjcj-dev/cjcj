@@ -1457,15 +1457,21 @@ private func ErasePromoteMappingForOmittedBaseTypeArgs(mapping: MultiTypeSubst, 
     }
     let genericTys = GetAllGenericTys(baseDecl.GetTy().getOrThrow())
     let definedTys = TypeCheckCallCollectTypeArgTys(baseTypeArgs)
-    for ((tyVar, tys) in mapping.entries) {
-        let retained = TreeSet<Ptr<Ty>>()
-        for (mappedTy in tys) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < mapping.entries.size) {
+        let tys = mapping.entries.ValueAt(mapIdx)
+        let retained = SubstTySet()
+        var tyIdx: Int64 = 0
+        while (tyIdx < tys.size) {
+            let mappedTy = tys.ValueAt(tyIdx)
             if (!TypeCheckCallGenericListContains(genericTys, mappedTy.value) ||
                 TyListContains(definedTys, mappedTy.value)) {
                 retained.add(mappedTy)
             }
+            tyIdx++
         }
-        mapping.entries[tyVar] = retained
+        mapping.entries.SetValueAt(mapIdx, retained)
+        mapIdx++
     }
 }
 
@@ -1522,10 +1528,13 @@ func GenerateTypeMappingForBaseExpr(typeManager: TypeManager, baseExpr: Expr,
                     ErasePromoteMappingForOmittedBaseTypeArgs(promoteMapping, realDecl, memberBase.GetTypeArgs())
                     let genericTysInst = GetAllGenericTys(memberBaseTy)
                     let removed = ArrayList<Ptr<GenericsTy>>()
-                    for ((tyVar, _) in directMapping.u2i.entries) {
+                    var mapIdx: Int64 = 0
+                    while (mapIdx < directMapping.u2i.entries.size) {
+                        let tyVar = directMapping.u2i.entries.KeyAt(mapIdx)
                         if (!TypeCheckCallGenericListContains(genericTysInst, tyVar.value)) {
                             removed.add(tyVar)
                         }
+                        mapIdx++
                     }
                     for (tyVar in removed) {
                         directMapping.u2i.entries.remove(tyVar)
@@ -1898,12 +1907,16 @@ private func AllCallArgsHaveCorrectTy(ce: CallExpr): Bool {
 // Mirrors C++ TypeArgumentInference.cpp:28-37.
 private func GetUnivTyVarsToSolve(maps: SubstPack): TyVars {
     let ret = TyVars()
-    for ((tyVar, ty) in maps.u2i.entries) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < maps.u2i.entries.size) {
+        let tyVar = maps.u2i.entries.KeyAt(mapIdx)
+        let ty = maps.u2i.entries.ValueAt(mapIdx)
         if (let Some(instTyVar) <- (ty as GenericsTy)) {
             if (let None <- maps.inst.Get(instTyVar)) {
                 ret.add(tyVar.value)
             }
         }
+        mapIdx++
     }
     return ret
 }
@@ -2081,10 +2094,12 @@ private class TyArgSynState {
 }
 
 private func SubstContainsTyVar(subst: TypeSubst, tyVar: GenericsTy): Bool {
-    for ((_, ty) in subst.entries) {
-        if (ty.Contains(tyVar)) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < subst.entries.size) {
+        if (subst.entries.ValueAt(mapIdx).Contains(tyVar)) {
             return true
         }
+        mapIdx++
     }
     return false
 }
@@ -2249,7 +2264,10 @@ private func DisableBodyInferForArgs(ctx: ASTContext, ce: CallExpr): Unit {
 
 private func ConstrainByUpperbound(typeManager: TypeManager): Unit {
     let instMapping = typeManager.GetInstMapping()
-    for ((tyVar, ty) in instMapping.u2i.entries) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < instMapping.u2i.entries.size) {
+        let tyVar = instMapping.u2i.entries.KeyAt(mapIdx)
+        let ty = instMapping.u2i.entries.ValueAt(mapIdx)
         if (let Some(instTv) <- (ty as GenericsTy)) {
             var found = false
             for (toSolve in typeManager.GetUnsolvedTyVars()) {
@@ -2259,6 +2277,7 @@ private func ConstrainByUpperbound(typeManager: TypeManager): Unit {
                 }
             }
             if (!found) {
+                mapIdx++
                 continue
             }
             for (upperBound in tyVar.value.upperBounds) {
@@ -2266,6 +2285,7 @@ private func ConstrainByUpperbound(typeManager: TypeManager): Unit {
                 bounds.ubs.Add(typeManager.InstOf(upperBound))
             }
         }
+        mapIdx++
     }
 }
 
@@ -2848,8 +2868,11 @@ private func CheckGenericDeclInstantiation(typeManager: TypeManager, diag: Optio
     if (let None <- generic) {
         return true
     }
-    for ((tyVar, ty) in GenerateTypeMapping(decl, typeArgs).entries) {
-        instantiateMap.Put(tyVar.value, ty)
+    let directMapping = GenerateTypeMapping(decl, typeArgs)
+    var mapIdx: Int64 = 0
+    while (mapIdx < directMapping.entries.size) {
+        instantiateMap.Put(directMapping.entries.KeyAt(mapIdx).value, directMapping.entries.ValueAt(mapIdx))
+        mapIdx++
     }
     for (constraint in generic.getOrThrow().genericConstraints) {
         let refType = constraint.refType ?? return false
@@ -2937,29 +2960,42 @@ private func CheckAndGetMappingForTypeDecl(typeManager: TypeManager, diag: Optio
             mapping = Promotion(typeManager).GetPromoteTypeMapping(baseTy, targetTy)
         }
     }
-    for ((tyVar, tys) in mapping.entries) {
-        for (ty in tys) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < mapping.entries.size) {
+        let tyVar = mapping.entries.KeyAt(mapIdx)
+        let tys = mapping.entries.ValueAt(mapIdx)
+        var tyIdx: Int64 = 0
+        while (tyIdx < tys.size) {
+            let ty = tys.ValueAt(tyIdx)
             if (ty.value.IsGeneric()) {
                 if (let Some(genTy) <- (ty.value as GenericsTy)) {
                     mts.Put(genTy, typeManager.ApplySubstPack(tyVar.value, typeMapping))
                 }
             }
+            tyIdx++
         }
+        mapIdx++
     }
     var valid = true
     var diagMessage = ""
-    for ((tyVar, tys) in mts.entries) {
+    mapIdx = 0
+    while (mapIdx < mts.entries.size) {
+        let tyVar = mts.entries.KeyAt(mapIdx)
+        let tys = mts.entries.ValueAt(mapIdx)
         if (tys.size > 1) {
             if (!diagMessage.isEmpty()) {
                 diagMessage += ", "
             }
             let values = ArrayList<Ty>()
-            for (ty in tys) {
-                values.add(ty.value)
+            var tyIdx: Int64 = 0
+            while (tyIdx < tys.size) {
+                values.add(tys.ValueAt(tyIdx).value)
+                tyIdx++
             }
             diagMessage += "'" + tyVar.value.String() + "' to '" + Ty.GetTypesToStr(values, "', '") + "'"
             valid = false
         }
+        mapIdx++
     }
     if (!valid) {
         if (let Some(diagValue) <- diag) {
@@ -3665,12 +3701,17 @@ private func IsGenericCall(ctx: Option<ASTContext>, ce: CallExpr, fd: FuncDecl):
 }
 
 private func ReplaceIdealTypeInSubstPack(typeManager: TypeManager, maps: SubstPack): Unit {
-    for ((tyVar, tys) in maps.inst.entries) {
-        let replaced = TreeSet<Ptr<Ty>>()
-        for (ty in tys) {
-            replaced.add(Ptr<Ty>(typeManager.ReplaceIdealTy(ty.value)))
+    var mapIdx: Int64 = 0
+    while (mapIdx < maps.inst.entries.size) {
+        let tys = maps.inst.entries.ValueAt(mapIdx)
+        let replaced = SubstTySet()
+        var tyIdx: Int64 = 0
+        while (tyIdx < tys.size) {
+            replaced.add(Ptr<Ty>(typeManager.ReplaceIdealTy(tys.ValueAt(tyIdx).value)))
+            tyIdx++
         }
-        maps.inst.entries[tyVar] = replaced
+        maps.inst.entries.SetValueAt(mapIdx, replaced)
+        mapIdx++
     }
 }
 
@@ -4576,14 +4617,19 @@ public func SelfhostPortStatus_TypeCheckCall(): Bool {
 
 // C++ src/Sema/TypeCheckCall.cpp:970 ReduceSubstPack.
 public func ReduceSubstPack(maps: SubstPack, typeManager: TypeManager): Unit {
-    for ((tyVar, tys) in maps.inst.entries) {
-        let instsFinal = TreeSet<Ptr<Ty>>()
-        for (ty in tys) {
-            for (instTy in typeManager.GetInstantiatedTys(ty.value, maps.inst).values) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < maps.inst.entries.size) {
+        let tys = maps.inst.entries.ValueAt(mapIdx)
+        let instsFinal = SubstTySet()
+        var tyIdx: Int64 = 0
+        while (tyIdx < tys.size) {
+            for (instTy in typeManager.GetInstantiatedTys(tys.ValueAt(tyIdx).value, maps.inst).values) {
                 instsFinal.add(Ptr<Ty>(instTy))
             }
+            tyIdx++
         }
-        maps.inst.entries[tyVar] = instsFinal
+        maps.inst.entries.SetValueAt(mapIdx, instsFinal)
+        mapIdx++
     }
 }
 

@@ -541,20 +541,25 @@ private func AddUpperBoundOnTypeParameters(typeManager: TypeManager, ctx: ASTCon
                 GetAllAssumptions(aliasedTypeGeneric.assumptionCollection, allAssumptionMap)
                 if (let Some(constraintTys) <- revTypeMapping.Get(genericTy)) {
                     let constraints = UpperBounds()
-                    for (constraintTy in constraintTys) {
+                    var constraintIdx: Int64 = 0
+                    while (constraintIdx < constraintTys.size) {
+                        let constraintTy = constraintTys.ValueAt(constraintIdx)
                         if (let Some(upperKeys) <-
                             allAssumptionMap.get(Ptr<GenericsTy>((constraintTy.value as GenericsTy).getOrThrow()))) {
                             for (upperKey in upperKeys) {
                                 constraints.Add(upperKey.value)
                             }
                         }
+                        constraintIdx++
                     }
                     let upperBoundsForParam = HashSet<Ptr<Ty>>()
                     for (constraint in constraints.values) {
                         let instTy = typeManager.GetInstantiatedTy(constraint, typeArgAppliedMap)
                         if (Ty.IsTyCorrect(instTy)) {
                             upperBoundsForParam.add(Ptr<Ty>(instTy))
-                            for (constraintTy in constraintTys) {
+                            constraintIdx = 0
+                            while (constraintIdx < constraintTys.size) {
+                                let constraintTy = constraintTys.ValueAt(constraintIdx)
                                 let constraintKey = constraintTy
                                 let constraintUpperKey = Ptr<Ty>(constraint)
                                 if (!ctx.gcBlames.contains(constraintKey)) {
@@ -576,9 +581,10 @@ private func AddUpperBoundOnTypeParameters(typeManager: TypeManager, ctx: ASTCon
                                 }
                                 for (blame in sourceBlames) {
                                     destinationUpperMap[instKey].add(blame)
+                                    }
                                 }
+                                constraintIdx++
                             }
-                        }
                     }
                     for (upperKey in upperBoundsForParam) {
                         var foundUpper = false
@@ -816,8 +822,10 @@ private func preCheckGetSubstituteMap(typeManager: TypeManager, decl1: FuncDecl,
     if (let Some(outer1) <- decl1.outerDecl) {
         if (let Some(outer2) <- decl2.outerDecl) {
             let parentMap = typeManager.GenerateGenericMappingFromGeneric(outer1, outer2)
-            for ((tyVar, ty) in parentMap.entries) {
-                substituteMap.Put(tyVar.value, ty)
+            var idx: Int64 = 0
+            while (idx < parentMap.entries.size) {
+                substituteMap.Put(parentMap.entries.KeyAt(idx).value, parentMap.entries.ValueAt(idx))
+                idx++
             }
         }
     }

@@ -28,8 +28,10 @@ private func genericListContainsTy(values: ArrayList<GenericsTy>, ty: Ty): Bool 
 }
 
 private func mergeTypeSubst(target: TypeSubst, source: TypeSubst): Unit {
-    for ((tyVar, ty) in source.entries) {
-        target.Put(tyVar.value, ty)
+    var mapIdx: Int64 = 0
+    while (mapIdx < source.entries.size) {
+        target.Put(source.entries.KeyAt(mapIdx).value, source.entries.ValueAt(mapIdx))
+        mapIdx++
     }
 }
 
@@ -50,15 +52,21 @@ private func filterPromoteMappingForExplicitBaseArgs(mapping: MultiTypeSubst, re
     }
     let genericTys = GetAllGenericTys(realBase.GetTy().getOrThrow())
     let explicitTys = collectTypeArgTys(baseTypeArgs)
-    for ((tyVar, tys) in mapping.entries) {
-        let retained = TreeSet<Ptr<Ty>>()
-        for (mappedTy in tys) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < mapping.entries.size) {
+        let tys = mapping.entries.ValueAt(mapIdx)
+        let retained = SubstTySet()
+        var tyIdx: Int64 = 0
+        while (tyIdx < tys.size) {
+            let mappedTy = tys.ValueAt(tyIdx)
             if (!genericListContainsTy(genericTys, mappedTy.value) ||
                 typeListContainsTy(explicitTys, mappedTy.value)) {
                 retained.add(mappedTy)
             }
+            tyIdx++
         }
-        mapping.entries[tyVar] = retained
+        mapping.entries.SetValueAt(mapIdx, retained)
+        mapIdx++
     }
 }
 
@@ -354,7 +362,10 @@ public func CheckGenericConstraints(ctx: ASTContext, typeManager: TypeManager, d
 }
 
 public func CheckInstTyWithUpperbound(typeManager: TypeManager, typeMapping: TypeSubst): Bool {
-    for ((tyVar, ty) in typeMapping.entries) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < typeMapping.entries.size) {
+        let tyVar = typeMapping.entries.KeyAt(mapIdx)
+        let ty = typeMapping.entries.ValueAt(mapIdx)
         let genericTy = tyVar.value
         for (upperBound in genericTy.upperBounds) {
             let upperBoundTy = typeManager.GetInstantiatedTy(upperBound, typeMapping)
@@ -363,6 +374,7 @@ public func CheckInstTyWithUpperbound(typeManager: TypeManager, typeMapping: Typ
                 return false
             }
         }
+        mapIdx++
     }
     return true
 }
@@ -496,7 +508,10 @@ extend TypeCheckerImpl {
         }
         let indexMap = GetTyArgsIndexMap(expr.instTys)
         let typeArgs = expr.GetTypeArgs()
-        for ((tyVar, ty) in typeMapping.entries) {
+        var mapIdx: Int64 = 0
+        while (mapIdx < typeMapping.entries.size) {
+            let tyVar = typeMapping.entries.KeyAt(mapIdx)
+            let ty = typeMapping.entries.ValueAt(mapIdx)
             let genericTy = tyVar.value
             var satisfiesConstraints = true
             for (upperBound in genericTy.upperBounds) {
@@ -519,6 +534,7 @@ extend TypeCheckerImpl {
                 }
             }
             if (staticMembers.isEmpty()) {
+                mapIdx++
                 continue
             }
 
@@ -538,6 +554,7 @@ extend TypeCheckerImpl {
                 emitIncompleteInstantiation(diag, diagNode, genericTy, ty, isInstByNothing)
                 return false
             }
+            mapIdx++
         }
         return true
     }

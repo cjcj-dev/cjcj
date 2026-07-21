@@ -426,10 +426,14 @@ public class TypeCheckerImpl {
             if (extendInstMap.entries.size != instantiateMap.entries.size) {
                 continue
             }
-            for ((tyVar, ty) in instantiateMap.entries) {
+            var mapIdx: Int64 = 0
+            while (mapIdx < instantiateMap.entries.size) {
+                let tyVar = instantiateMap.entries.KeyAt(mapIdx)
+                let ty = instantiateMap.entries.ValueAt(mapIdx)
                 if (!extendInstMap.Contains(tyVar.value)) {
                     extendInstMap.Put(tyVar.value, ty)
                 }
+                mapIdx++
             }
             for (interfaceType in extendDecl.inheritedTypes) {
                 if (!Ty.IsTyCorrect(interfaceType.GetTy())) {

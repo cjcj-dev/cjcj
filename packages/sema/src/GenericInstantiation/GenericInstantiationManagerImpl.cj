@@ -49,7 +49,10 @@ private func sameSubst(lhs: TypeSubst, rhs: TypeSubst): Bool {
     if (lhs.entries.size != rhs.entries.size) {
         return false
     }
-    for ((tyVar, ty) in lhs.entries) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < lhs.entries.size) {
+        let tyVar = lhs.entries.KeyAt(mapIdx)
+        let ty = lhs.entries.ValueAt(mapIdx)
         if (let Some(value) <- rhs.Get(tyVar.value)) {
             if (!SameTy(ty, value)) {
                 return false
@@ -57,6 +60,7 @@ private func sameSubst(lhs: TypeSubst, rhs: TypeSubst): Bool {
         } else {
             return false
         }
+        mapIdx++
     }
     return true
 }
@@ -78,8 +82,11 @@ private func genericInfoKey(decl: Decl, subst: TypeSubst): String {
     let builder = StringBuilder()
     builder.append(decl.objectId.toString())
     let pairs = ArrayList<(Int64, Int64)>()
-    for ((tyVar, ty) in subst.entries) {
-        insertGenericInfoKeyPair(pairs, (tyVar.value.objectId, ty.objectId))
+    var mapIdx: Int64 = 0
+    while (mapIdx < subst.entries.size) {
+        insertGenericInfoKeyPair(pairs, (subst.entries.KeyAt(mapIdx).value.objectId,
+            subst.entries.ValueAt(mapIdx).objectId))
+        mapIdx++
     }
     for (pair in pairs) {
         builder.append("|")
@@ -882,8 +889,10 @@ class GenericInstantiationManagerImpl {
                             let tmpMapping = GenerateTypeMappingByTy(implOuter.GetTy(), Some(ty))
                             let rts = GetReversedTypeSubst(tmpMapping)
                             let tg = TyGeneralizer(ci.typeManager, rts)
-                            for ((tyVar, ty) in typeMapping.entries) {
-                                typeMapping.entries[tyVar] = tg.Generalize(ty)
+                            var mapIdx: Int64 = 0
+                            while (mapIdx < typeMapping.entries.size) {
+                                typeMapping.entries.SetValueAt(mapIdx, tg.Generalize(typeMapping.entries.ValueAt(mapIdx)))
+                                mapIdx++
                             }
                         }
                     }

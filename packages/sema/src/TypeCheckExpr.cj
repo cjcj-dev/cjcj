@@ -89,9 +89,11 @@ private func SubstituteTypeForTypeAliasTypeMapping(typeManager: TypeManager, tad
             }
         }
     }
-    for ((tyVar, ty) in mapping.entries) {
-        mapping.entries[tyVar] = typeManager.SubstituteTypeAliasInTy(ty, needSubstituteGeneric: true,
-            typeMapping: aliasParamMapping)
+    var mapIdx: Int64 = 0
+    while (mapIdx < mapping.entries.size) {
+        mapping.entries.SetValueAt(mapIdx, typeManager.SubstituteTypeAliasInTy(mapping.entries.ValueAt(mapIdx), needSubstituteGeneric: true,
+            typeMapping: aliasParamMapping))
+        mapIdx++
     }
 }
 
@@ -112,8 +114,10 @@ public func GenerateTypeMappingForTypeAliasUse(typeManager: TypeManager, tad: Ty
     let mapping = GenerateTypeMappingForTypeAliasDecl(typeManager, tad)
     SubstituteTypeForTypeAliasTypeMapping(typeManager, tad, typeArgs, mapping)
     let directMapping = GenerateTypeMapping(tad, typeArgs)
-    for ((tyVar, ty) in directMapping.entries) {
-        mapping.Put(tyVar.value, ty)
+    var mapIdx: Int64 = 0
+    while (mapIdx < directMapping.entries.size) {
+        mapping.Put(directMapping.entries.KeyAt(mapIdx).value, directMapping.entries.ValueAt(mapIdx))
+        mapIdx++
     }
     return mapping
 }
@@ -135,8 +139,10 @@ public func GenerateTypeMappingForTypeAliasUse(typeManager: TypeManager, tad: Ty
     let mapping = GenerateTypeMappingForTypeAliasDecl(typeManager, tad)
     SubstituteTypeForTypeAliasTypeMapping(typeManager, tad, typeArgs, mapping)
     let directMapping = GenerateTypeMapping(tad, typeArgs)
-    for ((tyVar, ty) in directMapping.entries) {
-        mapping.Put(tyVar.value, ty)
+    var mapIdx: Int64 = 0
+    while (mapIdx < directMapping.entries.size) {
+        mapping.Put(directMapping.entries.KeyAt(mapIdx).value, directMapping.entries.ValueAt(mapIdx))
+        mapIdx++
     }
     return mapping
 }

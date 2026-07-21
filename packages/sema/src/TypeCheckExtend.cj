@@ -551,7 +551,10 @@ public func TypeCheckExtendCheckDupDefImplByDiffTypArgs(
 }
 
 private func TypeCheckExtendMergeTypeSubstNoConflict(target: TypeSubst, source: TypeSubst): Bool {
-    for ((tyVar, ty) in source.entries) {
+    var idx: Int64 = 0
+    while (idx < source.entries.size) {
+        let tyVar = source.entries.KeyAt(idx)
+        let ty = source.entries.ValueAt(idx)
         if (let Some(existing) <- target.Get(tyVar.value)) {
             if (!SameTy(existing, ty)) {
                 return false
@@ -559,6 +562,7 @@ private func TypeCheckExtendMergeTypeSubstNoConflict(target: TypeSubst, source: 
         } else {
             target.Put(tyVar.value, ty)
         }
+        idx++
     }
     return true
 }
@@ -1324,7 +1328,10 @@ extend TypeCheckerImpl {
             for (typeArg in extendedDeclTy.typeArgs) {
                 let tyArgGen = (typeArg as GenericsTy).getOrThrow()
                 let mapping = GenerateTypeMappingByTy(orig2genericMapping.Get(tyArgGen), orig2specMapping.Get(tyArgGen))
-                for ((tyVarPtr, mappedTy) in mapping.entries) {
+                var mapIdx: Int64 = 0
+                while (mapIdx < mapping.entries.size) {
+                    let tyVarPtr = mapping.entries.KeyAt(mapIdx)
+                    let mappedTy = mapping.entries.ValueAt(mapIdx)
                     let tyVar = tyVarPtr.value
                     if (let Some(existingTy) <- instantMapping.Get(tyVar)) {
                         if (!(existingTy == mappedTy)) {
@@ -1334,6 +1341,7 @@ extend TypeCheckerImpl {
                     } else {
                         instantMapping.Put(tyVar, mappedTy)
                     }
+                    mapIdx++
                 }
             }
             if (needCheck) {

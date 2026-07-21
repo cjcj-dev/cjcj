@@ -367,8 +367,153 @@ public class TyVarBounds {
     }
 }
 
+// C++ include/cangjie/Sema/CommonTypeAlias.h:82,87 stores substitution maps as
+// ordered value members. Keep the same Ptr ordering without TreeMap's managed
+// EntryView/Option allocation on every traversed element.
+public class SubstOrderedMap<V> {
+    private let keys: ArrayList<Ptr<GenericsTy>> = ArrayList<Ptr<GenericsTy>>()
+    private let values: ArrayList<V> = ArrayList<V>()
+
+    public init() {}
+
+    public prop size: Int64 {
+        get() { keys.size }
+    }
+
+    public func isEmpty(): Bool {
+        return keys.isEmpty()
+    }
+
+    public func FindIndex(key: Ptr<GenericsTy>): Int64 {
+        var low: Int64 = 0
+        var high = keys.size
+        while (low < high) {
+            let mid = low + (high - low) / 2
+            if (keys[mid] < key) {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        if (low < keys.size && keys[low] == key) {
+            return low
+        }
+        return -1
+    }
+
+    public func Set(key: Ptr<GenericsTy>, value: V): Unit {
+        var low: Int64 = 0
+        var high = keys.size
+        while (low < high) {
+            let mid = low + (high - low) / 2
+            if (keys[mid] < key) {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        if (low < keys.size && keys[low] == key) {
+            values[low] = value
+            return
+        }
+        keys.add(key, at: low)
+        values.add(value, at: low)
+    }
+
+    public func get(key: Ptr<GenericsTy>): Option<V> {
+        let idx = FindIndex(key)
+        return if (idx < 0) { None } else { Some(values[idx]) }
+    }
+
+    public func contains(key: Ptr<GenericsTy>): Bool {
+        return FindIndex(key) >= 0
+    }
+
+    public func remove(key: Ptr<GenericsTy>): Unit {
+        let idx = FindIndex(key)
+        if (idx >= 0) {
+            keys.remove(at: idx)
+            values.remove(at: idx)
+        }
+    }
+
+    public func KeyAt(index: Int64): Ptr<GenericsTy> {
+        return keys[index]
+    }
+
+    public func ValueAt(index: Int64): V {
+        return values[index]
+    }
+
+    public func SetValueAt(index: Int64, value: V): Unit {
+        values[index] = value
+    }
+}
+
+public class SubstTySet {
+    private let values: ArrayList<Ptr<Ty>> = ArrayList<Ptr<Ty>>()
+
+    public init() {}
+
+    public prop size: Int64 {
+        get() { values.size }
+    }
+
+    public func isEmpty(): Bool {
+        return values.isEmpty()
+    }
+
+    public func FindIndex(value: Ptr<Ty>): Int64 {
+        var low: Int64 = 0
+        var high = values.size
+        while (low < high) {
+            let mid = low + (high - low) / 2
+            if (values[mid] < value) {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        if (low < values.size && values[low] == value) {
+            return low
+        }
+        return -1
+    }
+
+    public func add(value: Ptr<Ty>): Bool {
+        var low: Int64 = 0
+        var high = values.size
+        while (low < high) {
+            let mid = low + (high - low) / 2
+            if (values[mid] < value) {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        if (low < values.size && values[low] == value) {
+            return false
+        }
+        values.add(value, at: low)
+        return true
+    }
+
+    public func remove(value: Ptr<Ty>): Bool {
+        let idx = FindIndex(value)
+        if (idx < 0) {
+            return false
+        }
+        values.remove(at: idx)
+        return true
+    }
+
+    public func ValueAt(index: Int64): Ptr<Ty> {
+        return values[index]
+    }
+}
+
 public class TypeSubst {
-    public let entries: TreeMap<Ptr<GenericsTy>, Ty> = TreeMap<Ptr<GenericsTy>, Ty>()
+    public let entries: SubstOrderedMap<Ty> = SubstOrderedMap<Ty>()
 
     public init() {}
 
@@ -379,7 +524,7 @@ public class TypeSubst {
     }
 
     public func Put(tyVar: GenericsTy, ty: Ty): Unit {
-        entries[Ptr<GenericsTy>(tyVar)] = ty
+        entries.Set(Ptr<GenericsTy>(tyVar), ty)
     }
 
     public func Get(tyVar: GenericsTy): Option<Ty> {
@@ -399,25 +544,28 @@ public class TypeSubst {
 
     public func Clone(): TypeSubst {
         let out = TypeSubst()
-        for ((tyVar, ty) in entries) {
-            out.Put(tyVar.value, ty)
+        var idx: Int64 = 0
+        while (idx < entries.size) {
+            out.Put(entries.KeyAt(idx).value, entries.ValueAt(idx))
+            idx++
         }
         return out
     }
 }
 
 public class MultiTypeSubst {
-    public let entries: TreeMap<Ptr<GenericsTy>, TreeSet<Ptr<Ty>>> =
-        TreeMap<Ptr<GenericsTy>, TreeSet<Ptr<Ty>>>()
+    public let entries: SubstOrderedMap<SubstTySet> = SubstOrderedMap<SubstTySet>()
 
     public init() {}
 
     public func Put(tyVar: GenericsTy, ty: Ty): Unit {
         let key = Ptr<GenericsTy>(tyVar)
-        if (!entries.contains(key)) {
-            entries[key] = TreeSet<Ptr<Ty>>()
+        var idx = entries.FindIndex(key)
+        if (idx < 0) {
+            entries.Set(key, SubstTySet())
+            idx = entries.FindIndex(key)
         }
-        entries.get(key).getOrThrow().add(Ptr<Ty>(ty))
+        entries.ValueAt(idx).add(Ptr<Ty>(ty))
     }
 
     public func PutAll(tyVar: GenericsTy, tys: TySet): Unit {
@@ -426,16 +574,22 @@ public class MultiTypeSubst {
         }
     }
 
-    public func Get(tyVar: GenericsTy): Option<TreeSet<Ptr<Ty>>> {
+    public func Get(tyVar: GenericsTy): Option<SubstTySet> {
         return entries.get(Ptr<GenericsTy>(tyVar))
     }
 
     public func Clone(): MultiTypeSubst {
         let out = MultiTypeSubst()
-        for ((tyVar, tys) in entries) {
-            for (ty in tys) {
-                out.Put(tyVar.value, ty.value)
+        var mapIdx: Int64 = 0
+        while (mapIdx < entries.size) {
+            let tyVar = entries.KeyAt(mapIdx)
+            let tys = entries.ValueAt(mapIdx)
+            var tyIdx: Int64 = 0
+            while (tyIdx < tys.size) {
+                out.Put(tyVar.value, tys.ValueAt(tyIdx).value)
+                tyIdx++
             }
+            mapIdx++
         }
         return out
     }
@@ -457,13 +611,21 @@ public class SubstPack {
     }
 
     public func Merge(other: SubstPack): Unit {
-        for ((tyVar, ty) in other.u2i.entries) {
-            u2i.Put(tyVar.value, ty)
+        var mapIdx: Int64 = 0
+        while (mapIdx < other.u2i.entries.size) {
+            u2i.Put(other.u2i.entries.KeyAt(mapIdx).value, other.u2i.entries.ValueAt(mapIdx))
+            mapIdx++
         }
-        for ((tyVar, tys) in other.inst.entries) {
-            for (ty in tys) {
-                inst.Put(tyVar.value, ty.value)
+        mapIdx = 0
+        while (mapIdx < other.inst.entries.size) {
+            let tyVar = other.inst.entries.KeyAt(mapIdx)
+            let tys = other.inst.entries.ValueAt(mapIdx)
+            var tyIdx: Int64 = 0
+            while (tyIdx < tys.size) {
+                inst.Put(tyVar.value, tys.ValueAt(tyIdx).value)
+                tyIdx++
             }
+            mapIdx++
         }
     }
 }
@@ -706,20 +868,30 @@ public func ToStringC(c: Constraint): String {
 
 public func ToStringS(m: TypeSubst): String {
     let parts = ArrayList<String>()
-    for ((tyVar, ty) in m.entries) {
+    var idx: Int64 = 0
+    while (idx < m.entries.size) {
+        let tyVar = m.entries.KeyAt(idx)
+        let ty = m.entries.ValueAt(idx)
         parts.add("${tyVar.value.String()} |-> ${ty.String()}")
+        idx++
     }
     return "[" + JoinStrings(parts, ", ") + "]"
 }
 
 public func ToStringMS(m: MultiTypeSubst): String {
     let parts = ArrayList<String>()
-    for ((tyVar, tys) in m.entries) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < m.entries.size) {
+        let tyVar = m.entries.KeyAt(mapIdx)
+        let tys = m.entries.ValueAt(mapIdx)
         let values = ArrayList<String>()
-        for (ty in tys) {
-            values.add(ty.value.String())
+        var tyIdx: Int64 = 0
+        while (tyIdx < tys.size) {
+            values.add(tys.ValueAt(tyIdx).value.String())
+            tyIdx++
         }
         parts.add("${tyVar.value.String()} |-> {${JoinStrings(values, ", ")}}")
+        mapIdx++
     }
     return "[" + JoinStrings(parts, ", ") + "]"
 }

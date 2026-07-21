@@ -115,18 +115,26 @@ private class TypeSubsts {
                 continue
             }
             var allSame = true
-            for ((tyVar, ty) in value.entries) {
+            var mapIdx: Int64 = 0
+            while (mapIdx < value.entries.size) {
+                let tyVar = value.entries.KeyAt(mapIdx)
+                let ty = value.entries.ValueAt(mapIdx)
                 var found = false
-                for ((otherTyVar, otherTy) in subst.entries) {
+                var otherIdx: Int64 = 0
+                while (otherIdx < subst.entries.size) {
+                    let otherTyVar = subst.entries.KeyAt(otherIdx)
+                    let otherTy = subst.entries.ValueAt(otherIdx)
                     if (tyVar == otherTyVar && refEq(ty, otherTy)) {
                         found = true
                         break
                     }
+                    otherIdx++
                 }
                 if (!found) {
                     allSame = false
                     break
                 }
+                mapIdx++
             }
             if (allSame) {
                 return
@@ -167,10 +175,12 @@ private func ToTySet(values: ArrayList<GenericsTy>): TySet {
 }
 
 private func substContainsTyVar(subst: TypeSubst, tyVar: GenericsTy): Bool {
-    for ((_, ty) in subst.entries) {
-        if (ty.Contains(tyVar)) {
+    var mapIdx: Int64 = 0
+    while (mapIdx < subst.entries.size) {
+        if (subst.entries.ValueAt(mapIdx).Contains(tyVar)) {
             return true
         }
+        mapIdx++
     }
     return false
 }
@@ -431,9 +441,13 @@ public class LocalTypeArgumentSynthesis {
 
     private func CopyUpperbound(): Unit {
         let instMapping = tyMgr.GetInstMapping()
-        for ((tyVar, ty) in instMapping.u2i.entries) {
+        var mapIdx: Int64 = 0
+        while (mapIdx < instMapping.u2i.entries.size) {
+            let tyVar = instMapping.u2i.entries.KeyAt(mapIdx)
+            let ty = instMapping.u2i.entries.ValueAt(mapIdx)
             if (let Some(instTyVar) <- (ty as GenericsTy)) {
                 if (!containsTyVar(argPack.tyVarsToSolve, instTyVar)) {
+                    mapIdx++
                     continue
                 }
                 for (upper in tyVar.value.upperBounds) {
@@ -458,6 +472,7 @@ public class LocalTypeArgumentSynthesis {
                     }
                 }
             }
+            mapIdx++
         }
     }
 
@@ -1130,8 +1145,10 @@ public class LocalTypeArgumentSynthesis {
     }
 
     private func MergeTypeSubst(target: TypeSubst, source: TypeSubst): Unit {
-        for ((tyVar, ty) in source.entries) {
-            target.Put(tyVar.value, ty)
+        var mapIdx: Int64 = 0
+        while (mapIdx < source.entries.size) {
+            target.Put(source.entries.KeyAt(mapIdx).value, source.entries.ValueAt(mapIdx))
+            mapIdx++
         }
     }
 
@@ -1235,8 +1252,10 @@ public class LocalTypeArgumentSynthesis {
 
     private func ResetIdealTypesInSubst(m: TypeSubst): TypeSubst {
         let res = TypeSubst()
-        for ((tyVar, ty) in m.entries) {
-            res.Put(tyVar.value, tyMgr.ReplaceIdealTy(ty))
+        var mapIdx: Int64 = 0
+        while (mapIdx < m.entries.size) {
+            res.Put(m.entries.KeyAt(mapIdx).value, tyMgr.ReplaceIdealTy(m.entries.ValueAt(mapIdx)))
+            mapIdx++
         }
         return res
     }
