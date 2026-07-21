@@ -529,6 +529,11 @@ public class CHIRContext {
 
     public func FreeMemoryInFunc(funcBody: BlockGroup): Unit {
         if (let Some(ptrs) <- allocatedPtrInFuncOrLambda.get(funcBody.nodeId)) {
+            for (ptr in ptrs) {
+                if (let Some(expr) <- (ptr as Expression)) {
+                    expr.RemoveSelfFromBlock()
+                }
+            }
             ptrs.clear()
         }
     }
