@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260712020030
+  CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
 
 jobs:
   lint:

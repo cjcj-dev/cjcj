@@ -8,7 +8,7 @@
 #
 # Env:
 #   GITCODE_API_KEY  optional; nightly+stdx download publicly without it (accelerator only)
-#   CJCJ_TOOLCHAIN   default nightly-1.2.0-alpha.20260712020030
+#   CJCJ_TOOLCHAIN   default nightly-1.2.0-alpha.20260721165458
 #   CJV_VERSION      default v0.2.20
 #   CJ_HEAP_SIZE     default 12GB (unset -> parse-phase OOM)
 #   REPO_ROOT        default the script's parent dir
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-CJCJ_TOOLCHAIN="${CJCJ_TOOLCHAIN:-nightly-1.2.0-alpha.20260712020030}"
+CJCJ_TOOLCHAIN="${CJCJ_TOOLCHAIN:-nightly-1.2.0-alpha.20260721165458}"
 CJV_VERSION="${CJV_VERSION:-v0.2.20}"
 CJ_HEAP_SIZE="${CJ_HEAP_SIZE:-12GB}"
 

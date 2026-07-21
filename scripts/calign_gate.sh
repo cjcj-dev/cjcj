@@ -6,7 +6,7 @@ SELF="${1:-$ROOT/target/release/bin/cjcj::cjc}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-: "${CANGJIE_HOME:=/root/.cjv/toolchains/nightly-1.2.0-alpha.20260712020030}"
+: "${CANGJIE_HOME:=/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458}"
 export CANGJIE_HOME
 export LD_LIBRARY_PATH="$CANGJIE_HOME/third_party/llvm/lib:$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative:$CANGJIE_HOME/tools/lib:${LD_LIBRARY_PATH:-}"
 export cjHeapSize="${cjHeapSize:-12GB}"

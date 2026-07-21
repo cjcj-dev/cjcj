@@ -32,7 +32,7 @@ permissions:
   contents: write
 
 env:
-  CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260712020030
+  CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
   RUNTIME_REF: f56e60bfb05121f138f39dec46d7e0b38eb3165a
 
 jobs:

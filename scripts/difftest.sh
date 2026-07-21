@@ -5,7 +5,7 @@
 # Usage: bash scripts/difftest.sh [corpus_dir] [-j N]
 #   internal: bash scripts/difftest.sh --one <file.cj>   (run+classify a single sample, prints one TSV line)
 set -u
-TC=${DIFFTEST_TC:-/root/.cjv/toolchains/nightly-1.2.0-alpha.20260712020030}
+TC=${DIFFTEST_TC:-/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458}
 export CANGJIE_HOME=$TC
 export LD_LIBRARY_PATH="$CANGJIE_HOME/third_party/llvm/lib:$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative:$CANGJIE_HOME/tools/lib:${LD_LIBRARY_PATH:-}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
