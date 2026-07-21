@@ -152,7 +152,7 @@ public class ManglePattern {
 }
 
 public class MangleDecl {
-    public let identity: Int64 = AllocateMangleDeclIdentity()
+    public let identity: Int64
     public var astKind: ASTKind
     public var identifier: String = ""
     public var fullPackageName: String = ""
@@ -179,11 +179,14 @@ public class MangleDecl {
     public let setters: ArrayList<MangleDecl> = ArrayList<MangleDecl>(Array<MangleDecl>())
     public var attrs: (Attribute) -> Bool = { _ => false }
 
-    public init(astKind: ASTKind) {
+    public init(astKind: ASTKind, identity!: Int64 = AllocateMangleDeclIdentity()) {
+        this.identity = identity
         this.astKind = astKind
     }
 
-    public init(astKind: ASTKind, identifier: String, fullPackageName!: String = "") {
+    public init(astKind: ASTKind, identifier: String, fullPackageName!: String = "",
+        identity!: Int64 = AllocateMangleDeclIdentity()) {
+        this.identity = identity
         this.astKind = astKind
         this.identifier = identifier
         this.fullPackageName = fullPackageName

@@ -71,6 +71,12 @@ public class MangleAstAdapter {
         return EnsureAdapterId(left) == EnsureAdapterId(right)
     }
 
+    private func StableDeclIdentity(source: Node): Int64 {
+        // Source-backed identities use the negative domain so they cannot collide with identities allocated for
+        // adapter-only synthetic nodes such as function-body scope keys.
+        return -EnsureAdapterId(source) - 1
+    }
+
     private func FindDecl(source: Decl): Option<MangleDecl> {
         if (source.mangleAdapterId < 0) {
             return None
@@ -196,7 +202,7 @@ public class MangleAstAdapter {
             return cached
         }
         let target = MangleDecl(source.astKind, source.identifier.Val(),
-            fullPackageName: PackageNameOf(source))
+            fullPackageName: PackageNameOf(source), identity: StableDeclIdentity(source))
         StoreDecl(source, target)
 
         target.rawMangleName = source.rawMangleName
@@ -247,7 +253,8 @@ public class MangleAstAdapter {
         if (let Some(cached) <- FindLambda(source)) {
             return cached
         }
-        let target = MangleDecl(ASTKind.LAMBDA_EXPR, "", fullPackageName: PackageNameOf(source))
+        let target = MangleDecl(ASTKind.LAMBDA_EXPR, "", fullPackageName: PackageNameOf(source),
+            identity: StableDeclIdentity(source))
         StoreLambda(source, target)
         target.mangledName = source.mangledName
         if (let Some(file) <- source.curFile) {
@@ -269,7 +276,8 @@ public class MangleAstAdapter {
         if (let Some(cached) <- FindAnnotationArray(source)) {
             return cached
         }
-        let target = MangleDecl(ASTKind.NODE, "<annotations>", fullPackageName: owner.fullPackageName)
+        let target = MangleDecl(ASTKind.NODE, "<annotations>", fullPackageName: owner.fullPackageName,
+            identity: StableDeclIdentity(source))
         target.outerDecl = owner
         target.curFile = owner.curFile
         StoreAnnotationArray(source, target)
@@ -765,6 +773,18 @@ public class MangleAstAdapter {
         for (pair in declPairs) {
             pair.source.exportId = pair.target.exportId
         }
+    }
+
+    // C++ BaseMangler.cpp consumes AST nodes directly, so its temporary recursive state ends at each public
+    // mangle operation. Keep the conversion caches intact until that operation has completed, then release the
+    // adapter-only graph. Source-backed MangleDecl identities remain stable across operations, matching the C++
+    // pointer-keyed ManglerContext maps.
+    public func ReleaseConvertedAst(): Unit {
+        declCache.clear()
+        lambdaCache.clear()
+        annotationArrayCache.clear()
+        tyCache.clear()
+        declPairs.clear()
     }
 }
 

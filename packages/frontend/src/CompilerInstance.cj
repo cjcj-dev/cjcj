@@ -599,6 +599,7 @@ public class CompilerInstance {
         mangler = RealCHIRMangler(invocation.globalOptions.enableCompileTest)
         let adapter = mangler.adapter
         PrepareManglerContexts(mangler, adapter)
+        adapter.ReleaseConvertedAst()
         mangler.lambdaCounter = Int64(cachedInfo.lambdaCounter)
         ManglingHelpFunction(mangler, adapter)
         cachedInfo.lambdaCounter = UInt64(mangler.lambdaCounter)
@@ -1290,6 +1291,7 @@ public class CompilerInstance {
         }
         for (topDecl in topDecls) {
             mangleDeclTree(baseMangler, adapter, topDecl[0], topDecl[1])
+            adapter.ReleaseConvertedAst()
         }
     }
 
