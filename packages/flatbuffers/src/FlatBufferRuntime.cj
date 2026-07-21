@@ -225,7 +225,7 @@ public class IndirectHelper<T> {
             UInt64(0) is T || Int64(0) is T || Float64(0.0) is T) {
             return ReadScalar<T>(data, elementPos)
         }
-        return elementPos + Int64(ReadScalar<UInt32>(data, elementPos))
+        return elementPos + Int64(ReadScalar(data, elementPos, 0u32))
     }
 }
 
@@ -242,13 +242,13 @@ public open class Table {
     }
 
     public func GetVTable(): Int64 {
-        return pos - Int64(ReadScalar<Int32>(data, pos))
+        return pos - Int64(ReadScalar(data, pos, 0i32))
     }
 
     public func GetOptionalFieldOffset(field: UInt16): UInt16 {
         let vtable = GetVTable()
-        let vtsize = ReadScalar<UInt16>(data, vtable)
-        return if (field < vtsize) { ReadScalar<UInt16>(data, vtable + Int64(field)) } else { 0u16 }
+        let vtsize = ReadScalar(data, vtable, 0u16)
+        return if (field < vtsize) { ReadScalar(data, vtable + Int64(field), 0u16) } else { 0u16 }
     }
 
     public func GetField<T>(field: UInt16, defaultval: T): T {
@@ -329,7 +329,7 @@ public open class Table {
         let fieldOffset = GetOptionalFieldOffset(field)
         let pointerPos = pos + Int64(fieldOffset)
         return if (fieldOffset != 0u16) {
-            Some(pointerPos + Int64(ReadScalar<UInt32>(data, pointerPos)))
+            Some(pointerPos + Int64(ReadScalar(data, pointerPos, 0u32)))
         } else {
             None
         }
@@ -354,7 +354,7 @@ public open class Vector<T> {
     }
 
     public func size(): UInt32 {
-        return EndianScalar<UInt32>(ReadScalar<UInt32>(data, pos))
+        return EndianScalar(ReadScalar(data, pos, 0u32))
     }
 
     public func Get(i: UInt32): Any {
@@ -570,7 +570,7 @@ public class VerifierTemplate {
         if (!Verify<UInt32>(vec)) {
             return false
         }
-        let vectorSize = ReadScalar<UInt32>(data, vec)
+        let vectorSize = ReadScalar(data, vec, 0u32)
         let maxElems = opts.maxSize / elemSize
         if (!Check(Int64(vectorSize) < maxElems)) {
             return false
@@ -588,7 +588,7 @@ public class VerifierTemplate {
             var idx = 0u32
             while (idx < values.size()) {
                 let offsetPos = values.Data() + Int64(idx) * 4
-                let target = offsetPos + Int64(ReadScalar<UInt32>(data, offsetPos))
+                let target = offsetPos + Int64(ReadScalar(data, offsetPos, 0u32))
                 if (!VerifyString(Some(target))) {
                     return false
                 }
@@ -604,7 +604,7 @@ public class VerifierTemplate {
             var idx = 0u32
             while (idx < values.size()) {
                 let offsetPos = values.Data() + Int64(idx) * 4
-                let target = offsetPos + Int64(ReadScalar<UInt32>(data, offsetPos))
+                let target = offsetPos + Int64(ReadScalar(data, offsetPos, 0u32))
                 if (!verifyTable(target, this)) {
                     return false
                 }
@@ -619,12 +619,12 @@ public class VerifierTemplate {
         if (!Verify<Int32>(table)) {
             return false
         }
-        let vtable = table - Int64(ReadScalar<Int32>(data, table))
+        let vtable = table - Int64(ReadScalar(data, table, 0i32))
         if (!(VerifyComplexity() && Verify<UInt16>(vtable) &&
-            VerifyAlignment(Int64(ReadScalar<UInt16>(data, vtable)), 2))) {
+            VerifyAlignment(Int64(ReadScalar(data, vtable, 0u16)), 2))) {
             return false
         }
-        let vtableSize = ReadScalar<UInt16>(data, vtable)
+        let vtableSize = ReadScalar(data, vtable, 0u16)
         return Check((vtableSize & 1u16) == 0u16) && Verify(vtable, Int64(vtableSize))
     }
 
@@ -655,7 +655,7 @@ public class VerifierTemplate {
             return true
         }
         let vectorPos = buf.getOrThrow()
-        let vectorSize = Int64(ReadScalar<UInt32>(data, vectorPos))
+        let vectorSize = Int64(ReadScalar(data, vectorPos, 0u32))
         if (!Check(vectorSize >= 12)) {
             return false
         }
@@ -670,7 +670,7 @@ public class VerifierTemplate {
     }
 
     public func VerifySizePrefixedBuffer(verifyRoot: (Int64, VerifierTemplate) -> Bool): Bool {
-        return Verify<UInt32>(0) && Check(Int64(ReadScalar<UInt32>(data, 0)) + 4 <= size_) &&
+        return Verify<UInt32>(0) && Check(Int64(ReadScalar(data, 0, 0u32)) + 4 <= size_) &&
             VerifyBufferFromStart(4, verifyRoot)
     }
 
@@ -679,7 +679,7 @@ public class VerifierTemplate {
         if (!Verify<UInt32>(start)) {
             return 0
         }
-        let offset = ReadScalar<UInt32>(data, start)
+        let offset = ReadScalar(data, start, 0u32)
         if (!Check(offset != 0u32)) {
             return 0
         }
