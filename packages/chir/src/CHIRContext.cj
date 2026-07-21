@@ -531,6 +531,7 @@ public class CHIRContext {
         if (let Some(ptrs) <- allocatedPtrInFuncOrLambda.get(funcBody.nodeId)) {
             ptrs.clear()
         }
+        funcBody.GetTopLevelFunc().getOrThrow().DestroyFuncBody()
     }
 
     public func FreeWholePackage(): Unit {
