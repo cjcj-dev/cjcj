@@ -574,6 +574,9 @@ public class FlatBufferBuilder {
         if (Int64(vtableOffset) < vtable.size || Int64(vtableOffset) > buffer.size) {
             return false
         }
+        if (BufferReadU16AtOffset(Int64(vtableOffset), 0) != UInt16(vtable.size)) {
+            return false
+        }
         var idx: Int64 = 0
         while (idx < vtable.size) {
             if (buffer.readAt(Int64(vtableOffset), idx) != vtable[idx]) {
