@@ -67,6 +67,7 @@ public func EmitFunctionIR(cgMod: CGModule, chirFunc: Function): Option<CGFuncti
     IRGenerator(generator).EmitIR()
     if (let Some(body) <- chirFunc.GetBody()) {
         cgMod.GetCGContext().GetCHIRBuilder().context.FreeMemoryInFunc(body)
+        chirFunc.DestroyFuncBody()
     }
     return generator.GetCGFunction()
 }
