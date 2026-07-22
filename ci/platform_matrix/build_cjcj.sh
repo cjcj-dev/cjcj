@@ -21,9 +21,8 @@ case "$(uname -s)" in
         export PATH="$CANGJIE_HOME/bin:$CANGJIE_HOME/tools/bin:$CANGJIE_HOME/runtime/lib/windows_x86_64_cjnative:$CANGJIE_HOME/tools/lib:$PATH"
         ;;
     *)
-        # O1 does not consume fixed llc. Override GitHub's CI=true only for the
-        # installer so Linux x64 keeps the stock llc instead of failing before
-        # the requested platform build attempt.
+        # Override GitHub's CI=true only for the installer. The downloaded native
+        # tuple is activated uniformly below instead of only on Linux x64.
         CI= FIXED_LLC_GZ= bash ci/setup_sdk.sh || setup_rc=$?
         CANGJIE_HOME="$HOME/.cjv/toolchains/$TOOLCHAIN"
         CANGJIE_STDX_PATH="$HOME/.cjv/stdx/$TOOLCHAIN/static/stdx"
@@ -42,18 +41,23 @@ if [ "$setup_rc" -ne 0 ]; then
     exit "$setup_rc"
 fi
 
-# The only checked-in-independent shim tuple currently available is Linux x64.
-# Every other host must supply an object built from patched LLVM for that exact
-# OS/architecture; stop before a long build and make that frontier prominent.
-case "$(uname -s)/$(uname -m)" in
-    Linux/x86_64|Linux/amd64) ;;
-    *)
-        if [ ! -s runtime_shim/cjselfhost_llvmshim.o ]; then
-            emit_blocked_summary 'no per-arch llvm shim (needs source-built tuple)'
-            exit 78
-        fi
-        ;;
-esac
+if [ ! -s runtime_shim/cjselfhost_llvmshim.o ] || [ ! -s "${FIXED_LLC_GZ:-}" ]; then
+    emit_blocked_summary 'no per-OS/arch fixed LLVM tuple (needs llc + source-built shim)'
+    exit 78
+fi
+
+# Replace the SDK backend after cjv provisioning. This works on every native
+# tuple, including llc.exe under MSYS2, and preserves the stock backend once.
+sdk_llc="$CANGJIE_HOME/third_party/llvm/bin/llc"
+if [ ! -f "$sdk_llc" ] && [ -f "$sdk_llc.exe" ]; then sdk_llc="$sdk_llc.exe"; fi
+test -f "$sdk_llc"
+tuple_llc="$sdk_llc.tuple"
+gunzip -c "$FIXED_LLC_GZ" > "$tuple_llc"
+chmod 0755 "$tuple_llc"
+"$tuple_llc" --version | head -n 5
+if [ ! -f "$sdk_llc.orig" ]; then cp "$sdk_llc" "$sdk_llc.orig"; fi
+mv "$tuple_llc" "$sdk_llc"
+echo "activated fixed LLVM tuple ${PLATFORM_TUPLE:-unknown}: $sdk_llc"
 export cjHeapSize="${CJ_HEAP_SIZE:-12GB}"
 
 print_common_versions
