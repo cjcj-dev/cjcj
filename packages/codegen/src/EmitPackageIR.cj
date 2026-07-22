@@ -1285,16 +1285,18 @@ private func EmitPrespecializedTypeInfoRegistration(cgMod: CGModule,
     let context = cgMod.GetLLVMContext()
     let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(context.raw), 0u32) }
     let i32Type = unsafe { LLVMInt32TypeInContext(context.raw) }
+    let typeTemplateType = GetOrCreateNamedStructType(context, "TypeTemplate")
+    let typeTemplatePtrType = unsafe { LLVMPointerType(typeTemplateType, 0u32) }
     let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(context)
     let typeInfoPtrPtrType = unsafe { LLVMPointerType(typeInfoPtrType, 0u32) }
     let descriptorType = GetOrCreateNamedStructType(context, "struct.PrespecializedTypeInfoDesc")
     SetStructTypeBody(descriptorType,
-        ArrayList<LLVMTypeRef>([i8PtrType, i32Type, typeInfoPtrPtrType, typeInfoPtrType]))
+        ArrayList<LLVMTypeRef>([typeTemplatePtrType, i32Type, typeInfoPtrPtrType, typeInfoPtrType]))
     let descriptorValues = ArrayList<LLVMValueRef>()
     for (record in records) {
         let initializer = unsafe { LLVMGetInitializer(record) }
         let fields = ArrayList<LLVMValueRef>()
-        fields.add(unsafe { LLVMConstBitCast(LLVMGetOperand(initializer, 11u32), i8PtrType) })
+        fields.add(unsafe { LLVMConstBitCast(LLVMGetOperand(initializer, 11u32), typeTemplatePtrType) })
         fields.add(unsafe { LLVMConstInt(i32Type,
             LLVMConstIntGetZExtValue(LLVMGetOperand(initializer, 8u32)), 0) })
         fields.add(unsafe { LLVMConstBitCast(LLVMGetOperand(initializer, 12u32), typeInfoPtrPtrType) })
