@@ -149,7 +149,7 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
 }
 
 private func SetSymbolLinkageType(cgMod: CGModule): Unit {
-    let moduleHandle = cgMod.GetLLVMModule() ?? return
+    let moduleHandle = if (let Some(handle) <- cgMod.GetLLVMModule()) { handle } else { return }
     let linkageTypeKind = LLVMGetMDKindID(cgMod.GetLLVMContext(), "LinkageType")
     var globalObject = unsafe { LLVMGetFirstGlobal(moduleHandle.raw) }
     while (!globalObject.isNull()) {
