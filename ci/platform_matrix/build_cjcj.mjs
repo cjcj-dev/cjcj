@@ -1,0 +1,150 @@
+#!/usr/bin/env zx
+// Provision the official host nightly SDK, activate the native fixed LLVM
+// tuple, then attempt the O1 workspace build.
+
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import {emitBlockedSummary, printCommonVersions, stageBegin} from './common.mjs';
+
+const {root} = stageBegin('cjcj');
+const toolchain = process.env.CJCJ_TOOLCHAIN || 'nightly-1.2.0-alpha.20260721165458';
+const heapSize = process.env.CJ_HEAP_SIZE || '12GB';
+let setupRc = 0;
+
+async function isDirectory(target) {
+  try { return (await fs.stat(target)).isDirectory(); } catch { return false; }
+}
+async function isFile(target) {
+  try { return (await fs.stat(target)).isFile(); } catch { return false; }
+}
+async function findFirst(directory, name) {
+  for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
+    const target = path.join(directory, entry.name);
+    if (entry.isFile() && entry.name.toLowerCase() === name.toLowerCase()) return target;
+    if (entry.isDirectory()) {
+      const found = await findFirst(target, name);
+      if (found) return found;
+    }
+  }
+  return '';
+}
+
+let home;
+if (process.platform === 'win32') {
+  home = process.env.USERPROFILE || process.env.HOME;
+  if (!home) throw new Error('USERPROFILE is required');
+  if (process.arch !== 'x64') throw new Error(`unsupported Windows architecture: ${process.arch}`);
+  const cjvVersion = process.env.CJV_VERSION || 'v0.2.20';
+  const tools = path.join(home, '.local', 'bin');
+  const cjv = path.join(tools, 'cjv.exe');
+  if (!(await isFile(cjv))) {
+    await fs.mkdir(tools, {recursive: true});
+    const archive = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'cjv_windows_amd64.zip');
+    const extract = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'cjv-windows');
+    const url = `https://github.com/Zxilly/cjv/releases/download/${cjvVersion}/cjv_windows_amd64.zip`;
+    console.log(`[platform setup_sdk] install cjv ${cjvVersion} from ${url}`);
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`cjv download failed: HTTP ${response.status}`);
+    await fs.writeFile(archive, Buffer.from(await response.arrayBuffer()));
+    await fs.rm(extract, {recursive: true, force: true});
+    await $`pwsh -NoLogo -NoProfile -Command ${`Expand-Archive -LiteralPath '${archive.replaceAll("'", "''")}' -DestinationPath '${extract.replaceAll("'", "''")}' -Force`}`;
+    const downloaded = await findFirst(extract, 'cjv.exe');
+    if (!downloaded) throw new Error(`cjv.exe missing from ${archive}`);
+    await fs.copyFile(downloaded, cjv);
+  }
+  process.env.PATH = `${tools};${process.env.PATH || ''}`;
+  if (process.env.GITCODE_API_KEY) {
+    await $({nothrow: true, stdio: 'pipe', verbose: false})`${cjv} set gitcode-api-key ${process.env.GITCODE_API_KEY}`;
+    console.log('[platform setup_sdk] gitcode-api-key set');
+  }
+  console.log(`[platform setup_sdk] cjv install ${toolchain} -c stdx`);
+  const install = await $({nothrow: true})`${cjv} install ${toolchain} -c stdx`;
+  setupRc = install.exitCode;
+} else {
+  home = process.env.HOME;
+  if (!home) throw new Error('HOME is required');
+  const setup = await $({nothrow: true, env: {...process.env, CI: '', FIXED_LLC_GZ: ''}})`npx --yes zx@8 ci/setup_sdk.mjs`;
+  setupRc = setup.exitCode;
+}
+
+const cangjieHome = path.join(home, '.cjv', 'toolchains', toolchain);
+const stdxPath = path.join(home, '.cjv', 'stdx', toolchain, 'static', 'stdx');
+if (setupRc === 0 && !(await isDirectory(cangjieHome))) throw new Error(`toolchain directory missing: ${cangjieHome}`);
+process.env.CANGJIE_HOME = cangjieHome;
+process.env.CANGJIE_STDX_PATH = stdxPath;
+process.env.cjHeapSize = heapSize;
+const pathEntries = [path.join(cangjieHome, 'bin'), path.join(cangjieHome, 'tools', 'bin')];
+if (process.platform === 'win32') {
+  pathEntries.push(path.join(cangjieHome, 'runtime', 'lib', 'windows_x86_64_cjnative'), path.join(cangjieHome, 'tools', 'lib'), path.join(home, '.local', 'bin'));
+  process.env.PATH = `${pathEntries.join(';')};${process.env.PATH || ''}`;
+  if (process.env.GITHUB_ENV) {
+    await fs.appendFile(process.env.GITHUB_ENV, `CANGJIE_HOME=${cangjieHome}\nCANGJIE_STDX_PATH=${stdxPath}\ncjHeapSize=${heapSize}\nPATH=${process.env.PATH}\n`);
+    if (!process.env.GITHUB_PATH) throw new Error('GITHUB_PATH is required when GITHUB_ENV is set');
+    await fs.appendFile(process.env.GITHUB_PATH, `${pathEntries.join('\n')}\n`);
+  }
+  console.log(`[platform setup_sdk] CANGJIE_HOME=${cangjieHome}`);
+} else {
+  pathEntries.push(path.join(home, '.local', 'bin'));
+  process.env.PATH = `${pathEntries.join(':')}:${process.env.PATH || ''}`;
+  const libraryPath = `${path.join(cangjieHome, 'third_party', 'llvm', 'lib')}:${path.join(cangjieHome, 'runtime', 'lib', process.env.SDK_RUNTIME_DIR || '')}:${path.join(cangjieHome, 'tools', 'lib')}`;
+  if (process.platform === 'darwin') {
+    process.env.DYLD_LIBRARY_PATH = libraryPath;
+    await $({nothrow: true})`xattr -dr com.apple.quarantine ${cangjieHome}`;
+  } else process.env.LD_LIBRARY_PATH = libraryPath;
+}
+if (setupRc !== 0) process.exit(setupRc);
+
+const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
+if (!(await isFile(path.join('runtime_shim', 'cjselfhost_llvmshim.o'))) || !(await isFile(fixedLlcGz))) {
+  emitBlockedSummary('no per-OS/arch fixed LLVM tuple (needs llc + source-built shim)');
+  process.exit(78);
+}
+
+let sdkLlc = path.join(cangjieHome, 'third_party', 'llvm', 'bin', 'llc');
+if (!(await isFile(sdkLlc)) && await isFile(`${sdkLlc}.exe`)) sdkLlc = `${sdkLlc}.exe`;
+if (!(await isFile(sdkLlc))) throw new Error(`SDK llc missing: ${sdkLlc}`);
+const tupleLlc = `${sdkLlc}.tuple`;
+await fs.writeFile(tupleLlc, zlib.gunzipSync(await fs.readFile(fixedLlcGz)));
+if (process.platform !== 'win32') await fs.chmod(tupleLlc, 0o755);
+await $`${tupleLlc} --version`;
+if (!(await isFile(`${sdkLlc}.orig`))) await fs.copyFile(sdkLlc, `${sdkLlc}.orig`);
+await fs.rm(sdkLlc, {force: true});
+await fs.rename(tupleLlc, sdkLlc);
+console.log(`activated fixed LLVM tuple ${process.env.PLATFORM_TUPLE || 'unknown'}: ${sdkLlc}`);
+
+await printCommonVersions();
+console.log(`sdk_toolchain=${toolchain}\nsdk_archive=${process.env.SDK_ARCHIVE || 'unknown'}\nsdk_home=${cangjieHome}\noptimization=O1\nsetup_rc=${setupRc}`);
+await $({nothrow: true})`cjv --version`;
+await $({nothrow: true})`cjc --version`;
+await $({nothrow: true})`cjpm --version`;
+await $({nothrow: true})`${sdkLlc} --version`;
+
+const cjpmToml = await fs.readFile('cjpm.toml', 'utf8');
+await fs.writeFile(path.join(root, 'cjpm.O1.toml'), cjpmToml.replace('compile-option = "-O2"', 'compile-option = "-O1"'));
+await fs.copyFile(path.join(root, 'cjpm.O1.toml'), 'cjpm.toml');
+
+let shim;
+let build;
+if (process.platform === 'win32') {
+  const msysBash = process.env.MSYS2_BASH || 'C:\\msys64\\usr\\bin\\bash.exe';
+  const msysEnv = {
+    ...process.env,
+    PLATFORM_REPO_ROOT: process.cwd(),
+    MSYSTEM: 'CLANG64',
+    MSYS2_PATH_TYPE: 'inherit',
+    CHERE_INVOKING: '1',
+  };
+  const prefix = 'repo="$(cygpath -u "$PLATFORM_REPO_ROOT")"; cangjie_home="$(cygpath -u "$CANGJIE_HOME")"; cd "$repo"; export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/clang64/bin:$PATH"';
+  shim = await $({nothrow: true, env: msysEnv})`${msysBash} -lc ${`${prefix}; npx --yes zx@8 runtime_shim/build_shim.mjs`}`;
+  console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
+  build = await $({nothrow: true, env: msysEnv})`${msysBash} -lc ${`${prefix}; cjpm build`}`;
+} else {
+  shim = await $({nothrow: true})`npx --yes zx@8 runtime_shim/build_shim.mjs`;
+  console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
+  build = await $({nothrow: true})`cjpm build`;
+}
+console.log(`setup_rc=${setupRc} shim_rc=${shim.exitCode} build_rc=${build.exitCode}`);
+if (shim.exitCode !== 0) process.exit(shim.exitCode);
+process.exit(build.exitCode);

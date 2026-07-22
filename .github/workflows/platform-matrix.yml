@@ -20,10 +20,6 @@ env:
   RUNTIME_VERSION: 1.2.0-alpha.20260721165458
   CJ_HEAP_SIZE: 12GB
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
@@ -83,7 +79,7 @@ jobs:
           fetch-depth: 1
           path: runtime-source
 
-      - name: Prepare MSYS2/MinGW runtime toolchain
+      - name: Prepare MSYS2/CLANG64 runtime toolchain
         if: always() && runner.os == 'Windows'
         # CLANG64: pure LLVM toolchain (clang + libc++ + compiler-rt bundled).
         # MINGW64's clang parses GCC-16 libstdc++ headers and miscompiles
@@ -101,39 +97,37 @@ jobs:
 
       - name: Runtime build (Linux/macOS native)
         if: always() && runner.os != 'Windows'
-        run: bash ci/platform_matrix/build_runtime.sh
+        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
 
-      - name: Runtime build (Windows target via MSYS2/MinGW)
+      - name: Runtime build (Windows target via MSYS2/CLANG64)
         if: always() && runner.os == 'Windows'
-        shell: msys2 {0}
-        run: bash ci/platform_matrix/build_runtime.sh
+        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
 
       - name: Download native fixed LLVM tuple
         if: always() && runner.os != 'Windows'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash ci/platform_matrix/fetch_llvm_tuple.sh
+        run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
 
-      - name: Download native fixed LLVM tuple (MSYS2)
+      - name: Download native fixed LLVM tuple (Windows)
         if: always() && runner.os == 'Windows'
-        shell: msys2 {0}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash ci/platform_matrix/fetch_llvm_tuple.sh
+        run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
 
       - name: Official SDK + O1 cjcj build
         if: always()
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-        run: bash ci/platform_matrix/build_cjcj.sh
+        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
 
       - name: cjcj compile/run + pinned-runtime combination smoke
         if: always()
-        run: bash ci/platform_matrix/run_smoke.sh
+        run: npx --yes zx@8 ci/platform_matrix/run_smoke.mjs
 
       - name: Summarize final key error
         if: always()
-        run: bash ci/platform_matrix/summarize_job.sh
+        run: npx --yes zx@8 ci/platform_matrix/summarize_job.mjs
 
       - name: Upload diagnostics and key products
         if: always()
