@@ -15,7 +15,7 @@ import cjcj::modules.CreateFeaturesDirective as CreateModuleFeaturesDirective
 import cjcj::modules.CreateFeaturesSet as CreateModuleFeaturesSet
 import cjcj::modules.CreateFileInfo as CreateModuleFileInfo
 import cjcj::modules.{CreateArrayInfo, CreateAssignInfo, CreateBinaryInfo, CreateBlockInfo, CreateCallInfo,
-    CreateExpr, CreateForInInfo, CreateFuncArgInfo, CreateIncOrDecInfo, CreateJumpInfo, CreateLambdaInfo,
+    CreateDecl, CreateExpr, CreateForInInfo, CreateFuncArgInfo, CreateIncOrDecInfo, CreateJumpInfo, CreateLambdaInfo,
     CreateLetPatternDestructorInfo, CreateLitConstInfo, CreateMatchCaseInfo, CreateMatchInfo, CreatePattern,
     CreateParamInfo, CreateReferenceInfo, CreateSpawnInfo, CreateSubscriptInfo, CreateTryInfo, CreateUnaryInfo}
 import cjcj::modules.{CreateSemaTy, VerifySemaTyContracts, MF_SEMA_TY_INFO_NONE,
@@ -831,27 +831,9 @@ public class ASTWriter {
             0u32
         }
 
-        builder.StartTable(19)
-        builder.AddOffset(18, dependencies)
-        builder.AddOffset(17, info)
-        builder.AddU8(16, infoType)
-        builder.AddStruct(15, hash, 8)
-        builder.AddOffset(14, rawMangle)
-        builder.AddOffset(13, exportId)
-        builder.AddOffset(12, mangledName)
-        builder.AddU32(11, typeIndex)
-        builder.AddOffset(10, annotations)
-        builder.AddOffset(9, attributes)
-        builder.AddStruct(8, identifierPos, 4)
-        builder.AddOffset(7, identifier)
-        builder.AddStruct(6, end, 4)
-        builder.AddStruct(5, begin, 4)
-        builder.AddOffset(4, generic)
-        builder.AddOffset(3, genericDecl)
-        builder.AddOffset(2, fullPkgName)
-        builder.AddBool(1, isTopLevel)
-        builder.AddU16(0, declKind)
-        let offset = builder.EndTable()
+        let offset = CreateDecl(builder, declKind, isTopLevel, fullPkgName, genericDecl, generic, begin, end,
+            identifier, identifierPos, attributes, annotations, typeIndex, mangledName, exportId, rawMangle,
+            hash, infoType, info, dependencies)
         allDecls[Int64(index) - 1] = offset
     }
 
