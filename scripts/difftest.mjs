@@ -56,22 +56,15 @@ async function classify(file) {
   }
 }
 
-if (argv._[0] === '--one') {
-  if (!argv._[1]) process.exit(1);
-  console.log(await classify(path.resolve(argv._[1])));
+if (argv.one !== undefined) {
+  const file = typeof argv.one === 'string' ? argv.one : argv._[0];
+  if (!file) process.exit(1);
+  console.log(await classify(path.resolve(file)));
   process.exit(0);
 }
 
-let corpus = '';
-let jobs = Math.min(16, os.cpus().length);
-const args = [...argv._];
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === '-j' || args[i] === '--jobs') {
-    jobs = Number(args[++i]);
-  } else {
-    corpus = args[i];
-  }
-}
+let corpus = argv._[0] || '';
+let jobs = Number(argv.j || argv.jobs || Math.min(16, os.cpus().length));
 corpus ||= `${repo}/scripts/difftest_corpus`;
 
 const samples = (await fs.readdir(corpus))
