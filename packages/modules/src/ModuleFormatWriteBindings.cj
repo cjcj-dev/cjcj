@@ -193,7 +193,7 @@ func CreateFuncInfo(builder: FlatBufferBuilder, funcBody: FlatBufferOffset, over
 }
 
 // ModuleFormat_generated.h (CreateParamInfo).
-func CreateParamInfo(builder: FlatBufferBuilder, isNamedParam: Bool, isMemberParam: Bool, defaultVal: UInt32): FlatBufferOffset {
+public func CreateParamInfo(builder: FlatBufferBuilder, isNamedParam: Bool, isMemberParam: Bool, defaultVal: UInt32): FlatBufferOffset {
     builder.StartTable(3)
     builder.AddU32(2, defaultVal, defaultValue: 0u32)
     builder.AddBool(1, isMemberParam, defaultValue: false)
