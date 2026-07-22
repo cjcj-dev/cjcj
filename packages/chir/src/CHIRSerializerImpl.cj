@@ -1,7 +1,6 @@
 package cjcj::chir
 
 import std.collection.*
-import std.reflect.TypeInfo
 import std.fs.File
 import cjcj::basic.Linkage as BasicLinkage
 import cjcj::basic.LinkageToInt
@@ -622,30 +621,30 @@ class CHIRSerializerImpl {
         let annoTypes = ArrayList<UInt8>()
         let annos = ArrayList<FlatBufferOffset>()
         for ((annotationType, annotation) in obj.GetAnno().GetAnnos()) {
-            if (annotationType == TypeInfo.of<NeedCheckArrayBound>()) {
+            if (annotationType == NeedCheckArrayBound.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_NEED_CHECK_ARRAY_BOUND)
                 let value = NeedCheckArrayBound.Extract(
                     (annotation as Annotation<Bool>).getOrThrow())
                 annos.add(CreateNeedCheckArrayBound(builder, value))
-            } else if (annotationType == TypeInfo.of<NeedCheckCast>()) {
+            } else if (annotationType == NeedCheckCast.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_NEED_CHECK_CAST)
                 let value = NeedCheckCast.Extract((annotation as Annotation<Bool>).getOrThrow())
                 annos.add(CreateNeedCheckCast(builder, value))
-            } else if (annotationType == TypeInfo.of<DebugLocationInfoForWarning>()) {
+            } else if (annotationType == DebugLocationInfoForWarning.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_DEBUG_LOCATION_INFO_FOR_WARNING)
                 let location = DebugLocationInfoForWarning.Extract(
                     (annotation as Annotation<DebugLocation>).getOrThrow())
                 annos.add(Serialize(location))
-            } else if (annotationType == TypeInfo.of<LinkTypeInfo>()) {
+            } else if (annotationType == LinkTypeInfo.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_LINK_TYPE_INFO)
                 let linkage = LinkTypeInfo.Extract(
                     (annotation as Annotation<BasicLinkage>).getOrThrow())
                 annos.add(CreateLinkTypeInfo(builder, Int16(LinkageToInt(linkage))))
-            } else if (annotationType == TypeInfo.of<SkipCheck>()) {
+            } else if (annotationType == SkipCheck.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_SKIP_CHECK)
                 let skipKind = SkipCheck.Extract((annotation as Annotation<SkipKind>).getOrThrow())
                 annos.add(CreateSkipCheck(builder, UInt8(SkipKindIndex(skipKind))))
-            } else if (annotationType == TypeInfo.of<WrappedRawMethod>()) {
+            } else if (annotationType == WrappedRawMethod.GetTypeIndex()) {
                 let rawMethod = WrappedRawMethod.Extract(
                     (annotation as Annotation<Option<Function>>).getOrThrow())
                 if (let Some(method) <- rawMethod) {
@@ -658,33 +657,33 @@ class CHIRSerializerImpl {
                     0u32
                 }
                 annos.add(CreateWrappedRawMethod(builder, rawMethodId))
-            } else if (annotationType == TypeInfo.of<NeverOverflowInfo>()) {
+            } else if (annotationType == NeverOverflowInfo.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_NEVER_OVERFLOW_INFO)
                 let value = NeverOverflowInfo.Extract((annotation as Annotation<Bool>).getOrThrow())
                 annos.add(CreateNeverOverflowInfo(builder, value))
-            } else if (annotationType == TypeInfo.of<GeneratedFromForIn>()) {
+            } else if (annotationType == GeneratedFromForIn.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_GENERATED_FROM_FOR_IN)
                 let value = GeneratedFromForIn.Extract((annotation as Annotation<Bool>).getOrThrow())
                 annos.add(CreateGeneratedFromForIn(builder, value))
-            } else if (annotationType == TypeInfo.of<IsAutoEnvClass>()) {
+            } else if (annotationType == IsAutoEnvClass.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_IS_AUTO_ENV_CLASS)
                 let value = IsAutoEnvClass.Extract((annotation as Annotation<Bool>).getOrThrow())
                 annos.add(CreateIsAutoEnvClass(builder, value))
-            } else if (annotationType == TypeInfo.of<IsCapturedClassInCC>()) {
+            } else if (annotationType == IsCapturedClassInCC.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_IS_CAPTURED_CLASS_IN_CC)
                 let value = IsCapturedClassInCC.Extract((annotation as Annotation<Bool>).getOrThrow())
                 annos.add(CreateIsCapturedClassInCC(builder, value))
-            } else if (annotationType == TypeInfo.of<EnumCaseIndex>()) {
+            } else if (annotationType == EnumCaseIndex.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_ENUM_CASE_INDEX)
                 let index = EnumCaseIndex.Extract(
                     (annotation as Annotation<Option<Int64>>).getOrThrow())
                 annos.add(CreateEnumCaseIndex(builder, if (let Some(value) <- index) { value } else { -1 }))
-            } else if (annotationType == TypeInfo.of<VirMethodOffset>()) {
+            } else if (annotationType == VirMethodOffset.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_VIR_METHOD_OFFSET)
                 let offset = VirMethodOffset.Extract(
                     (annotation as Annotation<Option<Int64>>).getOrThrow())
                 annos.add(CreateVirMethodOffset(builder, if (let Some(value) <- offset) { value } else { -1 }))
-            } else if (annotationType == TypeInfo.of<OverrideSrcFuncType>()) {
+            } else if (annotationType == OverrideSrcFuncType.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_OVERRIDE_SRC_FUNC_TYPE)
                 let funcType = OverrideSrcFuncType.Extract(
                     (annotation as Annotation<Option<FuncType>>).getOrThrow())
@@ -694,7 +693,7 @@ class CHIRSerializerImpl {
                     0u32
                 }
                 annos.add(CreateOverrideSrcFuncType(builder, typeId))
-            } else if (annotationType == TypeInfo.of<AnnoFactoryInfo>()) {
+            } else if (annotationType == AnnoFactoryInfo.GetTypeIndex()) {
                 continue
             } else {
                 CJC_ABORT()

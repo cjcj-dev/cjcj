@@ -2,9 +2,28 @@ package cjcj::chir
 
 import cjcj::basic.Linkage as BasicLinkage
 import std.collection.*
-import std.reflect.TypeInfo
+import std.sync.AtomicInt64
 
 // C++ ConstAnalysis.h:242-247 producer is ported by ConstAnalysis.MarkExpressionAsMustNotOverflow.
+
+private class TypeIndexIdAllocator {
+    private static let nextId = AtomicInt64(1)
+
+    public static func Next(): Int64 {
+        return nextId.fetchAdd(1)
+    }
+}
+
+// Mirrors std::type_index in Annotation.h:363-434 with one process-local token per annotation class.
+public class TypeIndex <: Hashable & Equatable<TypeIndex> {
+    private let objectId: Int64 = TypeIndexIdAllocator.Next()
+
+    public init() {}
+
+    public operator func ==(right: TypeIndex): Bool { return objectId == right.objectId }
+    public operator func !=(right: TypeIndex): Bool { return objectId != right.objectId }
+    public func hashCode(): Int64 { return objectId.hashCode() }
+}
 
 public interface AnnotationBase {
     func Clone(): AnnotationBase
@@ -12,13 +31,17 @@ public interface AnnotationBase {
 }
 
 public interface Annotation<T> <: AnnotationBase {
+    static func GetTypeIndex(): TypeIndex
     static func Create(): Annotation<T>
     static func Create(value: T): Annotation<T>
     static func Extract(annotation: Annotation<T>): T
 }
 
 public class AnnoFactoryInfo <: Annotation<ArrayList<GlobalVar>> {
+    private static let typeIndex = TypeIndex()
     private let value: ArrayList<GlobalVar> = ArrayList<GlobalVar>()
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {}
 
@@ -52,7 +75,10 @@ public class AnnoFactoryInfo <: Annotation<ArrayList<GlobalVar>> {
 }
 
 public class NeedCheckArrayBound <: Annotation<Bool> {
+    private static let typeIndex = TypeIndex()
     private let need: Bool
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         need = true
@@ -84,7 +110,10 @@ public class NeedCheckArrayBound <: Annotation<Bool> {
 }
 
 public class NeedCheckCast <: Annotation<Bool> {
+    private static let typeIndex = TypeIndex()
     private let need: Bool
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         need = true
@@ -116,7 +145,10 @@ public class NeedCheckCast <: Annotation<Bool> {
 }
 
 public class DebugLocationInfoForWarning <: Annotation<DebugLocation> {
+    private static let typeIndex = TypeIndex()
     private let location: DebugLocation
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         location = DebugLocation()
@@ -148,7 +180,10 @@ public class DebugLocationInfoForWarning <: Annotation<DebugLocation> {
 }
 
 public class GeneratedFromForIn <: Annotation<Bool> {
+    private static let typeIndex = TypeIndex()
     private let value: Bool
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         value = false
@@ -184,7 +219,10 @@ public class GeneratedFromForIn <: Annotation<Bool> {
 }
 
 public class LinkTypeInfo <: Annotation<BasicLinkage> {
+    private static let typeIndex = TypeIndex()
     private let linkType: BasicLinkage
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         linkType = BasicLinkage.EXTERNAL
@@ -238,7 +276,10 @@ public class LinkTypeInfo <: Annotation<BasicLinkage> {
 }
 
 public class WrappedRawMethod <: Annotation<Option<Function>> {
+    private static let typeIndex = TypeIndex()
     private let rawMethod: Option<Function>
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         rawMethod = None
@@ -299,7 +340,10 @@ extend SkipKind <: Equatable<SkipKind> {
 }
 
 public class SkipCheck <: Annotation<SkipKind> {
+    private static let typeIndex = TypeIndex()
     private let kind: SkipKind
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         kind = SkipKind.NO_SKIP
@@ -340,7 +384,10 @@ public class SkipCheck <: Annotation<SkipKind> {
 }
 
 public class NeverOverflowInfo <: Annotation<Bool> {
+    private static let typeIndex = TypeIndex()
     private let neverOverflowInfo: Bool
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         neverOverflowInfo = false
@@ -377,7 +424,10 @@ public class NeverOverflowInfo <: Annotation<Bool> {
 }
 
 public class IsAutoEnvClass <: Annotation<Bool> {
+    private static let typeIndex = TypeIndex()
     private let isAutoEnv: Bool
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         isAutoEnv = false
@@ -409,7 +459,10 @@ public class IsAutoEnvClass <: Annotation<Bool> {
 }
 
 public class IsCapturedClassInCC <: Annotation<Bool> {
+    private static let typeIndex = TypeIndex()
     private let flag: Bool
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         flag = false
@@ -441,7 +494,10 @@ public class IsCapturedClassInCC <: Annotation<Bool> {
 }
 
 public class EnumCaseIndex <: Annotation<Option<Int64>> {
+    private static let typeIndex = TypeIndex()
     private let index: Option<Int64>
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         index = None
@@ -480,7 +536,10 @@ public class EnumCaseIndex <: Annotation<Option<Int64>> {
 }
 
 public class VirMethodOffset <: Annotation<Option<Int64>> {
+    private static let typeIndex = TypeIndex()
     private let offset: Option<Int64>
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         offset = None
@@ -515,7 +574,10 @@ public class VirMethodOffset <: Annotation<Option<Int64>> {
 }
 
 public class OverrideSrcFuncType <: Annotation<Option<FuncType>> {
+    private static let typeIndex = TypeIndex()
     private let ty: Option<FuncType>
+
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
 
     public init() {
         ty = None
@@ -550,7 +612,8 @@ public class OverrideSrcFuncType <: Annotation<Option<FuncType>> {
 }
 
 public class AnnotationMap {
-    private let annotations: HashMap<TypeInfo, AnnotationBase> = HashMap<TypeInfo, AnnotationBase>(0)
+    private let annotations: HashMap<TypeIndex, AnnotationBase> = HashMap<TypeIndex, AnnotationBase>(0)
+    private let annotationOrder: ArrayList<TypeIndex> = ArrayList<TypeIndex>()
 
     public init() {}
 
@@ -560,38 +623,46 @@ public class AnnotationMap {
 
     // Set annotation T for this node, updating its value if it already exists. Annotation.h:363.
     public func Set<T, R>(value: R): Unit where T <: Annotation<R> {
-        annotations[TypeInfo.of<T>()] = T.Create(value)
+        let index = T.GetTypeIndex()
+        if (!annotations.contains(index)) { annotationOrder.add(index) }
+        annotations[index] = T.Create(value)
     }
 
     public func Remove<T>(): Unit {
-        annotations.remove(TypeInfo.of<T>())
+        let index = T.GetTypeIndex()
+        annotations.remove(index)
+        annotationOrder.remove(element: index)
     }
 
     // Get the value of the annotation T, returning the default empty value when absent. Annotation.h:370.
     public func Get<T, R>(): R where T <: Annotation<R> {
-        if (let Some(annotation) <- annotations.get(TypeInfo.of<T>())) {
+        if (let Some(annotation) <- annotations.get(T.GetTypeIndex())) {
             return T.Extract((annotation as Annotation<R>).getOrThrow())
         }
         return T.Extract(T.Create())
     }
 
     public func GetAnno<T, R>(): T where T <: Annotation<R> {
-        let index = TypeInfo.of<T>()
+        let index = T.GetTypeIndex()
         if (let Some(annotation) <- annotations.get(index)) {
             return (annotation as T).getOrThrow()
         }
         let annotation = T.Create()
         annotations[index] = annotation
+        annotationOrder.add(index)
         return (annotation as T).getOrThrow()
     }
 
     // Annotation.h:432 GetAnnos().
-    public func GetAnnos(): ReadOnlyMap<TypeInfo, AnnotationBase> {
-        return annotations
+    public func GetAnnos(): ArrayList<(TypeIndex, AnnotationBase)> {
+        let result = ArrayList<(TypeIndex, AnnotationBase)>()
+        for (index in annotationOrder) { result.add((index, annotations[index])) }
+        return result
     }
 
     public func Clear(): Unit {
         annotations.clear()
+        annotationOrder.clear()
     }
 
     // Annotation.h:407-425 copy semantics: deep-clone each annotation.
@@ -600,8 +671,11 @@ public class AnnotationMap {
             return
         }
         annotations.clear()
-        for ((index, annotation) in other.annotations) {
+        annotationOrder.clear()
+        for (index in other.annotationOrder) {
+            let annotation = other.annotations[index]
             annotations[index] = annotation.Clone()
+            annotationOrder.add(index)
         }
     }
 
@@ -611,7 +685,8 @@ public class AnnotationMap {
             return ""
         }
         let annotationParts = ArrayList<String>()
-        for ((_, annotation) in annotations) {
+        for (index in annotationOrder) {
+            let annotation = annotations[index]
             let text = annotation.ToString()
             if (!text.isEmpty()) {
                 annotationParts.add("${IndentToString(indent)}${text}")
