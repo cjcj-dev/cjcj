@@ -180,6 +180,8 @@ if (process.platform === 'win32') {
       `export CANGJIE_HOME="$cangjie_home" CANGJIE_STDX_PATH="$stdx_path" cjHeapSize=${shellQuote(heapSize)}`,
       // The msys2 login profile drops USERPROFILE; cjpm needs it (round-16).
       `export USERPROFILE=${shellQuote(process.env.USERPROFILE || '')}`,
+      // Evidence: what LLVM link artifacts does the Windows SDK actually ship?
+      'ls "$cangjie_home/third_party/llvm/lib" 2>/dev/null | head -20 || true',
       'export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/clang64/bin:$PATH:/c/mingw64/bin"',
       command,
     ].join('\n');
