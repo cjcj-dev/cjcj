@@ -122,6 +122,12 @@ if (!llcEntry || !shimEntry) {
   emitBlockedSummary(`${artifactName} is incomplete (requires llc.gz + cjselfhost_llvmshim.o)`);
   process.exit(0);
 }
+const staticManifestEntry = entries.find((entry) => /(^|[\\/])llvm-static-libs\.txt$/.test(entry));
+const systemManifestEntry = entries.find((entry) => /(^|[\\/])llvm-system-libs\.txt$/.test(entry));
+if (platform === 'windows_x86_64' && (!staticManifestEntry || !systemManifestEntry)) {
+  emitBlockedSummary(`${artifactName} is incomplete (requires LLVM static library manifests)`);
+  process.exit(0);
+}
 
 const dest = path.join(root, 'fixed-toolchain', platform);
 await fs.mkdir(dest, {recursive: true});
@@ -135,6 +141,51 @@ if (process.platform === 'win32') {
   await $`unzip -p ${archive} ${shimEntry} > ${shim}`;
 }
 if (!(await fs.stat(llc)).size || !(await fs.stat(shim)).size) throw new Error('tuple artifact contains an empty required file');
+
+let llvmLinkRsp = '';
+if (platform === 'windows_x86_64') {
+  const manifestRoot = path.dirname(staticManifestEntry);
+  const staticNames = (await fs.readFile(path.join(extracted, staticManifestEntry), 'utf8'))
+    .split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!staticNames.length || new Set(staticNames).size !== staticNames.length) {
+    throw new Error('LLVM static library manifest is empty or contains duplicates');
+  }
+  for (const name of staticNames) {
+    if (!/^libLLVM[A-Za-z0-9_]+\.a$/.test(name) || path.basename(name) !== name) {
+      throw new Error(`unsafe LLVM static library name: ${name}`);
+    }
+  }
+
+  const staticDest = path.join(dest, 'llvm-static');
+  await fs.rm(staticDest, {recursive: true, force: true});
+  await fs.mkdir(staticDest, {recursive: true});
+  const responseArchives = [];
+  for (const name of staticNames) {
+    const source = path.join(extracted, manifestRoot, 'llvm-static', name);
+    const handle = await fs.open(source, 'r');
+    const header = Buffer.alloc(8);
+    try {
+      const {bytesRead} = await handle.read(header, 0, header.length, 0);
+      if (bytesRead !== header.length || header.toString('ascii') !== '!<arch>\n') {
+        throw new Error(`unexpected LLVM archive format: ${name}`);
+      }
+    } finally {
+      await handle.close();
+    }
+    const destination = path.join(staticDest, name);
+    await fs.copyFile(source, destination);
+    responseArchives.push(`"${path.resolve(destination).replaceAll('\\', '/')}"`);
+  }
+
+  const systemLibs = (await fs.readFile(path.join(extracted, systemManifestEntry), 'utf8'))
+    .split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const option of systemLibs) {
+    if (!/^-[A-Za-z0-9_:+.,/=-]+$/.test(option)) throw new Error(`unsafe LLVM system library option: ${option}`);
+  }
+  llvmLinkRsp = path.join(dest, 'llvm-static-link.rsp');
+  await fs.writeFile(llvmLinkRsp, ['--start-group', ...responseArchives, '--end-group', ...systemLibs, ''].join('\n'));
+  console.log(`LLVM static link response: archives=${responseArchives.length} system_libs=${systemLibs.length}`);
+}
 
 async function sha256(file) {
   return crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
@@ -161,6 +212,12 @@ await fs.copyFile(shim, path.join('runtime_shim', 'cjselfhost_llvmshim.o'));
 const destAbs = path.resolve(dest);
 const githubEnv = process.env.GITHUB_ENV;
 if (!githubEnv) throw new Error('GITHUB_ENV is required');
-await fs.appendFile(githubEnv, `FIXED_LLC_GZ=${path.join(destAbs, 'llc.gz')}\nCJCJ_LLVM_SHIM_O=${path.join(destAbs, 'cjselfhost_llvmshim.o')}\nPLATFORM_TUPLE=${platform}\n`);
+const environment = [
+  `FIXED_LLC_GZ=${path.join(destAbs, 'llc.gz')}`,
+  `CJCJ_LLVM_SHIM_O=${path.join(destAbs, 'cjselfhost_llvmshim.o')}`,
+  `PLATFORM_TUPLE=${platform}`,
+];
+if (llvmLinkRsp) environment.push(`CJCJ_LLVM_LINK_RSP=${path.resolve(llvmLinkRsp)}`);
+await fs.appendFile(githubEnv, `${environment.join('\n')}\n`);
 console.log(`tuple_run=${runId}\ntuple_artifact=${artifactId}\ntuple_platform=${platform}`);
 console.log(`${await sha256(llc)}  ${llc}\n${await sha256(shim)}  ${shim}`);
