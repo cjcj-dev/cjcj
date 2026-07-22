@@ -16,7 +16,7 @@ concurrency:
 env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
   RUNTIME_REPOSITORY: https://github.com/cjcj-dev/cangjie-runtime.git
-  RUNTIME_REF: 2b5c0345e0aecd27a3993f20c1df736e78c5b7b0
+  RUNTIME_REF: ae074bd283796236a5b1962545cf5e548b8856f6
   RUNTIME_VERSION: 1.2.0-alpha.20260721165458
   CJ_HEAP_SIZE: 12GB
 
