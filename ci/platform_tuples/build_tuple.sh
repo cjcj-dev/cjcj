@@ -71,7 +71,7 @@ else
     nm_tool=nm
 fi
 shim_exports="$($nm_tool -C "$output/cjselfhost_llvmshim.o" \
-    | grep -cE ' [Tt] (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
+    | grep -cE ' [Tt] _?(LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
 test "$shim_exports" -ge 90
 echo "shim exported symbols: $shim_exports"
 sha256sum "$output/llc.gz" "$output/cjselfhost_llvmshim.o"
