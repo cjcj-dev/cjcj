@@ -184,14 +184,12 @@ foreign {
         information: CPointer<JobObjectExtendedLimitInformation>, informationLength: UInt32): Int32
     func AssignProcessToJobObject(job: CPointer<Unit>, process: CPointer<Unit>): Int32
     func GetStdHandle(stdHandle: UInt32): CPointer<Unit>
-    func CloseHandle(handle: CPointer<Unit>): Int32
     func CreatePipe(readPipe: CPointer<CPointer<Unit>>, writePipe: CPointer<CPointer<Unit>>,
         attributes: CPointer<SecurityAttributes>, size: UInt32): Int32
     func CreateProcessA(applicationName: CString, commandLine: CString,
         processAttributes: CPointer<SecurityAttributes>, threadAttributes: CPointer<SecurityAttributes>,
         inheritHandles: Int32, creationFlags: UInt32, environment: CPointer<Unit>, currentDirectory: CString,
         startupInfo: CPointer<StartupInfo>, processInformation: CPointer<ProcessInformation>): Int32
-    func GetLastError(): UInt32
 }
 
 @When[os != "Windows"]
