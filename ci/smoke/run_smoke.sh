@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Smoke driver: compile+run each ci/smoke sample with a deployed cjcj and check output.
-# Usage: run_smoke.sh <cjcj-binary> [workdir]
-#   <cjcj-binary>  needs a sibling ../runtime (macro engine resolves <bin>/../runtime/lib/<host>);
-#                  a release bin/cjcj satisfies this.
+# Smoke driver: compile+run each sample with a deployed self-host compiler and check output.
+# Usage: run_smoke.sh <compiler-binary> [workdir]
+#   <compiler-binary> needs a sibling ../runtime (macro engine resolves
+#                     <bin>/../runtime/lib/<host>); a packaged compiler satisfies this.
 #   [workdir]      scratch dir, default mktemp.
 # Requires CANGJIE_HOME / LD_LIBRARY_PATH / cjHeapSize exported by the caller.
 # Exits non-zero on any compile failure or output mismatch.
+# Deliberately omit `set -e`: the driver runs every sample and reports an aggregate.
 set -uo pipefail
 
-CJCJ="${1:?usage: run_smoke.sh <cjcj-binary> [workdir]}"
-HERE="$(cd "$(dirname "$0")" && pwd)"
-WORK="${2:-$(mktemp -d)}"
+readonly CJCJ="${1:?usage: run_smoke.sh <compiler-binary> [workdir]}"
+readonly HERE="$(cd "$(dirname "$0")" && pwd)"
+readonly WORK="${2:-$(mktemp -d)}"
 mkdir -p "$WORK"
 
 if [ ! -x "$CJCJ" ]; then
@@ -33,11 +34,16 @@ declare -A EXPECT=(
 run_one() {
     local name="$1" expect="$2"
     local src="$HERE/${name}.cj" exe="$WORK/${name}"
+    local got rc
+    rm -f "$exe" "$WORK/${name}.build.log" "$WORK/${name}.run.log"
     echo "--- smoke: ${name} ---"
     if ! "$CJCJ" "$src" -o "$exe" >"$WORK/${name}.build.log" 2>&1; then
         echo "  COMPILE FAIL:"; sed 's/^/    /' "$WORK/${name}.build.log"; fail=$((fail+1)); return
     fi
-    local got; got="$("$exe" 2>"$WORK/${name}.run.log")"
+    got="$("$exe" 2>"$WORK/${name}.run.log")"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "  RUN FAIL (exit $rc):"; sed 's/^/    /' "$WORK/${name}.run.log"; fail=$((fail+1)); return
+    fi
     if [ "$got" = "$expect" ]; then
         echo "  OK  -> [$got]"; pass=$((pass+1))
     else
@@ -63,7 +69,12 @@ if [ "$macro_ok" = 1 ]; then
     fi
 fi
 if [ "$macro_ok" = 1 ]; then
-    got="$("$MBUILD/app/app" 2>"$WORK/macro.run.log")"
+    got="$("$MBUILD/app/app" 2>"$WORK/macro.run.log")"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "  MACRO RUN FAIL (exit $rc):"; sed 's/^/    /' "$WORK/macro.run.log"; macro_ok=0
+    fi
+fi
+if [ "$macro_ok" = 1 ]; then
     want="$(printf 'tick\ntick')"
     if [ "$got" = "$want" ]; then echo "  OK  -> [${got//$'\n'/\\n}]"; pass=$((pass+1)); else
         echo "  OUTPUT MISMATCH: expected [tick\\ntick] got [${got//$'\n'/\\n}]"; fail=$((fail+1)); fi
