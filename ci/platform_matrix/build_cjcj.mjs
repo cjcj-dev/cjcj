@@ -118,11 +118,31 @@ const tupleLlc = process.platform === 'win32' ? `${sdkLlc.replace(/\.exe$/, '')}
 await fs.writeFile(tupleLlc, zlib.gunzipSync(await fs.readFile(fixedLlcGz)));
 if (process.platform !== 'win32') await fs.chmod(tupleLlc, 0o755);
 // The Windows tuple llc links against MinGW runtime DLLs (libstdc++-6.dll,
-// libwinpthread-1.dll; round-13 exit 127 = loader failure). The runner ships
-// them in C:\mingw64\bin — append it so the probe and later cjc-spawned llc
-// both resolve.
-if (process.platform === 'win32') process.env.PATH = `${process.env.PATH};C:\\mingw64\\bin`;
-await $`${toCommandPath(tupleLlc)} --version`;
+// libwinpthread-1.dll; round-13/14 exit 127 = loader failure even with PATH
+// appended). Same-directory DLL resolution always wins on Windows, so copy the
+// runtime DLLs next to the llc; probe via spawnSync for a discriminating error.
+if (process.platform === 'win32') {
+  process.env.PATH = `${process.env.PATH};C:\\mingw64\\bin`;
+  const llvmBin = path.dirname(sdkLlc);
+  for (const dll of ['libstdc++-6.dll', 'libwinpthread-1.dll', 'libgcc_s_seh-1.dll']) {
+    for (const dir of ['C:\\mingw64\\bin', 'C:\\msys64\\mingw64\\bin', 'C:\\Program Files\\Git\\mingw64\\bin']) {
+      const cand = path.join(dir, dll);
+      if (await isFile(cand)) {
+        await fs.copyFile(cand, path.join(llvmBin, dll));
+        console.log(`staged ${dll} from ${dir}`);
+        break;
+      }
+    }
+  }
+  const {spawnSync} = await import('node:child_process');
+  const probe = spawnSync(tupleLlc, ['--version'], {encoding: 'utf8'});
+  console.log(`tuple llc probe: status=${probe.status} error=${probe.error ? probe.error.code : 'none'}`);
+  if (probe.stdout) console.log(probe.stdout.slice(0, 200));
+  if (probe.stderr) console.error(probe.stderr.slice(0, 400));
+  if (probe.status !== 0) process.exit(41);
+} else {
+  await $`${toCommandPath(tupleLlc)} --version`;
+}
 if (!(await isFile(`${sdkLlc}.orig`))) await fs.copyFile(sdkLlc, `${sdkLlc}.orig`);
 await fs.rm(sdkLlc, {force: true});
 await fs.rename(tupleLlc, sdkLlc);
