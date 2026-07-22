@@ -88,12 +88,18 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: CLANG64
+          # release:false = provision the runner's preinstalled C:\msys64 instead of a
+          # fresh RUNNER_TEMP\msys64 — build_runtime.mjs invokes C:\msys64\usr\bin\bash.exe,
+          # so the CLANG64 packages must land in that installation (round-8 root: the two
+          # msys2 trees diverged and /clang64/bin was empty at build time).
+          release: false
           update: true
           path-type: inherit
           install: >-
             git make python gzip unzip file binutils
             mingw-w64-clang-x86_64-clang
             mingw-w64-clang-x86_64-cmake
+            mingw-w64-clang-x86_64-ninja
 
       - name: Runtime build (Linux/macOS native)
         if: always() && runner.os != 'Windows'
