@@ -12,7 +12,7 @@ import cjcj::chir.NoHeapAllocChecker
 import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.Type
 import cjcj::incremental_compilation.CachedMangleMap
-import cjcj::option.EnvironmentType
+import cjcj::option.{ArchType, EnvironmentType, OSType}
 import cjcj::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
 import cjcj::mangle.MANGLE_VOID_TY_SUFFIX
 import cjcj::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
@@ -28,6 +28,7 @@ import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, StaticCast}
 private let CANGJIE_SDK_VERSION: String = CANGJIE_VERSION
 private let PKG_INIT_FUNC_METADATA: String = "pkg_init_func"
 private let HAS_INVOKED_PKG_INIT_LITERAL: String = "has_invoked_pkg_init_literal"
+private let PRESPECIALIZED_TYPEINFO_SECTION: String = "__cjcj_prespec_ti"
 
 private type LLVMIsACallInstFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
 private type LLVMGetCalledValueFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
@@ -1167,6 +1168,7 @@ private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
         let staticGI = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoType)
         if (ShouldEmitStaticGI(staticGI)) {
             CJC_ASSERT(unsafe { LLVMIsDeclaration(staticGI) } == 0)
+            EmitPrespecializedTypeInfoRecord(cgMod, typeInfoName, staticGI)
             values.add(staticGI)
             emittedNames.add(typeInfoName)
         }
@@ -1182,6 +1184,7 @@ private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
             }
             if (!staticGI.isNull()) {
                 CJC_ASSERT(unsafe { LLVMIsDeclaration(staticGI) } == 0)
+                EmitPrespecializedTypeInfoRecord(cgMod, reflectStaticGIName, staticGI)
                 values.add(staticGI)
                 emittedNames.add(reflectStaticGIName)
             }
@@ -1200,6 +1203,26 @@ private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
     }
     addAttribute(table, "CFileStaticGenericTI")
     return table
+}
+
+// TYPEINFO_METADATA_V2.md C1 authorizes this cjcj-only optimization: the existing STATIC_GI
+// TypeInfo initializer is already the DYN_TypeInfo binary mirror, so prespecialization reuses
+// that canonical record and only gives it a discoverable section and per-key COMDAT.
+private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: String,
+    typeInfo: LLVMValueRef): Unit {
+    let options = cgMod.GetCGContext().GetCompileOptions()
+    if (!options.cjcjOptimization || options.target.os != OSType.LINUX ||
+        options.target.arch != ArchType.X86_64) {
+        return
+    }
+    let moduleHandle = cgMod.GetLLVMModule() ?? return
+    try (sectionName = unsafe { LibC.mallocCString(PRESPECIALIZED_TYPEINFO_SECTION) }.asResource(),
+        comdatName = unsafe { LibC.mallocCString(typeInfoName) }.asResource()) {
+        unsafe {
+            LLVMSetSection(typeInfo, sectionName.value)
+            LLVMSetComdat(typeInfo, LLVMGetOrInsertComdat(moduleHandle.raw, comdatName.value))
+        }
+    }
 }
 
 private func ShouldEmitStaticGI(staticGI: LLVMValueRef): Bool {
