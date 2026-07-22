@@ -4,7 +4,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {printCommonVersions, stageBegin} from './common.mjs';
+import {printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 
 const {root} = stageBegin('runtime');
 const source = process.env.RUNTIME_SOURCE || path.join(process.cwd(), 'runtime-source');
@@ -19,7 +19,7 @@ try { await fs.access(buildPy); } catch {
   process.exit(2);
 }
 if (process.env.RUNTIME_REF) {
-  const actualRef = (await $({stdio: 'pipe', verbose: false})`git -C ${source} rev-parse HEAD`).stdout.trim();
+  const actualRef = (await $({stdio: 'pipe', verbose: false})`git -C ${toCommandPath(source)} rev-parse HEAD`).stdout.trim();
   if (actualRef !== process.env.RUNTIME_REF) {
     console.error(`FATAL: runtime checkout is ${actualRef}, expected ${process.env.RUNTIME_REF}`);
     process.exit(3);
@@ -60,7 +60,7 @@ if (process.platform === 'linux') {
     'python3 build.py build --target windows-x86_64 --build-type release --target-toolchain /clang64 --prefix "$runtime_preinstall" -v "$PLATFORM_RUNTIME_VERSION"',
     'python3 build.py install --prefix "$runtime_install"',
   ].join('; ');
-  await $({env})`${msysBash} -lc ${script}`;
+  await $({env})`${toCommandPath(msysBash)} -lc ${script}`;
 } else {
   console.error(`FATAL: unsupported runtime build host: ${process.platform}/${process.arch}`);
   process.exit(5);
@@ -84,4 +84,4 @@ if (!runtimeLib) {
   console.error(`FATAL: libcangjie-runtime was not installed under ${installRoot}`);
   process.exit(6);
 }
-await $({nothrow: true})`file ${runtimeLib}`;
+await $({nothrow: true})`file ${toCommandPath(runtimeLib)}`;

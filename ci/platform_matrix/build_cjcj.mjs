@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import {emitBlockedSummary, printCommonVersions, stageBegin} from './common.mjs';
+import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 
 const {root} = stageBegin('cjcj');
 const toolchain = process.env.CJCJ_TOOLCHAIN || 'nightly-1.2.0-alpha.20260721165458';
@@ -49,18 +49,20 @@ if (process.platform === 'win32') {
     if (!response.ok) throw new Error(`cjv download failed: HTTP ${response.status}`);
     await fs.writeFile(archive, Buffer.from(await response.arrayBuffer()));
     await fs.rm(extract, {recursive: true, force: true});
-    await $`pwsh -NoLogo -NoProfile -Command ${`Expand-Archive -LiteralPath '${archive.replaceAll("'", "''")}' -DestinationPath '${extract.replaceAll("'", "''")}' -Force`}`;
+    const archiveCommandPath = toCommandPath(archive).replaceAll("'", "''");
+    const extractCommandPath = toCommandPath(extract).replaceAll("'", "''");
+    await $`pwsh -NoLogo -NoProfile -Command ${`Expand-Archive -LiteralPath '${archiveCommandPath}' -DestinationPath '${extractCommandPath}' -Force`}`;
     const downloaded = await findFirst(extract, 'cjv.exe');
     if (!downloaded) throw new Error(`cjv.exe missing from ${archive}`);
     await fs.copyFile(downloaded, cjv);
   }
   process.env.PATH = `${tools};${process.env.PATH || ''}`;
   if (process.env.GITCODE_API_KEY) {
-    await $({nothrow: true, stdio: 'pipe', verbose: false})`${cjv} set gitcode-api-key ${process.env.GITCODE_API_KEY}`;
+    await $({nothrow: true, stdio: 'pipe', verbose: false})`${toCommandPath(cjv)} set gitcode-api-key ${process.env.GITCODE_API_KEY}`;
     console.log('[platform setup_sdk] gitcode-api-key set');
   }
   console.log(`[platform setup_sdk] cjv install ${toolchain} -c stdx`);
-  const install = await $({nothrow: true})`${cjv} install ${toolchain} -c stdx`;
+  const install = await $({nothrow: true})`${toCommandPath(cjv)} install ${toolchain} -c stdx`;
   setupRc = install.exitCode;
 } else {
   home = process.env.HOME;
@@ -108,7 +110,7 @@ if (!(await isFile(sdkLlc))) throw new Error(`SDK llc missing: ${sdkLlc}`);
 const tupleLlc = `${sdkLlc}.tuple`;
 await fs.writeFile(tupleLlc, zlib.gunzipSync(await fs.readFile(fixedLlcGz)));
 if (process.platform !== 'win32') await fs.chmod(tupleLlc, 0o755);
-await $`${tupleLlc} --version`;
+await $`${toCommandPath(tupleLlc)} --version`;
 if (!(await isFile(`${sdkLlc}.orig`))) await fs.copyFile(sdkLlc, `${sdkLlc}.orig`);
 await fs.rm(sdkLlc, {force: true});
 await fs.rename(tupleLlc, sdkLlc);
@@ -119,7 +121,7 @@ console.log(`sdk_toolchain=${toolchain}\nsdk_archive=${process.env.SDK_ARCHIVE |
 await $({nothrow: true})`cjv --version`;
 await $({nothrow: true})`cjc --version`;
 await $({nothrow: true})`cjpm --version`;
-await $({nothrow: true})`${sdkLlc} --version`;
+await $({nothrow: true})`${toCommandPath(sdkLlc)} --version`;
 
 const cjpmToml = await fs.readFile('cjpm.toml', 'utf8');
 await fs.writeFile(path.join(root, 'cjpm.O1.toml'), cjpmToml.replace('compile-option = "-O2"', 'compile-option = "-O1"'));
@@ -137,9 +139,9 @@ if (process.platform === 'win32') {
     CHERE_INVOKING: '1',
   };
   const prefix = 'repo="$(cygpath -u "$PLATFORM_REPO_ROOT")"; cangjie_home="$(cygpath -u "$CANGJIE_HOME")"; cd "$repo"; export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/clang64/bin:$PATH"';
-  shim = await $({nothrow: true, env: msysEnv})`${msysBash} -lc ${`${prefix}; npx --yes zx@8 runtime_shim/build_shim.mjs`}`;
+  shim = await $({nothrow: true, env: msysEnv})`${toCommandPath(msysBash)} -lc ${`${prefix}; npx --yes zx@8 runtime_shim/build_shim.mjs`}`;
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
-  build = await $({nothrow: true, env: msysEnv})`${msysBash} -lc ${`${prefix}; cjpm build`}`;
+  build = await $({nothrow: true, env: msysEnv})`${toCommandPath(msysBash)} -lc ${`${prefix}; cjpm build`}`;
 } else {
   shim = await $({nothrow: true})`npx --yes zx@8 runtime_shim/build_shim.mjs`;
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);

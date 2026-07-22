@@ -89,6 +89,10 @@ export function platformCiRoot() {
   return stageState?.root || process.env.PLATFORM_CI_ROOT || path.join(process.cwd(), '.platform-ci');
 }
 
+export function toCommandPath(target) {
+  return target.replaceAll('\\', '/');
+}
+
 export async function commandExists(command) {
   const probe = process.platform === 'win32' ? $({nothrow: true, stdio: 'pipe', verbose: false})`where.exe ${command}` : $({nothrow: true, stdio: 'pipe', verbose: false})`command -v ${command}`;
   return (await probe).exitCode === 0;

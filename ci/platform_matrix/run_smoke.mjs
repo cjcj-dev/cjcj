@@ -4,7 +4,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {printCommonVersions, stageBegin} from './common.mjs';
+import {printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 
 const {root} = stageBegin('test');
 await printCommonVersions();
@@ -60,12 +60,12 @@ if (process.env.CANGJIE_HOME) {
     }
   }
 }
-await $({nothrow: true})`${deploy} --version`;
+await $({nothrow: true})`${toCommandPath(deploy)} --version`;
 
 async function runOne(name, expected, env = process.env) {
   const output = path.join(root, `${name}${exeSuffix}`);
-  await $({env})`${deploy} ${path.join('ci', 'smoke', `${name}.cj`)} -o ${output}`;
-  const got = (await $({env, stdio: 'pipe', verbose: false})`${output}`).stdout.trimEnd();
+  await $({env})`${toCommandPath(deploy)} ${toCommandPath(path.join('ci', 'smoke', `${name}.cj`))} -o ${toCommandPath(output)}`;
+  const got = (await $({env, stdio: 'pipe', verbose: false})`${toCommandPath(output)}`).stdout.trimEnd();
   console.log(`${name} => [${got}]`);
   if (got !== expected) {
     console.error(`ERROR: ${name} expected [${expected}], got [${got}]`);

@@ -8,7 +8,7 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {emitBlockedSummary} from './common.mjs';
+import {emitBlockedSummary, toCommandPath} from './common.mjs';
 
 $.stdio = 'inherit';
 
@@ -100,7 +100,9 @@ let extracted;
 if (process.platform === 'win32') {
   extracted = path.join(scratch, 'artifact');
   await fs.rm(extracted, {recursive: true, force: true});
-  await $`pwsh -NoLogo -NoProfile -Command ${`Expand-Archive -LiteralPath '${archive.replaceAll("'", "''")}' -DestinationPath '${extracted.replaceAll("'", "''")}' -Force`}`;
+  const archiveCommandPath = toCommandPath(archive).replaceAll("'", "''");
+  const extractedCommandPath = toCommandPath(extracted).replaceAll("'", "''");
+  await $`pwsh -NoLogo -NoProfile -Command ${`Expand-Archive -LiteralPath '${archiveCommandPath}' -DestinationPath '${extractedCommandPath}' -Force`}`;
   async function collect(directory) {
     const found = [];
     for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
