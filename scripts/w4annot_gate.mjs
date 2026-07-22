@@ -34,6 +34,7 @@ const cases = new Map([
 
 async function firstLines(text, count) {
   const selected = text.split('\n').slice(0, count).join('\n');
+  if (!selected) return;
   process.stdout.write(selected.endsWith('\n') ? selected : `${selected}\n`);
 }
 
