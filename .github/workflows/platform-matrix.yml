@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: platform-matrix-${{ github.ref }}
@@ -81,7 +82,7 @@ jobs:
           path: runtime-source
 
       - name: Prepare MSYS2/MinGW runtime toolchain
-        if: always() && startsWith(matrix.runner, 'windows-')
+        if: always() && runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -92,13 +93,19 @@ jobs:
             mingw-w64-x86_64-cmake
 
       - name: Runtime build (Linux/macOS native)
-        if: always() && !startsWith(matrix.runner, 'windows-')
+        if: always() && runner.os != 'Windows'
         run: bash ci/platform_matrix/build_runtime.sh
 
       - name: Runtime build (Windows target via MSYS2/MinGW)
-        if: always() && startsWith(matrix.runner, 'windows-')
+        if: always() && runner.os == 'Windows'
         shell: msys2 {0}
         run: bash ci/platform_matrix/build_runtime.sh
+
+      - name: Inject pinned Linux x64 LLVM shim
+        if: always() && runner.os == 'Linux' && runner.arch == 'X64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ci/platform_matrix/inject_linux_x64_shim.sh
 
       - name: Official SDK + O1 cjcj build
         if: always()
@@ -109,6 +116,10 @@ jobs:
       - name: cjcj compile/run + pinned-runtime combination smoke
         if: always()
         run: bash ci/platform_matrix/run_smoke.sh
+
+      - name: Summarize final key error
+        if: always()
+        run: bash ci/platform_matrix/summarize_job.sh
 
       - name: Upload diagnostics and key products
         if: always()

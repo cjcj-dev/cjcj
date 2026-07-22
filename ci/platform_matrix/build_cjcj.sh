@@ -37,6 +37,23 @@ case "$(uname -s)" in
         fi
         ;;
 esac
+
+if [ "$setup_rc" -ne 0 ]; then
+    exit "$setup_rc"
+fi
+
+# The only checked-in-independent shim tuple currently available is Linux x64.
+# Every other host must supply an object built from patched LLVM for that exact
+# OS/architecture; stop before a long build and make that frontier prominent.
+case "$(uname -s)/$(uname -m)" in
+    Linux/x86_64|Linux/amd64) ;;
+    *)
+        if [ ! -s runtime_shim/cjselfhost_llvmshim.o ]; then
+            emit_blocked_summary 'no per-arch llvm shim (needs source-built tuple)'
+            exit 78
+        fi
+        ;;
+esac
 export cjHeapSize="${CJ_HEAP_SIZE:-12GB}"
 
 print_common_versions
@@ -60,6 +77,5 @@ build_rc=0
 cjpm build || build_rc=$?
 printf 'setup_rc=%s shim_rc=%s build_rc=%s\n' "$setup_rc" "$shim_rc" "$build_rc"
 
-if [ "$setup_rc" -ne 0 ]; then exit "$setup_rc"; fi
 if [ "$shim_rc" -ne 0 ]; then exit "$shim_rc"; fi
 exit "$build_rc"

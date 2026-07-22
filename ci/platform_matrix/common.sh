@@ -30,6 +30,15 @@ stage_finish() {
     fi
 }
 
+emit_blocked_summary() {
+    local reason="${1:?blocked reason required}"
+    printf 'BLOCKED: %s\n' "$reason"
+    printf '\n- BLOCKED: %s\n' "$reason" >> "$PLATFORM_CI_ROOT/step-summary.md"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        printf '\n- BLOCKED: %s\n' "$reason" >> "$GITHUB_STEP_SUMMARY"
+    fi
+}
+
 print_common_versions() {
     printf 'runner=%s os=%s arch=%s\n' "${MATRIX_RUNNER:-local}" "$(uname -s)" "$(uname -m)"
     uname -a || true
