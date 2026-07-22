@@ -531,6 +531,27 @@ private func CreateGenericConstraints(generic: Generic): Unit {
     }
 }
 
+// C++ src/Sema/PreCheck.cpp:1455-1457 uses std::map::operator[] and keeps
+// references to the nested maps/sets. Preserve that get-or-create and aliasing
+// behavior with one lookup on the existing-key path.
+private func GetOrCreateUpperBlameMap(blames: GCBlames, key: Ptr<Ty>): HashMap<Ptr<Ty>, HashSet<Node>> {
+    if (let Some(upperMap) <- blames.get(key)) {
+        return upperMap
+    }
+    let upperMap = HashMap<Ptr<Ty>, HashSet<Node>>()
+    blames[key] = upperMap
+    return upperMap
+}
+
+private func GetOrCreateBlameSet(upperMap: HashMap<Ptr<Ty>, HashSet<Node>>, key: Ptr<Ty>): HashSet<Node> {
+    if (let Some(blameSet) <- upperMap.get(key)) {
+        return blameSet
+    }
+    let blameSet = HashSet<Node>()
+    upperMap[key] = blameSet
+    return blameSet
+}
+
 private func AddUpperBoundOnTypeParameters(typeManager: TypeManager, ctx: ASTContext, generic: Generic,
     typeTarget: Decl, revTypeMapping: MultiTypeSubst, allAssumptionMap: TyVarUB,
     typeArgAppliedMap: TypeSubst): Unit {
@@ -553,38 +574,35 @@ private func AddUpperBoundOnTypeParameters(typeManager: TypeManager, ctx: ASTCon
                         constraintIdx++
                     }
                     let upperBoundsForParam = HashSet<Ptr<Ty>>()
+                    let genericKey = Ptr<Ty>(genericTy)
                     for (constraint in constraints.values) {
                         let instTy = typeManager.GetInstantiatedTy(constraint, typeArgAppliedMap)
                         if (Ty.IsTyCorrect(instTy)) {
-                            upperBoundsForParam.add(Ptr<Ty>(instTy))
-                            constraintIdx = 0
+                            let instKey = Ptr<Ty>(instTy)
+                            let constraintUpperKey = Ptr<Ty>(constraint)
+                            upperBoundsForParam.add(instKey)
+                            // A present entry in this fresh reverse mapping always owns at least one value.
+                            // Initialize source first to retain the original insertion order, then cache the
+                            // destination references for every remaining source constraint.
+                            let firstConstraintKey = constraintTys.ValueAt(0)
+                            let firstSourceUpperMap = GetOrCreateUpperBlameMap(ctx.gcBlames, firstConstraintKey)
+                            let firstSourceBlames = GetOrCreateBlameSet(firstSourceUpperMap, constraintUpperKey)
+                            let destinationUpperMap = GetOrCreateUpperBlameMap(ctx.gcBlames, genericKey)
+                            let destinationBlames = GetOrCreateBlameSet(destinationUpperMap, instKey)
+                            for (blame in firstSourceBlames) {
+                                destinationBlames.add(blame)
+                            }
+                            constraintIdx = 1
                             while (constraintIdx < constraintTys.size) {
-                                let constraintTy = constraintTys.ValueAt(constraintIdx)
-                                let constraintKey = constraintTy
-                                let constraintUpperKey = Ptr<Ty>(constraint)
-                                if (!ctx.gcBlames.contains(constraintKey)) {
-                                    ctx.gcBlames[constraintKey] = HashMap<Ptr<Ty>, HashSet<Node>>()
-                                }
-                                let sourceUpperMap = ctx.gcBlames[constraintKey]
-                                if (!sourceUpperMap.contains(constraintUpperKey)) {
-                                    sourceUpperMap[constraintUpperKey] = HashSet<Node>()
-                                }
-                                let sourceBlames = sourceUpperMap[constraintUpperKey]
-                                let genericKey = Ptr<Ty>(genericTy)
-                                let instKey = Ptr<Ty>(instTy)
-                                if (!ctx.gcBlames.contains(genericKey)) {
-                                    ctx.gcBlames[genericKey] = HashMap<Ptr<Ty>, HashSet<Node>>()
-                                }
-                                let destinationUpperMap = ctx.gcBlames[genericKey]
-                                if (!destinationUpperMap.contains(instKey)) {
-                                    destinationUpperMap[instKey] = HashSet<Node>()
-                                }
+                                let constraintKey = constraintTys.ValueAt(constraintIdx)
+                                let sourceUpperMap = GetOrCreateUpperBlameMap(ctx.gcBlames, constraintKey)
+                                let sourceBlames = GetOrCreateBlameSet(sourceUpperMap, constraintUpperKey)
                                 for (blame in sourceBlames) {
-                                    destinationUpperMap[instKey].add(blame)
-                                    }
+                                    destinationBlames.add(blame)
                                 }
                                 constraintIdx++
                             }
+                        }
                     }
                     for (upperKey in upperBoundsForParam) {
                         var foundUpper = false
