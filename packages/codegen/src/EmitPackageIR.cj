@@ -1283,7 +1283,6 @@ private func EmitPrespecializedTypeInfoRegistration(cgMod: CGModule,
     }
     let moduleHandle = if (let Some(handle) <- cgMod.GetLLVMModule()) { handle } else { return None }
     let context = cgMod.GetLLVMContext()
-    let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(context.raw), 0u32) }
     let i32Type = unsafe { LLVMInt32TypeInContext(context.raw) }
     let typeTemplateType = GetOrCreateNamedStructType(context, "TypeTemplate")
     let typeTemplatePtrType = unsafe { LLVMPointerType(typeTemplateType, 0u32) }
