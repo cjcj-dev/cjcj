@@ -44,6 +44,9 @@ if (process.platform === 'linux') {
   const shellQuote = (value) => "'" + value.replace(/'/g, "'\\''") + "'";
   const script = [
     'set -euo pipefail',
+    'export PATH=/clang64/bin:/usr/bin:$PATH',
+    'export CMAKE_GENERATOR=Ninja',
+    'command -v cmake ninja clang; cmake --version | head -1',
     `runtime_source="$(cygpath -u ${shellQuote(runtimeDirectory)})"`,
     `runtime_preinstall="$(cygpath -u ${shellQuote(preinstall)})"`,
     `runtime_install="$(cygpath -u ${shellQuote(installRoot)})"`,
