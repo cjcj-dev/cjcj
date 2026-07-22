@@ -2,11 +2,10 @@ package cjcj::chir
 
 import cjcj::utils.CJC_ASSERT
 import std.collection.*
-import std.reflect.TypeInfo
 
 func IsInstanceOfValue<VD, Pool>(): Bool where VD <: AbstractDomain<VD> & ValueDomainAccess<VD>,
     Pool <: ValueStatePool<VD, Pool> {
-    return TypeInfo.of<Pool>() == TypeInfo.of<ActiveStatePool<VD>>()
+    return Pool.IsInstanceOfValue()
 }
 
 public func GetRefName(index: Int64): String {
@@ -22,6 +21,7 @@ public func GetObjChildName(parentName: String, fieldIdx: Int64): String {
 }
 
 public interface ValueStatePool<VD, Pool> where VD <: AbstractDomain<VD> & ValueDomainAccess<VD> {
+    static func IsInstanceOfValue(): Bool
     static func Create(): Pool
     func Clone(): Pool
     func Size(): Int64
@@ -55,6 +55,8 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
             idx++
         }
     }
+
+    public static func IsInstanceOfValue(): Bool { return false }
 
     public static func Create(): FullStatePool<VD> {
         return FullStatePool<VD>()
@@ -190,6 +192,8 @@ public class ActiveStatePool<VD> <: ValueStatePool<VD, ActiveStatePool<VD>>
             tails = Some(obj2StateNode[tailNode.value])
         }
     }
+
+    public static func IsInstanceOfValue(): Bool { return true }
 
     public static func Create(): ActiveStatePool<VD> {
         return ActiveStatePool<VD>()
