@@ -10,6 +10,14 @@ const {root} = stageBegin('test');
 await printCommonVersions();
 const exeSuffix = process.platform === 'win32' ? '.exe' : '';
 
+if (process.platform === 'darwin' && !process.env.SDKROOT) {
+  // The cjcj Darwin driver consumes SDKROOT for -syslibroot; without it every
+  // smoke link probes / and misses libSystem.tbd (rounds 19-20). Set it before
+  // the FIRST runOne — the two-sample smoke, not just the combined one.
+  process.env.SDKROOT = (await $({stdio: 'pipe', verbose: false})`xcrun --sdk macosx --show-sdk-path`).stdout.trim();
+  console.log(`smoke SDKROOT=${process.env.SDKROOT}`);
+}
+
 async function isFile(target) {
   try { return (await fs.stat(target)).isFile(); } catch { return false; }
 }
@@ -86,12 +94,6 @@ if (!runtimeLib) {
 console.log(`combined runtime smoke: ${runtimeLib}`);
 const runtimeDir = path.dirname(runtimeLib);
 const env = {...process.env};
-if (process.platform === 'darwin' && !env.SDKROOT) {
-  // The cjcj Darwin driver consumes SDKROOT for -syslibroot; without it the
-  // link probes / and misses libSystem.tbd (round-19).
-  env.SDKROOT = (await $({stdio: 'pipe', verbose: false})`xcrun --sdk macosx --show-sdk-path`).stdout.trim();
-  console.log(`smoke SDKROOT=${env.SDKROOT}`);
-}
 if (process.platform === 'darwin') env.DYLD_LIBRARY_PATH = `${runtimeDir}:${env.DYLD_LIBRARY_PATH || ''}`;
 else if (process.platform === 'win32') env.PATH = `${runtimeDir};${env.PATH || ''}`;
 else env.LD_LIBRARY_PATH = `${runtimeDir}:${env.LD_LIBRARY_PATH || ''}`;
