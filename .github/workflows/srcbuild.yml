@@ -1,0 +1,199 @@
+# Linux-x64 bootstrap closure:
+# C++ compiler/runtime/stdlib/stdx/tools -> self-host cjcj -> combined SDK -> four gates.
+name: Full source SDK (linux-x64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      cangjie_ref:
+        description: Optional shared tag/branch for the four upstream repositories
+        required: false
+        type: string
+      build_type:
+        description: C++ SDK build type
+        required: true
+        default: relwithdebinfo
+        type: choice
+        options: [release, relwithdebinfo, debug]
+  schedule:
+    - cron: "17 18 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: srcbuild-linux-x64-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fixed-llc:
+    uses: ./.github/workflows/build-fixed-llc.yml
+
+  srcbuild:
+    name: source build + compose + verify
+    needs: fixed-llc
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      BUILDER: ${{ github.workspace }}/cangjie-build
+      CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
+      CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
+      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"
+      SCCACHE_DIR: ${{ github.workspace }}/.srcbuild/sccache
+      SCCACHE_CACHE_SIZE: 5G
+      cjHeapSize: 12GB
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v4
+
+      - name: Checkout cangjie-build base
+        uses: actions/checkout@v4
+        with:
+          repository: cjcj-dev/cjcj-build
+          ref: 60c485cad4c3425772b7b9a9e5d6a5fd457527c2
+          path: cangjie-build
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: cangjie-build/uv.lock
+
+      - name: Install cangjie-build harness
+        working-directory: cangjie-build
+        run: uv sync --frozen
+
+      - name: Install source-build dependencies
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 install-system-deps
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Restore C/C++ support-library cache
+        id: support-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CANGJIE_BUILD_ROOT }}
+          key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('cangjie-build/src/cangjie_build/toolchain/static_libs.py') }}
+
+      - name: Build static support libraries from source
+        if: steps.support-cache.outputs.cache-hit != 'true'
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 install-static-libs
+
+      - name: Save C/C++ support-library cache
+        if: steps.support-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CANGJIE_BUILD_ROOT }}
+          key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('cangjie-build/src/cangjie_build/toolchain/static_libs.py') }}
+
+      - name: Resolve source SDK version
+        id: version
+        working-directory: cangjie-build
+        env:
+          REQUESTED_REF: ${{ inputs.cangjie_ref }}
+        run: |
+          value=$(uv run cangjie-build --cangjie-version "$REQUESTED_REF" print-version)
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch upstream source
+        working-directory: cangjie-build
+        env:
+          REQUESTED_REF: ${{ inputs.cangjie_ref }}
+        run: |
+          args=()
+          if [ -n "$REQUESTED_REF" ]; then args+=(--tag "$REQUESTED_REF"); fi
+          uv run cangjie-build \
+            --target linux-x64 \
+            --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" \
+            --cangjie-version "${{ steps.version.outputs.value }}" \
+            fetch "${args[@]}"
+
+      - name: Pin compiler LLVM source
+        # compiler main(87fff87a,a0171e4f)emit 7-operand enum reflection,但其 third_party
+        # CMake 硬编码 LLVM_TAG dev(2429f2f,ERT_MAX=6)→verifier 拒 7-operand(Broken global value)。
+        # 固定到 LLVM main b462fbd9(ERT_MAX=7,含 ERT_CTOR_ANNOTATIONS),预置 source override 绕过内部 git clone -b dev。
+        env:
+          LLVM_REF: b462fbd9fb53440aa4736a8cf9f9e97324e0623a
+        run: npx --yes zx@8 ci/srcbuild/steps/pin-compiler-llvm.mjs
+
+      - name: Build C++ compiler oracle
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
+
+      - name: Apply cjcj runtime patches (Front A — align runtime to upstream + cjcj patches)
+        # rebased runtime = upstream 14f32bf2 + 2 cjcj patches (mutator-lock writer-preference
+        # to stop GC starvation; toregion2fix for the toRegion2Idx GC assertion). Both cherry
+        # clean onto 14f32bf2 (verified). cjc-name GC exclusion is already upstream.
+        run: npx --yes zx@8 ci/srcbuild/steps/apply-runtime-patches.mjs
+
+      - name: Build runtime from source
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build runtime
+
+      - name: Build stdlib from source
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdlib
+
+      - name: Build stdx from source
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdx
+
+      - name: Build SDK tools from source
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
+
+      - name: Package and verify C++ SDK
+        working-directory: cangjie-build
+        run: |
+          uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
+          uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
+
+      - name: Download source-built fixed llc
+        uses: actions/download-artifact@v4
+        with:
+          name: fixed-llvm-tools-linux_x86_64
+          path: .srcbuild/fixed-llc
+
+      - name: Activate synthesized source SDK
+        run: npx --yes zx@8 ci/srcbuild/steps/activate-source-sdk.mjs
+
+      - name: Build shim from C++ compiler source tree
+        env:
+          CANGJIE_CPP_SRC: ${{ env.CANGJIE_WORKSPACE }}/cangjie_compiler
+        run: npx --yes zx@8 ci/srcbuild/steps/build-shim.mjs
+
+      - name: Build cjcj — stage1 (upstream cjc @ -O1, seed)
+        # Upstream cjc (14f32bf2) miscompiles cjcj at -O2: generic HashMap<TypeInfo,
+        # AnnotationBase>.iterator() instantiation loses the concrete->interface upcast,
+        # rejected by the CHIR checker (chirdiag: -O0 passes, -O2 fails; no cjcj-side
+        # workaround). Build a seed cjcj at -O1 with the upstream cjc to avoid the bug.
+        run: npx --yes zx@8 ci/srcbuild/steps/build-stage1.mjs
+
+      - name: Build cjcj — stage2 (cjcj-stage1 @ -O2, self-host)
+        # cjcj (our compiler) has no upstream -O2 CHIR bug; self-build the final cjcj at
+        # -O2 using the seed at $sdk/bin/cjc. The fixed static llc handles the -O2 backend.
+        run: npx --yes zx@8 ci/srcbuild/steps/build-stage2.mjs
+
+      - name: Compose cjc + cjcj SDK
+        env:
+          SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
+        run: npx --yes zx@8 ci/srcbuild/steps/compose-sdk.mjs
+
+      - name: Verify combined SDK with four rulers
+        run: npx --yes zx@8 ci/srcbuild/steps/verify.mjs "$CANGJIE_WORKSPACE/software/cangjie"
+
+      - name: Upload combined SDK and gate logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cjcj-srcbuild-linux-x64-${{ steps.version.outputs.value }}
+          path: |
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-linux-x64-${{ steps.version.outputs.value }}-cjcj.tar.gz
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-linux-x64-${{ steps.version.outputs.value }}-cjcj.tar.gz.sha256
+            ${{ runner.temp }}/cjcj-srcbuild-verify/*.log
+            .srcbuild/shim-build.log
+          if-no-files-found: warn
