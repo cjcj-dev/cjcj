@@ -15,7 +15,7 @@ concurrency:
 
 env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
-  RUNTIME_REF: f851b846e275859aeccacd0edd42b81f28cb25bd
+  RUNTIME_REF: 08374ada1d241453fac8ef56629345a90d0cccc8
 
 jobs:
   lint:

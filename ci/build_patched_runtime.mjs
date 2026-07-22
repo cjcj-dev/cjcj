@@ -1,5 +1,5 @@
 #!/usr/bin/env zx
-// Build libcangjie-runtime.so from the pinned CangjieFork integration commit.
+// Build libcangjie-runtime.so from the pinned cjcj-dev/cangjie-runtime main commit.
 
 import fs from 'node:fs/promises';
 import os from 'node:os';

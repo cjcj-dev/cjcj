@@ -1,6 +1,6 @@
 # Release. Repackages the official SDK tree as a cjcj SDK: bin/cjc is our
 # Cangjie-built compiler and runtime/lib/<plat>/libcangjie-runtime.so is rebuilt
-# from the pinned CangjieFork source commit. Smoke runs against the
+# from the pinned cjcj-dev/cangjie-runtime main commit. Smoke runs against the
 # packaged bin/cjc. Linux x64 + aarch64; macOS/Windows are BLOCKED (see
 # reports/REPORT-relmatrix.md). Set dry_run to build artifacts without publishing.
 name: Release
@@ -33,7 +33,7 @@ permissions:
 
 env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
-  RUNTIME_REF: f851b846e275859aeccacd0edd42b81f28cb25bd
+  RUNTIME_REF: 08374ada1d241453fac8ef56629345a90d0cccc8
 
 jobs:
   fixed-llvm-tools:
