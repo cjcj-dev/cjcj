@@ -2,7 +2,6 @@ package cjcj::meta_transformation
 
 import cjcj::chir.Function as CHIRFunction
 import cjcj::chir.Package as CHIRPackage
-import std.reflect.TypeInfo
 
 public type NativeMetaTransformPluginBuilderRef = CPointer<NativeMetaTransformPluginBuilder>
 
@@ -68,15 +67,15 @@ public open class MetaTransformConcept {
     public init() {}
 
     public func IsForCHIR(): Bool {
-        return kind > MetaTransformKind.UNKNOWN && kind < MetaTransformKind.FOR_CHIR
+        return IsForFunc() || IsForPackage()
     }
 
     public func IsForFunc(): Bool {
-        return kind == MetaTransformKind.FOR_CHIR_FUNC
+        return this is MetaTransform<CHIRFunction>
     }
 
     public func IsForPackage(): Bool {
-        return kind == MetaTransformKind.FOR_CHIR_PACKAGE
+        return this is MetaTransform<CHIRPackage>
     }
 }
 
@@ -84,21 +83,9 @@ public interface MetaTransformRunner<DeclT> {
     func Run(decl: DeclT): Unit
 }
 
-private func InferMetaTransformKind<DeclT>(): MetaTransformKind {
-    let declType = TypeInfo.of<DeclT>()
-    if (declType == TypeInfo.of<CHIRFunction>()) {
-        return MetaTransformKind.FOR_CHIR_FUNC
-    }
-    if (declType == TypeInfo.of<CHIRPackage>()) {
-        return MetaTransformKind.FOR_CHIR_PACKAGE
-    }
-    return MetaTransformKind.UNKNOWN
-}
-
 public abstract class MetaTransform<DeclT> <: MetaTransformConcept & MetaTransformRunner<DeclT> {
     public init() {
         super()
-        kind = InferMetaTransformKind<DeclT>()
     }
 }
 

@@ -3,7 +3,7 @@ package cjcj::meta_transformation
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.Function as CHIRFunction
 import cjcj::chir.Package as CHIRPackage
-import cjcj::utils.{CJC_ASSERT, ProfileRecorder}
+import cjcj::utils.ProfileRecorder
 import std.collection.*
 
 public struct MetaKind {
@@ -51,25 +51,12 @@ public type CHIRPluginManager = MetaTransformPluginManager<MetaKindCHIR>
 
 public func RunCHIRMetaTransforms(manager: CHIRPluginManager, chirPackage: CHIRPackage): Unit {
     manager.ForEachMetaTransformConcept({ mtc: MetaTransformConcept =>
-        if (!mtc.IsForCHIR()) {
-            return
-        }
-        if (mtc.IsForFunc()) {
-            if (let Some(functionTransform) <- (mtc as MetaTransform<CHIRFunction>)) {
-                for (chirFunc in chirPackage.GetGlobalFuncsWithBody()) {
-                    functionTransform.Run(chirFunc)
-                }
-            } else {
-                throw IllegalStateException("CHIR function meta transform has incompatible transform type")
+        if (let Some(functionTransform) <- (mtc as MetaTransform<CHIRFunction>)) {
+            for (chirFunc in chirPackage.GetGlobalFuncsWithBody()) {
+                functionTransform.Run(chirFunc)
             }
-        } else if (mtc.IsForPackage()) {
-            if (let Some(packageTransform) <- (mtc as MetaTransform<CHIRPackage>)) {
-                packageTransform.Run(chirPackage)
-            } else {
-                throw IllegalStateException("CHIR package meta transform has incompatible transform type")
-            }
-        } else {
-            CJC_ASSERT(false)
+        } else if (let Some(packageTransform) <- (mtc as MetaTransform<CHIRPackage>)) {
+            packageTransform.Run(chirPackage)
         }
     })
 }
