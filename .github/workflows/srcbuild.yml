@@ -176,6 +176,19 @@ jobs:
         # -O2 using the seed at $sdk/bin/cjc. The fixed static llc handles the -O2 backend.
         run: npx --yes zx@8 ci/srcbuild/steps/build-stage2.mjs
 
+      # Keep the seed compiler and stage2 CJOs when a stage fails: reproducing a
+      # stage2 frontier locally otherwise requires rebuilding the full C++ oracle.
+      - name: Upload stage diagnosis artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: srcbuild-diagnosis-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie/bin/cjcj-stage1
+            target/release/**/*.cjo
+
       - name: Compose cjc + cjcj SDK
         env:
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
