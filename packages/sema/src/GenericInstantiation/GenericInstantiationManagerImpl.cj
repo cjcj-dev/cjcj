@@ -398,7 +398,8 @@ class GenericInstantiationManagerImpl {
     private let membersIndexMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let skippedMemberOffsets: HashMap<Int64, ArrayList<Int64>> = HashMap<Int64, ArrayList<Int64>>()
     private let structContext: ArrayList<Decl> = ArrayList<Decl>()
-    private let usedSrcImportedDecls: ArrayList<Decl> = ArrayList<Decl>()
+    // C++: GenericInstantiationManagerImpl.h:162-163.
+    private let usedSrcImportedDecls: HashSet<Int64> = HashSet<Int64>()
     private let instantiationWalkerID: UInt32 = GetNextWalkerID()
     private let rearrangeWalkerID: UInt32 = GetNextWalkerID()
     private let promotion: Promotion
@@ -432,6 +433,8 @@ class GenericInstantiationManagerImpl {
         if (let Some(tm) <- testManager) {
             tm.HandleCreateMock(pkg)
         }
+        // C++: GenericInstantiationManagerImpl.cpp:304-310.
+        ClearUnusedSrcImportedDecls(pkg)
         RearrangeReferences(pkg)
         RecoverDesugarForBuiltIn()
         updateInstantiatedExtendMap(ci.typeManager, pkg)
@@ -1869,11 +1872,34 @@ class GenericInstantiationManagerImpl {
     }
 
     private func MarkAndInstantiateSrcImportedDecl(keyDecl: Decl, rootDecl: Decl, pkg: Package): Unit {
-        if (containsDecl(usedSrcImportedDecls, keyDecl)) {
+        if (usedSrcImportedDecls.contains(keyDecl.objectId)) {
             return
         }
-        usedSrcImportedDecls.add(keyDecl)
+        usedSrcImportedDecls.add(keyDecl.objectId)
         InstantiateReferencedGenericsInNode(rootDecl, pkg)
+    }
+
+    // C++: GenericInstantiationManagerImpl.cpp:99-111.
+    private func ClearUnusedSrcImportedDecls(pkg: Package): Unit {
+        var srcImportedIdx: Int64 = 0
+        while (srcImportedIdx < pkg.srcImportedNonGenericDecls.size) {
+            let decl = pkg.srcImportedNonGenericDecls[srcImportedIdx]
+            if (!decl.IsConst() && !usedSrcImportedDecls.contains(decl.objectId)) {
+                decl.DisableAttr(Attribute.SRC_IMPORTED)
+                pkg.srcImportedNonGenericDecls.remove(at: srcImportedIdx)
+                continue
+            }
+            srcImportedIdx++
+        }
+        var inlineFuncIdx: Int64 = 0
+        while (inlineFuncIdx < pkg.inlineFuncDecls.size) {
+            let decl = pkg.inlineFuncDecls[inlineFuncIdx]
+            if (!decl.IsConst() && !usedSrcImportedDecls.contains(decl.objectId)) {
+                pkg.inlineFuncDecls.remove(at: inlineFuncIdx)
+                continue
+            }
+            inlineFuncIdx++
+        }
     }
 
     private func InstantiateSrcImportedDefaultParamDecls(decl: Decl, pkg: Package): Unit {
@@ -1924,9 +1950,7 @@ class GenericInstantiationManagerImpl {
             RearrangeReferencesInNode(file, pkg)
         }
         for (decl in pkg.srcImportedNonGenericDecls) {
-            if (decl.IsConst() || containsDecl(usedSrcImportedDecls, decl)) {
-                RearrangeReferencesInNode(decl, pkg)
-            }
+            RearrangeReferencesInNode(decl, pkg)
         }
     }
 
