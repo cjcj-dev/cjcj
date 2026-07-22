@@ -45,20 +45,28 @@ if [ "$platform" = linux_x86_64 ]; then
         --jq ".artifacts[] | select(.name == \"$artifact_name\" and .expired == false) | .id" \
         | head -n 1)"
 else
-    run_ids="$(gh api "/repos/$repo/actions/workflows/$workflow/runs?branch=$branch&status=completed&per_page=30" \
-        --jq '.workflow_runs[].id')"
-    for candidate_run in $run_ids; do
-        successful_job="$(gh api "/repos/$repo/actions/runs/$candidate_run/jobs?filter=latest&per_page=100" \
-            --jq ".jobs[] | select(.name | contains(\"$platform\")) | select(.conclusion == \"success\") | .id" \
-            | head -n 1)"
-        if [ -z "$successful_job" ]; then continue; fi
-        candidate_artifact="$(gh api "/repos/$repo/actions/runs/$candidate_run/artifacts" \
-            --jq ".artifacts[] | select(.name == \"$artifact_name\" and .expired == false) | .id" \
-            | head -n 1)"
-        if [ -n "$candidate_artifact" ]; then
-            run_id="$candidate_run"
-            artifact_id="$candidate_artifact"
-            break
+    fetch_attempts="${TUPLE_FETCH_ATTEMPTS:-60}"
+    fetch_delay="${TUPLE_FETCH_DELAY_SECONDS:-30}"
+    for attempt in $(seq 1 "$fetch_attempts"); do
+        run_ids="$(gh api "/repos/$repo/actions/workflows/$workflow/runs?branch=$branch&status=completed&per_page=30" \
+            --jq '.workflow_runs[].id')"
+        for candidate_run in $run_ids; do
+            successful_job="$(gh api "/repos/$repo/actions/runs/$candidate_run/jobs?filter=latest&per_page=100" \
+                --jq ".jobs[] | select(.name | contains(\"$platform\")) | select(.conclusion == \"success\") | .id" \
+                | head -n 1)"
+            if [ -z "$successful_job" ]; then continue; fi
+            candidate_artifact="$(gh api "/repos/$repo/actions/runs/$candidate_run/artifacts" \
+                --jq ".artifacts[] | select(.name == \"$artifact_name\" and .expired == false) | .id" \
+                | head -n 1)"
+            if [ -n "$candidate_artifact" ]; then
+                run_id="$candidate_run"
+                artifact_id="$candidate_artifact"
+                break 2
+            fi
+        done
+        if [ "$attempt" -lt "$fetch_attempts" ]; then
+            echo "waiting for $artifact_name ($attempt/$fetch_attempts)"
+            sleep "$fetch_delay"
         fi
     done
 fi
