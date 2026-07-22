@@ -247,9 +247,8 @@ private func isSpecialName(mangled: String, idx: Int64, stdPkg!: Bool = false): 
     if (idx + MANGLE_CHAR_LEN >= mangled.size) {
         return false
     }
-    let bytes = mangled.toArray()
-    if (bytes[idx] < b'a' || bytes[idx] > b'y' || bytes[idx + MANGLE_CHAR_LEN] < b'a' ||
-        bytes[idx + MANGLE_CHAR_LEN] > b'y') {
+    if (mangled[idx] < b'a' || mangled[idx] > b'y' || mangled[idx + MANGLE_CHAR_LEN] < b'a' ||
+        mangled[idx + MANGLE_CHAR_LEN] > b'y') {
         return false
     }
     let code = mangled[idx..idx + MANGLE_SPECIAL_NAME_LEN]

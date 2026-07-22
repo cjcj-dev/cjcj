@@ -115,17 +115,18 @@ public class RefType <: Type {
     }
 
     public override func ToString(): String {
+        if (typeArguments.isEmpty()) {
+            return ref.identifier.Val()
+        }
         let builder = StringBuilder(ref.identifier.Val())
         var curSpanBegin = ref.identifier.End()
-        if (!typeArguments.isEmpty()) {
-            builder.append(NextSpan("<", curSpanBegin, leftAnglePos, offset: 1))
-            curSpanBegin = leftAnglePos + Position(0, 0, 1)
-            for (arg in typeArguments) {
-                builder.append(NextSpan(arg.ToString(), curSpanBegin, arg.end))
-                curSpanBegin = arg.end
-            }
-            builder.append(NextSpan(">", curSpanBegin, rightAnglePos, offset: 1))
+        builder.append(NextSpan("<", curSpanBegin, leftAnglePos, offset: 1))
+        curSpanBegin = leftAnglePos + Position(0, 0, 1)
+        for (arg in typeArguments) {
+            builder.append(NextSpan(arg.ToString(), curSpanBegin, arg.end))
+            curSpanBegin = arg.end
         }
+        builder.append(NextSpan(">", curSpanBegin, rightAnglePos, offset: 1))
         return builder.toString()
     }
 }
