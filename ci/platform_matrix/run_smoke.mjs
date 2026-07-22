@@ -86,6 +86,12 @@ if (!runtimeLib) {
 console.log(`combined runtime smoke: ${runtimeLib}`);
 const runtimeDir = path.dirname(runtimeLib);
 const env = {...process.env};
+if (process.platform === 'darwin' && !env.SDKROOT) {
+  // The cjcj Darwin driver consumes SDKROOT for -syslibroot; without it the
+  // link probes / and misses libSystem.tbd (round-19).
+  env.SDKROOT = (await $({stdio: 'pipe', verbose: false})`xcrun --sdk macosx --show-sdk-path`).stdout.trim();
+  console.log(`smoke SDKROOT=${env.SDKROOT}`);
+}
 if (process.platform === 'darwin') env.DYLD_LIBRARY_PATH = `${runtimeDir}:${env.DYLD_LIBRARY_PATH || ''}`;
 else if (process.platform === 'win32') env.PATH = `${runtimeDir};${env.PATH || ''}`;
 else env.LD_LIBRARY_PATH = `${runtimeDir}:${env.LD_LIBRARY_PATH || ''}`;
