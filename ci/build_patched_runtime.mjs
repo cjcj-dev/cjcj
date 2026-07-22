@@ -54,9 +54,9 @@ try {
   // RecomputeBitmapLiveBytes is introduced by the pinned trace-insertion-closure
   // fix and remains a versioned dynamic symbol in native release builds. Unlike
   // .cjmetadata, this proves the required code is in libcangjie-runtime.so.
-  const gcFixSymbol = '_ZNK12MapleRuntime8LiveInfo24RecomputeBitmapLiveBytesEv@@CANGJIE';
+  const GC_FIX_SYMBOL = '_ZNK12MapleRuntime8LiveInfo24RecomputeBitmapLiveBytesEv@@CANGJIE';
   const symbols = await $({nothrow: true, stdio: 'pipe'})`readelf --dyn-syms --wide ${out}/libcangjie-runtime.so`;
-  if (symbols.exitCode !== 0 || !symbols.stdout.includes(gcFixSymbol)) {
+  if (symbols.exitCode !== 0 || !symbols.stdout.includes(GC_FIX_SYMBOL)) {
     log('ERROR: built runtime lacks the pinned GC fix symbol; wrong fork commit');
     process.exitCode = 1;
     throw new Error('pinned GC fix symbol missing');
