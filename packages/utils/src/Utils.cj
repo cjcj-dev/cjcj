@@ -596,6 +596,7 @@ public func GetApplicationPath(): Option<String> {
     } catch (e: Exception) {
         return None
     }
+    return None
 }
 
 public func GetApplicationPath(argv0: String, environmentVars: HashMap<String, String>): Option<String> {
