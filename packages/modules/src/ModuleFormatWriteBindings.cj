@@ -227,7 +227,7 @@ func CreateAliasInfo(builder: FlatBufferBuilder, aliasedTy: UInt32): FlatBufferO
 }
 
 // ModuleFormat_generated.h (CreateDecl). info is DeclInfo union.
-func CreateDecl(builder: FlatBufferBuilder, kind: UInt16, isTopLevel: Bool, fullPkgName: FlatBufferOffset,
+public func CreateDecl(builder: FlatBufferBuilder, kind: UInt16, isTopLevel: Bool, fullPkgName: FlatBufferOffset,
     genericDecl: FlatBufferOffset, generic: FlatBufferOffset, begin: ArrayList<UInt8>, end: ArrayList<UInt8>,
     identifier: FlatBufferOffset, identifierPos: ArrayList<UInt8>, attributes: FlatBufferOffset, annotations: FlatBufferOffset,
     ty: UInt32, mangledName: FlatBufferOffset, exportId: FlatBufferOffset, mangledBeforeSema: FlatBufferOffset,
