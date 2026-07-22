@@ -243,8 +243,8 @@ private func RedirectStdOutTOStdErr(): Unit {
 }
 
 @When[os == "Windows"]
-private func WaitProcessExit(pi: ProcessInformation): Unit {
-    if (unsafe { WaitForSingleObject(pi.process, UInt32.Max) } == UInt32.Max) {
+private func WaitProcessExit(process: CPointer<Unit>): Unit {
+    if (unsafe { WaitForSingleObject(process, UInt32.Max) } == UInt32.Max) {
         Errorln("Getting child process exit code: " + unsafe { GetLastError() }.toString())
     }
     MacroProcMsger.GetInstance().macroSrvRun.store(false)
@@ -585,9 +585,11 @@ func CreateMacroSrvProcess(evaluation: MacroEvaluation): Unit {
                 }
                 msger.macroSrvRun.store(true)
                 let pi = unsafe { processInformation.value.read() }
-                let _ = spawn { WaitProcessExit(pi) }
-                msger.hProcess = pi.process
-                msger.hThread = pi.thread
+                let process = pi.process
+                let thread = pi.thread
+                let _ = spawn { WaitProcessExit(process) }
+                msger.hProcess = process
+                msger.hThread = thread
                 CreateJobObjectForMacroSrv()
                 CloseSrvPipe()
             }
