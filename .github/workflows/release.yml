@@ -89,7 +89,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_REF }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
       - name: Build fork runtime
         if: steps.rtcache.outputs.cache-hit != 'true'
         env:
@@ -100,7 +100,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_REF }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
       - name: Activate pinned runtime
         run: bash ci/install_patched_runtime.sh "$PWD/dist-runtime"
       - name: Build runtime shim

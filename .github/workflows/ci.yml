@@ -94,12 +94,14 @@ jobs:
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       - name: Install runtime build dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make
+      # Keyed by matrix.runner: the runtime .so links the builder's glibc, so a cache
+      # entry built on a newer distro is unloadable on an older one (GLIBC_x.y not found).
       - name: Restore patched runtime cache
         id: rtcache
         uses: actions/cache/restore@v4
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_REF }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
       - name: Build pinned runtime
         if: steps.rtcache.outputs.cache-hit != 'true'
         env:
@@ -110,7 +112,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_REF }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
       - name: Activate pinned runtime
         run: bash ci/install_patched_runtime.sh "$PWD/dist-runtime"
       - name: Build runtime shim
