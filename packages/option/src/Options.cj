@@ -303,6 +303,6 @@ public func CreateOptionInfos(): Array<OptionInfo> {
         OptionInfo("--pgo-instr-gen", ID.PGO_INSTR_GEN, Kind.FLAG_WITH_ARG, [Backend.CJNATIVE], [Group.DRIVER, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "PGO instrumentation"),
         OptionInfo("--pgo-instr-use", ID.PGO_INSTR_USE, Kind.SEPARATED, [Backend.CJNATIVE], [Group.DRIVER, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.SINGLE_OCCURRENCE, "Read PGO instrumentation profile"),
         OptionInfo("--discard-eh-frame", ID.DISCARD_EH_FRAME, Kind.FLAG, [Backend.CJNATIVE], [Group.DRIVER, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Discard the eh_frame section"),
-        OptionInfo("--cjcj-optimization", ID.CJCJ_OPTIMIZATION, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Enable cjcj-specific optimizations (output is no longer byte-for-byte identical to official cjc)"),
+        OptionInfo("--cjcj-optimization", ID.CJCJ_OPTIMIZATION, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Enable cjcj-specific optimizations (output is no longer byte-for-byte identical to official cjc)"),
     ]
 }
