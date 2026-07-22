@@ -112,7 +112,9 @@ if (!(await isFile(path.join('runtime_shim', 'cjselfhost_llvmshim.o'))) || !(awa
 let sdkLlc = path.join(cangjieHome, 'third_party', 'llvm', 'bin', 'llc');
 if (!(await isFile(sdkLlc)) && await isFile(`${sdkLlc}.exe`)) sdkLlc = `${sdkLlc}.exe`;
 if (!(await isFile(sdkLlc))) throw new Error(`SDK llc missing: ${sdkLlc}`);
-const tupleLlc = `${sdkLlc}.tuple`;
+// Windows refuses to execute a PE without an .exe suffix (round-12: exit 127 on
+// `llc.exe.tuple --version`), so keep the temp name ending in .exe there.
+const tupleLlc = process.platform === 'win32' ? `${sdkLlc.replace(/\.exe$/, '')}.tuple.exe` : `${sdkLlc}.tuple`;
 await fs.writeFile(tupleLlc, zlib.gunzipSync(await fs.readFile(fixedLlcGz)));
 if (process.platform !== 'win32') await fs.chmod(tupleLlc, 0o755);
 await $`${toCommandPath(tupleLlc)} --version`;
