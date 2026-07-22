@@ -177,10 +177,12 @@ public class CGContext {
             return true
         }
         if (let Some(chirFunc) <- (chirValue as Function)) {
-            if (chirFunc.IsFuncWithBody()) {
-                return !subCHIRPackage.OwnsFunction(chirFunc)
-            }
-            return false
+            // A cross-module reference to a generic struct method may be represented by a
+            // body-less Function in selfhost.  The C++ model keeps the owning Function (and
+            // therefore its body) here, so its IsFuncWithBody guard still reaches the split
+            // ownership lookup.  Use the split's mangled-name ownership directly to preserve
+            // the same single-emitter rule for the selfhost representation.
+            return !subCHIRPackage.OwnsFunction(chirFunc)
         } else if (let Some(chirGV) <- (chirValue as GlobalVar)) {
             if (chirGV.IsGlobalVarWithInitializer()) {
                 return !subCHIRPackage.OwnsGlobalVar(chirGV)
