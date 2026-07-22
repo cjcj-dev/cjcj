@@ -12,7 +12,9 @@ PLATFORM_CI_ROOT="${PLATFORM_CI_ROOT:-$PWD/.platform-ci}"
 mkdir -p "$PLATFORM_CI_ROOT/fixed-toolchain"
 repo="${SHIM_ARTIFACT_REPOSITORY:-cjcj-dev/cjcj}"
 workflow="${TUPLE_WORKFLOW:-platform-tuples.yml}"
-branch="${TUPLE_BRANCH:-ci/platform-matrix}"
+# Follow the branch this workflow runs on; a fixed default starves consumers on
+# iteration branches (darwin waited 30min for artifacts that lived elsewhere).
+branch="${TUPLE_BRANCH:-${GITHUB_REF_NAME:-ci/platform-matrix}}"
 
 case "$(uname -s)/$(uname -m)" in
     Linux/x86_64|Linux/amd64) platform=linux_x86_64 ;;
