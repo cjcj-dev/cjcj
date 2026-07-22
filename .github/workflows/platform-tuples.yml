@@ -1,0 +1,137 @@
+# Build native fixed-LLVM tuples for the platform matrix. macOS 26 consumes the
+# macOS 15 artifact of the same architecture (same Darwin target, older deployment
+# baseline); Ubuntu 24.04 ARM consumes the Ubuntu 22.04 ARM artifact; Windows 2025
+# consumes the Windows 2022 x64 artifact.
+name: Platform fixed LLVM tuples
+
+on:
+  push:
+    branches: [ci/platform-matrix]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-tuples-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  LLVM_URL: https://gitcode.com/Cangjie/llvm-project.git
+  LLVM_SHA: b462fbd9fb53440aa4736a8cf9f9e97324e0623a
+  CANGJIE_COMPILER_URL: https://gitcode.com/Cangjie/cangjie_compiler.git
+  CANGJIE_COMPILER_SHA: 87fff87a1883da9bfe5956296d8079e8a7f9d15f
+  FLATBUFFERS_URL: https://gitcode.com/openharmony/third_party_flatbuffers.git
+  FLATBUFFERS_SHA: c3e4d69cbd5950e43f775ba76eadb30750d6e0b7
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-tuple:
+    name: fixed LLVM tuple / ${{ matrix.platform }} / ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin_aarch64
+            llvm-targets: AArch64
+          - runner: macos-15-intel
+            platform: darwin_x86_64
+            llvm-targets: X86
+          - runner: ubuntu-22.04-arm
+            platform: linux_aarch64
+            llvm-targets: AArch64
+          - runner: windows-2022
+            platform: windows_x86_64
+            llvm-targets: X86
+    env:
+      TUPLE_PLATFORM: ${{ matrix.platform }}
+      LLVM_TARGETS: ${{ matrix.llvm-targets }}
+      TUPLE_ROOT: .tuple-build
+
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v4
+
+      - name: Prepare MSYS2/MinGW LLVM toolchain
+        id: msys2-setup
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          path-type: inherit
+          install: >-
+            git gzip unzip file binutils
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-ninja
+
+      - name: Install Linux build dependencies
+        id: linux-deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang cmake ninja-build gzip file binutils
+
+      - name: Install macOS build dependencies
+        id: macos-deps
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Fetch exact shallow source trees
+        id: source-fetch
+        if: runner.os != 'Windows'
+        run: bash ci/platform_tuples/fetch_sources.sh
+
+      - name: Fetch exact shallow source trees (MSYS2)
+        id: source-fetch-windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash ci/platform_tuples/fetch_sources.sh
+
+      - name: Restore LLVM build directory
+        id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TUPLE_ROOT }}/llvm-build
+          key: platform-llvm-build-${{ env.LLVM_SHA }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ci/platform_tuples/build_tuple.sh') }}
+
+      - name: Configure and build llc + shim
+        id: tuple-build
+        if: runner.os != 'Windows'
+        run: bash ci/platform_tuples/build_tuple.sh
+
+      - name: Configure and build llc + shim (MSYS2)
+        id: tuple-build-windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash ci/platform_tuples/build_tuple.sh
+
+      - name: Summarize tuple result
+        if: always()
+        env:
+          MSYS2_OUTCOME: ${{ steps.msys2-setup.outcome }}
+          LINUX_DEPS_OUTCOME: ${{ steps.linux-deps.outcome }}
+          MACOS_DEPS_OUTCOME: ${{ steps.macos-deps.outcome }}
+          SOURCE_OUTCOME: ${{ steps.source-fetch.outcome }}
+          WINDOWS_SOURCE_OUTCOME: ${{ steps.source-fetch-windows.outcome }}
+          CACHE_OUTCOME: ${{ steps.llvm-cache.outcome }}
+          BUILD_OUTCOME: ${{ steps.tuple-build.outcome }}
+          WINDOWS_BUILD_OUTCOME: ${{ steps.tuple-build-windows.outcome }}
+        run: bash ci/platform_tuples/summarize.sh
+
+      - name: Upload fixed LLVM tuple
+        if: steps.tuple-build.outcome == 'success' || steps.tuple-build-windows.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixed-llvm-tools-${{ matrix.platform }}
+          path: fixed-toolchain/${{ matrix.platform }}
+          if-no-files-found: error
+          retention-days: 14

@@ -87,8 +87,9 @@ jobs:
         with:
           msystem: MINGW64
           update: true
+          path-type: inherit
           install: >-
-            git make python
+            git make python gzip unzip file binutils
             mingw-w64-x86_64-clang
             mingw-w64-x86_64-cmake
 
@@ -101,11 +102,18 @@ jobs:
         shell: msys2 {0}
         run: bash ci/platform_matrix/build_runtime.sh
 
-      - name: Inject pinned Linux x64 LLVM shim
-        if: always() && runner.os == 'Linux' && runner.arch == 'X64'
+      - name: Download native fixed LLVM tuple
+        if: always() && runner.os != 'Windows'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash ci/platform_matrix/inject_linux_x64_shim.sh
+        run: bash ci/platform_matrix/fetch_llvm_tuple.sh
+
+      - name: Download native fixed LLVM tuple (MSYS2)
+        if: always() && runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ci/platform_matrix/fetch_llvm_tuple.sh
 
       - name: Official SDK + O1 cjcj build
         if: always()
