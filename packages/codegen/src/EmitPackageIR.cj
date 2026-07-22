@@ -1220,8 +1220,9 @@ private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: Str
     let prespecializedName = typeInfoName + ".cjcj.prespec"
     try (recordName = unsafe { LibC.mallocCString(prespecializedName) }.asResource(),
         sectionName = unsafe { LibC.mallocCString(PRESPECIALIZED_TYPEINFO_SECTION) }.asResource()) {
+        var record = LLVMNullValue()
         unsafe {
-            var record = LLVMGetNamedGlobal(moduleHandle.raw, recordName.value)
+            record = LLVMGetNamedGlobal(moduleHandle.raw, recordName.value)
             if (record.isNull()) {
                 record = LLVMAddGlobal(moduleHandle.raw, LLVMGlobalGetValueType(typeInfo), recordName.value)
             }
@@ -1229,6 +1230,24 @@ private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: Str
             LLVMSetLinkage(record, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
             LLVMSetGlobalConstant(record, 0)
             addAttribute(record, GC_KLASS_ATTR)
+        }
+        try (metadataCount = LibC.malloc<UIntNative>().asResource()) {
+            unsafe { metadataCount.value.write(UIntNative(0)) }
+            let entries = unsafe { LLVMGlobalCopyAllMetadata(typeInfo, metadataCount.value) }
+            let count = unsafe { metadataCount.value.read() }
+            var metadataIdx: UInt32 = 0u32
+            while (metadataIdx < UInt32(count)) {
+                unsafe {
+                    LLVMGlobalSetMetadata(record, LLVMValueMetadataEntriesGetKind(entries, metadataIdx),
+                        LLVMValueMetadataEntriesGetMetadata(entries, metadataIdx))
+                }
+                metadataIdx++
+            }
+            if (!entries.isNull()) {
+                unsafe { LLVMDisposeValueMetadataEntries(entries) }
+            }
+        }
+        unsafe {
             LLVMSetSection(record, sectionName.value)
             LLVMSetComdat(record, LLVMGetOrInsertComdat(moduleHandle.raw, recordName.value))
         }
