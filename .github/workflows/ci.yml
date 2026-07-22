@@ -32,8 +32,11 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck --severity=error \
-            ci/setup_sdk.sh ci/build_patched_runtime.sh ci/install_patched_runtime.sh \
             scripts/package_sdk.sh ci/smoke/run_smoke.sh runtime_shim/build_shim.sh
+      - name: Check zx script syntax
+        run: |
+          find ci runtime_shim -type f -name '*.mjs' -print0 \
+            | xargs -0 -n1 node --check
       - name: Check smoke assets
         run: |
           test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5
@@ -84,7 +87,7 @@ jobs:
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
           FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/llc.gz
-        run: bash ci/setup_sdk.sh
+        run: npx --yes zx@8 ci/setup_sdk.mjs
       # Save only after a successful install so a partial ~/.cjv is never cached.
       - name: Save SDK cache
         if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
@@ -92,8 +95,6 @@ jobs:
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Install runtime build dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make
       # Keyed by matrix.runner: the runtime .so links the builder's glibc, so a cache
       # entry built on a newer distro is unloadable on an older one (GLIBC_x.y not found).
       - name: Restore patched runtime cache
@@ -102,11 +103,14 @@ jobs:
         with:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
+      - name: Install runtime build dependencies
+        if: steps.rtcache.outputs.cache-hit != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make
       - name: Build pinned runtime
         if: steps.rtcache.outputs.cache-hit != 'true'
         env:
           RUNTIME_VERSION: ${{ env.CJCJ_TOOLCHAIN }}
-        run: bash ci/build_patched_runtime.sh "$PWD/dist-runtime"
+        run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Save patched runtime cache
         if: steps.rtcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -114,11 +118,11 @@ jobs:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
       - name: Activate pinned runtime
-        run: bash ci/install_patched_runtime.sh "$PWD/dist-runtime"
+        run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Build runtime shim
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/cjselfhost_llvmshim.o
-        run: bash runtime_shim/build_shim.sh
+        run: npx --yes zx@8 runtime_shim/build_shim.mjs
       - name: Build workspace
         run: cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
@@ -151,7 +155,7 @@ jobs:
         id: setup
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-        run: bash ci/setup_sdk.sh
+        run: npx --yes zx@8 ci/setup_sdk.mjs
       - name: Save SDK cache
         if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
