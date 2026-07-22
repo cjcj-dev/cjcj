@@ -6,4 +6,6 @@ $.stdio = 'inherit';
 // cjcj-stage1; the fixed static llc handles the -O2 backend.
 console.log('stage2 compiler:');
 await $`set -o pipefail; cjc --version | head -2`;
-await $`cjpm build`;
+// -j2: four parallel cjc at cjHeapSize=12GB exhaust the 16GB runner during the
+// large chir package and die as a Cangjie OutOfMemoryError.
+await $`cjpm build -j 2`;
