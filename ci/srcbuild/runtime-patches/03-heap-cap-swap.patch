@@ -1,0 +1,19 @@
+Allow a swap-backed Cangjie heap larger than physical RAM (bootstrap only).
+
+The O1-seed stage1 compiling the chir package needs a ~20GB heap (usedObj
+9.4GB at 38% region fragmentation); the 16GB runner carries it on swap, but
+InitHeapSize rejects any cjHeapSize above g_sysmemSize and silently falls
+back to the tiny default. Raise the cap to 2x RAM for the source-build SDK.
+
+--- a/runtime/src/CjScheduler.cpp
++++ b/runtime/src/CjScheduler.cpp
+@@ -100,7 +100,8 @@
+     // 4UL * KB: The minimum heap size, measured in KB, the value is 4MB.
+     size_t minSize = 4UL * KB;
+ #endif
+-    size_t maxSize = g_sysmemSize / KB;
++    // cjcj srcbuild: permit swap-backed heaps up to twice physical memory.
++    size_t maxSize = (g_sysmemSize * 2) / KB;
+     if (size >= minSize && size <= maxSize) {
+         return size;
+     } else {
