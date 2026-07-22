@@ -1569,6 +1569,13 @@ class GenericInstantiationManagerImpl {
     }
 
     private func CheckNodeInstantiation(node: Node, pkg: Package): VisitAction {
+        // C++: GenericInstantiationManagerImpl.cpp:1131-1137.
+        if (let Some(packageNode) <- (node as Package)) {
+            for (file in packageNode.files) {
+                InstantiateReferencedGenericsInNode(file, pkg)
+            }
+            return VisitAction.SKIP_CHILDREN
+        }
         let action = CheckVisitedNode(node)
         if (!action.isWalkChildren()) {
             return action
