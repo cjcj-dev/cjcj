@@ -166,16 +166,26 @@ public class Tool {
         return ldLibraryPath
     }
 
+    @When[os == "Windows"]
     public func Run(): ToolFuture {
         if (toolType == ToolType.INTERNAL_IMPLEMENTED) {
             return ThreadFuture(InternalImplementedCommandExec())
         }
         try {
-            let code = if (HostOS() == OSType.WINDOWS) {
-                execute(name, args.toArray())
-            } else {
-                RunPOSIX()
-            }
+            let code = execute(name, args.toArray())
+            return ProcessFuture(code)
+        } catch (e: Exception) {
+            return ErrorFuture(e.message)
+        }
+    }
+
+    @When[os != "Windows"]
+    public func Run(): ToolFuture {
+        if (toolType == ToolType.INTERNAL_IMPLEMENTED) {
+            return ThreadFuture(InternalImplementedCommandExec())
+        }
+        try {
+            let code = RunPOSIX()
             return ProcessFuture(code)
         } catch (e: Exception) {
             return ErrorFuture(e.message)
