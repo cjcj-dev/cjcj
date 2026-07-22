@@ -49,7 +49,8 @@ private class VectorDownward {
     }
 
     public func pushSmall(value: UInt8): Unit {
-        storage[makeSpace(1)] = value
+        let start = makeSpace(1)
+        storage[start] = value
     }
 
     public func pushSmall(value: UInt16): Unit {
