@@ -131,7 +131,7 @@ jobs:
           # shellcheck disable=SC1090,SC1091
           source "$PWD/pkgtest/${pkg}/envsetup.sh"
           export cjHeapSize=12GB
-          bash ci/smoke/run_smoke.sh "$PWD/pkgtest/${pkg}/bin/cjc"
+          npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/pkgtest/${pkg}/bin/cjc"
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

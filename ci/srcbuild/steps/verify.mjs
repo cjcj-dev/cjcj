@@ -35,7 +35,7 @@ await $({env: difftestEnv})`set -o pipefail; bash ${root}/scripts/difftest.sh -j
 await $`grep -Eq 'TOTAL=[0-9]+[[:space:]]+PASS=[0-9]+[[:space:]]+MISMATCH=0[[:space:]]+FAIL=0' ${work}/difftest.log`;
 
 console.log('[2/4] deployed SDK smoke');
-await $`bash ${root}/ci/smoke/run_smoke.sh ${self} ${work}/smoke`;
+await $`npx --yes zx@8 ${root}/ci/smoke/run_smoke.mjs ${self} ${work}/smoke`;
 
 console.log('[3/4] compiler-package smoke (includes incremental_compilation)');
 const packages = [

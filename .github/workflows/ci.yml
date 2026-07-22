@@ -131,7 +131,7 @@ jobs:
           test -f "target/release/bin/cjcj::cjc"
           cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
       - name: Run smoke tests
-        run: bash ci/smoke/run_smoke.sh "$PWD/target/release/bin/cjcj"
+        run: npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj"
 
   # Non-gating: verifies SDK provisioning on non-x64 platforms; does not build cjcj.
   provision:
