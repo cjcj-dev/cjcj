@@ -168,18 +168,27 @@ let build;
 if (process.platform === 'win32') {
   const msysBash = process.env.MSYS2_BASH || 'C:\\msys64\\usr\\bin\\bash.exe';
   const shellQuote = (value) => "'" + value.replace(/'/g, "'\\''") + "'";
-  const prefix = [
-    `repo="$(cygpath -u ${shellQuote(process.cwd())})"`,
-    `cangjie_home="$(cygpath -u ${shellQuote(cangjieHome)})"`,
-    `stdx_path="$(cygpath -u ${shellQuote(stdxPath)})"`,
-    'cd "$repo"',
-    `export CANGJIE_HOME="$cangjie_home" CANGJIE_STDX_PATH="$stdx_path" cjHeapSize=${shellQuote(heapSize)}`,
-    'export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/clang64/bin:$PATH:/c/mingw64/bin"',
-  ].join('; ');
-  const login = (command) => 'export MSYSTEM=CLANG64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -l -c ' + shellQuote(`${prefix}; ${command}`);
-  shim = await $({nothrow: true})`${toCommandPath(msysBash)} -c ${login('npx --yes zx@8 runtime_shim/build_shim.mjs')}`;
+  // Nested `bash -c` quoting exploded at the cygpath `$(` (round-15); write a
+  // script file and exec a login shell on it, mirroring build_runtime.mjs.
+  const runInMsys = async (command, tag) => {
+    const lines = [
+      'set -euo pipefail',
+      `repo="$(cygpath -u ${shellQuote(process.cwd())})"`,
+      `cangjie_home="$(cygpath -u ${shellQuote(cangjieHome)})"`,
+      `stdx_path="$(cygpath -u ${shellQuote(stdxPath)})"`,
+      'cd "$repo"',
+      `export CANGJIE_HOME="$cangjie_home" CANGJIE_STDX_PATH="$stdx_path" cjHeapSize=${shellQuote(heapSize)}`,
+      'export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/clang64/bin:$PATH:/c/mingw64/bin"',
+      command,
+    ].join('\n');
+    const scriptPath = path.join(process.cwd(), `cjcjbuild-${tag}.sh`);
+    await fs.writeFile(scriptPath, `${lines}\n`);
+    const mixed = scriptPath.replaceAll('\\', '/');
+    return $({nothrow: true})`${toCommandPath(msysBash)} -c ${'export MSYSTEM=CLANG64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -l ' + mixed}`;
+  };
+  shim = await runInMsys('npx --yes zx@8 runtime_shim/build_shim.mjs', 'shim');
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
-  build = await $({nothrow: true})`${toCommandPath(msysBash)} -c ${login('cjpm build')}`;
+  build = await runInMsys('cjpm build', 'build');
 } else {
   shim = await $({nothrow: true})`npx --yes zx@8 runtime_shim/build_shim.mjs`;
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
