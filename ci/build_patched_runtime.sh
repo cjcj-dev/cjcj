@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build libcangjie-runtime.so from the pinned CangjieFork runtime integration
 # commit. The alpha integration line preserves the release SDK's runtime ABI and
-# includes the mutator writer-preference and .cjmetadata fixes as normal commits.
+# includes the three pinned GC concurrency fixes as normal commits.
 #
 # Usage: build_patched_runtime.sh <out-dir>
 #   Writes the host-arch shared library plus source/SHA-256 provenance files.
@@ -47,10 +47,14 @@ cp "$SO" "$OUT/libcangjie-runtime.so"
 printf '%s\n' "$RUNTIME_REF" > "$OUT/SOURCE_SHA"
 (cd "$OUT" && sha256sum libcangjie-runtime.so > libcangjie-runtime.so.sha256)
 log "wrote $OUT/libcangjie-runtime.so"
-# Fail loudly if the .cjmetadata discriminator carried by the fork is absent.
-# grep -a reads the object directly (no `strings | grep -q`, which trips pipefail via SIGPIPE).
-if ! grep -qa '\.cjmetadata' "$OUT/libcangjie-runtime.so"; then
-    log "ERROR: built runtime lacks the .cjmetadata discriminator; wrong fork commit"
+# RecomputeBitmapLiveBytes is introduced by the pinned trace-insertion-closure fix
+# and retained as a versioned dynamic symbol in native release builds.  Unlike
+# .cjmetadata (an application link-script output section), it identifies code that
+# is actually present in libcangjie-runtime.so.
+GC_FIX_SYMBOL='_ZNK12MapleRuntime8LiveInfo24RecomputeBitmapLiveBytesEv@@CANGJIE'
+if ! readelf --dyn-syms --wide "$OUT/libcangjie-runtime.so" |
+    grep -F "$GC_FIX_SYMBOL" >/dev/null; then
+    log "ERROR: built runtime lacks the pinned GC fix symbol; wrong fork commit"
     exit 1
 fi
-log "verified: .cjmetadata discriminator present"
+log "verified: pinned GC fix symbol present"
