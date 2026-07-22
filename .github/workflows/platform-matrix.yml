@@ -17,6 +17,7 @@ env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
   RUNTIME_REPOSITORY: https://github.com/CangjieFork/cangjie_runtime.git
   RUNTIME_REF: f851b846e275859aeccacd0edd42b81f28cb25bd
+  RUNTIME_DARWIN_PATCH_REF: a88f8e29beadae4525dccb49dc4bd0b11d1799dd
   RUNTIME_VERSION: 1.2.0-alpha.20260721165458
   CJ_HEAP_SIZE: 12GB
 
@@ -80,6 +81,23 @@ jobs:
           ref: ${{ env.RUNTIME_REF }}
           fetch-depth: 1
           path: runtime-source
+
+      - name: Apply pinned Darwin runtime fixes
+        if: always() && runner.os == 'macOS'
+        working-directory: runtime-source
+        run: |
+          git fetch --no-tags --depth=12 origin "$RUNTIME_DARWIN_PATCH_REF"
+          test "$(git rev-parse FETCH_HEAD)" = "$RUNTIME_DARWIN_PATCH_REF"
+          for patch in \
+            0c9a427767088d40e0716c2bff71c7798ad2eb95 \
+            69e32e670c2bb8bafc68d56b1b05d72f14887257 \
+            a6c0a02c07f5cf072157a56ed7dc3c5855cce319 \
+            972c8a4563669af0a12b7b95db776ab26ccdc090
+          do
+            git diff "$patch^" "$patch" | git apply --check
+            git diff "$patch^" "$patch" | git apply
+          done
+          git diff --check
 
       - name: Prepare MSYS2/MinGW runtime toolchain
         if: always() && runner.os == 'Windows'
