@@ -117,6 +117,11 @@ if (!(await isFile(sdkLlc))) throw new Error(`SDK llc missing: ${sdkLlc}`);
 const tupleLlc = process.platform === 'win32' ? `${sdkLlc.replace(/\.exe$/, '')}.tuple.exe` : `${sdkLlc}.tuple`;
 await fs.writeFile(tupleLlc, zlib.gunzipSync(await fs.readFile(fixedLlcGz)));
 if (process.platform !== 'win32') await fs.chmod(tupleLlc, 0o755);
+// The Windows tuple llc links against MinGW runtime DLLs (libstdc++-6.dll,
+// libwinpthread-1.dll; round-13 exit 127 = loader failure). The runner ships
+// them in C:\mingw64\bin — append it so the probe and later cjc-spawned llc
+// both resolve.
+if (process.platform === 'win32') process.env.PATH = `${process.env.PATH};C:\\mingw64\\bin`;
 await $`${toCommandPath(tupleLlc)} --version`;
 if (!(await isFile(`${sdkLlc}.orig`))) await fs.copyFile(sdkLlc, `${sdkLlc}.orig`);
 await fs.rm(sdkLlc, {force: true});
@@ -149,7 +154,7 @@ if (process.platform === 'win32') {
     `stdx_path="$(cygpath -u ${shellQuote(stdxPath)})"`,
     'cd "$repo"',
     `export CANGJIE_HOME="$cangjie_home" CANGJIE_STDX_PATH="$stdx_path" cjHeapSize=${shellQuote(heapSize)}`,
-    'export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/clang64/bin:$PATH"',
+    'export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/clang64/bin:$PATH:/c/mingw64/bin"',
   ].join('; ');
   const login = (command) => 'export MSYSTEM=CLANG64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -l -c ' + shellQuote(`${prefix}; ${command}`);
   shim = await $({nothrow: true})`${toCommandPath(msysBash)} -c ${login('npx --yes zx@8 runtime_shim/build_shim.mjs')}`;
