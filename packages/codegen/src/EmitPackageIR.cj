@@ -1237,9 +1237,9 @@ private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: Str
     }
     let moduleHandle = if (let Some(handle) <- cgMod.GetLLVMModule()) { handle } else { return LLVMNullValue() }
     let prespecializedName = typeInfoName + ".cjcj.prespec"
+    var record = LLVMNullValue()
     try (recordName = unsafe { LibC.mallocCString(prespecializedName) }.asResource(),
         sectionName = unsafe { LibC.mallocCString(PRESPECIALIZED_TYPEINFO_SECTION) }.asResource()) {
-        var record = LLVMNullValue()
         unsafe {
             record = LLVMGetNamedGlobal(moduleHandle.raw, recordName.value)
             if (record.isNull()) {
@@ -1270,8 +1270,8 @@ private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: Str
             LLVMSetSection(record, sectionName.value)
             LLVMSetComdat(record, LLVMGetOrInsertComdat(moduleHandle.raw, recordName.value))
         }
-        return record
     }
+    return record
 }
 
 // TYPEINFO_METADATA_V2.md R1.4 PrespecializedTypeInfoDesc is
