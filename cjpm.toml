@@ -73,7 +73,7 @@
   # -O2 restored: the patched LLVM 15 llc SelectionDAG memory-corruption bug (relocate(undef)
   # producing an unusable TargetConstant, StatepointLowering.cpp) is fixed in cjcj-llvm
   # fix/scheddag-memcorrupt (edd69670 + 17c6e735). The fixed static llc is swapped into the SDK
-  # toolchain via ci/setup_sdk.sh. Evidence: reports/REPORT-llvmfix.md, reports/REPORT-o2root.md.
+  # toolchain via ci/setup_sdk.mjs. Evidence: reports/REPORT-llvmfix.md, reports/REPORT-o2root.md.
   compile-option = "-O2"
   override-compile-option = ""
   link-option = ""
