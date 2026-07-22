@@ -32,7 +32,10 @@ const cases = new Map([
   ['systemstack_invalid_target', ["error: class cannot be modified with '@SystemStack'"]],
 ]);
 
-async function firstLines(text, count) { process.stdout.write(text.split('\n').slice(0, count).join('\n') + '\n'); }
+async function firstLines(text, count) {
+  const selected = text.split('\n').slice(0, count).join('\n');
+  process.stdout.write(selected.endsWith('\n') ? selected : `${selected}\n`);
+}
 
 try {
   let result = await $({cwd: work, nothrow: true, quiet: true})`${cjc} ${fixtures}/legal.cj -o ${work}/legal`;
