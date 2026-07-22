@@ -39,7 +39,7 @@ cmake -G Ninja -S "$llvm_src/llvm" -B "$llvm_build" \
     -DCMAKE_C_COMPILER=clang \
     -DCMAKE_CXX_COMPILER=clang++ \
     -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string"
-cmake --build "$llvm_build" --target llc --parallel 3
+cmake --build "$llvm_build" --target llc llvm-config --parallel 3
 
 cmake -G Ninja -S "$flatbuffers_src" -B "$flatbuffers_build" \
     -DFLATBUFFERS_BUILD_TESTS=OFF \
@@ -88,6 +88,13 @@ if [[ "$bundle_static_llvm" == 1 ]]; then
     mkdir -p "$static_dir"
     read -r -a llvm_libfiles <<< "$($llvm_config --link-static --libfiles "${llvm_components[@]}")"
     test "${#llvm_libfiles[@]}" -gt 0
+    llvm_libtargets=()
+    for libfile in "${llvm_libfiles[@]}"; do
+        libname="${libfile##*/}"
+        libtarget="${libname#lib}"
+        llvm_libtargets+=("${libtarget%.a}")
+    done
+    cmake --build "$llvm_build" --target "${llvm_libtargets[@]}" --parallel 3
     : > "$output/llvm-static-libs.txt"
     for libfile in "${llvm_libfiles[@]}"; do
         test -s "$libfile"
