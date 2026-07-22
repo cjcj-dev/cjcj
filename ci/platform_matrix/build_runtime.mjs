@@ -42,6 +42,12 @@ if (process.platform === 'linux') {
 } else if (process.platform === 'win32') {
   const msysBash = process.env.MSYS2_BASH || 'C:\\msys64\\usr\\bin\\bash.exe';
   const shellQuote = (value) => "'" + value.replace(/'/g, "'\\''") + "'";
+  const runtimeTarget = 'windows-x86_64';
+  const buildType = 'release';
+  const targetSeparator = runtimeTarget.lastIndexOf('-');
+  const targetPlatform = runtimeTarget.slice(0, targetSeparator);
+  const targetArch = runtimeTarget.slice(targetSeparator + 1);
+  const configuredInstallRoot = path.join(installRoot, `${targetPlatform}_${buildType}_${targetArch}`);
   const script = [
     'set -euo pipefail',
     'export PATH=/clang64/bin:/usr/bin:$PATH',
@@ -50,10 +56,10 @@ if (process.platform === 'linux') {
     "export CMAKE_GENERATOR='Unix Makefiles'",
     'command -v cmake ninja clang; cmake --version | head -1',
     `runtime_source="$(cygpath -u ${shellQuote(runtimeDirectory)})"`,
-    `runtime_preinstall="$(cygpath -u ${shellQuote(preinstall)})"`,
-    `runtime_install="$(cygpath -u ${shellQuote(installRoot)})"`,
+    `runtime_preinstall="$(cygpath -u ${shellQuote(installRoot)})"`,
+    `runtime_install="$(cygpath -u ${shellQuote(configuredInstallRoot)})"`,
     'cd "$runtime_source"',
-    `python3 build.py build --target windows-x86_64 --build-type release --target-toolchain /clang64 --prefix "$runtime_preinstall" -v ${shellQuote(version)}`,
+    `python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain /clang64 --prefix "$runtime_preinstall" -v ${shellQuote(version)}`,
     'python3 build.py install --prefix "$runtime_install"',
   ].join('\n');
   const scriptPath = path.join(process.cwd(), 'rtbuild-msys2.sh');
