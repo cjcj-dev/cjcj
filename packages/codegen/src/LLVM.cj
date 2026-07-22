@@ -14,6 +14,7 @@ public type LLVMNamedMDNodeRef = CPointer<Unit>
 public type LLVMValueMetadataEntry = CPointer<Unit>
 public type LLVMAttributeRef = CPointer<Unit>
 public type LLVMUseRef = CPointer<Unit>
+public type LLVMComdatRef = CPointer<Unit>
 public type LLVMDIBuilderRef = CPointer<Unit>
 public type LLVMSelfhostLoopInfoRef = CPointer<Unit>
 public type LLVMSelfhostLoopRef = CPointer<Unit>
@@ -250,6 +251,8 @@ foreign {
     func LLVMGetAlignment(value: LLVMValueRef): UInt32
     func LLVMSetAlignment(value: LLVMValueRef, bytes: UInt32): Unit
     func LLVMSetSection(global: LLVMValueRef, section: CString): Unit
+    func LLVMGetOrInsertComdat(module: LLVMModuleRef, name: CString): LLVMComdatRef
+    func LLVMSetComdat(global: LLVMValueRef, comdat: LLVMComdatRef): Unit
     func LLVMGlobalSetMetadata(global: LLVMValueRef, kind: UInt32, metadata: LLVMMetadataRef): Unit
     func LLVMGlobalEraseMetadata(global: LLVMValueRef, kind: UInt32): Unit
     func LLVMGlobalClearMetadata(global: LLVMValueRef): Unit
