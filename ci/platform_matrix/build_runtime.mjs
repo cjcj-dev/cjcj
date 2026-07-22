@@ -45,7 +45,9 @@ if (process.platform === 'linux') {
   const script = [
     'set -euo pipefail',
     'export PATH=/clang64/bin:/usr/bin:$PATH',
-    'export CMAKE_GENERATOR=Ninja',
+    // build.py drives the main tree with `make cangjie-runtime`; Ninja files have no
+    // such rule (round-9 root), so force the Makefiles generator (make is installed).
+    "export CMAKE_GENERATOR='Unix Makefiles'",
     'command -v cmake ninja clang; cmake --version | head -1',
     `runtime_source="$(cygpath -u ${shellQuote(runtimeDirectory)})"`,
     `runtime_preinstall="$(cygpath -u ${shellQuote(preinstall)})"`,
