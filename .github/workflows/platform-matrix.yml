@@ -141,4 +141,3 @@ jobs:
             .platform-ci/step-summary.md
             .platform-ci/runtime-install/**
             .platform-ci/bin/**
-            target/release/bin/**

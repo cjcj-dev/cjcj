@@ -41,7 +41,10 @@ fi
 "$deploy" --version || true
 
 run_one() {
-    local name="$1" expected="$2" out="$PLATFORM_CI_ROOT/${name}${exe_suffix}" got
+    local name expected out got
+    name="$1"
+    expected="$2"
+    out="$PLATFORM_CI_ROOT/${name}${exe_suffix:-}"
     "$deploy" "ci/smoke/${name}.cj" -o "$out"
     got="$("$out")"
     printf '%s => [%s]\n' "$name" "$got"
