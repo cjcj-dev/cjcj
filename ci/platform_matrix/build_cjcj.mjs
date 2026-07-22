@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
+import {platformizeCjcToml} from './link_option.mjs';
 
 const {root} = stageBegin('cjcj');
 const toolchain = process.env.CJCJ_TOOLCHAIN || 'nightly-1.2.0-alpha.20260721165458';
@@ -122,6 +123,10 @@ await $({nothrow: true})`cjv --version`;
 await $({nothrow: true})`cjc --version`;
 await $({nothrow: true})`cjpm --version`;
 await $({nothrow: true})`${toCommandPath(sdkLlc)} --version`;
+
+const cjcTomlPath = path.join('packages', 'cjc', 'cjpm.toml');
+const cjcToml = await fs.readFile(cjcTomlPath, 'utf8');
+await fs.writeFile(cjcTomlPath, platformizeCjcToml(cjcToml, process.platform, cangjieHome));
 
 const cjpmToml = await fs.readFile('cjpm.toml', 'utf8');
 await fs.writeFile(path.join(root, 'cjpm.O1.toml'), cjpmToml.replace('compile-option = "-O2"', 'compile-option = "-O1"'));
