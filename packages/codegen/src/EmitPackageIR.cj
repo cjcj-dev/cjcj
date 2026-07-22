@@ -126,8 +126,11 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         cgModToEmit.GenIncremental()
         SetSymbolLinkageType(cgModToEmit)
         subDirNum = DumpIRIfNeeded(cgModToEmit, "GenIncremental", subDirNum)
-        if (let Some(initializerName) <- EmitStaticGenericTIsAndLLVMUsed(cgModToEmit)) {
-            prespecializedInitializers.add(initializerName)
+        EmitStaticGenericTIsAndLLVMUsed(cgModToEmit)
+        if (options.cjcjOptimization) {
+            if (let Some(initializerName) <- EmitPrespecializedTypeInfos(cgModToEmit)) {
+                prespecializedInitializers.add(initializerName)
+            }
         }
         emitIdx++
     }
@@ -1111,11 +1114,10 @@ private func KeepSomeTypesManually(cgMod: CGModule): Unit {
     }
 }
 
-private func EmitStaticGenericTIsAndLLVMUsed(cgMod: CGModule): Option<String> {
+private func EmitStaticGenericTIsAndLLVMUsed(cgMod: CGModule): Unit {
     if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
         let usedValues = ArrayList<LLVMValueRef>()
-        let (staticGITable, prespecializedRecords) = EmitStaticGenericTITable(cgMod)
-        let prespecializedInitializer = EmitPrespecializedTypeInfoRegistration(cgMod, prespecializedRecords)
+        let staticGITable = EmitStaticGenericTITable(cgMod)
         if (!staticGITable.isNull()) {
             usedValues.add(staticGITable)
         }
@@ -1138,7 +1140,7 @@ private func EmitStaticGenericTIsAndLLVMUsed(cgMod: CGModule): Option<String> {
             }
         }
         if (usedValues.isEmpty()) {
-            return prespecializedInitializer
+            return
         }
         let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(llvmContext), 0u32) }
         let usedArrayType = unsafe { LLVMArrayType(i8PtrType, UInt32(usedValues.size)) }
@@ -1160,17 +1162,14 @@ private func EmitStaticGenericTIsAndLLVMUsed(cgMod: CGModule): Option<String> {
         try (sectionName = unsafe { LibC.mallocCString("llvm.metadata") }.asResource()) {
             unsafe { LLVMSetSection(llvmUsed, sectionName.value) }
         }
-        return prespecializedInitializer
     }
-    return None
 }
 
-private func EmitStaticGenericTITable(cgMod: CGModule): (LLVMValueRef, ArrayList<LLVMValueRef>) {
+private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
     let staticGINames = cgMod.GetCGContext().GetStaticGINames()
     let typeInfoType = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
     let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(cgMod.GetLLVMContext())
     let values = ArrayList<LLVMValueRef>()
-    let prespecializedRecords = ArrayList<LLVMValueRef>()
     let emittedNames = HashSet<String>()
     let orderedStaticGINames = ArrayList<String>()
     for (typeInfoName in staticGINames) {
@@ -1181,10 +1180,6 @@ private func EmitStaticGenericTITable(cgMod: CGModule): (LLVMValueRef, ArrayList
         let staticGI = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoType)
         if (ShouldEmitStaticGI(staticGI)) {
             CJC_ASSERT(unsafe { LLVMIsDeclaration(staticGI) } == 0)
-            let prespecializedRecord = EmitPrespecializedTypeInfoRecord(cgMod, typeInfoName, staticGI)
-            if (!prespecializedRecord.isNull()) {
-                prespecializedRecords.add(prespecializedRecord)
-            }
             values.add(staticGI)
             emittedNames.add(typeInfoName)
         }
@@ -1200,17 +1195,13 @@ private func EmitStaticGenericTITable(cgMod: CGModule): (LLVMValueRef, ArrayList
             }
             if (!staticGI.isNull()) {
                 CJC_ASSERT(unsafe { LLVMIsDeclaration(staticGI) } == 0)
-                let prespecializedRecord = EmitPrespecializedTypeInfoRecord(cgMod, reflectStaticGIName, staticGI)
-                if (!prespecializedRecord.isNull()) {
-                    prespecializedRecords.add(prespecializedRecord)
-                }
                 values.add(staticGI)
                 emittedNames.add(reflectStaticGIName)
             }
         }
     }
     if (values.isEmpty()) {
-        return (LLVMNullValue(), prespecializedRecords)
+        return LLVMNullValue()
     }
     let sortedValues = TopologicalSortStaticGIs(cgMod, values)
     let arrayType = unsafe { LLVMArrayType(typeInfoPtrType, UInt32(values.size)) }
@@ -1221,7 +1212,50 @@ private func EmitStaticGenericTITable(cgMod: CGModule): (LLVMValueRef, ArrayList
         LLVMSetGlobalConstant(table, 0)
     }
     addAttribute(table, "CFileStaticGenericTI")
-    return (table, prespecializedRecords)
+    return table
+}
+
+// TYPEINFO_METADATA_V2.md C1 requires the cjcj-only path to reuse the existing static-GI
+// instantiation surface. Keep the ordinary static-GI emitter byte-for-byte unchanged and perform
+// this second pass only after the explicit optimization flag has been selected.
+private func EmitPrespecializedTypeInfos(cgMod: CGModule): Option<String> {
+    let options = cgMod.GetCGContext().GetCompileOptions()
+    if (options.target.os != OSType.LINUX || options.target.arch != ArchType.X86_64) {
+        return None
+    }
+    let typeInfoType = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
+    let records = ArrayList<LLVMValueRef>()
+    let emittedNames = HashSet<String>()
+    let orderedStaticGINames = ArrayList<String>()
+    for (typeInfoName in cgMod.GetCGContext().GetStaticGINames()) {
+        orderedStaticGINames.add(typeInfoName)
+    }
+    sort(orderedStaticGINames, by: { left: String, right: String => CompareString(left, right) })
+    for (typeInfoName in orderedStaticGINames) {
+        let staticGI = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoType)
+        if (ShouldEmitStaticGI(staticGI)) {
+            CJC_ASSERT(unsafe { LLVMIsDeclaration(staticGI) } == 0)
+            records.add(EmitPrespecializedTypeInfoRecord(cgMod, typeInfoName, staticGI))
+            emittedNames.add(typeInfoName)
+        }
+    }
+    for (reflectStaticGIName in cgMod.GetCGContext().GetReflectGeneratedStaticGINames()) {
+        if (emittedNames.contains(reflectStaticGIName)) {
+            continue
+        }
+        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            var staticGI = LLVMNullValue()
+            try (nameCString = unsafe { LibC.mallocCString(reflectStaticGIName) }.asResource()) {
+                staticGI = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+            }
+            if (!staticGI.isNull()) {
+                CJC_ASSERT(unsafe { LLVMIsDeclaration(staticGI) } == 0)
+                records.add(EmitPrespecializedTypeInfoRecord(cgMod, reflectStaticGIName, staticGI))
+                emittedNames.add(reflectStaticGIName)
+            }
+        }
+    }
+    return EmitPrespecializedTypeInfoRegistration(cgMod, records)
 }
 
 // TYPEINFO_METADATA_V2.md C1 authorizes this cjcj-only optimization: the existing STATIC_GI
