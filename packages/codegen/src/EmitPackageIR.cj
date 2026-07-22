@@ -1206,8 +1206,9 @@ private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
 }
 
 // TYPEINFO_METADATA_V2.md C1 authorizes this cjcj-only optimization: the existing STATIC_GI
-// TypeInfo initializer is already the DYN_TypeInfo binary mirror, so prespecialization reuses
-// that canonical record and only gives it a discoverable section and per-key COMDAT.
+// TypeInfo initializer is already the DYN_TypeInfo binary mirror. Keep the runtime's existing
+// static-GI record in its metadata section and clone that initializer into the prespecialization
+// section: the static-GI table uses local relative aliases that cannot target a discarded COMDAT.
 private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: String,
     typeInfo: LLVMValueRef): Unit {
     let options = cgMod.GetCGContext().GetCompileOptions()
@@ -1216,11 +1217,20 @@ private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: Str
         return
     }
     let moduleHandle = if (let Some(handle) <- cgMod.GetLLVMModule()) { handle } else { return }
-    try (sectionName = unsafe { LibC.mallocCString(PRESPECIALIZED_TYPEINFO_SECTION) }.asResource(),
-        comdatName = unsafe { LibC.mallocCString(typeInfoName) }.asResource()) {
+    let prespecializedName = typeInfoName + ".cjcj.prespec"
+    try (recordName = unsafe { LibC.mallocCString(prespecializedName) }.asResource(),
+        sectionName = unsafe { LibC.mallocCString(PRESPECIALIZED_TYPEINFO_SECTION) }.asResource()) {
         unsafe {
-            LLVMSetSection(typeInfo, sectionName.value)
-            LLVMSetComdat(typeInfo, LLVMGetOrInsertComdat(moduleHandle.raw, comdatName.value))
+            var record = LLVMGetNamedGlobal(moduleHandle.raw, recordName.value)
+            if (record.isNull()) {
+                record = LLVMAddGlobal(moduleHandle.raw, LLVMGlobalGetValueType(typeInfo), recordName.value)
+            }
+            LLVMSetInitializer(record, LLVMGetInitializer(typeInfo))
+            LLVMSetLinkage(record, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
+            LLVMSetGlobalConstant(record, 0)
+            addAttribute(record, GC_KLASS_ATTR)
+            LLVMSetSection(record, sectionName.value)
+            LLVMSetComdat(record, LLVMGetOrInsertComdat(moduleHandle.raw, recordName.value))
         }
     }
 }
