@@ -15,6 +15,7 @@ concurrency:
 
 env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
+  RUNTIME_REF: f851b846e275859aeccacd0edd42b81f28cb25bd
 
 jobs:
   lint:
@@ -31,7 +32,8 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck --severity=error \
-            ci/setup_sdk.sh scripts/package_sdk.sh ci/smoke/run_smoke.sh runtime_shim/build_shim.sh
+            ci/setup_sdk.sh ci/build_patched_runtime.sh ci/install_patched_runtime.sh \
+            scripts/package_sdk.sh ci/smoke/run_smoke.sh runtime_shim/build_shim.sh
       - name: Check smoke assets
         run: |
           test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5
@@ -90,6 +92,27 @@ jobs:
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+      - name: Install runtime build dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make
+      - name: Restore patched runtime cache
+        id: rtcache
+        uses: actions/cache/restore@v4
+        with:
+          path: dist-runtime
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_REF }}
+      - name: Build pinned runtime
+        if: steps.rtcache.outputs.cache-hit != 'true'
+        env:
+          RUNTIME_VERSION: ${{ env.CJCJ_TOOLCHAIN }}
+        run: bash ci/build_patched_runtime.sh "$PWD/dist-runtime"
+      - name: Save patched runtime cache
+        if: steps.rtcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dist-runtime
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ env.RUNTIME_REF }}
+      - name: Activate pinned runtime
+        run: bash ci/install_patched_runtime.sh "$PWD/dist-runtime"
       - name: Build runtime shim
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/cjselfhost_llvmshim.o
