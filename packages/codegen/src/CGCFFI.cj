@@ -867,7 +867,7 @@ public open class LinuxAarch64CJNativeCGCFFI <: LinuxCJNativeCGCFFI {
         return SetCFuncInfo(chirFuncTy, CreateFunctionType(retTy, paramTys, chirFuncTy.HasVarArg()), kinds)
     }
 
-    public override func AddFunctionAttr(chirFuncTy: FuncType, llvmFunc: LLVMValueRef): Unit {
+    public open override func AddFunctionAttr(chirFuncTy: FuncType, llvmFunc: LLVMValueRef): Unit {
         CJC_ASSERT(chirFuncTy.IsCFunc())
         if (FindCFuncInfo(chirFuncTy).isNone()) {
             return
