@@ -88,7 +88,7 @@ jobs:
         with:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
-      # patchelf is always required by scripts/package_sdk.sh, even on a runtime cache hit.
+      # patchelf is always required by scripts/package_sdk.mjs, even on a runtime cache hit.
       - name: Install packaging dependency
         run: sudo apt-get update -qq && sudo apt-get install -y -qq patchelf
       - name: Install runtime build dependencies
@@ -115,7 +115,7 @@ jobs:
         run: cjpm build
       - name: Package SDK
         run: |
-          bash scripts/package_sdk.sh \
+          npx --yes zx@8 scripts/package_sdk.mjs \
             --sdk "$CANGJIE_HOME" \
             --binary "$PWD/target/release/bin/cjcj::cjc" \
             --runtime-so "$PWD/dist-runtime/libcangjie-runtime.so" \
