@@ -7,16 +7,19 @@ import path from 'node:path';
 
 $.stdio = 'inherit';
 
-const here = import.meta.dirname;
-const cpp = process.env.CANGJIE_CPP_SRC || '/root/cj_build/cangjie_compiler';
+// Forward slashes everywhere: zx C-quotes values containing backslashes with
+// $'...', so a raw Windows path like D:\a\... reaches cc with \a as BEL.
+const norm = (p) => p.replaceAll('\\', '/');
+const here = norm(import.meta.dirname);
+const cpp = norm(process.env.CANGJIE_CPP_SRC || '/root/cj_build/cangjie_compiler');
 const llvmSrcInc = `${cpp}/third_party/llvm-project/llvm/include`;
 const llvmGenInc = `${cpp}/build/build/third_party/llvm/include`;
 const flatbuffersInc = `${cpp}/build/build/include`;
 const schemaGenInc = `${cpp}/build/build/schema`;
 let cxx = process.env.CXX || 'clang++';
 const cc = process.env.CC || 'cc';
-const sourceBuiltObject = process.env.CJCJ_LLVM_SHIM_O || '';
-const shimObject = path.join(here, 'cjselfhost_llvmshim.o');
+const sourceBuiltObject = norm(process.env.CJCJ_LLVM_SHIM_O || '');
+const shimObject = norm(path.join(here, 'cjselfhost_llvmshim.o'));
 
 async function commandExists(command) {
   return (await $({nothrow: true, stdio: 'pipe'})`command -v ${command}`).exitCode === 0;
@@ -71,7 +74,7 @@ await $({nothrow: true})`set -o pipefail; nm -C ${shimObject} | grep -cE ' T (LL
 // Macro runtime layout. The compiler resolves its runtime relative to its binary,
 // so the build-tree binary needs a sibling runtime symlink. Installed SDKs already
 // have that layout and need no special handling.
-const repo = path.resolve(here, '..');
+const repo = norm(path.resolve(here, '..'));
 if (process.env.CANGJIE_HOME && await isDirectory(`${process.env.CANGJIE_HOME}/runtime`)) {
   await fs.mkdir(`${repo}/target/release`, {recursive: true});
   await $`ln -sfn ${process.env.CANGJIE_HOME}/runtime ${repo}/target/release/runtime`;

@@ -178,6 +178,8 @@ if (process.platform === 'win32') {
       `stdx_path="$(cygpath -u ${shellQuote(stdxPath)})"`,
       'cd "$repo"',
       `export CANGJIE_HOME="$cangjie_home" CANGJIE_STDX_PATH="$stdx_path" cjHeapSize=${shellQuote(heapSize)}`,
+      // The msys2 login profile drops USERPROFILE; cjpm needs it (round-16).
+      `export USERPROFILE=${shellQuote(process.env.USERPROFILE || '')}`,
       'export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/clang64/bin:$PATH:/c/mingw64/bin"',
       command,
     ].join('\n');
