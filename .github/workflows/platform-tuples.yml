@@ -17,8 +17,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  LLVM_URL: https://gitcode.com/Cangjie/llvm-project.git
-  LLVM_SHA: b462fbd9fb53440aa4736a8cf9f9e97324e0623a
+  # Same proven source as build-fixed-llc.yml: cjcj-llvm fork with getUNDEF
+  # lowering, clang CTAD fix, and the in-tree CangjieDemangle source stub.
+  LLVM_URL: https://github.com/cjcj-dev/cjcj-llvm.git
+  LLVM_SHA: 4f61703c3225d60a7dc839718d822911628e6740
   CANGJIE_COMPILER_URL: https://gitcode.com/Cangjie/cangjie_compiler.git
   CANGJIE_COMPILER_SHA: 87fff87a1883da9bfe5956296d8079e8a7f9d15f
   FLATBUFFERS_URL: https://gitcode.com/openharmony/third_party_flatbuffers.git
