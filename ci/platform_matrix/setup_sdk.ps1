@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-# Windows counterpart of ci/setup_sdk.sh. cjv v0.2.20 publishes Windows x64,
+# Windows counterpart of ci/setup_sdk.mjs. cjv v0.2.20 publishes Windows x64,
 # and the selected matrix contains Windows x64 only.
 $Toolchain = if ($env:CJCJ_TOOLCHAIN) { $env:CJCJ_TOOLCHAIN } else { "nightly-1.2.0-alpha.20260721165458" }
 $CjvVersion = if ($env:CJV_VERSION) { $env:CJV_VERSION } else { "v0.2.20" }

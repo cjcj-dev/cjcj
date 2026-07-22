@@ -23,7 +23,7 @@ case "$(uname -s)" in
     *)
         # Override GitHub's CI=true only for the installer. The downloaded native
         # tuple is activated uniformly below instead of only on Linux x64.
-        CI= FIXED_LLC_GZ= bash ci/setup_sdk.sh || setup_rc=$?
+        CI= FIXED_LLC_GZ= npx --yes zx@8 ci/setup_sdk.mjs || setup_rc=$?
         CANGJIE_HOME="$HOME/.cjv/toolchains/$TOOLCHAIN"
         CANGJIE_STDX_PATH="$HOME/.cjv/stdx/$TOOLCHAIN/static/stdx"
         export CANGJIE_HOME CANGJIE_STDX_PATH
