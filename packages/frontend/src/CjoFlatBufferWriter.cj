@@ -17,7 +17,7 @@ import cjcj::modules.CreateFileInfo as CreateModuleFileInfo
 import cjcj::modules.{CreateArrayInfo, CreateAssignInfo, CreateBinaryInfo, CreateBlockInfo, CreateCallInfo,
     CreateExpr, CreateForInInfo, CreateFuncArgInfo, CreateIncOrDecInfo, CreateJumpInfo, CreateLambdaInfo,
     CreateLetPatternDestructorInfo, CreateLitConstInfo, CreateMatchCaseInfo, CreateMatchInfo, CreatePattern,
-    CreateReferenceInfo, CreateSpawnInfo, CreateSubscriptInfo, CreateTryInfo, CreateUnaryInfo}
+    CreateParamInfo, CreateReferenceInfo, CreateSpawnInfo, CreateSubscriptInfo, CreateTryInfo, CreateUnaryInfo}
 import cjcj::modules.{CreateSemaTy, VerifySemaTyContracts, MF_SEMA_TY_INFO_NONE,
     MF_SEMA_TY_INFO_FUNC_TY_INFO, MF_SEMA_TY_INFO_COMPOSITE_TY_INFO, MF_SEMA_TY_INFO_GENERIC_TY_INFO,
     MF_SEMA_TY_INFO_ARRAY_TY_INFO}
@@ -2272,11 +2272,7 @@ public class ASTWriter {
                 defaultVal = SaveExpr(assignment)
             }
         }
-        builder.StartTable(3)
-        builder.AddU32(2, defaultVal)
-        builder.AddBool(1, param.isMemberParam)
-        builder.AddBool(0, param.isNamedParam)
-        return builder.EndTable()
+        return CreateParamInfo(builder, param.isNamedParam, param.isMemberParam, defaultVal)
     }
 
     private func SaveClassInfo(classDecl: ClassDecl): FlatBufferOffset {
