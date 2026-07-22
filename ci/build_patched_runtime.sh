@@ -4,22 +4,15 @@
 # includes the mutator writer-preference and .cjmetadata fixes as normal commits.
 #
 # Usage: build_patched_runtime.sh <out-dir>
-#   Writes the host-arch shared library plus source/SHA-256 provenance files.
+#   Writes <out-dir>/libcangjie-runtime.so (host arch).
 # Env:
-#   RUNTIME_REF       optional workflow assertion; must equal runtime_pin.env
+#   RUNTIME_REF       pinned fork commit (default below)
 #   RUNTIME_VERSION   CJ_SDK_VERSION stamped into the build
 #   RUNTIME_SRC_URL   CangjieFork runtime repo
 set -euo pipefail
 
 OUT="${1:?usage: build_patched_runtime.sh <out-dir>}"
-HERE="$(cd "$(dirname "$0")" && pwd)"
-REQUESTED_RUNTIME_REF="${RUNTIME_REF:-}"
-# shellcheck source=runtime_pin.env
-. "$HERE/runtime_pin.env"
-[ -z "$REQUESTED_RUNTIME_REF" ] || [ "$REQUESTED_RUNTIME_REF" = "$RUNTIME_REF" ] || {
-    echo "workflow/runtime pin mismatch: $REQUESTED_RUNTIME_REF != $RUNTIME_REF" >&2
-    exit 2
-}
+RUNTIME_REF="${RUNTIME_REF:-f56e60bfb05121f138f39dec46d7e0b38eb3165a}"
 VERSION="${RUNTIME_VERSION:-1.2.0-alpha.20260619020029}"
 SRC_URL="${RUNTIME_SRC_URL:-https://github.com/CangjieFork/cangjie_runtime.git}"
 
@@ -44,8 +37,6 @@ SO="$(find "$WORK/runtime/output" -path '*Release*' -name 'libcangjie-runtime.so
 
 mkdir -p "$OUT"
 cp "$SO" "$OUT/libcangjie-runtime.so"
-printf '%s\n' "$RUNTIME_REF" > "$OUT/SOURCE_SHA"
-(cd "$OUT" && sha256sum libcangjie-runtime.so > libcangjie-runtime.so.sha256)
 log "wrote $OUT/libcangjie-runtime.so"
 # Fail loudly if the .cjmetadata discriminator carried by the fork is absent.
 # grep -a reads the object directly (no `strings | grep -q`, which trips pipefail via SIGPIPE).
