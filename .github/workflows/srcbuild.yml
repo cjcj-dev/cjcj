@@ -171,6 +171,17 @@ jobs:
         # workaround). Build a seed cjcj at -O1 with the upstream cjc to avoid the bug.
         run: npx --yes zx@8 ci/srcbuild/steps/build-stage1.mjs
 
+      - name: Add swap for stage2 chir heap
+        # The O1-seed stage1 needs >14GB Cangjie heap for the chir package
+        # (rc2 OOM at 12GB/frag 27%, rc3 OOM at 14GB/frag 38%; 24GB passes
+        # locally at ~26GB RSS). 16GB RAM + 16GB swap carries a 20GB heap.
+        run: |
+          sudo fallocate -l 16G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
       - name: Build cjcj — stage2 (cjcj-stage1 @ -O2, self-host)
         # cjcj (our compiler) has no upstream -O2 CHIR bug; self-build the final cjcj at
         # -O2 using the seed at $sdk/bin/cjc. The fixed static llc handles the -O2 backend.
