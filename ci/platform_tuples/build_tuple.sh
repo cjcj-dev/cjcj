@@ -16,8 +16,8 @@ mkdir -p "$log_dir" "$output"
 exec > >(tee "$log_dir/tuple-build.log") 2>&1
 
 case "$(uname -s)" in
-    MINGW*|MSYS*) exe=.exe; pic_flag= ;;
-    *)            exe=;     pic_flag=-fPIC ;;
+    MINGW*|MSYS*) exe=.exe; pic_flag=;     bundle_static_llvm=1 ;;
+    *)            exe=;     pic_flag=-fPIC; bundle_static_llvm=0 ;;
 esac
 
 cmake -G Ninja -S "$llvm_src/llvm" -B "$llvm_build" \
@@ -74,4 +74,31 @@ shim_exports="$($nm_tool -C "$output/cjselfhost_llvmshim.o" \
     | grep -cE ' [Tt] _?(LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
 test "$shim_exports" -ge 90
 echo "shim exported symbols: $shim_exports"
-sha256sum "$output/llc.gz" "$output/cjselfhost_llvmshim.o"
+
+if [[ "$bundle_static_llvm" == 1 ]]; then
+    # cjcj calls the LLVM C API directly in addition to the C++ API used by
+    # the shim. Preserve archive extraction at the final PE link instead of
+    # folding the libraries into one relocatable object.
+    llvm_components=(
+        core analysis bitreader bitwriter irreader passes support target transformutils
+        aarch64 arm x86
+    )
+    llvm_config="$llvm_build/bin/llvm-config$exe"
+    static_dir="$output/llvm-static"
+    mkdir -p "$static_dir"
+    read -r -a llvm_libfiles <<< "$($llvm_config --link-static --libfiles "${llvm_components[@]}")"
+    test "${#llvm_libfiles[@]}" -gt 0
+    : > "$output/llvm-static-libs.txt"
+    for libfile in "${llvm_libfiles[@]}"; do
+        test -s "$libfile"
+        libname="${libfile##*/}"
+        cp "$libfile" "$static_dir/$libname"
+        printf '%s\n' "$libname" >> "$output/llvm-static-libs.txt"
+    done
+    read -r -a llvm_system_libs <<< "$($llvm_config --link-static --system-libs "${llvm_components[@]}")"
+    printf '%s\n' "${llvm_system_libs[@]}" > "$output/llvm-system-libs.txt"
+    echo "LLVM static archives: ${#llvm_libfiles[@]}"
+    du -ch "$static_dir"/*.a | tail -n 1
+fi
+
+find "$output" -type f -print0 | sort -z | xargs -0 sha256sum
