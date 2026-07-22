@@ -93,6 +93,10 @@ if (process.platform === 'win32') {
   process.env.PATH = `${pathEntries.join(':')}:${process.env.PATH || ''}`;
   const libraryPath = `${path.join(cangjieHome, 'third_party', 'llvm', 'lib')}:${path.join(cangjieHome, 'runtime', 'lib', process.env.SDK_RUNTIME_DIR || '')}:${path.join(cangjieHome, 'tools', 'lib')}`;
   if (process.platform === 'darwin') {
+    const sdkRoot = (await $({stdio: 'pipe', verbose: false})`xcrun --sdk macosx --show-sdk-path`).stdout.trim();
+    if (!sdkRoot) throw new Error('xcrun returned an empty macOS SDK path');
+    process.env.SDKROOT = sdkRoot;
+    console.log(`[platform setup_sdk] SDKROOT=${sdkRoot}`);
     process.env.DYLD_LIBRARY_PATH = libraryPath;
     await $({nothrow: true})`xattr -dr com.apple.quarantine ${cangjieHome}`;
   } else process.env.LD_LIBRARY_PATH = libraryPath;
