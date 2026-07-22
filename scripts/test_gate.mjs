@@ -40,8 +40,8 @@ for (const fixture of ['t1_test_basic', 't2_mock_member', 't3_test_vs_normal']) 
     async function recordSymbols(tag, binary) {
       if (!await executable(binary)) { contents += `[${tag}] <no-binary>\n`; return; }
       const nm = await $({nothrow: true, quiet: true})`nm ${binary}`;
-      const count = regex => (nm.stdout.match(regex) || []).length;
-      contents += `[${tag}]\n  TestPackage=${count(/TestPackage/g)}\n  registerSuite=${count(/register[A-Za-z0-9_]*Suite/g)}\n  testEntry=${count(/entry_main/g)}\n  ToMock=${count(/ToMock/g)}\n`;
+      const count = regex => nm.stdout.split('\n').filter(line => regex.test(line)).length;
+      contents += `[${tag}]\n  TestPackage=${count(/TestPackage/)}\n  registerSuite=${count(/register[A-Za-z0-9_]*Suite/)}\n  testEntry=${count(/entry_main/)}\n  ToMock=${count(/ToMock/)}\n`;
     }
     if (fixture === 't1_test_basic') {
       const app = path.join(work, 't1.app');
