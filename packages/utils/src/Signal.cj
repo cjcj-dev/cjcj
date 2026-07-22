@@ -64,7 +64,23 @@ struct WindowsExceptionPointers {
 @When[os == "Windows"]
 private type WindowsExceptionHandler = CFunc<(CPointer<WindowsExceptionPointers>) -> Int32>
 
-@When[os != "Windows"]
+// Apple XNU bsd/sys/_types/_sigaltstack.h:42-47: ss_sp, ss_size, ss_flags.
+@When[os == "macOS" || os == "iOS"]
+@C
+struct SignalStack {
+    let ss_sp: CPointer<Unit>
+    let ss_size: UIntNative
+    let ss_flags: Int32
+
+    init(sp: CPointer<Unit>, flags: Int32, size: UIntNative) {
+        ss_sp = sp
+        ss_size = size
+        ss_flags = flags
+    }
+}
+
+// glibc sysdeps/unix/sysv/linux/bits/types/stack_t.h:25-31: ss_sp, ss_flags, ss_size.
+@When[os != "Windows" && os != "macOS" && os != "iOS"]
 @C
 struct SignalStack {
     let ss_sp: CPointer<Unit>
