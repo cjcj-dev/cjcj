@@ -75,26 +75,30 @@ jobs:
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
           FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/llc.gz
-        run: bash ci/setup_sdk.sh
+        run: npx --yes zx@8 ci/setup_sdk.mjs
       - name: Save SDK cache
         if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Install build deps
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq patchelf clang cmake make
       - name: Restore patched runtime cache
         id: rtcache
         uses: actions/cache/restore@v4
         with:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
+      # patchelf is always required by scripts/package_sdk.sh, even on a runtime cache hit.
+      - name: Install packaging dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq patchelf
+      - name: Install runtime build dependencies
+        if: steps.rtcache.outputs.cache-hit != 'true'
+        run: sudo apt-get install -y -qq clang cmake make
       - name: Build fork runtime
         if: steps.rtcache.outputs.cache-hit != 'true'
         env:
           RUNTIME_VERSION: ${{ inputs.version }}
-        run: bash ci/build_patched_runtime.sh "$PWD/dist-runtime"
+        run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Save patched runtime cache
         if: steps.rtcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -102,11 +106,11 @@ jobs:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
       - name: Activate pinned runtime
-        run: bash ci/install_patched_runtime.sh "$PWD/dist-runtime"
+        run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Build runtime shim
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/cjselfhost_llvmshim.o
-        run: bash runtime_shim/build_shim.sh
+        run: npx --yes zx@8 runtime_shim/build_shim.mjs
       - name: Build workspace
         run: cjpm build
       - name: Package SDK
