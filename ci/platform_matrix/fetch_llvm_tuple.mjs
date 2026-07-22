@@ -42,18 +42,18 @@ async function ghLines(endpoint, jq) {
 export async function selectTupleArtifact() {
   if (platform === 'linux_x86_64') {
     const runId = process.env.LINUX_X64_TUPLE_RUN || '29840652402';
-    const ids = await ghLines(`/repos/${repo}/actions/runs/${runId}/artifacts`, `.artifacts[] | select(.name == "${artifactName}" and .expired == false) | .id`);
+    const ids = await ghLines(`repos/${repo}/actions/runs/${runId}/artifacts`, `.artifacts[] | select(.name == "${artifactName}" and .expired == false) | .id`);
     return {runId, artifactId: ids[0] || ''};
   }
 
   const attempts = Number(process.env.TUPLE_FETCH_ATTEMPTS || 60);
   const delaySeconds = Number(process.env.TUPLE_FETCH_DELAY_SECONDS || 30);
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const runIds = await ghLines(`/repos/${repo}/actions/workflows/${workflow}/runs?branch=${encodeURIComponent(branch)}&status=completed&per_page=30`, '.workflow_runs[].id');
+    const runIds = await ghLines(`repos/${repo}/actions/workflows/${workflow}/runs?branch=${encodeURIComponent(branch)}&status=completed&per_page=30`, '.workflow_runs[].id');
     for (const runId of runIds) {
-      const jobs = await ghLines(`/repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`, `.jobs[] | select(.name | contains("${platform}")) | select(.conclusion == "success") | .id`);
+      const jobs = await ghLines(`repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`, `.jobs[] | select(.name | contains("${platform}")) | select(.conclusion == "success") | .id`);
       if (!jobs[0]) continue;
-      const artifacts = await ghLines(`/repos/${repo}/actions/runs/${runId}/artifacts`, `.artifacts[] | select(.name == "${artifactName}" and .expired == false) | .id`);
+      const artifacts = await ghLines(`repos/${repo}/actions/runs/${runId}/artifacts`, `.artifacts[] | select(.name == "${artifactName}" and .expired == false) | .id`);
       if (artifacts[0]) return {runId, artifactId: artifacts[0]};
     }
     if (attempt < attempts) {
@@ -91,7 +91,7 @@ const scratch = path.join(process.env.RUNNER_TEMP || process.env.TMPDIR || os.tm
 await fs.mkdir(scratch, {recursive: true});
 const archive = path.join(scratch, 'artifact.zip');
 const archiveFd = fsSync.openSync(archive, 'w');
-const download = spawnSync('gh', ['api', `/repos/${repo}/actions/artifacts/${artifactId}/zip`], {stdio: ['inherit', archiveFd, 'inherit']});
+const download = spawnSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifactId}/zip`], {stdio: ['inherit', archiveFd, 'inherit']});
 fsSync.closeSync(archiveFd);
 if (download.status !== 0) process.exit(download.status ?? 1);
 

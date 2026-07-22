@@ -33,7 +33,7 @@ for (const command of ['gh', 'unzip']) {
 }
 
 await fs.mkdir(work, {recursive: true});
-const ids = await $({stdio: 'pipe'})`gh api /repos/${repository}/actions/runs/${run}/artifacts --jq ${`.artifacts[] | select(.name == "${artifactName}" and .expired == false) | .id`}`;
+const ids = await $({stdio: 'pipe'})`gh api repos/${repository}/actions/runs/${run}/artifacts --jq ${`.artifacts[] | select(.name == "${artifactName}" and .expired == false) | .id`}`;
 const artifactId = ids.stdout.split(/\r?\n/).find(Boolean)?.trim() || '';
 if (!artifactId) {
   console.error(`ERROR: active artifact ${artifactName} not found on run ${run}`);
@@ -42,7 +42,7 @@ if (!artifactId) {
 
 const archive = path.join(work, 'artifact.zip');
 const archiveFd = fsSync.openSync(archive, 'w');
-const download = spawnSync('gh', ['api', `/repos/${repository}/actions/artifacts/${artifactId}/zip`], {stdio: ['inherit', archiveFd, 'inherit']});
+const download = spawnSync('gh', ['api', `repos/${repository}/actions/artifacts/${artifactId}/zip`], {stdio: ['inherit', archiveFd, 'inherit']});
 fsSync.closeSync(archiveFd);
 if (download.status !== 0) process.exit(download.status ?? 1);
 const entries = (await $({stdio: 'pipe'})`unzip -Z1 ${archive}`).stdout.split(/\r?\n/).filter(Boolean);
