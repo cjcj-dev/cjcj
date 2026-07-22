@@ -131,17 +131,19 @@ let shim;
 let build;
 if (process.platform === 'win32') {
   const msysBash = process.env.MSYS2_BASH || 'C:\\msys64\\usr\\bin\\bash.exe';
-  const msysEnv = {
-    ...process.env,
-    PLATFORM_REPO_ROOT: process.cwd(),
-    MSYSTEM: 'CLANG64',
-    MSYS2_PATH_TYPE: 'inherit',
-    CHERE_INVOKING: '1',
-  };
-  const prefix = 'repo="$(cygpath -u "$PLATFORM_REPO_ROOT")"; cangjie_home="$(cygpath -u "$CANGJIE_HOME")"; cd "$repo"; export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/clang64/bin:$PATH"';
-  shim = await $({nothrow: true, env: msysEnv})`${toCommandPath(msysBash)} -lc ${`${prefix}; npx --yes zx@8 runtime_shim/build_shim.mjs`}`;
+  const shellQuote = (value) => "'" + value.replace(/'/g, "'\\''") + "'";
+  const prefix = [
+    `repo="$(cygpath -u ${shellQuote(process.cwd())})"`,
+    `cangjie_home="$(cygpath -u ${shellQuote(cangjieHome)})"`,
+    `stdx_path="$(cygpath -u ${shellQuote(stdxPath)})"`,
+    'cd "$repo"',
+    `export CANGJIE_HOME="$cangjie_home" CANGJIE_STDX_PATH="$stdx_path" cjHeapSize=${shellQuote(heapSize)}`,
+    'export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/clang64/bin:$PATH"',
+  ].join('; ');
+  const login = (command) => 'export MSYSTEM=CLANG64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -l -c ' + shellQuote(`${prefix}; ${command}`);
+  shim = await $({nothrow: true})`${toCommandPath(msysBash)} -c ${login('npx --yes zx@8 runtime_shim/build_shim.mjs')}`;
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
-  build = await $({nothrow: true, env: msysEnv})`${toCommandPath(msysBash)} -lc ${`${prefix}; cjpm build`}`;
+  build = await $({nothrow: true})`${toCommandPath(msysBash)} -c ${login('cjpm build')}`;
 } else {
   shim = await $({nothrow: true})`npx --yes zx@8 runtime_shim/build_shim.mjs`;
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);

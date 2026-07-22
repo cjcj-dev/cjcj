@@ -41,26 +41,21 @@ if (process.platform === 'linux') {
   await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${installRoot}`;
 } else if (process.platform === 'win32') {
   const msysBash = process.env.MSYS2_BASH || 'C:\\msys64\\usr\\bin\\bash.exe';
-  const env = {
-    ...process.env,
-    PLATFORM_RUNTIME_SOURCE: runtimeDirectory,
-    PLATFORM_RUNTIME_PREINSTALL: preinstall,
-    PLATFORM_RUNTIME_INSTALL: installRoot,
-    PLATFORM_RUNTIME_VERSION: version,
-    MSYSTEM: 'CLANG64',
-    MSYS2_PATH_TYPE: 'inherit',
-    CHERE_INVOKING: '1',
-  };
+  const shellQuote = (value) => "'" + value.replace(/'/g, "'\\''") + "'";
   const script = [
     'set -euo pipefail',
-    'runtime_source="$(cygpath -u "$PLATFORM_RUNTIME_SOURCE")"',
-    'runtime_preinstall="$(cygpath -u "$PLATFORM_RUNTIME_PREINSTALL")"',
-    'runtime_install="$(cygpath -u "$PLATFORM_RUNTIME_INSTALL")"',
+    `runtime_source="$(cygpath -u ${shellQuote(runtimeDirectory)})"`,
+    `runtime_preinstall="$(cygpath -u ${shellQuote(preinstall)})"`,
+    `runtime_install="$(cygpath -u ${shellQuote(installRoot)})"`,
     'cd "$runtime_source"',
-    'python3 build.py build --target windows-x86_64 --build-type release --target-toolchain /clang64 --prefix "$runtime_preinstall" -v "$PLATFORM_RUNTIME_VERSION"',
+    `python3 build.py build --target windows-x86_64 --build-type release --target-toolchain /clang64 --prefix "$runtime_preinstall" -v ${shellQuote(version)}`,
     'python3 build.py install --prefix "$runtime_install"',
-  ].join('; ');
-  await $({env})`${toCommandPath(msysBash)} -lc ${script}`;
+  ].join('\n');
+  const scriptPath = path.join(process.cwd(), 'rtbuild-msys2.sh');
+  await fs.writeFile(scriptPath, `${script}\n`);
+  const scriptMixedPath = scriptPath.replaceAll('\\', '/');
+  const command = 'export MSYSTEM=CLANG64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -l ' + scriptMixedPath;
+  await $`${toCommandPath(msysBash)} -c ${command}`;
 } else {
   console.error(`FATAL: unsupported runtime build host: ${process.platform}/${process.arch}`);
   process.exit(5);
