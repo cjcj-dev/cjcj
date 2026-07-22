@@ -15,8 +15,6 @@ on:
         default: relwithdebinfo
         type: choice
         options: [release, relwithdebinfo, debug]
-  schedule:
-    - cron: "17 18 * * 0"
 
 permissions:
   contents: read
