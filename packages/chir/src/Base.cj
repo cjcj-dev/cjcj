@@ -36,7 +36,7 @@ public open class Base <: Hashable & Equatable<Base> {
         annotationMap.Set<T, R>(value)
     }
 
-    public func Remove<T>(): Unit {
+    public func Remove<T>(): Unit where T <: AnnotationBase {
         annotationMap.Remove<T>()
     }
 

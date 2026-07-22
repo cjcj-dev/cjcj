@@ -26,12 +26,12 @@ public class TypeIndex <: Hashable & Equatable<TypeIndex> {
 }
 
 public interface AnnotationBase {
+    static func GetTypeIndex(): TypeIndex
     func Clone(): AnnotationBase
     func ToString(): String
 }
 
 public interface Annotation<T> <: AnnotationBase {
-    static func GetTypeIndex(): TypeIndex
     static func Create(): Annotation<T>
     static func Create(value: T): Annotation<T>
     static func Extract(annotation: Annotation<T>): T
@@ -628,10 +628,17 @@ public class AnnotationMap {
         annotations[index] = T.Create(value)
     }
 
-    public func Remove<T>(): Unit {
+    public func Remove<T>(): Unit where T <: AnnotationBase {
         let index = T.GetTypeIndex()
         annotations.remove(index)
-        annotationOrder.remove(element: index)
+        var position: Int64 = 0
+        while (position < annotationOrder.size) {
+            if (annotationOrder[position] == index) {
+                annotationOrder.remove(at: position)
+                break
+            }
+            position++
+        }
     }
 
     // Get the value of the annotation T, returning the default empty value when absent. Annotation.h:370.
