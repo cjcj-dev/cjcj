@@ -50,7 +50,7 @@ jobs:
             llvm-targets: AArch64
           - runner: windows-2022
             platform: windows_x86_64
-            llvm-targets: X86
+            llvm-targets: AArch64;ARM;X86
     env:
       TUPLE_PLATFORM: ${{ matrix.platform }}
       LLVM_TARGETS: ${{ matrix.llvm-targets }}
