@@ -73,7 +73,7 @@ export async function compareOrWrite({mode, label, fixture, transcript, golden, 
     results.push(`${fixture}: PASS`);
     return true;
   }
-  results.push(`${fixture}: FAIL (differs${label === 'selfhost' ? ' from golden' : ''})`);
+  results.push(`${fixture}: FAIL (differs from golden)`);
   console.log(`----- ${fixture} diff (${label} vs golden) -----`);
   process.stdout.write(diff.stdout + diff.stderr);
   return false;
@@ -112,7 +112,8 @@ export async function runSingleFileGoldenGate(options) {
       const localSource = path.join(work, localName);
       const transcript = path.join(work, 't.txt');
       await fs.copyFile(source, localSource);
-      const compile = await $({cwd: work, nothrow: true, quiet: true})`${state.compiler} ${localSource} -o ${path.join(work, copyAsProg ? 'app' : `${fixture}.app`)} ${state.extra}`;
+      const compileSource = copyAsProg ? localName : localSource;
+      const compile = await $({cwd: work, nothrow: true, quiet: true})`${state.compiler} ${compileSource} -o ${path.join(work, copyAsProg ? 'app' : `${fixture}.app`)} ${state.extra}`;
       const replacements = [[work, copyAsProg ? '<BUILD>' : '<WORK>'], [home, '<HOME>']];
       if (replaceCjcBuild) replacements.push(['/root/cj_build/', '<CJC>/']);
       let contents = `[compile] rc=${compile.exitCode}\n${normalized(compile.stdout + compile.stderr, replacements)}\n`;
