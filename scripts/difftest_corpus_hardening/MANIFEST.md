@@ -4,7 +4,7 @@ These programs exercise language features used heavily in the compiler's own
 source but exercised 0x by the existing 113-program difftest corpus. Every file
 compiles EXIT=0 and runs to a deterministic result under the REFERENCE compiler
 (/root/.cjv/bin/cjc, nightly-1.2.0-alpha.20260619020029), which defines the
-expected stdout. They are intended to be run by scripts/difftest.sh against both
+expected stdout. They are intended to be run by scripts/difftest.mjs against both
 the selfhost and reference compilers.
 
 filename | feature guarded | reference stdout (first line) | self-host task most stressed

@@ -1,6 +1,6 @@
 # `--test` / mock gate fixtures
 
-Backing fixtures for `scripts/test_gate.sh` — the `--test`/mock focused compile gate
+Backing fixtures for `scripts/test_gate.mjs` — the `--test`/mock focused compile gate
 for the TestManager+Mock live-integration campaign
 (`audit_persist/TESTMANAGER_LIVE_DESIGN.md`, slice S5). The 114-file difftest corpus
 and sc_bcgate contain no `--test`/mock samples, so this gate is the only signal for
@@ -25,11 +25,11 @@ Per fixture the gate records: compile exit code + normalized diagnostics; produc
 run exit code (and, for the normal `main`, its deterministic stdout); and a stable count of
 `--test`/mock entry symbols (`TestPackage`, `register*Suite`, `entry_main`, `ToMock`).
 Golden is established with the C++ reference compiler and is self-consistent
-(`test_gate.sh --check` → PASS 3/3).
+(`npx --yes zx@8 scripts/test_gate.mjs --check` → PASS 3/3).
 
 ## Selfhost baseline (as of slices S0–S2, before S3/S4 wiring)
 
-`test_gate.sh --self <selfhost cjc>` currently FAILs all three vs golden — the intended
+`npx --yes zx@8 scripts/test_gate.mjs --self <selfhost cjc>` currently FAILs all three vs golden — the intended
 baseline. Two deterministic divergences:
 
 1. Spurious `warning: unused import 'std.unittest.*'` that the reference does not emit

@@ -32,10 +32,10 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck --severity=error \
-            scripts/package_sdk.sh ci/smoke/run_smoke.sh runtime_shim/build_shim.sh
+            scripts/difftest.sh runtime_shim/build_shim.sh
       - name: Check zx script syntax
         run: |
-          find ci runtime_shim -type f -name '*.mjs' -print0 \
+          find ci runtime_shim scripts -type f -name '*.mjs' -print0 \
             | xargs -0 -n1 node --check
       - name: Check smoke assets
         run: |

@@ -13,7 +13,7 @@
 | G1 | **BC 与 C++ 完全一致** | `python3 scripts/bcgate.py --self <cjc> -j 10` | differing **0**、byte-identical **2490/2490**、fully-identical samples **114/114**、compile-errors 0 |
 | G1' | G1 严格复核 | 逐样本 `.bc` 全文件级 diff（**关闭** bcgate 的 hash 名字宽松归一化）+ `scripts/sc_bcgate.py`（自编译语料，多包 import 路径） | 双语料均零差异 |
 | G2 | **自举闭环（A2-A4）** | stage2 = selfhost 编译 selfhost 全包并链接 cjc；stage3 = stage2 重复此过程 | stage2 可运行（`--version` 不 SEGV）；stage2 过 G3 全门；**stage3 与 stage2 产物逐字节一致（定点）** |
-| G3 | **功能门全绿** | `bash scripts/difftest.sh -j 10`；smoke15 | difftest 114/114 MISMATCH=0 FAIL=0；smoke15 15/15（多包 import 语料，是 difftest/bcgate 对 import 回归盲区的唯一把关） |
+| G3 | **功能门全绿** | `npx --yes zx@8 scripts/difftest.mjs -j 10`；smoke15 | difftest 114/114 MISMATCH=0 FAIL=0；smoke15 15/15（多包 import 语料，是 difftest/bcgate 对 import 回归盲区的唯一把关） |
 | G4 | **宏自举** | macro_gate --self | 5/5（宏 .so 由 selfhost 编译并正确展开） |
 | G5 | **完整性清账** | 审计清单 `/tmp/audit/`（1545 gap MANIFEST）+ `rg 'GAP_TODO|INVENTED' packages/` | 每条 gap 状态 = FIXED 或 显式记录的 BLOCKED/债（见第六节债表），无静默省略 |
 

@@ -1,6 +1,6 @@
 # Generic-call resolution gate fixtures
 
-Backs `scripts/generic_gate.sh` — the focused gate for the sema C2 campaign
+Backs `scripts/generic_gate.mjs` — the focused gate for the sema C2 campaign
 (`audit_persist/SEMA_C2_DESIGN.md`, CheckGenericCallCompatible cluster). The 114-file
 difftest corpus exercises generic calls but does not isolate the multi-mapping
 resolution / ambiguity-diagnostic path that C2b/C2c target.
@@ -18,8 +18,8 @@ resolution / ambiguity-diagnostic path that C2b/C2c target.
 
 ## Golden + baseline (as of C2a, before C2b/C2c)
 
-Golden established with the C++ reference compiler; `generic_gate.sh --check` → PASS 5/5.
-`generic_gate.sh --self <selfhost cjc>` current baseline: **PASS=4 FAIL=1** — gf1–gf4 pass
+Golden established with the C++ reference compiler; `npx --yes zx@8 scripts/generic_gate.mjs --check` → PASS 5/5.
+`npx --yes zx@8 scripts/generic_gate.mjs --self <selfhost cjc>` current baseline: **PASS=4 FAIL=1** — gf1–gf4 pass
 (single-mapping model already resolves them; these are regression guards C2c must keep green),
 gf5 fails on the missing multi-mapping ambiguity diagnostic (the DiagnoseForMultiMapping gap,
 ported in C2b and wired in C2c). The selfhost cjc needs a large heap; the gate exports

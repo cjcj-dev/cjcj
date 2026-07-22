@@ -31,7 +31,7 @@ const difftestEnv = {
   DIFFTEST_SELF: self,
   DIFFTEST_REF: oracle,
 };
-await $({env: difftestEnv})`set -o pipefail; bash ${root}/scripts/difftest.sh -j ${jobs} | tee ${work}/difftest.log`;
+await $({env: difftestEnv})`set -o pipefail; npx --yes zx@8 ${root}/scripts/difftest.mjs -j ${jobs} | tee ${work}/difftest.log`;
 await $`grep -Eq 'TOTAL=[0-9]+[[:space:]]+PASS=[0-9]+[[:space:]]+MISMATCH=0[[:space:]]+FAIL=0' ${work}/difftest.log`;
 
 console.log('[2/4] deployed SDK smoke');

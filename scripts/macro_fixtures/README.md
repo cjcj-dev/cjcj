@@ -1,6 +1,6 @@
 # Macro-focused gate fixtures
 
-Fixtures backing `../macro_gate.sh`, the macro-expansion gate for the
+Fixtures backing `../macro_gate.mjs`, the macro-expansion gate for the
 frontend↔macro integration campaign (design:
 `audit_persist/MACRO_INTEGRATION_DESIGN.md`, slice **S4** pre-gate).
 
@@ -32,9 +32,9 @@ macro-usage accounting, not a blanket disable of the unused-import check.
 ## Usage
 
 ```sh
-scripts/macro_gate.sh                       # establish/refresh golden (reference cjc)
-scripts/macro_gate.sh --check               # re-run reference, diff vs golden (determinism)
-scripts/macro_gate.sh --self <path-to-cjc>  # run selfhost cjc, diff vs golden
+npx --yes zx@8 scripts/macro_gate.mjs                       # establish/refresh golden (reference cjc)
+npx --yes zx@8 scripts/macro_gate.mjs --check               # re-run reference, diff vs golden (determinism)
+npx --yes zx@8 scripts/macro_gate.mjs --self <path-to-cjc>  # run selfhost cjc, diff vs golden
 ```
 
 Env overrides: `CANGJIE_HOME` (default `/root/cj_build/cangjie_compiler/output`),
