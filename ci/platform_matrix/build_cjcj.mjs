@@ -157,7 +157,8 @@ await $({nothrow: true})`${toCommandPath(sdkLlc)} --version`;
 
 const cjcTomlPath = path.join('packages', 'cjc', 'cjpm.toml');
 const cjcToml = await fs.readFile(cjcTomlPath, 'utf8');
-await fs.writeFile(cjcTomlPath, platformizeCjcToml(cjcToml, process.platform, cangjieHome));
+await fs.writeFile(cjcTomlPath, platformizeCjcToml(
+  cjcToml, process.platform, cangjieHome, process.env.CJCJ_LLVM_LINK_RSP || ''));
 
 const cjpmToml = await fs.readFile('cjpm.toml', 'utf8');
 await fs.writeFile(path.join(root, 'cjpm.O1.toml'), cjpmToml.replace('compile-option = "-O2"', 'compile-option = "-O1"'));
