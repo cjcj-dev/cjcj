@@ -1215,7 +1215,7 @@ private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: Str
         options.target.arch != ArchType.X86_64) {
         return
     }
-    let moduleHandle = cgMod.GetLLVMModule() ?? return
+    let moduleHandle = if (let Some(handle) <- cgMod.GetLLVMModule()) { handle } else { return }
     try (sectionName = unsafe { LibC.mallocCString(PRESPECIALIZED_TYPEINFO_SECTION) }.asResource(),
         comdatName = unsafe { LibC.mallocCString(typeInfoName) }.asResource()) {
         unsafe {
