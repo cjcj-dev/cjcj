@@ -59,22 +59,22 @@ try {
     if (mismatch >= 0) {
       fail(`${name} diagnostic[${mismatch}] mismatch`); console.log(`EXPECTED: ${expected[mismatch]}`); console.log(`ACTUAL:   ${actual[mismatch]}`); continue;
     }
-    const location = name === 'noheap_array_bad' ? 'noheap_array_bad.cj:3:' : name === 'noheap_closure_bad' ? 'noheap_closure_bad.cj:5:' : '';
+    const location = name === 'noheap_array_bad' ? 'noheap_array_bad.cj:3:' : name === 'noheap_closure_bad' ? 'noheap_closure_bad.cj:4:' : '';
     if (location && !output.includes(location)) { fail(`${name} missing allocation-site location ${location}`); await firstLines(output, 40); continue; }
     pass(`${name} rejected with exact diagnostics`);
   }
 
-  result = await $({cwd: work, nothrow: true, quiet: true})`${cjc} ${fixtures}/fastnative_managed.cj --output-type=staticlib -o ${work}/libfastnative_managed.a`;
+  result = await $({cwd: work, nothrow: true, quiet: true})`${cjc} ${fixtures}/fastnative_managed.cj --output-type=staticlib --save-temps ${work} -o ${work}/libfastnative_managed.a`;
   await fs.writeFile(`${work}/fastnative_managed.out`, result.stdout + result.stderr);
   let managedLeafFound = false;
   let managedLeafHasAttribute = false;
   let managedLeafHasSafepoint = false;
   if (result.exitCode === 0) {
     let cached = [];
-    try { cached = (await fs.readdir(`${work}/.cached`)).filter(file => file.endsWith('.bc')); } catch {}
+    try { cached = (await fs.readdir(work)).filter(file => file.endsWith('-fastnative_managed.bc')); } catch {}
     for (const file of cached) {
-      await $({nothrow: true, quiet: true})`${home}/third_party/llvm/bin/llvm-dis ${work}/.cached/${file} -o ${work}/.cached/${file}.ll`;
-      const ir = await fs.readFile(`${work}/.cached/${file}.ll`, 'utf8');
+      await $({nothrow: true, quiet: true})`${home}/third_party/llvm/bin/llvm-dis ${work}/${file} -o ${work}/${file}.ll`;
+      const ir = await fs.readFile(`${work}/${file}.ll`, 'utf8');
       const definition = ir.match(/define [^{]*managedLeaf[^{]*#([0-9]+)[^{]*\{([\s\S]*?)^\}/m);
       if (!definition) continue;
       managedLeafFound = true;
@@ -90,15 +90,15 @@ try {
     await firstLines(result.stdout + result.stderr, 30);
   }
 
-  result = await $({cwd: work, nothrow: true, quiet: true})`${cjc} ${fixtures}/nostackgrow.cj --output-type=staticlib -o ${work}/libnostackgrow.a`;
+  result = await $({cwd: work, nothrow: true, quiet: true})`${cjc} ${fixtures}/nostackgrow.cj --output-type=staticlib --save-temps ${work} -o ${work}/libnostackgrow.a`;
   await fs.writeFile(`${work}/nostackgrow.out`, result.stdout + result.stderr);
   let found = false;
   if (result.exitCode === 0) {
     let cached = [];
-    try { cached = (await fs.readdir(`${work}/.cached`)).filter(file => file.endsWith('.bc')); } catch {}
-    for (const file of cached) await $({nothrow: true, quiet: true})`${home}/third_party/llvm/bin/llvm-dis ${work}/.cached/${file} -o ${work}/.cached/${file}.ll`;
+    try { cached = (await fs.readdir(work)).filter(file => file.endsWith('-nostackgrow.bc')); } catch {}
+    for (const file of cached) await $({nothrow: true, quiet: true})`${home}/third_party/llvm/bin/llvm-dis ${work}/${file} -o ${work}/${file}.ll`;
     for (const file of cached.map(file => `${file}.ll`)) {
-      const ir = await fs.readFile(`${work}/.cached/${file}`, 'utf8');
+      const ir = await fs.readFile(`${work}/${file}`, 'utf8');
       const definition = ir.match(/define .*noGrow.*#([0-9]+)/);
       if (definition && new RegExp(`attributes #${definition[1]} = .*"gc-leaf-function"`).test(ir)) { found = true; break; }
     }
