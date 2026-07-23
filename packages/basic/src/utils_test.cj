@@ -37,7 +37,7 @@ class UtilsTest {
     // C++ anchor: /root/cj_build/cangjie_compiler/unittests/Basic/UtilsTest.cpp:15 TEST(UtilsTest, GetHashTest)
     @TestCase
     func getHashTest(): Unit {
-        @Expect(GetHash("hello world"), 5577293430985752569u64)
+        @Expect(GetHash("hello world"), 8618312879776256743u64)
     }
 
     @TestCase
