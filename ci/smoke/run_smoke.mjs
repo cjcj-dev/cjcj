@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const cjcj = argv._[0];
 if (!cjcj) {
-  console.error('usage: run_smoke.mjs <compiler-binary> [workdir]');
+  console.error('[smoke] usage: run_smoke.mjs <compiler-binary> [workdir]');
   process.exit(1);
 }
 
@@ -17,7 +17,7 @@ await fs.mkdir(work, {recursive: true});
 try {
   await fs.access(cjcj, fs.constants.X_OK);
 } catch {
-  console.error(`FATAL: cjcj binary not executable: ${cjcj}`);
+  console.error(`[smoke] compiler not executable: ${cjcj}`);
   process.exit(2);
 }
 
@@ -42,11 +42,11 @@ for (const [name, wanted] of expect) {
   const buildLog = path.join(work, `${name}.build.log`);
   const runLog = path.join(work, `${name}.run.log`);
   await Promise.all([fs.rm(exe, {force: true}), fs.rm(buildLog, {force: true}), fs.rm(runLog, {force: true})]);
-  console.log(`--- smoke: ${name} ---`);
+  console.log(`[smoke] sample ${name}`);
   const built = await $({nothrow: true, quiet: true})`${cjcj} ${src} -o ${exe}`;
   await fs.writeFile(buildLog, built.stdout + built.stderr);
   if (built.exitCode !== 0) {
-    console.log('  COMPILE FAIL:');
+    console.log('[smoke] compile failed');
     await printIndented(buildLog);
     fail++;
     continue;
@@ -55,19 +55,19 @@ for (const [name, wanted] of expect) {
   await fs.writeFile(runLog, ran.stderr);
   const got = ran.stdout.replace(/\n$/, '');
   if (ran.exitCode !== 0) {
-    console.log(`  RUN FAIL (exit ${ran.exitCode}):`);
+    console.log(`[smoke] run failed: exit ${ran.exitCode}`);
     await printIndented(runLog);
     fail++;
   } else if (got === wanted) {
-    console.log(`  OK  -> [${got}]`);
+    console.log(`[smoke] passed: [${got}]`);
     pass++;
   } else {
-    console.log(`  OUTPUT MISMATCH: expected [${wanted}] got [${got}]`);
+    console.log(`[smoke] mismatch: expected [${wanted}] got [${got}]`);
     fail++;
   }
 }
 
-console.log('--- smoke: 06_macro ---');
+console.log('[smoke] sample 06_macro');
 const macroBuild = path.join(work, 'macro_demo');
 await fs.rm(macroBuild, {recursive: true, force: true});
 await fs.cp(path.join(here, 'macro_demo'), macroBuild, {recursive: true});
@@ -76,7 +76,7 @@ let got = '';
 let result = await $({cwd: path.join(macroBuild, 'mymacros'), nothrow: true, quiet: true})`${cjcj} --compile-macro def.cj`;
 await fs.writeFile(path.join(work, 'macro.build.log'), result.stdout + result.stderr);
 if (result.exitCode !== 0) {
-  console.log('  MACRO-PKG COMPILE FAIL:');
+  console.log('[smoke] macro package compile failed');
   await printIndented(path.join(work, 'macro.build.log'));
   macroOk = false;
 }
@@ -84,7 +84,7 @@ if (macroOk) {
   result = await $({cwd: path.join(macroBuild, 'app'), nothrow: true, quiet: true})`${cjcj} main.cj --import-path ${path.join(macroBuild, 'mymacros')} -o ${path.join(macroBuild, 'app/app')}`;
   await fs.writeFile(path.join(work, 'macro.app.log'), result.stdout + result.stderr);
   if (result.exitCode !== 0) {
-    console.log('  MACRO-APP COMPILE FAIL:');
+    console.log('[smoke] macro app compile failed');
     await printIndented(path.join(work, 'macro.app.log'));
     macroOk = false;
   }
@@ -94,23 +94,22 @@ if (macroOk) {
   await fs.writeFile(path.join(work, 'macro.run.log'), result.stderr);
   got = result.stdout.replace(/\n$/, '');
   if (result.exitCode !== 0) {
-    console.log(`  MACRO RUN FAIL (exit ${result.exitCode}):`);
+    console.log(`[smoke] macro run failed: exit ${result.exitCode}`);
     await printIndented(path.join(work, 'macro.run.log'));
     macroOk = false;
   }
 }
 if (macroOk) {
   if (got === 'tick\ntick') {
-    console.log(`  OK  -> [${got.replaceAll('\n', '\\n')}]`);
+    console.log(`[smoke] passed: [${got.replaceAll('\n', '\\n')}]`);
     pass++;
   } else {
-    console.log(`  OUTPUT MISMATCH: expected [tick\\ntick] got [${got.replaceAll('\n', '\\n')}]`);
+    console.log(`[smoke] mismatch: expected [tick\\ntick] got [${got.replaceAll('\n', '\\n')}]`);
     fail++;
   }
 } else {
   fail++;
 }
 
-console.log('===================================');
-console.log(`smoke summary: pass=${pass} fail=${fail} (workdir=${work})`);
+console.log(`[smoke] summary: pass=${pass} fail=${fail} workdir=${work}`);
 process.exitCode = fail === 0 ? 0 : 1;
