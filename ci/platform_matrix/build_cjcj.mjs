@@ -108,7 +108,9 @@ if (process.platform === 'win32') {
   const llvmBin = path.join(cangjieHome, 'third_party', 'llvm', 'bin');
   const sdkLd = path.join(llvmBin, 'ld.lld.exe');
   const realLd = path.join(llvmBin, 'ld.lld-real.exe');
-  const wrapper = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'ld.lld-wrap.exe');
+  // Build the wrapper inside llvmBin so the final rename onto ld.lld.exe stays
+  // on one volume (RUNNER_TEMP is D:, the SDK lives on C: — rename = EXDEV).
+  const wrapper = path.join(llvmBin, 'ld.lld-wrap.exe');
   const wrapperSource = path.join(import.meta.dirname, 'lldwrap.c');
   const gcc = 'C:\\msys64\\mingw64\\bin\\gcc.exe';
   if (!(await isFile(realLd)) && !(await isFile(sdkLd))) throw new Error(`SDK ld.lld missing: ${sdkLd}`);
