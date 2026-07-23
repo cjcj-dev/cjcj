@@ -10,60 +10,6 @@ import {spawnSync} from 'node:child_process';
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
 
-function parseQuotedLinkArgs(command) {
-  const args = [];
-  let offset = 0;
-  while (offset < command.length) {
-    while (/\s/.test(command[offset] || '')) offset++;
-    if (offset === command.length) break;
-    if (command[offset] !== '"') throw new Error(`expected quoted linker argument at offset ${offset}`);
-    let end = offset + 1;
-    for (; end < command.length; end++) {
-      if (command[end] === '\\') {
-        end++;
-      } else if (command[end] === '"') {
-        break;
-      }
-    }
-    if (end === command.length) throw new Error('unterminated quoted linker argument');
-    args.push(JSON.parse(command.slice(offset, end + 1)));
-    offset = end + 1;
-  }
-  return args;
-}
-
-function extractWindowsRelinkArgs(stderr) {
-  if (!stderr.includes('cjcj::cjc.exe: Invalid argument')) return null;
-  for (const line of stderr.split(/\r?\n/)) {
-    const startMarker = 'error: "';
-    const endMarker = '": command failed with exit code ';
-    const start = line.indexOf(startMarker);
-    const end = line.lastIndexOf(endMarker);
-    if (start < 0 || end < start) continue;
-    const args = parseQuotedLinkArgs(line.slice(start + startMarker.length, end));
-    if (!/[/\\]ld\.lld(?:\.exe)?$/i.test(args[0] || '')) continue;
-    const outputIndex = args.indexOf('-o');
-    if (outputIndex < 0 || !args[outputIndex + 1]?.endsWith('cjcj::cjc.exe')) continue;
-    args[outputIndex + 1] = args[outputIndex + 1].slice(0, -'cjcj::cjc.exe'.length) + 'cjcj.exe';
-    return args;
-  }
-  return null;
-}
-
-if (process.argv.includes('--test-windows-relink-parser')) {
-  let fixture = '';
-  for await (const chunk of process.stdin) fixture += chunk;
-  const args = extractWindowsRelinkArgs(fixture);
-  if (!args) throw new Error('fixture did not yield a Windows relink command');
-  const outputIndex = args.indexOf('-o');
-  if (!args[outputIndex + 1].endsWith('target\\release\\bin\\cjcj.exe')) {
-    throw new Error(`unexpected rewritten output: ${args[outputIndex + 1]}`);
-  }
-  if (args.some((arg) => arg.includes('cjcj::cjc.exe'))) throw new Error('illegal output name survived rewrite');
-  console.log(`EXTRACT_TEST=pass ARGS=${args.length} OUTPUT=${args[outputIndex + 1]}`);
-  process.exit(0);
-}
-
 const {root} = stageBegin('cjcj');
 const toolchain = process.env.CJCJ_TOOLCHAIN || 'nightly-1.2.0-alpha.20260721165458';
 const heapSize = process.env.CJ_HEAP_SIZE || '12GB';
@@ -293,19 +239,6 @@ if (process.platform === 'win32') {
   shim = await runInMsys('npx --yes zx@8 runtime_shim/build_shim.mjs', 'shim');
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
   build = await runInMsys('cjpm build', 'build');
-  if (build.exitCode !== 0) {
-    const relinkArgs = extractWindowsRelinkArgs(String(build.stderr || ''));
-    if (relinkArgs) {
-      console.log('[platform cjcj] retrying captured ld.lld command with Windows-safe executable name');
-      const relink = await runInMsys(relinkArgs.map(shellQuote).join(' '), 'relink');
-      const product = path.join('target', 'release', 'bin', 'cjcj.exe');
-      if (relink.exitCode === 0) {
-        const stat = await fs.stat(product).catch(() => null);
-        if (!stat?.isFile() || stat.size === 0) throw new Error(`relink succeeded without non-empty ${product}`);
-      }
-      build = relink;
-    }
-  }
 } else {
   await fs.writeFile(cjcTomlPath, platformizeCjcToml(
     cjcToml, process.platform, cangjieHome, process.env.CJCJ_LLVM_LINK_RSP || ''));
