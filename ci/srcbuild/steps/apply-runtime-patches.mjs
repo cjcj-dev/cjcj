@@ -15,6 +15,6 @@ const patchDir = path.join(githubWorkspace, 'ci/srcbuild/runtime-patches');
 const patches = (await fs.readdir(patchDir)).filter((name) => name.endsWith('.patch')).sort();
 if (patches.length === 0) throw new Error(`no runtime patches found in ${patchDir}`);
 for (const name of patches) {
-  console.log(`== applying ${name} ==`);
+  console.log(`[runtime] applying ${name}`);
   await $`git -C ${runtime} apply --verbose ${path.join(patchDir, name)}`;
 }
