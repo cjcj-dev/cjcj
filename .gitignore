@@ -1,6 +1,8 @@
 # Cangjie / cjpm build artifacts
 target/
 build/
+!/build/
+!/build/**
 output/
 dist/
 *.o
