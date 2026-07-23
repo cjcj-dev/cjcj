@@ -65,13 +65,13 @@ export async function selectCjpmArtifact() {
 const gh = await $({nothrow: true, stdio: 'pipe'})`gh --version`;
 if (gh.exitCode !== 0) {
   emitBlockedSummary('gh is unavailable; cannot query patched cjpm artifacts');
-  process.exit(0);
+  process.exit(dryRun ? 0 : 78);
 }
 
 const {runId, artifactId} = await selectCjpmArtifact();
 if (!artifactId) {
   emitBlockedSummary(`no active ${artifactName} artifact from a recent successful Windows job`);
-  process.exit(0);
+  process.exit(dryRun ? 0 : 78);
 }
 console.log(`cjpm_selection run=${runId} artifact=${artifactId}`);
 if (dryRun) process.exit(0);

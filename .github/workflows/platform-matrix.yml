@@ -137,6 +137,7 @@ jobs:
         run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
 
       - name: Install patched cjpm (Windows)
+        id: fetch-cjpm
         if: always() && runner.os == 'Windows'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -149,7 +150,7 @@ jobs:
         run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
 
       - name: O1 cjcj build (Windows)
-        if: always() && runner.os == 'Windows'
+        if: always() && runner.os == 'Windows' && steps.fetch-cjpm.outcome == 'success'
         env:
           CJCJ_SDK_ALREADY_PROVISIONED: '1'
         run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
