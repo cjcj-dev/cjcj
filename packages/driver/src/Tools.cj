@@ -8,6 +8,30 @@ public class ToolInfo {
     }
 }
 
+// Mirrors include/cangjie/Driver/Tools.inc: the _WIN32 branch names every
+// tool with its .exe suffix.
+@When[os == "Windows"]
+public func ToolName(id: ToolID): String {
+    return match (id) {
+        case ToolID.CJC => "cjc.exe"
+        case ToolID.CLANG => "clang.exe"
+        case ToolID.OPT => "opt.exe"
+        case ToolID.LLC => "llc.exe"
+        case ToolID.LD => "ld.exe"
+        case ToolID.LLD => "ld.lld.exe"
+        case ToolID.LD64_LLD => "ld64.lld.exe"
+        case ToolID.AR => "ar.exe"
+        case ToolID.LLVM_AR => "llvm-ar.exe"
+        case ToolID.OBJCOPY => "objcopy.exe"
+        case ToolID.LLVM_OBJCOPY => "llvm-objcopy.exe"
+        case ToolID.DSYMUTIL => "dsymutil.exe"
+        case ToolID.CODESIGN => "codesign.exe"
+        case ToolID.STRIP => "strip.exe"
+        case ToolID.CMD => "cmd.exe"
+    }
+}
+
+@When[os != "Windows"]
 public func ToolName(id: ToolID): String {
     return match (id) {
         case ToolID.CJC => "cjc"
