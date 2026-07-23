@@ -38,7 +38,7 @@ async function findFirst(directory, predicate) {
 }
 
 let product = '';
-const productNames = process.platform === 'win32' ? ['cjcj.exe'] : ['cjcj::cjc', 'cjcj', 'cjc'];
+const productNames = process.platform === 'win32' ? ['cjcj.exe', 'cjc@cjcj.exe'] : ['cjcj::cjc', 'cjcj', 'cjc'];
 for (const name of productNames) {
   const candidate = path.join('target', 'release', 'bin', name);
   if (await isFile(candidate)) { product = candidate; break; }
