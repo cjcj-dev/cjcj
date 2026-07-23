@@ -14,7 +14,6 @@ import std.core.Box as CoreBox
 import std.sort.*
 
 import cjcj::ast.ASTKind
-import cjcj::ast.ASTKindIndex
 import cjcj::ast.ASTKindName
 import cjcj::ast.Annotation as AstAnnotation
 import cjcj::ast.AnnotationKind as AstAnnotationKind
@@ -65,7 +64,7 @@ import cjcj::ast.IsImpl as AstIsImpl
 import cjcj::ast.IsMirror as AstIsMirror
 import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
-import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, FileUtil,
+import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, FileUtil,
     MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR}
 
 foreign {
@@ -74,99 +73,6 @@ foreign {
 }
 
 private let USER_MAIN_MANGLED_NAME: String = "user.main"
-
-private class ImplicitImportedFunc {
-    public let parentKind: ASTKind
-    public let identifier: String
-    public let parentName: String
-
-    public init(parentKind: ASTKind, identifier: String, parentName!: String = "") {
-        this.parentKind = parentKind
-        this.identifier = identifier
-        this.parentName = parentName
-    }
-}
-
-private enum ImplicitImportedFuncMgrFuncKind {
-    | GENERIC
-    | NONE_GENERIC
-}
-
-private class ImplicitImportedFuncMgr {
-    private static let instance: ImplicitImportedFuncMgr = ImplicitImportedFuncMgr()
-    private let implicitImportedGenericFuncs: ArrayList<ImplicitImportedFunc> = ArrayList<ImplicitImportedFunc>()
-    private let implicitImportedNonGenericFuncs: ArrayList<ImplicitImportedFunc> = ArrayList<ImplicitImportedFunc>()
-
-    private init() {
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "init", parentName: "SpawnException"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "init", parentName: "Exception"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "init", parentName: "IndexOutOfBoundsException"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "init", parentName: "NegativeArraySizeException"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "init", parentName: "OutOfMemoryError"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "printStackTrace", parentName: "Exception"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "printStackTrace", parentName: "Error"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "getCommandLineArgs"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "createArithmeticExceptionMsg"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "createOverflowExceptionMsg"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "CJ_CORE_ExecAtexitCallbacks"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "handleException"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.INVALID_DECL, "eprintln"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "setRuntimeCJThreadHandle", parentName: "Thread"),
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "execute", parentName: "Future"),
-            ImplicitImportedFuncMgrFuncKind.GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "executeClosure", parentName: "Future"),
-            ImplicitImportedFuncMgrFuncKind.GENERIC)
-        RegImplicitImportedFunc(ImplicitImportedFunc(ASTKind.CLASS_DECL, "get", parentName: "Future"),
-            ImplicitImportedFuncMgrFuncKind.GENERIC)
-    }
-
-    public static func Instance(): ImplicitImportedFuncMgr { return instance }
-
-    public func RegImplicitImportedFunc(funcInfo: ImplicitImportedFunc,
-        funcKind: ImplicitImportedFuncMgrFuncKind): Unit {
-        match (funcKind) {
-            case ImplicitImportedFuncMgrFuncKind.GENERIC => implicitImportedGenericFuncs.add(funcInfo)
-            case ImplicitImportedFuncMgrFuncKind.NONE_GENERIC => implicitImportedNonGenericFuncs.add(funcInfo)
-            case _ => CJC_ASSERT(false)
-        }
-    }
-
-    public func GetImplicitImportedFuncs(funcKind: ImplicitImportedFuncMgrFuncKind): ArrayList<ImplicitImportedFunc> {
-        let funcs = match (funcKind) {
-            case ImplicitImportedFuncMgrFuncKind.GENERIC => implicitImportedGenericFuncs
-            case ImplicitImportedFuncMgrFuncKind.NONE_GENERIC => implicitImportedNonGenericFuncs
-            case _ =>
-                CJC_ASSERT(false)
-                ArrayList<ImplicitImportedFunc>()
-        }
-        sort(funcs, by: { left: ImplicitImportedFunc, right: ImplicitImportedFunc =>
-            let leftName = left.parentName + left.identifier
-            let rightName = right.parentName + right.identifier
-            if (leftName < rightName) {
-                Ordering.LT
-            } else if (leftName > rightName) {
-                Ordering.GT
-            } else {
-                Ordering.EQ
-            }
-        })
-        return funcs
-    }
-}
 
 private class FaithfulInitFileVars {
     public let file: AstFile
@@ -1104,8 +1010,6 @@ public class FaithfulAST2CHIR {
     private let deserializedDefs: HashMap<String, CustomTypeDef> = HashMap<String, CustomTypeDef>()
     private let deserializedVals: HashMap<String, Value> = HashMap<String, Value>()
     private let noNeedToTranslateDecls: HashSet<AstDecl> = HashSet<AstDecl>()
-    private let implicitDecls: HashSet<AstDecl> = HashSet<AstDecl>()
-    private let implicitFuncs: HashMap<String, Function> = HashMap<String, Function>()
     private let allTopLevelNodes: ArrayList<AstDecl> = ArrayList<AstDecl>()
     private let allTopLevelNodeSet: FaithfulInitDeclSet = FaithfulInitDeclSet()
     private let pkgFiles: ArrayList<AstFile> = ArrayList<AstFile>()
@@ -1184,7 +1088,6 @@ public class FaithfulAST2CHIR {
         }
         CurrentPackage().SetPackageAccessLevel(BuildPackageAccessLevel(node.accessible))
         RegisterAllSources()
-        CollectImplicitFuncs(node)
         CollectImportedDecls(node)
         CollectDeclsInCurPkg(node)
         let initOrder = GlobalDeclAnalysis(node)
@@ -1249,10 +1152,6 @@ public class FaithfulAST2CHIR {
 
     public func GetGlobalCache(): FaithfulAST2CHIRNodeMap {
         return globalCache
-    }
-
-    public func GetImplicitFuncs(): HashMap<String, Function> {
-        return implicitFuncs
     }
 
     public func GetInitFuncsForConstVar(): ArrayList<Function> {
@@ -1322,81 +1221,6 @@ public class FaithfulAST2CHIR {
 
     private func CurrentPackage(): Package {
         return outputPackage ?? throw IllegalStateException("faithful AST2CHIR package has not been created")
-    }
-
-    private func AddToImplicitFuncs(funcDecl: AstFuncDecl,
-        registeredImplicitFuncs: ArrayList<ImplicitImportedFunc>): Unit {
-        if (opts.sancovOption.IsSancovEnabled() &&
-            (funcDecl.mangledName == FUNC_MANGLE_NAME_MALLOC_CSTRING ||
-                funcDecl.mangledName == FUNC_MANGLE_NAME_CSTRING_SIZE)) {
-            implicitDecls.add(funcDecl)
-            return
-        }
-        for (funcInfo in registeredImplicitFuncs) {
-            let parentDecl = funcDecl.outerDecl
-            let parentMatches = if (funcInfo.parentName.isEmpty()) {
-                parentDecl.isNone()
-            } else if (let Some(parent) <- parentDecl) {
-                parent.identifier.Val() == funcInfo.parentName && parent.astKind == funcInfo.parentKind
-            } else {
-                false
-            }
-            if (funcDecl.identifier.Val() == funcInfo.identifier && parentMatches) {
-                implicitDecls.add(funcDecl)
-                return
-            }
-        }
-    }
-
-    private func CollectImplicitFuncs(node: AstPackage): Unit {
-        let genericFuncs = ImplicitImportedFuncMgr.Instance().GetImplicitImportedFuncs(
-            ImplicitImportedFuncMgrFuncKind.GENERIC)
-        let collectImplicitDecls = { astNode: AstNode =>
-            if (let Some(funcDecl) <- (astNode as AstFuncDecl)) {
-                AddToImplicitFuncs(funcDecl, genericFuncs)
-                return AstVisitAction.SKIP_CHILDREN
-            }
-            return AstVisitAction.WALK_CHILDREN
-        }
-        for (importedPkg in importedPackages) {
-            for (instantiatedDecl in importedPkg.genericInstantiatedDecls) {
-                AstWalker(instantiatedDecl, visitPre: collectImplicitDecls).Walk()
-            }
-        }
-
-        let nonGenericFuncs = ImplicitImportedFuncMgr.Instance().GetImplicitImportedFuncs(
-            ImplicitImportedFuncMgrFuncKind.NONE_GENERIC)
-        var stdCorePkg: Option<AstPackage> = None
-        if (node.fullPackageName == CORE_PACKAGE_NAME) {
-            stdCorePkg = Some(node)
-        } else {
-            for (importedPkg in importedPackages) {
-                if (importedPkg.fullPackageName == CORE_PACKAGE_NAME) {
-                    stdCorePkg = Some(importedPkg)
-                    break
-                }
-            }
-        }
-        let corePkg = stdCorePkg ??
-            throw IllegalStateException("faithful AST2CHIR cannot find imported std.core package")
-        let collectNonGenericDecls = { astNode: AstNode =>
-            if (let Some(funcDecl) <- (astNode as AstFuncDecl)) {
-                AddToImplicitFuncs(funcDecl, nonGenericFuncs)
-                return AstVisitAction.SKIP_CHILDREN
-            }
-            return AstVisitAction.WALK_CHILDREN
-        }
-        for (file in corePkg.files) {
-            for (decl in file.decls) {
-                AstWalker(decl, visitPre: collectNonGenericDecls).Walk()
-            }
-            for (decl in file.exportedInternalDecls) {
-                AstWalker(decl, visitPre: collectNonGenericDecls).Walk()
-            }
-        }
-        for (implicitDecl in implicitDecls) {
-            CJC_ASSERT(implicitDecl.IsFunc())
-        }
     }
 
     private func CollectImportedDecls(node: AstPackage): Unit {
@@ -4492,9 +4316,6 @@ public class FaithfulAST2CHIR {
                 ResetSpecificFunc(funcDecl, fn)
             }
             globalCache.Set(funcDecl, fn)
-            if (implicitDecls.contains(funcDecl)) {
-                implicitFuncs[fn.GetIdentifierWithoutPrefix()] = fn
-            }
             if (let Some(file) <- funcDecl.curFile) {
                 fn.SetFeatures(file.GetFeatures())
             }
@@ -4522,9 +4343,6 @@ public class FaithfulAST2CHIR {
         }
         SetFuncAttributeAndLinkageType(funcDecl, fn)
         TranslateFuncParams(funcDecl, fn)
-        if (implicitDecls.contains(funcDecl)) {
-            implicitFuncs[fn.GetIdentifierWithoutPrefix()] = fn
-        }
         globalCache.Set(funcDecl, fn)
         if (funcDecl.TestAttr(AstAttribute.GLOBAL) &&
             !funcDecl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)) {
@@ -4552,9 +4370,6 @@ public class FaithfulAST2CHIR {
             let paramLoc = TranslateLocationWithoutScope(builder.context, param.begin, param.end)
             let chirParam = builder.CreateParameter(paramTy, paramLoc, fn)
             chirParam.SetSrcCodeIdentifier(param.identifier.GetRawText())
-        }
-        if (implicitDecls.contains(funcDecl)) {
-            implicitFuncs[fn.GetIdentifierWithoutPrefix()] = fn
         }
         globalCache.Set(funcDecl, fn)
     }
@@ -4631,9 +4446,6 @@ public class FaithfulAST2CHIR {
         if (let Some(fn) <- TryGetDeserialized<Function>(funcDecl)) {
             ConvertImportedFunctionType(fn, funcDecl)
             globalCache.Set(funcDecl, fn)
-            if (implicitDecls.contains(funcDecl)) {
-                implicitFuncs[fn.GetIdentifierWithoutPrefix()] = fn
-            }
             fn.SetDebugLocation(GetDeclLoc(builder.context, funcDecl))
             return
         }
@@ -4648,9 +4460,6 @@ public class FaithfulAST2CHIR {
         AttachFunctionGenericParams(funcDecl, fn)
         fn.EnableAttr(Attribute.IMPORTED)
         SetFuncAttributeAndLinkageType(funcDecl, fn)
-        if (implicitDecls.contains(funcDecl)) {
-            implicitFuncs[fn.GetIdentifierWithoutPrefix()] = fn
-        }
         if (HasImplicitThisParam(funcDecl)) {
             let thisParam = builder.CreateParameter(funcTy.GetParamTypes()[0], INVALID_LOCATION, fn)
             thisParam.SetSrcCodeIdentifier("this")

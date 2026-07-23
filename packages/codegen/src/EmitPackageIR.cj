@@ -499,8 +499,8 @@ private func CreateCJEntryTryScope(cgMod: CGModule, irBuilder: IRBuilder2, userM
 
     let userMainArgs = ArrayList<LLVMValueRef>()
     if (unsafe { LLVMCountParams(userMain) } > 0u32) {
-        let getCommandLineArgsFuncCHIRNode = cgMod.GetCGContext().GetImplicitUsedFunc(
-            "_CNat18getCommandLineArgsHv").getOrThrow()
+        let getCommandLineArgsFuncCHIRNode = (cgMod.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(
+            "_CNat18getCommandLineArgsHv").getOrThrow() as Function).getOrThrow()
         let getCommandLineArgsFuncReturnType = getCommandLineArgsFuncCHIRNode.GetFuncType().getOrThrow().GetReturnType()
         let retCGType = CGType.GetOrCreate(cgMod, getCommandLineArgsFuncReturnType)
         let commandLineArgs = irBuilder.CreateEntryAlloca(retCGType.GetLLVMType())
@@ -578,20 +578,24 @@ private func CreateUnwindBlockForTryCatchWrapper(cgMod: CGModule, irBuilder: IRB
 
 private func CreatePrintStackTraceCall(cgMod: CGModule, irBuilder: IRBuilder2, exceptionValue: LLVMValueRef): Unit {
     let printStackTraceName = "_CNat5Error15printStackTraceHv"
-    if (let Some(printStackTraceFunc) <- cgMod.GetCGContext().GetImplicitUsedFunc(printStackTraceName)) {
-        if (let Some(printStackTraceType) <- printStackTraceFunc.GetFuncType()) {
-            let exceptionTypeInfo = irBuilder.GetTypeInfoFromObject(exceptionValue)
-            let parentDef = printStackTraceFunc.GetParentCustomTypeDef() ?? return
-            let ownerTy = parentDef.GetType() ?? return
-            let funcPtrRaw = irBuilder.CallIntrinsicGetVTableFunc(exceptionTypeInfo, irBuilder.GetInt64(1),
-                irBuilder.GetInt64(2), irBuilder.CreateTypeInfo(ownerTy))
-            let cgFuncType = (CGType.GetOrCreate(cgMod, printStackTraceType) as CGFunctionType) ?? return
-            let callee = irBuilder.CreateBitCast(funcPtrRaw,
-                unsafe { LLVMPointerType(cgFuncType.GetLLVMFunctionType(), 0u32) })
-            let paramRefTy = cgMod.GetCGContext().GetCHIRBuilder().context.GetRefTy(printStackTraceType.GetParamType(0))
-            let args = ArrayList<CGValue>()
-            args.add(CGValue(exceptionValue, CGType.GetOrCreate(cgMod, paramRefTy)))
-            let _ = irBuilder.CreateCallOrInvoke(cgFuncType, callee, args)
+    if (let Some(printStackTraceValue) <-
+        cgMod.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(printStackTraceName)) {
+        if (let Some(printStackTraceFunc) <- (printStackTraceValue as Function)) {
+            if (let Some(printStackTraceType) <- printStackTraceFunc.GetFuncType()) {
+                let exceptionTypeInfo = irBuilder.GetTypeInfoFromObject(exceptionValue)
+                let parentDef = printStackTraceFunc.GetParentCustomTypeDef() ?? return
+                let ownerTy = parentDef.GetType() ?? return
+                let funcPtrRaw = irBuilder.CallIntrinsicGetVTableFunc(exceptionTypeInfo, irBuilder.GetInt64(1),
+                    irBuilder.GetInt64(2), irBuilder.CreateTypeInfo(ownerTy))
+                let cgFuncType = (CGType.GetOrCreate(cgMod, printStackTraceType) as CGFunctionType) ?? return
+                let callee = irBuilder.CreateBitCast(funcPtrRaw,
+                    unsafe { LLVMPointerType(cgFuncType.GetLLVMFunctionType(), 0u32) })
+                let paramRefTy =
+                    cgMod.GetCGContext().GetCHIRBuilder().context.GetRefTy(printStackTraceType.GetParamType(0))
+                let args = ArrayList<CGValue>()
+                args.add(CGValue(exceptionValue, CGType.GetOrCreate(cgMod, paramRefTy)))
+                let _ = irBuilder.CreateCallOrInvoke(cgFuncType, callee, args)
+            }
         }
     }
 }
@@ -624,8 +628,10 @@ private func RegisterExceptionRaiser(cgMod: CGModule): Unit {
 }
 
 private func GetTypeFromImplicitUsedFuncParam(cgMod: CGModule, funcName: String, paramIndex: Int64): Type {
-    let helperFunc = cgMod.GetCGContext().GetImplicitUsedFunc(funcName) ?? throw IllegalStateException(
-        "missing implicit used function: " + funcName)
+    let helperValue = cgMod.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(funcName) ??
+        throw IllegalStateException("missing implicit used function: " + funcName)
+    let helperFunc = (helperValue as Function) ??
+        throw IllegalStateException("implicit used global is not a function: " + funcName)
     let funcType = helperFunc.GetFuncType() ?? throw IllegalStateException("missing function type: " + funcName)
     return funcType.GetParamType(paramIndex).StripAllRefs()
 }

@@ -296,10 +296,6 @@ public class CGContext {
         return impl.GetBasePtr(value)
     }
 
-    public func GetImplicitUsedFunc(funcMangledName: String): Option<Function> {
-        return cgPkgContext.GetImplicitUsedFunc(funcMangledName)
-    }
-
     public func GetCjStringType(): LLVMTypeRef {
         if (!cjStringType.isNull()) {
             return cjStringType
