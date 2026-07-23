@@ -4,6 +4,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {spawnSync} from 'node:child_process';
 import {printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 
 const {root} = stageBegin('test');
