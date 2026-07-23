@@ -24,7 +24,7 @@ const work = `${process.env.RUNNER_TEMP || '/tmp'}/cjcj-srcbuild-verify`;
 await fs.rm(work, {recursive: true, force: true});
 await fs.mkdir(work, {recursive: true});
 
-console.log('[1/4] difftest: cjcj vs source-built C++ cjc');
+console.log('[difftest] compare self-host and C++');
 const difftestEnv = {
   ...process.env,
   DIFFTEST_TC: sdk,
@@ -34,23 +34,23 @@ const difftestEnv = {
 await $({env: difftestEnv})`set -o pipefail; npx --yes zx@8 ${root}/scripts/difftest.mjs -j ${jobs} | tee ${work}/difftest.log`;
 await $`grep -Eq 'TOTAL=[0-9]+[[:space:]]+PASS=[0-9]+[[:space:]]+MISMATCH=0[[:space:]]+FAIL=0' ${work}/difftest.log`;
 
-console.log('[2/4] deployed SDK smoke');
+console.log('[smoke] verify deployed SDK');
 await $`npx --yes zx@8 ${root}/ci/smoke/run_smoke.mjs ${self} ${work}/smoke`;
 
-console.log('[3/4] compiler-package smoke (includes incremental_compilation)');
+console.log('[selfcheck] verify compiler packages');
 const packages = [
   'option', 'conditional_compilation', 'mangle', 'frontend_tool', 'incremental_compilation',
   'modules', 'driver', 'meta_transformation', 'lex', 'ast', 'frontend', 'cjc', 'basic', 'codegen', 'macro',
 ];
 for (const pkg of packages) {
-  console.log(`  package: ${pkg}`);
+  console.log(`[selfcheck] package ${pkg}`);
   await $`timeout 900 ${self} --package ${root}/packages/${pkg}/src --module-name cjcj --import-path ${root}/target/release --output-type=staticlib -o ${work}/${pkg}.a`;
 }
 
-console.log('[4/4] bitcode parity gate');
+console.log('[bcgate] verify bitcode parity');
 await $`set -o pipefail; python3 ${root}/scripts/bcgate.py --self ${self} --base ${oracle} --corpus ${root}/scripts/difftest_corpus -j ${jobs} | tee ${work}/bcgate.log`;
 await $`grep -Eq 'byte-identical: [0-9]+ \\(100\\.0%\\)[[:space:]]+\\|[[:space:]]+differing: 0' ${work}/bcgate.log`;
 await $`grep -Eq 'compile-errors: 0' ${work}/bcgate.log`;
 const onlyOneSide = await $({nothrow: true})`grep -q 'functions present on only one side' ${work}/bcgate.log`;
 if (onlyOneSide.exitCode === 0) throw new Error('bcgate failed: functions are present on only one side');
-console.log('srcbuild verification: PASS');
+console.log('[verify] source build passed');
