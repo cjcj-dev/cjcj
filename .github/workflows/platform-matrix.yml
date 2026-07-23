@@ -105,6 +105,10 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-ninja
 
+      - name: Validate ld.lld wrapper (Windows)
+        if: always() && runner.os == 'Windows'
+        run: node ci/platform_matrix/test_lldwrap.mjs
+
       - name: Runtime build (Linux/macOS native)
         if: always() && runner.os != 'Windows'
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
