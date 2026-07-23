@@ -19,12 +19,12 @@ const pins = Object.fromEntries(pinText.split(/\r?\n/).filter(Boolean).map((line
 const runtimeRef = pins.RUNTIME_REF;
 const requestedRuntimeRef = process.env.RUNTIME_REF || '';
 if (requestedRuntimeRef && requestedRuntimeRef !== runtimeRef) {
-  console.error(`workflow/runtime pin mismatch: ${requestedRuntimeRef} != ${runtimeRef}`);
+  console.error(`[runtime] pin mismatch: ${requestedRuntimeRef} != ${runtimeRef}`);
   process.exit(2);
 }
 const version = process.env.RUNTIME_VERSION || '1.2.0-alpha.20260619020029';
 const srcUrl = process.env.RUNTIME_SRC_URL || pins.RUNTIME_SRC_URL;
-const log = (message) => console.log(`[build_patched_runtime] ${message}`);
+const log = (message) => console.log(`[runtime] ${message}`);
 const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-runtime-'));
 
 try {
