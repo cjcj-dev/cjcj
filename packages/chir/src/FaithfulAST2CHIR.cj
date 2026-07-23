@@ -14,7 +14,6 @@ import std.core.Box as CoreBox
 import std.sort.*
 
 import cjcj::ast.ASTKind
-import cjcj::ast.ASTKindIndex
 import cjcj::ast.ASTKindName
 import cjcj::ast.Annotation as AstAnnotation
 import cjcj::ast.AnnotationKind as AstAnnotationKind
@@ -65,7 +64,7 @@ import cjcj::ast.IsImpl as AstIsImpl
 import cjcj::ast.IsMirror as AstIsMirror
 import cjcj::incremental_compilation.{CompilationCache, IncreKind, VirtualWrapperDepMap}
 import cjcj::sema.GenericInstantiation.GenericInstantiationManager
-import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, CORE_PACKAGE_NAME, FileUtil,
+import cjcj::utils.{ANNOTATION_VAR_POSTFIX, CFFI_FUNC_SUFFIX, CJC_ABORT, CJC_ASSERT, FileUtil,
     MAIN_INVOKE, ProfileRecorder, STATIC_INIT_FUNC, STATIC_INIT_VAR}
 
 foreign {

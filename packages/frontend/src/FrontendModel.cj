@@ -15,7 +15,6 @@ import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.FaithfulUnorderedMap
 import cjcj::basic.Range as BasicRange
 import cjcj::chir.CHIRContext as RealCHIRContext
-import cjcj::chir.Function as RealCHIRFunction
 import cjcj::chir.Package as RealCHIRPackage
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.SemaImportManager
