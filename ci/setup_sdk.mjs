@@ -13,7 +13,7 @@ const cjvVersion = process.env.CJV_VERSION || 'v0.2.20';
 const heapSize = process.env.CJ_HEAP_SIZE || '12GB';
 const home = process.env.HOME;
 if (!home) throw new Error('HOME is required');
-const log = (message) => console.log(`[setup_sdk] ${message}`);
+const log = (message) => console.log(`[sdk] ${message}`);
 
 async function isDirectory(target) {
   try { return (await fs.stat(target)).isDirectory(); } catch { return false; }
