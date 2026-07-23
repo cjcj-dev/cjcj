@@ -8,7 +8,7 @@ if (!workspace || !githubWorkspace) throw new Error('CANGJIE_WORKSPACE and GITHU
 
 const sdk = `${workspace}/software/cangjie`;
 await $`cp cjpm.toml cjpm.toml.O2bak`;
-await $`sed -i 's/compile-option = "-O2"/compile-option = "-O1"/' cjpm.toml`;
+await $`sed -i 's/compile-option = "-O2"/compile-option = "-O0"/' cjpm.toml`;
 // Upstream cjc miscompiles cjcj at -O2. Build the seed at -O1 to avoid the
 // generic concrete-to-interface upcast loss in the upstream CHIR optimizer.
 await $`cjpm build`;
