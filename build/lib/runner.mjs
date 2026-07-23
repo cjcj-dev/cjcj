@@ -18,10 +18,11 @@ export function formatCommand(command) {
   return command.map(quote).join(' ');
 }
 
-function streamLines(stream) {
+function streamLines(stream, collect) {
   let buffered = '';
   stream.setEncoding('utf8');
   stream.on('data', chunk => {
+    collect?.(chunk);
     buffered += chunk;
     const lines = buffered.split(/\r?\n/);
     buffered = lines.pop();
@@ -38,6 +39,7 @@ export async function run(command, {
   stage = 'run',
   check = true,
   echo = true,
+  capture = false,
 } = {}) {
   if (!Array.isArray(command) || command.length === 0) {
     throw new BuildError(stage, 'empty command');
@@ -49,7 +51,7 @@ export async function run(command, {
   }
 
   // Explicit verification-only mode used to compare generated command sequences.
-  if (process.env.CANGJIE_BUILD_DRY_RUN === '1') return {exitCode: 0};
+  if (process.env.CANGJIE_BUILD_DRY_RUN === '1') return {exitCode: 0, stdout: ''};
 
   const env = envOverlay ? {...process.env, ...envOverlay} : undefined;
   const child = spawn(argv[0], argv.slice(1), {
@@ -58,7 +60,8 @@ export async function run(command, {
     shell: false,
     stdio: ['inherit', 'pipe', 'pipe'],
   });
-  streamLines(child.stdout);
+  let stdout = '';
+  streamLines(child.stdout, capture ? chunk => { stdout += chunk; } : undefined);
   streamLines(child.stderr);
 
   const result = await new Promise((resolve, reject) => {
@@ -76,5 +79,5 @@ export async function run(command, {
   if (check && exitCode !== 0) {
     throw new BuildError(stage, `command failed: ${formatCommand(argv)}`, {exitCode});
   }
-  return {exitCode};
+  return {exitCode, stdout};
 }
