@@ -227,6 +227,21 @@ if (process.platform === 'win32') {
     'for required in -lstdc++ -lgcc -lgcc_eh -lpthread -lmsvcrt -lmingwex; do',
     '  grep -Fx -- "$required" "$probe_dir/libraries.txt" >/dev/null',
     'done',
+    // Whole-archive msvcrt/mingwex duplicate the SDK CRT generation and their
+    // static atexit/_onexit copies call each other forever (round-16 wine
+    // forensics: startup STACK_OVERFLOW with a two-frame recursion cycle), so
+    // only the members defining the missing *64 symbols are extracted.
+    'crt_extract=.platform-ci/mingw-crt64',
+    'rm -rf "$crt_extract" && mkdir -p "$crt_extract"',
+    'extract_syms() {',
+    '  library="$1"; shift',
+    '  for sym in "$@"; do',
+    '    member="$(nm -A "$library" 2>/dev/null | awk -F: -v s="$sym" \'$3 ~ (" T " s "$") {print $2; exit}\')"',
+    '    test -n "$member"',
+    '    (cd "$crt_extract" && ar x "$library" "$member")',
+    '    printf \'MINGW_CRT64 %s<=%s:%s\\n\' "$sym" "$library" "$member"',
+    '  done',
+    '}',
     `printf '%s\\n' '--start-group' > ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
     'while IFS= read -r option; do',
     '  name="${option#-l}"',
@@ -234,9 +249,17 @@ if (process.platform === 'win32') {
     '  library="$("$cxx" -print-file-name="$filename")"',
     '  test "$library" != "$filename" && test -f "$library"',
     '  mixed="$(cygpath -m "$library")"',
+    '  case "$name" in',
+    '    msvcrt) extract_syms "$library" fstat64; continue ;;',
+    '    mingwex) extract_syms "$library" __mingw_fix_fstat_finish; continue ;;',
+    '  esac',
     `  printf '\"%s\"\\n' "$mixed" >> ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
     '  printf \'MINGW_CXX_LIB %s=%s\\n\' "$option" "$mixed"',
     'done < "$probe_dir/libraries.txt"',
+    'for object in "$crt_extract"/*.o; do',
+    '  test -f "$object"',
+    `  printf '\"%s\"\\n' "$(cygpath -m "$object")" >> ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
+    'done',
     `printf '%s\\n' '--end-group' >> ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
   ].join('\n'), 'cxx-libs');
   if (resolveCxxRuntime.exitCode !== 0) process.exit(resolveCxxRuntime.exitCode);
