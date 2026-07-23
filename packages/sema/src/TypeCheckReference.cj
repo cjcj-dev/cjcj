@@ -1220,9 +1220,10 @@ public func TypeCheckReferenceCheckAccessLegalityOfMemberAccess(
                 importManager: impl.importManager)) {
                 valid = false
             }
-            if (decl.TestAttr(Attribute.UNSAFE) && !ma.isInFlowExpr) {
+            if (decl.TestAnyAttr(Attribute.UNSAFE, Attribute.INTRINSIC) && !ma.isInFlowExpr) {
                 let builder = DiagnoseRefactor(diag,
-                    BasicDiagKindRefactor.sema_unsafe_func_can_only_be_called, ma)
+                    BasicDiagKindRefactor.sema_func_can_only_be_called, ma,
+                    if (decl.TestAttr(Attribute.UNSAFE)) { "unsafe" } else { "intrinsic" })
                 builder.Emit()
                 valid = false
             }
@@ -1311,9 +1312,10 @@ public func TypeCheckReferenceCheckAccessLegalityOfRefExpr(
                 importManager: impl.importManager)) {
                 valid = false
             }
-            if (decl.TestAttr(Attribute.UNSAFE) && !re.isInFlowExpr) {
+            if (decl.TestAnyAttr(Attribute.UNSAFE, Attribute.INTRINSIC) && !re.isInFlowExpr) {
                 let builder = DiagnoseRefactor(diag,
-                    BasicDiagKindRefactor.sema_unsafe_func_can_only_be_called, re)
+                    BasicDiagKindRefactor.sema_func_can_only_be_called, re,
+                    if (decl.TestAttr(Attribute.UNSAFE)) { "unsafe" } else { "intrinsic" })
                 builder.Emit()
                 valid = false
             }

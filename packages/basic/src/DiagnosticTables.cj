@@ -807,7 +807,7 @@ public enum DiagKindRefactor {
     | sema_overload_conflicts
     | sema_static_function_overload_conflicts
     | sema_use_mutable_func_alone
-    | sema_unsafe_func_can_only_be_called
+    | sema_func_can_only_be_called
     | sema_ambiguous_match_primitive_extend
     | sema_immutable_access_mutable_func
     | sema_recursive_constructor_call
@@ -2727,7 +2727,7 @@ public let errorData: Array<ErrorData> = [
     ErrorData(message: "%s '%s' has overload conflicts", mainHint: "", otherHints: []),
     ErrorData(message: "overloaded functions '%s' cannot mix static and non-static", mainHint: "", otherHints: []),
     ErrorData(message: "mutable function '%s' cannot be used alone as reference", mainHint: "", otherHints: []),
-    ErrorData(message: "the unsafe function can only be called rather than as name reference", mainHint: "", otherHints: []),
+    ErrorData(message: "the %s function can only be called rather than as name reference", mainHint: "", otherHints: []),
     ErrorData(message: "ambiguous match for function call '%s' of these extended type: %s", mainHint: "", otherHints: []),
     ErrorData(message: "cannot use mutable function on immutable value", mainHint: "is immutable", otherHints: []),
     ErrorData(message: "recursive constructor calling detected", mainHint: "", otherHints: []),
@@ -4964,7 +4964,7 @@ public let RE_DIAG_KIND_STR: Array<String> = [
     "sema_overload_conflicts",
     "sema_static_function_overload_conflicts",
     "sema_use_mutable_func_alone",
-    "sema_unsafe_func_can_only_be_called",
+    "sema_func_can_only_be_called",
     "sema_ambiguous_match_primitive_extend",
     "sema_immutable_access_mutable_func",
     "sema_recursive_constructor_call",
@@ -6000,7 +6000,7 @@ public func DiagKindRefactorIndex(kind: DiagKindRefactor): Int64 {
         case DiagKindRefactor.sema_overload_conflicts => 469
         case DiagKindRefactor.sema_static_function_overload_conflicts => 470
         case DiagKindRefactor.sema_use_mutable_func_alone => 471
-        case DiagKindRefactor.sema_unsafe_func_can_only_be_called => 472
+        case DiagKindRefactor.sema_func_can_only_be_called => 472
         case DiagKindRefactor.sema_ambiguous_match_primitive_extend => 473
         case DiagKindRefactor.sema_immutable_access_mutable_func => 474
         case DiagKindRefactor.sema_recursive_constructor_call => 475
