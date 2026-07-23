@@ -1,0 +1,91 @@
+name: Patched cjpm for Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
+  CJPM_FORK_REF: 5df0053abea37c04c2fe43d3930b9a4324404bbc
+  CJPM_FORK_URL: https://github.com/cjcj-dev/cangjie-tools.git
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-cjpm:
+    name: patched cjpm / windows_x86_64 / windows-2022
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - name: Prepare MSYS2/MinGW build toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          path-type: inherit
+          install: >-
+            git gzip python cmake make
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-libc++
+            mingw-w64-x86_64-libunwind
+
+      - name: Install pinned Cangjie SDK with stdx
+        shell: pwsh
+        env:
+          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
+        run: |
+          $cjvRoot = Join-Path $env:USERPROFILE '.local\bin'
+          $archive = Join-Path $env:RUNNER_TEMP 'cjv_windows_amd64.zip'
+          $extract = Join-Path $env:RUNNER_TEMP 'cjv-windows'
+          New-Item -ItemType Directory -Force $cjvRoot | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_windows_amd64.zip' -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          $downloaded = Get-ChildItem -Path $extract -Filter cjv.exe -Recurse | Select-Object -First 1
+          if (-not $downloaded) { throw 'cjv.exe missing from downloaded archive' }
+          Copy-Item -LiteralPath $downloaded.FullName -Destination (Join-Path $cjvRoot 'cjv.exe') -Force
+          $env:PATH = "$cjvRoot;$env:PATH"
+          if ($env:GITCODE_API_KEY) { cjv set gitcode-api-key $env:GITCODE_API_KEY }
+          cjv install $env:CJCJ_TOOLCHAIN -c stdx
+          $cjvRoot | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Fetch pinned cjpm fork
+        shell: msys2 {0}
+        run: |
+          git clone --filter=blob:none --no-checkout "$CJPM_FORK_URL" cangjie-tools
+          git -C cangjie-tools checkout --detach "$CJPM_FORK_REF"
+          test "$(git -C cangjie-tools rev-parse HEAD)" = "$CJPM_FORK_REF"
+
+      - name: Build patched cjpm
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cangjie_home="$(cygpath -u "$USERPROFILE/.cjv/toolchains/$CJCJ_TOOLCHAIN")"
+          stdx_path="$(cygpath -u "$USERPROFILE/.cjv/stdx/$CJCJ_TOOLCHAIN/static/stdx")"
+          export CANGJIE_HOME="$cangjie_home"
+          export CANGJIE_STDX_PATH="$stdx_path"
+          export MINGW_PATH=/mingw64
+          export cjHeapSize=24GB
+          export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/mingw64/bin:$PATH"
+          cd cangjie-tools/cjpm
+          cjpm build
+          product=target/release/bin/main
+          test -f "$product" || product=target/release/bin/main.exe
+          test -f "$product"
+          mkdir -p ../../patched-cjpm/windows_x86_64
+          cp "$product" ../../patched-cjpm/windows_x86_64/cjpm.exe
+          ../../patched-cjpm/windows_x86_64/cjpm.exe --version
+          gzip -n -c -9 ../../patched-cjpm/windows_x86_64/cjpm.exe > ../../patched-cjpm/windows_x86_64/cjpm.exe.gz
+
+      - name: Upload patched cjpm
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-cjpm-windows_x86_64
+          path: patched-cjpm/windows_x86_64/cjpm.exe.gz
+          if-no-files-found: error
+          retention-days: 14
