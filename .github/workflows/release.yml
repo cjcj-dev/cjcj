@@ -1,3 +1,8 @@
+# Release. Repackages the official SDK tree as a cjcj SDK: bin/cjc is our
+# Cangjie-built compiler and runtime/lib/<plat>/libcangjie-runtime.{so,dylib} is rebuilt
+# from the pinned cjcj-dev/cangjie-runtime main commit. Smoke runs against the
+# packaged bin/cjc. Linux x64 and macOS x64/arm64 are enabled; set dry_run to
+# build artifacts without publishing.
 name: Release
 
 on:
@@ -25,6 +30,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
@@ -47,6 +53,8 @@ jobs:
       matrix:
         include:
           - { runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64 }
+          - { runner: macos-15-intel, platform: darwin-x64, llvm_platform: darwin_x86_64, sdk_runtime_dir: darwin_x86_64_cjnative }
+          - { runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative }
           # linux-aarch64 is validated through build + package (the cross-compiled shim
           # links, the native patched runtime builds), but the packaged compiler livelocks
           # the GC mutator-list lock on the oversubscribed 4-core arm runner
@@ -61,6 +69,7 @@ jobs:
         shell: bash
         run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
       - name: Download LLVM tools
+        if: runner.os == 'Linux'
         uses: actions/download-artifact@v4
         with:
           name: fixed-llvm-tools-${{ matrix.llvm_platform }}
@@ -73,12 +82,13 @@ jobs:
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       - name: Install SDK
         id: setup
+        if: runner.os == 'Linux'
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
           FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/llc.gz
         run: npx --yes zx@8 ci/setup_sdk.mjs
       - name: Save SDK cache
-        if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
+        if: runner.os == 'Linux' && steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ~/.cjv
@@ -91,9 +101,10 @@ jobs:
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
       # patchelf is always required by scripts/package_sdk.mjs, even on a runtime cache hit.
       - name: Install packaging dependency
+        if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq patchelf
-      - name: Install runtime dependencies
-        if: steps.rtcache.outputs.cache-hit != 'true'
+      - name: Install runtime build dependencies
+        if: runner.os == 'Linux' && steps.rtcache.outputs.cache-hit != 'true'
         run: sudo apt-get install -y -qq clang cmake make
       - name: Build patched runtime
         if: steps.rtcache.outputs.cache-hit != 'true'
@@ -106,20 +117,42 @@ jobs:
         with:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
-      - name: Install patched runtime
+      - name: Download native fixed LLVM tuple
+        if: runner.os == 'macOS'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
+      - name: Official SDK + cjcj build
+        id: darwinbuild
+        if: runner.os == 'macOS'
+        env:
+          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
+          SDK_RUNTIME_DIR: ${{ matrix.sdk_runtime_dir }}
+        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
+      - name: Save Darwin SDK cache
+        if: runner.os == 'macOS' && steps.darwinbuild.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cjv
+          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+      - name: Activate pinned runtime
         run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Build runtime shim
+        if: runner.os == 'Linux'
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/cjselfhost_llvmshim.o
         run: npx --yes zx@8 runtime_shim/build_shim.mjs
       - name: Build workspace
+        if: runner.os == 'Linux'
         run: cjpm build
       - name: Compose SDK package
         run: |
+          runtime_lib="$PWD/dist-runtime/libcangjie-runtime.so"
+          if [ "$RUNNER_OS" = "macOS" ]; then runtime_lib="$PWD/dist-runtime/libcangjie-runtime.dylib"; fi
           npx --yes zx@8 scripts/package_sdk.mjs \
             --sdk "$CANGJIE_HOME" \
             --binary "$PWD/target/release/bin/cjcj::cjc" \
-            --runtime-so "$PWD/dist-runtime/libcangjie-runtime.so" \
+            --runtime-lib "$runtime_lib" \
             --version "${{ inputs.version }}" \
             --platform "${{ matrix.platform }}" \
             --outdir "$PWD/dist"
@@ -166,8 +199,6 @@ jobs:
           mapfile -t assets < <(find dist -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.zip' \) | sort)
           gh release create "v${{ inputs.version }}" "${flags[@]}" "${assets[@]}"
 
-# linux-aarch64 is held (see the matrix comment). macOS/Windows are intentionally absent:
-# no per-platform shim .o and the cjc-name GC exclusion is ungated on Darwin/PE (needs the
-# runtime patch extended). BLOCKED-REPORT: reports/REPORT-relmatrix.md.
-# Adding a build platform needs a matching source-build matrix item in
-# build-fixed-llc.yml and its llvm_platform value in the release matrix.
+# linux-aarch64 is held (see the matrix comment). Windows remains absent pending its
+# separate gating. Darwin consumes native artifacts from platform-tuples.yml through
+# ci/platform_matrix/fetch_llvm_tuple.mjs; Linux x64 keeps build-fixed-llc.yml.
