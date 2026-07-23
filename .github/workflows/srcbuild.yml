@@ -32,7 +32,6 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     env:
-      BUILDER: ${{ github.workspace }}/cangjie-build
       CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
       SCCACHE_GHA_ENABLED: "true"
@@ -49,26 +48,8 @@ jobs:
       - name: Load runtime pin
         run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
 
-      - name: Checkout cangjie-build
-        uses: actions/checkout@v7
-        with:
-          repository: cjcj-dev/cjcj-build
-          ref: 60c485cad4c3425772b7b9a9e5d6a5fd457527c2
-          path: cangjie-build
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-          cache-dependency-glob: cangjie-build/uv.lock
-
-      - name: Install build harness
-        working-directory: cangjie-build
-        run: uv sync --frozen
-
       - name: Install build dependencies
-        working-directory: cangjie-build
-        run: uv run cangjie-build --target linux-x64 install-system-deps
+        run: npx --yes zx@8 build/cli.mjs --target linux-x64 install-system-deps
 
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.10
@@ -78,37 +59,34 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.CANGJIE_BUILD_ROOT }}
-          key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('cangjie-build/src/cangjie_build/toolchain/static_libs.py') }}
+          key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('build/toolchain/static-libs.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
 
       - name: Build support libraries
         if: steps.support-cache.outputs.cache-hit != 'true'
-        working-directory: cangjie-build
-        run: uv run cangjie-build --target linux-x64 install-static-libs
+        run: npx --yes zx@8 build/cli.mjs --target linux-x64 install-static-libs
 
       - name: Save support library cache
         if: steps.support-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: ${{ env.CANGJIE_BUILD_ROOT }}
-          key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('cangjie-build/src/cangjie_build/toolchain/static_libs.py') }}
+          key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('build/toolchain/static-libs.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
 
       - name: Generate SDK version
         id: version
-        working-directory: cangjie-build
         env:
           REQUESTED_REF: ${{ inputs.cangjie_ref }}
         run: |
-          value=$(uv run cangjie-build --cangjie-version "$REQUESTED_REF" print-version)
+          value=$(npx --yes zx@8 build/cli.mjs --cangjie-version "$REQUESTED_REF" print-version)
           echo "value=$value" >> "$GITHUB_OUTPUT"
 
       - name: Download upstream source
-        working-directory: cangjie-build
         env:
           REQUESTED_REF: ${{ inputs.cangjie_ref }}
         run: |
           args=()
           if [ -n "$REQUESTED_REF" ]; then args+=(--tag "$REQUESTED_REF"); fi
-          uv run cangjie-build \
+          npx --yes zx@8 build/cli.mjs \
             --target linux-x64 \
             --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" \
             --cangjie-version "${{ steps.version.outputs.value }}" \
@@ -123,30 +101,24 @@ jobs:
         run: npx --yes zx@8 ci/srcbuild/steps/pin-compiler-llvm.mjs
 
       - name: Build compiler oracle
-        working-directory: cangjie-build
-        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
+        run: npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
 
       - name: Build runtime from source
-        working-directory: cangjie-build
-        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build runtime
+        run: npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build runtime
 
       - name: Build stdlib from source
-        working-directory: cangjie-build
-        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdlib
+        run: npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdlib
 
       - name: Build stdx from source
-        working-directory: cangjie-build
-        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdx
+        run: npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdx
 
       - name: Build SDK tools from source
-        working-directory: cangjie-build
-        run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
+        run: npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
 
       - name: Verify bootstrap SDK
-        working-directory: cangjie-build
         run: |
-          uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
-          uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
+          npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
+          npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
 
       - name: Download LLVM tools
         uses: actions/download-artifact@v8
