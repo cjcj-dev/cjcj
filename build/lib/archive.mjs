@@ -29,7 +29,9 @@ export async function download(url, dest) {
 export async function extract(tarball, destDir) {
   fs.mkdirSync(destDir, {recursive: true});
   logger.info('Extracting %s into %s', path.basename(tarball), destDir);
-  const listing = await run(['tar', '-tf', tarball], {stage: 'archive.list', capture: true});
+  const listing = await run(['tar', '-tf', tarball], {
+    stage: 'archive.list', capture: true, logOutput: false,
+  });
   const first = listing.stdout.split(/\r?\n/, 1)[0];
   if (!first) throw new BuildError('archive', `empty tarball: ${tarball}`);
   const top = first.split('/', 1)[0];
