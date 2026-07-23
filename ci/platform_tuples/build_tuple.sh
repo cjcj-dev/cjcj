@@ -87,8 +87,14 @@ if [[ "$bundle_static_llvm" == 1 ]]; then
     static_dir="$output/llvm-static"
     mkdir -p "$static_dir"
     # llvm-config rejects --libfiles while any archive in the transitive
-    # closure is missing, so build the complete static library set first.
-    cmake --build "$llvm_build" --parallel 3
+    # closure is missing, so build every static LLVM library without linking
+    # unrelated tools such as llvm-lto and bugpoint.
+    mapfile -t llvm_static_targets < <(
+        ninja -C "$llvm_build" -t targets all \
+            | grep -oE '^lib/libLLVM[A-Za-z0-9_]+\.a'
+    )
+    test "${#llvm_static_targets[@]}" -gt 0
+    ninja -C "$llvm_build" -j 3 llc "${llvm_static_targets[@]}"
     read -r -a llvm_libfiles <<< "$($llvm_config --link-static --libfiles "${llvm_components[@]}")"
     test "${#llvm_libfiles[@]}" -gt 0
     : > "$output/llvm-static-libs.txt"
