@@ -88,7 +88,8 @@ public func GetHash(content: String): UInt64 {
     let fnvOffsetBasis = 14695981039346656037u64
     var hash = fnvOffsetBasis
     for (byte in content.toArray()) {
-        hash ^= UInt64(byte)
+        // C++ anchor: src/Basic/Utils.cpp:33-35 converts signed char to uint64_t before XOR.
+        hash ^= UInt64(Int64(Int8(byte)))
         hash *= fnvPrime
     }
     return hash
