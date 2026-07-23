@@ -114,7 +114,10 @@ public class FaithfulUnorderedMap<V> {
             nodes[nodeIndex].value = value
             return
         }
-        let hash = GetHash(key)
+        @When[os == "Windows"]
+        let hash = msvcStringHash(key.toArray())
+        @When[os != "Windows"]
+        let hash = libStdCxxHashBytes(key.toArray())
         let newBucketCount = MNeedRehash()
         if (newBucketCount > 0) {
             MRehash(newBucketCount)
@@ -166,7 +169,10 @@ public class FaithfulUnorderedMap<V> {
     }
 
     private func MFindNodeIndex(key: String): Option<Int64> {
-        let hash = GetHash(key)
+        @When[os == "Windows"]
+        let hash = msvcStringHash(key.toArray())
+        @When[os != "Windows"]
+        let hash = libStdCxxHashBytes(key.toArray())
         let bucketIndex = MBucketIndex(hash, bucketCount)
         let beforeNode = buckets[bucketIndex]
         if (beforeNode == FAITHFUL_UNORDERED_MAP_EMPTY) {
@@ -187,7 +193,10 @@ public class FaithfulUnorderedMap<V> {
     }
 
     private func MErase(key: String): Bool {
-        let hash = GetHash(key)
+        @When[os == "Windows"]
+        let hash = msvcStringHash(key.toArray())
+        @When[os != "Windows"]
+        let hash = libStdCxxHashBytes(key.toArray())
         var previous = FAITHFUL_UNORDERED_MAP_BEFORE_BEGIN
         var nodeIndex = beforeBeginNext
         while (nodeIndex != FAITHFUL_UNORDERED_MAP_EMPTY) {
