@@ -22,9 +22,11 @@ env:
   # bbaa9f9e adds the Darwin AArch64 stack-grow stub `_` mangle (AArch64AsmPrinter
   # emitStackOverflowCall emitted a bare CJ_MCC_StackGrowStub that no Mach-O
   # arm64 runtime exports; Darwin x86_64 runtime deliberately exports the bare
-  # name, so the mangle is AArch64-only).
+  # name, so the mangle is AArch64-only). 0613cbb5 adds out-of-class definitions
+  # for ODR-used constexpr statics (CJGCInstrReplace/CJSimpleOpt); without them
+  # the Windows COFF link of the shim fails with undefined symbols.
   LLVM_URL: https://github.com/cjcj-dev/cjcj-llvm.git
-  LLVM_SHA: bbaa9f9e8e29ea8fb0c6df7fa3e5c8fbcf40b029
+  LLVM_SHA: 0613cbb50ea173521dd30e73d9feb243e66fac58
   CANGJIE_COMPILER_URL: https://gitcode.com/Cangjie/cangjie_compiler.git
   CANGJIE_COMPILER_SHA: 87fff87a1883da9bfe5956296d8079e8a7f9d15f
   FLATBUFFERS_URL: https://gitcode.com/openharmony/third_party_flatbuffers.git
