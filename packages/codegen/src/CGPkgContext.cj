@@ -6,6 +6,7 @@ import cjcj::chir.CHIRContext
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.ClassType
 import cjcj::chir.Function
+import cjcj::chir.GlobalValue
 import cjcj::chir.NoHeapAllocChecker
 import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.Package
@@ -35,7 +36,6 @@ public class ObjectLocker<T> {
 public class CHIRData {
     private let chirContext: CHIRContext
     private var currentPackage: Package
-    private let implicitFuncs: HashMap<String, Function> = HashMap<String, Function>()
 
     public init(chirContext: CHIRContext, currentPackage: Package) {
         this.chirContext = chirContext
@@ -54,13 +54,6 @@ public class CHIRData {
         currentPackage = pkg
     }
 
-    public func GetImplicitFuncs(): HashMap<String, Function> {
-        return implicitFuncs
-    }
-
-    public func AddImplicitFunc(mangledName: String, fn: Function): Unit {
-        implicitFuncs[mangledName] = fn
-    }
 }
 
 public class CGPkgContext {
@@ -73,8 +66,8 @@ public class CGPkgContext {
     private let correctedCachedMangleMap: CachedMangleMap = CachedMangleMap()
     private let cgMods: ArrayList<CGModule> = ArrayList<CGModule>()
     private let subTypeMap: HashMap<Int64, HashMap<Int64, Type>> = HashMap<Int64, HashMap<Int64, Type>>()
-    private let quickCHIRValues: ObjectLocker<HashMap<String, Value>> =
-        ObjectLocker<HashMap<String, Value>>(HashMap<String, Value>())
+    private let quickCHIRValues: ObjectLocker<HashMap<String, GlobalValue>> =
+        ObjectLocker<HashMap<String, GlobalValue>>(HashMap<String, GlobalValue>())
     private let localizedSymbols: ObjectLocker<HashSet<String>> =
         ObjectLocker<HashSet<String>>(HashSet<String>())
 
@@ -130,13 +123,6 @@ public class CGPkgContext {
 
     public func GetGlobalOptions(): GlobalOptions {
         return options
-    }
-
-    public func GetImplicitUsedFunc(funcMangledName: String): Option<Function> {
-        if (implicitFuncsContains(funcMangledName)) {
-            return chirData.GetImplicitFuncs()[funcMangledName]
-        }
-        return None
     }
 
     public func GetCachedMangleMap(): CachedMangleMap {
@@ -228,7 +214,7 @@ public class CGPkgContext {
         return false
     }
 
-    public func FindCHIRGlobalValue(mangledName: String): Option<Value> {
+    public func FindCHIRGlobalValue(mangledName: String): Option<GlobalValue> {
         let chirPackage = GetCHIRPackage()
         return quickCHIRValues.Do({ object =>
             if (object.isEmpty()) {
@@ -241,10 +227,6 @@ public class CGPkgContext {
             }
             object.get(mangledName)
         })
-    }
-
-    private func implicitFuncsContains(name: String): Bool {
-        return chirData.GetImplicitFuncs().contains(name)
     }
 
 }
