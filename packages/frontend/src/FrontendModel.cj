@@ -307,7 +307,6 @@ public class CHIRPackage {
     public var fileCount: Int64 = 0
     public var declCount: Int64 = 0
     public let mangleNames: ArrayList<String> = ArrayList<String>()
-    public let implicitFuncs: HashMap<String, String> = HashMap<String, String>()
     public let constVarInitFuncs: ArrayList<String> = ArrayList<String>()
 
     public init(name: String) {
@@ -328,12 +327,7 @@ public class CHIRData {
     private let realContext: RealCHIRContext = RealCHIRContext()
     private let realChirPkgs: ArrayList<RealCHIRPackage> = ArrayList<RealCHIRPackage>()
     private var curRealCodegenPkg: Option<RealCHIRPackage> = None
-    private let implicitFuncs: HashMap<String, String> = HashMap<String, String>()
     private let constVarInitFuncs: ArrayList<String> = ArrayList<String>()
-    private let implicitFuncsPerPkg: HashMap<String, HashMap<String, String>> =
-        HashMap<String, HashMap<String, String>>()
-    private let realImplicitFuncsPerPkg: HashMap<String, HashMap<String, RealCHIRFunction>> =
-        HashMap<String, HashMap<String, RealCHIRFunction>>()
     private let constVarInitFuncsPerPkg: HashMap<String, ArrayList<String>> =
         HashMap<String, ArrayList<String>>()
 
@@ -405,37 +399,6 @@ public class CHIRData {
         curCodegenPkg = pkg
     }
 
-    public func SetImplicitFuncs(pkg: CHIRPackage, funcs: HashMap<String, String>): Unit {
-        implicitFuncs.clear()
-        for ((key, value) in funcs) {
-            implicitFuncs.add(key, value)
-        }
-        let copy = HashMap<String, String>()
-        for ((key, value) in funcs) {
-            copy.add(key, value)
-        }
-        if (implicitFuncsPerPkg.contains(pkg.name)) {
-            implicitFuncsPerPkg.remove(pkg.name)
-        }
-        implicitFuncsPerPkg.add(pkg.name, copy)
-    }
-
-    public func GetImplicitFuncs(): HashMap<String, String> {
-        return implicitFuncs
-    }
-
-    public func SetImplicitFuncs(pkg: RealCHIRPackage, funcs: HashMap<String, RealCHIRFunction>): Unit {
-        let copy = HashMap<String, RealCHIRFunction>()
-        for ((key, value) in funcs) {
-            copy.add(key, value)
-        }
-        realImplicitFuncsPerPkg[pkg.GetName()] = copy
-    }
-
-    public func GetImplicitFuncs(pkg: RealCHIRPackage): HashMap<String, RealCHIRFunction> {
-        return realImplicitFuncsPerPkg.get(pkg.GetName()) ?? HashMap<String, RealCHIRFunction>()
-    }
-
     public func SetConstVarInitFuncs(pkg: CHIRPackage, funcs: ArrayList<String>): Unit {
         constVarInitFuncs.clear()
         for (funcName in funcs) {
@@ -456,12 +419,6 @@ public class CHIRData {
     }
 
     public func ActivateCodegenFuncsForPackage(pkg: CHIRPackage): Unit {
-        if (let Some(funcs) <- implicitFuncsPerPkg.get(pkg.name)) {
-            implicitFuncs.clear()
-            for ((key, value) in funcs) {
-                implicitFuncs.add(key, value)
-            }
-        }
         if (let Some(funcs) <- constVarInitFuncsPerPkg.get(pkg.name)) {
             constVarInitFuncs.clear()
             for (funcName in funcs) {
