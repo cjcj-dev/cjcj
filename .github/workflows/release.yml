@@ -33,7 +33,7 @@ permissions:
 
 env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
-  RUNTIME_REF: 08374ada1d241453fac8ef56629345a90d0cccc8
+  RUNTIME_REF: ae074bd283796236a5b1962545cf5e548b8856f6
 
 jobs:
   fixed-llvm-tools:
