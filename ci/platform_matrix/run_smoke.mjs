@@ -55,6 +55,32 @@ const deploy = path.join(bin, `cjcj${exeSuffix}`);
 await fs.mkdir(bin, {recursive: true});
 await fs.copyFile(product, deploy);
 try { await fs.chmod(deploy, 0o755); } catch {}
+if (process.platform === 'win32') {
+  // Same-directory DLL resolution always wins on Windows (see the tuple llc
+  // staging in build_cjcj.mjs); stage the runtime and MinGW DLLs next to the
+  // deployed compiler so a PATH miss cannot produce a silent loader 127.
+  const dllSources = [path.join(process.env.CANGJIE_HOME || '', 'runtime', 'lib', 'windows_x86_64_cjnative')];
+  for (const dir of ['C:\\mingw64\\bin', 'C:\\msys64\\mingw64\\bin']) dllSources.push(dir);
+  const wanted = ['libcangjie-runtime.dll', 'cangjie-runtime.dll', 'libstdc++-6.dll', 'libwinpthread-1.dll', 'libgcc_s_seh-1.dll'];
+  for (const name of wanted) {
+    for (const dir of dllSources) {
+      const source = path.join(dir, name);
+      if (await isFile(source)) {
+        await fs.copyFile(source, path.join(bin, name));
+        console.log(`staged ${name} from ${dir}`);
+        break;
+      }
+    }
+  }
+  const imports = await $({nothrow: true, stdio: 'pipe'})`objdump -p ${toCommandPath(deploy)}`;
+  const importNames = [...imports.stdout.matchAll(/DLL Name: (\S+)/g)].map((m) => m[1]);
+  console.log(`import table: ${importNames.join(' ') || '(objdump unavailable)'}`);
+  for (const name of importNames) {
+    const local = await isFile(path.join(bin, name));
+    const located = local ? 'staged' : (await $({nothrow: true, stdio: 'pipe'})`where ${name}`).stdout.split(/\r?\n/).find(Boolean) || 'MISSING';
+    console.log(`import ${name}: ${located}`);
+  }
+}
 if (process.env.CANGJIE_HOME) {
   const sourceRuntime = path.join(process.env.CANGJIE_HOME, 'runtime');
   const targetRuntime = path.join(root, 'runtime');
