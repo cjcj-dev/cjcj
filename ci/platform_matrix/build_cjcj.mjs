@@ -35,7 +35,7 @@ function extractWindowsRelinkArgs(stderr) {
   if (!stderr.includes('cjcj::cjc.exe: Invalid argument')) return null;
   for (const line of stderr.split(/\r?\n/)) {
     const startMarker = 'error: "';
-    const endMarker = '" : command failed with exit code ';
+    const endMarker = '": command failed with exit code ';
     const start = line.indexOf(startMarker);
     const end = line.lastIndexOf(endMarker);
     if (start < 0 || end < start) continue;
