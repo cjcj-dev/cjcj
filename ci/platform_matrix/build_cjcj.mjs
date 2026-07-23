@@ -263,7 +263,7 @@ if (process.platform === 'win32') {
     // gcc-16 libstdc++ pulls the C99 wide-char/errno family as dllimports the
     // SDK-era msvcrt lacks (round-19); resolve each from the new import libs,
     // member-by-member, msvcrt first then mingwex.
-    'for sym in fstat64 __mingw_fix_fstat_finish mbsrtowcs _set_errno wctype wctob btowc wcrtomb mbrtowc wcsrtombs mbrlen; do',
+    'for sym in fstat64 __mingw_fix_fstat_finish mbsrtowcs _set_errno wctype wctob btowc wcrtomb mbrtowc wcsrtombs mbrlen __mingw_mbrtowc_cp __mingw_wcrtomb_cp; do',
     '  found=""',
     '  for library in "$MSVCRT_LIB" "$MINGWEX_LIB"; do',
     '    if extract_syms "$library" "$sym" 2>/dev/null; then found=1; break; fi',
