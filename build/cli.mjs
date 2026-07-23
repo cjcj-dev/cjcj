@@ -1,6 +1,8 @@
 #!/usr/bin/env zx
 // Port of cangjie-build/src/cangjie_build/cli.py.
 
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {buildConfig, DEFAULT_BUILD_TYPE, REPO_NAMES, VALID_BUILD_TYPES} from './lib/config.mjs';
 import {BuildError, ConfigError} from './lib/errors.mjs';
 import {configureLogging, getLogger} from './lib/logging.mjs';
@@ -183,7 +185,9 @@ async function dispatch(config, command, args) {
 }
 
 async function main() {
-  const parsed = parseGlobal(process.argv.slice(2));
+  const scriptPath = fileURLToPath(import.meta.url);
+  const scriptIndex = process.argv.findIndex(argument => path.resolve(argument) === scriptPath);
+  const parsed = parseGlobal(process.argv.slice(scriptIndex >= 0 ? scriptIndex + 1 : 2));
   if (parsed.help) {
     process.stdout.write(`${usage()}\n`);
     return;
