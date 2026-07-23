@@ -2,6 +2,7 @@
 // Verify and install a source-built runtime into this job's SDK tree.
 
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import path from 'node:path';
 
 $.stdio = 'inherit';
@@ -24,29 +25,33 @@ if (requestedRuntimeRef && requestedRuntimeRef !== runtimeRef) {
   process.exit(2);
 }
 
-const so = `${dist}/libcangjie-runtime.so`;
-await $`test -f ${so}`;
 const sourceSha = (await fs.readFile(`${dist}/SOURCE_SHA`, 'utf8')).trim();
 if (sourceSha !== runtimeRef) throw new Error(`runtime source mismatch: ${sourceSha} != ${runtimeRef}`);
-await $({cwd: dist})`sha256sum -c libcangjie-runtime.so.sha256`;
 
 const hostOs = (await $({stdio: 'pipe'})`uname -s`).stdout.trim();
 const hostArch = (await $({stdio: 'pipe'})`uname -m`).stdout.trim();
-const runtimeDirs = {
-  'Linux/x86_64': 'linux_x86_64_cjnative',
-  'Linux/aarch64': 'linux_aarch64_cjnative',
+const runtimes = {
+  'Linux/x86_64': ['linux_x86_64_cjnative', 'libcangjie-runtime.so'],
+  'Linux/aarch64': ['linux_aarch64_cjnative', 'libcangjie-runtime.so'],
+  'Darwin/x86_64': ['darwin_x86_64_cjnative', 'libcangjie-runtime.dylib'],
+  'Darwin/arm64': ['darwin_aarch64_cjnative', 'libcangjie-runtime.dylib'],
 };
-const runtimeDir = runtimeDirs[`${hostOs}/${hostArch}`];
-if (!runtimeDir) {
-  console.error(`[runtime] unsupported host ${hostOs}/${hostArch}`);
+const runtime = runtimes[`${hostOs}/${hostArch}`];
+if (!runtime) {
+  console.error(`patched runtime install unsupported on ${hostOs}/${hostArch}`);
   process.exit(2);
 }
+const [runtimeDir, runtimeLibrary] = runtime;
+const source = path.join(dist, runtimeLibrary);
+const sourceFileSha = crypto.createHash('sha256').update(await fs.readFile(source)).digest('hex');
+const expectedFileSha = (await fs.readFile(`${source}.sha256`, 'utf8')).trim().split(/\s+/)[0];
+if (sourceFileSha !== expectedFileSha) throw new Error('source runtime sha mismatch');
 
-const destination = `${cangjieHome}/runtime/lib/${runtimeDir}/libcangjie-runtime.so`;
-await $`test -f ${destination}`;
-await $`install -m0755 ${so} ${destination}.new`;
-await $`mv -f ${destination}.new ${destination}`;
-const destinationSha = (await $({stdio: 'pipe'})`sha256sum ${destination}`).stdout.trim().split(/\s+/)[0];
-const sourceFileSha = (await $({stdio: 'pipe'})`sha256sum ${so}`).stdout.trim().split(/\s+/)[0];
+const destination = path.join(cangjieHome, 'runtime', 'lib', runtimeDir, runtimeLibrary);
+await fs.access(destination);
+await fs.copyFile(source, `${destination}.new`);
+await fs.chmod(`${destination}.new`, 0o755);
+await fs.rename(`${destination}.new`, destination);
+const destinationSha = crypto.createHash('sha256').update(await fs.readFile(destination)).digest('hex');
 if (destinationSha !== sourceFileSha) throw new Error('installed runtime sha mismatch');
 console.log(`[runtime] installed ${runtimeRef} -> ${destination}`);
