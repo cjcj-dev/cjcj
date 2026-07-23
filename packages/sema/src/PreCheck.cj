@@ -61,6 +61,9 @@ private func IsSamePosition(pos1: BasicPosition, pos2: BasicPosition): Bool {
 }
 
 private func IsSameDeserializedFunction(left: Decl, right: Decl): Bool {
+    if (left == right) {
+        return false
+    }
     return IsSamePosition(left.begin, right.begin) &&
         (left.TestAttr(Attribute.ALREADY_LOADED) || right.TestAttr(Attribute.ALREADY_LOADED))
 }

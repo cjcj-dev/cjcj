@@ -320,11 +320,18 @@ public class Sort {
     public static func PosAsc(left: Symbol, right: Symbol): Bool {
         if (let Some(leftNode) <- left.node) {
             if (let Some(rightNode) <- right.node) {
-                if (leftNode.begin.fileID < rightNode.begin.fileID) {
-                    return true
+                var bothCjmp = false
+                if (let Some(leftFile) <- leftNode.curFile) {
+                    if (let Some(rightFile) <- rightNode.curFile) {
+                        bothCjmp = (leftFile.isCommon || leftFile.isSpecific) &&
+                            (rightFile.isCommon || rightFile.isSpecific)
+                        if (bothCjmp && leftFile.filePath != rightFile.filePath) {
+                            return leftFile.filePath < rightFile.filePath
+                        }
+                    }
                 }
-                if (leftNode.begin.fileID > rightNode.begin.fileID) {
-                    return false
+                if (!bothCjmp && leftNode.begin.fileID != rightNode.begin.fileID) {
+                    return leftNode.begin.fileID < rightNode.begin.fileID
                 }
                 if (leftNode.begin < rightNode.begin) {
                     return true
