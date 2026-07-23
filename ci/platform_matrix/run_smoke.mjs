@@ -111,8 +111,10 @@ if (process.env.CANGJIE_HOME) {
 // so every Windows invocation goes through cmd.exe. The console-less crash
 // itself is tracked as a runtime debt.
 function runCmd(exe, args, env = process.env) {
+  // /s strips exactly one outer quote pair from the /c payload, so the fully
+  // quoted line needs one extra wrapping pair to survive intact.
   const line = [`"${exe}"`, ...args.map((a) => `"${a}"`)].join(' ');
-  return spawnSync('cmd.exe', ['/d', '/s', '/c', line], {encoding: 'utf8', env, windowsVerbatimArguments: true, maxBuffer: 64 * 1024 * 1024});
+  return spawnSync('cmd.exe', ['/d', '/s', '/c', `"${line}"`], {encoding: 'utf8', env, windowsVerbatimArguments: true, maxBuffer: 64 * 1024 * 1024});
 }
 if (process.platform === 'win32') {
   const version = runCmd(deploy, ['--version']);
