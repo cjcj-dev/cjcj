@@ -38,6 +38,9 @@ class UtilsTest {
     @TestCase
     func getHashTest(): Unit {
         @Expect(GetHash("hello world"), 8618312879776256743u64)
+        let highByteHash = GetHash("é")
+        @Expect(highByteHash, 580246403935907841u64)
+        @Expect(UInt32(highByteHash >> 32) ^ UInt32(highByteHash & 0xffffffffu64), 3166782214u32)
     }
 
     @TestCase
