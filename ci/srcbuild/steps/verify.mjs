@@ -32,8 +32,8 @@ async function probeTempExec(rootDir, label) {
     probeDir = await fs.mkdtemp(path.join(rootDir, 'cjcj-preflight-exec-'));
     const probe = path.join(probeDir, 'probe.sh');
     await fs.writeFile(probe, '#!/bin/sh\nexit 0\n', {mode: 0o755});
-    const result = await $({nothrow: true, stdio: 'pipe'})`${probe}`;
-    const mount = await $({nothrow: true, stdio: 'pipe'})`findmnt -no TARGET,FSTYPE,OPTIONS -T ${probeDir}`;
+    const result = await $({nothrow: true, quiet: true, stdio: 'pipe'})`${probe}`;
+    const mount = await $({nothrow: true, quiet: true, stdio: 'pipe'})`findmnt -no TARGET,FSTYPE,OPTIONS -T ${probeDir}`;
     return `${label}=${rootDir} exec=${result.exitCode} mount=${mount.stdout.trim() || '<unavailable>'}`;
   } catch (error) {
     return `${label}=${rootDir} probe-error=${String(error)}`;
@@ -71,8 +71,8 @@ for (const [label, rootDir] of tempRoots) {
   if (!tempExec.some(line => line.includes(`=${rootDir} `))) tempExec.push(await probeTempExec(rootDir, label));
 }
 const sccacheKeys = Object.keys(process.env).filter(key => key === 'RUSTC_WRAPPER' || key.startsWith('SCCACHE_')).sort();
-const sccachePath = await $({nothrow: true, stdio: 'pipe'})`sh -c 'command -v sccache || true'`;
-const oracleLdd = await $({nothrow: true, stdio: 'pipe'})`ldd ${oracle}`;
+const sccachePath = await $({nothrow: true, quiet: true, stdio: 'pipe'})`sh -c 'command -v sccache || true'`;
+const oracleLdd = await $({nothrow: true, quiet: true, stdio: 'pipe'})`ldd ${oracle}`;
 const oracleLddOutput = `${oracleLdd.stdout}${oracleLdd.stderr}`;
 const oracleLddNotFound = oracleLddOutput.split(/\r?\n/).filter(line => /not found/i.test(line));
 const cgroupMemory = await readCgroupMemory();
@@ -97,13 +97,13 @@ async function reportPreflightFailure(label, result) {
 }
 
 console.log('[preflight] oracle --version');
-const oracleVersion = await $({nothrow: true, stdio: 'pipe'})`${oracle} --version`;
-if (oracleVersion.stdout) process.stdout.write(oracleVersion.stdout);
-if (oracleVersion.stderr) process.stderr.write(oracleVersion.stderr);
+const oracleVersion = await $({nothrow: true, quiet: true, stdio: 'pipe'})`${oracle} --version`;
 if (oracleVersion.exitCode !== 0) {
   await reportPreflightFailure('oracle --version', oracleVersion);
   throw new Error('reference oracle preflight failed');
 }
+if (oracleVersion.stdout) process.stdout.write(oracleVersion.stdout);
+if (oracleVersion.stderr) process.stderr.write(oracleVersion.stderr);
 
 const corpus = `${root}/scripts/difftest_corpus`;
 const firstCorpusName = (await fs.readdir(corpus)).filter(name => name.endsWith('.cj')).sort()[0];
@@ -111,14 +111,14 @@ if (!firstCorpusName) throw new Error(`reference oracle preflight failed: no .cj
 const firstCorpus = path.join(corpus, firstCorpusName);
 const preflightOutput = path.join(work, 'ref-preflight');
 console.log(`[preflight] reference compile: ${firstCorpusName}`);
-const referenceCompile = await $({nothrow: true, stdio: 'pipe', cwd: work})`timeout 180 ${oracle} ${firstCorpus} -o ${preflightOutput}`;
-if (referenceCompile.stdout) process.stdout.write(referenceCompile.stdout);
-if (referenceCompile.stderr) process.stderr.write(referenceCompile.stderr);
+const referenceCompile = await $({nothrow: true, quiet: true, stdio: 'pipe', cwd: work})`timeout 180 ${oracle} ${firstCorpus} -o ${preflightOutput}`;
 await fs.rm(preflightOutput, {force: true});
 if (referenceCompile.exitCode !== 0) {
   await reportPreflightFailure(`reference compile ${firstCorpusName}`, referenceCompile);
   throw new Error('reference oracle preflight failed');
 }
+if (referenceCompile.stdout) process.stdout.write(referenceCompile.stdout);
+if (referenceCompile.stderr) process.stderr.write(referenceCompile.stderr);
 console.log('[preflight] PASS items=6 probes=4/4');
 
 console.log('[1/4] difftest: cjcj vs source-built C++ cjc');
