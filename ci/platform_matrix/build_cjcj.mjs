@@ -14,6 +14,8 @@ import {pickWindowsCC} from './pick_cc.mjs';
 const {root} = stageBegin('cjcj');
 const toolchain = process.env.CJCJ_TOOLCHAIN || 'nightly-1.2.0-alpha.20260721165458';
 const heapSize = process.env.CJ_HEAP_SIZE || '12GB';
+const provisionOnly = process.platform === 'win32' && process.env.CJCJ_SDK_PROVISION_ONLY === '1';
+const sdkAlreadyProvisioned = process.platform === 'win32' && process.env.CJCJ_SDK_ALREADY_PROVISIONED === '1';
 let setupRc = 0;
 
 async function isDirectory(target) {
@@ -42,7 +44,7 @@ if (process.platform === 'win32') {
   const cjvVersion = process.env.CJV_VERSION || 'v0.2.20';
   const tools = path.join(home, '.local', 'bin');
   const cjv = path.join(tools, 'cjv.exe');
-  if (!(await isFile(cjv))) {
+  if (!sdkAlreadyProvisioned && !(await isFile(cjv))) {
     await fs.mkdir(tools, {recursive: true});
     const archive = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'cjv_windows_amd64.zip');
     const extract = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'cjv-windows');
@@ -59,14 +61,16 @@ if (process.platform === 'win32') {
     if (!downloaded) throw new Error(`cjv.exe missing from ${archive}`);
     await fs.copyFile(downloaded, cjv);
   }
-  process.env.PATH = `${tools};${process.env.PATH || ''}`;
-  if (process.env.GITCODE_API_KEY) {
-    await $({nothrow: true, stdio: 'pipe', verbose: false})`${toCommandPath(cjv)} set gitcode-api-key ${process.env.GITCODE_API_KEY}`;
-    console.log('[platform setup_sdk] gitcode-api-key set');
+  if (!sdkAlreadyProvisioned) {
+    process.env.PATH = `${tools};${process.env.PATH || ''}`;
+    if (process.env.GITCODE_API_KEY) {
+      await $({nothrow: true, stdio: 'pipe', verbose: false})`${toCommandPath(cjv)} set gitcode-api-key ${process.env.GITCODE_API_KEY}`;
+      console.log('[platform setup_sdk] gitcode-api-key set');
+    }
+    console.log(`[platform setup_sdk] cjv install ${toolchain} -c stdx`);
+    const install = await $({nothrow: true})`${toCommandPath(cjv)} install ${toolchain} -c stdx`;
+    setupRc = install.exitCode;
   }
-  console.log(`[platform setup_sdk] cjv install ${toolchain} -c stdx`);
-  const install = await $({nothrow: true})`${toCommandPath(cjv)} install ${toolchain} -c stdx`;
-  setupRc = install.exitCode;
 } else {
   home = process.env.HOME;
   if (!home) throw new Error('HOME is required');
@@ -104,6 +108,10 @@ if (process.platform === 'win32') {
   } else process.env.LD_LIBRARY_PATH = libraryPath;
 }
 if (setupRc !== 0) process.exit(setupRc);
+if (provisionOnly) {
+  console.log(`[platform setup_sdk] provisioned Windows SDK at ${cangjieHome}`);
+  process.exit(0);
+}
 
 if (process.platform === 'win32') {
   const llvmBin = path.join(cangjieHome, 'third_party', 'llvm', 'bin');
