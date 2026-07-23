@@ -21,7 +21,12 @@ export function assembleCjcLinkOption(
     if (!mingwCxxLinkRsp) throw new Error('Windows MinGW C++ link response is required');
     // PE link: no --export-dynamic / -rpath (ELF-only; round-17 lld rejected
     // both). The tuple response keeps LLVM archives lazy and grouped.
+    // --stack: the PE default reserve is 1MB and the compiler's recursion plus
+    // the Cangjie runtime overflow it at startup (round-14 STATUS_STACK_OVERFLOW,
+    // SizeOfStackReserve=0x100000); Linux runs on the 8MB ulimit default, so
+    // reserve 64MB to match the deep-recursion headroom.
     return [
+      '--stack=0x4000000',
       'runtime_shim/cjselfhost_llvmshim.o',
       'runtime_shim/cjc_runtime_config.o',
       `@${llvmLinkRsp.replaceAll('\\', '/')}`,
