@@ -1,6 +1,3 @@
-# CI. Build+smoke run on linux-x64 with llc+shim built from pinned sources;
-# other platforms run a non-gating SDK provisioning check.
-# Rationale and platform matrix: reports/REPORT-ci-pipelines.md.
 name: CI
 
 on:
@@ -19,38 +16,39 @@ env:
 
 jobs:
   lint:
-    name: lint
+    name: Verify sources
     runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - name: Lint workflows
+      - name: Checkout cjcj
+        uses: actions/checkout@v4
+      - name: Run actionlint
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           ./actionlint -color
-      - name: Shellcheck scripts
+      - name: Run ShellCheck
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck --severity=error \
             scripts/difftest.sh runtime_shim/build_shim.sh
-      - name: Check zx script syntax
+      - name: Verify zx syntax
         run: |
           find ci runtime_shim scripts -type f -name '*.mjs' -print0 \
             | xargs -0 -n1 node --check
-      - name: Check smoke assets
+      - name: Verify smoke assets
         run: |
           test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5
           test -f ci/smoke/macro_demo/mymacros/def.cj
           test -f ci/smoke/macro_demo/app/main.cj
-      - name: Reject vendored LLVM binaries
+      - name: Verify LLVM policy
         run: test -z "$(git ls-files 'ci/prebuilt/**' 'runtime_shim/prebuilt/**')"
 
   fixed-llvm-tools:
-    name: source-build fixed LLVM tools
+    name: Build LLVM tools
     uses: ./.github/workflows/build-fixed-llc.yml
 
   build:
-    name: build ${{ matrix.runner }}
+    name: ${{ matrix.runner }} / Build
     needs: fixed-llvm-tools
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -63,8 +61,9 @@ jobs:
           - { runner: ubuntu-22.04, experimental: false }
           - { runner: ubuntu-26.04, experimental: true }
     steps:
-      - uses: actions/checkout@v4
-      - name: Download source-built LLVM tools
+      - name: Checkout cjcj
+        uses: actions/checkout@v4
+      - name: Download LLVM tools
         uses: actions/download-artifact@v4
         with:
           name: fixed-llvm-tools-linux_x86_64
@@ -75,7 +74,7 @@ jobs:
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Cache cjpm build
+      - name: Restore cjpm cache
         uses: actions/cache@v4
         with:
           path: target
@@ -103,10 +102,10 @@ jobs:
         with:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
-      - name: Install runtime build dependencies
+      - name: Install runtime dependencies
         if: steps.rtcache.outputs.cache-hit != 'true'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make
-      - name: Build pinned runtime
+      - name: Build patched runtime
         if: steps.rtcache.outputs.cache-hit != 'true'
         env:
           RUNTIME_VERSION: ${{ env.CJCJ_TOOLCHAIN }}
@@ -117,7 +116,7 @@ jobs:
         with:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
-      - name: Activate pinned runtime
+      - name: Install patched runtime
         run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Build runtime shim
         env:
@@ -126,7 +125,7 @@ jobs:
       - name: Build workspace
         run: cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).
-      - name: Deploy compiler
+      - name: Compose compiler
         run: |
           test -f "target/release/bin/cjcj::cjc"
           cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
@@ -135,7 +134,7 @@ jobs:
 
   # Non-gating: verifies SDK provisioning on non-x64 platforms; does not build cjcj.
   provision:
-    name: provision ${{ matrix.runner }}
+    name: ${{ matrix.runner }} / Verify SDK
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     continue-on-error: true
@@ -144,7 +143,8 @@ jobs:
       matrix:
         runner: [ubuntu-24.04-arm, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout cjcj
+        uses: actions/checkout@v4
       - name: Restore SDK cache
         id: sdkcache
         uses: actions/cache/restore@v4
@@ -162,12 +162,12 @@ jobs:
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Diagnose SDK layout
+      - name: Verify SDK layout
         run: |
           ls -la "$CANGJIE_HOME/bin" || true
           file "$CANGJIE_HOME/bin/cjc" || true
           ls "$CANGJIE_HOME/runtime/lib" || true
-      - name: Verify official cjc
+      - name: Verify official compiler
         run: |
           set -x
           if [ "$(uname -s)" = "Darwin" ]; then xattr -dr com.apple.quarantine "$CANGJIE_HOME" || true; fi
