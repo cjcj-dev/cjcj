@@ -3742,7 +3742,7 @@ private func UpdateFuncGenericType(typeManager: TypeManager, ctx: Option<ASTCont
         }
     }
     if (let Some(base) <- ce.baseFunc) {
-        if (let Some(refExpr) <- (base as RefExpr)) {
+        if (let Some(refExpr) <- (base as NameReferenceExpr)) {
             if (let Some(parentTy) <- refExpr.matchedParentTy) {
                 refExpr.matchedParentTy = Some(typeManager.ApplySubstPack(parentTy, unit.typeMapping))
             }
