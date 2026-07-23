@@ -83,7 +83,9 @@ if (process.platform === 'win32') {
   }
   // Transitive closure: the top-level table resolving proves nothing about the
   // DLLs' own imports — msys2 ldd walks the full PE dependency tree.
-  const ldd = spawnSync('C:\\msys64\\usr\\bin\\bash.exe', ['-lc', `ldd '${toCommandPath(deploy)}'`],
+  // -c (not -lc): a login shell resets PATH and reports SDK DLLs as spuriously
+  // "not found" (round-12 artifact).
+  const ldd = spawnSync('C:\\msys64\\usr\\bin\\bash.exe', ['-c', `ldd '${toCommandPath(deploy)}'`],
     {encoding: 'utf8', env: {...process.env, MSYSTEM: 'MSYS', CHERE_INVOKING: '1'}, maxBuffer: 16 * 1024 * 1024});
   console.log(`ldd status=${ldd.status}\n${(ldd.stdout || '').trim()}\n${(ldd.stderr || '').trim()}`);
   // Raw NTSTATUS: bash flattens loader failures to 127; cmd surfaces the code.
@@ -104,10 +106,42 @@ if (process.env.CANGJIE_HOME) {
     }
   }
 }
-await $({nothrow: true})`${toCommandPath(deploy)} --version`;
+// Round-12 forensics: the exe is healthy under cmd.exe (RAWEXIT=0) but takes
+// an access violation when spawned without a console (bash/node direct spawn),
+// so every Windows invocation goes through cmd.exe. The console-less crash
+// itself is tracked as a runtime debt.
+function runCmd(exe, args, env = process.env) {
+  const line = [`"${exe}"`, ...args.map((a) => `"${a}"`)].join(' ');
+  return spawnSync('cmd.exe', ['/d', '/s', '/c', line], {encoding: 'utf8', env, windowsVerbatimArguments: true, maxBuffer: 64 * 1024 * 1024});
+}
+if (process.platform === 'win32') {
+  const version = runCmd(deploy, ['--version']);
+  console.log(`cjcj --version status=${version.status}\n${(version.stdout || '').trim()}`);
+} else {
+  await $({nothrow: true})`${toCommandPath(deploy)} --version`;
+}
 
 async function runOne(name, expected, env = process.env) {
   const output = path.join(root, `${name}${exeSuffix}`);
+  if (process.platform === 'win32') {
+    const compile = runCmd(deploy, [path.join('ci', 'smoke', `${name}.cj`), '-o', output], env);
+    if (compile.status !== 0) {
+      console.error(`ERROR: ${name} compile status=${compile.status}\n${compile.stdout}\n${compile.stderr}`);
+      return false;
+    }
+    const ran = runCmd(output, [], env);
+    if (ran.status !== 0) {
+      console.error(`ERROR: ${name} run status=${ran.status}\n${ran.stdout}\n${ran.stderr}`);
+      return false;
+    }
+    const got = (ran.stdout || '').trimEnd();
+    console.log(`${name} => [${got}]`);
+    if (got !== expected) {
+      console.error(`ERROR: ${name} expected [${expected}], got [${got}]`);
+      return false;
+    }
+    return true;
+  }
   await $({env})`${toCommandPath(deploy)} ${toCommandPath(path.join('ci', 'smoke', `${name}.cj`))} -o ${toCommandPath(output)}`;
   const got = (await $({env, stdio: 'pipe', verbose: false})`${toCommandPath(output)}`).stdout.trimEnd();
   console.log(`${name} => [${got}]`);
