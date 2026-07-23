@@ -217,7 +217,7 @@ if (process.platform === 'win32') {
     cjcToml, process.platform, cangjieHome, process.env.CJCJ_LLVM_LINK_RSP || '', mingwCxxLinkRsp));
   shim = await runInMsys('npx --yes zx@8 runtime_shim/build_shim.mjs', 'shim');
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
-  build = await runInMsys('cjpm build', 'build');
+  build = await runInMsys('cjpm build -o cjcj', 'build');
 } else {
   await fs.writeFile(cjcTomlPath, platformizeCjcToml(
     cjcToml, process.platform, cangjieHome, process.env.CJCJ_LLVM_LINK_RSP || ''));
