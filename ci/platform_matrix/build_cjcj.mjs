@@ -157,8 +157,6 @@ await $({nothrow: true})`${toCommandPath(sdkLlc)} --version`;
 
 const cjcTomlPath = path.join('packages', 'cjc', 'cjpm.toml');
 const cjcToml = await fs.readFile(cjcTomlPath, 'utf8');
-await fs.writeFile(cjcTomlPath, platformizeCjcToml(
-  cjcToml, process.platform, cangjieHome, process.env.CJCJ_LLVM_LINK_RSP || ''));
 
 const cjpmToml = await fs.readFile('cjpm.toml', 'utf8');
 await fs.writeFile(path.join(root, 'cjpm.O1.toml'), cjpmToml.replace('compile-option = "-O2"', 'compile-option = "-O1"'));
@@ -191,10 +189,35 @@ if (process.platform === 'win32') {
     const mixed = scriptPath.replaceAll('\\', '/');
     return $({nothrow: true})`${toCommandPath(msysBash)} -c ${'export MSYSTEM=CLANG64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -l ' + mixed}`;
   };
+  const mingwCxxLinkRsp = path.resolve(root, 'mingw-cxx-link.rsp');
+  const resolveCxxRuntime = await runInMsys([
+    'probe_dir=.platform-ci/mingw-cxx-probe',
+    'mkdir -p "$probe_dir"',
+    'trap \'rm -rf "$probe_dir"\' EXIT',
+    'printf \'int main() { return 0; }\\n\' > "$probe_dir/empty.cc"',
+    'clang++ -v "$probe_dir/empty.cc" -o "$probe_dir/empty.exe" > "$probe_dir/driver.log" 2>&1',
+    'grep -oE -- \'-l[A-Za-z0-9_+:.,-]+\' "$probe_dir/driver.log" > "$probe_dir/libraries.txt"',
+    'test -s "$probe_dir/libraries.txt"',
+    `: > ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
+    'while IFS= read -r option; do',
+    '  name="${option#-l}"',
+    '  case "$name" in :*) filename="${name#:}" ;; *) filename="lib${name}.a" ;; esac',
+    '  library="$(clang++ -print-file-name="$filename")"',
+    '  test "$library" != "$filename" && test -f "$library"',
+    '  mixed="$(cygpath -m "$library")"',
+    `  printf '\"%s\"\\n' "$mixed" >> ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
+    '  printf \'MINGW_CXX_LIB %s=%s\\n\' "$option" "$mixed"',
+    'done < "$probe_dir/libraries.txt"',
+  ].join('\n'), 'cxx-libs');
+  if (resolveCxxRuntime.exitCode !== 0) process.exit(resolveCxxRuntime.exitCode);
+  await fs.writeFile(cjcTomlPath, platformizeCjcToml(
+    cjcToml, process.platform, cangjieHome, process.env.CJCJ_LLVM_LINK_RSP || '', mingwCxxLinkRsp));
   shim = await runInMsys('npx --yes zx@8 runtime_shim/build_shim.mjs', 'shim');
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
   build = await runInMsys('cjpm build', 'build');
 } else {
+  await fs.writeFile(cjcTomlPath, platformizeCjcToml(
+    cjcToml, process.platform, cangjieHome, process.env.CJCJ_LLVM_LINK_RSP || ''));
   shim = await $({nothrow: true})`npx --yes zx@8 runtime_shim/build_shim.mjs`;
   console.log(`shim_rc=${shim.exitCode}; continuing to cjpm build so the platform frontier is recorded`);
   build = await $({nothrow: true})`cjpm build`;
