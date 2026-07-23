@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import {spawnSync} from 'node:child_process';
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
 
@@ -157,6 +158,27 @@ if (process.platform === 'win32') {
 }
 if (setupRc !== 0) process.exit(setupRc);
 
+if (process.platform === 'win32') {
+  const llvmBin = path.join(cangjieHome, 'third_party', 'llvm', 'bin');
+  const sdkLd = path.join(llvmBin, 'ld.lld.exe');
+  const realLd = path.join(llvmBin, 'ld.lld-real.exe');
+  const wrapper = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'ld.lld-wrap.exe');
+  const wrapperSource = path.join(root, 'ci', 'platform_matrix', 'lldwrap.c');
+  const gcc = 'C:\\msys64\\mingw64\\bin\\gcc.exe';
+  if (!(await isFile(realLd)) && !(await isFile(sdkLd))) throw new Error(`SDK ld.lld missing: ${sdkLd}`);
+  await $`${toCommandPath(gcc)} -std=c11 -O2 -Wall -Wextra ${wrapperSource} -o ${wrapper}`;
+  if (!(await isFile(wrapper))) throw new Error(`ld.lld wrapper compile produced no executable: ${wrapper}`);
+  if (!(await isFile(realLd))) await fs.rename(sdkLd, realLd);
+  if (!(await isFile(realLd))) throw new Error(`real SDK linker missing after rename: ${realLd}`);
+  await fs.rm(sdkLd, {force: true});
+  await fs.rename(wrapper, sdkLd);
+  const probe = spawnSync(sdkLd, ['--version'], {encoding: 'utf8'});
+  console.log(`ld.lld wrapper probe: status=${probe.status} real=${realLd}`);
+  if (probe.stdout) console.log(probe.stdout.slice(0, 200));
+  if (probe.stderr) console.error(probe.stderr.slice(0, 400));
+  if (probe.status !== 0) throw new Error(`ld.lld wrapper --version failed: status=${probe.status} error=${probe.error?.code || 'none'}`);
+}
+
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
 if (!(await isFile(path.join('runtime_shim', 'cjselfhost_llvmshim.o'))) || !(await isFile(fixedLlcGz))) {
   emitBlockedSummary('no per-OS/arch fixed LLVM tuple (needs llc + source-built shim)');
@@ -188,7 +210,6 @@ if (process.platform === 'win32') {
       }
     }
   }
-  const {spawnSync} = await import('node:child_process');
   const probe = spawnSync(tupleLlc, ['--version'], {encoding: 'utf8'});
   console.log(`tuple llc probe: status=${probe.status} error=${probe.error ? probe.error.code : 'none'}`);
   if (probe.stdout) console.log(probe.stdout.slice(0, 200));
