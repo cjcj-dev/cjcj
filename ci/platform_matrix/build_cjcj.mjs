@@ -236,7 +236,10 @@ if (process.platform === 'win32') {
     'extract_syms() {',
     '  library="$1"; shift',
     '  for sym in "$@"; do',
-    '    member="$(nm -A "$library" 2>/dev/null | awk -F: -v s="$sym" \'$3 ~ (" T " s "$") {print $2; exit}\')"',
+    // nm -A is unusable here: C:/-style paths add a drive colon that shifts
+    // the field split (round-18). Parse the archive section headers instead;
+    // both GNU nm ("member.o:") and llvm-nm ("lib.a(member.o):") forms parse.
+    '    member="$(nm --defined-only "$library" 2>/dev/null | awk -v s="$sym" \'/:[[:space:]]*$/ { line=$0; sub(/:[[:space:]]*$/, "", line); n=split(line, parts, /[()]/); m=(n>=2? parts[2] : line); next } !done && ($2=="T"||$2=="W") && $3==s { print m; done=1 }\')"',
     '    test -n "$member"',
     '    (cd "$crt_extract" && ar x "$library" "$member")',
     '    printf \'MINGW_CRT64 %s<=%s:%s\\n\' "$sym" "$library" "$member"',
