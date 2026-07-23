@@ -275,7 +275,8 @@ public func CheckAnnoFastNative(decl: Decl, annotation: Annotation, diag: BasicD
             annotation.args[0],
             args: [BasicDiagArgument("@FastNative"), BasicDiagArgument("no")])
     }
-    if (decl.astKind != ASTKind.FUNC_DECL || !decl.TestAttr(Attribute.FOREIGN)) {
+    if (decl.astKind != ASTKind.FUNC_DECL ||
+        (!decl.TestAttr(Attribute.FOREIGN) && !decl.HasAnno(AstAnnotationKind.NO_HEAP_ALLOC))) {
         let prefix = if (decl.astKind == ASTKind.FUNC_DECL) { "non-foreign " } else { "" }
         EmitLegacy(
             diag,
