@@ -40,12 +40,6 @@ async function ghLines(endpoint, jq) {
 }
 
 export async function selectTupleArtifact() {
-  if (platform === 'linux_x86_64') {
-    const runId = process.env.LINUX_X64_TUPLE_RUN || '29840652402';
-    const ids = await ghLines(`repos/${repo}/actions/runs/${runId}/artifacts`, `.artifacts[] | select(.name == "${artifactName}" and .expired == false) | .id`);
-    return {runId, artifactId: ids[0] || ''};
-  }
-
   const attempts = Number(process.env.TUPLE_FETCH_ATTEMPTS || 60);
   const delaySeconds = Number(process.env.TUPLE_FETCH_DELAY_SECONDS || 30);
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -190,22 +184,18 @@ if (platform === 'windows_x86_64') {
 async function sha256(file) {
   return crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 }
-if (platform === 'linux_x86_64') {
-  if (await sha256(llc) !== '084b0e437e879a20b72892464aed387955c7f0fe8e2d2b3bbb00f022af036e23') throw new Error('fixed llc integrity mismatch');
-  if (await sha256(shim) !== 'bb05dfd1fa584aa8456356064c3dd392c3588a13708327a6f899d9a09ec4fd47') throw new Error('fixed shim integrity mismatch');
+const descriptions = {
+  linux_x86_64: /ELF 64-bit.*x86[-_]64/i,
+  linux_aarch64: /ELF 64-bit.*(aarch64|ARM)/i,
+  darwin_aarch64: /Mach-O 64-bit.*(arm64|aarch64)/i,
+  darwin_x86_64: /Mach-O 64-bit.*x86_64/i,
+};
+if (platform === 'windows_x86_64') {
+  const header = await fs.readFile(shim);
+  if (header.length < 2 || header.readUInt16LE(0) !== 0x8664) throw new Error('unexpected shim format: not COFF AMD64');
 } else {
-  const descriptions = {
-    linux_aarch64: /ELF 64-bit.*(aarch64|ARM)/i,
-    darwin_aarch64: /Mach-O 64-bit.*(arm64|aarch64)/i,
-    darwin_x86_64: /Mach-O 64-bit.*x86_64/i,
-  };
-  if (platform === 'windows_x86_64') {
-    const header = await fs.readFile(shim);
-    if (header.length < 2 || header.readUInt16LE(0) !== 0x8664) throw new Error('unexpected shim format: not COFF AMD64');
-  } else {
-    const description = (await $({stdio: 'pipe'})`file ${shim}`).stdout;
-    if (!descriptions[platform].test(description)) throw new Error(`unexpected shim format: ${description.trim()}`);
-  }
+  const description = (await $({stdio: 'pipe'})`file ${shim}`).stdout;
+  if (!descriptions[platform].test(description)) throw new Error(`unexpected shim format: ${description.trim()}`);
 }
 
 await fs.copyFile(shim, path.join('runtime_shim', 'cjselfhost_llvmshim.o'));

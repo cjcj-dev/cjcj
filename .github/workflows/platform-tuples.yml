@@ -51,6 +51,9 @@ jobs:
           - runner: macos-15-intel
             platform: darwin_x86_64
             llvm-targets: X86
+          - runner: ubuntu-22.04
+            platform: linux_x86_64
+            llvm-targets: X86
           - runner: ubuntu-22.04-arm
             platform: linux_aarch64
             llvm-targets: AArch64
