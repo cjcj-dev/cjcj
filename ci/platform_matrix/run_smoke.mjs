@@ -117,8 +117,22 @@ function runCmd(exe, args, env = process.env) {
   return spawnSync('cmd.exe', ['/d', '/s', '/c', `"${line}"`], {encoding: 'utf8', env, windowsVerbatimArguments: true, maxBuffer: 64 * 1024 * 1024});
 }
 if (process.platform === 'win32') {
+  // The coroutine runtime sizes cjthread stacks from cjStackSize; the PE
+  // main-thread reserve (now 64MB) does not cover them.
+  process.env.cjStackSize = process.env.cjStackSize || '64MB';
+  const reserve = spawnSync('objdump', ['-x', deploy], {encoding: 'utf8', maxBuffer: 256 * 1024 * 1024});
+  console.log(((reserve.stdout || '').match(/SizeOfStack\w+\s+\S+/g) || ['(no stack header)']).join('\n'));
   const version = runCmd(deploy, ['--version']);
   console.log(`cjcj --version status=${version.status}\n${(version.stdout || '').trim()}`);
+  if (version.status !== 0) {
+    const cdb = 'C:\\Program Files (x86)\\Windows Kits\\10\\Debuggers\\x64\\cdb.exe';
+    if (await isFile(cdb)) {
+      const trace = spawnSync(cdb, ['-o', '-c', 'g; kb; lm; q', deploy, '--version'], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: process.env});
+      console.log(`cdb status=${trace.status}\n${(trace.stdout || '').slice(-8000)}\n${(trace.stderr || '').slice(-2000)}`);
+    } else {
+      console.log('cdb unavailable for backtrace');
+    }
+  }
 } else {
   await $({nothrow: true})`${toCommandPath(deploy)} --version`;
 }
