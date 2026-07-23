@@ -18,7 +18,7 @@ export function formatCommand(command) {
   return command.map(quote).join(' ');
 }
 
-function streamLines(stream, collect) {
+function streamLines(stream, collect, logOutput = true) {
   let buffered = '';
   stream.setEncoding('utf8');
   stream.on('data', chunk => {
@@ -26,10 +26,10 @@ function streamLines(stream, collect) {
     buffered += chunk;
     const lines = buffered.split(/\r?\n/);
     buffered = lines.pop();
-    for (const line of lines) logger.info('%s', line);
+    if (logOutput) for (const line of lines) logger.info('%s', line);
   });
   stream.on('end', () => {
-    if (buffered) logger.info('%s', buffered);
+    if (logOutput && buffered) logger.info('%s', buffered);
   });
 }
 
@@ -40,6 +40,7 @@ export async function run(command, {
   check = true,
   echo = true,
   capture = false,
+  logOutput = true,
 } = {}) {
   if (!Array.isArray(command) || command.length === 0) {
     throw new BuildError(stage, 'empty command');
@@ -61,7 +62,7 @@ export async function run(command, {
     stdio: ['inherit', 'pipe', 'pipe'],
   });
   let stdout = '';
-  streamLines(child.stdout, capture ? chunk => { stdout += chunk; } : undefined);
+  streamLines(child.stdout, capture ? chunk => { stdout += chunk; } : undefined, logOutput);
   streamLines(child.stderr);
 
   const result = await new Promise((resolve, reject) => {
