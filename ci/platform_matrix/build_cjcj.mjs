@@ -9,7 +9,6 @@ import zlib from 'node:zlib';
 import {spawnSync} from 'node:child_process';
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
-import {pickWindowsCC} from './pick_cc.mjs';
 
 const {root} = stageBegin('cjcj');
 const toolchain = process.env.CJCJ_TOOLCHAIN || 'nightly-1.2.0-alpha.20260721165458';
@@ -111,30 +110,6 @@ if (setupRc !== 0) process.exit(setupRc);
 if (provisionOnly) {
   console.log(`[platform setup_sdk] provisioned Windows SDK at ${cangjieHome}`);
   process.exit(0);
-}
-
-if (process.platform === 'win32') {
-  const llvmBin = path.join(cangjieHome, 'third_party', 'llvm', 'bin');
-  const sdkLd = path.join(llvmBin, 'ld.lld.exe');
-  const realLd = path.join(llvmBin, 'ld.lld-real.exe');
-  // Build the wrapper inside llvmBin so the final rename onto ld.lld.exe stays
-  // on one volume (RUNNER_TEMP is D:, the SDK lives on C: — rename = EXDEV).
-  const wrapper = path.join(llvmBin, 'ld.lld-wrap.exe');
-  const wrapperSource = path.join(import.meta.dirname, 'lldwrap.c');
-  const gcc = await pickWindowsCC();
-  if (!(await isFile(realLd)) && !(await isFile(sdkLd))) throw new Error(`SDK ld.lld missing: ${sdkLd}`);
-  if (!(await isFile(wrapperSource))) throw new Error(`ld.lld wrapper source missing: ${wrapperSource}`);
-  await $`${toCommandPath(gcc)} -std=c11 -O2 -Wall -Wextra ${toCommandPath(wrapperSource)} -o ${toCommandPath(wrapper)}`;
-  if (!(await isFile(wrapper))) throw new Error(`ld.lld wrapper compile produced no executable: ${wrapper}`);
-  if (!(await isFile(realLd))) await fs.rename(sdkLd, realLd);
-  if (!(await isFile(realLd))) throw new Error(`real SDK linker missing after rename: ${realLd}`);
-  await fs.rm(sdkLd, {force: true});
-  await fs.rename(wrapper, sdkLd);
-  const probe = spawnSync(sdkLd, ['--version'], {encoding: 'utf8'});
-  console.log(`ld.lld wrapper probe: status=${probe.status} real=${realLd}`);
-  if (probe.stdout) console.log(probe.stdout.slice(0, 200));
-  if (probe.stderr) console.error(probe.stderr.slice(0, 400));
-  if (probe.status !== 0) throw new Error(`ld.lld wrapper --version failed: status=${probe.status} error=${probe.error?.code || 'none'}`);
 }
 
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
