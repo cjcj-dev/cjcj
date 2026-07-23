@@ -227,7 +227,7 @@ if (process.platform === 'win32') {
     'for required in -lstdc++ -lgcc -lgcc_eh -lpthread -lmsvcrt -lmingwex; do',
     '  grep -Fx -- "$required" "$probe_dir/libraries.txt" >/dev/null',
     'done',
-    `: > ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
+    `printf '%s\\n' '--start-group' > ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
     'while IFS= read -r option; do',
     '  name="${option#-l}"',
     '  case "$name" in :*) filename="${name#:}" ;; *) filename="lib${name}.a" ;; esac',
@@ -237,6 +237,7 @@ if (process.platform === 'win32') {
     `  printf '\"%s\"\\n' "$mixed" >> ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
     '  printf \'MINGW_CXX_LIB %s=%s\\n\' "$option" "$mixed"',
     'done < "$probe_dir/libraries.txt"',
+    `printf '%s\\n' '--end-group' >> ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
   ].join('\n'), 'cxx-libs');
   if (resolveCxxRuntime.exitCode !== 0) process.exit(resolveCxxRuntime.exitCode);
   await fs.writeFile(cjcTomlPath, platformizeCjcToml(
