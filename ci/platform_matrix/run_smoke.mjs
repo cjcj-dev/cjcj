@@ -37,15 +37,13 @@ async function findFirst(directory, predicate) {
 }
 
 let product = '';
-for (const candidate of [
-  path.join('target', 'release', 'bin', `cjcj::cjc${exeSuffix}`),
-  path.join('target', 'release', 'bin', `cjcj${exeSuffix}`),
-  path.join('target', 'release', 'bin', `cjc${exeSuffix}`),
-]) {
+const productNames = process.platform === 'win32' ? ['cjcj.exe'] : ['cjcj::cjc', 'cjcj', 'cjc'];
+for (const name of productNames) {
+  const candidate = path.join('target', 'release', 'bin', name);
   if (await isFile(candidate)) { product = candidate; break; }
 }
 if (!product) {
-  product = await findFirst('target', (name) => name === 'cjcj::cjc' || name === 'cjcj' || /^cjcj.*\.exe$/i.test(name));
+  product = await findFirst('target', (name) => productNames.includes(name));
 }
 if (!product) {
   console.error('FATAL: cjcj build product not found; cjcj stage did not reach link success');
