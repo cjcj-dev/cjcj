@@ -20,7 +20,7 @@ const pins = Object.fromEntries(pinText.split(/\r?\n/).filter(Boolean).map((line
 const runtimeRef = pins.RUNTIME_REF;
 const requestedRuntimeRef = process.env.RUNTIME_REF || '';
 if (requestedRuntimeRef && requestedRuntimeRef !== runtimeRef) {
-  console.error(`workflow/runtime pin mismatch: ${requestedRuntimeRef} != ${runtimeRef}`);
+  console.error(`[runtime] pin mismatch: ${requestedRuntimeRef} != ${runtimeRef}`);
   process.exit(2);
 }
 
@@ -38,7 +38,7 @@ const runtimeDirs = {
 };
 const runtimeDir = runtimeDirs[`${hostOs}/${hostArch}`];
 if (!runtimeDir) {
-  console.error(`patched runtime install unsupported on ${hostOs}/${hostArch}`);
+  console.error(`[runtime] unsupported host ${hostOs}/${hostArch}`);
   process.exit(2);
 }
 
@@ -49,4 +49,4 @@ await $`mv -f ${destination}.new ${destination}`;
 const destinationSha = (await $({stdio: 'pipe'})`sha256sum ${destination}`).stdout.trim().split(/\s+/)[0];
 const sourceFileSha = (await $({stdio: 'pipe'})`sha256sum ${so}`).stdout.trim().split(/\s+/)[0];
 if (destinationSha !== sourceFileSha) throw new Error('installed runtime sha mismatch');
-console.log(`[install_patched_runtime] installed ${runtimeRef} -> ${destination}`);
+console.log(`[runtime] installed ${runtimeRef} -> ${destination}`);
