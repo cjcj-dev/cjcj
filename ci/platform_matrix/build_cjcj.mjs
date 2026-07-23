@@ -198,7 +198,7 @@ if (process.platform === 'win32') {
     'trap \'rm -rf "$probe_dir"\' EXIT',
     'printf \'int main() { return 0; }\\n\' > "$probe_dir/empty.cc"',
     '"$cxx" -v "$probe_dir/empty.cc" -o "$probe_dir/empty.exe" > "$probe_dir/driver.log" 2>&1',
-    'grep -oE -- \'(^|[[:space:]])"?-l[A-Za-z0-9_+:.,-]+"?\' "$probe_dir/driver.log" | sed -E \'s/^[[:space:]]*"?//; s/"$//\' > "$probe_dir/libraries.txt"',
+    'grep -oE -- \'(^|[[:space:]])"?-l[A-Za-z0-9_+:.,-]+"?\' "$probe_dir/driver.log" | sed -E \'s/^[[:space:]]*"?//; s/"$//\' | grep -Fx -- \'-lstdc++\' > "$probe_dir/libraries.txt"',
     'test -s "$probe_dir/libraries.txt"',
     'grep -Fx -- \'-lstdc++\' "$probe_dir/libraries.txt" >/dev/null',
     `: > ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
