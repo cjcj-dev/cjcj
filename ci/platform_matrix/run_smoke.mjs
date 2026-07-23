@@ -72,14 +72,25 @@ if (process.platform === 'win32') {
       }
     }
   }
-  const imports = await $({nothrow: true, stdio: 'pipe'})`objdump -p ${toCommandPath(deploy)}`;
-  const importNames = [...imports.stdout.matchAll(/DLL Name: (\S+)/g)].map((m) => m[1]);
+  const imports = spawnSync('objdump', ['-p', deploy], {encoding: 'utf8', maxBuffer: 256 * 1024 * 1024});
+  const importNames = [...(imports.stdout || '').matchAll(/DLL Name: (\S+)/g)].map((m) => m[1]);
   console.log(`import table: ${importNames.join(' ') || '(objdump unavailable)'}`);
   for (const name of importNames) {
     const local = await isFile(path.join(bin, name));
-    const located = local ? 'staged' : (await $({nothrow: true, stdio: 'pipe'})`where ${name}`).stdout.split(/\r?\n/).find(Boolean) || 'MISSING';
+    const located = local ? 'staged' : (await $({nothrow: true, stdio: 'pipe', verbose: false})`where ${name}`).stdout.split(/\r?\n/).find(Boolean) || 'MISSING';
     console.log(`import ${name}: ${located}`);
   }
+  // Transitive closure: the top-level table resolving proves nothing about the
+  // DLLs' own imports — msys2 ldd walks the full PE dependency tree.
+  const ldd = spawnSync('C:\\msys64\\usr\\bin\\bash.exe', ['-lc', `ldd '${toCommandPath(deploy)}'`],
+    {encoding: 'utf8', env: {...process.env, MSYSTEM: 'MSYS', CHERE_INVOKING: '1'}, maxBuffer: 16 * 1024 * 1024});
+  console.log(`ldd status=${ldd.status}\n${(ldd.stdout || '').trim()}\n${(ldd.stderr || '').trim()}`);
+  // Raw NTSTATUS: bash flattens loader failures to 127; cmd surfaces the code.
+  const rawProbe = spawnSync('cmd.exe', ['/d', '/s', '/c', `"${deploy}" --version & echo RAWEXIT=%ERRORLEVEL%`],
+    {encoding: 'utf8', windowsVerbatimArguments: true});
+  console.log(`cmd probe status=${rawProbe.status}\nstdout: ${(rawProbe.stdout || '').trim()}\nstderr: ${(rawProbe.stderr || '').trim()}`);
+  const bashProbe = spawnSync(deploy, ['--version'], {encoding: 'utf8'});
+  console.log(`direct spawn status=${bashProbe.status} error=${bashProbe.error ? bashProbe.error.code : 'none'}\nstdout: ${(bashProbe.stdout || '').trim()}\nstderr: ${(bashProbe.stderr || '').trim()}`);
 }
 if (process.env.CANGJIE_HOME) {
   const sourceRuntime = path.join(process.env.CANGJIE_HOME, 'runtime');
