@@ -1,8 +1,3 @@
-# Release. Repackages the official SDK tree as a cjcj SDK: bin/cjc is our
-# Cangjie-built compiler and runtime/lib/<plat>/libcangjie-runtime.so is rebuilt
-# from the pinned cjcj-dev/cangjie-runtime main commit. Smoke runs against the
-# packaged bin/cjc. Linux x64 + aarch64; macOS/Windows are BLOCKED (see
-# reports/REPORT-relmatrix.md). Set dry_run to build artifacts without publishing.
 name: Release
 
 on:
@@ -37,11 +32,11 @@ env:
 
 jobs:
   fixed-llvm-tools:
-    name: source-build fixed LLVM tools
+    name: Build LLVM tools
     uses: ./.github/workflows/build-fixed-llc.yml
 
   build:
-    name: build ${{ matrix.platform }}
+    name: ${{ matrix.platform }} / Build release
     needs: fixed-llvm-tools
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 150
@@ -58,8 +53,9 @@ jobs:
           # tuple in build-fixed-llc.yml and re-enable this line. See REPORT-relmatrix.
           # - { runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64 }
     steps:
-      - uses: actions/checkout@v4
-      - name: Download source-built LLVM tools
+      - name: Checkout cjcj
+        uses: actions/checkout@v4
+      - name: Download LLVM tools
         uses: actions/download-artifact@v4
         with:
           name: fixed-llvm-tools-${{ matrix.llvm_platform }}
@@ -82,7 +78,7 @@ jobs:
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
-      - name: Restore patched runtime cache
+      - name: Restore runtime cache
         id: rtcache
         uses: actions/cache/restore@v4
         with:
@@ -91,21 +87,21 @@ jobs:
       # patchelf is always required by scripts/package_sdk.mjs, even on a runtime cache hit.
       - name: Install packaging dependency
         run: sudo apt-get update -qq && sudo apt-get install -y -qq patchelf
-      - name: Install runtime build dependencies
+      - name: Install runtime dependencies
         if: steps.rtcache.outputs.cache-hit != 'true'
         run: sudo apt-get install -y -qq clang cmake make
-      - name: Build fork runtime
+      - name: Build patched runtime
         if: steps.rtcache.outputs.cache-hit != 'true'
         env:
           RUNTIME_VERSION: ${{ inputs.version }}
         run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
-      - name: Save patched runtime cache
+      - name: Save runtime cache
         if: steps.rtcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
-      - name: Activate pinned runtime
+      - name: Install patched runtime
         run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Build runtime shim
         env:
@@ -113,7 +109,7 @@ jobs:
         run: npx --yes zx@8 runtime_shim/build_shim.mjs
       - name: Build workspace
         run: cjpm build
-      - name: Package SDK
+      - name: Compose SDK package
         run: |
           npx --yes zx@8 scripts/package_sdk.mjs \
             --sdk "$CANGJIE_HOME" \
@@ -123,7 +119,7 @@ jobs:
             --platform "${{ matrix.platform }}" \
             --outdir "$PWD/dist"
       # Smoke the shipped artifact: packaged bin/cjc (renamed) + fork-built runtime.
-      - name: Smoke packaged SDK
+      - name: Verify packaged SDK
         run: |
           set -e
           pkg="cjcj-${{ inputs.version }}-${{ matrix.platform }}"
@@ -132,7 +128,7 @@ jobs:
           source "$PWD/pkgtest/${pkg}/envsetup.sh"
           export cjHeapSize=12GB
           npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/pkgtest/${pkg}/bin/cjc"
-      - name: Upload artifacts
+      - name: Upload SDK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: pkg-${{ matrix.platform }}
@@ -142,19 +138,20 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: publish
+    name: Publish release
     needs: build
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - name: Download artifacts
+      - name: Checkout cjcj
+        uses: actions/checkout@v4
+      - name: Download SDK artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - name: Create release
+      - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
