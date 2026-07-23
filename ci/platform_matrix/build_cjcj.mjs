@@ -191,18 +191,20 @@ if (process.platform === 'win32') {
   };
   const mingwCxxLinkRsp = path.resolve(root, 'mingw-cxx-link.rsp');
   const resolveCxxRuntime = await runInMsys([
+    'cxx=/mingw64/bin/clang++.exe',
+    'test -x "$cxx"',
     'probe_dir=.platform-ci/mingw-cxx-probe',
     'mkdir -p "$probe_dir"',
     'trap \'rm -rf "$probe_dir"\' EXIT',
     'printf \'int main() { return 0; }\\n\' > "$probe_dir/empty.cc"',
-    'clang++ -v "$probe_dir/empty.cc" -o "$probe_dir/empty.exe" > "$probe_dir/driver.log" 2>&1',
+    '"$cxx" -v "$probe_dir/empty.cc" -o "$probe_dir/empty.exe" > "$probe_dir/driver.log" 2>&1',
     'grep -oE -- \'(^|[[:space:]])"?-l[A-Za-z0-9_+:.,-]+"?\' "$probe_dir/driver.log" | sed -E \'s/^[[:space:]]*"?//; s/"$//\' > "$probe_dir/libraries.txt"',
     'test -s "$probe_dir/libraries.txt"',
     `: > ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
     'while IFS= read -r option; do',
     '  name="${option#-l}"',
     '  case "$name" in :*) filename="${name#:}" ;; *) filename="lib${name}.a" ;; esac',
-    '  library="$(clang++ -print-file-name="$filename")"',
+    '  library="$("$cxx" -print-file-name="$filename")"',
     '  test "$library" != "$filename" && test -f "$library"',
     '  mixed="$(cygpath -m "$library")"',
     `  printf '\"%s\"\\n' "$mixed" >> ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
