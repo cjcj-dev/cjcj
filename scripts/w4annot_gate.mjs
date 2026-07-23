@@ -18,6 +18,7 @@ const pass = message => { console.log(`PASS ${message}`); passCount++; };
 const fail = message => { console.log(`FAIL ${message}`); failCount++; };
 
 const cases = new Map([
+  ['fastnative_managed_bad', ["error: non-foreign function cannot be modified with '@FastNative'"]],
   ['noheap_bad', ["error: '@NoHeapAlloc' not applicable to static call closure emitted heap allocation 'llvm.cj.malloc.object'", "note: @NoHeapAlloc root is 'allocateObject'", 'note: static call path: allocateObject']],
   ['noheap_array_bad', ["error: '@NoHeapAlloc' not applicable to static call closure emitted heap allocation 'llvm.cj.malloc.array'", "note: @NoHeapAlloc root is 'allocateArray'", 'note: static call path: allocateArray']],
   ['noheap_box_bad', ["error: '@NoHeapAlloc' not applicable to static call closure emitted heap allocation 'llvm.cj.malloc.object'", "note: @NoHeapAlloc root is 'noHeapBox'", 'note: static call path: noHeapBox -> boxInteger']],
@@ -61,6 +62,32 @@ try {
     const location = name === 'noheap_array_bad' ? 'noheap_array_bad.cj:3:' : name === 'noheap_closure_bad' ? 'noheap_closure_bad.cj:5:' : '';
     if (location && !output.includes(location)) { fail(`${name} missing allocation-site location ${location}`); await firstLines(output, 40); continue; }
     pass(`${name} rejected with exact diagnostics`);
+  }
+
+  result = await $({cwd: work, nothrow: true, quiet: true})`${cjc} ${fixtures}/fastnative_managed.cj --output-type=staticlib -o ${work}/libfastnative_managed.a`;
+  await fs.writeFile(`${work}/fastnative_managed.out`, result.stdout + result.stderr);
+  let managedLeafFound = false;
+  let managedLeafHasAttribute = false;
+  let managedLeafHasSafepoint = false;
+  if (result.exitCode === 0) {
+    let cached = [];
+    try { cached = (await fs.readdir(`${work}/.cached`)).filter(file => file.endsWith('.bc')); } catch {}
+    for (const file of cached) {
+      await $({nothrow: true, quiet: true})`${home}/third_party/llvm/bin/llvm-dis ${work}/.cached/${file} -o ${work}/.cached/${file}.ll`;
+      const ir = await fs.readFile(`${work}/.cached/${file}.ll`, 'utf8');
+      const definition = ir.match(/define [^{]*managedLeaf[^{]*#([0-9]+)[^{]*\{([\s\S]*?)^\}/m);
+      if (!definition) continue;
+      managedLeafFound = true;
+      managedLeafHasAttribute = new RegExp(`attributes #${definition[1]} = .*"gc-leaf-function"`).test(ir);
+      managedLeafHasSafepoint = definition[2].includes('CJ_MCC_HandleSafepoint');
+      break;
+    }
+  }
+  if (result.exitCode === 0 && managedLeafFound && managedLeafHasAttribute && !managedLeafHasSafepoint) {
+    pass('managed NoHeapAlloc FastNative emits gc-leaf-function without safepoint');
+  } else {
+    fail(`managed NoHeapAlloc FastNative rc=${result.exitCode} found=${managedLeafFound} attr=${managedLeafHasAttribute} safepoint=${managedLeafHasSafepoint}`);
+    await firstLines(result.stdout + result.stderr, 30);
   }
 
   result = await $({cwd: work, nothrow: true, quiet: true})`${cjc} ${fixtures}/nostackgrow.cj --output-type=staticlib -o ${work}/libnostackgrow.a`;
