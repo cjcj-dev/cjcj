@@ -5,13 +5,11 @@ import std.sync.Mutex
 import cjcj::chir.CHIRContext
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.ClassType
-import cjcj::chir.Function
 import cjcj::chir.GlobalValue
 import cjcj::chir.NoHeapAllocChecker
 import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.Package
 import cjcj::chir.Type
-import cjcj::chir.Value
 import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::option.GlobalOptions
 
