@@ -11,12 +11,10 @@
 #include <process.h>
 #include <windows.h>
 #define REAL_LLD "ld.lld-real.exe"
-#define exec_lld(path, argv) _execv(path, argv)
 #else
 #include <limits.h>
 #include <unistd.h>
 #define REAL_LLD "ld.lld-real"
-#define exec_lld(path, argv) execv(path, argv)
 #endif
 
 static const char bad_name[] = "cjcj::cjc.exe";
@@ -80,7 +78,31 @@ int main(int argc, char **argv)
         }
     }
     argv[0] = real;
-    exec_lld(real, argv);
+#ifdef _WIN32
+    /* _exec* detaches on Windows (the caller would see the wrapper exit before
+     * the real linker finishes), so run the child with _spawnv(_P_WAIT) and
+     * hand its exit code back. The CRT joins argv with spaces without quoting,
+     * so re-quote arguments that would otherwise be split. */
+    for (i = 1; i < argc; ++i) {
+        if (argv[i][0] == '\0' || strpbrk(argv[i], " \t") != NULL) {
+            size_t len = strlen(argv[i]);
+            char *quoted = malloc(len + 3);
+            if (!quoted) { fputs("lldwrap: out of memory\n", stderr); return 127; }
+            quoted[0] = '"';
+            memcpy(quoted + 1, argv[i], len);
+            quoted[len + 1] = '"';
+            quoted[len + 2] = '\0';
+            argv[i] = quoted;
+        }
+    }
+    {
+        intptr_t status = _spawnv(_P_WAIT, real, (const char *const *)argv);
+        if (status < 0) { fprintf(stderr, "lldwrap: cannot execute %s: %s\n", real, strerror(errno)); return 127; }
+        return (int)status;
+    }
+#else
+    execv(real, argv);
     fprintf(stderr, "lldwrap: cannot execute %s: %s\n", real, strerror(errno));
     return 127;
+#endif
 }

@@ -109,10 +109,11 @@ if (process.platform === 'win32') {
   const sdkLd = path.join(llvmBin, 'ld.lld.exe');
   const realLd = path.join(llvmBin, 'ld.lld-real.exe');
   const wrapper = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'ld.lld-wrap.exe');
-  const wrapperSource = path.join(root, 'ci', 'platform_matrix', 'lldwrap.c');
+  const wrapperSource = path.join(import.meta.dirname, 'lldwrap.c');
   const gcc = 'C:\\msys64\\mingw64\\bin\\gcc.exe';
   if (!(await isFile(realLd)) && !(await isFile(sdkLd))) throw new Error(`SDK ld.lld missing: ${sdkLd}`);
-  await $`${toCommandPath(gcc)} -std=c11 -O2 -Wall -Wextra ${wrapperSource} -o ${wrapper}`;
+  if (!(await isFile(wrapperSource))) throw new Error(`ld.lld wrapper source missing: ${wrapperSource}`);
+  await $`${toCommandPath(gcc)} -std=c11 -O2 -Wall -Wextra ${toCommandPath(wrapperSource)} -o ${toCommandPath(wrapper)}`;
   if (!(await isFile(wrapper))) throw new Error(`ld.lld wrapper compile produced no executable: ${wrapper}`);
   if (!(await isFile(realLd))) await fs.rename(sdkLd, realLd);
   if (!(await isFile(realLd))) throw new Error(`real SDK linker missing after rename: ${realLd}`);
