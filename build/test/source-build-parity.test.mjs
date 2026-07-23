@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {buildConfig} from '../lib/config.mjs';
-import {formatCommand} from '../lib/runner.mjs';
+import {formatCommand, run as runCommand} from '../lib/runner.mjs';
 import * as compiler from '../srcbuild/stages/compiler.mjs';
 import * as packageStage from '../srcbuild/stages/package.mjs';
 import * as runtime from '../srcbuild/stages/runtime.mjs';
@@ -149,6 +149,23 @@ test('Linux source stages emit the Python command order', async () => {
       expected(root, path.join(workspace, 'verify'), ['bash', '-c', `set -e; source '${path.join(workspace, 'software', 'cangjie', 'envsetup.sh')}'; cjc hello.cj -o hello && ./hello`]),
     );
     assert.deepEqual(commands, expectedCommands);
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('package paths and archive roots match package.py', async () => {
+  const {root, config} = makeFixture();
+  try {
+    const [sdk, stdxArchive] = await packageStage.run(config);
+    assert.equal(sdk, path.join(config.softwareDir, 'cangjie-sdk-linux-x64-1.2.3.tar.gz'));
+    assert.equal(stdxArchive, path.join(config.softwareDir, 'cangjie-stdx-linux-x64-1.2.3.1.tar.gz'));
+    const sdkList = await runCommand(['tar', '-tf', sdk], {capture: true, logOutput: false});
+    const stdxList = await runCommand(['tar', '-tf', stdxArchive], {capture: true, logOutput: false});
+    assert.equal(sdkList.stdout.split('\n')[0], 'cangjie/');
+    assert.equal(stdxList.stdout.split('\n')[0], 'linux_x86_64_cjnative/');
+    assert.ok(fs.existsSync(path.join(config.softwareDir, 'cangjie', 'tools', 'bin', 'cjpm')));
+    assert.ok(!fs.existsSync(path.join(config.softwareDir, 'cangjie', 'tools', 'dtsparser', 'drop.cj')));
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
