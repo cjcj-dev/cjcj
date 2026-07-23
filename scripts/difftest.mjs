@@ -9,15 +9,15 @@ const tc = process.env.DIFFTEST_TC || '/root/.cjv/toolchains/nightly-1.2.0-alpha
 process.env.CANGJIE_HOME = tc;
 process.env.LD_LIBRARY_PATH = `${tc}/third_party/llvm/lib:${tc}/runtime/lib/linux_x86_64_cjnative:${tc}/tools/lib:${process.env.LD_LIBRARY_PATH || ''}`;
 const repo = path.resolve(import.meta.dirname, '..');
-const self = `${repo}/target/release/bin/cjcj::cjc`;
-const ref = '/root/.cjv/bin/cjc';
+const self = process.env.DIFFTEST_SELF || `${repo}/target/release/bin/cjcj::cjc`;
+const ref = process.env.DIFFTEST_REF || '/root/.cjv/bin/cjc';
 
 function commandSubstitution(text) {
   return text.replace(/\n+$/, '');
 }
 
-function bashQ(text) {
-  const value = text.slice(0, 30);
+function bashQ(text, limit = 30) {
+  const value = text.slice(0, limit);
   if (value === '') return "''";
   if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value;
   return `$'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'").replaceAll('\n', '\\n').replaceAll('\r', '\\r').replaceAll('\t', '\\t')}'`;
@@ -28,6 +28,7 @@ async function classify(file) {
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-difftest-'));
   try {
     const referenceBuild = await $({cwd: work, nothrow: true, quiet: true})`timeout 180 ${ref} ${file} -o ${path.join(work, `${name}.ref`)}`;
+    await fs.writeFile(path.join(work, `${name}.rlog`), referenceBuild.stdout + referenceBuild.stderr);
     let rout = '<REF-COMPILE-FAIL>';
     let rexit = -1;
     if (referenceBuild.exitCode === 0) {
@@ -42,7 +43,10 @@ async function classify(file) {
       const selfRun = await $({cwd: work, nothrow: true, quiet: true})`timeout 30 ${path.join(work, `${name}.self`)}`;
       const sout = commandSubstitution(selfRun.stdout);
       if (sout === rout && selfRun.exitCode === rexit) return `PASS\t${name}\texit=${selfRun.exitCode}`;
-      return `MISMATCH\t${name}\tself(exit=${selfRun.exitCode} out=${bashQ(sout)}) ref(exit=${rexit} out=${bashQ(rout)})`;
+      const refCompileDetail = referenceBuild.exitCode === 0
+        ? ''
+        : ` stderr=${bashQ(referenceBuild.stderr.split(/\r?\n/, 1)[0], 200)}`;
+      return `MISMATCH\t${name}\tself(exit=${selfRun.exitCode} out=${bashQ(sout)}) ref(exit=${rexit} out=${bashQ(rout)}${refCompileDetail})`;
     }
     if (selfBuild.exitCode === 124) return `FAIL\t${name}\t<COMPILE-TIMEOUT-180s>`;
 
