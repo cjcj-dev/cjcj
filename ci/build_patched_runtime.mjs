@@ -38,6 +38,15 @@ try {
   const actualRef = (await $({stdio: 'pipe'})`git -C ${work} rev-parse HEAD`).stdout.trim();
   if (actualRef !== runtimeRef) throw new Error(`runtime ref mismatch: expected ${runtimeRef}, got ${actualRef}`);
 
+  if (process.platform === 'darwin') {
+    await $`xcodebuild -version`;
+    await $`xcrun --sdk macosx --show-sdk-version`;
+    const sdkRoot = (await $({stdio: 'pipe'})`xcrun --sdk macosx --show-sdk-path`).stdout.trim();
+    if (!sdkRoot) throw new Error('xcrun returned an empty macOS SDK path');
+    process.env.SDKROOT = sdkRoot;
+    log(`SDKROOT=${sdkRoot}`);
+  }
+
   log('build (native, release)');
   // build.py drives cmake with -S ., so retain the runtime source working directory.
   await $({cwd: `${work}/runtime`})`python3 build.py build --target native --build-type release -v ${version}`;
