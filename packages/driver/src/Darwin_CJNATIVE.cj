@@ -2,6 +2,10 @@ package cjcj::driver
 
 import std.collection.*
 
+private func GetEffectiveOptimizationLevel(driverOptions: DriverOptions): OptimizationLevel {
+    return if (driverOptions.disableBackendOpt) { OptimizationLevel.O0 } else { driverOptions.optimizationLevel }
+}
+
 public open class Darwin_CJNATIVE <: MachO {
     public init(driver: Driver, driverOptions: DriverOptions, backendCmds: ArrayList<ToolBatch>) {
         super(driver, driverOptions, backendCmds)
@@ -12,6 +16,51 @@ public open class Darwin_CJNATIVE <: MachO {
             AddLibraryPaths(ComputeLibPaths())
         }
         super.AddSystemLibraryPaths()
+    }
+
+    protected func GenerateLinkOptionsForLTO(tool: Tool): Unit {
+        let setOptionHandler = { option: String => tool.AppendArg(option) }
+        SetOptions(setOptionHandler, driverOptions, LLDSetLTOOptimizationLevelOptions)
+        if (driverOptions.IsFullLTOEnabled()) {
+            tool.AppendArg("-mllvm")
+            tool.AppendArg("-cangjie-full-lto")
+        }
+        if (GetEffectiveOptimizationLevel(driverOptions) == OptimizationLevel.O2) {
+            tool.AppendArg("-mllvm")
+            tool.AppendArg("--cj-safepoint-outline=false")
+        }
+        tool.AppendArg("-mllvm")
+        tool.AppendArg("--cj-lto-opt")
+
+        if (driverOptions.IsLTOPkgVisibilityEnabled() || driverOptions.IsCompileAsExeEnabled()) {
+            let visiblePackages = driverOptions.GetLtoVisiblePkgs()
+            if (!visiblePackages.isEmpty()) {
+                let packages = ArrayList<String>()
+                for (pkg in visiblePackages) {
+                    packages.add(pkg)
+                }
+                tool.AppendArg("--visible-pkgs=" + JoinStrings(packages, ","))
+            } else {
+                tool.AppendArg("--visible-pkgs=")
+            }
+        }
+
+        let optionSet = HashSet<String>()
+        let setCompositeOption = { option: String =>
+            if (!optionSet.contains(option)) {
+                optionSet.add(option)
+                tool.AppendArg("-mllvm")
+                tool.AppendArg(option)
+            }
+        }
+        let setCompositeOptionsPass = ArrayList<ToolOptionType>()
+        setCompositeOptionsPass.add(OPTSetOptions)
+        setCompositeOptionsPass.add(OPTSetCodeObfuscationOptions)
+        setCompositeOptionsPass.add(OPTSetTransparentOptions)
+        setCompositeOptionsPass.add(LLDSetPgoOptions)
+        setCompositeOptionsPass.add(LLCSetOptions)
+        setCompositeOptionsPass.add(LLCSetTransparentOptions)
+        SetOptions(setCompositeOption, driverOptions, setCompositeOptionsPass)
     }
 
     protected open override func GenerateLinkingTool(
@@ -31,6 +80,14 @@ public open class Darwin_CJNATIVE <: MachO {
         let tool = Tool(ldPath, ToolType.BACKEND, driverOptions.environment.allVariables)
         tool.AppendArg("-o")
         tool.AppendArg(outputFileInfo.filePath)
+        if (driverOptions.IsLTOEnabled()) {
+            tool.SetLdLibraryPath(FileUtil.JoinPath(FileUtil.GetDirPath(ldPath), "../lib"))
+            GenerateLinkOptionsForLTO(tool)
+            if (!driverOptions.IsFullLTOEnabled()) {
+                tool.AppendArg("-cache_path_lto")
+                tool.AppendArg(driverOptions.compilationCachedPath)
+            }
+        }
         tool.AppendArgIf(driverOptions.outputMode == OutputMode.SHARED_LIB, "-dylib")
         tool.AppendArg("-arch")
         tool.AppendArg(GetTargetArchString())

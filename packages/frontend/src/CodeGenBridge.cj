@@ -338,7 +338,6 @@ private class ToCHIR {
             case Some(value) => value
             case None => return None
         }
-        instance.chirData.SetImplicitFuncs(lowered, ast2chir.GetImplicitFuncs())
         maybeUnreachable = ast2chir.GetMaybeUnreachableBlocks()
         chirPkg = Some(lowered)
         DumpCHIRToFile("AST_CHIR")
@@ -932,9 +931,6 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
         instance.chirData.SetCurrentRealCHIRPackage(Some(realPackage))
         instance.invocation.globalOptions.UpdateCachedDirName(realPackage.GetName())
         let codegenData = CodegenCHIRData(instance.chirData.GetRealCHIRContext(), realPackage)
-        for ((mangledName, fn) in instance.chirData.GetImplicitFuncs(realPackage)) {
-            codegenData.AddImplicitFunc(mangledName, fn)
-        }
         let noHeapAllocChecker = NoHeapAllocChecker(instance.diag.AsBasicDiagnosticEngine())
         noHeapAllocChecker.RunOnPackage(realPackage)
         let noWriteBarrierRecChecker = NoWriteBarrierRecChecker(instance.diag.AsBasicDiagnosticEngine())

@@ -4766,7 +4766,7 @@ public class IRBuilder2 <: Resource {
 
     public func CreateSetRuntimeCJThreadHandleCall(args: ArrayList<LLVMValueRef>): LLVMValueRef {
         let helperName = "_CNat6Thread24setRuntimeCJThreadHandleHPu"
-        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
+        if (let Some(helperNode) <- GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(helperName)) {
             let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
             return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
         }
@@ -4778,7 +4778,7 @@ public class IRBuilder2 <: Resource {
         let helperName = "_CNat27CJ_CORE_ExecAtexitCallbacksHv"
         let args = ArrayList<LLVMValueRef>()
         args.add(CreateEntryAlloca(CGType.GetUnitType(GetLLVMContext())))
-        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
+        if (let Some(helperNode) <- GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(helperName)) {
             let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
             return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
         }
@@ -4791,15 +4791,17 @@ public class IRBuilder2 <: Resource {
 
     public func CreateHandleExceptionCall(exceptionValue: LLVMValueRef): LLVMValueRef {
         let helperName = "_CNat15handleExceptionHCNat9ExceptionE"
-        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
-            let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
-            if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
-                if (let Some(funcTy) <- helperNode.GetFuncType()) {
-                    let args = ArrayList<LLVMValueRef>()
-                    args.add(CreateEntryAlloca(CGType.GetUnitType(GetLLVMContext())))
-                    args.add(FixFuncArg(CGValue(exceptionValue, CGType.GetOrCreate(cgMod, funcTy.GetParamType(0))),
-                        helperFuncType.GetParamType(0)))
-                    return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
+        if (let Some(helperValue) <- GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(helperName)) {
+            if (let Some(helperNode) <- (helperValue as Function)) {
+                let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
+                if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
+                    if (let Some(funcTy) <- helperNode.GetFuncType()) {
+                        let args = ArrayList<LLVMValueRef>()
+                        args.add(CreateEntryAlloca(CGType.GetUnitType(GetLLVMContext())))
+                        args.add(FixFuncArg(CGValue(exceptionValue, CGType.GetOrCreate(cgMod, funcTy.GetParamType(0))),
+                            helperFuncType.GetParamType(0)))
+                        return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
+                    }
                 }
             }
         }
@@ -4811,16 +4813,18 @@ public class IRBuilder2 <: Resource {
 
     public func CreateEPrintlnCall(message: String): LLVMValueRef {
         let helperName = "_CNat8eprintlnHRNat6StringE"
-        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
-            let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
-            if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
-                if (let Some(funcTy) <- helperNode.GetFuncType()) {
-                    let paramRefTy = GetCGContext().GetCHIRBuilder().context.GetRefTy(funcTy.GetParamType(0))
-                    let args = ArrayList<LLVMValueRef>()
-                    args.add(CreateEntryAlloca(CGType.GetUnitType(GetLLVMContext())))
-                    args.add(FixFuncArg(CGValue(CreateStringLiteral(message), CGType.GetOrCreate(cgMod, paramRefTy)),
-                        helperFuncType.GetParamType(0)))
-                    return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
+        if (let Some(helperValue) <- GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(helperName)) {
+            if (let Some(helperNode) <- (helperValue as Function)) {
+                let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
+                if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
+                    if (let Some(funcTy) <- helperNode.GetFuncType()) {
+                        let paramRefTy = GetCGContext().GetCHIRBuilder().context.GetRefTy(funcTy.GetParamType(0))
+                        let args = ArrayList<LLVMValueRef>()
+                        args.add(CreateEntryAlloca(CGType.GetUnitType(GetLLVMContext())))
+                        args.add(FixFuncArg(CGValue(CreateStringLiteral(message), CGType.GetOrCreate(cgMod, paramRefTy)),
+                            helperFuncType.GetParamType(0)))
+                        return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
+                    }
                 }
             }
         }
@@ -4960,7 +4964,7 @@ public class IRBuilder2 <: Resource {
     }
 
     private func GetOrInsertRuntimeExceptionHelper(funcName: String): (LLVMValueRef, LLVMTypeRef) {
-        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(funcName)) {
+        if (let Some(helperNode) <- GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(funcName)) {
             let cgFunctionValue = cgMod.GetOrInsertCGFunction(helperNode)
             if (let Some(functionType) <- cgFunctionValue.GetCGFunctionType()) {
                 return (cgFunctionValue.GetRawFunction(), functionType.GetLLVMFunctionType())
@@ -4971,7 +4975,7 @@ public class IRBuilder2 <: Resource {
     }
 
     private func CreateImplicitUsedFunctionCall(helperName: String, args: ArrayList<LLVMValueRef>): LLVMValueRef {
-        if (let Some(helperNode) <- GetCGContext().GetImplicitUsedFunc(helperName)) {
+        if (let Some(helperNode) <- GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(helperName)) {
             let helperFunc = cgMod.GetOrInsertCGFunction(helperNode)
             if (let Some(helperFuncType) <- helperFunc.GetCGFunctionType()) {
                 return CreateCallOrInvoke(helperFunc.GetRawFunction(), args)
@@ -5869,8 +5873,8 @@ public class TemporarilySetDebugLocInThisScope <: Resource {
 
 private func GetTypeDefFromImplicitUsedFuncParam(cgModule: CGModule, funcName: String,
     paramIndex: Int64): Type {
-    let functionValue = cgModule.GetCGContext().GetImplicitUsedFunc(funcName).getOrThrow()
-    let functionType = functionValue.GetFuncType().getOrThrow()
+    let functionValue = cgModule.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(funcName).getOrThrow()
+    let functionType = (functionValue as Function).getOrThrow().GetFuncType().getOrThrow()
     let classBaseType = functionType.GetParamType(paramIndex).StripAllRefs()
     CJC_ASSERT(classBaseType.IsClass())
     return classBaseType
@@ -5879,7 +5883,7 @@ private func GetTypeDefFromImplicitUsedFuncParam(cgModule: CGModule, funcName: S
 private func CreateImplicitUsedFuncCall(irBuilder: IRBuilder2, funcMangledName: String,
     args: ArrayList<LLVMValueRef>): Unit {
     let implicitImportedFunc = irBuilder.GetCGModule().GetOrInsertCGFunction(
-        irBuilder.GetCGContext().GetImplicitUsedFunc(funcMangledName).getOrThrow())
+        irBuilder.GetCGContext().GetCGPkgContext().FindCHIRGlobalValue(funcMangledName).getOrThrow())
     let _ = irBuilder.CreateCallOrInvoke(implicitImportedFunc.GetRawFunction(), args)
 }
 

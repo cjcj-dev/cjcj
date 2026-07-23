@@ -159,6 +159,9 @@ public func LLCSetOptions(setOptionHandler: (String) -> Unit, driverOptions: Dri
     SetOptionIf(setOptionHandler, !driverOptions.enableCompileDebug && !driverOptions.enableCoverage &&
         driverOptions.displayLineInfo, "-disable-debug-info-print")
     setOptionHandler("--relocation-model=pic")
+    SetOptionIf(setOptionHandler,
+        driverOptions.target.os == OSType.IOS && driverOptions.target.arch == ArchType.AARCH64,
+        "--code-model=large")
     if (driverOptions.target.arch == ArchType.ARM32 && driverOptions.optimizationLevel == OptimizationLevel.O2) {
         setOptionHandler("--frame-pointer=all")
     } else {

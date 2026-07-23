@@ -40,7 +40,7 @@ private func loadUInt64LittleEndian(bytes: Array<UInt8>, start: Int64): UInt64 {
 
 @When[os != "Windows"]
 @OverflowWrapping
-private func libStdCxxHashBytes(bytes: Array<UInt8>): UInt64 {
+func libStdCxxHashBytes(bytes: Array<UInt8>): UInt64 {
     var remaining = bytes.size
     var cursor = 0
     var hash = LIBSTDCXX_HASH_SEED ^ (UInt64(remaining) * LIBSTDCXX_HASH_MIX)
@@ -73,7 +73,7 @@ private func libStdCxxHashBytes(bytes: Array<UInt8>): UInt64 {
 
 @When[os == "Windows"]
 @OverflowWrapping
-private func msvcStringHash(bytes: Array<UInt8>): UInt64 {
+func msvcStringHash(bytes: Array<UInt8>): UInt64 {
     var hash = MSVC_HASH_OFFSET
     for (byte in bytes) {
         hash ^= UInt64(byte)
@@ -82,14 +82,17 @@ private func msvcStringHash(bytes: Array<UInt8>): UInt64 {
     return hash
 }
 
-@When[os == "Windows"]
+@OverflowWrapping
 public func GetHash(content: String): UInt64 {
-    return msvcStringHash(content.toArray())
-}
-
-@When[os != "Windows"]
-public func GetHash(content: String): UInt64 {
-    return libStdCxxHashBytes(content.toArray())
+    let fnvPrime = 1099511628211u64
+    let fnvOffsetBasis = 14695981039346656037u64
+    var hash = fnvOffsetBasis
+    for (byte in content.toArray()) {
+        // C++ anchor: src/Basic/Utils.cpp:33-35 converts signed char to uint64_t before XOR.
+        hash ^= UInt64(Int64(Int8(byte)))
+        hash *= fnvPrime
+    }
+    return hash
 }
 
 public func SplitLines(str: String): Array<String> {

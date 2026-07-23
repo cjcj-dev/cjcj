@@ -200,7 +200,7 @@ private func NotAssignableVariable(vd: VarDecl, inInitFunction: Bool): Bool {
     if (vd.TestAnyAttr(Attribute.GLOBAL, Attribute.INITIALIZED, Attribute.ENUM_CONSTRUCTOR)) {
         return true
     }
-    if (vd.TestAnyAttr(Attribute.IN_STRUCT, Attribute.IN_CLASSLIKE) && !inInitFunction) {
+    if (vd.TestAnyAttr(Attribute.IN_STRUCT, Attribute.IN_CLASSLIKE, Attribute.IN_EXTEND) && !inInitFunction) {
         return true
     }
     return vd.TestAnyAttr(Attribute.IN_STRUCT, Attribute.IN_CLASSLIKE) && inInitFunction &&

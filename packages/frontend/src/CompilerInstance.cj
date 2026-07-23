@@ -779,7 +779,6 @@ public class CompilerInstance {
         }
         chirPkg.declCount = chirPkg.mangleNames.size
         chirData.AppendNewPackage(chirPkg)
-        chirData.SetImplicitFuncs(chirPkg, chirPkg.implicitFuncs)
         chirData.SetConstVarInitFuncs(chirPkg, chirPkg.constVarInitFuncs)
         return true
     }
@@ -1399,11 +1398,7 @@ public class CompilerInstance {
             decl.mangledName
         }
         chirPkg.mangleNames.add(name)
-        if (decl.IsFunc()) {
-            if (!chirPkg.implicitFuncs.contains(name)) {
-                chirPkg.implicitFuncs.add(name, ASTKindName(decl.astKind))
-            }
-        } else if (decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.PROP_DECL) {
+        if (decl.astKind == ASTKind.VAR_DECL || decl.astKind == ASTKind.PROP_DECL) {
             chirPkg.constVarInitFuncs.add(name + ".init")
         }
         for (member in decl.GetMemberDecls()) {
