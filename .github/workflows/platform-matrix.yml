@@ -100,6 +100,10 @@ jobs:
             mingw-w64-clang-x86_64-clang
             mingw-w64-clang-x86_64-cmake
             mingw-w64-clang-x86_64-ninja
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-ninja
 
       - name: Runtime build (Linux/macOS native)
         if: always() && runner.os != 'Windows'
