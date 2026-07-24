@@ -7,6 +7,11 @@ on:
         required: false
         type: string
         default: 1.2.0-alpha.20260721165458
+      toolchain:
+        description: Official Cangjie toolchain supplying the std-ast link inputs
+        required: false
+        type: string
+        default: nightly-1.2.0-alpha.20260721165458
 
 permissions:
   contents: read
@@ -77,12 +82,12 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cjv
-          key: windows-stdast-cjv-nightly-${{ inputs.version }}
+          key: windows-stdast-cjv-${{ inputs.toolchain }}
 
       - name: Install Cangjie toolchain
         if: steps.cjv-cache.outputs.cache-hit != 'true'
         env:
-          CJCJ_TOOLCHAIN: nightly-${{ inputs.version }}
+          CJCJ_TOOLCHAIN: ${{ inputs.toolchain }}
         run: npx --yes zx@8 ci/setup_sdk.mjs
 
       - name: Save Cangjie toolchain
@@ -102,7 +107,7 @@ jobs:
       - name: Rebuild host-dispatch std-ast DLL
         env:
           RUNTIME_TOOLCHAIN: ${{ github.workspace }}/.windows-runtime-buildtools/llvm-mingw-w64
-          CJCJ_TOOLCHAIN: nightly-${{ inputs.version }}
+          CJCJ_TOOLCHAIN: ${{ inputs.toolchain }}
         run: CANGJIE_HOME="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" npx --yes zx@8 ci/platform_matrix/build_windows_std_ast.mjs
 
       - name: Save flatc

@@ -18,8 +18,15 @@ permissions:
   actions: read
 
 jobs:
+  windows-runtime:
+    name: Build Windows runtime
+    uses: ./.github/workflows/build-windows-runtime.yml
+    with:
+      version: ${{ inputs.version }}
+
   build:
     name: windows-x64 / Debug release round
+    needs: windows-runtime
     uses: ./.github/workflows/build-release-package.yml
     with:
       runner: windows-2025
