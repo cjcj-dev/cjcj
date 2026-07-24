@@ -189,6 +189,7 @@ public func LLCSetOptions(setOptionHandler: (String) -> Unit, driverOptions: Dri
     }
     SetOptionIf(setOptionHandler, effectiveOptimizationLevel(driverOptions) == OptimizationLevel.O2,
         "--cj-safepoint-outline=false")
+    SetOptionIf(setOptionHandler, driverOptions.cjcjOptimization, "--cjcj-sticky-logged-map")
 }
 
 public func LLCSetTripleOptions(setOptionHandler: (String) -> Unit, driverOptions: DriverOptions): Unit {
