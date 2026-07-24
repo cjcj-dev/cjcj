@@ -72,7 +72,7 @@ jobs:
           export CANGJIE_HOME="$cangjie_home"
           export CANGJIE_STDX_PATH="$stdx_path"
           export MINGW_PATH=/mingw64
-          export cjHeapSize=24GB
+          export cjHeapSize=12GB
           # cjpm is itself a Cangjie binary: it loads libcangjie-runtime.dll (and
           # tools/lib deps) at startup — r3 forensics: found on PATH, exec rc=127.
           export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:$cangjie_home/runtime/lib/windows_x86_64_cjnative:$cangjie_home/tools/lib:/mingw64/bin:$PATH"
