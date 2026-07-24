@@ -1272,7 +1272,8 @@ private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: Str
             LLVMSetGlobalConstant(record, 0)
             addAttribute(record, GC_KLASS_ATTR)
         }
-        CJC_ASSERT(unsafe { LLVMGetInitializer(record) } == unsafe { LLVMGetInitializer(typeInfo) })
+        CJC_ASSERT(unsafe { LLVMGetInitializer(record) }.toUIntNative() ==
+            unsafe { LLVMGetInitializer(typeInfo) }.toUIntNative())
         try (metadataCount = LibC.malloc<UIntNative>().asResource()) {
             unsafe { metadataCount.value.write(UIntNative(0)) }
             let entries = unsafe { LLVMGlobalCopyAllMetadata(typeInfo, metadataCount.value) }
