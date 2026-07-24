@@ -488,6 +488,11 @@ private class ToCHIR {
             }
             let devirtInfo = CollectDevirtualizationInfo(currentPackage)
             RunFunctionInline(currentPackage, devirtInfo)
+            if (options.cjcjOptimization) {
+                // The cjcj-only round runs after FaithfulAST2CHIR has materialized generic instances and before
+                // the remaining CHIR passes. It reuses the official Devirtualization pipeline below.
+                Devirtualization(currentPackage, devirtInfo, instantiatedOnly: true, inlineFrozen: false)
+            }
             if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_LOAD)) {
                 RedundantLoadElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
             }
@@ -521,7 +526,8 @@ private class ToCHIR {
     }
 
     // C++ CHIR.cpp:349-386.
-    private func Devirtualization(currentPackage: RealCHIRPackage, devirtInfo: DevirtualizationInfo): Unit {
+    private func Devirtualization(currentPackage: RealCHIRPackage, devirtInfo: DevirtualizationInfo,
+        instantiatedOnly!: Bool = false, inlineFrozen!: Bool = true): Unit {
         let options = instance.invocation.globalOptions
         if (!options.IsOptimizationExisted(OptimizationFlag.DEVIRTUALIZATION) ||
             options.enIncrementalCompilation) {
@@ -530,7 +536,17 @@ private class ToCHIR {
         try (recorder = ProfileRecorder("CHIR Opt", "Devirtualization")) {
             devirtInfo.FreshRetMap()
             devirtInfo.CollectConstMemberVarType()
-            let funcs = ChirDevirtualization.CollectContainInvokeExprFuncs(currentPackage)
+            let funcs = ArrayList<ChirFunction>()
+            for (fn in ChirDevirtualization.CollectContainInvokeExprFuncs(currentPackage)) {
+                let parentInstantiated = if (let Some(parent) <- fn.GetParentCustomTypeDef()) {
+                    parent.TestAttr(ChirAttribute.GENERIC_INSTANTIATED)
+                } else {
+                    false
+                }
+                if (!instantiatedOnly || fn.TestAttr(ChirAttribute.GENERIC_INSTANTIATED) || parentInstantiated) {
+                    funcs.add(fn)
+                }
+            }
             if (funcs.isEmpty()) {
                 return
             }
@@ -541,11 +557,23 @@ private class ToCHIR {
                     TypeAnalysis.InitialiseLetGVState(analysisPackage, analysisBuilder, typeAnalysisGlobals,
                         { globalVar => TypeAnalysis.IsTrackedGV(globalVar) })
                 })
-            typeAnalysisWrapper.RunOnPackage(currentPackage, options.chirDebugOptimizer, threadNum,
-                { fn: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
-                    TypeAnalysis(fn, analysisBuilder, isDebug, devirtInfo)
-                })
             let devirt = ChirDevirtualization(typeAnalysisWrapper, devirtInfo)
+            if (instantiatedOnly) {
+                TypeAnalysis.InitialiseLetGVState(currentPackage, builder, typeAnalysisGlobals,
+                    { globalVar => TypeAnalysis.IsTrackedGV(globalVar) })
+                for (fn in funcs) {
+                    let result = typeAnalysisWrapper.RunOnFunc(fn, options.chirDebugOptimizer,
+                        { instantiatedFn: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
+                            TypeAnalysis(instantiatedFn, analysisBuilder, isDebug, devirtInfo)
+                        })
+                    devirt.AppendFrozenFuncState(fn, result)
+                }
+            } else {
+                typeAnalysisWrapper.RunOnPackage(currentPackage, options.chirDebugOptimizer, threadNum,
+                    { fn: ChirFunction, analysisBuilder: ChirBuilder, isDebug: Bool =>
+                        TypeAnalysis(fn, analysisBuilder, isDebug, devirtInfo)
+                    })
+            }
             devirt.RunOnFuncs(funcs, builder, options.chirDebugOptimizer)
             if (!devirt.GetFrozenInstFuns().isEmpty()) {
                 let frozenFuncs = devirt.GetFrozenInstFuns()
@@ -557,9 +585,11 @@ private class ToCHIR {
                     devirt.AppendFrozenFuncState(fn, result)
                 }
                 devirt.RunOnFuncs(frozenFuncs, builder, options.chirDebugOptimizer)
-                let pass = FunctionInline(builder, options.optimizationLevel, options.chirDebugOptimizer)
-                for (fn in frozenFuncs) {
-                    pass.Run(fn)
+                if (inlineFrozen) {
+                    let pass = FunctionInline(builder, options.optimizationLevel, options.chirDebugOptimizer)
+                    for (fn in frozenFuncs) {
+                        pass.Run(fn)
+                    }
                 }
             }
             DumpCHIRToFile("Devirtualization")
