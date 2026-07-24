@@ -9,8 +9,10 @@ $.stdio = 'inherit';
 const root = path.resolve(import.meta.dirname, '../../..');
 const sdk = argv._[0];
 if (!sdk) throw new Error('usage: verify.mjs <sdk-dir>');
-const self = `${sdk}/bin/cjcj`;
-const oracle = `${sdk}/bin/cjc`;
+const workspace = process.env.CANGJIE_WORKSPACE;
+if (!workspace) throw new Error('CANGJIE_WORKSPACE is required');
+const self = `${sdk}/bin/cjc`;
+const oracle = `${workspace}/cangjie_compiler/output/bin/cjc`;
 let jobs = process.env.CJCJ_VERIFY_JOBS || (await $({stdio: 'pipe'})`nproc`).stdout.trim();
 if ((await $({nothrow: true})`test ${jobs} -gt 16`).exitCode === 0) jobs = '16';
 
@@ -121,7 +123,7 @@ if (referenceCompile.stdout) process.stdout.write(referenceCompile.stdout);
 if (referenceCompile.stderr) process.stderr.write(referenceCompile.stderr);
 console.log('[preflight] PASS items=6 probes=4/4');
 
-console.log('[difftest] compare self-host and C++');
+console.log('[difftest] compare selfhost SDK and source-built C++ oracle');
 const difftestEnv = {
   ...process.env,
   DIFFTEST_TC: sdk,
