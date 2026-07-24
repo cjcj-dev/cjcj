@@ -1,0 +1,30 @@
+# DEBUG SCAFFOLDING (0724): single-platform windows release round for the
+# 06_macro dlopen diagnosis. The failure-gated tmate step in
+# build-release-package.yml opens an SSH session on the failing runner.
+# Remove together with that step once the release pipeline is green.
+name: Debug windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version, e.g. 0.0.1"
+        required: false
+        type: string
+        default: "0.0.1"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    name: windows-x64 / Debug release round
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: windows-2025
+      platform: windows-x64
+      llvm_platform: windows_x86_64
+      sdk_runtime_dir: windows_x86_64_cjnative
+      version: ${{ inputs.version }}
+    secrets: inherit
