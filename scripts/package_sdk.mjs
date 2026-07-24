@@ -16,6 +16,7 @@ const version = required('version');
 const platform = required('platform');
 const outdir = required('outdir');
 const runtimeLib = typeof argv['runtime-lib'] === 'string' ? argv['runtime-lib'] : '';
+const runtimeRoot = typeof argv['runtime-root'] === 'string' ? argv['runtime-root'] : '';
 
 async function exists(file, kind = 'file') {
   try { const stat = await fs.stat(file); return kind === 'dir' ? stat.isDirectory() : stat.isFile(); } catch { return false; }
@@ -23,6 +24,7 @@ async function exists(file, kind = 'file') {
 if (!await exists(sdk, 'dir')) { console.error(`SDK dir not found: ${sdk}`); process.exit(2); }
 if (!await exists(binary)) { console.error(`cjc binary not found: ${binary}`); process.exit(2); }
 if (runtimeLib && !await exists(runtimeLib)) { console.error(`runtime library not found: ${runtimeLib}`); process.exit(2); }
+if (runtimeRoot && !await exists(runtimeRoot, 'dir')) { console.error(`runtime root not found: ${runtimeRoot}`); process.exit(2); }
 
 const platforms = {
   'linux-x64': ['linux_x86_64_cjnative', 'tar', ''],
@@ -34,23 +36,48 @@ const platforms = {
 if (!platforms[platform]) { console.error(`unsupported --platform: ${platform}`); process.exit(2); }
 const [runtimeDir, archiveType, exeSuffix] = platforms[platform];
 const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
+const isWindows = platform === 'windows-x64';
 const packageName = `cjcj-${version}-${platform}`;
 const stage = path.join(outdir, packageName);
 await fs.mkdir(outdir, {recursive: true});
 await fs.rm(stage, {recursive: true, force: true});
 
 console.log(`[1/6] copy SDK tree -> ${stage}`);
-await $({stdio: 'inherit'})`cp -a ${sdk} ${stage}`;
-await $({stdio: 'inherit'})`chmod -R u+rwX,go+rX ${stage}`;
+if (isWindows) await fs.cp(sdk, stage, {recursive: true});
+else {
+  await $({stdio: 'inherit'})`cp -a ${sdk} ${stage}`;
+  await $({stdio: 'inherit'})`chmod -R u+rwX,go+rX ${stage}`;
+}
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 
 console.log('[2/6] install our compiler as bin/cjc');
 const installed = path.join(stage, `bin/cjc${exeSuffix}`);
+await Promise.all([
+  fs.rm(path.join(stage, 'bin', 'cjc'), {force: true}),
+  fs.rm(path.join(stage, 'bin', 'cjc.exe'), {force: true}),
+]);
 await fs.copyFile(binary, installed);
 await fs.chmod(installed, 0o755);
 
 console.log('[3/6] swap in patched runtime');
-if (runtimeLib) {
+if (isWindows) {
+  if (!runtimeRoot) { console.error('  ERROR: Windows packaging requires --runtime-root'); process.exit(3); }
+  for (const relative of [path.join('runtime', 'lib', runtimeDir), path.join('lib', runtimeDir)]) {
+    const source = path.join(runtimeRoot, relative);
+    if (!await exists(source, 'dir')) { console.error(`  ERROR: ${source} missing from fork runtime install`); process.exit(3); }
+    await fs.cp(source, path.join(stage, relative), {recursive: true, force: true});
+    console.log(`  replaced ${relative} from ${source}`);
+  }
+  const runtimeFiles = await fs.readdir(path.join(stage, 'runtime', 'lib', runtimeDir));
+  if (!runtimeFiles.some((name) => ['libcangjie-runtime.dll', 'cangjie-runtime.dll'].includes(name.toLowerCase()))) {
+    console.error('  ERROR: fork libcangjie-runtime DLL missing from packaged runtime/lib');
+    process.exit(3);
+  }
+  if (!runtimeFiles.some((name) => name.toLowerCase() === 'libboundscheck.dll')) {
+    console.error('  ERROR: fork libboundscheck.dll missing from packaged runtime/lib');
+    process.exit(3);
+  }
+} else if (runtimeLib) {
   const destination = path.join(stage, 'runtime', 'lib', runtimeDir, runtimeLibrary);
   if (!await exists(destination)) { console.error(`  ERROR: ${destination} missing in SDK tree`); process.exit(3); }
   await fs.copyFile(runtimeLib, destination);
@@ -117,13 +144,17 @@ if (platform.startsWith('linux-')) {
   console.log(`  install name: ${relativeRuntime}`);
   console.log(`  rpaths: ${relativeRpaths.join(':')}`);
 } else {
-  console.log('  skip: Windows resolves DLLs by dir/PATH (no win build yet)');
+  console.log('  Windows resolves packaged DLLs through runtime/lib and PATH');
 }
 
 console.log('[5/6] archive');
 const archivePath = path.join(outdir, `${packageName}.${archiveType === 'tar' ? 'tar.gz' : 'zip'}`);
 if (archiveType === 'tar') await $({stdio: 'inherit'})`tar -C ${outdir} -czf ${archivePath} ${packageName}`;
-else await $({cwd: outdir, stdio: 'inherit'})`zip -qr ${`${packageName}.zip`} ${packageName}`;
+else {
+  const psQuote = value => `'${path.resolve(value).replaceAll("'", "''")}'`;
+  const command = `Compress-Archive -LiteralPath ${psQuote(stage)} -DestinationPath ${psQuote(archivePath)} -Force`;
+  await $({stdio: 'inherit'})`pwsh -NoLogo -NoProfile -Command ${command}`;
+}
 
 console.log('[6/6] sha256');
 const archiveDigest = crypto.createHash('sha256').update(await fs.readFile(archivePath)).digest('hex');
