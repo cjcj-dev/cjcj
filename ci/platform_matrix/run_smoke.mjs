@@ -142,7 +142,7 @@ async function runOne(name, expected, env = process.env) {
   if (process.platform === 'win32') {
     const compile = runCmd(deploy, [path.join('ci', 'smoke', `${name}.cj`), '-o', output], env);
     if (compile.status !== 0) {
-      console.error(`ERROR: ${name} compile status=${compile.status}\n${compile.stdout}\n${compile.stderr}`);
+      console.error(`ERROR: ${name} compile status=${compile.status} spawn_error=${compile.error ? compile.error.code : 'none'}\n${compile.stdout}\n${compile.stderr}`);
       return false;
     }
     const ran = runCmd(output, [], env);
@@ -181,6 +181,10 @@ console.log(`combined runtime smoke: ${runtimeLib}`);
 const runtimeDir = path.dirname(runtimeLib);
 const env = {...process.env};
 if (process.platform === 'darwin') env.DYLD_LIBRARY_PATH = `${runtimeDir}:${env.DYLD_LIBRARY_PATH || ''}`;
-else if (process.platform === 'win32') env.PATH = `${runtimeDir};${env.PATH || ''}`;
-else env.LD_LIBRARY_PATH = `${runtimeDir}:${env.LD_LIBRARY_PATH || ''}`;
+else if (process.platform === 'win32') {
+  // Prepend onto the existing PATH key whatever its case: adding a second
+  // 'PATH' beside a materialized 'Path' makes spawn fail with EINVAL.
+  const pathKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
+  env[pathKey] = `${runtimeDir};${env[pathKey] || ''}`;
+} else env.LD_LIBRARY_PATH = `${runtimeDir}:${env.LD_LIBRARY_PATH || ''}`;
 if (!(await runOne('01_hello', 'hello from cjcj', env))) process.exit(1);
