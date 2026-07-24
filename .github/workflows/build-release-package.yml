@@ -221,9 +221,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # The patched cjpm names the product cjc@cjcj.exe (swapOrgName); the
+          # retired lld wrapper era produced cjcj.exe — probe both, newest wins.
+          $binary = @("$PWD\target\release\bin\cjc@cjcj.exe", "$PWD\target\release\bin\cjcj.exe") |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $binary) { Write-Error "no cjcj product under target\release\bin"; exit 1 }
           npx --yes zx@8 scripts/package_sdk.mjs `
             --sdk "$env:CANGJIE_HOME" `
-            --binary "$PWD\target\release\bin\cjcj.exe" `
+            --binary "$binary" `
             --runtime-root "$PWD\.platform-ci\runtime-install\windows_release_x86_64" `
             --version "${{ inputs.version }}" `
             --platform "${{ inputs.platform }}" `
