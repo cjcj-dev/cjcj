@@ -41,8 +41,11 @@ async function requireFile(target, hint) {
 const stdlibNative = path.join(runtimeSource, 'stdlib', 'libs', 'std', 'ast', 'native');
 const astApiCpp = await requireFile(path.join(stdlibNative, 'ast_api.cpp'), 'fork ast_api.cpp');
 const schema = await requireFile(path.join(runtimeSource, 'stdlib', 'schema', 'NodeFormat.fbs'), 'flatbuffers schema');
-const flatbuffersSrc = path.join(runtimeSource, 'stdlib', 'third_party', 'flatbuffers');
-const boundscheckInclude = path.join(runtimeSource, 'stdlib', 'third_party', 'boundscheck-v1.1.16', 'include');
+// stdlib/third_party/flatbuffers is a build-time download (gitignored), so a CI
+// checkout does not carry it; provision it with the stdlib build's own pin
+// (stdlib/third_party/cmake/Flatbuffer.cmake).
+const FLATBUFFERS_REPOSITORY = 'https://gitcode.com/openharmony/third_party_flatbuffers.git';
+const FLATBUFFERS_PIN = 'c3e4d69cbd5950e43f775ba76eadb30750d6e0b7';
 const targetLib = path.join(cangjieHome, 'lib', 'windows_x86_64_cjnative');
 const targetRuntime = path.join(cangjieHome, 'runtime', 'lib', 'windows_x86_64_cjnative');
 const clangxx = await requireFile(path.join(toolchain, 'bin', 'x86_64-w64-mingw32-clang++'), 'mingw clang++');
@@ -58,6 +61,17 @@ if (!(await isDirectory(path.join(cangjieHome, 'include', 'cangjie')))) {
 }
 
 await fs.mkdir(work, {recursive: true});
+
+let flatbuffersSrc = path.join(runtimeSource, 'stdlib', 'third_party', 'flatbuffers');
+if (!(await isFile(path.join(flatbuffersSrc, 'CMakeLists.txt')))) {
+  flatbuffersSrc = path.join(work, 'flatbuffers-src');
+  if (!(await isFile(path.join(flatbuffersSrc, 'CMakeLists.txt')))) {
+    log(`fetching flatbuffers ${FLATBUFFERS_PIN}`);
+    await fs.rm(flatbuffersSrc, {recursive: true, force: true});
+    await $`git clone --filter=blob:none ${FLATBUFFERS_REPOSITORY} ${flatbuffersSrc}`;
+    await $({cwd: flatbuffersSrc})`git checkout --detach ${FLATBUFFERS_PIN}`;
+  }
+}
 
 // 1. flatc for the generated serialization header (host tool, cached across runs).
 let flatc = path.join(flatcDir, 'flatc');
@@ -78,7 +92,7 @@ await $`${flatc} --no-warnings -c -o ${path.join(generatedInclude, 'flatbuffers'
 // 2. Compile the fork ast_api.cpp with the stdlib build's flag set
 // (stdlib libs/std/ast/native + windows toolchain flags).
 const astApiObj = path.join(work, 'ast_api.cpp.obj');
-await $`${clangxx} -c ${astApiCpp} -o ${astApiObj} -DCANGJIE_CODEGEN_CJNATIVE_BACKEND -DNDEBUG -DRELEASE -D__windows__ -w -Wdate-time -Wno-int-conversion -fno-omit-frame-pointer -pipe -fno-common -fno-strict-aliasing -m64 -Wa,-mbig-obj -fstack-protector-all -D_FORTIFY_SOURCE=2 -O2 -fPIC -std=c++17 -I${path.join(cangjieHome, 'include')} -I${boundscheckInclude} -I${generatedInclude} -I${path.join(flatbuffersSrc, 'include')}`;
+await $`${clangxx} -c ${astApiCpp} -o ${astApiObj} -DCANGJIE_CODEGEN_CJNATIVE_BACKEND -DNDEBUG -DRELEASE -D__windows__ -w -Wdate-time -Wno-int-conversion -fno-omit-frame-pointer -pipe -fno-common -fno-strict-aliasing -m64 -Wa,-mbig-obj -fstack-protector-all -D_FORTIFY_SOURCE=2 -O2 -fPIC -std=c++17 -I${path.join(cangjieHome, 'include')} -I${generatedInclude} -I${path.join(flatbuffersSrc, 'include')}`;
 
 // 3. The official Cangjie half: single-member archive holding ast.o.
 await $({cwd: work})`${llvmAr} x ${path.join(targetLib, 'libcangjie-std-ast.a')} ast.o`;
