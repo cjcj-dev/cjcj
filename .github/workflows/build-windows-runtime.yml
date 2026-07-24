@@ -43,7 +43,7 @@ jobs:
 
       - name: Restore official MinGW toolchain
         id: mingw-cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: .windows-runtime-buildtools/llvm-mingw-w64
           key: windows-runtime-toolchain-20220906-5c68a1cb123161b54b72ce90e7975d95a8eaf2a4-feea9a87fa42591b298b18fe0e07198f0b8c2f63-${{ hashFiles('cangjie-build/src/cangjie_build/toolchain/mingw.py', 'cangjie-build/src/cangjie_build/toolchain/_archive.py', 'cangjie-build/src/cangjie_build/runner.py', 'cangjie-build/uv.lock') }}
@@ -57,6 +57,13 @@ jobs:
         if: steps.mingw-cache.outputs.cache-hit != 'true'
         working-directory: cangjie-build
         run: uv run cangjie-build --target windows-x64 --build-root "$GITHUB_WORKSPACE/.windows-runtime-buildtools" install-mingw
+
+      - name: Save official MinGW toolchain
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .windows-runtime-buildtools/llvm-mingw-w64
+          key: ${{ steps.mingw-cache.outputs.cache-primary-key }}
 
       - name: Cross-build pinned Windows runtime
         env:
