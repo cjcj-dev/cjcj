@@ -67,7 +67,7 @@ jobs:
 
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Prepare MSYS2/MinGW LLVM toolchain
         id: msys2-setup
@@ -109,7 +109,7 @@ jobs:
 
       - name: Restore LLVM build directory
         id: llvm-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.TUPLE_ROOT }}/llvm-build
           key: platform-llvm-build-${{ env.LLVM_SHA }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ci/platform_tuples/build_tuple.sh') }}
@@ -140,7 +140,7 @@ jobs:
 
       - name: Upload fixed LLVM tuple
         if: steps.tuple-build.outcome == 'success' || steps.tuple-build-windows.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fixed-llvm-tools-${{ matrix.platform }}
           path: fixed-toolchain/${{ matrix.platform }}

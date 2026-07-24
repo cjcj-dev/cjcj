@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Run actionlint
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
@@ -62,23 +62,23 @@ jobs:
           - { runner: ubuntu-26.04, experimental: true }
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Load runtime pin
         shell: bash
         run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
       - name: Download LLVM tools
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: fixed-llvm-tools-linux_x86_64
           path: fixed-toolchain/linux_x86_64
       - name: Restore SDK cache
         id: sdkcache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
       - name: Restore cjpm cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: target
           key: cjpm-${{ runner.os }}-${{ matrix.runner }}-${{ env.CJCJ_TOOLCHAIN }}-${{ github.sha }}
@@ -93,7 +93,7 @@ jobs:
       # Save only after a successful install so a partial ~/.cjv is never cached.
       - name: Save SDK cache
         if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
@@ -101,7 +101,7 @@ jobs:
       # entry built on a newer distro is unloadable on an older one (GLIBC_x.y not found).
       - name: Restore patched runtime cache
         id: rtcache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
@@ -115,7 +115,7 @@ jobs:
         run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Save patched runtime cache
         if: steps.rtcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: dist-runtime
           key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
@@ -147,10 +147,10 @@ jobs:
         runner: [ubuntu-24.04-arm, macos-latest]
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Restore SDK cache
         id: sdkcache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
@@ -161,7 +161,7 @@ jobs:
         run: npx --yes zx@8 ci/setup_sdk.mjs
       - name: Save SDK cache
         if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}

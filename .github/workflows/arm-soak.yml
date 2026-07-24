@@ -38,10 +38,10 @@ jobs:
     timeout-minutes: 300
     steps:
       - name: Checkout cjcj smoke corpus
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download Linux ARM package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pkg-linux-aarch64
           path: dist

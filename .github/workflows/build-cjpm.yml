@@ -104,7 +104,7 @@ jobs:
           gzip -n -c -9 ../../patched-cjpm/windows_x86_64/cjpm.exe > ../../patched-cjpm/windows_x86_64/cjpm.exe.gz
 
       - name: Upload patched cjpm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: patched-cjpm-windows_x86_64
           path: patched-cjpm/windows_x86_64/cjpm.exe.gz

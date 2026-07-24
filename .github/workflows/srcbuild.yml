@@ -44,13 +44,13 @@ jobs:
       cjHeapSwap: "on"
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Load runtime pin
         run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
 
       - name: Checkout cangjie-build
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cjcj-build
           ref: 60c485cad4c3425772b7b9a9e5d6a5fd457527c2
@@ -75,7 +75,7 @@ jobs:
 
       - name: Restore support library cache
         id: support-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.CANGJIE_BUILD_ROOT }}
           key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('cangjie-build/src/cangjie_build/toolchain/static_libs.py') }}
@@ -87,7 +87,7 @@ jobs:
 
       - name: Save support library cache
         if: steps.support-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ env.CANGJIE_BUILD_ROOT }}
           key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('cangjie-build/src/cangjie_build/toolchain/static_libs.py') }}
@@ -149,7 +149,7 @@ jobs:
           uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
 
       - name: Download LLVM tools
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: fixed-llvm-tools-linux_x86_64
           path: .srcbuild/fixed-llc
@@ -194,7 +194,7 @@ jobs:
       # stage2 frontier locally otherwise requires rebuilding the full C++ oracle.
       - name: Upload stage diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: srcbuild-diagnosis-${{ github.run_attempt }}
           retention-days: 7
@@ -213,7 +213,7 @@ jobs:
 
       - name: Upload self-hosted SDK and gate logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cjcj-srcbuild-linux-x64-${{ steps.version.outputs.value }}
           path: |

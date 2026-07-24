@@ -66,7 +66,7 @@ jobs:
 
     steps:
       - name: Checkout cjcj
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Load runtime pin
         shell: bash
@@ -76,7 +76,7 @@ jobs:
       # fixes; no per-runner patch overlay is needed.
       - name: Checkout pinned runtime
         if: always()
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
           ref: ${{ env.RUNTIME_REF }}
@@ -165,7 +165,7 @@ jobs:
 
       - name: Upload diagnostics and key products
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: platform-${{ matrix.runner }}-${{ github.run_attempt }}
           retention-days: 7
