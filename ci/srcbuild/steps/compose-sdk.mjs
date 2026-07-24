@@ -23,6 +23,12 @@ const compilerNames = [
 ];
 for (const name of compilerNames) await fs.rm(`${sdk}/bin/${name}`, {force: true});
 await $`install -m0755 target/release/bin/cjcj::cjc ${sdk}/bin/cjc`;
+const productVersion = await $({stdio: 'pipe'})`${sdk}/bin/cjc --version`;
+const versionOutput = `${productVersion.stdout}${productVersion.stderr}`;
+if (!versionOutput.includes(version)) {
+  throw new Error(`selfhost version mismatch: expected ${version}, got ${versionOutput.trim()}`);
+}
+process.stdout.write(versionOutput);
 
 const archive = `${workspace}/software/cangjie-sdk-linux-x64-${version}-cjcj.tar.gz`;
 await $`tar -C ${workspace}/software -czf ${archive} cangjie`;

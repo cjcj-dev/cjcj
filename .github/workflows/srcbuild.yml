@@ -162,6 +162,13 @@ jobs:
           CANGJIE_CPP_SRC: ${{ env.CANGJIE_WORKSPACE }}/cangjie_compiler
         run: npx --yes zx@8 ci/srcbuild/steps/build-shim.mjs
 
+      - name: Inject selfhost compiler version
+        env:
+          SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          npx --yes zx@8 ci/srcbuild/tests/inject-version.test.mjs
+          npx --yes zx@8 ci/srcbuild/steps/inject-version.mjs
+
       - name: Build stage 1 compiler
         # Upstream cjc miscompiles cjcj at -O2; build the seed at -O1.
         run: npx --yes zx@8 ci/srcbuild/steps/build-stage1.mjs
