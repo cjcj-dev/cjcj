@@ -21,8 +21,15 @@ env:
   CJ_HEAP_SIZE: 12GB
 
 jobs:
+  windows-runtime:
+    name: Build Windows runtime
+    uses: ./.github/workflows/build-windows-runtime.yml
+    with:
+      version: 1.2.0-alpha.20260721165458
+
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
+    needs: windows-runtime
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     strategy:
@@ -75,7 +82,7 @@ jobs:
       # The consolidated cangjie-runtime main already carries the GC and Darwin
       # fixes; no per-runner patch overlay is needed.
       - name: Checkout pinned runtime
-        if: always()
+        if: always() && runner.os != 'Windows'
         uses: actions/checkout@v7
         with:
           repository: cjcj-dev/cangjie-runtime
@@ -83,26 +90,19 @@ jobs:
           fetch-depth: 1
           path: runtime-source
 
-      - name: Prepare MSYS2/MINGW64 runtime toolchain
+      - name: Prepare MSYS2/MINGW64 cjcj toolchain
         if: always() && runner.os == 'Windows'
-        # The packaged SDK's prebuilt std DLLs use the MINGW64/MSVCRT runtime
-        # ABI. Keep clang as the compiler, but select that same CRT family so
-        # the fork runtime preserves the official DLL's exported CRT surface.
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           # release:false = provision the runner's preinstalled C:\msys64 instead of a
-          # fresh RUNNER_TEMP\msys64 — build_runtime.mjs invokes C:\msys64\usr\bin\bash.exe,
-          # so the MINGW64 packages must land in that installation (round-8 root: the two
-          # msys2 trees diverged and /clang64/bin was empty at build time).
+          # fresh RUNNER_TEMP\msys64; build_cjcj.mjs stages the MINGW64 tuple DLLs
+          # from C:\msys64\mingw64\bin next to the fixed llc.
           release: false
           update: true
           path-type: inherit
           install: >-
             git make python gzip unzip file binutils
-            mingw-w64-clang-x86_64-clang
-            mingw-w64-clang-x86_64-cmake
-            mingw-w64-clang-x86_64-ninja
             mingw-w64-x86_64-clang
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-compiler-rt
@@ -115,9 +115,16 @@ jobs:
         if: always() && runner.os != 'Windows'
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
 
-      - name: Runtime build (Windows target via MSYS2/MINGW64)
+      - name: Download cross-built Windows runtime
         if: always() && runner.os == 'Windows'
-        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+        uses: actions/download-artifact@v8
+        with:
+          name: runtime-install-windows_x86_64
+          path: .platform-ci/runtime-install/windows_release_x86_64
+
+      - name: Verify cross-built Windows runtime
+        if: always() && runner.os == 'Windows'
+        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
 
       - name: Download native fixed LLVM tuple
         if: always() && runner.os != 'Windows'
