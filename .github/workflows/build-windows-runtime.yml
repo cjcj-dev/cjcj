@@ -1,0 +1,84 @@
+name: Build Windows runtime
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: false
+        type: string
+        default: 1.2.0-alpha.20260721165458
+
+permissions:
+  contents: read
+
+jobs:
+  build-runtime:
+    name: windows-x64 / Cross-build runtime
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+
+      - name: Load runtime pin
+        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+
+      - name: Checkout pinned runtime
+        uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ env.RUNTIME_REF }}
+          fetch-depth: 1
+          path: runtime-source
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: cangjie-build/uv.lock
+
+      - name: Install build harness
+        working-directory: cangjie-build
+        run: uv sync --frozen
+
+      - name: Restore official MinGW toolchain
+        id: mingw-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .windows-runtime-buildtools/llvm-mingw-w64
+          key: windows-runtime-toolchain-20220906-5c68a1cb123161b54b72ce90e7975d95a8eaf2a4-feea9a87fa42591b298b18fe0e07198f0b8c2f63-${{ hashFiles('cangjie-build/src/cangjie_build/toolchain/mingw.py', 'cangjie-build/src/cangjie_build/toolchain/_archive.py', 'cangjie-build/src/cangjie_build/runner.py', 'cangjie-build/uv.lock') }}
+
+      - name: Install toolchain build dependencies
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target windows-x64 install-system-deps
+
+      - name: Build official MinGW toolchain
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        working-directory: cangjie-build
+        run: uv run cangjie-build --target windows-x64 --build-root "$GITHUB_WORKSPACE/.windows-runtime-buildtools" install-mingw
+
+      - name: Save official MinGW toolchain
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .windows-runtime-buildtools/llvm-mingw-w64
+          key: ${{ steps.mingw-cache.outputs.cache-primary-key }}
+
+      - name: Cross-build pinned Windows runtime
+        env:
+          RUNTIME_TARGET: windows-x86_64
+          RUNTIME_TOOLCHAIN: ${{ github.workspace }}/.windows-runtime-buildtools/llvm-mingw-w64
+          RUNTIME_VERSION: ${{ inputs.version }}
+        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-install-windows_x86_64
+          path: .platform-ci/runtime-install/windows_release_x86_64
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify official Windows runtime ABI
+        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs

@@ -51,16 +51,7 @@ jobs:
         shell: bash
         run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
 
-      - name: Checkout pinned runtime (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/checkout@v7
-        with:
-          repository: cjcj-dev/cangjie-runtime
-          ref: ${{ env.RUNTIME_REF }}
-          fetch-depth: 1
-          path: runtime-source
-
-      - name: Prepare MSYS2/MINGW64 runtime toolchain
+      - name: Prepare MSYS2/MINGW64 cjcj toolchain
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
@@ -70,9 +61,6 @@ jobs:
           path-type: inherit
           install: >-
             git make python gzip unzip file binutils
-            mingw-w64-clang-x86_64-clang
-            mingw-w64-clang-x86_64-cmake
-            mingw-w64-clang-x86_64-ninja
             mingw-w64-x86_64-clang
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-compiler-rt
@@ -81,11 +69,16 @@ jobs:
             mingw-w64-x86_64-libunwind
             mingw-w64-x86_64-ninja
 
-      - name: Build pinned runtime (Windows)
+      - name: Download cross-built Windows runtime
         if: runner.os == 'Windows'
-        env:
-          RUNTIME_VERSION: ${{ inputs.version }}
-        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+        uses: actions/download-artifact@v8
+        with:
+          name: runtime-install-windows_x86_64
+          path: .platform-ci/runtime-install/windows_release_x86_64
+
+      - name: Verify cross-built Windows runtime
+        if: runner.os == 'Windows'
+        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
 
       - name: Download native fixed LLVM tuple (Windows)
         if: runner.os == 'Windows'
