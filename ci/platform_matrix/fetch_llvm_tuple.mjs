@@ -17,7 +17,13 @@ const repo = process.env.SHIM_ARTIFACT_REPOSITORY || 'cjcj-dev/cjcj';
 const workflow = process.env.TUPLE_WORKFLOW || 'platform-tuples.yml';
 // Follow the branch this workflow runs on; a fixed default starves consumers on
 // iteration branches (darwin waited 30min for artifacts that lived elsewhere).
-const branch = process.env.TUPLE_BRANCH || process.env.GITHUB_REF_NAME || 'ci/platform-matrix';
+// Feature branches without their own tuple run fall back to master's artifact
+// (the tuple is branch-independent: built from the pinned LLVM fork SHA).
+const branches = [...new Set([
+  process.env.TUPLE_BRANCH || process.env.GITHUB_REF_NAME || 'ci/platform-matrix',
+  'master',
+  'ci/platform-matrix',
+])];
 
 const platforms = {
   'linux/x64': 'linux_x86_64',
@@ -43,12 +49,14 @@ export async function selectTupleArtifact() {
   const attempts = Number(process.env.TUPLE_FETCH_ATTEMPTS || 60);
   const delaySeconds = Number(process.env.TUPLE_FETCH_DELAY_SECONDS || 30);
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const runIds = await ghLines(`repos/${repo}/actions/workflows/${workflow}/runs?branch=${encodeURIComponent(branch)}&status=completed&per_page=30`, '.workflow_runs[].id');
-    for (const runId of runIds) {
-      const jobs = await ghLines(`repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`, `.jobs[] | select(.name | contains("${platform}")) | select(.conclusion == "success") | .id`);
-      if (!jobs[0]) continue;
-      const artifacts = await ghLines(`repos/${repo}/actions/runs/${runId}/artifacts`, `.artifacts[] | select(.name == "${artifactName}" and .expired == false) | .id`);
-      if (artifacts[0]) return {runId, artifactId: artifacts[0]};
+    for (const branch of branches) {
+      const runIds = await ghLines(`repos/${repo}/actions/workflows/${workflow}/runs?branch=${encodeURIComponent(branch)}&status=completed&per_page=30`, '.workflow_runs[].id');
+      for (const runId of runIds) {
+        const jobs = await ghLines(`repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`, `.jobs[] | select(.name | contains("${platform}")) | select(.conclusion == "success") | .id`);
+        if (!jobs[0]) continue;
+        const artifacts = await ghLines(`repos/${repo}/actions/runs/${runId}/artifacts`, `.artifacts[] | select(.name == "${artifactName}" and .expired == false) | .id`);
+        if (artifacts[0]) return {runId, artifactId: artifacts[0], branch};
+      }
     }
     if (attempt < attempts) {
       console.log(`waiting for ${artifactName} (${attempt}/${attempts})`);
@@ -73,7 +81,7 @@ if (!(await (async () => {
 })())) process.exit(0);
 
 await fs.mkdir(path.join(root, 'fixed-toolchain'), {recursive: true});
-const {runId, artifactId} = await selectTupleArtifact();
+const {runId, artifactId, branch} = await selectTupleArtifact();
 if (!artifactId) {
   emitBlockedSummary(`no active ${artifactName} artifact from a recent successful tuple job`);
   process.exit(0);
