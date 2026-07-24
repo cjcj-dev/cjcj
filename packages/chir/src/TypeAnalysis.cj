@@ -88,10 +88,16 @@ private func GetRealGenericRetType(apply: Apply, genericType: Type,
         index++
     }
     if (let Some(def) <- calleeFunc.GetParentCustomTypeDef()) {
-        let thisType = apply.GetThisType().getOrThrow().StripAllRefs()
+        var thisType = apply.GetThisType().getOrThrow().StripAllRefs()
         if (thisType.IsClassOrStruct()) {
-            let customType = (thisType as CustomType).getOrThrow()
             let defGenericParams = def.GetGenericTypeParams()
+            var customType = (thisType as CustomType).getOrThrow()
+            if (defGenericParams.size != customType.GetGenericArgs().size) {
+                // The cjcj-only instantiated round can freeze an inherited Apply whose thisType is the subtype.
+                // C++ Utils.cpp:1410-1413 projects it to the callee's instantiated declared parent.
+                thisType = GetInstParentCustomTypeForApplyCallee(apply, builder).getOrThrow().StripAllRefs()
+                customType = (thisType as CustomType).getOrThrow()
+            }
             let genericArgs = customType.GetGenericArgs()
             CJC_ASSERT(defGenericParams.size == genericArgs.size)
             var genericIndex: Int64 = 0
