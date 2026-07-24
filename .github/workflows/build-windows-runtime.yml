@@ -72,9 +72,6 @@ jobs:
           RUNTIME_VERSION: ${{ inputs.version }}
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
 
-      - name: Verify official Windows runtime ABI
-        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
-
       - name: Upload Windows runtime
         uses: actions/upload-artifact@v7
         with:
@@ -82,3 +79,6 @@ jobs:
           path: .platform-ci/runtime-install/windows_release_x86_64
           if-no-files-found: error
           retention-days: 7
+
+      - name: Verify official Windows runtime ABI
+        run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
