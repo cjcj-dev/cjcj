@@ -203,7 +203,9 @@ for (const [name, wanted] of expect) {
   }
   const ran = await runCommand(exe, []);
   await fs.writeFile(runLog, ran.stderr);
-  const got = ran.stdout.replace(/\r?\n$/, '');
+  // Normalize CRLF before comparing: Windows println emits \r\n, and the
+  // expectations encode line structure, not the OS newline byte sequence.
+  const got = ran.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '');
   if (ran.exitCode !== 0) {
     console.log(`[smoke] run failed: exit ${ran.exitCode}`);
     await printIndented(runLog);
@@ -252,7 +254,7 @@ if (macroOk) {
 if (macroOk) {
   result = await runCommand(path.join(macroBuild, `app/app${exeSuffix}`), []);
   await fs.writeFile(path.join(work, 'macro.run.log'), result.stderr);
-  got = result.stdout.replace(/\r?\n$/, '');
+  got = result.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '');
   if (result.exitCode !== 0) {
     console.log(`[smoke] macro run failed: exit ${result.exitCode}`);
     await printIndented(path.join(work, 'macro.run.log'));
