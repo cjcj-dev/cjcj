@@ -73,7 +73,9 @@ jobs:
           export CANGJIE_STDX_PATH="$stdx_path"
           export MINGW_PATH=/mingw64
           export cjHeapSize=24GB
-          export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/mingw64/bin:$PATH"
+          # cjpm is itself a Cangjie binary: it loads libcangjie-runtime.dll (and
+          # tools/lib deps) at startup — r3 forensics: found on PATH, exec rc=127.
+          export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:$cangjie_home/runtime/lib/windows_x86_64_cjnative:$cangjie_home/tools/lib:/mingw64/bin:$PATH"
           # r2 died here with a bare 127 and no output — name the failing layer.
           ls "$cangjie_home" "$cangjie_home/tools/bin" 2>&1 | head -40 || true
           command -v cjpm || echo "cjpm NOT on PATH"
