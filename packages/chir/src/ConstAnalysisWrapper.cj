@@ -1,5 +1,6 @@
 package cjcj::chir
 
+import cjcj::utils.{TaskQueue, TaskResult}
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import std.collection.*
 
@@ -38,8 +39,14 @@ public class ConstAnalysisWrapper {
         this.builder = builder
     }
 
-    public func RunOnPackage(pkg: Package, diag: BasicDiagnosticEngine, isDebug!: Bool = false): Unit {
-        RunOnPackageInSerial(pkg, diag, isDebug: isDebug)
+    // C++ ConstAnalysisWrapper.h:36-45.
+    public func RunOnPackage(pkg: Package, diag: BasicDiagnosticEngine, threadNum: Int64,
+        isDebug!: Bool = false): Unit {
+        if (threadNum == 1) {
+            RunOnPackageInSerial(pkg, diag, isDebug: isDebug)
+        } else {
+            RunOnPackageInParallel(pkg, diag, threadNum, isDebug: isDebug)
+        }
     }
 
     public func RunOnFunc(funcValue: Function, diag: BasicDiagnosticEngine,
@@ -81,6 +88,40 @@ public class ConstAnalysisWrapper {
                 if (let Some(result) <- RunOnFunc(funcValue, diag, isDebug: isDebug)) {
                     resultsMap[funcValue] = result
                 }
+            }
+        }
+    }
+
+    // C++ ConstAnalysisWrapper.h:130-169.
+    private func RunOnPackageInParallel(pkg: Package, diag: BasicDiagnosticEngine, threadNum: Int64,
+        isDebug!: Bool = false): Unit {
+        SetUpGlobalVarState(pkg, diag, isDebug: isDebug)
+        let taskQueue = TaskQueue(threadNum)
+        let results = ArrayList<TaskResult<Option<Results<ConstDomain>>>>()
+        let resultsPool = ArrayList<TaskResult<Option<Results<ConstPoolDomain>>>>()
+        for (funcValue in pkg.GetGlobalFuncsWithBody()) {
+            let strategy = ChooseAnalysisStrategy(funcValue)
+            if (strategy == ConstAnalysisStrategy.ActiveStatePool) {
+                resultsPool.add(taskQueue.AddTask<Option<Results<ConstPoolDomain>>>({ =>
+                    RunOnFuncWithPool(funcValue, diag, isDebug: isDebug)
+                }, priority: UInt64(funcValue.GetBody().getOrThrow().GetBlocks().size)))
+            } else if (strategy == ConstAnalysisStrategy.FullStatePool) {
+                results.add(taskQueue.AddTask<Option<Results<ConstDomain>>>({ =>
+                    RunOnFunc(funcValue, diag, isDebug: isDebug)
+                }, priority: UInt64(funcValue.GetBody().getOrThrow().GetBlocks().size)))
+            }
+        }
+
+        taskQueue.RunAndWaitForAllTasksCompleted()
+
+        for (taskResult in results) {
+            if (let Some(result) <- taskResult.get()) {
+                resultsMap[result.functionValue] = result
+            }
+        }
+        for (taskResult in resultsPool) {
+            if (let Some(result) <- taskResult.get()) {
+                resultsPoolMap[result.functionValue] = result
             }
         }
     }

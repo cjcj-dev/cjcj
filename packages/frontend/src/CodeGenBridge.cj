@@ -916,7 +916,8 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
         enableCoverage: options.enableCoverage)
     DeadCodeElimination(builder).NothingTypeExprElimination(pkg, isDebug: options.chirDebugOptimizer)
     let wrapper = ConstAnalysisWrapper(builder)
-    wrapper.RunOnPackage(pkg, diag, isDebug: options.chirDebugOptimizer)
+    // C++ CHIR.cpp:475-480 ToCHIR::RunConstantAnalysis.
+    wrapper.RunOnPackage(pkg, diag, Int64(options.GetJobs()), isDebug: options.chirDebugOptimizer)
     if (!RunVarInitChecking(pkg, diag, options.GetJobs())) {
         return false
     }
