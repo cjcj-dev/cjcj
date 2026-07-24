@@ -79,7 +79,8 @@ const stdxPath = `${home}/.cjv/stdx/${toolchain}/static/stdx`;
 // The stock nightly backend materializes relocate-of-undef as a phantom GC root.
 // This static llc contains the backend fix and has no libLLVM dependency. Keep the
 // true original once, and break a possible hardlink before replacing the binary.
-const llcPlatform = `${hostOs}/${hostArch}` === 'Linux/x86_64' ? 'linux_x86_64' : '';
+const llcPlatform = hostOs === 'Linux' && ['x86_64', 'aarch64'].includes(hostArch)
+  ? `linux_${hostArch}` : '';
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
 const sdkLlc = `${cangjieHome}/third_party/llvm/bin/llc`;
 if (llcPlatform && fixedLlcGz) {
@@ -108,7 +109,7 @@ if (llcPlatform && fixedLlcGz) {
     log('SDK llc already -O2-fixed; skip');
   }
 } else if (llcPlatform && process.env.CI) {
-  log('FATAL: FIXED_LLC_GZ is required for Linux x86_64 CI');
+  log(`FATAL: FIXED_LLC_GZ is required for ${llcPlatform} CI`);
   process.exit(4);
 } else {
   log(`no source-built fixed llc artifact for ${hostOs}/${hostArch}; keeping stock llc`);
