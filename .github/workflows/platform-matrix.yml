@@ -15,8 +15,8 @@ concurrency:
 
 env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
-  RUNTIME_REPOSITORY: https://github.com/cjcj-dev/cangjie-runtime.git
-  RUNTIME_REF: ae074bd283796236a5b1962545cf5e548b8856f6
+  # RUNTIME_REF/RUNTIME_SRC_URL come from ci/runtime_pin.env via the
+  # "Load runtime pin" step — the pin lives in exactly one file.
   RUNTIME_VERSION: 1.2.0-alpha.20260721165458
   CJ_HEAP_SIZE: 12GB
 
@@ -67,6 +67,10 @@ jobs:
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v4
+
+      - name: Load runtime pin
+        shell: bash
+        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
 
       # The consolidated cangjie-runtime main already carries the GC and Darwin
       # fixes; no per-runner patch overlay is needed.
