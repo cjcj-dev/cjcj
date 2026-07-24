@@ -1,5 +1,7 @@
 #!/usr/bin/env zx
 
+import fs from 'node:fs/promises';
+
 $.stdio = 'inherit';
 
 const workspace = process.env.CANGJIE_WORKSPACE;
@@ -8,12 +10,19 @@ if (!workspace || !version) throw new Error('CANGJIE_WORKSPACE and SOURCE_SDK_VE
 
 const sdk = `${workspace}/software/cangjie`;
 await $`test -x target/release/bin/cjcj::cjc`;
-// Stage1 replaced cjc with the seed symlink. Restore upstream cjc, expose its
-// oracle copy, and install the final self-built stage2 compiler.
-await $`rm -f ${sdk}/bin/cjc`;
-await $`install -m0755 ${sdk}/bin/cjc-upstream-oracle ${sdk}/bin/cjc`;
-await $`cp ${sdk}/bin/cjc ${sdk}/bin/cjc-oracle`;
-await $`install -m0755 target/release/bin/cjcj::cjc ${sdk}/bin/cjcj`;
+// The packaged SDK contains exactly one compiler, built by the cjcj stage2 line.
+// cjc-frontend is an official C++ SDK tool; frontend_tool is currently a static
+// selfhost package, so shipping the C++ binary would mix product lines.
+const compilerNames = [
+  'cjc',
+  'cjc-frontend',
+  'cjc-upstream-oracle',
+  'cjc-oracle',
+  'cjcj-stage1',
+  'cjcj',
+];
+for (const name of compilerNames) await fs.rm(`${sdk}/bin/${name}`, {force: true});
+await $`install -m0755 target/release/bin/cjcj::cjc ${sdk}/bin/cjc`;
 
 const archive = `${workspace}/software/cangjie-sdk-linux-x64-${version}-cjcj.tar.gz`;
 await $`tar -C ${workspace}/software -czf ${archive} cangjie`;

@@ -196,7 +196,7 @@ jobs:
             ${{ env.CANGJIE_WORKSPACE }}/software/cangjie/bin/cjcj-stage1
             target/release/**/*.cjo
 
-      - name: Compose source SDK
+      - name: Compose self-hosted SDK
         env:
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
         run: npx --yes zx@8 ci/srcbuild/steps/compose-sdk.mjs
