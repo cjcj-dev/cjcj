@@ -41,9 +41,13 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.srcbuild/sccache
       SCCACHE_CACHE_SIZE: 5G
       cjHeapSize: 12GB
+      cjHeapSwap: "on"
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v4
+
+      - name: Load runtime pin
+        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
 
       - name: Checkout cangjie-build
         uses: actions/checkout@v4
@@ -108,7 +112,9 @@ jobs:
             --target linux-x64 \
             --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" \
             --cangjie-version "${{ steps.version.outputs.value }}" \
-            fetch "${args[@]}"
+            fetch "${args[@]}" \
+            --repo-url "runtime=$RUNTIME_SRC_URL" \
+            --repo-tag "runtime=$RUNTIME_REF"
 
       - name: Configure compiler LLVM
         # LLVM dev rejects seven-operand enum reflection; pin ERT_MAX=7.
@@ -119,10 +125,6 @@ jobs:
       - name: Build compiler oracle
         working-directory: cangjie-build
         run: uv run cangjie-build --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
-
-      - name: Install runtime patches
-        # These patches prevent GC starvation and the toRegion2Idx assertion.
-        run: npx --yes zx@8 ci/srcbuild/steps/apply-runtime-patches.mjs
 
       - name: Build runtime from source
         working-directory: cangjie-build
