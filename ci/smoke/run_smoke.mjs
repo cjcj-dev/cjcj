@@ -105,6 +105,22 @@ if (macroOk) {
   if (result.exitCode !== 0) {
     console.log('[smoke] macro app compile failed');
     await printIndented(path.join(work, 'macro.app.log'));
+    if (process.platform === 'win32') {
+      // Release R5: the freshly compiled macro DLL fails to dlopen with PATH
+      // fully staged — name the unresolved dependency instead of guessing.
+      const macroDll = path.join(macroBuild, 'mymacros', 'lib-macro_mymacros.dll');
+      const present = await fs.stat(macroDll).then((s) => s.size, () => -1);
+      console.log(`[smoke] macro dll size=${present}`);
+      if (present > 0) {
+        const dump = spawnSync('objdump', ['-p', macroDll], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
+        const imports = [...(dump.stdout || '').matchAll(/DLL Name: (\S+)/g)].map((m) => m[1]);
+        console.log(`[smoke] macro dll imports: ${imports.join(' ') || `(objdump status=${dump.status})`}`);
+        for (const name of imports) {
+          const found = (spawnSync('where', [name], {encoding: 'utf8'}).stdout || '').split(/\r?\n/).find(Boolean) || 'MISSING';
+          console.log(`[smoke]   ${name}: ${found}`);
+        }
+      }
+    }
     macroOk = false;
   }
 }
