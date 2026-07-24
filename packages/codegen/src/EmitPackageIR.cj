@@ -28,8 +28,6 @@ import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, StaticCast}
 private let CANGJIE_SDK_VERSION: String = CANGJIE_VERSION
 private let PKG_INIT_FUNC_METADATA: String = "pkg_init_func"
 private let HAS_INVOKED_PKG_INIT_LITERAL: String = "has_invoked_pkg_init_literal"
-private let PRESPECIALIZED_TYPEINFO_SECTION: String = "__cjcj_prespec_ti"
-private let PRESPECIALIZED_TYPEINFO_REGISTER: String = "MRT_RegisterPrespecializedTypeInfos"
 
 private type LLVMIsACallInstFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
 private type LLVMGetCalledValueFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
@@ -77,8 +75,6 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         return cgPkgContext.ReleaseLLVMModules()
     }
     let cgModules = cgPkgContext.GetCGModules()
-    let prespecializedInitializers = ArrayList<String>()
-    var mainCGModule: Option<CGModule> = None
     var emitIdx: Int64 = 0
     while (emitIdx < subPackages.size) {
         let subPackageToEmit = subPackages[emitIdx]
@@ -95,7 +91,6 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
             EmitImportedCFuncIR(cgModToEmit, chirFunc)
         }
         if (subPackageToEmit.mainModule) {
-            mainCGModule = Some(cgModToEmit)
             // Mirror C++ EmitPackageIR.cpp:359: the main-module block runs for every output type,
             // including libraries. Emitting the SDK version and the package-init-reset function is
             // required for a shared/static library to be loadable by the runtime (the runtime reads
@@ -128,14 +123,9 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         subDirNum = DumpIRIfNeeded(cgModToEmit, "GenIncremental", subDirNum)
         EmitStaticGenericTIsAndLLVMUsed(cgModToEmit)
         if (options.cjcjOptimization) {
-            if (let Some(initializerName) <- EmitPrespecializedTypeInfos(cgModToEmit)) {
-                prespecializedInitializers.add(initializerName)
-            }
+            EmitPrespecializedTypeInfos(cgModToEmit)
         }
         emitIdx++
-    }
-    if (let Some(mainModule) <- mainCGModule) {
-        EmitPrespecializedTypeInfoInitializerCalls(mainModule, prespecializedInitializers)
     }
     let localizedSymbols = cgPkgContext.GetLocalizedSymbols()
     let localizedSymbolsVec = ArrayList<String>()
@@ -1217,14 +1207,14 @@ private func EmitStaticGenericTITable(cgMod: CGModule): LLVMValueRef {
 
 // TYPEINFO_METADATA_V2.md C1 requires the cjcj-only path to reuse the existing static-GI
 // instantiation surface. Keep the ordinary static-GI emitter byte-for-byte unchanged and perform
-// this second pass only after the explicit optimization flag has been selected.
-private func EmitPrespecializedTypeInfos(cgMod: CGModule): Option<String> {
+// this second pass only after the explicit optimization flag has been selected. CFileKlass sends
+// each clone through the existing FE TypeInfo section and CJFileLoader::RegisterTypeInfoCreatedByFE.
+private func EmitPrespecializedTypeInfos(cgMod: CGModule): Unit {
     let options = cgMod.GetCGContext().GetCompileOptions()
     if (options.target.os != OSType.LINUX || options.target.arch != ArchType.X86_64) {
-        return None
+        return
     }
     let typeInfoType = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
-    let records = ArrayList<LLVMValueRef>()
     let emittedNames = HashSet<String>()
     let orderedStaticGINames = ArrayList<String>()
     for (typeInfoName in cgMod.GetCGContext().GetStaticGINames()) {
@@ -1235,7 +1225,7 @@ private func EmitPrespecializedTypeInfos(cgMod: CGModule): Option<String> {
         let staticGI = GetOrInsertCodeGenGlobal(cgMod, typeInfoName, typeInfoType)
         if (ShouldEmitStaticGI(staticGI)) {
             CJC_ASSERT(unsafe { LLVMIsDeclaration(staticGI) } == 0)
-            records.add(EmitPrespecializedTypeInfoRecord(cgMod, typeInfoName, staticGI))
+            EmitPrespecializedTypeInfoRecord(cgMod, typeInfoName, staticGI)
             emittedNames.add(typeInfoName)
         }
     }
@@ -1250,30 +1240,28 @@ private func EmitPrespecializedTypeInfos(cgMod: CGModule): Option<String> {
             }
             if (!staticGI.isNull()) {
                 CJC_ASSERT(unsafe { LLVMIsDeclaration(staticGI) } == 0)
-                records.add(EmitPrespecializedTypeInfoRecord(cgMod, reflectStaticGIName, staticGI))
+                EmitPrespecializedTypeInfoRecord(cgMod, reflectStaticGIName, staticGI)
                 emittedNames.add(reflectStaticGIName)
             }
         }
     }
-    return EmitPrespecializedTypeInfoRegistration(cgMod, records)
 }
 
 // TYPEINFO_METADATA_V2.md C1 authorizes this cjcj-only optimization: the existing STATIC_GI
-// TypeInfo initializer is already the DYN_TypeInfo binary mirror. Keep the runtime's existing
-// static-GI record in its metadata section and clone that initializer into the prespecialization
-// section: the static-GI table uses local relative aliases that cannot target a discarded COMDAT.
+// TypeInfo initializer is already the DYN_TypeInfo binary mirror. Clone it as a separately keyed
+// COMDAT so the existing static-GI table keeps its local-relative target while CFileKlass places the
+// clone in the ordinary FE TypeInfo registration section.
 private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: String,
-    typeInfo: LLVMValueRef): LLVMValueRef {
+    typeInfo: LLVMValueRef): Unit {
     let options = cgMod.GetCGContext().GetCompileOptions()
     if (!options.cjcjOptimization || options.target.os != OSType.LINUX ||
         options.target.arch != ArchType.X86_64) {
-        return LLVMNullValue()
+        return
     }
-    let moduleHandle = if (let Some(handle) <- cgMod.GetLLVMModule()) { handle } else { return LLVMNullValue() }
+    let moduleHandle = if (let Some(handle) <- cgMod.GetLLVMModule()) { handle } else { return }
     let prespecializedName = typeInfoName + ".cjcj.prespec"
     var record = LLVMNullValue()
-    try (recordName = unsafe { LibC.mallocCString(prespecializedName) }.asResource(),
-        sectionName = unsafe { LibC.mallocCString(PRESPECIALIZED_TYPEINFO_SECTION) }.asResource()) {
+    try (recordName = unsafe { LibC.mallocCString(prespecializedName) }.asResource()) {
         unsafe {
             record = LLVMGetNamedGlobal(moduleHandle.raw, recordName.value)
             if (record.isNull()) {
@@ -1284,6 +1272,7 @@ private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: Str
             LLVMSetGlobalConstant(record, 0)
             addAttribute(record, GC_KLASS_ATTR)
         }
+        CJC_ASSERT(unsafe { LLVMGetInitializer(record) } == unsafe { LLVMGetInitializer(typeInfo) })
         try (metadataCount = LibC.malloc<UIntNative>().asResource()) {
             unsafe { metadataCount.value.write(UIntNative(0)) }
             let entries = unsafe { LLVMGlobalCopyAllMetadata(typeInfo, metadataCount.value) }
@@ -1301,113 +1290,7 @@ private func EmitPrespecializedTypeInfoRecord(cgMod: CGModule, typeInfoName: Str
             }
         }
         unsafe {
-            LLVMSetSection(record, sectionName.value)
             LLVMSetComdat(record, LLVMGetOrInsertComdat(moduleHandle.raw, recordName.value))
-        }
-    }
-    return record
-}
-
-// TYPEINFO_METADATA_V2.md R1.4 PrespecializedTypeInfoDesc is
-// {TypeTemplate*, U32, TypeInfo**, TypeInfo*}; emit one TU-local array and a weak-runtime initializer.
-private func EmitPrespecializedTypeInfoRegistration(cgMod: CGModule,
-    records: ArrayList<LLVMValueRef>): Option<String> {
-    if (records.isEmpty()) {
-        return None
-    }
-    let moduleHandle = if (let Some(handle) <- cgMod.GetLLVMModule()) { handle } else { return None }
-    let context = cgMod.GetLLVMContext()
-    let i32Type = unsafe { LLVMInt32TypeInContext(context.raw) }
-    let typeTemplateType = GetOrCreateNamedStructType(context, "TypeTemplate")
-    let typeTemplatePtrType = unsafe { LLVMPointerType(typeTemplateType, 0u32) }
-    let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(context)
-    let typeInfoPtrPtrType = unsafe { LLVMPointerType(typeInfoPtrType, 0u32) }
-    let descriptorType = GetOrCreateNamedStructType(context, "struct.PrespecializedTypeInfoDesc")
-    SetStructTypeBody(descriptorType,
-        ArrayList<LLVMTypeRef>([typeTemplatePtrType, i32Type, typeInfoPtrPtrType, typeInfoPtrType]))
-    let descriptorValues = ArrayList<LLVMValueRef>()
-    for (record in records) {
-        let initializer = unsafe { LLVMGetInitializer(record) }
-        let fields = ArrayList<LLVMValueRef>()
-        fields.add(unsafe { LLVMConstBitCast(LLVMGetOperand(initializer, 11u32), typeTemplatePtrType) })
-        fields.add(unsafe { LLVMConstInt(i32Type,
-            LLVMConstIntGetZExtValue(LLVMGetOperand(initializer, 8u32)), 0) })
-        fields.add(unsafe { LLVMConstBitCast(LLVMGetOperand(initializer, 12u32), typeInfoPtrPtrType) })
-        fields.add(record)
-        try (fieldPtr = LibC.malloc<LLVMValueRef>(count: fields.size).asResource()) {
-            var fieldIdx: Int64 = 0
-            while (fieldIdx < fields.size) {
-                unsafe { (fieldPtr.value + fieldIdx).write(fields[fieldIdx]) }
-                fieldIdx++
-            }
-            descriptorValues.add(unsafe {
-                LLVMConstNamedStruct(descriptorType, fieldPtr.value, UInt32(fields.size))
-            })
-        }
-    }
-    let descriptorArrayType = unsafe { LLVMArrayType(descriptorType, UInt32(descriptorValues.size)) }
-    let subPackageIdx = cgMod.GetCGContext().GetSubCHIRPackage().subCHIRPackageIdx
-    let descriptorName = "__cjcj_prespec_desc.${subPackageIdx}"
-    let descriptorArray = GetOrInsertCodeGenGlobal(cgMod, descriptorName, descriptorArrayType)
-    unsafe {
-        LLVMSetInitializer(descriptorArray, ConstLLVMArray(descriptorType, descriptorValues))
-        LLVMSetLinkage(descriptorArray, LLVMLinkageValue(LLVMLinkage.Private))
-        LLVMSetGlobalConstant(descriptorArray, 1)
-    }
-
-    let descriptorPtrType = unsafe { LLVMPointerType(descriptorType, 0u32) }
-    let voidType = unsafe { LLVMVoidTypeInContext(context.raw) }
-    let registerType = BuildLLVMFunctionType(voidType,
-        ArrayList<LLVMTypeRef>([descriptorPtrType, i32Type]))
-    let registerFunction = GetOrInsertLLVMFunction(moduleHandle, PRESPECIALIZED_TYPEINFO_REGISTER, registerType)
-    unsafe { LLVMSetLinkage(registerFunction, LLVMLinkageValue(LLVMLinkage.ExternalWeak)) }
-
-    let initializerName = "__cjcj_prespec_init.${cgMod.GetCGContext().GetCurrentPkgName()}.${subPackageIdx}"
-    let initializerType = BuildLLVMFunctionType(voidType, ArrayList<LLVMTypeRef>())
-    let initializer = GetOrInsertLLVMFunction(moduleHandle, initializerName, initializerType)
-    unsafe { LLVMSetLinkage(initializer, LLVMLinkageValue(LLVMLinkage.External)) }
-    AddFnAttr(initializer, "noinline")
-    try (irBuilder = IRBuilder2(cgMod)) {
-        let entry = irBuilder.CreateEntryBasicBlock(initializer, "entry")
-        irBuilder.SetInsertPoint(entry)
-        let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>(["register", "skip"]))
-        let available = irBuilder.CreateICmp(LLVMIntPredicate.NE, registerFunction,
-            unsafe { LLVMConstNull(LLVMTypeOf(registerFunction)) })
-        irBuilder.CreateCondBr(available, blocks[0], blocks[1])
-        irBuilder.SetInsertPoint(blocks[0])
-        let args = ArrayList<LLVMValueRef>()
-        args.add(unsafe { LLVMConstBitCast(descriptorArray, descriptorPtrType) })
-        args.add(unsafe { LLVMConstInt(i32Type, UInt64(descriptorValues.size), 0) })
-        let _ = irBuilder.CreateCallOrInvoke(registerFunction, registerType, args)
-        irBuilder.CreateBr(blocks[1])
-        irBuilder.SetInsertPoint(blocks[1])
-        irBuilder.CreateRetVoid()
-    }
-    return Some(initializerName)
-}
-
-// Attach every TU initializer to the existing once-only package-init continuation (bb2).
-private func EmitPrespecializedTypeInfoInitializerCalls(cgMod: CGModule,
-    initializerNames: ArrayList<String>): Unit {
-    if (initializerNames.isEmpty()) {
-        return
-    }
-    let moduleHandle = if (let Some(handle) <- cgMod.GetLLVMModule()) { handle } else { return }
-    let chirInit = cgMod.GetCGContext().GetCHIRPackage().GetPackageInitFunc().getOrThrow()
-    let packageInit = GetNamedFunction(moduleHandle, chirInit.GetIdentifierWithoutPrefix())
-    let entry = unsafe { LLVMGetEntryBasicBlock(packageInit) }
-    let entryTerminator = unsafe { LLVMGetBasicBlockTerminator(entry) }
-    CJC_ASSERT(!entryTerminator.isNull())
-    let onceContinuation = unsafe { LLVMGetSuccessor(entryTerminator, 1u32) }
-    let continuationTerminator = unsafe { LLVMGetBasicBlockTerminator(onceContinuation) }
-    CJC_ASSERT(!continuationTerminator.isNull())
-    let voidType = unsafe { LLVMVoidTypeInContext(cgMod.GetLLVMContext().raw) }
-    let initializerType = BuildLLVMFunctionType(voidType, ArrayList<LLVMTypeRef>())
-    try (irBuilder = IRBuilder2(cgMod)) {
-        irBuilder.SetInsertPointBefore(continuationTerminator)
-        for (initializerName in initializerNames) {
-            let initializer = GetOrInsertLLVMFunction(moduleHandle, initializerName, initializerType)
-            let _ = irBuilder.CreateCallOrInvoke(initializer, initializerType, ArrayList<LLVMValueRef>())
         }
     }
 }
