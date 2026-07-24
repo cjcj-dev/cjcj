@@ -13,9 +13,8 @@ await $`sed -i 's/compile-option = "-O2"/compile-option = "-O1"/' cjpm.toml`;
 // generic concrete-to-interface upcast loss in the upstream CHIR optimizer.
 await $`cjpm build`;
 
-// Put the seed under the SDK so <exe>/../runtime resolves. Preserve upstream cjc
-// as the difftest oracle before replacing it.
-await $`cp ${sdk}/bin/cjc ${sdk}/bin/cjc-upstream-oracle`;
+// Put the seed under the SDK so <exe>/../runtime resolves. The C++ oracle stays
+// in cangjie_compiler/output/bin and is never copied into the SDK tree.
 // The mapped seed must not be named cjc: the Linux runtime reserves that basename
 // for native C++ cjc and otherwise excludes managed frames from GC root scanning.
 await $`install -m0755 target/release/bin/cjcj::cjc ${sdk}/bin/cjcj-stage1`;
