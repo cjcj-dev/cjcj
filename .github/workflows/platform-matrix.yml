@@ -83,18 +83,17 @@ jobs:
           fetch-depth: 1
           path: runtime-source
 
-      - name: Prepare MSYS2/CLANG64 runtime toolchain
+      - name: Prepare MSYS2/MINGW64 runtime toolchain
         if: always() && runner.os == 'Windows'
-        # CLANG64: pure LLVM toolchain (clang + libc++ + compiler-rt bundled).
-        # MINGW64's clang parses GCC-16 libstdc++ headers and miscompiles
-        # std::hash<std::string> (implicitly-deleted); the runtime's reference
-        # Windows toolchain is a much older GCC header set.
+        # The packaged SDK's prebuilt std DLLs use the MINGW64/MSVCRT runtime
+        # ABI. Keep clang as the compiler, but select that same CRT family so
+        # the fork runtime preserves the official DLL's exported CRT surface.
         uses: msys2/setup-msys2@v2
         with:
-          msystem: CLANG64
+          msystem: MINGW64
           # release:false = provision the runner's preinstalled C:\msys64 instead of a
           # fresh RUNNER_TEMP\msys64 — build_runtime.mjs invokes C:\msys64\usr\bin\bash.exe,
-          # so the CLANG64 packages must land in that installation (round-8 root: the two
+          # so the MINGW64 packages must land in that installation (round-8 root: the two
           # msys2 trees diverged and /clang64/bin was empty at build time).
           release: false
           update: true
@@ -113,7 +112,7 @@ jobs:
         if: always() && runner.os != 'Windows'
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
 
-      - name: Runtime build (Windows target via MSYS2/CLANG64)
+      - name: Runtime build (Windows target via MSYS2/MINGW64)
         if: always() && runner.os == 'Windows'
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
 
