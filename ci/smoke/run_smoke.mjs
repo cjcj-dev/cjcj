@@ -2,6 +2,7 @@
 // Smoke driver: compile and run each deployed self-host compiler sample, preserving the legacy transcript and exit status.
 
 import fs from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -92,6 +93,20 @@ function resolveWindowsDll(name) {
   return (result.stdout || '').split(/\r?\n/).find(Boolean) || '';
 }
 
+function resolveOfficialWindowsDll(name) {
+  const root = process.env.CJCJ_OFFICIAL_SDK_HOME;
+  if (!root) return '';
+  for (const directory of [
+    path.join(root, 'runtime', 'lib', 'windows_x86_64_cjnative'),
+    path.join(root, 'tools', 'lib'),
+    path.join(root, 'bin'),
+  ]) {
+    const candidate = path.join(directory, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return '';
+}
+
 function isWindowsSystemDll(file) {
   const windowsRoot = (process.env.SystemRoot || 'C:\\Windows').toLowerCase();
   return path.resolve(file).toLowerCase().startsWith(`${windowsRoot}\\`);
@@ -155,6 +170,12 @@ async function diagnoseWindowsMacroLoad(macroDll) {
         const missing = symbols.filter((symbol) => !provider.exports.has(symbol));
         if (missing.length > 0) {
           console.log(`[smoke] closure missing-export consumer=${path.basename(file)} provider=${resolved} symbols=${missing.join(',')}`);
+          const official = resolveOfficialWindowsDll(name);
+          if (official) {
+            const officialExports = inspectPe(official).exports;
+            const restoredByOfficial = missing.filter((symbol) => officialExports.has(symbol));
+            console.log(`[smoke] closure official-export-diff provider=${official} restored=${restoredByOfficial.join(',') || 'NONE'}`);
+          }
           if (!firstMissingExport) firstMissingExport = `${path.basename(file)} -> ${name}!${missing[0]}`;
         }
       }
