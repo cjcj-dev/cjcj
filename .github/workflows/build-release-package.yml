@@ -33,7 +33,7 @@ permissions:
 
 env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
-  CJ_HEAP_SIZE: 12GB
+  CJ_HEAP_SIZE: ${{ inputs.platform == 'darwin-arm64' && '6GB' || '12GB' }}
 
 jobs:
   package:
