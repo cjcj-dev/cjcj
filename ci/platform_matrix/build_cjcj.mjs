@@ -9,6 +9,7 @@ import zlib from 'node:zlib';
 import {spawnSync} from 'node:child_process';
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
+import {pickWindowsCC} from './pick_cc.mjs';
 
 const {root} = stageBegin('cjcj');
 const toolchain = process.env.CJCJ_TOOLCHAIN || 'nightly-1.2.0-alpha.20260721165458';
@@ -112,7 +113,7 @@ if (process.platform === 'win32') {
   // on one volume (RUNNER_TEMP is D:, the SDK lives on C: — rename = EXDEV).
   const wrapper = path.join(llvmBin, 'ld.lld-wrap.exe');
   const wrapperSource = path.join(import.meta.dirname, 'lldwrap.c');
-  const gcc = 'C:\\msys64\\mingw64\\bin\\gcc.exe';
+  const gcc = await pickWindowsCC();
   if (!(await isFile(realLd)) && !(await isFile(sdkLd))) throw new Error(`SDK ld.lld missing: ${sdkLd}`);
   if (!(await isFile(wrapperSource))) throw new Error(`ld.lld wrapper source missing: ${wrapperSource}`);
   await $`${toCommandPath(gcc)} -std=c11 -O2 -Wall -Wextra ${toCommandPath(wrapperSource)} -o ${toCommandPath(wrapper)}`;

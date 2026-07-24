@@ -5,12 +5,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import {pickWindowsCC} from './pick_cc.mjs';
+
 const root = path.resolve(import.meta.dirname, '..', '..');
 const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'lldwrap-test-'));
 const windows = process.platform === 'win32';
 const wrapper = path.join(temp, windows ? 'ld.lld.exe' : 'ld.lld');
 const real = path.join(temp, windows ? 'ld.lld-real.exe' : 'ld.lld-real');
-const compiler = process.env.CC || (windows ? 'C:\\msys64\\mingw64\\bin\\gcc.exe' : 'cc');
+const compiler = windows ? await pickWindowsCC() : (process.env.CC || 'cc');
 const fakeSource = path.join(temp, 'fake_lld.c');
 const capture = path.join(temp, 'args.txt');
 
