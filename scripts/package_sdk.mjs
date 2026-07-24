@@ -151,7 +151,10 @@ console.log('[5/6] archive');
 const archivePath = path.join(outdir, `${packageName}.${archiveType === 'tar' ? 'tar.gz' : 'zip'}`);
 if (archiveType === 'tar') await $({stdio: 'inherit'})`tar -C ${outdir} -czf ${archivePath} ${packageName}`;
 else {
-  const psQuote = value => `'${path.resolve(value).replaceAll("'", "''")}'`;
+  // Forward slashes: zx quotes argv for bash as $'…', where a backslash before
+  // some letters is an ANSI-C escape — \c in "…\cjcj-…" swallowed the rest of
+  // the path on release R4. PowerShell accepts forward-slash paths.
+  const psQuote = value => `'${path.resolve(value).replaceAll('\\', '/').replaceAll("'", "''")}'`;
   const command = `Compress-Archive -LiteralPath ${psQuote(stage)} -DestinationPath ${psQuote(archivePath)} -Force`;
   await $({stdio: 'inherit'})`pwsh -NoLogo -NoProfile -Command ${command}`;
 }
