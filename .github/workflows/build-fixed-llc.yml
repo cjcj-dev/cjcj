@@ -34,6 +34,10 @@ jobs:
             platform: linux_x86_64
             llvm-targets: X86
             portability-tag: glibc2.35
+          - runner: ubuntu-24.04-arm
+            platform: linux_aarch64
+            llvm-targets: AArch64
+            portability-tag: glibc2.39
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout cjcj
