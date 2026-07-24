@@ -193,15 +193,20 @@ if (process.platform === 'win32') {
   // Windows build omits an export the product imports — diff the two DLLs' export
   // tables so the missing symbol is named, not guessed.
   const helloExe = path.join(root, `01_hello${exeSuffix}`);
+  // Import entries are "<vma> [<ordinal>] <hint> <name>" lines inside the DLL's
+  // block; export names are the last field of "[<n>] +base[<m>] <hint> <name>"
+  // lines in the [Ordinal/Name Pointer] Table.
   const dumpImports = (file, dll) => {
     const out = spawnSync('objdump', ['-p', file], {encoding: 'utf8', maxBuffer: 256 * 1024 * 1024}).stdout || '';
     const block = out.split(/DLL Name: /).find((s) => s.toLowerCase().startsWith(dll.toLowerCase()));
-    return block ? [...block.matchAll(/\b([A-Za-z_][A-Za-z0-9_]+)\b/g)].map((m) => m[1]) : [];
+    if (!block) return [];
+    return block.split('\n\n')[0].split('\n')
+      .map((line) => /^\s*[0-9a-fA-F]+\s+(?:<none>\s+|\d+\s+)?[0-9a-fA-F]+\s+(\S+)\s*$/.exec(line))
+      .filter(Boolean).map((m) => m[1]);
   };
   const dumpExports = (dll) => {
     const out = spawnSync('objdump', ['-p', dll], {encoding: 'utf8', maxBuffer: 256 * 1024 * 1024}).stdout || '';
-    const tail = out.slice(out.indexOf('Export Address Table'));
-    return new Set([...tail.matchAll(/\]\s+([A-Za-z_][A-Za-z0-9_]+)/g)].map((m) => m[1]));
+    return new Set([...out.matchAll(/^\s*\[\s*\d+\]\s+\+base\[\s*\d+\]\s+[0-9a-fA-F]+\s+(\S+)\s*$/gm)].map((m) => m[1]));
   };
   const forkDll = runtimeLib;
   const sdkDll = path.join(process.env.CANGJIE_HOME || '', 'runtime', 'lib', 'windows_x86_64_cjnative', 'libcangjie-runtime.dll');
