@@ -69,7 +69,7 @@ if (inspected.status !== 0) {
 
 const dump = inspected.stdout || '';
 const exportTable = dump.match(
-  /\[Ordinal\/Name Pointer\] Table\s*\r?\n([\s\S]*?)(?:\r?\n\s*\r?\n|$)/i,
+  /\[Ordinal\/Name Pointer\] Table[^\r\n]*\r?\n([\s\S]*?)(?:\r?\n\s*\r?\n|$)/i,
 )?.[1] || '';
 const exports = new Set(
   [...exportTable.matchAll(
