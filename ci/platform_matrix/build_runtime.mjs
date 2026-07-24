@@ -10,10 +10,16 @@ import {pickWindowsCC} from './pick_cc.mjs';
 const {root} = stageBegin('runtime');
 const source = process.env.RUNTIME_SOURCE || path.join(process.cwd(), 'runtime-source');
 const version = process.env.RUNTIME_VERSION || '1.2.0-alpha.20260721165458';
+const runtimeTarget = process.env.RUNTIME_TARGET || 'native';
+const runtimeToolchain = process.env.RUNTIME_TOOLCHAIN || '';
 const installRoot = path.join(root, 'runtime-install');
 
+if (runtimeToolchain) {
+  process.env.PATH = `${path.join(runtimeToolchain, 'bin')}${path.delimiter}${process.env.PATH || ''}`;
+}
+
 await printCommonVersions();
-console.log(`runtime_source=${source}\nruntime_ref=${process.env.RUNTIME_REF || 'unknown'}`);
+console.log(`runtime_source=${source}\nruntime_ref=${process.env.RUNTIME_REF || 'unknown'}\nruntime_target=${runtimeTarget}`);
 const buildPy = path.join(source, 'runtime', 'build.py');
 try { await fs.access(buildPy); } catch {
   console.error(`FATAL: pinned runtime checkout missing: ${buildPy}`);
@@ -33,9 +39,26 @@ const preinstall = path.join(process.env.RUNNER_TEMP || path.join(root, 'runtime
 if (process.platform === 'linux') {
   await $`sudo apt-get update -qq`;
   await $`sudo apt-get install -y -qq clang cmake make`;
-  await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type release --prefix ${preinstall} -v ${version}`;
-  await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${installRoot}`;
+  if (runtimeTarget === 'windows-x86_64') {
+    if (!runtimeToolchain) {
+      console.error('FATAL: RUNTIME_TOOLCHAIN is required for the Windows cross target');
+      process.exit(4);
+    }
+    const configuredInstallRoot = path.join(installRoot, 'windows_release_x86_64');
+    await $({cwd: runtimeDirectory})`python3 build.py build --target ${runtimeTarget} --build-type release --target-toolchain ${runtimeToolchain} --prefix ${preinstall} -v ${version}`;
+    await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${configuredInstallRoot}`;
+  } else if (runtimeTarget === 'native') {
+    await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type release --prefix ${preinstall} -v ${version}`;
+    await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${installRoot}`;
+  } else {
+    console.error(`FATAL: unsupported Linux runtime target: ${runtimeTarget}`);
+    process.exit(5);
+  }
 } else if (process.platform === 'darwin') {
+  if (runtimeTarget !== 'native') {
+    console.error(`FATAL: unsupported Darwin runtime target: ${runtimeTarget}`);
+    process.exit(5);
+  }
   await $({nothrow: true})`xcodebuild -version`;
   await $({nothrow: true})`xcrun --sdk macosx --show-sdk-version`;
   await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type release --prefix ${preinstall} -v ${version}`;
@@ -48,7 +71,6 @@ if (process.platform === 'linux') {
   }
   const msysBash = process.env.MSYS2_BASH || 'C:\\msys64\\usr\\bin\\bash.exe';
   const shellQuote = (value) => "'" + value.replace(/'/g, "'\\''") + "'";
-  const runtimeTarget = 'windows-x86_64';
   const buildType = 'release';
   const targetSeparator = runtimeTarget.lastIndexOf('-');
   const targetPlatform = runtimeTarget.slice(0, targetSeparator);
