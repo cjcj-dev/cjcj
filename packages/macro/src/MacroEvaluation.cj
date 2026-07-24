@@ -1330,6 +1330,9 @@ public class MacroEvaluation {
             }
             SetOpenedLibHandles(handle)
         }
+        if (let Some(message) <- EnsureMacroHostDispatchRegistered()) {
+            ci.GetDiag().Diagnose(DEFAULT_POSITION, message)
+        }
     }
 }
 

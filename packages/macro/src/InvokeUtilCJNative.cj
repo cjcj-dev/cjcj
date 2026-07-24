@@ -28,6 +28,13 @@ extend MacroCall {
             }
             return false
         }
+        if (let Some(message) <- EnsureMacroHostDispatchRegistered()) {
+            status = MacroEvalStatus.FAIL
+            if (let Some(instance) <- ci) {
+                instance.GetDiag().Diagnose(DEFAULT_POSITION, message)
+            }
+            return false
+        }
         let method = GetMethodPointer(handle, methodName)
         SetOpenedLibHandles(handle)
         if (!method.isNull()) {

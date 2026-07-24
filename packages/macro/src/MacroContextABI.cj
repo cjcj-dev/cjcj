@@ -533,3 +533,107 @@ public func CJ_AST_DiagReport(fptr: CPointer<Unit>, level: CPointer<Int32>, toke
     macCall.DiagReport(Int64(unsafe { level.read() }), range, message.toString(), hint.toString())
     return 0u8
 }
+
+// ===== Windows host-dispatch registration =====
+// On ELF hosts the CJ_* adapters above override the C++ implementations inside
+// libcangjie-std-ast through global symbol interposition, so std.ast code
+// running in a macro library reaches the registry-handle adapters
+// automatically. PE binds those calls inside libcangjie-std-ast.dll at static
+// link time, so the library instead exports CJ_MacroCall_RegisterHostCallbacks
+// and consults the registered table before touching the context handle; the
+// host must register the same adapters before evaluating any macro.
+// Field order and layout mirror CJMacroHostCallbacks in
+// stdlib/libs/std/ast/native/ast_api.cpp; structSize rejects layout skew.
+@When[os == "Windows"]
+@C
+struct CJMacroHostCallbacks {
+    let structSize: UInt64
+    let astLex: CFunc<(CPointer<Unit>, CString, Int64) -> CPointer<ParseRes>>
+    let astParseExpr: CFunc<(CPointer<Unit>, CPointer<UInt8>, CPointer<Int64>) -> CPointer<ParseRes>>
+    let astParsePattern: CFunc<(CPointer<Unit>, CPointer<UInt8>, CPointer<Int64>) -> CPointer<ParseRes>>
+    let astParseType: CFunc<(CPointer<Unit>, CPointer<UInt8>, CPointer<Int64>) -> CPointer<ParseRes>>
+    let astParseDecl: CFunc<(CPointer<Unit>, CPointer<UInt8>, CPointer<Int64>) -> CPointer<ParseRes>>
+    let astParsePropMemberDecl: CFunc<(CPointer<Unit>, CPointer<UInt8>) -> CPointer<ParseRes>>
+    let astParsePrimaryConstructor: CFunc<(CPointer<Unit>, CPointer<UInt8>) -> CPointer<ParseRes>>
+    let astParseTopLevel: CFunc<(CPointer<Unit>, CPointer<UInt8>) -> CPointer<ParseRes>>
+    let checkParentContext: CFunc<(CPointer<Unit>, CString, Bool) -> Bool>
+    let setItemInfo: CFunc<(CPointer<Unit>, CString, CPointer<Unit>, UInt8) -> Unit>
+    let getChildMessages: CFunc<(CPointer<Unit>, CString) -> CPointer<CPointer<CPointer<Unit>>>>
+    let getMacroPosition: CFunc<(CPointer<Unit>, CPointer<UInt32>, CPointer<Int32>, CPointer<Int32>) -> Unit>
+    let astDiagReport: CFunc<(CPointer<Unit>, CPointer<Int32>, CPointer<UInt8>, CString, CString) -> UInt8>
+
+    init() {
+        structSize = UInt64(sizeOf<CJMacroHostCallbacks>())
+        astLex = CJ_AST_Lex
+        astParseExpr = CJ_AST_ParseExpr
+        astParsePattern = CJ_AST_ParsePattern
+        astParseType = CJ_AST_ParseType
+        astParseDecl = CJ_AST_ParseDecl
+        astParsePropMemberDecl = CJ_AST_ParsePropMemberDecl
+        astParsePrimaryConstructor = CJ_AST_ParsePrimaryConstructor
+        astParseTopLevel = CJ_AST_ParseTopLevel
+        checkParentContext = CJ_CheckParentContext
+        setItemInfo = CJ_SetItemInfo
+        getChildMessages = CJ_GetChildMessages
+        getMacroPosition = CJ_GetMacroPosition
+        astDiagReport = CJ_AST_DiagReport
+    }
+}
+
+@When[os == "Windows"]
+private let STD_AST_LIBRARY_NAME = "libcangjie-std-ast.dll"
+
+@When[os == "Windows"]
+private let macroHostDispatchLock = Mutex()
+@When[os == "Windows"]
+private var macroHostDispatchDone = false
+@When[os == "Windows"]
+private var macroHostDispatchError: Option<String> = None
+
+@When[os == "Windows"]
+private func TryRegisterMacroHostDispatch(): Option<String> {
+    let handle = OpenSymbolTable(STD_AST_LIBRARY_NAME)
+    if (!handle.opened) {
+        return Some("cannot load '" + STD_AST_LIBRARY_NAME + "' for macro host dispatch registration")
+    }
+    let symbol = GetMethodPointer(handle, "CJ_MacroCall_RegisterHostCallbacks")
+    if (symbol.isNull()) {
+        return Some("'" + STD_AST_LIBRARY_NAME + "' does not export CJ_MacroCall_RegisterHostCallbacks; " +
+            "macro evaluation on Windows requires the host-dispatch enabled std.ast library shipped with this compiler")
+    }
+    let register = CFunc<(CPointer<CJMacroHostCallbacks>) -> Bool>(symbol)
+    let table = unsafe { LibC.malloc<CJMacroHostCallbacks>() }
+    if (table.isNull()) {
+        return Some("macro host dispatch table allocation failed")
+    }
+    unsafe { table.write(CJMacroHostCallbacks()) }
+    // The table stays registered inside libcangjie-std-ast for the process
+    // lifetime, so it is never freed on success.
+    let accepted = unsafe { register(table) }
+    if (!accepted) {
+        unsafe { LibC.free(table) }
+        return Some("CJ_MacroCall_RegisterHostCallbacks rejected the host table " +
+            "(layout mismatch between the compiler and '" + STD_AST_LIBRARY_NAME + "')")
+    }
+    return None
+}
+
+// Returns None once the host table is registered; otherwise the diagnostic
+// text. Failing closed here keeps the C++ implementations inside
+// libcangjie-std-ast from ever reinterpreting the selfhost registry handle as
+// a MacroCall pointer.
+@When[os == "Windows"]
+func EnsureMacroHostDispatchRegistered(): Option<String> {
+    return synchronized(macroHostDispatchLock) {
+        if (!macroHostDispatchDone) {
+            macroHostDispatchError = TryRegisterMacroHostDispatch()
+            macroHostDispatchDone = true
+        }
+        macroHostDispatchError
+    }
+}
+
+@When[os != "Windows"]
+func EnsureMacroHostDispatchRegistered(): Option<String> {
+    return None
+}

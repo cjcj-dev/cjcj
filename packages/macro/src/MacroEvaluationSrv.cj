@@ -207,6 +207,14 @@ extend MacroEvaluation {
             }
             SetOpenedLibHandles(handle)
         }
+        if (let Some(message) <- EnsureMacroHostDispatchRegistered()) {
+            let res = ArrayList<UInt8>()
+            for (byte in ("RespondFindDef " + message).toArray()) {
+                res.add(byte)
+            }
+            let _ = MacroProcMsger.GetInstance().SendMsgToClient(res)
+            return false
+        }
         let ok = ArrayList<UInt8>()
         for (byte in "RespondFindDef ".toArray()) {
             ok.add(byte)
