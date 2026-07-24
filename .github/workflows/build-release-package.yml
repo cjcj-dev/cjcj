@@ -237,6 +237,7 @@ jobs:
           pkg="cjcj-${{ inputs.version }}-${{ inputs.platform }}"
           mkdir -p pkgtest
           tar -C pkgtest -xzf "dist/${pkg}.tar.gz"
+          # shellcheck disable=SC1090
           source "$PWD/pkgtest/${pkg}/envsetup.sh"
           export cjHeapSize=12GB
           work="$RUNNER_TEMP/release-smoke"
