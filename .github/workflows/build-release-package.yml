@@ -259,6 +259,7 @@ jobs:
           try {
             Expand-Archive -LiteralPath "dist\$pkg.zip" -DestinationPath $extract -Force
             $root = Join-Path $extract $pkg
+            $env:CJCJ_OFFICIAL_SDK_HOME = $env:CANGJIE_HOME
             $env:CANGJIE_HOME = $root
             $env:cjHeapSize = '12GB'
             $env:PATH = "$root\bin;$root\runtime\lib\windows_x86_64_cjnative;$root\tools\lib;$env:PATH"
