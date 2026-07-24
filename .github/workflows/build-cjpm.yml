@@ -80,11 +80,14 @@ jobs:
           ls "$cangjie_home" "$cangjie_home/tools/bin" 2>&1 | head -40 || true
           command -v cjpm || echo "cjpm NOT on PATH"
           cjpm --version || echo "cjpm --version rc=$?"
-          # r5: the msys2-built libuv/fswatcher want the msys2 libc++ (>=18,
-          # __hash_memory) but the SDK's bundled older libc++.a wins the -L
-          # order. Swap the SDK copies for the msys2 set — build-local only,
-          # nothing here ships.
-          for lib in libc++.a libc++abi.a libc++experimental.a libunwind.a; do
+          # r5/r6: the msys2-built libuv/fswatcher and msys2 libc++ expect the
+          # msys2 CRT generation (__hash_memory, __imp_btowc, __sys_nerr…) but
+          # the SDK's older bundled mingw layer wins the -L order. Swap the
+          # whole C/C++ runtime layer to the single msys2 generation —
+          # build-local only, nothing here ships.
+          for lib in libc++.a libc++abi.a libc++experimental.a libunwind.a \
+                     libmsvcrt.a libmingwex.a libmingw32.a libmoldname.a libpthread.a libm.a \
+                     crt2.o crtbegin.o crtend.o CRT_glob.o; do
             for sdkcopy in $(find "$cangjie_home/third_party" -name "$lib" 2>/dev/null); do
               test -f "/mingw64/lib/$lib" || continue
               cp -v "/mingw64/lib/$lib" "$sdkcopy"
