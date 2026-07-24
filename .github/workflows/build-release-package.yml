@@ -76,6 +76,8 @@ jobs:
             mingw-w64-x86_64-clang
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-libc++
+            mingw-w64-x86_64-libunwind
             mingw-w64-x86_64-ninja
 
       - name: Build pinned runtime (Windows)
