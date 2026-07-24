@@ -68,8 +68,13 @@ if (inspected.status !== 0) {
 }
 
 const dump = inspected.stdout || '';
+const exportTable = dump.match(
+  /\[Ordinal\/Name Pointer\] Table\s*\r?\n([\s\S]*?)(?:\r?\n\s*\r?\n|$)/i,
+)?.[1] || '';
 const exports = new Set(
-  [...dump.matchAll(/^\s*\[\s*\d+\]\s+\+base\[\s*\d+\]\s+[0-9a-f]+\s+(\S.*)$/gim)]
+  [...exportTable.matchAll(
+    /^\s*\[\s*\d+\]\s+(?:\+base\[\s*\d+\]\s+[0-9a-f]+\s+)?(\S.*)$/gim,
+  )]
     .map((match) => match[1].trim()),
 );
 const imports = new Set(
