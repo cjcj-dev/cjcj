@@ -25,6 +25,7 @@ LLVM_MINGW_URL = f"https://github.com/mstorsjo/llvm-mingw/archive/refs/tags/{LLV
 LLVM_PROJECT_REMOTE = "https://gitee.com/openharmony/third_party_llvm-project.git"
 LLVM_PROJECT_COMMIT = "5c68a1cb123161b54b72ce90e7975d95a8eaf2a4"
 MINGW_W64_REMOTE = "https://gitee.com/openharmony/third_party_mingw-w64.git"
+MINGW_W64_COMMIT = "feea9a87fa42591b298b18fe0e07198f0b8c2f63"
 
 OPENSSL_VERSION = "3.0.9"
 OPENSSL_URL = (
@@ -85,9 +86,22 @@ def install(build_root: Path, *, jobs: int | None = None) -> None:
 
         mingw_w64 = llvm_src / "mingw-w64"
         if not mingw_w64.exists():
+            mingw_w64.mkdir(parents=True)
+            run(["git", "init"], cwd=mingw_w64, stage="mingw.mingw-w64.init")
             run(
-                ["git", "clone", "--depth", "1", MINGW_W64_REMOTE, str(mingw_w64)],
-                stage="mingw.mingw-w64.clone",
+                ["git", "remote", "add", "origin", MINGW_W64_REMOTE],
+                cwd=mingw_w64,
+                stage="mingw.mingw-w64.remote",
+            )
+            run(
+                ["git", "fetch", "--depth", "1", "origin", MINGW_W64_COMMIT],
+                cwd=mingw_w64,
+                stage="mingw.mingw-w64.fetch",
+            )
+            run(
+                ["git", "checkout", "FETCH_HEAD"],
+                cwd=mingw_w64,
+                stage="mingw.mingw-w64.checkout",
             )
 
         toolchain_env = {"TOOLCHAIN_ARCHS": "x86_64"}
