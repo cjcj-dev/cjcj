@@ -6,6 +6,11 @@ public let OPTIMIZATION_LEVEL_TO_BACKEND_OPTION: Array<String> = ["-O0", "-O1", 
 public type SetFuncType = (String) -> Unit
 public type ToolOptionType = (SetFuncType, DriverOptions) -> Unit
 
+@When[os == "macOS"]
+private let CANGJIE_DISABLE_STACK_GROW_FEATURE: Bool = true
+@When[os != "macOS"]
+private let CANGJIE_DISABLE_STACK_GROW_FEATURE: Bool = false
+
 private func backendOptimizationOption(level: OptimizationLevel): String {
     return OPTIMIZATION_LEVEL_TO_BACKEND_OPTION[OptimizationLevelIndex(level)]
 }
@@ -173,8 +178,9 @@ public func LLCSetOptions(setOptionHandler: (String) -> Unit, driverOptions: Dri
     SetOptionIf(setOptionHandler, driverOptions.enableDataSections, "-data-sections")
     SetOptionIf(setOptionHandler, driverOptions.EnableTsan(), "-tsan")
     SetOptionIf(setOptionHandler, driverOptions.EnableHwAsan(), "-mattr=+tagged-globals")
-    SetOptionIf(setOptionHandler, driverOptions.target.env == EnvironmentType.OHOS ||
-        driverOptions.target.env == EnvironmentType.ANDROID, "--cj-stack-grow=false")
+    SetOptionIf(setOptionHandler, CANGJIE_DISABLE_STACK_GROW_FEATURE ||
+        driverOptions.target.env == EnvironmentType.OHOS || driverOptions.target.env == EnvironmentType.ANDROID,
+        "--cj-stack-grow=false")
     if (let Some(cpu) <- driverOptions.targetCPU) {
         if (!cpu.isEmpty()) {
             setOptionHandler("-mcpu=" + cpu)
