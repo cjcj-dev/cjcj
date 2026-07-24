@@ -487,12 +487,12 @@ private class ToCHIR {
                 UnitUnify(builder).RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
             }
             let devirtInfo = CollectDevirtualizationInfo(currentPackage)
-            RunFunctionInline(currentPackage, devirtInfo)
             if (options.cjcjOptimization) {
                 // The cjcj-only round runs after FaithfulAST2CHIR has materialized generic instances and before
-                // the remaining CHIR passes. It reuses the official Devirtualization pipeline below.
+                // FunctionInline can consume them. It reuses the official Devirtualization pipeline below.
                 Devirtualization(currentPackage, devirtInfo, instantiatedOnly: true, inlineFrozen: false)
             }
+            RunFunctionInline(currentPackage, devirtInfo)
             if (options.IsOptimizationExisted(OptimizationFlag.REDUNDANT_LOAD)) {
                 RedundantLoadElimination().RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
             }
