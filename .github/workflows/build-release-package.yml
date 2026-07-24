@@ -288,8 +288,39 @@ jobs:
 
       # DEBUG SCAFFOLDING (0724, remove after the release pipeline is green):
       # on failure, open an SSH session onto the runner so the failing state can
-      # be inspected in place instead of re-running the whole pipeline.
+      # be inspected in place instead of re-running the whole pipeline. The
+      # connection string is published as an artifact because the logs of an
+      # in-progress job are not fetchable through the API.
+      - name: Open SSH debug session on failure (Windows)
+        if: failure() && runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          pacman -S --noconfirm --needed tmate openssh
+          test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ''
+          tmate -S /tmp/dbg.sock new-session -d
+          tmate -S /tmp/dbg.sock wait tmate-ready
+          tmate -S /tmp/dbg.sock display -p '#{tmate_ssh}' | tee tmate-ssh.txt
+
+      - name: Publish SSH connection string (Windows)
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tmate-conn-${{ inputs.platform }}
+          path: tmate-ssh.txt
+          retention-days: 1
+
+      # Keeps the runner alive for the SSH session: 45 min cap, or create
+      # /continue from inside the session to release the job early.
+      - name: Keep SSH session alive (Windows)
+        if: failure() && runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          for _ in $(seq 1 540); do
+            test -f /continue && exit 0
+            sleep 5
+          done
+
       - name: Debug over SSH on failure
-        if: failure()
+        if: failure() && runner.os != 'Windows'
         uses: mxschmitt/action-tmate@v3
         timeout-minutes: 45
