@@ -181,18 +181,26 @@ console.log(`combined runtime smoke: ${runtimeLib}`);
 const runtimeDir = path.dirname(runtimeLib);
 const env = {...process.env};
 if (process.platform === 'darwin') env.DYLD_LIBRARY_PATH = `${runtimeDir}:${env.DYLD_LIBRARY_PATH || ''}`;
-else if (process.platform === 'win32') {
-  // Prepend onto the existing PATH key whatever its case: adding a second
-  // 'PATH' beside a materialized 'Path' makes spawn fail with EINVAL.
-  const pathKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
-  env[pathKey] = `${runtimeDir};${env[pathKey] || ''}`;
-} else env.LD_LIBRARY_PATH = `${runtimeDir}:${env.LD_LIBRARY_PATH || ''}`;
+else if (process.platform !== 'win32') env.LD_LIBRARY_PATH = `${runtimeDir}:${env.LD_LIBRARY_PATH || ''}`;
 if (process.platform === 'win32') {
-  // The two-sample smoke passed on the SDK runtime; the combined smoke swaps in
-  // the fork-built DLL. An ENTRYPOINT_NOT_FOUND (0xC0000139) here means the fork
-  // Windows build omits an export the product imports — diff the two DLLs' export
-  // tables so the missing symbol is named, not guessed.
-  const helloExe = path.join(root, `01_hello${exeSuffix}`);
+  // Swapping only the DLL under an SDK-import-lib-linked exe is a pairing the
+  // product never ships: the SDK import lib leaks mingw CRT helpers as DLL
+  // imports the UCRT-based fork can never export (R26: __mingw_vfprintf,
+  // __stack_chk_fail). Install the fork runtime INTO the toolchain — import
+  // lib, DLL, and static side — and relink the samples, which is the actual
+  // product configuration.
+  const installRoot = path.resolve(runtimeDir, '..', '..', '..');
+  for (const sub of [path.join('runtime', 'lib', 'windows_x86_64_cjnative'), path.join('lib', 'windows_x86_64_cjnative')]) {
+    const from = path.join(installRoot, sub);
+    const to = path.join(process.env.CANGJIE_HOME || '', sub);
+    if (!(await fs.stat(from).then((s) => s.isDirectory(), () => false))) continue;
+    for (const entry of await fs.readdir(from)) {
+      await fs.cp(path.join(from, entry), path.join(to, entry), {recursive: true, force: true});
+      console.log(`combined smoke installed ${path.join(sub, entry)}`);
+    }
+  }
+  // Diagnostic: the relinked sample's runtime imports must all exist in the
+  // fork DLL — diff the tables so any gap is named, not guessed.
   // Import entries are "<vma> [<ordinal>] <hint> <name>" lines inside the DLL's
   // block; export names are the last field of "[<n>] +base[<m>] <hint> <name>"
   // lines in the [Ordinal/Name Pointer] Table.
@@ -208,13 +216,11 @@ if (process.platform === 'win32') {
     const out = spawnSync('objdump', ['-p', dll], {encoding: 'utf8', maxBuffer: 256 * 1024 * 1024}).stdout || '';
     return new Set([...out.matchAll(/^\s*\[\s*\d+\]\s+\+base\[\s*\d+\]\s+[0-9a-fA-F]+\s+(\S+)\s*$/gm)].map((m) => m[1]));
   };
-  const forkDll = runtimeLib;
-  const sdkDll = path.join(process.env.CANGJIE_HOME || '', 'runtime', 'lib', 'windows_x86_64_cjnative', 'libcangjie-runtime.dll');
-  const imported = dumpImports(helloExe, 'libcangjie-runtime.dll');
-  const forkExports = dumpExports(forkDll);
-  const sdkExports = await isFile(sdkDll) ? dumpExports(sdkDll) : new Set();
-  const missingInFork = imported.filter((s) => sdkExports.has(s) && !forkExports.has(s));
-  console.log(`combined smoke export diff: hello imports=${imported.length} fork_exports=${forkExports.size} sdk_exports=${sdkExports.size}`);
-  console.log(`imported symbols the fork DLL is missing (present in SDK DLL): ${missingInFork.join(', ') || '(none — entrypoint gap is elsewhere)'}`);
-}
-if (!(await runOne('01_hello', 'hello from cjcj', env))) process.exit(1);
+  const combinedOk = await runOne('01_hello', 'hello from cjcj', env);
+  const imported = dumpImports(path.join(root, `01_hello${exeSuffix}`), 'libcangjie-runtime.dll');
+  const forkExports = dumpExports(runtimeLib);
+  const missingInFork = imported.filter((s) => !forkExports.has(s));
+  console.log(`combined smoke export diff: hello imports=${imported.length} fork_exports=${forkExports.size}`);
+  console.log(`relinked hello imports missing from the fork DLL: ${missingInFork.join(', ') || '(none)'}`);
+  if (!combinedOk) process.exit(1);
+} else if (!(await runOne('01_hello', 'hello from cjcj', env))) process.exit(1);
