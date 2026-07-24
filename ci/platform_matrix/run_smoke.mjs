@@ -187,4 +187,29 @@ else if (process.platform === 'win32') {
   const pathKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') || 'PATH';
   env[pathKey] = `${runtimeDir};${env[pathKey] || ''}`;
 } else env.LD_LIBRARY_PATH = `${runtimeDir}:${env.LD_LIBRARY_PATH || ''}`;
+if (process.platform === 'win32') {
+  // The two-sample smoke passed on the SDK runtime; the combined smoke swaps in
+  // the fork-built DLL. An ENTRYPOINT_NOT_FOUND (0xC0000139) here means the fork
+  // Windows build omits an export the product imports — diff the two DLLs' export
+  // tables so the missing symbol is named, not guessed.
+  const helloExe = path.join(root, `01_hello${exeSuffix}`);
+  const dumpImports = (file, dll) => {
+    const out = spawnSync('objdump', ['-p', file], {encoding: 'utf8', maxBuffer: 256 * 1024 * 1024}).stdout || '';
+    const block = out.split(/DLL Name: /).find((s) => s.toLowerCase().startsWith(dll.toLowerCase()));
+    return block ? [...block.matchAll(/\b([A-Za-z_][A-Za-z0-9_]+)\b/g)].map((m) => m[1]) : [];
+  };
+  const dumpExports = (dll) => {
+    const out = spawnSync('objdump', ['-p', dll], {encoding: 'utf8', maxBuffer: 256 * 1024 * 1024}).stdout || '';
+    const tail = out.slice(out.indexOf('Export Address Table'));
+    return new Set([...tail.matchAll(/\]\s+([A-Za-z_][A-Za-z0-9_]+)/g)].map((m) => m[1]));
+  };
+  const forkDll = runtimeLib;
+  const sdkDll = path.join(process.env.CANGJIE_HOME || '', 'runtime', 'lib', 'windows_x86_64_cjnative', 'libcangjie-runtime.dll');
+  const imported = dumpImports(helloExe, 'libcangjie-runtime.dll');
+  const forkExports = dumpExports(forkDll);
+  const sdkExports = await isFile(sdkDll) ? dumpExports(sdkDll) : new Set();
+  const missingInFork = imported.filter((s) => sdkExports.has(s) && !forkExports.has(s));
+  console.log(`combined smoke export diff: hello imports=${imported.length} fork_exports=${forkExports.size} sdk_exports=${sdkExports.size}`);
+  console.log(`imported symbols the fork DLL is missing (present in SDK DLL): ${missingInFork.join(', ') || '(none — entrypoint gap is elsewhere)'}`);
+}
 if (!(await runOne('01_hello', 'hello from cjcj', env))) process.exit(1);
