@@ -11,6 +11,8 @@ import path from 'node:path';
 export async function pickWindowsCC() {
   const candidates = [
     process.env.CC,
+    'C:\\msys64\\mingw64\\bin\\clang.exe',
+    'C:\\mingw64\\bin\\clang.exe',
     'C:\\msys64\\mingw64\\bin\\gcc.exe',
     'C:\\mingw64\\bin\\gcc.exe',
     'C:\\msys64\\clang64\\bin\\clang.exe',
