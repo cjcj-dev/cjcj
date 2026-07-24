@@ -51,11 +51,10 @@ jobs:
       matrix:
         include:
           - { runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative }
-          # linux-aarch64 held again (release R1 0724): the first source-built
-          # aarch64 llc segfaults (exit 139) compiling parse@cjcj at -O2 —
-          # armllc investigation lane owns the diagnosis. Re-enable with the
-          # arm-soak ×20 pass once llc is fixed.
-          # - { runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64, sdk_runtime_dir: linux_aarch64_cjnative }
+          # linux-aarch64 re-enabled 0724: the R1 llc SEGV was the un-activated
+          # fixed llc (setup only mapped Linux/x86_64, fixed in 8e2f9ea6); the
+          # arm-soak ×20 packaged smoke run 30069890604 passed clean.
+          - { runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64, sdk_runtime_dir: linux_aarch64_cjnative }
           - { runner: macos-15-intel, platform: darwin-x64, llvm_platform: darwin_x86_64, sdk_runtime_dir: darwin_x86_64_cjnative }
           - { runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative }
           - { runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative }
