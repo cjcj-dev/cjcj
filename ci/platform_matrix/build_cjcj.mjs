@@ -230,20 +230,14 @@ if (process.platform === 'win32') {
     // Whole-archive msvcrt/mingwex duplicate the SDK CRT generation and their
     // static atexit/_onexit copies call each other forever (round-16 wine
     // forensics: startup STACK_OVERFLOW with a two-frame recursion cycle), so
-    // only the members defining the missing *64 symbols are extracted.
+    // only the members resolving the needed symbols are extracted.
     'crt_extract=.platform-ci/mingw-crt64',
     'rm -rf "$crt_extract" && mkdir -p "$crt_extract"',
-    'extract_syms() {',
-    '  library="$1"; shift',
-    '  for sym in "$@"; do',
     // nm -A is unusable here: C:/-style paths add a drive colon that shifts
     // the field split (round-18). Parse the archive section headers instead;
     // both GNU nm ("member.o:") and llvm-nm ("lib.a(member.o):") forms parse.
-    '    member="$(nm --defined-only "$library" 2>/dev/null | awk -v s="$sym" \'/:[[:space:]]*$/ { line=$0; sub(/:[[:space:]]*$/, "", line); n=split(line, parts, /[()]/); m=(n>=2? parts[2] : line); next } !done && ($2=="T"||$2=="W") && $3==s { print m; done=1 }\')"',
-    '    test -n "$member" || return 1',
-    '    (cd "$crt_extract" && ar x "$library" "$member")',
-    '    printf \'MINGW_CRT64 %s<=%s:%s\\n\' "$sym" "$library" "$member"',
-    '  done',
+    'crt_member_for() {',
+    '  nm --defined-only "$1" 2>/dev/null | awk -v s="$2" \'/:[[:space:]]*$/ { line=$0; sub(/:[[:space:]]*$/, "", line); n=split(line, parts, /[()]/); m=(n>=2? parts[2] : line); next } !done && NF>=3 && $NF==s { print m; done=1 }\'',
     '}',
     `printf '%s\\n' '--start-group' > ${shellQuote(mingwCxxLinkRsp.replaceAll('\\', '/'))}`,
     'while IFS= read -r option; do',
@@ -260,15 +254,59 @@ if (process.platform === 'win32') {
     '  printf \'MINGW_CXX_LIB %s=%s\\n\' "$option" "$mixed"',
     'done < "$probe_dir/libraries.txt"',
     'test -n "$MSVCRT_LIB" && test -n "$MINGWEX_LIB"',
-    // gcc-16 libstdc++ pulls the C99 wide-char/errno family as dllimports the
-    // SDK-era msvcrt lacks (round-19); resolve each from the new import libs,
-    // member-by-member, msvcrt first then mingwex.
-    'for sym in fstat64 __mingw_fix_fstat_finish mbsrtowcs _set_errno wctype wctob btowc wcrtomb mbrtowc wcsrtombs mbrlen __mingw_mbrtowc_cp __mingw_wcrtomb_cp __mingw_isleadbyte_cp; do',
-    '  found=""',
-    '  for library in "$MSVCRT_LIB" "$MINGWEX_LIB"; do',
-    '    if extract_syms "$library" "$sym" 2>/dev/null; then found=1; break; fi',
+    'SSP_LIB="$("$cxx" -print-file-name=libssp.a)"',
+    '{ test "$SSP_LIB" != libssp.a && test -f "$SSP_LIB"; } || SSP_LIB=""',
+    // gcc-16 libstdc++ pulls the C99 wide-char/errno family the SDK-era msvcrt
+    // lacks (round-19), and the SDK runtime import lib (gcc --export-all leaks
+    // its static CRT helpers into the DLL export table) otherwise satisfies
+    // them as DLL imports the fork/UCRT runtime can never provide (round-25:
+    // 0xC0000139 on __mingw_vfprintf & co). Extracted objects are always
+    // position-winning, so pull each needed member — and its transitive CRT
+    // closure, or the closure's own undefineds regress to DLL imports.
+    'seed_syms="fstat64 __mingw_fix_fstat_finish mbsrtowcs _set_errno wctype wctob btowc wcrtomb mbrtowc wcsrtombs mbrlen __mingw_mbrtowc_cp __mingw_wcrtomb_cp __mingw_isleadbyte_cp __mingw_vfprintf __mingw_vsnprintf __ms_vsnprintf __mingw_pformat __mingw_strtod __mingw_strtof strtold __cosl_internal __stack_chk_fail"',
+    'queue="$seed_syms"; seen=" "; rounds=0',
+    'while [ -n "${queue// /}" ]; do',
+    '  rounds=$((rounds+1)); test "$rounds" -le 12 || { echo "MINGW_CRT64_FAIL closure did not converge: $queue"; exit 1; }',
+    '  next=""',
+    '  for sym in $queue; do',
+    '    case "$seen" in *" $sym "*) continue ;; esac',
+    '    seen="$seen$sym "',
+    '    member=""',
+    '    for library in "$MSVCRT_LIB" "$MINGWEX_LIB" $SSP_LIB; do',
+    '      member="$(crt_member_for "$library" "$sym")"',
+    '      test -n "$member" && break',
+    '    done',
+    // No static CRT archive defines it: a system DLL, the SDK CRT generation,
+    // or a grouped archive resolves it — nothing to extract.
+    '    test -n "$member" || continue',
+    '    test -f "$crt_extract/$member" && continue',
+    '    (cd "$crt_extract" && ar x "$library" "$member")',
+    // libmsvcrt.a doubles as the msvcrt.dll import library; its dll-import
+    // stub members (nm type I) must stay unextracted so those symbols keep
+    // resolving as ordinary msvcrt.dll imports.
+    '    if nm "$crt_extract/$member" 2>/dev/null | awk \'$(NF-1)=="I"{f=1} END{exit f?0:1}\'; then',
+    '      rm -f "$crt_extract/$member"',
+    '      printf \'MINGW_CRT64_SKIP import stub member %s wanted for %s\\n\' "$member" "$sym"',
+    '      continue',
+    '    fi',
+    // Never extract the atexit family: mixing its two CRT generations is the
+    // round-16 infinite recursion. Leave such demands to the SDK CRT.
+    // (awk consumes all input — grep -q would SIGPIPE nm under pipefail and
+    // turn a hit into a 141 miss.)
+    '    if nm --defined-only "$crt_extract/$member" 2>/dev/null | awk \'$NF ~ /^(atexit|_onexit|__dllonexit|_cexit)$/ {f=1} END{exit f?0:1}\'; then',
+    '      rm -f "$crt_extract/$member"',
+    '      printf \'MINGW_CRT64_SKIP poison member %s (atexit family) wanted for %s\\n\' "$member" "$sym"',
+    '      continue',
+    '    fi',
+    '    printf \'MINGW_CRT64 %s<=%s:%s\\n\' "$sym" "$library" "$member"',
+    '    next="$next $(nm --undefined-only "$crt_extract/$member" 2>/dev/null | awk \'{print $NF}\' | tr \'\\n\' \' \')"',
     '  done',
-    '  test -n "$found"',
+    '  queue="$next"',
+    'done',
+    // Every seed must have landed in an extracted object — a miss regresses to
+    // a DLL import of a symbol the fork runtime cannot export.
+    'for sym in $seed_syms; do',
+    '  nm --defined-only "$crt_extract"/*.o 2>/dev/null | awk -v s="$sym" \'$NF==s{f=1} END{exit f?0:1}\' || { echo "MINGW_CRT64_FAIL seed $sym not extracted"; exit 1; }',
     'done',
     'for object in "$crt_extract"/*.o; do',
     '  test -f "$object"',
