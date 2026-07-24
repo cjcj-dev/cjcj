@@ -168,11 +168,13 @@ jobs:
         # The O1-seed stage1 needs >14GB Cangjie heap for the chir package
         # (rc2 OOM at 12GB/frag 27%, rc3 OOM at 14GB/frag 38%; 24GB passes
         # locally at ~26GB RSS). 16GB RAM + 16GB swap carries a 20GB heap.
+        # The runner already runs a 4G /swapfile (fallocate on it: Text file
+        # busy, rc5). Keep it and add 12G on the /mnt ephemeral disk.
         run: |
-          sudo fallocate -l 16G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
           free -h
 
       - name: Build stage 2 compiler
