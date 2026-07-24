@@ -935,12 +935,69 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
     if (options.IsCHIROptimizationLevelOverO2()) {
         DeadCodeElimination(builder).RunOnPackage(pkg)
     }
-    let cp = ConstPropagation(builder: Some(builder), wrapper: wrapper, opts: options)
-    MergeEffectMap(cp.GetEffectMap(), effectMap)
-    cp.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer, isCJLint: false)
-    DeadCodeElimination(builder).UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
-        isDebug: options.chirDebugOptimizer)
+    RunConstantPropagation(pkg, builder, options, wrapper, effectMap)
     return diag.GetErrorCount() == 0
+}
+
+// C++ CHIR.h:80-96 ToCHIR::ConstructSubBuilders.
+private func ConstructSubBuilders(builder: ChirBuilder, threadNum: Int64,
+    funcNum: Int64): ArrayList<ChirBuilder> {
+    let results = ArrayList<TaskResult<ChirBuilder>>()
+    let builderTaskQueue = TaskQueue(threadNum)
+    var index: Int64 = 0
+    while (index < funcNum) {
+        let builderIndex = index
+        results.add(builderTaskQueue.AddTask<ChirBuilder>({ =>
+            ChirBuilder(builder.context, threadIdx: builderIndex)
+        }))
+        index++
+    }
+    builderTaskQueue.RunAndWaitForAllTasksCompleted()
+    let builderList = ArrayList<ChirBuilder>()
+    for (result in results) {
+        builderList.add(result.get())
+    }
+    return builderList
+}
+
+// C++ CHIR.cpp:481-519 ToCHIR::RunConstantPropagation.
+private func RunConstantPropagation(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
+    wrapper: ConstAnalysisWrapper, effectMap: ChirOptEffectCHIRMap): Unit {
+    let threadNum = Int64(options.GetJobs())
+    let dce = DeadCodeElimination(builder)
+    if (threadNum == 1) {
+        let cp = ConstPropagation(builder: Some(builder), wrapper: wrapper, opts: options)
+        MergeEffectMap(cp.GetEffectMap(), effectMap)
+        cp.RunOnPackage(pkg, isDebug: options.chirDebugOptimizer, isCJLint: false)
+        dce.UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
+            isDebug: options.chirDebugOptimizer)
+    } else {
+        let globalFuncs = pkg.GetGlobalFuncsWithBody()
+        let funcNum = globalFuncs.size
+        let builderList = ConstructSubBuilders(builder, threadNum, funcNum)
+        let taskQueue = TaskQueue(threadNum)
+        let cpList = ArrayList<ConstPropagation>()
+        var index: Int64 = 0
+        while (index < funcNum) {
+            let funcValue = globalFuncs[index]
+            let cp = ConstPropagation(builder: Some(builderList[index]), wrapper: wrapper, opts: options)
+            let _ = taskQueue.AddTask<Unit>({ =>
+                cp.RunOnFunc(funcValue, isDebug: options.chirDebugOptimizer, isCJLint: false)
+            })
+            cpList.add(cp)
+            index++
+        }
+        taskQueue.RunAndWaitForAllTasksCompleted()
+        for (cp in cpList) {
+            MergeEffectMap(cp.GetEffectMap(), effectMap)
+            dce.UnreachableBlockElimination(cp.GetFuncsNeedRemoveBlocks(),
+                isDebug: options.chirDebugOptimizer)
+        }
+        for (subBuilder in builderList) {
+            subBuilder.MergeAllocatedInstance()
+        }
+        builder.context.MergeTypes()
+    }
 }
 
 private func RunVarInitChecking(pkg: RealCHIRPackage, diag: BasicDiagnosticEngine, jobs: UInt64): Bool {
