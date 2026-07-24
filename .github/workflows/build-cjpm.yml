@@ -66,7 +66,7 @@ jobs:
       - name: Build patched cjpm
         shell: msys2 {0}
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           cangjie_home="$(cygpath -u "$USERPROFILE/.cjv/toolchains/$CJCJ_TOOLCHAIN")"
           stdx_path="$(cygpath -u "$USERPROFILE/.cjv/stdx/$CJCJ_TOOLCHAIN/static/stdx")"
           export CANGJIE_HOME="$cangjie_home"
@@ -74,6 +74,10 @@ jobs:
           export MINGW_PATH=/mingw64
           export cjHeapSize=24GB
           export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/mingw64/bin:$PATH"
+          # r2 died here with a bare 127 and no output — name the failing layer.
+          ls "$cangjie_home" "$cangjie_home/tools/bin" 2>&1 | head -40 || true
+          command -v cjpm || echo "cjpm NOT on PATH"
+          cjpm --version || echo "cjpm --version rc=$?"
           cd cangjie-tools/cjpm
           cjpm build
           product=target/release/bin/main
