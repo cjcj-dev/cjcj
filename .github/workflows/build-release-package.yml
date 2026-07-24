@@ -256,6 +256,7 @@ jobs:
           $pkg = "cjcj-${{ inputs.version }}-${{ inputs.platform }}"
           $extract = Join-Path $PWD 'pkgtest'
           $work = Join-Path $env:RUNNER_TEMP 'release-smoke'
+          $smokeExit = 1
           try {
             Expand-Archive -LiteralPath "dist\$pkg.zip" -DestinationPath $extract -Force
             $root = Join-Path $extract $pkg
@@ -264,10 +265,15 @@ jobs:
             $env:cjHeapSize = '12GB'
             $env:PATH = "$root\bin;$root\runtime\lib\windows_x86_64_cjnative;$root\tools\lib;$env:PATH"
             npx --yes zx@8 ci/smoke/run_smoke.mjs "$root\bin\cjc.exe" $work
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $smokeExit = $LASTEXITCODE
           } finally {
-            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $work, $extract
+            if ($smokeExit -eq 0) {
+              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $work, $extract
+            } else {
+              Write-Host "preserving failed Windows smoke: work=$work package=$extract"
+            }
           }
+          if ($smokeExit -ne 0) { exit $smokeExit }
 
       - name: Upload SDK artifact
         uses: actions/upload-artifact@v7
