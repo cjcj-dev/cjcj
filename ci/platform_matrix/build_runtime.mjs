@@ -5,6 +5,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
+import {pickWindowsCC} from './pick_cc.mjs';
 
 const {root} = stageBegin('runtime');
 const source = process.env.RUNTIME_SOURCE || path.join(process.cwd(), 'runtime-source');
@@ -40,6 +41,11 @@ if (process.platform === 'linux') {
   await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type release --prefix ${preinstall} -v ${version}`;
   await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${installRoot}`;
 } else if (process.platform === 'win32') {
+  const windowsCC = await pickWindowsCC();
+  if (!/[\\/]mingw64[\\/]bin[\\/]clang\.exe$/i.test(windowsCC)) {
+    console.error(`FATAL: runtime requires working MINGW64/MSVCRT clang, probe selected ${windowsCC}`);
+    process.exit(4);
+  }
   const msysBash = process.env.MSYS2_BASH || 'C:\\msys64\\usr\\bin\\bash.exe';
   const shellQuote = (value) => "'" + value.replace(/'/g, "'\\''") + "'";
   const runtimeTarget = 'windows-x86_64';
@@ -50,7 +56,7 @@ if (process.platform === 'linux') {
   const configuredInstallRoot = path.join(installRoot, `${targetPlatform}_${buildType}_${targetArch}`);
   const script = [
     'set -euo pipefail',
-    'export PATH=/clang64/bin:/usr/bin:$PATH',
+    'export PATH=/mingw64/bin:/usr/bin:$PATH',
     // build.py drives the main tree with `make cangjie-runtime`; Ninja files have no
     // such rule (round-9 root), so force the Makefiles generator (make is installed).
     "export CMAKE_GENERATOR='Unix Makefiles'",
@@ -59,13 +65,13 @@ if (process.platform === 'linux') {
     `runtime_preinstall="$(cygpath -u ${shellQuote(installRoot)})"`,
     `runtime_install="$(cygpath -u ${shellQuote(configuredInstallRoot)})"`,
     'cd "$runtime_source"',
-    `python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain /clang64 --prefix "$runtime_preinstall" -v ${shellQuote(version)}`,
+    `python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain /mingw64 --prefix "$runtime_preinstall" -v ${shellQuote(version)}`,
     'python3 build.py install --prefix "$runtime_install"',
   ].join('\n');
   const scriptPath = path.join(process.cwd(), 'rtbuild-msys2.sh');
   await fs.writeFile(scriptPath, `${script}\n`);
   const scriptMixedPath = scriptPath.replaceAll('\\', '/');
-  const command = 'export MSYSTEM=CLANG64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -l ' + scriptMixedPath;
+  const command = 'export MSYSTEM=MINGW64 MSYS2_PATH_TYPE=inherit CHERE_INVOKING=1; exec /usr/bin/bash -l ' + scriptMixedPath;
   await $`${toCommandPath(msysBash)} -c ${command}`;
 } else {
   console.error(`FATAL: unsupported runtime build host: ${process.platform}/${process.arch}`);
