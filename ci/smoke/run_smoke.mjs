@@ -55,6 +55,116 @@ async function printIndented(file) {
   process.stdout.write(contents.split('\n').filter((line, i, lines) => i < lines.length - 1 || line).map(line => `    ${line}\n`).join(''));
 }
 
+function inspectPe(file) {
+  const result = spawnSync('objdump', ['-p', file], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
+  const imports = new Map();
+  const exports = new Set();
+  let currentImport = '';
+  let inImports = false;
+  let inExports = false;
+  for (const line of (result.stdout || '').split(/\r?\n/)) {
+    if (line.startsWith('The Import Tables')) { inImports = true; inExports = false; continue; }
+    if (line.startsWith('[Ordinal/Name Pointer] Table')) { inImports = false; inExports = true; continue; }
+    if (line.startsWith('The Export Tables') || line.startsWith('The Function Table')) {
+      inImports = false;
+      if (line.startsWith('The Function Table')) inExports = false;
+      continue;
+    }
+    if (inImports) {
+      const dll = line.match(/^\s*DLL Name:\s*(\S+)/)?.[1];
+      if (dll) {
+        currentImport = dll;
+        if (!imports.has(dll)) imports.set(dll, []);
+        continue;
+      }
+      const symbol = line.match(/^\s*[0-9a-f]+\s+<none>\s+[0-9a-f]+\s+(\S.*)$/i)?.[1];
+      if (currentImport && symbol) imports.get(currentImport).push(symbol.trim());
+    } else if (inExports) {
+      const symbol = line.match(/^\s*\[\s*\d+\]\s+\+base\[\s*\d+\]\s+[0-9a-f]+\s+(\S.*)$/i)?.[1];
+      if (symbol) exports.add(symbol.trim());
+    }
+  }
+  return {status: result.status, stderr: result.stderr || '', imports, exports};
+}
+
+function resolveWindowsDll(name) {
+  const result = spawnSync('where', [name], {encoding: 'utf8'});
+  return (result.stdout || '').split(/\r?\n/).find(Boolean) || '';
+}
+
+function isWindowsSystemDll(file) {
+  const windowsRoot = (process.env.SystemRoot || 'C:\\Windows').toLowerCase();
+  return path.resolve(file).toLowerCase().startsWith(`${windowsRoot}\\`);
+}
+
+async function diagnoseWindowsMacroLoad(macroDll) {
+  const ldd = spawnSync('ldd', [macroDll], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
+  console.log(`[smoke] macro ldd status=${ldd.status ?? 'spawn-failed'}`);
+  for (const line of `${ldd.stdout || ''}${ldd.stderr || ''}`.split(/\r?\n/).filter(Boolean)) {
+    console.log(`[smoke]   ldd: ${line}`);
+  }
+
+  const probe = [
+    'Add-Type -TypeDefinition @"',
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    'public static class CjcjNativeLoader {',
+    '  [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]',
+    '  public static extern IntPtr LoadLibraryA(string fileName);',
+    '  [DllImport("kernel32.dll", SetLastError = true)]',
+    '  public static extern bool FreeLibrary(IntPtr module);',
+    '}',
+    '"@',
+    '$module = [CjcjNativeLoader]::LoadLibraryA($args[0])',
+    '$code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()',
+    'if ($module -eq [IntPtr]::Zero) {',
+    '  $message = [ComponentModel.Win32Exception]::new($code).Message',
+    '  Write-Output "LOADLIBRARYA=FAIL WIN32=$code HEX=0x$($code.ToString(\'X8\')) MESSAGE=$message"',
+    '} else {',
+    '  Write-Output "LOADLIBRARYA=PASS HANDLE=0x$($module.ToInt64().ToString(\'X\'))"',
+    '  [void][CjcjNativeLoader]::FreeLibrary($module)',
+    '}',
+  ].join('\n');
+  const loaded = spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', probe, macroDll], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  for (const line of `${loaded.stdout || ''}${loaded.stderr || ''}`.split(/\r?\n/).filter(Boolean)) {
+    console.log(`[smoke]   loader: ${line}`);
+  }
+
+  const visited = new Set();
+  let firstMissingDll = '';
+  let firstMissingExport = '';
+  function walk(file, depth) {
+    const key = path.resolve(file).toLowerCase();
+    if (visited.has(key) || visited.size >= 256) return;
+    visited.add(key);
+    const pe = inspectPe(file);
+    console.log(`[smoke] closure node depth=${depth} file=${file} objdump=${pe.status}`);
+    if (pe.status !== 0) return;
+    for (const [name, symbols] of pe.imports) {
+      const resolved = resolveWindowsDll(name);
+      console.log(`[smoke] closure edge parent=${path.basename(file)} import=${name} resolved=${resolved || 'MISSING'}`);
+      if (!resolved) {
+        if (!firstMissingDll) firstMissingDll = `${path.basename(file)} -> ${name}`;
+        continue;
+      }
+      const provider = inspectPe(resolved);
+      if (symbols.length > 0 && provider.exports.size > 0) {
+        const missing = symbols.filter((symbol) => !provider.exports.has(symbol));
+        if (missing.length > 0) {
+          console.log(`[smoke] closure missing-export consumer=${path.basename(file)} provider=${resolved} symbols=${missing.join(',')}`);
+          if (!firstMissingExport) firstMissingExport = `${path.basename(file)} -> ${name}!${missing[0]}`;
+        }
+      }
+      if (!isWindowsSystemDll(resolved)) walk(resolved, depth + 1);
+    }
+  }
+  walk(macroDll, 0);
+  console.log(`[smoke] closure summary nodes=${visited.size} first-missing-dll=${firstMissingDll || 'NONE'} first-missing-export=${firstMissingExport || 'NONE'}`);
+}
+
 for (const [name, wanted] of expect) {
   const src = path.join(here, `${name}.cj`);
   const exe = path.join(work, `${name}${exeSuffix}`);
@@ -112,13 +222,7 @@ if (macroOk) {
       const present = await fs.stat(macroDll).then((s) => s.size, () => -1);
       console.log(`[smoke] macro dll size=${present}`);
       if (present > 0) {
-        const dump = spawnSync('objdump', ['-p', macroDll], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
-        const imports = [...(dump.stdout || '').matchAll(/DLL Name: (\S+)/g)].map((m) => m[1]);
-        console.log(`[smoke] macro dll imports: ${imports.join(' ') || `(objdump status=${dump.status})`}`);
-        for (const name of imports) {
-          const found = (spawnSync('where', [name], {encoding: 'utf8'}).stdout || '').split(/\r?\n/).find(Boolean) || 'MISSING';
-          console.log(`[smoke]   ${name}: ${found}`);
-        }
+        await diagnoseWindowsMacroLoad(macroDll);
       }
     }
     macroOk = false;
