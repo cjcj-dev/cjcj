@@ -33,7 +33,9 @@ try {
   log(`shallow fetch fork commit ${runtimeRef}`);
   await $`git -C ${work} init -q`;
   await $`git -C ${work} remote add origin ${srcUrl}`;
-  await $`git -C ${work} fetch --depth 1 origin ${runtimeRef}`;
+  // Depth must reach the pinned GC-fix commit so the ancestry guard below can
+  // resolve merge-base inside the shallow clone.
+  await $`git -C ${work} fetch --depth 200 origin ${runtimeRef}`;
   await $`git -C ${work} checkout -q FETCH_HEAD`;
   const actualRef = (await $({stdio: 'pipe'})`git -C ${work} rev-parse HEAD`).stdout.trim();
   if (actualRef !== runtimeRef) throw new Error(`runtime ref mismatch: expected ${runtimeRef}, got ${actualRef}`);
@@ -64,19 +66,19 @@ try {
   await fs.writeFile(`${packagedRuntime}.sha256`, `${digest}  ${runtimeLibrary}\n`);
   log(`wrote ${packagedRuntime}`);
 
-  // RecomputeBitmapLiveBytes is introduced by the pinned trace-insertion-closure
-  // fix and remains a dynamic symbol in native release builds. Unlike
-  // .cjmetadata, this proves the required code is in the packaged runtime.
-  const GC_FIX_SYMBOL = '_ZNK12MapleRuntime8LiveInfo24RecomputeBitmapLiveBytesEv';
-  const symbols = process.platform === 'darwin'
-    ? await $({nothrow: true, stdio: 'pipe'})`nm -gU ${packagedRuntime}`
-    : await $({nothrow: true, stdio: 'pipe'})`readelf --dyn-syms --wide ${packagedRuntime}`;
-  if (symbols.exitCode !== 0 || !symbols.stdout.includes(GC_FIX_SYMBOL)) {
-    log('ERROR: built runtime lacks the pinned GC fix symbol; wrong fork commit');
+  // Provenance guard: the pinned reader-admission GC fix must be an ancestor of
+  // the commit we just built. The former symbol probe
+  // (LiveInfo::RecomputeBitmapLiveBytes) broke at pin 707a07a1 — it is a
+  // header-inline function and newer code shapes inline its single call site,
+  // so no standalone symbol survives to be found.
+  const GC_FIX_COMMIT = 'f851b846e275859aeccacd0edd42b81f28cb25bd';
+  const ancestry = await $({nothrow: true})`git -C ${work} merge-base --is-ancestor ${GC_FIX_COMMIT} HEAD`;
+  if (ancestry.exitCode !== 0) {
+    log('ERROR: built runtime does not descend from the pinned GC fix commit; wrong fork commit');
     process.exitCode = 1;
-    throw new Error('pinned GC fix symbol missing');
+    throw new Error('pinned GC fix ancestry missing');
   }
-  log('verified: pinned GC fix symbol present');
+  log('verified: pinned GC fix commit is an ancestor of the built runtime');
 } finally {
   await fs.rm(work, {recursive: true, force: true});
 }
