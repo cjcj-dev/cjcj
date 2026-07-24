@@ -1,0 +1,89 @@
+name: Linux ARM packaged smoke soak
+
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: Full packaged-smoke rounds
+        required: false
+        type: number
+        default: 20
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  fixed-llvm-tools:
+    name: Build LLVM tools
+    uses: ./.github/workflows/build-fixed-llc.yml
+
+  package:
+    name: Build Linux ARM package once
+    needs: fixed-llvm-tools
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: ubuntu-24.04-arm
+      platform: linux-aarch64
+      llvm_platform: linux_aarch64
+      sdk_runtime_dir: linux_aarch64_cjnative
+      version: arm-soak
+      verify: false
+    secrets: inherit
+
+  soak:
+    name: Packaged smoke x${{ inputs.rounds }}
+    needs: package
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 300
+    steps:
+      - name: Checkout cjcj smoke corpus
+        uses: actions/checkout@v4
+
+      - name: Download Linux ARM package
+        uses: actions/download-artifact@v4
+        with:
+          name: pkg-linux-aarch64
+          path: dist
+
+      - name: Run full packaged smoke rounds
+        shell: bash
+        run: |
+          set -euo pipefail
+          rounds="${{ inputs.rounds }}"
+          [[ "$rounds" =~ ^[1-9][0-9]*$ ]] || { echo "invalid rounds: $rounds"; exit 2; }
+          pkg=cjcj-arm-soak-linux-aarch64
+          extract="$RUNNER_TEMP/arm-soak-package"
+          work_root="$RUNNER_TEMP/arm-soak-rounds"
+          rm -rf "$extract" "$work_root"
+          mkdir -p "$extract" "$work_root"
+          trap 'rm -rf "$extract" "$work_root"' EXIT
+          tar -C "$extract" -xzf "dist/${pkg}.tar.gz"
+          source "$extract/${pkg}/envsetup.sh"
+          export cjHeapSize=12GB
+          compiler="$extract/${pkg}/bin/cjc"
+          {
+            echo '### Linux ARM packaged smoke soak'
+            echo
+            echo '| Round | Result | Exit | Seconds |'
+            echo '|---:|:---:|---:|---:|'
+          } >> "$GITHUB_STEP_SUMMARY"
+          failed=0
+          for round in $(seq 1 "$rounds"); do
+            work="$work_root/round-${round}"
+            log="$work_root/round-${round}.log"
+            rm -rf "$work"
+            started=$SECONDS
+            set +e
+            npx --yes zx@8 ci/smoke/run_smoke.mjs "$compiler" "$work" >"$log" 2>&1
+            rc=$?
+            set -e
+            elapsed=$((SECONDS - started))
+            if [ "$rc" -eq 0 ]; then result=PASS; else result=FAIL; failed=1; fi
+            printf '| %s | %s | %s | %s |\n' "$round" "$result" "$rc" "$elapsed" >> "$GITHUB_STEP_SUMMARY"
+            echo "ARM_SOAK_ROUND round=$round result=$result exit=$rc seconds=$elapsed"
+            sed "s/^/[round $round] /" "$log"
+            rm -rf "$work" "$log"
+          done
+          echo "ARM_SOAK_SUMMARY rounds=$rounds failed=$failed"
+          test "$failed" -eq 0
