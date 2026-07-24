@@ -88,6 +88,7 @@ jobs:
         if: steps.cjv-cache.outputs.cache-hit != 'true'
         env:
           CJCJ_TOOLCHAIN: ${{ inputs.toolchain }}
+          CJCJ_SDK_LINK_INPUTS_ONLY: '1'
         run: npx --yes zx@8 ci/setup_sdk.mjs
 
       - name: Save Cangjie toolchain

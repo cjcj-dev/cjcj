@@ -79,7 +79,11 @@ const stdxPath = `${home}/.cjv/stdx/${toolchain}/static/stdx`;
 // The stock nightly backend materializes relocate-of-undef as a phantom GC root.
 // This static llc contains the backend fix and has no libLLVM dependency. Keep the
 // true original once, and break a possible hardlink before replacing the binary.
-const llcPlatform = hostOs === 'Linux' && ['x86_64', 'aarch64'].includes(hostArch)
+// Jobs that only consume the toolchain's archives and headers as link inputs
+// (no Cangjie compilation, e.g. the Windows std-ast relink) opt out of the llc
+// requirement with CJCJ_SDK_LINK_INPUTS_ONLY=1.
+const llcPlatform = process.env.CJCJ_SDK_LINK_INPUTS_ONLY
+  ? '' : hostOs === 'Linux' && ['x86_64', 'aarch64'].includes(hostArch)
   ? `linux_${hostArch}` : '';
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
 const sdkLlc = `${cangjieHome}/third_party/llvm/bin/llc`;
