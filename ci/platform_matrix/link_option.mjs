@@ -7,6 +7,10 @@ export function assembleCjcLinkOption(
   const llvmDir = path.join(cangjieHome, 'third_party', 'llvm', 'lib');
   if (platform === 'darwin') {
     return [
+      // Packaging rewrites rpaths with install_name_tool; without the padded
+      // header the longer packaged rpath set does not fit (release R2:
+      // "larger updated load commands do not fit").
+      '-headerpad_max_install_names',
       '-export_dynamic',
       'runtime_shim/cjselfhost_llvmshim.o',
       'runtime_shim/cjc_runtime_config.o',
