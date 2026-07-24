@@ -1,6 +1,7 @@
 # Release. Repackages the official SDK tree as a cjcj SDK: bin/cjc is our
 # Cangjie-built compiler and runtime/lib/<plat>/libcangjie-runtime.{so,dylib,dll} is rebuilt
-# from the pinned cjcj-dev/cangjie-runtime main commit. Smoke runs against the
+# from the pinned cjcj-dev/cangjie-runtime main commit. The Windows runtime is
+# cross-built with the official source-pinned MinGW toolchain. Smoke runs against the
 # packaged bin/cjc. Linux x64/arm64, macOS x64/arm64, and Windows x64 are
 # enabled; set dry_run to build artifacts without publishing.
 name: Release
@@ -43,9 +44,15 @@ jobs:
     name: Build LLVM tools
     uses: ./.github/workflows/build-fixed-llc.yml
 
+  windows-runtime:
+    name: Build Windows runtime
+    uses: ./.github/workflows/build-windows-runtime.yml
+    with:
+      version: ${{ inputs.version }}
+
   build:
     name: ${{ matrix.platform }} / Build release
-    needs: fixed-llvm-tools
+    needs: [fixed-llvm-tools, windows-runtime]
     strategy:
       fail-fast: false
       matrix:
