@@ -1,6 +1,6 @@
 #!/usr/bin/env zx
 // Build the exact pinned runtime on the current host. Windows enters MSYS2
-// CLANG64 only for build.py, whose Windows recipe requires POSIX make/PATH.
+// MINGW64 only for build.py, whose Windows recipe requires POSIX make/PATH.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
