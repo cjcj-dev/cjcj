@@ -1,4 +1,4 @@
-name: Source SDK
+name: Self-hosted source SDK (linux-x64)
 
 on:
   workflow_dispatch:
@@ -208,10 +208,10 @@ jobs:
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
         run: npx --yes zx@8 ci/srcbuild/steps/compose-sdk.mjs
 
-      - name: Verify source SDK
+      - name: Verify self-hosted SDK
         run: npx --yes zx@8 ci/srcbuild/steps/verify.mjs "$CANGJIE_WORKSPACE/software/cangjie"
 
-      - name: Upload SDK artifacts
+      - name: Upload self-hosted SDK and gate logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
