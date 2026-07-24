@@ -59,6 +59,7 @@ jobs:
           mkdir -p "$extract" "$work_root"
           trap 'rm -rf "$extract" "$work_root"' EXIT
           tar -C "$extract" -xzf "dist/${pkg}.tar.gz"
+          # shellcheck disable=SC1090
           source "$extract/${pkg}/envsetup.sh"
           export cjHeapSize=12GB
           compiler="$extract/${pkg}/bin/cjc"
