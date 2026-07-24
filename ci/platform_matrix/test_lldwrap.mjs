@@ -16,7 +16,15 @@ const capture = path.join(temp, 'args.txt');
 
 function compile(source, output) {
   const result = spawnSync(compiler, ['-std=c11', '-O2', '-Wall', '-Wextra', source, '-o', output], {encoding: 'utf8'});
-  if (result.status !== 0) throw new Error(`compile failed (${source}):\n${result.stdout}${result.stderr}`);
+  if (result.status !== 0) {
+    const probe = spawnSync(compiler, ['--version'], {encoding: 'utf8'});
+    throw new Error([
+      `compile failed (${source}):`,
+      `status=${result.status} signal=${result.signal} error=${result.error ?? 'none'}`,
+      `stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`,
+      `probe(--version): status=${probe.status} error=${probe.error ?? 'none'} stdout=${JSON.stringify(probe.stdout)} stderr=${JSON.stringify(probe.stderr)}`,
+    ].join('\n'));
+  }
 }
 
 async function invoke(args, exitCode = 0) {
