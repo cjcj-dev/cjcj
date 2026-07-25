@@ -107,6 +107,18 @@ public class InteropLibBridge {
     private static var convertToNSStringDecl: Option<Option<FuncDecl>> = None
     private static var descriptionAsStringDecl: Option<Option<FuncDecl>> = None
     private static var objCRetainAutoreleasedReturnValue: Option<Option<FuncDecl>> = None
+    private static var objCPointerDecl: Option<Option<StructDecl>> = None
+    private static var objCFuncDecl: Option<Option<StructDecl>> = None
+    private static var objCBlockDecl: Option<Option<ClassDecl>> = None
+    private static var objCPointerConstructor: Option<FuncDecl> = None
+    private static var objCPointerPointerField: Option<VarDecl> = None
+    private static var objCFuncConstructor: Option<FuncDecl> = None
+    private static var objCFuncFPointerAccessor: Option<FuncDecl> = None
+    private static var objCBlockConstructorFromObjC: Option<FuncDecl> = None
+    private static var objCBlockConstructorFromCangjie: Option<FuncDecl> = None
+    private static var objCBlockFPointerAccessor: Option<FuncDecl> = None
+    private static var objCBlockAbiPointerAccessor: Option<FuncDecl> = None
+    private static var objectGetClassDecl: Option<Option<FuncDecl>> = None
     private let importManager: SemaImportManager
     private let diag: DiagnosticEngine
 
@@ -406,97 +418,157 @@ public class InteropLibBridge {
         return result
     }
 
-    public func GetObjCPointerDecl(): Option<StructDecl> { return GetObjCLangDecl<StructDecl>(OBJ_C_POINTER_IDENT, ASTKind.STRUCT_DECL) }
-    public func GetObjCFuncDecl(): Option<StructDecl> { return GetObjCLangDecl<StructDecl>(OBJ_C_FUNC_IDENT, ASTKind.STRUCT_DECL) }
-    public func GetObjCBlockDecl(): Option<ClassDecl> { return GetObjCLangDecl<ClassDecl>(OBJ_C_BLOCK_IDENT, ASTKind.CLASS_DECL) }
+    public func GetObjCPointerDecl(): Option<StructDecl> {
+        if (let Some(result) <- InteropLibBridge.objCPointerDecl) { return result }
+        let result = GetObjCLangDecl<StructDecl>(OBJ_C_POINTER_IDENT, ASTKind.STRUCT_DECL)
+        InteropLibBridge.objCPointerDecl = Some(result)
+        return result
+    }
+    public func GetObjCFuncDecl(): Option<StructDecl> {
+        if (let Some(result) <- InteropLibBridge.objCFuncDecl) { return result }
+        let result = GetObjCLangDecl<StructDecl>(OBJ_C_FUNC_IDENT, ASTKind.STRUCT_DECL)
+        InteropLibBridge.objCFuncDecl = Some(result)
+        return result
+    }
+    public func GetObjCBlockDecl(): Option<ClassDecl> {
+        if (let Some(result) <- InteropLibBridge.objCBlockDecl) { return result }
+        let result = GetObjCLangDecl<ClassDecl>(OBJ_C_BLOCK_IDENT, ASTKind.CLASS_DECL)
+        InteropLibBridge.objCBlockDecl = Some(result)
+        return result
+    }
 
     public func GetObjCPointerConstructor(): Option<FuncDecl> {
-        if (let Some(outer) <- GetObjCPointerDecl()) {
-            for (member in outer.GetMemberDeclPtrs()) {
-                if (let Some(funcDecl) <- (member as FuncDecl)) {
-                    if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
-                        if (let Some(body) <- funcDecl.funcBody) {
-                            if (body.paramLists.size > 0 && body.paramLists[0].params.size == 1) { return funcDecl }
-                        }
-                    }
+        if (let Some(result) <- InteropLibBridge.objCPointerConstructor) { return result }
+        let outer = GetObjCPointerDecl()
+        CJC_NULLPTR_CHECK(outer)
+        for (member in outer.getOrThrow().body.getOrThrow().decls) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (funcDecl.TestAttr(Attribute.CONSTRUCTOR) && funcDecl.funcBody.isSome() &&
+                    funcDecl.funcBody.getOrThrow().paramLists[0].params.size == 1) {
+                    InteropLibBridge.objCPointerConstructor = Some(funcDecl)
+                    break
                 }
             }
         }
-        return None
+        return InteropLibBridge.objCPointerConstructor
     }
     public func GetObjCPointerPointerField(): Option<VarDecl> {
-        if (let Some(outer) <- GetObjCPointerDecl()) {
-            for (member in outer.GetMemberDeclPtrs()) {
-                if (let Some(field) <- (member as VarDecl)) {
-                    if (let Some(ty) <- field.GetTy()) { if (ty.IsPointer()) { return field } }
+        if (let Some(result) <- InteropLibBridge.objCPointerPointerField) { return result }
+        let outer = GetObjCPointerDecl()
+        CJC_NULLPTR_CHECK(outer)
+        for (member in outer.getOrThrow().body.getOrThrow().decls) {
+            if (let Some(fieldDecl) <- (member as VarDecl)) {
+                if (fieldDecl.GetTy().getOrThrow().IsPointer()) {
+                    InteropLibBridge.objCPointerPointerField = Some(fieldDecl)
+                    break
                 }
             }
         }
-        return None
+        return InteropLibBridge.objCPointerPointerField
     }
     public func GetObjCFuncConstructor(): Option<FuncDecl> {
-        if (let Some(outer) <- GetObjCFuncDecl()) {
-            for (member in outer.GetMemberDeclPtrs()) {
-                if (let Some(funcDecl) <- (member as FuncDecl)) {
-                    if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
-                        if (let Some(body) <- funcDecl.funcBody) {
-                            if (body.paramLists.size > 0 && body.paramLists[0].params.size == 1) { return funcDecl }
-                        }
-                    }
+        if (let Some(result) <- InteropLibBridge.objCFuncConstructor) { return result }
+        let outer = GetObjCFuncDecl()
+        CJC_NULLPTR_CHECK(outer)
+        for (member in outer.getOrThrow().body.getOrThrow().decls) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (funcDecl.TestAttr(Attribute.CONSTRUCTOR) && funcDecl.funcBody.isSome() &&
+                    funcDecl.funcBody.getOrThrow().paramLists[0].params.size == 1) {
+                    InteropLibBridge.objCFuncConstructor = Some(funcDecl)
+                    break
                 }
             }
         }
-        return None
+        return InteropLibBridge.objCFuncConstructor
     }
     public func GetObjCFuncFPointerAccessor(): Option<FuncDecl> {
-        if (let Some(outer) <- GetObjCFuncDecl()) {
-            return GetMemberOfDecl<FuncDecl>(outer, { member => member.identifier.Val() == OBJ_C_FUNC_GET_FPOINTER })
+        if (let Some(result) <- InteropLibBridge.objCFuncFPointerAccessor) { return result }
+        let outer = GetObjCFuncDecl()
+        CJC_NULLPTR_CHECK(outer)
+        for (member in outer.getOrThrow().body.getOrThrow().decls) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (funcDecl.identifier.Val() == OBJ_C_FUNC_GET_FPOINTER) {
+                    InteropLibBridge.objCFuncFPointerAccessor = Some(funcDecl)
+                    break
+                }
+            }
         }
-        return None
+        return InteropLibBridge.objCFuncFPointerAccessor
     }
-    public func GetObjCBlockConstructorFromObjC(): Option<FuncDecl> { return GetObjCBlockConstructorByABIName(INTEROPLIB_NATIVE_BLOCK_ABI) }
-    public func GetObjCBlockConstructorFromCangjie(): Option<FuncDecl> { return GetObjCBlockConstructorByABIName(INTEROPLIB_CANGJIE_BLOCK_ABI) }
+    public func GetObjCBlockConstructorFromObjC(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.objCBlockConstructorFromObjC) { return result }
+        let result = GetObjCBlockConstructorByABIName(this, INTEROPLIB_NATIVE_BLOCK_ABI)
+        CJC_NULLPTR_CHECK(result)
+        InteropLibBridge.objCBlockConstructorFromObjC = result
+        return result
+    }
+    public func GetObjCBlockConstructorFromCangjie(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.objCBlockConstructorFromCangjie) { return result }
+        let result = GetObjCBlockConstructorByABIName(this, INTEROPLIB_CANGJIE_BLOCK_ABI)
+        CJC_NULLPTR_CHECK(result)
+        InteropLibBridge.objCBlockConstructorFromCangjie = result
+        return result
+    }
     public func GetObjCBlockFPointerAccessor(): Option<FuncDecl> {
-        if (let Some(outer) <- GetObjCBlockDecl()) {
-            return GetMemberOfDecl<FuncDecl>(outer, { member => member.identifier.Val() == OBJ_C_FUNC_GET_FPOINTER })
+        if (let Some(result) <- InteropLibBridge.objCBlockFPointerAccessor) { return result }
+        let outer = GetObjCBlockDecl()
+        CJC_NULLPTR_CHECK(outer)
+        for (member in outer.getOrThrow().body.getOrThrow().decls) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (funcDecl.identifier.Val() == OBJ_C_FUNC_GET_FPOINTER) {
+                    InteropLibBridge.objCBlockFPointerAccessor = Some(funcDecl)
+                    break
+                }
+            }
         }
-        return None
+        return InteropLibBridge.objCBlockFPointerAccessor
     }
     public func GetObjCBlockAbiPointerAccessor(): Option<FuncDecl> {
-        if (let Some(outer) <- GetObjCBlockDecl()) {
-            return GetMemberOfDecl<FuncDecl>(outer, { member => member.identifier.Val() == OBJ_C_BLOCK_GET_ABI_POINTER })
+        if (let Some(result) <- InteropLibBridge.objCBlockAbiPointerAccessor) { return result }
+        let outer = GetObjCBlockDecl()
+        CJC_NULLPTR_CHECK(outer)
+        for (member in outer.getOrThrow().body.getOrThrow().decls) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (funcDecl.identifier.Val() == OBJ_C_BLOCK_GET_ABI_POINTER) {
+                    InteropLibBridge.objCBlockAbiPointerAccessor = Some(funcDecl)
+                    break
+                }
+            }
         }
-        return None
+        return InteropLibBridge.objCBlockAbiPointerAccessor
     }
     public func GetNativeBlockABIDecl(): Option<StructDecl> { return GetInteropLibDecl<StructDecl>(INTEROPLIB_NATIVE_BLOCK_ABI, ASTKind.STRUCT_DECL) }
     public func GetCangjieBlockABIDecl(): Option<StructDecl> { return GetInteropLibDecl<StructDecl>(INTEROPLIB_CANGJIE_BLOCK_ABI, ASTKind.STRUCT_DECL) }
     public func GetObjCStoreLambdaAsBlockDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJC_STORE_LAMBDA_AS_BLOCK, ASTKind.FUNC_DECL) }
     public func GetObjCGetLambdaFromBlockDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJC_GET_LAMBDA_FROM_BLOCK, ASTKind.FUNC_DECL) }
-    public func GetObjectGetClassDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_OBJECT_GET_CLASS, ASTKind.FUNC_DECL) }
+    public func GetObjectGetClassDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.objectGetClassDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_OBJECT_GET_CLASS, ASTKind.FUNC_DECL)
+        InteropLibBridge.objectGetClassDecl = Some(result)
+        return result
+    }
     public func IsInteropLibAccessible(importManager: SemaImportManager): Bool { return importManager.GetPackageDecl(INTEROPLIB_PACKAGE_NAME).isSome() }
     public func IsInteropLibAccessible(): Bool { return IsInteropLibAccessible(importManager) }
 
-    private func GetObjCBlockConstructorByABIName(abiTypeName: String): Option<FuncDecl> {
-        if (let Some(outer) <- GetObjCBlockDecl()) {
-            for (member in outer.GetMemberDeclPtrs()) {
-                if (let Some(funcDecl) <- (member as FuncDecl)) {
-                    if (!funcDecl.TestAttr(Attribute.CONSTRUCTOR)) { continue }
-                    if (let None <- funcDecl.funcBody) { continue }
-                    let body = funcDecl.funcBody.getOrThrow()
-                    if (body.paramLists.size != 1 || body.paramLists[0].params.size != 1) { continue }
-                    let paramTy = body.paramLists[0].params[0].GetTy()
-                    if (let Some(value) <- paramTy) {
-                        if (!value.IsPointer()) { continue }
-                        if (value.typeArgs.size == 1) {
-                            if (let Some(decl) <- Ty.GetDeclOfTy(value.typeArgs[0])) {
-                                if (decl.identifier.Val() == abiTypeName) { return funcDecl }
-                            }
-                        }
-                    }
-                }
-            }
+}
+
+private func GetObjCBlockConstructorByABIName(bridge: InteropLibBridge,
+    abiTypeName: String): Option<FuncDecl> {
+    let outer = bridge.GetObjCBlockDecl()
+    CJC_NULLPTR_CHECK(outer)
+    for (member in outer.getOrThrow().body.getOrThrow().decls) {
+        if (let Some(funcDecl) <- (member as FuncDecl)) {
+            if (!funcDecl.TestAttr(Attribute.CONSTRUCTOR)) { continue }
+            if (funcDecl.funcBody.isNone()) { continue }
+            let body = funcDecl.funcBody.getOrThrow()
+            if (body.paramLists.size != 1 || body.paramLists[0].params.size != 1) { continue }
+            let paramTy = body.paramLists[0].params[0].GetTy().getOrThrow()
+            if (!paramTy.IsPointer()) { continue }
+            let decl = Ty.GetDeclOfTy(paramTy.typeArgs[0])
+            CJC_NULLPTR_CHECK(decl)
+            if (decl.getOrThrow().identifier.Val() == abiTypeName) { return funcDecl }
         }
-        CJC_ABORT()
-        return None
     }
+    CJC_ABORT()
+    return None
 }
