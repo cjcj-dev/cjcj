@@ -21,6 +21,10 @@ env:
   CJ_HEAP_SIZE: 12GB
 
 jobs:
+  fixed-llvm-tuples:
+    name: Build fixed LLVM tuples
+    uses: ./.github/workflows/platform-tuples.yml
+
   windows-runtime:
     name: Build Windows runtime
     uses: ./.github/workflows/build-windows-runtime.yml
@@ -29,7 +33,8 @@ jobs:
 
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
-    needs: windows-runtime
+    needs: [fixed-llvm-tuples, windows-runtime]
+    if: always()
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     strategy:
@@ -37,33 +42,43 @@ jobs:
       matrix:
         include:
           - runner: macos-26
+            llvm_platform: darwin_aarch64
             sdk_runtime_dir: darwin_aarch64_cjnative
             sdk_archive: cangjie-sdk-mac-aarch64-1.2.0-alpha.20260721165458.tar.gz
           - runner: macos-26-intel
+            llvm_platform: darwin_x86_64
             sdk_runtime_dir: darwin_x86_64_cjnative
             sdk_archive: cangjie-sdk-mac-x64-1.2.0-alpha.20260721165458.tar.gz
           - runner: macos-15
+            llvm_platform: darwin_aarch64
             sdk_runtime_dir: darwin_aarch64_cjnative
             sdk_archive: cangjie-sdk-mac-aarch64-1.2.0-alpha.20260721165458.tar.gz
           - runner: macos-15-intel
+            llvm_platform: darwin_x86_64
             sdk_runtime_dir: darwin_x86_64_cjnative
             sdk_archive: cangjie-sdk-mac-x64-1.2.0-alpha.20260721165458.tar.gz
           - runner: ubuntu-24.04
+            llvm_platform: linux_x86_64
             sdk_runtime_dir: linux_x86_64_cjnative
             sdk_archive: cangjie-sdk-linux-x64-1.2.0-alpha.20260721165458.tar.gz
           - runner: ubuntu-24.04-arm
+            llvm_platform: linux_aarch64
             sdk_runtime_dir: linux_aarch64_cjnative
             sdk_archive: cangjie-sdk-linux-aarch64-1.2.0-alpha.20260721165458.tar.gz
           - runner: ubuntu-22.04
+            llvm_platform: linux_x86_64
             sdk_runtime_dir: linux_x86_64_cjnative
             sdk_archive: cangjie-sdk-linux-x64-1.2.0-alpha.20260721165458.tar.gz
           - runner: ubuntu-22.04-arm
+            llvm_platform: linux_aarch64
             sdk_runtime_dir: linux_aarch64_cjnative
             sdk_archive: cangjie-sdk-linux-aarch64-1.2.0-alpha.20260721165458.tar.gz
           - runner: windows-2025
+            llvm_platform: windows_x86_64
             sdk_runtime_dir: windows_x86_64_cjnative
             sdk_archive: cangjie-sdk-windows-x64-1.2.0-alpha.20260721165458.zip
           - runner: windows-2022
+            llvm_platform: windows_x86_64
             sdk_runtime_dir: windows_x86_64_cjnative
             sdk_archive: cangjie-sdk-windows-x64-1.2.0-alpha.20260721165458.zip
     env:
@@ -126,16 +141,26 @@ jobs:
         if: always() && runner.os == 'Windows'
         run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
 
+      - name: Download current-run fixed LLVM tuple
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: fixed-llvm-tools-${{ matrix.llvm_platform }}
+          path: ${{ runner.temp }}/current-run-fixed-llvm
+
       - name: Download native fixed LLVM tuple
         if: always() && runner.os != 'Windows'
         env:
           GH_TOKEN: ${{ github.token }}
+          TUPLE_ARTIFACT_DIR: ${{ runner.temp }}/current-run-fixed-llvm
         run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
 
       - name: Download native fixed LLVM tuple (Windows)
         if: always() && runner.os == 'Windows'
         env:
           GH_TOKEN: ${{ github.token }}
+          TUPLE_ARTIFACT_DIR: ${{ runner.temp }}/current-run-fixed-llvm
         run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
 
       - name: Official SDK provision (Windows)

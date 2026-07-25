@@ -1,6 +1,6 @@
 #!/usr/bin/env zx
-// Download the newest successful native tuple job for this runner. A workflow
-// run may be red solely because another matrix job failed, so select by job.
+// Prefer the tuple artifact downloaded from this workflow run. If it is absent,
+// retain the cross-run job lookup as a recovery path.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -15,6 +15,7 @@ $.stdio = 'inherit';
 const root = process.env.PLATFORM_CI_ROOT || path.join(process.cwd(), '.platform-ci');
 const repo = process.env.SHIM_ARTIFACT_REPOSITORY || 'cjcj-dev/cjcj';
 const workflow = process.env.TUPLE_WORKFLOW || 'platform-tuples.yml';
+const currentRunArtifact = process.env.TUPLE_ARTIFACT_DIR || '';
 // Follow the branch this workflow runs on; a fixed default starves consumers on
 // iteration branches (darwin waited 30min for artifacts that lived elsewhere).
 // Feature branches without their own tuple run fall back to master's artifact
@@ -66,58 +67,73 @@ export async function selectTupleArtifact() {
   return {runId: '', artifactId: ''};
 }
 
-if (!(await (async () => {
+await fs.mkdir(path.join(root, 'fixed-toolchain'), {recursive: true});
+async function collectFiles(directory, relativeTo = directory) {
+  const found = [];
+  for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...await collectFiles(target, relativeTo));
+    else if (entry.isFile()) found.push(path.relative(relativeTo, target));
+  }
+  return found;
+}
+
+let runId = 'current';
+let artifactId = 'same-run';
+let selectedBranch = 'current';
+let extracted = currentRunArtifact;
+let entries = [];
+if (extracted) {
+  try {
+    entries = await collectFiles(extracted);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+if (entries.length) {
+  console.log(`tuple_selection source=current-run platform=${platform} path=${extracted}`);
+} else {
   const gh = await $({nothrow: true, stdio: 'pipe'})`gh --version`;
   if (gh.exitCode !== 0) {
-    emitBlockedSummary('gh is unavailable; cannot query source-built LLVM tuples');
-    return false;
+    emitBlockedSummary('gh is unavailable; cannot query fallback LLVM tuples');
+    process.exit(0);
   }
   const unzip = process.platform === 'win32' ? {exitCode: 0} : await $({nothrow: true, stdio: 'pipe'})`unzip -v`;
   if (unzip.exitCode !== 0) {
-    emitBlockedSummary('unzip is unavailable; cannot unpack source-built LLVM tuple');
-    return false;
+    emitBlockedSummary('unzip is unavailable; cannot unpack fallback LLVM tuple');
+    process.exit(0);
   }
-  return true;
-})())) process.exit(0);
 
-await fs.mkdir(path.join(root, 'fixed-toolchain'), {recursive: true});
-const {runId, artifactId, branch} = await selectTupleArtifact();
-if (!artifactId) {
-  emitBlockedSummary(`no active ${artifactName} artifact from a recent successful tuple job`);
-  process.exit(0);
-}
-console.log(`tuple_selection run=${runId} artifact=${artifactId} platform=${platform} branch=${branch}`);
-if (process.env.TUPLE_DRY_RUN === '1') process.exit(0);
+  ({runId, artifactId, branch: selectedBranch} = await selectTupleArtifact());
+  if (!artifactId) {
+    emitBlockedSummary(`no active ${artifactName} artifact from this run or a recent successful tuple job`);
+    process.exit(0);
+  }
+  console.log(`tuple_selection source=fallback run=${runId} artifact=${artifactId} platform=${platform} branch=${selectedBranch}`);
+  if (process.env.TUPLE_DRY_RUN === '1') process.exit(0);
 
-const scratch = path.join(process.env.RUNNER_TEMP || process.env.TMPDIR || os.tmpdir(), `platform-ci-${platform}-tuple`);
-await fs.mkdir(scratch, {recursive: true});
-const archive = path.join(scratch, 'artifact.zip');
-const archiveFd = fsSync.openSync(archive, 'w');
-const download = spawnSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifactId}/zip`], {stdio: ['inherit', archiveFd, 'inherit']});
-fsSync.closeSync(archiveFd);
-if (download.status !== 0) process.exit(download.status ?? 1);
+  const scratch = path.join(process.env.RUNNER_TEMP || process.env.TMPDIR || os.tmpdir(), `platform-ci-${platform}-tuple`);
+  await fs.mkdir(scratch, {recursive: true});
+  const archive = path.join(scratch, 'artifact.zip');
+  const archiveFd = fsSync.openSync(archive, 'w');
+  const download = spawnSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifactId}/zip`], {stdio: ['inherit', archiveFd, 'inherit']});
+  fsSync.closeSync(archiveFd);
+  if (download.status !== 0) process.exit(download.status ?? 1);
 
-let entries;
-let extracted;
-if (process.platform === 'win32') {
   extracted = path.join(scratch, 'artifact');
   await fs.rm(extracted, {recursive: true, force: true});
-  const archiveCommandPath = toCommandPath(archive).replaceAll("'", "''");
-  const extractedCommandPath = toCommandPath(extracted).replaceAll("'", "''");
-  await $`pwsh -NoLogo -NoProfile -Command ${`Expand-Archive -LiteralPath '${archiveCommandPath}' -DestinationPath '${extractedCommandPath}' -Force`}`;
-  async function collect(directory) {
-    const found = [];
-    for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
-      const target = path.join(directory, entry.name);
-      if (entry.isDirectory()) found.push(...await collect(target));
-      else if (entry.isFile()) found.push(path.relative(extracted, target));
-    }
-    return found;
+  await fs.mkdir(extracted, {recursive: true});
+  if (process.platform === 'win32') {
+    const archiveCommandPath = toCommandPath(archive).replaceAll("'", "''");
+    const extractedCommandPath = toCommandPath(extracted).replaceAll("'", "''");
+    await $`pwsh -NoLogo -NoProfile -Command ${`Expand-Archive -LiteralPath '${archiveCommandPath}' -DestinationPath '${extractedCommandPath}' -Force`}`;
+  } else {
+    await $`unzip -q ${archive} -d ${extracted}`;
   }
-  entries = await collect(extracted);
-} else {
-  entries = (await $({stdio: 'pipe'})`unzip -Z1 ${archive}`).stdout.split(/\r?\n/).filter(Boolean);
+  entries = await collectFiles(extracted);
 }
+if (process.env.TUPLE_DRY_RUN === '1') process.exit(0);
 const llcEntry = entries.find((entry) => /(^|[\\/])llc\.gz$/.test(entry));
 const shimEntry = entries.find((entry) => /(^|[\\/])cjselfhost_llvmshim\.o$/.test(entry));
 if (!llcEntry || !shimEntry) {
@@ -135,13 +151,8 @@ const dest = path.join(root, 'fixed-toolchain', platform);
 await fs.mkdir(dest, {recursive: true});
 const llc = path.join(dest, 'llc.gz');
 const shim = path.join(dest, 'cjselfhost_llvmshim.o');
-if (process.platform === 'win32') {
-  await fs.copyFile(path.join(extracted, llcEntry), llc);
-  await fs.copyFile(path.join(extracted, shimEntry), shim);
-} else {
-  await $`unzip -p ${archive} ${llcEntry} > ${llc}`;
-  await $`unzip -p ${archive} ${shimEntry} > ${shim}`;
-}
+await fs.copyFile(path.join(extracted, llcEntry), llc);
+await fs.copyFile(path.join(extracted, shimEntry), shim);
 if (!(await fs.stat(llc)).size || !(await fs.stat(shim)).size) throw new Error('tuple artifact contains an empty required file');
 
 let llvmLinkRsp = '';
