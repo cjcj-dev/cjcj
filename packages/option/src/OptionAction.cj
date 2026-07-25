@@ -10,6 +10,8 @@ import cjcj::utils.FileUtil
 import cjcj::utils.NFC as UtilsNFC
 import cjcj::utils.Semaphore as UtilsSemaphore
 import cjcj::utils.Stoi as UtilsStoi
+import cjcj::utils.Stod as UtilsStod
+import cjcj::utils.StrToLower as UtilsStrToLower
 import cjcj::utils.StringToOverflowStrategy
 import cjcj::utils.TryParseInt as UtilsTryParseInt
 import cjcj::utils.ValidOverflowStrategy
@@ -230,6 +232,7 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.DISABLE_CHIR_OPT) { opts.disableChirOpt = true; return handled() }
     if (id == ID.DISABLE_BACKEND_OPT) { opts.disableBackendOpt = true; return handled() }
     if (id == ID.CJCJ_OPTIMIZATION) { opts.cjcjOptimization = true; return handled() }
+    if (id == ID.RUNTIME_CONFIG) { return parseRuntimeConfig(opts, arg.value) }
     if (id == ID.ENABLE_CHIR_REDUNDANT_GETORTHROW_ELIMINATION) {
         opts.SelectCHIROpt(OptimizationFlag.REDUNDANT_LOAD)
         opts.enableChirRGetOrThrowE = true
@@ -471,6 +474,126 @@ private func parsePassedWhen(opts: GlobalOptions, value: String): ActionResult {
         if (!maybeKey.hasValue) { return handled(success: false) }
         opts.passedWhenKeyValue.add(maybeKey.value, val)
     }
+    return handled()
+}
+
+private func isPositiveRuntimeInteger(value: String): Bool {
+    let parsed = TryParseUInt64(value)
+    return parsed.hasValue && parsed.value > 0u64
+}
+
+private func isRuntimeSize(value: String): Bool {
+    if (value.size <= 2) { return false }
+    let normalized = UtilsStrToLower(value)
+    let unit = normalized[normalized.size - 2..normalized.size]
+    if (unit != "kb" && unit != "mb" && unit != "gb") { return false }
+    return isPositiveRuntimeInteger(normalized[0..normalized.size - 2])
+}
+
+private func isRuntimeTime(value: String): Bool {
+    if (value.size <= 1) { return false }
+    if (value[value.size - 1] == b's' && isPositiveRuntimeInteger(value[0..value.size - 1])) {
+        return true
+    }
+    if (value.size <= 2) { return false }
+    let normalized = UtilsStrToLower(value)
+    let unit = normalized[normalized.size - 2..normalized.size]
+    if (unit != "ns" && unit != "us" && unit != "ms") { return false }
+    return isPositiveRuntimeInteger(normalized[0..normalized.size - 2])
+}
+
+private func isRuntimeDecimal(value: String, includeZero: Bool): Bool {
+    if (value.isEmpty()) { return false }
+    var dots: Int64 = 0
+    var digits: Int64 = 0
+    for (byte in value.toArray()) {
+        if (byte == b'.') {
+            dots++
+            if (dots > 1) { return false }
+        } else if (byte >= b'0' && byte <= b'9') {
+            digits++
+        } else {
+            return false
+        }
+    }
+    if (digits == 0) { return false }
+    if (let Some(number) <- UtilsStod(value)) {
+        return if (includeZero) { number >= 0.0 && number <= 1.0 } else { number > 0.0 }
+    }
+    return false
+}
+
+private func isPendingStickyRuntimeConfig(name: String): Bool {
+    return name == "MRT_STICKY_LOG_BARRIER" || name == "MRT_STICKY_MINOR" ||
+        name == "MRT_STICKY_MINOR_VALIDATE" || name == "MRT_STICKY_MINOR_FORCE_SLOW_PATH" ||
+        name == "MRT_STICKY_MINOR_YOUNG_BYTES" || name == "MRT_STICKY_MINOR_MAJOR_INTERVAL"
+}
+
+private func isSupportedRuntimeConfig(name: String): Bool {
+    return name == "cjHeapSize" || name == "cjHeapSwap" || name == "cjRegionSize" ||
+        name == "cjExemptionThreshold" || name == "cjHeapUtilization" || name == "cjHeapGrowth" ||
+        name == "cjAllocationRate" || name == "cjAllocationWaitTime" || name == "cjGCThreshold" ||
+        name == "cjGarbageThreshold" || name == "cjGCInterval" || name == "cjBackupGCInterval" ||
+        name == "cjStackSize" || name == "cjProcessorNum" || name == "cjEnableGC" ||
+        name == "cjPinnedRegionSize" || name == "cjLargeThresholdSize" || name == "cjCacheRatio" ||
+        name == "cjMutatorLockTimeout" || name == "MRT_STACK_CHECK"
+}
+
+private func isValidRuntimeConfigValue(name: String, value: String): Bool {
+    if (name == "cjHeapSize" || name == "cjRegionSize" || name == "cjGCThreshold" ||
+        name == "cjStackSize" || name == "cjPinnedRegionSize" || name == "cjLargeThresholdSize") {
+        return isRuntimeSize(value)
+    }
+    if (name == "cjAllocationWaitTime" || name == "cjGCInterval" || name == "cjBackupGCInterval") {
+        return isRuntimeTime(value)
+    }
+    if (name == "cjExemptionThreshold" || name == "cjHeapUtilization" || name == "cjCacheRatio") {
+        if (!isRuntimeDecimal(value, false)) { return false }
+        if (let Some(number) <- UtilsStod(value)) { return number <= 1.0 }
+        return false
+    }
+    if (name == "cjGarbageThreshold") { return isRuntimeDecimal(value, true) }
+    if (name == "cjHeapGrowth" || name == "cjAllocationRate") {
+        return isRuntimeDecimal(value, false)
+    }
+    if (name == "cjProcessorNum" || name == "cjMutatorLockTimeout") {
+        return isPositiveRuntimeInteger(value)
+    }
+    if (name == "cjHeapSwap") { return value == "on" }
+    if (name == "cjEnableGC") { return value == "0" || value == "1" }
+    if (name == "MRT_STACK_CHECK") { return value == "1" || value == "true" || value == "TRUE" }
+    return false
+}
+
+private func parseRuntimeConfig(opts: GlobalOptions, rawValue: String): ActionResult {
+    let parts = SplitString(rawValue, "=")
+    if (parts.size != 2) {
+        Errorln("Option '--runtime-config' requires exactly one name=value pair.")
+        return handled(success: false)
+    }
+    let name = parts[0].trimAscii()
+    let value = parts[1].trimAscii()
+    if (name.isEmpty() || value.isEmpty()) {
+        Errorln("Option '--runtime-config' requires a non-empty name and value.")
+        return handled(success: false)
+    }
+    if (isPendingStickyRuntimeConfig(name)) {
+        Errorln("Runtime config '" + name + "' requires the pending gcgen sticky-barrier backend support.")
+        return handled(success: false)
+    }
+    if (!isSupportedRuntimeConfig(name)) {
+        Errorln("Unsupported compile-time runtime config: '" + name + "'.")
+        return handled(success: false)
+    }
+    if (opts.runtimeConfigs.contains(name)) {
+        Errorln("Duplicate compile-time runtime config: '" + name + "'.")
+        return handled(success: false)
+    }
+    if (!isValidRuntimeConfigValue(name, value)) {
+        Errorln("Invalid value '" + value + "' for compile-time runtime config '" + name + "'.")
+        return handled(success: false)
+    }
+    opts.runtimeConfigs.add(name, value)
     return handled()
 }
 
