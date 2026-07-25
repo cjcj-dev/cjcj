@@ -2,6 +2,7 @@ package cjcj::driver
 
 import std.collection.*
 import std.process.*
+import cjcj::utils.Semaphore
 
 public type ToolBatch = ArrayList<Tool>
 
@@ -41,7 +42,6 @@ foreign {
         argv: CPointer<CString>,
         envp: CPointer<CString>
     ): Int32
-    func waitpid(pid: Int32, status: CPointer<Int32>, options: Int32): Int32
     func strerror(errnum: Int32): CString
     func free(ptr: CString): Unit
 }
@@ -73,18 +73,6 @@ private func WriteNativeStringArray(
     }
     unsafe { (target + values.size).write(CString(CPointer<UInt8>())) }
     return true
-}
-
-@When[os != "Windows"]
-private func DecodeWaitStatus(status: Int32): Int64 {
-    let signalBits = status & 0x7f
-    if (signalBits == 0) {
-        return Int64((status >> 8) & 0xff)
-    }
-    if (signalBits == 0x7f) {
-        return 1
-    }
-    return Int64(128 + signalBits)
 }
 
 @When[os != "Windows"]
@@ -169,7 +157,8 @@ public class Tool {
     @When[os == "Windows"]
     public func Run(): ToolFuture {
         if (toolType == ToolType.INTERNAL_IMPLEMENTED) {
-            return ThreadFuture(InternalImplementedCommandExec())
+            Semaphore.Get().Acquire()
+            return ThreadFuture(spawn { InternalImplementedCommandExec() })
         }
         try {
             let code = execute(name, args.toArray())
@@ -182,13 +171,44 @@ public class Tool {
     @When[os != "Windows"]
     public func Run(): ToolFuture {
         if (toolType == ToolType.INTERNAL_IMPLEMENTED) {
-            return ThreadFuture(InternalImplementedCommandExec())
+            Semaphore.Get().Acquire()
+            return ThreadFuture(spawn { InternalImplementedCommandExec() })
         }
-        try {
-            let code = RunPOSIX()
-            return ProcessFuture(code)
-        } catch (e: Exception) {
-            return ErrorFuture(e.message)
+        let argvValues = GetFullArgs()
+        let environmentValues = BuildEnvironmentVector()
+        let allocatedStrings = ArrayList<CString>()
+        try (pidPtr = LibC.malloc<Int32>().asResource(),
+            argvPtr = LibC.malloc<CString>(count: argvValues.size + 1).asResource(),
+            envpPtr = LibC.malloc<CString>(count: environmentValues.size + 1).asResource(),
+            nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
+            if (pidPtr.value.isNull() || argvPtr.value.isNull() || envpPtr.value.isNull() || nameCString.value.isNull()) {
+                FreeCStringList(allocatedStrings)
+                return ErrorFuture("failed to allocate process launch buffers")
+            }
+            if (!WriteNativeStringArray(argvValues, argvPtr.value, allocatedStrings)) {
+                FreeCStringList(allocatedStrings)
+                return ErrorFuture("failed to allocate process arguments")
+            }
+            if (!WriteNativeStringArray(environmentValues, envpPtr.value, allocatedStrings)) {
+                FreeCStringList(allocatedStrings)
+                return ErrorFuture("failed to allocate process environment")
+            }
+            Semaphore.Get().Acquire()
+            let spawnStatus = unsafe {
+                if (name.contains("/")) {
+                    posix_spawn(pidPtr.value, nameCString.value, CPointer<Unit>(), CPointer<Unit>(),
+                        argvPtr.value, envpPtr.value)
+                } else {
+                    posix_spawnp(pidPtr.value, nameCString.value, CPointer<Unit>(), CPointer<Unit>(),
+                        argvPtr.value, envpPtr.value)
+                }
+            }
+            FreeCStringList(allocatedStrings)
+            if (spawnStatus != 0) {
+                Semaphore.Get().Release()
+                return ErrorFuture(GetSystemErrorMessage(spawnStatus))
+            }
+            return LinuxProcessFuture(unsafe { pidPtr.value.read() })
         }
     }
 
@@ -279,52 +299,6 @@ public class Tool {
         return environment.toArray()
     }
 
-    @When[os != "Windows"]
-    private func RunPOSIX(): Int64 {
-        let argvValues = GetFullArgs()
-        let environmentValues = BuildEnvironmentVector()
-        let allocatedStrings = ArrayList<CString>()
-        var exitCode: Int64 = 1
-        try (pidPtr = LibC.malloc<Int32>().asResource(),
-            statusPtr = LibC.malloc<Int32>().asResource(),
-            argvPtr = LibC.malloc<CString>(count: argvValues.size + 1).asResource(),
-            envpPtr = LibC.malloc<CString>(count: environmentValues.size + 1).asResource(),
-            nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
-            if (pidPtr.value.isNull() || statusPtr.value.isNull() || argvPtr.value.isNull() ||
-                envpPtr.value.isNull() || nameCString.value.isNull()) {
-                FreeCStringList(allocatedStrings)
-                throw Exception("failed to allocate process launch buffers")
-            }
-            if (!WriteNativeStringArray(argvValues, argvPtr.value, allocatedStrings)) {
-                FreeCStringList(allocatedStrings)
-                throw Exception("failed to allocate process arguments")
-            }
-            if (!WriteNativeStringArray(environmentValues, envpPtr.value, allocatedStrings)) {
-                FreeCStringList(allocatedStrings)
-                throw Exception("failed to allocate process environment")
-            }
-            let spawnStatus = unsafe {
-                if (name.contains("/")) {
-                    posix_spawn(pidPtr.value, nameCString.value, CPointer<Unit>(), CPointer<Unit>(),
-                        argvPtr.value, envpPtr.value)
-                } else {
-                    posix_spawnp(pidPtr.value, nameCString.value, CPointer<Unit>(), CPointer<Unit>(),
-                        argvPtr.value, envpPtr.value)
-                }
-            }
-            FreeCStringList(allocatedStrings)
-            if (spawnStatus != 0) {
-                throw Exception(GetSystemErrorMessage(spawnStatus))
-            }
-            let pid = unsafe { pidPtr.value.read() }
-            let waited = unsafe { waitpid(pid, statusPtr.value, 0) }
-            if (waited < 0) {
-                throw Exception("waitpid failed")
-            }
-            exitCode = DecodeWaitStatus(unsafe { statusPtr.value.read() })
-        }
-        return exitCode
-    }
 }
 
 @When[os != "Windows"]
