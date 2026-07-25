@@ -104,15 +104,15 @@ public class LinuxProcessFuture <: ToolFuture {
 
     public override func GetState(): ToolFutureState {
         var status: Int32 = 0
-        let waitResult = try (statusPtr = LibC.malloc<Int32>().asResource()) {
+        var waitResult: Int32 = 0
+        try (statusPtr = LibC.malloc<Int32>().asResource()) {
             if (statusPtr.value.isNull()) {
                 exitCode = -1
                 return ToolFutureState.FAILED
             }
             unsafe { statusPtr.value.write(0) }
-            let result = unsafe { waitpid(pid, statusPtr.value, WNOHANG) }
+            waitResult = unsafe { waitpid(pid, statusPtr.value, WNOHANG) }
             status = unsafe { statusPtr.value.read() }
-            result
         }
         let signalBits = status & 0x7f
         if (signalBits == 0) {
