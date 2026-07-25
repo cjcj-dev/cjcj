@@ -7486,6 +7486,19 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
     }
 
+    public func AddGeneratedDeclToDeclMap(decl: Decl): Unit {
+        CJC_ASSERT(decl.TestAttr(Attribute.COMPILER_ADD))
+        CJC_ASSERT(!decl.fullPackageName.isEmpty())
+        CJC_ASSERT(decl.outerDecl.isNone())
+
+        let infoOpt = GetPackageInfo(decl.fullPackageName)
+        if ((let None <- infoOpt) || !IsVisitedPackage(decl.fullPackageName)) {
+            return
+        }
+
+        AddDeclToMap(decl, infoOpt.getOrThrow().declMap)
+    }
+
     private func RebuildSourcePackageDeclMap(fullPackageName: String): Unit {
         if (let Some(info) <- GetPackageInfo(fullPackageName)) {
             info.declMap.clear()
