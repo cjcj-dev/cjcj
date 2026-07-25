@@ -84,7 +84,7 @@ function parseGlobal(args) {
     ]) {
       parsed = optionValue(args, index, flag);
       if (parsed) {
-        options[key] = key === 'stdxVersion' ? Number(parsed.value) : parsed.value;
+        options[key] = parsed.value;
         index = parsed.next;
         break;
       }
@@ -99,6 +99,7 @@ function validateGlobalOptions(options) {
   if (!/^[-+]?\d+$/.test(String(options.stdxVersion))) {
     throw new ConfigError(`invalid value for --stdx-version: '${options.stdxVersion}' is not an integer`);
   }
+  options.stdxVersion = Number(options.stdxVersion);
   if (!LOG_LEVELS.has(options.logLevel)) {
     throw new ConfigError(`invalid value for --log-level: '${options.logLevel}'; valid: ${[...LOG_LEVELS].join(', ')}`);
   }
