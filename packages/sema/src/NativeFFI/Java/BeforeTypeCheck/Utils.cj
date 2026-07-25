@@ -51,6 +51,8 @@ public func InsertMethodStub(fd: FuncDecl, importManager: SemaImportManager, typ
     let args = ArrayList<Expr>()
     args.add(arg)
 
+    // C++ caches this lookup in a function-local static. Cangjie has no equivalent construct;
+    // repeated core-declaration lookup returns the same declaration during one compilation.
     let exception = GetExceptionDecl(importManager)
     let throwExpr = CreateThrowException(exception, args, fd.curFile.getOrThrow(), typeManager)
 

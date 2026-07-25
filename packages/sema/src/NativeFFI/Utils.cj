@@ -278,6 +278,8 @@ private func GetStringDecl(decl: Option<Decl>): StructDecl {
 }
 
 // C++ src/Sema/NativeFFI/Utils.cpp:130-135.
+// C++ caches this lookup in a function-local static. Cangjie has no equivalent construct;
+// repeated core-declaration lookup returns the same declaration during one compilation.
 public func GetStringDecl(importManager: ImportManager): StructDecl {
     return GetStringDecl(importManager.GetCoreDecl(STD_LIB_STRING_IDENT))
 }
