@@ -831,7 +831,10 @@ public class ConstEvaluationChecker {
 
     private func ChkSubscriptExpr(subscript: SubscriptExpr, isWeak: Bool): Bool {
         if (let Some(base) <- subscript.baseExpr) {
-            if (!Ty.IsTyCorrect(base.GetTy()) || !IsTupleOrVArrayExpr(base)) {
+            if (!Ty.IsTyCorrect(base.GetTy())) {
+                return false
+            }
+            if (!IsTupleOrVArrayExpr(base)) {
                 DiagExpectConstExpr(diag, subscript, isWeak)
                 return false
             }
