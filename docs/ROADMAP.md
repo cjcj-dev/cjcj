@@ -1,132 +1,119 @@
-# 自举完成路线图（ROADMAP to Full Bootstrap + BC 完全一致）
+# cjcj 路线图
 
-> 本文档定义"任务完全完成"的验收标准、当前基线、阶段计划与执行机制。
-> 配套：`docs/STATUS.md`（当前状态）、`docs/CODEX_DELEGATION_PLAYBOOK.md`（派发手册）、`/tmp/audit/STATUS_ANCHOR.md`（session 台账）。
-> 更新纪律：每合并一个根后更新"当前基线"表；阶段完成后勾选验收项。
+> 当前状态与测量口径见 [STATUS.md](STATUS.md)。本文只描述下一阶段目标，避免在多处
+> 复制易过时的进度数字。
 
----
+cjcj 的编译器主线复刻与自举闭环已经完成。后续工作不再以“能否自举”为中心，而是
+在保持官方语义和默认产物一致的前提下，提高发布质量、测试深度、平台覆盖与性能。
 
-## 一、终态验收标准（全部满足才算完成）
+## 不变量
 
-| # | 目标 | 验收命令 | 通过标准 |
-|---|------|---------|---------|
-| G1 | **BC 与 C++ 完全一致** | `python3 scripts/bcgate.py --self <cjc> -j 10` | differing **0**、byte-identical **2490/2490**、fully-identical samples **114/114**、compile-errors 0 |
-| G1' | G1 严格复核 | 逐样本 `.bc` 全文件级 diff（**关闭** bcgate 的 hash 名字宽松归一化）+ `scripts/sc_bcgate.py`（自编译语料，多包 import 路径） | 双语料均零差异 |
-| G2 | **自举闭环（A2-A4）** | stage2 = selfhost 编译 selfhost 全包并链接 cjc；stage3 = stage2 重复此过程 | stage2 可运行（`--version` 不 SEGV）；stage2 过 G3 全门；**stage3 与 stage2 产物逐字节一致（定点）** |
-| G3 | **功能门全绿** | `npx --yes zx@8 scripts/difftest.mjs -j 10`；smoke15 | difftest 114/114 MISMATCH=0 FAIL=0；smoke15 15/15（多包 import 语料，是 difftest/bcgate 对 import 回归盲区的唯一把关） |
-| G4 | **宏自举** | macro_gate --self | 5/5（宏 .so 由 selfhost 编译并正确展开） |
-| G5 | **完整性清账** | 审计清单 `/tmp/audit/`（1545 gap MANIFEST）+ `rg 'GAP_TODO|INVENTED' packages/` | 每条 gap 状态 = FIXED 或 显式记录的 BLOCKED/债（见第六节债表），无静默省略 |
+以下约束适用于所有里程碑：
 
-**判据关系**：G1 是 G2 的前置（stage2 SEGV 是 codegen 分歧的症状，用户指令：bcgate 一致优先于 stage2 可运行性）。G1' 防 bcgate 宽松模式漏报。G5 防"语料没覆盖到"的暗缺口。
+1. 默认模式忠实复刻 C++ 编译器，不静默省略规则，不以样本特判或 fallback 掩盖缺口。
+2. 默认模式持续保持 bcgate 共享函数 **2490/2490** 字节一致；任何下降都视为回归。
+3. 超越官方的 codegen 优化只能由 `--cjcj-optimization` 承载；旗标关闭时仍须保持
+   默认产物一致。runtime/GC 优化不得放宽语言、finalizer、weak reference、extension
+   更新或卸载语义。
+4. 每个修复必须有官方 C++ 源码锚和定向复现；测试未覆盖不是偏离官方行为的理由。
+5. 发布产物中的编译器名为 `cjc`，模块名与仓库名为 `cjcj`，主分支为 `master`。
 
----
+## 当前基线
 
-## 二、当前基线（2026-07-08，master @ 0b1e016d）
+2026-07-25 的权威基线为：
 
-| 维度 | 数值 |
+| 维度 | 基线 |
 |---|---|
-| 库包自编译（A1） | ✅ 18/18（+ cjc 驱动链接 = stage2 二进制 63MB） |
-| difftest / smoke15 | 114/114 / 15/15 |
-| bcgate | byte-identical **2381/2490（95.6%）**，differing **109**，fully-identical 46/114，compile-errors 0 |
-| A2 stage2 | 链接成功，运行 SIGSEGV（**暂缓**，等 G1 功能分歧清净） |
-| 宏自举 | 2/5；Layer A（decl 属性归一）已修；Layer B' 真根 = CPointer\<Unit\> 参数值 codegen 坍缩（objdump 实锤，在修） |
-| 完整性 | 1545 gap 审计清单持续清账中；symdiff 核心桶（CHIR/CodeGen/Sema）已扫多批 |
+| 编译器主线 | 真实 parse -> sema -> CHIR -> codegen 管线完成，自举闭环达成 |
+| 默认产物一致性 | bcgate 2490/2490，共享函数 differing=0 |
+| 单文件差分 | difftest 114/114 |
+| 结构化差分资产 | 18 例：12 个多包/import、3 个宏包、3 个增量双轮 case |
+| 发布 | v0.0.1 已公开为 pre-release，5 个平台、每个平台 SDK 包及 SHA-256，共 10 个发布产物 |
+| 性能 | Goal-2 权威比值 4.28x（旗开）/4.29x（旗关），同箱同窗 N=5 中位数 |
+| 构建编排 | 仓内 `build/` 与 CI 使用 zx 8 的 `.mjs` 脚本；旧 `cangjie-build/` Python 树已删除 |
 
-**在飞任务**：cptrunit（G4 根）、whydiff9（G1 重排 118 differing）、forinconst（G1 最大簇 for-in 完整 ConstAnalysis）。
+## R1：v0.0.2 发布准备
 
----
+v0.0.2 的目标是把已经完成的自举编译器变成可重复验证的多平台 SDK，而不是增加一个
+新的编译器前端分支。
 
-## 三、依赖关系
+- 保持 Linux x64、Linux aarch64、macOS x64、macOS arm64、Windows x64 五平台发布矩阵。
+- 每个平台生成可重定位 SDK 包和同名 `.sha256`；包内入口统一为 `bin/cjc` 或
+  `bin/cjc.exe`。
+- release workflow 必须消费同一轮构建的 LLVM tools、patched cjpm 与 runtime，避免
+  跨 run 的陈旧 artifact。
+- 对解压后的 SDK 执行编译、链接、运行、宏和包导入 smoke；不以“构建 job 成功”代替
+  最终包验证。
+- 发布前冻结 SDK、runtime、LLVM 与 cjpm 的来源 SHA，并在 release 元数据中保留。
 
+验收入口以 `.github/workflows/release.yml` 与
+`.github/workflows/build-release-package.yml` 为准。v0.0.1 是当前公开预发布，v0.0.2
+仍处于准备阶段。
+
+## R2：测试从样本门扩展到结构门
+
+现有 114 例单文件语料负责快速检查编译、运行与字节一致性，但对 import、宏包和增量
+重建天然覆盖不足。已经入库的 18 例结构化语料补上了这三类形态，下一步是把它从独立
+资产提升为稳定门禁。
+
+- 保持 `scripts/difftest.mjs` 的 114 例快速门与 `scripts/bcgate.py` 的 2490 函数字节门。
+- 使用 `scripts/difftestx_corpus/run.sh` 验证多包/import、macro package 与 incremental
+  两轮重建；固定外层 `JOBS` 和编译器内层 `CJC_JOBS`。
+- 将结构化语料接入 CI 时保留 case manifest 与逐例结果，避免只输出总计。
+- 继续维护 macro、generic、test/mock 等专项 golden gate；文档不固化易漂移的 selfhost
+  结果，当前结果由同一 HEAD 的实跑输出给出。
+- 扩展诊断、平台条件、CJO/增量缓存与 debug info 的行为级回归资产，弥补 bcgate 不覆盖
+  的输出面。
+
+## R3：性能从 4.28x 走向超越官方
+
+Goal-2 的权威口径是同箱、同窗、同 workload、同核域，分别构建 fresh target，使用 N>=3
+中位数；当前 N=5 结果为 4.28x。历史文档中的 11.49x、51.22x 与 1.06x 使用旧版本或
+错误口径，不能作为当前基线。
+
+近期目标是把比值降到 2.0x 以内，长期目标是编译产物性能超过官方，包括 runtime/GC。
+合法优化面只有两类：
+
+- `--cjcj-optimization`：旗开时允许生成优于官方的代码，旗关仍保持 bcgate 2490/2490。
+- runtime/GC：不改变 compiler 输出字节，但必须保持 GC、并发、finalizer、weak reference、
+  TypeInfo 与动态扩展语义。
+
+当前画像显示 GC Trace/Mark、写屏障与 TypeInfo 是主要成本桶。每把性能改动必须同时给出
+正确性门、前后二进制/IR 绑定和同口径 N>=3 收益；低于噪声的结果记录为负结果，不以
+单轮 wall time 宣称收益。
+
+## R4：忠实度与平台债持续清账
+
+主线完工不等于所有语料和平台行为都已经穷尽。后续清账按用户可观察面排序：
+
+1. 诊断精确性、source range 与平台条件分支；
+2. 多包 import、CJO 序列化、增量重建与 macro host/target 分离；
+3. debug info、sanitizer、LTO 和链接器/归档确定性；
+4. 官方 C++ 新提交带来的同步差异；
+5. 非发布平台与生态研究。
+
+缺失的上游设施必须先完整移植，不在 downstream 写简化替代。默认输出不变的并发化也要
+验证诊断顺序、dump 顺序、archive 顺序与竞争稳定性，不能只看逐函数 IR。
+
+## 研究方向：WebAssembly
+
+WebAssembly 当前是调研结论，尚未立项。线性内存路线需要重做精确 GC 根发现、异常、
+32 位对象 ABI、协程和 WASI/runtime 平台层，不能按普通 target triple 扩展估算。
+完整边界、8 类阻塞面与 86-134 人周估算见
+[WASM_PORTING.md](WASM_PORTING.md)。最小 4-6 人周演示只证明 backend feasibility，
+不构成“支持 wasm”的产品声明。
+
+## 验收入口
+
+本地开发和 CI 的权威入口均在仓内：
+
+```sh
+cjpm build
+npx --yes zx@8 scripts/difftest.mjs -j 10
+python3 scripts/bcgate.py --self target/release/bin/cjcj::cjc -j 10
+JOBS=4 CJC_JOBS=1 bash scripts/difftestx_corpus/run.sh
 ```
-Phase 1  bcgate differing 118→0 ──────────┐
-   (P1.1 for-in ConstAnalysis)            │
-   (P1.2 whydiff 重排→逐根清)              ▼
-   (P1.3 cosmetic 收尾)            Phase 3  A2 stage2 可运行
-Phase 2  宏自举 2/5→5/5 (独立并行)          → A3 stage2 过全门
-Phase 4  完整性清账 (独立并行,持续)          → A4 stage3 定点 = 自举完成
-                                           ▼
-                                   Phase 5  终验冻结 (G1'+G5 严格复核)
-```
 
----
-
-## 四、阶段计划
-
-### Phase 1：bcgate differing 118→0（当前主攻）
-
-**方法**：收敛循环 = whydiff 全量分簇重排 → 按样本数取最大功能簇 → 对照 C++ 定位根 → codex 忠实移植 → 独立门控+亲审 → 合并 → 重排。每合 2-3 根重跑 whydiff 刷新排名（根之间有遮蔽效应）。
-
-- **P1.1 for-in `<main>` 残余（~20-28 样本，最大单根）**：interim ConstTerminatorAnalysis（81e9be0c）只折无 break/continue 的简单形；含 break/continue 的 delay-exit 需完整移植 C++ `CHIR/Analysis/ConstAnalysis.cpp`（格+全 opcode 转移）挂在已有 dataflow Engine 上，ConstPropagation 升级为全规则，块删除改 `funcsNeedRemoveBlocks` 集合限定（CHIR.cpp:495，同时清偿 81e9be0c 的包级删除债）。→ 在飞 forinconst。
-- **P1.2 其余功能簇**：whydiff9 重排后逐根派发。已知候选（旧排名，待刷新）：Range.last lowering（~14）、for-keeping（~22）。每根一个 worktree、一个 codex、AGENTS.md 约束、独立 verify.sh full 门控。
-- **P1.3 cosmetic 簇收尾**：纯块标号/命名序差异（whydiff 判 cosmetic 的）最后统一处理——多数源于 pass 顺序/临时编号分配序，须对照 C++ 的确切发号点修，不许改 C++ 侧或加归一化遮蔽。
-- **P1.4 严格模式复核（G1'）**：differing=0 后关闭 bcgate 宽松归一化跑全文件 diff + sc_bcgate 自编译语料；暴露的 hash 名/多包差异按同方法清。
-
-**风险**：ConstAnalysis 是 ~3000 行设计重移植，codex 发明风险高 → AGENTS.md + 诊断 spec（forincfg_diagnosis.md）+ 亲审"是否复用 Engine、opcode 全计数"。
-
-### Phase 2：宏自举（独立并行）
-
-- **B' 根**（在飞 cptrunit）：codegen 把 CPointer\<Unit\> 函数参数值按零大小 Unit 坍缩（已收窄到 MapCFuncParameters 零大小分支，对照 C++ `IsZeroSizedTypeInC`——C++ 里 CPointer\<T\> 恒 i8*，值不因 T=Unit 丢失）。验收：objdump 宏 wrapper 从 `movq $0x0` 变真实指针传递；macro_gate 2/5→提升；xcross 四象限 SELF .so 不崩。
-- 修完 B' 后若 macro_gate 仍 <5/5：按同方法（gdb+objdump+四象限交叉编译）定位下一层，禁 band-aid 特判宏路径。
-
-### Phase 3：自举闭环 A2→A4（触发条件：Phase 1 功能簇清零；cosmetic 未清不阻塞，SEGV 只可能来自功能性分歧）
-
-1. **A2**：用清净后的 master 重编全包 → 重链 stage2 cjc → `--version`/`--help` 冒烟。若仍 SEGV：按 dupfn-corrupts-selfhost-binary 三步判别（同签名重复函数污染）→ runtime 初始化序 → TypeInfo 构造器（.ti 新发射路径），gdb 定位后回到 Phase 1 方法修根，**不做链接层 workaround**。
-2. **A3**：stage2 cjc 跑 difftest 114/114 + smoke15 + bcgate（stage2 产物 vs C++ 参考，应与 stage1 结果一致）。
-3. **A4**：stage2 编译 selfhost 源得 stage3，`cmp` 逐字节比对 stage2/stage3 全部 .a+cjc（剥离时间戳/路径类非确定性段后必须零差异；若有非确定性来源=真 bug，修根）。定点达成 = **自举完成**。
-
-### Phase 4：完整性清账（独立并行，持续到 G5）
-
-- symdiff 余桶（Sema 余/GenericInstantiation/Modules 余/CHIR 剩）继续按桶扫+移植；每桶产 FIXED/BLOCKED 对账（按 symbol）。
-- 第六节债表逐条清偿。
-- unittest-port 战役（C++ unittest → std.unittest）持续低优先推进，作为 G5 的行为级证据。
-
-### Phase 5：终验与冻结
-
-1. 全门一次性跑齐（G1/G1'/G2/G3/G4/G5），原始输出存档入 repo（docs/FINAL_ACCEPTANCE.md）。
-2. 债表清零或每条余债有显式接受记录。
-3. master 打 tag（如 `bootstrap-complete`），STATUS.md 定稿。
-
----
-
-## 五、执行机制（已验证有效，不变）
-
-- **派发**：`bash /root/cj_build/audit_persist/dispatch_codex.sh <worktree> <prompt.md> <log>` —— 自动投放 AGENTS.md 忠实硬约束（每轮自加载，禁发明/禁静默省略/BLOCKED=合格交付）+ git-exclude。worktree 必 `git worktree add -b fix/<name>`（禁占 master）。
-- **诊断先行**：设计重的根（跨 pass 框架、ABI）先出精确 C++ 机制+file:line 的 spec 再派实现；spec 压制发明。
-- **独立门控**：codex 自检不作数。合并前必由 orchestrator 跑 `bash /tmp/audit/verify.sh <wt> full <lane>`：difftest 114/114 + bcgate 非回归（byte-identical ≥ 当前基线且 compile-errors 0）+ smoke15 15/15。
-- **亲审**：逐符号对照 C++ file:line 抽查忠实性；折叠/删除类改动必须引用 C++ 做该操作的确切 pass。不忠实 = 拒，带审稿意见换新路径 `fix/<id>_rN` 重派（勿复用被拒 worktree 路径，防 auth-poison）。
-- **合并**：orchestrator 独占。ff-only（或 squash 单 commit）、作者 `Zxilly <zxilly@outlook.com>`、单行 semantic commit（feat:/fix:/chore:/chir:/codegen:）、禁 AI 署名、push origin master。bcgate 回归 = 绝不合。
-- **并发**：正交任务全部并发（实际约束 = build-storm ~16 并发编译）；监控看日志 MTIME 非 tail。
-- **节奏**：每次合并记 STATUS_ANCHOR（session 编号+bcgate 前后值）；bcgate 趋势是唯一进度主指标。
-
----
-
-## 六、已知忠实债与风险表（G5 清账对象）
-
-| 债 | 内容 | 清偿计划 |
-|---|---|---|
-| for-in 块删除 scope | 81e9be0c 用包级 UnreachableBlockEliminationForPackage，C++ 是 funcsNeedRemoveBlocks 限定（CHIR.cpp:495）；当前等价+非回归 | forinconst 落地时改 scoped |
-| JoinAndMeet stub | sema 类型格 Join/Meet 简化实现 | Phase 4 对照 C++ JoinAndMeet.cpp 补全 |
-| cjo text-scrape | cjo 元数据部分靠文本抽取而非结构化反序列化 | Phase 4，importmgr 战役后续 |
-| CGTypeInfo MTABLE | MTABLE 相关 TypeInfo 字段未完整 | Phase 4，撞到即修（可能被 A2/A3 逼出） |
-| pointer-identity（R-C） | Cut1-3 有界改+objectId 键 stand-in，未做 C++ 全量结构化 interning | 仅当 bcgate/自举被证明需要 Cut4 时升级 |
-| CME utils used-set | addImportedDeclToCurrentPackage 与 C++ used-set 分离未做 | Phase 4 |
-| parity 记账（A18 改名/B3C4 thunk/D7 keeptypes） | 0704 主动脉着陆时的具名 parity 债 | 随 P1.2 whydiff 簇逐个对上销账 |
-| bcgate 盲区 | 宽松归一化遮 hash 名差异；单文件语料对 import 路径回归盲 | G1' 严格复核 + smoke15 常开 + sc_bcgate |
-| sema 宽松接受重复函数 | 同签名重复函数静默接受会污染自举二进制 | A2 若 SEGV 按三步判别排查；Phase 4 补 sema 重复检查 |
-
----
-
-## 七、里程碑核对清单
-
-- [x] A1：18/18 库包自编译（2026-07-07）
-- [x] bcgate ≥95%（2381/2490，2026-07-08；session44 whydiff9+valanalysis +9）
-- [ ] 宏自举 5/5（Phase 2）
-- [ ] bcgate 功能簇清零（Phase 1 主体）
-- [ ] bcgate differing = 0（G1）
-- [ ] 严格模式+sc_bcgate 零差异（G1'）
-- [ ] A2 stage2 可运行
-- [ ] A3 stage2 全门绿
-- [ ] A4 stage3 定点 = **自举完成**（G2）
-- [ ] 债表清零/显式接受（G5）
-- [ ] 终验存档+打 tag（Phase 5）
+发布构建与完整源码构建分别以 `.github/workflows/release.yml`、
+`.github/workflows/srcbuild.yml` 为准。命令中的并发度是示例，受共享构建环境约束时应显式
+降低外层与编译器内层并发。
