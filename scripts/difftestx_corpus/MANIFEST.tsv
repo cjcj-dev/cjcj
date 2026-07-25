@@ -1,0 +1,19 @@
+case	kind	coverage	origin
+01_generic_two_packages	import	2 packages; generic qualified and wildcard imports	compiler/cjnative/Packages/Generic/generic_import_invoke_01
+02_generic_alias	import	generic value alias import	compiler/cjnative/Packages/Generic/variable_generic_importas_01
+03_class_import	import	generic inherited class import	compiler/cjnative/Packages/Generic/class_generic_import_05
+04_extension_import	import	imported extension method	compiler/cjnative/Packages/Generic/generic_import_ext_int_11
+05_duplicate_import	import	duplicate declaration import	compiler/cjnative/Packages/import/import_twice_02
+06_import_as	import	package alias import	compiler/cjnative/Packages/import/import_as_01
+07_from_import_as	import	declaration alias import	compiler/cjnative/Packages/import/from_import_as_01
+08_wildcard_import	import	wildcard import with two symbols	compiler/cjnative/Packages/import/pkgs_import_invoke_01
+09_generic_import	import	imported explicit generic call	compiler/cjnative/Packages/import/import_generics/import_generic_01
+10_public_reexport	import	public re-export across 3 packages	compiler/cjnative/Packages/import/public_import/public_import_01
+11_multi_source_package	import	2 source files in one imported package	compiler/cjnative/Packages/Generic/generic_import_bnf_12
+12_three_package_chain	import	transitive package dependency and link order	compiler/cjnative/Packages/import/public_import/public_import_10
+13_macro_identity_build	macro-import	compile macro package; direct import; expand; run	compiler/cjnative/MetaProgramming/Macro/Import/001/macro_import_10009.cj
+14_macro_alias_build	macro-import	compile macro package; alias import; expand; run	compiler/cjnative/MetaProgramming/Macro/Import/002/macro_import_20001.cj
+15_macro_public_build	macro-import	compile macro package; wildcard import; expand; run	compiler/cjnative/Packages/import/public_import/define_macro.cj
+16_incremental_function	incremental-build	function body rebuild; two incremental passes	compiler/cjnative/Chir/IncrementalCompile/case06
+17_incremental_generic	incremental-build	generic body rebuild; two incremental passes	compiler/cjnative/Chir/IncrementalCompile/case38
+18_incremental_class	incremental-build	class method rebuild; two incremental passes	compiler/cjnative/Chir/IncrementalCompile/case40
