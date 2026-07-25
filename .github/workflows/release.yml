@@ -44,6 +44,17 @@ jobs:
     name: Build LLVM tools
     uses: ./.github/workflows/build-fixed-llc.yml
 
+  native-fixed-llvm-tuples:
+    name: Build Darwin and Windows LLVM tuples
+    uses: ./.github/workflows/platform-tuples.yml
+    with:
+      platform_set: darwin-windows
+
+  patched-cjpm:
+    name: Build patched cjpm
+    uses: ./.github/workflows/build-cjpm.yml
+    secrets: inherit
+
   windows-runtime:
     name: Build Windows runtime
     uses: ./.github/workflows/build-windows-runtime.yml
@@ -52,7 +63,8 @@ jobs:
 
   build:
     name: ${{ matrix.platform }} / Build release
-    needs: [fixed-llvm-tools, windows-runtime]
+    needs: [fixed-llvm-tools, native-fixed-llvm-tuples, patched-cjpm, windows-runtime]
+    if: always()
     strategy:
       fail-fast: false
       matrix:
@@ -98,6 +110,6 @@ jobs:
           mapfile -t assets < <(find dist -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.zip' \) | sort)
           gh release create "v${{ inputs.version }}" "${flags[@]}" "${assets[@]}"
 
-# Darwin and Windows consume native artifacts from platform-tuples.yml through
-# ci/platform_matrix/fetch_llvm_tuple.mjs; both Linux architectures consume the
-# source-built artifacts from build-fixed-llc.yml.
+# Darwin and Windows consume current-run native artifacts from
+# platform-tuples.yml; both Linux architectures consume current-run artifacts
+# from build-fixed-llc.yml. Cross-run fetch remains a recovery path.

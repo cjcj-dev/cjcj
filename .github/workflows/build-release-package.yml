@@ -80,10 +80,19 @@ jobs:
         if: runner.os == 'Windows'
         run: npx --yes zx@8 ci/platform_matrix/verify_windows_runtime_exports.mjs
 
+      - name: Download current-run fixed LLVM tuple (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: fixed-llvm-tools-${{ inputs.llvm_platform }}
+          path: ${{ runner.temp }}/current-run-fixed-llvm
+
       - name: Download native fixed LLVM tuple (Windows)
         if: runner.os == 'Windows'
         env:
           GH_TOKEN: ${{ github.token }}
+          TUPLE_ARTIFACT_DIR: ${{ runner.temp }}/current-run-fixed-llvm
         run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
 
       - name: Official SDK provision (Windows)
@@ -93,11 +102,20 @@ jobs:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
         run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
 
+      - name: Download current-run patched cjpm
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: patched-cjpm-windows_x86_64
+          path: ${{ runner.temp }}/current-run-patched-cjpm
+
       - name: Install patched cjpm (Windows)
         id: fetch-cjpm
         if: runner.os == 'Windows'
         env:
           GH_TOKEN: ${{ github.token }}
+          CJPM_ARTIFACT_DIR: ${{ runner.temp }}/current-run-patched-cjpm
         run: npx --yes zx@8 ci/platform_matrix/fetch_cjpm.mjs
 
       - name: Build cjcj (Windows)
@@ -167,8 +185,17 @@ jobs:
 
       - name: Download native fixed LLVM tuple (macOS)
         if: runner.os == 'macOS'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: fixed-llvm-tools-${{ inputs.llvm_platform }}
+          path: ${{ runner.temp }}/current-run-fixed-llvm
+
+      - name: Install native fixed LLVM tuple (macOS)
+        if: runner.os == 'macOS'
         env:
           GH_TOKEN: ${{ github.token }}
+          TUPLE_ARTIFACT_DIR: ${{ runner.temp }}/current-run-fixed-llvm
         run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
 
       - name: Official SDK + cjcj build (macOS)

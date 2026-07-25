@@ -9,18 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  LLVM_FORK_URL: https://github.com/cjcj-dev/cjcj-llvm.git
-  LLVM_FORK_REF: fix/scheddag-memcorrupt
-  # getUNDEF lowering + clang CTAD fix + in-tree demangler source stub.
-  LLVM_FORK_SHA: 4f61703c3225d60a7dc839718d822911628e6740
-  # Supplies ModuleFormat.fbs.
-  CANGJIE_COMPILER_URL: https://gitcode.com/Cangjie/cangjie_compiler.git
-  CANGJIE_COMPILER_SHA: 87fff87a1883da9bfe5956296d8079e8a7f9d15f
-  # Matches the FlatBuffers revision pinned by cangjie_compiler.
-  FLATBUFFERS_URL: https://gitcode.com/openharmony/third_party_flatbuffers.git
-  FLATBUFFERS_SHA: c3e4d69cbd5950e43f775ba76eadb30750d6e0b7
-
 jobs:
   build-tools:
     name: ${{ matrix.platform }} / Build tools
@@ -43,12 +31,19 @@ jobs:
       - name: Checkout cjcj
         uses: actions/checkout@v7
 
+      - name: Load LLVM pin
+        id: llvm-pin
+        run: |
+          cat ci/llvm_pin.env >> "$GITHUB_ENV"
+          source ci/llvm_pin.env
+          echo "sha=$LLVM_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Restore LLVM tools cache
         id: cache
         uses: actions/cache@v6
         with:
           path: fixed-toolchain/${{ matrix.platform }}
-          key: fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ env.LLVM_FORK_SHA }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
+          key: fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
 
       - name: Install build dependencies
         if: steps.cache.outputs.cache-hit != 'true'
@@ -59,9 +54,11 @@ jobs:
       - name: Checkout source repositories
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          git clone --filter=blob:none --branch "$LLVM_FORK_REF" "$LLVM_FORK_URL" llvm-fork
-          git -C llvm-fork checkout --detach "$LLVM_FORK_SHA"
-          test "$(git -C llvm-fork rev-parse HEAD)" = "$LLVM_FORK_SHA"
+          git init llvm-fork
+          git -C llvm-fork remote add origin "$LLVM_URL"
+          git -C llvm-fork fetch --depth=1 origin "$LLVM_SHA"
+          git -C llvm-fork checkout --detach FETCH_HEAD
+          test "$(git -C llvm-fork rev-parse HEAD)" = "$LLVM_SHA"
 
           git clone --filter=blob:none --no-checkout "$CANGJIE_COMPILER_URL" cangjie-compiler
           git -C cangjie-compiler sparse-checkout set schema
