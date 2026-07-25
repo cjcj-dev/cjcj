@@ -30,6 +30,12 @@ private let PKG_INIT_FUNC_METADATA: String = "pkg_init_func"
 private let HAS_INVOKED_PKG_INIT_LITERAL: String = "has_invoked_pkg_init_literal"
 private let RUNTIME_CONFIG_GLOBAL_PREFIX: String = ".cjcj.runtime.config."
 
+// TEMPORARY selfhost safety gate: keep backend concurrency disabled by default because the selfhost runtime has a
+// concurrent-GC phase-handshake race that is nearly reproducible with jobs=4 (see REPORT-llcpar2.md for the stacks).
+// Delete this gate and restore the official default concurrency only after the runtime race is fixed and the
+// concurrent compiler passes the same-input 5-SHA determinism gate.
+private let TEMPORARILY_ENABLE_BACKEND_CONCURRENCY: Bool = false
+
 private type LLVMIsACallInstFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
 private type LLVMGetCalledValueFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
 private type LLVMSetValueName2Func = CFunc<(LLVMValueRef, CString, UIntNative) -> Unit>
@@ -55,7 +61,8 @@ private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
         return result
     }
     let cgModules = cgPkgContext.GetCGModules()
-    let threadNum = if (cgPkgContext.GetGlobalOptions().codegenDebugMode) { 1 } else { cgModules.size }
+    let threadNum = if (!TEMPORARILY_ENABLE_BACKEND_CONCURRENCY ||
+        cgPkgContext.GetGlobalOptions().codegenDebugMode) { 1 } else { cgModules.size }
     if (threadNum == 1) {
         for (cgModule in cgModules) {
             result = result && cgModule.InitIncrementalGen()
@@ -134,7 +141,11 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
     if (options.NeedDumpIRToFile()) {
         ClearOldIRDumpFiles(options.output, cgPkgContext.GetCurrentPkgName())
     }
-    let threadNum = if (options.codegenDebugMode) { 1 } else { cgModules.size }
+    let threadNum = if (!TEMPORARILY_ENABLE_BACKEND_CONCURRENCY || options.codegenDebugMode) {
+        1
+    } else {
+        cgModules.size
+    }
     if (threadNum == 1) {
         for (cgModule in cgModules) {
             GenSubCHIRPackage(cgModule)
