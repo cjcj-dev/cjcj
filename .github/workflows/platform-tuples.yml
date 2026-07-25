@@ -9,6 +9,12 @@ on:
     branches: [ci/platform-matrix]
   workflow_dispatch:
   workflow_call:
+    inputs:
+      platform_set:
+        description: Tuple subset to build in this caller run
+        required: false
+        type: string
+        default: all
 
 permissions:
   contents: read
@@ -45,6 +51,7 @@ jobs:
           - runner: windows-2022
             platform: windows_x86_64
             llvm-targets: AArch64;ARM;X86
+        exclude: ${{ fromJSON(inputs.platform_set == 'darwin-windows' && '[{"platform":"linux_x86_64"},{"platform":"linux_aarch64"}]' || '[]') }}
     env:
       TUPLE_PLATFORM: ${{ matrix.platform }}
       LLVM_TARGETS: ${{ matrix.llvm-targets }}
