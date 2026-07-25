@@ -45,6 +45,8 @@ class ConditionalCompilationImpl {
     private var test: Bool = false
     private let diag: BasicDiagnosticEngine
     private let passedCondition: HashMap<String, String> = HashMap<String, String>()
+    private let builtinConditionCache: HashMap<String, String> = HashMap<String, String>()
+    private let judgeConditionCache: HashMap<String, Bool> = HashMap<String, Bool>()
 
     public init(config: ConditionalCompilationConfig) {
         backendType = config.backendType
@@ -56,6 +58,17 @@ class ConditionalCompilationImpl {
         for ((key, value) in config.passedCondition) {
             passedCondition.add(key, value)
         }
+        InitBuiltinConditionCache()
+    }
+
+    private func InitBuiltinConditionCache(): Unit {
+        builtinConditionCache.add(ARCH_STR, GetArchType())
+        builtinConditionCache.add(BACKEND_STR, GetBackendType())
+        builtinConditionCache.add(CJC_VERSION_STR, GetCJCVersion())
+        builtinConditionCache.add(DEBUG_STR, GetDebug())
+        builtinConditionCache.add(ENV_STR, GetEnv())
+        builtinConditionCache.add(TEST_STR, GetTest())
+        builtinConditionCache.add(OS_STR, GetOSType())
     }
 
     private func GetBackendType(): String {
@@ -101,13 +114,9 @@ class ConditionalCompilationImpl {
     }
 
     private func GetRelatedInfo(target: String): Option<String> {
-        if (target == ARCH_STR) { return Some(GetArchType()) }
-        if (target == BACKEND_STR) { return Some(GetBackendType()) }
-        if (target == CJC_VERSION_STR) { return Some(GetCJCVersion()) }
-        if (target == DEBUG_STR) { return Some(GetDebug()) }
-        if (target == ENV_STR) { return Some(GetEnv()) }
-        if (target == TEST_STR) { return Some(GetTest()) }
-        if (target == OS_STR) { return Some(GetOSType()) }
+        if (let Some(value) <- builtinConditionCache.get(target)) {
+            return value
+        }
         return GetUserDefinedInfoByName(target)
     }
 
@@ -171,7 +180,12 @@ class ConditionalCompilationImpl {
         }
         let left = (leftExpr as RefExpr).getOrThrow()
         let conditionStr = left.ref.identifier.Val()
-        if (!ConditionCheck(conditionStr, be.begin, right.stringValue)) {
+        let rightValue = right.stringValue
+        let cacheKey = MakeJudgeConditionCacheKey(conditionStr, be.op, rightValue)
+        if (let Some(cached) <- judgeConditionCache.get(cacheKey)) {
+            return cached
+        }
+        if (!ConditionCheck(conditionStr, be.begin, rightValue)) {
             return false
         }
         let relatedInfo = GetRelatedInfo(conditionStr)
@@ -183,16 +197,20 @@ class ConditionalCompilationImpl {
                 be.begin, arguments: [conditionStr, TokenKindText(be.op)]).Emit()
             return false
         }
+        var evalResult = false
         if (conditionStr == CJC_VERSION_STR) {
-            let rightVersion = ParseVersion(right.stringValue)
+            let rightVersion = ParseVersion(rightValue)
             if (!rightVersion.isValid) {
                 diag.DiagnoseRefactor(
                     BasicDiagKindRefactor.conditional_compilation_not_support_cjc_version_format, be.begin).Emit()
                 return false
             }
-            return EvalVersion(be, cjcVersionInfo, rightVersion)
+            evalResult = EvalVersion(be, cjcVersionInfo, rightVersion)
+        } else {
+            evalResult = Eval(be, relatedInfo.getOrThrow(), rightValue)
         }
-        return Eval(be, relatedInfo.getOrThrow(), right.stringValue)
+        judgeConditionCache.add(cacheKey, evalResult)
+        return evalResult
     }
 
     private func EvalParenExpr(pe: ParenExpr): Bool {
