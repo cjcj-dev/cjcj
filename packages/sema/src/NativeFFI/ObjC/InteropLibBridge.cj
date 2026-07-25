@@ -98,7 +98,6 @@ public class InteropLibBridge {
     private static var objCMsgSendSuperDecl: Option<Option<FuncDecl>> = None
     private static var objCReleaseDecl: Option<Option<FuncDecl>> = None
     private static var objCRespondsToSelectorDecl: Option<Option<FuncDecl>> = None
-    private static var getProtocolDecl: Option<Option<FuncDecl>> = None
     private static var objCRetainDecl: Option<Option<FuncDecl>> = None
     private static var objCAutoReleaseDecl: Option<Option<FuncDecl>> = None
     private static var withObjCSuperDecl: Option<Option<FuncDecl>> = None
@@ -385,12 +384,6 @@ public class InteropLibBridge {
         if (let Some(result) <- InteropLibBridge.objCRespondsToSelectorDecl) { return result }
         let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RESPONSE_TO_SELECTOR, ASTKind.FUNC_DECL)
         InteropLibBridge.objCRespondsToSelectorDecl = Some(result)
-        return result
-    }
-    public func GetGetProtocolDecl(): Option<FuncDecl> {
-        if (let Some(result) <- InteropLibBridge.getProtocolDecl) { return result }
-        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_PROTOCOL, ASTKind.FUNC_DECL)
-        InteropLibBridge.getProtocolDecl = Some(result)
         return result
     }
     public func GetObjCRetainDecl(): Option<FuncDecl> {
