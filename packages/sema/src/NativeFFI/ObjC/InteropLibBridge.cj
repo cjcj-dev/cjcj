@@ -79,6 +79,21 @@ public class InteropLibBridge {
     private static var objCUnreachableCodeExceptionDecl: Option<Option<ClassDecl>> = None
     private static var objCOptionalMethodUnimplementedExceptionDecl: Option<Option<ClassDecl>> = None
     private static var objCStaticMethodCallOnIntefaceExceptionDecl: Option<Option<ClassDecl>> = None
+    private static var getFromRegistryByNativeHandleDecl: Option<Option<FuncDecl>> = None
+    private static var getFromRegistryByIdDecl: Option<Option<FuncDecl>> = None
+    private static var putToRegistryDecl: Option<Option<FuncDecl>> = None
+    private static var removeFromRegistryDecl: Option<Option<FuncDecl>> = None
+    private static var allocDecl: Option<Option<FuncDecl>> = None
+    private static var withAutoreleasePoolDecl: Option<Option<FuncDecl>> = None
+    private static var withAutoreleasePoolObjDecl: Option<Option<FuncDecl>> = None
+    private static var registerNameDecl: Option<Option<FuncDecl>> = None
+    private static var getInstanceVariableObjDecl: Option<Option<FuncDecl>> = None
+    private static var setInstanceVariableObjDecl: Option<Option<FuncDecl>> = None
+    private static var getInstanceVariableDecl: Option<Option<FuncDecl>> = None
+    private static var setInstanceVariableDecl: Option<Option<FuncDecl>> = None
+    private static var getClassDecl: Option<Option<FuncDecl>> = None
+    private static var getProtoDecl: Option<Option<FuncDecl>> = None
+    private static var getSuperClassDecl: Option<Option<FuncDecl>> = None
     private let importManager: SemaImportManager
     private let diag: DiagnosticEngine
 
@@ -207,21 +222,97 @@ public class InteropLibBridge {
         InteropLibBridge.objCStaticMethodCallOnIntefaceExceptionDecl = Some(result)
         return result
     }
-    public func GetGetFromRegistryByNativeHandleDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_NATIVE_HANDLE, ASTKind.FUNC_DECL) }
-    public func GetGetFromRegistryByIdDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_ID, ASTKind.FUNC_DECL) }
-    public func GetPutToRegistryDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_PUT_TO_REGISTRY, ASTKind.FUNC_DECL) }
-    public func GetRemoveFromRegistryDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_REMOVE_FROM_REGISTRY, ASTKind.FUNC_DECL) }
-    public func GetAllocDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_ALLOC, ASTKind.FUNC_DECL) }
-    public func GetWithAutoreleasePoolDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_WITH_AUTORELEASE_POOL, ASTKind.FUNC_DECL) }
-    public func GetWithAutoreleasePoolObjDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_WITH_AUTORELEASE_POOL_OBJ, ASTKind.FUNC_DECL) }
-    public func GetRegisterNameDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_REGISTER_NAME, ASTKind.FUNC_DECL) }
-    public func GetGetInstanceVariableObjDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_INSTANCE_VARIABLE_OBJ, ASTKind.FUNC_DECL) }
-    public func GetSetInstanceVariableObjDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_SET_INSTANCE_VARIABLE_OBJ, ASTKind.FUNC_DECL) }
-    public func GetGetInstanceVariableDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_INSTANCE_VARIABLE, ASTKind.FUNC_DECL) }
-    public func GetSetInstanceVariableDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_SET_INSTANCE_VARIABLE, ASTKind.FUNC_DECL) }
-    public func GetGetClassDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_CLASS, ASTKind.FUNC_DECL) }
-    public func GetGetProtoDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_PROTOCOL, ASTKind.FUNC_DECL) }
-    public func GetGetSuperClassDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_SUPER_CLASS, ASTKind.FUNC_DECL) }
+    public func GetGetFromRegistryByNativeHandleDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.getFromRegistryByNativeHandleDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_NATIVE_HANDLE,
+            ASTKind.FUNC_DECL)
+        InteropLibBridge.getFromRegistryByNativeHandleDecl = Some(result)
+        return result
+    }
+    public func GetGetFromRegistryByIdDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.getFromRegistryByIdDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_ID, ASTKind.FUNC_DECL)
+        InteropLibBridge.getFromRegistryByIdDecl = Some(result)
+        return result
+    }
+    public func GetPutToRegistryDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.putToRegistryDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_PUT_TO_REGISTRY, ASTKind.FUNC_DECL)
+        InteropLibBridge.putToRegistryDecl = Some(result)
+        return result
+    }
+    public func GetRemoveFromRegistryDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.removeFromRegistryDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_REMOVE_FROM_REGISTRY, ASTKind.FUNC_DECL)
+        InteropLibBridge.removeFromRegistryDecl = Some(result)
+        return result
+    }
+    public func GetAllocDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.allocDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_ALLOC, ASTKind.FUNC_DECL)
+        InteropLibBridge.allocDecl = Some(result)
+        return result
+    }
+    public func GetWithAutoreleasePoolDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.withAutoreleasePoolDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_WITH_AUTORELEASE_POOL, ASTKind.FUNC_DECL)
+        InteropLibBridge.withAutoreleasePoolDecl = Some(result)
+        return result
+    }
+    public func GetWithAutoreleasePoolObjDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.withAutoreleasePoolObjDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_WITH_AUTORELEASE_POOL_OBJ, ASTKind.FUNC_DECL)
+        InteropLibBridge.withAutoreleasePoolObjDecl = Some(result)
+        return result
+    }
+    public func GetRegisterNameDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.registerNameDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_REGISTER_NAME, ASTKind.FUNC_DECL)
+        InteropLibBridge.registerNameDecl = Some(result)
+        return result
+    }
+    public func GetGetInstanceVariableObjDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.getInstanceVariableObjDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_INSTANCE_VARIABLE_OBJ, ASTKind.FUNC_DECL)
+        InteropLibBridge.getInstanceVariableObjDecl = Some(result)
+        return result
+    }
+    public func GetSetInstanceVariableObjDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.setInstanceVariableObjDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_SET_INSTANCE_VARIABLE_OBJ, ASTKind.FUNC_DECL)
+        InteropLibBridge.setInstanceVariableObjDecl = Some(result)
+        return result
+    }
+    public func GetGetInstanceVariableDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.getInstanceVariableDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_INSTANCE_VARIABLE, ASTKind.FUNC_DECL)
+        InteropLibBridge.getInstanceVariableDecl = Some(result)
+        return result
+    }
+    public func GetSetInstanceVariableDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.setInstanceVariableDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_SET_INSTANCE_VARIABLE, ASTKind.FUNC_DECL)
+        InteropLibBridge.setInstanceVariableDecl = Some(result)
+        return result
+    }
+    public func GetGetClassDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.getClassDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_CLASS, ASTKind.FUNC_DECL)
+        InteropLibBridge.getClassDecl = Some(result)
+        return result
+    }
+    public func GetGetProtoDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.getProtoDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_PROTOCOL, ASTKind.FUNC_DECL)
+        InteropLibBridge.getProtoDecl = Some(result)
+        return result
+    }
+    public func GetGetSuperClassDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.getSuperClassDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_SUPER_CLASS, ASTKind.FUNC_DECL)
+        InteropLibBridge.getSuperClassDecl = Some(result)
+        return result
+    }
     public func GetObjCMsgSendDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_MSG_SEND, ASTKind.FUNC_DECL) }
     public func GetObjCMsgSendSuperDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_MSG_SEND_SUPER, ASTKind.FUNC_DECL) }
     public func GetObjCReleaseDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RELEASE, ASTKind.FUNC_DECL) }
