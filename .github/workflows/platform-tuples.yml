@@ -8,6 +8,7 @@ on:
   push:
     branches: [ci/platform-matrix]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -15,22 +16,6 @@ permissions:
 concurrency:
   group: platform-tuples-${{ github.ref }}
   cancel-in-progress: false
-
-env:
-  # Same proven source as build-fixed-llc.yml: cjcj-llvm fork with getUNDEF
-  # lowering, clang CTAD fix, and the in-tree CangjieDemangle source stub.
-  # bbaa9f9e adds the Darwin AArch64 stack-grow stub `_` mangle (AArch64AsmPrinter
-  # emitStackOverflowCall emitted a bare CJ_MCC_StackGrowStub that no Mach-O
-  # arm64 runtime exports; Darwin x86_64 runtime deliberately exports the bare
-  # name, so the mangle is AArch64-only). 0613cbb5 adds out-of-class definitions
-  # for ODR-used constexpr statics (CJGCInstrReplace/CJSimpleOpt); without them
-  # the Windows COFF link of the shim fails with undefined symbols.
-  LLVM_URL: https://github.com/cjcj-dev/cjcj-llvm.git
-  LLVM_SHA: 0613cbb50ea173521dd30e73d9feb243e66fac58
-  CANGJIE_COMPILER_URL: https://gitcode.com/Cangjie/cangjie_compiler.git
-  CANGJIE_COMPILER_SHA: 87fff87a1883da9bfe5956296d8079e8a7f9d15f
-  FLATBUFFERS_URL: https://gitcode.com/openharmony/third_party_flatbuffers.git
-  FLATBUFFERS_SHA: c3e4d69cbd5950e43f775ba76eadb30750d6e0b7
 
 defaults:
   run:
@@ -69,9 +54,23 @@ jobs:
       - name: Checkout cjcj
         uses: actions/checkout@v7
 
+      - name: Load LLVM pin
+        id: llvm-pin
+        run: |
+          cat ci/llvm_pin.env >> "$GITHUB_ENV"
+          source ci/llvm_pin.env
+          echo "sha=$LLVM_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Restore fixed LLVM tuple cache
+        id: tuple-cache
+        uses: actions/cache@v6
+        with:
+          path: fixed-toolchain/${{ matrix.platform }}
+          key: tuple-${{ matrix.platform }}-${{ steps.llvm-pin.outputs.sha }}
+
       - name: Prepare MSYS2/MinGW LLVM toolchain
         id: msys2-setup
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.tuple-cache.outputs.cache-hit != 'true'
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -86,42 +85,35 @@ jobs:
 
       - name: Install Linux build dependencies
         id: linux-deps
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.tuple-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq clang cmake ninja-build gzip file binutils
 
       - name: Install macOS build dependencies
         id: macos-deps
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.tuple-cache.outputs.cache-hit != 'true'
         run: brew install ninja
 
       - name: Fetch exact shallow source trees
         id: source-fetch
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && steps.tuple-cache.outputs.cache-hit != 'true'
         run: bash ci/platform_tuples/fetch_sources.sh
 
       - name: Fetch exact shallow source trees (MSYS2)
         id: source-fetch-windows
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.tuple-cache.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: bash ci/platform_tuples/fetch_sources.sh
 
-      - name: Restore LLVM build directory
-        id: llvm-cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.TUPLE_ROOT }}/llvm-build
-          key: platform-llvm-build-${{ env.LLVM_SHA }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ci/platform_tuples/build_tuple.sh') }}
-
       - name: Configure and build llc + shim
         id: tuple-build
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && steps.tuple-cache.outputs.cache-hit != 'true'
         run: bash ci/platform_tuples/build_tuple.sh
 
       - name: Configure and build llc + shim (MSYS2)
         id: tuple-build-windows
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.tuple-cache.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: bash ci/platform_tuples/build_tuple.sh
 
@@ -133,13 +125,12 @@ jobs:
           MACOS_DEPS_OUTCOME: ${{ steps.macos-deps.outcome }}
           SOURCE_OUTCOME: ${{ steps.source-fetch.outcome }}
           WINDOWS_SOURCE_OUTCOME: ${{ steps.source-fetch-windows.outcome }}
-          CACHE_OUTCOME: ${{ steps.llvm-cache.outcome }}
+          CACHE_OUTCOME: ${{ steps.tuple-cache.outcome }}
           BUILD_OUTCOME: ${{ steps.tuple-build.outcome }}
           WINDOWS_BUILD_OUTCOME: ${{ steps.tuple-build-windows.outcome }}
         run: bash ci/platform_tuples/summarize.sh
 
       - name: Upload fixed LLVM tuple
-        if: steps.tuple-build.outcome == 'success' || steps.tuple-build-windows.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: fixed-llvm-tools-${{ matrix.platform }}
