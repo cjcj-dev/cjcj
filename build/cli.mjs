@@ -32,7 +32,19 @@ const LOG_LEVELS = new Set(['DEBUG', 'INFO', 'WARNING', 'ERROR']);
 function usage() {
   return `Usage: npx --yes zx@8 build/cli.mjs [global options] COMMAND\n\n`
     + `Commands: ${[...COMMANDS].join(', ')}\n`
-    + `Targets: linux-x64, windows-x64\nBuild types: ${VALID_BUILD_TYPES.join(', ')}`;
+    + 'Global options:\n'
+    + '  --workspace PATH\n'
+    + '  --build-root PATH\n'
+    + '  --target TARGET (default: linux-x64)\n'
+    + `  --build-type TYPE (default: ${DEFAULT_BUILD_TYPE})\n`
+    + '  --cangjie-version VERSION\n'
+    + '  --stdx-version INTEGER (default: 1)\n'
+    + '  --log-level LEVEL (default: INFO)\n'
+    + '  --version\n'
+    + '  --help\n'
+    + 'Targets: linux-x64, windows-x64\n'
+    + `Build types: ${VALID_BUILD_TYPES.join(', ')}\n`
+    + 'Log levels: DEBUG, INFO, WARNING, ERROR';
 }
 
 function commandUsage(command) {
