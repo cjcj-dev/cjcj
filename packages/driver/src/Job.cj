@@ -1,136 +1,42 @@
 package cjcj::driver
 
 import std.collection.*
-import std.sync.*
-import cjcj::utils.ProfileRecorder
+import std.time.*
+import cjcj::utils.{ProfileRecorder, Semaphore}
 
-private func NormalizeJobLimit(jobs: Option<UInt64>): Int64 {
-    if (let Some(rawLimit) <- jobs) {
-        if (rawLimit == 0u64) {
-            return 1
-        }
-        if (rawLimit > 2147483647u64) {
-            return 2147483647
-        }
-        return Int64(rawLimit)
-    }
-    return 1
-}
-
-private class ToolExecutionResult {
-    public let command: String
-    public let spawnErrorMessage: String
-    public let exitCode: Int64
-
-    public init(command: String, spawnErrorMessage!: String = "", exitCode!: Int64 = 0) {
-        this.command = command
-        this.spawnErrorMessage = spawnErrorMessage
-        this.exitCode = exitCode
-    }
-
-    public func Succeeded(): Bool {
-        return spawnErrorMessage.isEmpty() && exitCode == 0
-    }
-}
-
-private func ExecuteToolAndCapture(tool: Tool, verbose: Bool): ToolExecutionResult {
-    let commandString = tool.GetCommandString()
-    let future = tool.Execute(verbose)
-    if (!future.spawnErrorMessage.isEmpty()) {
-        return ToolExecutionResult(commandString, spawnErrorMessage: future.spawnErrorMessage, exitCode: future.exitCode)
-    }
-    if (future.GetState() == ToolFutureState.FAILED) {
-        return ToolExecutionResult(commandString, exitCode: future.exitCode)
-    }
-    return ToolExecutionResult(commandString)
-}
-
-private func PrintToolFailure(result: ToolExecutionResult): Unit {
-    if (!result.spawnErrorMessage.isEmpty()) {
-        eprintln("${result.command}: command failed (${result.spawnErrorMessage})")
-    } else {
-        eprintln("${result.command}: command failed with exit code ${result.exitCode} (use -V to see invocation)")
-    }
-}
-
-private class ToolBatchRunner {
-    private let commands: ToolBatch
-    private let verbose: Bool
-    private let mutex: Mutex = Mutex()
-    private var nextIndex: Int64 = 0
-    private var failure: Option<ToolExecutionResult> = None
-
-    public init(commands: ToolBatch, verbose: Bool) {
-        this.commands = commands
-        this.verbose = verbose
-    }
-
-    public func Run(jobLimit: Int64): Option<ToolExecutionResult> {
-        let workerCount = ComputeWorkerCount(jobLimit)
-        if (workerCount == 0) {
-            return None
-        }
-        let workers = ArrayList<Future<Unit>>()
-        for (_ in 0..workerCount) {
-            workers.add(spawn {
-                WorkerLoop()
-            })
-        }
-        for (worker in workers) {
-            worker.get()
-        }
-        return failure
-    }
-
-    private func ComputeWorkerCount(jobLimit: Int64): Int64 {
-        if (commands.isEmpty()) {
-            return 0
-        }
-        let normalizedLimit = if (jobLimit > 0) { jobLimit } else { 1 }
-        return if (normalizedLimit < commands.size) { normalizedLimit } else { commands.size }
-    }
-
-    private func TakeNextCommand(): Option<Tool> {
-        synchronized(mutex) {
-            if (let Some(_) <- failure) {
-                return None
-            }
-            if (nextIndex >= commands.size) {
-                return None
-            }
-            let command = commands[nextIndex]
-            nextIndex++
-            return command
-        }
-    }
-
-    private func SaveFailure(result: ToolExecutionResult): Unit {
-        synchronized(mutex) {
-            if (let None <- failure) {
-                failure = result
+// Mirrors Driver/Job.cpp:30-69.
+private func CheckExecuteResult(checklist: TreeMap<String, ToolFuture>,
+    returnIfAnyToolFinished!: Bool = false): Bool {
+    var success = true
+    while (!checklist.isEmpty()) {
+        let totalTasks = checklist.size
+        let finishedCommands = ArrayList<String>()
+        for ((command, future) in checklist) {
+            let state = future.GetState()
+            if (state == ToolFutureState.FAILED) {
+                Semaphore.Get().Release()
+                eprintln("${command}: command failed with exit code ${future.exitCode} (use -V to see invocation)")
+                finishedCommands.add(command)
+                success = false
+            } else if (state == ToolFutureState.SUCCESS) {
+                Semaphore.Get().Release()
+                finishedCommands.add(command)
             }
         }
-    }
-
-    private func WorkerLoop(): Unit {
-        while (true) {
-            let nextCommand = TakeNextCommand()
-            if (let None <- nextCommand) {
-                return
-            }
-            let result = ExecuteToolAndCapture(nextCommand.getOrThrow(), verbose)
-            if (!result.Succeeded()) {
-                SaveFailure(result)
-                return
-            }
+        for (command in finishedCommands) {
+            checklist.remove(command)
         }
+        if (returnIfAnyToolFinished && totalTasks != checklist.size) {
+            return success
+        }
+        sleep(200 * Duration.microsecond)
     }
+    return success
 }
 
 public class Job {
     private var backend: Option<Backend> = None
     private var verbose: Bool = false
-    private var jobLimit: Int64 = 1
 
     public init() {}
 
@@ -145,7 +51,6 @@ public class Job {
         }
         backend = nextBackend
         verbose = driverOptions.enableVerbose
-        jobLimit = NormalizeJobLimit(Some(driverOptions.GetJobs()))
         return true
     }
 
@@ -159,9 +64,21 @@ public class Job {
                 continue
             }
             try (recorder = ProfileRecorder("Main Stage", "Execute " + FileUtil.GetFileName(cmdBatch[0].GetName()))) {
-                let runner = ToolBatchRunner(cmdBatch, verbose)
-                if (let Some(failure) <- runner.Run(jobLimit)) {
-                    PrintToolFailure(failure)
+                let childWorkers = TreeMap<String, ToolFuture>()
+                for (command in cmdBatch) {
+                    while (Semaphore.Get().GetCount() == 0) {
+                        if (!CheckExecuteResult(childWorkers, returnIfAnyToolFinished: true)) {
+                            return false
+                        }
+                    }
+                    let future = command.Execute(verbose)
+                    if (!future.spawnErrorMessage.isEmpty()) {
+                        eprintln("${command.GetCommandString()}: command failed (${future.spawnErrorMessage})")
+                        return false
+                    }
+                    childWorkers[command.GetCommandString()] = future
+                }
+                if (!CheckExecuteResult(childWorkers)) {
                     return false
                 }
             }
