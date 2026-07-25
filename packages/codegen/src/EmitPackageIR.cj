@@ -422,24 +422,28 @@ private func EmitRuntimeConfigString(moduleHandle: LLVMModuleHandle, llvmContext
 }
 
 private func RuntimeConfigEntryType(llvmContext: LLVMContextRef, i8PtrType: LLVMTypeRef): LLVMTypeRef {
+    var entryType = LLVMNullType()
     try (fieldTypes = LibC.malloc<LLVMTypeRef>(count: 2).asResource()) {
         unsafe {
             (fieldTypes.value + 0).write(i8PtrType)
             (fieldTypes.value + 1).write(i8PtrType)
-            return LLVMStructTypeInContext(llvmContext, fieldTypes.value, 2u32, 0)
+            entryType = LLVMStructTypeInContext(llvmContext, fieldTypes.value, 2u32, 0)
         }
     }
+    return entryType
 }
 
 private func RuntimeConfigEntryValue(llvmContext: LLVMContextRef, name: LLVMValueRef,
     value: LLVMValueRef): LLVMValueRef {
+    var entry = LLVMNullValue()
     try (fields = LibC.malloc<LLVMValueRef>(count: 2).asResource()) {
         unsafe {
             (fields.value + 0).write(name)
             (fields.value + 1).write(value)
-            return LLVMConstStructInContext(llvmContext, fields.value, 2u32, 0)
+            entry = LLVMConstStructInContext(llvmContext, fields.value, 2u32, 0)
         }
     }
+    return entry
 }
 
 private func EmitRuntimeConfigInit(cgMod: CGModule, moduleHandle: LLVMModuleHandle, llvmContext: LLVMContextRef,
