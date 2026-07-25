@@ -67,7 +67,18 @@ public class InteropLibBridge {
     private static var mutexLock: Option<FuncDecl> = None
     private static var mutexUnlock: Option<FuncDecl> = None
     private static var mutexConstructor: Option<FuncDecl> = None
-    private static var forwarderMutexDecl: Option<TypeAliasDecl> = None
+    // C++ InteropLibBridge.cpp:89-230 uses function-local statics. Cangjie only supports static
+    // members, so the outer Option is initialization state and the inner Option caches a failed lookup.
+    private static var forwarderMutexDecl: Option<Option<TypeAliasDecl>> = None
+    private static var nativeObjCIdDecl: Option<Option<TypeAliasDecl>> = None
+    private static var objCIdDecl: Option<Option<InterfaceDecl>> = None
+    private static var nativeObjCSelDecl: Option<Option<TypeAliasDecl>> = None
+    private static var nativeObjCClassDecl: Option<Option<TypeAliasDecl>> = None
+    private static var nativeObjCSuperPtrDecl: Option<Option<TypeAliasDecl>> = None
+    private static var registryIdDecl: Option<Option<TypeAliasDecl>> = None
+    private static var objCUnreachableCodeExceptionDecl: Option<Option<ClassDecl>> = None
+    private static var objCOptionalMethodUnimplementedExceptionDecl: Option<Option<ClassDecl>> = None
+    private static var objCStaticMethodCallOnIntefaceExceptionDecl: Option<Option<ClassDecl>> = None
     private let importManager: SemaImportManager
     private let diag: DiagnosticEngine
 
@@ -96,11 +107,10 @@ public class InteropLibBridge {
     }
 
     public func GetForwarderMutexDecl(): Option<TypeAliasDecl> {
-        if (let None <- InteropLibBridge.forwarderMutexDecl) {
-            InteropLibBridge.forwarderMutexDecl = GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_FORWARDER_MUTEX,
-                ASTKind.TYPE_ALIAS_DECL)
-        }
-        return InteropLibBridge.forwarderMutexDecl
+        if (let Some(result) <- InteropLibBridge.forwarderMutexDecl) { return result }
+        let result = GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_FORWARDER_MUTEX, ASTKind.TYPE_ALIAS_DECL)
+        InteropLibBridge.forwarderMutexDecl = Some(result)
+        return result
     }
 
     public func GetForwarderMutexTy(): Option<Ty> {
@@ -137,19 +147,66 @@ public class InteropLibBridge {
         return InteropLibBridge.mutexConstructor
     }
 
-    public func GetNativeObjCIdDecl(): Option<TypeAliasDecl> { return GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_NATIVE_OBJ_C_ID, ASTKind.TYPE_ALIAS_DECL) }
-    public func GetObjCIdDecl(): Option<InterfaceDecl> { return GetObjCLangDecl<InterfaceDecl>(INTEROPLIB_OBJ_C_ID, ASTKind.INTERFACE_DECL) }
+    public func GetNativeObjCIdDecl(): Option<TypeAliasDecl> {
+        if (let Some(result) <- InteropLibBridge.nativeObjCIdDecl) { return result }
+        let result = GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_NATIVE_OBJ_C_ID, ASTKind.TYPE_ALIAS_DECL)
+        InteropLibBridge.nativeObjCIdDecl = Some(result)
+        return result
+    }
+    public func GetObjCIdDecl(): Option<InterfaceDecl> {
+        if (let Some(result) <- InteropLibBridge.objCIdDecl) { return result }
+        let result = GetObjCLangDecl<InterfaceDecl>(INTEROPLIB_OBJ_C_ID, ASTKind.INTERFACE_DECL)
+        InteropLibBridge.objCIdDecl = Some(result)
+        return result
+    }
     public func GetNativeObjCIdTy(): Option<Ty> { return GetNativeObjCIdDecl().flatMap({ value => value.typeNode.flatMap({ node => node.GetTy() }) }) }
-    public func GetNativeObjCSelDecl(): Option<TypeAliasDecl> { return GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_NATIVE_OBJ_C_SEL, ASTKind.TYPE_ALIAS_DECL) }
-    public func GetNativeObjCClassDecl(): Option<TypeAliasDecl> { return GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_NATIVE_OBJ_C_CLASS, ASTKind.TYPE_ALIAS_DECL) }
+    public func GetNativeObjCSelDecl(): Option<TypeAliasDecl> {
+        if (let Some(result) <- InteropLibBridge.nativeObjCSelDecl) { return result }
+        let result = GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_NATIVE_OBJ_C_SEL, ASTKind.TYPE_ALIAS_DECL)
+        InteropLibBridge.nativeObjCSelDecl = Some(result)
+        return result
+    }
+    public func GetNativeObjCClassDecl(): Option<TypeAliasDecl> {
+        if (let Some(result) <- InteropLibBridge.nativeObjCClassDecl) { return result }
+        let result = GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_NATIVE_OBJ_C_CLASS, ASTKind.TYPE_ALIAS_DECL)
+        InteropLibBridge.nativeObjCClassDecl = Some(result)
+        return result
+    }
     public func GetNativeObjCClassTy(): Option<Ty> { return GetNativeObjCClassDecl().flatMap({ value => value.typeNode.flatMap({ node => node.GetTy() }) }) }
-    public func GetNativeObjCSuperPtrDecl(): Option<TypeAliasDecl> { return GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_NATIVE_OBJ_C_SUPER_PTR, ASTKind.TYPE_ALIAS_DECL) }
+    public func GetNativeObjCSuperPtrDecl(): Option<TypeAliasDecl> {
+        if (let Some(result) <- InteropLibBridge.nativeObjCSuperPtrDecl) { return result }
+        let result = GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_NATIVE_OBJ_C_SUPER_PTR, ASTKind.TYPE_ALIAS_DECL)
+        InteropLibBridge.nativeObjCSuperPtrDecl = Some(result)
+        return result
+    }
     public func GetNativeObjCSuperPtrTy(): Option<Ty> { return GetNativeObjCSuperPtrDecl().flatMap({ value => value.typeNode.flatMap({ node => node.GetTy() }) }) }
-    public func GetRegistryIdDecl(): Option<TypeAliasDecl> { return GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_REGISTRY_ID, ASTKind.TYPE_ALIAS_DECL) }
+    public func GetRegistryIdDecl(): Option<TypeAliasDecl> {
+        if (let Some(result) <- InteropLibBridge.registryIdDecl) { return result }
+        let result = GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_REGISTRY_ID, ASTKind.TYPE_ALIAS_DECL)
+        InteropLibBridge.registryIdDecl = Some(result)
+        return result
+    }
     public func GetRegistryIdTy(): Option<Ty> { return GetRegistryIdDecl().flatMap({ value => value.typeNode.flatMap({ node => node.GetTy() }) }) }
-    public func GetObjCUnreachableCodeExceptionDecl(): Option<ClassDecl> { return GetInteropLibDecl<ClassDecl>(INTEROPLIB_OBJ_C_UNREACHABLE_CODE_EXCEPTION, ASTKind.CLASS_DECL) }
-    public func GetObjCOptionalMethodUnimplementedExceptionDecl(): Option<ClassDecl> { return GetObjCLangDecl<ClassDecl>(INTEROPLIB_OBJ_C_OPTIONAL_METHOD_UNIMPLEMENTED_EXCEPTION, ASTKind.CLASS_DECL) }
-    public func GetObjCStaticMethodCallOnIntefaceExceptionDecl(): Option<ClassDecl> { return GetInteropLibDecl<ClassDecl>(INTEROPLIB_OBJ_C_STATIC_METHOD_CALL_ON_INTERFACE_EXCEPTION, ASTKind.CLASS_DECL) }
+    public func GetObjCUnreachableCodeExceptionDecl(): Option<ClassDecl> {
+        if (let Some(result) <- InteropLibBridge.objCUnreachableCodeExceptionDecl) { return result }
+        let result = GetInteropLibDecl<ClassDecl>(INTEROPLIB_OBJ_C_UNREACHABLE_CODE_EXCEPTION, ASTKind.CLASS_DECL)
+        InteropLibBridge.objCUnreachableCodeExceptionDecl = Some(result)
+        return result
+    }
+    public func GetObjCOptionalMethodUnimplementedExceptionDecl(): Option<ClassDecl> {
+        if (let Some(result) <- InteropLibBridge.objCOptionalMethodUnimplementedExceptionDecl) { return result }
+        let result = GetObjCLangDecl<ClassDecl>(INTEROPLIB_OBJ_C_OPTIONAL_METHOD_UNIMPLEMENTED_EXCEPTION,
+            ASTKind.CLASS_DECL)
+        InteropLibBridge.objCOptionalMethodUnimplementedExceptionDecl = Some(result)
+        return result
+    }
+    public func GetObjCStaticMethodCallOnIntefaceExceptionDecl(): Option<ClassDecl> {
+        if (let Some(result) <- InteropLibBridge.objCStaticMethodCallOnIntefaceExceptionDecl) { return result }
+        let result = GetInteropLibDecl<ClassDecl>(INTEROPLIB_OBJ_C_STATIC_METHOD_CALL_ON_INTERFACE_EXCEPTION,
+            ASTKind.CLASS_DECL)
+        InteropLibBridge.objCStaticMethodCallOnIntefaceExceptionDecl = Some(result)
+        return result
+    }
     public func GetGetFromRegistryByNativeHandleDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_NATIVE_HANDLE, ASTKind.FUNC_DECL) }
     public func GetGetFromRegistryByIdDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_ID, ASTKind.FUNC_DECL) }
     public func GetPutToRegistryDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_PUT_TO_REGISTRY, ASTKind.FUNC_DECL) }
