@@ -1,7 +1,6 @@
 package cjcj::driver
 
 import std.collection.*
-import std.process.*
 import cjcj::utils.Semaphore
 
 public type ToolBatch = ArrayList<Tool>
@@ -297,11 +296,48 @@ public class Tool {
             Semaphore.Get().Acquire()
             return ThreadFuture(spawn { InternalImplementedCommandExec() })
         }
-        try {
-            let code = execute(name, args.toArray())
-            return ProcessFuture(code)
-        } catch (e: Exception) {
-            return ErrorFuture(e.message)
+        let arguments = GetFullArgs()
+        let commandLineBuilder = StringBuilder()
+        var argumentIndex: Int64 = 0
+        while (argumentIndex < arguments.size) {
+            if (argumentIndex != 0) {
+                commandLineBuilder.append(" ")
+            }
+            let argument = arguments[argumentIndex]
+            let needsQuotes = argument.isEmpty() || argument.contains("\t") || argument.contains(" ") ||
+                argument.contains("\"") || argument.contains("&") || argument.contains("'") ||
+                argument.contains("(") || argument.contains(")") || argument.contains("*") ||
+                argument.contains("<") || argument.contains(">") || argument.contains("\\") ||
+                argument.contains("\u{60}") || argument.contains("^") || argument.contains("|") ||
+                argument.contains("\n")
+            commandLineBuilder.append(if (needsQuotes) { FileUtil.GetQuoted(argument) } else { argument })
+            argumentIndex++
+        }
+        let commandLine = commandLineBuilder.toString()
+        try (startupInfo = LibC.malloc<STARTUPINFOA>().asResource(),
+            processInformation = LibC.malloc<PROCESS_INFORMATION>().asResource(),
+            nameCString = unsafe { LibC.mallocCString(name) }.asResource(),
+            commandLineCString = unsafe { LibC.mallocCString(commandLine) }.asResource()) {
+            if (startupInfo.value.isNull() || processInformation.value.isNull() || nameCString.value.isNull() ||
+                commandLineCString.value.isNull()) {
+                return ErrorFuture("failed to allocate process launch buffers")
+            }
+            unsafe {
+                startupInfo.value.write(STARTUPINFOA())
+                processInformation.value.write(PROCESS_INFORMATION())
+            }
+            Semaphore.Get().Acquire()
+            if (unsafe {
+                CreateProcessA(nameCString.value, commandLineCString.value, CPointer<Unit>(), CPointer<Unit>(),
+                    0, 0u32, CPointer<Unit>(), CString(CPointer<UInt8>()), startupInfo.value,
+                    processInformation.value)
+            } == 0) {
+                let error = unsafe { GetLastError() }
+                Semaphore.Get().Release()
+                return ErrorFuture(GetSystemErrorMessage(error))
+            }
+            let processInfo = unsafe { processInformation.value.read() }
+            return WindowsProcessFuture(processInfo.hProcess, processInfo.hThread)
         }
     }
 
