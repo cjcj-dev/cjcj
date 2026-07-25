@@ -1313,7 +1313,7 @@ extend TypeChecker {
         let isCJNATIVEBackend = false
         if (isCJNATIVEBackend) {
             try (recorder = ProfileRecorder("PrepareTypeCheck", "InteropPrepare")) {
-                PrepareJavaInteropTypeCheck(pkg, importManager.getOrThrow(), typeManager)
+                PrepareJavaInteropTypeCheck(pkg, impl.importManager.getOrThrow(), impl.typeManager)
                 PrepareObjCInteropTypeCheck(pkg)
             }
         }
