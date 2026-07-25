@@ -6919,6 +6919,10 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return packageNameMap.get(fullPackageName)
     }
 
+    private func IsVisitedPackage(fullPackageName: String): Bool {
+        return visitedPkgs.contains(fullPackageName)
+    }
+
     private func AddSourcePackage(pkg: Package): Unit {
         let info = CjoPackageInfo(pkg)
         packageNameMap.add(pkg.fullPackageName, info)
