@@ -2,6 +2,7 @@
 # Stub-backed ObjC BeforeTypeCheck parity gate. The Linux SDK has no objc.internal/objc.lang modules,
 # so the AST dump is the product: it proves the Desugar.cpp branches ran before the intentional
 # missing-objc.lang diagnostic frontier. It does not validate ObjC runtime glue or macOS execution.
+# Integration prerequisite: ffin0 commit b4c8589a (the real ObjC PrepareTypeCheck entry wiring).
 set -uo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -119,6 +120,13 @@ EOF
 
 make_manifest official
 make_manifest candidate
+
+echo "PREREQUISITE=ffin0:b4c8589a ObjC PrepareTypeCheck entry wiring"
+if grep -q '^NSStringMirror ATTR=1 PROP=0 VAR=1 .* INIT=0 ' "$work/candidate.manifest" &&
+    grep -q '^NSObjectMirror ATTR=1 PROP=0 VAR=1 ' "$work/candidate.manifest" &&
+    grep -q '^PlainMirror ATTR=1 PROP=0 VAR=1 ' "$work/candidate.manifest"; then
+    echo "PREREQUISITE_NOT_MET=ffin0:b4c8589a; candidate retained raw mirror fields and generated no N1b members"
+fi
 
 # Diagnostics precede the AST dump. Comparing the entire prefix checks quantity, text, locations,
 # hints, kind, and order rather than accepting a summary-only match.
