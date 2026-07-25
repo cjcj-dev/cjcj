@@ -26,6 +26,7 @@ import cjcj::sema.InheritanceChecker.*
 import cjcj::sema.LegalityOfUsage.*
 import cjcj::sema.NativeFFI.*
 import cjcj::sema.NativeFFI.ObjC.InteropLibBridge as ObjCInteropLibBridge
+import cjcj::sema.NativeFFI.ObjC.PrepareTypeCheck as PrepareObjCInteropTypeCheck
 import cjcj::sema.Plugin.PluginCustomAnnoChecker
 import cjcj::utils.CFUNC_NAME
 import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
@@ -1304,6 +1305,16 @@ extend TypeChecker {
         ctx.fullPackageName = pkg.fullPackageName
         CheckPrimaryCtorBeforeMerge(pkg)
         mpImpl.PrepareTypeCheck4CJMP(pkg)
+        // C++ src/Sema/TypeChecker.cpp:2087-2092.
+        @When[backend == "cjnative"]
+        let isCJNATIVEBackend = true
+        @When[backend != "cjnative"]
+        let isCJNATIVEBackend = false
+        if (isCJNATIVEBackend) {
+            try (recorder = ProfileRecorder("PrepareTypeCheck", "InteropPrepare")) {
+                PrepareObjCInteropTypeCheck(pkg)
+            }
+        }
         SeedImportedPackageDecls(ctx)
         AddDefaultFunction(pkg)
         if (pkg.fullPackageName == UTILS_CORE_PACKAGE_NAME && !pkg.files.isEmpty() &&
