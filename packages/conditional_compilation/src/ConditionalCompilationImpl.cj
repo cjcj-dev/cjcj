@@ -405,8 +405,6 @@ class ConditionalCompilationImpl {
         let isBuiltin = IsTargetCondition(conditionStr)
         let isUserDefined = !isBuiltin && passedCondition.contains(conditionStr)
         if (!isBuiltin && !isUserDefined) {
-            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_not_support_this_condition,
-                begin, arguments: [conditionStr]).Emit()
             return false
         }
         if (!ConditionSupportsValue(conditionStr, right)) {
