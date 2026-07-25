@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +13,24 @@ import * as stdlib from '../srcbuild/stages/stdlib.mjs';
 import * as stdx from '../srcbuild/stages/stdx.mjs';
 import * as tools from '../srcbuild/stages/tools.mjs';
 import * as verify from '../srcbuild/stages/verify.mjs';
+
+const CLI = path.resolve(import.meta.dirname, '..', 'cli.mjs');
+const COMMANDS = [
+  'install-system-deps', 'print-version', 'install-static-libs', 'install-mingw',
+  'install-target-python', 'fetch', 'build', 'package', 'verify', 'run-all',
+];
+const GLOBAL_OPTIONS = [
+  '--workspace', '--build-root', '--target', '--build-type', '--cangjie-version',
+  '--stdx-version', '--log-level', '--version', '--help',
+];
+
+function runCli(args, {env = {}} = {}) {
+  const cleanEnv = {...process.env, ...env};
+  for (const name of ['CANGJIE_VERSION', 'CANGJIE_WORKSPACE', 'CANGJIE_BUILD_ROOT']) {
+    if (!(name in env)) delete cleanEnv[name];
+  }
+  return spawnSync(process.execPath, [CLI, ...args], {encoding: 'utf8', env: cleanEnv});
+}
 
 function directory(root, ...parts) {
   const result = path.join(root, ...parts);
@@ -94,6 +113,62 @@ test('target/build-type matrix matches config.py', () => {
       const config = buildConfig({targetKey, buildType});
       assert.equal(config.crossBuildType, targetKey === 'windows-x64' ? 'release' : buildType);
     }
+  }
+});
+
+test('CLI commands, options, defaults, and help match cli.py', () => {
+  const help = runCli(['--help']);
+  assert.equal(help.status, 0, help.stderr);
+  for (const command of COMMANDS) {
+    assert.match(help.stdout, new RegExp(`\\b${command}\\b`));
+    const commandHelp = runCli([command, '--help']);
+    assert.equal(commandHelp.status, 0, `${command}: ${commandHelp.stderr}`);
+  }
+  for (const option of GLOBAL_OPTIONS) assert.ok(help.stdout.includes(option), option);
+  for (const stageName of ['compiler', 'runtime', 'stdlib', 'stdx', 'tools']) {
+    const stageHelp = runCli(['build', stageName, '--help']);
+    assert.equal(stageHelp.status, 0, `${stageName}: ${stageHelp.stderr}`);
+  }
+
+  const version = runCli(['--version']);
+  assert.equal(version.status, 0, version.stderr);
+  assert.equal(version.stdout, '0.1.0\n');
+
+  const defaultVersion = runCli(['print-version']);
+  assert.equal(defaultVersion.status, 0, defaultVersion.stderr);
+  assert.equal(defaultVersion.stdout, '0.0.0-dev\n');
+
+  const explicitVersion = runCli([
+    '--target', 'windows-x64', '--build-type', 'debug', '--cangjie-version', 'v1.2.3',
+    '--stdx-version', '7', '--log-level', 'ERROR', 'print-version',
+  ]);
+  assert.equal(explicitVersion.status, 0, explicitVersion.stderr);
+  assert.equal(explicitVersion.stdout, '1.2.3\n');
+});
+
+test('CLI usage errors exit 2 like Typer and do not silently accept arguments', () => {
+  const cases = [
+    [], ['-h'], ['unknown-command'], ['--target', 'macos-arm64', 'print-version'],
+    ['--build-type', 'lto', 'print-version'], ['--stdx-version', 'nope', 'print-version'],
+    ['--log-level', 'debug', 'print-version'], ['build'], ['build', 'unknown-stage'],
+    ['build', 'compiler', 'extra'], ['print-version', 'extra'],
+    ['fetch', '--repo-url', 'compiler'], ['fetch', '--repo-url', 'mystery=x'],
+    ['fetch', '--repo-url', 'compiler=a', '--repo-url', 'compiler=b'],
+    ['fetch', '--unknown'], ['run-all', '--unknown'],
+  ];
+  for (const args of cases) {
+    const result = runCli(args);
+    assert.equal(result.status, 2, `${args.join(' ')}\nstdout=${result.stdout}\nstderr=${result.stderr}`);
+  }
+});
+
+test('CLI build failures exit 1 like entrypoint()', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'buildunify1-cli-exit-'));
+  try {
+    const result = runCli(['--workspace', root, 'verify']);
+    assert.equal(result.status, 1, result.stderr);
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
   }
 });
 
