@@ -55,7 +55,7 @@ run_recipe() {
             while IFS= read -r -d '' item; do archives+=("$item"); done <"$work/archives.list"
             local link_archives=() i
             for ((i=${#archives[@]}-1; i>=0; i--)); do link_archives+=("${archives[$i]}"); done
-            timeout 180 "$cjc" --import-path "$work/build" "$case_dir/main.cj" \
+            timeout 180 "$cjc" -j "$CJC_JOBS" --import-path "$work/build" "$case_dir/main.cj" \
                 "${link_archives[@]}" -o "$work/main" --set-runtime-rpath >>"$work/compile.log" 2>&1
             run_binary "$work/main" "$work/out.bin" "$work/exits.txt"
             ;;
@@ -80,7 +80,7 @@ run_recipe() {
                 "$work/src"/*.cj -o "$work/build/incremental.a" >>"$work/compile.log" 2>&1
             timeout 180 "$cjc" -j "$CJC_JOBS" --output-type=staticlib "$work/src"/*.cj \
                 -o "$work/build/run.a" >>"$work/compile.log" 2>&1
-            timeout 180 "$cjc" --import-path "$work/build" "$case_dir/main.cj" \
+            timeout 180 "$cjc" -j "$CJC_JOBS" --import-path "$work/build" "$case_dir/main.cj" \
                 "$work/build/run.a" -o "$work/main" --set-runtime-rpath >>"$work/compile.log" 2>&1
             run_binary "$work/main" "$work/out.bin" "$work/exits.txt"
             cp "$case_dir/new"/*.cj "$work/src/"
@@ -88,7 +88,7 @@ run_recipe() {
                 "$work/src"/*.cj -o "$work/build/incremental.a" >>"$work/compile.log" 2>&1
             timeout 180 "$cjc" -j "$CJC_JOBS" --output-type=staticlib "$work/src"/*.cj \
                 -o "$work/build/run.a" >>"$work/compile.log" 2>&1
-            timeout 180 "$cjc" --import-path "$work/build" "$case_dir/main.cj" \
+            timeout 180 "$cjc" -j "$CJC_JOBS" --import-path "$work/build" "$case_dir/main.cj" \
                 "$work/build/run.a" -o "$work/main" --set-runtime-rpath >>"$work/compile.log" 2>&1
             run_binary "$work/main" "$work/out.bin" "$work/exits.txt"
             ;;
