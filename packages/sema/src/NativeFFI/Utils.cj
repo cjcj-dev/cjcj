@@ -272,23 +272,19 @@ public func CreateBoolMatch(selector: Expr, trueBranch: Expr, falseBranch: Expr,
     return matchExpr
 }
 
-private func GetStringDecl(decl: Decl): StructDecl {
-    return (decl as StructDecl).getOrThrow()
-}
-
 // C++ src/Sema/NativeFFI/Utils.cpp:130-135.
 // C++ caches this lookup in a function-local static. Cangjie has no equivalent construct;
 // repeated core-declaration lookup returns the same declaration during one compilation.
 public func GetStringDecl(importManager: ImportManager): StructDecl {
     let decl = importManager.GetCoreDecl(STD_LIB_STRING_IDENT)
     CJC_NULLPTR_CHECK(decl)
-    return GetStringDecl(decl.getOrThrow())
+    return (decl.getOrThrow() as StructDecl).getOrThrow()
 }
 
 public func GetStringDecl(importManager: SemaImportManager): StructDecl {
-    let decl = importManager.GetCoreDecl<Decl>(STD_LIB_STRING_IDENT)
+    let decl = importManager.GetCoreDecl<StructDecl>(STD_LIB_STRING_IDENT)
     CJC_NULLPTR_CHECK(decl)
-    return GetStringDecl(decl.getOrThrow())
+    return decl.getOrThrow()
 }
 
 private func LambdaParamTys(params: ArrayList<FuncParam>): ArrayList<Ty> {
