@@ -12,8 +12,6 @@ private let FORMAT_MESSAGE_IGNORE_INSERTS: UInt32 = 0x00000200u32
 @When[os == "Windows"]
 private let FORMAT_MESSAGE_FROM_SYSTEM: UInt32 = 0x00001000u32
 @When[os == "Windows"]
-private let LANG_ENGLISH_SUBLANG_DEFAULT: UInt32 = 0x00000409u32
-@When[os == "Windows"]
 private let CP_UTF8: UInt32 = 65001u32
 
 @When[os == "Windows"]
@@ -183,7 +181,7 @@ private func GetSystemErrorMessage(error: UInt32): String {
         unsafe { messagePtr.value.write(CPointer<UInt16>()) }
         let size = unsafe {
             FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                FORMAT_MESSAGE_IGNORE_INSERTS, CPointer<Unit>(), error, LANG_ENGLISH_SUBLANG_DEFAULT,
+                FORMAT_MESSAGE_IGNORE_INSERTS, CPointer<Unit>(), error, 0x00000409u32,
                 messagePtr.value, 0u32, CPointer<Unit>())
         }
         let wideMessage = unsafe { messagePtr.value.read() }
