@@ -146,6 +146,9 @@ class ConditionalCompilationImpl {
             }
         }
         let beforeErrCnt = diag.GetErrorCount()
+        if (!CheckConditionExpr(condition)) {
+            return false
+        }
         let result = EvalConditionExpr(condition)
         if (let Some(key) <- cacheKey) {
             if (beforeErrCnt == diag.GetErrorCount()) {
@@ -153,6 +156,23 @@ class ConditionalCompilationImpl {
             }
         }
         return result
+    }
+
+    private func CheckConditionExpr(condition: Expr): Bool {
+        match (condition.astKind) {
+            case ASTKind.BINARY_EXPR =>
+                return CheckBinaryExpr((condition as BinaryExpr).getOrThrow())
+            case ASTKind.UNARY_EXPR =>
+                return CheckUnaryExpr((condition as UnaryExpr).getOrThrow())
+            case ASTKind.REF_EXPR =>
+                return CheckRefExpr((condition as RefExpr).getOrThrow())
+            case ASTKind.PAREN_EXPR =>
+                return CheckParenExpr((condition as ParenExpr).getOrThrow())
+            case _ =>
+                diag.DiagnoseRefactor(
+                    BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin).Emit()
+                return false
+        }
     }
 
     private func EvalBinaryExpr(be: BinaryExpr): Bool {
@@ -172,6 +192,31 @@ class ConditionalCompilationImpl {
         } else {
             return EvalConditionExpr(be.leftExpr.getOrThrow()) || EvalConditionExpr(be.rightExpr.getOrThrow())
         }
+    }
+
+    private func CheckBinaryExpr(be: BinaryExpr): Bool {
+        if (be.leftExpr.isNone() || be.rightExpr.isNone()) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
+            return false
+        }
+        if (IsLogicBinaryExpr(be.op)) {
+            let leftValid = CheckConditionExpr(be.leftExpr.getOrThrow())
+            let rightValid = CheckConditionExpr(be.rightExpr.getOrThrow())
+            return leftValid && rightValid
+        }
+        if (IsJudgeBinaryExpr(be.op) || IsRangeBinaryExpr(be.op)) {
+            return CheckJudgeConditionExpr(be)
+        }
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
+        return false
+    }
+
+    private func CheckParenExpr(pe: ParenExpr): Bool {
+        if (let Some(expr) <- pe.expr) {
+            return CheckConditionExpr(expr)
+        }
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, pe.begin).Emit()
+        return false
     }
 
     private func CheckJudgeBinaryExpr(be: BinaryExpr): Bool {
@@ -199,6 +244,23 @@ class ConditionalCompilationImpl {
         return true
     }
 
+    private func CheckJudgeConditionExpr(be: BinaryExpr): Bool {
+        if (!CheckJudgeBinaryExpr(be)) {
+            return false
+        }
+        let right = (be.rightExpr.getOrThrow() as LitConstExpr).getOrThrow()
+        let left = (be.leftExpr.getOrThrow() as RefExpr).getOrThrow()
+        let conditionStr = left.ref.identifier.Val()
+        let rightValue = right.stringValue
+        if (!ConditionCheck(conditionStr, be.begin, rightValue)) {
+            return false
+        }
+        if (GetRelatedInfo(conditionStr).isNone()) {
+            return false
+        }
+        return CheckConditionOp(be, conditionStr)
+    }
+
     private func EvalJudgeBinaryExpr(be: BinaryExpr): Bool {
         if (!CheckJudgeBinaryExpr(be)) {
             return false
@@ -220,9 +282,7 @@ class ConditionalCompilationImpl {
         if (relatedInfo.isNone()) {
             return false
         }
-        if (!ConditionSupportsOp(conditionStr, be.op)) {
-            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_not_support_op,
-                be.begin, arguments: [conditionStr, TokenKindText(be.op)]).Emit()
+        if (!CheckConditionOp(be, conditionStr)) {
             return false
         }
         var evalResult = false
@@ -248,15 +308,23 @@ class ConditionalCompilationImpl {
         return false
     }
 
-    private func EvalUnaryExpr(ue: UnaryExpr): Bool {
+    private func GetDebugOrTestRelatedInfo(re: RefExpr, diagnosePos: Position): Option<String> {
+        let name = re.ref.identifier.Val()
+        if (name != DEBUG_STR && name != TEST_STR) {
+            diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, diagnosePos).Emit()
+            return None
+        }
+        return GetRelatedInfo(name)
+    }
+
+    private func CheckUnaryExpr(ue: UnaryExpr): Bool {
         if (ue.expr.isNone() || ue.expr.getOrThrow().astKind != ASTKind.REF_EXPR) {
             diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin).Emit()
             return false
         }
         let conditionExpr = (ue.expr.getOrThrow() as RefExpr).getOrThrow()
-        let name = conditionExpr.ref.identifier.Val()
-        if (name != DEBUG_STR && name != TEST_STR) {
-            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin).Emit()
+        if (GetDebugOrTestRelatedInfo(conditionExpr, ue.begin).isNone()) {
             return false
         }
         if (ue.op != TokenKind.NOT) {
@@ -266,19 +334,35 @@ class ConditionalCompilationImpl {
             builder.Emit()
             return false
         }
-        if (let Some(relatedInfo) <- GetRelatedInfo(name)) {
-            return relatedInfo != CONDITION_TRUE
+        return true
+    }
+
+    private func CheckRefExpr(re: RefExpr): Bool {
+        return GetDebugOrTestRelatedInfo(re, re.begin).isSome()
+    }
+
+    private func EvalUnaryExpr(ue: UnaryExpr): Bool {
+        if (ue.expr.isNone() || ue.expr.getOrThrow().astKind != ASTKind.REF_EXPR) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin).Emit()
+            return false
         }
-        return false
+        let conditionExpr = (ue.expr.getOrThrow() as RefExpr).getOrThrow()
+        let relatedInfo = GetDebugOrTestRelatedInfo(conditionExpr, ue.begin)
+        if (relatedInfo.isNone()) {
+            return false
+        }
+        if (ue.op != TokenKind.NOT) {
+            let builder = diag.DiagnoseRefactor(
+                BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, ue.begin)
+            builder.AddNote("debug and test builtin conditions only support the logic ! operator")
+            builder.Emit()
+            return false
+        }
+        return relatedInfo.getOrThrow() != CONDITION_TRUE
     }
 
     private func EvalRefExpr(re: RefExpr): Bool {
-        let name = re.ref.identifier.Val()
-        if (name != DEBUG_STR && name != TEST_STR) {
-            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, re.begin).Emit()
-            return false
-        }
-        if (let Some(relatedInfo) <- GetRelatedInfo(name)) {
+        if (let Some(relatedInfo) <- GetDebugOrTestRelatedInfo(re, re.begin)) {
             return relatedInfo == CONDITION_TRUE
         }
         return false
@@ -324,6 +408,15 @@ class ConditionalCompilationImpl {
         if (conditionStr == CJC_VERSION_STR && !IsCJCVersionLiteral(right)) {
             diag.DiagnoseRefactor(
                 BasicDiagKindRefactor.conditional_compilation_not_support_cjc_version_format, begin).Emit()
+            return false
+        }
+        return true
+    }
+
+    private func CheckConditionOp(be: BinaryExpr, conditionStr: String): Bool {
+        if (!ConditionSupportsOp(conditionStr, be.op)) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_not_support_op,
+                be.begin, arguments: [conditionStr, TokenKindText(be.op)]).Emit()
             return false
         }
         return true
