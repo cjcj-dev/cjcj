@@ -14,6 +14,7 @@ import cjcj::basic.DiagnosticBuilder
 public interface SemaCjoManager {
     func GetPackageNameByImport(importSpec: ASTImportSpec): String
     func GetPackageMembers(fullPackageName: String): HashMap<String, ArrayList<ASTDecl>>
+    func AddGeneratedDeclToDeclMap(decl: ASTDecl): Unit
 }
 
 public interface SemaImportManager {
