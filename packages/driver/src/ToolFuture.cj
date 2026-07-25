@@ -62,18 +62,6 @@ public class ThreadFuture <: ToolFuture {
     }
 }
 
-// Retained until Tool.Run is switched to the platform process futures below.
-public class ProcessFuture <: ToolFuture {
-    public init(code: Int64) {
-        super()
-        exitCode = code
-    }
-
-    public override func GetState(): ToolFutureState {
-        return if (exitCode == 0) { ToolFutureState.SUCCESS } else { ToolFutureState.FAILED }
-    }
-}
-
 @When[os == "Windows"]
 public class WindowsProcessFuture <: ToolFuture {
     private let process: CPointer<Unit>
