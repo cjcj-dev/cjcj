@@ -1082,6 +1082,25 @@ private func CollectGenericParam(funcDecl: FuncDecl, desugared: FuncDecl): Unit 
     desugared.EnableAttr(Attribute.GENERIC)
 }
 
+// C++ src/Sema/TypeCheckCall.cpp:2963-2989 GetUnqualifiedCallBaseName.
+private func GetUnqualifiedCallBaseName(ce: CallExpr): Option<String> {
+    if (ce.sourceExpr.isSome() || ce.desugarExpr.isSome() || ce.baseFunc.isNone() ||
+        ce.baseFunc.getOrThrow().TestAttr(Attribute.MACRO_INVOKE_BODY)) {
+        return None
+    }
+    let base = ce.baseFunc.getOrThrow()
+    if (let Some(refExpr) <- (base as RefExpr)) {
+        return Some(refExpr.ref.identifier.Val())
+    }
+    if (let Some(memberAccess) <- (base as MemberAccess)) {
+        if ((let Some(baseExpr) <- memberAccess.baseExpr) &&
+            (let Some(baseRef) <- (baseExpr as RefExpr)) && baseRef.isThis) {
+            return Some(memberAccess.field.Val())
+        }
+    }
+    return None
+}
+
 public class TypeChecker {
     internal var impl: TypeCheckerImpl = TypeCheckerImpl()
     internal let contexts: ArrayList<ASTContext> = ArrayList<ASTContext>()
@@ -4832,6 +4851,151 @@ extend TypeChecker {
         return true
     }
 
+    // C++ src/Sema/TypeCheckCall.cpp:2991-3022 TypeCheckerImpl::ShadowedCallBaseTypeCandidate.
+    private func ShadowedCallBaseTypeCandidate(ctx: ASTContext, ce: CallExpr): Option<Decl> {
+        let name = if (let Some(value) <- GetUnqualifiedCallBaseName(ce)) { value } else { return None }
+        let base = ce.baseFunc.getOrThrow()
+        if (base.scopeName.isEmpty()) {
+            return None
+        }
+        let nearest = impl.Lookup(ctx, name, base.scopeName, base)
+        if (nearest.isEmpty()) {
+            return None
+        }
+        let nearestDecl = nearest[0]
+        if (nearestDecl.IsTypeDecl() || nearestDecl.TestAttr(Attribute.GLOBAL)) {
+            return None
+        }
+        if (nearestDecl.astKind != ASTKind.FUNC_DECL && nearestDecl.astKind != ASTKind.PROP_DECL &&
+            nearestDecl.astKind != ASTKind.VAR_DECL) {
+            return None
+        }
+        return LookupShadowedTopLevelTypeByName(ctx, name, base.scopeName, base)
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:3024-3107
+    // TypeCheckerImpl::RetryCallAsShadowedTypeConstructionWithType.
+    private func RetryCallAsShadowedTypeConstructionWithType(
+        ctx: ASTContext, target: Option<Ty>, ce: CallExpr, typeDecl: Decl): Bool {
+        if (ce.baseFunc.isNone() || !Ty.IsTyCorrect(typeDecl.GetTy())) {
+            return false
+        }
+        let base = ce.baseFunc.getOrThrow()
+        if (base.astKind != ASTKind.REF_EXPR && base.astKind != ASTKind.MEMBER_ACCESS) {
+            return false
+        }
+        let savedTarget = base.GetTarget()
+        let savedBaseTy = base.GetTy().getOrThrow()
+        let savedRefTargets = ArrayList<Option<Decl>>()
+        var savedAlias: Option<TypeAliasDecl> = None
+        if (let Some(refExpr) <- (base as RefExpr)) {
+            for (refTarget in refExpr.ref.targets) {
+                savedRefTargets.add(refTarget)
+            }
+            savedAlias = refExpr.aliasTarget
+        } else if (let Some(memberAccess) <- (base as MemberAccess)) {
+            for (memberTarget in memberAccess.targets) {
+                if (let Some(funcDecl) <- memberTarget) {
+                    savedRefTargets.add(Some(funcDecl))
+                } else {
+                    savedRefTargets.add(None)
+                }
+            }
+            savedAlias = memberAccess.aliasTarget
+        }
+        let savedCallKind = ce.callKind
+        let savedResolvedFunc = ce.resolvedFunction
+        let savedCeTy = ce.GetTy().getOrThrow()
+
+        var ok = false
+        try (ds = DiagSuppressor(impl.diag)) {
+            if (let Some(refExpr) <- (base as RefExpr)) {
+                ReplaceTarget(refExpr, Some(typeDecl))
+                refExpr.aliasTarget = None
+                refExpr.ref.targets.clear()
+                refExpr.callOrPattern = Some(ce)
+                refExpr.isAlone = false
+            } else if (let Some(memberAccess) <- (base as MemberAccess)) {
+                ReplaceTarget(memberAccess, Some(typeDecl))
+                memberAccess.aliasTarget = None
+                memberAccess.targets.clear()
+                memberAccess.callOrPattern = Some(ce)
+                memberAccess.isAlone = false
+            }
+            base.SetTy(typeDecl.GetTy().getOrThrow())
+            ce.callKind = CallKind.CALL_INVALID
+            ce.resolvedFunction = None
+            ce.SetTy(Ty.GetInitialTy())
+            impl.typeManager.constraints.Reset()
+            ok = ChkCallExpr(ctx, target, ce) && Ty.IsTyCorrect(ce.GetTy())
+        }
+        if (ok) {
+            return true
+        }
+        if (let Some(refExpr) <- (base as RefExpr)) {
+            ReplaceTarget(refExpr, savedTarget)
+            refExpr.aliasTarget = savedAlias
+            refExpr.ref.targets.clear()
+            for (decl in savedRefTargets) {
+                refExpr.ref.targets.add(decl)
+            }
+        } else if (let Some(memberAccess) <- (base as MemberAccess)) {
+            ReplaceTarget(memberAccess, savedTarget)
+            memberAccess.aliasTarget = savedAlias
+            memberAccess.targets.clear()
+            for (decl in savedRefTargets) {
+                if (let Some(value) <- decl) {
+                    if (let Some(funcDecl) <- (value as FuncDecl)) {
+                        memberAccess.targets.add(Some(funcDecl))
+                    }
+                } else {
+                    memberAccess.targets.add(None)
+                }
+            }
+        }
+        base.SetTy(savedBaseTy)
+        ce.callKind = savedCallKind
+        ce.resolvedFunction = savedResolvedFunc
+        ce.SetTy(savedCeTy)
+        impl.typeManager.constraints.Reset()
+        return false
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:3109-3129
+    // TypeCheckerImpl::MayRetryCallAsShadowedTypeConstruction.
+    private func MayRetryCallAsShadowedTypeConstruction(ctx: ASTContext, ce: CallExpr): Bool {
+        let _ = ctx
+        if (GetUnqualifiedCallBaseName(ce).isNone()) {
+            return false
+        }
+        let target = ce.baseFunc.getOrThrow().GetTarget()
+        if (target.isNone()) {
+            return false
+        }
+        let targetDecl = target.getOrThrow()
+        if (targetDecl.IsTypeDecl() || targetDecl.TestAttr(Attribute.GLOBAL)) {
+            return false
+        }
+        return targetDecl.astKind == ASTKind.FUNC_DECL || targetDecl.astKind == ASTKind.PROP_DECL ||
+            targetDecl.astKind == ASTKind.VAR_DECL
+    }
+
+    // C++ src/Sema/TypeCheckCall.cpp:3131-3145
+    // TypeCheckerImpl::RetryCallAsShadowedTypeConstruction.
+    private func RetryCallAsShadowedTypeConstruction(
+        ctx: ASTContext, target: Option<Ty>, ce: CallExpr): Bool {
+        let name = if (let Some(value) <- GetUnqualifiedCallBaseName(ce)) { value } else { return false }
+        let base = ce.baseFunc.getOrThrow()
+        if (base.scopeName.isEmpty()) {
+            return false
+        }
+        let typeDecl = LookupShadowedTopLevelTypeByName(ctx, name, base.scopeName, base)
+        if (typeDecl.isNone()) {
+            return false
+        }
+        return RetryCallAsShadowedTypeConstructionWithType(ctx, target, ce, typeDecl.getOrThrow())
+    }
+
     // C++ src/Sema/TypeCheckCall.cpp:3148-3287 TypeCheckerImpl::ChkCallExpr.
     internal func ChkCallExpr(ctx: ASTContext, target: Option<Ty>, ce: CallExpr): Bool {
         if (ce.desugarExpr.isSome()) {
@@ -4850,7 +5014,26 @@ extend TypeChecker {
         }
         ce.SetTy(TypeManager.GetNonNullTy(ce.GetTy().getOrThrow()))
 
-        let baseResult = ChkCallBaseExpr(ctx, ce, target)
+        let ctorTypeCandidate = ShadowedCallBaseTypeCandidate(ctx, ce)
+        let baseDiags = ArrayList<Diagnostic>()
+        var baseResult: (Bool, Option<Decl>, ArrayList<FuncDecl>) =
+            (false, None, ArrayList<FuncDecl>())
+        if (let Some(typeDecl) <- ctorTypeCandidate) {
+            try (ds = DiagSuppressor(impl.diag)) {
+                baseResult = ChkCallBaseExpr(ctx, ce, target)
+                for (diagnostic in ds.GetSuppressedDiag()) {
+                    baseDiags.add(diagnostic)
+                }
+            }
+            if (!baseResult[0] && RetryCallAsShadowedTypeConstructionWithType(ctx, target, ce, typeDecl)) {
+                return true
+            }
+            for (diagnostic in baseDiags) {
+                impl.diag.getOrThrow().Diagnose(diagnostic).Emit()
+            }
+        } else {
+            baseResult = ChkCallBaseExpr(ctx, ce, target)
+        }
         if (!baseResult[0]) {
             let builtinTarget = match (target) {
                 case Some(value) => value
@@ -4877,6 +5060,7 @@ extend TypeChecker {
         }
 
         let candidates = baseResult[2]
+        let mayRetryAsTypeCtor = MayRetryCallAsShadowedTypeConstruction(ctx, ce)
         if (let None <- baseResult[1]) {
             return CheckNonNormalCall(impl.typeManager, impl.diag, target, ce,
                 { targetTy, callExpr => ChkFunctionCallExpr(ctx, targetTy, callExpr) },
@@ -4888,6 +5072,9 @@ extend TypeChecker {
         }
         let decl = baseResult[1].getOrThrow()
         if (!CheckCallKind(impl.diag, ce, decl)) {
+            if (mayRetryAsTypeCtor && RetryCallAsShadowedTypeConstruction(ctx, target, ce)) {
+                return true
+            }
             return CheckNonNormalCall(impl.typeManager, impl.diag, target, ce,
                 { targetTy, callExpr => ChkFunctionCallExpr(ctx, targetTy, callExpr) },
                 { callExpr, arity => DesugarVariadicCallExpr(callExpr, arity) },
@@ -4911,7 +5098,7 @@ extend TypeChecker {
         var result = ArrayList<FuncDecl>()
         var typeMapping = SubstPack()
         try (cs = impl.typeManager.constraints.CommitScope()) {
-            if (maybeEnumOrVariadic) {
+            if (maybeEnumOrVariadic || mayRetryAsTypeCtor) {
                 try (ds = DiagSuppressor(impl.diag)) {
                     (result, typeMapping) = impl.MatchFunctionForCall(Some(ctx), candidates, ce, target,
                         argChecker: Some({ expectedTy5: Ty, arg10: FuncArg => CheckCallArgFromContext(ctx, expectedTy5, arg10) }),
@@ -4969,6 +5156,14 @@ extend TypeChecker {
                     })))
             if (ret) {
                 return true
+            }
+            if (mayRetryAsTypeCtor && RetryCallAsShadowedTypeConstruction(ctx, target, ce)) {
+                return true
+            }
+            if (mayRetryAsTypeCtor && !maybeEnumOrVariadic && !diagnostics.isEmpty()) {
+                for (diagnostic in diagnostics) {
+                    impl.diag.getOrThrow().Diagnose(diagnostic).Emit()
+                }
             }
             if (diagnostics.isEmpty()) {
                 DiagnoseForCall(impl.diag, impl.typeManager, impl.importManager.getOrThrow(),
@@ -7125,6 +7320,47 @@ extend TypeChecker {
         return true
     }
 
+    // C++ src/Sema/TypeCheckExpr/NameReferenceExpr.cpp:538-565
+    // TypeCheckerImpl::LookupShadowedTopLevelTypeByName.
+    private func LookupShadowedTopLevelTypeByName(
+        ctx: ASTContext, name: String, scopeName: String, node: Node): Option<Decl> {
+        if (scopeName.isEmpty() || name.isEmpty()) {
+            return None
+        }
+        let topLevel = impl.LookupTopLevel(ctx, name, scopeName, node)
+        var found: Option<Decl> = None
+        for (decl in topLevel) {
+            if (!decl.IsTypeDecl()) {
+                continue
+            }
+            if (!decl.IsStructOrClassDecl() && decl.astKind != ASTKind.ENUM_DECL) {
+                continue
+            }
+            if ((let Some(previous) <- found) && previous != decl) {
+                return None
+            }
+            found = Some(decl)
+        }
+        return found
+    }
+
+    // C++ src/Sema/TypeCheckExpr/NameReferenceExpr.cpp:567-583
+    // TypeCheckerImpl::LookupShadowedTopLevelType.
+    private func LookupShadowedTopLevelType(ctx: ASTContext, base: RefExpr): Option<Decl> {
+        if (base.ref.target.isNone()) {
+            return None
+        }
+        let target = base.ref.target.getOrThrow()
+        if (target.IsTypeDecl() || target.TestAttr(Attribute.GLOBAL)) {
+            return None
+        }
+        if (target.astKind != ASTKind.FUNC_DECL && target.astKind != ASTKind.PROP_DECL &&
+            target.astKind != ASTKind.VAR_DECL) {
+            return None
+        }
+        return LookupShadowedTopLevelTypeByName(ctx, base.ref.identifier.Val(), base.scopeName, base)
+    }
+
     private func InferMemberAccess(ctx: ASTContext, ma: MemberAccess): Unit {
         if (ma.target.isSome() && Ty.IsTyCorrect(ma.GetTy())) {
             return
@@ -7174,7 +7410,30 @@ extend TypeChecker {
                 BasicDiagKindRefactor.sema_undeclared_identifier, ma, memberRange, arguments: [ma.field.Val()])
             builder.Emit()
         } else {
-            InferInstanceAccess(ctx, ma)
+            var shadowedType: Option<Decl> = None
+            try (ds = DiagSuppressor(impl.diag)) {
+                InferInstanceAccess(ctx, ma)
+                if (ma.target.isNone() && ma.targets.isEmpty() && baseExpr.astKind == ASTKind.REF_EXPR) {
+                    let typeDecl = LookupShadowedTopLevelType(ctx, (baseExpr as RefExpr).getOrThrow())
+                    if ((let Some(decl) <- typeDecl) && Ty.IsTyCorrect(decl.GetTy())) {
+                        shadowedType = Some(decl)
+                    }
+                }
+                if (shadowedType.isNone()) {
+                    ds.ReportDiag()
+                }
+            }
+            if (let Some(typeDecl) <- shadowedType) {
+                let baseRef = (baseExpr as RefExpr).getOrThrow()
+                ReplaceTarget(baseRef, Some(typeDecl))
+                baseRef.aliasTarget = None
+                baseRef.ref.targets.clear()
+                baseRef.SetTy(typeDecl.GetTy().getOrThrow())
+                ma.targets.clear()
+                ReplaceTarget(ma, None)
+                ma.SetTy(Ty.GetInitialTy())
+                InferStaticAccess(ctx, ma, typeDecl)
+            }
         }
         if (ma.target.isNone()) {
             return
