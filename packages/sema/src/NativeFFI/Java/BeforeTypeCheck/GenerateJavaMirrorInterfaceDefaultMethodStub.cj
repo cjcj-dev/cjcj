@@ -28,7 +28,7 @@ public class GenerateJavaMirrorInterfaceDefaultMethodStub <: PreTypeCheckStage {
         }
     }
 
-    protected override func Process(ctx: PreTypeCheckContext): Unit {
+    public func Process(ctx: PreTypeCheckContext): Unit {
         for (mirror in ctx.javaMirrors) {
             if (let Some(mirrorInterface) <- (mirror as InterfaceDecl)) {
                 RemoveAbstractAttributeForJavaHasDefaultMethods(mirrorInterface)

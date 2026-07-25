@@ -16,7 +16,7 @@ public class GenerateJavaImplRegistryCompanion <: PreTypeCheckStage {
         return regCompanion
     }
 
-    protected override func Process(ctx: PreTypeCheckContext): Unit {
+    public func Process(ctx: PreTypeCheckContext): Unit {
         for (impl in ctx.javaImpls) {
             ctx.AddGeneratedDecl(GenerateRegistryCompanion(impl))
         }

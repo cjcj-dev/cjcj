@@ -37,7 +37,7 @@ public class GenerateJavaMirrorReferenceWrapperClass <: PreTypeCheckStage {
         return wrapper
     }
 
-    protected override func Process(ctx: PreTypeCheckContext): Unit {
+    public func Process(ctx: PreTypeCheckContext): Unit {
         for (mirror in ctx.javaMirrors) {
             if (!ShouldHaveMirrorReferenceWrapper(mirror)) {
                 continue

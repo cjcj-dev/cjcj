@@ -39,13 +39,16 @@ public class PreTypeCheckContext {
 
 // C++ src/Sema/NativeFFI/Java/BeforeTypeCheck/JavaInteropManager.h:40-48 and
 // JavaInteropManager.cpp:19-23.
-public abstract class PreTypeCheckStage {
+public interface PreTypeCheckStage {
     public operator func ()(ctx: PreTypeCheckContext): Unit {
         Process(ctx)
         ctx.FlushGeneratedDecls()
     }
 
-    protected abstract func Process(ctx: PreTypeCheckContext): Unit
+    // C++ declares Process as a protected pure-virtual function. Cangjie only
+    // permits explicitly abstract functions on Native FFI mirror classes, so
+    // the interface requirement is public; operator() remains its only caller.
+    func Process(ctx: PreTypeCheckContext): Unit
 }
 
 // C++ src/Sema/NativeFFI/Java/BeforeTypeCheck/JavaInteropManager.h:50-70 and
