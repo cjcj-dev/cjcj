@@ -248,7 +248,7 @@ public class InteropLibBridge {
     public func GetObjCStoreLambdaAsBlockDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJC_STORE_LAMBDA_AS_BLOCK, ASTKind.FUNC_DECL) }
     public func GetObjCGetLambdaFromBlockDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJC_GET_LAMBDA_FROM_BLOCK, ASTKind.FUNC_DECL) }
     public func GetObjectGetClassDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_OBJECT_GET_CLASS, ASTKind.FUNC_DECL) }
-    public func IsInteropLibAccessible(importManager: SemaImportManager): Bool { return importManager.GetPackageDecl(INTEROPLIB_PACKAGE_NAME).isSome() }
+    public static func IsInteropLibAccessible(importManager: SemaImportManager): Bool { return importManager.GetPackageDecl(INTEROPLIB_PACKAGE_NAME).isSome() }
     public func IsInteropLibAccessible(): Bool { return IsInteropLibAccessible(importManager) }
 
     private func GetObjCBlockConstructorByABIName(abiTypeName: String): Option<FuncDecl> {
