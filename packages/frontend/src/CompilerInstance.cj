@@ -1286,60 +1286,59 @@ public class CompilerInstance {
         end: Int64
     ): ArrayList<PendingMangledDecl> {
         let adapter = RealMangleAstAdapter()
-        let prefix = ArrayList<Node>()
         let pendingDecls = ArrayList<PendingMangledDecl>()
-        var currentPackageName = ""
-        let pre = { node: Node =>
-            let filteredPrefix = getMangleFilteredPrefix(prefix)
-            let convertedPrefix = convertManglePrefix(adapter, filteredPrefix)
-            let action = if (let Some(curDecl) <- (node as Decl)) {
-                curDecl.fullPackageName = currentPackageName
-                if (curDecl.astKind == ASTKind.MAIN_DECL) {
-                    VisitAction.WALK_CHILDREN
-                } else if (curDecl.astKind == ASTKind.MACRO_DECL) {
-                    if (let Some(desugarDecl) <- curDecl.GetDesugarDecl()) {
-                        let convertedDecl = adapter.ConvertDecl(desugarDecl)
-                        let mangledName = baseMangler.Mangle(convertedDecl)
-                        desugarDecl.mangledName = mangledName
-                        convertedDecl.mangledName = mangledName
-                    }
-                    VisitAction.WALK_CHILDREN
-                } else if (!Ty.IsTyCorrect(curDecl.GetTy())) {
-                    VisitAction.SKIP_CHILDREN
-                } else {
-                    let convertedDecl = adapter.ConvertDecl(curDecl)
-                    let mangledName = baseMangler.Mangle(convertedDecl, convertedPrefix)
-                    curDecl.mangledName = mangledName
-                    convertedDecl.mangledName = mangledName
-                    pendingDecls.add(PendingMangledDecl(curDecl, mangledName))
-                    VisitAction.WALK_CHILDREN
-                }
-            } else if (let Some(lambda) <- (node as LambdaExpr)) {
-                if (lambda.TestAttr(Attribute.GENERIC) || !Ty.IsTyCorrect(lambda.GetTy())) {
-                    VisitAction.SKIP_CHILDREN
-                } else {
-                    let convertedLambda = adapter.ConvertLambdaExpr(lambda)
-                    let mangledName = baseMangler.MangleLambda(convertedLambda, convertedPrefix)
-                    lambda.mangledName = mangledName
-                    convertedLambda.mangledName = mangledName
-                    VisitAction.WALK_CHILDREN
-                }
-            } else if (let Some(_) <- (node as Annotation)) {
-                VisitAction.SKIP_CHILDREN
-            } else {
-                VisitAction.WALK_CHILDREN
-            }
-            prefix.add(node)
-            action
-        }
-        let post = { _: Node =>
-            prefix.remove(at: prefix.size - 1)
-            VisitAction.KEEP_DECISION
-        }
         var idx = start
         while (idx < end) {
             let topDecl = topDecls[idx]
-            currentPackageName = topDecl[0]
+            let pkgName = topDecl[0]
+            let prefix = ArrayList<Node>()
+            let pre = { node: Node =>
+                let filteredPrefix = getMangleFilteredPrefix(prefix)
+                let convertedPrefix = convertManglePrefix(adapter, filteredPrefix)
+                let action = if (let Some(curDecl) <- (node as Decl)) {
+                    curDecl.fullPackageName = pkgName
+                    if (curDecl.astKind == ASTKind.MAIN_DECL) {
+                        VisitAction.WALK_CHILDREN
+                    } else if (curDecl.astKind == ASTKind.MACRO_DECL) {
+                        if (let Some(desugarDecl) <- curDecl.GetDesugarDecl()) {
+                            let convertedDecl = adapter.ConvertDecl(desugarDecl)
+                            let mangledName = baseMangler.Mangle(convertedDecl)
+                            desugarDecl.mangledName = mangledName
+                            convertedDecl.mangledName = mangledName
+                        }
+                        VisitAction.WALK_CHILDREN
+                    } else if (!Ty.IsTyCorrect(curDecl.GetTy())) {
+                        VisitAction.SKIP_CHILDREN
+                    } else {
+                        let convertedDecl = adapter.ConvertDecl(curDecl)
+                        let mangledName = baseMangler.Mangle(convertedDecl, convertedPrefix)
+                        curDecl.mangledName = mangledName
+                        convertedDecl.mangledName = mangledName
+                        pendingDecls.add(PendingMangledDecl(curDecl, mangledName))
+                        VisitAction.WALK_CHILDREN
+                    }
+                } else if (let Some(lambda) <- (node as LambdaExpr)) {
+                    if (lambda.TestAttr(Attribute.GENERIC) || !Ty.IsTyCorrect(lambda.GetTy())) {
+                        VisitAction.SKIP_CHILDREN
+                    } else {
+                        let convertedLambda = adapter.ConvertLambdaExpr(lambda)
+                        let mangledName = baseMangler.MangleLambda(convertedLambda, convertedPrefix)
+                        lambda.mangledName = mangledName
+                        convertedLambda.mangledName = mangledName
+                        VisitAction.WALK_CHILDREN
+                    }
+                } else if (let Some(_) <- (node as Annotation)) {
+                    VisitAction.SKIP_CHILDREN
+                } else {
+                    VisitAction.WALK_CHILDREN
+                }
+                prefix.add(node)
+                action
+            }
+            let post = { _: Node =>
+                prefix.remove(at: prefix.size - 1)
+                VisitAction.KEEP_DECISION
+            }
             Walker(topDecl[1], visitPre: pre, visitPost: post).Walk()
             idx++
         }
