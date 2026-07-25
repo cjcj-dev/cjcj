@@ -14,8 +14,8 @@ Codex 模型版本、插件缓存路径或已经结束的移植 wave。
 - 进行只读调研并沉淀设计文档。
 
 仓库、模块和主分支分别是 `cjcj-dev/cjcj`、`cjcj`、`master`。发布编译器名为 `cjc`。
-旧仓名 `cangjie_compiler_selfhost`、旧 `main` 分支、June-era deepen workflow 和
-`codex-companion.mjs` 插件路径都不是现役入口。
+早期仓名、非现役主分支、June-era deepen workflow 和插件缓存中的 companion 路径都
+不是现役入口。
 
 ## 一条 lane 的输入
 
