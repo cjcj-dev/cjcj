@@ -1,7 +1,6 @@
 package cjcj::chir
 
 import cjcj::option.GlobalOptions
-import std.collection.ArrayList
 
 // C++: CHIR/Optimization/ArrayListConstStartOpt.cpp:14-17.
 private let ARRAY_FUNC_INLINE_WHITE_LIST: Array<FuncInfo> = [
