@@ -516,14 +516,12 @@ public class InteropLibBridge {
     public func GetObjCBlockConstructorFromObjC(): Option<FuncDecl> {
         if (let Some(result) <- InteropLibBridge.objCBlockConstructorFromObjC) { return result }
         let result = GetObjCBlockConstructorByABIName(this, INTEROPLIB_NATIVE_BLOCK_ABI)
-        CJC_NULLPTR_CHECK(result)
         InteropLibBridge.objCBlockConstructorFromObjC = result
         return result
     }
     public func GetObjCBlockConstructorFromCangjie(): Option<FuncDecl> {
         if (let Some(result) <- InteropLibBridge.objCBlockConstructorFromCangjie) { return result }
         let result = GetObjCBlockConstructorByABIName(this, INTEROPLIB_CANGJIE_BLOCK_ABI)
-        CJC_NULLPTR_CHECK(result)
         InteropLibBridge.objCBlockConstructorFromCangjie = result
         return result
     }
