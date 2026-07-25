@@ -1,11 +1,18 @@
 # Corpus-hardening blind-spot programs
 
-These programs exercise language features used heavily in the compiler's own
-source but exercised 0x by the existing 113-program difftest corpus. Every file
-compiles EXIT=0 and runs to a deterministic result under the REFERENCE compiler
-(/root/.cjv/bin/cjc, nightly-1.2.0-alpha.20260619020029), which defines the
-expected stdout. They are intended to be run by scripts/difftest.mjs against both
-the selfhost and reference compilers.
+These supplemental programs were created to exercise language features used heavily
+in the compiler's own source but absent from the flat corpus at the time. The main
+difftest corpus now contains 114 programs; these 14 files remain in a separate directory
+and are not included in that count or in the default gate.
+
+At fixture creation, every file compiled with exit 0 and produced the listed deterministic
+output under `/root/.cjv/bin/cjc` from
+`nightly-1.2.0-alpha.20260619020029`. That pin is provenance, not a claim about the current
+SDK. Run the supplemental corpus against the current reference and selfhost compilers with:
+
+```sh
+npx --yes zx@8 scripts/difftest.mjs scripts/difftest_corpus_hardening
+```
 
 filename | feature guarded | reference stdout (first line) | self-host task most stressed
 ---------|-----------------|-------------------------------|------------------------------
