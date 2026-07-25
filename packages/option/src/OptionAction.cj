@@ -415,6 +415,8 @@ private func parseWarn(value: String, suppress: Bool): Bool {
         BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.INTERPRETER)), suppress)
     } else if (value == "apilevel-check") {
         BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.APILEVEL_CHECK)), suppress)
+    } else if (value == "unexpected-cfg") {
+        BasicWarningOptionMgr.UpdateFlag(UInt64(BasicWarnGroupIndex(BasicWarnGroup.UNEXPECTED_CFG)), suppress)
     } else {
         return false
     }
@@ -580,17 +582,153 @@ private func parseConditionKeyValueLine(line: String, map: HashMap<String, Strin
     return true
 }
 
-public func SetupConditionalCompilationCfgFromFile(filePath: String, map: HashMap<String, String>): Bool {
+private func collectCfgTomlStatements(content: String): Array<String> {
+    let statements = ArrayList<String>()
+    var statement = StringBuilder()
+    var squareDepth: Int64 = 0
+    var inString = false
+    var escaped = false
+    for (rawLine in SplitLines(content)) {
+        if (rawLine.isEmpty() || seeingTomlComment(rawLine)) { continue }
+        let commentPos = findTomlComment(rawLine)
+        let line = (if (commentPos >= 0) { rawLine[0..commentPos] } else { rawLine }).trimAscii()
+        if (line.isEmpty()) { continue }
+        if (statement.toString().isEmpty()) {
+            statement.append(line)
+        } else {
+            statement.append(" " + line)
+        }
+        for (byte in line.toArray()) {
+            if (inString) {
+                if (escaped) {
+                    escaped = false
+                } else if (byte == b'\\') {
+                    escaped = true
+                } else if (byte == b'"') {
+                    inString = false
+                }
+            } else if (byte == b'"') {
+                inString = true
+            } else if (byte == b'[') {
+                squareDepth++
+            } else if (byte == b']') {
+                squareDepth--
+            }
+        }
+        if (squareDepth <= 0 && !inString) {
+            statements.add(statement.toString())
+            statement = StringBuilder()
+            squareDepth = 0
+        }
+    }
+    let rest = statement.toString().trimAscii()
+    if (!rest.isEmpty()) { statements.add(rest) }
+    return statements.toArray()
+}
+
+private func normalizeExpectedCfgName(rawName: String): MaybeString {
+    if (!checkCfgIdentifier(rawName)) { return MaybeString() }
+    var name = rawName
+    if (name.size > 2 && name[0] == b'`') {
+        name = name[1..name.size - 1]
+    }
+    return MaybeString(UtilsNFC(name))
+}
+
+private func parseExpectedCfgNames(value: String, expectedNames: HashSet<String>): Bool {
+    let trimmed = value.trimAscii()
+    if (trimmed.size < 2 || trimmed[0] != b'[' || trimmed[trimmed.size - 1] != b']') {
+        emitDiag(BasicDiagKindRefactor.driver_cfg_toml_content_err)
+        return false
+    }
+    let body = trimmed[1..trimmed.size - 1]
+    var idx: Int64 = 0
+    while (idx < body.size) {
+        while (idx < body.size && (body[idx] == b' ' || body[idx] == b'\t' || body[idx] == b'\r' ||
+            body[idx] == b'\n')) { idx++ }
+        if (idx == body.size) { return true }
+        if (body[idx] != b'"') {
+            emitDiag(BasicDiagKindRefactor.driver_cfg_toml_content_err)
+            return false
+        }
+        let nameBegin = idx + 1
+        idx++
+        while (idx < body.size && (body[idx] != b'"' || isEscaped(body, idx - 1))) { idx++ }
+        if (idx == body.size) {
+            emitDiag(BasicDiagKindRefactor.driver_cfg_toml_content_err)
+            return false
+        }
+        let rawName = body[nameBegin..idx]
+        let maybeName = normalizeExpectedCfgName(rawName)
+        if (!maybeName.hasValue) { return false }
+        expectedNames.add(maybeName.value)
+        idx++
+        while (idx < body.size && (body[idx] == b' ' || body[idx] == b'\t' || body[idx] == b'\r' ||
+            body[idx] == b'\n')) { idx++ }
+        if (idx == body.size) { return true }
+        if (body[idx] != b',') {
+            emitDiag(BasicDiagKindRefactor.driver_cfg_toml_content_err)
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
+private func loadConditionalCompilationCfgFromFile(filePath: String, map: HashMap<String, String>,
+    expectedNames: HashSet<String>, loadValues: Bool): (Bool, Bool) {
     let readResult = ReadTextFileWithReason(filePath)
     if (!readResult.content.hasValue) {
         emitDiag(BasicDiagKindRefactor.driver_cfg_file_read_failed, filePath, readResult.failedReason)
-        return false
+        return (false, false)
     }
-    for (line in SplitLines(readResult.content.value)) {
-        if (line.isEmpty() || seeingTomlComment(line)) { continue }
-        if (!parseConditionKeyValueLine(line, map)) { return false }
+    var foundExpectedNames = false
+    for (statement in collectCfgTomlStatements(readResult.content.value)) {
+        let equalPos = statement.indexOf("=") ?? -1
+        if (equalPos < 0) {
+            if (loadValues) {
+                emitDiag(BasicDiagKindRefactor.driver_cfg_toml_content_err)
+                return (false, foundExpectedNames)
+            }
+            continue
+        }
+        let key = statement[0..equalPos].trimAscii()
+        if (key == "cfg.names") {
+            if (foundExpectedNames || !parseExpectedCfgNames(statement[equalPos + 1..], expectedNames)) {
+                if (foundExpectedNames) { emitDiag(BasicDiagKindRefactor.driver_cfg_toml_content_err) }
+                return (false, true)
+            }
+            foundExpectedNames = true
+        } else if (loadValues && !parseConditionKeyValueLine(statement, map)) {
+            return (false, foundExpectedNames)
+        }
     }
-    return true
+    return (true, foundExpectedNames)
+}
+
+public func SetupConditionalCompilationCfgFromFile(filePath: String, map: HashMap<String, String>): Bool {
+    let expectedNames = HashSet<String>()
+    let (success, _) = loadConditionalCompilationCfgFromFile(filePath, map, expectedNames, true)
+    return success
+}
+
+private func loadExpectedCfgNamesForKeyValueMode(opts: GlobalOptions): Bool {
+    for (path in opts.passedWhenCfgPaths) {
+        let filePath = JoinPath(path, "cfg.toml")
+        if (FileExist(filePath)) {
+            let (success, foundExpectedNames) = loadConditionalCompilationCfgFromFile(
+                filePath, opts.passedWhenKeyValue, opts.expectedWhenNames, false)
+            opts.checkUnexpectedCfgNames = foundExpectedNames
+            return success
+        }
+    }
+    if (opts.packagePaths.isEmpty()) { return true }
+    let filePath = JoinPath(opts.packagePaths[0], "cfg.toml")
+    if (!FileExist(filePath)) { return true }
+    let (success, foundExpectedNames) = loadConditionalCompilationCfgFromFile(
+        filePath, opts.passedWhenKeyValue, opts.expectedWhenNames, false)
+    opts.checkUnexpectedCfgNames = foundExpectedNames
+    return success
 }
 
 public func SetupConditionalCompilationCfg(opts: GlobalOptions): Bool {
@@ -598,18 +736,24 @@ public func SetupConditionalCompilationCfg(opts: GlobalOptions): Bool {
         if (!opts.passedWhenCfgPaths.isEmpty()) {
             emitDiag(BasicDiagKindRefactor.driver_cfg_path_ignored)
         }
-        return true
+        return loadExpectedCfgNamesForKeyValueMode(opts)
     }
     for (path in opts.passedWhenCfgPaths) {
         let filePath = JoinPath(path, "cfg.toml")
         if (FileExist(filePath)) {
-            return SetupConditionalCompilationCfgFromFile(filePath, opts.passedWhenKeyValue)
+            let (success, foundExpectedNames) = loadConditionalCompilationCfgFromFile(
+                filePath, opts.passedWhenKeyValue, opts.expectedWhenNames, true)
+            opts.checkUnexpectedCfgNames = foundExpectedNames
+            return success
         }
         emitDiag(BasicDiagKindRefactor.driver_warning_no_such_file, filePath)
     }
     let defaultCfgFilePath = if (opts.packagePaths.isEmpty()) { "cfg.toml" } else { JoinPath(opts.packagePaths[0], "cfg.toml") }
     if (!FileExist(defaultCfgFilePath)) { return true }
-    return SetupConditionalCompilationCfgFromFile(defaultCfgFilePath, opts.passedWhenKeyValue)
+    let (success, foundExpectedNames) = loadConditionalCompilationCfgFromFile(
+        defaultCfgFilePath, opts.passedWhenKeyValue, opts.expectedWhenNames, true)
+    opts.checkUnexpectedCfgNames = foundExpectedNames
+    return success
 }
 
 private func parseLto(opts: GlobalOptions, value: String): ActionResult {

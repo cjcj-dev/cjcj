@@ -20,6 +20,8 @@ public class ConditionalCompilationConfig {
     public var debug: Bool = false
     public var test: Bool = false
     public let passedCondition: HashMap<String, String> = HashMap<String, String>()
+    public let expectedConditionNames: HashSet<String> = HashSet<String>()
+    public var checkUnexpectedCfgNames: Bool = false
     public var diag: BasicDiagnosticEngine = BasicDiagnosticEngine()
 
     public init() {}
@@ -42,6 +44,11 @@ public class ConditionalCompilationConfig {
         for ((key, value) in options.passedWhenKeyValue) {
             passedCondition.add(key, value)
         }
+        expectedConditionNames.clear()
+        for (name in options.expectedWhenNames) {
+            expectedConditionNames.add(name)
+        }
+        checkUnexpectedCfgNames = options.checkUnexpectedCfgNames
         LoadLSPConfigIfNeeded(options)
     }
 
@@ -58,6 +65,7 @@ public class ConditionalCompilationConfig {
             if (!options.passedWhenCfgPaths.isEmpty()) {
                 diag.DiagnoseRefactor(BasicDiagKindRefactor.driver_cfg_path_ignored, DEFAULT_POSITION).Emit()
             }
+            LoadLSPExpectedCfgNamesForKeyValueMode(options)
             return
         }
 
@@ -69,7 +77,9 @@ public class ConditionalCompilationConfig {
                     BasicDiagKindRefactor.driver_warning_no_such_file, DEFAULT_POSITION, arguments: [filePath]).Emit()
                 continue
             }
-            let _ = SetupLSPConditionalCompilationCfgFromFile(filePath, passedCondition, diag)
+            let (_, foundExpectedNames) = SetupLSPConditionalCompilationCfgFromFile(
+                filePath, passedCondition, expectedConditionNames, true, diag)
+            checkUnexpectedCfgNames = foundExpectedNames
             return
         }
 
@@ -79,8 +89,28 @@ public class ConditionalCompilationConfig {
             FileUtil.JoinPath(options.packagePaths[0], cfgFileName)
         }
         if (FileUtil.FileExist(defaultCfgFilePath)) {
-            let _ = SetupLSPConditionalCompilationCfgFromFile(defaultCfgFilePath, passedCondition, diag)
+            let (_, foundExpectedNames) = SetupLSPConditionalCompilationCfgFromFile(
+                defaultCfgFilePath, passedCondition, expectedConditionNames, true, diag)
+            checkUnexpectedCfgNames = foundExpectedNames
         }
+    }
+
+    private func LoadLSPExpectedCfgNamesForKeyValueMode(options: GlobalOptions): Unit {
+        for (path in options.passedWhenCfgPaths) {
+            let filePath = FileUtil.JoinPath(path, "cfg.toml")
+            if (FileUtil.FileExist(filePath)) {
+                let (_, foundExpectedNames) = SetupLSPConditionalCompilationCfgFromFile(
+                    filePath, passedCondition, expectedConditionNames, false, diag)
+                checkUnexpectedCfgNames = foundExpectedNames
+                return
+            }
+        }
+        if (options.packagePaths.isEmpty()) { return }
+        let filePath = FileUtil.JoinPath(options.packagePaths[0], "cfg.toml")
+        if (!FileUtil.FileExist(filePath)) { return }
+        let (_, foundExpectedNames) = SetupLSPConditionalCompilationCfgFromFile(
+            filePath, passedCondition, expectedConditionNames, false, diag)
+        checkUnexpectedCfgNames = foundExpectedNames
     }
 }
 
@@ -181,26 +211,145 @@ private func ParseLSPConditionKeyValueLine(
     return false
 }
 
+private func CollectLSPCfgTomlStatements(content: String): Array<String> {
+    let statements = ArrayList<String>()
+    var statement = StringBuilder()
+    var squareDepth: Int64 = 0
+    var inString = false
+    var escaped = false
+    for (rawLine in SplitLines(content)) {
+        if (rawLine.isEmpty() || SeeingLSPTomlComment(rawLine)) { continue }
+        let commentPos = FindLSPTomlComment(rawLine)
+        let line = (if (commentPos >= 0) { rawLine[0..commentPos] } else { rawLine }).trimAscii()
+        if (line.isEmpty()) { continue }
+        if (statement.toString().isEmpty()) {
+            statement.append(line)
+        } else {
+            statement.append(" " + line)
+        }
+        for (byte in line.toArray()) {
+            if (inString) {
+                if (escaped) {
+                    escaped = false
+                } else if (byte == b'\\') {
+                    escaped = true
+                } else if (byte == b'"') {
+                    inString = false
+                }
+            } else if (byte == b'"') {
+                inString = true
+            } else if (byte == b'[') {
+                squareDepth++
+            } else if (byte == b']') {
+                squareDepth--
+            }
+        }
+        if (squareDepth <= 0 && !inString) {
+            statements.add(statement.toString())
+            statement = StringBuilder()
+            squareDepth = 0
+        }
+    }
+    let rest = statement.toString().trimAscii()
+    if (!rest.isEmpty()) { statements.add(rest) }
+    return statements.toArray()
+}
+
+private func NormalizeLSPExpectedCfgName(rawName: String, diag: BasicDiagnosticEngine): Option<String> {
+    if (!FileUtil.IsIdentifier(rawName)) {
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.dirver_cfg_invaild_identifier, DEFAULT_POSITION).Emit()
+        return None
+    }
+    var name = rawName
+    if (name.size > 2 && name[0] == b'`' && name[name.size - 1] == b'`') {
+        name = name[1..name.size - 1]
+    }
+    return Some(UtilsNFC(name))
+}
+
+private func ParseLSPExpectedCfgNames(value: String, expectedNames: HashSet<String>,
+    diag: BasicDiagnosticEngine): Bool {
+    let trimmed = value.trimAscii()
+    if (trimmed.size < 2 || trimmed[0] != b'[' || trimmed[trimmed.size - 1] != b']') {
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.driver_cfg_toml_content_err, DEFAULT_POSITION).Emit()
+        return false
+    }
+    let body = trimmed[1..trimmed.size - 1]
+    var idx: Int64 = 0
+    while (idx < body.size) {
+        while (idx < body.size && (body[idx] == b' ' || body[idx] == b'\t' || body[idx] == b'\r' ||
+            body[idx] == b'\n')) { idx++ }
+        if (idx == body.size) { return true }
+        if (body[idx] != b'"') {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.driver_cfg_toml_content_err, DEFAULT_POSITION).Emit()
+            return false
+        }
+        let nameBegin = idx + 1
+        idx++
+        while (idx < body.size && (body[idx] != b'"' || IsLSPEscaped(body, idx - 1))) { idx++ }
+        if (idx == body.size) {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.driver_cfg_toml_content_err, DEFAULT_POSITION).Emit()
+            return false
+        }
+        let rawName = body[nameBegin..idx]
+        if (let Some(name) <- NormalizeLSPExpectedCfgName(rawName, diag)) {
+            expectedNames.add(name)
+        } else {
+            return false
+        }
+        idx++
+        while (idx < body.size && (body[idx] == b' ' || body[idx] == b'\t' || body[idx] == b'\r' ||
+            body[idx] == b'\n')) { idx++ }
+        if (idx == body.size) { return true }
+        if (body[idx] != b',') {
+            diag.DiagnoseRefactor(BasicDiagKindRefactor.driver_cfg_toml_content_err, DEFAULT_POSITION).Emit()
+            return false
+        }
+        idx++
+    }
+    return true
+}
+
 private func SetupLSPConditionalCompilationCfgFromFile(
     filePath: String,
     map: HashMap<String, String>,
+    expectedNames: HashSet<String>,
+    loadValues: Bool,
     diag: BasicDiagnosticEngine
-): Bool {
+): (Bool, Bool) {
     let failReason = Box<String>("")
     if (let Some(content) <- FileUtil.ReadFileContent(filePath, failReason)) {
-        for (line in SplitLines(content)) {
-            if (line.isEmpty() || SeeingLSPTomlComment(line)) {
+        var foundExpectedNames = false
+        for (statement in CollectLSPCfgTomlStatements(content)) {
+            let equalPos = statement.indexOf("=") ?? -1
+            if (equalPos < 0) {
+                if (loadValues) {
+                    diag.DiagnoseRefactor(
+                        BasicDiagKindRefactor.driver_cfg_toml_content_err, DEFAULT_POSITION).Emit()
+                    return (false, foundExpectedNames)
+                }
                 continue
             }
-            if (!ParseLSPConditionKeyValueLine(line, map, diag)) {
-                return false
+            let key = statement[0..equalPos].trimAscii()
+            if (key == "cfg.names") {
+                if (foundExpectedNames ||
+                    !ParseLSPExpectedCfgNames(statement[equalPos + 1..], expectedNames, diag)) {
+                    if (foundExpectedNames) {
+                        diag.DiagnoseRefactor(
+                            BasicDiagKindRefactor.driver_cfg_toml_content_err, DEFAULT_POSITION).Emit()
+                    }
+                    return (false, true)
+                }
+                foundExpectedNames = true
+            } else if (loadValues && !ParseLSPConditionKeyValueLine(statement, map, diag)) {
+                return (false, foundExpectedNames)
             }
         }
-        return true
+        return (true, foundExpectedNames)
     }
     diag.DiagnoseRefactor(
         BasicDiagKindRefactor.driver_cfg_file_read_failed, DEFAULT_POSITION, arguments: [filePath, failReason.value]).Emit()
-    return false
+    return (false, false)
 }
 
 public func CopyTripleInfo(src: TripleInfo): TripleInfo {

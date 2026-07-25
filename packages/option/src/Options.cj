@@ -29,7 +29,8 @@ private func optionValues(name: String): Array<OptionValue> {
             value("parser", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
             value("semantics", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
             value("interpreter", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
-            value("apilevel-check", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE])
+            value("apilevel-check", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE]),
+            value("unexpected-cfg", "", [Backend.ALL], [Group.GLOBAL, Group.STABLE, Group.VISIBLE])
         ]
     }
     if (name == "diagnostic_value") {

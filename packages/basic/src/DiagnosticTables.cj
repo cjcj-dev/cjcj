@@ -13,6 +13,7 @@ public enum WarnGroup {
     | SEMANTICS
     | INTERPRETER
     | APILEVEL_CHECK
+    | UNEXPECTED_CFG
     | UNGROUPED
     | NONE
 }
@@ -1073,6 +1074,7 @@ public enum DiagKindRefactor {
     | sema_hide_must_at_end
     | sema_unused_import
     | sema_diag_end
+    | conditional_compilation_unexpected_cfg_name
 }
 
 public class ErrorData {
@@ -2347,7 +2349,7 @@ public let errorData: Array<ErrorData> = [
     ErrorData(message: "user defined condition's key can not repeat", mainHint: "", otherHints: []),
     ErrorData(message: "'%s' is not a vaild directory path, please check it or pass the key-value pair like: k1=v1,k2=v2.", mainHint: "", otherHints: []),
     ErrorData(message: "read '%s' failed, due to '%s'", mainHint: "", otherHints: []),
-    ErrorData(message: "conditional compilation has been set by key-value mode, cfg.toml will be ignored", mainHint: "", otherHints: []),
+    ErrorData(message: "conditional compilation has been set by key-value mode, cfg values in cfg.toml will be ignored", mainHint: "", otherHints: []),
     ErrorData(message: "--compile-as-exe only takes effect when lto mode is enabled", mainHint: "", otherHints: []),
     ErrorData(message: "Windows, Mac, IOS does not support --compile-as-exe", mainHint: "", otherHints: []),
     ErrorData(message: "--lto-keep-pkg-visibility only takes effect when lto mode is enabled", mainHint: "", otherHints: []),
@@ -2993,6 +2995,7 @@ public let errorData: Array<ErrorData> = [
     ErrorData(message: "annotation '%s' must be placed below all macros and annotations", mainHint: "", otherHints: []),
     ErrorData(message: "unused import '%s'", mainHint: "unused import", otherHints: []),
     ErrorData(message: "", mainHint: "", otherHints: []),
+    ErrorData(message: "unexpected conditional compilation condition name '%s'; declare it in cfg.names in cfg.toml", mainHint: "unexpected cfg name", otherHints: []),
 ]
 
 public let rDiagSeveritys: Array<DiagSeverity> = [
@@ -3734,6 +3737,7 @@ public let rDiagSeveritys: Array<DiagSeverity> = [
     DiagSeverity.DS_WARNING,
     DiagSeverity.DS_WARNING,
     DiagSeverity.DS_ERROR,
+    DiagSeverity.DS_WARNING,
 ]
 
 public let rWarnGroups: Array<WarnGroup> = [
@@ -4475,6 +4479,7 @@ public let rWarnGroups: Array<WarnGroup> = [
     WarnGroup.APILEVEL_CHECK,
     WarnGroup.UNUSED,
     WarnGroup.NONE,
+    WarnGroup.UNEXPECTED_CFG,
 ]
 
 public let warnGroupDescrs: Array<String> = [
@@ -4488,8 +4493,9 @@ public let warnGroupDescrs: Array<String> = [
     "semantics",
     "interpreter",
     "apilevel-check",
+    "unexpected-cfg",
 ]
-public let WARN_GROUP_DESCRS_SIZE: Int64 = 10
+public let WARN_GROUP_DESCRS_SIZE: Int64 = 11
 
 public let RE_DIAG_KIND_STR: Array<String> = [
     "chir_diag_begin",
@@ -5230,8 +5236,9 @@ public let RE_DIAG_KIND_STR: Array<String> = [
     "sema_hide_must_at_end",
     "sema_unused_import",
     "sema_diag_end",
+    "conditional_compilation_unexpected_cfg_name",
 ]
-public let RE_DIAG_KIND_STR_SIZE: Int64 = 738
+public let RE_DIAG_KIND_STR_SIZE: Int64 = 739
 
 public func DiagKindIndex(kind: DiagKind): Int64 {
     return match (kind) {
@@ -6266,6 +6273,7 @@ public func DiagKindRefactorIndex(kind: DiagKindRefactor): Int64 {
         case DiagKindRefactor.sema_hide_must_at_end => 735
         case DiagKindRefactor.sema_unused_import => 736
         case DiagKindRefactor.sema_diag_end => 737
+        case DiagKindRefactor.conditional_compilation_unexpected_cfg_name => 738
     }
 }
 
@@ -6281,8 +6289,9 @@ public func WarnGroupIndex(kind: WarnGroup): Int64 {
         case WarnGroup.SEMANTICS => 7
         case WarnGroup.INTERPRETER => 8
         case WarnGroup.APILEVEL_CHECK => 9
-        case WarnGroup.UNGROUPED => 10
-        case WarnGroup.NONE => 11
+        case WarnGroup.UNEXPECTED_CFG => 10
+        case WarnGroup.UNGROUPED => 11
+        case WarnGroup.NONE => 12
     }
 }
 
@@ -6302,6 +6311,9 @@ public func GetDiagnoseCategory(diagKind: DiagKind): DiagCategory {
 }
 
 public func GetDiagnoseCategory(diagKind: DiagKindRefactor): DiagCategory {
+    if (diagKind == DiagKindRefactor.conditional_compilation_unexpected_cfg_name) {
+        return DiagCategory.CONDITIONAL_COMPILATION
+    }
     let idx = DiagKindRefactorIndex(diagKind)
     if (idx > DiagKindRefactorIndex(DiagKindRefactor.lex_diag_begin) &&
         idx < DiagKindRefactorIndex(DiagKindRefactor.lex_diag_end)) { return DiagCategory.LEX }

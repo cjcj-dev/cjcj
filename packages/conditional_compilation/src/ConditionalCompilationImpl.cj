@@ -4,6 +4,7 @@ import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
+import cjcj::basic.MakeRange as BasicMakeRange
 import cjcj::basic.SplitString
 import cjcj::option.BackendToString
 import cjcj::option.BackendType
@@ -68,6 +69,8 @@ class ConditionalCompilationImpl {
     private let builtinConditionCache: HashMap<String, String> = HashMap<String, String>()
     private let judgeConditionCache: HashMap<String, Bool> = HashMap<String, Bool>()
     private let conditionExprCache: HashMap<String, Bool> = HashMap<String, Bool>()
+    private let expectedConditionNames: HashSet<String> = HashSet<String>()
+    private let checkUnexpectedCfgNames: Bool
 
     public init(config: ConditionalCompilationConfig) {
         backendType = config.backendType
@@ -79,6 +82,10 @@ class ConditionalCompilationImpl {
         for ((key, value) in config.passedCondition) {
             passedCondition.add(key, value)
         }
+        for (name in config.expectedConditionNames) {
+            expectedConditionNames.add(name)
+        }
+        checkUnexpectedCfgNames = config.checkUnexpectedCfgNames
         InitBuiltinConditionCache()
     }
 
@@ -192,6 +199,33 @@ class ConditionalCompilationImpl {
                 diag.DiagnoseRefactor(
                     BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin).Emit()
                 return false
+        }
+    }
+
+    private func CheckUnexpectedCfgName(re: RefExpr): Unit {
+        let name = re.ref.identifier.Val()
+        if (IsTargetCondition(name) || passedCondition.contains(name) || expectedConditionNames.contains(name)) {
+            return
+        }
+        diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_unexpected_cfg_name,
+            BasicMakeRange(re.begin, re.end), arguments: [name]).Emit()
+    }
+
+    private func CheckUnexpectedCfgNames(condition: Expr): Unit {
+        if (!checkUnexpectedCfgNames) { return }
+        match (condition.astKind) {
+            case ASTKind.BINARY_EXPR =>
+                let binary = (condition as BinaryExpr).getOrThrow()
+                if (let Some(left) <- binary.leftExpr) { CheckUnexpectedCfgNames(left) }
+                if (let Some(right) <- binary.rightExpr) { CheckUnexpectedCfgNames(right) }
+            case ASTKind.UNARY_EXPR =>
+                let unary = (condition as UnaryExpr).getOrThrow()
+                if (let Some(expr) <- unary.expr) { CheckUnexpectedCfgNames(expr) }
+            case ASTKind.REF_EXPR => CheckUnexpectedCfgName((condition as RefExpr).getOrThrow())
+            case ASTKind.PAREN_EXPR =>
+                let paren = (condition as ParenExpr).getOrThrow()
+                if (let Some(expr) <- paren.expr) { CheckUnexpectedCfgNames(expr) }
+            case _ => ()
         }
     }
 
@@ -508,6 +542,7 @@ class ConditionalCompilationImpl {
                 return false
             }
             if (let Some(condExpr) <- anno.condExpr) {
+                CheckUnexpectedCfgNames(condExpr)
                 evalResult[0] = EvalCachedConditionExpr(condExpr)
             } else {
                 diag.DiagnoseRefactor(
@@ -526,6 +561,7 @@ class ConditionalCompilationImpl {
                 return false
             }
             if (let Some(condExpr) <- anno.condExpr) {
+                CheckUnexpectedCfgNames(condExpr)
                 evalResult[0] = EvalCachedConditionExpr(condExpr)
             } else {
                 diag.DiagnoseRefactor(
@@ -544,6 +580,7 @@ class ConditionalCompilationImpl {
                 return false
             }
             if (let Some(condExpr) <- anno.condExpr) {
+                CheckUnexpectedCfgNames(condExpr)
                 evalResult[0] = EvalCachedConditionExpr(condExpr)
             } else {
                 diag.DiagnoseRefactor(

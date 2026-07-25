@@ -269,6 +269,8 @@ public open class GlobalOptions <: Option {
     public var target: TripleInfo = TripleInfo()
     public let passedWhenKeyValue: HashMap<String, String> = HashMap<String, String>()
     public let passedWhenCfgPaths: ArrayList<String> = ArrayList<String>()
+    public let expectedWhenNames: HashSet<String> = HashSet<String>()
+    public var checkUnexpectedCfgNames: Bool = false
     public var cangjieHome: String = ""
     public var output: String = "./"
     public var outputDir: MaybeString = MaybeString()
@@ -438,6 +440,8 @@ public open class GlobalOptions <: Option {
         target.apiLevel = other.target.apiLevel
         for ((key, value) in other.passedWhenKeyValue) { passedWhenKeyValue.add(key, value) }
         for (value in other.passedWhenCfgPaths) { passedWhenCfgPaths.add(value) }
+        for (name in other.expectedWhenNames) { expectedWhenNames.add(name) }
+        checkUnexpectedCfgNames = other.checkUnexpectedCfgNames
         cangjieHome = other.cangjieHome
         output = other.output
         outputDir.hasValue = other.outputDir.hasValue
