@@ -47,6 +47,7 @@ class ConditionalCompilationImpl {
     private let passedCondition: HashMap<String, String> = HashMap<String, String>()
     private let builtinConditionCache: HashMap<String, String> = HashMap<String, String>()
     private let judgeConditionCache: HashMap<String, Bool> = HashMap<String, Bool>()
+    private let conditionExprCache: HashMap<String, Bool> = HashMap<String, Bool>()
 
     public init(config: ConditionalCompilationConfig) {
         backendType = config.backendType
@@ -135,6 +136,23 @@ class ConditionalCompilationImpl {
                     BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, condition.begin).Emit()
                 return false
         }
+    }
+
+    private func EvalCachedConditionExpr(condition: Expr): Bool {
+        let cacheKey = MakeConditionExprCacheKey(condition)
+        if (let Some(key) <- cacheKey) {
+            if (let Some(cached) <- conditionExprCache.get(key)) {
+                return cached
+            }
+        }
+        let beforeErrCnt = diag.GetErrorCount()
+        let result = EvalConditionExpr(condition)
+        if (let Some(key) <- cacheKey) {
+            if (beforeErrCnt == diag.GetErrorCount()) {
+                conditionExprCache.add(key, result)
+            }
+        }
+        return result
     }
 
     private func EvalBinaryExpr(be: BinaryExpr): Bool {
@@ -380,7 +398,7 @@ class ConditionalCompilationImpl {
                 return false
             }
             if (let Some(condExpr) <- anno.condExpr) {
-                evalResult[0] = EvalConditionExpr(condExpr)
+                evalResult[0] = EvalCachedConditionExpr(condExpr)
             } else {
                 diag.DiagnoseRefactor(
                     BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin).Emit()
@@ -398,7 +416,7 @@ class ConditionalCompilationImpl {
                 return false
             }
             if (let Some(condExpr) <- anno.condExpr) {
-                evalResult[0] = EvalConditionExpr(condExpr)
+                evalResult[0] = EvalCachedConditionExpr(condExpr)
             } else {
                 diag.DiagnoseRefactor(
                     BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin).Emit()
@@ -416,7 +434,7 @@ class ConditionalCompilationImpl {
                 return false
             }
             if (let Some(condExpr) <- anno.condExpr) {
-                evalResult[0] = EvalConditionExpr(condExpr)
+                evalResult[0] = EvalCachedConditionExpr(condExpr)
             } else {
                 diag.DiagnoseRefactor(
                     BasicDiagKindRefactor.conditional_compilation_not_have_condition_expr, anno.begin).Emit()
