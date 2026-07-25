@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.LambdaPattern as BasicLambdaPattern
 import cjcj::mangle.BaseMangler
-import cjcj::modules.ImportManager
+import cjcj::modules.{ImportManager, SemaImportManager}
 import cjcj::option.GetFileName as OptionGetFileName
 import cjcj::option.IsDir as OptionIsDir
 import cjcj::sema.TypeManager
@@ -276,6 +276,13 @@ public func GetStringDecl(importManager: ImportManager): StructDecl {
     let decl = importManager.GetCoreDecl(STD_LIB_STRING_IDENT)
     CJC_NULLPTR_CHECK(decl)
     return (decl.getOrThrow() as StructDecl).getOrThrow()
+}
+
+// C++ src/Sema/NativeFFI/Utils.cpp:130-135.
+public func GetStringDecl(importManager: SemaImportManager): StructDecl {
+    let decl = importManager.GetCoreDecl<StructDecl>(STD_LIB_STRING_IDENT)
+    CJC_NULLPTR_CHECK(decl)
+    return decl.getOrThrow()
 }
 
 private func LambdaParamTys(params: ArrayList<FuncParam>): ArrayList<Ty> {
