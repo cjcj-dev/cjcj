@@ -350,6 +350,7 @@ public class Tool {
         let argvValues = GetFullArgs()
         let environmentValues = BuildEnvironmentVector()
         let allocatedStrings = ArrayList<CString>()
+        var pid: Int32 = 0
         try (pidPtr = LibC.malloc<Int32>().asResource(),
             argvPtr = LibC.malloc<CString>(count: argvValues.size + 1).asResource(),
             envpPtr = LibC.malloc<CString>(count: environmentValues.size + 1).asResource(),
@@ -381,8 +382,9 @@ public class Tool {
                 Semaphore.Get().Release()
                 return ErrorFuture(GetSystemErrorMessage(spawnStatus))
             }
-            return LinuxProcessFuture(unsafe { pidPtr.value.read() })
+            pid = unsafe { pidPtr.value.read() }
         }
+        return LinuxProcessFuture(pid)
     }
 
     public func Execute(verbose: Bool): ToolFuture {
