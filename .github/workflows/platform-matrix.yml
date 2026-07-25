@@ -25,6 +25,11 @@ jobs:
     name: Build fixed LLVM tuples
     uses: ./.github/workflows/platform-tuples.yml
 
+  patched-cjpm:
+    name: Build patched cjpm
+    uses: ./.github/workflows/build-cjpm.yml
+    secrets: inherit
+
   windows-runtime:
     name: Build Windows runtime
     uses: ./.github/workflows/build-windows-runtime.yml
@@ -33,7 +38,7 @@ jobs:
 
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
-    needs: [fixed-llvm-tuples, windows-runtime]
+    needs: [fixed-llvm-tuples, patched-cjpm, windows-runtime]
     if: always()
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
@@ -170,11 +175,20 @@ jobs:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
         run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
 
+      - name: Download current-run patched cjpm
+        if: always() && runner.os == 'Windows'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: patched-cjpm-windows_x86_64
+          path: ${{ runner.temp }}/current-run-patched-cjpm
+
       - name: Install patched cjpm (Windows)
         id: fetch-cjpm
         if: always() && runner.os == 'Windows'
         env:
           GH_TOKEN: ${{ github.token }}
+          CJPM_ARTIFACT_DIR: ${{ runner.temp }}/current-run-patched-cjpm
         run: npx --yes zx@8 ci/platform_matrix/fetch_cjpm.mjs
 
       - name: Official SDK + O1 cjcj build

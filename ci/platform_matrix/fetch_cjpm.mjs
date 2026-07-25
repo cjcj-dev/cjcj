@@ -1,7 +1,7 @@
 #!/usr/bin/env zx
-// Install the newest successful patched-cjpm artifact into the provisioned
-// Windows SDK. Non-Windows matrix jobs remain untouched; local dry-run may
-// explicitly exercise artifact selection from another host.
+// Install the current workflow run's patched-cjpm artifact into the provisioned
+// Windows SDK. Cross-run lookup remains available when the current artifact is
+// absent; local dry-run may exercise either selection path from another host.
 
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
@@ -26,6 +26,7 @@ if (process.platform === 'win32' && process.arch !== 'x64') {
 const repo = process.env.CJPM_ARTIFACT_REPOSITORY || 'cjcj-dev/cjcj';
 const workflow = process.env.CJPM_WORKFLOW || 'build-cjpm.yml';
 const artifactName = 'patched-cjpm-windows_x86_64';
+const currentRunArtifact = process.env.CJPM_ARTIFACT_DIR || '';
 
 async function ghLines(endpoint, jq) {
   const result = await $({nothrow: true, stdio: 'pipe'})`gh api ${endpoint} --jq ${jq}`;
@@ -62,38 +63,6 @@ export async function selectCjpmArtifact() {
   return {runId: '', artifactId: ''};
 }
 
-const gh = await $({nothrow: true, stdio: 'pipe'})`gh --version`;
-if (gh.exitCode !== 0) {
-  emitBlockedSummary('gh is unavailable; cannot query patched cjpm artifacts');
-  process.exit(dryRun ? 0 : 78);
-}
-
-const {runId, artifactId} = await selectCjpmArtifact();
-if (!artifactId) {
-  emitBlockedSummary(`no active ${artifactName} artifact from a recent successful Windows job`);
-  process.exit(dryRun ? 0 : 78);
-}
-console.log(`cjpm_selection run=${runId} artifact=${artifactId}`);
-if (dryRun) process.exit(0);
-
-const cangjieHome = process.env.CANGJIE_HOME;
-if (!cangjieHome) throw new Error('CANGJIE_HOME is required after SDK provision');
-const scratch = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'platform-ci-patched-cjpm');
-await fs.mkdir(scratch, {recursive: true});
-const archive = path.join(scratch, 'artifact.zip');
-const archiveFd = fsSync.openSync(archive, 'w');
-const download = spawnSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifactId}/zip`], {
-  stdio: ['inherit', archiveFd, 'inherit'],
-});
-fsSync.closeSync(archiveFd);
-if (download.status !== 0) process.exit(download.status ?? 1);
-
-const extracted = path.join(scratch, 'artifact');
-await fs.rm(extracted, {recursive: true, force: true});
-const archiveCommandPath = toCommandPath(archive).replaceAll("'", "''");
-const extractedCommandPath = toCommandPath(extracted).replaceAll("'", "''");
-await $`pwsh -NoLogo -NoProfile -Command ${`Expand-Archive -LiteralPath '${archiveCommandPath}' -DestinationPath '${extractedCommandPath}' -Force`}`;
-
 async function findFirst(directory, name) {
   for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
     const target = path.join(directory, entry.name);
@@ -106,8 +75,56 @@ async function findFirst(directory, name) {
   return '';
 }
 
-const compressed = await findFirst(extracted, 'cjpm.exe.gz');
+let runId = 'current';
+let artifactId = 'same-run';
+let compressed = '';
+if (currentRunArtifact) {
+  try {
+    compressed = await findFirst(currentRunArtifact, 'cjpm.exe.gz');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+if (compressed) {
+  console.log(`cjpm_selection source=current-run path=${compressed}`);
+} else {
+  const gh = await $({nothrow: true, stdio: 'pipe'})`gh --version`;
+  if (gh.exitCode !== 0) {
+    emitBlockedSummary('gh is unavailable; cannot query fallback patched cjpm artifacts');
+    process.exit(dryRun ? 0 : 78);
+  }
+
+  ({runId, artifactId} = await selectCjpmArtifact());
+  if (!artifactId) {
+    emitBlockedSummary(`no active ${artifactName} artifact from this run or a recent successful Windows job`);
+    process.exit(dryRun ? 0 : 78);
+  }
+  console.log(`cjpm_selection source=fallback run=${runId} artifact=${artifactId}`);
+  if (dryRun) process.exit(0);
+
+  const scratch = path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'platform-ci-patched-cjpm');
+  await fs.mkdir(scratch, {recursive: true});
+  const archive = path.join(scratch, 'artifact.zip');
+  const archiveFd = fsSync.openSync(archive, 'w');
+  const download = spawnSync('gh', ['api', `repos/${repo}/actions/artifacts/${artifactId}/zip`], {
+    stdio: ['inherit', archiveFd, 'inherit'],
+  });
+  fsSync.closeSync(archiveFd);
+  if (download.status !== 0) process.exit(download.status ?? 1);
+
+  const extracted = path.join(scratch, 'artifact');
+  await fs.rm(extracted, {recursive: true, force: true});
+  const archiveCommandPath = toCommandPath(archive).replaceAll("'", "''");
+  const extractedCommandPath = toCommandPath(extracted).replaceAll("'", "''");
+  await $`pwsh -NoLogo -NoProfile -Command ${`Expand-Archive -LiteralPath '${archiveCommandPath}' -DestinationPath '${extractedCommandPath}' -Force`}`;
+  compressed = await findFirst(extracted, 'cjpm.exe.gz');
+}
+
+if (dryRun) process.exit(0);
 if (!compressed) throw new Error(`${artifactName} is incomplete: cjpm.exe.gz is missing`);
+const cangjieHome = process.env.CANGJIE_HOME;
+if (!cangjieHome) throw new Error('CANGJIE_HOME is required after SDK provision');
 const toolsBin = path.join(cangjieHome, 'tools', 'bin');
 const installed = path.join(toolsBin, 'cjpm.exe');
 const stock = path.join(toolsBin, 'cjpm-stock.exe');
