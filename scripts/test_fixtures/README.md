@@ -1,10 +1,8 @@
 # `--test` / mock gate fixtures
 
-Backing fixtures for `scripts/test_gate.mjs` — the `--test`/mock focused compile gate
-for the TestManager+Mock live-integration campaign
-(`audit_persist/TESTMANAGER_LIVE_DESIGN.md`, slice S5). The 114-file difftest corpus
-and sc_bcgate contain no `--test`/mock samples, so this gate is the only signal for
-the mock/test-marking behaviour that slices S3/S4 turn on.
+Backing fixtures for `scripts/test_gate.mjs`, the focused golden gate for `--test`,
+test registration, and mock generation. The flat 114-file difftest corpus and bcgate
+contain no `--test`/mock samples, so these fixtures cover a distinct product mode.
 
 ## Fixtures
 
@@ -24,22 +22,15 @@ the mock/test-marking behaviour that slices S3/S4 turn on.
 Per fixture the gate records: compile exit code + normalized diagnostics; produced-binary
 run exit code (and, for the normal `main`, its deterministic stdout); and a stable count of
 `--test`/mock entry symbols (`TestPackage`, `register*Suite`, `entry_main`, `ToMock`).
-Golden is established with the C++ reference compiler and is self-consistent
-(`npx --yes zx@8 scripts/test_gate.mjs --check` → PASS 3/3).
+Golden transcripts are established with the C++ reference compiler. Recheck or compare
+them with:
 
-## Selfhost baseline (as of slices S0–S2, before S3/S4 wiring)
+```sh
+npx --yes zx@8 scripts/test_gate.mjs --check
+npx --yes zx@8 scripts/test_gate.mjs --self <path-to-cjc>
+```
 
-`npx --yes zx@8 scripts/test_gate.mjs --self <selfhost cjc>` currently FAILs all three vs golden — the intended
-baseline. Two deterministic divergences:
-
-1. Spurious `warning: unused import 'std.unittest.*'` that the reference does not emit
-   (selfhost's unused-import analysis does not credit usage introduced by `@Test`
-   expansion).
-2. Fewer test-registration symbols (e.g. t3 `TestPackage`/`register*Suite` = 95/13 vs
-   golden 103/19), reflecting the not-yet-wired mark/mock passes and the separate macro
-   campaign.
-
-Both binaries still compile (rc=0) and run (exit=0). The selfhost cjc needs a large
-managed heap for the std.unittest-heavy fixtures; the gate exports `cjHeapSize=12GB`
-(harmless for the reference cjc). As S3/S4 (mark + mock hooks) and the macro campaign
-land, `--self` should converge toward golden.
+The runner uses throwaway directories, removes generated products after each fixture,
+and exports `cjHeapSize=12GB` for the std.unittest-heavy selfhost path. Current pass counts
+are intentionally not stored here: they must be measured with the compiler HEAD under
+review instead of copied from an earlier integration campaign.
