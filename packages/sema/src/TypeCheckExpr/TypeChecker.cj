@@ -25,6 +25,7 @@ import cjcj::sema.FFI.*
 import cjcj::sema.InheritanceChecker.*
 import cjcj::sema.LegalityOfUsage.*
 import cjcj::sema.NativeFFI.*
+import cjcj::sema.NativeFFI.ObjC.InteropLibBridge as ObjCInteropLibBridge
 import cjcj::sema.Plugin.PluginCustomAnnoChecker
 import cjcj::utils.CFUNC_NAME
 import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
@@ -1576,6 +1577,15 @@ extend TypeChecker {
         if (!InteropLibBridge.IsInteropLibAccessible(impl.importManager.getOrThrow())) {
             DiagnoseRefactor(impl.diag.getOrThrow(),
                 BasicDiagKindRefactor.sema_java_mirror_interoplib_must_be_imported, decl).Emit()
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+    }
+
+    // C++ src/Sema/TypeChecker.cpp:1659-1664.
+    private func CheckObjCInteropLibImport(decl: Decl): Unit {
+        if (!ObjCInteropLibBridge.IsInteropLibAccessible(impl.importManager.getOrThrow())) {
+            DiagnoseRefactor(impl.diag.getOrThrow(),
+                BasicDiagKindRefactor.sema_objc_mirror_interoplib_must_be_imported, decl).Emit()
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
     }
@@ -4000,6 +4010,11 @@ extend TypeChecker {
                 Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE, Attribute.JAVA_CJ_MAPPING)) {
                 CheckJavaInteropLibImport(classDecl)
             }
+            // C++ src/Sema/TypeCheckClassLike.cpp:136-138.
+            if (classDecl.TestAnyAttr(
+                Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE, Attribute.OBJ_C_CJ_MAPPING)) {
+                CheckObjCInteropLibImport(classDecl)
+            }
             return tyOrInvalid(classDecl)
         }
         if (let Some(structDecl) <- (decl as StructDecl)) {
@@ -4028,6 +4043,10 @@ extend TypeChecker {
             }
             if (interfaceDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)) {
                 CheckJavaInteropLibImport(interfaceDecl)
+            }
+            // C++ src/Sema/TypeCheckClassLike.cpp:268-270.
+            if (interfaceDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+                CheckObjCInteropLibImport(interfaceDecl)
             }
             return tyOrInvalid(interfaceDecl)
         }
