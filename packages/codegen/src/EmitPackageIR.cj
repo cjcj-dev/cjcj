@@ -28,6 +28,7 @@ import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, StaticCast}
 private let CANGJIE_SDK_VERSION: String = CANGJIE_VERSION
 private let PKG_INIT_FUNC_METADATA: String = "pkg_init_func"
 private let HAS_INVOKED_PKG_INIT_LITERAL: String = "has_invoked_pkg_init_literal"
+private let RUNTIME_CONFIG_GLOBAL_PREFIX: String = ".cjcj.runtime.config."
 
 private type LLVMIsACallInstFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
 private type LLVMGetCalledValueFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
@@ -398,6 +399,97 @@ private func EmitCJSDKVersion(cgMod: CGModule): Unit {
     }
 }
 
+private func EmitRuntimeConfigString(moduleHandle: LLVMModuleHandle, llvmContext: LLVMContextRef,
+    content: String, globalName: String, i8PtrType: LLVMTypeRef): LLVMValueRef {
+    var initializer = LLVMNullValue()
+    try (contentCString = unsafe { LibC.mallocCString(content) }.asResource()) {
+        initializer = unsafe {
+            LLVMConstStringInContext(llvmContext, contentCString.value, UInt32(content.size), 0)
+        }
+    }
+    var global = LLVMNullValue()
+    try (nameCString = unsafe { LibC.mallocCString(globalName) }.asResource()) {
+        global = unsafe { LLVMAddGlobal(moduleHandle.raw, LLVMTypeOf(initializer), nameCString.value) }
+    }
+    unsafe {
+        LLVMSetInitializer(global, initializer)
+        LLVMSetGlobalConstant(global, 1)
+        LLVMSetLinkage(global, LLVMLinkageValue(LLVMLinkage.Private))
+        LLVMSetUnnamedAddress(global, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr))
+        LLVMSetAlignment(global, 1u32)
+    }
+    return unsafe { LLVMConstBitCast(global, i8PtrType) }
+}
+
+private func RuntimeConfigEntryType(llvmContext: LLVMContextRef, i8PtrType: LLVMTypeRef): LLVMTypeRef {
+    try (fieldTypes = LibC.malloc<LLVMTypeRef>(count: 2).asResource()) {
+        unsafe {
+            (fieldTypes.value + 0).write(i8PtrType)
+            (fieldTypes.value + 1).write(i8PtrType)
+            return LLVMStructTypeInContext(llvmContext, fieldTypes.value, 2u32, 0)
+        }
+    }
+}
+
+private func RuntimeConfigEntryValue(llvmContext: LLVMContextRef, name: LLVMValueRef,
+    value: LLVMValueRef): LLVMValueRef {
+    try (fields = LibC.malloc<LLVMValueRef>(count: 2).asResource()) {
+        unsafe {
+            (fields.value + 0).write(name)
+            (fields.value + 1).write(value)
+            return LLVMConstStructInContext(llvmContext, fields.value, 2u32, 0)
+        }
+    }
+}
+
+private func EmitRuntimeConfigInit(cgMod: CGModule, moduleHandle: LLVMModuleHandle, llvmContext: LLVMContextRef,
+    builder: LLVMBuilderRef, voidType: LLVMTypeRef, i8PtrType: LLVMTypeRef): Unit {
+    let options = cgMod.GetCGContext().GetCompileOptions()
+    let orderedNames = ArrayList<String>()
+    for ((name, _) in options.runtimeConfigs) { orderedNames.add(name) }
+    sort(orderedNames, by: { left: String, right: String => CompareString(left, right) })
+
+    let entryType = RuntimeConfigEntryType(llvmContext, i8PtrType)
+    let entries = ArrayList<LLVMValueRef>()
+    var index: Int64 = 0
+    for (name in orderedNames) {
+        let namePtr = EmitRuntimeConfigString(moduleHandle, llvmContext, name,
+            RUNTIME_CONFIG_GLOBAL_PREFIX + "name." + index.toString(), i8PtrType)
+        let valuePtr = EmitRuntimeConfigString(moduleHandle, llvmContext, options.runtimeConfigs[name],
+            RUNTIME_CONFIG_GLOBAL_PREFIX + "value." + index.toString(), i8PtrType)
+        entries.add(RuntimeConfigEntryValue(llvmContext, namePtr, valuePtr))
+        index++
+    }
+
+    let arrayInitializer = ConstLLVMArray(entryType, entries)
+    var arrayGlobal = LLVMNullValue()
+    try (arrayName = unsafe { LibC.mallocCString(RUNTIME_CONFIG_GLOBAL_PREFIX + "entries") }.asResource()) {
+        arrayGlobal = unsafe { LLVMAddGlobal(moduleHandle.raw, LLVMTypeOf(arrayInitializer), arrayName.value) }
+    }
+    unsafe {
+        LLVMSetInitializer(arrayGlobal, arrayInitializer)
+        LLVMSetGlobalConstant(arrayGlobal, 1)
+        LLVMSetLinkage(arrayGlobal, LLVMLinkageValue(LLVMLinkage.Private))
+    }
+
+    let entryPtrType = unsafe { LLVMPointerType(entryType, 0u32) }
+    let sizeType = if (options.target.arch == ArchType.ARM32) {
+        unsafe { LLVMInt32TypeInContext(llvmContext) }
+    } else {
+        unsafe { LLVMInt64TypeInContext(llvmContext) }
+    }
+    let initParamTypes = ArrayList<LLVMTypeRef>()
+    initParamTypes.add(entryPtrType)
+    initParamTypes.add(sizeType)
+    let initType = BuildLLVMFunctionType(voidType, initParamTypes)
+    let initFunc = GetOrInsertLLVMFunction(moduleHandle,
+        PREFIX_OF_RUNTIME_SYMS + "CjRuntimeInitWithConfigV1", initType)
+    let initArgs = ArrayList<LLVMValueRef>()
+    initArgs.add(unsafe { LLVMConstBitCast(arrayGlobal, entryPtrType) })
+    initArgs.add(unsafe { LLVMConstInt(sizeType, UInt64(entries.size), 0) })
+    BuildVoidCall(builder, initType, initFunc, initArgs)
+}
+
 private func EmitMain(cgMod: CGModule): Unit {
     if (!cgMod.GetCGContext().GetCompileOptions().CompileExecutable()) {
         return
@@ -435,9 +527,13 @@ private func EmitMain(cgMod: CGModule): Unit {
                     userMainFunc.GetRawFunction())
                 let voidFnType = unsafe { LLVMFunctionType(voidType, CPointer<LLVMTypeRef>(), 0u32, 0) }
                 let i32FnType = unsafe { LLVMFunctionType(i32Type, CPointer<LLVMTypeRef>(), 0u32, 0) }
-                let runtimeInit = GetOrInsertLLVMFunction(moduleHandle, PREFIX_OF_RUNTIME_SYMS + "CjRuntimeInit",
-                    voidFnType)
-                BuildVoidCall(builder, voidFnType, runtimeInit, ArrayList<LLVMValueRef>())
+                if (cgMod.GetCGContext().GetCompileOptions().runtimeConfigs.isEmpty()) {
+                    let runtimeInit = GetOrInsertLLVMFunction(moduleHandle, PREFIX_OF_RUNTIME_SYMS + "CjRuntimeInit",
+                        voidFnType)
+                    BuildVoidCall(builder, voidFnType, runtimeInit, ArrayList<LLVMValueRef>())
+                } else {
+                    EmitRuntimeConfigInit(cgMod, moduleHandle, llvmContext, builder, voidType, i8PtrType)
+                }
 
                 let setArgsParamTypes = ArrayList<LLVMTypeRef>()
                 setArgsParamTypes.add(i32Type)
