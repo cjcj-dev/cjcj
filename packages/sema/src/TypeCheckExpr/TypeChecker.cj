@@ -1583,7 +1583,11 @@ extend TypeChecker {
 
     // C++ src/Sema/TypeChecker.cpp:1659-1664.
     private func CheckObjCInteropLibImport(decl: Decl): Unit {
-        if (!ObjCInteropLibBridge.IsInteropLibAccessible(impl.importManager.getOrThrow())) {
+        let importManager = impl.importManager.getOrThrow()
+        // C++ calls the static overload here. Cangjie forbids mixing static and instance same-name overloads;
+        // the bridge constructor only stores these two references, so an instance call preserves the semantics.
+        let bridge = ObjCInteropLibBridge(importManager, impl.diag.getOrThrow())
+        if (!bridge.IsInteropLibAccessible(importManager)) {
             DiagnoseRefactor(impl.diag.getOrThrow(),
                 BasicDiagKindRefactor.sema_objc_mirror_interoplib_must_be_imported, decl).Emit()
             decl.EnableAttr(Attribute.IS_BROKEN)
