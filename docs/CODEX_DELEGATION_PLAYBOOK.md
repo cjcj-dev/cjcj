@@ -1,190 +1,163 @@
-# Codex Delegation Playbook (self-host rewrite)
+# Codex 工作流手册
 
-Reference for resuming the **Codex-delegated** workflow used to deepen this
-self-host Cangjie compiler. Paused 2026-06-17 because the Codex weekly quota was
-exhausted; work continued directly with Opus afterward. Use this to pick the
-Codex-driven flow back up once quota resets.
+本文说明 cjcj 当前使用的隔离 worktree + Codex lane 工作流。它面向维护者，不绑定某个
+Codex 模型版本、插件缓存路径或已经结束的移植 wave。
 
-> Constraint that drove this whole setup: every coding step is **delegated to
-> Codex** — the orchestrating agents only drive Codex + verify via git/grep,
-> never author compiler code themselves. (When quota is gone, that constraint is
-> lifted and the model edits directly.)
+## 适用范围
 
-## 1. The companion + how Codex is invoked
+编译器主线和自举闭环已经完成。Codex lane 现在用于：
 
-- Companion script: `/root/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/codex-companion.mjs`
-- Model / effort used: **`gpt-5.5`**, effort **`xhigh`**.
-- Codex runs **full-access** (unsandboxed) so it can write, `cjpm build`, and
-  `git commit` by itself.
+- 对照官方 C++ 源码修复忠实度或诊断差异；
+- 补平台、CJO、增量、debug info 等窄面；
+- 增加行为/字节测试；
+- 在默认输出不变的条件下做性能工作；
+- 进行只读调研并沉淀设计文档。
 
-### Launch (background, write-capable)
-```bash
-CODEX_HOME=/root/.codex CODEX_COMPANION_WRITE_SANDBOX=danger-full-access \
-  node "<companion>" task \
-    --prompt-file /tmp/cjsh_deep_<unit>.md \
-    [--resume-last] \
-    --write --cwd "<worktree>" \
-    --model gpt-5.5 --effort xhigh \
-    --background --json
-# -> returns { jobId, ... }; use .jobId for status/result.
-```
-- First pass per unit: omit `--resume-last` (fresh thread).
-- Subsequent passes: add `--resume-last` to continue the same Codex thread.
-- If `.jobId` can't be parsed: `node "<companion>" status --all --cwd "<cwd>" --json` and take the newest id.
+仓库、模块和主分支分别是 `cjcj-dev/cjcj`、`cjcj`、`master`。发布编译器名为 `cjc`。
+旧仓名 `cangjie_compiler_selfhost`、旧 `main` 分支、June-era deepen workflow 和
+`codex-companion.mjs` 插件路径都不是现役入口。
 
-### Poll until terminal
-```bash
-node "<companion>" status <JOBID> --cwd "<cwd>" --wait --timeout-ms 540000 --json
-```
-Terminal = status is **not** `queued` and **not** `running`. Poll up to ~8×
-(Bash tool timeout 560000 ms each). If still running after that, report timeout —
-do **not** cancel.
+## 一条 lane 的输入
 
-### Result + verify
-```bash
-node "<companion>" result <JOBID> --cwd "<cwd>" --json      # status, rawOutput, touchedFiles
-git -C "<cwd>" log --oneline -6
-git -C "<cwd>" status --short
-git -C "<cwd>" show --stat --oneline HEAD | head -60
-grep -rn "TODO(selfhost:<Module>)" "<cwd>/packages/<pkg>/src" | wc -l   # authoritative stub count
+每条 lane 必须有：
+
+1. 单一根因或边界清楚的文档/测试目标；
+2. 从最新 `origin/master` 创建的独立 worktree 与分支；
+3. worktree 根的 `AGENTS.md`，包含当轮环境、验证与交付约束；
+4. 官方 C++ 参考树，通常是 `/root/cj_build/cangjie_compiler`；
+5. 可复现的样本、基线命令与预期输出；
+6. 报告名和明确的允许修改范围。
+
+不要按“一个 package 一条 lane”切任务。优先按一个 C++ named facility、一个诊断根或一个
+行为差异切分；同一根跨 package 时仍是一条 lane，彼此独立的根才并行。
+
+## 开工检查
+
+开始编辑前完成以下只读检查：
+
+```sh
+git status --short --branch
+git remote -v
+git log -8 --oneline --decorate
 ```
 
-## 2. Required environment (two env vars — both mandatory)
+在当前维护环境中，还要读取协同台账、已移植设施、文件占用与断点状态。实际路径由 lane
+的 `AGENTS.md` 给出；目前使用 `BUS.md`、`PORTED_FACILITIES.tsv`、`CLAIMS.tsv` 和
+worktree 根 `STATE.md`。
 
-| Var | Value | Why |
-| --- | --- | --- |
-| `CODEX_HOME` | `/root/.codex` | This session's shell env has it **empty**; a freshly-spawned per-cwd broker then dies with `failed to load configuration: No such file or directory (os error 2)`. Must be pinned on the launch line. |
-| `CODEX_COMPANION_WRITE_SANDBOX` | `danger-full-access` | The companion (`executeTaskRun`, ~line 488) was patched to read this; otherwise `workspace-write` makes `.git` read-only and every `git commit` fails with `Unable to create '.git/index.lock': Read-only file system`. |
+移植任务必须先做依赖闭包预扫：列出目标 C++ 函数体调用的 named facility，逐一确认
+selfhost 已有实体。已有设施直接复用；缺失依赖按 `AGENTS.md` 的比例规则处理，超过授权
+范围就精确 BLOCKED，不写“差不多”的平行实现。
 
-The full-access patch in the companion:
-```js
-sandbox: request.write ? (process.env.CODEX_COMPANION_WRITE_SANDBOX || "workspace-write") : "read-only",
+## 忠实移植纪律
+
+每个新增或修改的函数、分支、字段和 helper 调用都要能定位到官方 C++ 的具体实体与
+`file:line`。实现审查至少检查：
+
+- 函数名与 C++ 名逐字符一致；
+- 所有 branch、case 和 early return 都已覆盖；
+- 调用参数、字段来源、诊断 overload 与执行顺序一致；
+- 平台条件覆盖 C++ 的全部平台分支；
+- 没有 fallback、样本特判、吞异常、skip 或未授权的简化 helper；
+- 默认模式没有借修业务源码绕过编译器缺陷。
+
+语义看似等价或测试通过都不能替代源码对位。任务前提若被 C++ 原文证伪，应停止改代码并
+报告证据；发现任务书错误本身是有效结论。
+
+## 编辑与提交节奏
+
+当前验证脚本可能清理或重建 worktree，未提交改动可能丢失。因此节奏固定为：
+
+```text
+编辑一个独立改动 -> 检查 staged 文件 -> commit -> 才运行 build/gate
 ```
-Reversible: unset the env var → back to `workspace-write`. May be lost on plugin update.
 
-## 3. Orchestration model (the deepen workflow)
+不要把多个可独立 review 的设施或文档压成巨型提交，也不要在验证前积累未提交改动。
+每次提交前至少执行：
 
-Script: `/root/.claude/projects/-root-cj-build-cangjie-compiler-selfhost/4e6fc3b9-6994-43d4-9eb0-6556f440218f/workflows/scripts/cangjie-selfhost-deepen-wf_5fede026-f48.js`
+```sh
+git add <明确文件>
+git diff --cached --name-only
+git commit -m '<semantic prefix>: <summary>'
+```
 
-- **Dependency waves**, all units in a wave run concurrently in **isolated git
-  worktrees** (`<WTROOT>/<slug>`, branch `deepen/<slug>`), merged back to `main`
-  between waves. 4 wide waves:
-  - W1 (9): Basic, Utils, Option, Lex, AST, Parse, ConditionalCompilation, Modules, Mangle
-  - W2 (11): Macro, MetaTransformation, **Sema×9**
-  - W3 (9): **CHIR×9**
-  - W4 (11): **CodeGen×7**, IncrementalCompilation, Frontend, FrontendTool, Driver
-- **Giants split into component groups** so a single-giant wave still fans out:
-  - Sema 9: tc-core, tc-decl, tc-expr, tc-call-pattern, generics, inherit, legality, desugar, ffi-cjmp-test
-  - CHIR 9: ir-model, ir-builder, ast2chir-decl, ast2chir-expr, transforms, analysis, checker, serialize, bchir-interp
-  - CodeGen 7: llvm-ffi, expr-lowering, types-rtti, generics-enum-closure, alloc-gc-array, eh-intrinsics, ffi-debug-output
-- **Concurrency:** unlimited by request; real ceiling is the workflow framework's
-  `min(16, cores-2)` = 14 on this 16-core box. `runPool(thunks, cap=16)` drives the fan-out.
-- **Completeness gate, NOT TODO count:** gate on Codex's self-reported
-  `COMPLETENESS ≥ 90%` (+ build pass), because "0 TODO markers" was a false
-  "done" signal (giants reached 12–25% with 0 TODOs). Each unit iterates
-  (fresh → `--resume-last`) up to a per-unit cap (6) / stagnation cap (3).
-- After waves: **Integrate** (real end-to-end pipeline + bitcode, self-compile
-  probe; gate completeness ≥ 60) → **Review** (refresh `docs/ROADMAP.md` + `docs/STATUS.md`).
-- Per-unit status files at `docs/status/<Module>_<group>.md` avoid merge conflicts.
-- **M0 de-isolation mandate** in every deepen prompt: replace local compatibility
-  copies with real sibling-package imports (wire the real package graph).
+生产提交不得包含调试探针、临时日志、`STATE.md`、`REPORT*.md`、`REJECT*` 或测量 TSV。
+这些报告类文件由本地 exclude 管理，只写盘，不使用 `git add -f`。提交作者由任务书指定；
+当前项目使用 `Zxilly <zxilly@outlook.com>`，不添加 AI 或 Co-Authored-By 署名。
 
-### Slug vs package-dir subtlety
-- Worktree slug = lowercase, no separators (`slug()`): e.g. `conditionalcompilation`.
-- Package dir uses underscores: `conditional_compilation`, `meta_transformation`,
-  `frontend_tool`, `incremental_compilation`; but `CodeGen` → `codegen` (no underscore).
+## 验证
 
-## 4. Gotchas / failure modes (all hit + fixed)
+### 环境
 
-1. **Empty `CODEX_HOME`** → fresh per-cwd brokers fail `failed to load configuration`
-   while the long-lived original broker still works (looks like "only one agent
-   runs"). Fix: pin `CODEX_HOME=/root/.codex` on the launch line.
-2. **Per-cwd broker caches bad env.** A broker spawned once for a cwd with bad env
-   is reused for that cwd even after you fix the launch env. Fix: use a **brand-new
-   worktree root** (`WTROOT` bumped `.cjsh_worktrees` → `.cjsh_wt2` → `.cjsh_wt3`)
-   so fresh brokers spawn clean. This is exactly what unblocked the `Parse` unit
-   in sweep 2 (it had failed all 7 resume attempts in `.cjsh_wt2/parse`).
-3. **Leftover `deepen/*` branch checked-out in a stale worktree** blocks
-   `git worktree add -b deepen/<x>` → wave runs in empty dirs. Fix: `setupPrompt`
-   force-cleans ALL non-main worktrees + ALL `deepen/*` branches
-   (`git worktree remove --force` + `git branch -D` + `git worktree prune`),
-   then `rm -rf` each target path before `git worktree add -b <branch> <wt> main`.
-4. **`pkill -f` of brokers is BLOCKED** by the safety classifier (mass process
-   kill). Use git worktree/branch cleanup + fresh paths instead — never pkill.
-5. **Transient 500 / "Reconnecting N/5"** from gpt-5.5: jobs recover but failures
-   waste the per-unit iteration budget (runLoop counts failed iters toward the
-   cap). Candidate improvement for next time: don't count transient-fail iters
-   toward the cap (separate retry budget).
-6. Repeated stop/relaunch leaves idle orphan brokers (~20+ accumulated; harmless,
-   clean up later). Bash safety classifier is intermittently "temporarily
-   unavailable" — retry after a brief wait; read-only ops still work meanwhile.
+标准 Linux 构建环境需要官方 SDK 和足够的 managed heap：
 
-## 5. Progress checkpoint at pause (2026-06-17)
+```sh
+export PATH=/root/.cjv/bin:$PATH
+export CANGJIE_HOME=/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458
+export LD_LIBRARY_PATH="$CANGJIE_HOME/third_party/llvm/lib:$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative:$CANGJIE_HOME/tools/lib:$LD_LIBRARY_PATH"
+export cjHeapSize=24GB
+```
 
-- **Sweep 1 (completed):** overall completeness **24% → 50%**; build green; smoke
-  tests pass (`--version` 1.1.0, `--help`, `--dump-tokens`, `--typecheck`, full
-  compile of `hello.cj` to a runnable executable). Self-compile probe reached
-  native ELF emission for `packages/basic/src` but output-type fidelity is wrong
-  (emitted PIE executable where a `.a` archive was expected) — a real gate.
-- **Sweep 2 (stopped early — quota out):** Waves 1 + 2 deepened + merged
-  (**77 `merge: deepen` commits** on `main`, all 9 Sema groups + Macro + Meta).
-  CHIR worktrees (Wave 3) were freshly created with 0 commits when stopped — no
-  work lost. `main` clean and buildable.
-- **Critical path to self-compile (from Review):** de-isolate Frontend → real
-  package graph; finish Sema (root orchestration / imported lookup / exact
-  diagnostics / interop — last TODOs all in Sema); production typed AST→CHIR
-  lowering + BCHIR/serializer parity; broaden CHIR→LLVM CodeGen coverage;
-  production-compatible Modules / Macro / CJO / incremental artifacts.
+共享维护环境当前要求本机只运行 agent 与秒级只读命令。编译、链接、gate、sweep、profiling
+和性能测量必须在任务指定的远程 builder 与核域执行；连接方式、核域和并发上限以当轮
+`AGENTS.md` 为准。进入远程 builder 后先登记资源 marker，所有计算进程用 `taskset`
+绑定核域，结束时只删除自己的 marker 行。
 
-## 5b. CRITICAL architecture finding (2026-06-17, hand audit)
+### 分层验证
 
-The "~50%" figures are per-module **code-volume** estimates, NOT integrated
-capability. The real integrated end-to-end path is a **literal-spec facade**:
+验证强度随改动风险增加：
 
-- **Two disconnected worlds.** (A) The real but mutually **isolated** packages
-  `ast / parse / sema / chir / codegen` — each re-declares its own copies of the
-  shared node types. Verified: `packages/parse` defines its OWN `File, Decl,
-  Expr, FuncDecl, FuncBody, CallExpr, Block, …` (40+ classes) duplicating
-  `packages/ast`, so `parse.File` ≠ `ast.File` even though parse depends on ast.
-  (B) The `frontend` integration layer with a local body-less mini-parser
-  (`CompileStrategy.cj`) + a spec-based CHIR/codegen bridge.
-- **The frontend does NOT use `packages/parse`** (not in its cjpm deps). Its local
-  scanner parses decl *signatures* (params, return type, generics) but NEVER
-  parses function *bodies* — `finishDeclExtent`/`captureFunctionBodySummary` only
-  extract a single literal `return <const>` value.
-- **The bridge is spec-only.** `CodeGenBridge.buildFunctionSpec` carries just
-  `funcBody.literalReturnKind/literalReturnValue` into `AST2CHIRPackageSpec`;
-  `BuildRealCHIRForFrontendPackage` calls the REAL `chir.AST2CHIR.LowerPackage`
-  and REAL `codegen.GenPackageModules`, but on that degenerate spec — so real
-  statements/expressions are never lowered.
-- **Observed capability (self-host cjc, verified):** compiles function signatures
-  + literal-constant `return`. `return 7`→exit 7, `return -5`→exit 255 (correct),
-  empty/unit main→0. Non-literal bodies (`let x=5; return x`) silently return 0.
-  `println("…")` is dropped entirely (binary has zero print symbols; the real
-  `cjc` prints fine). No crashes in the supported subset.
+| 层 | 入口 | 适用场景 |
+|---|---|---|
+| 构建 | `cjpm build` | 所有生产源码改动；文档-only 作为最终卫生检查 |
+| 定向复现 | lane 自带最小样本或专项 `*_gate.mjs` | 证明根因和行为变化 |
+| 单文件差分 | `npx --yes zx@8 scripts/difftest.mjs` | frontend/sema/CHIR/codegen 行为 |
+| 字节门 | `python3 scripts/bcgate.py --self <cjc>` | 默认产物，基线 2490/2490 |
+| 结构化差分 | `scripts/difftestx_corpus/run.sh` | import、macro package、incremental |
+| 自编译 | 用新 `cjc` 编译核心 package staticlib | sema/chir/codegen 与跨包改动 |
+| 发布 smoke | `ci/smoke/run_smoke.mjs` | SDK、runtime、linker 与平台打包 |
 
-**Therefore "make println work" = the remaining real-fidelity work:** unify the
-AST islands (make `parse` emit `ast` nodes, or add a `parse.*`→`ast.*` adapter),
-parse real bodies into `ast` statements, lower real `ast` bodies via chir's real
-AST→CHIR (not the spec path), resolve stdlib symbols (import real stdlib AST /
-CJO), and complete CodeGen call lowering. This is the M0 de-isolation grind the
-Codex waves target — large, multi-package, cross-cascading; not a localized fix.
+默认模式的 bcgate 下降为硬回归。`--cjcj-optimization` 性能刀必须同时证明旗关仍为
+2490/2490，并给出旗开同口径 N>=3 中位数；runtime/GC 性能刀不进入 compiler 字节面，
+但仍需行为门和并发/生命周期压力测试。
 
-Build-breaking regressions found + fixed by hand this session (commits 79fc770,
-c5c9a70): sema subpackage cycle (TypeCheckExpr↔Desugar.AfterTypeCheck) and two
-hash OverflowExceptions (libStdCxxHashBytes / sipRound → `@OverflowWrapping`).
-These had broken `cjpm build` entirely because sweep 2 was stopped before its
-integrate/wfix pass ran.
+批量验证前后检查磁盘；每个样本完成后删除 object、binary 和 save-temps。最终报告引用的
+逐例原始输入、诊断或 JSON 是证据，不得删除，体积大时压缩归档。
 
-## 6. To resume Codex-driven work after quota resets
+## 报告与断点恢复
 
-1. Verify quota restored: a small `node "<companion>" task ... --json` probe runs.
-2. Bump `WTROOT` to a fresh path (e.g. `.cjsh_wt4`) to dodge any stale brokers.
-3. Re-launch the deepen workflow fresh:
-   `Workflow({scriptPath: "<deepen script path above>"})`. Codex threads continue
-   via `--resume-last`; a fresh run with the same prompts cache-hits on resume,
-   so launch fresh (new runId) to get new iterations, not `resumeFromRunId`.
-4. Hard constraints still apply: production-grade port (no stubs); LLVM/native
-   backends via C FFI (do NOT reimplement LLVM); scope = only this repo; never
-   modify the C++ reference at `/root/cj_build/cangjie_compiler`; commits carry
-   **no AI attribution**.
+lane 进行中持续维护 `STATE.md`，至少三行：
+
+```text
+目标：<当前目标>
+已落 commit：<sha + 摘要>
+下一步：<唯一下一动作或 blocker>
+```
+
+最终 `REPORT-<lane>.md` 至少包含：
+
+- 结论与范围；
+- 基线 SHA、最终 HEAD 和提交列表；
+- 每个改动对应的 C++ `file:line`；
+- 最小复现的前后行为；
+- 每个 gate 的完整原始汇总行与退出码；
+- 未完成项、缺失依赖与限制，不隐藏部分交付；
+- `git log --name-only <base>..HEAD` 的提交卫生检查。
+
+若任务被中断，下一位执行者先读 `STATE.md` 和已落 commit，从“下一步”继续，不重复已经
+完成的调查或验证。遇到关键语义裁决、任务前提冲突或连续假设被证伪，使用当轮 runbook
+指定的 lead/advisor 通道，不在两个都说得通的实现间盲选。
+
+## 审查与合并
+
+lane 自己不合并 `master`。交付后由维护者完成：
+
+1. 检查提交只含授权文件，无报告或调试历史；
+2. 按 C++ anchor 逐符号审查忠实度；
+3. 在独立环境复跑要求的 gate；
+4. 以 ff-only 或明确选择的 semantic commits 合并；
+5. push `origin/master` 并观察 CI；
+6. 更新全局设施/状态台账。
+
+验证通过不自动授权合并，数字未改善也不自动否定忠实的部分移植。判断顺序始终是：
+C++ 对位、无回归、证据完整，最后才是目标数字。
