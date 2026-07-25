@@ -27,6 +27,7 @@ import cjcj::sema.LegalityOfUsage.*
 import cjcj::sema.NativeFFI.*
 import cjcj::sema.NativeFFI.ObjC.InteropLibBridge as ObjCInteropLibBridge
 import cjcj::sema.NativeFFI.ObjC.PrepareTypeCheck as PrepareObjCInteropTypeCheck
+import cjcj::sema.NativeFFI.Java.BeforeTypeCheck.PrepareTypeCheck as PrepareJavaInteropTypeCheck
 import cjcj::sema.Plugin.PluginCustomAnnoChecker
 import cjcj::utils.CFUNC_NAME
 import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
@@ -1312,6 +1313,7 @@ extend TypeChecker {
         let isCJNATIVEBackend = false
         if (isCJNATIVEBackend) {
             try (recorder = ProfileRecorder("PrepareTypeCheck", "InteropPrepare")) {
+                PrepareJavaInteropTypeCheck(pkg, importManager.getOrThrow(), typeManager)
                 PrepareObjCInteropTypeCheck(pkg)
             }
         }
