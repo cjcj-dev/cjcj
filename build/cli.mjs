@@ -26,11 +26,24 @@ const COMMANDS = new Set([
   'install-system-deps', 'print-version', 'install-static-libs', 'install-mingw',
   'install-target-python', 'fetch', 'build', 'package', 'verify', 'run-all',
 ]);
+const BUILD_STAGES = Object.freeze({compiler, runtime, stdlib, stdx, tools});
+const LOG_LEVELS = new Set(['DEBUG', 'INFO', 'WARNING', 'ERROR']);
 
 function usage() {
   return `Usage: npx --yes zx@8 build/cli.mjs [global options] COMMAND\n\n`
     + `Commands: ${[...COMMANDS].join(', ')}\n`
     + `Targets: linux-x64, windows-x64\nBuild types: ${VALID_BUILD_TYPES.join(', ')}`;
+}
+
+function commandUsage(command) {
+  if (command === 'build') return 'Usage: npx --yes zx@8 build/cli.mjs [global options] build STAGE';
+  if (command === 'fetch') {
+    return 'Usage: npx --yes zx@8 build/cli.mjs [global options] fetch [--tag TAG] [--repo-url NAME=URL] [--repo-tag NAME=TAG]';
+  }
+  if (command === 'run-all') {
+    return 'Usage: npx --yes zx@8 build/cli.mjs [global options] run-all [--skip-system-deps] [--skip-install-libs]';
+  }
+  return `Usage: npx --yes zx@8 build/cli.mjs [global options] ${command}`;
 }
 
 function optionValue(args, index, name) {
@@ -48,8 +61,9 @@ function parseGlobal(args) {
   let index = 0;
   while (index < args.length && !COMMANDS.has(args[index])) {
     const argument = args[index];
-    if (argument === '--help' || argument === '-h') return {help: true};
+    if (argument === '--help') return {help: true, exitCode: 0};
     if (argument === '--version') return {version: true};
+    if (!argument.startsWith('-')) return {options, command: argument, rest: args.slice(index + 1)};
     let parsed;
     for (const [flag, key] of [
       ['--workspace', 'workspace'], ['--build-root', 'buildRoot'], ['--target', 'targetKey'],
@@ -65,8 +79,25 @@ function parseGlobal(args) {
     }
     if (!parsed) throw new ConfigError(`unknown global option: ${argument}`);
   }
-  if (index >= args.length) return {help: true};
+  if (index >= args.length) return {help: true, exitCode: 2};
   return {options, command: args[index], rest: args.slice(index + 1)};
+}
+
+function validateGlobalOptions(options) {
+  if (!/^[-+]?\d+$/.test(String(options.stdxVersion))) {
+    throw new ConfigError(`invalid value for --stdx-version: '${options.stdxVersion}' is not an integer`);
+  }
+  if (!LOG_LEVELS.has(options.logLevel)) {
+    throw new ConfigError(`invalid value for --log-level: '${options.logLevel}'; valid: ${[...LOG_LEVELS].join(', ')}`);
+  }
+}
+
+function wantsHelp(args) {
+  return args.includes('--help');
+}
+
+function requireNoArgs(command, args) {
+  if (args.length !== 0) throw new ConfigError(`${command}: unexpected argument '${args[0]}'`);
 }
 
 export function parseRepoKv(items, option) {
@@ -112,13 +143,26 @@ function parseFetch(args) {
 }
 
 async function dispatch(config, command, args) {
-  if (command === 'install-system-deps') return systemDeps.install();
+  if (!COMMANDS.has(command)) throw new ConfigError(`unknown command: ${command}`);
+  if (wantsHelp(args)) {
+    process.stdout.write(`${commandUsage(command)}\n`);
+    return;
+  }
+  if (command === 'install-system-deps') {
+    requireNoArgs(command, args);
+    return systemDeps.install();
+  }
   if (command === 'print-version') {
+    requireNoArgs(command, args);
     process.stdout.write(`${config.cangjieVersion}\n`);
     return;
   }
-  if (command === 'install-static-libs') return staticLibs.install(config.buildRoot);
+  if (command === 'install-static-libs') {
+    requireNoArgs(command, args);
+    return staticLibs.install(config.buildRoot);
+  }
   if (command === 'install-mingw') {
+    requireNoArgs(command, args);
     if (!config.target.spec.needsMingw) {
       logger.warning('Target %s does not need MinGW; skipping', config.target.spec.key);
       return;
@@ -126,6 +170,7 @@ async function dispatch(config, command, args) {
     return mingw.install(config.buildRoot);
   }
   if (command === 'install-target-python') {
+    requireNoArgs(command, args);
     if (!config.target.spec.crossCompile) {
       logger.warning('Target %s is not cross-compile; skipping', config.target.spec.key);
       return;
@@ -153,13 +198,23 @@ async function dispatch(config, command, args) {
     return fetchStage.run(fetchConfig);
   }
   if (command === 'build') {
-    if (args.length !== 1) throw new ConfigError('build: expected one stage name');
-    const stages = {compiler, runtime, stdlib, stdx, tools};
-    if (!(args[0] in stages)) throw new ConfigError(`build: unknown stage '${args[0]}'`);
-    return stages[args[0]].run(config);
+    if (args.length === 0) {
+      process.stdout.write(`${commandUsage(command)}\nStages: ${Object.keys(BUILD_STAGES).join(', ')}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    if (args.length !== 1) throw new ConfigError(`build ${args[0]}: unexpected argument '${args[1]}'`);
+    if (!(args[0] in BUILD_STAGES)) throw new ConfigError(`build: unknown stage '${args[0]}'`);
+    return BUILD_STAGES[args[0]].run(config);
   }
-  if (command === 'package') return packageStage.run(config);
-  if (command === 'verify') return verify.run(config);
+  if (command === 'package') {
+    requireNoArgs(command, args);
+    return packageStage.run(config);
+  }
+  if (command === 'verify') {
+    requireNoArgs(command, args);
+    return verify.run(config);
+  }
   if (command === 'run-all') {
     const valid = new Set(['--skip-system-deps', '--skip-install-libs']);
     for (const argument of args) if (!valid.has(argument)) throw new ConfigError(`run-all: unknown option '${argument}'`);
@@ -181,7 +236,6 @@ async function dispatch(config, command, args) {
     await packageStage.run(config);
     return verify.run(config);
   }
-  throw new ConfigError(`unknown command: ${command}`);
 }
 
 async function main() {
@@ -190,12 +244,14 @@ async function main() {
   const parsed = parseGlobal(process.argv.slice(scriptIndex >= 0 ? scriptIndex + 1 : 2));
   if (parsed.help) {
     process.stdout.write(`${usage()}\n`);
+    process.exitCode = parsed.exitCode;
     return;
   }
   if (parsed.version) {
     process.stdout.write(`${VERSION}\n`);
     return;
   }
+  validateGlobalOptions(parsed.options);
   configureLogging(parsed.options.logLevel);
   sccache.maybeEnable();
   const config = buildConfig(parsed.options);
@@ -205,9 +261,12 @@ async function main() {
 try {
   await main();
 } catch (error) {
-  if (error instanceof BuildError || error instanceof ConfigError) {
+  if (error instanceof BuildError) {
     logger.error('%s', error.message);
     process.exitCode = 1;
+  } else if (error instanceof ConfigError) {
+    logger.error('%s', error.message);
+    process.exitCode = 2;
   } else {
     throw error;
   }
