@@ -359,6 +359,7 @@ public open class GlobalOptions <: Option {
     public var disableChirOpt: Bool = false
     public var disableBackendOpt: Bool = false
     public var cjcjOptimization: Bool = false
+    public let runtimeConfigs: HashMap<String, String> = HashMap<String, String>()
     public let selectedCHIROpts: ArrayList<OptimizationFlag> = ArrayList<OptimizationFlag>()
     public var interpreter: Bool = false
     public let printBCHIR: ArrayList<Bool> = initPrintBCHIR()
@@ -542,6 +543,7 @@ public open class GlobalOptions <: Option {
         disableChirOpt = other.disableChirOpt
         disableBackendOpt = other.disableBackendOpt
         cjcjOptimization = other.cjcjOptimization
+        for ((key, value) in other.runtimeConfigs) { runtimeConfigs.add(key, value) }
         for (value in other.selectedCHIROpts) { selectedCHIROpts.add(value) }
         interpreter = other.interpreter
         printBCHIR.clear()
