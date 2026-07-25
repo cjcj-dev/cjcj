@@ -18,10 +18,10 @@ cjcj 是仓颉编写的仓颉编译器，忠实复刻官方 C++ 编译器的 par
 | 公开发布 | **v0.0.1 pre-release**，5 平台的 SDK 包及 SHA-256，共 10 个发布产物 |
 | 下一发布 | **v0.0.2 正在准备** |
 | 性能 | Goal-2 当前权威比值 **4.28x**（旗开）/4.29x（旗关），同箱同窗 N=5 中位数 |
-| 构建编排 | `build/` 与 CI 使用 zx 8 `.mjs`；旧 `cangjie-build/` Python 树已删除 |
+| 构建编排 | `build/` 与 CI 使用 zx 8 `.mjs`；早期 Python 编排器已删除 |
 
-历史记录中的 2368/2490、2381/2490、stage2 SEGV，以及 11.49x、51.22x、1.06x
-性能比值均已过时，不能用于描述当前 master。
+自举完成前的部分一致性计数、stage2 崩溃状态和旧性能口径均已过时，不能用于描述当前
+master。
 
 ## 发布与平台
 
@@ -55,8 +55,8 @@ bcgate 主要比较单文件语料的逐函数 bitcode，不能替代所有用�
 
 ## 构建体系
 
-源码构建入口是 `cjpm build`。完整 SDK/source build 的编排已从删除的
-`cangjie-build/` Python 包迁移到仓内 zx 脚本：
+源码构建入口是 `cjpm build`。完整 SDK/source build 的编排已从早期 Python 工具迁移到
+仓内 zx 脚本：
 
 - `build/cli.mjs`：源码构建 CLI；
 - `build/srcbuild/stages/*.mjs`：compiler、runtime、stdlib、stdx、tools、package、verify；
