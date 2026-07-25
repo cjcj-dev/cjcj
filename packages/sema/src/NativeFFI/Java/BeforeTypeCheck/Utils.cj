@@ -3,9 +3,9 @@ package cjcj::sema.NativeFFI.Java.BeforeTypeCheck
 import std.collection.ArrayList
 import cjcj::ast.*
 import cjcj::modules.SemaImportManager
+import cjcj::sema.CreateThrowException
 import cjcj::sema.TypeManager
 import cjcj::sema.NativeFFI.{GetStringDecl, WithinFile}
-import cjcj::sema.TypeCheckUtil.CreateThrowException
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, GetRootPackageName}
 
 // C++ src/Sema/NativeFFI/Java/BeforeTypeCheck/Utils.cpp:23-34.
