@@ -395,6 +395,11 @@ class GenericInstantiationManagerImpl {
         HashMap<String, ArrayList<GenericInstantiationRecord>>()
     private let instantiatedDeclsMap: HashMap<Int64, ArrayList<Decl>> = HashMap<Int64, ArrayList<Decl>>()
     let abstractFuncToDeclMap: AbstractFuncMap = AbstractFuncMap()
+    // C++: GenericInstantiationManagerImpl.h:148-154.
+    private let inheritedMemberFuncsCache: HashMap<Ty, ArrayList<FuncDecl>> =
+        HashMap<Ty, ArrayList<FuncDecl>>()
+    private let inheritedInterfacesCache: HashMap<Ty, ArrayList<InheritableDecl>> =
+        HashMap<Ty, ArrayList<InheritableDecl>>()
     private let membersIndexMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
     private let skippedMemberOffsets: HashMap<Int64, ArrayList<Int64>> = HashMap<Int64, ArrayList<Int64>>()
     private let structContext: ArrayList<Decl> = ArrayList<Decl>()
@@ -600,6 +605,9 @@ class GenericInstantiationManagerImpl {
     }
 
     private func GetInheritedMemberFuncs(ty: Ty): ArrayList<FuncDecl> {
+        if (let Some(cached) <- inheritedMemberFuncsCache.get(ty)) {
+            return ArrayList<FuncDecl>(cached)
+        }
         var funcs = ArrayList<FuncDecl>()
         if (let Some(baseDecl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
             funcs = CollectInheritedMembers(ty, baseDecl)
@@ -614,6 +622,7 @@ class GenericInstantiationManagerImpl {
             }
             CollectDeclMemberFuncs(extendDecl, funcs, funcSet)
         }
+        inheritedMemberFuncsCache[ty] = ArrayList<FuncDecl>(funcs)
         return funcs
     }
 
@@ -640,6 +649,9 @@ class GenericInstantiationManagerImpl {
     }
 
     private func GetInheritedInterfaces(ty: Ty): ArrayList<InheritableDecl> {
+        if (let Some(cached) <- inheritedInterfacesCache.get(ty)) {
+            return ArrayList<InheritableDecl>(cached)
+        }
         let inheritableType = ArrayList<InheritableDecl>()
         let inheritableTypeSet = HashSet<Int64>()
         for (extendDecl in GetAllRelatedExtendsByTy(ci.typeManager, ty)) {
@@ -667,6 +679,7 @@ class GenericInstantiationManagerImpl {
                 }
             }
         }
+        inheritedInterfacesCache[ty] = ArrayList<InheritableDecl>(inheritableType)
         return inheritableType
     }
 
@@ -1101,6 +1114,8 @@ class GenericInstantiationManagerImpl {
 
     private func BuildAbstractFuncMap(): Unit {
         abstractFuncToDeclMap.Clear()
+        inheritedMemberFuncsCache.clear()
+        inheritedInterfacesCache.clear()
         membersIndexMap.clear()
         skippedMemberOffsets.clear()
         for (entry in ci.typeManager.builtinTyToExtendMap) {
