@@ -154,10 +154,11 @@ public class InteropLibBridge {
     }
 
     public func GetForwarderMutexTy(): Option<Ty> {
-        if (let Some(decl) <- GetForwarderMutexDecl()) {
-            if (let Some(typeNode) <- decl.typeNode) { return typeNode.GetTy() }
-        }
-        return None
+        let decl = GetForwarderMutexDecl()
+        CJC_NULLPTR_CHECK(decl)
+        let typeNode = decl.getOrThrow().typeNode
+        CJC_NULLPTR_CHECK(typeNode)
+        return typeNode.getOrThrow().GetTy()
     }
 
     public func GetMutexLock(): Option<FuncDecl> {
@@ -199,7 +200,13 @@ public class InteropLibBridge {
         InteropLibBridge.objCIdDecl = Some(result)
         return result
     }
-    public func GetNativeObjCIdTy(): Option<Ty> { return GetNativeObjCIdDecl().flatMap({ value => value.typeNode.flatMap({ node => node.GetTy() }) }) }
+    public func GetNativeObjCIdTy(): Option<Ty> {
+        let decl = GetNativeObjCIdDecl()
+        CJC_NULLPTR_CHECK(decl)
+        let typeNode = decl.getOrThrow().typeNode
+        CJC_NULLPTR_CHECK(typeNode)
+        return typeNode.getOrThrow().GetTy()
+    }
     public func GetNativeObjCSelDecl(): Option<TypeAliasDecl> {
         if (let Some(result) <- InteropLibBridge.nativeObjCSelDecl) { return result }
         let result = GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_NATIVE_OBJ_C_SEL, ASTKind.TYPE_ALIAS_DECL)
@@ -212,21 +219,39 @@ public class InteropLibBridge {
         InteropLibBridge.nativeObjCClassDecl = Some(result)
         return result
     }
-    public func GetNativeObjCClassTy(): Option<Ty> { return GetNativeObjCClassDecl().flatMap({ value => value.typeNode.flatMap({ node => node.GetTy() }) }) }
+    public func GetNativeObjCClassTy(): Option<Ty> {
+        let decl = GetNativeObjCClassDecl()
+        CJC_NULLPTR_CHECK(decl)
+        let typeNode = decl.getOrThrow().typeNode
+        CJC_NULLPTR_CHECK(typeNode)
+        return typeNode.getOrThrow().GetTy()
+    }
     public func GetNativeObjCSuperPtrDecl(): Option<TypeAliasDecl> {
         if (let Some(result) <- InteropLibBridge.nativeObjCSuperPtrDecl) { return result }
         let result = GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_NATIVE_OBJ_C_SUPER_PTR, ASTKind.TYPE_ALIAS_DECL)
         InteropLibBridge.nativeObjCSuperPtrDecl = Some(result)
         return result
     }
-    public func GetNativeObjCSuperPtrTy(): Option<Ty> { return GetNativeObjCSuperPtrDecl().flatMap({ value => value.typeNode.flatMap({ node => node.GetTy() }) }) }
+    public func GetNativeObjCSuperPtrTy(): Option<Ty> {
+        let decl = GetNativeObjCSuperPtrDecl()
+        CJC_NULLPTR_CHECK(decl)
+        let typeNode = decl.getOrThrow().typeNode
+        CJC_NULLPTR_CHECK(typeNode)
+        return typeNode.getOrThrow().GetTy()
+    }
     public func GetRegistryIdDecl(): Option<TypeAliasDecl> {
         if (let Some(result) <- InteropLibBridge.registryIdDecl) { return result }
         let result = GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_REGISTRY_ID, ASTKind.TYPE_ALIAS_DECL)
         InteropLibBridge.registryIdDecl = Some(result)
         return result
     }
-    public func GetRegistryIdTy(): Option<Ty> { return GetRegistryIdDecl().flatMap({ value => value.typeNode.flatMap({ node => node.GetTy() }) }) }
+    public func GetRegistryIdTy(): Option<Ty> {
+        let decl = GetRegistryIdDecl()
+        CJC_NULLPTR_CHECK(decl)
+        let typeNode = decl.getOrThrow().typeNode
+        CJC_NULLPTR_CHECK(typeNode)
+        return typeNode.getOrThrow().GetTy()
+    }
     public func GetObjCUnreachableCodeExceptionDecl(): Option<ClassDecl> {
         if (let Some(result) <- InteropLibBridge.objCUnreachableCodeExceptionDecl) { return result }
         let result = GetInteropLibDecl<ClassDecl>(INTEROPLIB_OBJ_C_UNREACHABLE_CODE_EXCEPTION, ASTKind.CLASS_DECL)
