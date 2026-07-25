@@ -108,6 +108,15 @@ jobs:
         shell: msys2 {0}
         run: bash ci/platform_tuples/build_tuple.sh
 
+      - name: Verify fixed LLVM tuple payload
+        run: |
+          test -s "fixed-toolchain/$TUPLE_PLATFORM/llc.gz"
+          test -s "fixed-toolchain/$TUPLE_PLATFORM/cjselfhost_llvmshim.o"
+          if [ "$TUPLE_PLATFORM" = windows_x86_64 ]; then
+            test -s "fixed-toolchain/$TUPLE_PLATFORM/llvm-static-libs.txt"
+            test -s "fixed-toolchain/$TUPLE_PLATFORM/llvm-system-libs.txt"
+          fi
+
       - name: Summarize tuple result
         if: always()
         env:
@@ -117,6 +126,7 @@ jobs:
           SOURCE_OUTCOME: ${{ steps.source-fetch.outcome }}
           WINDOWS_SOURCE_OUTCOME: ${{ steps.source-fetch-windows.outcome }}
           CACHE_OUTCOME: ${{ steps.tuple-cache.outcome }}
+          CACHE_HIT: ${{ steps.tuple-cache.outputs.cache-hit }}
           BUILD_OUTCOME: ${{ steps.tuple-build.outcome }}
           WINDOWS_BUILD_OUTCOME: ${{ steps.tuple-build-windows.outcome }}
         run: bash ci/platform_tuples/summarize.sh

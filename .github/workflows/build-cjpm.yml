@@ -124,6 +124,9 @@ jobs:
           ../../patched-cjpm/windows_x86_64/cjpm.exe --version
           gzip -n -c -9 ../../patched-cjpm/windows_x86_64/cjpm.exe > ../../patched-cjpm/windows_x86_64/cjpm.exe.gz
 
+      - name: Verify patched cjpm payload
+        run: test -s patched-cjpm/windows_x86_64/cjpm.exe.gz
+
       - name: Upload patched cjpm
         uses: actions/upload-artifact@v7
         with:

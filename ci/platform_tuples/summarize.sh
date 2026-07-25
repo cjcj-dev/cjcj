@@ -30,7 +30,8 @@ fi
     printf -- '- dependency setup: msys2=`%s`, linux=`%s`, macOS=`%s`\n' \
         "${MSYS2_OUTCOME:-skipped}" "${LINUX_DEPS_OUTCOME:-skipped}" "${MACOS_DEPS_OUTCOME:-skipped}"
     printf -- '- shallow source fetch: `%s`\n' "$source_outcome"
-    printf -- '- LLVM cache step: `%s`\n' "${CACHE_OUTCOME:-unknown}"
+    printf -- '- tuple artifact cache: outcome=`%s`, hit=`%s`\n' \
+        "${CACHE_OUTCOME:-unknown}" "${CACHE_HIT:-false}"
     printf -- '- tuple build: `%s`\n' "$build_outcome"
     if [ "${TUPLE_PLATFORM:-}" = windows_x86_64 ]; then
         printf -- '- Windows note: MSYS2/MinGW is the highest-risk tuple; failures remain red.\n'
