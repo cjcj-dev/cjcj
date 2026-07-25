@@ -150,6 +150,7 @@ test('CLI usage errors exit 2 like Typer and do not silently accept arguments', 
   const cases = [
     [], ['-h'], ['unknown-command'], ['--target', 'macos-arm64', 'print-version'],
     ['--build-type', 'lto', 'print-version'], ['--stdx-version', 'nope', 'print-version'],
+    ['--stdx-version', '1.0', 'print-version'], ['--stdx-version', '1e2', 'print-version'],
     ['--log-level', 'debug', 'print-version'], ['build'], ['build', 'unknown-stage'],
     ['build', 'compiler', 'extra'], ['print-version', 'extra'],
     ['fetch', '--repo-url', 'compiler'], ['fetch', '--repo-url', 'mystery=x'],
