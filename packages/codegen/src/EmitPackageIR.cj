@@ -20,7 +20,7 @@ import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
 import cjcj::option.GlobalOptions
-import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, StaticCast}
+import cjcj::utils.{CJC_ASSERT, CORE_PACKAGE_NAME, ProfileRecorder, StaticCast, TaskQueue, TaskResult}
 
 // Mirror EmitPackageIR.cpp:48-52: the SDK global is sourced from the compiler build-version
 // configuration. Version.cj is the selfhost compile-time configuration carrier for the same
@@ -48,17 +48,110 @@ private func DumpIRIfNeeded(cgMod: CGModule, suffix: String, subDirNum: Int64): 
     return subDirNum + 1
 }
 
-// Mirrors EmitPackageIR.cpp:437-465. Selfhost emits subpackages sequentially, so the
-// C++ threadNum == 1 branch is the active architecture-equivalent path.
+// Mirrors EmitPackageIR.cpp:437-465.
 private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
     var result = true
     if (!cgPkgContext.IsIncrementEnabled()) {
         return result
     }
-    for (cgModule in cgPkgContext.GetCGModules()) {
-        result = result && cgModule.InitIncrementalGen()
+    let cgModules = cgPkgContext.GetCGModules()
+    let threadNum = if (cgPkgContext.GetGlobalOptions().codegenDebugMode) { 1 } else { cgModules.size }
+    if (threadNum == 1) {
+        for (cgModule in cgModules) {
+            result = result && cgModule.InitIncrementalGen()
+        }
+    } else {
+        let taskQueueInitIncrementalGen = TaskQueue(threadNum)
+        let results = ArrayList<TaskResult<Bool>>()
+        for (cgModule in cgModules) {
+            results.add(taskQueueInitIncrementalGen.AddTask<Bool>({ => cgModule.InitIncrementalGen() }))
+        }
+        taskQueueInitIncrementalGen.RunAndWaitForAllTasksCompleted()
+        for (taskResult in results) {
+            result = result && taskResult.get()
+        }
     }
     return result
+}
+
+// Mirrors EmitPackageIR.cpp:351-415.
+private func GenSubCHIRPackage(cgMod: CGModule): Unit {
+    let subCHIRPackage = cgMod.GetCGContext().GetSubCHIRPackage()
+    let options = cgMod.GetCGContext().GetCGPkgContext().GetGlobalOptions()
+    var subDirNum: Int64 = 0
+    EmitTIOrTTForCustomDefs(cgMod)
+    for (globalVar in subCHIRPackage.chirGVs) {
+        EmitGlobalVariableIR(cgMod, globalVar)
+    }
+    for (chirFunc in subCHIRPackage.chirFuncs) {
+        EmitFunctionIR(cgMod, chirFunc)
+    }
+    for (chirFunc in subCHIRPackage.chirImportedCFuncs) {
+        EmitImportedCFuncIR(cgMod, chirFunc)
+    }
+    if (subCHIRPackage.mainModule) {
+        // Mirror C++ EmitPackageIR.cpp:359: the main-module block runs for every output type,
+        // including libraries. Emitting the SDK version and the package-init-reset function is
+        // required for a shared/static library to be loadable by the runtime (the runtime reads
+        // the SDK version at dlopen time via CheckPackageCompatibility). Only the executable
+        // entry (main/cj_entry$) is output-type-specific, so its guard lives inside
+        // EmitMain (mirroring C++ EmitMain's internal CompileExecutable() early-return).
+        EmitCJSDKVersion(cgMod)
+        EmitMain(cgMod)
+        RegisterExceptionRaiser(cgMod)
+        CreatePackageInitResetFunction(cgMod)
+        SpecifyPackageInitFunc(cgMod)
+    }
+    GenerateInterfaceExtensionDefs(cgMod)
+    // Mirror C++ EmitPackageIR.cpp:370 cgMod.GenTypeTemplate(): drain delayed generic
+    // TypeTemplate definitions before TypeInfo generation.
+    cgMod.GenTypeTemplate()
+    // Mirror C++ EmitPackageIR.cpp:372 cgMod.GenTypeInfo(): drain the delayed concrete-TypeInfo
+    // definitions (queued by CGType.GetOrCreateTypeInfo) before optimization.
+    cgMod.GenTypeInfo()
+    ReplaceFunction(cgMod)
+    cgMod.Opt()
+    GenerateReflectionMetadata(cgMod, subCHIRPackage)
+    cgMod.GenTypeInfo()
+    InitializeCjStringLiteral(cgMod)
+    GenerateBinarySectionInfo(cgMod)
+    KeepSomeTypesManually(cgMod)
+    cgMod.EraseUselessInstsAndDeclarations()
+    cgMod.GenIncremental()
+    SetSymbolLinkageType(cgMod)
+    subDirNum = DumpIRIfNeeded(cgMod, "GenIncremental", subDirNum)
+    EmitStaticGenericTIsAndLLVMUsed(cgMod)
+    if (options.cjcjOptimization) {
+        EmitPrespecializedTypeInfos(cgMod)
+    }
+}
+
+// Mirrors EmitPackageIR.cpp:467-492.
+private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
+    ProfileRecorder.Start("EmitIR", "GenSubCHIRPackages")
+    let cgModules = cgPkgContext.GetCGModules()
+    let options = cgPkgContext.GetGlobalOptions()
+    if (options.NeedDumpIRToFile()) {
+        ClearOldIRDumpFiles(options.output, cgPkgContext.GetCurrentPkgName())
+    }
+    let threadNum = if (options.codegenDebugMode) { 1 } else { cgModules.size }
+    if (threadNum == 1) {
+        for (cgModule in cgModules) {
+            GenSubCHIRPackage(cgModule)
+        }
+    } else {
+        let taskQueueCHIRIR2LLVMIR = TaskQueue(threadNum)
+        for (cgModule in cgModules) {
+            let _ = taskQueueCHIRIR2LLVMIR.AddTask<Unit>({ => GenSubCHIRPackage(cgModule) })
+        }
+        taskQueueCHIRIR2LLVMIR.RunAndWaitForAllTasksCompleted()
+    }
+    if (options.NeedDumpIRToScreen()) {
+        for (cgModule in cgModules) {
+            DumpIR(cgModule.GetLLVMModule().getOrThrow(), "")
+        }
+    }
+    ProfileRecorder.Stop("EmitIR", "GenSubCHIRPackages")
 }
 
 public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enableIncrement: Bool,
@@ -68,66 +161,14 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         noWriteBarrierRecChecker, cachedMangleMap)
     let splitter = CHIRSplitter(cgPkgContext)
     let subPackages = splitter.SplitCHIRPackage()
-    for (subPackageToRegister in subPackages) {
-        let cgModToRegister = CGModule(subPackageToRegister, cgPkgContext)
-        cgPkgContext.AddCGModule(cgModToRegister)
+    for (subPackage in subPackages) {
+        let cgModule = CGModule(subPackage, cgPkgContext)
+        cgPkgContext.AddCGModule(cgModule)
     }
     if (!InitIncrementalGen(cgPkgContext)) {
         return cgPkgContext.ReleaseLLVMModules()
     }
-    let cgModules = cgPkgContext.GetCGModules()
-    var emitIdx: Int64 = 0
-    while (emitIdx < subPackages.size) {
-        let subPackageToEmit = subPackages[emitIdx]
-        let cgModToEmit = cgModules[emitIdx]
-        var subDirNum: Int64 = 0
-        EmitTIOrTTForCustomDefs(cgModToEmit)
-        for (globalVar in subPackageToEmit.chirGVs) {
-            EmitGlobalVariableIR(cgModToEmit, globalVar)
-        }
-        for (chirFunc in subPackageToEmit.chirFuncs) {
-            EmitFunctionIR(cgModToEmit, chirFunc)
-        }
-        for (chirFunc in subPackageToEmit.chirImportedCFuncs) {
-            EmitImportedCFuncIR(cgModToEmit, chirFunc)
-        }
-        if (subPackageToEmit.mainModule) {
-            // Mirror C++ EmitPackageIR.cpp:359: the main-module block runs for every output type,
-            // including libraries. Emitting the SDK version and the package-init-reset function is
-            // required for a shared/static library to be loadable by the runtime (the runtime reads
-            // the SDK version at dlopen time via CheckPackageCompatibility). Only the executable
-            // entry (main/cj_entry$) is output-type-specific, so its guard lives inside
-            // EmitMain (mirroring C++ EmitMain's internal CompileExecutable() early-return).
-            EmitCJSDKVersion(cgModToEmit)
-            EmitMain(cgModToEmit)
-            RegisterExceptionRaiser(cgModToEmit)
-            CreatePackageInitResetFunction(cgModToEmit)
-            SpecifyPackageInitFunc(cgModToEmit)
-        }
-        GenerateInterfaceExtensionDefs(cgModToEmit)
-        // Mirror C++ EmitPackageIR.cpp:370 cgMod.GenTypeTemplate(): drain delayed generic
-        // TypeTemplate definitions before TypeInfo generation.
-        cgModToEmit.GenTypeTemplate()
-        // Mirror C++ EmitPackageIR.cpp:372 cgMod.GenTypeInfo(): drain the delayed concrete-TypeInfo
-        // definitions (queued by CGType.GetOrCreateTypeInfo) before optimization.
-        cgModToEmit.GenTypeInfo()
-        ReplaceFunction(cgModToEmit)
-        cgModToEmit.Opt()
-        GenerateReflectionMetadata(cgModToEmit, subPackageToEmit)
-        cgModToEmit.GenTypeInfo()
-        InitializeCjStringLiteral(cgModToEmit)
-        GenerateBinarySectionInfo(cgModToEmit)
-        KeepSomeTypesManually(cgModToEmit)
-        cgModToEmit.EraseUselessInstsAndDeclarations()
-        cgModToEmit.GenIncremental()
-        SetSymbolLinkageType(cgModToEmit)
-        subDirNum = DumpIRIfNeeded(cgModToEmit, "GenIncremental", subDirNum)
-        EmitStaticGenericTIsAndLLVMUsed(cgModToEmit)
-        if (options.cjcjOptimization) {
-            EmitPrespecializedTypeInfos(cgModToEmit)
-        }
-        emitIdx++
-    }
+    GenSubCHIRPackages(cgPkgContext)
     let localizedSymbols = cgPkgContext.GetLocalizedSymbols()
     let localizedSymbolsVec = ArrayList<String>()
     for (symbol in localizedSymbols) {
@@ -143,11 +184,6 @@ public func GenPackageModules(chirData: CHIRData, options: GlobalOptions, enable
         localizedSymbolsForPkg.add(symbol)
     }
     options.symbolsNeedLocalizedPerPkg[cgPkgContext.GetCHIRPackage().GetName()] = localizedSymbolsForPkg
-    if (options.NeedDumpIRToScreen()) {
-        for (cgMod in cgPkgContext.GetCGModules()) {
-            DumpIR(cgMod.GetLLVMModule().getOrThrow(), "")
-        }
-    }
     return cgPkgContext.ReleaseLLVMModules()
 }
 
