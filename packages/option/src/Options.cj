@@ -305,5 +305,6 @@ public func CreateOptionInfos(): Array<OptionInfo> {
         OptionInfo("--pgo-instr-use", ID.PGO_INSTR_USE, Kind.SEPARATED, [Backend.CJNATIVE], [Group.DRIVER, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.SINGLE_OCCURRENCE, "Read PGO instrumentation profile"),
         OptionInfo("--discard-eh-frame", ID.DISCARD_EH_FRAME, Kind.FLAG, [Backend.CJNATIVE], [Group.DRIVER, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Discard the eh_frame section"),
         OptionInfo("--cjcj-optimization", ID.CJCJ_OPTIMIZATION, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Enable cjcj-specific optimizations (output is no longer byte-for-byte identical to official cjc)"),
+        OptionInfo("--runtime-config", ID.RUNTIME_CONFIG, Kind.SEPARATED, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Embed a runtime configuration as an environment-variable name/value pair"),
     ]
 }
