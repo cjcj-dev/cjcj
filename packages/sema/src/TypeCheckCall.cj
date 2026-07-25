@@ -2323,26 +2323,30 @@ private func NeedLastTry(ce: CallExpr): Bool {
 }
 
 private func PropagatePlaceholderAndSolve(typeManager: TypeManager, ce: CallExpr, paramTys: ArrayList<Ty>,
-    funcRetTy: Ty, retTyUB: Option<Ty>, argChecker: Option<CallArgChecker>, tyVarsToSolve: ArrayList<GenericsTy>): Option<TypeSubst> {
+    funcRetTy: Ty, retTyUB: Option<Ty>, argChecker: Option<CallArgChecker>, tyVarsToSolve: ArrayList<GenericsTy>,
+    diag: Option<BasicDiagnosticEngine>): Option<TypeSubst> {
     if (!NeedLastTry(ce)) {
         return None
     }
-    let checker = argChecker ?? return None
-    for (tyVar in tyVarsToSolve) {
-        typeManager.MarkAsUnsolvedTyVar(tyVar)
-    }
-    ConstrainByUpperbound(typeManager)
-    if (let Some(target) <- retTyUB) {
-        if (!typeManager.IsSubtype(funcRetTy, target)) {
-            return None
+    try (ds = DiagSuppressor(diag)) {
+        let checker = argChecker ?? return None
+        for (tyVar in tyVarsToSolve) {
+            typeManager.MarkAsUnsolvedTyVar(tyVar)
         }
-    }
-    for (idx in 0..ce.args.size) {
-        if (!checker(paramTys[idx], ce.args[idx])) {
-            return None
+        ConstrainByUpperbound(typeManager)
+        if (let Some(target) <- retTyUB) {
+            if (!typeManager.IsSubtype(funcRetTy, target)) {
+                return None
+            }
         }
+        for (idx in 0..ce.args.size) {
+            if (!checker(paramTys[idx], ce.args[idx])) {
+                return None
+            }
+        }
+        return LocalTypeArgumentSynthesis.SolveConstraints(typeManager, typeManager.constraints)
     }
-    return LocalTypeArgumentSynthesis.SolveConstraints(typeManager, typeManager.constraints)
+    return None
 }
 
 private func SameDeclOpt(left: Option<Decl>, right: Option<Decl>): Bool {
@@ -2485,7 +2489,7 @@ private func PrepareTyArgsSynthesis(typeManager: TypeManager, diag: Option<Basic
                 if (!stat.newInfo && stat.unsolvedCount > 0 && stat.lastResortUnused) {
                     stat.lastResortUnused = false
                     if (let Some(sol) <- PropagatePlaceholderAndSolve(typeManager, ce, paramsTyInOrder, funcRetTy,
-                        retTyUB, argChecker, stat.tyVarsToSolve)) {
+                        retTyUB, argChecker, stat.tyVarsToSolve, diag)) {
                         if (!HasUnsolvedTyVars(stat.tyVarsToSolve, sol)) {
                             stat.solution = Some(sol)
                             stat.unsolvedCount = 0
