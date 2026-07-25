@@ -272,17 +272,18 @@ public func CreateBoolMatch(selector: Expr, trueBranch: Expr, falseBranch: Expr,
     return matchExpr
 }
 
-public func GetStringDecl(importManager: ImportManager): StructDecl {
-    let decl = importManager.GetCoreDecl(STD_LIB_STRING_IDENT)
+private func GetStringDecl(decl: Option<Decl>): StructDecl {
     CJC_NULLPTR_CHECK(decl)
     return (decl.getOrThrow() as StructDecl).getOrThrow()
 }
 
 // C++ src/Sema/NativeFFI/Utils.cpp:130-135.
+public func GetStringDecl(importManager: ImportManager): StructDecl {
+    return GetStringDecl(importManager.GetCoreDecl(STD_LIB_STRING_IDENT))
+}
+
 public func GetStringDecl(importManager: SemaImportManager): StructDecl {
-    let decl = importManager.GetCoreDecl<StructDecl>(STD_LIB_STRING_IDENT)
-    CJC_NULLPTR_CHECK(decl)
-    return decl.getOrThrow()
+    return GetStringDecl(importManager.GetCoreDecl<Decl>(STD_LIB_STRING_IDENT))
 }
 
 private func LambdaParamTys(params: ArrayList<FuncParam>): ArrayList<Ty> {
