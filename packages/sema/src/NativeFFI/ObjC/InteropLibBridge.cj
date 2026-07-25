@@ -94,6 +94,19 @@ public class InteropLibBridge {
     private static var getClassDecl: Option<Option<FuncDecl>> = None
     private static var getProtoDecl: Option<Option<FuncDecl>> = None
     private static var getSuperClassDecl: Option<Option<FuncDecl>> = None
+    private static var objCMsgSendDecl: Option<Option<FuncDecl>> = None
+    private static var objCMsgSendSuperDecl: Option<Option<FuncDecl>> = None
+    private static var objCReleaseDecl: Option<Option<FuncDecl>> = None
+    private static var objCRespondsToSelectorDecl: Option<Option<FuncDecl>> = None
+    private static var getProtocolDecl: Option<Option<FuncDecl>> = None
+    private static var objCRetainDecl: Option<Option<FuncDecl>> = None
+    private static var objCAutoReleaseDecl: Option<Option<FuncDecl>> = None
+    private static var withObjCSuperDecl: Option<Option<FuncDecl>> = None
+    private static var objCIsKindOfClassDecl: Option<Option<FuncDecl>> = None
+    private static var objCConformsToProtocolDecl: Option<Option<FuncDecl>> = None
+    private static var convertToNSStringDecl: Option<Option<FuncDecl>> = None
+    private static var descriptionAsStringDecl: Option<Option<FuncDecl>> = None
+    private static var objCRetainAutoreleasedReturnValue: Option<Option<FuncDecl>> = None
     private let importManager: SemaImportManager
     private let diag: DiagnosticEngine
 
@@ -313,20 +326,84 @@ public class InteropLibBridge {
         InteropLibBridge.getSuperClassDecl = Some(result)
         return result
     }
-    public func GetObjCMsgSendDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_MSG_SEND, ASTKind.FUNC_DECL) }
-    public func GetObjCMsgSendSuperDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_MSG_SEND_SUPER, ASTKind.FUNC_DECL) }
-    public func GetObjCReleaseDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RELEASE, ASTKind.FUNC_DECL) }
-    public func GetObjCRespondsToSelectorDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RESPONSE_TO_SELECTOR, ASTKind.FUNC_DECL) }
-    public func GetGetProtocolDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_PROTOCOL, ASTKind.FUNC_DECL) }
-    public func GetObjCRetainDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RETAIN, ASTKind.FUNC_DECL) }
-    public func GetObjCAutoReleaseDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_AUTO_RELEASE, ASTKind.FUNC_DECL) }
-    public func GetWithObjCSuperDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_WITH_OBJ_C_SUPER, ASTKind.FUNC_DECL) }
-    public func GetObjCIsKindOfClassDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_IS_KIND_OF_CLASS, ASTKind.FUNC_DECL) }
-    public func GetObjCConformsToProtocolDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_CONFORMS_TO_PROTOCOL, ASTKind.FUNC_DECL) }
-    public func GetConvertToNSStringDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_CONVERT_TO_NSSTRING, ASTKind.FUNC_DECL) }
-    public func GetDescriptionAsStringDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_DESCRIPTION_AS_STRING, ASTKind.FUNC_DECL) }
+    public func GetObjCMsgSendDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.objCMsgSendDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_MSG_SEND, ASTKind.FUNC_DECL)
+        InteropLibBridge.objCMsgSendDecl = Some(result)
+        return result
+    }
+    public func GetObjCMsgSendSuperDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.objCMsgSendSuperDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_MSG_SEND_SUPER, ASTKind.FUNC_DECL)
+        InteropLibBridge.objCMsgSendSuperDecl = Some(result)
+        return result
+    }
+    public func GetObjCReleaseDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.objCReleaseDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RELEASE, ASTKind.FUNC_DECL)
+        InteropLibBridge.objCReleaseDecl = Some(result)
+        return result
+    }
+    public func GetObjCRespondsToSelectorDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.objCRespondsToSelectorDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RESPONSE_TO_SELECTOR, ASTKind.FUNC_DECL)
+        InteropLibBridge.objCRespondsToSelectorDecl = Some(result)
+        return result
+    }
+    public func GetGetProtocolDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.getProtocolDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_PROTOCOL, ASTKind.FUNC_DECL)
+        InteropLibBridge.getProtocolDecl = Some(result)
+        return result
+    }
+    public func GetObjCRetainDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.objCRetainDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RETAIN, ASTKind.FUNC_DECL)
+        InteropLibBridge.objCRetainDecl = Some(result)
+        return result
+    }
+    public func GetObjCAutoReleaseDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.objCAutoReleaseDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_AUTO_RELEASE, ASTKind.FUNC_DECL)
+        InteropLibBridge.objCAutoReleaseDecl = Some(result)
+        return result
+    }
+    public func GetWithObjCSuperDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.withObjCSuperDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_WITH_OBJ_C_SUPER, ASTKind.FUNC_DECL)
+        InteropLibBridge.withObjCSuperDecl = Some(result)
+        return result
+    }
+    public func GetObjCIsKindOfClassDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.objCIsKindOfClassDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_IS_KIND_OF_CLASS, ASTKind.FUNC_DECL)
+        InteropLibBridge.objCIsKindOfClassDecl = Some(result)
+        return result
+    }
+    public func GetObjCConformsToProtocolDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.objCConformsToProtocolDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_CONFORMS_TO_PROTOCOL, ASTKind.FUNC_DECL)
+        InteropLibBridge.objCConformsToProtocolDecl = Some(result)
+        return result
+    }
+    public func GetConvertToNSStringDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.convertToNSStringDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_CONVERT_TO_NSSTRING, ASTKind.FUNC_DECL)
+        InteropLibBridge.convertToNSStringDecl = Some(result)
+        return result
+    }
+    public func GetDescriptionAsStringDecl(): Option<FuncDecl> {
+        if (let Some(result) <- InteropLibBridge.descriptionAsStringDecl) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_DESCRIPTION_AS_STRING, ASTKind.FUNC_DECL)
+        InteropLibBridge.descriptionAsStringDecl = Some(result)
+        return result
+    }
     public func GetObjCRetainAutoreleasedReturnValue(): Option<FuncDecl> {
-        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RETAIN_AUTORELEASED_RETURN_VALUE, ASTKind.FUNC_DECL)
+        if (let Some(result) <- InteropLibBridge.objCRetainAutoreleasedReturnValue) { return result }
+        let result = GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RETAIN_AUTORELEASED_RETURN_VALUE,
+            ASTKind.FUNC_DECL)
+        InteropLibBridge.objCRetainAutoreleasedReturnValue = Some(result)
+        return result
     }
 
     public func GetObjCPointerDecl(): Option<StructDecl> { return GetObjCLangDecl<StructDecl>(OBJ_C_POINTER_IDENT, ASTKind.STRUCT_DECL) }
