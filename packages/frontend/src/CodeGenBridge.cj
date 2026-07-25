@@ -498,7 +498,7 @@ private class ToCHIR {
         try (recorder = ProfileRecorder("CHIR", "CHIR Opt")) {
             let options = instance.invocation.globalOptions
             OptFuncRetType(currentPackage, builder).Unit2Void()
-            // C++ 此处有 RunArrayListConstStartOpt，selfhost 未移植，待补。
+            RunArrayListConstStartOpt(currentPackage)
             if (options.IsCHIROptimizationLevelOverO2()) {
                 UnitUnify(builder).RunOnPackage(currentPackage, isDebug: options.chirDebugOptimizer)
             }
