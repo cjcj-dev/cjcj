@@ -1283,6 +1283,10 @@ public open class GlobalOptions <: Option {
         chirLLVM = backend == BackendType.CJNATIVE
         chirCC = chirCC || chirLLVM
         if (interpreter) { chirCC = true }
+        if (!runtimeConfigs.isEmpty() && outputMode != OutputMode.EXECUTABLE) {
+            Errorln("Option '--runtime-config' is only supported for executable output.")
+            return false
+        }
         if (outputMode == OutputMode.OBJ && compileTarget == CompileTarget.DEFAULT) {
             compileTarget = CompileTarget.EXECUTABLE
         }
