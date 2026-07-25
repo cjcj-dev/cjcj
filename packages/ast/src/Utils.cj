@@ -938,6 +938,7 @@ private func makeMirrorPropFromVar(varDecl: VarDecl, attrToBeSet: Attribute): Pr
     }
     propNode.CloneAttrs(varDecl)
     propNode.EnableAttr(Attribute.DESUGARED_MIRROR_FIELD)
+    propNode.EnableAttr(Attribute.COMPILER_ADD)
     for (modifier in varDecl.modifiers) {
         propNode.modifiers.add(modifier)
     }
