@@ -33,8 +33,6 @@ private let INTEROPLIB_OBJ_C_SET_INSTANCE_VARIABLE: String = "setInstanceVariabl
 private let INTEROPLIB_OBJ_C_GET_CLASS: String = "getClass"
 private let INTEROPLIB_OBJ_C_GET_PROTOCOL: String = "getProtocol"
 private let INTEROPLIB_OBJ_C_GET_SUPER_CLASS: String = "getSuperClass"
-private let INTEROPLIB_OBJ_C_WITH_METHOD_ENV: String = "withMethodEnv"
-private let INTEROPLIB_OBJ_C_WITH_METHOD_ENV_OBJ: String = "withMethodEnvObj"
 private let INTEROPLIB_OBJ_C_WITH_OBJ_C_SUPER: String = "withObjCSuper"
 private let INTEROPLIB_OBJ_C_MSG_SEND: String = "objCMsgSend"
 private let INTEROPLIB_OBJ_C_MSG_SEND_SUPER: String = "objCMsgSendSuper"
@@ -52,6 +50,7 @@ private let INTEROPLIB_OBJ_C_IS_KIND_OF_CLASS: String = "isKindOfClass"
 private let INTEROPLIB_OBJ_C_CONFORMS_TO_PROTOCOL: String = "conformsToProtocol"
 private let INTEROPLIB_OBJ_C_CONVERT_TO_NSSTRING: String = "convertToNSString"
 private let INTEROPLIB_OBJ_C_DESCRIPTION_AS_STRING: String = "descriptionAsString"
+private let INTEROPLIB_OBJ_C_RETAIN_AUTORELEASED_RETURN_VALUE: String = "objCRetainAutoreleasedReturnValue"
 private let OBJ_C_FUNC_GET_FPOINTER: String = "unsafeGetFunctionPointer"
 private let OBJ_C_BLOCK_GET_ABI_POINTER: String = "unsafeGetNativeABIPointer"
 
@@ -166,8 +165,6 @@ public class InteropLibBridge {
     public func GetGetClassDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_CLASS, ASTKind.FUNC_DECL) }
     public func GetGetProtoDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_PROTOCOL, ASTKind.FUNC_DECL) }
     public func GetGetSuperClassDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_GET_SUPER_CLASS, ASTKind.FUNC_DECL) }
-    public func GetWithMethodEnvDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_WITH_METHOD_ENV, ASTKind.FUNC_DECL) }
-    public func GetWithMethodEnvObjDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_WITH_METHOD_ENV_OBJ, ASTKind.FUNC_DECL) }
     public func GetObjCMsgSendDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_MSG_SEND, ASTKind.FUNC_DECL) }
     public func GetObjCMsgSendSuperDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_MSG_SEND_SUPER, ASTKind.FUNC_DECL) }
     public func GetObjCReleaseDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RELEASE, ASTKind.FUNC_DECL) }
@@ -180,6 +177,9 @@ public class InteropLibBridge {
     public func GetObjCConformsToProtocolDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_CONFORMS_TO_PROTOCOL, ASTKind.FUNC_DECL) }
     public func GetConvertToNSStringDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_CONVERT_TO_NSSTRING, ASTKind.FUNC_DECL) }
     public func GetDescriptionAsStringDecl(): Option<FuncDecl> { return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_DESCRIPTION_AS_STRING, ASTKind.FUNC_DECL) }
+    public func GetObjCRetainAutoreleasedReturnValue(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_OBJ_C_RETAIN_AUTORELEASED_RETURN_VALUE, ASTKind.FUNC_DECL)
+    }
 
     public func GetObjCPointerDecl(): Option<StructDecl> { return GetObjCLangDecl<StructDecl>(OBJ_C_POINTER_IDENT, ASTKind.STRUCT_DECL) }
     public func GetObjCFuncDecl(): Option<StructDecl> { return GetObjCLangDecl<StructDecl>(OBJ_C_FUNC_IDENT, ASTKind.STRUCT_DECL) }
