@@ -1,16 +1,15 @@
 # Macro-focused gate fixtures
 
-Fixtures backing `../macro_gate.mjs`, the macro-expansion gate for the
-frontend↔macro integration campaign (design:
-`audit_persist/MACRO_INTEGRATION_DESIGN.md`, slice **S4** pre-gate).
+Fixtures backing `scripts/macro_gate.mjs`, the focused golden gate for macro package
+compilation, import, expansion, and usage accounting.
 
 ## Why this exists
 
-The 114-file difftest corpus contains **no real macro samples** (only
+The flat 114-file difftest/bcgate corpus contains **no real macro samples** (only
 `131_when_local_decl.cj`, which uses `@When` conditional compilation and does not
-go through the macro pipeline). So difftest/bcgate are blind to macro-expansion
-behavior. These fixtures give S4 an independent, reference-anchored gate before
-the live `CompileStrategy.MacroExpand()` stub is replaced.
+go through the macro pipeline). These fixtures provide a reference-anchored macro
+gate. The separate 18-case structural corpus also contains three macro-package cases,
+but it does not replace the detailed normalized transcripts stored here.
 
 ## Fixtures
 
@@ -44,11 +43,6 @@ reuse the reference `CANGJIE_HOME` std/runtime; only the `cjc` frontend differs.
 Fixtures build in throwaway temp dirs, so this tree is never polluted with
 `.cjo`/`.so`/binaries. Only sources and `golden/` are committed.
 
-## Current selfhost status (as of golden creation)
-
-`--self` against the selfhost cjc FAILs all fixtures, as expected pre-integration.
-The failure is **earlier** than the `MacroExpand()` stub: the selfhost cannot even
-`--compile-macro` a macro-definition package — it reports a spurious
-`redefinition of declaration '<macro>'` (same line reported as its own previous
-declaration), so expansion is never reached. This is an additional selfhost gap
-upstream of the integration root, surfaced by these fixtures.
+Current selfhost pass counts are intentionally not stored in this README. Use `--self`
+with the compiler binary built from the HEAD under review; otherwise a historical
+campaign result is easily mistaken for current status.
