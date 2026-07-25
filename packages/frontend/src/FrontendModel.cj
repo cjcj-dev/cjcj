@@ -3425,6 +3425,7 @@ private class CjoSignatureMaterializer {
             case 90 => Some(Attribute.CJ_MIRROR_JAVA_INTERFACE_DEFAULT)
             case 91 => Some(Attribute.CJ_MIRROR_OBJC_INTERFACE_FWD)
             case 92 => Some(Attribute.ALREADY_LOADED)
+            case 93 => Some(Attribute.JAVA_IMPL_REGISTRY_COMPANION)
             case _ => None
         }
     }

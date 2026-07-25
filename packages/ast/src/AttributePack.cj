@@ -96,6 +96,7 @@ public enum Attribute {
     | CJ_MIRROR_JAVA_INTERFACE_DEFAULT
     | CJ_MIRROR_OBJC_INTERFACE_FWD
     | ALREADY_LOADED
+    | JAVA_IMPL_REGISTRY_COMPANION
     | AST_ATTR_END
 }
 
@@ -194,7 +195,8 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.CJ_MIRROR_JAVA_INTERFACE_DEFAULT => 90
         case Attribute.CJ_MIRROR_OBJC_INTERFACE_FWD => 91
         case Attribute.ALREADY_LOADED => 92
-        case Attribute.AST_ATTR_END => 93
+        case Attribute.JAVA_IMPL_REGISTRY_COMPANION => 93
+        case Attribute.AST_ATTR_END => 94
     }
 }
 
@@ -302,6 +304,7 @@ private let ATTRIBUTE_NAMES: Array<String> = [
     "CJ_MIRROR_JAVA_INTERFACE_DEFAULT",
     "CJ_MIRROR_OBJC_INTERFACE_FWD",
     "ALREADY_LOADED",
+    "JAVA_IMPL_REGISTRY_COMPANION",
     "AST_ATTR_END"
 ]
 

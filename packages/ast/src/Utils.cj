@@ -980,6 +980,10 @@ public func IsImpl(ty: Ty): Bool {
     return false
 }
 
+public func IsImplRegistryCompanion(node: Node): Bool {
+    return node.TestAttr(Attribute.JAVA_IMPL_REGISTRY_COMPANION)
+}
+
 public func IsImplReferenceWrapper(node: Node): Bool {
     return IsImpl(node)
 }

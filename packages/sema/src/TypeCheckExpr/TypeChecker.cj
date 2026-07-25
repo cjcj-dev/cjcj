@@ -2123,11 +2123,14 @@ extend TypeChecker {
         if (decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER)) {
             return
         }
+        if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER,
+            Attribute.JAVA_IMPL_REGISTRY_COMPANION)) {
+            return
+        }
         if (decl.astKind == ASTKind.STRUCT_DECL && decl.TestAttr(Attribute.COMMON)) {
             return
         }
-        if (decl.astKind == ASTKind.CLASS_DECL &&
-            decl.TestAnyAttr(Attribute.COMMON, Attribute.JAVA_MIRROR)) {
+        if (decl.astKind == ASTKind.CLASS_DECL && decl.TestAttr(Attribute.COMMON)) {
             return
         }
         let ctor = CreateDefaultCtor(decl, isStatic: false)

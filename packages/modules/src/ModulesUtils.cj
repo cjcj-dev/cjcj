@@ -203,7 +203,8 @@ public func GetAttributes(value: String): ArrayList<Attribute> {
                     case 90 => out.add(Attribute.CJ_MIRROR_JAVA_INTERFACE_DEFAULT)
                     case 91 => out.add(Attribute.CJ_MIRROR_OBJC_INTERFACE_FWD)
                     case 92 => out.add(Attribute.ALREADY_LOADED)
-                    case 93 => out.add(Attribute.AST_ATTR_END)
+                    case 93 => out.add(Attribute.JAVA_IMPL_REGISTRY_COMPANION)
+                    case 94 => out.add(Attribute.AST_ATTR_END)
                     case _ => ()
                 }
             }
