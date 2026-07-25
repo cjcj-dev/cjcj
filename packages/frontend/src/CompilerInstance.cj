@@ -929,7 +929,8 @@ public class CompilerInstance {
             return false
         }
         MergePackages()
-        return ModularizeCompilation()
+        ModularizeCompilation()
+        return true
     }
 
     public func GetExtendDecls(queryType: ExtendMemberQueryType): ArrayList<ExtendDecl> {
@@ -1213,7 +1214,8 @@ public class CompilerInstance {
             return false
         }
         if (srcPkgs.size != 1) {
-            InternalError("source packages should only have one element.")
+            // C++ src/Frontend/CompilerInstance.cpp:513-520 (7a1666e7).
+            return false
         }
         if (!invocation.globalOptions.compilePackage && invocation.globalOptions.srcFiles.isEmpty() &&
             !invocation.globalOptions.inputObjs.isEmpty()) {

@@ -278,14 +278,16 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
     public override func PerformCodeGen(): Bool {
         let recorder = ProfileRecorder("Main Stage", "CodeGen")
         if (kind == IncreKind.NO_CHANGE) {
+            // C++ src/FrontendTool/IncrementalCompilerInstance.cpp:481-488 (7a1666e7).
+            LoadCachedCodegenResult()
             for (srcPkg in core.GetSourcePackages()) {
-                LoadCachedCodegenResult()
                 invocation.globalOptions.UpdateCachedDirName(srcPkg.fullPackageName)
             }
             recorder.close()
             return true
         }
-        let ret = CodegenOnePackage(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)
+        // C++ src/FrontendTool/IncrementalCompilerInstance.cpp:490-495 (7a1666e7).
+        let ret = CodegenAllPackages(kind == IncreKind.INCR, cachedMangleMap: cacheMangles)
         if (ret && ShouldSaveCjoForOutputMode()) {
             RegisterCjoOutputs(core.GetSourcePackages())
         }

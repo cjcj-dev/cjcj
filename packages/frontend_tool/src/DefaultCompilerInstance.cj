@@ -7,6 +7,7 @@ import cjcj::incremental_compilation.CachedMangleMap
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo
 import cjcj::utils.FileUtil
+import cjcj::utils.CJC_ASSERT
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.STANDARD_LIBS
 
@@ -102,7 +103,7 @@ public open class DefaultCompilerInstance {
 
     public open func PerformCodeGen(): Bool {
         return ProfiledBool("Main Stage", "CodeGen", { =>
-            if (!PerformCodeGenImpl()) {
+            if (!CodegenAllPackages(false)) {
                 return false
             }
             // Codegen rebuilds frontendOutputFiles from scratch for the emitted .bc modules
@@ -274,22 +275,37 @@ public open class DefaultCompilerInstance {
         return ret
     }
 
-    private func PerformCodeGenImpl(): Bool {
+    // C++ src/FrontendTool/DefaultCompilerInstance.cpp:348-383 (7a1666e7).
+    protected func CodegenAllPackages(enableIncrement: Bool,
+        cachedMangleMap!: CachedMangleMap = CachedMangleMap()): Bool {
+        invocation.globalOptions.frontendOutputFiles.clear()
         let chirPkgs = core.GetAllCHIRPackages()
         if (chirPkgs.size <= 1) {
-            return CodegenOnePackage(false)
+            return CodegenOnePackage(enableIncrement, cachedMangleMap: cachedMangleMap)
         }
         var ret = true
-        let savedPackage = core.chirData.GetCurrentCHIRPackage()
+        if (invocation.globalOptions.enIncrementalCompilation) {
+            core.cachedInfo.bitcodeFilesName.clear()
+        }
         for (pkg in chirPkgs) {
             core.chirData.SetCurrentCHIRPackage(Some(pkg))
+            var foundCurrentRealPackage = false
+            for (realPackage in core.chirData.GetAllRealCHIRPackages()) {
+                if (realPackage.GetName() == pkg.name) {
+                    core.chirData.SetCurrentRealCHIRPackage(Some(realPackage))
+                    foundCurrentRealPackage = true
+                    break
+                }
+            }
+            CJC_ASSERT(foundCurrentRealPackage)
             core.chirData.ActivateCodegenFuncsForPackage(pkg)
-            if (!CodegenOnePackage(false)) {
+            if (!CodegenOnePackage(enableIncrement, cachedMangleMap: cachedMangleMap)) {
                 ret = false
                 break
             }
         }
-        core.chirData.SetCurrentCHIRPackage(savedPackage)
+        core.chirData.SetCurrentCHIRPackage(None)
+        core.chirData.SetCurrentRealCHIRPackage(None)
         core.FreeCHIRData()
         return ret
     }

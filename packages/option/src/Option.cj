@@ -1200,9 +1200,18 @@ public open class GlobalOptions <: Option {
             emitOptionDiag(BasicDiagKindRefactor.driver_require_package_directory)
             return false
         }
+        // C++ src/Option/Option.cpp:894-908 (dev_perf ancestor 18da0bfb).
         if (compilePackage && packagePaths.size > 1) {
-            emitOptionDiag(BasicDiagKindRefactor.driver_require_one_package_directory)
-            return false
+            let seenPaths = ArrayList<String>()
+            for (packagePath in packagePaths) {
+                let absPath = GetAbsPath(packagePath)
+                let canonical = if (absPath.hasValue) { absPath.value } else { NormalizePath(packagePath) }
+                if (containsString(seenPaths, canonical)) {
+                    Errorln("duplicate package path '" + packagePath + "' specified with '-p'")
+                    return false
+                }
+                seenPaths.add(canonical)
+            }
         }
         return true
     }
