@@ -479,6 +479,21 @@ private class ToCHIR {
         }
     }
 
+    // C++ CHIR.cpp:416-427.
+    private func RunArrayListConstStartOpt(currentPackage: RealCHIRPackage): Unit {
+        let options = instance.invocation.globalOptions
+        if (!options.IsCHIROptimizationLevelOverO2()) {
+            return
+        }
+        try (recorder = ProfileRecorder("CHIR Opt", "ArrayListOpt")) {
+            let functionInline = FunctionInline(builder, options.optimizationLevel, options.chirDebugOptimizer)
+            let pass = ArrayListConstStartOpt(builder, options, functionInline)
+            pass.RunOnPackage(currentPackage)
+            MergeEffectMap(pass.GetEffectMap(), effectMap)
+            DumpCHIRToFile("RunArrayListConstStartOpt")
+        }
+    }
+
     private func RunOptimizationPass(currentPackage: RealCHIRPackage): Unit {
         try (recorder = ProfileRecorder("CHIR", "CHIR Opt")) {
             let options = instance.invocation.globalOptions
