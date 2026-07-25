@@ -140,12 +140,10 @@ class ConditionalCompilationImpl {
     }
 
     private func EvalLogicBinaryExpr(be: BinaryExpr): Bool {
-        let left = EvalConditionExpr(be.leftExpr.getOrThrow())
-        let right = EvalConditionExpr(be.rightExpr.getOrThrow())
         if (be.op == TokenKind.AND) {
-            return left && right
+            return EvalConditionExpr(be.leftExpr.getOrThrow()) && EvalConditionExpr(be.rightExpr.getOrThrow())
         } else {
-            return left || right
+            return EvalConditionExpr(be.leftExpr.getOrThrow()) || EvalConditionExpr(be.rightExpr.getOrThrow())
         }
     }
 
