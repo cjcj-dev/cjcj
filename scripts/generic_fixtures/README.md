@@ -1,26 +1,35 @@
 # Generic-call resolution gate fixtures
 
-Backs `scripts/generic_gate.mjs` — the focused gate for the sema C2 campaign
-(`audit_persist/SEMA_C2_DESIGN.md`, CheckGenericCallCompatible cluster). The 114-file
-difftest corpus exercises generic calls but does not isolate the multi-mapping
-resolution / ambiguity-diagnostic path that C2b/C2c target.
+These fixtures back `scripts/generic_gate.mjs`, a focused golden gate for generic-call
+mapping, overload resolution, and related diagnostics. The main 114-case difftest corpus
+exercises generic code, but does not isolate every multi-mapping and overload-conflict path.
 
 ## Fixtures
 
-- **gf1_constraint** — generic function with an interface upper-bound (`where T <: Shape`).
-- **gf2_nested** — nested generic instantiation (`unwrap(wrap(42))`).
-- **gf3_overload** — generic vs fixed overload resolution (`conv<T>` vs `conv(Int64)`).
-- **gf4_twoparam** — two type params with return-target-driven inference (`cast2<T,R>`).
-- **gf5_ambiguous** — a type implementing two interfaces called against two
-  `where T<:A` / `where T<:B` overloads: genuinely ambiguous. This is the **C2 target** —
-  C++ emits the full `DiagnoseForMultiMapping` ambiguity notes (6 locations); the current
-  selfhost emits fewer.
+- **gf1_constraint**: generic function with an interface upper bound (`where T <: Shape`).
+- **gf2_nested**: nested generic instantiation (`unwrap(wrap(42))`).
+- **gf3_overload**: generic versus fixed overload resolution.
+- **gf4_twoparam**: two type parameters with return-target-driven inference.
+- **gf5_ambiguous**: a type implementing two interfaces is passed to two constrained
+  overloads; the golden records the complete ambiguity diagnostic and notes.
+- **gf6_overload_conflict**: two declarations differ only in generic constraints; constraints
+  do not form an overload distinction, so the golden records the declaration conflict.
 
-## Golden + baseline (as of C2a, before C2b/C2c)
+The first five cases were introduced with the C2 generic-call campaign. `gf6` was added with
+the faithful `PreCheckFuncRedefinition` overload-conflict implementation.
 
-Golden established with the C++ reference compiler; `npx --yes zx@8 scripts/generic_gate.mjs --check` → PASS 5/5.
-`npx --yes zx@8 scripts/generic_gate.mjs --self <selfhost cjc>` current baseline: **PASS=4 FAIL=1** — gf1–gf4 pass
-(single-mapping model already resolves them; these are regression guards C2c must keep green),
-gf5 fails on the missing multi-mapping ambiguity diagnostic (the DiagnoseForMultiMapping gap,
-ported in C2b and wired in C2c). The selfhost cjc needs a large heap; the gate exports
-`cjHeapSize=12GB` (harmless for the reference cjc).
+## Usage
+
+```sh
+npx --yes zx@8 scripts/generic_gate.mjs --check
+npx --yes zx@8 scripts/generic_gate.mjs --self <path-to-cjc>
+```
+
+`--check` recompiles all six fixtures with the configured reference compiler and compares
+their normalized compile/run transcripts with `golden/`. `--self` applies the same comparison
+to the selected cjcj compiler.
+
+Set `CANGJIE_HOME` to select the SDK and `REF_CJC` to override its reference `cjc`. The gate
+creates throwaway build directories and removes generated binaries after each case. Current
+selfhost pass counts are intentionally not stored here: they must come from a run against the
+same compiler HEAD being evaluated.
