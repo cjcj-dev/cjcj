@@ -6,6 +6,7 @@ import cjcj::chir.Apply as ChirApply
 import cjcj::chir.ApplyWithException as ChirApplyWithException
 import cjcj::chir.AnalysisWrapper
 import cjcj::chir.AnnotationChecker
+import cjcj::chir.ArrayListConstStartOpt
 import cjcj::chir.ArrayLambdaOpt
 import cjcj::chir.Attribute as ChirAttribute
 import cjcj::chir.Block as ChirBlock
