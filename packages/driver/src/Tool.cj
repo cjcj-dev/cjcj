@@ -6,6 +6,92 @@ import cjcj::utils.Semaphore
 
 public type ToolBatch = ArrayList<Tool>
 
+@When[os == "Windows"]
+private let FORMAT_MESSAGE_ALLOCATE_BUFFER: UInt32 = 0x00000100u32
+@When[os == "Windows"]
+private let FORMAT_MESSAGE_IGNORE_INSERTS: UInt32 = 0x00000200u32
+@When[os == "Windows"]
+private let FORMAT_MESSAGE_FROM_SYSTEM: UInt32 = 0x00001000u32
+@When[os == "Windows"]
+private let LANG_ENGLISH_SUBLANG_DEFAULT: UInt32 = 0x00000409u32
+@When[os == "Windows"]
+private let CP_UTF8: UInt32 = 65001u32
+
+@When[os == "Windows"]
+@C
+struct STARTUPINFOA {
+    var cb: UInt32
+    var lpReserved: CString
+    var lpDesktop: CString
+    var lpTitle: CString
+    var dwX: UInt32
+    var dwY: UInt32
+    var dwXSize: UInt32
+    var dwYSize: UInt32
+    var dwXCountChars: UInt32
+    var dwYCountChars: UInt32
+    var dwFillAttribute: UInt32
+    var dwFlags: UInt32
+    var wShowWindow: UInt16
+    var cbReserved2: UInt16
+    var lpReserved2: CPointer<UInt8>
+    var hStdInput: CPointer<Unit>
+    var hStdOutput: CPointer<Unit>
+    var hStdError: CPointer<Unit>
+
+    init() {
+        cb = UInt32(sizeOf<STARTUPINFOA>())
+        lpReserved = CString(CPointer<UInt8>())
+        lpDesktop = CString(CPointer<UInt8>())
+        lpTitle = CString(CPointer<UInt8>())
+        dwX = 0u32
+        dwY = 0u32
+        dwXSize = 0u32
+        dwYSize = 0u32
+        dwXCountChars = 0u32
+        dwYCountChars = 0u32
+        dwFillAttribute = 0u32
+        dwFlags = 0u32
+        wShowWindow = 0u16
+        cbReserved2 = 0u16
+        lpReserved2 = CPointer<UInt8>()
+        hStdInput = CPointer<Unit>()
+        hStdOutput = CPointer<Unit>()
+        hStdError = CPointer<Unit>()
+    }
+}
+
+@When[os == "Windows"]
+@C
+struct PROCESS_INFORMATION {
+    var hProcess: CPointer<Unit>
+    var hThread: CPointer<Unit>
+    var dwProcessId: UInt32
+    var dwThreadId: UInt32
+
+    init() {
+        hProcess = CPointer<Unit>()
+        hThread = CPointer<Unit>()
+        dwProcessId = 0u32
+        dwThreadId = 0u32
+    }
+}
+
+@When[os == "Windows"]
+foreign {
+    func CreateProcessA(applicationName: CString, commandLine: CString, processAttributes: CPointer<Unit>,
+        threadAttributes: CPointer<Unit>, inheritHandles: Int32, creationFlags: UInt32, environment: CPointer<Unit>,
+        currentDirectory: CString, startupInfo: CPointer<STARTUPINFOA>,
+        processInformation: CPointer<PROCESS_INFORMATION>): Int32
+    func GetLastError(): UInt32
+    func FormatMessageW(flags: UInt32, source: CPointer<Unit>, messageId: UInt32, languageId: UInt32,
+        buffer: CPointer<CPointer<UInt16>>, size: UInt32, arguments: CPointer<Unit>): UInt32
+    func LocalFree(memory: CPointer<Unit>): CPointer<Unit>
+    func WideCharToMultiByte(codePage: UInt32, flags: UInt32, wideChars: CPointer<UInt16>,
+        wideCharCount: Int32, multiByteChars: CPointer<UInt8>, multiByteCount: Int32,
+        defaultChar: CString, usedDefaultChar: CPointer<Int32>): Int32
+}
+
 public func MakeSingleToolBatch(tool: Tool): ToolBatch {
     let result = ArrayList<Tool>()
     result.add(tool)
@@ -83,6 +169,57 @@ private func GetSystemErrorMessage(error: Int32): String {
     }
     let text = message.toString()
     return if (text.isEmpty()) { "Unknown system error code: ${error}" } else { text }
+}
+
+// Mirrors Driver/Tool.cpp:39-70.
+@When[os == "Windows"]
+private func GetSystemErrorMessage(error: UInt32): String {
+    if (error == 0u32) {
+        return ""
+    }
+    try (messagePtr = LibC.malloc<CPointer<UInt16>>().asResource()) {
+        if (messagePtr.value.isNull()) {
+            return "Unknown system error code: " + error.toString()
+        }
+        unsafe { messagePtr.value.write(CPointer<UInt16>()) }
+        let size = unsafe {
+            FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                FORMAT_MESSAGE_IGNORE_INSERTS, CPointer<Unit>(), error, LANG_ENGLISH_SUBLANG_DEFAULT,
+                messagePtr.value, 0u32, CPointer<Unit>())
+        }
+        let wideMessage = unsafe { messagePtr.value.read() }
+        if (size == 0u32 || wideMessage.isNull()) {
+            return "Unknown system error code: " + error.toString()
+        }
+        let utf8Size = unsafe {
+            WideCharToMultiByte(CP_UTF8, 0u32, wideMessage, Int32(size), CPointer<UInt8>(), 0,
+                CString(CPointer<UInt8>()), CPointer<Int32>())
+        }
+        if (utf8Size <= 0) {
+            let _ = unsafe { LocalFree(CPointer<Unit>(wideMessage)) }
+            return "Unknown system error code: " + error.toString()
+        }
+        var result = try (utf8Buffer = LibC.malloc<UInt8>(count: Int64(utf8Size) + 1).asResource()) {
+            if (utf8Buffer.value.isNull()) {
+                let _ = unsafe { LocalFree(CPointer<Unit>(wideMessage)) }
+                return "Unknown system error code: " + error.toString()
+            }
+            let converted = unsafe {
+                WideCharToMultiByte(CP_UTF8, 0u32, wideMessage, Int32(size), utf8Buffer.value, utf8Size,
+                    CString(CPointer<UInt8>()), CPointer<Int32>())
+            }
+            let _ = unsafe { LocalFree(CPointer<Unit>(wideMessage)) }
+            if (converted <= 0) {
+                return "Unknown system error code: " + error.toString()
+            }
+            unsafe { (utf8Buffer.value + Int64(converted)).write(0u8) }
+            CString(utf8Buffer.value).toString()
+        }
+        while (result.endsWith("\r") || result.endsWith("\n")) {
+            result = result[0..result.size - 1]
+        }
+        return result
+    }
 }
 
 public class Tool {
