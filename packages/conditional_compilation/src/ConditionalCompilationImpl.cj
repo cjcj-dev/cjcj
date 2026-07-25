@@ -174,7 +174,7 @@ class ConditionalCompilationImpl {
         }
     }
 
-    private func EvalJudgeBinaryExpr(be: BinaryExpr): Bool {
+    private func CheckJudgeBinaryExpr(be: BinaryExpr): Bool {
         if (be.leftExpr.isNone() || be.rightExpr.isNone()) {
             diag.DiagnoseRefactor(BasicDiagKindRefactor.conditional_compilation_invalid_condition_expr, be.begin).Emit()
             return false
@@ -196,6 +196,16 @@ class ConditionalCompilationImpl {
                 BasicDiagKindRefactor.conditional_compilation_invalid_condition_value, rightExpr.begin).Emit()
             return false
         }
+        return true
+    }
+
+    private func EvalJudgeBinaryExpr(be: BinaryExpr): Bool {
+        if (!CheckJudgeBinaryExpr(be)) {
+            return false
+        }
+        let leftExpr = be.leftExpr.getOrThrow()
+        let rightExpr = be.rightExpr.getOrThrow()
+        let right = (rightExpr as LitConstExpr).getOrThrow()
         let left = (leftExpr as RefExpr).getOrThrow()
         let conditionStr = left.ref.identifier.Val()
         let rightValue = right.stringValue
