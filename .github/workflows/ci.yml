@@ -158,6 +158,8 @@ jobs:
         id: setup
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
+          # This job never compiles with cjcj, so it has no fixed-llc artifact to swap in.
+          CJCJ_SDK_STOCK_LLC: '1'
         run: npx --yes zx@8 ci/setup_sdk.mjs
       - name: Save SDK cache
         if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'

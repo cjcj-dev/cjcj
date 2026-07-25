@@ -81,8 +81,11 @@ const stdxPath = `${home}/.cjv/stdx/${toolchain}/static/stdx`;
 // true original once, and break a possible hardlink before replacing the binary.
 // Jobs that only consume the toolchain's archives and headers as link inputs
 // (no Cangjie compilation, e.g. the Windows std-ast relink) opt out of the llc
-// requirement with CJCJ_SDK_LINK_INPUTS_ONLY=1.
-const llcPlatform = process.env.CJCJ_SDK_LINK_INPUTS_ONLY
+// requirement with CJCJ_SDK_LINK_INPUTS_ONLY=1. Jobs that never feed cjcj-generated
+// IR to llc at all (the non-gating SDK provisioning check, which exercises only the
+// official toolchain) keep the stock llc with CJCJ_SDK_STOCK_LLC=1.
+const keepStockLlc = process.env.CJCJ_SDK_LINK_INPUTS_ONLY || process.env.CJCJ_SDK_STOCK_LLC;
+const llcPlatform = keepStockLlc
   ? '' : hostOs === 'Linux' && ['x86_64', 'aarch64'].includes(hostArch)
   ? `linux_${hostArch}` : '';
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
