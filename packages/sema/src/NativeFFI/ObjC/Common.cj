@@ -1,7 +1,8 @@
 package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
-import cjcj::utils.{CJC_ASSERT, NATIVE_HANDLE_GETTER_IDENT}
+import cjcj::modules.SemaImportManager
+import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, NATIVE_HANDLE_GETTER_IDENT, SYNTHETIC_CLASS_SUFFIX}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/Common.cpp:22-36.
 private func GetMirrorSuperClass(target: ClassLikeDecl): Option<ClassDecl> {
@@ -38,4 +39,19 @@ public func GetNativeHandleGetter(target: ClassLikeDecl): Option<FuncDecl> {
         return GetNativeHandleGetter(mirrorSuperClass)
     }
     return FindMirrorMember(NATIVE_HANDLE_GETTER_IDENT, target) as FuncDecl
+}
+
+// C++ src/Sema/NativeFFI/ObjC/Utils/Common.cpp:155-165.
+public func GetSyntheticWrapper(importManager: SemaImportManager, target: ClassLikeDecl): Option<ClassDecl> {
+    CJC_ASSERT(TypeMapper.IsObjCMirror(target.GetTy().getOrThrow()))
+    let synthetic = importManager.GetImportedDecl<ClassDecl>(target.fullPackageName,
+        target.identifier.Val() + SYNTHETIC_CLASS_SUFFIX)
+    CJC_NULLPTR_CHECK(synthetic)
+    CJC_ASSERT(IsSyntheticWrapper(synthetic.getOrThrow()))
+    return synthetic
+}
+
+// C++ src/Sema/NativeFFI/ObjC/Utils/Common.cpp:178-181.
+public func IsSyntheticWrapper(decl: Decl): Bool {
+    return TypeMapper.IsSyntheticWrapper(decl.GetTy().getOrThrow())
 }
