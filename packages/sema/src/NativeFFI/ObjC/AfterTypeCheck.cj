@@ -105,6 +105,17 @@ public class ASTFactory {
         return WithinFile<CallExpr>(call, file)
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1796-1806.
+    public func CreateObjCConformsToProtocolCall(id: Expr, cls: Expr, file: Option<File>): Expr {
+        let conformsToProtocolDecl = bridge.GetObjCConformsToProtocolDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(id))
+        args.add(CreateFuncArg(cls))
+        let call = CreateCallExpr(CreateRefExpr(conformsToProtocolDecl), args, Some(conformsToProtocolDecl),
+            Some(TypeManager.GetBoolTy()), CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, file)
+    }
+
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
     // src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:49-278 and ASTFactory.cpp:42-1538.
 }
