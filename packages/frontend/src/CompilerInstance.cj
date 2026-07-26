@@ -20,6 +20,7 @@ import cjcj::lex.Lexer as CangjieLexer
 import cjcj::lex.TokenKind as CangjieTokenKind
 import cjcj::lex.TokenKindValue
 import cjcj::incremental_compilation.IncreKind
+import cjcj::option.OutputMode
 import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
     MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, SemanticInfo, TopLevelDeclCache, VarInitDepMap,
     VirtualWrapperDepMap, WriteCache}
