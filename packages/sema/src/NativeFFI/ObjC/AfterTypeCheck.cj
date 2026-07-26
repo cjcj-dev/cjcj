@@ -94,6 +94,17 @@ public class ASTFactory {
         return call
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1784-1794.
+    public func CreateObjCIsKindOfClassCall(id: Expr, cls: Expr, file: Option<File>): Expr {
+        let kindOfClassDecl = bridge.GetObjCIsKindOfClassDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(id))
+        args.add(CreateFuncArg(cls))
+        let call = CreateCallExpr(CreateRefExpr(kindOfClassDecl), args, Some(kindOfClassDecl),
+            Some(TypeManager.GetBoolTy()), CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, file)
+    }
+
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
     // src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:49-278 and ASTFactory.cpp:42-1538.
 }
