@@ -16,10 +16,12 @@ import {
 
 $.stdio = 'inherit';
 
-const sdk = path.resolve(String(argv.sdk || process.env.CANGJIE_HOME || ''));
-const out = path.resolve(String(argv.outdir || ''));
+const sdkArgument = String(argv.sdk || process.env.CANGJIE_HOME || '');
+const outArgument = String(argv.outdir || '');
+const sdk = path.resolve(sdkArgument || '.');
+const out = path.resolve(outArgument || '.');
 const jobs = String(argv.jobs || process.env.CJCJ_STD_BUILD_JOBS || '12');
-if (!sdk || sdk === path.parse(sdk).root || !out || out === path.parse(out).root) {
+if (!sdkArgument || !outArgument || sdk === path.parse(sdk).root || out === path.parse(out).root) {
   throw new Error('usage: build_std_variants.mjs --sdk <official-sdk> --outdir <bundle> [--jobs N]');
 }
 if (process.platform !== 'linux' || process.arch !== 'x64') {
