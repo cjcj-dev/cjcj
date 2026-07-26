@@ -52,7 +52,7 @@ const stage = path.join(outdir, packageName);
 await fs.mkdir(outdir, {recursive: true});
 await fs.rm(stage, {recursive: true, force: true});
 
-console.log(`[1/6] copy SDK tree -> ${stage}`);
+console.log(`[1/7] copy SDK tree -> ${stage}`);
 if (isWindows) await fs.cp(sdk, stage, {recursive: true});
 else {
   await $({stdio: 'inherit'})`cp -a ${sdk} ${stage}`;
