@@ -72,10 +72,16 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         }
         if (increRes.kind == IncreKind.NO_CHANGE) {
             for (srcPkg in sourcePackages) { options.UpdateCachedDirName(srcPkg.fullPackageName) }
-            if (!options.IsLTOEnabled() && !CheckCachedObjFile(options, increRes.cacheInfo)) {
+            if (options.aggressiveParallelCompileSplitNum.hasValue &&
+                !CheckCachedBitcodeInfo(packageValue.fullPackageName, options)) {
                 increRes.kind = IncreKind.ROLLBACK
             }
-            if (options.IsLTOEnabled() && !CheckCachedBitcodeInfoForLTO(options, increRes.cacheInfo)) {
+            if (increRes.kind == IncreKind.NO_CHANGE && !options.IsLTOEnabled() &&
+                !CheckCachedObjFile(options, increRes.cacheInfo)) {
+                increRes.kind = IncreKind.ROLLBACK
+            }
+            if (increRes.kind == IncreKind.NO_CHANGE && options.IsLTOEnabled() &&
+                !CheckCachedBitcodeInfoForLTO(options, increRes.cacheInfo)) {
                 increRes.kind = IncreKind.ROLLBACK
             }
         }
