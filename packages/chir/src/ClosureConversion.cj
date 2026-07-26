@@ -1094,9 +1094,7 @@ public class ClosureConversion {
             apply.SetDebugLocation(srcFunc.GetDebugLocation())
         }
         let applyResult = TypeCastOrBoxIfNeeded(RequireResult(apply), methodRetTy, builder, entry, INVALID_LOCATION)
-        if (!methodRetTy.IsUnit() && !methodRetTy.IsVoid() && !methodRetTy.IsNothing()) {
-            builder.CreateStore(applyResult, retSlot, entry)
-        }
+        builder.CreateStore(applyResult, retSlot, entry)
         builder.CreateExit(None, entry)
     }
 
@@ -1129,9 +1127,7 @@ public class ClosureConversion {
         if (IsArkInteropLambdaSignature(srcFunc)) {
             apply.SetDebugLocation(srcFunc.GetDebugLocation())
         }
-        if (!retTy.IsUnit() && !retTy.IsVoid() && !retTy.IsNothing()) {
-            builder.CreateStore(RequireResult(apply), retSlot, entry)
-        }
+        builder.CreateStore(RequireResult(apply), retSlot, entry)
         builder.CreateExit(None, entry)
     }
 
