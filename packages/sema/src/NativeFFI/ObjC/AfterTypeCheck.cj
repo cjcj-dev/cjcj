@@ -177,6 +177,21 @@ public class ASTFactory {
         return None
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2157-2169.
+    public func CreateUnsafePointerCast(expr: Expr, elementType: Ty): Expr {
+        let exprTy = expr.GetTy().getOrThrow()
+        CJC_ASSERT(exprTy.IsPointer() || exprTy.IsCFunc())
+        CJC_ASSERT(Ty.IsMetCType(elementType))
+        let pointerExpr = PointerExpr()
+        let pointerType = typeManager.GetPointerTy(elementType)
+        CopyBasicInfo(expr, pointerExpr)
+        pointerExpr.arg = CreateFuncArg(expr)
+        pointerExpr.SetTy(pointerType)
+        pointerExpr.typeNode = CreateType(pointerType)
+        pointerExpr.EnableAttr(Attribute.COMPILER_ADD)
+        return pointerExpr
+    }
+
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
     // src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:49-278 and ASTFactory.cpp:42-1538.
 }
