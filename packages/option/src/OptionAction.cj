@@ -320,6 +320,12 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.DISCARD_EH_FRAME) { opts.discardEhFrame = true; return handled() }
     if (id == ID.JOBS) { return parseJobs(opts, arg, false) }
     if (id == ID.AGGRESSIVE_PARALLEL_COMPILE) { return parseJobs(opts, arg, true) }
+    if (id == ID.APC_SPLIT_NUM) {
+        let parsed = parseJobsValue(arg.name, arg.value, clampToHardware: false)
+        if (!parsed.hasValue) { return handled(success: false) }
+        opts.aggressiveParallelCompileSplitNum = parsed
+        return handled()
+    }
     return missing()
 }
 
@@ -952,7 +958,7 @@ private func isAsciiDigitsOnly(value: String): Bool {
     return true
 }
 
-private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
+private func parseJobsValue(optionName: String, value: String, clampToHardware!: Bool = true): MaybeUInt64 {
     let maxLen: Int64 = 9
     if (value.isEmpty()) {
         Errorln("'" + optionName + "' requires a non-empty value.")
@@ -973,8 +979,10 @@ private func parseJobsValue(optionName: String, value: String): MaybeUInt64 {
         Warningln("'" + optionName + "' value must be greater than 0, the compiler will use 1 as the value.")
         return MaybeUInt64(1u64)
     }
-    let threadNum = GetHardwareConcurrency()
-    if (parsedValue > threadNum) { return MaybeUInt64(threadNum) }
+    if (clampToHardware) {
+        let threadNum = GetHardwareConcurrency()
+        if (parsedValue > threadNum) { return MaybeUInt64(threadNum) }
+    }
     return MaybeUInt64(parsedValue)
 }
 
