@@ -5,10 +5,10 @@ import cjcj::utils.ProfileRecorder
 
 // C++: CHIR/Transformation/ReplaceSrcCodeImportedVal.cpp:15-89.
 public class ReplaceSrcCodeImportedVal {
-    private let package: Package
+    private let `package`: Package
 
-    public init(package: Package) {
-        this.package = package
+    public init(`package`: Package) {
+        this.`package` = `package`
     }
 
     public func Run(srcCodeImportedFuncs: ArrayList<Function>, srcCodeImportedVars: ArrayList<GlobalVar>,
@@ -25,13 +25,13 @@ public class ReplaceSrcCodeImportedVal {
                 globalVar.DestroyInitializer()
             }
             let newFuncs = ArrayList<Function>()
-            for (funcValue in package.GetGlobalFunctions(includePureAbstract: true)) {
+            for (funcValue in `package`.GetGlobalFunctions(includePureAbstract: true)) {
                 if (toBeRemovedFuncs.contains(funcValue)) {
                     continue
                 }
                 newFuncs.add(funcValue)
             }
-            package.SetAllGlobalFuncs(newFuncs)
+            `package`.SetAllGlobalFuncs(newFuncs)
             RemoveUselessDefFromCC(uselessClasses, uselessLambda)
         }
     }
@@ -62,21 +62,21 @@ public class ReplaceSrcCodeImportedVal {
                 uselessClassSet.add(def)
             }
             let newClasses = ArrayList<ClassDef>()
-            for (def in package.GetClasses()) {
+            for (def in `package`.GetClasses()) {
                 if (!uselessClassSet.contains(def)) {
                     newClasses.add(def)
                 }
             }
-            package.SetClasses(newClasses)
+            `package`.SetClasses(newClasses)
 
             let globalFuncs = ArrayList<Function>()
-            for (funcValue in package.GetGlobalFunctions(includePureAbstract: true)) {
+            for (funcValue in `package`.GetGlobalFunctions(includePureAbstract: true)) {
                 if (toBeRemovedFuncs.contains(funcValue)) {
                     continue
                 }
                 globalFuncs.add(funcValue)
             }
-            package.SetAllGlobalFuncs(globalFuncs)
+            `package`.SetAllGlobalFuncs(globalFuncs)
         }
     }
 }
