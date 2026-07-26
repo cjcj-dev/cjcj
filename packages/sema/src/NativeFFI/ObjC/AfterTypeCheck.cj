@@ -8,7 +8,7 @@ import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.NativeFFI.{CreateCall, GetStringDecl, WithinFile}
+import cjcj::sema.NativeFFI.{CreateCall, CreateType, GetStringDecl, WithinFile}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR,
     OPTION_VALUE_CTOR, STD_LIB_OPTION}
 
