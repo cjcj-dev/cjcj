@@ -106,22 +106,9 @@ private class UseEdge {
     }
 }
 
-private func SameNode(left: Node, right: Node): Bool {
-    return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end
-}
-
 private func ContainsDecl(values: ArrayList<Decl>, decl: Decl): Bool {
     for (value in values) {
         if (SameDecl(value, decl)) {
-            return true
-        }
-    }
-    return false
-}
-
-private func ContainsNode(values: ArrayList<Node>, node: Node): Bool {
-    for (value in values) {
-        if (SameNode(value, node)) {
             return true
         }
     }
@@ -386,16 +373,15 @@ public class GlobalVarInitializationChecker {
 
     private func CollectVarUsageBFS(root: Node): Unit {
         let worklist = ArrayList<Node>()
-        let visited = ArrayList<Node>()
+        let visited = HashSet<Node>()
         worklist.add(root)
         var cursor: Int64 = 0
         while (cursor < worklist.size) {
             let current = worklist[cursor]
             cursor++
-            if (ContainsNode(visited, current)) {
+            if (!visited.add(current)) {
                 continue
             }
-            visited.add(current)
             CollectVarUsageBFSImpl(current, worklist)
         }
     }
