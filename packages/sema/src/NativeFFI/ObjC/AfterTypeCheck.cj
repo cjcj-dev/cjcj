@@ -8,7 +8,7 @@ import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.NativeFFI.WithinFile
+import cjcj::sema.NativeFFI.{CreateCall, GetStringDecl, WithinFile}
 import cjcj::utils.{CJC_ASSERT, OPTION_NONE_CTOR, OPTION_VALUE_CTOR, STD_LIB_OPTION}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
@@ -114,6 +114,16 @@ public class ASTFactory {
         let call = CreateCallExpr(CreateRefExpr(conformsToProtocolDecl), args, Some(conformsToProtocolDecl),
             Some(TypeManager.GetBoolTy()), CallKind.CALL_DECLARED_FUNCTION)
         return WithinFile<CallExpr>(call, file)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1931-1938.
+    public func CreateGetClassCall(className: String, curFile: Option<File>): Expr {
+        let getClassFuncDecl = bridge.GetGetClassDecl().getOrThrow()
+        let classNameLiteral = CreateLitConstExpr(LitConstKind.STRING, className,
+            GetStringDecl(importManager).GetTy().getOrThrow())
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(classNameLiteral))
+        return CreateCall(Some(getClassFuncDecl), curFile, args: args).getOrThrow()
     }
 
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
