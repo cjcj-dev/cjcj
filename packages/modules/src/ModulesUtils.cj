@@ -927,23 +927,23 @@ public func IsVisible(node: Node, relation: PackageRelation): Bool {
             (relation == PackageRelation.CHILD || relation == PackageRelation.SAME_PACKAGE))
 }
 
-public func AddImportedDeclToMap(decls: ArrayList<Decl>, targetSet: ArrayList<Decl>, importLevel: AccessLevel): Unit {
+public func AddImportedDeclToMap(decls: TreeSet<Decl>, targetSet: TreeSet<Decl>, importLevel: AccessLevel): Unit {
     for (decl in decls) {
         if (IsCompatibleAccessLevel(importLevel, GetAccessLevel(decl))) {
-            AddDeclUnique(targetSet, decl)
+            targetSet.add(decl)
         }
     }
 }
 
 public func GetVisibleDeclToMap(
-    decls: ArrayList<Decl>,
+    decls: TreeSet<Decl>,
     importLevel: AccessLevel,
     relation: PackageRelation
-): ArrayList<Decl> {
-    let ret = ArrayList<Decl>()
+): TreeSet<Decl> {
+    let ret = TreeSet<Decl>()
     for (decl in decls) {
         if (IsCompatibleAccessLevel(importLevel, GetAccessLevel(decl)) && IsVisible(decl, relation)) {
-            AddDeclUnique(ret, decl)
+            ret.add(decl)
         }
     }
     return ret
@@ -970,6 +970,14 @@ public func CloneDeclArray(values: ArrayList<Decl>): ArrayList<Decl> {
     return out
 }
 
+public func CloneDeclArray(values: TreeSet<Decl>): ArrayList<Decl> {
+    let out = ArrayList<Decl>()
+    for (value in values) {
+        out.add(value)
+    }
+    return out
+}
+
 public func CloneStringArray(values: ArrayList<String>): ArrayList<String> {
     let out = ArrayList<String>()
     for (value in values) {
@@ -987,7 +995,16 @@ public func PutDeclMapValue(map: HashMap<String, ArrayList<Decl>>, key: String, 
     }
 }
 
-public func GetDeclMapValue(map: HashMap<String, ArrayList<Decl>>, key: String): ArrayList<Decl> {
+public func PutDeclMapValue(map: TreeMap<String, TreeSet<Decl>>, key: String, decl: Decl): Unit {
+    if (!map.contains(key)) {
+        map.add(key, TreeSet<Decl>())
+    }
+    if (let Some(values) <- map.get(key)) {
+        values.add(decl)
+    }
+}
+
+public func GetDeclMapValue(map: TreeMap<String, TreeSet<Decl>>, key: String): ArrayList<Decl> {
     if (let Some(values) <- map.get(key)) {
         return CloneDeclArray(values)
     }

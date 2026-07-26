@@ -280,12 +280,12 @@ public class CjoManager {
         impl.RemovePackageInfo(fullPkgName)
     }
 
-    public func GetPackageMembers(fullPackageName: String): HashMap<String, ArrayList<Decl>> {
-        let out = HashMap<String, ArrayList<Decl>>()
+    public func GetPackageMembers(fullPackageName: String): TreeMap<String, TreeSet<Decl>> {
+        let out = TreeMap<String, TreeSet<Decl>>()
         if (let Some(info) <- impl.GetPackageInfo(fullPackageName)) {
             for (name in info.declMap.keys()) {
                 if (let Some(values) <- info.declMap.get(name)) {
-                    out[name] = CloneDeclArray(values)
+                    out.add(name, TreeSet<Decl>(values))
                 }
             }
         }
@@ -484,7 +484,7 @@ public class CjoManager {
         return false
     }
 
-    private func AddDeclToMap(decl: Decl, declMap: HashMap<String, ArrayList<Decl>>): Unit {
+    private func AddDeclToMap(decl: Decl, declMap: TreeMap<String, TreeSet<Decl>>): Unit {
         if (decl.doNotExport || decl.identifier.isEmpty()) {
             return
         }

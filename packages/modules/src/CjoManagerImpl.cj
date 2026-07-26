@@ -90,7 +90,7 @@ public class CjoPackageInfo {
     public var pkg: Package
     public var pkgDecl: PackageDecl
     public let exportIDDeclMap: HashMap<String, Decl> = HashMap<String, Decl>()
-    public let declMap: HashMap<String, ArrayList<Decl>> = HashMap<String, ArrayList<Decl>>()
+    public let declMap: TreeMap<String, TreeSet<Decl>> = TreeMap<String, TreeSet<Decl>>()
     public let implicitDeclMap: HashMap<String, Decl> = HashMap<String, Decl>()
     public var cjoPath: String = ""
     public var onlyUsedByMacro: Bool = false
@@ -352,7 +352,11 @@ public class CjoManagerImpl {
         return false
     }
 
-    public func AddImportsToMap(importSpec: ImportSpec, importedPackage: String, declMap: HashMap<String, ArrayList<Decl>>): Unit {
+    public func AddImportsToMap(
+        importSpec: ImportSpec,
+        importedPackage: String,
+        declMap: TreeMap<String, TreeSet<Decl>>
+    ): Unit {
         let pkgInfoOpt = GetPackageInfo(importedPackage)
         if (let None <- pkgInfoOpt) {
             return
@@ -363,7 +367,7 @@ public class CjoManagerImpl {
             for (name in pkgInfo.declMap.keys()) {
                 if (let Some(decls) <- pkgInfo.declMap.get(name)) {
                     if (!declMap.contains(name)) {
-                        declMap[name] = ArrayList<Decl>()
+                        declMap.add(name, TreeSet<Decl>())
                     }
                     if (let Some(targetMap) <- declMap.get(name)) {
                         AddImportedDeclToMap(decls, targetMap, importLevel)
@@ -380,7 +384,7 @@ public class CjoManagerImpl {
                 sourceName
             }
             if (!declMap.contains(targetName)) {
-                declMap[targetName] = ArrayList<Decl>()
+                declMap.add(targetName, TreeSet<Decl>())
             }
             if (let Some(targetMap) <- declMap.get(targetName)) {
                 AddImportedDeclToMap(decls, targetMap, importLevel)
