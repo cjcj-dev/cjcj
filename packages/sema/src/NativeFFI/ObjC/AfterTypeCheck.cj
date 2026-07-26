@@ -6,7 +6,7 @@ import cjcj::basic.DiagnosticEngine
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
-import cjcj::sema.{MemberMap, TypeManager}
+import cjcj::sema.{GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{CreateCall, CreateType, GetStringDecl, WithinFile}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR,
@@ -204,6 +204,38 @@ public class ASTFactory {
         let args = ArrayList<FuncArg>()
         args.add(CreateFuncArg(id))
         return CreateCall(bridge.GetObjCRetainAutoreleasedReturnValue(), id.curFile, args: args).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1720-1739.
+    private func CreateGetFromRegistryByNativeHandleCall(nativeHandle: Expr, typeArg: Type): CallExpr {
+        CJC_ASSERT(nativeHandle.GetTy().getOrThrow().IsPointer())
+        let registryDecl = bridge.GetGetFromRegistryByNativeHandleDecl().getOrThrow()
+        let registryRef = CreateRefExpr(registryDecl)
+        let ty = typeArg.GetTy().getOrThrow()
+        CJC_ASSERT(TypeMapper.IsObjCImpl(ty))
+        registryRef.instTys.add(ty)
+        registryRef.SetTy(typeManager.GetInstantiatedTy(registryDecl.GetTy().getOrThrow(),
+            GenerateTypeMapping(registryDecl, registryRef.instTys)))
+        registryRef.typeArguments.add(typeArg)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(nativeHandle))
+        return CreateCallExpr(registryRef, args, Some(registryDecl), Some(ty), CallKind.CALL_DECLARED_FUNCTION)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1741-1759.
+    public func CreateGetFromRegistryByIdCall(registryId: Expr, typeArg: Type): CallExpr {
+        let registryDecl = bridge.GetGetFromRegistryByIdDecl().getOrThrow()
+        let registryRef = CreateRefExpr(registryDecl)
+        let ty = typeArg.GetTy().getOrThrow()
+        CJC_ASSERT(TypeMapper.IsObjCImpl(ty) || TypeMapper.IsObjCCJMapping(ty) ||
+            TypeMapper.IsObjCFwdClass4Open(ty))
+        registryRef.instTys.add(ty)
+        registryRef.SetTy(typeManager.GetInstantiatedTy(registryDecl.GetTy().getOrThrow(),
+            GenerateTypeMapping(registryDecl, registryRef.instTys)))
+        registryRef.typeArguments.add(typeArg)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(registryId))
+        return CreateCallExpr(registryRef, args, Some(registryDecl), Some(ty), CallKind.CALL_DECLARED_FUNCTION)
     }
 
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
