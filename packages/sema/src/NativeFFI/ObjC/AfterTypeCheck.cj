@@ -238,6 +238,32 @@ public class ASTFactory {
         return CreateCallExpr(registryRef, args, Some(registryDecl), Some(ty), CallKind.CALL_DECLARED_FUNCTION)
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:513-541.
+    public func CreateGetObjcEntityOrNullCall(entity: VarDecl, file: Option<File>): Expr {
+        let baseTy = typeManager.GetPointerTy(TypeManager.GetInvalidTy())
+        let extendTy = typeManager.GetTyForExtendMap(baseTy)
+        let extends = typeManager.GetBuiltinTyExtends(extendTy)
+        CJC_ASSERT(!extends.isEmpty())
+        var isNullMember: Option<FuncDecl> = None
+        for (member in extends[0].GetMemberDeclPtrs()) {
+            if (member.identifier.GetRawText() == "isNull") {
+                isNullMember = member as FuncDecl
+                break
+            }
+        }
+        CJC_NULLPTR_CHECK(isNullMember)
+        let isNullDecl = isNullMember.getOrThrow()
+        let isNullAccess = WithinFile<MemberAccess>(CreateMemberAccess(CreateRefExpr(entity), isNullDecl), file)
+        isNullAccess.SetTy(bridge.GetNativeObjCIdTy().getOrThrow())
+        isNullAccess.begin = entity.begin
+        isNullAccess.curFile = entity.curFile
+        let resultCall = CreateCallExpr(isNullAccess, ArrayList<FuncArg>(), Some(isNullDecl),
+            Some(TypeManager.GetBoolTy()), CallKind.CALL_DECLARED_FUNCTION)
+        let result = WithinFile<CallExpr>(resultCall, file)
+        result.SetTy(TypeManager.GetBoolTy())
+        return result
+    }
+
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
     // src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:49-278 and ASTFactory.cpp:42-1538.
 }
