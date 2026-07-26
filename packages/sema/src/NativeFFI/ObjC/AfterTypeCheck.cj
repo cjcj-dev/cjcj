@@ -8,6 +8,13 @@ import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{MemberMap, TypeManager}
 
+// C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
+public enum Retain {
+    | UNRETAINED
+    | RETAINED
+    | RETAIN_AUTORELEASED_RETURN_VALUE
+}
+
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:37-47,279-283.
 public class ASTFactory {
     private let bridge: InteropLibBridge
