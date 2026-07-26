@@ -7,6 +7,8 @@ import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{MemberMap, TypeManager}
+import cjcj::sema.NativeFFI.WithinFile
+import cjcj::utils.CJC_ASSERT
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
 public enum Retain {
@@ -30,6 +32,20 @@ public class ASTFactory {
         this.nameGenerator = nameGenerator
         this.typeMapper = typeMapper
         this.importManager = importManager
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:93-104.
+    public func CreateNativeHandleExpr(entity: Expr): Expr {
+        let entityTy = entity.GetTy().getOrThrow()
+        CJC_ASSERT(TypeMapper.IsObjCMirror(entityTy) || TypeMapper.IsObjCImpl(entityTy) ||
+            TypeMapper.IsSyntheticWrapper(entityTy) || TypeMapper.IsObjCFwdClass(entityTy))
+        let entityClassTy = (entityTy as ClassLikeTy).getOrThrow()
+        let getter = GetNativeHandleGetter(entityClassTy.commonDecl.getOrThrow()).getOrThrow()
+        let getterMemberAccess = WithinFile<MemberAccess>(CreateMemberAccess(entity, getter), entity.curFile)
+        let getterTy = (getter.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let getterCall = CreateCallExpr(getterMemberAccess, ArrayList<FuncArg>(), Some(getter),
+            Some(getterTy.retTy), CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(getterCall, entity.curFile)
     }
 
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
