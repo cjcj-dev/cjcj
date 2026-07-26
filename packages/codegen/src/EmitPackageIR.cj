@@ -972,6 +972,7 @@ private func CallDependentPackageGlobalResetCall(irBuilder: IRBuilder2): Unit {
 }
 
 private func CollectDependentPackages(llvmFunc: LLVMValueRef, giList: ArrayList<String>): Unit {
+    CJC_ASSERT(unsafe { LLVMIsDeclaration(llvmFunc) } == 0)
     let isCallInstSymbol = LookupLLVMOptionalSymbol("LLVMIsACallInst")
     let getCalledValueSymbol = LookupLLVMOptionalSymbol("LLVMGetCalledValue")
     if (isCallInstSymbol.isNull() || getCalledValueSymbol.isNull()) {
