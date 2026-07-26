@@ -8,9 +8,10 @@ import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.NativeFFI.{CreateCall, CreateType, GetStringDecl, WithinFile}
+import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateType, GetStringDecl, WithinFile,
+    WrapReturningLambdaCall}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR,
-    OPTION_VALUE_CTOR, STD_LIB_OPTION}
+    OBJ_C_FWD_CLASS_SUFFIX, OPTION_VALUE_CTOR, STD_LIB_OPTION}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
 public enum Retain {
@@ -262,6 +263,147 @@ public class ASTFactory {
         let result = WithinFile<CallExpr>(resultCall, file)
         result.SetTy(TypeManager.GetBoolTy())
         return result
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:178-296.
+    public func WrapEntity(expr: Expr, wrapTy: Ty, withRetain!: Retain = Retain.UNRETAINED): Expr {
+        if (TypeMapper.IsObjCMirror(wrapTy)) {
+            CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
+            let classLikeTy = (wrapTy as ClassLikeTy).getOrThrow()
+            let commonDecl = classLikeTy.commonDecl.getOrThrow()
+            var mirror = commonDecl as ClassDecl
+            if (let None <- mirror) {
+                mirror = GetSyntheticWrapper(importManager, commonDecl)
+                CJC_NULLPTR_CHECK(mirror)
+            }
+            let ctor = GetGeneratedBaseCtor(mirror.getOrThrow()).getOrThrow()
+            var retainedExpr = expr
+            match (withRetain) {
+                case Retain.RETAINED => retainedExpr = CreateObjCRetainCall(retainedExpr)
+                case Retain.RETAIN_AUTORELEASED_RETURN_VALUE =>
+                    retainedExpr = CreateObjCRetainAutoreleasedReturnValueCall(retainedExpr)
+                case Retain.UNRETAINED => ()
+            }
+            let args = ArrayList<FuncArg>()
+            args.add(CreateFuncArg(retainedExpr))
+            return CreateCallExpr(CreateRefExpr(ctor), args, Some(ctor), Some(classLikeTy),
+                CallKind.CALL_OBJECT_CREATION)
+        }
+
+        if (TypeMapper.IsObjCImpl(wrapTy)) {
+            CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
+            let classTy = (wrapTy as ClassTy).getOrThrow()
+            let impl = classTy.commonDecl.getOrThrow()
+            return CreateGetFromRegistryByNativeHandleCall(expr, CreateRefType(impl))
+        }
+
+        if (TypeMapper.IsObjCPointer(wrapTy)) {
+            CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
+            CJC_ASSERT(wrapTy.typeArgs.size == 1)
+            let ctor = bridge.GetObjCPointerConstructor().getOrThrow()
+            let ctorRef = CreateRefExpr(ctor, expr)
+            ctorRef.instTys.add(wrapTy.typeArgs[0])
+            ctorRef.typeArguments.add(CreateType(wrapTy.typeArgs[0]))
+            let unitPtrExpr = CreateUnsafePointerCast(expr, TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+            let args = ArrayList<FuncArg>()
+            args.add(CreateFuncArg(unitPtrExpr))
+            return CreateCallExpr(ctorRef, args, Some(ctor), Some(wrapTy), CallKind.CALL_STRUCT_CREATION)
+        }
+
+        if (TypeMapper.IsObjCFunc(wrapTy)) {
+            CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
+            CJC_ASSERT(wrapTy.typeArgs.size == 1)
+            let ctor = bridge.GetObjCFuncConstructor().getOrThrow()
+            let ctorRef = CreateRefExpr(ctor, expr)
+            ctorRef.instTys.add(wrapTy.typeArgs[0])
+            ctorRef.typeArguments.add(CreateType(wrapTy.typeArgs[0]))
+            let cfg = FuncTyConfig()
+            cfg.isC = true
+            let unitFuncTy = typeManager.GetFunctionTy([], TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT), cfg: cfg)
+            let unitPtrExpr = CreateUnsafePointerCast(expr, unitFuncTy)
+            let args = ArrayList<FuncArg>()
+            args.add(CreateFuncArg(unitPtrExpr))
+            return CreateCallExpr(ctorRef, args, Some(ctor), Some(wrapTy), CallKind.CALL_STRUCT_CREATION)
+        }
+
+        if (TypeMapper.IsObjCBlock(wrapTy)) {
+            CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
+            CJC_ASSERT(wrapTy.typeArgs.size == 1)
+            let ctor = bridge.GetObjCBlockConstructorFromObjC().getOrThrow()
+            let ctorRef = CreateRefExpr(ctor, expr)
+            ctorRef.instTys.add(wrapTy.typeArgs[0])
+            ctorRef.typeArguments.add(CreateType(wrapTy.typeArgs[0]))
+            let args = ArrayList<FuncArg>()
+            args.add(CreateFuncArg(expr))
+            return CreateCallExpr(ctorRef, args, Some(ctor), Some(wrapTy), CallKind.CALL_OBJECT_CREATION)
+        }
+
+        if (TypeMapper.IsObjCCJMapping(wrapTy)) {
+            if (let Some(decl) <- Ty.GetDeclOfTy(Some(wrapTy))) {
+                if (let Some(inheritableDecl) <- (decl as InheritableDecl)) {
+                    return CreateGetFromRegistryByIdCall(expr, CreateRefType(inheritableDecl))
+                }
+            }
+            CJC_ABORT()
+        }
+
+        if (TypeMapper.IsObjCCJMappingInterface(wrapTy)) {
+            CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
+            let classLikeTy = (wrapTy as ClassLikeTy).getOrThrow()
+            var fwdTy: Ty = TypeManager.GetInvalidTy()
+            for (subtype in classLikeTy.directSubtypes) {
+                if (subtype.name == classLikeTy.name + OBJ_C_FWD_CLASS_SUFFIX) {
+                    fwdTy = subtype
+                    break
+                }
+            }
+            CJC_ASSERT(Ty.IsTyCorrect(fwdTy))
+            let fwdClassDecl = Ty.GetDeclOfTy(Some(fwdTy)).getOrThrow()
+            let ctor = GetGeneratedBaseCtor(fwdClassDecl).getOrThrow()
+            let args = ArrayList<FuncArg>()
+            args.add(CreateFuncArg(expr))
+            return CreateCallExpr(CreateRefExpr(ctor), args, Some(ctor), Some(fwdTy),
+                CallKind.CALL_OBJECT_CREATION)
+        }
+
+        if (wrapTy.IsCoreOptionType()) {
+            if (let Some(classLikeTy) <- (wrapTy.typeArgs[0] as ClassLikeTy)) {
+                if (let Some(decl) <- classLikeTy.commonDecl) {
+                    if (decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+                        return WrapObjCMirrorOption(expr, decl, expr.curFile, withRetain)
+                    }
+                }
+            }
+        }
+
+        let exprTy = expr.GetTy().getOrThrow()
+        CJC_ASSERT(exprTy.IsPrimitive() || Ty.IsCStructType(exprTy) || exprTy.IsCFunc() || exprTy.IsCString())
+        CJC_ASSERT(wrapTy.IsPrimitive() || Ty.IsCStructType(wrapTy) || wrapTy.IsCFunc() || wrapTy.IsCString())
+        return expr
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:432-457.
+    public func WrapObjCMirrorOption(entity: Expr, mirror: ClassLikeDecl, curFile: Option<File>,
+        withRetain!: Retain = Retain.UNRETAINED): Expr {
+        let nodes = ArrayList<Node>()
+        let baseTy = typeManager.GetPointerTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        let tmpVar = CreateTmpVarDecl(Some(CreateType(baseTy)), Some(entity))
+        CopyBasicInfo(tmpVar.initializer.getOrThrow(), tmpVar)
+        tmpVar.begin = entity.begin
+        tmpVar.curFile = curFile
+        let objcrefExpr = WithinFile<RefExpr>(CreateRefExpr(tmpVar), curFile)
+
+        let castTy = mirror.GetTy().getOrThrow()
+        let trueBranch = CreateOptionNoneRef(castTy)
+        let falseBranch = WrapEntity(objcrefExpr, castTy, withRetain)
+
+        let isInstanceCall = WithinFile<Expr>(CreateGetObjcEntityOrNullCall(tmpVar, curFile), curFile)
+        let boolMatch = CreateBoolMatch(isInstanceCall, trueBranch, falseBranch, GetOptionTy(castTy))
+        boolMatch.begin = entity.begin
+        boolMatch.end = entity.end
+        nodes.add(tmpVar)
+        nodes.add(boolMatch)
+        return WrapReturningLambdaCall(typeManager, nodes)
     }
 
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
