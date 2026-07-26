@@ -25,6 +25,7 @@ export async function run(config) {
   const stdlibOutput = path.join(stdlibRoot, 'output');
   const compilerOutput = path.join(config.repoPath('compiler'), 'output');
   const buildOutput = path.join(stdlibRoot, 'build', 'build');
+  const dryRun = process.env.CANGJIE_BUILD_DRY_RUN === '1';
 
   await stage('stdlib', async () => {
     await runBuildPy(config, stdlibRoot, ['clean'], {stageName: 'stdlib.clean.linux'});
@@ -33,25 +34,30 @@ export async function run(config) {
     ], {stageName: 'stdlib.build.linux'});
     await runBuildPy(config, stdlibRoot, ['install'], {stageName: 'stdlib.install.linux'});
     copyContents(stdlibOutput, compilerOutput, {stage: 'stdlib.copy.linux'});
-    copyCompiledStdLibraries(
-      path.join(buildOutput, 'lib', LINUX_LIB_PATH),
-      path.join(compilerOutput, 'lib', LINUX_LIB_PATH),
-    );
+    if (!dryRun) {
+      copyCompiledStdLibraries(
+        path.join(buildOutput, 'lib', LINUX_LIB_PATH),
+        path.join(compilerOutput, 'lib', LINUX_LIB_PATH),
+      );
+    }
 
     if (config.target.spec.key === 'linux-x64') {
       const flagOffCjos = path.join(config.buildRoot, 'stddual', 'flag-off-cjo');
-      fs.rmSync(flagOffCjos, {recursive: true, force: true});
-      fs.cpSync(path.join(stdlibOutput, 'modules', LINUX_LIB_PATH, 'std'), flagOffCjos, {recursive: true});
+      if (!dryRun) {
+        fs.rmSync(flagOffCjos, {recursive: true, force: true});
+        fs.cpSync(path.join(stdlibOutput, 'modules', LINUX_LIB_PATH, 'std'), flagOffCjos, {recursive: true});
+      }
 
-      const stickySdk = createStickySdkOverlay(
-        compilerOutput, path.join(config.buildRoot, 'stddual', 'sticky-sdk'),
-      );
-      const llc = path.join(compilerOutput, 'third_party', 'llvm', 'bin', 'llc');
-      const llcHelp = await runCommand([llc, '--help-hidden'], {
-        stage: 'stdlib.sticky.llc-capability', capture: true, logOutput: false,
-      });
-      if (!llcHelp.stdout.includes(STICKY_LLC_OPTION)) {
-        throw new BuildError('stdlib.sticky.llc-capability', `llc does not support ${STICKY_LLC_OPTION}`);
+      const stickySdkPath = path.join(config.buildRoot, 'stddual', 'sticky-sdk');
+      const stickySdk = dryRun ? stickySdkPath : createStickySdkOverlay(compilerOutput, stickySdkPath);
+      if (!dryRun) {
+        const llc = path.join(compilerOutput, 'third_party', 'llvm', 'bin', 'llc');
+        const llcHelp = await runCommand([llc, '--help-hidden'], {
+          stage: 'stdlib.sticky.llc-capability', capture: true, logOutput: false,
+        });
+        if (!llcHelp.stdout.includes(STICKY_LLC_OPTION)) {
+          throw new BuildError('stdlib.sticky.llc-capability', `llc does not support ${STICKY_LLC_OPTION}`);
+        }
       }
 
       await runBuildPy(config, stdlibRoot, ['clean'], {
@@ -61,25 +67,27 @@ export async function run(config) {
         'build', '-t', config.buildType, `--target-lib=${runtimeTarget}`,
       ], {stageName: 'stdlib.build.sticky', extraEnv: {CANGJIE_HOME: stickySdk}});
 
-      const stickyCjos = path.join(buildOutput, 'modules', LINUX_LIB_PATH, 'std');
-      const cjoResults = compareStdCjos(flagOffCjos, stickyCjos);
-      const differingCjos = cjoResults.filter(result => !result.identical);
-      if (differingCjos.length !== 0) {
-        throw new BuildError('stdlib.compare-cjo',
-          `sticky backend changed CJO bytes: ${differingCjos.map(result => result.name).join(', ')}`);
-      }
+      if (!dryRun) {
+        const stickyCjos = path.join(buildOutput, 'modules', LINUX_LIB_PATH, 'std');
+        const cjoResults = compareStdCjos(flagOffCjos, stickyCjos);
+        const differingCjos = cjoResults.filter(result => !result.identical);
+        if (differingCjos.length !== 0) {
+          throw new BuildError('stdlib.compare-cjo',
+            `sticky backend changed CJO bytes: ${differingCjos.map(result => result.name).join(', ')}`);
+        }
 
-      const stickyLibraries = path.join(
-        compilerOutput, 'lib', OPTIMIZED_STD_SUBDIR, LINUX_LIB_PATH,
-      );
-      fs.rmSync(stickyLibraries, {recursive: true, force: true});
-      const copied = copyCompiledStdLibraries(
-        path.join(buildOutput, 'lib', LINUX_LIB_PATH), stickyLibraries,
-      );
-      const preflight = stickyPreflight(stickyLibraries);
-      logger.info('sticky std: CJO %d/%d identical; %d libraries, %d bytes; symbols=%d relocations=%d',
-        cjoResults.length, cjoResults.length, copied.files.length, copied.bytes,
-        preflight.loggedBaseSymbols, preflight.stickyRelocations);
+        const stickyLibraries = path.join(
+          compilerOutput, 'lib', OPTIMIZED_STD_SUBDIR, LINUX_LIB_PATH,
+        );
+        fs.rmSync(stickyLibraries, {recursive: true, force: true});
+        const copied = copyCompiledStdLibraries(
+          path.join(buildOutput, 'lib', LINUX_LIB_PATH), stickyLibraries,
+        );
+        const preflight = stickyPreflight(stickyLibraries);
+        logger.info('sticky std: CJO %d/%d identical; %d libraries, %d bytes; symbols=%d relocations=%d',
+          cjoResults.length, cjoResults.length, copied.files.length, copied.bytes,
+          preflight.loggedBaseSymbols, preflight.stickyRelocations);
+      }
     }
     if (!config.target.spec.crossCompile) return;
 
