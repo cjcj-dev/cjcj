@@ -1516,8 +1516,7 @@ public open class GlobalOptions <: Option {
         } else if (aggressiveParallelCompileSplitNum.hasValue) {
             aggressiveParallelCompile = aggressiveParallelCompileSplitNum
             UtilsSemaphore.Get().SetCount(Int64(jobs.value + 2u64))
-        } else if (!aggressiveParallelCompile.hasValue && (optimizationLevel == OptimizationLevel.O0 ||
-            aggressiveParallelCompileWithoutArg)) {
+        } else if (!aggressiveParallelCompile.hasValue && aggressiveParallelCompileWithoutArg) {
             aggressiveParallelCompile = jobs
             UtilsSemaphore.Get().SetCount(Int64(jobs.value + 2u64))
         } else if (!aggressiveParallelCompile.hasValue) {
