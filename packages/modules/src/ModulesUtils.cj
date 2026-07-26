@@ -347,7 +347,14 @@ public open class Node <: Hashable & Equatable<Node> {
     }
 }
 
-public open class Decl <: Node & Hashable & Equatable<Decl> {
+// C++: include/cangjie/AST/Node.h:3182-3200.
+public func CompNodeByPos(n1: Node, n2: Node): Bool {
+    return n1.begin.fileID < n2.begin.fileID ||
+        (n1.begin.fileID == n2.begin.fileID && n1.begin < n2.begin) ||
+        (n1.begin.fileID == n2.begin.fileID && n1.begin == n2.begin && n1.objectId < n2.objectId)
+}
+
+public open class Decl <: Node & Comparable<Decl> & Hashable & Equatable<Decl> {
     public var identifier: String = ""
     public var fullPackageName: String = ""
     public var rawMangleName: String = ""
@@ -370,6 +377,17 @@ public open class Decl <: Node & Hashable & Equatable<Decl> {
 
     public operator func !=(right: Decl): Bool {
         return objectId != right.objectId
+    }
+
+    // Comparable adapter for C++ CmpNodeByPos (include/cangjie/AST/Node.h:3194-3200).
+    public func compare(right: Decl): Ordering {
+        if (CompNodeByPos(this, right)) {
+            return Ordering.LT
+        }
+        if (CompNodeByPos(right, this)) {
+            return Ordering.GT
+        }
+        return Ordering.EQ
     }
 
     public init(identifier: String, fullPackageName: String) {
