@@ -293,7 +293,7 @@ private class ToCHIR {
     private static var clearDumpDir: Bool = false
 
     private let instance: CompilerInstance
-    private let pkg: RealASTPackage
+    private var pkg: Option<RealASTPackage>
     private let outputPath: String
     private let builder: ChirBuilder
     private let effectMap: ChirOptEffectCHIRMap = ChirOptEffectCHIRMap()
@@ -308,7 +308,7 @@ private class ToCHIR {
 
     public init(instance: CompilerInstance, pkg: RealASTPackage) {
         this.instance = instance
-        this.pkg = pkg
+        this.pkg = Some(pkg)
         this.outputPath = instance.invocation.globalOptions.output
         this.builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
     }
@@ -318,7 +318,7 @@ private class ToCHIR {
         let ast2chir = FaithfulAST2CHIR(builder, chirType, instance.GetSourceManager(),
             gim: instance.gim,
             importedPkgs: instance.importManager.GetAllImportedPackages(),
-            directImportedPkgs: instance.importManager.GetCurImportedPackages(pkg.fullPackageName),
+            directImportedPkgs: instance.importManager.GetCurImportedPackages(pkg.getOrThrow().fullPackageName),
             overrideSrcFuncResolver: Some({ funcDecl =>
                 match (instance.faithfulSemaInstance) {
                     case Some(semaInstance) => semaInstance.typeManager.GetTopOverriddenFuncDecl(Some(funcDecl))
@@ -333,7 +333,7 @@ private class ToCHIR {
             chirWFC: instance.invocation.globalOptions.chirWFC,
             chirOptOverO2: instance.invocation.globalOptions.IsCHIROptimizationLevelOverO2(),
             diag: Some(instance.diag.AsBasicDiagnosticEngine()))
-        if (!ast2chir.ToCHIRPackage(pkg) || instance.diag.GetErrorCount() != 0) {
+        if (!ast2chir.ToCHIRPackage(pkg.getOrThrow()) || instance.diag.GetErrorCount() != 0) {
             return None
         }
         let lowered = match (ast2chir.GetPackage()) {
@@ -346,6 +346,7 @@ private class ToCHIR {
         maybeUnreachable = ast2chir.GetMaybeUnreachableBlocks()
         chirPkg = Some(lowered)
         DumpCHIRToFile("AST_CHIR")
+        ClearASTResources()
         // C++: CHIR/CHIR.cpp:1311 ToCHIR::Canonicalization.
         DumpCHIRToFile("Canonicalization")
         // C++: CHIR/CHIR.cpp:1133-1140 ToCHIR::Run.
@@ -408,6 +409,20 @@ private class ToCHIR {
         }
         builder.MergeAllocatedInstance()
         return Some(lowered)
+    }
+
+    // C++: CHIR/CHIR.cpp:1376-1391 ToCHIR::ClearASTResources.
+    private func ClearASTResources(): Unit {
+        if (instance.invocation.globalOptions.outputMode == OutputMode.CHIR) {
+            return
+        }
+        if (instance.isCJLint) {
+            return
+        }
+        try (recorder = ProfileRecorder("AST to CHIR Translation", "ClearASTResources")) {
+            pkg = None
+            instance.DestroyASTResources()
+        }
     }
 
     public func GetOptEffectMap(): OptEffectStrMap {
