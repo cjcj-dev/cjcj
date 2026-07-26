@@ -126,6 +126,16 @@ public class ASTFactory {
         return CreateCall(Some(getClassFuncDecl), curFile, args: args).getOrThrow()
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1940-1947.
+    public func CreateGetProtoCall(protoName: String, curFile: Option<File>): Expr {
+        let getProtoFuncDecl = bridge.GetGetProtoDecl().getOrThrow()
+        let protoNameLiteral = CreateLitConstExpr(LitConstKind.STRING, protoName,
+            GetStringDecl(importManager).GetTy().getOrThrow())
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(protoNameLiteral))
+        return CreateCall(Some(getProtoFuncDecl), curFile, args: args).getOrThrow()
+    }
+
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
     // src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:49-278 and ASTFactory.cpp:42-1538.
 }
