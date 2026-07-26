@@ -7,8 +7,9 @@ import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{MemberMap, TypeManager}
+import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.WithinFile
-import cjcj::utils.CJC_ASSERT
+import cjcj::utils.{CJC_ASSERT, OPTION_NONE_CTOR, OPTION_VALUE_CTOR, STD_LIB_OPTION}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
 public enum Retain {
@@ -46,6 +47,51 @@ public class ASTFactory {
         let getterCall = CreateCallExpr(getterMemberAccess, ArrayList<FuncArg>(), Some(getter),
             Some(getterTy.retTy), CallKind.CALL_DECLARED_FUNCTION)
         return WithinFile<CallExpr>(getterCall, entity.curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:299-302.
+    public func GetOptionTy(ty: Ty): Ty {
+        return typeManager.GetEnumTy(GetOptionDecl(), typeArgs: [ty])
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:304-308.
+    public func GetOptionDecl(): EnumDecl {
+        return importManager.GetCoreDecl<EnumDecl>(STD_LIB_OPTION).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:310-314.
+    public func GetOptionSomeDecl(): Decl {
+        return LookupEnumMember(GetOptionDecl(), OPTION_VALUE_CTOR).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:316-320.
+    public func GetOptionNoneDecl(): Decl {
+        return LookupEnumMember(GetOptionDecl(), OPTION_NONE_CTOR).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:322-328.
+    public func CreateOptionSomeRef(ty: Ty): Expr {
+        let someDeclRef = CreateRefExpr(GetOptionSomeDecl())
+        someDeclRef.SetTy(typeManager.GetFunctionTy([ty], GetOptionTy(ty)))
+        return someDeclRef
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:330-336.
+    public func CreateOptionNoneRef(ty: Ty): Expr {
+        let noneDeclRef = CreateRefExpr(GetOptionNoneDecl())
+        noneDeclRef.SetTy(GetOptionTy(ty))
+        return noneDeclRef
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:338-347.
+    public func CreateOptionSomeCall(expr: Expr, ty: Ty): Expr {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(expr))
+        let call = CreateCallExpr(CreateOptionSomeRef(ty), args)
+        call.SetTy(GetOptionTy(ty))
+        call.resolvedFunction = GetOptionSomeDecl() as FuncDecl
+        call.callKind = CallKind.CALL_DECLARED_FUNCTION
+        return call
     }
 
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
