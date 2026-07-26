@@ -192,6 +192,20 @@ public class ASTFactory {
         return pointerExpr
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2347-2352.
+    public func CreateObjCRetainCall(id: Expr): Expr {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(id))
+        return CreateCall(bridge.GetObjCRetainDecl(), id.curFile, args: args).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2354-2359.
+    public func CreateObjCRetainAutoreleasedReturnValueCall(id: Expr): Expr {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(id))
+        return CreateCall(bridge.GetObjCRetainAutoreleasedReturnValue(), id.curFile, args: args).getOrThrow()
+    }
+
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
     // src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:49-278 and ASTFactory.cpp:42-1538.
 }
