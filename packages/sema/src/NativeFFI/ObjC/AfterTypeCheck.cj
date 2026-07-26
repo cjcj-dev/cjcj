@@ -370,7 +370,7 @@ public class ASTFactory {
             if (let Some(classLikeTy) <- (wrapTy.typeArgs[0] as ClassLikeTy)) {
                 if (let Some(decl) <- classLikeTy.commonDecl) {
                     if (decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
-                        return WrapObjCMirrorOption(expr, decl, expr.curFile, withRetain)
+                        return WrapObjCMirrorOption(expr, decl, expr.curFile, withRetain: withRetain)
                     }
                 }
             }
@@ -395,7 +395,7 @@ public class ASTFactory {
 
         let castTy = mirror.GetTy().getOrThrow()
         let trueBranch = CreateOptionNoneRef(castTy)
-        let falseBranch = WrapEntity(objcrefExpr, castTy, withRetain)
+        let falseBranch = WrapEntity(objcrefExpr, castTy, withRetain: withRetain)
 
         let isInstanceCall = WithinFile<Expr>(CreateGetObjcEntityOrNullCall(tmpVar, curFile), curFile)
         let boolMatch = CreateBoolMatch(isInstanceCall, trueBranch, falseBranch, GetOptionTy(castTy))
