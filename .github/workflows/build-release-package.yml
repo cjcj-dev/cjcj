@@ -166,6 +166,10 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq patchelf
 
+      - name: Install std variant build dependencies (Linux x64)
+        if: inputs.platform == 'linux-x64'
+        run: sudo apt-get install -y -qq clang cmake make ninja-build libssl-dev
+
       - name: Install runtime build dependencies (Linux)
         if: runner.os == 'Linux' && steps.rtcache.outputs.cache-hit != 'true'
         run: sudo apt-get install -y -qq clang cmake make
@@ -216,6 +220,10 @@ jobs:
         if: runner.os != 'Windows'
         run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
 
+      - name: Build flag-off and sticky std variants (Linux x64)
+        if: inputs.platform == 'linux-x64'
+        run: npx --yes zx@8 ci/build_std_variants.mjs --sdk "$CANGJIE_HOME" --outdir "$PWD/dist-std-variants"
+
       - name: Build runtime shim (Linux)
         if: runner.os == 'Linux'
         env:
@@ -232,13 +240,18 @@ jobs:
         run: |
           runtime_lib="$PWD/dist-runtime/libcangjie-runtime.so"
           if [ "$RUNNER_OS" = "macOS" ]; then runtime_lib="$PWD/dist-runtime/libcangjie-runtime.dylib"; fi
+          std_args=()
+          if [ "${{ inputs.platform }}" = "linux-x64" ]; then
+            std_args=(--std-variants "$PWD/dist-std-variants")
+          fi
           npx --yes zx@8 scripts/package_sdk.mjs \
             --sdk "$CANGJIE_HOME" \
             --binary "$PWD/target/release/bin/cjcj::cjc" \
             --runtime-lib "$runtime_lib" \
             --version "${{ inputs.version }}" \
             --platform "${{ inputs.platform }}" \
-            --outdir "$PWD/dist"
+            --outdir "$PWD/dist" \
+            "${std_args[@]}"
 
       - name: Compose SDK package (Windows)
         if: runner.os == 'Windows'
