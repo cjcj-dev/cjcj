@@ -281,7 +281,9 @@ public open class DefaultCompilerInstance {
         invocation.globalOptions.frontendOutputFiles.clear()
         let chirPkgs = core.GetAllCHIRPackages()
         if (chirPkgs.size <= 1) {
-            return CodegenOnePackage(enableIncrement, cachedMangleMap: cachedMangleMap)
+            let ret = CodegenOnePackage(enableIncrement, cachedMangleMap: cachedMangleMap)
+            core.FreeCHIRData()
+            return ret
         }
         var ret = true
         if (invocation.globalOptions.enIncrementalCompilation) {
