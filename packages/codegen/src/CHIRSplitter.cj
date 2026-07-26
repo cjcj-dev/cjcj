@@ -670,6 +670,12 @@ public class CHIRSplitter {
             LLVMGetOrInsertNamedMetadata(module, "splitNum")
             LLVMAddNamedMetadataOperand(module, "splitNum",
                 LLVMCreateMDTuple(context, CreateUInt32Metadata(context, UInt64(splitNum))))
+            let options = cgPkgCtx.GetGlobalOptions()
+            if (options.aggressiveParallelCompileSplitNum.hasValue) {
+                LLVMGetOrInsertNamedMetadata(module, "apcSplitNum")
+                LLVMAddNamedMetadataOperand(module, "apcSplitNum", LLVMCreateMDTuple(context,
+                    CreateUInt32Metadata(context, options.aggressiveParallelCompileSplitNum.value)))
+            }
 
             LLVMGetOrInsertNamedMetadata(module, "classes")
             let classEntries = ArrayList<(String, Int64)>()
