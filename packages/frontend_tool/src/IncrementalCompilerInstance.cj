@@ -382,8 +382,9 @@ private func UpdateIncrRemovedDeclsForVarInitDep(cacheMangles: CachedMangleMap,
     }
 }
 
-private func GetCachedSplitNum(cachedCodeGenPath: String): Option<UInt64> {
+private func GetCachedSplitNum(cachedCodeGenPath: String): (Option<UInt64>, Option<UInt64>) {
     var splitNum: Option<UInt64> = None
+    var apcSplitNum: Option<UInt64> = None
     @When[os == "Windows"]
     let tempPath = StringConvertor.NormalizeStringToUTF8(cachedCodeGenPath)
     @When[os == "Windows"]
@@ -399,16 +400,20 @@ private func GetCachedSplitNum(cachedCodeGenPath: String): Option<UInt64> {
         let parseResult = LLVMParseIRFile(context, path, name: path)
         if (!parseResult.ok) {
             Errorln("Illegal cached codegen info detected during incremental compilation.")
-            return splitNum
+            return (splitNum, apcSplitNum)
         }
         try (module = parseResult.module) {
             for (mdNode in LLVMGetNamedMetadataOperandValues(module, "splitNum")) {
                 let operands = LLVMGetMDNodeOperands(mdNode)
                 splitNum = getZExtValue(operands[0])
             }
+            for (mdNode in LLVMGetNamedMetadataOperandValues(module, "apcSplitNum")) {
+                let operands = LLVMGetMDNodeOperands(mdNode)
+                apcSplitNum = getZExtValue(operands[0])
+            }
         }
     }
-    return splitNum
+    return (splitNum, apcSplitNum)
 }
 
 private func CheckCachedBitcode(packageName: String, splitNum: UInt64, globalOp: GlobalOptions): Bool {
@@ -436,10 +441,17 @@ private func CheckCachedBitcodeInfo(packageName: String, options: GlobalOptions)
             "load cached codegen info failed, roll back to full compilation")
         return false
     }
-    let splitNum = GetCachedSplitNum(cgCachePath)
+    let (splitNum, cachedAPCSplitNum) = GetCachedSplitNum(cgCachePath)
     if (splitNum.isNone()) {
         IncrementalCompilationLogger.GetInstance().LogLn(
             "get cached split num failed, roll back to full compilation")
+        return false
+    }
+    if (options.aggressiveParallelCompileSplitNum.hasValue &&
+        (cachedAPCSplitNum.isNone() || cachedAPCSplitNum.getOrThrow() !=
+        options.aggressiveParallelCompileSplitNum.value)) {
+        IncrementalCompilationLogger.GetInstance().LogLn(
+            "cached APC split num changed, roll back to full compilation")
         return false
     }
     let bcCachedGood = CheckCachedBitcode(packageName, splitNum.getOrThrow(), options)
