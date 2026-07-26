@@ -38,7 +38,10 @@ public func GetNativeHandleGetter(target: ClassLikeDecl): Option<FuncDecl> {
     if (let Some(mirrorSuperClass) <- GetMirrorSuperClass(target)) {
         return GetNativeHandleGetter(mirrorSuperClass)
     }
-    return FindMirrorMember(NATIVE_HANDLE_GETTER_IDENT, target) as FuncDecl
+    if (let Some(member) <- FindMirrorMember(NATIVE_HANDLE_GETTER_IDENT, target)) {
+        return member as FuncDecl
+    }
+    return None
 }
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/Common.cpp:155-165.
