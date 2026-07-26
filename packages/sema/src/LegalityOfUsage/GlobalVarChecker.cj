@@ -77,7 +77,6 @@ extend DefColor <: Equatable<DefColor> {
 private class DefNode {
     public var variable: Decl
     public let usage: ArrayList<UseEdge> = ArrayList<UseEdge>()
-    public let usedBy: ArrayList<UseEdge> = ArrayList<UseEdge>()
     public var visitOrder: Int64 = -1
     public var color: DefColor = DefColor.WHITE
 
@@ -258,14 +257,12 @@ private class DefUseGraph {
             CJC_ABORT()
         }
         userNode.usage.add(UseEdge(refExpr, refPos, refName, usedNode))
-        usedNode.usedBy.add(UseEdge(refExpr, refPos, refName, userNode))
     }
 
     public func AddOrderEdge(user: Decl, used: VarDeclAbstract): Unit {
         let userNode = GetOrBuildNode(user)
         let usedNode = GetOrBuildNode(used)
         userNode.usage.add(UseEdge(usedNode))
-        usedNode.usedBy.add(UseEdge(userNode))
     }
 }
 
