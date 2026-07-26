@@ -4,6 +4,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {OPTIMIZED_STD_SUBDIR, stickyPreflight} from '../build/lib/std-variants.mjs';
 
 const required = name => {
   const value = argv[name];
@@ -17,6 +18,7 @@ const platform = required('platform');
 const outdir = required('outdir');
 const runtimeLib = typeof argv['runtime-lib'] === 'string' ? argv['runtime-lib'] : '';
 const runtimeRoot = typeof argv['runtime-root'] === 'string' ? argv['runtime-root'] : '';
+const stdVariants = typeof argv['std-variants'] === 'string' ? argv['std-variants'] : '';
 
 async function exists(file, kind = 'file') {
   try { const stat = await fs.stat(file); return kind === 'dir' ? stat.isDirectory() : stat.isFile(); } catch { return false; }
@@ -35,6 +37,14 @@ const platforms = {
 };
 if (!platforms[platform]) { console.error(`unsupported --platform: ${platform}`); process.exit(2); }
 const [runtimeDir, archiveType, exeSuffix] = platforms[platform];
+if (platform === 'linux-x64' && !stdVariants) {
+  console.error('Linux x64 packaging requires --std-variants');
+  process.exit(2);
+}
+if (stdVariants && !await exists(stdVariants, 'dir')) {
+  console.error(`std variants directory not found: ${stdVariants}`);
+  process.exit(2);
+}
 const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
 const isWindows = platform === 'windows-x64';
 const packageName = `cjcj-${version}-${platform}`;
@@ -50,7 +60,18 @@ else {
 }
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 
-console.log('[2/6] install our compiler as bin/cjc');
+console.log('[2/7] install std variants');
+if (stdVariants) {
+  await fs.cp(stdVariants, stage, {recursive: true, force: true});
+  const stickyLibraries = path.join(stage, 'lib', OPTIMIZED_STD_SUBDIR, runtimeDir);
+  const preflight = stickyPreflight(stickyLibraries);
+  console.log(`  sticky std: ${preflight.loggedBaseSymbols} logged-base symbols, `
+    + `${preflight.stickyRelocations} sticky relocations`);
+} else {
+  console.log('  skip: this target has no sticky std variant');
+}
+
+console.log('[3/7] install our compiler as bin/cjc');
 const installed = path.join(stage, `bin/cjc${exeSuffix}`);
 await Promise.all([
   fs.rm(path.join(stage, 'bin', 'cjc'), {force: true}),
@@ -59,7 +80,7 @@ await Promise.all([
 await fs.copyFile(binary, installed);
 await fs.chmod(installed, 0o755);
 
-console.log('[3/6] swap in patched runtime');
+console.log('[4/7] swap in patched runtime');
 if (isWindows) {
   if (!runtimeRoot) { console.error('  ERROR: Windows packaging requires --runtime-root'); process.exit(3); }
   for (const relative of [path.join('runtime', 'lib', runtimeDir), path.join('lib', runtimeDir)]) {
@@ -86,7 +107,7 @@ if (isWindows) {
   console.log('  skip: no --runtime-lib (stock runtime; only safe if cjc name exclusion is inapplicable)');
 }
 
-console.log('[4/6] set relative runtime lookup paths');
+console.log('[5/7] set relative runtime lookup paths');
 if (platform.startsWith('linux-')) {
   const available = await $({nothrow: true, quiet: true})`command -v patchelf`;
   if (available.exitCode !== 0) { console.error('  ERROR: patchelf not found'); process.exit(3); }
@@ -147,7 +168,7 @@ if (platform.startsWith('linux-')) {
   console.log('  Windows resolves packaged DLLs through runtime/lib and PATH');
 }
 
-console.log('[5/6] archive');
+console.log('[6/7] archive');
 const archivePath = path.join(outdir, `${packageName}.${archiveType === 'tar' ? 'tar.gz' : 'zip'}`);
 if (archiveType === 'tar') await $({stdio: 'inherit'})`tar -C ${outdir} -czf ${archivePath} ${packageName}`;
 else {
@@ -159,7 +180,7 @@ else {
   await $({stdio: 'inherit'})`pwsh -NoLogo -NoProfile -Command ${command}`;
 }
 
-console.log('[6/6] sha256');
+console.log('[7/7] sha256');
 const archiveDigest = crypto.createHash('sha256').update(await fs.readFile(archivePath)).digest('hex');
 const digest = `${archiveDigest}  ${path.basename(archivePath)}\n`;
 await fs.writeFile(`${archivePath}.sha256`, digest);
