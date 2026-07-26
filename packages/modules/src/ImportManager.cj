@@ -1325,7 +1325,7 @@ public class ImportManager {
                             RecordTypeAlias(decl, decl.identifier)
                         }
                     }
-                    let visibleDecls = GetVisibleDeclToMap(members, importLevel, relation)
+                    let visibleDecls = GetVisibleDeclToMap(TreeSet<Decl>(members), importLevel, relation)
                     for (decl in visibleDecls) {
                         PutDeclMapValue(declMap, importedName, decl)
                         RecordImportOfDecl(pkg.fullPackageName, decl, importSpec)
