@@ -246,7 +246,7 @@ private class DefUseGraph {
         userNode.usage.add(UseEdge(refExpr, refPos, refName, usedNode))
     }
 
-    public func AddOrderEdge(user: Decl, used: VarDeclAbstract): Unit {
+    public func AddEdge(user: Decl, used: VarDeclAbstract): Unit {
         let userNode = GetOrBuildNode(user)
         let usedNode = GetOrBuildNode(used)
         userNode.usage.add(UseEdge(usedNode))
@@ -553,7 +553,7 @@ public class GlobalVarInitializationChecker {
         for (decl in file.decls) {
             if (let Some(varDecl) <- (decl as VarDecl)) {
                 if (let Some(prevDecl) <- previous) {
-                    graph.AddOrderEdge(varDecl, prevDecl)
+                    graph.AddEdge(varDecl, prevDecl)
                 }
                 previous = varDecl
             }
