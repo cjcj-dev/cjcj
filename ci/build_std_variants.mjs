@@ -102,13 +102,6 @@ async function runBuild(home, ...args) {
     `python3 build.py ${args}`;
 }
 
-async function copyDirectoryContents(from, to) {
-  await fs.mkdir(to, {recursive: true});
-  for (const entry of await fs.readdir(from)) {
-    await fs.cp(path.join(from, entry), path.join(to, entry), {recursive: true, force: true});
-  }
-}
-
 try {
   const cjc = await requireFile(path.join(sdk, 'bin', 'cjc'), 'official cjc');
   const cjcSha256 = await sha256(cjc);
@@ -140,7 +133,11 @@ try {
   const buildOutput = path.join(stdlib, 'build', 'build');
   const installedOutput = path.join(stdlib, 'output');
   await fs.rm(out, {recursive: true, force: true});
-  await copyDirectoryContents(installedOutput, out);
+  const sharedCjoDirectory = path.join(out, 'modules', platform, 'std');
+  await fs.mkdir(path.dirname(sharedCjoDirectory), {recursive: true});
+  await fs.cp(path.join(installedOutput, 'modules', platform, 'std'), sharedCjoDirectory, {
+    recursive: true,
+  });
   const flagOffLibraries = copyCompiledStdLibraries(
     path.join(buildOutput, 'lib', platform), path.join(out, 'lib', platform));
   await fs.cp(path.join(installedOutput, 'modules', platform, 'std'), flagOffCjo, {recursive: true});
