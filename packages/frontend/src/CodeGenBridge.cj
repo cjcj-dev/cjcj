@@ -419,6 +419,11 @@ private class ToCHIR {
         if (instance.isCJLint) {
             return
         }
+        // C++ CHIR.cpp:1381-1384 delays clearing when multiple packages share the compiler instance.
+        // Selfhost supports that mode directly, so clear after the final package conversion instead.
+        if (instance.realASTPkgs.size > 1) {
+            return
+        }
         try (recorder = ProfileRecorder("AST to CHIR Translation", "ClearASTResources")) {
             pkg = None
             instance.DestroyASTResources()

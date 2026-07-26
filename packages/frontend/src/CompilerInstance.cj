@@ -812,6 +812,11 @@ public class CompilerInstance {
                 ret = ret && GenerateCHIRForPkg(pkg)
             }
         }
+        if (ret && realASTPkgs.size > 1 && invocation.globalOptions.outputMode != OutputMode.CHIR && !isCJLint) {
+            try (recorder = ProfileRecorder("AST to CHIR Translation", "ClearASTResources")) {
+                DestroyASTResources()
+            }
+        }
         diag.EmitCategoryDiagnostics(DiagCategory.CHIR)
         return ret
     }
