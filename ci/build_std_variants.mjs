@@ -86,7 +86,19 @@ async function createFlagOffSdkOverlay() {
 }
 
 async function runBuild(home, ...args) {
-  await $({cwd: path.join(source, 'stdlib'), env: {...process.env, CANGJIE_HOME: home}})
+  const libraryPath = [
+    path.join(home, 'third_party', 'llvm', 'lib'),
+    path.join(home, 'runtime', 'lib', platform),
+    path.join(home, 'tools', 'lib'),
+    process.env.LD_LIBRARY_PATH || '',
+  ].filter(Boolean).join(path.delimiter);
+  const buildEnv = {
+    ...process.env,
+    CANGJIE_HOME: home,
+    PATH: [path.join(home, 'bin'), process.env.PATH || ''].filter(Boolean).join(path.delimiter),
+    LD_LIBRARY_PATH: libraryPath,
+  };
+  await $({cwd: path.join(source, 'stdlib'), env: buildEnv})
     `python3 build.py ${args}`;
 }
 
