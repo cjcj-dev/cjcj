@@ -310,7 +310,7 @@ private class ToCHIR {
         this.instance = instance
         this.pkg = Some(pkg)
         this.outputPath = instance.invocation.globalOptions.output
-        this.builder = ChirBuilder(instance.chirData.GetRealCHIRContext())
+        this.builder = ChirBuilder(instance.chirData.getOrThrow().GetRealCHIRContext())
     }
 
     public func Run(): Option<RealCHIRPackage> {
@@ -1041,14 +1041,14 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
     if (instance.diag.GetErrorCount() != 0) {
         return llvmModules
     }
-    let currentRealPackage = instance.chirData.GetCurrentRealCHIRPackage()
+    let currentRealPackage = instance.chirData.getOrThrow().GetCurrentRealCHIRPackage()
     if (let None <- currentRealPackage) {
         return llvmModules
     }
     let realPackage = currentRealPackage.getOrThrow()
     let codegenOptions = ConvertFrontendOptionsToCodegenOptions(instance.invocation.globalOptions)
     instance.invocation.globalOptions.UpdateCachedDirName(realPackage.GetName())
-    let codegenData = CodegenCHIRData(instance.chirData.GetRealCHIRContext(), realPackage)
+    let codegenData = CodegenCHIRData(instance.chirData.getOrThrow().GetRealCHIRContext(), realPackage)
     let noHeapAllocChecker = NoHeapAllocChecker(instance.diag.AsBasicDiagnosticEngine())
     noHeapAllocChecker.RunOnPackage(realPackage)
     let noWriteBarrierRecChecker = NoWriteBarrierRecChecker(instance.diag.AsBasicDiagnosticEngine())
@@ -1066,7 +1066,7 @@ public func GenPackageModules(instance: CompilerInstance, enableIncrement: Bool,
 // C++: FrontendTool/DefaultCompilerInstance.cpp:252-299.
 public func EmitLLVMSimilarBytecode(instance: CompilerInstance, enableIncrement: Bool,
     cachedMangleMap: CachedMangleMap): Bool {
-    let curPackage = instance.chirData.GetCurrentRealCHIRPackage()
+    let curPackage = instance.chirData.getOrThrow().GetCurrentRealCHIRPackage()
     if (let None <- curPackage) {
         return true
     }

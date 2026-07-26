@@ -230,7 +230,7 @@ public class CompilerInstance {
     public var buildTrie: Bool = true
     public let srcPkgs: ArrayList<Package> = ArrayList<Package>()
     public let realASTPkgs: HashMap<Node, RealASTPackage> = HashMap<Node, RealASTPackage>()
-    public let chirData: CHIRData = CHIRData()
+    public var chirData: Option<CHIRData> = Some(CHIRData())
     public var faithfulSemaInstance: Option<FaithfulSemaCompilerInstance> = None
     private var faithfulTypeChecker: Option<FaithfulSemaTypeChecker> = None
     private let pkgs: ArrayList<Package> = ArrayList<Package>()
@@ -253,7 +253,7 @@ public class CompilerInstance {
         testManager = TestManager(importManager, faithfulTypeManager, diag.AsBasicDiagnosticEngine(),
             invocation.globalOptions)
         compileStrategy = Some(FullCompileStrategy(this))
-        chirData.InitData(fileNameMap, Int64(invocation.globalOptions.GetJobs()))
+        chirData.getOrThrow().InitData(fileNameMap, Int64(invocation.globalOptions.GetJobs()))
         if (invocation.globalOptions.compilePackage) {
             for (pkgPath in invocation.globalOptions.packagePaths) {
                 srcDirs.add(pkgPath)
@@ -753,7 +753,7 @@ public class CompilerInstance {
                 return false
         }
         if (let Some(realPkg) <- BuildRealCHIRForASTPackage(this, realASTPkg)) {
-            chirData.AppendNewRealPackage(realPkg)
+            chirData.getOrThrow().AppendNewRealPackage(realPkg)
             chirInfo.varInitDepMap.clear()
             for ((rawMangledName, initFuncName) in GetVarInitDepMap(realPkg)) {
                 chirInfo.varInitDepMap[rawMangledName] = initFuncName
@@ -778,15 +778,15 @@ public class CompilerInstance {
             collectCHIRDeclSummary(chirPkg, decl)
         }
         chirPkg.declCount = chirPkg.mangleNames.size
-        chirData.AppendNewPackage(chirPkg)
-        chirData.SetConstVarInitFuncs(chirPkg, chirPkg.constVarInitFuncs)
+        chirData.getOrThrow().AppendNewPackage(chirPkg)
+        chirData.getOrThrow().SetConstVarInitFuncs(chirPkg, chirPkg.constVarInitFuncs)
         return true
     }
 
     public func PerformCHIRCompilation(): Bool {
         mangler.manglerCtxTable.clear()
         typeManager.ReleasePostSemaCaches()
-        chirData.ClearRealPackages()
+        chirData.getOrThrow().ClearRealPackages()
         unsafe {
             CJ_MCC_InvokeGC(true)
         }
@@ -1031,15 +1031,15 @@ public class CompilerInstance {
     }
 
     public func GetCHIRContext(): CHIRContext {
-        return chirData.GetCHIRContext()
+        return chirData.getOrThrow().GetCHIRContext()
     }
 
     public func GetAllCHIRPackages(): ArrayList<CHIRPackage> {
-        return chirData.GetAllCHIRPackages()
+        return chirData.getOrThrow().GetAllCHIRPackages()
     }
 
     public func FreeCHIRData(): Unit {
-        chirData.GetCHIRContext().packages.clear()
+        chirData = None
     }
 
     public func HasTypeChecker(): Bool {
@@ -1055,11 +1055,12 @@ public class CompilerInstance {
     }
 
     public func DeserializeCHIR(): Bool {
-        let chirBuilder = ChirBuilder(chirData.GetRealCHIRContext())
+        let chirBuilder = ChirBuilder(chirData.getOrThrow().GetRealCHIRContext())
         let phase = CoreBox<ChirToCHIRPhase>(ChirToCHIRPhase.RAW)
         ChirDeserializer.Deserialize(invocation.frontendOptions.chirDeserializePath, chirBuilder, phase)
         ChirPrinter.PrintCHIRSerializeInfo(phase.value, "deserialized.chir")
-        ChirPrinter.PrintPackage(chirData.GetRealCHIRContext().GetCurPackage().getOrThrow(), "deserialized.chir")
+        ChirPrinter.PrintPackage(chirData.getOrThrow().GetRealCHIRContext().GetCurPackage().getOrThrow(),
+            "deserialized.chir")
         return true
     }
 

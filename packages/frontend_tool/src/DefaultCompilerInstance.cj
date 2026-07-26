@@ -288,24 +288,24 @@ public open class DefaultCompilerInstance {
             core.cachedInfo.bitcodeFilesName.clear()
         }
         for (pkg in chirPkgs) {
-            core.chirData.SetCurrentCHIRPackage(Some(pkg))
+            core.chirData.getOrThrow().SetCurrentCHIRPackage(Some(pkg))
             var foundCurrentRealPackage = false
-            for (realPackage in core.chirData.GetAllRealCHIRPackages()) {
+            for (realPackage in core.chirData.getOrThrow().GetAllRealCHIRPackages()) {
                 if (realPackage.GetName() == pkg.name) {
-                    core.chirData.SetCurrentRealCHIRPackage(Some(realPackage))
+                    core.chirData.getOrThrow().SetCurrentRealCHIRPackage(Some(realPackage))
                     foundCurrentRealPackage = true
                     break
                 }
             }
             CJC_ASSERT(foundCurrentRealPackage)
-            core.chirData.ActivateCodegenFuncsForPackage(pkg)
+            core.chirData.getOrThrow().ActivateCodegenFuncsForPackage(pkg)
             if (!CodegenOnePackage(enableIncrement, cachedMangleMap: cachedMangleMap)) {
                 ret = false
                 break
             }
         }
-        core.chirData.SetCurrentCHIRPackage(None)
-        core.chirData.SetCurrentRealCHIRPackage(None)
+        core.chirData.getOrThrow().SetCurrentCHIRPackage(None)
+        core.chirData.getOrThrow().SetCurrentRealCHIRPackage(None)
         core.FreeCHIRData()
         return ret
     }
