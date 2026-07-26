@@ -406,6 +406,7 @@ public open class GlobalOptions <: Option {
     public var jobs: MaybeUInt64 = MaybeUInt64()
     public var aggressiveParallelCompile: MaybeUInt64 = MaybeUInt64()
     public var aggressiveParallelCompileWithoutArg: Bool = false
+    public var aggressiveParallelCompileSplitNum: MaybeUInt64 = MaybeUInt64()
     public let bitcodeFilesName: ArrayList<String> = ArrayList<String>()
     public let symbolsNeedLocalized: ArrayList<String> = ArrayList<String>()
     public let symbolsNeedLocalizedPerPkg: HashMap<String, ArrayList<String>> =
@@ -594,6 +595,8 @@ public open class GlobalOptions <: Option {
         aggressiveParallelCompile.hasValue = other.aggressiveParallelCompile.hasValue
         aggressiveParallelCompile.value = other.aggressiveParallelCompile.value
         aggressiveParallelCompileWithoutArg = other.aggressiveParallelCompileWithoutArg
+        aggressiveParallelCompileSplitNum.hasValue = other.aggressiveParallelCompileSplitNum.hasValue
+        aggressiveParallelCompileSplitNum.value = other.aggressiveParallelCompileSplitNum.value
         for (value in other.bitcodeFilesName) { bitcodeFilesName.add(value) }
         for (value in other.symbolsNeedLocalized) { symbolsNeedLocalized.add(value) }
         for ((key, values) in other.symbolsNeedLocalizedPerPkg) {
@@ -1493,6 +1496,11 @@ public open class GlobalOptions <: Option {
             cjmpOk = false
         }
         if (!cjmpOk) { return false }
+        if (aggressiveParallelCompileSplitNum.hasValue &&
+            (aggressiveParallelCompile.hasValue || aggressiveParallelCompileWithoutArg)) {
+            Errorln("'--apc-split-num' cannot be used together with '--apc'.")
+            return false
+        }
         if (!jobs.hasValue) { jobs = MaybeUInt64(GetHardwareConcurrency()) }
         if (target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS ||
             IsObfuscationEnabled() || IsLTOEnabled() || enableCoverage) {
@@ -1500,7 +1508,14 @@ public open class GlobalOptions <: Option {
                 (aggressiveParallelCompile.hasValue || aggressiveParallelCompileWithoutArg)) {
                 Warningln("'--apc' is not supported when targeting " + target.OSToString() + ".")
             }
+            if ((target.os == OSType.WINDOWS || target.os == OSType.DARWIN || target.os == OSType.IOS) &&
+                aggressiveParallelCompileSplitNum.hasValue) {
+                Warningln("'--apc-split-num' is not supported when targeting " + target.OSToString() + ".")
+            }
             aggressiveParallelCompile = MaybeUInt64(1u64)
+        } else if (aggressiveParallelCompileSplitNum.hasValue) {
+            aggressiveParallelCompile = aggressiveParallelCompileSplitNum
+            UtilsSemaphore.Get().SetCount(Int64(jobs.value + 2u64))
         } else if (!aggressiveParallelCompile.hasValue && (optimizationLevel == OptimizationLevel.O0 ||
             aggressiveParallelCompileWithoutArg)) {
             aggressiveParallelCompile = jobs
