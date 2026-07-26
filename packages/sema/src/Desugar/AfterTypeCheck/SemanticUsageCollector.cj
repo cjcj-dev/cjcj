@@ -360,10 +360,10 @@ private class SemanticUsageCollector {
             let _ = Walker(node, visitPre: ExtendBoxMarker.GetMarkExtendBoxFunc(tyMgr)).Walk()
         }
         let boxedTys = tyMgr.GetAllBoxedTys()
-        tyMgr.ClearRecordUsedExtends()
         for (ty in boxedTys) {
             usage.boxedTypes.add(GetTypeRawMangleName(ty))
         }
+        tyMgr.ClearRecordUsedExtends()
         var nodePtr: Node = node
         if (node.astKind == ASTKind.VAR_DECL) {
             nodePtr = (node as VarDecl).getOrThrow().initializer.getOrThrow()
