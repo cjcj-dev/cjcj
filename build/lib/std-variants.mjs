@@ -124,10 +124,15 @@ export function stickyPreflight(libraryDirectory) {
   if (sharedLibraries.length === 0) throw new Error(`no sticky std shared libraries found under ${root}`);
   const symbols = readelf(['-Ws', ...sharedLibraries]);
   const relocations = readelf(['-rW', ...sharedLibraries]);
-  return {
+  const result = {
     sharedLibraries: sharedLibraries.length,
     loggedBaseSymbols: matches(symbols, /__cj_sticky_logged_base/g),
     stickySymbols: matches(symbols, /__cj_sticky/g),
     stickyRelocations: matches(relocations, /__cj_sticky/g),
   };
+  if (result.loggedBaseSymbols === 0 || result.stickyRelocations === 0) {
+    throw new Error(`sticky std preflight failed: symbols=${result.loggedBaseSymbols} `
+      + `relocations=${result.stickyRelocations}`);
+  }
+  return result;
 }
