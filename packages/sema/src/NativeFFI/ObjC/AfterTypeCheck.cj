@@ -9,7 +9,8 @@ import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{CreateCall, GetStringDecl, WithinFile}
-import cjcj::utils.{CJC_ASSERT, OPTION_NONE_CTOR, OPTION_VALUE_CTOR, STD_LIB_OPTION}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR,
+    OPTION_VALUE_CTOR, STD_LIB_OPTION}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
 public enum Retain {
@@ -134,6 +135,46 @@ public class ASTFactory {
         let args = ArrayList<FuncArg>()
         args.add(CreateFuncArg(protoNameLiteral))
         return CreateCall(Some(getProtoFuncDecl), curFile, args: args).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1449-1470.
+    public func IsGeneratedBaseCtor(decl: Decl): Bool {
+        let funcDecl = decl as FuncDecl
+        if ((let None <- funcDecl) || !funcDecl.getOrThrow().TestAttr(Attribute.CONSTRUCTOR) ||
+            (let None <- funcDecl.getOrThrow().funcBody)) {
+            return false
+        }
+        let paramLists = funcDecl.getOrThrow().funcBody.getOrThrow().paramLists
+        if (paramLists.isEmpty()) {
+            return false
+        }
+        let params = paramLists[0].params
+        if (params.size != 1) {
+            return false
+        }
+        return params[0].identifier == NATIVE_HANDLE_IDENT
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1500-1520.
+    public func GetGeneratedBaseCtor(decl: Decl): Option<FuncDecl> {
+        CJC_ASSERT(decl.astKind == ASTKind.CLASS_DECL)
+        let declTy = decl.GetTy().getOrThrow()
+        CJC_ASSERT(TypeMapper.IsObjCMirror(declTy) || TypeMapper.IsObjCImpl(declTy) ||
+            TypeMapper.IsSyntheticWrapper(declTy) || TypeMapper.IsObjCFwdClass(declTy))
+        if (TypeMapper.IsObjCImpl(decl)) {
+            let superClass = (decl as ClassDecl).getOrThrow().GetSuperClassDecl()
+            CJC_NULLPTR_CHECK(superClass)
+            return GetGeneratedBaseCtor(superClass.getOrThrow())
+        }
+        for (member in decl.GetMemberDeclPtrs()) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (IsGeneratedBaseCtor(funcDecl)) {
+                    return Some(funcDecl)
+                }
+            }
+        }
+        CJC_ABORT()
+        return None
     }
 
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
