@@ -50,6 +50,7 @@ import cjcj::chir.RedundantLoadElimination
 import cjcj::chir.RangeAnalysis
 import cjcj::chir.RangeDomain
 import cjcj::chir.RangePropagation
+import cjcj::chir.ReplaceSrcCodeImportedVal
 import cjcj::chir.IsTrackedGVForRangeAnalysis
 import cjcj::chir.rangeStateGlobals
 import cjcj::chir.ReplaceUsesWithWrapper
@@ -339,6 +340,9 @@ private class ToCHIR {
             case Some(value) => value
             case None => return None
         }
+        let srcCodeImportedFuncs = ast2chir.GetSrcCodeImportedFuncs()
+        let srcCodeImportedVars = ast2chir.GetSrcCodeImportedVars()
+        let initFuncsForConstVar = ast2chir.GetInitFuncsForConstVar()
         maybeUnreachable = ast2chir.GetMaybeUnreachableBlocks()
         chirPkg = Some(lowered)
         DumpCHIRToFile("AST_CHIR")
@@ -365,7 +369,7 @@ private class ToCHIR {
             return None
         }
         let closure = ClosureConversion(builder, opts: instance.invocation.globalOptions,
-            srcCodeImportedFuncs: ast2chir.GetSrcCodeImportedFuncs())
+            srcCodeImportedFuncs: srcCodeImportedFuncs)
         closure.RunOnPackage(lowered)
         // C++: CHIR/CHIR.cpp:253-255.
         ccOutFuncsRawMangle.clear()
@@ -375,11 +379,11 @@ private class ToCHIR {
         // C++: CHIR/CHIR.cpp:255 ToCHIR::DoClosureConversion.
         DumpCHIRToFile("ClosureConversion")
         if (!RunConstantEvaluation(lowered, builder, instance.diag.AsBasicDiagnosticEngine(),
-            instance.invocation.globalOptions, ast2chir.GetInitFuncsForConstVar())) {
+            instance.invocation.globalOptions, initFuncsForConstVar)) {
             return None
         }
-        ast2chir.ReplaceSrcCodeImportedValAfterClosureConversion(lowered, closure.GetUselessClassDef(),
-            closure.GetUselessLambda())
+        ReplaceSrcCodeImportedVal(lowered).Run(srcCodeImportedFuncs, srcCodeImportedVars,
+            closure.GetUselessClassDef(), closure.GetUselessLambda())
         // C++: CHIR/CHIR.cpp:1178-1181.
         if (!AnnotationChecker(lowered, instance.diag.AsBasicDiagnosticEngine()).Run()) {
             return None
