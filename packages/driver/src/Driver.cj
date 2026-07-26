@@ -54,6 +54,20 @@ public class Driver {
         } else {
             driverOptions.cangjieHome = cangjieHome
         }
+        if (driverOptions.cjcjOptimization) {
+            let libPathName = driverOptions.GetCangjieLibTargetPathName()
+            if (libPathName != "linux_x86_64_cjnative") {
+                eprintln("error: option '--cjcj-optimization' is not supported for target '" + libPathName + "'")
+                return false
+            }
+            let optimizedStdPath = FileUtil.JoinPath(
+                FileUtil.JoinPath(FileUtil.JoinPath(cangjieHome, "lib"), "cjcj-optimization"), libPathName)
+            if (!FileUtil.IsDir(optimizedStdPath)) {
+                eprintln("error: option '--cjcj-optimization' requires sticky std libraries at '" +
+                    optimizedStdPath + "'")
+                return false
+            }
+        }
         driverOptions.SetCompilationCachedPath()
         return ExtractBCPackageNames()
     }
