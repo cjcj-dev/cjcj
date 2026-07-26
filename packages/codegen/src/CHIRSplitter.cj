@@ -244,7 +244,7 @@ public class CHIRSplitter {
             packages.add(subPackage)
             idx++
         }
-        SplitCHIRFunctions(packages)
+        SplitCHIRFuncs(packages)
         SplitCHIRClasses(packages)
         SplitCHIREnums(packages)
         SplitCHIRStructs(packages)
@@ -316,7 +316,7 @@ public class CHIRSplitter {
         return idx
     }
 
-    private func SplitCHIRFunctions(packages: ArrayList<SubCHIRPackage>): Unit {
+    private func SplitCHIRFuncs(packages: ArrayList<SubCHIRPackage>): Unit {
         if (packages.isEmpty()) {
             return
         }
