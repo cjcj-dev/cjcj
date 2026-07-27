@@ -4037,7 +4037,9 @@ public class IRBuilder2 <: Resource {
             unsafe { LLVMPointerType(arrayLayoutType, 1u32) }, name: "src.arr.ptr"), 1u32, name: "src.arr.data")
         let dstArrPtr = CreateStructGEP(arrayLayoutType, CreateBitCast(GetPayloadFromObject(dstArray),
             unsafe { LLVMPointerType(arrayLayoutType, 1u32) }, name: "dst.arr.ptr"), 1u32, name: "dst.arr.data")
-        return CreateArrayCopyTo(rawArrayTy, srcArray, dstArray, srcArrPtr, dstArrPtr, dataSize, srcIndex, dstIndex)
+        ArrayMemCpyOrCopyTo(ArrayCopyToInfo(srcArray, dstArray, srcArrPtr, dstArrPtr, dataSize, srcIndex, dstIndex,
+            CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType()), copyLenI64))
+        return LLVMNullValue()
     }
 
     public func AcquireRawData(args: ArrayList<Value>): LLVMValueRef {
@@ -5690,33 +5692,49 @@ public class IRBuilder2 <: Resource {
         }
     }
 
-    private func CreateArrayCopyTo(rawArrayTy: RawArrayType, srcArray: LLVMValueRef, dstArray: LLVMValueRef,
-        srcArrPtr: LLVMValueRef, dstArrPtr: LLVMValueRef, dataSize: LLVMValueRef, srcIndex: LLVMValueRef,
-        dstIndex: LLVMValueRef): LLVMValueRef {
-        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
-        let i8PtrType = unsafe { LLVMPointerType(i8Type, 1u32) }
-        let srcI8Ptr = CreatePointerCast(srcArrPtr, i8PtrType, name: "src.arr.i8")
-        let dstI8Ptr = CreatePointerCast(dstArrPtr, i8PtrType, name: "dst.arr.i8")
-        let srcIndices = ArrayList<LLVMValueRef>()
-        srcIndices.add(srcIndex)
-        let dstIndices = ArrayList<LLVMValueRef>()
-        dstIndices.add(dstIndex)
-        let srcDataPtr = CreateGEP(i8Type, srcI8Ptr, srcIndices, name: "src.arr.data.i8")
-        let dstDataPtr = CreateGEP(i8Type, dstI8Ptr, dstIndices, name: "dst.arr.data.i8")
-        let elementCGType = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType())
-        if (elementCGType.GetSize().isNone()) {
-            return CreateArrayCopyIntrinsic(ARRAY_COPY_GENERIC_INTRINSIC_NAME, dstArray, dstDataPtr, srcArray, srcDataPtr,
-                dataSize)
+    // Mirrors CodeGen/Base/IntrinsicsDispatcher.cpp:218-267 ArrayMemCpyOrCopyTo.
+    private func ArrayMemCpyOrCopyTo(arrayCopyToInfo: ArrayCopyToInfo): Unit {
+        let copyLen = arrayCopyToInfo.dataSize
+        if (unsafe { LLVMSelfhostIsConstantInt(copyLen) } != 0 &&
+            unsafe { LLVMConstIntGetZExtValue(copyLen) } <= 2147483647u64) {
+            CreateCopyTo(arrayCopyToInfo)
+            return
         }
-        if (IsLLVMTypeContainsRef(elementCGType.GetLLVMType())) {
-            let intrinsicName = if (elementCGType.IsReference()) {
-                ARRAY_COPY_REF_INTRINSIC_NAME
-            } else {
-                ARRAY_COPY_STRUCT_INTRINSIC_NAME
-            }
-            return CreateArrayCopyIntrinsic(intrinsicName, dstArray, dstDataPtr, srcArray, srcDataPtr, dataSize)
-        }
-        return CreateMemMove(dstDataPtr, 8u32, srcDataPtr, 8u32, dataSize)
+
+        let blocks = CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("arr.copy.start"),
+            GenNameForBB("arr.copy.body"), GenNameForBB("arr.copy.end")]))
+        CJC_ASSERT(blocks.size >= 3)
+        let whileLoopHeader = blocks[0]
+        let whileLoopBody = blocks[1]
+        let afterWhileLoop = blocks[2]
+        let sizeOfSingleCopy = GetInt64(2147483640)
+        let i64Ty = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        let iterator = CreateEntryAlloca(i64Ty, name: "iterator")
+        CreateStore(GetInt64(0), iterator)
+        CreateBr(whileLoopHeader)
+
+        SetInsertPoint(whileLoopHeader)
+        let iteratorPlus2G = CreateBinary(ExprKind.ADD, CreateLoad(i64Ty, iterator), sizeOfSingleCopy)
+        let cmpResult = CreateICmp(LLVMIntPredicate.SLT, iteratorPlus2G, copyLen, name: "max.size")
+        CreateCondBr(cmpResult, whileLoopBody, afterWhileLoop)
+
+        SetInsertPoint(whileLoopBody)
+        let iteratorIndex = CreateLoad(i64Ty, iterator)
+        CreateCopyTo(ArrayCopyToInfo(arrayCopyToInfo.srcBP, arrayCopyToInfo.dstBP, arrayCopyToInfo.srcArrPtr,
+            arrayCopyToInfo.dstArrPtr, sizeOfSingleCopy,
+            CreateBinary(ExprKind.ADD, iteratorIndex, arrayCopyToInfo.srcIndex),
+            CreateBinary(ExprKind.ADD, iteratorIndex, arrayCopyToInfo.dstIndex), arrayCopyToInfo.elemType,
+            sizeOfSingleCopy))
+        let newIterator = CreateBinary(ExprKind.ADD, iteratorIndex, sizeOfSingleCopy)
+        CreateStore(newIterator, iterator)
+        CreateBr(whileLoopHeader)
+
+        SetInsertPoint(afterWhileLoop)
+        let index = CreateLoad(i64Ty, iterator)
+        let residualSize = CreateBinary(ExprKind.SUB, copyLen, index)
+        CreateCopyTo(ArrayCopyToInfo(arrayCopyToInfo.srcBP, arrayCopyToInfo.dstBP, arrayCopyToInfo.srcArrPtr,
+            arrayCopyToInfo.dstArrPtr, residualSize, CreateBinary(ExprKind.ADD, index, arrayCopyToInfo.srcIndex),
+            CreateBinary(ExprKind.ADD, index, arrayCopyToInfo.dstIndex), arrayCopyToInfo.elemType, residualSize))
     }
 
     private func CreateArrayCopyIntrinsic(intrinsicName: String, dstBase: LLVMValueRef, dstData: LLVMValueRef,
