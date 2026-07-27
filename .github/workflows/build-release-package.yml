@@ -23,6 +23,14 @@ on:
         required: false
         type: boolean
         default: true
+      dry_run:
+        required: false
+        type: boolean
+        default: false
+      runtime_ref:
+        required: false
+        type: string
+        default: ''
     secrets:
       GITCODE_API_KEY:
         required: false
@@ -47,9 +55,12 @@ jobs:
       - name: Checkout cjcj
         uses: actions/checkout@v7
 
-      - name: Load runtime pin
+      - name: Load and validate runtime pin
         shell: bash
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+        env:
+          CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
+          CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
+        run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
       - name: Prepare MSYS2/MINGW64 cjcj toolchain
         if: runner.os == 'Windows'
