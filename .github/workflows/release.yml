@@ -65,6 +65,8 @@ jobs:
     uses: ./.github/workflows/build-windows-runtime.yml
     with:
       version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
 
   build:
     name: ${{ matrix.platform }} / Build release
