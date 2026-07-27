@@ -174,6 +174,7 @@ private func GetSystemErrorMessage(error: UInt32): String {
     if (error == 0u32) {
         return ""
     }
+    var result: String = ""
     try (messagePtr = LibC.malloc<CPointer<UInt16>>().asResource()) {
         if (messagePtr.value.isNull()) {
             return "Unknown system error code: " + error.toString()
@@ -196,7 +197,6 @@ private func GetSystemErrorMessage(error: UInt32): String {
             let _ = unsafe { LocalFree(CPointer<Unit>(wideMessage)) }
             return "Unknown system error code: " + error.toString()
         }
-        var result: String = ""
         try (utf8Buffer = LibC.malloc<UInt8>(count: Int64(utf8Size) + 1).asResource()) {
             if (utf8Buffer.value.isNull()) {
                 let _ = unsafe { LocalFree(CPointer<Unit>(wideMessage)) }
@@ -213,11 +213,11 @@ private func GetSystemErrorMessage(error: UInt32): String {
             unsafe { (utf8Buffer.value + Int64(converted)).write(0u8) }
             result = CString(utf8Buffer.value).toString()
         }
-        while (result.endsWith("\r") || result.endsWith("\n")) {
-            result = result[0..result.size - 1]
-        }
-        return result
     }
+    while (result.endsWith("\r") || result.endsWith("\n")) {
+        result = result[0..result.size - 1]
+    }
+    return result
 }
 
 public class Tool {
