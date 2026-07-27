@@ -11,6 +11,7 @@ import {
   createStickySdkOverlay,
   stickyPreflight,
 } from '../build/lib/std-variants.mjs';
+import {resolveRuntimeSource} from './runtime-pin.mjs';
 
 $.stdio = 'inherit';
 
@@ -26,14 +27,10 @@ if (process.platform !== 'linux' || process.arch !== 'x64') {
   throw new Error(`sticky std variants are unsupported on ${process.platform}/${process.arch}`);
 }
 
-const here = import.meta.dirname;
 const platform = 'linux_x86_64_cjnative';
 const officialCjcSha256 = process.env.CJCJ_OFFICIAL_CJC_SHA256
   || 'ed806687b1fa0228b84d18b72e01cdc174d75d140cf5f7dd6267598fb80cb509';
-const pins = Object.fromEntries((await fs.readFile(path.join(here, 'runtime_pin.env'), 'utf8'))
-  .split(/\r?\n/).filter(Boolean).map(line => line.split('=', 2)));
-const sourceUrl = process.env.RUNTIME_SRC_URL || pins.RUNTIME_SRC_URL;
-const sourceRef = process.env.RUNTIME_REF || pins.RUNTIME_REF;
+const {runtimeRef: sourceRef, sourceUrl, pinRef, overrideRef} = await resolveRuntimeSource();
 const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-sticky-std-'));
 const source = path.join(work, 'source');
 const buildSdk = path.join(work, 'build-sdk');
@@ -100,6 +97,7 @@ async function runBuild(home, ...args) {
 }
 
 try {
+  console.log(`[sticky-std] source ref=${sourceRef} pin=${pinRef} override=${overrideRef || '<none>'}`);
   const cjc = await requireFile(path.join(sdk, 'bin', 'cjc'), 'official cjc');
   const cjcSha256 = await sha256(cjc);
   if (cjcSha256 !== officialCjcSha256) {

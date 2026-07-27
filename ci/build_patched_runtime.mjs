@@ -5,31 +5,20 @@ import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import {resolveRuntimeSource} from './runtime-pin.mjs';
 
 $.stdio = 'inherit';
 
 const out = argv._[0];
 if (!out) throw new Error('usage: build_patched_runtime.mjs <out-dir>');
-const here = import.meta.dirname;
-const pinText = await fs.readFile(path.join(here, 'runtime_pin.env'), 'utf8');
-const pins = Object.fromEntries(pinText.split(/\r?\n/).filter(Boolean).map((line) => {
-  const separator = line.indexOf('=');
-  if (separator < 1) throw new Error(`invalid runtime pin line: ${line}`);
-  return [line.slice(0, separator), line.slice(separator + 1)];
-}));
-const runtimeRef = pins.RUNTIME_REF;
-const requestedRuntimeRef = process.env.RUNTIME_REF || '';
-if (requestedRuntimeRef && requestedRuntimeRef !== runtimeRef) {
-  console.error(`[runtime] pin mismatch: ${requestedRuntimeRef} != ${runtimeRef}`);
-  process.exit(2);
-}
+const {runtimeRef, sourceUrl: srcUrl, pinRef, overrideRef} = await resolveRuntimeSource();
 const version = process.env.RUNTIME_VERSION || '1.2.0-alpha.20260619020029';
-const srcUrl = process.env.RUNTIME_SRC_URL || pins.RUNTIME_SRC_URL;
 const log = (message) => console.log(`[runtime] ${message}`);
 const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-runtime-'));
 const runtimeLibrary = process.platform === 'darwin' ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
 
 try {
+  log(`source ref=${runtimeRef} pin=${pinRef} override=${overrideRef || '<none>'}`);
   log(`shallow fetch fork commit ${runtimeRef}`);
   await $`git -C ${work} init -q`;
   await $`git -C ${work} remote add origin ${srcUrl}`;

@@ -4,6 +4,7 @@
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import path from 'node:path';
+import {resolveRuntimeSource} from './runtime-pin.mjs';
 
 $.stdio = 'inherit';
 
@@ -12,18 +13,8 @@ if (!dist) throw new Error('usage: install_patched_runtime.mjs <runtime-artifact
 const cangjieHome = process.env.CANGJIE_HOME;
 if (!cangjieHome) throw new Error('CANGJIE_HOME is required');
 
-const pinText = await fs.readFile(path.join(import.meta.dirname, 'runtime_pin.env'), 'utf8');
-const pins = Object.fromEntries(pinText.split(/\r?\n/).filter(Boolean).map((line) => {
-  const separator = line.indexOf('=');
-  if (separator < 1) throw new Error(`invalid runtime pin line: ${line}`);
-  return [line.slice(0, separator), line.slice(separator + 1)];
-}));
-const runtimeRef = pins.RUNTIME_REF;
-const requestedRuntimeRef = process.env.RUNTIME_REF || '';
-if (requestedRuntimeRef && requestedRuntimeRef !== runtimeRef) {
-  console.error(`[runtime] pin mismatch: ${requestedRuntimeRef} != ${runtimeRef}`);
-  process.exit(2);
-}
+const {runtimeRef, pinRef, overrideRef} = await resolveRuntimeSource();
+console.log(`[runtime] source ref=${runtimeRef} pin=${pinRef} override=${overrideRef || '<none>'}`);
 
 const sourceSha = (await fs.readFile(`${dist}/SOURCE_SHA`, 'utf8')).trim();
 if (sourceSha !== runtimeRef) throw new Error(`runtime source mismatch: ${sourceSha} != ${runtimeRef}`);
