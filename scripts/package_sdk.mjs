@@ -33,6 +33,14 @@ async function matchingFiles(directory, pattern) {
   return (await fs.readdir(directory)).filter(name => pattern.test(name)).sort();
 }
 
+async function materializeDirectoryLink(directory) {
+  const stat = await fs.lstat(directory).catch(() => null);
+  if (!stat?.isSymbolicLink()) return;
+  const source = await fs.realpath(directory);
+  await fs.rm(directory, {force: true});
+  await fs.cp(source, directory, {recursive: true});
+}
+
 function requireSameFiles(label, actual, expected) {
   if (actual.join('\n') !== expected.join('\n')) {
     throw new Error(`${label} file set mismatch: actual=${actual.join(',')} expected=${expected.join(',')}`);
@@ -97,6 +105,7 @@ if (stickyStd) {
   const optimizedLibraries = path.join(stage, 'lib', 'cjcj-optimization', runtimeDir);
   const standardLibraries = path.join(stage, 'lib', runtimeDir);
   const runtimeLibraries = path.join(stage, 'runtime', 'lib', runtimeDir);
+  await materializeDirectoryLink(path.join(stage, 'modules'));
   const stdModules = path.join(stage, 'modules', runtimeDir, 'std');
   const libraryPattern = /^libcangjie-std.*\.(?:a|so|dylib)$/;
   const seedArtifacts = [];
