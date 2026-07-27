@@ -196,7 +196,8 @@ private func GetSystemErrorMessage(error: UInt32): String {
             let _ = unsafe { LocalFree(CPointer<Unit>(wideMessage)) }
             return "Unknown system error code: " + error.toString()
         }
-        var result = try (utf8Buffer = LibC.malloc<UInt8>(count: Int64(utf8Size) + 1).asResource()) {
+        var result: String = ""
+        try (utf8Buffer = LibC.malloc<UInt8>(count: Int64(utf8Size) + 1).asResource()) {
             if (utf8Buffer.value.isNull()) {
                 let _ = unsafe { LocalFree(CPointer<Unit>(wideMessage)) }
                 return "Unknown system error code: " + error.toString()
@@ -210,7 +211,7 @@ private func GetSystemErrorMessage(error: UInt32): String {
                 return "Unknown system error code: " + error.toString()
             }
             unsafe { (utf8Buffer.value + Int64(converted)).write(0u8) }
-            CString(utf8Buffer.value).toString()
+            result = CString(utf8Buffer.value).toString()
         }
         while (result.endsWith("\r") || result.endsWith("\n")) {
             result = result[0..result.size - 1]
@@ -312,6 +313,7 @@ public class Tool {
             argumentIndex++
         }
         let commandLine = commandLineBuilder.toString()
+        var processInfo = PROCESS_INFORMATION()
         try (startupInfo = LibC.malloc<STARTUPINFOA>().asResource(),
             processInformation = LibC.malloc<PROCESS_INFORMATION>().asResource(),
             nameCString = unsafe { LibC.mallocCString(name) }.asResource(),
@@ -334,9 +336,9 @@ public class Tool {
                 Semaphore.Get().Release()
                 return ErrorFuture(GetSystemErrorMessage(error))
             }
-            let processInfo = unsafe { processInformation.value.read() }
-            return WindowsProcessFuture(processInfo.hProcess, processInfo.hThread)
+            processInfo = unsafe { processInformation.value.read() }
         }
+        return WindowsProcessFuture(processInfo.hProcess, processInfo.hThread)
     }
 
     @When[os != "Windows"]
