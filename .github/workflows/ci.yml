@@ -12,7 +12,7 @@ concurrency:
 
 env:
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
-  # RUNTIME_REF comes from ci/runtime_pin.env via the "Load runtime pin" step.
+  # RUNTIME_REF/RUNTIME_VERSION come from ci/runtime_pin.env via the "Load runtime pin" step.
 
 jobs:
   lint:
@@ -107,21 +107,21 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
       - name: Install runtime dependencies
         if: steps.rtcache.outputs.cache-hit != 'true'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make
       - name: Build patched runtime
         if: steps.rtcache.outputs.cache-hit != 'true'
         env:
-          RUNTIME_VERSION: ${{ env.CJCJ_TOOLCHAIN }}
+          RUNTIME_VERSION: ${{ env.RUNTIME_VERSION }}
         run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Save patched runtime cache
         if: steps.rtcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ matrix.runner }}-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
       - name: Install patched runtime
         run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Build runtime shim

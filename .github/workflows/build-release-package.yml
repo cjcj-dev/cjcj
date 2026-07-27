@@ -160,7 +160,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ inputs.runner }}-${{ env.RUNTIME_REF }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ inputs.runner }}-${{ env.RUNTIME_REF }}-${{ inputs.version }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
 
       - name: Install packaging dependency (Linux)
         if: runner.os == 'Linux'
@@ -185,7 +185,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: dist-runtime
-          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ inputs.runner }}-${{ env.RUNTIME_REF }}
+          key: rt-${{ runner.os }}-${{ runner.arch }}-${{ inputs.runner }}-${{ env.RUNTIME_REF }}-${{ inputs.version }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
 
       - name: Download native fixed LLVM tuple (macOS)
         if: runner.os == 'macOS'
