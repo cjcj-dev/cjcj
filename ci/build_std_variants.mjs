@@ -1,14 +1,12 @@
 #!/usr/bin/env zx
-// Build the flag-off and sticky std variants with the official C++ frontend.
+// Build the single sticky std closure with the official C++ frontend.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  OPTIMIZED_STD_SUBDIR,
   STICKY_LLC_OPTION,
-  compareStdCjos,
   copyCompiledStdLibraries,
   createStickySdkOverlay,
   stickyPreflight,
@@ -36,11 +34,10 @@ const pins = Object.fromEntries((await fs.readFile(path.join(here, 'runtime_pin.
   .split(/\r?\n/).filter(Boolean).map(line => line.split('=', 2)));
 const sourceUrl = process.env.RUNTIME_SRC_URL || pins.RUNTIME_SRC_URL;
 const sourceRef = process.env.RUNTIME_REF || pins.RUNTIME_REF;
-const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-std-variants-'));
+const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-sticky-std-'));
 const source = path.join(work, 'source');
-const flagOffSdk = path.join(work, 'flag-off-sdk');
+const buildSdk = path.join(work, 'build-sdk');
 const stickySdk = path.join(work, 'sticky-sdk');
-const flagOffCjo = path.join(work, 'flag-off-cjo');
 
 async function requireFile(file, label) {
   if (!(await fs.stat(file).catch(() => null))?.isFile()) throw new Error(`${label} missing: ${file}`);
@@ -51,15 +48,15 @@ async function sha256(file) {
   return crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 }
 
-async function createFlagOffSdkOverlay() {
-  await fs.mkdir(flagOffSdk, {recursive: true});
+async function createBuildSdkOverlay() {
+  await fs.mkdir(buildSdk, {recursive: true});
   for (const name of ['bin', 'include', 'modules', 'runtime', 'tools']) {
-    await fs.symlink(path.join(sdk, name), path.join(flagOffSdk, name), 'dir');
+    await fs.symlink(path.join(sdk, name), path.join(buildSdk, name), 'dir');
   }
-  await fs.symlink(path.join(sdk, 'third_party'), path.join(flagOffSdk, 'third_party'), 'dir');
+  await fs.symlink(path.join(sdk, 'third_party'), path.join(buildSdk, 'third_party'), 'dir');
 
   const sdkLib = path.join(sdk, 'lib');
-  const overlayLib = path.join(flagOffSdk, 'lib');
+  const overlayLib = path.join(buildSdk, 'lib');
   const sdkTargetLib = path.join(sdkLib, platform);
   const overlayTargetLib = path.join(overlayLib, platform);
   await fs.mkdir(overlayTargetLib, {recursive: true});
@@ -121,55 +118,36 @@ try {
   const actualRef = (await $({stdio: 'pipe'})`git -C ${source} rev-parse HEAD`).stdout.trim();
   if (actualRef !== sourceRef) throw new Error(`runtime source mismatch: expected ${sourceRef}, got ${actualRef}`);
 
-  await createFlagOffSdkOverlay();
-  await runBuild(flagOffSdk, 'clean');
-  const startedFlagOff = process.hrtime.bigint();
-  await runBuild(flagOffSdk, 'build', '-t', 'release', `-j${jobs}`,
-    `--target-lib=${path.join(flagOffSdk, 'runtime', 'lib', platform)}`);
-  const flagOffSeconds = Number(process.hrtime.bigint() - startedFlagOff) / 1e9;
-  await runBuild(flagOffSdk, 'install');
+  await createBuildSdkOverlay();
+  createStickySdkOverlay(buildSdk, stickySdk);
+  await runBuild(stickySdk, 'clean');
+  const startedSticky = process.hrtime.bigint();
+  await runBuild(stickySdk, 'build', '-t', 'release', `-j${jobs}`,
+    `--target-lib=${path.join(buildSdk, 'runtime', 'lib', platform)}`);
+  const stickySeconds = Number(process.hrtime.bigint() - startedSticky) / 1e9;
+  await runBuild(stickySdk, 'install');
 
   const stdlib = path.join(source, 'stdlib');
   const buildOutput = path.join(stdlib, 'build', 'build');
   const installedOutput = path.join(stdlib, 'output');
   await fs.rm(out, {recursive: true, force: true});
-  const sharedCjoDirectory = path.join(out, 'modules', platform, 'std');
-  await fs.mkdir(path.dirname(sharedCjoDirectory), {recursive: true});
-  await fs.cp(path.join(installedOutput, 'modules', platform, 'std'), sharedCjoDirectory, {
-    recursive: true,
-  });
-  const flagOffLibraries = copyCompiledStdLibraries(
-    path.join(buildOutput, 'lib', platform), path.join(out, 'lib', platform));
-  await fs.cp(path.join(installedOutput, 'modules', platform, 'std'), flagOffCjo, {recursive: true});
-
-  createStickySdkOverlay(flagOffSdk, stickySdk);
-  await runBuild(stickySdk, 'clean');
-  const startedSticky = process.hrtime.bigint();
-  await runBuild(stickySdk, 'build', '-t', 'release', `-j${jobs}`,
-    `--target-lib=${path.join(flagOffSdk, 'runtime', 'lib', platform)}`);
-  const stickySeconds = Number(process.hrtime.bigint() - startedSticky) / 1e9;
-
-  const cjoResults = compareStdCjos(flagOffCjo, path.join(buildOutput, 'modules', platform, 'std'));
-  const different = cjoResults.filter(result => !result.identical);
-  if (different.length !== 0) {
-    throw new Error(`sticky backend changed CJO bytes: ${different.map(result => result.name).join(', ')}`);
-  }
-  const stickyDirectory = path.join(out, 'lib', OPTIMIZED_STD_SUBDIR, platform);
+  const cjoDirectory = path.join(out, 'modules', platform, 'std');
+  await fs.mkdir(path.dirname(cjoDirectory), {recursive: true});
+  await fs.cp(path.join(installedOutput, 'modules', platform, 'std'), cjoDirectory, {recursive: true});
+  const stickyDirectory = path.join(out, 'lib', platform);
   const stickyLibraries = copyCompiledStdLibraries(path.join(buildOutput, 'lib', platform), stickyDirectory);
   const preflight = stickyPreflight(stickyDirectory);
 
   const manifest = {
     recipe: 'official-cjc-plus-fixed-llc', sourceUrl, sourceRef, cjcSha256,
-    cjo: {total: cjoResults.length, identical: cjoResults.length - different.length},
-    flagOff: {...flagOffLibraries, seconds: flagOffSeconds},
     sticky: {...stickyLibraries, seconds: stickySeconds, preflight},
   };
-  await fs.writeFile(path.join(out, 'STD_VARIANTS.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`STD_VARIANTS CJO=${manifest.cjo.identical}/${manifest.cjo.total} `
-    + `STICKY_PREFLIGHT=${preflight.loggedBaseSymbols}/${preflight.stickyRelocations} `
-    + `TIME=${flagOffSeconds.toFixed(2)}s+${stickySeconds.toFixed(2)}s`);
+  await fs.writeFile(path.join(out, 'STICKY_STD.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  console.log(`STICKY_STD LIBS=${stickyLibraries.files.length} `
+    + `PREFLIGHT=${preflight.loggedBaseSymbols}/${preflight.stickyRelocations} `
+    + `TIME=${stickySeconds.toFixed(2)}s`);
 } finally {
-  if (process.env.CJCJ_KEEP_STD_VARIANTS_WORK !== '1') {
+  if (process.env.CJCJ_KEEP_STICKY_STD_WORK !== '1') {
     await fs.rm(work, {recursive: true, force: true});
   } else {
     console.log(`preserving std variant work directory: ${work}`);
