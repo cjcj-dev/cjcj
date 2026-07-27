@@ -4,7 +4,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {OPTIMIZED_STD_SUBDIR, stickyPreflight} from '../build/lib/std-variants.mjs';
+import {stickyPreflight} from '../build/lib/std-variants.mjs';
 
 const required = name => {
   const value = argv[name];
@@ -18,7 +18,7 @@ const platform = required('platform');
 const outdir = required('outdir');
 const runtimeLib = typeof argv['runtime-lib'] === 'string' ? argv['runtime-lib'] : '';
 const runtimeRoot = typeof argv['runtime-root'] === 'string' ? argv['runtime-root'] : '';
-const stdVariants = typeof argv['std-variants'] === 'string' ? argv['std-variants'] : '';
+const stickyStd = typeof argv['sticky-std'] === 'string' ? argv['sticky-std'] : '';
 
 async function exists(file, kind = 'file') {
   try { const stat = await fs.stat(file); return kind === 'dir' ? stat.isDirectory() : stat.isFile(); } catch { return false; }
@@ -37,12 +37,12 @@ const platforms = {
 };
 if (!platforms[platform]) { console.error(`unsupported --platform: ${platform}`); process.exit(2); }
 const [runtimeDir, archiveType, exeSuffix] = platforms[platform];
-if (platform === 'linux-x64' && !stdVariants) {
-  console.error('Linux x64 packaging requires --std-variants');
+if (platform === 'linux-x64' && !stickyStd) {
+  console.error('Linux x64 packaging requires --sticky-std');
   process.exit(2);
 }
-if (stdVariants && !await exists(stdVariants, 'dir')) {
-  console.error(`std variants directory not found: ${stdVariants}`);
+if (stickyStd && !await exists(stickyStd, 'dir')) {
+  console.error(`sticky std directory not found: ${stickyStd}`);
   process.exit(2);
 }
 const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
@@ -60,13 +60,21 @@ else {
 }
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 
-console.log('[2/7] install std variants');
-if (stdVariants) {
-  await fs.cp(stdVariants, stage, {recursive: true, force: true});
-  const stickyLibraries = path.join(stage, 'lib', OPTIMIZED_STD_SUBDIR, runtimeDir);
-  const preflight = stickyPreflight(stickyLibraries);
-  console.log(`  sticky std: ${preflight.loggedBaseSymbols} logged-base symbols, `
-    + `${preflight.stickyRelocations} sticky relocations`);
+console.log('[2/7] install the single sticky std closure');
+if (stickyStd) {
+  await fs.rm(path.join(stage, 'lib', 'cjcj-optimization'), {recursive: true, force: true});
+  await fs.cp(stickyStd, stage, {recursive: true, force: true});
+  const stickyLibraries = path.join(stage, 'lib', runtimeDir);
+  const runtimeLibraries = path.join(stage, 'runtime', 'lib', runtimeDir);
+  for (const name of await fs.readdir(stickyLibraries)) {
+    if (name.startsWith('libcangjie-std') && name.endsWith('.so')) {
+      await fs.copyFile(path.join(stickyLibraries, name), path.join(runtimeLibraries, name));
+    }
+  }
+  const libPreflight = stickyPreflight(stickyLibraries);
+  const runtimePreflight = stickyPreflight(runtimeLibraries);
+  console.log(`  sticky std: lib=${libPreflight.loggedBaseSymbols}/${libPreflight.stickyRelocations} `
+    + `runtime=${runtimePreflight.loggedBaseSymbols}/${runtimePreflight.stickyRelocations}`);
 } else {
   console.log('  skip: this target has no sticky std variant');
 }
