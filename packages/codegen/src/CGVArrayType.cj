@@ -4,6 +4,7 @@ import std.collection.*
 import cjcj::chir.MangleType
 import cjcj::chir.Type
 import cjcj::chir.VArrayType
+import cjcj::utils.InternalError
 
 public class CGVArrayType <: CGType {
     public init(cgMod: CGModule, cgCtx: CGContext, chirType: Type) {
@@ -46,7 +47,11 @@ public class CGVArrayType <: CGType {
 
     protected override func CalculateSizeAndAlign(): Unit {
         if (let Some(arrayType) <- llvmType) {
-            size = Int64(UInt32(cgMod.GetTypeSize(arrayType) & UInt64(UInt32.Max)))
+            let layoutSize = cgMod.GetTypeSize(arrayType)
+            if (layoutSize > UInt64(UInt32.Max)) {
+                InternalError("VArray layout size ${layoutSize} exceeds UInt32 range")
+            }
+            size = Int64(layoutSize)
             align = Int64(cgMod.GetABITypeAlignment(arrayType))
         }
     }
