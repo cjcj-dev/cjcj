@@ -28,6 +28,11 @@ on:
         required: false
         type: boolean
         default: false
+      runtime_ref:
+        description: "Dry-run only: test an exact 40-character runtime commit instead of ci/runtime_pin.env"
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -84,6 +89,8 @@ jobs:
       llvm_platform: ${{ matrix.llvm_platform }}
       sdk_runtime_dir: ${{ matrix.sdk_runtime_dir }}
       version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
     secrets: inherit
 
   publish:
