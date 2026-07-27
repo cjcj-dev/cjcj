@@ -135,10 +135,18 @@ try {
   const stickyDirectory = path.join(out, 'lib', platform);
   const stickyLibraries = copyCompiledStdLibraries(path.join(buildOutput, 'lib', platform), stickyDirectory);
   const preflight = stickyPreflight(stickyDirectory);
+  const librarySha256 = Object.fromEntries(await Promise.all(stickyLibraries.files.map(async name =>
+    [name, await sha256(path.join(stickyDirectory, name))])));
+  const cjoFiles = (await fs.readdir(cjoDirectory)).filter(name => name.endsWith('.cjo')).sort();
+  if (cjoFiles.length === 0) throw new Error('sticky std build produced no CJO files');
+  const cjoSha256 = Object.fromEntries(await Promise.all(cjoFiles.map(async name =>
+    [name, await sha256(path.join(cjoDirectory, name))])));
 
   const manifest = {
-    recipe: 'official-cjc-plus-fixed-llc', sourceUrl, sourceRef, cjcSha256,
-    sticky: {...stickyLibraries, seconds: stickySeconds, preflight},
+    recipe: 'official-cjc-plus-fixed-llc', closure: 'single-sticky', role: 'final',
+    provenance: 'official-cjc-sticky-lowering', sourceUrl, sourceRef, cjcSha256,
+    sticky: {...stickyLibraries, sha256: librarySha256, seconds: stickySeconds, preflight},
+    cjo: {files: cjoFiles, sha256: cjoSha256},
   };
   await fs.writeFile(path.join(out, 'STICKY_STD.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`STICKY_STD LIBS=${stickyLibraries.files.length} `
