@@ -63,15 +63,23 @@ await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 console.log('[2/7] install the single sticky std closure');
 if (stickyStd) {
   await fs.rm(path.join(stage, 'lib', 'cjcj-optimization'), {recursive: true, force: true});
-  await fs.cp(stickyStd, stage, {recursive: true, force: true});
-  const stickyLibraries = path.join(stage, 'lib', runtimeDir);
+  const standardLibraries = path.join(stage, 'lib', runtimeDir);
   const runtimeLibraries = path.join(stage, 'runtime', 'lib', runtimeDir);
-  for (const name of await fs.readdir(stickyLibraries)) {
-    if (name.startsWith('libcangjie-std') && name.endsWith('.so')) {
-      await fs.copyFile(path.join(stickyLibraries, name), path.join(runtimeLibraries, name));
+  for (const directory of [standardLibraries, runtimeLibraries]) {
+    for (const name of await fs.readdir(directory)) {
+      if (name.startsWith('libcangjie-std') && /\.(?:a|so|dylib)$/.test(name)) {
+        await fs.rm(path.join(directory, name), {force: true});
+      }
     }
   }
-  const libPreflight = stickyPreflight(stickyLibraries);
+  await fs.rm(path.join(stage, 'modules', runtimeDir, 'std'), {recursive: true, force: true});
+  await fs.cp(stickyStd, stage, {recursive: true, force: true});
+  for (const name of await fs.readdir(standardLibraries)) {
+    if (name.startsWith('libcangjie-std') && name.endsWith('.so')) {
+      await fs.copyFile(path.join(standardLibraries, name), path.join(runtimeLibraries, name));
+    }
+  }
+  const libPreflight = stickyPreflight(standardLibraries);
   const runtimePreflight = stickyPreflight(runtimeLibraries);
   console.log(`  sticky std: lib=${libPreflight.loggedBaseSymbols}/${libPreflight.stickyRelocations} `
     + `runtime=${runtimePreflight.loggedBaseSymbols}/${runtimePreflight.stickyRelocations}`);
