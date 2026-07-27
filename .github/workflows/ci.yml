@@ -57,9 +57,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: ubuntu-24.04, experimental: false }
-          - { runner: ubuntu-22.04, experimental: false }
-          - { runner: ubuntu-26.04, experimental: true }
+          - { runner: ubuntu-24.04, llvm_platform: linux_x86_64, experimental: false }
+          - { runner: ubuntu-22.04, llvm_platform: linux_x86_64, experimental: false }
+          - { runner: ubuntu-26.04, llvm_platform: linux_x86_64, experimental: true }
+          # Preserve the existing non-gating ARM policy while upgrading its
+          # coverage from official-SDK provisioning to a native cjcj build+smoke.
+          - { runner: ubuntu-24.04-arm, llvm_platform: linux_aarch64, experimental: true }
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
@@ -69,8 +72,8 @@ jobs:
       - name: Download LLVM tools
         uses: actions/download-artifact@v8
         with:
-          name: fixed-llvm-tools-linux_x86_64
-          path: fixed-toolchain/linux_x86_64
+          name: fixed-llvm-tools-${{ matrix.llvm_platform }}
+          path: fixed-toolchain/${{ matrix.llvm_platform }}
       - name: Restore SDK cache
         id: sdkcache
         uses: actions/cache/restore@v6
@@ -88,7 +91,7 @@ jobs:
         id: setup
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-          FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/llc.gz
+          FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/llc.gz
         run: npx --yes zx@8 ci/setup_sdk.mjs
       # Save only after a successful install so a partial ~/.cjv is never cached.
       - name: Save SDK cache
@@ -123,7 +126,7 @@ jobs:
         run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
       - name: Build runtime shim
         env:
-          CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/cjselfhost_llvmshim.o
+          CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/cjselfhost_llvmshim.o
         run: npx --yes zx@8 runtime_shim/build_shim.mjs
       - name: Build workspace
         run: cjpm build
@@ -135,7 +138,7 @@ jobs:
       - name: Run smoke tests
         run: npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj"
 
-  # Non-gating: verifies SDK provisioning on non-x64 platforms; does not build cjcj.
+  # Non-gating: verifies SDK provisioning on macOS; does not build cjcj.
   provision:
     name: ${{ matrix.runner }} / Verify SDK
     runs-on: ${{ matrix.runner }}
@@ -144,7 +147,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04-arm, macos-latest]
+        runner: [macos-latest]
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
