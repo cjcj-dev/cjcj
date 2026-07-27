@@ -293,6 +293,9 @@ jobs:
           pkg="cjcj-${{ inputs.version }}-${{ inputs.platform }}"
           mkdir -p pkgtest
           tar -C pkgtest -xzf "dist/${pkg}.tar.gz"
+          if [ "${{ inputs.platform }}" = "linux-x64" ]; then
+            node ci/verify_sticky_package.mjs "$PWD/pkgtest/${pkg}"
+          fi
           # shellcheck disable=SC1090
           source "$PWD/pkgtest/${pkg}/envsetup.sh"
           export cjHeapSize=12GB
