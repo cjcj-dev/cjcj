@@ -70,8 +70,8 @@ if (runEndToEnd) {
   const cjc = await requireFile(path.join(root, 'bin', 'cjc'), 'packaged cjc');
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-packaged-llc-'));
   const source = path.join(work, 'sticky_package_probe.cj');
-  const flagOff = path.join(work, 'flag-off.a');
-  const flagOn = path.join(work, 'flag-on.a');
+  const flagOff = path.join(work, 'flag-off.o');
+  const flagOn = path.join(work, 'flag-on.o');
   const buildEnvironment = {
     ...process.env,
     CANGJIE_HOME: root,
@@ -102,7 +102,7 @@ if (runEndToEnd) {
       '}',
       '',
     ].join('\n'));
-    const common = [source, '-O2', '--output-type=staticlib'];
+    const common = [source, '-O2', '--output-type=obj'];
     run(cjc, [...common, '-o', flagOff], {env: buildEnvironment});
     run(cjc, [...common, '--cjcj-optimization', '-o', flagOn], {env: buildEnvironment});
 
