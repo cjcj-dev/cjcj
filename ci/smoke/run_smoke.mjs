@@ -233,7 +233,7 @@ if (result.exitCode !== 0) {
   macroOk = false;
 }
 if (macroOk) {
-  result = await runCommand(cjcj, ['main.cj', '--import-path', path.join(macroBuild, 'mymacros'), '-o', path.join(macroBuild, `app/app${exeSuffix}`)], path.join(macroBuild, 'app'));
+  result = await runCommand(cjcj, ['main.cj', '--import-path', macroBuild, '-o', path.join(macroBuild, `app/app${exeSuffix}`)], path.join(macroBuild, 'app'));
   await fs.writeFile(path.join(work, 'macro.app.log'), result.stdout + result.stderr);
   if (result.exitCode !== 0) {
     console.log('[smoke] macro app compile failed');
