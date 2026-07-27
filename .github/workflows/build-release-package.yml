@@ -323,7 +323,12 @@ jobs:
           pkg="cjcj-${{ inputs.version }}-${{ inputs.platform }}"
           mkdir -p pkgtest
           tar -C pkgtest -xzf "dist/${pkg}.tar.gz"
+          llc_gate_args=()
+          if [ "${{ inputs.platform }}" = "linux-x64" ]; then
+            llc_gate_args=(--require-stock-control --e2e)
+          fi
           node ci/verify_sticky_package.mjs "$PWD/pkgtest/${pkg}" "${{ inputs.sdk_runtime_dir }}"
+          node ci/verify_packaged_llc.mjs "$PWD/pkgtest/${pkg}" "${llc_gate_args[@]}"
           # shellcheck disable=SC1090
           source "$PWD/pkgtest/${pkg}/envsetup.sh"
           export cjHeapSize=12GB
@@ -342,6 +347,8 @@ jobs:
           try {
             Expand-Archive -LiteralPath "dist\$pkg.zip" -DestinationPath $extract -Force
             $root = Join-Path $extract $pkg
+            node ci/verify_packaged_llc.mjs $root
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $env:CJCJ_OFFICIAL_SDK_HOME = $env:CANGJIE_HOME
             $env:CANGJIE_HOME = $root
             $env:cjHeapSize = '12GB'
