@@ -35,7 +35,7 @@ import cjcj::chir.Value
 import cjcj::chir.VArrayBuilder
 import cjcj::chir.VArrayType
 import cjcj::option.{ArchType, EnvironmentType, OptimizationLevel}
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, StaticCast}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, InternalError, StaticCast}
 
 private let CREATE_OVERFLOW_EXCEPTION_FUNC_NAME: String = "rt$CreateOverflowException_msg"
 private let CREATE_ARITHMETIC_EXCEPTION_FUNC_NAME: String = "rt$CreateArithmeticException_msg"
@@ -5707,7 +5707,27 @@ public class IRBuilder2 <: Resource {
         let whileLoopHeader = blocks[0]
         let whileLoopBody = blocks[1]
         let afterWhileLoop = blocks[2]
-        let sizeOfSingleCopy = GetInt64(2147483640)
+        // Intentionally diverges from CodeGen/Base/IntrinsicsDispatcher.cpp:231-233 to fix upstream UB-003:
+        // element alignment is required for correctness; the upstream 8-byte alignment can split an element.
+        let elementSize = if (let Some(size) <- arrayCopyToInfo.elemType.GetSize()) {
+            size
+        } else {
+            Int64(cgMod.GetTypeSize(arrayCopyToInfo.elemType.GetLLVMType()))
+        }
+        if (elementSize <= 0) {
+            InternalError("array element size must be positive for chunked array copy")
+            return
+        }
+        if (elementSize > 2147483647) {
+            InternalError("array element size exceeds the current 2 GiB array-copy implementation limit")
+            return
+        }
+        let sizeOfSingleCopyValue = 2147483647 - 2147483647 % elementSize
+        if (sizeOfSingleCopyValue <= 0) {
+            InternalError("array copy chunk size must be positive")
+            return
+        }
+        let sizeOfSingleCopy = GetInt64(sizeOfSingleCopyValue)
         let i64Ty = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
         let iterator = CreateEntryAlloca(i64Ty, name: "iterator")
         CreateStore(GetInt64(0), iterator)
