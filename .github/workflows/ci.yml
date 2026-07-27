@@ -11,6 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # 临时测试分支：显式打开分代 GC，验证 ON 路径（默认 OFF，见 StickyLog.cpp:31-35）
+  MRT_STICKY_MINOR: '1'
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
   # RUNTIME_REF/RUNTIME_VERSION come from ci/runtime_pin.env via the "Load runtime pin" step.
 
