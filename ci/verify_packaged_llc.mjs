@@ -102,7 +102,7 @@ if (runEndToEnd) {
       '}',
       '',
     ].join('\n'));
-    const common = [source, '-O2', '--output-type=obj'];
+    const common = [source, '-O2', '--experimental', '--output-type=obj'];
     run(cjc, [...common, '-o', flagOff], {env: buildEnvironment});
     run(cjc, [...common, '--cjcj-optimization', '-o', flagOn], {env: buildEnvironment});
 
