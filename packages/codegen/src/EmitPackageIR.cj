@@ -81,11 +81,10 @@ private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
     return result
 }
 
-// Mirrors EmitPackageIR.cpp:351-415.
+// Mirrors EmitPackageIR.cpp:351-358. All split modules finish this definition-emission phase
+// before GenSubCHIRPackagePart2 builds the package reset closure.
 private func GenSubCHIRPackage(cgMod: CGModule): Unit {
     let subCHIRPackage = cgMod.GetCGContext().GetSubCHIRPackage()
-    let options = cgMod.GetCGContext().GetCGPkgContext().GetGlobalOptions()
-    var subDirNum: Int64 = 0
     EmitTIOrTTForCustomDefs(cgMod)
     for (globalVar in subCHIRPackage.chirGVs) {
         EmitGlobalVariableIR(cgMod, globalVar)
@@ -96,6 +95,13 @@ private func GenSubCHIRPackage(cgMod: CGModule): Unit {
     for (chirFunc in subCHIRPackage.chirImportedCFuncs) {
         EmitImportedCFuncIR(cgMod, chirFunc)
     }
+}
+
+// Mirrors the remainder of C++ GenSubCHIRPackage at EmitPackageIR.cpp:359-415.
+private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
+    let subCHIRPackage = cgMod.GetCGContext().GetSubCHIRPackage()
+    let options = cgMod.GetCGContext().GetCGPkgContext().GetGlobalOptions()
+    var subDirNum: Int64 = 0
     if (subCHIRPackage.mainModule) {
         // Mirror C++ EmitPackageIR.cpp:359: the main-module block runs for every output type,
         // including libraries. Emitting the SDK version and the package-init-reset function is
@@ -151,11 +157,22 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
             GenSubCHIRPackage(cgModule)
         }
     } else {
-        let taskQueueCHIRIR2LLVMIR = TaskQueue(threadNum)
+        let taskQueueDefinitions = TaskQueue(threadNum)
         for (cgModule in cgModules) {
-            let _ = taskQueueCHIRIR2LLVMIR.AddTask<Unit>({ => GenSubCHIRPackage(cgModule) })
+            let _ = taskQueueDefinitions.AddTask<Unit>({ => GenSubCHIRPackage(cgModule) })
         }
-        taskQueueCHIRIR2LLVMIR.RunAndWaitForAllTasksCompleted()
+        taskQueueDefinitions.RunAndWaitForAllTasksCompleted()
+    }
+    if (threadNum == 1) {
+        for (cgModule in cgModules) {
+            GenSubCHIRPackagePart2(cgModule)
+        }
+    } else {
+        let taskQueueFinalize = TaskQueue(threadNum)
+        for (cgModule in cgModules) {
+            let _ = taskQueueFinalize.AddTask<Unit>({ => GenSubCHIRPackagePart2(cgModule) })
+        }
+        taskQueueFinalize.RunAndWaitForAllTasksCompleted()
     }
     if (options.NeedDumpIRToScreen()) {
         for (cgModule in cgModules) {
@@ -960,7 +977,10 @@ private func CallDependentPackageGlobalResetCall(irBuilder: IRBuilder2): Unit {
     let pkgInitFuncName = GetPackageInitFuncName(irBuilder.GetCGModule()) ?? return
     let initFunc = GetNamedFunctionOpt(irBuilder.GetCGModule(), pkgInitFuncName) ?? return
     let giList = ArrayList<String>()
-    CollectDependentPackages(initFunc, giList)
+    let visitedFunctions = HashSet<String>()
+    let dependentPackages = HashSet<String>()
+    CollectDependentPackages(irBuilder.GetCGModule().GetCGContext().GetCGPkgContext(), initFunc, giList,
+        visitedFunctions, dependentPackages)
     let giFuncType = unsafe {
         LLVMFunctionType(LLVMVoidTypeInContext(irBuilder.GetLLVMContext().raw), CPointer<LLVMTypeRef>(), 0u32, 0)
     }
@@ -971,8 +991,8 @@ private func CallDependentPackageGlobalResetCall(irBuilder: IRBuilder2): Unit {
     }
 }
 
-private func CollectDependentPackages(llvmFunc: LLVMValueRef, giList: ArrayList<String>): Unit {
-    CJC_ASSERT(unsafe { LLVMIsDeclaration(llvmFunc) } == 0)
+private func CollectDependentPackages(cgPkgContext: CGPkgContext, llvmFunc: LLVMValueRef,
+    giList: ArrayList<String>, visitedFunctions: HashSet<String>, dependentPackages: HashSet<String>): Unit {
     let isCallInstSymbol = LookupLLVMOptionalSymbol("LLVMIsACallInst")
     let getCalledValueSymbol = LookupLLVMOptionalSymbol("LLVMGetCalledValue")
     if (isCallInstSymbol.isNull() || getCalledValueSymbol.isNull()) {
@@ -985,7 +1005,24 @@ private func CollectDependentPackages(llvmFunc: LLVMValueRef, giList: ArrayList<
     let callDependentPackagesInitsSuffix = SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION +
         MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
 
-    var block = unsafe { LLVMGetFirstBasicBlock(llvmFunc) }
+    let functionName = LLVMCStringToString(unsafe { LLVMGetValueName(llvmFunc) }) ?? ""
+    if (visitedFunctions.contains(functionName)) {
+        return
+    }
+    visitedFunctions.add(functionName)
+    var definition = llvmFunc
+    if (unsafe { LLVMIsDeclaration(definition) } != 0) {
+        for (cgModule in cgPkgContext.GetCGModules()) {
+            if (let Some(candidate) <- GetNamedFunctionOpt(cgModule, functionName)) {
+                if (unsafe { LLVMIsDeclaration(candidate) } == 0) {
+                    definition = candidate
+                    break
+                }
+            }
+        }
+    }
+
+    var block = unsafe { LLVMGetFirstBasicBlock(definition) }
     while (!block.isNull()) {
         var inst = unsafe { LLVMGetFirstInstruction(block) }
         while (!inst.isNull()) {
@@ -993,8 +1030,9 @@ private func CollectDependentPackages(llvmFunc: LLVMValueRef, giList: ArrayList<
                 let callee = unsafe { getCalledValue(inst) }
                 if (!callee.isNull() && !unsafe { LLVMIsAFunction(callee) }.isNull()) {
                     let calleeName = LLVMCStringToString(unsafe { LLVMGetValueName(callee) }) ?? ""
-                    CollectDependentPackageByCalleeName(callee, calleeName, callDependentPackageInitSuffix,
-                        callDependentPackagesInitsSuffix, giList)
+                    CollectDependentPackageByCalleeName(cgPkgContext, callee, calleeName,
+                        callDependentPackageInitSuffix, callDependentPackagesInitsSuffix, giList,
+                        visitedFunctions, dependentPackages)
                 }
             }
             inst = unsafe { LLVMGetNextInstruction(inst) }
@@ -1079,9 +1117,9 @@ private func GenerateBinarySectionInfo(cgMod: CGModule): Unit {
     unsafe { LLVMSelfhostDisposeCallGraphWrapperPass(callGraph) }
 }
 
-private func CollectDependentPackageByCalleeName(callee: LLVMValueRef, calleeName: String,
+private func CollectDependentPackageByCalleeName(cgPkgContext: CGPkgContext, callee: LLVMValueRef, calleeName: String,
     callDependentPackageInitSuffix: String, callDependentPackagesInitsSuffix: String,
-    giList: ArrayList<String>): Unit {
+    giList: ArrayList<String>, visitedFunctions: HashSet<String>, dependentPackages: HashSet<String>): Unit {
     if (calleeName.size < callDependentPackageInitSuffix.size) {
         return
     }
@@ -1089,9 +1127,13 @@ private func CollectDependentPackageByCalleeName(callee: LLVMValueRef, calleeNam
     let calleePrefix = calleeName[0..calleePrefixSize]
     let calleeSuffix = calleeName[calleePrefixSize..]
     if (calleeSuffix == callDependentPackagesInitsSuffix) {
-        CollectDependentPackages(callee, giList)
+        CollectDependentPackages(cgPkgContext, callee, giList, visitedFunctions, dependentPackages)
     } else if (calleeName.startsWith(PKG_GV_INIT_PREFIX)) {
-        giList.add(calleePrefix + callDependentPackageInitSuffix)
+        let dependentPackage = calleePrefix + callDependentPackageInitSuffix
+        if (!dependentPackages.contains(dependentPackage)) {
+            dependentPackages.add(dependentPackage)
+            giList.add(dependentPackage)
+        }
     }
 }
 
