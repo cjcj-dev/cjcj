@@ -28,6 +28,12 @@ const DEFAULT_SAMPLES = [
 const SDK_VERSION_RE = /1\.2\.0-alpha\.\d{14}/g;
 const SDK_VERSION_CANONICAL = '1.2.0-alpha.00000000000000';
 const LAYERS = ['pre-opt-globals', 'post-opt', 'object', 'linked-elf'];
+const GATE_CONTRACT = {
+  partialRuns: 'FORBIDDEN',
+  reason: 'IR entity ordering is interpreted only together with object and linked-ELF results; a partial run would measure LLVM printer order without testing propagation',
+  orderSensitiveIrEntities: ['defined global', 'alias', 'comdat', 'defined function'],
+  nameStructuredIrEntities: ['named type', 'external global declaration', 'function declaration', 'named metadata', 'module property'],
+};
 
 const NORMALIZATION_RULES = [
   {
@@ -59,7 +65,7 @@ Optional:
   --llvm-dis PATH        llvm-dis path (default: $CANGJIE_HOME/third_party/llvm/bin/llvm-dis)
   --positive-control     run the global-order B-class injection arm (default)
   --no-positive-control  omit the injection arm
-  --describe-normalization  print the exact Class-A allowlist and exit
+  --describe-normalization  print the Class-A allowlist and indivisible-layer contract, then exit
   --help                  show this help
 
 The normal gate exits 0 only when all four layers pass for every sample, all
@@ -703,7 +709,6 @@ function positiveControl(candidateArtifacts, sample) {
 
   const common = {
     sample,
-    class: 'B',
     baselinePass: selfBaseline.pass,
     redLayer: 'pre-opt-globals',
     restored: true,
@@ -713,6 +718,7 @@ function positiveControl(candidateArtifacts, sample) {
     {
       ...common,
       name: 'global-order',
+      class: 'B',
       injection: 'swap-pre-opt-global-definition-order',
       targets: orderNames,
       detected: !orderInjected.pass,
@@ -721,6 +727,7 @@ function positiveControl(candidateArtifacts, sample) {
     {
       ...common,
       name: 'type-structure',
+      class: 'C',
       injection: 'prepend-i8-field-to-named-type',
       targets: [typeName],
       detected: !typeInjected.pass,
@@ -748,7 +755,7 @@ function printRound(round) {
 function main() {
   const opts = parseArgs(runtimeArgs());
   if (opts.describeNormalization) {
-    console.log(JSON.stringify(NORMALIZATION_RULES, null, 2));
+    console.log(JSON.stringify({ normalizationRules: NORMALIZATION_RULES, gateContract: GATE_CONTRACT }, null, 2));
     return 0;
   }
   const required = ['candidate', 'official', 'corpus', 'evidenceDir', 'scratch', 'cpus'];
@@ -813,10 +820,12 @@ function main() {
       sha256: sha256File(source),
     }])),
     normalizationRules: NORMALIZATION_RULES,
+    gateContract: GATE_CONTRACT,
   };
   writeFileSync(path.join(evidenceDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
   const rounds = [];
+  console.log(`RAWGATE_CONTRACT layers=${LAYERS.join(',')} partial_runs=${GATE_CONTRACT.partialRuns}`);
   let controlArtifacts = null;
   for (let roundNumber = 1; roundNumber <= opts.rounds; roundNumber += 1) {
     const roundDir = path.join(evidenceDir, `round-${roundNumber}`);
