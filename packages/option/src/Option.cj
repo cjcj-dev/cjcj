@@ -1520,7 +1520,7 @@ public open class GlobalOptions <: Option {
             aggressiveParallelCompile = jobs
             UtilsSemaphore.Get().SetCount(Int64(jobs.value + 2u64))
         } else if (!aggressiveParallelCompile.hasValue) {
-            aggressiveParallelCompile = MaybeUInt64(1u64)
+            aggressiveParallelCompile = MaybeUInt64(16u64)
         }
         if (target.env == EnvironmentType.OHOS) {
             if (let Some(staticStd) <- linkStaticStd) {
