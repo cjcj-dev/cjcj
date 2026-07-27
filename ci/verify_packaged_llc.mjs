@@ -4,8 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {STICKY_LLC_OPTION} from '../build/lib/std-variants.mjs';
 
-const STICKY_LLC_OPTION = '--cjcj-sticky-logged-map';
 const STICKY_SYMBOLS = [
   '__cj_sticky_logged_base',
   '__cj_sticky_heap_base',
@@ -39,7 +39,8 @@ function run(executable, args, options = {}) {
 }
 
 function stickyOptionCount(executable) {
-  return (run(executable, ['--help-hidden']).match(/cjcj-sticky-logged-map/g) || []).length;
+  const optionName = STICKY_LLC_OPTION.replace(/^--/, '');
+  return run(executable, ['--help-hidden']).split(optionName).length - 1;
 }
 
 function stickySymbolCount(text) {
