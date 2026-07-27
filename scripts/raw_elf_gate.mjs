@@ -113,6 +113,22 @@ function parseArgs(argv) {
   return opts;
 }
 
+function runtimeArgs() {
+  const zxArgv = globalThis.argv;
+  if (!zxArgv || !Array.isArray(zxArgv._)) return process.argv.slice(2);
+  const tokens = [...zxArgv._.map(String)];
+  for (const [key, rawValue] of Object.entries(zxArgv)) {
+    if (key === '_') continue;
+    const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+    for (const value of values) {
+      if (value === false) tokens.push(`--no-${key}`);
+      else if (value === true) tokens.push(`--${key}`);
+      else tokens.push(`--${key}`, String(value));
+    }
+  }
+  return tokens;
+}
+
 function sha256Buffer(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }
@@ -670,7 +686,7 @@ function printRound(round) {
 }
 
 function main() {
-  const opts = parseArgs(process.argv.slice(2));
+  const opts = parseArgs(runtimeArgs());
   if (opts.describeNormalization) {
     console.log(JSON.stringify(NORMALIZATION_RULES, null, 2));
     return 0;
