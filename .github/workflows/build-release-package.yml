@@ -55,6 +55,9 @@ jobs:
       - name: Checkout cjcj
         uses: actions/checkout@v7
 
+      - name: Test release build helpers
+        run: node --test build/test/std-variants.test.mjs build/test/runtime-pin.test.mjs
+
       - name: Load and validate runtime pin
         shell: bash
         env:
