@@ -302,6 +302,19 @@ function entityName(line) {
   return match?.[1] ?? match?.[2] ?? line.slice(0, 80);
 }
 
+function isExternalGlobal(line) {
+  return /^@[^=]+ =\s+(?:external|extern_weak)\b/.test(line);
+}
+
+function entity(kind, line, text, orderSensitive) {
+  return {
+    kind,
+    name: entityName(line),
+    orderSensitive,
+    text: `${kind}|${text}`,
+  };
+}
+
 function semanticStatement(statement, support, label) {
   return canonicalizeMetadata(expandAttributes(statement, support.attributes, label), support.metadata, label);
 }
@@ -318,11 +331,14 @@ function extractPreOptGlobals(rawText, label) {
     else if (/^![A-Za-z_][A-Za-z0-9_.]* = /.test(line)) kind = 'named-metadata';
     else if (/^(target datalayout|target triple|module asm) = /.test(line)) kind = 'module-property';
     else continue;
-    entities.push({
+    if (kind === 'global' && isExternalGlobal(line)) kind = 'global-declaration';
+    const orderSensitive = ['global', 'alias', 'comdat'].includes(kind);
+    entities.push(entity(
       kind,
-      name: entityName(line),
-      text: `${kind}|${semanticStatement(line, support, `${label}:${entityName(line)}`)}`,
-    });
+      line,
+      semanticStatement(line, support, `${label}:${entityName(line)}`),
+      orderSensitive,
+    ));
   }
   if (!entities.some((entity) => entity.kind === 'global')) {
     throw new Error(`${label}: no pre-opt globals captured`);
@@ -370,11 +386,12 @@ function extractPostOpt(rawText, label) {
       }
       if (body.at(-1) !== '}') throw new Error(`${label}: unterminated function ${entityName(line)}`);
       const localCanonical = localTokenTransform(body.join('\n'), typeNames);
-      entities.push({
-        kind: 'function-definition',
-        name: entityName(line),
-        text: `function-definition|${semanticStatement(localCanonical, support, `${label}:${entityName(line)}`)}`,
-      });
+      entities.push(entity(
+        'function-definition',
+        line,
+        semanticStatement(localCanonical, support, `${label}:${entityName(line)}`),
+        true,
+      ));
       continue;
     }
     let kind;
@@ -385,11 +402,14 @@ function extractPostOpt(rawText, label) {
     else if (/^![A-Za-z_][A-Za-z0-9_.]* = /.test(line)) kind = 'named-metadata';
     else if (/^(source_filename|target datalayout|target triple|module asm) = /.test(line)) kind = 'module-property';
     else continue;
-    entities.push({
+    if (kind === 'global' && isExternalGlobal(line)) kind = 'global-declaration';
+    const orderSensitive = ['global', 'alias', 'comdat'].includes(kind);
+    entities.push(entity(
       kind,
-      name: entityName(line),
-      text: `${kind}|${semanticStatement(line, support, `${label}:${entityName(line)}`)}`,
-    });
+      line,
+      semanticStatement(line, support, `${label}:${entityName(line)}`),
+      orderSensitive,
+    ));
   }
   if (!entities.some((entity) => entity.kind === 'function-definition')) {
     throw new Error(`${label}: no post-opt function definitions captured`);
@@ -397,8 +417,23 @@ function extractPostOpt(rawText, label) {
   return { entities, observations: normalized.observations };
 }
 
+function comparisonEntities(entities) {
+  const emitted = entities.filter((item) => item.orderSensitive);
+  const structural = entities.filter((item) => !item.orderSensitive).sort((left, right) => (
+    left.kind.localeCompare(right.kind)
+      || left.name.localeCompare(right.name)
+      || left.text.localeCompare(right.text)
+  ));
+  return [
+    entity('comparison-boundary', 'order-sensitive', 'emitted-definition-order', true),
+    ...emitted,
+    entity('comparison-boundary', 'name-structured', 'non-emitted-entities-by-name', false),
+    ...structural,
+  ];
+}
+
 function serializeEntities(entities) {
-  return Buffer.from(entities.map((entity) => entity.text).join('\n\n'), 'utf8');
+  return Buffer.from(comparisonEntities(entities).map((item) => item.text).join('\n\n'), 'utf8');
 }
 
 function firstEntityDifference(left, right) {
@@ -540,7 +575,10 @@ function compareEntityLayer(official, candidate) {
     candidateSha256: sha256Buffer(candidateBytes),
     officialEntityCount: official.entities.length,
     candidateEntityCount: candidate.entities.length,
-    firstDifference: pass ? null : firstEntityDifference(official.entities, candidate.entities),
+    firstDifference: pass ? null : firstEntityDifference(
+      comparisonEntities(official.entities),
+      comparisonEntities(candidate.entities),
+    ),
     normalization: [...official.observations, ...candidate.observations],
   };
 }
@@ -647,26 +685,48 @@ function resultSignature(result) {
 function positiveControl(candidateArtifacts, sample) {
   const pre = extractPreOptGlobals(readFileSync(candidateArtifacts.preLl, 'utf8'), `${sample}:positive-control`);
   const selfBaseline = compareEntityLayer(pre, pre);
-  const mutated = pre.entities.map((entity) => ({ ...entity }));
-  const globalIndices = mutated.flatMap((entity, index) => entity.kind === 'global' ? [index] : []);
+  const orderMutation = pre.entities.map((item) => ({ ...item }));
+  const globalIndices = orderMutation.flatMap((item, index) => item.kind === 'global' ? [index] : []);
   if (globalIndices.length < 2) throw new Error(`${sample}: positive control needs at least two globals`);
   const first = globalIndices[0];
   const second = globalIndices[1];
-  const names = [mutated[first].name, mutated[second].name];
-  [mutated[first], mutated[second]] = [mutated[second], mutated[first]];
-  const injected = compareEntityLayer(pre, { ...pre, entities: mutated });
-  return {
+  const orderNames = [orderMutation[first].name, orderMutation[second].name];
+  [orderMutation[first], orderMutation[second]] = [orderMutation[second], orderMutation[first]];
+  const orderInjected = compareEntityLayer(pre, { ...pre, entities: orderMutation });
+
+  const typeMutation = pre.entities.map((item) => ({ ...item }));
+  const typeIndex = typeMutation.findIndex((item) => item.kind === 'type' && item.text.includes(' = type {'));
+  if (typeIndex < 0) throw new Error(`${sample}: positive control needs a structured named type`);
+  const typeName = typeMutation[typeIndex].name;
+  typeMutation[typeIndex].text = typeMutation[typeIndex].text.replace(' = type {', ' = type { i8,');
+  const typeInjected = compareEntityLayer(pre, { ...pre, entities: typeMutation });
+
+  const common = {
     sample,
     class: 'B',
-    injection: 'swap-pre-opt-global-definition-order',
-    names,
     baselinePass: selfBaseline.pass,
-    detected: !injected.pass,
-    redLayer: injected.pass ? null : 'pre-opt-globals',
+    redLayer: 'pre-opt-globals',
     restored: true,
     sourceOrArtifactModified: false,
-    firstDifference: injected.firstDifference,
   };
+  return [
+    {
+      ...common,
+      name: 'global-order',
+      injection: 'swap-pre-opt-global-definition-order',
+      targets: orderNames,
+      detected: !orderInjected.pass,
+      firstDifference: orderInjected.firstDifference,
+    },
+    {
+      ...common,
+      name: 'type-structure',
+      injection: 'prepend-i8-field-to-named-type',
+      targets: [typeName],
+      detected: !typeInjected.pass,
+      firstDifference: typeInjected.firstDifference,
+    },
+  ];
 }
 
 function printRound(round) {
@@ -796,13 +856,13 @@ function main() {
 
   const signatures = rounds.map(resultSignature);
   const reproducible = signatures.slice(1).every((signature) => JSON.stringify(signature) === JSON.stringify(signatures[0]));
-  const positive = opts.positiveControl ? positiveControl(controlArtifacts, opts.samples[0]) : null;
-  if (positive) {
-    console.log(`RAWGATE_POSITIVE_CONTROL baseline=${positive.baselinePass ? 'PASS' : 'FAIL'} injection=${positive.injection} class=${positive.class} detected=${positive.detected ? 'YES' : 'NO'} red_layer=${positive.redLayer ?? 'none'} restored=${positive.restored ? 'YES' : 'NO'}`);
+  const positive = opts.positiveControl ? positiveControl(controlArtifacts, opts.samples[0]) : [];
+  for (const control of positive) {
+    console.log(`RAWGATE_POSITIVE_CONTROL name=${control.name} baseline=${control.baselinePass ? 'PASS' : 'FAIL'} injection=${control.injection} class=${control.class} detected=${control.detected ? 'YES' : 'NO'} red_layer=${control.detected ? control.redLayer : 'none'} restored=${control.restored ? 'YES' : 'NO'}`);
   }
   console.log(`RAWGATE_REPRODUCIBLE rounds=${opts.rounds} result=${reproducible ? 'PASS' : 'FAIL'}`);
   const allParity = rounds.every((round) => round.samples.every((sample) => LAYERS.every((layer) => sample.layers[layer].pass)));
-  const controlPass = !positive || (positive.baselinePass && positive.detected && positive.restored);
+  const controlPass = positive.every((control) => control.baselinePass && control.detected && control.restored);
   const summary = {
     schema: 1,
     completedAt: new Date().toISOString(),
