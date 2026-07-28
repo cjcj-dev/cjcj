@@ -100,6 +100,12 @@ if (process.platform === 'linux') {
   process.exit(5);
 }
 
+if (runtimeTarget === 'windows-x86_64') {
+  const exportDefinition = path.join(runtimeDirectory, 'src', 'windows_x86_64_exports.def');
+  const configuredInstallRoot = path.join(installRoot, 'windows_release_x86_64');
+  await fs.copyFile(exportDefinition, path.join(configuredInstallRoot, 'windows_x86_64_exports.def'));
+}
+
 async function collectFiles(directory) {
   const files = [];
   for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
