@@ -4,6 +4,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {requirePrivateStage} from '../build/lib/package-safety.mjs';
 import {stickyPreflight} from '../build/lib/std-variants.mjs';
 
 const required = name => {
@@ -71,16 +72,20 @@ if (stickyStd && !await exists(stickyStd, 'dir')) {
 const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
 const isWindows = platform === 'windows-x64';
 const packageName = `cjcj-${version}-${platform}`;
-const stage = path.join(outdir, packageName);
-await fs.mkdir(outdir, {recursive: true});
+const outputRoot = path.resolve(outdir);
+if (outputRoot === path.parse(outputRoot).root) throw new Error('package output root must not be a filesystem root');
+const stage = path.join(outputRoot, packageName);
+await fs.mkdir(outputRoot, {recursive: true});
 await fs.rm(stage, {recursive: true, force: true});
 
 console.log(`[1/7] copy SDK tree -> ${stage}`);
-if (isWindows) await fs.cp(sdk, stage, {recursive: true});
+const sdkSource = await fs.realpath(sdk);
+if (isWindows) await fs.cp(sdkSource, stage, {recursive: true, dereference: true});
 else {
-  await $({stdio: 'inherit'})`cp -a ${sdk} ${stage}`;
+  await $({stdio: 'inherit'})`cp -a ${sdkSource} ${stage}`;
   await $({stdio: 'inherit'})`chmod -R u+rwX,go+rX ${stage}`;
 }
+await requirePrivateStage(stage, outputRoot, sdkSource);
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 
 console.log('[2/7] install the single sticky std closure');
