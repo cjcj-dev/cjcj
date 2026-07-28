@@ -286,9 +286,7 @@ def coff_sections(data, origin):
         size = min(virtual_size, raw_size) if is_pe and virtual_size else raw_size
         if raw_offset + size > len(data):
             raise ClosureError(f"COFF section outside file: {origin}:{name}")
-        if name in result:
-            raise ClosureError(f"duplicate COFF section: {origin}:{name}")
-        result[name] = data[raw_offset:raw_offset + size]
+        result[name] = result.get(name, b"") + data[raw_offset:raw_offset + size]
     return "<", result
 
 
