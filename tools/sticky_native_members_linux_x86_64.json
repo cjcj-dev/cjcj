@@ -22,7 +22,8 @@
       "print.c.o",
       "string.c.o",
       "string_SIMD.c.o",
-      "string_strstr.c.o"
+      "string_strstr.c.o",
+      "typetemplate.c.o"
     ],
     "libcangjie-std-env.a": [
       "console_write.c.o",
