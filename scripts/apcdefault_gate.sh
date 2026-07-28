@@ -28,7 +28,7 @@ make_wrapper() {
         printf '#!/usr/bin/env bash\n'
         printf 'exec taskset -c %q %q "$@" --jobs %q' "$cpus" "$compiler" "$jobs"
         if [[ $mode == compat ]]; then
-            printf ' --apc'
+            printf ' --apc=1'
         fi
         printf '\n'
     } > "$output"
