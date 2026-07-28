@@ -97,10 +97,17 @@ console.log(
 if (missing.length) console.error(`FATAL: missing required exports: ${missing.join(',')}`);
 if (unexpectedImports.length) console.error(`FATAL: unexpected imports: ${unexpectedImports.join(',')}`);
 if (missingImports.length) console.error(`FATAL: missing official imports: ${missingImports.join(',')}`);
-if (mccCount !== 158 || cjMccCount !== 192 || mrtCount !== 61) {
-  console.error('FATAL: runtime export-family counts differ from the official Windows SDK');
+// CJ_MCC baseline is 194, not the official SDK's 192: generational (sticky) GC adds exactly two
+// symbols that the source declares as public C ABI --
+//   CJ_MCC_FlushDeferredLogRing  (extern "C" MRT_EXPORT, runtime/src/Mutator/Mutator.h:637)
+//   CJ_MCC_StickyLogLine         (runtime/src/Heap/StickyLog.h:21)
+// Both are called from the compiler-emitted write-barrier path, so they must stay exported.
+// The total export count is unchanged at 3116: the Windows producer no longer uses
+// --export-all-symbols, so 79 accidentally leaked internal C++/libc++ names are gone.
+if (mccCount !== 158 || cjMccCount !== 194 || mrtCount !== 61) {
+  console.error('FATAL: runtime export-family counts differ from the expected surface');
 }
 if (
   missing.length || unexpectedImports.length || missingImports.length ||
-  mccCount !== 158 || cjMccCount !== 192 || mrtCount !== 61
+  mccCount !== 158 || cjMccCount !== 194 || mrtCount !== 61
 ) process.exit(1);
