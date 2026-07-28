@@ -61,7 +61,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
             return true
         }
         let increRes = IncrementalScopeAnalysis(IncrementalScopeAnalysisArgs(core.rawMangleName2DeclMap,
-            core.astCacheInfo, packageValue, options, core.importManager, core.cachedInfo, core.fileMap,
+            core.astCacheInfo, packageValue, options, core.importManager.getOrThrow(), core.cachedInfo, core.fileMap,
             core.directExtends))
         if (increRes.kind == IncreKind.INCR) {
             if (!CheckCachedBitcodeInfo(packageValue.fullPackageName, options)) {
@@ -151,7 +151,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
         for (srcPkg in core.GetSourcePackages()) {
             srcPkg.EnableAttr(Attribute.INCRE_COMPILE)
             HandleCtorForIncr(srcPkg, core.mangledName2DeclMap, core.cachedInfo.semaInfo)
-            for (mangle in core.importManager.LoadCachedTypeForPackage(srcPkg, core.mangledName2DeclMap)) {
+            for (mangle in core.importManager.getOrThrow().LoadCachedTypeForPackage(srcPkg, core.mangledName2DeclMap)) {
                 cacheMangles.incrRemovedDecls.add(mangle)
             }
         }
@@ -334,7 +334,7 @@ public class IncrementalCompilerInstance <: DefaultCompilerInstance {
                 let cachedCjo = invocation.globalOptions.GenerateCachedPathName(
                     pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
                 ret = ret && FileUtil.WriteBufferToASTFile(cachedCjo,
-                    core.importManager.ExportASTSignature(pkg))
+                    core.importManager.getOrThrow().ExportASTSignature(pkg))
             }
         }
         recorder.close()

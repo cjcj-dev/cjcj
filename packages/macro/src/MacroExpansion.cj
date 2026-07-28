@@ -672,7 +672,7 @@ public class MacroExpansion {
         }
         if (ci.GetGlobalOptions().enableCompileTest && ci.GetGlobalOptions().CompileExecutable()) {
             TestEntryConstructor.ConstructTestSuite(ci.GetGlobalOptions().moduleName, packages,
-                ci.importManager.GetAllImportedPackages(true), ci.GetGlobalOptions().compileTestsOnly,
+                ci.importManager.getOrThrow().GetAllImportedPackages(true), ci.GetGlobalOptions().compileTestsOnly,
                 ci.GetGlobalOptions().mock == MockMode.ON)
         }
         for (pkg in packages) {
@@ -713,7 +713,7 @@ public class MacroExpansion {
             collectMacroEachFile(file, macroCollector)
         }
         sortMacroCalls(macroCollector.macCalls)
-        for (pkg in ci.importManager.GetImportedPkgsForMacro()) {
+        for (pkg in ci.importManager.getOrThrow().GetImportedPkgsForMacro()) {
             macroCollector.importedMacroPkgs.add(pkg)
         }
     }
@@ -792,7 +792,7 @@ public class MacroExpansion {
             let cc = ConditionalCompilation(ci.GetGlobalOptions(), ci.GetDiag())
             cc.HandleFileConditionalCompilation(newFile)
             if (let Some(pkg) <- curPackage) {
-                ci.importManager.UpdateFileNodeImportInfo(pkg, file, newFile)
+                ci.importManager.getOrThrow().UpdateFileNodeImportInfo(pkg, file, newFile)
             }
         }
     }

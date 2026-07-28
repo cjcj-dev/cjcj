@@ -31,7 +31,7 @@ class MacroHostAdapter <: MacroHost {
 
     public prop importManager: MacroHostImportManager {
         get() {
-            return ci.importManager
+            return ci.importManager.getOrThrow()
         }
     }
 

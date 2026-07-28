@@ -246,8 +246,8 @@ public open class DefaultCompilerInstance {
     }
 
     public func RearrangeImportedPackageDependence(): Unit {
-        let imported = core.importManager.GetAllImportedPackages()
-        let _ = core.packageManager.ResolveDependence(imported)
+        let imported = core.importManager.getOrThrow().GetAllImportedPackages()
+        let _ = core.packageManager.getOrThrow().ResolveDependence(imported)
     }
 
     public func CodegenOnePackage(enableIncrement: Bool,

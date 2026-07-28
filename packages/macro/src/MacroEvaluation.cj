@@ -722,7 +722,7 @@ public class MacroEvaluation {
 
     public func GetMacroDefDynamicFiles(): ArrayList<String> {
         let macroDynFiles = ArrayList<String>()
-        for (packageName in ci.importManager.GetImportedStdMacroPackages()) {
+        for (packageName in ci.importManager.getOrThrow().GetImportedStdMacroPackages()) {
             let basePath = FileUtil.JoinPath(FileUtil.GetDirPath(ci.GetGlobalOptions().executablePath),
                 "../runtime/lib")
             let libName = "lib" + FileUtil.ConvertPackageNameToLibCangjieBaseFormat(packageName) + LIB_SUFFIX
@@ -744,7 +744,7 @@ public class MacroEvaluation {
         if (let Some(node) <- macCall.GetNode()) {
             if (let Some(file) <- node.curFile) {
                 if (let Some(decl) <- macCall.GetDefinition()) {
-                    ci.importManager.AddUsedMacroDecls(file, decl)
+                    ci.importManager.getOrThrow().AddUsedMacroDecls(file, decl)
                 }
             }
         }

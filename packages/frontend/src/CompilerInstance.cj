@@ -211,10 +211,11 @@ public class CompilerInstance {
     public let chirInfo: CHIRInfo = CHIRInfo()
     public let metaTransformPluginBuilder: MetaTransformPluginBuilder = MetaTransformPluginBuilder()
     public let sm: SourceManager = SourceManager()
-    public let typeManager: TypeManager = TypeManager()
-    public let importManager: ImportManager
-    public let packageManager: PackageManager
-    public let testManager: TestManager
+    // C++ CompilerInstance.h:386-406,546 — raw owning pointers; Option = nullable after DestroyASTResources.
+    public var typeManager: Option<TypeManager> = None
+    public var importManager: Option<ImportManager> = None
+    public var packageManager: Option<PackageManager> = None
+    public var testManager: Option<TestManager> = None
     public var gim: Option<GenericInstantiationManager> = None
     public var compileOnePackageFromSrcFiles: Bool = false
     public var loadSrcFilesFromCache: Bool = false
@@ -248,11 +249,15 @@ public class CompilerInstance {
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
         this.invocation = invocation
         this.diag = diag
-        let faithfulTypeManager = typeManager.AsFaithfulSemaTypeManager()
-        importManager = ImportManager(diag, faithfulTypeManager, invocation.globalOptions)
-        packageManager = PackageManager(importManager)
-        testManager = TestManager(importManager, faithfulTypeManager, diag.AsBasicDiagnosticEngine(),
-            invocation.globalOptions)
+        // C++ CompilerInstance.cpp:61-64 allocate managers in safe order.
+        let tm = TypeManager()
+        typeManager = Some(tm)
+        let faithfulTypeManager = tm.AsFaithfulSemaTypeManager()
+        let im = ImportManager(diag, faithfulTypeManager, invocation.globalOptions)
+        importManager = Some(im)
+        packageManager = Some(PackageManager(im))
+        testManager = Some(TestManager(im, faithfulTypeManager, diag.AsBasicDiagnosticEngine(),
+            invocation.globalOptions))
         compileStrategy = Some(FullCompileStrategy(this))
         chirData.getOrThrow().InitData(fileNameMap, Int64(invocation.globalOptions.GetJobs()))
         if (invocation.globalOptions.compilePackage) {
@@ -270,18 +275,93 @@ public class CompilerInstance {
         ASTHasher.Init(invocation.globalOptions)
     }
 
+    // C++ Frontend/CompilerInstance.cpp:110-185 DestroyASTResources.
+    // CJ: delete ≡ drop last strong root (Option=None / clear); async body holds moved roots then FreeIdleMemoryToOS.
     public func DestroyASTResources(): Unit {
         if (astResourcesDestroyed || invocation.globalOptions.enIncrementalCompilation || invocation.globalOptions.cjdbMode) {
             return
         }
         astResourcesDestroyed = true
-        srcPkgs.clear()
-        realASTPkgs.clear()
-        pkgs.clear()
-        pkgCtxMap.clear()
-        importManager.DeleteASTWriters()
-        gim = None
-        hasTypeCheckerFlag = false
+        try (recorder = ProfileRecorder("ClearASTResources", "DestroyASTResources")) {
+            // 2) TypeChecker first (holds AST / TypeManager refs).
+            let toDestroyTypeChecker = faithfulTypeChecker
+            faithfulTypeChecker = None
+            hasTypeCheckerFlag = false
+
+            // Selfhost extra strong root (C++ TypeChecker holds non-owning CompilerInstance*).
+            let toDestroySema = faithfulSemaInstance
+            if (let Some(sema) <- toDestroySema) {
+                sema.packages.clear()
+                sema.sourcePackages.clear()
+                sema.packageDecls.clear()
+                sema.importedPackageDecls.clear()
+                sema.pkgCtxMap.clear()
+                sema.importManager = None
+            }
+            faithfulSemaInstance = None
+
+            // 3) TestManager
+            let toDestroyTestManager = testManager
+            testManager = None
+
+            // 4) GIM
+            let toDestroyGim = gim
+            gim = None
+
+            // 5) PackageManager
+            let toDestroyPackageManager = packageManager
+            packageManager = None
+
+            // 5.1) ImportManager after PackageManager
+            if (let Some(im) <- importManager) {
+                im.DeleteASTWriters()
+            }
+            let toDestroyImportManager = importManager
+            importManager = None
+
+            // 6) AST packages before ASTContext (symbol detaching order).
+            let toDestroySrcPkgs = ArrayList<Package>()
+            for (pkg in srcPkgs) {
+                toDestroySrcPkgs.add(pkg)
+            }
+            srcPkgs.clear()
+            realASTPkgs.clear()
+            pkgs.clear()
+
+            // 7) ASTContext map
+            let toDestroyCtxKeys = ArrayList<String>()
+            for (k in pkgCtxMap.keys()) {
+                toDestroyCtxKeys.add(k)
+            }
+            let toDestroyCtx = ArrayList<ASTContext>()
+            for (k in toDestroyCtxKeys) {
+                if (let Some(ctx) <- pkgCtxMap.get(k)) {
+                    toDestroyCtx.add(ctx)
+                }
+            }
+            pkgCtxMap.clear()
+
+            // 8) TypeManager last among heap managers
+            let toDestroyTypeManager = typeManager
+            typeManager = None
+
+            // C++: std::async destroyFunc — keep moved roots off the live CI, then FreeIdleMemoryToOS.
+            let _ = spawn {
+                let _tc = toDestroyTypeChecker
+                let _sema = toDestroySema
+                let _tmgr = toDestroyTestManager
+                let _gim = toDestroyGim
+                let _pm = toDestroyPackageManager
+                let _im = toDestroyImportManager
+                toDestroySrcPkgs.clear()
+                toDestroyCtx.clear()
+                let _tyman = toDestroyTypeManager
+                unsafe {
+                    CJ_MCC_InvokeGC(true)
+                }
+                FreeIdleMemoryToOS()
+            }
+        }
     }
 
     public func SetCompileStrategy(newCompileStrategy: CompileStrategy): Unit {
@@ -461,12 +541,12 @@ public class CompilerInstance {
     public func PerformMacroExpand(): Bool {
         let ret = getCompileStrategy().MacroExpand()
         if (ret) {
-            importManager.ReindexSourcePackagesAfterMacroExpand(GetSourcePackages())
+            importManager.getOrThrow().ReindexSourcePackagesAfterMacroExpand(GetSourcePackages())
         }
         if (!invocation.globalOptions.IsConstEvalEnabled() && !invocation.globalOptions.interpreter) {
-            importManager.DeleteASTLoaders()
+            importManager.getOrThrow().DeleteASTLoaders()
         }
-        importManager.ClearPackageBCHIRCache()
+        importManager.getOrThrow().ClearPackageBCHIRCache()
         if (invocation.globalOptions.compileTestsOnly && invocation.globalOptions.enableVerbose) {
             PrintTestOnlySourceFiles(srcPkgs)
         }
@@ -534,10 +614,10 @@ public class CompilerInstance {
     }
 
     public func PerformDesugarAfterSema(): Bool {
-        testManager.MarkDeclsForTestIfNeeded(GetSourcePackages())
+        testManager.getOrThrow().MarkDeclsForTestIfNeeded(GetSourcePackages())
         getCompileStrategy().DesugarAfterSema()
         if (!invocation.globalOptions.enIncrementalCompilation) {
-            testManager.PrepareToMock(GetSourcePackages())
+            testManager.getOrThrow().PrepareToMock(GetSourcePackages())
         }
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpASTToFile()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "desugar")
@@ -547,12 +627,12 @@ public class CompilerInstance {
 
     // ImportManager.cpp:291-320 ImportManager::ExportAST.
     public func ExportAST(saveFileWithAbsPath: Bool, pkg: Package): Array<UInt8> {
-        return importManager.ExportAST(saveFileWithAbsPath, pkg)
+        return importManager.getOrThrow().ExportAST(saveFileWithAbsPath, pkg)
     }
 
     public func PerformGenericInstantiation(): Bool {
         if (let None <- gim) {
-            gim = Some(GenericInstantiationManager(faithfulSemaInstance.getOrThrow(), testManager.GetImpl()))
+            gim = Some(GenericInstantiationManager(faithfulSemaInstance.getOrThrow(), testManager.getOrThrow().GetImpl()))
         }
         let semaInstance = faithfulSemaInstance.getOrThrow()
         semaInstance.mangler.adapter = RealMangleAstAdapter()
@@ -638,7 +718,7 @@ public class CompilerInstance {
             FaithfulDesugarBeforeTypeCheck(pkg, compatibleSDKVersion: compatibleSDKVersion)
         }
         let semaInstance = FaithfulSemaCompilerInstance()
-        semaInstance.typeManager = typeManager.AsFaithfulSemaTypeManager()
+        semaInstance.typeManager = typeManager.getOrThrow().AsFaithfulSemaTypeManager()
         semaInstance.globalOptions = invocation.globalOptions
         semaInstance.kind = kind
         semaInstance.compileStrategy = getCompileStrategy().strategyKind
@@ -652,7 +732,8 @@ public class CompilerInstance {
         for (pkg in srcPkgs) {
             semaInstance.sourcePackages.add(pkg)
         }
-        semaInstance.importManager = Some(importManager)
+        // C++ TypeChecker holds non-owning ImportManager*; selfhost Option root is shared until Destroy.
+        semaInstance.importManager = importManager
         semaInstance.cacheSemaUsage = Some({ info: SemanticInfo => CacheSemaUsage(info) })
         SeedFaithfulSemaResolvedImports(semaInstance)
         let checker = FaithfulSemaTypeChecker(Some(semaInstance))
@@ -664,15 +745,15 @@ public class CompilerInstance {
 
     private func SeedFaithfulSemaResolvedImports(semaInstance: FaithfulSemaCompilerInstance): Unit {
         for (pkg in srcPkgs) {
-            if (let Some(packageDecl) <- importManager.GetPackageDecl(pkg.fullPackageName)) {
+            if (let Some(packageDecl) <- importManager.getOrThrow().GetPackageDecl(pkg.fullPackageName)) {
                 semaInstance.AddResolvedPackageDecl(pkg.fullPackageName, packageDecl)
             }
         }
-        for (importedPackage in importManager.GetAllImportedPackages()) {
+        for (importedPackage in importManager.getOrThrow().GetAllImportedPackages()) {
             if (!importedPackage.TestAttr(Attribute.IMPORTED)) {
                 continue
             }
-            if (let Some(packageDecl) <- importManager.GetPackageDecl(importedPackage.fullPackageName)) {
+            if (let Some(packageDecl) <- importManager.getOrThrow().GetPackageDecl(importedPackage.fullPackageName)) {
                 semaInstance.packageDecls.add(packageDecl)
                 semaInstance.importedPackageDecls.add(packageDecl)
                 semaInstance.AddResolvedPackageDecl(importedPackage.fullPackageName, packageDecl)
@@ -686,16 +767,16 @@ public class CompilerInstance {
         for (pkg in srcPkgs) {
             for (file in pkg.files) {
                 for (importSpec in file.imports) {
-                    let packageName = importManager.GetPackageNameByImport(importSpec)
+                    let packageName = importManager.getOrThrow().GetPackageNameByImport(importSpec)
                     if (!packageName.isEmpty()) {
                         semaInstance.AddResolvedImportPackageName(importSpec, packageName,
-                            importManager.IsImportPackage(importSpec))
+                            importManager.getOrThrow().IsImportPackage(importSpec))
                     }
                 }
-                for (group in importManager.GetImportedDecls(file)) {
+                for (group in importManager.getOrThrow().GetImportedDecls(file)) {
                     semaInstance.AddResolvedImportedDecls(file.fileHash, group.name, group.decls)
                 }
-                let usedMacroDeclsMap = importManager.GetUsedMacroDecls(file)
+                let usedMacroDeclsMap = importManager.getOrThrow().GetUsedMacroDecls(file)
                 for (macroPackageName in usedMacroDeclsMap.keys()) {
                     if (let Some(decls) <- usedMacroDeclsMap.get(macroPackageName)) {
                         semaInstance.AddResolvedUsedMacroDecls(file.indexOfPackage, macroPackageName, decls)
@@ -704,15 +785,15 @@ public class CompilerInstance {
             }
         }
         for (srcPkg in srcPkgs) {
-            let members = importManager.GetPackageMembers(srcPkg.fullPackageName)
+            let members = importManager.getOrThrow().GetPackageMembers(srcPkg.fullPackageName)
             for (name in members.keys()) {
                 if (let Some(decls) <- members.get(name)) {
                     semaInstance.AddResolvedCjoPackageMemberDecls(srcPkg.fullPackageName, name, decls)
                 }
             }
         }
-        for (importedPackage in importManager.GetAllImportedPackages()) {
-            let members = importManager.GetPackageMembers(importedPackage.fullPackageName)
+        for (importedPackage in importManager.getOrThrow().GetAllImportedPackages()) {
+            let members = importManager.getOrThrow().GetPackageMembers(importedPackage.fullPackageName)
             for (name in members.keys()) {
                 if (let Some(decls) <- members.get(name)) {
                     semaInstance.AddResolvedCjoPackageMemberDecls(importedPackage.fullPackageName, name, decls)
@@ -720,8 +801,8 @@ public class CompilerInstance {
             }
         }
         for (srcPkg in srcPkgs) {
-            for (importedPackage in importManager.GetAllImportedPackages()) {
-                let members = importManager.GetPackageMembers(srcPkg.fullPackageName, importedPackage.fullPackageName)
+            for (importedPackage in importManager.getOrThrow().GetAllImportedPackages()) {
+                let members = importManager.getOrThrow().GetPackageMembers(srcPkg.fullPackageName, importedPackage.fullPackageName)
                 for (name in members.keys()) {
                     if (let Some(decls) <- members.get(name)) {
                         semaInstance.AddResolvedPackageMemberDecls(importedPackage.fullPackageName, name, decls)
@@ -729,7 +810,7 @@ public class CompilerInstance {
                 }
             }
         }
-        for (implicitPackage in importManager.GetAllImportedPackages()) {
+        for (implicitPackage in importManager.getOrThrow().GetAllImportedPackages()) {
             for (file in implicitPackage.files) {
                 for (decl in file.exportedInternalDecls) {
                     if (decl.TestAttr(Attribute.IMPLICIT_USED)) {
@@ -786,7 +867,7 @@ public class CompilerInstance {
 
     public func PerformCHIRCompilation(): Bool {
         mangler.manglerCtxTable.clear()
-        typeManager.ReleasePostSemaCaches()
+        typeManager.getOrThrow().ReleasePostSemaCaches()
         chirData.getOrThrow().ClearRealPackages()
         unsafe {
             CJ_MCC_InvokeGC(true)
@@ -794,7 +875,7 @@ public class CompilerInstance {
         FreeIdleMemoryToOS()
         var ret = true
         let sourcePackagesCHIR = GetSourcePackages()
-        let pkgsOrderedCHIR = packageManager.GetBuildOrders(sourcePackagesCHIR)
+        let pkgsOrderedCHIR = packageManager.getOrThrow().GetBuildOrders(sourcePackagesCHIR)
         let emitted = HashSet<String>()
         for (group in pkgsOrderedCHIR) {
             if (group.isEmpty()) {
@@ -919,19 +1000,19 @@ public class CompilerInstance {
         }
         AddSourceToMember()
         if (invocation.globalOptions.scanDepPkg) {
-            importManager.UpdateSearchPath(cangjieModules)
+            importManager.getOrThrow().UpdateSearchPath(cangjieModules)
             depPackageInfo.clear()
             let generated = if (!invocation.globalOptions.inputCjoFile.isEmpty()) {
-                importManager.GeneratePkgDepInfoByCjo(invocation.globalOptions.inputCjoFile)
+                importManager.getOrThrow().GeneratePkgDepInfoByCjo(invocation.globalOptions.inputCjoFile)
             } else {
-                importManager.GeneratePkgDepInfo(pkgs)
+                importManager.getOrThrow().GeneratePkgDepInfo(pkgs)
             }
             for (info in generated) {
                 depPackageInfo.add(info)
             }
             return true
         }
-        if (!importManager.BuildIndex(cangjieModules, invocation.globalOptions, pkgs)) {
+        if (!importManager.getOrThrow().BuildIndex(cangjieModules, invocation.globalOptions, pkgs)) {
             return false
         }
         MergePackages()
@@ -940,7 +1021,7 @@ public class CompilerInstance {
     }
 
     public func GetExtendDecls(queryType: ExtendMemberQueryType): ArrayList<ExtendDecl> {
-        let semaTypeManager = typeManager.AsFaithfulSemaTypeManager()
+        let semaTypeManager = typeManager.getOrThrow().AsFaithfulSemaTypeManager()
         match (queryType) {
             case ByTy(ty) => return semaTypeManager.GetAllExtendsByTy(ty)
             case ByInheritableDecl(decl) => return semaTypeManager.GetDeclExtends(decl)
@@ -977,7 +1058,7 @@ public class CompilerInstance {
         }
         let realExprTy = exprTy.getOrThrow()
         for (e in extends) {
-            if (!importManager.IsExtendAccessible(curFile, e, None)) {
+            if (!importManager.getOrThrow().IsExtendAccessible(curFile, e, None)) {
                 continue
             }
             let extendMember = e.GetMemberDecls()
@@ -987,14 +1068,14 @@ public class CompilerInstance {
                 }
             } else {
                 for (m in extendMember) {
-                    if (importManager.IsExtendMemberAccessible(curFile, m, realExprTy, None)) {
+                    if (importManager.getOrThrow().IsExtendMemberAccessible(curFile, m, realExprTy, None)) {
                         members.add(m)
                     }
                 }
             }
             CollectInheritMember(e, members)
             TypeCheckReferenceRemoveTargetNotMeetExtendConstraint(
-                typeManager.AsFaithfulSemaTypeManager(), Some(realExprTy), members)
+                typeManager.getOrThrow().AsFaithfulSemaTypeManager(), Some(realExprTy), members)
         }
         return members
     }
@@ -1048,8 +1129,9 @@ public class CompilerInstance {
         chirData = None
     }
 
+    // C++ CompilerInstance.h:534-536 HasTypeChecker — typeChecker != nullptr.
     public func HasTypeChecker(): Bool {
-        return hasTypeCheckerFlag
+        return faithfulTypeChecker.isSome()
     }
 
     public func IsBuildTrie(): Bool {
@@ -1151,17 +1233,17 @@ public class CompilerInstance {
 
     private func ModularizeCompilation(): Bool {
         for (bcPkg in invocation.globalOptions.bcPackageNames) {
-            if (!importManager.AnalyzeDepStdPkgsOfBC(bcPkg)) {
+            if (!importManager.getOrThrow().AnalyzeDepStdPkgsOfBC(bcPkg)) {
                 return false
             }
         }
-        for (objFile in importManager.GetUsedSTDLibFiles(DepType.DIRECT)) {
+        for (objFile in importManager.getOrThrow().GetUsedSTDLibFiles(DepType.DIRECT)) {
             invocation.globalOptions.directBuiltinDependencies.add(objFile)
         }
-        for (objFile in importManager.GetUsedSTDLibFiles(DepType.INDIRECT)) {
+        for (objFile in importManager.getOrThrow().GetUsedSTDLibFiles(DepType.INDIRECT)) {
             invocation.globalOptions.indirectBuiltinDependencies.add(objFile)
         }
-        return packageManager.ResolveDependence(pkgs)
+        return packageManager.getOrThrow().ResolveDependence(pkgs)
     }
 
     public func CacheCompileArgs(): Unit {
@@ -1244,7 +1326,7 @@ public class CompilerInstance {
             }
             adapter.CollectLocalDecls(ctx, pkg)
         }
-        for (pkg in importManager.GetAllImportedPackages()) {
+        for (pkg in importManager.getOrThrow().GetAllImportedPackages()) {
             let pkgName = RealManglerContext.ReduceUnitTestPackageName(pkg.fullPackageName)
             let ctx = if (let Some(value) <- baseMangler.manglerCtxTable.get(pkgName)) {
                 value
@@ -1279,7 +1361,7 @@ public class CompilerInstance {
                 deduplicatedEmplace(decl, pkg.fullPackageName)
             }
         }
-        for (pkg in importManager.GetAllImportedPackages()) {
+        for (pkg in importManager.getOrThrow().GetAllImportedPackages()) {
             if (!pkg.TestAttr(Attribute.IMPORTED)) {
                 continue
             }

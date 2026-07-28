@@ -317,8 +317,8 @@ private class ToCHIR {
         let chirType = CHIRType(builder, CHIRTypeCache())
         let ast2chir = FaithfulAST2CHIR(builder, chirType, instance.GetSourceManager(),
             gim: instance.gim,
-            importedPkgs: instance.importManager.GetAllImportedPackages(),
-            directImportedPkgs: instance.importManager.GetCurImportedPackages(pkg.getOrThrow().fullPackageName),
+            importedPkgs: instance.importManager.getOrThrow().GetAllImportedPackages(),
+            directImportedPkgs: instance.importManager.getOrThrow().GetCurImportedPackages(pkg.getOrThrow().fullPackageName),
             overrideSrcFuncResolver: Some({ funcDecl =>
                 match (instance.faithfulSemaInstance) {
                     case Some(semaInstance) => semaInstance.typeManager.GetTopOverriddenFuncDecl(Some(funcDecl))

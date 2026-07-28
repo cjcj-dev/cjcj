@@ -30,7 +30,7 @@ func ParseAndMergeCjd(ci: CompilerInstance, cjdInfo: (String, String)): Unit {
     let cjoPath = cjdInfo[1]
     var sourceCode = ReadFileContent(cjoPath)
     if (!sourceCode[0]) {
-        let searchPath = ci.importManager.GetSearchPath()
+        let searchPath = ci.importManager.getOrThrow().GetSearchPath()
         let cjdPath = FileUtil.FindSerializationFile(cjdInfo[0], CJ_D_FILE_EXTENSION, searchPath.toArray())
         if (cjdPath.isEmpty()) {
             return
@@ -52,7 +52,7 @@ func ParseAndMergeCjd(ci: CompilerInstance, cjdInfo: (String, String)): Unit {
     let pkg = Package(cjdInfo[0])
     fileAst.curPackage = Some(pkg)
     pkg.files.add(fileAst)
-    if (let Some(originPkg) <- ci.importManager.GetPackage(cjdInfo[0])) {
+    if (let Some(originPkg) <- ci.importManager.getOrThrow().GetPackage(cjdInfo[0])) {
         MergeCusAnno(originPkg, pkg)
     } else {
         InternalError(cjdInfo[0] + " cannot find origin ast")
@@ -120,7 +120,7 @@ public open class CompileStrategy {
             return
         }
         ProfileRecorder.Start("ImportPackages", "ParseAndMergeCjds")
-        let cjdInfos = ci.importManager.GetDepPkgCjdPaths()
+        let cjdInfos = ci.importManager.getOrThrow().GetDepPkgCjdPaths()
         let futures = ArrayList<Future<Unit>>()
         option.compileCjd = true
         for ((packageName, cjdPath) in cjdInfos) {
@@ -131,7 +131,7 @@ public open class CompileStrategy {
                 synchronized(g_cjdAstCacheLock) {
                     if (let Some(cachedPackage) <- g_cjdAstCache.get(packageName)) {
                         if (let Some(cachedPackageValue) <- cachedPackage) {
-                            if (let Some(originPkg) <- ci.importManager.GetPackage(packageName)) {
+                            if (let Some(originPkg) <- ci.importManager.getOrThrow().GetPackage(packageName)) {
                                 MergeCusAnno(originPkg, cachedPackageValue)
                             } else {
                                 InternalError(packageName + " cannot find origin ast")
