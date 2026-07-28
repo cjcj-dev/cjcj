@@ -107,17 +107,17 @@ async function preflightSelf(selfBin, selfHome, bootstrapTc, selfLd, selfCangjie
 }
 
 const selfHome = await resolveSelfHome(self, tc);
-// Self products + self binary must load the runtime that pairs with the CANGJIE_HOME
-// used for compile/link/--set-runtime-rpath. Bootstrap TC supplies llvm tools when
-// the tree-under-test has runtime but no third_party/llvm.
-// LD order: selfCangjieHome first (authoritative for products), then selfHome if
-// distinct, then remaining env — never put a stale sibling runtime ahead of the
-// home that actually drove codegen.
+// Runtime for self + products MUST come from the tree under test (selfHome).
+// CANGJIE_HOME still needs llvm tools (opt/llc): use selfHome when it has them,
+// else bootstrap DIFFTEST_TC. LD prefers selfHome runtime first so products do
+// not silently load a stale DIFFTEST_TC so (the original false-red bug).
+// If selfHome runtime and TC tools are ABI-mismatched, preflight or product
+// HARNESS tags fire — never ordinary silent red.
 const selfHasLlvm = await exists(path.join(selfHome, 'third_party/llvm/bin/llc'));
 const selfCangjieHome = selfHasLlvm ? selfHome : tc;
 const selfLd = mergeLd(
-  toolchainLd(selfCangjieHome),
-  selfHome !== selfCangjieHome ? toolchainLd(selfHome) : '',
+  toolchainLd(selfHome),
+  selfHome !== selfCangjieHome ? toolchainLd(selfCangjieHome) : '',
   process.env.LD_LIBRARY_PATH || '',
 );
 const refLd = mergeLd(toolchainLd(tc), process.env.LD_LIBRARY_PATH || '');
