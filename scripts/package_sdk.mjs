@@ -97,11 +97,16 @@ if (stickyStd) {
     throw new Error(`sticky std manifest role mismatch: closure=${stickyManifest.closure || '<missing>'} `
       + `role=${stickyManifest.role || '<missing>'} provenance=${stickyManifest.provenance || '<missing>'}`);
   }
-  const runtimeSourceSha = path.join(path.dirname(runtimeLib), 'SOURCE_SHA');
-  if (!runtimeLib || !await exists(runtimeSourceSha)) {
-    throw new Error('Linux x64 sticky packaging requires runtime-lib with adjacent SOURCE_SHA');
+  const runtimeSourceSha = runtimeLib
+    ? path.join(path.dirname(runtimeLib), 'SOURCE_SHA')
+    : path.join(runtimeRoot, 'SOURCE_SHA');
+  if ((!runtimeLib && !runtimeRoot) || !await exists(runtimeSourceSha)) {
+    throw new Error(`${platform} sticky packaging requires runtime provenance at ${runtimeSourceSha}`);
   }
   const runtimeRef = (await fs.readFile(runtimeSourceSha, 'utf8')).trim();
+  if (!/^[0-9a-f]{40}$/.test(runtimeRef)) {
+    throw new Error(`invalid runtime source ref in ${runtimeSourceSha}: ${runtimeRef || '<empty>'}`);
+  }
   if (runtimeRef !== stickyManifest.sourceRef) {
     throw new Error(`runtime/std source mismatch: runtime=${runtimeRef} std=${stickyManifest.sourceRef}`);
   }
@@ -133,7 +138,7 @@ if (stickyStd) {
   await fs.rm(stdModules, {recursive: true, force: true});
   await fs.cp(stickyStd, stage, {recursive: true, force: true});
   const finalLibraries = [...stickyManifest.sticky.files].sort();
-  const finalSharedLibraries = finalLibraries.filter(name => name.endsWith('.so'));
+  const finalSharedLibraries = finalLibraries.filter(name => name.endsWith('.so') || name.endsWith('.dylib'));
   const finalCjos = [...stickyManifest.cjo.files].sort();
   for (const name of finalSharedLibraries) {
       await fs.copyFile(path.join(standardLibraries, name), path.join(runtimeLibraries, name));
@@ -291,11 +296,9 @@ if (platform.startsWith('linux-')) {
   console.log('  Windows resolves packaged DLLs through runtime/lib and PATH');
 }
 
-if (platform === 'linux-x64') {
-  console.log('[sticky] verify final standard-library closure');
-  const checker = path.resolve(import.meta.dirname, '..', 'tools', 'check_sticky_closure.py');
-  await $({stdio: 'inherit'})`python3 ${checker} --manifest ${path.join(stage, 'STICKY_STD.json')} --sdk ${stage}`;
-}
+console.log('[sticky] verify final standard-library closure');
+const checker = path.resolve(import.meta.dirname, '..', 'tools', 'check_sticky_closure.py');
+await $({stdio: 'inherit'})`python3 ${checker} --manifest ${path.join(stage, 'STICKY_STD.json')} --sdk ${stage} --platform ${runtimeDir}`;
 
 console.log('[6/7] archive');
 const archivePath = path.join(outdir, `${packageName}.${archiveType === 'tar' ? 'tar.gz' : 'zip'}`);
