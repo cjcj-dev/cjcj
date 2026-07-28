@@ -31,6 +31,16 @@ const platform = 'linux_x86_64_cjnative';
 const officialCjcSha256 = process.env.CJCJ_OFFICIAL_CJC_SHA256
   || 'ed806687b1fa0228b84d18b72e01cdc174d75d140cf5f7dd6267598fb80cb509';
 const {runtimeRef: sourceRef, sourceUrl, pinRef, overrideRef} = await resolveRuntimeSource();
+const nativeChecklistPath = path.resolve(
+  import.meta.dirname, '..', 'tools', 'sticky_native_members_linux_x86_64.json');
+const nativeChecklist = JSON.parse(await fs.readFile(nativeChecklistPath, 'utf8'));
+if (nativeChecklist.sourceRef !== sourceRef || nativeChecklist.platform !== platform) {
+  throw new Error(`native std member checklist does not cover ${sourceRef}/${platform}`);
+}
+const nativeMembers = nativeChecklist.nativeMembers;
+if (!nativeMembers || Array.isArray(nativeMembers) || typeof nativeMembers !== 'object') {
+  throw new Error(`invalid native std member checklist: ${nativeChecklistPath}`);
+}
 const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-sticky-std-'));
 const source = path.join(work, 'source');
 const buildSdk = path.join(work, 'build-sdk');
@@ -146,7 +156,7 @@ try {
   const manifest = {
     recipe: 'official-cjc-plus-fixed-llc', closure: 'single-sticky', role: 'final',
     provenance: 'official-cjc-sticky-lowering', sourceUrl, sourceRef, cjcSha256,
-    nativeLibraries,
+    nativeLibraries, nativeMembers,
     sticky: {...stickyLibraries, sha256: librarySha256, seconds: stickySeconds, preflight},
     cjo: {files: cjoFiles, sha256: cjoSha256},
   };
