@@ -60,8 +60,12 @@ const platforms = {
 };
 if (!platforms[platform]) { console.error(`unsupported --platform: ${platform}`); process.exit(2); }
 const [runtimeDir, archiveType, exeSuffix] = platforms[platform];
-if (platform === 'linux-x64' && !stickyStd) {
-  console.error('Linux x64 packaging requires --sticky-std');
+if (!stickyStd) {
+  console.error(`${platform} packaging requires an attested sticky std closure`);
+  process.exit(2);
+}
+if (platform !== 'linux-x64') {
+  console.error(`sticky std build and attestation are not implemented for ${platform}; packaging is disabled`);
   process.exit(2);
 }
 if (stickyStd && !await exists(stickyStd, 'dir')) {
