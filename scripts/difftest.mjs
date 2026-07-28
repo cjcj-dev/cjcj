@@ -107,11 +107,19 @@ async function preflightSelf(selfBin, selfHome, bootstrapTc, selfLd, selfCangjie
 }
 
 const selfHome = await resolveSelfHome(self, tc);
-// Self products + self binary must prefer tree-under-test runtime.
-// Bootstrap TC still supplies llvm tools (opt/llc) via CANGJIE_HOME when self home has none.
+// Self products + self binary must load the runtime that pairs with the CANGJIE_HOME
+// used for compile/link/--set-runtime-rpath. Bootstrap TC supplies llvm tools when
+// the tree-under-test has runtime but no third_party/llvm.
+// LD order: selfCangjieHome first (authoritative for products), then selfHome if
+// distinct, then remaining env — never put a stale sibling runtime ahead of the
+// home that actually drove codegen.
 const selfHasLlvm = await exists(path.join(selfHome, 'third_party/llvm/bin/llc'));
 const selfCangjieHome = selfHasLlvm ? selfHome : tc;
-const selfLd = mergeLd(toolchainLd(selfHome), toolchainLd(tc), process.env.LD_LIBRARY_PATH || '');
+const selfLd = mergeLd(
+  toolchainLd(selfCangjieHome),
+  selfHome !== selfCangjieHome ? toolchainLd(selfHome) : '',
+  process.env.LD_LIBRARY_PATH || '',
+);
 const refLd = mergeLd(toolchainLd(tc), process.env.LD_LIBRARY_PATH || '');
 const refEnv = withEnv(process.env, {CANGJIE_HOME: tc, LD_LIBRARY_PATH: refLd});
 const selfEnv = withEnv(process.env, {CANGJIE_HOME: selfCangjieHome, LD_LIBRARY_PATH: selfLd});
