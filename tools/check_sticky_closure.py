@@ -34,6 +34,7 @@ SUPPORTED_PLATFORMS = {
 }
 COFF_MACHINES = {0x014C, 0x01C0, 0x01C4, 0x8664, 0xAA64}
 COFF_BIGOBJ_CLASS_ID = bytes.fromhex("c7a1bad1eeba a94b af20 faf66aa4dcb8".replace(" ", ""))
+BSD_ARCHIVE_SYMBOL_TABLES = {"__.SYMDEF", "__.SYMDEF SORTED", "__.SYMDEF_64", "__.SYMDEF_64 SORTED"}
 
 
 class ClosureError(Exception):
@@ -354,7 +355,8 @@ def archive_members(data, origin):
                 name = string_table[name_offset:name_end].decode("utf-8", errors="replace")
             else:
                 name = raw_name.rstrip("/")
-            members.append((name, body))
+            if name not in BSD_ARCHIVE_SYMBOL_TABLES:
+                members.append((name, body))
         offset = end + (end & 1)
     return members
 
