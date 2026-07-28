@@ -151,7 +151,10 @@ async function runBuild(home, ...args) {
     process.env.LD_LIBRARY_PATH || '',
   ].filter(Boolean).join(path.delimiter);
   const pathEntries = [path.join(home, 'bin')];
-  if (targetToolchain) pathEntries.push(path.join(targetToolchain, 'bin'));
+  if (targetToolchain) {
+    const bin = path.join(targetToolchain, 'bin');
+    pathEntries.push((await fs.stat(bin).catch(() => null))?.isDirectory() ? bin : targetToolchain);
+  }
   pathEntries.push(process.env.PATH || '');
   const buildEnv = {
     ...process.env,
@@ -160,8 +163,8 @@ async function runBuild(home, ...args) {
     LD_LIBRARY_PATH: libraryPath,
   };
   if (targetToolchain) buildEnv.RUNTIME_TOOLCHAIN = targetToolchain;
-  await $({cwd: path.join(source, 'stdlib'), env: buildEnv})
-    `python3 build.py ${args}`;
+  // Pass argv as discrete tokens so --target / --target-toolchain reach argparse.
+  await $({cwd: path.join(source, 'stdlib'), env: buildEnv})`python3 build.py ${args}`;
 }
 
 try {
@@ -191,14 +194,27 @@ try {
     || path.join(buildSdk, 'runtime', 'lib', platform);
   await requireDirectory(targetLib, 'sticky std target-lib');
 
+  // stdlib build.py check_compiler uses shutil.which(..., path=target_toolchain),
+  // which only searches that single directory — pass .../bin, not the toolchain root.
+  const toolchainBin = targetToolchain
+    ? (await fs.stat(path.join(targetToolchain, 'bin')).catch(() => null))?.isDirectory()
+      ? path.join(targetToolchain, 'bin')
+      : targetToolchain
+    : '';
+  if (targetSpec.needsToolchain) {
+    await requireFile(path.join(toolchainBin, 'clang'), 'mingw clang');
+    await requireFile(path.join(toolchainBin, 'clang++'), 'mingw clang++');
+  }
+
   const buildArgs = ['build', '-t', 'release', `-j${jobs}`, `--target-lib=${targetLib}`];
   if (targetSpec.buildTarget) {
-    buildArgs.push(`--target=${targetSpec.buildTarget}`, `--target-toolchain=${targetToolchain}`);
+    buildArgs.push(`--target=${targetSpec.buildTarget}`, `--target-toolchain=${toolchainBin}`);
   }
   await runBuild(stickySdk, 'clean');
   const startedSticky = process.hrtime.bigint();
   await runBuild(stickySdk, ...buildArgs);
   const stickySeconds = Number(process.hrtime.bigint() - startedSticky) / 1e9;
+  // install has no --target; build.py already wrote to the cross cmake dir from the build step
   await runBuild(stickySdk, 'install');
 
   const stdlib = path.join(source, 'stdlib');
