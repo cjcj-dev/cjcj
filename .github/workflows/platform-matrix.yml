@@ -32,9 +32,11 @@ jobs:
 
   windows-runtime:
     name: Build Windows runtime
+    needs: [fixed-llvm-tuples]
     uses: ./.github/workflows/build-windows-runtime.yml
     with:
       version: 1.2.0-alpha.20260721165458
+    secrets: inherit
 
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
