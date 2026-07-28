@@ -1335,6 +1335,38 @@ public class IRBuilder2 <: Resource {
         }
     }
 
+    // baseprop: multi-operand join (PHI/select). Same base → attach; conflicting managed bases → ICE.
+    private func PropagateBasePtrFromOperands(result: LLVMValueRef, operands: ArrayList<LLVMValueRef>): Unit {
+        if (result.isNull() || operands.isEmpty()) {
+            return
+        }
+        var commonBase = LLVMNullValue()
+        var hasBase = false
+        for (operand in operands) {
+            if (operand.isNull()) {
+                continue
+            }
+            if (let Some(basePtr) <- GetTrackedBasePtr(operand)) {
+                if (!hasBase) {
+                    commonBase = basePtr
+                    hasBase = true
+                } else if (commonBase.toUIntNative() != basePtr.toUIntNative()) {
+                    let managedConflict =
+                        (GetPointerAddressSpace(commonBase) ?? 0u32) == 1u32 ||
+                        (GetPointerAddressSpace(basePtr) ?? 0u32) == 1u32
+                    if (managedConflict) {
+                        InternalError(
+                            "baseprop: PHI/select operands carry conflicting managed basePtr")
+                    }
+                    return
+                }
+            }
+        }
+        if (hasBase) {
+            TrackBasePtr(result, commonBase)
+        }
+    }
+
     public func CreateMemSet(pointer: LLVMValueRef, value: LLVMValueRef, len: LLVMValueRef,
         align!: UInt32 = 0u32): LLVMValueRef {
         return unsafe { LLVMBuildMemSet(builder.raw, pointer, value, len, align) }
@@ -4265,6 +4297,9 @@ public class IRBuilder2 <: Resource {
                 unsafe { LLVMAddIncoming(phi, valuePtr.value, blockPtr.value, UInt32(values.size)) }
             }
         }
+        // baseprop: CreatePHI has no operands yet; propagate when incomings land.
+        // C++ IRBuilder.h:183-191 only BitCast; PHI join is selfhost guard (REPORT-baseprop).
+        PropagateBasePtrFromOperands(phi, values)
     }
 
     public func CreateSelect(cond: LLVMValueRef, trueValue: LLVMValueRef, falseValue: LLVMValueRef,
@@ -4273,7 +4308,10 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildSelect(builder.raw, cond, trueValue, falseValue, nameCString.value) }
         }
-        return ApplyFastMathIfNeeded(result)
+        result = ApplyFastMathIfNeeded(result)
+        // baseprop: same invariant as BitCast (IRBuilder.h:183-191) for multi-arm join.
+        PropagateBasePtrFromOperands(result, ArrayList<LLVMValueRef>([trueValue, falseValue]))
+        return result
     }
 
     public func CreateBitCast(value: LLVMValueRef, destType: LLVMTypeRef, name!: String = "bitcast"): LLVMValueRef {
@@ -4391,6 +4429,10 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildPtrToInt(builder.raw, value, destType, nameCString.value) }
         }
+        // baseprop: keep base across integer relay so CreateIntToPtr can restore it.
+        if (let Some(basePtr) <- GetTrackedBasePtr(value)) {
+            TrackBasePtr(result, basePtr)
+        }
         return result
     }
 
@@ -4398,6 +4440,16 @@ public class IRBuilder2 <: Resource {
         var result = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildIntToPtr(builder.raw, value, destType, nameCString.value) }
+        }
+        // baseprop: integer→pointer cannot invent a base. Propagate if present;
+        // dest addrspace(1) without base is an explicit ICE (no silent untracked managed ptr).
+        if (let Some(basePtr) <- GetTrackedBasePtr(value)) {
+            TrackBasePtr(result, basePtr)
+        } else if (!destType.isNull() &&
+            unsafe { LLVMGetTypeKind(destType) } == LLVM_POINTER_TYPE_KIND &&
+            unsafe { LLVMGetPointerAddressSpace(destType) } == 1u32) {
+            InternalError(
+                "baseprop: CreateIntToPtr to addrspace(1) without tracked basePtr")
         }
         return result
     }
