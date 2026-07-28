@@ -287,10 +287,13 @@ def coff_sections(data, origin):
         section_offset = section_table_offset + index * 40
         name = coff_section_name(data[section_offset:section_offset + 8], string_table, origin)
         virtual_size, _, raw_size, raw_offset = struct.unpack_from("<IIII", data, section_offset + 8)
+        characteristics = struct.unpack_from("<I", data, section_offset + 36)[0]
         size = min(virtual_size, raw_size) if is_pe and virtual_size else raw_size
-        if raw_offset + size > len(data):
+        is_uninitialized = bool(characteristics & 0x00000080)
+        if not is_uninitialized and raw_offset + size > len(data):
             raise ClosureError(f"COFF section outside file: {origin}:{name}")
-        result[name] = result.get(name, b"") + data[raw_offset:raw_offset + size]
+        raw = b"" if is_uninitialized else data[raw_offset:raw_offset + size]
+        result[name] = result.get(name, b"") + raw
     return "<", result
 
 
