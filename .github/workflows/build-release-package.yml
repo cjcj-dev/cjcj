@@ -268,6 +268,13 @@ jobs:
             --outdir "$PWD/dist" \
             "${std_args[@]}"
 
+      - name: Download Windows sticky std closure
+        if: runner.os == 'Windows'
+        uses: actions/download-artifact@v8
+        with:
+          name: sticky-std-windows_x86_64
+          path: dist-sticky-std
+
       - name: Compose SDK package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -277,10 +284,15 @@ jobs:
           $binary = @("$PWD\target\release\bin\cjc@cjcj.exe", "$PWD\target\release\bin\cjcj.exe") |
             Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $binary) { Write-Error "no cjcj product under target\release\bin"; exit 1 }
+          if (-not (Test-Path "$PWD\dist-sticky-std\STICKY_STD.json")) {
+            Write-Error "Windows sticky std closure missing; package remains fail-closed"
+            exit 2
+          }
           npx --yes zx@8 scripts/package_sdk.mjs `
             --sdk "$env:CANGJIE_HOME" `
             --binary "$binary" `
             --runtime-root "$PWD\.platform-ci\runtime-install\windows_release_x86_64" `
+            --sticky-std "$PWD\dist-sticky-std" `
             --version "${{ inputs.version }}" `
             --platform "${{ inputs.platform }}" `
             --outdir "$PWD\dist"
