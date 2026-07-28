@@ -287,6 +287,12 @@ if (platform.startsWith('linux-')) {
   console.log('  Windows resolves packaged DLLs through runtime/lib and PATH');
 }
 
+if (platform === 'linux-x64') {
+  console.log('[sticky] verify final standard-library closure');
+  const checker = path.resolve(import.meta.dirname, '..', 'tools', 'check_sticky_closure.py');
+  await $({stdio: 'inherit'})`python3 ${checker} --manifest ${path.join(stage, 'STICKY_STD.json')} --sdk ${stage}`;
+}
+
 console.log('[6/7] archive');
 const archivePath = path.join(outdir, `${packageName}.${archiveType === 'tar' ? 'tar.gz' : 'zip'}`);
 if (archiveType === 'tar') await $({stdio: 'inherit'})`tar -C ${outdir} -czf ${archivePath} ${packageName}`;
