@@ -1,16 +1,62 @@
 #!/usr/bin/env zx
 // Corpus differential gate: compare self-host and reference compile/run results with deterministic parallel aggregation.
+//
+// Invariant: runtime used to load selfhost + its products must come from the tree under test
+// (DIFFTEST_SELF_TC, or home next to DIFFTEST_SELF). DIFFTEST_TC is the official/bootstrap
+// toolchain (ref compiler + llvm tools). Never silently red on ABI mismatch — print HARNESS.
 
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {access, constants as fsConstants} from 'node:fs';
+import {promisify} from 'node:util';
 
-const tc = process.env.DIFFTEST_TC || '/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458';
-process.env.CANGJIE_HOME = tc;
-process.env.LD_LIBRARY_PATH = `${tc}/third_party/llvm/lib:${tc}/runtime/lib/linux_x86_64_cjnative:${tc}/tools/lib:${process.env.LD_LIBRARY_PATH || ''}`;
+const accessAsync = promisify(access);
+
 const repo = path.resolve(import.meta.dirname, '..');
+const tc = process.env.DIFFTEST_TC || '/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458';
 const self = process.env.DIFFTEST_SELF || `${repo}/target/release/bin/cjcj::cjc`;
 const ref = process.env.DIFFTEST_REF || '/root/.cjv/bin/cjc';
+
+const RUNTIME_SUB = 'runtime/lib/linux_x86_64_cjnative';
+const HARNESS_TAG = 'HARNESS';
+
+function toolchainLd(home) {
+  if (!home) return '';
+  return [
+    `${home}/third_party/llvm/lib`,
+    `${home}/${RUNTIME_SUB}`,
+    `${home}/tools/lib`,
+  ].join(':');
+}
+
+function mergeLd(...parts) {
+  return parts.filter(p => p && p.length).join(':');
+}
+
+async function exists(file) {
+  try {
+    await accessAsync(file, fsConstants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveSelfHome(selfBin, bootstrapTc) {
+  if (process.env.DIFFTEST_SELF_TC) {
+    return path.resolve(process.env.DIFFTEST_SELF_TC);
+  }
+  const nextToSelf = path.resolve(path.dirname(path.resolve(selfBin)), '..');
+  if (await exists(path.join(nextToSelf, RUNTIME_SUB, 'libcangjie-runtime.so'))) {
+    return nextToSelf;
+  }
+  return path.resolve(bootstrapTc);
+}
+
+function withEnv(base, extra) {
+  return {...base, ...extra};
+}
 
 function commandSubstitution(text) {
   return text.replace(/\n+$/, '');
@@ -23,25 +69,80 @@ function bashQ(text, limit = 30) {
   return `$'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'").replaceAll('\n', '\\n').replaceAll('\r', '\\r').replaceAll('\t', '\\t')}'`;
 }
 
+function isAbiLoadError(text) {
+  return /symbol lookup error|undefined symbol|version `[^']+' not found|cannot open shared object file|error while loading shared libraries/i.test(text);
+}
+
+async function preflightSelf(selfBin, selfHome, bootstrapTc, selfLd, selfCangjieHome) {
+  if (!(await exists(selfBin))) {
+    console.error(`${HARNESS_TAG}: missing DIFFTEST_SELF binary: ${selfBin}`);
+    process.exit(2);
+  }
+  const selfRt = path.join(selfHome, RUNTIME_SUB, 'libcangjie-runtime.so');
+  if (!(await exists(selfRt))) {
+    console.error(`${HARNESS_TAG}: self runtime not found under tree-under-test: ${selfRt}`);
+    console.error(`${HARNESS_TAG}: set DIFFTEST_SELF_TC to a SDK/home that pairs with ${selfBin}`);
+    process.exit(2);
+  }
+
+  const env = withEnv(process.env, {
+    CANGJIE_HOME: selfCangjieHome,
+    LD_LIBRARY_PATH: selfLd,
+  });
+  const probe = await $({nothrow: true, quiet: true, env})`timeout 15 ${selfBin} --version`;
+  const out = `${probe.stdout}${probe.stderr}`;
+  if (probe.exitCode === 0) return;
+
+  if (isAbiLoadError(out)) {
+    console.error(`${HARNESS_TAG}: selfhost failed to load with tree-under-test runtime (ABI/runtime mismatch)`);
+    console.error(`${HARNESS_TAG}: DIFFTEST_SELF=${selfBin}`);
+    console.error(`${HARNESS_TAG}: selfHome=${selfHome} bootstrapTc=${bootstrapTc}`);
+    console.error(`${HARNESS_TAG}: LD_LIBRARY_PATH(prefix)=${selfLd.split(':').slice(0, 4).join(':')}`);
+    console.error(`${HARNESS_TAG}: ${out.split(/\r?\n/).find(Boolean) || '<no output>'}`);
+    process.exit(2);
+  }
+  console.error(`${HARNESS_TAG}: selfhost --version exited ${probe.exitCode} (not a clean load probe)`);
+  console.error(`${HARNESS_TAG}: ${out.split(/\r?\n/).find(Boolean) || '<no output>'}`);
+  process.exit(2);
+}
+
+const selfHome = await resolveSelfHome(self, tc);
+// Self products + self binary must prefer tree-under-test runtime.
+// Bootstrap TC still supplies llvm tools (opt/llc) via CANGJIE_HOME when self home has none.
+const selfHasLlvm = await exists(path.join(selfHome, 'third_party/llvm/bin/llc'));
+const selfCangjieHome = selfHasLlvm ? selfHome : tc;
+const selfLd = mergeLd(toolchainLd(selfHome), toolchainLd(tc), process.env.LD_LIBRARY_PATH || '');
+const refLd = mergeLd(toolchainLd(tc), process.env.LD_LIBRARY_PATH || '');
+const refEnv = withEnv(process.env, {CANGJIE_HOME: tc, LD_LIBRARY_PATH: refLd});
+const selfEnv = withEnv(process.env, {CANGJIE_HOME: selfCangjieHome, LD_LIBRARY_PATH: selfLd});
+
+if (argv['skip-preflight'] === undefined) {
+  await preflightSelf(self, selfHome, tc, selfLd, selfCangjieHome);
+}
+
 async function classify(file) {
   const name = path.basename(file, '.cj');
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-difftest-'));
   try {
-    const referenceBuild = await $({cwd: work, nothrow: true, quiet: true})`timeout 180 ${ref} ${file} -o ${path.join(work, `${name}.ref`)}`;
+    const referenceBuild = await $({cwd: work, nothrow: true, quiet: true, env: refEnv})`timeout 180 ${ref} ${file} -o ${path.join(work, `${name}.ref`)}`;
     await fs.writeFile(path.join(work, `${name}.rlog`), referenceBuild.stdout + referenceBuild.stderr);
     let rout = '<REF-COMPILE-FAIL>';
     let rexit = -1;
     if (referenceBuild.exitCode === 0) {
-      const referenceRun = await $({cwd: work, nothrow: true, quiet: true})`timeout 30 ${path.join(work, `${name}.ref`)}`;
+      const referenceRun = await $({cwd: work, nothrow: true, quiet: true, env: refEnv})`timeout 30 ${path.join(work, `${name}.ref`)}`;
       rout = commandSubstitution(referenceRun.stdout);
       rexit = referenceRun.exitCode;
     }
 
-    const selfBuild = await $({cwd: work, nothrow: true, quiet: true})`timeout 180 ${self} ${file} -o ${path.join(work, `${name}.self`)} --set-runtime-rpath`;
+    const selfBuild = await $({cwd: work, nothrow: true, quiet: true, env: selfEnv})`timeout 180 ${self} ${file} -o ${path.join(work, `${name}.self`)} --set-runtime-rpath`;
     await fs.writeFile(path.join(work, `${name}.slog`), selfBuild.stdout + selfBuild.stderr);
     if (selfBuild.exitCode === 0) {
-      const selfRun = await $({cwd: work, nothrow: true, quiet: true})`timeout 30 ${path.join(work, `${name}.self`)}`;
+      const selfRun = await $({cwd: work, nothrow: true, quiet: true, env: selfEnv})`timeout 30 ${path.join(work, `${name}.self`)}`;
       const sout = commandSubstitution(selfRun.stdout);
+      const selfCombined = `${selfRun.stdout}${selfRun.stderr}`;
+      if (isAbiLoadError(selfCombined)) {
+        return `FAIL\t${name}\t${HARNESS_TAG}: product ABI/runtime mismatch: ${bashQ(selfCombined.split(/\r?\n/).find(Boolean) || '', 120)}`;
+      }
       if (sout === rout && selfRun.exitCode === rexit) return `PASS\t${name}\texit=${selfRun.exitCode}`;
       const refCompileDetail = referenceBuild.exitCode === 0
         ? ''
@@ -51,6 +152,9 @@ async function classify(file) {
     if (selfBuild.exitCode === 124) return `FAIL\t${name}\t<COMPILE-TIMEOUT-180s>`;
 
     const log = selfBuild.stdout + selfBuild.stderr;
+    if (isAbiLoadError(log)) {
+      return `FAIL\t${name}\t${HARNESS_TAG}: selfhost ABI/runtime mismatch: ${bashQ(log.split(/\r?\n/).find(Boolean) || '', 120)}`;
+    }
     const strong = log.match(/not yet ported[^"\n]*|globalCache miss|unsupported AST type kind[^"\n]*|unsupported construct[^"\n]*|should have result|Out of memory|does not match pointee|IllegalState[A-Za-z]*|IllegalArgument[A-Za-z]*|no Sema target|no resolvedFunction|you should set a return value/i);
     const weak = log.split('\n').find(line => /error|exception/i.test(line));
     const reason = strong?.[0] || weak?.slice(0, 60) || '<unknown>';
