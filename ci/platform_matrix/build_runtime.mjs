@@ -13,6 +13,7 @@ const version = process.env.RUNTIME_VERSION || '1.2.0-alpha.20260721165458';
 const runtimeTarget = process.env.RUNTIME_TARGET || 'native';
 const runtimeToolchain = process.env.RUNTIME_TOOLCHAIN || '';
 const installRoot = path.join(root, 'runtime-install');
+let artifactRoot = installRoot;
 
 if (runtimeToolchain) {
   process.env.PATH = `${path.join(runtimeToolchain, 'bin')}${path.delimiter}${process.env.PATH || ''}`;
@@ -25,8 +26,12 @@ try { await fs.access(buildPy); } catch {
   console.error(`FATAL: pinned runtime checkout missing: ${buildPy}`);
   process.exit(2);
 }
+const actualRef = (await $({stdio: 'pipe', verbose: false})`git -C ${toCommandPath(source)} rev-parse HEAD`).stdout.trim();
+if (!/^[0-9a-f]{40}$/.test(actualRef)) {
+  console.error(`FATAL: runtime checkout did not resolve to a full commit SHA: ${actualRef}`);
+  process.exit(3);
+}
 if (process.env.RUNTIME_REF) {
-  const actualRef = (await $({stdio: 'pipe', verbose: false})`git -C ${toCommandPath(source)} rev-parse HEAD`).stdout.trim();
   if (actualRef !== process.env.RUNTIME_REF) {
     console.error(`FATAL: runtime checkout is ${actualRef}, expected ${process.env.RUNTIME_REF}`);
     process.exit(3);
@@ -45,6 +50,7 @@ if (process.platform === 'linux') {
       process.exit(4);
     }
     const configuredInstallRoot = path.join(installRoot, 'windows_release_x86_64');
+    artifactRoot = configuredInstallRoot;
     await $({cwd: runtimeDirectory})`python3 build.py build --target ${runtimeTarget} --build-type release --target-toolchain ${runtimeToolchain} --prefix ${preinstall} -v ${version}`;
     await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${configuredInstallRoot}`;
   } else if (runtimeTarget === 'native') {
@@ -76,6 +82,7 @@ if (process.platform === 'linux') {
   const targetPlatform = runtimeTarget.slice(0, targetSeparator);
   const targetArch = runtimeTarget.slice(targetSeparator + 1);
   const configuredInstallRoot = path.join(installRoot, `${targetPlatform}_${buildType}_${targetArch}`);
+  artifactRoot = configuredInstallRoot;
   const script = [
     'set -euo pipefail',
     'export PATH=/mingw64/bin:/usr/bin:$PATH',
@@ -118,4 +125,6 @@ if (!runtimeLib) {
   console.error(`FATAL: libcangjie-runtime was not installed under ${installRoot}`);
   process.exit(6);
 }
+await fs.writeFile(path.join(artifactRoot, 'SOURCE_SHA'), `${actualRef}\n`);
+console.log(`runtime_provenance=${path.join(artifactRoot, 'SOURCE_SHA')} source_ref=${actualRef}`);
 await $({nothrow: true})`file ${toCommandPath(runtimeLib)}`;
