@@ -463,15 +463,20 @@ def verify_machine_artifact(path, allowed_native=()):
         images = object_images(body, f"{path}:{name}")
         if images is None:
             raise ClosureError(f"{path}:{name}: archive member is not a recognized object")
+        if name in allowed_native:
+            for object_origin, object_format, endian, sections in images:
+                gcflags_name = gcflags_section_name(object_format)
+                if gcflags_name in sections or (object_format == "ELF" and ".cjmetadata" in sections):
+                    count = verify_object_records(object_origin, object_format, endian, sections)
+                    if count is not None:
+                        raise ClosureError(
+                            f"{path}:{name}: attested Cangjie member is incorrectly declared native")
+            seen_native.add(name)
+            continue
         member_records = []
         for object_origin, object_format, endian, sections in images:
             count = verify_object_records(object_origin, object_format, endian, sections)
             member_records.append(count)
-        if name in allowed_native:
-            if any(count is not None for count in member_records):
-                raise ClosureError(f"{path}:{name}: attested Cangjie member is incorrectly declared native")
-            seen_native.add(name)
-            continue
         if any(count is None for count in member_records):
             raise ClosureError(f"{path}:{name}: unattested object is not declared native")
         cangjie_objects += len(member_records)
