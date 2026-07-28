@@ -64,10 +64,6 @@ if (!stickyStd) {
   console.error(`${platform} packaging requires an attested sticky std closure`);
   process.exit(2);
 }
-if (platform !== 'linux-x64') {
-  console.error(`sticky std build and attestation are not implemented for ${platform}; packaging is disabled`);
-  process.exit(2);
-}
 if (stickyStd && !await exists(stickyStd, 'dir')) {
   console.error(`sticky std directory not found: ${stickyStd}`);
   process.exit(2);
@@ -109,6 +105,10 @@ if (stickyStd) {
   }
   if (runtimeRef !== stickyManifest.sourceRef) {
     throw new Error(`runtime/std source mismatch: runtime=${runtimeRef} std=${stickyManifest.sourceRef}`);
+  }
+  if (platform !== 'linux-x64') {
+    console.error(`sticky std build and attestation are not implemented for ${platform}; packaging is disabled`);
+    process.exit(2);
   }
 
   const optimizedLibraries = path.join(stage, 'lib', 'cjcj-optimization', runtimeDir);
