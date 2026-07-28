@@ -121,14 +121,25 @@ async function createBuildSdkOverlay() {
       entry.isDirectory() ? 'dir' : 'file');
   }
 
-  const astFfi = await requireFile(path.join(sdkTargetLib, 'libcangjie-std-astFFI.a'), 'official ast FFI');
   const astSupport = path.join(overlayTargetLib, 'libcangjie-ast-support.a');
-  await fs.copyFile(astFfi, astSupport);
-  const llvmAr = await requireFile(path.join(sdk, 'third_party', 'llvm', 'bin', 'llvm-ar'), 'SDK llvm-ar');
-  await $`${llvmAr} d ${astSupport} ast_api.cpp.o`;
-  const members = (await $({stdio: 'pipe'})`${llvmAr} t ${astSupport}`).stdout.trim().split('\n').filter(Boolean);
-  if (members.length !== 70 || members.includes('ast_api.cpp.o')) {
-    throw new Error(`derived ast-support archive has unexpected members=${members.length}`);
+  const officialAstSupport = path.join(sdkTargetLib, 'libcangjie-ast-support.a');
+  // Linux sticky recipe derives ast-support from std-astFFI by dropping ast_api.cpp.o
+  // (exactly 70 members). Windows official SDK already ships the support archive;
+  // its FFI archive has a different member set, so reuse the official object.
+  if (targetSpec.buildTarget) {
+    await fs.copyFile(await requireFile(officialAstSupport, 'official windows ast-support'), astSupport);
+  } else {
+    if (await fs.stat(officialAstSupport).catch(() => null)) {
+      // still derive for linux so sticky builds match the historical recipe
+    }
+    const astFfi = await requireFile(path.join(sdkTargetLib, 'libcangjie-std-astFFI.a'), 'official ast FFI');
+    await fs.copyFile(astFfi, astSupport);
+    const llvmAr = await requireFile(path.join(sdk, 'third_party', 'llvm', 'bin', 'llvm-ar'), 'SDK llvm-ar');
+    await $`${llvmAr} d ${astSupport} ast_api.cpp.o`;
+    const members = (await $({stdio: 'pipe'})`${llvmAr} t ${astSupport}`).stdout.trim().split('\n').filter(Boolean);
+    if (members.length !== 70 || members.includes('ast_api.cpp.o')) {
+      throw new Error(`derived ast-support archive has unexpected members=${members.length}`);
+    }
   }
 }
 
