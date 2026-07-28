@@ -139,7 +139,7 @@ private func GetAllDeclsForMacroName(macCall: MacroCall, macroName: String, out:
                 if (macroName.contains(".")) {
                     // The package name may be an alias: import p0.* as p1.*, p1 is the alias for p0.
                     let pkgNameMaybeAlias = macroName[0..(macroName.lastIndexOf(".") ?? 0)]
-                    let (packageDeclOpt, isConflicted) = instance.importManager.getOrThrow().GetImportedPackageDecl(node,
+                    let (packageDeclOpt, isConflicted) = instance.importManager.GetImportedPackageDecl(node,
                         pkgNameMaybeAlias)
                     if (let Some(packageDecl) <- packageDeclOpt) {
                         if (isConflicted) {
@@ -147,7 +147,7 @@ private func GetAllDeclsForMacroName(macCall: MacroCall, macroName: String, out:
                                 args: [DiagArgument(pkgNameMaybeAlias)]).Emit()
                             return false
                         }
-                        for (foundDecl in instance.importManager.getOrThrow().GetPackageMembersByName(packageDecl.srcPackage,
+                        for (foundDecl in instance.importManager.GetPackageMembersByName(packageDecl.srcPackage,
                             identifier)) {
                             out.add(foundDecl)
                         }
@@ -157,7 +157,7 @@ private func GetAllDeclsForMacroName(macCall: MacroCall, macroName: String, out:
                         return false
                     }
                 } else {
-                    for (importedDecl in instance.importManager.getOrThrow().GetImportedDeclsByName(file, identifier)) {
+                    for (importedDecl in instance.importManager.GetImportedDeclsByName(file, identifier)) {
                         out.add(importedDecl)
                     }
                 }
@@ -268,7 +268,7 @@ private func findStdMacroLibPath(packageName: String, instance: MacroHost): Stri
             return candidate
         }
     }
-    let foundInSearch = findFileByName(libName, instance.importManager.getOrThrow().GetSearchPath())
+    let foundInSearch = findFileByName(libName, instance.importManager.GetSearchPath())
     if (!foundInSearch.isEmpty()) {
         return foundInSearch
     }
@@ -276,7 +276,7 @@ private func findStdMacroLibPath(packageName: String, instance: MacroHost): Stri
 }
 
 private func findMacroDefPkg(macCall: MacroCall, instance: MacroHost, fd: FuncDecl): Unit {
-    for (packageName in instance.importManager.getOrThrow().GetImportedStdMacroPackages()) {
+    for (packageName in instance.importManager.GetImportedStdMacroPackages()) {
         if (packageName == fd.fullPackageName) {
             macCall.libPath = findStdMacroLibPath(packageName, instance)
             return
@@ -286,13 +286,13 @@ private func findMacroDefPkg(macCall: MacroCall, instance: MacroHost, fd: FuncDe
     let names = splitQualifiedName(fd.fullPackageName)
     if (!names.isEmpty()) {
         let nestedName = toCjoFileName(names[0]) + DIR_SEPARATOR + libName
-        let nestedPath = findFileByName(nestedName, instance.importManager.getOrThrow().GetSearchPath())
+        let nestedPath = findFileByName(nestedName, instance.importManager.GetSearchPath())
         if (!nestedPath.isEmpty()) {
             macCall.libPath = nestedPath
             return
         }
     }
-    macCall.libPath = findFileByName(libName, instance.importManager.getOrThrow().GetSearchPath())
+    macCall.libPath = findFileByName(libName, instance.importManager.GetSearchPath())
 }
 
 private func bindInvokeFunc(macCall: MacroCall): Bool {
