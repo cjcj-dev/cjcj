@@ -97,10 +97,18 @@ async function matchingFiles(directory, pattern) {
   return (await fs.readdir(directory)).filter(name => pattern.test(name)).sort();
 }
 
-async function createBuildSdkOverlay() {
+async function createBuildSdkOverlay(runtimeOverlayRoot = '') {
   await fs.mkdir(buildSdk, {recursive: true});
-  for (const name of ['bin', 'include', 'modules', 'runtime', 'tools']) {
+  for (const name of ['bin', 'include', 'modules', 'tools']) {
     await fs.symlink(path.join(sdk, name), path.join(buildSdk, name), 'dir');
+  }
+  // Windows sticky objects reference sticky ABI symbols; the DLL link line
+  // searches sticky-sdk/runtime first, so overlay the cross-built runtime
+  // (with sticky exports) instead of the stock official Windows runtime.
+  if (runtimeOverlayRoot) {
+    await fs.symlink(runtimeOverlayRoot, path.join(buildSdk, 'runtime'), 'dir');
+  } else {
+    await fs.symlink(path.join(sdk, 'runtime'), path.join(buildSdk, 'runtime'), 'dir');
   }
   await fs.symlink(path.join(sdk, 'third_party'), path.join(buildSdk, 'third_party'), 'dir');
 
@@ -196,12 +204,19 @@ try {
   const actualRef = (await $({stdio: 'pipe'})`git -C ${source} rev-parse HEAD`).stdout.trim();
   if (actualRef !== sourceRef) throw new Error(`runtime source mismatch: expected ${sourceRef}, got ${actualRef}`);
 
-  await createBuildSdkOverlay();
-  createStickySdkOverlay(buildSdk, stickySdk);
-
   const targetLib = targetLibOverride
-    || path.join(buildSdk, 'runtime', 'lib', platform);
+    || path.join(sdk, 'runtime', 'lib', platform);
   await requireDirectory(targetLib, 'sticky std target-lib');
+  // For Windows cross, targetLib is .../runtime/lib/windows_... under the
+  // cross-built install root; its grandparent is the install "runtime" dir.
+  const runtimeOverlay = targetSpec.buildTarget
+    ? path.resolve(targetLib, '..', '..')
+    : '';
+  if (runtimeOverlay) {
+    await requireFile(path.join(targetLib, 'libcangjie-runtime.dll'), 'sticky Windows runtime DLL');
+  }
+  await createBuildSdkOverlay(runtimeOverlay);
+  createStickySdkOverlay(buildSdk, stickySdk);
 
   // stdlib build.py check_compiler uses shutil.which(..., path=target_toolchain),
   // which only searches that single directory — pass .../bin, not the toolchain root.
