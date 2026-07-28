@@ -4,12 +4,14 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::utils.CJC_ASSERT
 import std.collection.*
 import std.sort.*
+import std.sync.Mutex
 
 public open class Value <: Base & Hashable & Equatable<Value> {
     private var ty: Option<Type>
     private var identifier: String
     private let kind: ValueKind
     private let users: ArrayList<Expression> = ArrayList<Expression>()
+    private let userMutex: Mutex = Mutex()
 
     public init(ty: Option<Type>, identifier: String, kind: ValueKind) {
         super()
@@ -105,17 +107,36 @@ public open class Value <: Base & Hashable & Equatable<Value> {
     }
 
     public func AddUserOnly(expr: Expression): Unit {
-        users.add(expr)
+        if (IsGlobal()) {
+            synchronized(userMutex) {
+                users.add(expr)
+            }
+        } else {
+            users.add(expr)
+        }
     }
 
     public func RemoveUserOnly(expr: Expression): Unit {
-        var idx: Int64 = 0
-        while (idx < users.size) {
-            if (users[idx].nodeId == expr.nodeId) {
-                users.remove(at: idx)
-                continue
+        if (IsGlobal()) {
+            synchronized(userMutex) {
+                var idx: Int64 = 0
+                while (idx < users.size) {
+                    if (users[idx].nodeId == expr.nodeId) {
+                        users.remove(at: idx)
+                        continue
+                    }
+                    idx++
+                }
             }
-            idx++
+        } else {
+            var idx: Int64 = 0
+            while (idx < users.size) {
+                if (users[idx].nodeId == expr.nodeId) {
+                    users.remove(at: idx)
+                    continue
+                }
+                idx++
+            }
         }
     }
 
