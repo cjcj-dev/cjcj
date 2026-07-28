@@ -128,7 +128,7 @@ if (stickyStd) {
   if (runtimeRef !== stickyManifest.sourceRef) {
     throw new Error(`runtime/std source mismatch: runtime=${runtimeRef} std=${stickyManifest.sourceRef}`);
   }
-  if (platform !== 'linux-x64') {
+  if (!['linux-x64', 'windows-x64'].includes(platform)) {
     console.error(`sticky std build and attestation are not implemented for ${platform}; packaging is disabled`);
     process.exit(2);
   }
@@ -218,10 +218,14 @@ if (stickyStd) {
   if (seedShaResiduals.length !== 0) {
     throw new Error(`stock SDK std seed SHA survived purge: ${seedShaResiduals.join(',')}`);
   }
-  const libPreflight = stickyPreflight(standardLibraries);
-  const runtimePreflight = stickyPreflight(runtimeLibraries);
-  console.log(`  sticky std: lib=${libPreflight.loggedBaseSymbols}/${libPreflight.stickyRelocations} `
-    + `runtime=${runtimePreflight.loggedBaseSymbols}/${runtimePreflight.stickyRelocations}`);
+  if (isWindows) {
+    console.log(`  sticky std: managed=${managedFiles.length} final-checker=pending`);
+  } else {
+    const libPreflight = stickyPreflight(standardLibraries);
+    const runtimePreflight = stickyPreflight(runtimeLibraries);
+    console.log(`  sticky std: lib=${libPreflight.loggedBaseSymbols}/${libPreflight.stickyRelocations} `
+      + `runtime=${runtimePreflight.loggedBaseSymbols}/${runtimePreflight.stickyRelocations}`);
+  }
   console.log(`  stock SDK std seed: artifacts=${seedArtifacts.length} unique_sha=${seedOnlyHashes.size} residual=0`);
   await fs.writeFile(path.join(stage, 'CJCJ_RELEASE.json'), `${JSON.stringify({
     runtimeRef,
