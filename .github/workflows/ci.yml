@@ -11,6 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  MRT_STICKY_MINOR: '1'
   CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
   # RUNTIME_REF/RUNTIME_VERSION come from ci/runtime_pin.env via the "Load runtime pin" step.
 
