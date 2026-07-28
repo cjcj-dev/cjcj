@@ -25,6 +25,7 @@ STICKY_MAGIC = 0x53424A43
 STICKY_VERSION = 1
 STICKY_KIND = 2
 STD_LIBRARY = re.compile(r"^libcangjie-std(?:[-.].*)?\.(?:a|so|dylib)$")
+WINDOWS_STD_DLL = re.compile(r"^libcangjie-std(?:[-.].*)?\.dll$")
 SUPPORTED_PLATFORMS = {
     "linux_x86_64_cjnative",
     "linux_aarch64_cjnative",
@@ -542,7 +543,23 @@ def main():
 
     managed = manifest.get("managed")
     managed_paths = []
-    if managed is not None:
+    if args.platform == "windows_x86_64_cjnative":
+        if managed is None:
+            raise ClosureError("Windows sticky closure requires a nonempty managed inventory")
+        managed_files, managed_hashes = require_mapping(managed, "managed")
+        actual_managed = sorted(
+            str(path.relative_to(args.sdk)) for path in runtime_root.iterdir()
+            if path.is_file() and WINDOWS_STD_DLL.fullmatch(path.name)
+        )
+        if not managed_files:
+            raise ClosureError("Windows sticky closure managed inventory is empty")
+        if managed_files != actual_managed:
+            missing = sorted(set(managed_files) - set(actual_managed))
+            extra = sorted(set(actual_managed) - set(managed_files))
+            raise ClosureError(f"managed Windows std DLL inventory mismatch: missing={missing} extra={extra}")
+        verify_hashes(args.sdk, managed_files, managed_hashes, "managed artifact")
+        managed_paths.extend(args.sdk / name for name in managed_files)
+    elif managed is not None:
         managed_files, managed_hashes = require_mapping(managed, "managed")
         verify_hashes(args.sdk, managed_files, managed_hashes, "managed artifact")
         managed_paths.extend(args.sdk / name for name in managed_files)
