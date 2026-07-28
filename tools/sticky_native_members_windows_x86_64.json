@@ -1,0 +1,111 @@
+{
+  "sourceRef": "4d90980fab801e5a3ceab7de8e98e77f9940d61e",
+  "platform": "windows_x86_64_cjnative",
+  "nativeMembers": {
+    "libcangjie-std-collection.concurrent.a": [
+      "array_blocking_queue_ffi.c.obj"
+    ],
+    "libcangjie-std-console.a": [
+      "console_write.c.obj"
+    ],
+    "libcangjie-std-convert.a": [
+      "floatparse.c.obj",
+      "string.c.obj"
+    ],
+    "libcangjie-std-core.a": [
+      "SIMD_support.c.obj",
+      "atexit.c.obj",
+      "endian.c.obj",
+      "string_utf8.c.obj",
+      "console_read.c.obj",
+      "math.c.obj",
+      "print.c.obj",
+      "string.c.obj",
+      "string_SIMD.c.obj",
+      "string_strstr.c.obj",
+      "typetemplate.c.obj"
+    ],
+    "libcangjie-std-env.a": [
+      "console_write.c.o",
+      "process_ffi_win.c.o"
+    ],
+    "libcangjie-std-fs.a": [
+      "file_system_win.c.obj"
+    ],
+    "libcangjie-std-math.a": [
+      "math.c.obj"
+    ],
+    "libcangjie-std-net.a": [
+      "socket_buffer.c.o",
+      "utils.c.o",
+      "schdfd.cpp.o",
+      "sock.cpp.o",
+      "tcpsock_common.cpp.o",
+      "tcpsock.cpp.o",
+      "udpsock_common.cpp.o",
+      "udpsock.cpp.o",
+      "rawsock_common.cpp.o",
+      "rawsock.cpp.o"
+    ],
+    "libcangjie-std-objectpool.a": [
+      "objectpool_ffi.c.obj"
+    ],
+    "libcangjie-std-posix.a": [
+      "file_dirc.c.obj",
+      "native.c.obj",
+      "sys.c.obj"
+    ],
+    "libcangjie-std-process.a": [
+      "process_ffi_win.c.obj"
+    ],
+    "libcangjie-std-random.a": [
+      "random.c.obj"
+    ],
+    "libcangjie-std-regex.a": [
+      "regex_match.c.obj",
+      "pcre2_auto_possess.c.obj",
+      "pcre2_chartables.c.obj",
+      "pcre2_chkdint.c.obj",
+      "pcre2_compile.c.obj",
+      "pcre2_compile_class.c.obj",
+      "pcre2_config.c.obj",
+      "pcre2_context.c.obj",
+      "pcre2_convert.c.obj",
+      "pcre2_dfa_match.c.obj",
+      "pcre2_error.c.obj",
+      "pcre2_extuni.c.obj",
+      "pcre2_find_bracket.c.obj",
+      "pcre2_jit_compile.c.obj",
+      "pcre2_maketables.c.obj",
+      "pcre2_match.c.obj",
+      "pcre2_match_data.c.obj",
+      "pcre2_newline.c.obj",
+      "pcre2_ord2utf.c.obj",
+      "pcre2_pattern_info.c.obj",
+      "pcre2_script_run.c.obj",
+      "pcre2_serialize.c.obj",
+      "pcre2_string_utils.c.obj",
+      "pcre2_study.c.obj",
+      "pcre2_substitute.c.obj",
+      "pcre2_substring.c.obj",
+      "pcre2_tables.c.obj",
+      "pcre2_ucd.c.obj",
+      "pcre2_valid_utf.c.obj",
+      "pcre2_xclass.c.obj"
+    ],
+    "libcangjie-std-runtime.a": [
+      "runtime_ffi.c.obj"
+    ],
+    "libcangjie-std-time.a": [
+      "time.c.obj",
+      "time_common.c.obj",
+      "timezone.c.obj"
+    ],
+    "libcangjie-std-unittest.a": [
+      "coverage_impl.c.obj",
+      "cpu_counters.c.obj",
+      "terminal_ansi.c.obj",
+      "terminal_size.c.obj"
+    ]
+  }
+}
