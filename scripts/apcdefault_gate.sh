@@ -65,8 +65,8 @@ done
 
 for jobs in 1 2 24; do
     make_wrapper "$wrappers/candidate-compat-j$jobs" "$candidate" "$jobs" compat
-    make_wrapper "$wrappers/official-default-j$jobs" "$official" "$jobs" default
-    run_bcgate "GATE_B_J$jobs" "$wrappers/candidate-compat-j$jobs" "$wrappers/official-default-j$jobs"
+    make_wrapper "$wrappers/official-compat-j$jobs" "$official" "$jobs" compat
+    run_bcgate "GATE_B_J$jobs" "$wrappers/candidate-compat-j$jobs" "$wrappers/official-compat-j$jobs"
 done
 
 source_file=$repo/scripts/difftest_corpus/01_return.cj
