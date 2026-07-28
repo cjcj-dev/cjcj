@@ -47,6 +47,49 @@ async function findRuntimeDll(candidate) {
   return '';
 }
 
+async function findExportDefinition(candidate) {
+  const resolved = path.resolve(candidate);
+  const info = await fs.stat(resolved).catch(() => undefined);
+  if (!info) return '';
+  if (info.isFile()) {
+    return path.basename(resolved) === 'windows_x86_64_exports.def' ? resolved : '';
+  }
+  for (const entry of await fs.readdir(resolved, {withFileTypes: true})) {
+    const child = path.join(resolved, entry.name);
+    if (entry.isFile() && entry.name === 'windows_x86_64_exports.def') return child;
+    if (entry.isDirectory()) {
+      const found = await findExportDefinition(child);
+      if (found) return found;
+    }
+  }
+  return '';
+}
+
+function parseExportDefinition(contents, filename) {
+  const expected = new Set();
+  let hasExportsHeader = false;
+  for (const [index, original] of contents.split(/\r?\n/).entries()) {
+    const line = original.trim();
+    if (!line || line.startsWith(';')) continue;
+    if (line === 'EXPORTS') {
+      hasExportsHeader = true;
+      continue;
+    }
+    const matched = line.match(/^(\S+)\s+@\d+(?:\s+DATA)?$/);
+    if (!hasExportsHeader || !matched) {
+      throw new Error(`${filename}:${index + 1}: malformed export definition: ${original}`);
+    }
+    if (expected.has(matched[1])) {
+      throw new Error(`${filename}:${index + 1}: duplicate export: ${matched[1]}`);
+    }
+    expected.add(matched[1]);
+  }
+  if (!hasExportsHeader || !expected.size) throw new Error(`${filename}: empty export definition`);
+  return expected;
+}
+
+const sortedDifference = (left, right) => [...left].filter((value) => !right.has(value)).sort();
+
 const searchRoot = argv._[0] || path.join(
   process.env.PLATFORM_CI_ROOT || path.join(process.cwd(), '.platform-ci'),
   'runtime-install',
@@ -54,6 +97,27 @@ const searchRoot = argv._[0] || path.join(
 const runtimeDll = await findRuntimeDll(searchRoot);
 if (!runtimeDll) {
   console.error(`FATAL: libcangjie-runtime.dll not found under ${path.resolve(searchRoot)}`);
+  process.exit(2);
+}
+const runtimeSourceDefinition = path.join(
+  process.cwd(),
+  'runtime-source',
+  'runtime',
+  'src',
+  'windows_x86_64_exports.def',
+);
+const expectedDefinition = typeof argv['expected-def'] === 'string'
+  ? path.resolve(argv['expected-def'])
+  : await findExportDefinition(runtimeSourceDefinition) || await findExportDefinition(searchRoot);
+if (!expectedDefinition) {
+  console.error(`FATAL: windows_x86_64_exports.def not found in runtime-source or under ${path.resolve(searchRoot)}`);
+  process.exit(2);
+}
+let expectedExports;
+try {
+  expectedExports = parseExportDefinition(await fs.readFile(expectedDefinition, 'utf8'), expectedDefinition);
+} catch (error) {
+  console.error(`FATAL: ${error.message}`);
   process.exit(2);
 }
 
@@ -82,32 +146,23 @@ const imports = new Set(
     .map((match) => match[1].toLowerCase()),
 );
 const missing = requiredExports.filter((symbol) => !exports.has(symbol));
+const missingExpected = sortedDifference(expectedExports, exports);
+const unexpectedExports = sortedDifference(exports, expectedExports);
 const unexpectedImports = [...imports].filter((dll) => !officialImports.has(dll));
 const missingImports = [...officialImports].filter((dll) => !imports.has(dll));
-const prefixCount = (prefix) => [...exports].filter((symbol) => symbol.startsWith(prefix)).length;
-const mccCount = prefixCount('MCC_');
-const cjMccCount = prefixCount('CJ_MCC_');
-const mrtCount = prefixCount('MRT_');
 
-console.log(`WINDOWS_RUNTIME_EXPORT_GUARD dll=${runtimeDll}`);
+console.log(`WINDOWS_RUNTIME_EXPORT_GUARD dll=${runtimeDll} expected_def=${expectedDefinition}`);
 console.log(
-  `WINDOWS_RUNTIME_EXPORT_GUARD exports=${exports.size} required=${requiredExports.length} missing=${missing.length} ` +
-  `MCC=${mccCount} CJ_MCC=${cjMccCount} MRT=${mrtCount} imports=${[...imports].sort().join(',')}`,
+  `WINDOWS_RUNTIME_EXPORT_GUARD exports=${exports.size} expected=${expectedExports.size} ` +
+  `missing=${missingExpected.length} unexpected=${unexpectedExports.length} ` +
+  `required=${requiredExports.length} missing_required=${missing.length} imports=${[...imports].sort().join(',')}`,
 );
 if (missing.length) console.error(`FATAL: missing required exports: ${missing.join(',')}`);
+if (missingExpected.length) console.error(`FATAL: missing exports: ${missingExpected.join(',')}`);
+if (unexpectedExports.length) console.error(`FATAL: unexpected exports: ${unexpectedExports.join(',')}`);
 if (unexpectedImports.length) console.error(`FATAL: unexpected imports: ${unexpectedImports.join(',')}`);
 if (missingImports.length) console.error(`FATAL: missing official imports: ${missingImports.join(',')}`);
-// CJ_MCC baseline is 194, not the official SDK's 192: generational (sticky) GC adds exactly two
-// symbols that the source declares as public C ABI --
-//   CJ_MCC_FlushDeferredLogRing  (extern "C" MRT_EXPORT, runtime/src/Mutator/Mutator.h:637)
-//   CJ_MCC_StickyLogLine         (runtime/src/Heap/StickyLog.h:21)
-// Both are called from the compiler-emitted write-barrier path, so they must stay exported.
-// The total export count is unchanged at 3116: the Windows producer no longer uses
-// --export-all-symbols, so 79 accidentally leaked internal C++/libc++ names are gone.
-if (mccCount !== 158 || cjMccCount !== 194 || mrtCount !== 61) {
-  console.error('FATAL: runtime export-family counts differ from the expected surface');
-}
 if (
-  missing.length || unexpectedImports.length || missingImports.length ||
-  mccCount !== 158 || cjMccCount !== 194 || mrtCount !== 61
+  missing.length || missingExpected.length || unexpectedExports.length ||
+  unexpectedImports.length || missingImports.length
 ) process.exit(1);
