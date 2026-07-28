@@ -98,6 +98,28 @@ if (stickyStd) {
     throw new Error(`sticky std manifest role mismatch: closure=${stickyManifest.closure || '<missing>'} `
       + `role=${stickyManifest.role || '<missing>'} provenance=${stickyManifest.provenance || '<missing>'}`);
   }
+  const managedSection = stickyManifest.managed;
+  let managedFiles = [];
+  let managedHashes = {};
+  if (managedSection !== undefined) {
+    if (!Array.isArray(managedSection.files) || managedSection.files.length !== new Set(managedSection.files).size ||
+        !managedSection.sha256 || Array.isArray(managedSection.sha256) || typeof managedSection.sha256 !== 'object') {
+      throw new Error('managed must contain unique files[] and sha256{}');
+    }
+    managedFiles = [...managedSection.files].sort();
+    managedHashes = managedSection.sha256;
+    if (managedFiles.some(file => typeof file !== 'string' || file.includes('\\') ||
+        file.split('/').some(component => component === '' || component === '.' || component === '..')) ||
+        managedFiles.join('\n') !== Object.keys(managedHashes).sort().join('\n')) {
+      throw new Error('managed files must be canonical relative paths with matching sha256 keys');
+    }
+  }
+  const windowsManagedPrefix = `runtime/lib/${runtimeDir}/`;
+  const windowsStdDllPattern = /^libcangjie-std(?:[-.].*)?\.dll$/;
+  if (isWindows && (managedFiles.length === 0 || managedFiles.some(file =>
+    !file.startsWith(windowsManagedPrefix) || !windowsStdDllPattern.test(file.slice(windowsManagedPrefix.length))))) {
+    throw new Error('Windows sticky closure requires a nonempty exact managed std DLL inventory');
+  }
   const runtimeSourceSha = runtimeLib
     ? path.join(path.dirname(runtimeLib), 'SOURCE_SHA')
     : path.join(runtimeRoot, 'SOURCE_SHA');
@@ -133,6 +155,10 @@ if (stickyStd) {
     const file = path.join(stdModules, name);
     seedArtifacts.push({file: path.relative(stage, file), sha256: await sha256(file)});
   }
+  for (const name of managedFiles) {
+    const file = path.join(stage, name);
+    if (await exists(file)) seedArtifacts.push({file: name, sha256: await sha256(file)});
+  }
 
   await fs.rm(path.join(stage, 'lib', 'cjcj-optimization'), {recursive: true, force: true});
   for (const directory of [standardLibraries, runtimeLibraries]) {
@@ -141,6 +167,7 @@ if (stickyStd) {
     }
   }
   await fs.rm(stdModules, {recursive: true, force: true});
+  for (const name of managedFiles) await fs.rm(path.join(stage, name), {force: true});
   await fs.cp(stickyStd, stage, {recursive: true, force: true});
   const finalLibraries = [...stickyManifest.sticky.files].sort();
   const finalSharedLibraries = finalLibraries.filter(name => name.endsWith('.so') || name.endsWith('.dylib'));
@@ -153,6 +180,11 @@ if (stickyStd) {
   requireSameFiles('packaged runtime std libraries',
     await matchingFiles(runtimeLibraries, libraryPattern), finalSharedLibraries);
   requireSameFiles('packaged std CJO', await matchingFiles(stdModules, /\.cjo$/), finalCjos);
+  if (isWindows) {
+    const finalManagedDlls = managedFiles.map(name => name.slice(windowsManagedPrefix.length));
+    requireSameFiles('packaged managed Windows std DLLs',
+      await matchingFiles(runtimeLibraries, windowsStdDllPattern), finalManagedDlls);
+  }
   const shippedHashes = [];
   for (const name of finalLibraries) {
     const digest = await sha256(path.join(standardLibraries, name));
@@ -175,8 +207,16 @@ if (stickyStd) {
     }
     shippedHashes.push(digest);
   }
+  for (const name of managedFiles) {
+    const digest = await sha256(path.join(stage, name));
+    if (digest !== managedHashes[name]) {
+      throw new Error(`packaged managed artifact SHA mismatch: ${name} ${digest} != ${managedHashes[name]}`);
+    }
+    shippedHashes.push(digest);
+  }
   const finalHashes = new Set([
     ...Object.values(stickyManifest.sticky.sha256), ...Object.values(stickyManifest.cjo.sha256),
+    ...Object.values(managedHashes),
   ]);
   const seedOnlyHashes = new Set(seedArtifacts.map(item => item.sha256).filter(hash => !finalHashes.has(hash)));
   const seedShaResiduals = shippedHashes.filter(hash => seedOnlyHashes.has(hash));
@@ -197,6 +237,7 @@ if (stickyStd) {
       cjcSha256: stickyManifest.cjcSha256,
       libraries: finalLibraries.length,
       cjos: finalCjos.length,
+      managed: managedFiles.length,
     },
     stockSdkStdSeed: {artifactsPurged: seedArtifacts.length, uniqueSha256: seedOnlyHashes.size, residual: 0},
   }, null, 2)}\n`);
