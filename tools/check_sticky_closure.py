@@ -447,10 +447,12 @@ def verify_native_artifact(path):
         images = object_images(body, f"{path}:{name}")
         if images is None:
             raise ClosureError(f"{path}:{name}: native member is not a recognized object")
-        for object_origin, object_format, _, sections in images:
-            metadata = metadata_sections(object_format, sections)
-            if metadata:
-                raise ClosureError(f"{object_origin}: native library contains Cangjie metadata {metadata}")
+        for object_origin, object_format, endian, sections in images:
+            gcflags_name = gcflags_section_name(object_format)
+            if gcflags_name in sections or (object_format == "ELF" and ".cjmetadata" in sections):
+                count = verify_object_records(object_origin, object_format, endian, sections)
+                if count is not None:
+                    raise ClosureError(f"{object_origin}: attested Cangjie object is declared native")
             native_objects += 1
     if native_objects == 0:
         raise ClosureError(f"{path}: native library contains no object")
