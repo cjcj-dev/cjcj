@@ -8,6 +8,9 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.Range as BasicRange
 
+// INT32_MAX: CodeGen array-copy chunk ABI limit (IRBuilder.cj:5721-5723).
+private let ARRAY_ELEMENT_SIZE_LIMIT: Int64 = 2147483647
+
 // C++ src/Sema/CJMP/CheckCJMP.cpp:1342-1357.
 public func GetInheritedTypesWithSpecificImpl(
     inheritedTypes: ArrayList<Type>, hasSpecificImpl: Bool, compilePlatform: Bool
@@ -288,6 +291,285 @@ extend TypeCheckerImpl {
                 CheckValueTypeRecursiveDFS(Some(instantiatedDecl))
             }
         }
+    }
+
+    // L240 / arrchunk: CodeGen only had InternalError for elementSize > INT32_MAX
+    // (packages/codegen/src/IRBuilder.cj:5721-5723). Official C++ has no CodeGen/Sema
+    // diagnostic channel for this limit either. Raise a formal sema diagnostic when a
+    // static lower-bound layout of an array element type exceeds INT32_MAX (2GiB-1).
+    // Only diagnose when the lower bound is proven; never reject smaller legal types.
+    private func LayoutVisitedContains(visited: ArrayList<Ty>, ty: Ty): Bool {
+        for (seen in visited) {
+            if (SameTy(seen, ty)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func PrimitiveLayoutSize(kind: TypeKind): Option<Int64> {
+        match (kind) {
+            case TypeKind.TYPE_UNIT | TypeKind.TYPE_NOTHING => Some(0)
+            case TypeKind.TYPE_BOOLEAN => Some(1)
+            case TypeKind.TYPE_INT8 | TypeKind.TYPE_UINT8 => Some(1)
+            case TypeKind.TYPE_INT16 | TypeKind.TYPE_UINT16 => Some(2)
+            case TypeKind.TYPE_INT32 | TypeKind.TYPE_UINT32 | TypeKind.TYPE_RUNE => Some(4)
+            case TypeKind.TYPE_INT64 | TypeKind.TYPE_UINT64 => Some(8)
+            case TypeKind.TYPE_INT_NATIVE | TypeKind.TYPE_UINT_NATIVE => Some(8)
+            case TypeKind.TYPE_FLOAT16 => Some(2)
+            case TypeKind.TYPE_FLOAT32 => Some(4)
+            case TypeKind.TYPE_FLOAT64 => Some(8)
+            case _ => None
+        }
+    }
+
+    private func SaturatingMul(a: Int64, b: Int64): Int64 {
+        if (a <= 0 || b <= 0) {
+            return 0
+        }
+        if (a > ARRAY_ELEMENT_SIZE_LIMIT || b > ARRAY_ELEMENT_SIZE_LIMIT) {
+            return ARRAY_ELEMENT_SIZE_LIMIT + 1
+        }
+        if (a > (ARRAY_ELEMENT_SIZE_LIMIT + 1) / b) {
+            return ARRAY_ELEMENT_SIZE_LIMIT + 1
+        }
+        return a * b
+    }
+
+    private func SaturatingAdd(a: Int64, b: Int64): Int64 {
+        if (a > ARRAY_ELEMENT_SIZE_LIMIT || b > ARRAY_ELEMENT_SIZE_LIMIT) {
+            return ARRAY_ELEMENT_SIZE_LIMIT + 1
+        }
+        if (a > (ARRAY_ELEMENT_SIZE_LIMIT + 1) - b) {
+            return ARRAY_ELEMENT_SIZE_LIMIT + 1
+        }
+        return a + b
+    }
+
+    // Lower-bound layout size in bytes. None = cannot prove a bound (generic/unknown).
+    // Proven sizes use conservative lower bounds for reference-like types (pointer width).
+    private func EstimateLayoutLowerBound(ty: Ty, visited: ArrayList<Ty>): Option<Int64> {
+        if (!Ty.IsTyCorrect(ty) || ty.IsGeneric() || ty.HasGeneric()) {
+            return None
+        }
+        if (let Some(size) <- PrimitiveLayoutSize(ty.kind)) {
+            return Some(size)
+        }
+        if (ty.IsClassLike() || ty.IsFunc() || ty.IsPointer() || ty.IsCString() || ty.IsArray() ||
+            ty.IsStructArray()) {
+            // Reference / heap header / fat-pointer lower bound; never alone exceeds 2GiB.
+            return Some(8)
+        }
+        if (let Some(varrayTy) <- (ty as VArrayTy)) {
+            if (varrayTy.typeArgs.isEmpty()) {
+                return None
+            }
+            if (varrayTy.size < 0) {
+                return None
+            }
+            let elemBound = EstimateLayoutLowerBound(varrayTy.typeArgs[0], visited) ?? return None
+            return Some(SaturatingMul(varrayTy.size, elemBound))
+        }
+        if (let Some(tupleTy) <- (ty as TupleTy)) {
+            var total: Int64 = 0
+            for (elem in tupleTy.typeArgs) {
+                let elemBound = EstimateLayoutLowerBound(elem, visited) ?? return None
+                total = SaturatingAdd(total, elemBound)
+            }
+            return Some(total)
+        }
+        if (LayoutVisitedContains(visited, ty)) {
+            // Recursive value types are diagnosed elsewhere; do not invent a size.
+            return None
+        }
+        if (let Some(structTy) <- (ty as StructTy)) {
+            if (let None <- structTy.declPtr) {
+                return None
+            }
+            let decl = structTy.declPtr.getOrThrow()
+            if (structTy.IsString() || structTy.IsRange()) {
+                return Some(8)
+            }
+            visited.add(ty)
+            var total: Int64 = 0
+            var ok = true
+            for (member in decl.GetMemberDecls()) {
+                if (!ok) {
+                    continue
+                }
+                if (member.astKind != ASTKind.VAR_DECL || member.TestAttr(Attribute.STATIC)) {
+                    continue
+                }
+                if (let Some(memberTy) <- member.GetTy()) {
+                    if (let Some(fieldBound) <- EstimateLayoutLowerBound(memberTy, visited)) {
+                        total = SaturatingAdd(total, fieldBound)
+                    } else {
+                        ok = false
+                    }
+                } else {
+                    ok = false
+                }
+            }
+            visited.remove(at: visited.size - 1)
+            if (!ok) {
+                return None
+            }
+            return Some(total)
+        }
+        if (ty.IsEnum()) {
+            // Conservative: only prove oversize when a constructor payload lower-bound
+            // alone exceeds the limit (full enum ABI may add a tag).
+            if (let Some(decl) <- Ty.GetDeclOfTy(Some(ty))) {
+                if (let Some(enumDecl) <- (decl as EnumDecl)) {
+                    visited.add(ty)
+                    var maxPayload: Int64 = 0
+                    var provedOversize = false
+                    for (constructor in enumDecl.constructors) {
+                        if (constructor.astKind != ASTKind.FUNC_DECL) {
+                            continue
+                        }
+                        let funcDecl = (constructor as FuncDecl).getOrThrow()
+                        if (let Some(funcBody) <- funcDecl.funcBody) {
+                            if (funcBody.paramLists.isEmpty()) {
+                                continue
+                            }
+                            var payload: Int64 = 0
+                            var payloadOk = true
+                            for (param in funcBody.paramLists[0].params) {
+                                if (!payloadOk) {
+                                    continue
+                                }
+                                if (let Some(paramTy) <- param.GetTy()) {
+                                    if (let Some(paramBound) <- EstimateLayoutLowerBound(paramTy, visited)) {
+                                        payload = SaturatingAdd(payload, paramBound)
+                                    } else {
+                                        payloadOk = false
+                                    }
+                                } else {
+                                    payloadOk = false
+                                }
+                            }
+                            if (payloadOk && payload > maxPayload) {
+                                maxPayload = payload
+                                if (maxPayload > ARRAY_ELEMENT_SIZE_LIMIT) {
+                                    provedOversize = true
+                                }
+                            }
+                        }
+                    }
+                    visited.remove(at: visited.size - 1)
+                    if (provedOversize) {
+                        return Some(maxPayload)
+                    }
+                }
+            }
+            return None
+        }
+        return None
+    }
+
+    private func ArrayElementTypeOf(ty: Ty): Option<Ty> {
+        if (let Some(arrayTy) <- (ty as ArrayTy)) {
+            if (arrayTy.typeArgs.isEmpty()) {
+                return None
+            }
+            return Some(arrayTy.typeArgs[0])
+        }
+        if (ty.IsStructArray()) {
+            if (ty.typeArgs.isEmpty()) {
+                return None
+            }
+            return Some(ty.typeArgs[0])
+        }
+        return None
+    }
+
+    private func EmitArrayElementSizeLimitDiag(node: Node, elementTy: Ty, lowerBound: Int64): Unit {
+        if (let Some(diagValue) <- diag) {
+            let typeName = elementTy.String()
+            let sizeText = "${lowerBound}"
+            let message = "array element type '" + typeName + "' has size at least " + sizeText +
+                " bytes, which exceeds the current 2 GiB (" + "${ARRAY_ELEMENT_SIZE_LIMIT}" +
+                " bytes) array-element implementation limit"
+            let builder = Diagnose(diagValue, node, BasicDiagKind.sema_diag_report_error_message,
+                args: [BasicDiagArgument(message)])
+            builder.AddNote(
+                "this limit matches the CodeGen array-copy chunk ABI (element size must fit in Int32); " +
+                "previously reported only as an internal compiler error")
+            builder.Emit()
+        }
+    }
+
+    private func ReportIfElementExceedsLimit(node: Node, elementTy: Ty, reported: ArrayList<Ty>): Unit {
+        for (seen in reported) {
+            if (SameTy(seen, elementTy)) {
+                return
+            }
+        }
+        if (let Some(lowerBound) <- EstimateLayoutLowerBound(elementTy, ArrayList<Ty>())) {
+            if (lowerBound <= ARRAY_ELEMENT_SIZE_LIMIT) {
+                return
+            }
+            reported.add(elementTy)
+            EmitArrayElementSizeLimitDiag(node, elementTy, lowerBound)
+        }
+    }
+
+    private func CheckStructDeclElementSizeLimit(decl: StructDecl, reported: ArrayList<Ty>): Unit {
+        if (let Some(ty) <- decl.GetTy()) {
+            if (!Ty.IsTyCorrect(ty) || ty.HasGeneric()) {
+                return
+            }
+            // Prefer pointing at the field that alone exceeds the limit.
+            for (member in decl.GetMemberDecls()) {
+                if (member.astKind != ASTKind.VAR_DECL || member.TestAttr(Attribute.STATIC)) {
+                    continue
+                }
+                if (let Some(memberTy) <- member.GetTy()) {
+                    if (let Some(fieldBound) <- EstimateLayoutLowerBound(memberTy, ArrayList<Ty>())) {
+                        if (fieldBound > ARRAY_ELEMENT_SIZE_LIMIT) {
+                            ReportIfElementExceedsLimit(member, memberTy, reported)
+                            return
+                        }
+                    }
+                }
+            }
+            if (let Some(total) <- EstimateLayoutLowerBound(ty, ArrayList<Ty>())) {
+                if (total > ARRAY_ELEMENT_SIZE_LIMIT) {
+                    ReportIfElementExceedsLimit(decl, ty, reported)
+                }
+            }
+        }
+    }
+
+    public func CheckArrayElementSizeLimit(pkg: Package): Unit {
+        let reported = ArrayList<Ty>()
+        IterateToplevelDecls(pkg, { decl: Decl =>
+            if (let Some(structDecl) <- (decl as StructDecl)) {
+                CheckStructDeclElementSizeLimit(structDecl, reported)
+            }
+        })
+        for (instantiatedDecl in pkg.genericInstantiatedDecls) {
+            if (let Some(structDecl) <- (instantiatedDecl as StructDecl)) {
+                CheckStructDeclElementSizeLimit(structDecl, reported)
+            }
+        }
+        let walker = Walker(pkg, visitPre: { node: Node =>
+            if (let Some(ty) <- node.GetTy()) {
+                if (let Some(elemTy) <- ArrayElementTypeOf(ty)) {
+                    ReportIfElementExceedsLimit(node, elemTy, reported)
+                }
+            }
+            if (let Some(typeNode) <- (node as Type)) {
+                if (let Some(ty) <- typeNode.GetTy()) {
+                    if (let Some(elemTy) <- ArrayElementTypeOf(ty)) {
+                        ReportIfElementExceedsLimit(typeNode, elemTy, reported)
+                    }
+                }
+            }
+            VisitAction.WALK_CHILDREN
+        })
+        walker.Walk()
     }
 
     public func CheckRecursiveConstructorCall(decls: ArrayList<Decl>): Unit {
