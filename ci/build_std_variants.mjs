@@ -162,7 +162,16 @@ async function runBuild(home, ...args) {
     PATH: pathEntries.filter(Boolean).join(path.delimiter),
     LD_LIBRARY_PATH: libraryPath,
   };
-  if (targetToolchain) buildEnv.RUNTIME_TOOLCHAIN = targetToolchain;
+  if (targetToolchain) {
+    buildEnv.RUNTIME_TOOLCHAIN = targetToolchain;
+    // mingw.mjs installs OpenSSL under <toolchain>/<triple>; FindOpenSSL needs this root.
+    const opensslRoot = path.join(targetToolchain, 'x86_64-w64-mingw32');
+    if ((await fs.stat(path.join(opensslRoot, 'include', 'openssl')).catch(() => null))?.isDirectory()) {
+      buildEnv.OPENSSL_ROOT_DIR = opensslRoot;
+      buildEnv.CMAKE_PREFIX_PATH = [opensslRoot, buildEnv.CMAKE_PREFIX_PATH || '']
+        .filter(Boolean).join(path.delimiter);
+    }
+  }
   // Pass argv as discrete tokens so --target / --target-toolchain reach argparse.
   await $({cwd: path.join(source, 'stdlib'), env: buildEnv})`python3 build.py ${args}`;
 }
