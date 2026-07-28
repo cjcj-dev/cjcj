@@ -135,6 +135,7 @@ try {
   const stickyDirectory = path.join(out, 'lib', platform);
   const stickyLibraries = copyCompiledStdLibraries(path.join(buildOutput, 'lib', platform), stickyDirectory);
   const preflight = stickyPreflight(stickyDirectory);
+  const nativeLibraries = stickyLibraries.files.filter(name => name.endsWith('FFI.a'));
   const librarySha256 = Object.fromEntries(await Promise.all(stickyLibraries.files.map(async name =>
     [name, await sha256(path.join(stickyDirectory, name))])));
   const cjoFiles = (await fs.readdir(cjoDirectory)).filter(name => name.endsWith('.cjo')).sort();
@@ -145,6 +146,7 @@ try {
   const manifest = {
     recipe: 'official-cjc-plus-fixed-llc', closure: 'single-sticky', role: 'final',
     provenance: 'official-cjc-sticky-lowering', sourceUrl, sourceRef, cjcSha256,
+    nativeLibraries,
     sticky: {...stickyLibraries, sha256: librarySha256, seconds: stickySeconds, preflight},
     cjo: {files: cjoFiles, sha256: cjoSha256},
   };
