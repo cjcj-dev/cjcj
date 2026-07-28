@@ -171,6 +171,29 @@ def verify_records(raw, origin):
     return count
 
 
+def verify_merged_records(raw, origin):
+    """Verify gcflags records retained inside a linked .cjmetadata section."""
+    encoded_magic = struct.pack("<I", STICKY_MAGIC)
+    positions = []
+    cursor = 0
+    while True:
+        position = raw.find(encoded_magic, cursor)
+        if position < 0:
+            break
+        positions.append(position)
+        cursor = position + len(encoded_magic)
+    if not positions:
+        raise ClosureError(f"{origin}: merged Cangjie metadata contains no sticky record magic")
+    records = 0
+    for position in positions:
+        start = position - 4
+        end = start + GC_FLAGS_RECORD_SIZE
+        if start < 0 or end > len(raw):
+            raise ClosureError(f"{origin}: truncated merged gcflags record at offset {start}")
+        records += verify_records(raw[start:end], f"{origin}:merged+0x{start:x}")
+    return records
+
+
 def verify_native_artifact(path):
     data = path.read_bytes()
     members = archive_members(data, str(path))
@@ -180,7 +203,8 @@ def verify_native_artifact(path):
         sections = elf_sections(body, f"{path}:{name}")
         if sections is None:
             raise ClosureError(f"{path}:{name}: non-ELF native member is not attestable")
-        metadata = sorted(section for section in sections if section.startswith(".cjmetadata."))
+        metadata = sorted(section for section in sections
+                          if section == ".cjmetadata" or section.startswith(".cjmetadata."))
         if metadata:
             raise ClosureError(f"{path}:{name}: native library contains Cangjie metadata {metadata}")
         native_objects += 1
@@ -201,8 +225,13 @@ def verify_machine_artifact(path, allowed_native=()):
         sections = elf_sections(body, f"{path}:{name}")
         if sections is None:
             raise ClosureError(f"{path}:{name}: non-ELF archive member is not attestable")
-        has_cangjie_metadata = any(section.startswith(".cjmetadata.") for section in sections)
+        has_cangjie_metadata = any(
+            section == ".cjmetadata" or section.startswith(".cjmetadata.") for section in sections)
         gcflags = sections.get(GC_FLAGS_SECTION)
+        if gcflags is None and ".cjmetadata" in sections:
+            cangjie_objects += 1
+            records += verify_merged_records(sections[".cjmetadata"], f"{path}:{name}")
+            continue
         if gcflags is None:
             if name in allowed_native and not has_cangjie_metadata:
                 seen_native.add(name)
