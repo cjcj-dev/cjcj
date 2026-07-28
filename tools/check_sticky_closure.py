@@ -2,9 +2,9 @@
 """Fail closed unless a packaged standard-library closure is sticky.
 
 The STICKY_STD manifest binds the exact std libraries and CJO files. Every
-Cangjie ELF object in every bound machine-code artifact must contain only valid
-STICKY attestation records. Pure native FFI libraries must be named explicitly
-by ``nativeLibraries`` and must not contain any Cangjie metadata section.
+Cangjie-compiled ELF object in every bound machine-code artifact must contain
+only valid STICKY attestation records. Pure native FFI libraries and native
+members mixed into Cangjie archives must be named explicitly.
 """
 
 import argparse
@@ -233,7 +233,7 @@ def verify_machine_artifact(path, allowed_native=()):
             records += verify_merged_records(sections[".cjmetadata"], f"{path}:{name}")
             continue
         if gcflags is None:
-            if name in allowed_native and not has_cangjie_metadata:
+            if name in allowed_native:
                 seen_native.add(name)
                 continue
             if has_cangjie_metadata:
