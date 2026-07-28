@@ -732,8 +732,8 @@ public class CompilerInstance {
         for (pkg in srcPkgs) {
             semaInstance.sourcePackages.add(pkg)
         }
-        // C++ TypeChecker holds non-owning ImportManager*; selfhost Option root is shared until Destroy.
-        semaInstance.importManager = importManager
+        // C++ TypeChecker holds non-owning ImportManager*; re-wrap for Option<SemaImportManager>.
+        semaInstance.importManager = Some(importManager.getOrThrow())
         semaInstance.cacheSemaUsage = Some({ info: SemanticInfo => CacheSemaUsage(info) })
         SeedFaithfulSemaResolvedImports(semaInstance)
         let checker = FaithfulSemaTypeChecker(Some(semaInstance))
