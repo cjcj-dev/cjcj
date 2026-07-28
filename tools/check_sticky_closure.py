@@ -282,7 +282,7 @@ def coff_sections(data, origin):
     for index in range(section_count):
         section_offset = section_table_offset + index * 40
         name = coff_section_name(data[section_offset:section_offset + 8], string_table, origin)
-        virtual_size, raw_size, raw_offset = struct.unpack_from("<III", data, section_offset + 8)
+        virtual_size, _, raw_size, raw_offset = struct.unpack_from("<IIII", data, section_offset + 8)
         size = min(virtual_size, raw_size) if is_pe and virtual_size else raw_size
         if raw_offset + size > len(data):
             raise ClosureError(f"COFF section outside file: {origin}:{name}")
