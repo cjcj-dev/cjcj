@@ -169,13 +169,15 @@ def macho_sections(data, origin):
                 if is_64:
                     size = struct.unpack_from(endian + "Q", data, section_offset + 40)[0]
                     file_offset = struct.unpack_from(endian + "I", data, section_offset + 48)[0]
+                    flags = struct.unpack_from(endian + "I", data, section_offset + 64)[0]
                 else:
                     size, file_offset = struct.unpack_from(endian + "II", data, section_offset + 36)
-                if file_offset + size > len(data):
+                    flags = struct.unpack_from(endian + "I", data, section_offset + 56)[0]
+                is_zerofill = flags & 0xFF in (0x1, 0xC, 0x12)
+                if not is_zerofill and file_offset + size > len(data):
                     raise ClosureError(f"Mach-O section outside file: {origin}:{name}")
-                if name in result:
-                    raise ClosureError(f"duplicate Mach-O section: {origin}:{name}")
-                result[name] = data[file_offset:file_offset + size]
+                raw = b"" if is_zerofill else data[file_offset:file_offset + size]
+                result[name] = result.get(name, b"") + raw
         command_offset += command_size
     if command_offset != commands_end:
         raise ClosureError(f"Mach-O load command size mismatch: {origin}")
