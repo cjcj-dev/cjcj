@@ -2885,6 +2885,9 @@ extend TypeChecker {
     private func CheckLegalityOfUsage(ctx: ASTContext, pkg: Package): Unit {
         if (let Some(diagValue) <- impl.diag) {
             impl.CheckValueTypeRecursive(pkg)
+            // L240: formal sema diagnostic for array element types whose proven
+            // layout lower-bound exceeds INT32_MAX (was CodeGen InternalError only).
+            impl.CheckArrayElementSizeLimit(pkg)
             let result = CheckLegalityOfUsage(
                 ctx, pkg, diagValue, impl.typeManager, impl,
                 { inheritancePkg: Package => impl.CheckInheritance(inheritancePkg) },
