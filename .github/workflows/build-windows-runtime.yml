@@ -142,7 +142,7 @@ jobs:
           # CANGJIE_HOME is exported by the sticky-LLC setup_sdk step via GITHUB_ENV.
           test -n "$CANGJIE_HOME"
           test -f "$CANGJIE_HOME/third_party/llvm/bin/llc"
-          "$CANGJIE_HOME/third_party/llvm/bin/llc" --help-hidden | grep -q cjcj-sticky-logged-map
+          "$CANGJIE_HOME/third_party/llvm/bin/llc" --help-hidden 2>/dev/null | grep -F -- '--cjcj-sticky-logged-map' >/dev/null
           test -d "$CJCJ_STICKY_TARGET_LIB"
           npx --yes zx@8 ci/build_std_variants.mjs \
             --sdk "$CANGJIE_HOME" \
