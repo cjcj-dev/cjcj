@@ -685,7 +685,10 @@ function resultSignature(result) {
       officialSha256: sample.layers[layer].officialSha256,
       candidateSha256: sample.layers[layer].candidateSha256,
     }])),
-    artifacts: sample.artifacts,
+    compilerArtifacts: Object.fromEntries(Object.entries(sample.artifacts).map(([arm, artifacts]) => [
+      arm,
+      Object.fromEntries(['preOpt', 'postOpt', 'object', 'elf'].map((kind) => [kind, artifacts[kind]])),
+    ])),
   }]));
 }
 
