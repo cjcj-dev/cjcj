@@ -9,8 +9,8 @@ import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateThisCall, CreateThisRef, CreateType,
-    CreateUnitType, GenericConfigInfo, GetArgsAndRetGenericActualTyVector, GetInstantyForGenericTy, GetStringDecl,
-    WithinFile, INIT_IDENT, IsObjCGeneratedMember,
+    CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
+    GetGenericInstType, GetInstantyForGenericTy, GetStringDecl, WithinFile, INIT_IDENT, IsObjCGeneratedMember,
     WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
     CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
@@ -1787,6 +1787,95 @@ public class ASTFactory {
         wrapper.EnableAttr(Attribute.NO_MANGLE)
         wrapper.funcBody.getOrThrow().funcDecl = wrapper
         PutDeclToFile(wrapper, pd.curFile.getOrThrow())
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1160-1258.
+    public func CreateGetterWrapper(field: VarDecl,
+        genericConfig!: Option<GenericConfigInfo> = None): FuncDecl {
+        let outerDecl = (field.outerDecl.getOrThrow() as InheritableDecl).getOrThrow()
+        var genericActualTy: Option<Ty> = None
+        let actualTyArgMap = HashMap<String, Ty>()
+        let actualPrimitiveTypes = ArrayList<Type>()
+        if (field.GetTy().getOrThrow().IsGeneric()) {
+            let config = genericConfig.getOrThrow()
+            genericActualTy = Some(typeManager.GetPrimitiveTy(
+                GetActualTypeKind(GetGenericActualType(config, field.GetTy().getOrThrow().name))))
+            if (outerDecl.GetTy().getOrThrow().HasGeneric()) {
+                for (argTy in outerDecl.GetTy().getOrThrow().typeArgs) {
+                    if (argTy.IsGeneric()) {
+                        let actualRetTy = typeManager.GetPrimitiveTy(
+                            GetActualTypeKind(GetGenericActualType(config, argTy.name)))
+                        actualTyArgMap.add(argTy.name, actualRetTy)
+                        actualPrimitiveTypes.add(GetGenericInstType(config, actualRetTy, typeManager))
+                    }
+                }
+            }
+        }
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        var objTmpVarDecl: Option<VarDecl> = None
+        let fieldExpr: MemberAccess
+        if (field.TestAttr(Attribute.STATIC)) {
+            fieldExpr = CreateMemberAccess(WithinFile<RefExpr>(CreateRefExpr(outerDecl), field.curFile), field)
+        } else {
+            let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+            let registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+            wrapperParams.add(registryIdParam)
+            if (outerDecl.GetTy().getOrThrow().HasGeneric()) {
+                let instantTy = GetInstantyForGenericTy(outerDecl, actualTyArgMap, typeManager)
+                let registryTy = CreateRefType(outerDecl, instantTy)
+                for (actualType in actualPrimitiveTypes) { registryTy.typeArguments.add(actualType) }
+                let clonedRegistryTy = (ASTCloner.Clone(registryTy) as RefType).getOrThrow()
+                let getFromRegistryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam), registryTy)
+                let temp = CreateTmpVarDecl(clonedRegistryTy, getFromRegistryCall)
+                objTmpVarDecl = Some(temp)
+                fieldExpr = CreateMemberAccess(CreateRefExpr(temp), field)
+                if (field.GetTy().getOrThrow().IsGeneric()) {
+                    fieldExpr.SetTy(genericActualTy.getOrThrow())
+                }
+            } else {
+                let getFromRegistryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam),
+                    CreateRefType(outerDecl))
+                let temp = CreateTmpVarDecl(CreateRefType(outerDecl), getFromRegistryCall)
+                objTmpVarDecl = Some(temp)
+                fieldExpr = CreateMemberAccess(CreateRefExpr(temp), field)
+            }
+        }
+        fieldExpr.curFile = field.curFile
+        fieldExpr.begin = field.GetBegin()
+        fieldExpr.end = field.GetEnd()
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) { wrapperParamTys.add(param.GetTy().getOrThrow()) }
+        let fieldObjCTy = if (field.GetTy().getOrThrow().IsGeneric()) {
+            genericActualTy.getOrThrow()
+        } else { typeMapper.Cj2CType(field.GetTy().getOrThrow()) }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), fieldObjCTy, cfg: cfg)
+        let wrapperNodes = ArrayList<Node>()
+        if (let Some(temp) <- objTmpVarDecl) { wrapperNodes.add(temp) }
+        var unwrappedFieldExpr = UnwrapEntity(fieldExpr)
+        if (TypeMapper.IsObjCObjectType(field.GetTy().getOrThrow())) {
+            unwrappedFieldExpr = CreateObjCRetainCall(unwrappedFieldExpr)
+        }
+        wrapperNodes.add(unwrappedFieldExpr)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(wrapperParamList)
+        let wrapperBody = CreateFuncBody(paramLists, CreateType(wrapperTy.retTy),
+            CreateBlock(wrapperNodes, wrapperTy.retTy), wrapperTy)
+        let wrapperName = if (let Some(config) <- genericConfig) {
+            nameGenerator.GetFieldGetterWrapperName(field, genericActualName: config.declInstName)
+        } else { nameGenerator.GetFieldGetterWrapperName(field) }
+        let wrapper = CreateFuncDecl(wrapperName, wrapperBody, wrapperTy)
+        wrapper.moduleName = field.moduleName
+        wrapper.fullPackageName = field.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, field.curFile.getOrThrow())
         return wrapper
     }
 
