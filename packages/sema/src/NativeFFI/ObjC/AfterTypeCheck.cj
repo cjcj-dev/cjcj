@@ -660,8 +660,8 @@ private func DesugarIsExpr(ctx: InteropContext, expr: IsExpr): Unit {
         return
     }
 
-    let type = (isType.GetTy().getOrThrow() as ClassLikeTy).getOrThrow()
-    let typeDecl = type.commonDecl.getOrThrow()
+    let classLikeTy = (isType.GetTy().getOrThrow() as ClassLikeTy).getOrThrow()
+    let typeDecl = classLikeTy.commonDecl.getOrThrow()
     let targetName = ctx.nameGenerator.GetObjCDeclName(typeDecl)
     if (TypeMapper.IsObjCId(typeDecl)) {
         return
@@ -676,7 +676,7 @@ private func DesugarIsExpr(ctx: InteropContext, expr: IsExpr): Unit {
     let trueLit = CreateLitConstExpr(LitConstKind.BOOL, "true", boolTy)
     let matchCases = ArrayList<MatchCase>()
 
-    let originalTypePattern = CreateTypePattern(WildcardPattern(), CreateType(type), leftExpr)
+    let originalTypePattern = CreateTypePattern(WildcardPattern(), CreateType(classLikeTy), leftExpr)
     originalTypePattern.needRuntimeTypeCheck = true
     originalTypePattern.matchBeforeRuntime = false
     matchCases.add(CreateMatchCase(originalTypePattern, trueLit))
@@ -720,8 +720,8 @@ private func DesugarAsExpr(ctx: InteropContext, expr: AsExpr): Unit {
     CJC_NULLPTR_CHECK(curFile)
     CJC_ASSERT(expr.desugarExpr.isNone())
     let castTy = asType.GetTy().getOrThrow()
-    let type = (castTy as ClassLikeTy).getOrThrow()
-    let typeDecl = type.commonDecl.getOrThrow()
+    let classLikeTy = (castTy as ClassLikeTy).getOrThrow()
+    let typeDecl = classLikeTy.commonDecl.getOrThrow()
     if (TypeMapper.IsObjCId(typeDecl)) {
         return
     }
@@ -767,7 +767,7 @@ private func DesugarAsExpr(ctx: InteropContext, expr: AsExpr): Unit {
     let objCIdMatchCase = CreateMatchCase(objCIdTypePattern, objCIdBranch)
     objCIdMatchCase.patternGuard = checkCall
     matchCases.add(objCIdMatchCase)
-    matchCases.add(CreateMatchCase(WildcardPattern(), ctx.factory.CreateOptionNoneRef(type)))
+    matchCases.add(CreateMatchCase(WildcardPattern(), ctx.factory.CreateOptionNoneRef(classLikeTy)))
     expr.desugarExpr = WithinFile<MatchExpr>(CreateMatchExpr(leftExpr, matchCases, castResultTy), curFile)
 }
 
@@ -873,8 +873,8 @@ private func DesugarMatchCaseExpr(ctx: InteropContext, expr: MatchCase): Unit {
 
         let varPattern = (typePattern.pattern.getOrThrow() as VarPattern).getOrThrow()
         let originalTy = varPattern.GetTy().getOrThrow()
-        let type = (originalTy as ClassLikeTy).getOrThrow()
-        let targetName = ctx.nameGenerator.GetObjCDeclName(type.commonDecl.getOrThrow())
+        let classLikeTy = (originalTy as ClassLikeTy).getOrThrow()
+        let targetName = ctx.nameGenerator.GetObjCDeclName(classLikeTy.commonDecl.getOrThrow())
         typePattern.typeNode = CreateType(objCIdDecl.GetTy().getOrThrow())
         varPattern.SetTy(objCIdDecl.GetTy().getOrThrow())
         varPattern.varDecl.getOrThrow().SetTy(objCIdDecl.GetTy().getOrThrow())
@@ -935,8 +935,8 @@ private func DesugarLetDestructorExpr(ctx: InteropContext, expr: IfExpr): Unit {
         let typePattern = typePatterns[0]
         let varPattern = (typePattern.pattern.getOrThrow() as VarPattern).getOrThrow()
         let originalTy = varPattern.GetTy().getOrThrow()
-        let type = (originalTy as ClassLikeTy).getOrThrow()
-        let targetName = ctx.nameGenerator.GetObjCDeclName(type.commonDecl.getOrThrow())
+        let classLikeTy = (originalTy as ClassLikeTy).getOrThrow()
+        let targetName = ctx.nameGenerator.GetObjCDeclName(classLikeTy.commonDecl.getOrThrow())
         let objCIdDecl = ctx.bridge.GetObjCIdDecl().getOrThrow()
         typePattern.typeNode = CreateType(objCIdDecl.GetTy().getOrThrow())
         typePattern.SetTy(objCIdDecl.GetTy().getOrThrow())
@@ -982,8 +982,8 @@ private func DesugarWhileExpr(ctx: InteropContext, expr: WhileExpr): Unit {
         let typePattern = typePatterns[0]
         let varPattern = (typePattern.pattern.getOrThrow() as VarPattern).getOrThrow()
         let originalTy = varPattern.GetTy().getOrThrow()
-        let type = (originalTy as ClassLikeTy).getOrThrow()
-        let targetName = ctx.nameGenerator.GetObjCDeclName(type.commonDecl.getOrThrow())
+        let classLikeTy = (originalTy as ClassLikeTy).getOrThrow()
+        let targetName = ctx.nameGenerator.GetObjCDeclName(classLikeTy.commonDecl.getOrThrow())
         let objCIdDecl = ctx.bridge.GetObjCIdDecl().getOrThrow()
         typePattern.typeNode = CreateType(objCIdDecl.GetTy().getOrThrow())
         typePattern.SetTy(objCIdDecl.GetTy().getOrThrow())
