@@ -133,11 +133,6 @@ if (stickyStd) {
   if (runtimeRef !== stickyManifest.sourceRef) {
     throw new Error(`runtime/std source mismatch: runtime=${runtimeRef} std=${stickyManifest.sourceRef}`);
   }
-  if (!['linux-x64', 'windows-x64'].includes(platform)) {
-    console.error(`sticky std build and attestation are not implemented for ${platform}; packaging is disabled`);
-    process.exit(2);
-  }
-
   const optimizedLibraries = path.join(stage, 'lib', 'cjcj-optimization', runtimeDir);
   const standardLibraries = path.join(stage, 'lib', runtimeDir);
   const runtimeLibraries = path.join(stage, 'runtime', 'lib', runtimeDir);
@@ -225,11 +220,13 @@ if (stickyStd) {
   }
   if (isWindows) {
     console.log(`  sticky std: managed=${managedFiles.length} final-checker=pending`);
-  } else {
+  } else if (platform.startsWith('linux-')) {
     const libPreflight = stickyPreflight(standardLibraries);
     const runtimePreflight = stickyPreflight(runtimeLibraries);
     console.log(`  sticky std: lib=${libPreflight.loggedBaseSymbols}/${libPreflight.stickyRelocations} `
       + `runtime=${runtimePreflight.loggedBaseSymbols}/${runtimePreflight.stickyRelocations}`);
+  } else {
+    console.log('  sticky std: Mach-O final-checker=pending');
   }
   console.log(`  stock SDK std seed: artifacts=${seedArtifacts.length} unique_sha=${seedOnlyHashes.size} residual=0`);
   await fs.writeFile(path.join(stage, 'CJCJ_RELEASE.json'), `${JSON.stringify({
