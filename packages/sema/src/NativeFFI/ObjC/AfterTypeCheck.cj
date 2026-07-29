@@ -12,12 +12,13 @@ import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateSuperCall, CreateThisCall, CreateThisRef, CreateType,
     CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
     GetGenericInstType, GetInstantyForGenericTy, GetSingleArgumentAnnotationValue, GetStringDecl, GetTyByName,
-    GetTypeByName, InitGenericConfigs, ReplaceGenericTyForFunc,
+    GetTypeByName, InitGenericConfigs, IsSuperConstructorCall, IsThisConstructorCall, ReplaceGenericTyForFunc,
     WithinFile, INIT_IDENT, IsObjCGeneratedMember, IsObjCGeneratedNSObjectToString, IsObjCGeneratedNSStringCtor,
     NSOBJECT_CLASS_IDENT, NSSTRING_CLASS_IDENT,
     WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
     CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
+    REGISTRY_ID_SETTER_SELECTOR,
     GetRootPackageName, OBJ_C_FWD_CLASS_SUFFIX,
     OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
 
@@ -3784,6 +3785,263 @@ public class DesugarSyntheticWrappers <: Handler<InteropContext> {
             }
             wrapper.DisableAttr(Attribute.ABSTRACT)
         }
+    }
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarImpls.cpp:51-151.
+private func DesugarSuperCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: FuncDecl): Unit {
+    if (!ctor.TestAttr(Attribute.CONSTRUCTOR)) {
+        return
+    }
+    let body = ctor.funcBody.getOrThrow().body.getOrThrow().body
+    if (body.size < 1) {
+        return
+    }
+    let ce = body[0] as CallExpr
+    if (ce.isNone() || ce.getOrThrow().resolvedFunction.isNone() ||
+        !IsSuperConstructorCall(ce.getOrThrow())) {
+        return
+    }
+    let callExpr = ce.getOrThrow()
+    let isInGeneratedCtor = ctx.factory.IsGeneratedCtor(ctor)
+    let curFile = callExpr.curFile
+    let targetFd = callExpr.resolvedFunction.getOrThrow()
+    let objCSelf: Expr
+    if (isInGeneratedCtor) {
+        let methodParams = ctor.funcBody.getOrThrow().paramLists[0].params
+        CJC_ASSERT(methodParams.size > 0)
+        objCSelf = WithinFile<RefExpr>(CreateRefExpr(methodParams[0]), curFile)
+    } else {
+        objCSelf = ctx.factory.CreateAllocCall(impl, curFile)
+    }
+
+    if (HasImplSuperClass(impl)) {
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(objCSelf))
+        for (arg in callExpr.args) {
+            args.add(arg)
+        }
+        let realTarget = ctx.factory.GetGeneratedImplCtor(
+            GetImplSuperClass(impl).getOrThrow(), targetFd).getOrThrow()
+        let realTargetTy = (realTarget.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let superCall = CreateSuperCall(realTarget.outerDecl.getOrThrow(), realTarget, realTargetTy)
+        for (arg in args) {
+            superCall.args.add(arg)
+        }
+        callExpr.desugarExpr = superCall
+        return
+    }
+
+    let withObjCSuper = WithinFile<Expr>(ctx.factory.CreateWithObjCSuperScope(
+        objCSelf, impl, impl.GetTy().getOrThrow(), {receiver: Expr, objCSuper: Expr =>
+            let superInitArgs = ArrayList<Expr>()
+            for (arg in callExpr.args) {
+                let clonedArg = (ASTCloner.Clone(arg.expr.getOrThrow()) as Expr).getOrThrow()
+                superInitArgs.add(ctx.factory.UnwrapEntity(WithinFile<Expr>(clonedArg, curFile)))
+            }
+            let superInit = ctx.factory.CreateMethodCallViaMsgSendSuper(
+                targetFd, receiver, objCSuper, superInitArgs)
+            let tmpSelf = WithinFile<VarDecl>(CreateTmpVarDecl(None, superInit), curFile)
+            let selfRef = WithinFile<RefExpr>(CreateRefExpr(tmpSelf), curFile)
+            let putToRegistry = ctx.factory.CreatePutToRegistryCall(
+                CreateThisRef(impl, impl.GetTy().getOrThrow(), curFile.getOrThrow()))
+            let setRegistryArgs = ArrayList<Expr>()
+            setRegistryArgs.add(putToRegistry)
+            let clonedSelfRef = (ASTCloner.Clone(selfRef) as Expr).getOrThrow()
+            let setRegistryId = ctx.factory.CreateObjCMsgSendCall(clonedSelfRef,
+                REGISTRY_ID_SETTER_SELECTOR, TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT), setRegistryArgs)
+            let nodes = ArrayList<Node>()
+            nodes.add(tmpSelf)
+            nodes.add(setRegistryId)
+            nodes.add(selfRef)
+            nodes
+        }), curFile)
+    let withObjCSuperRetained =
+        ctx.factory.CreateObjCRetainAutoreleasedReturnValueCall(withObjCSuper)
+    let baseCtor = ctx.factory.GetGeneratedBaseCtor(impl)
+    CJC_NULLPTR_CHECK(baseCtor)
+    let realBaseCtor = baseCtor.getOrThrow()
+    let baseCtorCall = WithinFile<CallExpr>(CreateSuperCall(realBaseCtor.outerDecl.getOrThrow(),
+        realBaseCtor, realBaseCtor.GetTy().getOrThrow()), curFile)
+    baseCtorCall.args.add(CreateFuncArg(withObjCSuperRetained))
+    callExpr.desugarExpr = baseCtorCall
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarImpls.cpp:153-185.
+private func DesugarThisCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: FuncDecl): Unit {
+    if (!ctor.TestAttr(Attribute.CONSTRUCTOR)) {
+        return
+    }
+    let body = ctor.funcBody.getOrThrow().body.getOrThrow().body
+    if (body.size < 1) {
+        return
+    }
+    let ce = body[0] as CallExpr
+    if (ce.isNone() || ce.getOrThrow().resolvedFunction.isNone() ||
+        !IsThisConstructorCall(ce.getOrThrow())) {
+        return
+    }
+    let callExpr = ce.getOrThrow()
+    if (!ctx.factory.IsGeneratedCtor(ctor)) {
+        return
+    }
+    let curFile = callExpr.curFile
+    let targetFd = callExpr.resolvedFunction.getOrThrow()
+    let methodParams = ctor.funcBody.getOrThrow().paramLists[0].params
+    CJC_ASSERT(methodParams.size > 0)
+    let objCSelf = CreateRefExpr(methodParams[0])
+    let args = ArrayList<FuncArg>()
+    args.add(CreateFuncArg(objCSelf))
+    for (arg in callExpr.args) {
+        args.add(arg)
+    }
+    let realTarget = ctx.factory.GetGeneratedImplCtor(impl, targetFd).getOrThrow()
+    let realTargetTy = (realTarget.GetTy().getOrThrow() as FuncTy).getOrThrow()
+    callExpr.desugarExpr = CreateThisCall(impl, realTarget, realTargetTy,
+        curFile.getOrThrow(), args)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarImpls.cpp:26-326.
+public class DesugarImpls <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (impl in ctx.impls) {
+            if (impl.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            for (memberDecl in impl.GetMemberDeclPtrs()) {
+                if (memberDecl.TestAttr(Attribute.IS_BROKEN)) {
+                    continue
+                }
+                if (let Some(funcDecl) <- (memberDecl as FuncDecl)) {
+                    Desugar(ctx, impl, funcDecl)
+                } else if (let Some(propDecl) <- (memberDecl as PropDecl)) {
+                    Desugar(ctx, impl, propDecl)
+                }
+            }
+        }
+    }
+
+    private func Desugar(ctx: InteropContext, impl: ClassDecl, method: FuncDecl): Unit {
+        DesugarSuperCtorCall(ctx, impl, method)
+        DesugarThisCtorCall(ctx, impl, method)
+        let walker = Walker(method.funcBody.getOrThrow().body.getOrThrow(), visitPre: {node: Node =>
+            if (node.TestAnyAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN,
+                Attribute.UNREACHABLE, Attribute.LEFT_VALUE)) {
+                return VisitAction.SKIP_CHILDREN
+            }
+            if (let Some(callExpr) <- (node as CallExpr)) {
+                DesugarCallExpr(ctx, impl, callExpr)
+            } else if (let Some(memberAccess) <- (node as MemberAccess)) {
+                DesugarGetForPropDecl(ctx, impl, memberAccess)
+            }
+            return VisitAction.WALK_CHILDREN
+        })
+        let _ = walker.Walk()
+    }
+
+    private func Desugar(ctx: InteropContext, impl: ClassDecl, propDecl: PropDecl): Unit {
+        for (getter in propDecl.getters) {
+            Desugar(ctx, impl, getter)
+        }
+        for (setter in propDecl.setters) {
+            Desugar(ctx, impl, setter)
+        }
+    }
+
+    private func DesugarCallExpr(ctx: InteropContext, impl: ClassDecl, ce: CallExpr): Unit {
+        if (ce.desugarExpr.isSome() || ce.baseFunc.isNone() || ce.resolvedFunction.isNone()) {
+            return
+        }
+        if (ce.callKind != CallKind.CALL_SUPER_FUNCTION) {
+            return
+        }
+        let targetFd = ce.resolvedFunction.getOrThrow()
+        if (targetFd.propDecl.isSome() &&
+            targetFd.propDecl.getOrThrow().TestAttr(Attribute.DESUGARED_MIRROR_FIELD)) {
+            return
+        }
+        if (ctx.factory.IsGeneratedCtor(targetFd)) {
+            return
+        }
+        let targetFdTy = (targetFd.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let curFile = ce.curFile
+        if (!TypeMapper.IsObjCMirror(targetFd.outerDecl.getOrThrow().GetTy().getOrThrow())) {
+            return
+        }
+        let msgSendSuperArgs = ArrayList<Expr>()
+        for (arg in ce.args) {
+            let clonedArg = (ASTCloner.Clone(arg.expr.getOrThrow()) as Expr).getOrThrow()
+            msgSendSuperArgs.add(ctx.factory.UnwrapEntity(WithinFile<Expr>(clonedArg, curFile)))
+        }
+        let nativeHandle = ctx.factory.CreateNativeHandleExpr(impl, false, ce.curFile)
+        let withObjCSuperCall = ctx.factory.CreateWithObjCSuperScope(nativeHandle, impl,
+            targetFdTy.retTy, {receiver: Expr, objCSuper: Expr =>
+                let clonedObjCSuper = (ASTCloner.Clone(objCSuper) as Expr).getOrThrow()
+                let msgSendSuperCall: Expr
+                if (let Some(propDecl) <- targetFd.propDecl) {
+                    if (!msgSendSuperArgs.isEmpty()) {
+                        msgSendSuperCall = ctx.factory.CreatePropSetterCallViaMsgSendSuper(
+                            propDecl, receiver, clonedObjCSuper, msgSendSuperArgs[0])
+                    } else {
+                        msgSendSuperCall = ctx.factory.CreatePropGetterCallViaMsgSendSuper(
+                            propDecl, receiver, clonedObjCSuper)
+                    }
+                } else {
+                    msgSendSuperCall = ctx.factory.CreateMethodCallViaMsgSendSuper(
+                        targetFd, receiver, clonedObjCSuper, msgSendSuperArgs)
+                }
+                let nodes = ArrayList<Node>()
+                if (targetFd.HasAnno(AstAnnotationKind.OBJ_C_OPTIONAL)) {
+                    let methodSelector = ctx.nameGenerator.GetObjCDeclName(targetFd)
+                    let superClass = ctx.factory.CreateGetSuperClassExpr(objCSuper, curFile)
+                    let guardCall = ctx.factory.CreateOptionalMethodGuard(
+                        msgSendSuperCall, superClass, methodSelector, curFile)
+                    guardCall.curFile = curFile
+                    nodes.add(guardCall)
+                } else {
+                    nodes.add(msgSendSuperCall)
+                }
+                nodes
+            })
+        withObjCSuperCall.curFile = curFile
+        let withObjCSuperCallWrapped = ctx.factory.WrapEntity(withObjCSuperCall,
+            targetFdTy.retTy, withRetain: Retain.RETAIN_AUTORELEASED_RETURN_VALUE)
+        ctx.factory.SetDesugarExpr(ce, withObjCSuperCallWrapped)
+    }
+
+    private func DesugarGetForPropDecl(ctx: InteropContext, impl: ClassDecl, ma: MemberAccess): Unit {
+        if (ma.desugarExpr.isSome()) {
+            return
+        }
+        let target = ma.GetTarget()
+        if (target.isNone() || target.getOrThrow().astKind != ASTKind.PROP_DECL ||
+            target.getOrThrow().TestAttr(Attribute.DESUGARED_MIRROR_FIELD)) {
+            return
+        }
+        var isSuper = false
+        if (let Some(refExpr) <- (ma.baseExpr as RefExpr)) {
+            isSuper = refExpr.isSuper
+        }
+        if (!isSuper) {
+            return
+        }
+        let propDecl = (target.getOrThrow() as PropDecl).getOrThrow()
+        if (!TypeMapper.IsObjCMirror(propDecl.outerDecl.getOrThrow().GetTy().getOrThrow())) {
+            return
+        }
+        let nativeHandle = ctx.factory.CreateNativeHandleExpr(impl, false, ma.curFile)
+        let withObjCSuperCall = ctx.factory.CreateWithObjCSuperScope(nativeHandle, impl,
+            ma.GetTy().getOrThrow(), {receiver: Expr, objCSuper: Expr =>
+                let msgSendSuperCall = ctx.factory.CreatePropGetterCallViaMsgSendSuper(
+                    propDecl, receiver, objCSuper)
+                let nodes = ArrayList<Node>()
+                nodes.add(msgSendSuperCall)
+                nodes
+            })
+        withObjCSuperCall.curFile = ma.curFile
+        let withObjCSuperCallWrapped = ctx.factory.WrapEntity(withObjCSuperCall,
+            ma.GetTy().getOrThrow(), withRetain: Retain.RETAIN_AUTORELEASED_RETURN_VALUE)
+        ctx.factory.SetDesugarExpr(ma, withObjCSuperCallWrapped)
     }
 }
 
