@@ -3521,9 +3521,10 @@ private func DesugarGetter(ctx: InteropContext, mirror: ClassLikeDecl, propDecl:
     let curFile = propDecl.curFile
 
     if (mirror.astKind == ASTKind.INTERFACE_DECL && propDecl.TestAttr(Attribute.STATIC)) {
-        getter.funcBody.getOrThrow().body = CreateBlock(
-            [ctx.factory.CreateThrowUnreachableCodeExpr(curFile.getOrThrow())],
-            ctx.typeManager.GetPrimitiveTy(TypeKind.TYPE_NOTHING))
+        let unreachableNodes = ArrayList<Node>()
+        unreachableNodes.add(ctx.factory.CreateThrowUnreachableCodeExpr(curFile.getOrThrow()))
+        getter.funcBody.getOrThrow().body = CreateBlock(unreachableNodes,
+            TypeManager.GetPrimitiveTy(TypeKind.TYPE_NOTHING))
         return
     }
 
@@ -3544,10 +3545,11 @@ private func DesugarSetter(ctx: InteropContext, mirror: ClassLikeDecl, propDecl:
     CJC_ASSERT(!propDecl.setters.isEmpty())
     let setter = propDecl.setters[0]
     let curFile = propDecl.curFile
-    let unitTy = ctx.typeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+    let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
     if (mirror.astKind == ASTKind.INTERFACE_DECL && propDecl.TestAttr(Attribute.STATIC)) {
-        setter.funcBody.getOrThrow().body = CreateBlock(
-            [ctx.factory.CreateThrowUnreachableCodeExpr(curFile.getOrThrow())], unitTy)
+        let unreachableNodes = ArrayList<Node>()
+        unreachableNodes.add(ctx.factory.CreateThrowUnreachableCodeExpr(curFile.getOrThrow()))
+        setter.funcBody.getOrThrow().body = CreateBlock(unreachableNodes, unitTy)
         return
     }
     setter.funcBody.getOrThrow().body = CreateBlock(ArrayList<Node>(), unitTy)
@@ -3582,7 +3584,7 @@ private func DesugarFieldSetter(ctx: InteropContext, mirror: ClassLikeDecl, fiel
     CJC_ASSERT(!field.setters.isEmpty())
     let setter = field.setters[0]
     let curFile = field.curFile
-    let unitTy = ctx.typeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+    let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
     setter.funcBody.getOrThrow().body = CreateBlock(ArrayList<Node>(), unitTy)
 
     CJC_ASSERT(!field.TestAttr(Attribute.STATIC))
