@@ -2122,7 +2122,7 @@ public class InteropContext {
 }
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/FindMirrors.cpp:21-45.
-public class FindMirrors {
+public class FindMirrors <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
@@ -2153,7 +2153,7 @@ public class FindMirrors {
 }
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/FindCJMapping.cpp:20-27.
-public class FindCJMapping {
+public class FindCJMapping <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
@@ -2166,7 +2166,7 @@ public class FindCJMapping {
 }
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/FindCJMappingInterface.cpp:20-28.
-public class FindCJMappingInterface {
+public class FindCJMappingInterface <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
@@ -2181,7 +2181,7 @@ public class FindCJMappingInterface {
 }
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/FindFwdClass.cpp:20-28.
-public class FindFwdClass {
+public class FindFwdClass <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
@@ -2196,7 +2196,7 @@ public class FindFwdClass {
 }
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DrainGeneratedDecls.cpp:17-24.
-public class DrainGeneratedDecls {
+public class DrainGeneratedDecls <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (decl in ctx.genDecls) {
             decl.curFile.getOrThrow().decls.add(decl)
@@ -2207,7 +2207,7 @@ public class DrainGeneratedDecls {
 }
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckObjCPointerTypeArguments.cpp:22-40.
-public class CheckObjCPointerTypeArguments {
+public class CheckObjCPointerTypeArguments <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (file in ctx.pkg.files) {
             let walker = Walker(file, visitPre: { node: Node =>
@@ -2256,7 +2256,7 @@ private func ReportObjCIncompatibleType(ctx: InteropContext, typeUsage: Type): U
 }
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckObjCFuncTypeArguments.cpp:50-79.
-public class CheckObjCFuncTypeArguments {
+public class CheckObjCFuncTypeArguments <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (file in ctx.pkg.files) {
             let walker = Walker(file, visitPre: { node: Node =>
@@ -2294,7 +2294,7 @@ public class CheckObjCFuncTypeArguments {
 }
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarSyntheticWrappers.cpp:25-33.
-public class DesugarSyntheticWrappers {
+public class DesugarSyntheticWrappers <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (wrapper in ctx.synWrappers) {
             if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
@@ -2683,7 +2683,7 @@ private func DesugarWhileExpr(ctx: InteropContext, expr: WhileExpr): Unit {
 }
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:495-546.
-public class RewriteObjCTypechecks {
+public class RewriteObjCTypechecks <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (file in ctx.pkg.files) {
             let matchWalker = Walker(file, visitPre: { node: Node =>
