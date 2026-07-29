@@ -7,7 +7,7 @@ public class CheckImplInheritMirror <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckImplInheritMirror.cpp:19-48.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         let targetTy = ctx.target.GetTy().getOrThrow()
-        if (!ctx.typeMapper.IsObjCImpl(targetTy)) {
+        if (!TypeMapper.IsObjCImpl(targetTy)) {
             return
         }
 
@@ -15,7 +15,7 @@ public class CheckImplInheritMirror <: Handler<TypeCheckContext> {
         if (let Some(classTy) <- (targetTy as ClassTy)) {
             var hasOnlyMirrorSuperInterfaces = classTy.GetSuperInterfaceTys().size > 0
             for (superInterfaceTy in classTy.GetSuperInterfaceTys()) {
-                if (!ctx.typeMapper.IsValidObjCMirror(superInterfaceTy)) {
+                if (!TypeMapper.IsValidObjCMirror(superInterfaceTy)) {
                     hasOnlyMirrorSuperInterfaces = false
                     break
                 }
@@ -31,7 +31,7 @@ public class CheckImplInheritMirror <: Handler<TypeCheckContext> {
             }
         }
 
-        if (ctx.typeMapper.IsValidObjCMirrorSubtype(targetTy)) {
+        if (TypeMapper.IsValidObjCMirrorSubtype(targetTy)) {
             return
         }
 
