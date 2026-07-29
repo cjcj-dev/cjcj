@@ -249,7 +249,8 @@ public class ASTFactory {
         ctor.funcBody.getOrThrow().funcDecl = ctor
         ctor.constructorCall = ConstructorCall.NONE
         ctor.funcBody.getOrThrow().parentClassLike = target
-        ctor.EnableAttr(Attribute.PUBLIC, Attribute.CONSTRUCTOR)
+        ctor.EnableAttr(Attribute.PUBLIC)
+        ctor.EnableAttr(Attribute.CONSTRUCTOR)
         PutDeclToClassLikeBody(ctor, target)
         return ctor
     }
