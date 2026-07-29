@@ -31,7 +31,7 @@ public struct EmittableObjCClassMetainfo {
 // C++ src/Sema/NativeFFI/ObjC/ObjCCodeTranspiler/Emitter.h:50-57.
 public struct EmittableObjCPropMetainfo {
     public var name: String = ""
-    public var type: String = ""
+    public var `type`: String = ""
     public var isStatic: Bool = false
     public var isReadwrite: Bool = false
     public var getter: EmittableObjCFuncMetainfo = EmittableObjCFuncMetainfo()
@@ -183,15 +183,15 @@ public class Emitter {
     }
 
     public static func EmitDefaultFunctionImplementation(s: StringBuilder,
-        func: EmittableObjCFuncMetainfo): Unit {
-        s.append(if (func.isStatic) { "+" } else { "-" })
+        `func`: EmittableObjCFuncMetainfo): Unit {
+        s.append(if (`func`.isStatic) { "+" } else { "-" })
         s.append(" (")
-        s.append(func.retType)
+        s.append(`func`.retType)
         s.append(")")
-        s.append(func.identifier)
-        s.append(func.paramsDecl)
+        s.append(`func`.identifier)
+        s.append(`func`.paramsDecl)
         s.append(" {\n")
-        if (!func.isStatic) {
+        if (!`func`.isStatic) {
             s.append("    if (self.$registryId == -1) {\n")
             s.append("        [NSException raise: @\"Use before Cangjie counterpart is initialized\" format: ")
             s.append("@\"selector `%@` is overridden in Cangjie and cannot be used before Cangjie counterpart ")
@@ -199,17 +199,17 @@ public class Emitter {
             s.append("    }\n")
         }
         s.append("    ")
-        if (func.retType != "void") {
+        if (`func`.retType != "void") {
             s.append("return ")
         }
-        if (func.bridge) {
+        if (`func`.bridge) {
             s.append("(__bridge_transfer ")
-            s.append(func.retType)
+            s.append(`func`.retType)
             s.append(")")
         }
-        s.append(func.mangledIdentifier)
+        s.append(`func`.mangledIdentifier)
         s.append("(")
-        s.append(func.convertedParams)
+        s.append(`func`.convertedParams)
         s.append(");\n")
         s.append("}\n")
     }
@@ -245,19 +245,19 @@ public class Emitter {
         s.append("        }\n")
     }
 
-    public static func EmitProperty(s: StringBuilder, prop: EmittableObjCPropMetainfo): Unit {
+    public static func EmitProperty(s: StringBuilder, `prop`: EmittableObjCPropMetainfo): Unit {
         s.append("@property (")
-        s.append(if (prop.isReadwrite) { "readwrite" } else { "readonly" })
+        s.append(if (`prop`.isReadwrite) { "readwrite" } else { "readonly" })
         s.append(", getter=")
-        s.append(prop.getter.identifier)
-        if (prop.isReadwrite) {
+        s.append(`prop`.getter.identifier)
+        if (`prop`.isReadwrite) {
             s.append(", setter=")
-            s.append(prop.setter.identifier)
+            s.append(`prop`.setter.identifier)
         }
         s.append(") ")
-        s.append(prop.type)
+        s.append(`prop`.`type`)
         s.append(" ")
-        s.append(prop.name)
+        s.append(`prop`.name)
         s.append(";\n")
     }
 }
