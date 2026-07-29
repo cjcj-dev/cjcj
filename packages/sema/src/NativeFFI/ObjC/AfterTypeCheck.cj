@@ -567,6 +567,68 @@ public class CheckObjCPointerTypeArguments {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckObjCFuncTypeArguments.cpp:25-47.
+private func ReportObjCIncompatibleType(ctx: InteropContext, typeUsage: Type): Unit {
+    var errorRef: Node = typeUsage
+    if (!typeUsage.GetTypeArgs().isEmpty()) {
+        let tyArg = typeUsage.GetTypeArgs()[0]
+        errorRef = tyArg
+        if (let Some(funcTy) <- (tyArg as FuncType)) {
+            if (!ctx.typeMapper.IsObjCCompatible(funcTy.retType.getOrThrow().GetTy().getOrThrow())) {
+                errorRef = funcTy.retType.getOrThrow()
+            }
+            for (arg in funcTy.paramTypes) {
+                if (!ctx.typeMapper.IsObjCCompatible(arg.GetTy().getOrThrow())) {
+                    errorRef = arg
+                    break
+                }
+            }
+        }
+    }
+    let typeDecl = Ty.GetDeclOfTy(typeUsage.GetTy()).getOrThrow()
+    DiagnoseRefactor(ctx.diag, DiagKindRefactor.sema_objc_func_argument_must_be_objc_compatible,
+        errorRef, typeDecl.identifier.Val()).Emit()
+    typeUsage.EnableAttr(Attribute.IS_BROKEN)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckObjCFuncTypeArguments.cpp:50-79.
+public class CheckObjCFuncTypeArguments {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (file in ctx.pkg.files) {
+            let walker = Walker(file, visitPre: { node: Node =>
+                if (!node.IsSamePackage(file.curPackage.getOrThrow())) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (let Some(decl) <- (node as Decl)) {
+                    if (ctx.typeMapper.IsObjCFuncOrBlock(decl)) {
+                        return VisitAction.SKIP_CHILDREN
+                    }
+                }
+                if (let Some(typeUsage) <- (node as Type)) {
+                    if (typeUsage.TestAttr(Attribute.COMPILER_ADD)) {
+                        return VisitAction.SKIP_CHILDREN
+                    }
+                    if (let Some(usageTy) <- typeUsage.GetTy()) {
+                        if (usageTy.typeArgs.size == 1 && ctx.typeMapper.IsObjCFuncOrBlock(usageTy)) {
+                            let tyArg = usageTy.typeArgs[0]
+                            var valid = tyArg.IsFunc()
+                            valid = valid && !tyArg.IsCFunc()
+                            for (subTy in tyArg.typeArgs) {
+                                valid = valid && ctx.typeMapper.IsObjCCompatible(subTy)
+                            }
+                            if (!valid) {
+                                ReportObjCIncompatibleType(ctx, typeUsage)
+                            }
+                        }
+                    }
+                }
+                return VisitAction.WALK_CHILDREN
+            })
+            let _ = walker.Walk()
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Desugar.cpp:16-75.
 public func Desugar(ctx: InteropContext): Unit {
     if (!ctx.bridge.IsInteropLibAccessible()) {
