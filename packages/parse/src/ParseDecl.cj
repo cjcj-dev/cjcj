@@ -164,7 +164,7 @@ extend ParserImpl {
     private func ParseTopLevelDecl(file: File, annos: ArrayList<Annotation>): Unit {
         let modifiers = ArrayList<Modifier>()
         ParseModifiers(modifiers)
-        if (HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+        if (HasModifier(modifiers, TokenKind.FOREIGN)) {
             let decls = ParseForeignDecls(modifiers, annos)
             if (!decls.isEmpty()) {
                 for (decl in decls) {
@@ -178,7 +178,7 @@ extend ParserImpl {
         FinalizeDeclTree(decl)
         if (let Some(current) <- currentFile) {
             if (let Some(pkg) <- current.packageSpec) {
-                if (HasModifierToken(decl.modifiers, TokenKind.PUBLIC) && pkg.hasMacro &&
+                if (HasModifier(decl.modifiers, TokenKind.PUBLIC) && pkg.hasMacro &&
                     decl.astKind != ASTKind.MACRO_DECL) {
                     DiagDeclarationInMacroPackage(decl)
                 }
@@ -393,7 +393,7 @@ extend ParserImpl {
             if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL)) {
                 decl.EnableAttr(Attribute.GLOBAL)
             }
-            if (HasModifierToken(modifiers, TokenKind.CONST)) {
+            if (HasModifier(modifiers, TokenKind.CONST)) {
                 decl.isConst = true
             }
             SetDeclBeginPos(decl)
@@ -603,7 +603,7 @@ extend ParserImpl {
             Next()
             var funcScopeKind = scopeKind
             if (forImport && ScopeKindEquals(funcScopeKind, ScopeKind.CLASS_BODY) &&
-                HasModifierToken(modifiers, TokenKind.MUT)) {
+                HasModifier(modifiers, TokenKind.MUT)) {
                 funcScopeKind = ScopeKind.INTERFACE_BODY
             }
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, funcScopeKind, DefKind.FUNC))
@@ -628,7 +628,7 @@ extend ParserImpl {
             if (ret.TestAttr(Attribute.SPECIFIC) && hasNoReturnType && hasNoBody) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_specific_function_must_have_return_type, ret).Emit()
             }
-            if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+            if (HasModifier(modifiers, TokenKind.UNSAFE) || HasModifier(modifiers, TokenKind.FOREIGN)) {
                 SetUnsafe(ret, modifiers: modifiers)
             }
             let ffiParser = FFIParserImpl(this)
@@ -909,7 +909,7 @@ extend ParserImpl {
     public func ParseFuncLikeHeader(ret: FuncDecl, keyword: TokenKind, scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): Unit {
         ApplyModifiersAndAnnotations(ret, modifiers, annos)
         EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.FUNC))
-        if (HasModifierToken(modifiers, TokenKind.CONST)) {
+        if (HasModifier(modifiers, TokenKind.CONST)) {
             ret.isConst = true
         }
         let keywordToken = Expect(keyword, "expected function keyword")
@@ -927,7 +927,7 @@ extend ParserImpl {
         }
         let body = ParseFuncBody(scopeKind)
         ret.funcBody = body
-        if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+        if (HasModifier(modifiers, TokenKind.UNSAFE) || HasModifier(modifiers, TokenKind.FOREIGN)) {
             SetUnsafe(ret, modifiers: modifiers)
         }
         CheckFuncBody(scopeKind, ret)
@@ -1079,7 +1079,7 @@ extend ParserImpl {
                 outerDecl.EnableAttr(Attribute.HAS_BROKEN)
                 outerDecl.EnableAttr(Attribute.IS_BROKEN)
             }
-            if (HasModifierToken(decl.modifiers, TokenKind.CONST)) {
+            if (HasModifier(decl.modifiers, TokenKind.CONST)) {
                 FFIParserImpl(this).Java().DiagJavaMirrorCannotHaveConstMember(decl)
                 decl.EnableAttr(Attribute.IS_BROKEN)
                 outerDecl.EnableAttr(Attribute.HAS_BROKEN)
@@ -1110,7 +1110,7 @@ extend ParserImpl {
             outerDecl.EnableAttr(Attribute.HAS_BROKEN)
             outerDecl.EnableAttr(Attribute.IS_BROKEN)
         }
-        if (HasModifierToken(ctor.modifiers, TokenKind.CONST)) {
+        if (HasModifier(ctor.modifiers, TokenKind.CONST)) {
             FFIParserImpl(this).Java().DiagJavaMirrorCannotHaveConstMember(ctor)
             ctor.EnableAttr(Attribute.IS_BROKEN)
             outerDecl.EnableAttr(Attribute.HAS_BROKEN)
@@ -1562,7 +1562,7 @@ extend ParserImpl {
                 memberStartPos = lastToken.Begin()
                 fp.begin = memberStartPos
             }
-        } else if (HasModifierToken(fp.modifiers, TokenKind.CONST) && lastToken.kind == TokenKind.CONST) {
+        } else if (HasModifier(fp.modifiers, TokenKind.CONST) && lastToken.kind == TokenKind.CONST) {
             let scope = if (isPrimaryConstructor) { "primary constructor paramlist" } else { "paramlist" }
             let decl = if (isPrimaryConstructor) {
                 "const member variable declaration"
@@ -1822,7 +1822,7 @@ extend ParserImpl {
                 DiagParseIllegalDeclarationPattern(decl, scopeKind)
                 decl.EnableAttr(Attribute.IS_BROKEN)
             }
-            if (!decl.isConst && HasModifierToken(modifiers, TokenKind.CONST)) {
+            if (!decl.isConst && HasModifier(modifiers, TokenKind.CONST)) {
                 DiagUnExpectedModifierOnDeclaration(decl)
                 decl.EnableAttr(Attribute.IS_BROKEN)
             } else if (let None <- decl.initializer) {
@@ -1872,14 +1872,14 @@ extend ParserImpl {
         scopeKind: ScopeKind,
         keyToken: Token
     ): Unit {
-        if (HasModifierToken(modifiers, TokenKind.UNSAFE) || HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+        if (HasModifier(modifiers, TokenKind.UNSAFE) || HasModifier(modifiers, TokenKind.FOREIGN)) {
             SetUnsafe(varDecl, modifiers: modifiers)
         }
-        if (!varDecl.isConst && HasModifierToken(modifiers, TokenKind.CONST)) {
+        if (!varDecl.isConst && HasModifier(modifiers, TokenKind.CONST)) {
             DiagUnExpectedModifierOnDeclaration(varDecl)
         } else if (varDecl.isConst &&
             (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) &&
-            !HasModifierToken(modifiers, TokenKind.STATIC)) {
+            !HasModifier(modifiers, TokenKind.STATIC)) {
             DiagConstVariableExpectedStatic(keyToken)
         } else if ((let None <- varDecl.initializer) && !varDecl.TestAttr(Attribute.HAS_BROKEN)) {
             if (varDecl.isConst) {
@@ -1887,10 +1887,10 @@ extend ParserImpl {
             } else if (!ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) && (let None <- varDecl.typeNode)) {
                 DiagExpectedOneOfTypeOrInitializer(varDecl, varDecl.identifier.Val())
             } else if (ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) &&
-                !HasModifierToken(modifiers, TokenKind.FOREIGN)) {
+                !HasModifier(modifiers, TokenKind.FOREIGN)) {
                 if (let None <- varDecl.typeNode) {
                     DiagExpectedInitializerForToplevelVar(varDecl)
-                } else if (!diag.ignoreScopeCheck && !HasModifierToken(modifiers, TokenKind.COMMON)) {
+                } else if (!diag.ignoreScopeCheck && !HasModifier(modifiers, TokenKind.COMMON)) {
                     DiagExpectedInitializerForToplevelVar(varDecl)
                 }
             }
@@ -1904,12 +1904,12 @@ extend ParserImpl {
         key: Token
     ): Unit {
         EnableModifierAttrs(decl, CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE))
-        if (!decl.isConst && HasModifierToken(modifiers, TokenKind.CONST)) {
+        if (!decl.isConst && HasModifier(modifiers, TokenKind.CONST)) {
             DiagUnExpectedModifierOnDeclaration(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         } else if (decl.astKind == ASTKind.VAR_DECL && decl.isConst &&
             (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) &&
-            !HasModifierToken(modifiers, TokenKind.STATIC)) {
+            !HasModifier(modifiers, TokenKind.STATIC)) {
             DiagConstVariableExpectedStatic(key)
             decl.EnableAttr(Attribute.IS_BROKEN)
         } else if (decl.isConst && (let None <- decl.initializer)) {
@@ -1924,14 +1924,14 @@ extend ParserImpl {
             }
             decl.EnableAttr(Attribute.IS_BROKEN)
         } else if (!decl.isConst && ScopeKindEquals(scopeKind, ScopeKind.TOPLEVEL) && (let None <- decl.initializer) &&
-            !HasModifierToken(modifiers, TokenKind.FOREIGN) &&
-            ((let None <- decl.typeNode) || !HasModifierToken(modifiers, TokenKind.COMMON))) {
+            !HasModifier(modifiers, TokenKind.FOREIGN) &&
+            ((let None <- decl.typeNode) || !HasModifier(modifiers, TokenKind.COMMON))) {
             DiagExpectedInitializerForToplevelVar(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
     }
 
-    private func HasModifierToken(modifiers: ArrayList<Modifier>, tokenKind: TokenKind): Bool {
+    func HasModifier(modifiers: ArrayList<Modifier>, tokenKind: TokenKind): Bool {
         for (modifier in modifiers) {
             if (modifier.modifier == tokenKind) {
                 return true
@@ -1941,7 +1941,7 @@ extend ParserImpl {
     }
 
     private func SeeingConsumedConstModifier(modifiers: ArrayList<Modifier>): Bool {
-        return HasModifierToken(modifiers, TokenKind.CONST) && lastToken.kind == TokenKind.CONST
+        return HasModifier(modifiers, TokenKind.CONST) && lastToken.kind == TokenKind.CONST
     }
 
     public func ParseClassDecl(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ClassDecl {
@@ -2699,15 +2699,15 @@ extend ParserImpl {
         let isCommon = decl.TestAttr(Attribute.COMMON)
         let outerDecl = decl.outerDecl.getOrThrow()
         let outerModifiers = outerDecl.modifiers
-        let inAbstract = HasModifierToken(outerModifiers, TokenKind.ABSTRACT)
-        let inCJMP = HasModifierToken(outerModifiers, TokenKind.SPECIFIC) ||
-            HasModifierToken(outerModifiers, TokenKind.COMMON)
+        let inAbstract = HasModifier(outerModifiers, TokenKind.ABSTRACT)
+        let inCJMP = HasModifier(outerModifiers, TokenKind.SPECIFIC) ||
+            HasModifier(outerModifiers, TokenKind.COMMON)
         let inAbstractCJMP = inAbstract && inCJMP
         let inObjCMirror = outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)
         let isJavaMirrorOrJavaMirrorSubtype =
             outerDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)
 
-        if (HasModifierToken(decl.modifiers, TokenKind.ABSTRACT) && !isCommon && !inAbstractCJMP &&
+        if (HasModifier(decl.modifiers, TokenKind.ABSTRACT) && !isCommon && !inAbstractCJMP &&
             !isJavaMirrorOrJavaMirrorSubtype) {
             ParseDiagnoseRefactor(
                 DiagKindRefactor.parse_explicitly_abstract_only_for_cjmp_abstract_class,
@@ -2729,9 +2729,9 @@ extend ParserImpl {
 
         let inClass = outerDecl.astKind == ASTKind.CLASS_DECL
         let inAbstractCJMPClass = inAbstractCJMP && inClass
-        if (inAbstractCJMP && !HasModifierToken(decl.modifiers, TokenKind.ABSTRACT)) {
-            if (HasModifierToken(decl.modifiers, TokenKind.OPEN) && inAbstractCJMP &&
-                !HasModifierToken(decl.modifiers, TokenKind.COMMON)) {
+        if (inAbstractCJMP && !HasModifier(decl.modifiers, TokenKind.ABSTRACT)) {
+            if (HasModifier(decl.modifiers, TokenKind.OPEN) && inAbstractCJMP &&
+                !HasModifier(decl.modifiers, TokenKind.COMMON)) {
                 DiagMissingBody(
                     "function",
                     if (!decl.identifier.Valid()) { "" } else { " '${decl.identifier.Val()}'" },
@@ -2740,7 +2740,7 @@ extend ParserImpl {
             decl.DisableAttr(Attribute.ABSTRACT)
         }
 
-        let hasAbstractModifier = HasModifierToken(decl.modifiers, TokenKind.ABSTRACT)
+        let hasAbstractModifier = HasModifier(decl.modifiers, TokenKind.ABSTRACT)
         if (isJavaMirrorOrJavaMirrorSubtype) {
             let ffiParser = FFIParserImpl(this)
             if (ffiParser.Java().IsAbstractFunction(decl, outerDecl)) {
@@ -2806,15 +2806,15 @@ extend ParserImpl {
             outerDecl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE)
         let isCommon = property.TestAttr(Attribute.COMMON)
         let outerModifiers = outerDecl.modifiers
-        let inAbstract = HasModifierToken(outerModifiers, TokenKind.ABSTRACT)
-        let inCJMP = HasModifierToken(outerModifiers, TokenKind.SPECIFIC) ||
-            HasModifierToken(outerModifiers, TokenKind.COMMON)
+        let inAbstract = HasModifier(outerModifiers, TokenKind.ABSTRACT)
+        let inCJMP = HasModifier(outerModifiers, TokenKind.SPECIFIC) ||
+            HasModifier(outerModifiers, TokenKind.COMMON)
         let inAbstractCJMP = inAbstract && inCJMP
         let inClass = outerDecl.astKind == ASTKind.CLASS_DECL
         let inAbstractCJMPClass = inAbstractCJMP && inClass
         let inObjCMirror = outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)
 
-        if (HasModifierToken(property.modifiers, TokenKind.ABSTRACT) && !isCommon && !inAbstractCJMP &&
+        if (HasModifier(property.modifiers, TokenKind.ABSTRACT) && !isCommon && !inAbstractCJMP &&
             !isJavaMirrorOrJavaMirrorSubtype) {
             ParseDiagnoseRefactor(
                 DiagKindRefactor.parse_explicitly_abstract_only_for_cjmp_abstract_class,
@@ -2825,11 +2825,11 @@ extend ParserImpl {
             return
         }
         if (inAbstractCJMPClass && property.TestAttr(Attribute.ABSTRACT) &&
-            !HasModifierToken(property.modifiers, TokenKind.ABSTRACT)) {
+            !HasModifier(property.modifiers, TokenKind.ABSTRACT)) {
             property.DisableAttr(Attribute.ABSTRACT)
             return
         }
-        if (HasModifierToken(property.modifiers, TokenKind.ABSTRACT) && !inAbstractCJMPClass) {
+        if (HasModifier(property.modifiers, TokenKind.ABSTRACT) && !inAbstractCJMPClass) {
             var abstractModifier: Option<Modifier> = None
             for (modifier in property.modifiers) {
                 if (modifier.modifier == TokenKind.ABSTRACT) {
@@ -2912,7 +2912,7 @@ extend ParserImpl {
         }
         propDecl.rightCurlPos = lastToken.Begin()
         for (modifier in modifiers) {
-            if (!HasModifierToken(propDecl.modifiers, modifier.modifier)) {
+            if (!HasModifier(propDecl.modifiers, modifier.modifier)) {
                 propDecl.modifiers.add(modifier)
             }
         }
@@ -2984,7 +2984,7 @@ extend ParserImpl {
     public func ParseConstructor(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): FuncDecl {
         let ret = FuncDecl()
         try (cs = ChainScope(this, ret)) {
-            if (HasModifierToken(modifiers, TokenKind.STATIC)) {
+            if (HasModifier(modifiers, TokenKind.STATIC)) {
                 CheckNoDeprecatedAnno(annos, "static constructor")
             }
             ApplyModifiersAndAnnotations(ret, modifiers, annos)
@@ -2993,7 +2993,7 @@ extend ParserImpl {
             ret.begin = key.Begin()
             ret.identifier = SrcIdentifier("init", "init", key.Begin(), key.End(), false)
             ret.EnableAttr(Attribute.CONSTRUCTOR)
-            if (HasModifierToken(modifiers, TokenKind.CONST)) {
+            if (HasModifier(modifiers, TokenKind.CONST)) {
                 ret.isConst = true
             }
             ret.begin = if (ret.begin.IsZero()) { key.Begin() } else { ret.begin }
@@ -3053,7 +3053,7 @@ extend ParserImpl {
                 }
             }
             CheckNoDeprecatedAnno(annos, "~init")
-            if (HasModifierToken(modifiers, TokenKind.UNSAFE)) {
+            if (HasModifier(modifiers, TokenKind.UNSAFE)) {
                 SetUnsafe(ret, modifiers: modifiers)
             }
         }
@@ -3061,7 +3061,7 @@ extend ParserImpl {
     }
 
     public func ParsePrimaryConstructor(scopeKind: ScopeKind, modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): PrimaryCtorDecl {
-        if (HasModifierToken(modifiers, TokenKind.STATIC)) {
+        if (HasModifier(modifiers, TokenKind.STATIC)) {
             CheckNoDeprecatedAnno(annos, "static constructor")
         }
         let ret = PrimaryCtorDecl()
@@ -3091,7 +3091,7 @@ extend ParserImpl {
             } else {
                 ret.EnableAttr(Attribute.IN_CLASSLIKE)
             }
-            if (HasModifierToken(modifiers, TokenKind.CONST)) {
+            if (HasModifier(modifiers, TokenKind.CONST)) {
                 ret.isConst = true
             }
             let missingBody = match (ret.funcBody) {
@@ -3156,7 +3156,7 @@ extend ParserImpl {
                 DiagExpectNoModifier(modifiers[0])
             }
         } else {
-            if (HasModifierToken(modifiers, TokenKind.CONST)) {
+            if (HasModifier(modifiers, TokenKind.CONST)) {
                 DiagUnExpectedModifierOnDeclaration(fp)
             }
             EnableModifierAttrs(fp, CheckDeclModifiers(modifiers, scopeKind, DefKind.VARIABLE))
