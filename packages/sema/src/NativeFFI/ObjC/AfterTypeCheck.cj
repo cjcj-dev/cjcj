@@ -463,23 +463,23 @@ public class FindMirrors {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
                 if (let Some(classLikeDecl) <- (decl as ClassLikeDecl)) {
-                    if (ctx.typeMapper.IsObjCMirror(classLikeDecl)) {
+                    if (TypeMapper.IsObjCMirror(classLikeDecl)) {
                         ctx.mirrors.add(classLikeDecl)
                     }
                 }
 
                 if (let Some(classDecl) <- (decl as ClassDecl)) {
-                    if (ctx.typeMapper.IsSyntheticWrapper(classDecl)) {
+                    if (TypeMapper.IsSyntheticWrapper(classDecl)) {
                         ctx.synWrappers.add(classDecl)
-                    } else if (ctx.typeMapper.IsObjCImpl(classDecl) ||
-                        (ctx.typeMapper.IsObjCMirrorSubtype(classDecl) &&
-                        !ctx.typeMapper.IsObjCMirror(classDecl))) {
+                    } else if (TypeMapper.IsObjCImpl(classDecl) ||
+                        (TypeMapper.IsObjCMirrorSubtype(classDecl) &&
+                        !TypeMapper.IsObjCMirror(classDecl))) {
                         ctx.impls.add(classDecl)
                     }
                 }
 
                 if (let Some(funcDecl) <- (decl as FuncDecl)) {
-                    if (ctx.typeMapper.IsObjCMirror(funcDecl)) {
+                    if (TypeMapper.IsObjCMirror(funcDecl)) {
                         ctx.mirrorTopLevelFuncs.add(funcDecl)
                     }
                 }
@@ -493,7 +493,7 @@ public class FindCJMapping {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
-                if (ctx.typeMapper.IsObjCCJMapping(decl)) {
+                if (TypeMapper.IsObjCCJMapping(decl)) {
                     ctx.cjMappings.add(decl)
                 }
             }
@@ -507,7 +507,7 @@ public class FindCJMappingInterface {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
                 if (let Some(classLikeDecl) <- (decl as ClassLikeDecl)) {
-                    if (ctx.typeMapper.IsObjCCJMappingInterface(classLikeDecl)) {
+                    if (TypeMapper.IsObjCCJMappingInterface(classLikeDecl)) {
                         ctx.cjMappingInterfaces.add(classLikeDecl)
                     }
                 }
@@ -522,7 +522,7 @@ public class FindFwdClass {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
                 if (let Some(classDecl) <- (decl as ClassDecl)) {
-                    if (ctx.typeMapper.IsObjCFwdClass(classDecl)) {
+                    if (TypeMapper.IsObjCFwdClass(classDecl)) {
                         ctx.fwdClasses.add(classDecl)
                     }
                 }
@@ -552,8 +552,8 @@ public class CheckObjCPointerTypeArguments {
                 }
                 if (let Some(typeUsage) <- (node as Type)) {
                     let usageTy = typeUsage.GetTy().getOrThrow()
-                    if (typeUsage.GetTypeArgs().size == 1 && ctx.typeMapper.IsObjCPointer(usageTy) &&
-                        !ctx.typeMapper.IsObjCCompatible(usageTy.typeArgs[0])) {
+                    if (typeUsage.GetTypeArgs().size == 1 && TypeMapper.IsObjCPointer(usageTy) &&
+                        !TypeMapper.IsObjCCompatible(usageTy.typeArgs[0])) {
                         DiagnoseRefactor(ctx.diag,
                             DiagKindRefactor.sema_objc_pointer_argument_must_be_objc_compatible,
                             typeUsage).Emit()
@@ -574,11 +574,11 @@ private func ReportObjCIncompatibleType(ctx: InteropContext, typeUsage: Type): U
         let tyArg = typeUsage.GetTypeArgs()[0]
         errorRef = tyArg
         if (let Some(funcTy) <- (tyArg as FuncType)) {
-            if (!ctx.typeMapper.IsObjCCompatible(funcTy.retType.getOrThrow().GetTy().getOrThrow())) {
+            if (!TypeMapper.IsObjCCompatible(funcTy.retType.getOrThrow().GetTy().getOrThrow())) {
                 errorRef = funcTy.retType.getOrThrow()
             }
             for (arg in funcTy.paramTypes) {
-                if (!ctx.typeMapper.IsObjCCompatible(arg.GetTy().getOrThrow())) {
+                if (!TypeMapper.IsObjCCompatible(arg.GetTy().getOrThrow())) {
                     errorRef = arg
                     break
                 }
@@ -600,7 +600,7 @@ public class CheckObjCFuncTypeArguments {
                     return VisitAction.WALK_CHILDREN
                 }
                 if (let Some(decl) <- (node as Decl)) {
-                    if (ctx.typeMapper.IsObjCFuncOrBlock(decl)) {
+                    if (TypeMapper.IsObjCFuncOrBlock(decl)) {
                         return VisitAction.SKIP_CHILDREN
                     }
                 }
@@ -609,12 +609,12 @@ public class CheckObjCFuncTypeArguments {
                         return VisitAction.SKIP_CHILDREN
                     }
                     if (let Some(usageTy) <- typeUsage.GetTy()) {
-                        if (usageTy.typeArgs.size == 1 && ctx.typeMapper.IsObjCFuncOrBlock(usageTy)) {
+                        if (usageTy.typeArgs.size == 1 && TypeMapper.IsObjCFuncOrBlock(usageTy)) {
                             let tyArg = usageTy.typeArgs[0]
                             var valid = tyArg.IsFunc()
                             valid = valid && !tyArg.IsCFunc()
                             for (subTy in tyArg.typeArgs) {
-                                valid = valid && ctx.typeMapper.IsObjCCompatible(subTy)
+                                valid = valid && TypeMapper.IsObjCCompatible(subTy)
                             }
                             if (!valid) {
                                 ReportObjCIncompatibleType(ctx, typeUsage)
