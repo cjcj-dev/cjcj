@@ -2124,6 +2124,48 @@ public class InteropContext {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCBlockConstruction.cpp:35-77.
+public class RewriteObjCBlockConstruction <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (file in ctx.pkg.files) {
+            let walker = Walker(file, visitPre: { node: Node =>
+                if (!node.IsSamePackage(file.curPackage.getOrThrow())) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (node.astKind != ASTKind.CALL_EXPR) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                let callExpr = (node as CallExpr).getOrThrow()
+                if (callExpr.callKind != CallKind.CALL_OBJECT_CREATION) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                let calledFunc = callExpr.resolvedFunction
+                if (calledFunc.isNone() || !calledFunc.getOrThrow().TestAttr(Attribute.CONSTRUCTOR)) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                let containingClass = calledFunc.getOrThrow().outerDecl
+                if (containingClass.isNone() || containingClass.getOrThrow().astKind != ASTKind.CLASS_DECL) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (!TypeMapper.IsObjCBlock(containingClass.getOrThrow())) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (callExpr.args.size != 1) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                let arg = callExpr.args[0]
+                if (!arg.GetTy().getOrThrow().IsFunc()) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                let clonedArg = (ASTCloner.Clone(arg.expr.getOrThrow()) as Expr).getOrThrow()
+                ctx.factory.SetDesugarExpr(callExpr, ctx.factory.CreateObjCBlockFromLambdaCall(clonedArg))
+                return VisitAction.WALK_CHILDREN
+            })
+            let _ = walker.Walk()
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertBaseCtorDecl.cpp:21-71.
 public class InsertBaseCtorDecl <: Handler<InteropContext> {
     private let interopType: InteropType
