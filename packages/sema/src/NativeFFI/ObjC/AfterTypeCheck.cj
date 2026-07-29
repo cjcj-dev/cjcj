@@ -2122,6 +2122,34 @@ public class InteropContext {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateObjCImplMembers.cpp:19-49.
+public class GenerateObjCImplMembers <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (impl in ctx.impls) {
+            if (impl.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            for (memberDecl in impl.GetMemberDeclPtrs()) {
+                if (memberDecl.TestAttr(Attribute.IS_BROKEN)) {
+                    continue
+                }
+                match (memberDecl.astKind) {
+                    case ASTKind.FUNC_DECL =>
+                        if (memberDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+                            GenerateCtor(ctx, impl, (memberDecl as FuncDecl).getOrThrow())
+                        }
+                    case _ => ()
+                }
+            }
+        }
+    }
+
+    private func GenerateCtor(ctx: InteropContext, target: ClassDecl, from: FuncDecl): Unit {
+        let ctor = ctx.factory.CreateImplCtor(from)
+        target.body.getOrThrow().decls.add(ctor)
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateInSyntheticWrappers.cpp:25-41.
 public class GenerateInSyntheticWrappers <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
