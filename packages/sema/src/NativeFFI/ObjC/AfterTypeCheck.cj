@@ -2363,6 +2363,110 @@ public class InsertNativeHandleGetterBody <: Handler<InteropContext> {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCPointerAccess.cpp:29-32.
+private let READ_POINTER_INTRINSIC: String = "readPointer"
+private let WRITE_POINTER_INTRINSIC: String = "writePointer"
+private let OBJCPOINTER_READ_METHOD: String = "read"
+private let OBJCPOINTER_WRITE_METHOD: String = "write"
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCPointerAccess.cpp:34-37.
+private func CreateZero(ty: Ty): Expr {
+    return CreateLitConstExpr(LitConstKind.INTEGER, "0", ty)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCPointerAccess.cpp:58-95.
+private func HandleObjCPointerRead(ctx: InteropContext, callExpr: CallExpr): Unit {
+    let memberAccess = (callExpr.baseFunc.getOrThrow() as MemberAccess).getOrThrow()
+    let receiver = (ASTCloner.Clone(memberAccess.baseExpr.getOrThrow()) as Expr).getOrThrow()
+    let elementType = receiver.GetTy().getOrThrow().typeArgs[0]
+    let rawCType = ctx.typeMapper.Cj2CType(elementType)
+    let pointerType = ctx.typeManager.GetPointerTy(rawCType)
+    let ptrFieldDecl = ctx.bridge.GetObjCPointerPointerField().getOrThrow()
+    let int64Type = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+    let readPointerFunc = ctx.importManager.GetCoreDecl<FuncDecl>(READ_POINTER_INTRINSIC).getOrThrow()
+    let readPointerRef = CreateRefExpr(readPointerFunc, callExpr)
+    readPointerRef.instTys.add(rawCType)
+    readPointerRef.SetTy(ctx.typeManager.GetFunctionTy([pointerType, int64Type], rawCType))
+
+    let ptrExpr = ctx.factory.CreateUnsafePointerCast(
+        CreateMemberAccess(receiver, ptrFieldDecl), rawCType)
+    CopyBasicInfo(callExpr, ptrExpr)
+    let callArgs = ArrayList<FuncArg>()
+    callArgs.add(CreateFuncArg(ptrExpr))
+    callArgs.add(CreateFuncArg(CreateZero(int64Type)))
+    let call = WithinFile<CallExpr>(CreateCallExpr(readPointerRef, callArgs, Some(readPointerFunc),
+        Some(rawCType), CallKind.CALL_INTRINSIC_FUNCTION), callExpr.curFile)
+    let wrappedCall = ctx.factory.WrapEntity(call, elementType, withRetain: Retain.RETAINED)
+    ctx.factory.SetDesugarExpr(callExpr, wrappedCall)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCPointerAccess.cpp:113-151.
+private func HandleObjCPointerWrite(ctx: InteropContext, callExpr: CallExpr): Unit {
+    let memberAccess = (callExpr.baseFunc.getOrThrow() as MemberAccess).getOrThrow()
+    let receiver = (ASTCloner.Clone(memberAccess.baseExpr.getOrThrow()) as Expr).getOrThrow()
+    CJC_ASSERT(callExpr.args.size == 1)
+    let valueArg = (ASTCloner.Clone(callExpr.args[0].expr.getOrThrow()) as Expr).getOrThrow()
+    CJC_ASSERT_WITH_MSG(!receiver.GetTy().getOrThrow().typeArgs.isEmpty(), "ObjCPointer typeArgs is empty")
+    let elementType = receiver.GetTy().getOrThrow().typeArgs[0]
+    let rawCType = ctx.typeMapper.Cj2CType(elementType)
+    let pointerType = ctx.typeManager.GetPointerTy(rawCType)
+    let ptrFieldDecl = ctx.bridge.GetObjCPointerPointerField().getOrThrow()
+    let int64Type = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+    let unitType = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+    let writePointerFunc = ctx.importManager.GetCoreDecl<FuncDecl>(WRITE_POINTER_INTRINSIC).getOrThrow()
+    let writePointerRef = CreateRefExpr(writePointerFunc, callExpr)
+    writePointerRef.instTys.add(rawCType)
+    writePointerRef.SetTy(ctx.typeManager.GetFunctionTy(
+        [pointerType, int64Type, rawCType], unitType))
+
+    let ptrExpr = ctx.factory.CreateUnsafePointerCast(
+        CreateMemberAccess(receiver, ptrFieldDecl), rawCType)
+    CopyBasicInfo(callExpr, ptrExpr)
+    let callArgs = ArrayList<FuncArg>()
+    callArgs.add(CreateFuncArg(ptrExpr))
+    callArgs.add(CreateFuncArg(CreateZero(int64Type)))
+    callArgs.add(CreateFuncArg(ctx.factory.UnwrapEntity(valueArg)))
+    let call = WithinFile<CallExpr>(CreateCallExpr(writePointerRef, callArgs, Some(writePointerFunc),
+        Some(unitType), CallKind.CALL_INTRINSIC_FUNCTION), callExpr.curFile)
+    ctx.factory.SetDesugarExpr(callExpr, call)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCPointerAccess.cpp:155-188.
+public class RewriteObjCPointerAccess <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (file in ctx.pkg.files) {
+            let walker = Walker(file, visitPre: {node: Node =>
+                if (!node.IsSamePackage(file.curPackage.getOrThrow())) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (let None <- (node as CallExpr)) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                let callExpr = (node as CallExpr).getOrThrow()
+                if (callExpr.resolvedFunction.isNone()) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                let funcDecl = callExpr.resolvedFunction.getOrThrow()
+                if (funcDecl.outerDecl.isNone() || !TypeMapper.IsObjCPointer(funcDecl.outerDecl.getOrThrow())) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (funcDecl.identifier.Val() == OBJCPOINTER_READ_METHOD && callExpr.args.isEmpty() &&
+                    TypeMapper.IsObjCCompatible(callExpr.GetTy().getOrThrow())) {
+                    HandleObjCPointerRead(ctx, callExpr)
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (funcDecl.identifier.Val() == OBJCPOINTER_WRITE_METHOD && callExpr.args.size == 1 &&
+                    TypeMapper.IsObjCCompatible(callExpr.args[0].GetTy().getOrThrow())) {
+                    HandleObjCPointerWrite(ctx, callExpr)
+                    return VisitAction.WALK_CHILDREN
+                }
+                return VisitAction.WALK_CHILDREN
+            })
+            let _ = walker.Walk()
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCFuncCall.cpp:29-40.
 private func GetDirectlyReferencedMemberDecl(expr: Expr): Option<Decl> {
     if (let Some(memberAccess) <- (expr as MemberAccess)) {
