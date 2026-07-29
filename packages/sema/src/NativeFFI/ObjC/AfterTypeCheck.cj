@@ -8,6 +8,7 @@ import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
+import cjcj::sema.NativeFFI.ObjC.TypeCheck.*
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateThisCall, CreateThisRef, CreateType,
     CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
     GetGenericInstType, GetInstantyForGenericTy, GetStringDecl, WithinFile, INIT_IDENT, IsObjCGeneratedMember,
@@ -2118,6 +2119,19 @@ public class InteropContext {
         this.outputObjCGenDir = outputObjCGenDir
         this.structMemberSignatures = structMemberSignatures
         sharedLibraryExtension = GlobalOptions.GetSharedLibraryExtension(targetOsType)
+    }
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckCJMappingTypes.cpp:19-28.
+public class CheckCJMappingTypes <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        let checker = HandlerFactory.Start<TypeCheckContext>(CheckInheritanceInterface())
+            .Use(CheckGeneric())
+            .Use(CheckMemberTypes(InteropType.CJ_Mapping))
+        for (cjMapping in ctx.cjMappings) {
+            let typeCheckCtx = TypeCheckContext(cjMapping, ctx.diag, ctx.typeMapper, ctx.typeManager)
+            checker.Handle(typeCheckCtx)
+        }
     }
 }
 
