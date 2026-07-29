@@ -11,7 +11,7 @@ import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateType, GetStringDecl, WithinFile,
     INIT_IDENT, IsObjCGeneratedMember, WrapReturningLambdaCall}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
-    NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, OBJ_C_FWD_CLASS_SUFFIX,
+    CFUNC_NAME, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, OBJ_C_FWD_CLASS_SUFFIX,
     OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
@@ -554,6 +554,125 @@ public class ASTFactory {
         let classNameExpr = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.STRING, objcName,
             GetStringDecl(importManager).GetTy().getOrThrow()), curFile)
         return CreateAllocCall(classNameExpr)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1863-1890.
+    public func CreateObjCMsgSendCall(ty: FuncTy, funcType: FuncType,
+        funcArgs: ArrayList<Expr>): CallExpr {
+        let msgSendDecl = bridge.GetObjCMsgSendDecl().getOrThrow()
+        let msgSendRetTy = msgSendDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        let msgSendExpr = CreateCallExpr(CreateRefExpr(msgSendDecl), ArrayList<FuncArg>(), None,
+            Some(msgSendRetTy))
+        let retTy = funcType.retType.getOrThrow().GetTy().getOrThrow()
+
+        let cFuncDecl = importManager.GetCoreDecl<BuiltInDecl>(CFUNC_NAME).getOrThrow()
+        let cFuncRefExpr = CreateRefExpr(cFuncDecl)
+        cFuncRefExpr.SetTy(ty)
+        cFuncRefExpr.typeArguments.add(funcType)
+        let cFuncArgs = ArrayList<FuncArg>()
+        cFuncArgs.add(CreateFuncArg(msgSendExpr))
+        let cFuncCallExpr = CreateCallExpr(cFuncRefExpr, cFuncArgs, None, Some(ty),
+            CallKind.CALL_FUNCTION_PTR)
+
+        let msgSendCallArgs = ArrayList<FuncArg>()
+        for (argExpr in funcArgs) {
+            msgSendCallArgs.add(CreateFuncArg(argExpr))
+        }
+        return CreateCallExpr(cFuncCallExpr, msgSendCallArgs, None, Some(retTy),
+            CallKind.CALL_FUNCTION_PTR)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1892-1912.
+    public func CreateObjCMsgSendCall(nativeHandle: Expr, selector: String, retTy: Ty,
+        args: ArrayList<Expr>): CallExpr {
+        let selectorCall = CreateRegisterNameCall(selector, nativeHandle.curFile)
+        let funcType = FuncType()
+        funcType.retType = CreateType(retTy)
+        args.add(selectorCall, at: 0)
+        args.add(nativeHandle, at: 0)
+        let paramTys = ArrayList<Ty>()
+        for (param in args) {
+            let paramTy = param.GetTy().getOrThrow()
+            funcType.paramTypes.add(CreateType(paramTy))
+            paramTys.add(paramTy)
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let funcTy = typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
+        funcType.SetTy(funcTy)
+        return CreateObjCMsgSendCall(funcTy, funcType, args)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1984-1990.
+    public func CreateMethodCallViaMsgSend(fd: FuncDecl, nativeHandle: Expr,
+        rawArgs: ArrayList<Expr>): Expr {
+        let objcName = nameGenerator.GetObjCDeclName(fd)
+        let funcTy = (fd.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        return CreateObjCMsgSendCall(nativeHandle, objcName, typeMapper.Cj2CType(funcTy.retTy), rawArgs)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1992-2009.
+    public func CreateMethodCallViaMsgSend(fd: FuncDecl, handle: Expr): Expr {
+        CJC_NULLPTR_CHECK(fd.outerDecl)
+        CJC_ASSERT(TypeMapper.IsObjCCompatible(fd.outerDecl.getOrThrow().GetTy().getOrThrow()))
+        CJC_NULLPTR_CHECK(fd.funcBody)
+        CJC_ASSERT(!fd.funcBody.getOrThrow().paramLists.isEmpty())
+        let curFile = handle.curFile
+        let params = fd.funcBody.getOrThrow().paramLists[0].params
+        let args = ArrayList<Expr>()
+        for (param in params) {
+            args.add(UnwrapEntity(WithinFile<RefExpr>(CreateRefExpr(param), curFile)))
+        }
+        return CreateMethodCallViaMsgSend(fd, handle, args)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2011-2024.
+    public func CreateAllocInitCall(fd: FuncDecl): Expr {
+        CJC_ASSERT(fd.TestAttr(Attribute.CONSTRUCTOR) || IsStaticInitMethod(fd))
+        CJC_NULLPTR_CHECK(fd.outerDecl)
+        CJC_ASSERT(fd.outerDecl.getOrThrow().astKind == ASTKind.CLASS_DECL)
+        let mirror = (fd.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+        let allocCall = CreateAllocCall(mirror, mirror.curFile)
+        return CreateMethodCallViaMsgSend(fd, allocCall)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2026-2030.
+    public func CreatePropGetterCallViaMsgSend(prop: PropDecl, nativeHandle: Expr): Expr {
+        let objcName = nameGenerator.GetObjCGetterName(prop)
+        return CreateObjCMsgSendCall(nativeHandle, objcName, typeMapper.Cj2CType(prop.GetTy().getOrThrow()),
+            ArrayList<Expr>())
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2032-2037.
+    public func CreatePropSetterCallViaMsgSend(prop: PropDecl, nativeHandle: Expr, arg: Expr): Expr {
+        let objcName = nameGenerator.GetObjCSetterName(prop)
+        let args = ArrayList<Expr>()
+        args.add(arg)
+        return CreateObjCMsgSendCall(nativeHandle, objcName, typeMapper.Cj2CType(prop.GetTy().getOrThrow()), args)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2039-2072.
+    public func CreateFuncCallViaOpaquePointer(pointer: Expr, retTy: Ty, args: ArrayList<Expr>): Expr {
+        let argTys = ArrayList<Ty>()
+        for (arg in args) {
+            argTys.add(arg.GetTy().getOrThrow())
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let funcTy = typeManager.GetFunctionTy(argTys.toArray(), retTy, cfg: cfg)
+        let cFuncDecl = importManager.GetCoreDecl<BuiltInDecl>(CFUNC_NAME).getOrThrow()
+        let cFuncRefExpr = CreateRefExpr(cFuncDecl)
+        cFuncRefExpr.SetTy(funcTy)
+        cFuncRefExpr.instTys.add(funcTy)
+        let cFuncArgs = ArrayList<FuncArg>()
+        cFuncArgs.add(CreateFuncArg(pointer))
+        let cFuncCallExpr = CreateCallExpr(cFuncRefExpr, cFuncArgs, None, Some(funcTy),
+            CallKind.CALL_FUNCTION_PTR)
+        let actualArgs = ArrayList<FuncArg>()
+        for (arg in args) {
+            actualArgs.add(CreateFuncArg(arg))
+        }
+        return CreateCallExpr(cFuncCallExpr, actualArgs, None, Some(retTy), CallKind.CALL_FUNCTION_PTR)
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1567-1585.
