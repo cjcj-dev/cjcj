@@ -11,7 +11,7 @@ import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateType, GetStringDecl, WithinFile,
     WrapReturningLambdaCall}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR,
-    OBJ_C_FWD_CLASS_SUFFIX, OPTION_VALUE_CTOR, STD_LIB_OPTION}
+    OBJ_C_FWD_CLASS_SUFFIX, OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
 public enum Retain {
@@ -1026,8 +1026,8 @@ public class RewriteObjCTypechecks {
                 if (!node.IsSamePackage(file.curPackage.getOrThrow())) {
                     return VisitAction.WALK_CHILDREN
                 }
-                if (node.TestAnyAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN, Attribute.UNREACHABLE,
-                    Attribute.LEFT_VALUE)) {
+                if (node.TestAnyAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN, Attribute.UNREACHABLE) ||
+                    node.TestAttr(Attribute.LEFT_VALUE)) {
                     return VisitAction.SKIP_CHILDREN
                 }
                 if (let Some(matchCase) <- (node as MatchCase)) {
@@ -1041,8 +1041,8 @@ public class RewriteObjCTypechecks {
                 if (!node.IsSamePackage(file.curPackage.getOrThrow())) {
                     return VisitAction.WALK_CHILDREN
                 }
-                if (node.TestAnyAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN, Attribute.UNREACHABLE,
-                    Attribute.LEFT_VALUE)) {
+                if (node.TestAnyAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN, Attribute.UNREACHABLE) ||
+                    node.TestAttr(Attribute.LEFT_VALUE)) {
                     return VisitAction.SKIP_CHILDREN
                 }
                 if (let Some(isExpr) <- (node as IsExpr)) {
