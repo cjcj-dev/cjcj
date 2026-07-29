@@ -2124,6 +2124,55 @@ public class InteropContext {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertNativeHandleField.cpp:19-72.
+public class InsertNativeHandleField <: Handler<InteropContext> {
+    private let interopType: InteropType
+
+    public init(interopType: InteropType) {
+        this.interopType = interopType
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        if (interopType == InteropType.Fwd_Class) {
+            for (fwdClass in ctx.fwdClasses) {
+                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
+                    continue
+                }
+                fwdClass.body.getOrThrow().decls.add(ctx.factory.CreateNativeHandleField(fwdClass))
+            }
+            return
+        }
+
+        for (mirror in ctx.mirrors) {
+            if (mirror.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            let mirrorClass = mirror as ClassDecl
+            if (mirrorClass.isNone() || HasMirrorSuperClass(mirrorClass.getOrThrow())) {
+                continue
+            }
+            mirrorClass.getOrThrow().body.getOrThrow().decls.add(
+                ctx.factory.CreateNativeHandleField(mirrorClass.getOrThrow()))
+        }
+        for (wrapper in ctx.synWrappers) {
+            if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            wrapper.body.getOrThrow().decls.add(ctx.factory.CreateNativeHandleField(wrapper))
+        }
+        for (impl in ctx.impls) {
+            if (impl.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (HasMirrorSuperClass(impl)) {
+                continue
+            }
+            CJC_ASSERT(HasMirrorSuperInterface(impl))
+            impl.body.getOrThrow().decls.add(ctx.factory.CreateNativeHandleField(impl))
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertStringConversions.cpp:29-70.
 public class InsertStringConversions <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
