@@ -602,6 +602,90 @@ public class ASTFactory {
             CallKind.CALL_DECLARED_FUNCTION)
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1622-1676.
+    public func CreateNativeLambdaForBlockType(ty: Ty, curFile: Option<File>): Expr {
+        let funcTy = (ty as FuncTy).getOrThrow()
+        let nativeBlockABITy = bridge.GetNativeBlockABIDecl().getOrThrow().GetTy().getOrThrow()
+        let cArgTys = ArrayList<Ty>()
+        cArgTys.add(typeManager.GetPointerTy(nativeBlockABITy))
+        for (argTy in funcTy.paramTys) {
+            cArgTys.add(typeMapper.Cj2CType(argTy))
+        }
+        let cResultTy = typeMapper.Cj2CType(funcTy.retTy)
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let cFuncTy = typeManager.GetFunctionTy(cArgTys.toArray(), cResultTy, cfg: cfg)
+
+        let lambdaParams = ArrayList<FuncParam>()
+        var varIndex: Int64 = 0
+        for (cTy in cArgTys) {
+            lambdaParams.add(CreateFuncParam("arg${varIndex}", None, None, cTy))
+            varIndex++
+        }
+        let getLambdaFromBlockDecl = bridge.GetObjCGetLambdaFromBlockDecl().getOrThrow()
+        let getLambdaFromBlockRef = WithinFile<RefExpr>(CreateRefExpr(getLambdaFromBlockDecl), curFile)
+        getLambdaFromBlockRef.instTys.add(ty)
+        let getLambdaFromBlockFuncTy =
+            (getLambdaFromBlockRef.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        getLambdaFromBlockRef.SetTy(typeManager.GetFunctionTy(getLambdaFromBlockFuncTy.paramTys.toArray(), ty))
+        let getLambdaFromBlockArgs = ArrayList<FuncArg>()
+        getLambdaFromBlockArgs.add(CreateFuncArg(
+            WithinFile<RefExpr>(CreateRefExpr(lambdaParams[0]), curFile)))
+        let cangjieFuncExpr = CreateCallExpr(getLambdaFromBlockRef, getLambdaFromBlockArgs,
+            Some(getLambdaFromBlockDecl), Some(ty), CallKind.CALL_INVALID)
+
+        let cangjieFuncArgs = ArrayList<FuncArg>()
+        var index: Int64 = 1
+        while (index < lambdaParams.size) {
+            let paramRef = WithinFile<RefExpr>(CreateRefExpr(lambdaParams[index]), curFile)
+            cangjieFuncArgs.add(CreateFuncArg(WrapEntity(paramRef, funcTy.paramTys[index - 1],
+                withRetain: Retain.RETAINED)))
+            index++
+        }
+        let resultCangjie = CreateCallExpr(cangjieFuncExpr, cangjieFuncArgs, None, Some(cResultTy),
+            CallKind.CALL_INVALID)
+        let body = ArrayList<Node>()
+        body.add(UnwrapEntity(resultCangjie))
+        let lambda = WrapReturningLambdaExpr(typeManager, body, lambdaParams: lambdaParams)
+        lambda.SetTy(cFuncTy)
+        return lambda
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1678-1718.
+    public func CreateObjCBlockFromLambdaCall(funcExpr: Expr): Expr {
+        let curFile = funcExpr.curFile
+        let funcTy = (funcExpr.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let creatorFunc = bridge.GetObjCStoreLambdaAsBlockDecl().getOrThrow()
+        let cFuncLambda = CreateNativeLambdaForBlockType(funcTy, curFile)
+        let creatorFuncArgs = ArrayList<FuncArg>()
+        creatorFuncArgs.add(CreateFuncArg(funcExpr, "", typeManager.GetAnyTy()))
+
+        let nativeBlockABITy = bridge.GetNativeBlockABIDecl().getOrThrow().GetTy().getOrThrow()
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let nativeAbiErasedFuncTy = typeManager.GetFunctionTy([typeManager.GetPointerTy(nativeBlockABITy)],
+            TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT), cfg: cfg)
+        creatorFuncArgs.add(CreateFuncArg(CreateUnsafePointerCast(cFuncLambda, nativeAbiErasedFuncTy)))
+
+        let cangjieBlockABITy = bridge.GetCangjieBlockABIDecl().getOrThrow().GetTy().getOrThrow()
+        let pointerToAbiTy = typeManager.GetPointerTy(cangjieBlockABITy)
+        let objcBlockDecl = bridge.GetObjCBlockDecl().getOrThrow()
+        let instTys = ArrayList<Ty>()
+        instTys.add(funcTy)
+        let objcBlockTy = typeManager.GetInstantiatedTy(objcBlockDecl.GetTy().getOrThrow(),
+            GenerateTypeMapping(objcBlockDecl, instTys))
+        let nativeBlockExpr = CreateCallExpr(WithinFile<RefExpr>(CreateRefExpr(creatorFunc), curFile),
+            creatorFuncArgs, Some(creatorFunc), Some(pointerToAbiTy), CallKind.CALL_DECLARED_FUNCTION)
+        let blockConstructor = bridge.GetObjCBlockConstructorFromCangjie().getOrThrow()
+        let blockConstructorRef = WithinFile<RefExpr>(CreateRefExpr(blockConstructor), curFile)
+        blockConstructorRef.instTys.add(funcTy)
+        blockConstructorRef.SetTy(typeManager.GetFunctionTy([pointerToAbiTy], objcBlockTy))
+        let constructorArgs = ArrayList<FuncArg>()
+        constructorArgs.add(CreateFuncArg(nativeBlockExpr))
+        return CreateCallExpr(blockConstructorRef, constructorArgs, Some(blockConstructor), Some(objcBlockTy),
+            CallKind.CALL_OBJECT_CREATION)
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1760-1771.
     public func CreateRemoveFromRegistryCall(registryId: Expr): CallExpr {
         let removeFromRegistryDecl = bridge.GetRemoveFromRegistryDecl().getOrThrow()
