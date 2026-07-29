@@ -1,6 +1,7 @@
 package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::modules.SemaImportManager
 import cjcj::sema.MemberMap
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT,
@@ -26,7 +27,7 @@ private func GenerateSyntheticClassFuncStub(synthetic: ClassDecl, fd: FuncDecl):
     let funcStub = (ASTCloner.Clone(fd) as FuncDecl).getOrThrow()
     var index: Int64 = 0
     while (index < funcStub.annotations.size) {
-        if (funcStub.annotations[index].kind == AnnotationKind.FOREIGN_NAME) {
+        if (funcStub.annotations[index].kind == AstAnnotationKind.FOREIGN_NAME) {
             funcStub.annotations.remove(at: index)
             break
         }
@@ -41,7 +42,7 @@ private func GenerateSyntheticClassPropStub(synthetic: ClassDecl, pd: PropDecl):
     let propStub = (ASTCloner.Clone(pd) as PropDecl).getOrThrow()
     var index: Int64 = 0
     while (index < propStub.annotations.size) {
-        if (propStub.annotations[index].kind == AnnotationKind.FOREIGN_NAME) {
+        if (propStub.annotations[index].kind == AstAnnotationKind.FOREIGN_NAME) {
             propStub.annotations.remove(at: index)
             break
         }
