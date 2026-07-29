@@ -1100,19 +1100,19 @@ extern id objc_getClass(const char *);
         for (param in fn.funcBody.getOrThrow().paramLists[0].params) {
             params.add(param)
         }
-        let sig = "-(" + MapCJTypeToObjCType(fnTy.retTy) + ")" + fn.identifier.Val() +
+        let sig = Join(["-(", MapCJTypeToObjCType(fnTy.retTy), ")", fn.identifier.Val(),
             JoinVec<FuncParam>(params, {param: FuncParam =>
                 let paramName = param.identifier.Val()
                 callArgs.add(paramName)
                 ":(" + MapCJTypeToObjCType(param.GetTy().getOrThrow()) + ")" + paramName
-            }, sep: " ", pre: "", suf: "", force: false)
-        res += sig + ";\n"
+            }, sep: " ", pre: "", suf: "", force: false)])
+        res += Join([sig, ";\n"])
         let argStr = JoinVec<String>(callArgs, {arg: String => arg}, sep: ", ", pre: "(", suf: ");")
         let ifThen: () -> Unit = { =>
-            WriteSeq(["return " + ctx.nameGenerator.GenerateMethodWrapperName(fn) + argStr])
+            WriteSeq([Join(["return ", ctx.nameGenerator.GenerateMethodWrapperName(fn), argStr])])
         }
         let ifElse: () -> Unit = { =>
-            WriteSeq(["return " + ctx.nameGenerator.GenerateMethodWrapperName(originalOpenFn) + argStr])
+            WriteSeq([Join(["return ", ctx.nameGenerator.GenerateMethodWrapperName(originalOpenFn), argStr])])
         }
         WriteFunc(sig, { => WriteIf("self.$initedFromObjC", ifThen, other: Some(ifElse)) })
     }
@@ -1127,22 +1127,22 @@ extern id objc_getClass(const char *);
         for (idx in 2..fwdParams.size) {
             params.add(fwdParams[idx])
         }
-        let initSig = "-(id)init" + JoinVec<FuncParam>(params, {param: FuncParam =>
+        let initSig = Join(["-(id)init", JoinVec<FuncParam>(params, {param: FuncParam =>
             let paramName = param.identifier.Val()
             callArgs.add(paramName)
             ":(" + MapCJTypeToObjCType(param.GetTy().getOrThrow()) + ")" + paramName
-        }, sep: " ", pre: "", suf: "", force: false)
-        res += initSig + ";\n"
-        let callStr = ctx.nameGenerator.GenerateInitCjObjectName(ctor) +
-            JoinVec<String>(callArgs, {arg: String => arg}, sep: ", ", pre: "(", suf: ");")
+        }, sep: " ", pre: "", suf: "", force: false)])
+        res += Join([initSig, ";\n"])
+        let callStr = Join([ctx.nameGenerator.GenerateInitCjObjectName(ctor),
+            JoinVec<String>(callArgs, {arg: String => arg}, sep: ", ", pre: "(", suf: ");")])
         let ifThen: () -> Unit = { =>
-            WriteSeq([SELF_NAME_CJ_MAPPING + "." + INITED_FROM_OBJC_NAME + " = true;",
-                SELF_NAME_CJ_MAPPING + "." + SELF_WEAKLINK_NAME + " = " + callStr,
-                "[" + SELF_NAME_CJ_MAPPING + " " + RETAIN_FUNC_NAME + "];"])
+            WriteSeq([Join([SELF_NAME_CJ_MAPPING, ".", INITED_FROM_OBJC_NAME, " = ", "true;"]),
+                Join([SELF_NAME_CJ_MAPPING, ".", SELF_WEAKLINK_NAME, " = ", callStr]),
+                Join(["[", SELF_NAME_CJ_MAPPING, " ", RETAIN_FUNC_NAME, "];"])])
         }
         WriteFunc(initSig, { =>
             WriteIf("self = [super init]", ifThen)
-            WriteSeq(["return " + SELF_NAME_CJ_MAPPING + ";"])
+            WriteSeq([Join(["return ", SELF_NAME_CJ_MAPPING, ";"])])
         })
     }
 
@@ -1155,8 +1155,8 @@ extern id objc_getClass(const char *);
         if (!decl.IsOpen()) {
             return
         }
-        res += PROPERTY_KEYWORD + " (" + READWRITE_MODIFIER + ") " + BOOL_TYPE + " " +
-            INITED_FROM_OBJC_NAME + ";\n"
+        res += Join([PROPERTY_KEYWORD, " (", READWRITE_MODIFIER, ") ", BOOL_TYPE, " ",
+            INITED_FROM_OBJC_NAME, ";\n"])
     }
 
     // C++ ObjCTranspilerCJMapping.cpp:1363-1378.
@@ -1179,11 +1179,11 @@ extern id objc_getClass(const char *);
 
     // C++ ObjCTranspilerCJMapping.cpp:1383-1392.
     private func AddReinitWithRegistryId(): Unit {
-        res += REINIT_WITH_REGISTRY_ID_SIGNATURE + ";\n"
+        res += Join([REINIT_WITH_REGISTRY_ID_SIGNATURE, ";\n"])
         WriteFunc(REINIT_WITH_REGISTRY_ID_SIGNATURE, { =>
-            WriteSeq([SELF_NAME_CJ_MAPPING + "." + SELF_WEAKLINK_NAME + " = " +
-                REGISTRY_ID_PARAM_NAME + ";", "[" + SELF_NAME_CJ_MAPPING + " " + RETAIN_FUNC_NAME + "];",
-                "return " + SELF_NAME_CJ_MAPPING + ";"])
+            WriteSeq([Join([SELF_NAME_CJ_MAPPING, ".", SELF_WEAKLINK_NAME, " = ",
+                REGISTRY_ID_PARAM_NAME, ";"]), Join(["[", SELF_NAME_CJ_MAPPING, " ", RETAIN_FUNC_NAME, "];"]),
+                Join(["return ", SELF_NAME_CJ_MAPPING, ";"])])
         })
     }
 
@@ -1198,7 +1198,7 @@ extern id objc_getClass(const char *);
         }
         WriteFunc("- (void)deleteCJObject", { =>
             WriteIf("!self.$initedFromObjC", { =>
-                WriteSeq([ctx.nameGenerator.GenerateDeleteCjObjectName(decl) + "(self.$registryId);"])
+                WriteSeq([Join([ctx.nameGenerator.GenerateDeleteCjObjectName(decl), "(self.$registryId);"])])
             })
         })
         return true
@@ -1210,13 +1210,13 @@ extern id objc_getClass(const char *);
         res += RELEASE_SIGNATURE + ";\n"
         let ifThen: () -> Unit = { =>
             let lockFuncName = ctx.nameGenerator.GenerateLockCjObjectName(fwd)
-            WriteSeq(["int64_t idToDelete = self.$registryId;", lockFuncName + "(idToDelete);"])
+            WriteSeq(["int64_t idToDelete = self.$registryId;", Join([lockFuncName, "(idToDelete);"])])
             WriteIf("1 == CFGetRetainCount((__bridge CFTypeRef)self)", { =>
                 let deleteFuncName = ctx.nameGenerator.GenerateDeleteCjObjectName(fwd)
-                WriteSeq(["self.$registryId = -1;", deleteFuncName + "(idToDelete);"])
+                WriteSeq(["self.$registryId = -1;", Join([deleteFuncName, "(idToDelete);"])])
             }, other: Some({ =>
                 let unlockFuncName = ctx.nameGenerator.GenerateUnlockCjObjectName(fwd)
-                WriteSeq([unlockFuncName + "(idToDelete);"])
+                WriteSeq([Join([unlockFuncName, "(idToDelete);"])])
             }))
         }
         WriteFunc(RELEASE_SIGNATURE, { =>
@@ -1248,7 +1248,7 @@ static uint64_t calcMask(Class baseCls, Class selfCls, SEL* methods, int len) {
 
 """
         WriteFunc("- (uint64_t)calcOverrideMask", { =>
-            WriteSeq(["Class baseCls = objc_getClass(\"" + ctx.nameGenerator.GetObjCDeclName(decl) + "\");",
+            WriteSeq([Join(["Class baseCls = objc_getClass(\"", ctx.nameGenerator.GetObjCDeclName(decl), "\");"]),
                 "Class selfCls = [self class];",
                 JoinVec<FuncDecl>(overrides, {fn: FuncDecl =>
                     CJC_ASSERT(fn.funcBody.isSome())
@@ -1258,7 +1258,7 @@ static uint64_t calcMask(Class baseCls, Class selfCls, SEL* methods, int len) {
                     }
                     "@selector(" + fn.identifier.Val() + colons + ")"
                 }, sep: ", ", pre: "SEL methods[] = {", suf: "};"),
-                "return calcMask(baseCls, selfCls, methods, " + overrides.size.toString() + ");"])
+                Join(["return calcMask(baseCls, selfCls, methods, ", overrides.size.toString(), ");"])])
         })
     }
 
@@ -1275,7 +1275,7 @@ static uint64_t calcMask(Class baseCls, Class selfCls, SEL* methods, int len) {
         for (_ in 0..currentBlockIndent) {
             buffer.append(" ")
         }
-        buffer.append("for (" + header + ")")
+        buffer.append(Join(["for (", header, ")"]))
         WriteBlock(loop)
         buffer.append("\n")
     }
@@ -1285,7 +1285,7 @@ static uint64_t calcMask(Class baseCls, Class selfCls, SEL* methods, int len) {
         for (_ in 0..currentBlockIndent) {
             buffer.append(" ")
         }
-        buffer.append("if (" + cond + ")")
+        buffer.append(Join(["if (", cond, ")"]))
         WriteBlock(`then`)
         if (let Some(otherBlock) <- other) {
             WriteBlock(otherBlock, pre: " else")
@@ -1295,14 +1295,14 @@ static uint64_t calcMask(Class baseCls, Class selfCls, SEL* methods, int len) {
 
     private func WriteBlock(action: () -> Unit, pre!: String = "", suf!: String = "",
         flush!: Bool = false): Unit {
-        buffer.append(pre + " {\n")
+        buffer.append(Join([pre, " {\n"]))
         currentBlockIndent += INDENT_SIZE
         action()
         currentBlockIndent -= INDENT_SIZE
         for (_ in 0..currentBlockIndent) {
             buffer.append(" ")
         }
-        buffer.append("}" + suf)
+        buffer.append(Join(["}", suf]))
         if (flush) {
             resSource += buffer.toString()
             buffer = StringBuilder()
