@@ -158,9 +158,10 @@ async function createBuildSdkOverlay() {
   const astSupport = path.join(overlayTargetLib, 'libcangjie-ast-support.a');
   await fs.copyFile(astFfi, astSupport);
   const llvmAr = await requireFile(path.join(sdk, 'third_party', 'llvm', 'bin', 'llvm-ar'), 'SDK llvm-ar');
-  await $`${llvmAr} d ${astSupport} ast_api.cpp.o`;
+  const astApiMember = platform.startsWith('windows_') ? 'ast_api.cpp.obj' : 'ast_api.cpp.o';
+  await $`${llvmAr} d ${astSupport} ${astApiMember}`;
   const members = (await $({stdio: 'pipe'})`${llvmAr} t ${astSupport}`).stdout.trim().split('\n').filter(Boolean);
-  if (members.length !== 70 || members.includes('ast_api.cpp.o')) {
+  if (members.length !== 70 || members.includes(astApiMember)) {
     throw new Error(`derived ast-support archive has unexpected members=${members.length}`);
   }
 }
