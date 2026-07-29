@@ -1,6 +1,7 @@
 package cjcj::sema.NativeFFI.ObjC
 
 import std.collection.*
+import std.sort.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.{DiagnosticEngine, DiagKindRefactor, Linkage}
@@ -9,7 +10,7 @@ import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateSuperCall, CreateThisCall, CreateThisRef, CreateType,
+import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateSuperCall, CreateSuperRef, CreateThisCall, CreateThisRef, CreateType,
     CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
     GetGenericInstType, GetInstantyForGenericTy, GetSingleArgumentAnnotationValue, GetStringDecl, GetTyByName,
     GetTypeByName, InitGenericConfigs, IsSuperConstructorCall, IsThisConstructorCall, ReplaceGenericTyForFunc,
