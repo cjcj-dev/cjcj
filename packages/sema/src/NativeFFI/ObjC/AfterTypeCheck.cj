@@ -3926,7 +3926,7 @@ public class DesugarImpls <: Handler<InteropContext> {
         DesugarThisCtorCall(ctx, impl, method)
         let walker = Walker(method.funcBody.getOrThrow().body.getOrThrow(), visitPre: {node: Node =>
             if (node.TestAnyAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN,
-                Attribute.UNREACHABLE, Attribute.LEFT_VALUE)) {
+                Attribute.UNREACHABLE) || node.TestAttr(Attribute.LEFT_VALUE)) {
                 return VisitAction.SKIP_CHILDREN
             }
             if (let Some(callExpr) <- (node as CallExpr)) {
