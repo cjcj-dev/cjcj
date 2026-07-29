@@ -40,9 +40,11 @@ jobs:
       - name: Install official SDK with fixed LLC
         env:
           FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/linux_aarch64/llc.gz
-        run: |
-          npx --yes zx@8 ci/setup_sdk.mjs
-          "$CANGJIE_HOME/third_party/llvm/bin/llc" --help-hidden | grep -q cjcj-sticky-logged-map
+        run: npx --yes zx@8 ci/setup_sdk.mjs
+
+      # CANGJIE_HOME lands in $GITHUB_ENV, which only takes effect in the next step
+      - name: Verify fixed LLC in SDK
+        run: '"$CANGJIE_HOME/third_party/llvm/bin/llc" --help-hidden | grep -q cjcj-sticky-logged-map'
 
       - name: Build pinned runtime
         run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
