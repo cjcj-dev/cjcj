@@ -2124,6 +2124,61 @@ public class InteropContext {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertNativeHandleGetterBody.cpp:22-83.
+public class InsertNativeHandleGetterBody <: Handler<InteropContext> {
+    private let interopType: InteropType
+
+    public init(interopType: InteropType) {
+        this.interopType = interopType
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        if (interopType == InteropType.Fwd_Class) {
+            for (fwdClass in ctx.fwdClasses) {
+                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
+                    continue
+                }
+                let getterDecl = GetNativeHandleGetter(fwdClass).getOrThrow()
+                let nativeHandleFieldExpr = ctx.factory.CreateNativeHandleFieldExpr(fwdClass)
+                getterDecl.funcBody.getOrThrow().body.getOrThrow().body.add(nativeHandleFieldExpr)
+            }
+            return
+        }
+        for (mirror in ctx.mirrors) {
+            if (mirror.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (HasMirrorSuperClass(mirror)) {
+                continue
+            }
+            if (let Some(mirrorClass) <- (mirror as ClassDecl)) {
+                let getterDecl = GetNativeHandleGetter(mirrorClass).getOrThrow()
+                let nativeHandleFieldExpr = ctx.factory.CreateNativeHandleFieldExpr(mirrorClass)
+                getterDecl.funcBody.getOrThrow().body.getOrThrow().body.add(nativeHandleFieldExpr)
+            }
+        }
+        for (wrapper in ctx.synWrappers) {
+            if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            let getterDecl = GetNativeHandleGetter(wrapper).getOrThrow()
+            let nativeHandleFieldExpr = ctx.factory.CreateNativeHandleFieldExpr(wrapper)
+            getterDecl.funcBody.getOrThrow().body.getOrThrow().body.add(nativeHandleFieldExpr)
+        }
+        for (impl in ctx.impls) {
+            if (impl.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (HasMirrorSuperClass(impl)) {
+                continue
+            }
+            let getterDecl = GetNativeHandleGetter(impl).getOrThrow()
+            let nativeHandleFieldExpr = ctx.factory.CreateNativeHandleFieldExpr(impl)
+            getterDecl.funcBody.getOrThrow().body.getOrThrow().body.add(nativeHandleFieldExpr)
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCBlockConstruction.cpp:35-77.
 public class RewriteObjCBlockConstruction <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
