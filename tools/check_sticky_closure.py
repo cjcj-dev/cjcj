@@ -424,7 +424,7 @@ def verify_merged_records(raw, origin, endian="<"):
 
 def metadata_sections(object_format, sections):
     if object_format == "ELF":
-        return sorted(name for name in sections if name == ".cjmetadata" or name.startswith(".cjmetadata."))
+        return sorted(name for name in sections if name.startswith(".cj"))
     if object_format == "Mach-O":
         return sorted(name for name in sections if name.startswith("__CJ_METADATA,"))
     return sorted(name for name in sections if name.startswith(".cj"))
