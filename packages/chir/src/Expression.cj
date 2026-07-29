@@ -345,8 +345,20 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         EraseOperands()
     }
 
+    // C++ Expression::OperandsToString uses the terminator operands vector which
+    // already appends successors (see Terminator::GetFirstSuccessorIndex).
+    // Selfhost keeps successors in a separate list, so rebuild that layout here.
     public open func OperandsToString(): String {
-        return ValueIdVecToString("", operands, "", hasExceptionBranch: HasExceptionBranch())
+        let values = ArrayList<Value>()
+        for (op in operands) {
+            values.add(op)
+        }
+        if (let Some(terminator) <- AsTerminator()) {
+            for (successor in terminator.GetSuccessors()) {
+                values.add(successor)
+            }
+        }
+        return ValueIdVecToString("", values, "", hasExceptionBranch: HasExceptionBranch())
     }
 
     public open func AddExtraComment(): String {

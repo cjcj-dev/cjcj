@@ -1,7 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
-import cjcj::utils.OverflowStrategy
+import cjcj::utils.{CJC_ASSERT, OverflowStrategy}
 
 public func IndentToString(indent: Int64): String {
     let unit: Int64 = 2
@@ -81,12 +81,14 @@ public func ValueIdVecToString(prefix: String, values: ArrayList<Value>, suffix:
             ids.add(value.GetIdentifier())
         }
     }
+    // C++ ToStringUtils.h:56-62 — CJC_ASSERT(ids.size() >= 2), not a thrown exception.
+    // A throw here was swallowed by CHIRPrinter as "open file failed" (silent dump death).
     if (hasExceptionBranch) {
-        if (ids.size < 2) {
-            throw IllegalArgumentException("exception branch value list must contain normal and exception successors")
+        CJC_ASSERT(ids.size >= 2)
+        if (ids.size >= 2) {
+            ids[ids.size - 2] = "normal: " + ids[ids.size - 2]
+            ids[ids.size - 1] = "exception: " + ids[ids.size - 1]
         }
-        ids[ids.size - 2] = "normal: " + ids[ids.size - 2]
-        ids[ids.size - 1] = "exception: " + ids[ids.size - 1]
     }
     return prefix + StringJoin(ids, ", ") + suffix
 }
