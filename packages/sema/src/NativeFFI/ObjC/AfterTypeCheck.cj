@@ -9,7 +9,8 @@ import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateThisCall, CreateThisRef, CreateType,
-    CreateUnitType, GenericConfigInfo, GetStringDecl, WithinFile, INIT_IDENT, IsObjCGeneratedMember,
+    CreateUnitType, GenericConfigInfo, GetArgsAndRetGenericActualTyVector, GetInstantyForGenericTy, GetStringDecl,
+    WithinFile, INIT_IDENT, IsObjCGeneratedMember,
     WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
     CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
@@ -1333,6 +1334,102 @@ public class ASTFactory {
         nodes.add(getClassCall)
         classDecl.funcBody.getOrThrow().body = CreateBlock(nodes)
         return classDecl
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:592-697.
+    public func CreateInitCjObject(target: Decl, ctor: FuncDecl,
+        generateForOneWayMapping!: Bool = false,
+        genericConfig!: Option<GenericConfigInfo> = None): FuncDecl {
+        let curFile = ctor.curFile
+        let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+        let actualTyArgMap = HashMap<String, Ty>()
+        let funcTyParams = ArrayList<Ty>()
+        let actualPrimitiveTypes = ArrayList<Type>()
+        if (let Some(config) <- genericConfig) {
+            if (!config.instTypes.isEmpty()) {
+                GetArgsAndRetGenericActualTyVector(config, ctor, actualTyArgMap, funcTyParams,
+                    actualPrimitiveTypes, typeManager)
+            }
+        }
+
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        let ctorParams = ctor.funcBody.getOrThrow().paramLists[0].params
+        for (param in ctorParams) {
+            var finalTy = param.GetTy().getOrThrow()
+            if (let Some(actualTy) <- actualTyArgMap.get(finalTy.name)) {
+                finalTy = actualTy
+            }
+            wrapperParams.add(CreateFuncParam(param.identifier.Val(), None, None,
+                typeMapper.Cj2CType(finalTy)))
+        }
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) {
+            wrapperParamTys.add(param.GetTy().getOrThrow())
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), registryIdTy, cfg: cfg)
+        let wrapperParamLists = ArrayList<FuncParamList>()
+        wrapperParamLists.add(wrapperParamList)
+
+        let ctorCallArgs = ArrayList<FuncArg>()
+        var argIndex: Int64 = 0
+        if (!generateForOneWayMapping) {
+            CJC_ASSERT(!wrapperParams.isEmpty())
+            ctorCallArgs.add(CreateFuncArg(CreateRefExpr(wrapperParams[0])))
+            argIndex = 1
+        }
+        while (argIndex < ctorParams.size) {
+            var finalTy = ctorParams[argIndex].GetTy().getOrThrow()
+            if (let Some(actualTy) <- actualTyArgMap.get(finalTy.name)) {
+                finalTy = actualTy
+            }
+            let paramRef = WithinFile<RefExpr>(CreateRefExpr(wrapperParams[argIndex]), curFile)
+            ctorCallArgs.add(CreateFuncArg(WrapEntity(paramRef, finalTy)))
+            argIndex++
+        }
+
+        let ctorCall: CallExpr
+        if (target.GetTy().getOrThrow().HasGeneric()) {
+            let instantiationRefExpr = CreateRefExpr(ctor)
+            let instantTy = GetInstantyForGenericTy(target, actualTyArgMap, typeManager).getOrThrow()
+            let retTy = (ctor.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+            let instantiatedFuncTy = if (retTy.HasGeneric()) {
+                typeManager.GetFunctionTy(funcTyParams.toArray(), instantTy, cfg: cfg)
+            } else {
+                typeManager.GetFunctionTy(funcTyParams.toArray(), retTy, cfg: cfg)
+            }
+            for (actualType in actualPrimitiveTypes) {
+                instantiationRefExpr.typeArguments.add(actualType)
+            }
+            instantiationRefExpr.SetTy(instantiatedFuncTy)
+            ctorCall = CreateCallExpr(instantiationRefExpr, ctorCallArgs, Some(ctor), Some(instantTy),
+                CallKind.CALL_OBJECT_CREATION)
+        } else {
+            ctorCall = CreateCallExpr(CreateRefExpr(ctor), ctorCallArgs, Some(ctor), target.GetTy(),
+                CallKind.CALL_OBJECT_CREATION)
+        }
+        let putToRegistryCall = CreatePutToRegistryCall(ctorCall)
+        let bodyNodes = ArrayList<Node>()
+        bodyNodes.add(putToRegistryCall)
+        let wrapperBody = CreateFuncBody(wrapperParamLists, CreateType(registryIdTy),
+            CreateBlock(bodyNodes, registryIdTy), wrapperTy)
+        let wrapperName = if (let Some(config) <- genericConfig) {
+            nameGenerator.GenerateInitCjObjectName(ctor, genericActualName: config.declInstName)
+        } else {
+            nameGenerator.GenerateInitCjObjectName(ctor)
+        }
+        let wrapper = CreateFuncDecl(wrapperName, wrapperBody, wrapperTy)
+        wrapper.moduleName = ctor.moduleName
+        wrapper.fullPackageName = ctor.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, ctor.curFile.getOrThrow())
+        return wrapper
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:699-748.
