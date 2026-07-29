@@ -319,6 +319,20 @@ try {
       managedHashes[relative] = await sha256(path.join(managedOut, name));
     }
     managedFiles.sort();
+  } else {
+    const sharedNames = stickyLibraries.files
+      .filter(name => name.endsWith('.so') || name.endsWith('.dylib'));
+    const runtimeSource = path.join(installedOutput, 'runtime', 'lib', platform);
+    const runtimeOut = path.join(out, 'runtime', 'lib', platform);
+    await fs.mkdir(runtimeOut, {recursive: true});
+    const installedSharedNames = (await matchingFiles(runtimeSource, targetSpec.libraryPattern))
+      .filter(name => name.endsWith('.so') || name.endsWith('.dylib'));
+    if (installedSharedNames.join('\n') !== sharedNames.join('\n')) {
+      throw new Error(`installed runtime std mirror mismatch: expected=${sharedNames.join(',')} actual=${installedSharedNames.join(',')}`);
+    }
+    for (const name of sharedNames) {
+      await fs.copyFile(path.join(runtimeSource, name), path.join(runtimeOut, name));
+    }
   }
 
   const stickySet = new Set(stickyLibraries.files);
