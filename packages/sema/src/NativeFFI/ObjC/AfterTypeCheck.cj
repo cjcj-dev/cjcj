@@ -2,16 +2,20 @@ package cjcj::sema.NativeFFI.ObjC
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::basic.{DiagnosticEngine, DiagKindRefactor}
+import cjcj::basic.{DiagnosticEngine, DiagKindRefactor, Linkage}
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
-import cjcj::sema.{GenerateTypeMapping, MemberMap, TypeManager}
+import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateType, GetStringDecl, WithinFile,
-    WrapReturningLambdaCall}
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR,
-    OBJ_C_FWD_CLASS_SUFFIX, OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
+import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateThisCall, CreateThisRef, CreateType,
+    CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
+    GetGenericInstType, GetInstantyForGenericTy, GetStringDecl, WithinFile, INIT_IDENT, IsObjCGeneratedMember,
+    WrapReturningLambdaCall, WrapReturningLambdaExpr}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
+    CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
+    OBJ_C_FWD_CLASS_SUFFIX,
+    OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
 public enum Retain {
@@ -19,6 +23,11 @@ public enum Retain {
     | RETAINED
     | RETAIN_AUTORELEASED_RETURN_VALUE
 }
+
+// C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:38.
+private let FINALIZER_IDENT: String = "~init"
+// C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:37.
+private let VALUE_IDENT: String = "value"
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:37-47,279-283.
 public class ASTFactory {
@@ -37,6 +46,56 @@ public class ASTFactory {
         this.importManager = importManager
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:43-48.
+    public static func CreateParamLists(params: ArrayList<FuncParam>): ArrayList<FuncParamList> {
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(CreateFuncParamList(params))
+        return paramLists
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:50-58.
+    public static func GetParams(fn: FuncDecl): ArrayList<FuncParam> {
+        CJC_NULLPTR_CHECK(fn.funcBody)
+        let paramLists = fn.funcBody.getOrThrow().paramLists
+        CJC_ASSERT(paramLists.size == 1)
+        return paramLists[0].params
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:60-75.
+    public static func CreateVar(name: String, ty: Ty, isVar: Bool,
+        initializer!: Option<Expr> = None): VarDecl {
+        let result = VarDecl()
+        result.identifier = SrcIdentifier(name)
+        result.SetTy(ty)
+        result.isVar = isVar
+        result.EnableAttr(Attribute.COMPILER_ADD)
+        result.EnableAttr(Attribute.IMPLICIT_ADD)
+        result.EnableAttr(Attribute.NO_REFLECT_INFO)
+        result.initializer = initializer
+        result.toBeCompiled = true
+        return result
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:77-89.
+    public static func CreateFunc(name: String, funcTy: FuncTy, params: ArrayList<FuncParam>,
+        nodes: ArrayList<Node>): FuncDecl {
+        let retTy = funcTy.retTy
+        let bodyTy = if (nodes.isEmpty()) { retTy } else { nodes[nodes.size - 1].GetTy().getOrThrow() }
+        let body = CreateBlock(nodes, bodyTy)
+        let funcBody = CreateFuncBody(CreateParamLists(params), CreateType(retTy), body, retTy)
+        let funcDecl = CreateFuncDecl(name, funcBody, funcTy)
+        funcDecl.funcBody.getOrThrow().funcDecl = funcDecl
+        return funcDecl
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:91-98.
+    public static func CreateParenExpr(expr: Expr): ParenExpr {
+        let parenExpr = ParenExpr()
+        parenExpr.SetTy(expr.GetTy().getOrThrow())
+        parenExpr.expr = expr
+        return parenExpr
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:93-104.
     public func CreateNativeHandleExpr(entity: Expr): Expr {
         let entityTy = entity.GetTy().getOrThrow()
@@ -49,6 +108,25 @@ public class ASTFactory {
         let getterCall = CreateCallExpr(getterMemberAccess, ArrayList<FuncArg>(), Some(getter),
             Some(getterTy.retTy), CallKind.CALL_DECLARED_FUNCTION)
         return WithinFile<CallExpr>(getterCall, entity.curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:106-113.
+    public func CreateNativeHandleExpr(ty: ClassLikeTy, curFile: Option<File>): Expr {
+        CJC_ASSERT(TypeMapper.IsObjCMirror(ty) || TypeMapper.IsObjCImpl(ty) ||
+            TypeMapper.IsSyntheticWrapper(ty) || TypeMapper.IsObjCFwdClass(ty))
+        var commonDecl: Option<Decl> = None
+        if (let Some(decl) <- ty.commonDecl) {
+            commonDecl = Some(decl)
+        }
+        return CreateNativeHandleExpr(CreateThisRef(commonDecl, Some(ty), curFile))
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:115-124.
+    public func CreateNativeHandleExpr(decl: ClassLikeDecl, isStatic: Bool, curFile: Option<File>): Expr {
+        if (!isStatic) {
+            return CreateNativeHandleExpr((decl.GetTy().getOrThrow() as ClassLikeTy).getOrThrow(), curFile)
+        }
+        return CreateGetClassCall(decl, curFile)
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:299-302.
@@ -96,6 +174,143 @@ public class ASTFactory {
         return call
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:348-388.
+    public func CreateOptionMatch(selector: Expr, someBranch: (VarDecl) -> Expr,
+        noneBranch: () -> Expr, ty: Ty): Expr {
+        let curFile = selector.curFile.getOrThrow()
+        let optionTy = selector.GetTy().getOrThrow()
+        CJC_ASSERT(optionTy.IsCoreOptionType())
+        let optionArgTy = optionTy.typeArgs[0]
+
+        let varPattern = CreateVarPattern(V_COMPILER, Some(optionArgTy))
+        varPattern.curFile = curFile
+        let someArgVar = varPattern.varDecl.getOrThrow()
+        someArgVar.curFile = curFile
+        let somePattern = EnumPattern()
+        somePattern.SetTy(optionTy)
+        somePattern.constructor = CreateOptionSomeRef(optionArgTy)
+        somePattern.patterns.add(varPattern)
+        somePattern.curFile = curFile
+        let caseSome = CreateMatchCase(somePattern, someBranch(someArgVar))
+
+        let nonePattern = EnumPattern()
+        nonePattern.constructor = CreateOptionNoneRef(optionArgTy)
+        nonePattern.SetTy(nonePattern.constructor.getOrThrow().GetTy().getOrThrow())
+        nonePattern.curFile = curFile
+        let caseNone = CreateMatchCase(nonePattern, noneBranch())
+        let cases = ArrayList<MatchCase>()
+        cases.add(caseSome)
+        cases.add(caseNone)
+        return WithinFile<MatchExpr>(CreateMatchExpr(selector, cases, ty), curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:391-394.
+    public func GetObjCTy(): Ty {
+        return typeManager.GetPointerTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:396-403.
+    public func CreateObjCobjectNull(): Expr {
+        let pointerExpr = PointerExpr()
+        let typeNode = Type()
+        typeNode.SetTy(GetObjCTy())
+        pointerExpr.typeNode = typeNode
+        pointerExpr.SetTy(typeNode.GetTy().getOrThrow())
+        return pointerExpr
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:412-429.
+    public func UnwrapObjCMirrorOption(entity: Expr, ty: Ty): Expr {
+        let curFile = entity.curFile.getOrThrow()
+        return CreateOptionMatch(entity,
+            { value: VarDecl => UnwrapEntity(WithinFile<RefExpr>(CreateRefExpr(value), curFile)) },
+            { => CreateObjCobjectNull() }, typeMapper.Cj2CType(ty))
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:459-479.
+    public func CreateOptionalMethodGuard(msgSend: Expr, cls: Expr, selector: String,
+        curFile: Option<File>): Expr {
+        let baseTy = msgSend.GetTy().getOrThrow()
+        let selectorCall = CreateRegisterNameCall(selector, curFile)
+        let respondsToSelectorCall = CreateObjCRespondsToSelectorCall(cls, selectorCall, curFile)
+        let falseBranch = WithinFile<ThrowExpr>(
+            CreateThrowOptionalMethodUnimplemented(curFile.getOrThrow()), curFile)
+        let boolMatch = CreateBoolMatch(respondsToSelectorCall, msgSend, falseBranch, baseTy)
+        let nodes = ArrayList<Node>()
+        nodes.add(boolMatch)
+        return WrapReturningLambdaCall(typeManager, nodes)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:481-510.
+    public func CreateMirrorConstructorCall(entity: Expr, mirrorTy: Ty): Option<Expr> {
+        let curFile = entity.curFile
+        if (let None <- (mirrorTy as ClassLikeTy)) {
+            return None
+        }
+        let classLikeTy = (mirrorTy as ClassLikeTy).getOrThrow()
+        if (let Some(decl) <- classLikeTy.commonDecl) {
+            if (decl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                let mirror: ClassDecl
+                if (decl.astKind == ASTKind.CLASS_DECL) {
+                    mirror = (decl as ClassDecl).getOrThrow()
+                } else {
+                    mirror = GetSyntheticWrapper(importManager, decl).getOrThrow()
+                }
+                let mirrorCtor = GetGeneratedBaseCtor(mirror).getOrThrow()
+                let args = ArrayList<FuncArg>()
+                args.add(CreateFuncArg(entity))
+                if (let Some(ctorCall) <- CreateCall(Some(mirrorCtor), curFile, args: args)) {
+                    ctorCall.callKind = CallKind.CALL_OBJECT_CREATION
+                    ctorCall.SetTy(mirrorTy)
+                    return Some(ctorCall)
+                }
+                return None
+            }
+        }
+        CJC_ABORT()
+        return None
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:126-176.
+    public func UnwrapEntity(expr: Expr): Expr {
+        let exprTy = expr.GetTy().getOrThrow()
+        if (TypeMapper.IsObjCMirror(exprTy) || TypeMapper.IsObjCImpl(exprTy)) {
+            return CreateNativeHandleExpr(expr)
+        }
+        if (TypeMapper.IsObjCCJMapping(exprTy)) {
+            return CreatePutToRegistryCall(expr)
+        }
+        if (exprTy.IsCoreOptionType()) {
+            let innerTy = exprTy.typeArgs[0]
+            if (TypeMapper.IsValidObjCMirror(innerTy) || TypeMapper.IsObjCImpl(innerTy)) {
+                return UnwrapObjCMirrorOption(expr, innerTy)
+            }
+        }
+        if (TypeMapper.IsObjCPointer(exprTy)) {
+            CJC_ASSERT(exprTy.typeArgs.size == 1)
+            let elementType = exprTy.typeArgs[0]
+            let field = bridge.GetObjCPointerPointerField().getOrThrow()
+            return CreateUnsafePointerCast(CreateMemberAccess(expr, field), typeMapper.Cj2CType(elementType))
+        }
+        if (TypeMapper.IsObjCFunc(exprTy)) {
+            CJC_ASSERT(exprTy.typeArgs.size == 1)
+            let mappedTy = typeMapper.Cj2CType(exprTy)
+            let getter = bridge.GetObjCFuncFPointerAccessor().getOrThrow()
+            CJC_ASSERT(mappedTy.IsPointer())
+            return CreateUnsafePointerCast(CreateMemberCall(expr, getter), mappedTy.typeArgs[0])
+        }
+        if (TypeMapper.IsObjCBlock(exprTy)) {
+            CJC_ASSERT(exprTy.typeArgs.size == 1)
+            let mappedTy = typeMapper.Cj2CType(exprTy)
+            let abiPointer = bridge.GetObjCBlockAbiPointerAccessor().getOrThrow()
+            CJC_ASSERT(mappedTy.IsPointer())
+            return CreateUnsafePointerCast(CreateMemberCall(expr, abiPointer), mappedTy.typeArgs[0])
+        }
+        CJC_ASSERT(exprTy.IsPrimitive() || exprTy.IsPointer() || Ty.IsCStructType(exprTy) ||
+            exprTy.IsCFunc() || exprTy.IsCString())
+        return expr
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1784-1794.
     public func CreateObjCIsKindOfClassCall(id: Expr, cls: Expr, file: Option<File>): Expr {
         let kindOfClassDecl = bridge.GetObjCIsKindOfClassDecl().getOrThrow()
@@ -122,6 +337,23 @@ public class ASTFactory {
     public func CreateGetClassCall(className: String, curFile: Option<File>): Expr {
         let getClassFuncDecl = bridge.GetGetClassDecl().getOrThrow()
         let classNameLiteral = CreateLitConstExpr(LitConstKind.STRING, className,
+            GetStringDecl(importManager).GetTy().getOrThrow())
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(classNameLiteral))
+        return CreateCall(Some(getClassFuncDecl), curFile, args: args).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1914-1921.
+    public func CreateGetClassCall(cls: ClassLikeDecl, curFile: Option<File>): Expr {
+        let classNameFunc = FindMirrorMember(GET_OBJ_C_CLASS_IDENT, cls) as FuncDecl
+        CJC_NULLPTR_CHECK(classNameFunc)
+        return CreateCall(classNameFunc, curFile).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1923-1929.
+    public func CreateGetClassCall(ty: ClassLikeTy, curFile: Option<File>): Expr {
+        let getClassFuncDecl = bridge.GetGetClassDecl().getOrThrow()
+        let classNameLiteral = CreateLitConstExpr(LitConstKind.STRING, ty.name,
             GetStringDecl(importManager).GetTy().getOrThrow())
         let args = ArrayList<FuncArg>()
         args.add(CreateFuncArg(classNameLiteral))
@@ -176,6 +408,802 @@ public class ASTFactory {
         }
         CJC_ABORT()
         return None
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1343-1370.
+    // C++ std::set<Ptr<FuncDecl>> uses an unstable pointer-address order. Cangjie keeps identity uniqueness
+    // through HashSet<Decl> and exposes the deterministic inheritance discovery order; consumers must not rely on it.
+    public func GetAllParentCtors(target: ClassDecl): ArrayList<FuncDecl> {
+        let result = ArrayList<FuncDecl>()
+        let seen = HashSet<Decl>()
+        for (superDecl in target.GetAllSuperDecls()) {
+            for (decl in superDecl.GetMemberDecls()) {
+                if (IsGeneratedMember(decl)) {
+                    continue
+                }
+                if (!decl.TestAttr(Attribute.CONSTRUCTOR)) {
+                    continue
+                }
+                if (decl.astKind != ASTKind.FUNC_DECL) {
+                    // C++ skips the primary constructor, which is already desugared to init.
+                    continue
+                }
+                let funcDecl = (decl as FuncDecl).getOrThrow()
+                if (let None <- funcDecl.funcBody) {
+                    continue
+                }
+                if (!seen.contains(funcDecl)) {
+                    seen.add(funcDecl)
+                    result.add(funcDecl)
+                }
+            }
+        }
+        return result
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1322-1327.
+    public func CreateThrowOptionalMethodUnimplemented(file: File): ThrowExpr {
+        let exceptionDecl = bridge.GetObjCOptionalMethodUnimplementedExceptionDecl()
+        CJC_NULLPTR_CHECK(exceptionDecl)
+        return CreateThrowException(exceptionDecl.getOrThrow(), ArrayList<Expr>(), file, typeManager)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1329-1334.
+    public func CreateThrowUnreachableCodeExpr(file: File): ThrowExpr {
+        let exceptionDecl = bridge.GetObjCUnreachableCodeExceptionDecl()
+        CJC_NULLPTR_CHECK(exceptionDecl)
+        return CreateThrowException(exceptionDecl.getOrThrow(), ArrayList<Expr>(), file, typeManager)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1336-1341.
+    public func CreateThrowStaticMethodCallOnInterfaceExpr(file: File): ThrowExpr {
+        let exceptionDecl = bridge.GetObjCStaticMethodCallOnIntefaceExceptionDecl()
+        CJC_NULLPTR_CHECK(exceptionDecl)
+        return CreateThrowException(exceptionDecl.getOrThrow(), ArrayList<Expr>(), file, typeManager)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1372-1402.
+    public func CreateBaseCtorDecl(target: ClassDecl): FuncDecl {
+        let nativeObjCIdTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let param = CreateFuncParam(NATIVE_HANDLE_IDENT, CreateType(nativeObjCIdTy), None, nativeObjCIdTy)
+        let ctorFuncTy = typeManager.GetFunctionTy([param.GetTy().getOrThrow()], target.GetTy().getOrThrow())
+
+        let ctorParams = ArrayList<FuncParam>()
+        ctorParams.add(param)
+        let paramList = CreateFuncParamList(ctorParams)
+        let ctorNodes = ArrayList<Node>()
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(paramList)
+        let ctorFuncBody = CreateFuncBody(paramLists, CreateRefType(target),
+            CreateBlock(ctorNodes, target.GetTy()), ctorFuncTy)
+        let ctor = CreateFuncDecl(INIT_IDENT, ctorFuncBody, ctorFuncTy)
+        ctor.funcBody.getOrThrow().funcDecl = ctor
+        ctor.constructorCall = ConstructorCall.NONE
+        ctor.funcBody.getOrThrow().parentClassLike = target
+        ctor.EnableAttr(Attribute.PUBLIC)
+        ctor.EnableAttr(Attribute.CONSTRUCTOR)
+        PutDeclToClassLikeBody(ctor, target)
+        return ctor
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1404-1425.
+    public func CreateImplCtor(from: FuncDecl): FuncDecl {
+        let nativeHandleTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let ctor = (ASTCloner.Clone(from) as FuncDecl).getOrThrow()
+        let curFile = ctor.curFile
+        CJC_NULLPTR_CHECK(ctor.funcBody)
+        let implCtorParams = ctor.funcBody.getOrThrow().paramLists[0].params
+        implCtorParams.add(WithinFile<FuncParam>(CreateFuncParam(NATIVE_HANDLE_IDENT,
+            CreateType(nativeHandleTy), None, nativeHandleTy), curFile), at: 0)
+
+        let implCtorParamTys = ArrayList<Ty>()
+        for (param in implCtorParams) {
+            implCtorParamTys.add(param.typeNode.getOrThrow().GetTy().getOrThrow())
+        }
+        let retTy = ctor.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        ctor.SetTy(typeManager.GetFunctionTy(implCtorParamTys.toArray(), retTy))
+        ctor.funcBody.getOrThrow().SetTy(ctor.GetTy().getOrThrow())
+        ctor.funcBody.getOrThrow().funcDecl = ctor
+        ctor.constructorCall = ConstructorCall.SUPER
+        return ctor
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1427-1432.
+    public func IsGeneratedMember(decl: Decl): Bool {
+        return IsGeneratedNativeHandleField(decl) || IsGeneratedGetObjCClassFunction(decl) ||
+            IsGeneratedHasInitedField(decl) || IsGeneratedCtor(decl) || IsGeneratedNativeHandleGetter(decl) ||
+            IsObjCGeneratedMember(decl)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1434-1437.
+    public func IsGeneratedNativeHandleField(decl: Decl): Bool {
+        return decl.identifier.Val() == NATIVE_HANDLE_IDENT
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1439-1442.
+    public func IsGeneratedGetObjCClassFunction(decl: Decl): Bool {
+        return decl.identifier.Val() == GET_OBJ_C_CLASS_IDENT
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1444-1447.
+    public func IsGeneratedHasInitedField(decl: Decl): Bool {
+        return decl.TestAttr(Attribute.HAS_INITED_FIELD)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1472-1498.
+    public func IsGeneratedCtor(decl: Decl): Bool {
+        let funcDecl = decl as FuncDecl
+        if ((let None <- funcDecl) || !funcDecl.getOrThrow().TestAttr(Attribute.CONSTRUCTOR) ||
+            (let None <- funcDecl.getOrThrow().funcBody)) {
+            return false
+        }
+        let paramLists = funcDecl.getOrThrow().funcBody.getOrThrow().paramLists
+        if (paramLists.isEmpty()) {
+            return false
+        }
+        let params = paramLists[0].params
+        if (params.isEmpty()) {
+            return false
+        }
+        return params[0].identifier == NATIVE_HANDLE_IDENT
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1500-1503.
+    public func IsGeneratedNativeHandleGetter(decl: Decl): Bool {
+        return decl.identifier.Val() == NATIVE_HANDLE_GETTER_IDENT
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1523-1565.
+    public func GetGeneratedImplCtor(declArg: Decl, origin: FuncDecl): Option<FuncDecl> {
+        CJC_ASSERT(origin.TestAttr(Attribute.CONSTRUCTOR))
+        CJC_NULLPTR_CHECK(origin.funcBody)
+        let originParamLists = origin.funcBody.getOrThrow().paramLists
+        CJC_ASSERT(!originParamLists.isEmpty())
+        let originParams = originParamLists[0].params
+
+        for (member in declArg.GetMemberDeclPtrs()) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (!IsGeneratedCtor(funcDecl)) {
+                    continue
+                }
+                CJC_NULLPTR_CHECK(funcDecl.funcBody)
+                let funcDeclParamLists = funcDecl.funcBody.getOrThrow().paramLists
+                CJC_ASSERT(!funcDeclParamLists.isEmpty())
+                let funcDeclParams = funcDeclParamLists[0].params
+                if (originParams.size + 1 != funcDeclParams.size) {
+                    continue
+                }
+
+                var matched = true
+                var index = 1
+                while (index < funcDeclParams.size) {
+                    let funcDeclParam = funcDeclParams[index]
+                    let originParam = originParams[index - 1]
+                    if (funcDeclParam.identifier != originParam.identifier ||
+                        funcDeclParam.GetTy().getOrThrow() != originParam.GetTy().getOrThrow()) {
+                        matched = false
+                        break
+                    }
+                    index++
+                }
+                if (matched) {
+                    return Some(funcDecl)
+                }
+            }
+        }
+        return None
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1607-1620.
+    public func CreatePutToRegistryCall(expr: Expr): CallExpr {
+        let putToRegistryDecl = bridge.GetPutToRegistryDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(expr))
+        let retTy = putToRegistryDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        return CreateCallExpr(CreateRefExpr(putToRegistryDecl), args, Some(putToRegistryDecl), Some(retTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1622-1676.
+    public func CreateNativeLambdaForBlockType(ty: Ty, curFile: Option<File>): Expr {
+        let funcTy = (ty as FuncTy).getOrThrow()
+        let nativeBlockABITy = bridge.GetNativeBlockABIDecl().getOrThrow().GetTy().getOrThrow()
+        let cArgTys = ArrayList<Ty>()
+        cArgTys.add(typeManager.GetPointerTy(nativeBlockABITy))
+        for (argTy in funcTy.paramTys) {
+            cArgTys.add(typeMapper.Cj2CType(argTy))
+        }
+        let cResultTy = typeMapper.Cj2CType(funcTy.retTy)
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let cFuncTy = typeManager.GetFunctionTy(cArgTys.toArray(), cResultTy, cfg: cfg)
+
+        let lambdaParams = ArrayList<FuncParam>()
+        var varIndex: Int64 = 0
+        for (cTy in cArgTys) {
+            lambdaParams.add(CreateFuncParam("arg${varIndex}", None, None, cTy))
+            varIndex++
+        }
+        let getLambdaFromBlockDecl = bridge.GetObjCGetLambdaFromBlockDecl().getOrThrow()
+        let getLambdaFromBlockRef = WithinFile<RefExpr>(CreateRefExpr(getLambdaFromBlockDecl), curFile)
+        getLambdaFromBlockRef.instTys.add(ty)
+        let getLambdaFromBlockFuncTy =
+            (getLambdaFromBlockRef.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        getLambdaFromBlockRef.SetTy(typeManager.GetFunctionTy(getLambdaFromBlockFuncTy.paramTys.toArray(), ty))
+        let getLambdaFromBlockArgs = ArrayList<FuncArg>()
+        getLambdaFromBlockArgs.add(CreateFuncArg(
+            WithinFile<RefExpr>(CreateRefExpr(lambdaParams[0]), curFile)))
+        let cangjieFuncExpr = CreateCallExpr(getLambdaFromBlockRef, getLambdaFromBlockArgs,
+            Some(getLambdaFromBlockDecl), Some(ty), CallKind.CALL_INVALID)
+
+        let cangjieFuncArgs = ArrayList<FuncArg>()
+        var index: Int64 = 1
+        while (index < lambdaParams.size) {
+            let paramRef = WithinFile<RefExpr>(CreateRefExpr(lambdaParams[index]), curFile)
+            cangjieFuncArgs.add(CreateFuncArg(WrapEntity(paramRef, funcTy.paramTys[index - 1],
+                withRetain: Retain.RETAINED)))
+            index++
+        }
+        let resultCangjie = CreateCallExpr(cangjieFuncExpr, cangjieFuncArgs, None, Some(cResultTy),
+            CallKind.CALL_INVALID)
+        let body = ArrayList<Node>()
+        body.add(UnwrapEntity(resultCangjie))
+        let lambda = WrapReturningLambdaExpr(typeManager, body, lambdaParams: lambdaParams)
+        lambda.SetTy(cFuncTy)
+        return lambda
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1678-1718.
+    public func CreateObjCBlockFromLambdaCall(funcExpr: Expr): Expr {
+        let curFile = funcExpr.curFile
+        let funcTy = (funcExpr.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let creatorFunc = bridge.GetObjCStoreLambdaAsBlockDecl().getOrThrow()
+        let cFuncLambda = CreateNativeLambdaForBlockType(funcTy, curFile)
+        let creatorFuncArgs = ArrayList<FuncArg>()
+        creatorFuncArgs.add(CreateFuncArg(funcExpr, "", typeManager.GetAnyTy()))
+
+        let nativeBlockABITy = bridge.GetNativeBlockABIDecl().getOrThrow().GetTy().getOrThrow()
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let nativeAbiErasedFuncTy = typeManager.GetFunctionTy([typeManager.GetPointerTy(nativeBlockABITy)],
+            TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT), cfg: cfg)
+        creatorFuncArgs.add(CreateFuncArg(CreateUnsafePointerCast(cFuncLambda, nativeAbiErasedFuncTy)))
+
+        let cangjieBlockABITy = bridge.GetCangjieBlockABIDecl().getOrThrow().GetTy().getOrThrow()
+        let pointerToAbiTy = typeManager.GetPointerTy(cangjieBlockABITy)
+        let objcBlockDecl = bridge.GetObjCBlockDecl().getOrThrow()
+        let instTys = ArrayList<Ty>()
+        instTys.add(funcTy)
+        let objcBlockTy = typeManager.GetInstantiatedTy(objcBlockDecl.GetTy().getOrThrow(),
+            GenerateTypeMapping(objcBlockDecl, instTys))
+        let nativeBlockExpr = CreateCallExpr(WithinFile<RefExpr>(CreateRefExpr(creatorFunc), curFile),
+            creatorFuncArgs, Some(creatorFunc), Some(pointerToAbiTy), CallKind.CALL_DECLARED_FUNCTION)
+        let blockConstructor = bridge.GetObjCBlockConstructorFromCangjie().getOrThrow()
+        let blockConstructorRef = WithinFile<RefExpr>(CreateRefExpr(blockConstructor), curFile)
+        blockConstructorRef.instTys.add(funcTy)
+        blockConstructorRef.SetTy(typeManager.GetFunctionTy([pointerToAbiTy], objcBlockTy))
+        let constructorArgs = ArrayList<FuncArg>()
+        constructorArgs.add(CreateFuncArg(nativeBlockExpr))
+        return CreateCallExpr(blockConstructorRef, constructorArgs, Some(blockConstructor), Some(objcBlockTy),
+            CallKind.CALL_OBJECT_CREATION)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1760-1771.
+    public func CreateRemoveFromRegistryCall(registryId: Expr): CallExpr {
+        let removeFromRegistryDecl = bridge.GetRemoveFromRegistryDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(registryId))
+        let retTy = removeFromRegistryDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        return CreateCallExpr(CreateRefExpr(removeFromRegistryDecl), args, Some(removeFromRegistryDecl), Some(retTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1773-1782.
+    public func CreateObjCReleaseCall(nativeHandle: Expr): Expr {
+        let releaseDecl = bridge.GetObjCReleaseDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(nativeHandle))
+        return CreateCallExpr(CreateRefExpr(releaseDecl), args, None,
+            Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)),
+            CallKind.CALL_DECLARED_FUNCTION)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1808-1818.
+    public func CreateObjCRespondsToSelectorCall(cls: Expr, selector: Expr, file: Option<File>): Expr {
+        let respondsToSelectorDecl = bridge.GetObjCRespondsToSelectorDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(cls))
+        args.add(CreateFuncArg(selector))
+        let call = CreateCallExpr(CreateRefExpr(respondsToSelectorDecl), args, Some(respondsToSelectorDecl),
+            Some(TypeManager.GetBoolTy()), CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, file)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1820-1828.
+    public func CreateGetSuperClassExpr(objCSuper: Expr, file: Option<File>): Expr {
+        let getSuperClassDecl = bridge.GetGetSuperClassDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(objCSuper))
+        let call = CreateCallExpr(CreateRefExpr(getSuperClassDecl), args, Some(getSuperClassDecl),
+            bridge.GetNativeObjCClassTy(), CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, file)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1830-1861.
+    public func CreateWithObjCSuperScope(nativeHandle: Expr, outerDecl: ClassDecl, retTy: Ty,
+        bodyFactory: (Expr, Expr) -> ArrayList<Node>): Expr {
+        CJC_ASSERT(TypeMapper.IsObjCCompatible(retTy))
+        let withObjCSuperDecl = bridge.GetWithObjCSuperDecl().getOrThrow()
+        let unwrappedTy = typeMapper.Cj2CType(retTy)
+        let withObjCSuperRef = CreateRefExpr(withObjCSuperDecl)
+        withObjCSuperRef.instTys.add(unwrappedTy)
+        withObjCSuperRef.SetTy(typeManager.GetInstantiatedTy(withObjCSuperDecl.GetTy().getOrThrow(),
+            GenerateTypeMapping(withObjCSuperDecl, withObjCSuperRef.instTys)))
+        withObjCSuperRef.typeArguments.add(CreateType(unwrappedTy))
+
+        let receiverParam = WithinFile<FuncParam>(CreateFuncParam("receiver", None, None,
+            bridge.GetNativeObjCIdTy()), nativeHandle.curFile)
+        let receiverRef = WithinFile<RefExpr>(CreateRefExpr(receiverParam), nativeHandle.curFile)
+        let objCSuperParam = WithinFile<FuncParam>(CreateFuncParam("objCSuper", None, None,
+            bridge.GetNativeObjCSuperPtrTy()), nativeHandle.curFile)
+        let objCSuperRef = WithinFile<RefExpr>(CreateRefExpr(objCSuperParam), nativeHandle.curFile)
+        let actionParams = ArrayList<FuncParam>()
+        actionParams.add(receiverParam)
+        actionParams.add(objCSuperParam)
+
+        let objcName = nameGenerator.GetObjCDeclName(outerDecl)
+        let classNameExpr = CreateLitConstExpr(LitConstKind.STRING, objcName,
+            GetStringDecl(importManager).GetTy().getOrThrow())
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(nativeHandle))
+        args.add(CreateFuncArg(classNameExpr))
+        args.add(CreateFuncArg(WrapReturningLambdaExpr(typeManager,
+            bodyFactory(receiverRef, objCSuperRef), lambdaParams: actionParams)))
+        let realRetTy = (withObjCSuperRef.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+        return CreateCallExpr(withObjCSuperRef, args, Some(withObjCSuperDecl), Some(realRetTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1949-1956.
+    public func CreateRegisterNameCall(selectorExpr: Expr): CallExpr {
+        let registerNameDecl = bridge.GetRegisterNameDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(selectorExpr))
+        return CreateCall(Some(registerNameDecl), selectorExpr.curFile, args: args).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1958-1965.
+    public func CreateRegisterNameCall(selector: String, curFile: Option<File>): CallExpr {
+        let selectorLiteral = CreateLitConstExpr(LitConstKind.STRING, selector,
+            GetStringDecl(importManager).GetTy().getOrThrow())
+        selectorLiteral.curFile = curFile
+        return CreateRegisterNameCall(selectorLiteral)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1967-1974.
+    public func CreateAllocCall(className: Expr): CallExpr {
+        let allocDecl = bridge.GetAllocDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(className))
+        return CreateCall(Some(allocDecl), className.curFile, args: args).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1976-1982.
+    public func CreateAllocCall(decl: Decl, curFile: Option<File>): CallExpr {
+        let objcName = nameGenerator.GetObjCDeclName(decl)
+        let classNameExpr = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.STRING, objcName,
+            GetStringDecl(importManager).GetTy().getOrThrow()), curFile)
+        return CreateAllocCall(classNameExpr)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1863-1890.
+    public func CreateObjCMsgSendCall(ty: FuncTy, funcType: FuncType,
+        funcArgs: ArrayList<Expr>): CallExpr {
+        let msgSendDecl = bridge.GetObjCMsgSendDecl().getOrThrow()
+        let msgSendRetTy = msgSendDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        let msgSendExpr = CreateCallExpr(CreateRefExpr(msgSendDecl), ArrayList<FuncArg>(), None,
+            Some(msgSendRetTy), CallKind.CALL_INVALID)
+        let retTy = funcType.retType.getOrThrow().GetTy().getOrThrow()
+
+        let cFuncDecl = importManager.GetCoreDecl<BuiltInDecl>(CFUNC_NAME).getOrThrow()
+        let cFuncRefExpr = CreateRefExpr(cFuncDecl)
+        cFuncRefExpr.SetTy(ty)
+        cFuncRefExpr.typeArguments.add(funcType)
+        let cFuncArgs = ArrayList<FuncArg>()
+        cFuncArgs.add(CreateFuncArg(msgSendExpr))
+        let cFuncCallExpr = CreateCallExpr(cFuncRefExpr, cFuncArgs, None, Some(ty),
+            CallKind.CALL_FUNCTION_PTR)
+
+        let msgSendCallArgs = ArrayList<FuncArg>()
+        for (argExpr in funcArgs) {
+            msgSendCallArgs.add(CreateFuncArg(argExpr))
+        }
+        return CreateCallExpr(cFuncCallExpr, msgSendCallArgs, None, Some(retTy),
+            CallKind.CALL_FUNCTION_PTR)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1892-1912.
+    public func CreateObjCMsgSendCall(nativeHandle: Expr, selector: String, retTy: Ty,
+        args: ArrayList<Expr>): CallExpr {
+        let selectorCall = CreateRegisterNameCall(selector, nativeHandle.curFile)
+        let funcType = FuncType()
+        funcType.retType = CreateType(retTy)
+        args.add(selectorCall, at: 0)
+        args.add(nativeHandle, at: 0)
+        let paramTys = ArrayList<Ty>()
+        for (param in args) {
+            let paramTy = param.GetTy().getOrThrow()
+            funcType.paramTypes.add(CreateType(paramTy))
+            paramTys.add(paramTy)
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let funcTy = typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
+        funcType.SetTy(funcTy)
+        return CreateObjCMsgSendCall(funcTy, funcType, args)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1984-1990.
+    public func CreateMethodCallViaMsgSend(fd: FuncDecl, nativeHandle: Expr,
+        rawArgs: ArrayList<Expr>): Expr {
+        let objcName = nameGenerator.GetObjCDeclName(fd)
+        let funcTy = (fd.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        return CreateObjCMsgSendCall(nativeHandle, objcName, typeMapper.Cj2CType(funcTy.retTy), rawArgs)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1992-2009.
+    public func CreateMethodCallViaMsgSend(fd: FuncDecl, handle: Expr): Expr {
+        CJC_NULLPTR_CHECK(fd.outerDecl)
+        CJC_ASSERT(TypeMapper.IsObjCCompatible(fd.outerDecl.getOrThrow().GetTy().getOrThrow()))
+        CJC_NULLPTR_CHECK(fd.funcBody)
+        CJC_ASSERT(!fd.funcBody.getOrThrow().paramLists.isEmpty())
+        let curFile = handle.curFile
+        let params = fd.funcBody.getOrThrow().paramLists[0].params
+        let args = ArrayList<Expr>()
+        for (param in params) {
+            args.add(UnwrapEntity(WithinFile<RefExpr>(CreateRefExpr(param), curFile)))
+        }
+        return CreateMethodCallViaMsgSend(fd, handle, args)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2011-2024.
+    public func CreateAllocInitCall(fd: FuncDecl): Expr {
+        CJC_ASSERT(fd.TestAttr(Attribute.CONSTRUCTOR) || IsStaticInitMethod(fd))
+        CJC_NULLPTR_CHECK(fd.outerDecl)
+        CJC_ASSERT(fd.outerDecl.getOrThrow().astKind == ASTKind.CLASS_DECL)
+        let mirror = (fd.outerDecl.getOrThrow() as ClassDecl).getOrThrow()
+        let allocCall = CreateAllocCall(mirror, mirror.curFile)
+        return CreateMethodCallViaMsgSend(fd, allocCall)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2026-2030.
+    public func CreatePropGetterCallViaMsgSend(pd: PropDecl, nativeHandle: Expr): Expr {
+        let objcName = nameGenerator.GetObjCGetterName(pd)
+        return CreateObjCMsgSendCall(nativeHandle, objcName, typeMapper.Cj2CType(pd.GetTy().getOrThrow()),
+            ArrayList<Expr>())
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2032-2037.
+    public func CreatePropSetterCallViaMsgSend(pd: PropDecl, nativeHandle: Expr, arg: Expr): Expr {
+        let objcName = nameGenerator.GetObjCSetterName(pd)
+        let args = ArrayList<Expr>()
+        args.add(arg)
+        return CreateObjCMsgSendCall(nativeHandle, objcName, typeMapper.Cj2CType(pd.GetTy().getOrThrow()), args)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2039-2072.
+    public func CreateFuncCallViaOpaquePointer(pointer: Expr, retTy: Ty, args: ArrayList<Expr>): Expr {
+        let argTys = ArrayList<Ty>()
+        for (arg in args) {
+            argTys.add(arg.GetTy().getOrThrow())
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let funcTy = typeManager.GetFunctionTy(argTys.toArray(), retTy, cfg: cfg)
+        let cFuncDecl = importManager.GetCoreDecl<BuiltInDecl>(CFUNC_NAME).getOrThrow()
+        let cFuncRefExpr = CreateRefExpr(cFuncDecl)
+        cFuncRefExpr.SetTy(funcTy)
+        cFuncRefExpr.instTys.add(funcTy)
+        let cFuncArgs = ArrayList<FuncArg>()
+        cFuncArgs.add(CreateFuncArg(pointer))
+        let cFuncCallExpr = CreateCallExpr(cFuncRefExpr, cFuncArgs, None, Some(funcTy),
+            CallKind.CALL_FUNCTION_PTR)
+        let actualArgs = ArrayList<FuncArg>()
+        for (arg in args) {
+            actualArgs.add(CreateFuncArg(arg))
+        }
+        return CreateCallExpr(cFuncCallExpr, actualArgs, None, Some(retTy), CallKind.CALL_FUNCTION_PTR)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2074-2097.
+    public func CreateAutoreleasePoolScope(ty: Ty, actions: ArrayList<Node>): Expr {
+        CJC_ASSERT(TypeMapper.IsObjCCompatible(ty))
+        CJC_ASSERT(!actions.isEmpty())
+        let autoreleasePoolDecl: FuncDecl
+        let autoreleasePoolRef: RefExpr
+        if (TypeMapper.IsObjCObjectType(ty) || TypeMapper.IsObjCBlock(ty)) {
+            autoreleasePoolDecl = bridge.GetWithAutoreleasePoolObjDecl().getOrThrow()
+            autoreleasePoolRef = CreateRefExpr(autoreleasePoolDecl)
+        } else {
+            autoreleasePoolDecl = bridge.GetWithAutoreleasePoolDecl().getOrThrow()
+            let unwrappedTy = typeMapper.Cj2CType(ty)
+            autoreleasePoolRef = CreateRefExpr(autoreleasePoolDecl)
+            autoreleasePoolRef.instTys.add(unwrappedTy)
+            autoreleasePoolRef.SetTy(typeManager.GetInstantiatedTy(autoreleasePoolDecl.GetTy().getOrThrow(),
+                GenerateTypeMapping(autoreleasePoolDecl, autoreleasePoolRef.instTys)))
+            autoreleasePoolRef.typeArguments.add(CreateType(unwrappedTy))
+        }
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(WrapReturningLambdaExpr(typeManager, actions)))
+        let retTy = (autoreleasePoolRef.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+        return CreateCallExpr(autoreleasePoolRef, args, Some(autoreleasePoolDecl), Some(retTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2099-2126.
+    public func CreateGetInstanceVariableCall(field: PropDecl, nativeHandle: Expr): CallExpr {
+        let getInstanceVariableDecl: FuncDecl
+        let getInstanceVariableRef: RefExpr
+        let curFile = nativeHandle.curFile
+        if (TypeMapper.IsObjCObjectType(field.GetTy().getOrThrow())) {
+            getInstanceVariableDecl = bridge.GetGetInstanceVariableObjDecl().getOrThrow()
+            getInstanceVariableRef = CreateRefExpr(getInstanceVariableDecl)
+        } else {
+            getInstanceVariableDecl = bridge.GetGetInstanceVariableDecl().getOrThrow()
+            getInstanceVariableRef = CreateRefExpr(getInstanceVariableDecl)
+            getInstanceVariableRef.instTys.add(typeMapper.Cj2CType(field.GetTy().getOrThrow()))
+            getInstanceVariableRef.SetTy(typeManager.GetInstantiatedTy(
+                getInstanceVariableDecl.GetTy().getOrThrow(),
+                GenerateTypeMapping(getInstanceVariableDecl, getInstanceVariableRef.instTys)))
+        }
+        let objcName = nameGenerator.GetObjCDeclName(field)
+        let nameExpr = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.STRING, objcName,
+            GetStringDecl(importManager).GetTy().getOrThrow()), curFile)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(nativeHandle))
+        args.add(CreateFuncArg(nameExpr))
+        let retTy = (getInstanceVariableRef.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+        let call = CreateCallExpr(getInstanceVariableRef, args, Some(getInstanceVariableDecl), Some(retTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2128-2155.
+    public func CreateSetInstanceVariableCall(field: PropDecl, nativeHandle: Expr, value: Expr): CallExpr {
+        let setInstanceVariableDecl: FuncDecl
+        let setInstanceVariableRef: RefExpr
+        let curFile = nativeHandle.curFile
+        if (TypeMapper.IsObjCObjectType(field.GetTy().getOrThrow())) {
+            setInstanceVariableDecl = bridge.GetSetInstanceVariableObjDecl().getOrThrow()
+            setInstanceVariableRef = CreateRefExpr(setInstanceVariableDecl)
+        } else {
+            setInstanceVariableDecl = bridge.GetSetInstanceVariableDecl().getOrThrow()
+            setInstanceVariableRef = CreateRefExpr(setInstanceVariableDecl)
+            setInstanceVariableRef.instTys.add(typeMapper.Cj2CType(field.GetTy().getOrThrow()))
+            setInstanceVariableRef.SetTy(typeManager.GetInstantiatedTy(
+                setInstanceVariableDecl.GetTy().getOrThrow(),
+                GenerateTypeMapping(setInstanceVariableDecl, setInstanceVariableRef.instTys)))
+        }
+        let objcName = nameGenerator.GetObjCDeclName(field)
+        let nameExpr = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.STRING, objcName,
+            GetStringDecl(importManager).GetTy().getOrThrow()), curFile)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(nativeHandle))
+        args.add(CreateFuncArg(nameExpr))
+        args.add(CreateFuncArg(value))
+        let call = CreateCallExpr(setInstanceVariableRef, args, Some(setInstanceVariableDecl),
+            Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)), CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2171-2176.
+    public func SetDesugarExpr(original: Expr, desugared: Expr): Unit {
+        original.desugarExpr = desugared
+        original.desugarExpr.getOrThrow().sourceExpr = original
+        CopyBasicInfo(original, original.desugarExpr.getOrThrow())
+        AddCurFile(original.desugarExpr.getOrThrow(), file: original.curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2178-2193.
+    public func CreateFinalizer(target: ClassDecl): FuncDecl {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let funcBody = CreateFuncBody(ArrayList<FuncParamList>(), None,
+            CreateBlock(ArrayList<Node>(), unitTy), unitTy)
+        funcBody.paramLists.add(FuncParamList())
+        let nativeHandleExpr = CreateNativeHandleFieldExpr(target)
+        funcBody.body.getOrThrow().body.add(CreateObjCReleaseCall(nativeHandleExpr))
+        let funcDecl = CreateFuncDecl(FINALIZER_IDENT, funcBody,
+            typeManager.GetFunctionTy([], unitTy))
+        PutDeclToClassLikeBody(funcDecl, target)
+        funcDecl.EnableAttr(Attribute.PRIVATE)
+        funcDecl.EnableAttr(Attribute.FINALIZER)
+        funcDecl.linkage = Linkage.EXTERNAL
+        funcDecl.funcBody.getOrThrow().funcDecl = funcDecl
+        return funcDecl
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2195-2205.
+    public func CreateHasInitedField(target: ClassDecl): VarDecl {
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let initializer = CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy)
+        let result = CreateVarDecl(HAS_INITED_IDENT, initializer, None)
+        result.isVar = true
+        PutDeclToClassLikeBody(result, target)
+        result.EnableAttr(Attribute.PRIVATE)
+        result.EnableAttr(Attribute.NO_REFLECT_INFO)
+        result.EnableAttr(Attribute.HAS_INITED_FIELD)
+        return result
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2207-2222.
+    public func CreateNativeHandleGetterDecl(target: ClassLikeDecl): FuncDecl {
+        let nativeObjCIdTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let getterParamList = CreateFuncParamList(ArrayList<FuncParam>())
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(getterParamList)
+        let getterFuncBody = CreateFuncBody(paramLists, CreateType(nativeObjCIdTy),
+            CreateBlock(ArrayList<Node>(), nativeObjCIdTy), nativeObjCIdTy)
+        let getterDecl = CreateFuncDecl(NATIVE_HANDLE_GETTER_IDENT, getterFuncBody,
+            typeManager.GetFunctionTy([], nativeObjCIdTy))
+        getterDecl.funcBody.getOrThrow().funcDecl = getterDecl
+        getterDecl.funcBody.getOrThrow().parentClassLike = target
+        getterDecl.EnableAttr(Attribute.PUBLIC)
+        getterDecl.EnableAttr(Attribute.INITIALIZED)
+        getterDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
+        PutDeclToClassLikeBody(getterDecl, target)
+        return getterDecl
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2224-2229.
+    public func CreateNativeHandleFieldExpr(target: ClassDecl): Expr {
+        let nativeHandleDecl = GetNativeVarHandle(target).getOrThrow()
+        let thisRef = CreateThisRef(target, target.GetTy().getOrThrow(), target.curFile.getOrThrow())
+        return CreateMemberAccess(thisRef, nativeHandleDecl)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2231-2237.
+    public func CreateMethodCallViaMsgSendSuper(fd: FuncDecl, receiver: Expr, objCSuper: Expr,
+        rawArgs: ArrayList<Expr>): Expr {
+        let objcName = nameGenerator.GetObjCDeclName(fd)
+        let funcTy = (fd.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        return CreateObjCMsgSendSuperCall(receiver, objCSuper, objcName,
+            typeMapper.Cj2CType(funcTy.retTy), rawArgs)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2239-2245.
+    public func CreatePropGetterCallViaMsgSendSuper(pd: PropDecl, receiver: Expr, objCSuper: Expr): Expr {
+        let objcName = nameGenerator.GetObjCDeclName(pd)
+        return CreateObjCMsgSendSuperCall(receiver, objCSuper, objcName,
+            typeMapper.Cj2CType(pd.GetTy().getOrThrow()), ArrayList<Expr>())
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2247-2258.
+    public func CreatePropSetterCallViaMsgSendSuper(pd: PropDecl, receiver: Expr, objCSuper: Expr,
+        value: Expr): Expr {
+        var objcName = nameGenerator.GetObjCDeclName(pd)
+        objcName = "set" + objcName[0..1].toAsciiUpper() + objcName[1..] + ":"
+        let args = ArrayList<Expr>()
+        args.add(value)
+        return CreateObjCMsgSendSuperCall(receiver, objCSuper, objcName,
+            typeMapper.Cj2CType(pd.GetTy().getOrThrow()), args)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2260-2280.
+    public func CreateObjCMsgSendSuperCall(receiver: Expr, objCSuper: Expr, selector: String,
+        retTy: Ty, rawArgs: ArrayList<Expr>): CallExpr {
+        let selectorCall = CreateRegisterNameCall(selector, receiver.curFile)
+        let funcType = FuncType()
+        funcType.retType = CreateType(retTy)
+        rawArgs.add((ASTCloner.Clone(selectorCall) as Expr).getOrThrow(), at: 0)
+        rawArgs.add(receiver, at: 0)
+        let paramTys = ArrayList<Ty>()
+        for (param in rawArgs) {
+            let paramTy = param.GetTy().getOrThrow()
+            funcType.paramTypes.add(CreateType(paramTy))
+            paramTys.add(paramTy)
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let funcTy = typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
+        funcType.SetTy(funcTy)
+        return CreateObjCMsgSendSuperCall(objCSuper, selectorCall, funcTy, funcType, rawArgs)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2282-2308.
+    public func CreateObjCMsgSendSuperCall(objCSuper: Expr, selector: Expr, ty: FuncTy,
+        funcType: FuncType, funcArgs: ArrayList<Expr>): CallExpr {
+        let msgSendSuperDecl = bridge.GetObjCMsgSendSuperDecl().getOrThrow()
+        let msgSendSuperArgs = ArrayList<FuncArg>()
+        msgSendSuperArgs.add(CreateFuncArg(objCSuper))
+        msgSendSuperArgs.add(CreateFuncArg(selector))
+        let msgSendSuperRetTy = msgSendSuperDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        let msgSendSuperExpr = CreateCallExpr(CreateRefExpr(msgSendSuperDecl), msgSendSuperArgs, None,
+            Some(msgSendSuperRetTy), CallKind.CALL_DECLARED_FUNCTION)
+        let retTy = funcType.retType.getOrThrow().GetTy().getOrThrow()
+        let cFuncDecl = importManager.GetCoreDecl<BuiltInDecl>(CFUNC_NAME).getOrThrow()
+        let cFuncRefExpr = CreateRefExpr(cFuncDecl)
+        cFuncRefExpr.SetTy(ty)
+        cFuncRefExpr.typeArguments.add(funcType)
+        let cFuncArgs = ArrayList<FuncArg>()
+        cFuncArgs.add(CreateFuncArg(msgSendSuperExpr))
+        let cFuncCallExpr = CreateCallExpr(cFuncRefExpr, cFuncArgs, None, Some(ty),
+            CallKind.CALL_FUNCTION_PTR)
+        let msgSendSuperCallArgs = ArrayList<FuncArg>()
+        for (argExpr in funcArgs) {
+            msgSendSuperCallArgs.add(CreateFuncArg(argExpr))
+        }
+        return CreateCallExpr(cFuncCallExpr, msgSendSuperCallArgs, None, Some(retTy),
+            CallKind.CALL_FUNCTION_PTR)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2310-2319 incorrectly assigns Bool to objectGetClass.
+    // Its consumer passes the result as cls to respondsToSelector (DesugarMirrors.cpp:154-156), so use the
+    // called declaration's return type as the single source of truth (UPSTREAM_BUGS.md UB-007).
+    public func CreateObjectGetClassCall(id: Expr, curFile: Option<File>): Expr {
+        let objectGetClassDecl = bridge.GetObjectGetClassDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(id))
+        let retTy = (objectGetClassDecl.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+        let call = CreateCallExpr(CreateRefExpr(objectGetClassDecl), args, Some(objectGetClassDecl), Some(retTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2322-2339.
+    public func CreateConvertToNSStringCall(id: Expr, classDecl: ClassDecl, curFile: Option<File>): Expr {
+        let convertDecl = bridge.GetConvertToNSStringDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(id))
+        let nativeObjCIdTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let convertCallExpr = CreateCallExpr(CreateRefExpr(convertDecl), args, Some(convertDecl),
+            Some(nativeObjCIdTy), CallKind.CALL_DECLARED_FUNCTION)
+        let ctorArgs = ArrayList<FuncArg>()
+        ctorArgs.add(CreateFuncArg(convertCallExpr))
+        let realTarget = GetGeneratedBaseCtor(classDecl).getOrThrow()
+        return CreateThisCall(classDecl, realTarget, realTarget.GetTy().getOrThrow(),
+            curFile.getOrThrow(), ctorArgs)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2341-2345.
+    public func CreateDescriptionAsStringCall(id: Expr): Expr {
+        let convertDecl = bridge.GetDescriptionAsStringDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(id))
+        return CreateCall(Some(convertDecl), convertDecl.curFile, args: args).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1567-1585.
+    public func PutDeclToClassLikeBody(decl: Decl, target: ClassLikeDecl): Unit {
+        if (target.astKind == ASTKind.INTERFACE_DECL) {
+            PutDeclToInterfaceBody(decl, (target as InterfaceDecl).getOrThrow())
+        } else if (target.astKind == ASTKind.CLASS_DECL) {
+            PutDeclToClassBody(decl, (target as ClassDecl).getOrThrow())
+        } else {
+            CJC_ABORT()
+        }
+        decl.outerDecl = target
+        decl.curFile = target.curFile
+        decl.fullPackageName = target.fullPackageName
+        decl.EnableAttr(Attribute.IN_CLASSLIKE)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1587-1591.
+    public func PutDeclToClassBody(decl: Decl, target: ClassDecl): Unit {
+        decl.begin = target.body.getOrThrow().end
+        decl.end = target.body.getOrThrow().end
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1593-1597.
+    public func PutDeclToInterfaceBody(decl: Decl, target: InterfaceDecl): Unit {
+        decl.begin = target.body.getOrThrow().end
+        decl.end = target.body.getOrThrow().end
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1599-1605.
+    public func PutDeclToFile(decl: Decl, target: File): Unit {
+        decl.curFile = target
+        decl.begin = target.end
+        decl.end = target.end
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2157-2169.
@@ -263,6 +1291,642 @@ public class ASTFactory {
         let result = WithinFile<CallExpr>(resultCall, file)
         result.SetTy(TypeManager.GetBoolTy())
         return result
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:543-557.
+    public func CreateNativeHandleField(target: ClassDecl): VarDecl {
+        let nativeHandleTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let nativeHandleField = CreateVarDecl(NATIVE_HANDLE_IDENT, None, CreateType(nativeHandleTy))
+        nativeHandleField.SetTy(nativeHandleTy)
+        nativeHandleField.EnableAttr(Attribute.PUBLIC)
+        nativeHandleField.EnableAttr(Attribute.INITIALIZED)
+        PutDeclToClassLikeBody(nativeHandleField, target)
+        return nativeHandleField
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:559-581.
+    public func CreateGetObjCClassDecl(target: ClassLikeDecl): FuncDecl {
+        let nativeObjCClassTy = bridge.GetNativeObjCClassTy().getOrThrow()
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(FuncParamList())
+        let wrapperBody = CreateFuncBody(paramLists, CreateType(nativeObjCClassTy),
+            CreateBlock(ArrayList<Node>(), nativeObjCClassTy), nativeObjCClassTy)
+        let classDecl = CreateFuncDecl(GET_OBJ_C_CLASS_IDENT, wrapperBody,
+            typeManager.GetFunctionTy([], nativeObjCClassTy))
+        classDecl.moduleName = target.moduleName
+        classDecl.fullPackageName = target.fullPackageName
+        classDecl.EnableAttr(Attribute.PUBLIC)
+        classDecl.EnableAttr(Attribute.STATIC)
+        classDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
+        classDecl.funcBody.getOrThrow().funcDecl = classDecl
+        classDecl.linkage = Linkage.EXTERNAL
+        classDecl.funcBody.getOrThrow().parentClassLike = target
+        PutDeclToClassLikeBody(classDecl, target)
+        return classDecl
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:583-590.
+    public func CreateGetObjCClass(target: ClassLikeDecl): FuncDecl {
+        let targetTy = (target.GetTy().getOrThrow() as ClassTy).getOrThrow()
+        let getClassCall = CreateGetClassCall(targetTy, target.curFile)
+        let classDecl = CreateGetObjCClassDecl(target)
+        let nodes = ArrayList<Node>()
+        nodes.add(getClassCall)
+        classDecl.funcBody.getOrThrow().body = CreateBlock(nodes)
+        return classDecl
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:592-697.
+    public func CreateInitCjObject(target: Decl, ctor: FuncDecl,
+        generateForOneWayMapping!: Bool = false,
+        genericConfig!: Option<GenericConfigInfo> = None): FuncDecl {
+        let curFile = ctor.curFile
+        let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+        let actualTyArgMap = HashMap<String, Ty>()
+        let funcTyParams = ArrayList<Ty>()
+        let actualPrimitiveTypes = ArrayList<Type>()
+        if (let Some(config) <- genericConfig) {
+            if (!config.instTypes.isEmpty()) {
+                GetArgsAndRetGenericActualTyVector(config, ctor, actualTyArgMap, funcTyParams,
+                    actualPrimitiveTypes, typeManager)
+            }
+        }
+
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        let ctorParams = ctor.funcBody.getOrThrow().paramLists[0].params
+        for (param in ctorParams) {
+            var finalTy = param.GetTy().getOrThrow()
+            if (let Some(actualTy) <- actualTyArgMap.get(finalTy.name)) {
+                finalTy = actualTy
+            }
+            wrapperParams.add(CreateFuncParam(param.identifier.Val(), None, None,
+                typeMapper.Cj2CType(finalTy)))
+        }
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) {
+            wrapperParamTys.add(param.GetTy().getOrThrow())
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), registryIdTy, cfg: cfg)
+        let wrapperParamLists = ArrayList<FuncParamList>()
+        wrapperParamLists.add(wrapperParamList)
+
+        let ctorCallArgs = ArrayList<FuncArg>()
+        var argIndex: Int64 = 0
+        if (!generateForOneWayMapping) {
+            CJC_ASSERT(!wrapperParams.isEmpty())
+            ctorCallArgs.add(CreateFuncArg(CreateRefExpr(wrapperParams[0])))
+            argIndex = 1
+        }
+        while (argIndex < ctorParams.size) {
+            var finalTy = ctorParams[argIndex].GetTy().getOrThrow()
+            if (let Some(actualTy) <- actualTyArgMap.get(finalTy.name)) {
+                finalTy = actualTy
+            }
+            let paramRef = WithinFile<RefExpr>(CreateRefExpr(wrapperParams[argIndex]), curFile)
+            ctorCallArgs.add(CreateFuncArg(WrapEntity(paramRef, finalTy)))
+            argIndex++
+        }
+
+        let ctorCall: CallExpr
+        if (target.GetTy().getOrThrow().HasGeneric()) {
+            let instantiationRefExpr = CreateRefExpr(ctor)
+            let instantTy = GetInstantyForGenericTy(target, actualTyArgMap, typeManager).getOrThrow()
+            let retTy = (ctor.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+            let instantiatedFuncTy = if (retTy.HasGeneric()) {
+                typeManager.GetFunctionTy(funcTyParams.toArray(), instantTy, cfg: cfg)
+            } else {
+                typeManager.GetFunctionTy(funcTyParams.toArray(), retTy, cfg: cfg)
+            }
+            for (actualType in actualPrimitiveTypes) {
+                instantiationRefExpr.typeArguments.add(actualType)
+            }
+            instantiationRefExpr.SetTy(instantiatedFuncTy)
+            ctorCall = CreateCallExpr(instantiationRefExpr, ctorCallArgs, Some(ctor), Some(instantTy),
+                CallKind.CALL_OBJECT_CREATION)
+        } else {
+            ctorCall = CreateCallExpr(CreateRefExpr(ctor), ctorCallArgs, Some(ctor), target.GetTy(),
+                CallKind.CALL_OBJECT_CREATION)
+        }
+        let putToRegistryCall = CreatePutToRegistryCall(ctorCall)
+        let bodyNodes = ArrayList<Node>()
+        bodyNodes.add(putToRegistryCall)
+        let wrapperBody = CreateFuncBody(wrapperParamLists, CreateType(registryIdTy),
+            CreateBlock(bodyNodes, registryIdTy), wrapperTy)
+        let wrapperName = if (let Some(config) <- genericConfig) {
+            nameGenerator.GenerateInitCjObjectName(ctor, genericActualName: config.declInstName)
+        } else {
+            nameGenerator.GenerateInitCjObjectName(ctor)
+        }
+        let wrapper = CreateFuncDecl(wrapperName, wrapperBody, wrapperTy)
+        wrapper.moduleName = ctor.moduleName
+        wrapper.fullPackageName = ctor.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, ctor.curFile.getOrThrow())
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:699-748.
+    public func CreateInitCjObjectReturningObjCSelf(target: Decl, ctor: FuncDecl): FuncDecl {
+        let curFile = ctor.curFile
+        let nativeObjCIdTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        let ctorParams = ctor.funcBody.getOrThrow().paramLists[0].params
+        for (param in ctorParams) {
+            wrapperParams.add(CreateFuncParam(param.identifier.Val(), None, None,
+                typeMapper.Cj2CType(param.GetTy().getOrThrow())))
+        }
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) {
+            wrapperParamTys.add(param.GetTy().getOrThrow())
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), nativeObjCIdTy, cfg: cfg)
+        let wrapperParamLists = ArrayList<FuncParamList>()
+        wrapperParamLists.add(wrapperParamList)
+
+        let ctorCallArgs = ArrayList<FuncArg>()
+        ctorCallArgs.add(CreateFuncArg(CreateRefExpr(wrapperParams[0])))
+        var argIndex: Int64 = 1
+        while (argIndex < ctorParams.size) {
+            let paramRef = WithinFile<RefExpr>(CreateRefExpr(wrapperParams[argIndex]), curFile)
+            ctorCallArgs.add(CreateFuncArg(WrapEntity(paramRef, ctorParams[argIndex].GetTy().getOrThrow())))
+            argIndex++
+        }
+        let ctorCall = WithinFile<CallExpr>(CreateCallExpr(CreateRefExpr(ctor), ctorCallArgs, Some(ctor),
+            target.GetTy(), CallKind.CALL_OBJECT_CREATION), curFile)
+        let bodyNodes = ArrayList<Node>()
+        bodyNodes.add(UnwrapEntity(ctorCall))
+        let wrapperBody = CreateFuncBody(wrapperParamLists, None,
+            CreateBlock(bodyNodes, nativeObjCIdTy), wrapperTy)
+        let wrapper = CreateFuncDecl(nameGenerator.GenerateInitCjObjectName(ctor), wrapperBody, wrapperTy)
+        wrapper.moduleName = ctor.moduleName
+        wrapper.fullPackageName = ctor.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, ctor.curFile.getOrThrow())
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:750-779.
+    public func CreateInitCjObjectForEnumNoParams(target: EnumDecl, ctor: VarDecl): FuncDecl {
+        let curFile = ctor.curFile.getOrThrow()
+        let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+        let wrapperParamLists = ArrayList<FuncParamList>()
+        wrapperParamLists.add(FuncParamList())
+        let enumRef = WithinFile<RefExpr>(CreateRefExpr(target), curFile)
+        let ctorCall = CreateMemberAccess(enumRef, ctor.identifier.Val())
+        let putToRegistryCall = CreatePutToRegistryCall(ctorCall)
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy([], registryIdTy, cfg: cfg)
+        let bodyNodes = ArrayList<Node>()
+        bodyNodes.add(putToRegistryCall)
+        let wrapperBody = CreateFuncBody(wrapperParamLists, CreateType(registryIdTy),
+            CreateBlock(bodyNodes, registryIdTy), wrapperTy)
+        let wrapper = CreateFuncDecl(nameGenerator.GenerateInitCjObjectName(ctor), wrapperBody, wrapperTy)
+        wrapper.moduleName = ctor.moduleName
+        wrapper.fullPackageName = ctor.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, curFile)
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:781-832.
+    public func CreateDeleteCjObject(target: Decl, generateForOneWayMapping: Bool,
+        genericConfig!: Option<GenericConfigInfo> = None): FuncDecl {
+        let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+        let param = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let paramRef = CreateRefExpr(param)
+        let savedParamRef = paramRef
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let funcTy = typeManager.GetFunctionTy([param.GetTy().getOrThrow()], unitTy, cfg: cfg)
+        let removeFromRegistryCall = CreateRemoveFromRegistryCall(paramRef)
+        let funcNodes = ArrayList<Node>()
+        if (!generateForOneWayMapping) {
+            let inheritableTarget = (target as InheritableDecl).getOrThrow()
+            let clonedParamRef = (ASTCloner.Clone(savedParamRef) as Expr).getOrThrow()
+            let getFromRegistryCall = CreateGetFromRegistryByIdCall(clonedParamRef,
+                CreateRefType(inheritableTarget))
+            let objTmpVarDecl = CreateTmpVarDecl(CreateRefType(inheritableTarget), getFromRegistryCall)
+            let nativeHandleExpr = CreateMemberAccess(CreateRefExpr(objTmpVarDecl), NATIVE_HANDLE_IDENT)
+            let releaseCall = CreateObjCReleaseCall(nativeHandleExpr)
+            funcNodes.add(objTmpVarDecl)
+            funcNodes.add(removeFromRegistryCall)
+            funcNodes.add(releaseCall)
+        } else {
+            funcNodes.add(removeFromRegistryCall)
+        }
+        let funcParams = ArrayList<FuncParam>()
+        funcParams.add(param)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(CreateFuncParamList(funcParams))
+        let funcBody = CreateFuncBody(paramLists, CreateUnitType(target.curFile),
+            CreateBlock(funcNodes, unitTy), funcTy)
+        let funcName = if (let Some(config) <- genericConfig) {
+            nameGenerator.GenerateDeleteCjObjectName(target, genericActualName: config.declInstName)
+        } else {
+            nameGenerator.GenerateDeleteCjObjectName(target)
+        }
+        let result = CreateFuncDecl(funcName, funcBody, funcTy)
+        result.moduleName = target.moduleName
+        result.fullPackageName = target.fullPackageName
+        result.EnableAttr(Attribute.C)
+        result.EnableAttr(Attribute.GLOBAL)
+        result.EnableAttr(Attribute.PUBLIC)
+        result.EnableAttr(Attribute.NO_MANGLE)
+        result.funcBody.getOrThrow().funcDecl = result
+        PutDeclToFile(result, target.curFile.getOrThrow())
+        return result
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:834-998.
+    public func CreateMethodWrapper(method: FuncDecl,
+        genericConfig!: Option<GenericConfigInfo> = None): FuncDecl {
+        let outerDecl = (method.outerDecl.getOrThrow() as InheritableDecl).getOrThrow()
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        let methodRetType = method.funcBody.getOrThrow().retType.getOrThrow()
+        let actualTyArgMap = HashMap<String, Ty>()
+        let funcTyParams = ArrayList<Ty>()
+        let actualPrimitiveTypes = ArrayList<Type>()
+        if (let Some(config) <- genericConfig) {
+            if (!config.instTypes.isEmpty()) {
+                GetArgsAndRetGenericActualTyVector(config, method, actualTyArgMap, funcTyParams,
+                    actualPrimitiveTypes, typeManager)
+            }
+        }
+        let instantTy = GetInstantyForGenericTy(method.outerDecl.getOrThrow(), actualTyArgMap, typeManager)
+        let methodRetTy = methodRetType.GetTy().getOrThrow()
+        let retActualTy = if (methodRetTy.IsGeneric()) {
+            actualTyArgMap.get(methodRetTy.name).getOrThrow()
+        } else { methodRetTy }
+        var objTmpVarDecl: Option<VarDecl> = None
+        let methodExpr: MemberAccess
+        if (method.TestAttr(Attribute.STATIC)) {
+            let staticRefExpr = CreateRefExpr(method.outerDecl.getOrThrow())
+            if (method.outerDecl.getOrThrow().GetTy().getOrThrow().HasGeneric()) {
+                for (actualType in actualPrimitiveTypes) { staticRefExpr.typeArguments.add(actualType) }
+                staticRefExpr.SetTy(instantTy.getOrThrow())
+            }
+            methodExpr = CreateMemberAccess(WithinFile<RefExpr>(staticRefExpr, method.curFile), method)
+        } else {
+            let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+            let registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+            wrapperParams.add(registryIdParam)
+            let registryCall: CallExpr
+            let temp: VarDecl
+            if (outerDecl.GetTy().getOrThrow().HasGeneric()) {
+                let registryTy = CreateRefType(outerDecl, instantTy)
+                for (actualType in actualPrimitiveTypes) { registryTy.typeArguments.add(actualType) }
+                registryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam), registryTy)
+                temp = CreateTmpVarDecl(CreateType(instantTy.getOrThrow()), registryCall)
+            } else {
+                registryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam), CreateRefType(outerDecl))
+                temp = CreateTmpVarDecl(CreateRefType(outerDecl), registryCall)
+            }
+            if (method.TestAttr(Attribute.MUT)) { temp.isVar = true }
+            objTmpVarDecl = Some(temp)
+            methodExpr = CreateMemberAccess(CreateRefExpr(temp), method)
+            let memberRetTy = if (methodRetTy.IsGeneric()) { retActualTy } else { methodRetTy }
+            methodExpr.SetTy(typeManager.GetFunctionTy(funcTyParams.toArray(), memberRetTy))
+        }
+
+        let originParams = method.funcBody.getOrThrow().paramLists[0].params
+        for (param in originParams) {
+            var finalTy = param.GetTy().getOrThrow()
+            if (let Some(actualTy) <- actualTyArgMap.get(finalTy.name)) { finalTy = actualTy }
+            let convertedParamTy = typeMapper.Cj2CType(finalTy)
+            let suffix = if (TypeMapper.IsObjCCJMapping(finalTy)) { "Id" } else { "" }
+            wrapperParams.add(CreateFuncParam(param.identifier.GetRawText() + suffix,
+                CreateType(convertedParamTy), None, convertedParamTy))
+        }
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) { wrapperParamTys.add(param.GetTy().getOrThrow()) }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperRetTy = if (methodRetTy.HasGeneric()) {
+            typeMapper.Cj2CType(retActualTy)
+        } else { typeMapper.Cj2CType(methodRetTy) }
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), wrapperRetTy, cfg: cfg)
+        methodExpr.curFile = method.curFile
+        methodExpr.begin = method.GetBegin()
+        methodExpr.end = method.GetEnd()
+        let methodArgs = ArrayList<FuncArg>()
+        let firstParamIndex: Int64 = if (method.TestAttr(Attribute.STATIC)) { 0 } else { 1 }
+        var index = firstParamIndex
+        while (index < wrapperParams.size) {
+            let wrapperParam = wrapperParams[index]
+            let originParam = originParams[index - firstParamIndex]
+            var finalTy = originParam.GetTy().getOrThrow()
+            if (let Some(actualTy) <- actualTyArgMap.get(finalTy.name)) { finalTy = actualTy }
+            let wrappedParam = WrapEntity(WithinFile<RefExpr>(CreateRefExpr(wrapperParam), method.curFile), finalTy)
+            methodArgs.add(CreateFuncArg(wrappedParam, wrapperParam.identifier.Val(), finalTy))
+            index++
+        }
+        let callRetTy = if (outerDecl.GetTy().getOrThrow().HasGeneric()) { retActualTy } else { methodRetTy }
+        let methodCall = CreateCallExpr(methodExpr, methodArgs, Some(method), Some(callRetTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+        let wrapperNodes = ArrayList<Node>()
+        if (let Some(temp) <- objTmpVarDecl) { wrapperNodes.add(temp) }
+        var unwrappedMethodCall = UnwrapEntity(methodCall)
+        if (TypeMapper.IsObjCObjectType(methodCall.GetTy().getOrThrow())) {
+            unwrappedMethodCall = CreateObjCRetainCall(unwrappedMethodCall)
+        }
+        wrapperNodes.add(unwrappedMethodCall)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(wrapperParamList)
+        let wrapperBody = CreateFuncBody(paramLists, CreateType(wrapperTy.retTy),
+            CreateBlock(wrapperNodes, wrapperTy.retTy), wrapperTy)
+        var isInnerGenericProp = false
+        if ((let Some(config) <- genericConfig) && (let Some(propDecl) <- method.propDecl)) {
+            isInnerGenericProp = config.funcNames.contains(propDecl.identifier.Val())
+        }
+        let wrapperName = if (let Some(config) <- genericConfig) {
+            nameGenerator.GenerateMethodWrapperName(method, genericActualName: config.declInstName,
+                isInnerGeneric: isInnerGenericProp)
+        } else { nameGenerator.GenerateMethodWrapperName(method) }
+        let wrapper = CreateFuncDecl(wrapperName, wrapperBody, wrapperTy)
+        wrapper.moduleName = method.moduleName
+        wrapper.fullPackageName = method.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, method.curFile.getOrThrow())
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1000-1067.
+    public func CreateGetterWrapper(pd: PropDecl): FuncDecl {
+        let outerDecl = (pd.outerDecl.getOrThrow() as InheritableDecl).getOrThrow()
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        var objTmpVarDecl: Option<VarDecl> = None
+        let getter = pd.getters[0]
+        let propGetterExpr: MemberAccess
+        if (pd.TestAttr(Attribute.STATIC)) {
+            propGetterExpr = CreateMemberAccess(WithinFile<RefExpr>(CreateRefExpr(outerDecl), pd.curFile), getter)
+        } else {
+            let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+            let registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+            wrapperParams.add(registryIdParam)
+            let getFromRegistryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam),
+                CreateRefType(outerDecl))
+            let temp = CreateTmpVarDecl(CreateRefType(outerDecl), getFromRegistryCall)
+            objTmpVarDecl = Some(temp)
+            propGetterExpr = CreateMemberAccess(CreateRefExpr(temp), getter)
+        }
+        propGetterExpr.curFile = pd.curFile
+        propGetterExpr.begin = pd.GetBegin()
+        propGetterExpr.end = pd.GetEnd()
+        let propGetterCall = CreateCallExpr(propGetterExpr, ArrayList<FuncArg>(), Some(getter), pd.GetTy(),
+            CallKind.CALL_DECLARED_FUNCTION)
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) { wrapperParamTys.add(param.GetTy().getOrThrow()) }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(),
+            typeMapper.Cj2CType(pd.GetTy().getOrThrow()), cfg: cfg)
+        let wrapperNodes = ArrayList<Node>()
+        if (let Some(temp) <- objTmpVarDecl) { wrapperNodes.add(temp) }
+        var unwrappedGetterCall = UnwrapEntity(propGetterCall)
+        if (TypeMapper.IsObjCObjectType(pd.GetTy().getOrThrow())) {
+            unwrappedGetterCall = CreateObjCRetainCall(unwrappedGetterCall)
+        }
+        wrapperNodes.add(unwrappedGetterCall)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(wrapperParamList)
+        let wrapperBody = CreateFuncBody(paramLists, CreateType(wrapperTy.retTy),
+            CreateBlock(wrapperNodes, wrapperTy.retTy), wrapperTy)
+        let wrapper = CreateFuncDecl(nameGenerator.GeneratePropGetterWrapperName(pd), wrapperBody, wrapperTy)
+        wrapper.moduleName = pd.moduleName
+        wrapper.fullPackageName = pd.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, pd.curFile.getOrThrow())
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1069-1158.
+    public func CreateSetterWrapper(pd: PropDecl): FuncDecl {
+        let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let convertedPropTy = typeMapper.Cj2CType(pd.GetTy().getOrThrow())
+        let setterParam = CreateFuncParam(VALUE_IDENT, CreateType(convertedPropTy), None, convertedPropTy)
+        let outerDecl = (pd.outerDecl.getOrThrow() as InheritableDecl).getOrThrow()
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        let wrapperNodes = ArrayList<Node>()
+        let setter = pd.setters[0]
+        let originParams = setter.funcBody.getOrThrow().paramLists[0].params
+        let propSetterExpr: Expr
+        var objTmpVarDecl: Option<Decl> = None
+        if (pd.TestAttr(Attribute.STATIC)) {
+            wrapperParams.add(setterParam)
+            propSetterExpr = CreateMemberAccess(WithinFile<RefExpr>(CreateRefExpr(outerDecl), pd.curFile), setter)
+        } else {
+            let registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+            let getFromRegistryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam),
+                CreateRefType(outerDecl))
+            let temp = CreateTmpVarDecl(CreateRefType(outerDecl), getFromRegistryCall)
+            objTmpVarDecl = Some(temp)
+            wrapperParams.add(registryIdParam)
+            wrapperParams.add(setterParam)
+            propSetterExpr = CreateMemberAccess(CreateRefExpr(temp), setter)
+        }
+        propSetterExpr.curFile = pd.curFile
+        propSetterExpr.begin = pd.GetBegin()
+        propSetterExpr.end = pd.GetEnd()
+        CJC_ASSERT(wrapperParams.size <= 2)
+        let wrapperParam = wrapperParams[wrapperParams.size - 1]
+        let originParam = originParams[originParams.size - 1]
+        let wrappedParamRef = WrapEntity(CreateRefExpr(wrapperParam), originParam.GetTy().getOrThrow())
+        let setterArgs = ArrayList<FuncArg>()
+        setterArgs.add(CreateFuncArg(wrappedParamRef, wrapperParam.identifier.Val(), originParam.GetTy()))
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) { wrapperParamTys.add(param.GetTy().getOrThrow()) }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), unitTy, cfg: cfg)
+        let setterCall = CreateCallExpr(propSetterExpr, setterArgs, Some(setter), Some(unitTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+        if (let Some(temp) <- objTmpVarDecl) { wrapperNodes.add(temp) }
+        wrapperNodes.add(setterCall)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(wrapperParamList)
+        let wrapperBody = CreateFuncBody(paramLists, CreateUnitType(pd.curFile),
+            CreateBlock(wrapperNodes, wrapperTy.retTy), wrapperTy)
+        let wrapper = CreateFuncDecl(nameGenerator.GetPropSetterWrapperName(pd), wrapperBody, wrapperTy)
+        wrapper.moduleName = pd.moduleName
+        wrapper.fullPackageName = pd.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, pd.curFile.getOrThrow())
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1160-1258.
+    public func CreateGetterWrapper(field: VarDecl,
+        genericConfig!: Option<GenericConfigInfo> = None): FuncDecl {
+        let outerDecl = (field.outerDecl.getOrThrow() as InheritableDecl).getOrThrow()
+        var genericActualTy: Option<Ty> = None
+        let actualTyArgMap = HashMap<String, Ty>()
+        let actualPrimitiveTypes = ArrayList<Type>()
+        if (field.GetTy().getOrThrow().IsGeneric()) {
+            let config = genericConfig.getOrThrow()
+            genericActualTy = Some(TypeManager.GetPrimitiveTy(
+                GetActualTypeKind(GetGenericActualType(config, field.GetTy().getOrThrow().name))))
+            if (outerDecl.GetTy().getOrThrow().HasGeneric()) {
+                for (argTy in outerDecl.GetTy().getOrThrow().typeArgs) {
+                    if (argTy.IsGeneric()) {
+                        let actualRetTy = TypeManager.GetPrimitiveTy(
+                            GetActualTypeKind(GetGenericActualType(config, argTy.name)))
+                        actualTyArgMap.add(argTy.name, actualRetTy)
+                        actualPrimitiveTypes.add(GetGenericInstType(config, actualRetTy, typeManager))
+                    }
+                }
+            }
+        }
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        var objTmpVarDecl: Option<VarDecl> = None
+        let fieldExpr: MemberAccess
+        if (field.TestAttr(Attribute.STATIC)) {
+            fieldExpr = CreateMemberAccess(WithinFile<RefExpr>(CreateRefExpr(outerDecl), field.curFile), field)
+        } else {
+            let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+            let registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+            wrapperParams.add(registryIdParam)
+            if (outerDecl.GetTy().getOrThrow().HasGeneric()) {
+                let instantTy = GetInstantyForGenericTy(outerDecl, actualTyArgMap, typeManager)
+                let registryTy = CreateRefType(outerDecl, instantTy)
+                for (actualType in actualPrimitiveTypes) { registryTy.typeArguments.add(actualType) }
+                let clonedRegistryTy = (ASTCloner.Clone(registryTy) as RefType).getOrThrow()
+                let getFromRegistryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam), registryTy)
+                let temp = CreateTmpVarDecl(clonedRegistryTy, getFromRegistryCall)
+                objTmpVarDecl = Some(temp)
+                fieldExpr = CreateMemberAccess(CreateRefExpr(temp), field)
+                if (field.GetTy().getOrThrow().IsGeneric()) {
+                    fieldExpr.SetTy(genericActualTy.getOrThrow())
+                }
+            } else {
+                let getFromRegistryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam),
+                    CreateRefType(outerDecl))
+                let temp = CreateTmpVarDecl(CreateRefType(outerDecl), getFromRegistryCall)
+                objTmpVarDecl = Some(temp)
+                fieldExpr = CreateMemberAccess(CreateRefExpr(temp), field)
+            }
+        }
+        fieldExpr.curFile = field.curFile
+        fieldExpr.begin = field.GetBegin()
+        fieldExpr.end = field.GetEnd()
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) { wrapperParamTys.add(param.GetTy().getOrThrow()) }
+        let fieldObjCTy = if (field.GetTy().getOrThrow().IsGeneric()) {
+            genericActualTy.getOrThrow()
+        } else { typeMapper.Cj2CType(field.GetTy().getOrThrow()) }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), fieldObjCTy, cfg: cfg)
+        let wrapperNodes = ArrayList<Node>()
+        if (let Some(temp) <- objTmpVarDecl) { wrapperNodes.add(temp) }
+        var unwrappedFieldExpr = UnwrapEntity(fieldExpr)
+        if (TypeMapper.IsObjCObjectType(field.GetTy().getOrThrow())) {
+            unwrappedFieldExpr = CreateObjCRetainCall(unwrappedFieldExpr)
+        }
+        wrapperNodes.add(unwrappedFieldExpr)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(wrapperParamList)
+        let wrapperBody = CreateFuncBody(paramLists, CreateType(wrapperTy.retTy),
+            CreateBlock(wrapperNodes, wrapperTy.retTy), wrapperTy)
+        let wrapperName = if (let Some(config) <- genericConfig) {
+            nameGenerator.GetFieldGetterWrapperName(field, genericActualName: config.declInstName)
+        } else { nameGenerator.GetFieldGetterWrapperName(field) }
+        let wrapper = CreateFuncDecl(wrapperName, wrapperBody, wrapperTy)
+        wrapper.moduleName = field.moduleName
+        wrapper.fullPackageName = field.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, field.curFile.getOrThrow())
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1260-1320.
+    public func CreateSetterWrapper(field: VarDecl): FuncDecl {
+        let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let convertedFieldTy = typeMapper.Cj2CType(field.GetTy().getOrThrow())
+        let setterParam = CreateFuncParam(VALUE_IDENT, CreateType(convertedFieldTy), None, convertedFieldTy)
+        let setterParamRef = CreateRefExpr(setterParam)
+        let outerDecl = (field.outerDecl.getOrThrow() as InheritableDecl).getOrThrow()
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        let wrapperNodes = ArrayList<Node>()
+        let lhs: MemberAccess
+        if (field.TestAttr(Attribute.STATIC)) {
+            lhs = CreateMemberAccess(WithinFile<RefExpr>(CreateRefExpr(outerDecl), field.curFile), field)
+        } else {
+            let registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+            wrapperParams.add(registryIdParam)
+            let getFromRegistryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam),
+                CreateRefType(outerDecl))
+            let objTmpVarDecl = CreateTmpVarDecl(CreateRefType(outerDecl), getFromRegistryCall)
+            lhs = CreateMemberAccess(CreateRefExpr(objTmpVarDecl), field)
+            wrapperNodes.add(objTmpVarDecl)
+        }
+        let assignFieldExpr = CreateAssignExpr(lhs, WrapEntity(setterParamRef, field.GetTy().getOrThrow()), unitTy)
+        assignFieldExpr.curFile = field.curFile
+        assignFieldExpr.begin = field.GetBegin()
+        assignFieldExpr.end = field.GetEnd()
+        wrapperNodes.add(assignFieldExpr)
+        wrapperParams.add(setterParam)
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) { wrapperParamTys.add(param.GetTy().getOrThrow()) }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), unitTy, cfg: cfg)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(wrapperParamList)
+        let wrapperBody = CreateFuncBody(paramLists, CreateUnitType(field.curFile),
+            CreateBlock(wrapperNodes, wrapperTy.retTy), wrapperTy)
+        let wrapper = CreateFuncDecl(nameGenerator.GetFieldSetterWrapperName(field), wrapperBody, wrapperTy)
+        wrapper.moduleName = field.moduleName
+        wrapper.fullPackageName = field.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, field.curFile.getOrThrow())
+        return wrapper
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:178-296.

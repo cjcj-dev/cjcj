@@ -126,7 +126,7 @@ public class NameGenerator {
         return WRAPPER_PREFIX + name + WRAPPER_SETTER_SUFFIX
     }
 
-    public func GetUserDefinedObjCName(target: Decl): Option<String> {
+    public static func GetUserDefinedObjCName(target: Decl): Option<String> {
         for (annotation in target.annotations) {
             if (annotation.kind != AstAnnotationKind.OBJ_C_MIRROR &&
                 annotation.kind != AstAnnotationKind.OBJ_C_IMPL &&
