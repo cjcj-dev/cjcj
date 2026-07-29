@@ -562,7 +562,7 @@ public class ASTFactory {
         let msgSendDecl = bridge.GetObjCMsgSendDecl().getOrThrow()
         let msgSendRetTy = msgSendDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
         let msgSendExpr = CreateCallExpr(CreateRefExpr(msgSendDecl), ArrayList<FuncArg>(), None,
-            Some(msgSendRetTy))
+            Some(msgSendRetTy), CallKind.CALL_INVALID)
         let retTy = funcType.retType.getOrThrow().GetTy().getOrThrow()
 
         let cFuncDecl = importManager.GetCoreDecl<BuiltInDecl>(CFUNC_NAME).getOrThrow()
