@@ -2124,6 +2124,66 @@ public class InteropContext {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateGlueCode.cpp:20-92.
+public class GenerateGlueCode <: Handler<InteropContext> {
+    private let interopType: InteropType
+
+    public init(interopType: InteropType) {
+        this.interopType = interopType
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        let genGlueCode = {decl: Decl =>
+            if (decl.TestAnyAttr(Attribute.IS_BROKEN, Attribute.HAS_BROKEN)) {
+                return
+            }
+            if (interopType != InteropType.ObjC_Mirror) {
+                ObjCTranspilerCJMapping(ctx, decl, ctx.outputObjCGenDir,
+                    ctx.cjLibOutputPath, interopType).Generate()
+                return
+            }
+            Transpiler(ctx, decl, ctx.outputObjCGenDir, ctx.cjLibOutputPath, interopType).Generate()
+        }
+        let genGlueCodeWithGenericConfigs = {decl: Decl, genericConfig: GenericConfigInfo,
+            isGenericGlueCode: Bool =>
+            if (decl.TestAnyAttr(Attribute.IS_BROKEN, Attribute.HAS_BROKEN)) {
+                return
+            }
+            ObjCTranspilerCJMapping(ctx, decl, ctx.outputObjCGenDir, ctx.cjLibOutputPath,
+                interopType, genericConfig, isGenericGlueCode).Generate()
+            return
+        }
+        let processContainer = {item: Decl =>
+            let genericConfigs = ArrayList<GenericConfigInfo>()
+            let isGenericGlueCode = Box<Bool>(false)
+            InitGenericConfigs(item.curFile.getOrThrow(), item, genericConfigs, isGenericGlueCode)
+            if (isGenericGlueCode.value) {
+                for (genericConfig in genericConfigs) {
+                    genGlueCodeWithGenericConfigs(item, genericConfig, isGenericGlueCode.value)
+                }
+            } else {
+                genGlueCode(item)
+            }
+        }
+
+        match (interopType) {
+            case InteropType.ObjC_Mirror =>
+                for (impl in ctx.impls) {
+                    genGlueCode(impl)
+                }
+            case InteropType.CJ_Mapping =>
+                for (cjMapping in ctx.cjMappings) {
+                    processContainer(cjMapping)
+                }
+            case InteropType.CJ_Mapping_Interface =>
+                for (cjMappingInterface in ctx.cjMappingInterfaces) {
+                    processContainer(cjMappingInterface)
+                }
+            case _ => ()
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertNativeHandleGetterBody.cpp:22-83.
 public class InsertNativeHandleGetterBody <: Handler<InteropContext> {
     private let interopType: InteropType
