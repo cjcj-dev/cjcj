@@ -116,14 +116,21 @@ public open class FFIParserImpl {
                 java.CheckMirrorSignature(classLikeDecl, annos)
             } else if (anno.kind == AnnotationKind.JAVA_IMPL) {
                 java.CheckImplSignature(classLikeDecl, annos)
+            } else if (anno.kind == AnnotationKind.OBJ_C_MIRROR) {
+                objc.CheckMirrorSignature(classLikeDecl, annos)
+            } else if (anno.kind == AnnotationKind.OBJ_C_IMPL) {
+                objc.CheckImplSignature(classLikeDecl, annos)
             }
         }
-        objc.CheckClassLikeSignature(decl, annos)
     }
 
     public func CheckFuncSignature(decl: FuncDecl, annos: ArrayList<Annotation>): Unit {
         let objc = ObjC()
-        objc.CheckMirrorSignature(decl, annos)
+        for (anno in annos) {
+            if (anno.kind == AnnotationKind.OBJ_C_MIRROR) {
+                objc.CheckMirrorSignature(decl, annos)
+            }
+        }
     }
 
     private func CheckForeignNameAnnoArgs(anno: Annotation): Unit {

@@ -1,7 +1,7 @@
 package cjcj::parse
 
 import std.collection.*
-import cjcj::utils.CJC_ABORT
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 
 public class OCFFIParserImpl {
     public let parser: ParserImpl
@@ -29,6 +29,7 @@ public class OCFFIParserImpl {
     }
 
     public func CheckInitAnnotation(fd: FuncDecl): Unit {
+        CJC_ASSERT(!fd.TestAttr(Attribute.CONSTRUCTOR))
         for (anno in fd.annotations) {
             if (anno.kind != AnnotationKind.OBJ_C_INIT) {
                 continue
@@ -53,6 +54,7 @@ public class OCFFIParserImpl {
     }
 
     public func CheckOptionalAnnotation(fd: FuncDecl): Unit {
+        CJC_ASSERT(!fd.TestAttr(Attribute.CONSTRUCTOR))
         for (anno in fd.annotations) {
             if (anno.kind != AnnotationKind.OBJ_C_OPTIONAL) {
                 continue
@@ -70,59 +72,57 @@ public class OCFFIParserImpl {
         }
     }
 
-    public func CheckClassLikeSignature(decl: Decl, annos: ArrayList<Annotation>): Unit {
-        if (parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR)) {
-            decl.EnableAttr(Attribute.OBJ_C_MIRROR)
-            if (decl.TestAttr(Attribute.SEALED)) {
-                DiagObjCMirrorCannotBeSealed(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
+    public func CheckMirrorSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR))
+        decl.EnableAttr(Attribute.OBJ_C_MIRROR)
+        if (decl.TestAttr(Attribute.SEALED)) {
+            DiagObjCMirrorCannotBeSealed(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
         }
-        if (parser.HasAnnotation(annos, AnnotationKind.OBJ_C_IMPL)) {
-            decl.EnableAttr(Attribute.OBJ_C_MIRROR_SUBTYPE)
-            if (let Some(_) <- decl.generic) {
-                DiagObjCImplCannotBeGeneric(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (decl.TestAttr(Attribute.ABSTRACT)) {
-                DiagObjCImplCannotBeAbstract(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (decl.TestAttr(Attribute.SEALED)) {
-                DiagObjCImplCannotBeSealed(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (decl.astKind == ASTKind.INTERFACE_DECL) {
-                DiagObjCImplCannotBeInterface(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
+    }
+
+    public func CheckImplSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_IMPL))
+        decl.EnableAttr(Attribute.OBJ_C_MIRROR_SUBTYPE)
+        if (let Some(_) <- decl.generic) {
+            DiagObjCImplCannotBeGeneric(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (decl.TestAttr(Attribute.ABSTRACT)) {
+            DiagObjCImplCannotBeAbstract(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (decl.TestAttr(Attribute.SEALED)) {
+            DiagObjCImplCannotBeSealed(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (decl.astKind == ASTKind.INTERFACE_DECL) {
+            DiagObjCImplCannotBeInterface(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
         }
     }
 
     public func CheckMirrorSignature(decl: FuncDecl, annos: ArrayList<Annotation>): Unit {
-        if (!parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR)) {
-            return
-        }
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR))
         decl.EnableAttr(Attribute.OBJ_C_MIRROR)
         if (decl.TestAttr(Attribute.FOREIGN)) {
             DiagObjCMirrorFuncCannotBeForeign(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
-        if (let Some(body) <- decl.funcBody) {
-            if (let Some(_) <- body.generic) {
-                DiagObjCMirrorFuncCannotBeGeneric(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (let Some(_) <- body.body) {
-                DiagObjCMirrorFuncCannotHaveBody(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (let None <- body.retType) {
-                DiagObjCMirrorFuncMustHaveExplicitType(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
+        if (let Some(_) <- decl.GetGeneric()) {
+            DiagObjCMirrorFuncCannotBeGeneric(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
         }
-        if (decl.isConst) {
+        let body = decl.funcBody.getOrThrow()
+        if (let Some(_) <- body.body) {
+            DiagObjCMirrorFuncCannotHaveBody(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (let None <- body.retType) {
+            DiagObjCMirrorFuncMustHaveExplicitType(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (decl.isConst || parser.HasModifier(decl.modifiers, TokenKind.CONST)) {
             DiagObjCMirrorFuncCannotBeConst(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
@@ -169,14 +169,21 @@ public class OCFFIParserImpl {
     }
 
     public func DiagObjCInitFuncMustBeStatic(node: Node): Unit {
+        CJC_ASSERT(!node.TestAttr(Attribute.STATIC))
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_init_method_must_be_static, node).Emit()
     }
 
     public func DiagObjCInitFuncMustBeInMirrorClass(node: FuncDecl): Unit {
+        if (let Some(outer) <- node.outerDecl) {
+            CJC_ASSERT(!outer.TestAttr(Attribute.OBJ_C_MIRROR) || outer.astKind != ASTKind.CLASS_DECL)
+        }
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_init_method_must_be_in_mirror_class, node).Emit()
     }
 
     public func DiagObjCOptionalFuncMustBeInMirrorClass(fd: FuncDecl): Unit {
+        if (let Some(outer) <- fd.outerDecl) {
+            CJC_ASSERT(!outer.TestAttr(Attribute.OBJ_C_MIRROR) || outer.astKind != ASTKind.INTERFACE_DECL)
+        }
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_optional_method_must_be_in_mirror_class, fd).Emit()
     }
 
