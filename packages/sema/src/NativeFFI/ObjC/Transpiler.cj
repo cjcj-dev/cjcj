@@ -77,9 +77,10 @@ public class Transpiler {
         if (!arg.TestAttr(Attribute.PUBLIC)) {
             return false
         }
-        if (interopType == InteropType.CJ_Mapping &&
-            (!TypeMapper.IsObjCCJMappingMember(arg) || arg.IsOpen())) {
-            return false
+        if (let InteropType.CJ_Mapping <- interopType) {
+            if (!TypeMapper.IsObjCCJMappingMember(arg) || arg.IsOpen()) {
+                return false
+            }
         }
         if (IsNotThisActualTyFunc(arg)) {
             return false
@@ -109,8 +110,10 @@ public class Transpiler {
         if (let None <- funcDecl.funcBody) {
             return false
         }
-        if (interopType == InteropType.CJ_Mapping && !TypeMapper.IsObjCCJMappingMember(arg)) {
-            return false
+        if (let InteropType.CJ_Mapping <- interopType) {
+            if (!TypeMapper.IsObjCCJMappingMember(arg)) {
+                return false
+            }
         }
         return true
     }
@@ -126,8 +129,10 @@ public class Transpiler {
         if (ctx.factory.IsGeneratedNativeHandleField(arg)) {
             return false
         }
-        if (interopType == InteropType.CJ_Mapping && !TypeMapper.IsObjCCJMappingMember(arg)) {
-            return false
+        if (let InteropType.CJ_Mapping <- interopType) {
+            if (!TypeMapper.IsObjCCJMappingMember(arg)) {
+                return false
+            }
         }
         return true
     }
@@ -222,7 +227,7 @@ public class Transpiler {
                                 Emitter.EmitObjCFuncInitialization(funcInitialization, funcMeta)
                                 Emitter.EmitObjCFuncHeaderFunctionDecl(headerBody, funcMeta)
                                 CollectDependencies(funcDecl.GetTy().getOrThrow())
-                                if (interopType == InteropType.ObjC_Mirror) {
+                                if (let InteropType.ObjC_Mirror <- interopType) {
                                     generatedCtors.add(funcMeta.selectorComponents)
                                 }
                             }
@@ -274,7 +279,7 @@ public class Transpiler {
             Emitter.EmitTypedef(headerImport, typedef)
         }
 
-        if (interopType == InteropType.ObjC_Mirror) {
+        if (let InteropType.ObjC_Mirror <- interopType) {
             if (let Some(concreteClassDecl) <- classDecl) {
                 let ctorsToGenerate = ctx.factory.GetAllParentCtors(concreteClassDecl)
                 for (ctor in ctorsToGenerate) {
@@ -341,7 +346,11 @@ public class Transpiler {
         } else {
             ""
         }
-        let isFinal = interopType == InteropType.CJ_Mapping && TypeMapper.IsOneWayMapping(decl) && !decl.IsOpen()
+        let isFinal = if (let InteropType.CJ_Mapping <- interopType) {
+            TypeMapper.IsOneWayMapping(decl) && !decl.IsOpen()
+        } else {
+            false
+        }
         let interfaceNames = ArrayList<String>()
         for (interfaceTy in concreteClassDecl.GetSuperInterfaceTys()) {
             if (!TypeMapper.IsObjCId(interfaceTy)) {
@@ -358,7 +367,10 @@ public class Transpiler {
 
     // C++ Transpiler.cpp:434-437.
     private func SkipSetterForValueTypeDecl(declArg: Decl): Bool {
-        return interopType == InteropType.CJ_Mapping && declArg.GetTy().getOrThrow() is StructTy
+        if (let InteropType.CJ_Mapping <- interopType) {
+            return declArg.GetTy().getOrThrow() is StructTy
+        }
+        return false
     }
 
     // C++ Transpiler.cpp:439-468.
@@ -426,7 +438,7 @@ public class Transpiler {
     // C++ Transpiler.cpp:507-541.
     private func GetObjCCtorMetainfo(funcDecl: FuncDecl): EmittableObjCFuncMetainfo {
         var result = EmittableObjCFuncMetainfo()
-        let ctor = if (interopType == InteropType.ObjC_Mirror) {
+        let ctor = if (let InteropType.ObjC_Mirror <- interopType) {
             ctx.factory.GetGeneratedImplCtor(decl, funcDecl).getOrThrow()
         } else {
             funcDecl
