@@ -82,11 +82,11 @@ public class ObjCParamMapper {
         return objctype.usage
     }
 
-    public static func MapCJTypeToObjCType(typedefs: HashSet<String>, type: Option<Type>): String {
-        if (let None <- type) {
+    public static func MapCJTypeToObjCType(typedefs: HashSet<String>, `type`: Option<Type>): String {
+        if (let None <- `type`) {
             return UNSUPPORTED_TYPE
         }
-        return MapCJTypeToObjCType(typedefs, type.getOrThrow().GetTy().getOrThrow())
+        return MapCJTypeToObjCType(typedefs, `type`.getOrThrow().GetTy().getOrThrow())
     }
 
     public static func MapCJTypeToObjCType(typedefs: HashSet<String>, param: Option<FuncParam>): String {
@@ -115,40 +115,40 @@ public class ObjCParamMapper {
         return value
     }
 
-    public static func GetGetterForProp(prop: EmittableObjCPropMetainfo, getterName: String,
+    public static func GetGetterForProp(`prop`: EmittableObjCPropMetainfo, getterName: String,
         getterWrapperName: String, bridge: Bool): EmittableObjCFuncMetainfo {
         var getter = EmittableObjCFuncMetainfo()
-        getter.isStatic = prop.isStatic
+        getter.isStatic = `prop`.isStatic
         getter.selectorComponents = ArrayList<String>()
         getter.identifier = getterName
         getter.mangledIdentifier = getterWrapperName
-        getter.retType = prop.type
+        getter.retType = `prop`.`type`
         getter.paramsDecl = ""
-        getter.paramStaticRef = if (prop.isStatic) { "" } else { INT64_T }
-        getter.callingParams = if (prop.isStatic) { "" } else { SELF_NAME + "." + REGISTRY_ID }
-        getter.convertedParams = if (prop.isStatic) { "" } else { SELF_NAME + "." + REGISTRY_ID }
+        getter.paramStaticRef = if (`prop`.isStatic) { "" } else { INT64_T }
+        getter.callingParams = if (`prop`.isStatic) { "" } else { SELF_NAME + "." + REGISTRY_ID }
+        getter.convertedParams = if (`prop`.isStatic) { "" } else { SELF_NAME + "." + REGISTRY_ID }
         getter.bridge = bridge
         return getter
     }
 
-    public static func GetSetterForProp(prop: EmittableObjCPropMetainfo, ty: Ty, getterName: String,
+    public static func GetSetterForProp(`prop`: EmittableObjCPropMetainfo, ty: Ty, getterName: String,
         getterWrapperName: String): EmittableObjCFuncMetainfo {
         var setter = EmittableObjCFuncMetainfo()
-        setter.isStatic = prop.isStatic
+        setter.isStatic = `prop`.isStatic
         setter.selectorComponents = ArrayList<String>()
         setter.identifier = getterName
         setter.mangledIdentifier = getterWrapperName
         setter.retType = VOID_TYPE
         setter.bridge = false
-        setter.paramsDecl = "(" + prop.type + ")" + SETTER_PARAM_NAME
-        setter.paramStaticRef = (if (!prop.isStatic) { "(" + INT64_T + "," } else { "(" }) +
-            prop.type + ")"
-        setter.callingParams = if (!prop.isStatic) {
+        setter.paramsDecl = "(" + `prop`.`type` + ")" + SETTER_PARAM_NAME
+        setter.paramStaticRef = (if (!`prop`.isStatic) { "(" + INT64_T + "," } else { "(" }) +
+            `prop`.`type` + ")"
+        setter.callingParams = if (!`prop`.isStatic) {
             SELF_NAME + "." + REGISTRY_ID + ", " + SETTER_PARAM_NAME
         } else {
             SETTER_PARAM_NAME
         }
-        setter.convertedParams = (if (!prop.isStatic) { SELF_NAME + "." + REGISTRY_ID + ", " } else { "" }) +
+        setter.convertedParams = (if (!`prop`.isStatic) { SELF_NAME + "." + REGISTRY_ID + ", " } else { "" }) +
             GenerateArgumentCast(ty, SETTER_PARAM_NAME)
         return setter
     }
