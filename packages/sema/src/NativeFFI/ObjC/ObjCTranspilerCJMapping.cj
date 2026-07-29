@@ -33,18 +33,18 @@ private let INSTANCE_MODIFIER: String = "-"
 private let EXTERN_MODIFIER: String = "extern"
 private let FINAL_MODIFIER: String = "__attribute__((objc_subclassing_restricted))"
 
-private let VOID_TYPE_CJ_MAPPING: String = "void"
+private let VOID_TYPE: String = "void"
 private let BOOL_TYPE: String = "bool"
 private let CONST_CHAR_POINTER_TYPE: String = "const char*"
-private let VOID_POINTER_TYPE_CJ_MAPPING: String = "void*"
-private let ID_TYPE_CJ_MAPPING: String = "id"
-private let UNSUPPORTED_TYPE_CJ_MAPPING: String = "UNSUPPORTED_TYPE"
-private let INT64_T_CJ_MAPPING: String = "int64_t"
+private let VOID_POINTER_TYPE: String = "void*"
+private let ID_TYPE: String = "id"
+private let UNSUPPORTED_TYPE: String = "UNSUPPORTED_TYPE"
+private let INT64_T: String = "int64_t"
 
 private let SELF_WEAKLINK_NAME: String = "$registryId"
 private let INITED_FROM_OBJC_NAME: String = "$initedFromObjC"
-private let SELF_NAME_CJ_MAPPING: String = "self"
-private let SETTER_PARAM_NAME_CJ_MAPPING: String = "value"
+private let SELF_NAME: String = "self"
+private let SETTER_PARAM_NAME: String = "value"
 private let REGISTRY_ID_PARAM_NAME: String = "registryId"
 private let TMP_REG_ID: String = "regId"
 
@@ -59,9 +59,9 @@ private let INIT_WITH_REGISTRY_ID_SIGNATURE: String = "- (id)initWithRegistryId:
 private let REINIT_WITH_REGISTRY_ID_SIGNATURE: String = "- (id)reinitWithRegistryId:(int64_t)registryId"
 private let RELEASE_SIGNATURE: String = "- (oneway void)release"
 private let EXIT_FUNC_NAME: String = "exit"
-private let CAST_TO_VOID_PTR_CJ_MAPPING: String = "(__bridge void*)"
-private let CAST_TO_VOID_PTR_RETAINED_CJ_MAPPING: String = "(__bridge_retained void*)"
-private let CAST_TO_VOID_PTR_UNSAFE_CJ_MAPPING: String = "(void*)"
+private let CAST_TO_VOID_PTR: String = "(__bridge void*)"
+private let CAST_TO_VOID_PTR_RETAINED: String = "(__bridge_retained void*)"
+private let CAST_TO_VOID_PTR_UNSAFE: String = "(void*)"
 
 private let EQ_OP: String = "="
 private let EQ_CHECK_OP: String = "=="
@@ -74,9 +74,9 @@ private let FAIL_CALL_CANGJIE_BEFORE_INIT: String =
     "is initialized\", NSStringFromSelector(_cmd)];"
 private let REGISTRY_ID_UNINIT_VALUE: String = "-1"
 private let INDENT_SIZE: Int64 = 4
-private let DEFAULT_OUTPUT_DIR_WARNING_CJ_MAPPING: String =
+private let DEFAULT_OUTPUT_DIR_WARNING: String =
     "default value objc-gen of Objective-C generated sources directory will be changed in next Cangjie SDK release"
-private let DEFAULT_OUTPUT_DIR_CJ_MAPPING: String = "objc-gen"
+private let DEFAULT_OUTPUT_DIR: String = "objc-gen"
 
 // C++ ObjCTranspilerCJMapping.cpp:82-87 variadic stream helper. Cangjie has no parameter packs;
 // callers convert the same streamable operands to strings before passing this ordered array.
@@ -117,13 +117,13 @@ public class ObjCTranspilerCJMapping {
         cjLibOutputPath: String, interopType: InteropType) {
         this.ctx = ctx
         this.decl = declArg
-        this.outputFilePath = if (outputFilePath.isEmpty()) { DEFAULT_OUTPUT_DIR_CJ_MAPPING } else { outputFilePath }
+        this.outputFilePath = if (outputFilePath.isEmpty()) { DEFAULT_OUTPUT_DIR } else { outputFilePath }
         this.cjLibOutputPath = cjLibOutputPath
         this.interopType = interopType
         this.genericConfig = None
         this.isGenericGlueCode = false
         if (outputFilePath.isEmpty()) {
-            Warningln(DEFAULT_OUTPUT_DIR_WARNING_CJ_MAPPING)
+            Warningln(DEFAULT_OUTPUT_DIR_WARNING)
         }
     }
 
@@ -133,13 +133,13 @@ public class ObjCTranspilerCJMapping {
         isGenericGlueCode: Bool) {
         this.ctx = ctx
         this.decl = declArg
-        this.outputFilePath = if (outputFilePath.isEmpty()) { DEFAULT_OUTPUT_DIR_CJ_MAPPING } else { outputFilePath }
+        this.outputFilePath = if (outputFilePath.isEmpty()) { DEFAULT_OUTPUT_DIR } else { outputFilePath }
         this.cjLibOutputPath = cjLibOutputPath
         this.interopType = interopType
         this.genericConfig = Some(genericConfig)
         this.isGenericGlueCode = isGenericGlueCode
         if (outputFilePath.isEmpty()) {
-            Warningln(DEFAULT_OUTPUT_DIR_WARNING_CJ_MAPPING)
+            Warningln(DEFAULT_OUTPUT_DIR_WARNING)
         }
     }
 
@@ -393,7 +393,7 @@ public class ObjCTranspilerCJMapping {
                 let funcTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow()
                 let retTy = funcTy.retTy
                 let retType = if (TypeMapper.IsObjCObjectType(retTy) || TypeMapper.IsObjCBlock(retTy)) {
-                    VOID_POINTER_TYPE_CJ_MAPPING
+                    VOID_POINTER_TYPE
                 } else {
                     MapCJTypeToObjCType(retTy)
                 }
@@ -520,7 +520,7 @@ public class ObjCTranspilerCJMapping {
             if (params.isEmpty()) {
                 if (let ObjCFunctionType.STATIC <- `type`) {
                 } else {
-                    genParams += VOID_POINTER_TYPE_CJ_MAPPING
+                    genParams += VOID_POINTER_TYPE
                 }
             }
             genParams += ")"
@@ -528,7 +528,7 @@ public class ObjCTranspilerCJMapping {
             if (params.isEmpty()) {
                 if (let ObjCFunctionType.STATIC <- `type`) {
                 } else {
-                    genParams += VOID_POINTER_TYPE_CJ_MAPPING
+                    genParams += VOID_POINTER_TYPE
                 }
             }
             genParams += ")"
@@ -538,7 +538,7 @@ public class ObjCTranspilerCJMapping {
 
     // C++ ObjCTranspilerCJMapping.cpp:679-682.
     private func GenerateSetterParamLists(`type`: String): String {
-        return "(" + `type` + ")" + SETTER_PARAM_NAME_CJ_MAPPING
+        return "(" + `type` + ")" + SETTER_PARAM_NAME
     }
 
     // C++ ObjCTranspilerCJMapping.cpp:684-687.
@@ -553,7 +553,7 @@ public class ObjCTranspilerCJMapping {
     private func AddProperties(): Unit {
         let registryIdType = CreateType(TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
         AddWithIndent(GeneratePropertyDeclaration(ObjCFunctionType.INSTANCE, READWRITE_MODIFIER,
-            INT64_T_CJ_MAPPING, SELF_WEAKLINK_NAME, SELF_WEAKLINK_NAME,
+            INT64_T, SELF_WEAKLINK_NAME, SELF_WEAKLINK_NAME,
             NameGenerator.MakeSetterName(SELF_WEAKLINK_NAME)))
         for (declPtr in decl.GetMemberDecls()) {
             CJC_NULLPTR_CHECK(Some(declPtr))
@@ -595,7 +595,7 @@ public class ObjCTranspilerCJMapping {
             var getterResult = GenerateFunctionDeclaration(staticType, mappedType, getterName)
             let argList = ArgsList()
             if (let ObjCFunctionType.INSTANCE <- staticType) {
-                argList.add((INT64_T_CJ_MAPPING, SELF_NAME_CJ_MAPPING + "." + SELF_WEAKLINK_NAME))
+                argList.add((INT64_T, SELF_NAME + "." + SELF_WEAKLINK_NAME))
             }
             AddWithIndent(getterResult, target: GenerationTarget.BOTH, bOp: OptionalBlockOp.OPEN)
             if (let ObjCFunctionType.INSTANCE <- staticType) {
@@ -621,11 +621,11 @@ public class ObjCTranspilerCJMapping {
             }
             let setterArgsList = ArgsList()
             if (let ObjCFunctionType.INSTANCE <- staticType) {
-                setterArgsList.add((INT64_T_CJ_MAPPING, SELF_NAME_CJ_MAPPING + "." + SELF_WEAKLINK_NAME))
+                setterArgsList.add((INT64_T, SELF_NAME + "." + SELF_WEAKLINK_NAME))
             }
             setterArgsList.add((mappedType,
-                GenerateArgumentCast(varDecl.GetTy().getOrThrow(), SETTER_PARAM_NAME_CJ_MAPPING)))
-            var setterResult = GenerateFunctionDeclaration(staticType, VOID_TYPE_CJ_MAPPING, setterName)
+                GenerateArgumentCast(varDecl.GetTy().getOrThrow(), SETTER_PARAM_NAME)))
+            var setterResult = GenerateFunctionDeclaration(staticType, VOID_TYPE, setterName)
             setterResult += GenerateSetterParamLists(mappedType)
             AddWithIndent(setterResult, target: GenerationTarget.BOTH, bOp: OptionalBlockOp.OPEN)
             if (let ObjCFunctionType.INSTANCE <- staticType) {
@@ -661,7 +661,7 @@ public class ObjCTranspilerCJMapping {
                 argList = ConvertParamsListToCallableParamsString(funcDecl.funcBody.getOrThrow().paramLists, false)
             }
             AddWithIndent(result, target: GenerationTarget.BOTH, bOp: OptionalBlockOp.OPEN)
-            AddWithIndent(GenerateAssignment(INT64_T_CJ_MAPPING + " " + TMP_REG_ID,
+            AddWithIndent(GenerateAssignment(INT64_T + " " + TMP_REG_ID,
                 GenerateCCall(nativeFuncName, args: argList)) + ";", target: GenerationTarget.SOURCE)
             AddWithIndent(GenerateReturn(WrapperCallByInitForCJMappingReturn(
                 enumDecl.GetTy().getOrThrow(), TMP_REG_ID)), target: GenerationTarget.SOURCE,
@@ -671,9 +671,9 @@ public class ObjCTranspilerCJMapping {
 
     // C++ ObjCTranspilerCJMapping.cpp:827-860.
     private func GenerateInitializer(objCDeclName: String): Unit {
-        AddWithIndent(GenerateFunctionDeclaration(ObjCFunctionType.STATIC, VOID_TYPE_CJ_MAPPING,
+        AddWithIndent(GenerateFunctionDeclaration(ObjCFunctionType.STATIC, VOID_TYPE,
             INITIALIZE_FUNC_NAME), target: GenerationTarget.BOTH, bOp: OptionalBlockOp.OPEN)
-        AddWithIndent(GenerateIfStatement(SELF_NAME_CJ_MAPPING,
+        AddWithIndent(GenerateIfStatement(SELF_NAME,
             GenerateObjCCall(objCDeclName, CLASS_KEYWORD), EQ_CHECK_OP),
             target: GenerationTarget.SOURCE, bOp: OptionalBlockOp.OPEN)
         var cjLibName = GetCangjieLibName(cjLibOutputPath, decl.fullPackageName, trimmed: false)
@@ -700,8 +700,16 @@ public class ObjCTranspilerCJMapping {
     private func AddConstructors(): Unit {
         let generatedCtors = ArrayList<ArrayList<String>>()
         for (declPtr in decl.GetMemberDecls()) {
-            if (!declPtr.TestAttr(Attribute.PUBLIC) || ctx.factory.IsGeneratedMember(declPtr) ||
-                !declPtr.TestAttr(Attribute.CONSTRUCTOR) || declPtr.astKind != ASTKind.FUNC_DECL) {
+            if (!declPtr.TestAttr(Attribute.PUBLIC)) {
+                continue
+            }
+            if (ctx.factory.IsGeneratedMember(declPtr)) {
+                continue
+            }
+            if (!declPtr.TestAttr(Attribute.CONSTRUCTOR)) {
+                continue
+            }
+            if (declPtr.astKind != ASTKind.FUNC_DECL) {
                 continue
             }
             let funcDecl = (declPtr as FuncDecl).getOrThrow()
@@ -727,30 +735,30 @@ public class ObjCTranspilerCJMapping {
                 ctx.nameGenerator.GenerateInitCjObjectName(ctor)
             }
             var result = GenerateFunctionDeclaration(ObjCFunctionType.INSTANCE,
-                ID_TYPE_CJ_MAPPING, selectorComponents[0])
+                ID_TYPE, selectorComponents[0])
             let funcBody = funcDecl.funcBody.getOrThrow()
             result += GenerateFuncParamLists(funcBody.paramLists, selectorComponents,
                 format: FunctionListFormat.DECLARATION, `type`: ObjCFunctionType.INSTANCE,
                 hasForeignNameAnno: GetForeignNameAnnotation(funcDecl).isSome())
             AddWithIndent(result, target: GenerationTarget.BOTH, bOp: OptionalBlockOp.OPEN)
             if (let InteropType.ObjC_Mirror <- interopType) {
-                AddWithIndent(GenerateAssignment(SELF_NAME_CJ_MAPPING + "." + SELF_WEAKLINK_NAME,
+                AddWithIndent(GenerateAssignment(SELF_NAME + "." + SELF_WEAKLINK_NAME,
                     REGISTRY_ID_UNINIT_VALUE) + ";", target: GenerationTarget.SOURCE)
                 var rhs = "(__bridge_transfer " + MapCJTypeToObjCType(decl.GetTy().getOrThrow()) + ")"
                 rhs += GenerateCCall(cjWrapperName,
                     args: ConvertParamsListToCallableParamsString(funcBody.paramLists, true))
-                AddWithIndent(GenerateAssignment(SELF_NAME_CJ_MAPPING, rhs) + ";",
+                AddWithIndent(GenerateAssignment(SELF_NAME, rhs) + ";",
                     target: GenerationTarget.SOURCE)
             } else {
-                AddWithIndent(GenerateIfStatement(SELF_NAME_CJ_MAPPING,
+                AddWithIndent(GenerateIfStatement(SELF_NAME,
                     GenerateObjCCall(SUPER_KEYWORD, INIT_FUNC_NAME), EQ_OP),
                     target: GenerationTarget.SOURCE, bOp: OptionalBlockOp.OPEN)
-                AddWithIndent(GenerateAssignment(SELF_NAME_CJ_MAPPING + "." + SELF_WEAKLINK_NAME,
+                AddWithIndent(GenerateAssignment(SELF_NAME + "." + SELF_WEAKLINK_NAME,
                     GenerateCCall(cjWrapperName,
                         args: ConvertParamsListToCallableParamsString(funcBody.paramLists, false))) + ";",
                     target: GenerationTarget.SOURCE, bOp: OptionalBlockOp.CLOSE)
             }
-            AddWithIndent(GenerateReturn(SELF_NAME_CJ_MAPPING), target: GenerationTarget.SOURCE,
+            AddWithIndent(GenerateReturn(SELF_NAME), target: GenerationTarget.SOURCE,
                 bOp: OptionalBlockOp.CLOSE)
             if (let InteropType.ObjC_Mirror <- interopType) {
                 generatedCtors.add(selectorComponents)
@@ -775,7 +783,7 @@ public class ObjCTranspilerCJMapping {
                         continue
                     }
                     var result = GenerateFunctionDeclaration(ObjCFunctionType.INSTANCE,
-                        ID_TYPE_CJ_MAPPING, selectorComponents[0])
+                        ID_TYPE, selectorComponents[0])
                     result += GenerateFuncParamLists(funcBody.paramLists, selectorComponents,
                         format: FunctionListFormat.DECLARATION, `type`: ObjCFunctionType.INSTANCE,
                         hasForeignNameAnno: GetForeignNameAnnotation(ctor).isSome())
@@ -801,7 +809,7 @@ public class ObjCTranspilerCJMapping {
             }
         }
         AddWithIndent(GenerateFunctionDeclaration(ObjCFunctionType.INSTANCE,
-            VOID_TYPE_CJ_MAPPING, DELETE_FUNC_NAME), target: GenerationTarget.BOTH,
+            VOID_TYPE, DELETE_FUNC_NAME), target: GenerationTarget.BOTH,
             bOp: OptionalBlockOp.OPEN)
         let deleteObjName = if (let Some(config) <- genericConfig) {
             ctx.nameGenerator.GenerateDeleteCjObjectName(decl,
@@ -810,7 +818,7 @@ public class ObjCTranspilerCJMapping {
             ctx.nameGenerator.GenerateDeleteCjObjectName(decl)
         }
         let args = ArgsList()
-        args.add((INT64_T_CJ_MAPPING, SELF_NAME_CJ_MAPPING + "." + SELF_WEAKLINK_NAME))
+        args.add((INT64_T, SELF_NAME + "." + SELF_WEAKLINK_NAME))
         AddWithIndent(GenerateDefaultFunctionImplementation(deleteObjName,
             TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT), args: args),
             target: GenerationTarget.SOURCE, bOp: OptionalBlockOp.CLOSE)
@@ -824,9 +832,9 @@ public class ObjCTranspilerCJMapping {
             }
         }
         AddWithIndent(GenerateFunctionDeclaration(ObjCFunctionType.INSTANCE,
-            VOID_TYPE_CJ_MAPPING, DEALLOC_FUNC_NAME), target: GenerationTarget.BOTH,
+            VOID_TYPE, DEALLOC_FUNC_NAME), target: GenerationTarget.BOTH,
             bOp: OptionalBlockOp.OPEN)
-        AddWithIndent(GenerateObjCCall(SELF_NAME_CJ_MAPPING, DELETE_FUNC_NAME) + ";",
+        AddWithIndent(GenerateObjCCall(SELF_NAME, DELETE_FUNC_NAME) + ";",
             target: GenerationTarget.SOURCE, bOp: OptionalBlockOp.CLOSE)
     }
 
@@ -894,7 +902,7 @@ public class ObjCTranspilerCJMapping {
         withRegistryId: Bool): ArgsList {
         let result = ArgsList()
         if (withRegistryId) {
-            result.add((INT64_T_CJ_MAPPING, SELF_NAME_CJ_MAPPING + "." + SELF_WEAKLINK_NAME))
+            result.add((INT64_T, SELF_NAME + "." + SELF_WEAKLINK_NAME))
         }
         if (!paramLists.isEmpty()) {
             for (cur in paramLists[0].params) {
@@ -911,7 +919,7 @@ public class ObjCTranspilerCJMapping {
         withSelf: Bool): Array<String> {
         let result = ArrayList<String>()
         if (withSelf) {
-            result.add(CAST_TO_VOID_PTR_CJ_MAPPING + SELF_NAME_CJ_MAPPING)
+            result.add(CAST_TO_VOID_PTR + SELF_NAME)
         }
         if (!paramLists.isEmpty()) {
             for (cur in paramLists[0].params) {
@@ -967,7 +975,7 @@ public class ObjCTranspilerCJMapping {
 
     private func MapCJTypeToObjCType(typeNode: Option<Type>): String {
         if (let None <- typeNode) {
-            return UNSUPPORTED_TYPE_CJ_MAPPING
+            return UNSUPPORTED_TYPE
         }
         let ty = typeNode.getOrThrow().GetTy().getOrThrow()
         if (let Some(config) <- genericConfig) {
@@ -981,7 +989,7 @@ public class ObjCTranspilerCJMapping {
 
     private func MapCJTypeToObjCType(param: Option<FuncParam>): String {
         if (let None <- param) {
-            return UNSUPPORTED_TYPE_CJ_MAPPING
+            return UNSUPPORTED_TYPE
         }
         let funcParam = param.getOrThrow()
         let ty = funcParam.typeNode.getOrThrow().GetTy().getOrThrow()
@@ -1001,14 +1009,14 @@ public class ObjCTranspilerCJMapping {
         }
         let actualTy = if (retTy.IsCoreOptionType()) { retTy.typeArgs[0] } else { retTy }
         if (TypeMapper.IsObjCImpl(actualTy)) {
-            return CAST_TO_VOID_PTR_CJ_MAPPING + value
+            return CAST_TO_VOID_PTR + value
         }
         if (TypeMapper.IsObjCMirror(actualTy) || TypeMapper.IsObjCBlock(actualTy) ||
             TypeMapper.IsObjCCJMappingInterface(actualTy)) {
-            return CAST_TO_VOID_PTR_RETAINED_CJ_MAPPING + value
+            return CAST_TO_VOID_PTR_RETAINED + value
         }
         if (TypeMapper.IsObjCPointer(actualTy)) {
-            return CAST_TO_VOID_PTR_UNSAFE_CJ_MAPPING + value
+            return CAST_TO_VOID_PTR_UNSAFE + value
         }
         return value
     }
@@ -1121,7 +1129,7 @@ extern id objc_getClass(const char *);
     private func AddConstructor4CJMapping(ctor: FuncDecl): Unit {
         let params = ArrayList<FuncParam>()
         let callArgs = ArrayList<String>()
-        callArgs.add(CAST_TO_VOID_PTR_CJ_MAPPING + "self")
+        callArgs.add(CAST_TO_VOID_PTR + "self")
         callArgs.add("[self calcOverrideMask]")
         let fwdParams = ctor.funcBody.getOrThrow().paramLists[0].params
         for (idx in 2..fwdParams.size) {
@@ -1136,13 +1144,13 @@ extern id objc_getClass(const char *);
         let callStr = Join([ctx.nameGenerator.GenerateInitCjObjectName(ctor),
             JoinVec<String>(callArgs, {arg: String => arg}, sep: ", ", pre: "(", suf: ");")])
         let ifThen: () -> Unit = { =>
-            WriteSeq([Join([SELF_NAME_CJ_MAPPING, ".", INITED_FROM_OBJC_NAME, " = ", "true;"]),
-                Join([SELF_NAME_CJ_MAPPING, ".", SELF_WEAKLINK_NAME, " = ", callStr]),
-                Join(["[", SELF_NAME_CJ_MAPPING, " ", RETAIN_FUNC_NAME, "];"])])
+            WriteSeq([Join([SELF_NAME, ".", INITED_FROM_OBJC_NAME, " = ", "true;"]),
+                Join([SELF_NAME, ".", SELF_WEAKLINK_NAME, " = ", callStr]),
+                Join(["[", SELF_NAME, " ", RETAIN_FUNC_NAME, "];"])])
         }
         WriteFunc(initSig, { =>
             WriteIf("self = [super init]", ifThen)
-            WriteSeq([Join(["return ", SELF_NAME_CJ_MAPPING, ";"])])
+            WriteSeq([Join(["return ", SELF_NAME, ";"])])
         })
     }
 
@@ -1163,17 +1171,17 @@ extern id objc_getClass(const char *);
     private func AddInitWithRegistryId(): Unit {
         AddWithIndent(INIT_WITH_REGISTRY_ID_SIGNATURE, target: GenerationTarget.BOTH,
             bOp: OptionalBlockOp.OPEN)
-        AddWithIndent(GenerateIfStatement(SELF_NAME_CJ_MAPPING,
+        AddWithIndent(GenerateIfStatement(SELF_NAME,
             GenerateObjCCall(SUPER_KEYWORD, INIT_FUNC_NAME), EQ_OP),
             target: GenerationTarget.SOURCE, bOp: OptionalBlockOp.OPEN)
         if (decl.IsOpen()) {
-            AddWithIndent(GenerateAssignment(SELF_NAME_CJ_MAPPING + "." + INITED_FROM_OBJC_NAME,
+            AddWithIndent(GenerateAssignment(SELF_NAME + "." + INITED_FROM_OBJC_NAME,
                 "false") + ";", target: GenerationTarget.SOURCE)
         }
-        AddWithIndent(GenerateAssignment(SELF_NAME_CJ_MAPPING + "." + SELF_WEAKLINK_NAME,
+        AddWithIndent(GenerateAssignment(SELF_NAME + "." + SELF_WEAKLINK_NAME,
             REGISTRY_ID_PARAM_NAME) + ";", target: GenerationTarget.SOURCE,
             bOp: OptionalBlockOp.CLOSE)
-        AddWithIndent(GenerateReturn(SELF_NAME_CJ_MAPPING), target: GenerationTarget.SOURCE,
+        AddWithIndent(GenerateReturn(SELF_NAME), target: GenerationTarget.SOURCE,
             bOp: OptionalBlockOp.CLOSE)
     }
 
@@ -1181,9 +1189,9 @@ extern id objc_getClass(const char *);
     private func AddReinitWithRegistryId(): Unit {
         res += Join([REINIT_WITH_REGISTRY_ID_SIGNATURE, ";\n"])
         WriteFunc(REINIT_WITH_REGISTRY_ID_SIGNATURE, { =>
-            WriteSeq([Join([SELF_NAME_CJ_MAPPING, ".", SELF_WEAKLINK_NAME, " = ",
-                REGISTRY_ID_PARAM_NAME, ";"]), Join(["[", SELF_NAME_CJ_MAPPING, " ", RETAIN_FUNC_NAME, "];"]),
-                Join(["return ", SELF_NAME_CJ_MAPPING, ";"])])
+            WriteSeq([Join([SELF_NAME, ".", SELF_WEAKLINK_NAME, " = ",
+                REGISTRY_ID_PARAM_NAME, ";"]), Join(["[", SELF_NAME, " ", RETAIN_FUNC_NAME, "];"]),
+                Join(["return ", SELF_NAME, ";"])])
         })
     }
 
@@ -1324,7 +1332,7 @@ static uint64_t calcMask(Class baseCls, Class selfCls, SEL* methods, int len) {
         } else {
             return
         }
-        AddWithIndent(GenerateIfStatement(SELF_NAME_CJ_MAPPING + "." + SELF_WEAKLINK_NAME,
+        AddWithIndent(GenerateIfStatement(SELF_NAME + "." + SELF_WEAKLINK_NAME,
             REGISTRY_ID_UNINIT_VALUE, EQ_CHECK_OP), target: GenerationTarget.SOURCE,
             bOp: OptionalBlockOp.OPEN)
         AddWithIndent(FAIL_CALL_CANGJIE_BEFORE_INIT, target: GenerationTarget.SOURCE,

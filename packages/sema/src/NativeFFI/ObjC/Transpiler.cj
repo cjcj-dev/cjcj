@@ -233,7 +233,22 @@ public class Transpiler {
                             }
                         }
                     }
-                case ASTKind.VAR_DECL | ASTKind.PROP_DECL =>
+                case ASTKind.VAR_DECL =>
+                    if (CheckProp(declPtr)) {
+                        let propDecl = (declPtr as VarDeclAbstract).getOrThrow()
+                        let propMeta = GetObjCPropMetainfoFromProp(propDecl)
+                        Emitter.EmitObjCFuncInitialization(funcInitialization, propMeta.getter)
+                        Emitter.EmitDefaultFunctionImplementation(defaultFuncImpls, propMeta.getter)
+                        Emitter.EmitProperty(headerBody, propMeta)
+                        Emitter.EmitObjCFuncHeaderFunctionDecl(headerBody, propMeta.getter)
+                        if (propMeta.isReadwrite) {
+                            Emitter.EmitObjCFuncInitialization(funcInitialization, propMeta.setter)
+                            Emitter.EmitDefaultFunctionImplementation(defaultFuncImpls, propMeta.setter)
+                            Emitter.EmitObjCFuncHeaderFunctionDecl(headerBody, propMeta.setter)
+                        }
+                        CollectDependencies(propDecl.GetTy().getOrThrow())
+                    }
+                case ASTKind.PROP_DECL =>
                     if (CheckProp(declPtr)) {
                         let propDecl = (declPtr as VarDeclAbstract).getOrThrow()
                         let propMeta = GetObjCPropMetainfoFromProp(propDecl)
