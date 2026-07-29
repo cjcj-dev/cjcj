@@ -15,7 +15,7 @@ public class CheckTopLevelFuncTypes <: Handler<TypeCheckContext> {
         let funcBody = funcDecl.funcBody.getOrThrow()
         for (paramList in funcBody.paramLists) {
             for (param in paramList.params) {
-                if (!ctx.typeMapper.IsObjCCompatible(param.GetTy().getOrThrow())) {
+                if (!TypeMapper.IsObjCCompatible(param.GetTy().getOrThrow())) {
                     DiagnoseRefactor(ctx.diag,
                         DiagKindRefactor.sema_objc_interop_toplevel_param_must_be_objc_compatible,
                         param.typeNode.getOrThrow(), funcDecl.identifier.Val()).Emit()
@@ -24,7 +24,7 @@ public class CheckTopLevelFuncTypes <: Handler<TypeCheckContext> {
             }
         }
         if (let Some(retType) <- funcBody.retType) {
-            if (!ctx.typeMapper.IsObjCCompatible(retType.GetTy().getOrThrow())) {
+            if (!TypeMapper.IsObjCCompatible(retType.GetTy().getOrThrow())) {
                 DiagnoseRefactor(ctx.diag,
                     DiagKindRefactor.sema_objc_interop_toplevel_ret_must_be_objc_compatible,
                     retType, funcDecl.identifier.Val()).Emit()
