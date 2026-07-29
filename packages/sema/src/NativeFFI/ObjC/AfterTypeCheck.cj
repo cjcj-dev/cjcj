@@ -4626,8 +4626,10 @@ public class DesugarImpls <: Handler<InteropContext> {
             return
         }
         var isSuper = false
-        if (let Some(refExpr) <- (ma.baseExpr as RefExpr)) {
-            isSuper = refExpr.isSuper
+        if (let Some(baseExpr) <- ma.baseExpr) {
+            if (let Some(refExpr) <- (baseExpr as RefExpr)) {
+                isSuper = refExpr.isSuper
+            }
         }
         if (!isSuper) {
             return
