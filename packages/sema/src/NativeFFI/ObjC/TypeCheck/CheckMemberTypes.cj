@@ -1,8 +1,9 @@
-package cjcj::sema.NativeFFI.ObjC
+package cjcj::sema.NativeFFI.ObjC.TypeCheck
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
 import cjcj::sema.NativeFFI.IsObjCGeneratedMember
+import cjcj::sema.NativeFFI.ObjC.{Handler, InteropType, TypeMapper}
 import cjcj::utils.CJC_ABORT
 
 public class CheckMemberTypes <: Handler<TypeCheckContext> {
