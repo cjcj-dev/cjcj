@@ -1563,7 +1563,7 @@ public class ASTFactory {
         let wrapperParamList = FuncParamList()
         let wrapperParams = wrapperParamList.params
         var objTmpVarDecl: Option<VarDecl> = None
-        let getter = pd.getters[0].getOrThrow()
+        let getter = pd.getters[0]
         let propGetterExpr: MemberAccess
         if (pd.TestAttr(Attribute.STATIC)) {
             propGetterExpr = CreateMemberAccess(WithinFile<RefExpr>(CreateRefExpr(outerDecl), pd.curFile), getter)
@@ -1621,7 +1621,7 @@ public class ASTFactory {
         let wrapperParamList = FuncParamList()
         let wrapperParams = wrapperParamList.params
         let wrapperNodes = ArrayList<Node>()
-        let setter = pd.setters[0].getOrThrow()
+        let setter = pd.setters[0]
         let originParams = setter.funcBody.getOrThrow().paramLists[0].params
         let propSetterExpr: Expr
         var objTmpVarDecl: Option<Decl> = None
