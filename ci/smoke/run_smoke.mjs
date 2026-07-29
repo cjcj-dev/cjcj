@@ -29,18 +29,56 @@ let fail = 0;
 if (process.platform === 'win32') process.env.cjStackSize = process.env.cjStackSize || '64MB';
 
 async function runCommand(executable, args, cwd) {
+  const t0 = performance.now();
+  let out;
   if (process.platform !== 'win32') {
-    return $({cwd, nothrow: true, quiet: true})`${executable} ${args}`;
+    out = await $({cwd, nothrow: true, quiet: true})`${executable} ${args}`;
+  } else {
+    const line = [`"${executable}"`, ...args.map((arg) => `"${arg}"`)].join(' ');
+    const result = spawnSync('cmd.exe', ['/d', '/s', '/c', `"${line}"`], {
+      cwd,
+      encoding: 'utf8',
+      env: process.env,
+      windowsVerbatimArguments: true,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    out = {exitCode: result.status ?? 1, stdout: result.stdout || '', stderr: result.stderr || String(result.error || ''), signal: result.signal || null};
   }
-  const line = [`"${executable}"`, ...args.map((arg) => `"${arg}"`)].join(' ');
-  const result = spawnSync('cmd.exe', ['/d', '/s', '/c', `"${line}"`], {
-    cwd,
-    encoding: 'utf8',
-    env: process.env,
-    windowsVerbatimArguments: true,
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  return {exitCode: result.status ?? 1, stdout: result.stdout || '', stderr: result.stderr || String(result.error || '')};
+  const ms = Math.round(performance.now() - t0);
+  return {
+    exitCode: out.exitCode ?? 1,
+    stdout: out.stdout || '',
+    stderr: out.stderr || '',
+    signal: out.signal ?? null,
+    ms,
+  };
+}
+
+function reportFailure(kind, name, result) {
+  const rc = result.exitCode;
+  const sig = result.signal ?? 'none';
+  const ms = result.ms ?? -1;
+  const so = result.stdout || '';
+  const se = result.stderr || '';
+  console.log(`[smoke] ${kind} failed: name=${name} rc=${rc} signal=${sig} ms=${ms} stdout_bytes=${so.length} stderr_bytes=${se.length}`);
+  if (so.length === 0 && se.length === 0) {
+    console.log('[smoke]   (compiler stdout+stderr empty)');
+  } else {
+    if (so.length) {
+      for (const line of so.replace(/\r\n/g, '\n').split('\n').filter((l, i, a) => i < a.length - 1 || l)) {
+        console.log(`    [stdout] ${line}`);
+      }
+    } else {
+      console.log('[smoke]   stdout: EMPTY');
+    }
+    if (se.length) {
+      for (const line of se.replace(/\r\n/g, '\n').split('\n').filter((l, i, a) => i < a.length - 1 || l)) {
+        console.log(`    [stderr] ${line}`);
+      }
+    } else {
+      console.log('[smoke]   stderr: EMPTY');
+    }
+  }
 }
 
 const expect = new Map([
@@ -50,11 +88,6 @@ const expect = new Map([
   ['04_iface_enum', '12.560000 3'],
   ['05_ffi', '7'],
 ]);
-
-async function printIndented(file) {
-  const contents = await fs.readFile(file, 'utf8');
-  process.stdout.write(contents.split('\n').filter((line, i, lines) => i < lines.length - 1 || line).map(line => `    ${line}\n`).join(''));
-}
 
 function inspectPe(file) {
   const result = spawnSync('objdump', ['-p', file], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
@@ -194,27 +227,25 @@ for (const [name, wanted] of expect) {
   await Promise.all([fs.rm(exe, {force: true}), fs.rm(buildLog, {force: true}), fs.rm(runLog, {force: true})]);
   console.log(`[smoke] sample ${name}`);
   const built = await runCommand(cjcj, [src, '-o', exe]);
-  await fs.writeFile(buildLog, built.stdout + built.stderr);
+  await fs.writeFile(buildLog, `rc=${built.exitCode} signal=${built.signal ?? 'none'} ms=${built.ms}\n--- stdout ---\n${built.stdout}\n--- stderr ---\n${built.stderr}`);
   if (built.exitCode !== 0) {
-    console.log('[smoke] compile failed');
-    await printIndented(buildLog);
+    reportFailure('compile', name, built);
     fail++;
     continue;
   }
   const ran = await runCommand(exe, []);
-  await fs.writeFile(runLog, ran.stderr);
+  await fs.writeFile(runLog, `rc=${ran.exitCode} signal=${ran.signal ?? 'none'} ms=${ran.ms}\n--- stdout ---\n${ran.stdout}\n--- stderr ---\n${ran.stderr}`);
   // Normalize CRLF before comparing: Windows println emits \r\n, and the
   // expectations encode line structure, not the OS newline byte sequence.
   const got = ran.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '');
   if (ran.exitCode !== 0) {
-    console.log(`[smoke] run failed: exit ${ran.exitCode}`);
-    await printIndented(runLog);
+    reportFailure('run', name, ran);
     fail++;
   } else if (got === wanted) {
-    console.log(`[smoke] passed: [${got}]`);
+    console.log(`[smoke] passed: [${got}] ms_compile=${built.ms} ms_run=${ran.ms}`);
     pass++;
   } else {
-    console.log(`[smoke] mismatch: expected [${wanted}] got [${got}]`);
+    console.log(`[smoke] mismatch: expected [${wanted}] got [${got}] ms_compile=${built.ms} ms_run=${ran.ms}`);
     fail++;
   }
 }
@@ -226,18 +257,16 @@ await fs.cp(path.join(here, 'macro_demo'), macroBuild, {recursive: true});
 let macroOk = true;
 let got = '';
 let result = await runCommand(cjcj, ['--compile-macro', 'def.cj'], path.join(macroBuild, 'mymacros'));
-await fs.writeFile(path.join(work, 'macro.build.log'), result.stdout + result.stderr);
+await fs.writeFile(path.join(work, 'macro.build.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
 if (result.exitCode !== 0) {
-  console.log('[smoke] macro package compile failed');
-  await printIndented(path.join(work, 'macro.build.log'));
+  reportFailure('compile', '06_macro/package', result);
   macroOk = false;
 }
 if (macroOk) {
   result = await runCommand(cjcj, ['main.cj', '--import-path', macroBuild, '-o', path.join(macroBuild, `app/app${exeSuffix}`)], path.join(macroBuild, 'app'));
-  await fs.writeFile(path.join(work, 'macro.app.log'), result.stdout + result.stderr);
+  await fs.writeFile(path.join(work, 'macro.app.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
   if (result.exitCode !== 0) {
-    console.log('[smoke] macro app compile failed');
-    await printIndented(path.join(work, 'macro.app.log'));
+    reportFailure('compile', '06_macro/app', result);
     if (process.platform === 'win32') {
       // Release R5: the freshly compiled macro DLL fails to dlopen with PATH
       // fully staged — name the unresolved dependency instead of guessing.
@@ -253,11 +282,10 @@ if (macroOk) {
 }
 if (macroOk) {
   result = await runCommand(path.join(macroBuild, `app/app${exeSuffix}`), []);
-  await fs.writeFile(path.join(work, 'macro.run.log'), result.stderr);
+  await fs.writeFile(path.join(work, 'macro.run.log'), `rc=${result.exitCode} signal=${result.signal ?? 'none'} ms=${result.ms}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`);
   got = result.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '');
   if (result.exitCode !== 0) {
-    console.log(`[smoke] macro run failed: exit ${result.exitCode}`);
-    await printIndented(path.join(work, 'macro.run.log'));
+    reportFailure('run', '06_macro/app', result);
     macroOk = false;
   }
 }
