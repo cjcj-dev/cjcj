@@ -2165,8 +2165,8 @@ public class GenerateWrappers <: Handler<InteropContext> {
                 }
                 if (let Some(method) <- (memberDecl as FuncDecl)) {
                     GenerateWrapper(ctx, method, isGenericGlueCode, genericConfigsVector)
-                } else if (let Some(prop) <- (memberDecl as PropDecl)) {
-                    GenerateWrapper(ctx, prop, isGenericGlueCode, genericConfigsVector)
+                } else if (let Some(propDecl) <- (memberDecl as PropDecl)) {
+                    GenerateWrapper(ctx, propDecl, isGenericGlueCode, genericConfigsVector)
                 } else if (let Some(field) <- (memberDecl as VarDecl)) {
                     GenerateWrapper(ctx, field, isGenericGlueCode, genericConfigsVector)
                 }
@@ -2200,25 +2200,25 @@ public class GenerateWrappers <: Handler<InteropContext> {
         }
     }
 
-    private func GenerateWrapper(ctx: InteropContext, prop: PropDecl, isGenericGlueCode: Bool,
+    private func GenerateWrapper(ctx: InteropContext, propDecl: PropDecl, isGenericGlueCode: Bool,
         genericConfigsVector: ArrayList<GenericConfigInfo>): Unit {
         if (isGenericGlueCode) {
             for (genericConfig in genericConfigsVector) {
-                let funcDecl = prop.getters[0]
+                let funcDecl = propDecl.getters[0]
                 ctx.genDecls.add(ctx.factory.CreateMethodWrapper(funcDecl,
                     genericConfig: Some(genericConfig)))
             }
         } else {
-            ctx.genDecls.add(ctx.factory.CreateGetterWrapper(prop))
+            ctx.genDecls.add(ctx.factory.CreateGetterWrapper(propDecl))
         }
-        if (prop.isVar) {
-            GenerateSetterWrapper(ctx, prop)
+        if (propDecl.isVar) {
+            GenerateSetterWrapper(ctx, propDecl)
         }
     }
 
-    private func GenerateSetterWrapper(ctx: InteropContext, prop: PropDecl): Unit {
-        if (!SkipSetterForValueTypeDecl(prop.outerDecl.getOrThrow())) {
-            ctx.genDecls.add(ctx.factory.CreateSetterWrapper(prop))
+    private func GenerateSetterWrapper(ctx: InteropContext, propDecl: PropDecl): Unit {
+        if (!SkipSetterForValueTypeDecl(propDecl.outerDecl.getOrThrow())) {
+            ctx.genDecls.add(ctx.factory.CreateSetterWrapper(propDecl))
         }
     }
 
