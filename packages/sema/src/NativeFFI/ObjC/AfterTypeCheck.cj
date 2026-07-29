@@ -516,6 +516,21 @@ public class FindCJMappingInterface {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/FindFwdClass.cpp:20-28.
+public class FindFwdClass {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (file in ctx.pkg.files) {
+            for (decl in file.decls) {
+                if (let Some(classDecl) <- (decl as ClassDecl)) {
+                    if (ctx.typeMapper.IsObjCFwdClass(classDecl)) {
+                        ctx.fwdClasses.add(classDecl)
+                    }
+                }
+            }
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Desugar.cpp:16-75.
 public func Desugar(ctx: InteropContext): Unit {
     if (!ctx.bridge.IsInteropLibAccessible()) {
