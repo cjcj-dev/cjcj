@@ -39,14 +39,18 @@ public func ExecuteFrontendPhase(driver: Driver): Bool {
     }
     let frontendOptions = FrontendToolDriverOptions()
     let frontendDriver = FrontendToolDriver(driverOptions: frontendOptions)
+    // C++ Driver.cpp:228-246 DeleteInstance joins ~CompilerInstance (destroyFut.get).
     if (!ExecuteFrontendByDriver(frontendInstance, frontendDriver)) {
+        frontendInstance.JoinDestroyASTResources()
         return false
     }
     if (driver.driverOptions.enableVerbose) {
         PrintFrontendCommand(driver.cangjieHome, driver.driverOptions.GenerateFrontendOptions())
     }
     ApplyFrontendOutputs(driver.driverOptions, frontendOptions)
-    return PublishFrontendCjoOutputs(driver.driverOptions)
+    let published = PublishFrontendCjoOutputs(driver.driverOptions)
+    frontendInstance.JoinDestroyASTResources()
+    return published
 }
 
 private func GetFrontendExecutablePath(cangjieHome: String): String {

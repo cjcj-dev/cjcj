@@ -27,6 +27,11 @@ public open class DefaultCompilerInstance {
         return core
     }
 
+    // C++ ~CompilerInstance joins destroyFut (CompilerInstance.cpp:87-91).
+    public func JoinDestroyASTResources(): Unit {
+        core.JoinDestroyASTResources()
+    }
+
     public open func InitCompilerInstance(): Bool {
         return core.InitCompilerInstance()
     }

@@ -37,6 +37,7 @@ import cjcj::chir.CHIRPrinter as ChirPrinter
 import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
 import std.core.Box as CoreBox
+import std.sync.*
 
 foreign {
     func CJ_MCC_InvokeGC(sync: Bool): Unit
@@ -239,6 +240,8 @@ public class CompilerInstance {
     private let pkgCtxMap: HashMap<String, ASTContext> = HashMap<String, ASTContext>()
     private let depPackageInfo: ArrayList<String> = ArrayList<String>()
     private var astResourcesDestroyed: Bool = false
+    // C++ CompilerInstance.h:583 — std::future<void> destroyFut; joined in ~CompilerInstance.
+    private var destroyFut: Option<Future<Unit>> = None
     private var compileStrategy: Option<CompileStrategy> = None
     private var hasTypeCheckerFlag: Bool = false
     private let fileNameMap: HashMap<UInt64, String> = HashMap<UInt64, String>()
@@ -345,8 +348,10 @@ public class CompilerInstance {
             let toDestroyTypeManager = typeManager
             typeManager = None
 
-            // C++: std::async destroyFunc — keep moved roots off the live CI, then FreeIdleMemoryToOS.
-            let _ = spawn {
+            // C++: std::async destroyFunc (CompilerInstance.cpp:173-185).
+            // CJ: drop held roots then InvokeGC (delete ≡ GC reclaim) + FreeIdleMemoryToOS.
+            // Future stored for JoinDestroyASTResources ≡ dtor destroyFut.get() (cpp:87-91).
+            destroyFut = Some(spawn {
                 let _tc = toDestroyTypeChecker
                 let _sema = toDestroySema
                 let _tmgr = toDestroyTestManager
@@ -360,7 +365,16 @@ public class CompilerInstance {
                     CJ_MCC_InvokeGC(true)
                 }
                 FreeIdleMemoryToOS()
-            }
+            })
+        }
+    }
+
+    // C++ ~CompilerInstance (CompilerInstance.cpp:84-97): if Destroyed, destroyFut.get().
+    // CJ has no dtor; callers (FrontendBridge / FrontendTool) must join before instance dies.
+    public func JoinDestroyASTResources(): Unit {
+        if (let Some(fut) <- destroyFut) {
+            destroyFut = None
+            fut.get()
         }
     }
 

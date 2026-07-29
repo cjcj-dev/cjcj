@@ -138,8 +138,11 @@ public func ExecuteFrontendWithResult(
         let driverOptions = DriverOptions()
         driverOptions.CopyFromOptions(instance.invocation.globalOptions, incrementalNoChange)
         let _ = instance.UpdateAndWriteCachedInfoToDisk()
+        // C++ ~CompilerInstance joins destroyFut before process continues (cpp:87-91).
+        instance.JoinDestroyASTResources()
         return FrontendExecutionResult(0, driverOptions: driverOptions)
     }
+    instance.JoinDestroyASTResources()
     }
     return FrontendExecutionResult(1)
 }
