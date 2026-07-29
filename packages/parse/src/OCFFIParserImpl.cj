@@ -1,7 +1,7 @@
 package cjcj::parse
 
 import std.collection.*
-import cjcj::utils.CJC_ABORT
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
 
 public class OCFFIParserImpl {
     public let parser: ParserImpl
@@ -169,14 +169,21 @@ public class OCFFIParserImpl {
     }
 
     public func DiagObjCInitFuncMustBeStatic(node: Node): Unit {
+        CJC_ASSERT(!node.TestAttr(Attribute.STATIC))
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_init_method_must_be_static, node).Emit()
     }
 
     public func DiagObjCInitFuncMustBeInMirrorClass(node: FuncDecl): Unit {
+        if (let Some(outer) <- node.outerDecl) {
+            CJC_ASSERT(!outer.TestAttr(Attribute.OBJ_C_MIRROR) || outer.astKind != ASTKind.CLASS_DECL)
+        }
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_init_method_must_be_in_mirror_class, node).Emit()
     }
 
     public func DiagObjCOptionalFuncMustBeInMirrorClass(fd: FuncDecl): Unit {
+        if (let Some(outer) <- fd.outerDecl) {
+            CJC_ASSERT(!outer.TestAttr(Attribute.OBJ_C_MIRROR) || outer.astKind != ASTKind.INTERFACE_DECL)
+        }
         parser.ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_optional_method_must_be_in_mirror_class, fd).Emit()
     }
 
