@@ -1,7 +1,7 @@
 #!/usr/bin/env zx
 // Build the single sticky std closure with the official C++ frontend.
-// Host is always Linux x64. Target defaults to native linux_x86_64_cjnative;
-// --target windows-x64 cross-builds with llvm-mingw and records managed DLLs.
+// Native release targets build on their matching host runners. Windows x64
+// cross-builds on Linux x64 with llvm-mingw and records managed DLLs.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -35,31 +35,68 @@ if (process.platform !== 'linux' || process.arch !== 'x64') {
 const TARGETS = {
   'linux-x64': {
     platform: 'linux_x86_64_cjnative',
+    host: ['linux', 'x64'],
     buildTarget: null,
     checklist: 'sticky_native_members_linux_x86_64.json',
     libraryPattern: /^libcangjie-std(?:[-.].*)?\.(?:a|so)$/,
     managedPattern: null,
     needsToolchain: false,
+    elfPreflight: true,
+    officialCjcSha256: 'ed806687b1fa0228b84d18b72e01cdc174d75d140cf5f7dd6267598fb80cb509',
+  },
+  'linux-aarch64': {
+    platform: 'linux_aarch64_cjnative',
+    host: ['linux', 'arm64'],
+    buildTarget: null,
+    checklist: 'sticky_native_members_linux_aarch64.json',
+    libraryPattern: /^libcangjie-std(?:[-.].*)?\.(?:a|so)$/,
+    managedPattern: null,
+    needsToolchain: false,
+    elfPreflight: true,
+  },
+  'darwin-x64': {
+    platform: 'darwin_x86_64_cjnative',
+    host: ['darwin', 'x64'],
+    buildTarget: null,
+    checklist: 'sticky_native_members_darwin_x86_64.json',
+    libraryPattern: /^libcangjie-std(?:[-.].*)?\.(?:a|dylib)$/,
+    managedPattern: null,
+    needsToolchain: false,
+    elfPreflight: false,
+  },
+  'darwin-arm64': {
+    platform: 'darwin_aarch64_cjnative',
+    host: ['darwin', 'arm64'],
+    buildTarget: null,
+    checklist: 'sticky_native_members_darwin_aarch64.json',
+    libraryPattern: /^libcangjie-std(?:[-.].*)?\.(?:a|dylib)$/,
+    managedPattern: null,
+    needsToolchain: false,
+    elfPreflight: false,
   },
   'windows-x64': {
     platform: 'windows_x86_64_cjnative',
+    host: ['linux', 'x64'],
     buildTarget: 'windows-x86_64',
     checklist: 'sticky_native_members_windows_x86_64.json',
     libraryPattern: /^libcangjie-std(?:[-.].*)?\.a$/,
     managedPattern: /^libcangjie-std(?:[-.].*)?\.dll$/,
     needsToolchain: true,
+    elfPreflight: false,
   },
 };
 const targetSpec = TARGETS[targetArgument];
 if (!targetSpec) {
   throw new Error(`unsupported sticky std target: ${targetArgument} (allowed: ${Object.keys(TARGETS).join(', ')})`);
 }
+if (process.platform !== targetSpec.host[0] || process.arch !== targetSpec.host[1]) {
+  throw new Error(`sticky std target ${targetArgument} requires ${targetSpec.host.join('/')}, got ${process.platform}/${process.arch}`);
+}
 if (targetSpec.needsToolchain && !targetToolchain) {
   throw new Error(`sticky std target ${targetArgument} requires --target-toolchain / RUNTIME_TOOLCHAIN`);
 }
 const platform = targetSpec.platform;
-const officialCjcSha256 = process.env.CJCJ_OFFICIAL_CJC_SHA256
-  || 'ed806687b1fa0228b84d18b72e01cdc174d75d140cf5f7dd6267598fb80cb509';
+const officialCjcSha256 = process.env.CJCJ_OFFICIAL_CJC_SHA256 || targetSpec.officialCjcSha256 || '';
 const {runtimeRef: sourceRef, sourceUrl, pinRef, overrideRef} = await resolveRuntimeSource();
 const nativeChecklistPath = path.resolve(
   import.meta.dirname, '..', 'tools', targetSpec.checklist);
@@ -137,7 +174,7 @@ async function runBuild(home, ...args) {
     path.join(home, 'third_party', 'llvm', 'lib'),
     path.join(home, 'runtime', 'lib', platform),
     path.join(home, 'tools', 'lib'),
-    process.env.LD_LIBRARY_PATH || '',
+    process.env[process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH'] || '',
   ].filter(Boolean).join(path.delimiter);
   const pathEntries = [path.join(home, 'bin')];
   if (targetToolchain) pathEntries.push(path.join(targetToolchain, 'bin'));
@@ -146,8 +183,8 @@ async function runBuild(home, ...args) {
     ...process.env,
     CANGJIE_HOME: home,
     PATH: pathEntries.filter(Boolean).join(path.delimiter),
-    LD_LIBRARY_PATH: libraryPath,
   };
+  buildEnv[process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH'] = libraryPath;
   if (targetToolchain) buildEnv.RUNTIME_TOOLCHAIN = targetToolchain;
   await $({cwd: path.join(source, 'stdlib'), env: buildEnv})
     `python3 build.py ${args}`;
@@ -157,7 +194,7 @@ try {
   console.log(`[sticky-std] target=${targetArgument} platform=${platform} source ref=${sourceRef} pin=${pinRef} override=${overrideRef || '<none>'}`);
   const cjc = await requireFile(path.join(sdk, 'bin', 'cjc'), 'official cjc');
   const cjcSha256 = await sha256(cjc);
-  if (cjcSha256 !== officialCjcSha256) {
+  if (officialCjcSha256 && cjcSha256 !== officialCjcSha256) {
     throw new Error(`official cjc SHA-256 mismatch: expected ${officialCjcSha256}, got ${cjcSha256}`);
   }
   const llc = await requireFile(path.join(sdk, 'third_party', 'llvm', 'bin', 'llc'), 'fixed llc');
@@ -231,7 +268,7 @@ try {
   if (stickyLibraries.files.length === 0) throw new Error(`no sticky std libraries staged under ${stickyDirectory}`);
 
   let preflight = null;
-  if (!targetSpec.managedPattern) {
+  if (targetSpec.elfPreflight) {
     preflight = stickyPreflight(stickyDirectory);
   }
 
