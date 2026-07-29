@@ -1557,6 +1557,171 @@ public class ASTFactory {
         return result
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1000-1067.
+    public func CreateGetterWrapper(pd: PropDecl): FuncDecl {
+        let outerDecl = (pd.outerDecl.getOrThrow() as InheritableDecl).getOrThrow()
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        var objTmpVarDecl: Option<VarDecl> = None
+        let getter = pd.getters[0].getOrThrow()
+        let propGetterExpr: MemberAccess
+        if (pd.TestAttr(Attribute.STATIC)) {
+            propGetterExpr = CreateMemberAccess(WithinFile<RefExpr>(CreateRefExpr(outerDecl), pd.curFile), getter)
+        } else {
+            let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+            let registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+            wrapperParams.add(registryIdParam)
+            let getFromRegistryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam),
+                CreateRefType(outerDecl))
+            let temp = CreateTmpVarDecl(CreateRefType(outerDecl), getFromRegistryCall)
+            objTmpVarDecl = Some(temp)
+            propGetterExpr = CreateMemberAccess(CreateRefExpr(temp), getter)
+        }
+        propGetterExpr.curFile = pd.curFile
+        propGetterExpr.begin = pd.GetBegin()
+        propGetterExpr.end = pd.GetEnd()
+        let propGetterCall = CreateCallExpr(propGetterExpr, ArrayList<FuncArg>(), Some(getter), pd.GetTy(),
+            CallKind.CALL_DECLARED_FUNCTION)
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) { wrapperParamTys.add(param.GetTy().getOrThrow()) }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(),
+            typeMapper.Cj2CType(pd.GetTy().getOrThrow()), cfg: cfg)
+        let wrapperNodes = ArrayList<Node>()
+        if (let Some(temp) <- objTmpVarDecl) { wrapperNodes.add(temp) }
+        var unwrappedGetterCall = UnwrapEntity(propGetterCall)
+        if (TypeMapper.IsObjCObjectType(pd.GetTy().getOrThrow())) {
+            unwrappedGetterCall = CreateObjCRetainCall(unwrappedGetterCall)
+        }
+        wrapperNodes.add(unwrappedGetterCall)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(wrapperParamList)
+        let wrapperBody = CreateFuncBody(paramLists, CreateType(wrapperTy.retTy),
+            CreateBlock(wrapperNodes, wrapperTy.retTy), wrapperTy)
+        let wrapper = CreateFuncDecl(nameGenerator.GeneratePropGetterWrapperName(pd), wrapperBody, wrapperTy)
+        wrapper.moduleName = pd.moduleName
+        wrapper.fullPackageName = pd.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, pd.curFile.getOrThrow())
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1069-1158.
+    public func CreateSetterWrapper(pd: PropDecl): FuncDecl {
+        let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let convertedPropTy = typeMapper.Cj2CType(pd.GetTy().getOrThrow())
+        let setterParam = CreateFuncParam(VALUE_IDENT, CreateType(convertedPropTy), None, convertedPropTy)
+        let outerDecl = (pd.outerDecl.getOrThrow() as InheritableDecl).getOrThrow()
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        let wrapperNodes = ArrayList<Node>()
+        let setter = pd.setters[0].getOrThrow()
+        let originParams = setter.funcBody.getOrThrow().paramLists[0].params
+        let propSetterExpr: Expr
+        var objTmpVarDecl: Option<Decl> = None
+        if (pd.TestAttr(Attribute.STATIC)) {
+            wrapperParams.add(setterParam)
+            propSetterExpr = CreateMemberAccess(WithinFile<RefExpr>(CreateRefExpr(outerDecl), pd.curFile), setter)
+        } else {
+            let registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+            let getFromRegistryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam),
+                CreateRefType(outerDecl))
+            let temp = CreateTmpVarDecl(CreateRefType(outerDecl), getFromRegistryCall)
+            objTmpVarDecl = Some(temp)
+            wrapperParams.add(registryIdParam)
+            wrapperParams.add(setterParam)
+            propSetterExpr = CreateMemberAccess(CreateRefExpr(temp), setter)
+        }
+        propSetterExpr.curFile = pd.curFile
+        propSetterExpr.begin = pd.GetBegin()
+        propSetterExpr.end = pd.GetEnd()
+        CJC_ASSERT(wrapperParams.size <= 2)
+        let wrapperParam = wrapperParams[wrapperParams.size - 1]
+        let originParam = originParams[originParams.size - 1]
+        let wrappedParamRef = WrapEntity(CreateRefExpr(wrapperParam), originParam.GetTy().getOrThrow())
+        let setterArgs = ArrayList<FuncArg>()
+        setterArgs.add(CreateFuncArg(wrappedParamRef, wrapperParam.identifier.Val(), originParam.GetTy()))
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) { wrapperParamTys.add(param.GetTy().getOrThrow()) }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), unitTy, cfg: cfg)
+        let setterCall = CreateCallExpr(propSetterExpr, setterArgs, Some(setter), Some(unitTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+        if (let Some(temp) <- objTmpVarDecl) { wrapperNodes.add(temp) }
+        wrapperNodes.add(setterCall)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(wrapperParamList)
+        let wrapperBody = CreateFuncBody(paramLists, CreateUnitType(pd.curFile),
+            CreateBlock(wrapperNodes, wrapperTy.retTy), wrapperTy)
+        let wrapper = CreateFuncDecl(nameGenerator.GetPropSetterWrapperName(pd), wrapperBody, wrapperTy)
+        wrapper.moduleName = pd.moduleName
+        wrapper.fullPackageName = pd.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, pd.curFile.getOrThrow())
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1260-1320.
+    public func CreateSetterWrapper(field: VarDecl): FuncDecl {
+        let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let convertedFieldTy = typeMapper.Cj2CType(field.GetTy().getOrThrow())
+        let setterParam = CreateFuncParam(VALUE_IDENT, CreateType(convertedFieldTy), None, convertedFieldTy)
+        let setterParamRef = CreateRefExpr(setterParam)
+        let outerDecl = (field.outerDecl.getOrThrow() as InheritableDecl).getOrThrow()
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        let wrapperNodes = ArrayList<Node>()
+        let lhs: MemberAccess
+        if (field.TestAttr(Attribute.STATIC)) {
+            lhs = CreateMemberAccess(WithinFile<RefExpr>(CreateRefExpr(outerDecl), field.curFile), field)
+        } else {
+            let registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+            wrapperParams.add(registryIdParam)
+            let getFromRegistryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam),
+                CreateRefType(outerDecl))
+            let objTmpVarDecl = CreateTmpVarDecl(CreateRefType(outerDecl), getFromRegistryCall)
+            lhs = CreateMemberAccess(CreateRefExpr(objTmpVarDecl), field)
+            wrapperNodes.add(objTmpVarDecl)
+        }
+        let assignFieldExpr = CreateAssignExpr(lhs, WrapEntity(setterParamRef, field.GetTy().getOrThrow()), unitTy)
+        assignFieldExpr.curFile = field.curFile
+        assignFieldExpr.begin = field.GetBegin()
+        assignFieldExpr.end = field.GetEnd()
+        wrapperNodes.add(assignFieldExpr)
+        wrapperParams.add(setterParam)
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) { wrapperParamTys.add(param.GetTy().getOrThrow()) }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), unitTy, cfg: cfg)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(wrapperParamList)
+        let wrapperBody = CreateFuncBody(paramLists, CreateUnitType(field.curFile),
+            CreateBlock(wrapperNodes, wrapperTy.retTy), wrapperTy)
+        let wrapper = CreateFuncDecl(nameGenerator.GetFieldSetterWrapperName(field), wrapperBody, wrapperTy)
+        wrapper.moduleName = field.moduleName
+        wrapper.fullPackageName = field.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, field.curFile.getOrThrow())
+        return wrapper
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:178-296.
     public func WrapEntity(expr: Expr, wrapTy: Ty, withRetain!: Retain = Retain.UNRETAINED): Expr {
         if (TypeMapper.IsObjCMirror(wrapTy)) {
