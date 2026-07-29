@@ -2125,6 +2125,133 @@ public class InteropContext {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateWrappers.cpp:19-167.
+public class GenerateWrappers <: Handler<InteropContext> {
+    private let interopType: InteropType
+
+    public init(interopType: InteropType) {
+        this.interopType = interopType
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        let genWrapper = {decl: Decl, isGenericGlueCode: Bool,
+            genericConfigsVector: ArrayList<GenericConfigInfo> =>
+            if (decl.TestAttr(Attribute.IS_BROKEN)) {
+                return
+            }
+            let results = ArrayList<Decl>()
+            if (let Some(enumDecl) <- (decl as EnumDecl)) {
+                for (member in enumDecl.members) {
+                    results.add(member)
+                }
+            } else {
+                for (member in decl.GetMemberDeclPtrs()) {
+                    results.add(member)
+                }
+            }
+            for (memberDecl in results) {
+                if (memberDecl.TestAnyAttr(Attribute.IS_BROKEN, Attribute.CONSTRUCTOR)) {
+                    continue
+                }
+                if (interopType == InteropType.ObjC_Mirror && !memberDecl.TestAttr(Attribute.PUBLIC)) {
+                    continue
+                }
+                if (ctx.factory.IsGeneratedMember(memberDecl)) {
+                    continue
+                }
+                if (interopType == InteropType.CJ_Mapping &&
+                    !TypeMapper.IsObjCCJMappingMember(memberDecl)) {
+                    continue
+                }
+                if (let Some(method) <- (memberDecl as FuncDecl)) {
+                    GenerateWrapper(ctx, method, isGenericGlueCode, genericConfigsVector)
+                } else if (let Some(prop) <- (memberDecl as PropDecl)) {
+                    GenerateWrapper(ctx, prop, isGenericGlueCode, genericConfigsVector)
+                } else if (let Some(field) <- (memberDecl as VarDecl)) {
+                    GenerateWrapper(ctx, field, isGenericGlueCode, genericConfigsVector)
+                }
+            }
+        }
+
+        if (interopType == InteropType.ObjC_Mirror) {
+            for (impl in ctx.impls) {
+                genWrapper(impl, false, ArrayList<GenericConfigInfo>())
+            }
+        } else if (interopType == InteropType.CJ_Mapping) {
+            for (cjMapping in ctx.cjMappings) {
+                let genericConfigsVector = ArrayList<GenericConfigInfo>()
+                let isGenericGlueCode = Box<Bool>(false)
+                InitGenericConfigs(cjMapping.curFile.getOrThrow(), cjMapping,
+                    genericConfigsVector, isGenericGlueCode)
+                genWrapper(cjMapping, isGenericGlueCode.value, genericConfigsVector)
+            }
+        }
+    }
+
+    private func GenerateWrapper(ctx: InteropContext, method: FuncDecl, isGenericGlueCode: Bool,
+        genericConfigsVector: ArrayList<GenericConfigInfo>): Unit {
+        if (isGenericGlueCode) {
+            for (genericConfig in genericConfigsVector) {
+                ctx.genDecls.add(ctx.factory.CreateMethodWrapper(method,
+                    genericConfig: Some(genericConfig)))
+            }
+        } else {
+            ctx.genDecls.add(ctx.factory.CreateMethodWrapper(method))
+        }
+    }
+
+    private func GenerateWrapper(ctx: InteropContext, prop: PropDecl, isGenericGlueCode: Bool,
+        genericConfigsVector: ArrayList<GenericConfigInfo>): Unit {
+        if (isGenericGlueCode) {
+            for (genericConfig in genericConfigsVector) {
+                let funcDecl = prop.getters[0]
+                ctx.genDecls.add(ctx.factory.CreateMethodWrapper(funcDecl,
+                    genericConfig: Some(genericConfig)))
+            }
+        } else {
+            ctx.genDecls.add(ctx.factory.CreateGetterWrapper(prop))
+        }
+        if (prop.isVar) {
+            GenerateSetterWrapper(ctx, prop)
+        }
+    }
+
+    private func GenerateSetterWrapper(ctx: InteropContext, prop: PropDecl): Unit {
+        if (!SkipSetterForValueTypeDecl(prop.outerDecl.getOrThrow())) {
+            ctx.genDecls.add(ctx.factory.CreateSetterWrapper(prop))
+        }
+    }
+
+    private func GenerateWrapper(ctx: InteropContext, field: VarDecl, isGenericGlueCode: Bool,
+        genericConfigsVector: ArrayList<GenericConfigInfo>): Unit {
+        if (ctx.factory.IsGeneratedNativeHandleField(field)) {
+            return
+        }
+        if (isGenericGlueCode) {
+            for (genericConfig in genericConfigsVector) {
+                ctx.genDecls.add(ctx.factory.CreateGetterWrapper(field,
+                    genericConfig: Some(genericConfig)))
+            }
+        } else {
+            ctx.genDecls.add(ctx.factory.CreateGetterWrapper(field))
+        }
+        if (field.isVar) {
+            GenerateSetterWrapper(ctx, field)
+        }
+    }
+
+    private func GenerateSetterWrapper(ctx: InteropContext, field: VarDecl): Unit {
+        if (!SkipSetterForValueTypeDecl(field.outerDecl.getOrThrow())) {
+            ctx.genDecls.add(ctx.factory.CreateSetterWrapper(field))
+        }
+    }
+
+    private func SkipSetterForValueTypeDecl(decl: Decl): Bool {
+        return interopType == InteropType.CJ_Mapping &&
+            (decl.GetTy().getOrThrow() as StructTy).isSome()
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateGlueCode.cpp:20-92.
 public class GenerateGlueCode <: Handler<InteropContext> {
     private let interopType: InteropType
