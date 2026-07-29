@@ -637,18 +637,18 @@ public class ASTFactory {
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2026-2030.
-    public func CreatePropGetterCallViaMsgSend(prop: PropDecl, nativeHandle: Expr): Expr {
-        let objcName = nameGenerator.GetObjCGetterName(prop)
-        return CreateObjCMsgSendCall(nativeHandle, objcName, typeMapper.Cj2CType(prop.GetTy().getOrThrow()),
+    public func CreatePropGetterCallViaMsgSend(pd: PropDecl, nativeHandle: Expr): Expr {
+        let objcName = nameGenerator.GetObjCGetterName(pd)
+        return CreateObjCMsgSendCall(nativeHandle, objcName, typeMapper.Cj2CType(pd.GetTy().getOrThrow()),
             ArrayList<Expr>())
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2032-2037.
-    public func CreatePropSetterCallViaMsgSend(prop: PropDecl, nativeHandle: Expr, arg: Expr): Expr {
-        let objcName = nameGenerator.GetObjCSetterName(prop)
+    public func CreatePropSetterCallViaMsgSend(pd: PropDecl, nativeHandle: Expr, arg: Expr): Expr {
+        let objcName = nameGenerator.GetObjCSetterName(pd)
         let args = ArrayList<Expr>()
         args.add(arg)
-        return CreateObjCMsgSendCall(nativeHandle, objcName, typeMapper.Cj2CType(prop.GetTy().getOrThrow()), args)
+        return CreateObjCMsgSendCall(nativeHandle, objcName, typeMapper.Cj2CType(pd.GetTy().getOrThrow()), args)
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2039-2072.
