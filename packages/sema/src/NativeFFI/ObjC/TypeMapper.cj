@@ -23,6 +23,7 @@ private let NATIVE_UINT_TYPE: String = "size_t"
 private let FLOAT_TYPE: String = "float"
 private let DOUBLE_TYPE: String = "double"
 private let BOOL_TYPE: String = "BOOL"
+private let CHAR_PTR_TYPE: String = "char*"
 private let STRUCT_TYPE_PREFIX: String = "struct "
 private let TYPEDEF_PREFIX: String = "typedef "
 
@@ -81,17 +82,17 @@ private func SupportMemberFunc(decl: Decl, validTy: (Ty) -> Bool): Bool {
 public class TypeMapper {
     private let bridge: InteropLibBridge
     private let typeManager: TypeManager
-    private let mangler: BaseMangler = BaseMangler()
 
     public init(bridge: InteropLibBridge, typeManager: TypeManager) {
         this.bridge = bridge
         this.typeManager = typeManager
     }
 
-    public func BuildFunctionalCType(funcType: FuncTy, argTypes: ArrayList<Ty>, resultType: Ty, isBlock: Bool,
+    public static func BuildFunctionalCType(funcType: FuncTy, argTypes: ArrayList<Ty>, resultType: Ty, isBlock: Bool,
         toString: (Ty) -> String): MappedCType {
         let typedefNamePrefix = if (isBlock) { "Block" } else { "Func" }
         let designator = if (isBlock) { "^" } else { "*" }
+        let mangler = BaseMangler()
         let mangledName = typedefNamePrefix + MangleTypedefName(mangler.MangleAstSemanticType(funcType))
         var decl = TYPEDEF_PREFIX + toString(resultType) + "(" + designator + mangledName + ")(" 
         for (argType in argTypes) { decl += toString(argType) + "," }
@@ -135,7 +136,7 @@ public class TypeMapper {
         return cjty
     }
 
-    public func Cj2ObjCForObjC(from: Ty): MappedCType {
+    public static func Cj2ObjCForObjC(from: Ty): MappedCType {
         match (from.kind) {
             case TypeKind.TYPE_UNIT => return MappedCType(VOID_TYPE)
             case TypeKind.TYPE_INT8 => return MappedCType(INT8_TYPE)
@@ -151,6 +152,7 @@ public class TypeMapper {
             case TypeKind.TYPE_FLOAT32 => return MappedCType(FLOAT_TYPE)
             case TypeKind.TYPE_FLOAT64 | TypeKind.TYPE_IDEAL_FLOAT => return MappedCType(DOUBLE_TYPE)
             case TypeKind.TYPE_BOOLEAN => return MappedCType(BOOL_TYPE)
+            case TypeKind.TYPE_CSTRING => return MappedCType(CHAR_PTR_TYPE)
             case TypeKind.TYPE_STRUCT =>
                 if (TypeMapper.IsObjCPointer(from)) { let result = Cj2ObjCForObjC(from.typeArgs[0]); result.usage += "*"; return result }
                 if (Ty.IsCStructType(from)) { return MappedCType(STRUCT_TYPE_PREFIX + from.name) }
@@ -167,7 +169,14 @@ public class TypeMapper {
                     if (let Some(value) <- actualFuncType) { return BuildFunctionalCType(value, value.paramTys, value.retTy, true, { ty => Cj2ObjCForObjC(ty).usage }) }
                     return MappedCType(UNSUPPORTED_TYPE)
                 }
-                if (TypeMapper.IsObjCObjectType(from)) { return MappedCType(from.name + "*") }
+                if (TypeMapper.IsObjCObjectType(from)) {
+                    let decl = Ty.GetDeclOfTy(from)
+                    CJC_NULLPTR_CHECK(decl)
+                    if (let Some(userDefinedName) <- NameGenerator.GetUserDefinedObjCName(decl.getOrThrow())) {
+                        return MappedCType(userDefinedName + "*")
+                    }
+                    return MappedCType(from.name + "*")
+                }
                 return MappedCType(UNSUPPORTED_TYPE)
             case TypeKind.TYPE_INTERFACE =>
                 if (TypeMapper.IsObjCId(from)) { return MappedCType("id") }
