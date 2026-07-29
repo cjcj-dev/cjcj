@@ -63,10 +63,12 @@ jobs:
           attest="$(grep '^STICKY_CLOSURE ' sticky-std-linux-aarch64.log | tail -1)"
           test -n "$attest"
           echo "attestation=$attest" >> "$GITHUB_OUTPUT"
-          echo "### linux-aarch64 sticky std" >> "$GITHUB_STEP_SUMMARY"
-          echo '```text' >> "$GITHUB_STEP_SUMMARY"
-          echo "$attest" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### linux-aarch64 sticky std"
+            echo '```text'
+            echo "$attest"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sticky std closure and attestation
         uses: actions/upload-artifact@v7
