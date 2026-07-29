@@ -645,7 +645,7 @@ public class DesugarSyntheticWrappers {
 private func ShouldDesugarTypecheck(typeNode: Type, expr: Expr): Bool {
     let castDecl = Ty.GetDeclOfTy(typeNode.GetTy()) as ClassLikeDecl
     let objDecl = Ty.GetDeclOfTy(expr.GetTy()) as ClassLikeDecl
-    if ((let None <- objDecl) || (let None <- castDecl) ||
+    if (objDecl.isNone() || castDecl.isNone() ||
         !castDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR_SUBTYPE, Attribute.OBJ_C_MIRROR)) {
         return false
     }
