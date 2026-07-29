@@ -1,0 +1,31 @@
+# file	T1_points	note
+s01_basic_alias.cj	S1_resolve	basic type A = Int64; use as type & value
+s02_nested_alias_chain.cj	S1_resolve,S2_chain	A->B->C chain GetLastTypeAliasTarget
+s03_cycle_simple.cj	S3_cycle	D=F=D TypeAliasCircleCheck
+s04_cycle_generic.cj	S3_cycle,S4_generic	generic cycle + unused param warn
+s05_unused_typeparam.cj	S5_unused	GetUnusedTysInTypeAlias single
+s06_unused_multi.cj	S5_unused	unused multi params
+s07_generic_class_alias.cj	S4_generic,S6_expand	generic alias to class + fully applied
+s08_nested_generic_expand.cj	S2_chain,S4_generic,S6_expand	nested TypeClass mapping
+s09_alias_extend.cj	S7_extend	extend on alias-expanded type
+s10_arity_mismatch.cj	S8_arity	type arg count vs alias params
+s11_infer_fail.cj	S9_infer	unable to infer via alias ctor
+s12_infer_context.cj	S9_infer,S6_expand	contextual inference through alias
+s13_nested_unused.cj	S5_unused,S6_expand	unused Y in TypeClass3 + arity
+s14_func_type_alias.cj	S10_func	alias to function type
+s15_enum_alias.cj	S1_resolve,S11_enum	alias to generic enum + match
+s16_option_alias.cj	S1_resolve	alias to Option
+s17_nested_static_prop.cj	S2_chain,S6_expand	multi-hop + static prop via alias
+s18_extend_via_alias.cj	S7_extend	static method via alias of Array
+s19_constraint_prop.cj	S12_constraint	where T<:ToString through alias (fail)
+s20_constraint_ok.cj	S12_constraint	where through alias (ok)
+s21_dup_interface.cj	S13_dup_iface	duplicate interface via alias
+s22_alias_superclass.cj	S14_inherit	alias as superclass
+s23_partial_infer_static.cj	S9_infer,S6_expand	partial infer static call C.test
+s24_access_external_internal.cj	S15_access	public alias to private type
+s25_func_alias_run.cj	S10_func,S6_expand	func-type alias assigned + call
+s26_byteslice_alias.cj	S4_generic,S6_expand	nested Array alias instantiation
+s27_triple_nested.cj	S2_chain,S4_generic	A2=A1=A triple
+s28_constraint_field.cj	S12_constraint	field typed as constrained alias (ok)
+s29_constraint_field_fail.cj	S12_constraint	field constraint fail through alias
+s30_unalias_binop.cj	S1_resolve,S5_unused	unalias then binop type check
