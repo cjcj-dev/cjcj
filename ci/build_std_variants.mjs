@@ -130,11 +130,13 @@ async function matchingFiles(directory, pattern) {
   return (await fs.readdir(directory)).filter(name => pattern.test(name)).sort();
 }
 
-async function createBuildSdkOverlay() {
+async function createBuildSdkOverlay(runtimeOverlayRoot = '') {
   await fs.mkdir(buildSdk, {recursive: true});
-  for (const name of ['bin', 'include', 'modules', 'runtime', 'tools']) {
+  for (const name of ['bin', 'include', 'modules', 'tools']) {
     await fs.symlink(path.join(sdk, name), path.join(buildSdk, name), 'dir');
   }
+  // Windows DLL links must resolve the sticky ABI from the cross-built runtime.
+  await fs.symlink(runtimeOverlayRoot || path.join(sdk, 'runtime'), path.join(buildSdk, 'runtime'), 'dir');
   await fs.symlink(path.join(sdk, 'third_party'), path.join(buildSdk, 'third_party'), 'dir');
 
   const sdkLib = path.join(sdk, 'lib');
@@ -223,12 +225,17 @@ try {
   const actualRef = (await $({stdio: 'pipe'})`git -C ${source} rev-parse HEAD`).stdout.trim();
   if (actualRef !== sourceRef) throw new Error(`runtime source mismatch: expected ${sourceRef}, got ${actualRef}`);
 
-  await createBuildSdkOverlay();
-  createStickySdkOverlay(buildSdk, stickySdk);
-
   const targetLib = targetLibOverride
-    || path.join(buildSdk, 'runtime', 'lib', platform);
+    || path.join(sdk, 'runtime', 'lib', platform);
   await requireDirectory(targetLib, 'sticky std target-lib');
+  const runtimeOverlay = targetSpec.buildTarget
+    ? path.resolve(targetLib, '..', '..')
+    : '';
+  if (runtimeOverlay) {
+    await requireFile(path.join(targetLib, 'libcangjie-runtime.dll'), 'sticky Windows runtime DLL');
+  }
+  await createBuildSdkOverlay(runtimeOverlay);
+  createStickySdkOverlay(buildSdk, stickySdk);
 
   const buildArgs = ['build', '-t', 'release', `-j${jobs}`, `--target-lib=${targetLib}`];
   if (targetSpec.buildTarget) {
