@@ -37,7 +37,7 @@ const TARGETS = {
     platform: 'linux_x86_64_cjnative',
     host: ['linux', 'x64'],
     buildTarget: null,
-    checklist: 'sticky_native_members_linux_x86_64.json',
+    checklist: 'sticky_native_members_linux.json',
     libraryPattern: /^libcangjie-std(?:[-.].*)?\.(?:a|so)$/,
     managedPattern: null,
     needsToolchain: false,
@@ -48,7 +48,7 @@ const TARGETS = {
     platform: 'linux_aarch64_cjnative',
     host: ['linux', 'arm64'],
     buildTarget: null,
-    checklist: 'sticky_native_members_linux_aarch64.json',
+    checklist: 'sticky_native_members_linux.json',
     libraryPattern: /^libcangjie-std(?:[-.].*)?\.(?:a|so)$/,
     managedPattern: null,
     needsToolchain: false,
@@ -58,7 +58,7 @@ const TARGETS = {
     platform: 'darwin_x86_64_cjnative',
     host: ['darwin', 'x64'],
     buildTarget: null,
-    checklist: 'sticky_native_members_darwin_x86_64.json',
+    checklist: 'sticky_native_members_darwin.json',
     libraryPattern: /^libcangjie-std(?:[-.].*)?\.(?:a|dylib)$/,
     managedPattern: null,
     needsToolchain: false,
@@ -68,7 +68,7 @@ const TARGETS = {
     platform: 'darwin_aarch64_cjnative',
     host: ['darwin', 'arm64'],
     buildTarget: null,
-    checklist: 'sticky_native_members_darwin_aarch64.json',
+    checklist: 'sticky_native_members_darwin.json',
     libraryPattern: /^libcangjie-std(?:[-.].*)?\.(?:a|dylib)$/,
     managedPattern: null,
     needsToolchain: false,
@@ -101,7 +101,7 @@ const {runtimeRef: sourceRef, sourceUrl, pinRef, overrideRef} = await resolveRun
 const nativeChecklistPath = path.resolve(
   import.meta.dirname, '..', 'tools', targetSpec.checklist);
 const nativeChecklist = JSON.parse(await fs.readFile(nativeChecklistPath, 'utf8'));
-if (nativeChecklist.sourceRef !== sourceRef || nativeChecklist.platform !== platform) {
+if (nativeChecklist.sourceRef !== sourceRef || !nativeChecklist.platforms?.includes(platform)) {
   throw new Error(`native std member checklist does not cover ${sourceRef}/${platform}`);
 }
 const nativeMembers = nativeChecklist.nativeMembers;
