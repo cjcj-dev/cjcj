@@ -8,8 +8,8 @@ import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateThisRef, CreateType, GetStringDecl,
-    WithinFile, INIT_IDENT, IsObjCGeneratedMember, WrapReturningLambdaCall, WrapReturningLambdaExpr}
+import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateThisCall, CreateThisRef, CreateType,
+    GetStringDecl, WithinFile, INIT_IDENT, IsObjCGeneratedMember, WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
     CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR,
     OBJ_C_FWD_CLASS_SUFFIX,
@@ -823,6 +823,104 @@ public class ASTFactory {
         let nativeHandleDecl = GetNativeVarHandle(target).getOrThrow()
         let thisRef = CreateThisRef(target, target.GetTy().getOrThrow(), target.curFile.getOrThrow())
         return CreateMemberAccess(thisRef, nativeHandleDecl)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2231-2237.
+    public func CreateMethodCallViaMsgSendSuper(fd: FuncDecl, receiver: Expr, objCSuper: Expr,
+        rawArgs: ArrayList<Expr>): Expr {
+        let objcName = nameGenerator.GetObjCDeclName(fd)
+        let funcTy = (fd.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        return CreateObjCMsgSendSuperCall(receiver, objCSuper, objcName,
+            typeMapper.Cj2CType(funcTy.retTy), rawArgs)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2239-2245.
+    public func CreatePropGetterCallViaMsgSendSuper(pd: PropDecl, receiver: Expr, objCSuper: Expr): Expr {
+        let objcName = nameGenerator.GetObjCDeclName(pd)
+        return CreateObjCMsgSendSuperCall(receiver, objCSuper, objcName,
+            typeMapper.Cj2CType(pd.GetTy().getOrThrow()), ArrayList<Expr>())
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2247-2258.
+    public func CreatePropSetterCallViaMsgSendSuper(pd: PropDecl, receiver: Expr, objCSuper: Expr,
+        value: Expr): Expr {
+        var objcName = nameGenerator.GetObjCDeclName(pd)
+        objcName = "set" + objcName[0..1].toAsciiUpper() + objcName[1..] + ":"
+        let args = ArrayList<Expr>()
+        args.add(value)
+        return CreateObjCMsgSendSuperCall(receiver, objCSuper, objcName,
+            typeMapper.Cj2CType(pd.GetTy().getOrThrow()), args)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2260-2280.
+    public func CreateObjCMsgSendSuperCall(receiver: Expr, objCSuper: Expr, selector: String,
+        retTy: Ty, rawArgs: ArrayList<Expr>): CallExpr {
+        let selectorCall = CreateRegisterNameCall(selector, receiver.curFile)
+        let funcType = FuncType()
+        funcType.retType = CreateType(retTy)
+        rawArgs.add((ASTCloner.Clone(selectorCall) as Expr).getOrThrow(), at: 0)
+        rawArgs.add(receiver, at: 0)
+        let paramTys = ArrayList<Ty>()
+        for (param in rawArgs) {
+            let paramTy = param.GetTy().getOrThrow()
+            funcType.paramTypes.add(CreateType(paramTy))
+            paramTys.add(paramTy)
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let funcTy = typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
+        funcType.SetTy(funcTy)
+        return CreateObjCMsgSendSuperCall(objCSuper, selectorCall, funcTy, funcType, rawArgs)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2282-2308.
+    public func CreateObjCMsgSendSuperCall(objCSuper: Expr, selector: Expr, ty: FuncTy,
+        funcType: FuncType, funcArgs: ArrayList<Expr>): CallExpr {
+        let msgSendSuperDecl = bridge.GetObjCMsgSendSuperDecl().getOrThrow()
+        let msgSendSuperArgs = ArrayList<FuncArg>()
+        msgSendSuperArgs.add(CreateFuncArg(objCSuper))
+        msgSendSuperArgs.add(CreateFuncArg(selector))
+        let msgSendSuperRetTy = msgSendSuperDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        let msgSendSuperExpr = CreateCallExpr(CreateRefExpr(msgSendSuperDecl), msgSendSuperArgs, None,
+            Some(msgSendSuperRetTy), CallKind.CALL_DECLARED_FUNCTION)
+        let retTy = funcType.retType.getOrThrow().GetTy().getOrThrow()
+        let cFuncDecl = importManager.GetCoreDecl<BuiltInDecl>(CFUNC_NAME).getOrThrow()
+        let cFuncRefExpr = CreateRefExpr(cFuncDecl)
+        cFuncRefExpr.SetTy(ty)
+        cFuncRefExpr.typeArguments.add(funcType)
+        let cFuncArgs = ArrayList<FuncArg>()
+        cFuncArgs.add(CreateFuncArg(msgSendSuperExpr))
+        let cFuncCallExpr = CreateCallExpr(cFuncRefExpr, cFuncArgs, None, Some(ty),
+            CallKind.CALL_FUNCTION_PTR)
+        let msgSendSuperCallArgs = ArrayList<FuncArg>()
+        for (argExpr in funcArgs) {
+            msgSendSuperCallArgs.add(CreateFuncArg(argExpr))
+        }
+        return CreateCallExpr(cFuncCallExpr, msgSendSuperCallArgs, None, Some(retTy),
+            CallKind.CALL_FUNCTION_PTR)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2322-2339.
+    public func CreateConvertToNSStringCall(id: Expr, classDecl: ClassDecl, curFile: Option<File>): Expr {
+        let convertDecl = bridge.GetConvertToNSStringDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(id))
+        let nativeObjCIdTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let convertCallExpr = CreateCallExpr(CreateRefExpr(convertDecl), args, Some(convertDecl),
+            Some(nativeObjCIdTy), CallKind.CALL_DECLARED_FUNCTION)
+        let ctorArgs = ArrayList<FuncArg>()
+        ctorArgs.add(CreateFuncArg(convertCallExpr))
+        let realTarget = GetGeneratedBaseCtor(classDecl).getOrThrow()
+        return CreateThisCall(classDecl, realTarget, realTarget.GetTy().getOrThrow(),
+            curFile.getOrThrow(), ctorArgs)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2341-2345.
+    public func CreateDescriptionAsStringCall(id: Expr): Expr {
+        let convertDecl = bridge.GetDescriptionAsStringDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(id))
+        return CreateCall(Some(convertDecl), convertDecl.curFile, args: args).getOrThrow()
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1567-1585.
