@@ -2363,6 +2363,129 @@ public class InsertNativeHandleGetterBody <: Handler<InteropContext> {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCFuncCall.cpp:29-40.
+private func GetDirectlyReferencedMemberDecl(expr: Expr): Option<Decl> {
+    if (let Some(memberAccess) <- (expr as MemberAccess)) {
+        return memberAccess.target
+    }
+    if (let Some(refExpr) <- (expr as RefExpr)) {
+        return refExpr.ref.target
+    }
+    return None
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCFuncCall.cpp:42-53.
+private func CreateReceiverExpr(expr: Expr): Option<Expr> {
+    if (let Some(memberAccess) <- (expr as MemberAccess)) {
+        return Some((ASTCloner.Clone(memberAccess.baseExpr.getOrThrow()) as Expr).getOrThrow())
+    }
+    if (let Some(refExpr) <- (expr as RefExpr)) {
+        let owningDecl = refExpr.ref.target.getOrThrow().outerDecl.getOrThrow()
+        return Some(CreateThisRef(Some(owningDecl), owningDecl.GetTy(), expr.curFile))
+    }
+    return None
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCFuncCall.cpp:55-57.
+private enum ObjCFTypeKind {
+    | BLOCK
+    | FUNCPTR
+    | NONE
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCFuncCall.cpp:59-77.
+private func FTypeKindByCallPropertyDecl(tm: TypeMapper, decl: Option<Decl>): ObjCFTypeKind {
+    if (decl.isNone()) {
+        return ObjCFTypeKind.NONE
+    }
+    let target = decl.getOrThrow()
+    if (target.astKind != ASTKind.PROP_DECL || target.outerDecl.isNone() || target.identifier.Val() != "call") {
+        return ObjCFTypeKind.NONE
+    }
+    let typeDecl = target.outerDecl.getOrThrow()
+    if (TypeMapper.IsObjCFunc(typeDecl)) {
+        return ObjCFTypeKind.FUNCPTR
+    }
+    if (TypeMapper.IsObjCBlock(typeDecl)) {
+        return ObjCFTypeKind.BLOCK
+    }
+    return ObjCFTypeKind.NONE
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCFuncCall.cpp:82-151.
+public class RewriteObjCFuncCall <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (file in ctx.pkg.files) {
+            let safeUsage = HashSet<Node>()
+            let walker = Walker(file, visitPre: {node: Node =>
+                if (!node.IsSamePackage(file.curPackage.getOrThrow())) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (node.astKind != ASTKind.CALL_EXPR && node.astKind != ASTKind.MEMBER_ACCESS &&
+                    node.astKind != ASTKind.REF_EXPR) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (safeUsage.contains(node)) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                let expr = (node as Expr).getOrThrow()
+                let decl = GetDirectlyReferencedMemberDecl(expr)
+                let directKind = FTypeKindByCallPropertyDecl(ctx.typeMapper, decl)
+                match (directKind) {
+                    case ObjCFTypeKind.NONE => ()
+                    case _ =>
+                        let target = decl.getOrThrow()
+                        DiagnoseRefactor(ctx.diag,
+                            DiagKindRefactor.sema_objc_func_call_property_can_only_be_called,
+                            node, target.outerDecl.getOrThrow().identifier.Val()).Emit()
+                        node.EnableAttr(Attribute.IS_BROKEN)
+                        return VisitAction.WALK_CHILDREN
+                }
+                if (let None <- (node as CallExpr)) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                let callExpr = (node as CallExpr).getOrThrow()
+                let memberAccess = callExpr.baseFunc.getOrThrow()
+                let referencedDecl = GetDirectlyReferencedMemberDecl(memberAccess)
+                let fTypeKind = FTypeKindByCallPropertyDecl(ctx.typeMapper, referencedDecl)
+                match (fTypeKind) {
+                    case ObjCFTypeKind.NONE => return VisitAction.WALK_CHILDREN
+                    case _ => ()
+                }
+                safeUsage.add(memberAccess)
+                let unwrappedArguments = ArrayList<Expr>()
+                let tmpVar = CreateTmpVarDecl(None, CreateReceiverExpr(memberAccess))
+                match (fTypeKind) {
+                    case ObjCFTypeKind.BLOCK =>
+                        unwrappedArguments.add(CreateMemberCall(
+                            WithinFile<RefExpr>(CreateRefExpr(tmpVar), node.curFile),
+                            ctx.bridge.GetObjCBlockAbiPointerAccessor().getOrThrow()))
+                    case _ => ()
+                }
+                for (originalArg in callExpr.args) {
+                    let cloned = (ASTCloner.Clone(originalArg.expr.getOrThrow()) as Expr).getOrThrow()
+                    unwrappedArguments.add(ctx.factory.UnwrapEntity(cloned))
+                }
+                let fptrAccessor = match (fTypeKind) {
+                    case ObjCFTypeKind.BLOCK => ctx.bridge.GetObjCBlockFPointerAccessor().getOrThrow()
+                    case _ => ctx.bridge.GetObjCFuncFPointerAccessor().getOrThrow()
+                }
+                let pointer = CreateMemberCall(
+                    WithinFile<RefExpr>(CreateRefExpr(tmpVar), node.curFile), fptrAccessor)
+                let call = ctx.factory.CreateFuncCallViaOpaquePointer(pointer,
+                    ctx.typeMapper.Cj2CType(callExpr.GetTy().getOrThrow()), unwrappedArguments)
+                call.curFile = node.curFile
+                let block = ArrayList<Node>()
+                block.add(tmpVar)
+                block.add(ctx.factory.WrapEntity(call, callExpr.GetTy().getOrThrow(), Retain.RETAINED))
+                ctx.factory.SetDesugarExpr(callExpr, WrapReturningLambdaCall(ctx.typeManager, block))
+                return VisitAction.WALK_CHILDREN
+            })
+            let _ = walker.Walk()
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCBlockConstruction.cpp:35-77.
 public class RewriteObjCBlockConstruction <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
