@@ -112,7 +112,11 @@ public class ASTFactory {
     public func CreateNativeHandleExpr(ty: ClassLikeTy, curFile: Option<File>): Expr {
         CJC_ASSERT(TypeMapper.IsObjCMirror(ty) || TypeMapper.IsObjCImpl(ty) ||
             TypeMapper.IsSyntheticWrapper(ty) || TypeMapper.IsObjCFwdClass(ty))
-        return CreateNativeHandleExpr(CreateThisRef(ty.commonDecl, Some(ty), curFile))
+        var commonDecl: Option<Decl> = None
+        if (let Some(decl) <- ty.commonDecl) {
+            commonDecl = Some(decl)
+        }
+        return CreateNativeHandleExpr(CreateThisRef(commonDecl, Some(ty), curFile))
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:115-124.
