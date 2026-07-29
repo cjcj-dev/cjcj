@@ -216,7 +216,8 @@ try {
 
   const buildArgs = ['build', '-t', 'release', `-j${jobs}`, `--target-lib=${targetLib}`];
   if (targetSpec.buildTarget) {
-    buildArgs.push(`--target=${targetSpec.buildTarget}`, `--target-toolchain=${targetToolchain}`);
+    buildArgs.push(`--target=${targetSpec.buildTarget}`,
+      `--target-toolchain=${path.join(targetToolchain, 'bin')}`);
   }
   await runBuild(stickySdk, 'clean');
   const startedSticky = process.hrtime.bigint();
