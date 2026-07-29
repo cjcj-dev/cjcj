@@ -15,7 +15,7 @@ public enum InteropType {
 // C++ uses CRTP to dispatch Handle to DerivedT::HandleImpl. Cangjie has no generic parameter packs;
 // CPP_TO_CJ_TRANSLATION.md requires the protocol default below and the ordered handler table beneath it.
 public interface Handler<ContextT> {
-    public func Handle(ctx: ContextT): Unit {
+    func Handle(ctx: ContextT): Unit {
         HandleImpl(ctx)
     }
 
