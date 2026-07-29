@@ -23,6 +23,71 @@ public class ObjCParamMapper {
 
     public init() {}
 
+    // C++ ObjCParamMapper.cpp:39-96. UB-006: the official STATIC_REF arm emits only right
+    // parentheses and has no caller; fail loudly until a live ABI contract exists.
+    public static func GenerateFuncParamLists(typedefs: HashSet<String>,
+        paramLists: ArrayList<FuncParamList>, selectorComponents: ArrayList<String>,
+        format!: FunctionListFormat = FunctionListFormat.DECLARATION,
+        `type`!: ObjCFunctionType = ObjCFunctionType.INSTANCE,
+        hasForeignNameAnno!: Bool = true): String {
+        var componentIndex: Int64 = 1
+        var genParams = if (let FunctionListFormat.DECLARATION <- format) { "" } else { "(" }
+        if (paramLists.isEmpty()) {
+            return ""
+        }
+        let params = paramLists[0].params
+        for (idx in 0..params.size) {
+            let cur = params[idx]
+            match (format) {
+                case FunctionListFormat.DECLARATION =>
+                    if (idx != 0) {
+                        let name = if (hasForeignNameAnno) {
+                            let value = selectorComponents[componentIndex]
+                            componentIndex++
+                            value
+                        } else {
+                            ""
+                        }
+                        genParams += name + ":"
+                    } else {
+                        genParams += ":"
+                    }
+                    genParams += "(" + MapCJTypeToObjCType(typedefs, cur.GetTy().getOrThrow()) + ")"
+                    genParams += cur.identifier.Val()
+                    if (idx + 1 < params.size) {
+                        genParams += " "
+                    }
+                case FunctionListFormat.STATIC_REF =>
+                    InternalError("STATIC_REF param-list generation is defective upstream " +
+                        "(ObjCParamMapper.cpp:72-77 / ObjCTranspilerCJMapping.cpp:594-649); " +
+                        "arm believed dead — reaching it is a contract violation")
+                case FunctionListFormat.CANGJIE_DECL =>
+                    genParams += cur.identifier.Val() + ": " + Ty.ToString(cur.typeNode.getOrThrow().GetTy())
+                    if (idx + 1 < params.size) {
+                        genParams += ", "
+                    }
+            }
+        }
+        if (let FunctionListFormat.STATIC_REF <- format) {
+            if (params.isEmpty()) {
+                if (let ObjCFunctionType.STATIC <- `type`) {
+                } else {
+                    genParams += VOID_POINTER_TYPE
+                }
+            }
+            genParams += ")"
+        } else if (let FunctionListFormat.CANGJIE_DECL <- format) {
+            if (params.isEmpty()) {
+                if (let ObjCFunctionType.STATIC <- `type`) {
+                } else {
+                    genParams += VOID_POINTER_TYPE
+                }
+            }
+            genParams += ")"
+        }
+        return genParams
+    }
+
     public static func ConvertParamsListToArgsList(typedefs: HashSet<String>,
         paramLists: ArrayList<FuncParamList>, withRegistryId: Bool): ArgsList {
         let result = ArgsList()
