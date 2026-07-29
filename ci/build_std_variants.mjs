@@ -9,7 +9,6 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   STICKY_LLC_OPTION,
-  copyCompiledStdLibraries,
   createStickySdkOverlay,
   stickyPreflight,
 } from '../build/lib/std-variants.mjs';
@@ -26,10 +25,7 @@ const sdk = path.resolve(sdkArgument || '.');
 const out = path.resolve(outArgument || '.');
 const jobs = String(argv.jobs || process.env.CJCJ_STD_BUILD_JOBS || '12');
 if (!sdkArgument || !outArgument || sdk === path.parse(sdk).root || out === path.parse(out).root) {
-  throw new Error('usage: build_std_variants.mjs --sdk <official-sdk> --outdir <bundle> [--target linux-x64|windows-x64] [--target-toolchain <mingw>] [--jobs N]');
-}
-if (process.platform !== 'linux' || process.arch !== 'x64') {
-  throw new Error(`sticky std variants are unsupported on ${process.platform}/${process.arch}`);
+  throw new Error('usage: build_std_variants.mjs --sdk <official-sdk> --outdir <bundle> --target <release-target> [--target-toolchain <mingw>] [--jobs N]');
 }
 
 const TARGETS = {
