@@ -1,6 +1,9 @@
 {
-  "sourceRef": "4d90980fab801e5a3ceab7de8e98e77f9940d61e",
-  "platform": "linux_x86_64_cjnative",
+  "sourceRef": "f1b6dcab991f421c32a45f8b1e2081ce632e3859",
+  "platforms": [
+    "linux_x86_64_cjnative",
+    "linux_aarch64_cjnative"
+  ],
   "nativeMembers": {
     "libcangjie-std-collection.concurrent.a": [
       "array_blocking_queue_ffi.c.o"
