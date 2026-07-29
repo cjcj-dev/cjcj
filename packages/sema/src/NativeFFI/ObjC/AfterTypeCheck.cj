@@ -9,9 +9,10 @@ import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateThisCall, CreateThisRef, CreateType,
-    GetStringDecl, WithinFile, INIT_IDENT, IsObjCGeneratedMember, WrapReturningLambdaCall, WrapReturningLambdaExpr}
+    CreateUnitType, GenericConfigInfo, GetStringDecl, WithinFile, INIT_IDENT, IsObjCGeneratedMember,
+    WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
-    CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR,
+    CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
     OBJ_C_FWD_CLASS_SUFFIX,
     OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
 
@@ -1332,6 +1333,131 @@ public class ASTFactory {
         nodes.add(getClassCall)
         classDecl.funcBody.getOrThrow().body = CreateBlock(nodes)
         return classDecl
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:699-748.
+    public func CreateInitCjObjectReturningObjCSelf(target: Decl, ctor: FuncDecl): FuncDecl {
+        let curFile = ctor.curFile
+        let nativeObjCIdTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        let ctorParams = ctor.funcBody.getOrThrow().paramLists[0].params
+        for (param in ctorParams) {
+            wrapperParams.add(CreateFuncParam(param.identifier.Val(), None, None,
+                typeMapper.Cj2CType(param.GetTy().getOrThrow())))
+        }
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) {
+            wrapperParamTys.add(param.GetTy().getOrThrow())
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), nativeObjCIdTy, cfg: cfg)
+        let wrapperParamLists = ArrayList<FuncParamList>()
+        wrapperParamLists.add(wrapperParamList)
+
+        let ctorCallArgs = ArrayList<FuncArg>()
+        ctorCallArgs.add(CreateFuncArg(CreateRefExpr(wrapperParams[0])))
+        var argIndex: Int64 = 1
+        while (argIndex < ctorParams.size) {
+            let paramRef = WithinFile<RefExpr>(CreateRefExpr(wrapperParams[argIndex]), curFile)
+            ctorCallArgs.add(CreateFuncArg(WrapEntity(paramRef, ctorParams[argIndex].GetTy().getOrThrow())))
+            argIndex++
+        }
+        let ctorCall = WithinFile<CallExpr>(CreateCallExpr(CreateRefExpr(ctor), ctorCallArgs, Some(ctor),
+            target.GetTy(), CallKind.CALL_OBJECT_CREATION), curFile)
+        let bodyNodes = ArrayList<Node>()
+        bodyNodes.add(UnwrapEntity(ctorCall))
+        let wrapperBody = CreateFuncBody(wrapperParamLists, None,
+            CreateBlock(bodyNodes, nativeObjCIdTy), wrapperTy)
+        let wrapper = CreateFuncDecl(nameGenerator.GenerateInitCjObjectName(ctor), wrapperBody, wrapperTy)
+        wrapper.moduleName = ctor.moduleName
+        wrapper.fullPackageName = ctor.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, ctor.curFile.getOrThrow())
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:750-779.
+    public func CreateInitCjObjectForEnumNoParams(target: EnumDecl, ctor: VarDecl): FuncDecl {
+        let curFile = ctor.curFile.getOrThrow()
+        let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+        let wrapperParamLists = ArrayList<FuncParamList>()
+        wrapperParamLists.add(FuncParamList())
+        let enumRef = WithinFile<RefExpr>(CreateRefExpr(target), curFile)
+        let ctorCall = CreateMemberAccess(enumRef, ctor.identifier.Val())
+        let putToRegistryCall = CreatePutToRegistryCall(ctorCall)
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperTy = typeManager.GetFunctionTy([], registryIdTy, cfg: cfg)
+        let bodyNodes = ArrayList<Node>()
+        bodyNodes.add(putToRegistryCall)
+        let wrapperBody = CreateFuncBody(wrapperParamLists, CreateType(registryIdTy),
+            CreateBlock(bodyNodes, registryIdTy), wrapperTy)
+        let wrapper = CreateFuncDecl(nameGenerator.GenerateInitCjObjectName(ctor), wrapperBody, wrapperTy)
+        wrapper.moduleName = ctor.moduleName
+        wrapper.fullPackageName = ctor.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, curFile)
+        return wrapper
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:781-832.
+    public func CreateDeleteCjObject(target: Decl, generateForOneWayMapping: Bool,
+        genericConfig!: Option<GenericConfigInfo> = None): FuncDecl {
+        let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+        let param = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let paramRef = CreateRefExpr(param)
+        let savedParamRef = paramRef
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let funcTy = typeManager.GetFunctionTy([param.GetTy().getOrThrow()], unitTy, cfg: cfg)
+        let removeFromRegistryCall = CreateRemoveFromRegistryCall(paramRef)
+        let funcNodes = ArrayList<Node>()
+        if (!generateForOneWayMapping) {
+            let inheritableTarget = (target as InheritableDecl).getOrThrow()
+            let clonedParamRef = (ASTCloner.Clone(savedParamRef) as Expr).getOrThrow()
+            let getFromRegistryCall = CreateGetFromRegistryByIdCall(clonedParamRef,
+                CreateRefType(inheritableTarget))
+            let objTmpVarDecl = CreateTmpVarDecl(CreateRefType(inheritableTarget), getFromRegistryCall)
+            let nativeHandleExpr = CreateMemberAccess(CreateRefExpr(objTmpVarDecl), NATIVE_HANDLE_IDENT)
+            let releaseCall = CreateObjCReleaseCall(nativeHandleExpr)
+            funcNodes.add(objTmpVarDecl)
+            funcNodes.add(removeFromRegistryCall)
+            funcNodes.add(releaseCall)
+        } else {
+            funcNodes.add(removeFromRegistryCall)
+        }
+        let funcParams = ArrayList<FuncParam>()
+        funcParams.add(param)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(CreateFuncParamList(funcParams))
+        let funcBody = CreateFuncBody(paramLists, CreateUnitType(target.curFile),
+            CreateBlock(funcNodes, unitTy), funcTy)
+        let funcName = if (let Some(config) <- genericConfig) {
+            nameGenerator.GenerateDeleteCjObjectName(target, genericActualName: config.declInstName)
+        } else {
+            nameGenerator.GenerateDeleteCjObjectName(target)
+        }
+        let result = CreateFuncDecl(funcName, funcBody, funcTy)
+        result.moduleName = target.moduleName
+        result.fullPackageName = target.fullPackageName
+        result.EnableAttr(Attribute.C)
+        result.EnableAttr(Attribute.GLOBAL)
+        result.EnableAttr(Attribute.PUBLIC)
+        result.EnableAttr(Attribute.NO_MANGLE)
+        result.funcBody.getOrThrow().funcDecl = result
+        PutDeclToFile(result, target.curFile.getOrThrow())
+        return result
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:178-296.
