@@ -24,6 +24,8 @@ public enum Retain {
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:38.
 private let FINALIZER_IDENT: String = "~init"
+// C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:37.
+private let VALUE_IDENT: String = "value"
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:37-47,279-283.
 public class ASTFactory {
@@ -42,6 +44,56 @@ public class ASTFactory {
         this.importManager = importManager
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:43-48.
+    public static func CreateParamLists(params: ArrayList<FuncParam>): ArrayList<FuncParamList> {
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(CreateFuncParamList(params))
+        return paramLists
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:50-58.
+    public static func GetParams(fn: FuncDecl): ArrayList<FuncParam> {
+        CJC_NULLPTR_CHECK(fn.funcBody)
+        let paramLists = fn.funcBody.getOrThrow().paramLists
+        CJC_ASSERT(paramLists.size == 1)
+        return paramLists[0].params
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:60-75.
+    public static func CreateVar(name: String, ty: Ty, isVar: Bool,
+        initializer!: Option<Expr> = None): VarDecl {
+        let result = VarDecl()
+        result.identifier = SrcIdentifier(name)
+        result.SetTy(ty)
+        result.isVar = isVar
+        result.EnableAttr(Attribute.COMPILER_ADD)
+        result.EnableAttr(Attribute.IMPLICIT_ADD)
+        result.EnableAttr(Attribute.NO_REFLECT_INFO)
+        result.initializer = initializer
+        result.toBeCompiled = true
+        return result
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:77-89.
+    public static func CreateFunc(name: String, funcTy: FuncTy, params: ArrayList<FuncParam>,
+        nodes: ArrayList<Node>): FuncDecl {
+        let retTy = funcTy.retTy
+        let bodyTy = if (nodes.isEmpty()) { retTy } else { nodes[nodes.size - 1].GetTy().getOrThrow() }
+        let body = CreateBlock(nodes, bodyTy)
+        let funcBody = CreateFuncBody(CreateParamLists(params), CreateType(retTy), body, retTy)
+        let funcDecl = CreateFuncDecl(name, funcBody, funcTy)
+        funcDecl.funcBody.getOrThrow().funcDecl = funcDecl
+        return funcDecl
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:91-98.
+    public static func CreateParenExpr(expr: Expr): ParenExpr {
+        let parenExpr = ParenExpr()
+        parenExpr.SetTy(expr.GetTy().getOrThrow())
+        parenExpr.expr = expr
+        return parenExpr
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:93-104.
     public func CreateNativeHandleExpr(entity: Expr): Expr {
         let entityTy = entity.GetTy().getOrThrow()
@@ -54,6 +106,21 @@ public class ASTFactory {
         let getterCall = CreateCallExpr(getterMemberAccess, ArrayList<FuncArg>(), Some(getter),
             Some(getterTy.retTy), CallKind.CALL_DECLARED_FUNCTION)
         return WithinFile<CallExpr>(getterCall, entity.curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:106-113.
+    public func CreateNativeHandleExpr(ty: ClassLikeTy, curFile: Option<File>): Expr {
+        CJC_ASSERT(TypeMapper.IsObjCMirror(ty) || TypeMapper.IsObjCImpl(ty) ||
+            TypeMapper.IsSyntheticWrapper(ty) || TypeMapper.IsObjCFwdClass(ty))
+        return CreateNativeHandleExpr(CreateThisRef(ty.commonDecl, Some(ty), curFile))
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:115-124.
+    public func CreateNativeHandleExpr(decl: ClassLikeDecl, isStatic: Bool, curFile: Option<File>): Expr {
+        if (!isStatic) {
+            return CreateNativeHandleExpr((decl.GetTy().getOrThrow() as ClassLikeTy).getOrThrow(), curFile)
+        }
+        return CreateGetClassCall(decl, curFile)
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:299-302.
