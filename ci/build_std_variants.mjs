@@ -258,27 +258,27 @@ try {
   await fs.mkdir(path.dirname(cjoDirectory), {recursive: true});
   await fs.cp(path.join(installedOutput, 'modules', platform, 'std'), cjoDirectory, {recursive: true});
   const stickyDirectory = path.join(out, 'lib', platform);
-  const compiledLibDir = targetSpec.buildTarget
-    ? path.join(buildOutput, 'lib')
-    : path.join(buildOutput, 'lib', platform);
-  // Windows cross puts .a under build/lib/ and DLLs under build/lib/windows_.../
-  const stickySourceDir = targetSpec.buildTarget
-    ? path.join(buildOutput, 'lib')
-    : path.join(buildOutput, 'lib', platform);
+  const stickyCandidates = targetSpec.buildTarget
+    ? [
+      path.join(installedOutput, 'lib', platform),
+      path.join(buildOutput, 'lib'),
+      path.join(buildOutput, 'lib', platform),
+    ]
+    : [path.join(buildOutput, 'lib', platform)];
   await fs.mkdir(stickyDirectory, {recursive: true});
-  const stickyNames = await matchingFiles(stickySourceDir, targetSpec.libraryPattern);
-  if (stickyNames.length === 0) {
-    // native linux layout nests platform; windows layout may place .a in lib/
-    const nested = path.join(buildOutput, 'lib', platform);
-    const nestedNames = await matchingFiles(nested, targetSpec.libraryPattern);
-    if (nestedNames.length === 0) throw new Error(`no compiled sticky std libraries under ${stickySourceDir} or ${nested}`);
-    for (const name of nestedNames) {
-      await fs.copyFile(path.join(nested, name), path.join(stickyDirectory, name));
+  let stickySourceDir = '';
+  for (const candidate of stickyCandidates) {
+    const names = await matchingFiles(candidate, targetSpec.libraryPattern);
+    if (names.length !== 0) {
+      stickySourceDir = candidate;
+      for (const name of names) {
+        await fs.copyFile(path.join(candidate, name), path.join(stickyDirectory, name));
+      }
+      break;
     }
-  } else {
-    for (const name of stickyNames) {
-      await fs.copyFile(path.join(stickySourceDir, name), path.join(stickyDirectory, name));
-    }
+  }
+  if (!stickySourceDir) {
+    throw new Error(`no compiled sticky std libraries under ${stickyCandidates.join(' | ')}`);
   }
   const stickyLibraries = {
     files: (await matchingFiles(stickyDirectory, targetSpec.libraryPattern)),
@@ -296,11 +296,22 @@ try {
   const managedFiles = [];
   const managedHashes = {};
   if (targetSpec.managedPattern) {
-    const managedSource = path.join(buildOutput, 'lib', platform);
+    const managedCandidates = [
+      path.join(installedOutput, 'runtime', 'lib', platform),
+      path.join(buildOutput, 'lib', platform),
+    ];
     const managedOut = path.join(out, 'runtime', 'lib', platform);
     await fs.mkdir(managedOut, {recursive: true});
-    const dllNames = await matchingFiles(managedSource, targetSpec.managedPattern);
-    if (dllNames.length === 0) throw new Error(`no managed Windows std DLLs under ${managedSource}`);
+    let managedSource = '';
+    let dllNames = [];
+    for (const candidate of managedCandidates) {
+      dllNames = await matchingFiles(candidate, targetSpec.managedPattern);
+      if (dllNames.length !== 0) {
+        managedSource = candidate;
+        break;
+      }
+    }
+    if (!managedSource) throw new Error(`no managed Windows std DLLs under ${managedCandidates.join(' | ')}`);
     for (const name of dllNames) {
       const relative = path.join('runtime', 'lib', platform, name);
       await fs.copyFile(path.join(managedSource, name), path.join(managedOut, name));
@@ -310,6 +321,13 @@ try {
     managedFiles.sort();
   }
 
+  const stickySet = new Set(stickyLibraries.files);
+  const filteredNativeMembers = Object.fromEntries(
+    Object.entries(nativeMembers).filter(([name]) => stickySet.has(name)));
+  const missingNative = Object.keys(nativeMembers).filter(name => !stickySet.has(name)).sort();
+  if (missingNative.length !== 0) {
+    throw new Error(`sticky std missing checklist libraries: ${missingNative.join(',')}`);
+  }
   const nativeLibraries = stickyLibraries.files.filter(name => name.endsWith('FFI.a'));
   const librarySha256 = Object.fromEntries(await Promise.all(stickyLibraries.files.map(async name =>
     [name, await sha256(path.join(stickyDirectory, name))])));
@@ -321,7 +339,7 @@ try {
   const manifest = {
     recipe: 'official-cjc-plus-fixed-llc', closure: 'single-sticky', role: 'final',
     provenance: 'official-cjc-sticky-lowering', sourceUrl, sourceRef, cjcSha256,
-    nativeLibraries, nativeMembers,
+    nativeLibraries, nativeMembers: filteredNativeMembers,
     sticky: {...stickyLibraries, sha256: librarySha256, seconds: stickySeconds, ...(preflight ? {preflight} : {})},
     cjo: {files: cjoFiles, sha256: cjoSha256},
   };
