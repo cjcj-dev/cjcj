@@ -6,7 +6,7 @@ import std.collection.*
 public struct EmittableObjCFuncMetainfo {
     public var identifier: String = ""
     public var mangledIdentifier: String = ""
-    public let selectorComponents: ArrayList<String> = ArrayList<String>()
+    public var selectorComponents: ArrayList<String> = ArrayList<String>()
     public var isStatic: Bool = false
     public var bridge: Bool = false
     public var paramsDecl: String = ""
@@ -22,7 +22,7 @@ public struct EmittableObjCFuncMetainfo {
 public struct EmittableObjCClassMetainfo {
     public var className: String = ""
     public var superclassName: String = ""
-    public let interfaces: ArrayList<String> = ArrayList<String>()
+    public var interfaces: ArrayList<String> = ArrayList<String>()
     public var isFinal: Bool = false
 
     public init() {}
