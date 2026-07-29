@@ -9,9 +9,10 @@ import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateType, GetStringDecl, WithinFile,
-    WrapReturningLambdaCall}
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR,
-    OBJ_C_FWD_CLASS_SUFFIX, OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
+    IsObjCGeneratedMember, WrapReturningLambdaCall}
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
+    NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, OBJ_C_FWD_CLASS_SUFFIX,
+    OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
 public enum Retain {
@@ -175,6 +176,117 @@ public class ASTFactory {
             }
         }
         CJC_ABORT()
+        return None
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1343-1370.
+    public func GetAllParentCtors(target: ClassDecl): HashSet<FuncDecl> {
+        let result = HashSet<FuncDecl>()
+        for (superDecl in target.GetAllSuperDecls()) {
+            for (decl in superDecl.GetMemberDecls()) {
+                if (IsGeneratedMember(decl)) {
+                    continue
+                }
+                if (!decl.TestAttr(Attribute.CONSTRUCTOR)) {
+                    continue
+                }
+                if (decl.astKind != ASTKind.FUNC_DECL) {
+                    // C++ skips the primary constructor, which is already desugared to init.
+                    continue
+                }
+                let funcDecl = (decl as FuncDecl).getOrThrow()
+                if (let None <- funcDecl.funcBody) {
+                    continue
+                }
+                result.add(funcDecl)
+            }
+        }
+        return result
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1427-1432.
+    public func IsGeneratedMember(decl: Decl): Bool {
+        return IsGeneratedNativeHandleField(decl) || IsGeneratedGetObjCClassFunction(decl) ||
+            IsGeneratedHasInitedField(decl) || IsGeneratedCtor(decl) || IsGeneratedNativeHandleGetter(decl) ||
+            IsObjCGeneratedMember(decl)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1434-1437.
+    public func IsGeneratedNativeHandleField(decl: Decl): Bool {
+        return decl.identifier.Val() == NATIVE_HANDLE_IDENT
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1439-1442.
+    public func IsGeneratedGetObjCClassFunction(decl: Decl): Bool {
+        return decl.identifier.Val() == GET_OBJ_C_CLASS_IDENT
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1444-1447.
+    public func IsGeneratedHasInitedField(decl: Decl): Bool {
+        return decl.TestAttr(Attribute.HAS_INITED_FIELD)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1472-1498.
+    public func IsGeneratedCtor(decl: Decl): Bool {
+        let funcDecl = decl as FuncDecl
+        if ((let None <- funcDecl) || !funcDecl.getOrThrow().TestAttr(Attribute.CONSTRUCTOR) ||
+            (let None <- funcDecl.getOrThrow().funcBody)) {
+            return false
+        }
+        let paramLists = funcDecl.getOrThrow().funcBody.getOrThrow().paramLists
+        if (paramLists.isEmpty()) {
+            return false
+        }
+        let params = paramLists[0].params
+        if (params.isEmpty()) {
+            return false
+        }
+        return params[0].identifier == NATIVE_HANDLE_IDENT
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1500-1503.
+    public func IsGeneratedNativeHandleGetter(decl: Decl): Bool {
+        return decl.identifier.Val() == NATIVE_HANDLE_GETTER_IDENT
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1523-1565.
+    public func GetGeneratedImplCtor(declArg: Decl, origin: FuncDecl): Option<FuncDecl> {
+        CJC_ASSERT(origin.TestAttr(Attribute.CONSTRUCTOR))
+        CJC_NULLPTR_CHECK(origin.funcBody)
+        let originParamLists = origin.funcBody.getOrThrow().paramLists
+        CJC_ASSERT(!originParamLists.isEmpty())
+        let originParams = originParamLists[0].params
+
+        for (member in declArg.GetMemberDeclPtrs()) {
+            if (let Some(funcDecl) <- (member as FuncDecl)) {
+                if (!IsGeneratedCtor(funcDecl)) {
+                    continue
+                }
+                CJC_NULLPTR_CHECK(funcDecl.funcBody)
+                let funcDeclParamLists = funcDecl.funcBody.getOrThrow().paramLists
+                CJC_ASSERT(!funcDeclParamLists.isEmpty())
+                let funcDeclParams = funcDeclParamLists[0].params
+                if (originParams.size + 1 != funcDeclParams.size) {
+                    continue
+                }
+
+                var matched = true
+                var index = 1
+                while (index < funcDeclParams.size) {
+                    let funcDeclParam = funcDeclParams[index]
+                    let originParam = originParams[index - 1]
+                    if (funcDeclParam.identifier != originParam.identifier ||
+                        funcDeclParam.GetTy().getOrThrow() != originParam.GetTy().getOrThrow()) {
+                        matched = false
+                        break
+                    }
+                    index++
+                }
+                if (matched) {
+                    return Some(funcDecl)
+                }
+            }
+        }
         return None
     }
 
