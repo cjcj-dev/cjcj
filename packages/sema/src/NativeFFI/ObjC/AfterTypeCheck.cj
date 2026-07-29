@@ -129,6 +129,23 @@ public class ASTFactory {
         return CreateCall(Some(getClassFuncDecl), curFile, args: args).getOrThrow()
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1914-1921.
+    public func CreateGetClassCall(cls: ClassLikeDecl, curFile: Option<File>): Expr {
+        let classNameFunc = FindMirrorMember(GET_OBJ_C_CLASS_IDENT, cls) as FuncDecl
+        CJC_NULLPTR_CHECK(classNameFunc)
+        return CreateCall(classNameFunc, curFile).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1923-1929.
+    public func CreateGetClassCall(ty: ClassLikeTy, curFile: Option<File>): Expr {
+        let getClassFuncDecl = bridge.GetGetClassDecl().getOrThrow()
+        let classNameLiteral = CreateLitConstExpr(LitConstKind.STRING, ty.name,
+            GetStringDecl(importManager).GetTy().getOrThrow())
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(classNameLiteral))
+        return CreateCall(Some(getClassFuncDecl), curFile, args: args).getOrThrow()
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1940-1947.
     public func CreateGetProtoCall(protoName: String, curFile: Option<File>): Expr {
         let getProtoFuncDecl = bridge.GetGetProtoDecl().getOrThrow()
@@ -361,6 +378,89 @@ public class ASTFactory {
             }
         }
         return None
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1607-1620.
+    public func CreatePutToRegistryCall(expr: Expr): CallExpr {
+        let putToRegistryDecl = bridge.GetPutToRegistryDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(expr))
+        let retTy = putToRegistryDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        return CreateCallExpr(CreateRefExpr(putToRegistryDecl), args, Some(putToRegistryDecl), Some(retTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1760-1771.
+    public func CreateRemoveFromRegistryCall(registryId: Expr): CallExpr {
+        let removeFromRegistryDecl = bridge.GetRemoveFromRegistryDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(registryId))
+        let retTy = removeFromRegistryDecl.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        return CreateCallExpr(CreateRefExpr(removeFromRegistryDecl), args, Some(removeFromRegistryDecl), Some(retTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1773-1782.
+    public func CreateObjCReleaseCall(nativeHandle: Expr): Expr {
+        let releaseDecl = bridge.GetObjCReleaseDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(nativeHandle))
+        return CreateCallExpr(CreateRefExpr(releaseDecl), args, None,
+            Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)),
+            CallKind.CALL_DECLARED_FUNCTION)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1808-1818.
+    public func CreateObjCRespondsToSelectorCall(cls: Expr, selector: Expr, file: Option<File>): Expr {
+        let respondsToSelectorDecl = bridge.GetObjCRespondsToSelectorDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(cls))
+        args.add(CreateFuncArg(selector))
+        let call = CreateCallExpr(CreateRefExpr(respondsToSelectorDecl), args, Some(respondsToSelectorDecl),
+            Some(TypeManager.GetBoolTy()), CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, file)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1820-1828.
+    public func CreateGetSuperClassExpr(objCSuper: Expr, file: Option<File>): Expr {
+        let getSuperClassDecl = bridge.GetGetSuperClassDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(objCSuper))
+        let call = CreateCallExpr(CreateRefExpr(getSuperClassDecl), args, Some(getSuperClassDecl),
+            bridge.GetNativeObjCClassTy(), CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, file)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1949-1956.
+    public func CreateRegisterNameCall(selectorExpr: Expr): CallExpr {
+        let registerNameDecl = bridge.GetRegisterNameDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(selectorExpr))
+        return CreateCall(Some(registerNameDecl), selectorExpr.curFile, args: args).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1958-1965.
+    public func CreateRegisterNameCall(selector: String, curFile: Option<File>): CallExpr {
+        let selectorLiteral = CreateLitConstExpr(LitConstKind.STRING, selector,
+            GetStringDecl(importManager).GetTy().getOrThrow())
+        selectorLiteral.curFile = curFile
+        return CreateRegisterNameCall(selectorLiteral)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1967-1974.
+    public func CreateAllocCall(className: Expr): CallExpr {
+        let allocDecl = bridge.GetAllocDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(className))
+        return CreateCall(Some(allocDecl), className.curFile, args: args).getOrThrow()
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1976-1982.
+    public func CreateAllocCall(decl: Decl, curFile: Option<File>): CallExpr {
+        let objcName = nameGenerator.GetObjCDeclName(decl)
+        let classNameExpr = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.STRING, objcName,
+            GetStringDecl(importManager).GetTy().getOrThrow()), curFile)
+        return CreateAllocCall(classNameExpr)
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1567-1585.
