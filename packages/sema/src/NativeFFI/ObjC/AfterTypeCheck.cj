@@ -8,7 +8,7 @@ import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateType, GetStringDecl, WithinFile,
+import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateType, GetStringDecl, WithinFile,
     INIT_IDENT, IsObjCGeneratedMember, WrapReturningLambdaCall}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
     NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, OBJ_C_FWD_CLASS_SUFFIX,
@@ -95,6 +95,100 @@ public class ASTFactory {
         call.resolvedFunction = GetOptionSomeDecl() as FuncDecl
         call.callKind = CallKind.CALL_DECLARED_FUNCTION
         return call
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:348-388.
+    public func CreateOptionMatch(selector: Expr, someBranch: (VarDecl) -> Expr,
+        noneBranch: () -> Expr, ty: Ty): Expr {
+        let curFile = selector.curFile.getOrThrow()
+        let optionTy = selector.GetTy().getOrThrow()
+        CJC_ASSERT(optionTy.IsCoreOptionType())
+        let optionArgTy = optionTy.typeArgs[0]
+
+        let varPattern = CreateVarPattern(V_COMPILER, Some(optionArgTy))
+        varPattern.curFile = curFile
+        let someArgVar = varPattern.varDecl.getOrThrow()
+        someArgVar.curFile = curFile
+        let somePattern = EnumPattern()
+        somePattern.SetTy(optionTy)
+        somePattern.constructor = CreateOptionSomeRef(optionArgTy)
+        somePattern.patterns.add(varPattern)
+        somePattern.curFile = curFile
+        let caseSome = CreateMatchCase(somePattern, someBranch(someArgVar))
+
+        let nonePattern = EnumPattern()
+        nonePattern.constructor = CreateOptionNoneRef(optionArgTy)
+        nonePattern.SetTy(nonePattern.constructor.getOrThrow().GetTy().getOrThrow())
+        nonePattern.curFile = curFile
+        let caseNone = CreateMatchCase(nonePattern, noneBranch())
+        let cases = ArrayList<MatchCase>()
+        cases.add(caseSome)
+        cases.add(caseNone)
+        return WithinFile<MatchExpr>(CreateMatchExpr(selector, cases, ty), curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:391-394.
+    public func GetObjCTy(): Ty {
+        return typeManager.GetPointerTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:396-403.
+    public func CreateObjCobjectNull(): Expr {
+        let pointerExpr = PointerExpr()
+        let typeNode = Type()
+        typeNode.SetTy(GetObjCTy())
+        pointerExpr.typeNode = typeNode
+        pointerExpr.SetTy(typeNode.GetTy().getOrThrow())
+        return pointerExpr
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:412-429.
+    public func UnwrapObjCMirrorOption(entity: Expr, ty: Ty): Expr {
+        let curFile = entity.curFile.getOrThrow()
+        return CreateOptionMatch(entity,
+            { value: VarDecl => UnwrapEntity(WithinFile<RefExpr>(CreateRefExpr(value), curFile)) },
+            { => CreateObjCobjectNull() }, typeMapper.Cj2CType(ty))
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:126-176.
+    public func UnwrapEntity(expr: Expr): Expr {
+        let exprTy = expr.GetTy().getOrThrow()
+        if (TypeMapper.IsObjCMirror(exprTy) || TypeMapper.IsObjCImpl(exprTy)) {
+            return CreateNativeHandleExpr(expr)
+        }
+        if (TypeMapper.IsObjCCJMapping(exprTy)) {
+            return CreatePutToRegistryCall(expr)
+        }
+        if (exprTy.IsCoreOptionType()) {
+            let innerTy = exprTy.typeArgs[0]
+            if (TypeMapper.IsValidObjCMirror(innerTy) || TypeMapper.IsObjCImpl(innerTy)) {
+                return UnwrapObjCMirrorOption(expr, innerTy)
+            }
+        }
+        if (TypeMapper.IsObjCPointer(exprTy)) {
+            CJC_ASSERT(exprTy.typeArgs.size == 1)
+            let elementType = exprTy.typeArgs[0]
+            let field = bridge.GetObjCPointerPointerField().getOrThrow()
+            let fieldRef = CreateRefExpr(field, expr)
+            return CreateUnsafePointerCast(CreateMemberAccess(expr, field), typeMapper.Cj2CType(elementType))
+        }
+        if (TypeMapper.IsObjCFunc(exprTy)) {
+            CJC_ASSERT(exprTy.typeArgs.size == 1)
+            let mappedTy = typeMapper.Cj2CType(exprTy)
+            let getter = bridge.GetObjCFuncFPointerAccessor().getOrThrow()
+            CJC_ASSERT(mappedTy.IsPointer())
+            return CreateUnsafePointerCast(CreateMemberCall(expr, getter), mappedTy.typeArgs[0])
+        }
+        if (TypeMapper.IsObjCBlock(exprTy)) {
+            CJC_ASSERT(exprTy.typeArgs.size == 1)
+            let mappedTy = typeMapper.Cj2CType(exprTy)
+            let abiPointer = bridge.GetObjCBlockAbiPointerAccessor().getOrThrow()
+            CJC_ASSERT(mappedTy.IsPointer())
+            return CreateUnsafePointerCast(CreateMemberCall(expr, abiPointer), mappedTy.typeArgs[0])
+        }
+        CJC_ASSERT(exprTy.IsPrimitive() || exprTy.IsPointer() || Ty.IsCStructType(exprTy) ||
+            exprTy.IsCFunc() || exprTy.IsCString())
+        return expr
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1784-1794.
