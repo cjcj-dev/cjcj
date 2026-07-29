@@ -2122,6 +2122,35 @@ public class InteropContext {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertGetObjCClass.cpp:20-52.
+public class InsertGetObjCClass <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (mirror in ctx.mirrors) {
+            if (mirror.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (let Some(interfaceMirror) <- (mirror as InterfaceDecl)) {
+                let getObjCClassDecl = ctx.factory.CreateGetObjCClassDecl(interfaceMirror)
+                let nodes = ArrayList<Node>()
+                nodes.add(ctx.factory.CreateThrowStaticMethodCallOnInterfaceExpr(mirror.curFile.getOrThrow()))
+                getObjCClassDecl.funcBody.getOrThrow().body = CreateBlock(nodes, getObjCClassDecl.GetTy())
+                interfaceMirror.body.getOrThrow().decls.add(getObjCClassDecl)
+            } else if (let Some(classMirror) <- (mirror as ClassDecl)) {
+                let getObjCClassFunc = ctx.factory.CreateGetObjCClass(classMirror)
+                classMirror.body.getOrThrow().decls.add(getObjCClassFunc)
+            }
+        }
+
+        for (impl in ctx.impls) {
+            if (impl.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            let getObjCClassFunc = ctx.factory.CreateGetObjCClass(impl)
+            impl.body.getOrThrow().decls.add(getObjCClassFunc)
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateObjCImplMembers.cpp:19-49.
 public class GenerateObjCImplMembers <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
