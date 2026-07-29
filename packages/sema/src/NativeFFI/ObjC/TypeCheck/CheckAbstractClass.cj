@@ -1,7 +1,8 @@
-package cjcj::sema.NativeFFI.ObjC
+package cjcj::sema.NativeFFI.ObjC.TypeCheck
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
+import cjcj::sema.NativeFFI.ObjC.Handler
 
 public class CheckAbstractClass <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckAbstractClass.cpp:19-25.
