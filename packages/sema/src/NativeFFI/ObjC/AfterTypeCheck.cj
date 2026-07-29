@@ -1799,12 +1799,12 @@ public class ASTFactory {
         let actualPrimitiveTypes = ArrayList<Type>()
         if (field.GetTy().getOrThrow().IsGeneric()) {
             let config = genericConfig.getOrThrow()
-            genericActualTy = Some(typeManager.GetPrimitiveTy(
+            genericActualTy = Some(TypeManager.GetPrimitiveTy(
                 GetActualTypeKind(GetGenericActualType(config, field.GetTy().getOrThrow().name))))
             if (outerDecl.GetTy().getOrThrow().HasGeneric()) {
                 for (argTy in outerDecl.GetTy().getOrThrow().typeArgs) {
                     if (argTy.IsGeneric()) {
-                        let actualRetTy = typeManager.GetPrimitiveTy(
+                        let actualRetTy = TypeManager.GetPrimitiveTy(
                             GetActualTypeKind(GetGenericActualType(config, argTy.name)))
                         actualTyArgMap.add(argTy.name, actualRetTy)
                         actualPrimitiveTypes.add(GetGenericInstType(config, actualRetTy, typeManager))
