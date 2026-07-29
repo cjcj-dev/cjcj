@@ -3531,7 +3531,7 @@ private let REINIT_WITH_REG_ID_SEL: String = "reinitWithRegistryId:"
 private func CreateBlock(isSafe: Bool, nodes: ArrayList<Node>): Block {
     CJC_ASSERT(!nodes.isEmpty())
     let ty = nodes[nodes.size - 1].GetTy()
-    let block = cjcj::ast.CreateBlock(nodes, ty)
+    let block = CreateBlock(nodes, ty)
     if (isSafe) {
         block.EnableAttr(Attribute.UNSAFE)
     }
@@ -3917,9 +3917,10 @@ public class GenerateFwdClass <: Handler<InteropContext> {
             initializer, unitTy)
         let unsafeBlock = RegCjObjAndInitObjcObj(CreateRefExpr(objVar.getOrThrow()),
             CreateThisOfFwdClass(), reinit: true)
+        let retainArgs = ArrayList<FuncArg>()
+        retainArgs.add(CreateFuncArg(CreateRefExpr(objVar.getOrThrow())))
         let retainCall = CreateCall(ctx.bridge.GetObjCRetainDecl(), curFile,
-            args: { let args = ArrayList<FuncArg>(); args.add(CreateFuncArg(CreateRefExpr(objVar.getOrThrow()))); args }
-        ).getOrThrow()
+            args: retainArgs).getOrThrow()
         let trueNodes = ArrayList<Node>()
         trueNodes.add(assign)
         trueNodes.add(unsafeBlock)
