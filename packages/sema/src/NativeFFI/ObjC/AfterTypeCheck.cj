@@ -2124,6 +2124,52 @@ public class InteropContext {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertBaseCtorDecl.cpp:21-71.
+public class InsertBaseCtorDecl <: Handler<InteropContext> {
+    private let interopType: InteropType
+
+    public init(interopType: InteropType) {
+        this.interopType = interopType
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        if (interopType == InteropType.Fwd_Class) {
+            for (fwdClass in ctx.fwdClasses) {
+                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
+                    continue
+                }
+                fwdClass.body.getOrThrow().decls.add(ctx.factory.CreateBaseCtorDecl(fwdClass))
+            }
+            return
+        }
+
+        for (mirror in ctx.mirrors) {
+            if (mirror.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (let Some(mirrorClass) <- (mirror as ClassDecl)) {
+                mirrorClass.body.getOrThrow().decls.add(ctx.factory.CreateBaseCtorDecl(mirrorClass))
+            }
+        }
+        for (wrapper in ctx.synWrappers) {
+            if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            wrapper.body.getOrThrow().decls.add(ctx.factory.CreateBaseCtorDecl(wrapper))
+        }
+        for (impl in ctx.impls) {
+            if (impl.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (HasMirrorSuperClass(impl)) {
+                continue
+            }
+            CJC_ASSERT(HasMirrorSuperInterface(impl))
+            impl.body.getOrThrow().decls.add(ctx.factory.CreateBaseCtorDecl(impl))
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertNativeHandleField.cpp:19-72.
 public class InsertNativeHandleField <: Handler<InteropContext> {
     private let interopType: InteropType
