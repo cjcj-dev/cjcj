@@ -2122,6 +2122,27 @@ public class InteropContext {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckMirrorTypes.cpp:19-39.
+public class CheckMirrorTypes <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        let checker = HandlerFactory.Start<TypeCheckContext>(CheckAbstractClass())
+            .Use(CheckMirrorInheritMirror())
+            .Use(CheckInitMethod())
+            .Use(CheckForeignName())
+            .Use(CheckMemberTypes(InteropType.ObjC_Mirror))
+        for (mirror in ctx.mirrors) {
+            let typeCheckCtx = TypeCheckContext(mirror, ctx.diag, ctx.typeMapper, ctx.typeManager)
+            checker.Handle(typeCheckCtx)
+        }
+
+        let funcChecker = HandlerFactory.Start<TypeCheckContext>(CheckTopLevelFuncTypes())
+        for (mirror in ctx.mirrorTopLevelFuncs) {
+            let typeCheckCtx = TypeCheckContext(mirror, ctx.diag, ctx.typeMapper, ctx.typeManager)
+            funcChecker.Handle(typeCheckCtx)
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckImplTypes.cpp:19-30.
 public class CheckImplTypes <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
