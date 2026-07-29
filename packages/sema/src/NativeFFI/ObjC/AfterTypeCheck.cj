@@ -2184,6 +2184,67 @@ public class GenerateGlueCode <: Handler<InteropContext> {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertNativeHandleGetterDecl.cpp:20-90.
+public class InsertNativeHandleGetterDecl <: Handler<InteropContext> {
+    private let interopType: InteropType
+
+    public init(interopType: InteropType) {
+        this.interopType = interopType
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        if (interopType == InteropType.Fwd_Class) {
+            for (fwdClass in ctx.fwdClasses) {
+                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
+                    continue
+                }
+                if (GetNativeHandleGetter(fwdClass).isSome()) {
+                    continue
+                }
+                fwdClass.body.getOrThrow().decls.add(ctx.factory.CreateNativeHandleGetterDecl(fwdClass))
+            }
+            return
+        }
+
+        for (mirror in ctx.mirrors) {
+            if (mirror.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (HasMirrorSuperClass(mirror) || GetNativeHandleGetter(mirror).isSome()) {
+                continue
+            }
+            if (let Some(classDecl) <- (mirror as ClassDecl)) {
+                classDecl.body.getOrThrow().decls.add(ctx.factory.CreateNativeHandleGetterDecl(classDecl))
+            } else if (let Some(interfaceDecl) <- (mirror as InterfaceDecl)) {
+                interfaceDecl.body.getOrThrow().decls.add(ctx.factory.CreateNativeHandleGetterDecl(interfaceDecl))
+            } else {
+                CJC_ABORT()
+            }
+        }
+
+        for (wrapper in ctx.synWrappers) {
+            if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (GetNativeHandleGetter(wrapper).isSome()) {
+                continue
+            }
+            wrapper.body.getOrThrow().decls.add(ctx.factory.CreateNativeHandleGetterDecl(wrapper))
+        }
+
+        for (impl in ctx.impls) {
+            if (impl.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (HasMirrorSuperClass(impl) || GetNativeHandleGetter(impl).isSome()) {
+                continue
+            }
+            CJC_ASSERT(HasMirrorSuperInterface(impl))
+            impl.body.getOrThrow().decls.add(ctx.factory.CreateNativeHandleGetterDecl(impl))
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertNativeHandleGetterBody.cpp:22-83.
 public class InsertNativeHandleGetterBody <: Handler<InteropContext> {
     private let interopType: InteropType
