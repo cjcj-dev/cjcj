@@ -11,7 +11,7 @@ import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.ObjC.TypeCheck.*
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateThisCall, CreateThisRef, CreateType,
     CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
-    GetGenericInstType, GetInstantyForGenericTy, GetStringDecl, WithinFile, INIT_IDENT, IsObjCGeneratedMember,
+    GetGenericInstType, GetInstantyForGenericTy, GetStringDecl, InitGenericConfigs, WithinFile, INIT_IDENT, IsObjCGeneratedMember,
     WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
     CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
@@ -2119,6 +2119,55 @@ public class InteropContext {
         this.outputObjCGenDir = outputObjCGenDir
         this.structMemberSignatures = structMemberSignatures
         sharedLibraryExtension = GlobalOptions.GetSharedLibraryExtension(targetOsType)
+    }
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateDeleteCJObjectMethod.cpp:20-67.
+public class GenerateDeleteCJObjectMethod <: Handler<InteropContext> {
+    private let interopType: InteropType
+
+    public init(interopType: InteropType) {
+        this.interopType = interopType
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        let genNativeDeleteMethod = {decl: Decl =>
+            if (decl.TestAttr(Attribute.IS_BROKEN)) {
+                return
+            }
+            let forOneWayMapping = interopType == InteropType.CJ_Mapping && TypeMapper.IsOneWayMapping(decl)
+            ctx.genDecls.add(ctx.factory.CreateDeleteCjObject(decl, forOneWayMapping))
+        }
+        let genNativeDeleteMethodForGeneric = {decl: Decl, genericConfigs: ArrayList<GenericConfigInfo> =>
+            if (decl.TestAttr(Attribute.IS_BROKEN)) {
+                return
+            }
+            let forOneWayMapping = interopType == InteropType.CJ_Mapping && TypeMapper.IsOneWayMapping(decl)
+            for (genericConfig in genericConfigs) {
+                ctx.genDecls.add(ctx.factory.CreateDeleteCjObject(decl, forOneWayMapping,
+                    genericConfig: Some(genericConfig)))
+            }
+        }
+
+        if (interopType == InteropType.ObjC_Mirror) {
+            for (impl in ctx.impls) {
+                if (HasImplSuperClass(impl)) {
+                    continue
+                }
+                genNativeDeleteMethod(impl)
+            }
+        } else if (interopType == InteropType.CJ_Mapping) {
+            for (cjMapping in ctx.cjMappings) {
+                let genericConfigs = ArrayList<GenericConfigInfo>()
+                let isGenericGlueCode = Box<Bool>(false)
+                InitGenericConfigs(cjMapping.curFile.getOrThrow(), cjMapping, genericConfigs, isGenericGlueCode)
+                if (isGenericGlueCode.value) {
+                    genNativeDeleteMethodForGeneric(cjMapping, genericConfigs)
+                } else {
+                    genNativeDeleteMethod(cjMapping)
+                }
+            }
+        }
     }
 }
 
