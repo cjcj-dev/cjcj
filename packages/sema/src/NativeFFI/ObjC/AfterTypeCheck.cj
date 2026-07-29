@@ -11,13 +11,14 @@ import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeMan
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateSuperCall, CreateThisCall, CreateThisRef, CreateType,
     CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
-    GetGenericInstType, GetInstantyForGenericTy, GetSingleArgumentAnnotationValue, GetStringDecl, InitGenericConfigs,
+    GetGenericInstType, GetInstantyForGenericTy, GetSingleArgumentAnnotationValue, GetStringDecl, GetTyByName,
+    GetTypeByName, InitGenericConfigs, ReplaceGenericTyForFunc,
     WithinFile, INIT_IDENT, IsObjCGeneratedMember, IsObjCGeneratedNSObjectToString, IsObjCGeneratedNSStringCtor,
     NSOBJECT_CLASS_IDENT, NSSTRING_CLASS_IDENT,
     WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
     CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
-    OBJ_C_FWD_CLASS_SUFFIX,
+    GetRootPackageName, OBJ_C_FWD_CLASS_SUFFIX,
     OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
@@ -2783,6 +2784,104 @@ public class CheckCJMappingTypes <: Handler<InteropContext> {
         for (cjMapping in ctx.cjMappings) {
             let typeCheckCtx = TypeCheckContext(cjMapping, ctx.diag, ctx.typeMapper, ctx.typeManager)
             checker.Handle(typeCheckCtx)
+        }
+    }
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertFwdClasses.cpp:22-121.
+public class InsertFwdClasses <: Handler<InteropContext> {
+    public func InitInterfaceFwdClassDecl(interfaceDecl: ClassLikeDecl): ClassDecl {
+        let fwdclassDecl = ClassDecl()
+        fwdclassDecl.identifier = SrcIdentifier(interfaceDecl.identifier.Val() + OBJ_C_FWD_CLASS_SUFFIX)
+        fwdclassDecl.identifier.SetPos(interfaceDecl.identifier.Begin(), interfaceDecl.identifier.End())
+        fwdclassDecl.fullPackageName = interfaceDecl.fullPackageName
+        fwdclassDecl.moduleName = GetRootPackageName(interfaceDecl.fullPackageName)
+        fwdclassDecl.curFile = interfaceDecl.curFile
+        fwdclassDecl.EnableAttr(Attribute.PUBLIC)
+        fwdclassDecl.EnableAttr(Attribute.COMPILER_ADD)
+        fwdclassDecl.EnableAttr(Attribute.CJ_MIRROR_OBJC_INTERFACE_FWD)
+        fwdclassDecl.EnableAttr(Attribute.ABSTRACT)
+        fwdclassDecl.body = ClassBody()
+        return fwdclassDecl
+    }
+
+    public func GenerateInterfaceFwdclassMethod(ctx: InteropContext, fwdclassDecl: ClassDecl,
+        interfaceFuncDecl: FuncDecl, genericConfig: Option<GenericConfigInfo>): FuncDecl {
+        let funcDecl = (ASTCloner.Clone(interfaceFuncDecl) as FuncDecl).getOrThrow()
+        funcDecl.DisableAttr(Attribute.ABSTRACT)
+        funcDecl.DisableAttr(Attribute.OPEN)
+        funcDecl.EnableAttr(Attribute.PUBLIC)
+        funcDecl.EnableAttr(Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD)
+        if (let Some(config) <- genericConfig) {
+            ReplaceGenericTyForFunc(funcDecl, config, ctx.typeManager)
+            funcDecl.funcBody.getOrThrow().parentClassLike = fwdclassDecl
+        }
+        funcDecl.outerDecl = fwdclassDecl
+        return funcDecl
+    }
+
+    public func GenerateInterfaceFwdClassBody(ctx: InteropContext, fwdclassDecl: ClassDecl,
+        interfaceDecl: ClassLikeDecl, genericConfig: Option<GenericConfigInfo>): Unit {
+        for (decl in interfaceDecl.GetMemberDecls()) {
+            if (let Some(fd) <- (decl as FuncDecl)) {
+                if (!fd.TestAttr(Attribute.CONSTRUCTOR) && !fd.TestAttr(Attribute.STATIC)) {
+                    fwdclassDecl.body.getOrThrow().decls.add(
+                        GenerateInterfaceFwdclassMethod(ctx, fwdclassDecl, fd, genericConfig))
+                }
+            }
+        }
+    }
+
+    public func GenerateGenericInterfaceFwdclassMethod(ctx: InteropContext,
+        interfaceDecl: ClassLikeDecl, genericConfig: GenericConfigInfo): ClassDecl {
+        let fwdclassDecl = InitInterfaceFwdClassDecl(interfaceDecl)
+        fwdclassDecl.identifier = SrcIdentifier(genericConfig.declInstName + OBJ_C_FWD_CLASS_SUFFIX)
+        let actualTyArgMap = HashMap<String, Ty>()
+        let typeArgs = ArrayList<Ty>()
+        for (typePair in genericConfig.instTypes) {
+            let typeStr = typePair[1]
+            let ty = GetTyByName(typeStr)
+            typeArgs.add(ty)
+            actualTyArgMap[typeStr] = ty
+        }
+        let instantTy = GetInstantyForGenericTy(interfaceDecl, actualTyArgMap, ctx.typeManager).getOrThrow()
+        instantTy.typeArgs.clear()
+        for (typeArg in typeArgs) {
+            instantTy.typeArgs.add(typeArg)
+        }
+        let interfaceRefType = CreateRefType(interfaceDecl, Some(instantTy))
+        for ((typeName, _) in actualTyArgMap) {
+            interfaceRefType.typeArguments.add(GetTypeByName(typeName))
+        }
+        fwdclassDecl.inheritedTypes.add(interfaceRefType)
+        fwdclassDecl.SetTy(ctx.typeManager.GetClassTy(fwdclassDecl, []))
+        let classLikeTy = (instantTy as ClassLikeTy).getOrThrow()
+        classLikeTy.directSubtypes.add(fwdclassDecl.GetTy().getOrThrow())
+        GenerateInterfaceFwdClassBody(ctx, fwdclassDecl, interfaceDecl, Some(genericConfig))
+        return fwdclassDecl
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (interfaceDecl in ctx.cjMappingInterfaces) {
+            let genericConfigsVector = ArrayList<GenericConfigInfo>()
+            let isGenericGlueCode = Box<Bool>(false)
+            InitGenericConfigs(interfaceDecl.curFile.getOrThrow(), interfaceDecl,
+                genericConfigsVector, isGenericGlueCode)
+            if (isGenericGlueCode.value) {
+                for (genericConfig in genericConfigsVector) {
+                    ctx.genDecls.add(
+                        GenerateGenericInterfaceFwdclassMethod(ctx, interfaceDecl, genericConfig))
+                }
+            } else {
+                let fwdclassDecl = InitInterfaceFwdClassDecl(interfaceDecl)
+                fwdclassDecl.inheritedTypes.add(CreateRefType(interfaceDecl))
+                fwdclassDecl.SetTy(ctx.typeManager.GetClassTy(
+                    fwdclassDecl, interfaceDecl.GetTy().getOrThrow().typeArgs.toArray()))
+                let classLikeTy = (interfaceDecl.GetTy().getOrThrow() as ClassLikeTy).getOrThrow()
+                classLikeTy.directSubtypes.add(fwdclassDecl.GetTy().getOrThrow())
+                GenerateInterfaceFwdClassBody(ctx, fwdclassDecl, interfaceDecl, None)
+                ctx.genDecls.add(fwdclassDecl)
+            }
         }
     }
 }
