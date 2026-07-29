@@ -2,7 +2,7 @@ package cjcj::sema.NativeFFI.ObjC
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::basic.DiagnosticEngine
+import cjcj::basic.{DiagnosticEngine, DiagKindRefactor}
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
@@ -539,6 +539,31 @@ public class DrainGeneratedDecls {
         }
         ctx.genDecls.clear()
         ctx.fwdClasses.clear()
+    }
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckObjCPointerTypeArguments.cpp:22-40.
+public class CheckObjCPointerTypeArguments {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (file in ctx.pkg.files) {
+            let walker = Walker(file, visitPre: { node: Node =>
+                if (!node.IsSamePackage(file.curPackage.getOrThrow())) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (let Some(typeUsage) <- (node as Type)) {
+                    let usageTy = typeUsage.GetTy().getOrThrow()
+                    if (typeUsage.GetTypeArgs().size == 1 && ctx.typeMapper.IsObjCPointer(usageTy) &&
+                        !ctx.typeMapper.IsObjCCompatible(usageTy.typeArgs[0])) {
+                        DiagnoseRefactor(ctx.diag,
+                            DiagKindRefactor.sema_objc_pointer_argument_must_be_objc_compatible,
+                            typeUsage).Emit()
+                        typeUsage.EnableAttr(Attribute.IS_BROKEN)
+                    }
+                }
+                return VisitAction.WALK_CHILDREN
+            })
+            let _ = walker.Walk()
+        }
     }
 }
 
