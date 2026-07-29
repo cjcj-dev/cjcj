@@ -1,8 +1,9 @@
-package cjcj::sema.NativeFFI.ObjC
+package cjcj::sema.NativeFFI.ObjC.TypeCheck
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
 import cjcj::sema.NativeFFI.GetForeignNameAnnotation
+import cjcj::sema.NativeFFI.ObjC.{Handler, TypeMapper}
 
 // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckForeignName.cpp:22-37.
 private func MustHaveForeignName(member: Decl): Bool {
