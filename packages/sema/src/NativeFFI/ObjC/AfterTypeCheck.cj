@@ -180,8 +180,11 @@ public class ASTFactory {
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1343-1370.
-    public func GetAllParentCtors(target: ClassDecl): HashSet<FuncDecl> {
-        let result = HashSet<FuncDecl>()
+    // C++ std::set<Ptr<FuncDecl>> uses an unstable pointer-address order. Cangjie keeps identity uniqueness
+    // through HashSet<Decl> and exposes the deterministic inheritance discovery order; consumers must not rely on it.
+    public func GetAllParentCtors(target: ClassDecl): ArrayList<FuncDecl> {
+        let result = ArrayList<FuncDecl>()
+        let seen = HashSet<Decl>()
         for (superDecl in target.GetAllSuperDecls()) {
             for (decl in superDecl.GetMemberDecls()) {
                 if (IsGeneratedMember(decl)) {
@@ -198,7 +201,10 @@ public class ASTFactory {
                 if (let None <- funcDecl.funcBody) {
                     continue
                 }
-                result.add(funcDecl)
+                if (!seen.contains(funcDecl)) {
+                    seen.add(funcDecl)
+                    result.add(funcDecl)
+                }
             }
         }
         return result
