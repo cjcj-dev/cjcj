@@ -11,7 +11,9 @@ import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.ObjC.TypeCheck.*
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateThisCall, CreateThisRef, CreateType,
     CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
-    GetGenericInstType, GetInstantyForGenericTy, GetStringDecl, InitGenericConfigs, WithinFile, INIT_IDENT, IsObjCGeneratedMember,
+    GetGenericInstType, GetInstantyForGenericTy, GetSingleArgumentAnnotationValue, GetStringDecl, InitGenericConfigs,
+    WithinFile, INIT_IDENT, IsObjCGeneratedMember, IsObjCGeneratedNSObjectToString, IsObjCGeneratedNSStringCtor,
+    NSOBJECT_CLASS_IDENT, NSSTRING_CLASS_IDENT,
     WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
     CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
@@ -2119,6 +2121,40 @@ public class InteropContext {
         this.outputObjCGenDir = outputObjCGenDir
         this.structMemberSignatures = structMemberSignatures
         sharedLibraryExtension = GlobalOptions.GetSharedLibraryExtension(targetOsType)
+    }
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertStringConversions.cpp:29-70.
+public class InsertStringConversions <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (mirror in ctx.mirrors) {
+            if (mirror.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (let Some(classDecl) <- (mirror as ClassDecl)) {
+                var foreignName = classDecl.identifier.Val()
+                if (let Some(customName) <-
+                    GetSingleArgumentAnnotationValue(classDecl, AstAnnotationKind.OBJ_C_MIRROR)) {
+                    foreignName = customName
+                }
+                if (foreignName == NSSTRING_CLASS_IDENT) {
+                    let funcDecl = (FindMirrorMember(classDecl, IsObjCGeneratedNSStringCtor) as FuncDecl).getOrThrow()
+                    CJC_ASSERT(funcDecl.funcBody.getOrThrow().paramLists.size > 0)
+                    let funcParams = funcDecl.funcBody.getOrThrow().paramLists[0].params
+                    CJC_ASSERT(funcParams.size == 1)
+                    let convertCall = ctx.factory.CreateConvertToNSStringCall(
+                        CreateRefExpr(funcParams[0]), classDecl, classDecl.curFile)
+                    funcDecl.funcBody.getOrThrow().body.getOrThrow().body.add(convertCall)
+                }
+                if (foreignName == NSOBJECT_CLASS_IDENT) {
+                    let funcDecl = (FindMirrorMember(classDecl,
+                        IsObjCGeneratedNSObjectToString) as FuncDecl).getOrThrow()
+                    let nativeHandle = GetNativeVarHandle(classDecl).getOrThrow()
+                    let convertCall = ctx.factory.CreateDescriptionAsStringCall(CreateRefExpr(nativeHandle))
+                    funcDecl.funcBody.getOrThrow().body.getOrThrow().body.add(convertCall)
+                }
+            }
+        }
     }
 }
 
