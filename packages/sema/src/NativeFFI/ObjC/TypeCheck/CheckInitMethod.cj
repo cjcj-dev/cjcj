@@ -1,7 +1,8 @@
-package cjcj::sema.NativeFFI.ObjC
+package cjcj::sema.NativeFFI.ObjC.TypeCheck
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
+import cjcj::sema.NativeFFI.ObjC.{Handler, IsStaticInitMethod, TypeMapper}
 
 public class CheckInitMethod <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckInitMethod.cpp:20-46.
