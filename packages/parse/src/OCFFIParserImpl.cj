@@ -72,39 +72,38 @@ public class OCFFIParserImpl {
         }
     }
 
-    public func CheckClassLikeSignature(decl: Decl, annos: ArrayList<Annotation>): Unit {
-        if (parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR)) {
-            decl.EnableAttr(Attribute.OBJ_C_MIRROR)
-            if (decl.TestAttr(Attribute.SEALED)) {
-                DiagObjCMirrorCannotBeSealed(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
+    public func CheckMirrorSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR))
+        decl.EnableAttr(Attribute.OBJ_C_MIRROR)
+        if (decl.TestAttr(Attribute.SEALED)) {
+            DiagObjCMirrorCannotBeSealed(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
         }
-        if (parser.HasAnnotation(annos, AnnotationKind.OBJ_C_IMPL)) {
-            decl.EnableAttr(Attribute.OBJ_C_MIRROR_SUBTYPE)
-            if (let Some(_) <- decl.generic) {
-                DiagObjCImplCannotBeGeneric(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (decl.TestAttr(Attribute.ABSTRACT)) {
-                DiagObjCImplCannotBeAbstract(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (decl.TestAttr(Attribute.SEALED)) {
-                DiagObjCImplCannotBeSealed(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (decl.astKind == ASTKind.INTERFACE_DECL) {
-                DiagObjCImplCannotBeInterface(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
+    }
+
+    public func CheckImplSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_IMPL))
+        decl.EnableAttr(Attribute.OBJ_C_MIRROR_SUBTYPE)
+        if (let Some(_) <- decl.generic) {
+            DiagObjCImplCannotBeGeneric(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (decl.TestAttr(Attribute.ABSTRACT)) {
+            DiagObjCImplCannotBeAbstract(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (decl.TestAttr(Attribute.SEALED)) {
+            DiagObjCImplCannotBeSealed(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (decl.astKind == ASTKind.INTERFACE_DECL) {
+            DiagObjCImplCannotBeInterface(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
         }
     }
 
     public func CheckMirrorSignature(decl: FuncDecl, annos: ArrayList<Annotation>): Unit {
-        if (!parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR)) {
-            return
-        }
+        CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_MIRROR))
         decl.EnableAttr(Attribute.OBJ_C_MIRROR)
         if (decl.TestAttr(Attribute.FOREIGN)) {
             DiagObjCMirrorFuncCannotBeForeign(decl)
