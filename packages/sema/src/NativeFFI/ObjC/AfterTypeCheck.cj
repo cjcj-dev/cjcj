@@ -629,6 +629,18 @@ public class CheckObjCFuncTypeArguments {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarSyntheticWrappers.cpp:25-33.
+public class DesugarSyntheticWrappers {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (wrapper in ctx.synWrappers) {
+            if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            wrapper.DisableAttr(Attribute.ABSTRACT)
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Desugar.cpp:16-75.
 public func Desugar(ctx: InteropContext): Unit {
     if (!ctx.bridge.IsInteropLibAccessible()) {
