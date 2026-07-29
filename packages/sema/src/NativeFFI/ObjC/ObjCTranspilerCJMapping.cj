@@ -841,7 +841,10 @@ public class ObjCTranspilerCJMapping {
     // C++ ObjCTranspilerCJMapping.cpp:969-1013.
     private func AddMethods(): Unit {
         for (declPtr in decl.GetMemberDecls()) {
-            if (ctx.factory.IsGeneratedMember(declPtr) || !declPtr.TestAttr(Attribute.PUBLIC)) {
+            if (ctx.factory.IsGeneratedMember(declPtr)) {
+                continue
+            }
+            if (!declPtr.TestAttr(Attribute.PUBLIC)) {
                 continue
             }
             if (let InteropType.CJ_Mapping <- interopType) {
