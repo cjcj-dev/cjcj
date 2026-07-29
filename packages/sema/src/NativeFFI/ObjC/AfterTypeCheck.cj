@@ -4124,7 +4124,7 @@ public class GenerateFwdClass <: Handler<InteropContext> {
     }
 }
 
-// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:186-309.
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:222-246.
 private func DesugarGetter(ctx: InteropContext, mirror: ClassLikeDecl, propDecl: PropDecl): Unit {
     CJC_ASSERT(!propDecl.getters.isEmpty())
     let getter = propDecl.getters[0]
@@ -4149,7 +4149,7 @@ private func DesugarGetter(ctx: InteropContext, mirror: ClassLikeDecl, propDecl:
     getter.funcBody.getOrThrow().body.getOrThrow().body.add(wrappedPropGetterCall)
 }
 
-// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:218-245.
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:248-269.
 private func DesugarSetter(ctx: InteropContext, mirror: ClassLikeDecl, propDecl: PropDecl): Unit {
     CJC_ASSERT(propDecl.TestAttr(Attribute.MUT))
     CJC_ASSERT(!propDecl.setters.isEmpty())
@@ -4173,7 +4173,7 @@ private func DesugarSetter(ctx: InteropContext, mirror: ClassLikeDecl, propDecl:
     setter.funcBody.getOrThrow().body.getOrThrow().body.add(propSetterCall)
 }
 
-// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:247-269.
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:271-288.
 private func DesugarFieldGetter(ctx: InteropContext, mirror: ClassLikeDecl, field: PropDecl): Unit {
     CJC_ASSERT(!field.getters.isEmpty())
     let getter = field.getters[0]
@@ -4188,7 +4188,7 @@ private func DesugarFieldGetter(ctx: InteropContext, mirror: ClassLikeDecl, fiel
     getter.funcBody.getOrThrow().body.getOrThrow().body.add(wrappedGetInstanceVariableCall)
 }
 
-// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:271-309.
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:290-309.
 private func DesugarFieldSetter(ctx: InteropContext, mirror: ClassLikeDecl, field: PropDecl): Unit {
     CJC_ASSERT(field.TestAttr(Attribute.MUT))
     CJC_ASSERT(!field.setters.isEmpty())
@@ -4397,7 +4397,7 @@ public class DesugarSyntheticWrappers <: Handler<InteropContext> {
     }
 }
 
-// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarImpls.cpp:51-151.
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarImpls.cpp:56-145.
 private func DesugarSuperCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: FuncDecl): Unit {
     if (!ctor.TestAttr(Attribute.CONSTRUCTOR)) {
         return
@@ -4476,7 +4476,7 @@ private func DesugarSuperCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: Fu
     callExpr.desugarExpr = baseCtorCall
 }
 
-// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarImpls.cpp:153-185.
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarImpls.cpp:147-185.
 private func DesugarThisCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: FuncDecl): Unit {
     if (!ctor.TestAttr(Attribute.CONSTRUCTOR)) {
         return
