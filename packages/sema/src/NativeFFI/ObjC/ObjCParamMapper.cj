@@ -2,6 +2,7 @@ package cjcj::sema.NativeFFI.ObjC
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::utils.InternalError
 
 // C++ src/Sema/NativeFFI/ObjC/ObjCCodeTranspiler/ObjCParamMapper.h:27.
 public type ArgsList = ArrayList<(String, String)>
