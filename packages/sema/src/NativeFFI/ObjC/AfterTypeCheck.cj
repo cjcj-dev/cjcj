@@ -2722,6 +2722,107 @@ public class GenerateObjCImplMembers <: Handler<InteropContext> {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateInitCJObjectMethods.cpp:19-132.
+public class GenerateInitCJObjectMethods <: Handler<InteropContext> {
+    private let interopType: InteropType
+
+    public init(interopType: InteropType) {
+        this.interopType = interopType
+    }
+
+    private func GenNativeInitMethodForEnumCtor(ctx: InteropContext, enumDecl: EnumDecl,
+        isGenericGlueCode: Bool, genericConfigsVector: ArrayList<GenericConfigInfo>): Unit {
+        if (enumDecl.TestAttr(Attribute.IS_BROKEN)) {
+            return
+        }
+        if (interopType == InteropType.ObjC_Mirror) {
+            return
+        }
+        for (ctor in enumDecl.constructors) {
+            if (let Some(fd) <- (ctor as FuncDecl)) {
+                if (isGenericGlueCode) {
+                    for (genericConfig in genericConfigsVector) {
+                        ctx.genDecls.add(ctx.factory.CreateInitCjObject(enumDecl, fd,
+                            generateForOneWayMapping: true, genericConfig: Some(genericConfig)))
+                    }
+                } else {
+                    ctx.genDecls.add(ctx.factory.CreateInitCjObject(enumDecl, fd,
+                        generateForOneWayMapping: true))
+                }
+            } else if (let Some(varDecl) <- (ctor as VarDecl)) {
+                ctx.genDecls.add(ctx.factory.CreateInitCjObjectForEnumNoParams(enumDecl, varDecl))
+            }
+        }
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        let genNativeInitMethod = {decl: Decl, isGenericGlueCode: Bool,
+            genericConfigsVector: ArrayList<GenericConfigInfo> =>
+            if (decl.TestAttr(Attribute.IS_BROKEN)) {
+                return
+            }
+            for (memberDecl in decl.GetMemberDeclPtrs()) {
+                if (memberDecl.TestAttr(Attribute.IS_BROKEN)) {
+                    continue
+                }
+                if (!memberDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+                    continue
+                }
+                if (!memberDecl.TestAttr(Attribute.PUBLIC)) {
+                    continue
+                }
+                if (memberDecl.astKind != ASTKind.FUNC_DECL) {
+                    continue
+                }
+                CJC_ASSERT_WITH_MSG(memberDecl.astKind == ASTKind.FUNC_DECL,
+                    "Expected ASTKind::FUNC_DECL, found " + ASTKindName(memberDecl.astKind))
+                let ctorDecl = (memberDecl as FuncDecl).getOrThrow()
+                if (interopType == InteropType.ObjC_Mirror && !ctx.factory.IsGeneratedCtor(ctorDecl)) {
+                    continue
+                }
+                if (interopType == InteropType.CJ_Mapping && !TypeMapper.IsObjCCJMappingMember(ctorDecl)) {
+                    continue
+                }
+                if (interopType == InteropType.CJ_Mapping) {
+                    let forOneWayMapping = interopType == InteropType.CJ_Mapping &&
+                        TypeMapper.IsOneWayMapping(decl)
+                    if (isGenericGlueCode) {
+                        for (genericConfig in genericConfigsVector) {
+                            ctx.genDecls.add(ctx.factory.CreateInitCjObject(decl, ctorDecl,
+                                generateForOneWayMapping: forOneWayMapping,
+                                genericConfig: Some(genericConfig)))
+                        }
+                    } else {
+                        ctx.genDecls.add(ctx.factory.CreateInitCjObject(decl, ctorDecl,
+                            generateForOneWayMapping: forOneWayMapping))
+                    }
+                } else if (interopType == InteropType.ObjC_Mirror) {
+                    ctx.genDecls.add(ctx.factory.CreateInitCjObjectReturningObjCSelf(decl, ctorDecl))
+                }
+            }
+        }
+
+        if (interopType == InteropType.ObjC_Mirror) {
+            for (impl in ctx.impls) {
+                genNativeInitMethod(impl, false, ArrayList<GenericConfigInfo>())
+            }
+        } else if (interopType == InteropType.CJ_Mapping) {
+            for (cjMapping in ctx.cjMappings) {
+                let genericConfigsVector = ArrayList<GenericConfigInfo>()
+                let isGenericGlueCode = Box<Bool>(false)
+                InitGenericConfigs(cjMapping.curFile.getOrThrow(), cjMapping,
+                    genericConfigsVector, isGenericGlueCode)
+                if (let Some(enumDecl) <- (cjMapping as EnumDecl)) {
+                    GenNativeInitMethodForEnumCtor(ctx, enumDecl,
+                        isGenericGlueCode.value, genericConfigsVector)
+                } else {
+                    genNativeInitMethod(cjMapping, isGenericGlueCode.value, genericConfigsVector)
+                }
+            }
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateInSyntheticWrappers.cpp:25-41.
 public class GenerateInSyntheticWrappers <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
