@@ -225,6 +225,50 @@ public class ASTFactory {
             { => CreateObjCobjectNull() }, typeMapper.Cj2CType(ty))
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:459-479.
+    public func CreateOptionalMethodGuard(msgSend: Expr, cls: Expr, selector: String,
+        curFile: Option<File>): Expr {
+        let baseTy = msgSend.GetTy().getOrThrow()
+        let selectorCall = CreateRegisterNameCall(selector, curFile)
+        let respondsToSelectorCall = CreateObjCRespondsToSelectorCall(cls, selectorCall, curFile)
+        let falseBranch = WithinFile<ThrowExpr>(
+            CreateThrowOptionalMethodUnimplemented(curFile.getOrThrow()), curFile)
+        let boolMatch = CreateBoolMatch(respondsToSelectorCall, msgSend, falseBranch, baseTy)
+        let nodes = ArrayList<Node>()
+        nodes.add(boolMatch)
+        return WrapReturningLambdaCall(typeManager, nodes)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:481-510.
+    public func CreateMirrorConstructorCall(entity: Expr, mirrorTy: Ty): Option<Expr> {
+        let curFile = entity.curFile
+        if (let None <- (mirrorTy as ClassLikeTy)) {
+            return None
+        }
+        let classLikeTy = (mirrorTy as ClassLikeTy).getOrThrow()
+        if (let Some(decl) <- classLikeTy.commonDecl) {
+            if (decl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                let mirror: ClassDecl
+                if (decl.astKind == ASTKind.CLASS_DECL) {
+                    mirror = (decl as ClassDecl).getOrThrow()
+                } else {
+                    mirror = GetSyntheticWrapper(importManager, decl).getOrThrow()
+                }
+                let mirrorCtor = GetGeneratedBaseCtor(mirror).getOrThrow()
+                let args = ArrayList<FuncArg>()
+                args.add(CreateFuncArg(entity))
+                if (let Some(ctorCall) <- CreateCall(Some(mirrorCtor), curFile, args: args)) {
+                    ctorCall.callKind = CallKind.CALL_OBJECT_CREATION
+                    ctorCall.SetTy(mirrorTy)
+                    return Some(ctorCall)
+                }
+                return None
+            }
+        }
+        CJC_ABORT()
+        return None
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:126-176.
     public func UnwrapEntity(expr: Expr): Expr {
         let exprTy = expr.GetTy().getOrThrow()
