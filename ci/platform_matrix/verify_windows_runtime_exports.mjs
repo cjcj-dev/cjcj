@@ -99,7 +99,8 @@ if (unexpectedImports.length) console.error(`FATAL: unexpected imports: ${unexpe
 if (missingImports.length) console.error(`FATAL: missing official imports: ${missingImports.join(',')}`);
 // CJ_MCC baseline is 194, not the official SDK's 192: generational (sticky) GC adds exactly two
 // symbols that the source declares as public C ABI --
-//   CJ_MCC_FlushDeferredLogRing  (extern "C" MRT_EXPORT, runtime/src/Mutator/Mutator.h:637)
+//   CJ_MCC_FlushDeferredLogRing_v1_8_264_32  (versioned ABI, runtime/src/Mutator/CJDeferredLogRingABI.h:22;
+//                                             replaced the unversioned export as of runtime b71439a2)
 //   CJ_MCC_StickyLogLine         (runtime/src/Heap/StickyLog.h:21)
 // Both are called from the compiler-emitted write-barrier path, so they must stay exported.
 // The total export count is unchanged at 3116: the Windows producer no longer uses
