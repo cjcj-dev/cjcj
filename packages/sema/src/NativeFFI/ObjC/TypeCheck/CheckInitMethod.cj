@@ -2,9 +2,10 @@ package cjcj::sema.NativeFFI.ObjC.TypeCheck
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
-import cjcj::sema.NativeFFI.ObjC.{Handler, IsStaticInitMethod, TypeMapper}
+import cjcj::sema.NativeFFI.ObjC.Handler as ObjCHandler
+import cjcj::sema.NativeFFI.ObjC.{IsStaticInitMethod, TypeMapper}
 
-public class CheckInitMethod <: Handler<TypeCheckContext> {
+public class CheckInitMethod <: ObjCHandler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckInitMethod.cpp:20-46.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         if (!TypeMapper.IsObjCMirror(ctx.target)) {
