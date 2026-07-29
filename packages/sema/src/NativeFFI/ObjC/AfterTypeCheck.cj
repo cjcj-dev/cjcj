@@ -672,7 +672,7 @@ public class ASTFactory {
         args.add(CreateFuncArg(nativeHandle))
         args.add(CreateFuncArg(classNameExpr))
         args.add(CreateFuncArg(WrapReturningLambdaExpr(typeManager,
-            bodyFactory(receiverRef, objCSuperRef), actionParams)))
+            bodyFactory(receiverRef, objCSuperRef), lambdaParams: actionParams)))
         let realRetTy = (withObjCSuperRef.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
         return CreateCallExpr(withObjCSuperRef, args, Some(withObjCSuperDecl), Some(realRetTy),
             CallKind.CALL_DECLARED_FUNCTION)
