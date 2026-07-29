@@ -1557,6 +1557,124 @@ public class ASTFactory {
         return result
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:834-998.
+    public func CreateMethodWrapper(method: FuncDecl,
+        genericConfig!: Option<GenericConfigInfo> = None): FuncDecl {
+        let outerDecl = (method.outerDecl.getOrThrow() as InheritableDecl).getOrThrow()
+        let wrapperParamList = FuncParamList()
+        let wrapperParams = wrapperParamList.params
+        let methodRetType = method.funcBody.getOrThrow().retType.getOrThrow()
+        let actualTyArgMap = HashMap<String, Ty>()
+        let funcTyParams = ArrayList<Ty>()
+        let actualPrimitiveTypes = ArrayList<Type>()
+        if (let Some(config) <- genericConfig) {
+            if (!config.instTypes.isEmpty()) {
+                GetArgsAndRetGenericActualTyVector(config, method, actualTyArgMap, funcTyParams,
+                    actualPrimitiveTypes, typeManager)
+            }
+        }
+        let instantTy = GetInstantyForGenericTy(method.outerDecl.getOrThrow(), actualTyArgMap, typeManager)
+        let methodRetTy = methodRetType.GetTy().getOrThrow()
+        let retActualTy = if (methodRetTy.IsGeneric()) {
+            actualTyArgMap.get(methodRetTy.name).getOrThrow()
+        } else { methodRetTy }
+        var objTmpVarDecl: Option<VarDecl> = None
+        let methodExpr: MemberAccess
+        if (method.TestAttr(Attribute.STATIC)) {
+            let staticRefExpr = CreateRefExpr(method.outerDecl.getOrThrow())
+            if (method.outerDecl.getOrThrow().GetTy().getOrThrow().HasGeneric()) {
+                for (actualType in actualPrimitiveTypes) { staticRefExpr.typeArguments.add(actualType) }
+                staticRefExpr.SetTy(instantTy.getOrThrow())
+            }
+            methodExpr = CreateMemberAccess(WithinFile<RefExpr>(staticRefExpr, method.curFile), method)
+        } else {
+            let registryIdTy = bridge.GetRegistryIdTy().getOrThrow()
+            let registryIdParam = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+            wrapperParams.add(registryIdParam)
+            let registryCall: CallExpr
+            let temp: VarDecl
+            if (outerDecl.GetTy().getOrThrow().HasGeneric()) {
+                let registryTy = CreateRefType(outerDecl, instantTy)
+                for (actualType in actualPrimitiveTypes) { registryTy.typeArguments.add(actualType) }
+                registryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam), registryTy)
+                temp = CreateTmpVarDecl(CreateType(instantTy.getOrThrow()), registryCall)
+            } else {
+                registryCall = CreateGetFromRegistryByIdCall(CreateRefExpr(registryIdParam), CreateRefType(outerDecl))
+                temp = CreateTmpVarDecl(CreateRefType(outerDecl), registryCall)
+            }
+            if (method.TestAttr(Attribute.MUT)) { temp.isVar = true }
+            objTmpVarDecl = Some(temp)
+            methodExpr = CreateMemberAccess(CreateRefExpr(temp), method)
+            let memberRetTy = if (methodRetTy.IsGeneric()) { retActualTy } else { methodRetTy }
+            methodExpr.SetTy(typeManager.GetFunctionTy(funcTyParams.toArray(), memberRetTy))
+        }
+
+        let originParams = method.funcBody.getOrThrow().paramLists[0].params
+        for (param in originParams) {
+            var finalTy = param.GetTy().getOrThrow()
+            if (let Some(actualTy) <- actualTyArgMap.get(finalTy.name)) { finalTy = actualTy }
+            let convertedParamTy = typeMapper.Cj2CType(finalTy)
+            let suffix = if (TypeMapper.IsObjCCJMapping(finalTy)) { "Id" } else { "" }
+            wrapperParams.add(CreateFuncParam(param.identifier.GetRawText() + suffix,
+                CreateType(convertedParamTy), None, convertedParamTy))
+        }
+        let wrapperParamTys = ArrayList<Ty>()
+        for (param in wrapperParams) { wrapperParamTys.add(param.GetTy().getOrThrow()) }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperRetTy = if (methodRetTy.HasGeneric()) {
+            typeMapper.Cj2CType(retActualTy)
+        } else { typeMapper.Cj2CType(methodRetTy) }
+        let wrapperTy = typeManager.GetFunctionTy(wrapperParamTys.toArray(), wrapperRetTy, cfg: cfg)
+        methodExpr.curFile = method.curFile
+        methodExpr.begin = method.GetBegin()
+        methodExpr.end = method.GetEnd()
+        let methodArgs = ArrayList<FuncArg>()
+        let firstParamIndex: Int64 = if (method.TestAttr(Attribute.STATIC)) { 0 } else { 1 }
+        var index = firstParamIndex
+        while (index < wrapperParams.size) {
+            let wrapperParam = wrapperParams[index]
+            let originParam = originParams[index - firstParamIndex]
+            var finalTy = originParam.GetTy().getOrThrow()
+            if (let Some(actualTy) <- actualTyArgMap.get(finalTy.name)) { finalTy = actualTy }
+            let wrappedParam = WrapEntity(WithinFile<RefExpr>(CreateRefExpr(wrapperParam), method.curFile), finalTy)
+            methodArgs.add(CreateFuncArg(wrappedParam, wrapperParam.identifier.Val(), finalTy))
+            index++
+        }
+        let callRetTy = if (outerDecl.GetTy().getOrThrow().HasGeneric()) { retActualTy } else { methodRetTy }
+        let methodCall = CreateCallExpr(methodExpr, methodArgs, Some(method), Some(callRetTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+        let wrapperNodes = ArrayList<Node>()
+        if (let Some(temp) <- objTmpVarDecl) { wrapperNodes.add(temp) }
+        var unwrappedMethodCall = UnwrapEntity(methodCall)
+        if (TypeMapper.IsObjCObjectType(methodCall.GetTy().getOrThrow())) {
+            unwrappedMethodCall = CreateObjCRetainCall(unwrappedMethodCall)
+        }
+        wrapperNodes.add(unwrappedMethodCall)
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(wrapperParamList)
+        let wrapperBody = CreateFuncBody(paramLists, CreateType(wrapperTy.retTy),
+            CreateBlock(wrapperNodes, wrapperTy.retTy), wrapperTy)
+        var isInnerGenericProp = false
+        if ((let Some(config) <- genericConfig) && (let Some(propDecl) <- method.propDecl)) {
+            isInnerGenericProp = config.funcNames.contains(propDecl.identifier.Val())
+        }
+        let wrapperName = if (let Some(config) <- genericConfig) {
+            nameGenerator.GenerateMethodWrapperName(method, genericActualName: config.declInstName,
+                isInnerGeneric: isInnerGenericProp)
+        } else { nameGenerator.GenerateMethodWrapperName(method) }
+        let wrapper = CreateFuncDecl(wrapperName, wrapperBody, wrapperTy)
+        wrapper.moduleName = method.moduleName
+        wrapper.fullPackageName = method.fullPackageName
+        wrapper.EnableAttr(Attribute.C)
+        wrapper.EnableAttr(Attribute.GLOBAL)
+        wrapper.EnableAttr(Attribute.PUBLIC)
+        wrapper.EnableAttr(Attribute.NO_MANGLE)
+        wrapper.funcBody.getOrThrow().funcDecl = wrapper
+        PutDeclToFile(wrapper, method.curFile.getOrThrow())
+        return wrapper
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1000-1067.
     public func CreateGetterWrapper(pd: PropDecl): FuncDecl {
         let outerDecl = (pd.outerDecl.getOrThrow() as InheritableDecl).getOrThrow()
