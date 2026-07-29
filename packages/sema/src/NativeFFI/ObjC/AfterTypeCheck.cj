@@ -2245,6 +2245,68 @@ public class InsertNativeHandleGetterDecl <: Handler<InteropContext> {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertFinalizer.cpp:21-94.
+public class InsertFinalizer <: Handler<InteropContext> {
+    private let interopType: InteropType
+
+    public init(interopType: InteropType) {
+        this.interopType = interopType
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        if (interopType == InteropType.Fwd_Class) {
+            for (fwdClass in ctx.fwdClasses) {
+                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
+                    continue
+                }
+                fwdClass.body.getOrThrow().decls.add(ctx.factory.CreateHasInitedField(fwdClass))
+                fwdClass.body.getOrThrow().decls.add(ctx.factory.CreateFinalizer(fwdClass))
+            }
+            return
+        }
+
+        for (mirror in ctx.mirrors) {
+            if (mirror.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (let Some(mirrorClass) <- (mirror as ClassDecl)) {
+                mirrorClass.body.getOrThrow().decls.add(ctx.factory.CreateHasInitedField(mirrorClass))
+                mirrorClass.body.getOrThrow().decls.add(ctx.factory.CreateFinalizer(mirrorClass))
+            }
+        }
+
+        for (wrapper in ctx.synWrappers) {
+            if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            wrapper.body.getOrThrow().decls.add(ctx.factory.CreateHasInitedField(wrapper))
+            wrapper.body.getOrThrow().decls.add(ctx.factory.CreateFinalizer(wrapper))
+        }
+
+        for (impl in ctx.impls) {
+            if (impl.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (HasMirrorSuperClass(impl)) {
+                continue
+            }
+            CJC_ASSERT(HasMirrorSuperInterface(impl))
+            impl.body.getOrThrow().decls.add(ctx.factory.CreateHasInitedField(impl))
+
+            let finalizer = GetFinalizer(impl)
+            if (finalizer.isSome() && finalizer.getOrThrow().funcBody.isSome() &&
+                finalizer.getOrThrow().funcBody.getOrThrow().body.isSome()) {
+                let nativeHandleFieldExpr = ctx.factory.CreateNativeHandleFieldExpr(impl)
+                let releaseCall = ctx.factory.CreateObjCReleaseCall(nativeHandleFieldExpr)
+                finalizer.getOrThrow().funcBody.getOrThrow().body.getOrThrow().body.add(releaseCall)
+            } else {
+                // UPSTREAM_BUG: C++ line 91 inserts hasInitedField a second time instead of finalizer.
+                impl.body.getOrThrow().decls.add(ctx.factory.CreateFinalizer(impl))
+            }
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertNativeHandleGetterBody.cpp:22-83.
 public class InsertNativeHandleGetterBody <: Handler<InteropContext> {
     private let interopType: InteropType
