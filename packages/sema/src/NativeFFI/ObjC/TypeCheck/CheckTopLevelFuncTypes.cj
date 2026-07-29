@@ -1,11 +1,9 @@
-package cjcj::sema.NativeFFI.ObjC.TypeCheck
+package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
-import cjcj::sema.NativeFFI.ObjC.Handler as ObjCHandler
-import cjcj::sema.NativeFFI.ObjC.TypeMapper
 
-public class CheckTopLevelFuncTypes <: ObjCHandler<TypeCheckContext> {
+public class CheckTopLevelFuncTypes <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckTopLevelFuncTypes.cpp:19-43.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         let fd = ctx.target as FuncDecl

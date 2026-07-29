@@ -1,11 +1,9 @@
-package cjcj::sema.NativeFFI.ObjC.TypeCheck
+package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
-import cjcj::sema.NativeFFI.ObjC.Handler as ObjCHandler
-import cjcj::sema.NativeFFI.ObjC.TypeMapper
 
-public class CheckMirrorInheritMirror <: ObjCHandler<TypeCheckContext> {
+public class CheckMirrorInheritMirror <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckMirrorInheritMirror.cpp:20-29.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         if (TypeMapper.IsValidObjCMirror(ctx.target.GetTy().getOrThrow())) {

@@ -1,8 +1,7 @@
-package cjcj::sema.NativeFFI.ObjC.TypeCheck
+package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.Decl
 import cjcj::basic.DiagnosticEngine
-import cjcj::sema.NativeFFI.ObjC.TypeMapper
 import cjcj::sema.TypeManager
 
 // C++ src/Sema/NativeFFI/ObjC/TypeCheck/Context.h:22-32.

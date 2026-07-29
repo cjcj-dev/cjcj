@@ -1,9 +1,8 @@
-package cjcj::sema.NativeFFI.ObjC.TypeCheck
+package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::basic.{DiagKindRefactor, MakeRange}
-import cjcj::sema.NativeFFI.ObjC.Handler as ObjCHandler
 
-public class CheckGeneric <: ObjCHandler<TypeCheckContext> {
+public class CheckGeneric <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckGeneric.cpp:20-27.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         if (let Some(generic) <- ctx.target.generic) {
