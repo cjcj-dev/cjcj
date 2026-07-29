@@ -488,6 +488,19 @@ public class FindMirrors {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/FindCJMapping.cpp:20-27.
+public class FindCJMapping {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (file in ctx.pkg.files) {
+            for (decl in file.decls) {
+                if (ctx.typeMapper.IsObjCCJMapping(decl)) {
+                    ctx.cjMappings.add(decl)
+                }
+            }
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Desugar.cpp:16-75.
 public func Desugar(ctx: InteropContext): Unit {
     if (!ctx.bridge.IsInteropLibAccessible()) {
