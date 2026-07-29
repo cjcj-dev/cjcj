@@ -347,8 +347,7 @@ public class ObjCTranspilerCJMapping {
     // C++ ObjCTranspilerCJMapping.cpp:444-489.
     private func GenerateForwardDeclarations(): Unit {
         let dependencies = HashSet<Decl>()
-        var walker: (Ty) -> Unit = {_: Ty => }
-        walker = {ty: Ty =>
+        func walker(ty: Ty): Unit {
             if (TypeMapper.IsObjCObjectType(ty)) {
                 if (!TypeMapper.IsObjCId(ty) && !ty.IsCoreOptionType()) {
                     dependencies.add(Ty.GetDeclOfTy(Some(ty)).getOrThrow())
@@ -424,7 +423,11 @@ public class ObjCTranspilerCJMapping {
     // C++ ObjCTranspilerCJMapping.cpp:556-614.
     private func GenerateInterfaceDecl(): Unit {
         let classDecl = decl as ClassDecl
-        let superClassPtr = if (let Some(value) <- classDecl) { value.GetSuperClassDecl() } else { None }
+        let superClassPtr: Option<ClassDecl> = if (let Some(value) <- classDecl) {
+            value.GetSuperClassDecl()
+        } else {
+            None
+        }
         let isClassInheritedFromClass = if (let Some(superClass) <- superClassPtr) {
             superClass.identifier.Val() != OBJECT_NAME
         } else {
@@ -444,11 +447,12 @@ public class ObjCTranspilerCJMapping {
             ctx.nameGenerator.GetObjCDeclName(decl)
         }
         var resultH = INTERFACE_KEYWORD + " " + objCDeclName + " : "
-        resultH += if (isClassInheritedFromClass) {
+        let superClassName = if (isClassInheritedFromClass) {
             superClassPtr.getOrThrow().identifier.Val()
         } else {
             OCOBJECT_NAME
         }
+        resultH += superClassName
         let interfacesVec = ArrayList<InterfaceTy>()
         if (let Some(concreteClassDecl) <- classDecl) {
             for (interfaceTy in concreteClassDecl.GetSuperInterfaceTys()) {

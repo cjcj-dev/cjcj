@@ -415,9 +415,9 @@ public class Transpiler {
         result.retType = ObjCParamMapper.MapCJTypeToObjCType(typedefs, retTy)
         let funcBody = funcDecl.funcBody.getOrThrow()
         result.paramsDecl = ObjCParamMapper.GenerateFuncParamLists(typedefs, funcBody.paramLists,
-            result.selectorComponents, FunctionListFormat.DECLARATION,
-            if (result.isStatic) { ObjCFunctionType.STATIC } else { ObjCFunctionType.INSTANCE },
-            GetForeignNameAnnotation(funcDecl).isSome())
+            result.selectorComponents, format: FunctionListFormat.DECLARATION,
+            `type`: if (result.isStatic) { ObjCFunctionType.STATIC } else { ObjCFunctionType.INSTANCE },
+            hasForeignNameAnno: GetForeignNameAnnotation(funcDecl).isSome())
         let params = funcBody.paramLists[0].params
         result.paramStaticRef = if (params.isEmpty()) {
             "()"
@@ -457,9 +457,9 @@ public class Transpiler {
         result.retType = ObjCParamMapper.ID_TYPE
         let funcBody = funcDecl.funcBody.getOrThrow()
         result.paramsDecl = ObjCParamMapper.GenerateFuncParamLists(typedefs, funcBody.paramLists,
-            selectorComponents, FunctionListFormat.DECLARATION,
-            if (result.isStatic) { ObjCFunctionType.STATIC } else { ObjCFunctionType.INSTANCE },
-            GetForeignNameAnnotation(funcDecl).isSome())
+            selectorComponents, format: FunctionListFormat.DECLARATION,
+            `type`: if (result.isStatic) { ObjCFunctionType.STATIC } else { ObjCFunctionType.INSTANCE },
+            hasForeignNameAnno: GetForeignNameAnnotation(funcDecl).isSome())
         let params = funcBody.paramLists[0].params
         result.paramStaticRef = JoinVec<FuncParam>(params,
             {param: FuncParam => ObjCParamMapper.MapCJTypeToObjCType(typedefs, param.GetTy().getOrThrow())},
