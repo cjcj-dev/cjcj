@@ -2,16 +2,17 @@ package cjcj::sema.NativeFFI.ObjC
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::basic.DiagnosticEngine
+import cjcj::basic.{DiagnosticEngine, Linkage}
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateType, GetStringDecl, WithinFile,
-    INIT_IDENT, IsObjCGeneratedMember, WrapReturningLambdaCall}
+import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateThisRef, CreateType, GetStringDecl,
+    WithinFile, INIT_IDENT, IsObjCGeneratedMember, WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
-    CFUNC_NAME, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, OBJ_C_FWD_CLASS_SUFFIX,
+    CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR,
+    OBJ_C_FWD_CLASS_SUFFIX,
     OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:29-35.
@@ -20,6 +21,9 @@ public enum Retain {
     | RETAINED
     | RETAIN_AUTORELEASED_RETURN_VALUE
 }
+
+// C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:38.
+private let FINALIZER_IDENT: String = "~init"
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:37-47,279-283.
 public class ASTFactory {
@@ -673,6 +677,152 @@ public class ASTFactory {
             actualArgs.add(CreateFuncArg(arg))
         }
         return CreateCallExpr(cFuncCallExpr, actualArgs, None, Some(retTy), CallKind.CALL_FUNCTION_PTR)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2074-2097.
+    public func CreateAutoreleasePoolScope(ty: Ty, actions: ArrayList<Node>): Expr {
+        CJC_ASSERT(TypeMapper.IsObjCCompatible(ty))
+        CJC_ASSERT(!actions.isEmpty())
+        let autoreleasePoolDecl: FuncDecl
+        let autoreleasePoolRef: RefExpr
+        if (TypeMapper.IsObjCObjectType(ty) || TypeMapper.IsObjCBlock(ty)) {
+            autoreleasePoolDecl = bridge.GetWithAutoreleasePoolObjDecl().getOrThrow()
+            autoreleasePoolRef = CreateRefExpr(autoreleasePoolDecl)
+        } else {
+            autoreleasePoolDecl = bridge.GetWithAutoreleasePoolDecl().getOrThrow()
+            let unwrappedTy = typeMapper.Cj2CType(ty)
+            autoreleasePoolRef = CreateRefExpr(autoreleasePoolDecl)
+            autoreleasePoolRef.instTys.add(unwrappedTy)
+            autoreleasePoolRef.SetTy(typeManager.GetInstantiatedTy(autoreleasePoolDecl.GetTy().getOrThrow(),
+                GenerateTypeMapping(autoreleasePoolDecl, autoreleasePoolRef.instTys)))
+            autoreleasePoolRef.typeArguments.add(CreateType(unwrappedTy))
+        }
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(WrapReturningLambdaExpr(typeManager, actions)))
+        let retTy = (autoreleasePoolRef.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+        return CreateCallExpr(autoreleasePoolRef, args, Some(autoreleasePoolDecl), Some(retTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2099-2126.
+    public func CreateGetInstanceVariableCall(field: PropDecl, nativeHandle: Expr): CallExpr {
+        let getInstanceVariableDecl: FuncDecl
+        let getInstanceVariableRef: RefExpr
+        let curFile = nativeHandle.curFile
+        if (TypeMapper.IsObjCObjectType(field.GetTy().getOrThrow())) {
+            getInstanceVariableDecl = bridge.GetGetInstanceVariableObjDecl().getOrThrow()
+            getInstanceVariableRef = CreateRefExpr(getInstanceVariableDecl)
+        } else {
+            getInstanceVariableDecl = bridge.GetGetInstanceVariableDecl().getOrThrow()
+            getInstanceVariableRef = CreateRefExpr(getInstanceVariableDecl)
+            getInstanceVariableRef.instTys.add(typeMapper.Cj2CType(field.GetTy().getOrThrow()))
+            getInstanceVariableRef.SetTy(typeManager.GetInstantiatedTy(
+                getInstanceVariableDecl.GetTy().getOrThrow(),
+                GenerateTypeMapping(getInstanceVariableDecl, getInstanceVariableRef.instTys)))
+        }
+        let objcName = nameGenerator.GetObjCDeclName(field)
+        let nameExpr = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.STRING, objcName,
+            GetStringDecl(importManager).GetTy().getOrThrow()), curFile)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(nativeHandle))
+        args.add(CreateFuncArg(nameExpr))
+        let retTy = (getInstanceVariableRef.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+        let call = CreateCallExpr(getInstanceVariableRef, args, Some(getInstanceVariableDecl), Some(retTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2128-2155.
+    public func CreateSetInstanceVariableCall(field: PropDecl, nativeHandle: Expr, value: Expr): CallExpr {
+        let setInstanceVariableDecl: FuncDecl
+        let setInstanceVariableRef: RefExpr
+        let curFile = nativeHandle.curFile
+        if (TypeMapper.IsObjCObjectType(field.GetTy().getOrThrow())) {
+            setInstanceVariableDecl = bridge.GetSetInstanceVariableObjDecl().getOrThrow()
+            setInstanceVariableRef = CreateRefExpr(setInstanceVariableDecl)
+        } else {
+            setInstanceVariableDecl = bridge.GetSetInstanceVariableDecl().getOrThrow()
+            setInstanceVariableRef = CreateRefExpr(setInstanceVariableDecl)
+            setInstanceVariableRef.instTys.add(typeMapper.Cj2CType(field.GetTy().getOrThrow()))
+            setInstanceVariableRef.SetTy(typeManager.GetInstantiatedTy(
+                setInstanceVariableDecl.GetTy().getOrThrow(),
+                GenerateTypeMapping(setInstanceVariableDecl, setInstanceVariableRef.instTys)))
+        }
+        let objcName = nameGenerator.GetObjCDeclName(field)
+        let nameExpr = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.STRING, objcName,
+            GetStringDecl(importManager).GetTy().getOrThrow()), curFile)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(nativeHandle))
+        args.add(CreateFuncArg(nameExpr))
+        args.add(CreateFuncArg(value))
+        let call = CreateCallExpr(setInstanceVariableRef, args, Some(setInstanceVariableDecl),
+            Some(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)), CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2171-2176.
+    public func SetDesugarExpr(original: Expr, desugared: Expr): Unit {
+        original.desugarExpr = desugared
+        original.desugarExpr.getOrThrow().sourceExpr = original
+        CopyBasicInfo(original, original.desugarExpr.getOrThrow())
+        AddCurFile(original.desugarExpr.getOrThrow(), file: original.curFile)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2178-2193.
+    public func CreateFinalizer(target: ClassDecl): FuncDecl {
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let funcBody = CreateFuncBody(ArrayList<FuncParamList>(), None,
+            CreateBlock(ArrayList<Node>(), unitTy), unitTy)
+        funcBody.paramLists.add(FuncParamList())
+        let nativeHandleExpr = CreateNativeHandleFieldExpr(target)
+        funcBody.body.getOrThrow().body.add(CreateObjCReleaseCall(nativeHandleExpr))
+        let funcDecl = CreateFuncDecl(FINALIZER_IDENT, funcBody,
+            typeManager.GetFunctionTy([], unitTy))
+        PutDeclToClassLikeBody(funcDecl, target)
+        funcDecl.EnableAttr(Attribute.PRIVATE)
+        funcDecl.EnableAttr(Attribute.FINALIZER)
+        funcDecl.linkage = Linkage.EXTERNAL
+        funcDecl.funcBody.getOrThrow().funcDecl = funcDecl
+        return funcDecl
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2195-2205.
+    public func CreateHasInitedField(target: ClassDecl): VarDecl {
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let initializer = CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy)
+        let result = CreateVarDecl(HAS_INITED_IDENT, initializer, None)
+        result.isVar = true
+        PutDeclToClassLikeBody(result, target)
+        result.EnableAttr(Attribute.PRIVATE)
+        result.EnableAttr(Attribute.NO_REFLECT_INFO)
+        result.EnableAttr(Attribute.HAS_INITED_FIELD)
+        return result
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2207-2222.
+    public func CreateNativeHandleGetterDecl(target: ClassLikeDecl): FuncDecl {
+        let nativeObjCIdTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let getterParamList = CreateFuncParamList(ArrayList<FuncParam>())
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(getterParamList)
+        let getterFuncBody = CreateFuncBody(paramLists, CreateType(nativeObjCIdTy),
+            CreateBlock(ArrayList<Node>(), nativeObjCIdTy), nativeObjCIdTy)
+        let getterDecl = CreateFuncDecl(NATIVE_HANDLE_GETTER_IDENT, getterFuncBody,
+            typeManager.GetFunctionTy([], nativeObjCIdTy))
+        getterDecl.funcBody.getOrThrow().funcDecl = getterDecl
+        getterDecl.funcBody.getOrThrow().parentClassLike = target
+        getterDecl.EnableAttr(Attribute.PUBLIC)
+        getterDecl.EnableAttr(Attribute.INITIALIZED)
+        getterDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
+        PutDeclToClassLikeBody(getterDecl, target)
+        return getterDecl
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2224-2229.
+    public func CreateNativeHandleFieldExpr(target: ClassDecl): Expr {
+        let nativeHandleDecl = GetNativeVarHandle(target).getOrThrow()
+        let thisRef = CreateThisRef(target, target.GetTy().getOrThrow(), target.curFile.getOrThrow())
+        return CreateMemberAccess(thisRef, nativeHandleDecl)
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1567-1585.
