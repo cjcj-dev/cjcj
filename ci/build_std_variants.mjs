@@ -154,15 +154,22 @@ async function createBuildSdkOverlay() {
       entry.isDirectory() ? 'dir' : 'file');
   }
 
-  const astFfi = await requireFile(path.join(sdkTargetLib, 'libcangjie-std-astFFI.a'), 'official ast FFI');
   const astSupport = path.join(overlayTargetLib, 'libcangjie-ast-support.a');
-  await fs.copyFile(astFfi, astSupport);
-  const llvmAr = await requireFile(path.join(sdk, 'third_party', 'llvm', 'bin', 'llvm-ar'), 'SDK llvm-ar');
-  const astApiMember = platform.startsWith('windows_') ? 'ast_api.cpp.obj' : 'ast_api.cpp.o';
-  await $`${llvmAr} d ${astSupport} ${astApiMember}`;
-  const members = (await $({stdio: 'pipe'})`${llvmAr} t ${astSupport}`).stdout.trim().split('\n').filter(Boolean);
-  if (members.length !== 70 || members.includes(astApiMember)) {
-    throw new Error(`derived ast-support archive has unexpected members=${members.length}`);
+  const officialAstSupport = path.join(sdkTargetLib, 'libcangjie-ast-support.a');
+  // Windows SDKs already ship the target support archive. Native builds use
+  // the historical hybrid recipe derived from std-astFFI.
+  if (targetSpec.buildTarget) {
+    await fs.copyFile(await requireFile(officialAstSupport, 'official windows ast-support'), astSupport);
+  } else {
+    const astFfi = await requireFile(path.join(sdkTargetLib, 'libcangjie-std-astFFI.a'), 'official ast FFI');
+    await fs.copyFile(astFfi, astSupport);
+    const llvmAr = await requireFile(path.join(sdk, 'third_party', 'llvm', 'bin', 'llvm-ar'), 'SDK llvm-ar');
+    await $`${llvmAr} d ${astSupport} ast_api.cpp.o`;
+    const members = (await $({stdio: 'pipe'})`${llvmAr} t ${astSupport}`)
+      .stdout.trim().split('\n').filter(Boolean);
+    if (members.length !== 70 || members.includes('ast_api.cpp.o')) {
+      throw new Error(`derived ast-support archive has unexpected members=${members.length}`);
+    }
   }
 }
 
