@@ -2,6 +2,7 @@ package cjcj::sema.NativeFFI.ObjC
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.{DiagnosticEngine, DiagKindRefactor, Linkage}
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
