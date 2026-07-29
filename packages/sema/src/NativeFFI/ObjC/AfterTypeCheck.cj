@@ -457,6 +457,37 @@ public class InteropContext {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/FindMirrors.cpp:21-45.
+public class FindMirrors {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (file in ctx.pkg.files) {
+            for (decl in file.decls) {
+                if (let Some(classLikeDecl) <- (decl as ClassLikeDecl)) {
+                    if (ctx.typeMapper.IsObjCMirror(classLikeDecl)) {
+                        ctx.mirrors.add(classLikeDecl)
+                    }
+                }
+
+                if (let Some(classDecl) <- (decl as ClassDecl)) {
+                    if (ctx.typeMapper.IsSyntheticWrapper(classDecl)) {
+                        ctx.synWrappers.add(classDecl)
+                    } else if (ctx.typeMapper.IsObjCImpl(classDecl) ||
+                        (ctx.typeMapper.IsObjCMirrorSubtype(classDecl) &&
+                        !ctx.typeMapper.IsObjCMirror(classDecl))) {
+                        ctx.impls.add(classDecl)
+                    }
+                }
+
+                if (let Some(funcDecl) <- (decl as FuncDecl)) {
+                    if (ctx.typeMapper.IsObjCMirror(funcDecl)) {
+                        ctx.mirrorTopLevelFuncs.add(funcDecl)
+                    }
+                }
+            }
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Desugar.cpp:16-75.
 public func Desugar(ctx: InteropContext): Unit {
     if (!ctx.bridge.IsInteropLibAccessible()) {
