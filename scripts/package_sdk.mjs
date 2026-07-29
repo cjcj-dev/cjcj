@@ -4,6 +4,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {requirePrivateStage} from '../build/lib/package-safety.mjs';
 import {stickyPreflight} from '../build/lib/std-variants.mjs';
 
 const required = name => {
@@ -71,16 +72,20 @@ if (stickyStd && !await exists(stickyStd, 'dir')) {
 const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
 const isWindows = platform === 'windows-x64';
 const packageName = `cjcj-${version}-${platform}`;
-const stage = path.join(outdir, packageName);
-await fs.mkdir(outdir, {recursive: true});
+const outputRoot = path.resolve(outdir);
+if (outputRoot === path.parse(outputRoot).root) throw new Error('package output root must not be a filesystem root');
+const stage = path.join(outputRoot, packageName);
+await fs.mkdir(outputRoot, {recursive: true});
 await fs.rm(stage, {recursive: true, force: true});
 
 console.log(`[1/7] copy SDK tree -> ${stage}`);
-if (isWindows) await fs.cp(sdk, stage, {recursive: true});
+const sdkSource = await fs.realpath(sdk);
+if (isWindows) await fs.cp(sdkSource, stage, {recursive: true, dereference: true});
 else {
-  await $({stdio: 'inherit'})`cp -a ${sdk} ${stage}`;
+  await $({stdio: 'inherit'})`cp -a ${sdkSource} ${stage}`;
   await $({stdio: 'inherit'})`chmod -R u+rwX,go+rX ${stage}`;
 }
+await requirePrivateStage(stage, outputRoot, sdkSource);
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 
 console.log('[2/7] install the single sticky std closure');
@@ -92,6 +97,28 @@ if (stickyStd) {
       stickyManifest.provenance !== 'official-cjc-sticky-lowering') {
     throw new Error(`sticky std manifest role mismatch: closure=${stickyManifest.closure || '<missing>'} `
       + `role=${stickyManifest.role || '<missing>'} provenance=${stickyManifest.provenance || '<missing>'}`);
+  }
+  const managedSection = stickyManifest.managed;
+  let managedFiles = [];
+  let managedHashes = {};
+  if (managedSection !== undefined) {
+    if (!Array.isArray(managedSection.files) || managedSection.files.length !== new Set(managedSection.files).size ||
+        !managedSection.sha256 || Array.isArray(managedSection.sha256) || typeof managedSection.sha256 !== 'object') {
+      throw new Error('managed must contain unique files[] and sha256{}');
+    }
+    managedFiles = [...managedSection.files].sort();
+    managedHashes = managedSection.sha256;
+    if (managedFiles.some(file => typeof file !== 'string' || file.includes('\\') ||
+        file.split('/').some(component => component === '' || component === '.' || component === '..')) ||
+        managedFiles.join('\n') !== Object.keys(managedHashes).sort().join('\n')) {
+      throw new Error('managed files must be canonical relative paths with matching sha256 keys');
+    }
+  }
+  const windowsManagedPrefix = `runtime/lib/${runtimeDir}/`;
+  const windowsStdDllPattern = /^libcangjie-std(?:[-.].*)?\.dll$/;
+  if (isWindows && (managedFiles.length === 0 || managedFiles.some(file =>
+    !file.startsWith(windowsManagedPrefix) || !windowsStdDllPattern.test(file.slice(windowsManagedPrefix.length))))) {
+    throw new Error('Windows sticky closure requires a nonempty exact managed std DLL inventory');
   }
   const runtimeSourceSha = runtimeLib
     ? path.join(path.dirname(runtimeLib), 'SOURCE_SHA')
@@ -106,11 +133,6 @@ if (stickyStd) {
   if (runtimeRef !== stickyManifest.sourceRef) {
     throw new Error(`runtime/std source mismatch: runtime=${runtimeRef} std=${stickyManifest.sourceRef}`);
   }
-  if (platform !== 'linux-x64') {
-    console.error(`sticky std build and attestation are not implemented for ${platform}; packaging is disabled`);
-    process.exit(2);
-  }
-
   const optimizedLibraries = path.join(stage, 'lib', 'cjcj-optimization', runtimeDir);
   const standardLibraries = path.join(stage, 'lib', runtimeDir);
   const runtimeLibraries = path.join(stage, 'runtime', 'lib', runtimeDir);
@@ -128,6 +150,10 @@ if (stickyStd) {
     const file = path.join(stdModules, name);
     seedArtifacts.push({file: path.relative(stage, file), sha256: await sha256(file)});
   }
+  for (const name of managedFiles) {
+    const file = path.join(stage, name);
+    if (await exists(file)) seedArtifacts.push({file: name, sha256: await sha256(file)});
+  }
 
   await fs.rm(path.join(stage, 'lib', 'cjcj-optimization'), {recursive: true, force: true});
   for (const directory of [standardLibraries, runtimeLibraries]) {
@@ -136,6 +162,7 @@ if (stickyStd) {
     }
   }
   await fs.rm(stdModules, {recursive: true, force: true});
+  for (const name of managedFiles) await fs.rm(path.join(stage, name), {force: true});
   await fs.cp(stickyStd, stage, {recursive: true, force: true});
   const finalLibraries = [...stickyManifest.sticky.files].sort();
   const finalSharedLibraries = finalLibraries.filter(name => name.endsWith('.so') || name.endsWith('.dylib'));
@@ -148,6 +175,11 @@ if (stickyStd) {
   requireSameFiles('packaged runtime std libraries',
     await matchingFiles(runtimeLibraries, libraryPattern), finalSharedLibraries);
   requireSameFiles('packaged std CJO', await matchingFiles(stdModules, /\.cjo$/), finalCjos);
+  if (isWindows) {
+    const finalManagedDlls = managedFiles.map(name => name.slice(windowsManagedPrefix.length));
+    requireSameFiles('packaged managed Windows std DLLs',
+      await matchingFiles(runtimeLibraries, windowsStdDllPattern), finalManagedDlls);
+  }
   const shippedHashes = [];
   for (const name of finalLibraries) {
     const digest = await sha256(path.join(standardLibraries, name));
@@ -170,18 +202,32 @@ if (stickyStd) {
     }
     shippedHashes.push(digest);
   }
+  for (const name of managedFiles) {
+    const digest = await sha256(path.join(stage, name));
+    if (digest !== managedHashes[name]) {
+      throw new Error(`packaged managed artifact SHA mismatch: ${name} ${digest} != ${managedHashes[name]}`);
+    }
+    shippedHashes.push(digest);
+  }
   const finalHashes = new Set([
     ...Object.values(stickyManifest.sticky.sha256), ...Object.values(stickyManifest.cjo.sha256),
+    ...Object.values(managedHashes),
   ]);
   const seedOnlyHashes = new Set(seedArtifacts.map(item => item.sha256).filter(hash => !finalHashes.has(hash)));
   const seedShaResiduals = shippedHashes.filter(hash => seedOnlyHashes.has(hash));
   if (seedShaResiduals.length !== 0) {
     throw new Error(`stock SDK std seed SHA survived purge: ${seedShaResiduals.join(',')}`);
   }
-  const libPreflight = stickyPreflight(standardLibraries);
-  const runtimePreflight = stickyPreflight(runtimeLibraries);
-  console.log(`  sticky std: lib=${libPreflight.loggedBaseSymbols}/${libPreflight.stickyRelocations} `
-    + `runtime=${runtimePreflight.loggedBaseSymbols}/${runtimePreflight.stickyRelocations}`);
+  if (isWindows) {
+    console.log(`  sticky std: managed=${managedFiles.length} final-checker=pending`);
+  } else if (platform.startsWith('linux-')) {
+    const libPreflight = stickyPreflight(standardLibraries);
+    const runtimePreflight = stickyPreflight(runtimeLibraries);
+    console.log(`  sticky std: lib=${libPreflight.loggedBaseSymbols}/${libPreflight.stickyRelocations} `
+      + `runtime=${runtimePreflight.loggedBaseSymbols}/${runtimePreflight.stickyRelocations}`);
+  } else {
+    console.log('  sticky std: Mach-O final-checker=pending');
+  }
   console.log(`  stock SDK std seed: artifacts=${seedArtifacts.length} unique_sha=${seedOnlyHashes.size} residual=0`);
   await fs.writeFile(path.join(stage, 'CJCJ_RELEASE.json'), `${JSON.stringify({
     runtimeRef,
@@ -192,6 +238,7 @@ if (stickyStd) {
       cjcSha256: stickyManifest.cjcSha256,
       libraries: finalLibraries.length,
       cjos: finalCjos.length,
+      managed: managedFiles.length,
     },
     stockSdkStdSeed: {artifactsPurged: seedArtifacts.length, uniqueSha256: seedOnlyHashes.size, residual: 0},
   }, null, 2)}\n`);

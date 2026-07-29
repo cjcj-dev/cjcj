@@ -1,6 +1,9 @@
 {
-  "sourceRef": "4d90980fab801e5a3ceab7de8e98e77f9940d61e",
-  "platform": "linux_x86_64_cjnative",
+  "sourceRef": "f1b6dcab991f421c32a45f8b1e2081ce632e3859",
+  "platforms": [
+    "darwin_x86_64_cjnative",
+    "darwin_aarch64_cjnative"
+  ],
   "nativeMembers": {
     "libcangjie-std-collection.concurrent.a": [
       "array_blocking_queue_ffi.c.o"
@@ -28,7 +31,7 @@
     "libcangjie-std-env.a": [
       "console_write.c.o",
       "process_ffi_unix.c.o",
-      "process_impl_linux.c.o"
+      "process_impl_macos.c.o"
     ],
     "libcangjie-std-fs.a": [
       "file_system_unix.c.o"
@@ -60,7 +63,7 @@
     ],
     "libcangjie-std-process.a": [
       "process_ffi_unix.c.o",
-      "process_impl_linux.c.o"
+      "process_impl_macos.c.o"
     ],
     "libcangjie-std-random.a": [
       "random.c.o"

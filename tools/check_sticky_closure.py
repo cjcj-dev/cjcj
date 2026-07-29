@@ -20,11 +20,25 @@ from pathlib import Path
 ELF_GC_FLAGS_SECTION = ".cjmetadata.gcflags"
 MACHO_GC_FLAGS_SECTION = "__CJ_METADATA,__cjgcflags"
 COFF_GC_FLAGS_SECTION = ".cjgcflg"
+NATIVE_TYPE_METADATA_SECTIONS = {
+    "ELF": {
+        ".cjmetadata.typetemplate",
+        ".cjmetadata.typeinfo",
+        ".cjmetadata.reflect.gv",
+    },
+    "Mach-O": {
+        "__CJ_METADATA,__cjtemplate",
+        "__CJ_METADATA,__cjtypeinfo",
+        "__CJ_METADATA,__cjref_gv",
+    },
+    "COFF": {".cjtt", ".cjti", ".cjrflv"},
+}
 GC_FLAGS_RECORD_SIZE = 20
 STICKY_MAGIC = 0x53424A43
 STICKY_VERSION = 1
 STICKY_KIND = 2
 STD_LIBRARY = re.compile(r"^libcangjie-std(?:[-.].*)?\.(?:a|so|dylib)$")
+WINDOWS_STD_DLL = re.compile(r"^libcangjie-std(?:[-.].*)?\.dll$")
 SUPPORTED_PLATFORMS = {
     "linux_x86_64_cjnative",
     "linux_aarch64_cjnative",
@@ -286,10 +300,13 @@ def coff_sections(data, origin):
         section_offset = section_table_offset + index * 40
         name = coff_section_name(data[section_offset:section_offset + 8], string_table, origin)
         virtual_size, _, raw_size, raw_offset = struct.unpack_from("<IIII", data, section_offset + 8)
+        characteristics = struct.unpack_from("<I", data, section_offset + 36)[0]
         size = min(virtual_size, raw_size) if is_pe and virtual_size else raw_size
-        if raw_offset + size > len(data):
+        is_uninitialized = bool(characteristics & 0x00000080)
+        if not is_uninitialized and raw_offset + size > len(data):
             raise ClosureError(f"COFF section outside file: {origin}:{name}")
-        result[name] = result.get(name, b"") + data[raw_offset:raw_offset + size]
+        raw = b"" if is_uninitialized else data[raw_offset:raw_offset + size]
+        result[name] = result.get(name, b"") + raw
     return "<", result
 
 
@@ -407,7 +424,7 @@ def verify_merged_records(raw, origin, endian="<"):
 
 def metadata_sections(object_format, sections):
     if object_format == "ELF":
-        return sorted(name for name in sections if name == ".cjmetadata" or name.startswith(".cjmetadata."))
+        return sorted(name for name in sections if name.startswith(".cj"))
     if object_format == "Mach-O":
         return sorted(name for name in sections if name.startswith("__CJ_METADATA,"))
     return sorted(name for name in sections if name.startswith(".cj"))
@@ -434,6 +451,20 @@ def verify_object_records(object_origin, object_format, endian, sections):
     return None
 
 
+def verify_native_object(object_origin, object_format, endian, sections):
+    metadata = metadata_sections(object_format, sections)
+    unexpected = sorted(set(metadata) - NATIVE_TYPE_METADATA_SECTIONS[object_format])
+    if not unexpected:
+        return
+    gcflags_name = gcflags_section_name(object_format)
+    if gcflags_name in sections or (object_format == "ELF" and ".cjmetadata" in sections):
+        count = verify_object_records(object_origin, object_format, endian, sections)
+        if count is not None:
+            raise ClosureError(f"{object_origin}: attested Cangjie object is declared native")
+    raise ClosureError(
+        f"{object_origin}: native object contains non-whitelisted Cangjie metadata {unexpected}")
+
+
 def verify_native_artifact(path):
     data = path.read_bytes()
     members = archive_members(data, str(path))
@@ -443,10 +474,8 @@ def verify_native_artifact(path):
         images = object_images(body, f"{path}:{name}")
         if images is None:
             raise ClosureError(f"{path}:{name}: native member is not a recognized object")
-        for object_origin, object_format, _, sections in images:
-            metadata = metadata_sections(object_format, sections)
-            if metadata:
-                raise ClosureError(f"{object_origin}: native library contains Cangjie metadata {metadata}")
+        for object_origin, object_format, endian, sections in images:
+            verify_native_object(object_origin, object_format, endian, sections)
             native_objects += 1
     if native_objects == 0:
         raise ClosureError(f"{path}: native library contains no object")
@@ -467,12 +496,7 @@ def verify_machine_artifact(path, allowed_native=()):
             raise ClosureError(f"{path}:{name}: archive member is not a recognized object")
         if name in allowed_native:
             for object_origin, object_format, endian, sections in images:
-                gcflags_name = gcflags_section_name(object_format)
-                if gcflags_name in sections or (object_format == "ELF" and ".cjmetadata" in sections):
-                    count = verify_object_records(object_origin, object_format, endian, sections)
-                    if count is not None:
-                        raise ClosureError(
-                            f"{path}:{name}: attested Cangjie member is incorrectly declared native")
+                verify_native_object(object_origin, object_format, endian, sections)
             seen_native.add(name)
             continue
         member_records = []
@@ -542,7 +566,23 @@ def main():
 
     managed = manifest.get("managed")
     managed_paths = []
-    if managed is not None:
+    if args.platform == "windows_x86_64_cjnative":
+        if managed is None:
+            raise ClosureError("Windows sticky closure requires a nonempty managed inventory")
+        managed_files, managed_hashes = require_mapping(managed, "managed")
+        actual_managed = sorted(
+            str(path.relative_to(args.sdk)) for path in runtime_root.iterdir()
+            if path.is_file() and WINDOWS_STD_DLL.fullmatch(path.name)
+        )
+        if not managed_files:
+            raise ClosureError("Windows sticky closure managed inventory is empty")
+        if managed_files != actual_managed:
+            missing = sorted(set(managed_files) - set(actual_managed))
+            extra = sorted(set(actual_managed) - set(managed_files))
+            raise ClosureError(f"managed Windows std DLL inventory mismatch: missing={missing} extra={extra}")
+        verify_hashes(args.sdk, managed_files, managed_hashes, "managed artifact")
+        managed_paths.extend(args.sdk / name for name in managed_files)
+    elif managed is not None:
         managed_files, managed_hashes = require_mapping(managed, "managed")
         verify_hashes(args.sdk, managed_files, managed_hashes, "managed artifact")
         managed_paths.extend(args.sdk / name for name in managed_files)

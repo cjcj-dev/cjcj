@@ -117,6 +117,49 @@ jobs:
           path: .windows-stdast-buildtools/flatc
           key: ${{ steps.flatc-cache.outputs.cache-primary-key }}
 
+      - name: Download Linux fixed LLC for sticky std
+        id: fixed-llc
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: fixed-llvm-tools-linux_x86_64
+          path: fixed-toolchain/linux_x86_64
+
+      - name: Install full official SDK with sticky LLC
+        if: steps.fixed-llc.outcome == 'success'
+        env:
+          CJCJ_TOOLCHAIN: ${{ inputs.toolchain }}
+          FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/linux_x86_64/llc.gz
+          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
+        run: npx --yes zx@8 ci/setup_sdk.mjs
+
+      - name: Build Windows sticky std closure
+        if: steps.fixed-llc.outcome == 'success'
+        env:
+          RUNTIME_TOOLCHAIN: ${{ github.workspace }}/.windows-runtime-buildtools/llvm-mingw-w64
+          CJCJ_STICKY_TARGET_LIB: ${{ github.workspace }}/.platform-ci/runtime-install/windows_release_x86_64/runtime/lib/windows_x86_64_cjnative
+        run: |
+          # CANGJIE_HOME is exported by the sticky-LLC setup_sdk step via GITHUB_ENV.
+          test -n "$CANGJIE_HOME"
+          test -f "$CANGJIE_HOME/third_party/llvm/bin/llc"
+          "$CANGJIE_HOME/third_party/llvm/bin/llc" --help-hidden | grep -q cjcj-sticky-logged-map
+          test -d "$CJCJ_STICKY_TARGET_LIB"
+          npx --yes zx@8 ci/build_std_variants.mjs \
+            --sdk "$CANGJIE_HOME" \
+            --outdir "$PWD/dist-sticky-std-windows" \
+            --target windows-x64 \
+            --target-toolchain "$RUNTIME_TOOLCHAIN" \
+            --target-lib "$CJCJ_STICKY_TARGET_LIB"
+
+      - name: Upload Windows sticky std closure
+        if: steps.fixed-llc.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: sticky-std-windows_x86_64
+          path: dist-sticky-std-windows
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Windows runtime
         uses: actions/upload-artifact@v7
         with:

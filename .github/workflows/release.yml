@@ -62,11 +62,13 @@ jobs:
 
   windows-runtime:
     name: Build Windows runtime
+    needs: [fixed-llvm-tools]
     uses: ./.github/workflows/build-windows-runtime.yml
     with:
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
 
   build:
     name: ${{ matrix.platform }} / Build release

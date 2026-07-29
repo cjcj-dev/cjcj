@@ -85,9 +85,13 @@ const stdxPath = `${home}/.cjv/stdx/${toolchain}/static/stdx`;
 // IR to llc at all (the non-gating SDK provisioning check, which exercises only the
 // official toolchain) keep the stock llc with CJCJ_SDK_STOCK_LLC=1.
 const keepStockLlc = process.env.CJCJ_SDK_LINK_INPUTS_ONLY || process.env.CJCJ_SDK_STOCK_LLC;
-const llcPlatform = keepStockLlc
-  ? '' : hostOs === 'Linux' && ['x86_64', 'aarch64'].includes(hostArch)
-  ? `linux_${hostArch}` : '';
+const llcPlatforms = {
+  'Linux/x86_64': 'linux_x86_64',
+  'Linux/aarch64': 'linux_aarch64',
+  'Darwin/x86_64': 'darwin_x86_64',
+  'Darwin/arm64': 'darwin_aarch64',
+};
+const llcPlatform = keepStockLlc ? '' : llcPlatforms[`${hostOs}/${hostArch}`] || '';
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
 const sdkLlc = `${cangjieHome}/third_party/llvm/bin/llc`;
 if (llcPlatform && fixedLlcGz) {
