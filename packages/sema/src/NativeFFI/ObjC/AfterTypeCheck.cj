@@ -3515,6 +3515,613 @@ public class CheckObjCFuncTypeArguments <: Handler<InteropContext> {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateFwdClass.cpp:26-36.
+private let IMPL_SUFFIX: String = "Impl"
+private let MTX_IDENT: String = "mtx"
+private let OVERRIDE_MASK_IDENT: String = "overrideMask"
+private let OBJ_IDENT: String = "obj"
+private let CJ_FINALIZABLE_IDENT: String = "cjFinalizable"
+private let OBJC_FOR_PURE_CJ_IDENT: String = "objcObjForPureCJ"
+private let OBJC_OBJ_IDENT: String = "objcObj"
+private let AUTO_RELEASE_IDENT: String = "objcObjAutorelease"
+private let INIT_WITH_REG_ID_SEL: String = "initWithRegistryId:"
+private let REINIT_WITH_REG_ID_SEL: String = "reinitWithRegistryId:"
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateFwdClass.cpp:38-48.
+private func CreateBlock(isSafe: Bool, nodes: ArrayList<Node>): Block {
+    CJC_ASSERT(!nodes.isEmpty())
+    let ty = nodes[nodes.size - 1].GetTy()
+    let block = cjcj::ast.CreateBlock(nodes, ty)
+    if (isSafe) {
+        block.EnableAttr(Attribute.UNSAFE)
+    }
+    return block
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateFwdClass.cpp:50-58.
+private func CreateMemCall(base: Expr, fd: FuncDecl,
+    args!: ArrayList<Expr> = ArrayList<Expr>()): CallExpr {
+    let funcArgs = ArrayList<FuncArg>()
+    for (arg in args) {
+        funcArgs.add(CreateFuncArg(arg))
+    }
+    let funcTy = (fd.GetTy().getOrThrow() as FuncTy).getOrThrow()
+    return CreateCallExpr(CreateMemberAccess(base, fd), funcArgs, Some(fd), Some(funcTy.retTy),
+        CallKind.CALL_DECLARED_FUNCTION)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateFwdClass.cpp:60-72.
+private func CreateParamsAndArgs(origParams: ArrayList<FuncParam>, params: ArrayList<FuncParam>,
+    call: CallExpr, tyMap: (Ty) -> Ty, exprMap: (Expr) -> Expr): Unit {
+    for (param in origParams) {
+        let ty = tyMap(param.GetTy().getOrThrow())
+        let newParam = CreateFuncParam(param.identifier.Val(), CreateType(ty), None, ty)
+        call.args.add(CreateFuncArg(exprMap(CreateRefExpr(newParam))))
+        params.add(newParam)
+    }
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateFwdClass.cpp:74-79.
+private func CreateParamsAndArgs(origParams: ArrayList<FuncParam>, params: ArrayList<FuncParam>,
+    call: CallExpr): Unit {
+    CreateParamsAndArgs(origParams, params, call, {ty: Ty => ty}, {expr: Expr => expr})
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateFwdClass.cpp:81-86.
+private func CollectTys(params: ArrayList<FuncParam>): Array<Ty> {
+    let paramTys = ArrayList<Ty>()
+    for (param in params) {
+        paramTys.add(param.GetTy().getOrThrow())
+    }
+    return paramTys.toArray()
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateFwdClass.cpp:88-91.
+private func UpdateWrapperAttr(funcDecl: FuncDecl): Unit {
+    funcDecl.EnableAttr(Attribute.C)
+    funcDecl.EnableAttr(Attribute.GLOBAL)
+    funcDecl.EnableAttr(Attribute.PUBLIC)
+    funcDecl.EnableAttr(Attribute.NO_MANGLE)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateFwdClass.cpp:93-104.
+private func CollectOpenMemberFuncs(decl: ClassDecl, openMemberFuncs: ArrayList<FuncDecl>): Unit {
+    for (member in decl.GetMemberDeclPtrs()) {
+        if (member.IsOpen()) {
+            openMemberFuncs.add((member as FuncDecl).getOrThrow())
+        }
+    }
+    sort(openMemberFuncs, by: {left: FuncDecl, right: FuncDecl =>
+        let leftTy = left.GetTy().getOrThrow().String()
+        let rightTy = right.GetTy().getOrThrow().String()
+        if (leftTy > rightTy) {
+            Ordering.LT
+        } else if (leftTy < rightTy) {
+            Ordering.GT
+        } else {
+            Ordering.EQ
+        }
+    }, stable: false)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateFwdClass.cpp:107-628.
+public class GenerateFwdClass <: Handler<InteropContext> {
+    private var pctx: Option<InteropContext> = None
+    private var fwdClass: Option<ClassDecl> = None
+    private var curFile: Option<File> = None
+    private var objVar: Option<VarDecl> = None
+    private var maskVar: Option<VarDecl> = None
+    private var cjFinalizableVar: Option<VarDecl> = None
+    private var mtxVar: Option<VarDecl> = None
+    private var objcObj4PureCJFunc: Option<FuncDecl> = None
+    private var objcObjFunc: Option<FuncDecl> = None
+    private var objcAutoReleaseFunc: Option<FuncDecl> = None
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        pctx = ctx
+        for (decl in ctx.cjMappings) {
+            if (let Some(classDecl) <- (decl as ClassDecl)) {
+                if (!classDecl.IsOpen()) {
+                    continue
+                }
+                curFile = decl.curFile
+                let fwd = GenerateFwdClassDecl(classDecl)
+                ctx.fwdClassMap.add(decl, fwd)
+                GenerateDeleteCJObject()
+                GenerateLockOrUnlockCJObject(true)
+                GenerateLockOrUnlockCJObject(false)
+                PutIntoContext(fwd)
+                Clear()
+            }
+        }
+    }
+
+    private func GenerateFwdClassDecl(decl: ClassDecl): ClassDecl {
+        let fwd = ClassDecl()
+        fwd.identifier = SrcIdentifier(decl.identifier.Val() + OBJ_C_FWD_CLASS_SUFFIX)
+        fwd.fullPackageName = decl.fullPackageName
+        fwd.moduleName = decl.moduleName
+        fwd.curFile = decl.curFile
+        fwd.inheritedTypes.add(CreateRefType(decl))
+        fwd.SetTy(pctx.getOrThrow().typeManager.GetClassTy(fwd, Array<Ty>()))
+        let classTy = (decl.GetTy().getOrThrow() as ClassTy).getOrThrow()
+        classTy.directSubtypes.add(fwd.GetTy().getOrThrow())
+        fwd.EnableAttr(Attribute.PUBLIC)
+        fwd.EnableAttr(Attribute.COMPILER_ADD)
+        fwd.body = ClassBody()
+        fwdClass = fwd
+        GenerateObjVar()
+        GenerateOverrideMaskVar()
+        GenerateCjFinalizableVar()
+        GenerateMtxVar()
+        GenerateObjcObjForPureCJ(decl)
+        GenerateCtors(decl)
+        GenerateObjcObj4FwdClass()
+        GenerateAutoreleased4FwdClass()
+        GenerateMemberFuncsAndWrappers(decl)
+        GenerateFinalizer4FwdClass()
+        return fwd
+    }
+
+    private func GenerateInitCJObject(ctor: FuncDecl, fwdCtor: FuncDecl): Unit {
+        CJC_NULLPTR_CHECK(fwdClass)
+        CJC_NULLPTR_CHECK(objVar)
+        CJC_NULLPTR_CHECK(maskVar)
+        let realObjVar = objVar.getOrThrow()
+        let realMaskVar = maskVar.getOrThrow()
+        let objParam = CreateFuncParam(OBJ_IDENT, CreateType(realObjVar.GetTy().getOrThrow()), None,
+            realObjVar.GetTy())
+        let maskParam = CreateFuncParam(OVERRIDE_MASK_IDENT, CreateType(realMaskVar.GetTy().getOrThrow()), None,
+            realMaskVar.GetTy())
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(CreateRefExpr(objParam)))
+        args.add(CreateFuncArg(CreateRefExpr(maskParam)))
+        let ctorCall = CreateCallExpr(CreateRefExpr(fwdCtor), args, Some(fwdCtor),
+            fwdClass.getOrThrow().GetTy(), CallKind.CALL_OBJECT_CREATION)
+        let params = ArrayList<FuncParam>()
+        params.add(objParam)
+        params.add(maskParam)
+        CreateParamsAndArgs(ASTFactory.GetParams(ctor), params, ctorCall,
+            {ty: Ty => ty}, {expr: Expr => expr})
+        let putCall = pctx.getOrThrow().factory.CreatePutToRegistryCall(ctorCall)
+        let wrapperName = pctx.getOrThrow().nameGenerator.GenerateInitCjObjectName(fwdCtor)
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperFnTy = pctx.getOrThrow().typeManager.GetFunctionTy(
+            CollectTys(params), putCall.GetTy().getOrThrow(), cfg: cfg)
+        let nodes = ArrayList<Node>()
+        nodes.add(putCall)
+        let funcDecl = ASTFactory.CreateFunc(wrapperName, wrapperFnTy, params, nodes)
+        UpdateWrapperAttr(funcDecl)
+        PutIntoContext(funcDecl)
+    }
+
+    private func GenerateDeleteCJObject(): Unit {
+        CJC_NULLPTR_CHECK(fwdClass)
+        CJC_NULLPTR_CHECK(curFile)
+        CJC_NULLPTR_CHECK(cjFinalizableVar)
+        CJC_NULLPTR_CHECK(mtxVar)
+        let ctx = pctx.getOrThrow()
+        let registryIdTy = ctx.bridge.GetRegistryIdTy().getOrThrow()
+        let param = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+        let initializer = ctx.factory.CreateGetFromRegistryByIdCall(
+            CreateRefExpr(param), CreateType(fwdClass.getOrThrow().GetTy().getOrThrow()))
+        let fwdVar = ASTFactory.CreateVar("fwd", fwdClass.getOrThrow().GetTy().getOrThrow(), false,
+            initializer: initializer)
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let trueLit = CreateLitConstExpr(LitConstKind.BOOL, "true",
+            cjFinalizableVar.getOrThrow().GetTy().getOrThrow())
+        let cjFinalizableMA = CreateMemberAccess(CreateRefExpr(fwdVar), cjFinalizableVar.getOrThrow())
+        let assign = CreateAssignExpr(cjFinalizableMA, trueLit, unitTy)
+        let removeArgs = ArrayList<FuncArg>()
+        removeArgs.add(CreateFuncArg(CreateRefExpr(param)))
+        let remove = CreateCall(ctx.bridge.GetRemoveFromRegistryDecl(), curFile,
+            args: removeArgs).getOrThrow()
+        let unlock = CreateMemCall(CreateMemberAccess(CreateRefExpr(fwdVar), mtxVar.getOrThrow()),
+            ctx.bridge.GetMutexUnlock().getOrThrow())
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let fnTy = ctx.typeManager.GetFunctionTy([registryIdTy], unitTy, cfg: cfg)
+        let fnName = ctx.nameGenerator.GenerateDeleteCjObjectName(fwdClass.getOrThrow())
+        let params = ArrayList<FuncParam>()
+        params.add(param)
+        let nodes = ArrayList<Node>()
+        nodes.add(fwdVar)
+        nodes.add(assign)
+        nodes.add(remove)
+        nodes.add(unlock)
+        let funcDecl = ASTFactory.CreateFunc(fnName, fnTy, params, nodes)
+        UpdateWrapperAttr(funcDecl)
+        PutIntoContext(funcDecl)
+    }
+
+    private func GenerateLockOrUnlockCJObject(isLock: Bool): Unit {
+        CJC_NULLPTR_CHECK(fwdClass)
+        CJC_NULLPTR_CHECK(curFile)
+        CJC_NULLPTR_CHECK(cjFinalizableVar)
+        CJC_NULLPTR_CHECK(mtxVar)
+        let ctx = pctx.getOrThrow()
+        let registryIdTy = ctx.bridge.GetRegistryIdTy().getOrThrow()
+        let param = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+        let fwdCall = ctx.factory.CreateGetFromRegistryByIdCall(
+            CreateRefExpr(param), CreateType(fwdClass.getOrThrow().GetTy().getOrThrow()))
+        let lockMem = if (isLock) {
+            ctx.bridge.GetMutexLock().getOrThrow()
+        } else {
+            ctx.bridge.GetMutexUnlock().getOrThrow()
+        }
+        let call = CreateMemCall(CreateMemberAccess(fwdCall, mtxVar.getOrThrow()), lockMem)
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let fnTy = ctx.typeManager.GetFunctionTy([registryIdTy], unitTy, cfg: cfg)
+        let fnName = if (isLock) {
+            ctx.nameGenerator.GenerateLockCjObjectName(fwdClass.getOrThrow())
+        } else {
+            ctx.nameGenerator.GenerateUnlockCjObjectName(fwdClass.getOrThrow())
+        }
+        let params = ArrayList<FuncParam>()
+        params.add(param)
+        let nodes = ArrayList<Node>()
+        nodes.add(call)
+        let funcDecl = ASTFactory.CreateFunc(fnName, fnTy, params, nodes)
+        UpdateWrapperAttr(funcDecl)
+        PutIntoContext(funcDecl)
+    }
+
+    private func GenerateFwdMemberFuncWrapper(decl: FuncDecl, impl: FuncDecl): Unit {
+        CJC_NULLPTR_CHECK(fwdClass)
+        let ctx = pctx.getOrThrow()
+        let registryIdTy = ctx.bridge.GetRegistryIdTy().getOrThrow()
+        let param = CreateFuncParam(REGISTRY_ID_IDENT, CreateType(registryIdTy), None, registryIdTy)
+        let fwdCall = ctx.factory.CreateGetFromRegistryByIdCall(
+            CreateRefExpr(param), CreateType(fwdClass.getOrThrow().GetTy().getOrThrow()))
+        let implCall = CreateMemCall(fwdCall, impl)
+        let params = ArrayList<FuncParam>()
+        params.add(param)
+        CreateParamsAndArgs(ASTFactory.GetParams(impl), params, implCall)
+        let fnName = ctx.nameGenerator.GenerateMethodWrapperName(decl)
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let wrapperFnTy = ctx.typeManager.GetFunctionTy(
+            CollectTys(params), implCall.GetTy().getOrThrow(), cfg: cfg)
+        let nodes = ArrayList<Node>()
+        nodes.add(implCall)
+        let funcDecl = ASTFactory.CreateFunc(fnName, wrapperFnTy, params, nodes)
+        UpdateWrapperAttr(funcDecl)
+        PutIntoContext(funcDecl)
+    }
+
+    private func GenerateCtors(decl: ClassDecl): Unit {
+        for (member in decl.GetMemberDecls()) {
+            if (!member.TestAttr(Attribute.CONSTRUCTOR)) {
+                continue
+            }
+            GenerateConstructor4FwdClass((member as FuncDecl).getOrThrow())
+        }
+    }
+
+    private func GenerateMemberFuncsAndWrappers(decl: ClassDecl): Unit {
+        let openMembers = ArrayList<FuncDecl>()
+        CollectOpenMemberFuncs(decl, openMembers)
+        var index: Int64 = 0
+        while (index < openMembers.size) {
+            let funcDecl = openMembers[index]
+            let impl = GenerateImplMethod4FwdClass(funcDecl)
+            GenerateOverrideMethod4FwdClass(funcDecl, impl, index)
+            index++
+        }
+    }
+
+    private func GenerateObjVar(): Unit {
+        let ty = pctx.getOrThrow().bridge.GetNativeObjCIdTy().getOrThrow()
+        let fieldVar = ASTFactory.CreateVar(OBJ_IDENT, ty, false)
+        fieldVar.EnableAttr(Attribute.PRIVATE)
+        objVar = fieldVar
+        PutIntoFwdClass(fieldVar)
+    }
+
+    private func GenerateOverrideMaskVar(): Unit {
+        let ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT64)
+        let fieldVar = ASTFactory.CreateVar(OVERRIDE_MASK_IDENT, ty, false)
+        fieldVar.EnableAttr(Attribute.PRIVATE)
+        maskVar = fieldVar
+        PutIntoFwdClass(fieldVar)
+    }
+
+    private func GenerateCjFinalizableVar(): Unit {
+        let ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let initializer = CreateLitConstExpr(LitConstKind.BOOL, "false", ty)
+        let fieldVar = ASTFactory.CreateVar(CJ_FINALIZABLE_IDENT, ty, true, initializer: initializer)
+        fieldVar.EnableAttr(Attribute.INTERNAL)
+        fieldVar.EnableAttr(Attribute.HAS_INITED_FIELD)
+        cjFinalizableVar = fieldVar
+        PutIntoFwdClass(fieldVar)
+    }
+
+    private func GenerateMtxVar(): Unit {
+        let ctx = pctx.getOrThrow()
+        let ty = ctx.bridge.GetForwarderMutexTy().getOrThrow()
+        let ctor = ctx.bridge.GetMutexConstructor()
+        CJC_NULLPTR_CHECK(ctor)
+        let initializer = CreateCallExpr(CreateRefExpr(ctor.getOrThrow()), ArrayList<FuncArg>(), ctor,
+            Some(ty), CallKind.CALL_OBJECT_CREATION)
+        let fieldVar = ASTFactory.CreateVar(MTX_IDENT, ty, false, initializer: initializer)
+        fieldVar.EnableAttr(Attribute.INTERNAL)
+        fieldVar.EnableAttr(Attribute.HAS_INITED_FIELD)
+        mtxVar = fieldVar
+        PutIntoFwdClass(fieldVar)
+    }
+
+    private func GenerateObjcObjForPureCJ(decl: ClassDecl): Unit {
+        CJC_NULLPTR_CHECK(objVar)
+        let param = CreateFuncParam("cjObj", CreateType(decl.GetTy().getOrThrow()), None, decl.GetTy())
+        let nativeHandle = pctx.getOrThrow().factory.CreateAllocCall(decl, decl.curFile)
+        let unsafeBlock = RegCjObjAndInitObjcObj(nativeHandle, CreateRefExpr(param))
+        let fnTy = pctx.getOrThrow().typeManager.GetFunctionTy(
+            [decl.GetTy().getOrThrow()], objVar.getOrThrow().GetTy().getOrThrow())
+        let params = ArrayList<FuncParam>()
+        params.add(param)
+        let nodes = ArrayList<Node>()
+        nodes.add(unsafeBlock)
+        let funcDecl = ASTFactory.CreateFunc(OBJC_FOR_PURE_CJ_IDENT, fnTy, params, nodes)
+        funcDecl.EnableAttr(Attribute.PRIVATE)
+        funcDecl.EnableAttr(Attribute.STATIC)
+        objcObj4PureCJFunc = funcDecl
+        PutIntoFwdClass(funcDecl)
+    }
+
+    private func GenerateConstructor4FwdClass(decl: FuncDecl): Unit {
+        CJC_NULLPTR_CHECK(fwdClass)
+        CJC_NULLPTR_CHECK(objVar)
+        CJC_NULLPTR_CHECK(maskVar)
+        let fnTy = (decl.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let superClassDecl = (decl.outerDecl as ClassDecl).getOrThrow()
+        let objParam = CreateFuncParam(OBJ_IDENT, CreateType(objVar.getOrThrow().GetTy().getOrThrow()),
+            None, objVar.getOrThrow().GetTy())
+        let maskParam = CreateFuncParam(OVERRIDE_MASK_IDENT,
+            CreateType(maskVar.getOrThrow().GetTy().getOrThrow()), None, maskVar.getOrThrow().GetTy())
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let assignObj = CreateAssignExpr(CreateMemberAccessOfFwdClass(objVar.getOrThrow()),
+            CreateRefExpr(objParam), unitTy)
+        let assignMask = CreateAssignExpr(CreateMemberAccessOfFwdClass(maskVar.getOrThrow()),
+            CreateRefExpr(maskParam), unitTy)
+        let params = ArrayList<FuncParam>()
+        params.add(objParam)
+        params.add(maskParam)
+        let superCall = CreateSuperCall(superClassDecl, decl, fnTy)
+        CreateParamsAndArgs(ASTFactory.GetParams(decl), params, superCall)
+        let ctorTy = pctx.getOrThrow().typeManager.GetFunctionTy(
+            CollectTys(params), fwdClass.getOrThrow().GetTy().getOrThrow())
+        let nodes = ArrayList<Node>()
+        nodes.add(superCall)
+        nodes.add(assignObj)
+        nodes.add(assignMask)
+        let ctor = ASTFactory.CreateFunc(INIT_IDENT, ctorTy, params, nodes)
+        ctor.EnableAttr(Attribute.PUBLIC)
+        ctor.EnableAttr(Attribute.CONSTRUCTOR)
+        PutIntoFwdClass(ctor)
+        GenerateInitCJObject(decl, ctor)
+    }
+
+    private func GenerateObjcObj4FwdClass(): Unit {
+        CJC_NULLPTR_CHECK(curFile)
+        CJC_NULLPTR_CHECK(objVar)
+        CJC_NULLPTR_CHECK(mtxVar)
+        CJC_NULLPTR_CHECK(cjFinalizableVar)
+        let ctx = pctx.getOrThrow()
+        let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+        let initializer = CreateLitConstExpr(LitConstKind.BOOL, "false",
+            cjFinalizableVar.getOrThrow().GetTy().getOrThrow())
+        let assign = CreateAssignExpr(CreateMemberAccessOfFwdClass(cjFinalizableVar.getOrThrow()),
+            initializer, unitTy)
+        let unsafeBlock = RegCjObjAndInitObjcObj(CreateRefExpr(objVar.getOrThrow()),
+            CreateThisOfFwdClass(), reinit: true)
+        let retainCall = CreateCall(ctx.bridge.GetObjCRetainDecl(), curFile,
+            args: { let args = ArrayList<FuncArg>(); args.add(CreateFuncArg(CreateRefExpr(objVar.getOrThrow()))); args }
+        ).getOrThrow()
+        let trueNodes = ArrayList<Node>()
+        trueNodes.add(assign)
+        trueNodes.add(unsafeBlock)
+        let retainNodes = ArrayList<Node>()
+        retainNodes.add(retainCall)
+        let unsafeRetainBlock = CreateBlock(true, retainNodes)
+        let falseNodes = ArrayList<Node>()
+        falseNodes.add(unsafeRetainBlock)
+        let ifExpr = CreateIfExpr(CreateRefExpr(cjFinalizableVar.getOrThrow()),
+            CreateBlock(false, trueNodes), CreateBlock(false, falseNodes), objVar.getOrThrow().GetTy())
+        let tryExpr = TryExpr()
+        tryExpr.SetTy(ifExpr.GetTy().getOrThrow())
+        let tryNodes = ArrayList<Node>()
+        tryNodes.add(ifExpr)
+        tryExpr.tryBlock = CreateBlock(false, tryNodes)
+        let unlockNodes = ArrayList<Node>()
+        unlockNodes.add(CreateMemCall(CreateRefExpr(mtxVar.getOrThrow()),
+            ctx.bridge.GetMutexUnlock().getOrThrow()))
+        tryExpr.finallyBlock = CreateBlock(false, unlockNodes)
+        let fnTy = ctx.typeManager.GetFunctionTy(Array<Ty>(), objVar.getOrThrow().GetTy().getOrThrow())
+        let nodes = ArrayList<Node>()
+        nodes.add(CreateMemCall(CreateRefExpr(mtxVar.getOrThrow()), ctx.bridge.GetMutexLock().getOrThrow()))
+        nodes.add(tryExpr)
+        let funcDecl = ASTFactory.CreateFunc(OBJC_OBJ_IDENT, fnTy, ArrayList<FuncParam>(), nodes)
+        funcDecl.EnableAttr(Attribute.PRIVATE)
+        objcObjFunc = funcDecl
+        PutIntoFwdClass(funcDecl)
+    }
+
+    private func GenerateAutoreleased4FwdClass(): Unit {
+        CJC_NULLPTR_CHECK(curFile)
+        CJC_NULLPTR_CHECK(objcObjFunc)
+        let ctx = pctx.getOrThrow()
+        let autoCall = CreateCall(ctx.bridge.GetObjCAutoReleaseDecl().getOrThrow(), curFile.getOrThrow(),
+            CreateCall(objcObjFunc.getOrThrow(), curFile.getOrThrow()))
+        let fnTy = ctx.typeManager.GetFunctionTy(Array<Ty>(), objVar.getOrThrow().GetTy().getOrThrow())
+        let blockNodes = ArrayList<Node>()
+        blockNodes.add(autoCall)
+        let nodes = ArrayList<Node>()
+        nodes.add(CreateBlock(true, blockNodes))
+        let funcDecl = ASTFactory.CreateFunc(AUTO_RELEASE_IDENT, fnTy, ArrayList<FuncParam>(), nodes)
+        funcDecl.EnableAttr(Attribute.PRIVATE)
+        objcAutoReleaseFunc = funcDecl
+        PutIntoFwdClass(funcDecl)
+    }
+
+    private func GenerateImplMethod4FwdClass(decl: FuncDecl): FuncDecl {
+        let fnTy = (decl.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let superClassDecl = (decl.outerDecl as ClassDecl).getOrThrow()
+        let superCall = CreateMemCall(
+            CreateSuperRef(superClassDecl, superClassDecl.GetTy()), decl)
+        let params = ArrayList<FuncParam>()
+        CreateParamsAndArgs(ASTFactory.GetParams(decl), params, superCall)
+        let nodes = ArrayList<Node>()
+        nodes.add(superCall)
+        let funcDecl = ASTFactory.CreateFunc(decl.identifier.Val() + IMPL_SUFFIX, fnTy, params, nodes)
+        funcDecl.EnableAttr(Attribute.INTERNAL)
+        PutIntoFwdClass(funcDecl)
+        return funcDecl
+    }
+
+    private func GenerateOverrideMethod4FwdClass(decl: FuncDecl, impl: FuncDecl, mid: Int64): Unit {
+        let fnTy = (decl.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let implCall = CreateMemberCall(CreateThisOfFwdClass(), impl)
+        let params = ArrayList<FuncParam>()
+        CreateParamsAndArgs(ASTFactory.GetParams(decl), params, implCall)
+        let cond = CreateMaskCond(mid)
+        let trueNodes = ArrayList<Node>()
+        trueNodes.add(CreateAutoReleaseCall(decl, params))
+        let falseNodes = ArrayList<Node>()
+        falseNodes.add(implCall)
+        let ifExpr = CreateIfExpr(cond, CreateBlock(false, trueNodes),
+            CreateBlock(false, falseNodes), fnTy.retTy)
+        let nodes = ArrayList<Node>()
+        nodes.add(ifExpr)
+        let funcDecl = ASTFactory.CreateFunc(decl.identifier.Val(), fnTy, params, nodes)
+        funcDecl.EnableAttr(Attribute.PUBLIC)
+        funcDecl.EnableAttr(Attribute.OVERRIDE)
+        pctx.getOrThrow().fwdOverrideTable.add(funcDecl, decl)
+        PutIntoFwdClass(funcDecl)
+        GenerateFwdMemberFuncWrapper(funcDecl, impl)
+    }
+
+    private func GenerateFinalizer4FwdClass(): Unit {
+        CJC_NULLPTR_CHECK(curFile)
+        CJC_NULLPTR_CHECK(objVar)
+        let ctx = pctx.getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(CreateRefExpr(objVar.getOrThrow())))
+        let call = CreateCall(ctx.bridge.GetObjCReleaseDecl(), curFile, args: args).getOrThrow()
+        let fnTy = ctx.typeManager.GetFunctionTy(Array<Ty>(),
+            TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT))
+        let blockNodes = ArrayList<Node>()
+        blockNodes.add(call)
+        let nodes = ArrayList<Node>()
+        nodes.add(CreateBlock(true, blockNodes))
+        let funcDecl = ASTFactory.CreateFunc(FINALIZER_IDENT, fnTy, ArrayList<FuncParam>(), nodes)
+        funcDecl.EnableAttr(Attribute.INTERNAL)
+        funcDecl.EnableAttr(Attribute.FINALIZER)
+        PutIntoFwdClass(funcDecl)
+    }
+
+    private func PutIntoFwdClass(decl: Decl): Unit {
+        CJC_NULLPTR_CHECK(fwdClass)
+        CJC_NULLPTR_CHECK(fwdClass.getOrThrow().body)
+        let realFwdClass = fwdClass.getOrThrow()
+        decl.outerDecl = realFwdClass
+        decl.fullPackageName = realFwdClass.fullPackageName
+        decl.EnableAttr(Attribute.IN_CLASSLIKE)
+        if (let Some(funcDecl) <- (decl as FuncDecl)) {
+            CJC_NULLPTR_CHECK(funcDecl.funcBody)
+            funcDecl.funcBody.getOrThrow().parentClassLike = realFwdClass
+        }
+        realFwdClass.body.getOrThrow().decls.add(decl)
+    }
+
+    private func CreateThisOfFwdClass(): RefExpr {
+        CJC_NULLPTR_CHECK(fwdClass)
+        let realFwdClass = fwdClass.getOrThrow()
+        return CreateThisRef(realFwdClass, realFwdClass.GetTy().getOrThrow(),
+            realFwdClass.curFile.getOrThrow())
+    }
+
+    private func CreateMemberAccessOfFwdClass(decl: Decl): MemberAccess {
+        return CreateMemberAccess(CreateThisOfFwdClass(), decl)
+    }
+
+    private func RegCjObjAndInitObjcObj(objcObj: Expr, cjObj: Expr,
+        reinit!: Bool = false): Block {
+        CJC_NULLPTR_CHECK(curFile)
+        CJC_NULLPTR_CHECK(objVar)
+        let putCall = pctx.getOrThrow().factory.CreatePutToRegistryCall(cjObj)
+        objcObj.curFile = curFile
+        let selector = if (reinit) { REINIT_WITH_REG_ID_SEL } else { INIT_WITH_REG_ID_SEL }
+        let args = ArrayList<Expr>()
+        args.add(putCall)
+        let call = pctx.getOrThrow().factory.CreateObjCMsgSendCall(objcObj, selector,
+            objVar.getOrThrow().GetTy().getOrThrow(), args)
+        let nodes = ArrayList<Node>()
+        nodes.add(call)
+        return CreateBlock(true, nodes)
+    }
+
+    private func CreateAutoReleaseCall(decl: FuncDecl, params: ArrayList<FuncParam>): Expr {
+        CJC_NULLPTR_CHECK(curFile)
+        CJC_NULLPTR_CHECK(objcAutoReleaseFunc)
+        let ctx = pctx.getOrThrow()
+        let fnTy = (decl.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let msgSendArgs = ArrayList<Expr>()
+        for (param in params) {
+            msgSendArgs.add(ctx.factory.UnwrapEntity(
+                WithinFile<RefExpr>(CreateRefExpr(param), curFile)))
+        }
+        let nativeHandle = CreateMemCall(CreateThisOfFwdClass(), objcAutoReleaseFunc.getOrThrow())
+        nativeHandle.curFile = curFile
+        var selector = decl.identifier.Val()
+        for (_ in 0..params.size) {
+            selector += ":"
+        }
+        let nativeCall = ctx.factory.CreateObjCMsgSendCall(nativeHandle, selector,
+            ctx.typeMapper.Cj2CType(fnTy.retTy), msgSendArgs)
+        let actions = ArrayList<Node>()
+        actions.add(nativeCall)
+        return ctx.factory.CreateAutoreleasePoolScope(fnTy.retTy, actions)
+    }
+
+    private func CreateMaskCond(mid: Int64): Expr {
+        CJC_NULLPTR_CHECK(maskVar)
+        let boolTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN)
+        let uint64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT64)
+        let int64Ty = TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64)
+        let oneLit = CreateLitConstExpr(LitConstKind.INTEGER, "1", uint64Ty)
+        let idLit = CreateLitConstExpr(LitConstKind.INTEGER, mid.toString(), int64Ty)
+        let lshiftExpr = CreateBinaryExpr(oneLit, idLit, TokenKind.LSHIFT)
+        let bitAndExpr = CreateBinaryExpr(CreateMemberAccessOfFwdClass(maskVar.getOrThrow()),
+            ASTFactory.CreateParenExpr(lshiftExpr), TokenKind.BITAND)
+        let zeroLit = CreateLitConstExpr(LitConstKind.INTEGER, "0", uint64Ty)
+        let cond = CreateBinaryExpr(ASTFactory.CreateParenExpr(bitAndExpr), zeroLit, TokenKind.NOTEQ)
+        cond.SetTy(boolTy)
+        return cond
+    }
+
+    private func Clear(): Unit {
+        fwdClass = None
+        objVar = None
+        maskVar = None
+        cjFinalizableVar = None
+        mtxVar = None
+        objcObj4PureCJFunc = None
+        objcObjFunc = None
+        objcAutoReleaseFunc = None
+    }
+
+    private func PutIntoContext(decl: Decl): Unit {
+        CJC_NULLPTR_CHECK(pctx)
+        CJC_NULLPTR_CHECK(curFile)
+        AddCurFile(decl, file: curFile)
+        decl.fullPackageName = curFile.getOrThrow().GetFullPackageName()
+        pctx.getOrThrow().genDecls.add(decl)
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:186-309.
 private func DesugarGetter(ctx: InteropContext, mirror: ClassLikeDecl, propDecl: PropDecl): Unit {
     CJC_ASSERT(!propDecl.getters.isEmpty())
