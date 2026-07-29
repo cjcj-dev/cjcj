@@ -1291,6 +1291,49 @@ public class ASTFactory {
         return result
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:543-557.
+    public func CreateNativeHandleField(target: ClassDecl): VarDecl {
+        let nativeHandleTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let nativeHandleField = CreateVarDecl(NATIVE_HANDLE_IDENT, None, CreateType(nativeHandleTy))
+        nativeHandleField.SetTy(nativeHandleTy)
+        nativeHandleField.EnableAttr(Attribute.PUBLIC)
+        nativeHandleField.EnableAttr(Attribute.INITIALIZED)
+        PutDeclToClassLikeBody(nativeHandleField, target)
+        return nativeHandleField
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:559-581.
+    public func CreateGetObjCClassDecl(target: ClassLikeDecl): FuncDecl {
+        let nativeObjCClassTy = bridge.GetNativeObjCClassTy().getOrThrow()
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(FuncParamList())
+        let wrapperBody = CreateFuncBody(paramLists, CreateType(nativeObjCClassTy),
+            CreateBlock(ArrayList<Node>(), nativeObjCClassTy), nativeObjCClassTy)
+        let classDecl = CreateFuncDecl(GET_OBJ_C_CLASS_IDENT, wrapperBody,
+            typeManager.GetFunctionTy([], nativeObjCClassTy))
+        classDecl.moduleName = target.moduleName
+        classDecl.fullPackageName = target.fullPackageName
+        classDecl.EnableAttr(Attribute.PUBLIC)
+        classDecl.EnableAttr(Attribute.STATIC)
+        classDecl.EnableAttr(Attribute.IS_CHECK_VISITED)
+        classDecl.funcBody.getOrThrow().funcDecl = classDecl
+        classDecl.linkage = Linkage.EXTERNAL
+        classDecl.funcBody.getOrThrow().parentClassLike = target
+        PutDeclToClassLikeBody(classDecl, target)
+        return classDecl
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:583-590.
+    public func CreateGetObjCClass(target: ClassLikeDecl): FuncDecl {
+        let targetTy = (target.GetTy().getOrThrow() as ClassTy).getOrThrow()
+        let getClassCall = CreateGetClassCall(targetTy, target.curFile)
+        let classDecl = CreateGetObjCClassDecl(target)
+        let nodes = ArrayList<Node>()
+        nodes.add(getClassCall)
+        classDecl.funcBody.getOrThrow().body = CreateBlock(nodes)
+        return classDecl
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:178-296.
     public func WrapEntity(expr: Expr, wrapTy: Ty, withRetain!: Retain = Retain.UNRETAINED): Expr {
         if (TypeMapper.IsObjCMirror(wrapTy)) {
