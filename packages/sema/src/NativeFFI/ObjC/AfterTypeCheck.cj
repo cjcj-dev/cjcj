@@ -169,7 +169,6 @@ public class ASTFactory {
             CJC_ASSERT(exprTy.typeArgs.size == 1)
             let elementType = exprTy.typeArgs[0]
             let field = bridge.GetObjCPointerPointerField().getOrThrow()
-            let fieldRef = CreateRefExpr(field, expr)
             return CreateUnsafePointerCast(CreateMemberAccess(expr, field), typeMapper.Cj2CType(elementType))
         }
         if (TypeMapper.IsObjCFunc(exprTy)) {
