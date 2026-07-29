@@ -7,11 +7,11 @@ public class CheckMirrorSubtypeAttr <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckMirrorSubtypeAttr.cpp:20-34.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         let ty = ctx.target.GetTy().getOrThrow()
-        if (!ctx.typeMapper.IsValidObjCMirrorSubtype(ty)) {
+        if (!TypeMapper.IsValidObjCMirrorSubtype(ty)) {
             return
         }
 
-        if (ctx.typeMapper.IsValidObjCMirror(ty) || ctx.typeMapper.IsObjCImpl(ty)) {
+        if (TypeMapper.IsValidObjCMirror(ty) || TypeMapper.IsObjCImpl(ty)) {
             return
         }
 
