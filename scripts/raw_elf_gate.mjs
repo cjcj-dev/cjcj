@@ -679,13 +679,14 @@ function compareSample(sample, official, candidate) {
 }
 
 function resultSignature(result) {
-  return Object.fromEntries(result.samples.map((sample) => [sample.sample, Object.fromEntries(
-    LAYERS.map((layer) => [layer, {
+  return Object.fromEntries(result.samples.map((sample) => [sample.sample, {
+    layers: Object.fromEntries(LAYERS.map((layer) => [layer, {
       pass: sample.layers[layer].pass,
       officialSha256: sample.layers[layer].officialSha256,
       candidateSha256: sample.layers[layer].candidateSha256,
-    }]),
-  )]));
+    }])),
+    artifacts: sample.artifacts,
+  }]));
 }
 
 function positiveControl(candidateArtifacts, sample) {
