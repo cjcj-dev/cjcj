@@ -643,6 +643,41 @@ public class ASTFactory {
         return WithinFile<CallExpr>(call, file)
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1830-1861.
+    public func CreateWithObjCSuperScope(nativeHandle: Expr, outerDecl: ClassDecl, retTy: Ty,
+        bodyFactory: (Expr, Expr) -> ArrayList<Node>): Expr {
+        CJC_ASSERT(TypeMapper.IsObjCCompatible(retTy))
+        let withObjCSuperDecl = bridge.GetWithObjCSuperDecl().getOrThrow()
+        let unwrappedTy = typeMapper.Cj2CType(retTy)
+        let withObjCSuperRef = CreateRefExpr(withObjCSuperDecl)
+        withObjCSuperRef.instTys.add(unwrappedTy)
+        withObjCSuperRef.SetTy(typeManager.GetInstantiatedTy(withObjCSuperDecl.GetTy().getOrThrow(),
+            GenerateTypeMapping(withObjCSuperDecl, withObjCSuperRef.instTys)))
+        withObjCSuperRef.typeArguments.add(CreateType(unwrappedTy))
+
+        let receiverParam = WithinFile<FuncParam>(CreateFuncParam("receiver", None, None,
+            bridge.GetNativeObjCIdTy()), nativeHandle.curFile)
+        let receiverRef = WithinFile<RefExpr>(CreateRefExpr(receiverParam), nativeHandle.curFile)
+        let objCSuperParam = WithinFile<FuncParam>(CreateFuncParam("objCSuper", None, None,
+            bridge.GetNativeObjCSuperPtrTy()), nativeHandle.curFile)
+        let objCSuperRef = WithinFile<RefExpr>(CreateRefExpr(objCSuperParam), nativeHandle.curFile)
+        let actionParams = ArrayList<FuncParam>()
+        actionParams.add(receiverParam)
+        actionParams.add(objCSuperParam)
+
+        let objcName = nameGenerator.GetObjCDeclName(outerDecl)
+        let classNameExpr = CreateLitConstExpr(LitConstKind.STRING, objcName,
+            GetStringDecl(importManager).GetTy().getOrThrow())
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(nativeHandle))
+        args.add(CreateFuncArg(classNameExpr))
+        args.add(CreateFuncArg(WrapReturningLambdaExpr(typeManager,
+            bodyFactory(receiverRef, objCSuperRef), actionParams)))
+        let realRetTy = (withObjCSuperRef.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+        return CreateCallExpr(withObjCSuperRef, args, Some(withObjCSuperDecl), Some(realRetTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1949-1956.
     public func CreateRegisterNameCall(selectorExpr: Expr): CallExpr {
         let registerNameDecl = bridge.GetRegisterNameDecl().getOrThrow()
