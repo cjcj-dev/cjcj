@@ -6,10 +6,10 @@ import cjcj::basic.DiagnosticEngine
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
-import cjcj::sema.{GenerateTypeMapping, MemberMap, TypeManager}
+import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateType, GetStringDecl, WithinFile,
-    IsObjCGeneratedMember, WrapReturningLambdaCall}
+    INIT_IDENT, IsObjCGeneratedMember, WrapReturningLambdaCall}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
     NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, OBJ_C_FWD_CLASS_SUFFIX,
     OPTION_VALUE_CTOR, STD_LIB_OPTION}
@@ -210,6 +210,72 @@ public class ASTFactory {
         return result
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1322-1327.
+    public func CreateThrowOptionalMethodUnimplemented(file: File): ThrowExpr {
+        let exceptionDecl = bridge.GetObjCOptionalMethodUnimplementedExceptionDecl()
+        CJC_NULLPTR_CHECK(exceptionDecl)
+        return CreateThrowException(exceptionDecl.getOrThrow(), ArrayList<Expr>(), file, typeManager)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1329-1334.
+    public func CreateThrowUnreachableCodeExpr(file: File): ThrowExpr {
+        let exceptionDecl = bridge.GetObjCUnreachableCodeExceptionDecl()
+        CJC_NULLPTR_CHECK(exceptionDecl)
+        return CreateThrowException(exceptionDecl.getOrThrow(), ArrayList<Expr>(), file, typeManager)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1336-1341.
+    public func CreateThrowStaticMethodCallOnInterfaceExpr(file: File): ThrowExpr {
+        let exceptionDecl = bridge.GetObjCStaticMethodCallOnIntefaceExceptionDecl()
+        CJC_NULLPTR_CHECK(exceptionDecl)
+        return CreateThrowException(exceptionDecl.getOrThrow(), ArrayList<Expr>(), file, typeManager)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1372-1402.
+    public func CreateBaseCtorDecl(target: ClassDecl): FuncDecl {
+        let nativeObjCIdTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let param = CreateFuncParam(NATIVE_HANDLE_IDENT, CreateType(nativeObjCIdTy), None, nativeObjCIdTy)
+        let ctorFuncTy = typeManager.GetFunctionTy([param.GetTy().getOrThrow()], target.GetTy().getOrThrow())
+
+        let ctorParams = ArrayList<FuncParam>()
+        ctorParams.add(param)
+        let paramList = CreateFuncParamList(ctorParams)
+        let ctorNodes = ArrayList<Node>()
+        let paramLists = ArrayList<FuncParamList>()
+        paramLists.add(paramList)
+        let ctorFuncBody = CreateFuncBody(paramLists, CreateRefType(target),
+            CreateBlock(ctorNodes, target.GetTy()), ctorFuncTy)
+        let ctor = CreateFuncDecl(INIT_IDENT, ctorFuncBody, ctorFuncTy)
+        ctor.funcBody.getOrThrow().funcDecl = ctor
+        ctor.constructorCall = ConstructorCall.NONE
+        ctor.funcBody.getOrThrow().parentClassLike = target
+        ctor.EnableAttr(Attribute.PUBLIC, Attribute.CONSTRUCTOR)
+        PutDeclToClassLikeBody(ctor, target)
+        return ctor
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1404-1425.
+    public func CreateImplCtor(from: FuncDecl): FuncDecl {
+        let nativeHandleTy = bridge.GetNativeObjCIdTy().getOrThrow()
+        let ctor = (ASTCloner.Clone(from) as FuncDecl).getOrThrow()
+        let curFile = ctor.curFile
+        CJC_NULLPTR_CHECK(ctor.funcBody)
+        let implCtorParams = ctor.funcBody.getOrThrow().paramLists[0].params
+        implCtorParams.add(WithinFile<FuncParam>(CreateFuncParam(NATIVE_HANDLE_IDENT,
+            CreateType(nativeHandleTy), None, nativeHandleTy), curFile), at: 0)
+
+        let implCtorParamTys = ArrayList<Ty>()
+        for (param in implCtorParams) {
+            implCtorParamTys.add(param.typeNode.getOrThrow().GetTy().getOrThrow())
+        }
+        let retTy = ctor.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
+        ctor.SetTy(typeManager.GetFunctionTy(implCtorParamTys.toArray(), retTy))
+        ctor.funcBody.getOrThrow().SetTy(ctor.GetTy().getOrThrow())
+        ctor.funcBody.getOrThrow().funcDecl = ctor
+        ctor.constructorCall = ConstructorCall.SUPER
+        return ctor
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1427-1432.
     public func IsGeneratedMember(decl: Decl): Bool {
         return IsGeneratedNativeHandleField(decl) || IsGeneratedGetObjCClassFunction(decl) ||
@@ -294,6 +360,40 @@ public class ASTFactory {
             }
         }
         return None
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1567-1585.
+    public func PutDeclToClassLikeBody(decl: Decl, target: ClassLikeDecl): Unit {
+        if (target.astKind == ASTKind.INTERFACE_DECL) {
+            PutDeclToInterfaceBody(decl, (target as InterfaceDecl).getOrThrow())
+        } else if (target.astKind == ASTKind.CLASS_DECL) {
+            PutDeclToClassBody(decl, (target as ClassDecl).getOrThrow())
+        } else {
+            CJC_ABORT()
+        }
+        decl.outerDecl = target
+        decl.curFile = target.curFile
+        decl.fullPackageName = target.fullPackageName
+        decl.EnableAttr(Attribute.IN_CLASSLIKE)
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1587-1591.
+    public func PutDeclToClassBody(decl: Decl, target: ClassDecl): Unit {
+        decl.begin = target.body.getOrThrow().end
+        decl.end = target.body.getOrThrow().end
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1593-1597.
+    public func PutDeclToInterfaceBody(decl: Decl, target: InterfaceDecl): Unit {
+        decl.begin = target.body.getOrThrow().end
+        decl.end = target.body.getOrThrow().end
+    }
+
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1599-1605.
+    public func PutDeclToFile(decl: Decl, target: File): Unit {
+        decl.curFile = target
+        decl.begin = target.end
+        decl.end = target.end
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2157-2169.
