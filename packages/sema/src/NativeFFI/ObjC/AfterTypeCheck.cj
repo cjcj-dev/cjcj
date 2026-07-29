@@ -900,6 +900,19 @@ public class ASTFactory {
             CallKind.CALL_FUNCTION_PTR)
     }
 
+    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2310-2319 incorrectly assigns Bool to objectGetClass.
+    // Its consumer passes the result as cls to respondsToSelector (DesugarMirrors.cpp:154-156), so use the
+    // called declaration's return type as the single source of truth (UPSTREAM_BUGS.md UB-007).
+    public func CreateObjectGetClassCall(id: Expr, curFile: Option<File>): Expr {
+        let objectGetClassDecl = bridge.GetObjectGetClassDecl().getOrThrow()
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(id))
+        let retTy = (objectGetClassDecl.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+        let call = CreateCallExpr(CreateRefExpr(objectGetClassDecl), args, Some(objectGetClassDecl), Some(retTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+        return WithinFile<CallExpr>(call, curFile)
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2322-2339.
     public func CreateConvertToNSStringCall(id: Expr, classDecl: ClassDecl, curFile: Option<File>): Expr {
         let convertDecl = bridge.GetConvertToNSStringDecl().getOrThrow()
