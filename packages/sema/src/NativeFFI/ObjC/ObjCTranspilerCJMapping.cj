@@ -869,9 +869,14 @@ public class ObjCTranspilerCJMapping {
                         } else {
                             ctx.nameGenerator.GenerateMethodWrapperName(funcDecl)
                         }
+                        let withRegistryId = if (let ObjCFunctionType.INSTANCE <- staticType) {
+                            true
+                        } else {
+                            false
+                        }
                         AddWithIndent(GenerateDefaultFunctionImplementation(methodName, retTy,
-                            args: ConvertParamsListToArgsList(funcBody.paramLists,
-                                (let ObjCFunctionType.INSTANCE <- staticType)), `type`: staticType),
+                            args: ConvertParamsListToArgsList(funcBody.paramLists, withRegistryId),
+                            `type`: staticType),
                             target: GenerationTarget.SOURCE, bOp: OptionalBlockOp.CLOSE)
                     }
                 }
