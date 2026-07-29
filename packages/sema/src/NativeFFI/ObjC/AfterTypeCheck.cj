@@ -531,6 +531,17 @@ public class FindFwdClass {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DrainGeneratedDecls.cpp:17-24.
+public class DrainGeneratedDecls {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (decl in ctx.genDecls) {
+            decl.curFile.getOrThrow().decls.add(decl)
+        }
+        ctx.genDecls.clear()
+        ctx.fwdClasses.clear()
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Desugar.cpp:16-75.
 public func Desugar(ctx: InteropContext): Unit {
     if (!ctx.bridge.IsInteropLibAccessible()) {
