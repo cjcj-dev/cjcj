@@ -20,6 +20,19 @@ from pathlib import Path
 ELF_GC_FLAGS_SECTION = ".cjmetadata.gcflags"
 MACHO_GC_FLAGS_SECTION = "__CJ_METADATA,__cjgcflags"
 COFF_GC_FLAGS_SECTION = ".cjgcflg"
+NATIVE_TYPE_METADATA_SECTIONS = {
+    "ELF": {
+        ".cjmetadata.typetemplate",
+        ".cjmetadata.typeinfo",
+        ".cjmetadata.reflect.gv",
+    },
+    "Mach-O": {
+        "__CJ_METADATA,__cjtemplate",
+        "__CJ_METADATA,__cjtypeinfo",
+        "__CJ_METADATA,__cjref_gv",
+    },
+    "COFF": {".cjtt", ".cjti", ".cjrflv"},
+}
 GC_FLAGS_RECORD_SIZE = 20
 STICKY_MAGIC = 0x53424A43
 STICKY_VERSION = 1
@@ -438,6 +451,20 @@ def verify_object_records(object_origin, object_format, endian, sections):
     return None
 
 
+def verify_native_object(object_origin, object_format, endian, sections):
+    metadata = metadata_sections(object_format, sections)
+    unexpected = sorted(set(metadata) - NATIVE_TYPE_METADATA_SECTIONS[object_format])
+    if not unexpected:
+        return
+    gcflags_name = gcflags_section_name(object_format)
+    if gcflags_name in sections or (object_format == "ELF" and ".cjmetadata" in sections):
+        count = verify_object_records(object_origin, object_format, endian, sections)
+        if count is not None:
+            raise ClosureError(f"{object_origin}: attested Cangjie object is declared native")
+    raise ClosureError(
+        f"{object_origin}: native object contains non-whitelisted Cangjie metadata {unexpected}")
+
+
 def verify_native_artifact(path):
     data = path.read_bytes()
     members = archive_members(data, str(path))
@@ -448,11 +475,7 @@ def verify_native_artifact(path):
         if images is None:
             raise ClosureError(f"{path}:{name}: native member is not a recognized object")
         for object_origin, object_format, endian, sections in images:
-            gcflags_name = gcflags_section_name(object_format)
-            if gcflags_name in sections or (object_format == "ELF" and ".cjmetadata" in sections):
-                count = verify_object_records(object_origin, object_format, endian, sections)
-                if count is not None:
-                    raise ClosureError(f"{object_origin}: attested Cangjie object is declared native")
+            verify_native_object(object_origin, object_format, endian, sections)
             native_objects += 1
     if native_objects == 0:
         raise ClosureError(f"{path}: native library contains no object")
@@ -473,12 +496,7 @@ def verify_machine_artifact(path, allowed_native=()):
             raise ClosureError(f"{path}:{name}: archive member is not a recognized object")
         if name in allowed_native:
             for object_origin, object_format, endian, sections in images:
-                gcflags_name = gcflags_section_name(object_format)
-                if gcflags_name in sections or (object_format == "ELF" and ".cjmetadata" in sections):
-                    count = verify_object_records(object_origin, object_format, endian, sections)
-                    if count is not None:
-                        raise ClosureError(
-                            f"{path}:{name}: attested Cangjie member is incorrectly declared native")
+                verify_native_object(object_origin, object_format, endian, sections)
             seen_native.add(name)
             continue
         member_records = []
