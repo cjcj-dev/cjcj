@@ -1,10 +1,9 @@
-package cjcj::sema.NativeFFI.ObjC.TypeCheck
+package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
-import cjcj::sema.NativeFFI.ObjC.Handler as ObjCHandler
 
-public class CheckAbstractClass <: ObjCHandler<TypeCheckContext> {
+public class CheckAbstractClass <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckAbstractClass.cpp:19-25.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         if (let Some(cd) <- (ctx.target as ClassDecl)) {

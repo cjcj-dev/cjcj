@@ -1,11 +1,9 @@
-package cjcj::sema.NativeFFI.ObjC.TypeCheck
+package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
-import cjcj::sema.NativeFFI.ObjC.Handler as ObjCHandler
-import cjcj::sema.NativeFFI.ObjC.TypeMapper
 
-public class CheckImplInheritMirror <: ObjCHandler<TypeCheckContext> {
+public class CheckImplInheritMirror <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckImplInheritMirror.cpp:19-48.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         let targetTy = ctx.target.GetTy().getOrThrow()

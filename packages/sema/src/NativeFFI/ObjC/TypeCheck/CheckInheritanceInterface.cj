@@ -1,10 +1,9 @@
-package cjcj::sema.NativeFFI.ObjC.TypeCheck
+package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
-import cjcj::sema.NativeFFI.ObjC.Handler as ObjCHandler
 
-public class CheckInheritanceInterface <: ObjCHandler<TypeCheckContext> {
+public class CheckInheritanceInterface <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckInheritanceInterface.cpp:19-29.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         let inheritableDecl = (ctx.target as InheritableDecl).getOrThrow()

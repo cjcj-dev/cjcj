@@ -1,10 +1,8 @@
-package cjcj::sema.NativeFFI.ObjC.TypeCheck
+package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
 import cjcj::sema.NativeFFI.GetForeignNameAnnotation
-import cjcj::sema.NativeFFI.ObjC.Handler as ObjCHandler
-import cjcj::sema.NativeFFI.ObjC.TypeMapper
 
 // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckForeignName.cpp:22-37.
 private func MustHaveForeignName(member: Decl): Bool {
@@ -29,7 +27,7 @@ private func HasForeignName(member: Decl): Bool {
     return GetForeignNameAnnotation(member).isSome()
 }
 
-public class CheckForeignName <: ObjCHandler<TypeCheckContext> {
+public class CheckForeignName <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckForeignName.cpp:46-72.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         let targetKind = if (TypeMapper.IsObjCMirror(ctx.target)) { "@ObjCMirror" } else { "@ObjCImpl" }
