@@ -2477,7 +2477,8 @@ public class RewriteObjCFuncCall <: Handler<InteropContext> {
                 call.curFile = node.curFile
                 let block = ArrayList<Node>()
                 block.add(tmpVar)
-                block.add(ctx.factory.WrapEntity(call, callExpr.GetTy().getOrThrow(), Retain.RETAINED))
+                block.add(ctx.factory.WrapEntity(call, callExpr.GetTy().getOrThrow(),
+                    withRetain: Retain.RETAINED))
                 ctx.factory.SetDesugarExpr(callExpr, WrapReturningLambdaCall(ctx.typeManager, block))
                 return VisitAction.WALK_CHILDREN
             })
