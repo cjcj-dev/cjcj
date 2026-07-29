@@ -3514,6 +3514,265 @@ public class CheckObjCFuncTypeArguments <: Handler<InteropContext> {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:186-309.
+private func DesugarGetter(ctx: InteropContext, mirror: ClassLikeDecl, propDecl: PropDecl): Unit {
+    CJC_ASSERT(!propDecl.getters.isEmpty())
+    let getter = propDecl.getters[0]
+    let curFile = propDecl.curFile
+
+    if (mirror.astKind == ASTKind.INTERFACE_DECL && propDecl.TestAttr(Attribute.STATIC)) {
+        getter.funcBody.getOrThrow().body = CreateBlock(
+            [ctx.factory.CreateThrowUnreachableCodeExpr(curFile.getOrThrow())],
+            ctx.typeManager.GetPrimitiveTy(TypeKind.TYPE_NOTHING))
+        return
+    }
+
+    let nativeHandle = ctx.factory.CreateNativeHandleExpr(
+        mirror, propDecl.TestAttr(Attribute.STATIC), curFile)
+    let propGetterCall = WithinFile<Expr>(
+        ctx.factory.CreatePropGetterCallViaMsgSend(propDecl, nativeHandle), curFile)
+    let wrappedPropGetterCall = ctx.factory.WrapEntity(propGetterCall,
+        propDecl.GetTy().getOrThrow(), withRetain: Retain.RETAIN_AUTORELEASED_RETURN_VALUE)
+
+    getter.funcBody.getOrThrow().body = CreateBlock(ArrayList<Node>(), propDecl.GetTy())
+    getter.funcBody.getOrThrow().body.getOrThrow().body.add(wrappedPropGetterCall)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:218-245.
+private func DesugarSetter(ctx: InteropContext, mirror: ClassLikeDecl, propDecl: PropDecl): Unit {
+    CJC_ASSERT(propDecl.TestAttr(Attribute.MUT))
+    CJC_ASSERT(!propDecl.setters.isEmpty())
+    let setter = propDecl.setters[0]
+    let curFile = propDecl.curFile
+    let unitTy = ctx.typeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+    if (mirror.astKind == ASTKind.INTERFACE_DECL && propDecl.TestAttr(Attribute.STATIC)) {
+        setter.funcBody.getOrThrow().body = CreateBlock(
+            [ctx.factory.CreateThrowUnreachableCodeExpr(curFile.getOrThrow())], unitTy)
+        return
+    }
+    setter.funcBody.getOrThrow().body = CreateBlock(ArrayList<Node>(), unitTy)
+    let nativeHandle = ctx.factory.CreateNativeHandleExpr(
+        mirror, propDecl.TestAttr(Attribute.STATIC), curFile)
+    let paramRef = WithinFile<RefExpr>(CreateRefExpr(
+        setter.funcBody.getOrThrow().paramLists[0].params[0]), curFile)
+    let arg = ctx.factory.UnwrapEntity(paramRef)
+    let propSetterCall = WithinFile<Expr>(
+        ctx.factory.CreatePropSetterCallViaMsgSend(propDecl, nativeHandle, arg), curFile)
+    setter.funcBody.getOrThrow().body.getOrThrow().body.add(propSetterCall)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:247-269.
+private func DesugarFieldGetter(ctx: InteropContext, mirror: ClassLikeDecl, field: PropDecl): Unit {
+    CJC_ASSERT(!field.getters.isEmpty())
+    let getter = field.getters[0]
+    let curFile = field.curFile
+    getter.funcBody.getOrThrow().body = CreateBlock(ArrayList<Node>(), field.GetTy())
+
+    CJC_ASSERT(!field.TestAttr(Attribute.STATIC))
+    let nativeHandle = ctx.factory.CreateNativeHandleExpr(mirror, false, curFile)
+    let getInstanceVariableCall = ctx.factory.CreateGetInstanceVariableCall(field, nativeHandle)
+    let wrappedGetInstanceVariableCall = ctx.factory.WrapEntity(getInstanceVariableCall,
+        field.GetTy().getOrThrow(), withRetain: Retain.RETAINED)
+    getter.funcBody.getOrThrow().body.getOrThrow().body.add(wrappedGetInstanceVariableCall)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:271-309.
+private func DesugarFieldSetter(ctx: InteropContext, mirror: ClassLikeDecl, field: PropDecl): Unit {
+    CJC_ASSERT(field.TestAttr(Attribute.MUT))
+    CJC_ASSERT(!field.setters.isEmpty())
+    let setter = field.setters[0]
+    let curFile = field.curFile
+    let unitTy = ctx.typeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+    setter.funcBody.getOrThrow().body = CreateBlock(ArrayList<Node>(), unitTy)
+
+    CJC_ASSERT(!field.TestAttr(Attribute.STATIC))
+    let nativeHandle = ctx.factory.CreateNativeHandleExpr(mirror, false, curFile)
+    let paramRef = WithinFile<RefExpr>(CreateRefExpr(
+        setter.funcBody.getOrThrow().paramLists[0].params[0]), curFile)
+    let arg = ctx.factory.UnwrapEntity(paramRef)
+    let setInstanceVariableCall = ctx.factory.CreateSetInstanceVariableCall(field, nativeHandle, arg)
+    setter.funcBody.getOrThrow().body.getOrThrow().body.add(setInstanceVariableCall)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrors.cpp:25-325.
+public class DesugarMirrors <: Handler<InteropContext> {
+    private let interopType: InteropType
+
+    public init(interopType: InteropType) {
+        this.interopType = interopType
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        let genMirrorLikeClassBody = {decl: ClassLikeDecl =>
+            if (decl.TestAttr(Attribute.IS_BROKEN)) {
+                return
+            }
+            for (memberDecl in decl.GetMemberDeclPtrs()) {
+                if (memberDecl.TestAttr(Attribute.IS_BROKEN)) {
+                    continue
+                }
+                if (ctx.factory.IsGeneratedMember(memberDecl)) {
+                    continue
+                }
+                memberDecl.DisableAttr(Attribute.ABSTRACT)
+                if (let Some(funcDecl) <- (memberDecl as FuncDecl)) {
+                    if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+                        DesugarCtor(ctx, decl, funcDecl)
+                    } else if (funcDecl.TestAttr(Attribute.FINALIZER)) {
+                        continue
+                    } else if (IsStaticInitMethod(funcDecl)) {
+                        DesugarStaticMethodInitializer(ctx, funcDecl)
+                    } else {
+                        DesugarMethod(ctx, decl, funcDecl)
+                    }
+                } else if (let Some(propDecl) <- (memberDecl as PropDecl)) {
+                    if (memberDecl.TestAttr(Attribute.DESUGARED_MIRROR_FIELD)) {
+                        DesugarField(ctx, decl, propDecl)
+                    } else {
+                        DesugarProp(ctx, decl, propDecl)
+                    }
+                } else if (memberDecl.astKind == ASTKind.VAR_DECL) {
+                    CJC_ABORT()
+                }
+            }
+        }
+
+        if (interopType == InteropType.Fwd_Class) {
+            for (fwdClass in ctx.fwdClasses) {
+                genMirrorLikeClassBody(fwdClass)
+            }
+            return
+        }
+        for (mirror in ctx.mirrors) {
+            genMirrorLikeClassBody(mirror)
+        }
+        for (mirror in ctx.mirrorTopLevelFuncs) {
+            if (mirror.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            DesugarTopLevelFunc(ctx, mirror)
+        }
+    }
+
+    private func DesugarCtor(ctx: InteropContext, mirror: ClassLikeDecl, ctor: FuncDecl): Unit {
+        CJC_ASSERT(ctor.TestAttr(Attribute.CONSTRUCTOR))
+        let curFile = ctor.curFile
+        CJC_NULLPTR_CHECK(ctor.funcBody)
+        CJC_ASSERT(!ctor.funcBody.getOrThrow().paramLists.isEmpty())
+        let generatedCtor = ctx.factory.GetGeneratedBaseCtor(mirror).getOrThrow()
+        let thisCall = CreateThisCall(mirror, generatedCtor, generatedCtor.GetTy().getOrThrow(),
+            curFile.getOrThrow())
+        CJC_ASSERT_WITH_MSG(mirror.astKind == ASTKind.CLASS_DECL,
+            "Expected ASTKind::CLASS_DECL instead of " + ASTKindName(mirror.astKind))
+        let initCall = ctx.factory.CreateAllocInitCall(ctor)
+        thisCall.args.add(CreateFuncArg(initCall))
+        ctor.constructorCall = ConstructorCall.OTHER_INIT
+        ctor.funcBody.getOrThrow().body.getOrThrow().body.add(thisCall)
+    }
+
+    private func DesugarStaticMethodInitializer(ctx: InteropContext, initializer: FuncDecl): Unit {
+        CJC_ASSERT(IsStaticInitMethod(initializer))
+        let curFile = initializer.curFile
+        let retTy = (initializer.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy
+        let initCall = ctx.factory.CreateAllocInitCall(initializer)
+        let wrappedInit = ctx.factory.WrapEntity(initCall, retTy)
+        let returnExpr = WithinFile<ReturnExpr>(CreateReturnExpr(wrappedInit), curFile)
+        returnExpr.SetTy(TypeManager.GetNothingTy())
+        initializer.funcBody.getOrThrow().body = CreateBlock(ArrayList<Node>(), retTy)
+        initializer.funcBody.getOrThrow().body.getOrThrow().body.add(returnExpr)
+    }
+
+    private func DesugarMethod(ctx: InteropContext, mirror: ClassLikeDecl, method: FuncDecl): Unit {
+        let methodTy = (method.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let curFile = method.curFile
+        let nativeHandle = ctx.factory.CreateNativeHandleExpr(
+            mirror, method.TestAttr(Attribute.STATIC), curFile)
+        let msgSendArgs = ArrayList<Expr>()
+        let params = method.funcBody.getOrThrow().paramLists[0].params
+        for (param in params) {
+            msgSendArgs.add(ctx.factory.UnwrapEntity(
+                WithinFile<RefExpr>(CreateRefExpr(param), curFile)))
+        }
+        let clonedHandle = (ASTCloner.Clone(nativeHandle) as Expr).getOrThrow()
+        let methodCall = WithinFile<Expr>(
+            ctx.factory.CreateMethodCallViaMsgSend(method, clonedHandle, msgSendArgs), curFile)
+        let wrappedMethodCall = ctx.factory.WrapEntity(methodCall, methodTy.retTy,
+            withRetain: Retain.RETAIN_AUTORELEASED_RETURN_VALUE)
+        method.funcBody.getOrThrow().body = CreateBlock(ArrayList<Node>(), methodTy.retTy)
+
+        if (method.HasAnno(AstAnnotationKind.OBJ_C_OPTIONAL)) {
+            let selectorName = ctx.nameGenerator.GetObjCDeclName(method)
+            let clonedNativeHandle = (ASTCloner.Clone(nativeHandle) as Expr).getOrThrow()
+            let cls = ctx.factory.CreateObjectGetClassCall(clonedNativeHandle, curFile)
+            let guardCall = ctx.factory.CreateOptionalMethodGuard(
+                wrappedMethodCall, cls, selectorName, curFile.getOrThrow())
+            guardCall.curFile = curFile
+            method.funcBody.getOrThrow().body.getOrThrow().body.add(guardCall)
+        } else {
+            method.funcBody.getOrThrow().body.getOrThrow().body.add(wrappedMethodCall)
+        }
+    }
+
+    private func DesugarTopLevelFunc(ctx: InteropContext, funcDecl: FuncDecl): Unit {
+        let methodTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow()
+        let cParamTys = ArrayList<Ty>()
+        for (paramTy in methodTy.paramTys) {
+            cParamTys.add(ctx.typeMapper.Cj2CType(paramTy))
+        }
+        let cfg = FuncTyConfig()
+        cfg.isC = true
+        let cFuncTy = ctx.typeManager.GetFunctionTy(cParamTys.toArray(),
+            ctx.typeMapper.Cj2CType(methodTy.retTy), cfg: cfg)
+        let curFile = funcDecl.curFile
+        let funcParams = ArrayList<FuncParam>()
+        for (paramTy in cParamTys) {
+            funcParams.add(CreateFuncParam("_", CreateType(paramTy), None, paramTy))
+        }
+        let funcParamLists = ArrayList<FuncParamList>()
+        funcParamLists.add(CreateFuncParamList(funcParams, None))
+        let cFuncBody = CreateFuncBody(funcParamLists, CreateType(cFuncTy.retTy), None, cFuncTy)
+        let cFuncDecl = CreateFuncDecl(funcDecl.identifier.Val(), cFuncBody, cFuncTy)
+        CopyBasicInfo(funcDecl, cFuncDecl)
+        cFuncDecl.EnableAttr(Attribute.C)
+        cFuncDecl.EnableAttr(Attribute.GLOBAL)
+        cFuncDecl.EnableAttr(Attribute.NO_MANGLE)
+        cFuncDecl.EnableAttr(Attribute.UNSAFE)
+        cFuncDecl.EnableAttr(Attribute.FOREIGN)
+        cFuncDecl.curFile = funcDecl.curFile
+        cFuncDecl.moduleName = funcDecl.moduleName
+        cFuncDecl.fullPackageName = funcDecl.fullPackageName
+
+        let nativeCallArgs = ArrayList<FuncArg>()
+        let params = funcDecl.funcBody.getOrThrow().paramLists[0].params
+        for (param in params) {
+            nativeCallArgs.add(CreateFuncArg(ctx.factory.UnwrapEntity(
+                WithinFile<RefExpr>(CreateRefExpr(param), curFile))))
+        }
+        let funcAccess = WithinFile<RefExpr>(CreateRefExpr(cFuncDecl), funcDecl.curFile)
+        let call = CreateCallExpr(funcAccess, nativeCallArgs, Some(cFuncDecl), Some(cFuncTy.retTy),
+            CallKind.CALL_DECLARED_FUNCTION)
+        CopyBasicInfo(funcDecl, call)
+        let wrappedCall = ctx.factory.WrapEntity(call, methodTy.retTy, withRetain: Retain.RETAINED)
+        funcDecl.funcBody.getOrThrow().body = CreateBlock(ArrayList<Node>(), methodTy.retTy)
+        funcDecl.funcBody.getOrThrow().body.getOrThrow().body.add(wrappedCall)
+        ctx.genDecls.add(cFuncDecl)
+    }
+
+    private func DesugarProp(ctx: InteropContext, mirror: ClassLikeDecl, propDecl: PropDecl): Unit {
+        DesugarGetter(ctx, mirror, propDecl)
+        if (propDecl.TestAttr(Attribute.MUT)) {
+            DesugarSetter(ctx, mirror, propDecl)
+        }
+    }
+
+    private func DesugarField(ctx: InteropContext, mirror: ClassLikeDecl, field: PropDecl): Unit {
+        DesugarFieldGetter(ctx, mirror, field)
+        if (field.TestAttr(Attribute.MUT)) {
+            DesugarFieldSetter(ctx, mirror, field)
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarSyntheticWrappers.cpp:25-33.
 public class DesugarSyntheticWrappers <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
