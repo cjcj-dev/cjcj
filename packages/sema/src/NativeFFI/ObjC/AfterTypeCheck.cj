@@ -9,7 +9,7 @@ import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateThisCall, CreateThisRef, CreateType,
+import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateSuperCall, CreateThisCall, CreateThisRef, CreateType,
     CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
     GetGenericInstType, GetInstantyForGenericTy, GetSingleArgumentAnnotationValue, GetStringDecl, InitGenericConfigs,
     WithinFile, INIT_IDENT, IsObjCGeneratedMember, IsObjCGeneratedNSObjectToString, IsObjCGeneratedNSStringCtor,
@@ -2446,6 +2446,88 @@ public class InsertBaseCtorDecl <: Handler<InteropContext> {
             }
             CJC_ASSERT(HasMirrorSuperInterface(impl))
             impl.body.getOrThrow().decls.add(ctx.factory.CreateBaseCtorDecl(impl))
+        }
+    }
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertBaseCtorBody.cpp:25-108.
+public class InsertBaseCtorBody <: Handler<InteropContext> {
+    private let interopType: InteropType
+
+    public init(interopType: InteropType) {
+        this.interopType = interopType
+    }
+
+    public func HandleImpl(ctx: InteropContext): Unit {
+        if (interopType == InteropType.Fwd_Class) {
+            for (fwdClass in ctx.fwdClasses) {
+                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
+                    continue
+                }
+                let ctor = ctx.factory.GetGeneratedBaseCtor(fwdClass).getOrThrow()
+                let curFile = ctor.curFile
+                let handleParam = WithinFile<RefExpr>(
+                    CreateRefExpr(ctor.funcBody.getOrThrow().paramLists[0].params[0]), curFile)
+                let lhs = ctx.factory.CreateNativeHandleFieldExpr(fwdClass)
+                let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+                ctor.funcBody.getOrThrow().body.getOrThrow().body.add(
+                    CreateAssignExpr(lhs, handleParam, unitTy))
+            }
+            return
+        }
+
+        for (mirror in ctx.mirrors) {
+            if (mirror.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (let Some(mirrorClass) <- (mirror as ClassDecl)) {
+                let ctor = ctx.factory.GetGeneratedBaseCtor(mirrorClass).getOrThrow()
+                let curFile = ctor.curFile
+                let handleParam = WithinFile<RefExpr>(
+                    CreateRefExpr(ctor.funcBody.getOrThrow().paramLists[0].params[0]), curFile)
+                if (HasMirrorSuperClass(mirrorClass)) {
+                    let superClass = mirrorClass.GetSuperClassDecl().getOrThrow()
+                    let superCtor = ctx.factory.GetGeneratedBaseCtor(superClass).getOrThrow()
+                    let superCall = CreateSuperCall(mirrorClass, superCtor, superCtor.GetTy().getOrThrow())
+                    superCall.args.add(CreateFuncArg(handleParam))
+                    ctor.funcBody.getOrThrow().body.getOrThrow().body.add(superCall)
+                } else {
+                    let lhs = ctx.factory.CreateNativeHandleFieldExpr(mirrorClass)
+                    let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+                    ctor.funcBody.getOrThrow().body.getOrThrow().body.add(
+                        CreateAssignExpr(lhs, handleParam, unitTy))
+                }
+            }
+        }
+
+        for (wrapper in ctx.synWrappers) {
+            if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            let ctor = ctx.factory.GetGeneratedBaseCtor(wrapper).getOrThrow()
+            let curFile = ctor.curFile
+            let handleParam = WithinFile<RefExpr>(
+                CreateRefExpr(ctor.funcBody.getOrThrow().paramLists[0].params[0]), curFile)
+            let lhs = ctx.factory.CreateNativeHandleFieldExpr(wrapper)
+            let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            ctor.funcBody.getOrThrow().body.getOrThrow().body.add(CreateAssignExpr(lhs, handleParam, unitTy))
+        }
+
+        for (impl in ctx.impls) {
+            if (impl.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            if (HasMirrorSuperClass(impl)) {
+                continue
+            }
+            CJC_ASSERT(HasMirrorSuperInterface(impl))
+            let ctor = ctx.factory.GetGeneratedBaseCtor(impl).getOrThrow()
+            let curFile = ctor.curFile
+            let handleParam = WithinFile<RefExpr>(
+                CreateRefExpr(ctor.funcBody.getOrThrow().paramLists[0].params[0]), curFile)
+            let lhs = ctx.factory.CreateNativeHandleFieldExpr(impl)
+            let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
+            ctor.funcBody.getOrThrow().body.getOrThrow().body.add(CreateAssignExpr(lhs, handleParam, unitTy))
         }
     }
 }
