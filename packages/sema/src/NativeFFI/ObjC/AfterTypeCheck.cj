@@ -641,6 +641,426 @@ public class DesugarSyntheticWrappers {
     }
 }
 
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:29-40.
+private func ShouldDesugarTypecheck(typeNode: Type, expr: Expr): Bool {
+    let castDecl = Ty.GetDeclOfTy(typeNode.GetTy()) as ClassLikeDecl
+    let objDecl = Ty.GetDeclOfTy(expr.GetTy()) as ClassLikeDecl
+    if ((let None <- objDecl) || (let None <- castDecl) ||
+        !castDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR_SUBTYPE, Attribute.OBJ_C_MIRROR)) {
+        return false
+    }
+    return true
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:42-112.
+private func DesugarIsExpr(ctx: InteropContext, expr: IsExpr): Unit {
+    let isType = expr.isType.getOrThrow()
+    let leftExpr = expr.leftExpr.getOrThrow()
+    if (!ShouldDesugarTypecheck(isType, leftExpr)) {
+        return
+    }
+
+    let type = (isType.GetTy().getOrThrow() as ClassLikeTy).getOrThrow()
+    let typeDecl = type.commonDecl.getOrThrow()
+    let targetName = ctx.nameGenerator.GetObjCDeclName(typeDecl)
+    if (TypeMapper.IsObjCId(typeDecl)) {
+        return
+    }
+
+    let curFile = expr.curFile
+    CJC_NULLPTR_CHECK(curFile)
+    let boolTy = TypeManager.GetBoolTy()
+    CJC_ASSERT(expr.desugarExpr.isNone())
+    let objCIdDecl = ctx.bridge.GetObjCIdDecl().getOrThrow()
+    let falseLit = CreateLitConstExpr(LitConstKind.BOOL, "false", boolTy)
+    let trueLit = CreateLitConstExpr(LitConstKind.BOOL, "true", boolTy)
+    let matchCases = ArrayList<MatchCase>()
+
+    let originalTypePattern = CreateTypePattern(WildcardPattern(), CreateType(type), leftExpr)
+    originalTypePattern.needRuntimeTypeCheck = true
+    originalTypePattern.matchBeforeRuntime = false
+    matchCases.add(CreateMatchCase(originalTypePattern, trueLit))
+
+    let checkVarPattern = WithinFile<VarPattern>(CreateVarPattern(V_COMPILER, Some(objCIdDecl.GetTy().getOrThrow())),
+        curFile)
+    checkVarPattern.varDecl.getOrThrow().curFile = curFile
+    let objCIdType = CreateType(objCIdDecl.GetTy().getOrThrow())
+    var checkCall: Option<Expr> = None
+    match (isType.TyKind()) {
+        case TypeKind.TYPE_CLASS =>
+            checkCall = ctx.factory.CreateObjCIsKindOfClassCall(
+                ctx.factory.CreateNativeHandleExpr(WithinFile<RefExpr>(
+                    CreateRefExpr(checkVarPattern.varDecl.getOrThrow()), curFile)),
+                ctx.factory.CreateGetClassCall(targetName, curFile), curFile)
+        case TypeKind.TYPE_INTERFACE =>
+            checkCall = ctx.factory.CreateObjCConformsToProtocolCall(
+                ctx.factory.CreateNativeHandleExpr(WithinFile<RefExpr>(
+                    CreateRefExpr(checkVarPattern.varDecl.getOrThrow()), curFile)),
+                ctx.factory.CreateGetProtoCall(targetName, curFile), curFile)
+        case _ => return
+    }
+
+    let checkTypePattern = CreateTypePattern(checkVarPattern, objCIdType, leftExpr)
+    checkTypePattern.needRuntimeTypeCheck = true
+    checkTypePattern.matchBeforeRuntime = false
+    matchCases.add(CreateMatchCase(checkTypePattern, checkCall.getOrThrow()))
+    matchCases.add(CreateMatchCase(WildcardPattern(), falseLit))
+    expr.desugarExpr = WithinFile<MatchExpr>(CreateMatchExpr(leftExpr, matchCases, boolTy), curFile)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:114-200.
+private func DesugarAsExpr(ctx: InteropContext, expr: AsExpr): Unit {
+    let asType = expr.asType.getOrThrow()
+    let leftExpr = expr.leftExpr.getOrThrow()
+    if (!ShouldDesugarTypecheck(asType, leftExpr)) {
+        return
+    }
+
+    let curFile = expr.curFile
+    CJC_NULLPTR_CHECK(curFile)
+    CJC_ASSERT(expr.desugarExpr.isNone())
+    let castTy = asType.GetTy().getOrThrow()
+    let type = (castTy as ClassLikeTy).getOrThrow()
+    let typeDecl = type.commonDecl.getOrThrow()
+    if (TypeMapper.IsObjCId(typeDecl)) {
+        return
+    }
+
+    let objCIdDecl = ctx.bridge.GetObjCIdDecl().getOrThrow()
+    let castResultTy = ctx.factory.GetOptionTy(castTy)
+    let targetName = ctx.nameGenerator.GetObjCDeclName(typeDecl)
+    let matchCases = ArrayList<MatchCase>()
+
+    let originalVarPattern = WithinFile<VarPattern>(CreateVarPattern(V_COMPILER, Some(castTy)), curFile)
+    let originalBranch = ctx.factory.CreateOptionSomeCall(
+        WithinFile<RefExpr>(CreateRefExpr(originalVarPattern.varDecl.getOrThrow()), curFile), castTy)
+    let originalTypePattern = CreateTypePattern(originalVarPattern, CreateType(castTy), leftExpr)
+    originalTypePattern.needRuntimeTypeCheck = true
+    originalTypePattern.matchBeforeRuntime = false
+    matchCases.add(CreateMatchCase(originalTypePattern, originalBranch))
+
+    let objCIdVarPattern = WithinFile<VarPattern>(
+        CreateVarPattern(V_COMPILER, Some(objCIdDecl.GetTy().getOrThrow())), curFile)
+    objCIdVarPattern.varDecl.getOrThrow().curFile = curFile
+    var checkCall: Option<Expr> = None
+    match (asType.TyKind()) {
+        case TypeKind.TYPE_CLASS =>
+            checkCall = ctx.factory.CreateObjCIsKindOfClassCall(
+                ctx.factory.CreateNativeHandleExpr(WithinFile<RefExpr>(
+                    CreateRefExpr(objCIdVarPattern.varDecl.getOrThrow()), curFile)),
+                ctx.factory.CreateGetClassCall(targetName, curFile), curFile)
+        case TypeKind.TYPE_INTERFACE =>
+            checkCall = ctx.factory.CreateObjCConformsToProtocolCall(
+                ctx.factory.CreateNativeHandleExpr(WithinFile<RefExpr>(
+                    CreateRefExpr(objCIdVarPattern.varDecl.getOrThrow()), curFile)),
+                ctx.factory.CreateGetProtoCall(targetName, curFile), curFile)
+        case _ => return
+    }
+
+    let nativeHandle = ctx.factory.CreateNativeHandleExpr(
+        WithinFile<RefExpr>(CreateRefExpr(objCIdVarPattern.varDecl.getOrThrow()), curFile))
+    let objCIdTypePattern = CreateTypePattern(
+        objCIdVarPattern, CreateType(objCIdDecl.GetTy().getOrThrow()), leftExpr)
+    objCIdTypePattern.needRuntimeTypeCheck = true
+    objCIdTypePattern.matchBeforeRuntime = false
+    let objCIdBranch = ctx.factory.WrapEntity(nativeHandle, castResultTy, withRetain: Retain.RETAINED)
+    let objCIdMatchCase = CreateMatchCase(objCIdTypePattern, objCIdBranch)
+    objCIdMatchCase.patternGuard = checkCall
+    matchCases.add(objCIdMatchCase)
+    matchCases.add(CreateMatchCase(WildcardPattern(), ctx.factory.CreateOptionNoneRef(type)))
+    expr.desugarExpr = WithinFile<MatchExpr>(CreateMatchExpr(leftExpr, matchCases, castResultTy), curFile)
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:202-221.
+private func CollectTypePatternWithObjCClass(ctx: InteropContext, pattern: Pattern): ArrayList<TypePattern> {
+    let result = ArrayList<TypePattern>()
+    let walker = Walker(pattern, visitPre: { node: Node =>
+        if (let Some(typePattern) <- (node as TypePattern)) {
+            let decl = Ty.GetDeclOfTy(typePattern.typeNode.getOrThrow().GetTy())
+            if (let Some(value) <- decl) {
+                if (value.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE) &&
+                    !TypeMapper.IsObjCId(value)) {
+                    result.add(typePattern)
+                }
+            }
+        }
+        return VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+    return result
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:223-247.
+private func CollectTypePatternWithObjCClass(
+    ctx: InteropContext, patterns: ArrayList<Pattern>): ArrayList<TypePattern> {
+    let result = ArrayList<TypePattern>()
+    var multipleTypePatterns = false
+    for (pattern in patterns) {
+        if (let Some(typePattern) <- (pattern as TypePattern)) {
+            if (multipleTypePatterns) {
+                DiagnoseRefactor(ctx.diag, DiagKindRefactor.sema_objc_interop_not_supported, typePattern,
+                    "multiple type patterns inside match case (_: A | _: B)").Emit()
+                return ArrayList<TypePattern>()
+            } else {
+                multipleTypePatterns = true
+            }
+        }
+        for (typePattern in CollectTypePatternWithObjCClass(ctx, pattern)) {
+            result.add(typePattern)
+        }
+    }
+    return result
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:249-258.
+private func CreateTmpVarPattern(ty: Ty): VarPattern {
+    let variable = CreateTmpVarDecl()
+    let varPattern = VarPattern()
+    variable.parentPattern = varPattern
+    variable.SetTy(ty)
+    varPattern.SetTy(ty)
+    varPattern.varDecl = variable
+    return varPattern
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:260-294.
+private func CastAndSubstitudeVars(
+    ctx: InteropContext, expr: Expr, patternVars: ArrayList<(VarDecl, Ty)>): Block {
+    let curFile = expr.curFile
+    let varsBlock = WithinFile<Block>(Block(), curFile)
+    let varsMapping = HashMap<Decl, Decl>()
+    for ((varDecl, castTy) in patternVars) {
+        let castDecl = (Ty.GetDeclOfTy(Some(castTy)) as ClassLikeDecl).getOrThrow()
+        let nativeHandle = ctx.factory.CreateNativeHandleExpr(
+            WithinFile<RefExpr>(CreateRefExpr(varDecl), curFile))
+        let initializer = ctx.factory.WrapEntity(nativeHandle, castTy, withRetain: Retain.RETAINED)
+        let castedVar = WithinFile<VarDecl>(CreateTmpVarDecl(
+            Some(CreateType(castDecl.GetTy().getOrThrow())), Some(initializer)), curFile)
+        varsMapping[varDecl] = castedVar
+        varsBlock.body.add(castedVar)
+    }
+
+    let walker = Walker(expr, visitPre: { node: Node =>
+        if (let Some(refExpr) <- (node as RefExpr)) {
+            if (let Some(target) <- refExpr.ref.target) {
+                if (let Some(castedVar) <- varsMapping.get(target)) {
+                    refExpr.ref.identifier = castedVar.identifier
+                    refExpr.ref.target = castedVar
+                }
+            }
+        }
+        return VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+    return varsBlock
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:296-372.
+private func DesugarMatchCaseExpr(ctx: InteropContext, expr: MatchCase): Unit {
+    let typePatterns = CollectTypePatternWithObjCClass(ctx, expr.patterns)
+    if (typePatterns.isEmpty()) {
+        return
+    }
+
+    let objCIdDecl = ctx.bridge.GetObjCIdDecl().getOrThrow()
+    let interopGuards = ArrayList<Expr>()
+    let patternVars = ArrayList<(VarDecl, Ty)>()
+    for (typePattern in typePatterns) {
+        if (let Some(_) <- (typePattern.pattern.getOrThrow() as WildcardPattern)) {
+            typePattern.pattern = CreateTmpVarPattern(typePattern.typeNode.getOrThrow().GetTy().getOrThrow())
+            typePattern.pattern.getOrThrow().curFile = expr.curFile
+        }
+
+        let varPattern = (typePattern.pattern.getOrThrow() as VarPattern).getOrThrow()
+        let originalTy = varPattern.GetTy().getOrThrow()
+        let type = (originalTy as ClassLikeTy).getOrThrow()
+        let targetName = ctx.nameGenerator.GetObjCDeclName(type.commonDecl.getOrThrow())
+        typePattern.typeNode = CreateType(objCIdDecl.GetTy().getOrThrow())
+        varPattern.SetTy(objCIdDecl.GetTy().getOrThrow())
+        varPattern.varDecl.getOrThrow().SetTy(objCIdDecl.GetTy().getOrThrow())
+        patternVars.add((varPattern.varDecl.getOrThrow(), originalTy))
+
+        var checkCall: Option<Expr> = None
+        match (originalTy.kind) {
+            case TypeKind.TYPE_CLASS =>
+                checkCall = ctx.factory.CreateObjCIsKindOfClassCall(
+                    ctx.factory.CreateNativeHandleExpr(WithinFile<RefExpr>(
+                        CreateRefExpr(varPattern.varDecl.getOrThrow()), expr.curFile)),
+                    ctx.factory.CreateGetClassCall(targetName, expr.curFile), expr.curFile)
+            case TypeKind.TYPE_INTERFACE =>
+                checkCall = ctx.factory.CreateObjCConformsToProtocolCall(
+                    ctx.factory.CreateNativeHandleExpr(WithinFile<RefExpr>(
+                        CreateRefExpr(varPattern.varDecl.getOrThrow()), expr.curFile)),
+                    ctx.factory.CreateGetProtoCall(targetName, expr.curFile), expr.curFile)
+            case _ => return
+        }
+        interopGuards.add(checkCall.getOrThrow())
+    }
+
+    var guard: Expr
+    if (expr.patternGuard.isNone()) {
+        guard = interopGuards[interopGuards.size - 1]
+        interopGuards.remove(at: interopGuards.size - 1)
+    } else {
+        let patternGuard = expr.patternGuard.getOrThrow()
+        let guardVarsBlock = CastAndSubstitudeVars(ctx, patternGuard, patternVars)
+        guard = (ASTCloner.Clone(patternGuard) as Expr).getOrThrow()
+        guardVarsBlock.body.add(patternGuard)
+        guardVarsBlock.SetTy(guard.GetTy().getOrThrow())
+        guard.desugarExpr = guardVarsBlock
+    }
+
+    while (!interopGuards.isEmpty()) {
+        guard = CreateBinaryExpr(interopGuards[interopGuards.size - 1], guard, TokenKind.AND)
+        interopGuards.remove(at: interopGuards.size - 1)
+    }
+    expr.patternGuard = guard
+    let originalBody = expr.exprOrDecls.getOrThrow()
+    let bodyVarsBlock = CastAndSubstitudeVars(ctx, originalBody, patternVars)
+    bodyVarsBlock.SetTy(originalBody.GetTy().getOrThrow())
+    for (node in originalBody.body) {
+        bodyVarsBlock.body.add(node)
+    }
+    expr.exprOrDecls = bodyVarsBlock
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:374-432.
+private func DesugarLetDestructorExpr(ctx: InteropContext, expr: IfExpr): Unit {
+    if (let Some(letPattern) <- (expr.condExpr.getOrThrow() as LetPatternDestructor)) {
+        let typePatterns = CollectTypePatternWithObjCClass(ctx, letPattern.patterns)
+        if (typePatterns.isEmpty()) {
+            return
+        }
+        CJC_ASSERT(typePatterns.size == 1)
+        let typePattern = typePatterns[0]
+        let varPattern = (typePattern.pattern.getOrThrow() as VarPattern).getOrThrow()
+        let originalTy = varPattern.GetTy().getOrThrow()
+        let type = (originalTy as ClassLikeTy).getOrThrow()
+        let targetName = ctx.nameGenerator.GetObjCDeclName(type.commonDecl.getOrThrow())
+        let objCIdDecl = ctx.bridge.GetObjCIdDecl().getOrThrow()
+        typePattern.typeNode = CreateType(objCIdDecl.GetTy().getOrThrow())
+        typePattern.SetTy(objCIdDecl.GetTy().getOrThrow())
+        varPattern.SetTy(objCIdDecl.GetTy().getOrThrow())
+        varPattern.varDecl.getOrThrow().SetTy(objCIdDecl.GetTy().getOrThrow())
+
+        var checkCall: Option<Expr> = None
+        match (originalTy.kind) {
+            case TypeKind.TYPE_CLASS =>
+                checkCall = ctx.factory.CreateObjCIsKindOfClassCall(
+                    ctx.factory.CreateNativeHandleExpr(WithinFile<RefExpr>(
+                        CreateRefExpr(varPattern.varDecl.getOrThrow()), expr.curFile)),
+                    ctx.factory.CreateGetClassCall(targetName, expr.curFile), expr.curFile)
+            case TypeKind.TYPE_INTERFACE =>
+                checkCall = ctx.factory.CreateObjCConformsToProtocolCall(
+                    ctx.factory.CreateNativeHandleExpr(WithinFile<RefExpr>(
+                        CreateRefExpr(varPattern.varDecl.getOrThrow()), expr.curFile)),
+                    ctx.factory.CreateGetProtoCall(targetName, expr.curFile), expr.curFile)
+            case _ => return
+        }
+
+        let patternVars = ArrayList<(VarDecl, Ty)>()
+        patternVars.add((varPattern.varDecl.getOrThrow(), originalTy))
+        let originalBody = expr.thenBody.getOrThrow()
+        let bodyVarsBlock = CastAndSubstitudeVars(ctx, originalBody, patternVars)
+        bodyVarsBlock.SetTy(originalBody.GetTy().getOrThrow())
+        for (node in originalBody.body) {
+            bodyVarsBlock.body.add(node)
+        }
+        expr.condExpr = CreateBinaryExpr(expr.condExpr.getOrThrow(), checkCall.getOrThrow(), TokenKind.AND)
+        expr.thenBody = bodyVarsBlock
+    }
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:434-492.
+private func DesugarWhileExpr(ctx: InteropContext, expr: WhileExpr): Unit {
+    if (let Some(letPattern) <- (expr.condExpr.getOrThrow() as LetPatternDestructor)) {
+        let typePatterns = CollectTypePatternWithObjCClass(ctx, letPattern.patterns)
+        if (typePatterns.isEmpty()) {
+            return
+        }
+        CJC_ASSERT(typePatterns.size == 1)
+        let typePattern = typePatterns[0]
+        let varPattern = (typePattern.pattern.getOrThrow() as VarPattern).getOrThrow()
+        let originalTy = varPattern.GetTy().getOrThrow()
+        let type = (originalTy as ClassLikeTy).getOrThrow()
+        let targetName = ctx.nameGenerator.GetObjCDeclName(type.commonDecl.getOrThrow())
+        let objCIdDecl = ctx.bridge.GetObjCIdDecl().getOrThrow()
+        typePattern.typeNode = CreateType(objCIdDecl.GetTy().getOrThrow())
+        typePattern.SetTy(objCIdDecl.GetTy().getOrThrow())
+        varPattern.SetTy(objCIdDecl.GetTy().getOrThrow())
+        varPattern.varDecl.getOrThrow().SetTy(objCIdDecl.GetTy().getOrThrow())
+
+        var checkCall: Option<Expr> = None
+        match (originalTy.kind) {
+            case TypeKind.TYPE_CLASS =>
+                checkCall = ctx.factory.CreateObjCIsKindOfClassCall(
+                    ctx.factory.CreateNativeHandleExpr(WithinFile<RefExpr>(
+                        CreateRefExpr(varPattern.varDecl.getOrThrow()), expr.curFile)),
+                    ctx.factory.CreateGetClassCall(targetName, expr.curFile), expr.curFile)
+            case TypeKind.TYPE_INTERFACE =>
+                checkCall = ctx.factory.CreateObjCConformsToProtocolCall(
+                    ctx.factory.CreateNativeHandleExpr(WithinFile<RefExpr>(
+                        CreateRefExpr(varPattern.varDecl.getOrThrow()), expr.curFile)),
+                    ctx.factory.CreateGetProtoCall(targetName, expr.curFile), expr.curFile)
+            case _ => return
+        }
+
+        let patternVars = ArrayList<(VarDecl, Ty)>()
+        patternVars.add((varPattern.varDecl.getOrThrow(), originalTy))
+        let originalBody = expr.body.getOrThrow()
+        let bodyVarsBlock = CastAndSubstitudeVars(ctx, originalBody, patternVars)
+        bodyVarsBlock.SetTy(originalBody.GetTy().getOrThrow())
+        for (node in originalBody.body) {
+            bodyVarsBlock.body.add(node)
+        }
+        expr.condExpr = CreateBinaryExpr(expr.condExpr.getOrThrow(), checkCall.getOrThrow(), TokenKind.AND)
+        expr.body = bodyVarsBlock
+    }
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:495-546.
+public class RewriteObjCTypechecks {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (file in ctx.pkg.files) {
+            let matchWalker = Walker(file, visitPre: { node: Node =>
+                if (!node.IsSamePackage(file.curPackage.getOrThrow())) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (node.TestAnyAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN, Attribute.UNREACHABLE,
+                    Attribute.LEFT_VALUE)) {
+                    return VisitAction.SKIP_CHILDREN
+                }
+                if (let Some(matchCase) <- (node as MatchCase)) {
+                    DesugarMatchCaseExpr(ctx, matchCase)
+                }
+                return VisitAction.WALK_CHILDREN
+            })
+            let _ = matchWalker.Walk()
+
+            let expressionWalker = Walker(file, visitPre: { node: Node =>
+                if (!node.IsSamePackage(file.curPackage.getOrThrow())) {
+                    return VisitAction.WALK_CHILDREN
+                }
+                if (node.TestAnyAttr(Attribute.HAS_BROKEN, Attribute.IS_BROKEN, Attribute.UNREACHABLE,
+                    Attribute.LEFT_VALUE)) {
+                    return VisitAction.SKIP_CHILDREN
+                }
+                if (let Some(isExpr) <- (node as IsExpr)) {
+                    DesugarIsExpr(ctx, isExpr)
+                } else if (let Some(asExpr) <- (node as AsExpr)) {
+                    DesugarAsExpr(ctx, asExpr)
+                } else if (let Some(ifExpr) <- (node as IfExpr)) {
+                    DesugarLetDestructorExpr(ctx, ifExpr)
+                } else if (let Some(whileExpr) <- (node as WhileExpr)) {
+                    DesugarWhileExpr(ctx, whileExpr)
+                }
+                return VisitAction.WALK_CHILDREN
+            })
+            let _ = expressionWalker.Walk()
+        }
+    }
+}
+
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Desugar.cpp:16-75.
 public func Desugar(ctx: InteropContext): Unit {
     if (!ctx.bridge.IsInteropLibAccessible()) {
