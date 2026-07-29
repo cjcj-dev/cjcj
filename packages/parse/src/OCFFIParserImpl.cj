@@ -29,6 +29,7 @@ public class OCFFIParserImpl {
     }
 
     public func CheckInitAnnotation(fd: FuncDecl): Unit {
+        CJC_ASSERT(!fd.TestAttr(Attribute.CONSTRUCTOR))
         for (anno in fd.annotations) {
             if (anno.kind != AnnotationKind.OBJ_C_INIT) {
                 continue
@@ -53,6 +54,7 @@ public class OCFFIParserImpl {
     }
 
     public func CheckOptionalAnnotation(fd: FuncDecl): Unit {
+        CJC_ASSERT(!fd.TestAttr(Attribute.CONSTRUCTOR))
         for (anno in fd.annotations) {
             if (anno.kind != AnnotationKind.OBJ_C_OPTIONAL) {
                 continue
@@ -108,21 +110,20 @@ public class OCFFIParserImpl {
             DiagObjCMirrorFuncCannotBeForeign(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
-        if (let Some(body) <- decl.funcBody) {
-            if (let Some(_) <- body.generic) {
-                DiagObjCMirrorFuncCannotBeGeneric(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (let Some(_) <- body.body) {
-                DiagObjCMirrorFuncCannotHaveBody(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
-            if (let None <- body.retType) {
-                DiagObjCMirrorFuncMustHaveExplicitType(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
+        if (let Some(_) <- decl.GetGeneric()) {
+            DiagObjCMirrorFuncCannotBeGeneric(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
         }
-        if (decl.isConst) {
+        let body = decl.funcBody.getOrThrow()
+        if (let Some(_) <- body.body) {
+            DiagObjCMirrorFuncCannotHaveBody(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (let None <- body.retType) {
+            DiagObjCMirrorFuncMustHaveExplicitType(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
+        if (decl.isConst || parser.HasModifier(decl.modifiers, TokenKind.CONST)) {
             DiagObjCMirrorFuncCannotBeConst(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)
         }
