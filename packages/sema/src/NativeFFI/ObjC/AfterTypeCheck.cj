@@ -4430,6 +4430,7 @@ private func DesugarSuperCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: Fu
         for (arg in callExpr.args) {
             args.add(arg)
         }
+        callExpr.args.clear()
         let realTarget = ctx.factory.GetGeneratedImplCtor(
             GetImplSuperClass(impl).getOrThrow(), targetFd).getOrThrow()
         let realTargetTy = (realTarget.GetTy().getOrThrow() as FuncTy).getOrThrow()
@@ -4504,6 +4505,7 @@ private func DesugarThisCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: Fun
     for (arg in callExpr.args) {
         args.add(arg)
     }
+    callExpr.args.clear()
     let realTarget = ctx.factory.GetGeneratedImplCtor(impl, targetFd).getOrThrow()
     let realTargetTy = (realTarget.GetTy().getOrThrow() as FuncTy).getOrThrow()
     callExpr.desugarExpr = CreateThisCall(impl, realTarget, realTargetTy,
