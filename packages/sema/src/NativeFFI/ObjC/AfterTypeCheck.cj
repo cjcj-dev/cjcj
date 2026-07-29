@@ -13,7 +13,7 @@ import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, Crea
     CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
     GetGenericInstType, GetInstantyForGenericTy, GetStringDecl, WithinFile, INIT_IDENT, IsObjCGeneratedMember,
     WrapReturningLambdaCall, WrapReturningLambdaExpr}
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
+import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
     CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
     OBJ_C_FWD_CLASS_SUFFIX,
     OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
@@ -2119,6 +2119,24 @@ public class InteropContext {
         this.outputObjCGenDir = outputObjCGenDir
         this.structMemberSignatures = structMemberSignatures
         sharedLibraryExtension = GlobalOptions.GetSharedLibraryExtension(targetOsType)
+    }
+}
+
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateInSyntheticWrappers.cpp:25-41.
+public class GenerateInSyntheticWrappers <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (wrapper in ctx.synWrappers) {
+            if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
+                continue
+            }
+            CJC_ASSERT_WITH_MSG(wrapper.astKind == ASTKind.CLASS_DECL, "Synthetic wrapper expected to be a class")
+            if (let Some(inheritableDecl) <- (wrapper as InheritableDecl)) {
+                GenerateSyntheticClassAbstractMemberImplStubs(wrapper,
+                    ctx.structMemberSignatures.get(inheritableDecl).getOrThrow())
+            } else {
+                CJC_ABORT_WITH_MSG("Illegal state: synthetic classes expected to be InheritableDecl*")
+            }
+        }
     }
 }
 
