@@ -717,6 +717,20 @@ private func CheckAssumption(typeManager: TypeManager, ctx: ASTContext, diag: Ba
 }
 
 extend TypeCheckerImpl {
+    // C++ src/Sema/PreCheck.cpp:1185-1199 TypeCheckerImpl::AddSuperInterfaceForClassLikeDecl.
+    public func AddSuperInterfaceForClassLikeDecl(ctx: ASTContext): Unit {
+        for (sym in GetAllDecls(ctx)) {
+            let node = sym.node.getOrThrow()
+            if (!node.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+                continue
+            }
+            if (let Some(classLikeDecl) <- (node as ClassLikeDecl)) {
+                AddObjCIdSuperInterfaceObjCInterop(
+                    importManager.getOrThrow(), diag.getOrThrow(), ctx, classLikeDecl)
+            }
+        }
+    }
+
     // C++ src/Sema/PreCheck.cpp:1201-1217 TypeCheckerImpl::CollectAndCheckAssumption.
     public func CollectAndCheckAssumption(ctx: ASTContext): Unit {
         let decls = ArrayList<Decl>()
