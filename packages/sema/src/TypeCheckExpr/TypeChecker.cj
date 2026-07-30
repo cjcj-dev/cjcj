@@ -1267,6 +1267,7 @@ extend TypeChecker {
                     }
                 }
                 AddSuperClassObjectForClassDecl(ctx, pkg, impl.diag.getOrThrow(), impl.importManager)
+                impl.AddSuperInterfaceForClassLikeDecl(ctx)
                 impl.CollectAndCheckAssumption(ctx)
             }
         }
