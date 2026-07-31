@@ -210,6 +210,8 @@ foreign {
     func LLVMStructGetTypeAtIndex(structTy: LLVMTypeRef, index: UInt32): LLVMTypeRef
     func LLVMGetStructElementTypes(structTy: LLVMTypeRef, dest: CPointer<LLVMTypeRef>): Unit
     func LLVMGetArrayLength(arrayTy: LLVMTypeRef): UInt32
+
+    func LLVMGetElementType(valueType: LLVMTypeRef): LLVMTypeRef
     func LLVMGetReturnType(functionType: LLVMTypeRef): LLVMTypeRef
     func LLVMIsFunctionVarArg(functionType: LLVMTypeRef): Int32
     func LLVMCountParamTypes(functionType: LLVMTypeRef): UInt32

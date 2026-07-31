@@ -24,7 +24,11 @@ public func GenerateAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMV
             return obj
         }
         let cgType = CGType.GetOrCreate(irBuilder.GetCGModule(), actualAllocatedTy)
-        return irBuilder.CreateEntryAlloca(cgType, name: "alloca")
+        let allocaInst = irBuilder.CreateEntryAlloca(cgType, name: "alloca")
+        // See ZeroInitializeStackCellIfContainsRef: keeps deferred-init GC
+        // locals out of the undef-phi stackmap hole (vaildtype family).
+        irBuilder.ZeroInitializeStackCellIfContainsRef(cgType, allocaInst)
+        return allocaInst
     }
     return LLVMNullValue()
 }

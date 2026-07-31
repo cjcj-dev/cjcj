@@ -730,6 +730,55 @@ public class IRBuilder2 <: Resource {
         return unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), SignedInt64Bits(value), 1) }
     }
 
+    // Whether this LLVM type can put a GC reference into a stackmap slot:
+    // an addrspace(1) pointer, or an aggregate containing one.
+    private static func ContainsGCReference(valueType: LLVMTypeRef): Bool {
+        let kind = unsafe { LLVMGetTypeKind(valueType) }
+        if (kind == LLVM_POINTER_TYPE_KIND) {
+            return unsafe { LLVMGetPointerAddressSpace(valueType) } == 1u32
+        }
+        if (kind == LLVM_STRUCT_TYPE_KIND) {
+            let n = unsafe { LLVMCountStructElementTypes(valueType) }
+            var i: UInt32 = 0
+            while (i < n) {
+                if (ContainsGCReference(unsafe { LLVMStructGetTypeAtIndex(valueType, i) })) {
+                    return true
+                }
+                i++
+            }
+            return false
+        }
+        if (kind == LLVM_ARRAY_TYPE_KIND) {
+            return ContainsGCReference(unsafe { LLVMGetElementType(valueType) })
+        }
+        return false
+    }
+
+    // Deferred-initialization locals reach LLVM as bare allocas; mem2reg turns
+    // the declaration edge into `undef`, and CJRewriteStatepoint normalizes
+    // undef only on the base side of GC phis. The derived value then owns a
+    // stackmap position that is never written on the first-iteration path, and
+    // root enumeration reads stale stack memory through it (the vaildtype
+    // tip->IsVaildType abort). Definite assignment guarantees the program never
+    // observes a local's initial value, so storing zero here is semantically
+    // invisible, and SROA/DSE deletes it whenever the declaration has an
+    // initializer — the store survives to machine code only for genuinely
+    // deferred-initialization locals, which are exactly the ones that need it.
+    // Restricted to types that can put GC references into stackmaps so
+    // reference-free aggregates do not pay a memset.
+    public func ZeroInitializeStackCellIfContainsRef(cgType: CGType, allocaInst: LLVMValueRef): Unit {
+        if ((cgType as CGFunctionType).isSome()) {
+            // CreateEntryAlloca allocates a raw addrspace(0) function-pointer
+            // cell for these; no GC reference is involved.
+            return
+        }
+        let valueType = cgType.GetLLVMType()
+        if (valueType.isNull() || !ContainsGCReference(valueType)) {
+            return
+        }
+        CreateStore(unsafe { LLVMConstNull(valueType) }, allocaInst)
+    }
+
     public func CreateEntryAlloca(valueType: LLVMTypeRef, name!: String = ""): LLVMValueRef {
         CJC_ASSERT(!valueType.isNull())
         let currentBlock = unsafe { LLVMGetInsertBlock(builder.raw) }
