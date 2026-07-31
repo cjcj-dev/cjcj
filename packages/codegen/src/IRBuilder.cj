@@ -76,10 +76,6 @@ private let LLVM_POINTER_TYPE_KIND: Int32 = 12
 private let LLVM_VECTOR_TYPE_KIND: Int32 = 13
 private let LLVM_SCALABLE_VECTOR_TYPE_KIND: Int32 = 17
 
-foreign {
-    func LLVMGetElementType(valueType: LLVMTypeRef): LLVMTypeRef
-}
-
 private func SignedInt64Bits(value: Int64): UInt64 {
     if (value >= 0) {
         return UInt64(value)
@@ -5832,22 +5828,14 @@ public class IRBuilder2 <: Resource {
         }
         if (kind == LLVM_STRUCT_TYPE_KIND) {
             let elementCount = unsafe { LLVMCountStructElementTypes(llvmTy) }
-            if (elementCount == 0u32) {
-                return false
-            }
-            var result = false
-            try (elementPtr = LibC.malloc<LLVMTypeRef>(count: Int64(elementCount)).asResource()) {
-                unsafe { LLVMGetStructElementTypes(llvmTy, elementPtr.value) }
-                var idx: Int64 = 0
-                while (idx < Int64(elementCount)) {
-                    if (IsLLVMTypeContainsRef(unsafe { (elementPtr.value + idx).read() })) {
-                        result = true
-                        break
-                    }
-                    idx++
+            var idx: UInt32 = 0
+            while (idx < elementCount) {
+                if (IsLLVMTypeContainsRef(unsafe { LLVMStructGetTypeAtIndex(llvmTy, idx) })) {
+                    return true
                 }
+                idx++
             }
-            return result
+            return false
         }
         if (kind == LLVM_ARRAY_TYPE_KIND || kind == LLVM_VECTOR_TYPE_KIND || kind == LLVM_SCALABLE_VECTOR_TYPE_KIND) {
             return IsLLVMTypeContainsRef(unsafe { LLVMGetElementType(llvmTy) })
