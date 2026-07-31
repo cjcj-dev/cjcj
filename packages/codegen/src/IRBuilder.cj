@@ -726,30 +726,6 @@ public class IRBuilder2 <: Resource {
         return unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), SignedInt64Bits(value), 1) }
     }
 
-    // Whether this LLVM type can put a GC reference into a stackmap slot:
-    // an addrspace(1) pointer, or an aggregate containing one.
-    private static func ContainsGCReference(valueType: LLVMTypeRef): Bool {
-        let kind = unsafe { LLVMGetTypeKind(valueType) }
-        if (kind == LLVM_POINTER_TYPE_KIND) {
-            return unsafe { LLVMGetPointerAddressSpace(valueType) } == 1u32
-        }
-        if (kind == LLVM_STRUCT_TYPE_KIND) {
-            let n = unsafe { LLVMCountStructElementTypes(valueType) }
-            var i: UInt32 = 0
-            while (i < n) {
-                if (ContainsGCReference(unsafe { LLVMStructGetTypeAtIndex(valueType, i) })) {
-                    return true
-                }
-                i++
-            }
-            return false
-        }
-        if (kind == LLVM_ARRAY_TYPE_KIND) {
-            return ContainsGCReference(unsafe { LLVMGetElementType(valueType) })
-        }
-        return false
-    }
-
     // Deferred-initialization locals reach LLVM as bare allocas; mem2reg turns
     // the declaration edge into `undef`, and CJRewriteStatepoint normalizes
     // undef only on the base side of GC phis. The derived value then owns a
@@ -769,7 +745,7 @@ public class IRBuilder2 <: Resource {
             return
         }
         let valueType = cgType.GetLLVMType()
-        if (valueType.isNull() || !ContainsGCReference(valueType)) {
+        if (valueType.isNull() || !IsLLVMTypeContainsRef(valueType)) {
             return
         }
         CreateStore(unsafe { LLVMConstNull(valueType) }, allocaInst)
