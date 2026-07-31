@@ -76,10 +76,6 @@ private let LLVM_POINTER_TYPE_KIND: Int32 = 12
 private let LLVM_VECTOR_TYPE_KIND: Int32 = 13
 private let LLVM_SCALABLE_VECTOR_TYPE_KIND: Int32 = 17
 
-foreign {
-    func LLVMGetElementType(valueType: LLVMTypeRef): LLVMTypeRef
-}
-
 private func SignedInt64Bits(value: Int64): UInt64 {
     if (value >= 0) {
         return UInt64(value)
