@@ -7,6 +7,7 @@ import fs from 'node:fs/promises'
 import {existsSync} from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import {spawnSync} from 'node:child_process'
 
 const here = import.meta.dirname
 const minYoung = Number(process.env.GC_YOUNG_MIN || '20')
@@ -16,7 +17,8 @@ const compiler = process.env.GC_YOUNG_COMPILER || process.env.CJC || 'cjc'
 const src = process.env.GC_YOUNG_SRC || path.join(here, 'young_alloc.cj')
 const work = process.env.GC_YOUNG_WORK || await fs.mkdtemp(path.join(os.tmpdir(), 'gc-young-'))
 const reportPath = path.join(work, 'mrt.report.log')
-const exe = path.join(work, 'young_alloc')
+const exeSuffix = process.platform === 'win32' ? '.exe' : ''
+const exe = path.join(work, `young_alloc${exeSuffix}`)
 const buildLog = path.join(work, 'build.log')
 const runLog = path.join(work, 'run.log')
 
@@ -28,7 +30,24 @@ function log(msg) {
 
 async function run(cmd, args, env, logFile) {
   const t0 = performance.now()
-  const out = await $({nothrow: true, quiet: true, env})`${cmd} ${args}`
+  let out
+  if (process.platform === 'win32') {
+    const line = [`"${cmd}"`, ...args.map((arg) => `"${arg}"`)].join(' ')
+    const result = spawnSync('cmd.exe', ['/d', '/s', '/c', `"${line}"`], {
+      encoding: 'utf8',
+      env,
+      windowsVerbatimArguments: true,
+      maxBuffer: 64 * 1024 * 1024,
+    })
+    out = {
+      exitCode: result.status ?? 1,
+      stdout: result.stdout || '',
+      stderr: result.stderr || String(result.error || ''),
+      signal: result.signal || null,
+    }
+  } else {
+    out = await $({nothrow: true, quiet: true, env})`${cmd} ${args}`
+  }
   const ms = Math.round(performance.now() - t0)
   const body = [
     `rc=${out.exitCode ?? 1} signal=${out.signal ?? 'none'} ms=${ms}`,
