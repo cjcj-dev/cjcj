@@ -97,19 +97,19 @@ console.log(
 if (missing.length) console.error(`FATAL: missing required exports: ${missing.join(',')}`);
 if (unexpectedImports.length) console.error(`FATAL: unexpected imports: ${unexpectedImports.join(',')}`);
 if (missingImports.length) console.error(`FATAL: missing official imports: ${missingImports.join(',')}`);
-// Export-family baseline (post generational GC + intentional ABI additions):
-//   MCC=159  CJ_MCC=196  MRT=61
+// Export-family baseline after macwin (user 0801-19:0x removed unversioned Flush alias):
+//   MCC=159  CJ_MCC=195  MRT=61
 // Generational (sticky) GC public C ABI (compiler write-barrier path):
-//   CJ_MCC_FlushDeferredLogRing_v1_8_264_32  (versioned ABI, runtime Mutator/CJDeferredLogRingABI.h)
+//   CJ_MCC_FlushDeferredLogRing_v1_8_264_32  (versioned ABI; cjcj-llvm pin 745b3329)
 //   CJ_MCC_StickyLogLine                     (runtime Heap/StickyLog.h)
-// Intentional additions after the prior 158/194 guard (macwin audit, pin c1be51cc):
-//   MCC_FixEdgeMaybe + CJ_MCC_FixEdgeMaybe   (runtime 689390e0; r1c2impl C-1 fast path)
-//   CJ_MCC_FlushDeferredLogRing              (runtime 00ecac27; unversioned alias for stickyon3 cjc)
-// These are deliberate public exports, not accidental surface growth.
-if (mccCount !== 159 || cjMccCount !== 196 || mrtCount !== 61) {
+// Intentional addition after the prior 158/194 guard:
+//   MCC_FixEdgeMaybe + CJ_MCC_FixEdgeMaybe   (runtime 689390e0; r1c2impl C-1)
+// Removed vs 196: unversioned CJ_MCC_FlushDeferredLogRing (00ecac27 alias; old-cjc only).
+// Net vs prior guard 158/194: MCC +1, CJ_MCC +1.
+if (mccCount !== 159 || cjMccCount !== 195 || mrtCount !== 61) {
   console.error('FATAL: runtime export-family counts differ from the expected surface');
 }
 if (
   missing.length || unexpectedImports.length || missingImports.length ||
-  mccCount !== 159 || cjMccCount !== 196 || mrtCount !== 61
+  mccCount !== 159 || cjMccCount !== 195 || mrtCount !== 61
 ) process.exit(1);
