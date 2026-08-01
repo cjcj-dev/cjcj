@@ -20,6 +20,11 @@ on:
         required: false
         type: string
         default: ''
+      nongating:
+        description: Allow a manual corpus caller to record failures without setting a failing workflow conclusion
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +34,7 @@ jobs:
     name: windows-x64 / Cross-build runtime
     runs-on: ubuntu-22.04
     timeout-minutes: 180
+    continue-on-error: ${{ inputs.nongating }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
