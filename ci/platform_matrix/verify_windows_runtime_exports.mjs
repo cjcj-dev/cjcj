@@ -97,18 +97,19 @@ console.log(
 if (missing.length) console.error(`FATAL: missing required exports: ${missing.join(',')}`);
 if (unexpectedImports.length) console.error(`FATAL: unexpected imports: ${unexpectedImports.join(',')}`);
 if (missingImports.length) console.error(`FATAL: missing official imports: ${missingImports.join(',')}`);
-// CJ_MCC baseline is 194, not the official SDK's 192: generational (sticky) GC adds exactly two
-// symbols that the source declares as public C ABI --
-//   CJ_MCC_FlushDeferredLogRing_v1_8_264_32  (versioned ABI, runtime/src/Mutator/CJDeferredLogRingABI.h:22;
-//                                             replaced the unversioned export as of runtime b71439a2)
-//   CJ_MCC_StickyLogLine         (runtime/src/Heap/StickyLog.h:21)
-// Both are called from the compiler-emitted write-barrier path, so they must stay exported.
-// The total export count is unchanged at 3116: the Windows producer no longer uses
-// --export-all-symbols, so 79 accidentally leaked internal C++/libc++ names are gone.
-if (mccCount !== 158 || cjMccCount !== 194 || mrtCount !== 61) {
+// Export-family baseline (post generational GC + intentional ABI additions):
+//   MCC=159  CJ_MCC=196  MRT=61
+// Generational (sticky) GC public C ABI (compiler write-barrier path):
+//   CJ_MCC_FlushDeferredLogRing_v1_8_264_32  (versioned ABI, runtime Mutator/CJDeferredLogRingABI.h)
+//   CJ_MCC_StickyLogLine                     (runtime Heap/StickyLog.h)
+// Intentional additions after the prior 158/194 guard (macwin audit, pin c1be51cc):
+//   MCC_FixEdgeMaybe + CJ_MCC_FixEdgeMaybe   (runtime 689390e0; r1c2impl C-1 fast path)
+//   CJ_MCC_FlushDeferredLogRing              (runtime 00ecac27; unversioned alias for stickyon3 cjc)
+// These are deliberate public exports, not accidental surface growth.
+if (mccCount !== 159 || cjMccCount !== 196 || mrtCount !== 61) {
   console.error('FATAL: runtime export-family counts differ from the expected surface');
 }
 if (
   missing.length || unexpectedImports.length || missingImports.length ||
-  mccCount !== 158 || cjMccCount !== 194 || mrtCount !== 61
+  mccCount !== 159 || cjMccCount !== 196 || mrtCount !== 61
 ) process.exit(1);
