@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 
-const expectedDefinition = path.resolve(argv._[0] || 'runtime-source/runtime/src/windows_x86_64_exports.def');
+const expectedDefinition = path.resolve(argv._[0] || path.join(import.meta.dirname, 'windows_x86_64_exports.def'));
 const definition = await fs.readFile(expectedDefinition, 'utf8');
 const expectedExports = definition
   .split(/\r?\n/)
@@ -57,6 +57,8 @@ try {
   const current = await runCase('current', expectedExports);
   const removed = expectedExports.filter((symbol) => symbol !== removedExport);
   const missing = await runCase('missing-one', removed);
+  const withExtra = [...expectedExports, replacementExport];
+  const extra = await runCase('extra-one', withExtra);
   const replaced = [...removed, replacementExport];
   const replacement = await runCase('equal-count-replacement', replaced);
 
@@ -66,6 +68,9 @@ try {
   }
   if (missing.status !== 1 || !missing.stderr.includes(`FATAL: missing exports: ${removedExport}`)) {
     failures.push('single deletion did not report its missing ABI name');
+  }
+  if (extra.status !== 1 || !extra.stderr.includes(`FATAL: unexpected exports: ${replacementExport}`)) {
+    failures.push('single addition did not report its unexpected ABI name');
   }
   if (
     replacement.status !== 1 ||
