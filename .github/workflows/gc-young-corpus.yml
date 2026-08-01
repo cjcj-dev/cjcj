@@ -1,0 +1,121 @@
+# Non-gating GC young-collection corpus on a non-x86_64 platform.
+#
+# NONGATING_SAFE = yes:
+#   - on: workflow_dispatch only (no push / no pull_request)
+#   - never attached to the master CI graph, so a red run cannot paint a commit
+#   - not workflow_call'd from ci.yml / release.yml
+#   - repository has no required checks; even a red manual run only marks that
+#     workflow run, not the triggering commit status of a push
+#
+# Scope: prove young collection can fire on linux-aarch64 with the pinned
+# runtime. Not full smoke15, not sticky-closure product acceptance.
+
+name: GC young corpus (linux-aarch64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      min_young:
+        description: Minimum young collections required
+        required: false
+        type: number
+        default: 20
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gc-young-corpus-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
+  CJ_HEAP_SIZE: 2GB
+
+jobs:
+  gc-young-linux-aarch64:
+    name: ubuntu-24.04-arm / GC young corpus
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+
+      - name: Load runtime pin
+        shell: bash
+        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+
+      - name: Restore SDK cache
+        id: sdkcache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cjv
+          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+
+      - name: Install SDK (stock llc; official cjc only)
+        id: setup
+        env:
+          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
+          # This job never feeds cjcj IR to llc — only official cjc compiles the corpus.
+          CJCJ_SDK_STOCK_LLC: '1'
+        run: npx --yes zx@8 ci/setup_sdk.mjs
+
+      - name: Save SDK cache
+        if: steps.setup.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cjv
+          key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
+
+      - name: Restore patched runtime cache
+        id: rtcache
+        uses: actions/cache/restore@v6
+        with:
+          path: dist-runtime
+          key: rt-${{ runner.os }}-${{ runner.arch }}-ubuntu-24.04-arm-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
+
+      - name: Install runtime build dependencies
+        if: steps.rtcache.outputs.cache-hit != 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make python3
+
+      - name: Build patched runtime
+        if: steps.rtcache.outputs.cache-hit != 'true'
+        env:
+          RUNTIME_VERSION: ${{ env.RUNTIME_VERSION }}
+        run: npx --yes zx@8 ci/build_patched_runtime.mjs "$PWD/dist-runtime"
+
+      - name: Save patched runtime cache
+        if: steps.rtcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: dist-runtime
+          key: rt-${{ runner.os }}-${{ runner.arch }}-ubuntu-24.04-arm-${{ env.RUNTIME_REF }}-${{ env.RUNTIME_VERSION }}-${{ hashFiles('ci/build_patched_runtime.mjs') }}
+
+      - name: Install patched runtime into SDK
+        run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
+
+      - name: Run young-collection corpus
+        env:
+          GC_YOUNG_MIN: ${{ inputs.min_young }}
+          GC_YOUNG_WORK: ${{ github.workspace }}/.gc-young-work
+          MRT_STICKY_MINOR_YOUNG_BYTES: '1048576'
+          cjHeapSize: 2GB
+          GC_YOUNG_COMPILER: cjc
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source "$CANGJIE_HOME/envsetup.sh" 2>/dev/null || true
+          command -v cjc
+          uname -m
+          test "$(uname -m)" = "aarch64"
+          npx --yes zx@8 ci/gc_young/run_gc_young.mjs
+
+      - name: Upload young corpus logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gc-young-linux-aarch64-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            .gc-young-work/**
