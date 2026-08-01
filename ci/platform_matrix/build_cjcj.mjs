@@ -156,6 +156,115 @@ await fs.rm(sdkLlc, {force: true});
 await fs.rename(tupleLlc, sdkLlc);
 console.log(`activated fixed LLVM tuple ${process.env.PLATFORM_TUPLE || 'unknown'}: ${sdkLlc}`);
 
+// Fixed llc emits sticky / versioned DeferredLogRing ABI symbols. The official
+// SDK runtime does not define them; the matrix already built (or downloaded)
+// our pin under .platform-ci/runtime-install. Install that library into the
+// bootstrap SDK so the O1 cjcj link pairs with the activated llc.
+async function findNamedFile(directory, names) {
+  const wanted = new Set(names.map((n) => n.toLowerCase()));
+  let entries;
+  try { entries = await fs.readdir(directory, {withFileTypes: true}); } catch { return ''; }
+  for (const entry of entries) {
+    const target = path.join(directory, entry.name);
+    if (entry.isFile() && wanted.has(entry.name.toLowerCase())) return target;
+    if (entry.isDirectory()) {
+      const found = await findNamedFile(target, names);
+      if (found) return found;
+    }
+  }
+  return '';
+}
+async function installFile(source, destination) {
+  await fs.copyFile(source, `${destination}.new`);
+  if (process.platform !== 'win32') await fs.chmod(`${destination}.new`, 0o755);
+  await fs.rename(`${destination}.new`, destination);
+}
+const sdkRuntimeDirName = process.env.SDK_RUNTIME_DIR || {
+  'linux/x64': 'linux_x86_64_cjnative',
+  'linux/arm64': 'linux_aarch64_cjnative',
+  'darwin/arm64': 'darwin_aarch64_cjnative',
+  'darwin/x64': 'darwin_x86_64_cjnative',
+  'win32/x64': 'windows_x86_64_cjnative',
+}[`${process.platform}/${process.arch}`] || '';
+if (!sdkRuntimeDirName) throw new Error(`unsupported host for bootstrap runtime install: ${process.platform}/${process.arch}`);
+const sdkRuntimeDir = path.join(cangjieHome, 'runtime', 'lib', sdkRuntimeDirName);
+if (!(await isDirectory(sdkRuntimeDir))) throw new Error(`SDK runtime dir missing: ${sdkRuntimeDir}`);
+const runtimeLibNames = process.platform === 'darwin'
+  ? ['libcangjie-runtime.dylib']
+  : process.platform === 'win32'
+    ? ['libcangjie-runtime.dll', 'cangjie-runtime.dll']
+    : ['libcangjie-runtime.so'];
+// platform-matrix: .platform-ci/runtime-install (native or windows_release_*)
+// release package: dist-runtime (build_patched_runtime.mjs) before bootstrap link
+const runtimeSearchRoots = [
+  path.join(root, 'runtime-install'),
+  path.resolve('dist-runtime'),
+  process.env.BOOTSTRAP_RUNTIME_DIR || '',
+].filter(Boolean);
+let builtRuntimeLib = '';
+let runtimeSearchUsed = '';
+for (const searchRoot of runtimeSearchRoots) {
+  if (!(await isDirectory(searchRoot))) continue;
+  const found = await findNamedFile(searchRoot, runtimeLibNames);
+  if (found) {
+    builtRuntimeLib = found;
+    runtimeSearchUsed = searchRoot;
+    break;
+  }
+}
+if (!builtRuntimeLib) {
+  throw new Error(
+    `pinned runtime library missing under ${runtimeSearchRoots.join(' | ')} (need ${runtimeLibNames.join('|')})`,
+  );
+}
+console.log(`bootstrap runtime source=${builtRuntimeLib} search=${runtimeSearchUsed}`);
+const installedRuntimeLib = path.join(sdkRuntimeDir, path.basename(builtRuntimeLib));
+await installFile(builtRuntimeLib, installedRuntimeLib);
+// Windows PE link consumes -l:libcangjie-runtime.dll from this directory; the
+// cross-build also stages import/static side-cars and libboundscheck next to
+// the DLL. Mirror the whole host runtime lib dir so the bootstrap link matches
+// the product install (see run_smoke.mjs combined Windows path).
+if (process.platform === 'win32') {
+  const builtRuntimeDir = path.dirname(builtRuntimeLib);
+  for (const entry of await fs.readdir(builtRuntimeDir)) {
+    const source = path.join(builtRuntimeDir, entry);
+    if (!(await isFile(source))) continue;
+    const destination = path.join(sdkRuntimeDir, entry);
+    if (path.resolve(source) === path.resolve(installedRuntimeLib)) continue;
+    await installFile(source, destination);
+    console.log(`bootstrap runtime staged ${entry} -> ${destination}`);
+  }
+  const installRoot = path.resolve(builtRuntimeDir, '..', '..', '..');
+  const libSide = path.join(installRoot, 'lib', sdkRuntimeDirName);
+  const sdkLibDir = path.join(cangjieHome, 'lib', sdkRuntimeDirName);
+  if (await isDirectory(libSide) && await isDirectory(sdkLibDir)) {
+    for (const entry of await fs.readdir(libSide)) {
+      const source = path.join(libSide, entry);
+      if (!(await isFile(source))) continue;
+      const destination = path.join(sdkLibDir, entry);
+      await installFile(source, destination);
+      console.log(`bootstrap lib staged ${entry} -> ${destination}`);
+    }
+  }
+}
+const stickyProbe = process.platform === 'win32'
+  ? spawnSync('objdump', ['-p', installedRuntimeLib], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024})
+  : spawnSync('nm', [process.platform === 'darwin' ? '-gU' : '-D', installedRuntimeLib], {
+    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  });
+const stickyText = `${stickyProbe.stdout || ''}${stickyProbe.stderr || ''}`;
+const requiredSticky = [
+  'CJ_MCC_FlushDeferredLogRing_v1_8_264_32',
+  '__cj_sticky_heap_base',
+  '__cj_sticky_heap_size',
+  '__cj_sticky_logged_base',
+];
+const missingSticky = requiredSticky.filter((symbol) => !stickyText.includes(symbol));
+if (missingSticky.length) {
+  throw new Error(`installed bootstrap runtime lacks sticky ABI: ${missingSticky.join(', ')} (${installedRuntimeLib})`);
+}
+console.log(`bootstrap runtime ABI pair: fixed-llc + ${installedRuntimeLib}`);
+
 await printCommonVersions();
 console.log(`sdk_toolchain=${toolchain}\nsdk_archive=${process.env.SDK_ARCHIVE || 'unknown'}\nsdk_home=${cangjieHome}\noptimization=O1\nsetup_rc=${setupRc}`);
 await $({nothrow: true})`cjv --version`;
