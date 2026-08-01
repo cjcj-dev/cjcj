@@ -5520,8 +5520,6 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString("ti") }.asResource()) {
             typeInfo = unsafe { LLVMBuildLoad2(builder.raw, typeInfoPtrType, typeInfoSlot, nameCString.value) }
         }
-        let metadata = LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>())
-        LLVMSetInstructionMetadata(GetLLVMContext(), typeInfo, "invariant.load", metadata)
         return typeInfo
     }
 
