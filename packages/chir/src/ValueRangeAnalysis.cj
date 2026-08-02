@@ -373,8 +373,7 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
         return SIntDomain(numericRange, bounds, valueRange.IsUnsigned())
     }
 
-    public func HandleTypeCastExpression(state: RangeDomain, castExpr: Expression,
-        overflowStrategy!: OverflowStrategy = OverflowStrategy.THROWING): Unit {
+    public func HandleTypeCastExpression(state: RangeDomain, castExpr: Expression): Unit {
         if (let Some(dest) <- castExpr.GetResult()) {
             if (castExpr.GetNumOfOperands() == 0) {
                 state.SetToBound(dest, true)
@@ -388,6 +387,11 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
                         return
                     }
                     let sourceDomain = RangeAnalysis.GetSIntDomainFromState(state, sourceValue)
+                    let overflowStrategy = if (let Some(typeCast) <- (castExpr as TypeCast)) {
+                        typeCast.GetOverflowStrategy()
+                    } else {
+                        (castExpr as TypeCastWithException).getOrThrow().GetOverflowStrategy()
+                    }
                     let resultDomain = ComputeTypeCast(state, sourceValue, sourceDomain, SIntDomain.ToWidth(destTy),
                         destTy.IsUnsignedInteger(), overflowStrategy)
                     state.Update(dest, SIntRange(resultDomain))
