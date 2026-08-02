@@ -12,6 +12,7 @@ foreign {
     func dlopen(filename: CString, flag: Int32): CPointer<Unit>
     func dlsym(handle: CPointer<Unit>, symbol: CString): CPointer<Unit>
     func dlclose(handle: CPointer<Unit>): Int32
+    func dlerror(): CString
     func realpath(path: CString, resolvedPath: CString): CString
     func free(ptr: CString): Unit
     func strcmp(lhs: CString, rhs: CString): Int32
@@ -37,6 +38,7 @@ private func OpenNativeLibrary(path: String, pathCString: CString): CPointer<Uni
     unsafe { free(realpathRes) }
     if (handle.isNull()) {
         Errorln("could not load the dynamic library: " + path)
+        Errorln("error info is: " + unsafe { dlerror() }.toString())
     }
     return handle
 }
