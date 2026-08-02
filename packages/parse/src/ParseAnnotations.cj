@@ -161,7 +161,7 @@ extend ParserImpl {
     public func ParseAnnotationArgument(): FuncArg {
         let arg = FuncArg()
         let start = Peek()
-        if (Seeing(TokenKind.IDENTIFIER) && lexer.LookAheadSkipNL(1).size > 0 && lexer.LookAheadSkipNL(1)[0].kind == TokenKind.COLON) {
+        if (SeeingNamedFuncArgs()) {
             arg.name = ParseIdentifierFromToken(start)
             Next()
             arg.colonPos = Expect(TokenKind.COLON, "expected ':' after annotation argument name").Begin()
