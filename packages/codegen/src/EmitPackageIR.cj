@@ -855,7 +855,12 @@ private func EmitImportedCFuncIR(cgMod: CGModule, chirFunc: Function): Unit {
     if (funcPkgName != cgMod.GetCGContext().GetCurrentPkgName()) {
         return
     }
-    EmitFunctionIR(cgMod, chirFunc)
+    let cgFunc = EmitFunctionIR(cgMod, chirFunc).getOrThrow()
+    if (cgMod.GetCGContext().GetCGPkgContext().IsIncrementEnabled() &&
+        IsNonPublicCFunc(chirFuncTy, chirFunc) && chirFunc.TestAttr(Attribute.NON_RECOMPILE)) {
+        AddFnAttr(cgFunc.GetRawFunction(), INCREMENTAL_CFUNC_ATTR)
+        AddFnAttr(cgFunc.GetRawFunction(), INTERNAL_CFUNC_ATTR)
+    }
 }
 
 private func SpecifyPackageInitFunc(cgMod: CGModule): Unit {
