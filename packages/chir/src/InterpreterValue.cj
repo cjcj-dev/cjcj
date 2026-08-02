@@ -128,7 +128,12 @@ public class InterpreterValue {
     }
 
     public static func MakeFloat(kind: InterpreterValueKind, value: Float64): InterpreterValue {
-        return InterpreterValue(kind, floatContent: value, literalContent: FloatLiteral(value))
+        let normalized = if (kind == InterpreterValueKind.IFLOAT16 || kind == InterpreterValueKind.IFLOAT32) {
+            Float64(Float32(value))
+        } else {
+            value
+        }
+        return InterpreterValue(kind, floatContent: normalized, literalContent: FloatLiteral(normalized))
     }
 
     public static func MakeBool(value: Bool): InterpreterValue {
