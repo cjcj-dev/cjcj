@@ -393,6 +393,20 @@ public class DIBuilder {
         insertDeclare(value, localVariable, createExpression(expr), location, curBB)
     }
 
+    // Mirrors CodeGen/DIBuilder.cpp:368-378 DIBuilder::EmitGenericDeclare.
+    public func EmitGenericDeclare(genericTy: GenericType, arg: LLVMValueRef,
+        curBB: LLVMBasicBlockRef, index: Int64): Unit {
+        let parent = unsafe { LLVMGetBasicBlockParent(curBB) }
+        let scope = unsafe { LLVMGetSubprogram(parent) }
+        let name = "$G_${index}"
+        let ty = createTypedef(CreateRefType(), genericTy.GetSrcCodeIdentifier(), defaultFile, 0u32, diCompileUnit)
+        let localVariable = createAutoVariable(scope, name, defaultFile, 0u32, ty, true, FlagArtificial, 0u32)
+        let location = unsafe {
+            LLVMDIBuilderCreateDebugLocation(cgMod.GetLLVMContext().raw, 0u32, 0u32, scope, LLVMNullMetadata())
+        }
+        insertDeclare(arg, localVariable, createExpression(ArrayList<UInt64>()), location, curBB)
+    }
+
     private func CreateParameter(debugNode: Debug, curBB: LLVMBasicBlockRef, pointerWrapper: Bool): Unit {
         let isEnv = debugNode.GetSrcCodeIdentifier() == "$env"
         let paraTy = DeRef(debugNode.GetValue().GetType().getOrThrow())
