@@ -27,7 +27,9 @@ private class ExpressionGeneratorImpl <: IRGeneratorImpl {
             }
         }
         if (let Some(topLevelFunc) <- chirExprs[0].GetTopLevelFunc()) {
-            irBuilder.SetInsertCGFunction(cgMod.GetOrInsertCGFunction(topLevelFunc))
+            let cgFunc = cgMod.GetOrInsertCGFunction(topLevelFunc)
+            irBuilder.SetInsertCGFunction(cgFunc)
+            irBuilder.CreateGenericParaDeclare(cgFunc)
         }
         EmitExpressionIR(cgMod, irBuilder, chirExprs)
     }
