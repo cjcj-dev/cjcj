@@ -304,6 +304,8 @@ public class ASTLoader {
             if (!ValidateCommonPartOptions()) {
                 return false
             }
+        } else {
+            return false
         }
         return true
     }
