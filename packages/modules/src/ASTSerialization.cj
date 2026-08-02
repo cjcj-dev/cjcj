@@ -16,6 +16,7 @@ import cjcj::basic.DiagKindRefactor
 import cjcj::lex.TokenKind
 import cjcj::option.GlobalOptions
 import cjcj::option.OptimizationLevel
+import cjcj::utils.FileUtil
 
 public class ASTWriter {
     private let diag: DiagnosticEngine
@@ -87,7 +88,12 @@ public class ASTWriter {
         let emptyOffsetVector = fb.CreateVectorOffsets(emptyOffsets)
         let files = ArrayList<FlatBufferOffset>()
         for (file in pkg.files) {
-            files.add(fb.CreateString(file.filePath))
+            let fileName = if (exportCfg.needAbsPath || serializingCommon) {
+                file.filePath
+            } else {
+                FileUtil.JoinPath(pkg.fullPackageName, FileUtil.GetFileName(file.filePath))
+            }
+            files.add(fb.CreateString(fileName))
         }
         let filesVec = fb.CreateVectorOffsets(files)
         let fileImports = ArrayList<FlatBufferOffset>()
