@@ -118,6 +118,15 @@ public class ASTWriter {
         cjoVersion.add(0u8)
         cjoVersion.add(1u8)
         cjoVersion.add(0u8)
+        let kind = if (pkg.isMacroPackage) {
+            1u8
+        } else if (pkg.TestAttr(Attribute.TOOL_ADD)) {
+            2u8
+        } else if (pkg.TestAttr(Attribute.MOCK_SUPPORTED)) {
+            3u8
+        } else {
+            0u8
+        }
 
         fb.StartTable(17)
         fb.AddOffset(16, options)
@@ -125,7 +134,7 @@ public class ASTWriter {
         fb.AddOffset(14, fileInfosVec)
         fb.AddOffset(13, moduleName)
         fb.AddU8(12, FlatPackageAccess(pkg.accessible))
-        fb.AddU8(11, if (pkg.isMacroPackage) { 1u8 } else { 0u8 })
+        fb.AddU8(11, kind)
         fb.AddOffset(9, emptyOffsetVector)
         fb.AddOffset(8, emptyOffsetVector)
         fb.AddOffset(7, emptyOffsetVector)
