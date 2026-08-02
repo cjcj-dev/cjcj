@@ -307,6 +307,7 @@ public func CreateOptionInfos(): Array<OptionInfo> {
         OptionInfo("--discard-eh-frame", ID.DISCARD_EH_FRAME, Kind.FLAG, [Backend.CJNATIVE], [Group.DRIVER, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Discard the eh_frame section"),
         OptionInfo("--cjcj-optimization", ID.CJCJ_OPTIMIZATION, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Enable cjcj-specific optimizations (output is no longer byte-for-byte identical to official cjc)"),
         OptionInfo("--cjcj-disable-mangling-concurrency", ID.DISABLE_MANGLING_CONCURRENCY, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Disable concurrent mangling batches"),
+        OptionInfo("--cjcj-disable-parse-concurrency", ID.CJCJ_DISABLE_PARSE_CONCURRENCY, Kind.FLAG, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Disable concurrent parsing of source files"),
         OptionInfo("--runtime-config", ID.RUNTIME_CONFIG, Kind.SEPARATED, [Backend.CJNATIVE], [Group.GLOBAL, Group.STABLE, Group.VISIBLE], "", EMPTY_VALUES, Occurrence.MULTIPLE_OCCURRENCE, "Embed a runtime configuration as an environment-variable name/value pair"),
     ]
 }
