@@ -2,6 +2,7 @@ package cjcj::chir
 
 import cjcj::utils.CJC_NULLPTR_CHECK
 import std.collection.*
+import std.core.Box as CoreBox
 
 public class RedundantGetOrThrowElimination {
     public init() {}
@@ -19,7 +20,7 @@ public class RedundantGetOrThrowElimination {
         let resultOpt = Engine<GetOrThrowResultDomain>(fn, analysis).IterateToFixpoint()
         CJC_NULLPTR_CHECK(resultOpt)
         let result = resultOpt.getOrThrow()
-        let changed = Box<Int64>(0)
+        let changed = CoreBox<Int64>(0)
         result.VisitWith(
             { state: GetOrThrowResultDomain, expr: Expression, _: Int64 =>
                 if (IsGetOrThrowFunction(expr)) {
