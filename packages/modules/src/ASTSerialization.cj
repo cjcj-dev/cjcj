@@ -1,6 +1,6 @@
 package cjcj::modules
 
-import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset, FlatBufferString}
+import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset, FlatBufferString, VerifierOptions, VerifierTemplate}
 
 import std.collection.*
 import std.convert.*
@@ -229,8 +229,10 @@ public class ASTLoader {
     }
 
     public func LoadPackageDepInfo(): String {
-        let _ = LoadPackageDependencies()
-        return packageDepInfo
+        if (!VerifyForData("ast")) {
+            return ""
+        }
+        return GetPackage(data).GetPkgDepInfo().getOrThrow().str()
     }
 
     public func LoadRefs(): Unit {
@@ -333,6 +335,22 @@ public class ASTLoader {
 
     public func SetIsChirNow(isChirNow!: Bool = false): Unit {
         this.isChirNow = isChirNow
+    }
+
+    private func VerifyForData(id: String): Bool {
+        var options = VerifierOptions()
+        options.maxDepth = UInt32(FB_MAX_DEPTH)
+        options.maxTables = UInt32(FB_MAX_TABLES)
+        let verifier = VerifierTemplate(data, opts: options)
+        if (!VerifyPackageBuffer(data, verifier)) {
+            cjoManager.GetDiag().DiagnoseRefactor(
+                DiagKindRefactor.module_loaded_ast_failed,
+                DEFAULT_POSITION,
+                arguments: [id, requestedPackageName, CANGJIE_VERSION]
+            ).Emit()
+            return false
+        }
+        return true
     }
 
     private func ParseSerializedPackage(text: String): Option<Package> {
