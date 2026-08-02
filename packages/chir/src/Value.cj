@@ -1021,11 +1021,13 @@ public abstract class GlobalValue <: Value {
                 features.add(feature)
             }
         }
+        sort(features)
     }
 
     public func AddFeature(feature: String): Unit {
         if (!features.contains(feature)) {
             features.add(feature)
+            sort(features)
         }
     }
 
