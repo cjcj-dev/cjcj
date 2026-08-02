@@ -88,8 +88,9 @@ public class SubCHIRPackage {
     }
 
     public func OwnsCustomDef(def: CustomTypeDef): Bool {
+        let name = def.GetIdentifierWithoutPrefix()
         for (ownedDef in chirCustomDefs) {
-            if (ownedDef.nodeId == def.nodeId) {
+            if (ownedDef.GetIdentifierWithoutPrefix() == name) {
                 return true
             }
         }
