@@ -964,7 +964,7 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
             return
         }
         if (state.Contains(dest)) {
-            state.Insert(dest, programState.At(src))
+            state.At(dest).CopyFrom(programState.At(src))
         } else {
             state.Insert(dest, programState.At(src))
         }
