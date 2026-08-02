@@ -113,12 +113,12 @@ extend ParserImpl {
                 q.field = ExpectIdentifierWithPos(q)
                 if (Skip(TokenKind.LT)) {
                     q.leftAnglePos = lastToken.Begin()
-                    while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
-                        q.typeArguments.add(ParseType())
-                        if (!Skip(TokenKind.COMMA)) { break }
+                    let parsed = ParseTypeArguments()
+                    for (typeArgument in parsed[1]) {
+                        q.typeArguments.add(typeArgument)
                     }
-                    q.rightAnglePos = Expect(TokenKind.GT, "expected '>' after type arguments").Begin()
-                    q.end = q.rightAnglePos + 1
+                    q.rightAnglePos = lastToken.Begin()
+                    q.end = lastToken.End()
                 } else {
                     q.end = q.field.End()
                 }
