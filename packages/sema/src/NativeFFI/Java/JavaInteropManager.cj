@@ -2,12 +2,46 @@ package cjcj::sema.NativeFFI.Java
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::basic.DiagnosticEngine
+import cjcj::basic.{DiagnosticEngine, DiagKindRefactor, MakeRange, Range}
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.{InteropLanguage, MaybeString}
-import cjcj::sema.{MemberMap, TypeManager}
-import cjcj::sema.NativeFFI.{GetJavaFQName, IsJArray}
+import cjcj::sema.{MakeRangeForDeclIdentifier, MemberMap, TypeManager}
+import cjcj::sema.NativeFFI.{GetJavaFQName, GetJavaFQSourceCodeName, HasPredefinedJavaName, IsJArray}
+import cjcj::utils.CJC_ASSERT
+
+// C++ src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:16-31.
+private func MakeJavaImplJavaNameRange(decl: ClassLikeDecl): Range {
+    if (!HasPredefinedJavaName(decl)) {
+        return MakeRangeForDeclIdentifier(decl)
+    }
+    for (anno in decl.annotations) {
+        if (anno.kind != AnnotationKind.JAVA_IMPL) {
+            continue
+        }
+        return MakeRange(anno.GetBegin(), decl.identifier.End())
+    }
+    return MakeRange(decl.identifier.Begin(), decl.identifier.End())
+}
+
+// C++ src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:33-46.
+private func DiagJavaImplRedefinitionInJava(
+    diag: DiagnosticEngine,
+    decl: ClassLikeDecl,
+    prevDecl: ClassLikeDecl
+): Unit {
+    if (decl.TestAttr(Attribute.IS_BROKEN)) {
+        return
+    }
+    let prevDeclFqName = GetJavaFQSourceCodeName(prevDecl)
+    CJC_ASSERT(GetJavaFQSourceCodeName(decl) == prevDeclFqName)
+    let rangePrev = MakeJavaImplJavaNameRange(prevDecl)
+    let rangeNext = MakeJavaImplJavaNameRange(decl)
+    let builder = DiagnoseRefactor(diag, DiagKindRefactor.sema_java_impl_redefinition,
+        prevDecl, rangeNext, arguments: [prevDeclFqName])
+    AddNote(builder, decl, rangePrev, "'" + prevDeclFqName + "' is previously declared here")
+    builder.Emit()
+}
 
 // C++ src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:36-60.
 private func IsJavaMirrorSubtype(ty: Ty): Bool {
@@ -146,8 +180,8 @@ public class JavaInteropManager {
                 }
                 let name = GetJavaFQName(value)
                 if (javaNameToDecl.contains(name)) {
-                    // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-                    // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:367-370.
+                    DiagJavaImplRedefinitionInJava(diag, value, javaNameToDecl[name])
+                    value.EnableAttr(Attribute.IS_BROKEN)
                     continue
                 }
                 javaNameToDecl[name] = value
