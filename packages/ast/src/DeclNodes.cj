@@ -477,7 +477,7 @@ public class GenericParamDecl <: Decl {
     }
 
     public override func ToString(): String {
-        return identifier.GetRawText()
+        return identifier.Val()
     }
 }
 
