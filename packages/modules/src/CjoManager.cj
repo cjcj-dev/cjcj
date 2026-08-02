@@ -159,7 +159,7 @@ public class CjoManager {
         }
         for (file in info.pkg.files) {
             for (decl in file.decls) {
-                if (decl.TestAttr(Attribute.MACRO_EXPANDED_NODE)) {
+                if (decl.astKind == ASTKind.MACRO_EXPAND_DECL) {
                     continue
                 }
                 AddDeclToMap(decl, info.declMap)
