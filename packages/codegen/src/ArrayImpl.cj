@@ -219,6 +219,10 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     }
     irBuilder.EmitLocation(CHIRExprWrapper(chirExpr), removable: true)
     let value = irBuilder.GetCGModule().GetMappedCGValue(valueOperand)
+    if (valueOperand.TestAttr(Attribute.FOREIGN)) {
+        CJC_ASSERT(!unsafe { LLVMIsAFunction(value.GetRawValue()) }.isNull())
+        AddFnAttr(value.GetRawValue(), CJ2C_ATTR)
+    }
     let addr = irBuilder.GetCGModule().GetMappedCGValue(addrOperand)
     if (let Some(boxRetStore) <- TryGenerateBoxRetValueStore(irBuilder, chirExpr, valueOperand, addrOperand, value, addr)) {
         return boxRetStore
