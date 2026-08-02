@@ -4,13 +4,14 @@ import cjcj::ast.AddCurFile
 import cjcj::ast.TokenKind
 import cjcj::basic.InteropCJPackageConfigReader
 import cjcj::conditional_compilation.ConditionalCompilation
+import cjcj::lex.TokenVecMap
 import cjcj::parse.Parser as RealParser
-import cjcj::basic.GetHash
 import cjcj::basic.DiagCategory
 import cjcj::macro_pkg.MacroExpansion
 import cjcj::sema.TypeCheckExpr.TypeChecker as FaithfulSemaTypeChecker
 import cjcj::sema.StrategyType
-import cjcj::utils.CJC_ASSERT
+import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, CreateAltSignalStack, RegisterCrashSignalHandler, TaskQueue,
+    TaskResult}
 import cjcj::utils.FileUtil
 import cjcj::utils.OverflowStrategy as FaithfulOverflowStrategy
 import cjcj::utils.CJ_D_FILE_EXTENSION
@@ -24,6 +25,10 @@ import std.sync.*
 private let g_cjdAstCache = HashMap<String, Option<Package>>()
 private let g_cjdAstCacheLock = Mutex()
 private let g_sourceManageLock = Mutex()
+
+private type ParseResult = (File, TokenVecMap, Int64)
+private type ParseTaskResult = TaskResult<ParseResult>
+private type ParseTaskResults = ArrayList<ParseTaskResult>
 
 // Faithful port of C++ ParseAndMergeCjd (Frontend/CompileStrategy.cpp:469-512).
 func ParseAndMergeCjd(ci: CompilerInstance, cjdInfo: (String, String)): Unit {
@@ -194,7 +199,7 @@ public class FullCompileStrategy <: CompileStrategy {
         if (ci.loadSrcFilesFromCache || ci.compileOnePackageFromSrcFiles) {
             let incrParse = ci.loadSrcFilesFromCache && !ci.srcPkgs.isEmpty() && !ci.HasTypeChecker()
             if (incrParse) {
-                strategyImpl.ParseOnePackageInPlace(ci.srcPkgs[0])
+                strategyImpl.ParseOnePackage(ci.srcPkgs[0])
             } else {
                 let parsed = strategyImpl.ParseOnePackage(ci.srcFilePaths, DEFAULT_PACKAGE_NAME)
                 ci.srcPkgs.add(parsed[0])
@@ -260,7 +265,7 @@ private class FullCompileStrategyImpl {
 
     public func ParseOnePackage(files: ArrayList<String>, defaultPackageName: String): (Package, Bool) {
         var success = true
-        let fileInfos = ArrayList<(String, UInt64, String)>()
+        let fileInfoQueue = ArrayList<(String, UInt64)>()
         if (s.ci.loadSrcFilesFromCache) {
             for ((path, cacheInfo) in s.ci.bufferCache) {
                 if (cacheInfo.state == SrcCodeChangeState.DELETED) {
@@ -273,7 +278,7 @@ private class FullCompileStrategyImpl {
                         DEFAULT_POSITION, arguments: [path])
                 }
                 s.fileIds.add(fileID)
-                fileInfos.add((path, fileID, cacheInfo.code))
+                fileInfoQueue.add((cacheInfo.code, fileID))
             }
         } else {
             let parseFiles = ArrayList<String>()
@@ -297,48 +302,20 @@ private class FullCompileStrategyImpl {
                     continue
                 }
                 s.fileIds.add(fileID)
-                fileInfos.add((filePath, fileID, readResult[1]))
+                fileInfoQueue.add((readResult[1], fileID))
             }
         }
-        let pkg = Package(defaultPackageName)
-        for (info in fileInfos) {
-            let _ = parseRealSourceIntoPackage(pkg, info[0], info[1], info[2])
-        }
-        CheckPackageConsistency(pkg)
+        let pkg = MultiThreadParseOnePackage(fileInfoQueue, defaultPackageName)
         AddCurFile(pkg)
         return (pkg, success)
     }
 
-    public func ParseOnePackageInPlace(pkg: Package): Unit {
-        let fileInfos = ArrayList<(String, UInt64, String)>()
-        let deletedFiles = ArrayList<String>()
-        for ((path, cacheInfo) in s.ci.bufferCache) {
-            if (cacheInfo.state == SrcCodeChangeState.UNCHANGED) {
-                continue
-            }
-            if (cacheInfo.state == SrcCodeChangeState.DELETED) {
-                deleteFileInPackage(pkg, path)
-                deletedFiles.add(path)
-            } else {
-                if (cacheInfo.state == SrcCodeChangeState.CHANGED) {
-                    deleteFileInPackage(pkg, path)
-                }
-                let fileID = s.ci.GetSourceManager().AddSource(path, cacheInfo.code)
-                s.fileIds.add(fileID)
-                fileInfos.add((path, fileID, cacheInfo.code))
-            }
-        }
-        for (path in deletedFiles) {
-            s.ci.bufferCache.remove(path)
-        }
-        var changed = false
-        for (info in fileInfos) {
-            changed = true
-            let _ = parseRealSourceIntoPackage(pkg, info[0], info[1], info[2])
-        }
-        if (changed) {
+    public func ParseOnePackage(pkg: Package): Unit {
+        let fileInfoQueue = ArrayList<(String, UInt64)>()
+        BuildFileInfoQueueFromCache(pkg, fileInfoQueue)
+        if (!fileInfoQueue.isEmpty()) {
+            MultiThreadParseOnePackage(pkg, fileInfoQueue)
             sort(pkg.files, by: { left: File, right: File => compareString(left.fileName, right.fileName) })
-            CheckPackageConsistency(pkg)
             AddCurFile(pkg)
             s.ci.diag.EmitCategoryGroup()
         }
@@ -362,26 +339,7 @@ private class FullCompileStrategyImpl {
         }
     }
 
-    private func parseRealSourceIntoPackage(pkg: Package, filePath: String, fileID: UInt64, sourceCode: String): Bool {
-        let parseDiag = s.ci.diag.AsBasicDiagnosticEngine()
-        let errorCountBefore = s.ci.diag.GetErrorCount()
-        let parser = RealParser(fileID, sourceCode, parseDiag, s.ci.GetSourceManager())
-        parser.SetCompileOptions(s.ci.invocation.globalOptions)
-        let realFile = parser.ParseTopLevel()
-        realFile.filePath = NormalizePath(filePath)
-        realFile.fileName = GetFileName(realFile.filePath)
-        realFile.fileHash = GetHash(realFile.filePath)
-        realFile.begin = Position(fileID, 1, 1)
-        realFile.curPackage = Some(pkg)
-        realFile.indexOfPackage = UInt64(pkg.files.size)
-        pkg.files.add(realFile)
-        if (pkg.files.size == 1) {
-            initializePackageInfoFromFirstFile(pkg)
-        }
-        return s.ci.diag.GetErrorCount() == errorCountBefore
-    }
-
-    private func initializePackageInfoFromFirstFile(pkg: Package): Unit {
+    public func InitializePackageInfoFromFirstFile(pkg: Package): Unit {
         if (pkg.files.isEmpty()) {
             return
         }
@@ -401,7 +359,82 @@ private class FullCompileStrategyImpl {
         }
     }
 
-    private func deleteFileInPackage(pkg: Package, filePath: String): Unit {
+    public func AddFilesToPackage(pkg: Package, taskResults: ParseTaskResults): Int64 {
+        var lineCountOfAddedFiles: Int64 = 0
+        for (taskResult in taskResults) {
+            let curResult = taskResult.get()
+            let file = curResult[0]
+            file.curPackage = Some(pkg)
+            file.indexOfPackage = UInt64(pkg.files.size)
+            pkg.files.add(file)
+            // C++ CompileStrategy.cpp:188 calls SourceManager::AddComments here. The selfhost TokenVecMap is
+            // retained in ParseResult, while the existing lex.TokenVecMap -> basic.SourceManager package boundary is
+            // registered in compiler_unittest/PortDeferred.cj.
+            let _ = curResult[1]
+            lineCountOfAddedFiles += curResult[2]
+        }
+        InitializePackageInfoFromFirstFile(pkg)
+        return lineCountOfAddedFiles
+    }
+
+    public func GetMultiThreadParseOnePackage(taskResults: ParseTaskResults,
+        defaultPackageName: String): Package {
+        let pkg = Package(defaultPackageName)
+        let lineNumInOnePackage = AddFilesToPackage(pkg, taskResults)
+        ProfileRecorder.RecordCodeInfo("package line num", lineNumInOnePackage)
+        CheckPackageConsistency(pkg)
+        return pkg
+    }
+
+    public func ParseFilesWithTaskQueue(fileInfoQueue: ArrayList<(String, UInt64)>): ParseTaskResults {
+        let options = s.ci.invocation.globalOptions
+        let threadsNum = if (options.disableParseConcurrency) { 1 } else { Int64(options.GetJobs()) }
+        let taskQueue = TaskQueue(threadsNum)
+        let taskResults = ParseTaskResults()
+        for (curFile in fileInfoQueue) {
+            let taskResult = taskQueue.AddTask<ParseResult>({ =>
+                @When[!debug && os != "Windows"]
+                let _ = CreateAltSignalStack()
+                @When[!debug && os == "Windows"]
+                let _ = RegisterCrashSignalHandler()
+                let parser = CreateParser(curFile)
+                parser.SetCompileOptions(options)
+                let file = parser.ParseTopLevel()
+                return (file, parser.GetCommentsMap(), parser.GetLineNum())
+            })
+            taskResults.add(taskResult)
+        }
+        taskQueue.RunAndWaitForAllTasksCompleted()
+        return taskResults
+    }
+
+    public func MultiThreadParseOnePackage(fileInfoQueue: ArrayList<(String, UInt64)>,
+        defaultPackageName: String): Package {
+        let taskResults = ParseFilesWithTaskQueue(fileInfoQueue)
+        return GetMultiThreadParseOnePackage(taskResults, defaultPackageName)
+    }
+
+    public func MultiThreadParseOnePackage(pkg: Package, fileInfoQueue: ArrayList<(String, UInt64)>): Unit {
+        let taskResults = ParseFilesWithTaskQueue(fileInfoQueue)
+        let lineCountOfAddedFiles = AddFilesToPackage(pkg, taskResults)
+        for (file in pkg.files) {
+            if (let Some(curPackage) <- file.curPackage) {
+                CJC_ASSERT_WITH_MSG(curPackage == pkg, "curPackage should be set to package")
+            } else {
+                CJC_ASSERT_WITH_MSG(false, "curPackage should be set to package")
+            }
+        }
+        ProfileRecorder.RecordCodeInfo("added line num", lineCountOfAddedFiles)
+        CheckPackageConsistency(pkg)
+    }
+
+    public func CreateParser(curFile: (String, UInt64)): RealParser {
+        let options = s.ci.invocation.globalOptions
+        return RealParser(curFile[1], curFile[0], s.ci.diag.AsBasicDiagnosticEngine(), s.ci.GetSourceManager(),
+            attachComment: options.enableAddCommentToAst, parseDeclFile: options.compileCjd)
+    }
+
+    public func DeleteFileInPackage(pkg: Package, filePath: String): Unit {
         var idx: Int64 = 0
         while (idx < pkg.files.size) {
             if (pkg.files[idx].filePath == filePath) {
@@ -409,6 +442,38 @@ private class FullCompileStrategyImpl {
             } else {
                 idx++
             }
+        }
+    }
+
+    public func BuildFileInfoQueueFromCache(pkg: Package, fileInfoQueue: ArrayList<(String, UInt64)>): Unit {
+        let deletedFiles = ArrayList<String>()
+        for ((filePath, cacheInfo) in s.ci.bufferCache) {
+            let state = cacheInfo.state
+            if (state == SrcCodeChangeState.UNCHANGED) {
+                continue
+            }
+            if (state == SrcCodeChangeState.DELETED) {
+                DeleteFileInPackage(pkg, filePath)
+                deletedFiles.add(filePath)
+                continue
+            }
+            if (state != SrcCodeChangeState.ADDED) {
+                DeleteFileInPackage(pkg, filePath)
+            }
+            var fileAlreadyExists = false
+            for (file in pkg.files) {
+                if (file.filePath == filePath) {
+                    fileAlreadyExists = true
+                    break
+                }
+            }
+            CJC_ASSERT_WITH_MSG(state != SrcCodeChangeState.ADDED || !fileAlreadyExists, "File already exists")
+            let fileID = s.ci.GetSourceManager().AddSource(filePath, cacheInfo.code)
+            s.fileIds.add(fileID)
+            fileInfoQueue.add((cacheInfo.code, fileID))
+        }
+        for (filePath in deletedFiles) {
+            s.ci.bufferCache.remove(filePath)
         }
     }
 }
