@@ -36,8 +36,6 @@ private let RUNTIME_CONFIG_GLOBAL_PREFIX: String = ".cjcj.runtime.config."
 // concurrent compiler passes the same-input 5-SHA determinism gate.
 private let TEMPORARILY_ENABLE_BACKEND_CONCURRENCY: Bool = false
 
-private type LLVMIsACallInstFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
-private type LLVMGetCalledValueFunc = CFunc<(LLVMValueRef) -> LLVMValueRef>
 private type LLVMSetValueName2Func = CFunc<(LLVMValueRef, CString, UIntNative) -> Unit>
 
 // Mirrors EmitPackageIR.cpp:56-67.
@@ -996,13 +994,6 @@ private func CallDependentPackageGlobalResetCall(irBuilder: IRBuilder2): Unit {
 
 private func CollectDependentPackages(cgPkgContext: CGPkgContext, llvmFunc: LLVMValueRef,
     giList: ArrayList<String>, visitedFunctions: HashSet<String>, dependentPackages: HashSet<String>): Unit {
-    let isCallInstSymbol = LookupLLVMOptionalSymbol("LLVMIsACallInst")
-    let getCalledValueSymbol = LookupLLVMOptionalSymbol("LLVMGetCalledValue")
-    if (isCallInstSymbol.isNull() || getCalledValueSymbol.isNull()) {
-        return
-    }
-    let isCallInst = LLVMIsACallInstFunc(isCallInstSymbol)
-    let getCalledValue = LLVMGetCalledValueFunc(getCalledValueSymbol)
     let callDependentPackageInitSuffix = SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION +
         MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
     let callDependentPackagesInitsSuffix = SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION +
@@ -1029,8 +1020,8 @@ private func CollectDependentPackages(cgPkgContext: CGPkgContext, llvmFunc: LLVM
     while (!block.isNull()) {
         var inst = unsafe { LLVMGetFirstInstruction(block) }
         while (!inst.isNull()) {
-            if (!unsafe { isCallInst(inst) }.isNull()) {
-                let callee = unsafe { getCalledValue(inst) }
+            if (unsafe { LLVMSelfhostIsCallInst(inst) } != 0) {
+                let callee = unsafe { LLVMGetCalledValue(inst) }
                 if (!callee.isNull() && !unsafe { LLVMIsAFunction(callee) }.isNull()) {
                     let calleeName = LLVMCStringToString(unsafe { LLVMGetValueName(callee) }) ?? ""
                     CollectDependentPackageByCalleeName(cgPkgContext, callee, calleeName,
