@@ -3,12 +3,8 @@ package cjcj::basic
 import std.collection.*
 import std.sync.Mutex
 
-foreign {
-    func abort(): Unit
-}
-
 // C++: src/Basic/DiagnosticEngine.cpp:551,561,574, CJC_ASSERT.
-// Selfhost source: packages/utils/src/CheckUtils.cj:7-17.
+// Selfhost source: packages/utils/src/CheckUtils.cj:7-17; abort: WarningOptionMgr.cj:4-7.
 @When[debug]
 private func CJC_ASSERT(condition: Bool): Unit {
     if (!condition) {
