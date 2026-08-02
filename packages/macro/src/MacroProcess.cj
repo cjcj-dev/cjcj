@@ -1,6 +1,7 @@
 package cjcj::macro_pkg
 
-import cjcj::lex.{Lexer as RealLexer, StringPartKind}
+import cjcj::basic.{DiagArgument, DiagKind}
+import cjcj::lex.{Lexer as RealLexer, StringPartKind, TOKEN_KIND_VALUES}
 import std.collection.*
 import std.fs.File as FSFile
 import std.fs.exists
@@ -57,11 +58,11 @@ private func reportMappingFailedDiag(
         }
         if (oldTokens[idx].kind != newTokens[idx].kind || oldTokens[idx].Value() != newTokens[idx].Value()) {
             if (oldTokens[idx].Value().isEmpty()) {
-                ci.GetDiag().Diagnose(mcPos, "macro call map info failed for empty token kind " +
-                    TokenKindIndex(oldTokens[idx].kind).toString())
+                ci.GetDiag().Diagnose(mcPos, DiagKind.macro_call_map_to_empty_value_token,
+                    args: [DiagArgument(TOKEN_KIND_VALUES[TokenKindIndex(oldTokens[idx].kind)])]).Emit()
             } else {
-                ci.GetDiag().Diagnose(mcPos, "macro call map info failed: expected '" + oldTokens[idx].Value() +
-                    "', got '" + newTokens[idx].Value() + "'")
+                ci.GetDiag().Diagnose(mcPos, DiagKind.macro_call_map_info_failed,
+                    args: [DiagArgument(oldTokens[idx].Value()), DiagArgument(newTokens[idx].Value())]).Emit()
             }
             return
         }
