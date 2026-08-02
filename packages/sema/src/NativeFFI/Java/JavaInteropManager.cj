@@ -70,6 +70,29 @@ private func DiagJavaDeclCannotInheritPureCangjieType(
     builder.Emit()
 }
 
+// C++ src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:48-65.
+private func DiagJavaMirrorChildMustBeAnnotated(
+    diag: DiagnosticEngine,
+    decl: ClassLikeDecl
+): Unit {
+    var parentDecl: Option<Decl> = None
+    for (parentType in decl.inheritedTypes) {
+        if (let Some(parent) <- (parentType.GetTy().getOrThrow() as ClassTy)) {
+            parentDecl = parent.decl
+        } else if (let Some(parent) <- (parentType.GetTy().getOrThrow() as InterfaceTy)) {
+            parentDecl = parent.decl
+        }
+        if (parentDecl.isSome() && IsMirror(parentDecl.getOrThrow())) {
+            break
+        }
+    }
+    let parent = parentDecl.getOrThrow()
+    DiagnoseRefactor(diag,
+        DiagKindRefactor.sema_java_mirror_subtype_must_be_annotated,
+        decl,
+        arguments: [parent.identifier.Val()]).Emit()
+}
+
 // C++ src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:36-60.
 private func IsJavaMirrorSubtype(ty: Ty): Bool {
     if (let Some(classTy) <- (ty as ClassTy)) {
@@ -248,8 +271,8 @@ public class JavaInteropManager {
     private func CheckJavaMirrorSubtypeAttrClassLikeDecl(decl: ClassLikeDecl): Unit {
         if (IsJavaMirrorSubtype(decl.GetTy().getOrThrow())) {
             if (!decl.TestAnyAttr(Attribute.JAVA_MIRROR_SUBTYPE, Attribute.JAVA_MIRROR)) {
-                // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-                // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:314-315.
+                DiagJavaMirrorChildMustBeAnnotated(diag, decl)
+                decl.EnableAttr(Attribute.IS_BROKEN)
             }
         }
     }
