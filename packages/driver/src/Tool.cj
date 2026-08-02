@@ -230,7 +230,10 @@ public class Tool {
     public init(name: String, toolType: ToolType, environmentVars: HashMap<String, String>) {
         this.name = name
         this.toolType = toolType
-        this.environmentVars = environmentVars
+        this.environmentVars = HashMap<String, String>()
+        for ((key, value) in environmentVars) {
+            this.environmentVars[key] = value
+        }
     }
 
     public func GetArgs(): Array<String> {
