@@ -3,6 +3,7 @@ package cjcj::option
 import std.collection.*
 import std.core.Option as CoreOption
 import std.fs.Directory as FSDirectory
+import std.sync.AtomicUInt8
 import cjcj::utils.{FileUtil, GenerateRandomHexString}
 
 @When[os == "Windows"]
@@ -17,6 +18,7 @@ private let CANGJIE_TMP_DIR_PERFIX: String = "/cangjie-tmp-"
 private let NOT_DELETED: UInt8 = 0u8
 private let DELETING: UInt8 = 1u8
 private let DELETED: UInt8 = 2u8
+private let MULTIPLE_OF_SECOND_TO_NANOSECOND: UInt64 = 1_000_000_000u64
 
 // C++: Driver/TempFileManager.cpp:49-73.
 private func TempDirLegalityCheck(path: String, fromEnvSetting: Bool): CoreOption<String> {
@@ -58,7 +60,7 @@ public class TempFileManager {
     private var outputDir: String = "."
     private var outputName: String = ""
     private let deletedFiles: ArrayList<String> = ArrayList<String>()
-    private var deleteState: UInt8 = NOT_DELETED
+    private let deleteState: AtomicUInt8 = AtomicUInt8(NOT_DELETED)
 
     private init() {}
 
@@ -69,7 +71,7 @@ public class TempFileManager {
     public func Init(options: GlobalOptions, isFrontend: Bool): Bool {
         isCjcFrontend = isFrontend
         opts = GlobalOptions(options)
-        deleteState = NOT_DELETED
+        deleteState.store(NOT_DELETED)
         deletedFiles.clear()
         if (!InitOutputDir()) {
             return false
@@ -100,10 +102,9 @@ public class TempFileManager {
     }
 
     public func DeleteTempFiles(): Unit {
-        if (deleteState != NOT_DELETED && IsDeleted()) {
+        if (deleteState.swap(DELETING) != NOT_DELETED && IsDeleted()) {
             return
         }
-        deleteState = DELETING
         var idx = deletedFiles.size - 1
         while (idx >= 0) {
             let path = deletedFiles[idx]
@@ -117,7 +118,7 @@ public class TempFileManager {
             }
             idx--
         }
-        deleteState = DELETED
+        deleteState.store(DELETED)
     }
 
     public func DeleteTempFilesSignalSafe(): Unit {
@@ -125,7 +126,22 @@ public class TempFileManager {
     }
 
     public func IsDeleted(): Bool {
-        return deleteState == DELETED || deleteState == DELETING
+        if (deleteState.load() == DELETED) {
+            return true
+        }
+        if (deleteState.load() == NOT_DELETED) {
+            return false
+        }
+        if (deleteState.load() == DELETING) {
+            var count = MULTIPLE_OF_SECOND_TO_NANOSECOND
+            while (count > 0u64) {
+                if (deleteState.load() == DELETED) {
+                    return true
+                }
+                count--
+            }
+        }
+        return true
     }
 
     private func InitOutputDir(): Bool {
