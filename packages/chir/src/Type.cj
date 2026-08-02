@@ -543,6 +543,21 @@ public open class BuiltinType <: Type {
         return GetExtends()
     }
 
+    public func GetExtendMethods(): ArrayList<Function> {
+        let methods = ArrayList<Function>()
+        for (extendDef in GetExtends()) {
+            for (method in extendDef.GetMethods()) {
+                methods.add(method)
+            }
+        }
+        return methods
+    }
+
+    public override func GetDeclareAndExtendMethods(builder: CHIRBuilder): ArrayList<Function> {
+        let _ = builder
+        return GetExtendMethods()
+    }
+
     public override func GetSuperTypesRecusively(builder: CHIRBuilder,
         visited: Option<HashSet<String>>): ArrayList<ClassType> {
         let inheritanceList = ArrayList<ClassType>()
