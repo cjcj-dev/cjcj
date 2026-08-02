@@ -297,6 +297,8 @@ public class ASTLoader {
             ValidateCommonSpecificFeatureSetsRelations(commonPkg, pkg)
             for (file in commonPkg.files) {
                 file.EnableAttr(Attribute.FROM_COMMON_PART)
+                file.EnableAttr(Attribute.COMMON)
+                file.isCommon = true
                 pkg.AddFile(file)
             }
             if (!ValidateCommonPartOptions()) {
