@@ -501,13 +501,11 @@ public func PrepareRuntime(handle: RuntimeHandle, initArgs: ArrayList<(String, S
 }
 
 public func FinishRuntime(handle: RuntimeHandle): Unit {
-    let method = GetMethodPointer(handle, CJ_RUNTIME_FINI)
-    if (method.isNull()) {
+    let fini = RuntimeFiniFunc(GetMethodPointer(handle, CJ_RUNTIME_FINI))
+    let finiInit = unsafe { fini() }
+    if (finiInit != 0) {
+        Errorln("runtime finish failed: ")
         return
-    }
-    let fini = RuntimeFiniFunc(method)
-    unsafe {
-        let _ = fini()
     }
 }
 
