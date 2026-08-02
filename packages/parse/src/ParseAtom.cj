@@ -68,8 +68,7 @@ extend ParserImpl {
             }
             return ret
         }
-        if (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword() ||
-            Seeing(TokenKind.PACKAGE_IDENTIFIER)) {
+        if (Seeing(TokenKind.IDENTIFIER) || SeeingContextualKeyword()) {
             return ParseRefExpr(ek)
         }
         if (SeeingMacroCall() || SeeingBuiltinAnnotation()) { return ParseMacroExprOrLambdaExpr() }
