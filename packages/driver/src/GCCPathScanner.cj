@@ -2,7 +2,6 @@ package cjcj::driver
 
 import cjcj::utils.{CJC_ASSERT, Directory, Stoi}
 import std.collection.*
-import std.convert.*
 
 public struct GCCVersion {
     public var major: UInt8
