@@ -399,7 +399,7 @@ public class DIBuilder {
         let parent = unsafe { LLVMGetBasicBlockParent(curBB) }
         let scope = unsafe { LLVMGetSubprogram(parent) }
         let name = "$G_${index}"
-        let ty = createTypedef(CreateRefType(), genericTy.GetSrcCodeIdentifier(), defaultFile, 0u32, diCompileUnit)
+        let ty = createTypedef(CreateRefType(), genericTy.GetSrcCodeIdentifier(), defaultFile, 0u32, compileUnit)
         let localVariable = createAutoVariable(scope, name, defaultFile, 0u32, ty, true, FlagArtificial, 0u32)
         let location = unsafe {
             LLVMDIBuilderCreateDebugLocation(cgMod.GetLLVMContext().raw, 0u32, 0u32, scope, LLVMNullMetadata())
