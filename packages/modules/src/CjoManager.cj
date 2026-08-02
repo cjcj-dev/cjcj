@@ -485,7 +485,7 @@ public class CjoManager {
     }
 
     private func AddDeclToMap(decl: Decl, declMap: TreeMap<String, TreeSet<Decl>>): Unit {
-        if (decl.doNotExport || decl.identifier.isEmpty()) {
+        if (decl.astKind == ASTKind.EXTEND_DECL || decl.doNotExport || decl.identifier.isEmpty()) {
             return
         }
         PutDeclMapValue(declMap, decl.identifier, decl)
