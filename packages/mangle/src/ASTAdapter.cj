@@ -42,9 +42,8 @@ private func CopyParamAttributes(source: FuncParam, target: MangleFuncParam): Un
 }
 
 public class MangleAstAdapter {
-    private let declCache: HashMap<Decl, MangleDecl> = HashMap<Decl, MangleDecl>()
-    private let ownedDeclCache: HashMap<Decl, HashMap<FuncDecl, MangleDecl>> =
-        HashMap<Decl, HashMap<FuncDecl, MangleDecl>>()
+    private let declCache: HashMap<Decl, HashMap<Decl, MangleDecl>> =
+        HashMap<Decl, HashMap<Decl, MangleDecl>>()
     private let lambdaCache: HashMap<LambdaExpr, MangleDecl> = HashMap<LambdaExpr, MangleDecl>()
     private let annotationArrayCache: HashMap<ArrayLit, MangleDecl> = HashMap<ArrayLit, MangleDecl>()
     private let tyCache: HashMap<Ty, MangleType> = HashMap<Ty, MangleType>()
@@ -63,32 +62,32 @@ public class MangleAstAdapter {
     }
 
     private func FindDecl(source: Decl): Option<MangleDecl> {
+        var ownerKey: Decl = source
         if (let Some(funcDecl) <- (source as FuncDecl)) {
             if (let Some(owner) <- funcDecl.ownerFunc) {
-                if (let Some(ownerCache) <- ownedDeclCache.get(source)) {
-                    return ownerCache.get(owner)
-                }
-                return None
+                ownerKey = owner
             }
         }
-        return declCache.get(source)
+        if (let Some(ownerCache) <- declCache.get(source)) {
+            return ownerCache.get(ownerKey)
+        }
+        return None
     }
 
     private func StoreDecl(source: Decl, target: MangleDecl): Unit {
+        var ownerKey: Decl = source
         if (let Some(funcDecl) <- (source as FuncDecl)) {
             if (let Some(owner) <- funcDecl.ownerFunc) {
-                if (let Some(ownerCache) <- ownedDeclCache.get(source)) {
-                    ownerCache[owner] = target
-                } else {
-                    let ownerCache = HashMap<FuncDecl, MangleDecl>()
-                    ownerCache[owner] = target
-                    ownedDeclCache[source] = ownerCache
-                }
-                declPairs.add(AstDeclPair(source, target))
-                return
+                ownerKey = owner
             }
         }
-        declCache[source] = target
+        if (let Some(ownerCache) <- declCache.get(source)) {
+            ownerCache[ownerKey] = target
+        } else {
+            let ownerCache = HashMap<Decl, MangleDecl>()
+            ownerCache[ownerKey] = target
+            declCache[source] = ownerCache
+        }
         declPairs.add(AstDeclPair(source, target))
     }
 
@@ -748,7 +747,6 @@ public class MangleAstAdapter {
     // pointer-keyed ManglerContext maps.
     public func ReleaseConvertedAst(): Unit {
         declCache.clear()
-        ownedDeclCache.clear()
         lambdaCache.clear()
         annotationArrayCache.clear()
         tyCache.clear()
