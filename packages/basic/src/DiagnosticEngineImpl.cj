@@ -107,7 +107,9 @@ public class DiagnosticEngineImpl {
     }
 
     public func FirstErrorCategory(): Option<DiagCategory> {
-        return firstErrorCategory
+        return synchronized(firstErrorCategoryMtx) {
+            firstErrorCategory
+        }
     }
 
     public func GetDisableDiagDeep(): Int64 {
