@@ -1320,8 +1320,9 @@ public class Function <: GlobalValue & Hashable & Equatable<Function> {
     }
 
     public func GenerateLocalId(): UInt64 {
+        let id = localId
         localId++
-        return localId
+        return id
     }
 
     public func SetLocalId(id: UInt64): Unit {
