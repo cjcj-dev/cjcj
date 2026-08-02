@@ -635,6 +635,32 @@ public class IRBuilder2 <: Resource {
         }
     }
 
+    // Mirrors CodeGen/IRBuilder.cpp:467-495 IRBuilder2::CreateGenericParaDeclare.
+    public func CreateGenericParaDeclare(cgFunc: CGFunction): Unit {
+        if (!cgMod.GetCGContext().GetCompileOptions().enableCompileDebug) {
+            return
+        }
+        let chirFunc = (cgFunc.GetOriginal() as Function).getOrThrow()
+        if (chirFunc.TestAttr(Attribute.NO_DEBUG_INFO)) {
+            return
+        }
+        var genericIndex: Int64 = 0
+        let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
+        let nullValue = unsafe { LLVMConstNull(i8PtrType) }
+        let curBB = GetInsertBlock()
+        if (cgFunc.GetCGFunctionType().getOrThrow().GetOuterTypeInfoIndex().isSome()) {
+            let outerDef = chirFunc.GetParentCustomTypeDef().getOrThrow()
+            for (genericTy in outerDef.GetGenericTypeParams()) {
+                cgMod.GetDIBuilder().getOrThrow().EmitGenericDeclare(genericTy, nullValue, curBB, genericIndex)
+                genericIndex++
+            }
+        }
+        for (genericTy in chirFunc.GetGenericTypeParams()) {
+            cgMod.GetDIBuilder().getOrThrow().EmitGenericDeclare(genericTy, nullValue, curBB, genericIndex)
+            genericIndex++
+        }
+    }
+
     public func SetInsertCGFunction(cgFunc: CGFunction): Unit {
         cgFunction = cgFunc
     }

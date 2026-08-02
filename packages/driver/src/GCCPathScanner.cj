@@ -1,8 +1,7 @@
 package cjcj::driver
 
-import cjcj::utils.{CJC_ASSERT, Directory}
+import cjcj::utils.{CJC_ASSERT, Directory, Stoi}
 import std.collection.*
-import std.convert.*
 
 public struct GCCVersion {
     public var major: UInt8
@@ -104,9 +103,12 @@ public class GCCPathScanner {
         if (invalidMajorVer) {
             return None
         }
-        let majorVer = UInt64.parse(versionStr[0..majorEndIndex])
-        CJC_ASSERT(majorVer >= 0u64 && majorVer <= 255u64)
-        ver.major = UInt8(majorVer)
+        let majorVer = Stoi(versionStr[0..majorEndIndex])
+        if (let None <- majorVer) {
+            return None
+        }
+        CJC_ASSERT(majorVer.getOrThrow() >= 0 && majorVer.getOrThrow() <= 255)
+        ver.major = UInt8(majorVer.getOrThrow())
 
         if (majorEndIndex == versionStr.size) {
             return ver
@@ -131,9 +133,12 @@ public class GCCPathScanner {
             return None
         }
 
-        let minorVer = UInt64.parse(versionStr[majorEndIndex + 1..minorEndIndex])
-        CJC_ASSERT(minorVer >= 0u64 && minorVer <= 255u64)
-        ver.minor = UInt8(minorVer)
+        let minorVer = Stoi(versionStr[majorEndIndex + 1..minorEndIndex])
+        if (let None <- minorVer) {
+            return None
+        }
+        CJC_ASSERT(minorVer.getOrThrow() >= 0 && minorVer.getOrThrow() <= 255)
+        ver.minor = UInt8(minorVer.getOrThrow())
 
         if (minorEndIndex == versionStr.size) {
             return ver
@@ -154,9 +159,12 @@ public class GCCPathScanner {
             return None
         }
 
-        let buildVer = UInt64.parse(versionStr[minorEndIndex + 1..])
-        CJC_ASSERT(buildVer >= 0u64 && buildVer <= 255u64)
-        ver.build = UInt8(buildVer)
+        let buildVer = Stoi(versionStr[minorEndIndex + 1..])
+        if (let None <- buildVer) {
+            return None
+        }
+        CJC_ASSERT(buildVer.getOrThrow() >= 0 && buildVer.getOrThrow() <= 255)
+        ver.build = UInt8(buildVer.getOrThrow())
         return ver
     }
 

@@ -90,6 +90,10 @@ private func ApplyFrontendOutputs(opts: DriverOptions, frontendOpts: FrontendToo
     opts.compilationCachedDir = frontendOpts.compilationCachedDir
     opts.compilationCachedFileName = frontendOpts.compilationCachedFileName
     opts.incrementalCompileNoChange = frontendOpts.incrementalCompileNoChange
+    opts.inputLibraryOrder.clear()
+    for (input in frontendOpts.inputLibraryOrder) {
+        opts.inputLibraryOrder.add(OrderedInput(input.value, input.index))
+    }
     CopyStringList(opts.symbolsNeedLocalized, frontendOpts.symbolsNeedLocalized)
     CopyStringArrayMap(opts.symbolsNeedLocalizedPerPkg, frontendOpts.symbolsNeedLocalizedPerPkg)
     opts.directBuiltinDependencies.clear()

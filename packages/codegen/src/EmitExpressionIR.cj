@@ -26,9 +26,6 @@ private class ExpressionGeneratorImpl <: IRGeneratorImpl {
                 irBuilder.SetInsertPoint(mappedBlock)
             }
         }
-        if (let Some(topLevelFunc) <- chirExprs[0].GetTopLevelFunc()) {
-            irBuilder.SetInsertCGFunction(cgMod.GetOrInsertCGFunction(topLevelFunc))
-        }
         EmitExpressionIR(cgMod, irBuilder, chirExprs)
     }
 }
@@ -38,6 +35,13 @@ public func EmitExpressionIR(cgMod: CGModule, chirExprs: ArrayList<Expression>):
 }
 
 public func EmitExpressionIR(cgMod: CGModule, irBuilder: IRBuilder2, chirExprs: ArrayList<Expression>): Unit {
+    if (!chirExprs.isEmpty()) {
+        if (let Some(topLevelFunc) <- chirExprs[0].GetTopLevelFunc()) {
+            let cgFunc = cgMod.GetOrInsertCGFunction(topLevelFunc)
+            irBuilder.SetInsertCGFunction(cgFunc)
+            irBuilder.CreateGenericParaDeclare(cgFunc)
+        }
+    }
     for (chirExpr in chirExprs) {
         let chirExprWrapper = CHIRExprWrapper(chirExpr)
         if (chirExpr.GetParentBlock().isSome()) {
