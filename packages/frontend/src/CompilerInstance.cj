@@ -31,6 +31,7 @@ import cjcj::utils.ProfileRecorder
 import cjcj::utils.IncrementalCompilationLogger
 import cjcj::utils.InternalError
 import cjcj::utils.CJC_ABORT
+import cjcj::utils.{TaskQueue, TaskResult}
 import cjcj::chir.CHIRBuilder as ChirBuilder
 import cjcj::chir.CHIRDeserializer as ChirDeserializer
 import cjcj::chir.CHIRPrinter as ChirPrinter
@@ -696,7 +697,7 @@ public class CompilerInstance {
         PrepareManglerContexts(mangler, adapter)
         adapter.ReleaseConvertedAst()
         mangler.lambdaCounter = Int64(cachedInfo.lambdaCounter)
-        ManglingHelpFunction(mangler, adapter)
+        ManglingHelpFunction(mangler)
         cachedInfo.lambdaCounter = UInt64(mangler.lambdaCounter)
         mangler.adapter = RealMangleAstAdapter()
         mangler.manglerCtxTable.clear()
@@ -1351,7 +1352,7 @@ public class CompilerInstance {
         }
     }
 
-    private func ManglingHelpFunction(baseMangler: RealBaseMangler, adapter: RealMangleAstAdapter): Unit {
+    private func ManglingHelpFunction(baseMangler: RealBaseMangler): Unit {
         let topDecls = ArrayList<(String, Decl)>()
         let deduplicatedEmplace = { decl: Decl, pkgName: String =>
             if (decl.TestAttr(Attribute.IMPORTED) && !decl.isUsedImports) {
@@ -1393,75 +1394,125 @@ public class CompilerInstance {
                 }
             }
         }
-        for (topDecl in topDecls) {
-            mangleDeclTree(baseMangler, adapter, topDecl[0], topDecl[1])
-            adapter.ReleaseConvertedAst()
+        let parallelNum = if (invocation.globalOptions.disableManglingConcurrency) {
+            1
+        } else {
+            Int64(invocation.globalOptions.GetJobs())
         }
+        DoMangling(baseMangler, parallelNum, topDecls)
     }
 
-    private func mangleDeclTree(
+    private func DoNewMangling(
         baseMangler: RealBaseMangler,
-        adapter: RealMangleAstAdapter,
-        pkgName: String,
-        decl: Decl
-    ): Unit {
+        decls: ArrayList<(String, Decl)>,
+        start: Int64,
+        end: Int64
+    ): ArrayList<PendingMangledDecl> {
+        let mangledDecls = ArrayList<PendingMangledDecl>()
+        let adapter = RealMangleAstAdapter()
         let prefix = ArrayList<Node>()
-        let pendingDecls = ArrayList<PendingMangledDecl>()
-        let pendingLambdas = ArrayList<PendingMangledLambda>()
-        let pre = { node: Node =>
-            let filteredPrefix = getMangleFilteredPrefix(prefix)
-            let convertedPrefix = convertManglePrefix(adapter, filteredPrefix)
-            let action = if (let Some(curDecl) <- (node as Decl)) {
-                curDecl.fullPackageName = pkgName
-                if (curDecl.astKind == ASTKind.MAIN_DECL) {
-                    VisitAction.WALK_CHILDREN
-                } else if (curDecl.astKind == ASTKind.MACRO_DECL) {
-                    if (let Some(desugarDecl) <- curDecl.GetDesugarDecl()) {
-                        desugarDecl.mangledName = baseMangler.Mangle(desugarDecl)
+        var idx = start
+        while (idx < end) {
+            let pkgName = decls[idx][0]
+            let decl = decls[idx][1]
+            let pendingDecls = ArrayList<PendingMangledDecl>()
+            let pendingLambdas = ArrayList<PendingMangledLambda>()
+            let pre = { node: Node =>
+                let filteredPrefix = getMangleFilteredPrefix(prefix)
+                let convertedPrefix = convertManglePrefix(adapter, filteredPrefix)
+                let action = if (let Some(curDecl) <- (node as Decl)) {
+                    curDecl.fullPackageName = pkgName
+                    if (curDecl.astKind == ASTKind.MAIN_DECL) {
+                        VisitAction.WALK_CHILDREN
+                    } else if (curDecl.astKind == ASTKind.MACRO_DECL) {
+                        if (let Some(desugarDecl) <- curDecl.GetDesugarDecl()) {
+                            desugarDecl.mangledName = baseMangler.Mangle(desugarDecl)
+                        }
+                        VisitAction.WALK_CHILDREN
+                    } else if (!Ty.IsTyCorrect(curDecl.GetTy())) {
+                        VisitAction.SKIP_CHILDREN
+                    } else {
+                        let convertedDecl = adapter.ConvertDecl(curDecl)
+                        pendingDecls.add(PendingMangledDecl(curDecl, convertedDecl,
+                            baseMangler.Mangle(convertedDecl, convertedPrefix)))
+                        VisitAction.WALK_CHILDREN
                     }
-                    VisitAction.WALK_CHILDREN
-                } else if (!Ty.IsTyCorrect(curDecl.GetTy())) {
+                } else if (let Some(lambda) <- (node as LambdaExpr)) {
+                    if (lambda.TestAttr(Attribute.GENERIC) || !Ty.IsTyCorrect(lambda.GetTy())) {
+                        VisitAction.SKIP_CHILDREN
+                    } else {
+                        let convertedLambda = adapter.ConvertLambdaExpr(lambda)
+                        pendingLambdas.add(PendingMangledLambda(lambda, convertedLambda,
+                            baseMangler.MangleLambda(convertedLambda, convertedPrefix)))
+                        VisitAction.WALK_CHILDREN
+                    }
+                } else if (let Some(_) <- (node as Annotation)) {
                     VisitAction.SKIP_CHILDREN
                 } else {
-                    let convertedDecl = adapter.ConvertDecl(curDecl)
-                    pendingDecls.add(PendingMangledDecl(curDecl, convertedDecl,
-                        baseMangler.Mangle(convertedDecl, convertedPrefix)))
                     VisitAction.WALK_CHILDREN
                 }
-            } else if (let Some(lambda) <- (node as LambdaExpr)) {
-                if (lambda.TestAttr(Attribute.GENERIC) || !Ty.IsTyCorrect(lambda.GetTy())) {
-                    VisitAction.SKIP_CHILDREN
-                } else {
-                    let convertedLambda = adapter.ConvertLambdaExpr(lambda)
-                    pendingLambdas.add(PendingMangledLambda(lambda, convertedLambda,
-                        baseMangler.MangleLambda(convertedLambda, convertedPrefix)))
-                    VisitAction.WALK_CHILDREN
+                prefix.add(node)
+                action
+            }
+            let post = { _: Node =>
+                prefix.remove(at: prefix.size - 1)
+                VisitAction.KEEP_DECISION
+            }
+            Walker(decl, visitPre: pre, visitPost: post).Walk()
+            for (pending in pendingDecls) {
+                pending.astDecl.mangledName = pending.mangledName
+                pending.mangleDecl.mangledName = pending.mangledName
+                mangledDecls.add(pending)
+            }
+            for (pending in pendingLambdas) {
+                pending.astLambda.mangledName = pending.mangledName
+                pending.mangleLambda.mangledName = pending.mangledName
+            }
+            adapter.ReleaseConvertedAst()
+            idx++
+        }
+        return mangledDecls
+    }
+
+    private func DoMangling(
+        baseMangler: RealBaseMangler,
+        parallelNum: Int64,
+        topDecls: ArrayList<(String, Decl)>
+    ): Unit {
+        let mergeMangledDecls = { pendingDecls: ArrayList<PendingMangledDecl> =>
+            for (pending in pendingDecls) {
+                if (mangledName2DeclMap.contains(pending.mangledName)) {
+                    mangledName2DeclMap.remove(pending.mangledName)
                 }
-            } else if (let Some(_) <- (node as Annotation)) {
-                VisitAction.SKIP_CHILDREN
-            } else {
-                VisitAction.WALK_CHILDREN
+                mangledName2DeclMap.add(pending.mangledName, pending.astDecl)
             }
-            prefix.add(node)
-            action
         }
-        let post = { _: Node =>
-            prefix.remove(at: prefix.size - 1)
-            VisitAction.KEEP_DECISION
+        if (parallelNum == 1) {
+            mergeMangledDecls(DoNewMangling(baseMangler, topDecls, 0, topDecls.size))
+            return
         }
-        Walker(decl, visitPre: pre, visitPost: post).Walk()
-        for (pending in pendingDecls) {
-            pending.astDecl.mangledName = pending.mangledName
-            pending.mangleDecl.mangledName = pending.mangledName
-            if (mangledName2DeclMap.contains(pending.mangledName)) {
-                mangledName2DeclMap.remove(pending.mangledName)
-            }
-            mangledName2DeclMap.add(pending.mangledName, pending.astDecl)
+
+        let batchSize: Int64 = 30
+        let tasksNum = topDecls.size / batchSize
+        var start: Int64 = 0
+        var end: Int64 = batchSize
+        let taskQueue = TaskQueue(parallelNum)
+        let taskResults = ArrayList<TaskResult<ArrayList<PendingMangledDecl>>>()
+        for (_ in 0..tasksNum) {
+            let taskStart = start
+            let taskEnd = end
+            taskResults.add(taskQueue.AddTask<ArrayList<PendingMangledDecl>>({ =>
+                DoNewMangling(baseMangler, topDecls, taskStart, taskEnd)
+            }))
+            start += batchSize
+            end += batchSize
         }
-        for (pending in pendingLambdas) {
-            pending.astLambda.mangledName = pending.mangledName
-            pending.mangleLambda.mangledName = pending.mangledName
+        taskQueue.RunInBackground()
+        taskQueue.WaitForAllTasksCompleted()
+        for (result in taskResults) {
+            mergeMangledDecls(result.get())
         }
+        mergeMangledDecls(DoNewMangling(baseMangler, topDecls, start, topDecls.size))
     }
 
     private func getMangleFilteredPrefix(prefix: ArrayList<Node>): ArrayList<Node> {

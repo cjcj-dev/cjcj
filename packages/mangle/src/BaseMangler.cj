@@ -50,16 +50,6 @@ private class AnnotationLambdaKey {
     }
 }
 
-private class FuncBodyScopeKey {
-    public var owner: MangleDecl
-    public var key: MangleDecl
-
-    public init(owner: MangleDecl, key: MangleDecl) {
-        this.owner = owner
-        this.key = key
-    }
-}
-
 private class FileWildcardBucket {
     public var file: MangleFile
     public let vars: ArrayList<MangleDecl> = ArrayList<MangleDecl>()
@@ -183,7 +173,6 @@ public class ManglerContext {
     private let node2LocalVar: HashMap<Int64, VarBucket> = HashMap<Int64, VarBucket>()
     private let node2LocalFunc: HashMap<Int64, FuncBucket> = HashMap<Int64, FuncBucket>()
     private let file2ExtendDecl: HashMap<String, ExtendBucket> = HashMap<String, ExtendBucket>()
-    private let funcBodyScopeKeys: HashMap<Int64, FuncBodyScopeKey> = HashMap<Int64, FuncBodyScopeKey>()
     public let fileIndexes: ArrayList<UInt64> = ArrayList<UInt64>()
 
     public init() {}
@@ -282,14 +271,7 @@ public class ManglerContext {
         if (let None <- node.funcBody) {
             return None
         }
-        if (let Some(item) <- funcBodyScopeKeys.get(node.identity)) {
-            return item.key
-        }
-        let key = MangleDecl(ASTKind.FUNC_BODY, "<funcBody>", fullPackageName: node.fullPackageName)
-        key.curFile = node.curFile
-        key.outerDecl = node.outerDecl
-        funcBodyScopeKeys[node.identity] = FuncBodyScopeKey(node, key)
-        return key
+        return node
     }
 
     private func GetLocalVarScopeKey(node: MangleDecl): Option<MangleDecl> {

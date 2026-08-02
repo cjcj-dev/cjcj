@@ -2,7 +2,6 @@ package cjcj::mangle
 
 import std.collection.*
 import cjcj::ast.*
-import std.sync.AtomicInt64
 
 private class AstDeclPair {
     public var source: Decl
@@ -42,111 +41,78 @@ private func CopyParamAttributes(source: FuncParam, target: MangleFuncParam): Un
     }
 }
 
-private class MangleAdapterIdAllocator {
-    private static let nextId = AtomicInt64(0)
-
-    public static func Next(): Int64 {
-        return nextId.fetchAdd(1)
-    }
-}
-
 public class MangleAstAdapter {
-    private let declCache: HashMap<Int64, HashMap<Int64, MangleDecl>> =
-        HashMap<Int64, HashMap<Int64, MangleDecl>>()
-    private let lambdaCache: HashMap<Int64, MangleDecl> = HashMap<Int64, MangleDecl>()
-    private let annotationArrayCache: HashMap<Int64, MangleDecl> = HashMap<Int64, MangleDecl>()
-    private let tyCache: HashMap<Int64, MangleType> = HashMap<Int64, MangleType>()
+    private let declCache: HashMap<Decl, HashMap<Decl, MangleDecl>> =
+        HashMap<Decl, HashMap<Decl, MangleDecl>>()
+    private let lambdaCache: HashMap<Node, MangleDecl> = HashMap<Node, MangleDecl>()
+    private let annotationArrayCache: HashMap<Node, MangleDecl> = HashMap<Node, MangleDecl>()
+    private let tyCache: HashMap<Ty, MangleType> = HashMap<Ty, MangleType>()
     private let declPairs: ArrayList<AstDeclPair> = ArrayList<AstDeclPair>()
 
     public init() {}
 
-    private func EnsureAdapterId(source: Node): Int64 {
-        if (source.mangleAdapterId < 0) {
-            source.mangleAdapterId = MangleAdapterIdAllocator.Next()
-        }
-        return source.mangleAdapterId
-    }
-
     private func SameAdapterNode(left: Node, right: Node): Bool {
-        return EnsureAdapterId(left) == EnsureAdapterId(right)
+        return left == right
     }
 
     private func StableDeclIdentity(source: Node): Int64 {
         // Source-backed identities use the negative domain so they cannot collide with identities allocated for
         // adapter-only synthetic nodes such as function-body scope keys.
-        return -EnsureAdapterId(source) - 1
+        return -source.objectId - 1
     }
 
     private func FindDecl(source: Decl): Option<MangleDecl> {
-        if (source.mangleAdapterId < 0) {
-            return None
+        var ownerKey: Decl = source
+        if (let Some(funcDecl) <- (source as FuncDecl)) {
+            if (let Some(owner) <- funcDecl.ownerFunc) {
+                ownerKey = owner
+            }
         }
-        let ownerId = if (let Some(funcDecl) <- (source as FuncDecl)) {
-            if (let Some(owner) <- funcDecl.ownerFunc) { EnsureAdapterId(owner) } else { -1 }
-        } else {
-            -1
-        }
-        if (let Some(ownerCache) <- declCache.get(source.mangleAdapterId)) {
-            return ownerCache.get(ownerId)
+        if (let Some(ownerCache) <- declCache.get(source)) {
+            return ownerCache.get(ownerKey)
         }
         return None
     }
 
     private func StoreDecl(source: Decl, target: MangleDecl): Unit {
-        let sourceId = EnsureAdapterId(source)
-        let ownerId = if (let Some(funcDecl) <- (source as FuncDecl)) {
-            if (let Some(owner) <- funcDecl.ownerFunc) { EnsureAdapterId(owner) } else { -1 }
-        } else {
-            -1
+        var ownerKey: Decl = source
+        if (let Some(funcDecl) <- (source as FuncDecl)) {
+            if (let Some(owner) <- funcDecl.ownerFunc) {
+                ownerKey = owner
+            }
         }
-        if (let Some(ownerCache) <- declCache.get(sourceId)) {
-            ownerCache[ownerId] = target
+        if (let Some(ownerCache) <- declCache.get(source)) {
+            ownerCache[ownerKey] = target
         } else {
-            let ownerCache = HashMap<Int64, MangleDecl>()
-            ownerCache[ownerId] = target
-            declCache[sourceId] = ownerCache
+            let ownerCache = HashMap<Decl, MangleDecl>()
+            ownerCache[ownerKey] = target
+            declCache[source] = ownerCache
         }
         declPairs.add(AstDeclPair(source, target))
     }
 
     private func FindLambda(source: LambdaExpr): Option<MangleDecl> {
-        if (source.mangleAdapterId < 0) {
-            return None
-        }
-        return lambdaCache.get(source.mangleAdapterId)
+        return lambdaCache.get(source)
     }
 
     private func StoreLambda(source: LambdaExpr, target: MangleDecl): Unit {
-        lambdaCache[EnsureAdapterId(source)] = target
+        lambdaCache[source] = target
     }
 
     private func FindAnnotationArray(source: ArrayLit): Option<MangleDecl> {
-        if (source.mangleAdapterId < 0) {
-            return None
-        }
-        return annotationArrayCache.get(source.mangleAdapterId)
+        return annotationArrayCache.get(source)
     }
 
     private func StoreAnnotationArray(source: ArrayLit, target: MangleDecl): Unit {
-        annotationArrayCache[EnsureAdapterId(source)] = target
-    }
-
-    private func EnsureTyAdapterId(source: Ty): Int64 {
-        if (source.mangleAdapterId < 0) {
-            source.mangleAdapterId = MangleAdapterIdAllocator.Next()
-        }
-        return source.mangleAdapterId
+        annotationArrayCache[source] = target
     }
 
     private func FindTy(source: Ty): Option<MangleType> {
-        if (source.mangleAdapterId < 0) {
-            return None
-        }
-        return tyCache.get(source.mangleAdapterId)
+        return tyCache.get(source)
     }
 
     private func StoreTy(source: Ty, target: MangleType): Unit {
-        tyCache[EnsureTyAdapterId(source)] = target
+        tyCache[source] = target
     }
 
     private func SameNode(left: Node, right: Node): Bool {
