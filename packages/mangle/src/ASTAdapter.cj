@@ -44,8 +44,8 @@ private func CopyParamAttributes(source: FuncParam, target: MangleFuncParam): Un
 public class MangleAstAdapter {
     private let declCache: HashMap<Decl, HashMap<Decl, MangleDecl>> =
         HashMap<Decl, HashMap<Decl, MangleDecl>>()
-    private let lambdaCache: HashMap<LambdaExpr, MangleDecl> = HashMap<LambdaExpr, MangleDecl>()
-    private let annotationArrayCache: HashMap<ArrayLit, MangleDecl> = HashMap<ArrayLit, MangleDecl>()
+    private let lambdaCache: HashMap<Node, MangleDecl> = HashMap<Node, MangleDecl>()
+    private let annotationArrayCache: HashMap<Node, MangleDecl> = HashMap<Node, MangleDecl>()
     private let tyCache: HashMap<Ty, MangleType> = HashMap<Ty, MangleType>()
     private let declPairs: ArrayList<AstDeclPair> = ArrayList<AstDeclPair>()
 
