@@ -27,11 +27,7 @@ public class RedundantGetOrThrowElimination {
         isDebug!: Bool): Int64 {
         var changed: Int64 = 0
         for (block in body.GetBlocksRef()) {
-            var state = if (let Some(entryState) <- result.GetEntryState(block)) {
-                entryState
-            } else {
-                analysisBottom(result)
-            }
+            var state = result.GetEntryState(block) ?? continue
             let exprs = block.GetExpressionsRef()
             var idx: Int64 = 0
             while (idx < exprs.size) {
@@ -87,11 +83,4 @@ public class RedundantGetOrThrowElimination {
         ApplyExpressionEffect(state, term)
     }
 
-    private func analysisBottom(result: GetOrThrowResultAnalysisResult): GetOrThrowResultDomain {
-        let map = HashMap<Int64, Int64>()
-        for (arg in result.GetTrackedArgs()) {
-            map[arg.nodeId] = map.size
-        }
-        return GetOrThrowResultDomain(map)
-    }
 }
