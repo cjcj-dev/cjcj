@@ -1069,8 +1069,7 @@ extend ParserImpl {
     public func ParseUnsafeBlock(): Expr {
         let unsafeToken = Expect(TokenKind.UNSAFE, "expected 'unsafe'")
         if (!Seeing(TokenKind.LCURL)) {
-            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, unsafeToken, ConvertToken(Peek())).Emit()
-            return InvalidExpr(unsafeToken.Begin())
+            return GetInvalidExprInAtom(Peek().Begin())
         }
         let block = ParseBlock(ScopeKind.FUNC_BODY)
         block.EnableAttr(Attribute.UNSAFE)
