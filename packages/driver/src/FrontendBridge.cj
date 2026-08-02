@@ -6,7 +6,7 @@ import cjcj::frontend.{CompilerInvocation, DumpAction, GlobalOptions}
 import cjcj::frontend_tool.{DefaultCompilerInstance, Driver as FrontendToolDriver,
     DriverOptions as FrontendToolDriverOptions, ExecuteFrontendByDriver, IncrementalCompilerInstance,
     NeedCreateIncrementalCompilerInstance}
-import cjcj::option.DiagFormat as OptionDiagFormat
+import cjcj::option.{DiagFormat as OptionDiagFormat, OrderedInput}
 
 public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (!PrepareFrontendOutputs(driver.driverOptions)) {
@@ -90,6 +90,10 @@ private func ApplyFrontendOutputs(opts: DriverOptions, frontendOpts: FrontendToo
     opts.compilationCachedDir = frontendOpts.compilationCachedDir
     opts.compilationCachedFileName = frontendOpts.compilationCachedFileName
     opts.incrementalCompileNoChange = frontendOpts.incrementalCompileNoChange
+    opts.inputLibraryOrder.clear()
+    for (input in frontendOpts.inputLibraryOrder) {
+        opts.inputLibraryOrder.add(OrderedInput(input.value, input.index))
+    }
     CopyStringList(opts.symbolsNeedLocalized, frontendOpts.symbolsNeedLocalized)
     CopyStringArrayMap(opts.symbolsNeedLocalizedPerPkg, frontendOpts.symbolsNeedLocalizedPerPkg)
     opts.directBuiltinDependencies.clear()
