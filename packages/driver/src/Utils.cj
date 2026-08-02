@@ -4,6 +4,8 @@ import std.collection.*
 import std.env.*
 import std.fs.Directory as FSDirectory
 import std.fs.File
+import cjcj::basic.Errorln as Errorf
+import cjcj::basic.Infoln as Infof
 public import cjcj::utils.{DIR_SEPARATOR, FileUtil, GenerateRandomHexString}
 
 
@@ -116,16 +118,25 @@ public func RemovePath(path: String): Bool {
 }
 
 public func GetApplicationPath(argv0: String, environmentVars: HashMap<String, String>): Option<String> {
-    if (argv0.contains("/")) {
-        return FileUtil.GetAbsPath(argv0)
+    let paths = if (let Some(pathValue) <- environmentVars.get("PATH")) {
+        FileUtil.SplitEnvironmentPaths(pathValue)
+    } else {
+        Array<String>()
     }
-    if (let Some(pathValue) <- environmentVars.get("PATH")) {
-        let found = FileUtil.FindProgramByName(argv0, FileUtil.SplitEnvironmentPaths(pathValue))
-        if (!found.isEmpty()) {
-            return FileUtil.GetAbsPath(found)
-        }
+    let exePath = FileUtil.GetAbsPath(FileUtil.FindProgramByName(argv0, paths))
+    if (let None <- exePath) {
+        Errorf("Get path of ${argv0} failed.")
+        return None
     }
-    return None
+    let path = exePath.getOrThrow()
+    let environmentPathsSpecialCharacters = ":;"
+    if (path.contains(":") || path.contains(";")) {
+        Errorf("Invalid cjc installation path: ${path}")
+        Infof("Do not install `cjc` under a path that contains the following characters: " +
+            environmentPathsSpecialCharacters)
+        return None
+    }
+    return path
 }
 
 public func StringifyEnvironment(): HashMap<String, String> {
