@@ -3,8 +3,27 @@ package cjcj::basic
 import std.collection.*
 import std.sync.Mutex
 
+foreign {
+    func abort(): Unit
+}
+
+// C++: src/Basic/DiagnosticEngine.cpp:551,561,574, CJC_ASSERT.
+// Selfhost source: packages/utils/src/CheckUtils.cj:7-17.
+@When[debug]
+private func CJC_ASSERT(condition: Bool): Unit {
+    if (!condition) {
+        unsafe { abort() }
+    }
+}
+
+@When[!debug]
+private func CJC_ASSERT(condition: Bool): Unit {
+    let _ = condition
+}
+
 public class DiagnosticEngineImpl {
     private let mux: Mutex = Mutex()
+    private let transactionMutex: Mutex = Mutex()
     private var errorCount: UInt64 = 0
     private var warningCount: UInt64 = 0
     private var errorPrintCount: UInt64 = 0
@@ -21,8 +40,8 @@ public class DiagnosticEngineImpl {
     private var isEmitter: Bool = true
     private var isDumpErrCnt: Bool = true
     private var sourceManager: Option<SourceManager> = None
-    private var isInTransaction: Bool = false
-    private let transactionBuffer: ArrayList<Diagnostic> = ArrayList<Diagnostic>()
+    private let transactionMap: HashMap<Int64, ArrayList<Diagnostic>> = HashMap<Int64, ArrayList<Diagnostic>>()
+    private let isInTransaction: HashMap<Int64, Bool> = HashMap<Int64, Bool>()
     private var checkRangeErrorCodeRatherICE: Bool = false
     private var diagEngineErrorCode: DiagEngineErrorCode = DiagEngineErrorCode.NO_ERRORS
     private var firstErrorCategory: Option<DiagCategory> = None
@@ -240,8 +259,15 @@ public class DiagnosticEngineImpl {
                 diagnostic.subDiags.add(SubDiagnostic(msg))
             }
         }
-        if (isInTransaction) {
-            transactionBuffer.add(diagnostic)
+        let threadId = Thread.currentThread.id
+        let isDeferred = synchronized(transactionMutex) {
+            let active = isInTransaction.get(threadId) ?? false
+            if (active) {
+                transactionMap.get(threadId).getOrThrow().add(diagnostic)
+            }
+            active
+        }
+        if (isDeferred) {
             return
         }
         if (let Some(activeHandler) <- handler) {
@@ -263,23 +289,39 @@ public class DiagnosticEngineImpl {
     }
 
     public func Prepare(): Unit {
-        isInTransaction = true
-        transactionBuffer.clear()
+        let threadId = Thread.currentThread.id
+        synchronized(transactionMutex) {
+            CJC_ASSERT(!(isInTransaction.get(threadId) ?? false))
+            isInTransaction[threadId] = true
+            if (let Some(cachedDiagnostic) <- transactionMap.get(threadId)) {
+                cachedDiagnostic.clear()
+            } else {
+                transactionMap[threadId] = ArrayList<Diagnostic>()
+            }
+        }
     }
 
     public func Commit(): Unit {
-        if (let Some(activeHandler) <- handler) {
-            for (diagnostic in transactionBuffer) {
-                activeHandler.HandleDiagnose(diagnostic)
+        let threadId = Thread.currentThread.id
+        synchronized(transactionMutex) {
+            CJC_ASSERT(isInTransaction.get(threadId) ?? false)
+            if (let Some(activeHandler) <- handler) {
+                for (diagnostic in transactionMap.get(threadId).getOrThrow()) {
+                    activeHandler.HandleDiagnose(diagnostic)
+                }
             }
+            transactionMap.remove(threadId)
+            isInTransaction.remove(threadId)
         }
-        transactionBuffer.clear()
-        isInTransaction = false
     }
 
     public func ClearTransaction(): Unit {
-        transactionBuffer.clear()
-        isInTransaction = false
+        let threadId = Thread.currentThread.id
+        synchronized(transactionMutex) {
+            CJC_ASSERT(isInTransaction.get(threadId) ?? false)
+            transactionMap.remove(threadId)
+            isInTransaction.remove(threadId)
+        }
     }
 
     public func EmitCategoryDiagnostics(cate: DiagCategory): Unit {
