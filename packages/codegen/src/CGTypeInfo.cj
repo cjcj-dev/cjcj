@@ -948,8 +948,7 @@ private func TypeInfoRuntimeName(cgMod: CGModule, chirTy: Type): String {
 private func FindGenericParamIndex(genericTy: GenericType, genericParams: ArrayList<GenericType>): Option<Int64> {
     var idx: Int64 = 0
     while (idx < genericParams.size) {
-        if (genericTy.IsEqual(genericParams[idx]) || genericTy.GetIdentifier() == genericParams[idx].GetIdentifier() ||
-            genericTy.GetSrcCodeIdentifier() == genericParams[idx].GetSrcCodeIdentifier()) {
+        if (genericTy == genericParams[idx]) {
             return Some(idx)
         }
         idx++
