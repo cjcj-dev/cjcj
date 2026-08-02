@@ -1434,6 +1434,7 @@ public class StructInheritanceChecker {
             } else if (inconsistentType) {
                 AddPossibleInconsistentTypes(parent, child, inconsistentTypes)
             }
+            CheckNativeFFI(parent, child)
             if (shouldUpdate) {
                 if (parentDecl.TestAttr(Attribute.ABSTRACT) || !childDecl.TestAttr(Attribute.ABSTRACT)) {
                     UpdateOverriddenFuncDeclCache(childDecl, parentDecl)
