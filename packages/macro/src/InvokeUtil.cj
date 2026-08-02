@@ -587,6 +587,7 @@ public class RuntimeInit {
             if (!opened.opened) {
                 return false
             }
+            handle = Some(opened)
             runtimeReleaseFunc = GetMethodPointer(opened, CJ_RELEASE_HANDLE_FROM_C)
             // RT_ISOLATE_API_SPEC.md §3.2/§5 slice 2: the hybrid runtime exposes an
             // instance scheduler for the macro task. Its stack values come from the same
@@ -622,12 +623,15 @@ public class RuntimeInit {
                 initRuntime = true
             } else {
                 // Official runtime fallback (track 1): keep reusing the process-global scheduler.
+                if (!PrepareRuntime(opened, initArgs)) {
+                    return false
+                }
                 runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
                 if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
                     return false
                 }
+                initRuntime = true
             }
-            handle = Some(opened)
         }
         return true
     }
@@ -635,12 +639,17 @@ public class RuntimeInit {
     public func CloseRuntime(): Unit {
         if (let Some(opened) <- handle) {
             if (initRuntime) {
-                // RT_ISOLATE_API_SPEC.md §3.2: InstanceStop occupies the C++
-                // FinishRuntime position (InvokeUtilCJNative.cpp:181-190).
-                let stopResult = unsafe { RuntimeInstanceStopFunc(runtimeInstanceStopFunc)(runtimeInstanceHandle) }
-                if (stopResult != 0) {
-                    Errorln("runtime finish failed: ")
+                if (runtimeInstanceHandle.isNull()) {
+                    FinishRuntime(opened)
+                } else {
+                    // RT_ISOLATE_API_SPEC.md §3.2: InstanceStop occupies the C++
+                    // FinishRuntime position (InvokeUtilCJNative.cpp:181-190).
+                    let stopResult = unsafe { RuntimeInstanceStopFunc(runtimeInstanceStopFunc)(runtimeInstanceHandle) }
+                    if (stopResult != 0) {
+                        Errorln("runtime finish failed: ")
+                    }
                 }
+                initRuntime = false
             }
             @When[backend == "cjnative" && env != "ohos"]
             let _ = CloseSymbolTable(opened)
@@ -650,11 +659,8 @@ public class RuntimeInit {
         runtimeReleaseFunc = CPointer<Unit>()
         runtimeInstanceHandle = CPointer<Unit>()
         runtimeInstanceStopFunc = CPointer<Unit>()
-        if (initRuntime) {
-            @When[backend == "cjnative" && env != "ohos"]
-            let _ = CloseMacroDynamicLibrary()
-            initRuntime = false
-        }
+        @When[backend == "cjnative" && env != "ohos"]
+        let _ = CloseMacroDynamicLibrary()
     }
 
     public func GetHandle(): Option<RuntimeHandle> {
