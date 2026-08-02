@@ -6,7 +6,7 @@ import cjcj::frontend.{CompilerInvocation, DumpAction, GlobalOptions}
 import cjcj::frontend_tool.{DefaultCompilerInstance, Driver as FrontendToolDriver,
     DriverOptions as FrontendToolDriverOptions, ExecuteFrontendByDriver, IncrementalCompilerInstance,
     NeedCreateIncrementalCompilerInstance}
-import cjcj::option.{DiagFormat as OptionDiagFormat, OrderedInput}
+import cjcj::option.DiagFormat as OptionDiagFormat
 
 public func ExecuteFrontendPhase(driver: Driver): Bool {
     if (!PrepareFrontendOutputs(driver.driverOptions)) {
