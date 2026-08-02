@@ -724,7 +724,11 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
     }
 
     public func Update(dest: Value, domain: VD): Unit {
-        programState.Insert(dest, domain)
+        if (programState.Contains(dest)) {
+            programState.At(dest).CopyFrom(domain)
+        } else {
+            programState.Insert(dest, domain)
+        }
     }
 
     public func SetToBound(dest: Value, isTop: Bool): Unit {
