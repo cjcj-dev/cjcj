@@ -8,7 +8,7 @@ import cjcj::mangle.BaseMangler
 import cjcj::modules.{ImportManager, SemaImportManager}
 import cjcj::option.GetFileName as OptionGetFileName
 import cjcj::option.IsDir as OptionIsDir
-import cjcj::sema.TypeManager
+import cjcj::sema.{CreateThrowException, TypeManager}
 import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
 
 public let NSSTRING_CLASS_IDENT: String = "NSString"
@@ -856,6 +856,17 @@ public func GetExceptionDecl(importManager: ImportManager): ClassDecl {
         CJC_ABORT_WITH_MSG("'Exception' declaration expected to be 'ClassDecl'")
     }
     return exceptionClassDecl.getOrThrow()
+}
+
+// C++ src/Sema/NativeFFI/Utils.cpp:758-770.
+public func CreateThrowExceptionCall(importManager: ImportManager, typeManager: TypeManager,
+    msg: String, curFile: File): ThrowExpr {
+    let exceptionArgs = ArrayList<Expr>()
+    let exceptionMsg = WithinFile(CreateLitConstExpr(LitConstKind.STRING, msg,
+        GetStringDecl(importManager).GetTy().getOrThrow()), curFile)
+    exceptionArgs.add(exceptionMsg)
+    let exception = GetExceptionDecl(importManager)
+    return CreateThrowException(exception, exceptionArgs, curFile, typeManager)
 }
 
 public func IsGenericParam(ty: Ty, decl: Decl, config: GenericConfigInfo): Bool {
