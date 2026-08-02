@@ -6,12 +6,7 @@ import std.collection.*
 public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     match (expr.GetExprKind()) {
-        case ExprKind.CONSTANT =>
-            if (let Some(constant) <- (expr as Constant)) {
-                compiler.TranslateLiteralValue(context, constant.literal)
-            } else {
-                context.definition.PushOp(OpCode.NOT_SUPPORTED)
-            }
+        case ExprKind.CONSTANT => ()
         case ExprKind.TUPLE =>
             context.definition.PushOp(OpCode.TUPLE)
             context.definition.PushCell(expr.GetNumOfOperands())
