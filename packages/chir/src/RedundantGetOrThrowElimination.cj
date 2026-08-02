@@ -19,7 +19,7 @@ public class RedundantGetOrThrowElimination {
         let resultOpt = Engine<GetOrThrowResultDomain>(fn, analysis).IterateToFixpoint()
         CJC_NULLPTR_CHECK(resultOpt)
         let result = resultOpt.getOrThrow()
-        var changed: Int64 = 0
+        let changed = Box<Int64>(0)
         result.VisitWith(
             { state: GetOrThrowResultDomain, expr: Expression, _: Int64 =>
                 if (IsGetOrThrowFunction(expr)) {
@@ -29,7 +29,7 @@ public class RedundantGetOrThrowElimination {
                         let previousResult = previous.GetResult().getOrThrow()
                         let applyResult = apply.GetResult().getOrThrow()
                         applyResult.ReplaceWith(previousResult, fn.GetBody().getOrThrow())
-                        changed++
+                        changed.value++
                         if (isDebug) {
                             println("[RGetOtThrowE] replaced redundant getOrThrow result")
                         }
@@ -39,6 +39,6 @@ public class RedundantGetOrThrowElimination {
             { _: GetOrThrowResultDomain, _: Expression, _: Int64 => () },
             { _: GetOrThrowResultDomain, _: Terminator, _: Option<Block> => () }
         )
-        return changed
+        return changed.value
     }
 }
