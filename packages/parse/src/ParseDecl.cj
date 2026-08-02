@@ -2015,6 +2015,7 @@ extend ParserImpl {
             RevertPrimaryDecl()
             ret.end = lastToken.End()
         }
+        CheckCJMappingAttr(ret)
         return ret
     }
 
