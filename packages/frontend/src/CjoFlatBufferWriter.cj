@@ -1012,12 +1012,17 @@ public class ASTWriter {
         let body = SaveFuncBody(funcDecl)
         builder.StartTable(7)
         builder.AddBool(6, funcDecl.isFastNative)
-        builder.AddBool(5, funcDecl.isInline)
+        builder.AddBool(5, SaveInlineLabel(funcDecl))
         builder.AddBool(4, funcDecl.isConst)
         builder.AddU8(2, OperatorKindToFlat(funcDecl.op))
         builder.AddU8(1, OverflowPolicyToFlat(funcDecl.overflowStrategy))
         builder.AddOffset(0, body)
         return builder.EndTable()
+    }
+
+    private func SaveInlineLabel(funcDecl: FuncDecl): Bool {
+        // Instantiated decl or decl inside instantiated decl should not export inline condition.
+        return !IsInDeclWithAttribute(funcDecl, Attribute.GENERIC_INSTANTIATED) && funcDecl.isInline
     }
 
     private func SaveFuncBody(funcDecl: FuncDecl): FlatBufferOffset {
