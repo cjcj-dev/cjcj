@@ -2864,17 +2864,6 @@ extend TypeChecker {
                     out.add(found)
                 }
             }
-            for ((className, memberName) in [
-                ("OutOfMemoryError", "init"), ("Exception", "printStackTrace"), ("Error", "printStackTrace")
-            ]) {
-                let decl = match (findCoreImplicitMemberDeclInMap(instance, className, memberName)) {
-                    case Some(value) => Some(value)
-                    case None => findCoreImplicitMemberDeclInPackages(instance.packageDecls, className, memberName)
-                }
-                if (let Some(found) <- decl) {
-                    out.add(found)
-                }
-            }
         }
         return out
     }
