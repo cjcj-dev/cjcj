@@ -289,8 +289,7 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
         SetResultToTop(state, unaryExpr)
     }
 
-    public func HandleBinaryExpr(state: RangeDomain, binaryExpr: BinaryExpression,
-        overflowStrategy!: OverflowStrategy = OverflowStrategy.THROWING): Unit {
+    public func HandleBinaryExpr(state: RangeDomain, binaryExpr: BinaryExpression): Unit {
         if (let Some(dest) <- binaryExpr.GetResult()) {
             if (binaryExpr.GetNumOfOperands() < 2) {
                 state.SetToBound(dest, true)
@@ -310,6 +309,7 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
                     }
                     let lhsRange = RangeAnalysis.GetSIntDomainFromState(state, lhs)
                     let rhsRange = RangeAnalysis.GetSIntDomainFromState(state, rhs)
+                    let overflowStrategy = binaryExpr.GetOverflowStrategy()
                     let result = ComputeArithmeticBinop(CHIRArithmeticBinopArgs(lhsRange, rhsRange, lhs, rhs,
                         binaryExpr.GetExprKind(), overflowStrategy, IsUnsignedArithmetic(binaryExpr)))
                     if (result.IsNonTrivial()) {
