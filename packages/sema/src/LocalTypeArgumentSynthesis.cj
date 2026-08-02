@@ -1109,8 +1109,10 @@ public class LocalTypeArgumentSynthesis {
                     newInfo = true
                     continue
                 } else if (needDiagMsg) {
+                    let lbSt = StableTys(entry.bounds.lbs)
+                    let ubSt = StableTys(entry.bounds.ubs)
                     let lbs = ArrayList<Tracked>()
-                    for (lb in entry.bounds.lbs.values) {
+                    for (lb in lbSt.values) {
                         var blames = BlameSet()
                         for (blameEntry in entry.bounds.lb2Blames) {
                             if (Ptr<Ty>(blameEntry.ty) == Ptr<Ty>(lb)) {
@@ -1121,7 +1123,7 @@ public class LocalTypeArgumentSynthesis {
                         lbs.add(Tracked(lb, blames: blames))
                     }
                     let ubs = ArrayList<Tracked>()
-                    for (ub in entry.bounds.ubs.values) {
+                    for (ub in ubSt.values) {
                         var blames = BlameSet()
                         for (blameEntry in entry.bounds.ub2Blames) {
                             if (Ptr<Ty>(blameEntry.ty) == Ptr<Ty>(ub)) {

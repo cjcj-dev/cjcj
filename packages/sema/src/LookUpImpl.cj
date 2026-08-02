@@ -961,11 +961,6 @@ private func lookupImpl(typeManager: TypeManager, ctx: ASTContext, name: String,
         let targetDeclKeys: Option<HashSet<Decl>> =
             if (declsByName.size > 1) { Some(HashSet<Decl>()) } else { None }
         for (decl in declsByName) {
-            // C++: LookUpImpl.cpp:644-654. A reference type must resolve to a type, so a
-            // same-named non-type in a closer scope cannot stop the outward scope walk.
-            if ((onlyLookUpTopLevel || node.astKind == ASTKind.REF_TYPE) && !decl.IsTypeDecl()) {
-                continue
-            }
             if (isTargetVisibleToNode(decl, node)) {
                 if (let Some(keys) <- targetDeclKeys) {
                     addDeclUnique(targetDecls, keys, decl)

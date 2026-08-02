@@ -7387,23 +7387,6 @@ extend TypeChecker {
         return found
     }
 
-    // C++ src/Sema/TypeCheckExpr/NameReferenceExpr.cpp:567-583
-    // TypeCheckerImpl::LookupShadowedTopLevelType.
-    private func LookupShadowedTopLevelType(ctx: ASTContext, base: RefExpr): Option<Decl> {
-        if (base.ref.target.isNone()) {
-            return None
-        }
-        let target = base.ref.target.getOrThrow()
-        if (target.IsTypeDecl() || target.TestAttr(Attribute.GLOBAL)) {
-            return None
-        }
-        if (target.astKind != ASTKind.FUNC_DECL && target.astKind != ASTKind.PROP_DECL &&
-            target.astKind != ASTKind.VAR_DECL) {
-            return None
-        }
-        return LookupShadowedTopLevelTypeByName(ctx, base.ref.identifier.Val(), base.scopeName, base)
-    }
-
     private func InferMemberAccess(ctx: ASTContext, ma: MemberAccess): Unit {
         if (ma.target.isSome() && Ty.IsTyCorrect(ma.GetTy())) {
             return
@@ -7453,30 +7436,7 @@ extend TypeChecker {
                 BasicDiagKindRefactor.sema_undeclared_identifier, ma, memberRange, arguments: [ma.field.Val()])
             builder.Emit()
         } else {
-            var shadowedType: Option<Decl> = None
-            try (ds = DiagSuppressor(impl.diag)) {
-                InferInstanceAccess(ctx, ma)
-                if (ma.target.isNone() && ma.targets.isEmpty() && baseExpr.astKind == ASTKind.REF_EXPR) {
-                    let typeDecl = LookupShadowedTopLevelType(ctx, (baseExpr as RefExpr).getOrThrow())
-                    if ((let Some(decl) <- typeDecl) && Ty.IsTyCorrect(decl.GetTy())) {
-                        shadowedType = Some(decl)
-                    }
-                }
-                if (shadowedType.isNone()) {
-                    ds.ReportDiag()
-                }
-            }
-            if (let Some(typeDecl) <- shadowedType) {
-                let baseRef = (baseExpr as RefExpr).getOrThrow()
-                ReplaceTarget(baseRef, Some(typeDecl))
-                baseRef.aliasTarget = None
-                baseRef.ref.targets.clear()
-                baseRef.SetTy(typeDecl.GetTy().getOrThrow())
-                ma.targets.clear()
-                ReplaceTarget(ma, None)
-                ma.SetTy(Ty.GetInitialTy())
-                InferStaticAccess(ctx, ma, typeDecl)
-            }
+            InferInstanceAccess(ctx, ma)
         }
         if (ma.target.isNone()) {
             return

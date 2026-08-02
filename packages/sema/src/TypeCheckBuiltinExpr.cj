@@ -365,6 +365,7 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruc
         return InvalidExprTy(arrayLit)
     }
     let elemTys = ArrayList<Ty>()
+    var hasInvalidElemTy = false
     for (child in arrayLit.children) {
         if (let Some(synthesize) <- synthesizer) {
             let _ = synthesize(child)
@@ -372,12 +373,16 @@ public func SynArrayLit(typeManager: TypeManager, arrayLit: ArrayLit, arrayStruc
         }
         if (let Some(ty) <- child.GetTy()) {
             if (!Ty.IsTyCorrect(ty)) {
-                return InvalidExprTy(arrayLit)
+                hasInvalidElemTy = true
+                continue
             }
             elemTys.add(typeManager.ReplaceIdealTy(ty))
         } else {
-            return InvalidExprTy(arrayLit)
+            hasInvalidElemTy = true
         }
+    }
+    if (hasInvalidElemTy) {
+        return InvalidExprTy(arrayLit)
     }
     if (let None <- arrayStruct) {
         return InvalidExprTy(arrayLit)

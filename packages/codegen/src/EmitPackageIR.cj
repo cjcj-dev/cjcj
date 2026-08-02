@@ -86,9 +86,7 @@ private func InitIncrementalGen(cgPkgContext: CGPkgContext): Bool {
 private func GenSubCHIRPackage(cgMod: CGModule): Unit {
     let subCHIRPackage = cgMod.GetCGContext().GetSubCHIRPackage()
     EmitTIOrTTForCustomDefs(cgMod)
-    for (globalVar in subCHIRPackage.chirGVs) {
-        EmitGlobalVariableIR(cgMod, globalVar)
-    }
+    EmitGlobalVariableIR(cgMod, subCHIRPackage.chirGVs)
     for (chirFunc in subCHIRPackage.chirFuncs) {
         EmitFunctionIR(cgMod, chirFunc)
     }
