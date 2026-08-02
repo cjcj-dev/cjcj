@@ -2106,6 +2106,7 @@ extend ParserImpl {
             }
             ret.end = ret.rightCurlPos + 1
         }
+        CheckCJMappingAttr(ret)
         return ret
     }
 
