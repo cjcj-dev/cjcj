@@ -259,7 +259,7 @@ public open class DefaultCompilerInstance {
         }
         var ret = true
         for (pkg in pkgs) {
-            ret = SaveCjo(pkg) && ret
+            ret = ret && SaveCjo(pkg)
         }
         return ret
     }
