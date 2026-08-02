@@ -450,6 +450,7 @@ public class File <: Node {
     public var indexOfPackage: UInt64 = 0
     public let features: ArrayList<String> = ArrayList<String>()
     public var isProduct: Bool = true
+    public var isCommon: Bool = false
 
     public init() {
         super(ASTKind.FILE)
