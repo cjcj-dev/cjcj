@@ -320,6 +320,13 @@ public func WrapReturningLambdaCall(typeManager: TypeManager, nodes: ArrayList<N
     return CreateCallExpr(lambda, ArrayList<FuncArg>(), None, retTy, CallKind.CALL_INVALID)
 }
 
+// C++ src/Sema/NativeFFI/Utils.cpp:145-152.
+public func WrapUnitLambdaExpr(typeManager: TypeManager, nodes: ArrayList<Node>,
+    lambdaParams!: ArrayList<FuncParam> = ArrayList<FuncParam>()): LambdaExpr {
+    nodes.add(CreateUnitExpr(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+    return WrapReturningLambdaExpr(typeManager, nodes, lambdaParams: lambdaParams)
+}
+
 public func WrapReturningLambdaExpr(typeManager: TypeManager, nodes: ArrayList<Node>,
     lambdaParams!: ArrayList<FuncParam> = ArrayList<FuncParam>()): LambdaExpr {
     CJC_ASSERT(!nodes.isEmpty())
