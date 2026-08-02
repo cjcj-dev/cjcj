@@ -7387,23 +7387,6 @@ extend TypeChecker {
         return found
     }
 
-    // C++ src/Sema/TypeCheckExpr/NameReferenceExpr.cpp:567-583
-    // TypeCheckerImpl::LookupShadowedTopLevelType.
-    private func LookupShadowedTopLevelType(ctx: ASTContext, base: RefExpr): Option<Decl> {
-        if (base.ref.target.isNone()) {
-            return None
-        }
-        let target = base.ref.target.getOrThrow()
-        if (target.IsTypeDecl() || target.TestAttr(Attribute.GLOBAL)) {
-            return None
-        }
-        if (target.astKind != ASTKind.FUNC_DECL && target.astKind != ASTKind.PROP_DECL &&
-            target.astKind != ASTKind.VAR_DECL) {
-            return None
-        }
-        return LookupShadowedTopLevelTypeByName(ctx, base.ref.identifier.Val(), base.scopeName, base)
-    }
-
     private func InferMemberAccess(ctx: ASTContext, ma: MemberAccess): Unit {
         if (ma.target.isSome() && Ty.IsTyCorrect(ma.GetTy())) {
             return
