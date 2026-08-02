@@ -276,7 +276,7 @@ public class DIBuilder {
             globalVar = unsafe {
                 LLVMDIBuilderCreateGlobalVariableExpression(raw, namespaceScope, nameCString.value,
                     UIntNative(variableName.size), linkageCString.value, UIntNative(linkageName.size), diFile,
-                    begin.line, diType, if (isMemberVar) { 1 } else { 0 }, 1, createExpression(expr),
+                    begin.line, diType, if (isMemberVar) { 1 } else { 0 }, createExpression(expr),
                     LLVMNullMetadata(), 0u32)
             }
         }
