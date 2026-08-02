@@ -7,6 +7,7 @@ import cjcj::basic.PrintVersion
 import cjcj::basic.WriteError
 import cjcj::frontend.*
 import cjcj::option.DiagFormat as OptionDiagFormat
+import cjcj::option.Group
 import cjcj::incremental_compilation.IncreKind
 import cjcj::utils.IncrementalCompilationLogger
 import cjcj::option.MockMode
@@ -116,7 +117,7 @@ public func ExecuteFrontendWithResult(
 
     let globalOptions = invocation.globalOptions
     if (globalOptions.showUsage) {
-        PrintFrontendUsage()
+        invocation.optionTable.Usage(globalOptions.GetOptionsBackend(), [Group.GLOBAL, Group.FRONTEND])
         return FrontendExecutionResult(0)
     }
     if (globalOptions.enableVerbose || globalOptions.printVersionOnly) {
@@ -378,20 +379,6 @@ private func ConvertBuiltinLibraryBaseToCjo(rawName: String, trimNativeLibPrefix
         return Some(potentialPkgName + ".cjo")
     }
     return None
-}
-
-private func PrintFrontendUsage(): Unit {
-    println("Usage:")
-    println("  cjc-frontend [option] file...")
-    println("Options:")
-    println("  --dump-tokens")
-    println("  --dump-symbols")
-    println("  --typecheck")
-    println("  --scan-dependency")
-    println("  --deserialize-chir-and-dump <file>")
-    println("  -d")
-    println("  -p, --package")
-    println("  -o, --output <file>")
 }
 
 private func CopyStringList(target: ArrayList<String>, source: ArrayList<String>): Unit {
