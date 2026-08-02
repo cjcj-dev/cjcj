@@ -2,7 +2,9 @@ package cjcj::sema.NativeFFI.Java
 
 import std.collection.*
 import cjcj::ast.*
+import cjcj::ast.AnnotationKind as JavaAnnotationKind
 import cjcj::basic.{DiagnosticEngine, DiagKindRefactor, MakeRange}
+import cjcj::basic.Range as BasicRange
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.{InteropLanguage, MaybeString}
@@ -11,12 +13,12 @@ import cjcj::sema.NativeFFI.{GetJavaFQName, GetJavaFQSourceCodeName, HasPredefin
 import cjcj::utils.CJC_ASSERT
 
 // C++ src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:16-31.
-private func MakeJavaImplJavaNameRange(decl: ClassLikeDecl): cjcj::basic.Range {
+private func MakeJavaImplJavaNameRange(decl: ClassLikeDecl): BasicRange {
     if (!HasPredefinedJavaName(decl)) {
         return MakeRangeForDeclIdentifier(decl)
     }
     for (anno in decl.annotations) {
-        if (anno.kind != cjcj::ast.AnnotationKind.JAVA_IMPL) {
+        if (anno.kind != JavaAnnotationKind.JAVA_IMPL) {
             continue
         }
         return MakeRange(anno.GetBegin(), decl.identifier.End())
