@@ -135,6 +135,29 @@ jobs:
         run: |
           test -f "target/release/bin/cjcj::cjc"
           cp "target/release/bin/cjcj::cjc" "target/release/bin/cjcj"
+      # Sticky minor keeps a complete remembered set only when the compiled main
+      # executable embeds the sticky-logged-map consumer. The runtime used to probe
+      # for it and silently disable minor; that probe was dropped (user ruling), so
+      # the contract is now "all managed code is cjcj-compiled with sticky write
+      # barriers" and nothing checked it. A stock llc has no such lowering at all
+      # (`--cjcj-sticky-logged-map` is an unknown argument there), so a build that
+      # silently falls back to it produces a compiler that violates the contract:
+      # measured 20/20 rounds non-zero exit without the consumer versus 1/20 with it.
+      # Fail here rather than in smoke, where the symptom is an unrelated-looking
+      # `latest->IsValidObject()` abort.
+      - name: Verify sticky consumer in built compiler
+        run: |
+          bin="target/release/bin/cjcj"
+          bytes=$(python3 -c 'import sys;print(open(sys.argv[1],"rb").read().count(b"__cj_sticky_logged_base"))' "$bin")
+          syms=$(nm -D "$bin" 2>/dev/null | grep -c '__cj_sticky' || true)
+          echo "STICKY_CONSUMER_GATE bytes=$bytes dyn_syms=$syms bin=$bin"
+          if [ "$bytes" -eq 0 ]; then
+            echo "FATAL: built compiler has no __cj_sticky_logged_base consumer."
+            echo "The SDK llc almost certainly lacks the sticky barrier lowering."
+            "$CANGJIE_HOME/third_party/llvm/bin/llc" --help-hidden 2>&1 |
+              grep -c cjcj-sticky-logged-map || echo "llc has no sticky option"
+            exit 1
+          fi
       - name: Run smoke tests
         run: npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/target/release/bin/cjcj"
 
