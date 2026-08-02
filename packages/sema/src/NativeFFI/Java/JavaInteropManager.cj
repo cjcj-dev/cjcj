@@ -45,6 +45,31 @@ private func DiagJavaImplRedefinitionInJava(
     builder.Emit()
 }
 
+// C++ src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:67-84.
+private func DiagJavaDeclCannotInheritPureCangjieType(
+    diag: DiagnosticEngine,
+    decl: ClassLikeDecl
+): Unit {
+    CJC_ASSERT(IsMirror(decl) || IsImpl(decl))
+    let kind = if (IsMirror(decl)) {
+        DiagKindRefactor.sema_java_mirror_cannot_inherit_pure_cangjie_type
+    } else {
+        DiagKindRefactor.sema_java_impl_cannot_inherit_pure_cangjie_type
+    }
+    let builder = DiagnoseRefactor(diag, kind, decl)
+    for (superType in decl.inheritedTypes) {
+        let superDeclOpt = Ty.GetDeclOfTy(superType.GetTy())
+        CJC_ASSERT(superDeclOpt.isSome())
+        let superDecl = superDeclOpt.getOrThrow()
+        let superTy = superDecl.GetTy().getOrThrow()
+        if (!IsMirror(superDecl) && !IsImpl(superDecl) && !superTy.IsObject() && !superTy.IsAny()) {
+            AddNote(builder, superType,
+                "'" + superType.ToString() + "' is not a java-compatible type")
+        }
+    }
+    builder.Emit()
+}
+
 // C++ src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:36-60.
 private func IsJavaMirrorSubtype(ty: Ty): Bool {
     if (let Some(classTy) <- (ty as ClassTy)) {
@@ -201,8 +226,22 @@ public class JavaInteropManager {
 
     // C++ TypeCheckJavaInterop.cpp:289-308.
     private func CheckNonJavaSuperType(decl: ClassLikeDecl): Unit {
-        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-        // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:291-307.
+        CJC_ASSERT(IsMirror(decl) || IsImpl(decl))
+        for (superDecl in decl.GetAllSuperDecls()) {
+            let superTy = superDecl.GetTy().getOrThrow()
+            if (!IsMirror(superDecl) && !IsImpl(superDecl) && !superTy.IsObject() && !superTy.IsAny()) {
+                DiagJavaDeclCannotInheritPureCangjieType(diag, decl)
+                decl.EnableAttr(Attribute.IS_BROKEN)
+                return
+            }
+        }
+        if (decl.HasAnno(JavaAnnotationKind.JAVA_IMPL) &&
+            !IsJavaMirrorSubtype(decl.GetTy().getOrThrow())) {
+            DiagnoseRefactor(diag,
+                DiagKindRefactor.sema_java_mirror_subtype_anno_must_inherit_mirror,
+                decl).Emit()
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
     }
 
     // C++ TypeCheckJavaInterop.cpp:310-318.
