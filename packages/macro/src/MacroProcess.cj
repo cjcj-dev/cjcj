@@ -47,7 +47,7 @@ private func getTokenLengthForMap(token: Token): Int64 {
     return GetTokenLength(token.Value().size, token.kind, token.delimiterNum)
 }
 
-private func reportMappingFailedDiag(
+private func ReportMappingFailedDiag(
     oldTokens: ArrayList<Token>, newTokens: ArrayList<Token>, mcPos: Position, ci: MacroHost): Unit {
     let minSize = if (oldTokens.size < newTokens.size) { oldTokens.size } else { newTokens.size }
     var idx: Int64 = 0
@@ -257,7 +257,7 @@ public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: MacroHost): U
         }
         invocation.macroCallDiagInfo.mcEnd = tokens[tokens.size - 1].End()
         if (tokens.size != invocation.newTokens.size) {
-            reportMappingFailedDiag(invocation.newTokens, tokens, node.begin, ci)
+            ReportMappingFailedDiag(invocation.newTokens, tokens, node.begin, ci)
             return
         }
         if (ci.GetGlobalOptions().enableMacroDebug) {
@@ -327,7 +327,7 @@ private func removeMacroCallFile(path: String): Unit {
     }
 }
 
-private func generateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: MacroHost): Unit {
+private func GenerateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: MacroHost): Unit {
     let sm = ci.GetSourceManager()
     let isCjmpFile = ci.GetGlobalOptions().IsCompilingCJMPSpecific()
     let path = file.macroCallFilePath
@@ -406,7 +406,7 @@ public func ProcessPackageMacros(expansion: MacroExpansion, pkg: Package): Unit 
             }
         }
         for ((file, nodes) in grouped) {
-            generateMacroCallFile(file, nodes, expansion.ci)
+            GenerateMacroCallFile(file, nodes, expansion.ci)
         }
 }
 
