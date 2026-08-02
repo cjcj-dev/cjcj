@@ -350,7 +350,7 @@ private func generateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: Macro
     if (ci.GetGlobalOptions().enableMacroInLSP || ci.GetGlobalOptions().enableMacroDebug) {
         let source = sm.GetSource(fileID)
         if (!writeStringToFile(path, source.buffer)) {
-            ci.GetDiag().Diagnose(file.begin, "failed to save macro call file '" + path + "'")
+            ci.GetDiag().Diagnose(file.begin, DiagKind.macro_call_save_file_failed).Emit()
         }
     } else {
         removeMacroCallFile(path)
