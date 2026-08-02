@@ -670,7 +670,7 @@ public class MangleAstAdapter {
             if (let Some(baseType) <- qualifiedType.baseType) {
                 target.baseType = ConvertTypeAnnotation(baseType)
             }
-            target.field = qualifiedType.field.GetRawText()
+            target.field = qualifiedType.field.Val()
             for (arg in qualifiedType.typeArguments) {
                 target.typeArguments.add(ConvertTypeAnnotation(arg))
             }
