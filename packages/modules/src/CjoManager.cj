@@ -1,7 +1,7 @@
 package cjcj::modules
 
 import std.collection.*
-import cjcj::utils.FileUtil
+import cjcj::utils.{FileUtil, MAIN_INVOKE}
 
 public class CjoManager {
     private var impl: CjoManagerImpl
@@ -486,6 +486,9 @@ public class CjoManager {
 
     private func AddDeclToMap(decl: Decl, declMap: TreeMap<String, TreeSet<Decl>>): Unit {
         if (decl.astKind == ASTKind.EXTEND_DECL || decl.doNotExport || decl.identifier.isEmpty()) {
+            return
+        }
+        if (decl.isFunction && (decl.TestAttr(Attribute.MAIN_ENTRY) || decl.identifier == MAIN_INVOKE)) {
             return
         }
         PutDeclMapValue(declMap, decl.identifier, decl)
