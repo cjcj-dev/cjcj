@@ -464,7 +464,7 @@ private func HandleVarargTypePromotion(cgMod: CGModule, irBuilder: IRBuilder2, c
     let argTy = cgArg.GetCGType().getOrThrow().GetOriginal()
     let chirContext = cgMod.GetCGContext().GetCHIRBuilder().context
     match (argTy.GetTypeKind()) {
-        case TypeKind.TYPE_FLOAT32 =>
+        case TypeKind.TYPE_FLOAT16 | TypeKind.TYPE_FLOAT32 =>
             let promotedType = CGType.GetOrCreate(cgMod, chirContext.GetFloat64Ty())
             return CGValue(irBuilder.CreateFPExt(cgArg.GetRawValue(), promotedType.GetLLVMType()), promotedType)
         case TypeKind.TYPE_INT8 | TypeKind.TYPE_INT16 =>
