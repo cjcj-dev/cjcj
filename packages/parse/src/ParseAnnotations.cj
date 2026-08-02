@@ -91,15 +91,9 @@ extend ParserImpl {
             }
         }
         anno.begin = atToken.Begin()
-        var baseExpr: Expr = RefExpr(ExpectIdentifierWithPos(anno))
+        var baseExpr: Expr = ParseRefExpr()
         while (Skip(TokenKind.DOT)) {
-            let member = MemberAccess()
-            member.baseExpr = baseExpr
-            member.dotPos = lastToken.Begin()
-            member.field = ExpectIdentifierWithPos(member)
-            member.begin = baseExpr.begin
-            member.end = member.field.End()
-            baseExpr = member
+            baseExpr = ParseMemberAccess(baseExpr, ExprKind.ALL)
         }
         anno.baseExpr = baseExpr
         let annotationName = baseExpr.ToString()
