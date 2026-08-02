@@ -1,5 +1,6 @@
 package cjcj::chir
 
+import cjcj::utils.CJC_NULLPTR_CHECK
 import std.collection.*
 
 private func ModifyApplyCalleeInfo(loadResult: LocalVar, storeValue: Value): Unit {
@@ -41,7 +42,9 @@ public class RedundantLoadElimination {
         }
         if (let Some(body) <- fn.GetBody()) {
             let analysis = ReachingDefinitionAnalysis(fn)
-            let result = Engine<ReachingDefinitionDomain>(fn, analysis).IterateToFixpoint() ?? return 0
+            let resultOpt = Engine<ReachingDefinitionDomain>(fn, analysis).IterateToFixpoint()
+            CJC_NULLPTR_CHECK(resultOpt)
+            let result = resultOpt.getOrThrow()
             let toBeRemoved = ArrayList<Expression>()
             result.VisitWith(
                 { _: ReachingDefinitionDomain, _: Expression, _: Int64 => () },
