@@ -138,6 +138,7 @@ private func CopyScopeInfo(scope: ArrayList<Int64>): ArrayList<Int64> {
     return out
 }
 
+@When[os == "Windows"]
 private func DebugLocationFileName(path: String): String {
     if (path.isEmpty()) {
         return ""
@@ -145,6 +146,21 @@ private func DebugLocationFileName(path: String): String {
     var idx = path.size - 1
     while (idx >= 0) {
         if (path[idx] == b'/' || path[idx] == b'\\') {
+            return path[idx + 1..]
+        }
+        idx--
+    }
+    return path
+}
+
+@When[os != "Windows"]
+private func DebugLocationFileName(path: String): String {
+    if (path.isEmpty()) {
+        return ""
+    }
+    var idx = path.size - 1
+    while (idx >= 0) {
+        if (path[idx] == b'/') {
             return path[idx + 1..]
         }
         idx--
