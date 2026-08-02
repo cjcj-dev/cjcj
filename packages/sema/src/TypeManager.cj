@@ -1474,7 +1474,7 @@ public class TypeManager {
         if (SameTy(lvalue, rvalue) || isCommonAndSpecificRelation(lvalue, rvalue)) {
             return TypeCompatibility.IDENTICAL
         }
-        if (IsSubtype(rvalue, lvalue, implicitBoxed: implicitBoxed)) {
+        if (IsSubtype(lvalue, rvalue, implicitBoxed: implicitBoxed)) {
             return TypeCompatibility.SUBTYPE
         }
         if (isGeneric && checkGenericType(lvalue, rvalue, implicitBoxed)) {
