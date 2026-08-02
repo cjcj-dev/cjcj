@@ -83,6 +83,10 @@ extend ParserImpl {
         let ref = RefType()
         try (cs = ChainScope(this, ref)) {
             ref.ref.identifier = ExpectIdentifierWithPos(ref)
+            if (ref.ref.identifier.Val() == INVALID_IDENTIFIER) {
+                ref.EnableAttr(Attribute.IS_BROKEN)
+                TryConsumeUntilAny([TokenKind.LT])
+            }
             ref.begin = ref.ref.identifier.Begin()
             if (!onlyRef && Skip(TokenKind.LT)) {
                 ref.leftAnglePos = lastToken.Begin()
