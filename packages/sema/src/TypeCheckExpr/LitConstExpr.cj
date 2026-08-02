@@ -34,16 +34,6 @@ private func IsSameOrBoxable(typeManager: TypeManager, literalTy: Ty, target: Ty
     return false
 }
 
-private func IsIntegerLiteralBoxable(typeManager: TypeManager, suffixKind: TypeKind, basicTy: Ty, target: Ty): Bool {
-    if (target.IsCoreOptionType() && target.typeArgs.size == 1) {
-        return IsIntegerLiteralBoxable(typeManager, suffixKind, basicTy, target.typeArgs[0])
-    }
-    if (target.IsIntegerSubType()) {
-        return suffixKind == target.kind || suffixKind == TypeKind.TYPE_IDEAL_INT
-    }
-    return typeManager.IsLitBoxableType(basicTy, target)
-}
-
 private func IsFloatLiteralBoxable(typeManager: TypeManager, suffixKind: TypeKind, basicTy: Ty, target: Ty): Bool {
     if (target.IsCoreOptionType() && target.typeArgs.size == 1) {
         return IsFloatLiteralBoxable(typeManager, suffixKind, basicTy, target.typeArgs[0])
@@ -117,7 +107,7 @@ public func ChkLitConstExprOfTypeInteger(typeManager: TypeManager, target: Ty, l
         }
         return false
     }
-    if (IsIntegerLiteralBoxable(typeManager, suffixKind, basicTy, target)) {
+    if (typeManager.IsLitBoxableType(basicTy, target)) {
         lce.SetTy(GetInnerNumericType(target, basicTy))
         return true
     }
