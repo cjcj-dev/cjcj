@@ -497,7 +497,12 @@ public func CloseSymbolTable(handle: RuntimeHandle): Int64 {
 }
 
 public func PrepareRuntime(handle: RuntimeHandle, initArgs: ArrayList<(String, String)>): Bool {
-    return CallRuntime(handle, CJ_RUNTIME_INIT, initArgs) == 0
+    let callInit = CallRuntime(handle, CJ_RUNTIME_INIT, initArgs)
+    if (callInit != 0) {
+        Errorln("macro expansion failed because of runtime initiate failed. ")
+        return false
+    }
+    return true
 }
 
 public func FinishRuntime(handle: RuntimeHandle): Unit {
