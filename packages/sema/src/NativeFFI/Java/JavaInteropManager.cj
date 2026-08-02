@@ -78,9 +78,9 @@ private func DiagJavaMirrorChildMustBeAnnotated(
     var parentDecl: Option<Decl> = None
     for (parentType in decl.inheritedTypes) {
         if (let Some(parent) <- (parentType.GetTy().getOrThrow() as ClassTy)) {
-            parentDecl = parent.decl
+            parentDecl = Some<Decl>(parent.decl.getOrThrow())
         } else if (let Some(parent) <- (parentType.GetTy().getOrThrow() as InterfaceTy)) {
-            parentDecl = parent.decl
+            parentDecl = Some<Decl>(parent.decl.getOrThrow())
         }
         if (parentDecl.isSome() && IsMirror(parentDecl.getOrThrow())) {
             break
