@@ -828,12 +828,11 @@ public class TestManager {
             if (pkg.fullPackageName != importedPkg.srcPackage.fullPackageName &&
                 importedPkg.srcPackage.TestAttr(Attribute.MOCK_SUPPORTED) &&
                 !pkg.TestAttr(Attribute.MOCK_SUPPORTED)) {
-                // GAP_TODO: emission blocked on sema TypeCheckCall call-path parity (spurious fires during self-compile; see C++ dtor auto-emit DiagnosticEngine.cpp:314)
-                let _ = diag.DiagnoseRefactor(
+                diag.DiagnoseRefactor(
                     BasicDiagKindRefactor.package_mocking_support_inconsistency,
                     BasicDefaultPosition,
                     arguments: [importedPkg.srcPackage.fullPackageName, "--mock=on"]
-                )
+                ).Emit()
             }
         }
     }
