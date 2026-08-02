@@ -1,6 +1,7 @@
 package cjcj::parse
 
 import std.collection.*
+import cjcj::ast.INVALID_IDENTIFIER
 
 extend ParserImpl {
     public func ParseType(): Type {
