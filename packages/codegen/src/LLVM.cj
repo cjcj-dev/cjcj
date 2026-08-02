@@ -285,6 +285,7 @@ foreign {
     func LLVMDeleteBasicBlock(block: LLVMBasicBlockRef): Unit
     func LLVMGetFirstInstruction(block: LLVMBasicBlockRef): LLVMValueRef
     func LLVMGetNextInstruction(inst: LLVMValueRef): LLVMValueRef
+    func LLVMGetCalledValue(inst: LLVMValueRef): LLVMValueRef
     func LLVMGetInstructionParent(inst: LLVMValueRef): LLVMBasicBlockRef
     func LLVMGetInstructionOpcode(inst: LLVMValueRef): Int32
     func LLVMGetFirstUse(value: LLVMValueRef): LLVMUseRef
