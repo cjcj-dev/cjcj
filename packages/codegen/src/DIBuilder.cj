@@ -280,7 +280,9 @@ public class DIBuilder {
                     LLVMNullMetadata(), 0u32)
             }
         }
-        LLVMSetGlobalMetadata(cgMod.GetLLVMContext(), llvmValue, "dbg", globalVar)
+        unsafe {
+            LLVMGlobalSetMetadata(llvmValue, LLVMGetMDKindID(cgMod.GetLLVMContext(), "dbg"), globalVar)
+        }
         cgMod.GetCGContext().AddGlobalsOfCompileUnit(variable.GetIdentifierWithoutPrefix())
     }
 
