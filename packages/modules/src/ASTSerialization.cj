@@ -1,6 +1,6 @@
 package cjcj::modules
 
-import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
+import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset, FlatBufferString}
 
 import std.collection.*
 import std.convert.*
@@ -312,10 +312,11 @@ public class ASTLoader {
 
     public func ReadFileNames(): ArrayList<String> {
         let out = ArrayList<String>()
-        if (let Some(pkg) <- LoadPackageDependencies()) {
-            for (file in pkg.files) {
-                out.add(file.fileName)
-            }
+        let allFiles = GetPackage(data).GetAllFiles().getOrThrow()
+        var index: UInt32 = 0u32
+        while (index < allFiles.size()) {
+            out.add(FlatBufferString(data, (allFiles.Get(index) as Int64).getOrThrow()).str())
+            index++
         }
         return out
     }
