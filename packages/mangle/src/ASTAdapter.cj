@@ -622,7 +622,7 @@ public class MangleAstAdapter {
             target.ty = ConvertTy(ty)
         }
         if (let Some(refType) <- (typeNode as RefType)) {
-            target.name = refType.ref.identifier.GetRawText()
+            target.name = refType.ref.identifier.Val()
             for (arg in refType.typeArguments) {
                 target.typeArguments.add(ConvertTypeAnnotation(arg))
             }

@@ -659,7 +659,7 @@ public class TupleType <: Type {
         for (ty in argTys) {
             parts.add(ty.ToString())
         }
-        return "(" + JoinStrings(parts, ", ") + ")"
+        return "Tuple(" + JoinStrings(parts, ",") + ")"
     }
 }
 

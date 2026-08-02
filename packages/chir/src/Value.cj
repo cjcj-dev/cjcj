@@ -1315,13 +1315,15 @@ public class Function <: GlobalValue & Hashable & Equatable<Function> {
     }
 
     public func GenerateBlockGroupId(): UInt64 {
+        let id = blockGroupId
         blockGroupId++
-        return blockGroupId
+        return id
     }
 
     public func GenerateLocalId(): UInt64 {
+        let id = localId
         localId++
-        return localId
+        return id
     }
 
     public func SetLocalId(id: UInt64): Unit {
