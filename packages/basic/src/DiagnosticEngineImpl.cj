@@ -88,10 +88,16 @@ public class DiagnosticEngineImpl {
     public func GetIsEmitter(): Bool { return isEmitter }
     public func SetIsDumpErrCnt(dump: Bool): Unit { isDumpErrCnt = dump }
     public func GetIsDumpErrCnt(): Bool { return isDumpErrCnt }
-    public func SetSourceManager(sm: SourceManager): Unit { sourceManager = sm }
+    public func SetSourceManager(sm: SourceManager): Unit {
+        synchronized(mux) {
+            sourceManager = sm
+        }
+    }
 
     public func GetSourceManager(): SourceManager {
-        return sourceManager ?? throw IllegalStateException("sourceManager is null")
+        return synchronized(mux) {
+            sourceManager ?? throw IllegalStateException("sourceManager is null")
+        }
     }
 
     public func LockFirstErrorCategory<T>(action: () -> T): T {
