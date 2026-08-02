@@ -1,6 +1,7 @@
 package cjcj::modules
 
 import std.collection.*
+import cjcj::ast.ASTKind
 import cjcj::utils.{FileUtil, MAIN_INVOKE}
 
 public class CjoManager {
