@@ -543,6 +543,19 @@ public open class BuiltinType <: Type {
         return GetExtends()
     }
 
+    public func GetSuperTypes(builder: CHIRBuilder): ArrayList<ClassType> {
+        let superTypes = ArrayList<ClassType>()
+        for (extendDef in GetExtends(builder)) {
+            if (!IsEqualOrInstantiatedTypeOf(extendDef.GetExtendedType().getOrThrow(), builder)) {
+                continue
+            }
+            for (interfaceTy in extendDef.GetImplementedInterfaceTys()) {
+                superTypes.add(interfaceTy)
+            }
+        }
+        return superTypes
+    }
+
     public override func GetSuperTypesRecusively(builder: CHIRBuilder,
         visited: Option<HashSet<String>>): ArrayList<ClassType> {
         let inheritanceList = ArrayList<ClassType>()
