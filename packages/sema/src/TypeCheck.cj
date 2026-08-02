@@ -227,6 +227,10 @@ private func getTyFromBuiltinDecl(typeManager: TypeManager, bid: BuiltInDecl, ty
 private func getTyFromASTCFuncType(typeManager: TypeManager, ctx: ASTContext, rt: RefType,
     importManager!: Option<SemaImportManager> = None, diag!: Option<BasicDiagnosticEngine> = None): Ty {
     if (rt.typeArguments.size != 1) {
+        if (let Some(diagValue) <- diag) {
+            DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_generic_argument_no_match,
+                rt, MakeRange(rt.begin, rt.end)).Emit()
+        }
         return TypeManager.GetInvalidTy()
     }
     if (let Some(funcType) <- (rt.typeArguments[0] as FuncType)) {
