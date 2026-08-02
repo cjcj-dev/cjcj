@@ -1,6 +1,6 @@
 package cjcj::basic
 
-public let CANGJIE_VERSION: String = "1.2.0-alpha.20260619020029"
+public let CANGJIE_VERSION: String = "1.2.0-alpha.20260721165458"
 
 @When[arch == "x86_64" && os == "Linux"]
 private let VERSION_TAIL: String = " (cjnative)\nTarget: x86_64-unknown-linux-gnu"
@@ -17,7 +17,7 @@ private let VERSION_TAIL: String = " (cjnative)\nTarget: aarch64-unknown-windows
 @When[(arch != "x86_64" && arch != "aarch64") || (os != "Linux" && os != "macOS" && os != "Windows")]
 private let VERSION_TAIL: String = " (cjnative)\nTarget: unknown-unknown-unknown"
 
-public let CANGJIE_COMPILER_VERSION: String = "Cangjie Compiler: cjcj " + CANGJIE_VERSION +
+public let CANGJIE_COMPILER_VERSION: String = "Cangjie Compiler: " + CANGJIE_VERSION +
     VERSION_TAIL
 
 public func PrintVersion(): Unit {

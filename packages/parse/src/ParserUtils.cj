@@ -709,7 +709,7 @@ extend ParserImpl {
 
     public func SeeingPrimitiveTypeAndLParen(): Bool {
         return SeeingTypeConvertiblePrimitiveToken(Peek().kind) &&
-            lexer.LookAhead(1).size > 0 && lexer.LookAhead(1)[0].kind == TokenKind.LPAREN
+            Seeing([Peek().kind, TokenKind.LPAREN])
     }
 
     public func SeeingPrimitiveTypeAndDot(): Bool {

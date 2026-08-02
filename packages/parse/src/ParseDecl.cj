@@ -736,7 +736,7 @@ extend ParserImpl {
                     MakeRange(ret.identifier.Begin(), ret.identifier.End()),
                     ret.identifier.Val(),
                     builtinKind).Emit()
-                ret.EnableAttr(Attribute.IS_BROKEN)
+                ret.EnableAttr(Attribute.HAS_BROKEN)
             }
             let body = ParseMacroBody(ret)
             ret.funcBody = body
@@ -838,7 +838,7 @@ extend ParserImpl {
 
     private func IsTokensRefType(typeNode: Type): Bool {
         if (let Some(refType) <- (typeNode as RefType)) {
-            return refType.ref.identifier.Val() == "Tokens" && refType.typeArguments.isEmpty()
+            return refType.ref.identifier.Val() == "Tokens"
         }
         return false
     }
