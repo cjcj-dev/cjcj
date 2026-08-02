@@ -117,9 +117,6 @@ private let altStackRecord = LibC.malloc<SignalStack>(count: 1)
 @When[os != "Windows"]
 private let oldAltStackRecord = LibC.malloc<SignalStack>(count: 1)
 
-@When[os != "Windows"]
-private var altStackInstalled = false
-
 @When[os == "Windows"]
 private func windowsSignalHandler(signum: Int32): Unit {
     threadDelaySynchronizer()
@@ -245,9 +242,6 @@ public func RegisterCrtlCSignalHandler(): Unit {
 
 @When[os != "Windows"]
 public func CreateAltSignalStack(): Unit {
-    if (altStackInstalled) {
-        return
-    }
     if (altStackMemory.isNull() || altStackRecord.isNull() || oldAltStackRecord.isNull()) {
         InternalError("Failed to create a backup stack for the thread.")
         return
@@ -259,7 +253,6 @@ public func CreateAltSignalStack(): Unit {
         let oldStack = oldAltStackRecord.read()
         if ((oldStack.ss_flags & SS_ONSTACK) != 0 ||
             (!oldStack.ss_sp.isNull() && oldStack.ss_size >= UIntNative(SIGNAL_STACK_SIZE))) {
-            altStackInstalled = true
             return
         }
         altStackRecord.write(SignalStack(CPointer<Unit>(altStackMemory), 0, UIntNative(SIGNAL_STACK_SIZE)))
@@ -268,7 +261,6 @@ public func CreateAltSignalStack(): Unit {
             return
         }
     }
-    altStackInstalled = true
 }
 
 @When[os == "Windows"]
