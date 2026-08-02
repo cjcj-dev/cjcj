@@ -1,6 +1,7 @@
 package cjcj::macro_pkg
 
-import cjcj::lex.{Lexer as RealLexer, StringPartKind}
+import cjcj::basic.{DiagArgument, DiagKind}
+import cjcj::lex.{Lexer as RealLexer, StringPartKind, TOKEN_KIND_VALUES}
 import std.collection.*
 import std.fs.File as FSFile
 import std.fs.exists
@@ -46,7 +47,7 @@ private func getTokenLengthForMap(token: Token): Int64 {
     return GetTokenLength(token.Value().size, token.kind, token.delimiterNum)
 }
 
-private func reportMappingFailedDiag(
+private func ReportMappingFailedDiag(
     oldTokens: ArrayList<Token>, newTokens: ArrayList<Token>, mcPos: Position, ci: MacroHost): Unit {
     let minSize = if (oldTokens.size < newTokens.size) { oldTokens.size } else { newTokens.size }
     var idx: Int64 = 0
@@ -57,11 +58,11 @@ private func reportMappingFailedDiag(
         }
         if (oldTokens[idx].kind != newTokens[idx].kind || oldTokens[idx].Value() != newTokens[idx].Value()) {
             if (oldTokens[idx].Value().isEmpty()) {
-                ci.GetDiag().Diagnose(mcPos, "macro call map info failed for empty token kind " +
-                    TokenKindIndex(oldTokens[idx].kind).toString())
+                ci.GetDiag().Diagnose(mcPos, DiagKind.macro_call_map_to_empty_value_token,
+                    args: [DiagArgument(TOKEN_KIND_VALUES[TokenKindIndex(oldTokens[idx].kind)])]).Emit()
             } else {
-                ci.GetDiag().Diagnose(mcPos, "macro call map info failed: expected '" + oldTokens[idx].Value() +
-                    "', got '" + newTokens[idx].Value() + "'")
+                ci.GetDiag().Diagnose(mcPos, DiagKind.macro_call_map_info_failed,
+                    args: [DiagArgument(oldTokens[idx].Value()), DiagArgument(newTokens[idx].Value())]).Emit()
             }
             return
         }
@@ -256,7 +257,7 @@ public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: MacroHost): U
         }
         invocation.macroCallDiagInfo.mcEnd = tokens[tokens.size - 1].End()
         if (tokens.size != invocation.newTokens.size) {
-            reportMappingFailedDiag(invocation.newTokens, tokens, node.begin, ci)
+            ReportMappingFailedDiag(invocation.newTokens, tokens, node.begin, ci)
             return
         }
         if (ci.GetGlobalOptions().enableMacroDebug) {
@@ -326,7 +327,7 @@ private func removeMacroCallFile(path: String): Unit {
     }
 }
 
-private func generateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: MacroHost): Unit {
+private func GenerateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: MacroHost): Unit {
     let sm = ci.GetSourceManager()
     let isCjmpFile = ci.GetGlobalOptions().IsCompilingCJMPSpecific()
     let path = file.macroCallFilePath
@@ -349,7 +350,7 @@ private func generateMacroCallFile(file: File, nodes: ArrayList<Node>, ci: Macro
     if (ci.GetGlobalOptions().enableMacroInLSP || ci.GetGlobalOptions().enableMacroDebug) {
         let source = sm.GetSource(fileID)
         if (!writeStringToFile(path, source.buffer)) {
-            ci.GetDiag().Diagnose(file.begin, "failed to save macro call file '" + path + "'")
+            ci.GetDiag().Diagnose(file.begin, DiagKind.macro_call_save_file_failed).Emit()
         }
     } else {
         removeMacroCallFile(path)
@@ -405,7 +406,7 @@ public func ProcessPackageMacros(expansion: MacroExpansion, pkg: Package): Unit 
             }
         }
         for ((file, nodes) in grouped) {
-            generateMacroCallFile(file, nodes, expansion.ci)
+            GenerateMacroCallFile(file, nodes, expansion.ci)
         }
 }
 

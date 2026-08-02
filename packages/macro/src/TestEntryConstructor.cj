@@ -288,9 +288,12 @@ private func getMainPartPackageName(packageName: String): String {
     return packageName
 }
 
-private func createMethodCall(refName: String, decl: FuncDecl, args: ArrayList<FuncArg>): CallExpr {
-    let method = CreateMemberAccess(CreateRefExpr(refName), decl.identifier.GetRawText())
+private func CreateMethodCall(refName: String, decl: FuncDecl, args: ArrayList<FuncArg>): CallExpr {
+    let method = MemberAccess()
+    method.baseExpr = Some(CreateRefExpr(refName))
+    method.field = decl.identifier
     method.target = Some(decl)
+    method.targets.add(decl)
     return CreateCallExpr(method, args, target: Some(decl))
 }
 
@@ -478,7 +481,7 @@ public class TestEntryConstructor {
         }
         for (testPackage in module.testPackages) {
             for (funcDecl in testPackage.testRegisterFunctions) {
-                body.body.add(createMethodCall("testPkg", funcDecl, ArrayList<FuncArg>()))
+                body.body.add(CreateMethodCall("testPkg", funcDecl, ArrayList<FuncArg>()))
             }
         }
         let arg = FuncArg()
