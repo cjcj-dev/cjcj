@@ -262,6 +262,10 @@ private func getTyFromASTCFuncType(typeManager: TypeManager, ctx: ASTContext, rt
         cfg.isC = true
         return typeManager.GetFunctionTy(paramTys.toArray(), retTy, cfg: cfg)
     }
+    if (let Some(diagValue) <- diag) {
+        diagValue.Diagnose(rt.typeArguments[0].GetBegin(), rt.typeArguments[0].GetEnd(),
+            BasicDiagKind.sema_cfunc_type).Emit()
+    }
     return TypeManager.GetInvalidTy()
 }
 
