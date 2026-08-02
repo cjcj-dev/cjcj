@@ -1061,6 +1061,7 @@ public class CGModule {
                 unitValue = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, unitName.value) }
                 if (unitValue.isNull()) {
                     unitValue = unsafe { LLVMAddGlobal(moduleHandle.raw, unitType, unitName.value) }
+                    addAttribute(unitValue, CJGLOBAL_VALUE_ATTR)
                     unsafe { LLVMSetInitializer(unitValue, LLVMGetUndef(unitType)) }
                     let linkage = if (cgCtx.GetCompileOptions().target.IsMinGW()) {
                         LLVMLinkage.Private
