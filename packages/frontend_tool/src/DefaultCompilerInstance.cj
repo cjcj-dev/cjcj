@@ -205,18 +205,12 @@ public open class DefaultCompilerInstance {
         if (pkg.IsEmpty()) {
             return true
         }
-        let cachedCjoPath = invocation.globalOptions.GenerateCachedPathName(
-            pkg.fullPackageName, SERIALIZED_FILE_EXTENSION)
         let saveFileWithAbsPath = if (STANDARD_LIBS.contains(pkg.fullPackageName)) {
             invocation.globalOptions.enableCoverage
         } else {
             invocation.globalOptions.enableCompileDebug || invocation.globalOptions.enableCoverage
         }
         let data = core.ExportAST(saveFileWithAbsPath, pkg)
-        if (!FileUtil.WriteBufferToASTFile(cachedCjoPath, data)) {
-            diag.Warn(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION, "failed to write CJO: " + cachedCjoPath)
-            return false
-        }
         // C++: FrontendTool/DefaultCompilerInstance.cpp:195-200 DefaultCIImpl::SaveCjo.
         let cjoPath = TempFileManager.Instance().CreateNewFileInfo(
             TempFileInfo(fileName: FileUtil.ToCjoFileName(pkg.fullPackageName)), TempFileKind.O_CJO).filePath
