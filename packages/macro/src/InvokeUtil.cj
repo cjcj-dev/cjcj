@@ -512,6 +512,7 @@ public func FinishRuntime(handle: RuntimeHandle): Unit {
 public func CallRuntime(handle: RuntimeHandle, method: String, envs: ArrayList<(String, String)>): Int64 {
     let methodPtr = GetMethodPointer(handle, method)
     if (methodPtr.isNull()) {
+        Errorln("could not find runtime method: " + method)
         return 1
     }
     let initFunc = RuntimeInitFunc(methodPtr)
