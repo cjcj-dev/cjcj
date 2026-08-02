@@ -838,7 +838,7 @@ extend ParserImpl {
 
     private func IsTokensRefType(typeNode: Type): Bool {
         if (let Some(refType) <- (typeNode as RefType)) {
-            return refType.ref.identifier.Val() == "Tokens" && refType.typeArguments.isEmpty()
+            return refType.ref.identifier.Val() == "Tokens"
         }
         return false
     }
