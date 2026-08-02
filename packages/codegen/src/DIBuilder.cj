@@ -11,6 +11,7 @@ import cjcj::chir.FuncType
 import cjcj::chir.FuncKind
 import cjcj::chir.Function
 import cjcj::chir.GenericType
+import cjcj::chir.GlobalVar
 import cjcj::chir.Position
 import cjcj::chir.Type
 import cjcj::mangle.MANGLE_CANGJIE_PREFIX
@@ -238,6 +239,49 @@ public class DIBuilder {
             }
         }
         return (scope, declaration)
+    }
+
+    // Mirrors CodeGen/DIBuilder.cpp:154-185 DIBuilder::CreateGlobalVar.
+    public func CreateGlobalVar(variable: GlobalVar): Unit {
+        if (!cgMod.GetCGContext().GetCompileOptions().enableCompileDebug ||
+            variable.TestAttr(Attribute.NO_DEBUG_INFO)) {
+            return
+        }
+        CJC_ASSERT(!variable.TestAttr(Attribute.IMPORTED))
+        let position = variable.GetDebugLocation()
+        let ty = DeRef(variable.GetType().getOrThrow())
+        let diFile = GetOrCreateFile(position)
+        let isReadOnly = variable.TestAttr(Attribute.READONLY)
+        var diType = GetOrCreateType(ty, isReadOnly: isReadOnly)
+        let llvmValue = cgMod.GetMappedCGValue(variable).GetRawValue()
+        let expr = ArrayList<UInt64>()
+        if (IsReferenceType(ty, cgMod)) {
+            if (IsOptionOrOptionLike(ty)) {
+                if (!IsOption(ty)) {
+                    diType = CreatePointerType(diType)
+                }
+            } else {
+                expr.add(DW_OP_deref)
+            }
+        }
+        let linkageName = GenerateLinkageName(variable)
+        let isMemberVar = variable.GetParentCustomTypeDef().isSome()
+        let variableName = variable.GetSrcCodeIdentifier()
+        let begin = position.GetBeginPos()
+        var globalVar = LLVMNullMetadata()
+        try (
+            nameCString = unsafe { LibC.mallocCString(variableName) }.asResource(),
+            linkageCString = unsafe { LibC.mallocCString(linkageName) }.asResource()
+        ) {
+            globalVar = unsafe {
+                LLVMDIBuilderCreateGlobalVariableExpression(raw, namespaceScope, nameCString.value,
+                    UIntNative(variableName.size), linkageCString.value, UIntNative(linkageName.size), diFile,
+                    begin.line, diType, if (isMemberVar) { 1 } else { 0 }, 1, createExpression(expr),
+                    LLVMNullMetadata(), 0u32)
+            }
+        }
+        LLVMSetGlobalMetadata(cgMod.GetLLVMContext(), llvmValue, "dbg", globalVar)
+        cgMod.GetCGContext().AddGlobalsOfCompileUnit(variable.GetIdentifierWithoutPrefix())
     }
 
     public func CreateAnonymousTypeForGenericType(typeTemplate: LLVMValueRef, ty: Type): Unit {
@@ -2078,6 +2122,26 @@ private func IsBoxSelf(ty: Type, cgMod: CGModule): Bool {
 
 private func IsParaInitFunc(chirFunc: Function): Bool {
     return chirFunc.GetIdentifierWithoutPrefix().startsWith(MANGLE_CANGJIE_PREFIX + MANGLE_FUNC_PARA_INIT_PREFIX)
+}
+
+// Mirrors CodeGen/DIBuilder.cpp:58-75 GenerateLinkageName.
+private func GenerateLinkageName(variable: GlobalVar): String {
+    var linkageName = variable.GetPackageName() + "::"
+    if (variable.TestAttr(Attribute.STATIC)) {
+        let parent = variable.GetParentCustomTypeDef().getOrThrow()
+        linkageName += parent.GetSrcCodeIdentifier()
+        let genericTypeParams = parent.GetGenericTypeParams()
+        if (!genericTypeParams.isEmpty()) {
+            linkageName += "<"
+            for (genericTy in genericTypeParams) {
+                linkageName += genericTy.GetSrcCodeIdentifier() + ","
+            }
+            linkageName = linkageName[0..linkageName.size - 1]
+            linkageName += ">"
+        }
+        linkageName += "::"
+    }
+    return linkageName + variable.GetSrcCodeIdentifier()
 }
 
 private func GenerateGenericFuncName(funcName: String, genericTypeParams: ArrayList<GenericType>): String {

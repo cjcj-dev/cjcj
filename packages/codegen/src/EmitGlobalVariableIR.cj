@@ -19,6 +19,7 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
         let globalValue = cgMod.GetOrInsertGlobalVariable(chirGV)
         cgValue = globalValue
         let rawGlobal = globalValue.GetRawValue()
+        cgMod.GetDIBuilder().getOrThrow().CreateGlobalVar(chirGV)
         var preferredAlignment = cgMod.GetModuleTargetData().GetPrefTypeAlignment(unsafe { LLVMTypeOf(rawGlobal) })
         if (let Some(chirTy) <- chirGV.GetType()) {
             if (let Some(typeAlignment) <- CGType.GetOrCreate(cgMod, chirTy).GetAlign()) {
