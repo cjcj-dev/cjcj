@@ -639,10 +639,13 @@ public class CompilerDiagnosticHandler <: DiagnosticHandler {
     }
 
     public func CanBeEmitted(category: DiagCategory): Bool {
-        if (let Some(first) <- diag.FirstErrorCategory()) {
-            return DiagCategoryIndex(category) <= DiagCategoryIndex(first)
-        }
-        return true
+        return diag.LockFirstErrorCategory({ =>
+            if (let Some(first) <- diag.FirstErrorCategory()) {
+                DiagCategoryIndex(category) <= DiagCategoryIndex(first)
+            } else {
+                true
+            }
+        })
     }
 
     public override func HandleDiagnose(myDiag: Diagnostic): Unit {
@@ -1140,6 +1143,7 @@ public class DiagnosticEngine <: Resource {
     public func GetIsDumpErrCnt(): Bool { return impl.GetIsDumpErrCnt() }
     public func SetSourceManager(sm: SourceManager): Unit { impl.SetSourceManager(sm) }
     public func GetSourceManager(): SourceManager { return impl.GetSourceManager() }
+    public func LockFirstErrorCategory<T>(action: () -> T): T { return impl.LockFirstErrorCategory(action) }
     public func FirstErrorCategory(): Option<DiagCategory> { return impl.FirstErrorCategory() }
     public func GetDisableDiagDeep(): Int64 { return impl.GetDisableDiagDeep() }
     public func GetStoredDiags(): Array<Diagnostic> { return impl.GetStoredDiags() }
