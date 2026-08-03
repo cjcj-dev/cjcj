@@ -1254,6 +1254,7 @@ private func GenerateFieldsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoNam
             LLVMSetLinkage(fieldsGlobal, LLVMLinkageValue(LLVMLinkage.Private))
             addAttribute(fieldsGlobal, CJTI_FIELDS_ATTR)
             LLVMSetGlobalConstant(fieldsGlobal, 1)
+            LLVMSetUnnamedAddress(fieldsGlobal, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr))
         }
     }
     return unsafe { LLVMConstBitCast(fieldsGlobal, i8PtrType) }
