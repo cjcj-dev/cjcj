@@ -203,7 +203,9 @@ public class Parameter <: Value {
         super(ty, id, ValueKind.KIND_PARAMETER)
         this.ownerFunc = ownerFunc
         if (let Some(fn) <- ownerFunc) {
-            fn.AddParam(this)
+            if (!fn.TestAttr(Attribute.PREVIOUSLY_DESERIALIZED)) {
+                fn.AddParam(this)
+            }
         }
     }
 
