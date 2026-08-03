@@ -1220,6 +1220,7 @@ public class TypeCast <: Expression {
         let clonedResult = cloned.GetResult().getOrThrow()
         clonedResult.AppendAttributeInfo(resultValue.GetAttributeInfo())
         clonedResult.SetEnumCaseIndex(resultValue.GetEnumCaseIndex())
+        cloned.SetNeedCheckCast(GetNeedCheckCast())
         return cloned
     }
 }
