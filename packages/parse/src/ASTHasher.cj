@@ -1293,13 +1293,13 @@ private class ASTHasherImpl {
     }
 
     public func HashSpecificModifiers(decl: Decl, kinds: Array<TokenKind>): Unit {
-        let mods = ArrayList<UInt8>()
+        let mods = ArrayList<Int64>()
         var impliedOpen = false
         var hasOpen = false
         var hashVisibilityModifier = false
         for (mod in decl.modifiers) {
             if (In(kinds, mod.modifier)) {
-                mods.add(UInt8(TokenKindIndex(mod.modifier)))
+                mods.add(TokenKindIndex(mod.modifier))
                 if (mod.modifier == TokenKind.ABSTRACT) {
                     impliedOpen = true
                 } else if (mod.modifier == TokenKind.OPEN) {
@@ -1317,17 +1317,17 @@ private class ASTHasherImpl {
             if (let Some(outer) <- decl.outerDecl) {
                 if (outer.astKind == ASTKind.INTERFACE_DECL) {
                     hashVisibilityModifier = true
-                    mods.add(UInt8(TokenKindIndex(TokenKind.PUBLIC)))
+                    mods.add(TokenKindIndex(TokenKind.PUBLIC))
                 }
             }
         }
         if (In(kinds, TokenKind.INTERNAL) && !hashVisibilityModifier) {
-            mods.add(UInt8(TokenKindIndex(TokenKind.INTERNAL)))
+            mods.add(TokenKindIndex(TokenKind.INTERNAL))
         }
         if (In(kinds, TokenKind.OPEN) && impliedOpen && !hasOpen) {
-            mods.add(UInt8(TokenKindIndex(TokenKind.OPEN)))
+            mods.add(TokenKindIndex(TokenKind.OPEN))
         }
-        sort(mods, by: { left: UInt8, right: UInt8 =>
+        sort(mods, by: { left: Int64, right: Int64 =>
             if (left < right) {
                 Ordering.LT
             } else if (left > right) {
