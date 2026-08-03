@@ -252,13 +252,13 @@ public func GetTypeAlignment(cgMod: CGModule, chirTy: Type): UInt64 {
     }
 }
 
-public func IsNonPublicCFunc(funcTy: FuncType, func: Value): Bool {
+public func IsNonPublicCFunc(funcTy: FuncType, `func`: Value): Bool {
     // When incremental compile is enabled, foreign function is regarded as
     // imported variable, it should not be wrapped.
-    if (func.TestAttr(Attribute.FOREIGN)) {
+    if (`func`.TestAttr(Attribute.FOREIGN)) {
         return false
     }
-    return funcTy.IsCFunc() && func.TestAttr(Attribute.PRIVATE)
+    return funcTy.IsCFunc() && `func`.TestAttr(Attribute.PRIVATE)
 }
 
 public func IsZeroSizedTypeInC(cgMod: CGModule, chirTy: Type): Bool {
