@@ -347,7 +347,7 @@ private func sizeFromEnv(raw: String): Option<UIntNative> {
     }
     let numberPart = value[0..(value.size - UNIT_LEN)]
     let parsed = try {
-        Int64.parse(numberPart)
+        Int32.parse(numberPart)
     } catch (e: Exception) {
         return None
     }
