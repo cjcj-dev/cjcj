@@ -1,6 +1,7 @@
 package cjcj::parse
 
 import std.collection.*
+import cjcj::ast.INVALID_IDENTIFIER
 
 extend ParserImpl {
     public func ParseType(): Type {
@@ -83,6 +84,10 @@ extend ParserImpl {
         let ref = RefType()
         try (cs = ChainScope(this, ref)) {
             ref.ref.identifier = ExpectIdentifierWithPos(ref)
+            if (ref.ref.identifier.Val() == INVALID_IDENTIFIER) {
+                ref.EnableAttr(Attribute.IS_BROKEN)
+                TryConsumeUntilAny([TokenKind.LT])
+            }
             ref.begin = ref.ref.identifier.Begin()
             if (!onlyRef && Skip(TokenKind.LT)) {
                 ref.leftAnglePos = lastToken.Begin()
@@ -109,12 +114,12 @@ extend ParserImpl {
                 q.field = ExpectIdentifierWithPos(q)
                 if (Skip(TokenKind.LT)) {
                     q.leftAnglePos = lastToken.Begin()
-                    while (!Seeing(TokenKind.END) && !Seeing(TokenKind.GT)) {
-                        q.typeArguments.add(ParseType())
-                        if (!Skip(TokenKind.COMMA)) { break }
+                    let parsed = ParseTypeArguments()
+                    for (typeArgument in parsed[1]) {
+                        q.typeArguments.add(typeArgument)
                     }
-                    q.rightAnglePos = Expect(TokenKind.GT, "expected '>' after type arguments").Begin()
-                    q.end = q.rightAnglePos + 1
+                    q.rightAnglePos = lastToken.Begin()
+                    q.end = lastToken.End()
                 } else {
                     q.end = q.field.End()
                 }

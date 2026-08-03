@@ -12,7 +12,9 @@ extend ParserImpl {
     }
 
     public func ParsePattern(attributes: ArrayList<Attribute>, isVar: Bool, inDecl: Bool): Pattern {
-        if (SeeingConstPatternStart()) {
+        if (SeeingAny([TokenKind.BOOL_LITERAL, TokenKind.INTEGER_LITERAL, TokenKind.RUNE_BYTE_LITERAL,
+            TokenKind.STRING_LITERAL, TokenKind.MULTILINE_STRING, TokenKind.MULTILINE_RAW_STRING, TokenKind.SUB,
+            TokenKind.RUNE_LITERAL, TokenKind.FLOAT_LITERAL]) || Seeing([TokenKind.LPAREN, TokenKind.RPAREN])) {
             return ParseConstPattern()
         }
         if (Skip(TokenKind.WILDCARD)) {
@@ -34,10 +36,6 @@ extend ParserImpl {
         let token = Peek()
         ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_pattern, token, ConvertToken(token)).Emit()
         return InvalidPattern(token.Begin())
-    }
-
-    private func SeeingConstPatternStart(): Bool {
-        return SeeingLiteral() || Seeing(TokenKind.SUB) || Seeing([TokenKind.LPAREN, TokenKind.RPAREN])
     }
 
     public func ParseConstPattern(): ConstPattern {

@@ -194,8 +194,7 @@ public class CJNATIVEBackend <: Backend {
         if (driverOptions.IsLTOEnabled()) {
             let inputs = ArrayList<TempFileInfo>()
             for (file in tempBitCodeFiles) {
-                let tempFile = TempFileInfo(fileName: file.fileName, filePath: file.filePath, rawPath: file.rawPath,
-                    isFrontendOutput: file.isFrontendOutput, isForeignInput: file.isForeignInput)
+                var tempFile = file
                 if (!file.isForeignInput) {
                     let cachedFile = driverOptions.GetHashedObjFileName(FileUtil.GetFileNameWithoutExtension(file.fileName)) + ".bc"
                     tempFile.filePath = cachedFile
@@ -212,13 +211,17 @@ public class CJNATIVEBackend <: Backend {
             }
             return false
         }
-        for (file in tempBitCodeFiles) {
+        var fileIdx: Int64 = 0
+        while (fileIdx < tempBitCodeFiles.size) {
+            var file = tempBitCodeFiles[fileIdx]
             let objFile = driverOptions.GetHashedObjFileName(file.fileName) + ".o"
             if (!FileUtil.FileExist(objFile)) {
                 eprintln("error: The cache directory is incomplete.")
                 return false
             }
             file.filePath = objFile
+            tempBitCodeFiles[fileIdx] = file
+            fileIdx++
         }
         if (let Some(toolChain) <- TC) {
             return toolChain.ProcessGeneration(tempBitCodeFiles)

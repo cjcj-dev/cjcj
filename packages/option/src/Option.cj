@@ -133,7 +133,7 @@ public class OrderedInput {
     }
 }
 
-public class TempFileInfo {
+public struct TempFileInfo {
     public var fileName: String
     public var filePath: String
     public var rawPath: String
