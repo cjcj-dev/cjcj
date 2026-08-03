@@ -458,6 +458,15 @@ public class ASTWriter {
         let fullPkgName = builder.CreateString(pkg.fullPackageName)
         let pkgDepInfo = builder.CreateString(packageDepInfo)
         let moduleName = builder.CreateString("")
+        let packageKind = if (pkg.isMacroPackage) {
+            1u8
+        } else if (pkg.TestAttr(Attribute.TOOL_ADD)) {
+            2u8
+        } else if (pkg.TestAttr(Attribute.MOCK_SUPPORTED)) {
+            3u8
+        } else {
+            0u8
+        }
         let cjoVersion = CjoVersionBytes()
 
         builder.StartTable(17)
@@ -466,7 +475,7 @@ public class ASTWriter {
         builder.AddOffset(14, fileInfoVec)
         builder.AddOffset(13, moduleName)
         builder.AddU8(12, PackageAccess(pkg.accessible))
-        builder.AddU8(11, if (pkg.isMacroPackage) { 1u8 } else { 0u8 })
+        builder.AddU8(11, packageKind)
         builder.AddOffset(9, exprsVec)
         builder.AddOffset(8, declsVec)
         builder.AddOffset(7, typesVec)
