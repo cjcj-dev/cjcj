@@ -8,7 +8,7 @@ import cjcj::basic.Linkage
 import cjcj::mangle.ASTMangler
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
-import cjcj::modules.SemaCjoManager
+import cjcj::modules.{INVALID_FORMAT_INDEX, SemaCjoManager}
 import cjcj::modules.CreateFullId as CreateModuleFullId
 import cjcj::modules.CreateFeatureId as CreateModuleFeatureId
 import cjcj::modules.CreateFeaturesDirective as CreateModuleFeaturesDirective
@@ -821,7 +821,11 @@ public class ASTWriter {
         }
         let attributes = builder.CreateVectorU64(SaveAttributes(attrs))
         let annotations = SaveAnnotations(decl)
-        let typeIndex = SaveDeclType(decl)
+        let typeIndex = if (attrs.TestAttr(Attribute.UNREACHABLE)) {
+            INVALID_FORMAT_INDEX
+        } else {
+            SaveDeclType(decl)
+        }
         let info = SaveDeclInfo(decl)
         if (!fileIdToIndex.contains(decl.begin.fileID)) {
             let declFile = decl.curFile.getOrThrow()
