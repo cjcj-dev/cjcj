@@ -694,7 +694,7 @@ private class ASTHasherImpl {
         SuperHash(lce.siExpr, whatTypeToHash: whatTypeToHash)
         SuperHash(lce.stringValue, whatTypeToHash: whatTypeToHash)
         for (cp in lce.codepoint) {
-            SuperHash(cp, whatTypeToHash: whatTypeToHash)
+            SuperHash(UInt64(cp), whatTypeToHash: whatTypeToHash)
         }
         SuperHash(Int64(LitConstKindIndex(lce.kind)), whatTypeToHash: whatTypeToHash)
         SuperHash(lce.stringKind, whatTypeToHash: whatTypeToHash)
