@@ -423,7 +423,7 @@ private func DefineConcreteTypeInfoIfNeeded(cgMod: CGModule, chirTy: Type, typeI
     }
     if (chirTy.IsRawArray()) {
         if (cgMod.GetLLVMModule().isSome()) {
-            let initializer = BuildRawArrayTypeInfoInitializer(cgMod, chirTy, typeInfoTy)
+            let initializer = BuildRawArrayTypeInfoInitializer(cgMod, chirTy, typeInfo, typeInfoTy)
             unsafe {
                 LLVMSetInitializer(typeInfo, initializer)
                 LLVMSetLinkage(typeInfo, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
@@ -530,7 +530,8 @@ private func IsImportedCustomType(chirTy: Type): Bool {
     return false
 }
 
-private func BuildRawArrayTypeInfoInitializer(cgMod: CGModule, chirTy: Type, typeInfoTy: LLVMTypeRef): LLVMValueRef {
+private func BuildRawArrayTypeInfoInitializer(cgMod: CGModule, chirTy: Type, typeInfo: LLVMValueRef,
+    typeInfoTy: LLVMTypeRef): LLVMValueRef {
     let contextHandle = cgMod.GetLLVMContext()
     let context = contextHandle.raw
     let i8Type = unsafe { LLVMInt8TypeInContext(context) }
@@ -545,6 +546,10 @@ private func BuildRawArrayTypeInfoInitializer(cgMod: CGModule, chirTy: Type, typ
     let rawArrayTy = (chirTy as RawArrayType) ?? throw IllegalArgumentException("expected raw array type info")
     let elementTy = rawArrayTy.GetElementType().StripAllRefs()
     let elementCGType = CGType.GetOrCreate(cgMod, elementTy)
+    let elementTI = elementCGType.GetOrCreateTypeInfo()
+    if (elementCGType.IsStaticGI()) {
+        cgMod.GetCGContext().AddDependentPartialOrderOfTypes(elementTI, typeInfo)
+    }
     let elementSize = if (let Some(size) <- elementCGType.GetSize()) { UInt64(size) } else { 0u64 }
     let typeTemplateTy = CGType.GetOrCreateTypeTemplateType(contextHandle)
     let rawArrayTypeTemplate = GetOrInsertCodeGenGlobal(cgMod, "RawArray.tt", typeTemplateTy)
@@ -564,7 +569,7 @@ private func BuildRawArrayTypeInfoInitializer(cgMod: CGModule, chirTy: Type, typ
     typeInfoValues.add(unsafe { LLVMConstBitCast(rawArrayTypeTemplate, i8PtrType) })
     typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
     typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
-    typeInfoValues.add(CGType.GetOrCreate(cgMod, elementTy).GetOrCreateTypeInfo())
+    typeInfoValues.add(elementTI)
     typeInfoValues.add(unsafe { LLVMConstNull(extensionDefPtrPtrType) })
     typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
     typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
