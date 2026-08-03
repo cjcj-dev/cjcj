@@ -574,6 +574,7 @@ public class RuntimeInit {
             if (!opened.opened) {
                 return false
             }
+            handle = Some(opened)
             runtimeReleaseFunc = GetMethodPointer(opened, CJ_RELEASE_HANDLE_FROM_C)
             // RT_ISOLATE_API_SPEC.md §3.2/§5 slice 2: the hybrid runtime exposes an
             // instance scheduler for the macro task. Its stack values come from the same
@@ -614,7 +615,6 @@ public class RuntimeInit {
                     return false
                 }
             }
-            handle = Some(opened)
         }
         return true
     }
