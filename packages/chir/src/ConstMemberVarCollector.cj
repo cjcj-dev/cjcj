@@ -114,9 +114,7 @@ public class ConstMemberVarCollector {
 
     public static func GetSourceTargetRecursively(value: Value): Value {
         var current = value
-        var guard: Int64 = 0
-        while (guard < 256) {
-            guard++
+        while (true) {
             if (let Some(local) <- current.AsLocalVar()) {
                 if (let Some(expr) <- local.GetExpr()) {
                     if (IsForwardingExpression(expr) && expr.GetNumOfOperands() > 0) {
@@ -127,7 +125,6 @@ public class ConstMemberVarCollector {
             }
             return current
         }
-        return current
     }
 
     private func BuildCandidateMap(def: CustomTypeDef): HashMap<Int64, MemberInfo> {
