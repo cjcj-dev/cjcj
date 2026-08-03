@@ -425,9 +425,7 @@ class GenericInstantiationManagerImpl {
     }
 
     public func GenericInstantiatePackage(pkg: Package, resetGlobalState!: Bool = true): Unit {
-        if (resetGlobalState) {
-            ResetGenericInstantiationStage()
-        }
+        PartialInstantiation.ResetGlobalMap()
         curPkg = pkg
         InstantiatedExtendRecorder(this, ci.typeManager).Record(pkg)
         for (decl in pkg.genericInstantiatedDecls) {
