@@ -1018,6 +1018,14 @@ public open class BaseMangler {
         return MangleSemaType(adapter.ConvertTy(ty))
     }
 
+    // C++ src/Mangle/BaseMangler.cpp:258-296.
+    public func MangleType(ty: Ty): String {
+        if (ty.kind == TypeKind.TYPE) {
+            return ""
+        }
+        return MangleAstSemanticType(ty)
+    }
+
     public func MangleSemaType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare!: Bool = false,
         isCollectGTy!: Bool = true): String {
         if (let Some(primitive) <- PrimitiveTypeMangle(ty.kind)) {

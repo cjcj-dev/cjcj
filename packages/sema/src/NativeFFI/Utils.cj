@@ -541,7 +541,7 @@ public func GetMangledMethodName(mangler: BaseMangler, params: ArrayList<FuncPar
                 paramTy = GetGenericInstTy(config, rawParamTy, typeManager)
             }
         }
-        name += mangler.MangleAstSemanticType(paramTy).replace(".", "_")
+        name += mangler.MangleType(paramTy).replace(".", "_")
     }
     return name
 }
