@@ -64,7 +64,7 @@ private func ConfigureInvocation(invocation: CompilerInvocation, sourcePath: Str
     opts.UpdateCachedDirName("default")
 }
 
-public func CompileSource(code: String, stage!: CompileStage = CompileStage.SEMA): TestCompileResult {
+public func CompileSource(code: String, stage!: CompileStage = CompileStage.GENERIC_INSTANTIATION): TestCompileResult {
     let sourcePath = NewTestSourcePath()
     let _ = FileUtil.WriteToFile(sourcePath, code)
     let diag = DiagnosticEngine()
