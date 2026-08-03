@@ -5,7 +5,6 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {requirePrivateStage} from '../build/lib/package-safety.mjs';
-import {stickyPreflight} from '../build/lib/std-variants.mjs';
 
 const required = name => {
   const value = argv[name];
@@ -19,34 +18,10 @@ const platform = required('platform');
 const outdir = required('outdir');
 const runtimeLib = typeof argv['runtime-lib'] === 'string' ? argv['runtime-lib'] : '';
 const runtimeRoot = typeof argv['runtime-root'] === 'string' ? argv['runtime-root'] : '';
-const stickyStd = typeof argv['sticky-std'] === 'string' ? argv['sticky-std'] : '';
-
 async function exists(file, kind = 'file') {
   try { const stat = await fs.stat(file); return kind === 'dir' ? stat.isDirectory() : stat.isFile(); } catch { return false; }
 }
 
-async function sha256(file) {
-  return crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
-}
-
-async function matchingFiles(directory, pattern) {
-  if (!await exists(directory, 'dir')) return [];
-  return (await fs.readdir(directory)).filter(name => pattern.test(name)).sort();
-}
-
-async function materializeDirectoryLink(directory) {
-  const stat = await fs.lstat(directory).catch(() => null);
-  if (!stat?.isSymbolicLink()) return;
-  const source = await fs.realpath(directory);
-  await fs.rm(directory, {force: true});
-  await fs.cp(source, directory, {recursive: true});
-}
-
-function requireSameFiles(label, actual, expected) {
-  if (actual.join('\n') !== expected.join('\n')) {
-    throw new Error(`${label} file set mismatch: actual=${actual.join(',')} expected=${expected.join(',')}`);
-  }
-}
 if (!await exists(sdk, 'dir')) { console.error(`SDK dir not found: ${sdk}`); process.exit(2); }
 if (!await exists(binary)) { console.error(`cjc binary not found: ${binary}`); process.exit(2); }
 if (runtimeLib && !await exists(runtimeLib)) { console.error(`runtime library not found: ${runtimeLib}`); process.exit(2); }
@@ -61,14 +36,6 @@ const platforms = {
 };
 if (!platforms[platform]) { console.error(`unsupported --platform: ${platform}`); process.exit(2); }
 const [runtimeDir, archiveType, exeSuffix] = platforms[platform];
-if (!stickyStd) {
-  console.error(`${platform} packaging requires an attested sticky std closure`);
-  process.exit(2);
-}
-if (stickyStd && !await exists(stickyStd, 'dir')) {
-  console.error(`sticky std directory not found: ${stickyStd}`);
-  process.exit(2);
-}
 const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
 const isWindows = platform === 'windows-x64';
 const packageName = `cjcj-${version}-${platform}`;
@@ -78,7 +45,7 @@ const stage = path.join(outputRoot, packageName);
 await fs.mkdir(outputRoot, {recursive: true});
 await fs.rm(stage, {recursive: true, force: true});
 
-console.log(`[1/7] copy SDK tree -> ${stage}`);
+console.log(`[1/6] copy SDK tree -> ${stage}`);
 const sdkSource = await fs.realpath(sdk);
 if (isWindows) await fs.cp(sdkSource, stage, {recursive: true, dereference: true});
 else {
@@ -88,165 +55,7 @@ else {
 await requirePrivateStage(stage, outputRoot, sdkSource);
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 
-console.log('[2/7] install the single sticky std closure');
-if (stickyStd) {
-  const stickyManifestPath = path.join(stickyStd, 'STICKY_STD.json');
-  if (!await exists(stickyManifestPath)) throw new Error(`sticky std manifest missing: ${stickyManifestPath}`);
-  const stickyManifest = JSON.parse(await fs.readFile(stickyManifestPath, 'utf8'));
-  if (stickyManifest.closure !== 'single-sticky' || stickyManifest.role !== 'final' ||
-      stickyManifest.provenance !== 'official-cjc-sticky-lowering') {
-    throw new Error(`sticky std manifest role mismatch: closure=${stickyManifest.closure || '<missing>'} `
-      + `role=${stickyManifest.role || '<missing>'} provenance=${stickyManifest.provenance || '<missing>'}`);
-  }
-  const managedSection = stickyManifest.managed;
-  let managedFiles = [];
-  let managedHashes = {};
-  if (managedSection !== undefined) {
-    if (!Array.isArray(managedSection.files) || managedSection.files.length !== new Set(managedSection.files).size ||
-        !managedSection.sha256 || Array.isArray(managedSection.sha256) || typeof managedSection.sha256 !== 'object') {
-      throw new Error('managed must contain unique files[] and sha256{}');
-    }
-    managedFiles = [...managedSection.files].sort();
-    managedHashes = managedSection.sha256;
-    if (managedFiles.some(file => typeof file !== 'string' || file.includes('\\') ||
-        file.split('/').some(component => component === '' || component === '.' || component === '..')) ||
-        managedFiles.join('\n') !== Object.keys(managedHashes).sort().join('\n')) {
-      throw new Error('managed files must be canonical relative paths with matching sha256 keys');
-    }
-  }
-  const windowsManagedPrefix = `runtime/lib/${runtimeDir}/`;
-  const windowsStdDllPattern = /^libcangjie-std(?:[-.].*)?\.dll$/;
-  if (isWindows && (managedFiles.length === 0 || managedFiles.some(file =>
-    !file.startsWith(windowsManagedPrefix) || !windowsStdDllPattern.test(file.slice(windowsManagedPrefix.length))))) {
-    throw new Error('Windows sticky closure requires a nonempty exact managed std DLL inventory');
-  }
-  const runtimeSourceSha = runtimeLib
-    ? path.join(path.dirname(runtimeLib), 'SOURCE_SHA')
-    : path.join(runtimeRoot, 'SOURCE_SHA');
-  if ((!runtimeLib && !runtimeRoot) || !await exists(runtimeSourceSha)) {
-    throw new Error(`${platform} sticky packaging requires runtime provenance at ${runtimeSourceSha}`);
-  }
-  const runtimeRef = (await fs.readFile(runtimeSourceSha, 'utf8')).trim();
-  if (!/^[0-9a-f]{40}$/.test(runtimeRef)) {
-    throw new Error(`invalid runtime source ref in ${runtimeSourceSha}: ${runtimeRef || '<empty>'}`);
-  }
-  if (runtimeRef !== stickyManifest.sourceRef) {
-    throw new Error(`runtime/std source mismatch: runtime=${runtimeRef} std=${stickyManifest.sourceRef}`);
-  }
-  const optimizedLibraries = path.join(stage, 'lib', 'cjcj-optimization', runtimeDir);
-  const standardLibraries = path.join(stage, 'lib', runtimeDir);
-  const runtimeLibraries = path.join(stage, 'runtime', 'lib', runtimeDir);
-  await materializeDirectoryLink(path.join(stage, 'modules'));
-  const stdModules = path.join(stage, 'modules', runtimeDir, 'std');
-  const libraryPattern = /^libcangjie-std.*\.(?:a|so|dylib)$/;
-  const seedArtifacts = [];
-  for (const directory of [standardLibraries, runtimeLibraries, optimizedLibraries]) {
-    for (const name of await matchingFiles(directory, libraryPattern)) {
-      const file = path.join(directory, name);
-      seedArtifacts.push({file: path.relative(stage, file), sha256: await sha256(file)});
-    }
-  }
-  for (const name of await matchingFiles(stdModules, /\.cjo$/)) {
-    const file = path.join(stdModules, name);
-    seedArtifacts.push({file: path.relative(stage, file), sha256: await sha256(file)});
-  }
-  for (const name of managedFiles) {
-    const file = path.join(stage, name);
-    if (await exists(file)) seedArtifacts.push({file: name, sha256: await sha256(file)});
-  }
-
-  await fs.rm(path.join(stage, 'lib', 'cjcj-optimization'), {recursive: true, force: true});
-  for (const directory of [standardLibraries, runtimeLibraries]) {
-    for (const name of await matchingFiles(directory, libraryPattern)) {
-      await fs.rm(path.join(directory, name), {force: true});
-    }
-  }
-  await fs.rm(stdModules, {recursive: true, force: true});
-  for (const name of managedFiles) await fs.rm(path.join(stage, name), {force: true});
-  await fs.cp(stickyStd, stage, {recursive: true, force: true});
-  const finalLibraries = [...stickyManifest.sticky.files].sort();
-  const finalSharedLibraries = finalLibraries.filter(name => name.endsWith('.so') || name.endsWith('.dylib'));
-  const finalCjos = [...stickyManifest.cjo.files].sort();
-  for (const name of finalSharedLibraries) {
-      await fs.copyFile(path.join(standardLibraries, name), path.join(runtimeLibraries, name));
-  }
-
-  requireSameFiles('packaged std libraries', await matchingFiles(standardLibraries, libraryPattern), finalLibraries);
-  requireSameFiles('packaged runtime std libraries',
-    await matchingFiles(runtimeLibraries, libraryPattern), finalSharedLibraries);
-  requireSameFiles('packaged std CJO', await matchingFiles(stdModules, /\.cjo$/), finalCjos);
-  if (isWindows) {
-    const finalManagedDlls = managedFiles.map(name => name.slice(windowsManagedPrefix.length));
-    requireSameFiles('packaged managed Windows std DLLs',
-      await matchingFiles(runtimeLibraries, windowsStdDllPattern), finalManagedDlls);
-  }
-  const shippedHashes = [];
-  for (const name of finalLibraries) {
-    const digest = await sha256(path.join(standardLibraries, name));
-    if (digest !== stickyManifest.sticky.sha256[name]) {
-      throw new Error(`packaged std SHA mismatch: ${name} ${digest} != ${stickyManifest.sticky.sha256[name]}`);
-    }
-    shippedHashes.push(digest);
-  }
-  for (const name of finalSharedLibraries) {
-    const digest = await sha256(path.join(runtimeLibraries, name));
-    if (digest !== stickyManifest.sticky.sha256[name]) {
-      throw new Error(`packaged runtime std SHA mismatch: ${name}`);
-    }
-    shippedHashes.push(digest);
-  }
-  for (const name of finalCjos) {
-    const digest = await sha256(path.join(stdModules, name));
-    if (digest !== stickyManifest.cjo.sha256[name]) {
-      throw new Error(`packaged std CJO SHA mismatch: ${name}`);
-    }
-    shippedHashes.push(digest);
-  }
-  for (const name of managedFiles) {
-    const digest = await sha256(path.join(stage, name));
-    if (digest !== managedHashes[name]) {
-      throw new Error(`packaged managed artifact SHA mismatch: ${name} ${digest} != ${managedHashes[name]}`);
-    }
-    shippedHashes.push(digest);
-  }
-  const finalHashes = new Set([
-    ...Object.values(stickyManifest.sticky.sha256), ...Object.values(stickyManifest.cjo.sha256),
-    ...Object.values(managedHashes),
-  ]);
-  const seedOnlyHashes = new Set(seedArtifacts.map(item => item.sha256).filter(hash => !finalHashes.has(hash)));
-  const seedShaResiduals = shippedHashes.filter(hash => seedOnlyHashes.has(hash));
-  if (seedShaResiduals.length !== 0) {
-    throw new Error(`stock SDK std seed SHA survived purge: ${seedShaResiduals.join(',')}`);
-  }
-  if (isWindows) {
-    console.log(`  sticky std: managed=${managedFiles.length} final-checker=pending`);
-  } else if (platform.startsWith('linux-')) {
-    const libPreflight = stickyPreflight(standardLibraries);
-    const runtimePreflight = stickyPreflight(runtimeLibraries);
-    console.log(`  sticky std: lib=${libPreflight.loggedBaseSymbols}/${libPreflight.stickyRelocations} `
-      + `runtime=${runtimePreflight.loggedBaseSymbols}/${runtimePreflight.stickyRelocations}`);
-  } else {
-    console.log('  sticky std: Mach-O final-checker=pending');
-  }
-  console.log(`  stock SDK std seed: artifacts=${seedArtifacts.length} unique_sha=${seedOnlyHashes.size} residual=0`);
-  await fs.writeFile(path.join(stage, 'CJCJ_RELEASE.json'), `${JSON.stringify({
-    runtimeRef,
-    stickyStd: {
-      closure: stickyManifest.closure,
-      role: stickyManifest.role,
-      provenance: stickyManifest.provenance,
-      cjcSha256: stickyManifest.cjcSha256,
-      libraries: finalLibraries.length,
-      cjos: finalCjos.length,
-      managed: managedFiles.length,
-    },
-    stockSdkStdSeed: {artifactsPurged: seedArtifacts.length, uniqueSha256: seedOnlyHashes.size, residual: 0},
-  }, null, 2)}\n`);
-} else {
-  console.log('  skip: this target has no sticky std variant');
-}
-
-console.log('[3/7] install our compiler as bin/cjc');
+console.log('[2/6] install our compiler as bin/cjc');
 const installed = path.join(stage, `bin/cjc${exeSuffix}`);
 await Promise.all([
   fs.rm(path.join(stage, 'bin', 'cjc'), {force: true}),
@@ -255,7 +64,7 @@ await Promise.all([
 await fs.copyFile(binary, installed);
 await fs.chmod(installed, 0o755);
 
-console.log('[4/7] swap in patched runtime');
+console.log('[3/6] swap in patched runtime');
 if (isWindows) {
   if (!runtimeRoot) { console.error('  ERROR: Windows packaging requires --runtime-root'); process.exit(3); }
   for (const relative of [path.join('runtime', 'lib', runtimeDir), path.join('lib', runtimeDir)]) {
@@ -282,7 +91,7 @@ if (isWindows) {
   console.log('  skip: no --runtime-lib (stock runtime; only safe if cjc name exclusion is inapplicable)');
 }
 
-console.log('[5/7] set relative runtime lookup paths');
+console.log('[4/6] set relative runtime lookup paths');
 if (platform.startsWith('linux-')) {
   const available = await $({nothrow: true, quiet: true})`command -v patchelf`;
   if (available.exitCode !== 0) { console.error('  ERROR: patchelf not found'); process.exit(3); }
@@ -343,11 +152,7 @@ if (platform.startsWith('linux-')) {
   console.log('  Windows resolves packaged DLLs through runtime/lib and PATH');
 }
 
-console.log('[sticky] verify final standard-library closure');
-const checker = path.resolve(import.meta.dirname, '..', 'tools', 'check_sticky_closure.py');
-await $({stdio: 'inherit'})`python3 ${checker} --manifest ${path.join(stage, 'STICKY_STD.json')} --sdk ${stage} --platform ${runtimeDir}`;
-
-console.log('[6/7] archive');
+console.log('[5/6] archive');
 const archivePath = path.join(outdir, `${packageName}.${archiveType === 'tar' ? 'tar.gz' : 'zip'}`);
 if (archiveType === 'tar') await $({stdio: 'inherit'})`tar -C ${outdir} -czf ${archivePath} ${packageName}`;
 else {
@@ -359,7 +164,7 @@ else {
   await $({stdio: 'inherit'})`pwsh -NoLogo -NoProfile -Command ${command}`;
 }
 
-console.log('[7/7] sha256');
+console.log('[6/6] sha256');
 const archiveDigest = crypto.createHash('sha256').update(await fs.readFile(archivePath)).digest('hex');
 const digest = `${archiveDigest}  ${path.basename(archivePath)}\n`;
 await fs.writeFile(`${archivePath}.sha256`, digest);
