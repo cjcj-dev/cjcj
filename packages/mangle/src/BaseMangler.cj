@@ -1018,14 +1018,6 @@ public open class BaseMangler {
         return MangleSemaType(adapter.ConvertTy(ty))
     }
 
-    // C++ src/Mangle/BaseMangler.cpp:258-296.
-    public func MangleType(ty: Ty): String {
-        if (ty.kind == TypeKind.TYPE) {
-            return ""
-        }
-        return MangleAstSemanticType(ty)
-    }
-
     public func MangleSemaType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare!: Bool = false,
         isCollectGTy!: Bool = true): String {
         if (let Some(primitive) <- PrimitiveTypeMangle(ty.kind)) {
@@ -1807,4 +1799,13 @@ public open class BaseMangler {
             right--
         }
     }
+}
+
+// C++ src/Mangle/BaseMangler.cpp:258-296. The receiver is explicit because a
+// BaseMangler member named MangleType would hide the existing MangleType class.
+public func MangleType(mangler: BaseMangler, ty: Ty): String {
+    if (ty.kind == TypeKind.TYPE) {
+        return ""
+    }
+    return mangler.MangleAstSemanticType(ty)
 }

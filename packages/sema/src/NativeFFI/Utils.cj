@@ -4,7 +4,7 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.LambdaPattern as BasicLambdaPattern
-import cjcj::mangle.BaseMangler
+import cjcj::mangle.{BaseMangler, MangleType}
 import cjcj::modules.{ImportManager, SemaImportManager}
 import cjcj::option.GetFileName as OptionGetFileName
 import cjcj::option.IsDir as OptionIsDir
@@ -541,7 +541,7 @@ public func GetMangledMethodName(mangler: BaseMangler, params: ArrayList<FuncPar
                 paramTy = GetGenericInstTy(config, rawParamTy, typeManager)
             }
         }
-        name += mangler.MangleType(paramTy).replace(".", "_")
+        name += MangleType(mangler, paramTy).replace(".", "_")
     }
     return name
 }
