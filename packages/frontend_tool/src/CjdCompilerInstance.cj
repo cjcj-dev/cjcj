@@ -37,7 +37,7 @@ public class CjdCompilerInstance <: DefaultCompilerInstance {
         let recorder = ProfileRecorder("Main Stage", "Save results")
         var ret = true
         for (pkg in core.GetSourcePackages()) {
-            ret = SaveCjo(pkg) && ret
+            ret = ret && SaveCjo(pkg)
         }
         recorder.close()
         return ret

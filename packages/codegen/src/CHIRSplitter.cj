@@ -7,9 +7,6 @@ import cjcj::chir.Attribute
 import cjcj::chir.CustomTypeDef
 import cjcj::chir.Function
 import cjcj::chir.GlobalVar
-import cjcj::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
-import cjcj::mangle.MANGLE_VOID_TY_SUFFIX
-import cjcj::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
 @When[os == "Windows"]
 import cjcj::basic.StringConvertor
 import cjcj::utils.{CJC_ASSERT, FileUtil, REFLECT_PACKAGE_NAME}
@@ -88,8 +85,9 @@ public class SubCHIRPackage {
     }
 
     public func OwnsCustomDef(def: CustomTypeDef): Bool {
+        let name = def.GetIdentifierWithoutPrefix()
         for (ownedDef in chirCustomDefs) {
-            if (ownedDef.nodeId == def.nodeId) {
+            if (ownedDef.GetIdentifierWithoutPrefix() == name) {
                 return true
             }
         }
@@ -323,21 +321,16 @@ public class CHIRSplitter {
         let chirPkg = cgPkgCtx.GetCHIRPackage()
         let packageInitFunc = chirPkg.GetPackageInitFunc()
         let literalInitFunc = chirPkg.GetPackageLiteralInitFunc()
-        let importsInitSuffix = SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION +
-            MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
-        let importsInitFuncs = ArrayList<Function>()
         let toAnyFuncs = ArrayList<Function>()
         let normalFuncs = ArrayList<FunctionSplitItem>()
         for (fn in chirPkg.GetGlobalFuncsWithBody()) {
             if (chirPkg.GetName() == REFLECT_PACKAGE_NAME && fn.GetSrcCodeIdentifier() == "toAny") {
                 toAnyFuncs.add(fn)
-            } else if (fn.GetIdentifierWithoutPrefix().endsWith(importsInitSuffix)) {
-                importsInitFuncs.add(fn)
             } else if (!SameFunction(fn, packageInitFunc) && !SameFunction(fn, literalInitFunc)) {
                 normalFuncs.add(FunctionSplitItem(FunctionExprNum(fn), fn))
             }
         }
-        SplitSpecialFuncs(packages, packageInitFunc, literalInitFunc, importsInitFuncs, toAnyFuncs)
+        SplitSpecialFuncs(packages, packageInitFunc, literalInitFunc, toAnyFuncs)
         SplitNormalFuncs(packages, normalFuncs)
         SplitForeigns(packages)
         let orderedPackages = ArrayList<SubCHIRPackage>()
@@ -362,8 +355,7 @@ public class CHIRSplitter {
     }
 
     private func SplitSpecialFuncs(packages: ArrayList<SubCHIRPackage>, packageInitFunc: Option<Function>,
-        literalInitFunc: Option<Function>, importsInitFuncs: ArrayList<Function>,
-        toAnyFuncs: ArrayList<Function>): Unit {
+        literalInitFunc: Option<Function>, toAnyFuncs: ArrayList<Function>): Unit {
         if (let Some(initFn) <- packageInitFunc) {
             let initName = initFn.GetIdentifierWithoutPrefix()
             let targetIndex = if (subCHIRPackagesCache.funcsCache.contains(initName)) {
@@ -385,15 +377,6 @@ public class CHIRSplitter {
                 }
                 if (packages[targetIndex].AddFunction(literalFn)) {
                     packages[targetIndex].exprNumInChirFuncs += FunctionExprNum(literalFn)
-                }
-            }
-            for (importsInitFn in importsInitFuncs) {
-                let importsInitName = importsInitFn.GetIdentifierWithoutPrefix()
-                if (!subCHIRPackagesCache.funcsCache.contains(importsInitName)) {
-                    subCHIRPackagesCache.funcsCache[importsInitName] = targetIndex
-                }
-                if (packages[targetIndex].AddFunction(importsInitFn)) {
-                    packages[targetIndex].exprNumInChirFuncs += FunctionExprNum(importsInitFn)
                 }
             }
             for (toAnyFn in toAnyFuncs) {

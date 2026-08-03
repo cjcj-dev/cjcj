@@ -1322,13 +1322,16 @@ public class MacroEvaluation {
     }
 
     public func CollectMacroLibs(): Unit {
-        for (dyfile in GetMacroDefDynamicFiles()) {
-            let handle = OpenSymbolTable(dyfile)
-            if (!handle.opened) {
-                ci.GetDiag().Diagnose(DEFAULT_POSITION, "Cannot dlopen from the dynamic library '" + dyfile + "' for macro")
-                return
+        if (!ci.GetGlobalOptions().macroLib.isEmpty()) {
+            for (dyfile in GetMacroDefDynamicFiles()) {
+                let handle = OpenSymbolTable(dyfile)
+                if (!handle.opened) {
+                    ci.GetDiag().Diagnose(DEFAULT_POSITION,
+                        "Cannot dlopen from the dynamic library '" + dyfile + "' for macro")
+                    return
+                }
+                SetOpenedLibHandles(handle)
             }
-            SetOpenedLibHandles(handle)
         }
         if (let Some(message) <- EnsureMacroHostDispatchRegistered()) {
             ci.GetDiag().Diagnose(DEFAULT_POSITION, message)

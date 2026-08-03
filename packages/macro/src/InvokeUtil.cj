@@ -497,23 +497,27 @@ public func CloseSymbolTable(handle: RuntimeHandle): Int64 {
 }
 
 public func PrepareRuntime(handle: RuntimeHandle, initArgs: ArrayList<(String, String)>): Bool {
-    return CallRuntime(handle, CJ_RUNTIME_INIT, initArgs) == 0
+    let callInit = CallRuntime(handle, CJ_RUNTIME_INIT, initArgs)
+    if (callInit != 0) {
+        Errorln("macro expansion failed because of runtime initiate failed. ")
+        return false
+    }
+    return true
 }
 
 public func FinishRuntime(handle: RuntimeHandle): Unit {
-    let method = GetMethodPointer(handle, CJ_RUNTIME_FINI)
-    if (method.isNull()) {
+    let fini = RuntimeFiniFunc(GetMethodPointer(handle, CJ_RUNTIME_FINI))
+    let finiInit = unsafe { fini() }
+    if (finiInit != 0) {
+        Errorln("runtime finish failed: ")
         return
-    }
-    let fini = RuntimeFiniFunc(method)
-    unsafe {
-        let _ = fini()
     }
 }
 
 public func CallRuntime(handle: RuntimeHandle, method: String, envs: ArrayList<(String, String)>): Int64 {
     let methodPtr = GetMethodPointer(handle, method)
     if (methodPtr.isNull()) {
+        Errorln("could not find runtime method: " + method)
         return 1
     }
     let initFunc = RuntimeInitFunc(methodPtr)
@@ -583,6 +587,7 @@ public class RuntimeInit {
             if (!opened.opened) {
                 return false
             }
+            handle = Some(opened)
             runtimeReleaseFunc = GetMethodPointer(opened, CJ_RELEASE_HANDLE_FROM_C)
             // RT_ISOLATE_API_SPEC.md §3.2/§5 slice 2: the hybrid runtime exposes an
             // instance scheduler for the macro task. Its stack values come from the same
@@ -618,12 +623,15 @@ public class RuntimeInit {
                 initRuntime = true
             } else {
                 // Official runtime fallback (track 1): keep reusing the process-global scheduler.
+                if (!PrepareRuntime(opened, initArgs)) {
+                    return false
+                }
                 runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
                 if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
                     return false
                 }
+                initRuntime = true
             }
-            handle = Some(opened)
         }
         return true
     }
@@ -631,12 +639,17 @@ public class RuntimeInit {
     public func CloseRuntime(): Unit {
         if (let Some(opened) <- handle) {
             if (initRuntime) {
-                // RT_ISOLATE_API_SPEC.md §3.2: InstanceStop occupies the C++
-                // FinishRuntime position (InvokeUtilCJNative.cpp:181-190).
-                let stopResult = unsafe { RuntimeInstanceStopFunc(runtimeInstanceStopFunc)(runtimeInstanceHandle) }
-                if (stopResult != 0) {
-                    Errorln("runtime finish failed: ")
+                if (runtimeInstanceHandle.isNull()) {
+                    FinishRuntime(opened)
+                } else {
+                    // RT_ISOLATE_API_SPEC.md §3.2: InstanceStop occupies the C++
+                    // FinishRuntime position (InvokeUtilCJNative.cpp:181-190).
+                    let stopResult = unsafe { RuntimeInstanceStopFunc(runtimeInstanceStopFunc)(runtimeInstanceHandle) }
+                    if (stopResult != 0) {
+                        Errorln("runtime finish failed: ")
+                    }
                 }
+                initRuntime = false
             }
             @When[backend == "cjnative" && env != "ohos"]
             let _ = CloseSymbolTable(opened)
@@ -646,11 +659,8 @@ public class RuntimeInit {
         runtimeReleaseFunc = CPointer<Unit>()
         runtimeInstanceHandle = CPointer<Unit>()
         runtimeInstanceStopFunc = CPointer<Unit>()
-        if (initRuntime) {
-            @When[backend == "cjnative" && env != "ohos"]
-            let _ = CloseMacroDynamicLibrary()
-            initRuntime = false
-        }
+        @When[backend == "cjnative" && env != "ohos"]
+        let _ = CloseMacroDynamicLibrary()
     }
 
     public func GetHandle(): Option<RuntimeHandle> {

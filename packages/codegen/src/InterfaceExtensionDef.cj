@@ -3,6 +3,7 @@ package cjcj::codegen
 import std.collection.*
 import std.sort.*
 import cjcj::chir.Attribute
+import cjcj::chir.BuiltinType
 import cjcj::chir.CHIRBuilder
 import cjcj::chir.ClassDef
 import cjcj::chir.ClassType
@@ -735,23 +736,24 @@ private func IsSameTypeArgs(left: ArrayList<Type>, right: ArrayList<Type>): Bool
 }
 
 private func IsDirectSuperTypeOf(inheritedType: ClassType, targetType: Type, builder: CHIRBuilder): Bool {
-    if (let Some(classTy) <- (targetType.StripAllRefs() as ClassType)) {
-        if (let Some(superTy) <- classTy.GetSuperClassTy(builder: builder)) {
-            if (superTy.GetClassDef().nodeId == inheritedType.GetClassDef().nodeId) {
+    let subType = targetType.StripAllRefs()
+    if (let Some(builtinTy) <- (subType as BuiltinType)) {
+        for (superTy in builtinTy.GetSuperTypes(builder)) {
+            if (superTy == inheritedType) {
                 return true
             }
         }
-        for (interfaceTy in classTy.GetClassDef().GetImplementedInterfaceTys()) {
-            if (interfaceTy.GetClassDef().nodeId == inheritedType.GetClassDef().nodeId) {
+    } else if (let Some(customTy) <- (subType as CustomType)) {
+        for (superTy in customTy.GetImplementedInterfaceTys(builder)) {
+            if (superTy == inheritedType) {
                 return true
             }
         }
-        return false
-    }
-    if (let Some(customTy) <- (targetType.StripAllRefs() as CustomType)) {
-        for (interfaceTy in customTy.GetCustomTypeDef().GetImplementedInterfaceTys()) {
-            if (interfaceTy.GetClassDef().nodeId == inheritedType.GetClassDef().nodeId) {
-                return true
+        if (let Some(classTy) <- (customTy as ClassType)) {
+            if (let Some(superClassTy) <- classTy.GetSuperClassTy(builder: builder)) {
+                if (superClassTy == inheritedType) {
+                    return true
+                }
             }
         }
     }

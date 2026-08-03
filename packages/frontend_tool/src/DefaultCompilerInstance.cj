@@ -211,6 +211,7 @@ public open class DefaultCompilerInstance {
             invocation.globalOptions.enableCompileDebug || invocation.globalOptions.enableCoverage
         }
         let data = core.ExportAST(saveFileWithAbsPath, pkg)
+        // C++: FrontendTool/DefaultCompilerInstance.cpp:195-200 DefaultCIImpl::SaveCjo.
         let cjoPath = TempFileManager.Instance().CreateNewFileInfo(
             TempFileInfo(fileName: FileUtil.ToCjoFileName(pkg.fullPackageName)), TempFileKind.O_CJO).filePath
         if (!FileUtil.WriteBufferToASTFile(cjoPath, data)) {
@@ -262,7 +263,7 @@ public open class DefaultCompilerInstance {
         }
         var ret = true
         for (pkg in pkgs) {
-            ret = SaveCjo(pkg) && ret
+            ret = ret && SaveCjo(pkg)
         }
         return ret
     }
