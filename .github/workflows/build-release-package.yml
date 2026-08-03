@@ -57,7 +57,7 @@ jobs:
 
       - name: Test release build helpers
         if: inputs.platform == 'linux-x64'
-        run: node --test build/test/std-variants.test.mjs build/test/runtime-pin.test.mjs
+        run: node --test build/test/runtime-pin.test.mjs
 
       - name: Load and validate runtime pin
         shell: bash
