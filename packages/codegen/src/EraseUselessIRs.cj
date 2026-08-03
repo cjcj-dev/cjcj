@@ -38,6 +38,7 @@ private func EraseUnusedGVsAndFunctions(cgMod: CGModule, moduleRef: LLVMModuleRe
         erased = false
         let globals = CollectIRGlobals(moduleRef)
         for (globalValue in globals) {
+            unsafe { LLVMSelfhostGlobalValueRemoveDeadConstantUsers(globalValue) }
             if (CanEraseGlobal(cgMod, globalValue, declarationsOnly: declarationsOnly)) {
                 unsafe { LLVMDeleteGlobal(globalValue) }
                 erased = true
