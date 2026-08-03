@@ -125,6 +125,7 @@ public class ConstMemberVarCollector {
             }
             return current
         }
+        return current
     }
 
     private func BuildCandidateMap(def: CustomTypeDef): HashMap<Int64, MemberInfo> {
