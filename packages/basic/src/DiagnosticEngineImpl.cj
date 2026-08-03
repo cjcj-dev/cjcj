@@ -496,9 +496,11 @@ public class DiagnosticEngineImpl {
             CheckZeroRange(range)
             return
         }
-        if (errorByCategory[DiagCategoryIndex(DiagCategory.LEX)] == 0 &&
-            errorByCategory[DiagCategoryIndex(DiagCategory.PARSE)] == 0) {
-            CheckZeroRange(range)
+        synchronized(mux) {
+            if (errorByCategory[DiagCategoryIndex(DiagCategory.LEX)] == 0 &&
+                errorByCategory[DiagCategoryIndex(DiagCategory.PARSE)] == 0) {
+                CheckZeroRange(range)
+            }
         }
     }
 
