@@ -544,16 +544,7 @@ public func GetOpenedLibHandles(): ArrayList<RuntimeHandle> {
 }
 
 public func SetOpenedLibHandles(handle: RuntimeHandle): Unit {
-    var found = false
-    for (item in openedLibHandles) {
-        if (item.path == handle.path) {
-            found = true
-            break
-        }
-    }
-    if (!found) {
-        openedLibHandles.add(handle)
-    }
+    openedLibHandles.add(handle)
 }
 
 public func ClearOpenedLibHandles(): Unit {
