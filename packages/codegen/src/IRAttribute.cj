@@ -258,7 +258,8 @@ public func RemoveFnAttr(fn: LLVMValueRef, attrName: String): Unit {
 }
 
 public func AddSRetAttribute(value: LLVMValueRef): Unit {
-    AddAttributeAtIndex(value, 1u32, "sret")
+    let sretType = GetPointerElementType(unsafe { LLVMTypeOf(LLVMGetParam(value, 0u32)) })
+    AddSRetAttribute(value, sretType)
 }
 
 public func AddSRetAttribute(value: LLVMValueRef, sretType: LLVMTypeRef): Unit {
