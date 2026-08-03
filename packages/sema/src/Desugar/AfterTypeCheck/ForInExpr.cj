@@ -251,11 +251,11 @@ private func SelectStringSubscriptTarget(typeManager: TypeManager, targets: Arra
         if (let Some(funcDecl) <- AsFuncDecl(Some(target))) {
             let paramTys = GetParamTys(funcDecl)
             if (!paramTys.isEmpty() &&
-                typeManager.CheckTypeCompatibility(paramTys[paramTys.size - 1], indexTy) !=
-                    TypeCompatibility.INCOMPATIBLE) {
+                typeManager.IsSubtype(indexTy, paramTys[paramTys.size - 1])) {
                 if (let Some(expectedTy) <- expectedElementTy) {
                     if (let Some(retTy) <- FuncRetTyOf(funcDecl)) {
-                        if (typeManager.CheckTypeCompatibility(expectedTy, retTy) != TypeCompatibility.INCOMPATIBLE) {
+                        // ret <: expected
+                        if (typeManager.IsSubtype(retTy, expectedTy)) {
                             return funcDecl
                         }
                     }
