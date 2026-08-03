@@ -1201,7 +1201,9 @@ private func ChkCoalescingExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr
             return false
         }
         let unboxedTy = concreteLeftTy.typeArgs[0]
-        if (typeManager.CheckTypeCompatibility(target, unboxedTy) == TypeCompatibility.INCOMPATIBLE) {
+        // C++ ChkCoalescingExpr (BinaryExpr.cpp:1187): IsSubtype(leftTy->typeArgs[0], tgtTy)
+        // leaf=unboxed, root=target — allows Option-box of the unwrapped type.
+        if (!typeManager.IsSubtype(unboxedTy, target)) {
             let _ = BinaryInvalid(be)
             if (Ty.IsTyCorrect(unboxedTy)) {
                 if (let Some(diagValue) <- impl.diag) {
