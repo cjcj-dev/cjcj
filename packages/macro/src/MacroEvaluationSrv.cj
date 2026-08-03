@@ -202,8 +202,7 @@ extend MacroEvaluation {
                 for (byte in ("RespondFindDef " + dyfile).toArray()) {
                     res.add(byte)
                 }
-                let _ = MacroProcMsger.GetInstance().SendMsgToClient(res)
-                return false
+                return MacroProcMsger.GetInstance().SendMsgToClient(res)
             }
             SetOpenedLibHandles(handle)
         }
