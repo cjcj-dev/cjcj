@@ -91,9 +91,14 @@ public class DependencyGraph {
             for (edgeName in GetEdges(pkgName).keys()) {
                 stack.add(edgeName)
             }
-            if (includeMacroPkg || !cjoManager.IsMacroRelatedPackageName(pkgName)) {
-                packageNames.add(pkgName)
+            packageNames.add(pkgName)
+        }
+        var index = packageNames.size - 1
+        while (index >= 0) {
+            if (!includeMacroPkg && cjoManager.IsMacroRelatedPackageName(packageNames[index])) {
+                packageNames.remove(at: index)
             }
+            index--
         }
         sortStringsInPlace(packageNames)
         cacheDependencyPackageNames[fullPackageName] = CloneStringArray(packageNames)

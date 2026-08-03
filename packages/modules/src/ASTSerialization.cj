@@ -1,6 +1,6 @@
 package cjcj::modules
 
-import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
+import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset, FlatBufferString, VerifierOptions, VerifierTemplate}
 
 import std.collection.*
 import std.convert.*
@@ -16,6 +16,7 @@ import cjcj::basic.DiagKindRefactor
 import cjcj::lex.TokenKind
 import cjcj::option.GlobalOptions
 import cjcj::option.OptimizationLevel
+import cjcj::utils.FileUtil
 
 public class ASTWriter {
     private let diag: DiagnosticEngine
@@ -87,7 +88,12 @@ public class ASTWriter {
         let emptyOffsetVector = fb.CreateVectorOffsets(emptyOffsets)
         let files = ArrayList<FlatBufferOffset>()
         for (file in pkg.files) {
-            files.add(fb.CreateString(file.filePath))
+            let fileName = if (exportCfg.needAbsPath || serializingCommon) {
+                file.filePath
+            } else {
+                FileUtil.JoinPath(pkg.fullPackageName, FileUtil.GetFileName(file.filePath))
+            }
+            files.add(fb.CreateString(fileName))
         }
         let filesVec = fb.CreateVectorOffsets(files)
         let fileImports = ArrayList<FlatBufferOffset>()
@@ -112,6 +118,15 @@ public class ASTWriter {
         cjoVersion.add(0u8)
         cjoVersion.add(1u8)
         cjoVersion.add(0u8)
+        let kind = if (pkg.isMacroPackage) {
+            1u8
+        } else if (pkg.TestAttr(Attribute.TOOL_ADD)) {
+            2u8
+        } else if (pkg.TestAttr(Attribute.MOCK_SUPPORTED)) {
+            3u8
+        } else {
+            0u8
+        }
 
         fb.StartTable(17)
         fb.AddOffset(16, options)
@@ -119,7 +134,7 @@ public class ASTWriter {
         fb.AddOffset(14, fileInfosVec)
         fb.AddOffset(13, moduleName)
         fb.AddU8(12, FlatPackageAccess(pkg.accessible))
-        fb.AddU8(11, if (pkg.isMacroPackage) { 1u8 } else { 0u8 })
+        fb.AddU8(11, kind)
         fb.AddOffset(9, emptyOffsetVector)
         fb.AddOffset(8, emptyOffsetVector)
         fb.AddOffset(7, emptyOffsetVector)
@@ -214,8 +229,10 @@ public class ASTLoader {
     }
 
     public func LoadPackageDepInfo(): String {
-        let _ = LoadPackageDependencies()
-        return packageDepInfo
+        if (!VerifyForData("ast")) {
+            return ""
+        }
+        return GetPackage(data).GetPkgDepInfo().getOrThrow().str()
     }
 
     public func LoadRefs(): Unit {
@@ -282,21 +299,26 @@ public class ASTLoader {
             ValidateCommonSpecificFeatureSetsRelations(commonPkg, pkg)
             for (file in commonPkg.files) {
                 file.EnableAttr(Attribute.FROM_COMMON_PART)
+                file.EnableAttr(Attribute.COMMON)
+                file.isCommon = true
                 pkg.AddFile(file)
             }
             if (!ValidateCommonPartOptions()) {
                 return false
             }
+        } else {
+            return false
         }
         return true
     }
 
     public func ReadFileNames(): ArrayList<String> {
         let out = ArrayList<String>()
-        if (let Some(pkg) <- LoadPackageDependencies()) {
-            for (file in pkg.files) {
-                out.add(file.fileName)
-            }
+        let allFiles = GetPackage(data).GetAllFiles().getOrThrow()
+        var index: UInt32 = 0u32
+        while (index < allFiles.size()) {
+            out.add(FlatBufferString(data, (allFiles.Get(index) as Int64).getOrThrow()).str())
+            index++
         }
         return out
     }
@@ -313,6 +335,22 @@ public class ASTLoader {
 
     public func SetIsChirNow(isChirNow!: Bool = false): Unit {
         this.isChirNow = isChirNow
+    }
+
+    private func VerifyForData(id: String): Bool {
+        var options = VerifierOptions()
+        options.maxDepth = UInt32(FB_MAX_DEPTH)
+        options.maxTables = UInt32(FB_MAX_TABLES)
+        let verifier = VerifierTemplate(data, opts: options)
+        if (!VerifyPackageBuffer(data, verifier)) {
+            cjoManager.GetDiag().DiagnoseRefactor(
+                DiagKindRefactor.module_loaded_ast_failed,
+                DEFAULT_POSITION,
+                arguments: [id, requestedPackageName, CANGJIE_VERSION]
+            ).Emit()
+            return false
+        }
+        return true
     }
 
     private func ParseSerializedPackage(text: String): Option<Package> {
