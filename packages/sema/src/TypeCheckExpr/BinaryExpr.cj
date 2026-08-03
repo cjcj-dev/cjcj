@@ -984,8 +984,9 @@ private func SynPipelineExpr(typeManager: TypeManager, be: BinaryExpr,
         let leftTy = tys[0]
         let rightTy = tys[1]
         if (let Some(funcTy) <- (rightTy as FuncTy)) {
+            // pipeline left |> f : need left <: param (assignability)
             if (funcTy.paramTys.size == 1 &&
-                typeManager.CheckTypeCompatibility(funcTy.paramTys[0], leftTy) != TypeCompatibility.INCOMPATIBLE) {
+                typeManager.IsSubtype(leftTy, funcTy.paramTys[0])) {
                 be.SetTy(funcTy.retTy)
                 return funcTy.retTy
             }
@@ -1001,9 +1002,9 @@ private func SynCompositionExpr(typeManager: TypeManager, be: BinaryExpr,
         let rightTy = tys[1]
         if (let Some(leftFunc) <- (leftTy as FuncTy)) {
             if (let Some(rightFunc) <- (rightTy as FuncTy)) {
+                // composition g ~ f : need left.ret <: right.param
                 if (leftFunc.paramTys.size == 1 && rightFunc.paramTys.size == 1 &&
-                    typeManager.CheckTypeCompatibility(rightFunc.paramTys[0], leftFunc.retTy) !=
-                        TypeCompatibility.INCOMPATIBLE) {
+                    typeManager.IsSubtype(leftFunc.retTy, rightFunc.paramTys[0])) {
                     let composedTy = typeManager.GetFunctionTy([leftFunc.paramTys[0]], rightFunc.retTy)
                     be.SetTy(composedTy)
                     return composedTy
@@ -1201,7 +1202,8 @@ private func ChkCoalescingExpr(impl: TypeCheckerImpl, target: Ty, be: BinaryExpr
             return false
         }
         let unboxedTy = concreteLeftTy.typeArgs[0]
-        if (typeManager.CheckTypeCompatibility(target, unboxedTy) == TypeCompatibility.INCOMPATIBLE) {
+        // C++ ChkCoalescingExpr (BinaryExpr.cpp:1187): IsSubtype(leftTy->typeArgs[0], tgtTy)
+        if (!typeManager.IsSubtype(unboxedTy, target)) {
             let _ = BinaryInvalid(be)
             if (Ty.IsTyCorrect(unboxedTy)) {
                 if (let Some(diagValue) <- impl.diag) {
