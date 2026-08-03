@@ -122,10 +122,6 @@ private class ASTHasherImpl {
         let _ = CombineTwoHashes(SipHash.GetHashValue(v))
     }
 
-    public func CombineHash(v: Int32): Unit {
-        let _ = CombineTwoHashes(SipHash.GetHashValue(v))
-    }
-
     public func CombineHash(v: Int64): Unit {
         let _ = CombineTwoHashes(SipHash.GetHashValue(v))
     }
@@ -139,8 +135,8 @@ private class ASTHasherImpl {
             case PositionStatus.IGNORE => return
             case _ => ()
         }
-        CombineHash(Int32(pos.line))
-        CombineHash(Int32(pos.column))
+        CombineHash(pos.line)
+        CombineHash(pos.column)
         CombineHash(pos.isCurFile)
     }
 
