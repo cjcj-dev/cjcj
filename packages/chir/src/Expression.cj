@@ -6,6 +6,23 @@ import std.sync.AtomicInt64
 
 private let gLambdaClonedIdx = AtomicInt64(0)
 
+private func GetAllSuperClassDefs(def: ClassDef, allSuperDefs: HashSet<ClassDef>): Unit {
+    for (parent in def.GetImplementedInterfaceDefs()) {
+        allSuperDefs.add(parent)
+        GetAllSuperClassDefs(parent, allSuperDefs)
+    }
+    if (let Some(superClass) <- def.GetSuperClassDef()) {
+        allSuperDefs.add(superClass)
+        GetAllSuperClassDefs(superClass, allSuperDefs)
+    }
+    for (extendDef in def.GetExtends()) {
+        for (parent in extendDef.GetImplementedInterfaceDefs()) {
+            allSuperDefs.add(parent)
+            GetAllSuperClassDefs(parent, allSuperDefs)
+        }
+    }
+}
+
 public open class Expression <: Base & Hashable & Equatable<Expression> {
     private let kind: ExprKind
     private let operands: ArrayList<Value> = ArrayList<Value>()
@@ -1066,7 +1083,7 @@ public class Invoke <: DynamicDispatch {
     }
 
     public override func ReplaceOperand(oldOperand: Value, newOperand: Value): Unit {
-        let changedObject = GetObject().nodeId == oldOperand.nodeId
+        let changedObject = GetObject() == oldOperand
         super.ReplaceOperand(oldOperand, newOperand)
         if (changedObject) {
             UpdateThisType()
@@ -1074,10 +1091,22 @@ public class Invoke <: DynamicDispatch {
     }
 
     private func UpdateThisType(): Unit {
-        if (GetThisType().isNone()) {
-            if (let Some(objectTy) <- GetObject().GetType()) {
-                SetThisType(objectTy)
-            }
+        let objType = GetObject().GetType().getOrThrow()
+        let objDerefType = objType.StripAllRefs() as ClassType
+        let thisDerefType = GetThisType().getOrThrow().StripAllRefs() as ClassType
+        if (objDerefType.isNone() || thisDerefType.isNone()) {
+            return
+        }
+        let actualObjDerefType = objDerefType.getOrThrow()
+        let actualThisDerefType = thisDerefType.getOrThrow()
+        if (actualObjDerefType == actualThisDerefType) {
+            return
+        }
+        let parentDef = actualObjDerefType.GetClassDef()
+        let allSuperDefs = HashSet<ClassDef>()
+        GetAllSuperClassDefs(actualThisDerefType.GetClassDef(), allSuperDefs)
+        if (!allSuperDefs.contains(parentDef)) {
+            SetThisType(objType)
         }
     }
 
