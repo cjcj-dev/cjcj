@@ -165,8 +165,17 @@ async function classify(file) {
     }
     const strong = log.match(/not yet ported[^"\n]*|globalCache miss|unsupported AST type kind[^"\n]*|unsupported construct[^"\n]*|should have result|Out of memory|does not match pointee|IllegalState[A-Za-z]*|IllegalArgument[A-Za-z]*|no Sema target|no resolvedFunction|you should set a return value/i);
     const weak = log.split('\n').find(line => /error|exception/i.test(line));
-    const reason = strong?.[0] || weak?.slice(0, 60) || '<unknown>';
-    return `FAIL\t${name}\t${reason}`;
+    if (strong?.[0] || weak) {
+      return `FAIL\t${name}\t${strong?.[0] || weak.slice(0, 60)}`;
+    }
+    // Never collapse empty-log compile failures to bare <unknown>: report
+    // exit code, timeout flag, stdout/stderr tails, and whether product exists.
+    const productPath = path.join(work, `${name}.self`);
+    const productExists = await exists(productPath);
+    const tailLines = (text) => (text || '').split(/\r?\n/).filter(Boolean).slice(-2).join(' | ');
+    const stdoutTail = bashQ(tailLines(selfBuild.stdout), 80);
+    const stderrTail = bashQ(tailLines(selfBuild.stderr), 80);
+    return `FAIL\t${name}\trc=${selfBuild.exitCode} timeout=0 product=${productExists ? 1 : 0} stdout=${stdoutTail || "''"} stderr=${stderrTail || "''"}`;
   } finally {
     await fs.rm(work, {recursive: true, force: true});
   }
