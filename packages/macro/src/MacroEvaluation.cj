@@ -1,7 +1,7 @@
 package cjcj::macro_pkg
 
 import cjcj::basic.SplitQualifiedName as BasicSplitQualifiedName
-import cjcj::basic.GetLineTerminator
+import cjcj::basic.{GetLineTerminator, Warningln}
 import cjcj::basic.DiagCategory as EvalParsedDiagCategory
 import cjcj::basic.DiagnosticEngine as EvalParsedDiagnosticEngine
 import cjcj::lex.{Lexer as RealLexer, StringPartKind}
@@ -9,6 +9,8 @@ import cjcj::parse.IsBuiltinAnnotation as ParseIsBuiltinAnnotation
 import cjcj::parse.Parser as EvalParser
 import cjcj::parse.ScopeKind as EvalParsedScopeKind
 import cjcj::ast.{IsPureAnnotation, VisitAction, Walker}
+import cjcj::mangle.{GetOptPkgName, MANGLE_CANGJIE_PREFIX, MANGLE_FUNC_PARAM_TYPE_PREFIX,
+    MANGLE_GLOBAL_PACKAGE_INIT_PREFIX, MANGLE_VOID_TY_SUFFIX, SPECIAL_NAME_FOR_INIT_RESET_FUNCTION}
 import cjcj::utils.{CJC_ASSERT, FileUtil}
 import std.collection.*
 
@@ -763,9 +765,66 @@ public class MacroEvaluation {
     }
 
     public func InitGlobalVariable(): Unit {
+        let runtimeInit = RuntimeInit.GetInstance()
+        let invokeReleaseHandle = ReleaseHandleFromC(runtimeInit.runtimeReleaseFunc)
         var idx: Int64 = 0
         while (idx < usedMacroPkgs.size) {
-            usedMacroPkgs[idx] = (usedMacroPkgs[idx][0], true)
+            let packageName = usedMacroPkgs[idx][0]
+            if (usedMacroPkgs[idx][1]) {
+                idx++
+                continue
+            }
+            let method = MANGLE_CANGJIE_PREFIX + MANGLE_GLOBAL_PACKAGE_INIT_PREFIX +
+                GetOptPkgName(packageName) + SPECIAL_NAME_FOR_INIT_RESET_FUNCTION +
+                MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX
+            var findGlobalFunc = false
+            for (opened in GetOpenedLibHandles()) {
+                let initGlobalPtr = GetMethodPointer(opened, method)
+                if (initGlobalPtr.isNull()) {
+                    continue
+                }
+                let initGlobalFunc = InitGlobalFuncPtr(initGlobalPtr)
+                let mInvoke = MacroInvoke()
+                let id = synchronized(macroInvokeTableLock) {
+                    let currentId = macroInvokeNextId
+                    macroInvokeNextId++
+                    macroInvokeTable[currentId] = mInvoke
+                    currentId
+                }
+                try (idCell = LibC.malloc<Int64>().asResource(),
+                    resetNotify = LibC.malloc<ResetNotify>().asResource()) {
+                    CJC_ASSERT(!idCell.value.isNull() && !resetNotify.value.isNull())
+                    unsafe {
+                        idCell.value.write(id)
+                        resetNotify.value.write(ResetNotify(CPointer<Unit>(ResetVariableFinishNotify),
+                            CPointer<Unit>(idCell.value)))
+                    }
+                    synchronized(mInvoke.mtx) {
+                        let coroutineHandle = if (runtimeInit.runtimeInstanceHandle.isNull()) {
+                            unsafe { InvokeNewTaskFromC(runtimeInit.runtimeMethodFunc)(
+                                CPointer<Unit>(initGlobalFunc), CPointer<Unit>(resetNotify.value)) }
+                        } else {
+                            unsafe { InstanceRunTaskFromC(runtimeInit.runtimeMethodFunc)(
+                                runtimeInit.runtimeInstanceHandle, CPointer<Unit>(initGlobalFunc),
+                                CPointer<Unit>(resetNotify.value)) }
+                        }
+                        CJC_ASSERT(!coroutineHandle.isNull())
+                        while (!mInvoke.isDataReady) {
+                            mInvoke.cv.wait()
+                        }
+                        unsafe { invokeReleaseHandle(coroutineHandle) }
+                    }
+                }
+                synchronized(macroInvokeTableLock) {
+                    macroInvokeTable.remove(id)
+                }
+                findGlobalFunc = true
+                usedMacroPkgs[idx] = (packageName, true)
+                break
+            }
+            if (!findGlobalFunc) {
+                Warningln("could not find global reset method in macro dylib: " + method)
+            }
             idx++
         }
     }
