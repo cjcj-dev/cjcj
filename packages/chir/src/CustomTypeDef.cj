@@ -678,11 +678,11 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
         for (variable in staticVars) {
             variable.declaredParent = None
         }
-        staticVars.clear()
         for (variable in vars) {
-            staticVars.add(variable)
             variable.declaredParent = this
         }
+        staticVars.clear()
+        staticVars.add(all: vars)
     }
 
     public func GetVarInitializationFunc(): Option<Function> {
@@ -706,11 +706,11 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
         for (method in methods) {
             method.declaredParent = None
         }
-        methods.clear()
         for (item in items) {
-            methods.add(item)
             item.declaredParent = this
         }
+        methods.clear()
+        methods.add(all: items)
     }
 
     public func AddExtend(extendDef: ExtendDef): Unit {
