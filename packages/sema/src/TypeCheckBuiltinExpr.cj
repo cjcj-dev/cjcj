@@ -449,7 +449,8 @@ public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit
     }
     if (!hasElementTy) {
         let synTy = SynArrayLit(typeManager, arrayLit, None, synthesizer: synthesizer, diag: diag)
-        return typeManager.CheckTypeCompatibility(targetTy, synTy) != TypeCompatibility.INCOMPATIBLE
+        // C++ IsSubtype(arrayLitTy, &target) (TypeCheckBuiltinExpr.cpp:96)
+        return typeManager.IsSubtype(synTy, targetTy)
     }
     if (let Some(varrayTy) <- (targetTy as VArrayTy)) {
         if (varrayTy.size != arrayLit.children.size) {
@@ -464,7 +465,8 @@ public func ChkArrayLit(typeManager: TypeManager, target: Ty, arrayLit: ArrayLit
     }
     for (child in arrayLit.children) {
         if (let Some(childTy) <- child.GetTy()) {
-            if (typeManager.CheckTypeCompatibility(elemTy, childTy) == TypeCompatibility.INCOMPATIBLE) {
+            // C++ Check(ctx, arrayElemTy, child) => child <: elem
+            if (!typeManager.IsSubtype(childTy, elemTy)) {
                 arrayLit.SetTy(TypeManager.GetInvalidTy())
                 return false
             }
@@ -729,7 +731,8 @@ public func ChkVArrayArg(typeManager: TypeManager, arrayExpr: ArrayExpr,
                 ret = check(expected, arg)
             } else {
                 let argTy = FuncArgTy(arg)
-                ret = typeManager.CheckTypeCompatibility(expected, argTy) != TypeCompatibility.INCOMPATIBLE
+                // arg <: expected (assignability)
+                ret = typeManager.IsSubtype(argTy, expected)
             }
         } else {
             if (arg.name.Val() != "repeat") {
@@ -745,8 +748,8 @@ public func ChkVArrayArg(typeManager: TypeManager, arrayExpr: ArrayExpr,
                 ret = check(varrayTy.typeArgs[0], arg)
             } else {
                 let argTy = FuncArgTy(arg)
-                ret = typeManager.CheckTypeCompatibility(varrayTy.typeArgs[0], argTy) !=
-                    TypeCompatibility.INCOMPATIBLE
+                // arg <: elem
+                ret = typeManager.IsSubtype(argTy, varrayTy.typeArgs[0])
             }
         }
         if (Ty.IsTyCorrect(arrayExpr.GetTy()) && !Ty.IsTyCorrect(arrayExpr.typeNode.getOrThrow().GetTy())) {
@@ -955,7 +958,8 @@ public func ChkCStringCall(typeManager: TypeManager, target: Ty, ce: CallExpr,
     let argOk = if (let Some(check) <- checker) {
         check(cptrTy, ce.args[0])
     } else {
-        typeManager.CheckTypeCompatibility(cptrTy, FuncArgTy(ce.args[0])) != TypeCompatibility.INCOMPATIBLE
+        // arg <: CPointer<UInt8>
+        typeManager.IsSubtype(FuncArgTy(ce.args[0]), cptrTy)
     }
     if (!argOk) {
         ce.SetTy(TypeManager.GetInvalidTy())

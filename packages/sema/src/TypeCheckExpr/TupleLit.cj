@@ -112,9 +112,9 @@ public func ChkTupleLit(typeManager: TypeManager, target: Ty, tl: TupleLit, synt
                 continue
             }
             if (let Some(childTy) <- replaceIdealChildTy(typeManager, child)) {
+                // C++ Check(ctx, typeArgs[i], child) => child <: elem (TupleLit.cpp)
                 if (childTy.HasInvalidTy() ||
-                    typeManager.CheckTypeCompatibility(targetTuple.typeArgs[idx], childTy) ==
-                    TypeCompatibility.INCOMPATIBLE) {
+                    !typeManager.IsSubtype(childTy, targetTuple.typeArgs[idx])) {
                     let _ = SynTupleLit(typeManager, tl)
                     return false
                 }

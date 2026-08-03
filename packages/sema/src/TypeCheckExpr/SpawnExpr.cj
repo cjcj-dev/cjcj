@@ -128,6 +128,7 @@ public func ChkSpawnExpr(typeManager: TypeManager, target: Ty, se: SpawnExpr,
         se.SetTy(TypeManager.GetInvalidTy())
         return false
     }
+    // C++ ChkSpawnExprSimple (SpawnExpr.cpp:70-82): IsSubtype(synTy, target).
     if (!typeManager.IsSubtype(synTy, target)) {
         se.SetTy(TypeManager.GetInvalidTy())
         return false

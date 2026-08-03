@@ -25,7 +25,8 @@ public func ChkSyncExpr(typeManager: TypeManager, se: SynchronizedExpr,
             if (let Some(chk) <- checker) {
                 isWellTyped = chk(lockTargetTy, mutexExpr) && isWellTyped
             } else if (let Some(mutexTy) <- mutexExpr.GetTy()) {
-                if (typeManager.CheckTypeCompatibility(lockTargetTy, mutexTy) == TypeCompatibility.INCOMPATIBLE) {
+                // C++ Check(ctx, lockDecl->GetTy(), mutex) => mutex <: Lock
+                if (!typeManager.IsSubtype(mutexTy, lockTargetTy)) {
                     isWellTyped = false
                 }
             } else {
@@ -69,8 +70,8 @@ public func ChkSyncExpr(typeManager: TypeManager, se: SynchronizedExpr,
                         if (let Some(chkTry) <- tryChecker) {
                             isWellTyped = chkTry(expectedTy, tryExpr) && isWellTyped
                         } else if (let Some(tryTy) <- tryExpr.GetTy()) {
-                            if (typeManager.CheckTypeCompatibility(expectedTy, tryTy) ==
-                                TypeCompatibility.INCOMPATIBLE) {
+                            // C++ ChkTryExpr(ctx, *tgtTy, *te) => try <: expected
+                            if (!typeManager.IsSubtype(tryTy, expectedTy)) {
                                 isWellTyped = false
                             }
                         } else {
