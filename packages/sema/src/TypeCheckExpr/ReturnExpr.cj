@@ -59,7 +59,8 @@ private func checkReturnValue(typeManager: TypeManager, targetTy: Ty, expr: Expr
             actualTy = typeManager.ReplaceIdealTy(exprTy)
             expr.SetTy(actualTy)
         }
-        return typeManager.CheckTypeCompatibility(targetTy, actualTy) != TypeCompatibility.INCOMPATIBLE
+        // C++ Check(ctx, retTy, expr) => actual <: target (ReturnExpr.cpp)
+        return typeManager.IsSubtype(actualTy, targetTy)
     }
     return false
 }
