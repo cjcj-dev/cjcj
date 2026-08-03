@@ -49,8 +49,9 @@ public func ChkParenExpr(typeManager: TypeManager, target: Ty, pe: ParenExpr,
             return false
         }
         let actualTy = SynParenExpr(typeManager, pe)
+        // C++ Check(ctx, &target, pe.expr) => actual <: target (ParenExpr.cpp:31-45)
         if (!actualTy.HasInvalidTy() &&
-            typeManager.CheckTypeCompatibility(target, actualTy) != TypeCompatibility.INCOMPATIBLE) {
+            typeManager.IsSubtype(actualTy, target)) {
             pe.SetTy(actualTy)
             if (innerExpr.isConst) {
                 pe.isConst = true
