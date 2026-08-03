@@ -530,6 +530,17 @@ public func IsObjCGeneratedMember(target: Decl): Bool {
     return false
 }
 
+// C++ src/Mangle/BaseMangler.cpp:258-296. This package-local extension avoids
+// colliding with cjcj::mangle.MangleType while preserving the C++ receiver.
+extend BaseMangler {
+    public func MangleType(ty: Ty): String {
+        if (ty.kind == TypeKind.TYPE) {
+            return ""
+        }
+        return MangleAstSemanticType(ty)
+    }
+}
+
 public func GetMangledMethodName(mangler: BaseMangler, params: ArrayList<FuncParam>, methodName: String,
     typeManager: TypeManager, genericConfig!: Option<GenericConfigInfo> = None): String {
     var name = methodName
@@ -541,7 +552,7 @@ public func GetMangledMethodName(mangler: BaseMangler, params: ArrayList<FuncPar
                 paramTy = GetGenericInstTy(config, rawParamTy, typeManager)
             }
         }
-        name += MangleType(mangler, paramTy).replace(".", "_")
+        name += mangler.MangleType(paramTy).replace(".", "_")
     }
     return name
 }

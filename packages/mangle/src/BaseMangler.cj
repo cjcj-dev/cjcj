@@ -1800,12 +1800,3 @@ public open class BaseMangler {
         }
     }
 }
-
-// C++ src/Mangle/BaseMangler.cpp:258-296. The receiver is explicit because a
-// BaseMangler member named MangleType would hide the existing MangleType class.
-public func MangleType(mangler: BaseMangler, ty: Ty): String {
-    if (ty.kind == TypeKind.TYPE) {
-        return ""
-    }
-    return mangler.MangleAstSemanticType(ty)
-}
