@@ -233,6 +233,7 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.DISABLE_BACKEND_OPT) { opts.disableBackendOpt = true; return handled() }
     if (id == ID.CJCJ_OPTIMIZATION) { opts.cjcjOptimization = true; return handled() }
     if (id == ID.DISABLE_MANGLING_CONCURRENCY) { opts.disableManglingConcurrency = true; return handled() }
+    if (id == ID.CJCJ_DISABLE_PARSE_CONCURRENCY) { opts.disableParseConcurrency = true; return handled() }
     if (id == ID.RUNTIME_CONFIG) { return parseRuntimeConfig(opts, arg.value) }
     if (id == ID.ENABLE_CHIR_REDUNDANT_GETORTHROW_ELIMINATION) {
         opts.SelectCHIROpt(OptimizationFlag.REDUNDANT_LOAD)

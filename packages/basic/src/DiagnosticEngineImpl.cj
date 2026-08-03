@@ -26,6 +26,7 @@ public class DiagnosticEngineImpl {
     private var warningPrintCount: UInt64 = 0
     private var errorByCategory: Array<UInt64> = [0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64]
     private var warningByCategory: Array<UInt64> = [0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64]
+    private let firstErrorCategoryMtx: Mutex = Mutex()
     var disableDiagDeep: Int64 = 0
     var enableDiagnose: Bool = true
     private var disableWarning: Bool = false
@@ -87,14 +88,28 @@ public class DiagnosticEngineImpl {
     public func GetIsEmitter(): Bool { return isEmitter }
     public func SetIsDumpErrCnt(dump: Bool): Unit { isDumpErrCnt = dump }
     public func GetIsDumpErrCnt(): Bool { return isDumpErrCnt }
-    public func SetSourceManager(sm: SourceManager): Unit { sourceManager = sm }
+    public func SetSourceManager(sm: SourceManager): Unit {
+        synchronized(mux) {
+            sourceManager = sm
+        }
+    }
 
     public func GetSourceManager(): SourceManager {
-        return sourceManager ?? throw IllegalStateException("sourceManager is null")
+        return synchronized(mux) {
+            sourceManager ?? throw IllegalStateException("sourceManager is null")
+        }
+    }
+
+    public func LockFirstErrorCategory<T>(action: () -> T): T {
+        return synchronized(firstErrorCategoryMtx) {
+            action()
+        }
     }
 
     public func FirstErrorCategory(): Option<DiagCategory> {
-        return firstErrorCategory
+        return synchronized(firstErrorCategoryMtx) {
+            firstErrorCategory
+        }
     }
 
     public func GetDisableDiagDeep(): Int64 {
@@ -122,10 +137,14 @@ public class DiagnosticEngineImpl {
 
     public func IncreaseErrorCount(category: DiagCategory): Unit {
         let index = DiagCategoryIndex(category)
-        if (firstErrorCategory == None || DiagCategoryIndex(firstErrorCategory ?? category) > index) {
-            firstErrorCategory = category
+        synchronized(firstErrorCategoryMtx) {
+            if (firstErrorCategory == None || DiagCategoryIndex(firstErrorCategory ?? category) > index) {
+                firstErrorCategory = category
+            }
         }
-        errorByCategory[index] = errorByCategory[index] + 1
+        synchronized(mux) {
+            errorByCategory[index] = errorByCategory[index] + 1
+        }
         IncreaseErrorCount()
     }
 
@@ -144,24 +163,30 @@ public class DiagnosticEngineImpl {
     }
 
     public func GetWarningCount(): UInt64 {
-        if (let Some(first) <- firstErrorCategory) {
-            let last = DiagCategoryIndex(first)
-            var idx: Int64 = 0
-            var count: UInt64 = 0
-            while (idx <= last) {
-                count += warningByCategory[idx]
-                idx++
+        return synchronized(firstErrorCategoryMtx) {
+            if (let Some(first) <- firstErrorCategory) {
+                let last = DiagCategoryIndex(first)
+                var idx: Int64 = 0
+                var count: UInt64 = 0
+                while (idx <= last) {
+                    count += warningByCategory[idx]
+                    idx++
+                }
+                count
+            } else {
+                warningCount
             }
-            return count
         }
-        return warningCount
     }
 
     public func GetErrorCount(): UInt64 {
-        if (let Some(first) <- firstErrorCategory) {
-            return errorByCategory[DiagCategoryIndex(first)]
+        return synchronized(firstErrorCategoryMtx) {
+            if (let Some(first) <- firstErrorCategory) {
+                errorByCategory[DiagCategoryIndex(first)]
+            } else {
+                0
+            }
         }
-        return 0
     }
 
     public func IncreaseWarningPrintCount(): Unit { warningPrintCount++ }
@@ -367,11 +392,15 @@ public class DiagnosticEngineImpl {
     }
 
     public func Reset(): Unit {
-        errorCount = 0
-        warningCount = 0
-        errorByCategory = [0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64]
-        warningByCategory = [0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64]
-        firstErrorCategory = None
+        synchronized(mux) {
+            errorCount = 0
+            warningCount = 0
+            errorByCategory = [0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64]
+            warningByCategory = [0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64]
+        }
+        synchronized(firstErrorCategoryMtx) {
+            firstErrorCategory = None
+        }
         if (let Some(activeHandler) <- handler) {
             activeHandler.Clear()
         }
