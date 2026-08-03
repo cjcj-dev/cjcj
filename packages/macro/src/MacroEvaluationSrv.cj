@@ -291,6 +291,5 @@ extend MacroEvaluation {
         usedMacroPkgs.clear()
         macroCollector.clear()
         ci.GetDiag().Reset()
-        RuntimeInit.GetInstance().CloseRuntime()
     }
 }
