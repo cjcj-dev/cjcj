@@ -6,7 +6,6 @@ import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.MakeRange as BasicMakeRange
-import cjcj::sema.TypeCompatibility
 import cjcj::sema.TypeManager
 import cjcj::sema.TypeSubst
 import cjcj::sema.FieldLookup
@@ -121,6 +120,7 @@ public func SynSpawnExpr(typeManager: TypeManager, se: SpawnExpr,
     return TypeManager.GetInvalidTy()
 }
 
+// C++ ChkSpawnExprSimple (SpawnExpr.cpp:70-82): IsSubtype(synTy, target).
 public func ChkSpawnExpr(typeManager: TypeManager, target: Ty, se: SpawnExpr,
     futureClass!: Option<ClassDecl> = None, threadContextTy!: Option<Ty> = None): Bool {
     let synTy = SynSpawnExpr(typeManager, se, futureClass: futureClass, threadContextTy: threadContextTy)
@@ -128,7 +128,7 @@ public func ChkSpawnExpr(typeManager: TypeManager, target: Ty, se: SpawnExpr,
         se.SetTy(TypeManager.GetInvalidTy())
         return false
     }
-    if (typeManager.CheckTypeCompatibility(target, synTy) == TypeCompatibility.INCOMPATIBLE) {
+    if (!typeManager.IsSubtype(synTy, target)) {
         se.SetTy(TypeManager.GetInvalidTy())
         return false
     }
