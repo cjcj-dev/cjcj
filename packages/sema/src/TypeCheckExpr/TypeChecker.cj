@@ -8658,7 +8658,7 @@ extend TypeChecker {
         if (let Some(throwExpr) <- (expr as ThrowExpr)) {
             let throwTy = SynthesizeThrowExpr(ctx, throwExpr)
             return FinishCheck(ctx, throwExpr, Ty.IsTyCorrect(throwTy) &&
-                impl.typeManager.CheckTypeCompatibility(realTarget, throwTy) != TypeCompatibility.INCOMPATIBLE)
+                impl.typeManager.IsSubtype(throwTy, realTarget))
         }
         if (let Some(tryExpr) <- (expr as TryExpr)) {
             return FinishCheck(ctx, tryExpr, ChkTryExpr(ctx, realTarget, tryExpr))
