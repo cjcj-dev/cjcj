@@ -1,6 +1,7 @@
 package cjcj::codegen
 
 import std.collection.*
+import std.process.Process
 import std.sort.*
 import cjcj::basic.CANGJIE_VERSION
 import cjcj::chir.Attribute
@@ -34,7 +35,8 @@ private let RUNTIME_CONFIG_GLOBAL_PREFIX: String = ".cjcj.runtime.config."
 // concurrent-GC phase-handshake race that is nearly reproducible with jobs=4 (see REPORT-llcpar2.md for the stacks).
 // Delete this gate and restore the official default concurrency only after the runtime race is fixed and the
 // concurrent compiler passes the same-input 5-SHA determinism gate.
-private let TEMPORARILY_ENABLE_BACKEND_CONCURRENCY: Bool = false
+private let TEMPORARILY_ENABLE_BACKEND_CONCURRENCY: Bool =
+    (Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY") ?? "") == "1"
 
 private type LLVMSetValueName2Func = CFunc<(LLVMValueRef, CString, UIntNative) -> Unit>
 
@@ -147,6 +149,9 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
         1
     } else {
         cgModules.size
+    }
+    if ((Process.current.getEnv("CJCJ_BACKEND_CONCURRENCY_TRACE") ?? "") == "1") {
+        eprintln("CJCJ_BACKEND_CONCURRENCY threadNum=${threadNum} cgModules.size=${cgModules.size}")
     }
     if (threadNum == 1) {
         for (cgModule in cgModules) {
