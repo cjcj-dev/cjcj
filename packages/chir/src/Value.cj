@@ -976,7 +976,7 @@ public abstract class GlobalValue <: Value {
     private var srcCodeIdentifier: String
     private var rawMangledName: String
     private var packageName: String
-    private var declaredParent: Option<CustomTypeDef> = None
+    internal var declaredParent: Option<CustomTypeDef> = None
     private let features: ArrayList<String> = ArrayList<String>()
     private var annoInfo: AnnoInfo = AnnoInfo()
     private var linkage: Linkage = Linkage.EXTERNAL

@@ -675,9 +675,13 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
     }
 
     public func SetStaticMemberVars(vars: ArrayList<GlobalVar>): Unit {
+        for (variable in staticVars) {
+            variable.declaredParent = None
+        }
         staticVars.clear()
         for (variable in vars) {
-            AddStaticMemberVar(variable)
+            staticVars.add(variable)
+            variable.declaredParent = this
         }
     }
 
@@ -699,9 +703,13 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
     }
 
     public func SetMethods(items: ArrayList<Function>): Unit {
+        for (method in methods) {
+            method.declaredParent = None
+        }
         methods.clear()
         for (item in items) {
-            AddMethod(item)
+            methods.add(item)
+            item.declaredParent = this
         }
     }
 
