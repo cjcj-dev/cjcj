@@ -303,12 +303,6 @@ public open class Gnu <: ToolChain {
         if (driverOptions.EnableSanitizer()) {
             tool.AppendArg("-L" + FileUtil.JoinPath(cangjieLibPath, driverOptions.SanitizerTypeToShortString()))
         }
-        if (driverOptions.cjcjOptimization) {
-            let optimizedStdPath = FileUtil.JoinPath(
-                FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "lib"), "cjcj-optimization"),
-                driverOptions.GetCangjieLibTargetPathName())
-            tool.AppendArg("-L" + optimizedStdPath)
-        }
         tool.AppendArg("-L" + cangjieLibPath)
         let cangjieRuntimeLibPath = FileUtil.JoinPath(FileUtil.JoinPath(driver.cangjieHome, "runtime/lib"),
             driverOptions.GetCangjieLibTargetPathName())
