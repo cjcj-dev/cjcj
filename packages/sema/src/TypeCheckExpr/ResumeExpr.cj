@@ -60,7 +60,8 @@ public func SynResumeExpr(typeManager: TypeManager, re: ResumeExpr,
                 let _ = invalidResumeExpr(re)
             }
         } else if (let Some(withTy) <- withExpr.GetTy()) {
-            if (typeManager.CheckTypeCompatibility(resumptionParamTy, withTy) == TypeCompatibility.INCOMPATIBLE) {
+            // C++ Check(ctx, resumptionParamTy, withExpr) => with <: param (ResumeExpr.cpp:35-38)
+            if (!typeManager.IsSubtype(withTy, resumptionParamTy)) {
                 let _ = invalidResumeExpr(re)
             }
         } else {
