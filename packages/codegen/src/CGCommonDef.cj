@@ -119,7 +119,8 @@ public class GenericTypeAndPath {
 }
 
 public func IsCHIRWrapper(chirFuncName: String): Bool {
-    return chirFuncName.endsWith("$withoutTI") || chirFuncName.contains("wrapper")
+    return chirFuncName.endsWith("_cc_imported_wrapper") || chirFuncName.endsWith("_cc_wrapper") ||
+        chirFuncName.endsWith("_cc_abstractFunc_wrapper")
 }
 
 public func CHIRLinkage2LLVMLinkage(chirLinkage: Linkage): LLVMLinkage {
