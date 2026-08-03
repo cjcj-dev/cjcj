@@ -476,13 +476,10 @@ public class Block <: Value & Hashable & Equatable<Block> {
     }
 
     public func InsertExprIntoHead(expr: Expression): Unit {
-        var idx: Int64 = 0
-        while (idx < exprs.size) {
-            if (refEq(exprs[idx], expr)) {
-                exprs.remove(at: idx)
-                break
-            }
-            idx++
+        CJC_ASSERT(refEq(expr.GetParentBlockGroup().getOrThrow(), GetParentBlockGroup().getOrThrow()))
+        CJC_ASSERT(!expr.IsTerminator())
+        if (let Some(parentBlock) <- expr.GetParentBlock()) {
+            parentBlock.RemoveExprOnly(expr)
         }
         exprs.add(expr, at: 0)
         expr.SetParent(this)
@@ -1026,11 +1023,13 @@ public abstract class GlobalValue <: Value {
                 features.add(feature)
             }
         }
+        sort(features)
     }
 
     public func AddFeature(feature: String): Unit {
         if (!features.contains(feature)) {
             features.add(feature)
+            sort(features)
         }
     }
 

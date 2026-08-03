@@ -135,10 +135,7 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
     }
 
     public func Insert(value: Value, domain: VD): Unit {
-        if (let Some(current) <- data.get(value)) {
-            // The map owns the mutable domain. Updating it in place avoids a
-            // short-lived domain allocation and a HashMap reference write.
-            current.CopyFrom(domain)
+        if (data.contains(value)) {
             return
         }
         // C++ ActiveStatePool.h:91-94: data.emplace(value, domain).
@@ -727,7 +724,11 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
     }
 
     public func Update(dest: Value, domain: VD): Unit {
-        programState.Insert(dest, domain)
+        if (programState.Contains(dest)) {
+            programState.At(dest).CopyFrom(domain)
+        } else {
+            programState.Insert(dest, domain)
+        }
     }
 
     public func SetToBound(dest: Value, isTop: Bool): Unit {
@@ -963,7 +964,7 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
             return
         }
         if (state.Contains(dest)) {
-            state.Insert(dest, programState.At(src))
+            state.At(dest).CopyFrom(programState.At(src))
         } else {
             state.Insert(dest, programState.At(src))
         }

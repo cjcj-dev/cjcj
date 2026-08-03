@@ -1,17 +1,32 @@
 package cjcj::chir
 
-import cjcj::utils.{OverflowStrategy, OverflowStrategyIndex}
+import cjcj::utils.{CJC_ASSERT, OverflowStrategy, OverflowStrategyIndex}
 import std.collection.*
+
+private let syscall2IntrinsicKind = HashMap<String, IntrinsicKind>([
+    ("CJ_AST_Lex", IntrinsicKind.FFI_CJ_AST_LEX),
+    ("CJ_AST_ParseExpr", IntrinsicKind.FFI_CJ_AST_PARSEEXPR),
+    ("CJ_AST_ParseDecl", IntrinsicKind.FFI_CJ_AST_PARSEDECL),
+    ("CJ_AST_ParsePropMemberDecl", IntrinsicKind.FFI_CJ_AST_PARSE_PROPMEMBERDECL),
+    ("CJ_AST_ParsePrimaryConstructor", IntrinsicKind.FFI_CJ_AST_PARSE_PRICONSTRUCTOR),
+    ("CJ_AST_ParsePattern", IntrinsicKind.FFI_CJ_AST_PARSE_PATTERN),
+    ("CJ_AST_ParseType", IntrinsicKind.FFI_CJ_AST_PARSE_TYPE),
+    ("CJ_AST_ParseTopLevel", IntrinsicKind.FFI_CJ_AST_PARSETOPLEVEL),
+    ("CJ_CheckParentContext", IntrinsicKind.FFI_CJ_PARENT_CONTEXT),
+    ("CJ_SetItemInfo", IntrinsicKind.FFI_CJ_MACRO_ITEM_INFO),
+    ("CJ_GetChildMessages", IntrinsicKind.FFI_CJ_GET_CHILD_MESSAGES),
+    ("CJ_CheckAddSpace", IntrinsicKind.FFI_CJ_CHECK_ADD_SPACE),
+    ("CJ_AST_DiagReport", IntrinsicKind.FFI_CJ_AST_DIAGREPORT),
+    ("CJ_TLS_DYN_SetSessionCallback", IntrinsicKind.CJ_TLS_DYN_SET_SESSION_CALLBACK),
+    ("CJ_TLS_DYN_SslInit", IntrinsicKind.CJ_TLS_DYN_SSL_INIT),
+    ("CJ_CORE_CanUseSIMD", IntrinsicKind.CJ_CORE_CAN_USE_SIMD),
+    ("std.core:CJ_CORE_CanUseSIMD", IntrinsicKind.CJ_CORE_CAN_USE_SIMD)
+])
 
 public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     match (expr.GetExprKind()) {
-        case ExprKind.CONSTANT =>
-            if (let Some(constant) <- (expr as Constant)) {
-                compiler.TranslateLiteralValue(context, constant.literal)
-            } else {
-                context.definition.PushOp(OpCode.NOT_SUPPORTED)
-            }
+        case ExprKind.CONSTANT => ()
         case ExprKind.TUPLE =>
             context.definition.PushOp(OpCode.TUPLE)
             context.definition.PushCell(expr.GetNumOfOperands())
@@ -40,22 +55,51 @@ public func CHIR2BCHIRTranslateOtherExpression(compiler: CHIR2BCHIR, context: CH
     }
 }
 
+private func TranslateCApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
+    apply: Apply, funcTy: FuncType): Unit {
+    let numberArgs = apply.GetNumOfOperands() - 1
+    CJC_ASSERT(numberArgs == funcTy.GetParamTypes().size)
+    compiler.PushOpCodeWithAnnotations(context, OpCode.CAPPLY, apply,
+        args: ArrayList<Int64>([funcTy.GetParamTypes().size]), storeCodePos: true)
+    context.definition.PushCell(compiler.GetTypeIdx(funcTy.GetReturnType()))
+    for (paramTy in funcTy.GetParamTypes()) {
+        context.definition.PushCell(compiler.GetTypeIdx(paramTy))
+    }
+}
+
 private func TranslateApplyExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
-    if (let Some(apply) <- (expr as Apply)) {
-        let callee = apply.GetCallee()
-        if (callee.GetSrcCodeIdentifier() == "std.core:CJ_CORE_CanUseSIMD" ||
-            callee.GetSrcCodeIdentifier() == "CJ_CORE_CanUseSIMD" ||
-            callee.GetIdentifier().contains("CJ_CORE_CanUseSIMD")) {
-            compiler.PushOpCodeWithAnnotations(context, OpCode.INTRINSIC1, expr,
-                args: ArrayList<Int64>([
-                    BCHIRIntrinsic.ToByteCodeKind(IntrinsicKind.CJ_CORE_CAN_USE_SIMD), 0xffffffff
-                ]), storeCodePos: true)
+    let apply = (expr as Apply).getOrThrow()
+    let operands = apply.GetOperands()
+    let callee = operands[0]
+    let calleeName = callee.GetSrcCodeIdentifier()
+    if ((callee.IsImportedFunc() && callee.GetAttributeInfo().Test(Attribute.FOREIGN)) ||
+        calleeName == "std.core:CJ_CORE_CanUseSIMD") {
+        if (let Some(intrinsicKind) <- syscall2IntrinsicKind.get(calleeName)) {
+            compiler.PushOpCodeWithAnnotations(context, OpCode.INTRINSIC1, apply,
+                args: ArrayList<Int64>([BCHIRIntrinsic.ToByteCodeKind(intrinsicKind), 0xffffffff]),
+                storeCodePos: true)
             return
         }
+        let stringIndex = compiler.GetStringIdx(calleeName)
+        let numberArgs = apply.GetNumOfOperands() - 1
+        compiler.PushOpCodeWithAnnotations(context, OpCode.SYSCALL, apply,
+            args: ArrayList<Int64>([stringIndex, numberArgs]), storeCodePos: true)
+        context.definition.PushCell(compiler.GetTypeIdx(apply.GetResult().getOrThrow().GetType().getOrThrow()))
+        var operandIndex: Int64 = 1
+        while (operandIndex < operands.size) {
+            context.definition.PushCell(compiler.GetTypeIdx(operands[operandIndex].GetType().getOrThrow()))
+            operandIndex++
+        }
+        return
     }
-    compiler.PushOpCodeWithAnnotations(context, OpCode.APPLY, expr,
-        args: ArrayList<Int64>([expr.GetNumOfOperands()]), storeCodePos: true)
+    let funcTy = (callee.GetType().getOrThrow() as FuncType).getOrThrow()
+    if (funcTy.IsCFunc()) {
+        TranslateCApplyExpression(compiler, context, apply, funcTy)
+        return
+    }
+    compiler.PushOpCodeWithAnnotations(context, OpCode.APPLY, apply,
+        args: ArrayList<Int64>([apply.GetNumOfOperands()]), storeCodePos: true)
 }
 
 private func TranslateField(context: CHIR2BCHIRContext, expr: Expression): Unit {

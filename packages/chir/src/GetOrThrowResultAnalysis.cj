@@ -1,13 +1,14 @@
 package cjcj::chir
 
+import cjcj::utils.CJC_ASSERT
 import std.collection.*
 
-public class GetOrThrowResultDomain {
-    private var reachable: Bool = false
+public class GetOrThrowResultDomain <: AbstractDomain<GetOrThrowResultDomain> {
     private let getOrThrowResults: ArrayList<ExpressionFlatSet> = ArrayList<ExpressionFlatSet>()
-    private let argIdxMap: HashMap<Int64, Int64>
+    private let argIdxMap: HashMap<Value, Int64>
 
-    public init(argIdxMap: HashMap<Int64, Int64>) {
+    public init(argIdxMap: HashMap<Value, Int64>) {
+        super()
         this.argIdxMap = argIdxMap
         var idx: Int64 = 0
         while (idx < argIdxMap.size) {
@@ -16,45 +17,42 @@ public class GetOrThrowResultDomain {
         }
     }
 
-    public init(argIdxMap: HashMap<Int64, Int64>, values: ArrayList<ExpressionFlatSet>, reachable: Bool) {
+    private init(argIdxMap: HashMap<Value, Int64>, values: ArrayList<ExpressionFlatSet>, reachableKind: ReachableKind) {
+        super()
         this.argIdxMap = argIdxMap
+        kind = reachableKind
         for (value in values) {
             getOrThrowResults.add(value.Clone())
         }
-        this.reachable = reachable
     }
 
-    public func Clone(): GetOrThrowResultDomain {
-        return GetOrThrowResultDomain(argIdxMap, getOrThrowResults, reachable)
+    public override func Clone(): GetOrThrowResultDomain {
+        return GetOrThrowResultDomain(argIdxMap, getOrThrowResults, kind)
     }
 
-    public func IsReachable(): Bool {
-        return reachable
+    public override func CopyFrom(rhs: GetOrThrowResultDomain): Unit {
+        kind = rhs.kind
+        getOrThrowResults.clear()
+        for (value in rhs.getOrThrowResults) {
+            getOrThrowResults.add(value.Clone())
+        }
     }
 
     public func SetReachable(value: Bool): Unit {
-        reachable = value
+        kind = if (value) { ReachableKind.REACHABLE } else { ReachableKind.UNREACHABLE }
     }
 
     public func SetAllTrackedToTop(): Unit {
-        var idx: Int64 = 0
-        while (idx < getOrThrowResults.size) {
-            getOrThrowResults[idx].SetToBound(isTop: true)
-            idx++
+        for (result in getOrThrowResults) {
+            result.SetToBound(isTop: true)
         }
     }
 
-    public func Join(rhs: GetOrThrowResultDomain): Bool {
-        if (!rhs.reachable) {
-            return false
-        }
-        if (!reachable) {
-            CopyFrom(rhs)
-            return true
-        }
+    public override func Join(rhs: GetOrThrowResultDomain): Bool {
+        kind = ReachableKind.REACHABLE
         var changed = false
         var idx: Int64 = 0
-        while (idx < getOrThrowResults.size && idx < rhs.getOrThrowResults.size) {
+        while (idx < getOrThrowResults.size) {
             changed = getOrThrowResults[idx].Join(rhs.getOrThrowResults[idx]) || changed
             idx++
         }
@@ -62,223 +60,85 @@ public class GetOrThrowResultDomain {
     }
 
     public func CheckGetOrThrowResult(location: Value): Option<Expression> {
-        if (let Some(idx) <- argIdxMap.get(location.nodeId)) {
-            if (idx >= 0 && idx < getOrThrowResults.size) {
-                let maybeExpr = getOrThrowResults[idx].GetElem()
-                if (let Some(expr) <- maybeExpr) {
-                    if (IsGetOrThrowFunction(expr)) {
-                        return expr
-                    }
-                }
-            }
+        if (let Some(idx) <- argIdxMap.get(location)) {
+            return getOrThrowResults[idx].GetElem()
         }
         return None
     }
 
-    public func UpdateGetOrThrowResult(location: Value, applyExpr: Expression): Bool {
-        if (let Some(idx) <- argIdxMap.get(location.nodeId)) {
-            if (idx >= 0 && idx < getOrThrowResults.size) {
-                if (getOrThrowResults[idx].IsBottom() || getOrThrowResults[idx].IsTop()) {
-                    getOrThrowResults[idx].UpdateElem(applyExpr)
-                    return true
-                }
+    public func UpdateGetOrThrowResult(location: Value, applyExpr: Expression): Unit {
+        if (let Some(idx) <- argIdxMap.get(location)) {
+            if (getOrThrowResults[idx].IsBottom() || getOrThrowResults[idx].IsTop()) {
+                getOrThrowResults[idx].UpdateElem(applyExpr)
             }
         }
-        return false
     }
 
-    public func ToString(): String {
-        if (!reachable) {
+    public override func ToString(): String {
+        if (IsBottom()) {
             return "Unreachable"
         }
         let parts = ArrayList<String>()
         for (result in getOrThrowResults) {
             parts.add(result.ToString())
         }
-        return "{ " + JoinStrings(parts, ", ") + " }"
-    }
-
-    private func CopyFrom(rhs: GetOrThrowResultDomain): Unit {
-        reachable = rhs.reachable
-        getOrThrowResults.clear()
-        for (value in rhs.getOrThrowResults) {
-            getOrThrowResults.add(value.Clone())
-        }
+        return "{ " + JoinStrings(parts, ", ") + ", }"
     }
 }
 
-public class GetOrThrowResultAnalysisResult {
-    public let functionValue: Function
-    private let argIdxMap: HashMap<Int64, Int64>
-    private let trackedArgs: ArrayList<Value> = ArrayList<Value>()
-    private let entryStates: HashMap<Int64, GetOrThrowResultDomain> = HashMap<Int64, GetOrThrowResultDomain>()
-    private let exitStates: HashMap<Int64, GetOrThrowResultDomain> = HashMap<Int64, GetOrThrowResultDomain>()
-
-    public init(functionValue: Function, argIdxMap: HashMap<Int64, Int64>, trackedArgs: ArrayList<Value>) {
-        this.functionValue = functionValue
-        this.argIdxMap = argIdxMap
-        for (arg in trackedArgs) {
-            this.trackedArgs.add(arg)
-        }
-    }
-
-    public func GetTrackedArgs(): ArrayList<Value> {
-        let out = ArrayList<Value>()
-        for (arg in trackedArgs) {
-            out.add(arg)
-        }
-        return out
-    }
-
-    public func GetTrackedArgIndex(value: Value): Option<Int64> {
-        return argIdxMap.get(value.nodeId)
-    }
-
-    public func GetEntryState(block: Block): Option<GetOrThrowResultDomain> {
-        if (let Some(state) <- entryStates.get(block.nodeId)) {
-            return state.Clone()
-        }
-        return None
-    }
-
-    public func GetExitState(block: Block): Option<GetOrThrowResultDomain> {
-        if (let Some(state) <- exitStates.get(block.nodeId)) {
-            return state.Clone()
-        }
-        return None
-    }
-
-    public func SetEntryState(block: Block, state: GetOrThrowResultDomain): Unit {
-        entryStates[block.nodeId] = state.Clone()
-    }
-
-    public func SetExitState(block: Block, state: GetOrThrowResultDomain): Unit {
-        exitStates[block.nodeId] = state.Clone()
-    }
-}
-
-public class GetOrThrowResultAnalysis {
-    private let functionValue: Function
-    private let debug: Bool
-    private let argIdxMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
-    private let trackedArgs: ArrayList<Value> = ArrayList<Value>()
+public class GetOrThrowResultAnalysis <: Analysis<GetOrThrowResultDomain> {
+    private let argIdxMap: HashMap<Value, Int64> = HashMap<Value, Int64>()
 
     public init(functionValue: Function, isDebug!: Bool = false) {
-        this.functionValue = functionValue
-        this.debug = isDebug
-        CollectTrackedArgs()
+        super(functionValue, isDebug: isDebug)
+        let body = functionValue.GetBody() ??
+            throw IllegalArgumentException("GetOrThrowResultAnalysis requires a function body")
+        var argIdx: Int64 = 0
+        for (block in body.GetBlocks()) {
+            for (expr in block.GetExpressions()) {
+                if (IsGetOrThrowFunction(expr)) {
+                    CJC_ASSERT(expr.GetNumOfOperands() > 1)
+                    let arg = expr.GetOperand(1)
+                    if (!argIdxMap.contains(arg)) {
+                        argIdxMap[arg] = argIdx
+                        argIdx++
+                    }
+                }
+            }
+        }
     }
 
-    public func IsDebug(): Bool {
-        return debug
+    public override func GetAnalysisName(): String {
+        return "getOrThrow-result"
     }
 
-    public func Bottom(): GetOrThrowResultDomain {
+    public override func GetBlockLimit(): Option<UInt32> {
+        return None
+    }
+
+    public override func Bottom(): GetOrThrowResultDomain {
         return GetOrThrowResultDomain(argIdxMap)
     }
 
-    public func Run(): GetOrThrowResultAnalysisResult {
-        let result = GetOrThrowResultAnalysisResult(functionValue, argIdxMap, trackedArgs)
-        if (let Some(body) <- functionValue.GetBody()) {
-            RunOnBody(body, result)
-        }
-        return result
-    }
-
-    public func InitializeFuncEntryState(state: GetOrThrowResultDomain): Unit {
+    public override func InitializeFuncEntryState(state: GetOrThrowResultDomain): Unit {
         state.SetReachable(true)
         state.SetAllTrackedToTop()
     }
 
-    public func PropagateExpressionEffect(state: GetOrThrowResultDomain, expression: Expression): Unit {
-        if (!IsGetOrThrowFunction(expression) || expression.GetNumOfOperands() < 2) {
+    public override func PropagateExpressionEffect(state: GetOrThrowResultDomain, expression: Expression): Unit {
+        if (!IsGetOrThrowFunction(expression)) {
             return
         }
+        CJC_ASSERT(expression.GetNumOfOperands() > 1)
         state.UpdateGetOrThrowResult(expression.GetOperand(1), expression)
     }
 
-    public func PropagateTerminatorEffect(state: GetOrThrowResultDomain, terminator: Terminator): Option<Block> {
-        PropagateExpressionEffect(state, terminator)
+    public override func PropagateTerminatorEffect(
+        state: GetOrThrowResultDomain,
+        terminator: Terminator
+    ): Option<Block> {
+        let _ = state
+        let _ = terminator
         return None
-    }
-
-    private func CollectTrackedArgs(): Unit {
-        if (let Some(body) <- functionValue.GetBody()) {
-            let blocks = CollectBlocksRecursivelyForGetOrThrow(body)
-            for (block in blocks) {
-                for (expr in block.GetExpressionsRef()) {
-                    if (IsGetOrThrowFunction(expr) && expr.GetNumOfOperands() >= 2) {
-                        let arg = expr.GetOperand(1)
-                        if (argIdxMap.get(arg.nodeId).isNone()) {
-                            argIdxMap[arg.nodeId] = trackedArgs.size
-                            trackedArgs.add(arg)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func RunOnBody(body: BlockGroup, result: GetOrThrowResultAnalysisResult): Unit {
-        if (let Some(entryBlock) <- body.GetEntryBlock()) {
-            let entryState = Bottom()
-            InitializeFuncEntryState(entryState)
-            result.SetEntryState(entryBlock, entryState)
-            let worklist = ArrayList<Block>()
-            worklist.add(entryBlock)
-            var worklistIdx: Int64 = 0
-            while (worklistIdx < worklist.size) {
-                let block = worklist[worklistIdx]
-                worklistIdx++
-                let state = if (let Some(existing) <- result.GetEntryState(block)) { existing } else { Bottom() }
-                for (expr in block.GetExpressionsRef()) {
-                    if (let Some(term) <- expr.AsTerminator()) {
-                        PropagateTerminatorEffect(state, term)
-                    } else {
-                        PropagateExpressionEffect(state, expr)
-                    }
-                }
-                result.SetExitState(block, state)
-                for (successor in block.GetSuccessors()) {
-                    let successorState = if (let Some(oldState) <- result.GetEntryState(successor)) {
-                        oldState
-                    } else {
-                        Bottom()
-                    }
-                    if (successorState.Join(state)) {
-                        result.SetEntryState(successor, successorState)
-                        worklist.add(successor)
-                    }
-                }
-            }
-        }
-        for (block in body.GetBlocksRef()) {
-            for (expr in block.GetExpressionsRef()) {
-                if (let Some(lambdaExpr) <- (expr as Lambda)) {
-                    if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                        RunOnBody(lambdaBody, result)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private func CollectBlocksRecursivelyForGetOrThrow(body: BlockGroup): ArrayList<Block> {
-    let blocks = ArrayList<Block>()
-    AppendBlocksRecursivelyForGetOrThrow(body, blocks)
-    return blocks
-}
-
-private func AppendBlocksRecursivelyForGetOrThrow(body: BlockGroup, blocks: ArrayList<Block>): Unit {
-    for (block in body.GetBlocksRef()) {
-        blocks.add(block)
-        for (expr in block.GetExpressionsRef()) {
-            if (let Some(lambdaExpr) <- (expr as Lambda)) {
-                if (let Some(lambdaBody) <- lambdaExpr.GetBody()) {
-                    AppendBlocksRecursivelyForGetOrThrow(lambdaBody, blocks)
-                }
-            }
-        }
     }
 }

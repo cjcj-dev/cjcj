@@ -1052,12 +1052,9 @@ private func VisitLambdaBodyForCapturedVars(body: BlockGroup, capturedVars: Arra
         for (expr in block.GetExpressionsRef()) {
             if (let Some(appliedLambda) <- IsApplyToLambda(expr)) {
                 CollectLambdaCapturedVarsRecursively(appliedLambda, capturedVars, visitedLambdas)
-            } else if ((expr as Lambda).isSome()) {
-                continue
-            } else {
-                for (group in expr.GetBlockGroups()) {
-                    VisitLambdaBodyForCapturedVars(group, capturedVars, visitedLambdas)
-                }
+            }
+            for (group in expr.GetBlockGroups()) {
+                VisitLambdaBodyForCapturedVars(group, capturedVars, visitedLambdas)
             }
         }
     }
