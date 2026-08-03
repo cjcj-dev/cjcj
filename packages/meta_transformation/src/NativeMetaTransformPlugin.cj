@@ -2,10 +2,14 @@ package cjcj::meta_transformation
 
 import cjcj::basic.{CANGJIE_VERSION, Errorln}
 
-@When[os == "Linux" || os == "macOS" || os == "iOS"]
-private let RTLD_NOW: Int32 = 0x2
-@When[os == "Linux" || os == "macOS" || os == "iOS"]
-private let RTLD_LOCAL: Int32 = 0x0
+@When[os == "Linux"]
+private let RTLD_LAZY: Int32 = 0x1
+@When[os == "Linux"]
+private let RTLD_GLOBAL: Int32 = 0x100
+@When[os == "macOS" || os == "iOS"]
+private let RTLD_LAZY: Int32 = 0x1
+@When[os == "macOS" || os == "iOS"]
+private let RTLD_GLOBAL: Int32 = 0x8
 
 @When[os == "Linux" || os == "macOS" || os == "iOS"]
 foreign {
@@ -33,7 +37,7 @@ private func OpenNativeLibrary(path: String, pathCString: CString): CPointer<Uni
         Errorln("could not get realpath of library: " + path)
         return handle
     }
-    handle = unsafe { dlopen(realpathRes, RTLD_NOW | RTLD_LOCAL) }
+    handle = unsafe { dlopen(realpathRes, RTLD_LAZY | RTLD_GLOBAL) }
     unsafe { free(realpathRes) }
     if (handle.isNull()) {
         Errorln("could not load the dynamic library: " + path)
