@@ -154,7 +154,7 @@ public class Package {
     public func GetGlobalFunctions(includePureAbstract!: Bool = false): ArrayList<Function> {
         let out = ArrayList<Function>()
         for (item in globalFuncs) {
-            if (includePureAbstract || !item.TestAttr(Attribute.ABSTRACT)) {
+            if (includePureAbstract || !item.IsPureAbstract()) {
                 out.add(item)
             }
         }

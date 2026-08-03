@@ -675,10 +675,14 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
     }
 
     public func SetStaticMemberVars(vars: ArrayList<GlobalVar>): Unit {
-        staticVars.clear()
-        for (variable in vars) {
-            AddStaticMemberVar(variable)
+        for (variable in staticVars) {
+            variable.declaredParent = None
         }
+        for (variable in vars) {
+            variable.declaredParent = this
+        }
+        staticVars.clear()
+        staticVars.add(all: vars)
     }
 
     public func GetVarInitializationFunc(): Option<Function> {
@@ -699,10 +703,14 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
     }
 
     public func SetMethods(items: ArrayList<Function>): Unit {
-        methods.clear()
-        for (item in items) {
-            AddMethod(item)
+        for (method in methods) {
+            method.declaredParent = None
         }
+        for (item in items) {
+            item.declaredParent = this
+        }
+        methods.clear()
+        methods.add(all: items)
     }
 
     public func AddExtend(extendDef: ExtendDef): Unit {

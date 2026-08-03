@@ -344,6 +344,9 @@ public class ClosureConversion {
     private func CollectNestedFunctions(pkg: Package): ArrayList<Lambda> {
         let nestedFuncs = ArrayList<Lambda>()
         for (fn in pkg.GetGlobalFuncsWithBody()) {
+            if (fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
+                continue
+            }
             let oldNestedFuncNum = nestedFuncs.size
             if (let Some(body) <- fn.GetBody()) {
                 CollectNestedFunctionsInBlockGroup(body, nestedFuncs)
