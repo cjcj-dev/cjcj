@@ -2771,7 +2771,8 @@ private func CheckCallArgCompatible(typeManager: TypeManager, diag: Option<Basic
     let argTy = GetExprTy(ce.args[idx])
     let normalizedParamTy = typeManager.SubstituteTypeAliasInTy(paramTy)
     let normalizedArgTy = typeManager.SubstituteTypeAliasInTy(argTy)
-    if (typeManager.CheckTypeCompatibility(normalizedParamTy, normalizedArgTy) == TypeCompatibility.INCOMPATIBLE) {
+    // C++ CheckWithCache(ctx, paramTy, arg) => arg <: param (TypeCheckCall.cpp)
+    if (!typeManager.IsSubtype(normalizedArgTy, normalizedParamTy)) {
         if (let Some(diagValue) <- diag) {
             DiagOld(diagValue, ce.args[idx], BasicDiagKind.sema_parameters_and_arguments_mismatch)
         }
