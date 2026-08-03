@@ -8,7 +8,7 @@ import cjcj::basic.Linkage
 import cjcj::mangle.ASTMangler
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
-import cjcj::modules.SemaCjoManager
+import cjcj::modules.{INVALID_FORMAT_INDEX, SemaCjoManager}
 import cjcj::modules.CreateFullId as CreateModuleFullId
 import cjcj::modules.CreateFeatureId as CreateModuleFeatureId
 import cjcj::modules.CreateFeaturesDirective as CreateModuleFeaturesDirective
@@ -457,7 +457,18 @@ public class ASTWriter {
         let version = builder.CreateString(CANGJIE_VERSION)
         let fullPkgName = builder.CreateString(pkg.fullPackageName)
         let pkgDepInfo = builder.CreateString(packageDepInfo)
-        let moduleName = builder.CreateString("")
+        let hasModuleName = pkg.TestAttr(Attribute.TOOL_ADD) && !pkg.files.isEmpty() &&
+            !pkg.files[0].decls.isEmpty()
+        let moduleName = builder.CreateString(if (hasModuleName) { pkg.files[0].decls[0].moduleName } else { "" })
+        let packageKind = if (pkg.isMacroPackage) {
+            1u8
+        } else if (pkg.TestAttr(Attribute.TOOL_ADD)) {
+            2u8
+        } else if (pkg.TestAttr(Attribute.MOCK_SUPPORTED)) {
+            3u8
+        } else {
+            0u8
+        }
         let cjoVersion = CjoVersionBytes()
 
         builder.StartTable(17)
@@ -466,7 +477,7 @@ public class ASTWriter {
         builder.AddOffset(14, fileInfoVec)
         builder.AddOffset(13, moduleName)
         builder.AddU8(12, PackageAccess(pkg.accessible))
-        builder.AddU8(11, if (pkg.isMacroPackage) { 1u8 } else { 0u8 })
+        builder.AddU8(11, packageKind)
         builder.AddOffset(9, exprsVec)
         builder.AddOffset(8, declsVec)
         builder.AddOffset(7, typesVec)
@@ -810,7 +821,11 @@ public class ASTWriter {
         }
         let attributes = builder.CreateVectorU64(SaveAttributes(attrs))
         let annotations = SaveAnnotations(decl)
-        let typeIndex = SaveDeclType(decl)
+        let typeIndex = if (attrs.TestAttr(Attribute.UNREACHABLE)) {
+            INVALID_FORMAT_INDEX
+        } else {
+            SaveDeclType(decl)
+        }
         let info = SaveDeclInfo(decl)
         if (!fileIdToIndex.contains(decl.begin.fileID)) {
             let declFile = decl.curFile.getOrThrow()

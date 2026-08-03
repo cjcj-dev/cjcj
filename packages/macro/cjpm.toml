@@ -19,6 +19,7 @@
   "cjcj::basic" = { path = "../basic" }
   "cjcj::conditional_compilation" = { path = "../conditional_compilation" }
   "cjcj::lex" = { path = "../lex" }
+  "cjcj::mangle" = { path = "../mangle" }
   "cjcj::modules" = { path = "../modules" }
   "cjcj::option" = { path = "../option" }
   "cjcj::parse" = { path = "../parse" }

@@ -2121,6 +2121,9 @@ private class CjoSignatureMaterializer {
     }
 
     public func PreloadCommonPartOfPackage(targetPkg: Package, opts: GlobalOptions): Bool {
+        if (!VerifyForData("ast")) {
+            return false
+        }
         let rawData = data.getOrThrow()
         packageTable = Some(GetPackage(rawData))
         let allTypeTables = packageTable.getOrThrow().GetAllTypes().getOrThrow()
