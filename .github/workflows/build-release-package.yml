@@ -181,10 +181,6 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils patchelf
 
-      - name: Install sticky std build dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get install -y -qq clang cmake make ninja-build libssl-dev
-
       - name: Install runtime build dependencies (Linux)
         if: runner.os == 'Linux' && steps.rtcache.outputs.cache-hit != 'true'
         run: sudo apt-get install -y -qq clang cmake make
@@ -224,15 +220,6 @@ jobs:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
         run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
 
-      - name: Activate fixed LLC in official SDK (macOS)
-        if: runner.os == 'macOS'
-        env:
-          GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
-        run: |
-          test -n "$FIXED_LLC_GZ"
-          npx --yes zx@8 ci/setup_sdk.mjs
-          "$CANGJIE_HOME/third_party/llvm/bin/llc" --help-hidden | grep -q cjcj-sticky-logged-map
-
       - name: Save SDK cache (macOS)
         if: runner.os == 'macOS' && steps.darwinbuild.outcome == 'success' && steps.sdkcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
@@ -243,23 +230,6 @@ jobs:
       - name: Activate pinned runtime
         if: runner.os != 'Windows'
         run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
-
-      - name: Build and attest the native sticky std closure
-        if: runner.os != 'Windows'
-        run: |
-          npx --yes zx@8 ci/build_std_variants.mjs \
-            --sdk "$CANGJIE_HOME" \
-            --outdir "$PWD/dist-sticky-std" \
-            --target "${{ inputs.platform }}"
-
-      - name: Upload native sticky std attestation
-        if: runner.os != 'Windows'
-        uses: actions/upload-artifact@v7
-        with:
-          name: sticky-std-${{ inputs.sdk_runtime_dir }}
-          path: dist-sticky-std
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Build runtime shim (Linux)
         if: runner.os == 'Linux'
@@ -281,17 +251,9 @@ jobs:
             --sdk "$CANGJIE_HOME" \
             --binary "$PWD/target/release/bin/cjcj::cjc" \
             --runtime-lib "$runtime_lib" \
-            --sticky-std "$PWD/dist-sticky-std" \
             --version "${{ inputs.version }}" \
             --platform "${{ inputs.platform }}" \
             --outdir "$PWD/dist"
-
-      - name: Download Windows sticky std closure
-        if: runner.os == 'Windows'
-        uses: actions/download-artifact@v8
-        with:
-          name: sticky-std-windows_x86_64
-          path: dist-sticky-std
 
       - name: Compose SDK package (Windows)
         if: runner.os == 'Windows'
@@ -302,15 +264,10 @@ jobs:
           $binary = @("$PWD\target\release\bin\cjc@cjcj.exe", "$PWD\target\release\bin\cjcj.exe") |
             Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $binary) { Write-Error "no cjcj product under target\release\bin"; exit 1 }
-          if (-not (Test-Path "$PWD\dist-sticky-std\STICKY_STD.json")) {
-            Write-Error "Windows sticky std closure missing; package remains fail-closed"
-            exit 2
-          }
           npx --yes zx@8 scripts/package_sdk.mjs `
             --sdk "$env:CANGJIE_HOME" `
             --binary "$binary" `
             --runtime-root "$PWD\.platform-ci\runtime-install\windows_release_x86_64" `
-            --sticky-std "$PWD\dist-sticky-std" `
             --version "${{ inputs.version }}" `
             --platform "${{ inputs.platform }}" `
             --outdir "$PWD\dist"
@@ -323,12 +280,6 @@ jobs:
           pkg="cjcj-${{ inputs.version }}-${{ inputs.platform }}"
           mkdir -p pkgtest
           tar -C pkgtest -xzf "dist/${pkg}.tar.gz"
-          llc_gate_args=()
-          if [ "${{ inputs.platform }}" = "linux-x64" ]; then
-            llc_gate_args=(--require-stock-control --e2e)
-          fi
-          node ci/verify_sticky_package.mjs "$PWD/pkgtest/${pkg}" "${{ inputs.sdk_runtime_dir }}"
-          node ci/verify_packaged_llc.mjs "$PWD/pkgtest/${pkg}" "${llc_gate_args[@]}"
           # shellcheck disable=SC1090
           source "$PWD/pkgtest/${pkg}/envsetup.sh"
           export cjHeapSize=12GB
@@ -347,8 +298,6 @@ jobs:
           try {
             Expand-Archive -LiteralPath "dist\$pkg.zip" -DestinationPath $extract -Force
             $root = Join-Path $extract $pkg
-            node ci/verify_packaged_llc.mjs $root
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $env:CJCJ_OFFICIAL_SDK_HOME = $env:CANGJIE_HOME
             $env:CANGJIE_HOME = $root
             $env:cjHeapSize = '12GB'
