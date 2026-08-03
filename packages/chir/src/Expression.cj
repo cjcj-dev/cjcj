@@ -6,7 +6,7 @@ import std.sync.AtomicInt64
 
 private let gLambdaClonedIdx = AtomicInt64(0)
 
-private func GetAllSuperClassDefs(def: ClassDef, allSuperDefs: HashSet<ClassDef>): Unit {
+private func GetAllSuperClassDefs(def: ClassDef, allSuperDefs: HashSet<CustomTypeDef>): Unit {
     for (parent in def.GetImplementedInterfaceDefs()) {
         allSuperDefs.add(parent)
         GetAllSuperClassDefs(parent, allSuperDefs)
@@ -1103,7 +1103,7 @@ public class Invoke <: DynamicDispatch {
             return
         }
         let parentDef = actualObjDerefType.GetClassDef()
-        let allSuperDefs = HashSet<ClassDef>()
+        let allSuperDefs = HashSet<CustomTypeDef>()
         GetAllSuperClassDefs(actualThisDerefType.GetClassDef(), allSuperDefs)
         if (!allSuperDefs.contains(parentDef)) {
             SetThisType(objType)
