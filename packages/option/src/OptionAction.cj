@@ -530,12 +530,6 @@ private func isRuntimeDecimal(value: String, includeZero: Bool): Bool {
     return false
 }
 
-private func isPendingStickyRuntimeConfig(name: String): Bool {
-    return name == "MRT_STICKY_LOG_BARRIER" || name == "MRT_STICKY_MINOR" ||
-        name == "MRT_STICKY_MINOR_VALIDATE" || name == "MRT_STICKY_MINOR_FORCE_SLOW_PATH" ||
-        name == "MRT_STICKY_MINOR_YOUNG_BYTES" || name == "MRT_STICKY_MINOR_MAJOR_INTERVAL"
-}
-
 private func isSupportedRuntimeConfig(name: String): Bool {
     return name == "cjHeapSize" || name == "cjHeapSwap" || name == "cjRegionSize" ||
         name == "cjExemptionThreshold" || name == "cjHeapUtilization" || name == "cjHeapGrowth" ||
@@ -582,10 +576,6 @@ private func parseRuntimeConfig(opts: GlobalOptions, rawValue: String): ActionRe
     let value = parts[1].trimAscii()
     if (name.isEmpty() || value.isEmpty()) {
         Errorln("Option '--runtime-config' requires a non-empty name and value.")
-        return handled(success: false)
-    }
-    if (isPendingStickyRuntimeConfig(name)) {
-        Errorln("Runtime config '" + name + "' requires the pending gcgen sticky-barrier backend support.")
         return handled(success: false)
     }
     if (!isSupportedRuntimeConfig(name)) {
