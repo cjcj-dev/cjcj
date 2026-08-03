@@ -109,11 +109,9 @@ if (process.platform === 'linux') {
 
 if (runtimeTarget === 'windows-x86_64') {
   const runtimeExportDefinition = path.join(runtimeDirectory, 'src', 'windows_x86_64_exports.def');
-  const checkedInExportDefinition = path.join(import.meta.dirname, 'windows_x86_64_exports.def');
   const configuredInstallRoot = path.join(installRoot, 'windows_release_x86_64');
-  const exportDefinition = await fs.access(runtimeExportDefinition).then(() => runtimeExportDefinition).catch(() => checkedInExportDefinition);
-  await fs.copyFile(exportDefinition, path.join(configuredInstallRoot, 'windows_x86_64_exports.def'));
-  console.log(`WINDOWS_RUNTIME_EXPORT_DEF staged_from=${exportDefinition}`);
+  await fs.copyFile(runtimeExportDefinition, path.join(configuredInstallRoot, 'windows_x86_64_exports.def'));
+  console.log(`WINDOWS_RUNTIME_EXPORT_DEF staged_from=${runtimeExportDefinition}`);
 }
 
 async function collectFiles(directory) {

@@ -99,10 +99,8 @@ if (!runtimeDll) {
   console.error(`FATAL: libcangjie-runtime.dll not found under ${path.resolve(searchRoot)}`);
   process.exit(2);
 }
-// Authoritative expected set: checked-in observation from CI PE export table.
-// Prefer --expected-def, then in-tree def next to this script, then runtime-source,
-// then a staged copy under the runtime-install search root.
-const checkedInDefinition = path.join(import.meta.dirname, 'windows_x86_64_exports.def');
+// Authoritative expected set comes from the checked-out runtime source or the
+// copy staged next to the installed runtime by build_runtime.mjs.
 const runtimeSourceDefinition = path.join(
   process.cwd(),
   'runtime-source',
@@ -112,8 +110,7 @@ const runtimeSourceDefinition = path.join(
 );
 const expectedDefinition = typeof argv['expected-def'] === 'string'
   ? path.resolve(argv['expected-def'])
-  : await findExportDefinition(checkedInDefinition)
-    || await findExportDefinition(runtimeSourceDefinition)
+  : await findExportDefinition(runtimeSourceDefinition)
     || await findExportDefinition(searchRoot);
 if (!expectedDefinition) {
   console.error(

@@ -5,21 +5,33 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 
-const expectedDefinition = path.resolve(argv._[0] || path.join(import.meta.dirname, 'windows_x86_64_exports.def'));
-const definition = await fs.readFile(expectedDefinition, 'utf8');
-const expectedExports = definition
-  .split(/\r?\n/)
-  .map((line) => line.trim().match(/^(\S+)\s+@\d+(?:\s+DATA)?$/)?.[1])
-  .filter(Boolean);
-const removedExport = 'CJ_MCC_StickyLogLine';
+const suppliedDefinition = argv._[0];
+const fixtureExports = [
+  'StringCchCopyNA', '__cosl_internal', '__mingw_strtod', '__mingw_strtof', '__mingw_strtold',
+  '__mingw_vfprintf', '__mingw_vsnprintf', '__mingw_vsnwprintf', '__mingw_wcstod', '__mingw_wcstof',
+  '__ms_vsnprintf', '__stack_chk_fail', 'strtold', 'wcstold', 'wcstoll', 'wcstoull',
+];
+const removedExport = 'StringCchCopyNA';
 const replacementExport = 'CJ_MCC_GuardlistReplacement';
-if (!expectedExports.includes(removedExport)) {
-  console.error(`FATAL: test anchor ${removedExport} is absent from ${expectedDefinition}`);
-  process.exit(2);
-}
 
 const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'guardlist-'));
 try {
+  const expectedDefinition = suppliedDefinition
+    ? path.resolve(suppliedDefinition)
+    : path.join(temporaryRoot, 'windows_x86_64_exports.def');
+  if (!suppliedDefinition) {
+    await fs.writeFile(expectedDefinition, `EXPORTS\n${fixtureExports.map((name, index) =>
+      `    ${name} @${index + 1}`).join('\n')}\n`);
+  }
+  const definition = await fs.readFile(expectedDefinition, 'utf8');
+  const expectedExports = definition
+    .split(/\r?\n/)
+    .map((line) => line.trim().match(/^(\S+)\s+@\d+(?:\s+DATA)?$/)?.[1])
+    .filter(Boolean);
+  if (!expectedExports.includes(removedExport)) {
+    console.error(`FATAL: test anchor ${removedExport} is absent from ${expectedDefinition}`);
+    process.exit(2);
+  }
   const runtimeDll = path.join(temporaryRoot, 'libcangjie-runtime.dll');
   const fakeObjdump = path.join(temporaryRoot, 'fake-objdump.mjs');
   await fs.writeFile(runtimeDll, 'offline fixture\n');

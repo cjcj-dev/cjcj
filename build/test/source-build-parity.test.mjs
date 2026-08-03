@@ -202,8 +202,6 @@ test('Linux source stages emit the Python command order', async () => {
       expected(root, stdlibRoot, ['python3', 'build.py', 'clean']),
       expected(root, stdlibRoot, ['python3', 'build.py', 'build', '-t', 'relwithdebinfo', `--target-lib=${path.join(runtimeRoot, 'target')}`]),
       expected(root, stdlibRoot, ['python3', 'build.py', 'install']),
-      expected(root, stdlibRoot, ['python3', 'build.py', 'clean']),
-      expected(root, stdlibRoot, ['python3', 'build.py', 'build', '-t', 'relwithdebinfo', `--target-lib=${path.join(runtimeRoot, 'target')}`]),
       expected(root, stdxRoot, ['python3', 'build.py', 'clean']),
       expected(root, stdxRoot, ['python3', 'build.py', 'build', '-t', 'relwithdebinfo', `--include=${path.join(compilerRoot, 'include')}`]),
       expected(root, stdxRoot, ['python3', 'build.py', 'install']),

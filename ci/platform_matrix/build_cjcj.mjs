@@ -156,10 +156,6 @@ await fs.rm(sdkLlc, {force: true});
 await fs.rename(tupleLlc, sdkLlc);
 console.log(`activated fixed LLVM tuple ${process.env.PLATFORM_TUPLE || 'unknown'}: ${sdkLlc}`);
 
-// Fixed llc emits sticky / versioned DeferredLogRing ABI symbols. The official
-// SDK runtime does not define them; the matrix already built (or downloaded)
-// our pin under .platform-ci/runtime-install. Install that library into the
-// bootstrap SDK so the O1 cjcj link pairs with the activated llc.
 async function findNamedFile(directory, names) {
   const wanted = new Set(names.map((n) => n.toLowerCase()));
   let entries;
@@ -247,23 +243,7 @@ if (process.platform === 'win32') {
     }
   }
 }
-const stickyProbe = process.platform === 'win32'
-  ? spawnSync('objdump', ['-p', installedRuntimeLib], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024})
-  : spawnSync('nm', [process.platform === 'darwin' ? '-gU' : '-D', installedRuntimeLib], {
-    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-  });
-const stickyText = `${stickyProbe.stdout || ''}${stickyProbe.stderr || ''}`;
-const requiredSticky = [
-  'CJ_MCC_FlushDeferredLogRing_v1_8_264_32',
-  '__cj_sticky_heap_base',
-  '__cj_sticky_heap_size',
-  '__cj_sticky_logged_base',
-];
-const missingSticky = requiredSticky.filter((symbol) => !stickyText.includes(symbol));
-if (missingSticky.length) {
-  throw new Error(`installed bootstrap runtime lacks sticky ABI: ${missingSticky.join(', ')} (${installedRuntimeLib})`);
-}
-console.log(`bootstrap runtime ABI pair: fixed-llc + ${installedRuntimeLib}`);
+console.log(`bootstrap runtime installed: ${installedRuntimeLib}`);
 
 await printCommonVersions();
 console.log(`sdk_toolchain=${toolchain}\nsdk_archive=${process.env.SDK_ARCHIVE || 'unknown'}\nsdk_home=${cangjieHome}\noptimization=O1\nsetup_rc=${setupRc}`);
