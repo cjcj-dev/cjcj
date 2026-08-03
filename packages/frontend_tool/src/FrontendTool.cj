@@ -15,6 +15,7 @@ import cjcj::option.CompileTarget
 import cjcj::option.OrderedInput as OptionOrderedInput
 import cjcj::option.OutputMode
 import cjcj::option.TempFileInfo as OptionTempFileInfo
+import cjcj::option.TempFileManager
 import cjcj::utils.FileUtil
 import cjcj::utils.ProfileRecorder
 import cjcj::utils.ProfileRecorderType
@@ -127,6 +128,9 @@ public func ExecuteFrontendWithResult(
         }
     }
     ConfigureFrontendProfiling(globalOptions)
+    if (!TempFileManager.Instance().Init(globalOptions, true)) {
+        return FrontendExecutionResult(1)
+    }
     ConfigureFrontendDiagnostics(diag, globalOptions)
 
     let instance = CreateCompilerInstance(invocation, diag)
