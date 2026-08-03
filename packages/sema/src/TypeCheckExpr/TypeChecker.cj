@@ -5819,9 +5819,11 @@ extend TypeChecker {
                 return false
             }
         }
+        // C++ ChkSpawnExprSimple: IsSubtype(se.GetTy(), &tgtTy) — leaf=syn, root=target
+        // (SpawnExpr.cpp:70-82).
         let synTy = SynthesizeSpawnExpr(ctx, expr)
         if (Ty.IsTyCorrect(synTy)) {
-            if (impl.typeManager.CheckTypeCompatibility(target, synTy) != TypeCompatibility.INCOMPATIBLE) {
+            if (impl.typeManager.IsSubtype(synTy, target)) {
                 return true
             }
             if (let Some(diagValue) <- impl.diag) {
