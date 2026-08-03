@@ -208,7 +208,8 @@ public func ChkMatchCaseActions(typeManager: TypeManager, target: Option<Ty>, mc
             return false
         }
         let blockTy = BlockTy(block)
-        if (typeManager.CheckTypeCompatibility(targetTy, blockTy) == TypeCompatibility.INCOMPATIBLE) {
+        // C++ Check(ctx, target, exprOrDecls) => block <: target (TypeCheckMatchExpr.cpp:311-328)
+        if (!typeManager.IsSubtype(blockTy, targetTy)) {
             mc.SetTy(TypeManager.GetInvalidTy())
             return false
         }
