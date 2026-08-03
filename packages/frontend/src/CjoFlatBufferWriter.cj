@@ -457,7 +457,9 @@ public class ASTWriter {
         let version = builder.CreateString(CANGJIE_VERSION)
         let fullPkgName = builder.CreateString(pkg.fullPackageName)
         let pkgDepInfo = builder.CreateString(packageDepInfo)
-        let moduleName = builder.CreateString("")
+        let hasModuleName = pkg.TestAttr(Attribute.TOOL_ADD) && !pkg.files.isEmpty() &&
+            !pkg.files[0].decls.isEmpty()
+        let moduleName = builder.CreateString(if (hasModuleName) { pkg.files[0].decls[0].moduleName } else { "" })
         let packageKind = if (pkg.isMacroPackage) {
             1u8
         } else if (pkg.TestAttr(Attribute.TOOL_ADD)) {
