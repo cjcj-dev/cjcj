@@ -1,6 +1,7 @@
 package cjcj::sema
 
 import std.collection.*
+import std.sync.Mutex
 import cjcj::ast.*
 
 public class LocTyArgSynArgPack {
@@ -233,6 +234,7 @@ private func getOrderedCheckingIndexes(tys: ArrayList<Ty>): ArrayList<Int64> {
 }
 
 public class LocalTypeArgumentSynthesis {
+    private static let lock: Mutex = Mutex()
     private var tyMgr: TypeManager
     private var argPack: LocTyArgSynArgPack
     private var gcBlames: GCBlames
@@ -273,6 +275,7 @@ public class LocalTypeArgumentSynthesis {
     }
 
     public func SynthesizeTypeArguments(allowPartial!: Bool = false): Option<TypeSubst> {
+        synchronized(LocalTypeArgumentSynthesis.lock) {
         if (argPack.argTys.size != argPack.argBlames.size || argPack.argTys.size != argPack.paramTys.size) {
             return None
         }
@@ -352,6 +355,7 @@ public class LocalTypeArgumentSynthesis {
             return ResetIdealTypesInSubst(subst)
         }
         return None
+        }
     }
 
     public func HasUnsolvedTyVars(subst: TypeSubst): Bool {

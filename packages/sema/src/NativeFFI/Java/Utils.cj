@@ -66,3 +66,26 @@ public func GetJavaImpls(pkg: Package): ArrayList<ClassDecl> {
     }
     return impls
 }
+
+// C++ src/Sema/NativeFFI/Java/Utils.cpp:114.
+private let JAVA_IMPL_REGISTRY_COMPANION_REFERENCE_FIELD_NAME_IN_REFERENCE_WRAPPER = "$reg"
+
+// C++ src/Sema/NativeFFI/Java/Utils.cpp:116-131.
+public func IsJavaImplRegistryCompanionReferenceField(node: Node): Bool {
+    if (node.astKind != ASTKind.VAR_DECL) {
+        return false
+    }
+    let field = node as VarDecl
+    if (let None <- field) {
+        return false
+    }
+    let outerDecl = field.getOrThrow().outerDecl
+    if (let None <- outerDecl) {
+        return false
+    }
+    if (!IsImplReferenceWrapper(outerDecl.getOrThrow())) {
+        return false
+    }
+    return field.getOrThrow().identifier.Val() ==
+        JAVA_IMPL_REGISTRY_COMPANION_REFERENCE_FIELD_NAME_IN_REFERENCE_WRAPPER
+}

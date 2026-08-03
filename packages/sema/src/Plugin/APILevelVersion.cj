@@ -1,6 +1,7 @@
 package cjcj::sema.Plugin
 
 import std.collection.*
+import cjcj::utils.Stoull
 
 private let APILEVEL_MAJOR_MIN: UInt32 = 1u32
 private let APILEVEL_MAJOR_MAX: UInt32 = 99u32
@@ -209,23 +210,18 @@ private func isDecimalComponent(part: String): Bool {
 }
 
 private func parseComponentOrZero(part: String): UInt32 {
-    var value: UInt64 = 0u64
-    for (byte in part.toArray()) {
-        if (!isAsciiDigit(byte)) {
-            return 0u32
-        }
-        value = value * 10u64 + UInt64(byte - b'0')
-        if (value > UInt64(UInt32.Max)) {
-            return 0u32
-        }
+    if (let Some(value) <- Stoull(part)) {
+        return UInt32(value & 0xffffffffu64)
     }
-    return UInt32(value)
+    return 0u32
 }
 
 private func checkComponentRange(part: String, min: UInt32, max: UInt32): Bool {
     if (!isDecimalComponent(part)) {
         return false
     }
-    let value = parseComponentOrZero(part)
-    return value >= min && value <= max
+    if (let Some(value) <- Stoull(part)) {
+        return value >= UInt64(min) && value <= UInt64(max)
+    }
+    return false
 }

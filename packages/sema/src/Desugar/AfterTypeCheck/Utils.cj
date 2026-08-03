@@ -31,16 +31,12 @@ public func UnitifyBlock(posSrc: Expr, block: Block, unitTy: Ty): Unit {
     block.SetTy(unitTy)
 }
 
-private func sameNode(left: Node, right: Node): Bool {
-    return left.astKind == right.astKind && left.begin == right.begin && left.end == right.end
-}
-
 public func RearrangeRefLoop(src: Expr, dst: Expr, loopBody: Option<Node>): Unit {
     if (let Some(root) <- loopBody) {
         let walker = Walker(root, visitPre: { node: Node =>
             if (let Some(jumpExpr) <- (node as JumpExpr)) {
                 if (let Some(refLoop) <- jumpExpr.refLoop) {
-                    if (sameNode(refLoop, src)) {
+                    if (refLoop == src) {
                         jumpExpr.refLoop = dst
                     }
                 }

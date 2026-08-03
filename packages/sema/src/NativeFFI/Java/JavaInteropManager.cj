@@ -2,12 +2,96 @@ package cjcj::sema.NativeFFI.Java
 
 import std.collection.*
 import cjcj::ast.*
-import cjcj::basic.DiagnosticEngine
+import cjcj::ast.AnnotationKind as JavaAnnotationKind
+import cjcj::basic.{DiagnosticEngine, DiagKindRefactor, MakeRange}
+import cjcj::basic.Range as BasicRange
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::option.{InteropLanguage, MaybeString}
-import cjcj::sema.{MemberMap, TypeManager}
-import cjcj::sema.NativeFFI.{GetJavaFQName, IsJArray}
+import cjcj::sema.{MakeRangeForDeclIdentifier, MemberMap, TypeManager}
+import cjcj::sema.NativeFFI.{GetJavaFQName, GetJavaFQSourceCodeName, HasPredefinedJavaName, IsJArray}
+import cjcj::utils.CJC_ASSERT
+
+// C++ src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:16-31.
+private func MakeJavaImplJavaNameRange(decl: ClassLikeDecl): BasicRange {
+    if (!HasPredefinedJavaName(decl)) {
+        return MakeRangeForDeclIdentifier(decl)
+    }
+    for (anno in decl.annotations) {
+        if (anno.kind != JavaAnnotationKind.JAVA_IMPL) {
+            continue
+        }
+        return MakeRange(anno.GetBegin(), decl.identifier.End())
+    }
+    return MakeRange(decl.identifier.Begin(), decl.identifier.End())
+}
+
+// C++ src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:33-46.
+private func DiagJavaImplRedefinitionInJava(
+    diag: DiagnosticEngine,
+    decl: ClassLikeDecl,
+    prevDecl: ClassLikeDecl
+): Unit {
+    if (decl.TestAttr(Attribute.IS_BROKEN)) {
+        return
+    }
+    let prevDeclFqName = GetJavaFQSourceCodeName(prevDecl)
+    CJC_ASSERT(GetJavaFQSourceCodeName(decl) == prevDeclFqName)
+    let rangePrev = MakeJavaImplJavaNameRange(prevDecl)
+    let rangeNext = MakeJavaImplJavaNameRange(decl)
+    let builder = DiagnoseRefactor(diag, DiagKindRefactor.sema_java_impl_redefinition,
+        prevDecl, rangeNext, arguments: [prevDeclFqName])
+    AddNote(builder, decl, rangePrev, "'" + prevDeclFqName + "' is previously declared here")
+    builder.Emit()
+}
+
+// C++ src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:67-84.
+private func DiagJavaDeclCannotInheritPureCangjieType(
+    diag: DiagnosticEngine,
+    decl: ClassLikeDecl
+): Unit {
+    CJC_ASSERT(IsMirror(decl) || IsImpl(decl))
+    let kind = if (IsMirror(decl)) {
+        DiagKindRefactor.sema_java_mirror_cannot_inherit_pure_cangjie_type
+    } else {
+        DiagKindRefactor.sema_java_impl_cannot_inherit_pure_cangjie_type
+    }
+    let builder = DiagnoseRefactor(diag, kind, decl)
+    for (superType in decl.inheritedTypes) {
+        let superDeclOpt = Ty.GetDeclOfTy(superType.GetTy())
+        CJC_ASSERT(superDeclOpt.isSome())
+        let superDecl = superDeclOpt.getOrThrow()
+        let superTy = superDecl.GetTy().getOrThrow()
+        if (!IsMirror(superDecl) && !IsImpl(superDecl) && !superTy.IsObject() && !superTy.IsAny()) {
+            AddNote(builder, superType,
+                "'" + superType.ToString() + "' is not a java-compatible type")
+        }
+    }
+    builder.Emit()
+}
+
+// C++ src/Sema/NativeFFI/Java/AfterTypeCheck/DiagsInterop.cpp:48-65.
+private func DiagJavaMirrorChildMustBeAnnotated(
+    diag: DiagnosticEngine,
+    decl: ClassLikeDecl
+): Unit {
+    var parentDecl: Option<Decl> = None
+    for (parentType in decl.inheritedTypes) {
+        if (let Some(parent) <- (parentType.GetTy().getOrThrow() as ClassTy)) {
+            parentDecl = Some<Decl>(parent.decl.getOrThrow())
+        } else if (let Some(parent) <- (parentType.GetTy().getOrThrow() as InterfaceTy)) {
+            parentDecl = Some<Decl>(parent.decl.getOrThrow())
+        }
+        if (parentDecl.isSome() && IsMirror(parentDecl.getOrThrow())) {
+            break
+        }
+    }
+    let parent = parentDecl.getOrThrow()
+    DiagnoseRefactor(diag,
+        DiagKindRefactor.sema_java_mirror_subtype_must_be_annotated,
+        decl,
+        arguments: [parent.identifier.Val()]).Emit()
+}
 
 // C++ src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:36-60.
 private func IsJavaMirrorSubtype(ty: Ty): Bool {
@@ -146,8 +230,8 @@ public class JavaInteropManager {
                 }
                 let name = GetJavaFQName(value)
                 if (javaNameToDecl.contains(name)) {
-                    // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-                    // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:367-370.
+                    DiagJavaImplRedefinitionInJava(diag, value, javaNameToDecl[name])
+                    value.EnableAttr(Attribute.IS_BROKEN)
                     continue
                 }
                 javaNameToDecl[name] = value
@@ -165,16 +249,30 @@ public class JavaInteropManager {
 
     // C++ TypeCheckJavaInterop.cpp:289-308.
     private func CheckNonJavaSuperType(decl: ClassLikeDecl): Unit {
-        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-        // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:291-307.
+        CJC_ASSERT(IsMirror(decl) || IsImpl(decl))
+        for (superDecl in decl.GetAllSuperDecls()) {
+            let superTy = superDecl.GetTy().getOrThrow()
+            if (!IsMirror(superDecl) && !IsImpl(superDecl) && !superTy.IsObject() && !superTy.IsAny()) {
+                DiagJavaDeclCannotInheritPureCangjieType(diag, decl)
+                decl.EnableAttr(Attribute.IS_BROKEN)
+                return
+            }
+        }
+        if (decl.HasAnno(JavaAnnotationKind.JAVA_IMPL) &&
+            !IsJavaMirrorSubtype(decl.GetTy().getOrThrow())) {
+            DiagnoseRefactor(diag,
+                DiagKindRefactor.sema_java_mirror_subtype_anno_must_inherit_mirror,
+                decl).Emit()
+            decl.EnableAttr(Attribute.IS_BROKEN)
+        }
     }
 
     // C++ TypeCheckJavaInterop.cpp:310-318.
     private func CheckJavaMirrorSubtypeAttrClassLikeDecl(decl: ClassLikeDecl): Unit {
         if (IsJavaMirrorSubtype(decl.GetTy().getOrThrow())) {
             if (!decl.TestAnyAttr(Attribute.JAVA_MIRROR_SUBTYPE, Attribute.JAVA_MIRROR)) {
-                // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-                // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:314-315.
+                DiagJavaMirrorChildMustBeAnnotated(diag, decl)
+                decl.EnableAttr(Attribute.IS_BROKEN)
             }
         }
     }

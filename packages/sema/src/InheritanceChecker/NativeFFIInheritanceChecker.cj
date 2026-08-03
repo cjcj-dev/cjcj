@@ -33,7 +33,7 @@ private func DiagConflictingForeignName(
             DiagKindRefactor.sema_foreign_name_conflicting_annotation,
             declWithAnno,
             MakeRange(anno.GetBegin(), declWithAnno.identifier.End()),
-            arguments: [declWithAnno.identifier.Val(), anno.identifier.Val(), anno.identifier.Val()])
+            arguments: [declWithAnno.identifier.Val(), anno.identifier.Val()])
     } else {
         DiagnoseRefactor(diag,
             DiagKindRefactor.sema_foreign_name_conflicting_derived_annotation,

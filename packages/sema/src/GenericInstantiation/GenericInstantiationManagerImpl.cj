@@ -7,6 +7,15 @@ import cjcj::sema.Desugar.AfterTypeCheck.IsNeedRuntimeCheck
 import cjcj::sema.Test.TestManager as RealTestManager
 import cjcj::utils.{BOX_DECL_PREFIX, CJC_ASSERT, GetRootPackageName, InternalError}
 
+// C++ src/Sema/GenericInstantiation/GenericInstantiationManagerImpl.cpp:91-97.
+private func UnsetBoxStatus(pkg: Package): Unit {
+    let walker = Walker(pkg, visitPre: { node: Node =>
+        node.DisableAttr(Attribute.NEED_AUTO_BOX)
+        return VisitAction.WALK_CHILDREN
+    })
+    walker.Walk()
+}
+
 private class GenericInstantiationRecord {
     public var genericDecl: Decl
     public var instantiatedDecl: Decl
@@ -443,6 +452,10 @@ class GenericInstantiationManagerImpl {
         updateInstantiatedExtendMap(ci.typeManager, pkg)
         updateInstantiatedDeclsLinkage(pkg)
         ClearImportedUnusedInstantiatedDecls()
+        if (ci.diag.getOrThrow().GetErrorCount() == 0u64) {
+            ValidateUsedNodes(ci.diag.getOrThrow(), pkg)
+            UnsetBoxStatus(pkg)
+        }
     }
 
     public func GetInstantiatedDeclWithGenericInfo(genericInfo: GenericInfo, pkg: Package): Option<Decl> {

@@ -4,11 +4,11 @@ import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.LambdaPattern as BasicLambdaPattern
-import cjcj::mangle.BaseMangler
+import cjcj::mangle.{BaseMangler, MangleType}
 import cjcj::modules.{ImportManager, SemaImportManager}
 import cjcj::option.GetFileName as OptionGetFileName
 import cjcj::option.IsDir as OptionIsDir
-import cjcj::sema.TypeManager
+import cjcj::sema.{CreateThrowException, TypeManager}
 import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
 
 public let NSSTRING_CLASS_IDENT: String = "NSString"
@@ -320,6 +320,13 @@ public func WrapReturningLambdaCall(typeManager: TypeManager, nodes: ArrayList<N
     return CreateCallExpr(lambda, ArrayList<FuncArg>(), None, retTy, CallKind.CALL_INVALID)
 }
 
+// C++ src/Sema/NativeFFI/Utils.cpp:145-152.
+public func WrapUnitLambdaExpr(typeManager: TypeManager, nodes: ArrayList<Node>,
+    lambdaParams!: ArrayList<FuncParam> = ArrayList<FuncParam>()): LambdaExpr {
+    nodes.add(CreateUnitExpr(TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+    return WrapReturningLambdaExpr(typeManager, nodes, lambdaParams: lambdaParams)
+}
+
 public func WrapReturningLambdaExpr(typeManager: TypeManager, nodes: ArrayList<Node>,
     lambdaParams!: ArrayList<FuncParam> = ArrayList<FuncParam>()): LambdaExpr {
     CJC_ASSERT(!nodes.isEmpty())
@@ -523,6 +530,17 @@ public func IsObjCGeneratedMember(target: Decl): Bool {
     return false
 }
 
+// C++ src/Mangle/BaseMangler.cpp:258-296. This package-local extension avoids
+// colliding with cjcj::mangle.MangleType while preserving the C++ receiver.
+extend BaseMangler {
+    public func MangleType(ty: Ty): String {
+        if (ty.kind == TypeKind.TYPE) {
+            return ""
+        }
+        return MangleAstSemanticType(ty)
+    }
+}
+
 public func GetMangledMethodName(mangler: BaseMangler, params: ArrayList<FuncParam>, methodName: String,
     typeManager: TypeManager, genericConfig!: Option<GenericConfigInfo> = None): String {
     var name = methodName
@@ -534,7 +552,7 @@ public func GetMangledMethodName(mangler: BaseMangler, params: ArrayList<FuncPar
                 paramTy = GetGenericInstTy(config, rawParamTy, typeManager)
             }
         }
-        name += mangler.MangleAstSemanticType(paramTy).replace(".", "_")
+        name += mangler.MangleType(paramTy).replace(".", "_")
     }
     return name
 }
@@ -849,6 +867,17 @@ public func GetExceptionDecl(importManager: ImportManager): ClassDecl {
         CJC_ABORT_WITH_MSG("'Exception' declaration expected to be 'ClassDecl'")
     }
     return exceptionClassDecl.getOrThrow()
+}
+
+// C++ src/Sema/NativeFFI/Utils.cpp:758-770.
+public func CreateThrowExceptionCall(importManager: ImportManager, typeManager: TypeManager,
+    msg: String, curFile: File): ThrowExpr {
+    let exceptionArgs = ArrayList<Expr>()
+    let exceptionMsg = WithinFile(CreateLitConstExpr(LitConstKind.STRING, msg,
+        GetStringDecl(importManager).GetTy().getOrThrow()), curFile)
+    exceptionArgs.add(exceptionMsg)
+    let exception = GetExceptionDecl(importManager)
+    return CreateThrowException(exception, exceptionArgs, curFile, typeManager)
 }
 
 public func IsGenericParam(ty: Ty, decl: Decl, config: GenericConfigInfo): Bool {
