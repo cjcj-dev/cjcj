@@ -762,6 +762,17 @@ public class IRBuilder2 <: Resource {
         let currentLocation = unsafe { LLVMGetCurrentDebugLocation2(builder.raw) }
         SetInsertPointToAllocas(currentFunction)
         let result = CreateAllocaAtCurrentPoint(valueType, name)
+        // GC stackmaps may mark AS1/ref slots live before the first store (workerfix:
+        // PerformCHIRCompilation FA-104 live at +823, first store at +0xA28). Residual
+        // stack garbage then aborts in CheckAndPush via IsVaildType. Prefer late live
+        // over early: null-init at birth so safepoints before assignment see null.
+        // Official AddZeroInitForStructWithRefField (CGFunction.cpp:304-358) only covers
+        // struct allocas at first-use NCA and misses plain AS1 pointer cells + safepoint
+        // windows that are not IR uses — do not replicate that hole.
+        if (IsLLVMTypeContainsRef(valueType)) {
+            let nullVal = unsafe { LLVMConstNull(valueType) }
+            CreateStore(nullVal, result)
+        }
         RestoreInsertPoint(currentBlock, currentInsertPoint)
         unsafe { LLVMSetCurrentDebugLocation2(builder.raw, currentLocation) }
         return result
