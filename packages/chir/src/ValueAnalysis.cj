@@ -488,6 +488,19 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
 
     private func PreHandleApplyWithExceptionExpr(state: State<VD, Pool>,
         apply: ApplyWithException): Option<Block> {
+        if (apply.GetCallee().TestAttr(Attribute.MUT)) {
+            let structArg = apply.GetArgs()[0]
+            let structTy = (structArg.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType()
+            if (structTy.IsStruct()) {
+                if (let Some(obj) <- state.CheckAbstractObjectRefBy(structArg)) {
+                    if (childrenMap.Get(obj).isSome()) {
+                        SetObjChildrenStateToTop(state, obj, structTy, builder)
+                    }
+                }
+            } else {
+                CJC_ASSERT(structTy.IsClass())
+            }
+        }
         let refObj = PreHandleFuncCall(state, apply.GetResult().getOrThrow(), apply)
         return HandleApplyWithExceptionTerminator(state, apply, refObj)
     }
