@@ -47,6 +47,10 @@ public class CHIRBuilder {
         return context.GetStructType(packageName, name, genericType: genericType)
     }
 
+    public func GetZeroSizedTy(): VArrayType {
+        return context.GetVArrayTy(context.GetInt8Ty(), 0u64)
+    }
+
     public func CreatePackage(name: String): Package {
         let pkg = Package(name)
         context.SetCurPackage(pkg)
