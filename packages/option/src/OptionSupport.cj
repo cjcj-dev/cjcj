@@ -19,6 +19,7 @@ public let FILE_PATH_MAX_LENGTH: Int64 = UTILS_FILE_PATH_MAX_LENGTH
 @When[os == "Linux"]
 foreign {
     func get_nprocs(): Int32
+    func sched_getaffinity(pid: Int32, cpuSetSize: UIntNative, mask: VArray<UInt8, $128>): Int32
 }
 
 @When[os == "macOS"]
@@ -39,6 +40,21 @@ foreign {
 
 @When[os == "Linux"]
 public func GetHardwareConcurrency(): UInt64 {
+    var affinityMask = VArray<UInt8, $128>({ _: Int64 => 0u8 })
+    let affinityResult = unsafe { sched_getaffinity(0, UIntNative(affinityMask.size), inout affinityMask) }
+    if (affinityResult == 0) {
+        var affinityCount = 0u64
+        var byteIdx: Int64 = 0
+        while (byteIdx < affinityMask.size) {
+            var bits = affinityMask[byteIdx]
+            while (bits != 0u8) {
+                affinityCount += UInt64(bits & 1u8)
+                bits = bits >> 1
+            }
+            byteIdx++
+        }
+        if (affinityCount > 0u64) { return affinityCount }
+    }
     let count = unsafe { get_nprocs() }
     if (count > 0) { return UInt64(count) }
     return 1u64

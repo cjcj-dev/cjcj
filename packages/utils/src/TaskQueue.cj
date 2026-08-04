@@ -106,9 +106,9 @@ public class TaskQueue {
     private func createThreads(): Unit {
         isStarted = true
         sort(tasks, by: { left: Task, right: Task =>
-            if (right < left) {
+            if (left < right) {
                 Ordering.LT
-            } else if (left < right) {
+            } else if (right < left) {
                 Ordering.GT
             } else {
                 Ordering.EQ
@@ -129,8 +129,9 @@ public class TaskQueue {
                 if (tasks.isEmpty()) {
                     return
                 }
-                task = tasks[0]
-                tasks.remove(at: 0)
+                let lastIdx = tasks.size - 1
+                task = tasks[lastIdx]
+                tasks.remove(at: lastIdx)
             }
             task.getOrThrow().fn()
         }
