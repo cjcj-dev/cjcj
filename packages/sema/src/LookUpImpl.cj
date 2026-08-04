@@ -7,6 +7,7 @@ import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
 import cjcj::modules.PackageRelation as ModulesPackageRelation
 import cjcj::modules.SemaImportManager
 import cjcj::modules.SplitQualifiedName as ModulesSplitQualifiedName
+import cjcj::utils.EraseIf
 
 private let LOOKUP_CORE_PACKAGE_NAME: String = "std.core"
 private let LOOKUP_AST_PACKAGE_NAME: String = "std.ast"
@@ -52,7 +53,9 @@ private class LookUpImpl {
 
     public func SwapResultsWithInstTy(oldIdx: Int64, newIdx: Int64, decl: Decl,
         interfaceTy: InterfaceTy): Unit {
-        resultsWithInstTyV.remove(at: oldIdx)
+        if (oldIdx < resultsWithInstTyV.size) {
+            resultsWithInstTyV.remove(at: oldIdx)
+        }
         InsertResultsWithInstTy(newIdx, decl, interfaceTy)
     }
 
@@ -821,34 +824,50 @@ private func collectResolvedImportedDeclsByName(ctx: ASTContext, node: Node, nam
     return results
 }
 
+private func PreferNonBrokenFunctions(results: ArrayList<Decl>): Unit {
+    var hasNonBrokenFunction = false
+    for (decl in results) {
+        if (let Some(function) <- (decl as FuncDecl)) {
+            if (!function.TestAttr(Attribute.IS_BROKEN)) {
+                hasNonBrokenFunction = true
+                break
+            }
+        }
+    }
+    if (!hasNonBrokenFunction) {
+        return
+    }
+    EraseIf<Decl>(results, { decl: Decl =>
+        if (let Some(function) <- (decl as FuncDecl)) {
+            return function.TestAttr(Attribute.IS_BROKEN)
+        }
+        return false
+    })
+}
+
 public func FieldLookup(typeManager: TypeManager, decl: Option<Decl>, fieldName: String,
     info!: LookupInfo = LookupInfo(), importManager!: Option<SemaImportManager> = None): ArrayList<Decl> {
-    let results = ArrayList<Decl>()
+    var results = ArrayList<Decl>()
     let lookUpImpl = LookUpImpl(typeManager, importManager: importManager)
     if (let Some(target) <- decl) {
         let actual = GetSpecificDecl(target)
         if (let Some(classDecl) <- (actual as ClassDecl)) {
             fieldLookupClass(lookUpImpl, typeManager, classDecl, fieldName, results, info)
-            return results
-        }
-        if (let Some(interfaceDecl) <- (actual as InterfaceDecl)) {
+        } else if (let Some(interfaceDecl) <- (actual as InterfaceDecl)) {
             if (let Some(interfaceDeclTy) <- interfaceDecl.GetTy()) {
                 if (let Some(interfaceTy) <- (interfaceDeclTy as InterfaceTy)) {
                     lookUpImpl.FieldLookup(interfaceTy, fieldName, results, info)
                 }
             }
-            return results
-        }
-        if (let Some(enumDecl) <- (actual as EnumDecl)) {
-            return fieldLookupEnum(lookUpImpl, typeManager, enumDecl, fieldName, info)
-        }
-        if (let Some(structDecl) <- (actual as StructDecl)) {
-            return fieldLookupStruct(lookUpImpl, typeManager, structDecl, fieldName, info)
-        }
-        if (let Some(packageDecl) <- (actual as PackageDecl)) {
-            return fieldLookupPackage(packageDecl, fieldName, importManager: importManager)
+        } else if (let Some(enumDecl) <- (actual as EnumDecl)) {
+            results = fieldLookupEnum(lookUpImpl, typeManager, enumDecl, fieldName, info)
+        } else if (let Some(structDecl) <- (actual as StructDecl)) {
+            results = fieldLookupStruct(lookUpImpl, typeManager, structDecl, fieldName, info)
+        } else if (let Some(packageDecl) <- (actual as PackageDecl)) {
+            results = fieldLookupPackage(packageDecl, fieldName, importManager: importManager)
         }
     }
+    PreferNonBrokenFunctions(results)
     return results
 }
 
@@ -1055,5 +1074,6 @@ public func ExtendFieldLookup(typeManager: TypeManager, file: File, ty: Option<T
                 LookupInfo(baseTy: value, file: file))
         }
     }
+    PreferNonBrokenFunctions(results)
     return results
 }

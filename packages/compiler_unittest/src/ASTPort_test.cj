@@ -79,6 +79,38 @@ class ASTToSourceTest {
 }
 
 @Test
+class SearchTest {
+    // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/SearchTest.cpp:323 WildcardCharacterTest
+    @TestCase
+    func WildcardCharacterTest(): Unit {
+        let ctx = ASTContext(Package("search_test"))
+        for (name in ["func1", "afunc", "int646"]) {
+            let symbol = Symbol(name)
+            ctx.symbolTable.add(symbol)
+            ctx.invertedIndex.Index(symbol)
+        }
+
+        let results = Searcher().Search(ctx, "name:*")
+        @Expect(!results.isEmpty())
+        var hasFunc1 = false
+        var hasAfunc = false
+        var hasInt646 = false
+        for (symbol in results) {
+            if (symbol.name == "func1") {
+                hasFunc1 = true
+            } else if (symbol.name == "afunc") {
+                hasAfunc = true
+            } else if (symbol.name == "int646") {
+                hasInt646 = true
+            }
+        }
+        @Expect(hasFunc1)
+        @Expect(hasAfunc)
+        @Expect(hasInt646)
+    }
+}
+
+@Test
 class ToStringTest {
     // C++ anchor: /root/cj_build/cangjie_compiler/unittests/AST/ToStringTest.cpp:92 TEST(ToStringTest, BasicNodeSourceRestore)
     @TestCase
