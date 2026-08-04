@@ -962,6 +962,7 @@ public open class DynamicDispatch <: FuncCall {
     public init(kind: ExprKind, callContext: InvokeCallContext, parent: Option<Block>) {
         super(kind, callContext.funcCallCtx, parent)
         overflowStrategy = callContext.overflowStrategy
+        CJC_ASSERT(callContext.overflowStrategy != OverflowStrategy.CHECKED)
     }
 
     public func GetCallee(): Function {
@@ -1055,6 +1056,13 @@ public open class DynamicDispatch <: FuncCall {
         operands.remove(at: 0)
         parts.add(ValueIdsToString(operands))
         return JoinStrings(parts, ", ")
+    }
+
+    public override func AddExtraComment(): String {
+        if (overflowStrategy != OverflowStrategy.NA) {
+            return "methodName: " + GetMethodName()
+        }
+        return ""
     }
 }
 

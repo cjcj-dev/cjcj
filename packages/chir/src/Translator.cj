@@ -3091,10 +3091,7 @@ public class Translator {
         thisObj: Option<Value>, lambda: Lambda, lambdaArgs: ArrayList<Value>): Value {
         let args = lambdaArgs.clone()
         if (let Some(rawThis) <- thisObj) {
-            var objExpectedType = instFuncType.instParentCustomTy
-            if (objExpectedType.IsReferenceType()) {
-                objExpectedType = builder.context.GetRefTy(objExpectedType)
-            }
+            let objExpectedType = AddRefIfFuncIsMutOrClass(instFuncType.instParentCustomTy, funcDecl)
             args.add(TransformThisType(rawThis, objExpectedType, lambda), at: 0)
         }
         if (args.size != instFuncType.instParamTys.size) {
@@ -3115,19 +3112,13 @@ public class Translator {
         } else {
             callee
         }
-        let funcName = originalFuncDecl.identifier.Val()
-        var thisType = instFuncType.thisType.StripAllRefs()
-        if (thisType.IsThis()) {
-            thisType = CurrentFunction().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
-        }
-        let isStatic = originalFuncDecl.TestAttr(AstAttribute.STATIC)
-        let instFuncTy = builder.context.GetFuncTy(instFuncType.instParamTys, instFuncType.instRetTy)
-        let method = thisType.GetExpectedFunc(funcName, instFuncTy, isStatic,
-            instFuncType.instantiatedTypeArgs, builder, true) ??
-            throw IllegalStateException("expected virtual method is not available")
+        let method = (GetSymbolTable(originalFuncDecl) as Function).getOrThrow()
+        // The overflow strategy is NA in mock cases. SATURATING is the default because the two
+        // strategies have the same representation in OverflowStrategyPrefix.
+        let tempStrategy = if (strategy == OverflowStrategy.NA) { OverflowStrategy.SATURATING } else { strategy }
         return InvokeCallContext(method, caller, FuncCallContext(args: args,
             instTypeArgs: instFuncType.instantiatedTypeArgs, thisType: Some(instFuncType.thisType)),
-            overflowStrategy: if (IsOverflowOpCall(originalFuncDecl)) { strategy } else { OverflowStrategy.NA })
+            overflowStrategy: if (IsOverflowOpCall(originalFuncDecl)) { tempStrategy } else { OverflowStrategy.NA })
     }
 
     // C++ CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:829-835.
@@ -8152,11 +8143,7 @@ public class Translator {
             let rawObj = TranslateThisObjectForNonStaticMemberFuncCall(expr,
                 calleeDecl.TestAttr(AstAttribute.MUT))
             expectedThisObjTy = if (calleeInfo.isVirtualFuncCall) {
-                var virtualTy = calleeInfo.instParentCustomTy
-                if (virtualTy.IsClassOrArray() || (virtualTy.IsStruct() && calleeDecl.TestAttr(AstAttribute.MUT))) {
-                    virtualTy = builder.context.GetRefTy(virtualTy)
-                }
-                Some(virtualTy)
+                Some(AddRefIfFuncIsMutOrClass(calleeInfo.instParentCustomTy, calleeDecl))
             } else {
                 if (calleeInfo.instParamTys.isEmpty()) {
                     None

@@ -425,6 +425,7 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
             callContext.funcCallCtx.args),
             callContext.funcCallCtx, successBlock, errorBlock, parent)
         overflowStrategy = callContext.overflowStrategy
+        CJC_ASSERT(callContext.overflowStrategy != OverflowStrategy.CHECKED)
     }
 
     public func GetCallee(): Function {
@@ -511,6 +512,13 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
         operands.remove(at: 0)
         parts.add(TerminatorValueIdsToString(operands))
         return JoinStrings(parts, ", ")
+    }
+
+    public override func AddExtraComment(): String {
+        if (overflowStrategy != OverflowStrategy.NA) {
+            return "methodName: " + GetMethodName()
+        }
+        return ""
     }
 }
 
