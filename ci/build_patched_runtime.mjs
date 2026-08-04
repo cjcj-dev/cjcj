@@ -60,7 +60,9 @@ try {
   // (LiveInfo::RecomputeBitmapLiveBytes) broke at pin 707a07a1 — it is a
   // header-inline function and newer code shapes inline its single call site,
   // so no standalone symbol survives to be found.
-  const GC_FIX_COMMIT = 'c2fc3745f6baecfcebab78ff10b10371db949a6e';
+  // The fix commit was c2fc3745 on the pre-rebuild line; the integrate/0.0.2-gc
+  // history carries the same patch (identical stable patch-id) as ff89d7a1.
+  const GC_FIX_COMMIT = 'ff89d7a14f51de005281cdc071558837dedabe07';
   const ancestry = await $({nothrow: true})`git -C ${work} merge-base --is-ancestor ${GC_FIX_COMMIT} HEAD`;
   if (ancestry.exitCode !== 0) {
     log('ERROR: built runtime does not descend from the pinned GC fix commit; wrong fork commit');
