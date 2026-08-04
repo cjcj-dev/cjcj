@@ -2,6 +2,8 @@ package cjcj::macro_pkg
 
 import cjcj::basic.{DiagArgument, DiagKind}
 import cjcj::lex.{Lexer as RealLexer, StringPartKind, TOKEN_KIND_VALUES}
+import cjcj::option.GetHardwareConcurrency
+import cjcj::utils.TaskQueue
 import std.collection.*
 import std.fs.File as FSFile
 import std.fs.exists
@@ -185,24 +187,34 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: MacroHost): U
         var lastColumn = sm.GetLineEnd(mcPos) + 1
         var prevTokenKind = TokenKind.END
         invocation.macroAtPosition.add(mcPos)
+        let taskQueue = TaskQueue(Int64(GetHardwareConcurrency()))
         var tokenIdx: Int64 = 0
         while (tokenIdx < invocation.newTokens.size) {
-            var token = invocation.newTokens[tokenIdx]
-            if (token.kind == TokenKind.NL || token.kind == TokenKind.COMMENT) {
-                token.SetCurFile(true)
-                invocation.newTokens[tokenIdx] = token
-            } else if (mcPos.fileID != token.Begin().fileID) {
-                token.SetCurFile(false)
-            } else {
-                var isAtMacroPosition = false
-                for (atPos in invocation.macroAtPosition) {
-                    if (token.Begin() == atPos || token.Begin() == atPos + 1) {
-                        isAtMacroPosition = true
-                        break
+            let currentTokenIdx = tokenIdx
+            let _ = taskQueue.AddTask<Unit>({ =>
+                var token = invocation.newTokens[currentTokenIdx]
+                if (token.kind == TokenKind.NL || token.kind == TokenKind.COMMENT) {
+                    token.SetCurFile(true)
+                } else if (mcPos.fileID != token.Begin().fileID) {
+                    token.SetCurFile(false)
+                } else {
+                    var isAtMacroPosition = false
+                    for (atPos in invocation.macroAtPosition) {
+                        if (token.Begin() == atPos || token.Begin() == atPos + 1) {
+                            isAtMacroPosition = true
+                            break
+                        }
                     }
+                    token.SetCurFile(!isAtMacroPosition)
                 }
-                token.SetCurFile(!isAtMacroPosition)
-            }
+                invocation.newTokens[currentTokenIdx] = token
+            })
+            tokenIdx++
+        }
+        taskQueue.RunAndWaitForAllTasksCompleted()
+        tokenIdx = 0
+        while (tokenIdx < invocation.newTokens.size) {
+            var token = invocation.newTokens[tokenIdx]
             if (!isSpecialToken(prevTokenKind, token.kind)) {
                 lastColumn++
             }
