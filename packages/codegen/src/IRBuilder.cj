@@ -3337,8 +3337,10 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CallGCReadStaticRef(place: LLVMValueRef): LLVMValueRef {
+        let refTy = CGType.GetRefType(GetLLVMContext())
+        let refPlaceTy = unsafe { LLVMPointerType(refTy, 0u32) }
         let args = ArrayList<LLVMValueRef>()
-        args.add(place)
+        args.add(CreatePointerCast(place, refPlaceTy, name: "gcread.static.place"))
         return CreateIntrinsicCallNoInvoke(GCREAD_STATIC_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
