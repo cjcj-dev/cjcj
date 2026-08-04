@@ -319,17 +319,41 @@ public class CGModule {
     }
 
     public func GetOrCreateGlobalVariable(constVal: LLVMValueRef, gvContent: String, isTuple: Bool): LLVMValueRef {
-        let name = if (isTuple) { GetConstantTupleName(gvContent) } else { GetConstantArrayName(gvContent) }
-        if (let Some(moduleHandle) <- module) {
-            var globalVariable = LLVMNullValue()
+        let baseName = if (isTuple) { GetConstantTupleName(gvContent) } else { GetConstantArrayName(gvContent) }
+        var name = baseName
+        var collisionId: UIntNative = 1
+        while (true) {
+            let moduleHandle = module ?? return LLVMNullValue()
+            var namedValue = LLVMNullValue()
             try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
-                globalVariable = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+                namedValue = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+                if (namedValue.isNull()) {
+                    namedValue = unsafe { LLVMGetNamedFunction(moduleHandle.raw, nameCString.value) }
+                }
+                if (namedValue.isNull()) {
+                    namedValue = unsafe {
+                        LLVMGetNamedGlobalAlias(moduleHandle.raw, nameCString.value, UIntNative(name.size))
+                    }
+                }
+                if (namedValue.isNull()) {
+                    namedValue = unsafe {
+                        LLVMGetNamedGlobalIFunc(moduleHandle.raw, nameCString.value, UIntNative(name.size))
+                    }
+                }
             }
-            if (!globalVariable.isNull()) {
-                return globalVariable
+            if (namedValue.isNull()) {
+                return GeneratePrivateUnnamedAddrConstant(name, constVal)
             }
+            if (!unsafe { LLVMIsAGlobalVariable(namedValue) }.isNull()) {
+                let initializer = unsafe { LLVMGetInitializer(namedValue) }
+                if (!initializer.isNull() && initializer.toUIntNative() == constVal.toUIntNative()) {
+                    return namedValue
+                }
+            }
+            name = baseName + "." + collisionId.toString()
+            collisionId++
         }
-        return GeneratePrivateUnnamedAddrConstant(name, constVal)
+        return LLVMNullValue()
     }
 
     public func GetEnumCaseClassName(chirEnumType: EnumType, ctorIndex: Int64): String {

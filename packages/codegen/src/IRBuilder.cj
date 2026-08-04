@@ -4753,23 +4753,52 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateStringLiteral(value: String): LLVMValueRef {
-        let cjStringName = GetCjStringLiteralName(value)
+        let baseName = GetCjStringLiteralName(value)
+        var cjStringName = baseName
+        let cjStrings = GetCGContext().GetCJStrings()
+        var collisionId: UIntNative = 1
         if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            while (true) {
+                var namedValue = LLVMNullValue()
+                try (nameCString = unsafe { LibC.mallocCString(cjStringName) }.asResource()) {
+                    namedValue = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+                    if (namedValue.isNull()) {
+                        namedValue = unsafe { LLVMGetNamedFunction(moduleHandle.raw, nameCString.value) }
+                    }
+                    if (namedValue.isNull()) {
+                        namedValue = unsafe {
+                            LLVMGetNamedGlobalAlias(moduleHandle.raw, nameCString.value, UIntNative(cjStringName.size))
+                        }
+                    }
+                    if (namedValue.isNull()) {
+                        namedValue = unsafe {
+                            LLVMGetNamedGlobalIFunc(moduleHandle.raw, nameCString.value, UIntNative(cjStringName.size))
+                        }
+                    }
+                }
+                if (namedValue.isNull()) {
+                    break
+                }
+                if (!unsafe { LLVMIsAGlobalVariable(namedValue) }.isNull() && cjStrings.contains(cjStringName) &&
+                    cjStrings[cjStringName] == value) {
+                    return namedValue
+                }
+                cjStringName = baseName + "." + collisionId.toString()
+                collisionId++
+            }
+
+            let _ = CGArrayType.GenerateArrayLayoutTypeInfo(GetCGContext(), ARRAY_LAYOUT_PREFIX + "UInt8",
+                unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) })
             var result = LLVMNullValue()
             try (nameCString = unsafe { LibC.mallocCString(cjStringName) }.asResource()) {
-                result = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
-                if (result.isNull()) {
-                    let _ = CGArrayType.GenerateArrayLayoutTypeInfo(GetCGContext(), ARRAY_LAYOUT_PREFIX + "UInt8",
-                        unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) })
-                    result = unsafe { LLVMAddGlobal(moduleHandle.raw, GetCGContext().GetCjStringType(), nameCString.value) }
-                    unsafe {
-                        LLVMSetGlobalConstant(result, 1)
-                        addAttribute(result, CJSTRING_LITERAL_ATTR)
-                        LLVMSetLinkage(result, LLVMLinkageValue(LLVMLinkage.Private))
-                    }
-                    GetCGContext().AddCJString(cjStringName, value)
-                }
+                result = unsafe { LLVMAddGlobal(moduleHandle.raw, GetCGContext().GetCjStringType(), nameCString.value) }
             }
+            unsafe {
+                LLVMSetGlobalConstant(result, 1)
+                addAttribute(result, CJSTRING_LITERAL_ATTR)
+                LLVMSetLinkage(result, LLVMLinkageValue(LLVMLinkage.Private))
+            }
+            GetCGContext().AddCJString(cjStringName, value)
             return result
         }
         throw IllegalStateException("cannot create string literal without an LLVM module")

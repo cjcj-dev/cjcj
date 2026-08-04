@@ -230,6 +230,8 @@ foreign {
     func LLVMSetGC(fn: LLVMValueRef, name: CString): Unit
     func LLVMAddGlobal(module: LLVMModuleRef, globalType: LLVMTypeRef, name: CString): LLVMValueRef
     func LLVMGetNamedGlobal(module: LLVMModuleRef, name: CString): LLVMValueRef
+    func LLVMGetNamedGlobalAlias(module: LLVMModuleRef, name: CString, nameLen: UIntNative): LLVMValueRef
+    func LLVMGetNamedGlobalIFunc(module: LLVMModuleRef, name: CString, nameLen: UIntNative): LLVMValueRef
     func LLVMGlobalGetValueType(global: LLVMValueRef): LLVMTypeRef
     func LLVMGetFirstGlobal(module: LLVMModuleRef): LLVMValueRef
     func LLVMGetNextGlobal(global: LLVMValueRef): LLVMValueRef

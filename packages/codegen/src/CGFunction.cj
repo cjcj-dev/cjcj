@@ -15,23 +15,6 @@ foreign {
     func LLVMGetAllocatedType(alloca: LLVMValueRef): LLVMTypeRef
 }
 
-private func CreateFunctionWrapperForNoBasePtrCases(chirFunc: Value, cgMod: CGModule): LLVMValueRef {
-    let functionValue = (chirFunc as Function).getOrThrow()
-    let cgFunc = cgMod.GetOrInsertCGFunction(chirFunc, forWrapper: true)
-    cgMod.MapFunctionParameters(functionValue, cgFunc)
-    try (unwindBlockScope = CodeGenUnwindBlockScope(cgMod, LLVMNullBasicBlock())) {
-        if (let Some(body) <- functionValue.GetBody()) {
-            if (let Some(entryBlock) <- body.GetEntryBlock()) {
-                EmitBasicBlockIR(cgMod, entryBlock)
-            }
-            for (bb in body.GetBlocks()) {
-                cgMod.SetOrUpdateMappedBB(bb, LLVMNullBasicBlock())
-            }
-        }
-    }
-    return cgFunc.GetRawFunction()
-}
-
 private func CreateFunctionWrapperForNormalCases(function: LLVMValueRef, wrapperF: LLVMValueRef,
     cgType: CGFunctionType, cgMod: CGModule): Unit {
     cgMod.SetExceptionIntrinsicPersonality(wrapperF)
@@ -141,11 +124,6 @@ private func CreateFunctionWrapper(function: LLVMValueRef, cgType: CGFunctionTyp
         unsafe { LLVMSetValueName2(function, nameCString.value, UIntNative(withoutTIName.size)) }
     }
     AddFnAttr(function, HAS_WITH_TI_WRAPPER_ATTR)
-
-    if (!cgCtx.GetCompileOptions().enableCompileDebug && !cgType.HasBasePtr() &&
-        !cgCtx.IsValueOfOtherLLVMModule(chirFunc)) {
-        return CreateFunctionWrapperForNoBasePtrCases(chirFunc, cgMod)
-    }
 
     let originalFunctionType = unsafe { LLVMGlobalGetValueType(function) }
     let paramDerefType = CGType.GetOrCreate(cgMod, DeRef(cgType.GetParamType(0).GetOriginal())).GetLLVMType()
