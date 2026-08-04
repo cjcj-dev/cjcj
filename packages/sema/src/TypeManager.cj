@@ -2189,6 +2189,9 @@ public class TypeManager {
 
     private func IsOverrideOrShadow(src: FuncDecl, target: FuncDecl, baseTy: Option<Ty>,
         expectInstParent: Option<Ty>): Bool {
+        if (src.TestAttr(Attribute.IS_BROKEN) || target.TestAttr(Attribute.IS_BROKEN)) {
+            return false
+        }
         if (let Some(cached) <- GetOverrideCache(Some(src), Some(target), baseTy, expectInstParent)) {
             return cached
         }
