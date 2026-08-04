@@ -217,9 +217,8 @@ public class CGEnumType <: CGCustomType {
             let blocks = irBuilder.CreateAndInsertBasicBlocks(ArrayList<String>(["ref", "nonRef"]))
             irBuilder.CreateCondBr(isRef, blocks[0], blocks[1])
             irBuilder.SetInsertPoint(blocks[0])
-            let unitTypeInfo = CGType.GetOrCreate(cgMod,
-                cgMod.GetCGContext().GetCHIRBuilder().context.GetUnitTy()).GetOrCreateTypeInfo()
-            irBuilder.CreateRet(irBuilder.CreateBitCast(unitTypeInfo, i8PtrType))
+            irBuilder.CreateRet(irBuilder.CreateBitCast(
+                CGType.GetZeroSizedCGType(cgMod).GetOrCreateTypeInfo(), i8PtrType))
             irBuilder.SetInsertPoint(blocks[1])
             let boolTypeInfo = CGType.GetOrCreate(cgMod,
                 cgMod.GetCGContext().GetCHIRBuilder().context.GetBoolTy()).GetOrCreateTypeInfo()
