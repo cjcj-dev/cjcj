@@ -174,7 +174,6 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
 
     public open func VisitSubExpression(o: Invoke): Unit {
         VisitExprDefaultImpl(o)
-        o.SetMethodType(ConvertFuncParamsAndRetType(o.GetMethodType()))
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -185,7 +184,6 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
 
     public open func VisitSubExpression(o: InvokeWithException): Unit {
         VisitExprDefaultImpl(o)
-        o.SetMethodType(ConvertFuncParamsAndRetType(o.GetMethodType()))
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -196,7 +194,6 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
 
     public open func VisitSubExpression(o: InvokeStatic): Unit {
         VisitExprDefaultImpl(o)
-        o.SetMethodType(ConvertFuncParamsAndRetType(o.GetMethodType()))
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -207,7 +204,6 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
 
     public open func VisitSubExpression(o: InvokeStaticWithException): Unit {
         VisitExprDefaultImpl(o)
-        o.SetMethodType(ConvertFuncParamsAndRetType(o.GetMethodType()))
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {

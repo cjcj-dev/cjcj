@@ -299,8 +299,18 @@ public class CHIR2BCHIR {
         if (expr.GetExprKind() == ExprKind.INVOKE || expr.GetExprKind() == ExprKind.INVOKE_WITH_EXCEPTION) {
             context.definition.PushOp(OpCode.NULLPTR)
         }
-        for (operand in expr.GetOperands()) {
-            TranslateValue(this, context, operand)
+        if (expr.GetExprKind() == ExprKind.INVOKE || expr.GetExprKind() == ExprKind.INVOKE_WITH_EXCEPTION ||
+            expr.GetExprKind() == ExprKind.INVOKESTATIC ||
+            expr.GetExprKind() == ExprKind.INVOKESTATIC_WITH_EXCEPTION) {
+            var operandIdx: Int64 = 1
+            while (operandIdx < expr.GetNumOfOperands()) {
+                TranslateValue(this, context, expr.GetOperand(operandIdx))
+                operandIdx++
+            }
+        } else {
+            for (operand in expr.GetOperands()) {
+                TranslateValue(this, context, operand)
+            }
         }
         match (expr.GetExprMajorKind()) {
             case ExprMajorKind.TERMINATOR => TranslateTerminatorExpression(this, context, expr)

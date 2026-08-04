@@ -6,7 +6,19 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::basic.LinkageToInt
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT}
-import cjcj::utils.OverflowStrategyIndex
+import cjcj::utils.OverflowStrategy
+
+private func SerializeOverflowStrategy(strategy: OverflowStrategy): UInt8 {
+    return match (strategy) {
+        case OverflowStrategy.NA => CHIRFB_OVERFLOW_STRATEGY_NA
+        case OverflowStrategy.WRAPPING => CHIRFB_OVERFLOW_STRATEGY_WRAPPING
+        case OverflowStrategy.THROWING => CHIRFB_OVERFLOW_STRATEGY_THROWING
+        case OverflowStrategy.SATURATING => CHIRFB_OVERFLOW_STRATEGY_SATURATING
+        case _ =>
+            CJC_ABORT()
+            CHIRFB_OVERFLOW_STRATEGY_NA
+    }
+}
 
 private func IntrinsicKindToPackageIntrinsicKind(kind: IntrinsicKind): UInt16 {
     return match (kind) {
@@ -976,12 +988,12 @@ class CHIRSerializerImpl {
 
     private func Serialize(obj: UnaryExpression): FlatBufferOffset {
         let base = Serialize((obj as Expression).getOrThrow())
-        return CreateUnaryExpressionBase(builder, base, UInt8(OverflowStrategyIndex(obj.GetOverflowStrategy())))
+        return CreateUnaryExpressionBase(builder, base, SerializeOverflowStrategy(obj.GetOverflowStrategy()))
     }
 
     private func Serialize(obj: BinaryExpression): FlatBufferOffset {
         let base = Serialize((obj as Expression).getOrThrow())
-        return CreateBinaryExpressionBase(builder, base, UInt8(OverflowStrategyIndex(obj.GetOverflowStrategy())))
+        return CreateBinaryExpressionBase(builder, base, SerializeOverflowStrategy(obj.GetOverflowStrategy()))
     }
 
     private func Serialize(obj: Allocate): FlatBufferOffset {
@@ -1042,7 +1054,7 @@ class CHIRSerializerImpl {
         let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
         let funcCall = CreateFuncCallDirect(builder, expression,
             if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, GetId(obj.GetThisType()))
-        return CreateInvokeBase(builder, funcCall, Serialize(obj.virMethodCtx))
+        return CreateInvokeBase(builder, funcCall, SerializeOverflowStrategy(obj.overflowStrategy))
     }
 
     private func Serialize(obj: InvokeWithException): FlatBufferOffset {
@@ -1050,7 +1062,7 @@ class CHIRSerializerImpl {
         let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
         let funcCall = CreateFuncCallDirect(builder, expression,
             if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, GetId(obj.GetThisType()))
-        return CreateInvokeBase(builder, funcCall, Serialize(obj.virMethodCtx))
+        return CreateInvokeBase(builder, funcCall, SerializeOverflowStrategy(obj.overflowStrategy))
     }
 
     private func Serialize(obj: InvokeStatic): FlatBufferOffset {
@@ -1058,7 +1070,7 @@ class CHIRSerializerImpl {
         let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
         let funcCall = CreateFuncCallDirect(builder, expression,
             if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, GetId(obj.GetThisType()))
-        return CreateInvokeBase(builder, funcCall, Serialize(obj.virMethodCtx))
+        return CreateInvokeBase(builder, funcCall, SerializeOverflowStrategy(obj.overflowStrategy))
     }
 
     private func Serialize(obj: InvokeStaticWithException): FlatBufferOffset {
@@ -1066,17 +1078,17 @@ class CHIRSerializerImpl {
         let instantiatedTypeArgs = GetId(obj.GetInstantiatedTypeArgs())
         let funcCall = CreateFuncCallDirect(builder, expression,
             if (instantiatedTypeArgs.isEmpty()) { None } else { Some(instantiatedTypeArgs) }, GetId(obj.GetThisType()))
-        return CreateInvokeBase(builder, funcCall, Serialize(obj.virMethodCtx))
+        return CreateInvokeBase(builder, funcCall, SerializeOverflowStrategy(obj.overflowStrategy))
     }
 
     private func Serialize(obj: TypeCast): FlatBufferOffset {
         let base = Serialize((obj as Expression).getOrThrow())
-        return CreateNumericCastBase(builder, base, UInt8(OverflowStrategyIndex(obj.GetOverflowStrategy())))
+        return CreateNumericCastBase(builder, base, SerializeOverflowStrategy(obj.GetOverflowStrategy()))
     }
 
     private func Serialize(obj: TypeCastWithException): FlatBufferOffset {
         let base = Serialize((obj as Expression).getOrThrow())
-        return CreateNumericCastBase(builder, base, UInt8(OverflowStrategyIndex(obj.GetOverflowStrategy())))
+        return CreateNumericCastBase(builder, base, SerializeOverflowStrategy(obj.GetOverflowStrategy()))
     }
 
     private func Serialize(obj: InstanceOf): FlatBufferOffset {
@@ -1318,7 +1330,7 @@ class CHIRSerializerImpl {
             case ExprKind.INT_OP_WITH_EXCEPTION =>
                 let intOp = (obj as IntOpWithException).getOrThrow()
                 let base = Serialize(obj)
-                let overflow = UInt8(OverflowStrategyIndex(intOp.GetOverflowStrategy()))
+                let overflow = SerializeOverflowStrategy(intOp.GetOverflowStrategy())
                 if (ExprKindMajor(intOp.GetOpKind()) == ExprMajorKind.UNARY_EXPR) {
                     exprKind[index] = CHIRFB_EXPRESSION_ELEM_UNARY_EXPRESSION_BASE
                     CreateUnaryExpressionBase(builder, base, overflow)
@@ -2193,22 +2205,26 @@ class CHIRSerializerImpl {
             return serializeInvokePayload(invokeStaticWithException.GetInstantiatedTypeArgs(),
                 invokeStaticWithException.GetThisType(), invokeStaticWithException.GetMethodName(),
                 invokeStaticWithException.GetMethodType(), invokeStaticWithException.GetGenericTypeParams(),
+                invokeStaticWithException.overflowStrategy,
                 invokeStaticWithException.GetVirtualMethodOffset())
         }
         if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
             return serializeInvokePayload(invokeWithException.GetInstantiatedTypeArgs(),
                 invokeWithException.GetThisType(), invokeWithException.GetMethodName(),
                 invokeWithException.GetMethodType(), invokeWithException.GetGenericTypeParams(),
+                invokeWithException.overflowStrategy,
                 invokeWithException.GetVirtualMethodOffset())
         }
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
             return serializeInvokePayload(invokeStatic.GetInstantiatedTypeArgs(), invokeStatic.GetThisType(),
                 invokeStatic.GetMethodName(), invokeStatic.GetMethodType(), invokeStatic.GetGenericTypeParams(),
+                invokeStatic.overflowStrategy,
                 invokeStatic.GetVirtualMethodOffset())
         }
         if (let Some(invoke) <- (expr as Invoke)) {
             return serializeInvokePayload(invoke.GetInstantiatedTypeArgs(), invoke.GetThisType(),
                 invoke.GetMethodName(), invoke.GetMethodType(), invoke.GetGenericTypeParams(),
+                invoke.overflowStrategy,
                 invoke.GetVirtualMethodOffset())
         }
         if (let Some(instanceOf) <- (expr as InstanceOf)) {
@@ -2273,13 +2289,15 @@ class CHIRSerializerImpl {
     }
 
     private func serializeInvokePayload(instTypeArgs: ArrayList<Type>, thisType: Option<Type>, methodName: String,
-        methodType: FuncType, genericTypeParams: ArrayList<GenericType>, virtualMethodOffset: Option<UInt64>): String {
+        methodType: FuncType, genericTypeParams: ArrayList<GenericType>, overflowStrategy: OverflowStrategy,
+        virtualMethodOffset: Option<UInt64>): String {
         let fields = ArrayList<String>()
         fields.add(CHIRSerializeTypeList(instTypeArgs))
         fields.add(if (let Some(ty) <- thisType) { CHIRSerializeType(ty) } else { "" })
         fields.add(methodName)
         fields.add(CHIRSerializeType(methodType))
         fields.add(CHIRSerializeGenericTypeList(genericTypeParams))
+        fields.add(SerializeOverflowStrategy(overflowStrategy).toString())
         fields.add(if (let Some(offset) <- virtualMethodOffset) { offset.toString() } else { "" })
         return expressionPayload("invoke", fields)
     }

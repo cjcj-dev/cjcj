@@ -3,6 +3,8 @@ package cjcj::chir
 import std.collection.*
 import cjcj::utils.CJC_ASSERT
 
+const BYTECODE_CONTENT_MAX: Int64 = 4294967295
+
 public class BCHIRCodePosition {
     public let fileID: Int64
     public let line: Int64

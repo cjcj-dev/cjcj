@@ -226,7 +226,7 @@ public class Devirtualization {
             let invokeAbsObject = state.CheckAbstractObjectRefBy(invoke.GetObject()) ?? return
             let resVal = state.CheckAbstractValue(invokeAbsObject) ?? return
             let paramTys = ArrayList<Type>()
-            for (param in invoke.GetOperands()) {
+            for (param in invoke.GetArgs()) {
                 paramTys.add(param.GetType().getOrThrow())
             }
             let found = FindRealCallee(builder, resVal,
@@ -342,7 +342,7 @@ public class Devirtualization {
                 }
                 realFunc = rewriteInfo.realCallee.GetWrappedRawMethod().getOrThrow()
             }
-            let args = invoke.GetOperands()
+            let args = invoke.GetArgs()
             let thisDerefType = thisType.StripAllRefs()
             var instThisType = GetInstParentType(thisDerefType,
                 realFunc.GetFuncType().getOrThrow().GetParamTypes()[0].StripAllRefs(), builder)

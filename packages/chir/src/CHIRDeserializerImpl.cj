@@ -6,6 +6,23 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::flatbuffers.{FlatBufferString, Offset, Vector}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, OverflowStrategy}
 
+private func DeserializeOverflowStrategy(strategy: UInt8): OverflowStrategy {
+    if (strategy == CHIRFB_OVERFLOW_STRATEGY_NA) {
+        return OverflowStrategy.NA
+    }
+    if (strategy == CHIRFB_OVERFLOW_STRATEGY_WRAPPING) {
+        return OverflowStrategy.WRAPPING
+    }
+    if (strategy == CHIRFB_OVERFLOW_STRATEGY_THROWING) {
+        return OverflowStrategy.THROWING
+    }
+    if (strategy == CHIRFB_OVERFLOW_STRATEGY_SATURATING) {
+        return OverflowStrategy.SATURATING
+    }
+    CJC_ABORT()
+    return OverflowStrategy.NA
+}
+
 private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
     return match (kind) {
         case 1u8 => (ExprKind.GOTO, false)
@@ -1068,32 +1085,38 @@ class CHIRDeserializerImpl {
 
     private func createInvokeExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
         successors: ArrayList<Block>, payload: ArrayList<String>, block: Block): Option<Expression> {
-        let funcContext = FuncCallContext(args: valuesAfterFirst(operands),
+        if (operands.size < 2) {
+            return None
+        }
+        let method = (operands[0] as Function).getOrThrow()
+        let invokeOperands = operands.clone()
+        invokeOperands.remove(at: 0)
+        let funcContext = FuncCallContext(args: valuesAfterFirst(invokeOperands),
             instTypeArgs: CHIRParseTypeList(CHIRFieldAt(payload, 1), builder, customDefs),
             thisType: parseOptionalType(CHIRFieldAt(payload, 2)))
-        let methodContext = FuncSigInfo(parseFuncTypeOrDefault(CHIRFieldAt(payload, 4)), funcName: CHIRFieldAt(payload, 3),
-            genericTypeParams: CHIRParseGenericTypeList(CHIRFieldAt(payload, 5), builder, customDefs))
-        let invokeContext = InvokeCallContext(operands[0], funcContext, methodContext)
+        let overflowStrategy = DeserializeOverflowStrategy(UInt8(UInt64.parse(CHIRFieldAt(payload, 6))))
+        let invokeContext = InvokeCallContext(method, invokeOperands[0], funcContext,
+            overflowStrategy: overflowStrategy)
         if (kind == ExprKind.INVOKESTATIC) {
             let invokeExpr = builder.CreateInvokeStatic(resultTypeOrInvalid(resultTy), invokeContext, block)
-            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 6))
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 7))
             return invokeExpr
         }
         if (kind == ExprKind.INVOKE) {
             let invokeExpr = builder.CreateInvoke(resultTypeOrInvalid(resultTy), invokeContext, block)
-            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 6))
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 7))
             return invokeExpr
         }
         if (kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION && successors.size >= 2) {
             let invokeExpr = builder.CreateInvokeStaticWithException(resultTypeOrInvalid(resultTy), invokeContext,
                 successors[0], successors[1], block)
-            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 6))
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 7))
             return invokeExpr
         }
         if (kind == ExprKind.INVOKE_WITH_EXCEPTION && successors.size >= 2) {
             let invokeExpr = builder.CreateInvokeWithException(resultTypeOrInvalid(resultTy), invokeContext,
                 successors[0], successors[1], block)
-            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 6))
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 7))
             return invokeExpr
         }
         return None
@@ -2044,16 +2067,7 @@ class CHIRDeserializerImpl {
         let operand = GetValue<Value>(operandId).getOrThrow()
         let parentBlock = GetValue<Block>(base.GetOwner()).getOrThrow()
         let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
-        let overflowStrategy = match (obj.GetOverflowStrategy()) {
-            case 0u8 => OverflowStrategy.NA
-            case 1u8 => OverflowStrategy.CHECKED
-            case 2u8 => OverflowStrategy.WRAPPING
-            case 3u8 => OverflowStrategy.THROWING
-            case 4u8 => OverflowStrategy.SATURATING
-            case _ =>
-                CJC_ABORT()
-                OverflowStrategy.NA
-        }
+        let overflowStrategy = DeserializeOverflowStrategy(obj.GetOverflowStrategy())
         let (kind, isException) = CHIRExprKindToExprKind(base.GetKind())
         if (isException) {
             let normalId = operands.Get(1u32, 0u32)
@@ -2074,16 +2088,7 @@ class CHIRDeserializerImpl {
         let rhs = GetValue<Value>(operands.Get(1u32, 0u32)).getOrThrow()
         let parentBlock = GetValue<Block>(base.GetOwner()).getOrThrow()
         let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
-        let overflowStrategy = match (obj.GetOverflowStrategy()) {
-            case 0u8 => OverflowStrategy.NA
-            case 1u8 => OverflowStrategy.CHECKED
-            case 2u8 => OverflowStrategy.WRAPPING
-            case 3u8 => OverflowStrategy.THROWING
-            case 4u8 => OverflowStrategy.SATURATING
-            case _ =>
-                CJC_ABORT()
-                OverflowStrategy.NA
-        }
+        let overflowStrategy = DeserializeOverflowStrategy(obj.GetOverflowStrategy())
         let (kind, isException) = CHIRExprKindToExprKind(base.GetKind())
         if (isException) {
             let normalId = operands.Get(2u32, 0u32)
@@ -2290,7 +2295,9 @@ class CHIRDeserializerImpl {
         let base = funcCallBase.GetBase().getOrThrow()
         let owner = GetValue<Block>(base.GetOwner()).getOrThrow()
         let operands = GetValue<Value>(base.GetOperands())
-        CJC_ASSERT(!operands.isEmpty())
+        CJC_ASSERT(operands.size >= 2)
+        let method = (operands[0] as Function).getOrThrow()
+        operands.remove(at: 0)
         let caller = operands[0]
         operands.remove(at: 0)
         let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
@@ -2303,13 +2310,10 @@ class CHIRDeserializerImpl {
             normalBlock = (operands[operands.size - 1] as Block).getOrThrow()
             operands.remove(at: operands.size - 1)
         }
-        let virMethodCtx = obj.GetVirMethodCtx().getOrThrow()
-        let invokeInfo = InvokeCallContext(caller,
+        let invokeInfo = InvokeCallContext(method, caller,
             FuncCallContext(args: operands, instTypeArgs: GetType<Type>(funcCallBase.GetInstantiatedTypeArgs()),
                 thisType: GetType<Type>(funcCallBase.GetObjType())),
-            FuncSigInfo(GetType<FuncType>(virMethodCtx.GetFuncType()).getOrThrow(),
-                funcName: virMethodCtx.GetFuncName().getOrThrow().str(),
-                genericTypeParams: GetType<GenericType>(virMethodCtx.GetGenericTypeParams())))
+            overflowStrategy: DeserializeOverflowStrategy(obj.GetOverflowStrategy()))
         var isStatic = false
         if (let Some(local) <- (caller as LocalVar)) {
             if (let Some(callerExpression) <- local.GetExpr()) {
@@ -2343,16 +2347,7 @@ class CHIRDeserializerImpl {
         let operands = GetValue<Value>(base.GetOperands())
         let owner = GetValue<Block>(base.GetOwner()).getOrThrow()
         let resultTy = GetType<Type>(base.GetResultTy()).getOrThrow()
-        let overflowStrategy = match (obj.GetOverflowStrategy()) {
-            case 0u8 => OverflowStrategy.NA
-            case 1u8 => OverflowStrategy.CHECKED
-            case 2u8 => OverflowStrategy.WRAPPING
-            case 3u8 => OverflowStrategy.THROWING
-            case 4u8 => OverflowStrategy.SATURATING
-            case _ =>
-                CJC_ABORT()
-                OverflowStrategy.NA
-        }
+        let overflowStrategy = DeserializeOverflowStrategy(obj.GetOverflowStrategy())
         let (_, isException) = CHIRExprKindToExprKind(base.GetKind())
         if (isException) {
             return builder.CreateTypeCastWithException(resultTy, operands[0],

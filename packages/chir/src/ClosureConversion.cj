@@ -1317,13 +1317,6 @@ public class ClosureConversion {
         if (let Some(callWithException) <- (expr as FuncCallWithException)) {
             ConvertFuncCallWithExceptionThisTypes(callWithException, thisType)
         }
-        if (let Some(dispatch) <- (expr as DynamicDispatch)) {
-            dispatch.SetMethodType(ConvertFuncParamsAndRetTypeWithThisType(dispatch.GetMethodType(), thisType))
-        }
-        if (let Some(dispatchWithException) <- (expr as DynamicDispatchWithException)) {
-            dispatchWithException.SetMethodType(
-                ConvertFuncParamsAndRetTypeWithThisType(dispatchWithException.GetMethodType(), thisType))
-        }
         if (let Some(constant) <- (expr as Constant)) {
             ConvertValueThisType(constant.GetValue(), thisType)
         }
@@ -1864,9 +1857,10 @@ public class ClosureConversion {
         let callee = apply.GetCallee()
         let instParentType = ResolveAutoEnvCallParentType(callee, apply)
         let (methodName, originalFuncType) = GetFuncTypeFromAutoEnvBaseDef(instParentType.GetClassDef())
+        let methods = instParentType.GetClassDef().GetMethods()
+        CJC_ASSERT(methods.size == 1)
         let funcContext = FuncCallContext(args: apply.GetArgs(), thisType: Some(instParentType))
-        let methodContext = FuncSigInfo(originalFuncType, funcName: methodName)
-        let invokeContext = InvokeCallContext(callee, funcContext, methodContext)
+        let invokeContext = InvokeCallContext(methods[0], callee, funcContext)
         let retTy = apply.GetResultType() ??
             throw IllegalStateException("ClosureConversion apply has no result type")
         let parent = apply.GetParentBlock() ??
@@ -1881,9 +1875,10 @@ public class ClosureConversion {
         let callee = apply.GetCallee()
         let instParentType = ResolveAutoEnvCallParentType(callee, apply)
         let (methodName, originalFuncType) = GetFuncTypeFromAutoEnvBaseDef(instParentType.GetClassDef())
+        let methods = instParentType.GetClassDef().GetMethods()
+        CJC_ASSERT(methods.size == 1)
         let funcContext = FuncCallContext(args: apply.GetArgs(), thisType: Some(instParentType))
-        let methodContext = FuncSigInfo(originalFuncType, funcName: methodName)
-        let invokeContext = InvokeCallContext(callee, funcContext, methodContext)
+        let invokeContext = InvokeCallContext(methods[0], callee, funcContext)
         let retTy = apply.GetResultType() ??
             throw IllegalStateException("ClosureConversion apply-with-exception has no result type")
         let invoke = builder.CreateInvokeWithException(retTy, invokeContext, apply.GetSuccessBlock(),
@@ -2195,6 +2190,8 @@ public class ClosureConversion {
 
         let instCustomType = memberVarType
         let (methodName, originalFuncType) = GetFuncTypeFromAutoEnvBaseDef(instCustomType.GetClassDef())
+        let methods = instCustomType.GetClassDef().GetMethods()
+        CJC_ASSERT(methods.size == 1)
         let funcParams = fn.GetParams()
         let invokeArgs = ArrayList<Value>()
         var idx: Int64 = 1
@@ -2209,9 +2206,8 @@ public class ClosureConversion {
         path.add(0u64)
         let memberVarRefRef = RequireResult(builder.CreateGetElementRef(memberVarRefRefType, funcParams[0], path, entry))
         let memberVarRef = RequireResult(builder.CreateLoad(memberVarRefType, memberVarRefRef, entry))
-        let invokeInfo = InvokeCallContext(memberVarRef,
-            FuncCallContext(args: invokeArgs, thisType: Some(instCustomType)),
-            FuncSigInfo(originalFuncType, funcName: methodName))
+        let invokeInfo = InvokeCallContext(methods[0], memberVarRef,
+            FuncCallContext(args: invokeArgs, thisType: Some(instCustomType)))
         let invoke = builder.CreateInvoke(retType, invokeInfo, entry)
         invoke.SetVirtualMethodOffset(0u64)
         builder.CreateStore(RequireResult(invoke), retVal, entry)
@@ -2767,16 +2763,16 @@ public class ClosureConversion {
 
     private func IsCalleeOfApply(user: Expression, op: Value): Bool {
         if (let Some(apply) <- (user as Apply)) {
-            return apply.GetCallee().nodeId == op.nodeId
+            return apply.GetCallee() == op
         }
         if (let Some(applyWithException) <- (user as ApplyWithException)) {
-            return applyWithException.GetCallee().nodeId == op.nodeId
+            return applyWithException.GetCallee() == op
         }
-        if (let Some(invoke) <- (user as Invoke)) {
-            return invoke.GetObject().nodeId == op.nodeId
+        if (let Some(invoke) <- (user as DynamicDispatch)) {
+            return invoke.GetCallee() == op
         }
-        if (let Some(invokeWithException) <- (user as InvokeWithException)) {
-            return invokeWithException.GetObject().nodeId == op.nodeId
+        if (let Some(invokeWithException) <- (user as DynamicDispatchWithException)) {
+            return invokeWithException.GetCallee() == op
         }
         return false
     }

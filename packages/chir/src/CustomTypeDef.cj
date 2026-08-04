@@ -62,10 +62,21 @@ public class FuncSigInfo {
         return out
     }
 
+    public func ToStringBrief(): String {
+        let genericTypeArgs = ArrayList<Type>()
+        for (genericTypeParam in genericTypeParams) {
+            genericTypeArgs.add(genericTypeParam)
+        }
+        return FuncCallType(funcType, funcName: funcName, genericTypeArgs: genericTypeArgs).ToString()
+    }
+
     public func ToString(): String {
-        let typeParamText = TypeVecToString("<", genericTypeParams, ">", delimiter: ",")
-        let paramText = TypeVecToString("", funcType.GetParamTypes(), "", delimiter: ",")
-        return funcName + typeParamText + "(" + paramText + ") -> " + funcType.GetReturnType().ToString()
+        var out = ToStringBrief()
+        let constraints = GetGenericTypeConstaintsStr(genericTypeParams)
+        if (!constraints.isEmpty()) {
+            out += " " + constraints
+        }
+        return out
     }
 
     public func Dump(): Unit {
@@ -87,6 +98,16 @@ public class FuncCallType {
         }
     }
 
+    public func ToString(): String {
+        let genericTypeText = TypeVecToString("<", genericTypeArgs, ">")
+        let paramText = TypeVecToString("", funcType.GetParamTypes(), "")
+        return "@" + funcName + genericTypeText + "(" + paramText + ") -> " +
+            funcType.GetReturnType().ToString()
+    }
+
+    public func Dump(): Unit {
+        println(ToString())
+    }
 }
 
 public class VirtualMethodInfo {
@@ -148,6 +169,15 @@ public class VirtualMethodInfo {
 
     public func GetVirtualMethod(): Option<Function> {
         return instance
+    }
+
+    public func ToString(indent: Int64): String {
+        return IndentToString(indent) + condition.ToStringBrief() + " => " +
+            instance.getOrThrow().GetIdentifier()
+    }
+
+    public func Dump(): Unit {
+        println(ToString(0))
     }
 
     public func SetFuncName(newName: String): Unit {
@@ -311,6 +341,25 @@ public class VTableInType {
     public func IsEmpty(): Bool {
         return srcParentType.isNone()
     }
+
+    public func ToString(indent: Int64): String {
+        if (IsEmpty()) {
+            return ""
+        }
+        var curIndent = indent
+        var out = IndentToString(curIndent) + srcParentType.getOrThrow().ToString() + " {\n"
+        curIndent++
+        for (funcInfo in virtualMethods) {
+            out += funcInfo.ToString(curIndent) + "\n"
+        }
+        curIndent--
+        out += IndentToString(curIndent) + "}\n"
+        return out
+    }
+
+    public func Dump(): Unit {
+        print(ToString(0))
+    }
 }
 
 public class VTableInDef {
@@ -337,6 +386,25 @@ public class VTableInDef {
             out.add(vtable)
         }
         return out
+    }
+
+    public func ToString(indent: Int64): String {
+        if (vtables.isEmpty()) {
+            return ""
+        }
+        var curIndent = indent
+        var out = IndentToString(curIndent) + "vtable {\n"
+        curIndent++
+        for (vtableInType in vtables) {
+            out += vtableInType.ToString(curIndent)
+        }
+        curIndent--
+        out += IndentToString(curIndent) + "}\n"
+        return out
+    }
+
+    public func Dump(): Unit {
+        print(ToString(0))
     }
 
     public func AddNewItemToTypeVTable(srcParent: ClassType, funcInfo: VirtualMethodInfo): Unit {
@@ -752,7 +820,7 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
     }
 
     public func GetExpectedFunc(funcName: String, funcType: FuncType, isStatic: Bool,
-        replaceTable: HashMap<Int64, Type>, funcInstTypeArgs: ArrayList<Type>, builder: CHIRBuilder,
+        replaceTable: HashMap<GenericType, Type>, funcInstTypeArgs: ArrayList<Type>, builder: CHIRBuilder,
         checkAbstractMethod: Bool): Option<Function> {
         CJC_ASSERT(!funcName.isEmpty())
         let instParamTys = funcType.GetParamTypes()
@@ -784,13 +852,13 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
             if (genericTypeParams.size != funcInstTypeArgs.size) {
                 continue
             }
-            let localReplaceTable = HashMap<Int64, Type>()
+            let localReplaceTable = HashMap<GenericType, Type>()
             for ((key, value) in replaceTable) {
                 localReplaceTable[key] = value
             }
             var genericIdx: Int64 = 0
             while (genericIdx < genericTypeParams.size) {
-                localReplaceTable[genericTypeParams[genericIdx].objectId] = funcInstTypeArgs[genericIdx]
+                localReplaceTable[genericTypeParams[genericIdx]] = funcInstTypeArgs[genericIdx]
                 genericIdx++
             }
             var matched = true
@@ -806,7 +874,7 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
             if (matched) {
                 if (let Some(rawFunc) <- method.GetWrappedRawMethod()) {
                     if (let Some(rawParent) <- rawFunc.GetParentCustomTypeDef()) {
-                        if (rawParent.nodeId == nodeId) {
+                        if (rawParent == this) {
                             foundFunc = rawFunc
                         } else {
                             foundFunc = method
@@ -954,11 +1022,11 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
         return CommentToString(comments)
     }
 
-    protected open func LocalVarToString(): String {
+    protected open func LocalVarToString(indent: Int64): String {
         var out = ""
         for (localVar in GetDirectInstanceVars()) {
-            out += AddNewLineOrNot(localVar.annoInfo.ToString(indent: 1))
-            out += IndentToString(1) + localVar.attributeInfo.ToString()
+            out += AddNewLineOrNot(localVar.annoInfo.ToString(indent: indent))
+            out += IndentToString(indent) + localVar.attributeInfo.ToString()
             out += if (localVar.TestAttr(Attribute.READONLY)) { "let " } else { "var " }
             out += localVar.name + ": " + localVar.ty.ToString()
             let comments = ArrayList<String>()
@@ -976,61 +1044,34 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
         return out
     }
 
-    private func StaticVarToString(): String {
+    private func StaticVarToString(indent: Int64): String {
         var out = ""
         for (staticVar in GetStaticMemberVars()) {
-            out += IndentToString(1) + staticVar.GetAttributeInfo().ToString()
+            out += IndentToString(indent) + staticVar.GetAttributeInfo().ToString()
             out += if (staticVar.TestAttr(Attribute.READONLY)) { " let " } else { " var " }
             out += staticVar.GetIdentifier() + ": " + staticVar.GetType().getOrThrow().ToString() + "\n"
         }
         return out
     }
 
-    private func MethodToString(): String {
+    private func MethodToString(indent: Int64): String {
         var out = ""
         for (method in GetMethods()) {
-            out += IndentToString(1) + method.GetAttributeInfo().ToString()
+            out += IndentToString(indent) + method.GetAttributeInfo().ToString()
             out += " func " + method.GetIdentifier() + ": " + method.GetType().getOrThrow().ToString() + "\n"
         }
         return out
     }
 
-    public func VTableToString(): String {
-        let vtables = vtable.GetTypeVTables()
-        if (vtables.isEmpty()) {
-            return ""
-        }
-        var curIndent: Int64 = 1
-        var out = IndentToString(curIndent) + "vtable {\n"
-        curIndent++
-        for (vtableInType in vtables) {
-            let srcParentType = vtableInType.GetSrcParentType() ?? continue
-            out += IndentToString(curIndent) + srcParentType.ToString() + " {\n"
-            curIndent++
-            for (funcInfo in vtableInType.GetVirtualMethods()) {
-                out += IndentToString(curIndent) + "@" + funcInfo.GetMethodName()
-                out += ": " + funcInfo.GetOriginalFuncType().ToString()
-                if (let Some(fn) <- funcInfo.GetVirtualMethod()) {
-                    out += "=> " + fn.GetIdentifier()
-                }
-                out += "\n"
-            }
-            curIndent--
-            out += IndentToString(curIndent) + "}\n"
-        }
-        curIndent--
-        out += IndentToString(curIndent) + "}\n"
-        return out
-    }
-
     public open func ToString(indent: Int64): String {
+        let childIndent = indent + 1
         var out = AddNewLineOrNot(GetAnnoInfo().ToString(indent: indent))
         out += IndentToString(indent) + GetAttributeInfo().ToString() + CustomTypeDefTitleToString()
         out += ParentToString() + " {" + AddNewLineOrNot(CommentToString())
-        out += LocalVarToString()
-        out += StaticVarToString()
-        out += MethodToString()
-        out += VTableToString()
+        out += LocalVarToString(childIndent)
+        out += StaticVarToString(childIndent)
+        out += MethodToString(childIndent)
+        out += vtable.ToString(childIndent) + "\n"
         out += "}"
         return out
     }
@@ -1089,16 +1130,13 @@ private func GetWellMatchingResults(candidateRes: ArrayList<VTableSearchRes>, ca
         idx++
     }
     let result = ArrayList<VTableSearchRes>()
-    let instances = HashSet<Int64>()
+    let instances = HashSet<Function>()
     var resIdx: Int64 = 0
     while (resIdx < candidateNum) {
         if (targetMark[resIdx]) {
             result.add(candidateRes[resIdx])
-            if (let Some(fn) <- candidateRes[resIdx].instance) {
-                instances.add(fn.nodeId)
-            } else {
-                instances.add(0)
-            }
+            let function = candidateRes[resIdx].instance.getOrThrow()
+            instances.add(function.GetWrappedRawMethod() ?? function)
         }
         resIdx++
     }

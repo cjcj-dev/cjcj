@@ -55,7 +55,7 @@ private func GenerateInvoke(irBuilder: IRBuilder2, invoke: CHIRInvokeWrapper): L
     let result = irBuilder.CreateCallOrInvokeWithMethodTypeInfo(concreteFuncType, typedFuncPtr, argValues,
         None, instTypeArgs)
     GenIRToUnboxResult(irBuilder, objectRawValue,
-        invoke.TestVritualMethodAttr(irBuilder.GetCGContext().GetCHIRBuilder(), Attribute.MUT))
+        invoke.TestVritualMethodAttr(Attribute.MUT))
     return result
 }
 

@@ -183,16 +183,15 @@ class PackageFormat_InvokeBase <: Table {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_INVOKE_BASE_VT_BASE)) { Some(PackageFormat_FuncCall(data, pointerPos)) } else { None }
     }
 
-    func GetVirMethodCtx(): Option<PackageFormat_FuncSigInfo> {
-        return if (let Some(pointerPos) <- GetPointer(CHIRFB_INVOKE_BASE_VT_VIRMETHODCTX)) { Some(PackageFormat_FuncSigInfo(data, pointerPos)) } else { None }
+    func GetOverflowStrategy(): UInt8 {
+        return GetField(CHIRFB_INVOKE_BASE_VT_OVERFLOWSTRATEGY, 0u8)
     }
 
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, CHIRFB_INVOKE_BASE_VT_BASE) &&
             verifier.VerifyTable(GetPointer(CHIRFB_INVOKE_BASE_VT_BASE), {tablePos: Int64, active: VerifierTemplate => PackageFormat_FuncCall(data, tablePos).Verify(active)}) &&
-            VerifyOffset(verifier, CHIRFB_INVOKE_BASE_VT_VIRMETHODCTX) &&
-            verifier.VerifyTable(GetPointer(CHIRFB_INVOKE_BASE_VT_VIRMETHODCTX), {tablePos: Int64, active: VerifierTemplate => PackageFormat_FuncSigInfo(data, tablePos).Verify(active)}) &&
+            VerifyField<UInt8>(verifier, CHIRFB_INVOKE_BASE_VT_OVERFLOWSTRATEGY, 1) &&
             verifier.EndTable()
     }
 }

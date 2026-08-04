@@ -3091,22 +3091,14 @@ public class Translator {
         thisObj: Option<Value>, lambda: Lambda, lambdaArgs: ArrayList<Value>): Value {
         let args = lambdaArgs.clone()
         if (let Some(rawThis) <- thisObj) {
-            var objExpectedType = instFuncType.instParentCustomTy
-            if (objExpectedType.IsReferenceType()) {
-                objExpectedType = builder.context.GetRefTy(objExpectedType)
-            }
+            let objExpectedType = AddRefIfFuncIsMutOrClass(instFuncType.instParentCustomTy, funcDecl)
             args.add(TransformThisType(rawThis, objExpectedType, lambda), at: 0)
         }
         if (args.size != instFuncType.instParamTys.size) {
             throw IllegalStateException("faithful AST2CHIR member wrapper argument count mismatch")
         }
         let instTypeArgs = instFuncType.instantiatedTypeArgs.clone()
-        var callee = GetSymbolTable(funcDecl)
-        let funcType = builder.context.GetFuncTy(instFuncType.instParamTys, instFuncType.instRetTy)
-        if (let Some(wrapperFunc) <- GetWrapperFuncFromMemberAccess(instFuncType.instParentCustomTy.StripAllRefs(),
-            callee.GetSrcCodeIdentifier(), funcType, callee.TestAttr(Attribute.STATIC), instTypeArgs)) {
-            callee = wrapperFunc
-        }
+        let callee = GetSymbolTable(funcDecl)
         return RequireResult(builder.CreateApply(instFuncType.instRetTy, callee, FuncCallContext(args: args,
             instTypeArgs: instTypeArgs, thisType: Some(instFuncType.thisType)), CurrentBlock()))
     }
@@ -3120,15 +3112,13 @@ public class Translator {
         } else {
             callee
         }
-        let methodType = BuildMethodFuncTypeForMemberAccess(originalFuncDecl)
-        let genericParams = TranslateFuncGenericParams(originalFuncDecl)
-        var funcName = originalFuncDecl.identifier.Val()
-        if (IsOverflowOpCall(originalFuncDecl)) {
-            funcName = OverflowStrategyPrefix(strategy) + funcName
-        }
-        return InvokeCallContext(caller, FuncCallContext(args: args,
+        let method = (GetSymbolTable(originalFuncDecl) as Function).getOrThrow()
+        // The overflow strategy is NA in mock cases. SATURATING is the default because the two
+        // strategies have the same representation in OverflowStrategyPrefix.
+        let tempStrategy = if (strategy == OverflowStrategy.NA) { OverflowStrategy.SATURATING } else { strategy }
+        return InvokeCallContext(method, caller, FuncCallContext(args: args,
             instTypeArgs: instFuncType.instantiatedTypeArgs, thisType: Some(instFuncType.thisType)),
-            FuncSigInfo(methodType, funcName: funcName, genericTypeParams: genericParams))
+            overflowStrategy: if (IsOverflowOpCall(originalFuncDecl)) { tempStrategy } else { OverflowStrategy.NA })
     }
 
     // C++ CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:829-835.
@@ -3142,20 +3132,6 @@ public class Translator {
         }
         return IsOverflowOperator(funcDecl.identifier.Val(),
             RequireFuncType(chirTy.TranslateType(RequireAstTy(funcDecl))))
-    }
-
-    private func BuildMethodFuncTypeForMemberAccess(funcDecl: AstFuncDecl): FuncType {
-        let originalFuncDecl = if (let Some(resolver) <- overrideSrcFuncResolver) {
-            resolver(funcDecl) ?? funcDecl
-        } else {
-            funcDecl
-        }
-        let funcTy = RequireFuncType(chirTy.TranslateType(RequireAstTy(originalFuncDecl)))
-        let params = funcTy.GetParamTypes()
-        if (!originalFuncDecl.TestAttr(AstAttribute.STATIC)) {
-            params.add(AddRefIfFuncIsMutOrClass(TranslateMemberOwnerType(originalFuncDecl), originalFuncDecl), at: 0)
-        }
-        return builder.context.GetFuncTy(params, funcTy.GetReturnType())
     }
 
     private func TransformThisType(rawThis: Value, expectedTy: Type, curLambda: Lambda): Value {
@@ -3183,103 +3159,8 @@ public class Translator {
         return result
     }
 
-    private func GetWrapperFuncFromMemberAccess(thisType: Type, funcName: String, instFuncType: FuncType,
-        isStatic: Bool, funcInstTypeArgs: ArrayList<Type>): Option<Value> {
-        if (let Some(genericType) <- (thisType as GenericType)) {
-            for (upperBound in genericType.GetUpperBounds()) {
-                let upperClassType = ((upperBound as RefType).getOrThrow().GetBaseType() as ClassType).getOrThrow()
-                return GetWrapperFuncFromMemberAccess(upperClassType, funcName, instFuncType, isStatic,
-                    funcInstTypeArgs)
-            }
-            return None
-        }
-        if (let Some(customTy) <- (thisType as CustomType)) {
-            return GetExpectedFuncFromCustomType(customTy, funcName, instFuncType, true, funcInstTypeArgs)
-        }
-        if (let Some(builtinTy) <- (thisType as BuiltinType)) {
-            for (extendDef in builtinTy.GetExtends(builder)) {
-                let replaceTable = HashMap<Int64, Type>()
-                let classInstArgs = builtinTy.GetTypeArgs()
-                let classGenericArgs = extendDef.GetExtendedType().getOrThrow().GetTypeArgs()
-                if (classInstArgs.size != classGenericArgs.size) {
-                    throw IllegalStateException("faithful AST2CHIR member wrapper extend generic size mismatch")
-                }
-                var typeIdx: Int64 = 0
-                while (typeIdx < classInstArgs.size) {
-                    if (let Some(genericTy) <- (classGenericArgs[typeIdx] as GenericType)) {
-                        if (!replaceTable.contains(genericTy.objectId)) {
-                            replaceTable[genericTy.objectId] = classInstArgs[typeIdx]
-                        }
-                    }
-                    typeIdx++
-                }
-                if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, instFuncType, true,
-                    replaceTable, funcInstTypeArgs, checkAbstractMethod: false)) {
-                    return found
-                }
-            }
-        }
-        return None
-    }
-
-    private func GetExpectedFuncFromCustomType(customTy: CustomType, funcName: String, instFuncType: FuncType,
-        isStatic: Bool, funcInstTypeArgs: ArrayList<Type>): Option<Value> {
-        let replaceTable = HashMap<Int64, Type>()
-        let classInstArgs = customTy.GetTypeArgs()
-        let classGenericArgs = customTy.GetCustomTypeDef().GetGenericTypeParams()
-        if (!classGenericArgs.isEmpty()) {
-            CJC_ASSERT(classInstArgs.size == classGenericArgs.size)
-        }
-        var classArgIdx: Int64 = 0
-        while (classArgIdx < classGenericArgs.size) {
-            replaceTable[classGenericArgs[classArgIdx].objectId] = classInstArgs[classArgIdx]
-            classArgIdx++
-        }
-        if (let Some(found) <- GetExpectedFuncFromDef(customTy.GetCustomTypeDef(), funcName, instFuncType, isStatic,
-            replaceTable, funcInstTypeArgs, checkAbstractMethod: false)) {
-            return found
-        }
-        for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
-            let matchResult = CollectReplaceTableForExtendedType(extendDef.GetExtendedType().getOrThrow(), customTy,
-                replaceTable)
-            if (!matchResult) {
-                continue
-            }
-            if (let Some(found) <- GetExpectedFuncFromDef(extendDef, funcName, instFuncType, isStatic,
-                replaceTable, funcInstTypeArgs, checkAbstractMethod: false)) {
-                return found
-            }
-        }
-        if (let Some(classTy) <- (customTy as ClassType)) {
-            if (let Some(superTy) <- classTy.GetSuperClassTy()) {
-                if (let Some(found) <- GetExpectedFuncFromCustomType(superTy, funcName, instFuncType, isStatic,
-                    funcInstTypeArgs)) {
-                    return found
-                }
-            }
-        }
-        for (interfaceTy in customTy.GetCustomTypeDef().GetImplementedInterfaceTys()) {
-            if (let Some(found) <- GetExpectedFuncFromCustomType(interfaceTy, funcName, instFuncType, isStatic,
-                funcInstTypeArgs)) {
-                return found
-            }
-        }
-        for (extendDef in customTy.GetCustomTypeDef().GetExtends()) {
-            for (ty in extendDef.GetImplementedInterfaceTys()) {
-                let superInterfaceTy = ReplaceRawGenericArgType(ty, replaceTable, builder)
-                if (let Some(classTy) <- (superInterfaceTy as ClassType)) {
-                    if (let Some(found) <- GetExpectedFuncFromCustomType(classTy, funcName, instFuncType, isStatic,
-                        funcInstTypeArgs)) {
-                        return found
-                    }
-                }
-            }
-        }
-        return None
-    }
-
     private func GetExpectedFuncFromDef(def: CustomTypeDef, funcName: String, instFuncType: FuncType, isStatic: Bool,
-        replaceTable: HashMap<Int64, Type>, funcInstTypeArgs: ArrayList<Type>,
+        replaceTable: HashMap<GenericType, Type>, funcInstTypeArgs: ArrayList<Type>,
         checkAbstractMethod!: Bool = false): Option<Function> {
         if (let Some(found) <- def.GetExpectedFunc(funcName, instFuncType, isStatic, replaceTable, funcInstTypeArgs,
             builder, checkAbstractMethod)) {
@@ -3322,15 +3203,15 @@ public class Translator {
         let classInstArgs = fuzzyParentType.GetTypeArgs()
         let extendDefs = fuzzyParentType.GetExtends(builder)
         CJC_ASSERT(!extendDefs.isEmpty())
-        let replaceTable = HashMap<Int64, Type>()
+        let replaceTable = HashMap<GenericType, Type>()
         for (extendDef in extendDefs) {
             let classGenericArgs = extendDef.GetExtendedType().getOrThrow().GetTypeArgs()
             CJC_ASSERT(classInstArgs.size == classGenericArgs.size)
             var typeIdx: Int64 = 0
             while (typeIdx < classInstArgs.size) {
                 if (let Some(genericTy) <- (classGenericArgs[typeIdx] as GenericType)) {
-                    if (!replaceTable.contains(genericTy.objectId)) {
-                        replaceTable[genericTy.objectId] = classInstArgs[typeIdx]
+                    if (!replaceTable.contains(genericTy)) {
+                        replaceTable[genericTy] = classInstArgs[typeIdx]
                     }
                 }
                 typeIdx++
@@ -3357,7 +3238,7 @@ public class Translator {
 
     private func GetExactParentType(customTy: CustomType, funcName: String, funcType: FuncType, isStatic: Bool,
         funcInstTypeArgs: ArrayList<Type>, checkAbstractMethod: Bool): Option<Type> {
-        let replaceTable = HashMap<Int64, Type>()
+        let replaceTable = HashMap<GenericType, Type>()
         let classInstArgs = customTy.GetTypeArgs()
         let classGenericArgs = customTy.GetCustomTypeDef().GetGenericTypeParams()
         if (!classGenericArgs.isEmpty()) {
@@ -3365,7 +3246,7 @@ public class Translator {
         }
         var classArgIdx: Int64 = 0
         while (classArgIdx < classGenericArgs.size) {
-            replaceTable[classGenericArgs[classArgIdx].objectId] = classInstArgs[classArgIdx]
+            replaceTable[classGenericArgs[classArgIdx]] = classInstArgs[classArgIdx]
             classArgIdx++
         }
         if (GetExpectedFuncFromDef(customTy.GetCustomTypeDef(), funcName, funcType, isStatic, replaceTable,
@@ -3418,7 +3299,7 @@ public class Translator {
     }
 
     private func CollectReplaceTableForExtendedType(extendedType: Type, instCustomType: Type,
-        replaceTable: HashMap<Int64, Type>): Bool {
+        replaceTable: HashMap<GenericType, Type>): Bool {
         let instTypeArgs = instCustomType.GetTypeArgs()
         let genericTypeArgs = extendedType.GetTypeArgs()
         if (instTypeArgs.size != genericTypeArgs.size) {
@@ -3427,12 +3308,12 @@ public class Translator {
         var idx: Int64 = 0
         while (idx < genericTypeArgs.size) {
             if (let Some(genericTy) <- (genericTypeArgs[idx] as GenericType)) {
-                if (let Some(storedTy) <- replaceTable.get(genericTy.objectId)) {
-                    if (!storedTy.IsEqual(instTypeArgs[idx])) {
+                if (let Some(storedTy) <- replaceTable.get(genericTy)) {
+                    if (storedTy != instTypeArgs[idx]) {
                         return false
                     }
                 } else {
-                    replaceTable[genericTy.objectId] = instTypeArgs[idx]
+                    replaceTable[genericTy] = instTypeArgs[idx]
                 }
             } else {
                 let genericArgTy = genericTypeArgs[idx] as CustomType
@@ -3445,7 +3326,7 @@ public class Translator {
                 }
                 if (let Some(genericCustomTy) <- genericArgTy) {
                     if (let Some(instCustomTy) <- instArgTy) {
-                        if (genericCustomTy.GetCustomTypeDef().nodeId != instCustomTy.GetCustomTypeDef().nodeId) {
+                        if (genericCustomTy.GetCustomTypeDef() != instCustomTy.GetCustomTypeDef()) {
                             return false
                         }
                     }
@@ -7324,8 +7205,12 @@ public class Translator {
         let sizeFuncParamTys = ArrayList<Type>()
         sizeFuncParamTys.add(originalObjType)
         let sizeFuncTy = builder.context.GetFuncTy(sizeFuncParamTys, sizeTy)
-        let invokeCtx = InvokeCallContext(collection, FuncCallContext(thisType: collectionTy.StripAllRefs()),
-            FuncSigInfo(sizeFuncTy, funcName: "$sizeget"))
+        let funcInstTypeArgs = ArrayList<Type>()
+        let sizeFunc = collectionTy.StripAllRefs().GetExpectedFunc("$sizeget", sizeFuncTy, false,
+            funcInstTypeArgs, builder, true) ??
+            throw IllegalStateException("RawArray collection $sizeget method is not available")
+        let invokeCtx = InvokeCallContext(sizeFunc, collection,
+            FuncCallContext(thisType: collectionTy.StripAllRefs()))
         let sizeValue = CreateInvokeMaybeWithException(sizeTy, invokeCtx)
 
         let rawArrayExpr = builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(), sizeValue,
@@ -8258,11 +8143,7 @@ public class Translator {
             let rawObj = TranslateThisObjectForNonStaticMemberFuncCall(expr,
                 calleeDecl.TestAttr(AstAttribute.MUT))
             expectedThisObjTy = if (calleeInfo.isVirtualFuncCall) {
-                var virtualTy = calleeInfo.instParentCustomTy
-                if (virtualTy.IsClassOrArray() || (virtualTy.IsStruct() && calleeDecl.TestAttr(AstAttribute.MUT))) {
-                    virtualTy = builder.context.GetRefTy(virtualTy)
-                }
-                Some(virtualTy)
+                Some(AddRefIfFuncIsMutOrClass(calleeInfo.instParentCustomTy, calleeDecl))
             } else {
                 if (calleeInfo.instParamTys.isEmpty()) {
                     None
