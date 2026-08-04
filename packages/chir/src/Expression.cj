@@ -822,14 +822,17 @@ public class FuncCallContext {
 }
 
 public class InvokeCallContext {
+    public let method: Function
     public let caller: Value
     public let funcCallCtx: FuncCallContext
-    public let virMethodCtx: FuncSigInfo
+    public let overflowStrategy: OverflowStrategy
 
-    public init(caller: Value, funcCallCtx: FuncCallContext, virMethodCtx: FuncSigInfo) {
+    public init(method: Function, caller: Value, funcCallCtx: FuncCallContext,
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
+        this.method = method
         this.caller = caller
         this.funcCallCtx = funcCallCtx
-        this.virMethodCtx = virMethodCtx
+        this.overflowStrategy = overflowStrategy
     }
 }
 
@@ -953,28 +956,32 @@ public class Apply <: FuncCall {
 }
 
 public open class DynamicDispatch <: FuncCall {
-    let virMethodCtx: FuncSigInfo
+    let overflowStrategy: OverflowStrategy
     private var virtualMethodOffset: Option<UInt64> = None
 
     public init(kind: ExprKind, callContext: InvokeCallContext, parent: Option<Block>) {
         super(kind, callContext.funcCallCtx, parent)
-        virMethodCtx = callContext.virMethodCtx
+        overflowStrategy = callContext.overflowStrategy
+    }
+
+    public func GetCallee(): Function {
+        return (GetOperand(0) as Function).getOrThrow()
     }
 
     public func GetMethodName(): String {
-        return virMethodCtx.funcName
+        let name = GetCallee().GetSrcCodeIdentifier()
+        if (overflowStrategy != OverflowStrategy.NA) {
+            return OverflowStrategyPrefix(overflowStrategy) + name
+        }
+        return name
     }
 
     public func GetMethodType(): FuncType {
-        return virMethodCtx.funcType
-    }
-
-    public func SetMethodType(ty: FuncType): Unit {
-        virMethodCtx.funcType = ty
+        return GetCallee().GetFuncType().getOrThrow()
     }
 
     public func GetGenericTypeParams(): ArrayList<GenericType> {
-        return virMethodCtx.GetGenericTypeParams()
+        return GetCallee().GetGenericTypeParams()
     }
 
     public func SetVirtualMethodOffset(offset: UInt64): Unit {
@@ -999,7 +1006,7 @@ public open class DynamicDispatch <: FuncCall {
             instParamTypes.remove(at: 0)
         }
         let instFuncType = builder.context.GetFuncTy(instParamTypes, builder.context.GetUnitTy())
-        let funcCallType = FuncCallType(instFuncType, funcName: virMethodCtx.funcName,
+        let funcCallType = FuncCallType(instFuncType, funcName: GetMethodName(),
             genericTypeArgs: GetInstantiatedTypeArgs())
         let res = GetFuncIndexInVTable(thisTypeDeref, funcCallType, builder)
         CJC_ASSERT(!res.isEmpty())
@@ -1030,15 +1037,8 @@ public open class DynamicDispatch <: FuncCall {
         throw IllegalStateException("instantiated source parent custom type of virtual method is not available")
     }
 
-    public func GetVirtualMethodAttr(builder: CHIRBuilder): AttributeInfo {
-        let virtualOffset = GetVirtualMethodOffset().getOrThrow()
-        for (res in GetVirtualMethodInfo(builder)) {
-            if (res.offset == virtualOffset) {
-                let _ = res.instSrcParentType.getOrThrow()
-                return res.attr
-            }
-        }
-        throw IllegalStateException("virtual method attribute is not available")
+    public func GetVirtualMethodAttr(): AttributeInfo {
+        return GetCallee().GetAttributeInfo()
     }
 
     protected func DynamicDispatchPrefix(): String {
@@ -1050,9 +1050,10 @@ public open class DynamicDispatch <: FuncCall {
 
     public override func OperandsToString(): String {
         let parts = ArrayList<String>()
-        parts.add(DynamicDispatchPrefix() + GetMethodName() + InstantiatedTypeArgsToString())
-        parts.add(GetMethodType().ToString())
-        parts.add(ValueIdsToString(GetOperands()))
+        parts.add(DynamicDispatchPrefix() + GetCallee().GetIdentifier() + InstantiatedTypeArgsToString())
+        let operands = GetOperands()
+        operands.remove(at: 0)
+        parts.add(ValueIdsToString(operands))
         return JoinStrings(parts, ", ")
     }
 }
@@ -1060,6 +1061,7 @@ public open class DynamicDispatch <: FuncCall {
 public class Invoke <: DynamicDispatch {
     public init(callContext: InvokeCallContext, parent: Option<Block>) {
         super(ExprKind.INVOKE, callContext, parent)
+        AppendOperand(callContext.method)
         AppendOperand(callContext.caller)
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
@@ -1068,16 +1070,18 @@ public class Invoke <: DynamicDispatch {
     }
 
     public func GetObject(): Value {
-        return GetOperand(0)
+        return GetOperand(1)
     }
 
     public override func GetArgs(): ArrayList<Value> {
-        return GetOperands()
+        let operands = GetOperands()
+        operands.remove(at: 0)
+        return operands
     }
 
     public override func ReplaceOperand(idx: Int64, newOperand: Value): Unit {
         super.ReplaceOperand(idx, newOperand)
-        if (idx == 0) {
+        if (idx == 1) {
             UpdateThisType()
         }
     }
@@ -1114,9 +1118,8 @@ public class Invoke <: DynamicDispatch {
         let args = GetArgs()
         args.remove(at: 0)
         let funcContext = FuncCallContext(args: args, instTypeArgs: GetInstantiatedTypeArgs(), thisType: GetThisType())
-        let methodContext = FuncSigInfo(GetMethodType(), funcName: GetMethodName(),
-            genericTypeParams: GetGenericTypeParams())
-        let invokeContext = InvokeCallContext(GetObject(), funcContext, methodContext)
+        let invokeContext = InvokeCallContext(GetCallee(), GetObject(), funcContext,
+            overflowStrategy: overflowStrategy)
         let cloned = builder.CreateInvoke(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
@@ -1129,6 +1132,7 @@ public class Invoke <: DynamicDispatch {
 public class InvokeStatic <: DynamicDispatch {
     public init(callContext: InvokeCallContext, parent: Option<Block>) {
         super(ExprKind.INVOKESTATIC, callContext, parent)
+        AppendOperand(callContext.method)
         AppendOperand(callContext.caller)
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
@@ -1137,12 +1141,12 @@ public class InvokeStatic <: DynamicDispatch {
     }
 
     public func GetRTTIValue(): Value {
-        return GetOperand(0)
+        return GetOperand(1)
     }
 
     public override func GetArgs(): ArrayList<Value> {
         let out = ArrayList<Value>()
-        var idx: Int64 = 1
+        var idx: Int64 = 2
         while (idx < GetNumOfOperands()) {
             out.add(GetOperand(idx))
             idx++
@@ -1153,9 +1157,8 @@ public class InvokeStatic <: DynamicDispatch {
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let funcContext = FuncCallContext(args: GetArgs(), instTypeArgs: GetInstantiatedTypeArgs(),
             thisType: GetThisType())
-        let methodContext = FuncSigInfo(GetMethodType(), funcName: GetMethodName(),
-            genericTypeParams: GetGenericTypeParams())
-        let invokeContext = InvokeCallContext(GetRTTIValue(), funcContext, methodContext)
+        let invokeContext = InvokeCallContext(GetCallee(), GetRTTIValue(), funcContext,
+            overflowStrategy: overflowStrategy)
         let cloned = builder.CreateInvokeStatic(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)

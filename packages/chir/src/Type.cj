@@ -507,6 +507,18 @@ public open class Type <: Hashable & Equatable<Type> {
         return ArrayList<Function>()
     }
 
+    public open func GetExpectedFunc(funcName: String, funcType: FuncType, isStatic: Bool,
+        funcInstTypeArgs: ArrayList<Type>, builder: CHIRBuilder,
+        checkAbstractMethod: Bool): Option<Function> {
+        let _ = funcName
+        let _ = funcType
+        let _ = isStatic
+        let _ = funcInstTypeArgs
+        let _ = builder
+        let _ = checkAbstractMethod
+        return None
+    }
+
     public open func GetSuperTypesRecusively(builder: CHIRBuilder,
         visited: Option<HashSet<String>>): ArrayList<ClassType> {
         let _ = builder
@@ -556,6 +568,32 @@ public open class BuiltinType <: Type {
     public override func GetDeclareAndExtendMethods(builder: CHIRBuilder): ArrayList<Function> {
         let _ = builder
         return GetExtendMethods()
+    }
+
+    public override func GetExpectedFunc(funcName: String, funcType: FuncType, isStatic: Bool,
+        funcInstTypeArgs: ArrayList<Type>, builder: CHIRBuilder,
+        checkAbstractMethod: Bool): Option<Function> {
+        let replaceTable = HashMap<GenericType, Type>()
+        let classInstArgs = GetTypeArgs()
+        for (extendDef in GetExtends(builder)) {
+            let classGenericArgs = extendDef.GetExtendedType().getOrThrow().GetTypeArgs()
+            CJC_ASSERT(classInstArgs.size == classGenericArgs.size)
+            replaceTable.clear()
+            var typeIdx: Int64 = 0
+            while (typeIdx < classInstArgs.size) {
+                if (let Some(genericTy) <- (classGenericArgs[typeIdx] as GenericType)) {
+                    replaceTable[genericTy] = classInstArgs[typeIdx]
+                }
+                typeIdx++
+            }
+            if (let Some(expectedFunc) <- extendDef.GetExpectedFunc(funcName, funcType, isStatic, replaceTable,
+                funcInstTypeArgs, builder, checkAbstractMethod)) {
+                if (expectedFunc.GetWrappedRawMethod().isNone()) {
+                    return expectedFunc
+                }
+            }
+        }
+        return None
     }
 
     public func GetSuperTypes(builder: CHIRBuilder): ArrayList<ClassType> {
@@ -1050,6 +1088,18 @@ public class GenericType <: Type & Equatable<GenericType> {
             .GetInstMemberTypeByPathCheckingReadOnly(path, builder)
     }
 
+    public override func GetExpectedFunc(funcName: String, funcType: FuncType, isStatic: Bool,
+        funcInstTypeArgs: ArrayList<Type>, builder: CHIRBuilder,
+        checkAbstractMethod: Bool): Option<Function> {
+        for (upperBound in upperBounds) {
+            if (let Some(expectedFunc) <- upperBound.StripAllRefs().GetExpectedFunc(funcName, funcType, isStatic,
+                funcInstTypeArgs, builder, checkAbstractMethod)) {
+                return expectedFunc
+            }
+        }
+        return None
+    }
+
     public override func ToString(): String {
         return "Generic-" + name
     }
@@ -1138,6 +1188,61 @@ public open class CustomType <: Type {
             }
         }
         return allMethods
+    }
+
+    public override func GetExpectedFunc(funcName: String, funcType: FuncType, isStatic: Bool,
+        funcInstTypeArgs: ArrayList<Type>, builder: CHIRBuilder,
+        checkAbstractMethod: Bool): Option<Function> {
+        let replaceTable = HashMap<GenericType, Type>()
+        let classInstArgs = GetTypeArgs()
+        let classGenericArgs = GetCustomTypeDef().GetGenericTypeParams()
+        if (!classGenericArgs.isEmpty()) {
+            CJC_ASSERT(classInstArgs.size == classGenericArgs.size)
+        }
+        var classArgIdx: Int64 = 0
+        while (classArgIdx < classGenericArgs.size) {
+            replaceTable[classGenericArgs[classArgIdx]] = classInstArgs[classArgIdx]
+            classArgIdx++
+        }
+        if (let Some(expectedFunc) <- GetCustomTypeDef().GetExpectedFunc(funcName, funcType, isStatic, replaceTable,
+            funcInstTypeArgs, builder, checkAbstractMethod)) {
+            return expectedFunc
+        }
+        for (extendDef in GetCustomTypeDef().GetExtends()) {
+            if (!CollectReplaceTableForExtendedType(extendDef.GetExtendedType().getOrThrow(), this,
+                replaceTable)) {
+                continue
+            }
+            if (let Some(expectedFunc) <- extendDef.GetExpectedFunc(funcName, funcType, isStatic, replaceTable,
+                funcInstTypeArgs, builder, checkAbstractMethod)) {
+                return expectedFunc
+            }
+        }
+        if (let Some(classTy) <- (this as ClassType)) {
+            if (let Some(superClassTy) <- classTy.GetSuperClassTy(builder: builder)) {
+                if (let Some(expectedFunc) <- superClassTy.GetExpectedFunc(funcName, funcType, isStatic,
+                    funcInstTypeArgs, builder, checkAbstractMethod)) {
+                    return expectedFunc
+                }
+            }
+        }
+        for (superInterfaceTy in GetImplementedInterfaceTys(builder)) {
+            if (let Some(expectedFunc) <- superInterfaceTy.GetExpectedFunc(funcName, funcType, isStatic,
+                funcInstTypeArgs, builder, checkAbstractMethod)) {
+                return expectedFunc
+            }
+        }
+        for (extendDef in GetCustomTypeDef().GetExtends()) {
+            for (ty in extendDef.GetImplementedInterfaceTys()) {
+                let superInterfaceTy = (ReplaceRawGenericArgType(ty, replaceTable, builder) as ClassType)
+                    .getOrThrow()
+                if (let Some(expectedFunc) <- superInterfaceTy.GetExpectedFunc(funcName, funcType, isStatic,
+                    funcInstTypeArgs, builder, checkAbstractMethod)) {
+                    return expectedFunc
+                }
+            }
+        }
+        return None
     }
 
     public override func GetSuperTypesRecusively(builder: CHIRBuilder,
@@ -1400,6 +1505,48 @@ public open class CustomType <: Type {
         }
         return false
     }
+}
+
+private func CollectReplaceTableForExtendedType(extendedType: Type, instCustomType: Type,
+    replaceTable: HashMap<GenericType, Type>): Bool {
+    let instTypeArgs = instCustomType.GetTypeArgs()
+    let genericTypeArgs = extendedType.GetTypeArgs()
+    if (instTypeArgs.size != genericTypeArgs.size) {
+        return false
+    }
+    var idx: Int64 = 0
+    while (idx < genericTypeArgs.size) {
+        if (let Some(genericTy) <- (genericTypeArgs[idx] as GenericType)) {
+            if (let Some(storedTy) <- replaceTable.get(genericTy)) {
+                if (storedTy != instTypeArgs[idx]) {
+                    return false
+                }
+            } else {
+                replaceTable[genericTy] = instTypeArgs[idx]
+            }
+        } else {
+            let genericArgTy = genericTypeArgs[idx] as CustomType
+            let instArgTy = instTypeArgs[idx] as CustomType
+            if (genericArgTy.isSome() && instArgTy.isNone()) {
+                return false
+            }
+            if (genericArgTy.isNone() && instArgTy.isSome()) {
+                return false
+            }
+            if (let Some(genericCustomTy) <- genericArgTy) {
+                if (let Some(instCustomTy) <- instArgTy) {
+                    if (genericCustomTy.GetCustomTypeDef() != instCustomTy.GetCustomTypeDef()) {
+                        return false
+                    }
+                }
+            }
+            if (!CollectReplaceTableForExtendedType(genericTypeArgs[idx], instTypeArgs[idx], replaceTable)) {
+                return false
+            }
+        }
+        idx++
+    }
+    return true
 }
 
 private func CalculateGenericTyMappingImpl(instType: Type, genericType: Type,

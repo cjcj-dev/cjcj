@@ -752,7 +752,7 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
     }
 
     public func GetExpectedFunc(funcName: String, funcType: FuncType, isStatic: Bool,
-        replaceTable: HashMap<Int64, Type>, funcInstTypeArgs: ArrayList<Type>, builder: CHIRBuilder,
+        replaceTable: HashMap<GenericType, Type>, funcInstTypeArgs: ArrayList<Type>, builder: CHIRBuilder,
         checkAbstractMethod: Bool): Option<Function> {
         CJC_ASSERT(!funcName.isEmpty())
         let instParamTys = funcType.GetParamTypes()
@@ -784,13 +784,13 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
             if (genericTypeParams.size != funcInstTypeArgs.size) {
                 continue
             }
-            let localReplaceTable = HashMap<Int64, Type>()
+            let localReplaceTable = HashMap<GenericType, Type>()
             for ((key, value) in replaceTable) {
                 localReplaceTable[key] = value
             }
             var genericIdx: Int64 = 0
             while (genericIdx < genericTypeParams.size) {
-                localReplaceTable[genericTypeParams[genericIdx].objectId] = funcInstTypeArgs[genericIdx]
+                localReplaceTable[genericTypeParams[genericIdx]] = funcInstTypeArgs[genericIdx]
                 genericIdx++
             }
             var matched = true
@@ -806,7 +806,7 @@ public open class CustomTypeDef <: Base & Hashable & Equatable<CustomTypeDef> {
             if (matched) {
                 if (let Some(rawFunc) <- method.GetWrappedRawMethod()) {
                     if (let Some(rawParent) <- rawFunc.GetParentCustomTypeDef()) {
-                        if (rawParent.nodeId == nodeId) {
+                        if (rawParent == this) {
                             foundFunc = rawFunc
                         } else {
                             foundFunc = method

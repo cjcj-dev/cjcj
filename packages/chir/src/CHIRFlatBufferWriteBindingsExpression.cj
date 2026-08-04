@@ -224,8 +224,8 @@ class InvokeBaseBuilder {
         builder.AddOffset(0, base)
     }
 
-    public func add_virMethodCtx(virMethodCtx: FlatBufferOffset): Unit {
-        builder.AddOffset(1, virMethodCtx)
+    public func add_overflowStrategy(overflowStrategy: UInt8): Unit {
+        builder.AddU8(1, overflowStrategy, defaultValue: 0u8)
     }
 
     public func Finish(): FlatBufferOffset {
@@ -233,9 +233,10 @@ class InvokeBaseBuilder {
     }
 }
 
-func CreateInvokeBase(builder: FlatBufferBuilder, base: FlatBufferOffset, virMethodCtx: FlatBufferOffset): FlatBufferOffset {
+func CreateInvokeBase(builder: FlatBufferBuilder, base: FlatBufferOffset,
+    overflowStrategy: UInt8): FlatBufferOffset {
     let tableBuilder = InvokeBaseBuilder(builder)
-    tableBuilder.add_virMethodCtx(virMethodCtx)
+    tableBuilder.add_overflowStrategy(overflowStrategy)
     tableBuilder.add_base(base)
     return tableBuilder.Finish()
 }

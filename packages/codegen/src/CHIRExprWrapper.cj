@@ -348,11 +348,11 @@ public class CHIRInvokeWrapper <: CHIRInvokeExpr {
         return (expr as InvokeWithException).getOrThrow().GetVirtualMethodOffset().getOrThrow()
     }
 
-    public func TestVritualMethodAttr(builder: CHIRBuilder, attr: Attribute): Bool {
+    public func TestVritualMethodAttr(attr: Attribute): Bool {
         if (let Some(invoke) <- (expr as Invoke)) {
-            return invoke.GetVirtualMethodAttr(builder).Test(attr)
+            return invoke.GetVirtualMethodAttr().Test(attr)
         }
-        return (expr as InvokeWithException).getOrThrow().GetVirtualMethodAttr(builder).Test(attr)
+        return (expr as InvokeWithException).getOrThrow().GetVirtualMethodAttr().Test(attr)
     }
 }
 

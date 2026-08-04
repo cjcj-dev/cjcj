@@ -1164,7 +1164,7 @@ public class CHIRChecker {
 
     private func OverflowStrategyMustBeValid(ofs: OverflowStrategy, expr: Expression,
         topLevelFunc: Function): Unit {
-        if (ofs == OverflowStrategy.OVERFLOW_STRATEGY_END) {
+        if (ofs == OverflowStrategy.OVERFLOW_STRATEGY_END || ofs == OverflowStrategy.CHECKED) {
             ErrorInExpr(topLevelFunc, expr, "overflow strategy is invalid.")
         }
     }

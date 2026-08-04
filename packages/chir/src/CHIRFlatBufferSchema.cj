@@ -83,12 +83,11 @@ const CHIRFB_SKIP_KIND_MAX: UInt8 = 3u8
 
 // OverflowStrategy enum ordinals. PackageFormat.fbs:179-185; PackageFormat_generated.h:486-494.
 const CHIRFB_OVERFLOW_STRATEGY_NA: UInt8 = 0u8
-const CHIRFB_OVERFLOW_STRATEGY_CHECKED: UInt8 = 1u8
-const CHIRFB_OVERFLOW_STRATEGY_WRAPPING: UInt8 = 2u8
-const CHIRFB_OVERFLOW_STRATEGY_THROWING: UInt8 = 3u8
-const CHIRFB_OVERFLOW_STRATEGY_SATURATING: UInt8 = 4u8
+const CHIRFB_OVERFLOW_STRATEGY_WRAPPING: UInt8 = 1u8
+const CHIRFB_OVERFLOW_STRATEGY_THROWING: UInt8 = 2u8
+const CHIRFB_OVERFLOW_STRATEGY_SATURATING: UInt8 = 3u8
 const CHIRFB_OVERFLOW_STRATEGY_MIN: UInt8 = 0u8
-const CHIRFB_OVERFLOW_STRATEGY_MAX: UInt8 = 4u8
+const CHIRFB_OVERFLOW_STRATEGY_MAX: UInt8 = 3u8
 
 // Annotation union tags. PackageFormat.fbs:219-233; PackageFormat_generated.h:525-542.
 const CHIRFB_ANNOTATION_NONE: UInt8 = 0u8
@@ -1034,7 +1033,7 @@ const CHIRFB_APPLY_BASE_VT_ISSUPERCALL: UInt16 = 6u16
 // InvokeBase table field slot offsets. PackageFormat.fbs:1066-1069;
 // PackageFormat_generated.h:6771-6774 (InvokeBase::FlatBuffersVTableOffset).
 const CHIRFB_INVOKE_BASE_VT_BASE: UInt16 = 4u16
-const CHIRFB_INVOKE_BASE_VT_VIRMETHODCTX: UInt16 = 6u16
+const CHIRFB_INVOKE_BASE_VT_OVERFLOWSTRATEGY: UInt16 = 6u16
 
 // IntrinsicBase table field slot offsets. PackageFormat.fbs:1071-1074;
 // PackageFormat_generated.h:6824-6827 (IntrinsicBase::FlatBuffersVTableOffset).
@@ -1212,12 +1211,11 @@ public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     ok = ok && CHIRFB_SKIP_KIND_MIN == 0u8
     ok = ok && CHIRFB_SKIP_KIND_MAX == 3u8
     ok = ok && CHIRFB_OVERFLOW_STRATEGY_NA == 0u8
-    ok = ok && CHIRFB_OVERFLOW_STRATEGY_CHECKED == 1u8
-    ok = ok && CHIRFB_OVERFLOW_STRATEGY_WRAPPING == 2u8
-    ok = ok && CHIRFB_OVERFLOW_STRATEGY_THROWING == 3u8
-    ok = ok && CHIRFB_OVERFLOW_STRATEGY_SATURATING == 4u8
+    ok = ok && CHIRFB_OVERFLOW_STRATEGY_WRAPPING == 1u8
+    ok = ok && CHIRFB_OVERFLOW_STRATEGY_THROWING == 2u8
+    ok = ok && CHIRFB_OVERFLOW_STRATEGY_SATURATING == 3u8
     ok = ok && CHIRFB_OVERFLOW_STRATEGY_MIN == 0u8
-    ok = ok && CHIRFB_OVERFLOW_STRATEGY_MAX == 4u8
+    ok = ok && CHIRFB_OVERFLOW_STRATEGY_MAX == 3u8
     ok = ok && CHIRFB_ANNOTATION_NONE == 0u8
     ok = ok && CHIRFB_ANNOTATION_NEED_CHECK_ARRAY_BOUND == 1u8
     ok = ok && CHIRFB_ANNOTATION_NEED_CHECK_CAST == 2u8
@@ -1967,7 +1965,7 @@ public func VerifyCHIRPackageBufferSchemaConstants(): Bool {
     ok = ok && CHIRFB_APPLY_BASE_VT_BASE == 4u16
     ok = ok && CHIRFB_APPLY_BASE_VT_ISSUPERCALL == 6u16
     ok = ok && CHIRFB_INVOKE_BASE_VT_BASE == 4u16
-    ok = ok && CHIRFB_INVOKE_BASE_VT_VIRMETHODCTX == 6u16
+    ok = ok && CHIRFB_INVOKE_BASE_VT_OVERFLOWSTRATEGY == 6u16
     ok = ok && CHIRFB_INTRINSIC_BASE_VT_BASE == 4u16
     ok = ok && CHIRFB_INTRINSIC_BASE_VT_INTRINSICKIND == 6u16
     ok = ok && CHIRFB_NUMERIC_CAST_BASE_VT_BASE == 4u16
