@@ -632,6 +632,10 @@ public open class CGType {
         return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetNothingType())
     }
 
+    public static func GetZeroSizedCGType(cgMod: CGModule): CGType {
+        return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().GetZeroSizedTy())
+    }
+
     public static func GetBoolCGType(cgMod: CGModule): CGType {
         return CGType.GetOrCreate(cgMod, cgMod.GetCGContext().GetCHIRBuilder().context.GetBoolTy())
     }

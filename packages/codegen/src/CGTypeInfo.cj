@@ -1027,7 +1027,7 @@ private func GetEnumTypeTemplateFieldTypes(cgMod: CGModule, enumTy: EnumType): A
             return result
         }
         if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
-            result.add(builder.context.GetUnitTy())
+            result.add(CGType.GetZeroSizedCGType(cgMod).GetOriginal())
             if (let Some(objectTy) <- builder.context.GetObjectTy()) {
                 result.add(builder.context.GetRefTy(objectTy))
             } else {
@@ -1328,7 +1328,7 @@ private func GetEnumTypeInfoFieldTypes(cgMod: CGModule, enumTy: EnumType): Array
             return result
         }
         if (enumKind == CGEnumTypeKind.EXHAUSTIVE_ASSOCIATED_OPTION_LIKE_REF) {
-            result.add(builder.context.GetUnitTy())
+            result.add(CGType.GetZeroSizedCGType(cgMod).GetOriginal())
             if (let Some(associatedTy) <- enumCGType.GetAssociatedValueTypeOfOptionLike()) {
                 result.add(associatedTy)
             }

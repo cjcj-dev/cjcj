@@ -313,7 +313,7 @@ public class EnumCtorTIOrTTGenerator {
         layout.size = 8u32
         layout.align = 8u32
         let cgEnumType = (CGType.GetOrCreate(cgMod, chirEnumType) as CGEnumType).getOrThrow()
-        layout.fieldTypes.add(cgCtx.GetCHIRBuilder().context.GetUnitTy())
+        layout.fieldTypes.add(CGType.GetZeroSizedCGType(cgMod).GetOriginal())
         if (cgEnumType.IsOptionLikeT()) {
             layout.fieldTypes.add(CGType.GetRefTypeOfCHIRInt8(cgCtx.GetCHIRBuilder()))
         } else {
