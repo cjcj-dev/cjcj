@@ -52,7 +52,9 @@ private class LookUpImpl {
 
     public func SwapResultsWithInstTy(oldIdx: Int64, newIdx: Int64, decl: Decl,
         interfaceTy: InterfaceTy): Unit {
-        resultsWithInstTyV.remove(at: oldIdx)
+        if (oldIdx < resultsWithInstTyV.size) {
+            resultsWithInstTyV.remove(at: oldIdx)
+        }
         InsertResultsWithInstTy(newIdx, decl, interfaceTy)
     }
 
