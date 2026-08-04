@@ -29,6 +29,7 @@ import cjcj::sema.NativeFFI.ObjC.InteropLibBridge as ObjCInteropLibBridge
 import cjcj::sema.NativeFFI.ObjC.PrepareTypeCheck as PrepareObjCInteropTypeCheck
 import cjcj::sema.NativeFFI.Java.BeforeTypeCheck.PrepareTypeCheck as PrepareJavaInteropTypeCheck
 import cjcj::sema.Plugin.PluginCustomAnnoChecker
+import cjcj::utils.AST_PACKAGE_NAME as UTILS_AST_PACKAGE_NAME
 import cjcj::utils.CFUNC_NAME
 import cjcj::utils.CORE_PACKAGE_NAME as UTILS_CORE_PACKAGE_NAME
 import cjcj::utils.CPOINTER_NAME
@@ -37,6 +38,7 @@ import cjcj::utils.CTYPE_NAME as UtilsCTypeName
 import cjcj::utils.CJC_ASSERT
 import cjcj::utils.CJC_ASSERT_WITH_MSG
 import cjcj::utils.CJC_ABORT
+import cjcj::utils.MACRO_OBJECT_NAME
 import cjcj::utils.MAIN_INVOKE
 import cjcj::utils.OBJECT_NAME
 import cjcj::utils.ProfileRecorder
@@ -46,6 +48,32 @@ import cjcj::utils.VARRAY_NAME
 
 private let INOUT_TEMP_VALUE: String = "temporary value"
 private let INOUT_IMMUTABLE: String = "is a immutable variable"
+
+private let SPECIAL_EXPORTED_FUNCS = HashMap<String, HashSet<String>>([
+    (UTILS_CORE_PACKAGE_NAME, HashSet<String>([
+        "arrayInitByCollection", "arrayInitByFunction", "composition", "handleException",
+        "createOverflowExceptionMsg", "createArithmeticExceptionMsg", "getCommandLineArgs"
+    ])),
+    (UTILS_AST_PACKAGE_NAME, HashSet<String>([
+        MACRO_OBJECT_NAME, "refreshTokensPosition", "refreshPos", "unsafePointerCastFromUint8Array",
+        "transformTokens"
+    ]))
+])
+
+// C++ src/Sema/TypeChecker.cpp:1884-1905.
+private func MarkImplicitUsedFunctions(pkg: Package): Unit {
+    try (recorder = ProfileRecorder("Post TypeCheck", "MarkImplicitUsedFunctions")) {
+        if (let None <- SPECIAL_EXPORTED_FUNCS.get(pkg.fullPackageName)) {
+            return
+        }
+        let implicitUsedFunctions = SPECIAL_EXPORTED_FUNCS.get(pkg.fullPackageName).getOrThrow()
+        IterateToplevelDecls(pkg, { decl: Decl =>
+            if (implicitUsedFunctions.contains(decl.identifier.Val())) {
+                decl.EnableAttr(Attribute.IMPLICIT_USED)
+            }
+        })
+    }
+}
 
 // C++ src/Sema/TypeCheckExpr/IfExpr.cpp:99-114.
 private func CollectVariables(ctx: ASTContext, node: Node): ArrayList<Node> {
@@ -2693,6 +2721,7 @@ extend TypeChecker {
                 // C++ TypeChecker.cpp:2060-2062 desugars property access in sema before const checking.
                 DesugarForPropDecl(impl.typeManager, pkg)
                 CheckConstEvaluation(pkg, impl.diag.getOrThrow())
+                MarkImplicitUsedFunctions(pkg)
                 CollectMainFunctionsFromMainDecls(pkg)
                 let instance = impl.ci.getOrThrow()
                 PluginCustomAnnoChecker(
