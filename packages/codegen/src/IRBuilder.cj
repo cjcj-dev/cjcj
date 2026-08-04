@@ -932,11 +932,7 @@ public class IRBuilder2 <: Resource {
                         let refVal = if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
                             CallGCRead(ArrayList<LLVMValueRef>([baseObject, addr]))
                         } else {
-                            let i8PtrTy = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32) }
-                            let addrSpace = GetPointerAddressSpace(addr) ?? 0u32
-                            let addrFixedType = unsafe { LLVMPointerType(i8PtrTy, addrSpace) }
-                            let castedAddr = CreateBitCast(addr, addrFixedType)
-                            buildLoad(i8PtrTy, castedAddr, "")
+                            CallGCReadStaticRef(addr)
                         }
                         CreateBr(blocks[2])
                         SetInsertPoint(blocks[1])
@@ -986,10 +982,11 @@ public class IRBuilder2 <: Resource {
                 }
             }
         }
-        if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
-            if (elementType.toUIntNative() == CGType.GetRefType(GetLLVMContext()).toUIntNative()) {
+        if (elementType.toUIntNative() == CGType.GetRefType(GetLLVMContext()).toUIntNative()) {
+            if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
                 return CallGCRead(ArrayList<LLVMValueRef>([baseObject, addr]))
             }
+            return CallGCReadStaticRef(addr)
         }
         return buildLoad(elementType, addr, name)
     }
