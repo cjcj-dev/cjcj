@@ -121,3 +121,96 @@ public func FinishMacroMsgBuffer(builder: FlatBufferBuilder,
     root: FlatBufferOffset): Array<UInt8> {
     return builder.Finish(root)
 }
+
+// MacroMsgFormat_generated.h:345-986,1089-1161 (Create*Direct).
+public func CreateTokenDirect(builder: FlatBufferBuilder, kind: UInt8,
+    value: Option<String>, begin: Option<ArrayList<UInt8>>,
+    end: Option<ArrayList<UInt8>>, delimiterNum: UInt32): FlatBufferOffset {
+    let valueOffset = if (let Some(v) <- value) { builder.CreateString(v) } else { 0u32 }
+    let beginBytes = if (let Some(v) <- begin) { v } else { ArrayList<UInt8>() }
+    let endBytes = if (let Some(v) <- end) { v } else { ArrayList<UInt8>() }
+    return CreateToken(builder, kind, valueOffset, beginBytes, endBytes, delimiterNum)
+}
+
+public func CreateIdInfoDirect(builder: FlatBufferBuilder, name: Option<String>,
+    pos: Option<ArrayList<UInt8>>): FlatBufferOffset {
+    let nameOffset = if (let Some(v) <- name) { builder.CreateString(v) } else { 0u32 }
+    let posBytes = if (let Some(v) <- pos) { v } else { ArrayList<UInt8>() }
+    return CreateIdInfo(builder, nameOffset, posBytes)
+}
+
+public func CreateTokensValueDirect(builder: FlatBufferBuilder,
+    val: Option<ArrayList<FlatBufferOffset>>): FlatBufferOffset {
+    let valOffset = if (let Some(v) <- val) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    return CreateTokensValue(builder, valOffset)
+}
+
+public func CreateItemInfoDirect(builder: FlatBufferBuilder, key: Option<String>,
+    valueType: UInt8, value: FlatBufferOffset): FlatBufferOffset {
+    let keyOffset = if (let Some(v) <- key) { builder.CreateString(v) } else { 0u32 }
+    return CreateItemInfo(builder, keyOffset, valueType, value)
+}
+
+public func CreateChildMsgDirect(builder: FlatBufferBuilder, childName: Option<String>,
+    items: Option<ArrayList<FlatBufferOffset>>): FlatBufferOffset {
+    let childNameOffset = if (let Some(v) <- childName) { builder.CreateString(v) } else { 0u32 }
+    let itemsOffset = if (let Some(v) <- items) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    return CreateChildMsg(builder, childNameOffset, itemsOffset)
+}
+
+public func CreateDefLibDirect(builder: FlatBufferBuilder,
+    paths: Option<ArrayList<FlatBufferOffset>>): FlatBufferOffset {
+    let pathsOffset = if (let Some(v) <- paths) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    return CreateDefLib(builder, pathsOffset)
+}
+
+public func CreateDiagnosticDirect(builder: FlatBufferBuilder, diagSeverity: Int32,
+    begin: Option<ArrayList<UInt8>>, end: Option<ArrayList<UInt8>>,
+    errorMessage: Option<String>, mainHint: Option<String>): FlatBufferOffset {
+    let beginBytes = if (let Some(v) <- begin) { v } else { ArrayList<UInt8>() }
+    let endBytes = if (let Some(v) <- end) { v } else { ArrayList<UInt8>() }
+    let errorMessageOffset = if (let Some(v) <- errorMessage) { builder.CreateString(v) } else { 0u32 }
+    let mainHintOffset = if (let Some(v) <- mainHint) { builder.CreateString(v) } else { 0u32 }
+    return CreateDiagnostic(builder, diagSeverity, beginBytes, endBytes,
+        errorMessageOffset, mainHintOffset)
+}
+
+public func CreateMacroCallDirect(builder: FlatBufferBuilder, id: FlatBufferOffset,
+    hasAttrs: Bool, args: Option<ArrayList<FlatBufferOffset>>,
+    attrs: Option<ArrayList<FlatBufferOffset>>,
+    parentNames: Option<ArrayList<FlatBufferOffset>>,
+    childMsges: Option<ArrayList<FlatBufferOffset>>, methodName: Option<String>,
+    packageName: Option<String>, libPath: Option<String>,
+    begin: Option<ArrayList<UInt8>>, end: Option<ArrayList<UInt8>>): FlatBufferOffset {
+    let argsOffset = if (let Some(v) <- args) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    let attrsOffset = if (let Some(v) <- attrs) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    let parentNamesOffset = if (let Some(v) <- parentNames) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    let childMsgesOffset = if (let Some(v) <- childMsges) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    let methodNameOffset = if (let Some(v) <- methodName) { builder.CreateString(v) } else { 0u32 }
+    let packageNameOffset = if (let Some(v) <- packageName) { builder.CreateString(v) } else { 0u32 }
+    let libPathOffset = if (let Some(v) <- libPath) { builder.CreateString(v) } else { 0u32 }
+    let beginBytes = if (let Some(v) <- begin) { v } else { ArrayList<UInt8>() }
+    let endBytes = if (let Some(v) <- end) { v } else { ArrayList<UInt8>() }
+    return CreateMacroCall(builder, id, hasAttrs, argsOffset, attrsOffset,
+        parentNamesOffset, childMsgesOffset, methodNameOffset, packageNameOffset,
+        libPathOffset, beginBytes, endBytes)
+}
+
+public func CreateMacroResultDirect(builder: FlatBufferBuilder, id: FlatBufferOffset,
+    status: UInt8, tks: Option<ArrayList<FlatBufferOffset>>,
+    items: Option<ArrayList<FlatBufferOffset>>,
+    assertParents: Option<ArrayList<FlatBufferOffset>>,
+    diags: Option<ArrayList<FlatBufferOffset>>): FlatBufferOffset {
+    let tksOffset = if (let Some(v) <- tks) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    let itemsOffset = if (let Some(v) <- items) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    let assertParentsOffset = if (let Some(v) <- assertParents) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    let diagsOffset = if (let Some(v) <- diags) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    return CreateMacroResult(builder, id, status, tksOffset, itemsOffset,
+        assertParentsOffset, diagsOffset)
+}
+
+public func CreateMultiMacroCallsDirect(builder: FlatBufferBuilder,
+    calls: Option<ArrayList<FlatBufferOffset>>): FlatBufferOffset {
+    let callsOffset = if (let Some(v) <- calls) { builder.CreateVectorOffsets(v) } else { 0u32 }
+    return CreateMultiMacroCalls(builder, callsOffset)
+}
