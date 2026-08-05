@@ -103,7 +103,7 @@ private class DeclAttributeCheckerImpl {
 
     private func SetCommonAttributes(decl: Decl): Unit {
         SetDeclInternal(decl)
-        for (memberDecl in decl.GetMemberDecls()) {
+        for (memberDecl in decl.GetMemberDeclPtrs()) {
             if (decl.TestAttr(Attribute.FOREIGN)) {
                 memberDecl.EnableAttr(Attribute.FOREIGN)
             }
