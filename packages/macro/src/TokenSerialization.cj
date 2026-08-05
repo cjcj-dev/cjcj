@@ -174,6 +174,9 @@ public class TokenSerialization {
 
     public static func GetTokensFromBytes(bytes: ArrayList<UInt8>): ArrayList<Token> {
         let out = ArrayList<Token>()
+        if (bytes.isEmpty()) {
+            return out
+        }
         let cursor = Box<Int64>(0)
         let count = readUInt32(bytes, cursor)
         var idx: UInt32 = 0u32
