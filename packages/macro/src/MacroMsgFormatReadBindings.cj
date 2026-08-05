@@ -34,21 +34,34 @@ public class MacroMsgFormat_Token <: Table {
     }
 }
 
-public class MacroMsgFormat_IdInfo <: Table {
-    public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
+// Cangjie forbids IdInfo.pos() from sharing the inherited Table.pos field name.
+// This Impl retains the generated Table base while the public binding below
+// retains IdInfo::pos exactly. MacroMsgFormat_generated.h:362-382.
+private class MacroMsgFormat_IdInfoImpl <: Table {
+    init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
+}
+
+public class MacroMsgFormat_IdInfo {
+    private let data: Array<UInt8>
+    private let impl: MacroMsgFormat_IdInfoImpl
+
+    public init(data: Array<UInt8>, pos: Int64) {
+        this.data = data
+        impl = MacroMsgFormat_IdInfoImpl(data, pos)
+    }
 
     public func name(): Option<FlatBufferString> {
-        return if (let Some(p) <- GetPointer(4u16)) { Some(FlatBufferString(data, p)) } else { None }
+        return if (let Some(p) <- impl.GetPointer(4u16)) { Some(FlatBufferString(data, p)) } else { None }
     }
     public func pos(): Option<MacroMsgFormat_Position> {
-        return if (let Some(p) <- GetStruct(6u16)) { Some(MacroMsgFormat_Position(data, p)) } else { None }
+        return if (let Some(p) <- impl.GetStruct(6u16)) { Some(MacroMsgFormat_Position(data, p)) } else { None }
     }
 
     public func Verify(verifier: VerifierTemplate): Bool {
-        return VerifyTableStart(verifier) &&
-            VerifyOffset(verifier, 4u16) &&
-            verifier.VerifyString(GetPointer(4u16)) &&
-            VerifyStructField(verifier, 6u16, 12, 4) &&
+        return impl.VerifyTableStart(verifier) &&
+            impl.VerifyOffset(verifier, 4u16) &&
+            verifier.VerifyString(impl.GetPointer(4u16)) &&
+            impl.VerifyStructField(verifier, 6u16, 12, 4) &&
             verifier.EndTable()
     }
 }
