@@ -19,27 +19,28 @@ public class MacroMsgFormat_Position {
     public func file_id(): UInt32 { return ReadScalar(data, pos, 0u32) }
     public func line(): Int32 { return ReadScalar(data, pos + 4, 0i32) }
     public func column(): Int32 { return ReadScalar(data, pos + 8, 0i32) }
-}
 
-// MacroMsgFormat_generated.h:198-207 (Position::Position).
-@OverflowWrapping
-public func Position(fileId: UInt32, line: Int32, column: Int32): ArrayList<UInt8> {
-    let bytes = ArrayList<UInt8>()
-    bytes.add(UInt8(fileId & 0xffu32))
-    bytes.add(UInt8((fileId >> 8) & 0xffu32))
-    bytes.add(UInt8((fileId >> 16) & 0xffu32))
-    bytes.add(UInt8((fileId >> 24) & 0xffu32))
-    let lineBits = UInt32(line)
-    bytes.add(UInt8(lineBits & 0xffu32))
-    bytes.add(UInt8((lineBits >> 8) & 0xffu32))
-    bytes.add(UInt8((lineBits >> 16) & 0xffu32))
-    bytes.add(UInt8((lineBits >> 24) & 0xffu32))
-    let columnBits = UInt32(column)
-    bytes.add(UInt8(columnBits & 0xffu32))
-    bytes.add(UInt8((columnBits >> 8) & 0xffu32))
-    bytes.add(UInt8((columnBits >> 16) & 0xffu32))
-    bytes.add(UInt8((columnBits >> 24) & 0xffu32))
-    return bytes
+    // MacroMsgFormat_generated.h:198-207 (Position::Position). Keeping the
+    // constructor name class-qualified avoids shadowing cjcj::basic.Position.
+    @OverflowWrapping
+    public static func Position(fileId: UInt32, line: Int32, column: Int32): ArrayList<UInt8> {
+        let bytes = ArrayList<UInt8>()
+        bytes.add(UInt8(fileId & 0xffu32))
+        bytes.add(UInt8((fileId >> 8) & 0xffu32))
+        bytes.add(UInt8((fileId >> 16) & 0xffu32))
+        bytes.add(UInt8((fileId >> 24) & 0xffu32))
+        let lineBits = UInt32(line)
+        bytes.add(UInt8(lineBits & 0xffu32))
+        bytes.add(UInt8((lineBits >> 8) & 0xffu32))
+        bytes.add(UInt8((lineBits >> 16) & 0xffu32))
+        bytes.add(UInt8((lineBits >> 24) & 0xffu32))
+        let columnBits = UInt32(column)
+        bytes.add(UInt8(columnBits & 0xffu32))
+        bytes.add(UInt8((columnBits >> 8) & 0xffu32))
+        bytes.add(UInt8((columnBits >> 16) & 0xffu32))
+        bytes.add(UInt8((columnBits >> 24) & 0xffu32))
+        return bytes
+    }
 }
 
 public class MacroMsgFormat_IntValue {
