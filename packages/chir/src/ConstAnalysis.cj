@@ -13,8 +13,16 @@ public type ConstPoolDomain = State<ConstValueDomain, ConstActivePool>
 public let constStateGlobals = ValueAnalysisGlobals<ConstValueDomain, ConstStatePool>()
 public let constActiveGlobals = ValueAnalysisGlobals<ConstValueDomain, ConstActivePool>()
 
-private enum ConstExceptionKind {
+private enum ConstExceptionKind <: Equatable<ConstExceptionKind> {
     | SUCCESS | FAIL | NA
+
+    public operator func ==(right: ConstExceptionKind): Bool {
+        return ConstExceptionKindIndex(this) == ConstExceptionKindIndex(right)
+    }
+
+    public operator func !=(right: ConstExceptionKind): Bool {
+        return !(this == right)
+    }
 }
 
 private func ConstExceptionKindIndex(kind: ConstExceptionKind): Int64 {
@@ -22,16 +30,6 @@ private func ConstExceptionKindIndex(kind: ConstExceptionKind): Int64 {
         case ConstExceptionKind.SUCCESS => 0
         case ConstExceptionKind.FAIL => 1
         case ConstExceptionKind.NA => 2
-    }
-}
-
-extend ConstExceptionKind <: Equatable<ConstExceptionKind> {
-    public operator func ==(right: ConstExceptionKind): Bool {
-        return ConstExceptionKindIndex(this) == ConstExceptionKindIndex(right)
-    }
-
-    public operator func !=(right: ConstExceptionKind): Bool {
-        return !(this == right)
     }
 }
 
