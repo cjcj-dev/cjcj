@@ -1860,7 +1860,9 @@ public class ClosureConversion {
         let methods = instParentType.GetClassDef().GetMethods()
         CJC_ASSERT(methods.size == 1)
         let funcContext = FuncCallContext(args: apply.GetArgs(), thisType: Some(instParentType))
-        let invokeContext = InvokeCallContext(methods[0], callee, funcContext)
+        // C++ ClosureConversion.cpp:2240-2245 — virMethodCtx from AutoEnv base, not methods[0] alone.
+        let virCtx = FuncSigInfo(originalFuncType, funcName: methodName)
+        let invokeContext = InvokeCallContext(methods[0], callee, funcContext, virMethodCtx: Some(virCtx))
         let retTy = apply.GetResultType() ??
             throw IllegalStateException("ClosureConversion apply has no result type")
         let parent = apply.GetParentBlock() ??
@@ -1878,7 +1880,8 @@ public class ClosureConversion {
         let methods = instParentType.GetClassDef().GetMethods()
         CJC_ASSERT(methods.size == 1)
         let funcContext = FuncCallContext(args: apply.GetArgs(), thisType: Some(instParentType))
-        let invokeContext = InvokeCallContext(methods[0], callee, funcContext)
+        let virCtx = FuncSigInfo(originalFuncType, funcName: methodName)
+        let invokeContext = InvokeCallContext(methods[0], callee, funcContext, virMethodCtx: Some(virCtx))
         let retTy = apply.GetResultType() ??
             throw IllegalStateException("ClosureConversion apply-with-exception has no result type")
         let invoke = builder.CreateInvokeWithException(retTy, invokeContext, apply.GetSuccessBlock(),
@@ -2206,8 +2209,11 @@ public class ClosureConversion {
         path.add(0u64)
         let memberVarRefRef = RequireResult(builder.CreateGetElementRef(memberVarRefRefType, funcParams[0], path, entry))
         let memberVarRef = RequireResult(builder.CreateLoad(memberVarRefType, memberVarRefRef, entry))
+        // C++ ClosureConversion.cpp:2430-2442 — virMethodCtx from AutoEnv base.
+        let virCtx = FuncSigInfo(originalFuncType, funcName: methodName)
         let invokeInfo = InvokeCallContext(methods[0], memberVarRef,
-            FuncCallContext(args: invokeArgs, thisType: Some(instCustomType)))
+            FuncCallContext(args: invokeArgs, thisType: Some(instCustomType)),
+            virMethodCtx: Some(virCtx))
         let invoke = builder.CreateInvoke(retType, invokeInfo, entry)
         invoke.SetVirtualMethodOffset(0u64)
         builder.CreateStore(RequireResult(invoke), retVal, entry)

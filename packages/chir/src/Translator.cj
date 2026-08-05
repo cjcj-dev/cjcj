@@ -3106,19 +3106,51 @@ public class Translator {
     private func GenerateInvokeCallContext(instFuncType: FaithfulInstCalleeInfo, caller: Value,
         callee: AstFuncDecl, args: ArrayList<Value>, strategy!: OverflowStrategy = OverflowStrategy.NA
     ): InvokeCallContext {
-        // C++ CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:207-227.
+        // C++ CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:204-243.
         let originalFuncDecl = if (let Some(resolver) <- overrideSrcFuncResolver) {
             resolver(callee) ?? callee
         } else {
             callee
         }
         let method = (GetSymbolTable(originalFuncDecl) as Function).getOrThrow()
-        // The overflow strategy is NA in mock cases. SATURATING is the default because the two
-        // strategies have the same representation in OverflowStrategyPrefix.
+        // Rebuild original signature for virMethodCtx (not the concrete callee Function type).
+        // C++ TranslateRefExpr.cpp:209 — TranslateType of original FuncDecl AST ty.
+        var originalFuncType = (TranslateType(RequireAstTy(originalFuncDecl)) as FuncType).getOrThrow()
+        if (!originalFuncDecl.TestAttr(AstAttribute.STATIC)) {
+            // C++ TranslateRefExpr.cpp:211-217 — parent from nominal cache, then AddRefIfFuncIsMutOrClass.
+            let outerDecl = originalFuncDecl.outerDecl ??
+                throw IllegalStateException("non-static invoke original has no outerDecl")
+            var parentType = chirTy.GetGlobalNominalCache(outerDecl).GetType().getOrThrow()
+            parentType = AddRefIfFuncIsMutOrClass(parentType, originalFuncDecl)
+            let paramTypes = ArrayList<Type>()
+            paramTypes.add(parentType)
+            for (p in originalFuncType.GetParamTypes()) {
+                paramTypes.add(p)
+            }
+            originalFuncType = builder.context.GetFuncTy(paramTypes, originalFuncType.GetReturnType())
+        }
+        let originalGenericTypeParams = ArrayList<GenericType>()
+        if (originalFuncDecl.TestAttr(AstAttribute.GENERIC)) {
+            if (let Some(body) <- originalFuncDecl.funcBody) {
+                if (let Some(generic) <- body.generic) {
+                    for (genericTy in generic.typeParameters) {
+                        originalGenericTypeParams.add(
+                            (TranslateType(RequireAstTy(genericTy)) as GenericType).getOrThrow())
+                    }
+                }
+            }
+        }
         let tempStrategy = if (strategy == OverflowStrategy.NA) { OverflowStrategy.SATURATING } else { strategy }
+        let overflow = if (IsOverflowOpCall(originalFuncDecl)) { tempStrategy } else { OverflowStrategy.NA }
+        var funcName = originalFuncDecl.identifier.Val()
+        if (overflow != OverflowStrategy.NA) {
+            funcName = OverflowStrategyPrefix(overflow) + funcName
+        }
+        let virCtx = FuncSigInfo(originalFuncType, funcName: funcName,
+            genericTypeParams: originalGenericTypeParams)
         return InvokeCallContext(method, caller, FuncCallContext(args: args,
             instTypeArgs: instFuncType.instantiatedTypeArgs, thisType: Some(instFuncType.thisType)),
-            overflowStrategy: if (IsOverflowOpCall(originalFuncDecl)) { tempStrategy } else { OverflowStrategy.NA })
+            overflowStrategy: overflow, virMethodCtx: Some(virCtx))
     }
 
     // C++ CHIR/AST2CHIR/TranslateASTNode/TranslateCallExpr.cpp:829-835.

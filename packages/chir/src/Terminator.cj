@@ -417,6 +417,8 @@ public class ApplyWithException <: FuncCallWithException {
 
 public open class DynamicDispatchWithException <: FuncCallWithException {
     let overflowStrategy: OverflowStrategy
+    // C++ Terminator.h:446 FuncSigInfo virMethodCtx
+    private let virMethodCtx: FuncSigInfo
     private var virtualMethodOffset: Option<UInt64> = None
 
     public init(kind: ExprKind, callContext: InvokeCallContext, successBlock: Block, errorBlock: Block,
@@ -425,6 +427,7 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
             callContext.funcCallCtx.args),
             callContext.funcCallCtx, successBlock, errorBlock, parent)
         overflowStrategy = callContext.overflowStrategy
+        virMethodCtx = callContext.virMethodCtx
         CJC_ASSERT(callContext.overflowStrategy != OverflowStrategy.CHECKED)
     }
 
@@ -432,20 +435,23 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
         return (GetOperand(0) as Function).getOrThrow()
     }
 
+    // C++ Terminator.cpp:336-339
     public func GetMethodName(): String {
-        let name = GetCallee().GetSrcCodeIdentifier()
-        if (overflowStrategy != OverflowStrategy.NA) {
-            return OverflowStrategyPrefix(overflowStrategy) + name
-        }
-        return name
+        return virMethodCtx.funcName
     }
 
+    // C++ Terminator.cpp:341-344
     public func GetMethodType(): FuncType {
-        return GetCallee().GetFuncType().getOrThrow()
+        return virMethodCtx.funcType
     }
 
+    // C++ Terminator.cpp:346-349
     public func GetGenericTypeParams(): ArrayList<GenericType> {
-        return GetCallee().GetGenericTypeParams()
+        return virMethodCtx.GetGenericTypeParams()
+    }
+
+    public func GetVirMethodCtx(): FuncSigInfo {
+        return virMethodCtx
     }
 
     public func SetVirtualMethodOffset(offset: UInt64): Unit {
@@ -485,20 +491,36 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
     }
 
     public func GetInstSrcParentCustomTypeOfMethod(builder: CHIRBuilder): ClassType {
-        let virtualOffset = GetVirtualMethodOffset().getOrThrow()
+        // Mirror Expression.DynamicDispatch — AutoEnv single-slot thisType fallback.
+        if (let Some(thisTy) <- GetThisType()) {
+            let stripped = thisTy.StripAllRefs()
+            if (stripped.IsAutoEnv()) {
+                if (let Some(ct) <- (stripped as ClassType)) {
+                    return ct
+                }
+            }
+        }
+        let virtualOffset = GetVirtualMethodOffset(builder)
+        let methodType = GetMethodType()
         for (res in GetVirtualMethodInfo(builder)) {
             if (res.offset == virtualOffset) {
                 let instSrcParentType = res.instSrcParentType.getOrThrow()
                 let def = instSrcParentType.GetClassDef()
                 let defType = (def.GetType().getOrThrow() as ClassType).getOrThrow()
                 let parentFuncInfo = def.GetDefVTable().GetExpectedTypeVTable(defType)
-                let originalType = parentFuncInfo.GetVirtualMethods()[Int64(res.offset)].GetOriginalFuncType()
-                if (VirMethodTypeIsMatched(originalType, GetMethodType())) {
+                let methods = parentFuncInfo.GetVirtualMethods()
+                if (Int64(res.offset) >= methods.size) {
+                    continue
+                }
+                let originalType = methods[Int64(res.offset)].GetOriginalFuncType()
+                if (VirMethodTypeIsMatched(originalType, methodType)) {
                     return instSrcParentType
                 }
             }
         }
-        throw IllegalStateException("instantiated source parent custom type of virtual method is not available")
+        throw IllegalStateException(
+            "instantiated source parent custom type of virtual method is not available" +
+            " name=${GetMethodName()} offset=${virtualOffset}")
     }
 
     public func GetVirtualMethodAttr(): AttributeInfo {
@@ -542,7 +564,7 @@ public class InvokeWithException <: DynamicDispatchWithException {
         args.remove(at: 0)
         let funcContext = FuncCallContext(args: args, instTypeArgs: GetInstantiatedTypeArgs(), thisType: GetThisType())
         let invokeContext = InvokeCallContext(GetCallee(), GetObject(), funcContext,
-            overflowStrategy: overflowStrategy)
+            overflowStrategy: overflowStrategy, virMethodCtx: Some(GetVirMethodCtx()))
         let cloned = builder.CreateInvokeWithException(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, GetSuccessBlock(),
             GetErrorBlock(), parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {
@@ -576,7 +598,7 @@ public class InvokeStaticWithException <: DynamicDispatchWithException {
         let funcContext = FuncCallContext(args: GetArgs(), instTypeArgs: GetInstantiatedTypeArgs(),
             thisType: GetThisType())
         let invokeContext = InvokeCallContext(GetCallee(), GetRTTIValue(), funcContext,
-            overflowStrategy: overflowStrategy)
+            overflowStrategy: overflowStrategy, virMethodCtx: Some(GetVirMethodCtx()))
         let cloned = builder.CreateInvokeStaticWithException(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext,
             GetSuccessBlock(), GetErrorBlock(), parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {

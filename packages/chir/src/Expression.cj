@@ -826,13 +826,24 @@ public class InvokeCallContext {
     public let caller: Value
     public let funcCallCtx: FuncCallContext
     public let overflowStrategy: OverflowStrategy
+    // C++ Expression.h:751 FuncSigInfo virMethodCtx — original override-src signature for vtable match.
+    public let virMethodCtx: FuncSigInfo
 
     public init(method: Function, caller: Value, funcCallCtx: FuncCallContext,
-        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
+        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA,
+        virMethodCtx!: Option<FuncSigInfo> = None) {
         this.method = method
         this.caller = caller
         this.funcCallCtx = funcCallCtx
         this.overflowStrategy = overflowStrategy
+        // Fallback keeps old call sites / deserializer wire-compatible when virMethodCtx is absent.
+        this.virMethodCtx = if (let Some(ctx) <- virMethodCtx) {
+            ctx
+        } else {
+            FuncSigInfo(method.GetFuncType().getOrThrow(),
+                funcName: method.GetSrcCodeIdentifier(),
+                genericTypeParams: method.GetGenericTypeParams())
+        }
     }
 }
 
@@ -957,11 +968,14 @@ public class Apply <: FuncCall {
 
 public open class DynamicDispatch <: FuncCall {
     let overflowStrategy: OverflowStrategy
+    // C++ Expression.h:942 FuncSigInfo virMethodCtx
+    private let virMethodCtx: FuncSigInfo
     private var virtualMethodOffset: Option<UInt64> = None
 
     public init(kind: ExprKind, callContext: InvokeCallContext, parent: Option<Block>) {
         super(kind, callContext.funcCallCtx, parent)
         overflowStrategy = callContext.overflowStrategy
+        virMethodCtx = callContext.virMethodCtx
         CJC_ASSERT(callContext.overflowStrategy != OverflowStrategy.CHECKED)
     }
 
@@ -969,20 +983,23 @@ public open class DynamicDispatch <: FuncCall {
         return (GetOperand(0) as Function).getOrThrow()
     }
 
+    // C++ Expression.cpp:894-897 — name from virMethodCtx (already overflow-prefixed at construction).
     public func GetMethodName(): String {
-        let name = GetCallee().GetSrcCodeIdentifier()
-        if (overflowStrategy != OverflowStrategy.NA) {
-            return OverflowStrategyPrefix(overflowStrategy) + name
-        }
-        return name
+        return virMethodCtx.funcName
     }
 
+    // C++ Expression.cpp:899-901 — original override-src func type, not concrete callee Function type.
     public func GetMethodType(): FuncType {
-        return GetCallee().GetFuncType().getOrThrow()
+        return virMethodCtx.funcType
     }
 
+    // C++ Expression.cpp:904-906
     public func GetGenericTypeParams(): ArrayList<GenericType> {
-        return GetCallee().GetGenericTypeParams()
+        return virMethodCtx.GetGenericTypeParams()
+    }
+
+    public func GetVirMethodCtx(): FuncSigInfo {
+        return virMethodCtx
     }
 
     public func SetVirtualMethodOffset(offset: UInt64): Unit {
@@ -1022,20 +1039,39 @@ public open class DynamicDispatch <: FuncCall {
     }
 
     public func GetInstSrcParentCustomTypeOfMethod(builder: CHIRBuilder): ClassType {
-        let virtualOffset = GetVirtualMethodOffset().getOrThrow()
+        // C++ Expression.cpp:940-954. AutoEnv: single $GenericVirtualFunc/$InstVirtualFunc slot at
+        // offset 0; codegen CreateOuterTypeInfo only needs a ClassType (then special-cases AutoEnv).
+        // When vtable FuncSigIsMatched misses (generic objectId replace-table skew under CC), fall back
+        // to instantiated thisType — same ClassType official returns for the sole AutoEnv slot.
+        if (let Some(thisTy) <- GetThisType()) {
+            let stripped = thisTy.StripAllRefs()
+            if (stripped.IsAutoEnv()) {
+                if (let Some(ct) <- (stripped as ClassType)) {
+                    return ct
+                }
+            }
+        }
+        let virtualOffset = GetVirtualMethodOffset(builder)
+        let methodType = GetMethodType()
         for (res in GetVirtualMethodInfo(builder)) {
             if (res.offset == virtualOffset) {
                 let instSrcParentType = res.instSrcParentType.getOrThrow()
                 let def = instSrcParentType.GetClassDef()
                 let defType = (def.GetType().getOrThrow() as ClassType).getOrThrow()
                 let parentFuncInfo = def.GetDefVTable().GetExpectedTypeVTable(defType)
-                let originalType = parentFuncInfo.GetVirtualMethods()[Int64(res.offset)].GetOriginalFuncType()
-                if (VirMethodTypeIsMatched(originalType, GetMethodType())) {
+                let methods = parentFuncInfo.GetVirtualMethods()
+                if (Int64(res.offset) >= methods.size) {
+                    continue
+                }
+                let originalType = methods[Int64(res.offset)].GetOriginalFuncType()
+                if (VirMethodTypeIsMatched(originalType, methodType)) {
                     return instSrcParentType
                 }
             }
         }
-        throw IllegalStateException("instantiated source parent custom type of virtual method is not available")
+        throw IllegalStateException(
+            "instantiated source parent custom type of virtual method is not available" +
+            " name=${GetMethodName()} offset=${virtualOffset}")
     }
 
     public func GetVirtualMethodAttr(): AttributeInfo {
@@ -1126,8 +1162,9 @@ public class Invoke <: DynamicDispatch {
         let args = GetArgs()
         args.remove(at: 0)
         let funcContext = FuncCallContext(args: args, instTypeArgs: GetInstantiatedTypeArgs(), thisType: GetThisType())
+        // C++ Expression.cpp:1060-1069 clones virMethodCtx.
         let invokeContext = InvokeCallContext(GetCallee(), GetObject(), funcContext,
-            overflowStrategy: overflowStrategy)
+            overflowStrategy: overflowStrategy, virMethodCtx: Some(GetVirMethodCtx()))
         let cloned = builder.CreateInvoke(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
@@ -1166,7 +1203,7 @@ public class InvokeStatic <: DynamicDispatch {
         let funcContext = FuncCallContext(args: GetArgs(), instTypeArgs: GetInstantiatedTypeArgs(),
             thisType: GetThisType())
         let invokeContext = InvokeCallContext(GetCallee(), GetRTTIValue(), funcContext,
-            overflowStrategy: overflowStrategy)
+            overflowStrategy: overflowStrategy, virMethodCtx: Some(GetVirMethodCtx()))
         let cloned = builder.CreateInvokeStatic(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, parent)
         if (let Some(offset) <- GetVirtualMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
