@@ -932,7 +932,15 @@ public class IRBuilder2 <: Resource {
                         let refVal = if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
                             CallGCRead(ArrayList<LLVMValueRef>([baseObject, addr]))
                         } else {
-                            CallGCReadStaticRef(addr)
+                            // C++ CJNativeIRBuilder.cpp:856-859: plain load when no managed base
+                            let i8PtrTy1 = unsafe {
+                                LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 1u32)
+                            }
+                            let addrFixedType = unsafe {
+                                LLVMPointerType(i8PtrTy1, GetPointerAddressSpace(addr) ?? 0u32)
+                            }
+                            let castedAddr = CreateBitOrPointerCast(addr, addrFixedType)
+                            buildLoad(i8PtrTy1, castedAddr, "")
                         }
                         CreateBr(blocks[2])
                         SetInsertPoint(blocks[1])
@@ -982,11 +990,11 @@ public class IRBuilder2 <: Resource {
                 }
             }
         }
+        // C++ CJNativeIRBuilder.cpp:897-901
         if (elementType.toUIntNative() == CGType.GetRefType(GetLLVMContext()).toUIntNative()) {
             if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
                 return CallGCRead(ArrayList<LLVMValueRef>([baseObject, addr]))
             }
-            return CallGCReadStaticRef(addr)
         }
         return buildLoad(elementType, addr, name)
     }
