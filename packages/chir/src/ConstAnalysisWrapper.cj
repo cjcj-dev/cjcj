@@ -7,8 +7,16 @@ import std.collection.*
 private let OVERHEAD_BLOCK_SIZE: Int64 = 1000
 private let USE_ACTIVE_BLOCK_SIZE: Int64 = 300
 
-private enum ConstAnalysisStrategy {
+private enum ConstAnalysisStrategy <: Equatable<ConstAnalysisStrategy> {
     | SkipAnalysis | FullStatePool | ActiveStatePool
+
+    public operator func ==(right: ConstAnalysisStrategy): Bool {
+        return ConstAnalysisStrategyIndex(this) == ConstAnalysisStrategyIndex(right)
+    }
+
+    public operator func !=(right: ConstAnalysisStrategy): Bool {
+        return !(this == right)
+    }
 }
 
 private func ConstAnalysisStrategyIndex(value: ConstAnalysisStrategy): Int64 {
@@ -16,16 +24,6 @@ private func ConstAnalysisStrategyIndex(value: ConstAnalysisStrategy): Int64 {
         case ConstAnalysisStrategy.SkipAnalysis => 0
         case ConstAnalysisStrategy.FullStatePool => 1
         case ConstAnalysisStrategy.ActiveStatePool => 2
-    }
-}
-
-extend ConstAnalysisStrategy <: Equatable<ConstAnalysisStrategy> {
-    public operator func ==(right: ConstAnalysisStrategy): Bool {
-        return ConstAnalysisStrategyIndex(this) == ConstAnalysisStrategyIndex(right)
-    }
-
-    public operator func !=(right: ConstAnalysisStrategy): Bool {
-        return !(this == right)
     }
 }
 
