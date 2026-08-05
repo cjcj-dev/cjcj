@@ -19,6 +19,7 @@
   "cjcj::codegen" = { path = "../codegen" }
   "cjcj::driver" = { path = "../driver" }
   "cjcj::frontend" = { path = "../frontend" }
+  "cjcj::flatbuffers" = { path = "../flatbuffers" }
   "cjcj::lex" = { path = "../lex" }
   "cjcj::macro_pkg" = { path = "../macro" }
   "cjcj::option" = { path = "../option" }
