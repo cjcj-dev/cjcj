@@ -120,6 +120,94 @@ private func IntrinsicRuntimeFunctionName(kind: IntrinsicKind): Option<String> {
         case IntrinsicKind.MULTICONDITION_NOTIFY => Some("CJ_MCC_MultiConditionMonitorNotify")
         case IntrinsicKind.MULTICONDITION_NOTIFY_ALL => Some("CJ_MCC_MultiConditionMonitorNotifyAll")
         case IntrinsicKind.SLEEP => Some("CJ_MRT_Sleep")
+        // CodeGen/Utils/CGCommonDef.h reflection map via LLVMReflectionIntrinsics.def
+        case IntrinsicKind.IS_INTERFACE => Some("CJ_MCC_IsInterface")
+        case IntrinsicKind.IS_CLASS => Some("CJ_MCC_IsClass")
+        case IntrinsicKind.IS_PRIMITIVE => Some("CJ_MCC_IsPrimitive")
+        case IntrinsicKind.IS_STRUCT => Some("CJ_MCC_IsStruct")
+        case IntrinsicKind.IS_GENERIC => Some("CJ_MCC_IsGeneric")
+        case IntrinsicKind.IS_TUPLE => Some("CJ_MCC_IsTuple")
+        case IntrinsicKind.IS_FUNCTION => Some("CJ_MCC_IsFunction")
+        case IntrinsicKind.IS_ENUM => Some("CJ_MCC_IsEnum")
+        case IntrinsicKind.IS_BOX => Some("CJ_MCC_IsBox")
+        case IntrinsicKind.GET_OR_CREATE_TYPEINFO_FOR_REFLECT => Some("CJ_MCC_GetOrCreateTypeInfoForReflect")
+        case IntrinsicKind.GET_TYPETEMPLATE => Some("CJ_MCC_GetTypeTemplate")
+        case IntrinsicKind.CHECK_METHOD_ACTUAL_ARGS => Some("CJ_MCC_CheckMethodActualArgs")
+        case IntrinsicKind.METHOD_ENTRYPOINT_IS_NULL => Some("CJ_MCC_MethodEntryPointIsNull")
+        case IntrinsicKind.IS_RELECT_UNSUPPORTED_TYPE => Some("CJ_MCC_IsReflectUnsupportedType")
+        case IntrinsicKind.GET_TYPE_FOR_ANY => Some("CJ_MCC_GetTypeForAny")
+        case IntrinsicKind.GET_TYPE_BY_MANGLED_NAME => Some("CJ_MCC_GetTypeByMangledName")
+        case IntrinsicKind.GET_TYPE_NAME => Some("CJ_MCC_GetTypeName")
+        case IntrinsicKind.GET_TYPE_BY_QUALIFIED_NAME => Some("CJ_MCC_getTypeByQualifiedName")
+        case IntrinsicKind.GET_TYPE_QUALIFIED_NAME_LENGTH => Some("CJ_MCC_GetQualifiedNameLength")
+        case IntrinsicKind.GET_TYPE_QUALIFIED_NAME => Some("CJ_MCC_GetQualifiedName")
+        case IntrinsicKind.GET_NUM_OF_INTERFACE => Some("CJ_MCC_GetNumOfInterface")
+        case IntrinsicKind.GET_INTERFACE => Some("CJ_MCC_GetInterface")
+        case IntrinsicKind.IS_SUBTYPE => Some("CJ_MCC_IsSubType")
+        case IntrinsicKind.GET_TYPE_INFO_MODIFIER => Some("CJ_MCC_GetTypeInfoModifier")
+        case IntrinsicKind.GET_TYPE_INFO_ANNOTATIONS => Some("CJ_MCC_GetTypeInfoAnnotations")
+        case IntrinsicKind.GET_OBJ_CLASS => Some("CJ_MCC_GetObjClass")
+        case IntrinsicKind.GET_SUPER_TYPE_INFO => Some("CJ_MCC_GetSuperTypeInfo")
+        case IntrinsicKind.GET_TYPE_ARGS => Some("CJ_MCC_GetTypeArgs")
+        case IntrinsicKind.GET_NUM_OF_INSTANCE_METHOD_INFOS => Some("CJ_MCC_GetNumOfInstanceMethodInfos")
+        case IntrinsicKind.GET_INSTANCE_METHOD_INFO => Some("CJ_MCC_GetInstanceMethodInfo")
+        case IntrinsicKind.GET_NUM_OF_STATIC_METHOD_INFOS => Some("CJ_MCC_GetNumOfStaticMethodInfos")
+        case IntrinsicKind.GET_STATIC_METHOD_INFO => Some("CJ_MCC_GetStaticMethodInfo")
+        case IntrinsicKind.GET_METHOD_NAME => Some("CJ_MCC_GetMethodName")
+        case IntrinsicKind.GET_METHOD_RETURN_TYPE => Some("CJ_MCC_GetMethodReturnType")
+        case IntrinsicKind.GET_METHOD_MODIFIER => Some("CJ_MCC_GetMethodModifier")
+        case IntrinsicKind.GET_METHOD_ANNOTATIONS => Some("CJ_MCC_GetMethodAnnotations")
+        case IntrinsicKind.APPLY_CJ_METHOD => Some("CJ_MCC_ApplyCJInstanceMethod")
+        case IntrinsicKind.APPLY_CJ_STATIC_METHOD => Some("CJ_MCC_ApplyCJStaticMethod")
+        case IntrinsicKind.APPLY_CJ_GENERIC_METHOD => Some("CJ_MCC_ApplyCJGenericInstanceMethod")
+        case IntrinsicKind.APPLY_CJ_GENERIC_STATIC_METHOD => Some("CJ_MCC_ApplyCJGenericStaticMethod")
+        case IntrinsicKind.GET_NUM_OF_ACTUAL_PARAMETERS => Some("CJ_MCC_GetNumOfActualParameters")
+        case IntrinsicKind.GET_NUM_OF_GENERIC_PARAMETERS => Some("CJ_MCC_GetNumOfGenericParameters")
+        case IntrinsicKind.GET_ACTUAL_PARAMETER_INFO => Some("CJ_MCC_GetActualParameterInfo")
+        case IntrinsicKind.GET_GENERIC_PARAMETER_INFO => Some("CJ_MCC_GetGenericParameterInfo")
+        case IntrinsicKind.GET_NUM_OF_INSTANCE_FIELD_INFOS => Some("CJ_MCC_GetNumOfInstanceFieldInfos")
+        case IntrinsicKind.GET_INSTANCE_FIELD_INFO => Some("CJ_MCC_GetInstanceFieldInfo")
+        case IntrinsicKind.GET_NUM_OF_STATIC_FIELD_INFOS => Some("CJ_MCC_GetNumOfStaticFieldInfos")
+        case IntrinsicKind.GET_STATIC_FIELD_INFO => Some("CJ_MCC_GetStaticFieldInfo")
+        case IntrinsicKind.GET_STATIC_FIELD_NAME => Some("CJ_MCC_GetStaticFieldName")
+        case IntrinsicKind.GET_STATIC_FIELD_TYPE => Some("CJ_MCC_GetStaticFieldType")
+        case IntrinsicKind.GET_STATIC_FIELD_ANNOTATIONS => Some("CJ_MCC_GetStaticFieldAnnotations")
+        case IntrinsicKind.GET_INSTANCE_FIELD_NAME => Some("CJ_MCC_GetInstanceFieldName")
+        case IntrinsicKind.GET_INSTANCE_FIELD_TYPE => Some("CJ_MCC_GetInstanceFieldType")
+        case IntrinsicKind.GET_INSTANCE_FIELD_ANNOTATIONS => Some("CJ_MCC_GetInstanceFieldAnnotations")
+        case IntrinsicKind.GET_INSTANCE_FIELD_MODIFIER => Some("CJ_MCC_GetInstanceFieldModifier")
+        case IntrinsicKind.GET_STATIC_FIELD_MODIFIER => Some("CJ_MCC_GetStaticFieldModifier")
+        case IntrinsicKind.GET_FIELD_VALUE => Some("CJ_MCC_GetInstanceFieldValue")
+        case IntrinsicKind.SET_FIELD_VALUE => Some("CJ_MCC_SetInstanceFieldValue")
+        case IntrinsicKind.GET_STATIC_FIELD_VALUE => Some("CJ_MCC_GetStaticFieldValue")
+        case IntrinsicKind.SET_STATIC_FIELD_VALUE => Some("CJ_MCC_SetStaticFieldValue")
+        case IntrinsicKind.GET_FIELD_DECLARING_TYPE => Some("CJ_MCC_GetFieldDeclaringType")
+        case IntrinsicKind.GET_PARAMETER_INDEX => Some("CJ_MCC_GetParameterIndex")
+        case IntrinsicKind.GET_PARAMETER_NAME => Some("CJ_MCC_GetParameterName")
+        case IntrinsicKind.GET_PARAMETER_TYPE => Some("CJ_MCC_GetParameterType")
+        case IntrinsicKind.GET_PARAMETER_ANNOTATIONS => Some("CJ_MCC_GetParameterAnnotations")
+        case IntrinsicKind.GET_RELATED_PACKAGE_INF => Some("CJ_MCC_GetRelatedPackageInfo")
+        case IntrinsicKind.GET_PACKAGE_NAME => Some("CJ_MCC_GetPackageName")
+        case IntrinsicKind.GET_PACKAGE_NUM_OF_TYPE_INFOS => Some("CJ_MCC_GetPackageNumOfTypeInfos")
+        case IntrinsicKind.GET_PACKAGE_TYPE_INFO => Some("CJ_MCC_GetPackageTypeInfo")
+        case IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_METHODS => Some("CJ_MCC_GetPackageNumOfGlobalMethodInfos")
+        case IntrinsicKind.GET_PACKAGE_GLOBAL_METHOD_INFO => Some("CJ_MCC_GetPackageGlobalMethodInfo")
+        case IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_FIELD_INFOS => Some("CJ_MCC_GetPackageNumOfGlobalFieldInfos")
+        case IntrinsicKind.GET_PACKAGE_GLOBAL_FIELD_INFO => Some("CJ_MCC_GetPackageGlobalFieldInfo")
+        case IntrinsicKind.LOAD_PACKAGE => Some("CJ_MCC_LoadPackage")
+        case IntrinsicKind.GET_PACKAGE_BY_QUALIFIEDNAME => Some("CJ_MCC_GetPackageByQualifiedName")
+        case IntrinsicKind.GET_PACKAGE_VERSION => Some("CJ_MCC_GetPackageVersion")
+        case IntrinsicKind.GET_SUB_PACKAGES => Some("CJ_MCC_GetSubPackages")
+        case IntrinsicKind.GET_NUM_OF_FIELD_TYPES => Some("CJ_MCC_GetNumOfFieldTypes")
+        case IntrinsicKind.GET_FIELD_TYPES => Some("CJ_MCC_GetFieldTypes")
+        case IntrinsicKind.NEW_AND_INIT_OBJECT => Some("CJ_MCC_NewAndInitEnumTupleObject")
+        case IntrinsicKind.GET_ASSOCIATED_VALUES => Some("CJ_MCC_GetAssociatedValues")
+        case IntrinsicKind.GET_NUM_OF_FUNCTION_SIGNATURETYPES => Some("CJ_MCC_GetNumOfFunctionSignatureTypes")
+        case IntrinsicKind.GET_FUNCTION_SIGNATURE_TYPES => Some("CJ_MCC_GetFunctionSignatureTypes")
+        case IntrinsicKind.GET_NUM_OF_ENUM_CONSTRUCTOR_INFOS => Some("CJ_MCC_GetNumOfEnumConstructorInfos")
+        case IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO => Some("CJ_MCC_GetEnumConstructorInfo")
+        case IntrinsicKind.GET_ENUM_CONSTRUCTOR_NAME => Some("CJ_MCC_GetEnumConstructorName")
+        case IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO_FROM_ANY => Some("CJ_MCC_GetEnumConstructorInfoFromAny")
         case _ => None
     }
 }
@@ -5818,27 +5906,10 @@ public class IRBuilder2 <: Resource {
         let whileLoopHeader = blocks[0]
         let whileLoopBody = blocks[1]
         let afterWhileLoop = blocks[2]
-        // Intentionally diverges from CodeGen/Base/IntrinsicsDispatcher.cpp:231-233 to fix upstream UB-003:
-        // element alignment is required for correctness; the upstream 8-byte alignment can split an element.
-        let elementSize = if (let Some(size) <- arrayCopyToInfo.elemType.GetSize()) {
-            size
-        } else {
-            Int64(cgMod.GetTypeSize(arrayCopyToInfo.elemType.GetLLVMType()))
-        }
-        if (elementSize <= 0) {
-            InternalError("array element size must be positive for chunked array copy")
-            return
-        }
-        if (elementSize > 2147483647) {
-            InternalError("array element size exceeds the current 2 GiB array-copy implementation limit")
-            return
-        }
-        let sizeOfSingleCopyValue = 2147483647 - 2147483647 % elementSize
-        if (sizeOfSingleCopyValue <= 0) {
-            InternalError("array copy chunk size must be positive")
-            return
-        }
-        let sizeOfSingleCopy = GetInt64(sizeOfSingleCopyValue)
+        // CodeGen/Base/IntrinsicsDispatcher.cpp:231-233: fixed 8-byte-aligned INT32_MAX chunk.
+        // Do not query elemType.GetSize() here: for generic/unknown element types it is 0/None and
+        // incorrectly ICE'd std.unittest* while upstream still emits the copy loop.
+        let sizeOfSingleCopy = GetInt64(2147483640)
         let i64Ty = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
         let iterator = CreateEntryAlloca(i64Ty, name: "iterator")
         CreateStore(GetInt64(0), iterator)

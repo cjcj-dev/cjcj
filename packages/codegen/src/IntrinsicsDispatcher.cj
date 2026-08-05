@@ -156,6 +156,10 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
     if (IsRuntimeIntrinsic(kind)) {
         return irBuilder.CallRuntimeIntrinsics(kind, args, resultType)
     }
+    // CodeGen/Base/IntrinsicsDispatcher.h:163-167 IsReflectIntrinsic
+    if (IsReflectIntrinsic(kind)) {
+        return irBuilder.CallRuntimeIntrinsics(kind, args, resultType)
+    }
     if (IsFutureIntrinsic(kind)) {
         return irBuilder.CallRuntimeIntrinsics(kind, args, resultType)
     }
@@ -297,6 +301,97 @@ private func IsRuntimeIntrinsic(kind: IntrinsicKind): Bool {
         kind == IntrinsicKind.GET_THREAD_NUMBER ||
         kind == IntrinsicKind.GET_BLOCKING_THREAD_NUMBER ||
         kind == IntrinsicKind.GET_NATIVE_THREAD_NUMBER
+}
+
+// CodeGen/Base/IntrinsicsDispatcher.h:163-167
+private func IsReflectIntrinsic(kind: IntrinsicKind): Bool {
+    return kind == IntrinsicKind.IS_INTERFACE ||
+        kind == IntrinsicKind.IS_CLASS ||
+        kind == IntrinsicKind.IS_PRIMITIVE ||
+        kind == IntrinsicKind.IS_STRUCT ||
+        kind == IntrinsicKind.IS_GENERIC ||
+        kind == IntrinsicKind.IS_TUPLE ||
+        kind == IntrinsicKind.IS_FUNCTION ||
+        kind == IntrinsicKind.IS_ENUM ||
+        kind == IntrinsicKind.IS_BOX ||
+        kind == IntrinsicKind.GET_OR_CREATE_TYPEINFO_FOR_REFLECT ||
+        kind == IntrinsicKind.GET_TYPETEMPLATE ||
+        kind == IntrinsicKind.CHECK_METHOD_ACTUAL_ARGS ||
+        kind == IntrinsicKind.METHOD_ENTRYPOINT_IS_NULL ||
+        kind == IntrinsicKind.IS_RELECT_UNSUPPORTED_TYPE ||
+        kind == IntrinsicKind.GET_TYPE_FOR_ANY ||
+        kind == IntrinsicKind.GET_TYPE_BY_MANGLED_NAME ||
+        kind == IntrinsicKind.GET_TYPE_NAME ||
+        kind == IntrinsicKind.GET_TYPE_BY_QUALIFIED_NAME ||
+        kind == IntrinsicKind.GET_TYPE_QUALIFIED_NAME_LENGTH ||
+        kind == IntrinsicKind.GET_TYPE_QUALIFIED_NAME ||
+        kind == IntrinsicKind.GET_NUM_OF_INTERFACE ||
+        kind == IntrinsicKind.GET_INTERFACE ||
+        kind == IntrinsicKind.IS_SUBTYPE ||
+        kind == IntrinsicKind.GET_TYPE_INFO_MODIFIER ||
+        kind == IntrinsicKind.GET_TYPE_INFO_ANNOTATIONS ||
+        kind == IntrinsicKind.GET_OBJ_CLASS ||
+        kind == IntrinsicKind.GET_SUPER_TYPE_INFO ||
+        kind == IntrinsicKind.GET_TYPE_ARGS ||
+        kind == IntrinsicKind.GET_NUM_OF_INSTANCE_METHOD_INFOS ||
+        kind == IntrinsicKind.GET_INSTANCE_METHOD_INFO ||
+        kind == IntrinsicKind.GET_NUM_OF_STATIC_METHOD_INFOS ||
+        kind == IntrinsicKind.GET_STATIC_METHOD_INFO ||
+        kind == IntrinsicKind.GET_METHOD_NAME ||
+        kind == IntrinsicKind.GET_METHOD_RETURN_TYPE ||
+        kind == IntrinsicKind.GET_METHOD_MODIFIER ||
+        kind == IntrinsicKind.GET_METHOD_ANNOTATIONS ||
+        kind == IntrinsicKind.APPLY_CJ_METHOD ||
+        kind == IntrinsicKind.APPLY_CJ_STATIC_METHOD ||
+        kind == IntrinsicKind.APPLY_CJ_GENERIC_METHOD ||
+        kind == IntrinsicKind.APPLY_CJ_GENERIC_STATIC_METHOD ||
+        kind == IntrinsicKind.GET_NUM_OF_ACTUAL_PARAMETERS ||
+        kind == IntrinsicKind.GET_NUM_OF_GENERIC_PARAMETERS ||
+        kind == IntrinsicKind.GET_ACTUAL_PARAMETER_INFO ||
+        kind == IntrinsicKind.GET_GENERIC_PARAMETER_INFO ||
+        kind == IntrinsicKind.GET_NUM_OF_INSTANCE_FIELD_INFOS ||
+        kind == IntrinsicKind.GET_INSTANCE_FIELD_INFO ||
+        kind == IntrinsicKind.GET_NUM_OF_STATIC_FIELD_INFOS ||
+        kind == IntrinsicKind.GET_STATIC_FIELD_INFO ||
+        kind == IntrinsicKind.GET_STATIC_FIELD_NAME ||
+        kind == IntrinsicKind.GET_STATIC_FIELD_TYPE ||
+        kind == IntrinsicKind.GET_STATIC_FIELD_ANNOTATIONS ||
+        kind == IntrinsicKind.GET_INSTANCE_FIELD_NAME ||
+        kind == IntrinsicKind.GET_INSTANCE_FIELD_TYPE ||
+        kind == IntrinsicKind.GET_INSTANCE_FIELD_ANNOTATIONS ||
+        kind == IntrinsicKind.GET_INSTANCE_FIELD_MODIFIER ||
+        kind == IntrinsicKind.GET_STATIC_FIELD_MODIFIER ||
+        kind == IntrinsicKind.GET_FIELD_VALUE ||
+        kind == IntrinsicKind.SET_FIELD_VALUE ||
+        kind == IntrinsicKind.GET_STATIC_FIELD_VALUE ||
+        kind == IntrinsicKind.SET_STATIC_FIELD_VALUE ||
+        kind == IntrinsicKind.GET_FIELD_DECLARING_TYPE ||
+        kind == IntrinsicKind.GET_PARAMETER_INDEX ||
+        kind == IntrinsicKind.GET_PARAMETER_NAME ||
+        kind == IntrinsicKind.GET_PARAMETER_TYPE ||
+        kind == IntrinsicKind.GET_PARAMETER_ANNOTATIONS ||
+        kind == IntrinsicKind.GET_RELATED_PACKAGE_INF ||
+        kind == IntrinsicKind.GET_PACKAGE_NAME ||
+        kind == IntrinsicKind.GET_PACKAGE_NUM_OF_TYPE_INFOS ||
+        kind == IntrinsicKind.GET_PACKAGE_TYPE_INFO ||
+        kind == IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_METHODS ||
+        kind == IntrinsicKind.GET_PACKAGE_GLOBAL_METHOD_INFO ||
+        kind == IntrinsicKind.GET_PACKAGE_NUM_OF_GLOBAL_FIELD_INFOS ||
+        kind == IntrinsicKind.GET_PACKAGE_GLOBAL_FIELD_INFO ||
+        kind == IntrinsicKind.LOAD_PACKAGE ||
+        kind == IntrinsicKind.GET_PACKAGE_BY_QUALIFIEDNAME ||
+        kind == IntrinsicKind.GET_PACKAGE_VERSION ||
+        kind == IntrinsicKind.GET_SUB_PACKAGES ||
+        kind == IntrinsicKind.GET_NUM_OF_FIELD_TYPES ||
+        kind == IntrinsicKind.GET_FIELD_TYPES ||
+        kind == IntrinsicKind.NEW_AND_INIT_OBJECT ||
+        kind == IntrinsicKind.GET_ASSOCIATED_VALUES ||
+        kind == IntrinsicKind.GET_NUM_OF_FUNCTION_SIGNATURETYPES ||
+        kind == IntrinsicKind.GET_FUNCTION_SIGNATURE_TYPES ||
+        kind == IntrinsicKind.GET_NUM_OF_ENUM_CONSTRUCTOR_INFOS ||
+        kind == IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO ||
+        kind == IntrinsicKind.GET_ENUM_CONSTRUCTOR_NAME ||
+        kind == IntrinsicKind.GET_ENUM_CONSTRUCTOR_INFO_FROM_ANY
 }
 
 private func IsInteropIntrinsic(kind: IntrinsicKind): Bool {
