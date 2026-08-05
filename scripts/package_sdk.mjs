@@ -18,6 +18,7 @@ const platform = required('platform');
 const outdir = required('outdir');
 const runtimeLib = typeof argv['runtime-lib'] === 'string' ? argv['runtime-lib'] : '';
 const runtimeRoot = typeof argv['runtime-root'] === 'string' ? argv['runtime-root'] : '';
+const stdDir = typeof argv['std-dir'] === 'string' ? argv['std-dir'] : '';
 async function exists(file, kind = 'file') {
   try { const stat = await fs.stat(file); return kind === 'dir' ? stat.isDirectory() : stat.isFile(); } catch { return false; }
 }
@@ -26,6 +27,7 @@ if (!await exists(sdk, 'dir')) { console.error(`SDK dir not found: ${sdk}`); pro
 if (!await exists(binary)) { console.error(`cjc binary not found: ${binary}`); process.exit(2); }
 if (runtimeLib && !await exists(runtimeLib)) { console.error(`runtime library not found: ${runtimeLib}`); process.exit(2); }
 if (runtimeRoot && !await exists(runtimeRoot, 'dir')) { console.error(`runtime root not found: ${runtimeRoot}`); process.exit(2); }
+if (stdDir && !await exists(stdDir, 'dir')) { console.error(`std dir not found: ${stdDir}`); process.exit(2); }
 
 const platforms = {
   'linux-x64': ['linux_x86_64_cjnative', 'tar', ''],
@@ -45,7 +47,7 @@ const stage = path.join(outputRoot, packageName);
 await fs.mkdir(outputRoot, {recursive: true});
 await fs.rm(stage, {recursive: true, force: true});
 
-console.log(`[1/6] copy SDK tree -> ${stage}`);
+console.log(`[1/7] copy SDK tree -> ${stage}`);
 const sdkSource = await fs.realpath(sdk);
 if (isWindows) await fs.cp(sdkSource, stage, {recursive: true, dereference: true});
 else {
@@ -55,7 +57,7 @@ else {
 await requirePrivateStage(stage, outputRoot, sdkSource);
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 
-console.log('[2/6] install our compiler as bin/cjc');
+console.log('[2/7] install our compiler as bin/cjc');
 const installed = path.join(stage, `bin/cjc${exeSuffix}`);
 await Promise.all([
   fs.rm(path.join(stage, 'bin', 'cjc'), {force: true}),
@@ -64,7 +66,7 @@ await Promise.all([
 await fs.copyFile(binary, installed);
 await fs.chmod(installed, 0o755);
 
-console.log('[3/6] swap in patched runtime');
+console.log('[3/7] swap in patched runtime');
 if (isWindows) {
   if (!runtimeRoot) { console.error('  ERROR: Windows packaging requires --runtime-root'); process.exit(3); }
   for (const relative of [path.join('runtime', 'lib', runtimeDir), path.join('lib', runtimeDir)]) {
@@ -91,7 +93,108 @@ if (isWindows) {
   console.log('  skip: no --runtime-lib (stock runtime; only safe if cjc name exclusion is inapplicable)');
 }
 
-console.log('[4/6] set relative runtime lookup paths');
+// Overlay rebuilt std (.a/.cjo + lib/libcangjie-std-*.a). --std-dir may be:
+//   (a) SDK root with modules/<tuple>/std + lib/<tuple>
+//   (b) modules tree root containing <tuple>/std
+//   (c) the std package dir itself (…/std with std.core.a …)
+console.log('[4/7] overlay rebuilt std');
+if (stdDir) {
+  const stdSource = await fs.realpath(stdDir);
+  async function resolveStdLayout(root) {
+    const candidates = [
+      {
+        modulesStd: path.join(root, 'modules', runtimeDir, 'std'),
+        modulesTop: path.join(root, 'modules', runtimeDir),
+        libDir: path.join(root, 'lib', runtimeDir),
+      },
+      {
+        modulesStd: path.join(root, runtimeDir, 'std'),
+        modulesTop: path.join(root, runtimeDir),
+        libDir: path.join(root, 'lib', runtimeDir),
+      },
+      {
+        modulesStd: root,
+        modulesTop: path.dirname(root),
+        libDir: path.join(root, '..', '..', 'lib', runtimeDir),
+      },
+    ];
+    for (const candidate of candidates) {
+      if (await exists(candidate.modulesStd, 'dir')) return candidate;
+    }
+    return null;
+  }
+  const layout = await resolveStdLayout(stdSource);
+  if (!layout) {
+    console.error(`  ERROR: --std-dir has no modules/<tuple>/std layout: ${stdSource}`);
+    process.exit(3);
+  }
+  const stageModulesStd = path.join(stage, 'modules', runtimeDir, 'std');
+  const stageModulesTop = path.join(stage, 'modules', runtimeDir);
+  const stageLib = path.join(stage, 'lib', runtimeDir);
+  await fs.mkdir(stageModulesStd, {recursive: true});
+  await fs.mkdir(stageLib, {recursive: true});
+
+  const skipName = name => name === '.cached' || name.endsWith('-temp-files')
+    || /\.O[01]\.a$/.test(name) || name.endsWith('.bc') || name === 'core.o';
+  const entries = await fs.readdir(layout.modulesStd, {withFileTypes: true});
+  let copiedA = 0;
+  let copiedCjo = 0;
+  for (const entry of entries) {
+    if (!entry.isFile() || skipName(entry.name)) continue;
+    if (!entry.name.endsWith('.a') && !entry.name.endsWith('.cjo')) continue;
+    await fs.copyFile(path.join(layout.modulesStd, entry.name), path.join(stageModulesStd, entry.name));
+    if (entry.name.endsWith('.a')) copiedA += 1;
+    else copiedCjo += 1;
+  }
+  // package-level std.a / std.cjo (and optional libstd.bc) sit beside the std/ dir
+  for (const topName of ['std.a', 'std.cjo', 'libstd.bc']) {
+    const topSrc = path.join(layout.modulesTop, topName);
+    if (await exists(topSrc)) {
+      await fs.copyFile(topSrc, path.join(stageModulesTop, topName));
+      console.log(`  modules/${runtimeDir}/${topName}`);
+    }
+  }
+  // map std.X.a → lib/libcangjie-std-X.a (dots → hyphens after "std.")
+  // prefer pre-built lib/ if present, else synthesize from modules
+  let copiedLib = 0;
+  const libSourceExists = await exists(layout.libDir, 'dir');
+  if (libSourceExists) {
+    const libEntries = await fs.readdir(layout.libDir);
+    for (const name of libEntries) {
+      if (!name.startsWith('libcangjie-std') || !name.endsWith('.a')) continue;
+      if (/\.O[01]\.a$/.test(name)) continue;
+      await fs.copyFile(path.join(layout.libDir, name), path.join(stageLib, name));
+      copiedLib += 1;
+    }
+  }
+  if (copiedLib === 0) {
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.startsWith('std.') || !entry.name.endsWith('.a')) continue;
+      if (skipName(entry.name)) continue;
+      const base = entry.name.slice(0, -2); // strip .a
+      const rest = base.slice('std.'.length);
+      const libname = `libcangjie-std-${rest.replaceAll('.', '-')}.a`;
+      await fs.copyFile(path.join(layout.modulesStd, entry.name), path.join(stageLib, libname));
+      copiedLib += 1;
+    }
+  }
+  if (copiedA === 0) {
+    console.error(`  ERROR: --std-dir produced zero std.*.a under ${layout.modulesStd}`);
+    process.exit(3);
+  }
+  const coreA = path.join(stageModulesStd, 'std.core.a');
+  const coreLib = path.join(stageLib, 'libcangjie-std-core.a');
+  if (!await exists(coreA) || !await exists(coreLib)) {
+    console.error('  ERROR: overlay missing std.core.a or libcangjie-std-core.a');
+    process.exit(3);
+  }
+  console.log(`  modules/${runtimeDir}/std: ${copiedA} .a + ${copiedCjo} .cjo`);
+  console.log(`  lib/${runtimeDir}: ${copiedLib} libcangjie-std-*.a`);
+} else {
+  console.log('  skip: no --std-dir (stock nightly std retained)');
+}
+
+console.log('[5/7] set relative runtime lookup paths');
 if (platform.startsWith('linux-')) {
   const available = await $({nothrow: true, quiet: true})`command -v patchelf`;
   if (available.exitCode !== 0) { console.error('  ERROR: patchelf not found'); process.exit(3); }
@@ -152,7 +255,7 @@ if (platform.startsWith('linux-')) {
   console.log('  Windows resolves packaged DLLs through runtime/lib and PATH');
 }
 
-console.log('[5/6] archive');
+console.log('[6/7] archive');
 const archivePath = path.join(outdir, `${packageName}.${archiveType === 'tar' ? 'tar.gz' : 'zip'}`);
 if (archiveType === 'tar') await $({stdio: 'inherit'})`tar -C ${outdir} -czf ${archivePath} ${packageName}`;
 else {
@@ -164,7 +267,7 @@ else {
   await $({stdio: 'inherit'})`pwsh -NoLogo -NoProfile -Command ${command}`;
 }
 
-console.log('[6/6] sha256');
+console.log('[7/7] sha256');
 const archiveDigest = crypto.createHash('sha256').update(await fs.readFile(archivePath)).digest('hex');
 const digest = `${archiveDigest}  ${path.basename(archivePath)}\n`;
 await fs.writeFile(`${archivePath}.sha256`, digest);
