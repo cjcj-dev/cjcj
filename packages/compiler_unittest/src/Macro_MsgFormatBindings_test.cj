@@ -5,7 +5,14 @@ import std.unittest.*
 import std.unittest.testmacro.*
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset, FlatBufferString,
     VerifierOptions, VerifierTemplate}
-import cjcj::macro_pkg.*
+import cjcj::macro_pkg.{BoolValue, CreateChildMsgDirect, CreateDefLib, CreateDiagnostic,
+    CreateIdInfo, CreateItemInfo, CreateMacroCall, CreateMacroMsg, CreateMacroResult,
+    CreateMultiMacroCalls, CreateToken, CreateTokensValue, ExitTask, FinishMacroMsgBuffer,
+    GetMacroMsg, IntValue, MacroMsgFormat_ChildMsg, MacroMsgFormat_Diagnostic,
+    MacroMsgFormat_ItemInfo, MacroMsgFormat_MacroCall, MacroMsgFormat_Position,
+    MacroMsgFormat_Token, MsgContent_defLib, MsgContent_exitTask, MsgContent_macroResult,
+    MsgContent_multiCalls, OptionValue_bValue, OptionValue_iValue, OptionValue_sValue,
+    OptionValue_tValue, VerifyMacroMsgBuffer}
 
 // LSPDeserGuardTest.cpp:40-47 (BuildIdAbsentMacroMsg).
 private func BuildIdAbsentMacroMsg(): Array<UInt8> {
@@ -107,10 +114,10 @@ public class MacroMsgFormatBindingsTest {
         let builder = FlatBufferBuilder()
         let stringItem = CreateItemInfo(builder, builder.CreateString("s"),
             OptionValue_sValue, builder.CreateString("text"))
-        let intValue = builder.CreateStructBytes(IntValue(-9), alignment: 8)
+        let intValue = builder.CreateStructBytes(IntValue(-9), 8)
         let intItem = CreateItemInfo(builder, builder.CreateString("i"),
             OptionValue_iValue, intValue)
-        let boolValue = builder.CreateStructBytes(BoolValue(true), alignment: 1)
+        let boolValue = builder.CreateStructBytes(BoolValue(true), 1)
         let boolItem = CreateItemInfo(builder, builder.CreateString("b"),
             OptionValue_bValue, boolValue)
         let token = CreateToken(builder, 3u8, builder.CreateString("token"),
@@ -180,7 +187,7 @@ public class MacroMsgFormatBindingsTest {
     @TestCase
     public func ExitTaskRoundTrip(): Unit {
         let builder = FlatBufferBuilder()
-        let exitTask = builder.CreateStructBytes(ExitTask(false), alignment: 1)
+        let exitTask = builder.CreateStructBytes(ExitTask(false), 1)
         let rootOffset = CreateMacroMsg(builder, MsgContent_exitTask, exitTask)
         let bytes = FinishMacroMsgBuffer(builder, rootOffset)
         var options = VerifierOptions()
