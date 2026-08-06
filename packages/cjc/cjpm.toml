@@ -10,7 +10,7 @@
   output-type = "executable"
   compile-option = ""
   override-compile-option = ""
-  link-option = "--export-dynamic runtime_shim/cjselfhost_llvmshim.o runtime_shim/cjc_runtime_config.o -lLLVM-15 -lstdc++ -rpath $ORIGIN/../runtime/lib/linux_x86_64_cjnative -rpath $ORIGIN/../third_party/llvm/lib -rpath $ORIGIN/../tools/lib"
+  link-option = "--export-dynamic runtime_shim/cjselfhost_llvmshim.o runtime_shim/cjc_runtime_config.o ${CANGJIE_HOME}/third_party/llvm/lib/libLLVM-15.so -lstdc++ -rpath $ORIGIN/../runtime/lib/linux_x86_64_cjnative -rpath $ORIGIN/../third_party/llvm/lib -rpath $ORIGIN/../tools/lib"
   package-configuration = {}
 
 [dependencies]
