@@ -16,7 +16,7 @@ export const APT_PACKAGES = Object.freeze([
   'ssh', 'dos2unix', 'libxext-dev', 'libxtst-dev', 'libxt-dev', 'libcups2-dev', 'clang',
   'clang-15', 'lld', 'libxrender-dev', 'zip', 'bzip2', 'libopenmpi-dev', 'vim', 'gdb',
   'lldb', 'libclang-15-dev', 'libgtest-dev', 'rpm', 'patch', 'libtinfo5', 'cpio',
-  'rpm2cpio', 'libncurses5', 'libncurses5-dev', 'strace', 'net-tools', 'swig',
+  'rpm2cpio', 'libncurses5', 'libncurses5-dev', 'strace', 'net-tools', 'swig', 'python3-dev',
 ]);
 
 function which(name) {
