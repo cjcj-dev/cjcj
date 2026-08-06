@@ -223,16 +223,24 @@ if (stdDir) {
   // (AddCJNATIVELibrary.cmake: cangjie-std-core STATIC ${CORE_FFI_OBJECTS_LIST} + core.o,
   // and the same pattern for math/fs/time/…). Overlay of rebuilt CJ-only std.*.a
   // drops that merge, so static link of executables loses Int64.ti / typetemplate
-  // and CJ_* FFI entry points. Re-merge every libcangjie-std-X.a that has a
-  // matching XFFI.a sitting beside it (stock SDK keeps those FFI archives).
+  // and CJ_* FFI entry points. Re-merge from the sibling *FFI.a that the stock
+  // SDK copy still carries — but only when stock's static already had native
+  // members (ast has *FFI.a for the shared lib only; its STATIC is pure CJ).
   const stageLibEntries = await fs.readdir(stageLib);
   const ffiByStem = new Map();
   for (const name of stageLibEntries) {
     const match = name.match(/^libcangjie-std-(.+)FFI\.a$/);
     if (match) ffiByStem.set(match[1], name);
   }
+  const archiveMembers = async (archivePath) => {
+    const listed = await $({quiet: true})`ar t ${archivePath}`;
+    return listed.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+  };
+  const isNativeObject = (member) => /\.(c|cc|cpp|S)\.o$/.test(member);
   let mergedLibs = 0;
   let mergeBytesDelta = 0;
+  let coreBefore = 0;
+  let coreAfter = 0;
   const mergeWork = await fs.mkdtemp(path.join(path.dirname(stage), 'std-ffi-merge-'));
   try {
     for (const name of stageLibEntries) {
@@ -243,7 +251,21 @@ if (stdDir) {
       if (!ffiName) continue;
       const staticPath = path.join(stageLib, name);
       const ffiPath = path.join(stageLib, ffiName);
+      const members = await archiveMembers(staticPath);
+      // After overlay the static is usually a single CJ .o; native members are
+      // gone. Decide from the sibling FFI archive + official shape: merge iff
+      // FFI has objects AND this is not a shared-only FFI package. Shared-only
+      // is detected when the stock SDK (still present as *FFI.a) has a matching
+      // static that, on the pre-overlay tree, was pure CJ — we re-check by
+      // asking whether any official install merges this stem: native objects
+      // live only in *FFI.a for those packages. Conservative signal used here:
+      // merge when FFI members look like the core/math/fs family (always), and
+      // skip when the rebuilt static already has native objects (no-op), and
+      // skip stems whose stock static never absorbs FFI (ast).
+      if (stem === 'ast') continue;
+      if (members.some(isNativeObject)) continue;
       const before = (await fs.stat(staticPath)).size;
+      if (stem === 'core') coreBefore = before;
       const work = path.join(mergeWork, stem);
       await fs.rm(work, {recursive: true, force: true});
       await fs.mkdir(work, {recursive: true});
@@ -268,6 +290,7 @@ if (stdDir) {
       await $({quiet: true})`ar rcs ${outTmp} ${objects}`;
       await fs.copyFile(outTmp, staticPath);
       const after = (await fs.stat(staticPath)).size;
+      if (stem === 'core') coreAfter = after;
       mergedLibs += 1;
       mergeBytesDelta += after - before;
       if (stem === 'core') {
@@ -281,7 +304,8 @@ if (stdDir) {
   } finally {
     await fs.rm(mergeWork, {recursive: true, force: true});
   }
-  console.log(`  merged FFI into ${mergedLibs} static lib(s); core/lib size Δ ${mergeBytesDelta} bytes`);
+  console.log(`  merged FFI into ${mergedLibs} static lib(s); size Δ ${mergeBytesDelta} bytes` +
+    (coreBefore ? ` (core ${coreBefore}→${coreAfter})` : ''));
 
   // Prove the overlaid std is ours, not nightly's copied back over itself: nightly's
   // String.indexOf reads this.myData as a raw base, with zero tag tests (measured 0806 --
