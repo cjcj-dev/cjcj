@@ -1074,7 +1074,23 @@ public class IRBuilder2 <: Resource {
             if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
                 return CallGCRead(ArrayList<LLVMValueRef>([baseObject, addr]))
             }
-            return CallGCReadStaticRef(addr)
+            // C++ CJNativeIRBuilder.cpp:765-784 identifies Allocate-backed local loads.
+            // Keep those non-heap PEA slots plain; every other base-less ref may be tagged.
+            var isLoadOfAllocatedLocalRef = false
+            if (let Some(currentExpr) <- chirExpr) {
+                if (let Some(loadExpr) <- (currentExpr.GetExpression() as Load)) {
+                    if (let Some(localVar) <- (loadExpr.GetLocation() as LocalVar)) {
+                        if (let Some(locationExpr) <- localVar.GetExpr()) {
+                            let locationExprKind = locationExpr.GetExprKind()
+                            isLoadOfAllocatedLocalRef = locationExprKind == ExprKind.ALLOCATE ||
+                                locationExprKind == ExprKind.ALLOCATE_WITH_EXCEPTION
+                        }
+                    }
+                }
+            }
+            if (!isLoadOfAllocatedLocalRef) {
+                return CallGCReadStaticRef(addr)
+            }
         }
         return buildLoad(elementType, addr, name)
     }
