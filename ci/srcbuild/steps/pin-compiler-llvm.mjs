@@ -11,7 +11,11 @@ if (!workspace || !llvmRef) throw new Error('CANGJIE_WORKSPACE and LLVM_REF are 
 // the source override so the compiler build does not clone the dev branch.
 const llvmSrc = `${workspace}/cangjie_compiler/third_party/llvm-project`;
 await $`git init ${llvmSrc}`;
-await $`git -C ${llvmSrc} remote add origin https://gitcode.com/Cangjie/llvm-project.git`;
+// The URL is a variable because the release line builds our fork, which carries the
+// barrier lowering and the stack-map fixes. Upstream stays the default so a caller
+// that only sets LLVM_REF keeps the old behaviour instead of silently switching repo.
+const llvmUrl = process.env.LLVM_URL || 'https://gitcode.com/Cangjie/llvm-project.git';
+await $`git -C ${llvmSrc} remote add origin ${llvmUrl}`;
 await $`git -C ${llvmSrc} fetch --depth=1 origin ${llvmRef}`;
 await $`git -C ${llvmSrc} checkout --detach FETCH_HEAD`;
 const actualRef = (await $({stdio: 'pipe'})`git -C ${llvmSrc} rev-parse HEAD`).stdout.trim();

@@ -102,9 +102,14 @@ jobs:
 
       - name: Configure compiler LLVM
         # LLVM dev rejects seven-operand enum reflection; pin ERT_MAX=7.
-        env:
-          LLVM_REF: b462fbd9fb53440aa4736a8cf9f9e97324e0623a
-        run: npx --yes zx@8 ci/srcbuild/steps/pin-compiler-llvm.mjs
+        # Source and revision come from ci/llvm_pin.env so this stays one place:
+        # the fork carries CJBarrierLowering's mask test, the fast-read uncolour,
+        # and the two stack-map fixes stage2 needs. Upstream b462fbd9 has none.
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          export LLVM_URL LLVM_REF="$LLVM_SHA"
+          npx --yes zx@8 ci/srcbuild/steps/pin-compiler-llvm.mjs
 
       - name: Build compiler oracle
         run: npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
