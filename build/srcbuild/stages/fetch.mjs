@@ -21,14 +21,36 @@ const SRC_CMAKE_EDITS = [[
   'if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\nendif()\n',
   'if(CANGJIE_BUILD_CJDB)\n    add_dependencies(lldb cangjie-frontend)\n    if(TARGET lldb-build)\n        add_dependencies(lldb-build cangjie-frontend cangjie-lsp-share)\n    endif()\nendif()\n',
 ]];
+const COMPILER_CJDB_REQUIREMENTS = [
+  [path.join('third_party', 'cmake', 'BuildCJDB.cmake'), [
+    'cmake_policy(SET CMP0114 NEW)',
+    'STEP_TARGETS build configure',
+  ]],
+  [path.join('src', 'CMakeLists.txt'), [
+    'add_dependencies(lldb-build cangjie-frontend cangjie-lsp-share)',
+  ]],
+];
 
-function applyCompilerCjdbPatches(repoDir) {
+export function verifyCompilerCjdbPatches(repoDir) {
+  for (const [relativePath, requiredTexts] of COMPILER_CJDB_REQUIREMENTS) {
+    const file = path.join(repoDir, relativePath);
+    const source = fs.readFileSync(file, 'utf8');
+    for (const requiredText of requiredTexts) {
+      if (!source.includes(requiredText)) {
+        throw new BuildError('fetch.patch.verify', `required compiler patch text missing from ${file}: ${requiredText}`);
+      }
+    }
+  }
+}
+
+export function applyCompilerCjdbPatches(repoDir) {
   applyTextPatch(path.join(repoDir, 'third_party', 'cmake', 'BuildCJDB.cmake'), BUILDCJDB_EDITS, {
     stage: 'fetch.patch', marker: 'STEP_TARGETS build configure',
   });
   applyTextPatch(path.join(repoDir, 'src', 'CMakeLists.txt'), SRC_CMAKE_EDITS, {
     stage: 'fetch.patch', marker: 'add_dependencies(lldb-build cangjie-frontend cangjie-lsp-share)',
   });
+  verifyCompilerCjdbPatches(repoDir);
 }
 
 export async function run(config) {
