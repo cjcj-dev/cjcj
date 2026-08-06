@@ -130,7 +130,8 @@ async function assertStdBarriers(coreLib) {
   for (const symbol of symbols) {
     let inBody = false;
     let found = false;
-    let tagTests = 0;
+    let shrTests = 0;
+    let maskTests = 0;
     let barrierCalls = 0;
     for (const line of lines) {
       if (line.includes(`<${symbol}>:`)) {
@@ -140,14 +141,21 @@ async function assertStdBarriers(coreLib) {
       }
       if (inBody && (line.trim() === '' || (/^[0-9a-f]+ </.test(line) && !line.includes(symbol)))) inBody = false;
       if (!inBody) continue;
-      if (/shr *\$0x30/.test(line)) tagTests += 1;
+      // The tag test has two shapes. Older toolchains shift the top bits down and
+      // compare against zero; since CJBarrierLowering.cpp:653-665 the compiler loads
+      // g_cjLoadBadMask and ands against it, so a std built by the current LLVM main
+      // carries no shr at all. Counting only the shr form would reject a correctly
+      // built final std, which is the one thing this assertion exists to accept.
+      if (/shr *\$0x30/.test(line)) shrTests += 1;
+      if (/g_cjLoadBadMask/.test(line)) maskTests += 1;
       if (/CJ_MCC_ReadStaticRef|CJ_MCC_ReadRefField/.test(line)) barrierCalls += 1;
     }
+    const tagTests = shrTests + maskTests;
     if (!found || tagTests === 0 || barrierCalls === 0) {
-      throw new Error(`final std barrier assertion failed for ${symbol}: found=${found}, shr=${tagTests}, barrier_call=${barrierCalls}`);
+      throw new Error(`final std barrier assertion failed for ${symbol}: found=${found}, shr=${shrTests}, mask=${maskTests}, barrier_call=${barrierCalls}`);
     }
     checked += 1;
-    console.log(`STAGE3_BARRIER_FUNCTION_PASS symbol=${symbol} shr=${tagTests} barrier_call=${barrierCalls}`);
+    console.log(`STAGE3_BARRIER_FUNCTION_PASS symbol=${symbol} shr=${shrTests} mask=${maskTests} barrier_call=${barrierCalls}`);
   }
   if (checked === 0) throw new Error('final std barrier assertion checked zero functions');
   console.log(`STAGE3_BARRIER_ASSERT_PASS checked=${checked}`);
