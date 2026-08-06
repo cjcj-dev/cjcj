@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import {BuildError} from '../../lib/errors.mjs';
 import {shallowClone} from '../../lib/git.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
 import {applyTextPatch, ensureDir} from './common.mjs';
