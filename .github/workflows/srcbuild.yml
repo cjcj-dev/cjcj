@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       cangjie_ref:
-        description: Optional shared tag/branch for the four upstream repositories
+        description: Optional SDK version label; source repository revisions remain pinned
         required: false
         type: string
       build_type:
@@ -46,8 +46,8 @@ jobs:
       - name: Checkout cjcj
         uses: actions/checkout@v7
 
-      - name: Load runtime pin
-        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+      - name: Load source pins
+        run: cat ci/source_pin.env ci/runtime_pin.env >> "$GITHUB_ENV"
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target linux-x64 install-system-deps
@@ -81,19 +81,24 @@ jobs:
           value=$(npx --yes zx@8 build/cli.mjs --cangjie-version "$REQUESTED_REF" print-version)
           echo "value=$value" >> "$GITHUB_OUTPUT"
 
-      - name: Download upstream source
-        env:
-          REQUESTED_REF: ${{ inputs.cangjie_ref }}
+      - name: Download pinned source
         run: |
-          args=()
-          if [ -n "$REQUESTED_REF" ]; then args+=(--tag "$REQUESTED_REF"); fi
           npx --yes zx@8 build/cli.mjs \
             --target linux-x64 \
             --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" \
             --cangjie-version "${{ steps.version.outputs.value }}" \
-            fetch "${args[@]}" \
+            fetch \
+            --repo-url "compiler=$COMPILER_SRC_URL" \
+            --repo-tag "compiler=$COMPILER_REF" \
             --repo-url "runtime=$RUNTIME_SRC_URL" \
-            --repo-tag "runtime=$RUNTIME_REF"
+            --repo-tag "runtime=$RUNTIME_REF" \
+            --repo-url "tools=$TOOLS_SRC_URL" \
+            --repo-tag "tools=$TOOLS_REF" \
+            --repo-url "stdx=$STDX_SRC_URL" \
+            --repo-tag "stdx=$STDX_REF"
+
+      - name: Verify source revisions
+        run: npx --yes zx@8 ci/srcbuild/steps/verify-source-pins.mjs
 
       - name: Configure compiler LLVM
         # LLVM dev rejects seven-operand enum reflection; pin ERT_MAX=7.
