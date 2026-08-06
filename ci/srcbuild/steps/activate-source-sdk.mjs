@@ -19,9 +19,6 @@ await $`set -o pipefail; ${fixedLlc} --version | head -5`;
 await $`mv ${fixedLlc} ${sdk}/third_party/llvm/bin/llc`;
 
 const llvmDir = `${sdk}/third_party/llvm/lib`;
-const hardDir = (await $({stdio: 'pipe'})`grep -oE "/[^ '\\"]*/third_party/llvm/lib" packages/cjc/cjpm.toml | head -1`).stdout.trim();
-await $`sed ${`s#${hardDir}#${llvmDir}#g`} packages/cjc/cjpm.toml > packages/cjc/cjpm.toml.tmp`;
-await $`mv packages/cjc/cjpm.toml.tmp packages/cjc/cjpm.toml`;
 
 await fs.appendFile(githubEnv, [
   `CANGJIE_HOME=${sdk}`,
