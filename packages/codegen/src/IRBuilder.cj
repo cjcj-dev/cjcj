@@ -1074,21 +1074,25 @@ public class IRBuilder2 <: Resource {
             if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
                 return CallGCRead(ArrayList<LLVMValueRef>([baseObject, addr]))
             }
-            // C++ CJNativeIRBuilder.cpp:765-784 identifies Allocate-backed local loads.
-            // Keep those non-heap PEA slots plain; every other base-less ref may be tagged.
-            var isLoadOfAllocatedLocalRef = false
+            // C++ CJNativeIRBuilder.cpp:765-784 identifies Allocate-backed local loads;
+            // TerminatorExprDispatcher.cpp:49-66 also returns through a plain slot load.
+            var isUntaggedLocalRefLoad = false
             if (let Some(currentExpr) <- chirExpr) {
-                if (let Some(loadExpr) <- (currentExpr.GetExpression() as Load)) {
+                let expression = currentExpr.GetExpression()
+                if (expression.GetExprKind() == ExprKind.EXIT &&
+                    !unsafe { LLVMIsAAllocaInst(addr) }.isNull()) {
+                    isUntaggedLocalRefLoad = true
+                } else if (let Some(loadExpr) <- (expression as Load)) {
                     if (let Some(localVar) <- (loadExpr.GetLocation() as LocalVar)) {
                         if (let Some(locationExpr) <- localVar.GetExpr()) {
                             let locationExprKind = locationExpr.GetExprKind()
-                            isLoadOfAllocatedLocalRef = locationExprKind == ExprKind.ALLOCATE ||
+                            isUntaggedLocalRefLoad = locationExprKind == ExprKind.ALLOCATE ||
                                 locationExprKind == ExprKind.ALLOCATE_WITH_EXCEPTION
                         }
                     }
                 }
             }
-            if (!isLoadOfAllocatedLocalRef) {
+            if (!isUntaggedLocalRefLoad) {
                 return CallGCReadStaticRef(addr)
             }
         }
