@@ -219,6 +219,70 @@ if (stdDir) {
   console.log(`  modules/${runtimeDir}/std: ${copiedA} .a + ${copiedCjo} .cjo`);
   console.log(`  lib/${runtimeDir}: ${copiedLib} libcangjie-std-*.a`);
 
+  // Official CMake merges each package's FFI objects into the static lib
+  // (AddCJNATIVELibrary.cmake: cangjie-std-core STATIC ${CORE_FFI_OBJECTS_LIST} + core.o,
+  // and the same pattern for math/fs/time/…). Overlay of rebuilt CJ-only std.*.a
+  // drops that merge, so static link of executables loses Int64.ti / typetemplate
+  // and CJ_* FFI entry points. Re-merge every libcangjie-std-X.a that has a
+  // matching XFFI.a sitting beside it (stock SDK keeps those FFI archives).
+  const stageLibEntries = await fs.readdir(stageLib);
+  const ffiByStem = new Map();
+  for (const name of stageLibEntries) {
+    const match = name.match(/^libcangjie-std-(.+)FFI\.a$/);
+    if (match) ffiByStem.set(match[1], name);
+  }
+  let mergedLibs = 0;
+  let mergeBytesDelta = 0;
+  const mergeWork = await fs.mkdtemp(path.join(path.dirname(stage), 'std-ffi-merge-'));
+  try {
+    for (const name of stageLibEntries) {
+      const match = name.match(/^libcangjie-std-(.+)\.a$/);
+      if (!match || name.endsWith('FFI.a') || /\.O[01]\.a$/.test(name)) continue;
+      const stem = match[1];
+      const ffiName = ffiByStem.get(stem);
+      if (!ffiName) continue;
+      const staticPath = path.join(stageLib, name);
+      const ffiPath = path.join(stageLib, ffiName);
+      const before = (await fs.stat(staticPath)).size;
+      const work = path.join(mergeWork, stem);
+      await fs.rm(work, {recursive: true, force: true});
+      await fs.mkdir(work, {recursive: true});
+      const ffiDir = path.join(work, 'ffi');
+      const cjDir = path.join(work, 'cj');
+      await fs.mkdir(ffiDir);
+      await fs.mkdir(cjDir);
+      await $({cwd: ffiDir, quiet: true})`ar x ${ffiPath}`;
+      await $({cwd: cjDir, quiet: true})`ar x ${staticPath}`;
+      const objects = [];
+      for (const entry of await fs.readdir(ffiDir)) {
+        if (entry.endsWith('.o')) objects.push(path.join(ffiDir, entry));
+      }
+      for (const entry of await fs.readdir(cjDir)) {
+        if (entry.endsWith('.o')) objects.push(path.join(cjDir, entry));
+      }
+      if (objects.length === 0) {
+        console.error(`  ERROR: empty merge inputs for ${name}`);
+        process.exit(3);
+      }
+      const outTmp = path.join(work, name);
+      await $({quiet: true})`ar rcs ${outTmp} ${objects}`;
+      await fs.copyFile(outTmp, staticPath);
+      const after = (await fs.stat(staticPath)).size;
+      mergedLibs += 1;
+      mergeBytesDelta += after - before;
+      if (stem === 'core') {
+        const nm = await $({nothrow: true, quiet: true})`nm ${staticPath}`;
+        if (!/(^|\n)[0-9a-fA-F]+ D Int64\.ti(\n|$)/.test(nm.stdout)) {
+          console.error('  ERROR: merged libcangjie-std-core.a still lacks D Int64.ti');
+          process.exit(3);
+        }
+      }
+    }
+  } finally {
+    await fs.rm(mergeWork, {recursive: true, force: true});
+  }
+  console.log(`  merged FFI into ${mergedLibs} static lib(s); core/lib size Δ ${mergeBytesDelta} bytes`);
+
   // Prove the overlaid std is ours, not nightly's copied back over itself: nightly's
   // String.indexOf reads this.myData as a raw base, with zero tag tests (measured 0806 --
   // 539 across the whole archive, 0 inside that function), which is the SIGSEGV this
