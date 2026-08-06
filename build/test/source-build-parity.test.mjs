@@ -205,6 +205,14 @@ test('Linux source stages emit the Python command order', async () => {
       expected(root, stdxRoot, ['python3', 'build.py', 'clean']),
       expected(root, stdxRoot, ['python3', 'build.py', 'build', '-t', 'relwithdebinfo', `--include=${path.join(compilerRoot, 'include')}`]),
       expected(root, stdxRoot, ['python3', 'build.py', 'install']),
+      expected(root, toolsRoot, [
+        'git', 'fetch', '--depth', '1', 'https://github.com/cjcj-dev/cangjie-tools.git',
+        '2003d20ae84050fd2f70525bf00be214542113a6',
+      ]),
+      expected(root, toolsRoot, ['git', 'rev-parse', 'FETCH_HEAD']),
+      expected(root, toolsRoot, [
+        'git', 'checkout', '2003d20ae84050fd2f70525bf00be214542113a6', '--', 'cjpm',
+      ]),
     ];
     for (const [name, subpath] of [
       ['cjpm', path.join('cjpm', 'build')],
