@@ -1074,7 +1074,27 @@ public class IRBuilder2 <: Resource {
             if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
                 return CallGCRead(ArrayList<LLVMValueRef>([baseObject, addr]))
             }
-            return CallGCReadStaticRef(addr)
+            // C++ CJNativeIRBuilder.cpp:765-784 identifies Allocate-backed local loads;
+            // TerminatorExprDispatcher.cpp:49-66 also returns through a plain slot load.
+            var isUntaggedLocalRefLoad = false
+            if (let Some(currentExpr) <- chirExpr) {
+                let expression = currentExpr.GetExpression()
+                if (expression.GetExprKind() == ExprKind.EXIT &&
+                    !unsafe { LLVMIsAAllocaInst(addr) }.isNull()) {
+                    isUntaggedLocalRefLoad = true
+                } else if (let Some(loadExpr) <- (expression as Load)) {
+                    if (let Some(localVar) <- (loadExpr.GetLocation() as LocalVar)) {
+                        if (let Some(locationExpr) <- localVar.GetExpr()) {
+                            let locationExprKind = locationExpr.GetExprKind()
+                            isUntaggedLocalRefLoad = locationExprKind == ExprKind.ALLOCATE ||
+                                locationExprKind == ExprKind.ALLOCATE_WITH_EXCEPTION
+                        }
+                    }
+                }
+            }
+            if (!isUntaggedLocalRefLoad) {
+                return CallGCReadStaticRef(addr)
+            }
         }
         return buildLoad(elementType, addr, name)
     }
