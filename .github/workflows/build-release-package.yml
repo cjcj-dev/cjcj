@@ -179,7 +179,7 @@ jobs:
 
       - name: Install packaging dependency (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils patchelf
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils
 
       - name: Install runtime build dependencies (Linux)
         if: runner.os == 'Linux' && steps.rtcache.outputs.cache-hit != 'true'

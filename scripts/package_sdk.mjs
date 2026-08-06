@@ -18,6 +18,7 @@ const platform = required('platform');
 const outdir = required('outdir');
 const runtimeLib = typeof argv['runtime-lib'] === 'string' ? argv['runtime-lib'] : '';
 const runtimeRoot = typeof argv['runtime-root'] === 'string' ? argv['runtime-root'] : '';
+const allowStockRuntime = argv['allow-stock-runtime'] === true;
 const stdDir = typeof argv['std-dir'] === 'string' ? argv['std-dir'] : '';
 async function exists(file, kind = 'file') {
   try { const stat = await fs.stat(file); return kind === 'dir' ? stat.isDirectory() : stat.isFile(); } catch { return false; }
@@ -89,8 +90,34 @@ if (isWindows) {
   if (!await exists(destination)) { console.error(`  ERROR: ${destination} missing in SDK tree`); process.exit(3); }
   await fs.copyFile(runtimeLib, destination);
   console.log(`  replaced ${destination}`);
+} else if (allowStockRuntime) {
+  console.log('  skip: --allow-stock-runtime given; the package will carry the stock runtime');
 } else {
-  console.log('  skip: no --runtime-lib (stock runtime; only safe if cjc name exclusion is inapplicable)');
+  console.error('  ERROR: no --runtime-lib, so the package would carry the stock runtime. Two reasons that is wrong:');
+  console.error('    1. Stock skips stack-root scanning whenever the main executable is named cjc');
+  console.error('       (StackManager.cpp:588). Our bin/cjc is named cjc, so deep compiles corrupt the heap.');
+  console.error('       The fork gates that exclusion on IsCangjieExecutable(); stock has no such gate.');
+  console.error('    2. Stock has no generational GC, which is what this release ships.');
+  console.error('  Pass --runtime-lib <libcangjie-runtime.so>, or --allow-stock-runtime if you mean it.');
+  process.exit(3);
+}
+
+// Prove the packaged runtime is the fork rather than a stock library left in place: the fork's
+// diagnostic switches (MRT_GCV2_*) sit in .rodata and are absent from stock (57 vs 0 on 0806).
+// Copying a file proves an action ran, not that the right library arrived.
+if (!allowStockRuntime) {
+  const runtimeLibDir = path.join(stage, 'runtime', 'lib', runtimeDir);
+  const names = isWindows
+    ? (await fs.readdir(runtimeLibDir)).filter((name) => ['libcangjie-runtime.dll', 'cangjie-runtime.dll'].includes(name.toLowerCase()))
+    : [runtimeLibrary];
+  for (const name of names) {
+    const packaged = path.join(runtimeLibDir, name);
+    if (!(await fs.readFile(packaged)).includes('MRT_GCV2_')) {
+      console.error(`  ERROR: ${packaged} carries no MRT_GCV2_ markers, so it is not the fork runtime.`);
+      process.exit(3);
+    }
+    console.log(`  verified fork runtime: ${name}`);
+  }
 }
 
 // Overlay rebuilt std (.a/.cjo + lib/libcangjie-std-*.a). --std-dir may be:
@@ -196,11 +223,25 @@ if (stdDir) {
 
 console.log('[5/7] set relative runtime lookup paths');
 if (platform.startsWith('linux-')) {
-  const available = await $({nothrow: true, quiet: true})`command -v patchelf`;
-  if (available.exitCode !== 0) { console.error('  ERROR: patchelf not found'); process.exit(3); }
-  await $({stdio: 'inherit'})`patchelf --set-rpath ${`$ORIGIN/../runtime/lib/${runtimeDir}:$ORIGIN/../third_party/llvm/lib:$ORIGIN/../tools/lib`} ${path.join(stage, 'bin/cjc')}`;
+  // The link step already writes these entries (packages/cjc/cjpm.toml link-option), so this
+  // asserts them instead of rewriting with patchelf -- which was measured to be a no-op
+  // (identical SHA-256 before and after). A wrong RUNPATH means the build is wrong and must
+  // surface here rather than get papered over at packaging time.
+  const expected = [`$ORIGIN/../runtime/lib/${runtimeDir}`, '$ORIGIN/../third_party/llvm/lib', '$ORIGIN/../tools/lib'];
   const dynamic = await $({nothrow: true, quiet: true})`readelf -d ${path.join(stage, 'bin/cjc')}`;
   const runpath = dynamic.stdout.split('\n').find(line => line.includes('RUNPATH'))?.match(/\[(.*)\]/)?.[1] || '';
+  const entries = runpath.split(':').filter(Boolean);
+  const missing = expected.filter((entry) => !entries.includes(entry));
+  if (missing.length > 0) {
+    console.error(`  ERROR: bin/cjc RUNPATH lacks ${missing.join(', ')} -- got [${runpath}]`);
+    console.error('  The link step owns this; fix packages/cjc/cjpm.toml link-option.');
+    process.exit(3);
+  }
+  const hostPaths = entries.filter((entry) => entry.startsWith('/'));
+  if (hostPaths.length > 0) {
+    console.error(`  ERROR: bin/cjc RUNPATH carries build-host paths: ${hostPaths.join(', ')}`);
+    process.exit(3);
+  }
   process.stdout.write(`  RUNPATH: ${runpath}\n`);
 } else if (platform.startsWith('darwin-')) {
   const available = await $({nothrow: true, quiet: true})`command -v install_name_tool`;
