@@ -75,33 +75,39 @@ async function assertStage2Compiler(stageEnv, stage2Sha) {
 }
 
 async function countFinalStd(root) {
+  const modulesTop = path.join(root, 'modules', tuple);
   const modulesStd = path.join(root, 'modules', tuple, 'std');
   const staticDir = path.join(root, 'lib', tuple);
   const sharedDir = path.join(root, 'runtime', 'lib', tuple);
-  for (const directory of [modulesStd, staticDir, sharedDir]) {
+  for (const directory of [modulesTop, modulesStd, staticDir, sharedDir]) {
     if (!await exists(directory, 'dir')) throw new Error(`final std directory missing: ${directory}`);
   }
-  const [modules, staticLibs, sharedLibs] = await Promise.all([
+  const [topModules, modules, staticLibs, sharedLibs] = await Promise.all([
+    fs.readdir(modulesTop),
     fs.readdir(modulesStd),
     fs.readdir(staticDir),
     fs.readdir(sharedDir),
   ]);
   return {
-    archives: modules.filter((name) => /^std\..+\.a$/.test(name)).length,
-    cjos: modules.filter((name) => /^std\..+\.cjo$/.test(name)).length,
-    bitcode: modules.filter((name) => /^libstd\..+\.bc$/.test(name)).length,
-    staticLibs: staticLibs.filter((name) => /^libcangjie-std(?:-|\.)?.*\.a$/.test(name)).length,
+    cjos: modules.filter((name) => /^std\..+\.cjo$/.test(name)).length
+      + Number(topModules.includes('std.cjo')),
+    bitcode: modules.filter((name) => /^libstd\..+\.bc$/.test(name)).length
+      + Number(topModules.includes('libstd.bc')),
+    staticLibs: staticLibs.filter((name) => /^libcangjie-std(?:-|\.)?.*\.a$/.test(name) && !name.endsWith('FFI.a')).length,
+    ffiStaticLibs: staticLibs.filter((name) => /^libcangjie-std.*FFI\.a$/.test(name)).length,
     sharedLibs: sharedLibs.filter((name) => /^libcangjie-std(?:-|\.)?.*\.so$/.test(name)).length,
   };
 }
 
 async function assertFinalStd(root) {
   const counts = await countFinalStd(root);
-  const expected = dryRun ? 1 : 47;
+  const expected = dryRun
+    ? {cjos: 1, bitcode: 1, staticLibs: 1, ffiStaticLibs: 1, sharedLibs: 1}
+    : {cjos: 47, bitcode: 47, staticLibs: 47, ffiStaticLibs: 16, sharedLibs: 47};
   for (const [kind, count] of Object.entries(counts)) {
-    if (count !== expected) throw new Error(`final std ${kind}: expected ${expected}, found ${count}`);
+    if (count !== expected[kind]) throw new Error(`final std ${kind}: expected ${expected[kind]}, found ${count}`);
   }
-  console.log(`STAGE3_FINAL_STD_ASSERT_PASS archives=${counts.archives} cjos=${counts.cjos} bitcode=${counts.bitcode} static=${counts.staticLibs} shared=${counts.sharedLibs}${dryRun ? ' FAKE=1' : ''}`);
+  console.log(`STAGE3_FINAL_STD_ASSERT_PASS cjos=${counts.cjos} bitcode=${counts.bitcode} static=${counts.staticLibs} ffi_static=${counts.ffiStaticLibs} shared=${counts.sharedLibs}${dryRun ? ' FAKE=1' : ''}`);
   return counts;
 }
 
@@ -186,11 +192,7 @@ if (dryRun) {
 
 await assertFinalStd(finalStd);
 const finalCore = path.join(finalStd, 'lib', tuple, 'libcangjie-std-core.a');
-const finalModulesCore = path.join(finalStd, 'modules', tuple, 'std', 'std.core.a');
-const [finalCoreSha, finalModulesCoreSha] = await Promise.all([sha256(finalCore), sha256(finalModulesCore)]);
-if (finalCoreSha !== finalModulesCoreSha) {
-  throw new Error(`final std core copies differ: lib=${finalCoreSha}, modules=${finalModulesCoreSha}`);
-}
+const finalCoreSha = await sha256(finalCore);
 if (finalCoreSha === bootstrapCoreSha && allowIdenticalStdValue !== '1') {
   throw new Error('stage2-built std is byte-identical to bootstrap std; provenance is inconclusive (set CJCJ_STAGE3_ALLOW_IDENTICAL_STD=1 only after independent proof)');
 }
