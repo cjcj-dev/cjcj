@@ -4,20 +4,25 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import {applyCompilerCjdbPatches, verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
+import {verifyCompilerCjdbPatches} from '../srcbuild/stages/fetch.mjs';
 
 const BUILD_CJDB = [
+  'cmake_policy(SET CMP0114 NEW)',
   'externalproject_get_property(cjnative BINARY_DIR)',
   'set(LLVM_GC_BINARY_DIR "${BINARY_DIR}")',
   'ExternalProject_Add(',
   '    lldb',
   '    USES_TERMINAL_BUILD ON',
-  '    DEPENDS cjnative)',
+  '    DEPENDS cjnative',
+  '    STEP_TARGETS build configure)',
   '',
 ].join('\n');
 const SRC_CMAKE = [
   'if(CANGJIE_BUILD_CJDB)',
   '    add_dependencies(lldb cangjie-frontend)',
+  '    if(TARGET lldb-build)',
+  '        add_dependencies(lldb-build cangjie-frontend cangjie-lsp-share)',
+  '    endif()',
   'endif()',
   '',
 ].join('\n');
@@ -40,10 +45,9 @@ function makeCompilerFixture() {
   return root;
 }
 
-test('compiler CJDB patch verification has positive and per-requirement negative controls', () => {
+test('compiler fork patch verification has positive and per-requirement negative controls', () => {
   const root = makeCompilerFixture();
   try {
-    applyCompilerCjdbPatches(root);
     assert.doesNotThrow(() => verifyCompilerCjdbPatches(root));
 
     for (const [relativePath, requiredText] of REQUIREMENTS) {
@@ -57,24 +61,6 @@ test('compiler CJDB patch verification has positive and per-requirement negative
       );
       fs.writeFileSync(file, patched);
     }
-  } finally {
-    fs.rmSync(root, {recursive: true, force: true});
-  }
-});
-
-test('an existing patch marker cannot bypass another compiler CJDB requirement', () => {
-  const root = makeCompilerFixture();
-  try {
-    const file = path.join(root, 'third_party', 'cmake', 'BuildCJDB.cmake');
-    const partial = fs.readFileSync(file, 'utf8').replace(
-      '    DEPENDS cjnative)',
-      '    DEPENDS cjnative\n    STEP_TARGETS build configure)',
-    );
-    fs.writeFileSync(file, partial);
-    assert.throws(
-      () => applyCompilerCjdbPatches(root),
-      error => error.message.includes('cmake_policy(SET CMP0114 NEW)'),
-    );
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
