@@ -19,6 +19,7 @@ const outdir = required('outdir');
 const runtimeLib = typeof argv['runtime-lib'] === 'string' ? argv['runtime-lib'] : '';
 const runtimeRoot = typeof argv['runtime-root'] === 'string' ? argv['runtime-root'] : '';
 const allowStockRuntime = argv['allow-stock-runtime'] === true;
+const allowNightlyStd = argv['allow-nightly-std'] === true;
 const stdDir = typeof argv['std-dir'] === 'string' ? argv['std-dir'] : '';
 async function exists(file, kind = 'file') {
   try { const stat = await fs.stat(file); return kind === 'dir' ? stat.isDirectory() : stat.isFile(); } catch { return false; }
@@ -217,8 +218,43 @@ if (stdDir) {
   }
   console.log(`  modules/${runtimeDir}/std: ${copiedA} .a + ${copiedCjo} .cjo`);
   console.log(`  lib/${runtimeDir}: ${copiedLib} libcangjie-std-*.a`);
+
+  // Prove the overlaid std is ours, not nightly's copied back over itself: nightly's
+  // String.indexOf reads this.myData as a raw base, with zero tag tests (measured 0806 --
+  // 539 across the whole archive, 0 inside that function), which is the SIGSEGV this
+  // release exists to fix. Read the function body, not the archive total.
+  const barrierProbe = await $({nothrow: true, quiet: true})`objdump -drwC ${coreLib}`;
+  const probeBody = barrierProbe.stdout.split('\n');
+  const symbol = '_CNat6String7indexOfHRNatY0_E';
+  let inBody = false;
+  let tagTests = 0;
+  let found = false;
+  for (const line of probeBody) {
+    if (line.includes(`<${symbol}>:`)) { inBody = true; found = true; continue; }
+    if (inBody && (line.trim() === '' || (/^[0-9a-f]+ </.test(line) && !line.includes(symbol)))) inBody = false;
+    if (inBody && /shr +\$0x30/.test(line)) tagTests += 1;
+  }
+  if (!found) {
+    console.error(`  ERROR: ${symbol} absent from the overlaid ${path.basename(coreLib)}, so the`);
+    console.error('  barrier check has no evidence either way. Not shippable -- absence of a');
+    console.error('  symbol is not absence of the defect.');
+    process.exit(3);
+  }
+  if (tagTests === 0) {
+    console.error(`  ERROR: ${symbol} carries no tag test in the overlaid std, which is nightly's`);
+    console.error('  signature. Under our runtime this.myData is a bit48-coloured pointer, so a');
+    console.error('  bare read segfaults. Rebuild std with this release\'s compiler.');
+    process.exit(3);
+  }
+  console.log(`  verified rebuilt std: ${symbol} has ${tagTests} tag tests`);
+} else if (allowNightlyStd) {
+  console.log('  skip: --allow-nightly-std given; the package will carry the nightly std');
 } else {
-  console.log('  skip: no --std-dir (stock nightly std retained)');
+  console.error('  ERROR: no --std-dir, so the package would carry the nightly std. That std\'s');
+  console.error('  String.indexOf has no tag test before reading a bit48-coloured pointer, which');
+  console.error('  segfaults under our runtime -- it is the reason this release rebuilds std at all.');
+  console.error('  Pass --std-dir <rebuilt std>, or --allow-nightly-std if you mean it.');
+  process.exit(3);
 }
 
 console.log('[5/7] set relative runtime lookup paths');
