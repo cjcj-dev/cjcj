@@ -232,7 +232,12 @@ if (stdDir) {
   for (const line of probeBody) {
     if (line.includes(`<${symbol}>:`)) { inBody = true; found = true; continue; }
     if (inBody && (line.trim() === '' || (/^[0-9a-f]+ </.test(line) && !line.includes(symbol)))) inBody = false;
-    if (inBody && /shr +\$0x30/.test(line)) tagTests += 1;
+    // The tag test has two shapes. The older toolchain shifts the top 16 bits down
+    // and compares against zero; since CJBarrierLowering.cpp:653-665 it loads
+    // g_cjLoadBadMask and ands against it instead, so a std built with the current
+    // compiler carries no shr at all. Accepting only the shr form would reject a
+    // correctly built std, which is why both are counted here.
+    if (inBody && (/shr +\$0x30/.test(line) || /g_cjLoadBadMask/.test(line))) tagTests += 1;
   }
   if (!found) {
     console.error(`  ERROR: ${symbol} absent from the overlaid ${path.basename(coreLib)}, so the`);
