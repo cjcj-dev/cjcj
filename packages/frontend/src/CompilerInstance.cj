@@ -57,24 +57,10 @@ func RegisterMacroCallDiagInfos(diag: DiagnosticEngine, pkg: Package): Unit {
 
 private class PendingMangledDecl {
     public let astDecl: Decl
-    public let mangleDecl: RealMangleDecl
     public let mangledName: String
 
-    public init(astDecl: Decl, mangleDecl: RealMangleDecl, mangledName: String) {
+    public init(astDecl: Decl, mangledName: String) {
         this.astDecl = astDecl
-        this.mangleDecl = mangleDecl
-        this.mangledName = mangledName
-    }
-}
-
-private class PendingMangledLambda {
-    public let astLambda: LambdaExpr
-    public let mangleLambda: RealMangleDecl
-    public let mangledName: String
-
-    public init(astLambda: LambdaExpr, mangleLambda: RealMangleDecl, mangledName: String) {
-        this.astLambda = astLambda
-        this.mangleLambda = mangleLambda
         this.mangledName = mangledName
     }
 }
@@ -1415,8 +1401,6 @@ public class CompilerInstance {
         while (idx < end) {
             let pkgName = decls[idx][0]
             let decl = decls[idx][1]
-            let pendingDecls = ArrayList<PendingMangledDecl>()
-            let pendingLambdas = ArrayList<PendingMangledLambda>()
             let pre = { node: Node =>
                 let filteredPrefix = getMangleFilteredPrefix(prefix)
                 let convertedPrefix = convertManglePrefix(adapter, filteredPrefix)
@@ -1433,8 +1417,10 @@ public class CompilerInstance {
                         VisitAction.SKIP_CHILDREN
                     } else {
                         let convertedDecl = adapter.ConvertDecl(curDecl)
-                        pendingDecls.add(PendingMangledDecl(curDecl, convertedDecl,
-                            baseMangler.Mangle(convertedDecl, convertedPrefix)))
+                        let mangledName = baseMangler.Mangle(convertedDecl, convertedPrefix)
+                        curDecl.mangledName = mangledName
+                        convertedDecl.mangledName = mangledName
+                        mangledDecls.add(PendingMangledDecl(curDecl, mangledName))
                         VisitAction.WALK_CHILDREN
                     }
                 } else if (let Some(lambda) <- (node as LambdaExpr)) {
@@ -1442,8 +1428,9 @@ public class CompilerInstance {
                         VisitAction.SKIP_CHILDREN
                     } else {
                         let convertedLambda = adapter.ConvertLambdaExpr(lambda)
-                        pendingLambdas.add(PendingMangledLambda(lambda, convertedLambda,
-                            baseMangler.MangleLambda(convertedLambda, convertedPrefix)))
+                        let mangledName = baseMangler.MangleLambda(convertedLambda, convertedPrefix)
+                        lambda.mangledName = mangledName
+                        convertedLambda.mangledName = mangledName
                         VisitAction.WALK_CHILDREN
                     }
                 } else if (let Some(_) <- (node as Annotation)) {
@@ -1459,15 +1446,6 @@ public class CompilerInstance {
                 VisitAction.KEEP_DECISION
             }
             Walker(decl, visitPre: pre, visitPost: post).Walk()
-            for (pending in pendingDecls) {
-                pending.astDecl.mangledName = pending.mangledName
-                pending.mangleDecl.mangledName = pending.mangledName
-                mangledDecls.add(pending)
-            }
-            for (pending in pendingLambdas) {
-                pending.astLambda.mangledName = pending.mangledName
-                pending.mangleLambda.mangledName = pending.mangledName
-            }
             adapter.ReleaseConvertedAst()
             idx++
         }
