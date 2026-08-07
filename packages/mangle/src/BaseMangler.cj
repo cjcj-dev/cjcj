@@ -1,6 +1,7 @@
 package cjcj::mangle
 
 import std.collection.*
+import std.collection.concurrent.*
 import cjcj::ast.*
 import cjcj::utils.{CJC_ASSERT, CJC_NULLPTR_CHECK}
 
@@ -158,7 +159,7 @@ private func toBase62(value: UInt64): String {
 }
 
 public class ManglerContext {
-    // Identity-keyed HashMaps mirror the C++ pointer-keyed std::map containers
+    // Identity-keyed maps mirror the C++ pointer-keyed std::map containers
     // (include/cangjie/Mangle/BaseMangler.h:160-169). Lookups in C++ are .find()
     // probes that never rely on map iteration order; they index into the value
     // vector instead. The inner bucket lists stay ArrayList so insertion order
@@ -166,13 +167,18 @@ public class ManglerContext {
     // previous O(n) linear scans -> overall O(n^2) -> O(n) on large packages.
     // File-keyed containers use a composite "fileName\u{0}fileHash" string key
     // mirroring sameFile (fileName == fileName && fileHash == fileHash).
-    private let file2GlobalWildcardVar: HashMap<String, FileWildcardBucket> = HashMap<String, FileWildcardBucket>()
-    private let node2LocalWildcardVar: HashMap<Int64, WildcardBucket> = HashMap<Int64, WildcardBucket>()
-    private let node2Lambda: HashMap<Int64, LambdaBucket> = HashMap<Int64, LambdaBucket>()
-    private let owner2AnnotationLambdaKey: HashMap<Int64, AnnotationLambdaKey> = HashMap<Int64, AnnotationLambdaKey>()
-    private let node2LocalVar: HashMap<Int64, VarBucket> = HashMap<Int64, VarBucket>()
-    private let node2LocalFunc: HashMap<Int64, FuncBucket> = HashMap<Int64, FuncBucket>()
-    private let file2ExtendDecl: HashMap<String, ExtendBucket> = HashMap<String, ExtendBucket>()
+    // ConcurrentHashMap: DoMangling (CompilerInstance.cpp:846-870) shares one
+    // prepared ManglerContext across parallel batch tasks for concurrent reads.
+    private let file2GlobalWildcardVar: ConcurrentHashMap<String, FileWildcardBucket> =
+        ConcurrentHashMap<String, FileWildcardBucket>()
+    private let node2LocalWildcardVar: ConcurrentHashMap<Int64, WildcardBucket> =
+        ConcurrentHashMap<Int64, WildcardBucket>()
+    private let node2Lambda: ConcurrentHashMap<Int64, LambdaBucket> = ConcurrentHashMap<Int64, LambdaBucket>()
+    private let owner2AnnotationLambdaKey: ConcurrentHashMap<Int64, AnnotationLambdaKey> =
+        ConcurrentHashMap<Int64, AnnotationLambdaKey>()
+    private let node2LocalVar: ConcurrentHashMap<Int64, VarBucket> = ConcurrentHashMap<Int64, VarBucket>()
+    private let node2LocalFunc: ConcurrentHashMap<Int64, FuncBucket> = ConcurrentHashMap<Int64, FuncBucket>()
+    private let file2ExtendDecl: ConcurrentHashMap<String, ExtendBucket> = ConcurrentHashMap<String, ExtendBucket>()
     public let fileIndexes: ArrayList<UInt64> = ArrayList<UInt64>()
 
     public init() {}
@@ -585,13 +591,26 @@ public open class BaseMangler {
     public var moduleDelimiter: String = MANGLE_DOLLAR_PREFIX
     public var lambdaCounter: Int64 = 0
     public var exportIdMode: Bool = false
-    public let manglerCtxTable: HashMap<String, ManglerContext> = HashMap<String, ManglerContext>()
+    // Shared read-only across parallel DoMangling batches (CompilerInstance.cpp:846-870).
+    public let manglerCtxTable: ConcurrentHashMap<String, ManglerContext> =
+        ConcurrentHashMap<String, ManglerContext>()
     public var adapter: MangleAstAdapter = MangleAstAdapter()
 
     public init() {}
 
     public init(delimiter: String) {
         moduleDelimiter = delimiter
+    }
+
+    // ConcurrentHashMap has no clear(); callers of the former HashMap.clear() use this.
+    public func ClearManglerCtxTable(): Unit {
+        let keys = ArrayList<String>()
+        for ((key, _) in manglerCtxTable) {
+            keys.add(key)
+        }
+        for (key in keys) {
+            manglerCtxTable.remove(key)
+        }
     }
 
     public func Mangle(decl: Decl): String {

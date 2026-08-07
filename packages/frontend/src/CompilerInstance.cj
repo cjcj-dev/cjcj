@@ -637,7 +637,7 @@ public class CompilerInstance {
         }
         let semaInstance = faithfulSemaInstance.getOrThrow()
         semaInstance.mangler.adapter = RealMangleAstAdapter()
-        semaInstance.mangler.manglerCtxTable.clear()
+        semaInstance.mangler.ClearManglerCtxTable()
         semaInstance.typeManager.ReleaseSemaQueryCaches()
         unsafe {
             CJ_MCC_InvokeGC(true)
@@ -686,7 +686,7 @@ public class CompilerInstance {
         ManglingHelpFunction(mangler)
         cachedInfo.lambdaCounter = UInt64(mangler.lambdaCounter)
         mangler.adapter = RealMangleAstAdapter()
-        mangler.manglerCtxTable.clear()
+        mangler.ClearManglerCtxTable()
         if (!srcPkgs.isEmpty() && invocation.globalOptions.NeedDumpAST()) {
             DumpAST(GetSourcePackages(), invocation.globalOptions.output, "mangle", dumpToScreen: invocation.globalOptions.dumpToScreen)
         }
@@ -867,7 +867,7 @@ public class CompilerInstance {
     }
 
     public func PerformCHIRCompilation(): Bool {
-        mangler.manglerCtxTable.clear()
+        mangler.ClearManglerCtxTable()
         typeManager.getOrThrow().ReleasePostSemaCaches()
         chirData.getOrThrow().ClearRealPackages()
         unsafe {
