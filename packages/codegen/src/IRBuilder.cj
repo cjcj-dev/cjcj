@@ -1095,8 +1095,14 @@ public class IRBuilder2 <: Resource {
             if (!isUntaggedLocalRefLoad) {
                 return CallGCReadStaticRef(addr)
             }
+            // Plain local ref load (Allocate / EXIT slot): value may still carry
+            // colour if a coloured ref was stored into the slot. Peel so callers
+            // that use the ref as an address (String.eq data[i]) see a VA.
+            return UncolorIfGCPtr(buildLoad(elementType, addr, name))
         }
-        return buildLoad(elementType, addr, name)
+        // Plain non-ref scalar: if addr is AS1 (heap field / interior), peel
+        // colour so the machine address is canonical (Walker.WalkNode 0xa8(%rsi)).
+        return buildLoad(elementType, UncolorIfGCPtr(addr), name)
     }
 
     public func CreateLoad(elementType: LLVMTypeRef, addr: LLVMValueRef, name: CString): LLVMValueRef {
@@ -1355,6 +1361,34 @@ public class IRBuilder2 <: Resource {
             return None
         }
         return Some(unsafe { LLVMGetPointerAddressSpace(valueType) })
+    }
+
+    // Strip ZGC colour bits from addrspace(1) pointers before they are used as
+    // memory addresses (plain field/array load). Official CreateLoad also plain-
+    // loads non-ref fields and baseless refs (CJNativeIRBuilder.cpp:897-901) with
+    // no peel; that is correct only while heap refs stay uncoloured. Under colour
+    // ABI the same contract SEGV (heavycomp String.eq / Walker.WalkNode).
+    // AddressMask = (1<<48)-1 — RefField.h:179; same as
+    // CJBarrierLowering::uncolorIfGCPtr / ReadBarrier::splitFastPathAndSlowPath.
+    private func UncolorIfGCPtr(ptr: LLVMValueRef): LLVMValueRef {
+        if ((GetPointerAddressSpace(ptr) ?? 0u32) != 1u32) {
+            return ptr
+        }
+        let i64Ty = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
+        let ptrTy = unsafe { LLVMTypeOf(ptr) }
+        var asInt = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString("uncolor.asint") }.asResource()) {
+            asInt = unsafe { LLVMBuildPtrToInt(builder.raw, ptr, i64Ty, nameCString.value) }
+        }
+        let mask = unsafe { LLVMConstInt(i64Ty, 0x0000FFFFFFFFFFFF, 0) }
+        let masked = CreateAnd(asInt, mask)
+        var result = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString("uncolor.ptr") }.asResource()) {
+            result = unsafe { LLVMBuildIntToPtr(builder.raw, masked, ptrTy, nameCString.value) }
+        }
+        let base = GetTrackedBasePtr(ptr) ?? ptr
+        TrackBasePtr(result, base)
+        return result
     }
 
     public func GetTrackedManagedBase(value: LLVMValueRef): Option<LLVMValueRef> {
