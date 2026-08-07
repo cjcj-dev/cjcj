@@ -1095,10 +1095,23 @@ public class IRBuilder2 <: Resource {
             if (!isUntaggedLocalRefLoad) {
                 return CallGCReadStaticRef(addr)
             }
-            // Plain local ref load (Allocate / EXIT slot): value may still carry
-            // colour if a coloured ref was stored into the slot. Peel so callers
-            // that use the ref as an address (String.eq data[i]) see a VA.
-            return UncolorIfGCPtr(buildLoad(elementType, addr, name))
+            let loaded = buildLoad(elementType, addr, name)
+            // EXIT return slot must stay a plain load. Peeling via
+            // ptrtoint/and/inttoptr severs PEA's def-use chain
+            // (findMemoryBasePointer stops at IntToPtr; SafepointIRVerifier.cpp:952),
+            // so non-escaping mallocs (String.runes/lines/iterator) get wrongly
+            // stack-promoted and return a stack VA → SEGV at first use.
+            // Official CreateLoad also plain-loads (CJNativeIRBuilder.cpp:901).
+            // Colour peel stays on Allocate-backed loads used as addresses.
+            if (let Some(currentExpr) <- chirExpr) {
+                if (currentExpr.GetExpression().GetExprKind() == ExprKind.EXIT) {
+                    return loaded
+                }
+            }
+            // Allocate-backed local ref: value may still carry colour if a
+            // coloured ref was stored into the slot. Peel so callers that use
+            // the ref as an address (String.eq data[i]) see a VA.
+            return UncolorIfGCPtr(loaded)
         }
         // Plain non-ref scalar: if addr is AS1 (heap field / interior), peel
         // colour so the machine address is canonical (Walker.WalkNode 0xa8(%rsi)).
