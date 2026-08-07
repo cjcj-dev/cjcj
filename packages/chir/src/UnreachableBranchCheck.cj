@@ -2,6 +2,7 @@ package cjcj::chir
 
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::basic.DiagKindRefactor
+import cjcj::utils.TaskQueue
 import std.collection.*
 
 private func GetKeyWordBySourceExpr(branch: Branch): String {
@@ -26,6 +27,7 @@ public class UnreachableBranchCheck {
         this.currentPackageName = packageName
     }
 
+    // C++ UnreachableBranchCheck.cpp:30-58 — parallel arm was a dead serial copy.
     public func RunOnPackage(pkg: Package, threadNum: Int64): Unit {
         if (threadNum == 1) {
             for (funcValue in pkg.GetGlobalFuncsWithBody()) {
@@ -35,12 +37,16 @@ public class UnreachableBranchCheck {
                 RunOnFunc(funcValue)
             }
         } else {
+            let taskQueue = TaskQueue(threadNum)
             for (funcValue in pkg.GetGlobalFuncsWithBody()) {
                 if (funcValue.GetSkipCheck() == SkipKind.SKIP_DCE_WARNING) {
                     continue
                 }
-                RunOnFunc(funcValue)
+                let _ = taskQueue.AddTask<Unit>({ =>
+                    RunOnFunc(funcValue)
+                })
             }
+            taskQueue.RunAndWaitForAllTasksCompleted()
         }
     }
 
