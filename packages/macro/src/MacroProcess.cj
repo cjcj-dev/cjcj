@@ -242,7 +242,9 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: MacroHost): U
             tokenIdx++
         }
         if (ci.GetGlobalOptions().enableCompileDebug || ci.GetGlobalOptions().displayLineInfo) {
-            invocation.macroDebugMap.add((UInt64(lastColumn), node.end))
+            // C++ MacroProcess.cpp:219 assigns through the map, replacing a
+            // token-end entry when it has the same final column.
+            putPosition64(invocation.macroDebugMap, UInt64(lastColumn), node.end)
         }
     }
 }
