@@ -126,8 +126,8 @@ jobs:
             test -z "$(printf '%s\n' "$ldd_output" | grep 'not found' || true)"
             "$RUNNER_TEMP/fixed-llvm-tools/$tool" --version | head -5
           done
-          llc_version="$("$RUNNER_TEMP/fixed-llvm-tools/llc" --version)"
-          opt_version="$("$RUNNER_TEMP/fixed-llvm-tools/opt" --version)"
+          llc_version="$("$RUNNER_TEMP/fixed-llvm-tools/llc" --version | head -5)"
+          opt_version="$("$RUNNER_TEMP/fixed-llvm-tools/opt" --version | head -5)"
           test "$llc_version" = "$opt_version"
           llc_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/llc" | awk '{print $1}')"
           opt_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/opt" | awk '{print $1}')"
