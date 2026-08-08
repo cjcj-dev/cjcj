@@ -185,7 +185,7 @@ public class ConcurrencyBudget {
     private var localLimit: Int64 = 1
     private var localHeld: Int64 = 0
     private let heldTokens = ArrayList<UInt8>()
-    private let leaseThreadIds = HashSet<UInt64>()
+    private let leaseThreadIds = HashSet<Int64>()
 
     private init() {
         atExit({ => ReleaseAllAtExit() })
