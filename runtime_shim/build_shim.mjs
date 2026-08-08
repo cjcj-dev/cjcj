@@ -20,6 +20,23 @@ let cxx = process.env.CXX || 'clang++';
 const cc = process.env.CC || 'cc';
 const sourceBuiltObject = norm(process.env.CJCJ_LLVM_SHIM_O || '');
 const shimObject = norm(path.join(here, 'cjselfhost_llvmshim.o'));
+const repo = norm(path.resolve(here, '..'));
+
+let cjcjCommit = (process.env.CJCJ_COMMIT || '').trim();
+if (!cjcjCommit) {
+  const revision = await $({nothrow: true, stdio: 'pipe'})`git -C ${repo} rev-parse HEAD`;
+  if (revision.exitCode === 0) cjcjCommit = revision.stdout.trim();
+}
+if (!cjcjCommit) cjcjCommit = 'unknown';
+const status = await $({nothrow: true, stdio: 'pipe'})`git -C ${repo} status --porcelain`;
+if (status.exitCode === 0 && status.stdout.trim() && !cjcjCommit.endsWith('-dirty')) {
+  cjcjCommit += '-dirty';
+}
+if (!/^[0-9A-Za-z._-]+$/.test(cjcjCommit)) {
+  console.error(`ERR: invalid CJCJ_COMMIT value: ${JSON.stringify(cjcjCommit)}`);
+  process.exit(1);
+}
+const commitDefine = `-DCJCJ_COMMIT="${cjcjCommit}"`;
 
 async function commandExists(command) {
   return (await $({nothrow: true, stdio: 'pipe'})`command -v ${command}`).exitCode === 0;
@@ -35,7 +52,8 @@ async function isFile(target) {
 
 if (!(await commandExists(cxx)) && await commandExists('clang++-15')) cxx = 'clang++-15';
 
-await $`${cc} -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L -c ${here}/cjc_runtime_config.c -o ${here}/cjc_runtime_config.o`;
+await $`${cc} -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L ${commitDefine} -c ${here}/cjc_runtime_config.c -o ${here}/cjc_runtime_config.o`;
+console.log(`CJCJ_COMMIT=${cjcjCommit}`);
 
 // Resolve in the original priority order: existing object, CI source-built
 // artifact, then a local source build against a complete patched C++ tree.
@@ -74,7 +92,6 @@ await $({nothrow: true})`set -o pipefail; nm -C ${shimObject} | grep -cE ' T (LL
 // Macro runtime layout. The compiler resolves its runtime relative to its binary,
 // so the build-tree binary needs a sibling runtime symlink. Installed SDKs already
 // have that layout and need no special handling.
-const repo = norm(path.resolve(here, '..'));
 if (process.env.CANGJIE_HOME && await isDirectory(`${process.env.CANGJIE_HOME}/runtime`)) {
   await fs.mkdir(`${repo}/target/release`, {recursive: true});
   await $`ln -sfn ${process.env.CANGJIE_HOME}/runtime ${repo}/target/release/runtime`;
