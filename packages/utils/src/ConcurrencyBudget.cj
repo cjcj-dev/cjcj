@@ -349,7 +349,7 @@ public class ConcurrencyBudget {
         return false
     }
 
-    @When[os == "Windows" || env == "ohos" || env == "android")
+    @When[os == "Windows" || env == "ohos" || env == "android"]
     private func InitializeJobserver(_: String): Bool {
         return false
     }
@@ -381,7 +381,7 @@ public class ConcurrencyBudget {
         }
     }
 
-    @When[os == "Windows" || env == "ohos" || env == "android")
+    @When[os == "Windows" || env == "ohos" || env == "android"]
     private func TryReadToken(): Option<UInt8> {
         return None
     }
@@ -398,7 +398,7 @@ public class ConcurrencyBudget {
         }
     }
 
-    @When[os == "Windows" || env == "ohos" || env == "android")
+    @When[os == "Windows" || env == "ohos" || env == "android"]
     private func WriteToken(_: UInt8): Unit {}
 
     private func ReleaseAllAtExit(): Unit {
@@ -424,7 +424,7 @@ public class ConcurrencyBudget {
         jobserverReady = false
     }
 
-    @When[os == "Windows" || env == "ohos" || env == "android")
+    @When[os == "Windows" || env == "ohos" || env == "android"]
     private func CloseJobserver(): Unit {
         readFd = -1
         writeFd = -1
