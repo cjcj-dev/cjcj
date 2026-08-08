@@ -6899,22 +6899,18 @@ extend TypeChecker {
             }
         }
         if (let Some(expectedTy) <- targetTy) {
-            let declToUpperBound = ArrayList<(Decl, Ty)>()
+            // C++ NameReferenceExpr.cpp:801-805 uses map assignment, so a
+            // repeated Decl keeps the last upper bound written for that key.
+            let declToUpperBound = HashMap<Decl, Ty>()
             for ((upperBound, decls) in allTargets) {
                 for (decl in decls) {
-                    declToUpperBound.add((decl, upperBound))
+                    declToUpperBound[decl] = upperBound
                 }
             }
             let filteredTargets = ArrayList<Decl>()
             var validTy: Option<Ty> = None
             for (decl in targets) {
-                var upperBound: Option<Ty> = None
-                for ((mappedDecl, mappedUpperBound) in declToUpperBound) {
-                    if (mappedDecl == decl) {
-                        upperBound = Some(mappedUpperBound)
-                        break
-                    }
-                }
+                let upperBound = declToUpperBound.get(decl)
                 var isUnfilteredUpperBound = false
                 if (let None <- decl.outerDecl) {
                     isUnfilteredUpperBound = true
