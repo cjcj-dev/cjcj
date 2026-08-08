@@ -6,6 +6,7 @@ import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::utils.AccessResultType as UtilsAccessResultType
 import cjcj::utils.CJC_ABORT
 import cjcj::utils.CJC_ASSERT
+import cjcj::utils.ConcurrencyBudget
 import cjcj::utils.FileMode as UtilsFileMode
 import cjcj::utils.Out64
 import cjcj::utils.OverflowStrategy
@@ -839,7 +840,12 @@ public open class GlobalOptions <: Option {
     public func NeedDumpIRToScreen(): Bool { return NeedDumpIR() && dumpToScreen }
     public func SetFrontendMode(): Unit { frontendMode = true }
     public func GetStackTraceFormat(): String { return "--" + StackTraceFormatToSerializedString() }
-    public func GetJobs(): UInt64 { return if (jobs.hasValue) { jobs.value } else { GetHardwareConcurrency() } }
+    public func GetJobs(): UInt64 {
+        let hardwareParallelism = GetHardwareConcurrency()
+        let requestedParallelism = if (jobs.hasValue) { jobs.value } else { hardwareParallelism }
+        return UInt64(ConcurrencyBudget.Get().GetParallelism(
+            Int64(requestedParallelism), Int64(hardwareParallelism)))
+    }
 
     public func ReadPathsFromEnvironmentVars(environmentVars: HashMap<String, String>): Unit {
         environment.allVariables.clear()

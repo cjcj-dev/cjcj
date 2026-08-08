@@ -126,7 +126,7 @@ public open class CompileStrategy {
         }
         ProfileRecorder.Start("ImportPackages", "ParseAndMergeCjds")
         let cjdInfos = ci.importManager.getOrThrow().GetDepPkgCjdPaths()
-        let futures = ArrayList<Future<Unit>>()
+        let taskQueue = TaskQueue(Int64(cjdInfos.size))
         option.compileCjd = true
         for ((packageName, cjdPath) in cjdInfos) {
             let cjdInfo = (packageName, cjdPath)
@@ -142,18 +142,16 @@ public open class CompileStrategy {
                                 InternalError(packageName + " cannot find origin ast")
                             }
                         } else {
-                            futures.add(spawn { ParseAndMergeCjd(ci, cjdInfo) })
+                            let _ = taskQueue.AddTask<Unit>({ => ParseAndMergeCjd(ci, cjdInfo) })
                         }
                     } else {
                         g_cjdAstCache[packageName] = None
-                        futures.add(spawn { ParseAndMergeCjd(ci, cjdInfo) })
+                        let _ = taskQueue.AddTask<Unit>({ => ParseAndMergeCjd(ci, cjdInfo) })
                     }
                 }
             }
         }
-        for (future in futures) {
-            future.get()
-        }
+        taskQueue.RunAndWaitForAllTasksCompleted()
         ci.diag.EmitCategoryGroup()
         option.compileCjd = false
         ProfileRecorder.Stop("ImportPackages", "ParseAndMergeCjds")

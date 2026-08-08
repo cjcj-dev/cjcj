@@ -31,14 +31,13 @@ import cjcj::utils.ProfileRecorder
 import cjcj::utils.IncrementalCompilationLogger
 import cjcj::utils.InternalError
 import cjcj::utils.CJC_ABORT
-import cjcj::utils.{TaskQueue, TaskResult}
+import cjcj::utils.{ConcurrencyBudget, TaskQueue, TaskResult}
 import cjcj::chir.CHIRBuilder as ChirBuilder
 import cjcj::chir.CHIRDeserializer as ChirDeserializer
 import cjcj::chir.CHIRPrinter as ChirPrinter
 import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
 import std.core.Box as CoreBox
-import std.sync.*
 
 foreign {
     func CJ_MCC_InvokeGC(sync: Bool): Unit
@@ -338,7 +337,7 @@ public class CompilerInstance {
             // C++: std::async destroyFunc (CompilerInstance.cpp:173-185).
             // CJ: drop held roots then InvokeGC (delete ≡ GC reclaim) + FreeIdleMemoryToOS.
             // Future stored for JoinDestroyASTResources ≡ dtor destroyFut.get() (cpp:87-91).
-            destroyFut = Some(spawn {
+            let destroyFunc = { =>
                 let _tc = toDestroyTypeChecker
                 let _sema = toDestroySema
                 let _tmgr = toDestroyTestManager
@@ -352,7 +351,12 @@ public class CompilerInstance {
                     CJ_MCC_InvokeGC(true)
                 }
                 FreeIdleMemoryToOS()
-            })
+            }
+            if (let Some(future) <- ConcurrencyBudget.Get().SpawnBudgeted(destroyFunc)) {
+                destroyFut = Some(future)
+            } else {
+                destroyFunc()
+            }
         }
     }
 

@@ -7,7 +7,7 @@ import cjcj::basic.DiagKind as BasicDiagKind
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
 import cjcj::modules.SemaImportManager
 import cjcj::option.GetHardwareConcurrency
-import cjcj::utils.{CJC_ASSERT, ProfileRecorder}
+import cjcj::utils.{CJC_ASSERT, ProfileRecorder, TaskQueue}
 
 private let CORES_REQUIRED_WARMUP: UInt64 = 8u64
 
@@ -232,17 +232,16 @@ public class TypeCheckerImpl {
                 return
             }
             let cache = HashMap<String, ArrayList<Symbol>>()
-            let threads = ArrayList<Option<Future<Unit>>>()
+            let taskQueue = TaskQueue(Int64(scopeNames.size))
             let searchers = ArrayList<Searcher>()
             for (_ in 0..scopeNames.size) {
-                threads.add(None)
                 searchers.add(Searcher())
             }
             var idx: Int64 = 0
             while (idx < scopeNames.size) {
                 let scopeName = scopeNames[idx]
                 let searcher = searchers[idx]
-                threads[idx] = spawn {
+                let _ = taskQueue.AddTask<Unit>({ =>
                     let query = CompoundQuery(QueryKind.NOT)
                     let scopeAndDecl = CompoundQuery(QueryKind.AND)
                     scopeAndDecl.children.add(ScopeQuery(scopeName))
@@ -253,14 +252,10 @@ public class TypeCheckerImpl {
                     query.children.add(scopeAndDecl)
                     query.children.add(ASTKindQuery("extend_decl"))
                     let _ = searcher.Search(ctx, query)
-                }
+                })
                 idx++
             }
-            for (thread in threads) {
-                if (let Some(value) <- thread) {
-                    value.get()
-                }
-            }
+            taskQueue.RunAndWaitForAllTasksCompleted()
             for (searcher in searchers) {
                 for ((key, value) in searcher.GetCache()) {
                     cache[key] = value
