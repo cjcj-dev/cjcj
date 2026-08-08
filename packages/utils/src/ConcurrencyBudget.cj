@@ -184,6 +184,10 @@ public class ConcurrencyBudget {
     private var implicitHeld: Bool = false
     private var localLimit: Int64 = 1
     private var localHeld: Int64 = 0
+    private var acquiredCount: Int64 = 0
+    private var releasedCount: Int64 = 0
+    private var activeCount: Int64 = 0
+    private var peakActiveCount: Int64 = 0
     private let heldTokens = ArrayList<UInt8>()
     private let leaseThreadIds = HashSet<Int64>()
 
@@ -236,16 +240,19 @@ public class ConcurrencyBudget {
             if (jobserverReady) {
                 if (!implicitHeld) {
                     implicitHeld = true
+                    RecordAcquire()
                     return Some(ConcurrencyLease(this, JOBSERVER_IMPLICIT_LEASE))
                 }
                 if (let Some(token) <- TryReadToken()) {
                     heldTokens.add(token)
+                    RecordAcquire()
                     return Some(ConcurrencyLease(this, JOBSERVER_PIPE_LEASE, token: token))
                 }
                 return None
             }
             if (localHeld < localLimit) {
                 localHeld++
+                RecordAcquire()
                 return Some(ConcurrencyLease(this, JOBSERVER_LOCAL_LEASE))
             }
             return None
@@ -310,6 +317,20 @@ public class ConcurrencyBudget {
             } else if (kind == JOBSERVER_LOCAL_LEASE && localHeld > 0) {
                 localHeld--
             }
+            if (enabled) {
+                releasedCount++
+                if (activeCount > 0) {
+                    activeCount--
+                }
+            }
+        }
+    }
+
+    private func RecordAcquire(): Unit {
+        acquiredCount++
+        activeCount++
+        if (activeCount > peakActiveCount) {
+            peakActiveCount = activeCount
         }
     }
 
@@ -423,6 +444,10 @@ public class ConcurrencyBudget {
 
     private func ReleaseAllAtExit(): Unit {
         synchronized(mutex) {
+            if ((getVariable("CJCJ_JOBSERVER_TRACE") ?? "") == "1") {
+                println("CJCJ_JOBSERVER acquired=${acquiredCount} released=${releasedCount} " +
+                    "active=${activeCount} peak=${peakActiveCount} held_tokens=${heldTokens.size}")
+            }
             for (token in heldTokens) {
                 WriteToken(token)
             }
