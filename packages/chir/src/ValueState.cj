@@ -144,7 +144,13 @@ public class FullStatePool<VD> <: ValueStatePool<VD, FullStatePool<VD>>
     }
 
     public func SetRef(value: Value, refValue: Ref): Unit {
-        Insert(value, VD.Create(refValue))
+        // C++ ValueAnalysis.h:171-178,213-223 replaces the complete ValueDomain
+        // when assigning a Ref, and emplaces only for a new destination.
+        if (data.contains(value)) {
+            data[value] = VD.Create(refValue)
+        } else {
+            Insert(value, VD.Create(refValue))
+        }
     }
 
     public func SetBound(value: Value, isTop: Bool): Unit {
