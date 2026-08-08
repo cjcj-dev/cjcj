@@ -1,7 +1,7 @@
 package cjcj::driver
 
 import std.collection.*
-import cjcj::utils.Semaphore
+import cjcj::utils.{ConcurrencyBudget, ConcurrencyLease, Semaphore}
 
 public type ToolBatch = ArrayList<Tool>
 
@@ -292,11 +292,44 @@ public class Tool {
         return ldLibraryPath
     }
 
-    @When[os == "Windows"]
     public func Run(): ToolFuture {
+        return RunImpl(None)
+    }
+
+    public func RunWithLease(lease: ConcurrencyLease): ToolFuture {
+        return RunImpl(Some(lease))
+    }
+
+    private func ReleaseLeaseIfPresent(lease: Option<ConcurrencyLease>): Unit {
+        if (let Some(activeLease) <- lease) {
+            activeLease.Release()
+        }
+    }
+
+    private func ReleaseFailedAdmission(lease: Option<ConcurrencyLease>): Unit {
+        if (let Some(activeLease) <- lease) {
+            activeLease.Release()
+        } else {
+            Semaphore.Get().Release()
+        }
+    }
+
+    private func WrapProcessFuture(future: ToolFuture, lease: Option<ConcurrencyLease>): ToolFuture {
+        if (let Some(activeLease) <- lease) {
+            return BudgetedToolFuture(future, activeLease)
+        }
+        return future
+    }
+
+    @When[os == "Windows"]
+    private func RunImpl(lease: Option<ConcurrencyLease>): ToolFuture {
         if (toolType == ToolType.INTERNAL_IMPLEMENTED) {
+            if (let Some(activeLease) <- lease) {
+                return ThreadFuture(ConcurrencyBudget.Get().SpawnWithLease(
+                    activeLease, { => InternalImplementedCommandExec() }))
+            }
             Semaphore.Get().Acquire()
-            return ThreadFuture(spawn { InternalImplementedCommandExec() })
+            return ThreadFuture(ConcurrencyBudget.Get().SpawnUnbudgeted({ => InternalImplementedCommandExec() }))
         }
         let arguments = GetFullArgs()
         let commandLineBuilder = StringBuilder()
@@ -323,32 +356,39 @@ public class Tool {
             commandLineCString = unsafe { LibC.mallocCString(commandLine) }.asResource()) {
             if (startupInfo.value.isNull() || processInformation.value.isNull() || nameCString.value.isNull() ||
                 commandLineCString.value.isNull()) {
+                ReleaseLeaseIfPresent(lease)
                 return ErrorFuture("failed to allocate process launch buffers")
             }
             unsafe {
                 startupInfo.value.write(STARTUPINFOA())
                 processInformation.value.write(PROCESS_INFORMATION())
             }
-            Semaphore.Get().Acquire()
+            if (let None <- lease) {
+                Semaphore.Get().Acquire()
+            }
             if (unsafe {
                 CreateProcessA(nameCString.value, commandLineCString.value, CPointer<Unit>(), CPointer<Unit>(),
                     0, 0u32, CPointer<Unit>(), CString(CPointer<UInt8>()), startupInfo.value,
                     processInformation.value)
             } == 0) {
                 let error = unsafe { GetLastError() }
-                Semaphore.Get().Release()
+                ReleaseFailedAdmission(lease)
                 return ErrorFuture(GetSystemErrorMessage(error))
             }
             processInfo = unsafe { processInformation.value.read() }
         }
-        return WindowsProcessFuture(processInfo.hProcess, processInfo.hThread)
+        return WrapProcessFuture(WindowsProcessFuture(processInfo.hProcess, processInfo.hThread), lease)
     }
 
     @When[os != "Windows"]
-    public func Run(): ToolFuture {
+    private func RunImpl(lease: Option<ConcurrencyLease>): ToolFuture {
         if (toolType == ToolType.INTERNAL_IMPLEMENTED) {
+            if (let Some(activeLease) <- lease) {
+                return ThreadFuture(ConcurrencyBudget.Get().SpawnWithLease(
+                    activeLease, { => InternalImplementedCommandExec() }))
+            }
             Semaphore.Get().Acquire()
-            return ThreadFuture(spawn { InternalImplementedCommandExec() })
+            return ThreadFuture(ConcurrencyBudget.Get().SpawnUnbudgeted({ => InternalImplementedCommandExec() }))
         }
         let argvValues = GetFullArgs()
         let environmentValues = BuildEnvironmentVector()
@@ -360,17 +400,22 @@ public class Tool {
             nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             if (pidPtr.value.isNull() || argvPtr.value.isNull() || envpPtr.value.isNull() || nameCString.value.isNull()) {
                 FreeCStringList(allocatedStrings)
+                ReleaseLeaseIfPresent(lease)
                 return ErrorFuture("failed to allocate process launch buffers")
             }
             if (!WriteNativeStringArray(argvValues, argvPtr.value, allocatedStrings)) {
                 FreeCStringList(allocatedStrings)
+                ReleaseLeaseIfPresent(lease)
                 return ErrorFuture("failed to allocate process arguments")
             }
             if (!WriteNativeStringArray(environmentValues, envpPtr.value, allocatedStrings)) {
                 FreeCStringList(allocatedStrings)
+                ReleaseLeaseIfPresent(lease)
                 return ErrorFuture("failed to allocate process environment")
             }
-            Semaphore.Get().Acquire()
+            if (let None <- lease) {
+                Semaphore.Get().Acquire()
+            }
             let spawnStatus = unsafe {
                 if (name.contains("/")) {
                     posix_spawn(pidPtr.value, nameCString.value, CPointer<Unit>(), CPointer<Unit>(),
@@ -382,12 +427,12 @@ public class Tool {
             }
             FreeCStringList(allocatedStrings)
             if (spawnStatus != 0) {
-                Semaphore.Get().Release()
+                ReleaseFailedAdmission(lease)
                 return ErrorFuture(GetSystemErrorMessage(spawnStatus))
             }
             pid = unsafe { pidPtr.value.read() }
         }
-        return LinuxProcessFuture(pid)
+        return WrapProcessFuture(LinuxProcessFuture(pid), lease)
     }
 
     public func Execute(verbose: Bool): ToolFuture {
@@ -398,6 +443,17 @@ public class Tool {
             return ErrorFuture("temporary files were deleted before command execution")
         }
         return Run()
+    }
+
+    public func ExecuteWithLease(verbose: Bool, lease: ConcurrencyLease): ToolFuture {
+        if (verbose) {
+            println(FileUtil.Normalize(GetCommandString()))
+        }
+        if (TempFileManager.Instance().IsDeleted()) {
+            lease.Release()
+            return ErrorFuture("temporary files were deleted before command execution")
+        }
+        return RunWithLease(lease)
     }
 
     public func GetName(): String {

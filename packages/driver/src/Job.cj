@@ -2,7 +2,7 @@ package cjcj::driver
 
 import std.collection.*
 import std.time.*
-import cjcj::utils.{ProfileRecorder, Semaphore}
+import cjcj::utils.{ConcurrencyBudget, ProfileRecorder, Semaphore}
 
 // Mirrors Driver/Job.cpp:30-69.
 private func CheckExecuteResult(checklist: TreeMap<String, ToolFuture>,
@@ -14,12 +14,16 @@ private func CheckExecuteResult(checklist: TreeMap<String, ToolFuture>,
         for ((command, future) in checklist) {
             let state = future.GetState()
             if (state == ToolFutureState.FAILED) {
-                Semaphore.Get().Release()
+                if (!ConcurrencyBudget.Get().IsEnabled()) {
+                    Semaphore.Get().Release()
+                }
                 eprintln("${command}: command failed with exit code ${future.exitCode} (use -V to see invocation)")
                 finishedCommands.add(command)
                 success = false
             } else if (state == ToolFutureState.SUCCESS) {
-                Semaphore.Get().Release()
+                if (!ConcurrencyBudget.Get().IsEnabled()) {
+                    Semaphore.Get().Release()
+                }
                 finishedCommands.add(command)
             }
         }
@@ -66,12 +70,28 @@ public class Job {
             try (recorder = ProfileRecorder("Main Stage", "Execute " + FileUtil.GetFileName(cmdBatch[0].GetName()))) {
                 let childWorkers = TreeMap<String, ToolFuture>()
                 for (command in cmdBatch) {
-                    while (Semaphore.Get().GetCount() == 0) {
-                        if (!CheckExecuteResult(childWorkers, returnIfAnyToolFinished: true)) {
-                            return false
+                    let budget = ConcurrencyBudget.Get()
+                    let future = if (budget.IsEnabled()) {
+                        var lease = budget.TryAcquire()
+                        while (let None <- lease) {
+                            if (childWorkers.isEmpty()) {
+                                eprintln("error: no jobserver execution slot is available for a driver command")
+                                return false
+                            }
+                            if (!CheckExecuteResult(childWorkers, returnIfAnyToolFinished: true)) {
+                                return false
+                            }
+                            lease = budget.TryAcquire()
                         }
+                        command.ExecuteWithLease(verbose, lease.getOrThrow())
+                    } else {
+                        while (Semaphore.Get().GetCount() == 0) {
+                            if (!CheckExecuteResult(childWorkers, returnIfAnyToolFinished: true)) {
+                                return false
+                            }
+                        }
+                        command.Execute(verbose)
                     }
-                    let future = command.Execute(verbose)
                     if (!future.spawnErrorMessage.isEmpty()) {
                         eprintln("${command.GetCommandString()}: command failed (${future.spawnErrorMessage})")
                         return false

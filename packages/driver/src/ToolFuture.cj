@@ -1,5 +1,7 @@
 package cjcj::driver
 
+import cjcj::utils.ConcurrencyLease
+
 @When[os != "Windows"]
 private let WNOHANG: Int32 = 1
 
@@ -59,6 +61,29 @@ public class ThreadFuture <: ToolFuture {
         let succeeded = result.getOrThrow()
         exitCode = if (succeeded) { 0 } else { 1 }
         return if (succeeded) { ToolFutureState.SUCCESS } else { ToolFutureState.FAILED }
+    }
+}
+
+public class BudgetedToolFuture <: ToolFuture {
+    private let future: ToolFuture
+    private let lease: ConcurrencyLease
+    private var released: Bool = false
+
+    public init(future: ToolFuture, lease: ConcurrencyLease) {
+        super()
+        this.future = future
+        this.lease = lease
+    }
+
+    public override func GetState(): ToolFutureState {
+        let state = future.GetState()
+        spawnErrorMessage = future.spawnErrorMessage
+        exitCode = future.exitCode
+        if (state != ToolFutureState.RUNNING && !released) {
+            released = true
+            lease.Release()
+        }
+        return state
     }
 }
 
