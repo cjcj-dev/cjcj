@@ -352,26 +352,33 @@ if (stdDir) {
 
 console.log('[5/7] set relative runtime lookup paths');
 if (platform.startsWith('linux-')) {
-  // The link step already writes these entries (packages/cjc/cjpm.toml link-option), so this
-  // asserts them instead of rewriting with patchelf -- which was measured to be a no-op
-  // (identical SHA-256 before and after). A wrong RUNPATH means the build is wrong and must
-  // surface here rather than get papered over at packaging time.
-  const expected = [`$ORIGIN/../runtime/lib/${runtimeDir}`, '$ORIGIN/../third_party/llvm/lib', '$ORIGIN/../tools/lib'];
+  // cjc no longer carries $ORIGIN rpaths: the binary does not get to assume where it sits
+  // relative to its SDK, and the nightly cjpm rejects $ORIGIN outright. envsetup.sh below is
+  // what points at the three directories now, so the only thing left to assert here is that
+  // nothing absolute leaked in -- a RUNPATH naming the build host would make the package work
+  // on this machine and nowhere else, which is exactly the failure packaging must not ship.
   const dynamic = await $({nothrow: true, quiet: true})`readelf -d ${path.join(stage, 'bin/cjc')}`;
   const runpath = dynamic.stdout.split('\n').find(line => line.includes('RUNPATH'))?.match(/\[(.*)\]/)?.[1] || '';
   const entries = runpath.split(':').filter(Boolean);
-  const missing = expected.filter((entry) => !entries.includes(entry));
-  if (missing.length > 0) {
-    console.error(`  ERROR: bin/cjc RUNPATH lacks ${missing.join(', ')} -- got [${runpath}]`);
-    console.error('  The link step owns this; fix packages/cjc/cjpm.toml link-option.');
-    process.exit(3);
-  }
   const hostPaths = entries.filter((entry) => entry.startsWith('/'));
   if (hostPaths.length > 0) {
     console.error(`  ERROR: bin/cjc RUNPATH carries build-host paths: ${hostPaths.join(', ')}`);
+    console.error('  The link step owns this; fix packages/cjc/cjpm.toml link-option.');
     process.exit(3);
   }
-  process.stdout.write(`  RUNPATH: ${runpath}\n`);
+
+  // The stock envsetup.sh exports LD_LIBRARY_PATH over runtime/lib and tools/lib but not
+  // third_party/llvm/lib, and that is where libLLVM-15.so lives. With the rpaths gone this is
+  // the only thing that lets a shipped cjc start, so append it rather than leave the gap.
+  const envsetup = path.join(stage, 'envsetup.sh');
+  await fs.appendFile(envsetup, [
+    '',
+    '# libLLVM-15.so lives here and cjc carries no rpath to it.',
+    `export LD_LIBRARY_PATH="\${CANGJIE_HOME}/third_party/llvm/lib\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}"`,
+    '',
+  ].join('\n'));
+  process.stdout.write(`  RUNPATH: ${runpath || '(none)'}\n`);
+  process.stdout.write('  envsetup.sh: + third_party/llvm/lib on LD_LIBRARY_PATH\n');
 } else if (platform.startsWith('darwin-')) {
   const available = await $({nothrow: true, quiet: true})`command -v install_name_tool`;
   if (available.exitCode !== 0) { console.error('  ERROR: install_name_tool not found'); process.exit(3); }
