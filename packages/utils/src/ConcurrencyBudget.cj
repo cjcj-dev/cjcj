@@ -185,6 +185,7 @@ public class ConcurrencyBudget {
     private var localLimit: Int64 = 1
     private var localHeld: Int64 = 0
     private let heldTokens = ArrayList<UInt8>()
+    private let leaseThreadIds = HashSet<UInt64>()
 
     private init() {
         atExit({ => ReleaseAllAtExit() })
@@ -223,6 +224,12 @@ public class ConcurrencyBudget {
     public func TryAcquire(): Option<ConcurrencyLease> {
         EnsureInitialized()
         synchronized(mutex) {
+            // A worker that already owns one execution slot must run nested work
+            // serially. In particular, it must never hold a jobserver token while
+            // waiting for another token-backed worker.
+            if (enabled && leaseThreadIds.contains(Thread.currentThread.id)) {
+                return None
+            }
             if (!enabled) {
                 return Some(ConcurrencyLease(this, JOBSERVER_DISABLED_LEASE))
             }
@@ -248,14 +255,32 @@ public class ConcurrencyBudget {
     public func SpawnBudgeted<T>(body: () -> T): Option<Future<T>> {
         if (let Some(lease) <- TryAcquire()) {
             return Some(spawn {
+                EnterLeaseThread()
                 try {
                     body()
                 } finally {
+                    LeaveLeaseThread()
                     lease.Release()
                 }
             })
         }
         return None
+    }
+
+    private func EnterLeaseThread(): Unit {
+        synchronized(mutex) {
+            if (enabled) {
+                leaseThreadIds.add(Thread.currentThread.id)
+            }
+        }
+    }
+
+    private func LeaveLeaseThread(): Unit {
+        synchronized(mutex) {
+            if (enabled) {
+                leaseThreadIds.remove(Thread.currentThread.id)
+            }
+        }
     }
 
     // I/O reapers do not consume a CPU execution slot, but still route through the
