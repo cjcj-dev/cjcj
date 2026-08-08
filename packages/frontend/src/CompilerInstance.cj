@@ -38,7 +38,6 @@ import cjcj::chir.CHIRPrinter as ChirPrinter
 import cjcj::chir.ToCHIRPhase as ChirToCHIRPhase
 import std.collection.*
 import std.core.Box as CoreBox
-import std.sync.*
 
 foreign {
     func CJ_MCC_InvokeGC(sync: Bool): Unit
