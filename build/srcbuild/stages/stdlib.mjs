@@ -20,7 +20,9 @@ export async function run(config) {
       'build', '-t', config.buildType, `--target-lib=${runtimeTarget}`,
     ], {stageName: 'stdlib.build.linux'});
     await runBuildPy(config, stdlibRoot, ['install'], {stageName: 'stdlib.install.linux'});
-    await writeStdProvenance({sourceDir: stdlibRoot, installPrefix: stdlibOutput, compiler});
+    if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
+      await writeStdProvenance({sourceDir: stdlibRoot, installPrefix: stdlibOutput, compiler});
+    }
     copyContents(stdlibOutput, compilerOutput, {stage: 'stdlib.copy.linux'});
     if (!config.target.spec.crossCompile) return;
 
@@ -33,7 +35,9 @@ export async function run(config) {
       ...windowsCrossArgs(config),
     ], {stageName: 'stdlib.build.windows'});
     await runBuildPy(config, stdlibRoot, ['install'], {stageName: 'stdlib.install.windows'});
-    await writeStdProvenance({sourceDir: stdlibRoot, installPrefix: stdlibOutput, compiler});
+    if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
+      await writeStdProvenance({sourceDir: stdlibRoot, installPrefix: stdlibOutput, compiler});
+    }
     copyContents(stdlibOutput, compilerOutput, {stage: 'stdlib.copy.windows.host'});
     copyContents(stdlibOutput, path.join(config.repoPath('compiler'), 'output-x86_64-w64-mingw32'), {
       stage: 'stdlib.copy.windows.cross',
