@@ -4,7 +4,7 @@ import std.collection.*
 import cjcj::basic.{DEFAULT_POSITION, DiagKindRefactor, PrintVersion}
 import cjcj::frontend.DiagnosticEngine
 import cjcj::option.{ArgInstanceType, ArgList, ArgListEntry, CreateOptionTable, Group}
-import cjcj::utils.{ProfileRecorder, ProfileRecorderType}
+import cjcj::utils.{ConcurrencyBudget, ProfileRecorder, ProfileRecorderType}
 
 private func IsWarningArg(arg: String): Bool {
     return arg.startsWith("-Woff") || arg.startsWith("--warn-off") || arg.startsWith("-Won") ||
@@ -49,6 +49,7 @@ public class Driver {
         if (!driverOptions.ParseFromArgs(argList)) {
             return false
         }
+        ConcurrencyBudget.Get().Configure(Int64(driverOptions.GetJobs()))
         if (!driverOptions.cangjieHome.isEmpty()) {
             cangjieHome = driverOptions.cangjieHome
         } else {
