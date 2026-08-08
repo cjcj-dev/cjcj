@@ -1,7 +1,7 @@
 package cjcj::macro_pkg
 
 import cjcj::basic.{DiagSeverityIndex, Errorln}
-import cjcj::utils.FileUtil
+import cjcj::utils.{ConcurrencyBudget, FileUtil}
 import std.collection.*
 
 private let MACRO_SRV_NAME: String = "LSPMacroServer"
@@ -493,7 +493,7 @@ func CreateMacroSrvProcess(evaluation: MacroEvaluation): Unit {
                 evaluation.RunMacroSrv()
             } else {
                 SetExitSignal()
-                let _ = spawn { WaitProcessExit(pid) }
+                let _ = ConcurrencyBudget.Get().SpawnUnbudgeted({ => WaitProcessExit(pid) })
                 unsafe {
                     let _ = close(msger.pipefdP2C.read())
                     let _ = close((msger.pipefdC2P + 1).read())
@@ -543,7 +543,7 @@ func CreateMacroSrvProcess(evaluation: MacroEvaluation): Unit {
                 evaluation.RunMacroSrv()
             } else {
                 SetExitSignal()
-                let _ = spawn { WaitProcessExit(pid) }
+                let _ = ConcurrencyBudget.Get().SpawnUnbudgeted({ => WaitProcessExit(pid) })
                 unsafe {
                     let _ = close(msger.pipefdP2C.read())
                     let _ = close((msger.pipefdC2P + 1).read())
@@ -587,7 +587,7 @@ func CreateMacroSrvProcess(evaluation: MacroEvaluation): Unit {
                 let pi = unsafe { processInformation.value.read() }
                 let process = pi.process
                 let thread = pi.thread
-                let _ = spawn { WaitProcessExit(process) }
+                let _ = ConcurrencyBudget.Get().SpawnUnbudgeted({ => WaitProcessExit(process) })
                 msger.hProcess = process
                 msger.hThread = thread
                 CreateJobObjectForMacroSrv()
