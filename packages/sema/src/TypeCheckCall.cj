@@ -1570,7 +1570,11 @@ private func GenerateSubstPackByTyArgs(typeManager: TypeManager, tmaps: SubstPac
                             if (Ty.IsTyCorrect(typeArgTy) && !typeArgTy.HasIntersectionTy()) {
                                 if (let Some(mappedTy) <- tmaps.u2i.Get(genericTy)) {
                                     if (let Some(instGenTy) <- (mappedTy as GenericsTy)) {
-                                        tmaps.inst.Put(instGenTy, typeArgTy)
+                                        // C++ ExtraScopes.cpp:229 assigns a singleton set,
+                                        // replacing every prior instantiation for this key.
+                                        let instTys = SubstTySet()
+                                        instTys.add(Ptr<Ty>(typeArgTy))
+                                        tmaps.inst.entries.Set(Ptr<GenericsTy>(instGenTy), instTys)
                                     }
                                 }
                             }
