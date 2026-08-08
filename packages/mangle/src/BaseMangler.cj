@@ -614,7 +614,6 @@ public open class BaseMangler {
     }
 
     public func Mangle(decl: Decl): String {
-        PrepareAstContext(adapter, decl)
         return Mangle(adapter.ConvertDecl(decl))
     }
 
