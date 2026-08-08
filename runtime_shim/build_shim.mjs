@@ -24,11 +24,11 @@ const repo = norm(path.resolve(here, '..'));
 
 let cjcjCommit = (process.env.CJCJ_COMMIT || '').trim();
 if (!cjcjCommit) {
-  const revision = await $({nothrow: true, stdio: 'pipe'})`git -C ${repo} rev-parse HEAD`;
+  const revision = await $({nothrow: true, quiet: true, stdio: 'pipe'})`git -C ${repo} rev-parse HEAD`;
   if (revision.exitCode === 0) cjcjCommit = revision.stdout.trim();
 }
 if (!cjcjCommit) cjcjCommit = 'unknown';
-const status = await $({nothrow: true, stdio: 'pipe'})`git -C ${repo} status --porcelain`;
+const status = await $({nothrow: true, quiet: true, stdio: 'pipe'})`git -C ${repo} status --porcelain`;
 if (status.exitCode === 0 && status.stdout.trim() && !cjcjCommit.endsWith('-dirty')) {
   cjcjCommit += '-dirty';
 }
