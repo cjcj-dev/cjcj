@@ -160,6 +160,7 @@ jobs:
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
           FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/${{ inputs.llvm_platform }}/llc.gz
+          FIXED_OPT_GZ: ${{ github.workspace }}/fixed-toolchain/${{ inputs.llvm_platform }}/opt.gz
         run: npx --yes zx@8 ci/setup_sdk.mjs
 
       - name: Save SDK cache (Linux)

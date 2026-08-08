@@ -92,6 +92,7 @@ jobs:
         env:
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
           FIXED_LLC_GZ: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/llc.gz
+          FIXED_OPT_GZ: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/opt.gz
         run: npx --yes zx@8 ci/setup_sdk.mjs
       # Save only after a successful install so a partial ~/.cjv is never cached.
       - name: Save SDK cache

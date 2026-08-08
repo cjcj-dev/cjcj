@@ -84,9 +84,17 @@ jobs:
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string"
-          ninja -C llc-build llc
+          ninja -C llc-build llc opt
           mkdir -p "fixed-toolchain/${{ matrix.platform }}"
           gzip -n -c -9 llc-build/bin/llc > "fixed-toolchain/${{ matrix.platform }}/llc.gz"
+          gzip -n -c -9 llc-build/bin/opt > "fixed-toolchain/${{ matrix.platform }}/opt.gz"
+          llc_sha="$(sha256sum llc-build/bin/llc | awk '{print $1}')"
+          opt_sha="$(sha256sum llc-build/bin/opt | awk '{print $1}')"
+          {
+            printf 'LLVM_SHA=%s\n' "$LLVM_SHA"
+            printf 'LLC_SHA256=%s\n' "$llc_sha"
+            printf 'OPT_SHA256=%s\n' "$opt_sha"
+          } > "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
 
       - name: Generate LLVM shim
         if: steps.cache.outputs.cache-hit != 'true'
@@ -108,16 +116,35 @@ jobs:
       - name: Verify LLVM tools
         run: |
           mkdir -p "$RUNNER_TEMP/fixed-llvm-tools"
-          gunzip -c "fixed-toolchain/${{ matrix.platform }}/llc.gz" \
-            > "$RUNNER_TEMP/fixed-llvm-tools/llc"
-          chmod +x "$RUNNER_TEMP/fixed-llvm-tools/llc"
-          "$RUNNER_TEMP/fixed-llvm-tools/llc" --version | head -5
+          for tool in llc opt; do
+            gunzip -c "fixed-toolchain/${{ matrix.platform }}/${tool}.gz" \
+              > "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            chmod +x "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            file "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            ldd_output="$(ldd "$RUNNER_TEMP/fixed-llvm-tools/$tool")"
+            printf '%s\n' "$ldd_output"
+            test -z "$(printf '%s\n' "$ldd_output" | grep 'not found' || true)"
+            "$RUNNER_TEMP/fixed-llvm-tools/$tool" --version | head -5
+          done
+          llc_version="$("$RUNNER_TEMP/fixed-llvm-tools/llc" --version | head -5)"
+          opt_version="$("$RUNNER_TEMP/fixed-llvm-tools/opt" --version | head -5)"
+          test "$llc_version" = "$opt_version"
+          llc_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/llc" | awk '{print $1}')"
+          opt_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/opt" | awk '{print $1}')"
+          grep -Fx "LLVM_SHA=$LLVM_SHA" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLC_SHA256=$llc_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "OPT_SHA256=$opt_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           file "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
           shim_exports="$(nm -C "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" \
             | grep -cE ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
           test "$shim_exports" -ge 90
           echo "shim exported symbols: $shim_exports"
           sha256sum "fixed-toolchain/${{ matrix.platform }}/llc.gz" \
+            "fixed-toolchain/${{ matrix.platform }}/opt.gz" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest" \
             "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
 
       - name: Upload LLVM tools
