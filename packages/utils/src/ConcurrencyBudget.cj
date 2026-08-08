@@ -49,9 +49,6 @@ private let JOBSERVER_OPEN_READ_WRITE: Int32 = 2
 
 @When[os == "Linux" || os == "macOS" || os == "iOS"]
 foreign {
-    func open(path: CString, flags: Int32, ...): Int32
-    func close(fd: Int32): Int32
-    func read(fd: Int32, buffer: CPointer<UInt8>, count: UIntNative): IntNative
     func write(fd: Int32, buffer: CPointer<UInt8>, count: UIntNative): IntNative
     func select(nfds: Int32, readFds: CPointer<JobserverFdSet>, writeFds: CPointer<JobserverFdSet>,
         exceptFds: CPointer<JobserverFdSet>, timeout: CPointer<JobserverTimeval>): Int32
@@ -71,7 +68,7 @@ private func JobserverFdZero(set: CPointer<JobserverFdSet>): Unit {
 }
 
 @When[os == "Linux"]
-private func JobserverFdSet(fd: Int32, set: CPointer<JobserverFdSet>): Bool {
+private func JobserverFdAdd(fd: Int32, set: CPointer<JobserverFdSet>): Bool {
     if (fd < 0 || fd >= 1024) {
         return false
     }
@@ -99,7 +96,7 @@ private func JobserverFdZero(set: CPointer<JobserverFdSet>): Unit {
 }
 
 @When[os == "macOS" || os == "iOS"]
-private func JobserverFdSet(fd: Int32, set: CPointer<JobserverFdSet>): Bool {
+private func JobserverFdAdd(fd: Int32, set: CPointer<JobserverFdSet>): Bool {
     if (fd < 0 || fd >= 1024) {
         return false
     }
@@ -363,7 +360,7 @@ public class ConcurrencyBudget {
                 return None
             }
             JobserverFdZero(readSet.value)
-            if (!JobserverFdSet(readFd, readSet.value)) {
+            if (!JobserverFdAdd(readFd, readSet.value)) {
                 return None
             }
             unsafe { timeout.value.write(JobserverTimeval(0, 0)) }
