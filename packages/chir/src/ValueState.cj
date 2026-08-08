@@ -1156,7 +1156,13 @@ public class State<VD, Pool> <: AbstractDomain<State<VD, Pool>> where VD <: Abst
 extend<AV, Pool> State<ValueDomain<AV>, Pool> where AV <: HasEqual<AV>,
     Pool <: ValueStatePool<ValueDomain<AV>, Pool> {
     public func Update(dest: Value, absVal: AV): Unit {
-        programState.Insert(dest, ValueDomain<AV>(absVal))
+        // C++ ValueAnalysis.h:171-178 overwrites an existing abstract value
+        // and emplaces only when the destination has not been seen before.
+        if (programState.Contains(dest)) {
+            programState.At(dest).CopyFrom(ValueDomain<AV>(absVal))
+        } else {
+            programState.Insert(dest, ValueDomain<AV>(absVal))
+        }
     }
 
     public func CheckAbstractValue(obj: Value): Option<AV> {
