@@ -367,18 +367,24 @@ if (platform.startsWith('linux-')) {
     process.exit(3);
   }
 
-  // The stock envsetup.sh exports LD_LIBRARY_PATH over runtime/lib and tools/lib but not
-  // third_party/llvm/lib, and that is where libLLVM-15.so lives. With the rpaths gone this is
-  // the only thing that lets a shipped cjc start, so append it rather than leave the gap.
-  const envsetup = path.join(stage, 'envsetup.sh');
-  await fs.appendFile(envsetup, [
-    '',
-    '# libLLVM-15.so lives here and cjc carries no rpath to it.',
-    `export LD_LIBRARY_PATH="\${CANGJIE_HOME}/third_party/llvm/lib\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}"`,
-    '',
-  ].join('\n'));
-  process.stdout.write(`  RUNPATH: ${runpath || '(none)'}\n`);
-  process.stdout.write('  envsetup.sh: + third_party/llvm/lib on LD_LIBRARY_PATH\n');
+  // Do not paper over a missing library here. Official cjc needs no rpath and no extra
+  // LD_LIBRARY_PATH entry because it has no SDK-internal dynamic dependency at all: its ldd
+  // lists only pthread/m/dl/stdc++/gcc_s/c, and the SDK ships no LLVM .a, so upstream links
+  // LLVM statically at its own build time. Our self-hosted cjc links the shipped
+  // libLLVM-15.so instead -- that difference is the thing to fix, and adding a search path
+  // would only hide it. libcangjie-runtime.so is not part of the problem; the stock
+  // envsetup.sh already covers runtime/lib.
+  const dependencies = await $({nothrow: true, quiet: true})`ldd ${path.join(stage, 'bin/cjc')}`;
+  const sdkInternal = dependencies.stdout.split('\n')
+    .filter((line) => /libLLVM|not found/.test(line))
+    .map((line) => line.trim());
+  if (sdkInternal.length > 0) {
+    console.error('  ERROR: bin/cjc has SDK-internal dynamic dependencies that official cjc does not:');
+    for (const line of sdkInternal) console.error(`    ${line}`);
+    console.error('  Official links LLVM statically; match that rather than adding a search path.');
+    process.exit(3);
+  }
+  process.stdout.write(`  RUNPATH: ${runpath || '(none, as upstream)'}\n`);
 } else if (platform.startsWith('darwin-')) {
   const available = await $({nothrow: true, quiet: true})`command -v install_name_tool`;
   if (available.exitCode !== 0) { console.error('  ERROR: install_name_tool not found'); process.exit(3); }
