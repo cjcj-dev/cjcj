@@ -115,10 +115,19 @@ public class TaskQueue {
             }
         })
         let fixedThreadsNum = if (tasks.size < threadsNum) { tasks.size } else { threadsNum }
+        var hasWorker = false
         for (_ in 0..fixedThreadsNum) {
-            threads.add(spawn {
-                doTask()
-            })
+            if (let Some(worker) <- ConcurrencyBudget.Get().SpawnBudgeted({ => doTask() })) {
+                threads.add(worker)
+                hasWorker = true
+            } else {
+                break
+            }
+        }
+        // Nested queues are executed by their current token-owning worker. A
+        // top-level queue also uses this path when every global token is busy.
+        if (!hasWorker) {
+            doTask()
         }
     }
 
