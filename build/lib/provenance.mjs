@@ -71,7 +71,16 @@ async function sha256(file) {
   return hash.digest('hex');
 }
 
-export async function writeStdProvenance({sourceDir, installPrefix, compiler, now = new Date()}) {
+export async function writeStdProvenance({
+  sourceDir,
+  installPrefix,
+  compiler,
+  buildSdk = process.env.CANGJIE_HOME || 'unknown',
+  coloured = process.env.CJSTD_COLOURED || 'UNKNOWN',
+  preflightC2 = process.env.CJSTD_PREFLIGHT_C2 || 'UNKNOWN',
+  note = process.env.CJSTD_PROVENANCE_NOTE || 'not supplied',
+  now = new Date(),
+}) {
   const stdCommit = sourceCommit(sourceDir);
   const builtBy = await compilerCommit(compiler);
   const files = (await artifactFiles(installPrefix))
@@ -80,6 +89,12 @@ export async function writeStdProvenance({sourceDir, installPrefix, compiler, no
 
   const lines = [
     `CJSTD-COMMIT:${stdCommit} BUILT-BY:${builtBy}`,
+    `STD_SOURCE_COMMIT = ${stdCommit}`,
+    `BUILT_BY_CJC = ${builtBy}`,
+    `BUILT_WITH_SDK = ${buildSdk}`,
+    `COLOURED = ${coloured}`,
+    `PREFLIGHT_C2 = ${preflightC2}`,
+    `NOTE = ${note}`,
     `BUILD-TIME-UTC:${now.toISOString()}`,
     'ARTIFACT-SHA256:',
   ];

@@ -44,10 +44,20 @@ test('std provenance binds source, compiler, build time, and sorted artifact has
       sourceDir: source,
       installPrefix: prefix,
       compiler,
+      buildSdk: '/private/sdk-s1',
+      coloured: 'NO',
+      preflightC2: 'RED',
+      note: 'not for coloured targets',
       now: new Date('2026-08-09T01:02:03.000Z'),
     });
     const text = fs.readFileSync(destination, 'utf8');
     assert.match(text, new RegExp(`^CJSTD-COMMIT:${sourceSha} BUILT-BY:${compilerSha}$`, 'm'));
+    assert.match(text, new RegExp(`^STD_SOURCE_COMMIT = ${sourceSha}$`, 'm'));
+    assert.match(text, new RegExp(`^BUILT_BY_CJC = ${compilerSha}$`, 'm'));
+    assert.match(text, /^BUILT_WITH_SDK = \/private\/sdk-s1$/m);
+    assert.match(text, /^COLOURED = NO$/m);
+    assert.match(text, /^PREFLIGHT_C2 = RED$/m);
+    assert.match(text, /^NOTE = not for coloured targets$/m);
     assert.match(text, /^BUILD-TIME-UTC:2026-08-09T01:02:03\.000Z$/m);
     assert.match(text, new RegExp(`${sha256('std-archive')}  lib/libstd\\.a`));
     assert.match(text, new RegExp(`${sha256('core-cjo')}  modules/std\\.core\\.cjo`));
