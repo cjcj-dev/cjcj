@@ -17,6 +17,22 @@
 #define G_MIN_STACK_SIZE 64
 #define G_MAX_STACK_SIZE (1UL * MB)
 
+#ifndef CJCJ_COMMIT
+#define CJCJ_COMMIT "unknown"
+#endif
+
+#ifdef _WIN32
+#if defined(__GNUC__)
+__declspec(dllexport) __attribute__((used))
+#else
+__declspec(dllexport)
+#endif
+const char g_cjcjProvenance[] = "CJCJ-COMMIT:" CJCJ_COMMIT;
+#else
+__attribute__((used, visibility("default")))
+const char g_cjcjProvenance[] = "CJCJ-COMMIT:" CJCJ_COMMIT;
+#endif
+
 static size_t GetSizeFromEnv(const char* value)
 {
     char* compact = malloc(strlen(value) + 1);
