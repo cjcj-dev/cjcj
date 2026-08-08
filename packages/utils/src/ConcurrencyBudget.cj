@@ -254,17 +254,21 @@ public class ConcurrencyBudget {
 
     public func SpawnBudgeted<T>(body: () -> T): Option<Future<T>> {
         if (let Some(lease) <- TryAcquire()) {
-            return Some(spawn {
-                EnterLeaseThread()
-                try {
-                    body()
-                } finally {
-                    LeaveLeaseThread()
-                    lease.Release()
-                }
-            })
+            return Some(SpawnWithLease(lease, body))
         }
         return None
+    }
+
+    public func SpawnWithLease<T>(lease: ConcurrencyLease, body: () -> T): Future<T> {
+        return spawn {
+            EnterLeaseThread()
+            try {
+                body()
+            } finally {
+                LeaveLeaseThread()
+                lease.Release()
+            }
+        }
     }
 
     private func EnterLeaseThread(): Unit {
