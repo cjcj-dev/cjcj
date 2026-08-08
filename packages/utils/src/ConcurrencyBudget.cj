@@ -1,8 +1,8 @@
 package cjcj::utils
 
 import std.collection.*
-import std.env.atExit
-import std.process.Process
+import std.convert.*
+import std.env.{atExit, getVariable}
 import std.sync.*
 
 // GNU make jobserver protocol constants. The protocol carries one opaque byte per
@@ -14,7 +14,7 @@ private let JOBSERVER_LOCAL_LEASE: Int64 = 3
 
 @When[os == "Linux"]
 @C
-private struct JobserverFdSet {
+struct JobserverFdSet {
     var bits: VArray<UIntNative, $16>
 
     init() {
@@ -24,7 +24,7 @@ private struct JobserverFdSet {
 
 @When[os == "macOS" || os == "iOS"]
 @C
-private struct JobserverFdSet {
+struct JobserverFdSet {
     var bits: VArray<UInt32, $32>
 
     init() {
@@ -34,7 +34,7 @@ private struct JobserverFdSet {
 
 @When[os == "Linux" || os == "macOS" || os == "iOS"]
 @C
-private struct JobserverTimeval {
+struct JobserverTimeval {
     var seconds: IntNative
     var microseconds: IntNative
 
@@ -138,7 +138,7 @@ private func FindJobserverAuth(flags: String): Option<String> {
 
 private func GetJobserverAuthFromEnvironment(): Option<String> {
     for (name in ["CARGO_MAKEFLAGS", "MAKEFLAGS", "MFLAGS"]) {
-        if (let Some(flags) <- Process.current.getEnv(name)) {
+        if (let Some(flags) <- getVariable(name)) {
             if (let Some(auth) <- FindJobserverAuth(flags)) {
                 return Some(auth)
             }
@@ -157,10 +157,6 @@ public class ConcurrencyLease {
         this.owner = owner
         this.kind = kind
         this.token = token
-    }
-
-    ~init() {
-        Release()
     }
 
     public func Release(): Unit {
@@ -294,7 +290,7 @@ public class ConcurrencyBudget {
                 return
             }
             initialized = true
-            enabled = (Process.current.getEnv("CJPM_JOBSERVER") ?? "") == "1"
+            enabled = (getVariable("CJPM_JOBSERVER") ?? "") == "1"
             if (!enabled) {
                 return
             }
@@ -353,29 +349,27 @@ public class ConcurrencyBudget {
 
     @When[os == "Linux" || os == "macOS" || os == "iOS"]
     private func TryReadToken(): Option<UInt8> {
+        var result: Option<UInt8> = None
         try (readSet = LibC.malloc<JobserverFdSet>().asResource(),
             timeout = LibC.malloc<JobserverTimeval>().asResource(),
             token = LibC.malloc<UInt8>().asResource()) {
             if (readSet.value.isNull() || timeout.value.isNull() || token.value.isNull()) {
-                return None
+                result = None
+            } else {
+                JobserverFdZero(readSet.value)
+                if (JobserverFdAdd(readFd, readSet.value)) {
+                    unsafe { timeout.value.write(JobserverTimeval(0, 0)) }
+                    let ready = unsafe {
+                        select(readFd + 1, readSet.value, CPointer<JobserverFdSet>(),
+                            CPointer<JobserverFdSet>(), timeout.value)
+                    }
+                    if (ready > 0 && unsafe { read(readFd, token.value, UIntNative(1)) } == 1) {
+                        result = Some(unsafe { token.value.read() })
+                    }
+                }
             }
-            JobserverFdZero(readSet.value)
-            if (!JobserverFdAdd(readFd, readSet.value)) {
-                return None
-            }
-            unsafe { timeout.value.write(JobserverTimeval(0, 0)) }
-            let ready = unsafe {
-                select(readFd + 1, readSet.value, CPointer<JobserverFdSet>(),
-                    CPointer<JobserverFdSet>(), timeout.value)
-            }
-            if (ready <= 0) {
-                return None
-            }
-            if (unsafe { read(readFd, token.value, UIntNative(1)) } != 1) {
-                return None
-            }
-            return Some(unsafe { token.value.read() })
         }
+        return result
     }
 
     @When[os == "Windows" || env == "ohos" || env == "android"]
