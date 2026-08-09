@@ -296,14 +296,14 @@ if (stdDir) {
       copiedShared += 1;
     }
   }
-  if (copiedA === 0) {
-    console.error(`  ERROR: --std-dir produced zero std.*.a under ${layout.modulesStd}`);
+  if (copiedA === 0 && copiedLib === 0) {
+    console.error(`  ERROR: --std-dir produced neither module nor installed static std libraries`);
     process.exit(3);
   }
   const coreA = path.join(stageModulesStd, 'std.core.a');
   const coreLib = path.join(stageLib, 'libcangjie-std-core.a');
-  if (!await exists(coreA) || !await exists(coreLib)) {
-    console.error('  ERROR: overlay missing std.core.a or libcangjie-std-core.a');
+  if (!await exists(coreLib) || (copiedA > 0 && !await exists(coreA))) {
+    console.error('  ERROR: overlay missing libcangjie-std-core.a or the core archive of a supplied module archive set');
     process.exit(3);
   }
   if (copiedShared === 0) {
