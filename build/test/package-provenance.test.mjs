@@ -4,6 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {
+  CJDB_PYTHON_MODULES,
+  CJDB_PYTHON_UNIX_MODULES,
+  RELEASE_PYTHON_SOURCE_SHA256,
+  RELEASE_PYTHON_SOURCE_URL,
+  RELEASE_PYTHON_VERSION,
+} from '../lib/python-bundle.mjs';
 
 const TUPLE = 'linux_x86_64_cjnative';
 const CJCJ_SHA = 'a'.repeat(40);
@@ -27,6 +34,36 @@ function run(command, args, options = {}) {
   return result;
 }
 
+async function writePythonBundle(root) {
+  const bundle = path.join(root, 'python-bundle');
+  await write(bundle, 'bin/python3.11', [
+    '#!/bin/sh',
+    'case "$3" in',
+    ...[...CJDB_PYTHON_MODULES, ...CJDB_PYTHON_UNIX_MODULES]
+      .map(name => `  *'name = "${name}"'*) printf 'CJDB-PYTHON-IMPORT=${name}\\n'; exit 0 ;;`),
+    'esac',
+    `printf '${RELEASE_PYTHON_VERSION}\\n%s\\n' "$PYTHONHOME"`,
+    '',
+  ].join('\n'), 0o755);
+  await write(bundle, 'lib/libpython3.11.so.1.0', 'fixture libpython\n');
+  await fs.symlink('libpython3.11.so.1.0', path.join(bundle, 'lib', 'libpython3.11.so'));
+  await write(bundle, 'lib/python3.11/os.py', '# fixture stdlib\n');
+  await write(bundle, 'LICENSE.txt', 'PSF LICENSE AGREEMENT fixture\n');
+  await write(bundle, 'PYTHON-BUNDLE.json', `${JSON.stringify({
+    schema: 1,
+    platform: 'linux-x64',
+    version: RELEASE_PYTHON_VERSION,
+    source_type: 'python.org-source-native',
+    source_url: RELEASE_PYTHON_SOURCE_URL,
+    source_sha256: RELEASE_PYTHON_SOURCE_SHA256,
+    configure_args: '--prefix=<bundle> --enable-shared --without-ensurepip',
+    configure_environment: 'LDFLAGS=-Wl,-rpath,$ORIGIN/../lib',
+    required_modules: [...CJDB_PYTHON_MODULES],
+    required_unix_modules: [...CJDB_PYTHON_UNIX_MODULES],
+  }, null, 2)}\n`);
+  return bundle;
+}
+
 test('package_sdk archives std provenance and an honest complete manifest', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'package-provenance-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
@@ -34,6 +71,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   const std = path.join(root, 'std');
   const out = path.join(root, 'dist');
   await fs.mkdir(out);
+  const pythonBundle = await writePythonBundle(root);
 
   const binary = path.join(root, 'cjc');
   await fs.copyFile('/bin/true', binary);
@@ -63,6 +101,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   await fs.mkdir(path.join(std, 'lib', TUPLE), {recursive: true});
   await fs.copyFile(archive, path.join(std, 'modules', TUPLE, 'std', 'std.core.a'));
   await fs.copyFile(archive, path.join(std, 'lib', TUPLE, 'libcangjie-std-core.a'));
+  await write(std, `runtime/lib/${TUPLE}/libcangjie-std-core.so`, 'fixture shared std\n');
   await write(std, 'PROVENANCE.txt', [
     `CJSTD-COMMIT:${STD_SHA} BUILT-BY:${CJCJ_SHA}`,
     `STD_SOURCE_COMMIT = ${STD_SHA}`,
@@ -82,6 +121,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     '--allow-stock-runtime',
     '--std-dir', std,
     '--llvm-manifest', llvmManifest,
+    '--python-bundle', pythonBundle,
     '--base-sdk-id', 'fixture-sdk',
     '--cjcj-source-sha', CJCJ_SHA,
     '--runtime-source-sha', RUNTIME_SHA,
@@ -96,8 +136,9 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   const manifestFile = path.join(out, `${packageName}.RELEASE-MANIFEST.jsonl`);
   const manifestText = await fs.readFile(manifestFile, 'utf8');
   const rows = manifestText.trim().split('\n').map(JSON.parse);
-  assert.equal(rows.length, 7);
+  assert.equal(rows.length, 8);
   assert.equal(rows.find(row => row.component === 'llvm-opt').embedded_stamp, 'no-stamp');
+  assert.equal(rows.find(row => row.component === 'python').source.commit, RELEASE_PYTHON_VERSION);
   assert.match(rows.find(row => row.component === 'cjpm').artifact.sha256,
     /^unavailable: packaged cjpm is missing$/);
   const listing = run('tar', ['-tzf', path.join(out, `${packageName}.tar.gz`)]).stdout;

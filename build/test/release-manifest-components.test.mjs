@@ -5,6 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {
+  CJDB_PYTHON_MODULES,
+  CJDB_PYTHON_UNIX_MODULES,
+  RELEASE_PYTHON_SOURCE_SHA256,
+  RELEASE_PYTHON_SOURCE_URL,
+  RELEASE_PYTHON_VERSION,
+} from '../lib/python-bundle.mjs';
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../lib/release-manifest.mjs';
 
 const CJCJ_SHA = '1'.repeat(40);
@@ -47,6 +54,22 @@ test('release manifest keeps every component and records a removed stamp', async
     `OPT_SHA256=${'7'.repeat(64)}`,
     '',
   ].join('\n'));
+  const pythonArtifact = await write(stage, 'third_party/python/bin/python3.11',
+    'Python 3.11.9 fixture\n');
+  const pythonMetadata = {
+    schema: 1,
+    platform: 'linux-x64',
+    version: RELEASE_PYTHON_VERSION,
+    source_type: 'python.org-source-native',
+    source_url: RELEASE_PYTHON_SOURCE_URL,
+    source_sha256: RELEASE_PYTHON_SOURCE_SHA256,
+    configure_args: '--prefix=<bundle> --enable-shared --without-ensurepip',
+    configure_environment: 'LDFLAGS=-Wl,-rpath,$ORIGIN/../lib',
+    required_modules: [...CJDB_PYTHON_MODULES],
+    required_unix_modules: [...CJDB_PYTHON_UNIX_MODULES],
+  };
+  const pythonMetadataArtifact = await write(stage, 'third_party/python/PYTHON-BUNDLE.json',
+    `${JSON.stringify(pythonMetadata, null, 2)}\n`);
 
   const options = {
     stage,
@@ -60,11 +83,15 @@ test('release manifest keeps every component and records a removed stamp', async
     stdRepository: 'https://github.com/cjcj-dev/cangjie-runtime.git',
     cjpmRepository: 'https://github.com/cjcj-dev/cangjie-tools.git',
     cjpmCommit: CJPM_SHA,
+    pythonArtifact,
+    pythonMetadata,
+    pythonMetadataArtifact,
+    pythonVersion: RELEASE_PYTHON_VERSION,
   };
   const positive = await writeReleaseManifest(options);
-  assert.equal(positive.rows.length, 7);
+  assert.equal(positive.rows.length, 8);
   assert.deepEqual(positive.rows.map(row => row.component),
-    ['base-sdk', 'cjcj', 'runtime', 'llvm-llc', 'llvm-opt', 'std', 'cjpm']);
+    ['base-sdk', 'cjcj', 'runtime', 'llvm-llc', 'llvm-opt', 'std', 'cjpm', 'python']);
   assert.equal(positive.rows.find(row => row.component === 'llvm-opt').embedded_stamp,
     `CJLLVM-COMMIT:${LLVM_SHA}`);
   assert.equal(positive.rows.find(row => row.component === 'std').embedded_stamp, 'no-stamp');

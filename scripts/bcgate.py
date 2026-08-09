@@ -31,8 +31,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 CANGJIE_HOME = os.environ.get("CANGJIE_HOME", "/root/.cjv/toolchains/nightly-1.2.0-alpha.20260619020029")
+HOST_RUNTIME = os.environ.get("CJ_HOST_RTLIB", "")
 REPO = Path(__file__).resolve().parent.parent
 DIS = f"{CANGJIE_HOME}/third_party/llvm/bin/llvm-dis"
+TARGET_RUNTIME = f"{CANGJIE_HOME}/runtime/lib/linux_x86_64_cjnative"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cmpir import normalize as _normalize, canonicalize as _canonicalize  # noqa: E402
@@ -42,11 +44,30 @@ def env():
     e = dict(os.environ)
     e["CANGJIE_HOME"] = CANGJIE_HOME
     libs = [f"{CANGJIE_HOME}/third_party/llvm/lib",
-            f"{CANGJIE_HOME}/runtime/lib/linux_x86_64_cjnative",
+            *([HOST_RUNTIME] if HOST_RUNTIME else []),
+            TARGET_RUNTIME,
             f"{CANGJIE_HOME}/tools/lib", e.get("LD_LIBRARY_PATH", "")]
     e["LD_LIBRARY_PATH"] = ":".join(p for p in libs if p)
     e["cjHeapSize"] = "8GB"
     return e
+
+
+def runtime_mask_count(runtime):
+    library = Path(runtime) / "libcangjie-runtime.so"
+    if not library.is_file():
+        raise RuntimeError(f"runtime not found: {library}")
+    result = subprocess.run(["nm", "-D", str(library)], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"cannot inspect runtime mask: {library}")
+    return sum(1 for line in result.stdout.splitlines() if re.search(r"\bg_cjLoadBadMask\b", line))
+
+
+def report_runtime_split():
+    if not HOST_RUNTIME:
+        return
+    print(f"[bcgate] host/target split: host-rt={HOST_RUNTIME} target-rt={TARGET_RUNTIME}")
+    print(f"[bcgate]   host mask={runtime_mask_count(HOST_RUNTIME)} (expect 0)")
+    print(f"[bcgate]   target mask={runtime_mask_count(TARGET_RUNTIME)} (expect 1)")
 
 
 def norm_ir(text):
@@ -108,6 +129,11 @@ def main():
     ap.add_argument("-j", "--jobs", type=int, default=min(16, os.cpu_count() or 4),
                     help="parallel samples to process at once (default: min(16, nproc))")
     args = ap.parse_args()
+    try:
+        report_runtime_split()
+    except RuntimeError as error:
+        print(f"HARNESS: {error}", file=sys.stderr)
+        return 2
     e = env()
     samples = sorted(Path(args.corpus).resolve().glob("*.cj"))
     if not samples:
