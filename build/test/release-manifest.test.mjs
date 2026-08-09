@@ -138,6 +138,31 @@ test('empty signature policy fails closed in writer and renderer', async () => {
   }
 });
 
+test('missing or changed acceptance apparatus fails closed in renderer', async () => {
+  const {work, stage, dist, pythonArgs} = await fixture();
+  try {
+    const {rows} = await writeReleaseManifest({
+      stage, platform: platforms[0], ...pythonArgs,
+    });
+    const manifest = path.join(dist, 'cjcj-0.0.0-test-linux-x64.RELEASE-MANIFEST.jsonl');
+    const withoutApparatus = rows.filter(row => row.component !== GATE_APPARATUS_COMPONENT);
+    await fs.writeFile(manifest, `${withoutApparatus.map(row => JSON.stringify(row)).join('\n')}\n`);
+    const missing = render(dist, path.join(work, 'missing-notes.md'));
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /manifest components mismatch/);
+
+    const changed = structuredClone(rows);
+    changed.find(row => row.component === GATE_APPARATUS_COMPONENT)
+      .acceptance_apparatus.known_apparatus_limitations.text = 'tampered apparatus limitation';
+    await fs.writeFile(manifest, `${changed.map(row => JSON.stringify(row)).join('\n')}\n`);
+    const tampered = render(dist, path.join(work, 'tampered-notes.md'));
+    assert.notEqual(tampered.status, 0);
+    assert.match(tampered.stderr, /does not match the reviewed G8 apparatus evidence/);
+  } finally {
+    await fs.rm(work, {recursive: true, force: true});
+  }
+});
+
 test('missing Python bundle artifact fails closed', async () => {
   const {work, stage, pythonArgs} = await fixture();
   try {
