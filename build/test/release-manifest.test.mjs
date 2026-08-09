@@ -6,6 +6,13 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {
+  CJDB_PYTHON_MODULES,
+  CJDB_PYTHON_UNIX_MODULES,
+  RELEASE_PYTHON_SOURCE_SHA256,
+  RELEASE_PYTHON_SOURCE_URL,
+  RELEASE_PYTHON_VERSION,
+} from '../lib/python-bundle.mjs';
+import {
   RELEASE_SIGNATURE_POLICY,
   writeReleaseManifest,
 } from '../lib/release-manifest.mjs';
@@ -22,7 +29,27 @@ async function fixture() {
   const pythonArtifact = path.join(stage, 'third_party', 'python', 'bin', 'python3.11');
   await fs.mkdir(path.dirname(pythonArtifact), {recursive: true});
   await fs.writeFile(pythonArtifact, 'Python 3.11.9 fixture\n');
-  return {work, stage, dist, pythonArtifact};
+  const pythonMetadata = {
+    schema: 1,
+    platform: platforms[0],
+    version: RELEASE_PYTHON_VERSION,
+    source_type: 'python.org-source-native',
+    source_url: RELEASE_PYTHON_SOURCE_URL,
+    source_sha256: RELEASE_PYTHON_SOURCE_SHA256,
+    configure_args: '--prefix=<bundle> --enable-shared --without-ensurepip',
+    configure_environment: 'LDFLAGS=-Wl,-rpath,$ORIGIN/../lib',
+    required_modules: [...CJDB_PYTHON_MODULES],
+    required_unix_modules: [...CJDB_PYTHON_UNIX_MODULES],
+  };
+  const pythonMetadataArtifact = path.join(stage, 'third_party', 'python', 'PYTHON-BUNDLE.json');
+  await fs.writeFile(pythonMetadataArtifact, `${JSON.stringify(pythonMetadata, null, 2)}\n`);
+  const pythonArgs = {
+    pythonArtifact,
+    pythonMetadata,
+    pythonMetadataArtifact,
+    pythonVersion: RELEASE_PYTHON_VERSION,
+  };
+  return {work, stage, dist, pythonArgs};
 }
 
 function render(dist, output) {
@@ -33,10 +60,10 @@ function render(dist, output) {
 }
 
 test('five release manifests carry one nonempty SHA_ONLY policy and notes render it', async () => {
-  const {work, stage, dist, pythonArtifact} = await fixture();
+  const {work, stage, dist, pythonArgs} = await fixture();
   try {
     const {rows} = await writeReleaseManifest({
-      stage, platform: platforms[0], pythonArtifact, pythonVersion: '3.11.9',
+      stage, platform: platforms[0], ...pythonArgs,
     });
     assert.equal(rows.length, 8);
     for (const platform of platforms) {
@@ -56,14 +83,14 @@ test('five release manifests carry one nonempty SHA_ONLY policy and notes render
 });
 
 test('empty signature policy fails closed in writer and renderer', async () => {
-  const {work, stage, dist, pythonArtifact} = await fixture();
+  const {work, stage, dist, pythonArgs} = await fixture();
   try {
     await assert.rejects(writeReleaseManifest({
-      stage, platform: platforms[0], pythonArtifact, pythonVersion: '3.11.9', signaturePolicy: '',
+      stage, platform: platforms[0], ...pythonArgs, signaturePolicy: '',
     }),
       /signature_policy must be SHA_ONLY, got <empty>/);
     const {rows} = await writeReleaseManifest({
-      stage, platform: platforms[0], pythonArtifact, pythonVersion: '3.11.9',
+      stage, platform: platforms[0], ...pythonArgs,
     });
     rows[0].signature_policy = '';
     await fs.writeFile(path.join(dist, 'cjcj-0.0.0-test-linux-x64.RELEASE-MANIFEST.jsonl'),
@@ -77,13 +104,13 @@ test('empty signature policy fails closed in writer and renderer', async () => {
 });
 
 test('missing Python bundle artifact fails closed', async () => {
-  const {work, stage} = await fixture();
+  const {work, stage, pythonArgs} = await fixture();
   try {
     await assert.rejects(writeReleaseManifest({
       stage,
       platform: platforms[0],
+      ...pythonArgs,
       pythonArtifact: path.join(stage, 'third_party', 'python', 'bin', 'missing-python3.11'),
-      pythonVersion: '3.11.9',
     }), /packaged Python 3\.11\.9 artifact is missing/);
   } finally {
     await fs.rm(work, {recursive: true, force: true});
