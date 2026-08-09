@@ -832,7 +832,7 @@ public open class BaseMangler {
                     mangled += MangleExtendEntity(curPrefix, genericsTypeStack, declare)
                 } else if (let Some(extendedType) <- curPrefix.extendedType) {
                     if (let Some(ty) <- extendedType.ty) {
-                        mangled += MANGLE_EXTEND_PREFIX + MangleType(ty, genericsTypeStack, declare: true)
+                        mangled += MANGLE_EXTEND_PREFIX + MangleSemaType(ty, genericsTypeStack, declare: true)
                     }
                 }
             } else if (curPrefix.astKind == ASTKind.LAMBDA_EXPR) {
@@ -1027,16 +1027,16 @@ public open class BaseMangler {
         }
     }
 
-    public func MangleType(ty: MangleType): String {
+    public func MangleSemaType(ty: MangleType): String {
         let genericsTypeStack = ArrayList<String>()
-        return MangleType(ty, genericsTypeStack, declare: true)
+        return MangleSemaType(ty, genericsTypeStack, declare: true)
     }
 
     public func MangleAstSemanticType(ty: Ty): String {
-        return MangleType(adapter.ConvertTy(ty))
+        return MangleSemaType(adapter.ConvertTy(ty))
     }
 
-    public func MangleType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare!: Bool = false,
+    public func MangleSemaType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare!: Bool = false,
         isCollectGTy!: Bool = true): String {
         if (let Some(primitive) <- PrimitiveTypeMangle(ty.kind)) {
             return primitive
@@ -1104,7 +1104,7 @@ public open class BaseMangler {
             mangledName += MANGLE_GENERIC_PREFIX
         }
         for (arg in ty.typeArgs) {
-            mangledName += MangleType(arg, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+            mangledName += MangleSemaType(arg, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
         }
         mangledName += MANGLE_SUFFIX
         return mangledName
@@ -1141,7 +1141,7 @@ public open class BaseMangler {
         }
         var mangled = MANGLE_GENERIC_PREFIX
         for (arg in args) {
-            mangled += MangleType(arg, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+            mangled += MangleSemaType(arg, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
         }
         return mangled
     }
@@ -1167,14 +1167,14 @@ public open class BaseMangler {
             return unsupportedMangleType(ty.kind, "RawArray type has no element type")
         }
         return MANGLE_TYPE_ARRAY_PREFIX + DecimalToManglingNumber("${ty.dims}") +
-            MangleType(ty.typeArgs[0], genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+            MangleSemaType(ty.typeArgs[0], genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
     }
 
     public func MangleVArrayType(ty: MangleType, genericsTypeStack: ArrayList<String>, declare: Bool,
         isCollectGTy!: Bool = true): String {
         var mangled = MANGLE_VARRAY_PREFIX + DecimalToManglingNumber("${ty.size}")
         for (arg in ty.typeArgs) {
-            mangled += MangleType(arg, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+            mangled += MangleSemaType(arg, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
         }
         return mangled
     }
@@ -1183,7 +1183,7 @@ public open class BaseMangler {
         isCollectGTy!: Bool = true): String {
         var mangled = MANGLE_TUPLE_PREFIX + DecimalToManglingNumber("${ty.typeArgs.size}")
         for (arg in ty.typeArgs) {
-            mangled += MangleType(arg, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+            mangled += MangleSemaType(arg, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
         }
         mangled += MANGLE_SUFFIX
         return mangled
@@ -1193,7 +1193,7 @@ public open class BaseMangler {
         isCollectGTy!: Bool = true): String {
         var mangled = if (ty.isCFunc) { MANGLE_CFUNC_PREFIX } else { MANGLE_GENERAL_FUNC_PREFIX }
         var retTy = if (let Some(ret) <- ty.retTy) {
-            MangleType(ret, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+            MangleSemaType(ret, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
         } else {
             MANGLE_VOID_TY_SUFFIX
         }
@@ -1202,7 +1202,7 @@ public open class BaseMangler {
         }
         mangled += retTy
         for (param in ty.paramTys) {
-            mangled += MangleType(param, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+            mangled += MangleSemaType(param, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
         }
         mangled += MANGLE_SUFFIX
         return mangled
@@ -1218,7 +1218,7 @@ public open class BaseMangler {
             for (param in body.params) {
                 if (let Some(ty) <- param.semaTy()) {
                     if (ty.kind != TypeKind.TYPE_INITIAL) {
-                        mangled += MangleType(ty, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
+                        mangled += MangleSemaType(ty, genericsTypeStack, declare: declare, isCollectGTy: isCollectGTy)
                     }
                 } else {
                     throw IllegalArgumentException("Function parameter has no semantic type: " + param.identifier)
@@ -1234,7 +1234,7 @@ public open class BaseMangler {
         if (ty.typeArgs.isEmpty()) {
             return unsupportedMangleType(ty.kind, "CPointer type has no element type")
         }
-        return MANGLE_POINTER_PREFIX + MangleType(ty.typeArgs[0], genericsTypeStack, declare: declare,
+        return MANGLE_POINTER_PREFIX + MangleSemaType(ty.typeArgs[0], genericsTypeStack, declare: declare,
             isCollectGTy: isCollectGTy)
     }
 
@@ -1382,7 +1382,7 @@ public open class BaseMangler {
         } else {
             throw IllegalArgumentException("Extend declaration not registered in mangler context.")
         }
-        var mangled = MANGLE_EXTEND_PREFIX + MangleType(extTy, genericsTypeStack, declare: declare)
+        var mangled = MANGLE_EXTEND_PREFIX + MangleSemaType(extTy, genericsTypeStack, declare: declare)
         mangled += MANGLE_FILE_ID_PREFIX + fileIdFor(targetFile)
         mangled += MANGLE_COUNT_PREFIX + DecimalToManglingNumber("${extendIndex}")
         return mangled
@@ -1759,7 +1759,7 @@ public open class BaseMangler {
                 }
                 let genericsTypeStack = ArrayList<String>()
                 gpd.exportId = outer.exportId + MANGLE_WILDCARD_PREFIX + gpd.identifier +
-                    MangleType(ty, genericsTypeStack, declare: false, isCollectGTy: false)
+                    MangleSemaType(ty, genericsTypeStack, declare: false, isCollectGTy: false)
             }
         }
     }
