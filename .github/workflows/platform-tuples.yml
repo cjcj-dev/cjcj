@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.platform_set == 'darwin-windows' && '[{"runner":"macos-15","platform":"darwin_aarch64","llvm-targets":"AArch64"},{"runner":"macos-15-intel","platform":"darwin_x86_64","llvm-targets":"X86"},{"runner":"windows-2022","platform":"windows_x86_64","llvm-targets":"AArch64;ARM;X86"}]' || '[{"runner":"macos-15","platform":"darwin_aarch64","llvm-targets":"AArch64"},{"runner":"macos-15-intel","platform":"darwin_x86_64","llvm-targets":"X86"},{"runner":"ubuntu-22.04","platform":"linux_x86_64","llvm-targets":"X86"},{"runner":"ubuntu-22.04-arm","platform":"linux_aarch64","llvm-targets":"AArch64"},{"runner":"windows-2022","platform":"windows_x86_64","llvm-targets":"AArch64;ARM;X86"}]') }}
+        include: ${{ fromJSON(inputs.platform_set == 'windows-only' && '[{"runner":"windows-2022","platform":"windows_x86_64","llvm-targets":"AArch64;ARM;X86"}]' || inputs.platform_set == 'darwin-windows' && '[{"runner":"macos-15","platform":"darwin_aarch64","llvm-targets":"AArch64"},{"runner":"macos-15-intel","platform":"darwin_x86_64","llvm-targets":"X86"},{"runner":"windows-2022","platform":"windows_x86_64","llvm-targets":"AArch64;ARM;X86"}]' || '[{"runner":"macos-15","platform":"darwin_aarch64","llvm-targets":"AArch64"},{"runner":"macos-15-intel","platform":"darwin_x86_64","llvm-targets":"X86"},{"runner":"ubuntu-22.04","platform":"linux_x86_64","llvm-targets":"X86"},{"runner":"ubuntu-22.04-arm","platform":"linux_aarch64","llvm-targets":"AArch64"},{"runner":"windows-2022","platform":"windows_x86_64","llvm-targets":"AArch64;ARM;X86"}]') }}
     env:
       TUPLE_PLATFORM: ${{ matrix.platform }}
       LLVM_TARGETS: ${{ matrix.llvm-targets }}

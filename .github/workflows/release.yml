@@ -45,15 +45,19 @@ env:
   # runtime cache key while the build itself followed the pin file).
 
 jobs:
-  fixed-llvm-tools:
-    name: Build LLVM tools
-    uses: ./.github/workflows/build-fixed-llc.yml
+  source-final-std:
+    name: Build source SDK and final std artifacts
+    uses: ./.github/workflows/srcbuild.yml
+    with:
+      build_type: relwithdebinfo
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
 
-  native-fixed-llvm-tuples:
-    name: Build Darwin and Windows LLVM tuples
+  windows-fixed-llvm-tuple:
+    name: Build Windows LLVM tuple
     uses: ./.github/workflows/platform-tuples.yml
     with:
-      platform_set: darwin-windows
+      platform_set: windows-only
 
   patched-cjpm:
     name: Build patched cjpm
@@ -62,7 +66,6 @@ jobs:
 
   windows-runtime:
     name: Build Windows runtime
-    needs: [fixed-llvm-tools]
     uses: ./.github/workflows/build-windows-runtime.yml
     with:
       version: ${{ inputs.version }}
@@ -72,26 +75,27 @@ jobs:
 
   build:
     name: ${{ matrix.platform }} / Build release
-    needs: [fixed-llvm-tools, native-fixed-llvm-tuples, patched-cjpm, windows-runtime]
+    needs: [source-final-std, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime]
     if: always()
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative }
+          - { runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64 }
           # linux-aarch64 re-enabled 0724: the R1 llc SEGV was the un-activated
           # fixed llc (setup only mapped Linux/x86_64, fixed in 8e2f9ea6); the
           # arm-soak ×20 packaged smoke run 30069890604 passed clean.
-          - { runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64, sdk_runtime_dir: linux_aarch64_cjnative }
-          - { runner: macos-15-intel, platform: darwin-x64, llvm_platform: darwin_x86_64, sdk_runtime_dir: darwin_x86_64_cjnative }
-          - { runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative }
-          - { runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative }
+          - { runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64, sdk_runtime_dir: linux_aarch64_cjnative, std_artifact: final-std-linux-aarch64 }
+          - { runner: macos-15-intel, platform: darwin-x64, llvm_platform: darwin_x86_64, sdk_runtime_dir: darwin_x86_64_cjnative, std_artifact: final-std-darwin-x64 }
+          - { runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64 }
+          - { runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative, std_artifact: final-std-windows-x64 }
     uses: ./.github/workflows/build-release-package.yml
     with:
       runner: ${{ matrix.runner }}
       platform: ${{ matrix.platform }}
       llvm_platform: ${{ matrix.llvm_platform }}
       sdk_runtime_dir: ${{ matrix.sdk_runtime_dir }}
+      std_artifact: ${{ matrix.std_artifact }}
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -109,6 +113,7 @@ jobs:
       - name: Download SDK artifacts
         uses: actions/download-artifact@v8
         with:
+          pattern: pkg-*
           path: dist
           merge-multiple: true
       - name: Render release notes from package manifests
@@ -127,6 +132,6 @@ jobs:
           mapfile -t assets < <(find dist -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.zip' -o -name '*.RELEASE-MANIFEST.jsonl' \) | sort)
           gh release create "v${{ inputs.version }}" "${flags[@]}" "${assets[@]}"
 
-# Darwin and Windows consume current-run native artifacts from
-# platform-tuples.yml; both Linux architectures consume current-run artifacts
-# from build-fixed-llc.yml. Cross-run fetch remains a recovery path.
+# Source-build owns the four native LLVM artifacts; platform-tuples.yml owns
+# only the Windows tuple. Each release cell consumes final-std-${platform} from
+# the same matrix row, and artifact download failure is intentionally gating.

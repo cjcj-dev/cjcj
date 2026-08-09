@@ -1,6 +1,44 @@
-name: Self-hosted source SDK (native matrix)
+name: Self-hosted source SDK and final std
 
 on:
+  workflow_call:
+    inputs:
+      cangjie_ref:
+        description: Optional SDK version label; source repository revisions remain pinned
+        required: false
+        type: string
+        default: ''
+      build_type:
+        description: C++ SDK build type for native hosts
+        required: false
+        type: string
+        default: relwithdebinfo
+      dry_run:
+        description: Authorize an exact runtime_ref override without publishing
+        required: false
+        type: boolean
+        default: false
+      runtime_ref:
+        description: Dry-run only; exact runtime commit, otherwise ci/runtime_pin.env is used
+        required: false
+        type: string
+        default: ''
+    outputs:
+      final_std_linux_x64:
+        description: Linux x64 source-built std artifact
+        value: ${{ jobs.artifact-contract.outputs.final_std_linux_x64 }}
+      final_std_linux_aarch64:
+        description: Linux AArch64 source-built std artifact
+        value: ${{ jobs.artifact-contract.outputs.final_std_linux_aarch64 }}
+      final_std_darwin_x64:
+        description: Darwin x64 source-built std artifact
+        value: ${{ jobs.artifact-contract.outputs.final_std_darwin_x64 }}
+      final_std_darwin_arm64:
+        description: Darwin arm64 source-built std artifact
+        value: ${{ jobs.artifact-contract.outputs.final_std_darwin_arm64 }}
+      final_std_windows_x64:
+        description: Windows x64 source-built std artifact
+        value: ${{ jobs.artifact-contract.outputs.final_std_windows_x64 }}
   workflow_dispatch:
     inputs:
       cangjie_ref:
@@ -13,6 +51,16 @@ on:
         default: relwithdebinfo
         type: choice
         options: [release, relwithdebinfo, debug]
+      dry_run:
+        description: Authorize an exact runtime_ref override without publishing
+        required: false
+        type: boolean
+        default: false
+      runtime_ref:
+        description: Dry-run only; exact runtime commit, otherwise ci/runtime_pin.env is used
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -69,7 +117,13 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Load source pins
-        run: cat ci/source_pin.env ci/runtime_pin.env >> "$GITHUB_ENV"
+        run: cat ci/source_pin.env >> "$GITHUB_ENV"
+
+      - name: Load and validate runtime pin
+        env:
+          CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
+          CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
+        run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
@@ -201,6 +255,44 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Restore official MinGW toolchain
+        if: matrix.target == 'linux-x64'
+        id: windows-mingw-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64
+          key: windows-final-std-mingw-20220906-5c68a1cb123161b54b72ce90e7975d95a8eaf2a4-${{ hashFiles('build/toolchain/mingw.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
+
+      - name: Install Windows cross toolchain dependencies
+        if: matrix.target == 'linux-x64' && steps.windows-mingw-cache.outputs.cache-hit != 'true'
+        run: npx --yes zx@8 build/cli.mjs --target windows-x64 --build-root "$CANGJIE_BUILD_ROOT" install-system-deps
+
+      - name: Build official MinGW toolchain
+        if: matrix.target == 'linux-x64' && steps.windows-mingw-cache.outputs.cache-hit != 'true'
+        run: npx --yes zx@8 build/cli.mjs --target windows-x64 --build-root "$CANGJIE_BUILD_ROOT" install-mingw
+
+      - name: Save official MinGW toolchain
+        if: matrix.target == 'linux-x64' && steps.windows-mingw-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64
+          key: ${{ steps.windows-mingw-cache.outputs.cache-primary-key }}
+
+      - name: Cross-build Windows final std with stage2 host compiler
+        if: matrix.target == 'linux-x64'
+        env:
+          CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}
+        run: npx --yes zx@8 ci/srcbuild/steps/build-windows-final-std.mjs
+
+      - name: Upload Windows source-built std install root
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-windows-x64
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-windows-stage2
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload stage diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
@@ -231,3 +323,25 @@ jobs:
             ${{ runner.temp }}/cjcj-srcbuild-verify/*.log
             .srcbuild/shim-build.log
           if-no-files-found: warn
+
+  artifact-contract:
+    name: Publish final std artifact contract
+    needs: srcbuild
+    runs-on: ubuntu-22.04
+    outputs:
+      final_std_linux_x64: ${{ steps.contract.outputs.final_std_linux_x64 }}
+      final_std_linux_aarch64: ${{ steps.contract.outputs.final_std_linux_aarch64 }}
+      final_std_darwin_x64: ${{ steps.contract.outputs.final_std_darwin_x64 }}
+      final_std_darwin_arm64: ${{ steps.contract.outputs.final_std_darwin_arm64 }}
+      final_std_windows_x64: ${{ steps.contract.outputs.final_std_windows_x64 }}
+    steps:
+      - name: Export artifact names
+        id: contract
+        run: |
+          {
+            echo "final_std_linux_x64=final-std-linux-x64"
+            echo "final_std_linux_aarch64=final-std-linux-aarch64"
+            echo "final_std_darwin_x64=final-std-darwin-x64"
+            echo "final_std_darwin_arm64=final-std-darwin-arm64"
+            echo "final_std_windows_x64=final-std-windows-x64"
+          } >> "$GITHUB_OUTPUT"

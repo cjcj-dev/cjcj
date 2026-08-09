@@ -69,10 +69,28 @@ test('Darwin selfhost link uses the source SDK dylib and libc++', () => {
   assert.doesNotMatch(link, /libLLVM-15\.so|-lstdc\+\+/);
 });
 
-test('final std install roots satisfy package_sdk layout (a) on every native target', async () => {
+test('Windows final std is cross-built by the stage2 Linux host compiler', async () => {
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  const producer = await fs.readFile(path.join(root, 'ci/srcbuild/steps/build-windows-final-std.mjs'), 'utf8');
+  for (const edge of [
+    "if: matrix.target == 'linux-x64'",
+    'run: npx --yes zx@8 ci/srcbuild/steps/build-windows-final-std.mjs',
+    'name: final-std-windows-x64',
+    'path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-windows-stage2',
+  ]) assert.ok(workflow.includes(edge), edge);
+  for (const contract of [
+    "getTarget('windows-x64')",
+    "path.join(sdk, 'bin', 'cjcj-stage2')",
+    '--target windows-x86_64',
+    '--target-sysroot ${mingwRoot}/',
+    '--target-toolchain ${mingwBin}',
+  ]) assert.ok(producer.includes(contract), contract);
+});
+
+test('final std install roots satisfy package_sdk layout (a) on every release target', async () => {
   const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'srcbuild-final-std-'));
   try {
-    for (const targetKey of ['linux-aarch64', 'darwin-arm64', 'darwin-x64', 'linux-x64']) {
+    for (const targetKey of ['linux-aarch64', 'darwin-arm64', 'darwin-x64', 'linux-x64', 'windows-x64']) {
       const target = buildConfig({targetKey}).target;
       const install = path.join(fixture, targetKey);
       const modulesTop = path.join(install, 'modules', target.spec.runtimeTuple);
