@@ -15,17 +15,17 @@ const {values} = parseArgs({
     sdk: {type: 'string'},
     platform: {type: 'string'},
     'toolchain-pin': {type: 'string'},
-    'base-sdk-provenance': {type: 'string'},
+    'base-sdk-sidecar': {type: 'string'},
     outdir: {type: 'string'},
   },
 });
 
-for (const name of ['sdk', 'platform', 'toolchain-pin', 'base-sdk-provenance', 'outdir']) {
+for (const name of ['sdk', 'platform', 'toolchain-pin', 'base-sdk-sidecar', 'outdir']) {
   if (!values[name]) throw new Error(`--${name} is required`);
 }
 
 const toolchain = parseGateHostToolchain(await fs.readFile(values['toolchain-pin'], 'utf8'));
-const baseSdkProvenance = JSON.parse(await fs.readFile(values['base-sdk-provenance'], 'utf8'));
+const baseSdkProvenance = JSON.parse(await fs.readFile(values['base-sdk-sidecar'], 'utf8'));
 const source = await resolveGateHostRuntime({sdk: values.sdk, platform: values.platform});
 const output = path.resolve(values.outdir);
 const retainedRuntime = path.join(output, `gate-host-runtime${path.extname(source.file)}`);
