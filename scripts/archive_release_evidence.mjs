@@ -133,8 +133,9 @@ function validateJobs(jobs) {
     }
     if (urls.has(url)) throw new Error(`duplicate job URL: ${url}`);
     urls.add(url);
-    if (!['success', 'skipped'].includes(job.conclusion)) {
-      throw new Error(`job did not succeed: ${job.name} conclusion=${job.conclusion}`);
+    const expectedConclusion = job.name === 'Publish release' ? 'skipped' : 'success';
+    if (job.conclusion !== expectedConclusion) {
+      throw new Error(`job has the wrong dry-run conclusion: ${job.name} expected=${expectedConclusion} actual=${job.conclusion}`);
     }
   }
 
