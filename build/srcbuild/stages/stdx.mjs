@@ -3,7 +3,7 @@
 import path from 'node:path';
 import {stage} from '../../lib/logging.mjs';
 import {installPath, TARGET_TRIPLE} from '../../toolchain/mingw.mjs';
-import {runBuildPy, windowsCrossArgs} from './common.mjs';
+import {opensslLibPath, runBuildPy, windowsCrossArgs} from './common.mjs';
 
 export async function run(config) {
   const stdxRoot = config.repoPath('stdx');
@@ -21,6 +21,8 @@ export async function run(config) {
       ];
     } else {
       args = ['build', '-t', config.buildType, `--include=${compilerInclude}`];
+      const openssl = opensslLibPath(config);
+      if (openssl) args.push(`--target-lib=${openssl}`);
     }
     await runBuildPy(config, stdxRoot, args, {stageName: 'stdx.build'});
     await runBuildPy(config, stdxRoot, ['install'], {stageName: 'stdx.install'});

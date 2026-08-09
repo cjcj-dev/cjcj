@@ -108,11 +108,27 @@ function makeFixture() {
 }
 
 test('target/build-type matrix matches config.py', () => {
-  for (const targetKey of ['linux-x64', 'windows-x64']) {
+  for (const targetKey of ['linux-x64', 'linux-aarch64', 'darwin-arm64', 'darwin-x64', 'windows-x64']) {
     for (const buildType of ['release', 'debug', 'relwithdebinfo']) {
       const config = buildConfig({targetKey, buildType});
       assert.equal(config.crossBuildType, targetKey === 'windows-x64' ? 'release' : buildType);
     }
+  }
+});
+
+test('native target contracts match the source-build runner matrix', () => {
+  const expected = {
+    'linux-x64': ['linux', 'x86_64', 'linux_x86_64_cjnative', 'linux_x86_64', 47],
+    'linux-aarch64': ['linux', 'aarch64', 'linux_aarch64_cjnative', 'linux_aarch64', 47],
+    'darwin-arm64': ['darwin', 'aarch64', 'darwin_aarch64_cjnative', 'darwin_aarch64', 0],
+    'darwin-x64': ['darwin', 'x86_64', 'darwin_x86_64_cjnative', 'darwin_x86_64', 0],
+  };
+  for (const [targetKey, [osName, arch, tuple, llvmPlatform, bitcode]] of Object.entries(expected)) {
+    const {spec} = buildConfig({targetKey}).target;
+    assert.deepEqual(
+      [spec.os, spec.arch, spec.runtimeTuple, spec.llvmPlatform, spec.expectedStdArtifacts.bitcode],
+      [osName, arch, tuple, llvmPlatform, bitcode],
+    );
   }
 });
 
@@ -197,21 +213,27 @@ test('Linux source stages emit the Python command order', async () => {
       expected(root, compilerRoot, ['python3', 'build.py', 'build', '-t', 'relwithdebinfo', '--no-tests', '--build-cjdb', '-v', '1.2.3']),
       expected(root, compilerRoot, ['python3', 'build.py', 'install']),
       expected(root, runtimeRoot, ['python3', 'build.py', 'clean']),
-      expected(root, runtimeRoot, ['python3', 'build.py', 'build', '-t', 'relwithdebinfo', '-v', '1.2.3']),
+      expected(root, runtimeRoot, ['python3', 'build.py', 'build', '--target', 'native', '-t', 'relwithdebinfo', '-v', '1.2.3']),
       expected(root, runtimeRoot, ['python3', 'build.py', 'install']),
       expected(root, stdlibRoot, ['python3', 'build.py', 'clean']),
-      expected(root, stdlibRoot, ['python3', 'build.py', 'build', '-t', 'relwithdebinfo', `--target-lib=${path.join(runtimeRoot, 'target')}`]),
+      expected(root, stdlibRoot, [
+        'python3', 'build.py', 'build', '-t', 'relwithdebinfo', '--target', 'native',
+        `--target-lib=${path.join(runtimeRoot, 'target')}`, '--target-lib=/usr/lib/x86_64-linux-gnu',
+      ]),
       expected(root, stdlibRoot, ['python3', 'build.py', 'install']),
       expected(root, stdxRoot, ['python3', 'build.py', 'clean']),
-      expected(root, stdxRoot, ['python3', 'build.py', 'build', '-t', 'relwithdebinfo', `--include=${path.join(compilerRoot, 'include')}`]),
+      expected(root, stdxRoot, [
+        'python3', 'build.py', 'build', '-t', 'relwithdebinfo',
+        `--include=${path.join(compilerRoot, 'include')}`, '--target-lib=/usr/lib/x86_64-linux-gnu',
+      ]),
       expected(root, stdxRoot, ['python3', 'build.py', 'install']),
       expected(root, toolsRoot, [
         'git', 'fetch', '--depth', '1', 'https://github.com/cjcj-dev/cangjie-tools.git',
-        '2003d20ae84050fd2f70525bf00be214542113a6',
+        '1212a25c07be1a400be85e6ff2902788d3ecec0a',
       ]),
       expected(root, toolsRoot, ['git', 'rev-parse', 'FETCH_HEAD']),
       expected(root, toolsRoot, [
-        'git', 'checkout', '2003d20ae84050fd2f70525bf00be214542113a6', '--', 'cjpm',
+        'git', 'checkout', '1212a25c07be1a400be85e6ff2902788d3ecec0a', '--', 'cjpm',
       ]),
     ];
     for (const [name, subpath] of [
@@ -223,13 +245,13 @@ test('Linux source stages emit the Python command order', async () => {
       const cwd = path.join(toolsRoot, subpath);
       expectedCommands.push(expected(root, cwd, ['python3', 'build.py', 'clean']));
       const buildArgs = ['python3', 'build.py', 'build', '-t', 'release'];
-      if (name === 'cjpm') buildArgs.push('--set-rpath', '$ORIGIN/../../runtime/lib/linux_relwithdebinfo_x86_64_cjnative');
+      if (name === 'cjpm') buildArgs.push('--set-rpath', '$ORIGIN/../../runtime/lib/linux_x86_64_cjnative');
       expectedCommands.push(expected(root, cwd, buildArgs));
       expectedCommands.push(expected(root, cwd, ['python3', 'build.py', 'install']));
     }
     expectedCommands.push(
-      expected(root, null, ['tar', '-czf', path.join(workspace, 'software', 'cangjie-sdk-linux-x64-1.2.3.tar.gz'), '-C', path.join(workspace, 'software'), 'cangjie']),
-      expected(root, null, ['tar', '-czf', path.join(workspace, 'software', 'cangjie-stdx-linux-x64-1.2.3.1.tar.gz'), '-C', path.join(workspace, 'software'), 'linux_x86_64_cjnative']),
+      expected(root, null, ['tar', '--format=gnu', '-czf', path.join(workspace, 'software', 'cangjie-sdk-linux-x64-1.2.3.tar.gz'), '-C', path.join(workspace, 'software'), 'cangjie']),
+      expected(root, null, ['tar', '--format=gnu', '-czf', path.join(workspace, 'software', 'cangjie-stdx-linux-x64-1.2.3.1.tar.gz'), '-C', path.join(workspace, 'software'), 'linux_x86_64_cjnative']),
       expected(root, path.join(workspace, 'verify'), ['bash', '-c', `set -e; source '${path.join(workspace, 'software', 'cangjie', 'envsetup.sh')}'; cjc hello.cj -o hello && ./hello`]),
     );
     assert.deepEqual(commands, expectedCommands);

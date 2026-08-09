@@ -10,7 +10,7 @@ import {copyInto, copytree, ensureDir, requireDir, requireFile} from './common.m
 const logger = getLogger('cangjie_build.stages.package');
 
 function platformLibDirName(config) {
-  return `${config.target.spec.crossCompile ? 'windows' : 'linux'}_x86_64_cjnative`;
+  return config.target.runtimeLibSubdir(config.buildType);
 }
 
 async function makeArchive(config, sourceDir, baseName) {
@@ -20,7 +20,10 @@ async function makeArchive(config, sourceDir, baseName) {
   fs.rmSync(archive, {force: true});
   logger.info('Creating %s archive %s', format, archive);
   if (format === 'tar.gz') {
-    await runCommand(['tar', '-czf', archive, '-C', path.dirname(sourceDir), path.basename(sourceDir)], {
+    await runCommand([
+      config.target.spec.tarCommand, '--format=gnu', '-czf', archive,
+      '-C', path.dirname(sourceDir), path.basename(sourceDir),
+    ], {
       stage: 'package.archive',
     });
   } else if (format === 'zip') {

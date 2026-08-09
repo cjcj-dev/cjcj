@@ -1,14 +1,35 @@
 #!/usr/bin/env zx
 
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {getTarget} from '../../../build/lib/targets.mjs';
+import {platformizeCjcToml} from '../../platform_matrix/link_option.mjs';
+
 $.stdio = 'inherit';
 
 const workspace = process.env.CANGJIE_WORKSPACE;
 const githubWorkspace = process.env.GITHUB_WORKSPACE;
-if (!workspace || !githubWorkspace) throw new Error('CANGJIE_WORKSPACE and GITHUB_WORKSPACE are required');
+const targetKey = process.env.CJCJ_SRCBUILD_TARGET;
+if (!workspace || !githubWorkspace || !targetKey) {
+  throw new Error('CANGJIE_WORKSPACE, GITHUB_WORKSPACE and CJCJ_SRCBUILD_TARGET are required');
+}
+const target = getTarget(targetKey);
+if (process.platform !== target.spec.nodePlatform || process.arch !== target.spec.nodeArch) {
+  throw new Error(`target ${targetKey} requires ${target.spec.nodePlatform}/${target.spec.nodeArch}`);
+}
 
 const sdk = `${workspace}/software/cangjie`;
-await $`cp cjpm.toml cjpm.toml.O2bak`;
-await $`sed -i 's/compile-option = "-O2"/compile-option = "-O1"/' cjpm.toml`;
+const workspaceToml = path.resolve('cjpm.toml');
+const workspaceTomlBackup = `${workspaceToml}.O2bak`;
+const cjcToml = path.resolve('packages', 'cjc', 'cjpm.toml');
+const cjcConfig = await fs.readFile(cjcToml, 'utf8');
+await fs.writeFile(cjcToml, platformizeCjcToml(cjcConfig, process.platform, sdk));
+await fs.copyFile(workspaceToml, workspaceTomlBackup);
+await fs.writeFile(
+  workspaceToml,
+  (await fs.readFile(workspaceToml, 'utf8')).replace('compile-option = "-O2"', 'compile-option = "-O1"'),
+);
 // Upstream cjc miscompiles cjcj at -O2. Build the seed at -O1 to avoid the
 // generic concrete-to-interface upcast loss in the upstream CHIR optimizer.
 await $`cjpm build`;
@@ -20,8 +41,10 @@ await $`cjpm build`;
 await $`install -m0755 target/release/bin/cjcj::cjc ${sdk}/bin/cjcj-stage1`;
 await $`rm -f ${sdk}/bin/cjc`;
 await $`ln -s cjcj-stage1 ${sdk}/bin/cjc`;
-const scanJson = (await $({stdio: 'pipe'})`mktemp`).stdout.trim();
+const scanDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-stage1-scan-'));
+const scanJson = path.join(scanDir, 'scan.json');
 await $`cjc -p ${githubWorkspace}/packages/basic/src --scan-dependency > ${scanJson}`;
 await $`grep -q '"package":"cjcj::basic"' ${scanJson}`;
-await $`mv cjpm.toml.O2bak cjpm.toml`;
+await fs.rm(scanDir, {recursive: true, force: true});
+await fs.rename(workspaceTomlBackup, workspaceToml);
 await $`cjpm clean`;

@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {buildConfig, DEFAULT_BUILD_TYPE, REPO_NAMES, VALID_BUILD_TYPES} from './lib/config.mjs';
 import {BuildError, ConfigError} from './lib/errors.mjs';
 import {configureLogging, getLogger} from './lib/logging.mjs';
+import {allTargets} from './lib/targets.mjs';
 import * as sccache from './toolchain/sccache.mjs';
 import * as mingw from './toolchain/mingw.mjs';
 import * as staticLibs from './toolchain/static-libs.mjs';
@@ -42,7 +43,7 @@ function usage() {
     + '  --log-level LEVEL (default: INFO)\n'
     + '  --version\n'
     + '  --help\n'
-    + 'Targets: linux-x64, windows-x64\n'
+    + `Targets: ${allTargets().join(', ')}\n`
     + `Build types: ${VALID_BUILD_TYPES.join(', ')}\n`
     + 'Log levels: DEBUG, INFO, WARNING, ERROR';
 }
@@ -163,7 +164,7 @@ async function dispatch(config, command, args) {
   }
   if (command === 'install-system-deps') {
     requireNoArgs(command, args);
-    return systemDeps.install();
+    return systemDeps.install(config);
   }
   if (command === 'print-version') {
     requireNoArgs(command, args);
@@ -231,12 +232,12 @@ async function dispatch(config, command, args) {
   if (command === 'run-all') {
     const valid = new Set(['--skip-system-deps', '--skip-install-libs']);
     for (const argument of args) if (!valid.has(argument)) throw new ConfigError(`run-all: unknown option '${argument}'`);
-    if (!args.includes('--skip-system-deps')) await systemDeps.install();
+    if (!args.includes('--skip-system-deps')) await systemDeps.install(config);
     if (!args.includes('--skip-install-libs')) {
       if (config.target.spec.needsMingw) {
         await mingw.install(config.buildRoot);
         if (config.target.spec.crossCompile) await targetPython.install(config.buildRoot);
-      } else {
+      } else if (config.target.spec.needsStaticLibs) {
         await staticLibs.install(config.buildRoot);
       }
     }

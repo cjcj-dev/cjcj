@@ -1,7 +1,11 @@
 #!/usr/bin/env zx
 
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
+import {getTarget} from '../../../build/lib/targets.mjs';
+import {assertFinalStd} from '../lib/final-std.mjs';
 
 $.stdio = 'inherit';
 
@@ -13,6 +17,10 @@ const requiredEnv = (name) => {
 
 const workspace = path.resolve(requiredEnv('CANGJIE_WORKSPACE'));
 const githubWorkspace = path.resolve(requiredEnv('GITHUB_WORKSPACE'));
+const target = getTarget(requiredEnv('CJCJ_SRCBUILD_TARGET'));
+if (process.platform !== target.spec.nodePlatform || process.arch !== target.spec.nodeArch) {
+  throw new Error(`target ${target.spec.key} requires ${target.spec.nodePlatform}/${target.spec.nodeArch}`);
+}
 if (workspace === path.parse(workspace).root || githubWorkspace === path.parse(githubWorkspace).root) {
   throw new Error('CANGJIE_WORKSPACE and GITHUB_WORKSPACE must not be filesystem roots');
 }
@@ -30,7 +38,7 @@ if (allowIdenticalStdValue && allowIdenticalStdValue !== '1') {
 const sdk = path.join(workspace, 'software', 'cangjie');
 const stdlibRoot = path.join(workspace, 'cangjie_runtime', 'stdlib');
 const runtimeTarget = path.join(workspace, 'cangjie_runtime', 'runtime', 'target');
-const tuple = 'linux_x86_64_cjnative';
+const {runtimeTuple: tuple} = target.spec;
 const finalStd = dryRun
   ? path.resolve(requiredEnv('CJCJ_STAGE3_DRY_RUN_FINAL_STD'))
   : path.join(workspace, 'software', 'final-std-stage2');
@@ -45,10 +53,7 @@ const exists = async (file, kind = 'file') => {
   }
 };
 
-const sha256 = async (file) => {
-  const output = await $({stdio: 'pipe'})`sha256sum ${file}`;
-  return output.stdout.trim().split(/\s+/)[0];
-};
+const sha256 = async file => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 
 async function findProductBinary(phase) {
   const binDir = path.join(githubWorkspace, 'target', 'release', 'bin');
@@ -77,49 +82,25 @@ async function assertStage2Compiler(stageEnv, stage2Sha) {
   console.log(`STAGE3_COMPILER_ASSERT_PASS path=${resolvedInstalled} sha256=${installedSha}`);
 }
 
-async function countFinalStd(root) {
-  const modulesTop = path.join(root, 'modules', tuple);
-  const modulesStd = path.join(root, 'modules', tuple, 'std');
-  const staticDir = path.join(root, 'lib', tuple);
-  const sharedDir = path.join(root, 'runtime', 'lib', tuple);
-  for (const directory of [modulesTop, modulesStd, staticDir, sharedDir]) {
-    if (!await exists(directory, 'dir')) throw new Error(`final std directory missing: ${directory}`);
-  }
-  const [topModules, modules, staticLibs, sharedLibs] = await Promise.all([
-    fs.readdir(modulesTop),
-    fs.readdir(modulesStd),
-    fs.readdir(staticDir),
-    fs.readdir(sharedDir),
-  ]);
-  return {
-    cjos: modules.filter((name) => /^std\..+\.cjo$/.test(name)).length
-      + Number(topModules.includes('std.cjo')),
-    bitcode: modules.filter((name) => /^libstd\..+\.bc$/.test(name)).length
-      + Number(topModules.includes('libstd.bc')),
-    staticLibs: staticLibs.filter((name) => /^libcangjie-std(?:-|\.)?.*\.a$/.test(name) && !name.endsWith('FFI.a')).length,
-    ffiStaticLibs: staticLibs.filter((name) => /^libcangjie-std.*FFI\.a$/.test(name)).length,
-    sharedLibs: sharedLibs.filter((name) => /^libcangjie-std(?:-|\.)?.*\.so$/.test(name)).length,
-  };
-}
-
-async function assertFinalStd(root) {
-  const counts = await countFinalStd(root);
-  const expected = dryRun
-    ? {cjos: 1, bitcode: 1, staticLibs: 1, ffiStaticLibs: 1, sharedLibs: 1}
-    : {cjos: 47, bitcode: 47, staticLibs: 47, ffiStaticLibs: 16, sharedLibs: 47};
-  for (const [kind, count] of Object.entries(counts)) {
-    if (count !== expected[kind]) throw new Error(`final std ${kind}: expected ${expected[kind]}, found ${count}`);
-  }
-  console.log(`STAGE3_FINAL_STD_ASSERT_PASS cjos=${counts.cjos} bitcode=${counts.bitcode} static=${counts.staticLibs} ffi_static=${counts.ffiStaticLibs} shared=${counts.sharedLibs}${dryRun ? ' FAKE=1' : ''}`);
-  return counts;
-}
-
 async function countRuntimeMarkers(runtime) {
   const contents = (await fs.readFile(runtime)).toString('latin1');
   return contents.match(/MRT_GCV2_/g)?.length ?? 0;
 }
 
 async function assertStdBarriers(coreLib) {
+  const symbolTable = await $({stdio: 'pipe'})`nm -A ${coreLib}`;
+  const hasMask = symbolTable.stdout.includes('g_cjLoadBadMask');
+  const hasReadBarrier = /CJ_MCC_Read(?:StaticRef|RefField)/.test(symbolTable.stdout);
+  if (!hasMask || !hasReadBarrier) {
+    throw new Error(`final std barrier symbol assertion failed: mask=${hasMask} read_barrier=${hasReadBarrier}`);
+  }
+  if (target.spec.os !== 'linux' || target.spec.arch !== 'x86_64') {
+    // The existing instruction-shape probe is x86-specific. On native AArch64
+    // and Mach-O, require both exact runtime references instead of pretending
+    // the x86 shr/relocation syntax applies.
+    console.log(`STAGE3_BARRIER_SYMBOL_ASSERT_PASS target=${target.spec.key} mask=1 read_barrier=1`);
+    return;
+  }
   const output = await $({stdio: 'pipe'})`objdump -drwC ${coreLib}`;
   const lines = output.stdout.split('\n');
   const symbols = [
@@ -179,8 +160,12 @@ const stageEnv = {
 await assertStage2Compiler(stageEnv, stage2Sha);
 await $({cwd: githubWorkspace, env: stageEnv})`set -o pipefail; cjc --version | head -2`;
 
-const runtime = path.join(sdk, 'runtime', 'lib', tuple, 'libcangjie-runtime.so');
+const runtime = path.join(sdk, 'runtime', 'lib', tuple, target.spec.runtimeLibrary);
 if (!await exists(runtime)) throw new Error(`fork runtime missing: ${runtime}`);
+const runtimeKind = (await $({stdio: 'pipe'})`file -b ${runtime}`).stdout.trim();
+if (!runtimeKind.includes(target.spec.fileFormat) || !runtimeKind.includes(target.spec.fileArch)) {
+  throw new Error(`fork runtime has wrong native format for ${target.spec.key}: ${runtimeKind}`);
+}
 const runtimeMarkers = await countRuntimeMarkers(runtime);
 if (runtimeMarkers === 0) throw new Error(`${runtime} carries no MRT_GCV2_ markers; refusing stock runtime`);
 console.log(`STAGE3_RUNTIME_ASSERT_PASS MRT_GCV2_markers=${runtimeMarkers}`);
@@ -192,16 +177,21 @@ const bootstrapCoreSha = await sha256(bootstrapCore);
 console.log('[stage3] rebuild final std with stage2');
 if (dryRun) {
   console.log(`STAGE3_DRY_RUN_FAKE_ARTIFACTS=1 final_std=${finalStd}`);
-  console.log(`[stage3][dry-run] python3 build.py clean; build -t ${stdlibBuildType} --target-lib=${runtimeTarget}; install --prefix ${finalStd}`);
+  console.log(`[stage3][dry-run] python3 build.py clean; build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}; install --prefix ${finalStd}`);
 } else {
   await fs.rm(finalStd, {recursive: true, force: true});
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py clean`;
   await assertStage2Compiler(stageEnv, stage2Sha);
-  await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t ${stdlibBuildType} --target-lib=${runtimeTarget}`;
+  await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}`;
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
+  await writeStdProvenance({
+    sourceDir: stdlibRoot,
+    installPrefix: finalStd,
+    compiler: path.join(sdk, 'bin', 'cjcj-stage2'),
+  });
 }
 
-await assertFinalStd(finalStd);
+await assertFinalStd(finalStd, target, {dryRun});
 const finalCore = path.join(finalStd, 'lib', tuple, 'libcangjie-std-core.a');
 const finalCoreSha = await sha256(finalCore);
 if (finalCoreSha === bootstrapCoreSha && allowIdenticalStdValue !== '1') {

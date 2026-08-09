@@ -16,28 +16,39 @@ function joinPathsep(...parts) {
 }
 
 export function baseEnv(config) {
+  const spec = config.target.spec;
+  const dryRun = process.env.CANGJIE_BUILD_DRY_RUN === '1';
+  if (!dryRun && (process.platform !== spec.nodePlatform || process.arch !== spec.nodeArch)) {
+    throw new BuildError(
+      'environment',
+      `target ${spec.key} requires host ${spec.nodePlatform}/${spec.nodeArch}, current ${process.platform}/${process.arch}`,
+    );
+  }
+  for (const directory of [spec.llvmBinDir, spec.opensslLibDir].filter(Boolean)) {
+    if (!dryRun && !fs.statSync(directory, {throwIfNoEntry: false})?.isDirectory()) {
+      throw new BuildError('environment', `required platform dependency directory missing: ${directory}`);
+    }
+  }
   const env = {
-    ARCH: 'x86_64',
-    SDK_NAME: config.target.spec.sdkName,
+    ARCH: spec.arch,
+    SDK_NAME: spec.sdkName,
     CANGJIE_VERSION: config.cangjieVersion,
     STDX_VERSION: String(config.stdxVersion),
     BUILD_ROOT: config.buildRoot,
     WORKSPACE: config.workspace,
-    LDFLAGS: '-fuse-ld=lld',
   };
-  const extraPathDirs = ['/usr/lib/llvm-15/bin'];
-  if (config.target.spec.needsMingw) {
+  // Official Linux builds select lld; the macOS guide relies on Apple's linker.
+  if (spec.os === 'linux' || spec.crossCompile) env.LDFLAGS = '-fuse-ld=lld';
+  const extraPathDirs = [spec.llvmBinDir];
+  if (spec.needsMingw) {
     env.MINGW_PATH = mingw.installPath(config.buildRoot);
     extraPathDirs.unshift(path.join(mingw.installPath(config.buildRoot), 'bin'));
   }
 
   const ldPaths = [];
-  if (!config.target.spec.crossCompile && process.platform === 'linux') {
-    const candidate = '/usr/lib/x86_64-linux-gnu';
-    if (fs.existsSync(candidate)) {
-      env.OPENSSL_PATH = candidate;
-      ldPaths.push(candidate);
-    }
+  if (spec.opensslLibDir) {
+    env.OPENSSL_PATH = spec.opensslLibDir;
+    ldPaths.push(spec.opensslLibDir);
   }
 
   const cangjieHome = path.join(config.workspace, 'cangjie_compiler', 'output');
@@ -55,9 +66,15 @@ export function baseEnv(config) {
     config.workspace, 'cangjie_stdx', 'target', config.target.stdxTargetSubdir(), 'static', 'stdx',
   );
   if (fs.statSync(stdxPath, {throwIfNoEntry: false})?.isDirectory()) env.CANGJIE_STDX_PATH = stdxPath;
-  if (ldPaths.length) env.LD_LIBRARY_PATH = joinPathsep(...ldPaths, process.env.LD_LIBRARY_PATH || '');
+  if (ldPaths.length && spec.loaderEnv) {
+    env[spec.loaderEnv] = joinPathsep(...ldPaths, process.env[spec.loaderEnv] || '');
+  }
   env.PATH = joinPathsep(...extraPathDirs, process.env.PATH || '');
   return env;
+}
+
+export function opensslLibPath(config) {
+  return config.target.spec.opensslLibDir || null;
 }
 
 export function windowsCrossArgs(config, {sysroot = true} = {}) {
@@ -84,7 +101,7 @@ export function cmakePrefixPathFor(config) {
   const parts = [];
   if (config.target.spec.needsMingw) {
     parts.push(path.join(mingw.installPath(config.buildRoot), mingw.TARGET_TRIPLE));
-  } else if (process.platform === 'linux') {
+  } else if (config.target.spec.needsStaticLibs) {
     const ncursesRoot = path.join(config.buildRoot, `ncurses-${staticLibs.NCURSES_VERSION}`, 'usr');
     const libeditRoot = path.join(config.buildRoot, 'libedit-3.1');
     if (fs.existsSync(ncursesRoot) || fs.existsSync(libeditRoot)) parts.push(staticLibs.cmakePrefixPath(config.buildRoot));

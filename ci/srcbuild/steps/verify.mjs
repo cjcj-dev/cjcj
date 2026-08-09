@@ -3,6 +3,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {getTarget} from '../../../build/lib/targets.mjs';
 
 $.stdio = 'inherit';
 
@@ -10,17 +11,31 @@ const root = path.resolve(import.meta.dirname, '../../..');
 const sdk = argv._[0];
 if (!sdk) throw new Error('usage: verify.mjs <sdk-dir>');
 const workspace = process.env.CANGJIE_WORKSPACE;
-if (!workspace) throw new Error('CANGJIE_WORKSPACE is required');
+const targetKey = process.env.CJCJ_SRCBUILD_TARGET;
+if (!workspace || !targetKey) throw new Error('CANGJIE_WORKSPACE and CJCJ_SRCBUILD_TARGET are required');
+const target = getTarget(targetKey);
+if (process.platform !== target.spec.nodePlatform || process.arch !== target.spec.nodeArch) {
+  throw new Error(`target ${targetKey} requires ${target.spec.nodePlatform}/${target.spec.nodeArch}`);
+}
 const self = `${sdk}/bin/cjc`;
 const oracle = `${workspace}/cangjie_compiler/output/bin/cjc`;
-let jobs = process.env.CJCJ_VERIFY_JOBS || (await $({stdio: 'pipe'})`nproc`).stdout.trim();
-if ((await $({nothrow: true})`test ${jobs} -gt 16`).exitCode === 0) jobs = '16';
+let jobs = Number(process.env.CJCJ_VERIFY_JOBS || os.cpus().length || 1);
+if (!Number.isSafeInteger(jobs) || jobs < 1) throw new Error(`invalid CJCJ_VERIFY_JOBS: ${process.env.CJCJ_VERIFY_JOBS}`);
+jobs = String(Math.min(jobs, 16));
+const timeoutCommand = target.spec.os === 'darwin' ? 'gtimeout' : 'timeout';
 
 await $`test -x ${self}`;
 await $`test -x ${oracle}`;
 process.env.CANGJIE_HOME = sdk;
 process.env.PATH = `${sdk}/bin:${sdk}/tools/bin:${process.env.PATH}`;
-process.env.LD_LIBRARY_PATH = `${sdk}/third_party/llvm/lib:${sdk}/runtime/lib/linux_x86_64_cjnative:${sdk}/tools/lib:${process.env.LD_LIBRARY_PATH || ''}`;
+const libraryPath = [
+  `${sdk}/third_party/llvm/lib`,
+  `${sdk}/runtime/lib/${target.spec.runtimeTuple}`,
+  `${sdk}/tools/lib`,
+  process.env[target.spec.loaderEnv] || '',
+].filter(Boolean).join(path.delimiter);
+process.env[target.spec.loaderEnv] = libraryPath;
+if (target.spec.os === 'darwin') process.env.DYLD_FALLBACK_LIBRARY_PATH = libraryPath;
 process.env.cjHeapSize ||= '12GB';
 
 const work = `${process.env.RUNNER_TEMP || '/tmp'}/cjcj-srcbuild-verify`;
@@ -35,7 +50,9 @@ async function probeTempExec(rootDir, label) {
     const probe = path.join(probeDir, 'probe.sh');
     await fs.writeFile(probe, '#!/bin/sh\nexit 0\n', {mode: 0o755});
     const result = await $({nothrow: true, quiet: true, stdio: 'pipe'})`${probe}`;
-    const mount = await $({nothrow: true, quiet: true, stdio: 'pipe'})`findmnt -no TARGET,FSTYPE,OPTIONS -T ${probeDir}`;
+    const mount = target.spec.os === 'darwin'
+      ? await $({nothrow: true, quiet: true, stdio: 'pipe'})`df -P ${probeDir}`
+      : await $({nothrow: true, quiet: true, stdio: 'pipe'})`findmnt -no TARGET,FSTYPE,OPTIONS -T ${probeDir}`;
     return `${label}=${rootDir} exec=${result.exitCode} mount=${mount.stdout.trim() || '<unavailable>'}`;
   } catch (error) {
     return `${label}=${rootDir} probe-error=${String(error)}`;
@@ -74,15 +91,17 @@ for (const [label, rootDir] of tempRoots) {
 }
 const sccacheKeys = Object.keys(process.env).filter(key => key === 'RUSTC_WRAPPER' || key.startsWith('SCCACHE_')).sort();
 const sccachePath = await $({nothrow: true, quiet: true, stdio: 'pipe'})`sh -c 'command -v sccache || true'`;
-const oracleLdd = await $({nothrow: true, quiet: true, stdio: 'pipe'})`ldd ${oracle}`;
-const oracleLddOutput = `${oracleLdd.stdout}${oracleLdd.stderr}`;
-const oracleLddNotFound = oracleLddOutput.split(/\r?\n/).filter(line => /not found/i.test(line));
+const oracleDeps = target.spec.os === 'darwin'
+  ? await $({nothrow: true, quiet: true, stdio: 'pipe'})`otool -L ${oracle}`
+  : await $({nothrow: true, quiet: true, stdio: 'pipe'})`ldd ${oracle}`;
+const oracleDepsOutput = `${oracleDeps.stdout}${oracleDeps.stderr}`;
+const oracleDepsNotFound = oracleDepsOutput.split(/\r?\n/).filter(line => /not found/i.test(line));
 const cgroupMemory = await readCgroupMemory();
 
 console.log('[preflight] runner-specific probes');
 for (const line of tempExec) console.log(`  temp-exec: ${line}`);
 console.log(`  sccache: path=${sccachePath.stdout.trim() || '<absent>'} env-keys=${sccacheKeys.join(',') || '<none>'}`);
-console.log(`  oracle-deps: ldd-exit=${oracleLdd.exitCode} not-found=${oracleLddNotFound.join(' | ') || '<none>'}`);
+console.log(`  oracle-deps: inspector=${target.spec.os === 'darwin' ? 'otool' : 'ldd'} exit=${oracleDeps.exitCode} not-found=${oracleDepsNotFound.join(' | ') || '<none>'}`);
 console.log(`  cgroup-memory: ${cgroupMemory}`);
 
 async function reportPreflightFailure(label, result) {
@@ -90,9 +109,9 @@ async function reportPreflightFailure(label, result) {
   if (result.stdout) process.stderr.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   console.error(`[preflight] PATH=${process.env.PATH}`);
-  console.error(`[preflight] LD_LIBRARY_PATH=${process.env.LD_LIBRARY_PATH}`);
+  console.error(`[preflight] ${target.spec.loaderEnv}=${process.env[target.spec.loaderEnv]}`);
   console.error(`[preflight] CANGJIE_HOME=${process.env.CANGJIE_HOME}`);
-  console.error(`[preflight] oracle ldd not-found: ${oracleLddNotFound.join(' | ') || '<none>'}`);
+  console.error(`[preflight] oracle dependencies not-found: ${oracleDepsNotFound.join(' | ') || '<none>'}`);
   console.error(`[preflight] temp exec: ${tempExec.join(' || ')}`);
   console.error(`[preflight] sccache env keys: ${sccacheKeys.join(',') || '<none>'}`);
   console.error(`[preflight] cgroup memory: ${cgroupMemory}`);
@@ -113,7 +132,7 @@ if (!firstCorpusName) throw new Error(`reference oracle preflight failed: no .cj
 const firstCorpus = path.join(corpus, firstCorpusName);
 const preflightOutput = path.join(work, 'ref-preflight');
 console.log(`[preflight] reference compile: ${firstCorpusName}`);
-const referenceCompile = await $({nothrow: true, quiet: true, stdio: 'pipe', cwd: work})`timeout 180 ${oracle} ${firstCorpus} -o ${preflightOutput}`;
+const referenceCompile = await $({nothrow: true, quiet: true, stdio: 'pipe', cwd: work})`${timeoutCommand} 180 ${oracle} ${firstCorpus} -o ${preflightOutput}`;
 await fs.rm(preflightOutput, {force: true});
 if (referenceCompile.exitCode !== 0) {
   await reportPreflightFailure(`reference compile ${firstCorpusName}`, referenceCompile);
@@ -143,7 +162,7 @@ const packages = [
 ];
 for (const pkg of packages) {
   console.log(`[selfcheck] package ${pkg}`);
-  await $`timeout 900 ${self} --package ${root}/packages/${pkg}/src --module-name cjcj --import-path ${root}/target/release --output-type=staticlib -o ${work}/${pkg}.a`;
+  await $`${timeoutCommand} 900 ${self} --package ${root}/packages/${pkg}/src --module-name cjcj --import-path ${root}/target/release --output-type=staticlib -o ${work}/${pkg}.a`;
 }
 
 console.log('[bcgate] verify bitcode parity');
