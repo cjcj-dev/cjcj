@@ -37,7 +37,7 @@ test('release connects each platform row to its same-platform final std', async 
   assert.ok(release.includes('pattern: pkg-*'));
 });
 
-test('final std download and both package commands are fail-closed', async () => {
+test('final std and Python inputs plus both package commands are fail-closed', async () => {
   const consumer = await workflow('build-release-package.yml');
   const downloadStart = consumer.indexOf('- name: Download same-platform source-built final std');
   const downloadEnd = consumer.indexOf('\n      - name:', downloadStart + 1);
@@ -47,6 +47,15 @@ test('final std download and both package commands are fail-closed', async () =>
   assert.ok(download.includes('path: ${{ env.FINAL_STD_DIR }}'));
   assert.ok(!download.includes('continue-on-error'));
   assert.equal(consumer.match(/--std-dir/g)?.length, 2);
+  assert.equal(consumer.match(/--python-bundle/g)?.length, 2);
+  assert.equal(consumer.match(/prepare_python_bundle\.mjs/g)?.length, 2);
+  assert.equal(consumer.match(/verify_packaged_cjdb\.mjs/g)?.length, 2);
+  for (const name of ['Prepare Python 3.11 bundle (Unix)', 'Prepare Python 3.11 bundle (Windows)']) {
+    const start = consumer.indexOf(`- name: ${name}`);
+    const end = consumer.indexOf('\n      - name:', start + 1);
+    assert.ok(start >= 0, name);
+    assert.ok(!consumer.slice(start, end).includes('continue-on-error'), name);
+  }
   assert.ok(consumer.includes('EXPECTED_STD_ARTIFACT: final-std-${{ inputs.platform }}'));
 });
 
