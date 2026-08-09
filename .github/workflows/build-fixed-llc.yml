@@ -110,6 +110,8 @@ jobs:
           {
             printf 'PLATFORM=%s\n' '${{ matrix.platform }}'
             printf 'LLVM_SHA=%s\n' "$LLVM_SHA"
+            printf 'CANGJIE_COMPILER_SHA=%s\n' "$CANGJIE_COMPILER_SHA"
+            printf 'FLATBUFFERS_SHA=%s\n' "$FLATBUFFERS_SHA"
             printf 'LLC_SHA256=%s\n' "$llc_sha"
             printf 'OPT_SHA256=%s\n' "$opt_sha"
           } > "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
@@ -130,6 +132,13 @@ jobs:
             -Iflatbuffers/include -Ishim-generated \
             -c runtime_shim/cjselfhost_llvmshim.cpp \
             -o "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
+          if command -v sha256sum >/dev/null; then
+            shim_sha="$(sha256sum "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          else
+            shim_sha="$(shasum -a 256 "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          fi
+          printf 'SHIM_SHA256=%s\n' "$shim_sha" >> \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
 
       - name: Verify LLVM tools
         run: |
@@ -162,11 +171,22 @@ jobs:
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           grep -Fx "LLVM_SHA=$LLVM_SHA" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "CANGJIE_COMPILER_SHA=$CANGJIE_COMPILER_SHA" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "FLATBUFFERS_SHA=$FLATBUFFERS_SHA" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           grep -Fx "LLC_SHA256=$llc_sha" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           grep -Fx "OPT_SHA256=$opt_sha" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           file "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
+          if command -v sha256sum >/dev/null; then
+            shim_sha="$(sha256sum "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          else
+            shim_sha="$(shasum -a 256 "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          fi
+          grep -Fx "SHIM_SHA256=$shim_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           shim_exports="$(nm -C "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" \
             | grep -cE ' T _?(LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
           test "$shim_exports" -ge 90
