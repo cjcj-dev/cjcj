@@ -209,7 +209,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             binutils build-essential libssl-dev zlib1g-dev libffi-dev libbz2-dev \
-            liblzma-dev libreadline-dev libsqlite3-dev libncursesw5-dev uuid-dev tk-dev
+            liblzma-dev libreadline-dev libsqlite3-dev libncurses-dev uuid-dev tk-dev
 
       - name: Install Python build dependencies (macOS)
         if: runner.os == 'macOS'
