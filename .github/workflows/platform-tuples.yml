@@ -57,7 +57,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: fixed-toolchain/${{ matrix.platform }}
-          key: tuple-${{ matrix.platform }}-${{ steps.llvm-pin.outputs.sha }}-${{ hashFiles('.github/workflows/platform-tuples.yml', 'ci/platform_tuples/**', 'ci/platform_matrix/**') }}
+          key: tuple-${{ matrix.platform }}-${{ steps.llvm-pin.outputs.sha }}-${{ hashFiles('.github/workflows/platform-tuples.yml', 'ci/llvm_pin.env', 'ci/platform_tuples/**', 'ci/platform_matrix/**', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
 
       - name: Prepare MSYS2/MinGW LLVM toolchain
         id: msys2-setup
