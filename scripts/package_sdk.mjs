@@ -5,6 +5,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {requirePrivateStage} from '../build/lib/package-safety.mjs';
+import {
+  installPythonBundle,
+  RELEASE_PYTHON_SOURCE,
+} from '../build/lib/python-bundle.mjs';
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
 
 const required = name => {
@@ -17,6 +21,7 @@ const binary = required('binary');
 const version = required('version');
 const platform = required('platform');
 const outdir = required('outdir');
+const pythonBundle = required('python-bundle');
 const runtimeLib = typeof argv['runtime-lib'] === 'string' ? argv['runtime-lib'] : '';
 const runtimeRoot = typeof argv['runtime-root'] === 'string' ? argv['runtime-root'] : '';
 const allowStockRuntime = argv['allow-stock-runtime'] === true;
@@ -42,6 +47,7 @@ if (runtimeLib && !await exists(runtimeLib)) { console.error(`runtime library no
 if (runtimeRoot && !await exists(runtimeRoot, 'dir')) { console.error(`runtime root not found: ${runtimeRoot}`); process.exit(2); }
 if (stdDir && !await exists(stdDir, 'dir')) { console.error(`std dir not found: ${stdDir}`); process.exit(2); }
 if (llvmManifest && !await exists(llvmManifest)) { console.error(`LLVM manifest not found: ${llvmManifest}`); process.exit(2); }
+if (!await exists(pythonBundle, 'dir')) { console.error(`Python bundle dir not found: ${pythonBundle}`); process.exit(2); }
 
 const platforms = {
   'linux-x64': ['linux_x86_64_cjnative', 'tar', ''],
@@ -61,7 +67,7 @@ const stage = path.join(outputRoot, packageName);
 await fs.mkdir(outputRoot, {recursive: true});
 await fs.rm(stage, {recursive: true, force: true});
 
-console.log(`[1/8] copy SDK tree -> ${stage}`);
+console.log(`[1/9] copy SDK tree -> ${stage}`);
 const sdkSource = await fs.realpath(sdk);
 if (isWindows) await fs.cp(sdkSource, stage, {recursive: true, dereference: true});
 else {
@@ -71,7 +77,7 @@ else {
 await requirePrivateStage(stage, outputRoot, sdkSource);
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 
-console.log('[2/8] install our compiler as bin/cjc');
+console.log('[2/9] install our compiler as bin/cjc');
 const installed = path.join(stage, `bin/cjc${exeSuffix}`);
 await Promise.all([
   fs.rm(path.join(stage, 'bin', 'cjc'), {force: true}),
@@ -80,7 +86,7 @@ await Promise.all([
 await fs.copyFile(binary, installed);
 await fs.chmod(installed, 0o755);
 
-console.log('[3/8] swap in patched runtime');
+console.log('[3/9] swap in patched runtime');
 let packagedRuntime = '';
 if (isWindows) {
   if (!runtimeRoot) { console.error('  ERROR: Windows packaging requires --runtime-root'); process.exit(3); }
@@ -145,7 +151,7 @@ if (!allowStockRuntime) {
 //   (a) SDK root with modules/<tuple>/std + lib/<tuple>
 //   (b) modules tree root containing <tuple>/std
 //   (c) the std package dir itself (…/std with std.core.a …)
-console.log('[4/8] overlay rebuilt std');
+console.log('[4/9] overlay rebuilt std');
 let stdProvenance = '';
 if (stdDir) {
   const stdSource = await fs.realpath(stdDir);
@@ -445,7 +451,18 @@ if (stdDir) {
   process.exit(3);
 }
 
-console.log('[5/8] set relative runtime lookup paths');
+console.log('[5/9] bundle Python 3.11 for cjdb');
+const packagedPython = await installPythonBundle({
+  source: pythonBundle,
+  stage,
+  platform,
+  runtimeDir,
+});
+console.log(`  Python ${packagedPython.version}: ${packagedPython.artifact}`);
+console.log(`  cjdb launcher: ${packagedPython.launcher}`);
+console.log(`  PSF license: ${packagedPython.license}`);
+
+console.log('[6/9] set relative runtime lookup paths');
 if (platform.startsWith('linux-')) {
   // cjc no longer carries $ORIGIN rpaths: the binary does not get to assume where it sits
   // relative to its SDK, and the nightly cjpm rejects $ORIGIN outright. envsetup.sh below is
@@ -533,7 +550,7 @@ if (platform.startsWith('linux-')) {
   console.log('  Windows resolves packaged DLLs through runtime/lib and PATH');
 }
 
-console.log('[6/8] write release provenance manifest');
+console.log('[7/9] write release provenance manifest');
 const {destination: releaseManifest} = await writeReleaseManifest({
   stage,
   platform,
@@ -550,13 +567,18 @@ const {destination: releaseManifest} = await writeReleaseManifest({
   stdRepository: stdSourceRepository,
   cjpmRepository: cjpmSourceRepository,
   cjpmCommit: cjpmSourceCommit,
+  pythonArtifact: packagedPython.artifact,
+  pythonMetadata: packagedPython.metadata,
+  pythonMetadataArtifact: packagedPython.metadataArtifact,
+  pythonRepository: RELEASE_PYTHON_SOURCE,
+  pythonVersion: packagedPython.version,
 });
 const exportedManifest = path.join(outputRoot, `${packageName}.${RELEASE_MANIFEST}`);
 await fs.copyFile(releaseManifest, exportedManifest);
 console.log(`  archive: ${releaseManifest}`);
 console.log(`  release metadata: ${exportedManifest}`);
 
-console.log('[7/8] archive');
+console.log('[8/9] archive');
 const archivePath = path.join(outdir, `${packageName}.${archiveType === 'tar' ? 'tar.gz' : 'zip'}`);
 if (archiveType === 'tar') await $({stdio: 'inherit'})`tar -C ${outdir} -czf ${archivePath} ${packageName}`;
 else {
@@ -568,7 +590,7 @@ else {
   await $({stdio: 'inherit'})`pwsh -NoLogo -NoProfile -Command ${command}`;
 }
 
-console.log('[8/8] sha256');
+console.log('[9/9] sha256');
 const archiveDigest = crypto.createHash('sha256').update(await fs.readFile(archivePath)).digest('hex');
 const digest = `${archiveDigest}  ${path.basename(archivePath)}\n`;
 await fs.writeFile(`${archivePath}.sha256`, digest);

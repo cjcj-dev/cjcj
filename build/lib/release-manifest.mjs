@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export const RELEASE_MANIFEST = 'RELEASE-MANIFEST.jsonl';
+export const RELEASE_SIGNATURE_POLICY = 'SHA_ONLY';
 
 const unavailable = reason => `unavailable: ${reason}`;
 
@@ -107,7 +108,38 @@ export async function writeReleaseManifest({
   stdRepository = '',
   cjpmRepository = '',
   cjpmCommit = '',
+  pythonArtifact = '',
+  pythonMetadata = {},
+  pythonMetadataArtifact = '',
+  pythonRepository = 'https://github.com/python/cpython.git',
+  pythonVersion = '',
+  signaturePolicy = RELEASE_SIGNATURE_POLICY,
 }) {
+  const normalizedSignaturePolicy = typeof signaturePolicy === 'string' ? signaturePolicy.trim() : '';
+  if (normalizedSignaturePolicy !== RELEASE_SIGNATURE_POLICY) {
+    throw new Error(`signature_policy must be ${RELEASE_SIGNATURE_POLICY}, got ${normalizedSignaturePolicy || '<empty>'}`);
+  }
+  if (!/^3\.11\.\d+$/.test(pythonVersion)) {
+    throw new Error(`python version must be exact 3.11.x, got ${pythonVersion || '<empty>'}`);
+  }
+  if (!await fileExists(pythonArtifact)) {
+    throw new Error(`packaged Python ${pythonVersion} artifact is missing: ${pythonArtifact || '<empty>'}`);
+  }
+  if (!await fileExists(pythonMetadataArtifact)) {
+    throw new Error(`packaged Python provenance is missing: ${pythonMetadataArtifact || '<empty>'}`);
+  }
+  for (const [name, value] of Object.entries({
+    source_type: pythonMetadata.source_type,
+    source_url: pythonMetadata.source_url,
+    source_sha256: pythonMetadata.source_sha256,
+    configure_args: pythonMetadata.configure_args,
+    configure_environment: pythonMetadata.configure_environment,
+  })) {
+    if (typeof value !== 'string' || value.length === 0) throw new Error(`python metadata ${name} is empty`);
+  }
+  if (!/^[0-9a-f]{64}$/.test(pythonMetadata.source_sha256)) {
+    throw new Error(`python metadata source_sha256 is invalid: ${pythonMetadata.source_sha256}`);
+  }
   const cjcjFile = findExecutable(stage, 'bin/cjc', exeSuffix);
   const llcFile = findExecutable(stage, 'third_party/llvm/bin/llc', exeSuffix);
   const optFile = findExecutable(stage, 'third_party/llvm/bin/opt', exeSuffix);
@@ -117,6 +149,8 @@ export async function writeReleaseManifest({
   const llc = await artifact(stage, llcFile, 'packaged llc is missing', ['CJLLVM-COMMIT']);
   const opt = await artifact(stage, optFile, 'packaged opt is missing', ['CJLLVM-COMMIT']);
   const cjpm = await artifact(stage, cjpmFile, 'packaged cjpm is missing');
+  const python = await artifact(stage, pythonArtifact, `packaged Python ${pythonVersion} is missing`);
+  const pythonProvenance = await artifact(stage, pythonMetadataArtifact, 'packaged Python provenance is missing');
 
   const stdText = await fileExists(stdProvenance) ? await fs.readFile(stdProvenance, 'utf8') : '';
   const llvmText = await fileExists(llvmManifest) ? await fs.readFile(llvmManifest, 'utf8') : '';
@@ -192,7 +226,27 @@ export async function writeReleaseManifest({
       artifact: {path: cjpm.path, sha256: cjpm.sha256},
       embedded_stamp: cjpm.embedded_stamp,
     },
-  ];
+    {
+      schema: 1,
+      platform,
+      component: 'python',
+      source: {
+        repository: present(pythonRepository, 'Python source repository was not supplied'),
+        commit: pythonVersion,
+        download_url: pythonMetadata.source_url,
+        archive_sha256: pythonMetadata.source_sha256,
+      },
+      artifact: {path: python.path, sha256: python.sha256},
+      embedded_stamp: `PYTHON-VERSION:${pythonVersion}`,
+      build: {
+        source_type: pythonMetadata.source_type,
+        configure_args: pythonMetadata.configure_args,
+        configure_environment: pythonMetadata.configure_environment,
+        provenance_path: pythonProvenance.path,
+        provenance_sha256: pythonProvenance.sha256,
+      },
+    },
+  ].map(row => ({...row, signature_policy: normalizedSignaturePolicy}));
 
   for (const row of rows) {
     for (const [name, value] of Object.entries({
@@ -203,8 +257,22 @@ export async function writeReleaseManifest({
       artifact_path: row.artifact.path,
       artifact_sha256: row.artifact.sha256,
       embedded_stamp: row.embedded_stamp,
+      signature_policy: row.signature_policy,
     })) {
       if (typeof value !== 'string' || value.length === 0) throw new Error(`${row.component}.${name} is empty`);
+    }
+    if (row.component === 'python') {
+      for (const [name, value] of Object.entries({
+        source_download_url: row.source.download_url,
+        source_archive_sha256: row.source.archive_sha256,
+        build_source_type: row.build.source_type,
+        build_configure_args: row.build.configure_args,
+        build_configure_environment: row.build.configure_environment,
+        build_provenance_path: row.build.provenance_path,
+        build_provenance_sha256: row.build.provenance_sha256,
+      })) {
+        if (typeof value !== 'string' || value.length === 0) throw new Error(`python.${name} is empty`);
+      }
     }
   }
 

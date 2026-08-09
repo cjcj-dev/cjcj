@@ -56,6 +56,7 @@ jobs:
       MATRIX_RUNNER: ${{ inputs.runner }}
       SDK_RUNTIME_DIR: ${{ inputs.sdk_runtime_dir }}
       FINAL_STD_DIR: ${{ github.workspace }}/.release-final-std/${{ inputs.platform }}
+      PYTHON_BUNDLE_DIR: ${{ github.workspace }}/.release-python/${{ inputs.platform }}/bundle
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
@@ -204,7 +205,11 @@ jobs:
 
       - name: Install packaging dependency (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            binutils build-essential libssl-dev zlib1g-dev libffi-dev libbz2-dev \
+            liblzma-dev libreadline-dev libsqlite3-dev libncurses-dev uuid-dev tk-dev
 
       - name: Install runtime build dependencies (Linux)
         if: runner.os == 'Linux' && steps.rtcache.outputs.cache-hit != 'true'
@@ -266,6 +271,16 @@ jobs:
         if: runner.os == 'Linux'
         run: cjpm build
 
+      - name: Prepare Python 3.11 bundle (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: node ci/release/prepare_python_bundle.mjs "${{ inputs.platform }}" "$PYTHON_BUNDLE_DIR"
+
+      - name: Prepare Python 3.11 bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: node ci/release/prepare_python_bundle.mjs "${{ inputs.platform }}" "$env:PYTHON_BUNDLE_DIR"
+
       - name: Compose SDK package
         if: runner.os != 'Windows'
         shell: bash
@@ -286,6 +301,7 @@ jobs:
             --runtime-source-sha "$RUNTIME_REF" \
             --llvm-source-repo "$LLVM_URL" \
             --std-source-repo "$RUNTIME_SRC_URL" \
+            --python-bundle "$PYTHON_BUNDLE_DIR" \
             --version "${{ inputs.version }}" \
             --platform "${{ inputs.platform }}" \
             --outdir "$PWD/dist"
@@ -312,6 +328,7 @@ jobs:
             --runtime-source-sha "$env:RUNTIME_REF" `
             --llvm-source-repo "$env:LLVM_URL" `
             --std-source-repo "$env:RUNTIME_SRC_URL" `
+            --python-bundle "$env:PYTHON_BUNDLE_DIR" `
             --version "${{ inputs.version }}" `
             --platform "${{ inputs.platform }}" `
             --outdir "$PWD\dist"
@@ -329,6 +346,7 @@ jobs:
           export cjHeapSize=12GB
           work="$RUNNER_TEMP/release-smoke"
           trap 'rm -rf "$work" pkgtest' EXIT
+          node scripts/verify_packaged_cjdb.mjs "$PWD/pkgtest/${pkg}"
           npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/pkgtest/${pkg}/bin/cjc" "$work"
 
       - name: Verify packaged SDK (Windows)
@@ -346,6 +364,8 @@ jobs:
             $env:CANGJIE_HOME = $root
             $env:cjHeapSize = '12GB'
             $env:PATH = "$root\bin;$root\runtime\lib\windows_x86_64_cjnative;$root\tools\lib;$env:PATH"
+            node scripts/verify_packaged_cjdb.mjs $root
+            if ($LASTEXITCODE -ne 0) { throw "packaged cjdb verification failed: $LASTEXITCODE" }
             npx --yes zx@8 ci/smoke/run_smoke.mjs "$root\bin\cjc.exe" $work
             $smokeExit = $LASTEXITCODE
           } finally {
