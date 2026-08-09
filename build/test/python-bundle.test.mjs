@@ -34,6 +34,7 @@ async function fixture() {
   ].join('\n'));
   await fs.mkdir(path.join(source, 'lib', 'python3.11'), {recursive: true});
   await fs.writeFile(path.join(source, 'lib', 'libpython3.11.so.1.0'), 'fixture libpython\n');
+  await fs.symlink('libpython3.11.so.1.0', path.join(source, 'lib', 'libpython3.11.so'));
   await fs.writeFile(path.join(source, 'lib', 'python3.11', 'os.py'), '# fixture stdlib\n');
   await fs.writeFile(path.join(source, 'LICENSE.txt'), 'PSF LICENSE AGREEMENT fixture\n');
   await fs.writeFile(path.join(source, 'PYTHON-BUNDLE.json'), `${JSON.stringify({
@@ -65,6 +66,8 @@ test('Linux cjdb launcher uses only the packaged Python by relative path', async
     assert.equal(installed.version, RELEASE_PYTHON_VERSION);
     assert.equal(installed.artifact, path.join(stage, 'third_party', 'python', 'bin', 'python3.11'));
     assert.equal(await fs.readFile(installed.license, 'utf8'), 'PSF LICENSE AGREEMENT fixture\n');
+    assert.equal(await fs.readlink(path.join(stage, 'third_party', 'python', 'lib', 'libpython3.11.so')),
+      'libpython3.11.so.1.0');
     const session = spawnSync(installed.launcher, ['--batch', '-o', 'quit'], {
       encoding: 'utf8', env: {...process.env, PYTHONHOME: '/host/python', PYTHONPATH: '/host/modules'},
     });
