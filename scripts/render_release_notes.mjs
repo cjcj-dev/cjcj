@@ -52,7 +52,7 @@ const lines = [
 
 for (const {name, match, rows} of loadedManifests) {
   lines.push('', `### ${match[1]}`, '',
-    '| component | source commit | artifact SHA-256 | embedded stamp |',
+    '| component | source commit/version | artifact SHA-256 | embedded stamp |',
     '|---|---|---|---|');
   for (const row of rows) {
     const values = [row.component, row.source?.commit, row.artifact?.sha256, row.embedded_stamp];
