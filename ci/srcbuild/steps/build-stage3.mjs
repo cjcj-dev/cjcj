@@ -18,6 +18,9 @@ const requiredEnv = (name) => {
 const workspace = path.resolve(requiredEnv('CANGJIE_WORKSPACE'));
 const githubWorkspace = path.resolve(requiredEnv('GITHUB_WORKSPACE'));
 const target = getTarget(requiredEnv('CJCJ_SRCBUILD_TARGET'));
+if (process.platform !== target.spec.nodePlatform || process.arch !== target.spec.nodeArch) {
+  throw new Error(`target ${target.spec.key} requires ${target.spec.nodePlatform}/${target.spec.nodeArch}`);
+}
 if (workspace === path.parse(workspace).root || githubWorkspace === path.parse(githubWorkspace).root) {
   throw new Error('CANGJIE_WORKSPACE and GITHUB_WORKSPACE must not be filesystem roots');
 }
