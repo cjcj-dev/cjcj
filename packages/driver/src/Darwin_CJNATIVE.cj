@@ -85,7 +85,7 @@ public open class Darwin_CJNATIVE <: MachO {
         }
         let tool = Tool(ldPath, ToolType.BACKEND, driverOptions.environment.allVariables)
         tool.SetLdLibraryPath(FileUtil.JoinPath(FileUtil.GetDirPath(ldPath), "../lib"))
-        let outputFileInfo = CreateNewFileInfoWrapper(objFiles, TempFileKind.T_OBJ)
+        var outputFileInfo = CreateNewFileInfoWrapper(objFiles, TempFileKind.T_OBJ)
         let ltoObjectDir = outputFileInfo.filePath + ".lto"
         let ltoObjectPath = FileUtil.JoinPath(ltoObjectDir, "0." + GetTargetArchString() + ".lto.o")
         GenerateLinkOptionsForLTO(tool)
