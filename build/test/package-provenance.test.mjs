@@ -5,6 +5,13 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {
+  BASE_SDK_PROVENANCE,
+  CJPM_PROVENANCE,
+  baseSdkDownload,
+  writeBaseSdkProvenance,
+  writeCjpmProvenance,
+} from '../lib/release-component-provenance.mjs';
+import {
   CJDB_PYTHON_MODULES,
   CJDB_PYTHON_UNIX_MODULES,
   RELEASE_PYTHON_SOURCE_SHA256,
@@ -17,6 +24,7 @@ const CJCJ_SHA = 'a'.repeat(40);
 const RUNTIME_SHA = 'b'.repeat(40);
 const LLVM_SHA = 'c'.repeat(40);
 const STD_SHA = 'd'.repeat(40);
+const CJPM_SHA = 'e'.repeat(40);
 
 async function write(root, relative, contents, mode) {
   const file = path.join(root, relative);
@@ -26,12 +34,16 @@ async function write(root, relative, contents, mode) {
 }
 
 function run(command, args, options = {}) {
-  const result = spawnSync('timeout', ['90s', 'nice', '-n', '15', command, ...args], {
+  const result = runRaw(command, args, options);
+  assert.equal(result.status, 0, `${command} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  return result;
+}
+
+function runRaw(command, args, options = {}) {
+  return spawnSync('timeout', ['90s', 'nice', '-n', '15', command, ...args], {
     encoding: 'utf8',
     ...options,
   });
-  assert.equal(result.status, 0, `${command} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-  return result;
 }
 
 async function writePythonBundle(root) {
@@ -82,6 +94,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     `fixture-runtime\0CJRT-COMMIT:${RUNTIME_SHA}\0`);
   await write(sdk, 'third_party/llvm/bin/llc', `fixture-llc\0CJLLVM-COMMIT:${LLVM_SHA}\0`, 0o755);
   await write(sdk, 'third_party/llvm/bin/opt', 'fixture-opt-with-stamp-removed', 0o755);
+  const cjpm = await write(sdk, 'tools/bin/cjpm', 'fixture source-built cjpm', 0o755);
   await fs.mkdir(path.join(sdk, 'bin'), {recursive: true});
   await fs.mkdir(path.join(sdk, 'lib', TUPLE), {recursive: true});
   await fs.mkdir(path.join(sdk, 'modules', TUPLE, 'std'), {recursive: true});
@@ -114,22 +127,46 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     `OPT_SHA256=${'2'.repeat(64)}`,
     '',
   ].join('\n'));
+  const baseSdkId = 'nightly-fixture';
+  const baseArchive = await write(root, baseSdkDownload('linux-x64', baseSdkId).archive,
+    'fixture official SDK archive');
+  const baseSidecar = path.join(root, BASE_SDK_PROVENANCE);
+  await writeBaseSdkProvenance({
+    archive: baseArchive,
+    destination: baseSidecar,
+    platform: 'linux-x64',
+    toolchain: baseSdkId,
+  });
+  const cjpmSidecar = path.join(root, CJPM_PROVENANCE);
+  await writeCjpmProvenance({
+    binary: cjpm,
+    destination: cjpmSidecar,
+    platform: 'linux-x64',
+    repository: 'https://github.com/cjcj-dev/cangjie-tools.git',
+    commit: CJPM_SHA,
+  });
 
-  const packaged = run('zx', [path.resolve('scripts/package_sdk.mjs'),
+  const packageArgs = [path.resolve('scripts/package_sdk.mjs'),
     '--sdk', sdk,
     '--binary', binary,
     '--allow-stock-runtime',
     '--std-dir', std,
     '--llvm-manifest', llvmManifest,
     '--python-bundle', pythonBundle,
-    '--base-sdk-id', 'fixture-sdk',
+    '--base-sdk-id', baseSdkId,
+    '--base-sdk-archive', baseArchive,
+    '--base-sdk-provenance', baseSidecar,
     '--cjcj-source-sha', CJCJ_SHA,
     '--runtime-source-sha', RUNTIME_SHA,
     '--std-source-repo', 'https://github.com/cjcj-dev/cangjie-runtime.git',
+    '--cjpm-provenance', cjpmSidecar,
+    '--cjpm-source-repo', 'https://github.com/cjcj-dev/cangjie-tools.git',
+    '--cjpm-source-sha', CJPM_SHA,
     '--version', 'fixture',
     '--platform', 'linux-x64',
     '--outdir', out,
-  ], {cwd: path.resolve('.')});
+  ];
+  const packaged = run('zx', packageArgs, {cwd: path.resolve('.')});
   assert.match(packaged.stdout, /DONE: .*cjcj-fixture-linux-x64\.tar\.gz/);
 
   const packageName = 'cjcj-fixture-linux-x64';
@@ -139,13 +176,35 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.equal(rows.length, 8);
   assert.equal(rows.find(row => row.component === 'llvm-opt').embedded_stamp, 'no-stamp');
   assert.equal(rows.find(row => row.component === 'python').source.commit, RELEASE_PYTHON_VERSION);
-  assert.match(rows.find(row => row.component === 'cjpm').artifact.sha256,
-    /^unavailable: packaged cjpm is missing$/);
+  assert.equal(rows.find(row => row.component === 'base-sdk').source.version, 'fixture');
+  assert.match(rows.find(row => row.component === 'base-sdk').artifact.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(rows.find(row => row.component === 'cjpm').source.commit, CJPM_SHA);
+  assert.match(rows.find(row => row.component === 'cjpm').artifact.sha256, /^[0-9a-f]{64}$/);
   const listing = run('tar', ['-tzf', path.join(out, `${packageName}.tar.gz`)]).stdout;
   assert.match(listing, new RegExp(`${packageName}/PROVENANCE\\.txt`));
   assert.match(listing, new RegExp(`${packageName}/RELEASE-MANIFEST\\.jsonl`));
+  assert.match(listing, new RegExp(`${packageName}/${BASE_SDK_PROVENANCE}`));
+  assert.match(listing, new RegExp(`${packageName}/${CJPM_PROVENANCE}`));
   console.log(`PACKAGER-OUTPUT-BEGIN\n${packaged.stdout.trim()}\nPACKAGER-OUTPUT-END`);
   console.log(`ARCHIVE-PROVENANCE-BEGIN\n${listing.split('\n').filter(line =>
     /PROVENANCE|RELEASE-MANIFEST/.test(line)).join('\n')}\nARCHIVE-PROVENANCE-END`);
   console.log(`RELEASE-MANIFEST-BEGIN\n${manifestText.trim()}\nRELEASE-MANIFEST-END`);
+
+  await fs.rm(baseSidecar);
+  const deleted = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+  assert.notEqual(deleted.status, 0, 'deleting the base SDK sidecar must fail closed');
+  console.log(`NEGATIVE-DELETE-SIDECAR RC=${deleted.status}\n${deleted.stderr.trim()}`);
+  await writeBaseSdkProvenance({
+    archive: baseArchive,
+    destination: baseSidecar,
+    platform: 'linux-x64',
+    toolchain: baseSdkId,
+  });
+
+  const changedCjpmSha = `f${CJPM_SHA.slice(1)}`;
+  const changedSidecar = (await fs.readFile(cjpmSidecar, 'utf8')).replace(CJPM_SHA, changedCjpmSha);
+  await fs.writeFile(cjpmSidecar, changedSidecar);
+  const changed = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+  assert.notEqual(changed.status, 0, 'changing one byte in the cjpm sidecar must fail closed');
+  console.log(`NEGATIVE-CHANGE-SIDECAR RC=${changed.status}\n${changed.stderr.trim()}`);
 });

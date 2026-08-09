@@ -57,6 +57,8 @@ jobs:
       SDK_RUNTIME_DIR: ${{ inputs.sdk_runtime_dir }}
       FINAL_STD_DIR: ${{ github.workspace }}/.release-final-std/${{ inputs.platform }}
       PYTHON_BUNDLE_DIR: ${{ github.workspace }}/.release-python/${{ inputs.platform }}/bundle
+      RELEASE_PLATFORM: ${{ inputs.platform }}
+      SOURCE_CJPM_DIR: ${{ github.workspace }}/.release-cjpm/${{ inputs.platform }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
@@ -76,6 +78,13 @@ jobs:
           name: ${{ inputs.std_artifact }}
           path: ${{ env.FINAL_STD_DIR }}
 
+      - name: Download same-platform source-built cjpm
+        if: runner.os != 'Windows'
+        uses: actions/download-artifact@v8
+        with:
+          name: source-cjpm-${{ inputs.platform }}
+          path: ${{ env.SOURCE_CJPM_DIR }}
+
       - name: Test release build helpers
         if: inputs.platform == 'linux-x64'
         run: node --test build/test/runtime-pin.test.mjs
@@ -90,6 +99,14 @@ jobs:
       - name: Load LLVM provenance pin
         shell: bash
         run: cat ci/llvm_pin.env >> "$GITHUB_ENV"
+
+      - name: Retain exact official base SDK archive
+        shell: bash
+        run: |
+          node ci/release/prepare_base_sdk.mjs \
+            --platform "$RELEASE_PLATFORM" \
+            --toolchain "$CJCJ_TOOLCHAIN" \
+            --outdir "$RUNNER_TEMP/release-base-sdk"
 
       - name: Prepare MSYS2/MINGW64 cjcj toolchain
         if: runner.os == 'Windows'
@@ -271,6 +288,15 @@ jobs:
         if: runner.os == 'Linux'
         run: cjpm build
 
+      - name: Install source-built cjpm (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          node ci/release/install_cjpm_artifact.mjs \
+            --platform "$RELEASE_PLATFORM" \
+            --artifact "$SOURCE_CJPM_DIR" \
+            --sdk "$CANGJIE_HOME"
+
       - name: Prepare Python 3.11 bundle (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -295,12 +321,17 @@ jobs:
             --std-dir "$FINAL_STD_DIR" \
             --llvm-manifest "$llvm_manifest" \
             --base-sdk-id "$CJCJ_TOOLCHAIN" \
+            --base-sdk-archive "$BASE_SDK_ARCHIVE" \
+            --base-sdk-provenance "$BASE_SDK_PROVENANCE" \
             --cjcj-source-repo "${{ github.server_url }}/${{ github.repository }}.git" \
             --cjcj-source-sha "${{ github.sha }}" \
             --runtime-source-repo "$RUNTIME_SRC_URL" \
             --runtime-source-sha "$RUNTIME_REF" \
             --llvm-source-repo "$LLVM_URL" \
             --std-source-repo "$RUNTIME_SRC_URL" \
+            --cjpm-provenance "$CJPM_PROVENANCE" \
+            --cjpm-source-repo "$CJPM_SOURCE_REPOSITORY" \
+            --cjpm-source-sha "$CJPM_SOURCE_COMMIT" \
             --python-bundle "$PYTHON_BUNDLE_DIR" \
             --version "${{ inputs.version }}" \
             --platform "${{ inputs.platform }}" \
@@ -322,12 +353,17 @@ jobs:
             --std-dir "$env:FINAL_STD_DIR" `
             --llvm-manifest "$env:FIXED_LLVM_MANIFEST" `
             --base-sdk-id "$env:CJCJ_TOOLCHAIN" `
+            --base-sdk-archive "$env:BASE_SDK_ARCHIVE" `
+            --base-sdk-provenance "$env:BASE_SDK_PROVENANCE" `
             --cjcj-source-repo "${{ github.server_url }}/${{ github.repository }}.git" `
             --cjcj-source-sha "${{ github.sha }}" `
             --runtime-source-repo "$env:RUNTIME_SRC_URL" `
             --runtime-source-sha "$env:RUNTIME_REF" `
             --llvm-source-repo "$env:LLVM_URL" `
             --std-source-repo "$env:RUNTIME_SRC_URL" `
+            --cjpm-provenance "$env:CJPM_PROVENANCE" `
+            --cjpm-source-repo "$env:CJPM_SOURCE_REPOSITORY" `
+            --cjpm-source-sha "$env:CJPM_SOURCE_COMMIT" `
             --python-bundle "$env:PYTHON_BUNDLE_DIR" `
             --version "${{ inputs.version }}" `
             --platform "${{ inputs.platform }}" `

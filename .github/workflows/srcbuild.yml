@@ -201,6 +201,21 @@ jobs:
       - name: Build SDK tools from source
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
 
+      - name: Prepare source-built cjpm artifact
+        run: |
+          node ci/release/prepare_cjpm_artifact.mjs \
+            --platform "${{ matrix.target }}" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/cjpm/dist/cjpm" \
+            --outdir "$GITHUB_WORKSPACE/.release-cjpm/${{ matrix.target }}"
+
+      - name: Upload source-built cjpm artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-cjpm-${{ matrix.target }}
+          path: ${{ github.workspace }}/.release-cjpm/${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Verify bootstrap SDK
         run: |
           npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
