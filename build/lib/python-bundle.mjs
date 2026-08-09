@@ -49,7 +49,7 @@ function bundleLayout(root, platform) {
 }
 
 function pythonEnvironment(root, platform, pythonPath = '', libraryPaths = []) {
-  const env = {...process.env, PYTHONHOME: root, PYTHONPATH: pythonPath};
+  const env = {...process.env, PYTHONHOME: root, PYTHONPATH: pythonPath, PYTHONDONTWRITEBYTECODE: '1'};
   const libraryPath = [path.join(root, 'lib'), ...libraryPaths].join(path.delimiter);
   if (platform === 'windows-x64') {
     env.PATH = `${root};${libraryPaths.join(';')};${process.env.PATH || ''}`;
