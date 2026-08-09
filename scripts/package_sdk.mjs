@@ -155,16 +155,19 @@ if (stdDir) {
         modulesStd: path.join(root, 'modules', runtimeDir, 'std'),
         modulesTop: path.join(root, 'modules', runtimeDir),
         libDir: path.join(root, 'lib', runtimeDir),
+        sharedDir: path.join(root, 'runtime', 'lib', runtimeDir),
       },
       {
         modulesStd: path.join(root, runtimeDir, 'std'),
         modulesTop: path.join(root, runtimeDir),
-        libDir: path.join(root, 'lib', runtimeDir),
+        libDir: path.join(root, '..', 'lib', runtimeDir),
+        sharedDir: path.join(root, '..', 'runtime', 'lib', runtimeDir),
       },
       {
         modulesStd: root,
         modulesTop: path.dirname(root),
-        libDir: path.join(root, '..', '..', 'lib', runtimeDir),
+        libDir: path.join(root, '..', '..', '..', 'lib', runtimeDir),
+        sharedDir: path.join(root, '..', '..', '..', 'runtime', 'lib', runtimeDir),
       },
     ];
     for (const candidate of candidates) {
@@ -177,6 +180,44 @@ if (stdDir) {
     console.error(`  ERROR: --std-dir has no modules/<tuple>/std layout: ${stdSource}`);
     process.exit(3);
   }
+
+  // Each release cell is bound to final-std-${platform}. Purge every std seed
+  // inherited from the base SDK before installing that exact final root: even
+  // the target tuple may contain extra paths or same-name files from nightly.
+  // Preserve the non-std contents of every native and cross tuple.
+  let prunedStdSeed = 0;
+  const stageModules = path.join(stage, 'modules');
+  if (await exists(stageModules, 'dir')) {
+    for (const tuple of await fs.readdir(stageModules, {withFileTypes: true})) {
+      if (!tuple.isDirectory()) continue;
+      const tupleRoot = path.join(stageModules, tuple.name);
+      const stdPackage = path.join(tupleRoot, 'std');
+      if (await exists(stdPackage, 'dir')) {
+        await fs.rm(stdPackage, {recursive: true, force: true});
+        prunedStdSeed += 1;
+      }
+      for (const name of ['std.a', 'std.cjo', 'libstd.bc']) {
+        const artifact = path.join(tupleRoot, name);
+        if (!await exists(artifact)) continue;
+        await fs.rm(artifact, {force: true});
+        prunedStdSeed += 1;
+      }
+    }
+  }
+  for (const parent of [path.join(stage, 'lib'), path.join(stage, 'runtime', 'lib')]) {
+    if (!await exists(parent, 'dir')) continue;
+    for (const tuple of await fs.readdir(parent, {withFileTypes: true})) {
+      if (!tuple.isDirectory()) continue;
+      const tupleRoot = path.join(parent, tuple.name);
+      for (const name of await fs.readdir(tupleRoot)) {
+        if (!name.startsWith('libcangjie-std')) continue;
+        await fs.rm(path.join(tupleRoot, name), {recursive: true, force: true});
+        prunedStdSeed += 1;
+      }
+    }
+  }
+  console.log(`  pruned ${prunedStdSeed} base std seed path(s)`);
+
   const provenanceCandidates = [
     path.join(stdSource, 'PROVENANCE.txt'),
     path.join(stdSource, '..', 'PROVENANCE.txt'),
@@ -195,20 +236,24 @@ if (stdDir) {
   const stageModulesStd = path.join(stage, 'modules', runtimeDir, 'std');
   const stageModulesTop = path.join(stage, 'modules', runtimeDir);
   const stageLib = path.join(stage, 'lib', runtimeDir);
+  const stageShared = path.join(stage, 'runtime', 'lib', runtimeDir);
   await fs.mkdir(stageModulesStd, {recursive: true});
   await fs.mkdir(stageLib, {recursive: true});
+  await fs.mkdir(stageShared, {recursive: true});
 
   const skipName = name => name === '.cached' || name.endsWith('-temp-files')
-    || /\.O[01]\.a$/.test(name) || name.endsWith('.bc') || name === 'core.o';
+    || /\.O[01]\.a$/.test(name) || name === 'core.o';
   const entries = await fs.readdir(layout.modulesStd, {withFileTypes: true});
   let copiedA = 0;
   let copiedCjo = 0;
+  let copiedBc = 0;
   for (const entry of entries) {
     if (!entry.isFile() || skipName(entry.name)) continue;
-    if (!entry.name.endsWith('.a') && !entry.name.endsWith('.cjo')) continue;
+    if (!entry.name.endsWith('.a') && !entry.name.endsWith('.cjo') && !entry.name.endsWith('.bc')) continue;
     await fs.copyFile(path.join(layout.modulesStd, entry.name), path.join(stageModulesStd, entry.name));
     if (entry.name.endsWith('.a')) copiedA += 1;
-    else copiedCjo += 1;
+    else if (entry.name.endsWith('.cjo')) copiedCjo += 1;
+    else copiedBc += 1;
   }
   // package-level std.a / std.cjo (and optional libstd.bc) sit beside the std/ dir
   for (const topName of ['std.a', 'std.cjo', 'libstd.bc']) {
@@ -242,18 +287,32 @@ if (stdDir) {
       copiedLib += 1;
     }
   }
-  if (copiedA === 0) {
-    console.error(`  ERROR: --std-dir produced zero std.*.a under ${layout.modulesStd}`);
+  let copiedShared = 0;
+  if (await exists(layout.sharedDir, 'dir')) {
+    const sharedSuffix = isWindows ? '.dll' : platform.startsWith('darwin-') ? '.dylib' : '.so';
+    for (const name of await fs.readdir(layout.sharedDir)) {
+      if (!name.startsWith('libcangjie-std') || !name.endsWith(sharedSuffix)) continue;
+      await fs.copyFile(path.join(layout.sharedDir, name), path.join(stageShared, name));
+      copiedShared += 1;
+    }
+  }
+  if (copiedA === 0 && copiedLib === 0) {
+    console.error(`  ERROR: --std-dir produced neither module nor installed static std libraries`);
     process.exit(3);
   }
   const coreA = path.join(stageModulesStd, 'std.core.a');
   const coreLib = path.join(stageLib, 'libcangjie-std-core.a');
-  if (!await exists(coreA) || !await exists(coreLib)) {
-    console.error('  ERROR: overlay missing std.core.a or libcangjie-std-core.a');
+  if (!await exists(coreLib) || (copiedA > 0 && !await exists(coreA))) {
+    console.error('  ERROR: overlay missing libcangjie-std-core.a or the core archive of a supplied module archive set');
     process.exit(3);
   }
-  console.log(`  modules/${runtimeDir}/std: ${copiedA} .a + ${copiedCjo} .cjo`);
+  if (copiedShared === 0) {
+    console.error(`  ERROR: --std-dir produced zero shared std libraries under ${layout.sharedDir}`);
+    process.exit(3);
+  }
+  console.log(`  modules/${runtimeDir}/std: ${copiedA} .a + ${copiedCjo} .cjo + ${copiedBc} .bc`);
   console.log(`  lib/${runtimeDir}: ${copiedLib} libcangjie-std-*.a`);
+  console.log(`  runtime/lib/${runtimeDir}: ${copiedShared} shared std libraries`);
 
   // Official CMake merges each package's FFI objects into the static lib
   // (AddCJNATIVELibrary.cmake: cangjie-std-core STATIC ${CORE_FFI_OBJECTS_LIST} + core.o,
