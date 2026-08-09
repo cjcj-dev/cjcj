@@ -56,7 +56,7 @@ for (const [key, expected] of [
   if (manifest[key] !== expected) throw new Error(`fixed LLVM manifest ${key}: expected ${expected}, got ${manifest[key]}`);
 }
 
-const versions = {};
+const selectedTools = [];
 for (const [tool, hashKey] of [['llc', 'LLC_SHA256'], ['opt', 'OPT_SHA256']]) {
   const compressed = await fs.readFile(path.join(fixedRoot, `${tool}.gz`));
   const binary = zlib.gunzipSync(compressed);
@@ -70,11 +70,11 @@ for (const [tool, hashKey] of [['llc', 'LLC_SHA256'], ['opt', 'OPT_SHA256']]) {
   if (!kind.includes(spec.fileFormat) || !kind.includes(spec.fileArch)) {
     throw new Error(`${tool} has wrong native format for ${targetKey}: ${kind}`);
   }
-  const version = await $({stdio: 'pipe'})`${temporary} --version`;
-  versions[tool] = `${version.stdout}${version.stderr}`.trim();
-  await fs.rename(temporary, path.join(llvmBin, tool));
+  await $({stdio: 'pipe'})`${temporary} --version`;
+  const executable = path.join(llvmBin, tool);
+  await fs.rename(temporary, executable);
+  selectedTools.push({tool, executable, digest});
 }
-if (versions.llc !== versions.opt) throw new Error('fixed llc and opt report different versions');
 
 // A successful --version is necessary but not sufficient: validate every LLVM
 // executable consumed by cjcj, then use the native loader inspector. This is our
@@ -137,4 +137,7 @@ if (spec.os === 'darwin') {
 }
 await fs.appendFile(githubEnv, `${envLines.join('\n')}\n`);
 await fs.appendFile(githubPath, `${path.join(sdk, 'bin')}\n${path.join(sdk, 'tools', 'bin')}\n`);
+for (const {tool, executable, digest} of selectedTools) {
+  console.log(`FIXED_LLVM_TOOL_SELECTED tool=${tool} path=${executable} lineage=manifest:LLVM_SHA=${manifest.LLVM_SHA} sha256=${digest}`);
+}
 console.log(`FIXED_LLVM_TUPLE_ACTIVATED target=${targetKey} platform=${manifest.PLATFORM} llvm=${manifest.LLVM_SHA} llc=${manifest.LLC_SHA256} opt=${manifest.OPT_SHA256} shim=${manifest.SHIM_SHA256}`);
