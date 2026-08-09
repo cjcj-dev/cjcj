@@ -155,16 +155,19 @@ if (stdDir) {
         modulesStd: path.join(root, 'modules', runtimeDir, 'std'),
         modulesTop: path.join(root, 'modules', runtimeDir),
         libDir: path.join(root, 'lib', runtimeDir),
+        sharedDir: path.join(root, 'runtime', 'lib', runtimeDir),
       },
       {
         modulesStd: path.join(root, runtimeDir, 'std'),
         modulesTop: path.join(root, runtimeDir),
-        libDir: path.join(root, 'lib', runtimeDir),
+        libDir: path.join(root, '..', 'lib', runtimeDir),
+        sharedDir: path.join(root, '..', 'runtime', 'lib', runtimeDir),
       },
       {
         modulesStd: root,
         modulesTop: path.dirname(root),
-        libDir: path.join(root, '..', '..', 'lib', runtimeDir),
+        libDir: path.join(root, '..', '..', '..', 'lib', runtimeDir),
+        sharedDir: path.join(root, '..', '..', '..', 'runtime', 'lib', runtimeDir),
       },
     ];
     for (const candidate of candidates) {
@@ -195,8 +198,10 @@ if (stdDir) {
   const stageModulesStd = path.join(stage, 'modules', runtimeDir, 'std');
   const stageModulesTop = path.join(stage, 'modules', runtimeDir);
   const stageLib = path.join(stage, 'lib', runtimeDir);
+  const stageShared = path.join(stage, 'runtime', 'lib', runtimeDir);
   await fs.mkdir(stageModulesStd, {recursive: true});
   await fs.mkdir(stageLib, {recursive: true});
+  await fs.mkdir(stageShared, {recursive: true});
 
   const skipName = name => name === '.cached' || name.endsWith('-temp-files')
     || /\.O[01]\.a$/.test(name) || name === 'core.o';
@@ -244,6 +249,15 @@ if (stdDir) {
       copiedLib += 1;
     }
   }
+  let copiedShared = 0;
+  if (await exists(layout.sharedDir, 'dir')) {
+    const sharedSuffix = isWindows ? '.dll' : platform.startsWith('darwin-') ? '.dylib' : '.so';
+    for (const name of await fs.readdir(layout.sharedDir)) {
+      if (!name.startsWith('libcangjie-std') || !name.endsWith(sharedSuffix)) continue;
+      await fs.copyFile(path.join(layout.sharedDir, name), path.join(stageShared, name));
+      copiedShared += 1;
+    }
+  }
   if (copiedA === 0) {
     console.error(`  ERROR: --std-dir produced zero std.*.a under ${layout.modulesStd}`);
     process.exit(3);
@@ -254,8 +268,13 @@ if (stdDir) {
     console.error('  ERROR: overlay missing std.core.a or libcangjie-std-core.a');
     process.exit(3);
   }
+  if (copiedShared === 0) {
+    console.error(`  ERROR: --std-dir produced zero shared std libraries under ${layout.sharedDir}`);
+    process.exit(3);
+  }
   console.log(`  modules/${runtimeDir}/std: ${copiedA} .a + ${copiedCjo} .cjo + ${copiedBc} .bc`);
   console.log(`  lib/${runtimeDir}: ${copiedLib} libcangjie-std-*.a`);
+  console.log(`  runtime/lib/${runtimeDir}: ${copiedShared} shared std libraries`);
 
   // Official CMake merges each package's FFI objects into the static lib
   // (AddCJNATIVELibrary.cmake: cangjie-std-core STATIC ${CORE_FFI_OBJECTS_LIST} + core.o,
