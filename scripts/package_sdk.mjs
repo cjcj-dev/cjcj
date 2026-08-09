@@ -15,6 +15,10 @@ import {
   verifyBaseSdkProvenance,
   verifyCjpmProvenance,
 } from '../build/lib/release-component-provenance.mjs';
+import {
+  GATE_APPARATUS_PROVENANCE,
+  verifyGateApparatusProvenance,
+} from '../build/lib/release-gate-apparatus.mjs';
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
 
 const required = name => {
@@ -37,6 +41,8 @@ const llvmManifest = typeof argv['llvm-manifest'] === 'string' ? argv['llvm-mani
 const baseSdkId = typeof argv['base-sdk-id'] === 'string' ? argv['base-sdk-id'] : '';
 const baseSdkArchive = required('base-sdk-archive');
 const baseSdkProvenance = required('base-sdk-provenance');
+const gateHostRuntime = required('gate-host-runtime');
+const gateApparatusProvenance = required('gate-apparatus-provenance');
 const cjcjSourceRepository = typeof argv['cjcj-source-repo'] === 'string' ? argv['cjcj-source-repo'] : '';
 const cjcjSourceCommit = typeof argv['cjcj-source-sha'] === 'string' ? argv['cjcj-source-sha'] : '';
 const runtimeSourceRepository = typeof argv['runtime-source-repo'] === 'string' ? argv['runtime-source-repo'] : '';
@@ -58,6 +64,11 @@ if (stdDir && !await exists(stdDir, 'dir')) { console.error(`std dir not found: 
 if (llvmManifest && !await exists(llvmManifest)) { console.error(`LLVM manifest not found: ${llvmManifest}`); process.exit(2); }
 if (!await exists(baseSdkArchive)) { console.error(`base SDK archive not found: ${baseSdkArchive}`); process.exit(2); }
 if (!await exists(baseSdkProvenance)) { console.error(`base SDK provenance not found: ${baseSdkProvenance}`); process.exit(2); }
+if (!await exists(gateHostRuntime)) { console.error(`gate host runtime not found: ${gateHostRuntime}`); process.exit(2); }
+if (!await exists(gateApparatusProvenance)) {
+  console.error(`gate apparatus provenance not found: ${gateApparatusProvenance}`);
+  process.exit(2);
+}
 if (!await exists(cjpmProvenance)) { console.error(`cjpm provenance not found: ${cjpmProvenance}`); process.exit(2); }
 if (!await exists(pythonBundle, 'dir')) { console.error(`Python bundle dir not found: ${pythonBundle}`); process.exit(2); }
 
@@ -78,6 +89,13 @@ const verifiedBaseSdkProvenance = await verifyBaseSdkProvenance({
   sidecar: baseSdkProvenance,
   platform,
   toolchain: baseSdkId,
+});
+await verifyGateApparatusProvenance({
+  runtime: gateHostRuntime,
+  sidecar: gateApparatusProvenance,
+  platform,
+  expectedToolchain: baseSdkId,
+  expectedBaseSdkArchiveSha256: verifiedBaseSdkProvenance.artifact.sha256,
 });
 await verifyCjpmProvenance({
   binary: path.join(sdk, 'tools', 'bin', `cjpm${exeSuffix}`),
@@ -101,6 +119,7 @@ else {
 }
 await fs.copyFile(baseSdkProvenance, path.join(stage, BASE_SDK_PROVENANCE));
 await fs.copyFile(cjpmProvenance, path.join(stage, CJPM_PROVENANCE));
+await fs.copyFile(gateApparatusProvenance, path.join(stage, GATE_APPARATUS_PROVENANCE));
 await requirePrivateStage(stage, outputRoot, sdkSource);
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 
@@ -587,6 +606,7 @@ const {destination: releaseManifest} = await writeReleaseManifest({
   llvmManifest,
   baseSdkId,
   baseSdkProvenance: verifiedBaseSdkProvenance,
+  gateApparatusArtifact: path.join(stage, GATE_APPARATUS_PROVENANCE),
   cjcjRepository: cjcjSourceRepository || undefined,
   cjcjCommit: cjcjSourceCommit,
   runtimeRepository: runtimeSourceRepository || undefined,

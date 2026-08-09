@@ -1,6 +1,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {
+  GATE_APPARATUS_COMPONENT,
+  gateApparatusManifestSection,
+  readGateApparatusProvenance,
+} from './release-gate-apparatus.mjs';
 
 export const RELEASE_MANIFEST = 'RELEASE-MANIFEST.jsonl';
 export const RELEASE_SIGNATURE_POLICY = 'SHA_ONLY';
@@ -101,6 +106,7 @@ export async function writeReleaseManifest({
   llvmManifest = '',
   baseSdkId = '',
   baseSdkProvenance = undefined,
+  gateApparatusArtifact = '',
   cjcjRepository = 'https://github.com/cjcj-dev/cjcj.git',
   cjcjCommit = '',
   runtimeRepository = 'https://github.com/cjcj-dev/cangjie-runtime.git',
@@ -152,6 +158,16 @@ export async function writeReleaseManifest({
   const cjpm = await artifact(stage, cjpmFile, 'packaged cjpm is missing');
   const python = await artifact(stage, pythonArtifact, `packaged Python ${pythonVersion} is missing`);
   const pythonProvenance = await artifact(stage, pythonMetadataArtifact, 'packaged Python provenance is missing');
+  if (!await fileExists(gateApparatusArtifact)) {
+    throw new Error(`packaged gate apparatus provenance is missing: ${gateApparatusArtifact || '<empty>'}`);
+  }
+  const gateApparatus = await readGateApparatusProvenance({
+    file: gateApparatusArtifact,
+    platform,
+    expectedToolchain: baseSdkId,
+  });
+  const gateApparatusArtifactValue = await artifact(stage, gateApparatusArtifact,
+    'packaged gate apparatus provenance is missing');
 
   const stdText = await fileExists(stdProvenance) ? await fs.readFile(stdProvenance, 'utf8') : '';
   const llvmText = await fileExists(llvmManifest) ? await fs.readFile(llvmManifest, 'utf8') : '';
@@ -189,6 +205,23 @@ export async function writeReleaseManifest({
         sha256: unavailable('base SDK was supplied as an unpacked directory'),
       },
       embedded_stamp: 'no-stamp',
+    },
+    {
+      schema: 1,
+      platform,
+      component: GATE_APPARATUS_COMPONENT,
+      source: {
+        repository: gateApparatus.base_sdk.release_repository,
+        commit: unavailable(`official gate host toolchain ${gateApparatus.gate_host_toolchain} has no source commit metadata`),
+        version: gateApparatus.base_sdk.version,
+        download_url: gateApparatus.base_sdk.download_url,
+      },
+      artifact: {
+        path: gateApparatusArtifactValue.path,
+        sha256: gateApparatusArtifactValue.sha256,
+      },
+      embedded_stamp: 'no-stamp',
+      acceptance_apparatus: gateApparatusManifestSection(gateApparatus, platform),
     },
     {
       schema: 1,

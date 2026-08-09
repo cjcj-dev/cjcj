@@ -3,6 +3,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {RELEASE_SIGNATURE_POLICY} from '../build/lib/release-manifest.mjs';
+import {
+  GATE_APPARATUS_COMPONENT,
+  validateGateApparatusManifestSection,
+} from '../build/lib/release-gate-apparatus.mjs';
+
+const REQUIRED_COMPONENTS = [
+  'base-sdk', GATE_APPARATUS_COMPONENT, 'cjcj', 'runtime', 'llvm-llc', 'llvm-opt', 'std', 'cjpm', 'python',
+];
 
 function option(name) {
   const index = process.argv.indexOf(`--${name}`);
@@ -31,6 +39,13 @@ const loadedManifests = await Promise.all(manifests.map(async ({name, match}) =>
     }
   });
   if (rows.length === 0) throw new Error(`${name}: empty manifest`);
+  const components = rows.map(row => row.component).sort();
+  const requiredComponents = [...REQUIRED_COMPONENTS].sort();
+  if (JSON.stringify(components) !== JSON.stringify(requiredComponents)) {
+    throw new Error(`${name}: manifest components mismatch: expected=${requiredComponents.join(',')} actual=${components.join(',')}`);
+  }
+  const apparatus = rows.find(row => row.component === GATE_APPARATUS_COMPONENT);
+  validateGateApparatusManifestSection(apparatus?.acceptance_apparatus, match[1]);
   return {name, match, rows};
 }));
 const signaturePolicies = new Set(loadedManifests.flatMap(({rows}) =>

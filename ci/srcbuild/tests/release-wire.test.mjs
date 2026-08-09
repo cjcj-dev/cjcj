@@ -50,11 +50,14 @@ test('component provenance, final std, and Python inputs are fail-closed in both
   for (const argument of [
     '--base-sdk-archive',
     '--base-sdk-provenance',
+    '--gate-host-runtime',
+    '--gate-apparatus-provenance',
     '--cjpm-provenance',
     '--cjpm-source-repo',
     '--cjpm-source-sha',
   ]) assert.equal(consumer.match(new RegExp(argument, 'g'))?.length, 2, argument);
   assert.equal(consumer.match(/--python-bundle/g)?.length, 2);
+  assert.equal(consumer.match(/prepare_gate_apparatus\.mjs/g)?.length, 2);
   assert.equal(consumer.match(/prepare_python_bundle\.mjs/g)?.length, 2);
   assert.equal(consumer.match(/verify_packaged_cjdb\.mjs/g)?.length, 2);
   for (const name of ['Prepare Python 3.11 bundle (Unix)', 'Prepare Python 3.11 bundle (Windows)']) {
@@ -66,6 +69,8 @@ test('component provenance, final std, and Python inputs are fail-closed in both
   assert.ok(consumer.includes('EXPECTED_STD_ARTIFACT: final-std-${{ inputs.platform }}'));
   assert.ok(consumer.includes('name: source-cjpm-${{ inputs.platform }}'));
   assert.ok(consumer.includes('node ci/release/prepare_base_sdk.mjs'));
+  assert.ok(consumer.includes('--toolchain-pin "$PWD/ci/cjpm_pin.env"'));
+  assert.ok(consumer.includes('--toolchain-pin "$PWD\\ci\\cjpm_pin.env"'));
   assert.ok(consumer.includes('node ci/release/install_cjpm_artifact.mjs'));
 });
 

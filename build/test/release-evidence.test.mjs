@@ -3,6 +3,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {
+  GATE_APPARATUS_COMPONENT,
+  KNOWN_GATE_APPARATUS_LIMITATIONS,
+  REVIEWED_GATE_HOST_TOOLCHAIN,
+} from '../lib/release-gate-apparatus.mjs';
 
 const VERSION = '0.0.2';
 const RUN_ID = 42420002;
@@ -13,7 +18,9 @@ const PLATFORMS = [
   'darwin-arm64',
   'windows-x64',
 ];
-const COMPONENTS = ['base-sdk', 'cjcj', 'runtime', 'llvm-llc', 'llvm-opt', 'std', 'cjpm'];
+const COMPONENTS = [
+  'base-sdk', GATE_APPARATUS_COMPONENT, 'cjcj', 'runtime', 'llvm-llc', 'llvm-opt', 'std', 'cjpm', 'python',
+];
 const SCRIPT = path.resolve('scripts/archive_release_evidence.mjs');
 
 function persistentTestRoot() {
@@ -29,6 +36,20 @@ function run(args) {
 }
 
 function manifest(platform) {
+  const runtimePaths = {
+    'linux-x64': 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
+    'linux-aarch64': 'runtime/lib/linux_aarch64_cjnative/libcangjie-runtime.so',
+    'darwin-x64': 'runtime/lib/darwin_x86_64_cjnative/libcangjie-runtime.dylib',
+    'darwin-arm64': 'runtime/lib/darwin_aarch64_cjnative/libcangjie-runtime.dylib',
+    'windows-x64': 'runtime/lib/windows_x86_64_cjnative/libcangjie-runtime.dll',
+  };
+  const symbolProbes = {
+    'linux-x64': 'nm -D --defined-only',
+    'linux-aarch64': 'nm -D --defined-only',
+    'darwin-x64': 'nm -gU',
+    'darwin-arm64': 'nm -gU',
+    'windows-x64': 'nm -g --defined-only',
+  };
   const rows = COMPONENTS.map(component => ({
     schema: 1,
     platform,
@@ -42,6 +63,18 @@ function manifest(platform) {
       sha256: 'a'.repeat(64),
     },
     embedded_stamp: 'no-stamp',
+    ...(component === GATE_APPARATUS_COMPONENT ? {
+      acceptance_apparatus: {
+        gate_host_toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+        host_runtime: {
+          path: runtimePaths[platform],
+          sha256: 'c'.repeat(64),
+          g_cjLoadBadMask_count: 0,
+          symbol_probe: symbolProbes[platform],
+        },
+        known_apparatus_limitations: KNOWN_GATE_APPARATUS_LIMITATIONS,
+      },
+    } : {}),
   }));
   return `${rows.map(row => JSON.stringify(row)).join('\n')}\n`;
 }

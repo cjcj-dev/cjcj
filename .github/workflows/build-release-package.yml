@@ -274,6 +274,28 @@ jobs:
           path: ~/.cjv
           key: cjv-${{ runner.os }}-${{ runner.arch }}-${{ env.CJCJ_TOOLCHAIN }}
 
+      - name: Capture acceptance gate apparatus (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          node ci/release/prepare_gate_apparatus.mjs \
+            --sdk "$CANGJIE_HOME" \
+            --platform "$RELEASE_PLATFORM" \
+            --toolchain-pin "$PWD/ci/cjpm_pin.env" \
+            --base-sdk-sidecar "$BASE_SDK_PROVENANCE" \
+            --outdir "$RUNNER_TEMP/release-gate-apparatus"
+
+      - name: Capture acceptance gate apparatus (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          node ci/release/prepare_gate_apparatus.mjs `
+            --sdk "$env:CANGJIE_HOME" `
+            --platform "$env:RELEASE_PLATFORM" `
+            --toolchain-pin "$PWD\ci\cjpm_pin.env" `
+            --base-sdk-sidecar "$env:BASE_SDK_PROVENANCE" `
+            --outdir "$env:RUNNER_TEMP\release-gate-apparatus"
+
       - name: Activate pinned runtime
         if: runner.os != 'Windows'
         run: npx --yes zx@8 ci/install_patched_runtime.mjs "$PWD/dist-runtime"
@@ -323,6 +345,8 @@ jobs:
             --base-sdk-id "$CJCJ_TOOLCHAIN" \
             --base-sdk-archive "$BASE_SDK_ARCHIVE" \
             --base-sdk-provenance "$BASE_SDK_PROVENANCE" \
+            --gate-host-runtime "$GATE_HOST_RUNTIME" \
+            --gate-apparatus-provenance "$GATE_APPARATUS_PROVENANCE" \
             --cjcj-source-repo "${{ github.server_url }}/${{ github.repository }}.git" \
             --cjcj-source-sha "${{ github.sha }}" \
             --runtime-source-repo "$RUNTIME_SRC_URL" \
@@ -355,6 +379,8 @@ jobs:
             --base-sdk-id "$env:CJCJ_TOOLCHAIN" `
             --base-sdk-archive "$env:BASE_SDK_ARCHIVE" `
             --base-sdk-provenance "$env:BASE_SDK_PROVENANCE" `
+            --gate-host-runtime "$env:GATE_HOST_RUNTIME" `
+            --gate-apparatus-provenance "$env:GATE_APPARATUS_PROVENANCE" `
             --cjcj-source-repo "${{ github.server_url }}/${{ github.repository }}.git" `
             --cjcj-source-sha "${{ github.sha }}" `
             --runtime-source-repo "$env:RUNTIME_SRC_URL" `

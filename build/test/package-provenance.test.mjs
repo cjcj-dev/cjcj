@@ -12,6 +12,12 @@ import {
   writeCjpmProvenance,
 } from '../lib/release-component-provenance.mjs';
 import {
+  GATE_APPARATUS_COMPONENT,
+  GATE_APPARATUS_PROVENANCE,
+  REVIEWED_GATE_HOST_TOOLCHAIN,
+  writeGateApparatusProvenance,
+} from '../lib/release-gate-apparatus.mjs';
+import {
   CJDB_PYTHON_MODULES,
   CJDB_PYTHON_UNIX_MODULES,
   RELEASE_PYTHON_SOURCE_SHA256,
@@ -127,15 +133,32 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     `OPT_SHA256=${'2'.repeat(64)}`,
     '',
   ].join('\n'));
-  const baseSdkId = 'nightly-fixture';
+  const baseSdkId = REVIEWED_GATE_HOST_TOOLCHAIN;
   const baseArchive = await write(root, baseSdkDownload('linux-x64', baseSdkId).archive,
     'fixture official SDK archive');
   const baseSidecar = path.join(root, BASE_SDK_PROVENANCE);
-  await writeBaseSdkProvenance({
+  const baseProvenance = await writeBaseSdkProvenance({
     archive: baseArchive,
     destination: baseSidecar,
     platform: 'linux-x64',
     toolchain: baseSdkId,
+  });
+  const gateHostSource = await write(root, 'gate-host-runtime.c', [
+    '__attribute__((visibility("default"))) int fixture_gate_host_runtime(void) {',
+    '  return 0;',
+    '}',
+    '',
+  ].join('\n'));
+  const gateHostRuntime = path.join(root, 'gate-host-runtime.so');
+  run('cc', ['-shared', '-fPIC', gateHostSource, '-o', gateHostRuntime]);
+  const gateSidecar = path.join(root, GATE_APPARATUS_PROVENANCE);
+  const gateProvenance = await writeGateApparatusProvenance({
+    runtime: gateHostRuntime,
+    runtimePath: `runtime/lib/${TUPLE}/libcangjie-runtime.so`,
+    destination: gateSidecar,
+    platform: 'linux-x64',
+    toolchain: baseSdkId,
+    baseSdkProvenance: baseProvenance,
   });
   const cjpmSidecar = path.join(root, CJPM_PROVENANCE);
   await writeCjpmProvenance({
@@ -156,6 +179,8 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     '--base-sdk-id', baseSdkId,
     '--base-sdk-archive', baseArchive,
     '--base-sdk-provenance', baseSidecar,
+    '--gate-host-runtime', gateHostRuntime,
+    '--gate-apparatus-provenance', gateSidecar,
     '--cjcj-source-sha', CJCJ_SHA,
     '--runtime-source-sha', RUNTIME_SHA,
     '--std-source-repo', 'https://github.com/cjcj-dev/cangjie-runtime.git',
@@ -173,10 +198,16 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   const manifestFile = path.join(out, `${packageName}.RELEASE-MANIFEST.jsonl`);
   const manifestText = await fs.readFile(manifestFile, 'utf8');
   const rows = manifestText.trim().split('\n').map(JSON.parse);
-  assert.equal(rows.length, 8);
+  assert.equal(rows.length, 9);
+  const apparatus = rows.find(row => row.component === GATE_APPARATUS_COMPONENT).acceptance_apparatus;
+  assert.equal(apparatus.gate_host_toolchain, REVIEWED_GATE_HOST_TOOLCHAIN);
+  assert.equal(apparatus.host_runtime.sha256, gateProvenance.host_runtime.sha256);
+  assert.equal(apparatus.host_runtime.g_cjLoadBadMask_count, 0);
+  assert.match(apparatus.known_apparatus_limitations.text, /PostTraceBarrier::ReadReference/);
   assert.equal(rows.find(row => row.component === 'llvm-opt').embedded_stamp, 'no-stamp');
   assert.equal(rows.find(row => row.component === 'python').source.commit, RELEASE_PYTHON_VERSION);
-  assert.equal(rows.find(row => row.component === 'base-sdk').source.version, 'fixture');
+  assert.equal(rows.find(row => row.component === 'base-sdk').source.version,
+    REVIEWED_GATE_HOST_TOOLCHAIN.replace(/^nightly-/, ''));
   assert.match(rows.find(row => row.component === 'base-sdk').artifact.sha256, /^[0-9a-f]{64}$/);
   assert.equal(rows.find(row => row.component === 'cjpm').source.commit, CJPM_SHA);
   assert.match(rows.find(row => row.component === 'cjpm').artifact.sha256, /^[0-9a-f]{64}$/);
@@ -185,10 +216,41 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.match(listing, new RegExp(`${packageName}/RELEASE-MANIFEST\\.jsonl`));
   assert.match(listing, new RegExp(`${packageName}/${BASE_SDK_PROVENANCE}`));
   assert.match(listing, new RegExp(`${packageName}/${CJPM_PROVENANCE}`));
+  assert.match(listing, new RegExp(`${packageName}/${GATE_APPARATUS_PROVENANCE}`));
   console.log(`PACKAGER-OUTPUT-BEGIN\n${packaged.stdout.trim()}\nPACKAGER-OUTPUT-END`);
   console.log(`ARCHIVE-PROVENANCE-BEGIN\n${listing.split('\n').filter(line =>
     /PROVENANCE|RELEASE-MANIFEST/.test(line)).join('\n')}\nARCHIVE-PROVENANCE-END`);
   console.log(`RELEASE-MANIFEST-BEGIN\n${manifestText.trim()}\nRELEASE-MANIFEST-END`);
+
+  await fs.rm(gateSidecar);
+  const missingGateApparatus = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+  assert.equal(missingGateApparatus.status, 2, 'missing gate apparatus sidecar must fail closed with RC=2');
+  console.log(`NEGATIVE-MISSING-GATE-APPARATUS RC=${missingGateApparatus.status}\n${missingGateApparatus.stderr.trim()}`);
+  await writeGateApparatusProvenance({
+    runtime: gateHostRuntime,
+    runtimePath: `runtime/lib/${TUPLE}/libcangjie-runtime.so`,
+    destination: gateSidecar,
+    platform: 'linux-x64',
+    toolchain: baseSdkId,
+    baseSdkProvenance: baseProvenance,
+  });
+
+  const changedGateRuntimeSha = `${gateProvenance.host_runtime.sha256[0] === '0' ? '1' : '0'}${
+    gateProvenance.host_runtime.sha256.slice(1)}`;
+  const changedGateSidecar = (await fs.readFile(gateSidecar, 'utf8'))
+    .replace(gateProvenance.host_runtime.sha256, changedGateRuntimeSha);
+  await fs.writeFile(gateSidecar, changedGateSidecar);
+  const changedGateApparatus = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+  assert.equal(changedGateApparatus.status, 1, 'one-byte gate apparatus change must fail closed with RC=1');
+  console.log(`NEGATIVE-CHANGE-GATE-APPARATUS RC=${changedGateApparatus.status}\n${changedGateApparatus.stderr.trim()}`);
+  await writeGateApparatusProvenance({
+    runtime: gateHostRuntime,
+    runtimePath: `runtime/lib/${TUPLE}/libcangjie-runtime.so`,
+    destination: gateSidecar,
+    platform: 'linux-x64',
+    toolchain: baseSdkId,
+    baseSdkProvenance: baseProvenance,
+  });
 
   await fs.rm(baseSidecar);
   const deleted = runRaw('zx', packageArgs, {cwd: path.resolve('.')});

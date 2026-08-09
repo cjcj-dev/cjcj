@@ -16,9 +16,22 @@ import {
   RELEASE_SIGNATURE_POLICY,
   writeReleaseManifest,
 } from '../lib/release-manifest.mjs';
+import {
+  GATE_APPARATUS_COMPONENT,
+  GATE_APPARATUS_PROVENANCE,
+  KNOWN_GATE_APPARATUS_LIMITATIONS,
+  REVIEWED_GATE_HOST_TOOLCHAIN,
+} from '../lib/release-gate-apparatus.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const platforms = ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64'];
+const gateRuntimeByPlatform = {
+  'linux-x64': ['runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', 'nm -D --defined-only'],
+  'linux-aarch64': ['runtime/lib/linux_aarch64_cjnative/libcangjie-runtime.so', 'nm -D --defined-only'],
+  'darwin-x64': ['runtime/lib/darwin_x86_64_cjnative/libcangjie-runtime.dylib', 'nm -gU'],
+  'darwin-arm64': ['runtime/lib/darwin_aarch64_cjnative/libcangjie-runtime.dylib', 'nm -gU'],
+  'windows-x64': ['runtime/lib/windows_x86_64_cjnative/libcangjie-runtime.dll', 'nm -g --defined-only'],
+};
 
 async function fixture() {
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'release-manifest-'));
@@ -43,11 +56,34 @@ async function fixture() {
   };
   const pythonMetadataArtifact = path.join(stage, 'third_party', 'python', 'PYTHON-BUNDLE.json');
   await fs.writeFile(pythonMetadataArtifact, `${JSON.stringify(pythonMetadata, null, 2)}\n`);
+  const gateApparatusArtifact = path.join(stage, GATE_APPARATUS_PROVENANCE);
+  await fs.writeFile(gateApparatusArtifact, `${JSON.stringify({
+    schema: 1,
+    component: GATE_APPARATUS_COMPONENT,
+    platform: platforms[0],
+    gate_host_toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+    base_sdk: {
+      release_repository: 'https://gitcode.com/Cangjie/nightly_build',
+      version: REVIEWED_GATE_HOST_TOOLCHAIN.replace(/^nightly-/, ''),
+      download_url: 'https://gitcode.com/Cangjie/nightly_build/releases/download/fixture/sdk.tar.gz',
+      archive_path: 'sdk.tar.gz',
+      archive_sha256: 'a'.repeat(64),
+    },
+    host_runtime: {
+      path: 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
+      sha256: 'b'.repeat(64),
+      g_cjLoadBadMask_count: 0,
+      symbol_probe: 'nm -D --defined-only',
+    },
+    known_apparatus_limitations: KNOWN_GATE_APPARATUS_LIMITATIONS,
+  }, null, 2)}\n`);
   const pythonArgs = {
     pythonArtifact,
     pythonMetadata,
     pythonMetadataArtifact,
     pythonVersion: RELEASE_PYTHON_VERSION,
+    baseSdkId: REVIEWED_GATE_HOST_TOOLCHAIN,
+    gateApparatusArtifact,
   };
   return {work, stage, dist, pythonArgs};
 }
@@ -65,7 +101,7 @@ test('five release manifests carry one nonempty SHA_ONLY policy and notes render
     const {rows} = await writeReleaseManifest({
       stage, platform: platforms[0], ...pythonArgs,
     });
-    assert.equal(rows.length, 8);
+    assert.equal(rows.length, 9);
     const python = rows.find(row => row.component === 'python');
     assert.equal(python.source.commit, RELEASE_PYTHON_VERSION);
     assert.equal(python.source.download_url, RELEASE_PYTHON_SOURCE_URL);
@@ -73,7 +109,11 @@ test('five release manifests carry one nonempty SHA_ONLY policy and notes render
     assert.equal(python.build.configure_args, pythonArgs.pythonMetadata.configure_args);
     assert.match(python.build.provenance_sha256, /^[0-9a-f]{64}$/);
     for (const platform of platforms) {
-      const platformRows = rows.map(row => ({...row, platform}));
+      const platformRows = structuredClone(rows);
+      for (const row of platformRows) row.platform = platform;
+      const apparatus = platformRows.find(row => row.component === GATE_APPARATUS_COMPONENT)
+        .acceptance_apparatus.host_runtime;
+      [apparatus.path, apparatus.symbol_probe] = gateRuntimeByPlatform[platform];
       assert.ok(platformRows.every(row => row.signature_policy === RELEASE_SIGNATURE_POLICY));
       await fs.writeFile(path.join(dist,
         `cjcj-0.0.0-test-${platform}.RELEASE-MANIFEST.jsonl`),
@@ -104,6 +144,31 @@ test('empty signature policy fails closed in writer and renderer', async () => {
     const rendered = render(dist, path.join(work, 'notes.md'));
     assert.notEqual(rendered.status, 0);
     assert.match(rendered.stderr, /release manifests must have one SHA_ONLY signature_policy/);
+  } finally {
+    await fs.rm(work, {recursive: true, force: true});
+  }
+});
+
+test('missing or changed acceptance apparatus fails closed in renderer', async () => {
+  const {work, stage, dist, pythonArgs} = await fixture();
+  try {
+    const {rows} = await writeReleaseManifest({
+      stage, platform: platforms[0], ...pythonArgs,
+    });
+    const manifest = path.join(dist, 'cjcj-0.0.0-test-linux-x64.RELEASE-MANIFEST.jsonl');
+    const withoutApparatus = rows.filter(row => row.component !== GATE_APPARATUS_COMPONENT);
+    await fs.writeFile(manifest, `${withoutApparatus.map(row => JSON.stringify(row)).join('\n')}\n`);
+    const missing = render(dist, path.join(work, 'missing-notes.md'));
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /manifest components mismatch/);
+
+    const changed = structuredClone(rows);
+    changed.find(row => row.component === GATE_APPARATUS_COMPONENT)
+      .acceptance_apparatus.known_apparatus_limitations.text = 'tampered apparatus limitation';
+    await fs.writeFile(manifest, `${changed.map(row => JSON.stringify(row)).join('\n')}\n`);
+    const tampered = render(dist, path.join(work, 'tampered-notes.md'));
+    assert.notEqual(tampered.status, 0);
+    assert.match(tampered.stderr, /does not match the reviewed G8 apparatus evidence/);
   } finally {
     await fs.rm(work, {recursive: true, force: true});
   }

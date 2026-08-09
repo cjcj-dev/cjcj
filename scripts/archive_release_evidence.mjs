@@ -5,6 +5,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {RELEASE_MANIFEST} from '../build/lib/release-manifest.mjs';
+import {
+  GATE_APPARATUS_COMPONENT,
+  validateGateApparatusManifestSection,
+} from '../build/lib/release-gate-apparatus.mjs';
 
 const PLATFORMS = [
   'linux-x64',
@@ -14,7 +18,18 @@ const PLATFORMS = [
   'windows-x64',
 ];
 
-const REQUIRED_MANIFEST_ROWS = 7;
+const REQUIRED_MANIFEST_COMPONENTS = [
+  'base-sdk',
+  GATE_APPARATUS_COMPONENT,
+  'cjcj',
+  'runtime',
+  'llvm-llc',
+  'llvm-opt',
+  'std',
+  'cjpm',
+  'python',
+];
+const REQUIRED_MANIFEST_ROWS = REQUIRED_MANIFEST_COMPONENTS.length;
 const LEDGER = 'EVIDENCE_SHA256SUMS';
 const INDEX = 'ARCHIVE_INDEX.json';
 
@@ -192,6 +207,7 @@ async function validateManifest(file, platform) {
     throw new Error(`${platform} manifest must contain ${REQUIRED_MANIFEST_ROWS} JSONL rows, found ${lines.length}`);
   }
   const components = new Set();
+  let gateApparatus;
   for (const [index, line] of lines.entries()) {
     let row;
     try { row = JSON.parse(line); } catch (error) {
@@ -207,7 +223,14 @@ async function validateManifest(file, platform) {
     requireString(row.artifact?.path, `${platform}.${component}.artifact.path`);
     requireString(row.artifact?.sha256, `${platform}.${component}.artifact.sha256`);
     requireString(row.embedded_stamp, `${platform}.${component}.embedded_stamp`);
+    if (component === GATE_APPARATUS_COMPONENT) gateApparatus = row.acceptance_apparatus;
   }
+  const actualComponents = [...components].sort();
+  const requiredComponents = [...REQUIRED_MANIFEST_COMPONENTS].sort();
+  if (JSON.stringify(actualComponents) !== JSON.stringify(requiredComponents)) {
+    throw new Error(`${platform} manifest components mismatch: expected=${requiredComponents.join(',')} actual=${actualComponents.join(',')}`);
+  }
+  validateGateApparatusManifestSection(gateApparatus, platform);
 }
 
 async function validateChecksum(file, version, platform) {
