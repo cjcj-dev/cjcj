@@ -29,6 +29,11 @@ public class MacroInvocation {
     public var hasAttr: Bool = false
     public var isFuncParam: Bool = false
     public var isCompileTimeVisible: Bool = false
+    // Official Node.h:2426 is std::map<unsigned, Position, greater<>> (descending).
+    // ArrayList + append/replace is equivalent for exact-key lookup only while write
+    // keys stay non-decreasing (RefreshNewTokensPos advances lastColumn only upward).
+    // collectMacroDebugPosition treats the last entry as max-key; that premise is a
+    // write-order contract, not a structural guarantee — re-check if writers change.
     public let macroDebugMap: ArrayList<(UInt64, Position)> = ArrayList<(UInt64, Position)>()
     public let origin2newPosMap: ArrayList<(UInt64, Position)> = ArrayList<(UInt64, Position)>()
 

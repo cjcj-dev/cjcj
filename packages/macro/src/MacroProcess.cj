@@ -85,6 +85,9 @@ private func collectMacroDebugPosition(invocation: MacroInvocation, token: Token
     if (hasPosition64(invocation.origin2newPosMap, key)) {
         return
     }
+    // Official MacroProcess.cpp:75-76 uses map.begin()->second under greater<>
+    // (= position of max column key). Last ArrayList entry matches only while
+    // lastColumn is non-decreasing in RefreshNewTokensPos (sole writer of these keys).
     if (!invocation.macroDebugMap.isEmpty()) {
         let lastPos = invocation.macroDebugMap[invocation.macroDebugMap.size - 1][1]
         if (lastPos == token.Begin()) {
