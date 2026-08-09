@@ -66,6 +66,12 @@ test('five release manifests carry one nonempty SHA_ONLY policy and notes render
       stage, platform: platforms[0], ...pythonArgs,
     });
     assert.equal(rows.length, 8);
+    const python = rows.find(row => row.component === 'python');
+    assert.equal(python.source.commit, RELEASE_PYTHON_VERSION);
+    assert.equal(python.source.download_url, RELEASE_PYTHON_SOURCE_URL);
+    assert.equal(python.source.archive_sha256, RELEASE_PYTHON_SOURCE_SHA256);
+    assert.equal(python.build.configure_args, pythonArgs.pythonMetadata.configure_args);
+    assert.match(python.build.provenance_sha256, /^[0-9a-f]{64}$/);
     for (const platform of platforms) {
       const platformRows = rows.map(row => ({...row, platform}));
       assert.ok(platformRows.every(row => row.signature_policy === RELEASE_SIGNATURE_POLICY));
