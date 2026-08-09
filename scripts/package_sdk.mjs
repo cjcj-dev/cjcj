@@ -180,6 +180,43 @@ if (stdDir) {
     console.error(`  ERROR: --std-dir has no modules/<tuple>/std layout: ${stdSource}`);
     process.exit(3);
   }
+
+  // Each release cell is bound to final-std-${platform}, so std artifacts for
+  // any other tuple can only be unattested files inherited from the base SDK.
+  // Remove those std files while preserving the rest of each cross tuple.
+  let prunedForeignStd = 0;
+  const stageModules = path.join(stage, 'modules');
+  if (await exists(stageModules, 'dir')) {
+    for (const tuple of await fs.readdir(stageModules, {withFileTypes: true})) {
+      if (!tuple.isDirectory() || tuple.name === runtimeDir) continue;
+      const tupleRoot = path.join(stageModules, tuple.name);
+      const stdPackage = path.join(tupleRoot, 'std');
+      if (await exists(stdPackage, 'dir')) {
+        await fs.rm(stdPackage, {recursive: true, force: true});
+        prunedForeignStd += 1;
+      }
+      for (const name of ['std.a', 'std.cjo', 'libstd.bc']) {
+        const artifact = path.join(tupleRoot, name);
+        if (!await exists(artifact)) continue;
+        await fs.rm(artifact, {force: true});
+        prunedForeignStd += 1;
+      }
+    }
+  }
+  for (const parent of [path.join(stage, 'lib'), path.join(stage, 'runtime', 'lib')]) {
+    if (!await exists(parent, 'dir')) continue;
+    for (const tuple of await fs.readdir(parent, {withFileTypes: true})) {
+      if (!tuple.isDirectory() || tuple.name === runtimeDir) continue;
+      const tupleRoot = path.join(parent, tuple.name);
+      for (const name of await fs.readdir(tupleRoot)) {
+        if (!name.startsWith('libcangjie-std')) continue;
+        await fs.rm(path.join(tupleRoot, name), {recursive: true, force: true});
+        prunedForeignStd += 1;
+      }
+    }
+  }
+  console.log(`  pruned ${prunedForeignStd} non-target std artifact path(s)`);
+
   const provenanceCandidates = [
     path.join(stdSource, 'PROVENANCE.txt'),
     path.join(stdSource, '..', 'PROVENANCE.txt'),
