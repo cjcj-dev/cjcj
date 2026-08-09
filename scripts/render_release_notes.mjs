@@ -2,6 +2,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {RELEASE_SIGNATURE_POLICY} from '../build/lib/release-manifest.mjs';
 
 function option(name) {
   const index = process.argv.indexOf(`--${name}`);
@@ -22,16 +23,7 @@ const manifests = (await fs.readdir(dist)).map(name => ({name, match: name.match
   .filter(entry => entry.match).sort((left, right) => left.name.localeCompare(right.name));
 if (manifests.length === 0) throw new Error(`no release manifests under ${dist}`);
 
-const lines = [
-  `# cjcj v${version}`,
-  '',
-  'Every SDK archive embeds `RELEASE-MANIFEST.jsonl`; the same manifest is attached beside the archive.',
-  'The tables below are rendered from those manifests. `unavailable: …` and `no-stamp` are intentional, explicit provenance results.',
-  '',
-  '## Component provenance',
-];
-
-for (const {name, match} of manifests) {
+const loadedManifests = await Promise.all(manifests.map(async ({name, match}) => {
   const text = await fs.readFile(path.join(dist, name), 'utf8');
   const rows = text.split(/\r?\n/).filter(Boolean).map((line, index) => {
     try { return JSON.parse(line); } catch (error) {
@@ -39,12 +31,33 @@ for (const {name, match} of manifests) {
     }
   });
   if (rows.length === 0) throw new Error(`${name}: empty manifest`);
+  return {name, match, rows};
+}));
+const signaturePolicies = new Set(loadedManifests.flatMap(({rows}) =>
+  rows.map(row => row.signature_policy)));
+if (signaturePolicies.size !== 1 || !signaturePolicies.has(RELEASE_SIGNATURE_POLICY)) {
+  throw new Error(`release manifests must have one ${RELEASE_SIGNATURE_POLICY} signature_policy; got ${
+    [...signaturePolicies].map(value => JSON.stringify(value)).sort().join(', ') || '<empty>'}`);
+}
+
+const lines = [
+  `# cjcj v${version}`,
+  '',
+  'Every SDK archive embeds `RELEASE-MANIFEST.jsonl`; the same manifest is attached beside the archive.',
+  'The tables below are rendered from those manifests. `unavailable: …` and `no-stamp` are intentional, explicit provenance results.',
+  `Signature policy: \`${RELEASE_SIGNATURE_POLICY}\`.`,
+  '',
+  '## Component provenance',
+];
+
+for (const {name, match, rows} of loadedManifests) {
   lines.push('', `### ${match[1]}`, '',
     '| component | source commit | artifact SHA-256 | embedded stamp |',
     '|---|---|---|---|');
   for (const row of rows) {
     const values = [row.component, row.source?.commit, row.artifact?.sha256, row.embedded_stamp];
-    if (row.schema !== 1 || values.some(value => typeof value !== 'string' || value.length === 0)) {
+    if (row.schema !== 1 || row.signature_policy !== RELEASE_SIGNATURE_POLICY ||
+        values.some(value => typeof value !== 'string' || value.length === 0)) {
       throw new Error(`${name}: malformed component row ${JSON.stringify(row)}`);
     }
     lines.push(`| ${values.map(cell).join(' | ')} |`);
