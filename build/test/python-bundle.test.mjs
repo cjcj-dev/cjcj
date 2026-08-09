@@ -5,6 +5,8 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {
+  CJDB_PYTHON_MODULES,
+  CJDB_PYTHON_UNIX_MODULES,
   installPythonBundle,
   RELEASE_PYTHON_VERSION,
 } from '../lib/python-bundle.mjs';
@@ -21,6 +23,13 @@ async function fixture() {
   const stage = path.join(work, 'stage');
   await executable(path.join(source, 'bin', 'python3.11'), [
     '#!/bin/sh',
+    'case "$3" in',
+    '  *CJDB-PYTHON-IMPORT*)',
+    ...[...CJDB_PYTHON_MODULES, ...CJDB_PYTHON_UNIX_MODULES]
+      .map(name => `    printf 'CJDB-PYTHON-IMPORT=${name}\\n'`),
+    '    exit 0',
+    '    ;;',
+    'esac',
     `printf '${RELEASE_PYTHON_VERSION}\\n%s\\n' "$PYTHONHOME"`,
     '',
   ].join('\n'));
