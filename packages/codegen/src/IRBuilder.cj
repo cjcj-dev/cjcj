@@ -66,6 +66,9 @@ private let SET_LOCATION_INTRINSIC_NAME: String = "llvm.cj.set.location"
 private let PTR_ANNOTATION_INTRINSIC_NAME: String = "llvm.ptr.annotation"
 private let PLAIN_SAFE_REPRESENTATION_MARKER: String = "cj.repr.plain_safe.v1"
 private let PLAIN_SAFE_REPRESENTATION_GLOBAL: String = ".cj.repr.plain_safe"
+private let PLAIN_SAFE_REPRESENTATION_CONTRACT: String = "plain_safe"
+private let PLAIN_SAFE_ARGUMENT_CONTRACT: String = "cj.repr.arg"
+private let PLAIN_SAFE_RETURN_CONTRACT: String = "cj.repr.ret"
 private let FILL_IN_STACK_TRACE_INTRINSIC_NAME: String = "llvm.cj.fill.in.stack.trace"
 private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
 private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
@@ -2173,9 +2176,33 @@ public class IRBuilder2 <: Resource {
             if (funcType.IsCFunc()) {
                 SetZExtAttrForCFunc(callBase, calleeType.GetLLVMFunctionType())
             }
-            return GetReturnValue(calleeType, callBase, callArgs)
+            if (!funcType.IsCFunc()) {
+                AddPlainSafeArgumentContracts(callBase, llvmCallArgs)
+            }
+            let isIndirectManagedRefResult = !funcType.IsCFunc() && calleeType.HasSRet() == false &&
+                unsafe { LLVMIsAFunction(callee) }.isNull() && IsTypeContainsRef(unsafe { LLVMTypeOf(callBase) })
+            if (isIndirectManagedRefResult) {
+                AddStringAttributeAtIndex(callBase, 0u32, PLAIN_SAFE_RETURN_CONTRACT,
+                    attrValue: PLAIN_SAFE_REPRESENTATION_CONTRACT)
+            }
+            let retValue = GetReturnValue(calleeType, callBase, callArgs)
+            if (isIndirectManagedRefResult) {
+                return CreatePlainSafeRepresentationMarker(retValue)
+            }
+            return retValue
         }
         return CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), llvmCallArgs, name: name)
+    }
+
+    private func AddPlainSafeArgumentContracts(callBase: LLVMValueRef, args: ArrayList<LLVMValueRef>): Unit {
+        var idx: Int64 = 0
+        while (idx < args.size) {
+            if (IsTypeContainsRef(unsafe { LLVMTypeOf(args[idx]) })) {
+                AddStringAttributeAtIndex(callBase, UInt32(idx) + 1u32, PLAIN_SAFE_ARGUMENT_CONTRACT,
+                    attrValue: PLAIN_SAFE_REPRESENTATION_CONTRACT)
+            }
+            idx++
+        }
     }
 
     public func CreateCallOrInvoke(callee: CGFunction, args!: ArrayList<CGValue> = ArrayList<CGValue>(),
