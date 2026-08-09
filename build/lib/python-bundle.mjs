@@ -5,6 +5,24 @@ import {spawnSync} from 'node:child_process';
 export const RELEASE_PYTHON_VERSION = '3.11.9';
 export const RELEASE_PYTHON_SOURCE = 'https://github.com/python/cpython.git';
 export const RELEASE_PYTHON_DIR = 'third_party/python';
+export const RELEASE_PYTHON_SOURCE_URL = 'https://www.python.org/ftp/python/3.11.9/Python-3.11.9.tgz';
+export const RELEASE_PYTHON_SOURCE_SHA256 = 'e7de3240a8bc2b1e1ba5c81bf943f06861ff494b69fda990ce2722a504c6153d';
+export const RELEASE_PYTHON_WINDOWS_URL =
+  'https://www.python.org/ftp/python/3.11.9/python-3.11.9-embeddable-amd64.zip';
+export const RELEASE_PYTHON_WINDOWS_SHA256 =
+  '33b448f95fecb7c6f802157dbd5e6b40a2ad9bfc8b95ca634a06ba4073ad1ac0';
+
+// Startup imports from cjcj-llvm@bc65313a:
+// ScriptInterpreterPython.cpp:424-451,3172-3192; python.swig:83-89;
+// source/Interpreter/embedded_interpreter.py:1-36.
+export const CJDB_PYTHON_MODULES = Object.freeze([
+  'builtins', 'code', 'copy', 'keyword', 'lldb', 'lldb._lldb',
+  'lldb.embedded_interpreter', 'lldb.formatters', 'lldb.formatters.cpp',
+  'os', 'pydoc', 're', 'signal', 'six', 'six.moves', 'sys', 'traceback', 'uuid',
+]);
+export const CJDB_PYTHON_UNIX_MODULES = Object.freeze([
+  'fcntl', 'readline', 'rlcompleter', 'struct', 'termios',
+]);
 
 async function isFile(file) {
   try { return (await fs.stat(file)).isFile(); } catch { return false; }
@@ -30,16 +48,42 @@ function bundleLayout(root, platform) {
   };
 }
 
-function pythonEnvironment(root, platform) {
-  const env = {...process.env, PYTHONHOME: root, PYTHONPATH: ''};
+function pythonEnvironment(root, platform, pythonPath = '', libraryPaths = []) {
+  const env = {...process.env, PYTHONHOME: root, PYTHONPATH: pythonPath};
+  const libraryPath = [path.join(root, 'lib'), ...libraryPaths].join(path.delimiter);
   if (platform === 'windows-x64') {
-    env.PATH = `${root};${process.env.PATH || ''}`;
+    env.PATH = `${root};${libraryPaths.join(';')};${process.env.PATH || ''}`;
   } else if (platform.startsWith('darwin-')) {
-    env.DYLD_LIBRARY_PATH = `${path.join(root, 'lib')}:${process.env.DYLD_LIBRARY_PATH || ''}`;
+    env.DYLD_LIBRARY_PATH = `${libraryPath}:${process.env.DYLD_LIBRARY_PATH || ''}`;
   } else {
-    env.LD_LIBRARY_PATH = `${path.join(root, 'lib')}:${process.env.LD_LIBRARY_PATH || ''}`;
+    env.LD_LIBRARY_PATH = `${libraryPath}:${process.env.LD_LIBRARY_PATH || ''}`;
   }
   return env;
+}
+
+export function verifyPythonImports(executable, root, platform, pythonPath = '', libraryPaths = []) {
+  const modules = [...CJDB_PYTHON_MODULES];
+  if (platform !== 'windows-x64') modules.push(...CJDB_PYTHON_UNIX_MODULES);
+  const script = [
+    'import importlib',
+    `modules = ${JSON.stringify(modules)}`,
+    'for name in modules:',
+    '    importlib.import_module(name)',
+    '    print("CJDB-PYTHON-IMPORT=" + name)',
+  ].join('\n');
+  const result = spawnSync(executable, ['-s', '-c', script], {
+    encoding: 'utf8',
+    env: pythonEnvironment(root, platform, pythonPath, libraryPaths),
+  });
+  if (result.status !== 0) {
+    throw new Error(`cjdb Python import closure failed (${executable}):\n${result.stdout}\n${result.stderr || result.error?.message || `exit ${result.status}`}`);
+  }
+  const imported = result.stdout.split(/\r?\n/).filter(line => line.startsWith('CJDB-PYTHON-IMPORT='))
+    .map(line => line.slice('CJDB-PYTHON-IMPORT='.length));
+  if (imported.length !== modules.length || imported.some((name, index) => name !== modules[index])) {
+    throw new Error(`cjdb Python import audit was incomplete: expected ${modules.join(',')}; got ${imported.join(',')}`);
+  }
+  return imported;
 }
 
 function exactVersion(executable, root, platform) {
@@ -124,6 +168,17 @@ export async function installPythonBundle({source, stage, platform, runtimeDir})
   await fs.cp(sourceRoot, destination, {recursive: true, dereference: true, preserveTimestamps: true});
   const installed = await requireLayout(destination, platform);
   exactVersion(installed.executable, destination, platform);
+  verifyPythonImports(
+    installed.executable,
+    destination,
+    platform,
+    path.join(stage, 'third_party', 'llvm', 'lib', 'python3.11', 'site-packages'),
+    [
+      path.join(stage, 'third_party', 'llvm', 'lib'),
+      path.join(stage, 'tools', 'lib'),
+      path.join(stage, 'runtime', 'lib', runtimeDir),
+    ],
+  );
   const launcher = await writeLauncher(stage, platform, runtimeDir);
   return {artifact: installed.executable, launcher, license: installed.license, version: RELEASE_PYTHON_VERSION};
 }
