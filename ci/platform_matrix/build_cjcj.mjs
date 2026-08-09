@@ -84,7 +84,7 @@ if (process.platform === 'win32') {
         toolchain,
       });
       console.log(`[platform setup_sdk] cjv toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`);
-      install = await $({nothrow: true})`${toCommandPath(cjv)} toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`;
+      install = await $({nothrow: true})`${toCommandPath(cjv)} toolchain link ${toolchain} ${toCommandPath(baseSdkArchive)} --force --sha256 ${provenance.artifact.sha256}`;
       if (install.exitCode === 0) {
         console.log(`[platform setup_sdk] cjv component add stdx --toolchain ${toolchain}`);
         install = await $({nothrow: true})`${toCommandPath(cjv)} component add stdx --toolchain ${toolchain}`;
