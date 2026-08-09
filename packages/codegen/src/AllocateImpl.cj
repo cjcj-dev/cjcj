@@ -29,7 +29,7 @@ public func GenerateAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMV
         // CGFunctionType uses an addrspace(0) raw function-pointer cell.
         if ((cgType as CGFunctionType).isNone()) {
             let valueType = cgType.GetLLVMType()
-            if (!valueType.isNull() && irBuilder.IsLLVMTypeContainsRef(valueType)) {
+            if (!valueType.isNull() && irBuilder.IsTypeContainsRef(valueType)) {
                 irBuilder.CreateStore(unsafe { LLVMConstNull(valueType) }, allocaInst)
             }
         }

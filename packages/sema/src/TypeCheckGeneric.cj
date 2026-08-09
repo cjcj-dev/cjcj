@@ -284,7 +284,7 @@ public func getGenericConstraintDiagNode(checkNode: Node, typeNodes: ArrayList<T
     return checkNode
 }
 
-private func collectStaticMembers(decl: InheritableDecl, out: ArrayList<Decl>): Unit {
+private func CollectStaticMember(decl: InheritableDecl, out: ArrayList<Decl>): Unit {
     for (member in decl.GetMemberDecls()) {
         if (member.IsFuncOrProp() && member.TestAttr(Attribute.STATIC)) {
             out.add(member)
@@ -293,7 +293,7 @@ private func collectStaticMembers(decl: InheritableDecl, out: ArrayList<Decl>): 
     for (inheritedType in decl.inheritedTypes) {
         if (let Some(inheritedDecl) <- Ty.GetDeclPtrOfTy(inheritedType.GetTy())) {
             if (let Some(interfaceDecl) <- (inheritedDecl as InterfaceDecl)) {
-                collectStaticMembers(interfaceDecl, out)
+                CollectStaticMember(interfaceDecl, out)
             }
         }
     }
@@ -529,7 +529,7 @@ extend TypeCheckerImpl {
             for (upperBound in genericTy.upperBounds) {
                 if (let Some(upperDecl) <- Ty.GetDeclPtrOfTy(Some(upperBound))) {
                     if (let Some(inheritable) <- (upperDecl as InheritableDecl)) {
-                        collectStaticMembers(inheritable, staticMembers)
+                        CollectStaticMember(inheritable, staticMembers)
                     }
                 }
             }
@@ -542,7 +542,7 @@ extend TypeCheckerImpl {
             if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
                 if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
                     let interfaceStaticMembers = ArrayList<Decl>()
-                    collectStaticMembers(interfaceDecl, interfaceStaticMembers)
+                    CollectStaticMember(interfaceDecl, interfaceStaticMembers)
                     isIncompleteInterface = HasIncompleteStaticFuncOrProp(ctx, interfaceDecl, interfaceStaticMembers)
                 } else {
                     isIncompleteInterface = true

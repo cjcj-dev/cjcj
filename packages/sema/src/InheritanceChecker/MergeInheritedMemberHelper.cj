@@ -126,7 +126,7 @@ func MergeUpperBoundsForInheritance(
     }
 }
 
-func AddPossibleInconsistentTypes(target: MemberSignature, src: MemberSignature, inconsistentTypes: TySet): Unit {
+func SetPossibleInconsistentType(target: MemberSignature, src: MemberSignature, inconsistentTypes: TySet): Unit {
     if (let Some(targetTy) <- GetMemberComparableTy(target)) {
         inconsistentTypes.Add(targetTy)
     }

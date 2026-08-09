@@ -63,7 +63,7 @@ public func ContainsTokenKind(values: ArrayList<TokenKind>, kind: TokenKind): Bo
     return false
 }
 
-public func GetTokenLength(originalSize: Int64, kind: TokenKind, delimiterNum: UInt32): Int64 {
+public func GetTokenLenth(originalSize: Int64, kind: TokenKind, delimiterNum: UInt32): Int64 {
     let doubleQuotesSize: Int64 = 2
     let multiQuotesSize: Int64 = 6
     return match (kind) {

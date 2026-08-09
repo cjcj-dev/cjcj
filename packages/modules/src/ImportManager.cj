@@ -1126,11 +1126,11 @@ public class ImportManager {
     private func CheckRealPackageFeatureSpec(pkg: Package): Unit {
         let refMap = HashMap<String, Bool>()
         let invalidFeatures = ArrayList<File>()
-        let validation = ValidateRealFileFeatureSpec(pkg, refMap)
+        let validation = ValidateFileFeatureSpec(pkg, refMap)
         if (let None <- validation.referenceFile) {
             return
         }
-        CollectInvalidRealFeatureFiles(pkg, invalidFeatures, refMap, validation.hasAnnotation)
+        CollectInvalidFeatureFiles(pkg, invalidFeatures, refMap, validation.hasAnnotation)
         if (invalidFeatures.isEmpty()) {
             return
         }
@@ -1157,7 +1157,7 @@ public class ImportManager {
         }
     }
 
-    private func ValidateRealFileFeatureSpec(
+    private func ValidateFileFeatureSpec(
         pkg: Package,
         refMap: HashMap<String, Bool>
     ): FeatureValidationResult {
@@ -1191,7 +1191,7 @@ public class ImportManager {
         return result
     }
 
-    private func CollectInvalidRealFeatureFiles(
+    private func CollectInvalidFeatureFiles(
         pkg: Package,
         invalidFeatures: ArrayList<File>,
         refMap: HashMap<String, Bool>,

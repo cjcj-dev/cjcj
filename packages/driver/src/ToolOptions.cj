@@ -15,7 +15,7 @@ private func backendOptimizationOption(level: OptimizationLevel): String {
     return OPTIMIZATION_LEVEL_TO_BACKEND_OPTION[OptimizationLevelIndex(level)]
 }
 
-private func effectiveOptimizationLevel(driverOptions: DriverOptions): OptimizationLevel {
+func GetEffectiveOptimizationLevel(driverOptions: DriverOptions): OptimizationLevel {
     return if (driverOptions.disableBackendOpt) { OptimizationLevel.O0 } else { driverOptions.optimizationLevel }
 }
 
@@ -39,7 +39,7 @@ public func SetMtripleOption(setOptionHandler: (String) -> Unit, driverOptions: 
 }
 
 public func OPTSetOptimizationLevelOptions(setOptionHandler: (String) -> Unit, driverOptions: DriverOptions): Unit {
-    let opt = backendOptimizationOption(effectiveOptimizationLevel(driverOptions))
+    let opt = backendOptimizationOption(GetEffectiveOptimizationLevel(driverOptions))
     setOptionHandler("default<" + opt[1..] + ">")
 }
 
@@ -152,7 +152,7 @@ public func OPTSetPgoOptions(setOptionHandler: (String) -> Unit, driverOptions: 
 }
 
 public func LLCSetOptimizationLevelOptions(setOptionHandler: (String) -> Unit, driverOptions: DriverOptions): Unit {
-    var level = effectiveOptimizationLevel(driverOptions)
+    var level = GetEffectiveOptimizationLevel(driverOptions)
     if (level == OptimizationLevel.Os || level == OptimizationLevel.Oz) {
         level = OptimizationLevel.O2
     }
@@ -187,7 +187,7 @@ public func LLCSetOptions(setOptionHandler: (String) -> Unit, driverOptions: Dri
             SetOptionIf(setOptionHandler, driverOptions.target.arch == ArchType.X86_64, "-mattr=-avx")
         }
     }
-    SetOptionIf(setOptionHandler, effectiveOptimizationLevel(driverOptions) == OptimizationLevel.O2,
+    SetOptionIf(setOptionHandler, GetEffectiveOptimizationLevel(driverOptions) == OptimizationLevel.O2,
         "--cj-safepoint-outline=false")
     setOptionHandler("-cj-generational-post-barrier=true")
 }
@@ -201,7 +201,7 @@ public func LLCSetTransparentOptions(setOptionHandler: (String) -> Unit, driverO
 }
 
 public func LLDSetLTOOptimizationLevelOptions(setOptionHandler: (String) -> Unit, driverOptions: DriverOptions): Unit {
-    let level = effectiveOptimizationLevel(driverOptions)
+    let level = GetEffectiveOptimizationLevel(driverOptions)
     if (level == OptimizationLevel.O3) { setOptionHandler("--lto-O3") }
     else if (level == OptimizationLevel.Os || level == OptimizationLevel.Oz || level == OptimizationLevel.O2) { setOptionHandler("--lto-O2") }
     else if (level == OptimizationLevel.O1) { setOptionHandler("--lto-O1") }
@@ -218,7 +218,7 @@ public func LLDSetLTOOptions(setOptionHandler: (String) -> Unit, driverOptions: 
             setOptionHandler("--thinlto-cache-dir=" + FileUtil.TransferEscapeBacktick(absolutePath))
         }
     }
-    if (effectiveOptimizationLevel(driverOptions) == OptimizationLevel.O2) {
+    if (GetEffectiveOptimizationLevel(driverOptions) == OptimizationLevel.O2) {
         setOptionHandler("--mllvm")
         setOptionHandler("--cj-safepoint-outline=false")
     }

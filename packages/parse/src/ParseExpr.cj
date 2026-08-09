@@ -1221,7 +1221,7 @@ extend ParserImpl {
         if (!ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY) && !ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY)) {
             return false
         }
-        return Seeing(TokenKind.INIT) || SeeingPrimaryIdentifier()
+        return Seeing(TokenKind.INIT) || SeeingPrimaryIdentifer()
     }
 
     public func SeeingEnumConstructor(scopeKind: ScopeKind): Bool {

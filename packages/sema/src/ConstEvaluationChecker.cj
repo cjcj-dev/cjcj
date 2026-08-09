@@ -564,7 +564,7 @@ public class ConstEvaluationChecker {
             }
             if (expr.astKind == ASTKind.ASSIGN_EXPR) {
                 if (let Some(block) <- (desugar as Block)) {
-                    return ChkDesugaredMultipleAssignment(block, isWeak)
+                    return CheckDesugaredMultipleAssignment(block, isWeak)
                 }
                 return ChkExpr(desugar, isWeak)
             }
@@ -573,7 +573,7 @@ public class ConstEvaluationChecker {
         return false
     }
 
-    private func ChkDesugaredMultipleAssignment(block: Block, isWeak: Bool): Bool {
+    private func CheckDesugaredMultipleAssignment(block: Block, isWeak: Bool): Bool {
         var result = true
         for (node in block.body) {
             if (let Some(varDecl) <- (node as VarDecl)) {

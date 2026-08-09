@@ -438,7 +438,7 @@ public class GlobalVarInitializationChecker {
                 if (let Some(target) <- GetTargetIfShouldCollect(member)) {
                     worklist.add(target)
                 }
-                CollectInMemberAccess(member)
+                CollectInMemberAccessExpr(member)
                 return VisitAction.WALK_CHILDREN
             }
             if (let Some(refExpr) <- (node as RefExpr)) {
@@ -491,7 +491,7 @@ public class GlobalVarInitializationChecker {
         }
     }
 
-    private func CollectInMemberAccess(member: MemberAccess): Unit {
+    private func CollectInMemberAccessExpr(member: MemberAccess): Unit {
         if (let Some(target) <- member.target) {
             if (IsGlobalOrStaticOrConstVar(target)) {
                 if (let Some(varTarget) <- (target as VarDeclAbstract)) {

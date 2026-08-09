@@ -798,7 +798,7 @@ public class ClosureConversion {
             return found
         }
         let genericMap = HashMap<String, Type>()
-        let genericTypes = CreateGenericTypeParamsForAutoEnvImplDef(fn)
+        let genericTypes = CreateGenericTypeParamForAutoEnvImplDef(fn)
         let classDef = CreateAutoEnvImplDef(className, genericTypes, fn, superClassDef, genericMap)
         CreateGenericOverrideMethodInAutoEnvImplDef(classDef, fn, genericMap)
         CreateInstOverrideMethodInAutoEnvImplDef(classDef, fn, genericMap)
@@ -816,7 +816,7 @@ public class ClosureConversion {
         let result = lambda.GetResult() ??
             throw IllegalStateException("ClosureConversion lambda has no result")
         let genericMap = HashMap<String, Type>()
-        let genericTypes = CreateGenericTypeParamsForAutoEnvImplDef(result)
+        let genericTypes = CreateGenericTypeParamForAutoEnvImplDef(result)
         let classDef = CreateAutoEnvImplDef(className, genericTypes, result, superClassDef, genericMap)
         CreateMemberVarInAutoEnvImplDef(classDef, boxedEnvs, genericMap)
         let globalFunc = LiftLambdaToGlobalFunc(classDef, lambda, genericTypes, genericMap, boxedEnvs)
@@ -2646,7 +2646,7 @@ public class ClosureConversion {
         }
     }
 
-    private func CreateGenericTypeParamsForAutoEnvImplDef(value: Value): ArrayList<GenericType> {
+    private func CreateGenericTypeParamForAutoEnvImplDef(value: Value): ArrayList<GenericType> {
         let result = GetVisiableGenericTypes(value)
         if (NeedAddThisType(value)) {
             result.add(builder.context.GetGenericTy("This", GENERIC_THIS_SRC_NAME), at: 0)

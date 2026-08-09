@@ -457,7 +457,7 @@ private func InitArrayData(irBuilder: IRBuilder2, arrPtr: LLVMValueRef, arrayLen
     let elemKind = unsafe { LLVMGetTypeKind(elemType) }
     if (elemKind == LLVM_STRUCT_TYPE_KIND) {
         let size = irBuilder.GetInt64(Int64(irBuilder.GetCGModule().GetTypeSize(elemType)))
-        if (irBuilder.IsLLVMTypeContainsRef(elemType)) {
+        if (irBuilder.IsTypeContainsRef(elemType)) {
             irBuilder.CallGCWriteAgg(elemType, ArrayList<LLVMValueRef>([arrPtr, elemPtr, value, size]))
         } else {
             let align = irBuilder.GetCGModule().GetABITypeAlignment(elemType)
@@ -710,7 +710,7 @@ public class IRBuilder2 <: Resource {
                     let size = unsafe {
                         LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
                     }
-                    if (IsLLVMTypeContainsRef(elementType)) {
+                    if (IsTypeContainsRef(elementType)) {
                         CallGCReadAgg(elementType,
                             ArrayList<LLVMValueRef>([temp, boxedValue, castedPtr, size]))
                     } else {
@@ -857,7 +857,7 @@ public class IRBuilder2 <: Resource {
         // Official AddZeroInitForStructWithRefField (CGFunction.cpp:304-358) only covers
         // struct allocas at first-use NCA and misses plain AS1 pointer cells + safepoint
         // windows that are not IR uses — do not replicate that hole.
-        if (IsLLVMTypeContainsRef(valueType)) {
+        if (IsTypeContainsRef(valueType)) {
             let nullVal = unsafe { LLVMConstNull(valueType) }
             CreateStore(nullVal, result)
         }
@@ -956,7 +956,7 @@ public class IRBuilder2 <: Resource {
             }
             loadResult
         }
-        if (IsGlobalVariableBasePtr(addr) && IsLLVMTypeContainsRef(elementType)) {
+        if (IsGlobalVariableBasePtr(addr) && IsTypeContainsRef(elementType)) {
             if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_STRUCT_TYPE_KIND) {
                 let tempVal = CreateEntryAlloca(elementType)
                 let size = unsafe {
@@ -978,7 +978,7 @@ public class IRBuilder2 <: Resource {
                 LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), sizeInBytes, 0)
             }
             if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
-                if (IsLLVMTypeContainsRef(elementType)) {
+                if (IsTypeContainsRef(elementType)) {
                     CallGCReadAgg(elementType, ArrayList<LLVMValueRef>([tempVal, baseObject, addr, size]))
                     return tempVal
                 }
@@ -1466,7 +1466,7 @@ public class IRBuilder2 <: Resource {
         let size = unsafe {
             LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
         }
-        if (IsLLVMTypeContainsRef(structType)) {
+        if (IsTypeContainsRef(structType)) {
             let source = ReadManagedAggregateSourceIfNeeded(value.GetRawValue(), structCGType, size)
             return CallGCWriteAgg(structType, ArrayList<LLVMValueRef>([baseObject, dest, source, size]))
         }
@@ -1481,7 +1481,7 @@ public class IRBuilder2 <: Resource {
         let size = unsafe {
             LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(varrayType), 0)
         }
-        if (IsLLVMTypeContainsRef(varrayType)) {
+        if (IsTypeContainsRef(varrayType)) {
             return CallGCWriteStruct(baseObject, dest, value.GetRawValue(), size, varrayCGType.GetOriginal().ToString())
         }
         let align = cgMod.GetABITypeAlignment(varrayType)
@@ -1943,7 +1943,7 @@ public class IRBuilder2 <: Resource {
         let llvmKind = unsafe { LLVMGetTypeKind(llvmTy) }
         if (llvmKind == LLVM_STRUCT_TYPE_KIND) {
             let allocaInst = CreateEntryAlloca(llvmTy)
-            if (!IsLLVMTypeContainsRef(llvmTy)) {
+            if (!IsTypeContainsRef(llvmTy)) {
                 CreateMemsetStructWith0(allocaInst)
             }
             return allocaInst
@@ -2414,7 +2414,7 @@ public class IRBuilder2 <: Resource {
             let argDerefCGType = CGType.GetOrCreate(cgMod, argTy)
             if (argTy.IsStruct()) {
                 let size = GetLayoutSize_64(argTy)
-                if (IsLLVMTypeContainsRef(argDerefCGType.GetLLVMType())) {
+                if (IsTypeContainsRef(argDerefCGType.GetLLVMType())) {
                     CallGCWriteAgg(argDerefCGType.GetLayoutType(),
                         ArrayList<LLVMValueRef>([objectValue, payloadPtr, raw, size]))
                 } else {
@@ -2948,7 +2948,7 @@ public class IRBuilder2 <: Resource {
         let isDstAddrspace1 = unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(base)) } == 1u32
         if (isBaseObjStruct) {
             if (IsGlobalVariableBasePtr(place) && valueCGType.IsPointerType() &&
-                IsLLVMTypeContainsRef(valueCGType.GetPointerElementType().getOrThrow().GetLLVMType())) {
+                IsTypeContainsRef(valueCGType.GetPointerElementType().getOrThrow().GetLLVMType())) {
                 CreateWriteBarrierForGlobalVariable(cgValue, CGValue(place, valueCGType))
                 return
             }
@@ -2968,7 +2968,7 @@ public class IRBuilder2 <: Resource {
         }
         if (valueCGType.IsStructPtrType()) {
             let structType = valueCGType.GetPointerElementType().getOrThrow().GetLLVMType()
-            if (isDstAddrspace1 && IsLLVMTypeContainsRef(structType)) {
+            if (isDstAddrspace1 && IsTypeContainsRef(structType)) {
                 let size = unsafe {
                     LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
                 }
@@ -4214,7 +4214,7 @@ public class IRBuilder2 <: Resource {
                 LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw),
                     cgMod.GetTypeSize(elementType), 0)
             }
-            if (IsLLVMTypeContainsRef(elementType)) {
+            if (IsTypeContainsRef(elementType)) {
                 return CallGCWriteAgg(elementType,
                     ArrayList<LLVMValueRef>([array, elementPtr, rawValue, size]))
             } else {
@@ -5342,7 +5342,7 @@ public class IRBuilder2 <: Resource {
             CallGCWrite(storedValue, objectValue, typedPayload)
             return
         }
-        if ((valueTy.IsStruct() || valueTy.IsTuple()) && IsLLVMTypeContainsRef(valueCGType.GetLLVMType())) {
+        if ((valueTy.IsStruct() || valueTy.IsTuple()) && IsTypeContainsRef(valueCGType.GetLLVMType())) {
             let storedValueType = unsafe { LLVMTypeOf(storedValue) }
             let sourcePtr = if (!storedValueType.isNull() && unsafe { LLVMGetTypeKind(storedValueType) } == 12) {
                 storedValue
@@ -5939,7 +5939,7 @@ public class IRBuilder2 <: Resource {
                 _ = CreateArrayCopyIntrinsic(ARRAY_COPY_GENERIC_INTRINSIC_NAME, arrayCopyToInfo.dstBP, dstArrI8Ptr,
                     arrayCopyToInfo.srcBP, srcArrI8Ptr, dataSize)
             case Some(_) =>
-                match (IsLLVMTypeContainsRef(elemCGType.GetLLVMType())) {
+                match (IsTypeContainsRef(elemCGType.GetLLVMType())) {
                     case true =>
                         let refType = CGType.GetRefType(GetLLVMContext())
                         let intrinsicName = if (elemCGType.GetLLVMType().toUIntNative() == refType.toUIntNative()) {
@@ -6019,7 +6019,7 @@ public class IRBuilder2 <: Resource {
         return CreateIntrinsicCall(intrinsicName, overloadedTypes, args)
     }
 
-    public func IsLLVMTypeContainsRef(llvmTy: LLVMTypeRef): Bool {
+    public func IsTypeContainsRef(llvmTy: LLVMTypeRef): Bool {
         if (llvmTy.isNull()) {
             return false
         }
@@ -6031,7 +6031,7 @@ public class IRBuilder2 <: Resource {
             let elementCount = unsafe { LLVMCountStructElementTypes(llvmTy) }
             var idx: UInt32 = 0
             while (idx < elementCount) {
-                if (IsLLVMTypeContainsRef(unsafe { LLVMStructGetTypeAtIndex(llvmTy, idx) })) {
+                if (IsTypeContainsRef(unsafe { LLVMStructGetTypeAtIndex(llvmTy, idx) })) {
                     return true
                 }
                 idx++
@@ -6039,7 +6039,7 @@ public class IRBuilder2 <: Resource {
             return false
         }
         if (kind == LLVM_ARRAY_TYPE_KIND || kind == LLVM_VECTOR_TYPE_KIND || kind == LLVM_SCALABLE_VECTOR_TYPE_KIND) {
-            return IsLLVMTypeContainsRef(unsafe { LLVMGetElementType(llvmTy) })
+            return IsTypeContainsRef(unsafe { LLVMGetElementType(llvmTy) })
         }
         return false
     }

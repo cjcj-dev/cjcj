@@ -428,7 +428,7 @@ private func GetUnInitsInExpr(node: Node, unInitedNodes: ArrayList<Decl>): Unit 
     walker.Walk()
 }
 
-private func CollectReferencedDeclsBeforeJumpExpr(block: Block): ArrayList<Decl> {
+private func GetReferencedDeclsBeforeJumpExpr(block: Block): ArrayList<Decl> {
     let result = ArrayList<Decl>()
     let walker = Walker(block, visitPre: { node: Node =>
         if (let Some(_) <- (node as FuncBody)) {
@@ -2060,7 +2060,7 @@ public class InitializationChecker {
                     }
                 }
             } else {
-                let referencedBeforeJump = CollectReferencedDeclsBeforeJumpExpr(loopBlock)
+                let referencedBeforeJump = GetReferencedDeclsBeforeJumpExpr(loopBlock)
                 for (decl in uninitedDecls) {
                     if (!ContainsInitDecl(referencedBeforeJump, decl) && decl.TestAttr(Attribute.INITIALIZED)) {
                         decl.DisableAttr(Attribute.INITIALIZED)

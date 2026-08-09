@@ -288,7 +288,7 @@ public class CGFunction <: CGValue {
         let unusedLoads = ArrayList<LLVMValueRef>()
         var block = unsafe { LLVMGetFirstBasicBlock(function) }
         while (!block.isNull()) {
-            CGFunction.CollectUnusedInstructions(block, 27, unusedLoads)
+            CGFunction.CollectInstructions(block, 27, unusedLoads)
             block = unsafe { LLVMGetNextBasicBlock(block) }
         }
         CGFunction.EraseInstructions(unusedLoads)
@@ -296,12 +296,12 @@ public class CGFunction <: CGValue {
         let unusedAllocas = ArrayList<LLVMValueRef>()
         let entryBlock = unsafe { LLVMGetEntryBasicBlock(function) }
         if (!entryBlock.isNull()) {
-            CGFunction.CollectUnusedInstructions(entryBlock, 26, unusedAllocas)
+            CGFunction.CollectInstructions(entryBlock, 26, unusedAllocas)
         }
         CGFunction.EraseInstructions(unusedAllocas)
     }
 
-    private static func CollectUnusedInstructions(block: LLVMBasicBlockRef, opcode: Int32,
+    private static func CollectInstructions(block: LLVMBasicBlockRef, opcode: Int32,
         output: ArrayList<LLVMValueRef>): Unit {
         var inst = unsafe { LLVMGetFirstInstruction(block) }
         while (!inst.isNull()) {
@@ -389,7 +389,7 @@ public class CGFunction <: CGValue {
             if (unsafe { LLVMGetInstructionOpcode(inst) } == LLVM_ALLOCA_OPCODE) {
                 let allocatedType = unsafe { LLVMGetAllocatedType(inst) }
                 if (!allocatedType.isNull() && unsafe { LLVMGetTypeKind(allocatedType) } == LLVM_STRUCT_TYPE_KIND &&
-                    builder.IsLLVMTypeContainsRef(allocatedType)) {
+                    builder.IsTypeContainsRef(allocatedType)) {
                     structAllocas.add(inst)
                 }
             }

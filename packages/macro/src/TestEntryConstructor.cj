@@ -134,7 +134,7 @@ private func GetTestSuiteRegisterFunctions(pkg: Node): ArrayList<FuncDecl> {
     return results
 }
 
-private func getTopLevelFuncDecls(pkg: Package, out: ArrayList<FuncDecl>): Unit {
+private func GetTopLevelFuncDcl(pkg: Package, out: ArrayList<FuncDecl>): Unit {
     for (file in pkg.files) {
         for (decl in file.decls) {
             if (let Some(funcDecl) <- (decl as FuncDecl)) {
@@ -324,7 +324,7 @@ public class TestEntryConstructor {
     public func CheckTestSuite(packages: ArrayList<Package>): Unit {
         let topFuncs = ArrayList<FuncDecl>()
         for (pkg in packages) {
-            getTopLevelFuncDecls(pkg, topFuncs)
+            GetTopLevelFuncDcl(pkg, topFuncs)
         }
         for (pkg in packages) {
             CheckTestSuiteConstraints(pkg, topFuncs)

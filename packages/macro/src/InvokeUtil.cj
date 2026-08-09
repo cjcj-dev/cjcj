@@ -336,7 +336,7 @@ private func lowerAscii(value: String): String {
     return builder.toString()
 }
 
-private func sizeFromEnv(raw: String): Option<UIntNative> {
+private func GetSizeFromEnv(raw: String): Option<UIntNative> {
     let value = lowerAscii(raw.replace(" ", ""))
     if (value.size <= UNIT_LEN) {
         return None
@@ -364,9 +364,9 @@ private func sizeFromEnv(raw: String): Option<UIntNative> {
     return Some(base * MB_SIZE)
 }
 
-private func heapSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative {
+private func GetHeapSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative {
     if (let Some(raw) <- getRuntimeEnv(envs, CJ_HEAP_SIZE)) {
-        if (let Some(size) <- sizeFromEnv(raw)) {
+        if (let Some(size) <- GetSizeFromEnv(raw)) {
             if (size >= MIN_HEAP_SIZE) {
                 return size
             }
@@ -378,9 +378,9 @@ private func heapSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative {
     return HEAP_SIZE
 }
 
-private func stackSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative {
+private func GetStackSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative {
     if (let Some(raw) <- getRuntimeEnv(envs, CJ_STACK_SIZE)) {
-        if (let Some(size) <- sizeFromEnv(raw)) {
+        if (let Some(size) <- GetSizeFromEnv(raw)) {
             if (size >= MIN_STACK_SIZE && size <= MAX_STACK_SIZE) {
                 return size
             }
@@ -394,11 +394,11 @@ private func stackSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative {
 
 private func makeRuntimeConfig(envs: ArrayList<(String, String)>): RuntimeConfigParamC {
     return RuntimeConfigParamC(
-        RuntimeHeapParamC(REGION_SIZE, heapSizeFromEnv(envs), EXEMPTION_THRESHOLD, HEAP_UTILIZATION, HEAP_GROWTH,
+        RuntimeHeapParamC(REGION_SIZE, GetHeapSizeFromEnv(envs), EXEMPTION_THRESHOLD, HEAP_UTILIZATION, HEAP_GROWTH,
             ALLOCATION_RATE, ALLOCATION_WAIT_TIME),
         RuntimeGCParamC(GC_THRESHOLD, GARBAGE_THRESHOLD, GC_INTERVAL, BACKUP_GC_INTERNAL, GC_THREADS),
         RuntimeLogParamC(6),
-        RuntimeConcurrencyParamC(STACK_SIZE, stackSizeFromEnv(envs), PROCESSOR_NUM))
+        RuntimeConcurrencyParamC(STACK_SIZE, GetStackSizeFromEnv(envs), PROCESSOR_NUM))
 }
 
 @When[os == "Linux" || os == "macOS" || os == "iOS"]
@@ -594,7 +594,7 @@ public class RuntimeInit {
                 // C++ CallRuntime assembles heap before concurrency (InvokeUtilCJNative.cpp:159-168).
                 // InstanceNew consumes only ConcurrencyParam, but heap parsing still emits the
                 // exact C++ validation diagnostics before the shared-heap value is discarded.
-                let _ = heapSizeFromEnv(initArgs)
+                let _ = GetHeapSizeFromEnv(initArgs)
                 try (param = LibC.malloc<RuntimeConcurrencyParamC>().asResource()) {
                     if (param.value.isNull()) {
                         return false
@@ -602,7 +602,7 @@ public class RuntimeInit {
                     unsafe {
                         // RT_ISOLATE_API_SPEC.md §3.2 fixes a sub-scheduler to one processor;
                         // thread/coroutine stack sizes mirror InvokeUtil.h:50-51.
-                        param.value.write(RuntimeConcurrencyParamC(STACK_SIZE, stackSizeFromEnv(initArgs), 1u32))
+                        param.value.write(RuntimeConcurrencyParamC(STACK_SIZE, GetStackSizeFromEnv(initArgs), 1u32))
                         runtimeInstanceHandle = RuntimeInstanceNewFunc(instanceNewPtr)(param.value)
                     }
                 } catch (e: Exception) {

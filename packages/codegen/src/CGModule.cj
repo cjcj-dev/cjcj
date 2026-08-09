@@ -960,7 +960,7 @@ public class CGModule {
                 if (GetCGCFFI().NeedProcessParam(chirFuncTy, chirArgIdx)) {
                     let localBuilder = InitCFuncParamBuilder(builder, chirFunc, cgFunc)
                     builder = localBuilder
-                    llvmValue = ProcessCFuncParamOnDemand(chirFuncArgTy, argIt, localBuilder)
+                    llvmValue = ProcessParamOnDemand(chirFuncArgTy, argIt, localBuilder)
                     llvmArgIdx = argIt.idx
                 }
                 llvmArgIdx++
@@ -988,7 +988,7 @@ public class CGModule {
         return created
     }
 
-    private func ProcessCFuncParamOnDemand(chirParamTy: Type, arg: LLVMFuncArgIt,
+    private func ProcessParamOnDemand(chirParamTy: Type, arg: LLVMFuncArgIt,
         builder: IRBuilder2): LLVMValueRef {
         let cgType = CGType.GetOrCreate(this, chirParamTy)
         if (chirParamTy.IsVArray()) {

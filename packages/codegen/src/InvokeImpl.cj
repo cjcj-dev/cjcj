@@ -80,7 +80,7 @@ private func GenerateFuncPtrForNonAutoEnv(irBuilder: IRBuilder2, thisTI: LLVMVal
         mtableArgs.add(idxOfVFunc)
         irBuilder.CallIntrinsicMTable(mtableArgs)
     } else {
-        let vtableSizeOfIntroType = VTableSizeOf(introType)
+        let vtableSizeOfIntroType = GetVTableSizeOf(introType)
         CJC_ASSERT(vtableSizeOfIntroType > 0)
         let rawPtr = irBuilder.CallIntrinsicGetVTableFunc(thisTI, irBuilder.GetInt64(vtableSizeOfIntroType - 1),
             idxOfVFunc, introTi)
@@ -160,7 +160,7 @@ private func GenIRToUnboxResult(irBuilder: IRBuilder2, thisValue: LLVMValueRef, 
     irBuilder.SetInsertPoint(handleEndBB)
 }
 
-private func VTableSizeOf(ownerTy: Type): Int64 {
+private func GetVTableSizeOf(ownerTy: Type): Int64 {
     if (let Some(classTy) <- (ownerTy.StripAllRefs() as ClassType)) {
         let classDef = classTy.GetClassDef()
         if (classDef.IsInterface()) {

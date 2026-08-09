@@ -765,7 +765,7 @@ private func ExtensionDefFlag(targetType: Type, inheritedType: ClassType, direct
     if (direct) {
         flag |= 0b10000000u64
     }
-    if (SameRootPackage(TargetPackageName(targetType), inheritedType.GetClassDef().GetPackageName())) {
+    if (IsSameRootPackage(TargetPackageName(targetType), inheritedType.GetClassDef().GetPackageName())) {
         flag |= 0b00000110u64
     }
     return flag
@@ -821,7 +821,7 @@ private func TargetPackageName(targetType: Type): String {
     return ""
 }
 
-private func SameRootPackage(left: String, right: String): Bool {
+private func IsSameRootPackage(left: String, right: String): Bool {
     return RootPackage(left) == RootPackage(right)
 }
 

@@ -140,7 +140,7 @@ public class DiagnosticJsonFormatter {
         }
     }
 
-    private func FormatPositionJson(deep: Int64, pos: Position): String {
+    private func FormatPostionJson(deep: Int64, pos: Position): String {
         let builder = StringBuilder()
         var fileStr = "${pos.fileID}"
         if (diag.HasSourceManager() && diag.GetSourceManager().IsSourceFileExist(pos.fileID)) {
@@ -162,10 +162,10 @@ public class DiagnosticJsonFormatter {
         builder.append(Whitespace(deep * INDENT_WIDTH) + "\"Range\": {\n")
         let nextDepth = deep + 1
         builder.append(Whitespace(nextDepth * INDENT_WIDTH) + "\"Begin\": {\n")
-        builder.append(FormatPositionJson(nextDepth + 1, range.begin) + "\n")
+        builder.append(FormatPostionJson(nextDepth + 1, range.begin) + "\n")
         builder.append(Whitespace(nextDepth * INDENT_WIDTH) + "},\n")
         builder.append(Whitespace(nextDepth * INDENT_WIDTH) + "\"End\": {\n")
-        builder.append(FormatPositionJson(nextDepth + 1, range.end) + "\n")
+        builder.append(FormatPostionJson(nextDepth + 1, range.end) + "\n")
         builder.append(Whitespace(nextDepth * INDENT_WIDTH) + "}\n")
         builder.append(Whitespace(deep * INDENT_WIDTH) + "}")
         return builder.toString()
@@ -216,7 +216,7 @@ public class DiagnosticJsonFormatter {
         builder.append(Whitespace(deep * INDENT_WIDTH) + "\"Message\": \"" +
             jsonEscape(diagnostic.errorMessage) + "\",\n")
         builder.append(Whitespace(deep * INDENT_WIDTH) + "\"Location\": {\n")
-        builder.append(FormatPositionJson(deep + 1, diagnostic.mainHint.range.begin) + "\n")
+        builder.append(FormatPostionJson(deep + 1, diagnostic.mainHint.range.begin) + "\n")
         builder.append(Whitespace(deep * INDENT_WIDTH) + "},\n")
         if (diagnostic.mainHint.IsDefault()) {
             builder.append(Whitespace(deep * INDENT_WIDTH) + "\"MainHint\": null,\n")

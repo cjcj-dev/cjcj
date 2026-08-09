@@ -10,7 +10,7 @@ public import cjcj::option.OrderedInput as OptionOrderedInput
 public import cjcj::option.TempFileInfo as OptionTempFileInfo
 public import cjcj::option.TempFileKind
 public import cjcj::option.TempFileManager
-public import cjcj::option.{DylibSuffix, ObjSuffix, TempFileKindSuffix}
+public import cjcj::option.{GetDylibSuffix, GetObjSuffix, TempFileKindSuffix}
 import cjcj::option.enumIndex as OptionOptimizationLevelIndex
 
 public enum ToolType {

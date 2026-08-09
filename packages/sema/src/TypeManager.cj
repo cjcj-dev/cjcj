@@ -1108,7 +1108,7 @@ public class TypeManager {
         if (maybeInstTy.IsClassLike() || maybeInstTy.IsStruct()) {
             out.Add(maybeInstTy)
         } else if (let Some(genTy) <- (maybeInstTy as GenericsTy)) {
-            out.AddAll(collectAllUpperBounds(genTy))
+            out.AddAll(GetAllUpperBounds(genTy))
             out.Add(genTy)
         } else if (let Some(intersectionTy) <- (maybeInstTy as IntersectionTy)) {
             for (item in intersectionTy.tys) {
@@ -1139,7 +1139,7 @@ public class TypeManager {
             return true
         }
         if (let Some(genTy) <- (maybeInstTy as GenericsTy)) {
-            if (collectAllUpperBounds(genTy).Contains(superTy)) {
+            if (GetAllUpperBounds(genTy).Contains(superTy)) {
                 return true
             }
         } else if (let Some(intersectionTy) <- (maybeInstTy as IntersectionTy)) {
@@ -3379,7 +3379,7 @@ public class TypeManager {
         return ty
     }
 
-    private func collectAllUpperBounds(genTy: GenericsTy): TySet {
+    private func GetAllUpperBounds(genTy: GenericsTy): TySet {
         let out = TySet()
         let worklist = ArrayList<Ty>()
         for (upper in genTy.upperBounds) {

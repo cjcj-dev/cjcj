@@ -159,7 +159,7 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
         let tmp = irBuilder.CallClassIntrinsicAlloc(DeRef(sourceTy))
         let payloadPtr = irBuilder.GetPayloadFromObject(tmp)
         let size = irBuilder.GetLayoutSize_32(DeRef(sourceTy))
-        if (irBuilder.IsLLVMTypeContainsRef(sourceCGType.GetLLVMType())) {
+        if (irBuilder.IsTypeContainsRef(sourceCGType.GetLLVMType())) {
             let args = ArrayList<LLVMValueRef>()
             args.add(tmp)
             args.add(payloadPtr)
@@ -430,7 +430,7 @@ private func GenerateGenericTypeCast(irBuilder: IRBuilder2, sourceCGValue: CGVal
     } else if (IsDynamicStruct(sourceTy) && IsStaticStruct(targetTy)) {
         let tmp = irBuilder.CreateEntryAlloca(targetCGType)
         let dataPtr = irBuilder.GetPayloadFromObject(sourceValue)
-        if (irBuilder.IsLLVMTypeContainsRef(targetCGType.GetLLVMType())) {
+        if (irBuilder.IsTypeContainsRef(targetCGType.GetLLVMType())) {
             let args = ArrayList<LLVMValueRef>([
                 tmp, sourceValue, dataPtr, irBuilder.GetLayoutSize_64(targetTy)
             ])

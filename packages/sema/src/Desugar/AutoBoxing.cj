@@ -111,7 +111,7 @@ private func BoxExprIfNeeded(typeManager: TypeManager, target: Ty, expr: Expr): 
     }
 }
 
-private func AddOptionBoxHandleTupleLit(typeManager: TypeManager, tupleLit: TupleLit): Unit {
+private func AddOptionBoxHandleTupleList(typeManager: TypeManager, tupleLit: TupleLit): Unit {
     if (let Some(litTy) <- tupleLit.GetTy()) {
         if (let Some(tupleTy) <- (litTy as TupleTy)) {
             var idx: Int64 = 0
@@ -360,7 +360,7 @@ public func AddOptionBox(typeManager: TypeManager, pkg: Package): Unit {
         } else if (let Some(matchExpr) <- (node as MatchExpr)) {
             AddOptionBoxHandleMatchExpr(typeManager, matchExpr)
         } else if (let Some(tupleLit) <- (node as TupleLit)) {
-            AddOptionBoxHandleTupleLit(typeManager, tupleLit)
+            AddOptionBoxHandleTupleList(typeManager, tupleLit)
         } else if (let Some(arrayExpr) <- (node as ArrayExpr)) {
             AddOptionBoxHandleArrayExpr(typeManager, arrayExpr)
         }

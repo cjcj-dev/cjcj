@@ -1372,7 +1372,7 @@ public class Translator {
         } else {
             structDecl.linkage
         })
-        SetImplementedInterfaces(def, structDecl)
+        SetClassImplementedInterface(def, structDecl)
         for (member in structDecl.GetMemberDeclPtrs()) {
             if (!ShouldTranslateMember(structDecl, member)) {
                 continue
@@ -1421,7 +1421,7 @@ public class Translator {
         } else {
             enumDecl.linkage
         })
-        SetImplementedInterfaces(def, enumDecl)
+        SetClassImplementedInterface(def, enumDecl)
         for (ctor in enumDecl.constructors) {
             CJC_ASSERT(ctor.astKind == ASTKind.VAR_DECL || ctor.astKind == ASTKind.FUNC_DECL)
             if (mergingSpecific && SkipConstructorInSpecificMerging(def, ctor)) {
@@ -1473,7 +1473,7 @@ public class Translator {
             }
             TranslateMemberDecl(def, member)
         }
-        SetImplementedInterfaces(def, extendDecl)
+        SetClassImplementedInterface(def, extendDecl)
         if (extendDecl.TestAttr(AstAttribute.GENERIC)) {
             let genericDecl = extendDecl.GetGeneric().getOrThrow()
             for (genericTy in genericDecl.typeParameters) {
@@ -1916,7 +1916,7 @@ public class Translator {
             } else {
                 argValue = TranslateExprArg(RequireFuncArgExpr(arg, "pointer argument"))
             }
-            args.add(GenerateLoadIfNecessaryForArg(argValue, arg.withInout))
+            args.add(GenerateLoadIfNeccessary(argValue, arg.withInout))
         }
         return RequireResult(builder.CreateIntrinsic(resultTy, IntrisicCallContext(kind: intrinsicKind, args: args),
             CurrentBlock()))
@@ -3940,7 +3940,7 @@ public class Translator {
             decl.TestAttr(AstAttribute.IMPORTED) || decl.TestAttr(AstAttribute.GENERIC_INSTANTIATED)
         if (needInitialSuperClassSetup) {
             SetClassSuperClass(def, decl)
-            SetImplementedInterfaces(def, decl)
+            SetClassImplementedInterface(def, decl)
         }
         for (member in decl.GetMemberDeclPtrs()) {
             if (!ShouldTranslateMember(decl, member)) {
@@ -3993,7 +3993,7 @@ public class Translator {
         }
     }
 
-    private func SetImplementedInterfaces(def: CustomTypeDef, decl: AstInheritableDecl): Unit {
+    private func SetClassImplementedInterface(def: CustomTypeDef, decl: AstInheritableDecl): Unit {
         for (superInterfaceTy in decl.GetStableSuperInterfaceTys()) {
             def.AddImplementedInterfaceTy(UnwrapClassType(chirTy.TranslateType(superInterfaceTy)))
         }
@@ -4362,7 +4362,7 @@ public class Translator {
         let forInEntryBlock = builder.CreateBlock(parentGroup)
         forInEntryBlock.SetDebugLocation(TranslateLocation(expr.body.getOrThrow().begin, expr.body.getOrThrow().end))
         currentBlock = forInEntryBlock
-        let condVar = InitializeForInCondVar()
+        let condVar = InitializeCondVar()
         InitializeDelayExitSignal(condLoc)
         let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: false)
         if (let Some(retValLocation) <- forInRetValLocation) {
@@ -4409,7 +4409,7 @@ public class Translator {
         let parentGroup = RequireParentBlockGroup(recordBlock, "for-in string")
         let forInEntryBlock = builder.CreateBlock(parentGroup)
         currentBlock = forInEntryBlock
-        let condVar = InitializeForInCondVar()
+        let condVar = InitializeCondVar()
         InitializeDelayExitSignal(condLoc)
         let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: false)
         if (let Some(retValLocation) <- forInRetValLocation) {
@@ -4459,7 +4459,7 @@ public class Translator {
         let parentGroup = RequireParentBlockGroup(recordBlock, "for-in iterator")
         let forInEntryBlock = builder.CreateBlock(parentGroup)
         currentBlock = forInEntryBlock
-        let condVar = InitializeForInCondVar()
+        let condVar = InitializeCondVar()
         InitializeDelayExitSignal(condLoc)
         let forIn = InitForInExprSkeleton(expr, inductiveVar, condVar, isIter: true)
         if (let Some(retValLocation) <- forInRetValLocation) {
@@ -4468,7 +4468,7 @@ public class Translator {
 
         TranslateForInIterBody(expr, iterNextLocation, forIn)
         TranslateForInIterLatch(matchExpr, iterNextLocation, forIn)
-        TranslateForInIterCond(matchExpr, iterNextLocation, condVar, forIn)
+        TranslateForInIterCondition(matchExpr, iterNextLocation, condVar, forIn)
 
         let endBlock = builder.CreateBlock(parentGroup)
         builder.CreateGoTo(endBlock, forInEntryBlock)
@@ -4500,7 +4500,7 @@ public class Translator {
         builder.CreateGoTo(forInEntryBlock, CurrentBlock())
 
         currentBlock = forInEntryBlock
-        let condVar = InitializeForInCondVar()
+        let condVar = InitializeCondVar()
         let condLoc = TranslateLocation(RequireExpr(expr.inExpression, "closed-range for-in inExpression"))
         InitializeDelayExitSignal(condLoc)
         let forInRetValLocation = GenerateForInRetValLocation()
@@ -4793,7 +4793,7 @@ public class Translator {
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
-    private func TranslateForInIterCond(matchExpr: AstMatchExpr, iterNextLocation: Value, condVar: Value,
+    private func TranslateForInIterCondition(matchExpr: AstMatchExpr, iterNextLocation: Value, condVar: Value,
         forIn: ForIn): Unit {
         let _ = matchExpr
         blockGroupStack.add(forIn.GetCond())
@@ -4893,7 +4893,7 @@ public class Translator {
         currentBlock = returnBlock
     }
 
-    private func InitializeForInCondVar(): Value {
+    private func InitializeCondVar(): Value {
         let condVarExpr = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetBoolTy()),
             builder.context.GetBoolTy(), CurrentBlock())
         condVarExpr.SetGeneratedFromForIn(true)
@@ -8600,7 +8600,7 @@ public class Translator {
         let userArgs = ArrayList<Value>()
         let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
         AppendTranslatedCallArgs(expr, calleeDecl, userArgs, expectedParamTys, ArrayList<Value>())
-        let thisObj = if (IsSuperOrThisCtorCall(expr)) {
+        let thisObj = if (IsSuperOrThisCall(expr)) {
             CastValueIfNeeded(GetCurrentConstructorThisObject(), thisRefTy)
         } else {
             let allocated = CreateAllocateMaybeWithException(thisRefTy, thisTy, loc: loc)
@@ -8617,12 +8617,12 @@ public class Translator {
             FuncCallContext(args: args, thisType: thisRefTy), expr)
         if (let Some(outerDecl) <- calleeDecl.outerDecl) {
             if (outerDecl.astKind == ASTKind.STRUCT_DECL) {
-                if (IsSuperOrThisCtorCall(expr)) {
+                if (IsSuperOrThisCall(expr)) {
                     return None
                 }
                 let load = builder.CreateLoad(thisTy, thisObj, CurrentBlock())
                 load.SetDebugLocation(loc)
-                if (IsSuperOrThisCtorCall(expr)) {
+                if (IsSuperOrThisCall(expr)) {
                     load.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
                 }
                 return Some(RequireResult(load))
@@ -8650,7 +8650,7 @@ public class Translator {
         return false
     }
 
-    private func IsSuperOrThisCtorCall(expr: AstCallExpr): Bool {
+    private func IsSuperOrThisCall(expr: AstCallExpr): Bool {
         if (expr.callKind == AstCallKind.CALL_SUPER_FUNCTION) {
             return true
         }
@@ -9277,7 +9277,7 @@ public class Translator {
         let userArgs = ArrayList<Value>()
         let expectedParamTys = FuncParamTypes(expr, calleeDecl, thisType: Some(thisRefTy))
         AppendTranslatedCallArgs(expr, calleeDecl, userArgs, expectedParamTys, ArrayList<Value>())
-        let thisObj = if (IsSuperOrThisCtorCall(expr)) {
+        let thisObj = if (IsSuperOrThisCall(expr)) {
             CastValueIfNeeded(GetCurrentConstructorThisObject(), thisRefTy)
         } else {
             let loc = TranslateLocation(expr)
@@ -9930,7 +9930,7 @@ public class Translator {
         return value
     }
 
-    private func GenerateLoadIfNecessaryForArg(value: Value, isInOut: Bool): Value {
+    private func GenerateLoadIfNeccessary(value: Value, isInOut: Bool): Value {
         let argTy = value.GetType() ??
             throw IllegalStateException("faithful AST2CHIR argument has no type: ${value.GetIdentifier()}")
         let pureArgTy = argTy.StripAllRefs()
