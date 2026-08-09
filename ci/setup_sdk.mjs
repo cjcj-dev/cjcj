@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {parseLlvmToolsManifest} from './llvm-tools-manifest.mjs';
+import {verifyBaseSdkProvenance} from '../build/lib/release-component-provenance.mjs';
 
 $.stdio = 'inherit';
 
@@ -67,8 +68,25 @@ if (process.env.GITCODE_API_KEY) {
   await $({nothrow: true, stdio: 'pipe'})`cjv set gitcode-api-key ${process.env.GITCODE_API_KEY}`;
   log('gitcode-api-key set');
 }
-log(`cjv install ${toolchain} -c stdx`);
-await $`cjv install ${toolchain} -c stdx`;
+const baseSdkArchive = process.env.BASE_SDK_ARCHIVE || '';
+const baseSdkProvenance = process.env.BASE_SDK_PROVENANCE || '';
+const releasePlatform = process.env.RELEASE_PLATFORM || '';
+if (baseSdkArchive || baseSdkProvenance || releasePlatform) {
+  if (!baseSdkArchive || !baseSdkProvenance || !releasePlatform) {
+    throw new Error('BASE_SDK_ARCHIVE, BASE_SDK_PROVENANCE and RELEASE_PLATFORM must be supplied together');
+  }
+  const provenance = await verifyBaseSdkProvenance({
+    archive: baseSdkArchive,
+    sidecar: baseSdkProvenance,
+    platform: releasePlatform,
+    toolchain,
+  });
+  log(`cjv toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`);
+  await $`cjv toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`;
+} else {
+  log(`cjv install ${toolchain} -c stdx`);
+  await $`cjv install ${toolchain} -c stdx`;
+}
 
 const cangjieHome = `${home}/.cjv/toolchains/${toolchain}`;
 if (!(await isDirectory(cangjieHome))) {
@@ -76,6 +94,24 @@ if (!(await isDirectory(cangjieHome))) {
   process.exit(3);
 }
 const stdxPath = `${home}/.cjv/stdx/${toolchain}/static/stdx`;
+
+const installedCjc = path.join(cangjieHome, 'bin', 'cjc');
+const baseLibraryPath = `${cangjieHome}/third_party/llvm/lib:${cangjieHome}/runtime/lib/${runtimeDir}:${cangjieHome}/tools/lib`;
+const baseEnvironment = {...process.env};
+if (hostOs === 'Darwin') baseEnvironment.DYLD_LIBRARY_PATH = baseLibraryPath;
+else baseEnvironment.LD_LIBRARY_PATH = baseLibraryPath;
+const baseFile = await $({nothrow: true, stdio: 'pipe'})`file ${installedCjc}`;
+const baseLinked = hostOs === 'Darwin'
+  ? await $({nothrow: true, stdio: 'pipe'})`otool -L ${installedCjc}`
+  : await $({nothrow: true, stdio: 'pipe', env: baseEnvironment})`ldd ${installedCjc}`;
+const baseVersion = await $({nothrow: true, stdio: 'pipe', env: baseEnvironment})`${installedCjc} --version`;
+if (baseFile.exitCode !== 0 || baseLinked.exitCode !== 0 || baseVersion.exitCode !== 0 ||
+    /not found/i.test(baseLinked.stdout)) {
+  throw new Error(`installed base SDK failed file/link/--version verification: file=${baseFile.exitCode} linked=${baseLinked.exitCode} version=${baseVersion.exitCode}`);
+}
+log(`base cjc file: ${baseFile.stdout.trim()}`);
+log(`base cjc linked libraries: no missing entries`);
+log(`base cjc version:\n${baseVersion.stdout.trim()}`);
 
 // 2.5 Swap the SDK's llc and opt with one source-built fixed LLVM tuple.
 // The stock nightly backend materializes relocate-of-undef as a phantom GC root.
