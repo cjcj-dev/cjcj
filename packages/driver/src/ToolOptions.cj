@@ -189,7 +189,6 @@ public func LLCSetOptions(setOptionHandler: (String) -> Unit, driverOptions: Dri
     }
     SetOptionIf(setOptionHandler, effectiveOptimizationLevel(driverOptions) == OptimizationLevel.O2,
         "--cj-safepoint-outline=false")
-    setOptionHandler("-cj-generational-post-barrier=true")
 }
 
 public func LLCSetTripleOptions(setOptionHandler: (String) -> Unit, driverOptions: DriverOptions): Unit {
