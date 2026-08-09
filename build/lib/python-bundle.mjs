@@ -250,7 +250,9 @@ export async function installPythonBundle({source, stage, platform, runtimeDir})
   const destination = path.join(stage, RELEASE_PYTHON_DIR);
   await fs.rm(destination, {recursive: true, force: true});
   await fs.mkdir(path.dirname(destination), {recursive: true});
-  await fs.cp(sourceRoot, destination, {recursive: true, dereference: false, preserveTimestamps: true});
+  await fs.cp(sourceRoot, destination, {
+    recursive: true, dereference: false, preserveTimestamps: true, verbatimSymlinks: true,
+  });
   const installed = await requireLayout(destination, platform);
   const provenance = await readMetadata(destination, platform);
   if (platform.startsWith('darwin-')) await relocateDarwinPython(stage, destination);
