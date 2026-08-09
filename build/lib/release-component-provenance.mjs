@@ -165,8 +165,9 @@ export async function verifyCjpmProvenance({
   if (value.source?.repository !== expectedRepository || value.source?.commit !== expectedCommit) {
     throw new Error(`${label} source mismatch: ${value.source?.repository || '<empty>'}@${value.source?.commit || '<empty>'}`);
   }
-  if (value.artifact?.path !== path.basename(binary)) {
-    throw new Error(`${label} artifact path mismatch: ${value.artifact?.path || '<empty>'} != ${path.basename(binary)}`);
+  const artifactName = platform === 'windows-x64' ? 'cjpm.exe' : 'cjpm';
+  if (value.artifact?.path !== artifactName) {
+    throw new Error(`${label} artifact path mismatch: ${value.artifact?.path || '<empty>'} != ${artifactName}`);
   }
   const recorded = requireMatch(value.artifact?.sha256, SHA256, `${label}.artifact.sha256`);
   const actual = await fileSha256(binary);
