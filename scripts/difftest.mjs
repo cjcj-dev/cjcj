@@ -1,9 +1,11 @@
 #!/usr/bin/env zx
 // Corpus differential gate: compare self-host and reference compile/run results with deterministic parallel aggregation.
 //
-// Invariant: runtime used to load selfhost + its products must come from the tree under test
-// (DIFFTEST_SELF_TC, or home next to DIFFTEST_SELF). DIFFTEST_TC is the official/bootstrap
-// toolchain (ref compiler + llvm tools). Never silently red on ABI mismatch — print HARNESS.
+// Invariant: products use the runtime from the tree under test (DIFFTEST_SELF_TC, or home next
+// to DIFFTEST_SELF). By default selfhost uses that runtime too. CJ_HOST_RTLIB may explicitly
+// select a distinct runtime used only to load selfhost during bootstrap. DIFFTEST_TC is the
+// official/bootstrap toolchain (ref compiler + llvm tools). Never silently red on ABI mismatch —
+// print HARNESS.
 
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -17,6 +19,7 @@ const repo = path.resolve(import.meta.dirname, '..');
 const tc = process.env.DIFFTEST_TC || '/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458';
 const self = process.env.DIFFTEST_SELF || `${repo}/target/release/bin/cjcj::cjc`;
 const ref = process.env.DIFFTEST_REF || '/root/.cjv/bin/cjc';
+const hostRuntime = process.env.CJ_HOST_RTLIB ? path.resolve(process.env.CJ_HOST_RTLIB) : '';
 
 const RUNTIME_SUB = 'runtime/lib/linux_x86_64_cjnative';
 const HARNESS_TAG = 'HARNESS';
@@ -41,6 +44,20 @@ async function exists(file) {
   } catch {
     return false;
   }
+}
+
+async function runtimeMaskCount(runtime) {
+  const library = path.join(runtime, 'libcangjie-runtime.so');
+  if (!(await exists(library))) {
+    console.error(`${HARNESS_TAG}: runtime not found: ${library}`);
+    process.exit(2);
+  }
+  const result = await $({nothrow: true, quiet: true})`nm -D ${library}`;
+  if (result.exitCode !== 0) {
+    console.error(`${HARNESS_TAG}: cannot inspect runtime mask: ${library}`);
+    process.exit(2);
+  }
+  return result.stdout.split(/\r?\n/).filter(line => /\bg_cjLoadBadMask\b/.test(line)).length;
 }
 
 async function resolveSelfHome(selfBin, bootstrapTc) {
@@ -120,12 +137,24 @@ const selfLd = mergeLd(
   selfHome !== selfCangjieHome ? toolchainLd(selfCangjieHome) : '',
   process.env.LD_LIBRARY_PATH || '',
 );
+const selfCompileLd = hostRuntime ? mergeLd(hostRuntime, selfLd) : selfLd;
 const refLd = mergeLd(toolchainLd(tc), process.env.LD_LIBRARY_PATH || '');
 const refEnv = withEnv(process.env, {CANGJIE_HOME: tc, LD_LIBRARY_PATH: refLd});
-const selfEnv = withEnv(process.env, {CANGJIE_HOME: selfCangjieHome, LD_LIBRARY_PATH: selfLd});
+const selfCompileEnv = withEnv(process.env, {
+  CANGJIE_HOME: selfCangjieHome,
+  LD_LIBRARY_PATH: selfCompileLd,
+});
+const selfProductEnv = withEnv(process.env, {CANGJIE_HOME: selfCangjieHome, LD_LIBRARY_PATH: selfLd});
+
+if (hostRuntime) {
+  const targetRuntime = path.join(selfHome, RUNTIME_SUB);
+  console.log(`[difftest] host/target split: host-rt=${hostRuntime} target-rt=${targetRuntime}`);
+  console.log(`[difftest]   host mask=${await runtimeMaskCount(hostRuntime)} (expect 0)`);
+  console.log(`[difftest]   target mask=${await runtimeMaskCount(targetRuntime)} (expect 1)`);
+}
 
 if (argv['skip-preflight'] === undefined) {
-  await preflightSelf(self, selfHome, tc, selfLd, selfCangjieHome);
+  await preflightSelf(self, selfHome, tc, selfCompileLd, selfCangjieHome);
 }
 
 async function classify(file) {
@@ -142,10 +171,10 @@ async function classify(file) {
       rexit = referenceRun.exitCode;
     }
 
-    const selfBuild = await $({cwd: work, nothrow: true, quiet: true, env: selfEnv})`timeout 180 ${self} ${file} -o ${path.join(work, `${name}.self`)} --set-runtime-rpath`;
+    const selfBuild = await $({cwd: work, nothrow: true, quiet: true, env: selfCompileEnv})`timeout 180 ${self} ${file} -o ${path.join(work, `${name}.self`)} --set-runtime-rpath`;
     await fs.writeFile(path.join(work, `${name}.slog`), selfBuild.stdout + selfBuild.stderr);
     if (selfBuild.exitCode === 0) {
-      const selfRun = await $({cwd: work, nothrow: true, quiet: true, env: selfEnv})`timeout 30 ${path.join(work, `${name}.self`)}`;
+      const selfRun = await $({cwd: work, nothrow: true, quiet: true, env: selfProductEnv})`timeout 30 ${path.join(work, `${name}.self`)}`;
       const sout = commandSubstitution(selfRun.stdout);
       const selfCombined = `${selfRun.stdout}${selfRun.stderr}`;
       if (isAbiLoadError(selfCombined)) {
