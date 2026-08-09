@@ -68,6 +68,39 @@ async function brewPrefix(name) {
   return prefix;
 }
 
+async function removePythonCaches(directory) {
+  for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory() && entry.name === '__pycache__') {
+      await fs.rm(target, {recursive: true, force: true});
+    } else if (entry.isDirectory()) {
+      await removePythonCaches(target);
+    }
+  }
+}
+
+async function pruneUnixBundle() {
+  const stdlib = path.join(output, 'lib', 'python3.11');
+  const removed = [
+    '<bundle>/include',
+    '<bundle>/lib/pkgconfig',
+    '<bundle>/share',
+    '<bundle>/lib/python3.11/config-3.11-*',
+    '<bundle>/lib/python3.11/test',
+    '<bundle>/**/__pycache__',
+  ];
+  for (const relative of ['include', 'lib/pkgconfig', 'share', 'lib/python3.11/test']) {
+    await fs.rm(path.join(output, relative), {recursive: true, force: true});
+  }
+  for (const entry of await fs.readdir(stdlib, {withFileTypes: true})) {
+    if (entry.isDirectory() && entry.name.startsWith('config-3.11-')) {
+      await fs.rm(path.join(stdlib, entry.name), {recursive: true, force: true});
+    }
+  }
+  await removePythonCaches(output);
+  return removed;
+}
+
 async function prepareWindows() {
   const archive = path.join(downloads, path.basename(RELEASE_PYTHON_WINDOWS_URL));
   await verifiedDownload(RELEASE_PYTHON_WINDOWS_URL, RELEASE_PYTHON_WINDOWS_SHA256, archive);
@@ -136,12 +169,14 @@ async function prepareUnix() {
   });
   await run(['make', 'install'], {cwd: sourceRoot, stage: 'python.source.install'});
   await fs.copyFile(path.join(sourceRoot, 'LICENSE'), path.join(output, 'LICENSE.txt'));
+  const removed_runtime_extraneous_paths = await pruneUnixBundle();
   return {
     source_type: 'python.org-source-native',
     source_url: RELEASE_PYTHON_SOURCE_URL,
     source_sha256: RELEASE_PYTHON_SOURCE_SHA256,
     configure_args: recordedArgs.join(' '),
     configure_environment: Object.entries(configureEnv).map(([name, value]) => `${name}=${value}`).join(' ') || 'none',
+    removed_runtime_extraneous_paths,
   };
 }
 
