@@ -338,8 +338,10 @@ jobs:
       - name: Export artifact names
         id: contract
         run: |
-          echo "final_std_linux_x64=final-std-linux-x64" >> "$GITHUB_OUTPUT"
-          echo "final_std_linux_aarch64=final-std-linux-aarch64" >> "$GITHUB_OUTPUT"
-          echo "final_std_darwin_x64=final-std-darwin-x64" >> "$GITHUB_OUTPUT"
-          echo "final_std_darwin_arm64=final-std-darwin-arm64" >> "$GITHUB_OUTPUT"
-          echo "final_std_windows_x64=final-std-windows-x64" >> "$GITHUB_OUTPUT"
+          {
+            echo "final_std_linux_x64=final-std-linux-x64"
+            echo "final_std_linux_aarch64=final-std-linux-aarch64"
+            echo "final_std_darwin_x64=final-std-darwin-x64"
+            echo "final_std_darwin_arm64=final-std-darwin-arm64"
+            echo "final_std_windows_x64=final-std-windows-x64"
+          } >> "$GITHUB_OUTPUT"
