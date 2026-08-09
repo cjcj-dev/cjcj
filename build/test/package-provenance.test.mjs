@@ -1,0 +1,110 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
+import test from 'node:test';
+
+const TUPLE = 'linux_x86_64_cjnative';
+const CJCJ_SHA = 'a'.repeat(40);
+const RUNTIME_SHA = 'b'.repeat(40);
+const LLVM_SHA = 'c'.repeat(40);
+const STD_SHA = 'd'.repeat(40);
+
+async function write(root, relative, contents, mode) {
+  const file = path.join(root, relative);
+  await fs.mkdir(path.dirname(file), {recursive: true});
+  await fs.writeFile(file, contents, mode ? {mode} : undefined);
+  return file;
+}
+
+function run(command, args, options = {}) {
+  const result = spawnSync('timeout', ['90s', 'nice', '-n', '15', command, ...args], {
+    encoding: 'utf8',
+    ...options,
+  });
+  assert.equal(result.status, 0, `${command} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  return result;
+}
+
+test('package_sdk archives std provenance and an honest complete manifest', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'package-provenance-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const sdk = path.join(root, 'sdk');
+  const std = path.join(root, 'std');
+  const out = path.join(root, 'dist');
+  await fs.mkdir(out);
+
+  const binary = path.join(root, 'cjc');
+  await fs.copyFile('/bin/true', binary);
+  await fs.appendFile(binary, `\0CJCJ-COMMIT:${CJCJ_SHA}\0`);
+  await fs.chmod(binary, 0o755);
+  await write(sdk, 'envsetup.sh', '# fixture SDK\n', 0o755);
+  await write(sdk, `runtime/lib/${TUPLE}/libcangjie-runtime.so`,
+    `fixture-runtime\0CJRT-COMMIT:${RUNTIME_SHA}\0`);
+  await write(sdk, 'third_party/llvm/bin/llc', `fixture-llc\0CJLLVM-COMMIT:${LLVM_SHA}\0`, 0o755);
+  await write(sdk, 'third_party/llvm/bin/opt', 'fixture-opt-with-stamp-removed', 0o755);
+  await fs.mkdir(path.join(sdk, 'bin'), {recursive: true});
+  await fs.mkdir(path.join(sdk, 'lib', TUPLE), {recursive: true});
+  await fs.mkdir(path.join(sdk, 'modules', TUPLE, 'std'), {recursive: true});
+
+  const source = await write(root, 'std-core.c', [
+    'extern long g_cjLoadBadMask;',
+    '__attribute__((used)) long _CNat6String7indexOfHRNatY0_E(void) {',
+    '  return g_cjLoadBadMask;',
+    '}',
+    '',
+  ].join('\n'));
+  const object = path.join(root, 'std-core.o');
+  run('cc', ['-O0', '-fPIC', '-c', source, '-o', object]);
+  const archive = path.join(root, 'std.core.a');
+  run('ar', ['rcs', archive, object]);
+  await fs.mkdir(path.join(std, 'modules', TUPLE, 'std'), {recursive: true});
+  await fs.mkdir(path.join(std, 'lib', TUPLE), {recursive: true});
+  await fs.copyFile(archive, path.join(std, 'modules', TUPLE, 'std', 'std.core.a'));
+  await fs.copyFile(archive, path.join(std, 'lib', TUPLE, 'libcangjie-std-core.a'));
+  await write(std, 'PROVENANCE.txt', [
+    `CJSTD-COMMIT:${STD_SHA} BUILT-BY:${CJCJ_SHA}`,
+    `STD_SOURCE_COMMIT = ${STD_SHA}`,
+    'ARTIFACT-SHA256:',
+    '',
+  ].join('\n'));
+  const llvmManifest = await write(root, 'llvm-tools.manifest', [
+    `LLVM_SHA=${LLVM_SHA}`,
+    `LLC_SHA256=${'1'.repeat(64)}`,
+    `OPT_SHA256=${'2'.repeat(64)}`,
+    '',
+  ].join('\n'));
+
+  const packaged = run('zx', [path.resolve('scripts/package_sdk.mjs'),
+    '--sdk', sdk,
+    '--binary', binary,
+    '--allow-stock-runtime',
+    '--std-dir', std,
+    '--llvm-manifest', llvmManifest,
+    '--base-sdk-id', 'fixture-sdk',
+    '--cjcj-source-sha', CJCJ_SHA,
+    '--runtime-source-sha', RUNTIME_SHA,
+    '--std-source-repo', 'https://github.com/cjcj-dev/cangjie-runtime.git',
+    '--version', 'fixture',
+    '--platform', 'linux-x64',
+    '--outdir', out,
+  ], {cwd: path.resolve('.')});
+  assert.match(packaged.stdout, /DONE: .*cjcj-fixture-linux-x64\.tar\.gz/);
+
+  const packageName = 'cjcj-fixture-linux-x64';
+  const manifestFile = path.join(out, `${packageName}.RELEASE-MANIFEST.jsonl`);
+  const manifestText = await fs.readFile(manifestFile, 'utf8');
+  const rows = manifestText.trim().split('\n').map(JSON.parse);
+  assert.equal(rows.length, 7);
+  assert.equal(rows.find(row => row.component === 'llvm-opt').embedded_stamp, 'no-stamp');
+  assert.match(rows.find(row => row.component === 'cjpm').artifact.sha256,
+    /^unavailable: packaged cjpm is missing$/);
+  const listing = run('tar', ['-tzf', path.join(out, `${packageName}.tar.gz`)]).stdout;
+  assert.match(listing, new RegExp(`${packageName}/PROVENANCE\\.txt`));
+  assert.match(listing, new RegExp(`${packageName}/RELEASE-MANIFEST\\.jsonl`));
+  console.log(`PACKAGER-OUTPUT-BEGIN\n${packaged.stdout.trim()}\nPACKAGER-OUTPUT-END`);
+  console.log(`ARCHIVE-PROVENANCE-BEGIN\n${listing.split('\n').filter(line =>
+    /PROVENANCE|RELEASE-MANIFEST/.test(line)).join('\n')}\nARCHIVE-PROVENANCE-END`);
+  console.log(`RELEASE-MANIFEST-BEGIN\n${manifestText.trim()}\nRELEASE-MANIFEST-END`);
+});
