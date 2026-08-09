@@ -59,6 +59,54 @@ public open class Darwin_CJNATIVE <: MachO {
         SetOptions(setCompositeOption, driverOptions, setCompositeOptionsPass)
     }
 
+    protected open override func GenerateArchiveTool(objFiles: ArrayList<TempFileInfo>): Unit {
+        if (!driverOptions.ShouldEmitStaticLibInLTO()) {
+            super.GenerateArchiveTool(objFiles)
+            return
+        }
+        let ltoObject = GenerateLTOObjectFile(objFiles)
+        let archiveTool = Tool(arPath, ToolType.BACKEND, driverOptions.environment.allVariables)
+        archiveTool.AppendArg("cr")
+        let archiveOutput = CreateNewFileInfoWrapper(objFiles, TempFileKind.O_STATICLIB)
+        let removeArchive = Tool("RemoveFile", ToolType.INTERNAL_IMPLEMENTED,
+            driverOptions.environment.allVariables)
+        removeArchive.AppendArg(archiveOutput.filePath)
+        backendCmds.add(MakeSingleToolBatch(removeArchive))
+        archiveTool.AppendArg(archiveOutput.filePath)
+        archiveTool.AppendArgsFromDirAtExecution(ltoObject.rawPath, "lto.o")
+        backendCmds.add(MakeSingleToolBatch(archiveTool))
+    }
+
+    protected func GenerateLTOObjectFile(objFiles: ArrayList<TempFileInfo>): TempFileInfo {
+        let darwinSDKVersion = GetDarwinSDKVersion(driverOptions.sysroot)
+        if (driverOptions.enableVerbose) {
+            println("selected Darwin SDK path: " + driverOptions.sysroot + " (SDK Version: " +
+                (darwinSDKVersion ?? "N/A") + ")")
+        }
+        let tool = Tool(ldPath, ToolType.BACKEND, driverOptions.environment.allVariables)
+        tool.SetLdLibraryPath(FileUtil.JoinPath(FileUtil.GetDirPath(ldPath), "../lib"))
+        var outputFileInfo = CreateNewFileInfoWrapper(objFiles, TempFileKind.T_OBJ)
+        let ltoObjectDir = outputFileInfo.filePath + ".lto"
+        let ltoObjectPath = FileUtil.JoinPath(ltoObjectDir, "0." + GetTargetArchString() + ".lto.o")
+        GenerateLinkOptionsForLTO(tool)
+        tool.AppendArg("-object_path_lto", ltoObjectDir)
+        tool.AppendArg("-lto-emit-obj-only")
+        tool.AppendArg("-dylib")
+        tool.AppendArg("-arch", GetTargetArchString())
+        tool.AppendArg("-platform_version")
+        tool.AppendArg("macos")
+        tool.AppendArg("12.0.0")
+        tool.AppendArg(darwinSDKVersion ?? "12")
+        tool.AppendArg("-syslibroot")
+        tool.AppendArg(if (driverOptions.sysroot.isEmpty()) { "/" } else { driverOptions.sysroot })
+        HandleLLVMLinkOptions(objFiles, tool)
+        GenerateRuntimePath(tool)
+        backendCmds.add(MakeSingleToolBatch(tool))
+        outputFileInfo.filePath = ltoObjectPath
+        outputFileInfo.rawPath = ltoObjectDir
+        return outputFileInfo
+    }
+
     protected open override func GenerateLinkingTool(
         objFiles: ArrayList<TempFileInfo>,
         darwinSDKVersion: String
