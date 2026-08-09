@@ -20,7 +20,8 @@ if (process.platform !== target.spec.nodePlatform || process.arch !== target.spe
 
 const sdk = `${workspace}/software/cangjie`;
 await $`test -x target/release/bin/cjcj::cjc`;
-// The packaged SDK contains exactly one compiler, built by the cjcj stage2 line.
+// The packaged SDK contains exactly one compiler, rebuilt at stage3 against the
+// final std produced by stage2.
 // cjc-frontend is an official C++ SDK tool; frontend_tool is currently a static
 // selfhost package, so shipping the C++ binary would mix product lines.
 const compilerNames = [
