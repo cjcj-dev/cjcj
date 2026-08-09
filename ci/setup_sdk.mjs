@@ -83,6 +83,8 @@ if (baseSdkArchive || baseSdkProvenance || releasePlatform) {
   });
   log(`cjv toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`);
   await $`cjv toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`;
+  log(`cjv component add stdx --toolchain ${toolchain}`);
+  await $`cjv component add stdx --toolchain ${toolchain}`;
 } else {
   log(`cjv install ${toolchain} -c stdx`);
   await $`cjv install ${toolchain} -c stdx`;
