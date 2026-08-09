@@ -63,6 +63,11 @@ private let GCREAD_WEAK_REF_INTRINSIC_NAME: String = "llvm.cj.gcread.weakref"
 private let GCREAD_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcread.static.ref"
 private let GCWRITE_STATIC_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.static.ref"
 private let SET_LOCATION_INTRINSIC_NAME: String = "llvm.cj.set.location"
+private let PTR_ANNOTATION_INTRINSIC_NAME: String = "llvm.ptr.annotation"
+private let PLAIN_SAFE_REPRESENTATION_MARKER: String = "cj.repr.plain_safe.v1"
+private let PLAIN_SAFE_REPRESENTATION_GLOBAL: String = ".cj.repr.plain_safe"
+private let PLAIN_SAFE_REPRESENTATION_CONTRACT: String = "plain_safe"
+private let PLAIN_SAFE_RETURN_CONTRACT: String = "cj.repr.ret"
 private let FILL_IN_STACK_TRACE_INTRINSIC_NAME: String = "llvm.cj.fill.in.stack.trace"
 private let NEW_CJ_THREAD_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThread"
 private let NEW_CJ_THREAD_NO_RETURN_FUNC_NAME: String = PREFIX_OF_BACKEND_SYMS + "NewCJThreadNoReturn"
@@ -2170,7 +2175,17 @@ public class IRBuilder2 <: Resource {
             if (funcType.IsCFunc()) {
                 SetZExtAttrForCFunc(callBase, calleeType.GetLLVMFunctionType())
             }
-            return GetReturnValue(calleeType, callBase, callArgs)
+            let isIndirectManagedRefResult = !funcType.IsCFunc() && calleeType.HasSRet() == false &&
+                unsafe { LLVMIsAFunction(callee) }.isNull() && IsTypeContainsRef(unsafe { LLVMTypeOf(callBase) })
+            if (isIndirectManagedRefResult) {
+                AddStringAttributeAtIndex(callBase, 0u32, PLAIN_SAFE_RETURN_CONTRACT,
+                    attrValue: PLAIN_SAFE_REPRESENTATION_CONTRACT)
+            }
+            let retValue = GetReturnValue(calleeType, callBase, callArgs)
+            if (isIndirectManagedRefResult) {
+                return CreatePlainSafeRepresentationMarker(retValue)
+            }
+            return retValue
         }
         return CreateCallOrInvoke(callee, calleeType.GetLLVMFunctionType(), llvmCallArgs, name: name)
     }
@@ -3051,10 +3066,65 @@ public class IRBuilder2 <: Resource {
     private func CallMappedIntrinsicWithCGValues(kind: IntrinsicKind, parameters: ArrayList<CGValue>,
         resultType: Option<Type>): LLVMValueRef {
         if (let Some(funcName) <- IntrinsicRuntimeFunctionName(kind)) {
-            return CallIntrinsicFunction(ResultLLVMType(resultType), funcName, parameters,
+            let result = CallIntrinsicFunction(ResultLLVMType(resultType), funcName, parameters,
                 IntrinsicFunctionAttributes(kind))
+            if (kind == IntrinsicKind.GET_THREAD_OBJECT) {
+                return CreatePlainSafeRepresentationMarker(result)
+            }
+            return result
         }
         return CallMappedLLVMIntrinsic(kind, RawValuesOfCGValues(parameters), ArrayList<LLVMTypeRef>())
+    }
+
+    private func CreatePlainSafeRepresentationMarker(value: LLVMValueRef): LLVMValueRef {
+        if (value.isNull()) {
+            return value
+        }
+        let valueType = unsafe { LLVMTypeOf(value) }
+        if (valueType.isNull() || unsafe { LLVMGetTypeKind(valueType) } != LLVM_POINTER_TYPE_KIND) {
+            return value
+        }
+        let context = GetLLVMContext().raw
+        let i8Type = unsafe { LLVMInt8TypeInContext(context) }
+        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let marker = GetOrCreateRepresentationMarkerString(i8PtrType)
+        let args = ArrayList<LLVMValueRef>([
+            value,
+            marker,
+            unsafe { LLVMConstNull(i8PtrType) },
+            GetInt32(0),
+            unsafe { LLVMConstNull(i8PtrType) }
+        ])
+        return CreateIntrinsicCallNoInvoke(PTR_ANNOTATION_INTRINSIC_NAME,
+            ArrayList<LLVMTypeRef>([valueType]), args, name: "repr.plain_safe")
+    }
+
+    private func GetOrCreateRepresentationMarkerString(i8PtrType: LLVMTypeRef): LLVMValueRef {
+        let moduleHandle = cgMod.GetLLVMModule() ?? return unsafe { LLVMConstNull(i8PtrType) }
+        var markerGlobal = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString(PLAIN_SAFE_REPRESENTATION_GLOBAL) }.asResource()) {
+            markerGlobal = unsafe { LLVMGetNamedGlobal(moduleHandle.raw, nameCString.value) }
+            if (markerGlobal.isNull()) {
+                var markerConstant = LLVMNullValue()
+                try (markerCString = unsafe { LibC.mallocCString(PLAIN_SAFE_REPRESENTATION_MARKER) }.asResource()) {
+                    markerConstant = unsafe {
+                        LLVMConstStringInContext(GetLLVMContext().raw, markerCString.value,
+                            UInt32(PLAIN_SAFE_REPRESENTATION_MARKER.size), 0)
+                    }
+                }
+                markerGlobal = unsafe {
+                    LLVMAddGlobal(moduleHandle.raw, LLVMTypeOf(markerConstant), nameCString.value)
+                }
+                unsafe {
+                    LLVMSetInitializer(markerGlobal, markerConstant)
+                    LLVMSetGlobalConstant(markerGlobal, 1)
+                    LLVMSetLinkage(markerGlobal, LLVMLinkageValue(LLVMLinkage.Private))
+                    LLVMSetUnnamedAddress(markerGlobal, LLVMUnnamedAddrValue(LLVMUnnamedAddr.GlobalUnnamedAddr))
+                    LLVMSetAlignment(markerGlobal, 1u32)
+                }
+            }
+        }
+        return unsafe { LLVMConstBitCast(markerGlobal, i8PtrType) }
     }
 
     private func CallMappedLLVMIntrinsic(kind: IntrinsicKind, args: ArrayList<LLVMValueRef>,
