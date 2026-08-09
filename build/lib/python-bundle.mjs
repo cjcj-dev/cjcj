@@ -160,6 +160,40 @@ async function readMetadata(root, platform) {
   return {file, metadata};
 }
 
+function nativeCommand(command, args) {
+  const result = spawnSync(command, args, {encoding: 'utf8'});
+  if (result.status !== 0) {
+    throw new Error(`${command} failed (${result.status}): ${args.join(' ')}\n${result.stdout}\n${result.stderr}`);
+  }
+  return result.stdout;
+}
+
+async function relocateDarwinPython(stage, pythonRoot) {
+  const pythonLibrary = path.join(pythonRoot, 'lib', 'libpython3.11.dylib');
+  nativeCommand('install_name_tool', ['-id', '@rpath/libpython3.11.dylib', pythonLibrary]);
+  const llvmLib = path.join(stage, 'third_party', 'llvm', 'lib');
+  const candidates = [path.join(stage, 'third_party', 'llvm', 'bin', 'lldb')];
+  for (const name of await fs.readdir(llvmLib)) {
+    if (name.startsWith('liblldb') && name.endsWith('.dylib')) candidates.push(path.join(llvmLib, name));
+  }
+  let patched = 0;
+  for (const candidate of candidates) {
+    if (!await isFile(candidate)) continue;
+    const dependencies = nativeCommand('otool', ['-L', candidate]).split(/\r?\n/).slice(1)
+      .map(line => line.trim().split(/\s+\(/)[0]).filter(Boolean);
+    for (const dependency of dependencies) {
+      const base = path.basename(dependency);
+      if (!dependency.includes('3.11') ||
+          !(base === 'Python' || base === 'Python3' || /^libpython3\.11.*\.dylib$/.test(base))) continue;
+      const relative = path.relative(path.dirname(candidate), pythonLibrary).split(path.sep).join('/');
+      const replacement = `@loader_path/${relative}`;
+      if (dependency !== replacement) nativeCommand('install_name_tool', ['-change', dependency, replacement, candidate]);
+      patched += 1;
+    }
+  }
+  if (patched === 0) throw new Error('Darwin cjdb/LLDB carries no Python 3.11 dependency to relocate');
+}
+
 async function writeLauncher(stage, platform, runtimeDir) {
   const toolsBin = path.join(stage, 'tools', 'bin');
   await fs.mkdir(toolsBin, {recursive: true});
@@ -214,6 +248,7 @@ export async function installPythonBundle({source, stage, platform, runtimeDir})
   await fs.cp(sourceRoot, destination, {recursive: true, dereference: true, preserveTimestamps: true});
   const installed = await requireLayout(destination, platform);
   const provenance = await readMetadata(destination, platform);
+  if (platform.startsWith('darwin-')) await relocateDarwinPython(stage, destination);
   exactVersion(installed.executable, destination, platform);
   verifyPythonImports(
     installed.executable,
