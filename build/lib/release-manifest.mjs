@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export const RELEASE_MANIFEST = 'RELEASE-MANIFEST.jsonl';
+export const RELEASE_SIGNATURE_POLICY = 'SHA_ONLY';
 
 const unavailable = reason => `unavailable: ${reason}`;
 
@@ -107,7 +108,12 @@ export async function writeReleaseManifest({
   stdRepository = '',
   cjpmRepository = '',
   cjpmCommit = '',
+  signaturePolicy = RELEASE_SIGNATURE_POLICY,
 }) {
+  const normalizedSignaturePolicy = typeof signaturePolicy === 'string' ? signaturePolicy.trim() : '';
+  if (normalizedSignaturePolicy !== RELEASE_SIGNATURE_POLICY) {
+    throw new Error(`signature_policy must be ${RELEASE_SIGNATURE_POLICY}, got ${normalizedSignaturePolicy || '<empty>'}`);
+  }
   const cjcjFile = findExecutable(stage, 'bin/cjc', exeSuffix);
   const llcFile = findExecutable(stage, 'third_party/llvm/bin/llc', exeSuffix);
   const optFile = findExecutable(stage, 'third_party/llvm/bin/opt', exeSuffix);
@@ -192,7 +198,7 @@ export async function writeReleaseManifest({
       artifact: {path: cjpm.path, sha256: cjpm.sha256},
       embedded_stamp: cjpm.embedded_stamp,
     },
-  ];
+  ].map(row => ({...row, signature_policy: normalizedSignaturePolicy}));
 
   for (const row of rows) {
     for (const [name, value] of Object.entries({
@@ -203,6 +209,7 @@ export async function writeReleaseManifest({
       artifact_path: row.artifact.path,
       artifact_sha256: row.artifact.sha256,
       embedded_stamp: row.embedded_stamp,
+      signature_policy: row.signature_policy,
     })) {
       if (typeof value !== 'string' || value.length === 0) throw new Error(`${row.component}.${name} is empty`);
     }
