@@ -368,3 +368,4 @@ jobs:
             dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.zip.sha256
             dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.RELEASE-MANIFEST.jsonl
           if-no-files-found: error
+          retention-days: 90
