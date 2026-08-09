@@ -7,6 +7,12 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {baseSdkDownload} from '../lib/release-component-provenance.mjs';
 import {
+  GATE_APPARATUS_COMPONENT,
+  GATE_APPARATUS_PROVENANCE,
+  KNOWN_GATE_APPARATUS_LIMITATIONS,
+  REVIEWED_GATE_HOST_TOOLCHAIN,
+} from '../lib/release-gate-apparatus.mjs';
+import {
   CJDB_PYTHON_MODULES,
   CJDB_PYTHON_UNIX_MODULES,
   RELEASE_PYTHON_SOURCE_SHA256,
@@ -48,6 +54,29 @@ function digest(contents) {
   return crypto.createHash('sha256').update(contents).digest('hex');
 }
 
+async function writeGateApparatus(stage, platform) {
+  return write(stage, GATE_APPARATUS_PROVENANCE, `${JSON.stringify({
+    schema: 1,
+    component: GATE_APPARATUS_COMPONENT,
+    platform,
+    gate_host_toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+    base_sdk: {
+      release_repository: 'https://gitcode.com/Cangjie/nightly_build',
+      version: REVIEWED_GATE_HOST_TOOLCHAIN.replace(/^nightly-/, ''),
+      download_url: 'https://gitcode.com/Cangjie/nightly_build/releases/download/fixture/sdk.tar.gz',
+      archive_path: 'sdk.tar.gz',
+      archive_sha256: '8'.repeat(64),
+    },
+    host_runtime: {
+      path: 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
+      sha256: '9'.repeat(64),
+      g_cjLoadBadMask_count: 0,
+      symbol_probe: 'nm -D --defined-only',
+    },
+    known_apparatus_limitations: KNOWN_GATE_APPARATUS_LIMITATIONS,
+  }, null, 2)}\n`);
+}
+
 test('release manifest keeps every component and records a removed stamp', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'release-manifest-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
@@ -87,6 +116,7 @@ test('release manifest keeps every component and records a removed stamp', async
   };
   const pythonMetadataArtifact = await write(stage, 'third_party/python/PYTHON-BUNDLE.json',
     `${JSON.stringify(pythonMetadata, null, 2)}\n`);
+  const gateApparatusArtifact = await writeGateApparatus(stage, 'linux-x64');
 
   const options = {
     stage,
@@ -94,7 +124,8 @@ test('release manifest keeps every component and records a removed stamp', async
     runtimeArtifact: runtime,
     stdProvenance: provenance,
     llvmManifest,
-    baseSdkId: 'nightly-fixture',
+    baseSdkId: REVIEWED_GATE_HOST_TOOLCHAIN,
+    gateApparatusArtifact,
     cjcjCommit: CJCJ_SHA,
     runtimeCommit: RUNTIME_SHA,
     stdRepository: 'https://github.com/cjcj-dev/cangjie-runtime.git',
@@ -106,15 +137,20 @@ test('release manifest keeps every component and records a removed stamp', async
     pythonVersion: RELEASE_PYTHON_VERSION,
   };
   const positive = await writeReleaseManifest(options);
-  assert.equal(positive.rows.length, 8);
+  assert.equal(positive.rows.length, 9);
   assert.deepEqual(positive.rows.map(row => row.component),
-    ['base-sdk', 'cjcj', 'runtime', 'llvm-llc', 'llvm-opt', 'std', 'cjpm', 'python']);
+    ['base-sdk', GATE_APPARATUS_COMPONENT, 'cjcj', 'runtime', 'llvm-llc', 'llvm-opt', 'std', 'cjpm', 'python']);
+  const apparatus = positive.rows.find(row => row.component === GATE_APPARATUS_COMPONENT).acceptance_apparatus;
+  assert.equal(apparatus.gate_host_toolchain, REVIEWED_GATE_HOST_TOOLCHAIN);
+  assert.match(apparatus.host_runtime.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(apparatus.host_runtime.g_cjLoadBadMask_count, 0);
+  assert.equal(apparatus.known_apparatus_limitations.evidence[0].report, 'REPORT-gateconc.md');
   assert.equal(positive.rows.find(row => row.component === 'llvm-opt').embedded_stamp,
     `CJLLVM-COMMIT:${LLVM_SHA}`);
   assert.equal(positive.rows.find(row => row.component === 'std').embedded_stamp, 'no-stamp');
   assert.equal(positive.rows.find(row => row.component === 'cjpm').artifact.sha256, digest(cjpmContents));
   assert.match(positive.rows.find(row => row.component === 'base-sdk').source.commit,
-    /^unavailable: official SDK nightly-fixture/);
+    new RegExp(`^unavailable: official SDK ${REVIEWED_GATE_HOST_TOOLCHAIN}`));
 
   await fs.writeFile(opt, 'opt-with-stamp-deliberately-removed');
   const negative = await writeReleaseManifest(options);
