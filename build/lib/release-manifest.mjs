@@ -173,8 +173,8 @@ export async function writeReleaseManifest({
       component: 'base-sdk',
       source: {
         ...source('', '',
-          `official binary SDK ${baseSdkId || '<unknown>'} has no source repository metadata`,
-          `official binary SDK ${baseSdkId || '<unknown>'} has no source commit metadata`),
+          `official SDK ${baseSdkId || '<unknown>'} has no source repository metadata`,
+          `official SDK ${baseSdkId || '<unknown>'} has no source commit metadata`),
         ...(hasBaseSdkProvenance ? {
           release_repository: baseSdkProvenance.release.repository,
           version: baseSdkProvenance.release.version,
