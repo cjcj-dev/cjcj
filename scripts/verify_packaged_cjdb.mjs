@@ -78,8 +78,8 @@ if (session.status !== 0) {
   throw new Error(`packaged cjdb session failed with ${session.status}:\n${session.stdout}\n${session.stderr}`);
 }
 const output = `${session.stdout}\n${session.stderr}`;
-const version = output.match(/CJCJ_CJDB_PYTHON=([^\r\n]+)/)?.[1]?.trim() || '';
-const prefix = output.match(/CJCJ_CJDB_PREFIX=([^\r\n]+)/)?.[1]?.trim() || '';
+const version = output.match(/^CJCJ_CJDB_PYTHON=([^\r\n]+)$/m)?.[1]?.trim() || '';
+const prefix = output.match(/^CJCJ_CJDB_PREFIX=([^\r\n]+)$/m)?.[1]?.trim() || '';
 if (version !== RELEASE_PYTHON_VERSION) {
   throw new Error(`cjdb used Python ${version || '<unknown>'}, expected ${RELEASE_PYTHON_VERSION}`);
 }
