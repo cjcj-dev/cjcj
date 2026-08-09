@@ -85,6 +85,19 @@ async function countRuntimeMarkers(runtime) {
 }
 
 async function assertStdBarriers(coreLib) {
+  const symbolTable = await $({stdio: 'pipe'})`nm -A ${coreLib}`;
+  const hasMask = symbolTable.stdout.includes('g_cjLoadBadMask');
+  const hasReadBarrier = /CJ_MCC_Read(?:StaticRef|RefField)/.test(symbolTable.stdout);
+  if (!hasMask || !hasReadBarrier) {
+    throw new Error(`final std barrier symbol assertion failed: mask=${hasMask} read_barrier=${hasReadBarrier}`);
+  }
+  if (target.spec.os !== 'linux' || target.spec.arch !== 'x86_64') {
+    // The existing instruction-shape probe is x86-specific. On native AArch64
+    // and Mach-O, require both exact runtime references instead of pretending
+    // the x86 shr/relocation syntax applies.
+    console.log(`STAGE3_BARRIER_SYMBOL_ASSERT_PASS target=${target.spec.key} mask=1 read_barrier=1`);
+    return;
+  }
   const output = await $({stdio: 'pipe'})`objdump -drwC ${coreLib}`;
   const lines = output.stdout.split('\n');
   const symbols = [
