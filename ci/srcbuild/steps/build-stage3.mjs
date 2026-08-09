@@ -79,43 +79,6 @@ async function assertStage2Compiler(stageEnv, stage2Sha) {
   console.log(`STAGE3_COMPILER_ASSERT_PASS path=${resolvedInstalled} sha256=${installedSha}`);
 }
 
-async function countFinalStd(root) {
-  const modulesTop = path.join(root, 'modules', tuple);
-  const modulesStd = path.join(root, 'modules', tuple, 'std');
-  const staticDir = path.join(root, 'lib', tuple);
-  const sharedDir = path.join(root, 'runtime', 'lib', tuple);
-  for (const directory of [modulesTop, modulesStd, staticDir, sharedDir]) {
-    if (!await exists(directory, 'dir')) throw new Error(`final std directory missing: ${directory}`);
-  }
-  const [topModules, modules, staticLibs, sharedLibs] = await Promise.all([
-    fs.readdir(modulesTop),
-    fs.readdir(modulesStd),
-    fs.readdir(staticDir),
-    fs.readdir(sharedDir),
-  ]);
-  return {
-    cjos: modules.filter((name) => /^std\..+\.cjo$/.test(name)).length
-      + Number(topModules.includes('std.cjo')),
-    bitcode: modules.filter((name) => /^libstd\..+\.bc$/.test(name)).length
-      + Number(topModules.includes('libstd.bc')),
-    staticLibs: staticLibs.filter((name) => /^libcangjie-std(?:-|\.)?.*\.a$/.test(name) && !name.endsWith('FFI.a')).length,
-    ffiStaticLibs: staticLibs.filter((name) => /^libcangjie-std.*FFI\.a$/.test(name)).length,
-    sharedLibs: sharedLibs.filter((name) => /^libcangjie-std(?:-|\.)?.*\.so$/.test(name)).length,
-  };
-}
-
-async function assertFinalStd(root) {
-  const counts = await countFinalStd(root);
-  const expected = dryRun
-    ? {cjos: 1, bitcode: 1, staticLibs: 1, ffiStaticLibs: 1, sharedLibs: 1}
-    : {cjos: 47, bitcode: 47, staticLibs: 47, ffiStaticLibs: 16, sharedLibs: 47};
-  for (const [kind, count] of Object.entries(counts)) {
-    if (count !== expected[kind]) throw new Error(`final std ${kind}: expected ${expected[kind]}, found ${count}`);
-  }
-  console.log(`STAGE3_FINAL_STD_ASSERT_PASS cjos=${counts.cjos} bitcode=${counts.bitcode} static=${counts.staticLibs} ffi_static=${counts.ffiStaticLibs} shared=${counts.sharedLibs}${dryRun ? ' FAKE=1' : ''}`);
-  return counts;
-}
-
 async function countRuntimeMarkers(runtime) {
   const contents = (await fs.readFile(runtime)).toString('latin1');
   return contents.match(/MRT_GCV2_/g)?.length ?? 0;
