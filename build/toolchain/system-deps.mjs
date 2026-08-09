@@ -19,6 +19,13 @@ export const APT_PACKAGES = Object.freeze([
   'rpm2cpio', 'libncurses5', 'libncurses5-dev', 'strace', 'net-tools', 'swig', 'python3-dev',
 ]);
 
+// cangjie_build/docs/macos.md:52-82 and docs/env.md:21-34. coreutils and
+// gnu-tar are orchestration-only additions: bounded gates need gtimeout and the
+// official package recipe requires GNU tar rather than BSD tar.
+export const BREW_PACKAGES = Object.freeze([
+  'python3', 'ninja', 'llvm@16', 'openssl@3', 'bison', 'googletest', 'gnu-tar', 'swig', 'coreutils',
+]);
+
 function which(name) {
   for (const directory of (process.env.PATH || '').split(path.delimiter)) {
     const candidate = path.join(directory, name);
@@ -30,16 +37,51 @@ function which(name) {
   return null;
 }
 
-export async function install() {
-  if (process.platform !== 'linux') {
-    throw new BuildError('system_deps', `install-system-deps only supports Linux (current: ${process.platform})`);
+function assertNativeHost(config) {
+  const spec = config.target.spec;
+  if (process.platform !== spec.nodePlatform || process.arch !== spec.nodeArch) {
+    throw new BuildError(
+      'system_deps',
+      `target ${spec.key} requires host ${spec.nodePlatform}/${spec.nodeArch}, current ${process.platform}/${process.arch}`,
+    );
   }
+}
+
+function aptPackagesFor(config) {
+  if (config.target.spec.legacyNcursesPackages) return APT_PACKAGES;
+  const legacy = new Set(['libtinfo5', 'libncurses5', 'libncurses5-dev']);
+  return [...APT_PACKAGES.filter(name => !legacy.has(name)), 'libtinfo6', 'libncurses-dev'];
+}
+
+async function installLinux(config) {
   if (!which('apt-get')) throw new BuildError('system_deps', 'apt-get not found; an Ubuntu/Debian host is required');
+  const packages = aptPackagesFor(config);
   const sudo = which('sudo') ? ['sudo'] : [];
-  logger.info('Installing %d apt packages', APT_PACKAGES.length);
+  logger.info('Installing %d apt packages', packages.length);
   await run([...sudo, 'apt-get', 'update'], {stage: 'system_deps.update'});
-  await run([...sudo, 'apt-get', 'install', '-y', '--no-install-recommends', ...APT_PACKAGES], {
+  await run([...sudo, 'apt-get', 'install', '-y', '--no-install-recommends', ...packages], {
     stage: 'system_deps.install',
     envOverlay: {DEBIAN_FRONTEND: 'noninteractive'},
   });
+}
+
+async function installDarwin() {
+  if (!which('brew')) throw new BuildError('system_deps', 'Homebrew is required by docs/macos.md');
+  logger.info('Installing %d Homebrew packages', BREW_PACKAGES.length);
+  await run(['brew', 'install', ...BREW_PACKAGES], {stage: 'system_deps.install'});
+  const cmake = await run(['cmake', '--version'], {
+    stage: 'system_deps.cmake', capture: true, logOutput: false,
+  });
+  const version = cmake.stdout.match(/cmake version (\d+)\.(\d+)/);
+  if (!version || Number(version[1]) >= 4 || Number(version[1]) < 3 || (Number(version[1]) === 3 && Number(version[2]) < 17)) {
+    throw new BuildError('system_deps', `cmake >=3.17 and <4 is required, got: ${cmake.stdout.trim()}`);
+  }
+  await run(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], {stage: 'system_deps.xcode'});
+}
+
+export async function install(config) {
+  assertNativeHost(config);
+  if (config.target.spec.os === 'darwin') return installDarwin();
+  if (config.target.spec.nodePlatform === 'linux') return installLinux(config);
+  throw new BuildError('system_deps', `unsupported source-build host: ${process.platform}`);
 }
