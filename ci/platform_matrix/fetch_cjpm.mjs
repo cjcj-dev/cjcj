@@ -9,6 +9,11 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import {spawnSync} from 'node:child_process';
+import {
+  CJPM_PROVENANCE,
+  readCjpmPin,
+  verifyCjpmProvenance,
+} from '../../build/lib/release-component-provenance.mjs';
 import {emitBlockedSummary, toCommandPath} from './common.mjs';
 
 $.stdio = 'inherit';
@@ -78,15 +83,18 @@ async function findFirst(directory, name) {
 let runId = 'current';
 let artifactId = 'same-run';
 let compressed = '';
+let provenanceSidecar = '';
 if (currentRunArtifact) {
   try {
     compressed = await findFirst(currentRunArtifact, 'cjpm.exe.gz');
+    provenanceSidecar = await findFirst(currentRunArtifact, CJPM_PROVENANCE);
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
 }
 
 if (compressed) {
+  if (!provenanceSidecar) throw new Error(`${artifactName} is missing ${CJPM_PROVENANCE}`);
   console.log(`cjpm_selection source=current-run path=${compressed}`);
 } else {
   const gh = await $({nothrow: true, stdio: 'pipe'})`gh --version`;
@@ -119,10 +127,12 @@ if (compressed) {
   const extractedCommandPath = toCommandPath(extracted).replaceAll("'", "''");
   await $`pwsh -NoLogo -NoProfile -Command ${`Expand-Archive -LiteralPath '${archiveCommandPath}' -DestinationPath '${extractedCommandPath}' -Force`}`;
   compressed = await findFirst(extracted, 'cjpm.exe.gz');
+  provenanceSidecar = await findFirst(extracted, CJPM_PROVENANCE);
 }
 
 if (dryRun) process.exit(0);
 if (!compressed) throw new Error(`${artifactName} is incomplete: cjpm.exe.gz is missing`);
+if (!provenanceSidecar) throw new Error(`${artifactName} is incomplete: ${CJPM_PROVENANCE} is missing`);
 const cangjieHome = process.env.CANGJIE_HOME;
 if (!cangjieHome) throw new Error('CANGJIE_HOME is required after SDK provision');
 const toolsBin = path.join(cangjieHome, 'tools', 'bin');
@@ -136,6 +146,14 @@ try {
   await fs.copyFile(installed, stock);
 }
 await fs.writeFile(staged, zlib.gunzipSync(await fs.readFile(compressed)));
+const pin = await readCjpmPin(path.resolve(import.meta.dirname, '..', 'cjpm_pin.env'));
+const provenance = await verifyCjpmProvenance({
+  binary: staged,
+  sidecar: provenanceSidecar,
+  platform: 'windows-x64',
+  expectedRepository: pin.repository,
+  expectedCommit: pin.commit,
+});
 const stagedProbe = spawnSync(staged, ['--version'], {encoding: 'utf8'});
 if (stagedProbe.status !== 0) {
   throw new Error(`patched cjpm probe failed before activation: status=${stagedProbe.status} error=${stagedProbe.error?.code || 'none'} stderr=${stagedProbe.stderr?.slice(0, 400) || ''}`);
@@ -143,4 +161,13 @@ if (stagedProbe.status !== 0) {
 await fs.rm(installed, {force: true});
 await fs.rename(staged, installed);
 await $`${toCommandPath(installed)} --version`;
+if (process.env.GITHUB_ENV) {
+  await fs.appendFile(process.env.GITHUB_ENV, [
+    `CJPM_PROVENANCE=${provenanceSidecar}`,
+    `CJPM_SOURCE_REPOSITORY=${provenance.source.repository}`,
+    `CJPM_SOURCE_COMMIT=${provenance.source.commit}`,
+    '',
+  ].join('\n'));
+}
+console.log(`cjpm_provenance source=${provenance.source.repository}@${provenance.source.commit} sha256=${provenance.artifact.sha256}`);
 console.log(`activated patched cjpm: ${installed}; stock backup: ${stock}`);
