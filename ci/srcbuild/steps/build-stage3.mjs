@@ -1,7 +1,11 @@
 #!/usr/bin/env zx
 
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
+import {getTarget} from '../../../build/lib/targets.mjs';
+import {assertFinalStd} from '../lib/final-std.mjs';
 
 $.stdio = 'inherit';
 
@@ -13,6 +17,7 @@ const requiredEnv = (name) => {
 
 const workspace = path.resolve(requiredEnv('CANGJIE_WORKSPACE'));
 const githubWorkspace = path.resolve(requiredEnv('GITHUB_WORKSPACE'));
+const target = getTarget(requiredEnv('CJCJ_SRCBUILD_TARGET'));
 if (workspace === path.parse(workspace).root || githubWorkspace === path.parse(githubWorkspace).root) {
   throw new Error('CANGJIE_WORKSPACE and GITHUB_WORKSPACE must not be filesystem roots');
 }
@@ -30,7 +35,7 @@ if (allowIdenticalStdValue && allowIdenticalStdValue !== '1') {
 const sdk = path.join(workspace, 'software', 'cangjie');
 const stdlibRoot = path.join(workspace, 'cangjie_runtime', 'stdlib');
 const runtimeTarget = path.join(workspace, 'cangjie_runtime', 'runtime', 'target');
-const tuple = 'linux_x86_64_cjnative';
+const {runtimeTuple: tuple} = target.spec;
 const finalStd = dryRun
   ? path.resolve(requiredEnv('CJCJ_STAGE3_DRY_RUN_FINAL_STD'))
   : path.join(workspace, 'software', 'final-std-stage2');
@@ -45,10 +50,7 @@ const exists = async (file, kind = 'file') => {
   }
 };
 
-const sha256 = async (file) => {
-  const output = await $({stdio: 'pipe'})`sha256sum ${file}`;
-  return output.stdout.trim().split(/\s+/)[0];
-};
+const sha256 = async file => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 
 async function findProductBinary(phase) {
   const binDir = path.join(githubWorkspace, 'target', 'release', 'bin');
