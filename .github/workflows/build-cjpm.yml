@@ -125,12 +125,22 @@ jobs:
           gzip -n -c -9 ../../patched-cjpm/windows_x86_64/cjpm.exe > ../../patched-cjpm/windows_x86_64/cjpm.exe.gz
 
       - name: Verify patched cjpm payload
-        run: test -s patched-cjpm/windows_x86_64/cjpm.exe.gz
+        run: |
+          test -s patched-cjpm/windows_x86_64/cjpm.exe.gz
+          node ci/release/prepare_cjpm_artifact.mjs \
+            --platform windows-x64 \
+            --binary patched-cjpm/windows_x86_64/cjpm.exe \
+            --outdir "$RUNNER_TEMP/cjpm-provenance"
+          cp "$RUNNER_TEMP/cjpm-provenance/CJPM-PROVENANCE.json" \
+            patched-cjpm/windows_x86_64/CJPM-PROVENANCE.json
+          test -s patched-cjpm/windows_x86_64/CJPM-PROVENANCE.json
 
       - name: Upload patched cjpm
         uses: actions/upload-artifact@v7
         with:
           name: patched-cjpm-windows_x86_64
-          path: patched-cjpm/windows_x86_64/cjpm.exe.gz
+          path: |
+            patched-cjpm/windows_x86_64/cjpm.exe.gz
+            patched-cjpm/windows_x86_64/CJPM-PROVENANCE.json
           if-no-files-found: error
           retention-days: 14
