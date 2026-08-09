@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import {getTarget} from '../../../build/lib/targets.mjs';
+import {parseLlvmToolsManifest} from '../../llvm-tools-manifest.mjs';
 
 $.stdio = 'inherit';
 
@@ -27,7 +28,7 @@ const fixedRoot = path.resolve(process.env.CJCJ_FIXED_LLVM_DIR || '.srcbuild/fix
 const llvmBin = path.join(sdk, 'third_party', 'llvm', 'bin');
 const llvmLib = path.join(sdk, 'third_party', 'llvm', 'lib');
 
-function parseManifest(text, label) {
+function parsePinFile(text, label) {
   const result = {};
   for (const line of text.split(/\r?\n/).filter(Boolean)) {
     const separator = line.indexOf('=');
@@ -41,8 +42,11 @@ function parseManifest(text, label) {
 
 const sha256 = data => crypto.createHash('sha256').update(data).digest('hex');
 const manifestFile = path.join(fixedRoot, 'llvm-tools.manifest');
-const manifest = parseManifest(await fs.readFile(manifestFile, 'utf8'), manifestFile);
-const pins = parseManifest(await fs.readFile(path.join(root, 'ci', 'llvm_pin.env'), 'utf8'), 'ci/llvm_pin.env');
+const manifest = Object.fromEntries(parseLlvmToolsManifest(
+  await fs.readFile(manifestFile, 'utf8'),
+  {label: manifestFile, schema: 'native'},
+).values);
+const pins = parsePinFile(await fs.readFile(path.join(root, 'ci', 'llvm_pin.env'), 'utf8'), 'ci/llvm_pin.env');
 for (const [key, expected] of [
   ['PLATFORM', spec.llvmPlatform],
   ['LLVM_SHA', pins.LLVM_SHA],
