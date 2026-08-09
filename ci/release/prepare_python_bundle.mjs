@@ -171,7 +171,7 @@ for (const file of [executable, runtimeLibrary, license]) {
   if (!(await fs.stat(file, {throwIfNoEntry: false}))?.isFile()) throw new Error(`Python bundle output is missing ${file}`);
 }
 
-const versionEnv = {...process.env, PYTHONHOME: output, PYTHONPATH: ''};
+const versionEnv = {...process.env, PYTHONHOME: output, PYTHONPATH: '', PYTHONDONTWRITEBYTECODE: '1'};
 if (platform === 'windows-x64') versionEnv.PATH = `${output};${process.env.PATH || ''}`;
 else if (platform.startsWith('darwin-')) versionEnv.DYLD_LIBRARY_PATH = `${path.join(output, 'lib')}:${process.env.DYLD_LIBRARY_PATH || ''}`;
 else versionEnv.LD_LIBRARY_PATH = `${path.join(output, 'lib')}:${process.env.LD_LIBRARY_PATH || ''}`;
