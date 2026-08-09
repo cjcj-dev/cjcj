@@ -108,11 +108,20 @@ export async function writeReleaseManifest({
   stdRepository = '',
   cjpmRepository = '',
   cjpmCommit = '',
+  pythonArtifact = '',
+  pythonRepository = 'https://github.com/python/cpython.git',
+  pythonVersion = '',
   signaturePolicy = RELEASE_SIGNATURE_POLICY,
 }) {
   const normalizedSignaturePolicy = typeof signaturePolicy === 'string' ? signaturePolicy.trim() : '';
   if (normalizedSignaturePolicy !== RELEASE_SIGNATURE_POLICY) {
     throw new Error(`signature_policy must be ${RELEASE_SIGNATURE_POLICY}, got ${normalizedSignaturePolicy || '<empty>'}`);
+  }
+  if (!/^3\.11\.\d+$/.test(pythonVersion)) {
+    throw new Error(`python version must be exact 3.11.x, got ${pythonVersion || '<empty>'}`);
+  }
+  if (!await fileExists(pythonArtifact)) {
+    throw new Error(`packaged Python ${pythonVersion} artifact is missing: ${pythonArtifact || '<empty>'}`);
   }
   const cjcjFile = findExecutable(stage, 'bin/cjc', exeSuffix);
   const llcFile = findExecutable(stage, 'third_party/llvm/bin/llc', exeSuffix);
@@ -123,6 +132,7 @@ export async function writeReleaseManifest({
   const llc = await artifact(stage, llcFile, 'packaged llc is missing', ['CJLLVM-COMMIT']);
   const opt = await artifact(stage, optFile, 'packaged opt is missing', ['CJLLVM-COMMIT']);
   const cjpm = await artifact(stage, cjpmFile, 'packaged cjpm is missing');
+  const python = await artifact(stage, pythonArtifact, `packaged Python ${pythonVersion} is missing`);
 
   const stdText = await fileExists(stdProvenance) ? await fs.readFile(stdProvenance, 'utf8') : '';
   const llvmText = await fileExists(llvmManifest) ? await fs.readFile(llvmManifest, 'utf8') : '';
@@ -197,6 +207,17 @@ export async function writeReleaseManifest({
         'packaged cjpm has no source commit metadata'),
       artifact: {path: cjpm.path, sha256: cjpm.sha256},
       embedded_stamp: cjpm.embedded_stamp,
+    },
+    {
+      schema: 1,
+      platform,
+      component: 'python',
+      source: {
+        repository: present(pythonRepository, 'Python source repository was not supplied'),
+        commit: pythonVersion,
+      },
+      artifact: {path: python.path, sha256: python.sha256},
+      embedded_stamp: `PYTHON-VERSION:${pythonVersion}`,
     },
   ].map(row => ({...row, signature_policy: normalizedSignaturePolicy}));
 
