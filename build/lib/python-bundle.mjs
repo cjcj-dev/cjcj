@@ -115,6 +115,51 @@ async function requireLayout(root, platform) {
   return {...layout, license};
 }
 
+async function readMetadata(root, platform) {
+  const file = path.join(root, 'PYTHON-BUNDLE.json');
+  if (!await isFile(file)) throw new Error(`Python bundle provenance is missing: ${file}`);
+  let metadata;
+  try { metadata = JSON.parse(await fs.readFile(file, 'utf8')); } catch (error) {
+    throw new Error(`invalid Python bundle provenance ${file}: ${error.message}`);
+  }
+  const windows = platform === 'windows-x64';
+  const expected = {
+    source_type: windows ? 'python.org-embeddable' : 'python.org-source-native',
+    source_url: windows ? RELEASE_PYTHON_WINDOWS_URL : RELEASE_PYTHON_SOURCE_URL,
+    source_sha256: windows ? RELEASE_PYTHON_WINDOWS_SHA256 : RELEASE_PYTHON_SOURCE_SHA256,
+  };
+  for (const [name, value] of Object.entries({
+    platform: metadata.platform,
+    version: metadata.version,
+    source_type: metadata.source_type,
+    source_url: metadata.source_url,
+    source_sha256: metadata.source_sha256,
+    configure_args: metadata.configure_args,
+    configure_environment: metadata.configure_environment,
+  })) {
+    if (typeof value !== 'string' || value.length === 0) throw new Error(`Python bundle metadata ${name} is empty`);
+  }
+  if (metadata.schema !== 1 || metadata.platform !== platform || metadata.version !== RELEASE_PYTHON_VERSION) {
+    throw new Error(`Python bundle metadata identity mismatch: ${JSON.stringify(metadata)}`);
+  }
+  for (const [name, value] of Object.entries(expected)) {
+    if (metadata[name] !== value) {
+      throw new Error(`Python bundle metadata ${name} mismatch: expected ${value}, got ${metadata[name]}`);
+    }
+  }
+  const required = JSON.stringify(CJDB_PYTHON_MODULES);
+  const requiredUnix = JSON.stringify(windows ? [] : CJDB_PYTHON_UNIX_MODULES);
+  if (JSON.stringify(metadata.required_modules) !== required ||
+      JSON.stringify(metadata.required_unix_modules) !== requiredUnix) {
+    throw new Error(`Python bundle required_modules do not match the cjdb source inventory: ${file}`);
+  }
+  if (!windows && (metadata.configure_args.startsWith('unavailable:') ||
+      metadata.configure_environment.startsWith('unavailable:'))) {
+    throw new Error(`source-built Python must record configure inputs: ${file}`);
+  }
+  return {file, metadata};
+}
+
 async function writeLauncher(stage, platform, runtimeDir) {
   const toolsBin = path.join(stage, 'tools', 'bin');
   await fs.mkdir(toolsBin, {recursive: true});
@@ -160,6 +205,7 @@ export async function installPythonBundle({source, stage, platform, runtimeDir})
   }
   const sourceRoot = await fs.realpath(source);
   await requireLayout(sourceRoot, platform);
+  await readMetadata(sourceRoot, platform);
   exactVersion(bundleLayout(sourceRoot, platform).executable, sourceRoot, platform);
 
   const destination = path.join(stage, RELEASE_PYTHON_DIR);
@@ -167,6 +213,7 @@ export async function installPythonBundle({source, stage, platform, runtimeDir})
   await fs.mkdir(path.dirname(destination), {recursive: true});
   await fs.cp(sourceRoot, destination, {recursive: true, dereference: true, preserveTimestamps: true});
   const installed = await requireLayout(destination, platform);
+  const provenance = await readMetadata(destination, platform);
   exactVersion(installed.executable, destination, platform);
   verifyPythonImports(
     installed.executable,
@@ -180,5 +227,12 @@ export async function installPythonBundle({source, stage, platform, runtimeDir})
     ],
   );
   const launcher = await writeLauncher(stage, platform, runtimeDir);
-  return {artifact: installed.executable, launcher, license: installed.license, version: RELEASE_PYTHON_VERSION};
+  return {
+    artifact: installed.executable,
+    launcher,
+    license: installed.license,
+    metadata: provenance.metadata,
+    metadataArtifact: provenance.file,
+    version: RELEASE_PYTHON_VERSION,
+  };
 }
