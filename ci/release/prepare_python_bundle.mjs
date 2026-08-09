@@ -59,15 +59,6 @@ async function verifiedDownload(url, expected, destination) {
   return actual;
 }
 
-async function brewPrefix(name) {
-  const result = await run(['brew', '--prefix', name], {
-    stage: `python.brew-prefix.${name}`, capture: true, logOutput: false,
-  });
-  const prefix = result.stdout.trim();
-  if (!prefix) throw new Error(`brew --prefix ${name} returned an empty path`);
-  return prefix;
-}
-
 async function removePythonCaches(directory) {
   for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
     const target = path.join(directory, entry.name);
@@ -145,18 +136,8 @@ async function prepareUnix() {
   const configureEnv = {};
   const recordedArgs = ['--prefix=<bundle>', '--enable-shared', '--without-ensurepip'];
   if (platform.startsWith('darwin-')) {
-    const dependencies = {};
-    for (const name of ['openssl@3', 'readline', 'xz', 'zlib', 'bzip2', 'libffi']) {
-      dependencies[name] = await brewPrefix(name);
-    }
-    configureArgs.push(`--with-openssl=${dependencies['openssl@3']}`, '--with-openssl-rpath=auto');
-    recordedArgs.push('--with-openssl=<brew-openssl@3>', '--with-openssl-rpath=auto');
-    configureEnv.CPPFLAGS = Object.values(dependencies).map(prefix => `-I${prefix}/include`).join(' ');
-    configureEnv.LDFLAGS = [
-      ...Object.values(dependencies).map(prefix => `-L${prefix}/lib`),
-      '-Wl,-rpath,@loader_path/../lib',
-    ].join(' ');
-    configureEnv.PKG_CONFIG_PATH = Object.values(dependencies).map(prefix => `${prefix}/lib/pkgconfig`).join(':');
+    configureArgs.push('--with-readline=editline');
+    recordedArgs.push('--with-readline=editline');
   }
 
   await run([path.join(sourceRoot, 'configure'), ...configureArgs], {
