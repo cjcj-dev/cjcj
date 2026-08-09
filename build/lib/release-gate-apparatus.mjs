@@ -294,3 +294,23 @@ export function gateApparatusManifestSection(value, platform) {
     known_apparatus_limitations: value.known_apparatus_limitations,
   };
 }
+
+export function validateGateApparatusManifestSection(value, platform) {
+  requirePlatform(platform);
+  requireReviewedToolchain(value?.gate_host_toolchain, 'acceptance_apparatus.gate_host_toolchain');
+  const runtimePath = requireString(value?.host_runtime?.path, 'acceptance_apparatus.host_runtime.path');
+  if (!runtimePaths.get(platform).includes(runtimePath)) {
+    throw new Error(`acceptance_apparatus.host_runtime.path is not canonical for ${platform}: ${runtimePath}`);
+  }
+  requireSha256(value?.host_runtime?.sha256, 'acceptance_apparatus.host_runtime.sha256');
+  if (value?.host_runtime?.g_cjLoadBadMask_count !== EXPECTED_GATE_HOST_MASK_SYMBOL_COUNT) {
+    throw new Error(`acceptance_apparatus.host_runtime.g_cjLoadBadMask_count must be ${EXPECTED_GATE_HOST_MASK_SYMBOL_COUNT}`);
+  }
+  if (value?.host_runtime?.symbol_probe !== probeCommand(platform)) {
+    throw new Error(`acceptance_apparatus.host_runtime.symbol_probe mismatch: ${
+      value?.host_runtime?.symbol_probe || '<empty>'}`);
+  }
+  requireKnownLimitations(value?.known_apparatus_limitations,
+    'acceptance_apparatus.known_apparatus_limitations');
+  return value;
+}
