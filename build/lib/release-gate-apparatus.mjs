@@ -27,12 +27,12 @@ export const KNOWN_GATE_APPARATUS_LIMITATIONS = Object.freeze({
     },
     {
       report: 'REPORT-codegensmoke.md',
-      core: '/root/codegensmoke-run/crashes/cand_r2_gdb.txt',
+      gdb_evidence: '/root/codegensmoke-run/crashes/cand_r2_gdb.txt',
       fact: 'candidate 5/5 failed; four core/gdb captures ended in 0721 StackOverflow, RegionManager, or FormatLog; none entered pinbuild ff2339b5 mask1',
     },
     {
       report: 'REPORT-gatehost.md',
-      core: '/root/gatehost-run/evidence/smoke_newhost/',
+      evidence_path: '/root/gatehost-run/evidence/smoke_newhost/',
       fact: 'current-generation uncoloured host changed smoke from 13/15 to 0/15',
     },
   ],
