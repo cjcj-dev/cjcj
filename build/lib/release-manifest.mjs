@@ -100,6 +100,7 @@ export async function writeReleaseManifest({
   stdProvenance = '',
   llvmManifest = '',
   baseSdkId = '',
+  baseSdkProvenance = undefined,
   cjcjRepository = 'https://github.com/cjcj-dev/cjcj.git',
   cjcjCommit = '',
   runtimeRepository = 'https://github.com/cjcj-dev/cangjie-runtime.git',
@@ -157,16 +158,33 @@ export async function writeReleaseManifest({
   const llvmSourceCommit = llvmCommit(llvmText);
   const cjcjStampCommit = stampCommit(cjcjArtifact.embedded_stamp, 'CJCJ-COMMIT');
   const runtimeStampCommit = stampCommit(runtime.embedded_stamp, 'CJRT-COMMIT');
+  const hasBaseSdkProvenance = baseSdkProvenance?.schema === 1 &&
+    baseSdkProvenance?.component === 'base-sdk' &&
+    typeof baseSdkProvenance?.release?.repository === 'string' &&
+    typeof baseSdkProvenance?.release?.version === 'string' &&
+    typeof baseSdkProvenance?.release?.download_url === 'string' &&
+    typeof baseSdkProvenance?.artifact?.path === 'string' &&
+    /^[0-9a-f]{64}$/.test(baseSdkProvenance?.artifact?.sha256 || '');
 
   const rows = [
     {
       schema: 1,
       platform,
       component: 'base-sdk',
-      source: source('', '',
-        `official SDK ${baseSdkId || '<unknown>'} has no source repository metadata`,
-        `official SDK ${baseSdkId || '<unknown>'} has no source commit metadata`),
-      artifact: {
+      source: {
+        ...source('', '',
+          `official binary SDK ${baseSdkId || '<unknown>'} has no source repository metadata`,
+          `official binary SDK ${baseSdkId || '<unknown>'} has no source commit metadata`),
+        ...(hasBaseSdkProvenance ? {
+          release_repository: baseSdkProvenance.release.repository,
+          version: baseSdkProvenance.release.version,
+          download_url: baseSdkProvenance.release.download_url,
+        } : {}),
+      },
+      artifact: hasBaseSdkProvenance ? {
+        path: baseSdkProvenance.artifact.path,
+        sha256: baseSdkProvenance.artifact.sha256,
+      } : {
         path: unavailable('base SDK was supplied as an unpacked directory'),
         sha256: unavailable('base SDK was supplied as an unpacked directory'),
       },
