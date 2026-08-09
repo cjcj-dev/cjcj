@@ -563,9 +563,26 @@ private func GenerateArrayGetElemRef(irBuilder: IRBuilder2, args: ArrayList<Valu
     if (args.size != 2) {
         return LLVMNullValue()
     }
+    // C++ IntrinsicsDispatcher.cpp:174-196 GenerateArrayGetElemRef — size-unknown → mul TI.size
     if (let Some(rawArrayTy) <- GetRawArrayTypeFromArrayArg(args[0])) {
-        let arrayValue = irBuilder.GetCGModule().GetMappedCGValue(args[0]).GetRawValue()
-        let indexValue = irBuilder.GetCGModule().GetMappedCGValue(args[1]).GetRawValue()
+        let cgMod = irBuilder.GetCGModule()
+        let arrayValue = cgMod.GetMappedCGValue(args[0]).GetRawValue()
+        let indexValue = cgMod.GetMappedCGValue(args[1]).GetRawValue()
+        let rawArrayCGType = CGType.GetOrCreate(cgMod, rawArrayTy)
+        if (rawArrayCGType.GetSize().isNone()) {
+            let elementCHIRType = rawArrayTy.GetElementType()
+            let elementCGType = CGType.GetOrCreate(cgMod, elementCHIRType)
+            let elementType = elementCGType.GetLLVMType()
+            var offset = irBuilder.CreateBinary(ExprKind.MUL, irBuilder.GetSize_64(elementCHIRType), indexValue)
+            offset = irBuilder.CreateBinary(ExprKind.ADD, offset,
+                irBuilder.GetInt64(Int64(irBuilder.GetPayloadOffset() + 8u64)))
+            var elePtr = irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
+                arrayValue, ArrayList<LLVMValueRef>([offset]))
+            let arrayAddressSpace = unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(arrayValue)) }
+            elePtr = irBuilder.CreateBitCast(elePtr, unsafe { LLVMPointerType(elementType, arrayAddressSpace) })
+            irBuilder.GetCGContext().SetBasePtr(elePtr, arrayValue)
+            return elePtr
+        }
         return irBuilder.GetArrayElementAddr(rawArrayTy, arrayValue, indexValue, false)
     }
     return LLVMNullValue()
