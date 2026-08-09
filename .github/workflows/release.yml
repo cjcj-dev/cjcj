@@ -111,14 +111,20 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Render release notes from package manifests
+        run: |
+          node scripts/render_release_notes.mjs \
+            --version "${{ inputs.version }}" \
+            --dist dist \
+            --output "$RUNNER_TEMP/release-notes.md"
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          flags=(--title "cjcj v${{ inputs.version }}" --notes "cjcj v${{ inputs.version }}")
+          flags=(--title "cjcj v${{ inputs.version }}" --notes-file "$RUNNER_TEMP/release-notes.md")
           if [ "${{ inputs.prerelease }}" = "true" ]; then flags+=(--prerelease); fi
           if [ "${{ inputs.draft }}" = "true" ]; then flags+=(--draft); fi
-          mapfile -t assets < <(find dist -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.zip' \) | sort)
+          mapfile -t assets < <(find dist -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.zip' -o -name '*.RELEASE-MANIFEST.jsonl' \) | sort)
           gh release create "v${{ inputs.version }}" "${flags[@]}" "${assets[@]}"
 
 # Darwin and Windows consume current-run native artifacts from

@@ -66,6 +66,10 @@ jobs:
           CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
         run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
+      - name: Load LLVM provenance pin
+        shell: bash
+        run: cat ci/llvm_pin.env >> "$GITHUB_ENV"
+
       - name: Prepare MSYS2/MINGW64 cjcj toolchain
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
@@ -248,10 +252,19 @@ jobs:
         run: |
           runtime_lib="$PWD/dist-runtime/libcangjie-runtime.so"
           if [ "$RUNNER_OS" = "macOS" ]; then runtime_lib="$PWD/dist-runtime/libcangjie-runtime.dylib"; fi
+          llvm_manifest="${FIXED_LLVM_MANIFEST:-$PWD/fixed-toolchain/${{ inputs.llvm_platform }}/llvm-tools.manifest}"
           npx --yes zx@8 scripts/package_sdk.mjs \
             --sdk "$CANGJIE_HOME" \
             --binary "$PWD/target/release/bin/cjcj::cjc" \
             --runtime-lib "$runtime_lib" \
+            --llvm-manifest "$llvm_manifest" \
+            --base-sdk-id "$CJCJ_TOOLCHAIN" \
+            --cjcj-source-repo "${{ github.server_url }}/${{ github.repository }}.git" \
+            --cjcj-source-sha "${{ github.sha }}" \
+            --runtime-source-repo "$RUNTIME_SRC_URL" \
+            --runtime-source-sha "$RUNTIME_REF" \
+            --llvm-source-repo "$LLVM_URL" \
+            --std-source-repo "$RUNTIME_SRC_URL" \
             --version "${{ inputs.version }}" \
             --platform "${{ inputs.platform }}" \
             --outdir "$PWD/dist"
@@ -269,6 +282,14 @@ jobs:
             --sdk "$env:CANGJIE_HOME" `
             --binary "$binary" `
             --runtime-root "$PWD\.platform-ci\runtime-install\windows_release_x86_64" `
+            --llvm-manifest "$env:FIXED_LLVM_MANIFEST" `
+            --base-sdk-id "$env:CJCJ_TOOLCHAIN" `
+            --cjcj-source-repo "${{ github.server_url }}/${{ github.repository }}.git" `
+            --cjcj-source-sha "${{ github.sha }}" `
+            --runtime-source-repo "$env:RUNTIME_SRC_URL" `
+            --runtime-source-sha "$env:RUNTIME_REF" `
+            --llvm-source-repo "$env:LLVM_URL" `
+            --std-source-repo "$env:RUNTIME_SRC_URL" `
             --version "${{ inputs.version }}" `
             --platform "${{ inputs.platform }}" `
             --outdir "$PWD\dist"
@@ -323,4 +344,5 @@ jobs:
             dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.tar.gz.sha256
             dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.zip
             dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.zip.sha256
+            dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.RELEASE-MANIFEST.jsonl
           if-no-files-found: error
