@@ -4,7 +4,7 @@ import path from 'node:path';
 import {stage} from '../../lib/logging.mjs';
 import {writeStdProvenance} from '../../lib/provenance.mjs';
 import {installPath, TARGET_TRIPLE} from '../../toolchain/mingw.mjs';
-import {copyContents, runBuildPy, windowsCrossArgs} from './common.mjs';
+import {copyContents, opensslLibPath, runBuildPy, windowsCrossArgs} from './common.mjs';
 
 export async function run(config) {
   const stdlibRoot = path.join(config.repoPath('runtime'), 'stdlib');
@@ -13,17 +13,19 @@ export async function run(config) {
   const compilerOutput = path.join(config.repoPath('compiler'), 'output');
   const compilerSuffix = config.target.spec.crossCompile ? '' : config.target.spec.exeSuffix;
   const compiler = path.join(compilerOutput, 'bin', `cjc${compilerSuffix}`);
+  const nativeTargetLibs = [runtimeTarget, opensslLibPath(config)].filter(Boolean);
 
   await stage('stdlib', async () => {
-    await runBuildPy(config, stdlibRoot, ['clean'], {stageName: 'stdlib.clean.linux'});
+    await runBuildPy(config, stdlibRoot, ['clean'], {stageName: 'stdlib.clean.host'});
     await runBuildPy(config, stdlibRoot, [
-      'build', '-t', config.buildType, `--target-lib=${runtimeTarget}`,
-    ], {stageName: 'stdlib.build.linux'});
-    await runBuildPy(config, stdlibRoot, ['install'], {stageName: 'stdlib.install.linux'});
+      'build', '-t', config.buildType, '--target', 'native',
+      ...nativeTargetLibs.map(directory => `--target-lib=${directory}`),
+    ], {stageName: 'stdlib.build.host'});
+    await runBuildPy(config, stdlibRoot, ['install'], {stageName: 'stdlib.install.host'});
     if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
       await writeStdProvenance({sourceDir: stdlibRoot, installPrefix: stdlibOutput, compiler});
     }
-    copyContents(stdlibOutput, compilerOutput, {stage: 'stdlib.copy.linux'});
+    copyContents(stdlibOutput, compilerOutput, {stage: 'stdlib.copy.host'});
     if (!config.target.spec.crossCompile) return;
 
     await runBuildPy(config, stdlibRoot, ['clean'], {stageName: 'stdlib.clean.windows'});
