@@ -9,6 +9,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import {spawnSync} from 'node:child_process';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
+import {verifyBaseSdkProvenance} from '../../build/lib/release-component-provenance.mjs';
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
 
@@ -68,8 +69,26 @@ if (process.platform === 'win32') {
       await $({nothrow: true, stdio: 'pipe', verbose: false})`${toCommandPath(cjv)} set gitcode-api-key ${process.env.GITCODE_API_KEY}`;
       console.log('[platform setup_sdk] gitcode-api-key set');
     }
-    console.log(`[platform setup_sdk] cjv install ${toolchain} -c stdx`);
-    const install = await $({nothrow: true})`${toCommandPath(cjv)} install ${toolchain} -c stdx`;
+    const baseSdkArchive = process.env.BASE_SDK_ARCHIVE || '';
+    const baseSdkProvenance = process.env.BASE_SDK_PROVENANCE || '';
+    const releasePlatform = process.env.RELEASE_PLATFORM || '';
+    let install;
+    if (baseSdkArchive || baseSdkProvenance || releasePlatform) {
+      if (!baseSdkArchive || !baseSdkProvenance || !releasePlatform) {
+        throw new Error('BASE_SDK_ARCHIVE, BASE_SDK_PROVENANCE and RELEASE_PLATFORM must be supplied together');
+      }
+      const provenance = await verifyBaseSdkProvenance({
+        archive: baseSdkArchive,
+        sidecar: baseSdkProvenance,
+        platform: releasePlatform,
+        toolchain,
+      });
+      console.log(`[platform setup_sdk] cjv toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`);
+      install = await $({nothrow: true})`${toCommandPath(cjv)} toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`;
+    } else {
+      console.log(`[platform setup_sdk] cjv install ${toolchain} -c stdx`);
+      install = await $({nothrow: true})`${toCommandPath(cjv)} install ${toolchain} -c stdx`;
+    }
     setupRc = install.exitCode;
   }
 } else {
@@ -109,6 +128,18 @@ if (process.platform === 'win32') {
   } else process.env.LD_LIBRARY_PATH = libraryPath;
 }
 if (setupRc !== 0) process.exit(setupRc);
+if (process.platform === 'win32') {
+  const installedCjc = path.join(cangjieHome, 'bin', 'cjc.exe');
+  const baseFile = await $({nothrow: true, stdio: 'pipe'})`file ${toCommandPath(installedCjc)}`;
+  const baseLinked = await $({nothrow: true, stdio: 'pipe'})`objdump -p ${toCommandPath(installedCjc)}`;
+  const baseVersion = await $({nothrow: true, stdio: 'pipe'})`${toCommandPath(installedCjc)} --version`;
+  if (baseFile.exitCode !== 0 || baseLinked.exitCode !== 0 || baseVersion.exitCode !== 0) {
+    throw new Error(`installed base SDK failed file/objdump/--version verification: file=${baseFile.exitCode} linked=${baseLinked.exitCode} version=${baseVersion.exitCode}`);
+  }
+  console.log(`[platform setup_sdk] base cjc file: ${baseFile.stdout.trim()}`);
+  console.log('[platform setup_sdk] base cjc PE dependency table: readable');
+  console.log(`[platform setup_sdk] base cjc version:\n${baseVersion.stdout.trim()}`);
+}
 if (provisionOnly) {
   console.log(`[platform setup_sdk] provisioned Windows SDK at ${cangjieHome}`);
   process.exit(0);
