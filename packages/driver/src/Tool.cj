@@ -1,9 +1,25 @@
 package cjcj::driver
 
 import std.collection.*
+import std.sort.*
 import cjcj::utils.{ConcurrencyBudget, ConcurrencyLease, Semaphore}
 
 public type ToolBatch = ArrayList<Tool>
+
+private enum ArgKind {
+    | Literal
+    | DeferredDir
+}
+
+private class DeferredDirArgs {
+    let dir: String
+    let extension: String
+
+    init(dir: String, extension: String) {
+        this.dir = dir
+        this.extension = extension
+    }
+}
 
 @When[os == "Windows"]
 private let FORMAT_MESSAGE_ALLOCATE_BUFFER: UInt32 = 0x00000100u32
@@ -225,6 +241,9 @@ public class Tool {
     public let name: String
     public let environmentVars: HashMap<String, String>
     private let args: ArrayList<String> = ArrayList<String>()
+    private let argKinds: ArrayList<ArgKind> = ArrayList<ArgKind>()
+    private let deferredArgMap: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
+    private let deferredDirArgs: ArrayList<DeferredDirArgs> = ArrayList<DeferredDirArgs>()
     private var ldLibraryPath: String = ""
 
     public init(name: String, toolType: ToolType, environmentVars: HashMap<String, String>) {
@@ -243,7 +262,7 @@ public class Tool {
     public func GetFullArgs(): Array<String> {
         let full = ArrayList<String>()
         full.add(name)
-        for (arg in args) {
+        for (arg in ExpandArgs()) {
             full.add(arg)
         }
         return full.toArray()
@@ -251,6 +270,7 @@ public class Tool {
 
     public func AppendArg(arg: String): Unit {
         args.add(arg)
+        argKinds.add(ArgKind.Literal)
     }
 
     public func AppendArg(first: String, second: String): Unit {
@@ -274,8 +294,41 @@ public class Tool {
         for (item in SplitString(argStr, " ")) {
             if (!item.isEmpty()) {
                 args.add(item)
+                argKinds.add(ArgKind.Literal)
             }
         }
+    }
+
+    public func AppendArgsFromDirAtExecution(dir: String, extension: String): Unit {
+        let deferredIdx = deferredDirArgs.size
+        deferredDirArgs.add(DeferredDirArgs(dir, extension))
+        deferredArgMap[args.size] = deferredIdx
+        args.add("<expand_dir:" + extension + ">")
+        argKinds.add(ArgKind.DeferredDir)
+    }
+
+    private func ExpandArgs(): Array<String> {
+        if (deferredArgMap.isEmpty()) {
+            return args.toArray()
+        }
+        let expandedArgs = ArrayList<String>()
+        var pos: Int64 = 0
+        while (pos < args.size) {
+            if (argKinds[pos] != ArgKind.DeferredDir) {
+                expandedArgs.add(args[pos])
+                pos++
+                continue
+            }
+            let deferredArg = deferredDirArgs[deferredArgMap[pos]]
+            let files = ArrayList<String>(FileUtil.GetAllFilesUnderCurrentPath(
+                deferredArg.dir, FileUtil.GetFileExtension(deferredArg.extension)))
+            sort(files)
+            for (file in files) {
+                expandedArgs.add(FileUtil.JoinPath(deferredArg.dir, file))
+            }
+            pos++
+        }
+        return expandedArgs.toArray()
     }
 
     public func AppendMultiArgs(values: Array<String>): Unit {
@@ -501,6 +554,10 @@ public class Tool {
     }
 
     private func InternalImplementedCommandExec(): Bool {
+        if (toolType == ToolType.INTERNAL_IMPLEMENTED && name == "RemoveFile") {
+            let full = GetFullArgs()
+            return !FileUtil.FileExist(full[1]) || FileUtil.Remove(full[1])
+        }
         if (toolType == ToolType.INTERNAL_IMPLEMENTED && name == "CacheCopy") {
             let full = GetFullArgs()
             if (full.size < 3) {
