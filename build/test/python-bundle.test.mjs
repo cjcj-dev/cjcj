@@ -26,11 +26,8 @@ async function fixture() {
   await executable(path.join(source, 'bin', 'python3.11'), [
     '#!/bin/sh',
     'case "$3" in',
-    '  *CJDB-PYTHON-IMPORT*)',
     ...[...CJDB_PYTHON_MODULES, ...CJDB_PYTHON_UNIX_MODULES]
-      .map(name => `    printf 'CJDB-PYTHON-IMPORT=${name}\\n'`),
-    '    exit 0',
-    '    ;;',
+      .map(name => `  *'name = "${name}"'*) printf 'CJDB-PYTHON-IMPORT=${name}\\n'; exit 0 ;;`),
     'esac',
     `printf '${RELEASE_PYTHON_VERSION}\\n%s\\n' "$PYTHONHOME"`,
     '',
