@@ -1153,8 +1153,14 @@ public class IRBuilder2 <: Resource {
         return loaded
     }
 
+    // Colour ABI: AS1 dest may still carry colour bits (Walker.WalkNode store of
+    // visitedByWalkerID: lea 0x8(%r14); mov %ecx,0x84(%rax) with no peel — REPORT-
+    // walkernode2). Symmetric to CreateLoad's UncolorIfGCPtr(addr) at :1118 /
+    // a0fa6500. Official CreateStore is plain (CJNativeIRBuilder.cpp) — correct only
+    // while heap refs stay uncoloured. Helper = UncolorIfGCPtr :1386 (AddressMask
+    // same as CJBarrierLowering::uncolorIfGCPtr).
     public func CreateStore(value: LLVMValueRef, addr: LLVMValueRef, isVolatile!: Bool = false): LLVMValueRef {
-        let store = unsafe { LLVMBuildStore(builder.raw, value, addr) }
+        let store = unsafe { LLVMBuildStore(builder.raw, value, UncolorIfGCPtr(addr)) }
         if (isVolatile) {
             unsafe { LLVMSetVolatile(store, 1) }
         }
@@ -3283,30 +3289,36 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
+    // Colour ABI: atomic fieldPtr is a GEP off an AS1 object base; peel before
+    // bare cmpxchg/rmw/store/load (same UncolorIfGCPtr as CreateStore/CreateLoad).
     private func CallAtomicPrimitiveIntrinsics(kind: IntrinsicKind, args: ArrayList<CGValue>,
         fieldPtr: LLVMValueRef): LLVMValueRef {
+        let plainFieldPtr = UncolorIfGCPtr(fieldPtr)
         var fieldType = unsafe { LLVMSelfhostGetGEPResultElementType(fieldPtr) }
         if (fieldType.isNull()) {
             fieldType = GetPointerElementType(unsafe { LLVMTypeOf(fieldPtr) })
         }
         if (kind == IntrinsicKind.ATOMIC_COMPARE_AND_SWAP) {
             let cas = unsafe {
-                LLVMSelfhostCreateAtomicCmpXchg(builder.raw, fieldPtr, args[1].GetRawValue(), args[2].GetRawValue())
+                LLVMSelfhostCreateAtomicCmpXchg(builder.raw, plainFieldPtr, args[1].GetRawValue(),
+                    args[2].GetRawValue())
             }
             return CreateExtractValue(cas, 1u32)
         }
         if (let Some(op) <- AtomicRMWOp(kind)) {
-            return unsafe { LLVMSelfhostCreateAtomicRMW(builder.raw, op, fieldPtr, args[1].GetRawValue()) }
+            return unsafe { LLVMSelfhostCreateAtomicRMW(builder.raw, op, plainFieldPtr, args[1].GetRawValue()) }
         }
         let align = UInt32(unsafe { LLVMSelfhostGetPrimitiveSizeInBits(fieldType) })
         if (kind == IntrinsicKind.ATOMIC_STORE) {
-            let _ = unsafe { LLVMSelfhostCreateAtomicStore(builder.raw, args[1].GetRawValue(), fieldPtr, align) }
+            let _ = unsafe {
+                LLVMSelfhostCreateAtomicStore(builder.raw, args[1].GetRawValue(), plainFieldPtr, align)
+            }
             return LLVMNullValue()
         }
         if (kind == IntrinsicKind.ATOMIC_LOAD) {
             try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
                 return unsafe {
-                    LLVMSelfhostCreateAtomicLoad(builder.raw, fieldType, fieldPtr, align, nameCString.value)
+                    LLVMSelfhostCreateAtomicLoad(builder.raw, fieldType, plainFieldPtr, align, nameCString.value)
                 }
             }
         }
