@@ -56,7 +56,10 @@ function buildArgsFor(name, config) {
   const toolsBuildType = config.buildType === 'relwithdebinfo' ? 'release' : config.buildType;
   const args = ['build', '-t', toolsBuildType];
   if (name === 'cjpm') {
-    args.push('--set-rpath', `$ORIGIN/../../runtime/lib/${config.target.runtimeLibSubdir(config.buildType)}`);
+    args.push(
+      '--set-rpath',
+      `${config.target.spec.rpathOrigin}/../../runtime/lib/${config.target.runtimeLibSubdir(config.buildType)}`,
+    );
   }
   return args;
 }
