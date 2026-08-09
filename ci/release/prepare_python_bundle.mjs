@@ -37,10 +37,12 @@ if (output === path.parse(output).root) throw new Error('Python bundle output mu
 
 const parent = path.dirname(output);
 const work = path.join(parent, 'build-work');
+const downloads = path.join(parent, 'downloads');
 await fs.rm(output, {recursive: true, force: true});
 await fs.rm(work, {recursive: true, force: true});
 await fs.mkdir(output, {recursive: true});
 await fs.mkdir(work, {recursive: true});
+await fs.mkdir(downloads, {recursive: true});
 
 async function sha256(file) {
   const hash = crypto.createHash('sha256');
@@ -67,7 +69,7 @@ async function brewPrefix(name) {
 }
 
 async function prepareWindows() {
-  const archive = path.join(work, path.basename(RELEASE_PYTHON_WINDOWS_URL));
+  const archive = path.join(downloads, path.basename(RELEASE_PYTHON_WINDOWS_URL));
   await verifiedDownload(RELEASE_PYTHON_WINDOWS_URL, RELEASE_PYTHON_WINDOWS_SHA256, archive);
   await run(['tar', '-xf', archive, '-C', output], {stage: 'python.windows.extract'});
   const pth = path.join(output, 'python311._pth');
@@ -96,7 +98,7 @@ async function prepareWindows() {
 }
 
 async function prepareUnix() {
-  const archive = path.join(work, path.basename(RELEASE_PYTHON_SOURCE_URL));
+  const archive = path.join(downloads, path.basename(RELEASE_PYTHON_SOURCE_URL));
   await verifiedDownload(RELEASE_PYTHON_SOURCE_URL, RELEASE_PYTHON_SOURCE_SHA256, archive);
   const sources = path.join(work, 'source');
   await fs.mkdir(sources);
