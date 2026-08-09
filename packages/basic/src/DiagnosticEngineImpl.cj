@@ -519,10 +519,8 @@ public class DiagnosticEngineImpl {
         }
         var originPos = INVALID_POSITION
         let key = if (info.isCurFile) { pos.Hash32() } else { UInt32(pos.column) }
-        if (info.isCurFile) {
-            if (let Some(mapped) <- info.originPosMap.get(key)) {
-                originPos = mapped
-            }
+        if (info.isCurFile && info.originPosMap.contains(key)) {
+            originPos = info.originPosMap.get(key).getOrThrow()
         } else if (let Some(mapped) <- info.new2originPosMap.get(pos.Hash32())) {
             if (mapped.isCurFile) {
                 originPos = mapped
