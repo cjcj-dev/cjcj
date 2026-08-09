@@ -336,7 +336,7 @@ public class InteropCJPackageConfigReader {
         } else if (key == "generic_object_configuration") {
             appendGenericTables(pendingGenericTables, parseArrayOfTables(value))
         } else if (key == "lambda_patterns") {
-            parseLambdaPatternsConfiguration(pkg, value)
+            ParseLmabdaPatternsConfiguration(pkg, value)
         }
         return true
     }
@@ -909,7 +909,7 @@ private func parseLambdaPatternTable(pkg: PackageConfig, table: HashMap<String, 
     }
 }
 
-private func parseLambdaPatternsConfiguration(pkg: PackageConfig, value: String): Unit {
+private func ParseLmabdaPatternsConfiguration(pkg: PackageConfig, value: String): Unit {
     for (table in parseArrayOfTables(value)) {
         parseLambdaPatternTable(pkg, table)
     }

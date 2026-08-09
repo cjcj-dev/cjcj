@@ -2004,7 +2004,7 @@ class GenericInstantiationManagerImpl {
         if (let Some(expr) <- (node as Expr)) {
             if (let Some(desugar) <- expr.desugarExpr) {
                 RearrangeReferencesInNode(desugar, pkg)
-                ClearInstTysIfNeeded(node)
+                ClearInstTysIsNeeded(node)
                 return VisitAction.SKIP_CHILDREN
             }
         }
@@ -2032,7 +2032,7 @@ class GenericInstantiationManagerImpl {
         return VisitAction.WALK_CHILDREN
     }
 
-    private func ClearInstTysIfNeeded(node: Node): Unit {
+    private func ClearInstTysIsNeeded(node: Node): Unit {
         if (let Some(refExpr) <- (node as RefExpr)) {
             if (let Some(target) <- refExpr.GetTarget()) {
                 if (TargetNoLongerGeneric(target)) {
@@ -2069,7 +2069,7 @@ class GenericInstantiationManagerImpl {
                 }
             }
             if (let Some(baseFunc) <- callExpr.baseFunc) {
-                ClearInstTysIfNeeded(baseFunc)
+                ClearInstTysIsNeeded(baseFunc)
             }
         }
     }
@@ -2200,7 +2200,7 @@ class GenericInstantiationManagerImpl {
             }
             refExpr.ref.target = GetInstantiatedTarget(baseTy.getOrThrow(), target, instTys,
                 refExpr.matchedParentTy)
-            ClearInstTysIfNeeded(refExpr)
+            ClearInstTysIsNeeded(refExpr)
         }
     }
 
@@ -2231,7 +2231,7 @@ class GenericInstantiationManagerImpl {
             }
             memberAccess.target = GetInstantiatedTarget(baseTy.getOrThrow(), target, instTys,
                 memberAccess.matchedParentTy)
-            ClearInstTysIfNeeded(memberAccess)
+            ClearInstTysIsNeeded(memberAccess)
         }
     }
 

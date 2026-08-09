@@ -260,7 +260,7 @@ private func UpdateVarDependencies(decl: Decl): Unit {
     }
 }
 
-private func CheckCommonInstanceVars(checker: MPTypeCheckerImpl, specificDecl: Decl): Unit {
+private func Check4CommonInstanceVar(checker: MPTypeCheckerImpl, specificDecl: Decl): Unit {
     for (member in specificDecl.GetMemberDeclPtrs()) {
         if (IsInstanceVar(member) && member.TestAttr(Attribute.COMMON) &&
             !member.TestAttr(Attribute.COMMON_WITH_DEFAULT) && (let None <- member.specificImplementation)) {
@@ -337,7 +337,7 @@ private func MergeCommonIntoSpecific(checker: MPTypeCheckerImpl, commonDecl: Dec
     for (member in specificMembers) {
         UpdateVarDependencies(member)
     }
-    CheckCommonInstanceVars(checker, specificDecl)
+    Check4CommonInstanceVar(checker, specificDecl)
     commonDecl.doNotExport = true
     commonDecl.specificImplementation = specificDecl
 }

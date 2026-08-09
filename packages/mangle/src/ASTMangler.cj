@@ -263,7 +263,7 @@ public class ASTMangler {
             return MangleVarWithPatternDecl(decl)
         }
         if (decl.astKind == ASTKind.EXTEND_DECL) {
-            return MangleExtendDeclString(decl)
+            return MangleExtendDecl(decl)
         }
         return MangleDeclCommon(decl)
     }
@@ -444,7 +444,7 @@ public class ASTMangler {
                 mangled += MangleFilePrivate(outer)
             }
             if (outer.astKind == ASTKind.EXTEND_DECL) {
-                mangled += MangleExtendDeclString(outer)
+                mangled += MangleExtendDecl(outer)
             } else {
                 mangled += MangleName(outer.identifier)
                 mangled += MangleGenericArguments(outer)
@@ -455,7 +455,7 @@ public class ASTMangler {
         return mangled
     }
 
-    private func MangleExtendDeclString(decl: MangleDecl): String {
+    private func MangleExtendDecl(decl: MangleDecl): String {
         var mangled = ""
         let extendedType = if (let Some(value) <- decl.extendedType) {
             value

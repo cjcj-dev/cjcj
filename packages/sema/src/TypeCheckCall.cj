@@ -169,7 +169,7 @@ private func IsVArrayTy(ty: Ty): Bool {
     return false
 }
 
-private func RealNonOptionTy(ty: Ty): Ty {
+private func GetRealNonOptionTy(ty: Ty): Ty {
     var current = ty
     var keepGoing = true
     while (keepGoing) {
@@ -506,13 +506,13 @@ private func IsFuncDeclPossibleVariadic(fd: FuncDecl): Bool {
     return false
 }
 
-private func AreFuncDeclAndCallExprFulfillVariadicInequality(fd: FuncDecl, ce: CallExpr): Bool {
+private func AreFuncDeclAndCallExprFullfillVariadicInequality(fd: FuncDecl, ce: CallExpr): Bool {
     return GetPositionalArgSize(ce) + 1 >= GetPositionalParamSize(fd)
 }
 
 private func IsPossibleVariadicFunction(fd: FuncDecl, ce: CallExpr): Bool {
     return !IsCallSourceExprVariadic(ce) && IsFuncDeclPossibleVariadic(fd) &&
-        AreFuncDeclAndCallExprFulfillVariadicInequality(fd, ce)
+        AreFuncDeclAndCallExprFullfillVariadicInequality(fd, ce)
 }
 
 private func IsPossibleVariadicFunction(funcTy: FuncTy, ce: CallExpr): Bool {
@@ -525,7 +525,7 @@ private func IsPossibleVariadicFunction(funcTy: FuncTy, ce: CallExpr): Bool {
     return funcTy.paramTys[funcTy.paramTys.size - 1].IsStructArray()
 }
 
-private func CheckArgsOrder(diag: Option<BasicDiagnosticEngine>, ce: CallExpr): Bool {
+private func ChkArgsOrder(diag: Option<BasicDiagnosticEngine>, ce: CallExpr): Bool {
     var foundNamedArg = false
     for (arg in ce.args) {
         if (foundNamedArg && arg.name.Empty()) {
@@ -611,7 +611,7 @@ internal func ChkVariadicCallExpr(ctx: Option<ASTContext>, target: Option<Ty>, c
     declSynthesizer!: Option<CallDeclSynthesizer> = None, argSynthesizer!: Option<(FuncArg) -> Ty> = None,
     exprSynthesizer!: Option<(Expr) -> Ty> = None, effectiveArgChecker!: Option<CallArgChecker> = None,
     genericChecker!: Option<(Decl, ArrayList<Type>, Expr) -> Bool> = None): Bool {
-    if (!CheckArgsOrder(diag, ce)) {
+    if (!ChkArgsOrder(diag, ce)) {
         return false
     }
     let results = ArrayList<FuncDecl>()
@@ -690,7 +690,7 @@ private func SyntaxFilterCandidates(ce: CallExpr, candidates: ArrayList<FuncDecl
                 continue
             }
             if (arg.TestAttr(Attribute.IMPLICIT_ADD)) {
-                definitelyMismatch = paramTys.isEmpty() || !RealNonOptionTy(paramTys[paramTys.size - 1]).IsFunc()
+                definitelyMismatch = paramTys.isEmpty() || !GetRealNonOptionTy(paramTys[paramTys.size - 1]).IsFunc()
                 break
             }
             if (arg.name.Empty() && paramTys.size <= idx) {
@@ -699,9 +699,9 @@ private func SyntaxFilterCandidates(ce: CallExpr, candidates: ArrayList<FuncDecl
             }
             var paramTy: Option<Ty> = None
             if (arg.name.Empty()) {
-                paramTy = Some(RealNonOptionTy(paramTys[idx]))
+                paramTy = Some(GetRealNonOptionTy(paramTys[idx]))
             } else if (let Some(paramInfo) <- GetParamTyAccordingToArgName(fd, arg.name.Val())) {
-                paramTy = Some(RealNonOptionTy(paramInfo.ty))
+                paramTy = Some(GetRealNonOptionTy(paramInfo.ty))
             }
             if (let Some(realParamTy) <- paramTy) {
                 if (!realParamTy.IsFunc() && !realParamTy.IsAny() && !realParamTy.IsGeneric()) {

@@ -443,7 +443,7 @@ private func CreateTupleSubscript(baseName: String, source: Expr, index: Int64):
     return rightExpr
 }
 
-private func GetOptionalChainExprForLeftValue(leftValue: Expr): Option<OptionalChainExpr> {
+private func GetOptionalChainExprForLeftVale(leftValue: Expr): Option<OptionalChainExpr> {
     var current = leftValue
     while (let Some(paren) <- (current as ParenExpr)) {
         if (let Some(innerExpr) <- paren.expr) {
@@ -464,7 +464,7 @@ private func DesugarAssignExprRecursively(leftValues: TupleLit, rightExprs: Expr
         let rightExpr = CreateTupleSubscript(identifier, rightExprs, indexOfRightExpr)
         if (let Some(leftTuple) <- (leftValue as TupleLit)) {
             DesugarAssignExprRecursively(leftTuple, rightExpr, nodes)
-        } else if (let Some(optionalChain) <- GetOptionalChainExprForLeftValue(leftValue)) {
+        } else if (let Some(optionalChain) <- GetOptionalChainExprForLeftVale(leftValue)) {
             if (let Some(optionalExpr) <- optionalChain.expr) {
                 if (let Some(clonedOptionalExpr) <- CloneExpr(optionalExpr)) {
                     let optionalChainExpr = OptionalChainExpr()

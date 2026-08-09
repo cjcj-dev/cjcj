@@ -351,7 +351,7 @@ private func ShouldUseGCStaticWriteBarrier(irBuilder: IRBuilder2, addr: CGValue)
     }
     let addrCGType = addr.GetCGType() ?? return false
     let destCGType = addrCGType.GetPointerElementType() ?? return false
-    return irBuilder.IsLLVMTypeContainsRef(destCGType.GetLLVMType())
+    return irBuilder.IsTypeContainsRef(destCGType.GetLLVMType())
 }
 
 private func ShouldUseGCStaticRefWriteBarrier(addr: CGValue): Bool {
@@ -456,11 +456,11 @@ private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGVa
     let align = irBuilder.GetCGModule().GetABITypeAlignment(destCGType.GetLLVMType())
     let source = ReadManagedAggregateSourceIfNeeded(irBuilder, raw, destCGType, fieldSizeValue)
     if (irBuilder.IsGlobalVariableBasePtr(addr.GetRawValue()) &&
-        irBuilder.IsLLVMTypeContainsRef(destCGType.GetLLVMType())) {
+        irBuilder.IsTypeContainsRef(destCGType.GetLLVMType())) {
         return Some(CallGCWriteStaticStruct(irBuilder, addr.GetRawValue(), source, fieldSizeValue,
             destCGType.GetLLVMType()))
     }
-    if (IsAddressSpacePointer(addr.GetRawValue(), 1u32) && irBuilder.IsLLVMTypeContainsRef(destCGType.GetLLVMType())) {
+    if (IsAddressSpacePointer(addr.GetRawValue(), 1u32) && irBuilder.IsTypeContainsRef(destCGType.GetLLVMType())) {
         return Some(irBuilder.CallGCWriteStruct(addr.GetRawValue(), addr.GetRawValue(), source, fieldSizeValue,
             destCGType.GetOriginal().ToString()))
     }
@@ -647,7 +647,7 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
             parameters.add(size)
             let tmp = irBuilder.CallClassIntrinsicAlloc(parameters)
             let payloadPtr = irBuilder.GetPayloadFromObject(tmp)
-            if (irBuilder.IsLLVMTypeContainsRef(srcCGType.GetLLVMType())) {
+            if (irBuilder.IsTypeContainsRef(srcCGType.GetLLVMType())) {
                 let args = ArrayList<LLVMValueRef>()
                 args.add(tmp)
                 args.add(payloadPtr)
@@ -720,7 +720,7 @@ private func StoreRawArrayAggregateElement(irBuilder: IRBuilder2, rawArrayValue:
     let sizeValue = unsafe {
         LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(size), 0)
     }
-    if (irBuilder.IsLLVMTypeContainsRef(elementCGType.GetLLVMType())) {
+    if (irBuilder.IsTypeContainsRef(elementCGType.GetLLVMType())) {
         let source = ReadManagedAggregateSourceIfNeeded(irBuilder, rawElementValue, elementCGType, sizeValue)
         return irBuilder.CallGCWriteStruct(rawArrayValue, elementPtr, source, sizeValue,
             elementCGType.GetOriginal().ToString())
@@ -732,7 +732,7 @@ private func StoreRawArrayAggregateElement(irBuilder: IRBuilder2, rawArrayValue:
 
 private func ReadManagedAggregateSourceIfNeeded(irBuilder: IRBuilder2, source: LLVMValueRef,
     sourceCGType: CGType, size: LLVMValueRef): LLVMValueRef {
-    if (!IsAddressSpacePointer(source, 1u32) || !irBuilder.IsLLVMTypeContainsRef(sourceCGType.GetLLVMType())) {
+    if (!IsAddressSpacePointer(source, 1u32) || !irBuilder.IsTypeContainsRef(sourceCGType.GetLLVMType())) {
         return source
     }
     let sourceBase = irBuilder.GetTrackedManagedBase(source) ?? source

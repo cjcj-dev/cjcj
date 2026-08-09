@@ -37,7 +37,7 @@ private func GenerateIntrinsic(irBuilder: IRBuilder2, kind: IntrinsicKind, args:
         return GenerateOverflowIntrinsic(irBuilder, kind, args, resultType)
     }
     if (kind == IntrinsicKind.PREINITIALIZE) {
-        return GeneratePreInitializeIntrinsic(irBuilder)
+        return GeneratePreInitializeIntrinsics(irBuilder)
     }
     if (kind == IntrinsicKind.CG_UNSAFE_BEGIN || kind == IntrinsicKind.CG_UNSAFE_END) {
         return UnitOrNull(irBuilder, resultType)
@@ -402,7 +402,7 @@ private func IsInteropIntrinsic(kind: IntrinsicKind): Bool {
         kind == IntrinsicKind.GET_JSLAMBDA_ADDR
 }
 
-private func GeneratePreInitializeIntrinsic(irBuilder: IRBuilder2): LLVMValueRef {
+private func GeneratePreInitializeIntrinsics(irBuilder: IRBuilder2): LLVMValueRef {
     let i8PtrType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw), 0u32) }
     let args = ArrayList<LLVMValueRef>()
     args.add(unsafe { LLVMConstNull(i8PtrType) })

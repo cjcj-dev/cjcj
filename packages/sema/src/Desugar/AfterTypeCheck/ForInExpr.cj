@@ -738,7 +738,7 @@ private func CreateLoopJump(refLoop: Expr, isBreak: Bool): JumpExpr {
     return jumpExpr
 }
 
-private func CreateNoneCaseForIter(enumTy: EnumTy, refLoop: Expr): Option<MatchCase> {
+private func CreateNoneCaseForForInIter(enumTy: EnumTy, refLoop: Expr): Option<MatchCase> {
     if (let Some(noneRef) <- CreateOptionCtorRef(enumTy, OPTION_NONE_CTOR, enumTy)) {
         let nonePattern = EnumPattern()
         nonePattern.constructor = noneRef
@@ -790,7 +790,7 @@ private func CreatePatternBodyCase(forInExpr: ForInExpr, refLoop: Expr): Option<
     return None
 }
 
-private func CreateSomeCaseForIter(typeManager: TypeManager, enumTy: EnumTy, forInExpr: ForInExpr,
+private func CreateSomeCaseForForInIter(typeManager: TypeManager, enumTy: EnumTy, forInExpr: ForInExpr,
     refLoop: Expr): Option<MatchCase> {
     if (enumTy.typeArgs.size != 1) {
         return None
@@ -880,8 +880,8 @@ private func DesugarForInIterExpr(typeManager: TypeManager, forInExpr: ForInExpr
                     whileExpr.condExpr = cond
 
                     let matchCases = ArrayList<MatchCase>()
-                    if (let Some(noneCase) <- CreateNoneCaseForIter(enumTy, whileExpr)) {
-                        if (let Some(someCase) <- CreateSomeCaseForIter(typeManager, enumTy, forInExpr,
+                    if (let Some(noneCase) <- CreateNoneCaseForForInIter(enumTy, whileExpr)) {
+                        if (let Some(someCase) <- CreateSomeCaseForForInIter(typeManager, enumTy, forInExpr,
                             whileExpr)) {
                             noneCase.SetCtxExprForPatterns(nextCall)
                             someCase.SetCtxExprForPatterns(nextCall)

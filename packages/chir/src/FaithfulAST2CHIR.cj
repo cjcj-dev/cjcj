@@ -3663,7 +3663,7 @@ public class FaithfulAST2CHIR {
     }
 
     private func TryGetFileInitializer(file: AstFile, suffix: String): Option<Function> {
-        let initializerName = FileInitFuncName(file, suffix)
+        let initializerName = GetFileInitFuncName(file, suffix)
         return CurrentPackage().TryGetGlobalFunc(GLOBAL_VALUE_PREFIX + initializerName)
     }
 
@@ -3721,8 +3721,8 @@ public class FaithfulAST2CHIR {
             }
         }
         let trans = CreateTranslator()
-        let fileInit = trans.CreateEmptyGVInitFunc(FileInitFuncName(fileVars.file, ""),
-            FileInitFuncName(fileVars.file, ""), "", FileOwnerPackageName(fileVars.file), BasicLinkage.INTERNAL,
+        let fileInit = trans.CreateEmptyGVInitFunc(GetFileInitFuncName(fileVars.file, ""),
+            GetFileInitFuncName(fileVars.file, ""), "", FileOwnerPackageName(fileVars.file), BasicLinkage.INTERNAL,
             trans.TranslateFileLocation(fileVars.file.begin.fileID), false)
         let entry = RequireEntryBlock(fileInit)
         for (initFunc in initFuncs) {
@@ -3779,8 +3779,8 @@ public class FaithfulAST2CHIR {
             return None
         }
         let trans = CreateTranslator()
-        let fileInit = trans.CreateEmptyGVInitFunc(FileInitFuncName(fileVars.file, "_literal"),
-            FileInitFuncName(fileVars.file, "_literal"), "", FileOwnerPackageName(fileVars.file),
+        let fileInit = trans.CreateEmptyGVInitFunc(GetFileInitFuncName(fileVars.file, "_literal"),
+            GetFileInitFuncName(fileVars.file, "_literal"), "", FileOwnerPackageName(fileVars.file),
             BasicLinkage.INTERNAL, trans.TranslateFileLocation(fileVars.file.begin.fileID), false)
         fileInit.DisableAttr(Attribute.NO_INLINE)
         fileInit.SetDebugLocation(INVALID_LOCATION)
@@ -4140,7 +4140,7 @@ public class FaithfulAST2CHIR {
         }
     }
 
-    private func FileInitFuncName(file: AstFile, suffix: String): String {
+    private func GetFileInitFuncName(file: AstFile, suffix: String): String {
         let specialName = if (suffix.isEmpty()) {
             FAITHFUL_SPECIAL_NAME_FOR_INIT_FUNCTION
         } else {

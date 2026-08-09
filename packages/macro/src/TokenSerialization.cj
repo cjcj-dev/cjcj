@@ -196,7 +196,7 @@ public class TokenSerialization {
             let end = if (begin == INVALID_POSITION) {
                 INVALID_POSITION
             } else {
-                begin + GetTokenLength(value.size, kind, delimiterNum)
+                begin + GetTokenLenth(value.size, kind, delimiterNum)
             }
             var token = Token(kind, value, begin, end)
             token.delimiterNum = delimiterNum
@@ -231,7 +231,7 @@ public class TokenSerialization {
             let end = if (begin == INVALID_POSITION) {
                 INVALID_POSITION
             } else {
-                begin + GetTokenLength(value.size, kind, delimiterNum)
+                begin + GetTokenLenth(value.size, kind, delimiterNum)
             }
             var token = Token(kind, value, begin, end)
             token.delimiterNum = delimiterNum

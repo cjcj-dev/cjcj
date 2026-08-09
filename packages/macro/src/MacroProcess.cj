@@ -46,7 +46,7 @@ private func isSpecialToken(prevTokenKind: TokenKind, curTokenKind: TokenKind): 
 }
 
 private func getTokenLengthForMap(token: Token): Int64 {
-    return GetTokenLength(token.Value().size, token.kind, token.delimiterNum)
+    return GetTokenLenth(token.Value().size, token.kind, token.delimiterNum)
 }
 
 private func ReportMappingFailedDiag(
@@ -114,7 +114,7 @@ private func shiftedPosition(pos: Position, start: Position, tokenBegin: Positio
     return Position(start.fileID, line, column, pos.isCurFile)
 }
 
-private func handleInterpolationStringPosMap(strToken: Token, newStartPos: Position,
+private func HandleInterplationStringPosMap(strToken: Token, newStartPos: Position,
     invocation: MacroInvocation, ci: MacroHost, isMacroMap!: Bool = false): Unit {
     let lexer = RealLexer([strToken], ci.GetDiag(), ci.GetSourceManager())
     let strParts = lexer.GetStrParts(strToken)
@@ -224,7 +224,7 @@ public func RefreshNewTokensPos(node: Node, sm: SourceManager, ci: MacroHost): U
             let keyPos = Position(mcPos.fileID, mcPos.line, lastColumn)
             if (token.kind == TokenKind.STRING_LITERAL || token.kind == TokenKind.MULTILINE_STRING) {
                 invocation.macroCallDiagInfo.new2originPosMap.put(keyPos.Hash32(), token.Begin())
-                handleInterpolationStringPosMap(token, Position(mcPos.fileID, mcPos.line, lastColumn), invocation, ci)
+                HandleInterplationStringPosMap(token, Position(mcPos.fileID, mcPos.line, lastColumn), invocation, ci)
             } else if (token.kind != TokenKind.NL && token.kind != TokenKind.COMMENT) {
                 invocation.macroCallDiagInfo.new2originPosMap.put(keyPos.Hash32(), token.Begin())
             }
@@ -286,7 +286,7 @@ public func RefreshTokensPosMap(node: Node, sm: SourceManager, ci: MacroHost): U
                 invocation.macroCallDiagInfo.new2macroCallPosMap.put(key, tokens[idx].Begin())
             }
             if (tokens[idx].kind == TokenKind.STRING_LITERAL || tokens[idx].kind == TokenKind.MULTILINE_STRING) {
-                handleInterpolationStringPosMap(tokens[idx], invocation.newTokens[idx].Begin(), invocation, ci,
+                HandleInterplationStringPosMap(tokens[idx], invocation.newTokens[idx].Begin(), invocation, ci,
                     isMacroMap: true)
             }
             idx++

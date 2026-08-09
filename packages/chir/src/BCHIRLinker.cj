@@ -173,9 +173,9 @@ public class BCHIRLinker {
     }
 
     private func LinkGlobalInitializers(pkg: BCHIR, topDef: BCHIRDefinition): Unit {
-        let fileMap = UnlinkedFilesToLinkedFiles(pkg.GetFileNames())
-        let typeMap = UnlinkedTypesToLinkedTypes(pkg.GetTypes())
-        let stringMap = UnlinkedStringsToLinkedStrings(pkg.GetStrings())
+        let fileMap = UnlinkedFiles2LinkedFiles(pkg.GetFileNames())
+        let typeMap = UnlinkedTypes2LinkedTypes(pkg.GetTypes())
+        let stringMap = UnlinkedStrings2LinkedStrings(pkg.GetStrings())
         for (entry in pkg.GetGlobalVars()) {
             TraverseAndLink(pkg, entry.definition, topDef, fileMap, typeMap, stringMap)
             if (let Some(id) <- globalIds.get(entry.name)) {
@@ -186,9 +186,9 @@ public class BCHIRLinker {
     }
 
     private func LinkFunctions(pkg: BCHIR, topDef: BCHIRDefinition): Unit {
-        let fileMap = UnlinkedFilesToLinkedFiles(pkg.GetFileNames())
-        let typeMap = UnlinkedTypesToLinkedTypes(pkg.GetTypes())
-        let stringMap = UnlinkedStringsToLinkedStrings(pkg.GetStrings())
+        let fileMap = UnlinkedFiles2LinkedFiles(pkg.GetFileNames())
+        let typeMap = UnlinkedTypes2LinkedTypes(pkg.GetTypes())
+        let stringMap = UnlinkedStrings2LinkedStrings(pkg.GetStrings())
         for (entry in pkg.GetFunctions()) {
             let bodyIndex = topDef.NextIndex()
             ResolveFunctionPlaceholders(entry.name, bodyIndex, topDef)
@@ -422,7 +422,7 @@ public class BCHIRLinker {
         return next
     }
 
-    private func UnlinkedFilesToLinkedFiles(fileNames: ArrayList<String>): ArrayList<Int64> {
+    private func UnlinkedFiles2LinkedFiles(fileNames: ArrayList<String>): ArrayList<Int64> {
         let out = ArrayList<Int64>()
         for (name in fileNames) {
             if (let Some(index) <- fileNameIds.get(name)) {
@@ -436,7 +436,7 @@ public class BCHIRLinker {
         return out
     }
 
-    private func UnlinkedTypesToLinkedTypes(types: ArrayList<Type>): ArrayList<Int64> {
+    private func UnlinkedTypes2LinkedTypes(types: ArrayList<Type>): ArrayList<Int64> {
         let out = ArrayList<Int64>()
         for (ty in types) {
             let key = ty.objectId
@@ -451,7 +451,7 @@ public class BCHIRLinker {
         return out
     }
 
-    private func UnlinkedStringsToLinkedStrings(strings: ArrayList<String>): ArrayList<Int64> {
+    private func UnlinkedStrings2LinkedStrings(strings: ArrayList<String>): ArrayList<Int64> {
         let out = ArrayList<Int64>()
         for (text in strings) {
             if (let Some(index) <- stringIds.get(text)) {

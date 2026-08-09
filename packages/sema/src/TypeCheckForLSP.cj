@@ -127,7 +127,7 @@ private func CreateLocalReferenceQuery(scopeName: String, baseName: String): Que
     return root
 }
 
-public func GetLSPRelativePos(ctx: ASTContext, scopeName: String, baseName: String, hasLocalDecl: Bool): Position {
+public func GetRelativePos(ctx: ASTContext, scopeName: String, baseName: String, hasLocalDecl: Bool): Position {
     var pos = Position(0, LSP_DEFAULT_RELATIVE_LINE, 0)
     if (hasLocalDecl) {
         let syms = ctx.searcher.Search(ctx, CreateLocalReferenceQuery(scopeName, baseName))

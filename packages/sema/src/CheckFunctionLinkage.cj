@@ -177,7 +177,7 @@ public func AnalyzeLinkageBasedOnModifier(pkg: Package, opt: OptionGlobalOptions
     }
 }
 
-private func DeclKey(decl: Decl): String {
+private func GetDeclKey(decl: Decl): String {
     return "${ASTKindIndex(decl.astKind)}:${decl.fullPackageName}:${decl.identifier.Val()}:" +
         "${decl.begin.ToString()}:${decl.end.ToString()}"
 }
@@ -188,7 +188,7 @@ private func TyKey(ty: Ty): String {
 
 private func ExprKey(expr: Expr): String {
     if (let Some(target) <- expr.GetTarget()) {
-        return "target:" + DeclKey(target)
+        return "target:" + GetDeclKey(target)
     }
     return "${ASTKindIndex(expr.astKind)}:${expr.begin.ToString()}:${expr.end.ToString()}"
 }
@@ -255,7 +255,7 @@ private class ExternalLinkageAnalyzer {
     }
 
     private func AddSrcExportedDecl(decl: Decl): Unit {
-        let key = DeclKey(decl)
+        let key = GetDeclKey(decl)
         if (visitedSrcDeclKeys.contains(key) || queuedSrcDeclKeys.contains(key)) {
             return
         }
@@ -417,7 +417,7 @@ private class ExternalLinkageAnalyzer {
         while (!srcExportedDecls.isEmpty()) {
             let decl = srcExportedDecls[0]
             srcExportedDecls.remove(at: 0)
-            let key = DeclKey(decl)
+            let key = GetDeclKey(decl)
             queuedSrcDeclKeys.remove(key)
             visitedSrcDeclKeys.add(key)
             let walker = Walker(decl, visitPre: { curNode: Node => VisitSrcExportedNode(curNode) })

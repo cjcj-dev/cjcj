@@ -593,17 +593,17 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, chirTy: Type, typ
     let cgType = CGType.GetOrCreate(cgMod, chirTy)
     let typeInfoName = TypeInfoGlobalName(cgMod, chirTy)
     let fieldCount = GenFieldsNumOfTypeInfo(cgMod, chirTy)
-    let fields = GenerateFieldsOfTypeInfo(cgMod, chirTy, typeInfoName, i8PtrType)
+    let fields = GenFieldsOfTypeInfo(cgMod, chirTy, typeInfoName, i8PtrType)
     let sizeValue = TypeInfoSizeValue(cgMod, chirTy, cgType)
     let alignValue = TypeInfoAlignValue(cgMod, chirTy, cgType)
     let sourceGeneric = GenerateSourceGenericOfTypeInfo(cgMod, chirTy, i8PtrType)
     let typeArgsNum = GenTypeArgsNumOfTypeInfo(cgMod, chirTy)
-    let offsets = GenerateOffsetsOfTypeInfo(cgMod, chirTy, cgType, typeInfoName, i32PtrType)
+    let offsets = GenOffsetsOfTypeInfo(cgMod, chirTy, cgType, typeInfoName, i32PtrType)
     let typeArgs = GenerateTypeArgsOfTypeInfo(cgMod, chirTy, typeInfo, typeInfoName, i8PtrType)
-    let superType = GenerateSuperOfTypeInfo(cgMod, chirTy, typeInfo, typeInfoPtrType)
-    let extensionDef = GenerateExtensionDefPtrOfTypeInfo(cgMod, chirTy, extensionDefPtrPtrType)
+    let superType = GenSuperOfTypeInfo(cgMod, chirTy, typeInfo, typeInfoPtrType)
+    let extensionDef = GenExtensionDefPtrOfTypeInfo(cgMod, chirTy, extensionDefPtrPtrType)
     var inheritedClassNum = InheritedClassNumBase(cgMod, chirTy)
-    let (mtable, updatedInheritedClassNum) = GenerateMTableOfTypeInfo(cgMod, chirTy, i8PtrType, inheritedClassNum)
+    let (mtable, updatedInheritedClassNum) = GenMTableOfTypeInfo(cgMod, chirTy, i8PtrType, inheritedClassNum)
     inheritedClassNum = updatedInheritedClassNum
     let typeInfoValues = ArrayList<LLVMValueRef>()
     typeInfoValues.add(cgMod.GenerateTypeNameConstantString(TypeInfoRuntimeName(cgMod, chirTy), false))
@@ -724,16 +724,16 @@ private func BuildSourceGenericTypeTemplateInitializer(cgMod: CGModule, customTy
     let fieldNum = UInt64(GetTypeTemplateFieldTypes(cgMod, sourceTy).size)
     values.add(unsafe { LLVMConstInt(i16Type, fieldNum, 0) })
     values.add(unsafe { LLVMConstInt(i16Type, UInt64(sourceTy.GetGenericArgs().size), 0) })
-    values.add(GenerateFieldsFnsOfTypeTemplate(cgMod, sourceTy, typeTemplateName, i8PtrType))
-    values.add(GenerateSuperFnOfTypeTemplate(cgMod, sourceTy, typeTemplateName, i8PtrType))
-    values.add(GenerateFinalizerOfTypeTemplate(cgMod, sourceTy, i8PtrType))
+    values.add(GenFieldsFnsOfTypeTemplate(cgMod, sourceTy, typeTemplateName, i8PtrType))
+    values.add(GenSuperFnOfTypeTemplate(cgMod, sourceTy, typeTemplateName, i8PtrType))
+    values.add(GenFinalizerOfTypeTemplate(cgMod, sourceTy, i8PtrType))
     values.add(unsafe { LLVMConstNull(i8PtrType) })
-    values.add(GenerateExtensionDefPtrOfTypeInfo(cgMod, sourceTy, extensionDefPtrPtrType))
+    values.add(GenExtensionDefPtrOfTypeInfo(cgMod, sourceTy, extensionDefPtrPtrType))
     values.add(unsafe { LLVMConstInt(i16Type, TypeTemplateInheritedClassNumValue(cgMod, sourceTy), 0) })
     return TypeInfoConstStruct(typeTemplateTy, values)
 }
 
-private func GenerateFieldsFnsOfTypeTemplate(cgMod: CGModule, customTy: CustomType, typeTemplateName: String,
+private func GenFieldsFnsOfTypeTemplate(cgMod: CGModule, customTy: CustomType, typeTemplateName: String,
     i8PtrType: LLVMTypeRef): LLVMValueRef {
     let sourceTy = SourceCustomType(customTy)
     if (let Some(enumTy) <- (sourceTy as EnumType)) {
@@ -798,7 +798,7 @@ public func GenFieldsFnsOfTypeTemplate(cgMod: CGModule, funcPrefixName: String, 
     return GenFieldsFnsOfTypeTemplate(cgMod, funcPrefixName, initializers)
 }
 
-private func GenerateSuperFnOfTypeTemplate(cgMod: CGModule, customTy: CustomType, typeTemplateName: String,
+private func GenSuperFnOfTypeTemplate(cgMod: CGModule, customTy: CustomType, typeTemplateName: String,
     i8PtrType: LLVMTypeRef): LLVMValueRef {
     let sourceTy = SourceCustomType(customTy)
     if (let Some(classTy) <- (sourceTy as ClassType)) {
@@ -1058,7 +1058,7 @@ private func TypeTemplateSuperClassTy(cgMod: CGModule, classTy: ClassType): Opti
     return None
 }
 
-private func GenerateFinalizerOfTypeTemplate(cgMod: CGModule, customTy: CustomType,
+private func GenFinalizerOfTypeTemplate(cgMod: CGModule, customTy: CustomType,
     i8PtrType: LLVMTypeRef): LLVMValueRef {
     let sourceTy = SourceCustomType(customTy)
     if (let Some(classTy) <- (sourceTy as ClassType)) {
@@ -1233,7 +1233,7 @@ private func GenerateTypeArgsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfo:
     return unsafe { LLVMConstBitCast(typeArgsGlobal, i8PtrType) }
 }
 
-private func GenerateFieldsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoName: String,
+private func GenFieldsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoName: String,
     i8PtrType: LLVMTypeRef): LLVMValueRef {
     let fieldTypes = GetInstanceFieldTypes(cgMod, chirTy)
     if (fieldTypes.isEmpty()) {
@@ -1259,7 +1259,7 @@ private func GenerateFieldsOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfoNam
     return unsafe { LLVMConstBitCast(fieldsGlobal, i8PtrType) }
 }
 
-private func GenerateOffsetsOfTypeInfo(cgMod: CGModule, chirTy: Type, cgType: CGType,
+private func GenOffsetsOfTypeInfo(cgMod: CGModule, chirTy: Type, cgType: CGType,
     typeInfoName: String, i32PtrType: LLVMTypeRef): LLVMValueRef {
     let fieldTypes = GetInstanceFieldTypes(cgMod, chirTy)
     if (fieldTypes.isEmpty()) {
@@ -1557,7 +1557,7 @@ private func InheritedClassNumBase(cgMod: CGModule, chirTy: Type): UInt64 {
     return 0u64
 }
 
-private func GenerateExtensionDefPtrOfTypeInfo(cgMod: CGModule, chirTy: Type,
+private func GenExtensionDefPtrOfTypeInfo(cgMod: CGModule, chirTy: Type,
     extensionDefPtrPtrType: LLVMTypeRef): LLVMValueRef {
     if (let Some(startIdx) <- cgMod.GetExtensionDefStart(chirTy)) {
         let defs = if (IsExternalDefinedType(chirTy)) {
@@ -1588,7 +1588,7 @@ private func GenerateExtensionDefPtrOfTypeInfo(cgMod: CGModule, chirTy: Type,
     return unsafe { LLVMConstNull(extensionDefPtrPtrType) }
 }
 
-private func GenerateMTableOfTypeInfo(cgMod: CGModule, chirTy: Type, i8PtrType: LLVMTypeRef,
+private func GenMTableOfTypeInfo(cgMod: CGModule, chirTy: Type, i8PtrType: LLVMTypeRef,
     inheritedClassNum: UInt64): (LLVMValueRef, UInt64) {
     if ((inheritedClassNum >> 14u64) != 0u64 || cgMod.GetExtensionDefStart(chirTy).isNone()) {
         return (unsafe { LLVMConstNull(i8PtrType) }, inheritedClassNum)
@@ -1649,7 +1649,7 @@ private func GetLayoutMetadataName(cgMod: CGModule, chirTy: Type): String {
     return STRUCT_TYPE_PREFIX + chirTy.ToString()
 }
 
-private func GenerateSuperOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfo: LLVMValueRef,
+private func GenSuperOfTypeInfo(cgMod: CGModule, chirTy: Type, typeInfo: LLVMValueRef,
     typeInfoPtrType: LLVMTypeRef): LLVMValueRef {
     if (let Some(cPointerTy) <- (chirTy as CPointerType)) {
         let elementTI = CGType.GetOrCreate(cgMod, cPointerTy.GetElementType().StripAllRefs()).GetOrCreateTypeInfo()

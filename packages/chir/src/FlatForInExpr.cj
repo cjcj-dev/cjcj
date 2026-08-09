@@ -56,7 +56,7 @@ public class FlatForInExpr {
             if (let Some(forInExpr) <- (expr as ForIn)) {
                 RunOnBlockGroup(forInExpr.GetBody())
                 RunOnBlockGroup(forInExpr.GetLatch())
-                FlattenForInExpression(forInExpr, block, idx)
+                FlatternForInExpr(forInExpr, block, idx)
                 return true
             }
             idx++
@@ -64,9 +64,9 @@ public class FlatForInExpr {
         return false
     }
 
-    private func FlattenForInExpression(expr: ForIn, parentBlock: Block, exprIndex: Int64): Unit {
+    private func FlatternForInExpr(expr: ForIn, parentBlock: Block, exprIndex: Int64): Unit {
         if (let Some(closedRange) <- (expr as ForInClosedRange)) {
-            FlattenForInClosedRange(closedRange, parentBlock, exprIndex)
+            FlatternForInClosedRange(closedRange, parentBlock, exprIndex)
             return
         }
         let forInSuc = MoveExpressionAfterForIn(parentBlock, exprIndex)
@@ -99,7 +99,7 @@ public class FlatForInExpr {
         expr.RemoveSelfFromBlock()
     }
 
-    private func FlattenForInClosedRange(expr: ForInClosedRange, parentBlock: Block, exprIndex: Int64): Unit {
+    private func FlatternForInClosedRange(expr: ForInClosedRange, parentBlock: Block, exprIndex: Int64): Unit {
         let forInSuc = MoveExpressionAfterForIn(parentBlock, exprIndex)
         let firstEntry = GetEntryBlock(expr)
         let _ = builder.CreateGoTo(firstEntry, parentBlock)

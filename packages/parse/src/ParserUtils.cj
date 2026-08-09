@@ -597,7 +597,7 @@ extend ParserImpl {
         return false
     }
 
-    public func SeeingPrimaryIdentifier(): Bool {
+    public func SeeingPrimaryIdentifer(): Bool {
         return SeeingIdentifierAndTargetOp(
             [TokenKind.LT, TokenKind.LPAREN, TokenKind.LSQUARE, TokenKind.LCURL]) &&
             LevenshteinDistance(Peek().Value(), GetPrimaryDeclIdentRawValue()) <= 1u64
@@ -605,7 +605,7 @@ extend ParserImpl {
 
     public func SeeingPrimaryConstructor(scopeKind: ScopeKind): Bool {
         return (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) || ScopeKindEquals(scopeKind, ScopeKind.STRUCT_BODY)) &&
-            SeeingPrimaryIdentifier()
+            SeeingPrimaryIdentifer()
     }
 
     public func SeeingInitializer(): Bool {

@@ -2,10 +2,6 @@ package cjcj::driver
 
 import std.collection.*
 
-private func GetEffectiveOptimizationLevel(driverOptions: DriverOptions): OptimizationLevel {
-    return if (driverOptions.disableBackendOpt) { OptimizationLevel.O0 } else { driverOptions.optimizationLevel }
-}
-
 public open class Darwin_CJNATIVE <: MachO {
     public init(driver: Driver, driverOptions: DriverOptions, backendCmds: ArrayList<ToolBatch>) {
         super(driver, driverOptions, backendCmds)

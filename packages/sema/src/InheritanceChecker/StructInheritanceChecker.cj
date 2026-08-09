@@ -239,7 +239,7 @@ private func VisibilityToString(decl: Decl): String {
     return "internal"
 }
 
-private func DiagnoseWeakVisibility(
+private func DiagWeakVisibility(
     diag: DiagnosticEngine,
     parent: Decl,
     child: Decl,
@@ -1369,7 +1369,7 @@ public class StructInheritanceChecker {
                     }
                 }
                 if (!hasConsistentReturnTy) {
-                    AddPossibleInconsistentTypes(parent, child, inconsistentTypes)
+                    SetPossibleInconsistentType(parent, child, inconsistentTypes)
                 }
                 return hasConsistentReturnTy
             }
@@ -1432,7 +1432,7 @@ public class StructInheritanceChecker {
                 )
                 inconsistentType = inconsistentType && !consistent
             } else if (inconsistentType) {
-                AddPossibleInconsistentTypes(parent, child, inconsistentTypes)
+                SetPossibleInconsistentType(parent, child, inconsistentTypes)
             }
             CheckNativeFFI(parent, child)
             if (shouldUpdate) {
@@ -2248,7 +2248,7 @@ public class StructInheritanceChecker {
             (parent.TestAttr(Attribute.PROTECTED) && !child.TestAnyAttr(Attribute.PUBLIC, Attribute.PROTECTED)) ||
             (!parent.TestAnyAttr(Attribute.PUBLIC, Attribute.PROTECTED, Attribute.PRIVATE) && child.TestAttr(Attribute.PRIVATE))
         if (weakVisibility) {
-            DiagnoseWeakVisibility(diag, parent, child, diagNode)
+            DiagWeakVisibility(diag, parent, child, diagNode)
         }
     }
 

@@ -225,11 +225,11 @@ public open class ToolChain {
             } else {
                 AddLinkOrderedSetValue(staticLibraries, "-l:" + staticLib)
             }
-            CheckOtherDependenciesOfStaticLib(staticLib, dynamicLibraries, staticLibraries)
+            CheckOtherDependeniesOfStaticLib(staticLib, dynamicLibraries, staticLibraries)
         }
     }
 
-    private func CheckOtherDependenciesOfStaticLib(
+    private func CheckOtherDependeniesOfStaticLib(
         libName: String,
         dynamicLibraries: ArrayList<String>,
         staticLibraries: ArrayList<String>
