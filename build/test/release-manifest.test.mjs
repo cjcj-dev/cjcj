@@ -25,6 +25,13 @@ import {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const platforms = ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64'];
+const gateRuntimeByPlatform = {
+  'linux-x64': ['runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', 'nm -D --defined-only'],
+  'linux-aarch64': ['runtime/lib/linux_aarch64_cjnative/libcangjie-runtime.so', 'nm -D --defined-only'],
+  'darwin-x64': ['runtime/lib/darwin_x86_64_cjnative/libcangjie-runtime.dylib', 'nm -gU'],
+  'darwin-arm64': ['runtime/lib/darwin_aarch64_cjnative/libcangjie-runtime.dylib', 'nm -gU'],
+  'windows-x64': ['runtime/lib/windows_x86_64_cjnative/libcangjie-runtime.dll', 'nm -g --defined-only'],
+};
 
 async function fixture() {
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'release-manifest-'));
@@ -102,7 +109,11 @@ test('five release manifests carry one nonempty SHA_ONLY policy and notes render
     assert.equal(python.build.configure_args, pythonArgs.pythonMetadata.configure_args);
     assert.match(python.build.provenance_sha256, /^[0-9a-f]{64}$/);
     for (const platform of platforms) {
-      const platformRows = rows.map(row => ({...row, platform}));
+      const platformRows = structuredClone(rows);
+      for (const row of platformRows) row.platform = platform;
+      const apparatus = platformRows.find(row => row.component === GATE_APPARATUS_COMPONENT)
+        .acceptance_apparatus.host_runtime;
+      [apparatus.path, apparatus.symbol_probe] = gateRuntimeByPlatform[platform];
       assert.ok(platformRows.every(row => row.signature_policy === RELEASE_SIGNATURE_POLICY));
       await fs.writeFile(path.join(dist,
         `cjcj-0.0.0-test-${platform}.RELEASE-MANIFEST.jsonl`),
