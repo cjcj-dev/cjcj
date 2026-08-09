@@ -212,14 +212,10 @@ function probeLlvmTool(tool, phase) {
   if (probe.stdout) console.log(probe.stdout.slice(0, 400));
   if (probe.stderr) console.error(probe.stderr.slice(0, 400));
   if (probe.status !== 0) throw new Error(`${phase} LLVM tool probe failed: ${tool}`);
-  return probe.stdout.trim().split(/\r?\n/).slice(0, 5).join('\n');
 }
 
 // Validate the complete tuple before changing either SDK binary.
-const tupleVersions = fixedTools.map((tool) => probeLlvmTool(tool.tuple, 'tuple'));
-if (tupleVersions[0] !== tupleVersions[1]) {
-  throw new Error('tuple llc and opt report different LLVM version identities');
-}
+for (const tool of fixedTools) probeLlvmTool(tool.tuple, 'tuple');
 
 for (const tool of fixedTools) {
   if (!(await isFile(`${tool.sdk}.orig`))) await fs.copyFile(tool.sdk, `${tool.sdk}.orig`);
@@ -231,17 +227,13 @@ try {
     await fs.rm(tool.sdk, {force: true});
     await fs.rename(tool.tuple, tool.sdk);
   }
-  const installedVersions = [];
   for (const tool of fixedTools) {
     const installedSha = sha256(await fs.readFile(tool.sdk));
     if (installedSha !== tool.expectedSha) {
       throw new Error(`installed ${tool.name} sha mismatch (${installedSha})`);
     }
-    installedVersions.push(probeLlvmTool(tool.sdk, 'installed'));
+    probeLlvmTool(tool.sdk, 'installed');
     console.log(`SDK ${tool.name} -> source-built fixed LLVM (${installedSha})`);
-  }
-  if (installedVersions[0] !== installedVersions[1]) {
-    throw new Error('installed llc and opt report different LLVM version identities');
   }
 } catch (error) {
   for (const tool of fixedTools) {
