@@ -65,7 +65,7 @@ async function installLinux(config) {
   });
 }
 
-async function installDarwin() {
+async function installDarwin(config) {
   if (!which('brew')) throw new BuildError('system_deps', 'Homebrew is required by docs/macos.md');
   logger.info('Installing %d Homebrew packages', BREW_PACKAGES.length);
   await run(['brew', 'install', ...BREW_PACKAGES], {stage: 'system_deps.install'});
@@ -76,12 +76,24 @@ async function installDarwin() {
   if (!version || Number(version[1]) >= 4 || Number(version[1]) < 3 || (Number(version[1]) === 3 && Number(version[2]) < 17)) {
     throw new BuildError('system_deps', `cmake >=3.17 and <4 is required, got: ${cmake.stdout.trim()}`);
   }
+  const llvm = await run([path.join(config.target.spec.llvmBinDir, 'llvm-config'), '--version'], {
+    stage: 'system_deps.llvm', capture: true, logOutput: false,
+  });
+  if (!/^16\./.test(llvm.stdout.trim())) {
+    throw new BuildError('system_deps', `LLVM >=16 and <17 is required, got: ${llvm.stdout.trim()}`);
+  }
+  const openssl = await run([path.resolve(config.target.spec.opensslLibDir, '..', 'bin', 'openssl'), 'version'], {
+    stage: 'system_deps.openssl', capture: true, logOutput: false,
+  });
+  if (!/^OpenSSL 3\./.test(openssl.stdout.trim())) {
+    throw new BuildError('system_deps', `OpenSSL 3 is required, got: ${openssl.stdout.trim()}`);
+  }
   await run(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], {stage: 'system_deps.xcode'});
 }
 
 export async function install(config) {
   assertNativeHost(config);
-  if (config.target.spec.os === 'darwin') return installDarwin();
+  if (config.target.spec.os === 'darwin') return installDarwin(config);
   if (config.target.spec.nodePlatform === 'linux') return installLinux(config);
   throw new BuildError('system_deps', `unsupported source-build host: ${process.platform}`);
 }
