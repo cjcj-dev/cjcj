@@ -37,7 +37,7 @@ test('release connects each platform row to its same-platform final std', async 
   assert.ok(release.includes('pattern: pkg-*'));
 });
 
-test('final std and Python inputs plus both package commands are fail-closed', async () => {
+test('component provenance, final std, and Python inputs are fail-closed in both package commands', async () => {
   const consumer = await workflow('build-release-package.yml');
   const downloadStart = consumer.indexOf('- name: Download same-platform source-built final std');
   const downloadEnd = consumer.indexOf('\n      - name:', downloadStart + 1);
@@ -47,6 +47,13 @@ test('final std and Python inputs plus both package commands are fail-closed', a
   assert.ok(download.includes('path: ${{ env.FINAL_STD_DIR }}'));
   assert.ok(!download.includes('continue-on-error'));
   assert.equal(consumer.match(/--std-dir/g)?.length, 2);
+  for (const argument of [
+    '--base-sdk-archive',
+    '--base-sdk-provenance',
+    '--cjpm-provenance',
+    '--cjpm-source-repo',
+    '--cjpm-source-sha',
+  ]) assert.equal(consumer.match(new RegExp(argument, 'g'))?.length, 2, argument);
   assert.equal(consumer.match(/--python-bundle/g)?.length, 2);
   assert.equal(consumer.match(/prepare_python_bundle\.mjs/g)?.length, 2);
   assert.equal(consumer.match(/verify_packaged_cjdb\.mjs/g)?.length, 2);
@@ -57,6 +64,23 @@ test('final std and Python inputs plus both package commands are fail-closed', a
     assert.ok(!consumer.slice(start, end).includes('continue-on-error'), name);
   }
   assert.ok(consumer.includes('EXPECTED_STD_ARTIFACT: final-std-${{ inputs.platform }}'));
+  assert.ok(consumer.includes('name: source-cjpm-${{ inputs.platform }}'));
+  assert.ok(consumer.includes('node ci/release/prepare_base_sdk.mjs'));
+  assert.ok(consumer.includes('node ci/release/install_cjpm_artifact.mjs'));
+});
+
+test('all five package cells consume cjpm artifacts with producer sidecars', async () => {
+  const [sourceBuild, windowsCjpm, consumer] = await Promise.all([
+    workflow('srcbuild.yml'),
+    workflow('build-cjpm.yml'),
+    workflow('build-release-package.yml'),
+  ]);
+  assert.ok(sourceBuild.includes('name: source-cjpm-${{ matrix.target }}'));
+  assert.ok(sourceBuild.includes('node ci/release/prepare_cjpm_artifact.mjs'));
+  assert.ok(windowsCjpm.includes('patched-cjpm/windows_x86_64/CJPM-PROVENANCE.json'));
+  assert.ok(windowsCjpm.includes('node ci/release/prepare_cjpm_artifact.mjs'));
+  assert.ok(consumer.includes("if: runner.os != 'Windows'"));
+  assert.ok(consumer.includes('run: npx --yes zx@8 ci/platform_matrix/fetch_cjpm.mjs'));
 });
 
 test('release has one LLVM producer per tuple', async () => {
@@ -71,6 +95,7 @@ test('release has one LLVM producer per tuple', async () => {
       .map(platform => `fixed-llvm-tools-${platform}`),
     'fixed-llvm-tools-windows_x86_64',
     ...platforms.map(platform => `final-std-${platform}`),
+    ...platforms.filter(platform => platform !== 'windows-x64').map(platform => `source-cjpm-${platform}`),
     ...platforms.map(platform => `pkg-${platform}`),
     'runtime-install-windows_x86_64',
     'patched-cjpm-windows_x86_64',
