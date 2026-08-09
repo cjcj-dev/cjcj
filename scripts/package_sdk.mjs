@@ -199,16 +199,18 @@ if (stdDir) {
   await fs.mkdir(stageLib, {recursive: true});
 
   const skipName = name => name === '.cached' || name.endsWith('-temp-files')
-    || /\.O[01]\.a$/.test(name) || name.endsWith('.bc') || name === 'core.o';
+    || /\.O[01]\.a$/.test(name) || name === 'core.o';
   const entries = await fs.readdir(layout.modulesStd, {withFileTypes: true});
   let copiedA = 0;
   let copiedCjo = 0;
+  let copiedBc = 0;
   for (const entry of entries) {
     if (!entry.isFile() || skipName(entry.name)) continue;
-    if (!entry.name.endsWith('.a') && !entry.name.endsWith('.cjo')) continue;
+    if (!entry.name.endsWith('.a') && !entry.name.endsWith('.cjo') && !entry.name.endsWith('.bc')) continue;
     await fs.copyFile(path.join(layout.modulesStd, entry.name), path.join(stageModulesStd, entry.name));
     if (entry.name.endsWith('.a')) copiedA += 1;
-    else copiedCjo += 1;
+    else if (entry.name.endsWith('.cjo')) copiedCjo += 1;
+    else copiedBc += 1;
   }
   // package-level std.a / std.cjo (and optional libstd.bc) sit beside the std/ dir
   for (const topName of ['std.a', 'std.cjo', 'libstd.bc']) {
@@ -252,7 +254,7 @@ if (stdDir) {
     console.error('  ERROR: overlay missing std.core.a or libcangjie-std-core.a');
     process.exit(3);
   }
-  console.log(`  modules/${runtimeDir}/std: ${copiedA} .a + ${copiedCjo} .cjo`);
+  console.log(`  modules/${runtimeDir}/std: ${copiedA} .a + ${copiedCjo} .cjo + ${copiedBc} .bc`);
   console.log(`  lib/${runtimeDir}: ${copiedLib} libcangjie-std-*.a`);
 
   // Official CMake merges each package's FFI objects into the static lib
