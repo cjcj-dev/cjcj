@@ -282,7 +282,7 @@ jobs:
             --sdk "$CANGJIE_HOME" \
             --platform "$RELEASE_PLATFORM" \
             --toolchain-pin "$PWD/ci/cjpm_pin.env" \
-            --base-sdk-provenance "$BASE_SDK_PROVENANCE" \
+            --base-sdk-sidecar "$BASE_SDK_PROVENANCE" \
             --outdir "$RUNNER_TEMP/release-gate-apparatus"
 
       - name: Capture acceptance gate apparatus (Windows)
@@ -293,7 +293,7 @@ jobs:
             --sdk "$env:CANGJIE_HOME" `
             --platform "$env:RELEASE_PLATFORM" `
             --toolchain-pin "$PWD\ci\cjpm_pin.env" `
-            --base-sdk-provenance "$env:BASE_SDK_PROVENANCE" `
+            --base-sdk-sidecar "$env:BASE_SDK_PROVENANCE" `
             --outdir "$env:RUNNER_TEMP\release-gate-apparatus"
 
       - name: Activate pinned runtime
