@@ -113,6 +113,7 @@ jobs:
       - name: Download SDK artifacts
         uses: actions/download-artifact@v8
         with:
+          pattern: pkg-*
           path: dist
           merge-multiple: true
       - name: Publish GitHub release
