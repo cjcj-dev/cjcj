@@ -26,6 +26,14 @@ jobs:
             platform: linux_aarch64
             llvm-targets: AArch64
             portability-tag: glibc2.39
+          - runner: macos-15
+            platform: darwin_aarch64
+            llvm-targets: AArch64
+            portability-tag: macos15
+          - runner: macos-15-intel
+            platform: darwin_x86_64
+            llvm-targets: X86
+            portability-tag: macos15
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout cjcj
@@ -45,11 +53,15 @@ jobs:
           path: fixed-toolchain/${{ matrix.platform }}
           key: fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
 
-      - name: Install build dependencies
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq clang ninja-build cmake
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS' && steps.cache.outputs.cache-hit != 'true'
+        run: brew install ninja
 
       - name: Checkout source repositories
         if: steps.cache.outputs.cache-hit != 'true'
@@ -88,9 +100,15 @@ jobs:
           mkdir -p "fixed-toolchain/${{ matrix.platform }}"
           gzip -n -c -9 llc-build/bin/llc > "fixed-toolchain/${{ matrix.platform }}/llc.gz"
           gzip -n -c -9 llc-build/bin/opt > "fixed-toolchain/${{ matrix.platform }}/opt.gz"
-          llc_sha="$(sha256sum llc-build/bin/llc | awk '{print $1}')"
-          opt_sha="$(sha256sum llc-build/bin/opt | awk '{print $1}')"
+          if command -v sha256sum >/dev/null; then
+            llc_sha="$(sha256sum llc-build/bin/llc | awk '{print $1}')"
+            opt_sha="$(sha256sum llc-build/bin/opt | awk '{print $1}')"
+          else
+            llc_sha="$(shasum -a 256 llc-build/bin/llc | awk '{print $1}')"
+            opt_sha="$(shasum -a 256 llc-build/bin/opt | awk '{print $1}')"
+          fi
           {
+            printf 'PLATFORM=%s\n' '${{ matrix.platform }}'
             printf 'LLVM_SHA=%s\n' "$LLVM_SHA"
             printf 'LLC_SHA256=%s\n' "$llc_sha"
             printf 'OPT_SHA256=%s\n' "$opt_sha"
@@ -121,16 +139,27 @@ jobs:
               > "$RUNNER_TEMP/fixed-llvm-tools/$tool"
             chmod +x "$RUNNER_TEMP/fixed-llvm-tools/$tool"
             file "$RUNNER_TEMP/fixed-llvm-tools/$tool"
-            ldd_output="$(ldd "$RUNNER_TEMP/fixed-llvm-tools/$tool")"
-            printf '%s\n' "$ldd_output"
-            test -z "$(printf '%s\n' "$ldd_output" | grep 'not found' || true)"
+            if [ "${{ runner.os }}" = macOS ]; then
+              otool -L "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            else
+              ldd_output="$(ldd "$RUNNER_TEMP/fixed-llvm-tools/$tool")"
+              printf '%s\n' "$ldd_output"
+              test -z "$(printf '%s\n' "$ldd_output" | grep 'not found' || true)"
+            fi
             "$RUNNER_TEMP/fixed-llvm-tools/$tool" --version | head -5
           done
           llc_version="$("$RUNNER_TEMP/fixed-llvm-tools/llc" --version | head -5)"
           opt_version="$("$RUNNER_TEMP/fixed-llvm-tools/opt" --version | head -5)"
           test "$llc_version" = "$opt_version"
-          llc_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/llc" | awk '{print $1}')"
-          opt_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/opt" | awk '{print $1}')"
+          if command -v sha256sum >/dev/null; then
+            llc_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/llc" | awk '{print $1}')"
+            opt_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/opt" | awk '{print $1}')"
+          else
+            llc_sha="$(shasum -a 256 "$RUNNER_TEMP/fixed-llvm-tools/llc" | awk '{print $1}')"
+            opt_sha="$(shasum -a 256 "$RUNNER_TEMP/fixed-llvm-tools/opt" | awk '{print $1}')"
+          fi
+          grep -Fx "PLATFORM=${{ matrix.platform }}" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           grep -Fx "LLVM_SHA=$LLVM_SHA" \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           grep -Fx "LLC_SHA256=$llc_sha" \
@@ -139,13 +168,16 @@ jobs:
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           file "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
           shim_exports="$(nm -C "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" \
-            | grep -cE ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
+            | grep -cE ' T _?(LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
           test "$shim_exports" -ge 90
           echo "shim exported symbols: $shim_exports"
-          sha256sum "fixed-toolchain/${{ matrix.platform }}/llc.gz" \
-            "fixed-toolchain/${{ matrix.platform }}/opt.gz" \
-            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest" \
-            "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
+          for file in llc.gz opt.gz llvm-tools.manifest cjselfhost_llvmshim.o; do
+            if command -v sha256sum >/dev/null; then
+              sha256sum "fixed-toolchain/${{ matrix.platform }}/$file"
+            else
+              shasum -a 256 "fixed-toolchain/${{ matrix.platform }}/$file"
+            fi
+          done
 
       - name: Upload LLVM tools
         uses: actions/upload-artifact@v7
