@@ -157,8 +157,12 @@ const stageEnv = {
 await assertStage2Compiler(stageEnv, stage2Sha);
 await $({cwd: githubWorkspace, env: stageEnv})`set -o pipefail; cjc --version | head -2`;
 
-const runtime = path.join(sdk, 'runtime', 'lib', tuple, 'libcangjie-runtime.so');
+const runtime = path.join(sdk, 'runtime', 'lib', tuple, target.spec.runtimeLibrary);
 if (!await exists(runtime)) throw new Error(`fork runtime missing: ${runtime}`);
+const runtimeKind = (await $({stdio: 'pipe'})`file -b ${runtime}`).stdout.trim();
+if (!runtimeKind.includes(target.spec.fileFormat) || !runtimeKind.includes(target.spec.fileArch)) {
+  throw new Error(`fork runtime has wrong native format for ${target.spec.key}: ${runtimeKind}`);
+}
 const runtimeMarkers = await countRuntimeMarkers(runtime);
 if (runtimeMarkers === 0) throw new Error(`${runtime} carries no MRT_GCV2_ markers; refusing stock runtime`);
 console.log(`STAGE3_RUNTIME_ASSERT_PASS MRT_GCV2_markers=${runtimeMarkers}`);
