@@ -206,7 +206,8 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.match(apparatus.known_apparatus_limitations.text, /PostTraceBarrier::ReadReference/);
   assert.equal(rows.find(row => row.component === 'llvm-opt').embedded_stamp, 'no-stamp');
   assert.equal(rows.find(row => row.component === 'python').source.commit, RELEASE_PYTHON_VERSION);
-  assert.equal(rows.find(row => row.component === 'base-sdk').source.version, 'fixture');
+  assert.equal(rows.find(row => row.component === 'base-sdk').source.version,
+    REVIEWED_GATE_HOST_TOOLCHAIN.replace(/^nightly-/, ''));
   assert.match(rows.find(row => row.component === 'base-sdk').artifact.sha256, /^[0-9a-f]{64}$/);
   assert.equal(rows.find(row => row.component === 'cjpm').source.commit, CJPM_SHA);
   assert.match(rows.find(row => row.component === 'cjpm').artifact.sha256, /^[0-9a-f]{64}$/);
