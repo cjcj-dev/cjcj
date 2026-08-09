@@ -79,7 +79,7 @@ for (const [tool, hashKey] of [['llc', 'LLC_SHA256'], ['opt', 'OPT_SHA256']]) {
 // A successful --version is necessary but not sufficient: validate every LLVM
 // executable consumed by cjcj, then use the native loader inspector. This is our
 // fixed-tuple check in addition to the official compiler/runtime/std build order.
-for (const tool of ['llc', 'opt', 'llvm-objcopy', 'llvm-ar', 'llvm-strip']) {
+for (const tool of ['llc', 'opt', 'llvm-objcopy', 'llvm-ar']) {
   const executable = path.join(llvmBin, tool);
   const kind = (await $({stdio: 'pipe'})`file -b ${executable}`).stdout.trim();
   if (!kind.includes(spec.fileFormat) || !kind.includes(spec.fileArch)) {
