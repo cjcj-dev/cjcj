@@ -101,6 +101,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   await fs.mkdir(path.join(std, 'lib', TUPLE), {recursive: true});
   await fs.copyFile(archive, path.join(std, 'modules', TUPLE, 'std', 'std.core.a'));
   await fs.copyFile(archive, path.join(std, 'lib', TUPLE, 'libcangjie-std-core.a'));
+  await write(std, `runtime/lib/${TUPLE}/libcangjie-std-core.so`, 'fixture shared std\n');
   await write(std, 'PROVENANCE.txt', [
     `CJSTD-COMMIT:${STD_SHA} BUILT-BY:${CJCJ_SHA}`,
     `STD_SOURCE_COMMIT = ${STD_SHA}`,
