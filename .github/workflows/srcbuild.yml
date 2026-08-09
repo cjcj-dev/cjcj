@@ -1,4 +1,4 @@
-name: Self-hosted source SDK (linux-x64)
+name: Self-hosted source SDK (native matrix)
 
 on:
   workflow_dispatch:
@@ -18,22 +18,44 @@ permissions:
   contents: read
 
 concurrency:
-  group: srcbuild-linux-x64-${{ github.ref }}
+  group: srcbuild-native-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  fixed-llc:
-    name: Build LLVM tools
+  fixed-llvm:
+    name: Build native LLVM tools
     uses: ./.github/workflows/build-fixed-llc.yml
 
   srcbuild:
-    name: Build source SDK
-    needs: fixed-llc
-    runs-on: ubuntu-22.04
+    name: ${{ matrix.target }} / source SDK
+    needs: fixed-llvm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-aarch64
+            runner: ubuntu-24.04-arm
+            llvm_platform: linux_aarch64
+            static_libs: true
+          - target: darwin-arm64
+            runner: macos-15
+            llvm_platform: darwin_aarch64
+            static_libs: false
+          - target: darwin-x64
+            runner: macos-15-intel
+            llvm_platform: darwin_x86_64
+            static_libs: false
+          - target: linux-x64
+            runner: ubuntu-22.04
+            llvm_platform: linux_x86_64
+            static_libs: true
     env:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
+      CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
+      CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
       SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"
@@ -50,28 +72,29 @@ jobs:
         run: cat ci/source_pin.env ci/runtime_pin.env >> "$GITHUB_ENV"
 
       - name: Install build dependencies
-        run: npx --yes zx@8 build/cli.mjs --target linux-x64 install-system-deps
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
 
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.10
 
       - name: Restore support library cache
+        if: matrix.static_libs
         id: support-cache
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.CANGJIE_BUILD_ROOT }}
-          key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('build/toolchain/static-libs.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
+          key: cangjie-srcbuild-support-${{ matrix.target }}-${{ hashFiles('build/toolchain/static-libs.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
 
       - name: Build support libraries
-        if: steps.support-cache.outputs.cache-hit != 'true'
-        run: npx --yes zx@8 build/cli.mjs --target linux-x64 install-static-libs
+        if: matrix.static_libs && steps.support-cache.outputs.cache-hit != 'true'
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-static-libs
 
       - name: Save support library cache
-        if: steps.support-cache.outputs.cache-hit != 'true'
+        if: matrix.static_libs && steps.support-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: ${{ env.CANGJIE_BUILD_ROOT }}
-          key: cangjie-srcbuild-support-linux-x64-${{ hashFiles('build/toolchain/static-libs.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
+          key: cangjie-srcbuild-support-${{ matrix.target }}-${{ hashFiles('build/toolchain/static-libs.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
 
       - name: Generate SDK version
         id: version
@@ -84,7 +107,7 @@ jobs:
       - name: Download pinned source
         run: |
           npx --yes zx@8 build/cli.mjs \
-            --target linux-x64 \
+            --target "${{ matrix.target }}" \
             --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" \
             --cangjie-version "${{ steps.version.outputs.value }}" \
             fetch \
@@ -101,10 +124,8 @@ jobs:
         run: npx --yes zx@8 ci/srcbuild/steps/verify-source-pins.mjs
 
       - name: Configure compiler LLVM
-        # LLVM dev rejects seven-operand enum reflection; pin ERT_MAX=7.
-        # Source and revision come from ci/llvm_pin.env so this stays one place:
-        # the fork carries CJBarrierLowering's mask test, the fast-read uncolour,
-        # and the two stack-map fixes stage2 needs. Upstream b462fbd9 has none.
+        # Our LLVM fork adds the coloured-runtime lowering and stack-map fixes
+        # needed by the selfhost stages; the official source order is unchanged.
         run: |
           set -euo pipefail
           source ci/llvm_pin.env
@@ -112,32 +133,32 @@ jobs:
           npx --yes zx@8 ci/srcbuild/steps/pin-compiler-llvm.mjs
 
       - name: Build compiler oracle
-        run: npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
 
       - name: Build runtime from source
-        run: npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build runtime
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build runtime
 
       - name: Build stdlib from source
-        run: npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdlib
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdlib
 
       - name: Build stdx from source
-        run: npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdx
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdx
 
       - name: Build SDK tools from source
-        run: npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
+        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
 
       - name: Verify bootstrap SDK
         run: |
-          npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
-          npx --yes zx@8 build/cli.mjs --target linux-x64 --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
+          npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
+          npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
 
-      - name: Download LLVM tools
+      - name: Download native LLVM tuple
         uses: actions/download-artifact@v8
         with:
-          name: fixed-llvm-tools-linux_x86_64
-          path: .srcbuild/fixed-llc
+          name: fixed-llvm-tools-${{ matrix.llvm_platform }}
+          path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
 
-      - name: Install source SDK
+      - name: Install source SDK and fixed LLVM tuple
         run: npx --yes zx@8 ci/srcbuild/steps/activate-source-sdk.mjs
 
       - name: Build compiler shim
@@ -153,15 +174,11 @@ jobs:
           npx --yes zx@8 ci/srcbuild/steps/inject-version.mjs
 
       - name: Build stage 1 compiler
-        # Upstream cjc miscompiles cjcj at -O2; build the seed at -O1.
+        # The upstream C++ cjc miscompiles cjcj at -O2; seed at -O1.
         run: npx --yes zx@8 ci/srcbuild/steps/build-stage1.mjs
 
-      - name: Add swap for stage2 chir heap
-        # The O1-seed stage1 needs >14GB Cangjie heap for the chir package
-        # (rc2 OOM at 12GB/frag 27%, rc3 OOM at 14GB/frag 38%; 24GB passes
-        # locally at ~26GB RSS). 16GB RAM + 16GB swap carries a 20GB heap.
-        # The runner already runs a 4G /swapfile (fallocate on it: Text file
-        # busy, rc5). Keep it and add 12G on the /mnt ephemeral disk.
+      - name: Add Linux swap for stage2 chir heap
+        if: runner.os == 'Linux'
         run: |
           sudo fallocate -l 12G /mnt/swapfile
           sudo chmod 600 /mnt/swapfile
@@ -170,21 +187,25 @@ jobs:
           free -h
 
       - name: Build stage 2 compiler
-        # Use the stage 1 compiler to avoid the upstream -O2 CHIR bug.
         run: npx --yes zx@8 ci/srcbuild/steps/build-stage2.mjs
 
       - name: Build stage 3 compiler and final std
-        # Stage2 still embeds bootstrap std. Rebuild std with stage2, then build
-        # the final compiler against that exact rebuilt std before composition.
+        # Stage2 rebuilds std natively; stage3 consumes that exact install root.
         run: npx --yes zx@8 ci/srcbuild/steps/build-stage3.mjs
 
-      # Keep the seed compiler and stage2 CJOs when a stage fails: reproducing a
-      # stage2 frontier locally otherwise requires rebuilding the full C++ oracle.
+      - name: Upload final source-built std install root
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-${{ matrix.target }}
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-stage2
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload stage diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: srcbuild-diagnosis-${{ github.run_attempt }}
+          name: srcbuild-diagnosis-${{ matrix.target }}-${{ github.run_attempt }}
           retention-days: 7
           if-no-files-found: warn
           path: |
@@ -203,10 +224,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cjcj-srcbuild-linux-x64-${{ steps.version.outputs.value }}
+          name: cjcj-srcbuild-${{ matrix.target }}-${{ steps.version.outputs.value }}
           path: |
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-linux-x64-${{ steps.version.outputs.value }}-cjcj.tar.gz
-            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-linux-x64-${{ steps.version.outputs.value }}-cjcj.tar.gz.sha256
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.tar.gz
+            ${{ env.CANGJIE_WORKSPACE }}/software/cangjie-sdk-*-${{ steps.version.outputs.value }}-cjcj.tar.gz.sha256
             ${{ runner.temp }}/cjcj-srcbuild-verify/*.log
             .srcbuild/shim-build.log
           if-no-files-found: warn
