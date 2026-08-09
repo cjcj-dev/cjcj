@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import {spawnSync} from 'node:child_process';
+import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
 
@@ -133,17 +134,32 @@ function sha256(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
-const manifest = new Map();
-for (const line of (await fs.readFile(fixedLlvmManifest, 'utf8')).trim().split(/\r?\n/)) {
-  const match = line.match(/^([A-Z0-9_]+)=([0-9a-f]+)$/);
-  if (!match || manifest.has(match[1])) throw new Error(`malformed fixed LLVM manifest: ${fixedLlvmManifest}`);
-  manifest.set(match[1], match[2]);
-}
+const parsedManifest = parseLlvmToolsManifest(await fs.readFile(fixedLlvmManifest, 'utf8'), {
+  label: fixedLlvmManifest,
+  schema: 'core-or-native',
+});
+const manifest = parsedManifest.values;
 const llvmSourceSha = manifest.get('LLVM_SHA') || '';
 const pinText = await fs.readFile(path.join('ci', 'llvm_pin.env'), 'utf8');
 const pinnedLlvmSha = pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || '';
-if (manifest.size !== 3 || !/^[0-9a-f]{40}$/.test(llvmSourceSha) || llvmSourceSha !== pinnedLlvmSha) {
+if (llvmSourceSha !== pinnedLlvmSha) {
   throw new Error(`fixed LLVM source mismatch (manifest=${llvmSourceSha}, pin=${pinnedLlvmSha})`);
+}
+if (parsedManifest.schema === 'native') {
+  for (const [field, expected] of [
+    ['PLATFORM', process.env.PLATFORM_TUPLE || ''],
+    ['CANGJIE_COMPILER_SHA', pinText.match(/^CANGJIE_COMPILER_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
+    ['FLATBUFFERS_SHA', pinText.match(/^FLATBUFFERS_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
+  ]) {
+    if (!expected || manifest.get(field) !== expected) {
+      throw new Error(`fixed LLVM ${field} mismatch (manifest=${manifest.get(field) || ''}, expected=${expected})`);
+    }
+  }
+  const fixedShim = process.env.CJCJ_LLVM_SHIM_O || path.join('runtime_shim', 'cjselfhost_llvmshim.o');
+  const shimSha = sha256(await fs.readFile(fixedShim));
+  if (shimSha !== manifest.get('SHIM_SHA256')) {
+    throw new Error(`fixed LLVM shim sha mismatch (${shimSha})`);
+  }
 }
 
 const fixedTools = [
