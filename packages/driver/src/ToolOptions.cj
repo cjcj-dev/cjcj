@@ -15,7 +15,7 @@ private func backendOptimizationOption(level: OptimizationLevel): String {
     return OPTIMIZATION_LEVEL_TO_BACKEND_OPTION[OptimizationLevelIndex(level)]
 }
 
-private func GetEffectiveOptimizationLevel(driverOptions: DriverOptions): OptimizationLevel {
+func GetEffectiveOptimizationLevel(driverOptions: DriverOptions): OptimizationLevel {
     return if (driverOptions.disableBackendOpt) { OptimizationLevel.O0 } else { driverOptions.optimizationLevel }
 }
 
