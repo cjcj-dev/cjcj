@@ -8,6 +8,8 @@ import {
   CJDB_PYTHON_MODULES,
   CJDB_PYTHON_UNIX_MODULES,
   installPythonBundle,
+  RELEASE_PYTHON_SOURCE_SHA256,
+  RELEASE_PYTHON_SOURCE_URL,
   RELEASE_PYTHON_VERSION,
 } from '../lib/python-bundle.mjs';
 
@@ -37,6 +39,18 @@ async function fixture() {
   await fs.writeFile(path.join(source, 'lib', 'libpython3.11.so.1.0'), 'fixture libpython\n');
   await fs.writeFile(path.join(source, 'lib', 'python3.11', 'os.py'), '# fixture stdlib\n');
   await fs.writeFile(path.join(source, 'LICENSE.txt'), 'PSF LICENSE AGREEMENT fixture\n');
+  await fs.writeFile(path.join(source, 'PYTHON-BUNDLE.json'), `${JSON.stringify({
+    schema: 1,
+    platform: 'linux-x64',
+    version: RELEASE_PYTHON_VERSION,
+    source_type: 'python.org-source-native',
+    source_url: RELEASE_PYTHON_SOURCE_URL,
+    source_sha256: RELEASE_PYTHON_SOURCE_SHA256,
+    configure_args: '--prefix=<bundle> --enable-shared --without-ensurepip',
+    configure_environment: 'LDFLAGS=-Wl,-rpath,$ORIGIN/../lib',
+    required_modules: [...CJDB_PYTHON_MODULES],
+    required_unix_modules: [...CJDB_PYTHON_UNIX_MODULES],
+  }, null, 2)}\n`);
   await executable(path.join(stage, 'third_party', 'llvm', 'bin', 'lldb'), [
     '#!/bin/sh',
     'printf "PYTHONHOME=%s\\nPYTHONPATH=%s\\nARGS=%s\\n" "$PYTHONHOME" "$PYTHONPATH" "$*"',
