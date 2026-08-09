@@ -509,6 +509,8 @@ const {destination: releaseManifest} = await writeReleaseManifest({
   cjpmRepository: cjpmSourceRepository,
   cjpmCommit: cjpmSourceCommit,
   pythonArtifact: packagedPython.artifact,
+  pythonMetadata: packagedPython.metadata,
+  pythonMetadataArtifact: packagedPython.metadataArtifact,
   pythonRepository: RELEASE_PYTHON_SOURCE,
   pythonVersion: packagedPython.version,
 });
