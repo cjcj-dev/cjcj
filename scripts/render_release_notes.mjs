@@ -1,0 +1,55 @@
+#!/usr/bin/env node
+
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+function option(name) {
+  const index = process.argv.indexOf(`--${name}`);
+  if (index < 0 || !process.argv[index + 1]) throw new Error(`--${name} is required`);
+  return process.argv[index + 1];
+}
+
+function cell(value) {
+  return String(value).replaceAll('|', '\\|').replaceAll('\n', ' ');
+}
+
+const version = option('version');
+const dist = path.resolve(option('dist'));
+const output = path.resolve(option('output'));
+const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const pattern = new RegExp(`^cjcj-${escapedVersion}-(.+)\\.RELEASE-MANIFEST\\.jsonl$`);
+const manifests = (await fs.readdir(dist)).map(name => ({name, match: name.match(pattern)}))
+  .filter(entry => entry.match).sort((left, right) => left.name.localeCompare(right.name));
+if (manifests.length === 0) throw new Error(`no release manifests under ${dist}`);
+
+const lines = [
+  `# cjcj v${version}`,
+  '',
+  'Every SDK archive embeds `RELEASE-MANIFEST.jsonl`; the same manifest is attached beside the archive.',
+  'The tables below are rendered from those manifests. `unavailable: …` and `no-stamp` are intentional, explicit provenance results.',
+  '',
+  '## Component provenance',
+];
+
+for (const {name, match} of manifests) {
+  const text = await fs.readFile(path.join(dist, name), 'utf8');
+  const rows = text.split(/\r?\n/).filter(Boolean).map((line, index) => {
+    try { return JSON.parse(line); } catch (error) {
+      throw new Error(`${name}:${index + 1}: invalid JSON: ${error.message}`);
+    }
+  });
+  if (rows.length === 0) throw new Error(`${name}: empty manifest`);
+  lines.push('', `### ${match[1]}`, '',
+    '| component | source commit | artifact SHA-256 | embedded stamp |',
+    '|---|---|---|---|');
+  for (const row of rows) {
+    const values = [row.component, row.source?.commit, row.artifact?.sha256, row.embedded_stamp];
+    if (row.schema !== 1 || values.some(value => typeof value !== 'string' || value.length === 0)) {
+      throw new Error(`${name}: malformed component row ${JSON.stringify(row)}`);
+    }
+    lines.push(`| ${values.map(cell).join(' | ')} |`);
+  }
+}
+
+await fs.writeFile(output, `${lines.join('\n')}\n`);
+console.log(`release notes: ${output} (${manifests.length} manifest(s))`);

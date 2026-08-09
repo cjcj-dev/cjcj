@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {requirePrivateStage} from '../build/lib/package-safety.mjs';
+import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
 
 const required = name => {
   const value = argv[name];
@@ -21,6 +22,16 @@ const runtimeRoot = typeof argv['runtime-root'] === 'string' ? argv['runtime-roo
 const allowStockRuntime = argv['allow-stock-runtime'] === true;
 const allowNightlyStd = argv['allow-nightly-std'] === true;
 const stdDir = typeof argv['std-dir'] === 'string' ? argv['std-dir'] : '';
+const llvmManifest = typeof argv['llvm-manifest'] === 'string' ? argv['llvm-manifest'] : '';
+const baseSdkId = typeof argv['base-sdk-id'] === 'string' ? argv['base-sdk-id'] : '';
+const cjcjSourceRepository = typeof argv['cjcj-source-repo'] === 'string' ? argv['cjcj-source-repo'] : '';
+const cjcjSourceCommit = typeof argv['cjcj-source-sha'] === 'string' ? argv['cjcj-source-sha'] : '';
+const runtimeSourceRepository = typeof argv['runtime-source-repo'] === 'string' ? argv['runtime-source-repo'] : '';
+const runtimeSourceCommit = typeof argv['runtime-source-sha'] === 'string' ? argv['runtime-source-sha'] : '';
+const llvmSourceRepository = typeof argv['llvm-source-repo'] === 'string' ? argv['llvm-source-repo'] : '';
+const stdSourceRepository = typeof argv['std-source-repo'] === 'string' ? argv['std-source-repo'] : '';
+const cjpmSourceRepository = typeof argv['cjpm-source-repo'] === 'string' ? argv['cjpm-source-repo'] : '';
+const cjpmSourceCommit = typeof argv['cjpm-source-sha'] === 'string' ? argv['cjpm-source-sha'] : '';
 async function exists(file, kind = 'file') {
   try { const stat = await fs.stat(file); return kind === 'dir' ? stat.isDirectory() : stat.isFile(); } catch { return false; }
 }
@@ -30,6 +41,7 @@ if (!await exists(binary)) { console.error(`cjc binary not found: ${binary}`); p
 if (runtimeLib && !await exists(runtimeLib)) { console.error(`runtime library not found: ${runtimeLib}`); process.exit(2); }
 if (runtimeRoot && !await exists(runtimeRoot, 'dir')) { console.error(`runtime root not found: ${runtimeRoot}`); process.exit(2); }
 if (stdDir && !await exists(stdDir, 'dir')) { console.error(`std dir not found: ${stdDir}`); process.exit(2); }
+if (llvmManifest && !await exists(llvmManifest)) { console.error(`LLVM manifest not found: ${llvmManifest}`); process.exit(2); }
 
 const platforms = {
   'linux-x64': ['linux_x86_64_cjnative', 'tar', ''],
@@ -49,7 +61,7 @@ const stage = path.join(outputRoot, packageName);
 await fs.mkdir(outputRoot, {recursive: true});
 await fs.rm(stage, {recursive: true, force: true});
 
-console.log(`[1/7] copy SDK tree -> ${stage}`);
+console.log(`[1/8] copy SDK tree -> ${stage}`);
 const sdkSource = await fs.realpath(sdk);
 if (isWindows) await fs.cp(sdkSource, stage, {recursive: true, dereference: true});
 else {
@@ -59,7 +71,7 @@ else {
 await requirePrivateStage(stage, outputRoot, sdkSource);
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 
-console.log('[2/7] install our compiler as bin/cjc');
+console.log('[2/8] install our compiler as bin/cjc');
 const installed = path.join(stage, `bin/cjc${exeSuffix}`);
 await Promise.all([
   fs.rm(path.join(stage, 'bin', 'cjc'), {force: true}),
@@ -68,7 +80,8 @@ await Promise.all([
 await fs.copyFile(binary, installed);
 await fs.chmod(installed, 0o755);
 
-console.log('[3/7] swap in patched runtime');
+console.log('[3/8] swap in patched runtime');
+let packagedRuntime = '';
 if (isWindows) {
   if (!runtimeRoot) { console.error('  ERROR: Windows packaging requires --runtime-root'); process.exit(3); }
   for (const relative of [path.join('runtime', 'lib', runtimeDir), path.join('lib', runtimeDir)]) {
@@ -90,8 +103,10 @@ if (isWindows) {
   const destination = path.join(stage, 'runtime', 'lib', runtimeDir, runtimeLibrary);
   if (!await exists(destination)) { console.error(`  ERROR: ${destination} missing in SDK tree`); process.exit(3); }
   await fs.copyFile(runtimeLib, destination);
+  packagedRuntime = destination;
   console.log(`  replaced ${destination}`);
 } else if (allowStockRuntime) {
+  packagedRuntime = path.join(stage, 'runtime', 'lib', runtimeDir, runtimeLibrary);
   console.log('  skip: --allow-stock-runtime given; the package will carry the stock runtime');
 } else {
   console.error('  ERROR: no --runtime-lib, so the package would carry the stock runtime. Two reasons that is wrong:');
@@ -111,6 +126,11 @@ if (!allowStockRuntime) {
   const names = isWindows
     ? (await fs.readdir(runtimeLibDir)).filter((name) => ['libcangjie-runtime.dll', 'cangjie-runtime.dll'].includes(name.toLowerCase()))
     : [runtimeLibrary];
+  if (isWindows) {
+    names.sort((left, right) => Number(right.toLowerCase() === 'libcangjie-runtime.dll') -
+      Number(left.toLowerCase() === 'libcangjie-runtime.dll') || left.localeCompare(right));
+    packagedRuntime = path.join(runtimeLibDir, names[0]);
+  }
   for (const name of names) {
     const packaged = path.join(runtimeLibDir, name);
     if (!(await fs.readFile(packaged)).includes('MRT_GCV2_')) {
@@ -125,7 +145,8 @@ if (!allowStockRuntime) {
 //   (a) SDK root with modules/<tuple>/std + lib/<tuple>
 //   (b) modules tree root containing <tuple>/std
 //   (c) the std package dir itself (…/std with std.core.a …)
-console.log('[4/7] overlay rebuilt std');
+console.log('[4/8] overlay rebuilt std');
+let stdProvenance = '';
 if (stdDir) {
   const stdSource = await fs.realpath(stdDir);
   async function resolveStdLayout(root) {
@@ -155,6 +176,21 @@ if (stdDir) {
   if (!layout) {
     console.error(`  ERROR: --std-dir has no modules/<tuple>/std layout: ${stdSource}`);
     process.exit(3);
+  }
+  const provenanceCandidates = [
+    path.join(stdSource, 'PROVENANCE.txt'),
+    path.join(stdSource, '..', 'PROVENANCE.txt'),
+    path.join(stdSource, '..', '..', 'PROVENANCE.txt'),
+    path.join(stdSource, '..', '..', '..', 'PROVENANCE.txt'),
+  ];
+  const sourceProvenance = (await Promise.all(provenanceCandidates.map(async file =>
+    await exists(file) ? path.resolve(file) : ''))).find(Boolean) || '';
+  if (sourceProvenance) {
+    stdProvenance = path.join(stage, 'PROVENANCE.txt');
+    await fs.copyFile(sourceProvenance, stdProvenance);
+    console.log(`  PROVENANCE.txt <- ${sourceProvenance}`);
+  } else {
+    console.warn(`  WARNING: ${stdSource} has no PROVENANCE.txt; release manifest will record unavailable`);
   }
   const stageModulesStd = path.join(stage, 'modules', runtimeDir, 'std');
   const stageModulesTop = path.join(stage, 'modules', runtimeDir);
@@ -350,7 +386,7 @@ if (stdDir) {
   process.exit(3);
 }
 
-console.log('[5/7] set relative runtime lookup paths');
+console.log('[5/8] set relative runtime lookup paths');
 if (platform.startsWith('linux-')) {
   // cjc no longer carries $ORIGIN rpaths: the binary does not get to assume where it sits
   // relative to its SDK, and the nightly cjpm rejects $ORIGIN outright. envsetup.sh below is
@@ -438,7 +474,30 @@ if (platform.startsWith('linux-')) {
   console.log('  Windows resolves packaged DLLs through runtime/lib and PATH');
 }
 
-console.log('[6/7] archive');
+console.log('[6/8] write release provenance manifest');
+const {destination: releaseManifest} = await writeReleaseManifest({
+  stage,
+  platform,
+  exeSuffix,
+  runtimeArtifact: packagedRuntime,
+  stdProvenance,
+  llvmManifest,
+  baseSdkId,
+  cjcjRepository: cjcjSourceRepository || undefined,
+  cjcjCommit: cjcjSourceCommit,
+  runtimeRepository: runtimeSourceRepository || undefined,
+  runtimeCommit: runtimeSourceCommit,
+  llvmRepository: llvmSourceRepository || undefined,
+  stdRepository: stdSourceRepository,
+  cjpmRepository: cjpmSourceRepository,
+  cjpmCommit: cjpmSourceCommit,
+});
+const exportedManifest = path.join(outputRoot, `${packageName}.${RELEASE_MANIFEST}`);
+await fs.copyFile(releaseManifest, exportedManifest);
+console.log(`  archive: ${releaseManifest}`);
+console.log(`  release metadata: ${exportedManifest}`);
+
+console.log('[7/8] archive');
 const archivePath = path.join(outdir, `${packageName}.${archiveType === 'tar' ? 'tar.gz' : 'zip'}`);
 if (archiveType === 'tar') await $({stdio: 'inherit'})`tar -C ${outdir} -czf ${archivePath} ${packageName}`;
 else {
@@ -450,7 +509,7 @@ else {
   await $({stdio: 'inherit'})`pwsh -NoLogo -NoProfile -Command ${command}`;
 }
 
-console.log('[7/7] sha256');
+console.log('[8/8] sha256');
 const archiveDigest = crypto.createHash('sha256').update(await fs.readFile(archivePath)).digest('hex');
 const digest = `${archiveDigest}  ${path.basename(archivePath)}\n`;
 await fs.writeFile(`${archivePath}.sha256`, digest);
