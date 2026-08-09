@@ -16,6 +16,10 @@ on:
         required: false
         type: string
         default: ''
+      std_artifact:
+        description: Same-platform source-built final std artifact
+        required: true
+        type: string
       version:
         required: true
         type: string
@@ -51,9 +55,25 @@ jobs:
     env:
       MATRIX_RUNNER: ${{ inputs.runner }}
       SDK_RUNTIME_DIR: ${{ inputs.sdk_runtime_dir }}
+      FINAL_STD_DIR: ${{ github.workspace }}/.release-final-std/${{ inputs.platform }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
+
+      - name: Validate same-platform final std contract
+        shell: bash
+        env:
+          EXPECTED_STD_ARTIFACT: final-std-${{ inputs.platform }}
+          SELECTED_STD_ARTIFACT: ${{ inputs.std_artifact }}
+        run: |
+          set -euo pipefail
+          test "$SELECTED_STD_ARTIFACT" = "$EXPECTED_STD_ARTIFACT"
+
+      - name: Download same-platform source-built final std
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.std_artifact }}
+          path: ${{ env.FINAL_STD_DIR }}
 
       - name: Test release build helpers
         if: inputs.platform == 'linux-x64'
@@ -252,6 +272,7 @@ jobs:
             --sdk "$CANGJIE_HOME" \
             --binary "$PWD/target/release/bin/cjcj::cjc" \
             --runtime-lib "$runtime_lib" \
+            --std-dir "$FINAL_STD_DIR" \
             --version "${{ inputs.version }}" \
             --platform "${{ inputs.platform }}" \
             --outdir "$PWD/dist"
@@ -269,6 +290,7 @@ jobs:
             --sdk "$env:CANGJIE_HOME" `
             --binary "$binary" `
             --runtime-root "$PWD\.platform-ci\runtime-install\windows_release_x86_64" `
+            --std-dir "$env:FINAL_STD_DIR" `
             --version "${{ inputs.version }}" `
             --platform "${{ inputs.platform }}" `
             --outdir "$PWD\dist"
