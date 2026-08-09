@@ -34,6 +34,7 @@ test('release connects each platform row to its same-platform final std', async 
     assert.ok(row.includes(`std_artifact: final-std-${platform}`), row);
   }
   assert.ok(release.includes('std_artifact: ${{ matrix.std_artifact }}'));
+  assert.ok(release.includes('pattern: pkg-*'));
 });
 
 test('final std download and both package commands are fail-closed', async () => {
