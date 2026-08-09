@@ -34,12 +34,16 @@ async function write(root, relative, contents, mode) {
 }
 
 function run(command, args, options = {}) {
-  const result = spawnSync('timeout', ['90s', 'nice', '-n', '15', command, ...args], {
+  const result = runRaw(command, args, options);
+  assert.equal(result.status, 0, `${command} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  return result;
+}
+
+function runRaw(command, args, options = {}) {
+  return spawnSync('timeout', ['90s', 'nice', '-n', '15', command, ...args], {
     encoding: 'utf8',
     ...options,
   });
-  assert.equal(result.status, 0, `${command} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-  return result;
 }
 
 async function writePythonBundle(root) {
@@ -142,7 +146,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     commit: CJPM_SHA,
   });
 
-  const packaged = run('zx', [path.resolve('scripts/package_sdk.mjs'),
+  const packageArgs = [path.resolve('scripts/package_sdk.mjs'),
     '--sdk', sdk,
     '--binary', binary,
     '--allow-stock-runtime',
@@ -161,7 +165,8 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     '--version', 'fixture',
     '--platform', 'linux-x64',
     '--outdir', out,
-  ], {cwd: path.resolve('.')});
+  ];
+  const packaged = run('zx', packageArgs, {cwd: path.resolve('.')});
   assert.match(packaged.stdout, /DONE: .*cjcj-fixture-linux-x64\.tar\.gz/);
 
   const packageName = 'cjcj-fixture-linux-x64';
@@ -184,4 +189,22 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   console.log(`ARCHIVE-PROVENANCE-BEGIN\n${listing.split('\n').filter(line =>
     /PROVENANCE|RELEASE-MANIFEST/.test(line)).join('\n')}\nARCHIVE-PROVENANCE-END`);
   console.log(`RELEASE-MANIFEST-BEGIN\n${manifestText.trim()}\nRELEASE-MANIFEST-END`);
+
+  await fs.rm(baseSidecar);
+  const deleted = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+  assert.notEqual(deleted.status, 0, 'deleting the base SDK sidecar must fail closed');
+  console.log(`NEGATIVE-DELETE-SIDECAR RC=${deleted.status}\n${deleted.stderr.trim()}`);
+  await writeBaseSdkProvenance({
+    archive: baseArchive,
+    destination: baseSidecar,
+    platform: 'linux-x64',
+    toolchain: baseSdkId,
+  });
+
+  const changedCjpmSha = `f${CJPM_SHA.slice(1)}`;
+  const changedSidecar = (await fs.readFile(cjpmSidecar, 'utf8')).replace(CJPM_SHA, changedCjpmSha);
+  await fs.writeFile(cjpmSidecar, changedSidecar);
+  const changed = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+  assert.notEqual(changed.status, 0, 'changing one byte in the cjpm sidecar must fail closed');
+  console.log(`NEGATIVE-CHANGE-SIDECAR RC=${changed.status}\n${changed.stderr.trim()}`);
 });
