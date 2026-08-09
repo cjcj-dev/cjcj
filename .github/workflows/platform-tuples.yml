@@ -111,6 +111,8 @@ jobs:
       - name: Verify fixed LLVM tuple payload
         run: |
           test -s "fixed-toolchain/$TUPLE_PLATFORM/llc.gz"
+          test -s "fixed-toolchain/$TUPLE_PLATFORM/opt.gz"
+          test -s "fixed-toolchain/$TUPLE_PLATFORM/llvm-tools.manifest"
           test -s "fixed-toolchain/$TUPLE_PLATFORM/cjselfhost_llvmshim.o"
           if [ "$TUPLE_PLATFORM" = windows_x86_64 ]; then
             test -s "fixed-toolchain/$TUPLE_PLATFORM/llvm-static-libs.txt"
