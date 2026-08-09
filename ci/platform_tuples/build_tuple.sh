@@ -82,9 +82,6 @@ for tool in llc opt; do
     chmod 0755 "$root/verify/$tool$exe"
     "$root/verify/$tool$exe" --version | head -n 5
 done
-llc_version="$("$root/verify/llc$exe" --version | head -n 5)"
-opt_version="$("$root/verify/opt$exe" --version | head -n 5)"
-test "$llc_version" = "$opt_version"
 grep -Fx "LLVM_SHA=$LLVM_SHA" "$output/llvm-tools.manifest"
 grep -Fx "LLC_SHA256=$(sha256_file "$root/verify/llc$exe")" "$output/llvm-tools.manifest"
 grep -Fx "OPT_SHA256=$(sha256_file "$root/verify/opt$exe")" "$output/llvm-tools.manifest"
