@@ -347,7 +347,7 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
 
             let payloadPtr = irBuilder.GetPayloadFromObject(thisParamWithTI)
             let thisLLVMType = CGType.GetOrCreate(cgMod, thisCHIRType).GetLLVMType()
-            if (irBuilder.IsLLVMTypeContainsRef(thisLLVMType)) {
+            if (irBuilder.IsTypeContainsRef(thisLLVMType)) {
                 if (item.isCalleeMutOrCtor) {
                     let load = irBuilder.CreateEntryAlloca(thisLLVMType)
                     let _ = irBuilder.CreateCJMemSetStructWith0(load)
@@ -396,7 +396,7 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             if (!item.isCalleeMutOrCtor) {
                 continue
             }
-            if (irBuilder.IsLLVMTypeContainsRef(thisLLVMType)) {
+            if (irBuilder.IsTypeContainsRef(thisLLVMType)) {
                 let load = irBuilder.CreateEntryAlloca(thisLLVMType)
                 let _ = irBuilder.CreateCJMemSetStructWith0(load)
                 irBuilder.CallGCReadAgg(thisLLVMType, ArrayList<LLVMValueRef>(

@@ -389,7 +389,7 @@ public class CGFunction <: CGValue {
             if (unsafe { LLVMGetInstructionOpcode(inst) } == LLVM_ALLOCA_OPCODE) {
                 let allocatedType = unsafe { LLVMGetAllocatedType(inst) }
                 if (!allocatedType.isNull() && unsafe { LLVMGetTypeKind(allocatedType) } == LLVM_STRUCT_TYPE_KIND &&
-                    builder.IsLLVMTypeContainsRef(allocatedType)) {
+                    builder.IsTypeContainsRef(allocatedType)) {
                     structAllocas.add(inst)
                 }
             }
