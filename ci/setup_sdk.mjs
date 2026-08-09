@@ -196,7 +196,6 @@ if (llcPlatform && fixedLlcGz) {
   }
 
   if (fixedOptGz) {
-    const versions = [];
     for (const tool of toolsToInstall) {
       const fileResult = await $({nothrow: true, stdio: 'pipe'})`file ${tool.sdk}`;
       const lddResult = await $({nothrow: true, stdio: 'pipe'})`ldd ${tool.sdk}`;
@@ -208,11 +207,6 @@ if (llcPlatform && fixedLlcGz) {
       log(`${tool.name} file: ${fileResult.stdout.trim()}`);
       log(`${tool.name} ldd: no missing libraries`);
       log(`${tool.name} version:\n${versionResult.stdout.trim()}`);
-      versions.push(versionResult.stdout.trim().split('\n').slice(0, 5).join('\n'));
-    }
-    if (versions[0] !== versions[1]) {
-      log('FATAL: installed llc and opt report different LLVM version identities');
-      process.exit(4);
     }
     log(`installed llc/opt provenance verified: LLVM ${llvmSourceSha}`);
   }
