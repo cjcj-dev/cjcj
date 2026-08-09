@@ -57,7 +57,7 @@ export async function run(config) {
       'build', '-t', config.buildType, '--no-tests', '--build-cjdb', '-v', config.cangjieVersion,
     ];
     if (fs.existsSync(targetLib)) buildArgs.push('--target-lib', targetLib);
-    await runBuildPy(config, repoDir, buildArgs, {stageName: 'compiler.build.linux'});
+    await runBuildPy(config, repoDir, buildArgs, {stageName: 'compiler.build.native'});
     await runBuildPy(config, repoDir, ['install'], {stageName: 'compiler.install'});
   });
 }
