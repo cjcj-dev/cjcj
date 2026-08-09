@@ -91,7 +91,7 @@ const windowsX64 = Object.freeze({
     exeSuffix: '.exe', outputDirSuffix: 'x86_64', crossCompile: true, needsMingw: true,
     needsStaticLibs: false, os: 'windows', arch: 'x86_64', nodePlatform: 'linux', nodeArch: 'x64',
     runtimeTuple: 'windows_x86_64_cjnative', llvmPlatform: 'windows_x86_64',
-    llvmBinDir: '/usr/lib/llvm-15/bin', opensslLibDir: '', loaderEnv: '',
+    llvmBinDir: '/usr/lib/llvm-15/bin', opensslLibDir: '/usr/lib/x86_64-linux-gnu', loaderEnv: 'LD_LIBRARY_PATH',
     sharedLibrarySuffix: '.dll', runtimeLibrary: 'libcangjie-runtime.dll',
     fileFormat: 'PE32+', fileArch: 'x86-64', tarCommand: '', rpathOrigin: '',
     legacyNcursesPackages: true,
