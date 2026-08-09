@@ -314,7 +314,7 @@ public class Tool {
         let expandedArgs = ArrayList<String>()
         var pos: Int64 = 0
         while (pos < args.size) {
-            if (argKinds[pos] != ArgKind.DeferredDir) {
+            if (enumIndex(argKinds[pos]) != enumIndex(ArgKind.DeferredDir)) {
                 expandedArgs.add(args[pos])
                 pos++
                 continue
