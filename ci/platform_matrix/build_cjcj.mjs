@@ -2,6 +2,7 @@
 // Provision the official host nightly SDK, activate the native fixed LLVM
 // tuple, then attempt the O1 workspace build.
 
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -113,26 +114,70 @@ if (provisionOnly) {
 }
 
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
-if (!(await isFile(path.join('runtime_shim', 'cjselfhost_llvmshim.o'))) || !(await isFile(fixedLlcGz))) {
-  emitBlockedSummary('no per-OS/arch fixed LLVM tuple (needs llc + source-built shim)');
+const fixedOptGz = process.env.FIXED_OPT_GZ || '';
+const fixedLlvmManifest = process.env.FIXED_LLVM_MANIFEST || '';
+if (!(await isFile(path.join('runtime_shim', 'cjselfhost_llvmshim.o'))) ||
+    !(await isFile(fixedLlcGz)) || !(await isFile(fixedOptGz)) ||
+    !(await isFile(fixedLlvmManifest))) {
+  emitBlockedSummary('no complete per-OS/arch fixed LLVM tuple (needs llc + opt + manifest + source-built shim)');
   process.exit(78);
 }
 
-let sdkLlc = path.join(cangjieHome, 'third_party', 'llvm', 'bin', 'llc');
-if (!(await isFile(sdkLlc)) && await isFile(`${sdkLlc}.exe`)) sdkLlc = `${sdkLlc}.exe`;
-if (!(await isFile(sdkLlc))) throw new Error(`SDK llc missing: ${sdkLlc}`);
-// Windows refuses to execute a PE without an .exe suffix (round-12: exit 127 on
-// `llc.exe.tuple --version`), so keep the temp name ending in .exe there.
-const tupleLlc = process.platform === 'win32' ? `${sdkLlc.replace(/\.exe$/, '')}.tuple.exe` : `${sdkLlc}.tuple`;
-await fs.writeFile(tupleLlc, zlib.gunzipSync(await fs.readFile(fixedLlcGz)));
-if (process.platform !== 'win32') await fs.chmod(tupleLlc, 0o755);
+async function sdkToolPath(name) {
+  let target = path.join(cangjieHome, 'third_party', 'llvm', 'bin', name);
+  if (!(await isFile(target)) && await isFile(`${target}.exe`)) target = `${target}.exe`;
+  if (!(await isFile(target))) throw new Error(`SDK ${name} missing: ${target}`);
+  return target;
+}
+function sha256(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+const manifest = new Map();
+for (const line of (await fs.readFile(fixedLlvmManifest, 'utf8')).trim().split(/\r?\n/)) {
+  const match = line.match(/^([A-Z0-9_]+)=([0-9a-f]+)$/);
+  if (!match || manifest.has(match[1])) throw new Error(`malformed fixed LLVM manifest: ${fixedLlvmManifest}`);
+  manifest.set(match[1], match[2]);
+}
+const llvmSourceSha = manifest.get('LLVM_SHA') || '';
+const pinText = await fs.readFile(path.join('ci', 'llvm_pin.env'), 'utf8');
+const pinnedLlvmSha = pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || '';
+if (manifest.size !== 3 || !/^[0-9a-f]{40}$/.test(llvmSourceSha) || llvmSourceSha !== pinnedLlvmSha) {
+  throw new Error(`fixed LLVM source mismatch (manifest=${llvmSourceSha}, pin=${pinnedLlvmSha})`);
+}
+
+const fixedTools = [
+  {name: 'llc', archive: fixedLlcGz, manifestKey: 'LLC_SHA256'},
+  {name: 'opt', archive: fixedOptGz, manifestKey: 'OPT_SHA256'},
+];
+for (const tool of fixedTools) {
+  tool.sdk = await sdkToolPath(tool.name);
+  tool.expectedSha = manifest.get(tool.manifestKey) || '';
+  if (!/^[0-9a-f]{64}$/.test(tool.expectedSha)) {
+    throw new Error(`${tool.manifestKey} missing from fixed LLVM manifest`);
+  }
+  tool.payload = zlib.gunzipSync(await fs.readFile(tool.archive));
+  const artifactSha = sha256(tool.payload);
+  if (artifactSha !== tool.expectedSha) {
+    throw new Error(`fixed ${tool.name} artifact sha mismatch (${artifactSha})`);
+  }
+  // Windows refuses to execute a PE without an .exe suffix (round-12: exit
+  // 127 on `llc.exe.tuple --version`), so keep tuple temp names ending in .exe.
+  tool.tuple = process.platform === 'win32'
+    ? `${tool.sdk.replace(/\.exe$/i, '')}.tuple.exe`
+    : `${tool.sdk}.tuple`;
+  tool.rollback = `${tool.sdk}.tuple.rollback`;
+  await fs.writeFile(tool.tuple, tool.payload);
+  if (process.platform !== 'win32') await fs.chmod(tool.tuple, 0o755);
+}
+
 // The Windows tuple llc links against MinGW runtime DLLs (libstdc++-6.dll,
 // libwinpthread-1.dll; round-13/14 exit 127 = loader failure even with PATH
 // appended). Same-directory DLL resolution always wins on Windows, so copy the
-// runtime DLLs next to the llc; probe via spawnSync for a discriminating error.
+// runtime DLLs next to the tools; probe via spawnSync for a discriminating error.
 if (process.platform === 'win32') {
   process.env.PATH = `${process.env.PATH};C:\\mingw64\\bin`;
-  const llvmBin = path.dirname(sdkLlc);
+  const llvmBin = path.dirname(fixedTools[0].sdk);
   for (const dll of ['libstdc++-6.dll', 'libwinpthread-1.dll', 'libgcc_s_seh-1.dll']) {
     for (const dir of ['C:\\mingw64\\bin', 'C:\\msys64\\mingw64\\bin', 'C:\\Program Files\\Git\\mingw64\\bin']) {
       const cand = path.join(dir, dll);
@@ -143,18 +188,56 @@ if (process.platform === 'win32') {
       }
     }
   }
-  const probe = spawnSync(tupleLlc, ['--version'], {encoding: 'utf8'});
-  console.log(`tuple llc probe: status=${probe.status} error=${probe.error ? probe.error.code : 'none'}`);
-  if (probe.stdout) console.log(probe.stdout.slice(0, 200));
-  if (probe.stderr) console.error(probe.stderr.slice(0, 400));
-  if (probe.status !== 0) process.exit(41);
-} else {
-  await $`${toCommandPath(tupleLlc)} --version`;
 }
-if (!(await isFile(`${sdkLlc}.orig`))) await fs.copyFile(sdkLlc, `${sdkLlc}.orig`);
-await fs.rm(sdkLlc, {force: true});
-await fs.rename(tupleLlc, sdkLlc);
-console.log(`activated fixed LLVM tuple ${process.env.PLATFORM_TUPLE || 'unknown'}: ${sdkLlc}`);
+
+function probeLlvmTool(tool, phase) {
+  const probe = spawnSync(tool, ['--version'], {encoding: 'utf8'});
+  console.log(`${phase} ${path.basename(tool)} probe: status=${probe.status} error=${probe.error ? probe.error.code : 'none'}`);
+  if (probe.stdout) console.log(probe.stdout.slice(0, 400));
+  if (probe.stderr) console.error(probe.stderr.slice(0, 400));
+  if (probe.status !== 0) throw new Error(`${phase} LLVM tool probe failed: ${tool}`);
+  return probe.stdout.trim().split(/\r?\n/).slice(0, 5).join('\n');
+}
+
+// Validate the complete tuple before changing either SDK binary.
+const tupleVersions = fixedTools.map((tool) => probeLlvmTool(tool.tuple, 'tuple'));
+if (tupleVersions[0] !== tupleVersions[1]) {
+  throw new Error('tuple llc and opt report different LLVM version identities');
+}
+
+for (const tool of fixedTools) {
+  if (!(await isFile(`${tool.sdk}.orig`))) await fs.copyFile(tool.sdk, `${tool.sdk}.orig`);
+  await fs.rm(tool.rollback, {force: true});
+  await fs.copyFile(tool.sdk, tool.rollback);
+}
+try {
+  for (const tool of fixedTools) {
+    await fs.rm(tool.sdk, {force: true});
+    await fs.rename(tool.tuple, tool.sdk);
+  }
+  const installedVersions = [];
+  for (const tool of fixedTools) {
+    const installedSha = sha256(await fs.readFile(tool.sdk));
+    if (installedSha !== tool.expectedSha) {
+      throw new Error(`installed ${tool.name} sha mismatch (${installedSha})`);
+    }
+    installedVersions.push(probeLlvmTool(tool.sdk, 'installed'));
+    console.log(`SDK ${tool.name} -> source-built fixed LLVM (${installedSha})`);
+  }
+  if (installedVersions[0] !== installedVersions[1]) {
+    throw new Error('installed llc and opt report different LLVM version identities');
+  }
+} catch (error) {
+  for (const tool of fixedTools) {
+    if (await isFile(tool.rollback)) {
+      await fs.rm(tool.sdk, {force: true});
+      await fs.rename(tool.rollback, tool.sdk);
+    }
+  }
+  throw error;
+}
+for (const tool of fixedTools) await fs.rm(tool.rollback, {force: true});
+console.log(`activated fixed LLVM tuple ${process.env.PLATFORM_TUPLE || 'unknown'} at ${llvmSourceSha}: llc + opt`);
 
 async function findNamedFile(directory, names) {
   const wanted = new Set(names.map((n) => n.toLowerCase()));

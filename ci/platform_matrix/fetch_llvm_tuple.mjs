@@ -135,9 +135,11 @@ if (entries.length) {
 }
 if (process.env.TUPLE_DRY_RUN === '1') process.exit(0);
 const llcEntry = entries.find((entry) => /(^|[\\/])llc\.gz$/.test(entry));
+const optEntry = entries.find((entry) => /(^|[\\/])opt\.gz$/.test(entry));
+const toolsManifestEntry = entries.find((entry) => /(^|[\\/])llvm-tools\.manifest$/.test(entry));
 const shimEntry = entries.find((entry) => /(^|[\\/])cjselfhost_llvmshim\.o$/.test(entry));
-if (!llcEntry || !shimEntry) {
-  emitBlockedSummary(`${artifactName} is incomplete (requires llc.gz + cjselfhost_llvmshim.o)`);
+if (!llcEntry || !optEntry || !toolsManifestEntry || !shimEntry) {
+  emitBlockedSummary(`${artifactName} is incomplete (requires llc.gz + opt.gz + llvm-tools.manifest + cjselfhost_llvmshim.o)`);
   process.exit(0);
 }
 const staticManifestEntry = entries.find((entry) => /(^|[\\/])llvm-static-libs\.txt$/.test(entry));
@@ -150,10 +152,17 @@ if (platform === 'windows_x86_64' && (!staticManifestEntry || !systemManifestEnt
 const dest = path.join(root, 'fixed-toolchain', platform);
 await fs.mkdir(dest, {recursive: true});
 const llc = path.join(dest, 'llc.gz');
+const opt = path.join(dest, 'opt.gz');
+const toolsManifest = path.join(dest, 'llvm-tools.manifest');
 const shim = path.join(dest, 'cjselfhost_llvmshim.o');
 await fs.copyFile(path.join(extracted, llcEntry), llc);
+await fs.copyFile(path.join(extracted, optEntry), opt);
+await fs.copyFile(path.join(extracted, toolsManifestEntry), toolsManifest);
 await fs.copyFile(path.join(extracted, shimEntry), shim);
-if (!(await fs.stat(llc)).size || !(await fs.stat(shim)).size) throw new Error('tuple artifact contains an empty required file');
+if (!(await fs.stat(llc)).size || !(await fs.stat(opt)).size ||
+    !(await fs.stat(toolsManifest)).size || !(await fs.stat(shim)).size) {
+  throw new Error('tuple artifact contains an empty required file');
+}
 
 let llvmLinkRsp = '';
 if (platform === 'windows_x86_64') {
@@ -223,10 +232,12 @@ const githubEnv = process.env.GITHUB_ENV;
 if (!githubEnv) throw new Error('GITHUB_ENV is required');
 const environment = [
   `FIXED_LLC_GZ=${path.join(destAbs, 'llc.gz')}`,
+  `FIXED_OPT_GZ=${path.join(destAbs, 'opt.gz')}`,
+  `FIXED_LLVM_MANIFEST=${path.join(destAbs, 'llvm-tools.manifest')}`,
   `CJCJ_LLVM_SHIM_O=${path.join(destAbs, 'cjselfhost_llvmshim.o')}`,
   `PLATFORM_TUPLE=${platform}`,
 ];
 if (llvmLinkRsp) environment.push(`CJCJ_LLVM_LINK_RSP=${path.resolve(llvmLinkRsp)}`);
 await fs.appendFile(githubEnv, `${environment.join('\n')}\n`);
 console.log(`tuple_run=${runId}\ntuple_artifact=${artifactId}\ntuple_platform=${platform}`);
-console.log(`${await sha256(llc)}  ${llc}\n${await sha256(shim)}  ${shim}`);
+console.log(`${await sha256(llc)}  ${llc}\n${await sha256(opt)}  ${opt}\n${await sha256(toolsManifest)}  ${toolsManifest}\n${await sha256(shim)}  ${shim}`);
