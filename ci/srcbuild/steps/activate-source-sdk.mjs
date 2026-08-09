@@ -104,6 +104,14 @@ const toolsLib = path.join(sdk, 'tools', 'lib');
 for (const directory of [llvmLib, runtimeLib, toolsLib, spec.opensslLibDir]) {
   if (directory) await fs.access(directory);
 }
+const runtimeBinary = path.join(runtimeLib, spec.runtimeLibrary);
+const runtimeSymbols = await $({stdio: 'pipe'})`nm -g ${runtimeBinary}`;
+if (!runtimeSymbols.stdout.includes('g_cjLoadBadMask')) {
+  throw new Error(`${runtimeBinary} does not export g_cjLoadBadMask; refusing an uncoloured target runtime`);
+}
+if (!(await fs.readFile(runtimeBinary)).includes('MRT_GCV2_')) {
+  throw new Error(`${runtimeBinary} carries no MRT_GCV2_ markers; refusing a stock target runtime`);
+}
 const libraryPath = [llvmLib, runtimeLib, toolsLib, process.env[spec.loaderEnv] || ''].filter(Boolean).join(path.delimiter);
 const envLines = [
   `CANGJIE_HOME=${sdk}`,
@@ -112,6 +120,9 @@ const envLines = [
   `CJCJ_SRCBUILD_RUNTIME_TUPLE=${spec.runtimeTuple}`,
   `CJCJ_SRCBUILD_LLVM_PLATFORM=${spec.llvmPlatform}`,
   `OPENSSL_PATH=${spec.opensslLibDir}`,
+  'CJSTD_COLOURED=YES',
+  'CJSTD_PREFLIGHT_C2=GREEN',
+  `CJSTD_PROVENANCE_NOTE=source runtime exports g_cjLoadBadMask; bootstrap native hello passed before fixed tuple activation`,
   `${spec.loaderEnv}=${libraryPath}`,
 ];
 if (spec.os === 'darwin') {
