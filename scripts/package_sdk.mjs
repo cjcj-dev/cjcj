@@ -9,6 +9,12 @@ import {
   installPythonBundle,
   RELEASE_PYTHON_SOURCE,
 } from '../build/lib/python-bundle.mjs';
+import {
+  BASE_SDK_PROVENANCE,
+  CJPM_PROVENANCE,
+  verifyBaseSdkProvenance,
+  verifyCjpmProvenance,
+} from '../build/lib/release-component-provenance.mjs';
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
 
 const required = name => {
@@ -29,14 +35,17 @@ const allowNightlyStd = argv['allow-nightly-std'] === true;
 const stdDir = typeof argv['std-dir'] === 'string' ? argv['std-dir'] : '';
 const llvmManifest = typeof argv['llvm-manifest'] === 'string' ? argv['llvm-manifest'] : '';
 const baseSdkId = typeof argv['base-sdk-id'] === 'string' ? argv['base-sdk-id'] : '';
+const baseSdkArchive = required('base-sdk-archive');
+const baseSdkProvenance = required('base-sdk-provenance');
 const cjcjSourceRepository = typeof argv['cjcj-source-repo'] === 'string' ? argv['cjcj-source-repo'] : '';
 const cjcjSourceCommit = typeof argv['cjcj-source-sha'] === 'string' ? argv['cjcj-source-sha'] : '';
 const runtimeSourceRepository = typeof argv['runtime-source-repo'] === 'string' ? argv['runtime-source-repo'] : '';
 const runtimeSourceCommit = typeof argv['runtime-source-sha'] === 'string' ? argv['runtime-source-sha'] : '';
 const llvmSourceRepository = typeof argv['llvm-source-repo'] === 'string' ? argv['llvm-source-repo'] : '';
 const stdSourceRepository = typeof argv['std-source-repo'] === 'string' ? argv['std-source-repo'] : '';
-const cjpmSourceRepository = typeof argv['cjpm-source-repo'] === 'string' ? argv['cjpm-source-repo'] : '';
-const cjpmSourceCommit = typeof argv['cjpm-source-sha'] === 'string' ? argv['cjpm-source-sha'] : '';
+const cjpmProvenance = required('cjpm-provenance');
+const cjpmSourceRepository = required('cjpm-source-repo');
+const cjpmSourceCommit = required('cjpm-source-sha');
 async function exists(file, kind = 'file') {
   try { const stat = await fs.stat(file); return kind === 'dir' ? stat.isDirectory() : stat.isFile(); } catch { return false; }
 }
@@ -47,6 +56,9 @@ if (runtimeLib && !await exists(runtimeLib)) { console.error(`runtime library no
 if (runtimeRoot && !await exists(runtimeRoot, 'dir')) { console.error(`runtime root not found: ${runtimeRoot}`); process.exit(2); }
 if (stdDir && !await exists(stdDir, 'dir')) { console.error(`std dir not found: ${stdDir}`); process.exit(2); }
 if (llvmManifest && !await exists(llvmManifest)) { console.error(`LLVM manifest not found: ${llvmManifest}`); process.exit(2); }
+if (!await exists(baseSdkArchive)) { console.error(`base SDK archive not found: ${baseSdkArchive}`); process.exit(2); }
+if (!await exists(baseSdkProvenance)) { console.error(`base SDK provenance not found: ${baseSdkProvenance}`); process.exit(2); }
+if (!await exists(cjpmProvenance)) { console.error(`cjpm provenance not found: ${cjpmProvenance}`); process.exit(2); }
 if (!await exists(pythonBundle, 'dir')) { console.error(`Python bundle dir not found: ${pythonBundle}`); process.exit(2); }
 
 const platforms = {
@@ -61,6 +73,19 @@ const [runtimeDir, archiveType, exeSuffix] = platforms[platform];
 const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
 const isWindows = platform === 'windows-x64';
 const packageName = `cjcj-${version}-${platform}`;
+const verifiedBaseSdkProvenance = await verifyBaseSdkProvenance({
+  archive: baseSdkArchive,
+  sidecar: baseSdkProvenance,
+  platform,
+  toolchain: baseSdkId,
+});
+await verifyCjpmProvenance({
+  binary: path.join(sdk, 'tools', 'bin', `cjpm${exeSuffix}`),
+  sidecar: cjpmProvenance,
+  platform,
+  expectedRepository: cjpmSourceRepository,
+  expectedCommit: cjpmSourceCommit,
+});
 const outputRoot = path.resolve(outdir);
 if (outputRoot === path.parse(outputRoot).root) throw new Error('package output root must not be a filesystem root');
 const stage = path.join(outputRoot, packageName);
@@ -74,6 +99,8 @@ else {
   await $({stdio: 'inherit'})`cp -a ${sdkSource} ${stage}`;
   await $({stdio: 'inherit'})`chmod -R u+rwX,go+rX ${stage}`;
 }
+await fs.copyFile(baseSdkProvenance, path.join(stage, BASE_SDK_PROVENANCE));
+await fs.copyFile(cjpmProvenance, path.join(stage, CJPM_PROVENANCE));
 await requirePrivateStage(stage, outputRoot, sdkSource);
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 
@@ -559,6 +586,7 @@ const {destination: releaseManifest} = await writeReleaseManifest({
   stdProvenance,
   llvmManifest,
   baseSdkId,
+  baseSdkProvenance: verifiedBaseSdkProvenance,
   cjcjRepository: cjcjSourceRepository || undefined,
   cjcjCommit: cjcjSourceCommit,
   runtimeRepository: runtimeSourceRepository || undefined,
