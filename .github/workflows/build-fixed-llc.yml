@@ -51,7 +51,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: fixed-toolchain/${{ matrix.platform }}
-          key: fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
+          key: fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', 'ci/llvm-tools-manifest.mjs', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
@@ -186,6 +186,8 @@ jobs:
             shim_sha="$(shasum -a 256 "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
           fi
           grep -Fx "SHIM_SHA256=$shim_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          node ci/llvm-tools-manifest.mjs validate native \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
           shim_exports="$(nm -C "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" \
             | grep -cE ' T _?(LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"

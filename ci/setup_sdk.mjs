@@ -1,9 +1,11 @@
 #!/usr/bin/env zx
 // Install the Cangjie bootstrap SDK and export the build environment.
 
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {parseLlvmToolsManifest} from './llvm-tools-manifest.mjs';
 
 $.stdio = 'inherit';
 
@@ -124,25 +126,35 @@ if (llcPlatform && fixedLlcGz) {
       log(`FATAL: fixed LLVM provenance manifest missing: ${manifestPath}`);
       process.exit(4);
     }
-    const manifest = new Map();
     const manifestText = await fs.readFile(manifestPath, 'utf8');
-    for (const line of manifestText.trim().split('\n')) {
-      const match = line.match(/^([A-Z0-9_]+)=([0-9a-f]+)$/);
-      if (!match || manifest.has(match[1])) {
-        log(`FATAL: malformed fixed LLVM provenance manifest: ${manifestPath}`);
-        process.exit(4);
-      }
-      manifest.set(match[1], match[2]);
-    }
-    llvmSourceSha = manifest.get('LLVM_SHA') || '';
-    if (manifest.size !== 3 || !/^[0-9a-f]{40}$/.test(llvmSourceSha)) {
-      log(`FATAL: incomplete fixed LLVM provenance manifest: ${manifestPath}`);
+    let manifest;
+    try {
+      manifest = parseLlvmToolsManifest(manifestText, {label: manifestPath, schema: 'native'}).values;
+    } catch (error) {
+      log(`FATAL: malformed fixed LLVM provenance manifest: ${error.message}`);
       process.exit(4);
     }
+    llvmSourceSha = manifest.get('LLVM_SHA') || '';
     const pinText = await fs.readFile(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
-    const pinnedSha = pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || '';
-    if (!pinnedSha || llvmSourceSha !== pinnedSha) {
-      log(`FATAL: fixed LLVM source mismatch (manifest=${llvmSourceSha}, pin=${pinnedSha})`);
+    for (const [field, expected] of [
+      ['PLATFORM', llcPlatform],
+      ['LLVM_SHA', pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
+      ['CANGJIE_COMPILER_SHA', pinText.match(/^CANGJIE_COMPILER_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
+      ['FLATBUFFERS_SHA', pinText.match(/^FLATBUFFERS_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
+    ]) {
+      if (!expected || manifest.get(field) !== expected) {
+        log(`FATAL: fixed LLVM ${field} mismatch (manifest=${manifest.get(field) || ''}, expected=${expected})`);
+        process.exit(4);
+      }
+    }
+    const fixedShim = path.join(path.dirname(fixedLlcGz), 'cjselfhost_llvmshim.o');
+    if (!(await isFile(fixedShim))) {
+      log(`FATAL: fixed LLVM shim missing: ${fixedShim}`);
+      process.exit(4);
+    }
+    const shimSha = crypto.createHash('sha256').update(await fs.readFile(fixedShim)).digest('hex');
+    if (shimSha !== manifest.get('SHIM_SHA256')) {
+      log(`FATAL: fixed LLVM shim sha mismatch (${shimSha})`);
       process.exit(4);
     }
     for (const tool of toolsToInstall) {
