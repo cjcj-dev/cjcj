@@ -103,16 +103,42 @@ jobs:
 
   publish:
     name: Publish release
-    needs: build
-    if: ${{ !inputs.dry_run }}
+    needs: [source-final-std, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime, build]
+    if: >-
+      ${{
+        always() &&
+        !inputs.dry_run &&
+        needs.source-final-std.result == 'success' &&
+        needs.windows-fixed-llvm-tuple.result == 'success' &&
+        needs.patched-cjpm.result == 'success' &&
+        needs.windows-runtime.result == 'success' &&
+        needs.build.result == 'success'
+      }}
+    environment:
+      name: release-draft
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
+      - name: Verify manual approval environment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/environments/release-draft" \
+            | jq -e '
+                [.protection_rules[]
+                 | select(.type == "required_reviewers")
+                 | select(.prevent_self_review == true)
+                 | select((.reviewers | length) >= 1)]
+                | length == 1
+              '
       - name: Download SDK artifacts
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.run_id }}
           pattern: pkg-*
           path: dist
           merge-multiple: true
