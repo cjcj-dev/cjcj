@@ -211,10 +211,6 @@ jobs:
             binutils build-essential libssl-dev zlib1g-dev libffi-dev libbz2-dev \
             liblzma-dev libreadline-dev libsqlite3-dev libncurses-dev uuid-dev tk-dev
 
-      - name: Install Python build dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install openssl@3 readline xz zlib bzip2 libffi
-
       - name: Install runtime build dependencies (Linux)
         if: runner.os == 'Linux' && steps.rtcache.outputs.cache-hit != 'true'
         run: sudo apt-get install -y -qq clang cmake make
