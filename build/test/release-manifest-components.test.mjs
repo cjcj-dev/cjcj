@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {baseSdkDownload} from '../lib/release-component-provenance.mjs';
 import {
   CJDB_PYTHON_MODULES,
   CJDB_PYTHON_UNIX_MODULES,
@@ -19,6 +20,22 @@ const RUNTIME_SHA = '2'.repeat(40);
 const LLVM_SHA = '3'.repeat(40);
 const STD_SHA = '4'.repeat(40);
 const CJPM_SHA = '5'.repeat(40);
+
+test('base SDK provenance maps every release platform to its nightly archive', () => {
+  const version = 'nightly-1.2.0-alpha.20260721165458';
+  const expected = new Map([
+    ['linux-x64', 'cangjie-sdk-linux-x64-1.2.0-alpha.20260721165458.tar.gz'],
+    ['linux-aarch64', 'cangjie-sdk-linux-aarch64-1.2.0-alpha.20260721165458.tar.gz'],
+    ['darwin-x64', 'cangjie-sdk-mac-x64-1.2.0-alpha.20260721165458.tar.gz'],
+    ['darwin-arm64', 'cangjie-sdk-mac-aarch64-1.2.0-alpha.20260721165458.tar.gz'],
+    ['windows-x64', 'cangjie-sdk-windows-x64-1.2.0-alpha.20260721165458.zip'],
+  ]);
+  for (const [platform, archive] of expected) {
+    const value = baseSdkDownload(platform, version);
+    assert.equal(value.archive, archive);
+    assert.ok(value.url.endsWith(`/1.2.0-alpha.20260721165458/${archive}`));
+  }
+});
 
 async function write(root, relative, contents) {
   const file = path.join(root, relative);
