@@ -174,16 +174,21 @@ const bootstrapCoreSha = await sha256(bootstrapCore);
 console.log('[stage3] rebuild final std with stage2');
 if (dryRun) {
   console.log(`STAGE3_DRY_RUN_FAKE_ARTIFACTS=1 final_std=${finalStd}`);
-  console.log(`[stage3][dry-run] python3 build.py clean; build -t ${stdlibBuildType} --target-lib=${runtimeTarget}; install --prefix ${finalStd}`);
+  console.log(`[stage3][dry-run] python3 build.py clean; build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}; install --prefix ${finalStd}`);
 } else {
   await fs.rm(finalStd, {recursive: true, force: true});
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py clean`;
   await assertStage2Compiler(stageEnv, stage2Sha);
-  await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t ${stdlibBuildType} --target-lib=${runtimeTarget}`;
+  await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}`;
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
+  await writeStdProvenance({
+    sourceDir: stdlibRoot,
+    installPrefix: finalStd,
+    compiler: path.join(sdk, 'bin', 'cjcj-stage2'),
+  });
 }
 
-await assertFinalStd(finalStd);
+await assertFinalStd(finalStd, target, {dryRun});
 const finalCore = path.join(finalStd, 'lib', tuple, 'libcangjie-std-core.a');
 const finalCoreSha = await sha256(finalCore);
 if (finalCoreSha === bootstrapCoreSha && allowIdenticalStdValue !== '1') {
