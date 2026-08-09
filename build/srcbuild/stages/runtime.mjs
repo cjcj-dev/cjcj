@@ -11,17 +11,19 @@ export async function run(config) {
 
   await stage('runtime', async () => {
     ensureDir(targetDir);
-    await runBuildPy(config, runtimeRoot, ['clean'], {stageName: 'runtime.clean.linux'});
+    await runBuildPy(config, runtimeRoot, ['clean'], {stageName: 'runtime.clean.host'});
     await runBuildPy(config, runtimeRoot, [
-      'build', '-t', config.buildType, '-v', config.cangjieVersion,
-    ], {stageName: 'runtime.build.linux'});
-    await runBuildPy(config, runtimeRoot, ['install'], {stageName: 'runtime.install.linux'});
-    copyContents(path.join(runtimeRoot, 'output'), targetDir, {stage: 'runtime.snapshot.linux'});
+      'build', '--target', 'native', '-t', config.buildType, '-v', config.cangjieVersion,
+    ], {stageName: 'runtime.build.host'});
+    await runBuildPy(config, runtimeRoot, ['install'], {stageName: 'runtime.install.host'});
+    copyContents(path.join(runtimeRoot, 'output'), targetDir, {stage: 'runtime.snapshot.host'});
 
-    const linuxSubdir = path.join(runtimeRoot, 'output', 'common', `linux_${config.buildType.toLowerCase()}_x86_64`);
+    const hostSubdir = path.join(
+      runtimeRoot, 'output', 'common', config.target.hostRuntimeOutputSubdir(config.buildType),
+    );
     for (const subdirectory of ['lib', 'runtime']) {
-      copyContents(path.join(linuxSubdir, subdirectory), path.join(compilerOutput, subdirectory), {
-        stage: 'runtime.copy.linux',
+      copyContents(path.join(hostSubdir, subdirectory), path.join(compilerOutput, subdirectory), {
+        stage: 'runtime.copy.host',
       });
     }
     if (!config.target.spec.crossCompile) return;
