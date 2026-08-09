@@ -1,10 +1,6 @@
 package cjcj::chir
 
 import std.collection.*
-import std.process.Process
-
-private let rangeStateTraceEnabled: Bool =
-    (Process.current.getEnv("CJCJ_RANGE_STATE_TRACE") ?? "") == "1"
 
 public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
     private let functionValue: Function
@@ -89,10 +85,6 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
             if (state.IsBottom()) {
                 continue
             }
-            if (rangeStateTraceEnabled && analysis.GetAnalysisName() == "range-analysis" &&
-                functionValue.GetSrcCodeIdentifier() == "main") {
-                println("[RANGE_STATE_ENTRY] block=" + block.GetIdentifier() + "\n" + state.ToString())
-            }
 
             let exprs = block.GetExpressions()
             if (exprs.isEmpty()) {
@@ -136,10 +128,6 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
                 analysis.HandleVarStateCapturedByLambda(state, lambda)
             }
             var targetSucc = analysis.PropagateTerminatorEffect(state, terminator)
-            if (rangeStateTraceEnabled && analysis.GetAnalysisName() == "range-analysis" &&
-                functionValue.GetSrcCodeIdentifier() == "main") {
-                println("[RANGE_STATE_EXIT] block=" + block.GetIdentifier() + "\n" + state.ToString())
-            }
             if (analysis.CheckInQueueTimes(block, state)) {
                 targetSucc = None
             }
@@ -155,18 +143,7 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
             for (successor in successors) {
                 let successorState = entryStates.get(successor.nodeId) ??
                     throw IllegalStateException("Engine IterateSingleUnitToFixpoint expected successor state")
-                if (rangeStateTraceEnabled && analysis.GetAnalysisName() == "range-analysis" &&
-                    functionValue.GetSrcCodeIdentifier() == "main") {
-                    println("[RANGE_STATE_JOIN_BEFORE] successor=" + successor.GetIdentifier() +
-                        " predecessor=" + block.GetIdentifier() + "\n" + successorState.ToString())
-                }
                 let hasChanged = successorState.Join(state)
-                if (rangeStateTraceEnabled && analysis.GetAnalysisName() == "range-analysis" &&
-                    functionValue.GetSrcCodeIdentifier() == "main") {
-                    println("[RANGE_STATE_JOIN_AFTER] successor=" + successor.GetIdentifier() +
-                        " predecessor=" + block.GetIdentifier() + " changed=" + hasChanged.toString() +
-                        "\n" + successorState.ToString())
-                }
                 if (hasChanged) {
                     if (!worklistSet.contains(successor)) {
                         worklist.add(successor)
