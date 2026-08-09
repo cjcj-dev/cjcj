@@ -88,6 +88,7 @@ test "$llc_version" = "$opt_version"
 grep -Fx "LLVM_SHA=$LLVM_SHA" "$output/llvm-tools.manifest"
 grep -Fx "LLC_SHA256=$(sha256_file "$root/verify/llc$exe")" "$output/llvm-tools.manifest"
 grep -Fx "OPT_SHA256=$(sha256_file "$root/verify/opt$exe")" "$output/llvm-tools.manifest"
+node ci/llvm-tools-manifest.mjs validate core "$output/llvm-tools.manifest"
 file "$output/cjselfhost_llvmshim.o"
 
 if command -v llvm-nm >/dev/null 2>&1; then
