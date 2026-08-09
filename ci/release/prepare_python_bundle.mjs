@@ -157,8 +157,6 @@ async function prepareUnix() {
       '-Wl,-rpath,@loader_path/../lib',
     ].join(' ');
     configureEnv.PKG_CONFIG_PATH = Object.values(dependencies).map(prefix => `${prefix}/lib/pkgconfig`).join(':');
-  } else {
-    configureEnv.LDFLAGS = '-Wl,-rpath,$ORIGIN/../lib';
   }
 
   await run([path.join(sourceRoot, 'configure'), ...configureArgs], {
