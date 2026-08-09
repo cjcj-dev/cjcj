@@ -7,6 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {
   RELEASE_PYTHON_VERSION,
   RELEASE_PYTHON_DIR,
+  verifyPythonImports,
 } from '../build/lib/python-bundle.mjs';
 import {
   RELEASE_MANIFEST,
@@ -33,6 +34,34 @@ function comparable(file) {
 }
 
 await Promise.all([pythonArtifact, launcher, license].map(requireFile));
+const manifestPath = path.join(sdk, RELEASE_MANIFEST);
+await requireFile(manifestPath);
+const rows = (await fs.readFile(manifestPath, 'utf8')).split(/\r?\n/).filter(Boolean).map(JSON.parse);
+const platforms = new Set(rows.map(row => row.platform));
+if (platforms.size !== 1) throw new Error(`manifest has inconsistent platforms: ${[...platforms].join(',')}`);
+const platform = [...platforms][0];
+const runtimeDirs = new Map([
+  ['linux-x64', 'linux_x86_64_cjnative'],
+  ['linux-aarch64', 'linux_aarch64_cjnative'],
+  ['darwin-x64', 'darwin_x86_64_cjnative'],
+  ['darwin-arm64', 'darwin_aarch64_cjnative'],
+  ['windows-x64', 'windows_x86_64_cjnative'],
+]);
+const runtimeDir = runtimeDirs.get(platform);
+if (!runtimeDir) throw new Error(`unsupported packaged platform: ${platform}`);
+const imported = verifyPythonImports(
+  pythonArtifact,
+  pythonRoot,
+  platform,
+  path.join(sdk, 'third_party', 'llvm', 'lib', 'python3.11', 'site-packages'),
+  [
+    path.join(sdk, 'third_party', 'llvm', 'lib'),
+    path.join(sdk, 'tools', 'lib'),
+    path.join(sdk, 'runtime', 'lib', runtimeDir),
+  ],
+);
+console.log(`CJDB-IMPORTS-PASS count=${imported.length} modules=${imported.join(',')}`);
+
 const env = {...process.env};
 delete env.PYTHONHOME;
 delete env.PYTHONPATH;
@@ -58,9 +87,6 @@ if (comparable(prefix) !== comparable(pythonRoot)) {
   throw new Error(`cjdb Python prefix escaped package: expected ${pythonRoot}, got ${prefix || '<unknown>'}`);
 }
 
-const manifestPath = path.join(sdk, RELEASE_MANIFEST);
-await requireFile(manifestPath);
-const rows = (await fs.readFile(manifestPath, 'utf8')).split(/\r?\n/).filter(Boolean).map(JSON.parse);
 if (!rows.every(row => row.signature_policy === RELEASE_SIGNATURE_POLICY)) {
   throw new Error(`manifest signature_policy is not uniformly ${RELEASE_SIGNATURE_POLICY}`);
 }
@@ -69,12 +95,22 @@ if (pythonRows.length !== 1) throw new Error(`manifest must have exactly one pyt
 const [pythonRow] = pythonRows;
 if (pythonRow.source?.commit !== RELEASE_PYTHON_VERSION ||
     comparable(path.join(sdk, pythonRow.artifact?.path || '')) !== comparable(pythonArtifact) ||
-    pythonRow.embedded_stamp !== `PYTHON-VERSION:${RELEASE_PYTHON_VERSION}`) {
+    pythonRow.embedded_stamp !== `PYTHON-VERSION:${RELEASE_PYTHON_VERSION}` ||
+    !/^https:\/\/www\.python\.org\//.test(pythonRow.source?.download_url || '') ||
+    !/^[0-9a-f]{64}$/.test(pythonRow.source?.archive_sha256 || '') ||
+    typeof pythonRow.build?.configure_args !== 'string' || pythonRow.build.configure_args.length === 0 ||
+    typeof pythonRow.build?.configure_environment !== 'string' || pythonRow.build.configure_environment.length === 0) {
   throw new Error(`malformed Python manifest row: ${JSON.stringify(pythonRow)}`);
 }
 const digest = crypto.createHash('sha256').update(await fs.readFile(pythonArtifact)).digest('hex');
 if (pythonRow.artifact.sha256 !== digest) {
   throw new Error(`Python artifact SHA-256 mismatch: manifest=${pythonRow.artifact.sha256} actual=${digest}`);
+}
+const provenanceArtifact = path.join(sdk, pythonRow.build.provenance_path);
+await requireFile(provenanceArtifact);
+const provenanceDigest = crypto.createHash('sha256').update(await fs.readFile(provenanceArtifact)).digest('hex');
+if (pythonRow.build.provenance_sha256 !== provenanceDigest) {
+  throw new Error(`Python provenance SHA-256 mismatch: manifest=${pythonRow.build.provenance_sha256} actual=${provenanceDigest}`);
 }
 
 console.log(`CJDB-BUNDLE-PASS version=${version} prefix=${prefix} sha256=${digest}`);
