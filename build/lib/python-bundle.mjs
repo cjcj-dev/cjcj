@@ -64,24 +64,27 @@ function pythonEnvironment(root, platform, pythonPath = '', libraryPaths = []) {
 export function verifyPythonImports(executable, root, platform, pythonPath = '', libraryPaths = []) {
   const modules = [...CJDB_PYTHON_MODULES];
   if (platform !== 'windows-x64') modules.push(...CJDB_PYTHON_UNIX_MODULES);
-  const script = [
-    'import importlib',
-    `modules = ${JSON.stringify(modules)}`,
-    'for name in modules:',
-    '    importlib.import_module(name)',
-    '    print("CJDB-PYTHON-IMPORT=" + name)',
-  ].join('\n');
-  const result = spawnSync(executable, ['-s', '-c', script], {
-    encoding: 'utf8',
-    env: pythonEnvironment(root, platform, pythonPath, libraryPaths),
-  });
-  if (result.status !== 0) {
-    throw new Error(`cjdb Python import closure failed (${executable}):\n${result.stdout}\n${result.stderr || result.error?.message || `exit ${result.status}`}`);
-  }
-  const imported = result.stdout.split(/\r?\n/).filter(line => line.startsWith('CJDB-PYTHON-IMPORT='))
-    .map(line => line.slice('CJDB-PYTHON-IMPORT='.length));
-  if (imported.length !== modules.length || imported.some((name, index) => name !== modules[index])) {
-    throw new Error(`cjdb Python import audit was incomplete: expected ${modules.join(',')}; got ${imported.join(',')}`);
+  const imported = [];
+  for (const name of modules) {
+    const script = [
+      'import importlib',
+      `name = ${JSON.stringify(name)}`,
+      'importlib.import_module(name)',
+      'print("CJDB-PYTHON-IMPORT=" + name)',
+    ].join('\n');
+    const result = spawnSync(executable, ['-s', '-c', script], {
+      encoding: 'utf8',
+      env: pythonEnvironment(root, platform, pythonPath, libraryPaths),
+    });
+    if (result.status !== 0) {
+      throw new Error(`cjdb Python import failed for ${name} (${executable}):\n${result.stdout}\n${result.stderr || result.error?.message || `exit ${result.status}`}`);
+    }
+    const markers = result.stdout.split(/\r?\n/).filter(line => line.startsWith('CJDB-PYTHON-IMPORT='))
+      .map(line => line.slice('CJDB-PYTHON-IMPORT='.length));
+    if (markers.length !== 1 || markers[0] !== name) {
+      throw new Error(`cjdb Python import audit was incomplete for ${name}: got ${markers.join(',') || '<empty>'}`);
+    }
+    imported.push(name);
   }
   return imported;
 }
