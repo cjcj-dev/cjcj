@@ -60,6 +60,109 @@ async function runArtifacts(entry) {
   return produced;
 }
 
+// --- consumer side -----------------------------------------------------------
+// The produced set above is a property of the producer files alone, so on its own
+// it cannot notice a caller that asks for a name nobody builds. Everything below
+// derives what the caller actually demands, straight out of the caller's YAML.
+
+// The lines nested under the first line matching `header`.
+function block(text, header) {
+  const lines = text.split('\n');
+  const start = lines.findIndex(line => header.test(line));
+  if (start < 0) return undefined;
+  const indent = lines[start].match(/^ */)[0].length;
+  const body = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() && line.match(/^ */)[0].length <= indent) break;
+    body.push(line);
+  }
+  return body.join('\n');
+}
+
+// Anchored and whole-token on purpose: a substring test passes on `<value>-BROKEN`.
+const scalar = (text, key) => text?.match(new RegExp(String.raw`^\s*${key}: (.+?)\s*$`, 'm'))?.[1];
+
+const mapping = text => new Map(
+  (text ?? '').split('\n')
+    .map(line => line.match(/^\s*([A-Za-z0-9_-]+): (.+?)\s*$/))
+    .filter(Boolean)
+    .map(([, key, value]) => [key, value]),
+);
+
+function jobs(text) {
+  const body = block(uncommented(text), /^jobs:\s*$/);
+  assert.ok(body !== undefined, 'workflow declares no jobs');
+  const parsed = new Map();
+  let current;
+  for (const line of body.split('\n')) {
+    const header = line.match(/^ {2}([A-Za-z0-9_-]+):\s*$/);
+    if (header) parsed.set(current = header[1], []);
+    else if (current) parsed.get(current).push(line);
+  }
+  return new Map([...parsed].map(([name, lines]) => [name, lines.join('\n')]));
+}
+
+const needsOf = job => {
+  const raw = scalar(job, 'needs');
+  if (raw === undefined) return [];
+  return raw.startsWith('[') ? raw.slice(1, -1).split(',').map(entry => entry.trim()) : [raw];
+};
+
+// One `- ` item of a steps: list, with its trailing keys.
+function steps(text) {
+  const collected = [];
+  let current;
+  for (const line of uncommented(text).split('\n')) {
+    if (/^ {6}- /.test(line)) {
+      if (current) collected.push(current.join('\n'));
+      current = [line];
+    } else if (current) {
+      if (line.trim() && /^ {0,6}\S/.test(line)) {
+        collected.push(current.join('\n'));
+        current = undefined;
+      } else current.push(line);
+    }
+  }
+  if (current) collected.push(current.join('\n'));
+  return collected;
+}
+
+const runnerOs = runner => {
+  if (runner.startsWith('ubuntu')) return 'Linux';
+  if (runner.startsWith('macos')) return 'macOS';
+  if (runner.startsWith('windows')) return 'Windows';
+  return assert.fail(`unknown runner image: ${runner}`);
+};
+
+// Only the `if:` forms this repo actually uses. An unrecognized one fails the test
+// instead of defaulting either way -- guessing here is how a gate goes quietly green.
+function stepRuns(step, context) {
+  const condition = scalar(step, 'if');
+  if (condition === undefined) return true;
+  const os = condition.match(/^runner\.os (==|!=) '(\w+)'$/);
+  if (os) return (os[1] === '==') === (context.runnerOs === os[2]);
+  const input = condition.match(/^inputs\.(\w+) (==|!=) '([\w-]+)'$/);
+  if (input) return (input[2] === '==') === (context.inputs.get(input[1]) === input[3]);
+  return assert.fail(`unrecognized step condition, cannot decide statically: ${condition}`);
+}
+
+// Artifacts a called workflow will download and fail on if they are absent.
+function failClosedDownloads(text, inputs) {
+  const context = {inputs, runnerOs: runnerOs(inputs.get('runner'))};
+  return steps(text)
+    .filter(step => step.includes('uses: actions/download-artifact@'))
+    .filter(step => scalar(step, 'continue-on-error') !== 'true')
+    .filter(step => stepRuns(step, context))
+    .map(step => substitute(scalar(step, 'name'), inputs));
+}
+
+function substitute(value, inputs) {
+  return value.replace(/\$\{\{\s*inputs\.(\w+)\s*\}\}/g, (_, name) => {
+    assert.ok(inputs.has(name), `no value for inputs.${name}`);
+    return inputs.get(name);
+  });
+}
+
 test('source-build workflow connects every native runner to its LLVM and std artifact', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
   const fixed = await fs.readFile(path.join(root, '.github/workflows/build-fixed-llc.yml'), 'utf8');
@@ -95,37 +198,64 @@ test('source-build workflow connects every native runner to its LLVM and std art
 
 test('arm soak produces every artifact its package job downloads, each exactly once', async () => {
   const armSoak = await readWorkflow('arm-soak.yml');
-  const consumer = await readWorkflow('build-release-package.yml');
+  const soakJobs = jobs(armSoak);
 
-  // build-release-package.yml refuses any std artifact that is not same-platform,
-  // so linux-aarch64 fixes which artifact this run has to produce.
-  assert.ok(consumer.includes('EXPECTED_STD_ARTIFACT: final-std-${{ inputs.platform }}'));
-  assert.ok(armSoak.includes('platform: linux-aarch64'));
-  assert.ok(armSoak.includes('default: final-std-linux-aarch64'));
-  assert.ok(armSoak.includes('std_artifact: ${{ inputs.std_artifact }}'));
-
-  const produced = await runArtifacts('arm-soak.yml');
-
-  // Exactly one producer, and it is the source build.
-  assert.deepEqual(
-    produced.filter(([artifact]) => artifact === 'final-std-linux-aarch64').map(([, source]) => source),
-    ['srcbuild.yml'],
-  );
-
-  // The other two fail-closed downloads in the same package job.
-  for (const artifact of ['source-cjpm-linux-aarch64', 'fixed-llvm-tools-linux_aarch64']) {
-    assert.equal(produced.filter(([entry]) => entry === artifact).length, 1, artifact);
+  // A needs: pointing at a job that no longer exists is rejected by Actions before
+  // anything runs, and renaming a producer job is the easy way to introduce one.
+  for (const [name, job] of soakJobs) {
+    for (const need of needsOf(job)) assert.ok(soakJobs.has(need), `job ${name} needs missing job ${need}`);
   }
 
+  // What the package job asks for, resolved through arm-soak's own dispatch defaults.
+  const packageJob = soakJobs.get('package');
+  assert.ok(packageJob, 'arm-soak has no package job');
+  const callerInputs = new Map([...mapping(block(packageJob, /^\s*with:\s*$/))].map(([key, value]) => [
+    key,
+    value.replace(/\$\{\{\s*inputs\.(\w+)\s*\}\}/g, (_, name) => {
+      const declared = block(armSoak, new RegExp(String.raw`^ {6}${name}:\s*$`));
+      assert.ok(declared, `arm-soak declares no dispatch input ${name}`);
+      const fallback = scalar(declared, 'default');
+      assert.ok(fallback !== undefined, `dispatch input ${name} has no default`);
+      return fallback;
+    }),
+  ]));
+
+  const platform = callerInputs.get('platform');
+  const demanded = callerInputs.get('std_artifact');
+
+  // build-release-package.yml:66-73 fails the run on any other value, so the caller
+  // has to demand exactly this name. Whole-value equality: `-BROKEN` must not pass.
+  const consumer = await readWorkflow('build-release-package.yml');
+  assert.ok(consumer.includes('EXPECTED_STD_ARTIFACT: final-std-${{ inputs.platform }}'));
+  assert.equal(demanded, `final-std-${platform}`);
+
+  // Every download the package job will reach on this platform and die on if absent.
+  const required = failClosedDownloads(consumer, callerInputs);
+  assert.ok(required.includes(demanded), `std artifact ${demanded} is not among ${required}`);
+
+  const produced = await runArtifacts('arm-soak.yml');
+  const producersOf = artifact => produced.filter(([name]) => name === artifact).map(([, source]) => source);
+
+  // The point of the whole test: demanded and produced have to be the same set.
+  for (const artifact of required) assert.equal(producersOf(artifact).length, 1, `producers of ${artifact}`);
+  assert.deepEqual(producersOf(demanded), ['srcbuild.yml']);
+
   // upload-artifact rejects a name already uploaded in the same run, so two callers
-  // of one producer workflow break the run rather than merging. Checked before the
-  // wiring strings below so a second caller cannot be masked by an earlier failure.
+  // of one producer workflow break the run rather than merging.
   const names = produced.map(([artifact]) => artifact);
   assert.deepEqual(names.filter((artifact, index) => names.indexOf(artifact) !== index), []);
 
-  // The package job waits for that producer before it downloads.
-  assert.ok(armSoak.includes('uses: ./.github/workflows/srcbuild.yml'));
-  assert.ok(armSoak.includes('needs: source-final-std'));
+  // The package job must wait for whichever job actually builds those artifacts.
+  const producerJobs = [];
+  for (const [name, job] of soakJobs) {
+    const called = scalar(job, 'uses')?.match(/^\.\/\.github\/workflows\/([\w.-]+\.yml)$/);
+    if (!called) continue;
+    const uploads = (await runArtifacts(called[1])).map(([artifact]) => artifact);
+    if (uploads.includes(demanded)) producerJobs.push(name);
+  }
+  assert.equal(producerJobs.length, 1, `jobs producing ${demanded}: ${producerJobs}`);
+  assert.ok(needsOf(packageJob).includes(producerJobs[0]),
+    `package needs ${needsOf(packageJob)} but ${demanded} is built by ${producerJobs[0]}`);
 });
 
 test('source-build cache makes durable GHA writes primary and retains write diagnostics', async () => {
