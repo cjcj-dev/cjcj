@@ -370,6 +370,28 @@ test('native build environments use configured architecture, OpenSSL, and loader
   }
 });
 
+test('source build keeps a version-matched plain host runtime across both bootstrap halves', async () => {
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  const provision = workflow.indexOf('- name: Provision uncoloured host SDK');
+  const compiler = workflow.indexOf('- name: Build compiler oracle');
+  assert.ok(provision >= 0 && compiler > provision);
+  for (const contract of [
+    'export CJCJ_SDK_STOCK_LLC=1',
+    'export CJCJ_TOOLCHAIN="nightly-$RUNTIME_VERSION"',
+    'CJCJ_SRCBUILD_HOST_SDK=$host_sdk',
+  ]) assert.ok(workflow.includes(contract), contract);
+
+  const stdlib = await fs.readFile(path.join(root, 'build/srcbuild/stages/stdlib.mjs'), 'utf8');
+  assert.ok(stdlib.indexOf('assertRuntimeSplit({') < stdlib.indexOf("['clean']"));
+  assert.ok(stdlib.indexOf("['clean']") < stdlib.indexOf("['build', '-t'"));
+  assert.ok(stdlib.indexOf("['build', '-t'") < stdlib.indexOf('assertRuntimeCommonCache({'));
+
+  const activation = await fs.readFile(path.join(root, 'ci/srcbuild/steps/activate-source-sdk.mjs'), 'utf8');
+  assert.ok(activation.includes('assertRuntimeSplit({'));
+  assert.ok(activation.includes('const libraryPath = hostLoaderPath({'));
+  assert.ok(!activation.includes('const libraryPath = [llvmLib, runtimeLib, toolsLib'));
+});
+
 test('Darwin selfhost link uses the source SDK dylib and libc++', () => {
   const link = assembleCjcLinkOption('darwin', '/source-sdk', 'linux-only');
   assert.match(link, /\/source-sdk\/third_party\/llvm\/lib\/libLLVM\.dylib/);
