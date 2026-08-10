@@ -74,10 +74,15 @@ jobs:
         include:
           - { runner: ubuntu-24.04, llvm_platform: linux_x86_64, experimental: false }
           - { runner: ubuntu-22.04, llvm_platform: linux_x86_64, experimental: false }
+          # ubuntu-26.04 is not a platform we ship on yet, so its failures are
+          # information rather than verdicts.
           - { runner: ubuntu-26.04, llvm_platform: linux_x86_64, experimental: true }
-          # Preserve the existing non-gating ARM policy while upgrading its
-          # coverage from official-SDK provisioning to a native cjcj build+smoke.
-          - { runner: ubuntu-24.04-arm, llvm_platform: linux_aarch64, experimental: true }
+          # linux-aarch64 is a release platform: it appears in the release matrix
+          # and ships as an artifact, so a build failure here has to count. It was
+          # non-gating from when this row only provisioned the official SDK; the
+          # row now runs a native cjcj build and smoke, and the exemption outlived
+          # its reason.
+          - { runner: ubuntu-24.04-arm, llvm_platform: linux_aarch64, experimental: false }
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
