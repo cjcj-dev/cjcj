@@ -35,14 +35,21 @@ jobs:
         run: |
           find ci runtime_shim scripts -type f -name '*.mjs' -print0 \
             | xargs -0 -n1 node --check
-      - name: Test LLVM tools manifest contract
-        run: node --test ci/llvm-tools-manifest.test.mjs
-      - name: Test workflow artifact contracts
-        run: node --test ci/srcbuild/tests/platform-contract.test.mjs ci/srcbuild/tests/release-wire.test.mjs
-      - name: Test host toolchain and cjdb Python policy
-        run: node --test build/test/system-deps.test.mjs build/test/darwin-cjdb-python.test.mjs
-      - name: Test source-built tool coverage
-        run: node --test build/test/cangjie-written-tools.test.mjs build/test/source-build-parity.test.mjs
+      # Driven by ci/test-manifest.mjs, never by a literal list here: the four
+      # steps this replaced named eight of the repository's twenty-eight test
+      # files, and the other twenty ran nowhere. ci/test-manifest.test.mjs holds
+      # both ends of that -- every test file must be in a manifest bucket, and
+      # this step must keep asking the manifest.
+      - name: Test build and release contracts
+        shell: bash
+        run: |
+          mapfile -t FILES < <(node ci/test-manifest.mjs list)
+          echo "manifest gates ${#FILES[@]} test files"
+          # mapfile succeeds with zero lines if the manifest fails, and `node
+          # --test` with no file arguments falls back to its own discovery, which
+          # would pass while testing nothing.
+          test "${#FILES[@]}" -ge 26
+          node --test "${FILES[@]}"
       - name: Verify smoke assets
         run: |
           test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5
@@ -67,10 +74,15 @@ jobs:
         include:
           - { runner: ubuntu-24.04, llvm_platform: linux_x86_64, experimental: false }
           - { runner: ubuntu-22.04, llvm_platform: linux_x86_64, experimental: false }
+          # ubuntu-26.04 is not a platform we ship on yet, so its failures are
+          # information rather than verdicts.
           - { runner: ubuntu-26.04, llvm_platform: linux_x86_64, experimental: true }
-          # Preserve the existing non-gating ARM policy while upgrading its
-          # coverage from official-SDK provisioning to a native cjcj build+smoke.
-          - { runner: ubuntu-24.04-arm, llvm_platform: linux_aarch64, experimental: true }
+          # linux-aarch64 is a release platform: it appears in the release matrix
+          # and ships as an artifact, so a build failure here has to count. It was
+          # non-gating from when this row only provisioned the official SDK; the
+          # row now runs a native cjcj build and smoke, and the exemption outlived
+          # its reason.
+          - { runner: ubuntu-24.04-arm, llvm_platform: linux_aarch64, experimental: false }
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
