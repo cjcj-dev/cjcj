@@ -50,8 +50,19 @@ function run(command, args, options = {}) {
   return result;
 }
 
+// zx is not on the runner's PATH. This box happens to have /usr/bin/zx, which is
+// the only reason the bare name passed locally while CI reported exit 127 with
+// `nice: 'zx': No such file or directory`. Every workflow already spells it
+// `npx zx@8`; resolve to that when the bare name is absent, and give the npx
+// path room to fetch the package on a cold runner.
+const ZX = spawnSync('sh', ['-c', 'command -v zx'], {encoding: 'utf8'}).status === 0
+  ? {command: 'zx', prefix: [], timeout: '90s'}
+  : {command: 'npx', prefix: ['--yes', 'zx@8'], timeout: '300s'};
+
 function runRaw(command, args, options = {}) {
-  return spawnSync('timeout', ['90s', 'nice', '-n', '15', command, ...args], {
+  const zx = command === 'zx';
+  const argv = zx ? [ZX.command, ...ZX.prefix, ...args] : [command, ...args];
+  return spawnSync('timeout', [zx ? ZX.timeout : '90s', 'nice', '-n', '15', ...argv], {
     encoding: 'utf8',
     ...options,
   });
