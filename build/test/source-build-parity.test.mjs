@@ -183,6 +183,20 @@ test('source builds fail closed unless host runtime is plain and target runtime 
     ]);
     assert.ok(!loader.includes(path.dirname(targetRuntime)));
 
+    const earlyHostLoader = hostLoaderPath({
+      hostSdk,
+      targetSdk,
+      target,
+      inherited: '/inherited',
+      includeTargetLlvm: false,
+    }).split(path.delimiter);
+    assert.deepEqual(earlyHostLoader, [
+      path.dirname(hostRuntime),
+      path.join(targetSdk, 'tools', 'lib'),
+      '/inherited',
+    ]);
+    assert.ok(!earlyHostLoader.includes(path.join(targetSdk, 'third_party', 'llvm', 'lib')));
+
     const runtimeTarget = directory(root, 'workspace', 'cangjie_runtime', 'runtime', 'target');
     const cache = file(root, ['stdlib', 'build', 'build', 'CMakeCache.txt'], [
       `RUNTIME_COMMON_LIB_DIR:STRING=${path.join(runtimeTarget, 'common', 'linux_release_x86_64', 'lib', target.spec.runtimeTuple)}`,
