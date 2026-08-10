@@ -189,6 +189,10 @@ public func LLCSetOptions(setOptionHandler: (String) -> Unit, driverOptions: Dri
     }
     SetOptionIf(setOptionHandler, GetEffectiveOptimizationLevel(driverOptions) == OptimizationLevel.O2,
         "--cj-safepoint-outline=false")
+    // The pinned cjcj LLVM lowers O1+ heap write barriers to a phase-guarded plain store unless this
+    // is enabled. A generational collector needs the runtime path even while no tracing cycle is
+    // active so old-to-young writes enter its remembered set.
+    setOptionHandler("-cj-generational-post-barrier=true")
 }
 
 public func LLCSetTripleOptions(setOptionHandler: (String) -> Unit, driverOptions: DriverOptions): Unit {
