@@ -28,10 +28,12 @@ export const BREW_PACKAGES = Object.freeze([
   'ninja', 'llvm@16', 'openssl@3', 'bison', 'googletest', 'gnu-tar', 'swig', 'coreutils',
 ]);
 
-// llvm@16 depends on this versioned formula. Install it separately so a hosted
-// Intel runner's existing /Library/Frameworks Python links cannot turn an
-// otherwise complete multi-formula install into an opaque failure.
-export const LLVM_PYTHON_FORMULA = 'python@3.12';
+// llvm@16 depends on this versioned formula, and its LLDB sources still use
+// CPython interfaces removed after 3.12. Install it separately so a hosted
+// runner's newer framework Python cannot either collide during linking or get
+// selected later by CMake.
+export const LLVM_PYTHON_VERSION = '3.12';
+export const LLVM_PYTHON_FORMULA = `python@${LLVM_PYTHON_VERSION}`;
 
 // cangjie_build/docs/macos.md:52-76 still requires CMake >=3.17 and <4 and
 // explicitly directs macOS users to Kitware's 3.x archive. Homebrew/core has no
@@ -92,7 +94,11 @@ export function assertCmakeVersion(stdout) {
   }
 }
 
-async function assertPython(python, {runCommand = run, fileExists = isFile} = {}) {
+async function assertPython(python, {
+  runCommand = run,
+  fileExists = isFile,
+  expectedVersion,
+} = {}) {
   const result = await runCommand([
     python,
     '-c',
@@ -103,6 +109,9 @@ async function assertPython(python, {runCommand = run, fileExists = isFile} = {}
   if (!match || Number(match[1]) < 3 || (Number(match[1]) === 3 && Number(match[2]) <= 7)) {
     throw new BuildError('system_deps', `Python >3.7 is required, got: ${version || '<empty>'}`);
   }
+  if (expectedVersion && version !== expectedVersion) {
+    throw new BuildError('system_deps', `Python ${expectedVersion} is required, got: ${version}`);
+  }
   const header = path.join(includeDir, 'Python.h');
   if (!includeDir || !fileExists(header)) {
     throw new BuildError('system_deps', `Python headers are required, missing: ${header}`);
@@ -110,16 +119,29 @@ async function assertPython(python, {runCommand = run, fileExists = isFile} = {}
   return version;
 }
 
-async function installLlvmPython({runCommand = run, fileExists = isFile} = {}) {
+async function installLlvmPython({
+  runCommand = run,
+  fileExists = isFile,
+  exposePath = publishPath,
+} = {}) {
   await runCommand(['brew', 'install', '--skip-link', LLVM_PYTHON_FORMULA], {
     stage: 'system_deps.python.install',
   });
   const prefix = await runCommand(['brew', '--prefix', LLVM_PYTHON_FORMULA], {
     stage: 'system_deps.python.prefix', capture: true, logOutput: false,
   });
-  const kegPython = path.join(prefix.stdout.trim(), 'bin', 'python3.12');
-  const version = await assertPython(kegPython, {runCommand, fileExists});
-  logger.info('Installed unlinked %s (%s) at %s', LLVM_PYTHON_FORMULA, version, kegPython);
+  // Versioned Homebrew Python formulae keep their unversioned python3 shim in
+  // libexec/bin. Publish only that directory: the keg remains unlinked, while
+  // later Actions steps and CMake resolve the same supported interpreter.
+  const pythonBin = path.join(prefix.stdout.trim(), 'libexec', 'bin');
+  const kegPython = path.join(pythonBin, 'python3');
+  const version = await assertPython(kegPython, {
+    runCommand,
+    fileExists,
+    expectedVersion: LLVM_PYTHON_VERSION,
+  });
+  exposePath(pythonBin);
+  logger.info('Selected unlinked %s (%s) from %s', LLVM_PYTHON_FORMULA, version, pythonBin);
 }
 
 export async function installCmake3(buildRoot, {
@@ -179,12 +201,17 @@ export async function installDarwin(config, {
   fileExists = isFile,
   cmakeInstaller = installCmake3,
   findExecutable = which,
+  exposePath = publishPath,
 } = {}) {
   if (!findExecutable('brew')) throw new BuildError('system_deps', 'Homebrew is required by docs/macos.md');
-  await installLlvmPython({runCommand, fileExists});
+  await installLlvmPython({runCommand, fileExists, exposePath});
   logger.info('Installing %d Homebrew packages', BREW_PACKAGES.length);
   await runCommand(['brew', 'install', ...BREW_PACKAGES], {stage: 'system_deps.install'});
-  const pythonVersion = await assertPython('python3', {runCommand, fileExists});
+  const pythonVersion = await assertPython('python3', {
+    runCommand,
+    fileExists,
+    expectedVersion: LLVM_PYTHON_VERSION,
+  });
   logger.info('Selected host Python %s with development headers', pythonVersion);
   const cmakeExecutable = await cmakeInstaller(config.buildRoot);
   const cmake = await runCommand([cmakeExecutable, '--version'], {
