@@ -68,11 +68,29 @@ sha256_file() {
     fi
 }
 
+llvm_tool_version() {
+    "$1" --version | awk '
+        /LLVM version / {
+            sub(/^[[:space:]]+/, "")
+            print
+            found = 1
+            exit
+        }
+        END { if (!found) exit 1 }
+    '
+}
+
 llc_sha="$(sha256_file "$llvm_build/bin/llc$exe")"
 opt_sha="$(sha256_file "$llvm_build/bin/opt$exe")"
+llc_version="$(llvm_tool_version "$llvm_build/bin/llc$exe")"
+opt_version="$(llvm_tool_version "$llvm_build/bin/opt$exe")"
 {
     printf 'LLVM_SHA=%s\n' "${LLVM_SHA:?LLVM_SHA is required}"
+    printf 'LLC_SOURCE=tuple:%s\n' "$LLVM_SHA"
+    printf 'LLC_VERSION=%s\n' "$llc_version"
     printf 'LLC_SHA256=%s\n' "$llc_sha"
+    printf 'OPT_SOURCE=tuple:%s\n' "$LLVM_SHA"
+    printf 'OPT_VERSION=%s\n' "$opt_version"
     printf 'OPT_SHA256=%s\n' "$opt_sha"
 } > "$output/llvm-tools.manifest"
 
@@ -83,9 +101,13 @@ for tool in llc opt; do
     "$root/verify/$tool$exe" --version | head -n 5
 done
 grep -Fx "LLVM_SHA=$LLVM_SHA" "$output/llvm-tools.manifest"
+grep -Fx "LLC_SOURCE=tuple:$LLVM_SHA" "$output/llvm-tools.manifest"
+grep -Fx "LLC_VERSION=$llc_version" "$output/llvm-tools.manifest"
 grep -Fx "LLC_SHA256=$(sha256_file "$root/verify/llc$exe")" "$output/llvm-tools.manifest"
+grep -Fx "OPT_SOURCE=tuple:$LLVM_SHA" "$output/llvm-tools.manifest"
+grep -Fx "OPT_VERSION=$opt_version" "$output/llvm-tools.manifest"
 grep -Fx "OPT_SHA256=$(sha256_file "$root/verify/opt$exe")" "$output/llvm-tools.manifest"
-node ci/llvm-tools-manifest.mjs validate core "$output/llvm-tools.manifest"
+node ci/llvm-tools-manifest.mjs validate core-lineage "$output/llvm-tools.manifest"
 file "$output/cjselfhost_llvmshim.o"
 
 if command -v llvm-nm >/dev/null 2>&1; then
