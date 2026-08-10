@@ -69,7 +69,7 @@ async function artifactUploads(name) {
   return found;
 }
 
-test('policy contract 1: the five package phases run in the policy order, one after another', {todo: 'release.yml still runs the five packages as one fail-fast:false matrix; turning this on is the acceptance criterion for the phase chain'}, async () => {
+test('policy contract 1: the five package phases run in the policy order, one after another', async () => {
   const release = jobs(await readWorkflow('release.yml'));
   const packages = [...release].filter(([, job]) => /uses:\s*\.\/\.github\/workflows\/build-release-package\.yml/.test(job));
   assert.equal(packages.length, PHASES.length,
@@ -100,7 +100,7 @@ test('policy contract 2: source producers are gated by the same phases, not all 
   }
 });
 
-test('policy contract 3: Windows work waits for the Windows phase', {todo: 'windows-runtime and windows-fixed-llvm-tuple start with no gate'}, async () => {
+test('policy contract 3: Windows work waits for the Windows phase', async () => {
   const release = jobs(await readWorkflow('release.yml'));
   const windowsJobs = [...release].filter(([name, job]) =>
     /windows/i.test(name) && !/uses:\s*\.\/\.github\/workflows\/srcbuild\.yml/.test(job));
@@ -111,7 +111,7 @@ test('policy contract 3: Windows work waits for the Windows phase', {todo: 'wind
   }
 });
 
-test('policy contract 4: a STOP leaves later phases skipped, with no condition that overrides it', {todo: 'release.yml:79 carries if: always() on the package matrix, which is the hole itself'}, async () => {
+test('policy contract 4: a STOP leaves later phases skipped, with no condition that overrides it', async () => {
   // Actions skips a job whose needs did not succeed. That is the stop-loss, and
   // always()/cancelled()/failure() are the three ways to lose it -- release.yml
   // uses always() on the package matrix today, which is exactly the hole.
@@ -139,4 +139,28 @@ test('policy contract 5: each artifact name has exactly one producer in the run'
   const duplicated = [...counts].filter(([, sources]) => sources.length > 1);
   assert.deepEqual(duplicated, [],
     `upload-artifact rejects a name already uploaded in the same run: ${JSON.stringify(duplicated)}`);
+});
+
+// The other half of EXECUTION_BLOCKED_BY_PHASE_CONTROL_AND_FAILURE_CAPTURE: a
+// phase that dies has to leave something to read, or the stop-loss buys a stop
+// with no diagnosis.
+test('policy failure capture: a package cell that dies leaves evidence behind', async () => {
+  const text = uncommented(await readWorkflow('build-release-package.yml'));
+  assert.match(text, /if:\s*failure\(\)\s*\n\s*uses:\s*actions\/upload-artifact@/,
+    'no failure-only upload: the pkg-* upload runs only after everything before it succeeded');
+  // srcbuild names its per-cell diagnosis this way; two cells uploading the same
+  // name would collide under contract 5.
+  assert.match(text, /name:\s*pkg-diagnosis-\$\{\{\s*inputs\.platform\s*\}\}/,
+    'failure diagnostics must be named per platform');
+});
+
+test('policy failure capture: smoke workspaces survive the failure that needs them', async () => {
+  const text = uncommented(await readWorkflow('build-release-package.yml'));
+  // `trap '... rm -rf ...' EXIT` fires on the failure path too, so the evidence
+  // is gone before any upload step can see it.
+  const unconditional = [...text.matchAll(/trap\s+'([^']*)'\s+EXIT/g)]
+    .map(match => match[1])
+    .filter(handler => /\brm\s+-rf/.test(handler));
+  assert.deepEqual(unconditional, [],
+    `these EXIT traps delete the smoke workspace whatever happened: ${JSON.stringify(unconditional)}`);
 });

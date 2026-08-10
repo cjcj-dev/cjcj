@@ -454,9 +454,15 @@ jobs:
           source "$PWD/pkgtest/${pkg}/envsetup.sh"
           export cjHeapSize=12GB
           work="$RUNNER_TEMP/release-smoke"
-          trap 'rm -rf "$work" pkgtest' EXIT
+          # An EXIT trap deleted both of these whatever happened, so a smoke
+          # failure took its own evidence with it and the diagnosis upload below
+          # would find an empty tree. Clean up only on success, which is what the
+          # Windows branch already does.
+          trap 'echo "preserving failed Unix smoke: work=$work package=$PWD/pkgtest"' EXIT
           node scripts/verify_packaged_cjdb.mjs "$PWD/pkgtest/${pkg}"
           npx --yes zx@8 ci/smoke/run_smoke.mjs "$PWD/pkgtest/${pkg}/bin/cjc" "$work"
+          trap - EXIT
+          rm -rf "$work" pkgtest
 
       - name: Verify packaged SDK (Windows)
         if: inputs.verify && runner.os == 'Windows'
@@ -485,6 +491,24 @@ jobs:
             }
           }
           if ($smokeExit -ne 0) { exit $smokeExit }
+
+      # The pkg-* upload below only runs once everything before it succeeded, so a
+      # cell that dies leaves nothing behind to look at. srcbuild has carried a
+      # failure-only upload since srcbuild.yml's stage diagnostics; this is the
+      # package side of the same idea, named per platform so no two cells collide.
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pkg-diagnosis-${{ inputs.platform }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            dist/*.sha256
+            dist/RELEASE-MANIFEST.jsonl
+            pkgtest/**/PROVENANCE.txt
+            pkgtest/**/*.log
+            ${{ runner.temp }}/release-smoke/**
 
       - name: Upload SDK artifact
         uses: actions/upload-artifact@v7
