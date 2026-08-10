@@ -1,6 +1,20 @@
 # 五平台 release dry-run 执行政策
 
-状态：`POLICY_READY / EXECUTION_BLOCKED_BY_PHASE_CONTROL_AND_FAILURE_CAPTURE`。
+状态：`POLICY_READY / EXECUTION_UNBLOCKED_PENDING_USER_APPROVAL`（0811 06:1x 主控翻）。
+
+> 解阻依据（逐条可复现，`reports/REPORT-execstate.md` 是全表）：
+> 五条顺序契约 + 两条失败证据 **7/7**，且每条另行直读 workflow YAML 核对，不只看测试是否通过。
+> `ci.yml:53-64` 把 `ci/test-manifest.mjs` 的清单喂给 `node --test`（`-ge 26` 地板），该 step
+> 无 `continue-on-error`、无 `|| true`；清单第 23 行含 `phase-control.test.mjs`。逐字跑该步：
+> 128 tests / 128 pass / rc=0，七条契约名全部出现在输出里；阴性对照（查一个不存在的
+> `policy contract 6`）0 命中，证明匹配不是恒真。CI 侧对应 run `2cec8f5b`（27 文件，48s）。
+>
+> ⚠ **口径陷阱**：`ci.yml` 里现在**看不到** `phase-control.test.mjs` 这个字面量（已改为清单驱动）。
+> 按"文件名是否出现在 workflow 里"去查会得到**错误的否定**。正确判法是三段组合：清单含它 ·
+> workflow 消费清单 · 该 step 不可 `continue-on-error`。
+>
+> ⛔ **状态改为"只差用户批准"而不是"可执行"**：政策自己规定所有 GitHub Actions 动作都是外向动作，
+> 必须先取得用户批准。解阻解掉的是技术前置，不是那道闸。
 
 本文只定义执行政策，不授权 workflow dispatch、rerun、cancel、push、tag、draft 或 release。所有 GitHub Actions 动作都是外向动作，必须由主控先向用户取得批准。
 
