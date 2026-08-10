@@ -81,10 +81,10 @@ export function assertRuntimeSplit({
   return {...paths, hostRuntime: hostReal, targetRuntime: targetReal, hostCount, targetCount};
 }
 
-export function hostLoaderPath({hostSdk, targetSdk, target, inherited = ''}) {
+export function hostLoaderPath({hostSdk, targetSdk, target, inherited = '', includeTargetLlvm = true}) {
   const paths = runtimeSplitPaths({hostSdk, targetSdk, target});
   return [
-    path.join(paths.targetSdk, 'third_party', 'llvm', 'lib'),
+    includeTargetLlvm ? path.join(paths.targetSdk, 'third_party', 'llvm', 'lib') : '',
     path.dirname(paths.hostRuntime),
     path.join(paths.targetSdk, 'tools', 'lib'),
     inherited,
