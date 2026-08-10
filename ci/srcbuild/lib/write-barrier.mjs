@@ -176,6 +176,45 @@ export function assertWriteBarriers(disassembly, label, {failClosed = WRITE_BARR
   const counts = inspectWriteBarriers(disassembly);
   const summary = `${label} phase_checks=${counts.phaseChecks} static_guarded=${counts.staticGuarded}`
     + ` unresolved=${counts.unresolved} bypassed=${counts.bypassed}`;
+
+  // bypassed === 0 means "found no bypass", which is only good news if we found
+  // anything at all. Two states reach zero while proving nothing, and both are
+  // how this check fails in practice rather than in theory:
+  //
+  //   phase_checks === 0            the disassembly produced no fast-path
+  //                                 machinery — wrong object, wrong objdump
+  //                                 flags, or a build with no fast path at all
+  //                                 (-O0 emits none: runOnFunction guards
+  //                                 writeBarrierFastPath on OptLevel != None)
+  //   nothing resolved to a callee  every phase check was found but none could
+  //                                 be tied to a CJ_MCC_ call, which is exactly
+  //                                 what an unlinked .a looks like when the
+  //                                 relocations are not being read
+  //
+  // The second one is not hypothetical: during development, reading `-drwC`
+  // output with the wrong field split produced phase_checks=426 with all 426
+  // unresolved and bypassed=0, and the old code called that a PASS.
+  //
+  // The floor is "> 0" rather than a measured number because zero is the only
+  // value that is definitionally "the device left no trace"; any positive count
+  // is a real observation whose size depends on the package. For scale, the four
+  // real std cores measured while building this check sit at 426, 467, 19 and 19
+  // phase checks, so a legitimate build is nowhere near the floor.
+  const resolved = counts.staticGuarded + counts.bypassed;
+  const blind = counts.phaseChecks === 0 ? 'no-phase-checks-resolved'
+    : resolved === 0 ? 'no-phase-check-tied-to-a-callee'
+      : '';
+  if (blind) {
+    const reason = `STAGE3_WRITE_BARRIER_INDETERMINATE reason=${blind} ${summary}`;
+    if (failClosed) throw new Error(reason);
+    // ⭐ Report-only eats the verdict's exit code, never the device's: a check
+    // that could not look is not reporting, it is broken. Same rule as
+    // tools/emitpop_gate.sh, which exits 2 on an empty population in both modes.
+    console.error(reason);
+    console.error('STAGE3_WRITE_BARRIER_INDETERMINATE this run proves nothing about the write side');
+    return counts;
+  }
+
   if (counts.bypassed === 0) {
     console.log(`STAGE3_WRITE_BARRIER_PASS ${summary}`);
     return counts;

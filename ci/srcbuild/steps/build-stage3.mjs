@@ -100,7 +100,13 @@ async function assertStdBarriers(coreLib) {
     // and Mach-O, require both exact runtime references instead of pretending
     // the x86 shr/relocation syntax applies.
     console.log(`STAGE3_BARRIER_SYMBOL_ASSERT_PASS target=${target.spec.key} mask=1 read_barrier=1`);
-    console.log(`STAGE3_WRITE_BARRIER_SKIP target=${target.spec.key} reason=probe-is-x86-only`);
+    // Deliberate, and said on stderr so it does not sit in the stream of green
+    // lines: the phase-check shape below is x86 (mov 0x8(%r15),%rax). The
+    // aarch64 shape is known from AArch64AsmPrinter but has never been put
+    // through a two-armed check, so claiming a verdict here would be inventing
+    // one. These targets have NO write-side conclusion until that is done.
+    console.error(`STAGE3_WRITE_BARRIER_SKIP target=${target.spec.key} reason=probe-is-x86-only`);
+    console.error('STAGE3_WRITE_BARRIER_SKIP no write-side conclusion on this target — not a pass');
     return;
   }
   const output = await $({stdio: 'pipe'})`objdump -drwC ${coreLib}`;
