@@ -17,6 +17,11 @@ import {
   writeReleaseManifest,
 } from '../lib/release-manifest.mjs';
 import {
+  BASE_SDK_SOURCE_REASON,
+  SOURCE_PROVENANCE_NOT_APPLICABLE,
+  baseSdkDownload,
+} from '../lib/release-component-provenance.mjs';
+import {
   GATE_APPARATUS_COMPONENT,
   GATE_APPARATUS_PROVENANCE,
   KNOWN_GATE_APPARATUS_LIMITATIONS,
@@ -28,6 +33,8 @@ const platforms = ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', '
 const CJCJ_SHA = '1'.repeat(40);
 const RUNTIME_SHA = '2'.repeat(40);
 const LLVM_SHA = '3'.repeat(40);
+const STD_SHA = '4'.repeat(40);
+const CJPM_SHA = '5'.repeat(40);
 const gateRuntimeByPlatform = {
   'linux-x64': ['runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', 'nm -D --defined-only'],
   'linux-aarch64': ['runtime/lib/linux_aarch64_cjnative/libcangjie-runtime.so', 'nm -D --defined-only'],
@@ -53,6 +60,16 @@ async function fixture() {
   await fs.mkdir(llvmBin, {recursive: true});
   await fs.writeFile(path.join(llvmBin, 'llc'), `llc\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
   await fs.writeFile(path.join(llvmBin, 'opt'), `opt\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
+  const cjpmArtifact = path.join(stage, 'tools', 'bin', 'cjpm');
+  await fs.mkdir(path.dirname(cjpmArtifact), {recursive: true});
+  await fs.writeFile(cjpmArtifact, 'source-built cjpm fixture\n');
+  const stdProvenance = path.join(stage, 'PROVENANCE.txt');
+  await fs.writeFile(stdProvenance, [
+    `CJSTD-COMMIT:${STD_SHA} BUILT-BY:${CJCJ_SHA}`,
+    `STD_SOURCE_COMMIT = ${STD_SHA}`,
+    'ARTIFACT-SHA256:',
+    '',
+  ].join('\n'));
   const pythonArtifact = path.join(stage, 'third_party', 'python', 'bin', 'python3.11');
   await fs.mkdir(path.dirname(pythonArtifact), {recursive: true});
   await fs.writeFile(pythonArtifact, 'Python 3.11.9 fixture\n');
@@ -70,6 +87,25 @@ async function fixture() {
   };
   const pythonMetadataArtifact = path.join(stage, 'third_party', 'python', 'PYTHON-BUNDLE.json');
   await fs.writeFile(pythonMetadataArtifact, `${JSON.stringify(pythonMetadata, null, 2)}\n`);
+  const baseDownload = baseSdkDownload(platforms[0], REVIEWED_GATE_HOST_TOOLCHAIN);
+  const baseSdkProvenance = {
+    schema: 1,
+    component: 'base-sdk',
+    platform: platforms[0],
+    source: {
+      status: SOURCE_PROVENANCE_NOT_APPLICABLE,
+      reason: BASE_SDK_SOURCE_REASON,
+    },
+    release: {
+      repository: baseDownload.releaseRepository,
+      version: baseDownload.version,
+      download_url: baseDownload.url,
+    },
+    artifact: {
+      path: baseDownload.archive,
+      sha256: 'a'.repeat(64),
+    },
+  };
   const gateApparatusArtifact = path.join(stage, GATE_APPARATUS_PROVENANCE);
   await fs.writeFile(gateApparatusArtifact, `${JSON.stringify({
     schema: 1,
@@ -77,11 +113,12 @@ async function fixture() {
     platform: platforms[0],
     gate_host_toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
     base_sdk: {
-      release_repository: 'https://gitcode.com/Cangjie/nightly_build',
-      version: REVIEWED_GATE_HOST_TOOLCHAIN.replace(/^nightly-/, ''),
-      download_url: 'https://gitcode.com/Cangjie/nightly_build/releases/download/fixture/sdk.tar.gz',
-      archive_path: 'sdk.tar.gz',
-      archive_sha256: 'a'.repeat(64),
+      source: baseSdkProvenance.source,
+      release_repository: baseSdkProvenance.release.repository,
+      version: baseSdkProvenance.release.version,
+      download_url: baseSdkProvenance.release.download_url,
+      archive_path: baseSdkProvenance.artifact.path,
+      archive_sha256: baseSdkProvenance.artifact.sha256,
     },
     host_runtime: {
       path: 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
@@ -93,14 +130,19 @@ async function fixture() {
   }, null, 2)}\n`);
   const pythonArgs = {
     runtimeArtifact,
+    stdProvenance,
     cjcjCommit: CJCJ_SHA,
     runtimeCommit: RUNTIME_SHA,
     llvmCommit: LLVM_SHA,
+    stdRepository: 'https://github.com/cjcj-dev/cangjie-runtime.git',
+    cjpmRepository: 'https://github.com/cjcj-dev/cangjie-tools.git',
+    cjpmCommit: CJPM_SHA,
     pythonArtifact,
     pythonMetadata,
     pythonMetadataArtifact,
     pythonVersion: RELEASE_PYTHON_VERSION,
     baseSdkId: REVIEWED_GATE_HOST_TOOLCHAIN,
+    baseSdkProvenance,
     gateApparatusArtifact,
   };
   return {work, stage, dist, pythonArgs};

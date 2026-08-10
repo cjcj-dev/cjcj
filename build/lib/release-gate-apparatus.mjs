@@ -2,6 +2,12 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {
+  BASE_SDK_SOURCE_REASON,
+  SOURCE_PROVENANCE_NOT_APPLICABLE,
+  SOURCE_PROVENANCE_UNRESOLVED,
+  validateBaseSdkProvenance,
+} from './release-component-provenance.mjs';
 
 export const GATE_APPARATUS_PROVENANCE = 'GATE-APPARATUS.json';
 export const GATE_APPARATUS_COMPONENT = 'acceptance-apparatus';
@@ -127,13 +133,12 @@ function requireKnownLimitations(value, label) {
 }
 
 function requireBaseSdk(value, {platform, toolchain}, label) {
-  if (value?.schema !== 1 || value?.component !== 'base-sdk' || value?.platform !== platform) {
-    throw new Error(`${label} does not identify base-sdk for ${platform}`);
-  }
-  if (value.release?.version !== toolchainVersion(toolchain)) {
-    throw new Error(`${label}.release.version does not match ${toolchain}`);
-  }
+  validateBaseSdkProvenance(value, {platform, toolchain, label});
   return {
+    source: {
+      status: value.source.status,
+      reason: value.source.reason,
+    },
     release_repository: requireString(value.release?.repository, `${label}.release.repository`),
     version: value.release.version,
     download_url: requireString(value.release?.download_url, `${label}.release.download_url`),
@@ -214,6 +219,14 @@ export function validateGateApparatusProvenance(value, {platform, expectedToolch
   }
   for (const name of ['release_repository', 'download_url', 'archive_path']) {
     requireString(baseSdk?.[name], `${label}.base_sdk.${name}`);
+  }
+  if (baseSdk?.source?.status !== SOURCE_PROVENANCE_NOT_APPLICABLE) {
+    throw new Error(`${label}.base_sdk.source.status must be ${SOURCE_PROVENANCE_NOT_APPLICABLE}; got ${
+      baseSdk?.source?.status || SOURCE_PROVENANCE_UNRESOLVED}`);
+  }
+  const sourceReason = requireString(baseSdk?.source?.reason, `${label}.base_sdk.source.reason`);
+  if (sourceReason !== BASE_SDK_SOURCE_REASON) {
+    throw new Error(`${label}.base_sdk.source.reason does not describe the official multi-repository SDK`);
   }
   requireSha256(baseSdk?.archive_sha256, `${label}.base_sdk.archive_sha256`);
   requireKnownLimitations(value.known_apparatus_limitations, `${label}.known_apparatus_limitations`);

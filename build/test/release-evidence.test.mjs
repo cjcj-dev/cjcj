@@ -4,6 +4,11 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {
+  BASE_SDK_SOURCE_REASON,
+  SOURCE_PROVENANCE_NOT_APPLICABLE,
+  SOURCE_PROVENANCE_RESOLVED,
+} from '../lib/release-component-provenance.mjs';
+import {
   GATE_APPARATUS_COMPONENT,
   KNOWN_GATE_APPARATUS_LIMITATIONS,
   REVIEWED_GATE_HOST_TOOLCHAIN,
@@ -54,9 +59,18 @@ function manifest(platform) {
     schema: 1,
     platform,
     component,
-    source: {
+    source: [GATE_APPARATUS_COMPONENT, 'base-sdk'].includes(component) ? {
+      status: SOURCE_PROVENANCE_NOT_APPLICABLE,
+      repository: SOURCE_PROVENANCE_NOT_APPLICABLE,
+      commit: SOURCE_PROVENANCE_NOT_APPLICABLE,
+      reason: BASE_SDK_SOURCE_REASON,
+      release_repository: 'https://example.invalid/nightly-build',
+      version: 'fixture',
+      download_url: `https://example.invalid/${platform}/sdk.archive`,
+    } : {
+      status: SOURCE_PROVENANCE_RESOLVED,
       repository: `https://example.invalid/${component}.git`,
-      commit: '0123456789abcdef0123456789abcdef01234567',
+      commit: component === 'python' ? '3.11.9' : '0123456789abcdef0123456789abcdef01234567',
     },
     artifact: {
       path: `${component}/fixture`,

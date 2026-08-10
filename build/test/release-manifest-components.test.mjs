@@ -6,7 +6,12 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {pathToFileURL} from 'node:url';
-import {baseSdkDownload} from '../lib/release-component-provenance.mjs';
+import {
+  BASE_SDK_SOURCE_REASON,
+  SOURCE_PROVENANCE_NOT_APPLICABLE,
+  SOURCE_PROVENANCE_RESOLVED,
+  baseSdkDownload,
+} from '../lib/release-component-provenance.mjs';
 import {
   GATE_APPARATUS_COMPONENT,
   GATE_APPARATUS_PROVENANCE,
@@ -64,18 +69,42 @@ function digest(contents) {
   return crypto.createHash('sha256').update(contents).digest('hex');
 }
 
+function baseSdkProvenance(platform) {
+  const download = baseSdkDownload(platform, REVIEWED_GATE_HOST_TOOLCHAIN);
+  return {
+    schema: 1,
+    component: 'base-sdk',
+    platform,
+    source: {
+      status: SOURCE_PROVENANCE_NOT_APPLICABLE,
+      reason: BASE_SDK_SOURCE_REASON,
+    },
+    release: {
+      repository: download.releaseRepository,
+      version: download.version,
+      download_url: download.url,
+    },
+    artifact: {
+      path: download.archive,
+      sha256: '8'.repeat(64),
+    },
+  };
+}
+
 async function writeGateApparatus(stage, platform) {
+  const baseSdk = baseSdkProvenance(platform);
   return write(stage, GATE_APPARATUS_PROVENANCE, `${JSON.stringify({
     schema: 1,
     component: GATE_APPARATUS_COMPONENT,
     platform,
     gate_host_toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
     base_sdk: {
-      release_repository: 'https://gitcode.com/Cangjie/nightly_build',
-      version: REVIEWED_GATE_HOST_TOOLCHAIN.replace(/^nightly-/, ''),
-      download_url: 'https://gitcode.com/Cangjie/nightly_build/releases/download/fixture/sdk.tar.gz',
-      archive_path: 'sdk.tar.gz',
-      archive_sha256: '8'.repeat(64),
+      source: baseSdk.source,
+      release_repository: baseSdk.release.repository,
+      version: baseSdk.release.version,
+      download_url: baseSdk.release.download_url,
+      archive_path: baseSdk.artifact.path,
+      archive_sha256: baseSdk.artifact.sha256,
     },
     host_runtime: {
       path: 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
@@ -131,6 +160,7 @@ test('release manifest keeps every component and requires frozen clean stamps', 
     runtimeArtifact: runtime,
     stdProvenance: provenance,
     baseSdkId: REVIEWED_GATE_HOST_TOOLCHAIN,
+    baseSdkProvenance: baseSdkProvenance('linux-x64'),
     gateApparatusArtifact,
     cjcjCommit: CJCJ_SHA,
     runtimeCommit: RUNTIME_SHA,
@@ -156,8 +186,12 @@ test('release manifest keeps every component and requires frozen clean stamps', 
     `CJLLVM-COMMIT:${LLVM_SHA}`);
   assert.equal(positive.rows.find(row => row.component === 'std').embedded_stamp, 'no-stamp');
   assert.equal(positive.rows.find(row => row.component === 'cjpm').artifact.sha256, digest(cjpmContents));
-  assert.match(positive.rows.find(row => row.component === 'base-sdk').source.commit,
-    new RegExp(`^unavailable: official SDK ${REVIEWED_GATE_HOST_TOOLCHAIN}`));
+  const baseSdkRow = positive.rows.find(row => row.component === 'base-sdk');
+  assert.equal(baseSdkRow.source.status, SOURCE_PROVENANCE_NOT_APPLICABLE);
+  assert.equal(baseSdkRow.source.commit, SOURCE_PROVENANCE_NOT_APPLICABLE);
+  assert.equal(baseSdkRow.source.reason, BASE_SDK_SOURCE_REASON);
+  assert.equal(positive.rows.find(row => row.component === 'cjpm').source.status,
+    SOURCE_PROVENANCE_RESOLVED);
 
   const optionsFile = await write(root, 'writer-options.json', `${JSON.stringify(options)}\n`);
   async function expectStampGuard({name, mutate, restore, expected}) {
