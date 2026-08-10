@@ -95,6 +95,15 @@ const inputLlvmManifest = parseLlvmToolsManifest(await fs.readFile(llvmManifest,
   label: llvmManifest,
   schema: 'core-or-native',
 });
+if (inputLlvmManifest.schema !== 'core-lineage') {
+  throw new Error(`release packaging requires core-lineage LLVM manifest, got ${inputLlvmManifest.schema}`);
+}
+const expectedTupleLldTool = platform.startsWith('darwin-') ? 'ld64.lld' : 'ld.lld';
+if (inputLlvmManifest.values.get('LLD_TOOL') !== expectedTupleLldTool) {
+  throw new Error(
+    `release LLVM LLD tool mismatch: ${inputLlvmManifest.values.get('LLD_TOOL') || '<missing>'} != ${expectedTupleLldTool}`,
+  );
+}
 const verifiedBaseSdkProvenance = await verifyBaseSdkProvenance({
   archive: baseSdkArchive,
   sidecar: baseSdkProvenance,
@@ -717,6 +726,11 @@ const allToolNames = [...new Set([...PACKAGED_LLVM_TOOL_NAMES, ...physicalTools.
   .sort((left, right) => left.localeCompare(right));
 const tupleSha = inputLlvmManifest.values.get('LLVM_SHA');
 const baseSdkSha256 = verifiedBaseSdkProvenance.artifact.sha256;
+const tupleToolFields = new Map([
+  ['llc', 'LLC'],
+  ['opt', 'OPT'],
+  [expectedTupleLldTool, 'LLD'],
+]);
 const lineageRows = [];
 for (const tool of allToolNames) {
   const physical = physicalTools.get(tool);
@@ -727,8 +741,9 @@ for (const tool of allToolNames) {
   const packagedTool = path.join(packagedLlvmBin, physical);
   const digest = await sha256File(packagedTool);
   let source;
-  if (['llc', 'opt'].includes(tool)) {
-    const expected = inputLlvmManifest.values.get(`${tool.toUpperCase()}_SHA256`);
+  if (tupleToolFields.has(tool)) {
+    const field = tupleToolFields.get(tool);
+    const expected = inputLlvmManifest.values.get(`${field}_SHA256`);
     if (digest !== expected) {
       throw new Error(`${tool}: packaged sha256 ${digest} does not match tuple manifest ${expected || '<missing>'}`);
     }
@@ -743,8 +758,8 @@ for (const tool of allToolNames) {
     source = `base-sdk:${baseSdkSha256}`;
   }
   const version = versionLine(packagedTool);
-  if (inputLlvmManifest.schema === 'core-lineage' && ['llc', 'opt'].includes(tool)) {
-    const expectedVersion = inputLlvmManifest.values.get(`${tool.toUpperCase()}_VERSION`);
+  if (tupleToolFields.has(tool)) {
+    const expectedVersion = inputLlvmManifest.values.get(`${tupleToolFields.get(tool)}_VERSION`);
     if (version.probe.status !== 0 || version.version !== expectedVersion) {
       throw new Error(`${tool}: packaged version ${version.version} does not match tuple manifest ${expectedVersion}`);
     }
@@ -758,7 +773,7 @@ for (const tool of requiredLlvmTools.get(platform)) {
   const evidence = verifyNativeLlvmTool(tool, path.join(packagedLlvmBin, physical));
   console.log(`  ${tool}: file=${evidence.file}; version=${evidence.version}; loader=ok`);
 }
-const lldTool = platform.startsWith('darwin-') ? 'ld64.lld' : 'ld.lld';
+const lldTool = expectedTupleLldTool;
 const lldPhysical = physicalTools.get(lldTool);
 if (lldPhysical) {
   const help = runLineageProbe(path.join(packagedLlvmBin, lldPhysical), ['--help']);
