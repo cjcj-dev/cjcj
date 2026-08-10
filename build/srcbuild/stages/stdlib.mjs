@@ -3,6 +3,7 @@
 import path from 'node:path';
 import {stage} from '../../lib/logging.mjs';
 import {writeStdProvenance} from '../../lib/provenance.mjs';
+import {assertRuntimeCommonCache, assertRuntimeSplit} from '../../lib/runtime-split.mjs';
 import {installPath, TARGET_TRIPLE} from '../../toolchain/mingw.mjs';
 import {copyContents, opensslLibPath, runBuildPy, windowsCrossArgs} from './common.mjs';
 
@@ -16,11 +17,24 @@ export async function run(config) {
   const nativeTargetLibs = [runtimeTarget, opensslLibPath(config)].filter(Boolean);
 
   await stage('stdlib', async () => {
+    if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
+      assertRuntimeSplit({
+        hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+        targetSdk: compilerOutput,
+        target: config.target,
+      });
+    }
     await runBuildPy(config, stdlibRoot, ['clean'], {stageName: 'stdlib.clean.host'});
     await runBuildPy(config, stdlibRoot, [
       'build', '-t', config.buildType, '--target', 'native',
       ...nativeTargetLibs.map(directory => `--target-lib=${directory}`),
     ], {stageName: 'stdlib.build.host'});
+    if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
+      assertRuntimeCommonCache({
+        cache: path.join(stdlibRoot, 'build', 'build', 'CMakeCache.txt'),
+        runtimeTarget,
+      });
+    }
     await runBuildPy(config, stdlibRoot, ['install'], {stageName: 'stdlib.install.host'});
     if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
       await writeStdProvenance({sourceDir: stdlibRoot, installPrefix: stdlibOutput, compiler});
