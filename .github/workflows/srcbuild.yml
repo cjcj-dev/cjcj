@@ -23,6 +23,14 @@ on:
         required: false
         type: string
         default: ''
+      targets:
+        description: >-
+          Comma-separated source targets to build; "all" builds every one. A
+          release phase passes its own target so it pays for that target and no
+          other.
+        required: false
+        type: string
+        default: all
     outputs:
       final_std_linux_x64:
         description: Linux x64 source-built std artifact
@@ -61,6 +69,14 @@ on:
         required: false
         type: string
         default: ''
+      targets:
+        description: >-
+          Comma-separated source targets to build; "all" builds every one. A
+          release phase passes its own target so it pays for that target and no
+          other.
+        required: false
+        type: string
+        default: all
 
 permissions:
   contents: read
@@ -84,7 +100,7 @@ jobs:
       - name: Select the requested targets
         id: select
         env:
-          REQUESTED: ${{ inputs.targets || 'all' }}
+          REQUESTED: ${{ inputs.targets }}
         run: |
           set -euo pipefail
           all='[
