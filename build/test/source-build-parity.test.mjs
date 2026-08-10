@@ -327,7 +327,12 @@ test('Linux source stages emit the Python command order', async () => {
     expectedCommands.push(
       expected(root, null, ['tar', '--format=gnu', '-czf', path.join(workspace, 'software', 'cangjie-sdk-linux-x64-1.2.3.tar.gz'), '-C', path.join(workspace, 'software'), 'cangjie']),
       expected(root, null, ['tar', '--format=gnu', '-czf', path.join(workspace, 'software', 'cangjie-stdx-linux-x64-1.2.3.1.tar.gz'), '-C', path.join(workspace, 'software'), 'linux_x86_64_cjnative']),
-      expected(root, path.join(workspace, 'verify'), ['bash', '-c', `set -e; source '${path.join(workspace, 'software', 'cangjie', 'envsetup.sh')}'; cjc hello.cj -o hello && ./hello`]),
+      expected(root, path.join(workspace, 'verify'), [
+        'bash', '-c',
+        'set -e; source "$1"; export "$2=$3"; cjc hello.cj -o hello; export "$2=$4"; ./hello',
+        'srcbuild-verify', path.join(workspace, 'software', 'cangjie', 'envsetup.sh'),
+        'LD_LIBRARY_PATH', '<HOST_LIBRARIES>', '<TARGET_LIBRARIES>',
+      ]),
     );
     assert.deepEqual(commands, expectedCommands);
   } finally {
