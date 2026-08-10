@@ -128,12 +128,26 @@ test('release manifest keeps every component and requires frozen clean stamps', 
   const cjc = await write(stage, 'bin/cjc', cjcContents);
   const llc = await write(stage, 'third_party/llvm/bin/llc', llcContents);
   const opt = await write(stage, 'third_party/llvm/bin/opt', optContents);
-  const cjpmContents = 'patched-cjpm-without-an-embedded-stamp';
+  // Cangjie-written, and now discovered by that property rather than by name.
+  const cjpmContents = 'patched-cjpm-without-an-embedded-stamp\0CJ_MCC_WriteRefField\0';
   await write(stage, 'tools/bin/cjpm', cjpmContents);
+  // std ships bytes, and PROVENANCE.txt's ARTIFACT-SHA256 block is the only
+  // record tying those bytes to the build. An empty block meant the packaged std
+  // could be swapped wholesale without the manifest changing at all.
+  const stdArtifacts = [
+    ['modules/linux_x86_64_cjnative/std/core.cjo', 'fixture std core cjo'],
+    ['lib/linux_x86_64_cjnative/libcangjie-std-core.a', 'fixture std core archive'],
+  ];
+  const stdHashes = [];
+  for (const [relative, contents] of stdArtifacts) {
+    await write(stage, relative, contents);
+    stdHashes.push(`${digest(contents)}  ${relative}`);
+  }
   const provenance = await write(stage, 'PROVENANCE.txt', [
     `CJSTD-COMMIT:${STD_SHA} BUILT-BY:${CJCJ_SHA}`,
     `STD_SOURCE_COMMIT = ${STD_SHA}`,
     'ARTIFACT-SHA256:',
+    ...stdHashes,
     '',
   ].join('\n'));
   const pythonArtifact = await write(stage, 'third_party/python/bin/python3.11',

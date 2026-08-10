@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -62,12 +63,33 @@ async function fixture() {
   await fs.writeFile(path.join(llvmBin, 'opt'), `opt\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
   const cjpmArtifact = path.join(stage, 'tools', 'bin', 'cjpm');
   await fs.mkdir(path.dirname(cjpmArtifact), {recursive: true});
-  await fs.writeFile(cjpmArtifact, 'source-built cjpm fixture\n');
+  // cjpm is Cangjie-written, so the fixture has to look like one: the manifest
+  // now finds Cangjie tools by the runtime entry points the compiler emits
+  // rather than by filename, and a blob with no CJ_MCC_ reference is correctly
+  // not a Cangjie tool.
+  await fs.writeFile(cjpmArtifact, 'source-built cjpm fixture\0CJ_MCC_WriteRefField\0');
+  // A real package carries std bytes, and PROVENANCE.txt ends with one
+  // `<sha256>  <relative path>` line per installed artifact. The fixture used to
+  // ship an empty block, which meant no test ever exercised the only data that
+  // ties the packaged std bytes to the build that produced them.
+  const stdArtifacts = [
+    ['modules/linux_x86_64_cjnative/std/core.cjo', 'fixture std core cjo'],
+    ['lib/linux_x86_64_cjnative/libcangjie-std-core.a', 'fixture std core archive'],
+    ['runtime/lib/linux_x86_64_cjnative/libcangjie-std.so', 'fixture std shared object'],
+  ];
+  const stdHashes = [];
+  for (const [relative, contents] of stdArtifacts) {
+    const file = path.join(stage, relative);
+    await fs.mkdir(path.dirname(file), {recursive: true});
+    await fs.writeFile(file, contents);
+    stdHashes.push(`${createHash('sha256').update(contents).digest('hex')}  ${relative}`);
+  }
   const stdProvenance = path.join(stage, 'PROVENANCE.txt');
   await fs.writeFile(stdProvenance, [
     `CJSTD-COMMIT:${STD_SHA} BUILT-BY:${CJCJ_SHA}`,
     `STD_SOURCE_COMMIT = ${STD_SHA}`,
     'ARTIFACT-SHA256:',
+    ...stdHashes,
     '',
   ].join('\n'));
   const pythonArtifact = path.join(stage, 'third_party', 'python', 'bin', 'python3.11');

@@ -43,10 +43,23 @@ const loadedManifests = await Promise.all(manifests.map(async ({name, match}) =>
     }
   });
   if (rows.length === 0) throw new Error(`${name}: empty manifest`);
+  // The core components are required exactly; the Cangjie-written tools are
+  // discovered from the package, so their number grows as hle, cjcov and
+  // cjtrace-recover get wired. An exact equality over the whole set would have
+  // to be edited every time one lands — and an assertion that must be edited to
+  // stay true is the same shape as the hard-coded artifact name and the
+  // hard-coded counts this repository has already been bitten by. Missing a core
+  // component and inventing an unknown one both still fail.
   const components = rows.map(row => row.component).sort();
   const requiredComponents = [...REQUIRED_COMPONENTS].sort();
-  if (JSON.stringify(components) !== JSON.stringify(requiredComponents)) {
-    throw new Error(`${name}: manifest components mismatch: expected=${requiredComponents.join(',')} actual=${components.join(',')}`);
+  const missing = requiredComponents.filter(component => !components.includes(component));
+  const unexpected = components.filter(component =>
+    !requiredComponents.includes(component) && !/^tool-[A-Za-z0-9._-]+$/.test(component));
+  if (missing.length || unexpected.length) {
+    throw new Error(`${name}: manifest components mismatch: expected=${requiredComponents.join(',')} ` +
+      `actual=${components.join(',')}` +
+      `${missing.length ? ` missing=${missing.join(',')}` : ''}` +
+      `${unexpected.length ? ` unexpected=${unexpected.join(',')}` : ''}`);
   }
   const apparatus = rows.find(row => row.component === GATE_APPARATUS_COMPONENT);
   validateGateApparatusManifestSection(apparatus?.acceptance_apparatus, match[1]);

@@ -130,7 +130,10 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   }
   await fs.appendFile(path.join(sdk, 'third_party/llvm/bin/llc'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
   await fs.appendFile(path.join(sdk, 'third_party/llvm/bin/opt'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
-  const cjpm = await write(sdk, 'tools/bin/cjpm', 'fixture source-built cjpm', 0o755);
+  // Cangjie-written: the manifest finds these tools by the runtime entry points
+  // the compiler emits, so the fixture has to carry one.
+  const cjpm = await write(sdk, 'tools/bin/cjpm',
+    'fixture source-built cjpm\0CJ_MCC_WriteRefField\0', 0o755);
   await fs.mkdir(path.join(sdk, 'bin'), {recursive: true});
   await fs.mkdir(path.join(sdk, 'lib', TUPLE), {recursive: true});
   await fs.mkdir(path.join(sdk, 'modules', TUPLE, 'std'), {recursive: true});
@@ -151,10 +154,23 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   await fs.copyFile(archive, path.join(std, 'modules', TUPLE, 'std', 'std.core.a'));
   await fs.copyFile(archive, path.join(std, 'lib', TUPLE, 'libcangjie-std-core.a'));
   await write(std, `runtime/lib/${TUPLE}/libcangjie-std-core.so`, 'fixture shared std\n');
+  // The block writeStdProvenance actually emits: one line per installed std
+  // artifact. It is what the manifest reconciles the packaged bytes against, so
+  // the fixture has to carry the real thing rather than an empty header.
+  const stdRelatives = [
+    `modules/${TUPLE}/std/std.core.a`,
+    `lib/${TUPLE}/libcangjie-std-core.a`,
+    `runtime/lib/${TUPLE}/libcangjie-std-core.so`,
+  ];
+  const stdHashes = [];
+  for (const relative of stdRelatives) {
+    stdHashes.push(`${await sha256(path.join(std, relative))}  ${relative}`);
+  }
   await write(std, 'PROVENANCE.txt', [
     `CJSTD-COMMIT:${STD_SHA} BUILT-BY:${CJCJ_SHA}`,
     `STD_SOURCE_COMMIT = ${STD_SHA}`,
     'ARTIFACT-SHA256:',
+    ...stdHashes,
     '',
   ].join('\n'));
   const llvmManifest = await write(root, 'llvm-tools.manifest', [
