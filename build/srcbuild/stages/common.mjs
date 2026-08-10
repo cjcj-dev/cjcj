@@ -64,6 +64,7 @@ export function baseEnv(config) {
         targetSdk: cangjieHome,
         target: config.target,
         inherited: joinPathsep(...ldPaths, process.env[spec.loaderEnv] || ''),
+        includeTargetLlvm: false,
       });
     }
     const toolsLib = path.join(cangjieHome, 'tools', 'lib');
