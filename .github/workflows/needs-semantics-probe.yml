@@ -9,7 +9,13 @@
 #
 # Push a branch under probe/ to run it. Every other push-triggered workflow here
 # filters to master, debug/llc-build or ci/platform-matrix, so nothing else wakes up.
-name: needs semantics probe
+#
+# THE RUN-LEVEL CONCLUSION IS RED ON PURPOSE. One job has to fail for any of this
+# to mean anything, so GitHub marks the whole run failed. The verdict is the
+# `assert` job, which prints NEEDS_SEMANTICS_PROBE=CONFIRMED when the semantics
+# hold. Reading the run badge instead is how someone walks away from a green
+# result thinking it broke.
+name: needs semantics probe (run-level red is expected — read the assert job)
 
 on:
   push:
@@ -25,7 +31,7 @@ concurrency:
 
 jobs:
   a-fails:
-    name: a-fails
+    name: a-fails (expected failure — this is the setup, not a problem)
     runs-on: ubuntu-24.04
     steps:
       - name: fail on purpose
@@ -62,7 +68,7 @@ jobs:
       - run: echo "failure() is the second way to opt out of the skip"
 
   assert:
-    name: assert
+    name: assert (THIS is the probe's verdict)
     needs: [a-fails, b-needs-a, c-needs-a-if-always, d-needs-b, e-needs-a-if-failure]
     if: always()
     runs-on: ubuntu-24.04
@@ -76,7 +82,7 @@ jobs:
           set -euo pipefail
           expected() {
             case "$1" in
-              a-fails)              echo failure ;;
+              'a-fails (expected failure — this is the setup, not a problem)') echo failure ;;
               b-needs-a)            echo skipped ;;
               c-needs-a-if-always)  echo success ;;
               d-needs-b)            echo skipped ;;
