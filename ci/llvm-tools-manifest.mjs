@@ -21,6 +21,10 @@ export const LLVM_TOOLS_MANIFEST_SCHEMAS = Object.freeze({
     'OPT_SOURCE',
     'OPT_VERSION',
     'OPT_SHA256',
+    'LLD_TOOL',
+    'LLD_SOURCE',
+    'LLD_VERSION',
+    'LLD_SHA256',
   ]),
   native: Object.freeze([
     'PLATFORM',
@@ -44,6 +48,10 @@ const FIELD_PATTERNS = Object.freeze({
   OPT_SOURCE: /^tuple:[0-9a-f]{40}$/,
   OPT_VERSION: /^[^\r\n\t]+$/,
   OPT_SHA256: /^[0-9a-f]{64}$/,
+  LLD_TOOL: /^(?:ld\.lld|ld64\.lld)$/,
+  LLD_SOURCE: /^tuple:[0-9a-f]{40}$/,
+  LLD_VERSION: /^[^\r\n\t]+$/,
+  LLD_SHA256: /^[0-9a-f]{64}$/,
   SHIM_SHA256: /^[0-9a-f]{64}$/,
 });
 
@@ -116,7 +124,7 @@ export function parseLlvmToolsManifest(text, {label = 'llvm-tools.manifest', sch
     }
   }
   if (selectedSchema === 'core-lineage') {
-    for (const tool of ['LLC', 'OPT']) {
+    for (const tool of ['LLC', 'OPT', 'LLD']) {
       const expectedSource = `tuple:${values.get('LLVM_SHA')}`;
       if (values.get(`${tool}_SOURCE`) !== expectedSource) {
         throw new Error(`${label}: ${tool}_SOURCE does not match LLVM_SHA`);
