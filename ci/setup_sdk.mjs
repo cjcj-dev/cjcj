@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {runGrepProbe} from '../build/lib/fail-closed-probes.mjs';
 import {parseLlvmToolsManifest} from './llvm-tools-manifest.mjs';
 import {verifyBaseSdkProvenance} from '../build/lib/release-component-provenance.mjs';
 
@@ -287,8 +288,11 @@ if (llcPlatform && fixedLlcGz) {
 if (`${process.env.GITHUB_ENV || ''}${process.env.CI || ''}`) {
   const cjpmToml = `${repoRoot}/packages/cjc/cjpm.toml`;
   const sdkLlvmDir = `${cangjieHome}/third_party/llvm/lib`;
-  const grep = await $({nothrow: true, stdio: 'pipe'})`grep -oE "/[^ '\\"]*/third_party/llvm/lib" ${cjpmToml} | head -1`;
-  const hardDir = grep.stdout.trim();
+  const hardPathProbe = await runGrepProbe({
+    label: 'SDK hard-coded LLVM library path grep',
+    run: () => $({nothrow: true, stdio: 'pipe'})`grep -m 1 -oE "/[^ '\\"]*/third_party/llvm/lib" ${cjpmToml}`,
+  });
+  const hardDir = hardPathProbe.matched ? hardPathProbe.result.stdout.trim() : '';
   if (hardDir && hardDir !== sdkLlvmDir) {
     await $`sed ${`s#${hardDir}#${sdkLlvmDir}#g`} ${cjpmToml} > ${cjpmToml}.tmp`;
     await $`mv ${cjpmToml}.tmp ${cjpmToml}`;

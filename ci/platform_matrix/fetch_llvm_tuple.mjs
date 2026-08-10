@@ -8,6 +8,7 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {runRequiredProbe} from '../../build/lib/fail-closed-probes.mjs';
 import {emitBlockedSummary, toCommandPath} from './common.mjs';
 
 $.stdio = 'inherit';
@@ -16,6 +17,7 @@ const root = process.env.PLATFORM_CI_ROOT || path.join(process.cwd(), '.platform
 const repo = process.env.SHIM_ARTIFACT_REPOSITORY || 'cjcj-dev/cjcj';
 const workflow = process.env.TUPLE_WORKFLOW || 'platform-tuples.yml';
 const currentRunArtifact = process.env.TUPLE_ARTIFACT_DIR || '';
+const dryRun = process.env.TUPLE_DRY_RUN === '1';
 // Follow the branch this workflow runs on; a fixed default starves consumers on
 // iteration branches (darwin waited 30min for artifacts that lived elsewhere).
 // Feature branches without their own tuple run fall back to master's artifact
@@ -39,6 +41,13 @@ if (!platform) {
   process.exit(0);
 }
 const artifactName = `fixed-llvm-tools-${platform}`;
+
+function stopBlocked(reason) {
+  emitBlockedSummary(reason);
+  if (dryRun) process.exit(0);
+  console.error(`FATAL: required LLVM tuple unavailable: ${reason}`);
+  process.exit(78);
+}
 
 async function ghLines(endpoint, jq) {
   const result = await $({nothrow: true, stdio: 'pipe'})`gh api ${endpoint} --jq ${jq}`;
@@ -94,24 +103,31 @@ if (extracted) {
 if (entries.length) {
   console.log(`tuple_selection source=current-run platform=${platform} path=${extracted}`);
 } else {
-  const gh = await $({nothrow: true, stdio: 'pipe'})`gh --version`;
-  if (gh.exitCode !== 0) {
-    emitBlockedSummary('gh is unavailable; cannot query fallback LLVM tuples');
-    process.exit(0);
+  try {
+    await runRequiredProbe({
+      label: 'LLVM tuple fallback prerequisite gh --version',
+      run: () => $({nothrow: true, stdio: 'pipe'})`gh --version`,
+    });
+  } catch (error) {
+    stopBlocked(error.message);
   }
-  const unzip = process.platform === 'win32' ? {exitCode: 0} : await $({nothrow: true, stdio: 'pipe'})`unzip -v`;
-  if (unzip.exitCode !== 0) {
-    emitBlockedSummary('unzip is unavailable; cannot unpack fallback LLVM tuple');
-    process.exit(0);
+  if (process.platform !== 'win32') {
+    try {
+      await runRequiredProbe({
+        label: 'LLVM tuple fallback prerequisite unzip -v',
+        run: () => $({nothrow: true, stdio: 'pipe'})`unzip -v`,
+      });
+    } catch (error) {
+      stopBlocked(error.message);
+    }
   }
 
   ({runId, artifactId, branch: selectedBranch} = await selectTupleArtifact());
   if (!artifactId) {
-    emitBlockedSummary(`no active ${artifactName} artifact from this run or a recent successful tuple job`);
-    process.exit(0);
+    stopBlocked(`no active ${artifactName} artifact from this run or a recent successful tuple job`);
   }
   console.log(`tuple_selection source=fallback run=${runId} artifact=${artifactId} platform=${platform} branch=${selectedBranch}`);
-  if (process.env.TUPLE_DRY_RUN === '1') process.exit(0);
+  if (dryRun) process.exit(0);
 
   const scratch = path.join(process.env.RUNNER_TEMP || process.env.TMPDIR || os.tmpdir(), `platform-ci-${platform}-tuple`);
   await fs.mkdir(scratch, {recursive: true});
@@ -133,7 +149,7 @@ if (entries.length) {
   }
   entries = await collectFiles(extracted);
 }
-if (process.env.TUPLE_DRY_RUN === '1') process.exit(0);
+if (dryRun) process.exit(0);
 const llcEntry = entries.find((entry) => /(^|[\\/])llc\.gz$/.test(entry));
 const optEntry = entries.find((entry) => /(^|[\\/])opt\.gz$/.test(entry));
 const lldTool = platform.startsWith('darwin_') ? 'ld64.lld' : 'ld.lld';
@@ -141,14 +157,12 @@ const lldEntry = entries.find((entry) => path.basename(entry) === `${lldTool}.gz
 const toolsManifestEntry = entries.find((entry) => /(^|[\\/])llvm-tools\.manifest$/.test(entry));
 const shimEntry = entries.find((entry) => /(^|[\\/])cjselfhost_llvmshim\.o$/.test(entry));
 if (!llcEntry || !optEntry || !lldEntry || !toolsManifestEntry || !shimEntry) {
-  emitBlockedSummary(`${artifactName} is incomplete (requires llc.gz + opt.gz + ${lldTool}.gz + llvm-tools.manifest + cjselfhost_llvmshim.o)`);
-  process.exit(0);
+  stopBlocked(`${artifactName} is incomplete (requires llc.gz + opt.gz + ${lldTool}.gz + llvm-tools.manifest + cjselfhost_llvmshim.o)`);
 }
 const staticManifestEntry = entries.find((entry) => /(^|[\\/])llvm-static-libs\.txt$/.test(entry));
 const systemManifestEntry = entries.find((entry) => /(^|[\\/])llvm-system-libs\.txt$/.test(entry));
 if (platform === 'windows_x86_64' && (!staticManifestEntry || !systemManifestEntry)) {
-  emitBlockedSummary(`${artifactName} is incomplete (requires LLVM static library manifests)`);
-  process.exit(0);
+  stopBlocked(`${artifactName} is incomplete (requires LLVM static library manifests)`);
 }
 
 const dest = path.join(root, 'fixed-toolchain', platform);

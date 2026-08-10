@@ -306,6 +306,27 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     /PROVENANCE|RELEASE-MANIFEST/.test(line)).join('\n')}\nARCHIVE-PROVENANCE-END`);
   console.log(`RELEASE-MANIFEST-BEGIN\n${manifestText.trim()}\nRELEASE-MANIFEST-END`);
 
+  async function expectInspectionFailure(name, expected) {
+    const stubBin = path.join(root, `${name}-stub-bin`);
+    await write(stubBin, name, [
+      '#!/bin/sh',
+      `printf '%s\\n' '${name} forced failure' >&2`,
+      'exit 73',
+      '',
+    ].join('\n'), 0o755);
+    const result = runRaw('zx', packageArgs, {
+      cwd: path.resolve('.'),
+      env: {...process.env, PATH: `${stubBin}:${process.env.PATH}`},
+    });
+    assert.notEqual(result.status, 0, `${name} failure must stop packaging`);
+    assert.match(`${result.stdout}\n${result.stderr}`, expected);
+    console.log(`NEGATIVE-${name.toUpperCase()} RC=${result.status}\n${result.stderr.trim()}`);
+  }
+  await expectInspectionFailure('readelf',
+    /package readelf -d bin\/cjc failed \(exit=73\): readelf forced failure/);
+  await expectInspectionFailure('ldd',
+    /package ldd bin\/cjc failed \(exit=73\): ldd forced failure/);
+
   const originalLlvmManifest = await fs.readFile(llvmManifest, 'utf8');
   await fs.writeFile(llvmManifest, originalLlvmManifest.replace(/^OPT_SHA256=.*$/m, `OPT_SHA256=${'0'.repeat(64)}`));
   const changedLlvm = runRaw('zx', packageArgs, {cwd: path.resolve('.')});

@@ -3,6 +3,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {runGrepProbe} from '../../../build/lib/fail-closed-probes.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 
 $.stdio = 'inherit';
@@ -169,6 +170,9 @@ console.log('[bcgate] verify bitcode parity');
 await $`set -o pipefail; python3 ${root}/scripts/bcgate.py --self ${self} --base ${oracle} --corpus ${root}/scripts/difftest_corpus -j ${jobs} | tee ${work}/bcgate.log`;
 await $`grep -Eq 'byte-identical: [0-9]+ \\(100\\.0%\\)[[:space:]]+\\|[[:space:]]+differing: 0' ${work}/bcgate.log`;
 await $`grep -Eq 'compile-errors: 0' ${work}/bcgate.log`;
-const onlyOneSide = await $({nothrow: true})`grep -q 'functions present on only one side' ${work}/bcgate.log`;
-if (onlyOneSide.exitCode === 0) throw new Error('bcgate failed: functions are present on only one side');
+const onlyOneSide = await runGrepProbe({
+  label: 'bcgate one-side divergence grep',
+  run: () => $({nothrow: true})`grep -q 'functions present on only one side' ${work}/bcgate.log`,
+});
+if (onlyOneSide.matched) throw new Error('bcgate failed: functions are present on only one side');
 console.log('[verify] source build passed');
