@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {pathToFileURL} from 'node:url';
 import {baseSdkDownload} from '../lib/release-component-provenance.mjs';
 import {
   GATE_APPARATUS_COMPONENT,
@@ -26,6 +27,15 @@ const RUNTIME_SHA = '2'.repeat(40);
 const LLVM_SHA = '3'.repeat(40);
 const STD_SHA = '4'.repeat(40);
 const CJPM_SHA = '5'.repeat(40);
+const OTHER_SHA = '6'.repeat(40);
+
+const writerModule = pathToFileURL(path.resolve('build/lib/release-manifest.mjs')).href;
+const writerRunner = [
+  "import fs from 'node:fs/promises';",
+  `import {writeReleaseManifest} from ${JSON.stringify(writerModule)};`,
+  "const options = JSON.parse(await fs.readFile(process.argv[1], 'utf8'));",
+  'await writeReleaseManifest(options);',
+].join('\n');
 
 test('base SDK provenance maps every release platform to its nightly archive', () => {
   const version = 'nightly-1.2.0-alpha.20260721165458';
@@ -77,27 +87,24 @@ async function writeGateApparatus(stage, platform) {
   }, null, 2)}\n`);
 }
 
-test('release manifest keeps every component and records a removed stamp', async t => {
+test('release manifest keeps every component and requires frozen clean stamps', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'release-manifest-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   const stage = path.join(root, 'stage');
-  const runtime = await write(stage, 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
-    `runtime\0CJRT-COMMIT:${RUNTIME_SHA}\0`);
-  await write(stage, 'bin/cjc', `compiler\0CJCJ-COMMIT:${CJCJ_SHA}\0`);
-  await write(stage, 'third_party/llvm/bin/llc', `llc\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
-  const opt = await write(stage, 'third_party/llvm/bin/opt', `opt\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
+  const cjcContents = `compiler\0CJCJ-COMMIT:${CJCJ_SHA}\0`;
+  const runtimeContents = `runtime\0CJRT-COMMIT:${RUNTIME_SHA}\0`;
+  const llcContents = `llc\0CJLLVM-COMMIT:${LLVM_SHA}\0`;
+  const optContents = `opt\0CJLLVM-COMMIT:${LLVM_SHA}\0`;
+  const runtime = await write(stage, 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', runtimeContents);
+  const cjc = await write(stage, 'bin/cjc', cjcContents);
+  const llc = await write(stage, 'third_party/llvm/bin/llc', llcContents);
+  const opt = await write(stage, 'third_party/llvm/bin/opt', optContents);
   const cjpmContents = 'patched-cjpm-without-an-embedded-stamp';
   await write(stage, 'tools/bin/cjpm', cjpmContents);
   const provenance = await write(stage, 'PROVENANCE.txt', [
     `CJSTD-COMMIT:${STD_SHA} BUILT-BY:${CJCJ_SHA}`,
     `STD_SOURCE_COMMIT = ${STD_SHA}`,
     'ARTIFACT-SHA256:',
-    '',
-  ].join('\n'));
-  const llvmManifest = await write(root, 'llvm-tools.manifest', [
-    `LLVM_SHA=${LLVM_SHA}`,
-    `LLC_SHA256=${'6'.repeat(64)}`,
-    `OPT_SHA256=${'7'.repeat(64)}`,
     '',
   ].join('\n'));
   const pythonArtifact = await write(stage, 'third_party/python/bin/python3.11',
@@ -123,11 +130,11 @@ test('release manifest keeps every component and records a removed stamp', async
     platform: 'linux-x64',
     runtimeArtifact: runtime,
     stdProvenance: provenance,
-    llvmManifest,
     baseSdkId: REVIEWED_GATE_HOST_TOOLCHAIN,
     gateApparatusArtifact,
     cjcjCommit: CJCJ_SHA,
     runtimeCommit: RUNTIME_SHA,
+    llvmCommit: LLVM_SHA,
     stdRepository: 'https://github.com/cjcj-dev/cangjie-runtime.git',
     cjpmRepository: 'https://github.com/cjcj-dev/cangjie-tools.git',
     cjpmCommit: CJPM_SHA,
@@ -152,10 +159,59 @@ test('release manifest keeps every component and records a removed stamp', async
   assert.match(positive.rows.find(row => row.component === 'base-sdk').source.commit,
     new RegExp(`^unavailable: official SDK ${REVIEWED_GATE_HOST_TOOLCHAIN}`));
 
-  await fs.writeFile(opt, 'opt-with-stamp-deliberately-removed');
-  const negative = await writeReleaseManifest(options);
-  assert.equal(negative.rows.find(row => row.component === 'llvm-opt').embedded_stamp, 'no-stamp');
-  assert.ok(negative.rows.every(row => Object.values({
+  const optionsFile = await write(root, 'writer-options.json', `${JSON.stringify(options)}\n`);
+  async function expectStampGuard({name, mutate, restore, expected}) {
+    await t.test(name, async () => {
+      await mutate();
+      try {
+        const sentinel = `manifest-write-sentinel:${name}\n`;
+        await fs.writeFile(positive.destination, sentinel);
+        const result = spawnSync(process.execPath,
+          ['--input-type=module', '--eval', writerRunner, optionsFile], {encoding: 'utf8'});
+        const output = `${result.stdout}\n${result.stderr}`;
+        assert.equal(result.status, 1, output);
+        assert.match(output, expected);
+        assert.equal(await fs.readFile(positive.destination, 'utf8'), sentinel,
+          'stamp guard must reject before writing the release manifest');
+        const errorLine = output.split(/\r?\n/).find(line => line.includes('Error:'))?.trim() || '<missing error>';
+        console.log(`STAMP-GUARD ${name} RC=${result.status} ${errorLine}`);
+      } finally {
+        await restore();
+      }
+    });
+  }
+
+  await expectStampGuard({
+    name: 'occurrence=0',
+    mutate: () => fs.writeFile(cjc, 'compiler-without-stamp'),
+    restore: () => fs.writeFile(cjc, cjcContents),
+    expected: /cjc CJCJ-COMMIT occurrence must be exactly 1; actual count=0; actual stamps=<none>/,
+  });
+  await expectStampGuard({
+    name: 'occurrence=2',
+    mutate: () => fs.writeFile(runtime,
+      `runtime\0CJRT-COMMIT:${RUNTIME_SHA}\0CJRT-COMMIT:${RUNTIME_SHA}\0`),
+    restore: () => fs.writeFile(runtime, runtimeContents),
+    expected: new RegExp(`runtime CJRT-COMMIT occurrence must be exactly 1; actual count=2; ` +
+      `actual stamps=CJRT-COMMIT:${RUNTIME_SHA}, CJRT-COMMIT:${RUNTIME_SHA}`),
+  });
+  await expectStampGuard({
+    name: 'dirty',
+    mutate: () => fs.writeFile(llc, `llc\0CJLLVM-COMMIT:${LLVM_SHA}-dirty\0`),
+    restore: () => fs.writeFile(llc, llcContents),
+    expected: new RegExp(`llvm-llc CJLLVM-COMMIT must not be dirty; ` +
+      `actual=CJLLVM-COMMIT:${LLVM_SHA}-dirty`),
+  });
+  await expectStampGuard({
+    name: 'frozen-mismatch',
+    mutate: () => fs.writeFile(opt, `opt\0CJLLVM-COMMIT:${OTHER_SHA}\0`),
+    restore: () => fs.writeFile(opt, optContents),
+    expected: new RegExp(`llvm-opt CJLLVM-COMMIT must equal frozen SHA; ` +
+      `actual=${OTHER_SHA}; frozen=${LLVM_SHA}`),
+  });
+
+  const restored = await writeReleaseManifest(options);
+  assert.ok(restored.rows.every(row => Object.values({
     repository: row.source.repository,
     commit: row.source.commit,
     path: row.artifact.path,
@@ -165,7 +221,7 @@ test('release manifest keeps every component and records a removed stamp', async
 
   const dist = path.join(root, 'dist');
   await fs.mkdir(dist);
-  await fs.copyFile(negative.destination,
+  await fs.copyFile(restored.destination,
     path.join(dist, `cjcj-9.9.9-linux-x64.${RELEASE_MANIFEST}`));
   const notes = path.join(root, 'notes.md');
   const rendered = spawnSync(process.execPath, [
@@ -175,7 +231,7 @@ test('release manifest keeps every component and records a removed stamp', async
   assert.equal(rendered.status, 0, rendered.stderr);
   const notesText = await fs.readFile(notes, 'utf8');
   assert.match(notesText, /\| cjcj \| 1111111111111111111111111111111111111111 \| [0-9a-f]{64} \|/);
-  assert.match(notesText, /\| llvm-opt \| 3333333333333333333333333333333333333333 \| [0-9a-f]{64} \| no-stamp \|/);
-  console.log(`NEGATIVE-CONTROL llvm-opt ${positive.rows.find(row => row.component === 'llvm-opt').embedded_stamp} -> ${negative.rows.find(row => row.component === 'llvm-opt').embedded_stamp}`);
+  assert.match(notesText, new RegExp(`\\| llvm-opt \\| ${LLVM_SHA} \\| [0-9a-f]{64} \\| ` +
+    `CJLLVM-COMMIT:${LLVM_SHA} \\|`));
   console.log(`RELEASE-NOTES-BEGIN\n${notesText.trim()}\nRELEASE-NOTES-END`);
 });

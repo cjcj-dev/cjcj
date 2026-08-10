@@ -35,6 +35,7 @@ async function fileExists(file) {
 
 function embeddedStamp(buffer, prefixes) {
   const values = new Set();
+  const occurrences = Object.fromEntries(prefixes.map(prefix => [prefix, []]));
   for (const prefix of prefixes) {
     const marker = Buffer.from(`${prefix}:`);
     let offset = 0;
@@ -44,26 +45,49 @@ function embeddedStamp(buffer, prefixes) {
       const begin = found + marker.length;
       let end = begin;
       while (end < buffer.length && /[0-9A-Za-z._-]/.test(String.fromCharCode(buffer[end]))) end += 1;
-      if (end > begin) values.add(`${prefix}:${buffer.subarray(begin, end).toString('ascii')}`);
+      const value = buffer.subarray(begin, end).toString('ascii');
+      occurrences[prefix].push(value);
+      if (value) values.add(`${prefix}:${value}`);
       offset = begin;
     }
   }
-  if (values.size === 0) return 'no-stamp';
-  if (values.size === 1) return [...values][0];
-  return unavailable(`conflicting embedded stamps (${[...values].sort().join(',')})`);
+  let value;
+  if (values.size === 0) value = 'no-stamp';
+  else if (values.size === 1) [value] = values;
+  else value = unavailable(`conflicting embedded stamps (${[...values].sort().join(',')})`);
+  return {value, occurrences};
 }
 
-function stampCommit(stamp, prefix) {
-  const match = stamp.match(new RegExp(`^${prefix}:([0-9a-f]{40}(?:-dirty)?)$`));
-  return match?.[1] || '';
+function frozenCommit(value, component) {
+  const commit = typeof value === 'string' ? value.trim() : '';
+  if (!/^[0-9a-f]{40}$/.test(commit)) {
+    throw new Error(`${component} frozen SHA must be a clean 40-character commit SHA; ` +
+      `actual=${commit || '<empty>'}`);
+  }
+  return commit;
 }
 
 function stdCommit(text) {
   return text.match(/^STD_SOURCE_COMMIT\s*=\s*([0-9a-f]{40}(?:-dirty)?)$/m)?.[1] || '';
 }
 
-function llvmCommit(text) {
-  return text.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || '';
+function assertFrozenStamp(artifactValue, component, prefix, frozen) {
+  const occurrences = artifactValue.stamp_occurrences[prefix] || [];
+  const rendered = occurrences.length
+    ? occurrences.map(value => `${prefix}:${value || '<empty>'}`).join(', ')
+    : '<none>';
+  if (occurrences.length !== 1) {
+    throw new Error(`${component} ${prefix} occurrence must be exactly 1; ` +
+      `actual count=${occurrences.length}; actual stamps=${rendered}`);
+  }
+  const [actual] = occurrences;
+  if (actual.endsWith('-dirty')) {
+    throw new Error(`${component} ${prefix} must not be dirty; actual=${prefix}:${actual}`);
+  }
+  if (actual !== frozen) {
+    throw new Error(`${component} ${prefix} must equal frozen SHA; ` +
+      `actual=${actual || '<empty>'}; frozen=${frozen}`);
+  }
 }
 
 function packagedPath(stage, file) {
@@ -76,13 +100,16 @@ async function artifact(stage, file, reason, prefixes = []) {
       path: unavailable(reason),
       sha256: unavailable(reason),
       embedded_stamp: 'no-stamp',
+      stamp_occurrences: Object.fromEntries(prefixes.map(prefix => [prefix, []])),
     };
   }
   const bytes = await fs.readFile(file);
+  const stamps = embeddedStamp(bytes, prefixes);
   return {
     path: packagedPath(stage, file),
     sha256: await sha256(file),
-    embedded_stamp: embeddedStamp(bytes, prefixes),
+    embedded_stamp: stamps.value,
+    stamp_occurrences: stamps.occurrences,
   };
 }
 
@@ -103,7 +130,6 @@ export async function writeReleaseManifest({
   exeSuffix = '',
   runtimeArtifact,
   stdProvenance = '',
-  llvmManifest = '',
   baseSdkId = '',
   baseSdkProvenance = undefined,
   gateApparatusArtifact = '',
@@ -112,6 +138,7 @@ export async function writeReleaseManifest({
   runtimeRepository = 'https://github.com/cjcj-dev/cangjie-runtime.git',
   runtimeCommit = '',
   llvmRepository = 'https://github.com/cjcj-dev/cjcj-llvm.git',
+  llvmCommit = '',
   stdRepository = '',
   cjpmRepository = '',
   cjpmCommit = '',
@@ -126,6 +153,11 @@ export async function writeReleaseManifest({
   if (normalizedSignaturePolicy !== RELEASE_SIGNATURE_POLICY) {
     throw new Error(`signature_policy must be ${RELEASE_SIGNATURE_POLICY}, got ${normalizedSignaturePolicy || '<empty>'}`);
   }
+  const frozen = {
+    cjcj: frozenCommit(cjcjCommit, 'cjcj'),
+    runtime: frozenCommit(runtimeCommit, 'runtime'),
+    llvm: frozenCommit(llvmCommit, 'LLVM'),
+  };
   if (!/^3\.11\.\d+$/.test(pythonVersion)) {
     throw new Error(`python version must be exact 3.11.x, got ${pythonVersion || '<empty>'}`);
   }
@@ -158,6 +190,10 @@ export async function writeReleaseManifest({
   const cjpm = await artifact(stage, cjpmFile, 'packaged cjpm is missing');
   const python = await artifact(stage, pythonArtifact, `packaged Python ${pythonVersion} is missing`);
   const pythonProvenance = await artifact(stage, pythonMetadataArtifact, 'packaged Python provenance is missing');
+  assertFrozenStamp(cjcjArtifact, 'cjc', 'CJCJ-COMMIT', frozen.cjcj);
+  assertFrozenStamp(runtime, 'runtime', 'CJRT-COMMIT', frozen.runtime);
+  assertFrozenStamp(llc, 'llvm-llc', 'CJLLVM-COMMIT', frozen.llvm);
+  assertFrozenStamp(opt, 'llvm-opt', 'CJLLVM-COMMIT', frozen.llvm);
   if (!await fileExists(gateApparatusArtifact)) {
     throw new Error(`packaged gate apparatus provenance is missing: ${gateApparatusArtifact || '<empty>'}`);
   }
@@ -170,10 +206,6 @@ export async function writeReleaseManifest({
     'packaged gate apparatus provenance is missing');
 
   const stdText = await fileExists(stdProvenance) ? await fs.readFile(stdProvenance, 'utf8') : '';
-  const llvmText = await fileExists(llvmManifest) ? await fs.readFile(llvmManifest, 'utf8') : '';
-  const llvmSourceCommit = llvmCommit(llvmText);
-  const cjcjStampCommit = stampCommit(cjcjArtifact.embedded_stamp, 'CJCJ-COMMIT');
-  const runtimeStampCommit = stampCommit(runtime.embedded_stamp, 'CJRT-COMMIT');
   const hasBaseSdkProvenance = baseSdkProvenance?.schema === 1 &&
     baseSdkProvenance?.component === 'base-sdk' &&
     typeof baseSdkProvenance?.release?.repository === 'string' &&
@@ -227,7 +259,7 @@ export async function writeReleaseManifest({
       schema: 1,
       platform,
       component: 'cjcj',
-      source: source(cjcjRepository, cjcjCommit || cjcjStampCommit,
+      source: source(cjcjRepository, frozen.cjcj,
         'cjcj source repository was not supplied', 'cjcj source commit was neither supplied nor stamped'),
       artifact: {path: cjcjArtifact.path, sha256: cjcjArtifact.sha256},
       embedded_stamp: cjcjArtifact.embedded_stamp,
@@ -236,7 +268,7 @@ export async function writeReleaseManifest({
       schema: 1,
       platform,
       component: 'runtime',
-      source: source(runtimeRepository, runtimeCommit || runtimeStampCommit,
+      source: source(runtimeRepository, frozen.runtime,
         'runtime source repository was not supplied', 'runtime source commit was neither supplied nor stamped'),
       artifact: {path: runtime.path, sha256: runtime.sha256},
       embedded_stamp: runtime.embedded_stamp,
@@ -248,9 +280,9 @@ export async function writeReleaseManifest({
       schema: 1,
       platform,
       component,
-      source: source(llvmRepository, llvmSourceCommit,
+      source: source(llvmRepository, frozen.llvm,
         'LLVM source repository was not supplied',
-        llvmManifest ? 'LLVM manifest has no valid LLVM_SHA' : 'LLVM manifest was not supplied'),
+        'LLVM frozen source commit was not supplied'),
       artifact: {path: tool.path, sha256: tool.sha256},
       embedded_stamp: tool.embedded_stamp,
     })),

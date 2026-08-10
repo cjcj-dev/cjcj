@@ -126,6 +126,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     await fs.chmod(destination, 0o755);
   }
   await fs.appendFile(path.join(sdk, 'third_party/llvm/bin/llc'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
+  await fs.appendFile(path.join(sdk, 'third_party/llvm/bin/opt'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
   const cjpm = await write(sdk, 'tools/bin/cjpm', 'fixture source-built cjpm', 0o755);
   await fs.mkdir(path.join(sdk, 'bin'), {recursive: true});
   await fs.mkdir(path.join(sdk, 'lib', TUPLE), {recursive: true});
@@ -238,7 +239,8 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.equal(apparatus.host_runtime.sha256, gateProvenance.host_runtime.sha256);
   assert.equal(apparatus.host_runtime.g_cjLoadBadMask_count, 0);
   assert.match(apparatus.known_apparatus_limitations.text, /PostTraceBarrier::ReadReference/);
-  assert.equal(rows.find(row => row.component === 'llvm-opt').embedded_stamp, 'no-stamp');
+  assert.equal(rows.find(row => row.component === 'llvm-opt').embedded_stamp,
+    `CJLLVM-COMMIT:${LLVM_SHA}`);
   assert.equal(rows.find(row => row.component === 'python').source.commit, RELEASE_PYTHON_VERSION);
   assert.equal(rows.find(row => row.component === 'base-sdk').source.version,
     REVIEWED_GATE_HOST_TOOLCHAIN.replace(/^nightly-/, ''));

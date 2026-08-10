@@ -25,6 +25,9 @@ import {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const platforms = ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm64', 'windows-x64'];
+const CJCJ_SHA = '1'.repeat(40);
+const RUNTIME_SHA = '2'.repeat(40);
+const LLVM_SHA = '3'.repeat(40);
 const gateRuntimeByPlatform = {
   'linux-x64': ['runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', 'nm -D --defined-only'],
   'linux-aarch64': ['runtime/lib/linux_aarch64_cjnative/libcangjie-runtime.so', 'nm -D --defined-only'],
@@ -39,6 +42,17 @@ async function fixture() {
   const dist = path.join(work, 'dist');
   await fs.mkdir(stage);
   await fs.mkdir(dist);
+  await fs.mkdir(path.join(stage, 'bin'), {recursive: true});
+  await fs.writeFile(path.join(stage, 'bin', 'cjc'),
+    `compiler\0CJCJ-COMMIT:${CJCJ_SHA}\0`);
+  const runtimeArtifact = path.join(stage, 'runtime', 'lib', 'linux_x86_64_cjnative',
+    'libcangjie-runtime.so');
+  await fs.mkdir(path.dirname(runtimeArtifact), {recursive: true});
+  await fs.writeFile(runtimeArtifact, `runtime\0CJRT-COMMIT:${RUNTIME_SHA}\0`);
+  const llvmBin = path.join(stage, 'third_party', 'llvm', 'bin');
+  await fs.mkdir(llvmBin, {recursive: true});
+  await fs.writeFile(path.join(llvmBin, 'llc'), `llc\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
+  await fs.writeFile(path.join(llvmBin, 'opt'), `opt\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
   const pythonArtifact = path.join(stage, 'third_party', 'python', 'bin', 'python3.11');
   await fs.mkdir(path.dirname(pythonArtifact), {recursive: true});
   await fs.writeFile(pythonArtifact, 'Python 3.11.9 fixture\n');
@@ -78,6 +92,10 @@ async function fixture() {
     known_apparatus_limitations: KNOWN_GATE_APPARATUS_LIMITATIONS,
   }, null, 2)}\n`);
   const pythonArgs = {
+    runtimeArtifact,
+    cjcjCommit: CJCJ_SHA,
+    runtimeCommit: RUNTIME_SHA,
+    llvmCommit: LLVM_SHA,
     pythonArtifact,
     pythonMetadata,
     pythonMetadataArtifact,
