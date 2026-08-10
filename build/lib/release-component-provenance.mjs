@@ -4,6 +4,7 @@ import path from 'node:path';
 
 export const BASE_SDK_PROVENANCE = 'BASE-SDK-PROVENANCE.json';
 export const CJPM_PROVENANCE = 'CJPM-PROVENANCE.json';
+export const HLE_PROVENANCE = 'HLE-PROVENANCE.json';
 export const SOURCE_PROVENANCE_RESOLVED = 'resolved';
 export const SOURCE_PROVENANCE_NOT_APPLICABLE = 'not-applicable';
 export const SOURCE_PROVENANCE_UNRESOLVED = 'unresolved';
@@ -108,6 +109,10 @@ export async function writeBaseSdkProvenance({archive, destination, platform, to
   return value;
 }
 
+export async function writeCjpmProvenance(options) {
+  return writeComponentProvenance({component: 'cjpm', ...options});
+}
+
 export function validateBaseSdkProvenance(value, {platform, toolchain, label = 'base SDK provenance'}) {
   const expected = baseSdkDownload(platform, toolchain);
   requireIdentity(value, {component: 'base-sdk', platform}, label);
@@ -156,19 +161,40 @@ export function parseCjpmPin(text) {
   };
 }
 
+// hle is built from the same cangjie-tools checkout the source pin names, so
+// its sidecar is pinned the same way cjpm's is.
+export function parseToolsPin(text) {
+  const values = Object.fromEntries(text.split(/\r?\n/).filter(Boolean).map(line => {
+    const separator = line.indexOf('=');
+    if (separator < 1) throw new Error(`invalid source pin line: ${line}`);
+    return [line.slice(0, separator), line.slice(separator + 1)];
+  }));
+  return {
+    repository: requireString(values.TOOLS_SRC_URL, 'TOOLS_SRC_URL'),
+    commit: requireMatch(values.TOOLS_REF, SHA40, 'TOOLS_REF'),
+  };
+}
+
+export async function readToolsPin(pinFile) {
+  return parseToolsPin(await fs.readFile(pinFile, 'utf8'));
+}
+
 export async function readCjpmPin(pinFile) {
   return parseCjpmPin(await fs.readFile(pinFile, 'utf8'));
 }
 
-export async function writeCjpmProvenance({binary, destination, platform, repository, commit}) {
+// The sidecar shape is the same for every source-built tool we ship; only the
+// component name and the binary's name change. cjpm keeps its own entry points
+// so its thirty-odd call sites stay untouched.
+export async function writeComponentProvenance({component, binary, destination, platform, repository, commit}) {
   const value = {
     schema: 1,
-    component: 'cjpm',
+    component: requireString(component, 'component'),
     platform,
     source: {
       status: SOURCE_PROVENANCE_RESOLVED,
-      repository: requireString(repository, 'cjpm source repository'),
-      commit: requireMatch(commit, SHA40, 'cjpm source commit'),
+      repository: requireString(repository, `${component} source repository`),
+      commit: requireMatch(commit, SHA40, `${component} source commit`),
     },
     artifact: {
       path: path.basename(binary),
@@ -179,26 +205,27 @@ export async function writeCjpmProvenance({binary, destination, platform, reposi
   return value;
 }
 
-export async function verifyCjpmProvenance({
+export async function verifyComponentProvenance({
+  component,
+  artifactName,
   binary,
   sidecar,
   platform,
   expectedRepository,
   expectedCommit,
 }) {
-  const label = 'cjpm provenance';
+  const label = `${component} provenance`;
   const value = await readJson(sidecar, label);
-  requireIdentity(value, {component: 'cjpm', platform}, label);
+  requireIdentity(value, {component, platform}, label);
   if (value.source?.status !== SOURCE_PROVENANCE_RESOLVED) {
     throw new Error(`${label}.source.status must be ${SOURCE_PROVENANCE_RESOLVED}; got ${
       value.source?.status || SOURCE_PROVENANCE_UNRESOLVED}`);
   }
-  const repository = requireString(expectedRepository, 'expected cjpm source repository');
-  const commit = requireMatch(expectedCommit, SHA40, 'expected cjpm source commit');
+  const repository = requireString(expectedRepository, `expected ${component} source repository`);
+  const commit = requireMatch(expectedCommit, SHA40, `expected ${component} source commit`);
   if (value.source?.repository !== repository || value.source?.commit !== commit) {
     throw new Error(`${label} source mismatch: ${value.source?.repository || '<empty>'}@${value.source?.commit || '<empty>'}`);
   }
-  const artifactName = platform === 'windows-x64' ? 'cjpm.exe' : 'cjpm';
   if (value.artifact?.path !== artifactName) {
     throw new Error(`${label} artifact path mismatch: ${value.artifact?.path || '<empty>'} != ${artifactName}`);
   }
@@ -206,4 +233,12 @@ export async function verifyCjpmProvenance({
   const actual = await fileSha256(binary);
   if (recorded !== actual) throw new Error(`${label} binary SHA-256 mismatch: ${recorded} != ${actual}`);
   return value;
+}
+
+export async function verifyCjpmProvenance(options) {
+  return verifyComponentProvenance({
+    component: 'cjpm',
+    artifactName: options.platform === 'windows-x64' ? 'cjpm.exe' : 'cjpm',
+    ...options,
+  });
 }

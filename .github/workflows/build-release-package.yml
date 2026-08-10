@@ -59,6 +59,7 @@ jobs:
       PYTHON_BUNDLE_DIR: ${{ github.workspace }}/.release-python/${{ inputs.platform }}/bundle
       RELEASE_PLATFORM: ${{ inputs.platform }}
       SOURCE_CJPM_DIR: ${{ github.workspace }}/.release-cjpm/${{ inputs.platform }}
+      SOURCE_HLE_DIR: ${{ github.workspace }}/.release-hle/${{ inputs.platform }}
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
@@ -84,6 +85,13 @@ jobs:
         with:
           name: source-cjpm-${{ inputs.platform }}
           path: ${{ env.SOURCE_CJPM_DIR }}
+
+      - name: Download same-platform source-built hle
+        if: runner.os != 'Windows'
+        uses: actions/download-artifact@v8
+        with:
+          name: source-hle-${{ inputs.platform }}
+          path: ${{ env.SOURCE_HLE_DIR }}
 
       - name: Test release build helpers
         if: inputs.platform == 'linux-x64'
@@ -317,6 +325,15 @@ jobs:
           node ci/release/install_cjpm_artifact.mjs \
             --platform "$RELEASE_PLATFORM" \
             --artifact "$SOURCE_CJPM_DIR" \
+            --sdk "$CANGJIE_HOME"
+
+      - name: Install source-built hle (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          node ci/release/install_hle_artifact.mjs \
+            --platform "$RELEASE_PLATFORM" \
+            --artifact "$SOURCE_HLE_DIR" \
             --sdk "$CANGJIE_HOME"
 
       - name: Prepare Python 3.11 bundle (Unix)

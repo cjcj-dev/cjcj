@@ -222,6 +222,21 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Prepare source-built hle artifact
+        run: |
+          node ci/release/prepare_hle_artifact.mjs \
+            --platform "${{ matrix.target }}" \
+            --binary "$CANGJIE_WORKSPACE/cangjie_tools/hyperlangExtension/target/bin/main" \
+            --outdir "$GITHUB_WORKSPACE/.release-hle/${{ matrix.target }}"
+
+      - name: Upload source-built hle artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-hle-${{ matrix.target }}
+          path: ${{ github.workspace }}/.release-hle/${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Verify bootstrap SDK
         run: |
           npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
