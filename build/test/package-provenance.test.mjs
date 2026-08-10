@@ -161,6 +161,10 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     `OPT_SOURCE=tuple:${LLVM_SHA}`,
     'OPT_VERSION=LLVM version 15.0.4',
     `OPT_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/opt'))}`,
+    'LLD_TOOL=ld.lld',
+    `LLD_SOURCE=tuple:${LLVM_SHA}`,
+    'LLD_VERSION=LLVM version 15.0.4',
+    `LLD_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/ld.lld'))}`,
     '',
   ].join('\n'));
   const baseSdkId = REVIEWED_GATE_HOST_TOOLCHAIN;
@@ -254,7 +258,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   const toolRows = new Map(packagedLlvmManifest.tools.map(row => [row.tool, row]));
   assert.equal(toolRows.get('llc').source, `tuple:${LLVM_SHA}`);
   assert.equal(toolRows.get('opt').source, `tuple:${LLVM_SHA}`);
-  assert.equal(toolRows.get('ld.lld').source, `base-sdk:${baseProvenance.artifact.sha256}`);
+  assert.equal(toolRows.get('ld.lld').source, `tuple:${LLVM_SHA}`);
   assert.equal(toolRows.get('llvm-objcopy').source, `base-sdk:${baseProvenance.artifact.sha256}`);
   assert.equal(toolRows.get('llvm-ar').present, 'no');
   console.log(`PACKAGER-OUTPUT-BEGIN\n${packaged.stdout.trim()}\nPACKAGER-OUTPUT-END`);
