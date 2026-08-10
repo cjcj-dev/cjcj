@@ -27,6 +27,7 @@ export const repoRoot = path.resolve(import.meta.dirname, '..');
 export const GATING = Object.freeze([
   'build/test/cangjie-written-tools.test.mjs',
   'build/test/darwin-cjdb-python.test.mjs',
+  'build/test/fail-closed-probes.test.mjs',
   'build/test/fetch-patches.test.mjs',
   'build/test/gate-apparatus.test.mjs',
   'build/test/git.test.mjs',
@@ -82,7 +83,7 @@ export const DEFERRED = Object.freeze([
 
 // Floors, not equalities: adding tests must stay frictionless, dropping them must
 // not. Lower these only together with the deletion that requires it.
-export const GATING_FLOOR = 26;
+export const GATING_FLOOR = 27;
 export const DISCOVERY_FLOOR = 29;
 
 // git rather than a directory walk: it enumerates what a runner checks out, and

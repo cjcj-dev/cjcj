@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {runRequiredProbe} from '../build/lib/fail-closed-probes.mjs';
 import {requirePrivateStage} from '../build/lib/package-safety.mjs';
 import {
   installPythonBundle,
@@ -651,7 +652,10 @@ if (platform.startsWith('linux-')) {
   // what points at the three directories now, so the only thing left to assert here is that
   // nothing absolute leaked in -- a RUNPATH naming the build host would make the package work
   // on this machine and nowhere else, which is exactly the failure packaging must not ship.
-  const dynamic = await $({nothrow: true, quiet: true})`readelf -d ${path.join(stage, 'bin/cjc')}`;
+  const dynamic = await runRequiredProbe({
+    label: 'package readelf -d bin/cjc',
+    run: () => $({nothrow: true, quiet: true})`readelf -d ${path.join(stage, 'bin/cjc')}`,
+  });
   const runpath = dynamic.stdout.split('\n').find(line => line.includes('RUNPATH'))?.match(/\[(.*)\]/)?.[1] || '';
   const entries = runpath.split(':').filter(Boolean);
   const hostPaths = entries.filter((entry) => entry.startsWith('/'));
@@ -668,7 +672,10 @@ if (platform.startsWith('linux-')) {
   // libLLVM-15.so instead -- that difference is the thing to fix, and adding a search path
   // would only hide it. libcangjie-runtime.so is not part of the problem; the stock
   // envsetup.sh already covers runtime/lib.
-  const dependencies = await $({nothrow: true, quiet: true})`ldd ${path.join(stage, 'bin/cjc')}`;
+  const dependencies = await runRequiredProbe({
+    label: 'package ldd bin/cjc',
+    run: () => $({nothrow: true, quiet: true})`ldd ${path.join(stage, 'bin/cjc')}`,
+  });
   const sdkInternal = dependencies.stdout.split('\n')
     .filter((line) => /libLLVM|not found/.test(line))
     .map((line) => line.trim());
