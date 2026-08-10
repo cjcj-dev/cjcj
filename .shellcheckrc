@@ -1,0 +1,17 @@
+# Repository-wide shellcheck configuration.
+#
+# The lint job runs shellcheck at --severity=info over every tracked *.sh. info
+# is the level at which SC2086 (unquoted expansion) becomes visible; warning is
+# not enough, which is the whole reason for running below error at all.
+#
+# Two checks are disabled repository-wide because every occurrence here is the
+# intended form, and leaving them on would train people to ignore the output:
+#
+#   SC2016  "expressions don't expand in single quotes". Ours are printf format
+#           strings that deliberately contain literal backticks and %s, and
+#           `bash -c 'f "$1"' _ "$arg"` where $1 must expand in the inner shell.
+#   SC1091  "not following <source>". The sourced files are per-case data
+#           (cases/*/case.conf), not code to analyse.
+#
+# Anything else stays on. Suppress a genuine one-off at the line, with a reason.
+disable=SC2016,SC1091

@@ -26,6 +26,20 @@ async function workflows() {
   return loaded;
 }
 
+// The body of one `- name: <label>` step, up to the next step at that indent.
+function step(text, label) {
+  const lines = text.split('\n');
+  const start = lines.findIndex(line => line.trim() === `- name: ${label}`);
+  if (start < 0) return '';
+  const indent = lines[start].match(/^ */)[0].length;
+  const body = [lines[start]];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim().startsWith('- name:') && line.match(/^ */)[0].length <= indent) break;
+    body.push(line);
+  }
+  return body.join('\n');
+}
+
 // Every literal test file a workflow hands to `node --test`.
 function literalTestArguments(text) {
   const named = [];
@@ -83,6 +97,26 @@ test('ci.yml runs the manifest rather than a literal file list', async () => {
     'ci.yml no longer drives its test step from the manifest');
   assert.deepEqual(literalTestArguments(ci), [],
     'ci.yml names test files literally again; drive the list from ci/test-manifest.mjs instead');
+});
+
+test('ci.yml discovers the shell scripts it lints instead of listing them', async () => {
+  // The same failure as the test list, in the same file, found the same week:
+  // a literal list named two scripts, and all seven others were added after
+  // that list was last edited. One commit even widened the .mjs check to a find
+  // and left the .sh list literal, so the two live side by side as a worked
+  // example of which one rots.
+  const ci = (await workflows()).get('ci.yml');
+  const body = step(ci, 'Run ShellCheck');
+  assert.ok(body, 'ci.yml has no Run ShellCheck step');
+  assert.match(body, /git ls-files '\*\.sh'/, 'the shellcheck step no longer discovers its own script list');
+  const literals = body.split(/\s+/).filter(token => /[\w./-]\.sh$/.test(token));
+  assert.deepEqual(literals, [], `the shellcheck step names scripts literally again: ${literals.join(', ')}`);
+  // An empty discovery would pass while checking nothing.
+  assert.match(body, /-ge \d+/, 'the shellcheck step has no floor on how many scripts it found');
+  // SC2086, unquoted expansion, is an info-level check. error and warning both
+  // look straight past the class this gate exists to catch.
+  assert.doesNotMatch(body, /--severity=(error|warning)\b/,
+    'shellcheck is back above info, where SC2086 is invisible');
 });
 
 test('no workflow runs a test file the manifest does not gate', async () => {
