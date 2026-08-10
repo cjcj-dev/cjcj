@@ -50,7 +50,7 @@ test('platform tuple core manifest remains a separate valid contract', () => {
   assert.deepEqual([...parsed.values.keys()], LLVM_TOOLS_MANIFEST_SCHEMAS.core);
 });
 
-test('platform tuple lineage binds source, version and hash for both tools', () => {
+test('platform tuple lineage binds source, version and hash for optimizer, backend and linker', () => {
   const lineageManifest = [
     `LLVM_SHA=${pins.LLVM_SHA}`,
     `LLC_SOURCE=tuple:${pins.LLVM_SHA}`,
@@ -59,6 +59,10 @@ test('platform tuple lineage binds source, version and hash for both tools', () 
     `OPT_SOURCE=tuple:${pins.LLVM_SHA}`,
     'OPT_VERSION=LLVM version 15.0.4',
     `OPT_SHA256=${'2'.repeat(64)}`,
+    'LLD_TOOL=ld.lld',
+    `LLD_SOURCE=tuple:${pins.LLVM_SHA}`,
+    'LLD_VERSION=LLD 15.0.4',
+    `LLD_SHA256=${'3'.repeat(64)}`,
   ].join('\n');
   const parsed = parseLlvmToolsManifest(lineageManifest, {schema: 'core-or-native'});
   assert.equal(parsed.schema, 'core-lineage');
@@ -66,6 +70,10 @@ test('platform tuple lineage binds source, version and hash for both tools', () 
   assert.throws(
     () => parseLlvmToolsManifest(lineageManifest.replace(`LLC_SOURCE=tuple:${pins.LLVM_SHA}`, `LLC_SOURCE=tuple:${'0'.repeat(40)}`)),
     /LLC_SOURCE does not match LLVM_SHA/,
+  );
+  assert.throws(
+    () => parseLlvmToolsManifest(lineageManifest.replace('LLD_TOOL=ld.lld', 'LLD_TOOL=lld-link')),
+    /invalid LLD_TOOL/,
   );
 });
 
