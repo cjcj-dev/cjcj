@@ -141,14 +141,62 @@ function stepRuns(step, context) {
   if (condition === undefined) return true;
   const os = condition.match(/^runner\.os (==|!=) '(\w+)'$/);
   if (os) return (os[1] === '==') === (context.runnerOs === os[2]);
-  const input = condition.match(/^inputs\.(\w+) (==|!=) '([\w-]+)'$/);
-  if (input) return (input[2] === '==') === (context.inputs.get(input[1]) === input[3]);
+  // `*` not `+`: `inputs.x != ''` is how this repo spells "was anything passed",
+  // and a `+` cannot match the empty literal at all.
+  const input = condition.match(/^inputs\.(\w+) (==|!=) '([\w-]*)'$/);
+  if (input) {
+    // Reading straight from the caller's map would compare against undefined for
+    // any input the caller omitted, and `undefined !== ''` flips every one of
+    // these conditions the wrong way -- the test would then believe a step runs
+    // that Actions skips. Resolve through the declared defaults first.
+    assert.ok(context.inputs.has(input[1]), `no resolved value for inputs.${input[1]}`);
+    return (input[2] === '==') === (context.inputs.get(input[1]) === input[3]);
+  }
   return assert.fail(`unrecognized step condition, cannot decide statically: ${condition}`);
+}
+
+const unquote = value => value?.replace(/^'(.*)'$/, '$1').replace(/^"(.*)"$/, '$1');
+
+// name -> declaration block, for the inputs a called workflow accepts.
+function declaredInputs(text) {
+  const body = block(uncommented(text), /^\s*workflow_call:\s*$/);
+  const inputsBlock = body === undefined ? undefined : block(body, /^\s*inputs:\s*$/);
+  const declared = new Map();
+  if (inputsBlock === undefined) return declared;
+  let current;
+  for (const line of inputsBlock.split('\n')) {
+    const header = line.match(/^ {6}([A-Za-z0-9_-]+):\s*$/);
+    if (header) declared.set(current = header[1], []);
+    else if (current) declared.get(current).push(line);
+  }
+  return new Map([...declared].map(([name, lines]) => [name, lines.join('\n')]));
+}
+
+// What `inputs.<name>` actually evaluates to inside the called workflow: the
+// caller's value if it passed one, otherwise the declared default, and for a
+// string input declared without one, ''. Actions resolves it this way, so a test
+// that reads only the caller's `with:` block disagrees with the thing it checks.
+function effectiveInputs(text, inputs) {
+  const resolved = new Map(inputs);
+  for (const [name, declaration] of declaredInputs(text)) {
+    if (resolved.has(name)) continue;
+    const fallback = scalar(declaration, 'default');
+    if (fallback !== undefined) {
+      resolved.set(name, unquote(fallback));
+      continue;
+    }
+    // No caller value and no default: only a string input has an implicit one.
+    // Anything else would be a real gap, so say so rather than pick a value.
+    assert.equal(scalar(declaration, 'type'), 'string',
+      `input ${name} is omitted by the caller and declares no default`);
+    resolved.set(name, '');
+  }
+  return resolved;
 }
 
 // Artifacts a called workflow will download and fail on if they are absent.
 function failClosedDownloads(text, inputs) {
-  const context = {inputs, runnerOs: runnerOs(inputs.get('runner'))};
+  const context = {inputs: effectiveInputs(text, inputs), runnerOs: runnerOs(inputs.get('runner'))};
   return steps(text)
     .filter(step => step.includes('uses: actions/download-artifact@'))
     .filter(step => scalar(step, 'continue-on-error') !== 'true')
@@ -356,4 +404,44 @@ test('final std install roots satisfy package_sdk layout (a) on every release ta
   } finally {
     await fs.rm(fixture, {recursive: true, force: true});
   }
+});
+
+test('an omitted optional input reads the way Actions reads it, not as undefined', async () => {
+  // release.yml passes cross_std_artifact on two matrix rows and arm-soak.yml passes
+  // it on none. build-release-package.yml gates a download on `!= ''`, so the two
+  // cases have to come out opposite -- and the omitted one has to come out the same
+  // way Actions comes out, which is '' (its declared default), not undefined.
+  const consumer = await readWorkflow('build-release-package.yml');
+  // failClosedDownloads yields the artifact names the job will demand.
+  const gated = 'final-std-windows-x64';
+  // Every input the surviving download steps interpolate into their names.
+  const base = [
+    ['runner', 'ubuntu-24.04-arm'],
+    ['platform', 'linux-aarch64'],
+    ['llvm_platform', 'linux_aarch64'],
+    ['std_artifact', 'final-std-linux-aarch64'],
+  ];
+
+  const withCross = failClosedDownloads(consumer,
+    new Map([...base, ['cross_std_artifact', 'final-std-windows-x64']]));
+  assert.ok(withCross.includes(gated), `passing it should demand the artifact: ${withCross}`);
+
+  const withoutCross = failClosedDownloads(consumer, new Map(base));
+  assert.ok(!withoutCross.includes(gated),
+    `omitting it must skip that download the way Actions does: ${withoutCross}`);
+
+  // The specific wrong answer this guards: leaving the caller's map alone makes the
+  // value undefined, `undefined !== ''` holds, and the step reads as running.
+  const resolved = effectiveInputs(consumer, new Map(base));
+  assert.equal(resolved.get('cross_std_artifact'), '');
+  assert.equal(scalar(block(uncommented(consumer), /^ {6}cross_std_artifact:\s*$/), 'default'), "''");
+});
+
+test('an input the caller omits and the workflow does not default is a failure, not a guess', async () => {
+  // The unrecognized-condition assert exists so the parser never picks a side it
+  // cannot justify; the same has to hold for a value it cannot resolve.
+  const declared = ['on:', '  workflow_call:', '    inputs:', '      needed:',
+    '        required: true', '        type: boolean'].join('\n');
+  assert.throws(() => effectiveInputs(declared, new Map()),
+    /input needed is omitted by the caller and declares no default/);
 });
