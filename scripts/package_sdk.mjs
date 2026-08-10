@@ -622,7 +622,7 @@ const llvmLibraryPaths = [
   path.join(stage, 'third_party', 'llvm', 'lib'),
   path.join(stage, 'runtime', 'lib', runtimeDir),
   path.join(stage, 'tools', 'lib'),
-  path.join(stage, 'python', 'lib'),
+  path.join(stage, 'third_party', 'python', 'lib'),
 ].filter(Boolean);
 if (platform.startsWith('linux-')) {
   llvmToolEnvironment.LD_LIBRARY_PATH = [...llvmLibraryPaths, process.env.LD_LIBRARY_PATH || '']
