@@ -70,7 +70,7 @@ function manifest(platform) {
     } : {
       status: SOURCE_PROVENANCE_RESOLVED,
       repository: `https://example.invalid/${component}.git`,
-      commit: '0123456789abcdef0123456789abcdef01234567',
+      commit: component === 'python' ? '3.11.9' : '0123456789abcdef0123456789abcdef01234567',
     },
     artifact: {
       path: `${component}/fixture`,
