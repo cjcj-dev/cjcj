@@ -9,6 +9,7 @@ import {
   CMAKE_SHA256,
   CMAKE_VERSION,
   LLVM_PYTHON_FORMULA,
+  LLVM_PYTHON_VERSION,
   assertCmakeVersion,
   installCmake3,
   installDarwin,
@@ -22,6 +23,7 @@ function write(file, contents = '') {
 
 test('Darwin dependency pins keep LLVM 16 and OpenSSL 3 without top-level Python', () => {
   assert.equal(LLVM_PYTHON_FORMULA, 'python@3.12');
+  assert.equal(LLVM_PYTHON_VERSION, '3.12');
   assert.equal(CMAKE_VERSION, '3.31.10');
   assert.ok(!BREW_PACKAGES.includes('python3'));
   assert.ok(BREW_PACKAGES.includes('llvm@16'));
@@ -88,14 +90,13 @@ test('CMake installer fails closed on a mismatched archive digest', async () => 
   }
 });
 
-test('Darwin install keeps a complete LLVM Python keg unlinked', async () => {
+test('Darwin install exposes the supported LLVM Python keg without linking it', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'darwin-deps-'));
   const keg = path.join(root, 'python@3.12');
   const kegInclude = path.join(keg, 'include', 'python3.12');
-  const hostInclude = path.join(root, 'host-python-include');
   const commands = [];
+  const exposedPaths = [];
   write(path.join(kegInclude, 'Python.h'));
-  write(path.join(hostInclude, 'Python.h'));
   try {
     const runCommand = async (command, options = {}) => {
       commands.push(command);
@@ -104,11 +105,14 @@ test('Darwin install keeps a complete LLVM Python keg unlinked', async () => {
         return {exitCode: 0, stdout: ''};
       }
       if (command[0] === 'brew' && command[1] === '--prefix') return {exitCode: 0, stdout: `${keg}\n`};
-      if (command[0] === path.join(keg, 'bin', 'python3.12')) {
+      if (command[0] === path.join(keg, 'libexec', 'bin', 'python3')) {
         return {exitCode: 0, stdout: `3.12\n${kegInclude}\n`};
       }
       if (command[0] === 'brew' && command[1] === 'install') return {exitCode: 0, stdout: ''};
-      if (command[0] === 'python3') return {exitCode: 0, stdout: `3.14\n${hostInclude}\n`};
+      if (command[0] === 'python3') {
+        assert.deepEqual(exposedPaths, [path.join(keg, 'libexec', 'bin')]);
+        return {exitCode: 0, stdout: `3.12\n${kegInclude}\n`};
+      }
       if (command[0].endsWith('/llvm-config')) return {exitCode: 0, stdout: '16.0.6\n'};
       if (command[0].endsWith('/openssl')) return {exitCode: 0, stdout: 'OpenSSL 3.6.3 21 Jan 2026\n'};
       if (command[0] === 'xcrun') return {exitCode: 0, stdout: '/SDK\n'};
@@ -122,6 +126,7 @@ test('Darwin install keeps a complete LLVM Python keg unlinked', async () => {
       runCommand,
       cmakeInstaller: async () => '/fixture/cmake',
       findExecutable: () => '/fixture/brew',
+      exposePath: directory => exposedPaths.push(directory),
     });
 
     const brewInstalls = commands.filter(command => command[0] === 'brew' && command[1] === 'install');
@@ -129,7 +134,38 @@ test('Darwin install keeps a complete LLVM Python keg unlinked', async () => {
       ['brew', 'install', '--skip-link', LLVM_PYTHON_FORMULA],
       ['brew', 'install', ...BREW_PACKAGES],
     ]);
+    assert.deepEqual(exposedPaths, [path.join(keg, 'libexec', 'bin')]);
     assert.ok(!commands.flat().includes('--overwrite'));
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('Darwin install rejects a newer host Python when the pinned shim is not selected', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'darwin-python-selection-'));
+  const keg = path.join(root, 'python@3.12');
+  const kegInclude = path.join(keg, 'include', 'python3.12');
+  const hostInclude = path.join(root, 'host-python-include');
+  write(path.join(kegInclude, 'Python.h'));
+  write(path.join(hostInclude, 'Python.h'));
+  try {
+    const runCommand = async command => {
+      if (command[0] === 'brew' && command[1] === 'install') return {exitCode: 0, stdout: ''};
+      if (command[0] === 'brew' && command[1] === '--prefix') return {exitCode: 0, stdout: `${keg}\n`};
+      if (command[0] === path.join(keg, 'libexec', 'bin', 'python3')) {
+        return {exitCode: 0, stdout: `3.12\n${kegInclude}\n`};
+      }
+      if (command[0] === 'python3') return {exitCode: 0, stdout: `3.14\n${hostInclude}\n`};
+      throw new Error(`unexpected command: ${command.join(' ')}`);
+    };
+    await assert.rejects(installDarwin({
+      buildRoot: root,
+      target: {spec: {llvmBinDir: '/fixture/llvm', opensslLibDir: '/fixture/openssl/lib'}},
+    }, {
+      runCommand,
+      findExecutable: () => '/fixture/brew',
+      exposePath: () => {},
+    }), /Python 3\.12 is required, got: 3\.14/);
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
@@ -142,7 +178,7 @@ test('Darwin install rejects an unlinked LLVM Python keg without headers', async
     const runCommand = async command => {
       if (command[0] === 'brew' && command[1] === 'install') return {exitCode: 0, stdout: ''};
       if (command[0] === 'brew' && command[1] === '--prefix') return {exitCode: 0, stdout: `${keg}\n`};
-      if (command[0] === path.join(keg, 'bin', 'python3.12')) {
+      if (command[0] === path.join(keg, 'libexec', 'bin', 'python3')) {
         return {exitCode: 0, stdout: `3.12\n${path.join(keg, 'missing-include')}\n`};
       }
       throw new Error(`unexpected command: ${command.join(' ')}`);
@@ -150,7 +186,11 @@ test('Darwin install rejects an unlinked LLVM Python keg without headers', async
     await assert.rejects(installDarwin({
       buildRoot: root,
       target: {spec: {llvmBinDir: '/fixture/llvm', opensslLibDir: '/fixture/openssl/lib'}},
-    }, {runCommand, findExecutable: () => '/fixture/brew'}), /Python headers are required/);
+    }, {
+      runCommand,
+      findExecutable: () => '/fixture/brew',
+      exposePath: () => {},
+    }), /Python headers are required/);
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
