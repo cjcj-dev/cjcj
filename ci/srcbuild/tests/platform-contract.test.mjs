@@ -43,6 +43,30 @@ test('source-build workflow connects every native runner to its LLVM and std art
   }
 });
 
+test('source-build cache makes durable GHA writes primary and retains write diagnostics', async () => {
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
+  assert.ok(workflow.includes('SCCACHE_MULTILEVEL_CHAIN: "gha"'));
+  assert.ok(!workflow.includes('SCCACHE_MULTILEVEL_CHAIN: "disk,gha"'));
+  assert.ok(workflow.includes('SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"'));
+  assert.ok(workflow.includes('SCCACHE_ERROR_LOG=$RUNNER_TEMP/sccache-error.log'));
+  assert.ok(workflow.includes('name: Capture sccache diagnostics'));
+  assert.ok(workflow.includes('name: sccache-diagnostics-${{ matrix.target }}-${{ github.run_attempt }}'));
+  assert.ok(workflow.includes('retention-days: 1'));
+});
+
+test('Windows MinGW product cache has one bounded rate-limit retry', async () => {
+  const workflow = await fs.readFile(path.join(root, '.github/workflows/build-windows-runtime.yml'), 'utf8');
+  const start = workflow.indexOf('- name: Restore official MinGW toolchain');
+  const end = workflow.indexOf('- name: Cross-build pinned Windows runtime');
+  assert.ok(start >= 0 && end > start);
+  const cacheBlock = workflow.slice(start, end);
+  assert.equal(cacheBlock.match(/uses: actions\/cache\/save@v6/g)?.length, 2);
+  assert.equal(cacheBlock.match(/lookup-only: true/g)?.length, 2);
+  assert.equal(cacheBlock.match(/run: sleep 5/g)?.length, 1);
+  assert.ok(cacheBlock.includes("steps.mingw-cache-probe.outputs.cache-hit != 'true'"));
+  assert.ok(cacheBlock.includes('still absent after one bounded retry'));
+});
+
 test('native build environments use configured architecture, OpenSSL, and loader', () => {
   const oldDryRun = process.env.CANGJIE_BUILD_DRY_RUN;
   process.env.CANGJIE_BUILD_DRY_RUN = '1';

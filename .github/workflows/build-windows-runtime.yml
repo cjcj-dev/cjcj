@@ -75,6 +75,51 @@ jobs:
           path: .windows-runtime-buildtools/llvm-mingw-w64
           key: ${{ steps.mingw-cache.outputs.cache-primary-key }}
 
+      # actions/cache 6.1.0 does not retry HTTP 429 reservations. Confirm that
+      # the product cache became visible, then retry once beyond the observed
+      # three-second rate-limit window without rebuilding the toolchain.
+      - name: Verify official MinGW toolchain cache save
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        id: mingw-cache-probe
+        uses: actions/cache/restore@v6
+        with:
+          path: .windows-runtime-buildtools/llvm-mingw-w64
+          key: ${{ steps.mingw-cache.outputs.cache-primary-key }}
+          lookup-only: true
+
+      - name: Back off before retrying official MinGW toolchain cache save
+        if: steps.mingw-cache.outputs.cache-hit != 'true' && steps.mingw-cache-probe.outputs.cache-hit != 'true'
+        run: sleep 5
+
+      - name: Retry official MinGW toolchain cache save
+        if: steps.mingw-cache.outputs.cache-hit != 'true' && steps.mingw-cache-probe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .windows-runtime-buildtools/llvm-mingw-w64
+          key: ${{ steps.mingw-cache.outputs.cache-primary-key }}
+
+      - name: Verify retried official MinGW toolchain cache save
+        if: steps.mingw-cache.outputs.cache-hit != 'true' && steps.mingw-cache-probe.outputs.cache-hit != 'true'
+        id: mingw-cache-retry-probe
+        uses: actions/cache/restore@v6
+        with:
+          path: .windows-runtime-buildtools/llvm-mingw-w64
+          key: ${{ steps.mingw-cache.outputs.cache-primary-key }}
+          lookup-only: true
+
+      - name: Report official MinGW toolchain cache persistence
+        if: steps.mingw-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          FIRST_PROBE_HIT: ${{ steps.mingw-cache-probe.outputs.cache-hit }}
+          RETRY_PROBE_HIT: ${{ steps.mingw-cache-retry-probe.outputs.cache-hit }}
+        run: |
+          if [[ "$FIRST_PROBE_HIT" == true || "$RETRY_PROBE_HIT" == true ]]; then
+            echo "Official MinGW toolchain cache is visible for the exact primary key."
+          else
+            echo "::warning::Official MinGW toolchain cache is still absent after one bounded retry."
+          fi
+
       - name: Cross-build pinned Windows runtime
         env:
           RUNTIME_TARGET: windows-x86_64

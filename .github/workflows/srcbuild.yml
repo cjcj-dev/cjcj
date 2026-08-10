@@ -105,10 +105,12 @@ jobs:
       CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
       SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_MULTILEVEL_CHAIN: "disk,gha"
+      # The durable cross-run backend must be L0: with policy=l0, sccache stops
+      # a write as soon as L0 fails. A disposable disk L0 therefore prevented
+      # every GHA write on darwin-arm64 in run 31357498770.
+      SCCACHE_MULTILEVEL_CHAIN: "gha"
       SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"
-      SCCACHE_DIR: ${{ github.workspace }}/.srcbuild/sccache
-      SCCACHE_CACHE_SIZE: 5G
+      SCCACHE_LOG: warn
       cjHeapSize: 12GB
       cjHeapSwap: "on"
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
@@ -127,6 +129,10 @@ jobs:
 
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
+
+      - name: Configure sccache diagnostics
+        shell: bash
+        run: echo "SCCACHE_ERROR_LOG=$RUNNER_TEMP/sccache-error.log" >> "$GITHUB_ENV"
 
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.10
@@ -338,6 +344,25 @@ jobs:
             ${{ runner.temp }}/cjcj-srcbuild-verify/*.log
             .srcbuild/shim-build.log
           if-no-files-found: warn
+
+      - name: Capture sccache diagnostics
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          "${SCCACHE_PATH:-sccache}" --show-stats --stats-format=json \
+            > "$RUNNER_TEMP/sccache-stats.json"
+
+      - name: Upload sccache diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sccache-diagnostics-${{ matrix.target }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/sccache-error.log
+            ${{ runner.temp }}/sccache-stats.json
+          if-no-files-found: warn
+          retention-days: 1
 
   artifact-contract:
     name: Publish final std artifact contract
