@@ -382,9 +382,10 @@ test('source build keeps a version-matched plain host runtime across both bootst
   ]) assert.ok(workflow.includes(contract), contract);
 
   const stdlib = await fs.readFile(path.join(root, 'build/srcbuild/stages/stdlib.mjs'), 'utf8');
+  const nativeBuild = stdlib.indexOf("'build', '-t', config.buildType");
   assert.ok(stdlib.indexOf('assertRuntimeSplit({') < stdlib.indexOf("['clean']"));
-  assert.ok(stdlib.indexOf("['clean']") < stdlib.indexOf("['build', '-t'"));
-  assert.ok(stdlib.indexOf("['build', '-t'") < stdlib.indexOf('assertRuntimeCommonCache({'));
+  assert.ok(stdlib.indexOf("['clean']") < nativeBuild);
+  assert.ok(nativeBuild < stdlib.indexOf('assertRuntimeCommonCache({'));
 
   const activation = await fs.readFile(path.join(root, 'ci/srcbuild/steps/activate-source-sdk.mjs'), 'utf8');
   assert.ok(activation.includes('assertRuntimeSplit({'));
