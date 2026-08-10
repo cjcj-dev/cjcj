@@ -37,6 +37,8 @@ jobs:
             | xargs -0 -n1 node --check
       - name: Test LLVM tools manifest contract
         run: node --test ci/llvm-tools-manifest.test.mjs
+      - name: Test workflow artifact contracts
+        run: node --test ci/srcbuild/tests/platform-contract.test.mjs ci/srcbuild/tests/release-wire.test.mjs
       - name: Verify smoke assets
         run: |
           test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5

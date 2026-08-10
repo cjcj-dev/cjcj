@@ -12,10 +12,8 @@ on:
         description: >
           Same-platform source-built final std artifact. build-release-package.yml
           requires it and asserts it equals final-std-<platform>, so the default is
-          the only accepted value for linux-aarch64.
-          NOTE: this workflow has no producer for that artifact -- it needs one from
-          a source build in the same run before it can complete. Until then the
-          package job will fail at the (fail-closed) download step.
+          the only accepted value for linux-aarch64. The source-final-std job is its
+          only producer in this run.
         required: false
         type: string
         default: final-std-linux-aarch64
@@ -25,13 +23,15 @@ permissions:
   actions: read
 
 jobs:
-  fixed-llvm-tools:
-    name: Build LLVM tools
-    uses: ./.github/workflows/build-fixed-llc.yml
+  source-final-std:
+    name: Build source SDK and final std artifacts
+    uses: ./.github/workflows/srcbuild.yml
+    with:
+      build_type: relwithdebinfo
 
   package:
     name: Build Linux ARM package once
-    needs: fixed-llvm-tools
+    needs: source-final-std
     uses: ./.github/workflows/build-release-package.yml
     with:
       runner: ubuntu-24.04-arm
@@ -100,3 +100,10 @@ jobs:
           done
           echo "ARM_SOAK_SUMMARY rounds=$rounds failed=$failed"
           test "$failed" -eq 0
+
+# Source-build owns every artifact the package job downloads on this platform:
+# final-std-linux-aarch64, source-cjpm-linux-aarch64, and (via its own fixed-llvm
+# job) fixed-llvm-tools-linux_aarch64. Calling build-fixed-llc.yml here as well
+# would upload the four fixed-llvm-tools-* names twice in one run, which
+# upload-artifact rejects, so this workflow keeps release.yml's single-producer
+# shape and reaches the LLVM tools through srcbuild.yml.
