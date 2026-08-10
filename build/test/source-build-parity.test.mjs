@@ -6,6 +6,11 @@ import path from 'node:path';
 import test from 'node:test';
 import {buildConfig} from '../lib/config.mjs';
 import {formatCommand, run as runCommand} from '../lib/runner.mjs';
+import {
+  assertRuntimeCommonCache,
+  assertRuntimeSplit,
+  hostLoaderPath,
+} from '../lib/runtime-split.mjs';
 import * as compiler from '../srcbuild/stages/compiler.mjs';
 import * as packageStage from '../srcbuild/stages/package.mjs';
 import * as runtime from '../srcbuild/stages/runtime.mjs';
@@ -133,6 +138,64 @@ test('native target contracts match the source-build runner matrix', () => {
       [spec.os, spec.arch, spec.runtimeTuple, spec.llvmPlatform, spec.expectedStdArtifacts.bitcode],
       [osName, arch, tuple, llvmPlatform, bitcode],
     );
+  }
+});
+
+test('source builds fail closed unless host runtime is plain and target runtime is coloured', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-runtime-split-'));
+  try {
+    const target = buildConfig({targetKey: 'linux-x64'}).target;
+    const hostSdk = directory(root, 'host-sdk');
+    const targetSdk = directory(root, 'target-sdk');
+    const relative = ['runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary];
+    const hostRuntime = file(hostSdk, relative, 'host-runtime');
+    const targetRuntime = file(targetSdk, relative, 'target-runtime');
+    const symbols = runtime => runtime === hostRuntime ? '' : `00000000 D g_cjLoadBadMask\n`;
+    const messages = [];
+
+    const result = assertRuntimeSplit({
+      hostSdk,
+      targetSdk,
+      target,
+      readSymbols: symbols,
+      log: message => messages.push(message),
+    });
+    assert.equal(result.hostCount, 0);
+    assert.equal(result.targetCount, 1);
+    assert.notEqual(result.hostRuntime, result.targetRuntime);
+    assert.match(messages.join('\n'), /RUNTIME_SPLIT_ASSERT_PASS host=0 .* target=1 /);
+
+    assert.throws(
+      () => assertRuntimeSplit({
+        hostSdk,
+        targetSdk,
+        target,
+        readSymbols: () => `00000000 D g_cjLoadBadMask\n`,
+      }),
+      /count contract failed: host=1 .* target=1 .* expected host=0 target=1/,
+    );
+
+    const loader = hostLoaderPath({hostSdk, targetSdk, target, inherited: '/inherited'}).split(path.delimiter);
+    assert.deepEqual(loader.slice(0, 3), [
+      path.join(targetSdk, 'third_party', 'llvm', 'lib'),
+      path.dirname(hostRuntime),
+      path.join(targetSdk, 'tools', 'lib'),
+    ]);
+    assert.ok(!loader.includes(path.dirname(targetRuntime)));
+
+    const runtimeTarget = directory(root, 'workspace', 'cangjie_runtime', 'runtime', 'target');
+    const cache = file(root, ['stdlib', 'build', 'build', 'CMakeCache.txt'], [
+      `RUNTIME_COMMON_LIB_DIR:STRING=${path.join(runtimeTarget, 'common', 'linux_release_x86_64', 'lib', target.spec.runtimeTuple)}`,
+      '',
+    ].join('\n'));
+    assertRuntimeCommonCache({cache, runtimeTarget, log: () => {}});
+    fs.writeFileSync(cache, 'RUNTIME_COMMON_LIB_DIR:STRING=/wrong/host/runtime\n');
+    assert.throws(
+      () => assertRuntimeCommonCache({cache, runtimeTarget}),
+      /RUNTIME_COMMON_LIB_DIR escaped target runtime/,
+    );
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
   }
 });
 
