@@ -148,6 +148,150 @@ function assertFrozenStamp(artifactValue, component, prefix, frozen) {
   }
 }
 
+// ── Cangjie-written components ────────────────────────────────────────────────
+// A packaged executable is Cangjie-written when it references the runtime entry
+// points the compiler emits. That is a structural property of the emitted code,
+// not a name: `CJ_MCC_` cannot be renamed without breaking the load-time symbol
+// contract, so it cannot drift the way a hard-coded artifact list does. Measured
+// against the factory SDK (cjcj-pin-937877c8), this splits exactly the way the
+// scope determination did: cjcov/cjpm/cjtrace-recover/hle carry the references,
+// cjc/chir-dis/cjfmt/cjlint/cjprof/cjdb/LSPServer/LSPMacroServer carry none.
+const CJ_RUNTIME_ENTRY_MARKER = Buffer.from('CJ_MCC_');
+const TOOL_STAMP_PREFIX = 'CJTOOL-COMMIT';
+
+function isCangjieBinary(bytes) {
+  return bytes.indexOf(CJ_RUNTIME_ENTRY_MARKER) >= 0;
+}
+
+// Discovery, not a list. hle is wired today; cjcov and cjtrace-recover land when
+// TOOLS_REF bumps; whatever Cangjie tool ships next is covered the moment it
+// appears in the stage. A name list would have to be edited each time, and the
+// edit is exactly what gets forgotten (arm-soak's hard-coded artifact name, and
+// the four hard-coded counts in kkk2_gate.sh:195, are the same failure).
+async function discoverCangjieTools(stage, exeSuffix) {
+  const found = [];
+  for (const dir of [path.join(stage, 'tools', 'bin'), path.join(stage, 'bin')]) {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, {withFileTypes: true});
+    } catch {
+      continue;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!entry.isFile()) continue;
+      if (exeSuffix && !entry.name.endsWith(exeSuffix)) continue;
+      const file = path.join(dir, entry.name);
+      const bytes = await fs.readFile(file);
+      if (!isCangjieBinary(bytes)) continue;
+      const base = exeSuffix ? entry.name.slice(0, -exeSuffix.length) : entry.name;
+      found.push({component: `tool-${base}`, file});
+    }
+  }
+  if (found.length === 0) {
+    // Zero discovered is not a pass. Every release package ships at least cjpm,
+    // so an empty result means the walk looked in the wrong place or the stage
+    // is not populated — either way the manifest must not claim coverage.
+    throw new Error('no Cangjie-written tool was found under tools/bin or bin; ' +
+      'the package always ships at least cjpm, so this is an apparatus failure, not a clean tree');
+  }
+  return found;
+}
+
+// The stamp rule for Cangjie tools, with its own expiry built in.
+//
+// Today none of them carry CJTOOL-COMMIT: they are compiled by the stock driver
+// and nothing injects a marker, so demanding one would fail every package. But
+// "report-only until someone remembers" is how an exemption becomes permanent.
+// So the exemption is keyed to observable state instead of to a date or a note:
+// the moment ANY discovered tool carries the stamp, the build side has started
+// stamping, and every one of them must carry a clean one. There is nothing to
+// remember and nothing to switch off by hand.
+function assertToolStamps(tools, expectedCommit) {
+  const anyStamped = tools.some(tool => (tool.value.stamp_occurrences[TOOL_STAMP_PREFIX] || []).length > 0);
+  if (!anyStamped) {
+    return {
+      enforced: false,
+      unstamped: tools.map(tool => tool.component),
+    };
+  }
+  for (const tool of tools) {
+    assertFrozenStamp(tool.value, tool.component, TOOL_STAMP_PREFIX,
+      expectedCommit || (tool.value.stamp_occurrences[TOOL_STAMP_PREFIX] || [])[0] || '');
+  }
+  return {enforced: true, unstamped: []};
+}
+
+// ── std: reconcile the packaged bytes against the block PROVENANCE.txt already
+//    carries ───────────────────────────────────────────────────────────────────
+// The std row hashes PROVENANCE.txt, and PROVENANCE.txt ends with one
+// `<sha256>  <relative path>` line per installed artifact (build/lib/provenance.mjs
+// writeStdProvenance). Nothing ever read that block back, so swapping every std
+// archive for a factory copy left the manifest byte-identical. The data was
+// already there; only the reconciliation was missing.
+//
+// The comparison is by content, deliberately not by path: package_sdk.mjs owns
+// the install-prefix -> stage mapping, and re-deriving it here would be a second
+// copy of that logic that drifts away from the first.
+function provenanceArtifactHashes(text) {
+  const marker = text.indexOf('ARTIFACT-SHA256:');
+  if (marker < 0) return null;
+  const hashes = new Set();
+  for (const line of text.slice(marker).split('\n').slice(1)) {
+    const match = line.match(/^([0-9a-f]{64})\s\s(.+)$/);
+    if (match) hashes.add(match[1]);
+  }
+  return hashes;
+}
+
+async function stagedStdFiles(stage) {
+  const roots = [path.join(stage, 'modules'), path.join(stage, 'lib'), path.join(stage, 'runtime', 'lib')];
+  const files = [];
+  const walk = async dir => {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, {withFileTypes: true});
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) await walk(file);
+      else if (entry.isFile() && /(^|[/\\])(std|libcangjie-std)/.test(file)) files.push(file);
+    }
+  };
+  for (const root of roots) await walk(root);
+  return files.sort();
+}
+
+async function reconcileStdArtifacts(stage, stdText) {
+  const hashes = provenanceArtifactHashes(stdText);
+  if (hashes === null) {
+    throw new Error('std PROVENANCE.txt has no ARTIFACT-SHA256 block; ' +
+      'the packaged std bytes cannot be tied to the build that produced them');
+  }
+  if (hashes.size === 0) {
+    throw new Error('std PROVENANCE.txt ARTIFACT-SHA256 block is empty');
+  }
+  const staged = await stagedStdFiles(stage);
+  const unmatched = [];
+  let matched = 0;
+  for (const file of staged) {
+    if (hashes.has(await sha256(file))) matched += 1;
+    else unmatched.push(packagedPath(stage, file));
+  }
+  if (matched === 0) {
+    // Same shape as the empty-population guard: nothing verified is not a pass.
+    throw new Error('no packaged std artifact matched PROVENANCE.txt ARTIFACT-SHA256; ' +
+      `staged=${staged.length} provenance_entries=${hashes.size}`);
+  }
+  if (unmatched.length) {
+    throw new Error(`${unmatched.length} packaged std artifact(s) are not in PROVENANCE.txt ` +
+      `ARTIFACT-SHA256, so they are not from this std build: ${unmatched.slice(0, 8).join(', ')}` +
+      `${unmatched.length > 8 ? ` (+${unmatched.length - 8} more)` : ''}`);
+  }
+  return {verified: matched, provenance_entries: hashes.size};
+}
+
 function packagedPath(stage, file) {
   return path.relative(stage, file).split(path.sep).join('/');
 }
@@ -206,6 +350,11 @@ export async function writeReleaseManifest({
   stdRepository = '',
   cjpmRepository = '',
   cjpmCommit = '',
+  // Supplied once TOOLS_REF lands; until then the discovered tools carry the
+  // repository they were built from only if the caller says so, and the stamp
+  // rule below falls back to "any clean SHA" rather than inventing one.
+  toolsRepository = '',
+  toolsCommit = '',
   pythonArtifact = '',
   pythonMetadata = {},
   pythonMetadataArtifact = '',
@@ -251,13 +400,36 @@ export async function writeReleaseManifest({
   const runtime = await artifact(stage, runtimeArtifact, 'canonical packaged runtime is missing', ['CJRT-COMMIT']);
   const llc = await artifact(stage, llcFile, 'packaged llc is missing', ['CJLLVM-COMMIT']);
   const opt = await artifact(stage, optFile, 'packaged opt is missing', ['CJLLVM-COMMIT']);
-  const cjpm = await artifact(stage, cjpmFile, 'packaged cjpm is missing');
+  const cjpm = await artifact(stage, cjpmFile, 'packaged cjpm is missing', [TOOL_STAMP_PREFIX]);
   const python = await artifact(stage, pythonArtifact, `packaged Python ${pythonVersion} is missing`);
   const pythonProvenance = await artifact(stage, pythonMetadataArtifact, 'packaged Python provenance is missing');
   assertFrozenStamp(cjcjArtifact, 'cjc', 'CJCJ-COMMIT', frozen.cjcj);
   assertFrozenStamp(runtime, 'runtime', 'CJRT-COMMIT', frozen.runtime);
   assertFrozenStamp(llc, 'llvm-llc', 'CJLLVM-COMMIT', frozen.llvm);
   assertFrozenStamp(opt, 'llvm-opt', 'CJLLVM-COMMIT', frozen.llvm);
+  // Every Cangjie-written tool the stage actually contains, found by structure
+  // rather than by name. cjpm resolves through the same path, so it is covered
+  // by the same rule instead of by a special case.
+  const discovered = await discoverCangjieTools(stage, exeSuffix);
+  const tools = [];
+  for (const {component, file} of discovered) {
+    tools.push({
+      component,
+      file,
+      value: file === cjpmFile ? cjpm : await artifact(stage, file, `packaged ${component} is missing`, [TOOL_STAMP_PREFIX]),
+    });
+  }
+  const toolStamps = assertToolStamps(tools, toolsCommit);
+  if (!toolStamps.enforced) {
+    // Named, not silent. A limitation nobody can read is indistinguishable from
+    // no limitation, which is how "known issue, does not affect the release"
+    // text gets written; these names go to stderr and into each row's build
+    // section so the limitation is recomputable from the package itself.
+    console.error(`[release-manifest] WARNING no Cangjie-written tool carries ${TOOL_STAMP_PREFIX}, ` +
+      `so their identity rests on the caller-supplied sidecar alone: ${toolStamps.unstamped.join(', ')}`);
+    console.error('[release-manifest] this exemption ends by itself: the first tool that carries ' +
+      `${TOOL_STAMP_PREFIX} makes the stamp mandatory for all of them`);
+  }
   if (!await fileExists(gateApparatusArtifact)) {
     throw new Error(`packaged gate apparatus provenance is missing: ${gateApparatusArtifact || '<empty>'}`);
   }
@@ -345,6 +517,11 @@ export async function writeReleaseManifest({
         return {path: value.path, sha256: value.sha256};
       })(),
       embedded_stamp: 'no-stamp',
+      // std ships as many archives and shared objects, none of which can carry an
+      // embedded stamp of its own. Their identity lives in PROVENANCE.txt's
+      // ARTIFACT-SHA256 block, and this records that the packaged bytes were
+      // actually reconciled against it rather than merely accompanied by it.
+      build: await reconcileStdArtifacts(stage, stdText),
     },
     {
       schema: 1,
@@ -353,7 +530,29 @@ export async function writeReleaseManifest({
       source: source(cjpmRepository, cjpmCommit, 'cjpm'),
       artifact: {path: cjpm.path, sha256: cjpm.sha256},
       embedded_stamp: cjpm.embedded_stamp,
+      build: {identity_rule: toolStamps.enforced ? 'enforced' : 'report-only-until-first-stamp'},
     },
+    // One row per Cangjie-written tool the stage actually contains, minus cjpm
+    // which keeps its own component name for downstream readers.
+    ...tools
+      .filter(tool => tool.file !== cjpmFile)
+      .map(tool => ({
+        schema: 1,
+        platform,
+        component: tool.component,
+        // Until TOOLS_REF is wired these tools come out of the same cangjie-tools
+        // checkout as cjpm, so falling back to cjpm's repository and commit is
+        // the true answer rather than a placeholder. It is still an inference,
+        // so the row says which of the two it was instead of leaving the reader
+        // to guess — that distinction is the whole reason this row exists.
+        source: source(toolsRepository || cjpmRepository, toolsCommit || cjpmCommit, tool.component),
+        artifact: {path: tool.value.path, sha256: tool.value.sha256},
+        embedded_stamp: tool.value.embedded_stamp,
+        build: {
+          identity_rule: toolStamps.enforced ? 'enforced' : 'report-only-until-first-stamp',
+          source_provenance: toolsCommit ? 'supplied' : 'inherited-from-cjpm',
+        },
+      })),
     {
       schema: 1,
       platform,

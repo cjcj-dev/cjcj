@@ -48,7 +48,27 @@ export async function compilerCommit(compiler) {
   if (values.size > 1) {
     throw new Error(`compiler has conflicting CJCJ-COMMIT stamps: ${[...values].join(', ')}`);
   }
-  return values.size === 1 ? [...values][0] : 'unknown';
+  // Three outcomes, not two. The old code returned the bare string `unknown`
+  // when it found no marker at all — and a binary that really is stamped
+  // `CJCJ-COMMIT:unknown` (sourceCommit writes that word when git says nothing)
+  // returned the same string. The caller then reported "carries no CJCJ-COMMIT
+  // stamp", which is false for the second one. tools/whatis.py already split
+  // these as `absent` vs `stamped-unknown`; this brings the build side to the
+  // same vocabulary.
+  //   ''        no marker anywhere      — the scanner only records `end > begin`,
+  //                                       so the empty string cannot be a stamp value
+  //   'unknown' marker present, value unusable
+  //   <value>   marker present and usable
+  return values.size === 1 ? [...values][0] : '';
+}
+
+// A stamp value is usable when it is a clean commit SHA. Anything else that is
+// physically present (`unknown`, a version string, a truncated SHA) is
+// `stamped-unknown`: someone did stamp it, they just did not stamp an identity.
+export function classifyStamp(value) {
+  if (value === '') return 'absent';
+  if (/^[0-9a-f]{40}$/.test(value)) return 'stamped';
+  return 'stamped-unknown';
 }
 
 async function artifactFiles(root, directory = root) {
@@ -141,12 +161,19 @@ export async function writeStdProvenance({
 }) {
   const stdCommit = sourceCommit(sourceDir);
   const probedCommit = await compilerCommit(compiler);
-  const builtBy = probedCommit === 'unknown'
-    // Probed and came back empty: the binary carries no CJCJ-COMMIT stamp, which
-    // srcbuild injects (srcbuild.yml, "Inject selfhost compiler version"). So the
-    // compiler is not an srcbuild product — that is a fact worth saying out loud.
-    ? unresolved(`compiler ${path.basename(compiler)} carries no CJCJ-COMMIT stamp (not an srcbuild product)`)
-    : resolved(probedCommit);
+  const probedState = classifyStamp(probedCommit);
+  // Three states, three sentences. Collapsing the middle one into the first is
+  // what this change removes: "never stamped" and "stamped with a word instead
+  // of an identity" need different follow-up actions.
+  const builtBy = probedState === 'stamped'
+    ? resolved(probedCommit)
+    : probedState === 'absent'
+      // Probed and found nothing: the binary carries no CJCJ-COMMIT stamp, which
+      // srcbuild injects (srcbuild.yml, "Inject selfhost compiler version"). So the
+      // compiler is not an srcbuild product — that is a fact worth saying out loud.
+      ? unresolved(`compiler ${path.basename(compiler)} carries no CJCJ-COMMIT stamp (not an srcbuild product)`)
+      : unresolved(`compiler ${path.basename(compiler)} is stamped CJCJ-COMMIT:${probedCommit}, `
+        + 'which is not a commit SHA (stamped-unknown): the stamping step ran but had no identity to write');
   const fields = {
     BUILT_BY_CJC: builtBy,
     BUILT_WITH_SDK: fromCaller(buildSdk, 'CANGJIE_HOME'),
@@ -170,9 +197,11 @@ export async function writeStdProvenance({
 
   const lines = [
     // The compact first line stays whitespace-free so tools/provenance.sh keeps
-    // matching it, but it no longer says `unknown` either: `unstamped` says which
-    // of the two situations produced it.
-    `CJSTD-COMMIT:${stdCommit} BUILT-BY:${probedCommit === 'unknown' ? 'unstamped' : probedCommit}`,
+    // matching it, but it no longer says `unknown` either: `unstamped` and
+    // `stamped-unknown` say which of the three situations produced it.
+    `CJSTD-COMMIT:${stdCommit} BUILT-BY:${
+      probedState === 'stamped' ? probedCommit
+        : probedState === 'absent' ? 'unstamped' : 'stamped-unknown'}`,
     `STD_SOURCE_COMMIT = ${stdCommit}`,
     `BUILT_BY_CJC = ${fields.BUILT_BY_CJC.value}`,
     `BUILT_WITH_SDK = ${fields.BUILT_WITH_SDK.value}`,
