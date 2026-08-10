@@ -717,7 +717,6 @@ const allToolNames = [...new Set([...PACKAGED_LLVM_TOOL_NAMES, ...physicalTools.
   .sort((left, right) => left.localeCompare(right));
 const tupleSha = inputLlvmManifest.values.get('LLVM_SHA');
 const baseSdkSha256 = verifiedBaseSdkProvenance.artifact.sha256;
-const versionCache = new Map();
 const lineageRows = [];
 for (const tool of allToolNames) {
   const physical = physicalTools.get(tool);
@@ -744,7 +743,6 @@ for (const tool of allToolNames) {
     source = `base-sdk:${baseSdkSha256}`;
   }
   const version = versionLine(packagedTool);
-  versionCache.set(tool, version);
   if (inputLlvmManifest.schema === 'core-lineage' && ['llc', 'opt'].includes(tool)) {
     const expectedVersion = inputLlvmManifest.values.get(`${tool.toUpperCase()}_VERSION`);
     if (version.probe.status !== 0 || version.version !== expectedVersion) {
