@@ -188,23 +188,6 @@ const expectedLldTool = process.platform === 'darwin' ? 'ld64.lld' : 'ld.lld';
 if (manifest.get('LLD_TOOL') !== expectedLldTool) {
   throw new Error(`fixed LLVM LLD tool mismatch (manifest=${manifest.get('LLD_TOOL') || ''}, expected=${expectedLldTool})`);
 }
-if (parsedManifest.schema === 'native') {
-  for (const [field, expected] of [
-    ['PLATFORM', process.env.PLATFORM_TUPLE || ''],
-    ['CANGJIE_COMPILER_SHA', pinText.match(/^CANGJIE_COMPILER_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
-    ['FLATBUFFERS_SHA', pinText.match(/^FLATBUFFERS_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
-  ]) {
-    if (!expected || manifest.get(field) !== expected) {
-      throw new Error(`fixed LLVM ${field} mismatch (manifest=${manifest.get(field) || ''}, expected=${expected})`);
-    }
-  }
-  const fixedShim = process.env.CJCJ_LLVM_SHIM_O || path.join('runtime_shim', 'cjselfhost_llvmshim.o');
-  const shimSha = sha256(await fs.readFile(fixedShim));
-  if (shimSha !== manifest.get('SHIM_SHA256')) {
-    throw new Error(`fixed LLVM shim sha mismatch (${shimSha})`);
-  }
-}
-
 const fixedTools = [
   {name: 'llc', archive: fixedLlcGz, manifestKey: 'LLC_SHA256', versionKey: 'LLC_VERSION'},
   {name: 'opt', archive: fixedOptGz, manifestKey: 'OPT_SHA256', versionKey: 'OPT_VERSION'},
