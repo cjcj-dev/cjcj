@@ -126,9 +126,9 @@ node ci/llvm-tools-manifest.mjs validate core-lineage "$output/llvm-tools.manife
 file "$output/cjselfhost_llvmshim.o"
 
 if command -v llvm-nm >/dev/null 2>&1; then
-    nm_tool=llvm-nm
+    nm_tool='llvm-nm'
 else
-    nm_tool=nm
+    nm_tool='nm'
 fi
 shim_exports="$($nm_tool -C "$output/cjselfhost_llvmshim.o" \
     | grep -cE ' [Tt] _?(LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"

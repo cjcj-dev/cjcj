@@ -26,11 +26,21 @@ jobs:
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           ./actionlint -color
+      # The script list is discovered, never written out: the literal list this
+      # replaced named two scripts, and every one of the other seven was added
+      # after the list was last edited. Severity is info rather than error
+      # because SC2086 -- unquoted expansion -- is an info-level check, so error
+      # and warning both look past the class this gate exists to catch.
+      # .shellcheckrc holds the two repository-wide exemptions and why.
       - name: Run ShellCheck
+        shell: bash
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck --severity=error \
-            scripts/difftest.sh runtime_shim/build_shim.sh
+          shellcheck --version
+          mapfile -t SCRIPTS < <(git ls-files '*.sh')
+          echo "shellcheck covers ${#SCRIPTS[@]} scripts"
+          test "${#SCRIPTS[@]}" -ge 9
+          shellcheck --severity=info "${SCRIPTS[@]}"
       - name: Verify zx syntax
         run: |
           find ci runtime_shim scripts -type f -name '*.mjs' -print0 \

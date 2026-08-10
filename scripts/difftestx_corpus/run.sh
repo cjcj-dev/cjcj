@@ -39,7 +39,13 @@ compile_libs() {
 
 run_recipe() {
     local cjc=$1 tc=$2 case_dir=$3 work=$4
-    local KIND= LIBS= ORIGIN=
+    # Declared before the source so a value cannot carry over between cases.
+    # ORIGIN is set by every cases/*/case.conf to record the upstream test it
+    # came from and is read by nothing here, which is what SC2034 sees; scoping
+    # it is still the point, so the check is silenced rather than the variable
+    # dropped.
+    # shellcheck disable=SC2034
+    local KIND='' LIBS='' ORIGIN=''
     # shellcheck disable=SC1090
     source "$case_dir/case.conf"
     mkdir -p "$work/build"
