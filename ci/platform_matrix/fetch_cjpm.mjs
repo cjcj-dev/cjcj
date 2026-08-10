@@ -8,6 +8,7 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import {preserveStock} from '../../build/lib/stock-backup.mjs';
 import {spawnSync} from 'node:child_process';
 import {
   CJPM_PROVENANCE,
@@ -137,14 +138,9 @@ const cangjieHome = process.env.CANGJIE_HOME;
 if (!cangjieHome) throw new Error('CANGJIE_HOME is required after SDK provision');
 const toolsBin = path.join(cangjieHome, 'tools', 'bin');
 const installed = path.join(toolsBin, 'cjpm.exe');
-const stock = path.join(toolsBin, 'cjpm-stock.exe');
 const staged = path.join(toolsBin, 'cjpm-patched.exe');
 await fs.mkdir(toolsBin, {recursive: true});
-try {
-  await fs.access(stock);
-} catch {
-  await fs.copyFile(installed, stock);
-}
+const stock = await preserveStock({sdk: cangjieHome, installed, name: 'cjpm.exe'});
 await fs.writeFile(staged, zlib.gunzipSync(await fs.readFile(compressed)));
 const pin = await readCjpmPin(path.resolve(import.meta.dirname, '..', 'cjpm_pin.env'));
 const provenance = await verifyCjpmProvenance({
