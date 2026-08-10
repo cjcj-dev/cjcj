@@ -26,7 +26,14 @@
 4. 任一 phase 为 `STOP` 时，后续 phase 的 job 结论必须为 `skipped`，不能靠操作者竞速 cancel 冒充停损。
 5. 同一 run 内每个 artifact 名只有一个 producer；不得为分阶段调用重新引入同名 artifact 上传。
 
-在该契约有静态测试且合入前，状态保持 `EXECUTION_BLOCKED_BY_PHASE_CONTROL`，禁止触发五平台政策 run。
+在该契约有静态测试、**且那些测试在 CI 里真的被执行**之前，状态保持 `EXECUTION_BLOCKED_BY_PHASE_CONTROL`，禁止触发五平台政策 run。
+
+> ⛔⛔ **0811 补强 —— 原文只写"有静态测试且合入"，那个条件被字面满足过而实质没有。**
+> 实测：`ci/srcbuild/tests/phase-control.test.mjs`（本节指名的解阻物，七条契约）**已写、已合，
+> 而 `ci.yml` 从不执行它** —— 那一格的 `node --test` 硬编码点名两个文件，仓里 28 个测试只跑 8 个。
+> ⇒ 于是"解阻"被宣布过一次，而没有任何东西阻止那些契约悄悄腐烂。
+> ⇒ **解阻条件因此加一条可验证的下限**：该测试文件必须出现在某个 workflow 实际执行的命令里，
+> 且该步骤不得 `continue-on-error` / `|| true`。⛔ "写出来了"不等于"在跑"。
 
 另一个执行前缺口是失败证据：source-build 已在失败时上传 `srcbuild-diagnosis-*`（`.github/workflows/srcbuild.yml:332-342`），但 package workflow 的正常 `pkg-*` upload 只在前序成功后运行，Unix smoke 又用 EXIT trap 删除 work 与 `pkgtest`（`.github/workflows/build-release-package.yml:447-461,503-514`）。受控 orchestrator 必须同时补一个 `if: failure()` 的逐格诊断上传，并让 Unix/Windows 都只在成功时清理 smoke workspace；否则状态保持 `EXECUTION_BLOCKED_BY_FAILURE_CAPTURE`。
 
