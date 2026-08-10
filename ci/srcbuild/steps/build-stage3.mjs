@@ -6,6 +6,7 @@ import path from 'node:path';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
+import {assertWriteBarriers} from '../lib/write-barrier.mjs';
 
 $.stdio = 'inherit';
 
@@ -99,9 +100,15 @@ async function assertStdBarriers(coreLib) {
     // and Mach-O, require both exact runtime references instead of pretending
     // the x86 shr/relocation syntax applies.
     console.log(`STAGE3_BARRIER_SYMBOL_ASSERT_PASS target=${target.spec.key} mask=1 read_barrier=1`);
+    console.log(`STAGE3_WRITE_BARRIER_SKIP target=${target.spec.key} reason=probe-is-x86-only`);
     return;
   }
   const output = await $({stdio: 'pipe'})`objdump -drwC ${coreLib}`;
+  // Everything below proves the read side: the tag test and a CJ_MCC_Read* call.
+  // A std built with colouring but without the generational post barrier passes
+  // all of it, which is exactly the shape the pinned llc produces by default, so
+  // check the write side off the same disassembly.
+  assertWriteBarriers(output.stdout, `target=${target.spec.key} core=${path.basename(coreLib)}`);
   const lines = output.stdout.split('\n');
   const symbols = [
     '_CNat6String7indexOfHRNatY0_E',
