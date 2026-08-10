@@ -33,28 +33,32 @@ const BLOCKED_CALLEES = [
 ];
 const STATIC_CALLEES = ['CJ_MCC_WriteStaticRef', 'CJ_MCC_WriteStaticStruct'];
 
-// One line has up to four tab-separated fields and which ones are present
-// depends on the flags:
-//   --no-show-raw-insn  addr \t mnemonic
-//   default             addr \t raw bytes \t mnemonic
-//   -w (wide)           …and the relocation is appended to that same line as
-//                       `\t<offset>: <RELOC_TYPE>\t<symbol>` instead of getting
-//                       its own line.
-// assertStdBarriers calls objdump with -drwC, so the wide form is the one that
-// matters here. Taking the first or last field blindly picks the raw bytes or
-// the relocation symbol rather than the mnemonic, and every pattern below then
-// matches nothing at all — silently, which is the failure mode to avoid.
-const INSTRUCTION = /^\s+([0-9a-f]+):\t(.*)$/;
+// Two disassemblers, two dialects, one machine code. GNU objdump is what
+// assertStdBarriers calls today; llvm-objdump is the one that can also read
+// aarch64 and Mach-O, so the patterns have to survive both. Measured on the same
+// archive, the same instruction reads:
+//
+//   GNU   `     347:\t49 8b 47 08          \tmov    0x8(%r15),%rax`
+//   LLVM  `     347: 49 8b 47 08                  \tmovq\t8(%r15), %rax`
+//
+// Seven differences, three of which silently kill a pattern written for the
+// other: the address separator (tab vs space), the size suffix on the mnemonic
+// (mov vs movq), and the immediate radix ($0x9 vs $9, 0x8(%r15) vs 8(%r15)).
+// Relocations also move: GNU -w appends them to the instruction line, llvm-objdump
+// gives each its own.
+const INSTRUCTION = /^\s+([0-9a-f]+):[\t ](.*)$/;
 const RAW_BYTES = /^[0-9a-f]{2}(?: [0-9a-f]{2})*\s*$/;
 const RELOCATION_TAG = /^[0-9a-f]+:\s+\S+$/;
 // Addresses restart at every function, and an archive holds many members, so a
 // single address map lets a branch in one member resolve onto an instruction in
 // another. Cut the stream at function headers and resolve within one function.
 const FUNCTION_HEADER = /^[0-9a-f]+\s+<(.+)>:$/;
-const TLS_LOAD = /^mov\s+0x8\(%r15\),%rax$/;
-const PHASE_LOAD = /^mov\s+\(%rax\),%eax$/;
-const PHASE_COMPARE = /^cmp\w*\s+\$0x[89],/;
-const CONDITIONAL = /^j(?!mp\b)\w+\s+([0-9a-f]+)/;
+// `mov` or `movq`; `0x8(%r15)` or `8(%r15)`.
+const TLS_LOAD = /^mov\w*\s+(?:0x)?8\(%r15\),%rax$/;
+const PHASE_LOAD = /^mov\w*\s+\(%rax\),%eax$/;
+// icmp sle kGCPhaseInit(8), emitted as `cmp $0x8`/`cmp $0x9` or `cmpl $8`/`$9`.
+const PHASE_COMPARE = /^cmp\w*\s+\$(?:0x)?[89],/;
+const CONDITIONAL = /^j(?!mp\b)\w+\s+(?:0x)?([0-9a-f]+)/;
 const TERMINATOR = /^(?:jmp\w*|ret\w*)\b/;
 // In an unlinked archive the call target lives on a relocation line, not inside
 // the instruction text. Relocation lines start with tabs and put a space after
@@ -94,10 +98,18 @@ function firstBarrierCall(instructions, start) {
  * @returns {{phaseChecks: number, staticGuarded: number, bypassed: number, unresolved: number}}
  */
 export function inspectWriteBarriers(disassembly) {
-  const result = {phaseChecks: 0, staticGuarded: 0, bypassed: 0, unresolved: 0};
+  // functions/instructions are the lexer's own account of what it read. Comparing
+  // two disassemblers' verdicts is only meaningful if both front-ends saw the same
+  // program, and a front-end that silently read nothing reports zero everywhere.
+  const result = {phaseChecks: 0, staticGuarded: 0, bypassed: 0, unresolved: 0,
+    functions: 0, instructions: 0};
   let instructions = [];
   const flush = () => {
-    if (instructions.length) inspectFunction(instructions, result);
+    if (instructions.length) {
+      result.functions += 1;
+      result.instructions += instructions.length;
+      inspectFunction(instructions, result);
+    }
     instructions = [];
   };
   for (const line of disassembly.split('\n')) {
@@ -115,13 +127,23 @@ export function inspectWriteBarriers(disassembly) {
     const match = INSTRUCTION.exec(line);
     if (!match) continue;
     let fields = match[2].split('\t');
-    if (fields.length > 1 && RAW_BYTES.test(fields[0])) fields = fields.slice(1);
+    if (fields.length > 1 && RAW_BYTES.test(fields[0].trim())) fields = fields.slice(1);
     // Relocation appended to the instruction line (objdump with -w).
     let attached = '';
-    if (fields.length >= 3 && RELOCATION_TAG.test(fields[1])) attached = relocationSymbol(fields[2]);
+    let body;
+    if (fields.length >= 3 && RELOCATION_TAG.test(fields[1])) {
+      attached = relocationSymbol(fields[2]);
+      body = fields[0];
+    } else {
+      // llvm-objdump splits mnemonic and operands across the tab, so keeping only
+      // the first field would drop every operand and match nothing.
+      body = fields.join(' ');
+    }
     instructions.push({
       address: parseInt(match[1], 16),
-      text: fields[0].split('#')[0].trim().replace(/\s+/g, ' '),
+      // Collapse whitespace and drop the space llvm-objdump puts after commas, so
+      // `%rsp, %rbp` and `%rsp,%rbp` compare as the same operand list.
+      text: body.split('#')[0].trim().replace(/\s+/g, ' ').replace(/, /g, ','),
       callee: attached,
     });
   }

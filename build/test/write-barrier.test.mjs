@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {assertWriteBarriers, inspectWriteBarriers} from '../../ci/srcbuild/lib/write-barrier.mjs';
 
+// The verdict columns, without the lexer's own bookkeeping.
+const verdict = ({phaseChecks, staticGuarded, bypassed, unresolved}) =>
+  ({phaseChecks, staticGuarded, bypassed, unresolved});
+
 function capture(fn) {
   const lines = [];
   const out = console.log; const err = console.error;
@@ -44,19 +48,19 @@ const unguarded = [
 
 test('a phase-guarded heap write counts as bypassed', () => {
   const counts = inspectWriteBarriers(guarded('CJ_MCC_WriteRefField'));
-  assert.deepEqual(counts, {phaseChecks: 1, staticGuarded: 0, bypassed: 1, unresolved: 0});
+  assert.deepEqual(verdict(counts), {phaseChecks: 1, staticGuarded: 0, bypassed: 1, unresolved: 0});
 });
 
 test('a phase-guarded static write is the intended fast path, not a bypass', () => {
   // cj_gcwrite_static_ref is not in the list fastBarrier() blocks, so it keeps the
   // fast path even with the flag on. Counting it would reject a correct std.
   const counts = inspectWriteBarriers(guarded('CJ_MCC_WriteStaticRef'));
-  assert.deepEqual(counts, {phaseChecks: 1, staticGuarded: 1, bypassed: 0, unresolved: 0});
+  assert.deepEqual(verdict(counts), {phaseChecks: 1, staticGuarded: 1, bypassed: 0, unresolved: 0});
 });
 
 test('an unconditional heap write is what the barrier looks like when it is on', () => {
   const counts = inspectWriteBarriers(unguarded);
-  assert.deepEqual(counts, {phaseChecks: 0, staticGuarded: 0, bypassed: 0, unresolved: 0});
+  assert.deepEqual(verdict(counts), {phaseChecks: 0, staticGuarded: 0, bypassed: 0, unresolved: 0});
 });
 
 test('addresses do not resolve across function boundaries', () => {
