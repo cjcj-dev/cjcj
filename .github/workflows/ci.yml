@@ -59,7 +59,13 @@ jobs:
           # --test` with no file arguments falls back to its own discovery, which
           # would pass while testing nothing.
           test "${#FILES[@]}" -ge 26
-          node --test "${FILES[@]}"
+          # A hanging test would otherwise consume this job's whole
+          # timeout-minutes and end in "exceeded maximum execution time", which
+          # names no test. The bound makes the runner fail the specific test by
+          # name instead. It is not a way to pass over a hang -- a timeout here is
+          # a failure. 300s is ~150x the whole suite's normal 2s; a test that
+          # genuinely needs longer says so with its own {timeout}, which wins.
+          node --test --test-timeout=300000 "${FILES[@]}"
       - name: Verify smoke assets
         run: |
           test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5

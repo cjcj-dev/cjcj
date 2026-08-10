@@ -97,6 +97,11 @@ test('ci.yml runs the manifest rather than a literal file list', async () => {
     'ci.yml no longer drives its test step from the manifest');
   assert.deepEqual(literalTestArguments(ci), [],
     'ci.yml names test files literally again; drive the list from ci/test-manifest.mjs instead');
+  // Without it a hanging test spends the job's whole timeout-minutes and the
+  // failure names no test. package-std-integrity.test.mjs hangs in about 8% of
+  // batch runs on the shared box, cause unknown, and it is in this list.
+  assert.match(step(ci, 'Test build and release contracts'), /--test-timeout=\d+/,
+    'the test step lost its timeout; a hang would go unattributed for the whole job');
 });
 
 test('ci.yml discovers the shell scripts it lints instead of listing them', async () => {
