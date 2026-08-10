@@ -25,6 +25,11 @@ export async function nativeCjdbEnv(config, resolvePythonHome) {
 
 export async function run(config, {resolveCjdbPythonHome = cjdbPythonHome} = {}) {
   const repoDir = config.repoPath('compiler');
+  // Fail before the compiler stage starts: a Darwin runner must not spend the
+  // full oracle build discovering that nested LLDB selected an unsupported
+  // Python. Non-Darwin targets resolve to an empty overlay without probing a
+  // Homebrew keg.
+  const cjdbEnv = await nativeCjdbEnv(config, resolveCjdbPythonHome);
   await stage('compiler', async () => {
     await runBuildPy(config, repoDir, ['clean'], {stageName: 'compiler.clean'});
 
@@ -65,7 +70,6 @@ export async function run(config, {resolveCjdbPythonHome = cjdbPythonHome} = {})
       'build', '-t', config.buildType, '--no-tests', '--build-cjdb', '-v', config.cangjieVersion,
     ];
     if (fs.existsSync(targetLib)) buildArgs.push('--target-lib', targetLib);
-    const cjdbEnv = await nativeCjdbEnv(config, resolveCjdbPythonHome);
     await runBuildPy(config, repoDir, buildArgs, {stageName: 'compiler.build.native', extraEnv: cjdbEnv});
     await runBuildPy(config, repoDir, ['install'], {stageName: 'compiler.install', extraEnv: cjdbEnv});
   });
