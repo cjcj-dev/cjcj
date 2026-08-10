@@ -5,6 +5,7 @@ import path from 'node:path';
 import {BuildError} from '../../lib/errors.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
+import {assertRuntimeSplit, hostLoaderPath, targetLoaderPath} from '../../lib/runtime-split.mjs';
 import {ensureDir, requireFile} from './common.mjs';
 
 const logger = getLogger('cangjie_build.stages.verify');
@@ -23,8 +24,28 @@ export async function run(config) {
   const envsetup = requireFile(path.join(cangjieDir, 'envsetup.sh'), {stage: 'verify'});
   const work = ensureDir(path.join(config.workspace, 'verify'));
   fs.writeFileSync(path.join(work, 'hello.cj'), HELLO_SOURCE, 'utf8');
+  if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
+    assertRuntimeSplit({
+      hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+      targetSdk: cangjieDir,
+      target: config.target,
+    });
+  }
+  const hostLibraries = process.env.CANGJIE_BUILD_DRY_RUN === '1' ? '<HOST_LIBRARIES>' : hostLoaderPath({
+    hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+    targetSdk: cangjieDir,
+    target: config.target,
+  });
+  const targetLibraries = process.env.CANGJIE_BUILD_DRY_RUN === '1' ? '<TARGET_LIBRARIES>' : targetLoaderPath({
+    targetSdk: cangjieDir,
+    target: config.target,
+  });
   await stage('verify', async () => {
-    await runCommand(['bash', '-c', `set -e; source '${envsetup}'; cjc hello.cj -o hello && ./hello`], {
+    await runCommand([
+      'bash', '-c',
+      'set -e; source "$1"; export "$2=$3"; cjc hello.cj -o hello; export "$2=$4"; ./hello',
+      'srcbuild-verify', envsetup, config.target.spec.loaderEnv, hostLibraries, targetLibraries,
+    ], {
       cwd: work, stage: 'verify.hello',
     });
     if (!fs.existsSync(path.join(work, 'hello'))) {
