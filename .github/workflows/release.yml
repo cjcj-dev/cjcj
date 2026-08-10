@@ -45,27 +45,66 @@ env:
   # runtime cache key while the build itself followed the pin file).
 
 jobs:
-  source-final-std:
-    name: Build source SDK and final std artifacts
+  # One call built all four source SDKs at once, so a stop at phase 1 had already
+  # paid for the other three -- the exact thing the phase order exists to avoid.
+  # Each phase now asks srcbuild for its own target only. The linux-x64 cell also
+  # cross-builds final-std-windows-x64, which is why phase 3 has no source job of
+  # its own and phases 1 and 2 can already consume the cross artifact.
+  source-p1-linux-x64:
+    name: phase 1 · linux-x64 / source SDK and final std (also cross-builds the Windows std)
     uses: ./.github/workflows/srcbuild.yml
     with:
       build_type: relwithdebinfo
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
+      targets: linux-x64
+
+  source-p2-linux-aarch64:
+    name: phase 2 · linux-aarch64 / source SDK and final std
+    uses: ./.github/workflows/srcbuild.yml
+    needs: package-p1-linux-x64
+    with:
+      build_type: relwithdebinfo
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+      targets: linux-aarch64
+
+  source-p4-darwin-arm64:
+    name: phase 4 · darwin-arm64 / source SDK and final std
+    uses: ./.github/workflows/srcbuild.yml
+    needs: package-p3-windows-x64
+    with:
+      build_type: relwithdebinfo
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+      targets: darwin-arm64
+
+  source-p5-darwin-x64:
+    name: phase 5 · darwin-x64 / source SDK and final std
+    uses: ./.github/workflows/srcbuild.yml
+    needs: package-p4-darwin-arm64
+    with:
+      build_type: relwithdebinfo
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+      targets: darwin-x64
 
   windows-fixed-llvm-tuple:
     name: Build Windows LLVM tuple
+    needs: package-p2-linux-aarch64
     uses: ./.github/workflows/platform-tuples.yml
     with:
       platform_set: windows-only
 
   patched-cjpm:
     name: Build patched cjpm
+    needs: package-p2-linux-aarch64
     uses: ./.github/workflows/build-cjpm.yml
     secrets: inherit
 
   windows-runtime:
     name: Build Windows runtime
+    needs: package-p2-linux-aarch64
     uses: ./.github/workflows/build-windows-runtime.yml
     with:
       version: ${{ inputs.version }}
@@ -73,31 +112,96 @@ jobs:
       runtime_ref: ${{ inputs.runtime_ref }}
     secrets: inherit
 
-  build:
-    name: ${{ matrix.platform }} / Build release
-    needs: [source-final-std, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime]
-    if: always()
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64, cross_std_artifact: final-std-windows-x64, cross_std_tuple: windows_x86_64_cjnative}
-          # linux-aarch64 re-enabled 0724: the R1 llc SEGV was the un-activated
-          # fixed llc (setup only mapped Linux/x86_64, fixed in 8e2f9ea6); the
-          # arm-soak ×20 packaged smoke run 30069890604 passed clean.
-          - { runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64, sdk_runtime_dir: linux_aarch64_cjnative, std_artifact: final-std-linux-aarch64, cross_std_artifact: final-std-windows-x64, cross_std_tuple: windows_x86_64_cjnative}
-          - { runner: macos-15-intel, platform: darwin-x64, llvm_platform: darwin_x86_64, sdk_runtime_dir: darwin_x86_64_cjnative, std_artifact: final-std-darwin-x64 }
-          - { runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64 }
-          - { runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative, std_artifact: final-std-windows-x64 }
+  # ops/design/DRYRUN_EXECUTION_POLICY.md §3 fixes this order, cheapest information
+  # first, so a stop at phase N has not paid for phases N+1..5. A matrix cannot
+  # express that: its cells are siblings and all five start together. The needs:
+  # edges are the phase control, and the semantics they rest on -- a job whose
+  # needs did not succeed is skipped, transitively -- are measured by
+  # .github/workflows/needs-semantics-probe.yml rather than assumed.
+  #
+  # Nothing on this chain may carry if: always(). That one condition, which this
+  # job used to have, makes a job run even when everything it needs failed, and
+  # the probe confirms it: c-needs-a-if-always succeeds while a-fails failed.
+  package-p1-linux-x64:
+    name: phase 1 · linux-x64 / Build release package
+    needs: [source-p1-linux-x64]
     uses: ./.github/workflows/build-release-package.yml
     with:
-      runner: ${{ matrix.runner }}
-      platform: ${{ matrix.platform }}
-      llvm_platform: ${{ matrix.llvm_platform }}
-      sdk_runtime_dir: ${{ matrix.sdk_runtime_dir }}
-      std_artifact: ${{ matrix.std_artifact }}
-      cross_std_artifact: ${{ matrix.cross_std_artifact || '' }}
-      cross_std_tuple: ${{ matrix.cross_std_tuple || '' }}
+      runner: ubuntu-24.04
+      platform: linux-x64
+      llvm_platform: linux_x86_64
+      sdk_runtime_dir: linux_x86_64_cjnative
+      std_artifact: final-std-linux-x64
+      cross_std_artifact: 'final-std-windows-x64'
+      cross_std_tuple: 'windows_x86_64_cjnative'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package-p2-linux-aarch64:
+    name: phase 2 · linux-aarch64 / Build release package
+    needs: [source-p2-linux-aarch64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: ubuntu-24.04-arm
+      platform: linux-aarch64
+      llvm_platform: linux_aarch64
+      sdk_runtime_dir: linux_aarch64_cjnative
+      std_artifact: final-std-linux-aarch64
+      cross_std_artifact: 'final-std-windows-x64'
+      cross_std_tuple: 'windows_x86_64_cjnative'
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package-p3-windows-x64:
+    name: phase 3 · windows-x64 / Build release package
+    needs: [package-p2-linux-aarch64, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: windows-2025
+      platform: windows-x64
+      llvm_platform: windows_x86_64
+      sdk_runtime_dir: windows_x86_64_cjnative
+      std_artifact: final-std-windows-x64
+      cross_std_artifact: ''
+      cross_std_tuple: ''
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package-p4-darwin-arm64:
+    name: phase 4 · darwin-arm64 / Build release package
+    needs: [source-p4-darwin-arm64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: macos-15
+      platform: darwin-arm64
+      llvm_platform: darwin_aarch64
+      sdk_runtime_dir: darwin_aarch64_cjnative
+      std_artifact: final-std-darwin-arm64
+      cross_std_artifact: ''
+      cross_std_tuple: ''
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package-p5-darwin-x64:
+    name: phase 5 · darwin-x64 / Build release package
+    needs: [source-p5-darwin-x64]
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: macos-15-intel
+      platform: darwin-x64
+      llvm_platform: darwin_x86_64
+      sdk_runtime_dir: darwin_x86_64_cjnative
+      std_artifact: final-std-darwin-x64
+      cross_std_artifact: ''
+      cross_std_tuple: ''
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
@@ -105,16 +209,16 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [source-final-std, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime, build]
+    needs: [source-p1-linux-x64, source-p2-linux-aarch64, source-p4-darwin-arm64, source-p5-darwin-x64, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime, package-p1-linux-x64, package-p2-linux-aarch64, package-p3-windows-x64, package-p4-darwin-arm64, package-p5-darwin-x64]
     if: >-
       ${{
         always() &&
         !inputs.dry_run &&
-        needs.source-final-std.result == 'success' &&
+        needs.source-p5-darwin-x64.result == 'success' &&
         needs.windows-fixed-llvm-tuple.result == 'success' &&
         needs.patched-cjpm.result == 'success' &&
         needs.windows-runtime.result == 'success' &&
-        needs.build.result == 'success'
+        needs.package-p5-darwin-x64.result == 'success'
       }}
     environment:
       name: release-draft

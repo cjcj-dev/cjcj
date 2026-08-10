@@ -69,7 +69,7 @@ async function artifactUploads(name) {
   return found;
 }
 
-test('policy contract 1: the five package phases run in the policy order, one after another', {todo: 'release.yml still runs the five packages as one fail-fast:false matrix; turning this on is the acceptance criterion for the phase chain'}, async () => {
+test('policy contract 1: the five package phases run in the policy order, one after another', async () => {
   const release = jobs(await readWorkflow('release.yml'));
   const packages = [...release].filter(([, job]) => /uses:\s*\.\/\.github\/workflows\/build-release-package\.yml/.test(job));
   assert.equal(packages.length, PHASES.length,
@@ -78,16 +78,21 @@ test('policy contract 1: the five package phases run in the policy order, one af
   for (const [index, platform] of PHASES.entries()) {
     assert.ok(byPhase.has(index + 1), `no package job for phase ${index + 1} (${platform})`);
   }
-  // Phase N reaches queued only after phase N-1 reported GO, which is what a
-  // needs: edge means and a matrix cannot express.
+  // Phase N reaches queued only after phase N-1 reported GO. Reachability, not a
+  // direct edge: a phase legitimately hangs off its own source job, which hangs
+  // off the previous package, and needs-semantics-probe.yml measured that
+  // skipping travels down a chain like that (d-needs-b came back skipped when b
+  // was skipped because a failed). Demanding the direct edge would reject a
+  // correct graph.
+  const reaches = (from, to, seen = new Set()) => needsOf(release.get(from) || '').some(need =>
+    need === to || (!seen.has(need) && (seen.add(need), reaches(need, to, seen))));
   for (let phase = 2; phase <= PHASES.length; phase += 1) {
-    const job = release.get(byPhase.get(phase));
-    assert.ok(needsOf(job).includes(byPhase.get(phase - 1)),
-      `phase ${phase} (${byPhase.get(phase)}) does not need phase ${phase - 1} (${byPhase.get(phase - 1)})`);
+    assert.ok(reaches(byPhase.get(phase), byPhase.get(phase - 1)),
+      `phase ${phase} (${byPhase.get(phase)}) cannot reach phase ${phase - 1} (${byPhase.get(phase - 1)}) through needs:`);
   }
 });
 
-test('policy contract 2: source producers are gated by the same phases, not all at once', {todo: 'srcbuild.yml has no target-selection input, so one call builds all four targets at once'}, async () => {
+test('policy contract 2: source producers are gated by the same phases, not all at once', async () => {
   const release = jobs(await readWorkflow('release.yml'));
   const sources = [...release].filter(([, job]) => /uses:\s*\.\/\.github\/workflows\/srcbuild\.yml/.test(job));
   assert.ok(sources.length > 1,
@@ -100,7 +105,7 @@ test('policy contract 2: source producers are gated by the same phases, not all 
   }
 });
 
-test('policy contract 3: Windows work waits for the Windows phase', {todo: 'windows-runtime and windows-fixed-llvm-tuple start with no gate'}, async () => {
+test('policy contract 3: Windows work waits for the Windows phase', async () => {
   const release = jobs(await readWorkflow('release.yml'));
   const windowsJobs = [...release].filter(([name, job]) =>
     /windows/i.test(name) && !/uses:\s*\.\/\.github\/workflows\/srcbuild\.yml/.test(job));
@@ -111,7 +116,7 @@ test('policy contract 3: Windows work waits for the Windows phase', {todo: 'wind
   }
 });
 
-test('policy contract 4: a STOP leaves later phases skipped, with no condition that overrides it', {todo: 'release.yml:79 carries if: always() on the package matrix, which is the hole itself'}, async () => {
+test('policy contract 4: a STOP leaves later phases skipped, with no condition that overrides it', async () => {
   // Actions skips a job whose needs did not succeed. That is the stop-loss, and
   // always()/cancelled()/failure() are the three ways to lose it -- release.yml
   // uses always() on the package matrix today, which is exactly the hole.
@@ -139,4 +144,52 @@ test('policy contract 5: each artifact name has exactly one producer in the run'
   const duplicated = [...counts].filter(([, sources]) => sources.length > 1);
   assert.deepEqual(duplicated, [],
     `upload-artifact rejects a name already uploaded in the same run: ${JSON.stringify(duplicated)}`);
+
+  // Counting upload steps in files misses the way phase control reintroduces the
+  // collision: one workflow called several times in the same run uploads its
+  // names once per call. Each repeated call has to differ in what it is asked to
+  // produce, or two of them race for the same artifact name.
+  const release = jobs(await readWorkflow('release.yml'));
+  const callers = new Map();
+  for (const [name, job] of release) {
+    const used = job.match(/uses:\s*(\.\/\.github\/workflows\/\S+)/);
+    if (used) callers.set(name, used[1]);
+  }
+  const byWorkflow = new Map();
+  for (const [name, workflow] of callers) {
+    byWorkflow.set(workflow, [...(byWorkflow.get(workflow) || []), name]);
+  }
+  for (const [workflow, jobNames] of byWorkflow) {
+    if (jobNames.length < 2) continue;
+    const selectors = jobNames.map(name => {
+      const withBlock = release.get(name).split(/\n\s*with:\s*\n/)[1] || '';
+      return withBlock.split('\n').filter(line => /^\s{6}\S/.test(line)).sort().join('|');
+    });
+    assert.equal(new Set(selectors).size, jobNames.length,
+      `${workflow} is called ${jobNames.length} times (${jobNames}) with inputs that do not distinguish them`);
+  }
+});
+
+// The other half of EXECUTION_BLOCKED_BY_PHASE_CONTROL_AND_FAILURE_CAPTURE: a
+// phase that dies has to leave something to read, or the stop-loss buys a stop
+// with no diagnosis.
+test('policy failure capture: a package cell that dies leaves evidence behind', async () => {
+  const text = uncommented(await readWorkflow('build-release-package.yml'));
+  assert.match(text, /if:\s*failure\(\)\s*\n\s*uses:\s*actions\/upload-artifact@/,
+    'no failure-only upload: the pkg-* upload runs only after everything before it succeeded');
+  // srcbuild names its per-cell diagnosis this way; two cells uploading the same
+  // name would collide under contract 5.
+  assert.match(text, /name:\s*pkg-diagnosis-\$\{\{\s*inputs\.platform\s*\}\}/,
+    'failure diagnostics must be named per platform');
+});
+
+test('policy failure capture: smoke workspaces survive the failure that needs them', async () => {
+  const text = uncommented(await readWorkflow('build-release-package.yml'));
+  // `trap '... rm -rf ...' EXIT` fires on the failure path too, so the evidence
+  // is gone before any upload step can see it.
+  const unconditional = [...text.matchAll(/trap\s+'([^']*)'\s+EXIT/g)]
+    .map(match => match[1])
+    .filter(handler => /\brm\s+-rf/.test(handler));
+  assert.deepEqual(unconditional, [],
+    `these EXIT traps delete the smoke workspace whatever happened: ${JSON.stringify(unconditional)}`);
 });

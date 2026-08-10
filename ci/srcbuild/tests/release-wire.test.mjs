@@ -26,14 +26,20 @@ test('release connects each platform row to its same-platform final std', async 
   const release = await workflow('release.yml');
   assert.ok(release.includes('uses: ./.github/workflows/srcbuild.yml'));
   assert.ok(release.includes('runtime_ref: ${{ inputs.runtime_ref }}'));
-  const rows = release.split('\n').filter(line => line.includes('std_artifact: final-std-'));
-  assert.equal(rows.length, platforms.length);
+  // The pairing, not the row that used to carry it. Phase control replaced the
+  // matrix with one job per phase, so platform and std_artifact now sit on
+  // separate lines of the same with: block; a line-shaped check reads a correct
+  // wiring as missing.
+  const packageJobs = release.split(/\n  (?=[a-z0-9-]+:\n)/)
+    .filter(job => job.includes('uses: ./.github/workflows/build-release-package.yml'));
+  assert.equal(packageJobs.length, platforms.length,
+    `expected one package job per platform, found ${packageJobs.length}`);
   for (const platform of platforms) {
-    const row = rows.find(line => line.includes(`platform: ${platform},`));
-    assert.ok(row, platform);
-    assert.ok(row.includes(`std_artifact: final-std-${platform}`), row);
+    const job = packageJobs.find(entry => new RegExp(String.raw`^\s*platform: ${platform}\s*$`, 'm').test(entry));
+    assert.ok(job, `no package job declares platform: ${platform}`);
+    assert.match(job, new RegExp(String.raw`^\s*std_artifact: final-std-${platform}\s*$`, 'm'),
+      `the ${platform} package job does not ask for final-std-${platform}`);
   }
-  assert.ok(release.includes('std_artifact: ${{ matrix.std_artifact }}'));
   assert.ok(release.includes('pattern: pkg-*'));
 });
 

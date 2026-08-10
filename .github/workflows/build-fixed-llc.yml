@@ -5,35 +5,63 @@ on:
     branches: [debug/llc-build]
   workflow_dispatch:
   workflow_call:
+    inputs:
+      platforms:
+        description: >-
+          Comma-separated llvm platforms to build. Empty or "all" builds every
+          one, which is what a caller that wants the whole set still gets.
+        required: false
+        type: string
+        default: all
 
 permissions:
   contents: read
 
 jobs:
+  # A release phase pays for its own tuple and no one else's, so the matrix has to
+  # be selectable. Actions cannot filter a literal matrix, so build the list here
+  # and hand it over as JSON. The tuples themselves stay in one place.
+  plan:
+    name: Select tuples
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - name: Select the requested tuples
+        id: select
+        env:
+          REQUESTED: ${{ inputs.platforms || 'all' }}
+        run: |
+          set -euo pipefail
+          all='[
+            {"runner":"ubuntu-22.04","platform":"linux_x86_64","llvm-targets":"X86","portability-tag":"glibc2.35"},
+            {"runner":"ubuntu-24.04-arm","platform":"linux_aarch64","llvm-targets":"AArch64","portability-tag":"glibc2.39"},
+            {"runner":"macos-15","platform":"darwin_aarch64","llvm-targets":"AArch64","portability-tag":"macos15"},
+            {"runner":"macos-15-intel","platform":"darwin_x86_64","llvm-targets":"X86","portability-tag":"macos15"}
+          ]'
+          if [ -z "$REQUESTED" ] || [ "$REQUESTED" = all ]; then
+            selected="$all"
+          else
+            selected="$(printf '%s' "$all" | jq -c --arg want "$REQUESTED" \
+              '[.[] | select(.platform as $p | ($want | split(",") | map(gsub("^ +| +$";"")) | index($p)))]')"
+          fi
+          count="$(printf '%s' "$selected" | jq 'length')"
+          # An empty matrix makes every dependent job skip while reporting nothing
+          # wrong, which is the shape this repo keeps getting bitten by.
+          if [ "$count" -eq 0 ]; then
+            echo "no tuple matched platforms=$REQUESTED" >&2
+            exit 1
+          fi
+          echo "selected $count tuple(s) for platforms=$REQUESTED"
+          printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
+
   build-tools:
     name: ${{ matrix.platform }} / Build tools
+    needs: plan
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # Add a native runner/platform/LLVM target tuple here to extend the mechanism.
-          - runner: ubuntu-22.04
-            platform: linux_x86_64
-            llvm-targets: X86
-            portability-tag: glibc2.35
-          - runner: ubuntu-24.04-arm
-            platform: linux_aarch64
-            llvm-targets: AArch64
-            portability-tag: glibc2.39
-          - runner: macos-15
-            platform: darwin_aarch64
-            llvm-targets: AArch64
-            portability-tag: macos15
-          - runner: macos-15-intel
-            platform: darwin_x86_64
-            llvm-targets: X86
-            portability-tag: macos15
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout cjcj

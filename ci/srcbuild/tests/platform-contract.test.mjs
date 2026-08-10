@@ -25,9 +25,18 @@ async function invokedWorkflows(entry, stack = []) {
   return invocations;
 }
 
+// A selectable matrix cannot be a literal any more -- Actions has no way to
+// filter one -- so the tuple table moved into the plan step as JSON. It is still
+// one table in one place; it just is not YAML, and reading only the YAML form
+// leaves this file blind to every tuple.
+const planTable = text => [...text.matchAll(/^\s*all='(\[[\s\S]*?\])'\s*$/gm)]
+  .flatMap(([, json]) => JSON.parse(json));
+
 // The values a ${{ matrix.KEY }} placeholder can take inside one workflow file.
-const matrixValues = (text, key) =>
-  [...text.matchAll(new RegExp(String.raw`^\s*(?:- )?${key}: (\S+)$`, 'gm'))].map(([, value]) => value);
+const matrixValues = (text, key) => [
+  ...[...text.matchAll(new RegExp(String.raw`^\s*(?:- )?${key}: (\S+)$`, 'gm'))].map(([, value]) => value),
+  ...planTable(text).map(entry => entry[key]).filter(value => value !== undefined).map(String),
+];
 
 function expandMatrix(name, text) {
   const placeholder = name.match(/\$\{\{\s*matrix\.(\w+)\s*\}\}/);
@@ -221,11 +230,23 @@ test('source-build workflow connects every native runner to its LLVM and std art
     ['linux-x64', 'ubuntu-22.04', 'linux_x86_64'],
   ];
   for (const [target, runner, llvmPlatform] of cells) {
-    assert.ok(workflow.includes(`- target: ${target}\n            runner: ${runner}\n            llvm_platform: ${llvmPlatform}`));
-    assert.ok(fixed.includes(`runner: ${runner}\n            platform: ${llvmPlatform}`));
+    // Whole-tuple equality: a row that pairs the right target with the wrong
+    // runner has to fail, which is why this compares the entry and not three
+    // independent substring hits.
+    const row = planTable(workflow).find(entry => entry.target === target);
+    assert.ok(row, `srcbuild plan has no row for ${target}`);
+    assert.equal(row.runner, runner, `${target} runner`);
+    assert.equal(row.llvm_platform, llvmPlatform, `${target} llvm_platform`);
+    const tuple = planTable(fixed).find(entry => entry.platform === llvmPlatform);
+    assert.ok(tuple, `fixed-llc plan has no tuple for ${llvmPlatform}`);
+    assert.equal(tuple.runner, runner, `${llvmPlatform} runner`);
   }
+  // The dependency, not one spelling of it: the list form appeared when the
+  // matrix became selectable and a literal match would have read that as the
+  // edge being gone.
+  assert.match(workflow, /^\s*needs:\s*(fixed-llvm\s*$|\[[^\]]*\bfixed-llvm\b)/m,
+    'the source SDK job no longer depends on fixed-llvm');
   for (const edge of [
-    'needs: fixed-llvm',
     'name: fixed-llvm-tools-${{ matrix.llvm_platform }}',
     'name: final-std-${{ matrix.target }}',
     'path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-stage2',

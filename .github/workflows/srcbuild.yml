@@ -70,35 +70,60 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Four source SDK builds are the expensive part of a release, and starting all
+  # of them before phase 1 has reported anything is what the phase policy exists
+  # to prevent. Selecting here lets each phase call this workflow for its own
+  # target; the tuple list stays in one place.
+  plan:
+    name: Select targets
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      llvm_platforms: ${{ steps.select.outputs.llvm_platforms }}
+    steps:
+      - name: Select the requested targets
+        id: select
+        env:
+          REQUESTED: ${{ inputs.targets || 'all' }}
+        run: |
+          set -euo pipefail
+          all='[
+            {"target":"linux-aarch64","runner":"ubuntu-24.04-arm","llvm_platform":"linux_aarch64","static_libs":true},
+            {"target":"darwin-arm64","runner":"macos-15","llvm_platform":"darwin_aarch64","static_libs":false},
+            {"target":"darwin-x64","runner":"macos-15-intel","llvm_platform":"darwin_x86_64","static_libs":false},
+            {"target":"linux-x64","runner":"ubuntu-22.04","llvm_platform":"linux_x86_64","static_libs":true}
+          ]'
+          if [ -z "$REQUESTED" ] || [ "$REQUESTED" = all ]; then
+            selected="$all"
+          else
+            selected="$(printf '%s' "$all" | jq -c --arg want "$REQUESTED" \
+              '[.[] | select(.target as $t | ($want | split(",") | map(gsub("^ +| +$";"")) | index($t)))]')"
+          fi
+          count="$(printf '%s' "$selected" | jq 'length')"
+          # An empty matrix skips every dependent job while reporting nothing wrong.
+          if [ "$count" -eq 0 ]; then
+            echo "no target matched targets=$REQUESTED" >&2
+            exit 1
+          fi
+          echo "selected $count target(s) for targets=$REQUESTED"
+          printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
+          printf 'llvm_platforms=%s\n' "$(printf '%s' "$selected" | jq -r '[.[].llvm_platform] | join(",")')" >> "$GITHUB_OUTPUT"
+
   fixed-llvm:
     name: Build native LLVM tools
+    needs: plan
     uses: ./.github/workflows/build-fixed-llc.yml
+    with:
+      platforms: ${{ needs.plan.outputs.llvm_platforms }}
 
   srcbuild:
     name: ${{ matrix.target }} / source SDK
-    needs: fixed-llvm
+    needs: [plan, fixed-llvm]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - target: linux-aarch64
-            runner: ubuntu-24.04-arm
-            llvm_platform: linux_aarch64
-            static_libs: true
-          - target: darwin-arm64
-            runner: macos-15
-            llvm_platform: darwin_aarch64
-            static_libs: false
-          - target: darwin-x64
-            runner: macos-15-intel
-            llvm_platform: darwin_x86_64
-            static_libs: false
-          - target: linux-x64
-            runner: ubuntu-22.04
-            llvm_platform: linux_x86_64
-            static_libs: true
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     env:
       CANGJIE_WORKSPACE: ${{ github.workspace }}/.srcbuild/workspace
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
