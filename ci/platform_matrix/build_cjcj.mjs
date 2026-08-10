@@ -151,11 +151,12 @@ if (provisionOnly) {
 
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
 const fixedOptGz = process.env.FIXED_OPT_GZ || '';
+const fixedLldGz = process.env.FIXED_LLD_GZ || '';
 const fixedLlvmManifest = process.env.FIXED_LLVM_MANIFEST || '';
 if (!(await isFile(path.join('runtime_shim', 'cjselfhost_llvmshim.o'))) ||
-    !(await isFile(fixedLlcGz)) || !(await isFile(fixedOptGz)) ||
+    !(await isFile(fixedLlcGz)) || !(await isFile(fixedOptGz)) || !(await isFile(fixedLldGz)) ||
     !(await isFile(fixedLlvmManifest))) {
-  emitBlockedSummary('no complete per-OS/arch fixed LLVM tuple (needs llc + opt + manifest + source-built shim)');
+  emitBlockedSummary('no complete per-OS/arch fixed LLVM tuple (needs llc + opt + native LLD + manifest + source-built shim)');
   process.exit(78);
 }
 
@@ -174,11 +175,18 @@ const parsedManifest = parseLlvmToolsManifest(await fs.readFile(fixedLlvmManifes
   schema: 'core-or-native',
 });
 const manifest = parsedManifest.values;
+if (parsedManifest.schema !== 'core-lineage') {
+  throw new Error(`fixed LLVM tuple requires core-lineage manifest, got ${parsedManifest.schema}`);
+}
 const llvmSourceSha = manifest.get('LLVM_SHA') || '';
 const pinText = await fs.readFile(path.join('ci', 'llvm_pin.env'), 'utf8');
 const pinnedLlvmSha = pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || '';
 if (llvmSourceSha !== pinnedLlvmSha) {
   throw new Error(`fixed LLVM source mismatch (manifest=${llvmSourceSha}, pin=${pinnedLlvmSha})`);
+}
+const expectedLldTool = process.platform === 'darwin' ? 'ld64.lld' : 'ld.lld';
+if (manifest.get('LLD_TOOL') !== expectedLldTool) {
+  throw new Error(`fixed LLVM LLD tool mismatch (manifest=${manifest.get('LLD_TOOL') || ''}, expected=${expectedLldTool})`);
 }
 if (parsedManifest.schema === 'native') {
   for (const [field, expected] of [
@@ -198,8 +206,9 @@ if (parsedManifest.schema === 'native') {
 }
 
 const fixedTools = [
-  {name: 'llc', archive: fixedLlcGz, manifestKey: 'LLC_SHA256'},
-  {name: 'opt', archive: fixedOptGz, manifestKey: 'OPT_SHA256'},
+  {name: 'llc', archive: fixedLlcGz, manifestKey: 'LLC_SHA256', versionKey: 'LLC_VERSION'},
+  {name: 'opt', archive: fixedOptGz, manifestKey: 'OPT_SHA256', versionKey: 'OPT_VERSION'},
+  {name: expectedLldTool, archive: fixedLldGz, manifestKey: 'LLD_SHA256', versionKey: 'LLD_VERSION'},
 ];
 for (const tool of fixedTools) {
   tool.sdk = await sdkToolPath(tool.name);
@@ -241,16 +250,21 @@ if (process.platform === 'win32') {
   }
 }
 
-function probeLlvmTool(tool, phase) {
+function probeLlvmTool(tool, phase, expectedVersion) {
   const probe = spawnSync(tool, ['--version'], {encoding: 'utf8'});
   console.log(`${phase} ${path.basename(tool)} probe: status=${probe.status} error=${probe.error ? probe.error.code : 'none'}`);
   if (probe.stdout) console.log(probe.stdout.slice(0, 400));
   if (probe.stderr) console.error(probe.stderr.slice(0, 400));
   if (probe.status !== 0) throw new Error(`${phase} LLVM tool probe failed: ${tool}`);
+  const reportedVersion = probe.stdout.split(/\r?\n/).map(line => line.trim())
+    .find(line => /LLVM version |^LLD /.test(line)) || '';
+  if (reportedVersion !== expectedVersion) {
+    throw new Error(`${phase} LLVM tool version mismatch: ${tool} (${reportedVersion} != ${expectedVersion})`);
+  }
 }
 
-// Validate the complete tuple before changing either SDK binary.
-for (const tool of fixedTools) probeLlvmTool(tool.tuple, 'tuple');
+// Validate the complete tuple before changing any SDK binary.
+for (const tool of fixedTools) probeLlvmTool(tool.tuple, 'tuple', manifest.get(tool.versionKey));
 
 for (const tool of fixedTools) {
   if (!(await isFile(`${tool.sdk}.orig`))) await fs.copyFile(tool.sdk, `${tool.sdk}.orig`);
@@ -267,7 +281,7 @@ try {
     if (installedSha !== tool.expectedSha) {
       throw new Error(`installed ${tool.name} sha mismatch (${installedSha})`);
     }
-    probeLlvmTool(tool.sdk, 'installed');
+    probeLlvmTool(tool.sdk, 'installed', manifest.get(tool.versionKey));
     console.log(`SDK ${tool.name} -> source-built fixed LLVM (${installedSha})`);
   }
 } catch (error) {
@@ -280,7 +294,7 @@ try {
   throw error;
 }
 for (const tool of fixedTools) await fs.rm(tool.rollback, {force: true});
-console.log(`activated fixed LLVM tuple ${process.env.PLATFORM_TUPLE || 'unknown'} at ${llvmSourceSha}: llc + opt`);
+console.log(`activated fixed LLVM tuple ${process.env.PLATFORM_TUPLE || 'unknown'} at ${llvmSourceSha}: llc + opt + ${expectedLldTool}`);
 
 async function findNamedFile(directory, names) {
   const wanted = new Set(names.map((n) => n.toLowerCase()));
