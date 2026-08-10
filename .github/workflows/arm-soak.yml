@@ -8,6 +8,17 @@ on:
         required: false
         type: number
         default: 20
+      std_artifact:
+        description: >
+          Same-platform source-built final std artifact. build-release-package.yml
+          requires it and asserts it equals final-std-<platform>, so the default is
+          the only accepted value for linux-aarch64.
+          NOTE: this workflow has no producer for that artifact -- it needs one from
+          a source build in the same run before it can complete. Until then the
+          package job will fail at the (fail-closed) download step.
+        required: false
+        type: string
+        default: final-std-linux-aarch64
 
 permissions:
   contents: read
@@ -27,6 +38,7 @@ jobs:
       platform: linux-aarch64
       llvm_platform: linux_aarch64
       sdk_runtime_dir: linux_aarch64_cjnative
+      std_artifact: ${{ inputs.std_artifact }}
       version: arm-soak
       verify: false
     secrets: inherit
