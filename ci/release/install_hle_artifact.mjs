@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-// Swap the stock hle for the source-built one, keeping the stock copy beside it
-// the way install_cjpm_artifact.mjs keeps cjpm-stock.
+// Swap the stock hle for the source-built one, keeping the stock copy under
+// tools/stock the way install_cjpm_artifact.mjs keeps cjpm's.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {parseArgs} from 'node:util';
+import {preserveStock} from '../../build/lib/stock-backup.mjs';
 import {
   HLE_PROVENANCE,
   readToolsPin,
@@ -41,14 +42,9 @@ const provenance = await verifyComponentProvenance({
 
 const toolsBin = path.join(path.resolve(values.sdk), 'tools', 'bin');
 const installed = path.join(toolsBin, name);
-const stock = path.join(toolsBin, windows ? 'hle-stock.exe' : 'hle-stock');
 const staged = path.join(toolsBin, windows ? 'hle-source.exe' : 'hle-source');
 await fs.mkdir(toolsBin, {recursive: true});
-try {
-  await fs.access(stock);
-} catch {
-  await fs.copyFile(installed, stock);
-}
+await preserveStock({sdk: values.sdk, installed, name});
 await fs.copyFile(sourceBinary, staged);
 if (!windows) await fs.chmod(staged, 0o755);
 await fs.rm(installed, {force: true});

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {parseArgs} from 'node:util';
+import {preserveStock} from '../../build/lib/stock-backup.mjs';
 import {
   CJPM_PROVENANCE,
   readCjpmPin,
@@ -36,14 +37,9 @@ const provenance = await verifyCjpmProvenance({
 
 const toolsBin = path.join(path.resolve(values.sdk), 'tools', 'bin');
 const installed = path.join(toolsBin, windows ? 'cjpm.exe' : 'cjpm');
-const stock = path.join(toolsBin, windows ? 'cjpm-stock.exe' : 'cjpm-stock');
 const staged = path.join(toolsBin, windows ? 'cjpm-source.exe' : 'cjpm-source');
 await fs.mkdir(toolsBin, {recursive: true});
-try {
-  await fs.access(stock);
-} catch {
-  await fs.copyFile(installed, stock);
-}
+await preserveStock({sdk: values.sdk, installed, name: windows ? 'cjpm.exe' : 'cjpm'});
 await fs.copyFile(sourceBinary, staged);
 if (!windows) await fs.chmod(staged, 0o755);
 await fs.rm(installed, {force: true});
