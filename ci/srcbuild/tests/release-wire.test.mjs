@@ -80,6 +80,22 @@ test('component provenance, final std, and Python inputs are fail-closed in both
   assert.ok(consumer.includes('node ci/release/install_cjpm_artifact.mjs'));
 });
 
+test('release package runs the packaged std checker as a bounded fail-closed step', async () => {
+  const consumer = await workflow('build-release-package.yml');
+  const start = consumer.indexOf('- name: Verify packaged standard library');
+  const end = consumer.indexOf('\n      - name:', start + 1);
+  assert.ok(start >= 0, 'packaged std verification step is missing');
+  const check = consumer.slice(start, end);
+  assert.match(check, /if: inputs\.verify/);
+  assert.match(check, /timeout-minutes: 2/);
+  assert.ok(!check.includes('continue-on-error'));
+  assert.ok(check.includes('node scripts/check_packaged_std.mjs'));
+  for (const argument of ['--sdk', '--std', '--platform']) assert.ok(check.includes(argument), argument);
+  assert.equal(consumer.match(/node scripts\/check_packaged_std\.mjs/g)?.length, 1);
+  assert.ok(start > consumer.indexOf('- name: Compose SDK package (Windows)'));
+  assert.ok(start < consumer.indexOf('- name: Verify packaged SDK'));
+});
+
 test('all five package cells consume cjpm artifacts with producer sidecars', async () => {
   const [sourceBuild, windowsCjpm, consumer] = await Promise.all([
     workflow('srcbuild.yml'),
