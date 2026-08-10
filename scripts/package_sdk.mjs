@@ -44,6 +44,12 @@ const runtimeRoot = typeof argv['runtime-root'] === 'string' ? argv['runtime-roo
 const allowStockRuntime = argv['allow-stock-runtime'] === true;
 const allowNightlyStd = argv['allow-nightly-std'] === true;
 const stdDir = typeof argv['std-dir'] === 'string' ? argv['std-dir'] : '';
+// Repeatable `--cross-std-dir <tuple>=<final-std-root>`: an attested source-built
+// std for a tuple this package can target but is not built on. See the cross
+// overlay below for why the prune must stay whole-tree.
+const crossStdDirs = (Array.isArray(argv['cross-std-dir'])
+  ? argv['cross-std-dir']
+  : typeof argv['cross-std-dir'] === 'string' ? [argv['cross-std-dir']] : []).map(String);
 const llvmManifest = required('llvm-manifest');
 const baseSdkId = typeof argv['base-sdk-id'] === 'string' ? argv['base-sdk-id'] : '';
 const baseSdkArchive = required('base-sdk-archive');
@@ -507,6 +513,116 @@ if (stdDir) {
     process.exit(3);
   }
   console.log(`  verified rebuilt std: ${symbol} has ${tagTests} tag tests`);
+
+  // ---- cross-tuple std ----------------------------------------------------
+  // The prune above deliberately empties EVERY tuple, and the overlay only
+  // refills runtimeDir. For a Linux cell that silently drops the one thing a
+  // user needs to run `cjc --target x86_64-w64-mingw32`: modules/lib/runtime-lib
+  // for windows_x86_64_cjnative. The shipped compiler resolves the module root
+  // from the *target* tuple (packages/frontend/src/CompilerInstance.cj:1221 via
+  // GetCangjieLibTargetPathName, Option.cj:878) and fail-closes with
+  // "target library path is not exist" when it is missing.
+  //
+  // Neither pruning commit asked for that tuple to end up empty:
+  //   d1d7020c wanted no UNATTESTED nightly std to ship,
+  //   f2d64ef0 wanted the host tuple to equal its final root EXACTLY.
+  // Refilling a cross tuple from an equally attested source-built final root
+  // satisfies both -- so the prune stays whole-tree and nothing is handed back.
+  for (const spec of crossStdDirs) {
+    const split = spec.indexOf('=');
+    if (split <= 0) {
+      console.error(`  ERROR: --cross-std-dir must be <tuple>=<dir>, got: ${spec}`);
+      process.exit(3);
+    }
+    const tuple = spec.slice(0, split);
+    const root = spec.slice(split + 1);
+    if (tuple === runtimeDir) {
+      console.error(`  ERROR: --cross-std-dir names the host tuple ${tuple}; use --std-dir`);
+      process.exit(3);
+    }
+    if (!await exists(root, 'dir')) {
+      console.error(`  ERROR: --cross-std-dir root not found: ${root}`);
+      process.exit(3);
+    }
+    // Suffix follows the TUPLE, not this package's own platform.
+    const crossShared = tuple.includes('windows') ? '.dll' : tuple.includes('darwin') ? '.dylib' : '.so';
+    const src = {
+      modulesStd: path.join(root, 'modules', tuple, 'std'),
+      modulesTop: path.join(root, 'modules', tuple),
+      libDir: path.join(root, 'lib', tuple),
+      sharedDir: path.join(root, 'runtime', 'lib', tuple),
+    };
+    if (!await exists(src.modulesStd, 'dir')) {
+      console.error(`  ERROR: --cross-std-dir ${tuple} has no modules/${tuple}/std under ${root}`);
+      process.exit(3);
+    }
+    const dstModulesStd = path.join(stage, 'modules', tuple, 'std');
+    const dstModulesTop = path.join(stage, 'modules', tuple);
+    const dstLib = path.join(stage, 'lib', tuple);
+    const dstShared = path.join(stage, 'runtime', 'lib', tuple);
+    for (const dir of [dstModulesStd, dstLib, dstShared]) await fs.mkdir(dir, {recursive: true});
+    let nMod = 0, nTop = 0, nLib = 0, nShared = 0;
+    for (const entry of await fs.readdir(src.modulesStd, {withFileTypes: true})) {
+      if (!entry.isFile() || skipName(entry.name)) continue;
+      if (!/\.(a|cjo|bc)$/.test(entry.name)) continue;
+      await fs.copyFile(path.join(src.modulesStd, entry.name), path.join(dstModulesStd, entry.name));
+      nMod += 1;
+    }
+    for (const topName of ['std.a', 'std.cjo', 'libstd.bc']) {
+      const topSrc = path.join(src.modulesTop, topName);
+      if (!await exists(topSrc)) continue;
+      await fs.copyFile(topSrc, path.join(dstModulesTop, topName));
+      nTop += 1;
+    }
+    if (await exists(src.libDir, 'dir')) {
+      for (const name of await fs.readdir(src.libDir)) {
+        if (!name.startsWith('libcangjie-std') || !name.endsWith('.a')) continue;
+        if (/\.O[01]\.a$/.test(name)) continue;
+        await fs.copyFile(path.join(src.libDir, name), path.join(dstLib, name));
+        nLib += 1;
+      }
+    }
+    if (await exists(src.sharedDir, 'dir')) {
+      for (const name of await fs.readdir(src.sharedDir)) {
+        if (!name.startsWith('libcangjie-std') || !name.endsWith(crossShared)) continue;
+        await fs.copyFile(path.join(src.sharedDir, name), path.join(dstShared, name));
+        nShared += 1;
+      }
+    }
+    // Fail closed on the exact shape the negative arm proves is fatal: a tuple
+    // directory that exists (so --target selects it) with no usable std behind it.
+    if (nMod === 0 || nLib === 0) {
+      console.error(`  ERROR: cross std for ${tuple} produced ${nMod} module + ${nLib} lib artifacts`);
+      process.exit(3);
+    }
+    if (!await exists(path.join(dstLib, 'libcangjie-std-core.a'))) {
+      console.error(`  ERROR: cross std for ${tuple} has no lib/${tuple}/libcangjie-std-core.a`);
+      process.exit(3);
+    }
+    console.log(`  cross ${tuple}: ${nMod} modules/std + ${nTop} top + ${nLib} lib + ${nShared} shared`);
+  }
+
+  // Guard against the regression itself: after every overlay, a tuple directory
+  // that survives under modules/ must carry a std. An empty one advertises a
+  // --target the package cannot serve, which is exactly how the Linux cells lost
+  // Windows cross-compilation between d1d7020c and now without anyone noticing.
+  const stagedTuples = path.join(stage, 'modules');
+  if (await exists(stagedTuples, 'dir')) {
+    const starved = [];
+    for (const tuple of await fs.readdir(stagedTuples, {withFileTypes: true})) {
+      if (!tuple.isDirectory()) continue;
+      const std = path.join(stagedTuples, tuple.name, 'std');
+      const entries = await exists(std, 'dir') ? await fs.readdir(std) : [];
+      if (entries.length === 0) starved.push(tuple.name);
+    }
+    if (starved.length > 0) {
+      console.error(`  ERROR: tuples present but carrying no std: ${starved.join(', ')}`);
+      console.error('  Such a tuple makes cjc --target fail with "target library path is not exist".');
+      console.error('  Supply --cross-std-dir <tuple>=<final-std-root>, or drop the tuple directory.');
+      process.exit(3);
+    }
+    console.log('  every packaged tuple carries a std');
+  }
 } else if (allowNightlyStd) {
   console.log('  skip: --allow-nightly-std given; the package will carry the nightly std');
 } else {

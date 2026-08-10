@@ -20,6 +20,18 @@ on:
         description: Same-platform source-built final std artifact
         required: true
         type: string
+      cross_std_artifact:
+        description: >-
+          Source-built final std for a tuple this package can target but is not
+          built on. Empty means the package targets only its own tuple.
+        required: false
+        type: string
+        default: ''
+      cross_std_tuple:
+        description: Runtime tuple that cross_std_artifact fills (e.g. windows_x86_64_cjnative)
+        required: false
+        type: string
+        default: ''
       version:
         required: true
         type: string
@@ -56,6 +68,8 @@ jobs:
       MATRIX_RUNNER: ${{ inputs.runner }}
       SDK_RUNTIME_DIR: ${{ inputs.sdk_runtime_dir }}
       FINAL_STD_DIR: ${{ github.workspace }}/.release-final-std/${{ inputs.platform }}
+      CROSS_STD_DIR: ${{ github.workspace }}/.release-cross-std/${{ inputs.platform }}
+      CROSS_STD_TUPLE: ${{ inputs.cross_std_tuple }}
       PYTHON_BUNDLE_DIR: ${{ github.workspace }}/.release-python/${{ inputs.platform }}/bundle
       RELEASE_PLATFORM: ${{ inputs.platform }}
       SOURCE_CJPM_DIR: ${{ github.workspace }}/.release-cjpm/${{ inputs.platform }}
@@ -78,6 +92,13 @@ jobs:
         with:
           name: ${{ inputs.std_artifact }}
           path: ${{ env.FINAL_STD_DIR }}
+
+      - name: Download cross-tuple source-built final std
+        if: inputs.cross_std_artifact != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.cross_std_artifact }}
+          path: ${{ env.CROSS_STD_DIR }}
 
       - name: Download same-platform source-built cjpm
         if: runner.os != 'Windows'
@@ -353,7 +374,16 @@ jobs:
           runtime_lib="$PWD/dist-runtime/libcangjie-runtime.so"
           if [ "$RUNNER_OS" = "macOS" ]; then runtime_lib="$PWD/dist-runtime/libcangjie-runtime.dylib"; fi
           llvm_manifest="${FIXED_LLVM_MANIFEST:-$PWD/fixed-toolchain/${{ inputs.llvm_platform }}/llvm-tools.manifest}"
+          # Two words when a cross tuple is configured, zero when not. Plain string
+          # rather than an array: macOS runners still ship bash 3.2, where "${a[@]}"
+          # on an empty array is an unbound-variable error under set -u.
+          cross_std_arg=""
+          if [ -n "${CROSS_STD_TUPLE:-}" ]; then
+            cross_std_arg="--cross-std-dir ${CROSS_STD_TUPLE}=${CROSS_STD_DIR}"
+          fi
+          # shellcheck disable=SC2086
           npx --yes zx@8 scripts/package_sdk.mjs \
+            $cross_std_arg \
             --sdk "$CANGJIE_HOME" \
             --binary "$PWD/target/release/bin/cjcj::cjc" \
             --runtime-lib "$runtime_lib" \
