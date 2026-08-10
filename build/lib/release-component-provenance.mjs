@@ -4,6 +4,11 @@ import path from 'node:path';
 
 export const BASE_SDK_PROVENANCE = 'BASE-SDK-PROVENANCE.json';
 export const CJPM_PROVENANCE = 'CJPM-PROVENANCE.json';
+export const SOURCE_PROVENANCE_RESOLVED = 'resolved';
+export const SOURCE_PROVENANCE_NOT_APPLICABLE = 'not-applicable';
+export const SOURCE_PROVENANCE_UNRESOLVED = 'unresolved';
+export const BASE_SDK_SOURCE_REASON =
+  'Official nightly SDKs are multi-repository integration artifacts and do not have a single source commit.';
 
 const SHA40 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -85,6 +90,10 @@ export async function writeBaseSdkProvenance({archive, destination, platform, to
     schema: 1,
     component: 'base-sdk',
     platform,
+    source: {
+      status: SOURCE_PROVENANCE_NOT_APPLICABLE,
+      reason: BASE_SDK_SOURCE_REASON,
+    },
     release: {
       repository: expected.releaseRepository,
       version: expected.version,
@@ -99,17 +108,34 @@ export async function writeBaseSdkProvenance({archive, destination, platform, to
   return value;
 }
 
-export async function verifyBaseSdkProvenance({archive, sidecar, platform, toolchain}) {
-  const label = 'base SDK provenance';
+export function validateBaseSdkProvenance(value, {platform, toolchain, label = 'base SDK provenance'}) {
   const expected = baseSdkDownload(platform, toolchain);
-  const value = await readJson(sidecar, label);
   requireIdentity(value, {component: 'base-sdk', platform}, label);
+  if (value.source?.status !== SOURCE_PROVENANCE_NOT_APPLICABLE) {
+    throw new Error(`${label}.source.status must be ${SOURCE_PROVENANCE_NOT_APPLICABLE}; got ${
+      value.source?.status || SOURCE_PROVENANCE_UNRESOLVED}`);
+  }
+  const reason = requireString(value.source?.reason, `${label}.source.reason`);
+  if (reason !== BASE_SDK_SOURCE_REASON) {
+    throw new Error(`${label}.source.reason does not describe the official multi-repository SDK`);
+  }
   if (value.release?.repository !== expected.releaseRepository ||
       value.release?.version !== expected.version ||
       value.release?.download_url !== expected.url) {
     throw new Error(`${label} release identity does not match ${expected.url}`);
   }
-  if (value.artifact?.path !== expected.archive || path.basename(archive) !== expected.archive) {
+  if (value.artifact?.path !== expected.archive) {
+    throw new Error(`${label} archive path does not match ${expected.archive}`);
+  }
+  requireMatch(value.artifact?.sha256, SHA256, `${label}.artifact.sha256`);
+  return value;
+}
+
+export async function verifyBaseSdkProvenance({archive, sidecar, platform, toolchain}) {
+  const label = 'base SDK provenance';
+  const expected = baseSdkDownload(platform, toolchain);
+  const value = validateBaseSdkProvenance(await readJson(sidecar, label), {platform, toolchain, label});
+  if (path.basename(archive) !== expected.archive) {
     throw new Error(`${label} archive path does not match ${expected.archive}`);
   }
   const recorded = requireMatch(value.artifact?.sha256, SHA256, `${label}.artifact.sha256`);
@@ -140,6 +166,7 @@ export async function writeCjpmProvenance({binary, destination, platform, reposi
     component: 'cjpm',
     platform,
     source: {
+      status: SOURCE_PROVENANCE_RESOLVED,
       repository: requireString(repository, 'cjpm source repository'),
       commit: requireMatch(commit, SHA40, 'cjpm source commit'),
     },
@@ -162,7 +189,13 @@ export async function verifyCjpmProvenance({
   const label = 'cjpm provenance';
   const value = await readJson(sidecar, label);
   requireIdentity(value, {component: 'cjpm', platform}, label);
-  if (value.source?.repository !== expectedRepository || value.source?.commit !== expectedCommit) {
+  if (value.source?.status !== SOURCE_PROVENANCE_RESOLVED) {
+    throw new Error(`${label}.source.status must be ${SOURCE_PROVENANCE_RESOLVED}; got ${
+      value.source?.status || SOURCE_PROVENANCE_UNRESOLVED}`);
+  }
+  const repository = requireString(expectedRepository, 'expected cjpm source repository');
+  const commit = requireMatch(expectedCommit, SHA40, 'expected cjpm source commit');
+  if (value.source?.repository !== repository || value.source?.commit !== commit) {
     throw new Error(`${label} source mismatch: ${value.source?.repository || '<empty>'}@${value.source?.commit || '<empty>'}`);
   }
   const artifactName = platform === 'windows-x64' ? 'cjpm.exe' : 'cjpm';

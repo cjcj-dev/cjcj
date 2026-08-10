@@ -2,7 +2,11 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {RELEASE_SIGNATURE_POLICY} from '../build/lib/release-manifest.mjs';
+import {
+  RELEASE_SIGNATURE_POLICY,
+  validateReleaseManifestArtifact,
+  validateReleaseManifestSource,
+} from '../build/lib/release-manifest.mjs';
 import {
   GATE_APPARATUS_COMPONENT,
   validateGateApparatusManifestSection,
@@ -59,7 +63,7 @@ const lines = [
   `# cjcj v${version}`,
   '',
   'Every SDK archive embeds `RELEASE-MANIFEST.jsonl`; the same manifest is attached beside the archive.',
-  'The tables below are rendered from those manifests. `unavailable: …` and `no-stamp` are intentional, explicit provenance results.',
+  'The tables below are rendered from those manifests. `not-applicable` is allowed only with an explicit reason; unresolved provenance is rejected. `no-stamp` records an absent embedded stamp.',
   `Signature policy: \`${RELEASE_SIGNATURE_POLICY}\`.`,
   '',
   '## Component provenance',
@@ -70,6 +74,8 @@ for (const {name, match, rows} of loadedManifests) {
     '| component | source commit/version | artifact SHA-256 | embedded stamp |',
     '|---|---|---|---|');
   for (const row of rows) {
+    validateReleaseManifestSource(row.source, row.component || '<missing-component>');
+    validateReleaseManifestArtifact(row.artifact, row.component || '<missing-component>');
     const values = [row.component, row.source?.commit, row.artifact?.sha256, row.embedded_stamp];
     if (row.schema !== 1 || row.signature_policy !== RELEASE_SIGNATURE_POLICY ||
         values.some(value => typeof value !== 'string' || value.length === 0)) {

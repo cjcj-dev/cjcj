@@ -116,8 +116,8 @@ async function prepareWindows() {
     source_type: 'python.org-embeddable',
     source_url: RELEASE_PYTHON_WINDOWS_URL,
     source_sha256: RELEASE_PYTHON_WINDOWS_SHA256,
-    configure_args: 'unavailable: official Windows embeddable distribution is not source-configured',
-    configure_environment: 'unavailable: official Windows embeddable distribution is not source-configured',
+    configure_args: 'not-applicable: official Windows embeddable distribution is not source-configured',
+    configure_environment: 'not-applicable: official Windows embeddable distribution is not source-configured',
   };
 }
 

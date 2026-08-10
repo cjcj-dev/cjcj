@@ -2,6 +2,12 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
+  SOURCE_PROVENANCE_NOT_APPLICABLE,
+  SOURCE_PROVENANCE_RESOLVED,
+  SOURCE_PROVENANCE_UNRESOLVED,
+  validateBaseSdkProvenance,
+} from './release-component-provenance.mjs';
+import {
   GATE_APPARATUS_COMPONENT,
   gateApparatusManifestSection,
   readGateApparatusProvenance,
@@ -10,16 +16,68 @@ import {
 export const RELEASE_MANIFEST = 'RELEASE-MANIFEST.jsonl';
 export const RELEASE_SIGNATURE_POLICY = 'SHA_ONLY';
 
-const unavailable = reason => `unavailable: ${reason}`;
+const STRUCTURAL_NOT_APPLICABLE_COMPONENTS = new Set(['base-sdk', GATE_APPARATUS_COMPONENT]);
 
-function present(value, reason) {
+function requireText(value, label) {
   const text = typeof value === 'string' ? value.trim() : '';
-  return text || unavailable(reason);
+  if (!text) throw new Error(`${label} is empty`);
+  return text;
 }
 
-function sourceCommit(value, reason) {
+function sourceCommit(value, component) {
   const commit = typeof value === 'string' ? value.trim() : '';
-  return /^[0-9a-f]{40}(?:-dirty)?$/.test(commit) ? commit : unavailable(reason);
+  if (!/^[0-9a-f]{40}(?:-dirty)?$/.test(commit)) {
+    throw new Error(`${component} source commit must be a 40-character SHA; actual=${commit || '<empty>'}`);
+  }
+  return commit;
+}
+
+export function validateReleaseManifestSource(sourceValue, component) {
+  const status = typeof sourceValue?.status === 'string'
+    ? sourceValue.status.trim()
+    : SOURCE_PROVENANCE_UNRESOLVED;
+  if (status === SOURCE_PROVENANCE_UNRESOLVED) {
+    throw new Error(`${component}.source.status is ${SOURCE_PROVENANCE_UNRESOLVED}; release provenance must resolve or explicitly be not applicable`);
+  }
+  if (STRUCTURAL_NOT_APPLICABLE_COMPONENTS.has(component)) {
+    if (status !== SOURCE_PROVENANCE_NOT_APPLICABLE) {
+      throw new Error(`${component}.source.status must be ${SOURCE_PROVENANCE_NOT_APPLICABLE}; got ${status}`);
+    }
+    if (sourceValue.repository !== SOURCE_PROVENANCE_NOT_APPLICABLE ||
+        sourceValue.commit !== SOURCE_PROVENANCE_NOT_APPLICABLE) {
+      throw new Error(`${component}.source repository and commit must both be ${SOURCE_PROVENANCE_NOT_APPLICABLE}`);
+    }
+    requireText(sourceValue.reason, `${component}.source.reason`);
+    requireText(sourceValue.release_repository, `${component}.source.release_repository`);
+    requireText(sourceValue.version, `${component}.source.version`);
+    requireText(sourceValue.download_url, `${component}.source.download_url`);
+    return sourceValue;
+  }
+  if (status !== SOURCE_PROVENANCE_RESOLVED) {
+    throw new Error(`${component}.source.status must be ${SOURCE_PROVENANCE_RESOLVED}; got ${status}`);
+  }
+  const repository = requireText(sourceValue.repository, `${component}.source.repository`);
+  const commit = requireText(sourceValue.commit, `${component}.source.commit`);
+  if (/^unavailable:/i.test(repository) || /^unavailable:/i.test(commit)) {
+    throw new Error(`${component}.source uses the forbidden legacy unavailable value`);
+  }
+  const expectedCommit = component === 'python' ? /^3\.11\.\d+$/ : /^[0-9a-f]{40}(?:-dirty)?$/;
+  if (!expectedCommit.test(commit)) {
+    throw new Error(`${component}.source.commit is invalid for resolved provenance: ${commit}`);
+  }
+  return sourceValue;
+}
+
+export function validateReleaseManifestArtifact(artifactValue, component) {
+  const artifactPath = requireText(artifactValue?.path, `${component}.artifact.path`);
+  const artifactSha256 = requireText(artifactValue?.sha256, `${component}.artifact.sha256`);
+  if (/^unavailable:/i.test(artifactPath) || /^unavailable:/i.test(artifactSha256)) {
+    throw new Error(`${component}.artifact uses the forbidden legacy unavailable value`);
+  }
+  if (!/^[0-9a-f]{64}$/.test(artifactSha256)) {
+    throw new Error(`${component}.artifact.sha256 is invalid: ${artifactSha256}`);
+  }
+  return artifactValue;
 }
 
 async function sha256(file) {
@@ -54,7 +112,7 @@ function embeddedStamp(buffer, prefixes) {
   let value;
   if (values.size === 0) value = 'no-stamp';
   else if (values.size === 1) [value] = values;
-  else value = unavailable(`conflicting embedded stamps (${[...values].sort().join(',')})`);
+  else throw new Error(`conflicting embedded stamps (${[...values].sort().join(',')})`);
   return {value, occurrences};
 }
 
@@ -96,12 +154,7 @@ function packagedPath(stage, file) {
 
 async function artifact(stage, file, reason, prefixes = []) {
   if (!await fileExists(file)) {
-    return {
-      path: unavailable(reason),
-      sha256: unavailable(reason),
-      embedded_stamp: 'no-stamp',
-      stamp_occurrences: Object.fromEntries(prefixes.map(prefix => [prefix, []])),
-    };
+    throw new Error(`${reason}: ${file || '<empty>'}`);
   }
   const bytes = await fs.readFile(file);
   const stamps = embeddedStamp(bytes, prefixes);
@@ -113,10 +166,21 @@ async function artifact(stage, file, reason, prefixes = []) {
   };
 }
 
-function source(repository, commit, repoReason, commitReason) {
+function source(repository, commit, component) {
   return {
-    repository: present(repository, repoReason),
-    commit: sourceCommit(commit, commitReason),
+    status: SOURCE_PROVENANCE_RESOLVED,
+    repository: requireText(repository, `${component}.source.repository`),
+    commit: sourceCommit(commit, component),
+  };
+}
+
+function notApplicableSource(reason, extra = {}) {
+  return {
+    status: SOURCE_PROVENANCE_NOT_APPLICABLE,
+    repository: SOURCE_PROVENANCE_NOT_APPLICABLE,
+    commit: SOURCE_PROVENANCE_NOT_APPLICABLE,
+    reason: requireText(reason, 'not-applicable source reason'),
+    ...extra,
   };
 }
 
@@ -206,35 +270,25 @@ export async function writeReleaseManifest({
     'packaged gate apparatus provenance is missing');
 
   const stdText = await fileExists(stdProvenance) ? await fs.readFile(stdProvenance, 'utf8') : '';
-  const hasBaseSdkProvenance = baseSdkProvenance?.schema === 1 &&
-    baseSdkProvenance?.component === 'base-sdk' &&
-    typeof baseSdkProvenance?.release?.repository === 'string' &&
-    typeof baseSdkProvenance?.release?.version === 'string' &&
-    typeof baseSdkProvenance?.release?.download_url === 'string' &&
-    typeof baseSdkProvenance?.artifact?.path === 'string' &&
-    /^[0-9a-f]{64}$/.test(baseSdkProvenance?.artifact?.sha256 || '');
+  const verifiedBaseSdk = validateBaseSdkProvenance(baseSdkProvenance, {
+    platform,
+    toolchain: baseSdkId,
+    label: 'release manifest base SDK provenance',
+  });
 
   const rows = [
     {
       schema: 1,
       platform,
       component: 'base-sdk',
-      source: {
-        ...source('', '',
-          `official SDK ${baseSdkId || '<unknown>'} has no source repository metadata`,
-          `official SDK ${baseSdkId || '<unknown>'} has no source commit metadata`),
-        ...(hasBaseSdkProvenance ? {
-          release_repository: baseSdkProvenance.release.repository,
-          version: baseSdkProvenance.release.version,
-          download_url: baseSdkProvenance.release.download_url,
-        } : {}),
-      },
-      artifact: hasBaseSdkProvenance ? {
-        path: baseSdkProvenance.artifact.path,
-        sha256: baseSdkProvenance.artifact.sha256,
-      } : {
-        path: unavailable('base SDK was supplied as an unpacked directory'),
-        sha256: unavailable('base SDK was supplied as an unpacked directory'),
+      source: notApplicableSource(verifiedBaseSdk.source.reason, {
+        release_repository: verifiedBaseSdk.release.repository,
+        version: verifiedBaseSdk.release.version,
+        download_url: verifiedBaseSdk.release.download_url,
+      }),
+      artifact: {
+        path: verifiedBaseSdk.artifact.path,
+        sha256: verifiedBaseSdk.artifact.sha256,
       },
       embedded_stamp: 'no-stamp',
     },
@@ -242,12 +296,11 @@ export async function writeReleaseManifest({
       schema: 1,
       platform,
       component: GATE_APPARATUS_COMPONENT,
-      source: {
-        repository: gateApparatus.base_sdk.release_repository,
-        commit: unavailable(`official gate host toolchain ${gateApparatus.gate_host_toolchain} has no source commit metadata`),
+      source: notApplicableSource(gateApparatus.base_sdk.source.reason, {
+        release_repository: gateApparatus.base_sdk.release_repository,
         version: gateApparatus.base_sdk.version,
         download_url: gateApparatus.base_sdk.download_url,
-      },
+      }),
       artifact: {
         path: gateApparatusArtifactValue.path,
         sha256: gateApparatusArtifactValue.sha256,
@@ -259,8 +312,7 @@ export async function writeReleaseManifest({
       schema: 1,
       platform,
       component: 'cjcj',
-      source: source(cjcjRepository, frozen.cjcj,
-        'cjcj source repository was not supplied', 'cjcj source commit was neither supplied nor stamped'),
+      source: source(cjcjRepository, frozen.cjcj, 'cjcj'),
       artifact: {path: cjcjArtifact.path, sha256: cjcjArtifact.sha256},
       embedded_stamp: cjcjArtifact.embedded_stamp,
     },
@@ -268,8 +320,7 @@ export async function writeReleaseManifest({
       schema: 1,
       platform,
       component: 'runtime',
-      source: source(runtimeRepository, frozen.runtime,
-        'runtime source repository was not supplied', 'runtime source commit was neither supplied nor stamped'),
+      source: source(runtimeRepository, frozen.runtime, 'runtime'),
       artifact: {path: runtime.path, sha256: runtime.sha256},
       embedded_stamp: runtime.embedded_stamp,
     },
@@ -280,9 +331,7 @@ export async function writeReleaseManifest({
       schema: 1,
       platform,
       component,
-      source: source(llvmRepository, frozen.llvm,
-        'LLVM source repository was not supplied',
-        'LLVM frozen source commit was not supplied'),
+      source: source(llvmRepository, frozen.llvm, component),
       artifact: {path: tool.path, sha256: tool.sha256},
       embedded_stamp: tool.embedded_stamp,
     })),
@@ -290,9 +339,7 @@ export async function writeReleaseManifest({
       schema: 1,
       platform,
       component: 'std',
-      source: source(stdRepository || runtimeRepository, stdCommit(stdText),
-        'std source repository was not supplied',
-        stdProvenance ? 'std provenance has no valid STD_SOURCE_COMMIT' : 'std PROVENANCE.txt was not supplied'),
+      source: source(stdRepository || runtimeRepository, stdCommit(stdText), 'std'),
       artifact: await (async () => {
         const value = await artifact(stage, stdProvenance, 'std PROVENANCE.txt is missing');
         return {path: value.path, sha256: value.sha256};
@@ -303,9 +350,7 @@ export async function writeReleaseManifest({
       schema: 1,
       platform,
       component: 'cjpm',
-      source: source(cjpmRepository, cjpmCommit,
-        'packaged cjpm has no source repository metadata',
-        'packaged cjpm has no source commit metadata'),
+      source: source(cjpmRepository, cjpmCommit, 'cjpm'),
       artifact: {path: cjpm.path, sha256: cjpm.sha256},
       embedded_stamp: cjpm.embedded_stamp,
     },
@@ -314,7 +359,8 @@ export async function writeReleaseManifest({
       platform,
       component: 'python',
       source: {
-        repository: present(pythonRepository, 'Python source repository was not supplied'),
+        status: SOURCE_PROVENANCE_RESOLVED,
+        repository: requireText(pythonRepository, 'python.source.repository'),
         commit: pythonVersion,
         download_url: pythonMetadata.source_url,
         archive_sha256: pythonMetadata.source_sha256,
@@ -332,6 +378,8 @@ export async function writeReleaseManifest({
   ].map(row => ({...row, signature_policy: normalizedSignaturePolicy}));
 
   for (const row of rows) {
+    validateReleaseManifestSource(row.source, row.component);
+    validateReleaseManifestArtifact(row.artifact, row.component);
     for (const [name, value] of Object.entries({
       platform: row.platform,
       component: row.component,
@@ -343,6 +391,9 @@ export async function writeReleaseManifest({
       signature_policy: row.signature_policy,
     })) {
       if (typeof value !== 'string' || value.length === 0) throw new Error(`${row.component}.${name} is empty`);
+      if (/^unavailable:/i.test(value)) {
+        throw new Error(`${row.component}.${name} uses the forbidden legacy unavailable value`);
+      }
     }
     if (row.component === 'python') {
       for (const [name, value] of Object.entries({

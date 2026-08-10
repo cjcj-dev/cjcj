@@ -7,7 +7,10 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {
   BASE_SDK_PROVENANCE,
+  BASE_SDK_SOURCE_REASON,
   CJPM_PROVENANCE,
+  SOURCE_PROVENANCE_NOT_APPLICABLE,
+  SOURCE_PROVENANCE_RESOLVED,
   baseSdkDownload,
   writeBaseSdkProvenance,
   writeCjpmProvenance,
@@ -244,7 +247,15 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.equal(rows.find(row => row.component === 'python').source.commit, RELEASE_PYTHON_VERSION);
   assert.equal(rows.find(row => row.component === 'base-sdk').source.version,
     REVIEWED_GATE_HOST_TOOLCHAIN.replace(/^nightly-/, ''));
+  assert.equal(rows.find(row => row.component === 'base-sdk').source.status,
+    SOURCE_PROVENANCE_NOT_APPLICABLE);
+  assert.equal(rows.find(row => row.component === 'base-sdk').source.commit,
+    SOURCE_PROVENANCE_NOT_APPLICABLE);
+  assert.equal(rows.find(row => row.component === 'base-sdk').source.reason,
+    BASE_SDK_SOURCE_REASON);
   assert.match(rows.find(row => row.component === 'base-sdk').artifact.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(rows.find(row => row.component === 'cjpm').source.status,
+    SOURCE_PROVENANCE_RESOLVED);
   assert.equal(rows.find(row => row.component === 'cjpm').source.commit, CJPM_SHA);
   assert.match(rows.find(row => row.component === 'cjpm').artifact.sha256, /^[0-9a-f]{64}$/);
   const listing = run('tar', ['-tzf', path.join(out, `${packageName}.tar.gz`)]).stdout;
@@ -322,6 +333,34 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     destination: baseSidecar,
     platform: 'linux-x64',
     toolchain: baseSdkId,
+  });
+
+  const emptyBaseReason = JSON.parse(await fs.readFile(baseSidecar, 'utf8'));
+  emptyBaseReason.source.reason = '';
+  await fs.writeFile(baseSidecar, `${JSON.stringify(emptyBaseReason, null, 2)}\n`);
+  const missingBaseReason = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+  assert.notEqual(missingBaseReason.status, 0, 'empty base SDK not-applicable reason must fail closed');
+  assert.match(`${missingBaseReason.stdout}\n${missingBaseReason.stderr}`,
+    /base SDK provenance\.source\.reason is empty/);
+  console.log(`NEGATIVE-EMPTY-BASE-REASON RC=${missingBaseReason.status}\n${missingBaseReason.stderr.trim()}`);
+  await writeBaseSdkProvenance({
+    archive: baseArchive,
+    destination: baseSidecar,
+    platform: 'linux-x64',
+    toolchain: baseSdkId,
+  });
+
+  await fs.rm(cjpmSidecar);
+  const missingCjpm = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+  assert.equal(missingCjpm.status, 2, 'deleting the cjpm sidecar must fail closed with RC=2');
+  assert.match(`${missingCjpm.stdout}\n${missingCjpm.stderr}`, /cjpm provenance not found:/);
+  console.log(`NEGATIVE-DELETE-CJPM-SIDECAR RC=${missingCjpm.status}\n${missingCjpm.stderr.trim()}`);
+  await writeCjpmProvenance({
+    binary: cjpm,
+    destination: cjpmSidecar,
+    platform: 'linux-x64',
+    repository: 'https://github.com/cjcj-dev/cangjie-tools.git',
+    commit: CJPM_SHA,
   });
 
   const changedCjpmSha = `f${CJPM_SHA.slice(1)}`;

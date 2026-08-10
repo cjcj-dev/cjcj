@@ -4,7 +4,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import {RELEASE_MANIFEST} from '../build/lib/release-manifest.mjs';
+import {
+  RELEASE_MANIFEST,
+  validateReleaseManifestArtifact,
+  validateReleaseManifestSource,
+} from '../build/lib/release-manifest.mjs';
 import {
   GATE_APPARATUS_COMPONENT,
   validateGateApparatusManifestSection,
@@ -218,6 +222,8 @@ async function validateManifest(file, platform) {
     const component = requireString(row.component, `${platform} row ${index + 1} component`);
     if (components.has(component)) throw new Error(`${platform} manifest repeats component ${component}`);
     components.add(component);
+    validateReleaseManifestSource(row.source, component);
+    validateReleaseManifestArtifact(row.artifact, component);
     requireString(row.source?.repository, `${platform}.${component}.source.repository`);
     requireString(row.source?.commit, `${platform}.${component}.source.commit`);
     requireString(row.artifact?.path, `${platform}.${component}.artifact.path`);

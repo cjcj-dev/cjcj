@@ -303,7 +303,7 @@ if (stdDir) {
     await fs.copyFile(sourceProvenance, stdProvenance);
     console.log(`  PROVENANCE.txt <- ${sourceProvenance}`);
   } else {
-    console.warn(`  WARNING: ${stdSource} has no PROVENANCE.txt; release manifest will record unavailable`);
+    throw new Error(`${stdSource} has no PROVENANCE.txt; release packaging requires resolved std source provenance`);
   }
   const stageModulesStd = path.join(stage, 'modules', runtimeDir, 'std');
   const stageModulesTop = path.join(stage, 'modules', runtimeDir);

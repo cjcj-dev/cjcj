@@ -156,8 +156,11 @@ async function readMetadata(root, platform) {
       JSON.stringify(metadata.required_unix_modules) !== requiredUnix) {
     throw new Error(`Python bundle required_modules do not match the cjdb source inventory: ${file}`);
   }
-  if (!windows && (metadata.configure_args.startsWith('unavailable:') ||
-      metadata.configure_environment.startsWith('unavailable:'))) {
+  const configureInputs = [metadata.configure_args, metadata.configure_environment];
+  if (configureInputs.some(value => value.startsWith('unavailable:'))) {
+    throw new Error(`Python bundle uses the forbidden legacy unavailable value: ${file}`);
+  }
+  if (!windows && configureInputs.some(value => value.startsWith('not-applicable:'))) {
     throw new Error(`source-built Python must record configure inputs: ${file}`);
   }
   return {file, metadata};
