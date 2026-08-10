@@ -442,6 +442,18 @@ jobs:
             --platform "${{ inputs.platform }}" `
             --outdir "$PWD\dist"
 
+      - name: Verify packaged standard library
+        if: inputs.verify
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          # The checker discovers the target's complete std inventory; do not
+          # duplicate artifact or tuple file lists in this workflow.
+          node scripts/check_packaged_std.mjs \
+            --sdk "$PWD/dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}" \
+            --std "$FINAL_STD_DIR" \
+            --platform "$RELEASE_PLATFORM"
+
       - name: Verify packaged SDK
         if: inputs.verify && runner.os != 'Windows'
         shell: bash

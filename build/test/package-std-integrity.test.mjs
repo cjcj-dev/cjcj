@@ -65,18 +65,16 @@ async function cloneFixture(source, destination) {
 // futex_do_wait rather than epoll_wait -- an idle node process waits in epoll, so
 // this one is blocked on a lock, not idling and not computing.
 //
-// That script sets process.exitCode and returns, so any handle still referenced
-// keeps it alive; its sha256 resolves on 'end' without destroying the read stream
-// and hashFiles runs sixteen of those at once. That remains the suspect and it is
-// NOT confirmed -- an interleaved A/B of the destroy() change was inconclusive
-// because neither arm hung in 20 rounds. io_uring on this WSL2 kernel is a second
-// open lead; UV_USE_IO_URING=0 does not test it, since node v23.11.1 opens the
-// same three io_uring fds either way.
+// A later native capture ruled out those open leads: libuv's loop and worker
+// pool were idle, while NodePlatform::DrainTasks waited on the same condition as
+// four idle V8 workers. The checker now waits behind its stdout/stderr writes and
+// explicitly exits with the verdict it already computed, bypassing that broken
+// Node v23.11.1 shutdown drain without dropping diagnostics.
 //
-// So: bound it, and let it fail loudly. Whichever bound fires, the test FAILS
-// and the message names the invocation that was in flight and prints what it had
-// produced. Both values are far above the observed cost: all five checker
-// invocations complete inside 1.4s total.
+// Keep both independent bounds as regression backstops. Whichever bound fires,
+// the test FAILS and the message names the invocation that was in flight and
+// prints what it had produced. Both values are far above the observed cost: all
+// five checker invocations complete inside 1.4s total.
 const CHECKER_TIMEOUT_MS = 60_000;
 const TEST_TIMEOUT_MS = 180_000;
 

@@ -307,17 +307,24 @@ export async function checkPackagedStd({sdk, std, platform}) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  let exitCode;
   try {
     const options = parseArguments(process.argv.slice(2));
     if (options.help) {
       console.log(usage());
-      process.exitCode = 0;
+      exitCode = 0;
     } else {
-      process.exitCode = await checkPackagedStd(options) ? 0 : 1;
+      exitCode = await checkPackagedStd(options) ? 0 : 1;
     }
   } catch (error) {
     console.error(`PKGSTD_CHECK_ERROR ${error.message}`);
     console.error(usage());
-    process.exitCode = 2;
+    exitCode = 2;
   }
+  // Node v23.11.1 can deadlock after libuv has drained while its V8 platform
+  // tasks shut down. Wait behind all prior pipe writes so forcing the already
+  // computed verdict cannot truncate diagnostics, then bypass that broken drain.
+  await Promise.all([process.stdout, process.stderr].map(stream =>
+    new Promise((resolve, reject) => stream.write('', error => error ? reject(error) : resolve()))));
+  process.exit(exitCode);
 }
