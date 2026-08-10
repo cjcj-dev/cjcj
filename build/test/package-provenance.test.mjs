@@ -274,6 +274,13 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   console.log(`NEGATIVE-CHANGE-LLVM RC=${changedLlvm.status}\n${changedLlvm.stderr.trim()}`);
   await fs.writeFile(llvmManifest, originalLlvmManifest);
 
+  await fs.writeFile(llvmManifest, originalLlvmManifest.replace(/^LLD_SHA256=.*$/m, `LLD_SHA256=${'0'.repeat(64)}`));
+  const changedLld = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+  assert.notEqual(changedLld.status, 0, 'changing the LTO linker sha must fail closed');
+  assert.match(`${changedLld.stdout}\n${changedLld.stderr}`, /ld\.lld: packaged sha256 .* does not match tuple manifest/);
+  console.log(`NEGATIVE-CHANGE-LLD RC=${changedLld.status}\n${changedLld.stderr.trim()}`);
+  await fs.writeFile(llvmManifest, originalLlvmManifest);
+
   await fs.rm(gateSidecar);
   const missingGateApparatus = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
   assert.equal(missingGateApparatus.status, 2, 'missing gate apparatus sidecar must fail closed with RC=2');
