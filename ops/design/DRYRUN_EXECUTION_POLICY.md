@@ -78,7 +78,14 @@ dispatch 后第一项取证是 run JSON。`head_sha != FREEZE.json.head_sha`、`
 
 只有第 0 层全绿才读这一层：
 
-- `TESTS_MANIFEST` 必须是 `configure=1 manual=15 orphan=5`；数字少一个即 `STOP-CONTRACT`，不能只认 `PASS`。
+- `TESTS_MANIFEST` 三个数（今日实测 `configure=1 manual=15 orphan=5`，21 条条目）必须满足**三条不变量**，
+  任一不满足即 `STOP-CONTRACT`，不能只认 `PASS`：
+  1. `configure >= 1` —— 配置期那道负编译门还在跑；
+  2. `configure + manual + orphan == 21` —— **没有条目静默消失**（这才是"覆盖面没缩水"的真判据）；
+  3. `orphan <= 5` —— 欠债不增长。
+  ⛔ **不要写成 `manual == 15` 这类等式**：把一个 orphan 接上 runner 会让 `manual` 变 16、`orphan` 变 4，
+  那是**改进**，而等式判据会把它判成契约违反。一道把还债当违约的门，只会让人不还债。
+  （原文即为等式形式；0811 由主控改为不变量形式，理由见 `RELEASE_0_0_2_BLOCKERS.md` 同日条目。）
 - `SLOT_TYPE_PROBE` 必须是 `control=1 witness=1 negatives=5`，五个负臂都必须“拒绝且诊断到预期 symbol”；错误拼法编过、control 不编过、或因无关错误失败，均为 `STOP-CONTRACT`。
 - Linux x64 的共享 compiler/runtime/stdx/stage1/2/3 任一确定性编译或测试失败为 `STOP-SHARED-BUILD`，后四格不得启动。
 - Linux AArch64 的架构编译/测试失败为 `STOP-LINUX-ARM64`；Windows 的 cross runtime/export/PowerShell/ZIP 失败为 `STOP-WINDOWS`；Darwin arm64 的 Python 选择、compiler、loader/LTO 失败为 `STOP-DARWIN-ARM64`；Darwin x64 任一失败为 `STOP-DARWIN-X64`。
