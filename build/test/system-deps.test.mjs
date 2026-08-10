@@ -22,8 +22,8 @@ function write(file, contents = '') {
 }
 
 test('Darwin dependency pins keep LLVM 16 and OpenSSL 3 without top-level Python', () => {
-  assert.equal(LLVM_PYTHON_FORMULA, 'python@3.12');
-  assert.equal(LLVM_PYTHON_VERSION, '3.12');
+  assert.equal(LLVM_PYTHON_FORMULA, 'python@3.11');
+  assert.equal(LLVM_PYTHON_VERSION, '3.11');
   assert.equal(CMAKE_VERSION, '3.31.10');
   assert.ok(!BREW_PACKAGES.includes('python3'));
   assert.ok(BREW_PACKAGES.includes('llvm@16'));
@@ -92,8 +92,8 @@ test('CMake installer fails closed on a mismatched archive digest', async () => 
 
 test('Darwin install exposes the supported LLVM Python keg without linking it', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'darwin-deps-'));
-  const keg = path.join(root, 'python@3.12');
-  const kegInclude = path.join(keg, 'include', 'python3.12');
+  const keg = path.join(root, 'python@3.11');
+  const kegInclude = path.join(keg, 'include', 'python3.11');
   const commands = [];
   const exposedPaths = [];
   write(path.join(kegInclude, 'Python.h'));
@@ -106,12 +106,12 @@ test('Darwin install exposes the supported LLVM Python keg without linking it', 
       }
       if (command[0] === 'brew' && command[1] === '--prefix') return {exitCode: 0, stdout: `${keg}\n`};
       if (command[0] === path.join(keg, 'libexec', 'bin', 'python3')) {
-        return {exitCode: 0, stdout: `3.12\n${kegInclude}\n`};
+        return {exitCode: 0, stdout: `3.11\n${kegInclude}\n`};
       }
       if (command[0] === 'brew' && command[1] === 'install') return {exitCode: 0, stdout: ''};
       if (command[0] === 'python3') {
         assert.deepEqual(exposedPaths, [path.join(keg, 'libexec', 'bin')]);
-        return {exitCode: 0, stdout: `3.12\n${kegInclude}\n`};
+        return {exitCode: 0, stdout: `3.11\n${kegInclude}\n`};
       }
       if (command[0].endsWith('/llvm-config')) return {exitCode: 0, stdout: '16.0.6\n'};
       if (command[0].endsWith('/openssl')) return {exitCode: 0, stdout: 'OpenSSL 3.6.3 21 Jan 2026\n'};
@@ -143,8 +143,8 @@ test('Darwin install exposes the supported LLVM Python keg without linking it', 
 
 test('Darwin install rejects a newer host Python when the pinned shim is not selected', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'darwin-python-selection-'));
-  const keg = path.join(root, 'python@3.12');
-  const kegInclude = path.join(keg, 'include', 'python3.12');
+  const keg = path.join(root, 'python@3.11');
+  const kegInclude = path.join(keg, 'include', 'python3.11');
   const hostInclude = path.join(root, 'host-python-include');
   write(path.join(kegInclude, 'Python.h'));
   write(path.join(hostInclude, 'Python.h'));
@@ -153,7 +153,7 @@ test('Darwin install rejects a newer host Python when the pinned shim is not sel
       if (command[0] === 'brew' && command[1] === 'install') return {exitCode: 0, stdout: ''};
       if (command[0] === 'brew' && command[1] === '--prefix') return {exitCode: 0, stdout: `${keg}\n`};
       if (command[0] === path.join(keg, 'libexec', 'bin', 'python3')) {
-        return {exitCode: 0, stdout: `3.12\n${kegInclude}\n`};
+        return {exitCode: 0, stdout: `3.11\n${kegInclude}\n`};
       }
       if (command[0] === 'python3') return {exitCode: 0, stdout: `3.14\n${hostInclude}\n`};
       throw new Error(`unexpected command: ${command.join(' ')}`);
@@ -165,7 +165,7 @@ test('Darwin install rejects a newer host Python when the pinned shim is not sel
       runCommand,
       findExecutable: () => '/fixture/brew',
       exposePath: () => {},
-    }), /Python 3\.12 is required, got: 3\.14/);
+    }), /Python 3\.11 is required, got: 3\.14/);
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
@@ -173,13 +173,13 @@ test('Darwin install rejects a newer host Python when the pinned shim is not sel
 
 test('Darwin install rejects an unlinked LLVM Python keg without headers', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'darwin-python-headers-'));
-  const keg = path.join(root, 'python@3.12');
+  const keg = path.join(root, 'python@3.11');
   try {
     const runCommand = async command => {
       if (command[0] === 'brew' && command[1] === 'install') return {exitCode: 0, stdout: ''};
       if (command[0] === 'brew' && command[1] === '--prefix') return {exitCode: 0, stdout: `${keg}\n`};
       if (command[0] === path.join(keg, 'libexec', 'bin', 'python3')) {
-        return {exitCode: 0, stdout: `3.12\n${path.join(keg, 'missing-include')}\n`};
+        return {exitCode: 0, stdout: `3.11\n${path.join(keg, 'missing-include')}\n`};
       }
       throw new Error(`unexpected command: ${command.join(' ')}`);
     };

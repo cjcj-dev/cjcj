@@ -5,6 +5,7 @@ import path from 'node:path';
 import {stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
 import * as staticLibs from '../../toolchain/static-libs.mjs';
+import {cjdbPythonHome} from '../../toolchain/system-deps.mjs';
 import * as targetPython from '../../toolchain/target-python.mjs';
 import {
   copyContents,
@@ -15,7 +16,14 @@ import {
   windowsCrossArgs,
 } from './common.mjs';
 
-export async function run(config) {
+// BuildCJDB.cmake reads TARGET_PYTHON_PATH under if(DARWIN) as well as under
+// the Windows cross branch; elsewhere it is ignored, so only macOS resolves it.
+export async function nativeCjdbEnv(config, resolvePythonHome) {
+  if (config.target.spec.os !== 'darwin') return {};
+  return {TARGET_PYTHON_PATH: await resolvePythonHome()};
+}
+
+export async function run(config, {resolveCjdbPythonHome = cjdbPythonHome} = {}) {
   const repoDir = config.repoPath('compiler');
   await stage('compiler', async () => {
     await runBuildPy(config, repoDir, ['clean'], {stageName: 'compiler.clean'});
@@ -57,8 +65,9 @@ export async function run(config) {
       'build', '-t', config.buildType, '--no-tests', '--build-cjdb', '-v', config.cangjieVersion,
     ];
     if (fs.existsSync(targetLib)) buildArgs.push('--target-lib', targetLib);
-    await runBuildPy(config, repoDir, buildArgs, {stageName: 'compiler.build.native'});
-    await runBuildPy(config, repoDir, ['install'], {stageName: 'compiler.install'});
+    const cjdbEnv = await nativeCjdbEnv(config, resolveCjdbPythonHome);
+    await runBuildPy(config, repoDir, buildArgs, {stageName: 'compiler.build.native', extraEnv: cjdbEnv});
+    await runBuildPy(config, repoDir, ['install'], {stageName: 'compiler.install', extraEnv: cjdbEnv});
   });
 }
 

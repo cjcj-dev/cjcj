@@ -39,6 +39,8 @@ jobs:
         run: node --test ci/llvm-tools-manifest.test.mjs
       - name: Test workflow artifact contracts
         run: node --test ci/srcbuild/tests/platform-contract.test.mjs ci/srcbuild/tests/release-wire.test.mjs
+      - name: Test host toolchain and cjdb Python policy
+        run: node --test build/test/system-deps.test.mjs build/test/darwin-cjdb-python.test.mjs
       - name: Verify smoke assets
         run: |
           test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5
