@@ -49,13 +49,39 @@ async function cloneFixture(source, destination) {
   await fs.cp(source, destination, {recursive: true});
 }
 
+// This test hangs. Measured on the shared box 2026-08-11: 3/12 and 4/14 of runs
+// of this file alone, and it also hung inside full-suite runs, so it is not two
+// runs colliding in the repo's target/. It is in the CI lint job, where an
+// unbounded hang burns the job's whole timeout-minutes and then reports
+// "exceeded maximum execution time", naming no test at all.
+//
+// Where it stops is not a mystery: with PKGSTD_EVIDENCE_DIR set, every hang had
+// written clean/missing-shared/byte-change and stopped in the baseline-mix
+// subtest. A standalone reproducer -- no node:test involved -- narrows it
+// further: the spawned scripts/check_packaged_std.mjs writes its complete output
+// (same 1101 bytes, 11 lines, as a passing run) and then does not exit for the
+// next 30 seconds. So it is a hang at process exit, not stuck work. That script
+// sets process.exitCode and returns, so any handle still referenced keeps it
+// alive; its sha256 resolves on 'end' without destroying the read stream and
+// hashFiles runs sixteen of those at once, which is the obvious suspect and is
+// NOT yet confirmed -- an interleaved A/B of that change was inconclusive
+// because neither arm hung in 20 rounds.
+//
+// So: bound it, and let it fail loudly. Whichever bound fires, the test FAILS
+// and the message names the invocation that was in flight and prints what it had
+// produced. Both values are far above the observed cost: all five checker
+// invocations complete inside 1.4s total.
+const CHECKER_TIMEOUT_MS = 60_000;
+const TEST_TIMEOUT_MS = 180_000;
+
 async function runChecker(name, sdk, finalStd, platform = 'linux-x64') {
   const result = spawnSync(process.execPath, [
     checker,
     '--sdk', sdk,
     '--std', finalStd,
     '--platform', platform,
-  ], {cwd: root, encoding: 'utf8'});
+  ], {cwd: root, encoding: 'utf8', timeout: CHECKER_TIMEOUT_MS, killSignal: 'SIGKILL'});
+  result.invocation = name;
   if (evidenceDirectory) {
     await fs.mkdir(evidenceDirectory, {recursive: true});
     await fs.writeFile(
@@ -67,10 +93,17 @@ async function runChecker(name, sdk, finalStd, platform = 'linux-x64') {
 }
 
 function resultText(result) {
-  return `${result.stdout}${result.stderr}`;
+  // A killed checker leaves status null and stdout empty, which reads exactly
+  // like "the checker printed nothing" unless the timeout says so itself.
+  const timedOut = result.error?.code === 'ETIMEDOUT' || result.signal === 'SIGKILL';
+  const banner = timedOut
+    ? `CHECKER TIMED OUT after ${CHECKER_TIMEOUT_MS}ms during invocation "${result.invocation}" `
+      + `(signal=${result.signal}); everything it had written follows:\n`
+    : '';
+  return `${banner}${result.stdout}${result.stderr}`;
 }
 
-test('packaged std checker passes clean input and rejects three corruption modes', async t => {
+test('packaged std checker passes clean input and rejects three corruption modes', {timeout: TEST_TIMEOUT_MS}, async t => {
   const scratchParent = path.join(root, 'target');
   await fs.mkdir(scratchParent, {recursive: true});
   const scratch = await fs.mkdtemp(path.join(scratchParent, 'pkgstd-test-'));
