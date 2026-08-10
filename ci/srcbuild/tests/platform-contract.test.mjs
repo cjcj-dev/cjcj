@@ -9,6 +9,56 @@ import {assembleCjcLinkOption} from '../../platform_matrix/link_option.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
+const readWorkflow = name => fs.readFile(path.join(root, '.github/workflows', name), 'utf8');
+
+const uncommented = text => text.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+
+// One entry per reusable-workflow *call*, not per distinct file: two jobs calling
+// one producer upload its artifacts twice, so the repeat has to survive here.
+async function invokedWorkflows(entry, stack = []) {
+  assert.ok(!stack.includes(entry), `reusable workflow cycle: ${[...stack, entry].join(' -> ')}`);
+  const text = uncommented(await readWorkflow(entry));
+  const invocations = [entry];
+  for (const [, called] of text.matchAll(/uses:\s*\.\/\.github\/workflows\/([\w.-]+\.yml)/g)) {
+    invocations.push(...await invokedWorkflows(called, [...stack, entry]));
+  }
+  return invocations;
+}
+
+// The values a ${{ matrix.KEY }} placeholder can take inside one workflow file.
+const matrixValues = (text, key) =>
+  [...text.matchAll(new RegExp(String.raw`^\s*(?:- )?${key}: (\S+)$`, 'gm'))].map(([, value]) => value);
+
+function expandMatrix(name, text) {
+  const placeholder = name.match(/\$\{\{\s*matrix\.(\w+)\s*\}\}/);
+  if (!placeholder) return [name];
+  const values = matrixValues(text, placeholder[1]);
+  assert.ok(values.length > 0, `no matrix values for ${placeholder[1]} in ${name}`);
+  return values.flatMap(value => expandMatrix(name.replace(placeholder[0], value), text));
+}
+
+// Artifact names one workflow file uploads, with its own matrix fanout expanded.
+function uploadedArtifacts(text) {
+  const lines = text.split('\n');
+  const names = [];
+  for (const [index, line] of lines.entries()) {
+    if (!line.includes('uses: actions/upload-artifact@')) continue;
+    const nameLine = lines.slice(index + 1, index + 10).find(entry => /^\s+name: /.test(entry));
+    assert.ok(nameLine, `upload step at line ${index + 1} declares no artifact name`);
+    names.push(...expandMatrix(nameLine.replace(/^\s+name: /, '').trim(), text));
+  }
+  return names;
+}
+
+// [artifact, producing workflow] for everything a dispatch entry point uploads.
+async function runArtifacts(entry) {
+  const produced = [];
+  for (const name of await invokedWorkflows(entry)) {
+    const text = uncommented(await readWorkflow(name));
+    for (const artifact of uploadedArtifacts(text)) produced.push([artifact, name]);
+  }
+  return produced;
+}
 
 test('source-build workflow connects every native runner to its LLVM and std artifact', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
@@ -41,6 +91,41 @@ test('source-build workflow connects every native runner to its LLVM and std art
   for (const payload of ['llc.gz', 'opt.gz', 'llvm-tools.manifest', 'cjselfhost_llvmshim.o']) {
     assert.ok(fixed.includes(payload), payload);
   }
+});
+
+test('arm soak produces every artifact its package job downloads, each exactly once', async () => {
+  const armSoak = await readWorkflow('arm-soak.yml');
+  const consumer = await readWorkflow('build-release-package.yml');
+
+  // build-release-package.yml refuses any std artifact that is not same-platform,
+  // so linux-aarch64 fixes which artifact this run has to produce.
+  assert.ok(consumer.includes('EXPECTED_STD_ARTIFACT: final-std-${{ inputs.platform }}'));
+  assert.ok(armSoak.includes('platform: linux-aarch64'));
+  assert.ok(armSoak.includes('default: final-std-linux-aarch64'));
+  assert.ok(armSoak.includes('std_artifact: ${{ inputs.std_artifact }}'));
+
+  const produced = await runArtifacts('arm-soak.yml');
+
+  // Exactly one producer, and it is the source build.
+  assert.deepEqual(
+    produced.filter(([artifact]) => artifact === 'final-std-linux-aarch64').map(([, source]) => source),
+    ['srcbuild.yml'],
+  );
+
+  // The other two fail-closed downloads in the same package job.
+  for (const artifact of ['source-cjpm-linux-aarch64', 'fixed-llvm-tools-linux_aarch64']) {
+    assert.equal(produced.filter(([entry]) => entry === artifact).length, 1, artifact);
+  }
+
+  // upload-artifact rejects a name already uploaded in the same run, so two callers
+  // of one producer workflow break the run rather than merging. Checked before the
+  // wiring strings below so a second caller cannot be masked by an earlier failure.
+  const names = produced.map(([artifact]) => artifact);
+  assert.deepEqual(names.filter((artifact, index) => names.indexOf(artifact) !== index), []);
+
+  // The package job waits for that producer before it downloads.
+  assert.ok(armSoak.includes('uses: ./.github/workflows/srcbuild.yml'));
+  assert.ok(armSoak.includes('needs: source-final-std'));
 });
 
 test('source-build cache makes durable GHA writes primary and retains write diagnostics', async () => {
