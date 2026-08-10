@@ -97,6 +97,10 @@ function makeFixture() {
   file(toolsRoot, ['hyperlangExtension', 'src', 'dtsparser', 'keep.txt']);
   file(toolsRoot, ['hyperlangExtension', 'src', 'dtsparser', 'drop.cj']);
   file(toolsRoot, ['cangjie-language-server', 'output', 'bin', 'LSPServer']);
+  directory(toolsRoot, 'cjcov', 'build');
+  file(toolsRoot, ['cjcov', 'dist', 'cjcov']);
+  directory(toolsRoot, 'cjtrace-recover', 'build');
+  file(toolsRoot, ['cjtrace-recover', 'dist', 'bin', 'cjtrace-recover']);
   file(stdxRoot, ['target', 'linux_x86_64_cjnative', '.keep']);
   file(compilerRoot, ['output', 'envsetup.sh']);
   file(workspace, ['verify', 'hello']);
@@ -236,18 +240,26 @@ test('Linux source stages emit the Python command order', async () => {
         'git', 'checkout', '1212a25c07be1a400be85e6ff2902788d3ecec0a', '--', 'cjpm',
       ]),
     ];
+    // cjcov and cjtrace-recover extend the upstream tool set on purpose: they
+    // are Cangjie-written and must come from source rather than the base SDK.
     for (const [name, subpath] of [
       ['cjpm', path.join('cjpm', 'build')],
       ['cjfmt', path.join('cjfmt', 'build')],
       ['hle', path.join('hyperlangExtension', 'build')],
       ['lsp', path.join('cangjie-language-server', 'build')],
+      ['cjcov', path.join('cjcov', 'build')],
+      ['cjtrace-recover', path.join('cjtrace-recover', 'build')],
     ]) {
       const cwd = path.join(toolsRoot, subpath);
       expectedCommands.push(expected(root, cwd, ['python3', 'build.py', 'clean']));
       const buildArgs = ['python3', 'build.py', 'build', '-t', 'release'];
       if (name === 'cjpm') buildArgs.push('--set-rpath', '$ORIGIN/../../runtime/lib/linux_x86_64_cjnative');
       expectedCommands.push(expected(root, cwd, buildArgs));
-      expectedCommands.push(expected(root, cwd, ['python3', 'build.py', 'install']));
+      const installArgs = ['python3', 'build.py', 'install'];
+      if (name === 'cjtrace-recover') {
+        installArgs.push('--prefix', path.join(toolsRoot, 'cjtrace-recover', 'dist'));
+      }
+      expectedCommands.push(expected(root, cwd, installArgs));
     }
     expectedCommands.push(
       expected(root, null, ['tar', '--format=gnu', '-czf', path.join(workspace, 'software', 'cangjie-sdk-linux-x64-1.2.3.tar.gz'), '-C', path.join(workspace, 'software'), 'cangjie']),
@@ -271,6 +283,8 @@ test('package paths and archive roots match package.py', async () => {
     assert.equal(sdkList.stdout.split('\n')[0], 'cangjie/');
     assert.equal(stdxList.stdout.split('\n')[0], 'linux_x86_64_cjnative/');
     assert.ok(fs.existsSync(path.join(config.softwareDir, 'cangjie', 'tools', 'bin', 'cjpm')));
+    assert.ok(fs.existsSync(path.join(config.softwareDir, 'cangjie', 'tools', 'bin', 'cjcov')));
+    assert.ok(fs.existsSync(path.join(config.softwareDir, 'cangjie', 'tools', 'bin', 'cjtrace-recover')));
     assert.ok(!fs.existsSync(path.join(config.softwareDir, 'cangjie', 'tools', 'dtsparser', 'drop.cj')));
   } finally {
     fs.rmSync(root, {recursive: true, force: true});

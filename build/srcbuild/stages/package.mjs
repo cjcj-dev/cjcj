@@ -86,6 +86,20 @@ function organizeSdkTree(config, destination) {
     stage: 'package.lsp',
   });
   copyInto(lsp, toolsBin, {stage: 'package.lsp'});
+
+  // Both are built native-only, so on the Windows cross build the SDK keeps the
+  // base toolchain's copies rather than failing on a product we never produced.
+  if (!config.target.spec.crossCompile) {
+    const cjcov = requireFile(path.join(toolsRoot, 'cjcov', 'dist', `cjcov${suffix}`), {stage: 'package.cjcov'});
+    copyInto(cjcov, toolsBin, {stage: 'package.cjcov'});
+
+    // cjtrace-recover installs through CMake, which places programs under bin/.
+    const cjtrace = requireFile(
+      path.join(toolsRoot, 'cjtrace-recover', 'dist', 'bin', `cjtrace-recover${suffix}`),
+      {stage: 'package.cjtrace-recover'},
+    );
+    copyInto(cjtrace, toolsBin, {stage: 'package.cjtrace-recover'});
+  }
 }
 
 async function packageMainSdk(config) {
