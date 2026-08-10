@@ -81,11 +81,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64 }
+          - { runner: ubuntu-24.04, platform: linux-x64, llvm_platform: linux_x86_64, sdk_runtime_dir: linux_x86_64_cjnative, std_artifact: final-std-linux-x64, cross_std_artifact: final-std-windows-x64, cross_std_tuple: windows_x86_64_cjnative}
           # linux-aarch64 re-enabled 0724: the R1 llc SEGV was the un-activated
           # fixed llc (setup only mapped Linux/x86_64, fixed in 8e2f9ea6); the
           # arm-soak ×20 packaged smoke run 30069890604 passed clean.
-          - { runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64, sdk_runtime_dir: linux_aarch64_cjnative, std_artifact: final-std-linux-aarch64 }
+          - { runner: ubuntu-24.04-arm, platform: linux-aarch64, llvm_platform: linux_aarch64, sdk_runtime_dir: linux_aarch64_cjnative, std_artifact: final-std-linux-aarch64, cross_std_artifact: final-std-windows-x64, cross_std_tuple: windows_x86_64_cjnative}
           - { runner: macos-15-intel, platform: darwin-x64, llvm_platform: darwin_x86_64, sdk_runtime_dir: darwin_x86_64_cjnative, std_artifact: final-std-darwin-x64 }
           - { runner: macos-15, platform: darwin-arm64, llvm_platform: darwin_aarch64, sdk_runtime_dir: darwin_aarch64_cjnative, std_artifact: final-std-darwin-arm64 }
           - { runner: windows-2025, platform: windows-x64, llvm_platform: windows_x86_64, sdk_runtime_dir: windows_x86_64_cjnative, std_artifact: final-std-windows-x64 }
@@ -96,6 +96,8 @@ jobs:
       llvm_platform: ${{ matrix.llvm_platform }}
       sdk_runtime_dir: ${{ matrix.sdk_runtime_dir }}
       std_artifact: ${{ matrix.std_artifact }}
+      cross_std_artifact: ${{ matrix.cross_std_artifact || '' }}
+      cross_std_tuple: ${{ matrix.cross_std_tuple || '' }}
       version: ${{ inputs.version }}
       dry_run: ${{ inputs.dry_run }}
       runtime_ref: ${{ inputs.runtime_ref }}
