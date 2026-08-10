@@ -60,12 +60,18 @@ async function cloneFixture(source, destination) {
 // subtest. A standalone reproducer -- no node:test involved -- narrows it
 // further: the spawned scripts/check_packaged_std.mjs writes its complete output
 // (same 1101 bytes, 11 lines, as a passing run) and then does not exit for the
-// next 30 seconds. So it is a hang at process exit, not stuck work. That script
-// sets process.exitCode and returns, so any handle still referenced keeps it
-// alive; its sha256 resolves on 'end' without destroying the read stream and
-// hashFiles runs sixteen of those at once, which is the obvious suspect and is
-// NOT yet confirmed -- an interleaved A/B of that change was inconclusive
-// because neither arm hung in 20 rounds.
+// next 30 seconds. Live capture of a hung child agrees and sharpens it: zero CPU
+// ticks over three seconds, no child of its own, and its main thread parked in
+// futex_do_wait rather than epoll_wait -- an idle node process waits in epoll, so
+// this one is blocked on a lock, not idling and not computing.
+//
+// That script sets process.exitCode and returns, so any handle still referenced
+// keeps it alive; its sha256 resolves on 'end' without destroying the read stream
+// and hashFiles runs sixteen of those at once. That remains the suspect and it is
+// NOT confirmed -- an interleaved A/B of the destroy() change was inconclusive
+// because neither arm hung in 20 rounds. io_uring on this WSL2 kernel is a second
+// open lead; UV_USE_IO_URING=0 does not test it, since node v23.11.1 opens the
+// same three io_uring fds either way.
 //
 // So: bound it, and let it fail loudly. Whichever bound fires, the test FAILS
 // and the message names the invocation that was in flight and prints what it had
