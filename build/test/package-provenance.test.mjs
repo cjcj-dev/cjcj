@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,6 +25,7 @@ import {
   RELEASE_PYTHON_SOURCE_URL,
   RELEASE_PYTHON_VERSION,
 } from '../lib/python-bundle.mjs';
+import {parsePackagedLlvmToolsManifest} from '../../ci/llvm-tools-manifest.mjs';
 
 const TUPLE = 'linux_x86_64_cjnative';
 const CJCJ_SHA = 'a'.repeat(40);
@@ -50,6 +52,10 @@ function runRaw(command, args, options = {}) {
     encoding: 'utf8',
     ...options,
   });
+}
+
+async function sha256(file) {
+  return crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 }
 
 async function writePythonBundle(root) {
@@ -98,8 +104,28 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   await write(sdk, 'envsetup.sh', '# fixture SDK\n', 0o755);
   await write(sdk, `runtime/lib/${TUPLE}/libcangjie-runtime.so`,
     `fixture-runtime\0CJRT-COMMIT:${RUNTIME_SHA}\0`);
-  await write(sdk, 'third_party/llvm/bin/llc', `fixture-llc\0CJLLVM-COMMIT:${LLVM_SHA}\0`, 0o755);
-  await write(sdk, 'third_party/llvm/bin/opt', 'fixture-opt-with-stamp-removed', 0o755);
+  const llvmFixtureSource = await write(root, 'llvm-tool.c', [
+    '#include <stdio.h>',
+    '#include <string.h>',
+    'int main(int argc, char **argv) {',
+    '  if (argc > 1 && strcmp(argv[1], "--help") == 0) {',
+    '    puts("--export-bc=file --lto-newpm-passes=value --mllvm=value --visible-pkgs=value");',
+    '    return 0;',
+    '  }',
+    '  puts("LLVM version 15.0.4");',
+    '  return 0;',
+    '}',
+    '',
+  ].join('\n'));
+  const llvmFixture = path.join(root, 'llvm-tool');
+  run('cc', [llvmFixtureSource, '-o', llvmFixture]);
+  for (const tool of ['llc', 'opt', 'ld.lld', 'llvm-objcopy']) {
+    const destination = path.join(sdk, 'third_party', 'llvm', 'bin', tool);
+    await fs.mkdir(path.dirname(destination), {recursive: true});
+    await fs.copyFile(llvmFixture, destination);
+    await fs.chmod(destination, 0o755);
+  }
+  await fs.appendFile(path.join(sdk, 'third_party/llvm/bin/llc'), `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
   const cjpm = await write(sdk, 'tools/bin/cjpm', 'fixture source-built cjpm', 0o755);
   await fs.mkdir(path.join(sdk, 'bin'), {recursive: true});
   await fs.mkdir(path.join(sdk, 'lib', TUPLE), {recursive: true});
@@ -129,8 +155,16 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   ].join('\n'));
   const llvmManifest = await write(root, 'llvm-tools.manifest', [
     `LLVM_SHA=${LLVM_SHA}`,
-    `LLC_SHA256=${'1'.repeat(64)}`,
-    `OPT_SHA256=${'2'.repeat(64)}`,
+    `LLC_SOURCE=tuple:${LLVM_SHA}`,
+    'LLC_VERSION=LLVM version 15.0.4',
+    `LLC_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/llc'))}`,
+    `OPT_SOURCE=tuple:${LLVM_SHA}`,
+    'OPT_VERSION=LLVM version 15.0.4',
+    `OPT_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/opt'))}`,
+    'LLD_TOOL=ld.lld',
+    `LLD_SOURCE=tuple:${LLVM_SHA}`,
+    'LLD_VERSION=LLVM version 15.0.4',
+    `LLD_SHA256=${await sha256(path.join(sdk, 'third_party/llvm/bin/ld.lld'))}`,
     '',
   ].join('\n'));
   const baseSdkId = REVIEWED_GATE_HOST_TOOLCHAIN;
@@ -217,10 +251,35 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.match(listing, new RegExp(`${packageName}/${BASE_SDK_PROVENANCE}`));
   assert.match(listing, new RegExp(`${packageName}/${CJPM_PROVENANCE}`));
   assert.match(listing, new RegExp(`${packageName}/${GATE_APPARATUS_PROVENANCE}`));
+  assert.match(listing, new RegExp(`${packageName}/llvm-tools\.manifest`));
+  const packagedLlvmManifest = parsePackagedLlvmToolsManifest(
+    await fs.readFile(path.join(out, packageName, 'llvm-tools.manifest'), 'utf8'),
+  );
+  const toolRows = new Map(packagedLlvmManifest.tools.map(row => [row.tool, row]));
+  assert.equal(toolRows.get('llc').source, `tuple:${LLVM_SHA}`);
+  assert.equal(toolRows.get('opt').source, `tuple:${LLVM_SHA}`);
+  assert.equal(toolRows.get('ld.lld').source, `tuple:${LLVM_SHA}`);
+  assert.equal(toolRows.get('llvm-objcopy').source, `base-sdk:${baseProvenance.artifact.sha256}`);
+  assert.equal(toolRows.get('llvm-ar').present, 'no');
   console.log(`PACKAGER-OUTPUT-BEGIN\n${packaged.stdout.trim()}\nPACKAGER-OUTPUT-END`);
   console.log(`ARCHIVE-PROVENANCE-BEGIN\n${listing.split('\n').filter(line =>
     /PROVENANCE|RELEASE-MANIFEST/.test(line)).join('\n')}\nARCHIVE-PROVENANCE-END`);
   console.log(`RELEASE-MANIFEST-BEGIN\n${manifestText.trim()}\nRELEASE-MANIFEST-END`);
+
+  const originalLlvmManifest = await fs.readFile(llvmManifest, 'utf8');
+  await fs.writeFile(llvmManifest, originalLlvmManifest.replace(/^OPT_SHA256=.*$/m, `OPT_SHA256=${'0'.repeat(64)}`));
+  const changedLlvm = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+  assert.notEqual(changedLlvm.status, 0, 'changing one LLVM tool sha must fail closed');
+  assert.match(`${changedLlvm.stdout}\n${changedLlvm.stderr}`, /opt: packaged sha256 .* does not match tuple manifest/);
+  console.log(`NEGATIVE-CHANGE-LLVM RC=${changedLlvm.status}\n${changedLlvm.stderr.trim()}`);
+  await fs.writeFile(llvmManifest, originalLlvmManifest);
+
+  await fs.writeFile(llvmManifest, originalLlvmManifest.replace(/^LLD_SHA256=.*$/m, `LLD_SHA256=${'0'.repeat(64)}`));
+  const changedLld = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+  assert.notEqual(changedLld.status, 0, 'changing the LTO linker sha must fail closed');
+  assert.match(`${changedLld.stdout}\n${changedLld.stderr}`, /ld\.lld: packaged sha256 .* does not match tuple manifest/);
+  console.log(`NEGATIVE-CHANGE-LLD RC=${changedLld.status}\n${changedLld.stderr.trim()}`);
+  await fs.writeFile(llvmManifest, originalLlvmManifest);
 
   await fs.rm(gateSidecar);
   const missingGateApparatus = runRaw('zx', packageArgs, {cwd: path.resolve('.')});

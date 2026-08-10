@@ -115,7 +115,8 @@ log(`base cjc file: ${baseFile.stdout.trim()}`);
 log(`base cjc linked libraries: no missing entries`);
 log(`base cjc version:\n${baseVersion.stdout.trim()}`);
 
-// 2.5 Swap the SDK's llc and opt with one source-built fixed LLVM tuple.
+// 2.5 Swap the SDK's optimizer, backend and (for releases) LTO linker with one
+// source-built fixed LLVM tuple.
 // The stock nightly backend materializes relocate-of-undef as a phantom GC root.
 // These static tools contain the backend fixes and have no libLLVM dependency. Keep
 // each true original once, and break a possible hardlink before replacing a binary.
@@ -134,17 +135,25 @@ const llcPlatforms = {
 const llcPlatform = keepStockLlc ? '' : llcPlatforms[`${hostOs}/${hostArch}`] || '';
 const fixedLlcGz = process.env.FIXED_LLC_GZ || '';
 const fixedOptGz = process.env.FIXED_OPT_GZ || '';
+const lldTool = hostOs === 'Darwin' ? 'ld64.lld' : 'ld.lld';
+const fixedLldGz = process.env.FIXED_LLD_GZ ||
+  (fixedLlcGz ? path.join(path.dirname(fixedLlcGz), `${lldTool}.gz`) : '');
+const hasFixedLld = Boolean(fixedLldGz && await isFile(fixedLldGz));
+const releaseNeedsLld = Boolean(process.env.RELEASE_PLATFORM);
 const sdkLlvmBin = `${cangjieHome}/third_party/llvm/bin`;
 const fixedTools = [
-  {name: 'llc', archive: fixedLlcGz, sdk: `${sdkLlvmBin}/llc`, manifestKey: 'LLC_SHA256'},
-  {name: 'opt', archive: fixedOptGz, sdk: `${sdkLlvmBin}/opt`, manifestKey: 'OPT_SHA256'},
+  {name: 'llc', archive: fixedLlcGz, sdk: `${sdkLlvmBin}/llc`, manifestKey: 'LLC_SHA256', versionKey: 'LLC_VERSION'},
+  {name: 'opt', archive: fixedOptGz, sdk: `${sdkLlvmBin}/opt`, manifestKey: 'OPT_SHA256', versionKey: 'OPT_VERSION'},
+  {name: lldTool, archive: fixedLldGz, sdk: `${sdkLlvmBin}/${lldTool}`, manifestKey: 'LLD_SHA256', versionKey: 'LLD_VERSION'},
 ];
 if (llcPlatform && fixedLlcGz) {
-  if (process.env.CI && !fixedOptGz) {
-    log(`FATAL: FIXED_LLC_GZ and FIXED_OPT_GZ are both required for ${llcPlatform} CI`);
+  if (process.env.CI && (!fixedOptGz || (releaseNeedsLld && !hasFixedLld))) {
+    log(`FATAL: llc, opt and native LLD artifacts are required for ${llcPlatform} release CI`);
     process.exit(4);
   }
-  const toolsToInstall = fixedOptGz ? fixedTools : fixedTools.slice(0, 1);
+  const toolsToInstall = fixedOptGz
+    ? fixedTools.slice(0, hasFixedLld ? fixedTools.length : 2)
+    : fixedTools.slice(0, 1);
   for (const tool of toolsToInstall) {
     if (!(await isFile(tool.archive))) {
       log(`FATAL: fixed ${tool.name} artifact missing: ${tool.archive}`);
@@ -157,6 +166,7 @@ if (llcPlatform && fixedLlcGz) {
   }
 
   const expectedShas = new Map();
+  const expectedVersions = new Map();
   let llvmSourceSha = '';
   if (fixedOptGz) {
     const manifestPath = path.join(path.dirname(fixedLlcGz), 'llvm-tools.manifest');
@@ -167,33 +177,42 @@ if (llcPlatform && fixedLlcGz) {
     const manifestText = await fs.readFile(manifestPath, 'utf8');
     let manifest;
     try {
-      manifest = parseLlvmToolsManifest(manifestText, {label: manifestPath, schema: 'native'}).values;
+      manifest = parseLlvmToolsManifest(manifestText, {label: manifestPath, schema: 'core-or-native'});
     } catch (error) {
       log(`FATAL: malformed fixed LLVM provenance manifest: ${error.message}`);
       process.exit(4);
     }
+    const parsedSchema = manifest.schema;
+    manifest = manifest.values;
     llvmSourceSha = manifest.get('LLVM_SHA') || '';
     const pinText = await fs.readFile(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
-    for (const [field, expected] of [
+    const expectedFields = [['LLVM_SHA', pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || '']];
+    if (parsedSchema === 'native') expectedFields.push(
       ['PLATFORM', llcPlatform],
-      ['LLVM_SHA', pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
       ['CANGJIE_COMPILER_SHA', pinText.match(/^CANGJIE_COMPILER_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
       ['FLATBUFFERS_SHA', pinText.match(/^FLATBUFFERS_SHA=([0-9a-f]{40})$/m)?.[1] || ''],
-    ]) {
+    );
+    for (const [field, expected] of expectedFields) {
       if (!expected || manifest.get(field) !== expected) {
         log(`FATAL: fixed LLVM ${field} mismatch (manifest=${manifest.get(field) || ''}, expected=${expected})`);
         process.exit(4);
       }
     }
-    const fixedShim = path.join(path.dirname(fixedLlcGz), 'cjselfhost_llvmshim.o');
-    if (!(await isFile(fixedShim))) {
-      log(`FATAL: fixed LLVM shim missing: ${fixedShim}`);
+    if (hasFixedLld && (parsedSchema !== 'core-lineage' || manifest.get('LLD_TOOL') !== lldTool)) {
+      log(`FATAL: fixed LLVM LLD lineage mismatch (schema=${parsedSchema} tool=${manifest.get('LLD_TOOL') || ''})`);
       process.exit(4);
     }
-    const shimSha = crypto.createHash('sha256').update(await fs.readFile(fixedShim)).digest('hex');
-    if (shimSha !== manifest.get('SHIM_SHA256')) {
-      log(`FATAL: fixed LLVM shim sha mismatch (${shimSha})`);
-      process.exit(4);
+    if (parsedSchema === 'native') {
+      const fixedShim = path.join(path.dirname(fixedLlcGz), 'cjselfhost_llvmshim.o');
+      if (!(await isFile(fixedShim))) {
+        log(`FATAL: fixed LLVM shim missing: ${fixedShim}`);
+        process.exit(4);
+      }
+      const shimSha = crypto.createHash('sha256').update(await fs.readFile(fixedShim)).digest('hex');
+      if (shimSha !== manifest.get('SHIM_SHA256')) {
+        log(`FATAL: fixed LLVM shim sha mismatch (${shimSha})`);
+        process.exit(4);
+      }
     }
     for (const tool of toolsToInstall) {
       const expectedSha = manifest.get(tool.manifestKey) || '';
@@ -202,13 +221,15 @@ if (llcPlatform && fixedLlcGz) {
         process.exit(4);
       }
       expectedShas.set(tool.name, expectedSha);
+      const expectedVersion = manifest.get(tool.versionKey) || '';
+      if (expectedVersion) expectedVersions.set(tool.name, expectedVersion);
     }
   } else {
     const llcSha = (await $({stdio: 'pipe'})`gunzip -c ${fixedLlcGz} | sha256sum`).stdout.trim().split(/\s+/)[0];
     expectedShas.set('llc', llcSha);
   }
 
-  // Validate the complete tuple before changing either SDK binary.
+  // Validate the complete tuple before changing any SDK binary.
   for (const tool of toolsToInstall) {
     const artifactSha = (await $({stdio: 'pipe'})`gunzip -c ${tool.archive} | sha256sum`).stdout.trim().split(/\s+/)[0];
     if (artifactSha !== expectedShas.get(tool.name)) {
@@ -242,14 +263,21 @@ if (llcPlatform && fixedLlcGz) {
         log(`FATAL: installed ${tool.name} failed file/ldd/--version verification`);
         process.exit(4);
       }
+      const reportedVersion = versionResult.stdout.split(/\r?\n/).map(line => line.trim())
+        .find(line => /LLVM version |^LLD /.test(line)) || '';
+      const expectedVersion = expectedVersions.get(tool.name) || '';
+      if (expectedVersion && reportedVersion !== expectedVersion) {
+        log(`FATAL: installed ${tool.name} version mismatch (${reportedVersion} != ${expectedVersion})`);
+        process.exit(4);
+      }
       log(`${tool.name} file: ${fileResult.stdout.trim()}`);
       log(`${tool.name} ldd: no missing libraries`);
       log(`${tool.name} version:\n${versionResult.stdout.trim()}`);
     }
-    log(`installed llc/opt provenance verified: LLVM ${llvmSourceSha}`);
+    log(`installed ${toolsToInstall.map(tool => tool.name).join('/')} provenance verified: LLVM ${llvmSourceSha}`);
   }
 } else if (llcPlatform && process.env.CI) {
-  log(`FATAL: FIXED_LLC_GZ and FIXED_OPT_GZ are both required for ${llcPlatform} CI`);
+  log(`FATAL: fixed llc/opt tuple is required for ${llcPlatform} CI`);
   process.exit(4);
 } else {
   log(`no source-built fixed LLVM tuple for ${hostOs}/${hostArch}; keeping stock tools`);

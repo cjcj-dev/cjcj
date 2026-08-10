@@ -2,6 +2,7 @@
 // Repackage an official SDK with the self-host compiler and optional patched runtime into a relocatable release archive.
 
 import crypto from 'node:crypto';
+import {spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {requirePrivateStage} from '../build/lib/package-safety.mjs';
@@ -20,6 +21,12 @@ import {
   verifyGateApparatusProvenance,
 } from '../build/lib/release-gate-apparatus.mjs';
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
+import {
+  PACKAGED_LLVM_TOOL_NAMES,
+  formatPackagedLlvmToolsManifest,
+  parseLlvmToolsManifest,
+  parsePackagedLlvmToolsManifest,
+} from '../ci/llvm-tools-manifest.mjs';
 
 const required = name => {
   const value = argv[name];
@@ -37,7 +44,7 @@ const runtimeRoot = typeof argv['runtime-root'] === 'string' ? argv['runtime-roo
 const allowStockRuntime = argv['allow-stock-runtime'] === true;
 const allowNightlyStd = argv['allow-nightly-std'] === true;
 const stdDir = typeof argv['std-dir'] === 'string' ? argv['std-dir'] : '';
-const llvmManifest = typeof argv['llvm-manifest'] === 'string' ? argv['llvm-manifest'] : '';
+const llvmManifest = required('llvm-manifest');
 const baseSdkId = typeof argv['base-sdk-id'] === 'string' ? argv['base-sdk-id'] : '';
 const baseSdkArchive = required('base-sdk-archive');
 const baseSdkProvenance = required('base-sdk-provenance');
@@ -61,7 +68,7 @@ if (!await exists(binary)) { console.error(`cjc binary not found: ${binary}`); p
 if (runtimeLib && !await exists(runtimeLib)) { console.error(`runtime library not found: ${runtimeLib}`); process.exit(2); }
 if (runtimeRoot && !await exists(runtimeRoot, 'dir')) { console.error(`runtime root not found: ${runtimeRoot}`); process.exit(2); }
 if (stdDir && !await exists(stdDir, 'dir')) { console.error(`std dir not found: ${stdDir}`); process.exit(2); }
-if (llvmManifest && !await exists(llvmManifest)) { console.error(`LLVM manifest not found: ${llvmManifest}`); process.exit(2); }
+if (!await exists(llvmManifest)) { console.error(`LLVM manifest not found: ${llvmManifest}`); process.exit(2); }
 if (!await exists(baseSdkArchive)) { console.error(`base SDK archive not found: ${baseSdkArchive}`); process.exit(2); }
 if (!await exists(baseSdkProvenance)) { console.error(`base SDK provenance not found: ${baseSdkProvenance}`); process.exit(2); }
 if (!await exists(gateHostRuntime)) { console.error(`gate host runtime not found: ${gateHostRuntime}`); process.exit(2); }
@@ -84,6 +91,19 @@ const [runtimeDir, archiveType, exeSuffix] = platforms[platform];
 const runtimeLibrary = platform.startsWith('darwin-') ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so';
 const isWindows = platform === 'windows-x64';
 const packageName = `cjcj-${version}-${platform}`;
+const inputLlvmManifest = parseLlvmToolsManifest(await fs.readFile(llvmManifest, 'utf8'), {
+  label: llvmManifest,
+  schema: 'core-or-native',
+});
+if (inputLlvmManifest.schema !== 'core-lineage') {
+  throw new Error(`release packaging requires core-lineage LLVM manifest, got ${inputLlvmManifest.schema}`);
+}
+const expectedTupleLldTool = platform.startsWith('darwin-') ? 'ld64.lld' : 'ld.lld';
+if (inputLlvmManifest.values.get('LLD_TOOL') !== expectedTupleLldTool) {
+  throw new Error(
+    `release LLVM LLD tool mismatch: ${inputLlvmManifest.values.get('LLD_TOOL') || '<missing>'} != ${expectedTupleLldTool}`,
+  );
+}
 const verifiedBaseSdkProvenance = await verifyBaseSdkProvenance({
   archive: baseSdkArchive,
   sidecar: baseSdkProvenance,
@@ -596,7 +616,197 @@ if (platform.startsWith('linux-')) {
   console.log('  Windows resolves packaged DLLs through runtime/lib and PATH');
 }
 
-console.log('[7/9] write release provenance manifest');
+const sha256File = async file => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
+const llvmToolEnvironment = {...process.env};
+const llvmLibraryPaths = [
+  path.join(stage, 'third_party', 'llvm', 'lib'),
+  path.join(stage, 'runtime', 'lib', runtimeDir),
+  path.join(stage, 'tools', 'lib'),
+  path.join(stage, 'third_party', 'python', 'lib'),
+].filter(Boolean);
+if (platform.startsWith('linux-')) {
+  llvmToolEnvironment.LD_LIBRARY_PATH = [...llvmLibraryPaths, process.env.LD_LIBRARY_PATH || '']
+    .filter(Boolean).join(path.delimiter);
+} else if (platform.startsWith('darwin-')) {
+  llvmToolEnvironment.DYLD_LIBRARY_PATH = [...llvmLibraryPaths, process.env.DYLD_LIBRARY_PATH || '']
+    .filter(Boolean).join(path.delimiter);
+} else {
+  llvmToolEnvironment.PATH = [
+    path.join(stage, 'third_party', 'llvm', 'bin'),
+    ...llvmLibraryPaths,
+    process.env.PATH || '',
+  ].filter(Boolean).join(path.delimiter);
+}
+
+function runLineageProbe(command, args) {
+  const result = spawnSync(command, args, {
+    encoding: 'utf8',
+    env: llvmToolEnvironment,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  const output = [result.stdout, result.stderr]
+    .filter(value => typeof value === 'string' && value.trim())
+    .join('\n').trim();
+  return {status: result.status, error: result.error, output};
+}
+
+function oneLine(text) {
+  return text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).join(' | ').slice(0, 512);
+}
+
+function versionLine(executable) {
+  const probe = runLineageProbe(executable, ['--version']);
+  const lines = probe.output.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const preferred = lines.find(line => /(?:LLVM|LLD|lldb).*version|^LLD\b/i.test(line));
+  const detail = oneLine(preferred || lines[0] || probe.error?.message || 'no output');
+  if (probe.status === 0) return {version: detail, probe};
+  return {version: `unavailable(exit=${probe.status ?? 'spawn'}): ${detail}`.slice(0, 512), probe};
+}
+
+const requiredLlvmTools = new Map([
+  ['linux-x64', ['llc', 'opt', 'ld.lld', 'llvm-objcopy']],
+  ['linux-aarch64', ['llc', 'opt', 'ld.lld', 'llvm-objcopy']],
+  ['darwin-arm64', ['llc', 'opt', 'ld64.lld']],
+  ['darwin-x64', ['llc', 'opt', 'ld64.lld']],
+  ['windows-x64', ['llc', 'opt', 'ld.lld', 'llvm-ar']],
+]);
+const nativeFilePatterns = new Map([
+  ['linux-x64', /ELF 64-bit.*(?:x86-64|x86_64)/i],
+  ['linux-aarch64', /ELF 64-bit.*(?:ARM aarch64|aarch64)/i],
+  ['darwin-arm64', /Mach-O 64-bit.*(?:arm64|aarch64)/i],
+  ['darwin-x64', /Mach-O 64-bit.*x86_64/i],
+  ['windows-x64', /PE32\+ executable.*x86-64/i],
+]);
+
+function verifyNativeLlvmTool(tool, executable) {
+  const fileProbe = runLineageProbe('file', ['-b', executable]);
+  if (fileProbe.status !== 0 || !nativeFilePatterns.get(platform).test(fileProbe.output)) {
+    throw new Error(`${tool}: wrong native format for ${platform}: ${oneLine(fileProbe.output)}`);
+  }
+  let loaderProbe;
+  if (platform.startsWith('linux-')) {
+    loaderProbe = runLineageProbe('ldd', [executable]);
+    const staticBinary = /not a dynamic executable|statically linked/i.test(loaderProbe.output);
+    if ((!staticBinary && loaderProbe.status !== 0) || /not found/i.test(loaderProbe.output)) {
+      throw new Error(`${tool}: loader check failed: ${oneLine(loaderProbe.output)}`);
+    }
+  } else if (platform.startsWith('darwin-')) {
+    loaderProbe = runLineageProbe('otool', ['-L', executable]);
+    if (loaderProbe.status !== 0) throw new Error(`${tool}: loader check failed: ${oneLine(loaderProbe.output)}`);
+  } else {
+    loaderProbe = runLineageProbe('objdump', ['-p', executable]);
+    if (loaderProbe.status !== 0) throw new Error(`${tool}: loader check failed: ${oneLine(loaderProbe.output)}`);
+  }
+  const version = versionLine(executable);
+  if (version.probe.status !== 0 || !version.version) {
+    throw new Error(`${tool}: --version failed: ${oneLine(version.probe.output)}`);
+  }
+  return {file: oneLine(fileProbe.output), loader: oneLine(loaderProbe.output), version: version.version};
+}
+
+console.log('[7a/9] audit packaged LLVM tool lineage');
+const llvmBinRelative = path.join('third_party', 'llvm', 'bin');
+const packagedLlvmBin = path.join(stage, llvmBinRelative);
+const baseLlvmBin = path.join(sdkSource, llvmBinRelative);
+const physicalTools = new Map();
+for (const entry of await fs.readdir(packagedLlvmBin, {withFileTypes: true})) {
+  if (entry.isDirectory() || entry.name.toLowerCase().endsWith('.dll')) continue;
+  const executable = path.join(packagedLlvmBin, entry.name);
+  let stat;
+  try { stat = await fs.stat(executable); } catch (error) {
+    throw new Error(`broken packaged LLVM tool ${entry.name}: ${error.message}`);
+  }
+  if (!stat.isFile()) continue;
+  const tool = entry.name.replace(/\.exe$/i, '');
+  if (physicalTools.has(tool)) throw new Error(`duplicate packaged LLVM tool name after suffix normalization: ${tool}`);
+  physicalTools.set(tool, entry.name);
+}
+
+const allToolNames = [...new Set([...PACKAGED_LLVM_TOOL_NAMES, ...physicalTools.keys()])]
+  .sort((left, right) => left.localeCompare(right));
+const tupleSha = inputLlvmManifest.values.get('LLVM_SHA');
+const baseSdkSha256 = verifiedBaseSdkProvenance.artifact.sha256;
+const tupleToolFields = new Map([
+  ['llc', 'LLC'],
+  ['opt', 'OPT'],
+  [expectedTupleLldTool, 'LLD'],
+]);
+const lineageRows = [];
+for (const tool of allToolNames) {
+  const physical = physicalTools.get(tool);
+  if (!physical) {
+    lineageRows.push({tool, present: 'no', source: 'none', version: '-', sha256: '-'});
+    continue;
+  }
+  const packagedTool = path.join(packagedLlvmBin, physical);
+  const digest = await sha256File(packagedTool);
+  let source;
+  if (tupleToolFields.has(tool)) {
+    const field = tupleToolFields.get(tool);
+    const expected = inputLlvmManifest.values.get(`${field}_SHA256`);
+    if (digest !== expected) {
+      throw new Error(`${tool}: packaged sha256 ${digest} does not match tuple manifest ${expected || '<missing>'}`);
+    }
+    source = `tuple:${tupleSha}`;
+  } else {
+    const baseTool = path.join(baseLlvmBin, physical);
+    if (!await exists(baseTool)) throw new Error(`${tool}: inherited tool is absent from base SDK: ${baseTool}`);
+    const baseDigest = await sha256File(baseTool);
+    if (digest !== baseDigest) {
+      throw new Error(`${tool}: packaged sha256 ${digest} does not match base SDK ${baseDigest}`);
+    }
+    source = `base-sdk:${baseSdkSha256}`;
+  }
+  const version = versionLine(packagedTool);
+  if (tupleToolFields.has(tool)) {
+    const expectedVersion = inputLlvmManifest.values.get(`${tupleToolFields.get(tool)}_VERSION`);
+    if (version.probe.status !== 0 || version.version !== expectedVersion) {
+      throw new Error(`${tool}: packaged version ${version.version} does not match tuple manifest ${expectedVersion}`);
+    }
+  }
+  lineageRows.push({tool, present: 'yes', source, version: version.version, sha256: digest});
+}
+
+for (const tool of requiredLlvmTools.get(platform)) {
+  const physical = physicalTools.get(tool);
+  if (!physical) throw new Error(`${tool}: required by ${platform} driver but absent from package`);
+  const evidence = verifyNativeLlvmTool(tool, path.join(packagedLlvmBin, physical));
+  console.log(`  ${tool}: file=${evidence.file}; version=${evidence.version}; loader=ok`);
+}
+const lldTool = expectedTupleLldTool;
+const lldPhysical = physicalTools.get(lldTool);
+if (lldPhysical) {
+  const help = runLineageProbe(path.join(packagedLlvmBin, lldPhysical), ['--help']);
+  const requiredOptions = platform.startsWith('darwin-')
+    ? ['--visible-pkgs']
+    : ['--export-bc', '--lto-newpm-passes', '--mllvm', '--visible-pkgs'];
+  const missingOptions = requiredOptions.filter(option => !help.output.includes(option));
+  if (help.status !== 0 || missingOptions.length) {
+    throw new Error(`${lldTool}: missing Cangjie LTO capabilities: ${missingOptions.join(',') || oneLine(help.output)}`);
+  }
+  console.log(`  ${lldTool}: Cangjie LTO options=${requiredOptions.join(',')}`);
+}
+
+const packagedLlvmManifest = path.join(stage, 'llvm-tools.manifest');
+await fs.writeFile(packagedLlvmManifest, formatPackagedLlvmToolsManifest({
+  llvmSha: tupleSha,
+  baseSdkSha256,
+  tools: lineageRows,
+}));
+const recordedLineage = parsePackagedLlvmToolsManifest(await fs.readFile(packagedLlvmManifest, 'utf8'), {
+  label: packagedLlvmManifest,
+});
+for (const row of recordedLineage.tools.filter(row => row.present === 'yes')) {
+  const physical = physicalTools.get(row.tool);
+  const actualSha = await sha256File(path.join(packagedLlvmBin, physical));
+  const actualVersion = versionLine(path.join(packagedLlvmBin, physical)).version;
+  if (row.sha256 !== actualSha || row.version !== actualVersion) {
+    throw new Error(`${row.tool}: packaged manifest does not match final payload`);
+  }
+}
+console.log(`LLVM_TOOL_LINEAGE_OK total=${lineageRows.length} present=${physicalTools.size} required=${requiredLlvmTools.get(platform).length}`);
+
+console.log('[7b/9] write release provenance manifest');
 const {destination: releaseManifest} = await writeReleaseManifest({
   stage,
   platform,

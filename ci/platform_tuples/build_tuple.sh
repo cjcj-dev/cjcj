@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the native llc, opt, and cjselfhost LLVM shim from pinned source trees.
+# Build the native llc, opt, LTO linker, and cjselfhost LLVM shim from pinned source trees.
 set -euo pipefail
 
 root="${TUPLE_ROOT:?TUPLE_ROOT is required}"
@@ -19,6 +19,10 @@ case "$(uname -s)" in
     MINGW*|MSYS*) exe=.exe; pic_flag=;     bundle_static_llvm=1 ;;
     *)            exe=;     pic_flag=-fPIC; bundle_static_llvm=0 ;;
 esac
+case "$platform" in
+    darwin_*) lld_tool=ld64.lld ;;
+    *)        lld_tool=ld.lld ;;
+esac
 
 cmake -G Ninja -S "$llvm_src/llvm" -B "$llvm_build" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -35,11 +39,11 @@ cmake -G Ninja -S "$llvm_src/llvm" -B "$llvm_build" \
     -DLLVM_INCLUDE_EXAMPLES=OFF \
     -DLLVM_INCLUDE_BENCHMARKS=OFF \
     -DLLVM_TARGETS_TO_BUILD="$targets" \
-    -DLLVM_ENABLE_PROJECTS= \
+    -DLLVM_ENABLE_PROJECTS=lld \
     -DCMAKE_C_COMPILER=clang \
     -DCMAKE_CXX_COMPILER=clang++ \
     -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string"
-cmake --build "$llvm_build" --target llc opt llvm-config --parallel 3
+cmake --build "$llvm_build" --target llc opt lld llvm-config --parallel 3
 
 cmake -G Ninja -S "$flatbuffers_src" -B "$flatbuffers_build" \
     -DFLATBUFFERS_BUILD_TESTS=OFF \
@@ -59,6 +63,7 @@ clang++ -std=c++17 -O2 ${pic_flag:+"$pic_flag"} -fno-rtti -fno-exceptions \
     -o "$output/cjselfhost_llvmshim.o"
 gzip -n -c -9 "$llvm_build/bin/llc$exe" > "$output/llc.gz"
 gzip -n -c -9 "$llvm_build/bin/opt$exe" > "$output/opt.gz"
+gzip -n -c -9 "$llvm_build/bin/$lld_tool$exe" > "$output/$lld_tool.gz"
 
 sha256_file() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -68,24 +73,56 @@ sha256_file() {
     fi
 }
 
+llvm_tool_version() {
+    "$1" --version | awk '
+        /LLVM version |^LLD / {
+            sub(/^[[:space:]]+/, "")
+            print
+            found = 1
+            exit
+        }
+        END { if (!found) exit 1 }
+    '
+}
+
 llc_sha="$(sha256_file "$llvm_build/bin/llc$exe")"
 opt_sha="$(sha256_file "$llvm_build/bin/opt$exe")"
+lld_sha="$(sha256_file "$llvm_build/bin/$lld_tool$exe")"
+llc_version="$(llvm_tool_version "$llvm_build/bin/llc$exe")"
+opt_version="$(llvm_tool_version "$llvm_build/bin/opt$exe")"
+lld_version="$(llvm_tool_version "$llvm_build/bin/$lld_tool$exe")"
 {
     printf 'LLVM_SHA=%s\n' "${LLVM_SHA:?LLVM_SHA is required}"
+    printf 'LLC_SOURCE=tuple:%s\n' "$LLVM_SHA"
+    printf 'LLC_VERSION=%s\n' "$llc_version"
     printf 'LLC_SHA256=%s\n' "$llc_sha"
+    printf 'OPT_SOURCE=tuple:%s\n' "$LLVM_SHA"
+    printf 'OPT_VERSION=%s\n' "$opt_version"
     printf 'OPT_SHA256=%s\n' "$opt_sha"
+    printf 'LLD_TOOL=%s\n' "$lld_tool"
+    printf 'LLD_SOURCE=tuple:%s\n' "$LLVM_SHA"
+    printf 'LLD_VERSION=%s\n' "$lld_version"
+    printf 'LLD_SHA256=%s\n' "$lld_sha"
 } > "$output/llvm-tools.manifest"
 
 mkdir -p "$root/verify"
-for tool in llc opt; do
+for tool in llc opt "$lld_tool"; do
     gunzip -c "$output/$tool.gz" > "$root/verify/$tool$exe"
     chmod 0755 "$root/verify/$tool$exe"
     "$root/verify/$tool$exe" --version | head -n 5
 done
 grep -Fx "LLVM_SHA=$LLVM_SHA" "$output/llvm-tools.manifest"
+grep -Fx "LLC_SOURCE=tuple:$LLVM_SHA" "$output/llvm-tools.manifest"
+grep -Fx "LLC_VERSION=$llc_version" "$output/llvm-tools.manifest"
 grep -Fx "LLC_SHA256=$(sha256_file "$root/verify/llc$exe")" "$output/llvm-tools.manifest"
+grep -Fx "OPT_SOURCE=tuple:$LLVM_SHA" "$output/llvm-tools.manifest"
+grep -Fx "OPT_VERSION=$opt_version" "$output/llvm-tools.manifest"
 grep -Fx "OPT_SHA256=$(sha256_file "$root/verify/opt$exe")" "$output/llvm-tools.manifest"
-node ci/llvm-tools-manifest.mjs validate core "$output/llvm-tools.manifest"
+grep -Fx "LLD_TOOL=$lld_tool" "$output/llvm-tools.manifest"
+grep -Fx "LLD_SOURCE=tuple:$LLVM_SHA" "$output/llvm-tools.manifest"
+grep -Fx "LLD_VERSION=$lld_version" "$output/llvm-tools.manifest"
+grep -Fx "LLD_SHA256=$(sha256_file "$root/verify/$lld_tool$exe")" "$output/llvm-tools.manifest"
+node ci/llvm-tools-manifest.mjs validate core-lineage "$output/llvm-tools.manifest"
 file "$output/cjselfhost_llvmshim.o"
 
 if command -v llvm-nm >/dev/null 2>&1; then
