@@ -1,0 +1,114 @@
+# What Actions actually does when a needed job does not succeed.
+#
+# ci/srcbuild/tests/phase-control.test.mjs decides contract 4 -- "a STOP leaves
+# later phases skipped" -- from two static properties: phase N needs phase N-1,
+# and no job on the chain calls always()/cancelled()/failure(). That reasoning is
+# only as good as the semantics it assumes, and nothing in this repo has ever
+# checked those semantics against the real thing. This does, in seconds, with no
+# artifacts and nothing published.
+#
+# Push a branch under probe/ to run it. Every other push-triggered workflow here
+# filters to master, debug/llc-build or ci/platform-matrix, so nothing else wakes up.
+name: needs semantics probe
+
+on:
+  push:
+    branches: ['probe/**']
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: needs-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  a-fails:
+    name: a-fails
+    runs-on: ubuntu-24.04
+    steps:
+      - name: fail on purpose
+        run: exit 1
+
+  b-needs-a:
+    name: b-needs-a
+    needs: a-fails
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "if this job ran at all, a failed need does not skip a dependent"
+
+  c-needs-a-if-always:
+    name: c-needs-a-if-always
+    needs: a-fails
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "this is the hole release.yml:79 has today"
+
+  d-needs-b:
+    name: d-needs-b
+    needs: b-needs-a
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "skipping has to be transitive or a chain proves nothing"
+
+  e-needs-a-if-failure:
+    name: e-needs-a-if-failure
+    needs: a-fails
+    if: failure()
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "failure() is the second way to opt out of the skip"
+
+  assert:
+    name: assert
+    needs: [a-fails, b-needs-a, c-needs-a-if-always, d-needs-b, e-needs-a-if-failure]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      # The probe judges itself. Reading these conclusions by eye would put a
+      # person back in the position the static test is trying to get out of.
+      - name: compare this run's job conclusions against the expected semantics
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          expected() {
+            case "$1" in
+              a-fails)              echo failure ;;
+              b-needs-a)            echo skipped ;;
+              c-needs-a-if-always)  echo success ;;
+              d-needs-b)            echo skipped ;;
+              e-needs-a-if-failure) echo success ;;
+              *)                    echo '' ;;
+            esac
+          }
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs" \
+            --paginate --jq '.jobs[] | [.name, (.conclusion // "in_progress")] | @tsv' > actual.tsv
+          echo "--- this run's jobs ---"
+          cat actual.tsv
+          checked=0
+          bad=0
+          while IFS=$'\t' read -r name conclusion; do
+            want="$(expected "$name")"
+            [ -n "$want" ] || continue
+            checked=$((checked + 1))
+            if [ "$conclusion" = "$want" ]; then
+              echo "OK   $name = $conclusion"
+            else
+              echo "BAD  $name = $conclusion, expected $want"
+              bad=$((bad + 1))
+            fi
+          done < actual.tsv
+          # Five is the whole point: a probe that silently checked three of them
+          # would report green while proving less than it claims.
+          if [ "$checked" -ne 5 ]; then
+            echo "NEEDS_SEMANTICS_PROBE=BROKEN checked=$checked of 5 named jobs"
+            exit 1
+          fi
+          if [ "$bad" -ne 0 ]; then
+            echo "NEEDS_SEMANTICS_PROBE=MISMATCH bad=$bad"
+            exit 1
+          fi
+          echo "NEEDS_SEMANTICS_PROBE=CONFIRMED checked=5"
