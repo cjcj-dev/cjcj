@@ -3918,7 +3918,9 @@ public class IRBuilder2 <: Resource {
         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
         let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
         let objectSlotType = unsafe { LLVMPointerType(i8PtrType, 1u32) }
-        let objectSlot = CreateBitCast(objectValue, objectSlotType, name: "obj.payload.slot")
+        // C++: CJNativeIRBuilder.cpp:1976-1983 GetPayloadFromObject; peel the AS1 GEP base with
+        // SafepointIRVerifier.cpp:991-1003 uncolorIfGCPtr before deriving the payload address.
+        let objectSlot = CreateBitCast(UncolorIfGCPtr(objectValue), objectSlotType, name: "obj.payload.slot")
         let indices = ArrayList<LLVMValueRef>()
         indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), 1u64, 0) })
         let payload = CreateGEP(i8PtrType, objectSlot, indices, name: "obj.payload")
