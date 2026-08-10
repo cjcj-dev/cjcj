@@ -6,6 +6,7 @@ import path from 'node:path';
 import {download, extract} from '../lib/archive.mjs';
 import {BuildError} from '../lib/errors.mjs';
 import {getLogger} from '../lib/logging.mjs';
+import {RELEASE_PYTHON_VERSION} from '../lib/python-bundle.mjs';
 import {run} from '../lib/runner.mjs';
 
 const logger = getLogger('cangjie_build.toolchain.system_deps');
@@ -28,11 +29,20 @@ export const BREW_PACKAGES = Object.freeze([
   'ninja', 'llvm@16', 'openssl@3', 'bison', 'googletest', 'gnu-tar', 'swig', 'coreutils',
 ]);
 
-// llvm@16 depends on this versioned formula, and its LLDB sources still use
-// CPython interfaces removed after 3.12. Install it separately so a hosted
-// runner's newer framework Python cannot either collide during linking or get
-// selected later by CMake.
-export const LLVM_PYTHON_VERSION = '3.12';
+export function pythonSeries(version) {
+  const match = String(version).match(/^(\d+)\.(\d+)\.\d+$/);
+  if (!match) throw new BuildError('system_deps', `unsupported Python version: ${version || '<empty>'}`);
+  return `${match[1]}.${match[2]}`;
+}
+
+// Two constraints select one series, so derive it instead of writing it twice.
+// Our LLDB sources still use CPython interfaces removed after 3.12
+// (_Py_IsFinalizing, PyEval_ThreadsInitialized), and every release package
+// ships CPython RELEASE_PYTHON_VERSION beside a cjdb whose _lldb extension only
+// loads in that exact series (build/lib/python-bundle.mjs:43-48,267). The
+// official nightly SDK links its own LLDB against the same series, which is
+// why third_party/llvm/lib/python3.11 is what the packager finds there.
+export const LLVM_PYTHON_VERSION = pythonSeries(RELEASE_PYTHON_VERSION);
 export const LLVM_PYTHON_FORMULA = `python@${LLVM_PYTHON_VERSION}`;
 
 // cangjie_build/docs/macos.md:52-76 still requires CMake >=3.17 and <4 and
@@ -119,6 +129,19 @@ async function assertPython(python, {
   return version;
 }
 
+async function llvmPythonPrefix(runCommand) {
+  const prefix = await runCommand(['brew', '--prefix', LLVM_PYTHON_FORMULA], {
+    stage: 'system_deps.python.prefix', capture: true, logOutput: false,
+  });
+  return prefix.stdout.trim();
+}
+
+// Versioned Homebrew Python formulae keep their unversioned python3 shim in
+// libexec/bin, so libexec is the keg root whose bin/python3 exists.
+function llvmPythonHome(prefix) {
+  return path.join(prefix, 'libexec');
+}
+
 async function installLlvmPython({
   runCommand = run,
   fileExists = isFile,
@@ -127,13 +150,9 @@ async function installLlvmPython({
   await runCommand(['brew', 'install', '--skip-link', LLVM_PYTHON_FORMULA], {
     stage: 'system_deps.python.install',
   });
-  const prefix = await runCommand(['brew', '--prefix', LLVM_PYTHON_FORMULA], {
-    stage: 'system_deps.python.prefix', capture: true, logOutput: false,
-  });
-  // Versioned Homebrew Python formulae keep their unversioned python3 shim in
-  // libexec/bin. Publish only that directory: the keg remains unlinked, while
-  // later Actions steps and CMake resolve the same supported interpreter.
-  const pythonBin = path.join(prefix.stdout.trim(), 'libexec', 'bin');
+  // Publish only the shim directory: the keg remains unlinked, while later
+  // Actions steps resolve the same supported interpreter.
+  const pythonBin = path.join(llvmPythonHome(await llvmPythonPrefix(runCommand)), 'bin');
   const kegPython = path.join(pythonBin, 'python3');
   const version = await assertPython(kegPython, {
     runCommand,
@@ -142,6 +161,26 @@ async function installLlvmPython({
   });
   exposePath(pythonBin);
   logger.info('Selected unlinked %s (%s) from %s', LLVM_PYTHON_FORMULA, version, pythonBin);
+}
+
+// PATH does not decide which Python LLDB compiles against. The nested LLDB
+// CMake runs its own find_package(Python3 COMPONENTS Interpreter Development),
+// and on macOS that takes the newest framework Python it can see. The one hook
+// that reaches it is TARGET_PYTHON_PATH: cangjie_compiler
+// third_party/cmake/BuildCJDB.cmake:39-45 forwards
+// -DPython3_EXECUTABLE=${TARGET_PYTHON_PATH}/bin/python3 only when that
+// variable is set, and :101-106 derives the site-packages version from the same
+// interpreter. Return the keg root that owns that bin/python3, refusing any
+// other series so a runner's Homebrew upgrade cannot silently pick it up.
+export async function cjdbPythonHome({runCommand = run, fileExists = isFile} = {}) {
+  const home = llvmPythonHome(await llvmPythonPrefix(runCommand));
+  const version = await assertPython(path.join(home, 'bin', 'python3'), {
+    runCommand,
+    fileExists,
+    expectedVersion: LLVM_PYTHON_VERSION,
+  });
+  logger.info('cjdb LLDB builds against Python %s from %s', version, home);
+  return home;
 }
 
 export async function installCmake3(buildRoot, {
