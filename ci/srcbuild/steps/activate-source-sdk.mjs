@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import {getTarget} from '../../../build/lib/targets.mjs';
+import {assertRuntimeSplit, hostLoaderPath} from '../../../build/lib/runtime-split.mjs';
 import {parseLlvmToolsManifest} from '../../llvm-tools-manifest.mjs';
 
 $.stdio = 'inherit';
@@ -116,7 +117,17 @@ if (!runtimeSymbols.stdout.includes('g_cjLoadBadMask')) {
 if (!(await fs.readFile(runtimeBinary)).includes('MRT_GCV2_')) {
   throw new Error(`${runtimeBinary} carries no MRT_GCV2_ markers; refusing a stock target runtime`);
 }
-const libraryPath = [llvmLib, runtimeLib, toolsLib, process.env[spec.loaderEnv] || ''].filter(Boolean).join(path.delimiter);
+assertRuntimeSplit({
+  hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+  targetSdk: sdk,
+  target,
+});
+const libraryPath = hostLoaderPath({
+  hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+  targetSdk: sdk,
+  target,
+  inherited: process.env[spec.loaderEnv] || '',
+});
 const envLines = [
   `CANGJIE_HOME=${sdk}`,
   `CANGJIE_STDX_PATH=${path.join(workspace, 'cangjie_stdx', 'target', spec.runtimeTuple, 'static', 'stdx')}`,
