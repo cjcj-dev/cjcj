@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO = path.resolve(HERE, '..');
@@ -417,17 +417,353 @@ async function evaluateG8(context) {
   return gateResult('G8', 'UNKNOWN', '判据 0811 已更新；manifest 已有 freeze-baseline 字段，但未提供绑定当前 freeze 的实测 manifest，不能判 MET/NOT_MET');
 }
 
+function parseG12Tsv(text, label) {
+  const lines = text.split(/\r?\n/).filter(line => line.length > 0);
+  if (lines.length < 2) throw new GateInputError('UNKNOWN', `${label} has no data rows`);
+  const header = lines[0].split('\t');
+  if (header.some((name, index) => !name || header.indexOf(name) !== index)) {
+    throw new GateInputError('UNKNOWN', `${label} has an invalid or duplicate TSV header`);
+  }
+  return lines.slice(1).map((line, rowIndex) => {
+    const fields = line.split('\t');
+    if (fields.length !== header.length) {
+      throw new GateInputError('UNKNOWN',
+        `${label} row ${rowIndex + 2} has ${fields.length} fields; expected ${header.length}`);
+    }
+    return Object.fromEntries(header.map((name, index) => [name, fields[index]]));
+  });
+}
+
+function requireG12Columns(rows, names, label) {
+  const available = new Set(Object.keys(rows[0] || {}));
+  const missing = names.filter(name => !available.has(name));
+  if (missing.length) throw new GateInputError('UNKNOWN', `${label} lacks columns: ${missing.join(',')}`);
+}
+
+function g12Integer(value, label) {
+  if (!/^-?\d+$/.test(String(value))) {
+    throw new GateInputError('UNKNOWN', `${label} is not an integer: ${value || '<empty>'}`);
+  }
+  const number = Number(value);
+  if (!Number.isSafeInteger(number)) throw new GateInputError('UNKNOWN', `${label} is outside the safe integer range`);
+  return number;
+}
+
+function g12Number(value, label) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) throw new GateInputError('UNKNOWN', `${label} is not a finite number`);
+  return number;
+}
+
+function g12Median(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function g12Fields(line) {
+  return Object.fromEntries([...line.matchAll(/(?:^|\s)([A-Za-z][A-Za-z0-9_]*)=([^\s]+)/g)]
+    .map(match => [match[1], match[2]]));
+}
+
+function g12Criterion(id, status, value) {
+  return {id, status, value};
+}
+
+function completeG12Rows(rows, predicate, runs, label) {
+  const selected = rows.filter(predicate);
+  const rounds = selected.map((row, index) => g12Integer(row.round, `${label}.round[${index}]`));
+  const expected = Array.from({length: runs}, (_, index) => index + 1);
+  const unique = [...new Set(rounds)].sort((left, right) => left - right);
+  if (selected.length !== runs || JSON.stringify(unique) !== JSON.stringify(expected)) {
+    return {status: 'UNKNOWN', rows: selected,
+      reason: `${label} samples=${selected.length} unique_rounds=${unique.length}; expected=${runs}`};
+  }
+  return {status: 'MET', rows: selected};
+}
+
+async function loadG12Floor(context) {
+  if (context.ref) throw new GateInputError('UNKNOWN', 'G12 evidence evaluation requires a checkout, not --ref');
+  const file = path.join(context.repo, 'build', 'lib', 'gc-release-floor.mjs');
+  let imported;
+  try {
+    imported = await import(pathToFileURL(file).href);
+  } catch (error) {
+    throw new GateInputError('UNKNOWN', `cannot load frozen G12 floor: ${error.code || error.message}`);
+  }
+  const floor = imported.GC_RELEASE_FLOOR;
+  const blockers = floor?.blocking?.map(item => item.id);
+  const records = floor?.recording?.map(item => item.id);
+  if (floor?.schema !== 1 || JSON.stringify(blockers) !== JSON.stringify(['F1', 'F2', 'F3', 'F4', 'F5', 'F6']) ||
+      JSON.stringify(records) !== JSON.stringify(['R1', 'R2', 'R3', 'R4'])) {
+    throw new GateInputError('UNKNOWN', 'frozen G12 floor does not contain exactly F1-F6 and R1-R4');
+  }
+  return floor;
+}
+
+async function readG12Evidence(context, relative) {
+  const root = path.resolve(context.evidence);
+  const file = path.resolve(root, ...relative.split('/'));
+  const withinRoot = file === root || file.startsWith(`${root}${path.sep}`);
+  if (!withinRoot) throw new GateInputError('UNKNOWN', `G12 evidence path escapes archive root: ${relative}`);
+  return readAbsolute(file, {absence: 'UNKNOWN'});
+}
+
+function validateG12Metadata(text, floor) {
+  const {heap_mib: heap, workload_sha8: sha8, runs} = floor.measurement;
+  if (!new RegExp(`\\b${sha8}[0-9a-f]{56}\\b`).test(text)) {
+    throw new GateInputError('UNKNOWN', `G12 metadata lacks full workload SHA beginning ${sha8}`);
+  }
+  if (!new RegExp(`\\bHEAP=${heap}MB\\s+N=${runs}\\b`).test(text)) {
+    throw new GateInputError('UNKNOWN', `G12 metadata lacks HEAP=${heap}MB N=${runs}`);
+  }
+  if (!/^[0-9a-f]{64}\s+.*libcangjie-runtime\.(?:so|dylib|dll)\b/m.test(text)) {
+    throw new GateInputError('UNKNOWN', 'G12 metadata lacks runtime SHA-256');
+  }
+  if (!/\bCJRT-COMMIT:[0-9a-f]{40}\b/.test(text)) {
+    throw new GateInputError('UNKNOWN', 'G12 metadata lacks a clean CJRT-COMMIT provenance stamp');
+  }
+  if (!/INTERLEAVE START\b/.test(text) || !/INTERLEAVE DONE\b/.test(text)) {
+    throw new GateInputError('UNKNOWN', 'G12 metadata does not prove a completed interleaved window');
+  }
+}
+
+function evaluateG12Runs(rows, floor, profileName) {
+  requireG12Columns(rows, ['round', 'arm', 'load', 'rc', 'class', 'minor'], 'G12 runs.tsv');
+  const profile = floor.measurement.profiles[profileName];
+  const runs = floor.measurement.runs;
+  const f1Floor = floor.blocking.find(item => item.id === 'F1');
+  const f2Floor = floor.blocking.find(item => item.id === 'F2');
+  const workload = completeG12Rows(rows,
+    row => row.arm === profile.run_arm && row.load === 'nw_e75', runs, `${profileName}.nw_e75`);
+  const hello = completeG12Rows(rows,
+    row => row.arm === profile.run_arm && row.load === 'hello_alloc', runs, `${profileName}.hello_alloc`);
+  const f1 = workload.status === 'UNKNOWN'
+    ? g12Criterion('F1', 'UNKNOWN', workload.reason)
+    : (() => {
+        const rc0 = workload.rows.filter((row, index) =>
+          g12Integer(row.rc, `${profileName}.nw_e75.rc[${index}]`) === 0).length;
+        const passed = workload.rows.length === f1Floor.expected_runs && rc0 === f1Floor.expected_rc0;
+        return g12Criterion('F1', passed ? 'MET' : 'NOT_MET',
+          `N=${workload.rows.length} rc0=${rc0}/${f1Floor.expected_rc0}`);
+      })();
+  const f2 = hello.status === 'UNKNOWN'
+    ? g12Criterion('F2', 'UNKNOWN', hello.reason)
+    : (() => {
+        const rc0 = hello.rows.filter((row, index) =>
+          g12Integer(row.rc, `${profileName}.hello_alloc.rc[${index}]`) === 0).length;
+        const gcRuns = hello.rows.filter((row, index) =>
+          g12Integer(row.minor, `${profileName}.hello_alloc.minor[${index}]`) >=
+            f2Floor.minimum_minor_cycles_per_run).length;
+        const passed = hello.rows.length === f2Floor.expected_runs && rc0 === f2Floor.expected_rc0 &&
+          gcRuns === f2Floor.expected_runs;
+        return g12Criterion('F2', passed ? 'MET' : 'NOT_MET',
+          `N=${hello.rows.length} rc0=${rc0}/${f2Floor.expected_rc0} gc_runs=${gcRuns}/${f2Floor.expected_runs}`);
+      })();
+  return {f1, f2};
+}
+
+function evaluateG12F3(candidateText, controlText, floor) {
+  const criterion = floor.blocking.find(item => item.id === 'F3');
+  const candidateLines = candidateText.split(/\r?\n/)
+    .filter(line => line.includes('[GCV2][f3-deadarm]') && /\bpoint=atexit\b/.test(line));
+  if (candidateLines.length !== floor.measurement.runs) {
+    return g12Criterion('F3', 'UNKNOWN',
+      `atexit_count_lines=${candidateLines.length}; expected=${floor.measurement.runs}`);
+  }
+  const candidate = candidateLines.reduce((sum, line, index) => {
+    const fields = g12Fields(line);
+    if (g12Integer(fields.class_sum_ok, `F3.class_sum_ok[${index}]`) !== 1) {
+      throw new GateInputError('UNKNOWN', `F3 class_sum_ok is not 1 at sample ${index + 1}`);
+    }
+    return sum + g12Integer(fields.total, `F3.total[${index}]`);
+  }, 0);
+  const controlLines = controlText.split(/\r?\n/)
+    .filter(line => line.includes('[GCV2][f3-deadarm]') && /\bpoint=atexit\b/.test(line));
+  const control = controlLines.reduce((sum, line, index) =>
+    sum + g12Integer(g12Fields(line).total, `F3.control.total[${index}]`), 0);
+  if (control < criterion.positive_control_minimum) {
+    return g12Criterion('F3', 'UNKNOWN',
+      `count=${candidate} positive_control=${control}; required>=${criterion.positive_control_minimum}`);
+  }
+  return g12Criterion('F3', candidate <= criterion.maximum_count ? 'MET' : 'NOT_MET',
+    `count=${candidate} maximum=${criterion.maximum_count} positive_control=${control}`);
+}
+
+function markSurvivalSignatureCount(text) {
+  return text.split(/\r?\n/).filter(line => line.includes('[GCV2]') &&
+    /\bsameWord=1\b/.test(line) && /\bmBit=1\b/.test(line) && /\bf3Bit=0\b/.test(line)).length;
+}
+
+function evaluateG12F4(candidateText, controlText, floor) {
+  const criterion = floor.blocking.find(item => item.id === 'F4');
+  const candidate = markSurvivalSignatureCount(candidateText);
+  const control = markSurvivalSignatureCount(controlText);
+  if (control < criterion.positive_control_minimum) {
+    return g12Criterion('F4', 'UNKNOWN',
+      `count=${candidate} positive_control=${control}; required>=${criterion.positive_control_minimum}`);
+  }
+  return g12Criterion('F4', candidate <= criterion.maximum_count ? 'MET' : 'NOT_MET',
+    `count=${candidate} maximum=${criterion.maximum_count} positive_control=${control}`);
+}
+
+function evaluateG12F5(rows, floor, profileName) {
+  requireG12Columns(rows,
+    ['round', 'load', 'fys', 'rc', 'minors', 'missBareNeverSeen', 'remsetSizeHint', 'status'],
+    'G12 remset.tsv');
+  const criterion = floor.blocking.find(item => item.id === 'F5');
+  const profile = floor.measurement.profiles[profileName];
+  const counts = {};
+  for (const load of criterion.loads) {
+    const selected = completeG12Rows(rows,
+      row => row.load === load && g12Integer(row.fys, `F5.${load}.fys`) === profile.full_young_scan,
+      floor.measurement.runs, `${profileName}.remset.${load}`);
+    if (selected.status === 'UNKNOWN') return g12Criterion('F5', 'UNKNOWN', selected.reason);
+    for (const [index, row] of selected.rows.entries()) {
+      if (g12Integer(row.rc, `F5.${load}.rc[${index}]`) !== 0 || row.status !== 'OK' ||
+          g12Integer(row.minors, `F5.${load}.minors[${index}]`) < 1) {
+        return g12Criterion('F5', 'UNKNOWN', `${profileName}.${load} has an incomplete counter run`);
+      }
+    }
+    counts[load] = selected.rows.reduce((sum, row, index) =>
+      sum + g12Integer(row.missBareNeverSeen, `F5.${load}.missBareNeverSeen[${index}]`), 0);
+  }
+  const controls = rows.filter(row => row.load === 'CTRL' &&
+    g12Integer(row.fys, 'F5.CTRL.fys') === profile.full_young_scan);
+  const control = controls.reduce((sum, row, index) =>
+    sum + g12Integer(row.missBareNeverSeen, `F5.CTRL.missBareNeverSeen[${index}]`), 0);
+  if (control < criterion.positive_control_minimum) {
+    return g12Criterion('F5', 'UNKNOWN',
+      `counts=${JSON.stringify(counts)} positive_control=${control}; required>=${criterion.positive_control_minimum}`);
+  }
+  const passed = Object.values(counts).every(count => count <= criterion.maximum_count);
+  return g12Criterion('F5', passed ? 'MET' : 'NOT_MET',
+    `O0=${counts.O0} O2=${counts.O2} maximum=${criterion.maximum_count} positive_control=${control}`);
+}
+
+function evaluateG12Records(remsetRows, throughputRows, phaseText, floor) {
+  const phaseNames = floor.recording.find(item => item.id === 'R1').phases;
+  const phaseUs = Object.fromEntries(phaseNames.map(name => [name, []]));
+  for (const line of phaseText.split(/\r?\n/)) {
+    const match = line.match(/\[GCLOG\].*\brec=phase\b.*\bname=(young\.[A-Za-z0-9_.-]+)\s+us=(\d+)\b/);
+    if (match && Object.hasOwn(phaseUs, match[1])) phaseUs[match[1]].push(g12Integer(match[2], `R1.${match[1]}`));
+  }
+  if (Object.values(phaseUs).some(values => values.length === 0)) {
+    throw new GateInputError('UNKNOWN', 'R1 lacks one or more four-pillar [GCLOG] phase records');
+  }
+  const phaseSums = Object.fromEntries(Object.entries(phaseUs)
+    .map(([name, values]) => [name, values.reduce((sum, value) => sum + value, 0)]));
+  const fourPillarTotal = Object.values(phaseSums).reduce((sum, value) => sum + value, 0);
+  if (fourPillarTotal <= 0) throw new GateInputError('UNKNOWN', 'R1 four-pillar phase total is zero');
+  const shares = Object.fromEntries(Object.entries(phaseSums)
+    .map(([name, value]) => [name, Number((value / fourPillarTotal).toFixed(6))]));
+
+  const defaultFys = floor.measurement.profiles.DEFAULT.full_young_scan;
+  const remset = {};
+  for (const load of floor.recording.find(item => item.id === 'R2').loads) {
+    const selected = completeG12Rows(remsetRows,
+      row => row.load === load && g12Integer(row.fys, `R2.${load}.fys`) === defaultFys,
+      floor.measurement.runs, `R2.${load}`);
+    if (selected.status === 'UNKNOWN') throw new GateInputError('UNKNOWN', selected.reason);
+    const values = selected.rows.map((row, index) =>
+      g12Integer(row.remsetSizeHint, `R2.${load}.remsetSizeHint[${index}]`));
+    remset[load] = {median: g12Median(values), max: Math.max(...values)};
+  }
+
+  requireG12Columns(throughputRows, ['round', 'arm', 'rc', 'task_ms', 'minor', 'status'],
+    'G12 throughput.tsv');
+  const r3 = floor.recording.find(item => item.id === 'R3');
+  const task = {};
+  for (const arm of [r3.generational_arm, r3.minor_disabled_arm]) {
+    const selected = completeG12Rows(throughputRows, row => row.arm === arm,
+      floor.measurement.runs, `R3.${arm}`);
+    if (selected.status === 'UNKNOWN') throw new GateInputError('UNKNOWN', selected.reason);
+    for (const [index, row] of selected.rows.entries()) {
+      if (g12Integer(row.rc, `R3.${arm}.rc[${index}]`) !== 0 || row.status !== 'OK') {
+        throw new GateInputError('UNKNOWN', `R3 arm ${arm} contains an incomplete run`);
+      }
+      const minor = g12Integer(row.minor, `R3.${arm}.minor[${index}]`);
+      if (arm === r3.minor_disabled_arm && minor !== 0) {
+        throw new GateInputError('UNKNOWN', `R3 minor-disabled arm ${arm} observed minor=${minor}`);
+      }
+    }
+    task[arm] = g12Median(selected.rows.map((row, index) =>
+      g12Number(row.task_ms, `R3.${arm}.task_ms[${index}]`)));
+  }
+  if (task[r3.minor_disabled_arm] <= 0) throw new GateInputError('UNKNOWN', 'R3 denominator is not positive');
+  const ratio = task[r3.generational_arm] / task[r3.minor_disabled_arm];
+
+  const stw = [...phaseText.matchAll(/young collection stw time:\s*([0-9,]+)us/g)]
+    .map((match, index) => g12Integer(match[1].replaceAll(',', ''), `R4.stw[${index}]`));
+  if (stw.length === 0) throw new GateInputError('UNKNOWN', 'R4 lacks young collection STW duration lines');
+  return [
+    {id: 'R1', value: shares},
+    {id: 'R2', value: remset},
+    {id: 'R3', value: {median_task_ms: task, ratio: Number(ratio.toFixed(6))}},
+    {id: 'R4', value: {samples: stw.length, median_us: g12Median(stw), max_us: Math.max(...stw)}},
+  ];
+}
+
 async function evaluateG12(context) {
-  const [manifest, release] = await Promise.all([
-    readFile(context, 'build/lib/release-manifest.mjs'),
-    readFile(context, '.github/workflows/release.yml'),
+  const floor = await loadG12Floor(context);
+  if (!context.evidence) {
+    return gateResult('G12', 'UNKNOWN',
+      'GC floor F1-F6 已冻结；未指定 --evidence，无法读取计数行/TSV/日志');
+  }
+  const profileFiles = floor.evidence.profiles;
+  const [metadata, runText, remsetText, throughputText, phaseText,
+    defaultF3, defaultF3Control, defaultF4, defaultF4Control,
+    fys0F3, fys0F3Control, fys0F4, fys0F4Control] = await Promise.all([
+    readG12Evidence(context, floor.evidence.metadata),
+    readG12Evidence(context, floor.evidence.run_results),
+    readG12Evidence(context, floor.evidence.remset_results),
+    readG12Evidence(context, floor.evidence.throughput_results),
+    readG12Evidence(context, floor.evidence.phase_log),
+    readG12Evidence(context, profileFiles.DEFAULT.f3_counts),
+    readG12Evidence(context, profileFiles.DEFAULT.f3_positive_control),
+    readG12Evidence(context, profileFiles.DEFAULT.mark_survival),
+    readG12Evidence(context, profileFiles.DEFAULT.mark_survival_positive_control),
+    readG12Evidence(context, profileFiles.FYS0.f3_counts),
+    readG12Evidence(context, profileFiles.FYS0.f3_positive_control),
+    readG12Evidence(context, profileFiles.FYS0.mark_survival),
+    readG12Evidence(context, profileFiles.FYS0.mark_survival_positive_control),
   ]);
-  const text = `${manifest}\n${release}`;
-  const hasFrozenIntegers = /gc[_-]?release[_-]?floor/i.test(text) &&
-    ['DEFAULT', 'GOLD', 'ALOT'].every(name => new RegExp(`${name}[^\\n]*(?:N20|N10|ok)`, 'i').test(text));
-  return hasFrozenIntegers
-    ? gateResult('G12', 'UNKNOWN', '整数 GC floor 已接入 release 配置；未提供同 final archive 的 NEW/GOLD/ALOT 结果，不能继续判定')
-    : gateResult('G12', 'NOT_MET', 'release manifest/workflow 中没有冻结的 DEFAULT/GOLD/ALOT 整数门值');
+  validateG12Metadata(metadata, floor);
+  const runRows = parseG12Tsv(runText, 'G12 runs.tsv');
+  const remsetRows = parseG12Tsv(remsetText, 'G12 remset.tsv');
+  const throughputRows = parseG12Tsv(throughputText, 'G12 throughput.tsv');
+
+  const defaultRuns = evaluateG12Runs(runRows, floor, 'DEFAULT');
+  const defaultChecks = [
+    defaultRuns.f1,
+    defaultRuns.f2,
+    evaluateG12F3(defaultF3, defaultF3Control, floor),
+    evaluateG12F4(defaultF4, defaultF4Control, floor),
+    evaluateG12F5(remsetRows, floor, 'DEFAULT'),
+  ];
+  const fys0Runs = evaluateG12Runs(runRows, floor, 'FYS0');
+  const fys0Checks = [
+    fys0Runs.f1,
+    fys0Runs.f2,
+    evaluateG12F3(fys0F3, fys0F3Control, floor),
+    evaluateG12F4(fys0F4, fys0F4Control, floor),
+    evaluateG12F5(remsetRows, floor, 'FYS0'),
+  ];
+  const f6Status = fys0Checks.some(item => item.status === 'UNKNOWN') ? 'UNKNOWN' :
+    fys0Checks.every(item => item.status === 'MET') ? 'MET' : 'NOT_MET';
+  const f6 = g12Criterion('F6', f6Status,
+    `FYS=0 ${fys0Checks.map(item => `${item.id}:${item.status}`).join(',')}`);
+  const checks = [...defaultChecks, f6];
+  const records = evaluateG12Records(remsetRows, throughputRows, phaseText, floor);
+  const status = checks.some(item => item.status === 'UNKNOWN') ? 'UNKNOWN' :
+    checks.every(item => item.status === 'MET') ? 'MET' : 'NOT_MET';
+  const values = checks.map(item => `${item.id}=${item.status}(${item.value})`).join('; ');
+  return gateResult('G12', status, values, {
+    floor: {release: floor.release, heap_mib: floor.measurement.heap_mib,
+      workload_sha8: floor.measurement.workload_sha8, runs: floor.measurement.runs},
+    checks,
+    records,
+  });
 }
 
 async function evaluateG14(context) {
