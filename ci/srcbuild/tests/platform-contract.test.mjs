@@ -407,6 +407,7 @@ test('source build keeps a version-matched plain host runtime across both bootst
   assert.ok(activation.includes('assertRuntimeSplit({'));
   assert.ok(activation.includes('const libraryPath = targetLoaderPath({'));
   assert.ok(!activation.includes('const libraryPath = hostLoaderPath({'));
+  assert.ok(activation.includes("const hostCompiler = path.join(sdk, 'bin', 'cjc')"));
   assert.ok(activation.includes('CJCJ_SRCBUILD_HOST_CJC=${hostCompiler}'));
   assert.ok(!activation.includes('const libraryPath = [llvmLib, runtimeLib, toolsLib'));
 
