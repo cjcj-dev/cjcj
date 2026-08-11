@@ -303,6 +303,30 @@ test('packaged SDK colour ABI accepts a SAME fake SDK', () => {
   }
 });
 
+test('packaged SDK colour ABI recognizes Darwin leading-underscore symbols', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-colour-abi-darwin-'));
+  try {
+    const target = buildConfig({targetKey: 'darwin-arm64'}).target;
+    const sdk = directory(root, 'sdk');
+    file(sdk, ['bin', 'cjc'], 'fake Mach-O compiler');
+    file(sdk, [
+      'runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary,
+    ], 'fake Mach-O runtime');
+    const symbols = '                 U _g_cjLoadBadMask\n';
+    const result = assertSdkCompilerRuntimeAbi({
+      sdk,
+      target,
+      readCompiler: () => symbols,
+      readRuntime: () => '0000000000000000 T _g_cjLoadBadMask\n',
+      log: () => {},
+    });
+    assert.equal(result.compilerCount, 1);
+    assert.equal(result.runtimeCount, 1);
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
 test('packaged SDK colour ABI rejects a MISMATCH fake SDK', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-colour-abi-mismatch-'));
   try {
