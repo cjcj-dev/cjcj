@@ -72,6 +72,11 @@ export function baseEnv(config) {
       ldPaths.unshift(toolsLib);
     }
   }
+  const hostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
+  if (hostSdk && fs.statSync(hostSdk, {throwIfNoEntry: false})?.isDirectory()) {
+    extraPathDirs.unshift(path.join(hostSdk, 'tools', 'bin'));
+    extraPathDirs.unshift(path.join(hostSdk, 'bin'));
+  }
 
   const stdxPath = path.join(
     config.workspace, 'cangjie_stdx', 'target', config.target.stdxTargetSubdir(), 'static', 'stdx',
