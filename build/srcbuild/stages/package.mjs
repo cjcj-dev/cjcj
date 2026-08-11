@@ -48,6 +48,10 @@ function globOrFail(directory, suffix, stageName) {
 function organizeSdkTree(config, destination) {
   const suffix = config.target.spec.exeSuffix;
   const toolsRoot = config.repoPath('tools');
+  const usabilityChecker = requireFile(
+    path.resolve(import.meta.dirname, '..', '..', '..', 'scripts', 'check_sdk_usable.mjs'),
+    {stage: 'package.usability_checker'},
+  );
   const astSupport = path.join(destination, 'lib', platformLibDirName(config), 'libcangjie-ast-support.a');
   if (fs.statSync(astSupport, {throwIfNoEntry: false})?.isFile()) {
     fs.unlinkSync(astSupport);
@@ -56,6 +60,7 @@ function organizeSdkTree(config, destination) {
 
   const toolsBin = ensureDir(path.join(destination, 'tools', 'bin'));
   const toolsConfig = ensureDir(path.join(destination, 'tools', 'config'));
+  copyInto(usabilityChecker, path.join(destination, 'tools'), {stage: 'package.usability_checker'});
   const cjpm = requireFile(path.join(toolsRoot, 'cjpm', 'dist', `cjpm${suffix}`), {stage: 'package.cjpm'});
   copyInto(cjpm, toolsBin, {stage: 'package.cjpm'});
 
