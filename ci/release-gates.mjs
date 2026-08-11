@@ -12,6 +12,14 @@ const SHA40 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const STATUSES = new Set(['MET', 'NOT_MET', 'UNKNOWN']);
 const PLATFORMS = ['linux-x64', 'linux-aarch64', 'windows-x64', 'darwin-arm64', 'darwin-x64'];
+const G2_ARTIFACTS = [
+  'runtime_dynamic',
+  'runtime_static',
+  'llvm_llc',
+  'llvm_opt',
+  'cjcj',
+  'std',
+];
 
 const GATES = Object.freeze({
   G1: {name: '冻结输入'},
@@ -332,17 +340,186 @@ async function loaderlifeResult(context, gate = 'G13') {
   return gateResult(gate, 'UNKNOWN', `runtime ancestry unreadable: ${commandFailure(probe)}; repo=${runtimeRepo}`);
 }
 
+function plainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function exactKeys(value, allowed, label, failures) {
+  if (!plainObject(value)) return;
+  const extra = Object.keys(value).filter(key => !allowed.includes(key));
+  if (extra.length) failures.push(`${label} additionalProperties=${extra.join(',')}`);
+}
+
+function g2IdentitySchemaState(identity, schema) {
+  const missing = [];
+  const invalid = [];
+  const pending = [];
+  if (!plainObject(identity)) {
+    return {status: 'NOT_MET', detail: 'G2_IDENTITY.json schema failure: root must be an object'};
+  }
+
+  const rootProperties = Object.keys(schema?.properties || {});
+  const rootRequired = schema?.required || [];
+  if (schema?.type !== 'object' || schema?.properties?.schema_version?.const !== 1 ||
+      JSON.stringify(schema?.properties?.status?.enum) !== JSON.stringify(['PENDING', 'READY']) ||
+      JSON.stringify(schema?.properties?.artifacts?.required) !== JSON.stringify(G2_ARTIFACTS)) {
+    return {status: 'UNKNOWN', detail: 'g2-identity.schema.json does not define the expected six-slot v1 contract'};
+  }
+  exactKeys(identity, rootProperties, 'root', invalid);
+  for (const field of rootRequired) {
+    if (!Object.hasOwn(identity, field)) missing.push(field);
+  }
+  if (identity.schema_version !== 1) invalid.push(`schema_version=${String(identity.schema_version)}`);
+  const campaignPattern = new RegExp(schema.properties.campaign_id.pattern);
+  if (Object.hasOwn(identity, 'campaign_id') &&
+      (typeof identity.campaign_id !== 'string' || !campaignPattern.test(identity.campaign_id))) {
+    invalid.push('campaign_id');
+  }
+  const shaPattern = new RegExp(schema.properties.cjcj_head_sha.pattern);
+  if (Object.hasOwn(identity, 'cjcj_head_sha') &&
+      (typeof identity.cjcj_head_sha !== 'string' || !shaPattern.test(identity.cjcj_head_sha))) {
+    invalid.push('cjcj_head_sha');
+  }
+  if (Object.hasOwn(identity, 'status') && !schema.properties.status.enum.includes(identity.status)) {
+    invalid.push(`status=${String(identity.status)}`);
+  }
+  const ready = identity.status === 'READY';
+  if (Object.hasOwn(identity, 'captured_utc')) {
+    if (identity.captured_utc === null) {
+      if (ready) missing.push('captured_utc');
+      else pending.push('captured_utc');
+    } else if (typeof identity.captured_utc !== 'string' ||
+               !new RegExp(schema.properties.captured_utc.pattern).test(identity.captured_utc)) {
+      invalid.push('captured_utc');
+    }
+  }
+
+  const artifactSchema = schema.$defs?.artifact_slot;
+  const artifactFields = artifactSchema?.required || [];
+  if (!plainObject(identity.artifacts)) {
+    if (Object.hasOwn(identity, 'artifacts')) invalid.push('artifacts');
+  } else {
+    exactKeys(identity.artifacts, G2_ARTIFACTS, 'artifacts', invalid);
+    for (const name of G2_ARTIFACTS) {
+      const artifact = identity.artifacts[name];
+      if (!Object.hasOwn(identity.artifacts, name)) {
+        missing.push(`artifacts.${name}`);
+        continue;
+      }
+      if (!plainObject(artifact)) {
+        invalid.push(`artifacts.${name}`);
+        continue;
+      }
+      exactKeys(artifact, artifactFields, `artifacts.${name}`, invalid);
+      for (const field of artifactFields) {
+        const label = `artifacts.${name}.${field}`;
+        if (!Object.hasOwn(artifact, field)) {
+          missing.push(label);
+          continue;
+        }
+        const value = artifact[field];
+        if (value === null) {
+          if (ready) missing.push(label);
+          else pending.push(label);
+          continue;
+        }
+        if (field === 'source_dirty') {
+          if (typeof value !== 'boolean') invalid.push(label);
+        } else if (typeof value !== 'string' || value.length === 0) {
+          invalid.push(label);
+        } else if (field === 'sha256' && !SHA256.test(value)) {
+          invalid.push(label);
+        } else if (field === 'source_commit' && !SHA40.test(value)) {
+          invalid.push(label);
+        }
+      }
+    }
+  }
+
+  if (missing.length) return {status: 'UNKNOWN', detail: `G2_IDENTITY.json missing=${missing.join(',')}`};
+  if (invalid.length) return {status: 'NOT_MET', detail: `G2_IDENTITY.json schema_failures=${invalid.join(';')}`};
+  if (!ready) {
+    return {status: 'UNKNOWN',
+      detail: `G2_IDENTITY.json status=PENDING; missing=status=READY${pending.length ? `,${pending.join(',')}` : ''}`};
+  }
+  return {status: 'MET', detail: 'G2_IDENTITY.json status=READY and schema complete'};
+}
+
+function parseG2Json(text, label) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new GateInputError('UNKNOWN', `${label} is unreadable JSON: ${error.message}`);
+  }
+}
+
 async function evaluateG2(context) {
   const ancestry = await loaderlifeResult(context, 'G2');
   if (ancestry.status !== 'MET') return ancestry;
   if (!context.evidence) {
-    return gateResult('G2', 'UNKNOWN', `${ancestry.value}; 未指定持久 evidence，无法读取同轮 runtime 动/静态库、LLVM、cjcj、std 的二进制戳与 dirty 状态`);
+    return gateResult('G2', 'UNKNOWN', `${ancestry.value}; missing=--evidence archive,` +
+      'G2_IDENTITY.json.status=READY,G2_IDENTITY.json.captured_utc,' +
+      'G2_IDENTITY.json.artifacts.{runtime_dynamic,runtime_static,llvm_llc,llvm_opt,cjcj,std}.' +
+      '{artifact_path,sha256,provenance_stamp,source_commit,source_dirty}');
   }
   const verifier = path.join(context.repo, 'scripts/archive_release_evidence.mjs');
   const verified = spawn(process.execPath, [verifier, 'verify', '--archive', context.evidence], {cwd: context.repo});
   if (verified.error) return gateResult('G2', 'UNKNOWN', `evidence verifier unavailable: ${verified.error.message}`);
   if (verified.status !== 0) return gateResult('G2', 'NOT_MET', `evidence rejected: ${commandFailure(verified)}`);
-  return gateResult('G2', 'UNKNOWN', 'release evidence archive is internally valid, but its current schema does not enumerate both runtime dynamic/static artifacts; G2 cannot be promoted to MET from incomplete identity evidence');
+
+  const identityFile = path.join(path.dirname(path.resolve(context.evidence)), 'G2_IDENTITY.json');
+  const [identityText, schemaText, runText, pins] = await Promise.all([
+    readAbsolute(identityFile, {absence: 'UNKNOWN'}),
+    readFile(context, 'ci/release-evidence/g2-identity.schema.json', {absence: 'UNKNOWN'}),
+    readAbsolute(path.join(context.evidence, 'run.json'), {absence: 'UNKNOWN'}),
+    loadPins(context),
+  ]);
+  const identity = parseG2Json(identityText, identityFile);
+  const schema = parseG2Json(schemaText, 'ci/release-evidence/g2-identity.schema.json');
+  const run = parseG2Json(runText, path.join(context.evidence, 'run.json'));
+  const schemaState = g2IdentitySchemaState(identity, schema);
+  if (schemaState.status !== 'MET') {
+    return gateResult('G2', schemaState.status, `${ancestry.value}; archive=valid; ${schemaState.detail}`);
+  }
+
+  const failures = [];
+  if (!identity.campaign_id.startsWith(`${identity.cjcj_head_sha}-`)) {
+    failures.push('campaign_id does not bind cjcj_head_sha');
+  }
+  if (run.head_sha !== identity.cjcj_head_sha) {
+    failures.push(`archive head=${run.head_sha || '<missing>'} identity head=${identity.cjcj_head_sha}`);
+  }
+  const expectedCommits = {
+    runtime_dynamic: pins.runtime.RUNTIME_REF,
+    runtime_static: pins.runtime.RUNTIME_REF,
+    llvm_llc: pins.llvm.LLVM_SHA,
+    llvm_opt: pins.llvm.LLVM_SHA,
+    cjcj: identity.cjcj_head_sha,
+  };
+  const stampPrefixes = {
+    runtime_dynamic: 'CJRT-COMMIT',
+    runtime_static: 'CJRT-COMMIT',
+    llvm_llc: 'CJLLVM-COMMIT',
+    llvm_opt: 'CJLLVM-COMMIT',
+    cjcj: 'CJCJ-COMMIT',
+    std: 'CJSTD-COMMIT',
+  };
+  for (const name of G2_ARTIFACTS) {
+    const artifact = identity.artifacts[name];
+    const expectedCommit = expectedCommits[name];
+    if (expectedCommit && artifact.source_commit !== expectedCommit) {
+      failures.push(`${name}.source_commit=${artifact.source_commit} expected=${expectedCommit}`);
+    }
+    if (artifact.source_dirty !== false) failures.push(`${name}.source_dirty=${artifact.source_dirty}`);
+    const marker = `${stampPrefixes[name]}:${artifact.source_commit}`;
+    if (!artifact.provenance_stamp.includes(marker)) failures.push(`${name}.provenance_stamp lacks ${marker}`);
+    if (artifact.provenance_stamp.includes('-dirty')) failures.push(`${name}.provenance_stamp is dirty`);
+  }
+  if (failures.length) {
+    return gateResult('G2', 'NOT_MET', `${ancestry.value}; archive=valid; identity=READY; failures=${failures.join(';')}`);
+  }
+  return gateResult('G2', 'MET', `${ancestry.value}; archive=valid; G2_IDENTITY.json READY; ` +
+    'six slots schema-complete, clean, stamped, and bound to archive head/runtime/LLVM pins');
 }
 
 function runTests(context, files) {
