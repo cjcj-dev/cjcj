@@ -24,12 +24,20 @@ function requireRuntime(file, label) {
 export function runtimeSplitPaths({hostSdk, targetSdk, target}) {
   const hostRoot = requireDirectory(hostSdk, 'CJCJ_SRCBUILD_HOST_SDK');
   const targetRoot = requireDirectory(targetSdk, 'target SDK');
-  const relative = path.join('runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary);
+  const hostRelative = path.join(
+    'runtime',
+    'lib',
+    target.spec.hostRuntimeTuple || target.spec.runtimeTuple,
+    target.spec.hostRuntimeLibrary || target.spec.runtimeLibrary,
+  );
+  const targetRelative = path.join(
+    'runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary,
+  );
   return {
     hostSdk: hostRoot,
     targetSdk: targetRoot,
-    hostRuntime: requireRuntime(path.join(hostRoot, relative), 'host'),
-    targetRuntime: requireRuntime(path.join(targetRoot, relative), 'target'),
+    hostRuntime: requireRuntime(path.join(hostRoot, hostRelative), 'host'),
+    targetRuntime: requireRuntime(path.join(targetRoot, targetRelative), 'target'),
   };
 }
 
