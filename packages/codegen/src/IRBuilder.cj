@@ -5819,7 +5819,9 @@ public class IRBuilder2 <: Resource {
     public func GetTypeInfoFromObject(obj: LLVMValueRef): LLVMValueRef {
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
         let typeInfoSlotType = unsafe { LLVMPointerType(typeInfoPtrType, 1u32) }
-        let typeInfoSlot = CreateBitCast(obj, typeInfoSlotType, name: "obj.ti.slot")
+        // C++: CJNativeIRBuilder.cpp:1967-1973 GetTypeInfoFromObject; peel the AS1 load base with
+        // CJBarrierLowering.cpp:1217-1227 uncolorIfGCPtr before reading the object header.
+        let typeInfoSlot = CreateBitCast(UncolorIfGCPtr(obj), typeInfoSlotType, name: "obj.ti.slot")
         var typeInfo = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString("ti") }.asResource()) {
             typeInfo = unsafe { LLVMBuildLoad2(builder.raw, typeInfoPtrType, typeInfoSlot, nameCString.value) }
