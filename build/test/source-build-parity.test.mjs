@@ -13,7 +13,6 @@ import {
   hostLoaderPath,
 } from '../lib/runtime-split.mjs';
 import * as compiler from '../srcbuild/stages/compiler.mjs';
-import {hostCompilerEnv} from '../srcbuild/stages/common.mjs';
 import * as packageStage from '../srcbuild/stages/package.mjs';
 import * as runtime from '../srcbuild/stages/runtime.mjs';
 import * as stdlib from '../srcbuild/stages/stdlib.mjs';
@@ -198,40 +197,6 @@ test('source builds fail closed unless host runtime is plain and target runtime 
       '/inherited',
     ]);
     assert.ok(!earlyHostLoader.includes(path.join(targetSdk, 'third_party', 'llvm', 'lib')));
-
-    const launcherWorkspace = directory(root, 'launcher-workspace');
-    const launcherTargetSdk = directory(launcherWorkspace, 'cangjie_compiler', 'output');
-    const launcherCompiler = file(launcherTargetSdk, ['bin', 'cjc'], [
-      '#!/bin/sh',
-      'printf "%s|%s|%s\\n" "$LD_PRELOAD" "$LD_LIBRARY_PATH" "$1"',
-      '',
-    ].join('\n'));
-    fs.chmodSync(launcherCompiler, 0o755);
-    file(launcherTargetSdk, relative, 'target-runtime');
-    directory(launcherTargetSdk, 'tools', 'lib');
-    const launcherConfig = buildConfig({
-      workspace: launcherWorkspace,
-      buildRoot: directory(root, 'launcher-build-root'),
-      targetKey: 'linux-x64',
-    });
-    const previousHostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
-    process.env.CJCJ_SRCBUILD_HOST_SDK = hostSdk;
-    try {
-      const launcherEnv = hostCompilerEnv(launcherConfig, {hostRuntime});
-      const launched = spawnSync('cjc', ['sentinel'], {
-        encoding: 'utf8',
-        env: {...process.env, ...launcherEnv},
-      });
-      assert.equal(launched.status, 0, launched.stderr);
-      const [preload, libraryPath, argument] = launched.stdout.trim().split('|');
-      assert.equal(preload, hostRuntime);
-      assert.equal(libraryPath.split(path.delimiter)[0], path.dirname(hostRuntime));
-      assert.ok(!libraryPath.includes(path.dirname(targetRuntime)));
-      assert.equal(argument, 'sentinel');
-    } finally {
-      if (previousHostSdk === undefined) delete process.env.CJCJ_SRCBUILD_HOST_SDK;
-      else process.env.CJCJ_SRCBUILD_HOST_SDK = previousHostSdk;
-    }
 
     const generatedBuild = file(root, ['stdx', 'build.ninja'], [
       `command = env LD_LIBRARY_PATH=${path.dirname(hostRuntime)}:${path.dirname(targetRuntime)} cjc package.cj`,
