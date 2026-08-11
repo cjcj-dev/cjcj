@@ -107,6 +107,14 @@ export function countLoadBadMask(symbols) {
     .filter(line => new RegExp(`\\b${LOAD_BAD_MASK_SYMBOL}\\b`).test(line)).length;
 }
 
+function countSdkLoadBadMask(symbols, target) {
+  const symbol = target.spec.os === 'darwin'
+    ? `_${LOAD_BAD_MASK_SYMBOL}`
+    : LOAD_BAD_MASK_SYMBOL;
+  return String(symbols).split(/\r?\n/)
+    .filter(line => new RegExp(`\\b${symbol}\\b`).test(line)).length;
+}
+
 export function assertSdkCompilerRuntimeAbi({
   sdk,
   target,
@@ -120,8 +128,8 @@ export function assertSdkCompilerRuntimeAbi({
     path.join(sdkRoot, runtimeRelativePath(target, 'target')),
     'packaged',
   );
-  const compilerCount = countLoadBadMask(readCompiler(compiler, target));
-  const runtimeCount = countLoadBadMask(readRuntime(runtime, target));
+  const compilerCount = countSdkLoadBadMask(readCompiler(compiler, target), target);
+  const runtimeCount = countSdkLoadBadMask(readRuntime(runtime, target), target);
   if (![compilerCount, runtimeCount].every(count => count === 0 || count === 1)) {
     throw new BuildError(
       'runtime.sdk-abi',
