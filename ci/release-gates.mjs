@@ -12,6 +12,10 @@ const SHA40 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const STATUSES = new Set(['MET', 'NOT_MET', 'UNKNOWN']);
 const PLATFORMS = ['linux-x64', 'linux-aarch64', 'windows-x64', 'darwin-arm64', 'darwin-x64'];
+const EVIDENCE_REGISTRY = 'GATE_EVIDENCE.json';
+const EVIDENCE_BINDING = 'EVIDENCE_BINDING.json';
+const DISCOVERABLE_EVIDENCE_GATES = new Set(['G2', 'G8', 'G12', 'G14']);
+const GENERIC_BINDING_GATES = new Set(['G12', 'G14']);
 const G2_ARTIFACTS = [
   'runtime_dynamic',
   'runtime_static',
@@ -249,13 +253,150 @@ function nestedValues(value, key, found = []) {
   return found;
 }
 
-async function defaultFreezePath(context) {
+async function releaseEvidenceRoot(context) {
   const runbook = await readFile(context, 'ops/coord/RELEASE_0_0_2_RUNBOOK.md', {absence: 'UNKNOWN'});
   const root = runbook.match(/^export RELEASE_EVIDENCE_ROOT=(.+)$/m)?.[1]?.trim();
   if (!root || root.includes('<')) {
     throw new GateInputError('UNKNOWN', 'runbook does not expose one concrete RELEASE_EVIDENCE_ROOT');
   }
-  return path.join(root, 'FREEZE.json');
+  return path.resolve(root);
+}
+
+async function defaultFreezePath(context) {
+  return path.join(await releaseEvidenceRoot(context), 'FREEZE.json');
+}
+
+function parseEvidenceJson(text, label) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new GateInputError('UNKNOWN', `${label} is unreadable JSON: ${error.message}`);
+  }
+}
+
+function evidenceRelativeFile(root, relative, label) {
+  if (typeof relative !== 'string' || relative.length === 0 || path.isAbsolute(relative) || relative.includes('\\')) {
+    throw new GateInputError('UNKNOWN', `${label} is not a normalized relative path`);
+  }
+  const file = path.resolve(root, ...relative.split('/'));
+  const withinRoot = file.startsWith(`${root}${path.sep}`);
+  if (!withinRoot || path.relative(root, file).split(path.sep).includes('..')) {
+    throw new GateInputError('UNKNOWN', `${label} escapes its evidence root`);
+  }
+  return file;
+}
+
+async function evidencePayloadFiles(root, directory = root) {
+  let entries;
+  try {
+    entries = await fs.readdir(directory, {withFileTypes: true});
+  } catch (error) {
+    throw new GateInputError('UNKNOWN', `cannot enumerate evidence ${directory}: ${error.code || error.message}`);
+  }
+  const files = [];
+  for (const entry of entries) {
+    const file = path.join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new GateInputError('UNKNOWN', `evidence contains a symbolic link: ${path.relative(root, file)}`);
+    }
+    if (entry.isDirectory()) files.push(...await evidencePayloadFiles(root, file));
+    else if (entry.isFile()) files.push(path.relative(root, file).split(path.sep).join('/'));
+    else throw new GateInputError('UNKNOWN', `evidence contains a non-file entry: ${path.relative(root, file)}`);
+  }
+  return files;
+}
+
+function validMeasurementTime(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+    Number.isFinite(Date.parse(value));
+}
+
+async function validateEvidenceBinding(gate, context, evidence) {
+  const root = path.resolve(evidence);
+  const bindingFile = path.join(root, EVIDENCE_BINDING);
+  const binding = parseEvidenceJson(await readAbsolute(bindingFile, {absence: 'UNKNOWN'}), bindingFile);
+  const failures = [];
+  const checkoutHead = git(context, ['rev-parse', 'HEAD']);
+  if (binding.schema !== 1) failures.push('schema');
+  if (binding.gate !== gate) failures.push(`gate=${binding.gate || '<missing>'}`);
+  if (!SHA40.test(String(binding.cjcj_head_sha || '')) || binding.cjcj_head_sha !== checkoutHead) {
+    failures.push(`cjcj_head_sha=${binding.cjcj_head_sha || '<missing>'} current=${checkoutHead}`);
+  }
+  if (typeof binding.producer?.repository !== 'string' || !binding.producer.repository.trim()) {
+    failures.push('producer.repository');
+  }
+  if (!SHA40.test(String(binding.producer?.head_sha || ''))) failures.push('producer.head_sha');
+  if (typeof binding.recipe?.id !== 'string' || !binding.recipe.id.trim()) failures.push('recipe.id');
+  if (!SHA256.test(String(binding.recipe?.sha256 || ''))) failures.push('recipe.sha256');
+  if (!validMeasurementTime(binding.measurement?.started_utc)) failures.push('measurement.started_utc');
+  if (!validMeasurementTime(binding.measurement?.finished_utc)) failures.push('measurement.finished_utc');
+  if (validMeasurementTime(binding.measurement?.started_utc) && validMeasurementTime(binding.measurement?.finished_utc) &&
+      Date.parse(binding.measurement.finished_utc) < Date.parse(binding.measurement.started_utc)) {
+    failures.push('measurement.order');
+  }
+  if (!binding.payload_sha256 || typeof binding.payload_sha256 !== 'object' ||
+      Array.isArray(binding.payload_sha256) || Object.keys(binding.payload_sha256).length === 0) {
+    failures.push('payload_sha256');
+  }
+  if (failures.length) {
+    throw new GateInputError('UNKNOWN', `${gate} evidence binding rejected: ${failures.join(',')}; file=${bindingFile}`);
+  }
+
+  const recipeFile = evidenceRelativeFile(root, binding.recipe.file, 'recipe.file');
+  if (await sha256(recipeFile) !== binding.recipe.sha256) {
+    throw new GateInputError('UNKNOWN', `${gate} evidence binding rejected: recipe sha256 mismatch`);
+  }
+  const producerFile = evidenceRelativeFile(root, binding.producer.head_file, 'producer.head_file');
+  const producerText = await readAbsolute(producerFile, {absence: 'UNKNOWN'});
+  if (!producerText.split(/\r?\n/).includes(`HEAD=${binding.producer.head_sha}`)) {
+    throw new GateInputError('UNKNOWN', `${gate} evidence binding rejected: producer HEAD is not bound by ${binding.producer.head_file}`);
+  }
+
+  const registered = Object.keys(binding.payload_sha256).sort();
+  const actual = (await evidencePayloadFiles(root)).filter(file => file !== EVIDENCE_BINDING).sort();
+  if (JSON.stringify(registered) !== JSON.stringify(actual)) {
+    throw new GateInputError('UNKNOWN', `${gate} evidence binding rejected: payload inventory mismatch`);
+  }
+  for (const relative of registered) {
+    const expected = binding.payload_sha256[relative];
+    if (!SHA256.test(String(expected || ''))) {
+      throw new GateInputError('UNKNOWN', `${gate} evidence binding rejected: invalid sha256 for ${relative}`);
+    }
+    const file = evidenceRelativeFile(root, relative, `payload_sha256.${relative}`);
+    if (await sha256(file) !== expected) {
+      throw new GateInputError('UNKNOWN', `${gate} evidence binding rejected: sha256 mismatch for ${relative}`);
+    }
+  }
+  if (binding.payload_sha256[binding.recipe.file] !== binding.recipe.sha256) {
+    throw new GateInputError('UNKNOWN', `${gate} evidence binding rejected: recipe is absent from payload inventory`);
+  }
+  return root;
+}
+
+async function discoverEvidenceContext(gate, context) {
+  if (context.evidence) {
+    if (GENERIC_BINDING_GATES.has(gate)) await validateEvidenceBinding(gate, context, context.evidence);
+    return context;
+  }
+  if (!DISCOVERABLE_EVIDENCE_GATES.has(gate)) return context;
+  const root = await releaseEvidenceRoot(context);
+  const registryFile = path.join(root, EVIDENCE_REGISTRY);
+  let registryText;
+  try {
+    registryText = await fs.readFile(registryFile, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return context;
+    throw new GateInputError('UNKNOWN', `cannot read evidence registry ${registryFile}: ${error.code || error.message}`);
+  }
+  const registry = parseEvidenceJson(registryText, registryFile);
+  if (registry.schema !== 1 || !registry.gates || typeof registry.gates !== 'object' || Array.isArray(registry.gates)) {
+    throw new GateInputError('UNKNOWN', `evidence registry has an invalid schema: ${registryFile}`);
+  }
+  const relative = registry.gates[gate];
+  if (relative === undefined) return context;
+  const evidence = evidenceRelativeFile(root, relative, `registry.gates.${gate}`);
+  await validateEvidenceBinding(gate, context, evidence);
+  return {...context, evidence};
 }
 
 async function evaluateG1(context) {
@@ -1304,7 +1445,7 @@ async function evaluate(gate, context) {
     G17: evaluateG17,
   };
   try {
-    return await evaluators[gate](context);
+    return await evaluators[gate](await discoverEvidenceContext(gate, context));
   } catch (error) {
     if (error instanceof GateInputError) return gateResult(gate, error.kind, error.message);
     return gateResult(gate, 'UNKNOWN', `unexpected evaluator error: ${error.message}`);
