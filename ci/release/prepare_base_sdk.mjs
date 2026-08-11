@@ -5,6 +5,7 @@ import path from 'node:path';
 import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {parseArgs} from 'node:util';
+import {runRequiredCheck} from '../../build/lib/fail-closed-probes.mjs';
 import {
   BASE_SDK_PROVENANCE,
   baseSdkDownload,
@@ -44,11 +45,14 @@ try {
   throw error;
 }
 
-const provenance = await writeBaseSdkProvenance({
-  archive,
-  destination: sidecar,
-  platform: values.platform,
-  toolchain: values.toolchain,
+const provenance = await runRequiredCheck({
+  label: 'base SDK pinned archive digest',
+  run: () => writeBaseSdkProvenance({
+    archive,
+    destination: sidecar,
+    platform: values.platform,
+    toolchain: values.toolchain,
+  }),
 });
 if (process.env.GITHUB_ENV) {
   await fs.appendFile(process.env.GITHUB_ENV, [
