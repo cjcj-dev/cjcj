@@ -102,6 +102,19 @@ test('base SDK digest mismatch cannot turn into provenance success', async () =>
   );
 });
 
+test('packaged SDK ABI mismatch cannot turn into compose success', async () => {
+  const label = coverProbeSite('packaged SDK compiler/runtime colour ABI');
+  await assert.rejects(
+    runRequiredCheck({
+      label,
+      run: async () => {
+        throw new Error('g_cjLoadBadMask ABI mismatch: compiler=0 runtime=1');
+      },
+    }),
+    /packaged SDK compiler\/runtime colour ABI failed: g_cjLoadBadMask ABI mismatch: compiler=0 runtime=1/,
+  );
+});
+
 test('tuple fetch script rejects an unsupported non-dry-run host', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tuple-fetch-host-negative-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));

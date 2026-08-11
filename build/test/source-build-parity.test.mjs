@@ -11,6 +11,7 @@ import {
   assertPlainHostRuntime,
   assertRuntimeCommonCache,
   assertRuntimeSplit,
+  assertSdkCompilerRuntimeAbi,
   hostLoaderPath,
 } from '../lib/runtime-split.mjs';
 import * as compiler from '../srcbuild/stages/compiler.mjs';
@@ -271,6 +272,111 @@ test('source builds fail closed unless host runtime is plain and target runtime 
     assert.throws(
       () => assertRuntimeCommonCache({cache, runtimeTarget}),
       /RUNTIME_COMMON_LIB_DIR escaped target runtime/,
+    );
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('packaged SDK colour ABI accepts a SAME fake SDK', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-colour-abi-same-'));
+  try {
+    const target = buildConfig({targetKey: 'linux-x64'}).target;
+    const sdk = directory(root, 'sdk');
+    const compiler = file(sdk, ['bin', 'cjc'], 'fake compiler');
+    const runtime = file(sdk, [
+      'runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary,
+    ], 'fake runtime');
+    const messages = [];
+    const result = assertSdkCompilerRuntimeAbi({
+      sdk,
+      target,
+      readCompiler: fileName => fileName === compiler ? '' : 'unexpected',
+      readRuntime: fileName => fileName === runtime ? '' : 'unexpected',
+      log: message => messages.push(message),
+    });
+    assert.equal(result.compilerCount, 0);
+    assert.equal(result.runtimeCount, 0);
+    assert.match(messages.join('\n'), /SDK_COLOUR_ABI_ASSERT_PASS compiler=0 .* runtime=0 /);
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('packaged SDK colour ABI recognizes Darwin leading-underscore symbols', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-colour-abi-darwin-'));
+  try {
+    const target = buildConfig({targetKey: 'darwin-arm64'}).target;
+    const sdk = directory(root, 'sdk');
+    file(sdk, ['bin', 'cjc'], 'fake Mach-O compiler');
+    file(sdk, [
+      'runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary,
+    ], 'fake Mach-O runtime');
+    const symbols = '                 U _g_cjLoadBadMask\n';
+    const result = assertSdkCompilerRuntimeAbi({
+      sdk,
+      target,
+      readCompiler: () => symbols,
+      readRuntime: () => '0000000000000000 T _g_cjLoadBadMask\n',
+      log: () => {},
+    });
+    assert.equal(result.compilerCount, 1);
+    assert.equal(result.runtimeCount, 1);
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('packaged SDK colour ABI rejects a MISMATCH fake SDK', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-colour-abi-mismatch-'));
+  try {
+    const target = buildConfig({targetKey: 'linux-x64'}).target;
+    const sdk = directory(root, 'sdk');
+    file(sdk, ['bin', 'cjc'], 'fake compiler');
+    file(sdk, [
+      'runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary,
+    ], 'fake runtime');
+    assert.throws(
+      () => assertSdkCompilerRuntimeAbi({
+        sdk,
+        target,
+        readCompiler: () => '',
+        readRuntime: () => `00000000 D g_cjLoadBadMask\n`,
+      }),
+      /g_cjLoadBadMask ABI mismatch: compiler=0 .* runtime=1 /,
+    );
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('packaged SDK colour ABI rejects an nm failure', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-colour-abi-nm-failure-'));
+  try {
+    const target = buildConfig({targetKey: 'linux-x64'}).target;
+    const sdk = directory(root, 'sdk');
+    file(sdk, ['bin', 'cjc'], 'not an object file');
+    file(sdk, [
+      'runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary,
+    ], 'fake runtime');
+    assert.throws(
+      () => assertSdkCompilerRuntimeAbi({sdk, target, readRuntime: () => ''}),
+      /nm failed for packaged compiler .* rc=[^0]/,
+    );
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('packaged SDK colour ABI rejects a missing runtime', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-colour-abi-missing-'));
+  try {
+    const target = buildConfig({targetKey: 'linux-x64'}).target;
+    const sdk = directory(root, 'sdk');
+    file(sdk, ['bin', 'cjc'], 'fake compiler');
+    assert.throws(
+      () => assertSdkCompilerRuntimeAbi({sdk, target, readCompiler: () => ''}),
+      /packaged runtime is missing:/,
     );
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
