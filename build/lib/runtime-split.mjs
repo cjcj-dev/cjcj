@@ -132,3 +132,44 @@ export function assertRuntimeCommonCache({cache, runtimeTarget, log = console.lo
   log(`RUNTIME_SPLIT_CMAKE_ASSERT_PASS configured=${configured} expected_root=${expectedRoot}`);
   return configured;
 }
+
+export function assertHostRuntimeCommands({
+  buildFile,
+  hostRuntime,
+  targetRuntime,
+  loaderEnv,
+  log = console.log,
+}) {
+  if (!fs.statSync(buildFile, {throwIfNoEntry: false})?.isFile()) {
+    throw new BuildError('runtime.split.commands', `generated build file is missing: ${buildFile}`);
+  }
+  const hostDirectory = path.dirname(fs.realpathSync(hostRuntime));
+  const targetDirectory = path.dirname(fs.realpathSync(targetRuntime));
+  const marker = `${loaderEnv}=`;
+  let checked = 0;
+  for (const line of fs.readFileSync(buildFile, 'utf8').split(/\r?\n/)) {
+    if (!line.includes(marker) || !/(?:^|\s)cjc(?:\s|$)/.test(line)) continue;
+    const value = line.slice(line.indexOf(marker) + marker.length).split(/\s/, 1)[0];
+    const entries = value.split(path.delimiter);
+    const hostIndex = entries.indexOf(hostDirectory);
+    const targetIndex = entries.indexOf(targetDirectory);
+    if (targetIndex >= 0 && (hostIndex < 0 || targetIndex < hostIndex)) {
+      throw new BuildError(
+        'runtime.split.commands',
+        `generated cjc command selects target runtime before host: ${line}`,
+      );
+    }
+    if (hostIndex >= 0) checked += 1;
+  }
+  if (checked === 0) {
+    throw new BuildError(
+      'runtime.split.commands',
+      `no generated cjc command selects host runtime ${hostDirectory} in ${buildFile}`,
+    );
+  }
+  log(
+    `RUNTIME_SPLIT_COMMAND_ASSERT_PASS checked=${checked} host=${hostDirectory} ` +
+    `target=${targetDirectory}`,
+  );
+  return checked;
+}
