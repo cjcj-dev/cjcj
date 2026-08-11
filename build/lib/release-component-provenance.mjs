@@ -15,13 +15,29 @@ const SHA40 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const NIGHTLY_RELEASE_REPOSITORY = 'https://gitcode.com/Cangjie/nightly_build';
 const NIGHTLY_RELEASE_BASE = `${NIGHTLY_RELEASE_REPOSITORY}/releases/download`;
+const PINNED_BASE_SDK_VERSION = '1.2.0-alpha.20260721165458';
 
 const baseSdkPlatforms = new Map([
-  ['linux-x64', ['linux', 'x64', '.tar.gz']],
-  ['linux-aarch64', ['linux', 'aarch64', '.tar.gz']],
-  ['darwin-x64', ['mac', 'x64', '.tar.gz']],
-  ['darwin-arm64', ['mac', 'aarch64', '.tar.gz']],
-  ['windows-x64', ['windows', 'x64', '.zip']],
+  ['linux-x64', {
+    os: 'linux', arch: 'x64', extension: '.tar.gz', size: 201639272,
+    sha256: '4490fd0ac553f4122b90ab6cb0d437bc6a5325fbe81e43643cc01d484a0dc0d6',
+  }],
+  ['linux-aarch64', {
+    os: 'linux', arch: 'aarch64', extension: '.tar.gz', size: 203100802,
+    sha256: '461e8d1c2f81b540d9c270c92333e57af60980e8c0e1f59b051f6c8906449320',
+  }],
+  ['darwin-x64', {
+    os: 'mac', arch: 'x64', extension: '.tar.gz', size: 173277379,
+    sha256: '7546e5cbf8cffce60d91f65de17c4d7fb88abb960e4238fad0a26765182eef07',
+  }],
+  ['darwin-arm64', {
+    os: 'mac', arch: 'aarch64', extension: '.tar.gz', size: 164273695,
+    sha256: '4c2b55321697bcac5da5e8ba349fc4405212c4e0f3e7105cfa78457a14810138',
+  }],
+  ['windows-x64', {
+    os: 'windows', arch: 'x64', extension: '.zip', size: 263516382,
+    sha256: 'fa121323c4b411501690fe67169982215a7872e671df8007d85070c8afffa672',
+  }],
 ]);
 
 function requireString(value, label) {
@@ -44,6 +60,50 @@ async function fileSha256(file) {
     await handle.close();
   }
   return hash.digest('hex');
+}
+
+async function fileIdentity(file) {
+  const stat = await fs.stat(file);
+  if (!stat.isFile()) throw new Error(`base SDK archive is not a file: ${file}`);
+  return {size: stat.size, sha256: await fileSha256(file)};
+}
+
+async function atomicWriteFile(destination, contents) {
+  const directory = path.dirname(destination);
+  const temporary = path.join(directory, `.${path.basename(destination)}.${crypto.randomUUID()}.partial`);
+  await fs.mkdir(directory, {recursive: true});
+  try {
+    const handle = await fs.open(temporary, 'wx');
+    try {
+      await handle.writeFile(contents);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(temporary, destination);
+  } catch (error) {
+    await fs.rm(temporary, {force: true});
+    throw error;
+  }
+}
+
+async function atomicCopyFile(source, destination) {
+  const directory = path.dirname(destination);
+  const temporary = path.join(directory, `.${path.basename(destination)}.${crypto.randomUUID()}.partial`);
+  await fs.mkdir(directory, {recursive: true});
+  try {
+    await fs.copyFile(source, temporary);
+    const handle = await fs.open(temporary, 'r');
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(temporary, destination);
+  } catch (error) {
+    await fs.rm(temporary, {force: true});
+    throw error;
+  }
 }
 
 async function readJson(file, label) {
@@ -72,13 +132,17 @@ export function baseSdkDownload(platform, toolchain) {
   const tuple = baseSdkPlatforms.get(platform);
   if (!tuple) throw new Error(`unsupported base SDK platform: ${platform}`);
   const version = requireString(toolchain, 'base SDK toolchain').replace(/^nightly-/, '');
-  const [os, arch, extension] = tuple;
-  const archive = `cangjie-sdk-${os}-${arch}-${version}${extension}`;
+  if (version !== PINNED_BASE_SDK_VERSION) {
+    throw new Error(`base SDK release has no pinned archive identity: ${version}`);
+  }
+  const archive = `cangjie-sdk-${tuple.os}-${tuple.arch}-${version}${tuple.extension}`;
   return {
     archive,
     url: `${NIGHTLY_RELEASE_BASE}/${version}/${archive}`,
     releaseRepository: NIGHTLY_RELEASE_REPOSITORY,
     version,
+    size: tuple.size,
+    sha256: tuple.sha256,
   };
 }
 
@@ -86,6 +150,13 @@ export async function writeBaseSdkProvenance({archive, destination, platform, to
   const expected = baseSdkDownload(platform, toolchain);
   if (path.basename(archive) !== expected.archive) {
     throw new Error(`base SDK archive name mismatch: ${path.basename(archive)} != ${expected.archive}`);
+  }
+  const actual = await fileIdentity(archive);
+  if (actual.sha256 !== expected.sha256) {
+    throw new Error(`base SDK archive SHA-256 mismatch for ${platform}: expected ${expected.sha256}, got ${actual.sha256}`);
+  }
+  if (actual.size !== expected.size) {
+    throw new Error(`base SDK archive size mismatch for ${platform}: expected ${expected.size}, got ${actual.size}`);
   }
   const value = {
     schema: 1,
@@ -102,10 +173,11 @@ export async function writeBaseSdkProvenance({archive, destination, platform, to
     },
     artifact: {
       path: expected.archive,
-      sha256: await fileSha256(archive),
+      size: actual.size,
+      sha256: actual.sha256,
     },
   };
-  await fs.writeFile(destination, `${JSON.stringify(value, null, 2)}\n`);
+  await atomicWriteFile(destination, `${JSON.stringify(value, null, 2)}\n`);
   return value;
 }
 
@@ -132,6 +204,10 @@ export function validateBaseSdkProvenance(value, {platform, toolchain, label = '
   if (value.artifact?.path !== expected.archive) {
     throw new Error(`${label} archive path does not match ${expected.archive}`);
   }
+  if (value.artifact?.size !== undefined &&
+      (!Number.isSafeInteger(value.artifact.size) || value.artifact.size < 0)) {
+    throw new Error(`${label}.artifact.size is invalid: ${value.artifact.size}`);
+  }
   requireMatch(value.artifact?.sha256, SHA256, `${label}.artifact.sha256`);
   return value;
 }
@@ -144,9 +220,52 @@ export async function verifyBaseSdkProvenance({archive, sidecar, platform, toolc
     throw new Error(`${label} archive path does not match ${expected.archive}`);
   }
   const recorded = requireMatch(value.artifact?.sha256, SHA256, `${label}.artifact.sha256`);
-  const actual = await fileSha256(archive);
-  if (recorded !== actual) throw new Error(`${label} archive SHA-256 mismatch: ${recorded} != ${actual}`);
+  const actual = await fileIdentity(archive);
+  if (value.artifact.size !== undefined && value.artifact.size !== actual.size) {
+    throw new Error(`${label} archive size mismatch: ${value.artifact.size} != ${actual.size}`);
+  }
+  if (recorded !== actual.sha256) {
+    throw new Error(`${label} archive SHA-256 mismatch: ${recorded} != ${actual.sha256}`);
+  }
   return value;
+}
+
+export async function persistBaseSdkProvenance({archive, sidecar, toolchainDir, platform, toolchain}) {
+  const expected = baseSdkDownload(platform, toolchain);
+  const value = await verifyBaseSdkProvenance({archive, sidecar, platform, toolchain});
+  const root = path.resolve(toolchainDir);
+  const rootStat = await fs.stat(root);
+  if (!rootStat.isDirectory()) throw new Error(`base SDK toolchain is not a directory: ${root}`);
+
+  const metadata = path.join(root, '.cjv');
+  const cacheRelative = path.join('archives', 'sha256', value.artifact.sha256, expected.archive);
+  const cachedArchive = path.join(metadata, cacheRelative);
+  let cachedIdentity;
+  try {
+    cachedIdentity = await fileIdentity(cachedArchive);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  const archiveSize = value.artifact.size ?? (await fs.stat(archive)).size;
+  if (cachedIdentity?.sha256 !== value.artifact.sha256 || cachedIdentity?.size !== archiveSize) {
+    await atomicCopyFile(archive, cachedArchive);
+    cachedIdentity = await fileIdentity(cachedArchive);
+  }
+  if (cachedIdentity.sha256 !== value.artifact.sha256 || cachedIdentity.size !== archiveSize) {
+    throw new Error(`base SDK content-addressed cache mismatch: ${cachedArchive}`);
+  }
+
+  const durable = {
+    ...value,
+    artifact: {
+      ...value.artifact,
+      size: archiveSize,
+      cache_path: cacheRelative.split(path.sep).join('/'),
+    },
+  };
+  const durableSidecar = path.join(metadata, BASE_SDK_PROVENANCE);
+  await atomicWriteFile(durableSidecar, `${JSON.stringify(durable, null, 2)}\n`);
+  return {provenance: durable, sidecar: durableSidecar, cachedArchive};
 }
 
 export function parseCjpmPin(text) {
