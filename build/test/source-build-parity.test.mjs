@@ -16,7 +16,7 @@ import {
 import * as compiler from '../srcbuild/stages/compiler.mjs';
 import * as packageStage from '../srcbuild/stages/package.mjs';
 import * as runtime from '../srcbuild/stages/runtime.mjs';
-import {copyContents} from '../srcbuild/stages/common.mjs';
+import {baseEnv, copyContents} from '../srcbuild/stages/common.mjs';
 import * as stdlib from '../srcbuild/stages/stdlib.mjs';
 import * as stdx from '../srcbuild/stages/stdx.mjs';
 import * as tools from '../srcbuild/stages/tools.mjs';
@@ -273,6 +273,45 @@ test('source builds fail closed unless host runtime is plain and target runtime 
       /RUNTIME_COMMON_LIB_DIR escaped target runtime/,
     );
   } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('runtime producer uses the host loader before the target runtime exists', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-runtime-producer-'));
+  const previousDryRun = process.env.CANGJIE_BUILD_DRY_RUN;
+  const previousHostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
+  const previousLoader = process.env.LD_LIBRARY_PATH;
+  try {
+    const workspace = directory(root, 'workspace');
+    const buildRoot = directory(root, 'buildtools');
+    const config = buildConfig({workspace, buildRoot, targetKey: 'linux-x64'});
+    const cangjieHome = directory(workspace, 'cangjie_compiler', 'output');
+    const runtimeDirectory = directory(
+      cangjieHome, 'runtime', 'lib', config.target.runtimeLibSubdir(config.buildType),
+    );
+    file(runtimeDirectory, ['libboundscheck.so']);
+    file(runtimeDirectory, ['libsecurec.so']);
+    const hostSdk = directory(root, 'host-sdk');
+    const hostRuntime = file(hostSdk, [
+      'runtime', 'lib', config.target.spec.runtimeTuple, config.target.spec.runtimeLibrary,
+    ]);
+
+    process.env.CANGJIE_BUILD_DRY_RUN = '1';
+    process.env.CJCJ_SRCBUILD_HOST_SDK = hostSdk;
+    process.env.LD_LIBRARY_PATH = '/inherited';
+    const env = baseEnv(config);
+    const loader = env.LD_LIBRARY_PATH.split(path.delimiter);
+    assert.equal(env.CANGJIE_HOME, cangjieHome);
+    assert.equal(loader[0], path.dirname(hostRuntime));
+    assert.ok(!fs.existsSync(path.join(runtimeDirectory, config.target.spec.runtimeLibrary)));
+  } finally {
+    if (previousDryRun === undefined) delete process.env.CANGJIE_BUILD_DRY_RUN;
+    else process.env.CANGJIE_BUILD_DRY_RUN = previousDryRun;
+    if (previousHostSdk === undefined) delete process.env.CJCJ_SRCBUILD_HOST_SDK;
+    else process.env.CJCJ_SRCBUILD_HOST_SDK = previousHostSdk;
+    if (previousLoader === undefined) delete process.env.LD_LIBRARY_PATH;
+    else process.env.LD_LIBRARY_PATH = previousLoader;
     fs.rmSync(root, {recursive: true, force: true});
   }
 });

@@ -116,11 +116,16 @@ export function assertRuntimeSplit({
 }
 
 export function hostLoaderPath({hostSdk, targetSdk, target, inherited = '', includeTargetLlvm = true}) {
-  const paths = runtimeSplitPaths({hostSdk, targetSdk, target});
+  const hostRoot = requireDirectory(hostSdk, 'CJCJ_SRCBUILD_HOST_SDK');
+  const targetRoot = requireDirectory(targetSdk, 'target SDK');
+  const hostRuntime = requireRuntime(
+    path.join(hostRoot, runtimeRelativePath(target, 'host')),
+    'host',
+  );
   return [
-    includeTargetLlvm ? path.join(paths.targetSdk, 'third_party', 'llvm', 'lib') : '',
-    path.dirname(paths.hostRuntime),
-    path.join(paths.targetSdk, 'tools', 'lib'),
+    includeTargetLlvm ? path.join(targetRoot, 'third_party', 'llvm', 'lib') : '',
+    path.dirname(hostRuntime),
+    path.join(targetRoot, 'tools', 'lib'),
     inherited,
   ].filter(Boolean).join(path.delimiter);
 }
