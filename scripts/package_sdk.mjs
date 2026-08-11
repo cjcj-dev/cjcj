@@ -149,6 +149,10 @@ await fs.copyFile(cjpmProvenance, path.join(stage, CJPM_PROVENANCE));
 await fs.copyFile(gateApparatusProvenance, path.join(stage, GATE_APPARATUS_PROVENANCE));
 await requirePrivateStage(stage, outputRoot, sdkSource);
 await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
+await fs.copyFile(
+  path.join(import.meta.dirname, 'check_sdk_usable.mjs'),
+  path.join(stage, 'tools', 'check_sdk_usable.mjs'),
+);
 
 console.log('[2/9] install our compiler as bin/cjc');
 const installed = path.join(stage, `bin/cjc${exeSuffix}`);
