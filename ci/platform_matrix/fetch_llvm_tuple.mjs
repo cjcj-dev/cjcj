@@ -36,11 +36,6 @@ const platforms = {
   'win32/x64': 'windows_x86_64',
 };
 const platform = platforms[`${process.platform}/${process.arch}`];
-if (!platform) {
-  emitBlockedSummary(`unsupported tuple host ${process.platform}/${process.arch}`);
-  process.exit(0);
-}
-const artifactName = `fixed-llvm-tools-${platform}`;
 
 function stopBlocked(reason) {
   emitBlockedSummary(reason);
@@ -48,6 +43,9 @@ function stopBlocked(reason) {
   console.error(`FATAL: required LLVM tuple unavailable: ${reason}`);
   process.exit(78);
 }
+
+if (!platform) stopBlocked(`unsupported tuple host ${process.platform}/${process.arch}`);
+const artifactName = `fixed-llvm-tools-${platform}`;
 
 async function ghLines(endpoint, jq) {
   const result = await $({nothrow: true, stdio: 'pipe'})`gh api ${endpoint} --jq ${jq}`;

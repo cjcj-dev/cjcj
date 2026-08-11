@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {pathToFileURL} from 'node:url';
 import {runGrepProbe, runRequiredProbe} from '../lib/fail-closed-probes.mjs';
 
 const zxProbe = spawnSync('sh', ['-c', 'command -v zx'], {encoding: 'utf8'});
@@ -11,6 +12,51 @@ const zxPath = zxProbe.status === 0 ? `${zxProbe.stdout || ''}`.trim() : '';
 const zxCommand = zxPath
   ? {command: zxPath, prefix: []}
   : {command: 'npx', prefix: ['--yes', 'zx@8']};
+const repoRoot = path.resolve(import.meta.dirname, '../..');
+const coveredProbeLabels = new Set();
+
+function coverProbeSite(label) {
+  assert.equal(coveredProbeLabels.has(label), false, `duplicate negative control for ${label}`);
+  coveredProbeLabels.add(label);
+  return label;
+}
+
+async function productionProbeSites() {
+  const listed = spawnSync('git', ['ls-files', '--', '*.mjs'], {cwd: repoRoot, encoding: 'utf8'});
+  assert.equal(listed.status, 0, listed.stderr || 'git ls-files failed');
+  const files = listed.stdout.split(/\r?\n/).filter(Boolean)
+    .filter(relative => !relative.endsWith('.test.mjs'))
+    .filter(relative => relative !== 'build/lib/fail-closed-probes.mjs');
+  const sites = [];
+  for (const relative of files) {
+    const source = await fs.readFile(path.join(repoRoot, relative), 'utf8');
+    const calls = [...source.matchAll(/\b(runRequiredProbe|runGrepProbe)\s*\(/g)];
+    const labeled = [...source.matchAll(
+      /\b(runRequiredProbe|runGrepProbe)\s*\(\s*\{\s*label:\s*(['"])([^'"\r\n]+)\2/g,
+    )];
+    assert.equal(labeled.length, calls.length,
+      `${relative}: every fail-closed probe site must put a literal label first`);
+    for (const match of labeled) {
+      sites.push({
+        helper: match[1],
+        label: match[3],
+        relative,
+        line: source.slice(0, match.index).split('\n').length,
+      });
+    }
+  }
+  return sites;
+}
+
+function assertProbeCoverage(sites, controls = coveredProbeLabels) {
+  const liveLabels = sites.map(({label}) => label);
+  assert.equal(new Set(liveLabels).size, liveLabels.length,
+    `fail-closed probe labels must identify one site each:\n${sites.map(
+      site => `${site.label}\t${site.relative}:${site.line}`,
+    ).join('\n')}`);
+  assert.deepEqual([...controls].sort(), [...liveLabels].sort(),
+    'negative controls and production fail-closed probe sites diverged');
+}
 
 async function failingTool(t, name, exit = 73) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'fail-closed-probe-'));
@@ -26,11 +72,42 @@ async function failingTool(t, name, exit = 73) {
 }
 
 test('tuple fetch prerequisite cannot turn a failed tool into BLOCKED success', async t => {
+  const label = coverProbeSite('LLVM tuple fallback prerequisite gh --version');
   const run = await failingTool(t, 'gh');
   await assert.rejects(
-    runRequiredProbe({label: 'LLVM tuple fallback prerequisite gh --version', run}),
+    runRequiredProbe({label, run}),
     /LLVM tuple fallback prerequisite gh --version failed \(exit=73\): gh forced failure/,
   );
+});
+
+test('tuple fetch unzip prerequisite cannot turn a failed tool into BLOCKED success', async t => {
+  const label = coverProbeSite('LLVM tuple fallback prerequisite unzip -v');
+  const run = await failingTool(t, 'unzip');
+  await assert.rejects(
+    runRequiredProbe({label, run}),
+    /LLVM tuple fallback prerequisite unzip -v failed \(exit=73\): unzip forced failure/,
+  );
+});
+
+test('tuple fetch script rejects an unsupported non-dry-run host', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tuple-fetch-host-negative-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const target = pathToFileURL(path.resolve('ci/platform_matrix/fetch_llvm_tuple.mjs')).href;
+  const evaluate = [
+    'Object.defineProperty(process, "platform", {value: "freebsd"});',
+    `await import(${JSON.stringify(target)});`,
+  ].join(' ');
+  const result = spawnSync(zxCommand.command, [...zxCommand.prefix, '--eval', evaluate], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PLATFORM_CI_ROOT: path.join(root, 'platform-ci'),
+      TUPLE_DRY_RUN: '0',
+    },
+  });
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.equal(result.status, 78, output);
+  assert.match(output, /FATAL: required LLVM tuple unavailable: unsupported tuple host freebsd\/x64/);
 });
 
 test('tuple fetch script rejects an incomplete current-run artifact', async t => {
@@ -105,38 +182,59 @@ test('tuple fetch script rejects a failed gh prerequisite', async t => {
 });
 
 test('SDK LLVM-path grep distinguishes no match from apparatus failure', async t => {
+  const label = coverProbeSite('SDK hard-coded LLVM library path grep');
   const failed = await failingTool(t, 'grep');
   await assert.rejects(
-    runGrepProbe({label: 'SDK hard-coded LLVM library path grep', run: failed}),
+    runGrepProbe({label, run: failed}),
     /SDK hard-coded LLVM library path grep failed \(exit=73\): grep forced failure/,
   );
   const noMatch = await runGrepProbe({
-    label: 'SDK hard-coded LLVM library path grep',
+    label,
     run: () => ({status: 1, stdout: '', stderr: ''}),
   });
   assert.equal(noMatch.matched, false);
 });
 
 test('bcgate final negative grep rejects apparatus failure', async t => {
+  const label = coverProbeSite('bcgate one-side divergence grep');
   const run = await failingTool(t, 'grep');
   await assert.rejects(
-    runGrepProbe({label: 'bcgate one-side divergence grep', run}),
+    runGrepProbe({label, run}),
     /bcgate one-side divergence grep failed \(exit=73\): grep forced failure/,
   );
 });
 
 test('package rejects a failed readelf inspection', async t => {
+  const label = coverProbeSite('package readelf -d bin/cjc');
   const run = await failingTool(t, 'readelf');
   await assert.rejects(
-    runRequiredProbe({label: 'package readelf -d bin/cjc', run}),
+    runRequiredProbe({label, run}),
     /package readelf -d bin\/cjc failed \(exit=73\): readelf forced failure/,
   );
 });
 
 test('package rejects a failed ldd inspection', async t => {
+  const label = coverProbeSite('package ldd bin/cjc');
   const run = await failingTool(t, 'ldd');
   await assert.rejects(
-    runRequiredProbe({label: 'package ldd bin/cjc', run}),
+    runRequiredProbe({label, run}),
     /package ldd bin\/cjc failed \(exit=73\): ldd forced failure/,
   );
+});
+
+test('every production fail-closed probe site has a negative control', async () => {
+  const sites = await productionProbeSites();
+  assertProbeCoverage(sites);
+  console.log(`FAIL_CLOSED_PROBE_COVERAGE sites=${sites.length} files=${new Set(
+    sites.map(({relative}) => relative),
+  ).size}`);
+});
+
+test('probe inventory rejects a new site without a negative control', () => {
+  assert.throws(() => assertProbeCoverage([{
+    helper: 'runRequiredProbe',
+    label: 'future required probe',
+    relative: 'ci/future-probe.mjs',
+    line: 1,
+  }], new Set()), /negative controls and production fail-closed probe sites diverged/);
 });

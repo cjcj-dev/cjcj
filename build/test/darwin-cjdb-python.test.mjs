@@ -112,6 +112,30 @@ test('cjdb Python home rejects a keg without development headers', async () => {
   }
 });
 
+test('cjdb Python home fails closed when the interpreter version is unavailable or unreadable', async () => {
+  const prefix = '/fixture/python@3.11';
+  const interpreter = path.join(prefix, 'libexec', 'bin', 'python3');
+  const unavailable = async command => {
+    if (command[0] === 'brew') return {exitCode: 0, stdout: `${prefix}\n`};
+    if (command[0] === interpreter) throw new Error('python version probe failed to start');
+    throw new Error(`unexpected command: ${command.join(' ')}`);
+  };
+  await assert.rejects(
+    cjdbPythonHome({runCommand: unavailable}),
+    /python version probe failed to start/,
+  );
+
+  const unreadable = async command => {
+    if (command[0] === 'brew') return {exitCode: 0, stdout: `${prefix}\n`};
+    if (command[0] === interpreter) return {exitCode: 0, stdout: 'not-a-version\n/fixture/include\n'};
+    throw new Error(`unexpected command: ${command.join(' ')}`);
+  };
+  await assert.rejects(
+    cjdbPythonHome({runCommand: unreadable}),
+    /Python >3\.7 is required, got: not-a-version/,
+  );
+});
+
 test('only Darwin carries TARGET_PYTHON_PATH into build.py', async () => {
   const previous = process.env.CANGJIE_BUILD_DRY_RUN;
   process.env.CANGJIE_BUILD_DRY_RUN = '1';
@@ -150,7 +174,7 @@ test('the Darwin compiler stage resolves the pinned interpreter before building'
   }
 });
 
-test('a 3.14 runner Python fails the Darwin compiler stage before build.py runs', async () => {
+test('a 3.14 Python fails before the Darwin compiler stage starts', async () => {
   const {root, config} = compilerFixture('darwin-arm64');
   try {
     const keg = kegFixture(root, {series: '3.14'});
@@ -160,7 +184,7 @@ test('a 3.14 runner Python fails the Darwin compiler stage before build.py runs'
       }), /Python 3\.11 is required, got: 3\.14/);
     });
     const commands = output.split('\n').filter(line => line.includes('| $ '));
-    assert.equal(commands.filter(line => line.includes('--build-cjdb')).length, 0);
+    assert.deepEqual(commands, []);
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
