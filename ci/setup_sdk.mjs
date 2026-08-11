@@ -7,7 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 import {runGrepProbe} from '../build/lib/fail-closed-probes.mjs';
 import {parseLlvmToolsManifest} from './llvm-tools-manifest.mjs';
-import {verifyBaseSdkProvenance} from '../build/lib/release-component-provenance.mjs';
+import {
+  persistBaseSdkProvenance,
+  verifyBaseSdkProvenance,
+} from '../build/lib/release-component-provenance.mjs';
 
 $.stdio = 'inherit';
 
@@ -95,6 +98,16 @@ const cangjieHome = `${home}/.cjv/toolchains/${toolchain}`;
 if (!(await isDirectory(cangjieHome))) {
   log(`toolchain dir missing: ${cangjieHome}`);
   process.exit(3);
+}
+if (baseSdkArchive) {
+  const retained = await persistBaseSdkProvenance({
+    archive: baseSdkArchive,
+    sidecar: baseSdkProvenance,
+    toolchainDir: cangjieHome,
+    platform: releasePlatform,
+    toolchain,
+  });
+  log(`base SDK provenance retained: sidecar=${retained.sidecar} archive=${retained.cachedArchive}`);
 }
 const stdxPath = `${home}/.cjv/stdx/${toolchain}/static/stdx`;
 

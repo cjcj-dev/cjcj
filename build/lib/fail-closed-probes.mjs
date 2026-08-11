@@ -26,6 +26,17 @@ export async function runRequiredProbe({label, run}) {
   return assertCommandSucceeded(await run(), label);
 }
 
+export async function runRequiredCheck({label, run}) {
+  if (!label) throw new Error('check label is required');
+  if (typeof run !== 'function') throw new Error(`${label} runner is required`);
+  try {
+    return await run();
+  } catch (error) {
+    const detail = oneLine(error?.message || error).slice(0, 512) || 'no diagnostic output';
+    throw new Error(`${label} failed: ${detail}`, {cause: error});
+  }
+}
+
 export async function runGrepProbe({label, run}) {
   if (typeof run !== 'function') throw new Error(`${label || 'grep probe'} runner is required`);
   const result = await run();

@@ -9,7 +9,10 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import {spawnSync} from 'node:child_process';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
-import {verifyBaseSdkProvenance} from '../../build/lib/release-component-provenance.mjs';
+import {
+  persistBaseSdkProvenance,
+  verifyBaseSdkProvenance,
+} from '../../build/lib/release-component-provenance.mjs';
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
 
@@ -19,6 +22,7 @@ const heapSize = process.env.CJ_HEAP_SIZE || '12GB';
 const provisionOnly = process.platform === 'win32' && process.env.CJCJ_SDK_PROVISION_ONLY === '1';
 const sdkAlreadyProvisioned = process.platform === 'win32' && process.env.CJCJ_SDK_ALREADY_PROVISIONED === '1';
 let setupRc = 0;
+let baseSdkRetention;
 
 async function isDirectory(target) {
   try { return (await fs.stat(target)).isDirectory(); } catch { return false; }
@@ -83,6 +87,7 @@ if (process.platform === 'win32') {
         platform: releasePlatform,
         toolchain,
       });
+      baseSdkRetention = {archive: baseSdkArchive, sidecar: baseSdkProvenance, platform: releasePlatform};
       console.log(`[platform setup_sdk] cjv toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`);
       install = await $({nothrow: true})`${toCommandPath(cjv)} toolchain link ${toolchain} ${toCommandPath(baseSdkArchive)} --force --sha256 ${provenance.artifact.sha256}`;
       if (install.exitCode === 0) {
@@ -105,6 +110,14 @@ if (process.platform === 'win32') {
 const cangjieHome = path.join(home, '.cjv', 'toolchains', toolchain);
 const stdxPath = path.join(home, '.cjv', 'stdx', toolchain, 'static', 'stdx');
 if (setupRc === 0 && !(await isDirectory(cangjieHome))) throw new Error(`toolchain directory missing: ${cangjieHome}`);
+if (setupRc === 0 && baseSdkRetention) {
+  const retained = await persistBaseSdkProvenance({
+    ...baseSdkRetention,
+    toolchainDir: cangjieHome,
+    toolchain,
+  });
+  console.log(`[platform setup_sdk] base SDK provenance retained: sidecar=${retained.sidecar} archive=${retained.cachedArchive}`);
+}
 process.env.CANGJIE_HOME = cangjieHome;
 process.env.CANGJIE_STDX_PATH = stdxPath;
 process.env.cjHeapSize = heapSize;

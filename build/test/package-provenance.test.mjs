@@ -12,7 +12,6 @@ import {
   SOURCE_PROVENANCE_NOT_APPLICABLE,
   SOURCE_PROVENANCE_RESOLVED,
   baseSdkDownload,
-  writeBaseSdkProvenance,
   writeCjpmProvenance,
 } from '../lib/release-component-provenance.mjs';
 import {
@@ -70,6 +69,31 @@ function runRaw(command, args, options = {}) {
 
 async function sha256(file) {
   return crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
+}
+
+async function writeFixtureBaseSdkProvenance({archive, destination, platform, toolchain}) {
+  const expected = baseSdkDownload(platform, toolchain);
+  const value = {
+    schema: 1,
+    component: 'base-sdk',
+    platform,
+    source: {
+      status: SOURCE_PROVENANCE_NOT_APPLICABLE,
+      reason: BASE_SDK_SOURCE_REASON,
+    },
+    release: {
+      repository: expected.releaseRepository,
+      version: expected.version,
+      download_url: expected.url,
+    },
+    artifact: {
+      path: expected.archive,
+      size: (await fs.stat(archive)).size,
+      sha256: await sha256(archive),
+    },
+  };
+  await fs.writeFile(destination, `${JSON.stringify(value, null, 2)}\n`);
+  return value;
 }
 
 async function writePythonBundle(root) {
@@ -202,7 +226,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   const baseArchive = await write(root, baseSdkDownload('linux-x64', baseSdkId).archive,
     'fixture official SDK archive');
   const baseSidecar = path.join(root, BASE_SDK_PROVENANCE);
-  const baseProvenance = await writeBaseSdkProvenance({
+  const baseProvenance = await writeFixtureBaseSdkProvenance({
     archive: baseArchive,
     destination: baseSidecar,
     platform: 'linux-x64',
@@ -377,7 +401,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   const deleted = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
   assert.notEqual(deleted.status, 0, 'deleting the base SDK sidecar must fail closed');
   console.log(`NEGATIVE-DELETE-SIDECAR RC=${deleted.status}\n${deleted.stderr.trim()}`);
-  await writeBaseSdkProvenance({
+  await writeFixtureBaseSdkProvenance({
     archive: baseArchive,
     destination: baseSidecar,
     platform: 'linux-x64',
@@ -392,7 +416,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.match(`${missingBaseReason.stdout}\n${missingBaseReason.stderr}`,
     /base SDK provenance\.source\.reason is empty/);
   console.log(`NEGATIVE-EMPTY-BASE-REASON RC=${missingBaseReason.status}\n${missingBaseReason.stderr.trim()}`);
-  await writeBaseSdkProvenance({
+  await writeFixtureBaseSdkProvenance({
     archive: baseArchive,
     destination: baseSidecar,
     platform: 'linux-x64',

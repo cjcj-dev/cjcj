@@ -5,7 +5,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {pathToFileURL} from 'node:url';
-import {runGrepProbe, runRequiredProbe} from '../lib/fail-closed-probes.mjs';
+import {runGrepProbe, runRequiredCheck, runRequiredProbe} from '../lib/fail-closed-probes.mjs';
 
 const zxProbe = spawnSync('sh', ['-c', 'command -v zx'], {encoding: 'utf8'});
 const zxPath = zxProbe.status === 0 ? `${zxProbe.stdout || ''}`.trim() : '';
@@ -30,9 +30,9 @@ async function productionProbeSites() {
   const sites = [];
   for (const relative of files) {
     const source = await fs.readFile(path.join(repoRoot, relative), 'utf8');
-    const calls = [...source.matchAll(/\b(runRequiredProbe|runGrepProbe)\s*\(/g)];
+    const calls = [...source.matchAll(/\b(runRequiredCheck|runRequiredProbe|runGrepProbe)\s*\(/g)];
     const labeled = [...source.matchAll(
-      /\b(runRequiredProbe|runGrepProbe)\s*\(\s*\{\s*label:\s*(['"])([^'"\r\n]+)\2/g,
+      /\b(runRequiredCheck|runRequiredProbe|runGrepProbe)\s*\(\s*\{\s*label:\s*(['"])([^'"\r\n]+)\2/g,
     )];
     assert.equal(labeled.length, calls.length,
       `${relative}: every fail-closed probe site must put a literal label first`);
@@ -86,6 +86,19 @@ test('tuple fetch unzip prerequisite cannot turn a failed tool into BLOCKED succ
   await assert.rejects(
     runRequiredProbe({label, run}),
     /LLVM tuple fallback prerequisite unzip -v failed \(exit=73\): unzip forced failure/,
+  );
+});
+
+test('base SDK digest mismatch cannot turn into provenance success', async () => {
+  const label = coverProbeSite('base SDK pinned archive digest');
+  await assert.rejects(
+    runRequiredCheck({
+      label,
+      run: async () => {
+        throw new Error(`base SDK archive SHA-256 mismatch for linux-x64: expected ${'a'.repeat(64)}, got ${'b'.repeat(64)}`);
+      },
+    }),
+    /base SDK pinned archive digest failed: base SDK archive SHA-256 mismatch for linux-x64: expected a{64}, got b{64}/,
   );
 });
 
