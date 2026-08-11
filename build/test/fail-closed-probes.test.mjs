@@ -48,6 +48,16 @@ async function productionProbeSites() {
   return sites;
 }
 
+function assertProbeCoverage(sites, controls = coveredProbeLabels) {
+  const liveLabels = sites.map(({label}) => label);
+  assert.equal(new Set(liveLabels).size, liveLabels.length,
+    `fail-closed probe labels must identify one site each:\n${sites.map(
+      site => `${site.label}\t${site.relative}:${site.line}`,
+    ).join('\n')}`);
+  assert.deepEqual([...controls].sort(), [...liveLabels].sort(),
+    'negative controls and production fail-closed probe sites diverged');
+}
+
 async function failingTool(t, name, exit = 73) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'fail-closed-probe-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
@@ -208,14 +218,17 @@ test('package rejects a failed ldd inspection', async t => {
 
 test('every production fail-closed probe site has a negative control', async () => {
   const sites = await productionProbeSites();
-  const liveLabels = sites.map(({label}) => label);
-  assert.equal(new Set(liveLabels).size, liveLabels.length,
-    `fail-closed probe labels must identify one site each:\n${sites.map(
-      site => `${site.label}\t${site.relative}:${site.line}`,
-    ).join('\n')}`);
-  assert.deepEqual([...coveredProbeLabels].sort(), [...liveLabels].sort(),
-    'negative controls and production fail-closed probe sites diverged');
+  assertProbeCoverage(sites);
   console.log(`FAIL_CLOSED_PROBE_COVERAGE sites=${sites.length} files=${new Set(
     sites.map(({relative}) => relative),
   ).size}`);
+});
+
+test('probe inventory rejects a new site without a negative control', () => {
+  assert.throws(() => assertProbeCoverage([{
+    helper: 'runRequiredProbe',
+    label: 'future required probe',
+    relative: 'ci/future-probe.mjs',
+    line: 1,
+  }], new Set()), /negative controls and production fail-closed probe sites diverged/);
 });
