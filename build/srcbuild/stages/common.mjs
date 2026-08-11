@@ -16,6 +16,10 @@ function joinPathsep(...parts) {
   return parts.filter(Boolean).join(path.delimiter);
 }
 
+function quoteShellWord(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
 export function baseEnv(config) {
   const spec = config.target.spec;
   const dryRun = process.env.CANGJIE_BUILD_DRY_RUN === '1';
@@ -82,6 +86,39 @@ export function baseEnv(config) {
   }
   env.PATH = joinPathsep(...extraPathDirs, process.env.PATH || '');
   return env;
+}
+
+export function hostCompilerEnv(config, {hostRuntime}) {
+  const spec = config.target.spec;
+  const compiler = requireFile(
+    path.join(config.repoPath('compiler'), 'output', 'bin', 'cjc'),
+    {stage: 'host-compiler.launcher'},
+  );
+  const runtime = fs.realpathSync(hostRuntime);
+  const env = baseEnv(config);
+  const loaderPath = env[spec.loaderEnv];
+  if (!loaderPath) {
+    throw new BuildError('host-compiler.launcher', `${spec.loaderEnv} is empty`);
+  }
+  const launcherDirectory = ensureDir(path.join(
+    config.workspace, '.srcbuild', 'host-tools', spec.key,
+  ));
+  const launcher = path.join(launcherDirectory, 'cjc');
+  const preloadEnv = spec.loaderEnv === 'DYLD_LIBRARY_PATH'
+    ? 'DYLD_INSERT_LIBRARIES'
+    : 'LD_PRELOAD';
+  fs.writeFileSync(launcher, [
+    '#!/bin/sh',
+    'set -eu',
+    `export ${spec.loaderEnv}=${quoteShellWord(loaderPath)}`,
+    `export ${preloadEnv}=${quoteShellWord(runtime)}`,
+    `exec ${quoteShellWord(compiler)} "$@"`,
+    '',
+  ].join('\n'), {mode: 0o755});
+  return {
+    PATH: joinPathsep(launcherDirectory, env.PATH),
+    CJCJ_SRCBUILD_HOST_CJC: launcher,
+  };
 }
 
 export function opensslLibPath(config) {
