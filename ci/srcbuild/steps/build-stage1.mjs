@@ -3,6 +3,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {hostLoaderPath} from '../../../build/lib/runtime-split.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {platformizeCjcToml} from '../../platform_matrix/link_option.mjs';
 
@@ -11,10 +12,12 @@ $.stdio = 'inherit';
 const workspace = process.env.CANGJIE_WORKSPACE;
 const githubWorkspace = process.env.GITHUB_WORKSPACE;
 const targetKey = process.env.CJCJ_SRCBUILD_TARGET;
+const hostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
 const hostCompiler = process.env.CJCJ_SRCBUILD_HOST_CJC;
-if (!workspace || !githubWorkspace || !targetKey || !hostCompiler) {
+if (!workspace || !githubWorkspace || !targetKey || !hostSdk || !hostCompiler) {
   throw new Error(
-    'CANGJIE_WORKSPACE, GITHUB_WORKSPACE, CJCJ_SRCBUILD_TARGET and CJCJ_SRCBUILD_HOST_CJC are required',
+    'CANGJIE_WORKSPACE, GITHUB_WORKSPACE, CJCJ_SRCBUILD_TARGET, ' +
+    'CJCJ_SRCBUILD_HOST_SDK and CJCJ_SRCBUILD_HOST_CJC are required',
   );
 }
 const target = getTarget(targetKey);
@@ -23,6 +26,12 @@ if (process.platform !== target.spec.nodePlatform || process.arch !== target.spe
 }
 
 const sdk = `${workspace}/software/cangjie`;
+const hostLibraryPath = hostLoaderPath({
+  hostSdk,
+  targetSdk: sdk,
+  target,
+  inherited: process.env[target.spec.loaderEnv] || '',
+});
 const workspaceToml = path.resolve('cjpm.toml');
 const workspaceTomlBackup = `${workspaceToml}.O2bak`;
 const cjcToml = path.resolve('packages', 'cjc', 'cjpm.toml');
@@ -35,11 +44,24 @@ await fs.writeFile(
 );
 // Upstream cjc miscompiles cjcj at -O2. Build the seed at -O1 to avoid the
 // generic concrete-to-interface upcast loss in the upstream CHIR optimizer.
-const oracleEnv = {
-  ...process.env,
-  PATH: `${path.dirname(hostCompiler)}${path.delimiter}${process.env.PATH || ''}`,
-};
-await $({env: oracleEnv})`cjpm build`;
+const oracleCompilerDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-host-cjc-'));
+const oracleCompiler = path.join(oracleCompilerDir, 'cjc');
+await fs.writeFile(oracleCompiler, `#!/usr/bin/env node
+const {spawnSync} = require('node:child_process');
+const env = {...process.env, ${JSON.stringify(target.spec.loaderEnv)}: ${JSON.stringify(hostLibraryPath)}};
+const child = spawnSync(${JSON.stringify(hostCompiler)}, process.argv.slice(2), {env, stdio: 'inherit'});
+if (child.error) {
+  console.error(child.error.message);
+  process.exit(1);
+}
+process.exit(child.status ?? 1);
+`, {mode: 0o755});
+const oracleEnv = {...process.env, PATH: `${oracleCompilerDir}${path.delimiter}${process.env.PATH || ''}`};
+try {
+  await $({env: oracleEnv})`cjpm build`;
+} finally {
+  await fs.rm(oracleCompilerDir, {recursive: true, force: true});
+}
 
 // Put the seed under the SDK so <exe>/../runtime resolves. The C++ oracle stays
 // in cangjie_compiler/output/bin and is never copied into the SDK tree.
