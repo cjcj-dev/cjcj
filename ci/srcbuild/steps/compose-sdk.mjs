@@ -3,6 +3,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {runRequiredCheck} from '../../../build/lib/fail-closed-probes.mjs';
+import {assertSdkCompilerRuntimeAbi} from '../../../build/lib/runtime-split.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 
 $.stdio = 'inherit';
@@ -46,6 +48,10 @@ const kind = (await $({stdio: 'pipe'})`file -b ${installed}`).stdout.trim();
 if (!kind.includes(target.spec.fileFormat) || !kind.includes(target.spec.fileArch)) {
   throw new Error(`packaged compiler has wrong native format for ${targetKey}: ${kind}`);
 }
+await runRequiredCheck({
+  label: 'packaged SDK compiler/runtime colour ABI',
+  run: async () => assertSdkCompilerRuntimeAbi({sdk, target}),
+});
 
 if (target.spec.os === 'darwin') {
   const runtime = path.join(sdk, 'runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary);
