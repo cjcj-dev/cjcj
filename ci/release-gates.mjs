@@ -818,11 +818,15 @@ async function evaluateG14(context) {
   ]);
   const rawRows = parseG12Tsv(rawText, 'G14 raw.tsv');
   const remsetRows = parseG12Tsv(remsetText, 'G14 remset.tsv');
-  const counterColumns = [
+  const remsetColumns = [
     'round', 'load', 'fys', 'rc', 'minors', 'remsetMiss', 'missBare', 'missBareNeverSeen', 'status',
   ];
-  requireG12Columns(rawRows, [...counterColumns, 'fys_bound', 'fallbackFullScan_obs'], 'G14 raw.tsv');
-  requireG12Columns(remsetRows, counterColumns, 'G14 remset.tsv');
+  const rawColumns = [
+    'round', 'load', 'fys', 'rc', 'minors', 'miss', 'missBare', 'missBareNeverSeen', 'status',
+    'fys_bound', 'fallbackFullScan_obs',
+  ];
+  requireG12Columns(rawRows, rawColumns, 'G14 raw.tsv');
+  requireG12Columns(remsetRows, remsetColumns, 'G14 remset.tsv');
 
   const samples = {};
   const bindingMismatches = [];
@@ -840,11 +844,15 @@ async function evaluateG14(context) {
     for (const [index, row] of remset.rows.entries()) {
       const round = g12Integer(row.round, `G14.remset.${load}.round[${index}]`);
       const rawRow = rawByRound.get(round);
-      for (const field of ['rc', 'minors', 'remsetMiss', 'missBare', 'missBareNeverSeen']) {
-        const rawValue = g12Integer(rawRow[field], `G14.raw.${load}.${field}[${index}]`);
-        const remsetValue = g12Integer(row[field], `G14.remset.${load}.${field}[${index}]`);
+      for (const [rawField, remsetField] of [
+        ['rc', 'rc'], ['minors', 'minors'], ['miss', 'remsetMiss'],
+        ['missBare', 'missBare'], ['missBareNeverSeen', 'missBareNeverSeen'],
+      ]) {
+        const rawValue = g12Integer(rawRow[rawField], `G14.raw.${load}.${rawField}[${index}]`);
+        const remsetValue = g12Integer(row[remsetField], `G14.remset.${load}.${remsetField}[${index}]`);
         if (rawValue !== remsetValue) {
-          throw new GateInputError('UNKNOWN', `G14 ${load} round=${round} disagrees between raw.tsv and remset.tsv for ${field}`);
+          throw new GateInputError('UNKNOWN',
+            `G14 ${load} round=${round} disagrees between raw.tsv and remset.tsv for ${remsetField}`);
         }
       }
       if (row.status !== 'OK' || rawRow.status !== 'OK' || g12Integer(row.rc, `G14.${load}.rc[${index}]`) !== 0 ||
