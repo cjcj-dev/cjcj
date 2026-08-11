@@ -168,6 +168,18 @@ jobs:
           CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
         run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
+      - name: Provision uncoloured host SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CJCJ_SDK_STOCK_LLC=1
+          export CJCJ_TOOLCHAIN="nightly-$RUNTIME_VERSION"
+          npx --yes zx@8 ci/setup_sdk.mjs
+          host_sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
+          test -d "$host_sdk"
+          echo "CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk" >> "$GITHUB_ENV"
+          echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
+
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
 
@@ -235,6 +247,9 @@ jobs:
 
       - name: Build compiler oracle
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
+
+      - name: Prepare source compiler host SDK
+        run: npx --yes zx@8 ci/srcbuild/steps/prepare-source-host-sdk.mjs
 
       - name: Build runtime from source
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build runtime

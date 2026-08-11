@@ -6,9 +6,17 @@ import path from 'node:path';
 import test from 'node:test';
 import {buildConfig} from '../lib/config.mjs';
 import {formatCommand, run as runCommand} from '../lib/runner.mjs';
+import {
+  assertHostRuntimeCommands,
+  assertPlainHostRuntime,
+  assertRuntimeCommonCache,
+  assertRuntimeSplit,
+  hostLoaderPath,
+} from '../lib/runtime-split.mjs';
 import * as compiler from '../srcbuild/stages/compiler.mjs';
 import * as packageStage from '../srcbuild/stages/package.mjs';
 import * as runtime from '../srcbuild/stages/runtime.mjs';
+import {copyContents} from '../srcbuild/stages/common.mjs';
 import * as stdlib from '../srcbuild/stages/stdlib.mjs';
 import * as stdx from '../srcbuild/stages/stdx.mjs';
 import * as tools from '../srcbuild/stages/tools.mjs';
@@ -133,6 +141,158 @@ test('native target contracts match the source-build runner matrix', () => {
       [spec.os, spec.arch, spec.runtimeTuple, spec.llvmPlatform, spec.expectedStdArtifacts.bitcode],
       [osName, arch, tuple, llvmPlatform, bitcode],
     );
+  }
+});
+
+test('source builds fail closed unless host runtime is plain and target runtime is coloured', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-runtime-split-'));
+  try {
+    const target = buildConfig({targetKey: 'linux-x64'}).target;
+    const hostSdk = directory(root, 'host-sdk');
+    const targetSdk = directory(root, 'target-sdk');
+    const relative = ['runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary];
+    const hostRuntime = file(hostSdk, relative, 'host-runtime');
+    const targetRuntime = file(targetSdk, relative, 'target-runtime');
+    const symbols = runtime => runtime === hostRuntime ? '' : `00000000 D g_cjLoadBadMask\n`;
+    const messages = [];
+
+    const result = assertRuntimeSplit({
+      hostSdk,
+      targetSdk,
+      target,
+      readSymbols: symbols,
+      log: message => messages.push(message),
+    });
+    assert.equal(result.hostCount, 0);
+    assert.equal(result.targetCount, 1);
+    assert.notEqual(result.hostRuntime, result.targetRuntime);
+    assert.match(messages.join('\n'), /RUNTIME_SPLIT_ASSERT_PASS host=0 .* target=1 /);
+
+    const hostMessages = [];
+    const hostOnly = assertPlainHostRuntime({
+      hostSdk,
+      target,
+      readSymbols: symbols,
+      log: message => hostMessages.push(message),
+    });
+    assert.equal(hostOnly.hostRuntime, hostRuntime);
+    assert.equal(hostOnly.hostCount, 0);
+    assert.match(hostMessages.join('\n'), /HOST_RUNTIME_ASSERT_PASS host=0 /);
+    assert.throws(
+      () => assertPlainHostRuntime({
+        hostSdk,
+        target,
+        readSymbols: () => `00000000 D g_cjLoadBadMask\n`,
+      }),
+      /count contract failed: host=1 .* expected host=0/,
+    );
+
+    assert.throws(
+      () => assertRuntimeSplit({
+        hostSdk,
+        targetSdk,
+        target,
+        readSymbols: () => `00000000 D g_cjLoadBadMask\n`,
+      }),
+      /count contract failed: host=1 .* target=1 .* expected host=0 target=1/,
+    );
+
+    const loader = hostLoaderPath({hostSdk, targetSdk, target, inherited: '/inherited'}).split(path.delimiter);
+    assert.deepEqual(loader.slice(0, 3), [
+      path.join(targetSdk, 'third_party', 'llvm', 'lib'),
+      path.dirname(hostRuntime),
+      path.join(targetSdk, 'tools', 'lib'),
+    ]);
+    assert.ok(!loader.includes(path.dirname(targetRuntime)));
+
+    const earlyHostLoader = hostLoaderPath({
+      hostSdk,
+      targetSdk,
+      target,
+      inherited: '/inherited',
+      includeTargetLlvm: false,
+    }).split(path.delimiter);
+    assert.deepEqual(earlyHostLoader, [
+      path.dirname(hostRuntime),
+      path.join(targetSdk, 'tools', 'lib'),
+      '/inherited',
+    ]);
+    assert.ok(!earlyHostLoader.includes(path.join(targetSdk, 'third_party', 'llvm', 'lib')));
+
+    const generatedBuild = file(root, ['stdx', 'build.ninja'], [
+      `command = env LD_LIBRARY_PATH=${path.dirname(hostRuntime)}:${path.dirname(targetRuntime)} cjc package.cj`,
+      '',
+    ].join('\n'));
+    assert.equal(assertHostRuntimeCommands({
+      buildFile: generatedBuild,
+      hostRuntime,
+      targetRuntime,
+      loaderEnv: 'LD_LIBRARY_PATH',
+      log: () => {},
+    }), 1);
+    fs.writeFileSync(generatedBuild,
+      `command = env LD_LIBRARY_PATH=${path.dirname(targetRuntime)}:${path.dirname(hostRuntime)} cjc package.cj\n`);
+    assert.throws(
+      () => assertHostRuntimeCommands({
+        buildFile: generatedBuild,
+        hostRuntime,
+        targetRuntime,
+        loaderEnv: 'LD_LIBRARY_PATH',
+      }),
+      /generated cjc command selects target runtime before host/,
+    );
+
+    const crossTarget = buildConfig({targetKey: 'windows-x64'}).target;
+    const crossHostSdk = directory(root, 'cross-host-sdk');
+    const crossTargetSdk = directory(root, 'cross-target-sdk');
+    const crossHostRuntime = file(crossHostSdk, [
+      'runtime', 'lib', crossTarget.spec.hostRuntimeTuple, crossTarget.spec.hostRuntimeLibrary,
+    ], 'plain-linux-host-runtime');
+    const crossTargetRuntime = file(crossTargetSdk, [
+      'runtime', 'lib', crossTarget.spec.runtimeTuple, crossTarget.spec.runtimeLibrary,
+    ], 'coloured-windows-target-runtime');
+    const crossResult = assertRuntimeSplit({
+      hostSdk: crossHostSdk,
+      targetSdk: crossTargetSdk,
+      target: crossTarget,
+      readSymbols: runtime => runtime === crossHostRuntime ? '' : `00000000 D g_cjLoadBadMask\n`,
+      log: () => {},
+    });
+    assert.equal(crossResult.hostRuntime, crossHostRuntime);
+    assert.equal(crossResult.targetRuntime, crossTargetRuntime);
+
+    const runtimeTarget = directory(root, 'workspace', 'cangjie_runtime', 'runtime', 'target');
+    const cache = file(root, ['stdlib', 'build', 'build', 'CMakeCache.txt'], [
+      `RUNTIME_COMMON_LIB_DIR:STRING=${path.join(runtimeTarget, 'common', 'linux_release_x86_64', 'lib', target.spec.runtimeTuple)}`,
+      '',
+    ].join('\n'));
+    assertRuntimeCommonCache({cache, runtimeTarget, log: () => {}});
+    fs.writeFileSync(cache, 'RUNTIME_COMMON_LIB_DIR:STRING=/wrong/host/runtime\n');
+    assert.throws(
+      () => assertRuntimeCommonCache({cache, runtimeTarget}),
+      /RUNTIME_COMMON_LIB_DIR escaped target runtime/,
+    );
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('SDK overlays preserve relative symlinks across clean rebuilds', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-overlay-links-'));
+  try {
+    const source = directory(root, 'source');
+    const destination = directory(root, 'destination');
+    fs.writeFileSync(path.join(source, 'libsample.so.1'), 'runtime');
+    fs.symlinkSync('libsample.so.1', path.join(source, 'libsample.so'));
+    copyContents(source, destination, {stage: 'test.overlay.first'});
+    copyContents(source, destination, {stage: 'test.overlay.clean-rebuild'});
+    assert.equal(fs.readlinkSync(path.join(destination, 'libsample.so')), 'libsample.so.1');
+    assert.equal(
+      fs.realpathSync(path.join(destination, 'libsample.so')),
+      path.join(destination, 'libsample.so.1'),
+    );
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
   }
 });
 
@@ -264,7 +424,12 @@ test('Linux source stages emit the Python command order', async () => {
     expectedCommands.push(
       expected(root, null, ['tar', '--format=gnu', '-czf', path.join(workspace, 'software', 'cangjie-sdk-linux-x64-1.2.3.tar.gz'), '-C', path.join(workspace, 'software'), 'cangjie']),
       expected(root, null, ['tar', '--format=gnu', '-czf', path.join(workspace, 'software', 'cangjie-stdx-linux-x64-1.2.3.1.tar.gz'), '-C', path.join(workspace, 'software'), 'linux_x86_64_cjnative']),
-      expected(root, path.join(workspace, 'verify'), ['bash', '-c', `set -e; source '${path.join(workspace, 'software', 'cangjie', 'envsetup.sh')}'; cjc hello.cj -o hello && ./hello`]),
+      expected(root, path.join(workspace, 'verify'), [
+        'bash', '-c',
+        'set -e; source "$1"; export "$2=$3"; "$5" hello.cj -o hello; export "$2=$4"; ./hello',
+        'srcbuild-verify', path.join(workspace, 'software', 'cangjie', 'envsetup.sh'),
+        'LD_LIBRARY_PATH', '<HOST_LIBRARIES>', '<TARGET_LIBRARIES>', '<HOST_CJC>',
+      ]),
     );
     assert.deepEqual(commands, expectedCommands);
   } finally {

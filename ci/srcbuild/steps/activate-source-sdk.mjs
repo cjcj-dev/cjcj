@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import {getTarget} from '../../../build/lib/targets.mjs';
+import {assertRuntimeSplit, hostLoaderPath} from '../../../build/lib/runtime-split.mjs';
 import {parseLlvmToolsManifest} from '../../llvm-tools-manifest.mjs';
 
 $.stdio = 'inherit';
@@ -13,8 +14,11 @@ const workspace = process.env.CANGJIE_WORKSPACE;
 const githubEnv = process.env.GITHUB_ENV;
 const githubPath = process.env.GITHUB_PATH;
 const targetKey = process.env.CJCJ_SRCBUILD_TARGET;
-if (!workspace || !githubEnv || !githubPath || !targetKey) {
-  throw new Error('CANGJIE_WORKSPACE, GITHUB_ENV, GITHUB_PATH and CJCJ_SRCBUILD_TARGET are required');
+const hostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
+if (!workspace || !githubEnv || !githubPath || !targetKey || !hostSdk) {
+  throw new Error(
+    'CANGJIE_WORKSPACE, GITHUB_ENV, GITHUB_PATH, CJCJ_SRCBUILD_TARGET and CJCJ_SRCBUILD_HOST_SDK are required',
+  );
 }
 const target = getTarget(targetKey);
 const {spec} = target;
@@ -105,9 +109,11 @@ await fs.copyFile(manifestFile, path.join(sdk, 'third_party', 'llvm', 'LLVM_TOOL
 
 const runtimeLib = path.join(sdk, 'runtime', 'lib', spec.runtimeTuple);
 const toolsLib = path.join(sdk, 'tools', 'lib');
+const hostCompiler = path.join(hostSdk, 'bin', 'cjc');
 for (const directory of [llvmLib, runtimeLib, toolsLib, spec.opensslLibDir]) {
   if (directory) await fs.access(directory);
 }
+await fs.access(hostCompiler);
 const runtimeBinary = path.join(runtimeLib, spec.runtimeLibrary);
 const runtimeSymbols = await $({stdio: 'pipe'})`nm -g ${runtimeBinary}`;
 if (!runtimeSymbols.stdout.includes('g_cjLoadBadMask')) {
@@ -116,13 +122,24 @@ if (!runtimeSymbols.stdout.includes('g_cjLoadBadMask')) {
 if (!(await fs.readFile(runtimeBinary)).includes('MRT_GCV2_')) {
   throw new Error(`${runtimeBinary} carries no MRT_GCV2_ markers; refusing a stock target runtime`);
 }
-const libraryPath = [llvmLib, runtimeLib, toolsLib, process.env[spec.loaderEnv] || ''].filter(Boolean).join(path.delimiter);
+assertRuntimeSplit({
+  hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+  targetSdk: sdk,
+  target,
+});
+const libraryPath = hostLoaderPath({
+  hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+  targetSdk: sdk,
+  target,
+  inherited: process.env[spec.loaderEnv] || '',
+});
 const envLines = [
   `CANGJIE_HOME=${sdk}`,
   `CANGJIE_STDX_PATH=${path.join(workspace, 'cangjie_stdx', 'target', spec.runtimeTuple, 'static', 'stdx')}`,
   `CJCJ_LLVM_SHIM_O=${shim}`,
   `CJCJ_SRCBUILD_RUNTIME_TUPLE=${spec.runtimeTuple}`,
   `CJCJ_SRCBUILD_LLVM_PLATFORM=${spec.llvmPlatform}`,
+  `CJCJ_SRCBUILD_HOST_CJC=${hostCompiler}`,
   `OPENSSL_PATH=${spec.opensslLibDir}`,
   'CJSTD_COLOURED=YES',
   'CJSTD_PREFLIGHT_C2=GREEN',

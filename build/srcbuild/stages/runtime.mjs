@@ -2,6 +2,7 @@
 
 import path from 'node:path';
 import {stage} from '../../lib/logging.mjs';
+import {assertRuntimeSplit} from '../../lib/runtime-split.mjs';
 import {copyContents, ensureDir, runBuildPy, windowsCrossArgs} from './common.mjs';
 
 export async function run(config) {
@@ -26,7 +27,16 @@ export async function run(config) {
         stage: 'runtime.copy.host',
       });
     }
-    if (!config.target.spec.crossCompile) return;
+    if (!config.target.spec.crossCompile) {
+      if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
+        assertRuntimeSplit({
+          hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+          targetSdk: compilerOutput,
+          target: config.target,
+        });
+      }
+      return;
+    }
 
     await runBuildPy(config, runtimeRoot, ['clean'], {stageName: 'runtime.clean.windows'});
     await runBuildPy(config, runtimeRoot, [
@@ -47,6 +57,13 @@ export async function run(config) {
       });
       copyContents(path.join(windowsSubdir, subdirectory), path.join(compilerMingwOutput, subdirectory), {
         stage: 'runtime.copy.windows.cross',
+      });
+    }
+    if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
+      assertRuntimeSplit({
+        hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+        targetSdk: compilerOutput,
+        target: config.target,
       });
     }
   });

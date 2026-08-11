@@ -5,6 +5,7 @@ import path from 'node:path';
 import {BuildError} from '../../lib/errors.mjs';
 import {getLogger} from '../../lib/logging.mjs';
 import {run} from '../../lib/runner.mjs';
+import {hostLoaderPath} from '../../lib/runtime-split.mjs';
 import * as mingw from '../../toolchain/mingw.mjs';
 import * as staticLibs from '../../toolchain/static-libs.mjs';
 
@@ -57,16 +58,31 @@ export function baseEnv(config) {
     extraPathDirs.unshift(path.join(cangjieHome, 'tools', 'bin'));
     extraPathDirs.unshift(path.join(cangjieHome, 'bin'));
     const runtimeLib = path.join(cangjieHome, 'runtime', 'lib', config.target.runtimeLibSubdir(config.buildType));
-    if (fs.statSync(runtimeLib, {throwIfNoEntry: false})?.isDirectory()) ldPaths.unshift(runtimeLib);
+    if (fs.statSync(runtimeLib, {throwIfNoEntry: false})?.isDirectory()) {
+      env[spec.loaderEnv] = hostLoaderPath({
+        hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+        targetSdk: cangjieHome,
+        target: config.target,
+        inherited: joinPathsep(...ldPaths, process.env[spec.loaderEnv] || ''),
+        includeTargetLlvm: false,
+      });
+    }
     const toolsLib = path.join(cangjieHome, 'tools', 'lib');
-    if (fs.statSync(toolsLib, {throwIfNoEntry: false})?.isDirectory()) ldPaths.unshift(toolsLib);
+    if (!env[spec.loaderEnv] && fs.statSync(toolsLib, {throwIfNoEntry: false})?.isDirectory()) {
+      ldPaths.unshift(toolsLib);
+    }
+  }
+  const hostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
+  if (hostSdk && fs.statSync(hostSdk, {throwIfNoEntry: false})?.isDirectory()) {
+    extraPathDirs.unshift(path.join(hostSdk, 'tools', 'bin'));
+    extraPathDirs.unshift(path.join(hostSdk, 'bin'));
   }
 
   const stdxPath = path.join(
     config.workspace, 'cangjie_stdx', 'target', config.target.stdxTargetSubdir(), 'static', 'stdx',
   );
   if (fs.statSync(stdxPath, {throwIfNoEntry: false})?.isDirectory()) env.CANGJIE_STDX_PATH = stdxPath;
-  if (ldPaths.length && spec.loaderEnv) {
+  if (!env[spec.loaderEnv] && ldPaths.length && spec.loaderEnv) {
     env[spec.loaderEnv] = joinPathsep(...ldPaths, process.env[spec.loaderEnv] || '');
   }
   env.PATH = joinPathsep(...extraPathDirs, process.env.PATH || '');
@@ -147,7 +163,13 @@ export function requireFile(file, {stage: stageName}) {
 }
 
 function copy(source, target) {
-  fs.cpSync(source, target, {recursive: true, dereference: false, preserveTimestamps: true, force: true});
+  fs.cpSync(source, target, {
+    recursive: true,
+    dereference: false,
+    preserveTimestamps: true,
+    verbatimSymlinks: true,
+    force: true,
+  });
 }
 
 export function copytree(source, destination, {stage: stageName}) {
