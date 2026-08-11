@@ -7,6 +7,7 @@ import test from 'node:test';
 import {buildConfig} from '../lib/config.mjs';
 import {formatCommand, run as runCommand} from '../lib/runner.mjs';
 import {
+  assertHostRuntimeCommands,
   assertRuntimeCommonCache,
   assertRuntimeSplit,
   hostLoaderPath,
@@ -196,6 +197,29 @@ test('source builds fail closed unless host runtime is plain and target runtime 
       '/inherited',
     ]);
     assert.ok(!earlyHostLoader.includes(path.join(targetSdk, 'third_party', 'llvm', 'lib')));
+
+    const generatedBuild = file(root, ['stdx', 'build.ninja'], [
+      `command = env LD_LIBRARY_PATH=${path.dirname(hostRuntime)}:${path.dirname(targetRuntime)} cjc package.cj`,
+      '',
+    ].join('\n'));
+    assert.equal(assertHostRuntimeCommands({
+      buildFile: generatedBuild,
+      hostRuntime,
+      targetRuntime,
+      loaderEnv: 'LD_LIBRARY_PATH',
+      log: () => {},
+    }), 1);
+    fs.writeFileSync(generatedBuild,
+      `command = env LD_LIBRARY_PATH=${path.dirname(targetRuntime)}:${path.dirname(hostRuntime)} cjc package.cj\n`);
+    assert.throws(
+      () => assertHostRuntimeCommands({
+        buildFile: generatedBuild,
+        hostRuntime,
+        targetRuntime,
+        loaderEnv: 'LD_LIBRARY_PATH',
+      }),
+      /generated cjc command selects target runtime before host/,
+    );
 
     const crossTarget = buildConfig({targetKey: 'windows-x64'}).target;
     const crossHostSdk = directory(root, 'cross-host-sdk');
