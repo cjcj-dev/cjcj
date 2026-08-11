@@ -449,6 +449,7 @@ test('package paths and archive roots match package.py', async () => {
     assert.equal(sdkList.stdout.split('\n')[0], 'cangjie/');
     assert.equal(stdxList.stdout.split('\n')[0], 'linux_x86_64_cjnative/');
     assert.ok(fs.existsSync(path.join(config.softwareDir, 'cangjie', 'tools', 'bin', 'cjpm')));
+    assert.ok(fs.existsSync(path.join(config.softwareDir, 'cangjie', 'tools', 'check_sdk_usable.mjs')));
     assert.ok(fs.existsSync(path.join(config.softwareDir, 'cangjie', 'tools', 'bin', 'cjcov')));
     assert.ok(fs.existsSync(path.join(config.softwareDir, 'cangjie', 'tools', 'bin', 'cjtrace-recover')));
     assert.ok(!fs.existsSync(path.join(config.softwareDir, 'cangjie', 'tools', 'dtsparser', 'drop.cj')));
