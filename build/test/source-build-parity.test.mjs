@@ -277,6 +277,34 @@ test('source builds fail closed unless host runtime is plain and target runtime 
   }
 });
 
+test('tools select the target compiler home while keeping the plain host loader', () => {
+  const {root, config} = makeFixture();
+  const previousHostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
+  try {
+    const hostSdk = directory(root, 'host-sdk');
+    const targetSdk = path.join(config.repoPath('compiler'), 'output');
+    const runtimeRelative = [
+      'runtime', 'lib', config.target.spec.runtimeTuple, config.target.spec.runtimeLibrary,
+    ];
+    const hostRuntime = file(hostSdk, runtimeRelative, 'plain-host-runtime');
+    file(targetSdk, runtimeRelative, 'coloured-target-runtime');
+    process.env.CJCJ_SRCBUILD_HOST_SDK = hostSdk;
+
+    const env = tools.targetToolsEnv(config);
+    const pathEntries = env.PATH.split(path.delimiter);
+    assert.deepEqual(pathEntries.slice(0, 2), [
+      path.join(targetSdk, 'bin'),
+      path.join(targetSdk, 'tools', 'bin'),
+    ]);
+    assert.ok(pathEntries.indexOf(path.join(hostSdk, 'bin')) > 1);
+    assert.equal(env[config.target.spec.loaderEnv].split(path.delimiter)[0], path.dirname(hostRuntime));
+  } finally {
+    if (previousHostSdk === undefined) delete process.env.CJCJ_SRCBUILD_HOST_SDK;
+    else process.env.CJCJ_SRCBUILD_HOST_SDK = previousHostSdk;
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
 test('runtime producer uses the host loader before the target runtime exists', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-runtime-producer-'));
   const previousDryRun = process.env.CANGJIE_BUILD_DRY_RUN;
