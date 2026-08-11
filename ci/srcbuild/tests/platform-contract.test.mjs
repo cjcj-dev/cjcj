@@ -374,12 +374,28 @@ test('source build keeps a version-matched plain host runtime across both bootst
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
   const provision = workflow.indexOf('- name: Provision uncoloured host SDK');
   const compiler = workflow.indexOf('- name: Build compiler oracle');
+  const prepareHost = workflow.indexOf('- name: Prepare source compiler host SDK');
+  const runtime = workflow.indexOf('- name: Build runtime from source');
   assert.ok(provision >= 0 && compiler > provision);
+  assert.ok(prepareHost > compiler && runtime > prepareHost);
   for (const contract of [
     'export CJCJ_SDK_STOCK_LLC=1',
     'export CJCJ_TOOLCHAIN="nightly-$RUNTIME_VERSION"',
+    'CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk',
     'CJCJ_SRCBUILD_HOST_SDK=$host_sdk',
+    'ci/srcbuild/steps/prepare-source-host-sdk.mjs',
   ]) assert.ok(workflow.includes(contract), contract);
+
+  const prepare = await fs.readFile(path.join(root, 'ci/srcbuild/steps/prepare-source-host-sdk.mjs'), 'utf8');
+  for (const contract of [
+    'await fs.realpath(bootstrapSdk)',
+    "path.join(workspace, 'source-host-sdk')",
+    'await fs.rm(hostSdk, {recursive: true, force: true})',
+    'await fs.cp(sourceSdk, hostSdk, {recursive: true, preserveTimestamps: true})',
+    'await fs.copyFile(compiler, hostCompiler)',
+    'assertPlainHostRuntime({hostSdk, target})',
+    'CJCJ_SRCBUILD_HOST_SDK=${hostSdk}',
+  ]) assert.ok(prepare.includes(contract), contract);
 
   const stdlib = await fs.readFile(path.join(root, 'build/srcbuild/stages/stdlib.mjs'), 'utf8');
   const nativeBuild = stdlib.indexOf("'build', '-t', config.buildType");
@@ -390,7 +406,14 @@ test('source build keeps a version-matched plain host runtime across both bootst
   const activation = await fs.readFile(path.join(root, 'ci/srcbuild/steps/activate-source-sdk.mjs'), 'utf8');
   assert.ok(activation.includes('assertRuntimeSplit({'));
   assert.ok(activation.includes('const libraryPath = hostLoaderPath({'));
+  assert.ok(activation.includes('CJCJ_SRCBUILD_HOST_CJC=${hostCompiler}'));
   assert.ok(!activation.includes('const libraryPath = [llvmLib, runtimeLib, toolsLib'));
+
+  const common = await fs.readFile(path.join(root, 'build/srcbuild/stages/common.mjs'), 'utf8');
+  assert.ok(common.includes("extraPathDirs.unshift(path.join(hostSdk, 'bin'))"));
+  const stage1 = await fs.readFile(path.join(root, 'ci/srcbuild/steps/build-stage1.mjs'), 'utf8');
+  assert.ok(stage1.includes('PATH: `${path.dirname(hostCompiler)}${path.delimiter}'));
+  assert.ok(stage1.includes('await $({env: oracleEnv})`cjpm build`'));
 
   const stdx = await fs.readFile(path.join(root, 'build/srcbuild/stages/stdx.mjs'), 'utf8');
   assert.ok(stdx.includes('STDX_HOST_RUNTIME_LIB_DIR'));
