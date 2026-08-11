@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -7,6 +9,7 @@ import {
   STATES,
   classifyToolVersion,
   countC9Instructions,
+  layoutCheck,
   parseArguments,
   summarizeResults,
 } from '../../scripts/check_sdk_usable.mjs';
@@ -94,6 +97,38 @@ test('C9 counts only the comma-terminated mask inside String.[]', () => {
     .replace('movabs $0xffffffffffff,%rax', 'movabs $0xffffffffffff');
   assert.deepEqual(countC9Instructions(missingComma), {anchored: true, count: 0});
   assert.deepEqual(countC9Instructions('0000 <other>:\n'), {anchored: false, count: 0});
+});
+
+test('layout requires Linux bitcode but accepts the official Windows zero-bitcode shape', () => {
+  const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-layout-'));
+  const add = (relative, contents = '') => {
+    const destination = path.join(sdk, relative);
+    fs.mkdirSync(path.dirname(destination), {recursive: true});
+    fs.writeFileSync(destination, contents);
+  };
+  try {
+    for (const [tuple, sharedSuffix] of [
+      ['linux_x86_64_cjnative', 'so'],
+      ['windows_x86_64_cjnative', 'dll'],
+    ]) {
+      add(`modules/${tuple}/std/std.core.cjo`);
+      add(`lib/${tuple}/libcangjie-std-core.a`);
+      add(`lib/${tuple}/libcangjie-std-coreFFI.a`);
+      add(`runtime/lib/${tuple}/libcangjie-std-core.${sharedSuffix}`);
+    }
+    add('modules/linux_x86_64_cjnative/std/libstd.core.bc');
+    assert.deepEqual(layoutCheck(sdk), {
+      state: STATES.PASS,
+      detail: 'tuples=2 cjo=2 bc=1 ffi_a=2',
+    });
+
+    fs.rmSync(path.join(sdk, 'modules', 'linux_x86_64_cjnative', 'std', 'libstd.core.bc'));
+    const missingLinuxBitcode = layoutCheck(sdk);
+    assert.equal(missingLinuxBitcode.state, STATES.FAIL);
+    assert.match(missingLinuxBitcode.detail, /linux_x86_64_cjnative: std cjo=1 bc=0/);
+  } finally {
+    fs.rmSync(sdk, {recursive: true, force: true});
+  }
 });
 
 test('an unreadable SDK emits every criterion as UNKNOWN and exits 2', () => {
