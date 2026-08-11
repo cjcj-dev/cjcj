@@ -8,6 +8,7 @@ import {buildConfig} from '../lib/config.mjs';
 import {formatCommand, run as runCommand} from '../lib/runner.mjs';
 import {
   assertHostRuntimeCommands,
+  assertPlainHostRuntime,
   assertRuntimeCommonCache,
   assertRuntimeSplit,
   hostLoaderPath,
@@ -165,6 +166,25 @@ test('source builds fail closed unless host runtime is plain and target runtime 
     assert.equal(result.targetCount, 1);
     assert.notEqual(result.hostRuntime, result.targetRuntime);
     assert.match(messages.join('\n'), /RUNTIME_SPLIT_ASSERT_PASS host=0 .* target=1 /);
+
+    const hostMessages = [];
+    const hostOnly = assertPlainHostRuntime({
+      hostSdk,
+      target,
+      readSymbols: symbols,
+      log: message => hostMessages.push(message),
+    });
+    assert.equal(hostOnly.hostRuntime, hostRuntime);
+    assert.equal(hostOnly.hostCount, 0);
+    assert.match(hostMessages.join('\n'), /HOST_RUNTIME_ASSERT_PASS host=0 /);
+    assert.throws(
+      () => assertPlainHostRuntime({
+        hostSdk,
+        target,
+        readSymbols: () => `00000000 D g_cjLoadBadMask\n`,
+      }),
+      /count contract failed: host=1 .* expected host=0/,
+    );
 
     assert.throws(
       () => assertRuntimeSplit({
@@ -386,9 +406,9 @@ test('Linux source stages emit the Python command order', async () => {
       expected(root, null, ['tar', '--format=gnu', '-czf', path.join(workspace, 'software', 'cangjie-stdx-linux-x64-1.2.3.1.tar.gz'), '-C', path.join(workspace, 'software'), 'linux_x86_64_cjnative']),
       expected(root, path.join(workspace, 'verify'), [
         'bash', '-c',
-        'set -e; source "$1"; export "$2=$3"; cjc hello.cj -o hello; export "$2=$4"; ./hello',
+        'set -e; source "$1"; export "$2=$3"; "$5" hello.cj -o hello; export "$2=$4"; ./hello',
         'srcbuild-verify', path.join(workspace, 'software', 'cangjie', 'envsetup.sh'),
-        'LD_LIBRARY_PATH', '<HOST_LIBRARIES>', '<TARGET_LIBRARIES>',
+        'LD_LIBRARY_PATH', '<HOST_LIBRARIES>', '<TARGET_LIBRARIES>', '<HOST_CJC>',
       ]),
     );
     assert.deepEqual(commands, expectedCommands);
