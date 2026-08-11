@@ -16,6 +16,7 @@ import {
 import * as compiler from '../srcbuild/stages/compiler.mjs';
 import * as packageStage from '../srcbuild/stages/package.mjs';
 import * as runtime from '../srcbuild/stages/runtime.mjs';
+import {copyContents} from '../srcbuild/stages/common.mjs';
 import * as stdlib from '../srcbuild/stages/stdlib.mjs';
 import * as stdx from '../srcbuild/stages/stdx.mjs';
 import * as tools from '../srcbuild/stages/tools.mjs';
@@ -270,6 +271,25 @@ test('source builds fail closed unless host runtime is plain and target runtime 
     assert.throws(
       () => assertRuntimeCommonCache({cache, runtimeTarget}),
       /RUNTIME_COMMON_LIB_DIR escaped target runtime/,
+    );
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('SDK overlays preserve relative symlinks across clean rebuilds', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-overlay-links-'));
+  try {
+    const source = directory(root, 'source');
+    const destination = directory(root, 'destination');
+    fs.writeFileSync(path.join(source, 'libsample.so.1'), 'runtime');
+    fs.symlinkSync('libsample.so.1', path.join(source, 'libsample.so'));
+    copyContents(source, destination, {stage: 'test.overlay.first'});
+    copyContents(source, destination, {stage: 'test.overlay.clean-rebuild'});
+    assert.equal(fs.readlinkSync(path.join(destination, 'libsample.so')), 'libsample.so.1');
+    assert.equal(
+      fs.realpathSync(path.join(destination, 'libsample.so')),
+      path.join(destination, 'libsample.so.1'),
     );
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
