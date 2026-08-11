@@ -584,14 +584,183 @@ async function evaluateG5(context) {
     `classes=5 workflow_consumers=1 bounded_fail_closed=yes; ${tests.detail}`);
 }
 
-async function evaluateG8(context) {
-  const manifest = await readFile(context, 'build/lib/release-manifest.mjs');
-  const recordsFreezeBaseline = /(?:freeze|frozen)[A-Za-z0-9_]*baseline/i.test(manifest) &&
-    ['difftest', 'smoke', 'bcgate', 'verify_exit'].every(field => manifest.includes(field));
-  if (!recordsFreezeBaseline) {
-    return gateResult('G8', 'NOT_MET', '判据 0811 已更新；release manifest 尚未记录 freeze 基线的 difftest/smoke/bcgate/VERIFY 数值，旧 2005/2472/467 不沿用');
+const G8_METRIC_PATHS = [
+  'difftest.total',
+  'difftest.pass',
+  'difftest.mismatch',
+  'difftest.fail',
+  'smoke.pass',
+  'smoke.fail',
+  'bcgate.shared',
+  'bcgate.byte_identical',
+  'bcgate.differing',
+  'bcgate.compile_errors',
+  'verify_exit',
+];
+
+function nestedField(value, dotted) {
+  return dotted.split('.').reduce((current, field) => current?.[field], value);
+}
+
+function validateG8Metrics(value, label, {pending = false} = {}) {
+  const missing = [];
+  const invalid = [];
+  for (const metric of G8_METRIC_PATHS) {
+    const actual = nestedField(value, metric);
+    if (actual === undefined || actual === null) {
+      missing.push(`${label}.${metric}`);
+    } else if (!Number.isSafeInteger(actual) || actual < 0) {
+      invalid.push(`${label}.${metric}=${String(actual)}`);
+    }
   }
-  return gateResult('G8', 'UNKNOWN', '判据 0811 已更新；manifest 已有 freeze-baseline 字段，但未提供绑定当前 freeze 的实测 manifest，不能判 MET/NOT_MET');
+  if (pending) return {status: 'UNKNOWN', detail: `missing=status=READY,${missing.join(',')}`};
+  if (missing.length) return {status: 'UNKNOWN', detail: `missing=${missing.join(',')}`};
+  if (invalid.length) return {status: 'NOT_MET', detail: `invalid=${invalid.join(',')}`};
+  return {status: 'MET', detail: 'complete'};
+}
+
+async function loadG8Floor(context) {
+  if (context.ref) throw new GateInputError('UNKNOWN', 'G8 evidence evaluation requires a checkout, not --ref');
+  const file = path.join(context.repo, 'build', 'lib', 'full-gate-release-floor.mjs');
+  let imported;
+  try {
+    imported = await import(pathToFileURL(file).href);
+  } catch (error) {
+    throw new GateInputError('UNKNOWN', `cannot load frozen G8 floor: ${error.code || error.message}`);
+  }
+  const floor = imported.FULL_GATE_RELEASE_FLOOR;
+  if (!plainObject(floor) || floor.schema !== 1) {
+    throw new GateInputError('UNKNOWN', 'frozen G8 floor does not expose the v1 contract');
+  }
+  if (!['PENDING', 'READY'].includes(floor.status)) {
+    return {floor, state: {status: 'NOT_MET', detail: `invalid=status=${String(floor.status)}`}};
+  }
+  const pending = floor.status === 'PENDING';
+  const missing = [];
+  const invalid = [];
+  for (const [field, pattern] of [
+    ['campaign_id', /^[0-9a-f]{40}-[0-9]{8}T[0-9]{6}Z-[1-9][0-9]*$/],
+    ['cjcj_head_sha', SHA40],
+    ['measured_utc', /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/],
+  ]) {
+    const value = floor[field];
+    if (value === undefined || value === null) missing.push(field);
+    else if (typeof value !== 'string' || !pattern.test(value)) invalid.push(field);
+  }
+  const resultsFile = floor.evidence?.results;
+  if (typeof resultsFile !== 'string' || !resultsFile) {
+    if (resultsFile === undefined || resultsFile === null) missing.push('evidence.results');
+    else invalid.push('evidence.results');
+  }
+  const metrics = validateG8Metrics(floor.baseline, 'baseline', {pending});
+  if (pending) {
+    return {floor, state: {status: 'UNKNOWN',
+      detail: `floor status=PENDING; missing=status=READY,${[...missing, ...G8_METRIC_PATHS.map(name => `baseline.${name}`)].join(',')}`}};
+  }
+  if (missing.length || metrics.status === 'UNKNOWN') {
+    const metricDetail = metrics.status === 'UNKNOWN' ? metrics.detail.replace(/^missing=/, '') : '';
+    return {floor, state: {status: 'UNKNOWN',
+      detail: `missing=${[...missing, metricDetail].filter(Boolean).join(',')}`}};
+  }
+  if (invalid.length || metrics.status === 'NOT_MET') {
+    return {floor, state: {status: 'NOT_MET',
+      detail: `invalid=${[...invalid, metrics.status === 'NOT_MET' ? metrics.detail : ''].filter(Boolean).join(',')}`}};
+  }
+  if (!floor.campaign_id.startsWith(`${floor.cjcj_head_sha}-`)) {
+    return {floor, state: {status: 'NOT_MET', detail: 'campaign_id does not bind cjcj_head_sha'}};
+  }
+  return {floor, state: {status: 'MET', detail: 'READY'}};
+}
+
+function validateG8Results(results) {
+  if (!plainObject(results)) return {status: 'NOT_MET', detail: 'G8_FULL_GATE.json root must be an object'};
+  const missing = [];
+  const invalid = [];
+  if (results.schema === undefined || results.schema === null) missing.push('schema');
+  else if (results.schema !== 1) invalid.push(`schema=${String(results.schema)}`);
+  for (const [field, pattern] of [
+    ['campaign_id', /^[0-9a-f]{40}-[0-9]{8}T[0-9]{6}Z-[1-9][0-9]*$/],
+    ['cjcj_head_sha', SHA40],
+    ['captured_utc', /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/],
+  ]) {
+    const value = results[field];
+    if (value === undefined || value === null) missing.push(field);
+    else if (typeof value !== 'string' || !pattern.test(value)) invalid.push(field);
+  }
+  const metrics = validateG8Metrics(results.results, 'results');
+  if (missing.length || metrics.status === 'UNKNOWN') {
+    const metricDetail = metrics.status === 'UNKNOWN' ? metrics.detail.replace(/^missing=/, '') : '';
+    return {status: 'UNKNOWN', detail: `missing=${[...missing, metricDetail].filter(Boolean).join(',')}`};
+  }
+  if (invalid.length || metrics.status === 'NOT_MET') {
+    return {status: 'NOT_MET',
+      detail: `invalid=${[...invalid, metrics.status === 'NOT_MET' ? metrics.detail : ''].filter(Boolean).join(',')}`};
+  }
+  return {status: 'MET', detail: 'complete'};
+}
+
+async function readG8Results(context, relative) {
+  const root = path.resolve(context.evidence);
+  const file = path.resolve(root, ...relative.split('/'));
+  if (file !== root && !file.startsWith(`${root}${path.sep}`)) {
+    throw new GateInputError('UNKNOWN', `G8 evidence path escapes archive root: ${relative}`);
+  }
+  return {file, text: await readAbsolute(file, {absence: 'UNKNOWN'})};
+}
+
+async function evaluateG8(context) {
+  const {floor, state} = await loadG8Floor(context);
+  if (state.status !== 'MET') {
+    return gateResult('G8', state.status, `判据 0811 已更新；${state.detail}；旧 2005/2472/467 未沿用`);
+  }
+  if (!context.evidence) {
+    return gateResult('G8', 'UNKNOWN',
+      `判据 0811 已更新；floor=READY；missing=--evidence/${floor.evidence.results}`);
+  }
+  const evidence = await readG8Results(context, floor.evidence.results);
+  const results = parseG2Json(evidence.text, evidence.file);
+  const resultState = validateG8Results(results);
+  if (resultState.status !== 'MET') {
+    return gateResult('G8', resultState.status,
+      `判据 0811 已更新；floor=READY；${floor.evidence.results} ${resultState.detail}`);
+  }
+
+  const failures = [];
+  if (results.campaign_id !== floor.campaign_id) {
+    failures.push(`campaign_id=${results.campaign_id} expected=${floor.campaign_id}`);
+  }
+  if (results.cjcj_head_sha !== floor.cjcj_head_sha) {
+    failures.push(`cjcj_head_sha=${results.cjcj_head_sha} expected=${floor.cjcj_head_sha}`);
+  }
+  const baseline = floor.baseline;
+  const current = results.results;
+  if (current.difftest.total < baseline.difftest.total) {
+    failures.push(`difftest.total=${current.difftest.total}<${baseline.difftest.total}`);
+  }
+  if (current.difftest.pass !== current.difftest.total || current.difftest.mismatch !== 0 ||
+      current.difftest.fail !== 0) {
+    failures.push(`difftest=${current.difftest.pass}/${current.difftest.total}` +
+      ` mismatch=${current.difftest.mismatch} fail=${current.difftest.fail}`);
+  }
+  if (current.smoke.pass < baseline.smoke.pass || current.smoke.fail !== 0) {
+    failures.push(`smoke=pass${current.smoke.pass}/fail${current.smoke.fail}; baseline_pass=${baseline.smoke.pass}`);
+  }
+  if (current.bcgate.shared < baseline.bcgate.shared ||
+      current.bcgate.byte_identical < baseline.bcgate.byte_identical ||
+      current.bcgate.differing > baseline.bcgate.differing || current.bcgate.compile_errors !== 0) {
+    failures.push(`bcgate=shared${current.bcgate.shared}/identical${current.bcgate.byte_identical}` +
+      `/differing${current.bcgate.differing}/compile_errors${current.bcgate.compile_errors}; ` +
+      `baseline=${baseline.bcgate.shared}/${baseline.bcgate.byte_identical}/${baseline.bcgate.differing}`);
+  }
+  if (current.verify_exit !== 0) failures.push(`verify_exit=${current.verify_exit}`);
+  if (failures.length) {
+    return gateResult('G8', 'NOT_MET', `判据 0811 已更新；floor=${floor.campaign_id}; failures=${failures.join(';')}`);
+  }
+  return gateResult('G8', 'MET', `判据 0811 已更新；floor=${floor.campaign_id}; ` +
+    `difftest=${current.difftest.pass}/${current.difftest.total} mismatch=0 fail=0; ` +
+    `smoke=${current.smoke.pass}/0; bcgate shared=${current.bcgate.shared} ` +
+    `byte_identical=${current.bcgate.byte_identical} differing=${current.bcgate.differing} compile_errors=0; ` +
+    'VERIFY-EXIT=0');
 }
 
 function parseG12Tsv(text, label) {
