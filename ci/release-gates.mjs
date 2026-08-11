@@ -317,7 +317,7 @@ async function validateEvidenceBinding(gate, context, evidence) {
   try {
     rootStat = await fs.lstat(root);
   } catch (error) {
-    throw new GateInputError('UNKNOWN', `cannot inspect evidence root ${root}: ${error.code || error.message}`);
+    throw new GateInputError('UNKNOWN', `cannot read or inspect evidence root ${root}: ${error.code || error.message}`);
   }
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
     throw new GateInputError('UNKNOWN', `evidence root is not a direct directory: ${root}`);
