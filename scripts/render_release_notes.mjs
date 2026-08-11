@@ -78,6 +78,7 @@ const lines = [
   'Every SDK archive embeds `RELEASE-MANIFEST.jsonl`; the same manifest is attached beside the archive.',
   'The tables below are rendered from those manifests. `not-applicable` is allowed only with an explicit reason; unresolved provenance is rejected. `no-stamp` records an absent embedded stamp.',
   `Signature policy: \`${RELEASE_SIGNATURE_POLICY}\`.`,
+  'SHA_ONLY provides checksums only; this release has no detached signature, GitHub attestation, CycloneDX SBOM, or SPDX SBOM.',
   '',
   '## Component provenance',
 ];
