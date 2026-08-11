@@ -40,11 +40,14 @@ export async function run(config) {
     targetSdk: cangjieDir,
     target: config.target,
   });
+  const hostCompiler = process.env.CANGJIE_BUILD_DRY_RUN === '1'
+    ? '<HOST_CJC>'
+    : requireFile(path.join(process.env.CJCJ_SRCBUILD_HOST_SDK, 'bin', 'cjc'), {stage: 'verify.host-cjc'});
   await stage('verify', async () => {
     await runCommand([
       'bash', '-c',
-      'set -e; source "$1"; export "$2=$3"; cjc hello.cj -o hello; export "$2=$4"; ./hello',
-      'srcbuild-verify', envsetup, config.target.spec.loaderEnv, hostLibraries, targetLibraries,
+      'set -e; source "$1"; export "$2=$3"; "$5" hello.cj -o hello; export "$2=$4"; ./hello',
+      'srcbuild-verify', envsetup, config.target.spec.loaderEnv, hostLibraries, targetLibraries, hostCompiler,
     ], {
       cwd: work, stage: 'verify.hello',
     });
