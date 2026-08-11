@@ -109,6 +109,11 @@ async function packageMainSdk(config) {
   fs.rmSync(cangjieDir, {recursive: true, force: true});
   fs.cpSync(compilerOutput, cangjieDir, {recursive: true, dereference: false, preserveTimestamps: true});
   organizeSdkTree(config, cangjieDir);
+  if (config.target.spec.os !== 'windows') {
+    // Match the release re-packager: installed SDK data must be readable and
+    // directories/programs traversable by users other than the build account.
+    await runCommand(['chmod', '-R', 'u+rwX,go+rX', cangjieDir], {stage: 'package.permissions'});
+  }
   return makeArchive(config, cangjieDir, `cangjie-sdk-${config.target.spec.sdkName}-${config.cangjieVersion}`);
 }
 
