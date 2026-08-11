@@ -47,6 +47,7 @@ export const GATING = Object.freeze([
   'build/test/write-barrier.test.mjs',
   'ci/generate-freeze.test.mjs',
   'ci/gc-release-floor.test.mjs',
+  'ci/idle-writer-policy.test.mjs',
   'ci/llvm-tools-manifest.test.mjs',
   'ci/release-gates.test.mjs',
   'ci/srcbuild/tests/inject-version.test.mjs',
