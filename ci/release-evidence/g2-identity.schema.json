@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cjcj-dev/cjcj/blob/master/ci/release-evidence/g2-identity.schema.json",
+  "title": "cjcj same-round G2 toolchain identity evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "campaign_id",
+    "cjcj_head_sha",
+    "captured_utc",
+    "status",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}-[0-9]{8}T[0-9]{6}Z-[1-9][0-9]*$"
+    },
+    "cjcj_head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "captured_utc": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "status": {
+      "enum": ["PENDING", "READY"]
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime_dynamic",
+        "runtime_static",
+        "llvm_llc",
+        "llvm_opt",
+        "cjcj",
+        "std"
+      ],
+      "properties": {
+        "runtime_dynamic": {"$ref": "#/$defs/artifact_slot"},
+        "runtime_static": {"$ref": "#/$defs/artifact_slot"},
+        "llvm_llc": {"$ref": "#/$defs/artifact_slot"},
+        "llvm_opt": {"$ref": "#/$defs/artifact_slot"},
+        "cjcj": {"$ref": "#/$defs/artifact_slot"},
+        "std": {"$ref": "#/$defs/artifact_slot"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"status": {"const": "READY"}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "captured_utc": {"type": "string"},
+          "artifacts": {
+            "properties": {
+              "runtime_dynamic": {"$ref": "#/$defs/complete_artifact"},
+              "runtime_static": {"$ref": "#/$defs/complete_artifact"},
+              "llvm_llc": {"$ref": "#/$defs/complete_artifact"},
+              "llvm_opt": {"$ref": "#/$defs/complete_artifact"},
+              "cjcj": {"$ref": "#/$defs/complete_artifact"},
+              "std": {"$ref": "#/$defs/complete_artifact"}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "artifact_slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_path",
+        "sha256",
+        "provenance_stamp",
+        "source_commit",
+        "source_dirty"
+      ],
+      "properties": {
+        "artifact_path": {"type": ["string", "null"]},
+        "sha256": {"type": ["string", "null"]},
+        "provenance_stamp": {"type": ["string", "null"]},
+        "source_commit": {"type": ["string", "null"]},
+        "source_dirty": {"type": ["boolean", "null"]}
+      }
+    },
+    "complete_artifact": {
+      "allOf": [
+        {"$ref": "#/$defs/artifact_slot"},
+        {
+          "properties": {
+            "artifact_path": {"type": "string", "minLength": 1},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "provenance_stamp": {"type": "string", "minLength": 1},
+            "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "source_dirty": {"type": "boolean"}
+          }
+        }
+      ]
+    }
+  }
+}
