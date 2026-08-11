@@ -21,6 +21,13 @@ function requireRuntime(file, label) {
   return file;
 }
 
+function requireCompiler(file) {
+  if (!fs.statSync(file, {throwIfNoEntry: false})?.isFile()) {
+    throw new BuildError('runtime.sdk-abi', `packaged compiler is missing: ${file}`);
+  }
+  return file;
+}
+
 function runtimeRelativePath(target, role) {
   const host = role === 'host';
   return path.join(
@@ -81,9 +88,67 @@ export function readRuntimeSymbols(file, target) {
   return result.stdout;
 }
 
+export function readCompilerSymbols(file, target) {
+  const args = target.spec.os === 'darwin'
+    ? ['-u', file]
+    : ['-D', '--undefined-only', file];
+  const result = spawnSync('nm', args, {encoding: 'utf8'});
+  if (result.status !== 0) {
+    throw new BuildError(
+      'runtime.sdk-abi',
+      `nm failed for packaged compiler ${file}: rc=${result.status} ${String(result.stderr || '').trim()}`,
+    );
+  }
+  return result.stdout;
+}
+
 export function countLoadBadMask(symbols) {
   return String(symbols).split(/\r?\n/)
     .filter(line => new RegExp(`\\b${LOAD_BAD_MASK_SYMBOL}\\b`).test(line)).length;
+}
+
+export function assertSdkCompilerRuntimeAbi({
+  sdk,
+  target,
+  readCompiler = readCompilerSymbols,
+  readRuntime = readRuntimeSymbols,
+  log = console.log,
+}) {
+  const sdkRoot = requireDirectory(sdk, 'SDK');
+  const compiler = requireCompiler(path.join(sdkRoot, 'bin', 'cjc'));
+  const runtime = requireRuntime(
+    path.join(sdkRoot, runtimeRelativePath(target, 'target')),
+    'packaged',
+  );
+  const compilerCount = countLoadBadMask(readCompiler(compiler, target));
+  const runtimeCount = countLoadBadMask(readRuntime(runtime, target));
+  if (![compilerCount, runtimeCount].every(count => count === 0 || count === 1)) {
+    throw new BuildError(
+      'runtime.sdk-abi',
+      `${LOAD_BAD_MASK_SYMBOL} ABI count is not boolean: compiler=${compilerCount} path=${compiler}; ` +
+      `runtime=${runtimeCount} path=${runtime}`,
+    );
+  }
+  if (compilerCount !== runtimeCount) {
+    throw new BuildError(
+      'runtime.sdk-abi',
+      `${LOAD_BAD_MASK_SYMBOL} ABI mismatch: compiler=${compilerCount} path=${compiler}; ` +
+      `runtime=${runtimeCount} path=${runtime}`,
+    );
+  }
+  const compilerReal = fs.realpathSync(compiler);
+  const runtimeReal = fs.realpathSync(runtime);
+  log(
+    `SDK_COLOUR_ABI_ASSERT_PASS compiler=${compilerCount} path=${compilerReal} ` +
+    `runtime=${runtimeCount} path=${runtimeReal}`,
+  );
+  return {
+    sdk: sdkRoot,
+    compiler: compilerReal,
+    runtime: runtimeReal,
+    compilerCount,
+    runtimeCount,
+  };
 }
 
 export function assertRuntimeSplit({
