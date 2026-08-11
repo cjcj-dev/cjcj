@@ -436,7 +436,7 @@ function listFilesRecursive(root) {
   return files;
 }
 
-function layoutCheck(sdk) {
+export function layoutCheck(sdk) {
   const modulesRoot = path.join(sdk, 'modules');
   if (!fs.statSync(modulesRoot, {throwIfNoEntry: false})?.isDirectory()) {
     return {state: STATES.FAIL, detail: 'modules/ missing'};
@@ -447,18 +447,27 @@ function layoutCheck(sdk) {
   let cjo = 0;
   let bitcode = 0;
   let ffiArchives = 0;
-  let ffiShared = 0;
   for (const tupleEntry of tuples) {
     const tuple = tupleEntry.name;
+    const tupleRoot = path.join(modulesRoot, tuple);
     const stdRoot = path.join(modulesRoot, tuple, 'std');
+    const topModules = fs.readdirSync(tupleRoot);
     const moduleFiles = fs.statSync(stdRoot, {throwIfNoEntry: false})?.isDirectory()
       ? listFilesRecursive(stdRoot).filter(item => item.entry.isFile()).map(item => item.absolute)
       : [];
-    const tupleCjo = moduleFiles.filter(file => file.endsWith('.cjo')).length;
-    const tupleBc = moduleFiles.filter(file => file.endsWith('.bc')).length;
+    // cangjie_runtime/stdlib/cmake/modules/AddCangjieSource.cmake:350-390
+    // installs cjo plus platform-dependent LTO bitcode and static FFI targets.
+    // The target matrix emits bitcode on Linux only; Windows and Darwin having
+    // zero .bc files is an official layout, not an incomplete SDK.
+    const tupleCjo = moduleFiles.filter(file => file.endsWith('.cjo')).length
+      + Number(topModules.includes('std.cjo'));
+    const tupleBc = moduleFiles.filter(file => file.endsWith('.bc')).length
+      + Number(topModules.includes('libstd.bc'));
     cjo += tupleCjo;
     bitcode += tupleBc;
-    if (tupleCjo === 0 || tupleBc === 0) failures.push(`${tuple}: std cjo=${tupleCjo} bc=${tupleBc}`);
+    if (tupleCjo === 0 || (tuple.startsWith('linux_') && tupleBc === 0)) {
+      failures.push(`${tuple}: std cjo=${tupleCjo} bc=${tupleBc}`);
+    }
     const staticRoot = path.join(sdk, 'lib', tuple);
     const dynamicRoot = path.join(sdk, 'runtime', 'lib', tuple);
     if (!fs.existsSync(path.join(staticRoot, 'libcangjie-std-core.a'))) failures.push(`${tuple}: static std-core missing`);
@@ -467,15 +476,14 @@ function layoutCheck(sdk) {
       : false;
     if (!dynamicCore) failures.push(`${tuple}: shared std-core missing`);
     if (fs.statSync(staticRoot, {throwIfNoEntry: false})?.isDirectory()) {
-      ffiArchives += fs.readdirSync(staticRoot).filter(name => /FFI\.a$/.test(name)).length;
-    }
-    if (fs.statSync(dynamicRoot, {throwIfNoEntry: false})?.isDirectory()) {
-      ffiShared += fs.readdirSync(dynamicRoot).filter(name => /FFI\.(?:so|dylib|dll)/.test(name)).length;
+      const tupleFfiArchives = fs.readdirSync(staticRoot).filter(name => /FFI\.a$/.test(name)).length;
+      ffiArchives += tupleFfiArchives;
+      if (tupleFfiArchives === 0) failures.push(`${tuple}: static FFI archives missing`);
+    } else {
+      failures.push(`${tuple}: static library directory missing`);
     }
   }
-  if (ffiArchives === 0) failures.push('no static FFI archive');
-  if (ffiShared === 0) failures.push('no shared FFI library');
-  const detail = `tuples=${tuples.length} cjo=${cjo} bc=${bitcode} ffi_a=${ffiArchives} ffi_shared=${ffiShared}`;
+  const detail = `tuples=${tuples.length} cjo=${cjo} bc=${bitcode} ffi_a=${ffiArchives}`;
   return failures.length
     ? {state: STATES.FAIL, detail: `${detail}; ${failures.join('; ')}`}
     : {state: STATES.PASS, detail};
