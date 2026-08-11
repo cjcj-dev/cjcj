@@ -63,8 +63,8 @@ try {
   await fs.rm(oracleCompilerDir, {recursive: true, force: true});
 }
 
-// Put the seed under the SDK so <exe>/../runtime resolves. The C++ oracle stays
-// in cangjie_compiler/output/bin and is never copied into the SDK tree.
+// Put the seed under the SDK so <exe>/../runtime resolves. The source-built C++
+// oracle already occupies sdk/bin/cjc; replace it only after the seed is built.
 // The mapped seed must not be named cjc: the Linux runtime reserves that basename
 // for native C++ cjc and otherwise excludes managed frames from GC root scanning.
 await $`install -m0755 target/release/bin/cjcj::cjc ${sdk}/bin/cjcj-stage1`;
