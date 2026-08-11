@@ -53,8 +53,10 @@ export async function run(config) {
       `--target-lib=${runtimeTarget}`,
       `--target-lib=${mingwLib}`,
       ...windowsCrossArgs(config),
-    ], {stageName: 'stdlib.build.windows'});
-    await runBuildPy(config, stdlibRoot, ['install'], {stageName: 'stdlib.install.windows'});
+    ], {stageName: 'stdlib.build.windows', extraEnv: hostEnv});
+    await runBuildPy(config, stdlibRoot, ['install'], {
+      stageName: 'stdlib.install.windows', extraEnv: hostEnv,
+    });
     if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
       await writeStdProvenance({sourceDir: stdlibRoot, installPrefix: stdlibOutput, compiler});
     }
