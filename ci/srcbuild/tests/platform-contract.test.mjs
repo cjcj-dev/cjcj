@@ -416,7 +416,8 @@ test('source build keeps a version-matched plain host runtime across both bootst
   assert.ok(stage1.includes('await $({env: oracleEnv})`cjpm build`'));
 
   const stdx = await fs.readFile(path.join(root, 'build/srcbuild/stages/stdx.mjs'), 'utf8');
-  assert.ok(stdx.includes('STDX_HOST_RUNTIME_LIB_DIR'));
+  assert.ok(stdx.includes('STDX_HOST_CANGJIE_HOME'));
+  assert.ok(!stdx.includes('applyTextPatch'));
   assert.ok(stdx.includes('assertRuntimeSplit({'));
   assert.ok(stdx.includes('assertHostRuntimeCommands({'));
 });
