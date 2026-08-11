@@ -163,7 +163,13 @@ export function requireFile(file, {stage: stageName}) {
 }
 
 function copy(source, target) {
-  fs.cpSync(source, target, {recursive: true, dereference: false, preserveTimestamps: true, force: true});
+  fs.cpSync(source, target, {
+    recursive: true,
+    dereference: false,
+    preserveTimestamps: true,
+    verbatimSymlinks: true,
+    force: true,
+  });
 }
 
 export function copytree(source, destination, {stage: stageName}) {
