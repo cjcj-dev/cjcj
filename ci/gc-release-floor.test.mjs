@@ -6,6 +6,7 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 
 import {GC_RELEASE_FLOOR} from '../build/lib/gc-release-floor.mjs';
+import {bindEvidence} from './evidence-binding-fixture.mjs';
 
 const repo = path.resolve(import.meta.dirname, '..');
 const command = path.join(repo, 'ci', 'release-gates.mjs');
@@ -153,6 +154,7 @@ async function evidenceFixture(t, {failing = '', positiveControls = true, verdic
   await write(root, 'fys0/f3-control.log', positiveControls ? f3Log(194) : '');
   await write(root, 'fys0/marksurvive.log', markSurvivalLog(0));
   await write(root, 'fys0/marksurvive-control.log', positiveControls ? markSurvivalLog(79) : '');
+  await bindEvidence(root, 'G12', repo);
   return root;
 }
 
@@ -199,6 +201,7 @@ test('an unreadable evidence path is UNKNOWN, not NOT_MET', () => {
 test('a parse failure is UNKNOWN, not NOT_MET', async t => {
   const evidence = await evidenceFixture(t);
   await write(evidence, 'runs.tsv', 'not\ta\tknown\theader\n1\t2\t3\t4\n');
+  await bindEvidence(evidence, 'G12', repo);
   const {result, value} = gate(evidence);
   assert.equal(result.status, 2, result.stderr);
   assert.equal(value.status, 'UNKNOWN');

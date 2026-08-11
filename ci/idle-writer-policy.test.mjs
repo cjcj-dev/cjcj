@@ -5,6 +5,8 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 
+import {bindEvidence} from './evidence-binding-fixture.mjs';
+
 const repo = path.resolve(import.meta.dirname, '..');
 const command = path.join(repo, 'ci', 'release-gates.mjs');
 
@@ -27,7 +29,7 @@ function gate(evidence, checkout = repo) {
   return {result, value};
 }
 
-async function evidenceFixture(t, {fys = 1, observed = fys, missing = '', miss = 0} = {}) {
+async function evidenceFixture(t, {fys = 1, observed = fys, missing = '', miss = 0, checkout = repo} = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g14-policy-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   const rawHeader = [
@@ -49,6 +51,7 @@ async function evidenceFixture(t, {fys = 1, observed = fys, missing = '', miss =
   }
   await write(root, 'raw.tsv', `${rawHeader.join('\t')}\n${raw.join('\n')}\n`);
   await write(root, 'remset.tsv', `${remsetHeader.join('\t')}\n${remset.join('\n')}\n`);
+  await bindEvidence(root, 'G14', checkout);
   return root;
 }
 
@@ -57,6 +60,14 @@ async function policyCheckout(t, choice) {
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   await write(root, 'build/lib/release-manifest.mjs', `export const IDLE_WRITER_POLICY = '${choice}';\n`);
   await write(root, '.github/workflows/release.yml', 'name: release\n');
+  for (const args of [
+    ['init', '-q'],
+    ['add', '.'],
+    ['-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com', 'commit', '-q', '-m', 'fixture'],
+  ]) {
+    const result = spawnSync('git', ['-C', root, ...args], {encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  }
   return root;
 }
 
@@ -97,12 +108,12 @@ test('a readable but incomplete N20 distribution is UNKNOWN', async t => {
 
 test('ZERO_MISS keeps the manifest zero criterion after runtime FYS=0 binding', async t => {
   const checkout = await policyCheckout(t, 'ZERO_MISS');
-  const zero = await evidenceFixture(t, {fys: 0, observed: 0});
+  const zero = await evidenceFixture(t, {fys: 0, observed: 0, checkout});
   const positive = gate(zero, checkout);
   assert.equal(positive.result.status, 0, positive.result.stderr);
   assert.equal(positive.value.status, 'MET');
 
-  const nonzero = await evidenceFixture(t, {fys: 0, observed: 0, miss: 1});
+  const nonzero = await evidenceFixture(t, {fys: 0, observed: 0, miss: 1, checkout});
   const negative = gate(nonzero, checkout);
   assert.equal(negative.result.status, 1, negative.result.stderr);
   assert.equal(negative.value.status, 'NOT_MET');
