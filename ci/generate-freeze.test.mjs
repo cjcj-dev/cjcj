@@ -175,7 +175,7 @@ test('freeze generator roundtrips through G1 and keeps every negative control cl
     state.checkout, evidenceRoot, state.baseSdk, 2, 'TEST-ONLY-INJECTED-APPROVAL');
   const releaseFile = path.join(state.checkout, '.github/workflows/release.yml');
   const release = await fs.readFile(releaseFile, 'utf8');
-  await fs.writeFile(releaseFile, `${release}\n# one-byte-class test mutation\n`);
+  await fs.writeFile(releaseFile, `${release} `);
   const workflowNegative = g1(state.checkout, workflowBound.freezeFile);
   assert.equal(workflowNegative.result.status, 1, workflowNegative.result.stderr);
   assert.equal(workflowNegative.value.status, 'NOT_MET');
