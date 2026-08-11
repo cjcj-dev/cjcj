@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import {getTarget} from '../../../build/lib/targets.mjs';
-import {assertRuntimeSplit, hostLoaderPath} from '../../../build/lib/runtime-split.mjs';
+import {assertRuntimeSplit, targetLoaderPath} from '../../../build/lib/runtime-split.mjs';
 import {parseLlvmToolsManifest} from '../../llvm-tools-manifest.mjs';
 
 $.stdio = 'inherit';
@@ -127,8 +127,7 @@ assertRuntimeSplit({
   targetSdk: sdk,
   target,
 });
-const libraryPath = hostLoaderPath({
-  hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
+const libraryPath = targetLoaderPath({
   targetSdk: sdk,
   target,
   inherited: process.env[spec.loaderEnv] || '',
