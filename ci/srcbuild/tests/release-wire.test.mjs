@@ -80,6 +80,21 @@ test('component provenance, final std, and Python inputs are fail-closed in both
   assert.ok(consumer.includes('node ci/release/install_cjpm_artifact.mjs'));
 });
 
+test('private toolchain setup retains base SDK provenance and content-addressed bytes', async () => {
+  const [setup, platformSetup, provenance] = await Promise.all([
+    fs.readFile(path.join(root, 'ci/setup_sdk.mjs'), 'utf8'),
+    fs.readFile(path.join(root, 'ci/platform_matrix/build_cjcj.mjs'), 'utf8'),
+    fs.readFile(path.join(root, 'build/lib/release-component-provenance.mjs'), 'utf8'),
+  ]);
+  for (const source of [setup, platformSetup]) {
+    assert.ok(source.includes('persistBaseSdkProvenance({'));
+    assert.ok(source.includes('toolchainDir: cangjieHome'));
+  }
+  assert.ok(provenance.includes("path.join(root, '.cjv')"));
+  assert.ok(provenance.includes("path.join('archives', 'sha256', value.artifact.sha256, expected.archive)"));
+  assert.ok(provenance.includes('await fs.rename(temporary, destination)'));
+});
+
 test('release package runs the packaged std checker as a bounded fail-closed step', async () => {
   const consumer = await workflow('build-release-package.yml');
   const start = consumer.indexOf('- name: Verify packaged standard library');
