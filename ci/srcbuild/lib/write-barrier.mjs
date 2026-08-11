@@ -187,12 +187,26 @@ function inspectFunction(instructions, result) {
 }
 
 /**
- * Report-only by default: a std built before the pin carries the flag on would
- * fail this outright, so turning it on now would block the very build that has
- * to produce the fixed std. Flip the constant once the pin moves past
- * 743f41f7, which is when a green result becomes achievable.
+ * Fail-closed. The condition the previous comment set for flipping this -- "once
+ * the pin moves past 743f41f7" -- has been met: ci/llvm_pin.env pins
+ * LLVM_SHA=70a40482, `git merge-base --is-ancestor 743f41f7 70a40482` exits 0,
+ * and 70a40482..main is empty, so the pinned llc defaults the generational post
+ * barrier on. packages/driver/src/ToolOptions.cj:195 passes it explicitly too.
+ *
+ * What this checker reads is build-stage3.mjs:232 finalCore, the std this stage
+ * just built from source (:223 build.py install --prefix), never the bootstrap
+ * SDK's. Measured on kkk2 with the pinned llc and driver, both disassemblers
+ * agreeing: source-built core 19/19/0/0 (all nineteen resolve to the
+ * deliberately-allowed CJ_MCC_WriteStaticRef guard), stock nightly core
+ * 426/14/7/405. Flipping was verified both directions -- the stock arm exits 1,
+ * the source-built arm exits 0 -- so this blocks a real regression rather than
+ * the build that has to fix it.
+ *
+ * Only linux-x86_64 reaches here; assertStdBarriers returns early on the other
+ * targets, and Windows final std is produced on a path that does not call this
+ * at all. Those remain unchecked, not proven clean.
  */
-export const WRITE_BARRIER_FAIL_CLOSED = false;
+export const WRITE_BARRIER_FAIL_CLOSED = true;
 
 export function assertWriteBarriers(disassembly, label, {failClosed = WRITE_BARRIER_FAIL_CLOSED} = {}) {
   const counts = inspectWriteBarriers(disassembly);

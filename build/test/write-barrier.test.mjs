@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {assertWriteBarriers, inspectWriteBarriers} from '../../ci/srcbuild/lib/write-barrier.mjs';
+import {assertWriteBarriers, inspectWriteBarriers, WRITE_BARRIER_FAIL_CLOSED} from '../../ci/srcbuild/lib/write-barrier.mjs';
 
 // The verdict columns, without the lexer's own bookkeeping.
 const verdict = ({phaseChecks, staticGuarded, bypassed, unresolved}) =>
@@ -76,7 +76,12 @@ test('an empty disassembly is indeterminate, never a pass', () => {
   // is how this check fails in practice: point it at the wrong object, or run
   // objdump with flags whose line shape the patterns do not match, and every
   // counter is zero.
-  const lines = capture(() => assertWriteBarriers('', 'label=empty'));
+  // failClosed is passed explicitly rather than inherited: this asserts what the
+  // report-only arm prints, which is a property of the branch, not of whichever
+  // default the constant happens to carry. Both arms are covered -- the throwing
+  // one by 'fail-closed refuses a run that proved nothing' below, and the default
+  // itself by 'the shipped default is fail-closed'.
+  const lines = capture(() => assertWriteBarriers('', 'label=empty', {failClosed: false}));
   assert.equal(lines.filter(([, text]) => text.includes('STAGE3_WRITE_BARRIER_PASS')).length, 0);
   assert.match(lines[0][1], /STAGE3_WRITE_BARRIER_INDETERMINATE reason=no-phase-checks-resolved/);
   assert.equal(lines[0][0], 'err');
@@ -100,13 +105,24 @@ test('phase checks that tie to no callee are indeterminate, never a pass', () =>
   const counts = inspectWriteBarriers(opaque);
   assert.equal(counts.phaseChecks, 1);
   assert.equal(counts.bypassed, 0);
-  const lines = capture(() => assertWriteBarriers(opaque, 'label=opaque'));
+  const lines = capture(() => assertWriteBarriers(opaque, 'label=opaque', {failClosed: false}));
   assert.match(lines[0][1], /STAGE3_WRITE_BARRIER_INDETERMINATE reason=no-phase-check-tied-to-a-callee/);
 });
 
 test('fail-closed refuses a run that proved nothing', () => {
   assert.throws(() => assertWriteBarriers('', 'label=empty', {failClosed: true}),
     /STAGE3_WRITE_BARRIER_INDETERMINATE reason=no-phase-checks-resolved/);
+});
+
+test('the shipped default is fail-closed', () => {
+  // The constant is the whole difference between a check that blocks and one that
+  // prints. It sat at false while the stock std measured 405 bypasses, and nothing
+  // was red for as long as that lasted -- so the value itself gets a gate, not just
+  // the branches it selects. Asserted through the default path (no failClosed
+  // argument) so a change to the constant fails here rather than only in CI.
+  assert.equal(WRITE_BARRIER_FAIL_CLOSED, true);
+  assert.throws(() => assertWriteBarriers('', 'label=empty'),
+    /STAGE3_WRITE_BARRIER_INDETERMINATE/);
 });
 
 test('a resolved population still passes', () => {
