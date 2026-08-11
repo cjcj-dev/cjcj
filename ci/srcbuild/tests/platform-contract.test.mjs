@@ -405,14 +405,17 @@ test('source build keeps a version-matched plain host runtime across both bootst
 
   const activation = await fs.readFile(path.join(root, 'ci/srcbuild/steps/activate-source-sdk.mjs'), 'utf8');
   assert.ok(activation.includes('assertRuntimeSplit({'));
-  assert.ok(activation.includes('const libraryPath = hostLoaderPath({'));
+  assert.ok(activation.includes('const libraryPath = targetLoaderPath({'));
+  assert.ok(!activation.includes('const libraryPath = hostLoaderPath({'));
   assert.ok(activation.includes('CJCJ_SRCBUILD_HOST_CJC=${hostCompiler}'));
   assert.ok(!activation.includes('const libraryPath = [llvmLib, runtimeLib, toolsLib'));
 
   const common = await fs.readFile(path.join(root, 'build/srcbuild/stages/common.mjs'), 'utf8');
   assert.ok(common.includes("extraPathDirs.unshift(path.join(hostSdk, 'bin'))"));
   const stage1 = await fs.readFile(path.join(root, 'ci/srcbuild/steps/build-stage1.mjs'), 'utf8');
-  assert.ok(stage1.includes('PATH: `${path.dirname(hostCompiler)}${path.delimiter}'));
+  assert.ok(stage1.includes('hostLoaderPath({'));
+  assert.ok(stage1.includes("path.join(oracleCompilerDir, 'cjc')"));
+  assert.ok(stage1.includes('PATH: `${oracleCompilerDir}${path.delimiter}'));
   assert.ok(stage1.includes('await $({env: oracleEnv})`cjpm build`'));
 
   const stdx = await fs.readFile(path.join(root, 'build/srcbuild/stages/stdx.mjs'), 'utf8');
