@@ -177,6 +177,7 @@ jobs:
           npx --yes zx@8 ci/setup_sdk.mjs
           host_sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
           test -d "$host_sdk"
+          echo "CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk" >> "$GITHUB_ENV"
           echo "CJCJ_SRCBUILD_HOST_SDK=$host_sdk" >> "$GITHUB_ENV"
 
       - name: Install build dependencies
@@ -246,6 +247,9 @@ jobs:
 
       - name: Build compiler oracle
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
+
+      - name: Prepare source compiler host SDK
+        run: npx --yes zx@8 ci/srcbuild/steps/prepare-source-host-sdk.mjs
 
       - name: Build runtime from source
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build runtime
