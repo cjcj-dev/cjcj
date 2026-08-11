@@ -46,6 +46,7 @@ export const GATING = Object.freeze([
   'build/test/system-deps.test.mjs',
   'build/test/write-barrier.test.mjs',
   'ci/llvm-tools-manifest.test.mjs',
+  'ci/release-gates.test.mjs',
   'ci/srcbuild/tests/inject-version.test.mjs',
   'ci/srcbuild/tests/phase-control.test.mjs',
   'ci/srcbuild/tests/platform-contract.test.mjs',
@@ -83,8 +84,8 @@ export const DEFERRED = Object.freeze([
 
 // Floors, not equalities: adding tests must stay frictionless, dropping them must
 // not. Lower these only together with the deletion that requires it.
-export const GATING_FLOOR = 27;
-export const DISCOVERY_FLOOR = 29;
+export const GATING_FLOOR = 28;
+export const DISCOVERY_FLOOR = 30;
 
 // git rather than a directory walk: it enumerates what a runner checks out, and
 // --exclude-standard keeps build output and scratch copies out. --others is what
