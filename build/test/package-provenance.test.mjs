@@ -292,6 +292,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.match(listing, new RegExp(`${packageName}/${CJPM_PROVENANCE}`));
   assert.match(listing, new RegExp(`${packageName}/${GATE_APPARATUS_PROVENANCE}`));
   assert.match(listing, new RegExp(`${packageName}/llvm-tools\.manifest`));
+  assert.match(listing, new RegExp(`${packageName}/tools/check_sdk_usable\.mjs`));
   const packagedLlvmManifest = parsePackagedLlvmToolsManifest(
     await fs.readFile(path.join(out, packageName, 'llvm-tools.manifest'), 'utf8'),
   );
