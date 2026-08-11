@@ -204,7 +204,10 @@ test('five release manifests carry one nonempty SHA_ONLY policy and notes render
     const output = path.join(work, 'notes.md');
     const rendered = render(dist, output);
     assert.equal(rendered.status, 0, rendered.stderr);
-    assert.match(await fs.readFile(output, 'utf8'), /Signature policy: `SHA_ONLY`\./);
+    const notes = await fs.readFile(output, 'utf8');
+    assert.match(notes, /Signature policy: `SHA_ONLY`\./);
+    assert.match(notes,
+      /no detached signature, GitHub attestation, CycloneDX SBOM, or SPDX SBOM\./);
   } finally {
     await fs.rm(work, {recursive: true, force: true});
   }
