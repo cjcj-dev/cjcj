@@ -766,6 +766,38 @@ async function evaluateG12(context) {
   });
 }
 
+async function readG14Evidence(context, relative) {
+  const root = path.resolve(context.evidence);
+  const file = path.resolve(root, ...relative.split('/'));
+  const withinRoot = file === root || file.startsWith(`${root}${path.sep}`);
+  if (!withinRoot) throw new GateInputError('UNKNOWN', `G14 evidence path escapes archive root: ${relative}`);
+  return readAbsolute(file, {absence: 'UNKNOWN'});
+}
+
+function g14ObservedFys(row, label) {
+  const bound = String(row.fys_bound).split(',');
+  if (bound.length === 0 || bound.some(value => !/^[01]$/.test(value))) {
+    throw new GateInputError('UNKNOWN', `${label}.fys_bound does not contain runtime FYS values`);
+  }
+  const first = g12Integer(row.fallbackFullScan_obs, `${label}.fallbackFullScan_obs`);
+  if (first !== 0 && first !== 1) {
+    throw new GateInputError('UNKNOWN', `${label}.fallbackFullScan_obs is not 0 or 1`);
+  }
+  return new Set([...bound.map(Number), first]);
+}
+
+function g14Distribution(rows, field, label) {
+  const values = rows.map((row, index) => g12Integer(row[field], `${label}.${field}[${index}]`));
+  if (values.some(value => value < 0)) {
+    throw new GateInputError('UNKNOWN', `${label}.${field} contains a negative count`);
+  }
+  return {
+    nonzero_runs: values.filter(value => value > 0).length,
+    sum: values.reduce((sum, value) => sum + value, 0),
+    max: Math.max(...values),
+  };
+}
+
 async function evaluateG14(context) {
   const [manifest, release] = await Promise.all([
     readFile(context, 'build/lib/release-manifest.mjs'),
@@ -774,7 +806,86 @@ async function evaluateG14(context) {
   const text = `${manifest}\n${release}`;
   const choice = text.match(/idle[_-]?writer[_-]?policy\s*[:=]\s*['"](FYS_CENSUS|ZERO_MISS)['"]/i)?.[1];
   if (!choice) return gateResult('G14', 'NOT_MET', 'release config 未记录 A=FYS_CENSUS 或 B=ZERO_MISS 的唯一选择');
-  return gateResult('G14', 'UNKNOWN', `release choice=${choice}; 尚无与该选择绑定的启动日志或 N20 remsetMiss/missBare 证据`);
+  if (!context.evidence) {
+    return gateResult('G14', 'UNKNOWN',
+      `release choice=${choice}; 未指定 --evidence，无法读取运行期 FYS 与 N20 remsetMiss/missBare 证据`);
+  }
+
+  const expectedFys = choice === 'FYS_CENSUS' ? 1 : 0;
+  const [rawText, remsetText] = await Promise.all([
+    readG14Evidence(context, 'raw.tsv'),
+    readG14Evidence(context, 'remset.tsv'),
+  ]);
+  const rawRows = parseG12Tsv(rawText, 'G14 raw.tsv');
+  const remsetRows = parseG12Tsv(remsetText, 'G14 remset.tsv');
+  const remsetColumns = [
+    'round', 'load', 'fys', 'rc', 'minors', 'remsetMiss', 'missBare', 'missBareNeverSeen', 'status',
+  ];
+  const rawColumns = [
+    'round', 'load', 'fys', 'rc', 'minors', 'miss', 'missBare', 'missBareNeverSeen', 'status',
+    'fys_bound', 'fallbackFullScan_obs',
+  ];
+  requireG12Columns(rawRows, rawColumns, 'G14 raw.tsv');
+  requireG12Columns(remsetRows, remsetColumns, 'G14 remset.tsv');
+
+  const samples = {};
+  const bindingMismatches = [];
+  for (const load of ['O0', 'O2']) {
+    const raw = completeG12Rows(rawRows,
+      row => row.load === load && g12Integer(row.fys, `G14.raw.${load}.fys`) === expectedFys,
+      20, `G14.raw.${load}.FYS${expectedFys}`);
+    const remset = completeG12Rows(remsetRows,
+      row => row.load === load && g12Integer(row.fys, `G14.remset.${load}.fys`) === expectedFys,
+      20, `G14.remset.${load}.FYS${expectedFys}`);
+    if (raw.status === 'UNKNOWN') throw new GateInputError('UNKNOWN', raw.reason);
+    if (remset.status === 'UNKNOWN') throw new GateInputError('UNKNOWN', remset.reason);
+
+    const rawByRound = new Map(raw.rows.map(row => [g12Integer(row.round, `G14.raw.${load}.round`), row]));
+    for (const [index, row] of remset.rows.entries()) {
+      const round = g12Integer(row.round, `G14.remset.${load}.round[${index}]`);
+      const rawRow = rawByRound.get(round);
+      for (const [rawField, remsetField] of [
+        ['rc', 'rc'], ['minors', 'minors'], ['miss', 'remsetMiss'],
+        ['missBare', 'missBare'], ['missBareNeverSeen', 'missBareNeverSeen'],
+      ]) {
+        const rawValue = g12Integer(rawRow[rawField], `G14.raw.${load}.${rawField}[${index}]`);
+        const remsetValue = g12Integer(row[remsetField], `G14.remset.${load}.${remsetField}[${index}]`);
+        if (rawValue !== remsetValue) {
+          throw new GateInputError('UNKNOWN',
+            `G14 ${load} round=${round} disagrees between raw.tsv and remset.tsv for ${remsetField}`);
+        }
+      }
+      if (row.status !== 'OK' || rawRow.status !== 'OK' || g12Integer(row.rc, `G14.${load}.rc[${index}]`) !== 0 ||
+          g12Integer(row.minors, `G14.${load}.minors[${index}]`) < 1) {
+        throw new GateInputError('UNKNOWN', `G14 ${load} round=${round} is not a complete counter run`);
+      }
+      const observed = g14ObservedFys(rawRow, `G14.raw.${load}[${index}]`);
+      if (observed.size !== 1 || !observed.has(expectedFys)) bindingMismatches.push(`${load}:r${round}`);
+    }
+    samples[load] = {
+      runs: remset.rows.length,
+      remsetMiss: g14Distribution(remset.rows, 'remsetMiss', `G14.${load}`),
+      missBare: g14Distribution(remset.rows, 'missBare', `G14.${load}`),
+      missBareNeverSeen: g14Distribution(remset.rows, 'missBareNeverSeen', `G14.${load}`),
+    };
+  }
+
+  if (bindingMismatches.length > 0) {
+    return gateResult('G14', 'NOT_MET',
+      `release choice=${choice}; runtime FYS expected=${expectedFys}, mismatched=${bindingMismatches.length}/40 (${bindingMismatches.join(',')})`,
+      {choice, expected_fys: expectedFys, samples});
+  }
+  const summary = Object.entries(samples).map(([load, value]) =>
+    `${load}:N=${value.runs} remsetMiss[nz=${value.remsetMiss.nonzero_runs},sum=${value.remsetMiss.sum},max=${value.remsetMiss.max}] ` +
+      `missBareNeverSeen[nz=${value.missBareNeverSeen.nonzero_runs},sum=${value.missBareNeverSeen.sum},max=${value.missBareNeverSeen.max}]`)
+    .join('; ');
+  const zeroMiss = Object.values(samples).every(sample =>
+    sample.remsetMiss.sum === 0 && sample.missBare.sum === 0);
+  const status = choice === 'FYS_CENSUS' || zeroMiss ? 'MET' : 'NOT_MET';
+  const criterion = choice === 'FYS_CENSUS' ? 'census distribution recorded' : `zero_miss=${zeroMiss}`;
+  return gateResult('G14', status,
+    `release choice=${choice}; runtime FYS=${expectedFys} bound=40/40; ${summary}; ${criterion}`,
+    {choice, expected_fys: expectedFys, samples});
 }
 
 async function evaluateG15(context) {
