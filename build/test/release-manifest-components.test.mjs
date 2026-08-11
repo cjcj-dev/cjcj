@@ -7,10 +7,13 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {pathToFileURL} from 'node:url';
 import {
+  BASE_SDK_PROVENANCE,
   BASE_SDK_SOURCE_REASON,
   SOURCE_PROVENANCE_NOT_APPLICABLE,
   SOURCE_PROVENANCE_RESOLVED,
   baseSdkDownload,
+  persistBaseSdkProvenance,
+  writeBaseSdkProvenance,
 } from '../lib/release-component-provenance.mjs';
 import {
   GATE_APPARATUS_COMPONENT,
@@ -45,17 +48,112 @@ const writerRunner = [
 test('base SDK provenance maps every release platform to its nightly archive', () => {
   const version = 'nightly-1.2.0-alpha.20260721165458';
   const expected = new Map([
-    ['linux-x64', 'cangjie-sdk-linux-x64-1.2.0-alpha.20260721165458.tar.gz'],
-    ['linux-aarch64', 'cangjie-sdk-linux-aarch64-1.2.0-alpha.20260721165458.tar.gz'],
-    ['darwin-x64', 'cangjie-sdk-mac-x64-1.2.0-alpha.20260721165458.tar.gz'],
-    ['darwin-arm64', 'cangjie-sdk-mac-aarch64-1.2.0-alpha.20260721165458.tar.gz'],
-    ['windows-x64', 'cangjie-sdk-windows-x64-1.2.0-alpha.20260721165458.zip'],
+    ['linux-x64', [
+      'cangjie-sdk-linux-x64-1.2.0-alpha.20260721165458.tar.gz', 201639272,
+      '4490fd0ac553f4122b90ab6cb0d437bc6a5325fbe81e43643cc01d484a0dc0d6',
+    ]],
+    ['linux-aarch64', [
+      'cangjie-sdk-linux-aarch64-1.2.0-alpha.20260721165458.tar.gz', 203100802,
+      '461e8d1c2f81b540d9c270c92333e57af60980e8c0e1f59b051f6c8906449320',
+    ]],
+    ['darwin-x64', [
+      'cangjie-sdk-mac-x64-1.2.0-alpha.20260721165458.tar.gz', 173277379,
+      '7546e5cbf8cffce60d91f65de17c4d7fb88abb960e4238fad0a26765182eef07',
+    ]],
+    ['darwin-arm64', [
+      'cangjie-sdk-mac-aarch64-1.2.0-alpha.20260721165458.tar.gz', 164273695,
+      '4c2b55321697bcac5da5e8ba349fc4405212c4e0f3e7105cfa78457a14810138',
+    ]],
+    ['windows-x64', [
+      'cangjie-sdk-windows-x64-1.2.0-alpha.20260721165458.zip', 263516382,
+      'fa121323c4b411501690fe67169982215a7872e671df8007d85070c8afffa672',
+    ]],
   ]);
-  for (const [platform, archive] of expected) {
+  for (const [platform, [archive, size, sha256]] of expected) {
     const value = baseSdkDownload(platform, version);
     assert.equal(value.archive, archive);
     assert.ok(value.url.endsWith(`/1.2.0-alpha.20260721165458/${archive}`));
+    assert.equal(value.size, size);
+    assert.equal(value.sha256, sha256);
   }
+});
+
+test('base SDK provenance refuses an archive outside the pinned digest', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'base-sdk-pin-negative-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const expected = baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN);
+  const archive = path.join(root, expected.archive);
+  const destination = path.join(root, BASE_SDK_PROVENANCE);
+  await fs.writeFile(archive, 'tampered base SDK archive\n');
+  await fs.writeFile(destination, '{"sentinel":"complete-old-value"}\n');
+  await assert.rejects(
+    writeBaseSdkProvenance({
+      archive,
+      destination,
+      platform: 'linux-x64',
+      toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+    }),
+    new RegExp(`base SDK archive SHA-256 mismatch for linux-x64: expected ${expected.sha256}, got [0-9a-f]{64}`),
+  );
+  assert.equal(await fs.readFile(destination, 'utf8'), '{"sentinel":"complete-old-value"}\n');
+});
+
+test('base SDK provenance is atomically retained with a content-addressed archive', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'base-sdk-durable-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const toolchain = path.join(root, 'private-toolchain');
+  const expected = baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN);
+  const archive = path.join(root, expected.archive);
+  const inputSidecar = path.join(root, BASE_SDK_PROVENANCE);
+  const contents = Buffer.from('fixture base SDK archive\n');
+  const sha256 = digest(contents);
+  await fs.mkdir(toolchain);
+  await fs.writeFile(archive, contents);
+  await fs.writeFile(inputSidecar, `${JSON.stringify({
+    schema: 1,
+    component: 'base-sdk',
+    platform: 'linux-x64',
+    source: {
+      status: SOURCE_PROVENANCE_NOT_APPLICABLE,
+      reason: BASE_SDK_SOURCE_REASON,
+    },
+    release: {
+      repository: expected.releaseRepository,
+      version: expected.version,
+      download_url: expected.url,
+    },
+    artifact: {path: expected.archive, size: contents.length, sha256},
+  }, null, 2)}\n`);
+
+  const retained = await persistBaseSdkProvenance({
+    archive,
+    sidecar: inputSidecar,
+    toolchainDir: toolchain,
+    platform: 'linux-x64',
+    toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+  });
+  assert.equal(await fs.readFile(retained.cachedArchive, 'utf8'), contents.toString());
+  assert.equal(retained.provenance.artifact.size, contents.length);
+  assert.equal(retained.provenance.artifact.sha256, sha256);
+  assert.equal(retained.provenance.artifact.cache_path,
+    `archives/sha256/${sha256}/${expected.archive}`);
+  assert.deepEqual(JSON.parse(await fs.readFile(retained.sidecar, 'utf8')), retained.provenance);
+
+  const completeSidecar = await fs.readFile(retained.sidecar, 'utf8');
+  await fs.writeFile(archive, 'changed after provenance capture\n');
+  await assert.rejects(
+    persistBaseSdkProvenance({
+      archive,
+      sidecar: inputSidecar,
+      toolchainDir: toolchain,
+      platform: 'linux-x64',
+      toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+    }),
+    /base SDK provenance archive size mismatch|base SDK provenance archive SHA-256 mismatch/,
+  );
+  assert.equal(await fs.readFile(retained.sidecar, 'utf8'), completeSidecar);
+  const metadataEntries = await fs.readdir(path.join(toolchain, '.cjv'));
+  assert.equal(metadataEntries.some(name => name.endsWith('.partial')), false);
 });
 
 async function write(root, relative, contents) {
