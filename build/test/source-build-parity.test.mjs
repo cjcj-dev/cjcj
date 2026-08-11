@@ -422,6 +422,7 @@ test('Linux source stages emit the Python command order', async () => {
       expectedCommands.push(expected(root, cwd, installArgs));
     }
     expectedCommands.push(
+      expected(root, null, ['chmod', '-R', 'u+rwX,go+rX', path.join(workspace, 'software', 'cangjie')]),
       expected(root, null, ['tar', '--format=gnu', '-czf', path.join(workspace, 'software', 'cangjie-sdk-linux-x64-1.2.3.tar.gz'), '-C', path.join(workspace, 'software'), 'cangjie']),
       expected(root, null, ['tar', '--format=gnu', '-czf', path.join(workspace, 'software', 'cangjie-stdx-linux-x64-1.2.3.1.tar.gz'), '-C', path.join(workspace, 'software'), 'linux_x86_64_cjnative']),
       expected(root, path.join(workspace, 'verify'), [
