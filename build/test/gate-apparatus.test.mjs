@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,8 +7,9 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {
   BASE_SDK_PROVENANCE,
+  BASE_SDK_SOURCE_REASON,
+  SOURCE_PROVENANCE_NOT_APPLICABLE,
   baseSdkDownload,
-  writeBaseSdkProvenance,
 } from '../lib/release-component-provenance.mjs';
 import {
   GATE_APPARATUS_PROVENANCE,
@@ -28,12 +30,27 @@ test('gate apparatus is captured from the pinned uncoloured host runtime', async
   const archive = path.join(root, baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN).archive);
   await fs.writeFile(archive, 'fixture SDK archive\n');
   const baseSidecar = path.join(root, BASE_SDK_PROVENANCE);
-  await writeBaseSdkProvenance({
-    archive,
-    destination: baseSidecar,
+  const baseDownload = baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN);
+  const archiveBytes = await fs.readFile(archive);
+  await fs.writeFile(baseSidecar, `${JSON.stringify({
+    schema: 1,
+    component: 'base-sdk',
     platform: 'linux-x64',
-    toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
-  });
+    source: {
+      status: SOURCE_PROVENANCE_NOT_APPLICABLE,
+      reason: BASE_SDK_SOURCE_REASON,
+    },
+    release: {
+      repository: baseDownload.releaseRepository,
+      version: baseDownload.version,
+      download_url: baseDownload.url,
+    },
+    artifact: {
+      path: baseDownload.archive,
+      size: archiveBytes.length,
+      sha256: crypto.createHash('sha256').update(archiveBytes).digest('hex'),
+    },
+  }, null, 2)}\n`);
   const githubEnv = path.join(root, 'github.env');
   const output = path.join(root, 'out');
   const captured = spawnSync(process.execPath, [
