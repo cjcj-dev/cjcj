@@ -109,7 +109,7 @@ await fs.copyFile(manifestFile, path.join(sdk, 'third_party', 'llvm', 'LLVM_TOOL
 
 const runtimeLib = path.join(sdk, 'runtime', 'lib', spec.runtimeTuple);
 const toolsLib = path.join(sdk, 'tools', 'lib');
-const hostCompiler = path.join(hostSdk, 'bin', 'cjc');
+const hostCompiler = path.join(sdk, 'bin', 'cjc');
 for (const directory of [llvmLib, runtimeLib, toolsLib, spec.opensslLibDir]) {
   if (directory) await fs.access(directory);
 }
