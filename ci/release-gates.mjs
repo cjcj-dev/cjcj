@@ -313,6 +313,15 @@ function validMeasurementTime(value) {
 
 async function validateEvidenceBinding(gate, context, evidence) {
   const root = path.resolve(evidence);
+  let rootStat;
+  try {
+    rootStat = await fs.lstat(root);
+  } catch (error) {
+    throw new GateInputError('UNKNOWN', `cannot inspect evidence root ${root}: ${error.code || error.message}`);
+  }
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new GateInputError('UNKNOWN', `evidence root is not a direct directory: ${root}`);
+  }
   const bindingFile = path.join(root, EVIDENCE_BINDING);
   const binding = parseEvidenceJson(await readAbsolute(bindingFile, {absence: 'UNKNOWN'}), bindingFile);
   const failures = [];
@@ -395,6 +404,16 @@ async function discoverEvidenceContext(gate, context) {
   const relative = registry.gates[gate];
   if (relative === undefined) return context;
   const evidence = evidenceRelativeFile(root, relative, `registry.gates.${gate}`);
+  let realRoot;
+  let realEvidence;
+  try {
+    [realRoot, realEvidence] = await Promise.all([fs.realpath(root), fs.realpath(evidence)]);
+  } catch (error) {
+    throw new GateInputError('UNKNOWN', `cannot resolve registered ${gate} evidence: ${error.code || error.message}`);
+  }
+  if (!realEvidence.startsWith(`${realRoot}${path.sep}`)) {
+    throw new GateInputError('UNKNOWN', `registry.gates.${gate} resolves outside its evidence root`);
+  }
   await validateEvidenceBinding(gate, context, evidence);
   return {...context, evidence};
 }
