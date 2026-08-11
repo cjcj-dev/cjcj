@@ -609,7 +609,8 @@ function evaluateG12F4(candidateText, controlText, floor) {
 
 function evaluateG12F5(rows, floor, profileName) {
   requireG12Columns(rows,
-    ['round', 'load', 'fys', 'rc', 'minors', 'miss', 'remsetSizeHint', 'status'], 'G12 remset.tsv');
+    ['round', 'load', 'fys', 'rc', 'minors', 'missBareNeverSeen', 'remsetSizeHint', 'status'],
+    'G12 remset.tsv');
   const criterion = floor.blocking.find(item => item.id === 'F5');
   const profile = floor.measurement.profiles[profileName];
   const counts = {};
@@ -625,12 +626,12 @@ function evaluateG12F5(rows, floor, profileName) {
       }
     }
     counts[load] = selected.rows.reduce((sum, row, index) =>
-      sum + g12Integer(row.miss, `F5.${load}.miss[${index}]`), 0);
+      sum + g12Integer(row.missBareNeverSeen, `F5.${load}.missBareNeverSeen[${index}]`), 0);
   }
   const controls = rows.filter(row => row.load === 'CTRL' &&
     g12Integer(row.fys, 'F5.CTRL.fys') === profile.full_young_scan);
   const control = controls.reduce((sum, row, index) =>
-    sum + g12Integer(row.miss, `F5.CTRL.miss[${index}]`), 0);
+    sum + g12Integer(row.missBareNeverSeen, `F5.CTRL.missBareNeverSeen[${index}]`), 0);
   if (control < criterion.positive_control_minimum) {
     return g12Criterion('F5', 'UNKNOWN',
       `counts=${JSON.stringify(counts)} positive_control=${control}; required>=${criterion.positive_control_minimum}`);
