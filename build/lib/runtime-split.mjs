@@ -21,18 +21,44 @@ function requireRuntime(file, label) {
   return file;
 }
 
+function runtimeRelativePath(target, role) {
+  const host = role === 'host';
+  return path.join(
+    'runtime',
+    'lib',
+    host ? (target.spec.hostRuntimeTuple || target.spec.runtimeTuple) : target.spec.runtimeTuple,
+    host ? (target.spec.hostRuntimeLibrary || target.spec.runtimeLibrary) : target.spec.runtimeLibrary,
+  );
+}
+
+export function assertPlainHostRuntime({
+  hostSdk,
+  target,
+  readSymbols = readRuntimeSymbols,
+  log = console.log,
+}) {
+  const hostRoot = requireDirectory(hostSdk, 'CJCJ_SRCBUILD_HOST_SDK');
+  const hostRuntime = requireRuntime(
+    path.join(hostRoot, runtimeRelativePath(target, 'host')),
+    'host',
+  );
+  const hostCount = countLoadBadMask(readSymbols(hostRuntime, target));
+  if (hostCount !== 0) {
+    throw new BuildError(
+      'runtime.split',
+      `${LOAD_BAD_MASK_SYMBOL} count contract failed: host=${hostCount} path=${hostRuntime}; expected host=0`,
+    );
+  }
+  const hostReal = fs.realpathSync(hostRuntime);
+  log(`HOST_RUNTIME_ASSERT_PASS host=${hostCount} path=${hostReal}`);
+  return {hostSdk: hostRoot, hostRuntime: hostReal, hostCount};
+}
+
 export function runtimeSplitPaths({hostSdk, targetSdk, target}) {
   const hostRoot = requireDirectory(hostSdk, 'CJCJ_SRCBUILD_HOST_SDK');
   const targetRoot = requireDirectory(targetSdk, 'target SDK');
-  const hostRelative = path.join(
-    'runtime',
-    'lib',
-    target.spec.hostRuntimeTuple || target.spec.runtimeTuple,
-    target.spec.hostRuntimeLibrary || target.spec.runtimeLibrary,
-  );
-  const targetRelative = path.join(
-    'runtime', 'lib', target.spec.runtimeTuple, target.spec.runtimeLibrary,
-  );
+  const hostRelative = runtimeRelativePath(target, 'host');
+  const targetRelative = runtimeRelativePath(target, 'target');
   return {
     hostSdk: hostRoot,
     targetSdk: targetRoot,
