@@ -89,7 +89,9 @@ test('tuple fetch unzip prerequisite cannot turn a failed tool into BLOCKED succ
   );
 });
 
-test('tuple fetch script rejects an unsupported non-dry-run host', () => {
+test('tuple fetch script rejects an unsupported non-dry-run host', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tuple-fetch-host-negative-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
   const target = pathToFileURL(path.resolve('ci/platform_matrix/fetch_llvm_tuple.mjs')).href;
   const evaluate = [
     'Object.defineProperty(process, "platform", {value: "freebsd"});',
@@ -97,7 +99,11 @@ test('tuple fetch script rejects an unsupported non-dry-run host', () => {
   ].join(' ');
   const result = spawnSync(zxCommand.command, [...zxCommand.prefix, '--eval', evaluate], {
     encoding: 'utf8',
-    env: {...process.env, TUPLE_DRY_RUN: '0'},
+    env: {
+      ...process.env,
+      PLATFORM_CI_ROOT: path.join(root, 'platform-ci'),
+      TUPLE_DRY_RUN: '0',
+    },
   });
   const output = `${result.stdout}\n${result.stderr}`;
   assert.equal(result.status, 78, output);
