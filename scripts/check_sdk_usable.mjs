@@ -258,7 +258,7 @@ function runtimeResolution(lddOutput) {
   return match?.[1] || '';
 }
 
-function gcWorkloadCheck(sdk, sdkEnv, options, work) {
+function gcWorkloadCheck(sdk, sdkEnv, options, work, progress) {
   if (!options.gcWorkload) {
     return {state: STATES.UNKNOWN, detail: 'required --gc-workload e75cdefd was not supplied'};
   }
@@ -300,6 +300,7 @@ function gcWorkloadCheck(sdk, sdkEnv, options, work) {
   let passed = 0;
   let firstFailure = '';
   for (let run = 1; run <= options.gcRuns; run += 1) {
+    progress?.(`U4_GC_LOAD run=${run}/${options.gcRuns}`);
     const result = probe(workload, [], {
       cwd: work,
       env: {...sdkEnv, cjHeapSize: '256MB'},
@@ -355,7 +356,7 @@ function executableInventory(sdk) {
   return entries;
 }
 
-function toolAudit(sdk, sdkEnv, work, timeoutMs, details) {
+function toolAudit(sdk, sdkEnv, work, timeoutMs, details, progress) {
   const tools = executableInventory(sdk);
   if (tools.length === 0) return {state: STATES.FAIL, detail: 'no tools found in SDK executable directories'};
   const failures = [];
@@ -365,6 +366,7 @@ function toolAudit(sdk, sdkEnv, work, timeoutMs, details) {
   let versionPass = 0;
   let intentional = 0;
   for (const tool of tools) {
+    progress?.(`U6_TOOLS ${tool.relative}`);
     try {
       fs.accessSync(tool.absolute, fs.constants.X_OK);
     } catch {
@@ -646,7 +648,7 @@ const ALL_CRITERIA = Object.freeze([
   'C9_STD_UNCOLOUR',
 ]);
 
-export function runSdkUsability(options, {onResult} = {}) {
+export function runSdkUsability(options, {onResult, onProgress} = {}) {
   const recorder = makeRecorder(onResult);
   const details = [];
   let sdk;
@@ -663,24 +665,34 @@ export function runSdkUsability(options, {onResult} = {}) {
   const work = options.workDir ? path.resolve(options.workDir) : fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-usable-'));
   fs.mkdirSync(work, {recursive: true});
 
+  onProgress?.('U1_DIRECT_CJC');
   const direct = directCompilerVersion(sdk, work, options.timeoutMs);
   recorder.record('U1_DIRECT_CJC', direct.state, direct.detail);
+  onProgress?.('U2_ENVSETUP');
   const environment = loadSdkEnvironment(sdk, work, options.timeoutMs);
   recorder.record('U2_ENVSETUP', environment.state, environment.detail);
+  onProgress?.('U3_MINIMAL_RUN');
   const minimal = minimalCompileAndRun(sdk, environment.env, work, options.timeoutMs);
   recorder.record('U3_MINIMAL_RUN', minimal.state, minimal.detail);
-  const gc = gcWorkloadCheck(sdk, environment.env, options, work);
+  onProgress?.('U4_GC_LOAD');
+  const gc = gcWorkloadCheck(sdk, environment.env, options, work, onProgress);
   recorder.record('U4_GC_LOAD', gc.state, gc.detail);
+  onProgress?.('U5_CJPM_BUILD');
   const cjpm = cjpmProjectCheck(sdk, environment.env, work, options.timeoutMs);
   recorder.record('U5_CJPM_BUILD', cjpm.state, cjpm.detail);
-  const tools = toolAudit(sdk, environment.env, work, options.timeoutMs, details);
+  onProgress?.('U6_TOOLS');
+  const tools = toolAudit(sdk, environment.env, work, options.timeoutMs, details, onProgress);
   recorder.record('U6_TOOLS', tools.state, tools.detail);
+  onProgress?.('U7_LAYOUT');
   const layout = layoutCheck(sdk);
   recorder.record('U7_LAYOUT', layout.state, layout.detail);
+  onProgress?.('U8_PERMISSIONS_LINKS');
   const permissions = permissionsAndLinksCheck(sdk);
   recorder.record('U8_PERMISSIONS_LINKS', permissions.state, permissions.detail);
+  onProgress?.('U9_IDENTITY');
   const identity = identityCheck(sdk, work, options.timeoutMs, details);
   recorder.record('U9_IDENTITY', identity.state, identity.detail);
+  onProgress?.('C9_STD_UNCOLOUR');
   const c9 = c9Check(sdk, work, options.timeoutMs);
   recorder.record('C9_STD_UNCOLOUR', c9.state, c9.detail);
   return {sdk, results: recorder.results, details, work, ownedWork};
@@ -711,7 +723,10 @@ export function main(args = process.argv.slice(2)) {
     console.log(usage());
     return 0;
   }
-  const report = runSdkUsability(options);
+  const report = runSdkUsability(options, {
+    onProgress: message => console.log(`PROBE_START ${message}`),
+    onResult: result => console.log(`PROBE_RESULT ${result.id} ${result.state} ${result.detail}`),
+  });
   const summary = printReport(report);
   if (report.work && report.ownedWork && !options.keepWork) fs.rmSync(report.work, {recursive: true, force: true});
   else if (report.work) console.log(`WORK_DIR=${report.work}`);
