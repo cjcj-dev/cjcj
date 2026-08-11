@@ -12,6 +12,14 @@ const SHA40 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const STATUSES = new Set(['MET', 'NOT_MET', 'UNKNOWN']);
 const PLATFORMS = ['linux-x64', 'linux-aarch64', 'windows-x64', 'darwin-arm64', 'darwin-x64'];
+const G2_ARTIFACTS = [
+  'runtime_dynamic',
+  'runtime_static',
+  'llvm_llc',
+  'llvm_opt',
+  'cjcj',
+  'std',
+];
 
 const GATES = Object.freeze({
   G1: {name: '冻结输入'},
@@ -332,17 +340,186 @@ async function loaderlifeResult(context, gate = 'G13') {
   return gateResult(gate, 'UNKNOWN', `runtime ancestry unreadable: ${commandFailure(probe)}; repo=${runtimeRepo}`);
 }
 
+function plainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function exactKeys(value, allowed, label, failures) {
+  if (!plainObject(value)) return;
+  const extra = Object.keys(value).filter(key => !allowed.includes(key));
+  if (extra.length) failures.push(`${label} additionalProperties=${extra.join(',')}`);
+}
+
+function g2IdentitySchemaState(identity, schema) {
+  const missing = [];
+  const invalid = [];
+  const pending = [];
+  if (!plainObject(identity)) {
+    return {status: 'NOT_MET', detail: 'G2_IDENTITY.json schema failure: root must be an object'};
+  }
+
+  const rootProperties = Object.keys(schema?.properties || {});
+  const rootRequired = schema?.required || [];
+  if (schema?.type !== 'object' || schema?.properties?.schema_version?.const !== 1 ||
+      JSON.stringify(schema?.properties?.status?.enum) !== JSON.stringify(['PENDING', 'READY']) ||
+      JSON.stringify(schema?.properties?.artifacts?.required) !== JSON.stringify(G2_ARTIFACTS)) {
+    return {status: 'UNKNOWN', detail: 'g2-identity.schema.json does not define the expected six-slot v1 contract'};
+  }
+  exactKeys(identity, rootProperties, 'root', invalid);
+  for (const field of rootRequired) {
+    if (!Object.hasOwn(identity, field)) missing.push(field);
+  }
+  if (identity.schema_version !== 1) invalid.push(`schema_version=${String(identity.schema_version)}`);
+  const campaignPattern = new RegExp(schema.properties.campaign_id.pattern);
+  if (Object.hasOwn(identity, 'campaign_id') &&
+      (typeof identity.campaign_id !== 'string' || !campaignPattern.test(identity.campaign_id))) {
+    invalid.push('campaign_id');
+  }
+  const shaPattern = new RegExp(schema.properties.cjcj_head_sha.pattern);
+  if (Object.hasOwn(identity, 'cjcj_head_sha') &&
+      (typeof identity.cjcj_head_sha !== 'string' || !shaPattern.test(identity.cjcj_head_sha))) {
+    invalid.push('cjcj_head_sha');
+  }
+  if (Object.hasOwn(identity, 'status') && !schema.properties.status.enum.includes(identity.status)) {
+    invalid.push(`status=${String(identity.status)}`);
+  }
+  const ready = identity.status === 'READY';
+  if (Object.hasOwn(identity, 'captured_utc')) {
+    if (identity.captured_utc === null) {
+      if (ready) missing.push('captured_utc');
+      else pending.push('captured_utc');
+    } else if (typeof identity.captured_utc !== 'string' ||
+               !new RegExp(schema.properties.captured_utc.pattern).test(identity.captured_utc)) {
+      invalid.push('captured_utc');
+    }
+  }
+
+  const artifactSchema = schema.$defs?.artifact_slot;
+  const artifactFields = artifactSchema?.required || [];
+  if (!plainObject(identity.artifacts)) {
+    if (Object.hasOwn(identity, 'artifacts')) invalid.push('artifacts');
+  } else {
+    exactKeys(identity.artifacts, G2_ARTIFACTS, 'artifacts', invalid);
+    for (const name of G2_ARTIFACTS) {
+      const artifact = identity.artifacts[name];
+      if (!Object.hasOwn(identity.artifacts, name)) {
+        missing.push(`artifacts.${name}`);
+        continue;
+      }
+      if (!plainObject(artifact)) {
+        invalid.push(`artifacts.${name}`);
+        continue;
+      }
+      exactKeys(artifact, artifactFields, `artifacts.${name}`, invalid);
+      for (const field of artifactFields) {
+        const label = `artifacts.${name}.${field}`;
+        if (!Object.hasOwn(artifact, field)) {
+          missing.push(label);
+          continue;
+        }
+        const value = artifact[field];
+        if (value === null) {
+          if (ready) missing.push(label);
+          else pending.push(label);
+          continue;
+        }
+        if (field === 'source_dirty') {
+          if (typeof value !== 'boolean') invalid.push(label);
+        } else if (typeof value !== 'string' || value.length === 0) {
+          invalid.push(label);
+        } else if (field === 'sha256' && !SHA256.test(value)) {
+          invalid.push(label);
+        } else if (field === 'source_commit' && !SHA40.test(value)) {
+          invalid.push(label);
+        }
+      }
+    }
+  }
+
+  if (missing.length) return {status: 'UNKNOWN', detail: `G2_IDENTITY.json missing=${missing.join(',')}`};
+  if (invalid.length) return {status: 'NOT_MET', detail: `G2_IDENTITY.json schema_failures=${invalid.join(';')}`};
+  if (!ready) {
+    return {status: 'UNKNOWN',
+      detail: `G2_IDENTITY.json status=PENDING; missing=status=READY${pending.length ? `,${pending.join(',')}` : ''}`};
+  }
+  return {status: 'MET', detail: 'G2_IDENTITY.json status=READY and schema complete'};
+}
+
+function parseG2Json(text, label) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new GateInputError('UNKNOWN', `${label} is unreadable JSON: ${error.message}`);
+  }
+}
+
 async function evaluateG2(context) {
   const ancestry = await loaderlifeResult(context, 'G2');
   if (ancestry.status !== 'MET') return ancestry;
   if (!context.evidence) {
-    return gateResult('G2', 'UNKNOWN', `${ancestry.value}; 未指定持久 evidence，无法读取同轮 runtime 动/静态库、LLVM、cjcj、std 的二进制戳与 dirty 状态`);
+    return gateResult('G2', 'UNKNOWN', `${ancestry.value}; missing=--evidence archive,` +
+      'G2_IDENTITY.json.status=READY,G2_IDENTITY.json.captured_utc,' +
+      'G2_IDENTITY.json.artifacts.{runtime_dynamic,runtime_static,llvm_llc,llvm_opt,cjcj,std}.' +
+      '{artifact_path,sha256,provenance_stamp,source_commit,source_dirty}');
   }
   const verifier = path.join(context.repo, 'scripts/archive_release_evidence.mjs');
   const verified = spawn(process.execPath, [verifier, 'verify', '--archive', context.evidence], {cwd: context.repo});
   if (verified.error) return gateResult('G2', 'UNKNOWN', `evidence verifier unavailable: ${verified.error.message}`);
   if (verified.status !== 0) return gateResult('G2', 'NOT_MET', `evidence rejected: ${commandFailure(verified)}`);
-  return gateResult('G2', 'UNKNOWN', 'release evidence archive is internally valid, but its current schema does not enumerate both runtime dynamic/static artifacts; G2 cannot be promoted to MET from incomplete identity evidence');
+
+  const identityFile = path.join(path.dirname(path.resolve(context.evidence)), 'G2_IDENTITY.json');
+  const [identityText, schemaText, runText, pins] = await Promise.all([
+    readAbsolute(identityFile, {absence: 'UNKNOWN'}),
+    readFile(context, 'ci/release-evidence/g2-identity.schema.json', {absence: 'UNKNOWN'}),
+    readAbsolute(path.join(context.evidence, 'run.json'), {absence: 'UNKNOWN'}),
+    loadPins(context),
+  ]);
+  const identity = parseG2Json(identityText, identityFile);
+  const schema = parseG2Json(schemaText, 'ci/release-evidence/g2-identity.schema.json');
+  const run = parseG2Json(runText, path.join(context.evidence, 'run.json'));
+  const schemaState = g2IdentitySchemaState(identity, schema);
+  if (schemaState.status !== 'MET') {
+    return gateResult('G2', schemaState.status, `${ancestry.value}; archive=valid; ${schemaState.detail}`);
+  }
+
+  const failures = [];
+  if (!identity.campaign_id.startsWith(`${identity.cjcj_head_sha}-`)) {
+    failures.push('campaign_id does not bind cjcj_head_sha');
+  }
+  if (run.head_sha !== identity.cjcj_head_sha) {
+    failures.push(`archive head=${run.head_sha || '<missing>'} identity head=${identity.cjcj_head_sha}`);
+  }
+  const expectedCommits = {
+    runtime_dynamic: pins.runtime.RUNTIME_REF,
+    runtime_static: pins.runtime.RUNTIME_REF,
+    llvm_llc: pins.llvm.LLVM_SHA,
+    llvm_opt: pins.llvm.LLVM_SHA,
+    cjcj: identity.cjcj_head_sha,
+  };
+  const stampPrefixes = {
+    runtime_dynamic: 'CJRT-COMMIT',
+    runtime_static: 'CJRT-COMMIT',
+    llvm_llc: 'CJLLVM-COMMIT',
+    llvm_opt: 'CJLLVM-COMMIT',
+    cjcj: 'CJCJ-COMMIT',
+    std: 'CJSTD-COMMIT',
+  };
+  for (const name of G2_ARTIFACTS) {
+    const artifact = identity.artifacts[name];
+    const expectedCommit = expectedCommits[name];
+    if (expectedCommit && artifact.source_commit !== expectedCommit) {
+      failures.push(`${name}.source_commit=${artifact.source_commit} expected=${expectedCommit}`);
+    }
+    if (artifact.source_dirty !== false) failures.push(`${name}.source_dirty=${artifact.source_dirty}`);
+    const marker = `${stampPrefixes[name]}:${artifact.source_commit}`;
+    if (!artifact.provenance_stamp.includes(marker)) failures.push(`${name}.provenance_stamp lacks ${marker}`);
+    if (artifact.provenance_stamp.includes('-dirty')) failures.push(`${name}.provenance_stamp is dirty`);
+  }
+  if (failures.length) {
+    return gateResult('G2', 'NOT_MET', `${ancestry.value}; archive=valid; identity=READY; failures=${failures.join(';')}`);
+  }
+  return gateResult('G2', 'MET', `${ancestry.value}; archive=valid; G2_IDENTITY.json READY; ` +
+    'six slots schema-complete, clean, stamped, and bound to archive head/runtime/LLVM pins');
 }
 
 function runTests(context, files) {
@@ -407,14 +584,183 @@ async function evaluateG5(context) {
     `classes=5 workflow_consumers=1 bounded_fail_closed=yes; ${tests.detail}`);
 }
 
-async function evaluateG8(context) {
-  const manifest = await readFile(context, 'build/lib/release-manifest.mjs');
-  const recordsFreezeBaseline = /(?:freeze|frozen)[A-Za-z0-9_]*baseline/i.test(manifest) &&
-    ['difftest', 'smoke', 'bcgate', 'verify_exit'].every(field => manifest.includes(field));
-  if (!recordsFreezeBaseline) {
-    return gateResult('G8', 'NOT_MET', '判据 0811 已更新；release manifest 尚未记录 freeze 基线的 difftest/smoke/bcgate/VERIFY 数值，旧 2005/2472/467 不沿用');
+const G8_METRIC_PATHS = [
+  'difftest.total',
+  'difftest.pass',
+  'difftest.mismatch',
+  'difftest.fail',
+  'smoke.pass',
+  'smoke.fail',
+  'bcgate.shared',
+  'bcgate.byte_identical',
+  'bcgate.differing',
+  'bcgate.compile_errors',
+  'verify_exit',
+];
+
+function nestedField(value, dotted) {
+  return dotted.split('.').reduce((current, field) => current?.[field], value);
+}
+
+function validateG8Metrics(value, label, {pending = false} = {}) {
+  const missing = [];
+  const invalid = [];
+  for (const metric of G8_METRIC_PATHS) {
+    const actual = nestedField(value, metric);
+    if (actual === undefined || actual === null) {
+      missing.push(`${label}.${metric}`);
+    } else if (!Number.isSafeInteger(actual) || actual < 0) {
+      invalid.push(`${label}.${metric}=${String(actual)}`);
+    }
   }
-  return gateResult('G8', 'UNKNOWN', '判据 0811 已更新；manifest 已有 freeze-baseline 字段，但未提供绑定当前 freeze 的实测 manifest，不能判 MET/NOT_MET');
+  if (pending) return {status: 'UNKNOWN', detail: `missing=status=READY,${missing.join(',')}`};
+  if (missing.length) return {status: 'UNKNOWN', detail: `missing=${missing.join(',')}`};
+  if (invalid.length) return {status: 'NOT_MET', detail: `invalid=${invalid.join(',')}`};
+  return {status: 'MET', detail: 'complete'};
+}
+
+async function loadG8Floor(context) {
+  if (context.ref) throw new GateInputError('UNKNOWN', 'G8 evidence evaluation requires a checkout, not --ref');
+  const file = path.join(context.repo, 'build', 'lib', 'full-gate-release-floor.mjs');
+  let imported;
+  try {
+    imported = await import(pathToFileURL(file).href);
+  } catch (error) {
+    throw new GateInputError('UNKNOWN', `cannot load frozen G8 floor: ${error.code || error.message}`);
+  }
+  const floor = imported.FULL_GATE_RELEASE_FLOOR;
+  if (!plainObject(floor) || floor.schema !== 1) {
+    throw new GateInputError('UNKNOWN', 'frozen G8 floor does not expose the v1 contract');
+  }
+  if (!['PENDING', 'READY'].includes(floor.status)) {
+    return {floor, state: {status: 'NOT_MET', detail: `invalid=status=${String(floor.status)}`}};
+  }
+  const pending = floor.status === 'PENDING';
+  const missing = [];
+  const invalid = [];
+  for (const [field, pattern] of [
+    ['campaign_id', /^[0-9a-f]{40}-[0-9]{8}T[0-9]{6}Z-[1-9][0-9]*$/],
+    ['cjcj_head_sha', SHA40],
+    ['measured_utc', /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/],
+  ]) {
+    const value = floor[field];
+    if (value === undefined || value === null) missing.push(field);
+    else if (typeof value !== 'string' || !pattern.test(value)) invalid.push(field);
+  }
+  const resultsFile = floor.evidence?.results;
+  if (typeof resultsFile !== 'string' || !resultsFile) {
+    if (resultsFile === undefined || resultsFile === null) missing.push('evidence.results');
+    else invalid.push('evidence.results');
+  }
+  const metrics = validateG8Metrics(floor.baseline, 'baseline', {pending});
+  if (pending) {
+    return {floor, state: {status: 'UNKNOWN',
+      detail: `floor status=PENDING; missing=status=READY,${[...missing, ...G8_METRIC_PATHS.map(name => `baseline.${name}`)].join(',')}`}};
+  }
+  if (missing.length || metrics.status === 'UNKNOWN') {
+    const metricDetail = metrics.status === 'UNKNOWN' ? metrics.detail.replace(/^missing=/, '') : '';
+    return {floor, state: {status: 'UNKNOWN',
+      detail: `missing=${[...missing, metricDetail].filter(Boolean).join(',')}`}};
+  }
+  if (invalid.length || metrics.status === 'NOT_MET') {
+    return {floor, state: {status: 'NOT_MET',
+      detail: `invalid=${[...invalid, metrics.status === 'NOT_MET' ? metrics.detail : ''].filter(Boolean).join(',')}`}};
+  }
+  if (!floor.campaign_id.startsWith(`${floor.cjcj_head_sha}-`)) {
+    return {floor, state: {status: 'NOT_MET', detail: 'campaign_id does not bind cjcj_head_sha'}};
+  }
+  return {floor, state: {status: 'MET', detail: 'READY'}};
+}
+
+function validateG8Results(results) {
+  if (!plainObject(results)) return {status: 'NOT_MET', detail: 'G8_FULL_GATE.json root must be an object'};
+  const missing = [];
+  const invalid = [];
+  if (results.schema === undefined || results.schema === null) missing.push('schema');
+  else if (results.schema !== 1) invalid.push(`schema=${String(results.schema)}`);
+  for (const [field, pattern] of [
+    ['campaign_id', /^[0-9a-f]{40}-[0-9]{8}T[0-9]{6}Z-[1-9][0-9]*$/],
+    ['cjcj_head_sha', SHA40],
+    ['captured_utc', /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/],
+  ]) {
+    const value = results[field];
+    if (value === undefined || value === null) missing.push(field);
+    else if (typeof value !== 'string' || !pattern.test(value)) invalid.push(field);
+  }
+  const metrics = validateG8Metrics(results.results, 'results');
+  if (missing.length || metrics.status === 'UNKNOWN') {
+    const metricDetail = metrics.status === 'UNKNOWN' ? metrics.detail.replace(/^missing=/, '') : '';
+    return {status: 'UNKNOWN', detail: `missing=${[...missing, metricDetail].filter(Boolean).join(',')}`};
+  }
+  if (invalid.length || metrics.status === 'NOT_MET') {
+    return {status: 'NOT_MET',
+      detail: `invalid=${[...invalid, metrics.status === 'NOT_MET' ? metrics.detail : ''].filter(Boolean).join(',')}`};
+  }
+  return {status: 'MET', detail: 'complete'};
+}
+
+async function readG8Results(context, relative) {
+  const root = path.resolve(context.evidence);
+  const file = path.resolve(root, ...relative.split('/'));
+  if (file !== root && !file.startsWith(`${root}${path.sep}`)) {
+    throw new GateInputError('UNKNOWN', `G8 evidence path escapes archive root: ${relative}`);
+  }
+  return {file, text: await readAbsolute(file, {absence: 'UNKNOWN'})};
+}
+
+async function evaluateG8(context) {
+  const {floor, state} = await loadG8Floor(context);
+  if (state.status !== 'MET') {
+    return gateResult('G8', state.status, `判据 0811 已更新；${state.detail}；旧 2005/2472/467 未沿用`);
+  }
+  if (!context.evidence) {
+    return gateResult('G8', 'UNKNOWN',
+      `判据 0811 已更新；floor=READY；missing=--evidence/${floor.evidence.results}`);
+  }
+  const evidence = await readG8Results(context, floor.evidence.results);
+  const results = parseG2Json(evidence.text, evidence.file);
+  const resultState = validateG8Results(results);
+  if (resultState.status !== 'MET') {
+    return gateResult('G8', resultState.status,
+      `判据 0811 已更新；floor=READY；${floor.evidence.results} ${resultState.detail}`);
+  }
+
+  const failures = [];
+  if (results.campaign_id !== floor.campaign_id) {
+    failures.push(`campaign_id=${results.campaign_id} expected=${floor.campaign_id}`);
+  }
+  if (results.cjcj_head_sha !== floor.cjcj_head_sha) {
+    failures.push(`cjcj_head_sha=${results.cjcj_head_sha} expected=${floor.cjcj_head_sha}`);
+  }
+  const baseline = floor.baseline;
+  const current = results.results;
+  if (current.difftest.total < baseline.difftest.total) {
+    failures.push(`difftest.total=${current.difftest.total}<${baseline.difftest.total}`);
+  }
+  if (current.difftest.pass !== current.difftest.total || current.difftest.mismatch !== 0 ||
+      current.difftest.fail !== 0) {
+    failures.push(`difftest=${current.difftest.pass}/${current.difftest.total}` +
+      ` mismatch=${current.difftest.mismatch} fail=${current.difftest.fail}`);
+  }
+  if (current.smoke.pass < baseline.smoke.pass || current.smoke.fail !== 0) {
+    failures.push(`smoke=pass${current.smoke.pass}/fail${current.smoke.fail}; baseline_pass=${baseline.smoke.pass}`);
+  }
+  if (current.bcgate.shared < baseline.bcgate.shared ||
+      current.bcgate.byte_identical < baseline.bcgate.byte_identical ||
+      current.bcgate.differing > baseline.bcgate.differing || current.bcgate.compile_errors !== 0) {
+    failures.push(`bcgate=shared${current.bcgate.shared}/identical${current.bcgate.byte_identical}` +
+      `/differing${current.bcgate.differing}/compile_errors${current.bcgate.compile_errors}; ` +
+      `baseline=${baseline.bcgate.shared}/${baseline.bcgate.byte_identical}/${baseline.bcgate.differing}`);
+  }
+  if (current.verify_exit !== 0) failures.push(`verify_exit=${current.verify_exit}`);
+  if (failures.length) {
+    return gateResult('G8', 'NOT_MET', `判据 0811 已更新；floor=${floor.campaign_id}; failures=${failures.join(';')}`);
+  }
+  return gateResult('G8', 'MET', `判据 0811 已更新；floor=${floor.campaign_id}; ` +
+    `difftest=${current.difftest.pass}/${current.difftest.total} mismatch=0 fail=0; ` +
+    `smoke=${current.smoke.pass}/0; bcgate shared=${current.bcgate.shared} ` +
+    `byte_identical=${current.bcgate.byte_identical} differing=${current.bcgate.differing} compile_errors=0; ` +
+    'VERIFY-EXIT=0');
 }
 
 function parseG12Tsv(text, label) {
