@@ -197,6 +197,25 @@ test('source builds fail closed unless host runtime is plain and target runtime 
     ]);
     assert.ok(!earlyHostLoader.includes(path.join(targetSdk, 'third_party', 'llvm', 'lib')));
 
+    const crossTarget = buildConfig({targetKey: 'windows-x64'}).target;
+    const crossHostSdk = directory(root, 'cross-host-sdk');
+    const crossTargetSdk = directory(root, 'cross-target-sdk');
+    const crossHostRuntime = file(crossHostSdk, [
+      'runtime', 'lib', crossTarget.spec.hostRuntimeTuple, crossTarget.spec.hostRuntimeLibrary,
+    ], 'plain-linux-host-runtime');
+    const crossTargetRuntime = file(crossTargetSdk, [
+      'runtime', 'lib', crossTarget.spec.runtimeTuple, crossTarget.spec.runtimeLibrary,
+    ], 'coloured-windows-target-runtime');
+    const crossResult = assertRuntimeSplit({
+      hostSdk: crossHostSdk,
+      targetSdk: crossTargetSdk,
+      target: crossTarget,
+      readSymbols: runtime => runtime === crossHostRuntime ? '' : `00000000 D g_cjLoadBadMask\n`,
+      log: () => {},
+    });
+    assert.equal(crossResult.hostRuntime, crossHostRuntime);
+    assert.equal(crossResult.targetRuntime, crossTargetRuntime);
+
     const runtimeTarget = directory(root, 'workspace', 'cangjie_runtime', 'runtime', 'target');
     const cache = file(root, ['stdlib', 'build', 'build', 'CMakeCache.txt'], [
       `RUNTIME_COMMON_LIB_DIR:STRING=${path.join(runtimeTarget, 'common', 'linux_release_x86_64', 'lib', target.spec.runtimeTuple)}`,
