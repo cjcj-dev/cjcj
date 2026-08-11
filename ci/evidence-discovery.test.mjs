@@ -112,3 +112,16 @@ test('a registry path outside RELEASE_EVIDENCE_ROOT is UNKNOWN', async t => {
   assert.equal(negative.value.status, 'UNKNOWN');
   assert.match(negative.value.value, /registry\.gates\.G14 escapes its evidence root/);
 });
+
+test('a registry entry that is a symbolic link is UNKNOWN', async t => {
+  const state = await fixture(t);
+  await fs.symlink('G14', path.join(state.evidenceRoot, 'gates', 'linked-G14'), 'dir');
+  await write(state.evidenceRoot, 'GATE_EVIDENCE.json', `${JSON.stringify({
+    schema: 1,
+    gates: {G14: 'gates/linked-G14'},
+  }, null, 2)}\n`);
+  const negative = run(state.checkout);
+  assert.equal(negative.result.status, 2, negative.result.stderr);
+  assert.equal(negative.value.status, 'UNKNOWN');
+  assert.match(negative.value.value, /evidence root is not a direct directory/);
+});
