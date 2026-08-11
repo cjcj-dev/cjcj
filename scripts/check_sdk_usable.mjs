@@ -619,7 +619,7 @@ function c9Check(sdk, work, timeoutMs) {
   if (readable.status !== 0) return {state: STATES.FAIL, detail: `std archive unreadable: ${probeDescription(readable)}`};
   const extracted = probe('/bin/bash', [
     '-c',
-    '/usr/bin/objdump -d "$1" | /usr/bin/awk '\''/<_CNat6StringixHl>:/ { inside=1 } inside { print } inside && /^$/ { exit }'\''',
+    "/usr/bin/objdump -d \"$1\" | /usr/bin/awk '/<_CNat6StringixHl>:/ { inside=1 } inside { print } inside && /^$/ { exit }'",
     'sdk-usable-c9',
     core,
   ], {cwd: work, env: baseEnvironment(work), timeoutMs, maxBuffer: 2 * 1024 * 1024});
