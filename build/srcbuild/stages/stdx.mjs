@@ -4,7 +4,13 @@ import path from 'node:path';
 import {stage} from '../../lib/logging.mjs';
 import {assertHostRuntimeCommands, assertRuntimeSplit} from '../../lib/runtime-split.mjs';
 import {installPath, TARGET_TRIPLE} from '../../toolchain/mingw.mjs';
-import {applyTextPatch, opensslLibPath, runBuildPy, windowsCrossArgs} from './common.mjs';
+import {
+  applyTextPatch,
+  hostCompilerEnv,
+  opensslLibPath,
+  runBuildPy,
+  windowsCrossArgs,
+} from './common.mjs';
 
 const HOST_RUNTIME_EDIT = [[
   '        set(_cj_runtime_lib_dir "$ENV{CANGJIE_HOME}/runtime/lib/${output_cj_lib_dir}${SANITIZER_SUBPATH}")',
@@ -33,7 +39,10 @@ export async function run(config) {
       );
     }
     const hostRuntimeEnv = split
-      ? {STDX_HOST_RUNTIME_LIB_DIR: path.dirname(split.hostRuntime)}
+      ? {
+          ...hostCompilerEnv(config, {hostRuntime: split.hostRuntime}),
+          STDX_HOST_RUNTIME_LIB_DIR: path.dirname(split.hostRuntime),
+        }
       : undefined;
     await runBuildPy(config, stdxRoot, ['clean'], {stageName: 'stdx.clean'});
     let args;
