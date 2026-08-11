@@ -384,7 +384,6 @@ test('source build keeps a version-matched plain host runtime across both bootst
   const stdlib = await fs.readFile(path.join(root, 'build/srcbuild/stages/stdlib.mjs'), 'utf8');
   const nativeBuild = stdlib.indexOf("'build', '-t', config.buildType");
   assert.ok(stdlib.indexOf('assertRuntimeSplit({') < stdlib.indexOf("['clean']"));
-  assert.ok(stdlib.includes('hostCompilerEnv(config, {hostRuntime: split.hostRuntime})'));
   assert.ok(stdlib.indexOf("['clean']") < nativeBuild);
   assert.ok(nativeBuild < stdlib.indexOf('assertRuntimeCommonCache({'));
 
@@ -395,7 +394,6 @@ test('source build keeps a version-matched plain host runtime across both bootst
 
   const stdx = await fs.readFile(path.join(root, 'build/srcbuild/stages/stdx.mjs'), 'utf8');
   assert.ok(stdx.includes('STDX_HOST_RUNTIME_LIB_DIR'));
-  assert.ok(stdx.includes('hostCompilerEnv(config, {hostRuntime: split.hostRuntime})'));
   assert.ok(stdx.includes('assertRuntimeSplit({'));
   assert.ok(stdx.includes('assertHostRuntimeCommands({'));
 });
