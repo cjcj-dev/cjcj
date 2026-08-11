@@ -350,8 +350,8 @@ function runTests(context, files) {
   const result = spawn(process.execPath, ['--test', '--test-timeout=300000', ...files], {cwd: context.repo});
   if (result.error) throw new GateInputError('UNKNOWN', `node test runner unavailable: ${result.error.message}`);
   if (result.status !== 0) return {status: 'NOT_MET', detail: commandFailure(result)};
-  const pass = result.stdout.match(/^# pass (\d+)$/m)?.[1] || '?';
-  const fail = result.stdout.match(/^# fail (\d+)$/m)?.[1] || '?';
+  const pass = result.stdout.match(/^(?:#|ℹ)\s*pass\s+(\d+)$/m)?.[1] || '?';
+  const fail = result.stdout.match(/^(?:#|ℹ)\s*fail\s+(\d+)$/m)?.[1] || '?';
   return {status: 'MET', detail: `tests pass=${pass} fail=${fail}`};
 }
 
