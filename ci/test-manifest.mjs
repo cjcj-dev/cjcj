@@ -41,6 +41,7 @@ export const GATING = Object.freeze([
   'build/test/release-manifest-components.test.mjs',
   'build/test/release-manifest.test.mjs',
   'build/test/runtime-pin.test.mjs',
+  'build/test/sdk-usability.test.mjs',
   'build/test/source-build-parity.test.mjs',
   'build/test/stock-backup.test.mjs',
   'build/test/system-deps.test.mjs',
