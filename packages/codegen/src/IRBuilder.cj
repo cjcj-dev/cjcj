@@ -1400,16 +1400,11 @@ public class IRBuilder2 <: Resource {
         }
         let i64Ty = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
         let ptrTy = unsafe { LLVMTypeOf(ptr) }
-        var asInt = LLVMNullValue()
-        try (nameCString = unsafe { LibC.mallocCString("uncolor.asint") }.asResource()) {
-            asInt = unsafe { LLVMBuildPtrToInt(builder.raw, ptr, i64Ty, nameCString.value) }
-        }
         let mask = unsafe { LLVMConstInt(i64Ty, 0x0000FFFFFFFFFFFF, 0) }
-        let masked = CreateAnd(asInt, mask)
-        var result = LLVMNullValue()
-        try (nameCString = unsafe { LibC.mallocCString("uncolor.ptr") }.asResource()) {
-            result = unsafe { LLVMBuildIntToPtr(builder.raw, masked, ptrTy, nameCString.value) }
-        }
+        // Preserve pointer provenance (ptrtoint/inttoptr severs base/derived pairing
+        // for statepoint + PEA). Same AddressMask as CJBarrierLowering::uncolorIfGCPtr.
+        let result = CreateIntrinsicCallNoInvoke("llvm.ptrmask", ArrayList<LLVMTypeRef>([ptrTy, i64Ty]),
+            ArrayList<LLVMValueRef>([ptr, mask]), name: "uncolor.ptr")
         let base = GetTrackedBasePtr(ptr) ?? ptr
         TrackBasePtr(result, base)
         return result
