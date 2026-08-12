@@ -130,6 +130,7 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
     cgMod.EraseUselessInstsAndDeclarations()
     cgMod.GenIncremental()
     SetSymbolLinkageType(cgMod)
+    cgMod.EraseUselessGVAndFunctions()
     subDirNum = DumpIRIfNeeded(cgMod, "GenIncremental", subDirNum)
     EmitStaticGenericTIsAndLLVMUsed(cgMod)
     if (options.cjcjOptimization) {
