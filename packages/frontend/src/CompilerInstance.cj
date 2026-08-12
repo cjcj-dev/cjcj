@@ -636,6 +636,10 @@ public class CompilerInstance {
     }
 
     public func PerformGenericInstantiation(): Bool {
+        if (!importManager.getOrThrow().IsSourceCodeImported()) {
+            InternalError("Generic instantiation should not be performed when imported source code is not reparsed.")
+            return false
+        }
         if (let None <- gim) {
             gim = Some(GenericInstantiationManager(faithfulSemaInstance.getOrThrow(), testManager.getOrThrow().GetImpl()))
         }
