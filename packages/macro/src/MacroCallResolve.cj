@@ -2,28 +2,12 @@ package cjcj::macro_pkg
 
 import std.collection.*
 import std.fs.exists
+import cjcj::utils.FileUtil
 
 private let MACRO_COMMON_ARGS: Int64 = 1
 private let MACRO_ATTR_ARGS: Int64 = 2
 private let MACRO_DEF_NUM: Int64 = 2
 private let DIR_SEPARATOR: String = "/"
-
-private let STANDARD_LIBS: Array<(String, String)> = [
-    ("std.core", "core"), ("std.binary", "binary"), ("std.io", "io"), ("std.math", "math"),
-    ("std.overflow", "overflow"), ("std.runtime", "runtime"), ("std.convert", "convert"),
-    ("std.random", "random"), ("std.collection", "collection"), ("std.unicode", "unicode"),
-    ("std.sort", "sort"), ("std.argopt", "argopt"), ("std.time", "time"), ("std.sync", "sync"),
-    ("std.collection.concurrent", "collection.concurrent"), ("std.net", "net"), ("std.regex", "regex"),
-    ("std.unittest.common", "unittest.common"), ("std.unittest.prop_test", "unittest.prop_test"),
-    ("std.unittest.diff", "unittest.diff"), ("std.math.numeric", "math.numeric"), ("std.fs", "fs"),
-    ("std.unittest.mock.internal", "unittest.mock.internal"), ("std.unittest.mock", "unittest.mock"),
-    ("std.reflect", "reflect"), ("std.ref", "ref"), ("std.crypto", "crypto"),
-    ("std.crypto.digest", "crypto.digest"), ("std.crypto.cipher", "crypto.cipher"),
-    ("std.console", "console"), ("std.database", "database"), ("std.database.sql", "database.sql"),
-    ("std.posix", "posix"), ("std.process", "process"), ("std.env", "env"),
-    ("std.objectpool", "objectpool"), ("std.unittest", "unittest"), ("std", "std"),
-    ("std.ffi.python", "ffi.python"), ("fuzz.fuzz", "fuzz")
-]
 
 public func GetMacroFuncName(fullPackageName: String, isAttr: Bool, ident: String): String {
     let prefix = if (isAttr) { "macroCall_a_" } else { "macroCall_c_" }
@@ -43,19 +27,6 @@ private func splitQualifiedName(name: String): ArrayList<String> {
     }
     parts.add(name[start..])
     return parts
-}
-
-private func getDirPath(path: String): String {
-    if (path.isEmpty()) {
-        return "."
-    }
-    if (let Some(pos) <- path.lastIndexOf(DIR_SEPARATOR)) {
-        if (pos == 0) {
-            return DIR_SEPARATOR
-        }
-        return path[0..pos]
-    }
-    return "."
 }
 
 private func joinPath(base: String, append: String): String {
@@ -95,31 +66,11 @@ private func findFileByName(fileName: String, searchPaths: ArrayList<String>): S
     return ""
 }
 
-private func standardLibName(fullPackageName: String): Option<String> {
-    for ((name, mapped) in STANDARD_LIBS) {
-        if (name == fullPackageName) {
-            return Some(mapped)
-        }
-    }
-    return None
-}
-
 private func toCjoFileName(fullPackageName: String): String {
     if (let Some(pos) <- fullPackageName.indexOf("::")) {
         return fullPackageName[(pos + 2)..] + "_" + fullPackageName[0..pos]
     }
     return fullPackageName
-}
-
-private func convertPackageNameToLibCangjieBaseFormat(fullPackageName: String): String {
-    if (let Some(mapped) <- standardLibName(fullPackageName)) {
-        let names = splitQualifiedName(fullPackageName)
-        if (names.size == 1) {
-            return "cangjie-" + mapped
-        }
-        return "cangjie-" + names[0] + "-" + mapped
-    }
-    return ""
 }
 
 private func collectParentMacroName(macCall: MacroCall): Unit {
@@ -256,23 +207,11 @@ private func BindDefinition(macCall: MacroCall, macroName: String): Bool {
 }
 
 private func findStdMacroLibPath(packageName: String, instance: MacroHost): String {
-    let baseName = convertPackageNameToLibCangjieBaseFormat(packageName)
-    if (baseName.isEmpty()) {
-        return ""
-    }
-    let libName = "lib" + baseName + LIB_SUFFIX
-    let executablePath = instance.GetGlobalOptions().executablePath
-    if (!executablePath.isEmpty()) {
-        let candidate = joinPath(joinPath(getDirPath(executablePath), "../runtime/lib"), libName)
-        if (fileExists(candidate)) {
-            return candidate
-        }
-    }
-    let foundInSearch = findFileByName(libName, instance.importManager.GetSearchPath())
-    if (!foundInSearch.isEmpty()) {
-        return foundInSearch
-    }
-    return ""
+    let basePath = FileUtil.JoinPath(FileUtil.GetDirPath(instance.GetGlobalOptions().executablePath),
+        "../runtime/lib")
+    let libName = "lib" + FileUtil.ConvertPackageNameToLibCangjieBaseFormat(packageName) + LIB_SUFFIX
+    return FileUtil.JoinPath(
+        FileUtil.JoinPath(basePath, instance.GetGlobalOptions().GetCangjieLibHostPathName()), libName)
 }
 
 private func findMacroDefPkg(macCall: MacroCall, instance: MacroHost, fd: FuncDecl): Unit {

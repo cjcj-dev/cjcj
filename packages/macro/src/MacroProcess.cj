@@ -78,7 +78,7 @@ private func syncMacroCallDiagInfo(node: Node, invocation: MacroInvocation): Uni
 }
 
 private func collectMacroDebugPosition(invocation: MacroInvocation, token: Token, lastColumn: Int64): Unit {
-    if (!token.Begin().isCurFile || token.kind == TokenKind.COMMENT || token.kind == TokenKind.NL) {
+    if (token.kind == TokenKind.COMMENT || token.kind == TokenKind.NL) {
         return
     }
     let key = token.Begin().Hash64()
