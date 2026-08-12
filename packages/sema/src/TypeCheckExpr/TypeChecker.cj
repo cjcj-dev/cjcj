@@ -1159,6 +1159,11 @@ public class TypeChecker {
 }
 
 extend TypeChecker {
+    public func SynReferenceSeparately(ctx: ASTContext, scopeName: String, expr: Expr,
+        hasLocalDecl: Bool): Candidate {
+        return impl.SynReferenceSeparately(ctx, scopeName, expr, hasLocalDecl)
+    }
+
     public func TypeCheckForPackages(pkgs: ArrayList<Package>): Unit {
         let activeContexts = PreTypeCheck(pkgs)
         for (ctx in activeContexts) {

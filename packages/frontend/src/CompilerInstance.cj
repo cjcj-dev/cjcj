@@ -1087,20 +1087,11 @@ public class CompilerInstance {
         return members
     }
 
-    public func GetGivenReferenceTarget(ctx: ASTContext, scopeName: String, exprName: String, hasLocalDecl: Bool): Candidate {
-        let _ = scopeName
-        let _ = hasLocalDecl
-        let out = Candidate()
-        for (sym in ctx.symbolTable) {
-            if (sym.name == exprName) {
-                if (let Some(node) <- sym.node) {
-                    if (let Some(decl) <- (node as Decl)) {
-                        out.decls.add(decl)
-                    }
-                }
-            }
+    public func GetGivenReferenceTarget(ctx: ASTContext, scopeName: String, expr: Expr, hasLocalDecl: Bool): Candidate {
+        if (let None <- faithfulTypeChecker) {
+            return Candidate()
         }
-        return out
+        return GetTypeChecker().SynReferenceSeparately(ctx, scopeName, expr, hasLocalDecl)
     }
 
     public func UpdateAndWriteCachedInfoToDisk(updateCachedInfo: () -> Unit): Bool {
