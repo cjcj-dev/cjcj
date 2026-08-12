@@ -1138,7 +1138,7 @@ private class CjoSignatureMaterializer {
         if (let Some(loaded) <- allLoadedDecls.get(declIndex)) {
             return Some(loaded)
         }
-        if (let Some(record) <- GetFlatDecl(declIndex)) {
+        if (let Some(record) <- GetFormatDeclByIndexImpl(declIndex)) {
             return EnsureFlatDecl(record)
         }
         return None
@@ -1525,7 +1525,7 @@ private class CjoSignatureMaterializer {
     }
 
     // ASTLoaderImpl.h:184-189: serialized declIndex is vector offset plus 1.
-    private func GetFlatDecl(declIndex: UInt32): Option<CjoFlatDecl> {
+    private func GetFormatDeclByIndexImpl(declIndex: UInt32): Option<CjoFlatDecl> {
         if (declIndex == 0u32) {
             return None
         }
@@ -2934,7 +2934,7 @@ private class CjoSignatureMaterializer {
         var idx: Int64 = 0
         while (idx < declCount) {
             let formatIndex = UInt32(idx + 1)
-            if (let Some(record) <- GetFlatDecl(formatIndex)) {
+            if (let Some(record) <- GetFormatDeclByIndexImpl(formatIndex)) {
                 MaterializeFlatInheritedTypes(reader, record)
             }
             idx++
@@ -3074,7 +3074,7 @@ private class CjoSignatureMaterializer {
         var idx: Int64 = 0
         while (idx < declCount) {
             let formatIndex = UInt32(idx + 1)
-            if (let Some(record) <- GetFlatDecl(formatIndex)) {
+            if (let Some(record) <- GetFormatDeclByIndexImpl(formatIndex)) {
                 if (record.isTopLevel) {
                     if (IgnoreDecl(reader, record)) {
                         idx++
@@ -3540,7 +3540,7 @@ private class CjoSignatureMaterializer {
         let count = reader.VectorLength(typeParams)
         while (idx < count) {
             let paramIndex = reader.VectorU32(typeParams, idx)
-            if (let Some(paramRecord) <- GetFlatDecl(paramIndex)) {
+            if (let Some(paramRecord) <- GetFormatDeclByIndexImpl(paramIndex)) {
                 if (let Some(paramDecl) <- EnsureFlatDecl(paramRecord)) {
                     if (let Some(gpd) <- (paramDecl as GenericParamDecl)) {
                         gpd.outerDecl = Some(decl)
@@ -3873,13 +3873,13 @@ private class CjoSignatureMaterializer {
         let count = reader.VectorLength(params)
         while (idx < count) {
             let paramIndex = reader.VectorU32(params, idx)
-            if (let Some(paramRecord) <- GetFlatDecl(paramIndex)) {
+            if (let Some(paramRecord) <- GetFormatDeclByIndexImpl(paramIndex)) {
                 if (let Some(paramDecl) <- EnsureFlatDecl(paramRecord)) {
                     if (let Some(param) <- (paramDecl as FuncParam)) {
                         if (desugars >= 0 && idx < reader.VectorLength(desugars)) {
                             let desugarIndex = reader.VectorU32(desugars, idx)
                             if (desugarIndex != 0u32) {
-                                if (let Some(desugarRecord) <- GetFlatDecl(desugarIndex)) {
+                                if (let Some(desugarRecord) <- GetFormatDeclByIndexImpl(desugarIndex)) {
                                     if (let Some(desugarDecl) <- EnsureFlatDecl(desugarRecord)) {
                                         if (let Some(desugarFunc) <- (desugarDecl as FuncDecl)) {
                                             param.desugarDecl = Some(desugarFunc)
@@ -4949,7 +4949,7 @@ private class CjoSignatureMaterializer {
                         block.body.add(childExpr)
                     }
                 } else {
-                    if (let Some(childRecord) <- GetFlatDecl(childIndex)) {
+                    if (let Some(childRecord) <- GetFormatDeclByIndexImpl(childIndex)) {
                         if (let Some(childDecl) <- EnsureFlatDecl(childRecord)) {
                             block.body.add(childDecl)
                         }
@@ -5051,7 +5051,7 @@ private class CjoSignatureMaterializer {
         let exprs = reader.VectorField(patternTable, 14)
         if (exprs >= 0 && reader.VectorLength(exprs) >= 1) {
             let declIndex = reader.VectorU32(exprs, 0)
-            if (let Some(record) <- GetFlatDecl(declIndex)) {
+            if (let Some(record) <- GetFormatDeclByIndexImpl(declIndex)) {
                 if (let Some(decl) <- EnsureFlatDecl(record)) {
                     if (let Some(varDecl) <- (decl as VarDecl)) {
                         pattern.varDecl = Some(varDecl)
@@ -5153,7 +5153,7 @@ private class CjoSignatureMaterializer {
         let count = reader.VectorLength(accessors)
         while (idx < count) {
             let accessorIndex = reader.VectorU32(accessors, idx)
-            if (let Some(accessorRecord) <- GetFlatDecl(accessorIndex)) {
+            if (let Some(accessorRecord) <- GetFormatDeclByIndexImpl(accessorIndex)) {
                 if (let Some(accessorDecl) <- EnsureFlatDecl(accessorRecord)) {
                     if (let Some(funcDecl) <- (accessorDecl as FuncDecl)) {
                         funcDecl.propDecl = Some(propDecl)
@@ -5214,7 +5214,7 @@ private class CjoSignatureMaterializer {
         let count = reader.VectorLength(body)
         while (idx < count) {
             let memberIndex = reader.VectorU32(body, idx)
-            let memberRecord = GetFlatDecl(memberIndex).getOrThrow()
+            let memberRecord = GetFormatDeclByIndexImpl(memberIndex).getOrThrow()
             let member = EnsureFlatDecl(memberRecord).getOrThrow()
             AddFlatMember(parent, member)
             idx++
@@ -5648,7 +5648,7 @@ private class CjoSignatureMaterializer {
         if (let Some(loaded) <- allLoadedDecls.get(id.index)) {
             return Some(loaded)
         }
-        if (let Some(record) <- GetFlatDecl(id.index)) {
+        if (let Some(record) <- GetFormatDeclByIndexImpl(id.index)) {
             return EnsureFlatDecl(record)
         }
         return None
