@@ -79,7 +79,7 @@ private func MapExpressionResult(cgMod: CGModule, irBuilder: IRBuilder2, chirExp
             }
         }
         let sretResult = IsSRetResult(irBuilder, chirExpr, resultValue.nodeId)
-        cgMod.SetOrUpdateMappedCGValue(resultValue, CGValue(rawRet, resultType, isSRetArg: sretResult))
+        cgMod.SetOrUpdateMappedCGValue(resultValue, CGValueFromProducer(rawRet, resultType, isSRetArg: sretResult))
     }
 }
 

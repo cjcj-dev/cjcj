@@ -265,13 +265,21 @@ private func TryGenerateBoxRetValueStore(irBuilder: IRBuilder2, chirExpr: Expres
         }
     }
 
-    let typedValue = CGValue(valueToStore, storeValCGType, isSRetArg: value.IsSRetArg())
-    let typedAddr = CGValue(addr.GetRawValue(), retAddrCGType, isSRetArg: addr.IsSRetArg())
+    let typedValueState = if (valueToStore.toUIntNative() == value.GetRawValue().toUIntNative()) {
+        value.GetRepresentationState()
+    } else {
+        InferCGValueRepresentationState(valueToStore)
+    }
+    let typedValue = CGValue(valueToStore, storeValCGType, isSRetArg: value.IsSRetArg(),
+        representationState: typedValueState)
+    let typedAddr = CGValue(addr.GetRawValue(), retAddrCGType, isSRetArg: addr.IsSRetArg(),
+        representationState: addr.GetRepresentationState())
     return Some(irBuilder.CreateStore(typedValue, typedAddr, typeArgs[0]))
 }
 
 public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, addr: CGValue,
     boxType!: Option<Type> = None): LLVMValueRef {
+    ReportTypedStoreDestinationProvenance(irBuilder, value, addr)
     if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr, boxType: boxType)) {
         return genericStore
     }
@@ -330,6 +338,36 @@ public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, ad
         return irBuilder.CallGCWriteStaticRef(storedValue, addr.GetRawValue())
     }
     return irBuilder.CreateStore(storedValue, addr.GetRawValue())
+}
+
+private func IsNonHeapStoreDestination(irBuilder: IRBuilder2, addr: CGValue): Bool {
+    if (irBuilder.GetTrackedManagedBase(addr.GetRawValue()).isSome()) {
+        return false
+    }
+    if (IsAddressSpacePointer(addr.GetRawValue(), 1u32)) {
+        return false
+    }
+    return true
+}
+
+private func IsManagedRefStoreValue(value: CGValue): Bool {
+    if (let Some(valueCGType) <- value.GetCGType()) {
+        if (valueCGType.IsReference() || valueCGType.IsRefType()) {
+            return true
+        }
+    }
+    return IsBareGCRefLLVMType(unsafe { LLVMTypeOf(value.GetRawValue()) })
+}
+
+private func ReportTypedStoreDestinationProvenance(irBuilder: IRBuilder2, value: CGValue, addr: CGValue): Unit {
+    if (!IsNonHeapStoreDestination(irBuilder, addr)) {
+        return
+    }
+    if (!IsManagedRefStoreValue(value)) {
+        return
+    }
+    CGValueRepresentationCensus.FirePositiveControlIfRequested()
+    CGValueRepresentationCensus.RecordNonHeapStore(value.GetRepresentationState())
 }
 
 private func IsPointerLLVMValue(value: LLVMValueRef): Bool {

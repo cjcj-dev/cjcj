@@ -1,6 +1,8 @@
 package cjcj::codegen
 
 import std.collection.*
+import std.process.Process
+import std.sync.{AtomicBool, AtomicInt64}
 import cjcj::basic.Linkage
 import cjcj::chir.Attribute
 import cjcj::chir.Block
@@ -50,21 +52,198 @@ private func SetCFFIStub(funcValue: Value, rawFunction: LLVMValueRef): Unit {
     }
 }
 
+public enum CGValueRepresentationState {
+    | UNKNOWN
+    | PLAIN_SAFE
+    | PLAIN_UNSAFE
+    | COLOURED
+}
+
+public func CGValueRepresentationStateIndex(state: CGValueRepresentationState): Int64 {
+    return match (state) {
+        case CGValueRepresentationState.UNKNOWN => 0
+        case CGValueRepresentationState.PLAIN_SAFE => 1
+        case CGValueRepresentationState.PLAIN_UNSAFE => 2
+        case CGValueRepresentationState.COLOURED => 3
+    }
+}
+
+extend CGValueRepresentationState <: Equatable<CGValueRepresentationState> {
+    public operator func ==(right: CGValueRepresentationState): Bool {
+        return CGValueRepresentationStateIndex(this) == CGValueRepresentationStateIndex(right)
+    }
+    public operator func !=(right: CGValueRepresentationState): Bool {
+        return !(this == right)
+    }
+}
+
+public func CGValueRepresentationStateName(state: CGValueRepresentationState): String {
+    return match (state) {
+        case CGValueRepresentationState.UNKNOWN => "UNKNOWN"
+        case CGValueRepresentationState.PLAIN_SAFE => "PLAIN_SAFE"
+        case CGValueRepresentationState.PLAIN_UNSAFE => "PLAIN_UNSAFE"
+        case CGValueRepresentationState.COLOURED => "COLOURED"
+    }
+}
+
+private func StripBitCastValue(value: LLVMValueRef): LLVMValueRef {
+    var current = value
+    while (!current.isNull() && !unsafe { LLVMIsABitCastInst(current) }.isNull()) {
+        current = unsafe { LLVMGetOperand(current, 0u32) }
+    }
+    return current
+}
+
+private func CalleeNameOfCall(value: LLVMValueRef): String {
+    if (value.isNull()) {
+        return ""
+    }
+    let isCall = unsafe { LLVMSelfhostIsCallInst(value) } != 0
+    let isInvoke = unsafe { LLVMSelfhostIsInvokeInst(value) } != 0
+    if (!isCall && !isInvoke) {
+        return ""
+    }
+    let callee = StripBitCastValue(unsafe { LLVMGetCalledValue(value) })
+    if (callee.isNull()) {
+        return ""
+    }
+    return LLVMCStringToString(unsafe { LLVMGetValueName(callee) }) ?? ""
+}
+
+private func RepresentationStateFromPtrAnnotation(value: LLVMValueRef): Option<CGValueRepresentationState> {
+    if (unsafe { LLVMGetNumOperands(value) } < 2) {
+        return None
+    }
+    let marker = StripBitCastValue(unsafe { LLVMGetOperand(value, 1u32) })
+    if (marker.isNull()) {
+        return None
+    }
+    var markerName = LLVMCStringToString(unsafe { LLVMGetValueName(marker) }) ?? ""
+    if (markerName.isEmpty() && unsafe { LLVMGetNumOperands(marker) } > 0) {
+        let inner = unsafe { LLVMGetOperand(marker, 0u32) }
+        markerName = LLVMCStringToString(unsafe { LLVMGetValueName(inner) }) ?? ""
+    }
+    if (markerName.contains("plain_safe")) {
+        return Some(CGValueRepresentationState.PLAIN_SAFE)
+    }
+    if (markerName.contains("plain_unsafe")) {
+        return Some(CGValueRepresentationState.PLAIN_UNSAFE)
+    }
+    if (markerName.contains("coloured")) {
+        return Some(CGValueRepresentationState.COLOURED)
+    }
+    return None
+}
+
+public func InferCGValueRepresentationState(value: LLVMValueRef): CGValueRepresentationState {
+    if (value.isNull()) {
+        return CGValueRepresentationState.UNKNOWN
+    }
+    let stripped = StripBitCastValue(value)
+    let calleeName = CalleeNameOfCall(stripped)
+    if (calleeName.isEmpty()) {
+        return CGValueRepresentationState.UNKNOWN
+    }
+    if (calleeName.startsWith("llvm.ptr.annotation")) {
+        return RepresentationStateFromPtrAnnotation(stripped) ?? CGValueRepresentationState.UNKNOWN
+    }
+    if (calleeName.startsWith("llvm.cj.gcread.ref") ||
+        calleeName.startsWith("llvm.cj.gcread.static.ref") ||
+        calleeName.startsWith("llvm.cj.gcread.weakref")) {
+        return CGValueRepresentationState.PLAIN_SAFE
+    }
+    if (calleeName.startsWith("llvm.cj.malloc.object") ||
+        calleeName.startsWith("llvm.cj.malloc.array")) {
+        return CGValueRepresentationState.PLAIN_SAFE
+    }
+    if (calleeName.contains("GetCurrentCJThreadObject")) {
+        return CGValueRepresentationState.PLAIN_SAFE
+    }
+    if (calleeName.startsWith("llvm.ptrmask")) {
+        return CGValueRepresentationState.PLAIN_UNSAFE
+    }
+    return CGValueRepresentationState.UNKNOWN
+}
+
+public func CGValueFromProducer(rawVal: LLVMValueRef, cgType: CGType, isSRetArg!: Bool = false): CGValue {
+    return CGValue(rawVal, cgType, isSRetArg: isSRetArg,
+        representationState: InferCGValueRepresentationState(rawVal))
+}
+
+public class CGValueRepresentationCensus {
+    private static let nonheapTotal = AtomicInt64(0)
+    private static let plainSafe = AtomicInt64(0)
+    private static let plainUnsafe = AtomicInt64(0)
+    private static let coloured = AtomicInt64(0)
+    private static let unknown = AtomicInt64(0)
+    private static let posctrlFired = AtomicBool(false)
+    private static let dumped = AtomicBool(false)
+
+    public static func RecordNonHeapStore(state: CGValueRepresentationState): Unit {
+        let _ = nonheapTotal.fetchAdd(1)
+        if (state == CGValueRepresentationState.PLAIN_SAFE) {
+            let _ = plainSafe.fetchAdd(1)
+        } else if (state == CGValueRepresentationState.PLAIN_UNSAFE) {
+            let _ = plainUnsafe.fetchAdd(1)
+        } else if (state == CGValueRepresentationState.COLOURED) {
+            let _ = coloured.fetchAdd(1)
+        } else {
+            let _ = unknown.fetchAdd(1)
+        }
+    }
+
+    public static func FirePositiveControlIfRequested(): Unit {
+        if ((Process.current.getEnv("CJCJ_CGVALSTATE_POSCTRL") ?? "") != "1") {
+            return
+        }
+        if (posctrlFired.swap(true)) {
+            return
+        }
+        let _ = nonheapTotal.fetchAdd(1)
+        let _ = unknown.fetchAdd(1)
+        eprintln("[CGVALSTATE] posctrl UNKNOWN_NONHEAP_STORE +1")
+    }
+
+    public static func Dump(): Unit {
+        FirePositiveControlIfRequested()
+        if ((Process.current.getEnv("CJCJ_CGVALSTATE_DUMP") ?? "") != "1") {
+            return
+        }
+        if (dumped.swap(true)) {
+            return
+        }
+        let total = nonheapTotal.load()
+        let safe = plainSafe.load()
+        let unsafeCount = plainUnsafe.load()
+        let colouredCount = coloured.load()
+        let unknownCount = unknown.load()
+        var ratio = "n/a"
+        if (total > 0) {
+            ratio = "${(unknownCount * 100) / total}%"
+        }
+        eprintln("[CGVALSTATE] nonheap_stores_total=${total} plain_safe=${safe} coloured=${colouredCount} plain_unsafe=${unsafeCount} unknown=${unknownCount} unknown_ratio=${ratio}")
+    }
+}
+
 public open class CGValue {
     private var rawVal: LLVMValueRef
     private var cgType: Option<CGType>
     private var sRetArg: Bool
+    private var representationState: CGValueRepresentationState
 
     public init() {
         rawVal = LLVMNullValue()
         cgType = None
         sRetArg = false
+        representationState = CGValueRepresentationState.UNKNOWN
     }
 
-    public init(rawVal: LLVMValueRef, cgType: CGType, isSRetArg!: Bool = false) {
+    public init(rawVal: LLVMValueRef, cgType: CGType, isSRetArg!: Bool = false,
+        representationState!: CGValueRepresentationState = CGValueRepresentationState.UNKNOWN) {
         this.rawVal = rawVal
         this.cgType = cgType
         sRetArg = isSRetArg
+        this.representationState = representationState
     }
 
     public func GetRawValue(): LLVMValueRef { return rawVal }
@@ -76,6 +255,10 @@ public open class CGValue {
         return LLVMNullType()
     }
     public func IsSRetArg(): Bool { return sRetArg }
+    public func GetRepresentationState(): CGValueRepresentationState { return representationState }
+    public func SetRepresentationState(state: CGValueRepresentationState): Unit {
+        representationState = state
+    }
 }
 
 public class MTableInterfaceInfo {
