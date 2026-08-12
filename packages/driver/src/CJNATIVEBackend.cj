@@ -134,7 +134,10 @@ public class CJNATIVEBackend <: Backend {
             for (fileInfo in processedFrontendFiles) {
                 preprocessedFiles.add(fileInfo)
             }
-            if (driverOptions.outputMode == OutputMode.STATIC_LIB) {
+            // C++: src/Driver/Backend/CJNATIVEBackend.cpp:164-168
+            // Default LTO staticlib stops after opt, except iOS --lto-staticlib-format=native.
+            if (driverOptions.outputMode == OutputMode.STATIC_LIB &&
+                !(driverOptions.ShouldEmitStaticLibInLTO() && driverOptions.target.os == OSType.IOS)) {
                 return true
             }
             if (let Some(toolChain) <- TC) {
@@ -203,7 +206,9 @@ public class CJNATIVEBackend <: Backend {
                 inputs.add(tempFile)
             }
             let preprocessedFiles = GeneratePreprocessTools(inputs)
-            if (driverOptions.outputMode == OutputMode.STATIC_LIB) {
+            // C++: src/Driver/Backend/CJNATIVEBackend.cpp:228-231
+            if (driverOptions.outputMode == OutputMode.STATIC_LIB &&
+                !(driverOptions.ShouldEmitStaticLibInLTO() && driverOptions.target.os == OSType.IOS)) {
                 return true
             }
             if (let Some(toolChain) <- TC) {
