@@ -340,7 +340,8 @@ public func ShouldReturnVoid(fn: Function): Bool {
 public func SetSRetAttrForStructReturnType(chirFuncTy: FuncType, llvmFunc: LLVMValueRef): Unit {
     var shouldSetSRet = false
     if (chirFuncTy.IsCFunc()) {
-        shouldSetSRet = HasAttributeAtIndex(llvmFunc, 1u32, "sret")
+        // IRAttribute.h:152 shouldSetSRet = llvmFunc.hasStructRetAttr()
+        shouldSetSRet = unsafe { LLVMSelfhostFunctionHasStructRetAttr(llvmFunc) } != 0
     } else {
         let llvmFuncTy = unsafe { LLVMGlobalGetValueType(llvmFunc) }
         let llvmRetTy = unsafe { LLVMGetReturnType(llvmFuncTy) }
