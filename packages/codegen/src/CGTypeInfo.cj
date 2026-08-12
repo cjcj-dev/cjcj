@@ -615,7 +615,7 @@ private func BuildConcreteTypeInfoInitializer(cgMod: CGModule, chirTy: Type, typ
     typeInfoValues.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, alignValue, 0) })
     typeInfoValues.add(unsafe { LLVMConstInt(i8Type, typeArgsNum, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i16Type, inheritedClassNum + INHERITED_CLASS_NUM_FE_FLAG, 0) })
+    typeInfoValues.add(unsafe { LLVMConstInt(i16Type, inheritedClassNum | INHERITED_CLASS_NUM_FE_FLAG, 0) })
     typeInfoValues.add(offsets)
     typeInfoValues.add(sourceGeneric)
     typeInfoValues.add(typeArgs)
@@ -1545,7 +1545,7 @@ private func SameCustomTypeDef(left: Type, right: Type): Bool {
 }
 
 private func InheritedClassNumValue(cgMod: CGModule, chirTy: Type): UInt64 {
-    return INHERITED_CLASS_NUM_FE_FLAG + InheritedClassNumBase(cgMod, chirTy)
+    return INHERITED_CLASS_NUM_FE_FLAG | InheritedClassNumBase(cgMod, chirTy)
 }
 
 private func InheritedClassNumBase(cgMod: CGModule, chirTy: Type): UInt64 {
