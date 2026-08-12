@@ -24,7 +24,7 @@ import cjcj::option.OutputMode
 import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
     MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, SemanticInfo, TopLevelDeclCache, VarInitDepMap,
     VirtualWrapperDepMap, WriteCache}
-import cjcj::macro_pkg.{GetMethodPointer, OpenSymbolTable, OpenSymbolTableSafely, RuntimeInit}
+import cjcj::macro_pkg.{GetMethodPointer, MacroExpansion, OpenSymbolTable, OpenSymbolTableSafely, RuntimeInit}
 import cjcj::parse.ASTHasher
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
@@ -437,10 +437,10 @@ public class CompilerInstance {
                 let metaTransformPlugin = NativeMetaTransformPlugin.Get(pluginPath)
                 if (!metaTransformPlugin.IsValid()) {
                     DiagnoseInvalidPlugin(pluginPath)
+                    return false
                 }
                 loadedPluginPaths.add(pluginPath)
                 loadedNativeMetaTransformPlugins.add(metaTransformPlugin)
-                // Native C++ callbacks require a C++ MetaTransformPluginBuilder ABI adapter.
             } catch (e: Exception) {
                 DiagnoseInvalidPlugin(pluginPath)
                 return false
@@ -562,9 +562,9 @@ public class CompilerInstance {
     }
 
     public func ExpandDecl(decl: Decl): ArrayList<Decl> {
-        let out = ArrayList<Decl>()
-        out.add(decl)
-        return out
+        let host = MacroHostAdapter(this)
+        let expansion = MacroExpansion(host)
+        return expansion.ExpandDecl(decl)
     }
 
     public func PerformIncrementalScopeAnalysis(): Bool {
@@ -636,6 +636,10 @@ public class CompilerInstance {
     }
 
     public func PerformGenericInstantiation(): Bool {
+        if (!importManager.getOrThrow().IsSourceCodeImported()) {
+            InternalError("Generic instantiation should not be performed when imported source code is not reparsed.")
+            return false
+        }
         if (let None <- gim) {
             gim = Some(GenericInstantiationManager(faithfulSemaInstance.getOrThrow(), testManager.getOrThrow().GetImpl()))
         }
@@ -720,8 +724,11 @@ public class CompilerInstance {
         }
         let compatibleSDKVersion = invocation.globalOptions.passedWhenKeyValue.get("APILevel_level") ?? ""
         for (pkg in pkgs) {
-            FaithfulDesugarBeforeTypeCheck(pkg, compatibleSDKVersion: compatibleSDKVersion)
+            FaithfulDesugarBeforeTypeCheck(pkg,
+                desugarMacrocall: invocation.globalOptions.enableMacroInLSP,
+                compatibleSDKVersion: compatibleSDKVersion)
         }
+        getCompileStrategy().InteropConfigTomlCheck()
         let semaInstance = FaithfulSemaCompilerInstance()
         semaInstance.typeManager = typeManager.getOrThrow().AsFaithfulSemaTypeManager()
         semaInstance.globalOptions = invocation.globalOptions
@@ -1085,20 +1092,11 @@ public class CompilerInstance {
         return members
     }
 
-    public func GetGivenReferenceTarget(ctx: ASTContext, scopeName: String, exprName: String, hasLocalDecl: Bool): Candidate {
-        let _ = scopeName
-        let _ = hasLocalDecl
-        let out = Candidate()
-        for (sym in ctx.symbolTable) {
-            if (sym.name == exprName) {
-                if (let Some(node) <- sym.node) {
-                    if (let Some(decl) <- (node as Decl)) {
-                        out.decls.add(decl)
-                    }
-                }
-            }
+    public func GetGivenReferenceTarget(ctx: ASTContext, scopeName: String, expr: Expr, hasLocalDecl: Bool): Candidate {
+        if (let None <- faithfulTypeChecker) {
+            return Candidate()
         }
-        return out
+        return GetTypeChecker().SynReferenceSeparately(ctx, scopeName, expr, hasLocalDecl)
     }
 
     public func UpdateAndWriteCachedInfoToDisk(updateCachedInfo: () -> Unit): Bool {
@@ -1197,15 +1195,15 @@ public class CompilerInstance {
             return true
         }
         if (invocation.globalOptions.executablePath.isEmpty()) {
-            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
-                "failed to detect CANGJIE_HOME: can not resolve executable path")
+            diag.DiagnoseRefactor(DiagKindRefactor.frontend_failed_to_detect_cangjie_home,
+                DEFAULT_POSITION, arguments: ["can not resolve executable path"])
             return false
         }
         let exeAbs = GetAbsPath(invocation.globalOptions.executablePath) ?? invocation.globalOptions.executablePath
         cangjieHome = JoinPath(GetDirPath(exeAbs), "..")
         if (!FileExist(cangjieHome) || !FileExist(JoinPath(cangjieHome, "modules"))) {
-            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
-                "failed to detect CANGJIE_HOME: invalid cjc home")
+            diag.DiagnoseRefactor(DiagKindRefactor.frontend_failed_to_detect_cangjie_home,
+                DEFAULT_POSITION, arguments: ["invalid cjc home"])
             return false
         }
         return true
