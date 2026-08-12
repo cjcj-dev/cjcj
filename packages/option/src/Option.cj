@@ -1440,7 +1440,11 @@ public open class GlobalOptions <: Option {
                 emitOptionDiag(BasicDiagKindRefactor.driver_invalid_visible_pkgs_conflict)
                 return false
             }
-            if (outputMode != OutputMode.SHARED_LIB) {
+            // C++: src/Option/Option.cpp:647-654
+            // Valid on Linux dylib LTO and iOS staticlib LTO; other configs only warn.
+            let validForDylib = outputMode == OutputMode.SHARED_LIB && target.os == OSType.LINUX
+            let validForStaticLib = outputMode == OutputMode.STATIC_LIB && target.os == OSType.IOS
+            if (!validForDylib && !validForStaticLib) {
                 emitOptionDiag(BasicDiagKindRefactor.driver_visible_pkgs_only_for_dylib)
             }
         }
