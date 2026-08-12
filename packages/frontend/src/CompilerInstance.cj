@@ -722,6 +722,7 @@ public class CompilerInstance {
         if (pkgs.isEmpty()) {
             return true
         }
+        getCompileStrategy().InteropConfigTomlCheck()
         let compatibleSDKVersion = invocation.globalOptions.passedWhenKeyValue.get("APILevel_level") ?? ""
         for (pkg in pkgs) {
             FaithfulDesugarBeforeTypeCheck(pkg,
