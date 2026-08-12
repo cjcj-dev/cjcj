@@ -14,6 +14,19 @@ import {
   assertSdkCompilerRuntimeAbi,
   hostLoaderPath,
 } from '../lib/runtime-split.mjs';
+// The cjpm pin is read, never repeated: `git fetch --depth 1 <sha>` only works
+// when that exact sha is reachable on the remote, so the pin and the assertion
+// must be the same string by construction.
+const cjpmPin = Object.fromEntries(
+  fs.readFileSync(new URL('../../ci/cjpm_pin.env', import.meta.url), 'utf8')
+    .split('\n')
+    .filter(line => /^[A-Z_]+=/.test(line))
+    .map(line => {
+      const at = line.indexOf('=');
+      return [line.slice(0, at), line.slice(at + 1).trim()];
+    }),
+);
+
 import * as compiler from '../srcbuild/stages/compiler.mjs';
 import * as packageStage from '../srcbuild/stages/package.mjs';
 import * as runtime from '../srcbuild/stages/runtime.mjs';
@@ -564,13 +577,18 @@ test('Linux source stages emit the Python command order', async () => {
         `--include=${path.join(compilerRoot, 'include')}`, '--target-lib=/usr/lib/x86_64-linux-gnu',
       ]),
       expected(root, stdxRoot, ['python3', 'build.py', 'install']),
+      // Read the pin rather than repeating it. tools.mjs:48-51 takes the url and
+      // ref straight from ci/cjpm_pin.env, so a literal here is a second copy of
+      // the pin that no one updates with the first: when CJPM_FORK_REF moved to
+      // pick up the cjpm-side jobserver, this assertion still named the old sha
+      // and would have failed for a reason that has nothing to do with the
+      // command order it exists to check.
       expected(root, toolsRoot, [
-        'git', 'fetch', '--depth', '1', 'https://github.com/cjcj-dev/cangjie-tools.git',
-        '1212a25c07be1a400be85e6ff2902788d3ecec0a',
+        'git', 'fetch', '--depth', '1', cjpmPin.CJPM_FORK_URL, cjpmPin.CJPM_FORK_REF,
       ]),
       expected(root, toolsRoot, ['git', 'rev-parse', 'FETCH_HEAD']),
       expected(root, toolsRoot, [
-        'git', 'checkout', '1212a25c07be1a400be85e6ff2902788d3ecec0a', '--', 'cjpm',
+        'git', 'checkout', cjpmPin.CJPM_FORK_REF, '--', 'cjpm',
       ]),
     ];
     // cjcov and cjtrace-recover extend the upstream tool set on purpose: they
@@ -629,4 +647,40 @@ test('package paths and archive roots match package.py', async () => {
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
+});
+
+// A pinned sha that is only reachable in someone's local clone builds fine for
+// them and fails for everyone else. tools.mjs fetches it with `git fetch
+// --depth 1 <url> <sha>`, which resolves nothing when the object is not
+// advertised by the remote, so the pin must name an object the remote actually
+// has. This is not hypothetical: CJPM_FORK_REF sat four commits behind the
+// cjpm-side jobserver for three days because those commits lived only on a
+// local branch, and nothing said so -- the build simply kept using the older
+// pin, and the jobserver on the compiler side had no token source.
+//
+// Skipped without network rather than failing: an offline run should not turn
+// red over something it cannot check.
+test('the cjpm pin names an object the remote actually has', {timeout: 60_000}, () => {
+  const {CJPM_FORK_URL: url, CJPM_FORK_REF: ref} = cjpmPin;
+  assert.match(ref, /^[0-9a-f]{40}$/, 'CJPM_FORK_REF must be a full sha');
+
+  const probe = spawnSync('git', ['ls-remote', '--exit-code', url, 'HEAD'], {
+    encoding: 'utf8', timeout: 30_000,
+  });
+  if (probe.status !== 0) {
+    console.error(`SKIP pin reachability: cannot reach ${url}`);
+    return;
+  }
+
+  // `git fetch --depth 1 <url> <sha>` is exactly what tools.mjs runs; --dry-run
+  // resolves the object without writing anything into this repository.
+  const fetched = spawnSync('git', ['fetch', '--dry-run', '--depth', '1', url, ref], {
+    encoding: 'utf8', timeout: 45_000,
+  });
+  assert.equal(
+    fetched.status, 0,
+    `CJPM_FORK_REF ${ref} is not reachable on ${url}.\n`
+    + 'The commit is probably still on a local branch. Push it before pinning it.\n'
+    + `git said: ${(fetched.stderr || '').trim()}`,
+  );
 });
