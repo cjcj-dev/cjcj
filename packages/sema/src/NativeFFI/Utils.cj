@@ -889,7 +889,7 @@ public func IsGenericParam(ty: Ty, decl: Decl, config: GenericConfigInfo): Bool 
     }
     if (ty.IsTuple()) {
         for (typeArg in ty.typeArgs) {
-            if (typeArg.HasGeneric() && !IsGenericParam(typeArg, decl, config)) {
+            if (typeArg.IsGeneric() && !IsGenericParam(typeArg, decl, config)) {
                 return false
             }
         }
@@ -897,11 +897,11 @@ public func IsGenericParam(ty: Ty, decl: Decl, config: GenericConfigInfo): Bool 
     }
     if (let Some(funcTy) <- (ty as FuncTy)) {
         for (paramTy in funcTy.paramTys) {
-            if (paramTy.HasGeneric() && !IsGenericParam(paramTy, decl, config)) {
+            if (paramTy.IsGeneric() && !IsGenericParam(paramTy, decl, config)) {
                 return false
             }
         }
-        if (funcTy.retTy.HasGeneric()) {
+        if (funcTy.retTy.IsGeneric()) {
             return IsGenericParam(funcTy.retTy, decl, config)
         }
         return true

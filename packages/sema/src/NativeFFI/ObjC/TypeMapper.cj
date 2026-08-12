@@ -228,6 +228,7 @@ public class TypeMapper {
                 CJC_ASSERT(ty.typeArgs.size == 1)
                 if (IsValidObjCMirror(ty.typeArgs[0]) || IsObjCImpl(ty.typeArgs[0])) { return true }
             case TypeKind.TYPE_FUNC => if (ty.IsCFunc()) { return true }
+            case TypeKind.TYPE_CSTRING => if (ty.IsCString()) { return true }
             case _ => return false
         }
         return false
