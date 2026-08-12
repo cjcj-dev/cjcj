@@ -33,6 +33,7 @@ import cjcj::chir.FuncKind as ChirFuncKind
 import cjcj::chir.FuncSigInfo as ChirFuncSigInfo
 import cjcj::chir.Function as ChirFunction
 import cjcj::chir.FunctionInline
+import cjcj::chir.GlobalVar as ChirGlobalVar
 import cjcj::chir.GlobalValue as ChirGlobalValue
 import cjcj::chir.GetRefToArrayElem
 import cjcj::chir.INVALID_LOCATION as CHIR_INVALID_LOCATION
@@ -347,31 +348,31 @@ private class ToCHIR {
         chirPkg = Some(lowered)
         DumpCHIRToFile("AST_CHIR")
         ClearASTResources()
-        // C++: CHIR/CHIR.cpp:1311 ToCHIR::Canonicalization.
-        DumpCHIRToFile("Canonicalization")
         // C++: CHIR/CHIR.cpp:1133-1140 ToCHIR::Run.
         if (instance.invocation.globalOptions.outputMode == OutputMode.CHIR) {
             let fileName = FileUtil.JoinPath(outputPath, lowered.GetName()) + CHIR_SERIALIZATION_FILE_EXTENSION
             CHIRSerializer.Serialize(lowered, fileName, ToCHIRPhase.RAW)
             return Some(lowered)
         }
-        if (instance.invocation.globalOptions.emitCHIRPhase == CandidateEmitCHIRPhase.RAW) {
-            EmitCHIR(outputPath, lowered, ToCHIRPhase.RAW,
-                instance.invocation.globalOptions.NeedDumpCHIR())
-            return Some(lowered)
+        var pluginPackage = lowered
+        if (!PerformPlugin(pluginPackage, srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar)) {
+            return None
         }
-        if (!RulesChecking(lowered, builder, instance.invocation.globalOptions,
+        pluginPackage = chirPkg.getOrThrow()
+        DumpCHIRToFile("Canonicalization")
+        if (instance.invocation.globalOptions.emitCHIRPhase == CandidateEmitCHIRPhase.RAW) {
+            EmitCHIR(outputPath, pluginPackage, ToCHIRPhase.RAW,
+                instance.invocation.globalOptions.NeedDumpCHIR())
+            return Some(pluginPackage)
+        }
+        if (!RulesChecking(pluginPackage, builder, instance.invocation.globalOptions,
             instance.diag.AsBasicDiagnosticEngine(), effectMap, maybeUnreachable)) {
             return None
         }
-        RunOptimizationPass(lowered)
-        if (!TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, lowered)) {
-            instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
-            return None
-        }
+        RunOptimizationPass(pluginPackage)
         let closure = ClosureConversion(builder, opts: instance.invocation.globalOptions,
             srcCodeImportedFuncs: srcCodeImportedFuncs)
-        closure.RunOnPackage(lowered)
+        closure.RunOnPackage(pluginPackage)
         // C++: CHIR/CHIR.cpp:253-255.
         ccOutFuncsRawMangle.clear()
         for (rawMangledName in closure.GetCCOutFuncsRawMangle()) {
@@ -379,14 +380,14 @@ private class ToCHIR {
         }
         // C++: CHIR/CHIR.cpp:255 ToCHIR::DoClosureConversion.
         DumpCHIRToFile("ClosureConversion")
-        if (!RunConstantEvaluation(lowered, builder, instance.diag.AsBasicDiagnosticEngine(),
+        if (!RunConstantEvaluation(pluginPackage, builder, instance.diag.AsBasicDiagnosticEngine(),
             instance.invocation.globalOptions, initFuncsForConstVar)) {
             return None
         }
-        ReplaceSrcCodeImportedVal(lowered).Run(srcCodeImportedFuncs, srcCodeImportedVars,
+        ReplaceSrcCodeImportedVal(pluginPackage).Run(srcCodeImportedFuncs, srcCodeImportedVars,
             closure.GetUselessClassDef(), closure.GetUselessLambda())
         // C++: CHIR/CHIR.cpp:1178-1181.
-        if (!AnnotationChecker(lowered, instance.diag.AsBasicDiagnosticEngine()).Run()) {
+        if (!AnnotationChecker(pluginPackage, instance.diag.AsBasicDiagnosticEngine()).Run()) {
             return None
         }
         // C++: CHIR/CHIR.cpp:1183.
@@ -397,18 +398,72 @@ private class ToCHIR {
         EraseDebugExpr()
         CFFIFuncWrapper()
         if (instance.invocation.globalOptions.NeedDumpCHIRToScreen()) {
-            ChirCHIRPrinter.PrintPackage(lowered)
+            ChirCHIRPrinter.PrintPackage(pluginPackage)
         }
         if (instance.invocation.globalOptions.emitCHIRPhase == CandidateEmitCHIRPhase.OPT) {
-            EmitCHIR(outputPath, lowered, ToCHIRPhase.OPT,
+            EmitCHIR(outputPath, pluginPackage, ToCHIRPhase.OPT,
                 instance.invocation.globalOptions.NeedDumpCHIR())
         } else if (instance.invocation.globalOptions.saveTemps) {
             let tempFileInfo = TempFileManager.Instance().CreateNewFileInfo(
-                TempFileInfo(fileName: lowered.GetName()), TempFileKind.O_CHIR)
-            CHIRSerializer.Serialize(lowered, tempFileInfo.filePath, ToCHIRPhase.OPT)
+                TempFileInfo(fileName: pluginPackage.GetName()), TempFileKind.O_CHIR)
+            CHIRSerializer.Serialize(pluginPackage, tempFileInfo.filePath, ToCHIRPhase.OPT)
         }
         builder.MergeAllocatedInstance()
-        return Some(lowered)
+        return Some(pluginPackage)
+    }
+
+    // C++: CHIR/CHIR.cpp:1254-1279 ToCHIR::PerformPlugin.
+    private func PerformPlugin(
+        currentPackage: RealCHIRPackage,
+        srcCodeImportedFuncs: ArrayList<ChirFunction>,
+        srcCodeImportedVars: ArrayList<ChirGlobalVar>,
+        initFuncsForConstVar: ArrayList<ChirFunction>
+    ): Bool {
+        if (instance.invocation.globalOptions.pluginPaths.isEmpty()) {
+            return true
+        }
+        try (recorder = ProfileRecorder("CHIR", "PerformPlugin")) {
+            var succeed = true
+            try {
+                if (instance.metaTransformPluginBuilder.IsCppPlugin()) {
+                    succeed = TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, currentPackage)
+                } else {
+                    succeed = ExecuteCjPlugins(currentPackage, srcCodeImportedFuncs, srcCodeImportedVars,
+                        initFuncsForConstVar)
+                }
+            } catch (e: Exception) {
+                succeed = false
+            }
+            if (!succeed) {
+                instance.diag.DiagnoseRefactor(DiagKindRefactor.plugin_throws_exception, DEFAULT_POSITION)
+            } else {
+                DumpCHIRToFile("PLUGIN")
+            }
+            return succeed
+        }
+    }
+
+    // C++: CHIR/CHIR.cpp:1225-1251 ToCHIR::ExecuteCjPlugins.
+    private func ExecuteCjPlugins(
+        currentPackage: RealCHIRPackage,
+        srcCodeImportedFuncs: ArrayList<ChirFunction>,
+        srcCodeImportedVars: ArrayList<ChirGlobalVar>,
+        initFuncsForConstVar: ArrayList<ChirFunction>
+    ): Bool {
+        let executePlugin = ExecutePlugin(builder)
+        if (!executePlugin.SerializePackage(currentPackage)) {
+            return false
+        }
+        if (!executePlugin.Execute(instance.invocation.globalOptions.pluginPaths[0])) {
+            return false
+        }
+        if (let Some(newPackage) <- executePlugin.DeserializePluginResult(
+            srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar, maybeUnreachable)) {
+            chirPkg = Some(newPackage)
+        } else {
+            return false
+        }
+        return executePlugin.FreeCachedData()
     }
 
     // C++: CHIR/CHIR.cpp:1376-1391 ToCHIR::ClearASTResources.
