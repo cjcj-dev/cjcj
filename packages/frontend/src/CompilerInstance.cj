@@ -437,10 +437,10 @@ public class CompilerInstance {
                 let metaTransformPlugin = NativeMetaTransformPlugin.Get(pluginPath)
                 if (!metaTransformPlugin.IsValid()) {
                     DiagnoseInvalidPlugin(pluginPath)
+                    return false
                 }
                 loadedPluginPaths.add(pluginPath)
                 loadedNativeMetaTransformPlugins.add(metaTransformPlugin)
-                // Native C++ callbacks require a C++ MetaTransformPluginBuilder ABI adapter.
             } catch (e: Exception) {
                 DiagnoseInvalidPlugin(pluginPath)
                 return false
