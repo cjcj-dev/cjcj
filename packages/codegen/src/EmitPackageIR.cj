@@ -181,6 +181,7 @@ private func GenSubCHIRPackages(cgPkgContext: CGPkgContext): Unit {
             DumpIR(cgModule.GetLLVMModule().getOrThrow(), "")
         }
     }
+    CGValueRepresentationCensus.Dump()
     ProfileRecorder.Stop("EmitIR", "GenSubCHIRPackages")
 }
 
