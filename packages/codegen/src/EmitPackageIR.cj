@@ -865,6 +865,7 @@ private func EmitImportedCFuncIR(cgMod: CGModule, chirFunc: Function): Unit {
         AddFnAttr(cgFunc.GetRawFunction(), INCREMENTAL_CFUNC_ATTR)
         AddFnAttr(cgFunc.GetRawFunction(), INTERNAL_CFUNC_ATTR)
     }
+    SetSRetAttrForStructReturnType(chirFuncTy, cgFunc.GetRawFunction())
 }
 
 private func SpecifyPackageInitFunc(cgMod: CGModule): Unit {
