@@ -161,7 +161,9 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
     if (id == ID.TRIMPATH) {
         let normalized = NormalizeRawPath(arg.value)
         if (!normalized.isEmpty()) {
-            opts.removedPathPrefix.add(if (normalized[normalized.size - 1] == b'/') { normalized } else { normalized + "/" })
+            // C++: src/Option/OptionAction.cpp:711-720
+            // Windows keeps a trailing backslash; other hosts keep a trailing slash.
+            opts.removedPathPrefix.add(appendTrimPathSeparator(normalized))
         }
         return handled()
     }
@@ -329,6 +331,16 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
         return handled()
     }
     return missing()
+}
+
+@When[os == "Windows"]
+private func appendTrimPathSeparator(normalized: String): String {
+    return if (normalized[normalized.size - 1] == b'\\') { normalized } else { normalized + "\\" }
+}
+
+@When[os != "Windows"]
+private func appendTrimPathSeparator(normalized: String): String {
+    return if (normalized[normalized.size - 1] == b'/') { normalized } else { normalized + "/" }
 }
 
 private func parseOutputType(opts: GlobalOptions, value: String): ActionResult {

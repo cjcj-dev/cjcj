@@ -229,7 +229,14 @@ public func LLDSetLTOOptions(setOptionHandler: (String) -> Unit, driverOptions: 
     setOptionHandler("--cj-lto-opt")
     setOptionHandler("--allow-multiple-definition")
     setOptionHandler("--plugin-opt=no-opaque-pointers")
-    if (driverOptions.outputMode == OutputMode.SHARED_LIB) {
+    // C++: src/Driver/ToolOptions.cpp:309-320
+    // Linux dylib LTO and iOS native LTO staticlib both need --visible-pkgs.
+    let shouldSetVisiblePkgs = (driverOptions.outputMode == OutputMode.SHARED_LIB &&
+            driverOptions.target.os == OSType.LINUX) ||
+        (driverOptions.outputMode == OutputMode.STATIC_LIB &&
+            driverOptions.target.os == OSType.IOS &&
+            driverOptions.ShouldEmitStaticLibInLTO())
+    if (shouldSetVisiblePkgs) {
         let visible = driverOptions.GetLtoVisiblePkgs()
         if (visible.size > 0) {
             let list = ArrayList<String>()

@@ -77,7 +77,7 @@ public open class Darwin_CJNATIVE <: MachO {
         backendCmds.add(MakeSingleToolBatch(archiveTool))
     }
 
-    protected func GenerateLTOObjectFile(objFiles: ArrayList<TempFileInfo>): TempFileInfo {
+    protected open func GenerateLTOObjectFile(objFiles: ArrayList<TempFileInfo>): TempFileInfo {
         let darwinSDKVersion = GetDarwinSDKVersion(driverOptions.sysroot)
         if (driverOptions.enableVerbose) {
             println("selected Darwin SDK path: " + driverOptions.sysroot + " (SDK Version: " +
