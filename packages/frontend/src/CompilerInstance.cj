@@ -722,13 +722,13 @@ public class CompilerInstance {
         if (pkgs.isEmpty()) {
             return true
         }
-        getCompileStrategy().InteropConfigTomlCheck()
         let compatibleSDKVersion = invocation.globalOptions.passedWhenKeyValue.get("APILevel_level") ?? ""
         for (pkg in pkgs) {
             FaithfulDesugarBeforeTypeCheck(pkg,
                 desugarMacrocall: invocation.globalOptions.enableMacroInLSP,
                 compatibleSDKVersion: compatibleSDKVersion)
         }
+        getCompileStrategy().InteropConfigTomlCheck()
         let semaInstance = FaithfulSemaCompilerInstance()
         semaInstance.typeManager = typeManager.getOrThrow().AsFaithfulSemaTypeManager()
         semaInstance.globalOptions = invocation.globalOptions
