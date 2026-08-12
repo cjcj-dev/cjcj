@@ -2613,6 +2613,20 @@ extend ParserImpl {
                     CheckJavaInteropMember(member)
                     CheckObjCInteropMember(member)
                 }
+                // C++: Parse/ParseDecl.cpp:1150-1153 / 1602-1605
+                if (member.astKind == ASTKind.PRIMARY_CTOR_DECL) {
+                    if (let Some(classDecl) <- (ret as ClassDecl)) {
+                        if (member.identifier != classDecl.identifier) {
+                            AddBodyMember(ret, InvalidDecl(member.begin))
+                            continue
+                        }
+                    } else if (let Some(structDecl) <- (ret as StructDecl)) {
+                        if (member.identifier != structDecl.identifier) {
+                            AddBodyMember(ret, InvalidDecl(member.begin))
+                            continue
+                        }
+                    }
+                }
                 AddBodyMember(ret, member)
             }
         }
