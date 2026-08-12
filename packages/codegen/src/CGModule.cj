@@ -209,9 +209,6 @@ public class CGValueRepresentationCensus {
         if ((Process.current.getEnv("CJCJ_CGVALSTATE_DUMP") ?? "") != "1") {
             return
         }
-        if (dumped.swap(true)) {
-            return
-        }
         let total = nonheapTotal.load()
         let safe = plainSafe.load()
         let unsafeCount = plainUnsafe.load()
