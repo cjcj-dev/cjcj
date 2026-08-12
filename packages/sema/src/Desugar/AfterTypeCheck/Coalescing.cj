@@ -54,7 +54,7 @@ public func ConstructOptionMatch(selector: Expr, someExpr: Block, otherExpr: Blo
     someTy: Ty): Option<Expr> {
     if (let Some(selectorTy) <- selector.GetTy()) {
         if (let Some(enumTy) <- (selectorTy as EnumTy)) {
-            if (let Some(enumDecl) <- enumTy.decl) {
+            if (let Some(enumDecl) <- enumTy.declPtr) {
                 if (let Some(ctorDeclNode) <- LookupEnumMember(enumDecl, OPTION_VALUE_CTOR)) {
                     if (let Some(ctorDecl) <- (ctorDeclNode as FuncDecl)) {
                         let matchExpr = MatchExpr()
