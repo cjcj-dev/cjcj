@@ -136,7 +136,7 @@ private func RepresentationStateFromPtrAnnotation(value: LLVMValueRef): Option<C
 }
 
 public func InferCGValueRepresentationState(value: LLVMValueRef): CGValueRepresentationState {
-    if (value.isNull()) {
+    if (value.isNull() || unsafe { LLVMIsAInstruction(value) }.isNull()) {
         return CGValueRepresentationState.UNKNOWN
     }
     let stripped = StripBitCastValue(value)
