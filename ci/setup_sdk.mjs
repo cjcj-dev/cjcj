@@ -277,6 +277,13 @@ if (llcPlatform && fixedLlcGz) {
         log(`FATAL: installed ${tool.name} failed file/ldd/--version verification`);
         process.exit(4);
       }
+      // Stock nightly ships a ~100KB thin llc that NEEDs libLLVM-15.so. That shape
+      // lacks CJ flags (e.g. -cj-generational-post-barrier) and SEGV on isel of
+      // gc.relocate(undef). Fixed tuples are fat (LLVM_LINK_LLVM_DYLIB=OFF).
+      if ((tool.name === 'llc' || tool.name === 'opt') && /libLLVM/.test(lddResult.stdout)) {
+        log(`FATAL: installed ${tool.name} is thin (links libLLVM); product requires fat static tool`);
+        process.exit(4);
+      }
       const reportedVersion = versionResult.stdout.split(/\r?\n/).map(line => line.trim())
         .find(line => /LLVM version |^LLD /.test(line)) || '';
       const expectedVersion = expectedVersions.get(tool.name) || '';

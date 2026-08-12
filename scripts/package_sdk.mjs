@@ -817,9 +817,18 @@ function verifyNativeLlvmTool(tool, executable) {
     if ((!staticBinary && loaderProbe.status !== 0) || /not found/i.test(loaderProbe.output)) {
       throw new Error(`${tool}: loader check failed: ${oneLine(loaderProbe.output)}`);
     }
+    // Reject stock thin wrappers (~100KB + NEEDED libLLVM). Release llc/opt must be
+    // the fat fixed-tuple binaries (LLVM_LINK_LLVM_DYLIB=OFF); thin lacks CJ flags and
+    // SEGV on isel of gc.relocate(undef). See REPORT-fatllc / REPORT-llcparse.
+    if ((tool === 'llc' || tool === 'opt') && /libLLVM/.test(loaderProbe.output)) {
+      throw new Error(`${tool}: thin libLLVM-linked binary forbidden; need fat fixed-tuple tool`);
+    }
   } else if (platform.startsWith('darwin-')) {
     loaderProbe = runLineageProbe('otool', ['-L', executable]);
     if (loaderProbe.status !== 0) throw new Error(`${tool}: loader check failed: ${oneLine(loaderProbe.output)}`);
+    if ((tool === 'llc' || tool === 'opt') && /libLLVM/.test(loaderProbe.output)) {
+      throw new Error(`${tool}: thin libLLVM-linked binary forbidden; need fat fixed-tuple tool`);
+    }
   } else {
     loaderProbe = runLineageProbe('objdump', ['-p', executable]);
     if (loaderProbe.status !== 0) throw new Error(`${tool}: loader check failed: ${oneLine(loaderProbe.output)}`);
