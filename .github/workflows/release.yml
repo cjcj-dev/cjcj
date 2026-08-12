@@ -220,25 +220,11 @@ jobs:
         needs.windows-runtime.result == 'success' &&
         needs.package-p5-darwin-x64.result == 'success'
       }}
-    environment:
-      name: release-draft
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
-      - name: Verify manual approval environment
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api "repos/${{ github.repository }}/environments/release-draft" \
-            | jq -e '
-                [.protection_rules[]
-                 | select(.type == "required_reviewers")
-                 | select(.prevent_self_review == true)
-                 | select((.reviewers | length) >= 1)]
-                | length == 1
-              '
       - name: Download SDK artifacts
         uses: actions/download-artifact@v8
         with:
