@@ -15,23 +15,22 @@ public class CheckInitMethod <: Handler<TypeCheckContext> {
                 continue
             }
             let method = (member as FuncDecl).getOrThrow()
-            let fTy = method.GetTy().getOrThrow() as FuncTy
-            if (fTy.isNone()) {
-                continue
-            }
+            let fTy = method.GetTy() as FuncTy
             let methodBody = method.funcBody.getOrThrow()
-            if (methodBody.retType.isNone()) {
+            if (fTy.isNone() || methodBody.retType.isNone()) {
                 continue
             }
             let retTy = fTy.getOrThrow().retTy
-            let mirrorTy = method.outerDecl.getOrThrow().GetTy().getOrThrow()
-            if (ctx.typeManager.IsTyEqual(retTy, mirrorTy)) {
-                continue
+            let mirrorTy = method.outerDecl.getOrThrow().GetTy()
+            if (let Some(mirror) <- mirrorTy) {
+                if (ctx.typeManager.IsTyEqual(retTy, mirror)) {
+                    continue
+                }
             }
 
             let builder = DiagnoseRefactor(ctx.diag, DiagKindRefactor.sema_mismatched_types,
                 methodBody.retType.getOrThrow())
-            builder.AddMainHintArguments(Ty.ToString(Some(mirrorTy)), Ty.ToString(Some(retTy)))
+            builder.AddMainHintArguments(Ty.ToString(mirrorTy), Ty.ToString(Some(retTy)))
             builder.Emit()
             ctx.target.EnableAttr(Attribute.IS_BROKEN)
         }
