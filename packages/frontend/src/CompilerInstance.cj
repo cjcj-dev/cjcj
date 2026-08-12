@@ -24,7 +24,7 @@ import cjcj::option.OutputMode
 import cjcj::incremental_compilation.{ASTCache, ASTCacheCalculator, CompilationCache, FileMap,
     MemberDeclCache, OptEffectStrMap, RawMangled2DeclMap, SemanticInfo, TopLevelDeclCache, VarInitDepMap,
     VirtualWrapperDepMap, WriteCache}
-import cjcj::macro_pkg.{GetMethodPointer, OpenSymbolTable, OpenSymbolTableSafely, RuntimeInit}
+import cjcj::macro_pkg.{GetMethodPointer, MacroExpansion, OpenSymbolTable, OpenSymbolTableSafely, RuntimeInit}
 import cjcj::parse.ASTHasher
 import cjcj::utils.FreeIdleMemoryToOS
 import cjcj::utils.ProfileRecorder
@@ -562,9 +562,9 @@ public class CompilerInstance {
     }
 
     public func ExpandDecl(decl: Decl): ArrayList<Decl> {
-        let out = ArrayList<Decl>()
-        out.add(decl)
-        return out
+        let host = MacroHostAdapter(this)
+        let expansion = MacroExpansion(host)
+        return expansion.ExpandDecl(decl)
     }
 
     public func PerformIncrementalScopeAnalysis(): Bool {
