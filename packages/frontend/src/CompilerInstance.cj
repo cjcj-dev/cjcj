@@ -1190,15 +1190,15 @@ public class CompilerInstance {
             return true
         }
         if (invocation.globalOptions.executablePath.isEmpty()) {
-            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
-                "failed to detect CANGJIE_HOME: can not resolve executable path")
+            diag.DiagnoseRefactor(DiagKindRefactor.frontend_failed_to_detect_cangjie_home,
+                DEFAULT_POSITION, arguments: ["can not resolve executable path"])
             return false
         }
         let exeAbs = GetAbsPath(invocation.globalOptions.executablePath) ?? invocation.globalOptions.executablePath
         cangjieHome = JoinPath(GetDirPath(exeAbs), "..")
         if (!FileExist(cangjieHome) || !FileExist(JoinPath(cangjieHome, "modules"))) {
-            diag.Diagnose(DiagCategory.IMPORT_PACKAGE, DEFAULT_POSITION,
-                "failed to detect CANGJIE_HOME: invalid cjc home")
+            diag.DiagnoseRefactor(DiagKindRefactor.frontend_failed_to_detect_cangjie_home,
+                DEFAULT_POSITION, arguments: ["invalid cjc home"])
             return false
         }
         return true
