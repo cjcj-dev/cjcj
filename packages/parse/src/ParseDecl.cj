@@ -2,6 +2,8 @@ package cjcj::parse
 
 import cjcj::ast.ASTCloner
 import cjcj::ast.InsertObjCSyntheticClassDecl
+import cjcj::ast.InsertPropGetterSignature
+import cjcj::ast.InsertPropSetterSignature
 import cjcj::ast.INVALID_IDENTIFIER
 import cjcj::ast.IsObjCDeclAppropriateForSyntheticClassGeneration
 import cjcj::ast.Node
@@ -1063,6 +1065,193 @@ extend ParserImpl {
             FFIParserImpl(this).CheckForeignNameAnnotation(propDecl)
         } else if (let Some(primaryCtorDecl) <- (decl as PrimaryCtorDecl)) {
             CheckPrimaryCtorDeclJavaMirror(primaryCtorDecl)
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:564-619
+    private func CheckObjCInteropMember(member: Decl): Unit {
+        let outerDecl = member.outerDecl.getOrThrow()
+        if (outerDecl.TestAttr(Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+            if (member.GetGeneric().isSome()) {
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+                member.EnableAttr(Attribute.IS_BROKEN)
+                FFIParserImpl(this).ObjC().DiagObjCImplCannotBeGeneric(member)
+                return
+            }
+            if (member.astKind == ASTKind.FUNC_DECL &&
+                member.TestAttr(Attribute.CONSTRUCTOR) && member.TestAttr(Attribute.STATIC)) {
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+                member.EnableAttr(Attribute.IS_BROKEN)
+                FFIParserImpl(this).ObjC().DiagObjCImplCannotHaveStaticInit(member)
+                return
+            }
+        }
+        if (let Some(funcDecl) <- (member as FuncDecl)) {
+            if (funcDecl.TestAttr(Attribute.CONSTRUCTOR)) {
+                CheckInitCtorDeclObjCMirror(funcDecl)
+                FFIParserImpl(this).CheckForeignNameAnnotation(funcDecl)
+            } else if (funcDecl.TestAttr(Attribute.FINALIZER) && outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+                funcDecl.EnableAttr(Attribute.IS_BROKEN)
+                FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHaveFinalizer(funcDecl)
+            } else {
+                CheckMemberFuncObjCMirror(funcDecl)
+                FFIParserImpl(this).CheckForeignNameAnnotation(funcDecl)
+                FFIParserImpl(this).ObjC().CheckInitAnnotation(funcDecl)
+                FFIParserImpl(this).ObjC().CheckOptionalAnnotation(funcDecl)
+            }
+        } else if (let Some(varDecl) <- (member as VarDecl)) {
+            CheckVarDeclObjCMirror(varDecl)
+        } else if (let Some(propDecl) <- (member as PropDecl)) {
+            CheckPropDeclObjCMirror(propDecl)
+            FFIParserImpl(this).CheckForeignNameAnnotation(propDecl)
+        } else if (let Some(primaryCtorDecl) <- (member as PrimaryCtorDecl)) {
+            CheckPrimaryCtorDeclObjCMirror(primaryCtorDecl)
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:651-674
+    private func CheckMemberFuncObjCMirror(funcDecl: FuncDecl): Unit {
+        if (let Some(outerDecl) <- funcDecl.outerDecl) {
+            if (!outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                return
+            }
+            funcDecl.EnableAttr(Attribute.OBJ_C_MIRROR)
+            if (funcDecl.TestAttr(Attribute.PRIVATE)) {
+                FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHavePrivateMember(funcDecl)
+                funcDecl.EnableAttr(Attribute.IS_BROKEN)
+                outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (HasModifier(funcDecl.modifiers, TokenKind.CONST)) {
+                FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHaveConstMember(funcDecl)
+                funcDecl.EnableAttr(Attribute.IS_BROKEN)
+                outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            FFICheckClassLikeFuncBody(funcDecl,
+                DiagKindRefactor.parse_objc_mirror_method_must_have_return_type,
+                DiagKindRefactor.parse_objc_mirror_method_cannot_have_body)
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:718-757
+    private func CheckInitCtorDeclObjCMirror(ctor: FuncDecl): Unit {
+        if (let Some(outerDecl) <- ctor.outerDecl) {
+            if (!outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                return
+            }
+            ctor.constructorCall = ConstructorCall.OTHER_INIT
+            ctor.EnableAttr(Attribute.OBJ_C_MIRROR)
+            if (ctor.TestAttr(Attribute.STATIC)) {
+                FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHaveStaticInit(ctor)
+                ctor.EnableAttr(Attribute.IS_BROKEN)
+                outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (HasModifier(ctor.modifiers, TokenKind.CONST)) {
+                FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHaveConstMember(ctor)
+                ctor.EnableAttr(Attribute.IS_BROKEN)
+                outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (ctor.TestAttr(Attribute.PRIVATE)) {
+                FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHavePrivateMember(ctor)
+                ctor.EnableAttr(Attribute.IS_BROKEN)
+                outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (let Some(funcBody) <- ctor.funcBody) {
+                if (let Some(body) <- funcBody.body) {
+                    ctor.EnableAttr(Attribute.IS_BROKEN)
+                    ParseDiagnoseRefactor(
+                        DiagKindRefactor.parse_objc_mirror_ctor_cannot_have_body, body.begin).Emit()
+                } else {
+                    let body = Block()
+                    body.EnableAttr(Attribute.COMPILER_ADD)
+                    body.EnableAttr(Attribute.IMPLICIT_ADD)
+                    body.begin = ctor.end
+                    body.curFile = ctor.curFile
+                    body.end = ctor.end
+                    if (let Some(ty) <- ctor.GetTy()) {
+                        body.SetTy(ty)
+                    }
+                    funcBody.body = body
+                }
+            }
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:759-784
+    private func CheckVarDeclObjCMirror(field: VarDecl): Unit {
+        if (let Some(outerDecl) <- field.outerDecl) {
+            if (!outerDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR)) {
+                return
+            }
+            field.EnableAttr(Attribute.OBJ_C_MIRROR)
+            if (field.TestAttr(Attribute.PRIVATE)) {
+                FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHavePrivateMember(field)
+                field.EnableAttr(Attribute.IS_BROKEN)
+                outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (field.TestAttr(Attribute.STATIC)) {
+                FFIParserImpl(this).ObjC().DiagObjCMirrorFieldCannotBeStatic(field)
+                field.EnableAttr(Attribute.IS_BROKEN)
+                outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (field.initializer.isSome()) {
+                FFIParserImpl(this).ObjC().DiagObjCMirrorFieldCannotHaveInitializer(field)
+                field.EnableAttr(Attribute.IS_BROKEN)
+                outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:786-816
+    private func CheckPropDeclObjCMirror(prop: PropDecl): Unit {
+        if (let Some(outerDecl) <- prop.outerDecl) {
+            if (!outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                return
+            }
+            prop.EnableAttr(Attribute.OBJ_C_MIRROR)
+            if (!outerDecl.TestAttr(Attribute.ABSTRACT)) {
+                prop.DisableAttr(Attribute.ABSTRACT)
+            }
+            if (prop.TestAttr(Attribute.PRIVATE)) {
+                FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHavePrivateMember(prop)
+                prop.EnableAttr(Attribute.IS_BROKEN)
+                outerDecl.EnableAttr(Attribute.HAS_BROKEN)
+                outerDecl.EnableAttr(Attribute.IS_BROKEN)
+            }
+            if (!prop.getters.isEmpty()) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_prop_cannot_have_getter, prop,
+                    prop.identifier.Val()).Emit()
+                prop.EnableAttr(Attribute.IS_BROKEN)
+            } else {
+                InsertPropGetterSignature(prop, Attribute.OBJ_C_MIRROR)
+            }
+            if (!prop.setters.isEmpty()) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_prop_cannot_have_setter, prop,
+                    prop.identifier.Val()).Emit()
+                prop.EnableAttr(Attribute.IS_BROKEN)
+            } else if (prop.isVar) {
+                InsertPropSetterSignature(prop, Attribute.OBJ_C_MIRROR)
+            }
+        }
+    }
+
+    // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:818-827
+    private func CheckPrimaryCtorDeclObjCMirror(ctor: PrimaryCtorDecl): Unit {
+        if (let Some(outerDecl) <- ctor.outerDecl) {
+            if (!outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                return
+            }
+            ctor.EnableAttr(Attribute.OBJ_C_MIRROR)
+            ctor.EnableAttr(Attribute.IS_BROKEN)
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_cannot_have_primary_ctor, ctor).Emit()
         }
     }
 
@@ -2422,6 +2611,21 @@ extend ParserImpl {
                         CheckClassLikePropAbstractness(propDecl)
                     }
                     CheckJavaInteropMember(member)
+                    CheckObjCInteropMember(member)
+                }
+                // C++: Parse/ParseDecl.cpp:1150-1153 / 1602-1605
+                if (member.astKind == ASTKind.PRIMARY_CTOR_DECL) {
+                    if (let Some(classDecl) <- (ret as ClassDecl)) {
+                        if (member.identifier != classDecl.identifier) {
+                            AddBodyMember(ret, InvalidDecl(member.begin))
+                            continue
+                        }
+                    } else if (let Some(structDecl) <- (ret as StructDecl)) {
+                        if (member.identifier != structDecl.identifier) {
+                            AddBodyMember(ret, InvalidDecl(member.begin))
+                            continue
+                        }
+                    }
                 }
                 AddBodyMember(ret, member)
             }
