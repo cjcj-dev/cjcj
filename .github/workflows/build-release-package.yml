@@ -129,6 +129,10 @@ jobs:
         shell: bash
         run: cat ci/llvm_pin.env >> "$GITHUB_ENV"
 
+      - name: Load tools provenance pin
+        shell: bash
+        run: cat ci/source_pin.env >> "$GITHUB_ENV"
+
       - name: Retain exact official base SDK archive
         shell: bash
         run: |
