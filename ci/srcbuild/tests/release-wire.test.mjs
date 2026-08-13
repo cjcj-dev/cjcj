@@ -61,7 +61,10 @@ test('component provenance, final std, and Python inputs are fail-closed in both
     '--cjpm-provenance',
     '--cjpm-source-repo',
     '--cjpm-source-sha',
+    '--tools-source-repo',
+    '--tools-source-sha',
   ]) assert.equal(consumer.match(new RegExp(argument, 'g'))?.length, 2, argument);
+  assert.ok(consumer.includes('cat ci/source_pin.env >> "$GITHUB_ENV"'));
   assert.equal(consumer.match(/--python-bundle/g)?.length, 2);
   assert.equal(consumer.match(/prepare_gate_apparatus\.mjs/g)?.length, 2);
   assert.equal(consumer.match(/prepare_python_bundle\.mjs/g)?.length, 2);
