@@ -452,6 +452,11 @@ export async function writeReleaseManifest({
       }
     }
   }
+  for (const component of sourceByComponent.keys()) {
+    if (!tools.some(tool => tool.component === component)) {
+      throw new Error(`${component} is declared source-owned but is absent from the packaged tool set`);
+    }
+  }
   const toolStamps = assertToolStamps(tools, sourceByComponent);
   if (!toolStamps.enforced) {
     // Named, not silent. A limitation nobody can read is indistinguishable from
