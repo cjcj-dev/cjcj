@@ -397,8 +397,18 @@ test('packaged SDK colour ABI rejects a missing runtime', () => {
 });
 
 test('tools select the target compiler home while keeping the plain host loader', () => {
-  const {root, config} = makeFixture();
-  const previousDryRun = process.env.CANGJIE_BUILD_DRY_RUN;
+  const {root, config: platformConfig} = makeFixture();
+  const config = Object.freeze({
+    ...platformConfig,
+    target: Object.freeze({
+      ...platformConfig.target,
+      spec: Object.freeze({
+        ...platformConfig.target.spec,
+        llvmBinDir: directory(root, 'platform-deps', 'llvm', 'bin'),
+        opensslLibDir: directory(root, 'platform-deps', 'openssl', 'lib'),
+      }),
+    }),
+  });
   const previousHostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
   try {
     const hostSdk = directory(root, 'host-sdk');
@@ -408,10 +418,6 @@ test('tools select the target compiler home while keeping the plain host loader'
     ];
     const hostRuntime = file(hostSdk, runtimeRelative, 'plain-host-runtime');
     file(targetSdk, runtimeRelative, 'coloured-target-runtime');
-    // llvmBinDir is a platform tool used by a real source build, not an input
-    // to this PATH/loader ordering contract. Dry-run keeps this fixture
-    // hermetic while baseEnv remains fail-closed for real builds.
-    process.env.CANGJIE_BUILD_DRY_RUN = '1';
     process.env.CJCJ_SRCBUILD_HOST_SDK = hostSdk;
 
     const env = tools.targetToolsEnv(config);
@@ -422,9 +428,19 @@ test('tools select the target compiler home while keeping the plain host loader'
     ]);
     assert.ok(pathEntries.indexOf(path.join(hostSdk, 'bin')) > 1);
     assert.equal(env[config.target.spec.loaderEnv].split(path.delimiter)[0], path.dirname(hostRuntime));
+
+    const missingDependencyConfig = Object.freeze({
+      ...config,
+      target: Object.freeze({
+        ...config.target,
+        spec: Object.freeze({...config.target.spec, llvmBinDir: path.join(root, 'missing-llvm', 'bin')}),
+      }),
+    });
+    assert.throws(
+      () => tools.targetToolsEnv(missingDependencyConfig),
+      /required platform dependency directory missing:/,
+    );
   } finally {
-    if (previousDryRun === undefined) delete process.env.CANGJIE_BUILD_DRY_RUN;
-    else process.env.CANGJIE_BUILD_DRY_RUN = previousDryRun;
     if (previousHostSdk === undefined) delete process.env.CJCJ_SRCBUILD_HOST_SDK;
     else process.env.CJCJ_SRCBUILD_HOST_SDK = previousHostSdk;
     fs.rmSync(root, {recursive: true, force: true});
