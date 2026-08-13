@@ -1211,34 +1211,34 @@ extend ParserImpl {
     }
 
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:786-816
-    private func CheckPropDeclObjCMirror(prop: PropDecl): Unit {
-        if (let Some(outerDecl) <- prop.outerDecl) {
+    private func CheckPropDeclObjCMirror(propDecl: PropDecl): Unit {
+        if (let Some(outerDecl) <- propDecl.outerDecl) {
             if (!outerDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
                 return
             }
-            prop.EnableAttr(Attribute.OBJ_C_MIRROR)
+            propDecl.EnableAttr(Attribute.OBJ_C_MIRROR)
             if (!outerDecl.TestAttr(Attribute.ABSTRACT)) {
-                prop.DisableAttr(Attribute.ABSTRACT)
+                propDecl.DisableAttr(Attribute.ABSTRACT)
             }
-            if (prop.TestAttr(Attribute.PRIVATE)) {
-                FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHavePrivateMember(prop)
-                prop.EnableAttr(Attribute.IS_BROKEN)
+            if (propDecl.TestAttr(Attribute.PRIVATE)) {
+                FFIParserImpl(this).ObjC().DiagObjCMirrorCannotHavePrivateMember(propDecl)
+                propDecl.EnableAttr(Attribute.IS_BROKEN)
                 outerDecl.EnableAttr(Attribute.HAS_BROKEN)
                 outerDecl.EnableAttr(Attribute.IS_BROKEN)
             }
-            if (!prop.getters.isEmpty()) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_prop_cannot_have_getter, prop,
-                    prop.identifier.Val()).Emit()
-                prop.EnableAttr(Attribute.IS_BROKEN)
+            if (!propDecl.getters.isEmpty()) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_prop_cannot_have_getter, propDecl,
+                    propDecl.identifier.Val()).Emit()
+                propDecl.EnableAttr(Attribute.IS_BROKEN)
             } else {
-                InsertPropGetterSignature(prop, Attribute.OBJ_C_MIRROR)
+                InsertPropGetterSignature(propDecl, Attribute.OBJ_C_MIRROR)
             }
-            if (!prop.setters.isEmpty()) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_prop_cannot_have_setter, prop,
-                    prop.identifier.Val()).Emit()
-                prop.EnableAttr(Attribute.IS_BROKEN)
-            } else if (prop.isVar) {
-                InsertPropSetterSignature(prop, Attribute.OBJ_C_MIRROR)
+            if (!propDecl.setters.isEmpty()) {
+                ParseDiagnoseRefactor(DiagKindRefactor.parse_objc_mirror_prop_cannot_have_setter, propDecl,
+                    propDecl.identifier.Val()).Emit()
+                propDecl.EnableAttr(Attribute.IS_BROKEN)
+            } else if (propDecl.isVar) {
+                InsertPropSetterSignature(propDecl, Attribute.OBJ_C_MIRROR)
             }
         }
     }
