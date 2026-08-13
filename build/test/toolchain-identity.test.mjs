@@ -30,10 +30,11 @@ const PATHS = Object.freeze({
   opt: 'third_party/llvm/bin/opt',
 });
 
-async function fixture() {
+async function fixture({includeHle = true} = {}) {
   const stage = await fs.mkdtemp(path.join(os.tmpdir(), 'toolchain-identity-'));
   const releaseRows = [];
   for (const artifact of TOOLCHAIN_IDENTITY_ARTIFACTS) {
+    if (artifact.optional && !includeHle) continue;
     const relative = PATHS[artifact.name];
     const file = path.join(stage, relative);
     const stamp = `${artifact.prefix}:${COMMITS[artifact.name]}`;
@@ -86,6 +87,16 @@ test('identity producer rejects an unstamped artifact instead of writing UNKNOWN
     /cjpm CJTOOL-COMMIT occurrence must be exactly 1; actual count=0/,
   );
   await assert.rejects(fs.stat(path.join(value.stage, TOOLCHAIN_IDENTITY)), {code: 'ENOENT'});
+});
+
+test('identity producer omits the optional inherited hle record', async t => {
+  const value = await fixture({includeHle: false});
+  t.after(() => fs.rm(value.stage, {recursive: true, force: true}));
+  const result = await writeToolchainIdentity(value);
+  assert.equal(result.artifacts.length, 5);
+  const text = await fs.readFile(path.join(value.stage, TOOLCHAIN_IDENTITY), 'utf8');
+  assert.match(text, /^artifact_count\t5$/m);
+  assert.doesNotMatch(text, /^hle_path\t/m);
 });
 
 test('identity producer rejects a dirty embedded lineage stamp', async t => {
