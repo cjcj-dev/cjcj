@@ -225,8 +225,13 @@ test('while no tool carries CJTOOL-COMMIT the rows say so instead of staying sil
   const {options} = await fixture({tools: {cjpm: `cjpm${CJ}`, hle: `hle${CJ}`}});
   const {rows} = await writeReleaseManifest(options);
   for (const component of ['cjpm', 'tool-hle']) {
-    assert.equal(rows.find(row => row.component === component).build.identity_rule,
+    const row = rows.find(row => row.component === component);
+    assert.equal(row.build.identity_rule,
       component === 'cjpm' ? 'report-only-until-first-stamp' : 'inherited-base-sdk');
+    if (component === 'tool-hle') {
+      assert.equal(row.source.status, 'not-applicable');
+      assert.match(row.source.reason, /inherited unchanged from the base SDK/);
+    }
   }
 });
 
