@@ -64,6 +64,8 @@ const runtimeSourceRepository = typeof argv['runtime-source-repo'] === 'string' 
 const runtimeSourceCommit = typeof argv['runtime-source-sha'] === 'string' ? argv['runtime-source-sha'] : '';
 const llvmSourceRepository = typeof argv['llvm-source-repo'] === 'string' ? argv['llvm-source-repo'] : '';
 const stdSourceRepository = typeof argv['std-source-repo'] === 'string' ? argv['std-source-repo'] : '';
+const toolsSourceRepository = typeof argv['tools-source-repo'] === 'string' ? argv['tools-source-repo'] : '';
+const toolsSourceCommit = typeof argv['tools-source-sha'] === 'string' ? argv['tools-source-sha'] : '';
 const cjpmProvenance = required('cjpm-provenance');
 const cjpmSourceRepository = required('cjpm-source-repo');
 const cjpmSourceCommit = required('cjpm-source-sha');
@@ -945,6 +947,12 @@ for (const row of recordedLineage.tools.filter(row => row.present === 'yes')) {
 console.log(`LLVM_TOOL_LINEAGE_OK total=${lineageRows.length} present=${physicalTools.size} required=${requiredLlvmTools.get(platform).length}`);
 
 console.log('[7b/9] write release provenance manifest');
+const toolSources = {
+  cjpm: {repository: cjpmSourceRepository, commit: cjpmSourceCommit},
+};
+if (!isWindows && toolsSourceRepository && toolsSourceCommit) {
+  toolSources['tool-hle'] = {repository: toolsSourceRepository, commit: toolsSourceCommit};
+}
 const {destination: releaseManifest, rows: releaseRows} = await writeReleaseManifest({
   stage,
   platform,
@@ -963,6 +971,7 @@ const {destination: releaseManifest, rows: releaseRows} = await writeReleaseMani
   stdRepository: stdSourceRepository,
   cjpmRepository: cjpmSourceRepository,
   cjpmCommit: cjpmSourceCommit,
+  toolSources,
   pythonArtifact: packagedPython.artifact,
   pythonMetadata: packagedPython.metadata,
   pythonMetadataArtifact: packagedPython.metadataArtifact,
