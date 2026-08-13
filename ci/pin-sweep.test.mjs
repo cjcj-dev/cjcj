@@ -69,7 +69,7 @@ test('an existing commit on a backup line is NOT_MET for both authority question
     const unpublished = commit(source, 'local-unpublished', 'local-only');
     git(source, 'switch', '--quiet', '-c', 'remote-main', positive);
     const remoteAhead = commit(source, 'remote-ahead', 'remote-only');
-    git(remote, 'update-ref', 'refs/heads/main', remoteAhead);
+    git(remote, 'fetch', '--quiet', source, `${remoteAhead}:refs/heads/main`);
     git(source, 'switch', '--quiet', 'main');
 
     const pins = [
