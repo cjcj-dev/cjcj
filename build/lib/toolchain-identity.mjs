@@ -9,6 +9,10 @@ export const TOOLCHAIN_IDENTITY_ARTIFACTS = Object.freeze([
   {name: 'runtime', component: 'runtime', prefix: 'CJRT-COMMIT'},
   {name: 'cjc', component: 'cjcj', prefix: 'CJCJ-COMMIT'},
   {name: 'cjpm', component: 'cjpm', prefix: 'CJTOOL-COMMIT'},
+  // hle is source-built only on the Unix release cells.  Windows keeps the
+  // base SDK copy, so its manifest row is explicitly not applicable and this
+  // optional record is omitted there rather than fabricating lineage.
+  {name: 'hle', component: 'tool-hle', prefix: 'CJTOOL-COMMIT', optional: true},
   {name: 'llc', component: 'llvm-llc', prefix: 'CJLLVM-COMMIT'},
   {name: 'opt', component: 'llvm-opt', prefix: 'CJLLVM-COMMIT'},
 ]);
@@ -118,6 +122,8 @@ export async function writeToolchainIdentity({stage, releaseRows}) {
   const sdk = path.resolve(stage);
   const artifacts = [];
   for (const specification of TOOLCHAIN_IDENTITY_ARTIFACTS) {
+    const row = releaseRows.find(value => value.component === specification.component);
+    if (specification.optional && (!row || row.source?.status !== 'resolved')) continue;
     artifacts.push(await inspectArtifact(sdk, releaseRows, specification));
   }
 
