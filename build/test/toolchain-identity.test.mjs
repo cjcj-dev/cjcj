@@ -8,6 +8,7 @@ import {
   TOOLCHAIN_IDENTITY,
   TOOLCHAIN_IDENTITY_ARTIFACTS,
   TOOLCHAIN_IDENTITY_FORMAT,
+  stampBinaryLineage,
   writeToolchainIdentity,
 } from '../lib/toolchain-identity.mjs';
 
@@ -96,4 +97,27 @@ test('identity producer rejects a dirty embedded lineage stamp', async t => {
   row.artifact.sha256 = (await import('node:crypto')).createHash('sha256').update(bytes).digest('hex');
   row.embedded_stamp = dirtyStamp;
   await assert.rejects(writeToolchainIdentity(value), /llc CJLLVM-COMMIT must not be dirty/);
+});
+
+test('post-link lineage stamping is idempotent and rejects conflicting source identity', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'binary-lineage-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  const file = path.join(root, 'cjpm');
+  await fs.writeFile(file, 'fixture executable');
+  const commit = '5'.repeat(40);
+  const first = await stampBinaryLineage({file, prefix: 'CJTOOL-COMMIT', commit});
+  assert.equal(first.changed, true);
+  assert.equal(first.stamp, `CJTOOL-COMMIT:${commit}`);
+  const second = await stampBinaryLineage({file, prefix: 'CJTOOL-COMMIT', commit});
+  assert.equal(second.changed, false);
+  assert.equal(second.sha256, first.sha256);
+  assert.equal((await fs.readFile(file, 'latin1')).split('CJTOOL-COMMIT:').length - 1, 1);
+  await assert.rejects(
+    stampBinaryLineage({file, prefix: 'CJTOOL-COMMIT', commit: '6'.repeat(40)}),
+    /CJTOOL-COMMIT conflicts with source commit/,
+  );
+  await assert.rejects(
+    stampBinaryLineage({file, prefix: 'CJTOOL-COMMIT', commit: `${commit}-dirty`}),
+    /must be a clean 40-character commit SHA/,
+  );
 });
