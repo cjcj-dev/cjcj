@@ -422,8 +422,13 @@ private class ToCHIR {
         if (instance.invocation.globalOptions.pluginPaths.isEmpty()) {
             return true
         }
+        // C++ declares `succeed` beside the recorder as two plain locals
+        // (CHIR.cpp:1254-1279), so the recorder's lifetime is the function body and
+        // the result outlives it. A try-with-resources expression is Unit-typed here,
+        // so keeping the result inside the block leaves this Bool function with no
+        // Bool to return. Same order as C++: declare, run the block, return after it.
+        var succeed = true
         try (recorder = ProfileRecorder("CHIR", "PerformPlugin")) {
-            var succeed = true
             try {
                 if (instance.metaTransformPluginBuilder.IsCppPlugin()) {
                     succeed = TryRunCHIRMetaTransforms(instance.metaTransformPluginBuilder, builder, currentPackage)
@@ -439,8 +444,8 @@ private class ToCHIR {
             } else {
                 DumpCHIRToFile("PLUGIN")
             }
-            return succeed
         }
+        return succeed
     }
 
     // C++: CHIR/CHIR.cpp:1225-1251 ToCHIR::ExecuteCjPlugins.
