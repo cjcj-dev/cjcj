@@ -948,7 +948,7 @@ console.log(`LLVM_TOOL_LINEAGE_OK total=${lineageRows.length} present=${physical
 
 console.log('[7b/9] write release provenance manifest');
 const toolSources = {
-  cjpm: {repository: cjpmSourceRepository, commit: cjpmSourceCommit},
+  'tool-cjpm': {repository: cjpmSourceRepository, commit: cjpmSourceCommit},
 };
 if (!isWindows && toolsSourceRepository && toolsSourceCommit) {
   toolSources['tool-hle'] = {repository: toolsSourceRepository, commit: toolsSourceCommit};

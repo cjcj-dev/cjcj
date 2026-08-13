@@ -574,7 +574,7 @@ export async function writeReleaseManifest({
       source: source(cjpmRepository, cjpmCommit, 'cjpm'),
       artifact: {path: cjpm.path, sha256: cjpm.sha256},
       embedded_stamp: cjpm.embedded_stamp,
-      build: {identity_rule: sourceByComponent.has('cjpm') ? 'enforced' : 'report-only-until-first-stamp'},
+      build: {identity_rule: sourceByComponent.has('tool-cjpm') ? 'enforced' : 'report-only-until-first-stamp'},
     },
     // One row per Cangjie-written tool the stage actually contains, minus cjpm
     // which keeps its own component name for downstream readers.
