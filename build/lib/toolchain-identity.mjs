@@ -47,6 +47,27 @@ function embeddedStamp(bytes, prefix) {
   return values;
 }
 
+export async function stampBinaryLineage({file, prefix, commit}) {
+  const clean = cleanCommit(commit, `${prefix} source commit`);
+  if (!/^[A-Z][A-Z0-9_-]*-COMMIT$/.test(prefix)) {
+    throw new Error(`invalid lineage prefix: ${prefix}`);
+  }
+  const bytes = await fs.readFile(file);
+  const values = embeddedStamp(bytes, prefix);
+  if (values.length > 1) {
+    throw new Error(`${prefix} occurrence must be at most 1 before stamping; actual count=${values.length}`);
+  }
+  if (values.length === 1) {
+    if (values[0] !== clean) {
+      throw new Error(`${prefix} conflicts with source commit: actual=${values[0] || '<empty>'}; source=${clean}`);
+    }
+    return {changed: false, stamp: `${prefix}:${clean}`, sha256: sha256(bytes)};
+  }
+  const marker = Buffer.from(`\0${prefix}:${clean}\0`, 'ascii');
+  await fs.appendFile(file, marker);
+  return {changed: true, stamp: `${prefix}:${clean}`, sha256: sha256(Buffer.concat([bytes, marker]))};
+}
+
 function artifactPath(stage, relative, label) {
   const normalized = requireText(relative, `${label}.artifact.path`).replaceAll('\\', '/');
   if (path.posix.isAbsolute(normalized) || normalized.split('/').includes('..')) {
