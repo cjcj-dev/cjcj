@@ -277,10 +277,10 @@ if (llcPlatform && fixedLlcGz) {
         log(`FATAL: installed ${tool.name} failed file/ldd/--version verification`);
         process.exit(4);
       }
-      // Stock nightly ships a ~100KB thin llc that NEEDs libLLVM-15.so. That shape
-      // lacks CJ flags (e.g. -cj-generational-post-barrier) and SEGV on isel of
-      // gc.relocate(undef). Fixed tuples are fat (LLVM_LINK_LLVM_DYLIB=OFF).
-      if ((tool.name === 'llc' || tool.name === 'opt') && /libLLVM/.test(lddResult.stdout)) {
+      // Every source-built tuple tool is produced with LLVM_LINK_LLVM_DYLIB=OFF.
+      // A libLLVM dependency would move its claimed tuple implementation back
+      // into the inherited SDK library, including the native LTO linker.
+      if (/libLLVM/.test(lddResult.stdout)) {
         log(`FATAL: installed ${tool.name} is thin (links libLLVM); product requires fat static tool`);
         process.exit(4);
       }

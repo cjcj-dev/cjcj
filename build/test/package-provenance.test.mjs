@@ -157,6 +157,32 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   ].join('\n'));
   const llvmFixture = path.join(root, 'llvm-tool');
   run('cc', [llvmFixtureSource, '-o', llvmFixture]);
+  const llvmLibraryDir = path.join(sdk, 'third_party', 'llvm', 'lib');
+  const thinLibrarySource = await write(root, 'thin-libllvm.c', [
+    'int toolgen2_llvm_marker(void) { return 0; }',
+    '',
+  ].join('\n'));
+  const thinLibrary = path.join(llvmLibraryDir, 'libLLVM-toolgen2.so');
+  await fs.mkdir(llvmLibraryDir, {recursive: true});
+  run('cc', ['-shared', '-fPIC', thinLibrarySource, '-Wl,-soname,libLLVM-toolgen2.so', '-o', thinLibrary]);
+  const thinFixtureSource = await write(root, 'thin-llvm-tool.c', [
+    '#include <stdio.h>',
+    '#include <string.h>',
+    'extern int toolgen2_llvm_marker(void);',
+    'int main(int argc, char **argv) {',
+    '  if (toolgen2_llvm_marker() != 0) return 1;',
+    '  if (argc > 1 && strcmp(argv[1], "--help") == 0) {',
+    '    puts("--export-bc=file --lto-newpm-passes=value --mllvm=value --visible-pkgs=value");',
+    '    return 0;',
+    '  }',
+    '  puts("LLVM version 15.0.4");',
+    '  return 0;',
+    '}',
+    '',
+  ].join('\n'));
+  const thinLlvmFixture = path.join(root, 'thin-llvm-tool');
+  run('cc', [thinFixtureSource, `-L${llvmLibraryDir}`, '-lLLVM-toolgen2',
+    '-Wl,-rpath,$ORIGIN/../lib', '-o', thinLlvmFixture]);
   for (const tool of ['llc', 'opt', 'ld.lld', 'llvm-objcopy']) {
     const destination = path.join(sdk, 'third_party', 'llvm', 'bin', tool);
     await fs.mkdir(path.dirname(destination), {recursive: true});
@@ -359,6 +385,29 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.match(`${changedLlvm.stdout}\n${changedLlvm.stderr}`, /opt: packaged sha256 .* does not match tuple manifest/);
   console.log(`NEGATIVE-CHANGE-LLVM RC=${changedLlvm.status}\n${changedLlvm.stderr.trim()}`);
   await fs.writeFile(llvmManifest, originalLlvmManifest);
+
+  async function expectThinTupleFailure(tool, manifestField) {
+    const executable = path.join(sdk, 'third_party', 'llvm', 'bin', tool);
+    const originalExecutable = await fs.readFile(executable);
+    await fs.copyFile(thinLlvmFixture, executable);
+    if (tool === 'llc' || tool === 'opt') {
+      await fs.appendFile(executable, `\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
+    }
+    const thinManifest = originalLlvmManifest.replace(
+      new RegExp(`^${manifestField}=.*$`, 'm'), `${manifestField}=${await sha256(executable)}`);
+    await fs.writeFile(llvmManifest, thinManifest);
+    const result = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
+    assert.notEqual(result.status, 0, `thin ${tool} must fail closed`);
+    assert.match(`${result.stdout}\n${result.stderr}`,
+      new RegExp(`${tool.replace('.', '\\.')}: thin libLLVM-linked binary forbidden`));
+    console.log(`NEGATIVE-THIN-${tool.toUpperCase()} RC=${result.status}\n${result.stderr.trim()}`);
+    await fs.writeFile(executable, originalExecutable, {mode: 0o755});
+    await fs.writeFile(llvmManifest, originalLlvmManifest);
+  }
+
+  await expectThinTupleFailure('ld.lld', 'LLD_SHA256');
+  await expectThinTupleFailure('llc', 'LLC_SHA256');
+  await expectThinTupleFailure('opt', 'OPT_SHA256');
 
   await fs.writeFile(llvmManifest, originalLlvmManifest.replace(/^LLD_SHA256=.*$/m, `LLD_SHA256=${'0'.repeat(64)}`));
   const changedLld = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
