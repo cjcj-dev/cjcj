@@ -489,7 +489,7 @@ export function layoutCheck(sdk) {
     : {state: STATES.PASS, detail};
 }
 
-function permissionsAndLinksCheck(sdk) {
+export function permissionsAndLinksCheck(sdk) {
   const badModes = [];
   const brokenLinks = [];
   const externalLinks = [];
@@ -506,8 +506,8 @@ function permissionsAndLinksCheck(sdk) {
       continue;
     }
     if (stat.isDirectory()) {
-      if ((stat.mode & 0o005) !== 0o005) badModes.push(`${relative}/:${(stat.mode & 0o777).toString(8)}`);
-    } else if (stat.isFile() && (stat.mode & 0o004) !== 0o004) {
+      if ((stat.mode & 0o500) !== 0o500) badModes.push(`${relative}/:${(stat.mode & 0o777).toString(8)}`);
+    } else if (stat.isFile() && (stat.mode & 0o400) !== 0o400) {
       badModes.push(`${relative}:${(stat.mode & 0o777).toString(8)}`);
     }
   }

@@ -11,6 +11,7 @@ import {
   countC9Instructions,
   layoutCheck,
   parseArguments,
+  permissionsAndLinksCheck,
   summarizeResults,
 } from '../../scripts/check_sdk_usable.mjs';
 
@@ -126,6 +127,36 @@ test('layout requires Linux bitcode but accepts the official Windows zero-bitcod
     const missingLinuxBitcode = layoutCheck(sdk);
     assert.equal(missingLinuxBitcode.state, STATES.FAIL);
     assert.match(missingLinuxBitcode.detail, /linux_x86_64_cjnative: std cjo=1 bc=0/);
+  } finally {
+    fs.rmSync(sdk, {recursive: true, force: true});
+  }
+});
+
+test('U8 accepts official 750 and only rejects owner-unreadable entries', () => {
+  const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-u8-'));
+  const add = (relative, mode) => {
+    const destination = path.join(sdk, relative);
+    fs.mkdirSync(path.dirname(destination), {recursive: true});
+    fs.writeFileSync(destination, 'fixture\n');
+    fs.chmodSync(destination, mode);
+  };
+  try {
+    add('LICENSE', 0o750);
+    add('bin/cjc', 0o750);
+    add('include/cangjie/AST/Node.h', 0o750);
+    fs.chmodSync(path.join(sdk, 'include'), 0o750);
+    fs.chmodSync(path.join(sdk, 'include', 'cangjie'), 0o750);
+    fs.chmodSync(path.join(sdk, 'include', 'cangjie', 'AST'), 0o750);
+    fs.symlinkSync('cjc', path.join(sdk, 'bin', 'cjc.alias'));
+    const official = permissionsAndLinksCheck(sdk);
+    assert.equal(official.state, STATES.PASS, official.detail);
+    assert.match(official.detail, /bad_modes=0/);
+
+    add('secret.bin', 0o000);
+    const unreadable = permissionsAndLinksCheck(sdk);
+    assert.equal(unreadable.state, STATES.FAIL);
+    assert.match(unreadable.detail, /bad_modes=1/);
+    assert.match(unreadable.detail, /secret.bin:0/);
   } finally {
     fs.rmSync(sdk, {recursive: true, force: true});
   }
