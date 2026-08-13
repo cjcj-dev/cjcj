@@ -805,7 +805,7 @@ const nativeFilePatterns = new Map([
   ['windows-x64', /PE32\+ executable.*x86-64/i],
 ]);
 
-function verifyNativeLlvmTool(tool, executable) {
+function verifyNativeLlvmTool(tool, executable, {requiresFat = false} = {}) {
   const fileProbe = runLineageProbe('file', ['-b', executable]);
   if (fileProbe.status !== 0 || !nativeFilePatterns.get(platform).test(fileProbe.output)) {
     throw new Error(`${tool}: wrong native format for ${platform}: ${oneLine(fileProbe.output)}`);
@@ -817,16 +817,15 @@ function verifyNativeLlvmTool(tool, executable) {
     if ((!staticBinary && loaderProbe.status !== 0) || /not found/i.test(loaderProbe.output)) {
       throw new Error(`${tool}: loader check failed: ${oneLine(loaderProbe.output)}`);
     }
-    // Reject stock thin wrappers (~100KB + NEEDED libLLVM). Release llc/opt must be
-    // the fat fixed-tuple binaries (LLVM_LINK_LLVM_DYLIB=OFF); thin lacks CJ flags and
-    // SEGV on isel of gc.relocate(undef). See REPORT-fatllc / REPORT-llcparse.
-    if ((tool === 'llc' || tool === 'opt') && /libLLVM/.test(loaderProbe.output)) {
+    // Tuple binaries are built with LLVM_LINK_LLVM_DYLIB=OFF. A shared libLLVM
+    // dependency would make the inherited SDK library their real implementation.
+    if (requiresFat && /libLLVM/.test(loaderProbe.output)) {
       throw new Error(`${tool}: thin libLLVM-linked binary forbidden; need fat fixed-tuple tool`);
     }
   } else if (platform.startsWith('darwin-')) {
     loaderProbe = runLineageProbe('otool', ['-L', executable]);
     if (loaderProbe.status !== 0) throw new Error(`${tool}: loader check failed: ${oneLine(loaderProbe.output)}`);
-    if ((tool === 'llc' || tool === 'opt') && /libLLVM/.test(loaderProbe.output)) {
+    if (requiresFat && /libLLVM/.test(loaderProbe.output)) {
       throw new Error(`${tool}: thin libLLVM-linked binary forbidden; need fat fixed-tuple tool`);
     }
   } else {
@@ -906,7 +905,9 @@ for (const tool of allToolNames) {
 for (const tool of requiredLlvmTools.get(platform)) {
   const physical = physicalTools.get(tool);
   if (!physical) throw new Error(`${tool}: required by ${platform} driver but absent from package`);
-  const evidence = verifyNativeLlvmTool(tool, path.join(packagedLlvmBin, physical));
+  const evidence = verifyNativeLlvmTool(tool, path.join(packagedLlvmBin, physical), {
+    requiresFat: tupleToolFields.has(tool),
+  });
   console.log(`  ${tool}: file=${evidence.file}; version=${evidence.version}; loader=ok`);
 }
 const lldTool = expectedTupleLldTool;
