@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
@@ -9,6 +8,15 @@ const repo = path.resolve(import.meta.dirname, '..');
 const command = path.join(repo, 'ci', 'release-gates.mjs');
 const CJCJ_SHA = 'c'.repeat(40);
 const CAMPAIGN_ID = `${CJCJ_SHA}-20260811T130000Z-1`;
+
+async function persistentTestRoot() {
+  const configured = process.env.RELEASE_EVIDENCE_TEST_ROOT;
+  assert.ok(configured, 'RELEASE_EVIDENCE_TEST_ROOT is required; use a persistent path outside /tmp');
+  const root = path.resolve(configured);
+  assert.ok(root !== '/tmp' && !root.startsWith('/tmp/'), `test evidence root must not be under /tmp: ${root}`);
+  await fs.mkdir(root, {recursive: true});
+  return root;
+}
 
 async function write(root, relative, contents) {
   const file = path.join(root, ...relative.split('/'));
@@ -35,8 +43,8 @@ function results() {
   };
 }
 
-async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g8-full-gate-'));
+async function fixture(t, {floorSource} = {}) {
+  const root = await fs.mkdtemp(path.join(await persistentTestRoot(), 'g8-full-gate-'));
   const checkout = path.join(root, 'cjcj');
   const evidence = path.join(root, 'evidence');
   t.after(() => fs.rm(root, {recursive: true, force: true}));
@@ -49,8 +57,8 @@ async function fixture(t) {
     evidence: {results: 'G8_FULL_GATE.json'},
     baseline: baseline(),
   };
-  await write(checkout, 'build/lib/full-gate-release-floor.mjs',
-    `export const FULL_GATE_RELEASE_FLOOR = ${JSON.stringify(floor, null, 2)};\n`);
+  await write(checkout, 'build/lib/full-gate-release-floor.mjs', floorSource
+    ?? `export const FULL_GATE_RELEASE_FLOOR = ${JSON.stringify(floor, null, 2)};\n`);
   await fs.mkdir(evidence, {recursive: true});
   return {checkout, evidence};
 }
@@ -104,8 +112,11 @@ test('evidence with a missing full-gate field is UNKNOWN', async t => {
   assert.match(value.value, /missing=results\.bcgate\.compile_errors/);
 });
 
-test('the repository floor stays PENDING and names every unmeasured value', () => {
-  const {result, value} = gate(repo);
+test('the repository floor stays PENDING and names every unmeasured value', async t => {
+  const floorSource = await fs.readFile(
+    path.join(repo, 'build', 'lib', 'full-gate-release-floor.mjs'), 'utf8');
+  const state = await fixture(t, {floorSource});
+  const {result, value} = gate(state.checkout, state.evidence);
   assert.equal(result.status, 2, result.stderr);
   assert.equal(value.status, 'UNKNOWN');
   assert.match(value.value, /floor status=PENDING/);
