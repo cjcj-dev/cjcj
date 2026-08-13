@@ -133,10 +133,14 @@ function unknown(detail) {
 
 function conclusion(result, remote) {
   const considered = remote ? [result.q1, result.q2, result.q3] : [result.q1, result.q2];
-  if (result.q1.answer === 'MET'
-      && considered.slice(1).some(question => question.answer === 'NOT_MET')) return 'STRANDED';
-  if (considered.some(question => question.answer === 'NOT_MET')) return 'NOT_MET';
+  if (result.q1.answer === 'NOT_MET') return 'NOT_MET';
   if (considered.some(question => question.answer === 'UNKNOWN')) return 'UNKNOWN';
+  if (remote && result.q2.answer === 'MET' && result.q3.answer === 'NOT_MET') return 'UNPUSHED';
+  if (remote && result.q2.answer === 'NOT_MET' && result.q3.answer === 'MET') {
+    return 'LOCAL_STALE_OR_DIVERGED';
+  }
+  if (result.q1.answer === 'MET' && result.q2.answer === 'NOT_MET'
+      && (!remote || result.q3.answer === 'NOT_MET')) return 'STRANDED';
   return remote ? 'PASS' : 'OFFLINE_MET';
 }
 
