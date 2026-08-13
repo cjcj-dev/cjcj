@@ -14,6 +14,15 @@ export const GC_WORKLOAD_SHA256 =
 const GC_EXPECTED_LINE = 'NATURAL_WAVE_OK checksum=635925223159200 roots0=3449000';
 const MINIMAL_EXPECTED_LINE = 'SDK_USABLE_MIN_OK';
 const DEFAULT_TIMEOUT_MS = 120_000;
+// Compiling against a coloured runtime is measured at 382/434/459 s wall for a
+// hello-world (u3slow, N=3, 24 GB heap) -- 237x the uncoloured 1.83 s, with the
+// time spent in young.mark_closure because every minor is a full-heap trace.
+// The 120 s budget that suits a --version query therefore kills U3 and U5 before
+// they can finish, and the probe reports `compile timeout signal=SIGTERM` --
+// indistinguishable, in the log, from a compiler that hangs.  Give the two
+// compile-bearing probes their own budget rather than raising the global one:
+// a genuine hang should still surface in two minutes everywhere else.
+const DEFAULT_COMPILE_TIMEOUT_MS = 900_000;
 
 // These programs are shipped as internal entry points or command dispatchers, not
 // as version-reporting CLIs.  They are still executed: only the exact documented
@@ -41,13 +50,19 @@ function usage() {
     '  --gc-workload <e75cdefd binary>   exact natural_wave_notime load',
     '  --gc-runs <N>                      defaults to 10; values below 10 are rejected',
     '  --timeout-seconds <seconds>        per-command timeout, defaults to 120',
+    '  --compile-timeout-seconds <sec>    budget for U3/U5, which compile; defaults to 900',
     '  --work-dir <private directory>     scratch/evidence root',
     '  --keep-work                        keep generated scratch files',
   ].join('\n');
 }
 
 export function parseArguments(args) {
-  const options = {gcRuns: 10, timeoutMs: DEFAULT_TIMEOUT_MS, keepWork: false};
+  const options = {
+    gcRuns: 10,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    compileTimeoutMs: DEFAULT_COMPILE_TIMEOUT_MS,
+    keepWork: false,
+  };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     const value = () => {
@@ -60,6 +75,7 @@ export function parseArguments(args) {
       case '--gc-workload': options.gcWorkload = value(); break;
       case '--gc-runs': options.gcRuns = Number.parseInt(value(), 10); break;
       case '--timeout-seconds': options.timeoutMs = Number.parseFloat(value()) * 1000; break;
+      case '--compile-timeout-seconds': options.compileTimeoutMs = Number.parseFloat(value()) * 1000; break;
       case '--work-dir': options.workDir = value(); break;
       case '--keep-work': options.keepWork = true; break;
       case '-h':
@@ -74,6 +90,14 @@ export function parseArguments(args) {
   }
   if (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0) {
     throw new UsageError('--timeout-seconds must be positive');
+  }
+  if (!Number.isFinite(options.compileTimeoutMs) || options.compileTimeoutMs <= 0) {
+    throw new UsageError('--compile-timeout-seconds must be positive');
+  }
+  if (options.compileTimeoutMs < options.timeoutMs) {
+    // A compile budget below the general one is always a mistake: the probes that
+    // use it are the slowest ones we have.
+    throw new UsageError('--compile-timeout-seconds must not be below --timeout-seconds');
   }
   return options;
 }
@@ -757,13 +781,13 @@ export function runSdkUsability(options, {onResult, onProgress} = {}) {
   const environment = loadSdkEnvironment(sdk, work, options.timeoutMs);
   recorder.record('U2_ENVSETUP', environment.state, environment.detail);
   onProgress?.('U3_MINIMAL_RUN');
-  const minimal = minimalCompileAndRun(sdk, environment.env, work, options.timeoutMs);
+  const minimal = minimalCompileAndRun(sdk, environment.env, work, options.compileTimeoutMs);
   recorder.record('U3_MINIMAL_RUN', minimal.state, minimal.detail);
   onProgress?.('U4_GC_LOAD');
   const gc = gcWorkloadCheck(sdk, environment.env, options, work, onProgress);
   recorder.record('U4_GC_LOAD', gc.state, gc.detail);
   onProgress?.('U5_CJPM_BUILD');
-  const cjpm = cjpmProjectCheck(sdk, environment.env, work, options.timeoutMs);
+  const cjpm = cjpmProjectCheck(sdk, environment.env, work, options.compileTimeoutMs);
   recorder.record('U5_CJPM_BUILD', cjpm.state, cjpm.detail);
   onProgress?.('U6_TOOLS');
   const tools = toolAudit(sdk, environment.env, work, options.timeoutMs, details, onProgress);

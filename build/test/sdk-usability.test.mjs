@@ -271,3 +271,26 @@ test('an unreadable SDK emits every criterion as UNKNOWN and exits 2', () => {
   assert.match(result.stdout, /C9_STD_UNCOLOUR\tUNKNOWN\tSDK unreadable:/);
   assert.match(result.stdout, /SDK-USABILITY-UNKNOWN pass=0 fail=0 unknown=10/);
 });
+
+test('U3 and U5 get a compile budget of their own, and it cannot be set below the general one', () => {
+  // u3slow measured 382/434/459 s for a hello-world against a coloured runtime.
+  // Under the 120 s general timeout both compile-bearing probes reported
+  // `compile timeout signal=SIGTERM`, which reads in the log exactly like a
+  // compiler that hangs -- two lanes lost a round to it before it was diagnosed.
+  const defaults = parseArguments(['--sdk', '/tmp/sdk']);
+  assert.equal(defaults.timeoutMs, 120_000);
+  assert.equal(defaults.compileTimeoutMs, 900_000);
+
+  const raised = parseArguments(['--sdk', '/tmp/sdk', '--compile-timeout-seconds', '1200']);
+  assert.equal(raised.compileTimeoutMs, 1_200_000);
+  assert.equal(raised.timeoutMs, 120_000, 'raising the compile budget must not move the general one');
+
+  assert.throws(
+    () => parseArguments(['--sdk', '/tmp/sdk', '--timeout-seconds', '600', '--compile-timeout-seconds', '300']),
+    /must not be below/,
+  );
+  assert.throws(
+    () => parseArguments(['--sdk', '/tmp/sdk', '--compile-timeout-seconds', '0']),
+    /must be positive/,
+  );
+});
