@@ -397,7 +397,18 @@ test('packaged SDK colour ABI rejects a missing runtime', () => {
 });
 
 test('tools select the target compiler home while keeping the plain host loader', () => {
-  const {root, config} = makeFixture();
+  const {root, config: platformConfig} = makeFixture();
+  const config = Object.freeze({
+    ...platformConfig,
+    target: Object.freeze({
+      ...platformConfig.target,
+      spec: Object.freeze({
+        ...platformConfig.target.spec,
+        llvmBinDir: directory(root, 'platform-deps', 'llvm', 'bin'),
+        opensslLibDir: directory(root, 'platform-deps', 'openssl', 'lib'),
+      }),
+    }),
+  });
   const previousHostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK;
   try {
     const hostSdk = directory(root, 'host-sdk');
@@ -409,7 +420,13 @@ test('tools select the target compiler home while keeping the plain host loader'
     file(targetSdk, runtimeRelative, 'coloured-target-runtime');
     process.env.CJCJ_SRCBUILD_HOST_SDK = hostSdk;
 
-    const env = tools.targetToolsEnv(config);
+    let env;
+    try {
+      env = tools.targetToolsEnv(config);
+    } catch (error) {
+      if (error?.stage === 'environment') assert.fail(`UNKNOWN: ${error.message}`);
+      throw error;
+    }
     const pathEntries = env.PATH.split(path.delimiter);
     assert.deepEqual(pathEntries.slice(0, 2), [
       path.join(targetSdk, 'bin'),
@@ -417,6 +434,18 @@ test('tools select the target compiler home while keeping the plain host loader'
     ]);
     assert.ok(pathEntries.indexOf(path.join(hostSdk, 'bin')) > 1);
     assert.equal(env[config.target.spec.loaderEnv].split(path.delimiter)[0], path.dirname(hostRuntime));
+
+    const missingDependencyConfig = Object.freeze({
+      ...config,
+      target: Object.freeze({
+        ...config.target,
+        spec: Object.freeze({...config.target.spec, llvmBinDir: path.join(root, 'missing-llvm', 'bin')}),
+      }),
+    });
+    assert.throws(
+      () => tools.targetToolsEnv(missingDependencyConfig),
+      /required platform dependency directory missing:/,
+    );
   } finally {
     if (previousHostSdk === undefined) delete process.env.CJCJ_SRCBUILD_HOST_SDK;
     else process.env.CJCJ_SRCBUILD_HOST_SDK = previousHostSdk;

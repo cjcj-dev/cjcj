@@ -52,6 +52,8 @@ jobs:
       # this step must keep asking the manifest.
       - name: Test build and release contracts
         shell: bash
+        env:
+          RELEASE_EVIDENCE_TEST_ROOT: ${{ runner.temp }}/release-evidence-tests
         run: |
           mapfile -t FILES < <(node ci/test-manifest.mjs list)
           echo "manifest gates ${#FILES[@]} test files"
