@@ -444,7 +444,7 @@ export async function writeReleaseManifest({
   }]));
   if (toolsRepository && toolsCommit) {
     for (const tool of tools) {
-      if (tool.component !== 'cjpm' && !sourceByComponent.has(tool.component)) {
+      if (tool.component !== 'tool-cjpm' && !sourceByComponent.has(tool.component)) {
         sourceByComponent.set(tool.component, {
           repository: requireText(toolsRepository, `${tool.component}.source.repository`),
           commit: sourceCommit(toolsCommit, tool.component),
