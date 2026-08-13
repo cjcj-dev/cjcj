@@ -208,15 +208,9 @@ async function discoverCangjieTools(stage, exeSuffix) {
   return found;
 }
 
-// The stamp rule for Cangjie tools, with its own expiry built in.
-//
-// Today none of them carry CJTOOL-COMMIT: they are compiled by the stock driver
-// and nothing injects a marker, so demanding one would fail every package. But
-// "report-only until someone remembers" is how an exemption becomes permanent.
-// So the exemption is keyed to observable state instead of to a date or a note:
-// the moment ANY discovered tool carries the stamp, the build side has started
-// stamping, and every one of them must carry a clean one. There is nothing to
-// remember and nothing to switch off by hand.
+// Each source-owned tool is declared by component. Inherited base-SDK tools
+// remain explicit not-applicable rows; they are never assigned our commit just
+// because they happen to contain Cangjie runtime entry points.
 function assertToolStamps(tools, sourceByComponent) {
   const owned = [];
   const unstamped = [];
@@ -373,9 +367,8 @@ export async function writeReleaseManifest({
   stdRepository = '',
   cjpmRepository = '',
   cjpmCommit = '',
-  // Supplied once TOOLS_REF lands; until then the discovered tools carry the
-  // repository they were built from only if the caller says so, and the stamp
-  // rule below falls back to "any clean SHA" rather than inventing one.
+  // Legacy callers may still provide one TOOLS_REF for every discovered tool;
+  // package_sdk uses the per-tool map because cjpm and hle have different pins.
   toolsRepository = '',
   toolsCommit = '',
   // Per-tool source rows keep the forked cjpm pin distinct from TOOLS_REF used
