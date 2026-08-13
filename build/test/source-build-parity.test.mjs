@@ -420,7 +420,13 @@ test('tools select the target compiler home while keeping the plain host loader'
     file(targetSdk, runtimeRelative, 'coloured-target-runtime');
     process.env.CJCJ_SRCBUILD_HOST_SDK = hostSdk;
 
-    const env = tools.targetToolsEnv(config);
+    let env;
+    try {
+      env = tools.targetToolsEnv(config);
+    } catch (error) {
+      if (error?.stage === 'environment') assert.fail(`UNKNOWN: ${error.message}`);
+      throw error;
+    }
     const pathEntries = env.PATH.split(path.delimiter);
     assert.deepEqual(pathEntries.slice(0, 2), [
       path.join(targetSdk, 'bin'),
