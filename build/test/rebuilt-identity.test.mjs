@@ -230,6 +230,25 @@ test('while no tool carries CJTOOL-COMMIT the rows say so instead of staying sil
   }
 });
 
+test('per-tool source rows keep cjpm and hle pins distinct', async () => {
+  const {options} = await fixture({
+    tools: {
+      cjpm: `cjpm\0CJTOOL-COMMIT:${'5'.repeat(40)}\0${CJ}`,
+      hle: `hle\0CJTOOL-COMMIT:${'6'.repeat(40)}\0${CJ}`,
+    },
+  });
+  const {rows} = await writeReleaseManifest({
+    ...options,
+    toolSources: {
+      'tool-cjpm': {repository: 'https://example.invalid/cjpm', commit: '5'.repeat(40)},
+      'tool-hle': {repository: 'https://example.invalid/tools', commit: '6'.repeat(40)},
+    },
+  });
+  const hle = rows.find(row => row.component === 'tool-hle');
+  assert.equal(hle.source.commit, '6'.repeat(40));
+  assert.equal(hle.build.identity_rule, 'enforced');
+});
+
 // The renderer's component check was relaxed from "exactly this list" to "these
 // plus any discovered tool", so it has to be shown still rejecting the two
 // things it is there for: a missing core component, and a component nobody
