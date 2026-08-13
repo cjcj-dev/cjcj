@@ -544,7 +544,7 @@ function artifactStamps(file, prefix, work, timeoutMs) {
   if (!file || !fs.existsSync(file)) return {state: STATES.UNKNOWN, stamps: [], detail: 'artifact missing'};
   const result = probe('/bin/bash', [
     '-c',
-    '/usr/bin/strings "$1" | /usr/bin/grep -oE "$2:[0-9a-f]+(-dirty)?" | /usr/bin/sort -u || true',
+    '/usr/bin/strings "$1" | /usr/bin/grep -oE "$2:[0-9A-Za-z._-]+" || true',
     'sdk-usable-stamps',
     file,
     prefix,
@@ -559,29 +559,91 @@ function artifactStamps(file, prefix, work, timeoutMs) {
   if (stamps.length !== 1) {
     return {state: STATES.UNKNOWN, stamps, detail: stamps.length ? `conflicting stamps ${stamps.join(',')}` : 'no lineage stamp'};
   }
+  const commit = stamps[0].slice(prefix.length + 1);
+  if (!/^[0-9a-f]{40}$/.test(commit)) {
+    return {state: STATES.UNKNOWN, stamps, detail: `invalid lineage stamp ${stamps[0]}`};
+  }
   return {state: STATES.PASS, stamps, detail: stamps[0]};
 }
 
-function identityCheck(sdk, work, timeoutMs, details) {
+export function identityCheck(sdk, work, timeoutMs, details) {
   const identity = path.join(sdk, 'TOOLCHAIN_ID.tsv');
   if (!fs.existsSync(identity)) return {state: STATES.UNKNOWN, detail: 'TOOLCHAIN_ID.tsv missing'};
   const parsed = parseIdentity(fs.readFileSync(identity, 'utf8'));
   const failures = [];
   const unknown = [];
   if (parsed.duplicates.length) failures.push(`duplicate keys=${parsed.duplicates.join(',')}`);
-  if (parsed.values.get('sdk_real') !== sdk) failures.push(`sdk_real=${parsed.values.get('sdk_real') || '<missing>'}`);
+  const format = parsed.values.get('format') || '';
+  const relocatable = format === 'toolchain-lineage-v1';
+  if (format && !relocatable) failures.push(`unsupported format=${format}`);
+  if (relocatable) {
+    if (parsed.values.get('sdk_root') !== '.') failures.push(`sdk_root=${parsed.values.get('sdk_root') || '<missing>'}`);
+    if (parsed.values.get('artifact_count') !== '5') {
+      failures.push(`artifact_count=${parsed.values.get('artifact_count') || '<missing>'}`);
+    }
+  } else if (parsed.values.get('sdk_real') !== sdk) {
+    failures.push(`sdk_real=${parsed.values.get('sdk_real') || '<missing>'}`);
+  }
   if (parsed.values.get('is_symlink') !== 'no') failures.push(`is_symlink=${parsed.values.get('is_symlink') || '<missing>'}`);
   const runtime = firstMatchingFile(path.join(sdk, 'runtime', 'lib'), name => name === 'libcangjie-runtime.so');
   const artifacts = [
-    ['runtime', runtime, 'runtime_sha', 'CJRT-COMMIT'],
-    ['cjc', path.join(sdk, 'bin', 'cjc'), 'cjc_sha', 'CJCJ-COMMIT'],
-    ['cjpm', path.join(sdk, 'tools', 'bin', 'cjpm'), 'cjpm_sha', 'CJTOOL-COMMIT'],
-    ['llc', path.join(sdk, 'third_party', 'llvm', 'bin', 'llc'), 'llc_sha', 'CJLLVM-COMMIT'],
-    ['opt', path.join(sdk, 'third_party', 'llvm', 'bin', 'opt'), 'opt_sha', 'CJLLVM-COMMIT'],
+    ['runtime', runtime, 'CJRT-COMMIT'],
+    ['cjc', path.join(sdk, 'bin', 'cjc'), 'CJCJ-COMMIT'],
+    ['cjpm', path.join(sdk, 'tools', 'bin', 'cjpm'), 'CJTOOL-COMMIT'],
+    ['llc', path.join(sdk, 'third_party', 'llvm', 'bin', 'llc'), 'CJLLVM-COMMIT'],
+    ['opt', path.join(sdk, 'third_party', 'llvm', 'bin', 'opt'), 'CJLLVM-COMMIT'],
   ];
   let hashes = 0;
   let lineages = 0;
-  for (const [name, file, key, prefix] of artifacts) {
+  const seenPaths = new Set();
+  for (const [name, legacyFile, prefix] of artifacts) {
+    const key = `${name}_sha`;
+    let file = legacyFile;
+    let lineageMetadataValid = true;
+    let repository = '';
+    let commit = '';
+    let dirty = '';
+    let recordedLineage = '';
+    if (relocatable) {
+      const relative = parsed.values.get(`${name}_path`) || '';
+      repository = parsed.values.get(`${name}_repository`) || '';
+      commit = parsed.values.get(`${name}_commit`) || '';
+      dirty = parsed.values.get(`${name}_dirty`) || '';
+      recordedLineage = parsed.values.get(`${name}_lineage`) || '';
+      if (!relative || path.isAbsolute(relative)) {
+        failures.push(`${name}: invalid path=${relative || '<missing>'}`);
+        lineageMetadataValid = false;
+        file = '';
+      } else {
+        file = path.resolve(sdk, relative);
+        if (!pathInside(sdk, file)) {
+          failures.push(`${name}: path escapes SDK=${relative}`);
+          lineageMetadataValid = false;
+          file = '';
+        } else if (seenPaths.has(file)) {
+          failures.push(`${name}: duplicate artifact path=${relative}`);
+          lineageMetadataValid = false;
+        } else {
+          seenPaths.add(file);
+        }
+      }
+      if (!repository || /[\t\r\n]/.test(repository)) {
+        failures.push(`${name}: repository missing or invalid`);
+        lineageMetadataValid = false;
+      }
+      if (!/^[0-9a-f]{40}$/.test(commit)) {
+        failures.push(`${name}: commit is not a clean 40-character SHA`);
+        lineageMetadataValid = false;
+      }
+      if (dirty !== 'no') {
+        failures.push(`${name}: dirty=${dirty || '<missing>'}`);
+        lineageMetadataValid = false;
+      }
+      if (recordedLineage !== `${prefix}:${commit}`) {
+        failures.push(`${name}: lineage=${recordedLineage || '<missing>'}`);
+        lineageMetadataValid = false;
+      }
+    }
     if (!fs.existsSync(file)) {
       failures.push(`${name}: artifact missing`);
       continue;
@@ -591,10 +653,17 @@ function identityCheck(sdk, work, timeoutMs, details) {
     else if (sha256(file) !== recorded) failures.push(`${name}: sha mismatch`);
     else hashes += 1;
     const lineage = artifactStamps(file, prefix, work, timeoutMs);
-    details.push(`IDENTITY ${name} sha256=${sha256(file)} lineage=${lineage.stamps.join(',') || '⛔ 无血缘戳'}`);
+    details.push(`IDENTITY ${name} sha256=${sha256(file)} repository=${repository || '<legacy-unrecorded>'} ` +
+      `commit=${commit || '<legacy-unrecorded>'} dirty=${dirty || '<legacy-unrecorded>'} ` +
+      `lineage=${lineage.stamps.join(',') || '⛔ 无血缘戳'}`);
     if (lineage.state === STATES.FAIL) failures.push(`${name}: ${lineage.detail}`);
-    else if (lineage.state === STATES.UNKNOWN) unknown.push(`${name}: ${lineage.detail}`);
-    else lineages += 1;
+    else if (lineage.state === STATES.UNKNOWN) {
+      (relocatable ? failures : unknown).push(`${name}: ${lineage.detail}`);
+    } else if (relocatable && lineage.stamps[0] !== recordedLineage) {
+      failures.push(`${name}: embedded lineage does not match TOOLCHAIN_ID.tsv`);
+    } else if (lineageMetadataValid) {
+      lineages += 1;
+    }
   }
   const summary = `hashes=${hashes}/${artifacts.length} lineage=${lineages}/${artifacts.length} `
     + `failures=${failures.length} unknown=${unknown.length}`;

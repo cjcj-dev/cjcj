@@ -45,6 +45,7 @@ export const GATING = Object.freeze([
   'build/test/source-build-parity.test.mjs',
   'build/test/stock-backup.test.mjs',
   'build/test/system-deps.test.mjs',
+  'build/test/toolchain-identity.test.mjs',
   'build/test/write-barrier.test.mjs',
   'ci/evidence-discovery.test.mjs',
   'ci/full-gate-floor.test.mjs',

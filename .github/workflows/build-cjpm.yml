@@ -122,17 +122,18 @@ jobs:
           mkdir -p ../../patched-cjpm/windows_x86_64
           cp "$product" ../../patched-cjpm/windows_x86_64/cjpm.exe
           ../../patched-cjpm/windows_x86_64/cjpm.exe --version
-          gzip -n -c -9 ../../patched-cjpm/windows_x86_64/cjpm.exe > ../../patched-cjpm/windows_x86_64/cjpm.exe.gz
 
       - name: Verify patched cjpm payload
         run: |
-          test -s patched-cjpm/windows_x86_64/cjpm.exe.gz
           node ci/release/prepare_cjpm_artifact.mjs \
             --platform windows-x64 \
             --binary patched-cjpm/windows_x86_64/cjpm.exe \
             --outdir "$RUNNER_TEMP/cjpm-provenance"
+          cp "$RUNNER_TEMP/cjpm-provenance/cjpm.exe" patched-cjpm/windows_x86_64/cjpm.exe
+          gzip -n -c -9 patched-cjpm/windows_x86_64/cjpm.exe > patched-cjpm/windows_x86_64/cjpm.exe.gz
           cp "$RUNNER_TEMP/cjpm-provenance/CJPM-PROVENANCE.json" \
             patched-cjpm/windows_x86_64/CJPM-PROVENANCE.json
+          test -s patched-cjpm/windows_x86_64/cjpm.exe.gz
           test -s patched-cjpm/windows_x86_64/CJPM-PROVENANCE.json
 
       - name: Upload patched cjpm

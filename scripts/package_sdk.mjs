@@ -22,6 +22,7 @@ import {
   verifyGateApparatusProvenance,
 } from '../build/lib/release-gate-apparatus.mjs';
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
+import {writeToolchainIdentity} from '../build/lib/toolchain-identity.mjs';
 import {
   PACKAGED_LLVM_TOOL_NAMES,
   formatPackagedLlvmToolsManifest,
@@ -944,7 +945,7 @@ for (const row of recordedLineage.tools.filter(row => row.present === 'yes')) {
 console.log(`LLVM_TOOL_LINEAGE_OK total=${lineageRows.length} present=${physicalTools.size} required=${requiredLlvmTools.get(platform).length}`);
 
 console.log('[7b/9] write release provenance manifest');
-const {destination: releaseManifest} = await writeReleaseManifest({
+const {destination: releaseManifest, rows: releaseRows} = await writeReleaseManifest({
   stage,
   platform,
   exeSuffix,
@@ -968,6 +969,9 @@ const {destination: releaseManifest} = await writeReleaseManifest({
   pythonRepository: RELEASE_PYTHON_SOURCE,
   pythonVersion: packagedPython.version,
 });
+console.log('[7c/9] write relocatable toolchain identity');
+const identity = await writeToolchainIdentity({stage, releaseRows});
+console.log(`TOOLCHAIN_IDENTITY_OK artifacts=${identity.artifacts.length} path=${identity.destination}`);
 const exportedManifest = path.join(outputRoot, `${packageName}.${RELEASE_MANIFEST}`);
 await fs.copyFile(releaseManifest, exportedManifest);
 console.log(`  archive: ${releaseManifest}`);

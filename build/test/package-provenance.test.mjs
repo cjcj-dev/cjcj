@@ -194,7 +194,7 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   // Cangjie-written: the manifest finds these tools by the runtime entry points
   // the compiler emits, so the fixture has to carry one.
   const cjpm = await write(sdk, 'tools/bin/cjpm',
-    'fixture source-built cjpm\0CJ_MCC_WriteRefField\0', 0o755);
+    `fixture source-built cjpm\0CJTOOL-COMMIT:${CJPM_SHA}\0CJ_MCC_WriteRefField\0`, 0o755);
   await fs.mkdir(path.join(sdk, 'bin'), {recursive: true});
   await fs.mkdir(path.join(sdk, 'lib', TUPLE), {recursive: true});
   await fs.mkdir(path.join(sdk, 'modules', TUPLE, 'std'), {recursive: true});
@@ -342,7 +342,12 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   assert.match(listing, new RegExp(`${packageName}/${CJPM_PROVENANCE}`));
   assert.match(listing, new RegExp(`${packageName}/${GATE_APPARATUS_PROVENANCE}`));
   assert.match(listing, new RegExp(`${packageName}/llvm-tools\.manifest`));
+  assert.match(listing, new RegExp(`${packageName}/TOOLCHAIN_ID\.tsv`));
   assert.match(listing, new RegExp(`${packageName}/tools/check_sdk_usable\.mjs`));
+  const identity = await fs.readFile(path.join(out, packageName, 'TOOLCHAIN_ID.tsv'), 'utf8');
+  assert.match(identity, /^artifact_count\t5$/m);
+  assert.match(identity, new RegExp(`^cjpm_commit\\t${CJPM_SHA}$`, 'm'));
+  assert.match(identity, new RegExp(`^cjpm_lineage\\tCJTOOL-COMMIT:${CJPM_SHA}$`, 'm'));
   const packagedLlvmManifest = parsePackagedLlvmToolsManifest(
     await fs.readFile(path.join(out, packageName, 'llvm-tools.manifest'), 'utf8'),
   );

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,6 +10,7 @@ import {
   STATES,
   classifyToolVersion,
   countC9Instructions,
+  identityCheck,
   layoutCheck,
   parseArguments,
   permissionsAndLinksCheck,
@@ -17,6 +19,40 @@ import {
 
 const root = path.resolve(import.meta.dirname, '..', '..');
 const checker = path.join(root, 'scripts', 'check_sdk_usable.mjs');
+
+const IDENTITY_ARTIFACTS = Object.freeze([
+  ['runtime', 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', 'CJRT-COMMIT', '1'.repeat(40)],
+  ['cjc', 'bin/cjc', 'CJCJ-COMMIT', '2'.repeat(40)],
+  ['cjpm', 'tools/bin/cjpm', 'CJTOOL-COMMIT', '3'.repeat(40)],
+  ['llc', 'third_party/llvm/bin/llc', 'CJLLVM-COMMIT', '4'.repeat(40)],
+  ['opt', 'third_party/llvm/bin/opt', 'CJLLVM-COMMIT', '4'.repeat(40)],
+]);
+
+function digest(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+function identityFixture({legacy = false} = {}) {
+  const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-identity-'));
+  const lines = legacy
+    ? [`sdk_real\t${sdk}`, 'is_symlink\tno']
+    : ['format\ttoolchain-lineage-v1', 'sdk_root\t.', 'is_symlink\tno', 'artifact_count\t5'];
+  for (const [name, relative, prefix, commit] of IDENTITY_ARTIFACTS) {
+    const file = path.join(sdk, relative);
+    fs.mkdirSync(path.dirname(file), {recursive: true});
+    fs.writeFileSync(file, `${name}\0${prefix}:${commit}\0`);
+    lines.push(`${name}_sha\t${digest(file)}`);
+    if (!legacy) lines.push(
+      `${name}_path\t${relative}`,
+      `${name}_repository\thttps://example.invalid/${name}.git`,
+      `${name}_commit\t${commit}`,
+      `${name}_dirty\tno`,
+      `${name}_lineage\t${prefix}:${commit}`,
+    );
+  }
+  fs.writeFileSync(path.join(sdk, 'TOOLCHAIN_ID.tsv'), `${lines.join('\n')}\n`);
+  return sdk;
+}
 
 function versionResult(status, output, overrides = {}) {
   return {
@@ -157,6 +193,68 @@ test('U8 accepts official 750 and only rejects owner-unreadable entries', () => 
     assert.equal(unreadable.state, STATES.FAIL);
     assert.match(unreadable.detail, /bad_modes=1/);
     assert.match(unreadable.detail, /secret.bin:0/);
+  } finally {
+    fs.rmSync(sdk, {recursive: true, force: true});
+  }
+});
+
+test('U9 accepts exactly five clean relocatable lineage records', () => {
+  const sdk = identityFixture();
+  try {
+    const details = [];
+    const result = identityCheck(sdk, sdk, 5_000, details);
+    assert.equal(result.state, STATES.PASS, result.detail);
+    assert.match(result.detail, /hashes=5\/5 lineage=5\/5 failures=0 unknown=0/);
+    assert.equal(details.length, 5);
+    assert.ok(details.every(detail => /repository=https:\/\/example\.invalid\//.test(detail)));
+    assert.ok(details.every(detail => /dirty=no/.test(detail)));
+  } finally {
+    fs.rmSync(sdk, {recursive: true, force: true});
+  }
+});
+
+test('U9 fails a produced identity that marks any artifact dirty or loses its stamp', () => {
+  const sdk = identityFixture();
+  try {
+    const identity = path.join(sdk, 'TOOLCHAIN_ID.tsv');
+    fs.appendFileSync(identity, 'llc_dirty\tyes\n');
+    let result = identityCheck(sdk, sdk, 5_000, []);
+    assert.equal(result.state, STATES.FAIL);
+    assert.match(result.detail, /duplicate keys=llc_dirty/);
+    assert.match(result.detail, /llc: dirty=yes/);
+
+    const cjpm = path.join(sdk, 'tools/bin/cjpm');
+    fs.writeFileSync(cjpm, 'cjpm-without-stamp');
+    let text = fs.readFileSync(identity, 'utf8').replace(/^cjpm_sha\t.*$/m, `cjpm_sha\t${digest(cjpm)}`);
+    text = text.replace(/^llc_dirty\tno\nllc_dirty\tyes$/m, 'llc_dirty\tno');
+    fs.writeFileSync(identity, text);
+    result = identityCheck(sdk, sdk, 5_000, []);
+    assert.equal(result.state, STATES.FAIL);
+    assert.match(result.detail, /cjpm: no lineage stamp/);
+  } finally {
+    fs.rmSync(sdk, {recursive: true, force: true});
+  }
+});
+
+test('U9 keeps the legacy hash-mismatch gate while distinguishing missing lineage as UNKNOWN', () => {
+  const sdk = identityFixture({legacy: true});
+  try {
+    const identity = path.join(sdk, 'TOOLCHAIN_ID.tsv');
+    let text = fs.readFileSync(identity, 'utf8').replace(/^cjc_sha\t.*$/m, `cjc_sha\t${'0'.repeat(64)}`);
+    fs.writeFileSync(identity, text);
+    let result = identityCheck(sdk, sdk, 5_000, []);
+    assert.equal(result.state, STATES.FAIL);
+    assert.match(result.detail, /cjc: sha mismatch/);
+
+    const cjpm = path.join(sdk, 'tools/bin/cjpm');
+    fs.writeFileSync(cjpm, 'legacy-cjpm-without-stamp');
+    text = fs.readFileSync(identity, 'utf8')
+      .replace(/^cjc_sha\t.*$/m, `cjc_sha\t${digest(path.join(sdk, 'bin/cjc'))}`)
+      .replace(/^cjpm_sha\t.*$/m, `cjpm_sha\t${digest(cjpm)}`);
+    fs.writeFileSync(identity, text);
+    result = identityCheck(sdk, sdk, 5_000, []);
+    assert.equal(result.state, STATES.UNKNOWN);
+    assert.match(result.detail, /cjpm: no lineage stamp/);
   } finally {
     fs.rmSync(sdk, {recursive: true, force: true});
   }
