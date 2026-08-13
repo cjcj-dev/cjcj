@@ -8,6 +8,7 @@ import path from 'node:path';
 export const repoRoot = path.resolve(import.meta.dirname, '..');
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
+const BRANCH_REF_PATTERN = /^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const SHARED_URL_KEYS = Object.freeze({
   LOADERLIFE_MIN_REF: 'RUNTIME_SRC_URL',
 });
@@ -48,6 +49,10 @@ export function discoverPins(root = repoRoot) {
         sha: value,
         urlKey,
         url: urlKey ? values.get(urlKey) : '',
+        authorityKey: `${key}_AUTHORITY`,
+        authorityRef: values.get(`${key}_AUTHORITY`) || '',
+        mainlineKey: `${key}_MAINLINE`,
+        mainlineRef: values.get(`${key}_MAINLINE`) || '',
       });
     }
   }
@@ -96,24 +101,25 @@ function isAncestor(repo, sha, authority, timeoutMs) {
   return {answer: 'UNKNOWN', detail: diagnostic(result)};
 }
 
-function localBranch(repo, requested, timeoutMs) {
-  const candidates = requested ? [requested] : ['main', 'master'];
-  for (const branch of candidates) {
-    const result = git(repo, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], timeoutMs);
-    if (result.status === 0) return {branch, ref: `refs/heads/${branch}`, detail: ''};
-    if (result.status === null || result.error || result.signal) {
-      return {branch: '', ref: '', detail: diagnostic(result)};
-    }
-  }
-  return {branch: '', ref: '', detail: `no local ${candidates.join('/')} branch`};
+function branchFromRef(ref) {
+  return BRANCH_REF_PATTERN.test(ref) ? ref.slice('refs/heads/'.length) : '';
 }
 
-function remoteDefaultBranch(url, timeoutMs) {
-  const result = run('git', ['ls-remote', '--symref', url, 'HEAD'], {timeoutMs});
-  if (result.status !== 0) return {branch: '', detail: diagnostic(result)};
-  const match = result.stdout.match(/^ref: refs\/heads\/(.+)\tHEAD$/m);
-  if (!match) return {branch: '', detail: 'remote HEAD did not name a branch'};
-  return {branch: match[1], detail: ''};
+function declarationProblem(pin) {
+  if (!pin.authorityRef) return `${pin.key} has no ${pin.authorityKey || `${pin.key}_AUTHORITY`} declaration`;
+  if (!branchFromRef(pin.authorityRef)) return `${pin.key} authority is not a refs/heads/* ref`;
+  if (!pin.mainlineRef) return `${pin.key} has no ${pin.mainlineKey || `${pin.key}_MAINLINE`} declaration`;
+  if (!branchFromRef(pin.mainlineRef)) return `${pin.key} mainline is not a refs/heads/* ref`;
+  return '';
+}
+
+function localRef(repo, ref, timeoutMs) {
+  const result = git(repo, ['show-ref', '--verify', '--quiet', ref], timeoutMs);
+  if (result.status === 0) return {ref, detail: ''};
+  if (result.status === null || result.error || result.signal) {
+    return {ref: '', detail: diagnostic(result)};
+  }
+  return {ref: '', detail: `no local ${ref}`};
 }
 
 function fetchExact(repo, url, sha, timeoutMs) {
@@ -127,6 +133,26 @@ function fetchAuthority(repo, url, branch, timeoutMs, filter = false) {
   return git(repo, arguments_, timeoutMs);
 }
 
+function fetchRemoteRef(repo, url, ref, timeoutMs, filter = false) {
+  const fetched = fetchAuthority(repo, url, branchFromRef(ref), timeoutMs, filter);
+  if (fetched.status !== 0) return {head: '', detail: diagnostic(fetched)};
+  const resolved = git(repo, ['rev-parse', '--verify', 'FETCH_HEAD^{commit}'], timeoutMs);
+  if (resolved.status !== 0) return {head: '', detail: diagnostic(resolved)};
+  return {head: resolved.stdout.trim(), detail: ''};
+}
+
+function unknownDistance(detail) {
+  return {refOnly: 'UNKNOWN', mainlineOnly: 'UNKNOWN', detail};
+}
+
+function distanceFromMainline(repo, authority, mainline, timeoutMs) {
+  const result = git(repo, ['rev-list', '--left-right', '--count', `${authority}...${mainline}`], timeoutMs);
+  if (result.status !== 0) return unknownDistance(diagnostic(result));
+  const match = result.stdout.trim().match(/^(\d+)\s+(\d+)$/);
+  if (!match) return unknownDistance(`unexpected rev-list count: ${result.stdout.trim() || '<empty>'}`);
+  return {refOnly: match[1], mainlineOnly: match[2], detail: ''};
+}
+
 function unknown(detail) {
   return {answer: 'UNKNOWN', detail};
 }
@@ -134,7 +160,7 @@ function unknown(detail) {
 function conclusion(result, remote) {
   const considered = remote ? [result.q1, result.q2, result.q3] : [result.q1, result.q2];
   if (result.q1.answer === 'NOT_MET') return 'NOT_MET';
-  if (considered.some(question => question.answer === 'UNKNOWN')) return 'UNKNOWN';
+  if (considered.some(question => question.answer === 'UNKNOWN') || result.distance.detail) return 'UNKNOWN';
   if (remote && result.q2.answer === 'MET' && result.q3.answer === 'NOT_MET') return 'UNPUSHED';
   if (remote && result.q2.answer === 'NOT_MET' && result.q3.answer === 'MET') {
     return 'LOCAL_STALE_OR_DIVERGED';
@@ -160,38 +186,68 @@ function parseRepoSpecs(specifications) {
   return repos;
 }
 
-function initializeScratch(url, timeoutMs) {
-  const branchResult = remoteDefaultBranch(url, timeoutMs);
-  if (!branchResult.branch) return {detail: branchResult.detail};
+function initializeScratch(pin, timeoutMs) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pin-sweep-'));
   const initialized = git(root, ['init', '--quiet'], timeoutMs);
   if (initialized.status !== 0) {
     fs.rmSync(root, {recursive: true, force: true});
     return {detail: diagnostic(initialized)};
   }
-  const fetched = fetchAuthority(root, url, branchResult.branch, timeoutMs, true);
-  if (fetched.status !== 0) {
+  const authority = fetchRemoteRef(root, pin.url, pin.authorityRef, timeoutMs, true);
+  if (!authority.head) {
     fs.rmSync(root, {recursive: true, force: true});
-    return {detail: diagnostic(fetched)};
+    return {detail: authority.detail};
   }
-  const saved = git(root, ['update-ref', 'refs/pinsweep/authority', 'FETCH_HEAD'], timeoutMs);
-  if (saved.status !== 0) {
+  const savedAuthority = git(root, ['update-ref', 'refs/pinsweep/authority', authority.head], timeoutMs);
+  if (savedAuthority.status !== 0) {
     fs.rmSync(root, {recursive: true, force: true});
-    return {detail: diagnostic(saved)};
+    return {detail: diagnostic(savedAuthority)};
   }
-  return {root, branch: branchResult.branch, authority: 'refs/pinsweep/authority', detail: ''};
+  const mainline = pin.authorityRef === pin.mainlineRef
+    ? authority
+    : fetchRemoteRef(root, pin.url, pin.mainlineRef, timeoutMs, true);
+  if (!mainline.head) {
+    fs.rmSync(root, {recursive: true, force: true});
+    return {detail: mainline.detail};
+  }
+  const savedMainline = git(root, ['update-ref', 'refs/pinsweep/mainline', mainline.head], timeoutMs);
+  if (savedMainline.status !== 0) {
+    fs.rmSync(root, {recursive: true, force: true});
+    return {detail: diagnostic(savedMainline)};
+  }
+  return {
+    root,
+    authority: 'refs/pinsweep/authority',
+    mainline: 'refs/pinsweep/mainline',
+    detail: '',
+  };
 }
 
 function checkWithLocal(pin, specification, {remote, timeoutMs}) {
-  const branchResult = localBranch(specification.path, specification.branch, timeoutMs);
-  if (!branchResult.ref) {
+  const declaredBranch = branchFromRef(pin.authorityRef);
+  if (specification.branch && specification.branch !== declaredBranch) {
+    const detail = `--repo branch ${specification.branch} conflicts with declared ${declaredBranch}`;
     const result = {
       ...pin,
       repo: specification.path,
-      branch: specification.branch || '',
-      q1: unknown(branchResult.detail),
-      q2: unknown(branchResult.detail),
-      q3: unknown(remote ? branchResult.detail : 'remote tier not requested'),
+      q1: unknown(detail),
+      q2: unknown(detail),
+      q3: unknown(remote ? detail : 'remote tier not requested'),
+      distance: unknownDistance(detail),
+    };
+    return {...result, conclusion: conclusion(result, remote)};
+  }
+  const authority = localRef(specification.path, pin.authorityRef, timeoutMs);
+  const mainline = localRef(specification.path, pin.mainlineRef, timeoutMs);
+  if (!authority.ref || !mainline.ref) {
+    const detail = authority.detail || mainline.detail;
+    const result = {
+      ...pin,
+      repo: specification.path,
+      q1: unknown(detail),
+      q2: unknown(detail),
+      q3: unknown(remote ? detail : 'remote tier not requested'),
+      distance: unknownDistance(detail),
     };
     return {...result, conclusion: conclusion(result, remote)};
   }
@@ -204,22 +260,31 @@ function checkWithLocal(pin, specification, {remote, timeoutMs}) {
       : unknown(`exact fetch failed: ${diagnostic(fetched)}`);
   }
   const q2 = q1.answer === 'MET'
-    ? isAncestor(specification.path, pin.sha, branchResult.ref, timeoutMs)
+    ? isAncestor(specification.path, pin.sha, authority.ref, timeoutMs)
     : unknown('question 1 is not MET');
   let q3 = unknown('remote tier not requested');
+  let distance = distanceFromMainline(specification.path, authority.ref, mainline.ref, timeoutMs);
   if (remote) {
-    const fetched = fetchAuthority(specification.path, pin.url, branchResult.branch, timeoutMs);
-    q3 = fetched.status === 0 && q1.answer === 'MET'
-      ? isAncestor(specification.path, pin.sha, 'FETCH_HEAD', timeoutMs)
-      : unknown(fetched.status === 0 ? 'question 1 is not MET' : diagnostic(fetched));
+    const fetchedAuthority = fetchRemoteRef(
+      specification.path, pin.url, pin.authorityRef, timeoutMs,
+    );
+    q3 = fetchedAuthority.head && q1.answer === 'MET'
+      ? isAncestor(specification.path, pin.sha, fetchedAuthority.head, timeoutMs)
+      : unknown(fetchedAuthority.head ? 'question 1 is not MET' : fetchedAuthority.detail);
+    const fetchedMainline = pin.authorityRef === pin.mainlineRef
+      ? fetchedAuthority
+      : fetchRemoteRef(specification.path, pin.url, pin.mainlineRef, timeoutMs);
+    distance = fetchedAuthority.head && fetchedMainline.head
+      ? distanceFromMainline(specification.path, fetchedAuthority.head, fetchedMainline.head, timeoutMs)
+      : unknownDistance(fetchedAuthority.detail || fetchedMainline.detail);
   }
   const result = {
     ...pin,
     repo: specification.path,
-    branch: branchResult.branch,
     q1,
     q2,
     q3,
+    distance,
   };
   return {...result, conclusion: conclusion(result, remote)};
 }
@@ -230,10 +295,10 @@ function checkWithScratch(pin, scratch, {remote, timeoutMs}) {
     const result = {
       ...pin,
       repo: '<scratch>',
-      branch: scratch.branch || '',
       q1: unknown(detail),
       q2: unknown(detail),
       q3: unknown(remote ? detail : 'remote tier not requested'),
+      distance: unknownDistance(detail),
     };
     return {...result, conclusion: conclusion(result, remote)};
   }
@@ -248,17 +313,16 @@ function checkWithScratch(pin, scratch, {remote, timeoutMs}) {
   const q2 = q1.answer === 'MET'
     ? isAncestor(scratch.root, pin.sha, scratch.authority, timeoutMs)
     : unknown('question 1 is not MET');
-  const fetched = fetchAuthority(scratch.root, pin.url, scratch.branch, timeoutMs, true);
-  const q3 = fetched.status === 0 && q1.answer === 'MET'
-    ? isAncestor(scratch.root, pin.sha, 'FETCH_HEAD', timeoutMs)
-    : unknown(fetched.status === 0 ? 'question 1 is not MET' : diagnostic(fetched));
+  const q3 = q1.answer === 'MET'
+    ? isAncestor(scratch.root, pin.sha, scratch.authority, timeoutMs)
+    : unknown('question 1 is not MET');
   const result = {
     ...pin,
     repo: '<scratch>',
-    branch: scratch.branch,
     q1,
     q2,
     q3,
+    distance: distanceFromMainline(scratch.root, scratch.authority, scratch.mainline, timeoutMs),
   };
   return {...result, conclusion: conclusion(result, remote)};
 }
@@ -273,6 +337,19 @@ export function auditPins(pins, {
   const results = [];
   try {
     for (const pin of pins) {
+      const declarationDetail = declarationProblem(pin);
+      if (declarationDetail) {
+        const result = {
+          ...pin,
+          repo: '',
+          q1: unknown(declarationDetail),
+          q2: unknown(declarationDetail),
+          q3: unknown(declarationDetail),
+          distance: unknownDistance(declarationDetail),
+        };
+        results.push({...result, conclusion: 'UNKNOWN'});
+        continue;
+      }
       if (!pin.urlKey || !pin.url) {
         const detail = `${pin.key} has no paired URL key`;
         const result = {
@@ -282,6 +359,7 @@ export function auditPins(pins, {
           q1: unknown(detail),
           q2: unknown(detail),
           q3: unknown(detail),
+          distance: unknownDistance(detail),
         };
         results.push({...result, conclusion: 'UNKNOWN'});
         continue;
@@ -291,12 +369,13 @@ export function auditPins(pins, {
         results.push(checkWithLocal(pin, specification, {remote, timeoutMs}));
         continue;
       }
-      if (!scratchByUrl.has(pin.url)) {
-        scratchByUrl.set(pin.url, remote
-          ? initializeScratch(pin.url, timeoutMs)
+      const scratchKey = `${pin.url}\0${pin.authorityRef}\0${pin.mainlineRef}`;
+      if (!scratchByUrl.has(scratchKey)) {
+        scratchByUrl.set(scratchKey, remote
+          ? initializeScratch(pin, timeoutMs)
           : {detail: 'no --repo mapping in offline tier'});
       }
-      results.push(checkWithScratch(pin, scratchByUrl.get(pin.url), {remote, timeoutMs}));
+      results.push(checkWithScratch(pin, scratchByUrl.get(scratchKey), {remote, timeoutMs}));
     }
   } finally {
     for (const scratch of scratchByUrl.values()) {
@@ -323,22 +402,25 @@ function parseArguments(argv) {
 }
 
 function printResults(results) {
-  console.log('KEY\tVALUE\tREPOSITORY\tURL_KEY\tBRANCH\tQ1_EXISTS\tQ2_AUTHORITY\tQ3_FETCH_HEAD\tCONCLUSION');
+  console.log('KEY\tVALUE\tREPOSITORY\tURL_KEY\tAUTHORITY_REF\tMAINLINE_REF\tQ1_EXISTS\tQ2_AUTHORITY\tQ3_FETCH_HEAD\tREF_VS_MAINLINE\tCONCLUSION');
   for (const result of results) {
     console.log([
       result.key,
       result.sha,
       result.url,
       result.urlKey || '<missing>',
-      result.branch || '<unknown>',
+      result.authorityRef || '<missing>',
+      result.mainlineRef || '<missing>',
       result.q1.answer,
       result.q2.answer,
       result.q3.answer,
+      `${result.distance.refOnly}/${result.distance.mainlineOnly}`,
       result.conclusion,
     ].join('\t'));
     for (const [question, answer] of [['Q1', result.q1], ['Q2', result.q2], ['Q3', result.q3]]) {
       if (answer.detail) console.error(`${result.key} ${question}: ${answer.detail}`);
     }
+    if (result.distance.detail) console.error(`${result.key} REF_VS_MAINLINE: ${result.distance.detail}`);
   }
 }
 
