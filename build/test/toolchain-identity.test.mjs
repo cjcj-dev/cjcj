@@ -16,6 +16,7 @@ const COMMITS = Object.freeze({
   runtime: '1'.repeat(40),
   cjc: '2'.repeat(40),
   cjpm: '3'.repeat(40),
+  hle: '5'.repeat(40),
   llc: '4'.repeat(40),
   opt: '4'.repeat(40),
 });
@@ -24,6 +25,7 @@ const PATHS = Object.freeze({
   runtime: 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so',
   cjc: 'bin/cjc',
   cjpm: 'tools/bin/cjpm',
+  hle: 'tools/bin/hle',
   llc: 'third_party/llvm/bin/llc',
   opt: 'third_party/llvm/bin/opt',
 });
@@ -53,15 +55,15 @@ async function fixture() {
   return {stage, releaseRows};
 }
 
-test('identity producer binds five final artifacts to clean repository commits', async t => {
+test('identity producer binds final artifacts to clean repository commits', async t => {
   const value = await fixture();
   t.after(() => fs.rm(value.stage, {recursive: true, force: true}));
   const result = await writeToolchainIdentity(value);
-  assert.equal(result.artifacts.length, 5);
+  assert.equal(result.artifacts.length, 6);
   const text = await fs.readFile(path.join(value.stage, TOOLCHAIN_IDENTITY), 'utf8');
   assert.match(text, new RegExp(`^format\\t${TOOLCHAIN_IDENTITY_FORMAT}$`, 'm'));
   assert.match(text, /^sdk_root\t\.$/m);
-  assert.match(text, /^artifact_count\t5$/m);
+  assert.match(text, /^artifact_count\t6$/m);
   for (const artifact of TOOLCHAIN_IDENTITY_ARTIFACTS) {
     assert.match(text, new RegExp(`^${artifact.name}_path\\t${PATHS[artifact.name].replaceAll('.', '\\.')}$$`, 'm'));
     assert.match(text, new RegExp(`^${artifact.name}_repository\\thttps://example\\.invalid/`, 'm'));

@@ -24,6 +24,7 @@ const IDENTITY_ARTIFACTS = Object.freeze([
   ['runtime', 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so', 'CJRT-COMMIT', '1'.repeat(40)],
   ['cjc', 'bin/cjc', 'CJCJ-COMMIT', '2'.repeat(40)],
   ['cjpm', 'tools/bin/cjpm', 'CJTOOL-COMMIT', '3'.repeat(40)],
+  ['hle', 'tools/bin/hle', 'CJTOOL-COMMIT', '5'.repeat(40)],
   ['llc', 'third_party/llvm/bin/llc', 'CJLLVM-COMMIT', '4'.repeat(40)],
   ['opt', 'third_party/llvm/bin/opt', 'CJLLVM-COMMIT', '4'.repeat(40)],
 ]);
@@ -36,7 +37,7 @@ function identityFixture({legacy = false} = {}) {
   const sdk = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-identity-'));
   const lines = legacy
     ? [`sdk_real\t${sdk}`, 'is_symlink\tno']
-    : ['format\ttoolchain-lineage-v1', 'sdk_root\t.', 'is_symlink\tno', 'artifact_count\t5'];
+    : ['format\ttoolchain-lineage-v1', 'sdk_root\t.', 'is_symlink\tno', `artifact_count\t${IDENTITY_ARTIFACTS.length}`];
   for (const [name, relative, prefix, commit] of IDENTITY_ARTIFACTS) {
     const file = path.join(sdk, relative);
     fs.mkdirSync(path.dirname(file), {recursive: true});
@@ -198,14 +199,14 @@ test('U8 accepts official 750 and only rejects owner-unreadable entries', () => 
   }
 });
 
-test('U9 accepts exactly five clean relocatable lineage records', () => {
+test('U9 accepts clean relocatable lineage records for owned artifacts', () => {
   const sdk = identityFixture();
   try {
     const details = [];
     const result = identityCheck(sdk, sdk, 5_000, details);
     assert.equal(result.state, STATES.PASS, result.detail);
-    assert.match(result.detail, /hashes=5\/5 lineage=5\/5 failures=0 unknown=0/);
-    assert.equal(details.length, 5);
+    assert.match(result.detail, /hashes=6\/6 lineage=6\/6 failures=0 unknown=0/);
+    assert.equal(details.length, 6);
     assert.ok(details.every(detail => /repository=https:\/\/example\.invalid\//.test(detail)));
     assert.ok(details.every(detail => /dirty=no/.test(detail)));
   } finally {

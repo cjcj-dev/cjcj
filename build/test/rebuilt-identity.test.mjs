@@ -212,7 +212,13 @@ test('once any tool carries CJTOOL-COMMIT the unstamped ones fail closed', async
   const {options} = await fixture({
     tools: {cjpm: `cjpm\0CJTOOL-COMMIT:${'6'.repeat(40)}\0${CJ}`, hle: `hle${CJ}`},
   });
-  await assert.rejects(writeReleaseManifest(options), /tool-hle CJTOOL-COMMIT occurrence must be exactly 1/);
+  await assert.rejects(writeReleaseManifest({
+    ...options,
+    toolSources: {
+      cjpm: {repository: 'https://example.invalid/tools', commit: '6'.repeat(40)},
+      'tool-hle': {repository: 'https://example.invalid/tools', commit: '6'.repeat(40)},
+    },
+  }), /tool-hle CJTOOL-COMMIT occurrence must be exactly 1/);
 });
 
 test('while no tool carries CJTOOL-COMMIT the rows say so instead of staying silent', async () => {
@@ -220,7 +226,7 @@ test('while no tool carries CJTOOL-COMMIT the rows say so instead of staying sil
   const {rows} = await writeReleaseManifest(options);
   for (const component of ['cjpm', 'tool-hle']) {
     assert.equal(rows.find(row => row.component === component).build.identity_rule,
-      'report-only-until-first-stamp');
+      'inherited-base-sdk');
   }
 });
 
