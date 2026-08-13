@@ -50,9 +50,9 @@ export function validateReleaseManifestSource(sourceValue, component) {
   if (status === SOURCE_PROVENANCE_UNRESOLVED) {
     throw new Error(`${component}.source.status is ${SOURCE_PROVENANCE_UNRESOLVED}; release provenance must resolve or explicitly be not applicable`);
   }
-  if (STRUCTURAL_NOT_APPLICABLE_COMPONENTS.has(component)) {
-    if (status !== SOURCE_PROVENANCE_NOT_APPLICABLE) {
-      throw new Error(`${component}.source.status must be ${SOURCE_PROVENANCE_NOT_APPLICABLE}; got ${status}`);
+  if (status === SOURCE_PROVENANCE_NOT_APPLICABLE) {
+    if (!STRUCTURAL_NOT_APPLICABLE_COMPONENTS.has(component) && !component.startsWith('tool-')) {
+      throw new Error(`${component}.source.status must be ${SOURCE_PROVENANCE_RESOLVED}; got ${status}`);
     }
     if (sourceValue.repository !== SOURCE_PROVENANCE_NOT_APPLICABLE ||
         sourceValue.commit !== SOURCE_PROVENANCE_NOT_APPLICABLE) {
@@ -208,28 +208,26 @@ async function discoverCangjieTools(stage, exeSuffix) {
   return found;
 }
 
-// The stamp rule for Cangjie tools, with its own expiry built in.
-//
-// Today none of them carry CJTOOL-COMMIT: they are compiled by the stock driver
-// and nothing injects a marker, so demanding one would fail every package. But
-// "report-only until someone remembers" is how an exemption becomes permanent.
-// So the exemption is keyed to observable state instead of to a date or a note:
-// the moment ANY discovered tool carries the stamp, the build side has started
-// stamping, and every one of them must carry a clean one. There is nothing to
-// remember and nothing to switch off by hand.
-function assertToolStamps(tools, expectedCommit) {
-  const anyStamped = tools.some(tool => (tool.value.stamp_occurrences[TOOL_STAMP_PREFIX] || []).length > 0);
-  if (!anyStamped) {
-    return {
-      enforced: false,
-      unstamped: tools.map(tool => tool.component),
-    };
-  }
+// Each source-owned tool is declared by component. Inherited base-SDK tools
+// remain explicit not-applicable rows; they are never assigned our commit just
+// because they happen to contain Cangjie runtime entry points.
+function assertToolStamps(tools, sourceByComponent) {
+  const owned = [];
+  const unstamped = [];
   for (const tool of tools) {
-    assertFrozenStamp(tool.value, tool.component, TOOL_STAMP_PREFIX,
-      expectedCommit || (tool.value.stamp_occurrences[TOOL_STAMP_PREFIX] || [])[0] || '');
+    const sourceInfo = sourceByComponent.get(tool.component);
+    const occurrences = tool.value.stamp_occurrences[TOOL_STAMP_PREFIX] || [];
+    if (!sourceInfo) {
+      if (occurrences.length) {
+        throw new Error(`${tool.component} carries ${TOOL_STAMP_PREFIX} without a declared source`);
+      }
+      unstamped.push(tool.component);
+      continue;
+    }
+    assertFrozenStamp(tool.value, tool.component, TOOL_STAMP_PREFIX, sourceInfo.commit);
+    owned.push(tool.component);
   }
-  return {enforced: true, unstamped: []};
+  return {enforced: owned.length > 0, owned, unstamped};
 }
 
 // ── std: reconcile the packaged bytes against the block PROVENANCE.txt already
@@ -339,6 +337,14 @@ function notApplicableSource(reason, extra = {}) {
   };
 }
 
+function inheritedToolSource(baseSdk, component) {
+  return notApplicableSource(`inherited unchanged from the base SDK: ${component}`, {
+    release_repository: baseSdk.release.repository,
+    version: baseSdk.release.version,
+    download_url: baseSdk.release.download_url,
+  });
+}
+
 function findExecutable(root, relative, exeSuffix) {
   return path.join(root, `${relative}${exeSuffix}`);
 }
@@ -361,11 +367,13 @@ export async function writeReleaseManifest({
   stdRepository = '',
   cjpmRepository = '',
   cjpmCommit = '',
-  // Supplied once TOOLS_REF lands; until then the discovered tools carry the
-  // repository they were built from only if the caller says so, and the stamp
-  // rule below falls back to "any clean SHA" rather than inventing one.
+  // Legacy callers may still provide one TOOLS_REF for every discovered tool;
+  // package_sdk uses the per-tool map because cjpm and hle have different pins.
   toolsRepository = '',
   toolsCommit = '',
+  // Per-tool source rows keep the forked cjpm pin distinct from TOOLS_REF used
+  // by hle. A missing entry means the binary is inherited from the base SDK.
+  toolSources = {},
   pythonArtifact = '',
   pythonMetadata = {},
   pythonMetadataArtifact = '',
@@ -430,16 +438,33 @@ export async function writeReleaseManifest({
       value: file === cjpmFile ? cjpm : await artifact(stage, file, `packaged ${component} is missing`, [TOOL_STAMP_PREFIX]),
     });
   }
-  const toolStamps = assertToolStamps(tools, toolsCommit);
+  const sourceByComponent = new Map(Object.entries(toolSources).map(([component, value]) => [component, {
+    repository: requireText(value.repository, `${component}.source.repository`),
+    commit: sourceCommit(value.commit, component),
+  }]));
+  if (toolsRepository && toolsCommit) {
+    for (const tool of tools) {
+      if (tool.component !== 'tool-cjpm' && !sourceByComponent.has(tool.component)) {
+        sourceByComponent.set(tool.component, {
+          repository: requireText(toolsRepository, `${tool.component}.source.repository`),
+          commit: sourceCommit(toolsCommit, tool.component),
+        });
+      }
+    }
+  }
+  for (const component of sourceByComponent.keys()) {
+    if (!tools.some(tool => tool.component === component)) {
+      throw new Error(`${component} is declared source-owned but is absent from the packaged tool set`);
+    }
+  }
+  const toolStamps = assertToolStamps(tools, sourceByComponent);
   if (!toolStamps.enforced) {
     // Named, not silent. A limitation nobody can read is indistinguishable from
     // no limitation, which is how "known issue, does not affect the release"
     // text gets written; these names go to stderr and into each row's build
     // section so the limitation is recomputable from the package itself.
-    console.error(`[release-manifest] WARNING no Cangjie-written tool carries ${TOOL_STAMP_PREFIX}, ` +
-      `so their identity rests on the caller-supplied sidecar alone: ${toolStamps.unstamped.join(', ')}`);
-    console.error('[release-manifest] this exemption ends by itself: the first tool that carries ' +
-      `${TOOL_STAMP_PREFIX} makes the stamp mandatory for all of them`);
+    console.error(`[release-manifest] WARNING no declared source-owned Cangjie tool carries ${TOOL_STAMP_PREFIX}; ` +
+      `inherited tools remain base-SDK records: ${toolStamps.unstamped.join(', ')}`);
   }
   if (!await fileExists(gateApparatusArtifact)) {
     throw new Error(`packaged gate apparatus provenance is missing: ${gateApparatusArtifact || '<empty>'}`);
@@ -458,6 +483,12 @@ export async function writeReleaseManifest({
     toolchain: baseSdkId,
     label: 'release manifest base SDK provenance',
   });
+  const sourceForTool = tool => {
+    const sourceInfo = sourceByComponent.get(tool.component);
+    return sourceInfo
+      ? source(sourceInfo.repository, sourceInfo.commit, tool.component)
+      : inheritedToolSource(verifiedBaseSdk, tool.component);
+  };
 
   const rows = [
     {
@@ -541,7 +572,7 @@ export async function writeReleaseManifest({
       source: source(cjpmRepository, cjpmCommit, 'cjpm'),
       artifact: {path: cjpm.path, sha256: cjpm.sha256},
       embedded_stamp: cjpm.embedded_stamp,
-      build: {identity_rule: toolStamps.enforced ? 'enforced' : 'report-only-until-first-stamp'},
+      build: {identity_rule: sourceByComponent.has('tool-cjpm') ? 'enforced' : 'report-only-until-first-stamp'},
     },
     // One row per Cangjie-written tool the stage actually contains, minus cjpm
     // which keeps its own component name for downstream readers.
@@ -551,17 +582,12 @@ export async function writeReleaseManifest({
         schema: 1,
         platform,
         component: tool.component,
-        // Until TOOLS_REF is wired these tools come out of the same cangjie-tools
-        // checkout as cjpm, so falling back to cjpm's repository and commit is
-        // the true answer rather than a placeholder. It is still an inference,
-        // so the row says which of the two it was instead of leaving the reader
-        // to guess — that distinction is the whole reason this row exists.
-        source: source(toolsRepository || cjpmRepository, toolsCommit || cjpmCommit, tool.component),
+        source: sourceForTool(tool),
         artifact: {path: tool.value.path, sha256: tool.value.sha256},
         embedded_stamp: tool.value.embedded_stamp,
         build: {
-          identity_rule: toolStamps.enforced ? 'enforced' : 'report-only-until-first-stamp',
-          source_provenance: toolsCommit ? 'supplied' : 'inherited-from-cjpm',
+          identity_rule: sourceByComponent.has(tool.component) ? 'enforced' : 'inherited-base-sdk',
+          source_provenance: sourceByComponent.has(tool.component) ? 'supplied' : 'base-sdk',
         },
       })),
     {

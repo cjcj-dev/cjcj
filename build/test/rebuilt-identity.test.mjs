@@ -212,16 +212,46 @@ test('once any tool carries CJTOOL-COMMIT the unstamped ones fail closed', async
   const {options} = await fixture({
     tools: {cjpm: `cjpm\0CJTOOL-COMMIT:${'6'.repeat(40)}\0${CJ}`, hle: `hle${CJ}`},
   });
-  await assert.rejects(writeReleaseManifest(options), /tool-hle CJTOOL-COMMIT occurrence must be exactly 1/);
+  await assert.rejects(writeReleaseManifest({
+    ...options,
+    toolSources: {
+      'tool-cjpm': {repository: 'https://example.invalid/tools', commit: '6'.repeat(40)},
+      'tool-hle': {repository: 'https://example.invalid/tools', commit: '6'.repeat(40)},
+    },
+  }), /tool-hle CJTOOL-COMMIT occurrence must be exactly 1/);
 });
 
 test('while no tool carries CJTOOL-COMMIT the rows say so instead of staying silent', async () => {
   const {options} = await fixture({tools: {cjpm: `cjpm${CJ}`, hle: `hle${CJ}`}});
   const {rows} = await writeReleaseManifest(options);
   for (const component of ['cjpm', 'tool-hle']) {
-    assert.equal(rows.find(row => row.component === component).build.identity_rule,
-      'report-only-until-first-stamp');
+    const row = rows.find(row => row.component === component);
+    assert.equal(row.build.identity_rule,
+      component === 'cjpm' ? 'report-only-until-first-stamp' : 'inherited-base-sdk');
+    if (component === 'tool-hle') {
+      assert.equal(row.source.status, 'not-applicable');
+      assert.match(row.source.reason, /inherited unchanged from the base SDK/);
+    }
   }
+});
+
+test('per-tool source rows keep cjpm and hle pins distinct', async () => {
+  const {options} = await fixture({
+    tools: {
+      cjpm: `cjpm\0CJTOOL-COMMIT:${'5'.repeat(40)}\0${CJ}`,
+      hle: `hle\0CJTOOL-COMMIT:${'6'.repeat(40)}\0${CJ}`,
+    },
+  });
+  const {rows} = await writeReleaseManifest({
+    ...options,
+    toolSources: {
+      'tool-cjpm': {repository: 'https://example.invalid/cjpm', commit: '5'.repeat(40)},
+      'tool-hle': {repository: 'https://example.invalid/tools', commit: '6'.repeat(40)},
+    },
+  });
+  const hle = rows.find(row => row.component === 'tool-hle');
+  assert.equal(hle.source.commit, '6'.repeat(40));
+  assert.equal(hle.build.identity_rule, 'enforced');
 });
 
 // The renderer's component check was relaxed from "exactly this list" to "these

@@ -578,9 +578,6 @@ export function identityCheck(sdk, work, timeoutMs, details) {
   if (format && !relocatable) failures.push(`unsupported format=${format}`);
   if (relocatable) {
     if (parsed.values.get('sdk_root') !== '.') failures.push(`sdk_root=${parsed.values.get('sdk_root') || '<missing>'}`);
-    if (parsed.values.get('artifact_count') !== '5') {
-      failures.push(`artifact_count=${parsed.values.get('artifact_count') || '<missing>'}`);
-    }
   } else if (parsed.values.get('sdk_real') !== sdk) {
     failures.push(`sdk_real=${parsed.values.get('sdk_real') || '<missing>'}`);
   }
@@ -593,6 +590,17 @@ export function identityCheck(sdk, work, timeoutMs, details) {
     ['llc', path.join(sdk, 'third_party', 'llvm', 'bin', 'llc'), 'CJLLVM-COMMIT'],
     ['opt', path.join(sdk, 'third_party', 'llvm', 'bin', 'opt'), 'CJLLVM-COMMIT'],
   ];
+  // hle is an optional source-built tool: Unix release cells replace the base
+  // SDK copy, while Windows deliberately inherits it.  The producer records
+  // the row only when the source-owned binary is present, so the consumer must
+  // derive this sixth artifact from the relocatable identity rather than
+  // pretending every platform owns it.
+  if (relocatable && ['hle_path', 'hle_sha', 'hle_lineage'].some(key => parsed.values.has(key))) {
+    artifacts.push(['hle', path.join(sdk, 'tools', 'bin', 'hle'), 'CJTOOL-COMMIT']);
+  }
+  if (relocatable && parsed.values.get('artifact_count') !== String(artifacts.length)) {
+    failures.push(`artifact_count=${parsed.values.get('artifact_count') || '<missing>'}`);
+  }
   let hashes = 0;
   let lineages = 0;
   const seenPaths = new Set();

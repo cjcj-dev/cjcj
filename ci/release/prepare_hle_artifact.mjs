@@ -14,6 +14,7 @@ import {
   readToolsPin,
   writeComponentProvenance,
 } from '../../build/lib/release-component-provenance.mjs';
+import {stampBinaryLineage} from '../../build/lib/toolchain-identity.mjs';
 
 const {values} = parseArgs({
   options: {
@@ -38,6 +39,7 @@ await fs.rm(destination, {recursive: true, force: true});
 await fs.mkdir(destination, {recursive: true});
 await fs.copyFile(path.resolve(values.binary), binary);
 if (!windows) await fs.chmod(binary, 0o755);
+const lineage = await stampBinaryLineage({file: binary, prefix: 'CJTOOL-COMMIT', commit: pin.commit});
 const provenance = await writeComponentProvenance({
   component: 'hle',
   binary,
@@ -46,4 +48,5 @@ const provenance = await writeComponentProvenance({
   repository: pin.repository,
   commit: pin.commit,
 });
+console.log(`HLE-LINEAGE stamp=${lineage.stamp} changed=${lineage.changed}`);
 console.log(`HLE-PROVENANCE platform=${values.platform} source=${pin.repository}@${pin.commit} sha256=${provenance.artifact.sha256}`);

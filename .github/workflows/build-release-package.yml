@@ -129,6 +129,10 @@ jobs:
         shell: bash
         run: cat ci/llvm_pin.env >> "$GITHUB_ENV"
 
+      - name: Load tools provenance pin
+        shell: bash
+        run: cat ci/source_pin.env >> "$GITHUB_ENV"
+
       - name: Retain exact official base SDK archive
         shell: bash
         run: |
@@ -403,6 +407,8 @@ jobs:
             --cjpm-provenance "$CJPM_PROVENANCE" \
             --cjpm-source-repo "$CJPM_SOURCE_REPOSITORY" \
             --cjpm-source-sha "$CJPM_SOURCE_COMMIT" \
+            --tools-source-repo "$TOOLS_SRC_URL" \
+            --tools-source-sha "$TOOLS_REF" \
             --python-bundle "$PYTHON_BUNDLE_DIR" \
             --version "${{ inputs.version }}" \
             --platform "${{ inputs.platform }}" \
@@ -437,6 +443,8 @@ jobs:
             --cjpm-provenance "$env:CJPM_PROVENANCE" `
             --cjpm-source-repo "$env:CJPM_SOURCE_REPOSITORY" `
             --cjpm-source-sha "$env:CJPM_SOURCE_COMMIT" `
+            --tools-source-repo "$env:TOOLS_SRC_URL" `
+            --tools-source-sha "$env:TOOLS_REF" `
             --python-bundle "$env:PYTHON_BUNDLE_DIR" `
             --version "${{ inputs.version }}" `
             --platform "${{ inputs.platform }}" `
