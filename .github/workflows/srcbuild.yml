@@ -145,12 +145,23 @@ jobs:
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
       CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
-      SCCACHE_GHA_ENABLED: "true"
-      # The durable cross-run backend must be L0: with policy=l0, sccache stops
-      # a write as soon as L0 fails. A disposable disk L0 therefore prevented
-      # every GHA write on darwin-arm64 in run 31357498770.
-      SCCACHE_MULTILEVEL_CHAIN: "gha"
-      SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"
+      # GitHub's cache is the wrong shape for sccache here, measured rather than
+      # assumed. Run 31551077927 reported 230 hits against 6585 misses -- 3% --
+      # while spending 4162 s writing 6565 entries, and the repository's cache
+      # then held 27840 entries totalling 6.9 GB of a 10 GB cap, of which only 36
+      # were the whole-artifact caches (cjv, cjpm, fixed-llvm-tools) that do earn
+      # their space. sccache writes one entry per object file, so each release run
+      # pushes past the cap and evicts the previous run's entries -- which is why
+      # the hit rate stays at 3% no matter how much is written.
+      #
+      # Disabling the cross-run backend costs those 230 cached compilations and
+      # returns 4162 s per run plus the cache budget. sccache still runs with its
+      # local disk cache; nothing about correctness changes either way.
+      #
+      # Before turning this back on, re-measure: the numbers to beat are hit rate
+      # 3% and write duration 4162 s, and a backend without a 10 GB per-repository
+      # cap is what would actually change them.
+      SCCACHE_GHA_ENABLED: "false"
       SCCACHE_LOG: warn
       cjHeapSize: 12GB
       cjHeapSwap: "on"

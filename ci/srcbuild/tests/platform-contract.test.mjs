@@ -327,11 +327,18 @@ test('arm soak produces every artifact its package job downloads, each exactly o
     `package needs ${needsOf(packageJob)} but ${demanded} is built by ${producerJobs[0]}`);
 });
 
-test('source-build cache makes durable GHA writes primary and retains write diagnostics', async () => {
+test('source-build leaves the GHA cache backend off and keeps the write diagnostics', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
-  assert.ok(workflow.includes('SCCACHE_MULTILEVEL_CHAIN: "gha"'));
-  assert.ok(!workflow.includes('SCCACHE_MULTILEVEL_CHAIN: "disk,gha"'));
-  assert.ok(workflow.includes('SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY: "l0"'));
+  // The durable backend was measured, not assumed: run 31551077927 got 230 hits
+  // against 6585 misses while spending 4162 s on writes, and the repository cache
+  // held 27840 entries in 6.9 GB of a 10 GB cap -- one entry per object file, so
+  // every run evicted the last one's. Turning it back on without a backend that
+  // has no per-repository cap would restore a 3% hit rate at that price, so this
+  // asserts the off state rather than merely dropping the old assertion.
+  assert.ok(workflow.includes('SCCACHE_GHA_ENABLED: "false"'));
+  assert.ok(!workflow.includes('SCCACHE_MULTILEVEL_CHAIN'),
+    'multi-level chain only means something with a durable backend enabled');
+  // The diagnostics stay: they are how the next measurement gets taken.
   assert.ok(workflow.includes('SCCACHE_ERROR_LOG=$RUNNER_TEMP/sccache-error.log'));
   assert.ok(workflow.includes('name: Capture sccache diagnostics'));
   assert.ok(workflow.includes('name: sccache-diagnostics-${{ matrix.target }}-${{ github.run_attempt }}'));
