@@ -1,0 +1,12 @@
+[package]
+  cjc-version = "1.1.0"
+  name = "cjoffi_probe"
+  organization = "cjcj_test"
+  description = "Focused official-FFI versus handwritten CJO header probe"
+  version = "0.1.0"
+  src-dir = "src"
+  output-type = "executable"
+  link-option = "${CJOFFI_SHIM_O} ${CJOFFI_NEGATIVE_STUB_O} ${CANGJIE_HOME}/third_party/llvm/lib/libLLVM-15.so -lstdc++"
+
+[dependencies]
+  "cjcj::frontend" = { path = "../../packages/frontend" }

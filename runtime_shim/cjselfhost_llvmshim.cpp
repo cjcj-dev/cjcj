@@ -45,7 +45,10 @@
 #include <llvm-c/DebugInfo.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <new>
 #include <vector>
 
 #include "llvm/ADT/StringRef.h"
@@ -82,6 +85,36 @@ constexpr int CJOF_FB_MAX_DEPTH = 128;
 constexpr int CJOF_FB_MAX_TABLES = 2000000;
 
 namespace {
+// Owns the immutable buffer behind every pointer returned by the CJOF package
+// accessors below.  Returned string bytes are borrowed from this buffer and are
+// valid until CJOFPackageViewClose is called; callers must copy them before then.
+struct CJOFPackageView {
+    unsigned char *data = nullptr;
+    size_t size = 0;
+    const PackageFormat::Package *package = nullptr;
+};
+
+const unsigned char *CJOFStringBytes(const flatbuffers::String *value, size_t *length)
+{
+    if (length == nullptr) {
+        return nullptr;
+    }
+    *length = 0;
+    if (value == nullptr) {
+        return nullptr;
+    }
+    *length = value->size();
+    return value->Data();
+}
+
+bool CJOFStringBytesEqual(const flatbuffers::String *left, const flatbuffers::String *right)
+{
+    if (left == nullptr || right == nullptr || left->size() != right->size()) {
+        return false;
+    }
+    return left->size() == 0 || std::memcmp(left->Data(), right->Data(), left->size()) == 0;
+}
+
 struct LLVMSelfhostLoopInfoState {
     DominatorTree domTree;
     LoopInfoBase<BasicBlock, Loop> loopInfo;
@@ -690,6 +723,96 @@ extern "C" int CJOFVerifyPackageBuffer(const unsigned char *Data, size_t Size)
     }
     flatbuffers::Verifier verifier(Data, Size, CJOF_FB_MAX_DEPTH, CJOF_FB_MAX_TABLES);
     return PackageFormat::VerifyPackageBuffer(verifier) ? 1 : 0;
+}
+
+extern "C" void *CJOFPackageViewOpen(const unsigned char *Data, size_t Size)
+{
+    if (CJOFVerifyPackageBuffer(Data, Size) == 0) {
+        return nullptr;
+    }
+    auto *view = new (std::nothrow) CJOFPackageView();
+    if (view == nullptr) {
+        return nullptr;
+    }
+    view->data = static_cast<unsigned char *>(std::malloc(Size));
+    if (view->data == nullptr) {
+        delete view;
+        return nullptr;
+    }
+    std::memcpy(view->data, Data, Size);
+    view->size = Size;
+    view->package = PackageFormat::GetPackage(view->data);
+    return view;
+}
+
+extern "C" void CJOFPackageViewClose(void *RawView)
+{
+    auto *view = static_cast<CJOFPackageView *>(RawView);
+    if (view == nullptr) {
+        return;
+    }
+    std::free(view->data);
+    delete view;
+}
+
+// The returned bytes are not NUL-terminated API strings.  The (pointer,
+// length) pair is borrowed from RawView and becomes invalid at Close.
+extern "C" const unsigned char *CJOFPackageViewGetFullPkgName(const void *RawView, size_t *Length)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return CJOFStringBytes(view == nullptr ? nullptr : view->package->fullPkgName(), Length);
+}
+
+extern "C" size_t CJOFPackageViewGetDependencyCount(const void *RawView)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    if (view == nullptr) {
+        return 0;
+    }
+    const auto *imports = view->package->imports();
+    const auto *fullPkgName = view->package->fullPkgName();
+    if (imports == nullptr) {
+        return 0;
+    }
+    size_t count = 0;
+    for (const auto *name : *imports) {
+        if (!CJOFStringBytesEqual(name, fullPkgName)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+// DependencyIndex addresses the filtered imports table (the package's own
+// fullPkgName entry is excluded).  The returned (pointer, length) pair has the
+// same RawView-owned lifetime as CJOFPackageViewGetFullPkgName.
+extern "C" const unsigned char *CJOFPackageViewGetDependencyName(
+    const void *RawView, size_t DependencyIndex, size_t *Length)
+{
+    if (Length == nullptr) {
+        return nullptr;
+    }
+    *Length = 0;
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    if (view == nullptr) {
+        return nullptr;
+    }
+    const auto *imports = view->package->imports();
+    const auto *fullPkgName = view->package->fullPkgName();
+    if (imports == nullptr) {
+        return nullptr;
+    }
+    size_t currentIndex = 0;
+    for (const auto *name : *imports) {
+        if (CJOFStringBytesEqual(name, fullPkgName)) {
+            continue;
+        }
+        if (currentIndex == DependencyIndex) {
+            return CJOFStringBytes(name, Length);
+        }
+        ++currentIndex;
+    }
+    return nullptr;
 }
 
 // ---------------------------------------------------------------------------
