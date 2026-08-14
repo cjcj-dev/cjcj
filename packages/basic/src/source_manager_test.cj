@@ -127,4 +127,47 @@ class SourceManagerTest {
         let fileID = sm.AddSource("/tmp/cangjie_basic_lsp.cj", lspSnippet())
         GetContentBetweenTest(sm, fileID)
     }
+
+    @TestCase
+    func pathPrefixMapDefaultsOffTest(): Unit {
+        let sm = SourceManager()
+        let fileID = sm.AddSource("/build/root/pkg/dir/foo.cj", "")
+        @Expect(sm.GetSource(fileID).fileHash, 7543164539185912140u64)
+    }
+
+    @TestCase
+    func pathPrefixMapMakesBuildRootsStableTest(): Unit {
+        let left = SourceManager()
+        left.SetPathPrefixMaps([("/build/left", "module@v1")])
+        let leftID = left.AddSource("/build/left/pkg/dir/foo.cj", "")
+
+        let right = SourceManager()
+        right.SetPathPrefixMaps([("/build/right", "module@v1")])
+        let rightID = right.AddSource("/build/right/pkg/dir/foo.cj", "")
+
+        @Expect(left.GetSource(leftID).fileHash, right.GetSource(rightID).fileHash)
+    }
+
+    @TestCase
+    func pathPrefixMapPreservesDirectoriesForSameBasenameTest(): Unit {
+        let sm = SourceManager()
+        sm.SetPathPrefixMaps([("/build/root", "module@v1")])
+        let firstID = sm.AddSource("/build/root/pkg/dirA/foo.cj", "")
+        let secondID = sm.AddSource("/build/root/pkg/dirB/foo.cj", "")
+        @Expect(sm.GetSource(firstID).fileHash == sm.GetSource(secondID).fileHash, false)
+    }
+
+    @TestCase
+    func pathPrefixMapRejectsNonInjectiveMappingsTest(): Unit {
+        let sm = SourceManager()
+        sm.SetPathPrefixMaps([("/build/first", "module@v1"), ("/build/second", "module@v1")])
+        let _ = sm.AddSource("/build/first/pkg/foo.cj", "")
+        var rejected = false
+        try {
+            let _ = sm.AddSource("/build/second/pkg/foo.cj", "")
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        @Expect(rejected, true)
+    }
 }

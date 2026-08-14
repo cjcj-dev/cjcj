@@ -238,6 +238,7 @@ public class CompilerInstance {
     public init(invocation: CompilerInvocation, diag: DiagnosticEngine) {
         this.invocation = invocation
         this.diag = diag
+        sm.SetPathPrefixMaps(invocation.globalOptions.pathPrefixMaps.toArray())
         // C++ CompilerInstance.cpp:61-64 allocate managers in safe order.
         let tm = TypeManager()
         typeManager = Some(tm)
