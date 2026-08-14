@@ -60,6 +60,12 @@ import std.sort.*
 
 foreign {
     func CJOFVerifyPackageBuffer(data: CPointer<UInt8>, size: UIntNative): Int32
+    func CJOFPackageViewOpen(data: CPointer<UInt8>, size: UIntNative): CPointer<Unit>
+    func CJOFPackageViewClose(view: CPointer<Unit>): Unit
+    func CJOFPackageViewGetFullPkgName(view: CPointer<Unit>, length: CPointer<UIntNative>): CPointer<UInt8>
+    func CJOFPackageViewGetDependencyCount(view: CPointer<Unit>): UIntNative
+    func CJOFPackageViewGetDependencyName(view: CPointer<Unit>, index: UIntNative,
+        length: CPointer<UIntNative>): CPointer<UInt8>
 }
 
 public class DiagnosticEngine <: Resource {
@@ -782,6 +788,160 @@ private class CjoFlatBuffer {
     private func ReadI64(pos: Int64): Int64 {
         return Int64(ReadU64(pos))
     }
+}
+
+public class CjoPackageHeader {
+    public let fullPkgName: String
+    public let dependencyPackageNames: Array<String>
+
+    public init(fullPkgName: String, dependencyPackageNames: ArrayList<String>) {
+        this.fullPkgName = fullPkgName
+        this.dependencyPackageNames = dependencyPackageNames.toArray()
+    }
+}
+
+// Owns the immutable C++ copy of a verified CJO buffer. Strings returned by the
+// shim are borrowed (pointer, length) pairs valid only until close(); each getter
+// below copies those bytes into a Cangjie String before the borrowed view expires.
+public class OfficialCjoPackageView <: Resource {
+    private let raw: CPointer<Unit>
+    private var closed: Bool = false
+
+    private init(raw: CPointer<Unit>) {
+        this.raw = raw
+    }
+
+    public static func Open(data: Array<UInt8>): Option<OfficialCjoPackageView> {
+        if (data.isEmpty()) {
+            return None
+        }
+        var rawView = CPointer<Unit>()
+        try (buffer = LibC.malloc<UInt8>(count: data.size).asResource()) {
+            if (buffer.value.isNull()) {
+                return None
+            }
+            unsafe {
+                var idx: Int64 = 0
+                while (idx < data.size) {
+                    (buffer.value + idx).write(data[idx])
+                    idx++
+                }
+                rawView = CJOFPackageViewOpen(buffer.value, UIntNative(data.size))
+            }
+        }
+        return if (rawView.isNull()) { None } else { Some(OfficialCjoPackageView(rawView)) }
+    }
+
+    public func GetFullPkgName(): Option<String> {
+        if (closed) {
+            return None
+        }
+        var result: Option<String> = None
+        try (length = LibC.malloc<UIntNative>().asResource()) {
+            if (!length.value.isNull()) {
+                unsafe { length.value.write(0) }
+                let bytes = unsafe { CJOFPackageViewGetFullPkgName(raw, length.value) }
+                result = CopyBorrowedOfficialString(bytes, unsafe { length.value.read() })
+            }
+        }
+        return result
+    }
+
+    public func GetDependencyCount(): UIntNative {
+        return if (closed) { 0 } else { unsafe { CJOFPackageViewGetDependencyCount(raw) } }
+    }
+
+    public func GetDependencyName(index: UIntNative): Option<String> {
+        if (closed) {
+            return None
+        }
+        var result: Option<String> = None
+        try (length = LibC.malloc<UIntNative>().asResource()) {
+            if (!length.value.isNull()) {
+                unsafe { length.value.write(0) }
+                let bytes = unsafe { CJOFPackageViewGetDependencyName(raw, index, length.value) }
+                result = CopyBorrowedOfficialString(bytes, unsafe { length.value.read() })
+            }
+        }
+        return result
+    }
+
+    public func close(): Unit {
+        if (!closed) {
+            unsafe { CJOFPackageViewClose(raw) }
+            closed = true
+        }
+    }
+
+    public func isClosed(): Bool { return closed }
+}
+
+private func CopyBorrowedOfficialString(bytes: CPointer<UInt8>, length: UIntNative): Option<String> {
+    if (bytes.isNull()) {
+        return None
+    }
+    let copied = Array<UInt8>(Int64(length), repeat: 0u8)
+    var idx: Int64 = 0
+    unsafe {
+        while (idx < copied.size) {
+            copied[idx] = (bytes + idx).read()
+            idx++
+        }
+    }
+    return Some(unsafe { String.fromUtf8Unchecked(copied) })
+}
+
+// Parallel read entry for the official generated C++ accessors. It intentionally
+// does not replace any existing CjoFlatBuffer call site.
+public func ReadCjoPackageHeaderViaOfficialFFI(data: Array<UInt8>): Option<CjoPackageHeader> {
+    let opened = OfficialCjoPackageView.Open(data) ?? return None
+    var result: Option<CjoPackageHeader> = None
+    try (view = opened) {
+        if (let Some(fullPkgName) <- view.GetFullPkgName()) {
+            let dependencies = ArrayList<String>()
+            let count = view.GetDependencyCount()
+            var idx: UIntNative = 0
+            var valid = true
+            while (idx < count) {
+                if (let Some(name) <- view.GetDependencyName(idx)) {
+                    dependencies.add(name)
+                } else {
+                    valid = false
+                    break
+                }
+                idx++
+            }
+            if (valid) {
+                result = Some(CjoPackageHeader(fullPkgName, dependencies))
+            }
+        }
+    }
+    return result
+}
+
+// Test/probe entry matching the still-live handwritten reader for byte-for-byte
+// comparisons during the staged replacement.
+public func ReadCjoPackageHeaderManually(data: Array<UInt8>): Option<CjoPackageHeader> {
+    let reader = CjoFlatBuffer(data)
+    if (!reader.VerifyPackageBuffer()) {
+        return None
+    }
+    let root = reader.RootTable()
+    if (root < 0) {
+        return None
+    }
+    let fullPkgName = reader.StringField(root, 8)
+    let dependencies = ArrayList<String>()
+    let imports = reader.VectorField(root, 12)
+    var idx: Int64 = 0
+    while (idx < reader.VectorLength(imports)) {
+        let name = reader.StringAt(reader.VectorOffsetElement(imports, idx))
+        if (name != fullPkgName) {
+            dependencies.add(name)
+        }
+        idx++
+    }
+    return Some(CjoPackageHeader(fullPkgName, dependencies))
 }
 
 private class CjoFlatDecl {
