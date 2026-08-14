@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -7,6 +8,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "flatbuffers/ModuleFormat_generated.h"
 
 extern "C" {
 void *CJOFPackageViewOpen(const unsigned char *, size_t);
@@ -37,6 +40,8 @@ const unsigned char *CJOFPackageViewGetDeclMangledBeforeSema(const void *, size_
 size_t CJOFPackageViewGetDeclGenericArity(const void *, size_t);
 unsigned int CJOFPackageViewGetDeclType(const void *, size_t);
 unsigned char CJOFPackageViewGetDeclInfoType(const void *, size_t);
+int CJOFPackageViewGetReadSurfaceFingerprint(
+    const void *, uint64_t *, uint64_t *, uint64_t *, size_t);
 }
 
 namespace {
@@ -97,12 +102,67 @@ public:
         return pos >= 0 ? ReadU32(pos) : defaultValue;
     }
 
+    uint8_t U8(int64_t pos, uint8_t defaultValue) const
+    {
+        return InBounds(pos, 1) ? data_[pos] : defaultValue;
+    }
+
+    uint16_t U16(int64_t pos, uint16_t defaultValue) const
+    {
+        return InBounds(pos, 2) ? ReadU16(pos) : defaultValue;
+    }
+
+    uint32_t U32(int64_t pos, uint32_t defaultValue) const
+    {
+        return InBounds(pos, 4) ? ReadU32(pos) : defaultValue;
+    }
+
+    uint64_t U64(int64_t pos, uint64_t defaultValue) const
+    {
+        return InBounds(pos, 8) ? ReadU64(pos) : defaultValue;
+    }
+
+    int8_t I8(int64_t pos, int8_t defaultValue) const
+    {
+        return InBounds(pos, 1) ? static_cast<int8_t>(data_[pos]) : defaultValue;
+    }
+
+    int16_t I16(int64_t pos, int16_t defaultValue) const
+    {
+        return InBounds(pos, 2) ? static_cast<int16_t>(ReadU16(pos)) : defaultValue;
+    }
+
+    int32_t I32(int64_t pos, int32_t defaultValue) const
+    {
+        return InBounds(pos, 4) ? static_cast<int32_t>(ReadU32(pos)) : defaultValue;
+    }
+
+    int64_t I64(int64_t pos, int64_t defaultValue) const
+    {
+        return InBounds(pos, 8) ? static_cast<int64_t>(ReadU64(pos)) : defaultValue;
+    }
+
     int64_t VectorLength(int64_t vector) const { return InBounds(vector, 4) ? ReadU32(vector) : 0; }
 
     int64_t VectorOffsetElement(int64_t vector, int64_t index) const
     {
         return Indirect(vector + 4 + index * 4);
     }
+
+    int64_t VectorStructElement(int64_t vector, int64_t index, int64_t width) const
+    {
+        const int64_t pos = vector + 4 + index * width;
+        return InBounds(pos, width) ? pos : -1;
+    }
+
+    uint8_t VectorU8(int64_t vector, int64_t index) const { return U8(vector + 4 + index, 0); }
+    uint16_t VectorU16(int64_t vector, int64_t index) const { return U16(vector + 4 + index * 2, 0); }
+    uint32_t VectorU32(int64_t vector, int64_t index) const { return U32(vector + 4 + index * 4, 0); }
+    uint64_t VectorU64(int64_t vector, int64_t index) const { return U64(vector + 4 + index * 8, 0); }
+    int8_t VectorI8(int64_t vector, int64_t index) const { return I8(vector + 4 + index, 0); }
+    int16_t VectorI16(int64_t vector, int64_t index) const { return I16(vector + 4 + index * 2, 0); }
+    int32_t VectorI32(int64_t vector, int64_t index) const { return I32(vector + 4 + index * 4, 0); }
+    int64_t VectorI64(int64_t vector, int64_t index) const { return I64(vector + 4 + index * 8, 0); }
 
     std::string StringAt(int64_t pos) const
     {
@@ -139,10 +199,60 @@ private:
             static_cast<uint32_t>(data_[pos + 2]) << 16 | static_cast<uint32_t>(data_[pos + 3]) << 24;
     }
 
+    uint64_t ReadU64(int64_t pos) const
+    {
+        if (!InBounds(pos, 8)) return 0;
+        uint64_t result = 0;
+        for (unsigned int index = 0; index < 8; ++index) {
+            result |= static_cast<uint64_t>(data_[pos + index]) << (index * 8);
+        }
+        return result;
+    }
+
     int64_t ReadI32(int64_t pos) const { return static_cast<int32_t>(ReadU32(pos)); }
 
     const std::vector<unsigned char> &data_;
 };
+
+constexpr size_t READ_SURFACE_FIELD_COUNT = 217;
+
+struct ReadSurfaceFingerprint {
+    uint64_t hits[READ_SURFACE_FIELD_COUNT] = {};
+    uint64_t fnv[READ_SURFACE_FIELD_COUNT] = {};
+    uint64_t mix[READ_SURFACE_FIELD_COUNT] = {};
+};
+
+void ReadSurfaceByte(ReadSurfaceFingerprint &out, size_t field, unsigned char byte)
+{
+    out.fnv[field] ^= byte;
+    out.fnv[field] *= 1099511628211ULL;
+    out.mix[field] ^= static_cast<uint64_t>(byte) + 0x9eU;
+    out.mix[field] *= 0x9e3779b185ebca87ULL;
+}
+
+void ReadSurfaceAdd(ReadSurfaceFingerprint &out, size_t field, uint64_t value)
+{
+    for (unsigned int shift = 0; shift < 64; shift += 8) {
+        ReadSurfaceByte(out, field, static_cast<unsigned char>(value >> shift));
+    }
+}
+
+void ReadSurfaceBegin(ReadSurfaceFingerprint &out, size_t field)
+{
+    if (out.hits[field]++ == 0) {
+        out.fnv[field] = 14695981039346656037ULL;
+        out.mix[field] = 0xd6e8feb86659fd93ULL;
+    }
+    ReadSurfaceAdd(out, field, 0xc10f000000000000ULL | field);
+}
+
+void ReadSurfaceString(ReadSurfaceFingerprint &out, size_t field, const std::string &value)
+{
+    ReadSurfaceAdd(out, field, value.size());
+    for (unsigned char byte : value) ReadSurfaceByte(out, field, byte);
+}
+
+#include "cjo_read_surface_manual.inc"
 
 std::string Bytes(const unsigned char *value, size_t length)
 {
@@ -293,6 +403,81 @@ bool OfficialSurface(const std::vector<unsigned char> &data, Surface &values)
     return true;
 }
 
+bool ManualReadSurface(const std::vector<unsigned char> &data, ReadSurfaceFingerprint &out)
+{
+    if (data.empty() || CJOFVerifyPackageBuffer(data.data(), data.size()) == 0) return false;
+    const ManualFlatBuffer reader(data);
+    const int64_t root = reader.RootTable();
+    if (root < 0) return false;
+    WalkManual_Package(reader, root, out);
+    return true;
+}
+
+bool OfficialReadSurface(const std::vector<unsigned char> &data, ReadSurfaceFingerprint &out)
+{
+    void *raw = data.empty() ? nullptr : CJOFPackageViewOpen(data.data(), data.size());
+    if (raw == nullptr) return false;
+    const bool okay = CJOFPackageViewGetReadSurfaceFingerprint(
+        raw, out.hits, out.fnv, out.mix, READ_SURFACE_FIELD_COUNT) != 0;
+    CJOFPackageViewClose(raw);
+    return okay;
+}
+
+bool EqualReadSurface(const ReadSurfaceFingerprint &left, const ReadSurfaceFingerprint &right)
+{
+    for (size_t field = 0; field < READ_SURFACE_FIELD_COUNT; ++field) {
+        if (left.hits[field] != right.hits[field] || left.fnv[field] != right.fnv[field] ||
+            left.mix[field] != right.mix[field]) return false;
+    }
+    return true;
+}
+
+size_t SurfaceEvents(const ReadSurfaceFingerprint &value)
+{
+    size_t result = 0;
+    for (uint64_t count : value.hits) result += count;
+    return result;
+}
+
+size_t SurfaceGroups(const ReadSurfaceFingerprint &value)
+{
+    size_t result = 0;
+    for (uint64_t count : value.hits) result += count != 0;
+    return result;
+}
+
+std::pair<uint64_t, uint64_t> BufferFingerprint(const std::vector<unsigned char> &data)
+{
+    uint64_t fnv = 14695981039346656037ULL;
+    uint64_t mix = 0xd6e8feb86659fd93ULL;
+    for (unsigned char byte : data) {
+        fnv = (fnv ^ byte) * 1099511628211ULL;
+        mix = (mix ^ (static_cast<uint64_t>(byte) + 0x9eU)) * 0x9e3779b185ebca87ULL;
+    }
+    return {fnv, mix};
+}
+
+void DiagnoseDeclDependencies(const std::vector<unsigned char> &data, const ManualFlatBuffer &reader)
+{
+    const auto *package = PackageFormat::GetPackage(data.data());
+    const auto *officialDecls = package->allDecls();
+    const int64_t manualDecls = reader.VectorField(reader.RootTable(), 20);
+    const size_t count = officialDecls == nullptr ? 0 : officialDecls->size();
+    for (size_t index = 0; index < count; ++index) {
+        const auto *officialDeps = officialDecls->Get(index)->dependencies();
+        const int64_t manualDecl = reader.VectorOffsetElement(manualDecls, index);
+        const int64_t manualDeps = reader.VectorField(manualDecl, 40);
+        const size_t officialCount = officialDeps == nullptr ? 0 : officialDeps->size();
+        const size_t manualCount = reader.VectorLength(manualDeps);
+        if ((officialDeps != nullptr) != (manualDeps >= 0) || officialCount != manualCount) {
+            std::cout << "DEBUG112\tdecl=" << index << "\tofficial_present=" << (officialDeps != nullptr)
+                      << "\tmanual_present=" << (manualDeps >= 0) << "\tofficial_count=" << officialCount
+                      << "\tmanual_count=" << manualCount << '\n';
+            return;
+        }
+    }
+}
+
 #undef READ_BORROWED
 
 std::vector<unsigned char> ReadFile(const std::string &path)
@@ -301,40 +486,73 @@ std::vector<unsigned char> ReadFile(const std::string &path)
     return std::vector<unsigned char>(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 }
 
-int Probe(const std::string &path)
+char Probe(const std::string &path, ReadSurfaceFingerprint &aggregate)
 {
     const auto data = ReadFile(path);
-    Surface official;
-    Surface manual;
-    const bool officialOk = OfficialSurface(data, official);
-    const bool manualOk = ManualSurface(data, manual);
+    const auto before = BufferFingerprint(data);
+    const auto timeNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    ReadSurfaceFingerprint official;
+    ReadSurfaceFingerprint manual;
+    const bool officialOk = OfficialReadSurface(data, official);
+    const bool manualOk = ManualReadSurface(data, manual);
+    const auto after = BufferFingerprint(data);
     char klass = '?';
     if (officialOk && !manualOk) klass = 'A';
     else if (!officialOk && manualOk) klass = 'C';
-    else if (officialOk && manualOk) klass = official == manual ? 'D' : 'B';
+    else if (officialOk && manualOk) klass = EqualReadSurface(official, manual) ? 'D' : 'B';
 
-    std::cout << "RESULT\t" << klass << "\tchecks=" << (officialOk ? official.size() : 0) << "\t" << path << '\n';
-    if (klass == 'B') {
-        const size_t common = std::min(official.size(), manual.size());
-        size_t index = 0;
-        while (index < common && official[index] == manual[index]) ++index;
-        if (index < common) {
-            std::cout << "DIFF\t" << path << "\tfield=" << official[index].first
-                      << "\tofficial_hex=" << Hex(official[index].second)
-                      << "\tmanual_hex=" << Hex(manual[index].second) << '\n';
-        } else {
-            std::cout << "DIFF\t" << path << "\tsize_official=" << official.size()
-                      << "\tsize_manual=" << manual.size() << '\n';
+    if (officialOk) {
+        for (size_t field = 0; field < READ_SURFACE_FIELD_COUNT; ++field) {
+            aggregate.hits[field] += official.hits[field];
+            if (aggregate.fnv[field] == 0 && official.hits[field] != 0) aggregate.fnv[field] = 1;
         }
     }
-    return klass == '?' ? 2 : 0;
+    std::cout << "RESULT\t" << klass << "\tchecks=" << (officialOk ? SurfaceEvents(official) : 0)
+              << "\tgroups=" << (officialOk ? SurfaceGroups(official) : 0) << "\t" << path << '\n';
+    if (klass == 'B') {
+        for (size_t field = 0; field < READ_SURFACE_FIELD_COUNT; ++field) {
+            if (official.hits[field] != manual.hits[field] || official.fnv[field] != manual.fnv[field] ||
+                official.mix[field] != manual.mix[field]) {
+                std::cout << "DIFF\t" << path << "\tfield_id=" << field
+                          << "\tofficial_hits=" << official.hits[field]
+                          << "\tmanual_hits=" << manual.hits[field]
+                          << "\tofficial_fnv=" << official.fnv[field]
+                          << "\tmanual_fnv=" << manual.fnv[field]
+                          << "\tofficial_mix=" << official.mix[field]
+                          << "\tmanual_mix=" << manual.mix[field] << '\n';
+                if (field == 112) DiagnoseDeclDependencies(data, ManualFlatBuffer(data));
+                break;
+            }
+        }
+    }
+    if (before != after || before.first == 0 || before.second == 0 || after.first == 0 || after.second == 0) {
+        std::cout << "MEMORY_ALERT\t" << path << "\taddr=" << static_cast<const void *>(data.data())
+                  << "\ttime_ns=" << timeNs << "\tbefore_fnv=" << before.first << "\tbefore_mix=" << before.second
+                  << "\tafter_fnv=" << after.first << "\tafter_mix=" << after.second << '\n';
+    }
+    return klass;
 }
 } // namespace
 
 int main(int argc, char **argv)
 {
     if (argc < 2) return 2;
-    int result = 0;
-    for (int i = 1; i < argc; ++i) result |= Probe(argv[i]);
-    return result;
+    size_t counts[4] = {};
+    size_t unknown = 0;
+    ReadSurfaceFingerprint aggregate;
+    for (int i = 1; i < argc; ++i) {
+        const char klass = Probe(argv[i], aggregate);
+        if (klass >= 'A' && klass <= 'D') ++counts[klass - 'A']; else ++unknown;
+    }
+    std::cout << "SUMMARY\tN=" << (argc - 1) << "\tA=" << counts[0] << "\tB=" << counts[1]
+              << "\tC=" << counts[2] << "\tD=" << counts[3] << "\tUNKNOWN=" << unknown
+              << "\tFIELD_GROUPS=" << SurfaceGroups(aggregate)
+              << "\tCHECKS=" << SurfaceEvents(aggregate) << '\n';
+    std::cout << "UNHIT_IDS";
+    for (size_t field = 0; field < READ_SURFACE_FIELD_COUNT; ++field) {
+        if (aggregate.hits[field] == 0) std::cout << '\t' << field;
+    }
+    std::cout << '\n';
+    return unknown == 0 ? 0 : 2;
 }

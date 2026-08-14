@@ -130,6 +130,52 @@ const PackageFormat::Decl *CJOFDeclAt(const CJOFPackageView *view, size_t index)
     return decls == nullptr || index >= decls->size() ? nullptr : decls->Get(index);
 }
 
+constexpr size_t CJOF_READ_SURFACE_FIELD_COUNT = 217;
+
+struct CJOFReadSurfaceFingerprint {
+    uint64_t hits[CJOF_READ_SURFACE_FIELD_COUNT] = {};
+    uint64_t fnv[CJOF_READ_SURFACE_FIELD_COUNT] = {};
+    uint64_t mix[CJOF_READ_SURFACE_FIELD_COUNT] = {};
+};
+
+void CJOFReadSurfaceByte(CJOFReadSurfaceFingerprint &out, size_t field, unsigned char byte)
+{
+    out.fnv[field] ^= byte;
+    out.fnv[field] *= 1099511628211ULL;
+    out.mix[field] ^= static_cast<uint64_t>(byte) + 0x9eU;
+    out.mix[field] *= 0x9e3779b185ebca87ULL;
+}
+
+void CJOFReadSurfaceAdd(CJOFReadSurfaceFingerprint &out, size_t field, uint64_t value)
+{
+    for (unsigned int shift = 0; shift < 64; shift += 8) {
+        CJOFReadSurfaceByte(out, field, static_cast<unsigned char>(value >> shift));
+    }
+}
+
+void CJOFReadSurfaceBegin(CJOFReadSurfaceFingerprint &out, size_t field)
+{
+    if (out.hits[field]++ == 0) {
+        out.fnv[field] = 14695981039346656037ULL;
+        out.mix[field] = 0xd6e8feb86659fd93ULL;
+    }
+    CJOFReadSurfaceAdd(out, field, 0xc10f000000000000ULL | field);
+}
+
+void CJOFReadSurfaceString(
+    CJOFReadSurfaceFingerprint &out, size_t field, const flatbuffers::String *value)
+{
+    const size_t length = value == nullptr ? 0 : value->size();
+    CJOFReadSurfaceAdd(out, field, length);
+    if (value != nullptr) {
+        for (size_t index = 0; index < length; ++index) {
+            CJOFReadSurfaceByte(out, field, value->Data()[index]);
+        }
+    }
+}
+
+#include "cjo_read_surface_official.inc"
+
 struct LLVMSelfhostLoopInfoState {
     DominatorTree domTree;
     LoopInfoBase<BasicBlock, Loop> loopInfo;
@@ -964,6 +1010,22 @@ extern "C" unsigned char CJOFPackageViewGetDeclInfoType(const void *RawView, siz
 {
     const auto *decl = CJOFDeclAt(static_cast<const CJOFPackageView *>(RawView), Index);
     return decl == nullptr ? 0 : static_cast<unsigned char>(decl->info_type());
+}
+
+extern "C" int CJOFPackageViewGetReadSurfaceFingerprint(const void *RawView, uint64_t *Hits,
+    uint64_t *Fnv, uint64_t *Mix, size_t FieldCount)
+{
+    if (RawView == nullptr || Hits == nullptr || Fnv == nullptr || Mix == nullptr ||
+        FieldCount < CJOF_READ_SURFACE_FIELD_COUNT) {
+        return 0;
+    }
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    CJOFReadSurfaceFingerprint result;
+    CJOFWalkOfficial_Package(view->package, result);
+    std::copy_n(result.hits, CJOF_READ_SURFACE_FIELD_COUNT, Hits);
+    std::copy_n(result.fnv, CJOF_READ_SURFACE_FIELD_COUNT, Fnv);
+    std::copy_n(result.mix, CJOF_READ_SURFACE_FIELD_COUNT, Mix);
+    return 1;
 }
 
 // ---------------------------------------------------------------------------
