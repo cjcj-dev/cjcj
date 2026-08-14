@@ -1,6 +1,7 @@
 package cjcj::frontend
 
 import std.collection.*
+import std.sort.*
 import cjcj::ast.DiagnoseRefactor
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.{CANGJIE_VERSION, DiagKindRefactor}
@@ -452,7 +453,13 @@ public class ASTWriter {
         let declsVec = builder.CreateVectorOffsets(allDecls)
         let exprsVec = builder.CreateVectorOffsets(allExprs)
         let fileInfoVec = builder.CreateVectorOffsets(allFileInfo)
-        let dependentStdPkgs = CreateStringVector(pkg.GetAllDependentStdPkgs())
+        // Canonicalize at the serialization boundary so discovery-map keys cannot affect CJO bytes.
+        let orderedDependentStdPkgs = ArrayList<String>()
+        for (dependentStdPkg in pkg.GetAllDependentStdPkgs()) {
+            orderedDependentStdPkgs.add(dependentStdPkg)
+        }
+        sort(orderedDependentStdPkgs)
+        let dependentStdPkgs = CreateStringVector(orderedDependentStdPkgs)
         let options = CreateCompilationOptions()
         let version = builder.CreateString(CANGJIE_VERSION)
         let fullPkgName = builder.CreateString(pkg.fullPackageName)
