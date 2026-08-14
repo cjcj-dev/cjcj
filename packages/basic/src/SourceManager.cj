@@ -193,11 +193,70 @@ public class Source {
 public class SourceManager {
     private let filePathToFileIDMap: HashMap<String, UInt64> = HashMap<String, UInt64>()
     private let sources: HashMap<UInt64, Source> = HashMap<UInt64, Source>()
+    private let pathPrefixMaps: ArrayList<(String, String)> = ArrayList<(String, String)>()
+    private let fileHashInputToPath: HashMap<String, String> = HashMap<String, String>()
 
     public static let testPkgSuffix: String = "$test"
 
     public init() {
         sources.add(0, Source(0, "", ""))
+    }
+
+    public func SetPathPrefixMaps(mappings: Array<(String, String)>): Unit {
+        pathPrefixMaps.clear()
+        fileHashInputToPath.clear()
+        for (mapping in mappings) {
+            let oldPrefix = BasicNormalizePath(mapping[0])
+            if (!oldPrefix.isEmpty()) {
+                pathPrefixMaps.add((oldPrefix, BasicNormalizePath(mapping[1])))
+            }
+        }
+    }
+
+    private func pathPrefixMatches(path: String, prefix: String): Bool {
+        if (path == prefix) { return true }
+        if (path.size <= prefix.size || path[0..prefix.size] != prefix) { return false }
+        return basicIsPathSlashByte(prefix[prefix.size - 1]) || basicIsPathSlashByte(path[prefix.size])
+    }
+
+    private func ApplyPathPrefixMap(path: String): String {
+        var bestIndex: Int64 = -1
+        var idx: Int64 = 0
+        while (idx < pathPrefixMaps.size) {
+            let oldPrefix = pathPrefixMaps[idx][0]
+            if (pathPrefixMatches(path, oldPrefix) &&
+                (bestIndex < 0 || oldPrefix.size > pathPrefixMaps[bestIndex][0].size)) {
+                bestIndex = idx
+            }
+            idx++
+        }
+        if (bestIndex < 0) { return path }
+
+        let mapping = pathPrefixMaps[bestIndex]
+        var remainderStart = mapping[0].size
+        while (remainderStart < path.size && basicIsPathSlashByte(path[remainderStart])) {
+            remainderStart++
+        }
+        let remainder = path[remainderStart..]
+        if (mapping[1].isEmpty()) { return remainder }
+        if (remainder.isEmpty()) { return mapping[1] }
+        let separator = basicPreferredDirSeparator(false)
+        return BasicNormalizePath(mapping[1] +
+            (if (basicIsPathSlashByte(mapping[1][mapping[1].size - 1])) { "" } else { separator }) + remainder)
+    }
+
+    private func GetFileHashInput(normalizedPath: String): String {
+        if (pathPrefixMaps.isEmpty()) { return normalizedPath }
+        let hashInput = ApplyPathPrefixMap(normalizedPath)
+        if (let Some(existingPath) <- fileHashInputToPath.get(hashInput)) {
+            if (existingPath != normalizedPath) {
+                throw IllegalArgumentException("Path prefix maps make distinct source files share identity '" +
+                    hashInput + "': '" + existingPath + "' and '" + normalizedPath + "'.")
+            }
+        } else {
+            fileHashInputToPath.add(hashInput, normalizedPath)
+        }
+        return hashInput
     }
 
     private func putSource(fileID: UInt64, source: Source): Unit {
@@ -244,6 +303,7 @@ public class SourceManager {
     public func Clear(): Unit {
         sources.clear()
         filePathToFileIDMap.clear()
+        fileHashInputToPath.clear()
         sources.add(0, Source(0, "", ""))
     }
 
@@ -278,13 +338,13 @@ public class SourceManager {
         isCjmpFile!: Bool = false
     ): UInt64 {
         let normalizedPath = BasicNormalizePath(path)
-        let fileHash = GetHash(normalizedPath)
+        let fileHash = GetHash(GetFileHashInput(normalizedPath))
         return GetFileId(normalizedPath, buffer, fileHash, packageName, isCjmpFile, false)
     }
 
     public func AppendSource(path: String, buffer: String, isCjmpFile!: Bool = false): UInt64 {
         let normalizedPath = BasicNormalizePath(path)
-        let fileHash = GetHash(normalizedPath)
+        let fileHash = GetHash(GetFileHashInput(normalizedPath))
         return GetFileId(normalizedPath, buffer, fileHash, None, isCjmpFile, true)
     }
 

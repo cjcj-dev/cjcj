@@ -167,6 +167,7 @@ public func ParseAction(opts: GlobalOptions, arg: OptionArgInstance): ActionResu
         }
         return handled()
     }
+    if (id == ID.PATH_PREFIX_MAP) { return parsePathPrefixMap(opts, arg.value) }
     if (id == ID.NO_STACKTRACE_INFO) { opts.displayLineInfo = false; return handled() }
     if (id == ID.COMPILE_TEST) {
         opts.parseTest = true
@@ -604,6 +605,29 @@ private func parseRuntimeConfig(opts: GlobalOptions, rawValue: String): ActionRe
         return handled(success: false)
     }
     opts.runtimeConfigs.add(name, value)
+    return handled()
+}
+
+private func parsePathPrefixMap(opts: GlobalOptions, rawValue: String): ActionResult {
+    let equalPos = rawValue.indexOf("=") ?? -1
+    if (equalPos <= 0) {
+        Errorln("Option '--path-prefix-map' requires OLD=NEW with a non-empty OLD prefix.")
+        return handled(success: false)
+    }
+    let oldPrefix = NormalizeRawPath(rawValue[0..equalPos])
+    let newPrefix = NormalizeRawPath(rawValue[equalPos + 1..])
+    if (oldPrefix.isEmpty()) {
+        Errorln("Option '--path-prefix-map' requires a non-empty OLD prefix.")
+        return handled(success: false)
+    }
+    for (mapping in opts.pathPrefixMaps) {
+        if (mapping[0] == oldPrefix) {
+            if (mapping[1] == newPrefix) { return handled() }
+            Errorln("Option '--path-prefix-map' maps OLD prefix '" + oldPrefix + "' more than once.")
+            return handled(success: false)
+        }
+    }
+    opts.pathPrefixMaps.add((oldPrefix, newPrefix))
     return handled()
 }
 
