@@ -50,6 +50,26 @@ async function isFile(target) {
   try { return (await fs.stat(target)).isFile(); } catch { return false; }
 }
 
+async function mtimeMs(target) {
+  try { return (await fs.stat(target)).mtimeMs; } catch { return null; }
+}
+
+// An object older than the source it was compiled from links silently: the
+// symbols still resolve, so nothing fails and the build looks clean. Treat a
+// stale object as absent so it falls through to the rebuild paths below, and
+// let the final else report it if none of them can produce one.
+async function isUsableObject(object, source) {
+  if (!(await isFile(object))) return false;
+  const objectAge = await mtimeMs(object);
+  const sourceAge = await mtimeMs(source);
+  if (objectAge === null || sourceAge === null) return true;
+  if (objectAge >= sourceAge) return true;
+  console.error(`STALE_SHIM_OBJECT object=${object} is older than source=${source}`);
+  console.error(`  object mtime ${new Date(objectAge).toISOString()}`);
+  console.error(`  source mtime ${new Date(sourceAge).toISOString()}`);
+  return false;
+}
+
 if (!(await commandExists(cxx)) && await commandExists('clang++-15')) cxx = 'clang++-15';
 
 await $`${cc} -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L ${commitDefine} -c ${here}/cjc_runtime_config.c -o ${here}/cjc_runtime_config.o`;
@@ -57,8 +77,10 @@ console.log(`CJCJ_COMMIT=${cjcjCommit}`);
 
 // Resolve in the original priority order: existing object, CI source-built
 // artifact, then a local source build against a complete patched C++ tree.
-if (await isFile(shimObject)) {
+let reused = false;
+if (await isUsableObject(shimObject, `${here}/cjselfhost_llvmshim.cpp`)) {
   console.log('reusing existing cjselfhost_llvmshim.o');
+  reused = true;
 } else if (sourceBuiltObject) {
   if (!(await isFile(sourceBuiltObject))) {
     console.error(`ERR: source-built shim artifact missing: ${sourceBuiltObject}`);
@@ -85,7 +107,10 @@ if (await isFile(shimObject)) {
   process.exit(1);
 }
 
-console.log(`built: ${shimObject}`);
+// Say which of the two happened. The previous message said "built:" on the
+// reuse path too, so a log showing a fresh build and a log showing a month-old
+// object read the same.
+console.log(`${reused ? 'reused' : 'built'}: ${shimObject}`);
 console.log(`built: ${here}/cjc_runtime_config.o`);
 await $({nothrow: true})`set -o pipefail; nm -C ${shimObject} | grep -cE ' T (LLVMGlobalObjectAddStringAttribute|LLVMSelfhost)' | sed 's/^/exported LLVMSelfhost* symbols: /'`;
 
