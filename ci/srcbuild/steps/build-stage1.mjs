@@ -67,7 +67,27 @@ try {
 // oracle already occupies sdk/bin/cjc; replace it only after the seed is built.
 // The mapped seed must not be named cjc: the Linux runtime reserves that basename
 // for native C++ cjc and otherwise excludes managed frames from GC root scanning.
-await $`install -m0755 target/release/bin/cjcj::cjc ${sdk}/bin/cjcj-stage1`;
+// `cjpm build success` followed by a missing binary says nothing about which of
+// the two it is: a build that quietly produced no executable, or one that named
+// it something else. Report the directory so the next run answers that on its
+// own -- a CI round trip here costs hours.
+const seed = 'target/release/bin/cjcj::cjc';
+try {
+  await fs.access(seed);
+} catch {
+  const binDir = 'target/release/bin';
+  let listing;
+  try {
+    listing = (await fs.readdir(binDir)).sort();
+  } catch (error) {
+    listing = `<${binDir} unreadable: ${error.code || error.message}>`;
+  }
+  throw new Error(
+    `cjpm build reported success but ${seed} does not exist.\n` +
+    `${binDir} contains: ${JSON.stringify(listing)}`,
+  );
+}
+await $`install -m0755 ${seed} ${sdk}/bin/cjcj-stage1`;
 await $`rm -f ${sdk}/bin/cjc`;
 await $`ln -s cjcj-stage1 ${sdk}/bin/cjc`;
 const scanDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cjcj-stage1-scan-'));
