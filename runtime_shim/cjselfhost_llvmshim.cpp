@@ -115,6 +115,21 @@ bool CJOFStringBytesEqual(const flatbuffers::String *left, const flatbuffers::St
     return left->size() == 0 || std::memcmp(left->Data(), right->Data(), left->size()) == 0;
 }
 
+template <typename T>
+size_t CJOFVectorSize(const T *value)
+{
+    return value == nullptr ? 0 : value->size();
+}
+
+const PackageFormat::Decl *CJOFDeclAt(const CJOFPackageView *view, size_t index)
+{
+    if (view == nullptr || view->package == nullptr) {
+        return nullptr;
+    }
+    const auto *decls = view->package->allDecls();
+    return decls == nullptr || index >= decls->size() ? nullptr : decls->Get(index);
+}
+
 struct LLVMSelfhostLoopInfoState {
     DominatorTree domTree;
     LoopInfoBase<BasicBlock, Loop> loopInfo;
@@ -813,6 +828,142 @@ extern "C" const unsigned char *CJOFPackageViewGetDependencyName(
         ++currentIndex;
     }
     return nullptr;
+}
+
+extern "C" const unsigned char *CJOFPackageViewGetPkgDepInfo(const void *RawView, size_t *Length)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return CJOFStringBytes(view == nullptr ? nullptr : view->package->pkgDepInfo(), Length);
+}
+
+extern "C" size_t CJOFPackageViewGetImportCount(const void *RawView)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return view == nullptr ? 0 : CJOFVectorSize(view->package->imports());
+}
+
+extern "C" const unsigned char *CJOFPackageViewGetImportName(
+    const void *RawView, size_t Index, size_t *Length)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    const auto *values = view == nullptr ? nullptr : view->package->imports();
+    return CJOFStringBytes(values == nullptr || Index >= values->size() ? nullptr : values->Get(Index), Length);
+}
+
+extern "C" size_t CJOFPackageViewGetAllFileCount(const void *RawView)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return view == nullptr ? 0 : CJOFVectorSize(view->package->allFiles());
+}
+
+extern "C" const unsigned char *CJOFPackageViewGetAllFileName(
+    const void *RawView, size_t Index, size_t *Length)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    const auto *values = view == nullptr ? nullptr : view->package->allFiles();
+    return CJOFStringBytes(values == nullptr || Index >= values->size() ? nullptr : values->Get(Index), Length);
+}
+
+extern "C" size_t CJOFPackageViewGetAllFileImportCount(const void *RawView)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return view == nullptr ? 0 : CJOFVectorSize(view->package->allFileImports());
+}
+
+extern "C" size_t CJOFPackageViewGetAllTypeCount(const void *RawView)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return view == nullptr ? 0 : CJOFVectorSize(view->package->allTypes());
+}
+
+extern "C" size_t CJOFPackageViewGetAllDeclCount(const void *RawView)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return view == nullptr ? 0 : CJOFVectorSize(view->package->allDecls());
+}
+
+extern "C" size_t CJOFPackageViewGetAllExprCount(const void *RawView)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return view == nullptr ? 0 : CJOFVectorSize(view->package->allExprs());
+}
+
+extern "C" unsigned char CJOFPackageViewGetKind(const void *RawView)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return view == nullptr ? 0 : static_cast<unsigned char>(view->package->kind());
+}
+
+extern "C" unsigned char CJOFPackageViewGetAccess(const void *RawView)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return view == nullptr ? 0 : static_cast<unsigned char>(view->package->access());
+}
+
+extern "C" size_t CJOFPackageViewGetAllFileInfoCount(const void *RawView)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return view == nullptr ? 0 : CJOFVectorSize(view->package->allFileInfo());
+}
+
+extern "C" size_t CJOFPackageViewGetDependentStdPkgCount(const void *RawView)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    return view == nullptr ? 0 : CJOFVectorSize(view->package->allDependentStdPkgs());
+}
+
+extern "C" const unsigned char *CJOFPackageViewGetDependentStdPkgName(
+    const void *RawView, size_t Index, size_t *Length)
+{
+    const auto *view = static_cast<const CJOFPackageView *>(RawView);
+    const auto *values = view == nullptr ? nullptr : view->package->allDependentStdPkgs();
+    return CJOFStringBytes(values == nullptr || Index >= values->size() ? nullptr : values->Get(Index), Length);
+}
+
+extern "C" unsigned short CJOFPackageViewGetDeclKind(const void *RawView, size_t Index)
+{
+    const auto *decl = CJOFDeclAt(static_cast<const CJOFPackageView *>(RawView), Index);
+    return decl == nullptr ? 0 : static_cast<unsigned short>(decl->kind());
+}
+
+extern "C" unsigned char CJOFPackageViewGetDeclIsTopLevel(const void *RawView, size_t Index)
+{
+    const auto *decl = CJOFDeclAt(static_cast<const CJOFPackageView *>(RawView), Index);
+    return decl != nullptr && decl->isTopLevel() ? 1 : 0;
+}
+
+#define CJOF_DECL_STRING_GETTER(Name, Accessor) \
+    extern "C" const unsigned char *Name(const void *RawView, size_t Index, size_t *Length) \
+    { \
+        const auto *decl = CJOFDeclAt(static_cast<const CJOFPackageView *>(RawView), Index); \
+        return CJOFStringBytes(decl == nullptr ? nullptr : decl->Accessor(), Length); \
+    }
+
+CJOF_DECL_STRING_GETTER(CJOFPackageViewGetDeclIdentifier, identifier)
+CJOF_DECL_STRING_GETTER(CJOFPackageViewGetDeclFullPkgName, fullPkgName)
+CJOF_DECL_STRING_GETTER(CJOFPackageViewGetDeclExportId, exportId)
+CJOF_DECL_STRING_GETTER(CJOFPackageViewGetDeclMangledName, mangledName)
+CJOF_DECL_STRING_GETTER(CJOFPackageViewGetDeclMangledBeforeSema, mangledBeforeSema)
+
+#undef CJOF_DECL_STRING_GETTER
+
+extern "C" size_t CJOFPackageViewGetDeclGenericArity(const void *RawView, size_t Index)
+{
+    const auto *decl = CJOFDeclAt(static_cast<const CJOFPackageView *>(RawView), Index);
+    const auto *generic = decl == nullptr ? nullptr : decl->generic();
+    return generic == nullptr ? 0 : CJOFVectorSize(generic->typeParameters());
+}
+
+extern "C" unsigned int CJOFPackageViewGetDeclType(const void *RawView, size_t Index)
+{
+    const auto *decl = CJOFDeclAt(static_cast<const CJOFPackageView *>(RawView), Index);
+    return decl == nullptr ? 0 : decl->type();
+}
+
+extern "C" unsigned char CJOFPackageViewGetDeclInfoType(const void *RawView, size_t Index)
+{
+    const auto *decl = CJOFDeclAt(static_cast<const CJOFPackageView *>(RawView), Index);
+    return decl == nullptr ? 0 : static_cast<unsigned char>(decl->info_type());
 }
 
 // ---------------------------------------------------------------------------
