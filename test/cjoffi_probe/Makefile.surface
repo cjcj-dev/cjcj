@@ -1,0 +1,27 @@
+CXX ?= clang++-15
+CPP_ROOT ?= /root/stdsrc-run-0814/workspace/cangjie_compiler
+OUT ?= /root/cjodiff3-run/out
+SHIM_DIR ?= /root/cjodiff3-run/src/runtime_shim
+PROBE_DIR ?= /root/cjodiff3-run/src/test/cjoffi_probe
+
+CPPFLAGS := -I$(CPP_ROOT)/third_party/llvm-project/llvm/include \
+  -I$(CPP_ROOT)/build/build/third_party/llvm/include \
+  -I$(CPP_ROOT)/build/build/include \
+  -I$(CPP_ROOT)/build/build/schema
+CXXFLAGS := -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions
+LLVM_LDLIBS ?= -lLLVM-15
+
+.PHONY: all
+all: $(OUT)/surface_probe $(OUT)/surface_probe_negative
+
+$(OUT)/cjselfhost_llvmshim.o: $(SHIM_DIR)/cjselfhost_llvmshim.cpp $(SHIM_DIR)/cjo_read_surface_official.inc
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+$(OUT)/surface_probe: $(PROBE_DIR)/surface_probe.cpp $(PROBE_DIR)/cjo_read_surface_manual.inc $(OUT)/cjselfhost_llvmshim.o
+	$(CXX) $(CPPFLAGS) -std=c++17 -O2 $< $(OUT)/cjselfhost_llvmshim.o $(LLVM_LDLIBS) -o $@
+
+$(OUT)/surface_probe_negative: $(PROBE_DIR)/surface_probe.cpp $(PROBE_DIR)/cjo_read_surface_manual.inc \
+  $(PROBE_DIR)/negative_open_wrap.cpp $(OUT)/cjselfhost_llvmshim.o
+	$(CXX) $(CPPFLAGS) -std=c++17 -O2 $(PROBE_DIR)/surface_probe.cpp \
+	  $(PROBE_DIR)/negative_open_wrap.cpp $(OUT)/cjselfhost_llvmshim.o $(LLVM_LDLIBS) \
+	  -Wl,--wrap=CJOFPackageViewOpen -o $@
