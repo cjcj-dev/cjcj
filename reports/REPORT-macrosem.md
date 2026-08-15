@@ -1,6 +1,6 @@
 PROGRESS=DONE · verdict=新 pin 的单次 CI package 通过已知，但本棒未执行要求的 N≥8；四刀定位与 macro/app 崩点重算均未开始 · LANE=macrosem
 SIDE_EFFECT: 已提交的产品改动只增强 `sema_invalid_node_after_check` 的正文与落点；未改冒烟样本、未降级诊断、未写共享 SDK。
-DELIVERY_REF=/root/cj_build/cjcj|fix/macrosem|cf4773c5ee4ede7b2ee5ce55aad092810d4143b0
+DELIVERY_REF=cjcj|fix/macrosem|cf4773c5ee4ede7b2ee5ce55aad092810d4143b0
 
 # macrosem 停棒报告
 
