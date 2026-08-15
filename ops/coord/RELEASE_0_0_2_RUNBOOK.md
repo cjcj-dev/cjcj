@@ -37,6 +37,30 @@ freeze → 环境门预检 → 单次候选 run（producer/package）→ exact a
 ```bash
 export RELEASE_REPO=cjcj-dev/cjcj
 export RELEASE_EVIDENCE_ROOT=/root/cj_build/ops/release_evidence/0.0.2
+```
+
+`RELEASE_EVIDENCE_ROOT` 是**版本持久**目录：批准记录、environment JSON、各门证据都留在这里，跨 campaign 不变。
+
+而 `generate-freeze.mjs` 产的是**不可变的 per-campaign 目录** `<parent>/<campaign_id>/`，`campaign_id` 里带 `cjcj_head_sha`。两者是不同的东西，中间缺的是「哪个 campaign 是当前的」这条声明 —— G1 默认从 `$RELEASE_EVIDENCE_ROOT/FREEZE.json` 读，而生成器永远不会写到那个路径。
+
+**冻结 = 生成 campaign 后把持久目录里的指针指过去。** 不复制、不改判据：
+
+```bash
+node ci/generate-freeze.mjs \
+  --base-sdk /root/basesdk-run/fix-basesdk-0811/cangjie-sdk-linux-x64-1.2.0-alpha.20260721165458.tar.gz \
+  --evidence-root "$(dirname "$RELEASE_EVIDENCE_ROOT")" \
+  --approval-record 'user-instruction-2026-08-11T13:14+08:00-g1'
+# 上面打印 CAMPAIGN_ID=<id>，然后：
+ln -sfn "../<id>/FREEZE.json"      "$RELEASE_EVIDENCE_ROOT/FREEZE.json"
+ln -sfn "../<id>/G2_IDENTITY.json" "$RELEASE_EVIDENCE_ROOT/G2_IDENTITY.json"
+node ci/release-gates.mjs G1        # ⇒ MET
+```
+
+`campaign_id` 绑 `cjcj_head_sha`，所以**任何一笔 cjcj 提交都会让 G1 退回 NOT_MET**。那是判据在如实报告"冻结已过期"，不是故障 —— 重跑上面三步即可。同理，G12/G14 的 `EVIDENCE_BINDING.json` 也绑 head，改动 cjcj 后必须在新 head 上重新取证。
+
+`--approval-record` 没有默认值、没有环境变量回退、没有占位串；批准记录见 `$RELEASE_EVIDENCE_ROOT/APPROVAL_RECORD.md`，其 SCOPE 明确**只覆盖 G1**，不覆盖 dry-run 与发布。
+
+```bash
 
 gh api "repos/$RELEASE_REPO/environments/release-draft" \
   > "$RELEASE_EVIDENCE_ROOT/release-draft-environment.json"
