@@ -6,6 +6,7 @@ import path from 'node:path';
 import {runRequiredCheck} from '../../../build/lib/fail-closed-probes.mjs';
 import {assertSdkCompilerRuntimeAbi} from '../../../build/lib/runtime-split.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
+import {resolveProductBinary} from '../lib/product-binary.mjs';
 
 $.stdio = 'inherit';
 
@@ -21,7 +22,8 @@ if (process.platform !== target.spec.nodePlatform || process.arch !== target.spe
 }
 
 const sdk = `${workspace}/software/cangjie`;
-await $`test -x target/release/bin/cjcj::cjc`;
+const product = await resolveProductBinary('target/release/bin', 'compose-sdk');
+await $`test -x ${product}`;
 // The packaged SDK contains exactly one compiler, rebuilt at stage3 against the
 // final std produced by stage2.
 // cjc-frontend is an official C++ SDK tool; frontend_tool is currently a static
@@ -35,7 +37,7 @@ const compilerNames = [
   'cjcj',
 ];
 for (const name of compilerNames) await fs.rm(`${sdk}/bin/${name}`, {force: true});
-await $`install -m0755 target/release/bin/cjcj::cjc ${sdk}/bin/cjc`;
+await $`install -m0755 ${product} ${sdk}/bin/cjc`;
 const productVersion = await $({stdio: 'pipe'})`${sdk}/bin/cjc --version`;
 const versionOutput = `${productVersion.stdout}${productVersion.stderr}`;
 if (!versionOutput.includes(version)) {

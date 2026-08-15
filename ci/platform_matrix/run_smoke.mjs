@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
+import {PRODUCT_NAMES} from '../srcbuild/lib/product-binary.mjs';
 
 const {root} = stageBegin('test');
 await printCommonVersions();
@@ -38,7 +39,15 @@ async function findFirst(directory, predicate) {
 }
 
 let product = '';
-const productNames = process.platform === 'win32' ? ['cjcj.exe', 'cjc@cjcj.exe'] : ['cjcj::cjc', 'cjcj', 'cjc'];
+// The two cjpm spellings come from ../srcbuild/lib/product-binary.mjs rather
+// than being written out again here: this list is the fourth copy of them in
+// the repository, and the copy that fell behind is what failed the 2026-08-15
+// release run. The extra names below are this step's own -- it also accepts a
+// plain `cjcj`/`cjc` deploy, and it prefers earlier entries rather than
+// requiring exactly one.
+const productNames = process.platform === 'win32'
+  ? ['cjcj.exe', ...PRODUCT_NAMES.map((name) => `${name}.exe`)]
+  : [...PRODUCT_NAMES, 'cjcj', 'cjc'];
 for (const name of productNames) {
   const candidate = path.join('target', 'release', 'bin', name);
   if (await isFile(candidate)) { product = candidate; break; }

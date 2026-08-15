@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {hostLoaderPath} from '../../../build/lib/runtime-split.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
+import {resolveProductBinary} from '../lib/product-binary.mjs';
 import {platformizeCjcToml} from '../../platform_matrix/link_option.mjs';
 
 $.stdio = 'inherit';
@@ -67,26 +68,10 @@ try {
 // oracle already occupies sdk/bin/cjc; replace it only after the seed is built.
 // The mapped seed must not be named cjc: the Linux runtime reserves that basename
 // for native C++ cjc and otherwise excludes managed frames from GC root scanning.
-// `cjpm build success` followed by a missing binary says nothing about which of
-// the two it is: a build that quietly produced no executable, or one that named
-// it something else. Report the directory so the next run answers that on its
-// own -- a CI round trip here costs hours.
-const seed = 'target/release/bin/cjcj::cjc';
-try {
-  await fs.access(seed);
-} catch {
-  const binDir = 'target/release/bin';
-  let listing;
-  try {
-    listing = (await fs.readdir(binDir)).sort();
-  } catch (error) {
-    listing = `<${binDir} unreadable: ${error.code || error.message}>`;
-  }
-  throw new Error(
-    `cjpm build reported success but ${seed} does not exist.\n` +
-    `${binDir} contains: ${JSON.stringify(listing)}`,
-  );
-}
+// Which name cjpm gives the product depends on the cjpm doing the build, so the
+// candidate list lives in one place; see ../lib/product-binary.mjs for what the
+// 2026-08-15 release run cost when this step carried its own copy of it.
+const seed = await resolveProductBinary('target/release/bin', 'stage1');
 await $`install -m0755 ${seed} ${sdk}/bin/cjcj-stage1`;
 await $`rm -f ${sdk}/bin/cjc`;
 await $`ln -s cjcj-stage1 ${sdk}/bin/cjc`;

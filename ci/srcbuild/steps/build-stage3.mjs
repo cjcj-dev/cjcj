@@ -6,6 +6,7 @@ import path from 'node:path';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
+import {resolveProductBinary} from '../lib/product-binary.mjs';
 import {assertWriteBarriers} from '../lib/write-barrier.mjs';
 
 $.stdio = 'inherit';
@@ -43,7 +44,6 @@ const {runtimeTuple: tuple} = target.spec;
 const finalStd = dryRun
   ? path.resolve(requiredEnv('CJCJ_STAGE3_DRY_RUN_FINAL_STD'))
   : path.join(workspace, 'software', 'final-std-stage2');
-const productCandidates = ['cjc@cjcj', 'cjcj::cjc'];
 
 const exists = async (file, kind = 'file') => {
   try {
@@ -57,16 +57,7 @@ const exists = async (file, kind = 'file') => {
 const sha256 = async file => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
 
 async function findProductBinary(phase) {
-  const binDir = path.join(githubWorkspace, 'target', 'release', 'bin');
-  const found = [];
-  for (const name of productCandidates) {
-    const candidate = path.join(binDir, name);
-    if (await exists(candidate)) found.push(candidate);
-  }
-  if (found.length !== 1) {
-    throw new Error(`${phase}: expected exactly one cjcj product (${productCandidates.join(', ')}), found ${found.length}`);
-  }
-  return found[0];
+  return resolveProductBinary(path.join(githubWorkspace, 'target', 'release', 'bin'), phase);
 }
 
 async function assertStage2Compiler(stageEnv, stage2Sha) {

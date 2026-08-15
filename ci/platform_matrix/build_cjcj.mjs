@@ -15,6 +15,7 @@ import {
 } from '../../build/lib/release-component-provenance.mjs';
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
+import {PRODUCT_NAMES} from '../srcbuild/lib/product-binary.mjs';
 
 const {root} = stageBegin('cjcj');
 const toolchain = process.env.CJCJ_TOOLCHAIN || 'nightly-1.2.0-alpha.20260721165458';
@@ -531,8 +532,13 @@ if (process.platform === 'win32') {
   // cjpm's up-to-date check does not cover link-option changes, so a cached
   // target keeps stale link flags (round-15: --stack never reached the link).
   // Dropping the linked product forces a fresh final link, keeping .o caches.
-  await fs.rm(path.join('target', 'release', 'bin', 'cjcj.exe'), {force: true});
-  await fs.rm(path.join('target', 'release', 'bin', 'cjcj::cjc.exe'), {force: true});
+  // Every spelling cjpm might have used, or the stale one it did use survives
+  // and the fresh link this rm exists to force does not happen. `cjc@cjcj.exe`
+  // was missing here for the same reason it was missing from three other
+  // lists; see ../srcbuild/lib/product-binary.mjs.
+  for (const name of ['cjcj.exe', ...PRODUCT_NAMES.map((n) => `${n}.exe`)]) {
+    await fs.rm(path.join('target', 'release', 'bin', name), {force: true});
+  }
   build = await runInMsys('cjpm build', 'build');
 } else {
   await fs.writeFile(cjcTomlPath, platformizeCjcToml(
