@@ -169,7 +169,8 @@ for (const pkg of packages) {
 console.log('[selfdet] verify compiler CJO path determinism');
 const selfdetStarted = process.hrtime.bigint();
 const selfdetRoot = path.join(work, 'selfdet');
-const selfdetSource = path.join(root, 'packages', 'option', 'src');
+const selfdetPackage = 'conditional_compilation';
+const selfdetSource = path.join(root, 'packages', selfdetPackage, 'src');
 const selfdetSourceA = path.join(selfdetRoot, 'a');
 const selfdetSourceB = path.join(selfdetRoot, 'bbbbbbbb', 'deep');
 if (selfdetSourceA.length === selfdetSourceB.length) {
@@ -183,15 +184,15 @@ await fs.cp(selfdetSource, selfdetSourceA, {
 await fs.cp(selfdetSource, selfdetSourceB, {
   recursive: true, preserveTimestamps: true, force: false, errorOnExist: true,
 });
-console.log(`[selfdet] package=option source-a=${selfdetSourceA} length=${selfdetSourceA.length}`);
-console.log(`[selfdet] package=option source-b=${selfdetSourceB} length=${selfdetSourceB.length}`);
+console.log(`[selfdet] package=${selfdetPackage} source-a=${selfdetSourceA} length=${selfdetSourceA.length}`);
+console.log(`[selfdet] package=${selfdetPackage} source-b=${selfdetSourceB} length=${selfdetSourceB.length}`);
 console.log('[selfdet] env MRT_GCV2_MARKPAR_FORCE_SERIAL=1');
 
 const selfdetEnv = {...process.env, MRT_GCV2_MARKPAR_FORCE_SERIAL: '1'};
 async function compileSelfdet(sourceDir, arm, mapped) {
   const outputDir = path.join(selfdetRoot, arm);
   await fs.mkdir(outputDir, {recursive: true});
-  const output = path.join(outputDir, 'option.a');
+  const output = path.join(outputDir, `${selfdetPackage}.a`);
   if (mapped) {
     const prefixMap = `${sourceDir}=/cjcj`;
     await $({env: selfdetEnv})`${timeoutCommand} 900 ${self} --emit-chir=raw --output-type=staticlib --package ${sourceDir} --module-name cjcj --import-path ${root}/target/release --path-prefix-map=${prefixMap} --trimpath=${sourceDir} -o ${output}`;
@@ -236,7 +237,7 @@ if (selfdetMappedListing.exitCode !== 0 || selfdetMappedLines !== 0 || selfdetMa
   throw new Error('selfdet determinism failed: cmp -l did not complete with zero output');
 }
 const selfdetWall = Number(process.hrtime.bigint() - selfdetStarted) / 1e9;
-console.log(`[selfdet] PASS package=option positive=different mapped=byte-identical wall=${selfdetWall.toFixed(3)}s`);
+console.log(`[selfdet] PASS package=${selfdetPackage} positive=different mapped=byte-identical wall=${selfdetWall.toFixed(3)}s`);
 
 console.log('[bcgate] verify bitcode parity');
 await $`set -o pipefail; python3 ${root}/scripts/bcgate.py --self ${self} --base ${oracle} --corpus ${root}/scripts/difftest_corpus -j ${jobs} | tee ${work}/bcgate.log`;
