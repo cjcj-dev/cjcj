@@ -91,10 +91,9 @@ public class ASTTypeValidator {
         if (!needCheck) {
             return VisitAction.WALK_CHILDREN
         }
-        let valid = validateNode(node)
-        if (!valid) {
+        if (let Some(message) <- validateNode(node)) {
             markInvalid(node)
-            emitInvalidNodeDiagnostic(node)
+            emitInvalidNodeDiagnostic(node, message)
             return VisitAction.STOP_NOW
         }
         popValidRangeIfCurrent(node)
@@ -133,17 +132,19 @@ public class ASTTypeValidator {
         return (action, needCheck)
     }
 
-    private func validateNode(node: Node): Bool {
+    private func validateNode(node: Node): Option<String> {
         let curTarget = node.GetTarget()
         if (let Some(target) <- curTarget) {
             if (!isIgnoredTargetNode(node) && !isIgnoreKind(target.astKind) && !Ty.IsTyCorrect(target.GetTy())) {
-                messages.add("invalid target type from ${ASTKindName(node.astKind)} to ${ASTKindName(target.astKind)}")
-                return false
+                let message = "invalid target type from ${ASTKindName(node.astKind)} to ${ASTKindName(target.astKind)}"
+                messages.add(message)
+                return Some(message)
             }
         }
         if (!Ty.IsTyCorrect(node.GetTy()) || hasUnresolvedTypeVars(node.GetTy())) {
-            messages.add("invalid sema type on ${ASTKindName(node.astKind)} at ${node.begin.ToString()}")
-            return false
+            let message = "invalid sema type on ${ASTKindName(node.astKind)} at ${node.begin.ToString()}"
+            messages.add(message)
+            return Some(message)
         }
         if (let Some(body) <- (node as FuncBody)) {
             var parent: Option<Decl> = None
@@ -156,12 +157,13 @@ public class ASTTypeValidator {
             }
             if (let Some(parentDecl) <- parent) {
                 if (!Ty.IsTyCorrect(parentDecl.GetTy())) {
-                    messages.add("invalid owner type for function body at ${body.begin.ToString()}")
-                    return false
+                    let message = "invalid owner type for function body at ${body.begin.ToString()}"
+                    messages.add(message)
+                    return Some(message)
                 }
             }
         }
-        return true
+        return None
     }
 
     private func hasUnresolvedTypeVars(ty: Option<Ty>): Bool {
@@ -188,10 +190,21 @@ public class ASTTypeValidator {
         }
     }
 
-    private func emitInvalidNodeDiagnostic(node: Node): Unit {
+    private func invalidNodeDiagnosticRange(node: Node): BasicRange {
+        if (!node.begin.IsZero()) {
+            return MakeRange(node.begin, node.begin + 1)
+        }
+        // Desugared nodes may not carry source positions. Point at the beginning
+        // of the closest user-written construct instead of its closing token.
+        let fallback = currentValidRange()
+        return if (fallback.HasZero()) { fallback } else { MakeRange(fallback.begin, fallback.begin + 1) }
+    }
+
+    private func emitInvalidNodeDiagnostic(node: Node, message: String): Unit {
         if (let Some(diag) <- diagEngine) {
             let builder = DiagnoseRefactor(
-                diag, DiagKindRefactor.sema_invalid_node_after_check, node, currentValidRange())
+                diag, DiagKindRefactor.sema_invalid_node_after_check, node,
+                invalidNodeDiagnosticRange(node), message)
             builder.AddNote("please report this to Cangjie team and include the project")
             builder.Emit()
         }

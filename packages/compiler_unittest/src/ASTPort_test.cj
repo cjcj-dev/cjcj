@@ -1,7 +1,7 @@
 package cjcj::compiler_unittest
 
 import cjcj::ast.*
-import cjcj::basic.{DiagnosticEngine, SourceManager}
+import cjcj::basic.{DiagCategory, DiagnosticEngine, SourceManager}
 import cjcj::parse.Parser
 import cjcj::parse.ScopeKind as ParseScopeKind
 import std.unittest.*
@@ -51,6 +51,31 @@ private func ParseFileFromSrc(src: String): File {
     let fileID = sm.AddSource("./", src)
     let parser = Parser(fileID, src, diag, sm)
     return parser.ParseTopLevel()
+}
+
+@Test
+class ASTTypeValidatorDiagnosticTest {
+    @TestCase
+    func InvalidNodeDiagnosticIncludesReasonAndStartsAtNode(): Unit {
+        let code = "func f() {}\n"
+        let sm = SourceManager()
+        let diag = DiagnosticEngine()
+        diag.SetSourceManager(sm)
+        let fileID = sm.AddSource("ASTTypeValidatorDiagnosticTest.cj", code)
+        let file = Parser(fileID, code, diag, sm).ParseTopLevel()
+        let pkg = Package("validator_test")
+        pkg.files.add(file)
+
+        let validator = ASTTypeValidator()
+        @Expect(!validator.Validate(diag, pkg))
+        @Assert(validator.firstInvalid.isSome())
+        let invalid = validator.firstInvalid.getOrThrow()
+        let diagnostics = diag.GetCategoryDiagnostic(DiagCategory.SEMA)
+        @Expect(diagnostics.size, 1)
+        @Expect(diagnostics[0].errorMessage.startsWith("semantic error: invalid "))
+        @Expect(diagnostics[0].GetBegin(), invalid.begin)
+        @Expect(diagnostics[0].GetEnd(), invalid.begin + 1)
+    }
 }
 
 @Test

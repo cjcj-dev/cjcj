@@ -2700,7 +2700,7 @@ public let errorData: Array<ErrorData> = [
     ErrorData(message: "Searcher error: scope name doesn't support suffix search *'%s'.", mainHint: "", otherHints: []),
     ErrorData(message: "", mainHint: "", otherHints: []),
     ErrorData(message: "", mainHint: "", otherHints: []),
-    ErrorData(message: "semantic error", mainHint: "", otherHints: []),
+    ErrorData(message: "semantic error: %s", mainHint: "", otherHints: []),
     ErrorData(message: "unable to infer declaration type, please add type annotation", mainHint: "", otherHints: []),
     ErrorData(message: "mismatched types", mainHint: "expected '%s', found '%s'", otherHints: []),
     ErrorData(message: "mismatched types", mainHint: "the expression has type '%s'", otherHints: []),
