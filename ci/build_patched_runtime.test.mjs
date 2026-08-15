@@ -5,10 +5,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {
-  GC_FIX_COMMIT,
-  GC_FIX_DEEPEN_BY,
-  GC_FIX_FETCH_DEPTH,
+  GC_FIX_MAX_FETCH_DEPTH,
   INITIAL_RUNTIME_FETCH_DEPTH,
+  gcFixCommit,
   verifyGcFixAncestry,
 } from './build_patched_runtime.mjs';
 import {resolveRuntimeSource} from './runtime-pin.mjs';
@@ -16,6 +15,9 @@ import {resolveRuntimeSource} from './runtime-pin.mjs';
 $.verbose = false;
 
 const {runtimeRef, sourceUrl} = await resolveRuntimeSource({});
+// The floor is read from the pin file, not from a literal here — a second copy of
+// it is what went stale and took CI down on 2026-08-15.
+const GC_FIX_COMMIT = await gcFixCommit({});
 const suppliedSource = argv._[0];
 const remote = suppliedSource
   ? (/^[a-z][a-z0-9+.-]*:\/\//i.test(suppliedSource)
@@ -61,7 +63,7 @@ try {
   // Positive control first: retain the fix object, but point HEAD at a ref whose
   // history stops at the fix's parent. This is specifically the "object exists,
   // ancestry is false" arm and must remain fail-closed.
-  const withoutFix = await initShallow('without-fix', runtimeRef, GC_FIX_FETCH_DEPTH);
+  const withoutFix = await initShallow('without-fix', runtimeRef, GC_FIX_MAX_FETCH_DEPTH);
   assert.equal((await gitResult(withoutFix, 'cat-file', '-e', `${GC_FIX_COMMIT}^{commit}`)).exitCode, 0);
   const withoutFixRef = (await gitResult(withoutFix, 'rev-parse', `${GC_FIX_COMMIT}^`)).stdout.trim();
   await $({quiet: true, stdio: 'pipe'})`git -C ${withoutFix} branch without-gc-fix ${withoutFixRef}`;
@@ -73,17 +75,23 @@ try {
   );
   assert.match(positive.error?.message || '', /pinned GC fix ancestry missing/);
   assert.match(positive.output, /is available, but runtime refs\/heads\/without-gc-fix does not descend/);
-  assert.doesNotMatch(positive.output, /runtime fetch apparatus cannot obtain/);
+  assert.doesNotMatch(positive.output, /unreachable after deepening by/);
   console.log(`SELFTEST_CASE=without-fix ref=${withoutFixRef} rc=1 diagnostic=ancestry-missing`);
 
   // Negative control: reproduce the production depth-200 fetch from a clean
   // repository, then prove the measured deepen makes the object and ancestry
   // independently resolvable.
-  const currentPin = await initShallow('current-pin', runtimeRef, INITIAL_RUNTIME_FETCH_DEPTH);
+  // ⭐ 深度取 20 而非 INITIAL_RUNTIME_FETCH_DEPTH：⭐ 新地板离 pin 只有约 235 笔，
+  // ⭐ 而 depth-200 的浅克隆已经能取到它 ⇒ ⭐⭐ 用 200 起步这条臂会**永远走不到加深路径**，
+  // ⭐ 变成一个恒真的对照。⛔ 对照臂必须真的证明它要证明的那件事。
+  const currentPin = await initShallow('current-pin', runtimeRef, 20);
   assert.notEqual((await gitResult(currentPin, 'cat-file', '-e', `${GC_FIX_COMMIT}^{commit}`)).exitCode, 0);
   const negative = await captureRuntimeLog(() => verifyGcFixAncestry(currentPin, runtimeRef));
   assert.equal(negative.error, undefined);
-  assert.match(negative.output, new RegExp(`deepening by ${GC_FIX_DEEPEN_BY} to depth ${GC_FIX_FETCH_DEPTH}`));
+  assert.match(negative.output, /not present; deepening by \d+/);
+  // The success line must name the depth it actually reached, so a future drift shows
+  // up as a number that keeps climbing rather than as one hard-coded constant.
+  assert.match(negative.output, /is an ancestor of the selected runtime source \(after deepening by \d+\)/);
   assert.equal((await gitResult(currentPin, 'cat-file', '-e', `${GC_FIX_COMMIT}^{commit}`)).exitCode, 0);
   assert.equal((await gitResult(currentPin, 'merge-base', '--is-ancestor', GC_FIX_COMMIT, 'HEAD')).exitCode, 0);
   assert.doesNotMatch(negative.output, /Not a valid commit name|runtime fetch apparatus/);
@@ -99,8 +107,8 @@ try {
   const apparatus = await captureRuntimeLog(
     () => verifyGcFixAncestry(missingObject, withoutFixRef),
   );
-  assert.match(apparatus.error?.message || '', /runtime fetch apparatus cannot obtain/);
-  assert.match(apparatus.output, new RegExp(`deepened to depth ${GC_FIX_FETCH_DEPTH}.*still unavailable`));
+  assert.match(apparatus.error?.message || '', /unreachable after deepening by \d+/);
+  assert.match(apparatus.output, /is still absent after asking for \d+ more commits/);
   assert.doesNotMatch(apparatus.output, /pinned GC fix ancestry missing|Not a valid commit name/);
   console.log(`SELFTEST_CASE=missing-object ref=${withoutFixRef} rc=1 diagnostic=fetch-apparatus`);
   console.log('SELFTEST_RESULT=PASS');
