@@ -1,134 +1,130 @@
-PROGRESS=DONE · verdict=DIAGNOSTIC_FIXED; SAMPLE_VALID; CI_SEMANTIC_IS_GC-CORRUPTED-AST · LANE=macrosem
-SIDE_EFFECT: `sema_invalid_node_after_check` 现在携带校验器的具体原因，并把主标记放在无效节点（或最近源码范围）的起点；冒烟样本与共享 SDK 均未改动。
+PROGRESS=DONE · verdict=新 pin 的单次 CI package 通过已知，但本棒未执行要求的 N≥8；四刀定位与 macro/app 崩点重算均未开始 · LANE=macrosem
+SIDE_EFFECT: 已提交的产品改动只增强 `sema_invalid_node_after_check` 的正文与落点；未改冒烟样本、未降级诊断、未写共享 SDK。
+DELIVERY_REF=/root/cj_build/cjcj|fix/macrosem|cf4773c5ee4ede7b2ee5ce55aad092810d4143b0
 
-# macrosem 调查与修复报告
+# macrosem 停棒报告
 
-## 1. 先答第③问：官方/我方对照
+## ① 我确定的
 
-### 官方 cjc
+以下显式区分 `read`、`measured`、`provided` 与 `inferred`；`provided` 是主控给出的 CI 数据，本棒没有再次联网打开该 run。
 
-- 工具链：`nightly-1.2.0-alpha.20260721165458`
-- 二进制：`/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458/bin/cjc`
-- cwd：一份全新复制的 `ci/smoke/macro_demo/mymacros`
-- 布局：使用该 cjc 相邻的官方 `runtime/lib/linux_x86_64_cjnative`，不是裸二进制。
-- 命令：`cjc --compile-macro def.cj`
-- 结果：`rc=0`，墙钟 `0.426 s`；产出 `lib-macro_mymacros.so`（47432 bytes）与 `mymacros.cjo`（3208 bytes）。
+### 无正文诊断
 
-结论：这 12 行样本及 `macro package`、`Tokens`、`quote($input; $input)` 的写法对官方编译器是合法的；不能通过改样本来“修”本问题。
+- **read** — `packages/basic/src/DiagnosticTables.cj:2703` 原模板是固定字符串 `semantic error`，没有参数槽；已提交版本为 `semantic error: %s`。
+- **read** — `packages/ast/src/ASTTypeValidator.cj:135-166` 会生成三类具体原因：invalid target type、invalid sema type、invalid function-body owner type。
+- **read** — 原 `packages/ast/src/ASTTypeValidator.cj:94-96,203-209` 调用链只传 Bool/Node，不传上述字符串；因此原因在进入 renderer 前被丢弃，不是 renderer 吞字。
+- **read** — 原发射点使用整个 `currentValidRange()`；已提交版本在 `packages/ast/src/ASTTypeValidator.cj:193-207` 改为无效节点 `begin..begin+1`，合成节点则用最近源码范围的起点。这解释旧输出为什么落到多行宏声明末端 `def.cj:12:2`。
+- **measured** — 定向测试 `packages/compiler_unittest/src/ASTPort_test.cj:56-78`：`PASSED=1, FAILED=0, SKIPPED=140`；全 workspace 构建末行是 `cjpm build success`。
+- **certain limitation** — run `31873940305` 当时具体命中 AST validator 三个 predicate 中哪一个不可从旧日志恢复；被丢掉的字符串是唯一区分信息。
 
-### 我方失败身份
+### 样本合法性与旧 pin
 
-- 用户给出的 run `31873940305` 在 ubuntu-24.04 检出的 cjcj 是 `29f9262ad5a2559c7aff00d6584ca0b71149be2c`，runtime pin 是 `597b47f106cf58dad5c71e7ededc13563640a2c3`。
-- 原始结果：`rc=1`、无 signal、约 `22.108 s`，只打印 `error: semantic error`，范围终点落在 `def.cj:12:2`。
-- 当前修复基线 `767d21e2fb17f484691b4dc7ba59a2ed6d6289c6` 与该 CI cjcj 提交之间，`git diff --name-status` 只有 `ci/runtime_pin.env`；编译器源码相同。pin 从 `597b47f...` 移到了 `9bc7290...`。
-- 我用 runtime 源码 `597b47f...` 按 `ci/build_patched_runtime.mjs` 的 native/release 配方重建，私有副本 SHA-256 为 `6edc6e9148e423590c90c25911fe9d1a2a99b24a9f9c41d40bff2217567cf93b`；编译器以 CI 要求的 `bin/cjcj` 名称运行，且有相邻 `../runtime`。因此复测确实加载了目标 runtime，没有落入“裸二进制静默跳过宏展开”。共享 `/root/sdks/**`、`/root/.cjv/**` 没有被写入。
+- **measured** — 官方 `/root/.cjv/toolchains/nightly-1.2.0-alpha.20260721165458/bin/cjc` 在正确相邻 runtime 布局下，对原样 12 行 `def.cj` 运行 `--compile-macro`：`1/1` 通过，`rc=0`，墙钟 `0.426 s`；产物为 `lib-macro_mymacros.so` 47432 bytes、`mymacros.cjo` 3208 bytes。
+- **read** — 旧 CI cjcj 提交 `29f9262ad5a2559c7aff00d6584ca0b71149be2c` 到修复基线 `767d21e2fb17f484691b4dc7ba59a2ed6d6289c6` 的源码差异只有 `ci/runtime_pin.env:1`：`597b47f106cf58dad5c71e7ededc13563640a2c3` → `9bc72903517fd643d2e1c9cab18aa35aa31d7e75`。
+- **measured** — 私有重建的旧 `597b47f...` SO SHA-256 为 `6edc6e9148e423590c90c25911fe9d1a2a99b24a9f9c41d40bff2217567cf93b`；它放在 `<private>/runtime/lib/linux_x86_64_cjnative`，编译器复制为 `<private>/bin/cjcj`，所以确实进入进程内 runtime，不是缺 `../runtime` 的静默跳过。
+- **measured** — 旧 SO + 原样宏的多轮表现不稳定：至少观察到 `SIGABRT`（invalid TypeInfo）、`SIGSEGV`（`ForEachBitmapWord`）、FlatBuffer 负索引，以及走到 llc；这不是一个稳定的源码语义错误。
+- **read** — 旧 runtime 源码 `/tmp/macrosem-runtime-597.6KPh9A/runtime/src/Heap/Allocator/RegionManager.cpp:1440-1445` 的对照开关是 `MRT_GCV2_DISABLE_MINOR=1`。
+- **measured** — 原样宏在旧 SO 上加 `MRT_GCV2_DISABLE_MINOR=1`：`1/1` 在 `3.604 s` 内通过 sema/AST validator 到达 llc，`invalid_object_active_region=0`；随后因本机 SDK 的 llc 不认识 `-cj-generational-post-barrier=true` 而失败。这个 arm 证明“关闭 minor 后旧 semantic 终点消失”，但不等于已经定位到新 pin 四刀中的某一刀。
+- **measured** — 最小化：空宏体在旧 SO 上 `1/1` 到达正常 `Unit`→`Tokens` mismatched-types（`15.436 s`）；加入最小 `return quote()` 后 `1/1` 进入 GC/SIGSEGV 路径。`$input` 与第二次展开不是触发该负载所必需。
+- **inferred（证据较强，但不是四刀二分结果）** — 旧 run 的 generic semantic error 是 GC 破坏后的 AST 类型完整性报警，而不是 `quote`/`Tokens`/`macro package` 的语言规则错误。依据是官方通过、旧 SO 多形态内存破坏、禁 minor 后越过 AST validator。
 
-所以这是我方回归，不是样本错误。
+### 新 pin 与新失败
 
-## 2. 第①问：正文去哪了（独立缺陷）
+- **provided, not independently re-read** — 主控给出的 CI run `31882945821`：runtime pin `9bc72903`；03_closures、04_iface_enum、06_macro/package 均通过，06_macro/app 以 SIGSEGV 失败，总计 `pass=5 fail=1`。
+- **provided raw numbers** — 新 app 失败：`rc=1`、`signal=SIGSEGV`、`ms=40978`、`pc=0x558c7989fc4c`、`fa=0x7f9be27ffdb0`、`si_addr=0x7f9cb95d4fe8`、`si_code=SEGV_MAPERR`。
+- **certain semantics of fields** — `fa` 在该 GCLOG 格式中是 frame address/RBP，不是 fault address；真正需和指令寻址式核对的是 `si_addr`。
+- **not established** — 本棒尚无新 pin 的本地 N≥8 数据，不能把新 CI 的单次 package 通过改写为“已修复”或“概率为零”。
 
-这不是格式化器吞掉 message，而是诊断定义和发射点共同把 message 丢了。
+## ② 我做到哪一步了
 
-### 发射链
+### 已提交产品改动
 
-1. 诊断表原定义位于 `packages/basic/src/DiagnosticTables.cj:2703`：
+- 分支：`fix/macrosem`
+- 产品提交：`cf4773c5ee4ede7b2ee5ce55aad092810d4143b0`
+- 作者/提交者：`Zxilly <zxilly@outlook.com>`
+- 改动：`packages/basic/src/DiagnosticTables.cj:2703`、`packages/ast/src/ASTTypeValidator.cj:94-207`、`packages/compiler_unittest/src/ASTPort_test.cj:56-78`。
+- 状态：诊断修复与回归测试完整，不是半成品；它不声称修复 runtime GC 或新的 macro/app SIGSEGV。
 
-   ```cangjie
-   ErrorData(message: "semantic error", mainHint: "", otherHints: [])
+### 已有装置与产物
+
+- 修补后 cjcj：`target/release/bin/cjcj::cjc`；曾复制到 `/tmp/macrosem-layout.oMlTtA/bin/cjcj`，该副本 SHA-256 为 `259cbcb7deb5f857b94ff6676b7a8115951551c3499ff8b90736c2c3d129481d`。
+- 旧 pin runtime：`/tmp/macrosem-runtime-597.6KPh9A/runtime/output/temp/lib/x86_64_Release/libcangjie-runtime.so`，SHA-256 `6edc6e9148e423590c90c25911fe9d1a2a99b24a9f9c41d40bff2217567cf93b`。
+- 旧 pin boundscheck：同目录 `libboundscheck.so`，SHA-256 `5e589a81b328ef0253d92fd453b0ce76ac00e35184aa28b7aa8813918185cc14`。
+- 当前 `/tmp/macrosem-layout.oMlTtA` 已被钉回旧 `597b47f...` SO；不要把它误当新 pin 装置。
+- 一个此前已构建但尚未接入 N≥8 装置的新 pin 候选存在于 `/tmp/macrosem-runtime.vQrtxe/product/libcangjie-runtime.so`，最后一次只读检查显示 21570144 bytes；本棒没有计算/记录其 SHA，也没有重新核对 SOURCE_SHA。
+
+### 已跑的臂与数量
+
+| arm | 次数 | 结果 |
+|---|---:|---|
+| 官方 cjc + 原样 package | 1 | `1/1 rc=0` |
+| 旧 `597b47f...` + 空宏体 | 1 | 正常 mismatched-types |
+| 旧 `597b47f...` + `quote()` | 1 | SIGSEGV/GC 路径 |
+| 旧 `597b47f...` + 原样 package、正常日志 | 2 | 1 次 SIGABRT，1 次 SIGSEGV |
+| 旧 `597b47f...` + 原样 package、`MRT_LOG_LEVEL=f` | 至少 3 | FlatBuffer 负索引或走到 llc；未再次命中 semantic 文本 |
+| 旧 `597b47f...` + `MRT_GCV2_DISABLE_MINOR=1` | 1 | 通过 sema/AST 到 llc，`3.604 s` |
+| 新 `9bc72903` + 原样 package、本地概率测量 | **0/8 已跑** | **尚未开始** |
+| 四刀父/子 runtime 边界 | 0 | 尚未构建 |
+| 新 pin macro/app 本地复现 | 0 | 尚无 core、寄存器或崩点指令 |
+
+## ③ 下一步该做什么
+
+必须保持顺序；不要先跳到 app。
+
+### A. 先完成新 pin package 的 N≥8
+
+1. 只读核验 `/tmp/macrosem-runtime.vQrtxe/product/` 的 `SOURCE_SHA`（若有）并对 `libcangjie-runtime.so` 执行 `sha256sum`；必须得到完整 `9bc72903517fd643d2e1c9cab18aa35aa31d7e75` 身份，否则按 `ci/build_patched_runtime.mjs:main` 的 native/release 配方重建。
+2. 新建另一个私有目录，不复用当前已钉旧 SO 的 `/tmp/macrosem-layout.oMlTtA`。布局必须是 `<layout>/bin/cjcj` 与 `<layout>/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so`；复制 SDK runtime 其余库，禁止写 `/root/.cjv/**`。
+3. 按 `.github/workflows/ci.yml:172-178` 使用进程名 `cjcj`，并给私有工具链装入 CI 的 fixed `llc/opt`；否则 package 走到后端会被本机 stock llc 的未知 `-cj-generational-post-barrier=true` 干扰。
+4. 每轮复制全新的 `ci/smoke/macro_demo/mymacros/def.cj` 到独立目录，cwd 为该目录，执行：
+
+   ```sh
+   env CANGJIE_HOME=<private-sdk> \
+     LD_LIBRARY_PATH=<layout>/runtime/lib/linux_x86_64_cjnative:<private-sdk>/third_party/llvm/lib:<private-sdk>/tools/lib \
+     <layout>/bin/cjcj --compile-macro def.cj
    ```
 
-   模板没有 `%s`，本身就没有正文槽位。
+5. 连跑至少 8 次，逐轮记录 `run, rc, signal, ms, stderr_signature, runtime_sha, cjcj_sha`。判据只能是 `8/8 rc=0`；任何一轮出现 semantic/error/signal 都判“仍复现”。
 
-2. 唯一发射点原位于 `packages/ast/src/ASTTypeValidator.cj:194` 附近。`validateNode` 已经生成并保存了三类具体字符串：
+### B. 仅在 A 为 8/8 后定位四刀
 
-   - `invalid target type from ... to ...`
-   - `invalid sema type on ... at ...`
-   - `invalid owner type for function body at ...`
+1. 先用以下只读命令固定四个 merge 的父链与顺序，避免凭主题猜父提交：
 
-   但 `PostVisitor` 只接收 `Bool`，`emitInvalidNodeDiagnostic(node)` 也不接收/传递这些字符串。也就是说，原因在进入诊断引擎之前就被调用方丢掉了。
+   ```sh
+   git -C /root/cj_build/cangjie_runtime show -s --format='%H %P %s' \
+     5897434f 7d106625 0b904b5e 9bc72903
+   ```
 
-3. CI 输出仍正确打印了该诊断随后添加的 `please report ...` note，其他诊断也能格式化参数；这进一步排除了 renderer 吞正文。
+2. 对 whopush、regcover、freeregion/SATB、routetbl2 的每个“父 → 子”边界，分别按 `ci/build_patched_runtime.mjs` 构建私有 SO，记录完整 commit 与 SO SHA-256；不要改共享 SDK。
+3. 使用 A 的同一 cjcj、fixed LLVM、8 轮脚本测边界。第一个从“至少一轮失败”变成 `8/8 package rc=0` 的提交才是候选刀；候选的父/子再各复跑一组确认概率窗口没有漂移。
 
-### 为什么指向第 12 行 `}`
+### C. 最后处理 06_macro/app
 
-原发射点传入 `currentValidRange()`。它往往是整个宏声明/函数体的多行范围；主标记显示该范围的末端，于是落到收尾 `}`，不是第 12 行源码本身有错。
+1. 先用 A 确认过的 package 产物，再按 `ci/smoke/run_smoke.mjs:259` 后续调用编 app：cwd=`ci/smoke/macro_demo/app` 的新复制目录，参数为 `main.cj --import-path <macroBuild> -o <app>`。
+2. 用同一私有 `9bc72903` runtime、进程名和 fixed LLVM 跑到 SIGSEGV；保存完整 stderr 与 core。若 core 不可靠，直接批处理 gdb：
 
-### 修复
+   ```sh
+   gdb -q -batch \
+     -ex 'set pagination off' \
+     -ex run \
+     -ex 'printf "PC=%p\n", $pc' \
+     -ex 'info registers' \
+     -ex 'x/12i $pc-24' \
+     -ex 'p/x $_siginfo._sifields._sigfault.si_addr' \
+     --args <layout>/bin/cjcj main.cj --import-path <macroBuild> -o <app>
+   ```
 
-- `packages/basic/src/DiagnosticTables.cj:2703` 改为 `semantic error: %s`。
-- `packages/ast/src/ASTTypeValidator.cj:94-96,135-166,203-209` 让校验函数返回具体原因并传给诊断。
-- `packages/ast/src/ASTTypeValidator.cj:193-200` 对有源码位置的无效节点标记其 `begin..begin+1`；合成节点没有位置时，标记最近用户源码范围的起点，不再指向范围末尾的 `}`。
-- `packages/compiler_unittest/src/ASTPort_test.cj:56-78` 新增回归测试，断言正文以 `semantic error: invalid ` 开头，且范围始于第一个无效节点。
+3. 对实际崩点指令逐项重算有效地址。例如 `disp(base,index,scale)` 必须写出 `base + index*scale + disp = ...`，再与 gdb 的 `si_addr` 比较；不能拿 `fa` 当基址，也不能仅凭 `si_addr` 外形分族。
+4. 用 `info symbol $pc`、`info proc mappings`/模块基址和 `addr2line -Cfipe <binary-or-so> <module-relative-pc>` 固定函数与 `file:line`，然后才判断是编译器、宏动态库还是 runtime 访问。
 
-这项修复独立于本次底层 GC 故障：今后无论什么原因触发该 AST 完整性检查，都不会再只得到四个字。
+## ④ 没覆盖到什么 + 我怀疑但没验的
 
-## 3. 第②问：底层是什么错
-
-### 诊断实际代表什么
-
-`sema_invalid_node_after_check` 不是一条 Cangjie 语言规则诊断，而是 `ASTTypeValidator` 在语义分析之后做的内部完整性检查。它表示 AST 中至少有一个节点满足下列之一：
-
-- 节点指向的 target 没有正确类型；
-- 节点自身的 sema type 缺失、错误，或仍含 ideal/question type variable；
-- 函数体 owner 的类型不正确。
-
-历史 CI 那一轮究竟命中这三个 predicate 中的哪一个，已经无法从旧日志反推：旧调用点正是把唯一能区分它们的字符串丢掉了。这也是“无正文”必须单独修的原因。修补后的精确旧-runtime 复跑具有随机性，分别提前落到 SIGABRT、SIGSEGV、FlatBuffer 负索引等内存破坏表现，没有再次恰好落到 AST validator；报告不伪造一个无法恢复的具体节点名。
-
-### 根因不是 quote/Tokens/macro package 的语义
-
-证据链指向 CI 所绑定的旧 runtime 的 minor-GC 路径破坏了编译器进程内对象，而后 AST validator 只是较幸运地把破坏后的类型元数据截住：
-
-- 官方 cjc 对原样源码 `rc=0`。
-- 同一 cjcj 编译器源码在不发生这条 GC 破坏时能通过 sema，随后才可能遇到当前树中另一个、独立的 CHIR/codegen 问题。
-- run `31873940305` 的同一 job 中已有 GC 异常计数；目标宏进程最终没有 signal，只以 AST 完整性诊断退出。
-- 私有重建的精确 `597b47f...` runtime 在正确布局下，对同一源码的重复运行分别出现：
-
-  - `CheckAndPush: TypeInfo ... has invalid type kind` + SIGABRT；
-  - `ForEachBitmapWord` 的 SIGSEGV；
-  - FlatBuffer 读到负索引的 `IndexOutOfBoundsException`；
-  - `invalid_object_active_region` 非零。
-
-- 该 runtime 源码提供的对照开关是 `MRT_GCV2_DISABLE_MINOR=1`（`runtime/src/Heap/Allocator/RegionManager.cpp:1440-1445`）。启用它后，原样宏在 `3.604 s` 内稳定通过 sema/AST 校验并到达后端，`invalid_object_active_region=0`；随后因本机未替换 CI 的 fixed llc 而报未知 `-cj-generational-post-barrier=true`。这个后端报错不属于本棒，但“关闭 minor 后 semantic error 消失并能走到 llc”把目标错误收窄到了 runtime minor-GC 路径。
-- `597b47f...` 到当前 pin `9bc7290...` 的祖先路径包含多项 GC 修复（reclaimed-region SATB、young-region coverage、compact route table publish/reclaim 等）；当前基线提交也明确是移动该 runtime pin。
-
-因此底层结论是：合法宏编译负载触发了旧 runtime 的 GC 内存破坏，破坏后的 sema AST 类型元数据被 `ASTTypeValidator` 报成 generic semantic error；它不是 `$input`、`Tokens` 或 `macro package` 的合法性错误。
-
-## 4. 最小触发形
-
-按“空体 → `quote()` → 加插值 → 复制两次”逐步缩减：
-
-| 宏体 | 官方 cjc | 我方观察 | 结论 |
-|---|---|---|---|
-| `{}` | 正常的 `Unit` 与 `Tokens` mismatched-types，`rc=1` | 精确旧 runtime 也到达同一具体类型诊断 | 没有进入目标路径 |
-| `{ return quote() }` | `rc=0` | 已进入旧 runtime 的 GC 腐坏/崩溃路径 | 最小负载触发形 |
-| `{ return quote($input) }` | `rc=0` | 与 `quote()` 同类 | `$input` 不是必要条件 |
-| `{ return quote($input; $input) }` | `rc=0` | CI 命中无正文 AST 诊断；本地旧 runtime 多种随机腐坏 | 分号与第二次 `$input` 不是必要条件 |
-
-最小源码为：
-
-```cangjie
-macro package mymacros
-import std.ast.*
-public macro Twice(input: Tokens): Tokens {
-    return quote()
-}
-```
-
-这里的“最小触发”是触发同一高内存/GC 故障路径，不保证每轮都呈现相同的 `rc=1 semantic error`；旧 runtime 的表现本来就是随机的。`macro package`、`Tokens` 和 `import std.ast.*` 是构造一个返回 `Tokens` 的宏所需脚手架，首次新增且必要的负载是 `quote()`；插值不是必要条件。
-
-## 5. 验证
-
-- 定向单测：`ASTTypeValidatorDiagnosticTest`，`PASS=1, FAIL=0, SKIP=140`。
-- 全 workspace：`cjpm build --incremental` 成功，末行 `cjpm build success`。
-- `git diff --check` 通过。
-- 官方 exact sample：`rc=0`。
-- 精确 CI runtime 私有布局：确认进入 runtime；默认 minor 下重现多种 GC/内存破坏，`MRT_GCV2_DISABLE_MINOR=1` 下通过 sema/AST validator 到达 llc。
-- 冒烟样本内容未改；共享 SDK 未改。
-
-## 6. 没覆盖到什么
-
-- 本提交修复诊断信息与定位，不修改 cangjie runtime；旧 `597b47f...` 的 GC 修复不在本仓改动范围内。
-- 没有声称恢复了历史 CI 那一轮被丢弃的具体 predicate/节点名；信息在旧二进制中不可逆丢失，且精确旧 runtime 复跑未再次随机落到同一 AST-validator 终点。
-- 当前 cjcj 在较新/禁 minor 环境下还可能遇到独立的 CHIR dominance 或 fixed-llc 装置问题；它们不是 run `31873940305` 的 `rc=1, signal=none, semantic error` 签名，本提交没有顺带修。
-- 没跑完整 smoke matrix，也没有覆盖 macOS、Windows、AArch64；精确旧 runtime 本身会随机崩溃，不能作为可靠的全套回归环境。
-- `REPORT-blamebisect2.md` 的 sticky-minor abort 位于另一段 runtime 历史，且其目标签名是 SIGABRT；本报告只借鉴装置思路，没有把它与本次无正文诊断当成同一个失败。精确 `597b47f...` 使用的控制开关是 `MRT_GCV2_DISABLE_MINOR=1`。
+- **未覆盖** — 新 pin 本地 N≥8：当前是 `0/8`，所以“旧 semantic 已消失”尚未达到用户给定判据。
+- **未覆盖** — 四刀二分：四个父/子 SO 均未在本棒构建或测量，不能回答是哪一刀。
+- **未覆盖** — 新 CI run `31882945821` 没有由本棒再次打开；表格和崩溃数字来自主控输入。
+- **未覆盖** — `06_macro/app` 没有本地复现，没有崩点机器指令、通用寄存器、模块映射或 core；因此没有做寻址表达式重算。
+- **未覆盖** — 私有 fixed LLVM 装置尚未组好；stock llc 已知会产生无关的 `-cj-generational-post-barrier=true` 参数错误。
+- **未覆盖** — 当前新 pin 候选 SO 只有路径和 21570144-byte 大小，尚缺 SHA/SOURCE_SHA 复核。
+- **怀疑但未验** — 四刀中的至少一刀把旧 semantic 的发生概率压到零；现有证据只能说明 GC 是强根因候选，不能指名 whopush/regcover/freeregion/routetbl2。
+- **怀疑但未验** — 新 macro/app SIGSEGV 可能仍是 GC，也可能是宏加载/展开后的独立缺陷。`si_addr` 是规范用户态地址这一外观不足以归族，必须以实际指令和寄存器重算为准。
+- **明确不混同** — `/root/cj_build/reports/REPORT-blamebisect2.md` 的 sticky-minor SIGABRT 位于另一段 runtime 历史；它不能代替本次四刀二分。
