@@ -21,6 +21,19 @@ const noFailFast = process.env.CJCJ_VERIFY_NO_FAIL_FAST === '1'
   || process.argv.includes('--no-fail-fast');
 const phaseResults = [];
 
+// zx puts the useful part of a failed command ("exit code: 1") below the stack
+// frames and leaves the first line of the message empty, so a naive first-line
+// slice makes every process failure render as an empty detail.
+function describeFailure(error) {
+  const lines = String(error?.message ?? error).split('\n').map(line => line.trim()).filter(Boolean);
+  const head = lines.find(line => !line.startsWith('at ') && line !== 'Error:') || lines[0] || String(error);
+  const fields = [];
+  if (typeof error?.exitCode === 'number') fields.push(`exit=${error.exitCode}`);
+  if (error?.signal) fields.push(`signal=${error.signal}`);
+  if (fields.length === 0 || !head.startsWith('exit code:')) fields.push(head);
+  return fields.join(' ').slice(0, 400) || String(error);
+}
+
 async function phase(name, body) {
   const started = process.hrtime.bigint();
   try {
@@ -31,7 +44,7 @@ async function phase(name, body) {
   } catch (error) {
     if (!noFailFast) throw error;
     const wall = Number(process.hrtime.bigint() - started) / 1e9;
-    const detail = String(error?.message ?? error).split('\n')[0].slice(0, 400);
+    const detail = describeFailure(error);
     phaseResults.push({name, status: 'FAIL', wall, detail});
     console.error(`[phase] ${name} FAIL wall=${wall.toFixed(3)}s detail=${detail}`);
   }
