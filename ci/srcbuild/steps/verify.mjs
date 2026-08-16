@@ -9,8 +9,46 @@ import {getTarget} from '../../../build/lib/targets.mjs';
 $.stdio = 'inherit';
 
 const root = path.resolve(import.meta.dirname, '../../..');
-const sdk = argv._[0];
-if (!sdk) throw new Error('usage: verify.mjs <sdk-dir>');
+const sdk = argv._.map(String).filter(value => !value.startsWith('-'))[0];
+if (!sdk) throw new Error('usage: verify.mjs [--no-fail-fast] <sdk-dir>');
+// Diagnostic mode only. The default is unchanged: the first failing phase ends
+// the run, so the release gate keeps failing exactly where it failed before.
+// With --no-fail-fast every phase is still attempted, the failures are all
+// collected, and the run still exits non-zero, so the four groups of the G8
+// gate can be measured in one pass without the gate becoming any weaker.
+const noFailFast = process.env.CJCJ_VERIFY_NO_FAIL_FAST === '1'
+  || argv['fail-fast'] === false
+  || process.argv.includes('--no-fail-fast');
+const phaseResults = [];
+
+// zx puts the useful part of a failed command ("exit code: 1") below the stack
+// frames and leaves the first line of the message empty, so a naive first-line
+// slice makes every process failure render as an empty detail.
+function describeFailure(error) {
+  const lines = String(error?.message ?? error).split('\n').map(line => line.trim()).filter(Boolean);
+  const head = lines.find(line => !line.startsWith('at ') && line !== 'Error:') || lines[0] || String(error);
+  const fields = [];
+  if (typeof error?.exitCode === 'number') fields.push(`exit=${error.exitCode}`);
+  if (error?.signal) fields.push(`signal=${error.signal}`);
+  if (fields.length === 0 || !head.startsWith('exit code:')) fields.push(head);
+  return fields.join(' ').slice(0, 400) || String(error);
+}
+
+async function phase(name, body) {
+  const started = process.hrtime.bigint();
+  try {
+    await body();
+    const wall = Number(process.hrtime.bigint() - started) / 1e9;
+    phaseResults.push({name, status: 'PASS', wall, detail: ''});
+    if (noFailFast) console.log(`[phase] ${name} PASS wall=${wall.toFixed(3)}s`);
+  } catch (error) {
+    if (!noFailFast) throw error;
+    const wall = Number(process.hrtime.bigint() - started) / 1e9;
+    const detail = describeFailure(error);
+    phaseResults.push({name, status: 'FAIL', wall, detail});
+    console.error(`[phase] ${name} FAIL wall=${wall.toFixed(3)}s detail=${detail}`);
+  }
+}
 const workspace = process.env.CANGJIE_WORKSPACE;
 const targetKey = process.env.CJCJ_SRCBUILD_TARGET;
 if (!workspace || !targetKey) throw new Error('CANGJIE_WORKSPACE and CJCJ_SRCBUILD_TARGET are required');
@@ -143,109 +181,144 @@ if (referenceCompile.stdout) process.stdout.write(referenceCompile.stdout);
 if (referenceCompile.stderr) process.stderr.write(referenceCompile.stderr);
 console.log('[preflight] PASS items=6 probes=4/4');
 
-console.log('[difftest] compare selfhost SDK and source-built C++ oracle');
-const difftestEnv = {
-  ...process.env,
-  DIFFTEST_TC: sdk,
-  DIFFTEST_SELF: self,
-  DIFFTEST_REF: oracle,
-};
-await $({env: difftestEnv})`set -o pipefail; npx --yes zx@8 ${root}/scripts/difftest.mjs -j ${jobs} | tee ${work}/difftest.log`;
-await $`grep -Eq 'TOTAL=[0-9]+[[:space:]]+PASS=[0-9]+[[:space:]]+MISMATCH=0[[:space:]]+FAIL=0' ${work}/difftest.log`;
-
-console.log('[smoke] verify deployed SDK');
-await $`npx --yes zx@8 ${root}/ci/smoke/run_smoke.mjs ${self} ${work}/smoke`;
-
-console.log('[selfcheck] verify compiler packages');
-const packages = [
-  'option', 'conditional_compilation', 'mangle', 'frontend_tool', 'incremental_compilation',
-  'modules', 'driver', 'meta_transformation', 'lex', 'ast', 'frontend', 'cjc', 'basic', 'codegen', 'macro',
-];
-for (const pkg of packages) {
-  console.log(`[selfcheck] package ${pkg}`);
-  await $`${timeoutCommand} 900 ${self} --package ${root}/packages/${pkg}/src --module-name cjcj --import-path ${root}/target/release --output-type=staticlib -o ${work}/${pkg}.a`;
-}
-
-console.log('[selfdet] verify compiler CJO path determinism');
-const selfdetStarted = process.hrtime.bigint();
-const selfdetRoot = path.join(work, 'selfdet');
-const selfdetPackage = 'conditional_compilation';
-const selfdetSource = path.join(root, 'packages', selfdetPackage, 'src');
-const selfdetSourceA = path.join(selfdetRoot, 'a');
-const selfdetSourceB = path.join(selfdetRoot, 'bbbbbbbb', 'deep');
-if (selfdetSourceA.length === selfdetSourceB.length) {
-  throw new Error('selfdet apparatus failed: source paths must have different lengths');
-}
-await fs.mkdir(path.dirname(selfdetSourceA), {recursive: true});
-await fs.mkdir(path.dirname(selfdetSourceB), {recursive: true});
-await fs.cp(selfdetSource, selfdetSourceA, {
-  recursive: true, preserveTimestamps: true, force: false, errorOnExist: true,
+await phase('difftest', async () => {
+  console.log('[difftest] compare selfhost SDK and source-built C++ oracle');
+  const difftestEnv = {
+    ...process.env,
+    DIFFTEST_TC: sdk,
+    DIFFTEST_SELF: self,
+    DIFFTEST_REF: oracle,
+  };
+  await $({env: difftestEnv})`set -o pipefail; npx --yes zx@8 ${root}/scripts/difftest.mjs -j ${jobs} | tee ${work}/difftest.log`;
+  await $`grep -Eq 'TOTAL=[0-9]+[[:space:]]+PASS=[0-9]+[[:space:]]+MISMATCH=0[[:space:]]+FAIL=0' ${work}/difftest.log`;
 });
-await fs.cp(selfdetSource, selfdetSourceB, {
-  recursive: true, preserveTimestamps: true, force: false, errorOnExist: true,
+
+await phase('smoke', async () => {
+  console.log('[smoke] verify deployed SDK');
+  await $`npx --yes zx@8 ${root}/ci/smoke/run_smoke.mjs ${self} ${work}/smoke`;
 });
-console.log(`[selfdet] package=${selfdetPackage} source-a=${selfdetSourceA} length=${selfdetSourceA.length}`);
-console.log(`[selfdet] package=${selfdetPackage} source-b=${selfdetSourceB} length=${selfdetSourceB.length}`);
-console.log('[selfdet] env MRT_GCV2_MARKPAR_FORCE_SERIAL=1');
 
-const selfdetEnv = {...process.env, MRT_GCV2_MARKPAR_FORCE_SERIAL: '1'};
-async function compileSelfdet(sourceDir, arm, mapped) {
-  const outputDir = path.join(selfdetRoot, arm);
-  await fs.mkdir(outputDir, {recursive: true});
-  const output = path.join(outputDir, `${selfdetPackage}.a`);
-  if (mapped) {
-    const prefixMap = `${sourceDir}=/cjcj`;
-    await $({env: selfdetEnv})`${timeoutCommand} 900 ${self} --emit-chir=raw --output-type=staticlib --package ${sourceDir} --module-name cjcj --import-path ${root}/target/release --path-prefix-map=${prefixMap} --trimpath=${sourceDir} -o ${output}`;
-  } else {
-    await $({env: selfdetEnv})`${timeoutCommand} 900 ${self} --emit-chir=raw --output-type=staticlib --package ${sourceDir} --module-name cjcj --import-path ${root}/target/release -o ${output}`;
+await phase('selfcheck', async () => {
+  console.log('[selfcheck] verify compiler packages');
+  const packages = [
+    'option', 'conditional_compilation', 'mangle', 'frontend_tool', 'incremental_compilation',
+    'modules', 'driver', 'meta_transformation', 'lex', 'ast', 'frontend', 'cjc', 'basic', 'codegen', 'macro',
+  ];
+  const failedPackages = [];
+  for (const pkg of packages) {
+    console.log(`[selfcheck] package ${pkg}`);
+    const compiled = await $({nothrow: noFailFast})`${timeoutCommand} 900 ${self} --package ${root}/packages/${pkg}/src --module-name cjcj --import-path ${root}/target/release --output-type=staticlib -o ${work}/${pkg}.a`;
+    if (!noFailFast) continue;
+    if (compiled.exitCode === 0) {
+      console.log(`[selfcheck] package ${pkg} PASS`);
+    } else {
+      failedPackages.push(`${pkg}:exit=${compiled.exitCode ?? 'null'}:signal=${compiled.signal ?? 'none'}`);
+      console.error(`[selfcheck] package ${pkg} FAIL exit=${compiled.exitCode ?? 'null'} signal=${compiled.signal ?? 'none'}`);
+    }
   }
-  const cjos = (await fs.readdir(outputDir)).filter(name => name.endsWith('.cjo')).sort();
-  if (cjos.length !== 1) {
-    throw new Error(`selfdet ${arm} failed: expected exactly one CJO, found ${cjos.length}`);
+  if (noFailFast) {
+    console.log(`[selfcheck] summary: total=${packages.length} pass=${packages.length - failedPackages.length} fail=${failedPackages.length}`);
+    if (failedPackages.length > 0) throw new Error(`selfcheck failed packages: ${failedPackages.join(' ')}`);
   }
-  const cjo = path.join(outputDir, cjos[0]);
-  const cjoStat = await fs.stat(cjo);
-  if (!cjoStat.isFile() || cjoStat.size === 0) {
-    throw new Error(`selfdet ${arm} failed: CJO is missing or empty: ${cjo}`);
-  }
-  console.log(`[selfdet] ${arm} cjo=${cjo} bytes=${cjoStat.size}`);
-  return cjo;
-}
-
-console.log('[selfdet] positive-control compile without path flags');
-const selfdetPositiveA = await compileSelfdet(selfdetSourceA, 'positive-a', false);
-const selfdetPositiveB = await compileSelfdet(selfdetSourceB, 'positive-b', false);
-const selfdetPositiveCmp = await $({nothrow: true, quiet: true, stdio: 'pipe'})`cmp -s ${selfdetPositiveA} ${selfdetPositiveB}`;
-console.log(`[selfdet] positive-control cmp-s-exit=${selfdetPositiveCmp.exitCode} expected=1`);
-if (selfdetPositiveCmp.exitCode !== 1) {
-  throw new Error(`selfdet positive control failed: expected different CJO files, cmp exit=${selfdetPositiveCmp.exitCode}`);
-}
-
-console.log('[selfdet] deterministic compile with path-prefix-map and trimpath');
-const selfdetMappedA = await compileSelfdet(selfdetSourceA, 'mapped-a', true);
-const selfdetMappedB = await compileSelfdet(selfdetSourceB, 'mapped-b', true);
-const selfdetMappedCmp = await $({nothrow: true, quiet: true, stdio: 'pipe'})`cmp -s ${selfdetMappedA} ${selfdetMappedB}`;
-if (selfdetMappedCmp.exitCode !== 0) {
-  throw new Error(`selfdet determinism failed: expected identical CJO files, cmp exit=${selfdetMappedCmp.exitCode}`);
-}
-const selfdetMappedListing = await $({nothrow: true, quiet: true, stdio: 'pipe'})`cmp -l ${selfdetMappedA} ${selfdetMappedB}`;
-const selfdetMappedLines = selfdetMappedListing.stdout.trim().length === 0
-  ? 0
-  : selfdetMappedListing.stdout.trim().split(/\r?\n/).length;
-console.log(`[selfdet] mapped cmp-l-lines=${selfdetMappedLines} exit=${selfdetMappedListing.exitCode}`);
-if (selfdetMappedListing.exitCode !== 0 || selfdetMappedLines !== 0 || selfdetMappedListing.stderr) {
-  throw new Error('selfdet determinism failed: cmp -l did not complete with zero output');
-}
-const selfdetWall = Number(process.hrtime.bigint() - selfdetStarted) / 1e9;
-console.log(`[selfdet] PASS package=${selfdetPackage} positive=different mapped=byte-identical wall=${selfdetWall.toFixed(3)}s`);
-
-console.log('[bcgate] verify bitcode parity');
-await $`set -o pipefail; python3 ${root}/scripts/bcgate.py --self ${self} --base ${oracle} --corpus ${root}/scripts/difftest_corpus -j ${jobs} | tee ${work}/bcgate.log`;
-await $`grep -Eq 'byte-identical: [0-9]+ \\(100\\.0%\\)[[:space:]]+\\|[[:space:]]+differing: 0' ${work}/bcgate.log`;
-await $`grep -Eq 'compile-errors: 0' ${work}/bcgate.log`;
-const onlyOneSide = await runGrepProbe({
-  label: 'bcgate one-side divergence grep',
-  run: () => $({nothrow: true})`grep -q 'functions present on only one side' ${work}/bcgate.log`,
 });
-if (onlyOneSide.matched) throw new Error('bcgate failed: functions are present on only one side');
+
+await phase('selfdet', async () => {
+  console.log('[selfdet] verify compiler CJO path determinism');
+  const selfdetStarted = process.hrtime.bigint();
+  const selfdetRoot = path.join(work, 'selfdet');
+  const selfdetPackage = 'conditional_compilation';
+  const selfdetSource = path.join(root, 'packages', selfdetPackage, 'src');
+  const selfdetSourceA = path.join(selfdetRoot, 'a');
+  const selfdetSourceB = path.join(selfdetRoot, 'bbbbbbbb', 'deep');
+  if (selfdetSourceA.length === selfdetSourceB.length) {
+    throw new Error('selfdet apparatus failed: source paths must have different lengths');
+  }
+  await fs.mkdir(path.dirname(selfdetSourceA), {recursive: true});
+  await fs.mkdir(path.dirname(selfdetSourceB), {recursive: true});
+  await fs.cp(selfdetSource, selfdetSourceA, {
+    recursive: true, preserveTimestamps: true, force: false, errorOnExist: true,
+  });
+  await fs.cp(selfdetSource, selfdetSourceB, {
+    recursive: true, preserveTimestamps: true, force: false, errorOnExist: true,
+  });
+  console.log(`[selfdet] package=${selfdetPackage} source-a=${selfdetSourceA} length=${selfdetSourceA.length}`);
+  console.log(`[selfdet] package=${selfdetPackage} source-b=${selfdetSourceB} length=${selfdetSourceB.length}`);
+  console.log('[selfdet] env MRT_GCV2_MARKPAR_FORCE_SERIAL=1');
+
+  const selfdetEnv = {...process.env, MRT_GCV2_MARKPAR_FORCE_SERIAL: '1'};
+  async function compileSelfdet(sourceDir, arm, mapped) {
+    const outputDir = path.join(selfdetRoot, arm);
+    await fs.mkdir(outputDir, {recursive: true});
+    const output = path.join(outputDir, `${selfdetPackage}.a`);
+    if (mapped) {
+      const prefixMap = `${sourceDir}=/cjcj`;
+      await $({env: selfdetEnv})`${timeoutCommand} 900 ${self} --emit-chir=raw --output-type=staticlib --package ${sourceDir} --module-name cjcj --import-path ${root}/target/release --path-prefix-map=${prefixMap} --trimpath=${sourceDir} -o ${output}`;
+    } else {
+      await $({env: selfdetEnv})`${timeoutCommand} 900 ${self} --emit-chir=raw --output-type=staticlib --package ${sourceDir} --module-name cjcj --import-path ${root}/target/release -o ${output}`;
+    }
+    const cjos = (await fs.readdir(outputDir)).filter(name => name.endsWith('.cjo')).sort();
+    if (cjos.length !== 1) {
+      throw new Error(`selfdet ${arm} failed: expected exactly one CJO, found ${cjos.length}`);
+    }
+    const cjo = path.join(outputDir, cjos[0]);
+    const cjoStat = await fs.stat(cjo);
+    if (!cjoStat.isFile() || cjoStat.size === 0) {
+      throw new Error(`selfdet ${arm} failed: CJO is missing or empty: ${cjo}`);
+    }
+    console.log(`[selfdet] ${arm} cjo=${cjo} bytes=${cjoStat.size}`);
+    return cjo;
+  }
+
+  console.log('[selfdet] positive-control compile without path flags');
+  const selfdetPositiveA = await compileSelfdet(selfdetSourceA, 'positive-a', false);
+  const selfdetPositiveB = await compileSelfdet(selfdetSourceB, 'positive-b', false);
+  const selfdetPositiveCmp = await $({nothrow: true, quiet: true, stdio: 'pipe'})`cmp -s ${selfdetPositiveA} ${selfdetPositiveB}`;
+  console.log(`[selfdet] positive-control cmp-s-exit=${selfdetPositiveCmp.exitCode} expected=1`);
+  if (selfdetPositiveCmp.exitCode !== 1) {
+    throw new Error(`selfdet positive control failed: expected different CJO files, cmp exit=${selfdetPositiveCmp.exitCode}`);
+  }
+
+  console.log('[selfdet] deterministic compile with path-prefix-map and trimpath');
+  const selfdetMappedA = await compileSelfdet(selfdetSourceA, 'mapped-a', true);
+  const selfdetMappedB = await compileSelfdet(selfdetSourceB, 'mapped-b', true);
+  const selfdetMappedCmp = await $({nothrow: true, quiet: true, stdio: 'pipe'})`cmp -s ${selfdetMappedA} ${selfdetMappedB}`;
+  if (selfdetMappedCmp.exitCode !== 0) {
+    throw new Error(`selfdet determinism failed: expected identical CJO files, cmp exit=${selfdetMappedCmp.exitCode}`);
+  }
+  const selfdetMappedListing = await $({nothrow: true, quiet: true, stdio: 'pipe'})`cmp -l ${selfdetMappedA} ${selfdetMappedB}`;
+  const selfdetMappedLines = selfdetMappedListing.stdout.trim().length === 0
+    ? 0
+    : selfdetMappedListing.stdout.trim().split(/\r?\n/).length;
+  console.log(`[selfdet] mapped cmp-l-lines=${selfdetMappedLines} exit=${selfdetMappedListing.exitCode}`);
+  if (selfdetMappedListing.exitCode !== 0 || selfdetMappedLines !== 0 || selfdetMappedListing.stderr) {
+    throw new Error('selfdet determinism failed: cmp -l did not complete with zero output');
+  }
+  const selfdetWall = Number(process.hrtime.bigint() - selfdetStarted) / 1e9;
+  console.log(`[selfdet] PASS package=${selfdetPackage} positive=different mapped=byte-identical wall=${selfdetWall.toFixed(3)}s`);
+});
+
+await phase('bcgate', async () => {
+  console.log('[bcgate] verify bitcode parity');
+  await $`set -o pipefail; python3 ${root}/scripts/bcgate.py --self ${self} --base ${oracle} --corpus ${root}/scripts/difftest_corpus -j ${jobs} | tee ${work}/bcgate.log`;
+  await $`grep -Eq 'byte-identical: [0-9]+ \\(100\\.0%\\)[[:space:]]+\\|[[:space:]]+differing: 0' ${work}/bcgate.log`;
+  await $`grep -Eq 'compile-errors: 0' ${work}/bcgate.log`;
+  const onlyOneSide = await runGrepProbe({
+    label: 'bcgate one-side divergence grep',
+    run: () => $({nothrow: true})`grep -q 'functions present on only one side' ${work}/bcgate.log`,
+  });
+  if (onlyOneSide.matched) throw new Error('bcgate failed: functions are present on only one side');
+});
+
+if (noFailFast) {
+  console.log('[verify] --no-fail-fast summary');
+  for (const result of phaseResults) {
+    console.log(`  ${result.status.padEnd(4)} ${result.name} wall=${result.wall.toFixed(3)}s${result.detail ? ` detail=${result.detail}` : ''}`);
+  }
+  const failedPhases = phaseResults.filter(result => result.status === 'FAIL');
+  console.log(`[verify] phases=${phaseResults.length} pass=${phaseResults.length - failedPhases.length} fail=${failedPhases.length}`);
+  if (failedPhases.length > 0) {
+    console.error(`[verify] source build failed: ${failedPhases.map(result => result.name).join(',')}`);
+    process.exit(1);
+  }
+}
 console.log('[verify] source build passed');
