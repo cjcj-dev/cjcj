@@ -20,9 +20,12 @@ export const INITIAL_RUNTIME_FETCH_DEPTH = 200;
 // fix commit after depth 532", which points at the depth and not at the sha.
 //
 // The content is still on main. `// Close the race between the pending-writer
-// check above and TryLockRead().` sits at MutatorManager.h:130, introduced by
-// 9975f4d2 — the same commit LOADERLIFE_MIN_REF already names. So there is one
-// floor, and it now has one definition.
+// check above and TryLockRead().` sits at MutatorManager.h:132; on the
+// post-rewrite line it arrives with ff2c807b — the same commit
+// LOADERLIFE_MIN_REF already names. So there is one floor, and it now has one
+// definition. (The pre-rewrite introducer 9975f4d2 survives only on backup
+// branches and is an ancestor of nothing on main; pinning it is what kept the
+// smoke lane red from 08-15 to 08-19.)
 //
 // Distance is measured rather than declared. A literal distance is wrong the
 // moment the pin moves, and it fails in the confusing direction: the guard
