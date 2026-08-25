@@ -189,10 +189,10 @@ public func LLCSetOptions(setOptionHandler: (String) -> Unit, driverOptions: Dri
     }
     SetOptionIf(setOptionHandler, GetEffectiveOptimizationLevel(driverOptions) == OptimizationLevel.O2,
         "--cj-safepoint-outline=false")
-    // The pinned cjcj LLVM lowers O1+ heap write barriers to a phase-guarded plain store unless this
-    // is enabled. A generational collector needs the runtime path even while no tracing cycle is
-    // active so old-to-young writes enter its remembered set.
-    setOptionHandler("-cj-generational-post-barrier=true")
+    // The coloured-reference ABI is unconditional in the pinned cjcj LLVM: the read barrier always
+    // tests g_cjLoadBadMask and scalar heap ref writes always colour-test and paint. There is no
+    // flag to pass here -- a switch that could turn either off would let this driver emit code for
+    // a runtime we do not target, and the failure would be silent.
 }
 
 public func LLCSetTripleOptions(setOptionHandler: (String) -> Unit, driverOptions: DriverOptions): Unit {

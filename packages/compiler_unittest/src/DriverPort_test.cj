@@ -91,15 +91,47 @@ public class DriverToolOptionsTest {
         return count
     }
 
+    // Reduce `--flag=value` / `-flag` to the bare option name, so a reintroduced switch is caught
+    // whichever spelling the driver uses.
+    private func optionNamesFor(level: OptimizationLevel): ArrayList<String> {
+        let names = ArrayList<String>()
+        for (arg in llcOptionsFor(level)) {
+            var head = arg.split("=")[0]
+            while (head.startsWith("-")) {
+                head = head[1..]
+            }
+            names.add(head)
+        }
+        return names
+    }
+
+    // Positive control for the extractor used below. Without it, a broken `optionNamesFor` would
+    // make every forbidden-name count 0 and the real assertion would pass vacuously.
+    // `cangjie-pipeline` is passed bare at both levels; `cj-safepoint-outline` is passed as
+    // `--cj-safepoint-outline=false` at O2 only -- so this also proves the `=value` strip works
+    // and that the count actually moves between levels.
     @TestCase
-    public func keepGenerationalPostBarrierAtO0AndO2(): Unit {
-        let enabled = "-cj-generational-post-barrier=true"
-        let disabled = "-cj-generational-post-barrier=false"
-        let o0Args = llcOptionsFor(OptimizationLevel.O0)
-        let o2Args = llcOptionsFor(OptimizationLevel.O2)
-        @Expect(countOption(o0Args, enabled), 1)
-        @Expect(countOption(o2Args, enabled), 1)
-        @Expect(countOption(o0Args, disabled), 0)
-        @Expect(countOption(o2Args, disabled), 0)
+    public func optionNameExtractorActuallyFindsThings(): Unit {
+        let o0 = optionNamesFor(OptimizationLevel.O0)
+        let o2 = optionNamesFor(OptimizationLevel.O2)
+        @Expect(countOption(o0, "cangjie-pipeline"), 1)
+        @Expect(countOption(o2, "cangjie-pipeline"), 1)
+        @Expect(countOption(o0, "cj-safepoint-outline"), 0)
+        @Expect(countOption(o2, "cj-safepoint-outline"), 1)
+    }
+
+    // The coloured-reference ABI is the only ABI this driver targets. Nothing it hands to llc may
+    // be able to switch a piece of it off: such a build would link against a runtime we do not
+    // target and fail somewhere far away from here.
+    @TestCase
+    public func noSwitchCanDisableTheColouredAbi(): Unit {
+        let forbidden = ["cj-generational-post-barrier", "cj-store-good-paint", "cj-weak-load-bad-mask",
+            "enable-tagged-pointer", "cj-gcstate-dup-loop"]
+        for (level in [OptimizationLevel.O0, OptimizationLevel.O2]) {
+            let names = optionNamesFor(level)
+            for (bad in forbidden) {
+                @Expect(countOption(names, bad), 0)
+            }
+        }
     }
 }
