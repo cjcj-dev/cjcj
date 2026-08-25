@@ -128,22 +128,26 @@ function fromCaller(value, envName) {
   return unresolved(`caller supplied neither the argument nor ${envName}; this field is never probed`);
 }
 
-// Which way the generational post barrier was decided. It has exactly two
-// sources and they disagree, so recording it turns an afternoon of
-// disassembly into reading one line:
-//   a cjcj-built compiler passes -cj-generational-post-barrier=true itself
-//     (packages/driver/src/ToolOptions.cj, LLCSetOptions), so the flag is on
-//     no matter what the backend defaults to;
-//   anything else inherits the pinned llc's default, and the pin in
-//     ci/llvm_pin.env (bc65313a) still has cl::init(false).
+// Which way the generational post barrier was decided. It used to have two
+// sources that disagreed -- the cjcj driver passed
+// -cj-generational-post-barrier=true itself while an older pinned llc defaulted
+// it off -- so recording which one won turned an afternoon of digging into
+// reading one line.
+//
+// Only the backend decides now. The switch is gone from CJBarrierLowering
+// (the colour test on scalar heap ref writes is unconditional), and the driver
+// passes no barrier switch at all. So a compiler that srcbuild stamped was
+// built against ci/llvm_pin.env and has the barrier on; anything else could
+// have been built against an llc old enough to still carry the switch, and
+// only its identity can say.
 function barrierMode(builtBy, supplied) {
   const text = typeof supplied === 'string' ? supplied.trim() : '';
   if (text) return resolved(text);
   if (builtBy.status === STD_PROVENANCE_RESOLVED) {
-    return resolved('explicit-true (cjcj driver, ToolOptions.cj LLCSetOptions)');
+    return resolved('backend-on (pinned llc; the cjcj driver passes no barrier switch)');
   }
   return unresolved(
-    'compiler carries no CJCJ-COMMIT stamp, so the flag fell to the backend default; '
+    'compiler carries no CJCJ-COMMIT stamp, so which llc decided the barrier is unknown; '
       + 'supply barrierMode (or CJSTD_BARRIER_MODE) with the llc identity that decided it');
 }
 

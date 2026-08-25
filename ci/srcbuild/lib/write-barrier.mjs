@@ -3,10 +3,14 @@
 // assertStdBarriers already proves the *read* side — g_cjLoadBadMask, the tag
 // test, CJ_MCC_Read* — and passes a std that has colouring. It says nothing
 // about the *write* side, so a std built with colouring but without the
-// generational post barrier walks straight through it. That combination is not
-// hypothetical: ci/llvm_pin.env pins an llc whose -cj-generational-post-barrier
-// still defaults to cl::init(false), so anything compiled by a driver that does
-// not pass the flag itself lands in exactly that state.
+// generational post barrier walks straight through it.
+//
+// The switch that used to produce that combination (-cj-generational-post-barrier,
+// once default-off) is gone: CJBarrierLowering keeps the five write-side
+// intrinsics off the phase-guarded plain-store path unconditionally. This check
+// stays because it reads the emitted code rather than the switch — it is what
+// catches the pass regressing, or a std built by an llc old enough to still
+// carry the switch.
 //
 // Shape being detected (CJBarrierLowering.cpp SplitFastPathAndSlowPath):
 //
@@ -188,10 +192,10 @@ function inspectFunction(instructions, result) {
 
 /**
  * Fail-closed. The condition the previous comment set for flipping this -- "once
- * the pin moves past 743f41f7" -- has been met: ci/llvm_pin.env pins
- * LLVM_SHA=70a40482, `git merge-base --is-ancestor 743f41f7 70a40482` exits 0,
- * and 70a40482..main is empty, so the pinned llc defaults the generational post
- * barrier on. packages/driver/src/ToolOptions.cj:195 passes it explicitly too.
+ * the pin moves past 743f41f7" -- was met long ago, and the question has since
+ * stopped being conditional at all: the generational post barrier is no longer
+ * switchable, so every llc from the cleanup onward emits it. The driver passes
+ * nothing; ToolOptions.cj LLCSetOptions hands llc no barrier switch.
  *
  * What this checker reads is build-stage3.mjs:232 finalCore, the std this stage
  * just built from source (:223 build.py install --prefix), never the bootstrap

@@ -146,9 +146,10 @@ test('fail-closed refuses to write provenance it could not resolve', async () =>
 });
 
 test('a cjcj-built compiler resolves the barrier without being told', async () => {
-  // Positive arm: the stamp proves the cjcj driver compiled this std, and that
-  // driver passes -cj-generational-post-barrier=true itself, so the flag does not
-  // depend on whatever the pinned backend defaults to.
+  // Positive arm: the stamp proves srcbuild produced this compiler, so it was
+  // built against ci/llvm_pin.env -- an llc whose colour test on scalar heap ref
+  // writes is unconditional. The driver passes no barrier switch; the backend is
+  // the only source.
   const {root, source, prefix, compiler, compilerSha} = fixture({stamped: true});
   try {
     const destination = await writeStdProvenance({
@@ -157,7 +158,7 @@ test('a cjcj-built compiler resolves the barrier without being told', async () =
     });
     const text = fs.readFileSync(destination, 'utf8');
     assert.match(text, new RegExp(`^BUILT_BY_CJC = ${compilerSha}$`, 'm'));
-    assert.match(text, /^GENERATIONAL_POST_BARRIER = explicit-true \(cjcj driver, ToolOptions\.cj LLCSetOptions\)$/m);
+    assert.match(text, /^GENERATIONAL_POST_BARRIER = backend-on \(pinned llc; the cjcj driver passes no barrier switch\)$/m);
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
