@@ -80,6 +80,10 @@ test('rewritten history drops every old ref while actual checkout source shape r
 
     git(fixture, 'checkout', '--orphan', 'rewritten');
     git(fixture, 'commit', '--quiet', '-m', 'rewrite keeps content');
+    const refsBeforeDelete = git(
+      fixture, 'for-each-ref', '--format=%(refname)', `--contains=${oldSha}`);
+    assert.equal(refsBeforeDelete, 'refs/heads/main', 'positive control must retain old sha');
+    console.log(`REWRITE_REFS_BEFORE_DELETE=${refsBeforeDelete}`);
     git(fixture, 'branch', '--delete', '--force', 'main');
     const newSha = git(fixture, 'rev-parse', 'HEAD');
     assert.notEqual(oldSha, newSha);
