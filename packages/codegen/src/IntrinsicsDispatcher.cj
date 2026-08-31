@@ -698,7 +698,12 @@ private func CPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>, typeArg
         let gep = irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
             pointerValue, indices, name: "ele.ptr")
         InsertAsanInstrument(irBuilder, typeArgs, gep, "CJ_MCC_AsanRead")
-        irBuilder.CreateMemCpy(destPayloadPtr, 0u32, gep, 0u32, resultTySize)
+        // The generic result payload may contain references (for example
+        // ArrayIterator<String>.next).  A raw p0<-p0 memcpy has no typed
+        // provenance and is rejected by CJIRVerifier.  Reuse the existing
+        // generic payload helper so the runtime receives the type-aware copy
+        // operation while preserving the generic type information.
+        irBuilder.CallGCWriteGenericPayload(destPayloadPtr, gep, resultTySize)
         return ret
     }
     let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
