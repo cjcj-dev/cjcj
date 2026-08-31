@@ -988,15 +988,6 @@ public class IRBuilder2 <: Resource {
                 CallGCReadAgg(elementType, ArrayList<LLVMValueRef>([tempVal, baseObject, addr, size]))
                 return tempVal
             }
-            if (IsTypeContainsRef(elementType)) {
-                // Native temporaries can still carry reference fields (for
-                // example iterator values).  Keep this copy on the typed
-                // helper path even when no managed base is available; a null
-                // base is the explicit non-managed provenance token.
-                let nullBase = unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) }
-                CallGCReadAgg(elementType, ArrayList<LLVMValueRef>([tempVal, nullBase, addr, size]))
-                return tempVal
-            }
             if (sizeInBytes != 0u64) {
                 let align = cgMod.GetABITypeAlignment(elementType)
                 CreateMemCpy(tempVal, align, addr, align, size)
@@ -1007,11 +998,6 @@ public class IRBuilder2 <: Resource {
             let tempVal = CreateEntryAlloca(elementType)
             let size = unsafe {
                 LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
-            }
-            if (IsTypeContainsRef(elementType)) {
-                let nullBase = unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) }
-                CallGCReadAgg(elementType, ArrayList<LLVMValueRef>([tempVal, nullBase, addr, size]))
-                return tempVal
             }
             let align = cgMod.GetABITypeAlignment(elementType)
             CreateMemCpy(tempVal, align, addr, align, size)
@@ -1579,16 +1565,6 @@ public class IRBuilder2 <: Resource {
 
     public func CreateMemCpy(dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef, srcAlign: UInt32,
         size: LLVMValueRef): LLVMValueRef {
-        // Managed payloads must not be copied with a bare LLVM memcpy: the
-        // intrinsic carries no object/base token and CJIRVerifier correctly
-        // rejects that provenance-less form.  When the source is tracked, use
-        // the existing typed read helper; untracked sources intentionally keep
-        // the old path so genuinely unknown heap copies remain fail-closed.
-        if ((GetPointerAddressSpace(src) ?? 0u32) == 1u32) {
-            if (let Some(baseObject) <- GetTrackedManagedBase(src)) {
-                return CallGCReadStruct(dest, baseObject, src, size, "")
-            }
-        }
         return unsafe { LLVMBuildMemCpy(builder.raw, dest, destAlign, src, srcAlign, size) }
     }
 
@@ -3013,17 +2989,6 @@ public class IRBuilder2 <: Resource {
                     LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
                 }
                 CallGCWriteAgg(structType, ArrayList<LLVMValueRef>([base, place, value, size]))
-            } else if (IsTypeContainsRef(structType)) {
-                // Struct values containing references can also be copied
-                // between native temporaries (for example, iterator return
-                // values).  Keep the operation typed even without a managed
-                // destination/base; null explicitly denotes non-managed
-                // provenance and avoids a bare reference-payload memcpy.
-                let size = unsafe {
-                    LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
-                }
-                let nullBase = unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) }
-                CallGCReadAgg(structType, ArrayList<LLVMValueRef>([place, nullBase, value, size]))
             } else {
                 let size = unsafe {
                     LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
