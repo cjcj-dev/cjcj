@@ -3013,6 +3013,17 @@ public class IRBuilder2 <: Resource {
                     LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
                 }
                 CallGCWriteAgg(structType, ArrayList<LLVMValueRef>([base, place, value, size]))
+            } else if (IsTypeContainsRef(structType)) {
+                // Struct values containing references can also be copied
+                // between native temporaries (for example, iterator return
+                // values).  Keep the operation typed even without a managed
+                // destination/base; null explicitly denotes non-managed
+                // provenance and avoids a bare reference-payload memcpy.
+                let size = unsafe {
+                    LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
+                }
+                let nullBase = unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) }
+                CallGCReadAgg(structType, ArrayList<LLVMValueRef>([place, nullBase, value, size]))
             } else {
                 let size = unsafe {
                     LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
