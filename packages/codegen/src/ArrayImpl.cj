@@ -162,9 +162,11 @@ private func InitArrayFilledWithConstant(irBuilder: IRBuilder2, array: LLVMValue
     let int64Type = unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }
     let dataSize = unsafe { LLVMConstInt(int64Type, cgMod.GetTypeSize(LLVMGlobalGetValueType(arrayConstant)), 0) }
     let elemCnt = unsafe { LLVMConstInt(int64Type, UInt64(arrayConstantElems.size), 0) }
-    // The constant global is not a managed object; use a null source base
-    // token while retaining the typed source data pointer.
-    irBuilder.CreateCopyTo(ArrayCopyToInfo(LLVMNullValue(), array, srcArrI8Ptr, dstArrI8Ptr, dataSize,
+    // The constant global is not a managed object; use a typed null source
+    // base token.  LLVMNullValue() is a null C handle and crashes in
+    // CreatePointerCast; LLVMConstNull(RefType) is the IR null object.
+    let nullSrcBase = unsafe { LLVMConstNull(CGType.GetRefType(irBuilder.GetLLVMContext())) }
+    irBuilder.CreateCopyTo(ArrayCopyToInfo(nullSrcBase, array, srcArrI8Ptr, dstArrI8Ptr, dataSize,
         irBuilder.GetInt64(0), irBuilder.GetInt64(0), elemType, elemCnt))
     return array
 }
