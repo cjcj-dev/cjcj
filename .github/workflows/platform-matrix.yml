@@ -14,7 +14,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
   # RUNTIME_REF/RUNTIME_SRC_URL come from ci/runtime_pin.env via the
   # "Load runtime pin" step — the pin lives in exactly one file.
   RUNTIME_VERSION: 1.2.0-alpha.20260721165458
@@ -49,51 +48,44 @@ jobs:
           - runner: macos-26
             llvm_platform: darwin_aarch64
             sdk_runtime_dir: darwin_aarch64_cjnative
-            sdk_archive: cangjie-sdk-mac-aarch64-1.2.0-alpha.20260721165458.tar.gz
           - runner: macos-26-intel
             llvm_platform: darwin_x86_64
             sdk_runtime_dir: darwin_x86_64_cjnative
-            sdk_archive: cangjie-sdk-mac-x64-1.2.0-alpha.20260721165458.tar.gz
           - runner: macos-15
             llvm_platform: darwin_aarch64
             sdk_runtime_dir: darwin_aarch64_cjnative
-            sdk_archive: cangjie-sdk-mac-aarch64-1.2.0-alpha.20260721165458.tar.gz
           - runner: macos-15-intel
             llvm_platform: darwin_x86_64
             sdk_runtime_dir: darwin_x86_64_cjnative
-            sdk_archive: cangjie-sdk-mac-x64-1.2.0-alpha.20260721165458.tar.gz
           - runner: ubuntu-24.04
             llvm_platform: linux_x86_64
             sdk_runtime_dir: linux_x86_64_cjnative
-            sdk_archive: cangjie-sdk-linux-x64-1.2.0-alpha.20260721165458.tar.gz
           - runner: ubuntu-24.04-arm
             llvm_platform: linux_aarch64
             sdk_runtime_dir: linux_aarch64_cjnative
-            sdk_archive: cangjie-sdk-linux-aarch64-1.2.0-alpha.20260721165458.tar.gz
           - runner: ubuntu-22.04
             llvm_platform: linux_x86_64
             sdk_runtime_dir: linux_x86_64_cjnative
-            sdk_archive: cangjie-sdk-linux-x64-1.2.0-alpha.20260721165458.tar.gz
           - runner: ubuntu-22.04-arm
             llvm_platform: linux_aarch64
             sdk_runtime_dir: linux_aarch64_cjnative
-            sdk_archive: cangjie-sdk-linux-aarch64-1.2.0-alpha.20260721165458.tar.gz
           - runner: windows-2025
             llvm_platform: windows_x86_64
             sdk_runtime_dir: windows_x86_64_cjnative
-            sdk_archive: cangjie-sdk-windows-x64-1.2.0-alpha.20260721165458.zip
           - runner: windows-2022
             llvm_platform: windows_x86_64
             sdk_runtime_dir: windows_x86_64_cjnative
-            sdk_archive: cangjie-sdk-windows-x64-1.2.0-alpha.20260721165458.zip
     env:
       MATRIX_RUNNER: ${{ matrix.runner }}
       SDK_RUNTIME_DIR: ${{ matrix.sdk_runtime_dir }}
-      SDK_ARCHIVE: ${{ matrix.sdk_archive }}
 
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
+
+      - name: Load host toolchain pin
+        shell: bash
+        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
 
       - name: Load runtime pin
         shell: bash

@@ -377,7 +377,7 @@ test('native build environments use configured architecture, OpenSSL, and loader
   }
 });
 
-test('source build keeps a version-matched plain host runtime across both bootstrap halves', async () => {
+test('source build keeps the pinned plain host runtime across both bootstrap halves', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
   const provision = workflow.indexOf('- name: Provision uncoloured host SDK');
   const compiler = workflow.indexOf('- name: Build compiler oracle');
@@ -387,7 +387,7 @@ test('source build keeps a version-matched plain host runtime across both bootst
   assert.ok(prepareHost > compiler && runtime > prepareHost);
   for (const contract of [
     'export CJCJ_SDK_STOCK_LLC=1',
-    'export CJCJ_TOOLCHAIN="nightly-$RUNTIME_VERSION"',
+    'cat ci/cjpm_pin.env >> "$GITHUB_ENV"',
     'CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk',
     'CJCJ_SRCBUILD_HOST_SDK=$host_sdk',
     'ci/srcbuild/steps/prepare-source-host-sdk.mjs',

@@ -58,6 +58,7 @@ if (process.env.GITHUB_ENV) {
   await fs.appendFile(process.env.GITHUB_ENV, [
     `BASE_SDK_ARCHIVE=${archive}`,
     `BASE_SDK_PROVENANCE=${sidecar}`,
+    `BASE_SDK_TOOLCHAIN=${values.toolchain}`,
     '',
   ].join('\n'));
 }

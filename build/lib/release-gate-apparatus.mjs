@@ -12,6 +12,7 @@ import {
 export const GATE_APPARATUS_PROVENANCE = 'GATE-APPARATUS.json';
 export const GATE_APPARATUS_COMPONENT = 'acceptance-apparatus';
 export const REVIEWED_GATE_HOST_TOOLCHAIN = 'nightly-1.2.0-alpha.20260721165458';
+export const GATE_APPARATUS_COVERAGE = Object.freeze(['covered', 'not-covered']);
 export const GATE_HOST_MASK_SYMBOL = 'g_cjLoadBadMask';
 export const EXPECTED_GATE_HOST_MASK_SYMBOL_COUNT = 0;
 
@@ -24,6 +25,9 @@ export const KNOWN_GATE_APPARATUS_LIMITATIONS = Object.freeze({
     'that host runtime. Replacing it with the current-generation uncoloured host changed smoke',
     'from 13/15 to 0/15, so the gate remains on the previous released toolchain. This record is',
     'apparatus provenance only: it does not classify future failures or relax difftest or VERIFY.',
+    'The ordinary build host now follows ci/cjpm_pin.env independently; reviewed_against and',
+    'coverage record whether this apparatus covers those host bytes, and re-review is pending',
+    'when it does not.',
   ].join(' '),
   evidence: [
     {
@@ -89,6 +93,19 @@ function requireReviewedToolchain(value, label = 'gate host toolchain') {
   return toolchain;
 }
 
+function requireCoverage(value, label) {
+  const coverage = requireString(value, label);
+  if (!GATE_APPARATUS_COVERAGE.includes(coverage)) {
+    throw new Error(`${label} is outside the closed set ${GATE_APPARATUS_COVERAGE.join('/')}: ${coverage}`);
+  }
+  return coverage;
+}
+
+export function gateApparatusCoverageWarning(toolchain) {
+  return `Gate apparatus does not cover this host configuration: bytes=${toolchain}, `
+    + `reviewed_against=${REVIEWED_GATE_HOST_TOOLCHAIN}`;
+}
+
 function probeArguments(platform) {
   if (platform.startsWith('linux-')) return ['-D', '--defined-only'];
   if (platform.startsWith('darwin-')) return ['-gU'];
@@ -147,18 +164,6 @@ function requireBaseSdk(value, {platform, toolchain}, label) {
   };
 }
 
-export function parseGateHostToolchain(text) {
-  const values = new Map();
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
-    if (!match) throw new Error(`invalid toolchain pin line: ${raw}`);
-    values.set(match[1], match[2]);
-  }
-  return requireReviewedToolchain(values.get('CJCJ_TOOLCHAIN'), 'CJCJ_TOOLCHAIN');
-}
-
 export async function resolveGateHostRuntime({sdk, platform}) {
   requirePlatform(platform);
   const root = path.resolve(sdk);
@@ -190,16 +195,36 @@ export function probeGateHostMaskSymbol({runtime, platform}) {
 export function validateGateApparatusProvenance(value, {platform, expectedToolchain = ''} = {}) {
   const label = 'gate apparatus provenance';
   requirePlatform(platform);
-  if (value?.schema !== 1) throw new Error(`${label}.schema must be 1`);
+  if (![1, 2].includes(value?.schema)) throw new Error(`${label}.schema must be 1 or 2`);
   if (value?.component !== GATE_APPARATUS_COMPONENT) {
     throw new Error(`${label}.component must be ${GATE_APPARATUS_COMPONENT}`);
   }
   if (value?.platform !== platform) {
     throw new Error(`${label}.platform mismatch: ${value?.platform || '<empty>'} != ${platform}`);
   }
-  const toolchain = requireReviewedToolchain(value.gate_host_toolchain);
-  if (expectedToolchain && toolchain !== expectedToolchain) {
-    throw new Error(`${label}.gate_host_toolchain mismatch: ${toolchain} != ${expectedToolchain}`);
+  const toolchain = value.schema === 1
+    ? requireReviewedToolchain(value.gate_host_toolchain, `${label}.gate_host_toolchain`)
+    : requireString(value.gate_host_toolchain, `${label}.gate_host_toolchain`);
+  const reviewedAgainst = value.schema === 1
+    ? REVIEWED_GATE_HOST_TOOLCHAIN
+    : requireReviewedToolchain(value.reviewed_against, `${label}.reviewed_against`);
+  const coverage = value.schema === 1
+    ? 'covered'
+    : requireCoverage(value.coverage, `${label}.coverage`);
+  const expectedCoverage = toolchain === reviewedAgainst ? 'covered' : 'not-covered';
+  if (coverage !== expectedCoverage) {
+    throw new Error(`${label}.coverage mismatch: ${coverage} != ${expectedCoverage}`);
+  }
+  if (coverage === 'not-covered') {
+    const warning = requireString(value.coverage_warning, `${label}.coverage_warning`);
+    if (warning !== gateApparatusCoverageWarning(toolchain)) {
+      throw new Error(`${label}.coverage_warning does not identify the uncovered host bytes`);
+    }
+  } else if (value.schema === 2 && Object.hasOwn(value, 'coverage_warning')) {
+    throw new Error(`${label}.coverage_warning must be absent when coverage=covered`);
+  }
+  if (expectedToolchain && reviewedAgainst !== expectedToolchain) {
+    throw new Error(`${label}.reviewed_against mismatch: ${reviewedAgainst} != ${expectedToolchain}`);
   }
   const allowedRuntimePaths = runtimePaths.get(platform);
   const runtimePath = requireString(value.host_runtime?.path, `${label}.host_runtime.path`);
@@ -214,8 +239,8 @@ export function validateGateApparatusProvenance(value, {platform, expectedToolch
     throw new Error(`${label}.host_runtime.symbol_probe mismatch: ${value.host_runtime?.symbol_probe || '<empty>'}`);
   }
   const baseSdk = value.base_sdk;
-  if (baseSdk?.version !== toolchainVersion(toolchain)) {
-    throw new Error(`${label}.base_sdk.version does not match ${toolchain}`);
+  if (baseSdk?.version !== toolchainVersion(reviewedAgainst)) {
+    throw new Error(`${label}.base_sdk.version does not match ${reviewedAgainst}`);
   }
   for (const name of ['release_repository', 'download_url', 'archive_path']) {
     requireString(baseSdk?.[name], `${label}.base_sdk.${name}`);
@@ -249,7 +274,8 @@ export async function writeGateApparatusProvenance({
   baseSdkProvenance,
 }) {
   requirePlatform(platform);
-  const reviewedToolchain = requireReviewedToolchain(toolchain);
+  const actualToolchain = requireString(toolchain, 'gate host toolchain');
+  const reviewedToolchain = REVIEWED_GATE_HOST_TOOLCHAIN;
   const normalizedRuntimePath = normalizeRelative(runtimePath);
   if (!runtimePaths.get(platform).includes(normalizedRuntimePath)) {
     throw new Error(`gate host runtime path is not canonical for ${platform}: ${normalizedRuntimePath}`);
@@ -258,11 +284,14 @@ export async function writeGateApparatusProvenance({
   if (probe.count !== EXPECTED_GATE_HOST_MASK_SYMBOL_COUNT) {
     throw new Error(`gate host ${GATE_HOST_MASK_SYMBOL} count must be ${EXPECTED_GATE_HOST_MASK_SYMBOL_COUNT}, got ${probe.count}`);
   }
+  const coverage = actualToolchain === reviewedToolchain ? 'covered' : 'not-covered';
   const value = {
-    schema: 1,
+    schema: 2,
     component: GATE_APPARATUS_COMPONENT,
     platform,
-    gate_host_toolchain: reviewedToolchain,
+    gate_host_toolchain: actualToolchain,
+    reviewed_against: reviewedToolchain,
+    coverage,
     base_sdk: requireBaseSdk(baseSdkProvenance, {platform, toolchain: reviewedToolchain}, 'base SDK provenance'),
     host_runtime: {
       path: normalizedRuntimePath,
@@ -272,6 +301,9 @@ export async function writeGateApparatusProvenance({
     },
     known_apparatus_limitations: KNOWN_GATE_APPARATUS_LIMITATIONS,
   };
+  if (coverage === 'not-covered') {
+    value.coverage_warning = gateApparatusCoverageWarning(actualToolchain);
+  }
   validateGateApparatusProvenance(value, {platform, expectedToolchain: reviewedToolchain});
   await fs.writeFile(destination, `${JSON.stringify(value, null, 2)}\n`);
   return value;
@@ -303,6 +335,9 @@ export function gateApparatusManifestSection(value, platform) {
   validateGateApparatusProvenance(value, {platform});
   return {
     gate_host_toolchain: value.gate_host_toolchain,
+    reviewed_against: value.reviewed_against,
+    coverage: value.coverage,
+    ...(value.coverage_warning ? {coverage_warning: value.coverage_warning} : {}),
     host_runtime: value.host_runtime,
     known_apparatus_limitations: value.known_apparatus_limitations,
   };
@@ -310,7 +345,28 @@ export function gateApparatusManifestSection(value, platform) {
 
 export function validateGateApparatusManifestSection(value, platform) {
   requirePlatform(platform);
-  requireReviewedToolchain(value?.gate_host_toolchain, 'acceptance_apparatus.gate_host_toolchain');
+  const hasCoverageRecord = Object.hasOwn(value || {}, 'reviewed_against') ||
+    Object.hasOwn(value || {}, 'coverage') || Object.hasOwn(value || {}, 'coverage_warning');
+  const toolchain = hasCoverageRecord
+    ? requireString(value?.gate_host_toolchain, 'acceptance_apparatus.gate_host_toolchain')
+    : requireReviewedToolchain(value?.gate_host_toolchain, 'acceptance_apparatus.gate_host_toolchain');
+  const reviewedAgainst = hasCoverageRecord
+    ? requireReviewedToolchain(value?.reviewed_against, 'acceptance_apparatus.reviewed_against')
+    : REVIEWED_GATE_HOST_TOOLCHAIN;
+  const coverage = hasCoverageRecord
+    ? requireCoverage(value?.coverage, 'acceptance_apparatus.coverage')
+    : 'covered';
+  const expectedCoverage = toolchain === reviewedAgainst ? 'covered' : 'not-covered';
+  if (coverage !== expectedCoverage) {
+    throw new Error(`acceptance_apparatus.coverage mismatch: ${coverage} != ${expectedCoverage}`);
+  }
+  if (coverage === 'not-covered') {
+    if (value?.coverage_warning !== gateApparatusCoverageWarning(toolchain)) {
+      throw new Error('acceptance_apparatus.coverage_warning does not identify the uncovered host bytes');
+    }
+  } else if (hasCoverageRecord && Object.hasOwn(value, 'coverage_warning')) {
+    throw new Error('acceptance_apparatus.coverage_warning must be absent when coverage=covered');
+  }
   const runtimePath = requireString(value?.host_runtime?.path, 'acceptance_apparatus.host_runtime.path');
   if (!runtimePaths.get(platform).includes(runtimePath)) {
     throw new Error(`acceptance_apparatus.host_runtime.path is not canonical for ${platform}: ${runtimePath}`);

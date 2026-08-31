@@ -78,8 +78,10 @@ test('component provenance, final std, and Python inputs are fail-closed in both
   assert.ok(consumer.includes('EXPECTED_STD_ARTIFACT: final-std-${{ inputs.platform }}'));
   assert.ok(consumer.includes('name: source-cjpm-${{ inputs.platform }}'));
   assert.ok(consumer.includes('node ci/release/prepare_base_sdk.mjs'));
-  assert.ok(consumer.includes('--toolchain-pin "$PWD/ci/cjpm_pin.env"'));
-  assert.ok(consumer.includes('--toolchain-pin "$PWD\\ci\\cjpm_pin.env"'));
+  assert.ok(consumer.includes('--actual-host-toolchain "$CJCJ_ACTUAL_HOST_TOOLCHAIN"'));
+  assert.ok(consumer.includes('--actual-host-toolchain "$env:CJCJ_ACTUAL_HOST_TOOLCHAIN"'));
+  assert.ok(consumer.includes('--base-sdk-id "$RELEASE_HOST_TOOLCHAIN"'));
+  assert.ok(consumer.includes('--base-sdk-id "$env:RELEASE_HOST_TOOLCHAIN"'));
   assert.ok(consumer.includes('node ci/release/install_cjpm_artifact.mjs'));
 });
 

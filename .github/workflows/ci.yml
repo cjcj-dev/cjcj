@@ -10,10 +10,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
-  # RUNTIME_REF/RUNTIME_VERSION come from ci/runtime_pin.env via the "Load runtime pin" step.
-
 jobs:
   lint:
     name: Verify sources
@@ -106,6 +102,9 @@ jobs:
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
+      - name: Load host toolchain pin
+        shell: bash
+        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
       - name: Load runtime pin
         shell: bash
         run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
@@ -192,6 +191,9 @@ jobs:
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
+      - name: Load host toolchain pin
+        shell: bash
+        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
       - name: Restore SDK cache
         id: sdkcache
         uses: actions/cache/restore@v6

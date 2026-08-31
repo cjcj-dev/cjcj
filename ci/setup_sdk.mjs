@@ -6,6 +6,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {runGrepProbe} from '../build/lib/fail-closed-probes.mjs';
+import {
+  hostToolchainFromCjcVersion,
+  requireHostToolchain,
+  requireMatchingBaseSdkToolchain,
+} from './host-toolchain-pin.mjs';
 import {parseLlvmToolsManifest} from './llvm-tools-manifest.mjs';
 import {
   persistBaseSdkProvenance,
@@ -15,7 +20,7 @@ import {
 $.stdio = 'inherit';
 
 const repoRoot = process.env.REPO_ROOT || path.resolve(import.meta.dirname, '..');
-const toolchain = process.env.CJCJ_TOOLCHAIN || 'nightly-1.2.0-alpha.20260721165458';
+const toolchain = requireHostToolchain();
 const cjvVersion = process.env.CJV_VERSION || 'v0.2.20';
 const heapSize = process.env.CJ_HEAP_SIZE || '12GB';
 const home = process.env.HOME;
@@ -74,16 +79,18 @@ if (process.env.GITCODE_API_KEY) {
 }
 const baseSdkArchive = process.env.BASE_SDK_ARCHIVE || '';
 const baseSdkProvenance = process.env.BASE_SDK_PROVENANCE || '';
+const baseSdkToolchain = process.env.BASE_SDK_TOOLCHAIN || '';
 const releasePlatform = process.env.RELEASE_PLATFORM || '';
-if (baseSdkArchive || baseSdkProvenance || releasePlatform) {
-  if (!baseSdkArchive || !baseSdkProvenance || !releasePlatform) {
-    throw new Error('BASE_SDK_ARCHIVE, BASE_SDK_PROVENANCE and RELEASE_PLATFORM must be supplied together');
+if (baseSdkArchive || baseSdkProvenance || baseSdkToolchain || releasePlatform) {
+  if (!baseSdkArchive || !baseSdkProvenance || !baseSdkToolchain || !releasePlatform) {
+    throw new Error('BASE_SDK_ARCHIVE, BASE_SDK_PROVENANCE, BASE_SDK_TOOLCHAIN and RELEASE_PLATFORM must be supplied together');
   }
+  requireMatchingBaseSdkToolchain({hostToolchain: toolchain, baseSdkToolchain});
   const provenance = await verifyBaseSdkProvenance({
     archive: baseSdkArchive,
     sidecar: baseSdkProvenance,
     platform: releasePlatform,
-    toolchain,
+    toolchain: baseSdkToolchain,
   });
   log(`cjv toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`);
   await $`cjv toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`;
@@ -105,7 +112,7 @@ if (baseSdkArchive) {
     sidecar: baseSdkProvenance,
     toolchainDir: cangjieHome,
     platform: releasePlatform,
-    toolchain,
+    toolchain: baseSdkToolchain,
   });
   log(`base SDK provenance retained: sidecar=${retained.sidecar} archive=${retained.cachedArchive}`);
 }
@@ -128,6 +135,10 @@ if (baseFile.exitCode !== 0 || baseLinked.exitCode !== 0 || baseVersion.exitCode
 log(`base cjc file: ${baseFile.stdout.trim()}`);
 log(`base cjc linked libraries: no missing entries`);
 log(`base cjc version:\n${baseVersion.stdout.trim()}`);
+const actualHostToolchain = hostToolchainFromCjcVersion(baseVersion.stdout);
+if (actualHostToolchain !== toolchain) {
+  throw new Error(`installed base SDK identity mismatch: requested=${toolchain} actual=${actualHostToolchain}`);
+}
 
 // 2.5 Swap the SDK's optimizer, backend and (for releases) LTO linker with one
 // source-built fixed LLVM tuple.
@@ -327,6 +338,7 @@ if (process.env.GITHUB_ENV) {
   if (!process.env.GITHUB_PATH) throw new Error('GITHUB_PATH is required when GITHUB_ENV is set');
   await fs.appendFile(process.env.GITHUB_ENV, [
     `CANGJIE_HOME=${cangjieHome}`,
+    `CJCJ_ACTUAL_HOST_TOOLCHAIN=${actualHostToolchain}`,
     `CANGJIE_STDX_PATH=${stdxPath}`,
     `${ldVar}=${ldPath}`,
     `cjHeapSize=${heapSize}`,

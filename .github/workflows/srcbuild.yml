@@ -170,6 +170,9 @@ jobs:
       - name: Checkout cjcj
         uses: actions/checkout@v7
 
+      - name: Load host toolchain pin
+        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+
       - name: Load source pins
         run: cat ci/source_pin.env >> "$GITHUB_ENV"
 
@@ -184,7 +187,6 @@ jobs:
         run: |
           set -euo pipefail
           export CJCJ_SDK_STOCK_LLC=1
-          export CJCJ_TOOLCHAIN="nightly-$RUNTIME_VERSION"
           npx --yes zx@8 ci/setup_sdk.mjs
           host_sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
           test -d "$host_sdk"
