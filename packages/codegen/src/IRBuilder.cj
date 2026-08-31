@@ -988,6 +988,15 @@ public class IRBuilder2 <: Resource {
                 CallGCReadAgg(elementType, ArrayList<LLVMValueRef>([tempVal, baseObject, addr, size]))
                 return tempVal
             }
+            if (IsTypeContainsRef(elementType)) {
+                // Native temporaries can still carry reference fields (for
+                // example iterator values).  Keep this copy on the typed
+                // helper path even when no managed base is available; a null
+                // base is the explicit non-managed provenance token.
+                let nullBase = unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) }
+                CallGCReadAgg(elementType, ArrayList<LLVMValueRef>([tempVal, nullBase, addr, size]))
+                return tempVal
+            }
             if (sizeInBytes != 0u64) {
                 let align = cgMod.GetABITypeAlignment(elementType)
                 CreateMemCpy(tempVal, align, addr, align, size)
@@ -998,6 +1007,11 @@ public class IRBuilder2 <: Resource {
             let tempVal = CreateEntryAlloca(elementType)
             let size = unsafe {
                 LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
+            }
+            if (IsTypeContainsRef(elementType)) {
+                let nullBase = unsafe { LLVMConstNull(CGType.GetRefType(GetLLVMContext())) }
+                CallGCReadAgg(elementType, ArrayList<LLVMValueRef>([tempVal, nullBase, addr, size]))
+                return tempVal
             }
             let align = cgMod.GetABITypeAlignment(elementType)
             CreateMemCpy(tempVal, align, addr, align, size)
