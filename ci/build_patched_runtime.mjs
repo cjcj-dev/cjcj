@@ -11,21 +11,21 @@ import {resolveRuntimeSource} from './runtime-pin.mjs';
 const log = (message) => console.log(`[runtime] ${message}`);
 export const INITIAL_RUNTIME_FETCH_DEPTH = 200;
 
-// The floor this guard enforces is the reader-admission recheck in
-// MutatorManager::TryAcquireMutatorManagementRLock: after TryLockRead succeeds,
-// a second acquire load of mgmtWritersWaiting must UnlockRead and return false
-// if a writer announced in the window. That is the load-bearing order; comments
-// and the introducing commit SHA are not. LOADERLIFE_MIN_REF still names a sha
-// for G13, but this build-time guard must not ask merge-base --is-ancestor of
-// that sha: the 08-12 and 08-23 rewrites left the content on main and the sha
-// only on pre-rewrite branches, and "no fetch depth can reach a commit that is
-// not an ancestor" then red-lined CI while blaming depth.
+// This guard checks a weak source-shape floor in
+// MutatorManager::TryAcquireMutatorManagementRLock. It deliberately avoids the
+// introducing commit SHA: history rewrites may replace that SHA while retaining
+// the current canonical spelling checked below.
 export const GC_FIX_MAX_FETCH_DEPTH = 4096;
 export const GC_FIX_SOURCE = 'runtime/src/Mutator/MutatorManager.h';
 
-// Semantic floor: TryLockRead success, then mgmtWritersWaiting > 0 ⇒ UnlockRead + false.
-// A rewrite that keeps this order still passes; deleting the post-lock recheck fails.
-export function gcFixContentPresent(sourceText) {
+// Weak source-shape floor.
+// Guarantees: under the current canonical spelling, the function body contains
+// a mgmtWritersWaiting acquire-load and an UnlockRead token after TryLockRead.
+// Does not guarantee: reachability, a shared branch, comparison or return value,
+// local aliases, helper extraction, macros, or any equivalent rewrite.
+// Do not expand this text matcher for newly found spellings; record such cases
+// for a separate behavior-level check instead.
+export function gcFixWeakSourceShapePresent(sourceText) {
   const start = sourceText.search(/bool\s+TryAcquireMutatorManagementRLock\s*\(\s*\)\s*\{/);
   if (start < 0) return false;
   const open = sourceText.indexOf('{', start);
@@ -62,7 +62,7 @@ export async function gcFixCommit(env = process.env) {
   return floor;
 }
 
-export async function verifyGcFixAncestry(work, runtimeRef = 'HEAD', env = process.env) {
+export async function verifyGcFixWeakSourceShape(work, runtimeRef = 'HEAD', env = process.env) {
   void runtimeRef;
   void env;
   const source = path.join(work, GC_FIX_SOURCE);
@@ -73,11 +73,11 @@ export async function verifyGcFixAncestry(work, runtimeRef = 'HEAD', env = proce
     log(`ERROR: cannot read ${GC_FIX_SOURCE}: ${error.code || error.message}`);
     throw new Error(`GC fix source missing: ${GC_FIX_SOURCE}`);
   }
-  if (!gcFixContentPresent(text)) {
-    log(`ERROR: ${GC_FIX_SOURCE} lacks post-TryLockRead mgmtWritersWaiting recheck + UnlockRead`);
-    throw new Error('pinned GC fix content missing');
+  if (!gcFixWeakSourceShapePresent(text)) {
+    log(`ERROR: ${GC_FIX_SOURCE} lacks the canonical weak source shape after TryLockRead`);
+    throw new Error('pinned GC weak source-shape floor missing');
   }
-  log(`verified: ${GC_FIX_SOURCE} has post-lock writer-pending recheck (content floor, not sha ancestry)`);
+  log(`verified: ${GC_FIX_SOURCE} matches the weak source-shape floor (not a behavior proof)`);
 }
 
 async function main() {
@@ -100,9 +100,9 @@ async function main() {
     const actualRef = (await $({stdio: 'pipe'})`git -C ${work} rev-parse HEAD`).stdout.trim();
     if (actualRef !== runtimeRef) throw new Error(`runtime ref mismatch: expected ${runtimeRef}, got ${actualRef}`);
 
-    // Provenance guard: the reader-admission recheck must be in the tree about
-    // to be built. SHA ancestry of LOADERLIFE_MIN_REF is not this check.
-    await verifyGcFixAncestry(work, runtimeRef);
+    // Source-shape guard: check the tree about to be built rather than SHA
+    // ancestry of LOADERLIFE_MIN_REF.
+    await verifyGcFixWeakSourceShape(work, runtimeRef);
 
     if (process.platform === 'darwin') {
       await $`xcodebuild -version`;
