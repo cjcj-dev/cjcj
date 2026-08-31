@@ -160,6 +160,40 @@ test('an existing commit on a backup line is NOT_MET for both authority question
   }
 });
 
+test('offline --repo with a stale local authority is STALE, not STRANDED', () => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'pin-sweep-stale-offline-'));
+  const source = path.join(fixture, 'source');
+  fs.mkdirSync(source);
+  try {
+    git(source, 'init', '--quiet', '--initial-branch=main');
+    git(source, 'config', 'user.name', 'Pin Sweep Test');
+    git(source, 'config', 'user.email', 'pin-sweep@example.invalid');
+    const base = commit(source, 'base', 'base');
+    const remoteAhead = commit(source, 'ahead', 'ahead');
+    git(source, 'reset', '--quiet', '--hard', base);
+    const pins = [{
+      file: 'ci/fixture_pin.env',
+      key: 'COMPILER_REF',
+      sha: remoteAhead,
+      urlKey: 'COMPILER_URL',
+      url: source,
+      ...declaration('COMPILER_REF'),
+    }];
+    const offline = auditPins(pins, {
+      remote: false,
+      repoSpecifications: [`COMPILER_REF=${source}#main`],
+      timeoutMs: 10_000,
+    });
+    assert.equal(offline[0].q1.answer, 'MET');
+    assert.equal(offline[0].q2.answer, 'NOT_MET');
+    assert.equal(offline[0].conclusion, 'STALE');
+    assert.notEqual(offline[0].conclusion, 'STRANDED');
+    console.log('GATEARM OFFLINE_STALE q1=MET q2=NOT_MET conclusion=STALE not STRANDED');
+  } finally {
+    fs.rmSync(fixture, {recursive: true, force: true});
+  }
+});
+
 test('a missing authority declaration fails instead of guessing main', () => {
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'pin-sweep-missing-declaration-'));
   const source = path.join(fixture, 'source');

@@ -166,7 +166,10 @@ function conclusion(result, remote) {
     return 'LOCAL_STALE_OR_DIVERGED';
   }
   if (result.q1.answer === 'MET' && result.q2.answer === 'NOT_MET'
-      && (!remote || result.q3.answer === 'NOT_MET')) return 'STRANDED';
+      && remote && result.q3.answer === 'NOT_MET') return 'STRANDED';
+  if (result.q1.answer === 'MET' && result.q2.answer === 'NOT_MET' && !remote) {
+    return 'STALE';
+  }
   return remote ? 'PASS' : 'OFFLINE_MET';
 }
 

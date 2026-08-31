@@ -11,26 +11,47 @@ import {resolveRuntimeSource} from './runtime-pin.mjs';
 const log = (message) => console.log(`[runtime] ${message}`);
 export const INITIAL_RUNTIME_FETCH_DEPTH = 200;
 
-// The floor this guard enforces lives in ci/runtime_pin.env as LOADERLIFE_MIN_REF,
-// which G13 also reads. It used to be duplicated here as a literal SHA together
-// with a literal distance-from-the-pin, and that pair is what broke CI on
-// 2026-08-15: the runtime history was rewritten on 08-12, the sha the literal
-// named survives only on pre-rewrite branches, and no fetch depth can reach a
-// commit that is not an ancestor. The failure read as "cannot obtain pinned GC
-// fix commit after depth 532", which points at the depth and not at the sha.
-//
-// The content is still on main. `// Close the race between the pending-writer
-// check above and TryLockRead().` sits at MutatorManager.h:132; on the
-// post-rewrite line it arrives with ff2c807b — the same commit
-// LOADERLIFE_MIN_REF already names. So there is one floor, and it now has one
-// definition. (The pre-rewrite introducer 9975f4d2 survives only on backup
-// branches and is an ancestor of nothing on main; pinning it is what kept the
-// smoke lane red from 08-15 to 08-19.)
-//
-// Distance is measured rather than declared. A literal distance is wrong the
-// moment the pin moves, and it fails in the confusing direction: the guard
-// blames its own depth for a commit that was never reachable.
+// The floor this guard enforces is the reader-admission recheck in
+// MutatorManager::TryAcquireMutatorManagementRLock: after TryLockRead succeeds,
+// a second acquire load of mgmtWritersWaiting must UnlockRead and return false
+// if a writer announced in the window. That is the load-bearing order; comments
+// and the introducing commit SHA are not. LOADERLIFE_MIN_REF still names a sha
+// for G13, but this build-time guard must not ask merge-base --is-ancestor of
+// that sha: the 08-12 and 08-23 rewrites left the content on main and the sha
+// only on pre-rewrite branches, and "no fetch depth can reach a commit that is
+// not an ancestor" then red-lined CI while blaming depth.
 export const GC_FIX_MAX_FETCH_DEPTH = 4096;
+export const GC_FIX_SOURCE = 'runtime/src/Mutator/MutatorManager.h';
+
+// Semantic floor: TryLockRead success, then mgmtWritersWaiting > 0 ⇒ UnlockRead + false.
+// A rewrite that keeps this order still passes; deleting the post-lock recheck fails.
+export function gcFixContentPresent(sourceText) {
+  const start = sourceText.search(/bool\s+TryAcquireMutatorManagementRLock\s*\(\s*\)\s*\{/);
+  if (start < 0) return false;
+  const open = sourceText.indexOf('{', start);
+  if (open < 0) return false;
+  let depth = 0;
+  let end = -1;
+  for (let index = open; index < sourceText.length; index += 1) {
+    const char = sourceText[index];
+    if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        end = index;
+        break;
+      }
+    }
+  }
+  if (end < 0) return false;
+  const body = sourceText.slice(open + 1, end);
+  const lock = body.search(/mutatorManagementRWLock\s*\.\s*TryLockRead\s*\(\s*\)/);
+  if (lock < 0) return false;
+  const after = body.slice(lock);
+  const recheck = after.search(/mgmtWritersWaiting\s*\.\s*load\s*\(\s*std::memory_order_acquire\s*\)/);
+  if (recheck < 0) return false;
+  return /mutatorManagementRWLock\s*\.\s*UnlockRead\s*\(\s*\)/.test(after.slice(recheck));
+}
 
 export async function gcFixCommit(env = process.env) {
   const pins = await resolveRuntimeSource(env);
@@ -41,64 +62,22 @@ export async function gcFixCommit(env = process.env) {
   return floor;
 }
 
-async function hasCommit(work, commit) {
-  const result = await $({nothrow: true, quiet: true, stdio: 'pipe'})`
-    git -C ${work} cat-file -e ${commit}^{commit}
-  `;
-  return result.exitCode === 0;
-}
-
 export async function verifyGcFixAncestry(work, runtimeRef = 'HEAD', env = process.env) {
-  const fixCommit = await gcFixCommit(env);
-  let fixAvailable = await hasCommit(work, fixCommit);
-
-  // Deepen in doubling rounds until the commit appears or the cap is reached.
-  //
-  // What is reported is how much history this function asked for, not "the depth
-  // of the repository": the caller may have cloned at any depth, and claiming a
-  // number we never checked is how the old message came to blame its own depth
-  // for a commit that was never on the branch.
-  let requested = 0;
-  let step = INITIAL_RUNTIME_FETCH_DEPTH;
-  while (!fixAvailable && requested < GC_FIX_MAX_FETCH_DEPTH) {
-    const by = Math.min(step, GC_FIX_MAX_FETCH_DEPTH - requested);
-    log(`GC fix commit ${fixCommit} not present; deepening by ${by} (asked for ${requested + by} so far)`);
-    const deepen = await $({nothrow: true, quiet: true, stdio: 'pipe'})`
-      git -C ${work} fetch --deepen ${by} origin ${runtimeRef}
-    `;
-    if (deepen.exitCode !== 0) {
-      const detail = deepen.stderr.trim().split(/\r?\n/).at(-1) || '<no git diagnostic>';
-      log(`ERROR: runtime fetch apparatus failed while deepening by ${by}; `
-        + `git exit=${deepen.exitCode}: ${detail}`);
-      throw new Error(`runtime fetch apparatus could not deepen history for GC fix ${fixCommit}`);
-    }
-    requested += by;
-    step *= 2;
-    fixAvailable = await hasCommit(work, fixCommit);
+  void runtimeRef;
+  void env;
+  const source = path.join(work, GC_FIX_SOURCE);
+  let text;
+  try {
+    text = await fs.readFile(source, 'utf8');
+  } catch (error) {
+    log(`ERROR: cannot read ${GC_FIX_SOURCE}: ${error.code || error.message}`);
+    throw new Error(`GC fix source missing: ${GC_FIX_SOURCE}`);
   }
-
-  if (!fixAvailable) {
-    log(`ERROR: GC fix commit ${fixCommit} is still absent after asking for ${requested} more commits. `
-      + 'A commit no amount of deepening reaches is not on this branch at all — check whether the '
-      + 'floor names a sha from a rewritten history (git branch -a --contains <sha>).');
-    throw new Error(`pinned GC fix commit ${fixCommit} unreachable after deepening by ${requested}`);
+  if (!gcFixContentPresent(text)) {
+    log(`ERROR: ${GC_FIX_SOURCE} lacks post-TryLockRead mgmtWritersWaiting recheck + UnlockRead`);
+    throw new Error('pinned GC fix content missing');
   }
-
-  const ancestry = await $({nothrow: true, quiet: true, stdio: 'pipe'})`
-    git -C ${work} merge-base --is-ancestor ${fixCommit} HEAD
-  `;
-  if (ancestry.exitCode > 1) {
-    const detail = ancestry.stderr.trim().split(/\r?\n/).at(-1) || '<no git diagnostic>';
-    log(`ERROR: runtime ancestry apparatus failed with git exit=${ancestry.exitCode}: ${detail}`);
-    throw new Error('runtime ancestry apparatus could not evaluate the pinned GC fix');
-  }
-  if (ancestry.exitCode !== 0) {
-    log(`ERROR: GC fix commit ${fixCommit} is available, but runtime ${runtimeRef} `
-      + 'does not descend from it; wrong fork commit');
-    throw new Error('pinned GC fix ancestry missing');
-  }
-  log(`verified: pinned GC fix ${fixCommit} is an ancestor of the selected runtime source`
-    + (requested > 0 ? ` (after deepening by ${requested})` : ' (already present)'));
+  log(`verified: ${GC_FIX_SOURCE} has post-lock writer-pending recheck (content floor, not sha ancestry)`);
 }
 
 async function main() {
@@ -121,15 +100,8 @@ async function main() {
     const actualRef = (await $({stdio: 'pipe'})`git -C ${work} rev-parse HEAD`).stdout.trim();
     if (actualRef !== runtimeRef) throw new Error(`runtime ref mismatch: expected ${runtimeRef}, got ${actualRef}`);
 
-    // Provenance guard: the reader-admission GC fix must be an ancestor of the
-    // commit about to be built. An earlier version probed for a symbol
-    // (LiveInfo::RecomputeBitmapLiveBytes), which broke at pin 707a07a1 because
-    // it is header-inline and newer shapes inline its only call site.
-    //
-    // The fix has had several shas — c2fc3745 pre-rebuild, ff89d7a1 on
-    // integrate/0.0.2-gc — and naming any of them here is what broke on
-    // 2026-08-15, since the 08-12 rewrite left all of them off main. The floor
-    // now comes from LOADERLIFE_MIN_REF, whose value is maintained with the pin.
+    // Provenance guard: the reader-admission recheck must be in the tree about
+    // to be built. SHA ancestry of LOADERLIFE_MIN_REF is not this check.
     await verifyGcFixAncestry(work, runtimeRef);
 
     if (process.platform === 'darwin') {

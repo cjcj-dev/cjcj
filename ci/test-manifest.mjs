@@ -49,6 +49,7 @@ export const GATING = Object.freeze([
   'build/test/write-barrier.test.mjs',
   'ci/evidence-discovery.test.mjs',
   'ci/full-gate-floor.test.mjs',
+  'ci/gc-fix-floor.test.mjs',
   'ci/g2-identity-gate.test.mjs',
   'ci/generate-freeze.test.mjs',
   'ci/gc-release-floor.test.mjs',

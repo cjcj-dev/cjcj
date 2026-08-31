@@ -68,6 +68,8 @@ jobs:
           # a failure. 300s is ~150x the whole suite's normal 2s; a test that
           # genuinely needs longer says so with its own {timeout}, which wins.
           node --test --test-timeout=300000 "${FILES[@]}"
+      - name: Audit pin reachability
+        run: node ci/pin-sweep.mjs --remote
       - name: Verify smoke assets
         run: |
           test "$(find ci/smoke -maxdepth 1 -name '*.cj' | wc -l)" -ge 5
