@@ -5,7 +5,7 @@ import std.sync.Mutex
 import cjcj::basic.{DiagCategory, DiagEngineErrorCode}
 import cjcj::lex.{Len, Lexer as RealLexer}
 import cjcj::parse.{Parser as RealParser, ScopeKind as ParsedScopeKind}
-import cjcj::utils.TriggerPointSetter
+import cjcj::utils.{CJC_ASSERT, TriggerPointSetter}
 
 private enum ParseKind {
     | EXPR
@@ -463,6 +463,48 @@ public func CJ_AST_ParseTopLevel(fptr: CPointer<Unit>, tokensBytes: CPointer<UIn
         throw e
     }
     return result
+}
+
+// Mirrors libcangjie-std-ast ast_api.cpp:CJ_AST_ParseAnnotationArguments.
+@C
+public func CJ_AST_ParseAnnotationArguments(tokensBytes: CPointer<UInt8>): CPointer<ParseRes> {
+    var result = CPointer<ParseRes>()
+    try (iceSetter = TriggerPointSetter(1)) {
+        let tokens = TokenSerialization.GetTokensFromNativeBuffer(tokensBytes)
+        let diag = DiagnosticEngine()
+        let sm = SourceManager()
+        diag.SetSourceManager(sm)
+        diag.SetDiagnoseStatus(true)
+        diag.DisableScopeCheck()
+        diag.SetDisableWarning(true)
+        diag.EnableCheckRangeErrorCodeRatherICE()
+        let parser = RealParser(tokens.toArray(), diag, sm)
+        let annotation = parser.ParseCustomAnnotation()
+        result = unsafe { LibC.malloc<ParseRes>() }
+        if (!result.isNull()) {
+            unsafe {
+                result.write(ParseRes(NodeWriter(annotation).ExportNode(), CString(CPointer<UInt8>())))
+            }
+        }
+    } catch (e: Exception) {
+        throw e
+    }
+    return result
+}
+
+// Mirrors libcangjie-std-ast ast_api.cpp:CJ_CheckAddSpace.
+@C
+public func CJ_CheckAddSpace(tokensBytes: CPointer<UInt8>, spaceFlag: CPointer<Bool>): Unit {
+    let tokens = TokenSerialization.GetTokensFromNativeBuffer(tokensBytes)
+    CJC_ASSERT(!tokens.isEmpty())
+    var idx: Int64 = 0
+    unsafe {
+        while (idx < tokens.size - 1) {
+            spaceFlag.write(idx, CheckAddSpace(tokens[idx], tokens[idx + 1]))
+            idx++
+        }
+        spaceFlag.write(tokens.size - 1, false)
+    }
 }
 
 // Mirrors libcangjie-std-ast ast_api.cpp:CJ_GetMacroPosition.

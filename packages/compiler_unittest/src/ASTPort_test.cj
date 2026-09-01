@@ -2,8 +2,11 @@ package cjcj::compiler_unittest
 
 import cjcj::ast.*
 import cjcj::basic.{DiagCategory, DiagnosticEngine, SourceManager}
+import cjcj::lex.{Lexer, Token, TokenKind}
+import cjcj::macro_pkg.{CJ_AST_ParseAnnotationArguments, CJ_CheckAddSpace, CheckAddSpace, TokenSerialization}
 import cjcj::parse.Parser
 import cjcj::parse.ScopeKind as ParseScopeKind
+import std.collection.ArrayList
 import std.unittest.*
 import std.unittest.testmacro.*
 
@@ -51,6 +54,125 @@ private func ParseFileFromSrc(src: String): File {
     let fileID = sm.AddSource("./", src)
     let parser = Parser(fileID, src, diag, sm)
     return parser.ParseTopLevel()
+}
+
+private func LexAllTokens(src: String): ArrayList<Token> {
+    let lexer = Lexer(src, DiagnosticEngine(), SourceManager())
+    let tokens = ArrayList<Token>()
+    while (true) {
+        let token = lexer.Next()
+        tokens.add(token)
+        if (token.kind == TokenKind.END) {
+            break
+        }
+    }
+    return tokens
+}
+
+private func MakeNativeTokenBuffer(tokens: ArrayList<Token>): CPointer<UInt8> {
+    let bytes = TokenSerialization.GetTokensBytes(tokens)
+    let buffer = unsafe { LibC.malloc<UInt8>(count: bytes.size) }
+    @Assert(!buffer.isNull())
+    unsafe {
+        var idx: Int64 = 0
+        while (idx < bytes.size) {
+            buffer.write(idx, bytes[idx])
+            idx++
+        }
+    }
+    return buffer
+}
+
+private func ReadU32LE(buffer: CPointer<UInt8>): UInt32 {
+    unsafe {
+        return UInt32(buffer.read(0)) |
+            (UInt32(buffer.read(1)) << 8) |
+            (UInt32(buffer.read(2)) << 16) |
+            (UInt32(buffer.read(3)) << 24)
+    }
+}
+
+@C
+struct ASTABIParseResView {
+    let node: CPointer<UInt8>
+    let eMsg: CString
+
+    init(node: CPointer<UInt8>, eMsg: CString) {
+        this.node = node
+        this.eMsg = eMsg
+    }
+}
+
+@Test
+class ASTCABICompatibilityTest {
+    @TestCase
+    func ParseAnnotationArgumentsReturnsCallerOwnedNodeForValidAndInvalidSyntax(): Unit {
+        let validBuffer = MakeNativeTokenBuffer(LexAllTokens("@Foo[1]"))
+        let validResult = unsafe { CJ_AST_ParseAnnotationArguments(validBuffer) }
+        @Assert(!validResult.isNull())
+        let validParsed = unsafe { CPointer<ASTABIParseResView>(CPointer<Unit>(validResult)).read() }
+        @Assert(!validParsed.node.isNull())
+        @Expect(validParsed.eMsg.isNull(), true)
+        @Expect(ReadU32LE(validParsed.node) > 4u32, true)
+        let validMarker = unsafe { validParsed.node.read(4) }
+        unsafe {
+            LibC.free(validParsed.node)
+            LibC.free(validResult)
+            LibC.free(validBuffer)
+        }
+
+        let invalidBuffer = MakeNativeTokenBuffer(LexAllTokens("@Foo["))
+        let invalidResult = unsafe { CJ_AST_ParseAnnotationArguments(invalidBuffer) }
+        @Assert(!invalidResult.isNull())
+        let invalidParsed = unsafe { CPointer<ASTABIParseResView>(CPointer<Unit>(invalidResult)).read() }
+        @Assert(!invalidParsed.node.isNull())
+        @Expect(invalidParsed.eMsg.isNull(), true)
+        @Expect(ReadU32LE(invalidParsed.node) > 4u32, true)
+        @Expect(unsafe { invalidParsed.node.read(4) != validMarker }, true)
+        unsafe {
+            LibC.free(invalidParsed.node)
+            LibC.free(invalidResult)
+            LibC.free(invalidBuffer)
+        }
+    }
+
+    @TestCase
+    func CheckAddSpaceWritesPairwiseValuesAndTerminalFalseWithoutUnderrun(): Unit {
+        let oneToken = ArrayList<Token>()
+        oneToken.add(LexAllTokens("single")[0])
+        let oneTokenBuffer = MakeNativeTokenBuffer(oneToken)
+        let guardedFlags = unsafe { LibC.malloc<Bool>(count: 3) }
+        @Assert(!guardedFlags.isNull())
+        unsafe {
+            guardedFlags.write(0, true)
+            guardedFlags.write(1, true)
+            guardedFlags.write(2, true)
+        }
+        unsafe { CJ_CheckAddSpace(oneTokenBuffer, guardedFlags + 1) }
+        unsafe {
+            @Expect(guardedFlags.read(0), true)
+            @Expect(guardedFlags.read(1), false)
+            @Expect(guardedFlags.read(2), true)
+            LibC.free(guardedFlags)
+            LibC.free(oneTokenBuffer)
+        }
+
+        let tokens = LexAllTokens("left.right + value")
+        let tokenBuffer = MakeNativeTokenBuffer(tokens)
+        let flags = unsafe { LibC.malloc<Bool>(count: tokens.size) }
+        @Assert(!flags.isNull())
+        unsafe { CJ_CheckAddSpace(tokenBuffer, flags) }
+        unsafe {
+            var idx: Int64 = 0
+            while (idx < tokens.size - 1) {
+                @Expect(flags.read(idx), CheckAddSpace(tokens[idx], tokens[idx + 1]))
+                idx++
+            }
+            @Expect(flags.read(tokens.size - 1), false)
+            LibC.free(flags)
+            LibC.free(tokenBuffer)
+        }
+    }
 }
 
 @Test
