@@ -297,7 +297,7 @@ run_step() {
 }
 
 fixed_tuple_is_current() {
-    local manifest="$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
+    local manifest="$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest" manifest_llvm opt_llvm
     [[ -s $CJCJ_FIXED_LLVM_DIR/llc.gz ]] || return 1
     [[ -s $CJCJ_FIXED_LLVM_DIR/opt.gz ]] || return 1
     [[ -s $CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o ]] || return 1
@@ -305,31 +305,39 @@ fixed_tuple_is_current() {
     # shellcheck disable=SC1091
     source "$REPO_ROOT/ci/llvm_pin.env" || return 1
     [[ $(awk -F= '$1=="PLATFORM" {print $2}' "$manifest") == linux_x86_64 ]] || return 1
-    [[ $(awk -F= '$1=="LLVM_SHA" {print $2}' "$manifest") == "$LLVM_SHA" ]] || return 1
+    manifest_llvm=$(awk -F= '$1=="LLVM_SHA" {print $2}' "$manifest") || return 1
+    [[ $manifest_llvm == "$LLVM_SHA" ]] || return 1
+    opt_llvm=$(gzip -dc "$CJCJ_FIXED_LLVM_DIR/opt.gz" \
+        | strings | sed -n 's/^CJLLVM-COMMIT:\([0-9a-f]\{40\}\)$/\1/p') || return 1
+    [[ $opt_llvm == "$manifest_llvm" ]] || return 1
     [[ $(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$manifest") == "$CANGJIE_COMPILER_SHA" ]] || return 1
     [[ $(awk -F= '$1=="FLATBUFFERS_SHA" {print $2}' "$manifest") == "$FLATBUFFERS_SHA" ]] || return 1
     node "$REPO_ROOT/ci/llvm-tools-manifest.mjs" validate native "$manifest" >/dev/null || return 1
 }
 
 checkout_exact() {
-    local directory=$1 url=$2 revision=$3
+    local directory=$1 url=$2 revision=$3 fetch_url
+    fetch_url=$(source_fetch_url "$url") || return 1
     if [[ ! -d $directory/.git ]]; then
-        git clone --filter=blob:none --no-checkout "$url" "$directory"
+        git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout "$fetch_url" "$directory" || return 1
+        git -C "$directory" remote set-url origin "$url" || return 1
     fi
-    git -C "$directory" fetch --depth=1 origin "$revision"
-    git -C "$directory" checkout --detach FETCH_HEAD
+    git -C "$directory" -c http.version=HTTP/1.1 fetch --depth=1 "$fetch_url" "$revision" || return 1
+    git -C "$directory" checkout --detach FETCH_HEAD || return 1
     [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
 }
 
 checkout_sparse_exact() {
-    local directory=$1 url=$2 revision=$3 sparse_path=$4
+    local directory=$1 url=$2 revision=$3 sparse_path=$4 fetch_url
+    fetch_url=$(source_fetch_url "$url") || return 1
     if [[ ! -d $directory/.git ]]; then
-        git clone --filter=blob:none --no-checkout "$url" "$directory"
+        git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout "$fetch_url" "$directory" || return 1
+        git -C "$directory" remote set-url origin "$url" || return 1
     fi
-    git -C "$directory" sparse-checkout init --cone
-    git -C "$directory" sparse-checkout set "$sparse_path"
-    git -C "$directory" fetch --depth=1 origin "$revision"
-    git -C "$directory" checkout --detach FETCH_HEAD
+    git -C "$directory" sparse-checkout init --cone || return 1
+    git -C "$directory" sparse-checkout set "$sparse_path" || return 1
+    git -C "$directory" -c http.version=HTTP/1.1 fetch --depth=1 "$fetch_url" "$revision" || return 1
+    git -C "$directory" checkout --detach FETCH_HEAD || return 1
     [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
 }
 
@@ -357,9 +365,9 @@ build_fixed_tuple() {
     local llc_sha opt_sha shim_sha
 
     mkdir -p "$build_root"
-    checkout_exact "$llvm_fork" "$LLVM_URL" "$LLVM_SHA"
-    checkout_sparse_exact "$compiler" "$CANGJIE_COMPILER_URL" "$CANGJIE_COMPILER_SHA" schema
-    checkout_exact "$flatbuffers" "$FLATBUFFERS_URL" "$FLATBUFFERS_SHA"
+    checkout_exact "$llvm_fork" "$LLVM_URL" "$LLVM_SHA" || return 1
+    checkout_sparse_exact "$compiler" "$CANGJIE_COMPILER_URL" "$CANGJIE_COMPILER_SHA" schema || return 1
+    checkout_exact "$flatbuffers" "$FLATBUFFERS_URL" "$FLATBUFFERS_SHA" || return 1
 
     cmake -G Ninja -S "$llvm_fork/llvm" -B "$llc_build" \
         -DCMAKE_BUILD_TYPE=Release \
