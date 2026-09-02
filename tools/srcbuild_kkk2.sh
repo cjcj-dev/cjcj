@@ -357,15 +357,63 @@ record_crash_signature() {
         "$si_code" "$si_addr" "$pc_mod" "$gc_phase"
 }
 
+capture_build_child_affinity() {
+    local root_pid=$1 step=$2 stop_file=$3
+    local candidate pid command arguments affinity actual
+    while [[ ! -e $stop_file ]]; do
+        candidate=$(LC_ALL=C ps -eo pid=,ppid=,comm=,args= | awk -v root_pid="$root_pid" '
+            {
+                pid = $1
+                parent[pid] = $2
+                command[pid] = $3
+                $1 = $2 = $3 = ""
+                sub(/^[[:space:]]+/, "")
+                arguments[pid] = $0
+            }
+            function is_descendant(pid, ancestor, depth) {
+                for (depth = 0; depth < 64 && pid in parent; depth++) {
+                    pid = parent[pid]
+                    if (pid == root_pid) return 1
+                    if (pid <= 1) return 0
+                }
+                return 0
+            }
+            END {
+                for (pid in parent) {
+                    if ((command[pid] == "cmake" || command[pid] == "ninja") &&
+                        is_descendant(pid)) {
+                        printf "%s\t%s\t%s\n", pid, command[pid], arguments[pid]
+                        exit
+                    }
+                }
+            }
+        ') || return 1
+        if [[ -n $candidate ]]; then
+            IFS=$'\t' read -r pid command arguments <<< "$candidate"
+            affinity=$(LC_ALL=C taskset -pc "$pid" 2>/dev/null) || continue
+            actual=${affinity##*: }
+            printf 'affinity\tstep=%s\tpid=%s\tcommand=%s\trequested=%s\tactual=%s\targs=%s\n' \
+                "$step" "$pid" "$command" "$CPUSET" "$actual" "$arguments" >> "$TIMINGS"
+            return 0
+        fi
+        sleep 0.02
+    done
+}
+
 run_step() {
     local step=$1 name=$2 function_name=$3
     local log="$LOG_ROOT/${START_STAMP}-step${step}.log"
-    local start_ns end_ns wall rc
+    local stop_file="$STATE_ROOT/.affinity-${START_STAMP}-step${step}-$$.stop"
+    local start_ns end_ns wall rc monitor_pid
     start_ns=$(date +%s%N)
+    capture_build_child_affinity "$$" "$step" "$stop_file" &
+    monitor_pid=$!
     set +e
     "$function_name" > "$log" 2>&1
     rc=$?
     set -e
+    : > "$stop_file"
+    wait "$monitor_pid" || true
     end_ns=$(date +%s%N)
     wall=$(elapsed_seconds "$start_ns" "$end_ns")
     printf 'step\t%s\t%s\t%s\t%s\t%s\n' "$step" "$name" "$rc" "$wall" "$log" >> "$TIMINGS"
