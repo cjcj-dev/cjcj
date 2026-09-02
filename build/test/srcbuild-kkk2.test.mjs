@@ -149,6 +149,34 @@ test('source-build shell mirror fallback is visible and optionally required', ()
   assert.match(required.stderr, /source mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1/);
 });
 
+test('source-build shell exact checkout repairs a stale origin before fetching the pin', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-shell-checkout-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const source = path.join(root, 'source');
+  const mirror = path.join(root, 'source.git');
+  const checkout = path.join(root, 'checkout');
+  const authoritative = 'https://github.com/cjcj-dev/cjcj-llvm.git';
+  runGit(['init', source]);
+  fs.writeFileSync(path.join(source, 'value'), 'pinned fixture\n');
+  runGit(['-C', source, 'add', 'value']);
+  runGit(['-C', source, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+    'commit', '-m', 'fixture']);
+  const sha = runGit(['-C', source, 'rev-parse', 'HEAD']);
+  runGit(['clone', '--bare', source, mirror]);
+  runGit(['init', checkout]);
+  runGit(['-C', checkout, 'remote', 'add', 'origin', 'https://example.invalid/stale.git']);
+
+  const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
+  const invoke = 'source "$1"\n'
+    + `${shellFunction('checkout_exact')}\n`
+    + 'CJCJ_SRCBUILD_SOURCE_MIRRORS="$2=file://$3"\n'
+    + 'checkout_exact "$4" "$2" "$5"\n';
+  const result = runBash(invoke, [helper, authoritative, mirror, checkout, sha]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(runGit(['-C', checkout, 'rev-parse', 'HEAD']), sha);
+  assert.equal(runGit(['-C', checkout, 'remote', 'get-url', 'origin']), authoritative);
+});
+
 test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-tuple-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));

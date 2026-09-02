@@ -495,6 +495,10 @@ checkout_exact() {
     local directory=$1 url=$2 revision=$3
     if [[ ! -d $directory/.git ]]; then
         git init "$directory" || return 1
+    fi
+    if git -C "$directory" remote get-url origin >/dev/null 2>&1; then
+        git -C "$directory" remote set-url origin "$url" || return 1
+    else
         git -C "$directory" remote add origin "$url" || return 1
     fi
     srcbuild_git_fetch "$directory" "$url" "$revision" || return 1
