@@ -375,22 +375,60 @@ run_step() {
 }
 
 fixed_tuple_is_current() {
-    local manifest="$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest" manifest_llvm opt_llvm
-    [[ -s $CJCJ_FIXED_LLVM_DIR/llc.gz ]] || return 1
-    [[ -s $CJCJ_FIXED_LLVM_DIR/opt.gz ]] || return 1
-    [[ -s $CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o ]] || return 1
+    local tuple_dir=${1:-$CJCJ_FIXED_LLVM_DIR}
+    local manifest="$tuple_dir/llvm-tools.manifest" manifest_llvm opt_llvm
+    [[ -s $tuple_dir/llc.gz ]] || return 1
+    [[ -s $tuple_dir/opt.gz ]] || return 1
+    [[ -s $tuple_dir/cjselfhost_llvmshim.o ]] || return 1
     [[ -s $manifest ]] || return 1
     # shellcheck disable=SC1091
     source "$REPO_ROOT/ci/llvm_pin.env" || return 1
     [[ $(awk -F= '$1=="PLATFORM" {print $2}' "$manifest") == linux_x86_64 ]] || return 1
     manifest_llvm=$(awk -F= '$1=="LLVM_SHA" {print $2}' "$manifest") || return 1
     [[ $manifest_llvm == "$LLVM_SHA" ]] || return 1
-    opt_llvm=$(gzip -dc "$CJCJ_FIXED_LLVM_DIR/opt.gz" \
+    opt_llvm=$(gzip -dc "$tuple_dir/opt.gz" \
         | strings | sed -n 's/^CJLLVM-COMMIT:\([0-9a-f]\{40\}\)$/\1/p') || return 1
     [[ $opt_llvm == "$manifest_llvm" ]] || return 1
     [[ $(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$manifest") == "$CANGJIE_COMPILER_SHA" ]] || return 1
     [[ $(awk -F= '$1=="FLATBUFFERS_SHA" {print $2}' "$manifest") == "$FLATBUFFERS_SHA" ]] || return 1
     node "$REPO_ROOT/ci/llvm-tools-manifest.mjs" validate native "$manifest" >/dev/null || return 1
+}
+
+seed_fixed_tuple_from_depot() {
+    local depot_root=${1:-${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}}
+    local depot="$depot_root/$LLVM_SHA"
+    local tuple="$depot/fixed-llc"
+    local payload
+    local -a payloads=(llc.gz opt.gz cjselfhost_llvmshim.o llvm-tools.manifest)
+
+    [[ -d $tuple && -s $depot/SHA256SUMS ]] || {
+        echo "fixed LLVM depot seed unavailable: $depot (missing fixed-llc or SHA256SUMS); rebuilding" >&2
+        return 1
+    }
+    for payload in "${payloads[@]}"; do
+        [[ -f $tuple/$payload && ! -L $tuple/$payload ]] || {
+            echo "fixed LLVM depot seed rejected: missing or non-regular fixed-llc/$payload; rebuilding" >&2
+            return 1
+        }
+    done
+    if ! (cd "$depot" && sha256sum --strict -c SHA256SUMS); then
+        echo "fixed LLVM depot seed rejected: SHA256SUMS verification failed at $depot; rebuilding" >&2
+        return 1
+    fi
+    if ! fixed_tuple_is_current "$tuple"; then
+        echo "fixed LLVM depot seed rejected: pin, manifest, and opt lineage disagree at $tuple; rebuilding" >&2
+        return 1
+    fi
+
+    mkdir -p "$CJCJ_FIXED_LLVM_DIR"
+    for payload in "${payloads[@]}"; do
+        cp -- "$tuple/$payload" "$CJCJ_FIXED_LLVM_DIR/$payload"
+    done
+    if ! fixed_tuple_is_current; then
+        echo "fixed LLVM depot seed rejected after copy; rebuilding" >&2
+        return 1
+    fi
+    echo "seeded fixed LLVM tuple from verified depot $depot"
 }
 
 checkout_exact() {
@@ -424,13 +462,16 @@ build_fixed_tuple() {
         echo "fixed LLVM tuple matches ci/llvm_pin.env; reusing it"
         return
     fi
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/ci/llvm_pin.env"
+    if seed_fixed_tuple_from_depot; then
+        return
+    fi
     if ((DRY_RUN)); then
         echo "DRY_RUN PREREQUISITE=fixed-llvm action=rebuild"
         return
     fi
 
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/ci/llvm_pin.env"
     export LLVM_URL LLVM_SHA CANGJIE_COMPILER_URL CANGJIE_COMPILER_SHA
     export FLATBUFFERS_URL FLATBUFFERS_SHA
     local build_root="$STATE_ROOT/fixed-llvm-build"

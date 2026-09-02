@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -43,6 +44,20 @@ function writeTuple(root, embeddedSha) {
   return llvmSha;
 }
 
+function writeDepotChecksums(depot) {
+  const files = [
+    'fixed-llc/llc.gz',
+    'fixed-llc/opt.gz',
+    'fixed-llc/cjselfhost_llvmshim.o',
+    'fixed-llc/llvm-tools.manifest',
+  ];
+  const rows = files.map(file => {
+    const digest = crypto.createHash('sha256').update(fs.readFileSync(path.join(depot, file))).digest('hex');
+    return `${digest}  ./${file}`;
+  });
+  fs.writeFileSync(path.join(depot, 'SHA256SUMS'), `${rows.join('\n')}\n`);
+}
+
 test('source-build CPU windows preserve explicit placement and derive their width', () => {
   const invoke = `source "$1" --lib-only\n`
     + 'test "$(explicit_cpuset 048-063)" = 48-63\n'
@@ -71,6 +86,49 @@ test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t =
   const stale = runBash(invoke, [repoRoot, root]);
   assert.equal(stale.status, 1, stale.stderr);
   console.log(`FIXED_TUPLE_ARM tuple=stale-opt rc=${stale.status}`);
+});
+
+test('fixed tuple depot seeds only checksum-valid pinned payloads and otherwise rebuilds', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-depot-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const pinText = fs.readFileSync(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
+  const llvmSha = pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)[1];
+  const depotRoot = path.join(root, 'depot');
+  const depot = path.join(depotRoot, llvmSha);
+  const tuple = path.join(depot, 'fixed-llc');
+  const destination = path.join(root, 'destination');
+  fs.mkdirSync(tuple, {recursive: true});
+  writeTuple(tuple, llvmSha);
+  writeDepotChecksums(depot);
+
+  const seedInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
+    + `${shellFunction('seed_fixed_tuple_from_depot')}\n`
+    + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3\n'
+    + 'seed_fixed_tuple_from_depot "$4"\n';
+  const seeded = runBash(seedInvoke, [repoRoot, destination, llvmSha, depotRoot]);
+  assert.equal(seeded.status, 0, seeded.stderr);
+  assert.match(seeded.stdout, /seeded fixed LLVM tuple from verified depot/);
+
+  fs.rmSync(destination, {recursive: true, force: true});
+  fs.appendFileSync(path.join(tuple, 'opt.gz'), 'tampered');
+  const rejected = runBash(seedInvoke, [repoRoot, destination, llvmSha, depotRoot]);
+  assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+  assert.match(rejected.stderr, /SHA256SUMS verification failed/);
+  assert.equal(fs.existsSync(destination), false, 'rejected depot payload was copied');
+
+  const checkoutMarker = path.join(root, 'rebuild-started');
+  const buildInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
+    + `${shellFunction('seed_fixed_tuple_from_depot')}\n`
+    + `${shellFunction('build_fixed_tuple')}\n`
+    + 'checkout_exact() { touch "$CHECKOUT_MARKER"; return 17; }\n'
+    + 'checkout_sparse_exact() { return 17; }\n'
+    + 'DRY_RUN=0 REPO_ROOT=$1 STATE_ROOT=$2 CJCJ_FIXED_LLVM_DIR=$2 JOBS=1 '
+    + 'CHECKOUT_MARKER=$3 CJCJ_LLVM_DEPOT_ROOT=$4\n'
+    + 'build_fixed_tuple\n';
+  const rebuilt = runBash(buildInvoke,
+    [repoRoot, path.join(root, 'build-destination'), checkoutMarker, depotRoot]);
+  assert.equal(rebuilt.status, 1, rebuilt.stdout + rebuilt.stderr);
+  assert.equal(fs.existsSync(checkoutMarker), true, 'rebuild path did not start after rejecting depot');
 });
 
 test('fixed tuple build stops when an exact checkout fails', t => {
