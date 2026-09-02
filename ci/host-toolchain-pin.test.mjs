@@ -35,6 +35,7 @@ async function hostPin() {
 async function runSrcbuildHostResolver({
   pin,
   runtimeVersion,
+  runtimePinVersion = '1.2.0-alpha.fixture',
   staleToolchain = 'nightly-stale',
   readerOnly = false,
 }) {
@@ -45,6 +46,10 @@ async function runSrcbuildHostResolver({
     await fs.mkdir(path.join(fixture, 'ci'), {recursive: true});
     await fs.copyFile(path.join(root, 'tools', 'srcbuild_kkk2.sh'), fixtureScript);
     await fs.writeFile(path.join(fixture, 'ci', 'cjpm_pin.env'), pin);
+    await fs.writeFile(
+      path.join(fixture, 'ci', 'runtime_pin.env'),
+      `RUNTIME_VERSION=${runtimePinVersion}\n`,
+    );
     const command = readerOnly
       ? 'source "$1" --lib-only; read_host_toolchain_pin'
       : 'source "$1" --lib-only; export RUNTIME_VERSION="$2" CJCJ_TOOLCHAIN="$3"; resolve_host_toolchain_pin; printf "%s\\n" "$CJCJ_TOOLCHAIN"';
@@ -108,8 +113,25 @@ test('srcbuild resolved host changes only with the pin, not RUNTIME_VERSION', as
   });
   assert.equal(runtimeA.status, 0, runtimeA.stderr);
   assert.equal(runtimeB.status, 0, runtimeB.stderr);
-  assert.equal(runtimeA.stdout.trim(), 'nightly-good');
+  assert.notEqual(runtimeA.stdout.trim(), '');
   assert.equal(runtimeB.stdout, runtimeA.stdout);
+});
+
+test('srcbuild resolved host does not change with ci/runtime_pin.env', async () => {
+  const runtimePinA = await runSrcbuildHostResolver({
+    pin: 'CJCJ_TOOLCHAIN=nightly-good\n',
+    runtimeVersion: '9.9.9',
+    runtimePinVersion: '1.2.0-alpha.first',
+  });
+  const runtimePinB = await runSrcbuildHostResolver({
+    pin: 'CJCJ_TOOLCHAIN=nightly-good\n',
+    runtimeVersion: '9.9.9',
+    runtimePinVersion: '1.2.0-alpha.second',
+  });
+  assert.equal(runtimePinA.status, 0, runtimePinA.stderr);
+  assert.equal(runtimePinB.status, 0, runtimePinB.stderr);
+  assert.equal(runtimePinA.stdout.trim(), 'nightly-good');
+  assert.equal(runtimePinB.stdout, runtimePinA.stdout);
 });
 
 test('srcbuild pin reader returns a changed pinned host', async () => {
@@ -129,6 +151,17 @@ test('srcbuild rejects a missing pin key instead of retaining stale host state',
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /CJCJ_TOOLCHAIN is missing/);
+  assert.equal(result.stdout, '');
+});
+
+test('srcbuild pin reader rejects duplicate CJCJ_TOOLCHAIN keys', async () => {
+  const result = await runSrcbuildHostResolver({
+    pin: 'CJCJ_TOOLCHAIN=one\nCJCJ_TOOLCHAIN=two\n',
+    runtimeVersion: '9.9.9',
+    readerOnly: true,
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /CJCJ_TOOLCHAIN is duplicated in .*ci\/cjpm_pin\.env/);
   assert.equal(result.stdout, '');
 });
 

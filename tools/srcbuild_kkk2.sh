@@ -14,7 +14,7 @@ readonly HOST_TOOLCHAIN_PIN="$REPO_ROOT/ci/cjpm_pin.env"
 readonly ORIGINAL_ARGS=("$@")
 
 read_host_toolchain_pin() {
-    local line key value toolchain=
+    local line key value toolchain= seen_toolchain=0
     while IFS= read -r line || [[ -n $line ]]; do
         [[ -z $line ]] && continue
         [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || {
@@ -23,7 +23,14 @@ read_host_toolchain_pin() {
         }
         key=${line%%=*}
         value=${line#*=}
-        if [[ $key == CJCJ_TOOLCHAIN ]]; then toolchain=$value; fi
+        if [[ $key == CJCJ_TOOLCHAIN ]]; then
+            [[ $seen_toolchain == 0 ]] || {
+                echo "CJCJ_TOOLCHAIN is duplicated in $HOST_TOOLCHAIN_PIN" >&2
+                return 1
+            }
+            seen_toolchain=1
+            toolchain=$value
+        fi
     done < "$HOST_TOOLCHAIN_PIN"
     [[ -n $toolchain ]] || {
         echo "CJCJ_TOOLCHAIN is missing from $HOST_TOOLCHAIN_PIN" >&2
