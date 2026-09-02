@@ -253,17 +253,17 @@ run_step() {
 
 fixed_tuple_is_current() {
     local manifest="$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
-    [[ -s $CJCJ_FIXED_LLVM_DIR/llc.gz ]]
-    [[ -s $CJCJ_FIXED_LLVM_DIR/opt.gz ]]
-    [[ -s $CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o ]]
-    [[ -s $manifest ]]
+    [[ -s $CJCJ_FIXED_LLVM_DIR/llc.gz ]] || return 1
+    [[ -s $CJCJ_FIXED_LLVM_DIR/opt.gz ]] || return 1
+    [[ -s $CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o ]] || return 1
+    [[ -s $manifest ]] || return 1
     # shellcheck disable=SC1091
-    source "$REPO_ROOT/ci/llvm_pin.env"
-    [[ $(awk -F= '$1=="PLATFORM" {print $2}' "$manifest") == linux_x86_64 ]]
-    [[ $(awk -F= '$1=="LLVM_SHA" {print $2}' "$manifest") == "$LLVM_SHA" ]]
-    [[ $(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$manifest") == "$CANGJIE_COMPILER_SHA" ]]
-    [[ $(awk -F= '$1=="FLATBUFFERS_SHA" {print $2}' "$manifest") == "$FLATBUFFERS_SHA" ]]
-    node "$REPO_ROOT/ci/llvm-tools-manifest.mjs" validate native "$manifest" >/dev/null
+    source "$REPO_ROOT/ci/llvm_pin.env" || return 1
+    [[ $(awk -F= '$1=="PLATFORM" {print $2}' "$manifest") == linux_x86_64 ]] || return 1
+    [[ $(awk -F= '$1=="LLVM_SHA" {print $2}' "$manifest") == "$LLVM_SHA" ]] || return 1
+    [[ $(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$manifest") == "$CANGJIE_COMPILER_SHA" ]] || return 1
+    [[ $(awk -F= '$1=="FLATBUFFERS_SHA" {print $2}' "$manifest") == "$FLATBUFFERS_SHA" ]] || return 1
+    node "$REPO_ROOT/ci/llvm-tools-manifest.mjs" validate native "$manifest" >/dev/null || return 1
 }
 
 checkout_exact() {
@@ -291,6 +291,10 @@ checkout_sparse_exact() {
 build_fixed_tuple() {
     if fixed_tuple_is_current; then
         echo "fixed LLVM tuple matches ci/llvm_pin.env; reusing it"
+        return
+    fi
+    if ((DRY_RUN)); then
+        echo "DRY_RUN PREREQUISITE=fixed-llvm action=rebuild"
         return
     fi
 
@@ -693,7 +697,7 @@ if ((DRY_RUN)); then
     readonly dry_run_toolchain
     printf 'DRY_RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' \
         "$host_name" "$TARGET" "$JOBS" "$CPUSET" "$FROM_STEP" "$THROUGH_STEP"
-    printf 'DRY_RUN PREREQUISITE=fixed-llvm action=validate-only-no-build\n'
+    build_fixed_tuple
     for ((step = FROM_STEP; step <= THROUGH_STEP; step++)); do
         print_dry_step "$step" "$dry_run_toolchain"
     done
