@@ -186,6 +186,7 @@ readonly CJCJ_FIXED_LLVM_DIR="$STATE_ROOT/fixed-llc"
 readonly STAGE1_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"
 readonly STAGE2_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage2.mjs"
 readonly STAGE3_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage3.mjs"
+readonly STAGE2_PRODUCT_DIR="$REPO_ROOT/target/release/bin"
 readonly BUILD_TYPE=relwithdebinfo
 START_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 readonly START_STAMP
@@ -565,10 +566,10 @@ step_13() {
     # shallowClone creates the directory before its network fetch.  A dropped
     # connection therefore leaves a directory that fetch.mjs would otherwise
     # mistake for a completed clone on --from-step retries.
-    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_compiler" "$COMPILER_SRC_URL" "$COMPILER_REF"
-    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_runtime" "$RUNTIME_SRC_URL" "$RUNTIME_REF"
-    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_tools" "$TOOLS_SRC_URL" "$TOOLS_REF"
-    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_stdx" "$STDX_SRC_URL" "$STDX_REF"
+    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_compiler" "$COMPILER_SRC_URL" "$COMPILER_REF" || return 1
+    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_runtime" "$RUNTIME_SRC_URL" "$RUNTIME_REF" || return 1
+    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_tools" "$TOOLS_SRC_URL" "$TOOLS_REF" || return 1
+    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_stdx" "$STDX_SRC_URL" "$STDX_REF" || return 1
     build_cli fetch \
         --repo-url "compiler=$COMPILER_SRC_URL" --repo-tag "compiler=$COMPILER_REF" \
         --repo-url "runtime=$RUNTIME_SRC_URL" --repo-tag "runtime=$RUNTIME_REF" \
@@ -719,6 +720,10 @@ validate_stage_step_contracts() {
     if ((FROM_STEP <= 33 && THROUGH_STEP >= 33)); then
         [[ -f $STAGE3_STEP_SCRIPT ]] || {
             echo "dry-run referenced step script is missing: $STAGE3_STEP_SCRIPT" >&2
+            return 1
+        }
+        [[ -d $STAGE2_PRODUCT_DIR ]] || {
+            echo "dry-run stage3 input missing: stage2 product directory $STAGE2_PRODUCT_DIR" >&2
             return 1
         }
     fi
