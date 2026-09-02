@@ -10,6 +10,11 @@ import zlib from 'node:zlib';
 import {spawnSync} from 'node:child_process';
 import {parseLlvmToolsManifest} from '../llvm-tools-manifest.mjs';
 import {
+  hostToolchainFromCjcVersion,
+  requireHostToolchain,
+  requireMatchingBaseSdkToolchain,
+} from '../host-toolchain-pin.mjs';
+import {
   persistBaseSdkProvenance,
   verifyBaseSdkProvenance,
 } from '../../build/lib/release-component-provenance.mjs';
@@ -18,7 +23,7 @@ import {platformizeCjcToml} from './link_option.mjs';
 import {PRODUCT_NAMES} from '../srcbuild/lib/product-binary.mjs';
 
 const {root} = stageBegin('cjcj');
-const toolchain = process.env.CJCJ_TOOLCHAIN || 'nightly-1.2.0-alpha.20260721165458';
+const toolchain = requireHostToolchain();
 const heapSize = process.env.CJ_HEAP_SIZE || '12GB';
 const provisionOnly = process.platform === 'win32' && process.env.CJCJ_SDK_PROVISION_ONLY === '1';
 const sdkAlreadyProvisioned = process.platform === 'win32' && process.env.CJCJ_SDK_ALREADY_PROVISIONED === '1';
@@ -76,19 +81,26 @@ if (process.platform === 'win32') {
     }
     const baseSdkArchive = process.env.BASE_SDK_ARCHIVE || '';
     const baseSdkProvenance = process.env.BASE_SDK_PROVENANCE || '';
+    const baseSdkToolchain = process.env.BASE_SDK_TOOLCHAIN || '';
     const releasePlatform = process.env.RELEASE_PLATFORM || '';
     let install;
-    if (baseSdkArchive || baseSdkProvenance || releasePlatform) {
-      if (!baseSdkArchive || !baseSdkProvenance || !releasePlatform) {
-        throw new Error('BASE_SDK_ARCHIVE, BASE_SDK_PROVENANCE and RELEASE_PLATFORM must be supplied together');
+    if (baseSdkArchive || baseSdkProvenance || baseSdkToolchain || releasePlatform) {
+      if (!baseSdkArchive || !baseSdkProvenance || !baseSdkToolchain || !releasePlatform) {
+        throw new Error('BASE_SDK_ARCHIVE, BASE_SDK_PROVENANCE, BASE_SDK_TOOLCHAIN and RELEASE_PLATFORM must be supplied together');
       }
+      requireMatchingBaseSdkToolchain({hostToolchain: toolchain, baseSdkToolchain});
       const provenance = await verifyBaseSdkProvenance({
         archive: baseSdkArchive,
         sidecar: baseSdkProvenance,
         platform: releasePlatform,
-        toolchain,
+        toolchain: baseSdkToolchain,
       });
-      baseSdkRetention = {archive: baseSdkArchive, sidecar: baseSdkProvenance, platform: releasePlatform};
+      baseSdkRetention = {
+        archive: baseSdkArchive,
+        sidecar: baseSdkProvenance,
+        platform: releasePlatform,
+        toolchain: baseSdkToolchain,
+      };
       console.log(`[platform setup_sdk] cjv toolchain link ${toolchain} ${baseSdkArchive} --force --sha256 ${provenance.artifact.sha256}`);
       install = await $({nothrow: true})`${toCommandPath(cjv)} toolchain link ${toolchain} ${toCommandPath(baseSdkArchive)} --force --sha256 ${provenance.artifact.sha256}`;
       if (install.exitCode === 0) {
@@ -115,7 +127,6 @@ if (setupRc === 0 && baseSdkRetention) {
   const retained = await persistBaseSdkProvenance({
     ...baseSdkRetention,
     toolchainDir: cangjieHome,
-    toolchain,
   });
   console.log(`[platform setup_sdk] base SDK provenance retained: sidecar=${retained.sidecar} archive=${retained.cachedArchive}`);
 }
@@ -157,6 +168,13 @@ if (process.platform === 'win32') {
   console.log(`[platform setup_sdk] base cjc file: ${baseFile.stdout.trim()}`);
   console.log('[platform setup_sdk] base cjc PE dependency table: readable');
   console.log(`[platform setup_sdk] base cjc version:\n${baseVersion.stdout.trim()}`);
+  const actualHostToolchain = hostToolchainFromCjcVersion(baseVersion.stdout);
+  if (actualHostToolchain !== toolchain) {
+    throw new Error(`installed base SDK identity mismatch: requested=${toolchain} actual=${actualHostToolchain}`);
+  }
+  if (process.env.GITHUB_ENV) {
+    await fs.appendFile(process.env.GITHUB_ENV, `CJCJ_ACTUAL_HOST_TOOLCHAIN=${actualHostToolchain}\n`);
+  }
 }
 if (provisionOnly) {
   console.log(`[platform setup_sdk] provisioned Windows SDK at ${cangjieHome}`);
@@ -383,7 +401,7 @@ if (process.platform === 'win32') {
 console.log(`bootstrap runtime installed: ${installedRuntimeLib}`);
 
 await printCommonVersions();
-console.log(`sdk_toolchain=${toolchain}\nsdk_archive=${process.env.SDK_ARCHIVE || 'unknown'}\nsdk_home=${cangjieHome}\noptimization=O1\nsetup_rc=${setupRc}`);
+console.log(`sdk_toolchain=${toolchain}\nsdk_home=${cangjieHome}\noptimization=O1\nsetup_rc=${setupRc}`);
 await $({nothrow: true})`cjv --version`;
 await $({nothrow: true})`cjc --version`;
 await $({nothrow: true})`cjpm --version`;

@@ -7,11 +7,6 @@ on:
         required: false
         type: string
         default: 1.2.0-alpha.20260721165458
-      toolchain:
-        description: Official Cangjie toolchain supplying the std-ast link inputs
-        required: false
-        type: string
-        default: nightly-1.2.0-alpha.20260721165458
       dry_run:
         required: false
         type: boolean
@@ -38,6 +33,10 @@ jobs:
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
+
+      - name: Load host toolchain pin
+        shell: bash
+        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
 
       - name: Load runtime pin
         env:
@@ -132,12 +131,11 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cjv
-          key: windows-stdast-cjv-${{ inputs.toolchain }}
+          key: windows-stdast-cjv-${{ env.CJCJ_TOOLCHAIN }}
 
       - name: Install Cangjie toolchain
         if: steps.cjv-cache.outputs.cache-hit != 'true'
         env:
-          CJCJ_TOOLCHAIN: ${{ inputs.toolchain }}
           CJCJ_SDK_LINK_INPUTS_ONLY: '1'
         run: npx --yes zx@8 ci/setup_sdk.mjs
 
@@ -158,7 +156,6 @@ jobs:
       - name: Rebuild host-dispatch std-ast DLL
         env:
           RUNTIME_TOOLCHAIN: ${{ github.workspace }}/.windows-runtime-buildtools/llvm-mingw-w64
-          CJCJ_TOOLCHAIN: ${{ inputs.toolchain }}
         run: CANGJIE_HOME="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN" npx --yes zx@8 ci/platform_matrix/build_windows_std_ast.mjs
 
       - name: Save flatc

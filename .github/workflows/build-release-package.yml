@@ -56,7 +56,11 @@ permissions:
   actions: read
 
 env:
-  CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
+  # Explicit release-only exception: ordinary build hosts follow ci/cjpm_pin.env
+  # (currently 1.3), but the distributed base SDK stays on the reviewed 1.2 host.
+  # Five-platform 1.3 archive hashes do not exist yet, and the acceptance apparatus
+  # review records smoke changing from 13/15 to 0/15 on the newer host.
+  RELEASE_HOST_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
   CJ_HEAP_SIZE: ${{ inputs.platform == 'darwin-arm64' && '6GB' || '12GB' }}
 
 jobs:
@@ -77,6 +81,10 @@ jobs:
     steps:
       - name: Checkout cjcj
         uses: actions/checkout@v7
+
+      - name: Select reviewed release host exception
+        shell: bash
+        run: echo "CJCJ_TOOLCHAIN=$RELEASE_HOST_TOOLCHAIN" >> "$GITHUB_ENV"
 
       - name: Validate same-platform final std contract
         shell: bash
@@ -138,7 +146,7 @@ jobs:
         run: |
           node ci/release/prepare_base_sdk.mjs \
             --platform "$RELEASE_PLATFORM" \
-            --toolchain "$CJCJ_TOOLCHAIN" \
+            --toolchain "$RELEASE_HOST_TOOLCHAIN" \
             --outdir "$RUNNER_TEMP/release-base-sdk"
 
       - name: Prepare MSYS2/MINGW64 cjcj toolchain
@@ -314,7 +322,7 @@ jobs:
           node ci/release/prepare_gate_apparatus.mjs \
             --sdk "$CANGJIE_HOME" \
             --platform "$RELEASE_PLATFORM" \
-            --toolchain-pin "$PWD/ci/cjpm_pin.env" \
+            --actual-host-toolchain "$CJCJ_ACTUAL_HOST_TOOLCHAIN" \
             --base-sdk-sidecar "$BASE_SDK_PROVENANCE" \
             --outdir "$RUNNER_TEMP/release-gate-apparatus"
 
@@ -325,7 +333,7 @@ jobs:
           node ci/release/prepare_gate_apparatus.mjs `
             --sdk "$env:CANGJIE_HOME" `
             --platform "$env:RELEASE_PLATFORM" `
-            --toolchain-pin "$PWD\ci\cjpm_pin.env" `
+            --actual-host-toolchain "$env:CJCJ_ACTUAL_HOST_TOOLCHAIN" `
             --base-sdk-sidecar "$env:BASE_SDK_PROVENANCE" `
             --outdir "$env:RUNNER_TEMP\release-gate-apparatus"
 
@@ -393,7 +401,7 @@ jobs:
             --runtime-lib "$runtime_lib" \
             --std-dir "$FINAL_STD_DIR" \
             --llvm-manifest "$llvm_manifest" \
-            --base-sdk-id "$CJCJ_TOOLCHAIN" \
+            --base-sdk-id "$RELEASE_HOST_TOOLCHAIN" \
             --base-sdk-archive "$BASE_SDK_ARCHIVE" \
             --base-sdk-provenance "$BASE_SDK_PROVENANCE" \
             --gate-host-runtime "$GATE_HOST_RUNTIME" \
@@ -429,7 +437,7 @@ jobs:
             --runtime-root "$PWD\.platform-ci\runtime-install\windows_release_x86_64" `
             --std-dir "$env:FINAL_STD_DIR" `
             --llvm-manifest "$env:FIXED_LLVM_MANIFEST" `
-            --base-sdk-id "$env:CJCJ_TOOLCHAIN" `
+            --base-sdk-id "$env:RELEASE_HOST_TOOLCHAIN" `
             --base-sdk-archive "$env:BASE_SDK_ARCHIVE" `
             --base-sdk-provenance "$env:BASE_SDK_PROVENANCE" `
             --gate-host-runtime "$env:GATE_HOST_RUNTIME" `

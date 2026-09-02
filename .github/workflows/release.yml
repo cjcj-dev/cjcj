@@ -38,12 +38,6 @@ permissions:
   contents: write
   actions: read
 
-env:
-  CJCJ_TOOLCHAIN: nightly-1.2.0-alpha.20260721165458
-  # RUNTIME_REF comes from ci/runtime_pin.env via the "Load runtime pin" step —
-  # the pin lives in exactly one file (a stale copy here once poisoned the
-  # runtime cache key while the build itself followed the pin file).
-
 jobs:
   # One call built all four source SDKs at once, so a stop at phase 1 had already
   # paid for the other three -- the exact thing the phase order exists to avoid.

@@ -5,7 +5,7 @@ import path from 'node:path';
 import {parseArgs} from 'node:util';
 import {
   GATE_APPARATUS_PROVENANCE,
-  parseGateHostToolchain,
+  gateApparatusCoverageWarning,
   resolveGateHostRuntime,
   writeGateApparatusProvenance,
 } from '../../build/lib/release-gate-apparatus.mjs';
@@ -14,17 +14,17 @@ const {values} = parseArgs({
   options: {
     sdk: {type: 'string'},
     platform: {type: 'string'},
-    'toolchain-pin': {type: 'string'},
+    'actual-host-toolchain': {type: 'string'},
     'base-sdk-sidecar': {type: 'string'},
     outdir: {type: 'string'},
   },
 });
 
-for (const name of ['sdk', 'platform', 'toolchain-pin', 'base-sdk-sidecar', 'outdir']) {
+for (const name of ['sdk', 'platform', 'actual-host-toolchain', 'base-sdk-sidecar', 'outdir']) {
   if (!values[name]) throw new Error(`--${name} is required`);
 }
 
-const toolchain = parseGateHostToolchain(await fs.readFile(values['toolchain-pin'], 'utf8'));
+const toolchain = values['actual-host-toolchain'];
 const baseSdkProvenance = JSON.parse(await fs.readFile(values['base-sdk-sidecar'], 'utf8'));
 const source = await resolveGateHostRuntime({sdk: values.sdk, platform: values.platform});
 const output = path.resolve(values.outdir);
@@ -57,3 +57,6 @@ console.log([
   `g_cjLoadBadMask=${provenance.host_runtime.g_cjLoadBadMask_count}`,
   `sidecar=${sidecar}`,
 ].join(' '));
+if (provenance.coverage === 'not-covered') {
+  console.warn(`WARNING: ${gateApparatusCoverageWarning(provenance.gate_host_toolchain)}`);
+}

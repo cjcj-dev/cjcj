@@ -53,6 +53,7 @@ export const GATING = Object.freeze([
   'ci/g2-identity-gate.test.mjs',
   'ci/generate-freeze.test.mjs',
   'ci/gc-release-floor.test.mjs',
+  'ci/host-toolchain-pin.test.mjs',
   'ci/idle-writer-policy.test.mjs',
   'ci/llvm-tools-manifest.test.mjs',
   'ci/pin-sweep.test.mjs',

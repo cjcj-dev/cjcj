@@ -14,9 +14,11 @@ import {
 import {
   GATE_APPARATUS_PROVENANCE,
   REVIEWED_GATE_HOST_TOOLCHAIN,
+  gateApparatusCoverageWarning,
+  validateGateApparatusProvenance,
 } from '../lib/release-gate-apparatus.mjs';
 
-test('gate apparatus is captured from the pinned uncoloured host runtime', async t => {
+test('gate apparatus records actual host bytes separately from its review coverage', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'gate-apparatus-'));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   const sdk = path.join(root, 'sdk');
@@ -52,23 +54,59 @@ test('gate apparatus is captured from the pinned uncoloured host runtime', async
     },
   }, null, 2)}\n`);
   const githubEnv = path.join(root, 'github.env');
-  const output = path.join(root, 'out');
-  const captured = spawnSync(process.execPath, [
-    path.resolve('ci/release/prepare_gate_apparatus.mjs'),
-    '--sdk', sdk,
-    '--platform', 'linux-x64',
-    '--toolchain-pin', path.resolve('ci/cjpm_pin.env'),
-    '--base-sdk-sidecar', baseSidecar,
-    '--outdir', output,
-  ], {encoding: 'utf8', env: {...process.env, GITHUB_ENV: githubEnv}});
-  assert.equal(captured.status, 0, captured.stderr);
-  assert.match(captured.stdout, new RegExp(`toolchain=${REVIEWED_GATE_HOST_TOOLCHAIN}`));
-  assert.match(captured.stdout, /g_cjLoadBadMask=0/);
+  const currentPinText = await fs.readFile(path.resolve('ci/cjpm_pin.env'), 'utf8');
+  const currentHost = currentPinText.match(/^CJCJ_TOOLCHAIN=(\S+)$/m)?.[1];
+  assert.ok(currentHost);
 
-  const sidecar = JSON.parse(await fs.readFile(path.join(output, GATE_APPARATUS_PROVENANCE), 'utf8'));
-  assert.equal(sidecar.gate_host_toolchain, REVIEWED_GATE_HOST_TOOLCHAIN);
-  assert.match(sidecar.host_runtime.sha256, /^[0-9a-f]{64}$/);
-  assert.equal(sidecar.host_runtime.g_cjLoadBadMask_count, 0);
+  const capture = ({toolchain, name}) => {
+    const output = path.join(root, name);
+    const childEnv = {...process.env, GITHUB_ENV: githubEnv};
+    delete childEnv.NODE_TEST_CONTEXT;
+    const captured = spawnSync(process.execPath, [
+      path.resolve('ci/release/prepare_gate_apparatus.mjs'),
+      '--sdk', sdk,
+      '--platform', 'linux-x64',
+      '--actual-host-toolchain', toolchain,
+      '--base-sdk-sidecar', baseSidecar,
+      '--outdir', output,
+    ], {encoding: 'utf8', env: childEnv});
+    return {captured, output};
+  };
+
+  await t.test('a newer actual host is retained with a visible not-covered warning', async () => {
+    const {captured, output} = capture({toolchain: currentHost, name: 'uncovered'});
+    assert.equal(captured.status, 0, captured.stderr);
+    assert.match(captured.stderr, /WARNING: Gate apparatus does not cover this host configuration/);
+
+    const sidecar = JSON.parse(await fs.readFile(path.join(output, GATE_APPARATUS_PROVENANCE), 'utf8'));
+    assert.equal(sidecar.gate_host_toolchain, currentHost);
+    assert.equal(sidecar.reviewed_against, REVIEWED_GATE_HOST_TOOLCHAIN);
+    assert.equal(sidecar.coverage, 'not-covered');
+    assert.equal(sidecar.coverage_warning, gateApparatusCoverageWarning(currentHost));
+    assert.match(sidecar.host_runtime.sha256, /^[0-9a-f]{64}$/);
+    assert.equal(sidecar.host_runtime.g_cjLoadBadMask_count, 0);
+  });
+
+  await t.test('the reviewed host is covered and carries no warning', async () => {
+    const {captured, output} = capture({toolchain: REVIEWED_GATE_HOST_TOOLCHAIN, name: 'covered'});
+    assert.equal(captured.status, 0, captured.stderr);
+    assert.doesNotMatch(captured.stderr, /WARNING:/);
+    const sidecar = JSON.parse(await fs.readFile(path.join(output, GATE_APPARATUS_PROVENANCE), 'utf8'));
+    assert.equal(sidecar.gate_host_toolchain, REVIEWED_GATE_HOST_TOOLCHAIN);
+    assert.equal(sidecar.reviewed_against, REVIEWED_GATE_HOST_TOOLCHAIN);
+    assert.equal(sidecar.coverage, 'covered');
+    assert.ok(!Object.hasOwn(sidecar, 'coverage_warning'));
+  });
+
+  await t.test('coverage rejects values outside the closed set', async () => {
+    const {captured, output} = capture({toolchain: REVIEWED_GATE_HOST_TOOLCHAIN, name: 'invalid'});
+    assert.equal(captured.status, 0, captured.stderr);
+    const sidecar = JSON.parse(await fs.readFile(path.join(output, GATE_APPARATUS_PROVENANCE), 'utf8'));
+    sidecar.coverage = 'unknown';
+    assert.throws(() => validateGateApparatusProvenance(sidecar, {platform: 'linux-x64'}),
+      /outside the closed set/);
+  });
+
   const environment = await fs.readFile(githubEnv, 'utf8');
   assert.match(environment, /^GATE_HOST_RUNTIME=.+gate-host-runtime\.so$/m);
   assert.match(environment, /^GATE_APPARATUS_PROVENANCE=.+GATE-APPARATUS\.json$/m);
