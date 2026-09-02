@@ -1,6 +1,7 @@
 // Port of cangjie-build/src/cangjie_build/toolchain/_archive.py.
 
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
@@ -11,6 +12,7 @@ import {run} from './runner.mjs';
 const logger = getLogger('cangjie_build.toolchain.archive');
 
 export async function download(url, dest) {
+  net.setDefaultAutoSelectFamilyAttemptTimeout(2_000);
   if (fs.existsSync(dest)) {
     logger.info('Reusing cached download: %s', dest);
     return;
