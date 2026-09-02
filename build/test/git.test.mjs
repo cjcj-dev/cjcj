@@ -30,7 +30,7 @@ test('shallowClone fetches a full commit SHA without treating it as a branch', a
     fs.rmSync(root, {recursive: true, force: true});
   }
   assert.match(output, /git init/);
-  assert.match(output, new RegExp(`git -C .* -c http.version=HTTP/1.1 fetch --depth 1 https://example.invalid/runtime.git ${sha}`));
+  assert.match(output, new RegExp(`cd .*checkout.*git -c http.version=HTTP/1.1 fetch --depth 1 https://example.invalid/runtime.git ${sha}`));
   assert.match(output, /git -C .* checkout --detach FETCH_HEAD/);
   assert.doesNotMatch(output, new RegExp(`clone .* --branch ${sha}`));
 });

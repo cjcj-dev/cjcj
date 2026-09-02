@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {BuildError} from '../../lib/errors.mjs';
+import {fetchSource} from '../../lib/git.mjs';
 import {stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
 import {applyTextPatch, baseEnv, requireFile, runBuildPy} from './common.mjs';
@@ -53,7 +54,7 @@ function readCjpmPin() {
 
 async function checkoutPinnedCjpm(toolsRoot) {
   const {url, ref} = readCjpmPin();
-  await runCommand(['git', 'fetch', '--depth', '1', url, ref], {cwd: toolsRoot, stage: 'tools.cjpm.fetch'});
+  await fetchSource(url, ref, {cwd: toolsRoot, stage: 'tools.cjpm.fetch'});
   const fetched = await runCommand(['git', 'rev-parse', 'FETCH_HEAD'], {
     cwd: toolsRoot, stage: 'tools.cjpm.pin', capture: true, logOutput: false,
   });

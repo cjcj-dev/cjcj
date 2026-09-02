@@ -4,6 +4,7 @@ import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {sourceFetchArguments} from '../build/lib/git.mjs';
 
 export const repoRoot = path.resolve(import.meta.dirname, '..');
 
@@ -123,14 +124,15 @@ function localRef(repo, ref, timeoutMs) {
 }
 
 function fetchExact(repo, url, sha, timeoutMs) {
-  return git(repo, ['fetch', '--no-tags', '--depth=1', url, sha], timeoutMs);
+  return git(repo, sourceFetchArguments(url, sha, {noTags: true}), timeoutMs);
 }
 
 function fetchAuthority(repo, url, branch, timeoutMs, filter = false) {
-  const arguments_ = ['fetch', '--no-tags'];
-  if (filter) arguments_.push('--filter=blob:none');
-  arguments_.push(url, branch);
-  return git(repo, arguments_, timeoutMs);
+  return git(repo, sourceFetchArguments(url, branch, {
+    noTags: true,
+    depth: 0,
+    filter: filter ? 'blob:none' : '',
+  }), timeoutMs);
 }
 
 function fetchRemoteRef(repo, url, ref, timeoutMs, filter = false) {

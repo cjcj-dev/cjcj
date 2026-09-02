@@ -15,6 +15,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {shallowClone} from '../../build/lib/git.mjs';
 
 $.stdio = 'inherit';
 const log = (message) => console.log(`[std-ast] ${message}`);
@@ -68,8 +69,7 @@ if (!(await isFile(path.join(flatbuffersSrc, 'CMakeLists.txt')))) {
   if (!(await isFile(path.join(flatbuffersSrc, 'CMakeLists.txt')))) {
     log(`fetching flatbuffers ${FLATBUFFERS_PIN}`);
     await fs.rm(flatbuffersSrc, {recursive: true, force: true});
-    await $`git clone --filter=blob:none ${FLATBUFFERS_REPOSITORY} ${flatbuffersSrc}`;
-    await $({cwd: flatbuffersSrc})`git checkout --detach ${FLATBUFFERS_PIN}`;
+    await shallowClone(FLATBUFFERS_REPOSITORY, flatbuffersSrc, {tag: FLATBUFFERS_PIN});
   }
 }
 

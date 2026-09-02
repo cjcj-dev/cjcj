@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {download, extract} from '../lib/archive.mjs';
+import {fetchSource, shallowClone} from '../lib/git.mjs';
 import {getLogger, stage} from '../lib/logging.mjs';
 import {run} from '../lib/runner.mjs';
 
@@ -61,7 +62,7 @@ export async function install(buildRoot, {jobs} = {}) {
       await run(['git', 'remote', 'add', 'origin', LLVM_PROJECT_REMOTE], {
         cwd: llvmProject, stage: 'mingw.llvm.remote',
       });
-      await run(['git', 'fetch', '--depth', '1', 'origin', LLVM_PROJECT_COMMIT], {
+      await fetchSource(LLVM_PROJECT_REMOTE, LLVM_PROJECT_COMMIT, {
         cwd: llvmProject, stage: 'mingw.llvm.fetch',
       });
       await run(['git', 'checkout', 'FETCH_HEAD'], {cwd: llvmProject, stage: 'mingw.llvm.checkout'});
@@ -69,9 +70,7 @@ export async function install(buildRoot, {jobs} = {}) {
 
     const mingwW64 = path.join(source, 'mingw-w64');
     if (!fs.existsSync(mingwW64)) {
-      await run(['git', 'clone', '--depth', '1', MINGW_W64_REMOTE, mingwW64], {
-        stage: 'mingw.mingw-w64.clone',
-      });
+      await shallowClone(MINGW_W64_REMOTE, mingwW64);
     }
 
     const toolchainEnv = {TOOLCHAIN_ARCHS: 'x86_64'};

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,6 +18,12 @@ function shellFunction(name) {
 
 function runBash(source, args = []) {
   return spawnSync('bash', ['-c', source, 'bash', ...args], {encoding: 'utf8'});
+}
+
+function runGit(args) {
+  const result = spawnSync('git', args, {encoding: 'utf8'});
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
 }
 
 function writeTuple(root, embeddedSha) {
@@ -43,6 +50,61 @@ function writeTuple(root, embeddedSha) {
   return llvmSha;
 }
 
+function writeDepotChecksums(depot) {
+  const files = [
+    'fixed-llc/llc.gz',
+    'fixed-llc/opt.gz',
+    'fixed-llc/cjselfhost_llvmshim.o',
+    'fixed-llc/llvm-tools.manifest',
+  ];
+  const rows = files.map(file => {
+    const digest = crypto.createHash('sha256').update(fs.readFileSync(path.join(depot, file))).digest('hex');
+    return `${digest}  ./${file}`;
+  });
+  fs.writeFileSync(path.join(depot, 'SHA256SUMS'), `${rows.join('\n')}\n`);
+}
+
+test('source-build CPU windows preserve explicit placement and derive their width', () => {
+  const invoke = `source "$1" --lib-only\n`
+    + 'test "$(explicit_cpuset 048-063)" = 48-63\n'
+    + 'test "$(cpuset_width 48-63)" = 16\n'
+    + 'test "$(cpuset_width 2-3,8,11-13)" = 6\n'
+    + 'if explicit_cpuset 63-48; then exit 17; fi\n';
+  const result = runBash(invoke, [scriptPath]);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('source-build shell fetch uses the selected mirror and keeps canonical origin', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-shell-git-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const source = path.join(root, 'source');
+  const mirror = path.join(root, 'source.git');
+  const checkout = path.join(root, 'checkout');
+  const authoritative = 'https://github.com/cjcj-dev/cjcj-llvm.git';
+  runGit(['init', source]);
+  fs.writeFileSync(path.join(source, 'value'), 'fixture\n');
+  runGit(['-C', source, 'add', 'value']);
+  runGit(['-C', source, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+    'commit', '-m', 'fixture']);
+  const sha = runGit(['-C', source, 'rev-parse', 'HEAD']);
+  runGit(['clone', '--bare', source, mirror]);
+  runGit(['init', checkout]);
+  runGit(['-C', checkout, 'remote', 'add', 'origin', authoritative]);
+
+  const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
+  const invoke = 'source "$1"\n'
+    + 'CJCJ_SRCBUILD_SOURCE_MIRRORS="$2=file://$3"\n'
+    + 'srcbuild_git_fetch "$4" "$2" "$5"\n';
+  const fetched = runBash(invoke, [helper, authoritative, mirror, checkout, sha]);
+  assert.equal(fetched.status, 0, fetched.stderr);
+  assert.equal(runGit(['-C', checkout, 'rev-parse', 'FETCH_HEAD']), sha);
+  assert.equal(runGit(['-C', checkout, 'remote', 'get-url', 'origin']), authoritative);
+
+  const missing = runBash(invoke,
+    [helper, authoritative, path.join(root, 'missing.git'), checkout, sha]);
+  assert.notEqual(missing.status, 0, 'missing mirror unexpectedly fell back to canonical URL');
+});
+
 test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-tuple-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
@@ -61,6 +123,49 @@ test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t =
   const stale = runBash(invoke, [repoRoot, root]);
   assert.equal(stale.status, 1, stale.stderr);
   console.log(`FIXED_TUPLE_ARM tuple=stale-opt rc=${stale.status}`);
+});
+
+test('fixed tuple depot seeds only checksum-valid pinned payloads and otherwise rebuilds', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-depot-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const pinText = fs.readFileSync(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
+  const llvmSha = pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)[1];
+  const depotRoot = path.join(root, 'depot');
+  const depot = path.join(depotRoot, llvmSha);
+  const tuple = path.join(depot, 'fixed-llc');
+  const destination = path.join(root, 'destination');
+  fs.mkdirSync(tuple, {recursive: true});
+  writeTuple(tuple, llvmSha);
+  writeDepotChecksums(depot);
+
+  const seedInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
+    + `${shellFunction('seed_fixed_tuple_from_depot')}\n`
+    + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3\n'
+    + 'seed_fixed_tuple_from_depot "$4"\n';
+  const seeded = runBash(seedInvoke, [repoRoot, destination, llvmSha, depotRoot]);
+  assert.equal(seeded.status, 0, seeded.stderr);
+  assert.match(seeded.stdout, /seeded fixed LLVM tuple from verified depot/);
+
+  fs.rmSync(destination, {recursive: true, force: true});
+  fs.appendFileSync(path.join(tuple, 'llc.gz'), 'tampered');
+  const rejected = runBash(seedInvoke, [repoRoot, destination, llvmSha, depotRoot]);
+  assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+  assert.match(rejected.stderr, /SHA256SUMS verification failed/);
+  assert.equal(fs.existsSync(destination), false, 'rejected depot payload was copied');
+
+  const checkoutMarker = path.join(root, 'rebuild-started');
+  const buildInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
+    + `${shellFunction('seed_fixed_tuple_from_depot')}\n`
+    + `${shellFunction('build_fixed_tuple')}\n`
+    + 'checkout_exact() { touch "$CHECKOUT_MARKER"; return 17; }\n'
+    + 'checkout_sparse_exact() { return 17; }\n'
+    + 'DRY_RUN=0 REPO_ROOT=$1 STATE_ROOT=$2 CJCJ_FIXED_LLVM_DIR=$2 JOBS=1 '
+    + 'CHECKOUT_MARKER=$3 CJCJ_LLVM_DEPOT_ROOT=$4\n'
+    + 'build_fixed_tuple\n';
+  const rebuilt = runBash(buildInvoke,
+    [repoRoot, path.join(root, 'build-destination'), checkoutMarker, depotRoot]);
+  assert.equal(rebuilt.status, 1, rebuilt.stdout + rebuilt.stderr);
+  assert.equal(fs.existsSync(checkoutMarker), true, 'rebuild path did not start after rejecting depot');
 });
 
 test('fixed tuple build stops when an exact checkout fails', t => {

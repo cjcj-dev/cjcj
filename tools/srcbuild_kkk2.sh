@@ -46,6 +46,55 @@ resolve_host_toolchain_pin() {
     export CJCJ_TOOLCHAIN
 }
 
+current_cpuset() {
+    local affinity
+    affinity=$(LC_ALL=C taskset -pc "$$") || return 1
+    affinity=${affinity##*: }
+    [[ -n $affinity ]] || {
+        echo "taskset returned an empty CPU affinity" >&2
+        return 1
+    }
+    printf '%s\n' "$affinity"
+}
+
+cpuset_width() {
+    local cpuset=$1
+    awk -v cpuset="$cpuset" '
+        BEGIN {
+            n = split(cpuset, groups, ",")
+            width = 0
+            for (i = 1; i <= n; i++) {
+                if (groups[i] ~ /^[0-9]+$/) {
+                    width++
+                } else if (groups[i] ~ /^[0-9]+-[0-9]+$/) {
+                    split(groups[i], bounds, "-")
+                    if (bounds[2] < bounds[1]) exit 1
+                    width += bounds[2] - bounds[1] + 1
+                } else {
+                    exit 1
+                }
+            }
+            if (width < 1) exit 1
+            print width
+        }
+    '
+}
+
+explicit_cpuset() {
+    local requested=$1 first last
+    [[ $requested =~ ^[0-9]+-[0-9]+$ ]] || {
+        echo "CJCJ_SRCBUILD_CPUSET must be one contiguous range such as 48-63" >&2
+        return 1
+    }
+    first=${requested%-*}
+    last=${requested#*-}
+    ((10#$first <= 10#$last)) || {
+        echo "CJCJ_SRCBUILD_CPUSET has a descending range: $requested" >&2
+        return 1
+    }
+    printf '%d-%d\n' "$((10#$first))" "$((10#$last))"
+}
+
 if [[ ${1:-} == --lib-only ]]; then
     [[ $# == 1 ]] || {
         echo "--lib-only does not accept other arguments" >&2
@@ -53,6 +102,9 @@ if [[ ${1:-} == --lib-only ]]; then
     }
     return 0 2>/dev/null || exit 0
 fi
+
+# shellcheck disable=SC1091
+source "$REPO_ROOT/build/lib/srcbuild_git.sh"
 
 usage() {
     cat <<'EOF'
@@ -62,7 +114,12 @@ Usage: tools/srcbuild_kkk2.sh [TARGET [JOBS [FROM_STEP]]]
        source tools/srcbuild_kkk2.sh --lib-only
 
 Defaults:
-  TARGET=linux-x64  JOBS=96  FROM_STEP=2  THROUGH_STEP=33
+  TARGET=linux-x64  JOBS=<selected CPU window width>
+  FROM_STEP=2  THROUGH_STEP=33
+
+CPU placement:
+  CJCJ_SRCBUILD_CPUSET=48-63 selects an explicit contiguous window.  When it
+  is unset, the driver inherits its caller's current taskset affinity.
 
 Final source-build steps:
   32  Build stage 2 compiler (cjpm build -j 1, cjHeapSize=20GB)
@@ -85,7 +142,8 @@ EOF
 }
 
 TARGET=linux-x64
-JOBS=96
+JOBS=
+JOBS_EXPLICIT=0
 FROM_STEP=2
 THROUGH_STEP=33
 DRY_RUN=0
@@ -101,6 +159,7 @@ while (($#)); do
         --jobs|-j)
             [[ $# -ge 2 ]] || { echo "$1 requires a value" >&2; exit 2; }
             JOBS=$2
+            JOBS_EXPLICIT=1
             shift 2
             ;;
         --from-step)
@@ -143,15 +202,33 @@ if ((${#positional[@]} > 3)); then
     exit 2
 fi
 if ((${#positional[@]} >= 1)); then TARGET=${positional[0]}; fi
-if ((${#positional[@]} >= 2)); then JOBS=${positional[1]}; fi
+if ((${#positional[@]} >= 2)); then
+    JOBS=${positional[1]}
+    JOBS_EXPLICIT=1
+fi
 if ((${#positional[@]} >= 3)); then FROM_STEP=${positional[2]}; fi
+
+inherited_cpuset=$(current_cpuset) || exit 2
+if [[ -n ${CJCJ_SRCBUILD_CPUSET:-} ]]; then
+    CPUSET=$(explicit_cpuset "$CJCJ_SRCBUILD_CPUSET") || exit 2
+else
+    CPUSET=$inherited_cpuset
+fi
+CPUSET_WIDTH=$(cpuset_width "$CPUSET") || {
+    echo "cannot determine CPU count from affinity '$CPUSET'" >&2
+    exit 2
+}
+if ((JOBS_EXPLICIT == 0)); then JOBS=$CPUSET_WIDTH; fi
 
 [[ $TARGET == linux-x64 ]] || {
     echo "kkk2 is Linux/x86_64; srcbuild target '$TARGET' requires its matching native runner" >&2
     exit 2
 }
 [[ $JOBS =~ ^[1-9][0-9]*$ ]] || { echo "jobs must be a positive integer" >&2; exit 2; }
-((JOBS <= 96)) || { echo "jobs must not exceed this lane's reserved CPUs 0-95" >&2; exit 2; }
+((JOBS <= CPUSET_WIDTH)) || {
+    echo "jobs ($JOBS) must not exceed selected CPU window width ($CPUSET_WIDTH for $CPUSET)" >&2
+    exit 2
+}
 [[ $FROM_STEP =~ ^[0-9]+$ ]] || { echo "from-step must be an integer" >&2; exit 2; }
 [[ $THROUGH_STEP =~ ^[0-9]+$ ]] || { echo "through-step must be an integer" >&2; exit 2; }
 ((FROM_STEP >= 1 && FROM_STEP <= 33)) || { echo "from-step must be in 1..33" >&2; exit 2; }
@@ -165,12 +242,15 @@ host_name=$(hostname -s)
     exit 3
 }
 
-cpu_last=$((JOBS - 1))
-CPUSET="0-$cpu_last"
 if [[ ${CJCJ_KKK2_AFFINED:-} != "$CPUSET" ]]; then
     exec taskset -c "$CPUSET" env CJCJ_KKK2_AFFINED="$CPUSET" \
         bash "$SCRIPT_PATH" "${ORIGINAL_ARGS[@]}"
 fi
+actual_cpuset=$(current_cpuset) || exit 3
+[[ $actual_cpuset == "$CPUSET" ]] || {
+    echo "taskset affinity mismatch: requested=$CPUSET actual=$actual_cpuset" >&2
+    exit 3
+}
 
 readonly STATE_ROOT="$REPO_ROOT/.srcbuild"
 readonly LOG_ROOT="$STATE_ROOT/logs"
@@ -298,17 +378,18 @@ run_step() {
 }
 
 fixed_tuple_is_current() {
-    local manifest="$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest" manifest_llvm opt_llvm
-    [[ -s $CJCJ_FIXED_LLVM_DIR/llc.gz ]] || return 1
-    [[ -s $CJCJ_FIXED_LLVM_DIR/opt.gz ]] || return 1
-    [[ -s $CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o ]] || return 1
+    local tuple_dir=${1:-$CJCJ_FIXED_LLVM_DIR}
+    local manifest="$tuple_dir/llvm-tools.manifest" manifest_llvm opt_llvm
+    [[ -s $tuple_dir/llc.gz ]] || return 1
+    [[ -s $tuple_dir/opt.gz ]] || return 1
+    [[ -s $tuple_dir/cjselfhost_llvmshim.o ]] || return 1
     [[ -s $manifest ]] || return 1
     # shellcheck disable=SC1091
     source "$REPO_ROOT/ci/llvm_pin.env" || return 1
     [[ $(awk -F= '$1=="PLATFORM" {print $2}' "$manifest") == linux_x86_64 ]] || return 1
     manifest_llvm=$(awk -F= '$1=="LLVM_SHA" {print $2}' "$manifest") || return 1
     [[ $manifest_llvm == "$LLVM_SHA" ]] || return 1
-    opt_llvm=$(gzip -dc "$CJCJ_FIXED_LLVM_DIR/opt.gz" \
+    opt_llvm=$(gzip -dc "$tuple_dir/opt.gz" \
         | strings | sed -n 's/^CJLLVM-COMMIT:\([0-9a-f]\{40\}\)$/\1/p') || return 1
     [[ $opt_llvm == "$manifest_llvm" ]] || return 1
     [[ $(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$manifest") == "$CANGJIE_COMPILER_SHA" ]] || return 1
@@ -316,28 +397,63 @@ fixed_tuple_is_current() {
     node "$REPO_ROOT/ci/llvm-tools-manifest.mjs" validate native "$manifest" >/dev/null || return 1
 }
 
-checkout_exact() {
-    local directory=$1 url=$2 revision=$3 fetch_url
-    fetch_url=$(source_fetch_url "$url") || return 1
-    if [[ ! -d $directory/.git ]]; then
-        git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout "$fetch_url" "$directory" || return 1
-        git -C "$directory" remote set-url origin "$url" || return 1
+seed_fixed_tuple_from_depot() {
+    local depot_root=${1:-${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}}
+    local depot="$depot_root/$LLVM_SHA"
+    local tuple="$depot/fixed-llc"
+    local payload
+    local -a payloads=(llc.gz opt.gz cjselfhost_llvmshim.o llvm-tools.manifest)
+
+    [[ -d $tuple && -s $depot/SHA256SUMS ]] || {
+        echo "fixed LLVM depot seed unavailable: $depot (missing fixed-llc or SHA256SUMS); rebuilding" >&2
+        return 1
+    }
+    for payload in "${payloads[@]}"; do
+        [[ -f $tuple/$payload && ! -L $tuple/$payload ]] || {
+            echo "fixed LLVM depot seed rejected: missing or non-regular fixed-llc/$payload; rebuilding" >&2
+            return 1
+        }
+    done
+    if ! (cd "$depot" && sha256sum --strict -c SHA256SUMS); then
+        echo "fixed LLVM depot seed rejected: SHA256SUMS verification failed at $depot; rebuilding" >&2
+        return 1
     fi
-    git -C "$directory" -c http.version=HTTP/1.1 fetch --depth=1 "$fetch_url" "$revision" || return 1
+    if ! fixed_tuple_is_current "$tuple"; then
+        echo "fixed LLVM depot seed rejected: pin, manifest, and opt lineage disagree at $tuple; rebuilding" >&2
+        return 1
+    fi
+
+    mkdir -p "$CJCJ_FIXED_LLVM_DIR"
+    for payload in "${payloads[@]}"; do
+        cp -- "$tuple/$payload" "$CJCJ_FIXED_LLVM_DIR/$payload"
+    done
+    if ! fixed_tuple_is_current; then
+        echo "fixed LLVM depot seed rejected after copy; rebuilding" >&2
+        return 1
+    fi
+    echo "seeded fixed LLVM tuple from verified depot $depot"
+}
+
+checkout_exact() {
+    local directory=$1 url=$2 revision=$3
+    if [[ ! -d $directory/.git ]]; then
+        git init "$directory" || return 1
+        git -C "$directory" remote add origin "$url" || return 1
+    fi
+    srcbuild_git_fetch "$directory" "$url" "$revision" || return 1
     git -C "$directory" checkout --detach FETCH_HEAD || return 1
     [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
 }
 
 checkout_sparse_exact() {
-    local directory=$1 url=$2 revision=$3 sparse_path=$4 fetch_url
-    fetch_url=$(source_fetch_url "$url") || return 1
+    local directory=$1 url=$2 revision=$3 sparse_path=$4
     if [[ ! -d $directory/.git ]]; then
-        git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout "$fetch_url" "$directory" || return 1
-        git -C "$directory" remote set-url origin "$url" || return 1
+        git init "$directory" || return 1
+        git -C "$directory" remote add origin "$url" || return 1
     fi
     git -C "$directory" sparse-checkout init --cone || return 1
     git -C "$directory" sparse-checkout set "$sparse_path" || return 1
-    git -C "$directory" -c http.version=HTTP/1.1 fetch --depth=1 "$fetch_url" "$revision" || return 1
+    srcbuild_git_fetch "$directory" "$url" "$revision" || return 1
     git -C "$directory" checkout --detach FETCH_HEAD || return 1
     [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
 }
@@ -347,13 +463,16 @@ build_fixed_tuple() {
         echo "fixed LLVM tuple matches ci/llvm_pin.env; reusing it"
         return
     fi
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/ci/llvm_pin.env"
+    if seed_fixed_tuple_from_depot; then
+        return
+    fi
     if ((DRY_RUN)); then
         echo "DRY_RUN PREREQUISITE=fixed-llvm action=rebuild"
         return
     fi
 
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/ci/llvm_pin.env"
     export LLVM_URL LLVM_SHA CANGJIE_COMPILER_URL CANGJIE_COMPILER_SHA
     export FLATBUFFERS_URL FLATBUFFERS_SHA
     local build_root="$STATE_ROOT/fixed-llvm-build"
@@ -509,35 +628,9 @@ build_cli() {
         --cangjie-version "$CJCJ_SRCBUILD_VERSION" "$@"
 }
 
-source_fetch_url() {
-    local original=$1 mappings=${CJCJ_SRCBUILD_SOURCE_MIRRORS:-} entry source mirror resolved=$1
-    local -A seen=()
-    local -a entries=()
-    IFS=';' read -r -a entries <<< "$mappings"
-    for entry in "${entries[@]}"; do
-        [[ -n $entry ]] || continue
-        [[ $entry == *=* && -n ${entry%%=*} && -n ${entry#*=} ]] || {
-            echo "invalid CJCJ_SRCBUILD_SOURCE_MIRRORS entry: $entry" >&2
-            return 1
-        }
-        source=${entry%%=*}
-        mirror=${entry#*=}
-        [[ -z ${seen[$source]+set} ]] || {
-            echo "duplicate CJCJ_SRCBUILD_SOURCE_MIRRORS source: $source" >&2
-            return 1
-        }
-        seen[$source]=1
-        if [[ $source == "$original" ]]; then
-            resolved=$mirror
-        fi
-    done
-    printf '%s\n' "$resolved"
-}
-
 ensure_exact_clone() {
-    local directory=$1 url=$2 revision=$3 attempt fetch_url
+    local directory=$1 url=$2 revision=$3 attempt
     [[ -d $directory ]] || return 0
-    fetch_url=$(source_fetch_url "$url") || return
     local actual_url=
     if ! git -C "$directory" remote get-url origin >/dev/null 2>&1; then
         git -C "$directory" remote add origin "$url"
@@ -552,7 +645,7 @@ ensure_exact_clone() {
         return 0
     fi
     for attempt in 1 2 3; do
-        if git -C "$directory" -c http.version=HTTP/1.1 fetch --depth 1 "$fetch_url" "$revision"; then
+        if srcbuild_git_fetch "$directory" "$url" "$revision"; then
             git -C "$directory" checkout --detach FETCH_HEAD
             [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
             return
