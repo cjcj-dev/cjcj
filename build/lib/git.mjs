@@ -27,17 +27,66 @@ export function resolveSourceMirror(url, mappings = process.env.CJCJ_SRCBUILD_SO
   return resolved;
 }
 
+export function sourceFetchArguments(url, ref, {
+  depth = 1,
+  noTags = false,
+  filter = '',
+  dryRun = false,
+} = {}) {
+  const command = ['-c', 'http.version=HTTP/1.1', 'fetch'];
+  if (noTags) command.push('--no-tags');
+  if (dryRun) command.push('--dry-run');
+  if (depth) command.push('--depth', String(depth));
+  if (filter) command.push('--filter', filter);
+  command.push(resolveSourceMirror(url), ref);
+  return command;
+}
+
+export function sourceLsRemoteArguments(url, ...refs) {
+  return ['-c', 'http.version=HTTP/1.1', 'ls-remote', '--exit-code', resolveSourceMirror(url), ...refs];
+}
+
+export async function fetchSource(url, ref, {
+  cwd,
+  depth = 1,
+  noTags = false,
+  filter = '',
+  stage = 'git.fetch',
+  ...runOptions
+} = {}) {
+  if (!cwd) throw new BuildError(stage, 'fetchSource requires cwd');
+  return run(['git', ...sourceFetchArguments(url, ref, {depth, noTags, filter})], {
+    cwd,
+    stage,
+    ...runOptions,
+  });
+}
+
+export async function checkoutExactSource(url, dest, ref) {
+  fs.mkdirSync(dest, {recursive: true});
+  if (!fs.existsSync(path.join(dest, '.git'))) {
+    await run(['git', 'init', dest], {stage: 'git.init'});
+    await run(['git', '-C', dest, 'remote', 'add', 'origin', url], {stage: 'git.remote'});
+  } else {
+    const remote = await run(['git', '-C', dest, 'remote', 'get-url', 'origin'], {
+      stage: 'git.remote', capture: true, logOutput: false,
+    });
+    if (remote.stdout.trim() !== url) {
+      throw new BuildError('git.remote',
+        `source remote mismatch: path=${dest} actual=${remote.stdout.trim()} expected=${url}`);
+    }
+  }
+  await fetchSource(url, ref, {cwd: dest});
+  await run(['git', '-C', dest, 'checkout', '--detach', 'FETCH_HEAD'], {stage: 'git.checkout'});
+}
+
 export async function shallowClone(url, dest, {tag} = {}) {
   if (fs.existsSync(dest)) throw new BuildError('git', `destination already exists: ${dest}`);
   fs.mkdirSync(path.dirname(dest), {recursive: true});
   const fetchUrl = resolveSourceMirror(url);
   if (tag && /^[0-9a-f]{40}$/i.test(tag)) {
     logger.info('Cloning %s @ %s into %s', url, tag, dest);
-    await run(['git', 'init', dest], {stage: 'git.init'});
-    await run(['git', '-C', dest, 'remote', 'add', 'origin', url], {stage: 'git.remote'});
-    await run(['git', '-C', dest, '-c', 'http.version=HTTP/1.1',
-      'fetch', '--depth', '1', fetchUrl, tag], {stage: 'git.fetch'});
-    await run(['git', '-C', dest, 'checkout', '--detach', 'FETCH_HEAD'], {stage: 'git.checkout'});
+    await checkoutExactSource(url, dest, tag);
     return;
   }
   const command = ['git', '-c', 'http.version=HTTP/1.1', 'clone', '--depth', '1'];

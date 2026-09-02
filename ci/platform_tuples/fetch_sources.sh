@@ -3,6 +3,11 @@
 # never cloned at a moving branch tip.
 set -euo pipefail
 
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+repo_root=$(cd "$script_dir/../.." && pwd -P)
+# shellcheck disable=SC1091
+source "$repo_root/build/lib/srcbuild_git.sh"
+
 root="${TUPLE_ROOT:?TUPLE_ROOT is required}"
 mkdir -p "$root/logs"
 exec > >(tee "$root/logs/source-fetch.log") 2>&1
@@ -16,7 +21,7 @@ fetch_exact() {
     if [ -n "$sparse_path" ]; then
         git -C "$dest" sparse-checkout set "$sparse_path"
     fi
-    git -C "$dest" fetch --depth=1 origin "$sha"
+    srcbuild_git_fetch "$dest" "$url" "$sha"
     git -C "$dest" checkout --detach FETCH_HEAD
     test "$(git -C "$dest" rev-parse HEAD)" = "$sha"
 }

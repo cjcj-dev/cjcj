@@ -103,6 +103,9 @@ if [[ ${1:-} == --lib-only ]]; then
     return 0 2>/dev/null || exit 0
 fi
 
+# shellcheck disable=SC1091
+source "$REPO_ROOT/build/lib/srcbuild_git.sh"
+
 usage() {
     cat <<'EOF'
 Usage: tools/srcbuild_kkk2.sh [TARGET [JOBS [FROM_STEP]]]
@@ -432,27 +435,25 @@ seed_fixed_tuple_from_depot() {
 }
 
 checkout_exact() {
-    local directory=$1 url=$2 revision=$3 fetch_url
-    fetch_url=$(source_fetch_url "$url") || return 1
+    local directory=$1 url=$2 revision=$3
     if [[ ! -d $directory/.git ]]; then
-        git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout "$fetch_url" "$directory" || return 1
-        git -C "$directory" remote set-url origin "$url" || return 1
+        git init "$directory" || return 1
+        git -C "$directory" remote add origin "$url" || return 1
     fi
-    git -C "$directory" -c http.version=HTTP/1.1 fetch --depth=1 "$fetch_url" "$revision" || return 1
+    srcbuild_git_fetch "$directory" "$url" "$revision" || return 1
     git -C "$directory" checkout --detach FETCH_HEAD || return 1
     [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
 }
 
 checkout_sparse_exact() {
-    local directory=$1 url=$2 revision=$3 sparse_path=$4 fetch_url
-    fetch_url=$(source_fetch_url "$url") || return 1
+    local directory=$1 url=$2 revision=$3 sparse_path=$4
     if [[ ! -d $directory/.git ]]; then
-        git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout "$fetch_url" "$directory" || return 1
-        git -C "$directory" remote set-url origin "$url" || return 1
+        git init "$directory" || return 1
+        git -C "$directory" remote add origin "$url" || return 1
     fi
     git -C "$directory" sparse-checkout init --cone || return 1
     git -C "$directory" sparse-checkout set "$sparse_path" || return 1
-    git -C "$directory" -c http.version=HTTP/1.1 fetch --depth=1 "$fetch_url" "$revision" || return 1
+    srcbuild_git_fetch "$directory" "$url" "$revision" || return 1
     git -C "$directory" checkout --detach FETCH_HEAD || return 1
     [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
 }
@@ -627,35 +628,9 @@ build_cli() {
         --cangjie-version "$CJCJ_SRCBUILD_VERSION" "$@"
 }
 
-source_fetch_url() {
-    local original=$1 mappings=${CJCJ_SRCBUILD_SOURCE_MIRRORS:-} entry source mirror resolved=$1
-    local -A seen=()
-    local -a entries=()
-    IFS=';' read -r -a entries <<< "$mappings"
-    for entry in "${entries[@]}"; do
-        [[ -n $entry ]] || continue
-        [[ $entry == *=* && -n ${entry%%=*} && -n ${entry#*=} ]] || {
-            echo "invalid CJCJ_SRCBUILD_SOURCE_MIRRORS entry: $entry" >&2
-            return 1
-        }
-        source=${entry%%=*}
-        mirror=${entry#*=}
-        [[ -z ${seen[$source]+set} ]] || {
-            echo "duplicate CJCJ_SRCBUILD_SOURCE_MIRRORS source: $source" >&2
-            return 1
-        }
-        seen[$source]=1
-        if [[ $source == "$original" ]]; then
-            resolved=$mirror
-        fi
-    done
-    printf '%s\n' "$resolved"
-}
-
 ensure_exact_clone() {
-    local directory=$1 url=$2 revision=$3 attempt fetch_url
+    local directory=$1 url=$2 revision=$3 attempt
     [[ -d $directory ]] || return 0
-    fetch_url=$(source_fetch_url "$url") || return
     local actual_url=
     if ! git -C "$directory" remote get-url origin >/dev/null 2>&1; then
         git -C "$directory" remote add origin "$url"
@@ -670,7 +645,7 @@ ensure_exact_clone() {
         return 0
     fi
     for attempt in 1 2 3; do
-        if git -C "$directory" -c http.version=HTTP/1.1 fetch --depth 1 "$fetch_url" "$revision"; then
+        if srcbuild_git_fetch "$directory" "$url" "$revision"; then
             git -C "$directory" checkout --detach FETCH_HEAD
             [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
             return

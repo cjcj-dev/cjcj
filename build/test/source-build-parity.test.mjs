@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {buildConfig} from '../lib/config.mjs';
+import {resolveSourceMirror, sourceFetchArguments, sourceLsRemoteArguments} from '../lib/git.mjs';
 import {formatCommand, run as runCommand} from '../lib/runner.mjs';
 import {
   assertHostRuntimeCommands,
@@ -613,7 +614,7 @@ test('Linux source stages emit the Python command order', async () => {
       // and would have failed for a reason that has nothing to do with the
       // command order it exists to check.
       expected(root, toolsRoot, [
-        'git', 'fetch', '--depth', '1', cjpmPin.CJPM_FORK_URL, cjpmPin.CJPM_FORK_REF,
+        'git', ...sourceFetchArguments(cjpmPin.CJPM_FORK_URL, cjpmPin.CJPM_FORK_REF),
       ]),
       expected(root, toolsRoot, ['git', 'rev-parse', 'FETCH_HEAD']),
       expected(root, toolsRoot, [
@@ -693,17 +694,18 @@ test('the cjpm pin names an object the remote actually has', {timeout: 60_000}, 
   const {CJPM_FORK_URL: url, CJPM_FORK_REF: ref} = cjpmPin;
   assert.match(ref, /^[0-9a-f]{40}$/, 'CJPM_FORK_REF must be a full sha');
 
-  const probe = spawnSync('git', ['ls-remote', '--exit-code', url, 'HEAD'], {
+  const fetchUrl = resolveSourceMirror(url);
+  const probe = spawnSync('git', sourceLsRemoteArguments(url, 'HEAD'), {
     encoding: 'utf8', timeout: 30_000,
   });
   if (probe.status !== 0) {
-    console.error(`SKIP pin reachability: cannot reach ${url}`);
+    console.error(`SKIP pin reachability: cannot reach ${fetchUrl}`);
     return;
   }
 
   // `git fetch --depth 1 <url> <sha>` is exactly what tools.mjs runs; --dry-run
   // resolves the object without writing anything into this repository.
-  const fetched = spawnSync('git', ['fetch', '--dry-run', '--depth', '1', url, ref], {
+  const fetched = spawnSync('git', sourceFetchArguments(url, ref, {dryRun: true}), {
     encoding: 'utf8', timeout: 45_000,
   });
   assert.equal(

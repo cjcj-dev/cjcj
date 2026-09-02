@@ -11,6 +11,7 @@ import {
   verifyGcFixWeakSourceShape,
 } from './build_patched_runtime.mjs';
 import {resolveRuntimeSource} from './runtime-pin.mjs';
+import {sourceFetchArguments} from '../build/lib/git.mjs';
 
 let checkout;
 let checkoutOwned = false;
@@ -32,7 +33,7 @@ before(async () => {
     checkoutOwned = true;
     git(checkout, 'init', '--quiet');
     git(checkout, 'remote', 'add', 'origin', sourceUrl);
-    git(checkout, 'fetch', '--quiet', '--depth=1', 'origin', runtimeRef);
+    git(checkout, ...sourceFetchArguments(sourceUrl, runtimeRef), '--quiet');
     git(checkout, 'checkout', '--quiet', '--detach', 'FETCH_HEAD');
   }
   const checkoutHead = git(checkout, 'rev-parse', 'HEAD');

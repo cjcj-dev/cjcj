@@ -20,6 +20,12 @@ function runBash(source, args = []) {
   return spawnSync('bash', ['-c', source, 'bash', ...args], {encoding: 'utf8'});
 }
 
+function runGit(args) {
+  const result = spawnSync('git', args, {encoding: 'utf8'});
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
 function writeTuple(root, embeddedSha) {
   const pinText = fs.readFileSync(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
   const field = name => pinText.match(new RegExp(`^${name}=([0-9a-f]{40})$`, 'm'))[1];
@@ -68,6 +74,37 @@ test('source-build CPU windows preserve explicit placement and derive their widt
   assert.equal(result.status, 0, result.stderr);
 });
 
+test('source-build shell fetch uses the selected mirror and keeps canonical origin', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-shell-git-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const source = path.join(root, 'source');
+  const mirror = path.join(root, 'source.git');
+  const checkout = path.join(root, 'checkout');
+  const authoritative = 'https://github.com/cjcj-dev/cjcj-llvm.git';
+  runGit(['init', source]);
+  fs.writeFileSync(path.join(source, 'value'), 'fixture\n');
+  runGit(['-C', source, 'add', 'value']);
+  runGit(['-C', source, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+    'commit', '-m', 'fixture']);
+  const sha = runGit(['-C', source, 'rev-parse', 'HEAD']);
+  runGit(['clone', '--bare', source, mirror]);
+  runGit(['init', checkout]);
+  runGit(['-C', checkout, 'remote', 'add', 'origin', authoritative]);
+
+  const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
+  const invoke = 'source "$1"\n'
+    + 'CJCJ_SRCBUILD_SOURCE_MIRRORS="$2=file://$3"\n'
+    + 'srcbuild_git_fetch "$4" "$2" "$5"\n';
+  const fetched = runBash(invoke, [helper, authoritative, mirror, checkout, sha]);
+  assert.equal(fetched.status, 0, fetched.stderr);
+  assert.equal(runGit(['-C', checkout, 'rev-parse', 'FETCH_HEAD']), sha);
+  assert.equal(runGit(['-C', checkout, 'remote', 'get-url', 'origin']), authoritative);
+
+  const missing = runBash(invoke,
+    [helper, authoritative, path.join(root, 'missing.git'), checkout, sha]);
+  assert.notEqual(missing.status, 0, 'missing mirror unexpectedly fell back to canonical URL');
+});
+
 test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-tuple-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
@@ -110,7 +147,7 @@ test('fixed tuple depot seeds only checksum-valid pinned payloads and otherwise 
   assert.match(seeded.stdout, /seeded fixed LLVM tuple from verified depot/);
 
   fs.rmSync(destination, {recursive: true, force: true});
-  fs.appendFileSync(path.join(tuple, 'opt.gz'), 'tampered');
+  fs.appendFileSync(path.join(tuple, 'llc.gz'), 'tampered');
   const rejected = runBash(seedInvoke, [repoRoot, destination, llvmSha, depotRoot]);
   assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
   assert.match(rejected.stderr, /SHA256SUMS verification failed/);

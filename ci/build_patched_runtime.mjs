@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {resolveRuntimeSource} from './runtime-pin.mjs';
+import {fetchSource} from '../build/lib/git.mjs';
 
 const log = (message) => console.log(`[runtime] ${message}`);
 export const INITIAL_RUNTIME_FETCH_DEPTH = 200;
@@ -95,7 +96,9 @@ async function main() {
     log(`shallow fetch fork commit ${runtimeRef}`);
     await $`git -C ${work} init -q`;
     await $`git -C ${work} remote add origin ${srcUrl}`;
-    await $`git -C ${work} fetch --depth ${INITIAL_RUNTIME_FETCH_DEPTH} origin ${runtimeRef}`;
+    await fetchSource(srcUrl, runtimeRef, {
+      cwd: work, depth: INITIAL_RUNTIME_FETCH_DEPTH, stage: 'runtime.source.fetch',
+    });
     await $`git -C ${work} checkout -q FETCH_HEAD`;
     const actualRef = (await $({stdio: 'pipe'})`git -C ${work} rev-parse HEAD`).stdout.trim();
     if (actualRef !== runtimeRef) throw new Error(`runtime ref mismatch: expected ${runtimeRef}, got ${actualRef}`);
