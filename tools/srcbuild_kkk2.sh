@@ -46,6 +46,55 @@ resolve_host_toolchain_pin() {
     export CJCJ_TOOLCHAIN
 }
 
+current_cpuset() {
+    local affinity
+    affinity=$(LC_ALL=C taskset -pc "$$") || return 1
+    affinity=${affinity##*: }
+    [[ -n $affinity ]] || {
+        echo "taskset returned an empty CPU affinity" >&2
+        return 1
+    }
+    printf '%s\n' "$affinity"
+}
+
+cpuset_width() {
+    local cpuset=$1
+    awk -v cpuset="$cpuset" '
+        BEGIN {
+            n = split(cpuset, groups, ",")
+            width = 0
+            for (i = 1; i <= n; i++) {
+                if (groups[i] ~ /^[0-9]+$/) {
+                    width++
+                } else if (groups[i] ~ /^[0-9]+-[0-9]+$/) {
+                    split(groups[i], bounds, "-")
+                    if (bounds[2] < bounds[1]) exit 1
+                    width += bounds[2] - bounds[1] + 1
+                } else {
+                    exit 1
+                }
+            }
+            if (width < 1) exit 1
+            print width
+        }
+    '
+}
+
+explicit_cpuset() {
+    local requested=$1 first last
+    [[ $requested =~ ^[0-9]+-[0-9]+$ ]] || {
+        echo "CJCJ_SRCBUILD_CPUSET must be one contiguous range such as 48-63" >&2
+        return 1
+    }
+    first=${requested%-*}
+    last=${requested#*-}
+    ((10#$first <= 10#$last)) || {
+        echo "CJCJ_SRCBUILD_CPUSET has a descending range: $requested" >&2
+        return 1
+    }
+    printf '%d-%d\n' "$((10#$first))" "$((10#$last))"
+}
+
 if [[ ${1:-} == --lib-only ]]; then
     [[ $# == 1 ]] || {
         echo "--lib-only does not accept other arguments" >&2
@@ -62,7 +111,12 @@ Usage: tools/srcbuild_kkk2.sh [TARGET [JOBS [FROM_STEP]]]
        source tools/srcbuild_kkk2.sh --lib-only
 
 Defaults:
-  TARGET=linux-x64  JOBS=96  FROM_STEP=2  THROUGH_STEP=33
+  TARGET=linux-x64  JOBS=<selected CPU window width>
+  FROM_STEP=2  THROUGH_STEP=33
+
+CPU placement:
+  CJCJ_SRCBUILD_CPUSET=48-63 selects an explicit contiguous window.  When it
+  is unset, the driver inherits its caller's current taskset affinity.
 
 Final source-build steps:
   32  Build stage 2 compiler (cjpm build -j 1, cjHeapSize=20GB)
@@ -85,7 +139,8 @@ EOF
 }
 
 TARGET=linux-x64
-JOBS=96
+JOBS=
+JOBS_EXPLICIT=0
 FROM_STEP=2
 THROUGH_STEP=33
 DRY_RUN=0
@@ -101,6 +156,7 @@ while (($#)); do
         --jobs|-j)
             [[ $# -ge 2 ]] || { echo "$1 requires a value" >&2; exit 2; }
             JOBS=$2
+            JOBS_EXPLICIT=1
             shift 2
             ;;
         --from-step)
@@ -143,15 +199,33 @@ if ((${#positional[@]} > 3)); then
     exit 2
 fi
 if ((${#positional[@]} >= 1)); then TARGET=${positional[0]}; fi
-if ((${#positional[@]} >= 2)); then JOBS=${positional[1]}; fi
+if ((${#positional[@]} >= 2)); then
+    JOBS=${positional[1]}
+    JOBS_EXPLICIT=1
+fi
 if ((${#positional[@]} >= 3)); then FROM_STEP=${positional[2]}; fi
+
+inherited_cpuset=$(current_cpuset) || exit 2
+if [[ -n ${CJCJ_SRCBUILD_CPUSET:-} ]]; then
+    CPUSET=$(explicit_cpuset "$CJCJ_SRCBUILD_CPUSET") || exit 2
+else
+    CPUSET=$inherited_cpuset
+fi
+CPUSET_WIDTH=$(cpuset_width "$CPUSET") || {
+    echo "cannot determine CPU count from affinity '$CPUSET'" >&2
+    exit 2
+}
+if ((JOBS_EXPLICIT == 0)); then JOBS=$CPUSET_WIDTH; fi
 
 [[ $TARGET == linux-x64 ]] || {
     echo "kkk2 is Linux/x86_64; srcbuild target '$TARGET' requires its matching native runner" >&2
     exit 2
 }
 [[ $JOBS =~ ^[1-9][0-9]*$ ]] || { echo "jobs must be a positive integer" >&2; exit 2; }
-((JOBS <= 96)) || { echo "jobs must not exceed this lane's reserved CPUs 0-95" >&2; exit 2; }
+((JOBS <= CPUSET_WIDTH)) || {
+    echo "jobs ($JOBS) must not exceed selected CPU window width ($CPUSET_WIDTH for $CPUSET)" >&2
+    exit 2
+}
 [[ $FROM_STEP =~ ^[0-9]+$ ]] || { echo "from-step must be an integer" >&2; exit 2; }
 [[ $THROUGH_STEP =~ ^[0-9]+$ ]] || { echo "through-step must be an integer" >&2; exit 2; }
 ((FROM_STEP >= 1 && FROM_STEP <= 33)) || { echo "from-step must be in 1..33" >&2; exit 2; }
@@ -165,12 +239,15 @@ host_name=$(hostname -s)
     exit 3
 }
 
-cpu_last=$((JOBS - 1))
-CPUSET="0-$cpu_last"
 if [[ ${CJCJ_KKK2_AFFINED:-} != "$CPUSET" ]]; then
     exec taskset -c "$CPUSET" env CJCJ_KKK2_AFFINED="$CPUSET" \
         bash "$SCRIPT_PATH" "${ORIGINAL_ARGS[@]}"
 fi
+actual_cpuset=$(current_cpuset) || exit 3
+[[ $actual_cpuset == "$CPUSET" ]] || {
+    echo "taskset affinity mismatch: requested=$CPUSET actual=$actual_cpuset" >&2
+    exit 3
+}
 
 readonly STATE_ROOT="$REPO_ROOT/.srcbuild"
 readonly LOG_ROOT="$STATE_ROOT/logs"

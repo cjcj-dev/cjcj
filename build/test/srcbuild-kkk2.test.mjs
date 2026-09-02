@@ -43,6 +43,16 @@ function writeTuple(root, embeddedSha) {
   return llvmSha;
 }
 
+test('source-build CPU windows preserve explicit placement and derive their width', () => {
+  const invoke = `source "$1" --lib-only\n`
+    + 'test "$(explicit_cpuset 048-063)" = 48-63\n'
+    + 'test "$(cpuset_width 48-63)" = 16\n'
+    + 'test "$(cpuset_width 2-3,8,11-13)" = 6\n'
+    + 'if explicit_cpuset 63-48; then exit 17; fi\n';
+  const result = runBash(invoke, [scriptPath]);
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-tuple-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
