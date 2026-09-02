@@ -186,6 +186,7 @@ readonly CJCJ_FIXED_LLVM_DIR="$STATE_ROOT/fixed-llc"
 readonly STAGE1_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"
 readonly STAGE2_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage2.mjs"
 readonly STAGE3_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage3.mjs"
+readonly STAGE2_PRODUCT_DIR="$REPO_ROOT/target/release/bin"
 readonly BUILD_TYPE=relwithdebinfo
 START_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 readonly START_STAMP
@@ -297,7 +298,7 @@ run_step() {
 }
 
 fixed_tuple_is_current() {
-    local manifest="$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
+    local manifest="$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest" manifest_llvm opt_llvm
     [[ -s $CJCJ_FIXED_LLVM_DIR/llc.gz ]] || return 1
     [[ -s $CJCJ_FIXED_LLVM_DIR/opt.gz ]] || return 1
     [[ -s $CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o ]] || return 1
@@ -305,31 +306,39 @@ fixed_tuple_is_current() {
     # shellcheck disable=SC1091
     source "$REPO_ROOT/ci/llvm_pin.env" || return 1
     [[ $(awk -F= '$1=="PLATFORM" {print $2}' "$manifest") == linux_x86_64 ]] || return 1
-    [[ $(awk -F= '$1=="LLVM_SHA" {print $2}' "$manifest") == "$LLVM_SHA" ]] || return 1
+    manifest_llvm=$(awk -F= '$1=="LLVM_SHA" {print $2}' "$manifest") || return 1
+    [[ $manifest_llvm == "$LLVM_SHA" ]] || return 1
+    opt_llvm=$(gzip -dc "$CJCJ_FIXED_LLVM_DIR/opt.gz" \
+        | strings | sed -n 's/^CJLLVM-COMMIT:\([0-9a-f]\{40\}\)$/\1/p') || return 1
+    [[ $opt_llvm == "$manifest_llvm" ]] || return 1
     [[ $(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$manifest") == "$CANGJIE_COMPILER_SHA" ]] || return 1
     [[ $(awk -F= '$1=="FLATBUFFERS_SHA" {print $2}' "$manifest") == "$FLATBUFFERS_SHA" ]] || return 1
     node "$REPO_ROOT/ci/llvm-tools-manifest.mjs" validate native "$manifest" >/dev/null || return 1
 }
 
 checkout_exact() {
-    local directory=$1 url=$2 revision=$3
+    local directory=$1 url=$2 revision=$3 fetch_url
+    fetch_url=$(source_fetch_url "$url") || return 1
     if [[ ! -d $directory/.git ]]; then
-        git clone --filter=blob:none --no-checkout "$url" "$directory"
+        git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout "$fetch_url" "$directory" || return 1
+        git -C "$directory" remote set-url origin "$url" || return 1
     fi
-    git -C "$directory" fetch --depth=1 origin "$revision"
-    git -C "$directory" checkout --detach FETCH_HEAD
+    git -C "$directory" -c http.version=HTTP/1.1 fetch --depth=1 "$fetch_url" "$revision" || return 1
+    git -C "$directory" checkout --detach FETCH_HEAD || return 1
     [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
 }
 
 checkout_sparse_exact() {
-    local directory=$1 url=$2 revision=$3 sparse_path=$4
+    local directory=$1 url=$2 revision=$3 sparse_path=$4 fetch_url
+    fetch_url=$(source_fetch_url "$url") || return 1
     if [[ ! -d $directory/.git ]]; then
-        git clone --filter=blob:none --no-checkout "$url" "$directory"
+        git -c http.version=HTTP/1.1 clone --filter=blob:none --no-checkout "$fetch_url" "$directory" || return 1
+        git -C "$directory" remote set-url origin "$url" || return 1
     fi
-    git -C "$directory" sparse-checkout init --cone
-    git -C "$directory" sparse-checkout set "$sparse_path"
-    git -C "$directory" fetch --depth=1 origin "$revision"
-    git -C "$directory" checkout --detach FETCH_HEAD
+    git -C "$directory" sparse-checkout init --cone || return 1
+    git -C "$directory" sparse-checkout set "$sparse_path" || return 1
+    git -C "$directory" -c http.version=HTTP/1.1 fetch --depth=1 "$fetch_url" "$revision" || return 1
+    git -C "$directory" checkout --detach FETCH_HEAD || return 1
     [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
 }
 
@@ -357,9 +366,9 @@ build_fixed_tuple() {
     local llc_sha opt_sha shim_sha
 
     mkdir -p "$build_root"
-    checkout_exact "$llvm_fork" "$LLVM_URL" "$LLVM_SHA"
-    checkout_sparse_exact "$compiler" "$CANGJIE_COMPILER_URL" "$CANGJIE_COMPILER_SHA" schema
-    checkout_exact "$flatbuffers" "$FLATBUFFERS_URL" "$FLATBUFFERS_SHA"
+    checkout_exact "$llvm_fork" "$LLVM_URL" "$LLVM_SHA" || return 1
+    checkout_sparse_exact "$compiler" "$CANGJIE_COMPILER_URL" "$CANGJIE_COMPILER_SHA" schema || return 1
+    checkout_exact "$flatbuffers" "$FLATBUFFERS_URL" "$FLATBUFFERS_SHA" || return 1
 
     cmake -G Ninja -S "$llvm_fork/llvm" -B "$llc_build" \
         -DCMAKE_BUILD_TYPE=Release \
@@ -500,9 +509,35 @@ build_cli() {
         --cangjie-version "$CJCJ_SRCBUILD_VERSION" "$@"
 }
 
+source_fetch_url() {
+    local original=$1 mappings=${CJCJ_SRCBUILD_SOURCE_MIRRORS:-} entry source mirror resolved=$1
+    local -A seen=()
+    local -a entries=()
+    IFS=';' read -r -a entries <<< "$mappings"
+    for entry in "${entries[@]}"; do
+        [[ -n $entry ]] || continue
+        [[ $entry == *=* && -n ${entry%%=*} && -n ${entry#*=} ]] || {
+            echo "invalid CJCJ_SRCBUILD_SOURCE_MIRRORS entry: $entry" >&2
+            return 1
+        }
+        source=${entry%%=*}
+        mirror=${entry#*=}
+        [[ -z ${seen[$source]+set} ]] || {
+            echo "duplicate CJCJ_SRCBUILD_SOURCE_MIRRORS source: $source" >&2
+            return 1
+        }
+        seen[$source]=1
+        if [[ $source == "$original" ]]; then
+            resolved=$mirror
+        fi
+    done
+    printf '%s\n' "$resolved"
+}
+
 ensure_exact_clone() {
-    local directory=$1 url=$2 revision=$3 attempt
+    local directory=$1 url=$2 revision=$3 attempt fetch_url
     [[ -d $directory ]] || return 0
+    fetch_url=$(source_fetch_url "$url") || return
     local actual_url=
     if ! git -C "$directory" remote get-url origin >/dev/null 2>&1; then
         git -C "$directory" remote add origin "$url"
@@ -517,7 +552,7 @@ ensure_exact_clone() {
         return 0
     fi
     for attempt in 1 2 3; do
-        if git -C "$directory" fetch --depth 1 origin "$revision"; then
+        if git -C "$directory" -c http.version=HTTP/1.1 fetch --depth 1 "$fetch_url" "$revision"; then
             git -C "$directory" checkout --detach FETCH_HEAD
             [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
             return
@@ -531,10 +566,10 @@ step_13() {
     # shallowClone creates the directory before its network fetch.  A dropped
     # connection therefore leaves a directory that fetch.mjs would otherwise
     # mistake for a completed clone on --from-step retries.
-    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_compiler" "$COMPILER_SRC_URL" "$COMPILER_REF"
-    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_runtime" "$RUNTIME_SRC_URL" "$RUNTIME_REF"
-    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_tools" "$TOOLS_SRC_URL" "$TOOLS_REF"
-    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_stdx" "$STDX_SRC_URL" "$STDX_REF"
+    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_compiler" "$COMPILER_SRC_URL" "$COMPILER_REF" || return 1
+    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_runtime" "$RUNTIME_SRC_URL" "$RUNTIME_REF" || return 1
+    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_tools" "$TOOLS_SRC_URL" "$TOOLS_REF" || return 1
+    ensure_exact_clone "$CANGJIE_WORKSPACE/cangjie_stdx" "$STDX_SRC_URL" "$STDX_REF" || return 1
     build_cli fetch \
         --repo-url "compiler=$COMPILER_SRC_URL" --repo-tag "compiler=$COMPILER_REF" \
         --repo-url "runtime=$RUNTIME_SRC_URL" --repo-tag "runtime=$RUNTIME_REF" \
@@ -685,6 +720,10 @@ validate_stage_step_contracts() {
     if ((FROM_STEP <= 33 && THROUGH_STEP >= 33)); then
         [[ -f $STAGE3_STEP_SCRIPT ]] || {
             echo "dry-run referenced step script is missing: $STAGE3_STEP_SCRIPT" >&2
+            return 1
+        }
+        [[ -d $STAGE2_PRODUCT_DIR ]] || {
+            echo "dry-run stage3 input missing: stage2 product directory $STAGE2_PRODUCT_DIR" >&2
             return 1
         }
     fi
