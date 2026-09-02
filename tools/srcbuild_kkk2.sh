@@ -16,10 +16,17 @@ usage() {
     cat <<'EOF'
 Usage: tools/srcbuild_kkk2.sh [TARGET [JOBS [FROM_STEP]]]
        tools/srcbuild_kkk2.sh [--target TARGET] [--jobs N]
-                              [--from-step N] [--through-step N]
+                              [--from-step N] [--through-step N] [--dry-run]
 
 Defaults:
-  TARGET=linux-x64  JOBS=96  FROM_STEP=2  THROUGH_STEP=31
+  TARGET=linux-x64  JOBS=96  FROM_STEP=2  THROUGH_STEP=33
+
+Final source-build steps:
+  32  Build stage 2 compiler (cjpm build -j 1, cjHeapSize=20GB)
+  33  Build stage 3 compiler and final std
+
+--dry-run validates referenced step scripts and their command contracts, then
+prints the selected commands and environment without executing them.
 
 The script must run on kkk2.  Invoke it through the shared box entry point,
 for example:
@@ -34,7 +41,8 @@ EOF
 TARGET=linux-x64
 JOBS=96
 FROM_STEP=2
-THROUGH_STEP=31
+THROUGH_STEP=33
+DRY_RUN=0
 
 positional=()
 while (($#)); do
@@ -58,6 +66,10 @@ while (($#)); do
             [[ $# -ge 2 ]] || { echo "--through-step requires a value" >&2; exit 2; }
             THROUGH_STEP=$2
             shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=1
+            shift
             ;;
         -h|--help)
             usage
@@ -96,8 +108,8 @@ if ((${#positional[@]} >= 3)); then FROM_STEP=${positional[2]}; fi
 ((JOBS <= 96)) || { echo "jobs must not exceed this lane's reserved CPUs 0-95" >&2; exit 2; }
 [[ $FROM_STEP =~ ^[0-9]+$ ]] || { echo "from-step must be an integer" >&2; exit 2; }
 [[ $THROUGH_STEP =~ ^[0-9]+$ ]] || { echo "through-step must be an integer" >&2; exit 2; }
-((FROM_STEP >= 1 && FROM_STEP <= 31)) || { echo "from-step must be in 1..31" >&2; exit 2; }
-((THROUGH_STEP >= 2 && THROUGH_STEP <= 31)) || { echo "through-step must be in 2..31" >&2; exit 2; }
+((FROM_STEP >= 1 && FROM_STEP <= 33)) || { echo "from-step must be in 1..33" >&2; exit 2; }
+((THROUGH_STEP >= 2 && THROUGH_STEP <= 33)) || { echo "through-step must be in 2..33" >&2; exit 2; }
 ((FROM_STEP <= THROUGH_STEP)) || { echo "from-step must not exceed through-step" >&2; exit 2; }
 if ((FROM_STEP == 1)); then FROM_STEP=2; fi
 
@@ -125,13 +137,19 @@ readonly PRIVATE_HOME="$STATE_ROOT/home"
 readonly CANGJIE_WORKSPACE="$STATE_ROOT/workspace"
 readonly CANGJIE_BUILD_ROOT="$STATE_ROOT/buildtools"
 readonly CJCJ_FIXED_LLVM_DIR="$STATE_ROOT/fixed-llc"
+readonly HOST_TOOLCHAIN_PIN="$REPO_ROOT/ci/cjpm_pin.env"
+readonly STAGE1_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"
+readonly STAGE2_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage2.mjs"
+readonly STAGE3_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage3.mjs"
 readonly BUILD_TYPE=relwithdebinfo
 START_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 readonly START_STAMP
 readonly BASE_PATH="$PRIVATE_HOME/.local/bin:$PATH"
 
-mkdir -p "$LOG_ROOT" "$RUNNER_TEMP" "$PRIVATE_HOME" "$CANGJIE_WORKSPACE" \
-    "$CANGJIE_BUILD_ROOT" "$CJCJ_FIXED_LLVM_DIR"
+if ((DRY_RUN == 0)); then
+    mkdir -p "$LOG_ROOT" "$RUNNER_TEMP" "$PRIVATE_HOME" "$CANGJIE_WORKSPACE" \
+        "$CANGJIE_BUILD_ROOT" "$CJCJ_FIXED_LLVM_DIR"
+fi
 
 export HOME="$PRIVATE_HOME"
 export GITHUB_WORKSPACE="$REPO_ROOT"
@@ -148,7 +166,9 @@ export MAKEFLAGS="-j$JOBS"
 export CARGO_BUILD_JOBS="$JOBS"
 export PATH="$BASE_PATH"
 
-if ((FROM_STEP == 2)); then
+if ((DRY_RUN)); then
+    :
+elif ((FROM_STEP == 2)); then
     : > "$GITHUB_ENV"
     : > "$GITHUB_PATH"
     printf 'kind\tstep\tname\trc\twall_s\tlog\n' > "$TIMINGS"
@@ -358,6 +378,7 @@ step_2() {
 }
 
 step_3() {
+    cat "$HOST_TOOLCHAIN_PIN" >> "$GITHUB_ENV"
     cat "$REPO_ROOT/ci/source_pin.env" >> "$GITHUB_ENV"
 }
 
@@ -367,8 +388,13 @@ step_4() {
 
 step_5() {
     load_github_state
+    # Reload the authoritative host pin so retries from step 5 cannot reuse a
+    # retained pre-1.3 GITHUB_ENV file.
+    # shellcheck disable=SC1091
+    set -a
+    source "$HOST_TOOLCHAIN_PIN"
+    set +a
     export CJCJ_SDK_STOCK_LLC=1
-    export CJCJ_TOOLCHAIN="nightly-$RUNTIME_VERSION"
     npx --yes zx@8 "$REPO_ROOT/ci/setup_sdk.mjs"
     local host_sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
     [[ -d $host_sdk ]]
@@ -543,7 +569,15 @@ step_30() {
 
 step_31() {
     ulimit -c unlimited || true
-    npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"
+    npx --yes zx@8 "$STAGE1_STEP_SCRIPT"
+}
+
+step_32() {
+    npx --yes zx@8 "$STAGE2_STEP_SCRIPT"
+}
+
+step_33() {
+    npx --yes zx@8 "$STAGE3_STEP_SCRIPT"
 }
 
 declare -Ar STEP_NAMES=(
@@ -577,7 +611,95 @@ declare -Ar STEP_NAMES=(
     [29]='Build compiler shim'
     [30]='Inject selfhost compiler version'
     [31]='Build stage 1 compiler'
+    [32]='Build stage 2 compiler'
+    [33]='Build stage 3 compiler and final std'
 )
+
+read_host_toolchain_pin() {
+    local line key value toolchain=
+    while IFS= read -r line || [[ -n $line ]]; do
+        [[ -z $line ]] && continue
+        [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || {
+            echo "unsupported host toolchain pin record: $line" >&2
+            return 1
+        }
+        key=${line%%=*}
+        value=${line#*=}
+        if [[ $key == CJCJ_TOOLCHAIN ]]; then toolchain=$value; fi
+    done < "$HOST_TOOLCHAIN_PIN"
+    [[ -n $toolchain ]] || {
+        echo "CJCJ_TOOLCHAIN is missing from $HOST_TOOLCHAIN_PIN" >&2
+        return 1
+    }
+    printf '%s\n' "$toolchain"
+}
+
+validate_stage_step_contracts() {
+    if ((FROM_STEP <= 31 && THROUGH_STEP >= 31)); then
+        [[ -f $STAGE1_STEP_SCRIPT ]] || {
+            echo "dry-run referenced step script is missing: $STAGE1_STEP_SCRIPT" >&2
+            return 1
+        }
+    fi
+    if ((FROM_STEP <= 32 && THROUGH_STEP >= 32)); then
+        [[ -f $STAGE2_STEP_SCRIPT ]] || {
+            echo "dry-run referenced step script is missing: $STAGE2_STEP_SCRIPT" >&2
+            return 1
+        }
+        /usr/bin/grep -Fq "cjHeapSize: '20GB'" "$STAGE2_STEP_SCRIPT" || {
+            echo "dry-run stage2 contract missing: cjHeapSize=20GB in $STAGE2_STEP_SCRIPT" >&2
+            return 1
+        }
+        /usr/bin/grep -Fq 'cjpm build -j 1' "$STAGE2_STEP_SCRIPT" || {
+            echo "dry-run stage2 contract missing: cjpm build -j 1 in $STAGE2_STEP_SCRIPT" >&2
+            return 1
+        }
+    fi
+    if ((FROM_STEP <= 33 && THROUGH_STEP >= 33)); then
+        [[ -f $STAGE3_STEP_SCRIPT ]] || {
+            echo "dry-run referenced step script is missing: $STAGE3_STEP_SCRIPT" >&2
+            return 1
+        }
+    fi
+}
+
+print_dry_step() {
+    local step=$1 toolchain=$2
+    printf 'DRY_RUN STEP=%s name=%s\n' "$step" "${STEP_NAMES[$step]}"
+    case "$step" in
+        5)
+            printf 'DRY_RUN ENV CJCJ_SDK_STOCK_LLC=1 CJCJ_TOOLCHAIN=%s\n' "$toolchain"
+            printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$REPO_ROOT/ci/setup_sdk.mjs"
+            ;;
+        31)
+            printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$STAGE1_STEP_SCRIPT"
+            ;;
+        32)
+            printf 'DRY_RUN ASSUME=stage1-artifact-exists\n'
+            printf 'DRY_RUN ENV cjHeapSize=20GB cjHeapSwap=on\n'
+            printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$STAGE2_STEP_SCRIPT"
+            printf 'DRY_RUN INNER_COMMAND=cjpm build -j 1\n'
+            ;;
+        33)
+            printf 'DRY_RUN ENV CJCJ_STAGE3_STDLIB_BUILD_TYPE=%s cjHeapSwap=on\n' "$BUILD_TYPE"
+            printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$STAGE3_STEP_SCRIPT"
+            ;;
+    esac
+}
+
+if ((DRY_RUN)); then
+    validate_stage_step_contracts
+    dry_run_toolchain=$(read_host_toolchain_pin)
+    readonly dry_run_toolchain
+    printf 'DRY_RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' \
+        "$host_name" "$TARGET" "$JOBS" "$CPUSET" "$FROM_STEP" "$THROUGH_STEP"
+    printf 'DRY_RUN PREREQUISITE=fixed-llvm action=validate-only-no-build\n'
+    for ((step = FROM_STEP; step <= THROUGH_STEP; step++)); do
+        print_dry_step "$step" "$dry_run_toolchain"
+    done
+    printf 'DRY_RUN RESULT=success through_step=%s\n' "$THROUGH_STEP"
+    exit 0
+fi
 
 load_github_state
 printf 'RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' \
