@@ -10,13 +10,49 @@ SCRIPT_PATH=$(readlink -f "${BASH_SOURCE[0]}")
 readonly SCRIPT_PATH
 REPO_ROOT=$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd -P)
 readonly REPO_ROOT
+readonly HOST_TOOLCHAIN_PIN="$REPO_ROOT/ci/cjpm_pin.env"
 readonly ORIGINAL_ARGS=("$@")
+
+read_host_toolchain_pin() {
+    local line key value toolchain=
+    while IFS= read -r line || [[ -n $line ]]; do
+        [[ -z $line ]] && continue
+        [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || {
+            echo "unsupported host toolchain pin record: $line" >&2
+            return 1
+        }
+        key=${line%%=*}
+        value=${line#*=}
+        if [[ $key == CJCJ_TOOLCHAIN ]]; then toolchain=$value; fi
+    done < "$HOST_TOOLCHAIN_PIN"
+    [[ -n $toolchain ]] || {
+        echo "CJCJ_TOOLCHAIN is missing from $HOST_TOOLCHAIN_PIN" >&2
+        return 1
+    }
+    printf '%s\n' "$toolchain"
+}
+
+resolve_host_toolchain_pin() {
+    local pinned_toolchain
+    pinned_toolchain=$(read_host_toolchain_pin) || return
+    CJCJ_TOOLCHAIN=$pinned_toolchain
+    export CJCJ_TOOLCHAIN
+}
+
+if [[ ${1:-} == --lib-only ]]; then
+    [[ $# == 1 ]] || {
+        echo "--lib-only does not accept other arguments" >&2
+        return 2 2>/dev/null || exit 2
+    }
+    return 0 2>/dev/null || exit 0
+fi
 
 usage() {
     cat <<'EOF'
 Usage: tools/srcbuild_kkk2.sh [TARGET [JOBS [FROM_STEP]]]
        tools/srcbuild_kkk2.sh [--target TARGET] [--jobs N]
                               [--from-step N] [--through-step N] [--dry-run]
+       source tools/srcbuild_kkk2.sh --lib-only
 
 Defaults:
   TARGET=linux-x64  JOBS=96  FROM_STEP=2  THROUGH_STEP=33
@@ -27,6 +63,9 @@ Final source-build steps:
 
 --dry-run validates referenced step scripts and their command contracts, then
 prints the selected commands and environment without executing them.
+
+--lib-only is source-only and defines the strict host pin reader/resolver
+without entering the kkk2 build driver.
 
 The script must run on kkk2.  Invoke it through the shared box entry point,
 for example:
@@ -137,7 +176,6 @@ readonly PRIVATE_HOME="$STATE_ROOT/home"
 readonly CANGJIE_WORKSPACE="$STATE_ROOT/workspace"
 readonly CANGJIE_BUILD_ROOT="$STATE_ROOT/buildtools"
 readonly CJCJ_FIXED_LLVM_DIR="$STATE_ROOT/fixed-llc"
-readonly HOST_TOOLCHAIN_PIN="$REPO_ROOT/ci/cjpm_pin.env"
 readonly STAGE1_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"
 readonly STAGE2_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage2.mjs"
 readonly STAGE3_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage3.mjs"
@@ -392,12 +430,9 @@ step_4() {
 
 step_5() {
     load_github_state
-    # Reload the authoritative host pin so retries from step 5 cannot reuse a
-    # retained pre-1.3 GITHUB_ENV file.
-    # shellcheck disable=SC1091
-    set -a
-    source "$HOST_TOOLCHAIN_PIN"
-    set +a
+    # Resolve through the strict reader so retries cannot reuse a retained
+    # pre-1.3 GITHUB_ENV value, including when the pin is malformed.
+    resolve_host_toolchain_pin
     export CJCJ_SDK_STOCK_LLC=1
     npx --yes zx@8 "$REPO_ROOT/ci/setup_sdk.mjs"
     local host_sdk="$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN"
@@ -619,25 +654,6 @@ declare -Ar STEP_NAMES=(
     [33]='Build stage 3 compiler and final std'
 )
 
-read_host_toolchain_pin() {
-    local line key value toolchain=
-    while IFS= read -r line || [[ -n $line ]]; do
-        [[ -z $line ]] && continue
-        [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || {
-            echo "unsupported host toolchain pin record: $line" >&2
-            return 1
-        }
-        key=${line%%=*}
-        value=${line#*=}
-        if [[ $key == CJCJ_TOOLCHAIN ]]; then toolchain=$value; fi
-    done < "$HOST_TOOLCHAIN_PIN"
-    [[ -n $toolchain ]] || {
-        echo "CJCJ_TOOLCHAIN is missing from $HOST_TOOLCHAIN_PIN" >&2
-        return 1
-    }
-    printf '%s\n' "$toolchain"
-}
-
 validate_stage_step_contracts() {
     if ((FROM_STEP <= 31 && THROUGH_STEP >= 31)); then
         [[ -f $STAGE1_STEP_SCRIPT ]] || {
@@ -693,7 +709,8 @@ print_dry_step() {
 
 if ((DRY_RUN)); then
     validate_stage_step_contracts
-    dry_run_toolchain=$(read_host_toolchain_pin)
+    resolve_host_toolchain_pin
+    dry_run_toolchain=$CJCJ_TOOLCHAIN
     readonly dry_run_toolchain
     printf 'DRY_RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' \
         "$host_name" "$TARGET" "$JOBS" "$CPUSET" "$FROM_STEP" "$THROUGH_STEP"

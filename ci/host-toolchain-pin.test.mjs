@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {baseSdkDownload} from '../build/lib/release-component-provenance.mjs';
@@ -28,6 +30,30 @@ async function hostPin() {
   const match = text.match(/^CJCJ_TOOLCHAIN=(\S+)$/m);
   assert.ok(match, 'ci/cjpm_pin.env must define CJCJ_TOOLCHAIN');
   return match[1];
+}
+
+async function runSrcbuildHostResolver({
+  pin,
+  runtimeVersion,
+  staleToolchain = 'nightly-stale',
+  readerOnly = false,
+}) {
+  const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'srcbuild-host-pin-'));
+  try {
+    const fixtureScript = path.join(fixture, 'tools', 'srcbuild_kkk2.sh');
+    await fs.mkdir(path.dirname(fixtureScript), {recursive: true});
+    await fs.mkdir(path.join(fixture, 'ci'), {recursive: true});
+    await fs.copyFile(path.join(root, 'tools', 'srcbuild_kkk2.sh'), fixtureScript);
+    await fs.writeFile(path.join(fixture, 'ci', 'cjpm_pin.env'), pin);
+    const command = readerOnly
+      ? 'source "$1" --lib-only; read_host_toolchain_pin'
+      : 'source "$1" --lib-only; export RUNTIME_VERSION="$2" CJCJ_TOOLCHAIN="$3"; resolve_host_toolchain_pin; printf "%s\\n" "$CJCJ_TOOLCHAIN"';
+    return spawnSync('bash', ['-c', command, 'bash', fixtureScript, runtimeVersion, staleToolchain], {
+      encoding: 'utf8',
+    });
+  } finally {
+    await fs.rm(fixture, {recursive: true, force: true});
+  }
 }
 
 test('host toolchain consumers fail closed when the pin was not loaded', () => {
@@ -61,9 +87,49 @@ test('the ordinary host nightly literal has one pin and the release exception is
   assert.match(release, /smoke changing from 13\/15 to 0\/15/);
 });
 
-test('host identity comes only from the pin, never from RUNTIME_VERSION', async () => {
-  const srcbuild = await fs.readFile(path.join(root, 'tools', 'srcbuild_kkk2.sh'), 'utf8');
-  assert.doesNotMatch(srcbuild, /CJCJ_TOOLCHAIN\s*=.*\$\{?RUNTIME_VERSION/);
+test('srcbuild pin reader returns the initial pinned host', async () => {
+  const result = await runSrcbuildHostResolver({
+    pin: 'CJCJ_TOOLCHAIN=nightly-good\n',
+    runtimeVersion: '9.9.9',
+    readerOnly: true,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'nightly-good');
+});
+
+test('srcbuild resolved host changes only with the pin, not RUNTIME_VERSION', async () => {
+  const runtimeA = await runSrcbuildHostResolver({
+    pin: 'CJCJ_TOOLCHAIN=nightly-good\n',
+    runtimeVersion: '9.9.9',
+  });
+  const runtimeB = await runSrcbuildHostResolver({
+    pin: 'CJCJ_TOOLCHAIN=nightly-good\n',
+    runtimeVersion: '8.8.8',
+  });
+  assert.equal(runtimeA.status, 0, runtimeA.stderr);
+  assert.equal(runtimeB.status, 0, runtimeB.stderr);
+  assert.equal(runtimeA.stdout.trim(), 'nightly-good');
+  assert.equal(runtimeB.stdout, runtimeA.stdout);
+});
+
+test('srcbuild pin reader returns a changed pinned host', async () => {
+  const result = await runSrcbuildHostResolver({
+    pin: 'CJCJ_TOOLCHAIN=nightly-other\n',
+    runtimeVersion: '9.9.9',
+    readerOnly: true,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'nightly-other');
+});
+
+test('srcbuild rejects a missing pin key instead of retaining stale host state', async () => {
+  const result = await runSrcbuildHostResolver({
+    pin: 'CJPM_FORK_REF=fixture\n',
+    runtimeVersion: '9.9.9',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /CJCJ_TOOLCHAIN is missing/);
+  assert.equal(result.stdout, '');
 });
 
 test('every workflow host consumer loads ci/cjpm_pin.env after checkout', async () => {
