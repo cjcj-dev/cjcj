@@ -128,6 +128,27 @@ test('source-build shell fetch uses the selected mirror and keeps canonical orig
   assert.notEqual(missing.status, 0, 'missing mirror unexpectedly fell back to canonical URL');
 });
 
+test('source-build shell mirror fallback is visible and optionally required', () => {
+  const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
+  const authoritative = 'https://example.invalid/source.git';
+  const fallback = runBash(
+    'source "$1"\nunset CJCJ_SRCBUILD_SOURCE_MIRRORS CJCJ_SRCBUILD_REQUIRE_MIRRORS\n'
+      + 'srcbuild_git_resolve_source_mirror "$2"\n',
+    [helper, authoritative],
+  );
+  assert.equal(fallback.status, 0, fallback.stdout + fallback.stderr);
+  assert.equal(fallback.stdout.trim(), authoritative);
+  assert.match(fallback.stderr, /SOURCE-MIRROR none, falling back to https:\/\/example\.invalid\/source\.git/);
+
+  const required = runBash(
+    'source "$1"\nunset CJCJ_SRCBUILD_SOURCE_MIRRORS\nCJCJ_SRCBUILD_REQUIRE_MIRRORS=1\n'
+      + 'srcbuild_git_resolve_source_mirror "$2"\n',
+    [helper, authoritative],
+  );
+  assert.equal(required.status, 1, required.stdout + required.stderr);
+  assert.match(required.stderr, /source mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1/);
+});
+
 test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-tuple-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));

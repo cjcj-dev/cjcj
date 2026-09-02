@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {spawnSync} from 'node:child_process';
-import {shallowClone} from '../lib/git.mjs';
+import {resolveSourceMirror, shallowClone} from '../lib/git.mjs';
 
 const runGit = (args, options = {}) => {
   const result = spawnSync('git', args, {encoding: 'utf8', ...options});
@@ -33,6 +33,31 @@ test('shallowClone fetches a full commit SHA without treating it as a branch', a
   assert.match(output, new RegExp(`cd .*checkout.*git -c http.version=HTTP/1.1 fetch --depth 1 https://example.invalid/runtime.git ${sha}`));
   assert.match(output, /git -C .* checkout --detach FETCH_HEAD/);
   assert.doesNotMatch(output, new RegExp(`clone .* --branch ${sha}`));
+});
+
+test('source mirror fallback is visible and optionally required', () => {
+  const previousMirrors = process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS;
+  const previousRequired = process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS;
+  const originalWrite = process.stderr.write;
+  const authoritative = 'https://example.invalid/source.git';
+  let output = '';
+  process.stderr.write = chunk => { output += String(chunk); return true; };
+  try {
+    delete process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS;
+    delete process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS;
+    assert.equal(resolveSourceMirror(authoritative), authoritative);
+    assert.match(output, /SOURCE-MIRROR none, falling back to https:\/\/example\.invalid\/source\.git/);
+
+    process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS = '1';
+    assert.throws(() => resolveSourceMirror(authoritative),
+      /source mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1/);
+  } finally {
+    process.stderr.write = originalWrite;
+    if (previousMirrors === undefined) delete process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS;
+    else process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS = previousMirrors;
+    if (previousRequired === undefined) delete process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS;
+    else process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS = previousRequired;
+  }
 });
 
 test('shallowClone fetches through a source mirror but retains the authoritative remote', async t => {

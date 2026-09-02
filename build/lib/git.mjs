@@ -10,6 +10,7 @@ const logger = getLogger('cangjie_build.git');
 
 export function resolveSourceMirror(url, mappings = process.env.CJCJ_SRCBUILD_SOURCE_MIRRORS) {
   let resolved = url;
+  let matched = false;
   const seen = new Set();
   for (const entry of (mappings ?? '').split(';').filter(Boolean)) {
     const separator = entry.indexOf('=');
@@ -22,7 +23,16 @@ export function resolveSourceMirror(url, mappings = process.env.CJCJ_SRCBUILD_SO
       throw new BuildError('git', `duplicate CJCJ_SRCBUILD_SOURCE_MIRRORS source: ${source}`);
     }
     seen.add(source);
-    if (source === url) resolved = mirror;
+    if (source === url) {
+      resolved = mirror;
+      matched = true;
+    }
+  }
+  if (!matched) {
+    console.error(`SOURCE-MIRROR none, falling back to ${url}`);
+    if (process.env.CJCJ_SRCBUILD_REQUIRE_MIRRORS === '1') {
+      throw new BuildError('git', `source mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1: ${url}`);
+    }
   }
   return resolved;
 }
