@@ -69,11 +69,12 @@ export async function checkoutExactSource(url, dest, ref) {
     await run(['git', '-C', dest, 'remote', 'add', 'origin', url], {stage: 'git.remote'});
   } else {
     const remote = await run(['git', '-C', dest, 'remote', 'get-url', 'origin'], {
-      stage: 'git.remote', capture: true, logOutput: false,
+      stage: 'git.remote', check: false, capture: true, logOutput: false,
     });
-    if (remote.stdout.trim() !== url) {
-      throw new BuildError('git.remote',
-        `source remote mismatch: path=${dest} actual=${remote.stdout.trim()} expected=${url}`);
+    if (remote.exitCode === 0) {
+      await run(['git', '-C', dest, 'remote', 'set-url', 'origin', url], {stage: 'git.remote'});
+    } else {
+      await run(['git', '-C', dest, 'remote', 'add', 'origin', url], {stage: 'git.remote'});
     }
   }
   await fetchSource(url, ref, {cwd: dest});

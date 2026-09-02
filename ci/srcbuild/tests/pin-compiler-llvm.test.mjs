@@ -52,6 +52,32 @@ test('compiler LLVM pin step uses a mirror and keeps the authoritative origin', 
   assert.equal(git(['-C', checkout, 'remote', 'get-url', 'origin']), authoritative);
 });
 
+test('compiler LLVM pin step reuses an empty git directory with an existing origin', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pin-compiler-llvm-reentry-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const {mirror, sha} = fixture(root);
+  const authoritative = 'https://github.com/cjcj-dev/cjcj-llvm.git';
+  const workspace = path.join(root, 'workspace');
+  const checkout = path.join(workspace, 'cangjie_compiler', 'third_party', 'llvm-project');
+  fs.mkdirSync(checkout, {recursive: true});
+  git(['init', checkout]);
+  git(['-C', checkout, 'remote', 'add', 'origin', 'https://example.invalid/stale-origin.git']);
+
+  const result = spawnSync(process.execPath, [step], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      CANGJIE_WORKSPACE: workspace,
+      LLVM_REF: sha,
+      LLVM_URL: authoritative,
+      CJCJ_SRCBUILD_SOURCE_MIRRORS: `${authoritative}=file://${mirror}`,
+    },
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(git(['-C', checkout, 'rev-parse', 'HEAD']), sha);
+  assert.equal(git(['-C', checkout, 'remote', 'get-url', 'origin']), authoritative);
+});
+
 test('compiler LLVM pin step fails closed on a missing selected mirror', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pin-compiler-llvm-missing-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
