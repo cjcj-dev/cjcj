@@ -6,6 +6,7 @@ import {BuildError} from '../../lib/errors.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
 import {assertRuntimeSplit, hostLoaderPath, targetLoaderPath} from '../../lib/runtime-split.mjs';
+import {assertGcUnitLanguageDone} from '../gc-unit-gate.mjs';
 import {ensureDir, requireFile} from './common.mjs';
 
 const logger = getLogger('cangjie_build.stages.verify');
@@ -44,6 +45,7 @@ export async function run(config) {
     ? '<HOST_CJC>'
     : requireFile(path.join(process.env.CJCJ_SRCBUILD_HOST_SDK, 'bin', 'cjc'), {stage: 'verify.host-cjc'});
   await stage('verify', async () => {
+    assertGcUnitLanguageDone(config, cangjieDir);
     await runCommand([
       'bash', '-c',
       'set -e; source "$1"; export "$2=$3"; "$5" hello.cj -o hello; export "$2=$4"; ./hello',
