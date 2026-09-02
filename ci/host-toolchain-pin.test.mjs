@@ -44,6 +44,7 @@ test('the ordinary host nightly literal has one pin and the release exception is
   const files = [
     ...await filesBelow(path.join(root, 'ci')),
     ...await filesBelow(path.join(root, '.github', 'workflows')),
+    ...await filesBelow(path.join(root, 'tools')),
   ];
   const offenders = [];
   for (const file of files) {
@@ -58,6 +59,11 @@ test('the ordinary host nightly literal has one pin and the release exception is
   assert.equal(release.match(/^  RELEASE_HOST_TOOLCHAIN: nightly-\S+$/gm)?.length, 1);
   assert.match(release, /Five-platform 1\.3 archive hashes do not exist yet/);
   assert.match(release, /smoke changing from 13\/15 to 0\/15/);
+});
+
+test('host identity comes only from the pin, never from RUNTIME_VERSION', async () => {
+  const srcbuild = await fs.readFile(path.join(root, 'tools', 'srcbuild_kkk2.sh'), 'utf8');
+  assert.doesNotMatch(srcbuild, /CJCJ_TOOLCHAIN\s*=.*\$\{?RUNTIME_VERSION/);
 });
 
 test('every workflow host consumer loads ci/cjpm_pin.env after checkout', async () => {
