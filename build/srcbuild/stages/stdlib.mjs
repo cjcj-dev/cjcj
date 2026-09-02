@@ -4,6 +4,7 @@ import path from 'node:path';
 import {stage} from '../../lib/logging.mjs';
 import {writeStdProvenance} from '../../lib/provenance.mjs';
 import {assertRuntimeCommonCache, assertRuntimeSplit} from '../../lib/runtime-split.mjs';
+import {runGcUnitLanguageTests} from '../gc-unit-gate.mjs';
 import {installPath, TARGET_TRIPLE} from '../../toolchain/mingw.mjs';
 import {copyContents, opensslLibPath, runBuildPy, windowsCrossArgs} from './common.mjs';
 
@@ -40,6 +41,7 @@ export async function run(config) {
       await writeStdProvenance({sourceDir: stdlibRoot, installPrefix: stdlibOutput, compiler});
     }
     copyContents(stdlibOutput, compilerOutput, {stage: 'stdlib.copy.host'});
+    await runGcUnitLanguageTests(config, compilerOutput);
     if (!config.target.spec.crossCompile) return;
 
     await runBuildPy(config, stdlibRoot, ['clean'], {stageName: 'stdlib.clean.windows'});

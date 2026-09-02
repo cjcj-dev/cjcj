@@ -3,6 +3,11 @@
 import path from 'node:path';
 import {stage} from '../../lib/logging.mjs';
 import {assertRuntimeSplit} from '../../lib/runtime-split.mjs';
+import {
+  beginGcUnitLanguageDeferral,
+  finishGcUnitLanguageDeferral,
+  gcUnitRuntimeBuildEnv,
+} from '../gc-unit-gate.mjs';
 import {copyContents, ensureDir, runBuildPy, windowsCrossArgs} from './common.mjs';
 
 export async function run(config) {
@@ -11,11 +16,15 @@ export async function run(config) {
   const compilerOutput = path.join(config.repoPath('compiler'), 'output');
 
   await stage('runtime', async () => {
+    beginGcUnitLanguageDeferral(config, runtimeRoot, compilerOutput);
     ensureDir(targetDir);
     await runBuildPy(config, runtimeRoot, ['clean'], {stageName: 'runtime.clean.host'});
     await runBuildPy(config, runtimeRoot, [
       'build', '--target', 'native', '-t', config.buildType, '-v', config.cangjieVersion,
-    ], {stageName: 'runtime.build.host'});
+    ], {
+      stageName: 'runtime.build.host',
+      extraEnv: gcUnitRuntimeBuildEnv(config),
+    });
     await runBuildPy(config, runtimeRoot, ['install'], {stageName: 'runtime.install.host'});
     copyContents(path.join(runtimeRoot, 'output'), targetDir, {stage: 'runtime.snapshot.host'});
 
@@ -27,6 +36,7 @@ export async function run(config) {
         stage: 'runtime.copy.host',
       });
     }
+    finishGcUnitLanguageDeferral(config, runtimeRoot, compilerOutput);
     if (!config.target.spec.crossCompile) {
       if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
         assertRuntimeSplit({
