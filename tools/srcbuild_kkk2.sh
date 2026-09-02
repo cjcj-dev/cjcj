@@ -401,7 +401,7 @@ seed_fixed_tuple_from_depot() {
     local depot_root=${1:-${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}}
     local depot="$depot_root/$LLVM_SHA"
     local tuple="$depot/fixed-llc"
-    local payload
+    local payload sums_sha
     local -a payloads=(llc.gz opt.gz cjselfhost_llvmshim.o llvm-tools.manifest)
 
     [[ -d $tuple && -s $depot/SHA256SUMS ]] || {
@@ -414,6 +414,15 @@ seed_fixed_tuple_from_depot() {
             return 1
         }
     done
+    [[ ${LLVM_TUPLE_SUMS_SHA:-} =~ ^[0-9a-f]{64}$ ]] || {
+        echo "fixed LLVM depot seed rejected: LLVM_TUPLE_SUMS_SHA is missing or malformed; rebuilding" >&2
+        return 1
+    }
+    sums_sha=$(sha256sum "$depot/SHA256SUMS" | awk '{print $1}') || return 1
+    [[ $sums_sha == "$LLVM_TUPLE_SUMS_SHA" ]] || {
+        echo "fixed LLVM depot seed rejected: SHA256SUMS digest disagrees with ci/llvm_pin.env at $depot; rebuilding" >&2
+        return 1
+    }
     if ! (cd "$depot" && sha256sum --strict -c SHA256SUMS); then
         echo "fixed LLVM depot seed rejected: SHA256SUMS verification failed at $depot; rebuilding" >&2
         return 1
