@@ -105,12 +105,11 @@ apply_source_mirror_profile() {
 
 # Step 8 compiler-cache setup.  sccache wins when it is on PATH; otherwise a
 # ccache installation enables the CMAKE_*_COMPILER_LAUNCHER variables with a
-# dedicated cache directory (never the shared /root/.ccache).
-# Do not set CCACHE_BASEDIR: ccache 4.5 rewrites absolute argv paths to
-# CWD-relative before invoking the compiler, which changes DWARF/__FILE__
-# relative to a no-launcher arm at the same tree.  CCACHE_NOHASHDIR still
-# omits CWD from the hash so a hot cache can hit after a same-machine
-# rebuild; cross-directory hits are not a byte-identity contract.
+# dedicated cache directory (never the shared /root/.ccache).  CCACHE_BASEDIR
+# rewrites source/include argv paths to workspace-relative keys so independent
+# per-run workspaces can share entries.  The C/C++ stages also receive
+# -ffile-prefix-map via build/srcbuild/stages/common.mjs; this keeps the
+# compiler's __FILE__ and DWARF paths identical after ccache rewrites argv.
 # build/cli.mjs (build/toolchain/sccache.mjs maybeEnable) leaves pre-set
 # launcher variables untouched, so these records flow through GITHUB_ENV
 # into the compiler/runtime configure steps unchanged.
@@ -132,6 +131,7 @@ srcbuild_setup_compiler_cache() {
         return 0
     fi
     local dir=${CJCJ_SRCBUILD_CCACHE_DIR:-${SRCBUILD_USER_HOME:-${HOME:-/root}}/.cache/cjcj-srcbuild/ccache}
+    local basedir=${CANGJIE_WORKSPACE:-$REPO_ROOT}
     mkdir -p "$dir"
     export CCACHE_DIR="$dir"
     export CCACHE_NOHASHDIR=true
@@ -139,11 +139,12 @@ srcbuild_setup_compiler_cache() {
     append_env CMAKE_C_COMPILER_LAUNCHER ccache
     append_env CMAKE_CXX_COMPILER_LAUNCHER ccache
     append_env CCACHE_DIR "$dir"
+    append_env CCACHE_BASEDIR "$basedir"
     append_env CCACHE_NOHASHDIR true
-    append_env CCACHE_SLOPPINESS pch_defines,time_macros,locale
+    append_env CCACHE_SLOPPINESS pch_defines,locale
     CCACHE_DIR="$dir" ccache -M "${CJCJ_SRCBUILD_CCACHE_SIZE:-60G}" >/dev/null
     CCACHE_DIR="$dir" ccache -z >/dev/null
-    echo "ccache enabled as CMAKE compiler launcher: dir=$dir max_size=${CJCJ_SRCBUILD_CCACHE_SIZE:-60G} no-basedir"
+    echo "ccache enabled as CMAKE compiler launcher: dir=$dir max_size=${CJCJ_SRCBUILD_CCACHE_SIZE:-60G} basedir=$basedir"
 }
 
 if [[ ${1:-} == --lib-only ]]; then

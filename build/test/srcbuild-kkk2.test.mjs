@@ -473,21 +473,22 @@ test('step 8 enables ccache launchers when sccache is absent and ccache is prese
   fs.symlinkSync('/usr/bin/mkdir', path.join(bin, 'mkdir'));
   const envFile = path.join(root, 'github.env');
   const cacheDir = path.join(root, 'cache');
+  const workspace = path.join(root, 'workspace');
   const stubLog = path.join(root, 'ccache-calls.log');
-  const invoke = `${step8Preamble}export CJCJ_SRCBUILD_CCACHE_DIR=$5\nsrcbuild_setup_compiler_cache\n`;
-  const result = runBash(invoke, [scriptPath, envFile, bin, stubLog, cacheDir]);
+  const invoke = `${step8Preamble}export CJCJ_SRCBUILD_CCACHE_DIR=$5 CANGJIE_WORKSPACE=$6\nsrcbuild_setup_compiler_cache\n`;
+  const result = runBash(invoke, [scriptPath, envFile, bin, stubLog, cacheDir, workspace]);
   assert.equal(result.status, 0, result.stderr);
   const env = fs.readFileSync(envFile, 'utf8');
   for (const record of [
     'CMAKE_C_COMPILER_LAUNCHER=ccache',
     'CMAKE_CXX_COMPILER_LAUNCHER=ccache',
     `CCACHE_DIR=${cacheDir}`,
+    `CCACHE_BASEDIR=${workspace}`,
     'CCACHE_NOHASHDIR=true',
-    'CCACHE_SLOPPINESS=pch_defines,time_macros,locale',
+    'CCACHE_SLOPPINESS=pch_defines,locale',
   ]) {
     assert.ok(env.includes(record), `missing ${record} in:\n${env}`);
   }
-  assert.ok(!env.includes('CCACHE_BASEDIR'), env);
   assert.match(result.stdout, /ccache enabled as CMAKE compiler launcher/);
   const calls = fs.readFileSync(stubLog, 'utf8');
   assert.match(calls, /-M 60G/);

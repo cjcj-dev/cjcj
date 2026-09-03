@@ -38,6 +38,17 @@ export function baseEnv(config) {
     BUILD_ROOT: config.buildRoot,
     WORKSPACE: config.workspace,
   };
+  // Keep compiler outputs independent of the per-run workspace prefix.  This
+  // is deliberately passed through CFLAGS/CXXFLAGS (rather than only to the
+  // cache launcher): compiler/build.py and runtime/build.py inherit these
+  // variables and use them when initializing their CMake projects.  ccache's
+  // CCACHE_BASEDIR may present relative argv paths on a cache hit, while a
+  // no-launcher build presents absolute paths; -ffile-prefix-map makes both
+  // forms produce identical __FILE__ and DWARF records.
+  const sourcePrefixMap = `-ffile-prefix-map=${path.resolve(config.workspace)}=.`;
+  for (const flag of ['CFLAGS', 'CXXFLAGS']) {
+    env[flag] = [process.env[flag], sourcePrefixMap].filter(Boolean).join(' ');
+  }
   // Official Linux builds select lld; the macOS guide relies on Apple's linker.
   if (spec.os === 'linux' || spec.crossCompile) env.LDFLAGS = '-fuse-ld=lld';
   const extraPathDirs = [spec.llvmBinDir];
