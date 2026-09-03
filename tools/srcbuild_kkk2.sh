@@ -123,7 +123,13 @@ srcbuild_setup_compiler_cache() {
         return 0
     fi
     if [[ ${CJCJ_SRCBUILD_CCACHE:-1} == 0 ]]; then
-        echo "sccache is absent and CJCJ_SRCBUILD_CCACHE=0; build/cli.mjs will leave compiler launchers unset"
+        local basedir=${CANGJIE_WORKSPACE:-$REPO_ROOT}
+        local canon=$REPO_ROOT/tools/srcbuild_pathcanon.sh
+        export CCACHE_BASEDIR="$basedir"
+        append_env CMAKE_C_COMPILER_LAUNCHER "$canon"
+        append_env CMAKE_CXX_COMPILER_LAUNCHER "$canon"
+        append_env CCACHE_BASEDIR "$basedir"
+        echo "CJCJ_SRCBUILD_CCACHE=0; CMAKE compiler launcher is pathcanon basedir=$basedir"
         return 0
     fi
     if ! command -v ccache >/dev/null; then

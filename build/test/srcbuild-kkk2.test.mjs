@@ -517,8 +517,10 @@ test('step 8 ccache fallback honours the CJCJ_SRCBUILD_CCACHE=0 opt-out', t => {
   const invoke = `${step8Preamble}export CJCJ_SRCBUILD_CCACHE=0\nsrcbuild_setup_compiler_cache\n`;
   const result = runBash(invoke, [scriptPath, envFile, bin, path.join(root, 'stub.log')]);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /sccache is absent and CJCJ_SRCBUILD_CCACHE=0/);
-  assert.equal(fs.existsSync(envFile), false, 'launcher env was appended despite the opt-out');
+  assert.match(result.stdout, /CJCJ_SRCBUILD_CCACHE=0; CMAKE compiler launcher is pathcanon/);
+  const env = fs.readFileSync(envFile, 'utf8');
+  assert.match(env, /srcbuild_pathcanon\.sh/);
+  assert.ok(!env.includes('CMAKE_CXX_COMPILER_LAUNCHER=ccache'), env);
 });
 
 test('step 8 prefers sccache when it is on PATH', t => {
