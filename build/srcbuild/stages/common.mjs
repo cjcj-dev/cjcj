@@ -51,6 +51,8 @@ export function baseEnv(config) {
     `-ffile-prefix-map=${workspace}/cangjie_compiler=.`,
     `-ffile-prefix-map=${workspace}/cangjie_runtime/runtime=.`,
     '-ffile-prefix-map=..=.',
+    '-ffile-prefix-map=../..=.',
+    '-ffile-prefix-map=../../..=.',
     '-fdebug-compilation-dir=.',
   ].join(' ');
   for (const flag of ['CFLAGS', 'CXXFLAGS']) {
