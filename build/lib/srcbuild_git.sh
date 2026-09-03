@@ -3,7 +3,7 @@
 # Shared mirror and transport policy for source-build shell entry points.
 
 srcbuild_git_resolve_source_mirror() {
-    local original=$1 mappings=${CJCJ_SRCBUILD_SOURCE_MIRRORS:-} entry source mirror resolved=$1
+    local original=$1 mappings=${CJCJ_SRCBUILD_SOURCE_MIRRORS:-} entry source mirror resolved=$1 matched=0
     local -A seen=()
     local -a entries=()
     IFS=';' read -r -a entries <<< "$mappings"
@@ -20,8 +20,18 @@ srcbuild_git_resolve_source_mirror() {
             return 1
         }
         seen[$source]=1
-        if [[ $source == "$original" ]]; then resolved=$mirror; fi
+        if [[ $source == "$original" ]]; then
+            resolved=$mirror
+            matched=1
+        fi
     done
+    if ((matched == 0)); then
+        echo "SOURCE-MIRROR none, falling back to $original" >&2
+        [[ ${CJCJ_SRCBUILD_REQUIRE_MIRRORS:-0} != 1 ]] || {
+            echo "source mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1: $original" >&2
+            return 1
+        }
+    fi
     printf '%s\n' "$resolved"
 }
 

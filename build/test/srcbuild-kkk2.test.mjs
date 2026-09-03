@@ -64,6 +64,10 @@ function writeDepotChecksums(depot) {
   fs.writeFileSync(path.join(depot, 'SHA256SUMS'), `${rows.join('\n')}\n`);
 }
 
+function sha256(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
 test('source-build CPU windows preserve explicit placement and derive their width', () => {
   const invoke = `source "$1" --lib-only\n`
     + 'test "$(explicit_cpuset 048-063)" = 48-63\n'
@@ -72,6 +76,25 @@ test('source-build CPU windows preserve explicit placement and derive their widt
     + 'if explicit_cpuset 63-48; then exit 17; fi\n';
   const result = runBash(invoke, [scriptPath]);
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('source-build records affinity from a real build-tool descendant', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-affinity-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const timings = path.join(root, 'timings.tsv');
+  fs.writeFileSync(path.join(root, 'Makefile'), 'all:\n\tsleep 0.5\n');
+  const invoke = `${shellFunction('elapsed_seconds')}\n`
+    + `${shellFunction('capture_build_child_affinity')}\n`
+    + `${shellFunction('run_step')}\n`
+    + 'STATE_ROOT=$1 LOG_ROOT=$1 TIMINGS=$2 START_STAMP=fixture\n'
+    + 'CPUSET=$(LC_ALL=C taskset -pc $$ | sed "s/.*: //")\n'
+    + 'load_github_state() { :; }\n'
+    + 'step_10() { taskset -c "$CPUSET" make -C "$STATE_ROOT"; }\n'
+    + 'run_step 10 build-support-libraries step_10\n';
+  const result = runBash(invoke, [root, timings]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const record = fs.readFileSync(timings, 'utf8');
+  assert.match(record, /^affinity\tstep=10\tpid=[0-9]+\tcommand=make\trequested=([^\t]+)\tactual=\1\targs=.*make/m);
 });
 
 test('source-build shell fetch uses the selected mirror and keeps canonical origin', t => {
@@ -103,6 +126,55 @@ test('source-build shell fetch uses the selected mirror and keeps canonical orig
   const missing = runBash(invoke,
     [helper, authoritative, path.join(root, 'missing.git'), checkout, sha]);
   assert.notEqual(missing.status, 0, 'missing mirror unexpectedly fell back to canonical URL');
+});
+
+test('source-build shell mirror fallback is visible and optionally required', () => {
+  const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
+  const authoritative = 'https://example.invalid/source.git';
+  const fallback = runBash(
+    'source "$1"\nunset CJCJ_SRCBUILD_SOURCE_MIRRORS CJCJ_SRCBUILD_REQUIRE_MIRRORS\n'
+      + 'srcbuild_git_resolve_source_mirror "$2"\n',
+    [helper, authoritative],
+  );
+  assert.equal(fallback.status, 0, fallback.stdout + fallback.stderr);
+  assert.equal(fallback.stdout.trim(), authoritative);
+  assert.match(fallback.stderr, /SOURCE-MIRROR none, falling back to https:\/\/example\.invalid\/source\.git/);
+
+  const required = runBash(
+    'source "$1"\nunset CJCJ_SRCBUILD_SOURCE_MIRRORS\nCJCJ_SRCBUILD_REQUIRE_MIRRORS=1\n'
+      + 'srcbuild_git_resolve_source_mirror "$2"\n',
+    [helper, authoritative],
+  );
+  assert.equal(required.status, 1, required.stdout + required.stderr);
+  assert.match(required.stderr, /source mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1/);
+});
+
+test('source-build shell exact checkout repairs a stale origin before fetching the pin', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-shell-checkout-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const source = path.join(root, 'source');
+  const mirror = path.join(root, 'source.git');
+  const checkout = path.join(root, 'checkout');
+  const authoritative = 'https://github.com/cjcj-dev/cjcj-llvm.git';
+  runGit(['init', source]);
+  fs.writeFileSync(path.join(source, 'value'), 'pinned fixture\n');
+  runGit(['-C', source, 'add', 'value']);
+  runGit(['-C', source, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+    'commit', '-m', 'fixture']);
+  const sha = runGit(['-C', source, 'rev-parse', 'HEAD']);
+  runGit(['clone', '--bare', source, mirror]);
+  runGit(['init', checkout]);
+  runGit(['-C', checkout, 'remote', 'add', 'origin', 'https://example.invalid/stale.git']);
+
+  const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
+  const invoke = 'source "$1"\n'
+    + `${shellFunction('checkout_exact')}\n`
+    + 'CJCJ_SRCBUILD_SOURCE_MIRRORS="$2=file://$3"\n'
+    + 'checkout_exact "$4" "$2" "$5"\n';
+  const result = runBash(invoke, [helper, authoritative, mirror, checkout, sha]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(runGit(['-C', checkout, 'rev-parse', 'HEAD']), sha);
+  assert.equal(runGit(['-C', checkout, 'remote', 'get-url', 'origin']), authoritative);
 });
 
 test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t => {
@@ -137,21 +209,28 @@ test('fixed tuple depot seeds only checksum-valid pinned payloads and otherwise 
   fs.mkdirSync(tuple, {recursive: true});
   writeTuple(tuple, llvmSha);
   writeDepotChecksums(depot);
+  const pinnedSumsSha = sha256(path.join(depot, 'SHA256SUMS'));
 
   const seedInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
     + `${shellFunction('seed_fixed_tuple_from_depot')}\n`
-    + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3\n'
-    + 'seed_fixed_tuple_from_depot "$4"\n';
-  const seeded = runBash(seedInvoke, [repoRoot, destination, llvmSha, depotRoot]);
+    + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3 LLVM_TUPLE_SUMS_SHA=$4\n'
+    + 'seed_fixed_tuple_from_depot "$5"\n';
+  const seeded = runBash(seedInvoke, [repoRoot, destination, llvmSha, pinnedSumsSha, depotRoot]);
   assert.equal(seeded.status, 0, seeded.stderr);
   assert.match(seeded.stdout, /seeded fixed LLVM tuple from verified depot/);
 
   fs.rmSync(destination, {recursive: true, force: true});
   fs.appendFileSync(path.join(tuple, 'llc.gz'), 'tampered');
-  const rejected = runBash(seedInvoke, [repoRoot, destination, llvmSha, depotRoot]);
+  const rejected = runBash(seedInvoke, [repoRoot, destination, llvmSha, pinnedSumsSha, depotRoot]);
   assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
   assert.match(rejected.stderr, /SHA256SUMS verification failed/);
   assert.equal(fs.existsSync(destination), false, 'rejected depot payload was copied');
+
+  writeDepotChecksums(depot);
+  const rewritten = runBash(seedInvoke, [repoRoot, destination, llvmSha, pinnedSumsSha, depotRoot]);
+  assert.equal(rewritten.status, 1, rewritten.stdout + rewritten.stderr);
+  assert.match(rewritten.stderr, /SHA256SUMS digest disagrees with ci\/llvm_pin\.env/);
+  assert.equal(fs.existsSync(destination), false, 'jointly rewritten payload and checksums were copied');
 
   const checkoutMarker = path.join(root, 'rebuild-started');
   const buildInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
@@ -160,10 +239,10 @@ test('fixed tuple depot seeds only checksum-valid pinned payloads and otherwise 
     + 'checkout_exact() { touch "$CHECKOUT_MARKER"; return 17; }\n'
     + 'checkout_sparse_exact() { return 17; }\n'
     + 'DRY_RUN=0 REPO_ROOT=$1 STATE_ROOT=$2 CJCJ_FIXED_LLVM_DIR=$2 JOBS=1 '
-    + 'CHECKOUT_MARKER=$3 CJCJ_LLVM_DEPOT_ROOT=$4\n'
+    + 'CHECKOUT_MARKER=$3 CJCJ_LLVM_DEPOT_ROOT=$4 LLVM_TUPLE_SUMS_SHA=$5\n'
     + 'build_fixed_tuple\n';
   const rebuilt = runBash(buildInvoke,
-    [repoRoot, path.join(root, 'build-destination'), checkoutMarker, depotRoot]);
+    [repoRoot, path.join(root, 'build-destination'), checkoutMarker, depotRoot, pinnedSumsSha]);
   assert.equal(rebuilt.status, 1, rebuilt.stdout + rebuilt.stderr);
   assert.equal(fs.existsSync(checkoutMarker), true, 'rebuild path did not start after rejecting depot');
 });
