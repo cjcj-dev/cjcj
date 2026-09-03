@@ -78,23 +78,23 @@ test('source-build CPU windows preserve explicit placement and derive their widt
   assert.equal(result.status, 0, result.stderr);
 });
 
-test('source-build records affinity from a real cmake or ninja descendant', t => {
+test('source-build records affinity from a real build-tool descendant', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-affinity-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const timings = path.join(root, 'timings.tsv');
-  fs.writeFileSync(path.join(root, 'build.ninja'), 'rule wait\n  command = sleep 0.5\nbuild all: wait\n');
+  fs.writeFileSync(path.join(root, 'Makefile'), 'all:\n\tsleep 0.5\n');
   const invoke = `${shellFunction('elapsed_seconds')}\n`
     + `${shellFunction('capture_build_child_affinity')}\n`
     + `${shellFunction('run_step')}\n`
     + 'STATE_ROOT=$1 LOG_ROOT=$1 TIMINGS=$2 START_STAMP=fixture\n'
-    + 'CPUSET=$(taskset -pc $$ | sed "s/.*: //")\n'
+    + 'CPUSET=$(LC_ALL=C taskset -pc $$ | sed "s/.*: //")\n'
     + 'load_github_state() { :; }\n'
-    + 'step_10() { taskset -c "$CPUSET" ninja -C "$STATE_ROOT"; }\n'
+    + 'step_10() { taskset -c "$CPUSET" make -C "$STATE_ROOT"; }\n'
     + 'run_step 10 build-support-libraries step_10\n';
   const result = runBash(invoke, [root, timings]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const record = fs.readFileSync(timings, 'utf8');
-  assert.match(record, /^affinity\tstep=10\tpid=[0-9]+\tcommand=ninja\trequested=([^\t]+)\tactual=\1\targs=.*ninja/m);
+  assert.match(record, /^affinity\tstep=10\tpid=[0-9]+\tcommand=make\trequested=([^\t]+)\tactual=\1\targs=.*make/m);
 });
 
 test('source-build shell fetch uses the selected mirror and keeps canonical origin', t => {

@@ -380,7 +380,8 @@ capture_build_child_affinity() {
             }
             END {
                 for (pid in parent) {
-                    if ((command[pid] == "cmake" || command[pid] == "ninja") &&
+                    if ((command[pid] == "cmake" || command[pid] == "ninja" ||
+                         command[pid] == "make" || command[pid] == "gmake") &&
                         is_descendant(pid)) {
                         printf "%s\t%s\t%s\n", pid, command[pid], arguments[pid]
                         exit
