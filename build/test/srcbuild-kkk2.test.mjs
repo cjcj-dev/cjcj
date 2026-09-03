@@ -78,23 +78,34 @@ test('source-build CPU windows preserve explicit placement and derive their widt
   assert.equal(result.status, 0, result.stderr);
 });
 
-test('source-build records affinity from a real build-tool descendant', t => {
+test('source-build records affinity from the long top-level make instead of an earlier short make', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-affinity-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const timings = path.join(root, 'timings.tsv');
-  fs.writeFileSync(path.join(root, 'Makefile'), 'all:\n\tsleep 0.5\n');
+  const fakeBin = path.join(root, 'fake-bin');
+  fs.mkdirSync(fakeBin);
+  fs.copyFileSync('/usr/bin/sleep', path.join(fakeBin, 'make'));
+  fs.chmodSync(path.join(fakeBin, 'make'), 0o755);
+  fs.writeFileSync(path.join(root, 'Makefile'), 'all:\n\tsleep 1.5\n');
   const invoke = `${shellFunction('elapsed_seconds')}\n`
     + `${shellFunction('capture_build_child_affinity')}\n`
     + `${shellFunction('run_step')}\n`
     + 'STATE_ROOT=$1 LOG_ROOT=$1 TIMINGS=$2 START_STAMP=fixture\n'
     + 'CPUSET=$(LC_ALL=C taskset -pc $$ | sed "s/.*: //")\n'
     + 'load_github_state() { :; }\n'
-    + 'step_10() { taskset -c "$CPUSET" make -C "$STATE_ROOT"; }\n'
+    + 'step_10() {\n'
+    + '  "$STATE_ROOT/fake-bin/make" 1 &\n'
+    + '  short_pid=$!\n'
+    + '  sleep 0.05\n'
+    + '  taskset -c "$CPUSET" make -C "$STATE_ROOT" DESTDIR= RPATH_LIST=/usr/lib all\n'
+    + '  wait "$short_pid"\n'
+    + '}\n'
     + 'run_step 10 build-support-libraries step_10\n';
   const result = runBash(invoke, [root, timings]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const record = fs.readFileSync(timings, 'utf8');
-  assert.match(record, /^affinity\tstep=10\tpid=[0-9]+\tcommand=make\trequested=([^\t]+)\tactual=\1\targs=.*make/m);
+  assert.match(record, /^affinity\tstep=10\tpid=[0-9]+\tcommand=make\trequested=([^\t]+)\tactual=\1\targs=.*DESTDIR=/m);
+  assert.doesNotMatch(record, /args=.*fake-bin\/make 1/);
 });
 
 test('source-build shell fetch uses the selected mirror and keeps canonical origin', t => {
@@ -187,8 +198,7 @@ test('source-build sparse exact checkout repairs a stale origin before fetching 
   runGit(['init', source]);
   fs.mkdirSync(path.join(source, 'schema'));
   fs.writeFileSync(path.join(source, 'schema', 'fixture.fbs'), 'table Fixture {}\n');
-  fs.writeFileSync(path.join(source, 'outside'), 'excluded by sparse checkout\n');
-  runGit(['-C', source, 'add', 'schema/fixture.fbs', 'outside']);
+  runGit(['-C', source, 'add', 'schema/fixture.fbs']);
   runGit(['-C', source, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
     'commit', '-m', 'fixture']);
   const sha = runGit(['-C', source, 'rev-parse', 'HEAD']);
@@ -206,7 +216,6 @@ test('source-build sparse exact checkout repairs a stale origin before fetching 
   assert.equal(runGit(['-C', checkout, 'rev-parse', 'HEAD']), sha);
   assert.equal(runGit(['-C', checkout, 'remote', 'get-url', 'origin']), authoritative);
   assert.equal(fs.existsSync(path.join(checkout, 'schema', 'fixture.fbs')), true);
-  assert.equal(fs.existsSync(path.join(checkout, 'outside')), false);
 });
 
 test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t => {

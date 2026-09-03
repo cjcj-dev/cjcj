@@ -359,14 +359,17 @@ record_crash_signature() {
 
 capture_build_child_affinity() {
     local root_pid=$1 step=$2 stop_file=$3
-    local candidate pid command arguments affinity actual
+    local candidate pid command elapsed preferred arguments affinity actual
+    local best_pid= best_command= best_arguments= best_actual=
+    local best_elapsed=-1 best_preferred=0
     while [[ ! -e $stop_file ]]; do
-        candidate=$(LC_ALL=C ps -eo pid=,ppid=,comm=,args= | awk -v root_pid="$root_pid" '
+        candidate=$(LC_ALL=C ps -eo pid=,ppid=,etimes=,comm=,args= | awk -v root_pid="$root_pid" '
             {
                 pid = $1
                 parent[pid] = $2
-                command[pid] = $3
-                $1 = $2 = $3 = ""
+                elapsed[pid] = $3
+                command[pid] = $4
+                $1 = $2 = $3 = $4 = ""
                 sub(/^[[:space:]]+/, "")
                 arguments[pid] = $0
             }
@@ -379,26 +382,49 @@ capture_build_child_affinity() {
                 return 0
             }
             END {
+                best_pid = 0
+                best_elapsed = -1
+                best_preferred = -1
                 for (pid in parent) {
                     if ((command[pid] == "cmake" || command[pid] == "ninja" ||
                          command[pid] == "make" || command[pid] == "gmake") &&
                         is_descendant(pid)) {
-                        printf "%s\t%s\t%s\n", pid, command[pid], arguments[pid]
-                        exit
+                        preferred = ((command[pid] == "make" || command[pid] == "gmake") &&
+                                     arguments[pid] ~ /(^|[[:space:]])DESTDIR=/)
+                        if (preferred > best_preferred ||
+                            (preferred == best_preferred && elapsed[pid] >= best_elapsed)) {
+                            best_pid = pid
+                            best_elapsed = elapsed[pid]
+                            best_preferred = preferred
+                        }
                     }
+                }
+                if (best_pid != 0) {
+                    printf "%s\t%s\t%s\t%s\t%s\n", best_pid, command[best_pid],
+                        elapsed[best_pid], best_preferred, arguments[best_pid]
                 }
             }
         ') || return 1
         if [[ -n $candidate ]]; then
-            IFS=$'\t' read -r pid command arguments <<< "$candidate"
+            IFS=$'\t' read -r pid command elapsed preferred arguments <<< "$candidate"
             affinity=$(LC_ALL=C taskset -pc "$pid" 2>/dev/null) || continue
             actual=${affinity##*: }
-            printf 'affinity\tstep=%s\tpid=%s\tcommand=%s\trequested=%s\tactual=%s\targs=%s\n' \
-                "$step" "$pid" "$command" "$CPUSET" "$actual" "$arguments" >> "$TIMINGS"
-            return 0
+            if ((preferred > best_preferred ||
+                (preferred == best_preferred && elapsed >= best_elapsed))); then
+                best_pid=$pid
+                best_command=$command
+                best_elapsed=$elapsed
+                best_preferred=$preferred
+                best_actual=$actual
+                best_arguments=$arguments
+            fi
         fi
         sleep 0.02
     done
+    if [[ -n $best_pid ]]; then
+        printf 'affinity\tstep=%s\tpid=%s\tcommand=%s\trequested=%s\tactual=%s\targs=%s\n' \
+            "$step" "$best_pid" "$best_command" "$CPUSET" "$best_actual" "$best_arguments" >> "$TIMINGS"
+    fi
 }
 
 run_step() {
