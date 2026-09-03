@@ -95,6 +95,14 @@ explicit_cpuset() {
     printf '%d-%d\n' "$((10#$first))" "$((10#$last))"
 }
 
+apply_source_mirror_profile() {
+    local profile=$1
+    if [[ $profile == kkk2 ]]; then
+        : "${CJCJ_SRCBUILD_REQUIRE_MIRRORS:=1}"
+        export CJCJ_SRCBUILD_REQUIRE_MIRRORS
+    fi
+}
+
 if [[ ${1:-} == --lib-only ]]; then
     [[ $# == 1 ]] || {
         echo "--lib-only does not accept other arguments" >&2
@@ -241,6 +249,7 @@ host_name=$(hostname -s)
     echo "refusing build load on host '$host_name': run this script on kkk2 via tools/box.sh" >&2
     exit 3
 }
+apply_source_mirror_profile "$host_name"
 
 if [[ ${CJCJ_KKK2_AFFINED:-} != "$CPUSET" ]]; then
     exec taskset -c "$CPUSET" env CJCJ_KKK2_AFFINED="$CPUSET" \

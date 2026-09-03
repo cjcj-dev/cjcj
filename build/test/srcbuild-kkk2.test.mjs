@@ -160,6 +160,33 @@ test('source-build shell mirror fallback is visible and optionally required', ()
   assert.match(required.stderr, /source mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1/);
 });
 
+test('kkk2 source-build profile requires mirrors while local helpers keep fallback enabled', () => {
+  const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
+  const authoritative = 'https://example.invalid/source.git';
+  const kkk2 = runBash(
+    'source "$1" --lib-only\nsource "$2"\n'
+      + 'unset CJCJ_SRCBUILD_SOURCE_MIRRORS CJCJ_SRCBUILD_REQUIRE_MIRRORS\n'
+      + 'apply_source_mirror_profile kkk2\n'
+      + 'srcbuild_git_resolve_source_mirror "$3"\n',
+    [scriptPath, helper, authoritative],
+  );
+  assert.equal(kkk2.status, 1, kkk2.stdout + kkk2.stderr);
+  assert.match(kkk2.stderr,
+    /source mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1: https:\/\/example\.invalid\/source\.git/);
+
+  const local = runBash(
+    'source "$1" --lib-only\nsource "$2"\n'
+      + 'unset CJCJ_SRCBUILD_SOURCE_MIRRORS CJCJ_SRCBUILD_REQUIRE_MIRRORS\n'
+      + 'apply_source_mirror_profile local\n'
+      + 'srcbuild_git_resolve_source_mirror "$3"\n',
+    [scriptPath, helper, authoritative],
+  );
+  assert.equal(local.status, 0, local.stdout + local.stderr);
+  assert.equal(local.stdout.trim(), authoritative);
+  assert.match(local.stderr, /SOURCE-MIRROR none, falling back to/);
+  assert.match(script, /^apply_source_mirror_profile "\$host_name"$/m);
+});
+
 test('source-build shell exact checkout repairs a stale origin before fetching the pin', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-shell-checkout-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
