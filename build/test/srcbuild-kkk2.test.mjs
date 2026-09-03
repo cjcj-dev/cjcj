@@ -26,7 +26,7 @@ function runGit(args) {
   return result.stdout.trim();
 }
 
-function writeTuple(root, embeddedSha) {
+function writeTuple(root, embeddedSha, compilerSha) {
   const pinText = fs.readFileSync(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
   const field = name => pinText.match(new RegExp(`^${name}=([0-9a-f]{40})$`, 'm'))[1];
   const llvmSha = field('LLVM_SHA');
@@ -40,14 +40,14 @@ function writeTuple(root, embeddedSha) {
   fs.writeFileSync(path.join(root, 'llvm-tools.manifest'), [
     'PLATFORM=linux_x86_64',
     `LLVM_SHA=${llvmSha}`,
-    `CANGJIE_COMPILER_SHA=${field('CANGJIE_COMPILER_SHA')}`,
+    `CANGJIE_COMPILER_SHA=${compilerSha || field('CANGJIE_COMPILER_SHA')}`,
     `FLATBUFFERS_SHA=${field('FLATBUFFERS_SHA')}`,
     `LLC_SHA256=${'1'.repeat(64)}`,
     `OPT_SHA256=${'2'.repeat(64)}`,
     `SHIM_SHA256=${'3'.repeat(64)}`,
     '',
   ].join('\n'));
-  return llvmSha;
+  return {llvmSha, compilerSha: compilerSha || field('CANGJIE_COMPILER_SHA')};
 }
 
 function writeDepotChecksums(depot) {
@@ -280,6 +280,7 @@ test('fixed tuple depot seeds only checksum-valid pinned payloads and otherwise 
   const pinnedSumsSha = sha256(path.join(depot, 'SHA256SUMS'));
 
   const seedInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
+    + `${shellFunction('resolve_depot_tuple_root')}\n`
     + `${shellFunction('seed_fixed_tuple_from_depot')}\n`
     + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3 LLVM_TUPLE_SUMS_SHA=$4\n'
     + 'seed_fixed_tuple_from_depot "$5"\n';
@@ -302,6 +303,7 @@ test('fixed tuple depot seeds only checksum-valid pinned payloads and otherwise 
 
   const checkoutMarker = path.join(root, 'rebuild-started');
   const buildInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
+    + `${shellFunction('resolve_depot_tuple_root')}\n`
     + `${shellFunction('seed_fixed_tuple_from_depot')}\n`
     + `${shellFunction('build_fixed_tuple')}\n`
     + 'checkout_exact() { touch "$CHECKOUT_MARKER"; return 17; }\n'
@@ -313,6 +315,89 @@ test('fixed tuple depot seeds only checksum-valid pinned payloads and otherwise 
     [repoRoot, path.join(root, 'build-destination'), checkoutMarker, depotRoot, pinnedSumsSha]);
   assert.equal(rebuilt.status, 1, rebuilt.stdout + rebuilt.stderr);
   assert.equal(fs.existsSync(checkoutMarker), true, 'rebuild path did not start after rejecting depot');
+});
+
+test('fixed tuple depot seeds the nested compiler-sha key and rejects a mismatched pin', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-depot-compiler-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const pinText = fs.readFileSync(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
+  const llvmSha = pinText.match(/^LLVM_SHA=([0-9a-f]{40})$/m)[1];
+  const pinCompiler = pinText.match(/^CANGJIE_COMPILER_SHA=([0-9a-f]{40})$/m)[1];
+  const otherCompiler = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const depotRoot = path.join(root, 'depot');
+  const pinTuple = path.join(depotRoot, llvmSha, pinCompiler, 'fixed-llc');
+  const otherTuple = path.join(depotRoot, llvmSha, otherCompiler, 'fixed-llc');
+  fs.mkdirSync(pinTuple, {recursive: true});
+  fs.mkdirSync(otherTuple, {recursive: true});
+  writeTuple(pinTuple, llvmSha, pinCompiler);
+  writeTuple(otherTuple, llvmSha, otherCompiler);
+  writeDepotChecksums(path.join(depotRoot, llvmSha, pinCompiler));
+  writeDepotChecksums(path.join(depotRoot, llvmSha, otherCompiler));
+  const pinSums = sha256(path.join(depotRoot, llvmSha, pinCompiler, 'SHA256SUMS'));
+  const otherSums = sha256(path.join(depotRoot, llvmSha, otherCompiler, 'SHA256SUMS'));
+  const destination = path.join(root, 'destination');
+  const seedInvoke = `${shellFunction('fixed_tuple_is_current')}\n`
+    + `${shellFunction('resolve_depot_tuple_root')}\n`
+    + `${shellFunction('seed_fixed_tuple_from_depot')}\n`
+    + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3 CANGJIE_COMPILER_SHA=$4 '
+    + 'LLVM_TUPLE_SUMS_SHA=$5\n'
+    + 'seed_fixed_tuple_from_depot "$6"\n';
+
+  const seeded = runBash(seedInvoke, [repoRoot, destination, llvmSha, pinCompiler, pinSums, depotRoot]);
+  assert.equal(seeded.status, 0, seeded.stderr);
+  assert.match(seeded.stdout, new RegExp(`${llvmSha}/${pinCompiler}`));
+
+  fs.rmSync(destination, {recursive: true, force: true});
+  const rejected = runBash(seedInvoke,
+    [repoRoot, destination, llvmSha, otherCompiler, otherSums, depotRoot]);
+  assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+  assert.match(rejected.stderr, /pin, manifest, and opt lineage disagree/);
+});
+
+test('shared support cache misses until step 11 writes and then hits a second workspace', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-support-cache-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const cache = path.join(root, 'support-cache');
+  const mirrors = path.join(root, 'mirrors');
+  fs.mkdirSync(mirrors);
+  const ncursesTar = path.join(mirrors, 'ncurses-6.5.tar.gz');
+  const libeditTar = path.join(mirrors, 'libedit-20210910-3.1.tar.gz');
+  fs.writeFileSync(ncursesTar, 'ncurses-fixture');
+  fs.writeFileSync(libeditTar, 'libedit-fixture');
+  const mapping = 'https://ftp.gnu.org/pub/gnu/ncurses/ncurses-6.5.tar.gz=file://'
+    + ncursesTar
+    + ';https://thrysoee.dk/editline/libedit-20210910-3.1.tar.gz=file://'
+    + libeditTar;
+  const workspaceA = path.join(root, 'ws-a');
+  const workspaceB = path.join(root, 'ws-b');
+  fs.mkdirSync(path.join(workspaceA, 'buildtools'), {recursive: true});
+  fs.mkdirSync(path.join(workspaceB, 'buildtools'), {recursive: true});
+  const helpers = `${shellFunction('support_cache_root')}\n`
+    + `${shellFunction('srcbuild_tarball_resolve_mirror')}\n`
+    + `${shellFunction('support_tarball_sha256')}\n`
+    + `${shellFunction('support_cache_key')}\n`
+    + `${shellFunction('support_cache_dir')}\n`
+    + `${shellFunction('step_9')}\n`
+    + `${shellFunction('step_10')}\n`
+    + `${shellFunction('step_11')}\n`;
+  const envPrefix = 'CJCJ_SRCBUILD_SUPPORT_CACHE=$1 CJCJ_SRCBUILD_TARBALL_MIRRORS=$2 '
+    + 'CANGJIE_BUILD_ROOT=$3 TARGET=linux-x64 SRCBUILD_USER_HOME=$4\n';
+  const miss = runBash(helpers + envPrefix + 'step_9\n',
+    [cache, mapping, path.join(workspaceA, 'buildtools'), root]);
+  assert.equal(miss.status, 0, miss.stderr);
+  assert.match(miss.stdout, /local support-library cache miss/);
+
+  fs.writeFileSync(path.join(workspaceA, 'buildtools', 'installed.marker'), 'built');
+  const written = runBash(helpers + envPrefix + 'step_11 && step_9\n',
+    [cache, mapping, path.join(workspaceA, 'buildtools'), root]);
+  assert.equal(written.status, 0, written.stderr);
+  assert.match(written.stdout, /local support-library cache hit/);
+
+  const hitB = runBash(helpers + envPrefix + 'step_9 && step_10\n',
+    [cache, mapping, path.join(workspaceB, 'buildtools'), root]);
+  assert.equal(hitB.status, 0, hitB.stderr);
+  assert.match(hitB.stdout, /local support-library cache hit/);
+  assert.equal(fs.readFileSync(path.join(workspaceB, 'buildtools', 'installed.marker'), 'utf8'), 'built');
 });
 
 test('fixed tuple build stops when an exact checkout fails', t => {
