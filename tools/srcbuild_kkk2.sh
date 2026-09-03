@@ -286,7 +286,8 @@ if ((DRY_RUN == 0)); then
         "$CANGJIE_BUILD_ROOT" "$CJCJ_FIXED_LLVM_DIR"
 fi
 
-export HOME="$PRIVATE_HOME"
+    readonly SRCBUILD_USER_HOME="${HOME:-/root}"
+    export HOME="$PRIVATE_HOME"
 export GITHUB_WORKSPACE="$REPO_ROOT"
 export GITHUB_ENV GITHUB_PATH RUNNER_TEMP
 export CANGJIE_WORKSPACE CANGJIE_BUILD_ROOT CJCJ_FIXED_LLVM_DIR
@@ -481,17 +482,60 @@ fixed_tuple_is_current() {
     node "$REPO_ROOT/ci/llvm-tools-manifest.mjs" validate native "$manifest" >/dev/null || return 1
 }
 
+resolve_depot_tuple_root() {
+    local depot_root=${1:-${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}}
+    local nested="$depot_root/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
+    local legacy="$depot_root/$LLVM_SHA"
+    local manifest_compiler
+    if [[ -d $nested/fixed-llc && -s $nested/SHA256SUMS ]]; then
+        printf '%s\n' "$nested"
+        return 0
+    fi
+    if [[ -d $legacy/fixed-llc && -s $legacy/SHA256SUMS && -s $legacy/fixed-llc/llvm-tools.manifest ]]; then
+        manifest_compiler=$(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$legacy/fixed-llc/llvm-tools.manifest") || return 1
+        if [[ $manifest_compiler == "$CANGJIE_COMPILER_SHA" ]]; then
+            printf '%s\n' "$legacy"
+            return 0
+        fi
+        echo "fixed LLVM depot legacy layout skipped: compiler sha $manifest_compiler != pin $CANGJIE_COMPILER_SHA at $legacy" >&2
+    fi
+    return 1
+}
+
+publish_fixed_tuple_to_depot() {
+    local depot_root=${1:-${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}}
+    local depot="$depot_root/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
+    local tuple="$depot/fixed-llc"
+    local payload
+    local -a payloads=(llc.gz opt.gz cjselfhost_llvmshim.o llvm-tools.manifest)
+    [[ -n ${LLVM_SHA:-} && -n ${CANGJIE_COMPILER_SHA:-} ]] || return 1
+    mkdir -p "$tuple"
+    for payload in "${payloads[@]}"; do
+        cp -- "$CJCJ_FIXED_LLVM_DIR/$payload" "$tuple/$payload"
+    done
+    (
+        cd "$depot" || exit 1
+        sha256sum -- "./fixed-llc/llc.gz" "./fixed-llc/opt.gz" \
+            "./fixed-llc/cjselfhost_llvmshim.o" "./fixed-llc/llvm-tools.manifest" > SHA256SUMS
+    ) || return 1
+    echo "published fixed LLVM tuple to depot $depot"
+}
+
 seed_fixed_tuple_from_depot() {
     local depot_root=${1:-${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}}
-    local depot="$depot_root/$LLVM_SHA"
-    local tuple="$depot/fixed-llc"
-    local payload sums_sha
+    local depot tuple payload sums_sha
     local -a payloads=(llc.gz opt.gz cjselfhost_llvmshim.o llvm-tools.manifest)
-
-    [[ -d $tuple && -s $depot/SHA256SUMS ]] || {
-        echo "fixed LLVM depot seed unavailable: $depot (missing fixed-llc or SHA256SUMS); rebuilding" >&2
+    if [[ -z ${LLVM_SHA:-} ]]; then
+        LLVM_SHA=$(awk -F= '$1=="LLVM_SHA" {print $2}' "$REPO_ROOT/ci/llvm_pin.env") || return 1
+    fi
+    if [[ -z ${CANGJIE_COMPILER_SHA:-} ]]; then
+        CANGJIE_COMPILER_SHA=$(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$REPO_ROOT/ci/llvm_pin.env") || return 1
+    fi
+    depot=$(resolve_depot_tuple_root "$depot_root") || {
+        echo "fixed LLVM depot seed unavailable under $depot_root/$LLVM_SHA/{${CANGJIE_COMPILER_SHA},} (missing nested or matching-legacy fixed-llc); rebuilding" >&2
         return 1
     }
+    tuple="$depot/fixed-llc"
     for payload in "${payloads[@]}"; do
         [[ -f $tuple/$payload && ! -L $tuple/$payload ]] || {
             echo "fixed LLVM depot seed rejected: missing or non-regular fixed-llc/$payload; rebuilding" >&2
@@ -632,7 +676,10 @@ build_fixed_tuple() {
         printf 'OPT_SHA256=%s\n' "$opt_sha"
         printf 'SHIM_SHA256=%s\n' "$shim_sha"
     } > "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
-    fixed_tuple_is_current
+    fixed_tuple_is_current || return 1
+    if [[ ${CJCJ_LLVM_DEPOT_PUBLISH:-0} == 1 ]]; then
+        publish_fixed_tuple_to_depot || return 1
+    fi
 }
 
 run_fixed_tuple_prerequisite() {
@@ -695,25 +742,104 @@ step_8() {
     fi
 }
 
+support_cache_root() {
+    printf '%s\n' "${CJCJ_SRCBUILD_SUPPORT_CACHE:-${SRCBUILD_USER_HOME:-$HOME}/.cache/cjcj-srcbuild/support}"
+}
+
+srcbuild_tarball_resolve_mirror() {
+    local original=$1 mappings=${CJCJ_SRCBUILD_TARBALL_MIRRORS:-} entry source mirror resolved=$1 matched=0
+    local -A seen=()
+    local -a entries=()
+    IFS=';' read -r -a entries <<< "$mappings"
+    for entry in "${entries[@]}"; do
+        [[ -n $entry ]] || continue
+        [[ $entry == *=* && -n ${entry%%=*} && -n ${entry#*=} ]] || {
+            echo "invalid CJCJ_SRCBUILD_TARBALL_MIRRORS entry: $entry" >&2
+            return 1
+        }
+        source=${entry%%=*}
+        mirror=${entry#*=}
+        [[ -z ${seen[$source]+set} ]] || {
+            echo "duplicate CJCJ_SRCBUILD_TARBALL_MIRRORS source: $source" >&2
+            return 1
+        }
+        seen[$source]=1
+        if [[ $source == "$original" ]]; then
+            resolved=$mirror
+            matched=1
+        fi
+    done
+    if ((matched == 0)); then
+        echo "TARBALL-MIRROR none, falling back to $original" >&2
+        [[ ${CJCJ_SRCBUILD_REQUIRE_MIRRORS:-0} != 1 ]] || {
+            echo "tarball mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1: $original" >&2
+            return 1
+        }
+    fi
+    printf '%s\n' "$resolved"
+}
+
+support_tarball_sha256() {
+    local url=$1 dest=$2 resolved path_file
+    if [[ -f $dest ]]; then
+        sha256sum "$dest" | awk '{print $1}'
+        return 0
+    fi
+    resolved=$(srcbuild_tarball_resolve_mirror "$url") || return 1
+    path_file=$resolved
+    [[ $path_file == file://* ]] && path_file=${path_file#file://}
+    if [[ -f $path_file ]]; then
+        sha256sum "$path_file" | awk '{print $1}'
+        return 0
+    fi
+    return 1
+}
+
+support_cache_key() {
+    local ncurses_url='https://ftp.gnu.org/pub/gnu/ncurses/ncurses-6.5.tar.gz'
+    local libedit_url='https://thrysoee.dk/editline/libedit-20210910-3.1.tar.gz'
+    local ncurses_tar="$CANGJIE_BUILD_ROOT/ncurses-6.5.tar.gz"
+    local libedit_tar="$CANGJIE_BUILD_ROOT/libedit-20210910-3.1.tar.gz"
+    local ncurses_sha libedit_sha
+    ncurses_sha=$(support_tarball_sha256 "$ncurses_url" "$ncurses_tar") || return 1
+    libedit_sha=$(support_tarball_sha256 "$libedit_url" "$libedit_tar") || return 1
+    printf '%s-%s\n' "$ncurses_sha" "$libedit_sha"
+}
+
+support_cache_dir() {
+    local key
+    key=$(support_cache_key) || return 1
+    printf '%s/%s\n' "$(support_cache_root)" "$key"
+}
+
 step_9() {
-    if [[ -f $STATE_ROOT/support-cache-$TARGET.ok ]]; then
-        echo "local support-library cache hit"
+    local cache_dir
+    if cache_dir=$(support_cache_dir) && [[ -f $cache_dir/.ok ]]; then
+        echo "local support-library cache hit $cache_dir"
     else
         echo "local support-library cache miss"
     fi
 }
 
 step_10() {
-    if [[ -f $STATE_ROOT/support-cache-$TARGET.ok ]]; then
-        echo "support libraries already retained locally"
+    local cache_dir
+    if cache_dir=$(support_cache_dir) && [[ -f $cache_dir/.ok ]]; then
+        echo "support libraries already retained in shared cache $cache_dir"
+        mkdir -p "$CANGJIE_BUILD_ROOT"
+        cp -a -- "$cache_dir/." "$CANGJIE_BUILD_ROOT/"
+        rm -f "$CANGJIE_BUILD_ROOT/.ok"
     else
         npx --yes zx@8 "$REPO_ROOT/build/cli.mjs" --target "$TARGET" install-static-libs
     fi
 }
 
 step_11() {
+    local cache_dir
     [[ -d $CANGJIE_BUILD_ROOT ]]
-    touch "$STATE_ROOT/support-cache-$TARGET.ok"
+    cache_dir=$(support_cache_dir) || return 1
+    mkdir -p "$cache_dir"
+    cp -a -- "$CANGJIE_BUILD_ROOT/." "$cache_dir/"
+    touch "$cache_dir/.ok"
 }
 
 step_12() {
