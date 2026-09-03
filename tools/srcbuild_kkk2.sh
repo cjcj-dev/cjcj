@@ -95,6 +95,14 @@ explicit_cpuset() {
     printf '%d-%d\n' "$((10#$first))" "$((10#$last))"
 }
 
+apply_source_mirror_profile() {
+    local profile=$1
+    if [[ $profile == kkk2 ]]; then
+        : "${CJCJ_SRCBUILD_REQUIRE_MIRRORS:=1}"
+        export CJCJ_SRCBUILD_REQUIRE_MIRRORS
+    fi
+}
+
 if [[ ${1:-} == --lib-only ]]; then
     [[ $# == 1 ]] || {
         echo "--lib-only does not accept other arguments" >&2
@@ -241,6 +249,7 @@ host_name=$(hostname -s)
     echo "refusing build load on host '$host_name': run this script on kkk2 via tools/box.sh" >&2
     exit 3
 }
+apply_source_mirror_profile "$host_name"
 
 if [[ ${CJCJ_KKK2_AFFINED:-} != "$CPUSET" ]]; then
     exec taskset -c "$CPUSET" env CJCJ_KKK2_AFFINED="$CPUSET" \
@@ -359,14 +368,17 @@ record_crash_signature() {
 
 capture_build_child_affinity() {
     local root_pid=$1 step=$2 stop_file=$3
-    local candidate pid command arguments affinity actual
+    local candidate pid command elapsed preferred arguments affinity actual
+    local best_pid= best_command= best_arguments= best_actual=
+    local best_elapsed=-1 best_preferred=0
     while [[ ! -e $stop_file ]]; do
-        candidate=$(LC_ALL=C ps -eo pid=,ppid=,comm=,args= | awk -v root_pid="$root_pid" '
+        candidate=$(LC_ALL=C ps -eo pid=,ppid=,etimes=,comm=,args= | awk -v root_pid="$root_pid" '
             {
                 pid = $1
                 parent[pid] = $2
-                command[pid] = $3
-                $1 = $2 = $3 = ""
+                elapsed[pid] = $3
+                command[pid] = $4
+                $1 = $2 = $3 = $4 = ""
                 sub(/^[[:space:]]+/, "")
                 arguments[pid] = $0
             }
@@ -379,26 +391,49 @@ capture_build_child_affinity() {
                 return 0
             }
             END {
+                best_pid = 0
+                best_elapsed = -1
+                best_preferred = -1
                 for (pid in parent) {
                     if ((command[pid] == "cmake" || command[pid] == "ninja" ||
                          command[pid] == "make" || command[pid] == "gmake") &&
                         is_descendant(pid)) {
-                        printf "%s\t%s\t%s\n", pid, command[pid], arguments[pid]
-                        exit
+                        preferred = ((command[pid] == "make" || command[pid] == "gmake") &&
+                                     arguments[pid] ~ /(^|[[:space:]])DESTDIR=/)
+                        if (preferred > best_preferred ||
+                            (preferred == best_preferred && elapsed[pid] >= best_elapsed)) {
+                            best_pid = pid
+                            best_elapsed = elapsed[pid]
+                            best_preferred = preferred
+                        }
                     }
+                }
+                if (best_pid != 0) {
+                    printf "%s\t%s\t%s\t%s\t%s\n", best_pid, command[best_pid],
+                        elapsed[best_pid], best_preferred, arguments[best_pid]
                 }
             }
         ') || return 1
         if [[ -n $candidate ]]; then
-            IFS=$'\t' read -r pid command arguments <<< "$candidate"
+            IFS=$'\t' read -r pid command elapsed preferred arguments <<< "$candidate"
             affinity=$(LC_ALL=C taskset -pc "$pid" 2>/dev/null) || continue
             actual=${affinity##*: }
-            printf 'affinity\tstep=%s\tpid=%s\tcommand=%s\trequested=%s\tactual=%s\targs=%s\n' \
-                "$step" "$pid" "$command" "$CPUSET" "$actual" "$arguments" >> "$TIMINGS"
-            return 0
+            if ((preferred > best_preferred ||
+                (preferred == best_preferred && elapsed >= best_elapsed))); then
+                best_pid=$pid
+                best_command=$command
+                best_elapsed=$elapsed
+                best_preferred=$preferred
+                best_actual=$actual
+                best_arguments=$arguments
+            fi
         fi
         sleep 0.02
     done
+    if [[ -n $best_pid ]]; then
+        printf 'affinity\tstep=%s\tpid=%s\tcommand=%s\trequested=%s\tactual=%s\targs=%s\n' \
+            "$step" "$best_pid" "$best_command" "$CPUSET" "$best_actual" "$best_arguments" >> "$TIMINGS"
+    fi
 }
 
 run_step() {
@@ -511,6 +546,10 @@ checkout_sparse_exact() {
     local directory=$1 url=$2 revision=$3 sparse_path=$4
     if [[ ! -d $directory/.git ]]; then
         git init "$directory" || return 1
+    fi
+    if git -C "$directory" remote get-url origin >/dev/null 2>&1; then
+        git -C "$directory" remote set-url origin "$url" || return 1
+    else
         git -C "$directory" remote add origin "$url" || return 1
     fi
     git -C "$directory" sparse-checkout init --cone || return 1
