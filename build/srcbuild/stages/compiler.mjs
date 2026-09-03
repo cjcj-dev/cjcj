@@ -8,6 +8,7 @@ import * as staticLibs from '../../toolchain/static-libs.mjs';
 import {cjdbPythonHome} from '../../toolchain/system-deps.mjs';
 import * as targetPython from '../../toolchain/target-python.mjs';
 import {
+  applyCompilerPathNeutralFlags,
   copyContents,
   mergedEnv,
   pythonExe,
@@ -31,6 +32,7 @@ export async function run(config, {resolveCjdbPythonHome = cjdbPythonHome} = {})
   // Homebrew keg.
   const cjdbEnv = await nativeCjdbEnv(config, resolveCjdbPythonHome);
   await stage('compiler', async () => {
+    applyCompilerPathNeutralFlags(repoDir);
     await runBuildPy(config, repoDir, ['clean'], {stageName: 'compiler.clean'});
 
     if (config.target.spec.crossCompile) {
