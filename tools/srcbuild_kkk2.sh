@@ -105,11 +105,15 @@ apply_source_mirror_profile() {
 
 # Step 8 compiler-cache setup.  sccache wins when it is on PATH; otherwise a
 # ccache installation enables the CMAKE_*_COMPILER_LAUNCHER variables with a
-# dedicated cache directory (never the shared /root/.ccache).  CCACHE_BASEDIR
-# plus CCACHE_NOHASHDIR make hits reproducible across per-lane workspace
-# copies of the same tree.  build/cli.mjs (build/toolchain/sccache.mjs
-# maybeEnable) leaves pre-set launcher variables untouched, so these records
-# flow through GITHUB_ENV into the compiler/runtime configure steps unchanged.
+# dedicated cache directory (never the shared /root/.ccache).
+# Do not set CCACHE_BASEDIR: ccache 4.5 rewrites absolute argv paths to
+# CWD-relative before invoking the compiler, which changes DWARF/__FILE__
+# relative to a no-launcher arm at the same tree.  CCACHE_NOHASHDIR still
+# omits CWD from the hash so a hot cache can hit after a same-machine
+# rebuild; cross-directory hits are not a byte-identity contract.
+# build/cli.mjs (build/toolchain/sccache.mjs maybeEnable) leaves pre-set
+# launcher variables untouched, so these records flow through GITHUB_ENV
+# into the compiler/runtime configure steps unchanged.
 # Defined in the --lib-only section so tests can exercise the branch decisions
 # without entering the kkk2 driver.  Opt out with CJCJ_SRCBUILD_CCACHE=0.
 srcbuild_setup_compiler_cache() {
@@ -129,15 +133,17 @@ srcbuild_setup_compiler_cache() {
     fi
     local dir=${CJCJ_SRCBUILD_CCACHE_DIR:-${SRCBUILD_USER_HOME:-${HOME:-/root}}/.cache/cjcj-srcbuild/ccache}
     mkdir -p "$dir"
+    export CCACHE_DIR="$dir"
+    export CCACHE_NOHASHDIR=true
+    export CCACHE_SLOPPINESS=pch_defines,time_macros,locale
     append_env CMAKE_C_COMPILER_LAUNCHER ccache
     append_env CMAKE_CXX_COMPILER_LAUNCHER ccache
     append_env CCACHE_DIR "$dir"
-    append_env CCACHE_BASEDIR "$REPO_ROOT"
     append_env CCACHE_NOHASHDIR true
     append_env CCACHE_SLOPPINESS pch_defines,time_macros,locale
     CCACHE_DIR="$dir" ccache -M "${CJCJ_SRCBUILD_CCACHE_SIZE:-60G}" >/dev/null
     CCACHE_DIR="$dir" ccache -z >/dev/null
-    echo "ccache enabled as CMAKE compiler launcher: dir=$dir max_size=${CJCJ_SRCBUILD_CCACHE_SIZE:-60G} basedir=$REPO_ROOT"
+    echo "ccache enabled as CMAKE compiler launcher: dir=$dir max_size=${CJCJ_SRCBUILD_CCACHE_SIZE:-60G} no-basedir"
 }
 
 if [[ ${1:-} == --lib-only ]]; then
@@ -500,6 +506,11 @@ run_step() {
     wall=$(elapsed_seconds "$start_ns" "$end_ns")
     printf 'step\t%s\t%s\t%s\t%s\t%s\n' "$step" "$name" "$rc" "$wall" "$log" >> "$TIMINGS"
     printf 'STEP=%s name=%s rc=%s wall_s=%s log=%s\n' "$step" "$name" "$rc" "$wall" "$log"
+    if ((rc != 0)); then
+        if ((step == 31)); then record_crash_signature "$log"; fi
+    else
+        load_github_state
+    fi
     if [[ -n ${CCACHE_DIR:-} ]] && command -v ccache >/dev/null; then
         {
             printf '[ccache -s after step %s]\n' "$step"
@@ -507,10 +518,8 @@ run_step() {
         } >> "$log" 2>&1
     fi
     if ((rc != 0)); then
-        if ((step == 31)); then record_crash_signature "$log"; fi
         return "$rc"
     fi
-    load_github_state
 }
 
 fixed_tuple_is_current() {

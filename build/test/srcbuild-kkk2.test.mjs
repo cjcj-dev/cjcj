@@ -482,12 +482,12 @@ test('step 8 enables ccache launchers when sccache is absent and ccache is prese
     'CMAKE_C_COMPILER_LAUNCHER=ccache',
     'CMAKE_CXX_COMPILER_LAUNCHER=ccache',
     `CCACHE_DIR=${cacheDir}`,
-    `CCACHE_BASEDIR=${repoRoot}`,
     'CCACHE_NOHASHDIR=true',
     'CCACHE_SLOPPINESS=pch_defines,time_macros,locale',
   ]) {
     assert.ok(env.includes(record), `missing ${record} in:\n${env}`);
   }
+  assert.ok(!env.includes('CCACHE_BASEDIR'), env);
   assert.match(result.stdout, /ccache enabled as CMAKE compiler launcher/);
   const calls = fs.readFileSync(stubLog, 'utf8');
   assert.match(calls, /-M 60G/);
