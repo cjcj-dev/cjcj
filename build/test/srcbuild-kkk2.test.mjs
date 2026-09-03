@@ -452,3 +452,89 @@ test('step13 stops before build CLI when an interrupted clone repair fails', t =
   assert.equal(failed.status, 1, failed.stderr);
   assert.equal(fs.existsSync(cliMarker), false, 'build CLI ran after clone repair failed');
 });
+
+function writeStub(file, body) {
+  fs.writeFileSync(file, body);
+  fs.chmodSync(file, 0o755);
+}
+
+const step8Preamble = 'source "$1" --lib-only\n'
+  + 'append_env() { printf "%s=%s\\n" "$1" "$2" >> "$GITHUB_ENV"; }\n'
+  + 'export GITHUB_ENV=$2 PATH=$3 CCACHE_STUB_LOG=$4\n';
+const step8Invoke = `${step8Preamble}srcbuild_setup_compiler_cache\n`;
+
+test('step 8 enables ccache launchers when sccache is absent and ccache is present', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-step8-ccache-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  writeStub(path.join(bin, 'ccache'),
+    '#!/bin/bash\nprintf "ccache-stub %s\\n" "$*" >> "$CCACHE_STUB_LOG"\n');
+  fs.symlinkSync('/usr/bin/mkdir', path.join(bin, 'mkdir'));
+  const envFile = path.join(root, 'github.env');
+  const cacheDir = path.join(root, 'cache');
+  const stubLog = path.join(root, 'ccache-calls.log');
+  const invoke = `${step8Preamble}export CJCJ_SRCBUILD_CCACHE_DIR=$5\nsrcbuild_setup_compiler_cache\n`;
+  const result = runBash(invoke, [scriptPath, envFile, bin, stubLog, cacheDir]);
+  assert.equal(result.status, 0, result.stderr);
+  const env = fs.readFileSync(envFile, 'utf8');
+  for (const record of [
+    'CMAKE_C_COMPILER_LAUNCHER=ccache',
+    'CMAKE_CXX_COMPILER_LAUNCHER=ccache',
+    `CCACHE_DIR=${cacheDir}`,
+    `CCACHE_BASEDIR=${repoRoot}`,
+    'CCACHE_NOHASHDIR=true',
+    'CCACHE_SLOPPINESS=pch_defines,time_macros,locale',
+  ]) {
+    assert.ok(env.includes(record), `missing ${record} in:\n${env}`);
+  }
+  assert.match(result.stdout, /ccache enabled as CMAKE compiler launcher/);
+  const calls = fs.readFileSync(stubLog, 'utf8');
+  assert.match(calls, /-M 60G/);
+  assert.match(calls, /-z/);
+});
+
+test('step 8 keeps the launchers unset when neither sccache nor ccache is installed', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-step8-none-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  const envFile = path.join(root, 'github.env');
+  const result = runBash(step8Invoke, [scriptPath, envFile, bin, path.join(root, 'stub.log')]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /sccache is absent; build\/cli\.mjs will leave compiler launchers unset/);
+  assert.equal(fs.existsSync(envFile), false, 'launcher env was appended without a cache tool');
+});
+
+test('step 8 ccache fallback honours the CJCJ_SRCBUILD_CCACHE=0 opt-out', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-step8-optout-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  writeStub(path.join(bin, 'ccache'), '#!/bin/bash\nexit 0\n');
+  const envFile = path.join(root, 'github.env');
+  const invoke = `${step8Preamble}export CJCJ_SRCBUILD_CCACHE=0\nsrcbuild_setup_compiler_cache\n`;
+  const result = runBash(invoke, [scriptPath, envFile, bin, path.join(root, 'stub.log')]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /sccache is absent and CJCJ_SRCBUILD_CCACHE=0/);
+  assert.equal(fs.existsSync(envFile), false, 'launcher env was appended despite the opt-out');
+});
+
+test('step 8 prefers sccache when it is on PATH', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'srcbuild-step8-sccache-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  const stubLog = path.join(root, 'sccache-calls.log');
+  writeStub(path.join(bin, 'sccache'),
+    '#!/bin/bash\nprintf "sccache-stub %s\\n" "$*" >> "$CCACHE_STUB_LOG"\n');
+  const envFile = path.join(root, 'github.env');
+  const result = runBash(step8Invoke, [scriptPath, envFile, bin, stubLog]);
+  assert.equal(result.status, 0, result.stderr);
+  const env = fs.readFileSync(envFile, 'utf8');
+  assert.ok(env.includes(`SCCACHE_PATH=${path.join(bin, 'sccache')}`), env);
+  assert.ok(!env.includes('CCACHE_DIR'), env);
+  const calls = fs.readFileSync(stubLog, 'utf8');
+  assert.match(calls, /--start-server/);
+  assert.match(calls, /--zero-stats/);
+});

@@ -83,7 +83,7 @@ cpuset_width() {
 explicit_cpuset() {
     local requested=$1 first last
     [[ $requested =~ ^[0-9]+-[0-9]+$ ]] || {
-        echo "CJCJ_SRCBUILD_CPUSET must be one contiguous range such as 48-63" >&2
+        echo "CJCJ_SRCBUILD_CPUSET must be one contiguous range such as 96-159" >&2
         return 1
     }
     first=${requested%-*}
@@ -101,6 +101,43 @@ apply_source_mirror_profile() {
         : "${CJCJ_SRCBUILD_REQUIRE_MIRRORS:=1}"
         export CJCJ_SRCBUILD_REQUIRE_MIRRORS
     fi
+}
+
+# Step 8 compiler-cache setup.  sccache wins when it is on PATH; otherwise a
+# ccache installation enables the CMAKE_*_COMPILER_LAUNCHER variables with a
+# dedicated cache directory (never the shared /root/.ccache).  CCACHE_BASEDIR
+# plus CCACHE_NOHASHDIR make hits reproducible across per-lane workspace
+# copies of the same tree.  build/cli.mjs (build/toolchain/sccache.mjs
+# maybeEnable) leaves pre-set launcher variables untouched, so these records
+# flow through GITHUB_ENV into the compiler/runtime configure steps unchanged.
+# Defined in the --lib-only section so tests can exercise the branch decisions
+# without entering the kkk2 driver.  Opt out with CJCJ_SRCBUILD_CCACHE=0.
+srcbuild_setup_compiler_cache() {
+    if command -v sccache >/dev/null; then
+        append_env SCCACHE_PATH "$(command -v sccache)"
+        sccache --start-server
+        sccache --zero-stats
+        return 0
+    fi
+    if [[ ${CJCJ_SRCBUILD_CCACHE:-1} == 0 ]]; then
+        echo "sccache is absent and CJCJ_SRCBUILD_CCACHE=0; build/cli.mjs will leave compiler launchers unset"
+        return 0
+    fi
+    if ! command -v ccache >/dev/null; then
+        echo "sccache is absent; build/cli.mjs will leave compiler launchers unset"
+        return 0
+    fi
+    local dir=${CJCJ_SRCBUILD_CCACHE_DIR:-${SRCBUILD_USER_HOME:-${HOME:-/root}}/.cache/cjcj-srcbuild/ccache}
+    mkdir -p "$dir"
+    append_env CMAKE_C_COMPILER_LAUNCHER ccache
+    append_env CMAKE_CXX_COMPILER_LAUNCHER ccache
+    append_env CCACHE_DIR "$dir"
+    append_env CCACHE_BASEDIR "$REPO_ROOT"
+    append_env CCACHE_NOHASHDIR true
+    append_env CCACHE_SLOPPINESS pch_defines,time_macros,locale
+    CCACHE_DIR="$dir" ccache -M "${CJCJ_SRCBUILD_CCACHE_SIZE:-60G}" >/dev/null
+    CCACHE_DIR="$dir" ccache -z >/dev/null
+    echo "ccache enabled as CMAKE compiler launcher: dir=$dir max_size=${CJCJ_SRCBUILD_CCACHE_SIZE:-60G} basedir=$REPO_ROOT"
 }
 
 if [[ ${1:-} == --lib-only ]]; then
@@ -126,8 +163,16 @@ Defaults:
   FROM_STEP=2  THROUGH_STEP=33
 
 CPU placement:
-  CJCJ_SRCBUILD_CPUSET=48-63 selects an explicit contiguous window.  When it
-  is unset, the driver inherits its caller's current taskset affinity.
+  CJCJ_SRCBUILD_CPUSET=96-159 selects an explicit contiguous 64-core window.
+  When it is unset, the driver inherits its caller's current taskset affinity.
+  JOBS always equals the selected window width unless given explicitly, so
+  claiming a wider window is how compile parallelism is raised.
+
+Compiler cache:
+  Step 8 uses sccache when present, else falls back to ccache with a dedicated
+  CCACHE_DIR (default ~/.cache/cjcj-srcbuild/ccache, override with
+  CJCJ_SRCBUILD_CCACHE_DIR; size with CJCJ_SRCBUILD_CCACHE_SIZE, default 60G).
+  CJCJ_SRCBUILD_CCACHE=0 disables the ccache fallback.
 
 Final source-build steps:
   32  Build stage 2 compiler (cjpm build -j 1, cjHeapSize=20GB)
@@ -455,6 +500,12 @@ run_step() {
     wall=$(elapsed_seconds "$start_ns" "$end_ns")
     printf 'step\t%s\t%s\t%s\t%s\t%s\n' "$step" "$name" "$rc" "$wall" "$log" >> "$TIMINGS"
     printf 'STEP=%s name=%s rc=%s wall_s=%s log=%s\n' "$step" "$name" "$rc" "$wall" "$log"
+    if [[ -n ${CCACHE_DIR:-} ]] && command -v ccache >/dev/null; then
+        {
+            printf '[ccache -s after step %s]\n' "$step"
+            CCACHE_DIR="$CCACHE_DIR" ccache -s
+        } >> "$log" 2>&1
+    fi
     if ((rc != 0)); then
         if ((step == 31)); then record_crash_signature "$log"; fi
         return "$rc"
@@ -733,13 +784,7 @@ step_7() {
 }
 
 step_8() {
-    if command -v sccache >/dev/null; then
-        append_env SCCACHE_PATH "$(command -v sccache)"
-        sccache --start-server
-        sccache --zero-stats
-    else
-        echo "sccache is absent; build/cli.mjs will leave compiler launchers unset"
-    fi
+    srcbuild_setup_compiler_cache
 }
 
 support_cache_root() {
@@ -1089,6 +1134,7 @@ if ((DRY_RUN)); then
 fi
 
 load_github_state
+printf 'CPU window=%s width=%s => JOBS=%s\n' "$CPUSET" "$CPUSET_WIDTH" "$JOBS"
 printf 'RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' \
     "$host_name" "$TARGET" "$JOBS" "$CPUSET" "$FROM_STEP" "$THROUGH_STEP"
 
