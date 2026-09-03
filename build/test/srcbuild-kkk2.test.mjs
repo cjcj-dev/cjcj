@@ -177,6 +177,38 @@ test('source-build shell exact checkout repairs a stale origin before fetching t
   assert.equal(runGit(['-C', checkout, 'remote', 'get-url', 'origin']), authoritative);
 });
 
+test('source-build sparse exact checkout repairs a stale origin before fetching the pin', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-sparse-checkout-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const source = path.join(root, 'source');
+  const mirror = path.join(root, 'source.git');
+  const checkout = path.join(root, 'checkout');
+  const authoritative = 'https://github.com/cangjie-lang/cangjie_compiler.git';
+  runGit(['init', source]);
+  fs.mkdirSync(path.join(source, 'schema'));
+  fs.writeFileSync(path.join(source, 'schema', 'fixture.fbs'), 'table Fixture {}\n');
+  fs.writeFileSync(path.join(source, 'outside'), 'excluded by sparse checkout\n');
+  runGit(['-C', source, 'add', 'schema/fixture.fbs', 'outside']);
+  runGit(['-C', source, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+    'commit', '-m', 'fixture']);
+  const sha = runGit(['-C', source, 'rev-parse', 'HEAD']);
+  runGit(['clone', '--bare', source, mirror]);
+  runGit(['init', checkout]);
+  runGit(['-C', checkout, 'remote', 'add', 'origin', 'https://example.invalid/stale.git']);
+
+  const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
+  const invoke = 'source "$1"\n'
+    + `${shellFunction('checkout_sparse_exact')}\n`
+    + 'CJCJ_SRCBUILD_SOURCE_MIRRORS="$2=file://$3"\n'
+    + 'checkout_sparse_exact "$4" "$2" "$5" schema\n';
+  const result = runBash(invoke, [helper, authoritative, mirror, checkout, sha]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(runGit(['-C', checkout, 'rev-parse', 'HEAD']), sha);
+  assert.equal(runGit(['-C', checkout, 'remote', 'get-url', 'origin']), authoritative);
+  assert.equal(fs.existsSync(path.join(checkout, 'schema', 'fixture.fbs')), true);
+  assert.equal(fs.existsSync(path.join(checkout, 'outside')), false);
+});
+
 test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-tuple-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));

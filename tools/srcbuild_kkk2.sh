@@ -511,6 +511,10 @@ checkout_sparse_exact() {
     local directory=$1 url=$2 revision=$3 sparse_path=$4
     if [[ ! -d $directory/.git ]]; then
         git init "$directory" || return 1
+    fi
+    if git -C "$directory" remote get-url origin >/dev/null 2>&1; then
+        git -C "$directory" remote set-url origin "$url" || return 1
+    else
         git -C "$directory" remote add origin "$url" || return 1
     fi
     git -C "$directory" sparse-checkout init --cone || return 1
