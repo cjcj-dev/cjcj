@@ -45,7 +45,14 @@ export function baseEnv(config) {
   // CCACHE_BASEDIR may present relative argv paths on a cache hit, while a
   // no-launcher build presents absolute paths; -ffile-prefix-map makes both
   // forms produce identical __FILE__ and DWARF records.
-  const sourcePrefixMap = `-ffile-prefix-map=${path.resolve(config.workspace)}=.`;
+  const workspace = path.resolve(config.workspace);
+  const sourcePrefixMap = [
+    `-ffile-prefix-map=${workspace}=.`,
+    `-ffile-prefix-map=${workspace}/cangjie_compiler=.`,
+    `-ffile-prefix-map=${workspace}/cangjie_runtime/runtime=.`,
+    '-ffile-prefix-map=..=.',
+    '-fdebug-compilation-dir=.',
+  ].join(' ');
   for (const flag of ['CFLAGS', 'CXXFLAGS']) {
     env[flag] = [process.env[flag], sourcePrefixMap].filter(Boolean).join(' ');
   }

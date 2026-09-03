@@ -481,7 +481,8 @@ test('runtime producer uses the host loader before the target runtime exists', (
     const loader = env.LD_LIBRARY_PATH.split(path.delimiter);
     const prefixMap = `-ffile-prefix-map=${path.resolve(workspace)}=.`;
     assert.match(env.CFLAGS, new RegExp(prefixMap.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-    assert.match(env.CXXFLAGS, new RegExp(prefixMap.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(env.CXXFLAGS, /ffile-prefix-map=\.\.=/);
+    assert.match(env.CXXFLAGS, /fdebug-compilation-dir=\./);
     assert.equal(env.CANGJIE_HOME, cangjieHome);
     assert.equal(loader[0], path.dirname(hostRuntime));
     assert.ok(!fs.existsSync(path.join(runtimeDirectory, config.target.spec.runtimeLibrary)));
