@@ -134,14 +134,15 @@ srcbuild_setup_compiler_cache() {
     local basedir=${CANGJIE_WORKSPACE:-$REPO_ROOT}
     mkdir -p "$dir"
     export CCACHE_DIR="$dir"
+    export CCACHE_BASEDIR="$basedir"
     export CCACHE_NOHASHDIR=true
-    export CCACHE_SLOPPINESS=pch_defines,time_macros,locale
+    export CCACHE_SLOPPINESS=pch_defines,include_file_mtime,locale
     append_env CMAKE_C_COMPILER_LAUNCHER ccache
     append_env CMAKE_CXX_COMPILER_LAUNCHER ccache
     append_env CCACHE_DIR "$dir"
     append_env CCACHE_BASEDIR "$basedir"
     append_env CCACHE_NOHASHDIR true
-    append_env CCACHE_SLOPPINESS pch_defines,locale
+    append_env CCACHE_SLOPPINESS pch_defines,include_file_mtime,locale
     CCACHE_DIR="$dir" ccache -M "${CJCJ_SRCBUILD_CCACHE_SIZE:-60G}" >/dev/null
     CCACHE_DIR="$dir" ccache -z >/dev/null
     echo "ccache enabled as CMAKE compiler launcher: dir=$dir max_size=${CJCJ_SRCBUILD_CCACHE_SIZE:-60G} basedir=$basedir"

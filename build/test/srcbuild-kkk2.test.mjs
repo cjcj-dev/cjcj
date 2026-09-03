@@ -485,7 +485,7 @@ test('step 8 enables ccache launchers when sccache is absent and ccache is prese
     `CCACHE_DIR=${cacheDir}`,
     `CCACHE_BASEDIR=${workspace}`,
     'CCACHE_NOHASHDIR=true',
-    'CCACHE_SLOPPINESS=pch_defines,locale',
+    'CCACHE_SLOPPINESS=pch_defines,include_file_mtime,locale',
   ]) {
     assert.ok(env.includes(record), `missing ${record} in:\n${env}`);
   }
