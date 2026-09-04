@@ -690,7 +690,6 @@ private func CPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>, typeArg
         let typeInfoOfResult = irBuilder.CreateTypeInfo(resultTy)
         let resultTySize = irBuilder.GetLayoutSize_32(resultTy)
         let ret = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfoOfResult, resultTySize]))
-        let destPayloadPtr = irBuilder.GetPayloadFromObject(ret)
         let fixedTypeSize = irBuilder.CreateZExtOrTrunc(resultTySize,
             unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }, name: "ptr.read.size")
         let offset = irBuilder.CreateBinary(ExprKind.MUL, fixedTypeSize, indexValue, name: "ptr.read.offset")
@@ -698,7 +697,7 @@ private func CPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>, typeArg
         let gep = irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
             pointerValue, indices, name: "ele.ptr")
         InsertAsanInstrument(irBuilder, typeArgs, gep, "CJ_MCC_AsanRead")
-        irBuilder.CreateMemCpy(destPayloadPtr, 0u32, gep, 0u32, resultTySize)
+        irBuilder.CallGCWriteGenericPayloadFromSrc(ret, gep, resultTySize, typeInfoOfResult)
         return ret
     }
     let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)
@@ -741,9 +740,8 @@ private func CPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>,
         let indices = ArrayList<LLVMValueRef>([offset])
         let addr = irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
             pointerValue, indices, name: "ele.ptr")
-        let payloadPtr = irBuilder.GetPayloadFromObject(value.GetRawValue())
         InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanWrite")
-        irBuilder.CreateMemCpy(addr, 0u32, payloadPtr, 0u32, valueTySize)
+        irBuilder.CallGCReadGenericPayload(addr, value.GetRawValue(), valueTySize)
         return LLVMNullValue()
     }
     let rawValue = value.GetRawValue()

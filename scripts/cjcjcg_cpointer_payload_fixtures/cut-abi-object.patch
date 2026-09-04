@@ -1,0 +1,12 @@
+diff --git a/packages/codegen/src/IRBuilder.cj b/packages/codegen/src/IRBuilder.cj
+--- a/packages/codegen/src/IRBuilder.cj
++++ b/packages/codegen/src/IRBuilder.cj
+@@ -3731,7 +3731,7 @@ public class IRBuilder2 <: Resource {
+         }
+         let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+         let destType = unsafe { LLVMPointerType(i8Type, 0u32) }
+-        let objectType = unsafe { LLVMPointerType(i8Type, 1u32) }
++        let objectType = unsafe { LLVMPointerType(i8Type, 0u32) }
+         let sizeType = unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }
+         let args = ArrayList<LLVMValueRef>()
+         args.add(CreatePointerCast(dest, destType, name: "gcread.generic.payload.dest"))

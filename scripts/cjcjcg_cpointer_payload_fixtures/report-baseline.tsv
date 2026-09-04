@@ -1,0 +1,4 @@
+module	function	rule	instruction	dest_as	src_as	length	dest_root	src_root	source_type
+std.core	_CNatXPG_4readHl	Bare memcpy/memmove payload provenance is unknown; use a typed helper.	memcpy	1	0	%6	call	argument	i8*
+std.core	_CNatXPG_5writeHlG_	Bare memcpy/memmove payload provenance is unknown; use a typed helper.	memcpy	0	1	%6	gep	argument	i8 addrspace(1)*
+std.core	unrelated	Bare memcpy/memmove payload provenance is unknown; use a typed helper.	memcpy	1	1	16	argument	call	%Other*

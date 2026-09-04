@@ -1,0 +1,20 @@
+diff --git a/packages/codegen/src/IntrinsicsDispatcher.cj b/packages/codegen/src/IntrinsicsDispatcher.cj
+--- a/packages/codegen/src/IntrinsicsDispatcher.cj
++++ b/packages/codegen/src/IntrinsicsDispatcher.cj
+@@ -689,6 +689,7 @@ private func CPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>, typeArg
+         let typeInfoOfResult = irBuilder.CreateTypeInfo(resultTy)
+         let resultTySize = irBuilder.GetLayoutSize_32(resultTy)
+         let ret = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfoOfResult, resultTySize]))
++        let destPayloadPtr = irBuilder.GetPayloadFromObject(ret)
+         let fixedTypeSize = irBuilder.CreateZExtOrTrunc(resultTySize,
+             unsafe { LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw) }, name: "ptr.read.size")
+         let offset = irBuilder.CreateBinary(ExprKind.MUL, fixedTypeSize, indexValue, name: "ptr.read.offset")
+@@ -697,7 +698,7 @@ private func CPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>, typeArg
+         let gep = irBuilder.CreateInBoundsGEP(unsafe { LLVMInt8TypeInContext(irBuilder.GetLLVMContext().raw) },
+             pointerValue, indices, name: "ele.ptr")
+         InsertAsanInstrument(irBuilder, typeArgs, gep, "CJ_MCC_AsanRead")
+-        irBuilder.CallGCWriteGenericPayloadFromSrc(ret, gep, resultTySize, typeInfoOfResult)
++        irBuilder.CreateMemCpy(destPayloadPtr, 0u32, gep, 0u32, resultTySize)
+         return ret
+     }
+     let resultCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), resultTy)

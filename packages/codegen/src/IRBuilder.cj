@@ -56,6 +56,7 @@ private let GET_FIELD_OFFSET_INTRINSIC_NAME: String = "llvm.cj.get.field.offset"
 private let GCREAD_GENERIC_INTRINSIC_NAME: String = "llvm.cj.gcread.generic"
 private let GCWRITE_GENERIC_INTRINSIC_NAME: String = "llvm.cj.gcwrite.generic"
 private let GCWRITE_GENERIC_PAYLOAD_INTRINSIC_NAME: String = "llvm.cj.gcwrite.generic.payload"
+private let GCREAD_GENERIC_PAYLOAD_INTRINSIC_NAME: String = "llvm.cj.gcread.generic.payload"
 private let MALLOC_OBJECT_INTRINSIC_NAME: String = "llvm.cj.malloc.object"
 private let CJ_MEMSET_INTRINSIC_NAME: String = "llvm.cj.memset"
 private let GCWRITE_REF_INTRINSIC_NAME: String = "llvm.cj.gcwrite.ref"
@@ -3754,6 +3755,30 @@ public class IRBuilder2 <: Resource {
             name: "gcread.generic.source"))
         args.add(size)
         return CreateIntrinsicCallNoInvoke(GCREAD_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+    }
+
+    public func CallGCReadGenericPayload(dest: LLVMValueRef, object: LLVMValueRef,
+        size: LLVMValueRef): LLVMValueRef {
+        if ((GetPointerAddressSpace(dest) ?? 1u32) != 0u32) {
+            InternalError("generic payload destination must be an addrspace(0) pointer")
+            return LLVMNullValue()
+        }
+        if ((GetPointerAddressSpace(object) ?? 0u32) != 1u32) {
+            InternalError("generic payload object must be an addrspace(1) pointer")
+            return LLVMNullValue()
+        }
+        let i8Type = unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }
+        let destType = unsafe { LLVMPointerType(i8Type, 0u32) }
+        let objectType = unsafe { LLVMPointerType(i8Type, 1u32) }
+        let sizeType = unsafe { LLVMInt32TypeInContext(GetLLVMContext().raw) }
+        let functionType = MakeFunctionType(unsafe { LLVMVoidTypeInContext(GetLLVMContext().raw) },
+            ArrayList<LLVMTypeRef>([destType, objectType, sizeType]))
+        let function = cgMod.GetOrInsertFunction(GCREAD_GENERIC_PAYLOAD_INTRINSIC_NAME, functionType)
+        let args = ArrayList<LLVMValueRef>()
+        args.add(CreatePointerCast(dest, destType, name: "gcread.generic.payload.dest"))
+        args.add(CreatePointerCast(object, objectType, name: "gcread.generic.payload.object"))
+        args.add(CreateZExtOrTrunc(size, sizeType, name: "gcread.generic.payload.size"))
+        return CreateCall(function, functionType, args)
     }
 
     public func CallGetFieldOffset(typeInfo: LLVMValueRef, index: UInt64, preOffset: UInt64): LLVMValueRef {
