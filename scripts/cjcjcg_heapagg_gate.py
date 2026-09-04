@@ -123,8 +123,17 @@ def main() -> int:
 
     def const_array_control() -> None:
         function = function_slice(proc.stdout, "constArrayControl")
-        if "$const_array" not in function or "llvm.memmove.p1" not in function:
-            raise AssertionError("constant-array neighbour no longer uses its existing raw copy")
+        if "$const_array" not in function:
+            raise AssertionError("constant-array neighbour lost its $const_array global")
+        has_raw = (
+            "llvm.memmove.p1" in function
+            or "llvm.cj.array.copy" in function
+            or "llvm.memcpy" in function
+        )
+        if not has_raw:
+            raise AssertionError("constant-array neighbour lost its bulk copy")
+        if "typed.copy." in function:
+            raise AssertionError("constant-array neighbour was captured by the typed aggregate copier")
 
     checks.append(("constArrayControl", const_array_control))
     results = dict(run_check(name, check) for name, check in checks)
