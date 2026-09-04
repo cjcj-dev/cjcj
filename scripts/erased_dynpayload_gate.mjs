@@ -158,7 +158,8 @@ function targetKind(row) {
       row.source_type === 'i8*') return 'p1p0';
   if (row.dest_as === '1' && row.src_as === '1' &&
       row.function.includes('ExternallyLockedLazy') && /compute/.test(row.function) &&
-      row.function.includes('withoutTI')) return 'p1p1';
+      row.function.includes('withoutTI') && row.dest_root === 'argument' &&
+      row.src_root === 'call') return 'p1p1';
   return '';
 }
 
