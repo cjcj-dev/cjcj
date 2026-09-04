@@ -407,9 +407,8 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
                 irBuilder.CallGCWriteAgg(thisLLVMType, ArrayList<LLVMValueRef>(
                     [basePtr, thisParamWithoutTI, load, size64]))
             } else {
-                // payloadPtr is tracked by thisParamWithTI, so the existing
-                // generic read is the managed-source arm of C1's dispatcher.
-                irBuilder.CallGCReadGeneric(thisParamWithoutTI, thisParamWithTI, payloadPtr, size32)
+                irBuilder.CallGCWriteGenericPayloadFromSrc(
+                    thisParamWithoutTI, payloadPtr, size32, thisParamTypeInfo)
             }
         }
     }

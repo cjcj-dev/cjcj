@@ -169,9 +169,7 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
             args.add(size)
             irBuilder.CallGCWriteAgg(sourceCGType.GetLayoutType(), args)
         } else {
-            // This source is the native without-TI receiver.  C1 will fold this
-            // direct arm into CallGCWriteGenericPayloadFromSrc during merge.
-            irBuilder.CallGCWriteGenericPayload(tmp, sourceRawValue, size)
+            irBuilder.CallGCWriteGenericPayloadFromSrc(tmp, sourceRawValue, size, typeInfo)
         }
         return tmp
     }
