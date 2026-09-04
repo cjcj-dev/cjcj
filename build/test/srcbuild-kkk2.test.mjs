@@ -701,11 +701,13 @@ function vendorShaDefects(sourceEnv, files) {
   const defects = [];
   const expectedSha = sourceEnv.TOOLS_SHA;
   if (!/^[0-9a-f]{40}$/.test(expectedSha || '')) defects.push('missing-tools-sha');
+  const toolsGit = spawnSync('git', ['-C', '/root/cj_build/tools', 'rev-parse', 'HEAD'], {encoding: 'utf8'});
+  const toolsHead = (toolsGit.stdout || '').trim();
   for (const name of ['bootstrap.sh', 'sdk_build.sh', 'test_bootstrap.sh']) {
     const vendor = sha256(files[name]);
     if (vendor !== sourceEnv[`VENDOR_${name}`]) defects.push(`vendor-drift:${name}`);
     const toolsPath = `/root/cj_build/tools/${name}`;
-    if (fs.existsSync(toolsPath) && sha256(toolsPath) !== sourceEnv[`TOOLS_${name}`]) {
+    if (toolsHead === expectedSha && fs.existsSync(toolsPath) && sha256(toolsPath) !== sourceEnv[`TOOLS_${name}`]) {
       defects.push(`tools-record-drift:${name}`);
     }
   }
