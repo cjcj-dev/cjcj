@@ -95,7 +95,8 @@ function compileFixture(name) {
   fs.mkdirSync(temps, {recursive: true});
   // -g is the product switch that runs EmitPackageIR.ReplaceFunction; -O2 and
   // --apc=1 mirror the stdlib package recipe that exposes these two sites.
-  const args = [fixture, '--output-type=staticlib', '-g', '-O2', '--apc=1', '-j1',
+  const opt = name.includes('reverse') ? '-O0' : '-O2';
+  const args = [fixture, '--output-type=staticlib', '-g', opt, '--apc=1', '-j1',
     '--dump-ir', '--dump-to-screen', '--save-temps', temps,
     '-o', path.join(armRoot, `${name}.a`)];
   const run = spawnSync(path.resolve(compiler), args, {encoding: 'utf8', env: process.env});
