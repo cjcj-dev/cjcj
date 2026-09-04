@@ -7,6 +7,9 @@ if (( $# < 1 || $# > 3 )); then
 fi
 
 compiler="$(realpath "$1")"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+compiler_root="$(dirname "$(dirname "$compiler")")"
+node "$script_dir/verifier_artifact_gate.mjs" --root "$compiler_root"
 workdir="${2:-$(mktemp -d /tmp/perfincr-cycle.XXXXXX)}"
 jobs="${3:-12}"
 if [[ -e "$workdir" ]] && [[ -n "$(find "$workdir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then

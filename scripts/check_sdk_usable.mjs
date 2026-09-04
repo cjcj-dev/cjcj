@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {assertNoVerifierReportArtifacts} from './verifier_artifact_gate.mjs';
 
 export const STATES = Object.freeze({PASS: 'PASS', FAIL: 'FAIL', UNKNOWN: 'UNKNOWN'});
 
@@ -745,6 +746,7 @@ function c9Check(sdk, work, timeoutMs) {
 }
 
 const ALL_CRITERIA = Object.freeze([
+  'U0_VERIFIER_ARTIFACTS',
   'U1_DIRECT_CJC',
   'U2_ENVSETUP',
   'U3_MINIMAL_RUN',
@@ -773,6 +775,21 @@ export function runSdkUsability(options, {onResult, onProgress} = {}) {
   const ownedWork = !options.workDir;
   const work = options.workDir ? path.resolve(options.workDir) : fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-usable-'));
   fs.mkdirSync(work, {recursive: true});
+
+  onProgress?.('U0_VERIFIER_ARTIFACTS');
+  try {
+    const verifierArtifacts = assertNoVerifierReportArtifacts([sdk]);
+    recorder.record(
+      'U0_VERIFIER_ARTIFACTS', STATES.PASS,
+      `candidates=${verifierArtifacts.candidates.length} report_metadata=0`,
+    );
+  } catch (error) {
+    recorder.record('U0_VERIFIER_ARTIFACTS', STATES.FAIL, error.message);
+    for (const criterion of ALL_CRITERIA.slice(1)) {
+      recorder.record(criterion, STATES.UNKNOWN, 'not run after verifier artifact rejection');
+    }
+    return {sdk, results: recorder.results, details, work, ownedWork};
+  }
 
   onProgress?.('U1_DIRECT_CJC');
   const direct = directCompilerVersion(sdk, work, options.timeoutMs);

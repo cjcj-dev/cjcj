@@ -5,6 +5,7 @@ import path from 'node:path';
 import {BuildError} from '../../lib/errors.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
+import {assertNoVerifierReportArtifacts} from '../../../scripts/verifier_artifact_gate.mjs';
 import {copyInto, copytree, ensureDir, requireDir, requireFile} from './common.mjs';
 
 const logger = getLogger('cangjie_build.stages.package');
@@ -52,6 +53,10 @@ function organizeSdkTree(config, destination) {
     path.resolve(import.meta.dirname, '..', '..', '..', 'scripts', 'check_sdk_usable.mjs'),
     {stage: 'package.usability_checker'},
   );
+  const verifierArtifactGate = requireFile(
+    path.resolve(import.meta.dirname, '..', '..', '..', 'scripts', 'verifier_artifact_gate.mjs'),
+    {stage: 'package.verifier_artifact_gate'},
+  );
   const astSupport = path.join(destination, 'lib', platformLibDirName(config), 'libcangjie-ast-support.a');
   if (fs.statSync(astSupport, {throwIfNoEntry: false})?.isFile()) {
     fs.unlinkSync(astSupport);
@@ -61,6 +66,7 @@ function organizeSdkTree(config, destination) {
   const toolsBin = ensureDir(path.join(destination, 'tools', 'bin'));
   const toolsConfig = ensureDir(path.join(destination, 'tools', 'config'));
   copyInto(usabilityChecker, path.join(destination, 'tools'), {stage: 'package.usability_checker'});
+  copyInto(verifierArtifactGate, path.join(destination, 'tools'), {stage: 'package.verifier_artifact_gate'});
   const cjpm = requireFile(path.join(toolsRoot, 'cjpm', 'dist', `cjpm${suffix}`), {stage: 'package.cjpm'});
   copyInto(cjpm, toolsBin, {stage: 'package.cjpm'});
 
@@ -110,6 +116,11 @@ function organizeSdkTree(config, destination) {
 async function packageMainSdk(config) {
   const compilerOutput = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
   requireDir(compilerOutput, {stage: 'package.compiler_output'});
+  try {
+    assertNoVerifierReportArtifacts([compilerOutput]);
+  } catch (error) {
+    throw new BuildError('package.verifier_artifact_gate', error.message);
+  }
   const cangjieDir = path.join(ensureDir(config.softwareDir), 'cangjie');
   fs.rmSync(cangjieDir, {recursive: true, force: true});
   fs.cpSync(compilerOutput, cangjieDir, {recursive: true, dereference: false, preserveTimestamps: true});

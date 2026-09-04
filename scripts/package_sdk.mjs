@@ -23,6 +23,7 @@ import {
 } from '../build/lib/release-gate-apparatus.mjs';
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
 import {writeToolchainIdentity} from '../build/lib/toolchain-identity.mjs';
+import {assertNoVerifierReportArtifacts} from './verifier_artifact_gate.mjs';
 import {
   PACKAGED_LLVM_TOOL_NAMES,
   formatPackagedLlvmToolsManifest,
@@ -88,6 +89,11 @@ if (!await exists(gateApparatusProvenance)) {
 }
 if (!await exists(cjpmProvenance)) { console.error(`cjpm provenance not found: ${cjpmProvenance}`); process.exit(2); }
 if (!await exists(pythonBundle, 'dir')) { console.error(`Python bundle dir not found: ${pythonBundle}`); process.exit(2); }
+
+// Reuse the release lineage checkpoint before creating or mutating a package
+// stage.  A diagnostic marker is sufficient to reject; otherwise inspect the
+// .bc/.o inputs for the report-mode named metadata.
+assertNoVerifierReportArtifacts([sdk, ...[stdDir, runtimeRoot].filter(Boolean)]);
 
 const platforms = {
   'linux-x64': ['linux_x86_64_cjnative', 'tar', ''],
@@ -155,6 +161,10 @@ await fs.rm(path.join(stage, '.cjv'), {recursive: true, force: true});
 await fs.copyFile(
   path.join(import.meta.dirname, 'check_sdk_usable.mjs'),
   path.join(stage, 'tools', 'check_sdk_usable.mjs'),
+);
+await fs.copyFile(
+  path.join(import.meta.dirname, 'verifier_artifact_gate.mjs'),
+  path.join(stage, 'tools', 'verifier_artifact_gate.mjs'),
 );
 
 console.log('[2/9] install our compiler as bin/cjc');
