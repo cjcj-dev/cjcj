@@ -45,6 +45,7 @@
 #include <llvm-c/DebugInfo.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -187,17 +188,38 @@ struct LLVMSelfhostLoopInfoState {
     }
 };
 
+[[noreturn]] void FailConvertArgsType(const char *reason)
+{
+    std::fprintf(stderr, "cjcj LLVM shim: ConvertArgsType rejected invalid call: %s\n", reason);
+    std::fflush(stderr);
+    std::exit(EXIT_FAILURE);
+}
+
 void ConvertArgsType(IRBuilder<> &builder, Function *func, std::vector<Value*> &args)
 {
+    if (func == nullptr) {
+        FailConvertArgsType("null callee");
+    }
     auto *functionType = func->getFunctionType();
+    if (args.size() != func->arg_size()) {
+        FailConvertArgsType("argument count does not match callee parameter count");
+    }
     for (size_t idx = 0; idx < args.size(); ++idx) {
-        if (args[idx]->getType() == functionType->getParamType(idx)) {
+        if (args[idx] == nullptr) {
+            FailConvertArgsType("null argument");
+        }
+        auto *argumentType = args[idx]->getType();
+        auto *parameterType = functionType->getParamType(idx);
+        if (argumentType == parameterType) {
             continue;
         }
-        if (!args[idx]->getType()->isPointerTy()) {
+        if (!argumentType->isPointerTy()) {
             continue;
         }
-        args[idx] = builder.CreatePointerCast(args[idx], functionType->getParamType(idx));
+        if (parameterType == nullptr || !parameterType->isPointerTy()) {
+            FailConvertArgsType("pointer argument has a non-pointer parameter type");
+        }
+        args[idx] = builder.CreatePointerCast(args[idx], parameterType);
     }
 }
 
@@ -218,11 +240,25 @@ CallInst *CreateCall(IRBuilder<> &builder, Function *callee, ArrayRef<Value*> ar
 LLVMValueRef CreateGCStaticAggCall(LLVMBuilderRef Builder, LLVMModuleRef Module, LLVMTypeRef AggType,
     LLVMValueRef Dest, LLVMValueRef Source, LLVMValueRef Size, LLVMTypeRef SizeType, Intrinsic::ID ID)
 {
+    if (Builder == nullptr || Module == nullptr || SizeType == nullptr || Dest == nullptr || Source == nullptr ||
+        Size == nullptr) {
+        FailConvertArgsType("null LLVM C API handle");
+    }
     auto *builder = unwrap(Builder);
     auto *module = unwrap(Module);
     auto *sizeType = unwrap<Type>(SizeType);
+    auto *dest = unwrap(Dest);
+    auto *source = unwrap(Source);
+    auto *size = unwrap(Size);
+    if (builder == nullptr || module == nullptr || sizeType == nullptr || dest == nullptr || source == nullptr ||
+        size == nullptr) {
+        FailConvertArgsType("unwrap produced a null LLVM object");
+    }
     auto *func = Intrinsic::getDeclaration(module, ID, {sizeType});
-    std::vector<Value*> args{unwrap(Dest), unwrap(Source), unwrap(Size)};
+    if (func == nullptr) {
+        FailConvertArgsType("intrinsic declaration is null");
+    }
+    std::vector<Value*> args{dest, source, size};
     if (ID == Intrinsic::cj_gcwrite_static_struct) {
         if (auto *size = dyn_cast<ConstantInt>(args[2]); size && size->isZero()) {
             return nullptr;
@@ -746,18 +782,54 @@ extern "C" LLVMMetadataRef LLVMSelfhostDILocationGet(LLVMContextRef Context, uns
     return wrap(DILocation::get(*unwrap(Context), Line, Column, scope, inlinedAt, IsImplicitCode));
 }
 
+static Intrinsic::ID LookupCJIntrinsicOr(const char *name, Intrinsic::ID fallback)
+{
+    unsigned iid = Function::lookupIntrinsicID(name);
+    if (iid != Intrinsic::not_intrinsic) {
+        return static_cast<Intrinsic::ID>(iid);
+    }
+    return fallback;
+}
+
 extern "C" LLVMValueRef LLVMSelfhostCreateGCReadStaticAgg(LLVMBuilderRef Builder, LLVMModuleRef Module,
     LLVMTypeRef Type, LLVMValueRef Dest, LLVMValueRef Source, LLVMValueRef Size, LLVMTypeRef SizeType)
 {
     return CreateGCStaticAggCall(Builder, Module, Type, Dest, Source, Size, SizeType,
-        Intrinsic::cj_gcread_static_struct);
+        LookupCJIntrinsicOr("llvm.cj.gcread.static.struct", Intrinsic::cj_gcread_static_struct));
 }
 
 extern "C" LLVMValueRef LLVMSelfhostCreateGCWriteStaticAgg(LLVMBuilderRef Builder, LLVMModuleRef Module,
     LLVMTypeRef Type, LLVMValueRef Dest, LLVMValueRef Source, LLVMValueRef Size, LLVMTypeRef SizeType)
 {
     return CreateGCStaticAggCall(Builder, Module, Type, Dest, Source, Size, SizeType,
-        Intrinsic::cj_gcwrite_static_struct);
+        LookupCJIntrinsicOr("llvm.cj.gcwrite.static.struct", Intrinsic::cj_gcwrite_static_struct));
+}
+
+extern "C" LLVMValueRef LLVMSelfhostCreateCopyNoRefStruct(LLVMBuilderRef Builder, LLVMModuleRef Module,
+    LLVMTypeRef AggType, LLVMValueRef Dest, LLVMValueRef Source, LLVMValueRef Size, LLVMTypeRef SizeType)
+{
+    unsigned iid = Function::lookupIntrinsicID("llvm.cj.copy.no.ref.struct");
+    if (iid != Intrinsic::not_intrinsic) {
+        return CreateGCStaticAggCall(Builder, Module, AggType, Dest, Source, Size, SizeType,
+            static_cast<Intrinsic::ID>(iid));
+    }
+    return nullptr;
+}
+
+extern "C" void LLVMSelfhostConvertArgsTypeFailClosedProbe(LLVMBuilderRef Builder, LLVMModuleRef Module)
+{
+    if (Builder == nullptr || Module == nullptr) {
+        FailConvertArgsType("null LLVM C API handle");
+    }
+    auto *builder = unwrap(Builder);
+    auto *module = unwrap(Module);
+    if (builder == nullptr || module == nullptr) {
+        FailConvertArgsType("unwrap produced a null LLVM object");
+    }
+    auto *sizeType = Type::getInt64Ty(module->getContext());
+    auto *func = Intrinsic::getDeclaration(module, Intrinsic::cj_gcwrite_static_struct, {sizeType});
+    std::vector<Value*> args;
+    ConvertArgsType(*builder, func, args);
 }
 
 extern "C" uint64_t LLVMSelfhostGetPrimitiveSizeInBits(LLVMTypeRef Ty)

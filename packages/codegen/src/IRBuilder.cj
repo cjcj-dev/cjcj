@@ -715,13 +715,15 @@ public class IRBuilder2 <: Resource {
                     let size = unsafe {
                         LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
                     }
-                    // A boxed value's payload is always in managed address space (1),
-                    // even when the aggregate itself contains no references.  A bare
-                    // memcpy from that payload to a native temporary loses the managed
-                    // base provenance and is rejected by CJIRVerifier.  Use the typed
-                    // aggregate read for both ref and non-ref structs.
-                    CallGCReadAgg(elementType,
-                        ArrayList<LLVMValueRef>([temp, boxedValue, castedPtr, size]))
+                    // A boxed value's payload is always in managed address space (1).
+                    // Reference aggregates use the typed GC read; non-reference
+                    // aggregates use llvm.cj.copy.no.ref.struct (Intrinsics.td:472).
+                    if (IsTypeContainsRef(elementType)) {
+                        CallGCReadAgg(elementType,
+                            ArrayList<LLVMValueRef>([temp, boxedValue, castedPtr, size]))
+                    } else {
+                        CopyNoRefOrMemCpy(elementType, temp, castedPtr, size)
+                    }
                 }
                 FixedCGTypeOfFuncArg(cgMod, operand, temp)
             }
@@ -983,9 +985,11 @@ public class IRBuilder2 <: Resource {
                 LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), sizeInBytes, 0)
             }
             if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
-                // Managed payload reads must carry an explicit typed provenance token;
-                // this applies to non-reference aggregates as well as reference ones.
-                CallGCReadAgg(elementType, ArrayList<LLVMValueRef>([tempVal, baseObject, addr, size]))
+                if (IsTypeContainsRef(elementType)) {
+                    CallGCReadAgg(elementType, ArrayList<LLVMValueRef>([tempVal, baseObject, addr, size]))
+                } else {
+                    CopyNoRefOrMemCpy(elementType, tempVal, addr, size)
+                }
                 return tempVal
             }
             if (sizeInBytes != 0u64) {
@@ -3546,6 +3550,50 @@ public class IRBuilder2 <: Resource {
             call = unsafe {
                 LLVMSelfhostCreateGCWriteStaticAgg(builder.raw, moduleHandle.raw, structType, args[0], args[1],
                     args[2], GetSizetLLVMType())
+            }
+        }
+        if (call.isNull()) {
+            return call
+        }
+        let aggTypeName = if (!structType.isNull() &&
+            unsafe { LLVMGetTypeKind(structType) } == LLVM_STRUCT_TYPE_KIND) {
+            LLVMCStringToString(unsafe { LLVMGetStructName(structType) }) ?? ""
+        } else {
+            ""
+        }
+        let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
+        LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)
+        return call
+    }
+
+    public func CopyNoRefOrMemCpy(structType: LLVMTypeRef, dest: LLVMValueRef, source: LLVMValueRef,
+        size: LLVMValueRef): LLVMValueRef {
+        let call = CallCopyNoRefStruct(structType, dest, source, size)
+        if (!call.isNull()) {
+            return call
+        }
+        let sizeTy = unsafe { LLVMTypeOf(size) }
+        let sizeInBytes = if (!size.isNull() && !sizeTy.isNull() &&
+            unsafe { LLVMGetTypeKind(sizeTy) } == LLVM_INTEGER_TYPE_KIND &&
+            unsafe { LLVMIsAInstruction(size) }.isNull() && unsafe { LLVMIsAArgument(size) }.isNull()) {
+            unsafe { LLVMConstIntGetZExtValue(size) }
+        } else {
+            1u64
+        }
+        if (sizeInBytes == 0u64) {
+            return LLVMNullValue()
+        }
+        let align = cgMod.GetABITypeAlignment(structType)
+        return CreateMemCpy(dest, align, source, align, size)
+    }
+
+    public func CallCopyNoRefStruct(structType: LLVMTypeRef, dest: LLVMValueRef, source: LLVMValueRef,
+        size: LLVMValueRef): LLVMValueRef {
+        var call = LLVMNullValue()
+        if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+            call = unsafe {
+                LLVMSelfhostCreateCopyNoRefStruct(builder.raw, moduleHandle.raw, structType, dest, source, size,
+                    GetSizetLLVMType())
             }
         }
         if (call.isNull()) {

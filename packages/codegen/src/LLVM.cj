@@ -361,6 +361,8 @@ foreign {
         dest: LLVMValueRef, source: LLVMValueRef, size: LLVMValueRef, sizeType: LLVMTypeRef): LLVMValueRef
     func LLVMSelfhostCreateGCWriteStaticAgg(builder: LLVMBuilderRef, module: LLVMModuleRef, aggType: LLVMTypeRef,
         dest: LLVMValueRef, source: LLVMValueRef, size: LLVMValueRef, sizeType: LLVMTypeRef): LLVMValueRef
+    func LLVMSelfhostCreateCopyNoRefStruct(builder: LLVMBuilderRef, module: LLVMModuleRef, aggType: LLVMTypeRef,
+        dest: LLVMValueRef, source: LLVMValueRef, size: LLVMValueRef, sizeType: LLVMTypeRef): LLVMValueRef
     func LLVMSelfhostGetPrimitiveSizeInBits(ty: LLVMTypeRef): UInt64
     func LLVMSelfhostGetFirstUse(value: LLVMValueRef): LLVMUseRef
     func LLVMSelfhostGetNextUse(useRef: LLVMUseRef): LLVMUseRef
