@@ -6,6 +6,7 @@ import {BuildError} from '../../lib/errors.mjs';
 import {getLogger, stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
 import {assertNoVerifierReportArtifacts} from '../../../scripts/verifier_artifact_gate.mjs';
+import {assertSdkPathParity} from '../../lib/sdk-path-parity.mjs';
 import {copyInto, copytree, ensureDir, requireDir, requireFile} from './common.mjs';
 
 const logger = getLogger('cangjie_build.stages.package');
@@ -14,10 +15,14 @@ function platformLibDirName(config) {
   return config.target.runtimeLibSubdir(config.buildType);
 }
 
+function archivePath(config, baseName) {
+  return path.join(config.softwareDir, `${baseName}.${config.target.spec.archiveFormat}`);
+}
+
 async function makeArchive(config, sourceDir, baseName) {
   const format = config.target.spec.archiveFormat;
   fs.mkdirSync(config.softwareDir, {recursive: true});
-  const archive = path.join(config.softwareDir, `${baseName}.${format}`);
+  const archive = archivePath(config, baseName);
   fs.rmSync(archive, {force: true});
   logger.info('Creating %s archive %s', format, archive);
   if (format === 'tar.gz') {
@@ -130,7 +135,19 @@ async function packageMainSdk(config) {
     // directories/programs traversable by users other than the build account.
     await runCommand(['chmod', '-R', 'u+rwX,go+rX', cangjieDir], {stage: 'package.permissions'});
   }
-  return makeArchive(config, cangjieDir, `cangjie-sdk-${config.target.spec.sdkName}-${config.cangjieVersion}`);
+  const archiveBase = `cangjie-sdk-${config.target.spec.sdkName}-${config.cangjieVersion}`;
+  // A failed parity check must not leave a stale archive from an earlier run
+  // looking publishable in software/.
+  fs.rmSync(archivePath(config, archiveBase), {force: true});
+  const parity = await assertSdkPathParity(cangjieDir, {officialRoot: config.officialSdkRoot});
+  logger.info(
+    'SDK_PATH_PARITY_PASS official=%s candidate=%s required=%d extra=%d',
+    parity.officialRoot,
+    parity.candidateRoot,
+    parity.officialPaths.length,
+    parity.extraInCandidate.length,
+  );
+  return makeArchive(config, cangjieDir, archiveBase);
 }
 
 async function packageStdx(config) {

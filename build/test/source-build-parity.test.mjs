@@ -95,6 +95,7 @@ function makeFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'buildunify1-parity-'));
   const workspace = directory(root, 'workspace');
   const buildRoot = directory(root, 'buildtools');
+  const officialSdkRoot = directory(root, 'official-sdk');
   const compilerRoot = directory(workspace, 'cangjie_compiler');
   const runtimeRoot = directory(workspace, 'cangjie_runtime');
   const toolsRoot = directory(workspace, 'cangjie_tools');
@@ -126,11 +127,12 @@ function makeFixture() {
   file(toolsRoot, ['cjtrace-recover', 'dist', 'bin', 'cjtrace-recover']);
   file(stdxRoot, ['target', 'linux_x86_64_cjnative', '.keep']);
   file(compilerRoot, ['output', 'envsetup.sh']);
+  file(officialSdkRoot, ['envsetup.sh']);
   file(workspace, ['verify', 'hello']);
 
   return {
     root,
-    config: buildConfig({workspace, buildRoot, cangjieVersion: '1.2.3'}),
+    config: buildConfig({workspace, buildRoot, officialSdkRoot, cangjieVersion: '1.2.3'}),
   };
 }
 

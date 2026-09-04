@@ -22,9 +22,11 @@ function packageFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cjtoolsrc-package-'));
   const workspace = path.join(root, 'workspace');
   const tools = path.join(workspace, 'cangjie_tools');
+  const officialSdkRoot = path.join(root, 'official-sdk');
   fs.mkdirSync(path.join(workspace, 'cangjie_compiler', 'output'), {recursive: true});
   fs.mkdirSync(path.join(workspace, 'cangjie_stdx', 'target', 'linux_x86_64_cjnative'), {recursive: true});
   file(tools, ['cjpm', 'dist', 'cjpm']);
+  file(officialSdkRoot, ['tools', 'bin', 'cjpm']);
   file(tools, ['cjfmt', 'build', 'build', 'bin', 'cjfmt']);
   file(tools, ['cjfmt', 'config', 'default.toml']);
   file(tools, ['hyperlangExtension', 'target', 'bin', 'main']);
@@ -35,11 +37,41 @@ function packageFixture() {
   return {
     root,
     tools,
+    officialSdkRoot,
     config: buildConfig({
-      workspace, buildRoot: path.join(root, 'buildtools'), cangjieVersion: '1.2.3',
+      workspace, buildRoot: path.join(root, 'buildtools'), officialSdkRoot, cangjieVersion: '1.2.3',
     }),
   };
 }
+
+test('package entry refuses to archive an SDK missing one official relative path', async () => {
+  const {root, officialSdkRoot, config} = packageFixture();
+  try {
+    file(officialSdkRoot, ['tools', 'bin', 'LSPMacroServer'], 'official fixture');
+    const archive = file(
+      config.softwareDir,
+      ['cangjie-sdk-linux-x64-1.2.3.tar.gz'],
+      'stale archive from an earlier run',
+    );
+    await runPackage(() => assert.rejects(
+      packageStage.run(config),
+      error => {
+        assert.equal(error.stage, 'package.sdk-path-parity');
+        assert.deepEqual(
+          error.message.split('\n').filter(line => line.startsWith('missing-official-path\t')),
+          ['missing-official-path\ttools/bin/LSPMacroServer'],
+        );
+        return true;
+      },
+    ));
+    assert.equal(
+      fs.existsSync(archive),
+      false,
+    );
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
 
 async function runPackage(action) {
   const previous = process.env.CANGJIE_BUILD_DRY_RUN;

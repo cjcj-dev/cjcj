@@ -48,6 +48,7 @@ export function makeRepos({globalTag, overrides = {}} = {}) {
 export function buildConfig({
   workspace,
   buildRoot,
+  officialSdkRoot,
   targetKey = 'linux-x64',
   buildType = DEFAULT_BUILD_TYPE,
   cangjieVersion,
@@ -73,6 +74,7 @@ export function buildConfig({
     stdxVersion: Number(stdxVersion),
     repos,
     softwareDir: path.join(workspacePath, 'software'),
+    officialSdkRoot: officialSdkRoot ? absolute(officialSdkRoot) : null,
     crossBuildType: target.spec.crossCompile ? 'release' : buildType,
     repo(name) {
       if (!REPO_NAMES.includes(name)) throw new ConfigError(`unknown repo '${name}'`);
@@ -94,6 +96,7 @@ export function withBuildType(config, buildType) {
     buildType,
     cangjieVersion: config.cangjieVersion,
     stdxVersion: config.stdxVersion,
+    officialSdkRoot: config.officialSdkRoot,
     repoOverrides: Object.fromEntries(REPO_NAMES.map(name => [name, config.repos[name]])),
   });
 }
