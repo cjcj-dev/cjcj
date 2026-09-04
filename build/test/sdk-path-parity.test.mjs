@@ -31,7 +31,11 @@ test('SDK path inventory includes directories, files, and symlinks as normalized
   const {official} = fixture(t);
   put(official, 'bin/cjc');
   fs.symlinkSync('cjc', path.join(official, 'bin', 'cjc-frontend'));
-  assert.deepEqual(collectRelativePaths(official), ['bin', 'bin/cjc', 'bin/cjc-frontend']);
+  assert.deepEqual(collectRelativePaths(official), [
+    {relativePath: 'bin', type: 'dir', symlinkTarget: null},
+    {relativePath: 'bin/cjc', type: 'file', symlinkTarget: null},
+    {relativePath: 'bin/cjc-frontend', type: 'symlink', symlinkTarget: 'cjc'},
+  ]);
 });
 
 test('candidate may replace contents and add paths while retaining every official path', async t => {
@@ -98,6 +102,59 @@ test('removing a path from the official sample does not reverse the official-min
   const result = await assertSdkPathParity(candidate, {officialRoot: official});
   assert.deepEqual(result.missingInCandidate, []);
   assert.ok(result.extraInCandidate.includes('tools/bin/cjpm'));
+});
+
+test('replacing one required symlink with a same-name file turns red on exactly that path', async t => {
+  const {official, candidate} = fixture(t);
+  put(official, 'bin/cjc');
+  put(candidate, 'bin/cjc', 'rebuilt');
+  fs.symlinkSync('cjc', path.join(official, 'bin', 'cjc-frontend'));
+  put(candidate, 'bin/cjc-frontend', 'copied binary');
+
+  const result = compareSdkPathSets(official, candidate);
+  assert.deepEqual(result.missingInCandidate, []);
+  assert.deepEqual(result.typeMismatches, [{
+    relativePath: 'bin/cjc-frontend',
+    officialType: 'symlink',
+    candidateType: 'file',
+    officialSymlinkTarget: 'cjc',
+    candidateSymlinkTarget: null,
+  }]);
+  await assert.rejects(
+    assertSdkPathParity(candidate, {officialRoot: official}),
+    error => error.stage === 'package.sdk-path-parity'
+      && /type-mismatch\tbin\/cjc-frontend\tofficial=symlink->cjc\tcandidate=file/.test(error.message)
+      && !/missing-official-path/.test(error.message),
+  );
+});
+
+test('matching entry types and symlink targets do not turn the parity gate red', async t => {
+  const {official, candidate} = fixture(t);
+  put(official, 'bin/cjc');
+  put(candidate, 'bin/cjc', 'rebuilt');
+  fs.symlinkSync('cjc', path.join(official, 'bin', 'cjc-frontend'));
+  fs.symlinkSync('cjc', path.join(candidate, 'bin', 'cjc-frontend'));
+
+  const result = await assertSdkPathParity(candidate, {officialRoot: official});
+  assert.deepEqual(result.missingInCandidate, []);
+  assert.deepEqual(result.typeMismatches, []);
+});
+
+test('changing one required symlink target reports only that path as a type mismatch', async t => {
+  const {official, candidate} = fixture(t);
+  for (const root of [official, candidate]) {
+    put(root, 'bin/cjc');
+    put(root, 'bin/cjc-alt');
+  }
+  fs.symlinkSync('cjc', path.join(official, 'bin', 'cjc-frontend'));
+  fs.symlinkSync('cjc-alt', path.join(candidate, 'bin', 'cjc-frontend'));
+
+  const result = compareSdkPathSets(official, candidate);
+  assert.deepEqual(result.typeMismatches.map(mismatch => mismatch.relativePath), ['bin/cjc-frontend']);
+  await assert.rejects(
+    assertSdkPathParity(candidate, {officialRoot: official}),
+    /type-mismatch\tbin\/cjc-frontend\tofficial=symlink->cjc\tcandidate=symlink->cjc-alt/,
+  );
 });
 
 test('missing or non-directory official samples fail closed', async t => {

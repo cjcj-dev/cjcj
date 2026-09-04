@@ -26,46 +26,82 @@ function isExcluded(relative, excludedSubtrees) {
 export function collectRelativePaths(root, {excludedSubtrees = []} = {}) {
   const absoluteRoot = path.resolve(root);
   requireDirectory(absoluteRoot, 'SDK');
-  const paths = [];
+  const entries = [];
 
   function walk(directory, relativeDirectory = '') {
-    const entries = fs.readdirSync(directory, {withFileTypes: true})
+    const children = fs.readdirSync(directory, {withFileTypes: true})
       .sort((left, right) => lexical(left.name, right.name));
-    for (const entry of entries) {
+    for (const entry of children) {
       const relative = relativeDirectory
         ? path.posix.join(relativeDirectory, entry.name)
         : entry.name;
       if (isExcluded(relative, excludedSubtrees)) continue;
-      paths.push(relative);
-      if (entry.isDirectory()) walk(path.join(directory, entry.name), relative);
+      const absolute = path.join(directory, entry.name);
+      const type = entry.isDirectory() ? 'dir' : entry.isSymbolicLink() ? 'symlink' : 'file';
+      entries.push(Object.freeze({
+        relativePath: relative,
+        type,
+        symlinkTarget: type === 'symlink' ? fs.readlinkSync(absolute) : null,
+      }));
+      if (type === 'dir') walk(absolute, relative);
     }
   }
 
   walk(absoluteRoot);
-  return paths;
+  return Object.freeze(entries);
 }
 
 export function compareSdkPathSets(officialRoot, candidateRoot) {
-  const officialPaths = collectRelativePaths(officialRoot, {excludedSubtrees: OFFICIAL_PATH_EXCLUSIONS});
-  const candidatePaths = collectRelativePaths(candidateRoot);
-  const official = new Set(officialPaths);
-  const candidate = new Set(candidatePaths);
+  const officialEntries = collectRelativePaths(officialRoot, {excludedSubtrees: OFFICIAL_PATH_EXCLUSIONS});
+  const candidateEntries = collectRelativePaths(candidateRoot);
+  const official = new Map(officialEntries.map(entry => [entry.relativePath, entry]));
+  const candidate = new Map(candidateEntries.map(entry => [entry.relativePath, entry]));
+  const officialPaths = Object.freeze([...official.keys()]);
+  const candidatePaths = Object.freeze([...candidate.keys()]);
+  const typeMismatches = officialEntries.flatMap(officialEntry => {
+    const candidateEntry = candidate.get(officialEntry.relativePath);
+    if (!candidateEntry) return [];
+    if (officialEntry.type === candidateEntry.type
+      && officialEntry.symlinkTarget === candidateEntry.symlinkTarget) return [];
+    return [Object.freeze({
+      relativePath: officialEntry.relativePath,
+      officialType: officialEntry.type,
+      candidateType: candidateEntry.type,
+      officialSymlinkTarget: officialEntry.symlinkTarget,
+      candidateSymlinkTarget: candidateEntry.symlinkTarget,
+    })];
+  });
   return Object.freeze({
-    officialPaths: Object.freeze(officialPaths),
-    candidatePaths: Object.freeze(candidatePaths),
+    officialEntries,
+    candidateEntries,
+    officialPaths,
+    candidatePaths,
     missingInCandidate: Object.freeze(officialPaths.filter(relative => !candidate.has(relative))),
     extraInCandidate: Object.freeze(candidatePaths.filter(relative => !official.has(relative))),
+    typeMismatches: Object.freeze(typeMismatches),
   });
+}
+
+function describeEntry(type, symlinkTarget) {
+  return type === 'symlink' ? `${type}->${symlinkTarget}` : type;
 }
 
 export async function assertSdkPathParity(candidateRoot, {officialRoot} = {}) {
   const referenceRoot = path.resolve(officialRoot || await pinnedOfficialSdkRoot());
   const result = compareSdkPathSets(referenceRoot, candidateRoot);
-  if (result.missingInCandidate.length) {
+  if (result.missingInCandidate.length || result.typeMismatches.length) {
+    const differences = [
+      ...result.missingInCandidate.map(relative => `missing-official-path\t${relative}`),
+      ...result.typeMismatches.map(mismatch => (
+        `type-mismatch\t${mismatch.relativePath}`
+          + `\tofficial=${describeEntry(mismatch.officialType, mismatch.officialSymlinkTarget)}`
+          + `\tcandidate=${describeEntry(mismatch.candidateType, mismatch.candidateSymlinkTarget)}`
+      )),
+    ];
     throw new BuildError(
       'package.sdk-path-parity',
-      `candidate SDK is missing ${result.missingInCandidate.length} official path(s):\n`
-        + result.missingInCandidate.map(relative => `missing-official-path\t${relative}`).join('\n'),
+      `candidate SDK differs from official SDK: missing=${result.missingInCandidate.length}`
+        + ` type-mismatch=${result.typeMismatches.length}\n${differences.join('\n')}`,
     );
   }
   return Object.freeze({...result, officialRoot: referenceRoot, candidateRoot: path.resolve(candidateRoot)});
