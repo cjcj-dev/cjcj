@@ -24,7 +24,7 @@ import {
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
 import {writeToolchainIdentity} from '../build/lib/toolchain-identity.mjs';
 import {assertNoVerifierReportArtifacts} from './verifier_artifact_gate.mjs';
-import {assertPackagedLineage, collectStdArtifactShas} from '../build/lib/package-lineage.mjs';
+import {assertPackagedLineage} from '../build/lib/package-lineage.mjs';
 import {
   PACKAGED_LLVM_TOOL_NAMES,
   formatPackagedLlvmToolsManifest,
@@ -243,7 +243,6 @@ if (!allowStockRuntime) {
 //   (b) modules tree root containing <tuple>/std
 //   (c) the std package dir itself (…/std with std.core.a …)
 console.log('[4/9] overlay rebuilt std');
-const officialStdShas = await collectStdArtifactShas(stage);
 let stdProvenance = '';
 if (stdDir) {
   const stdSource = await fs.realpath(stdDir);
@@ -654,7 +653,7 @@ if (stdDir) {
 }
 
 try {
-  const lineage = await assertPackagedLineage(stage, {officialStdShas, allowNightlyStd});
+  const lineage = await assertPackagedLineage(stage, {allowNightlyStd});
   if (lineage.allowedNightly) {
     console.log('  lineage: --allow-nightly-std explicit; official std hashes present');
   } else {

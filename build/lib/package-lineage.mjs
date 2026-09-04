@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 
 export const PACKAGED_TOOL_NAMES = Object.freeze([
   'cjpm', 'cjfmt', 'hle', 'LSPServer', 'cjcov', 'cjtrace-recover',
@@ -9,6 +11,17 @@ export const PACKAGED_TOOL_NAMES = Object.freeze([
 const SHA40 = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const ALLOWED_LINEAGE = new Set(['cjcj-stage2', 'final-std']);
+const ARTIFACT_EXT = new Set(['.cjo', '.a', '.so', '.bc']);
+const SCAN_ROOTS = Object.freeze(['modules', 'lib', 'runtime/lib']);
+const DYE_LABELS = Object.freeze([
+  'CJCJ-COMMIT',
+  'CJTOOL-COMMIT',
+  'CJLLVM-COMMIT',
+  'CJRT-COMMIT',
+  'g_cjStoreBadMask',
+]);
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 export async function fileSha256(file) {
   const hash = crypto.createHash('sha256');
@@ -52,66 +65,108 @@ export function classifyProvenanceText(text) {
   return 'unknown';
 }
 
-export async function collectStdArtifactShas(root) {
-  const shas = new Set();
-  if (!await exists(root, 'dir')) return shas;
-  const modules = path.join(root, 'modules');
-  if (await exists(modules, 'dir')) {
-    for (const tuple of await fs.readdir(modules, {withFileTypes: true})) {
-      if (!tuple.isDirectory()) continue;
-      const std = path.join(modules, tuple.name, 'std');
-      if (!await exists(std, 'dir')) continue;
-      for (const name of await fs.readdir(std)) {
-        const file = path.join(std, name);
-        if ((await fs.stat(file)).isFile()) shas.add(await fileSha256(file));
+export function hostSdkPinPath() {
+  return path.join(REPO_ROOT, 'ci', 'host_sdk_pin.env');
+}
+
+export async function readHostSdkPinToolchain(pinFile = hostSdkPinPath()) {
+  const text = await fs.readFile(pinFile, 'utf8');
+  const match = text.match(/^CJCJ_TOOLCHAIN=(\S+)$/m);
+  if (!match) throw new Error(`CJCJ_TOOLCHAIN missing from ${pinFile}`);
+  return match[1];
+}
+
+export async function pinnedOfficialSdkRoot(pinFile = hostSdkPinPath()) {
+  const toolchain = await readHostSdkPinToolchain(pinFile);
+  return path.join(os.homedir(), '.cjv', 'toolchains', toolchain);
+}
+
+export function isPackagedArtifact(file) {
+  return ARTIFACT_EXT.has(path.extname(file));
+}
+
+export async function listPackagedArtifacts(root) {
+  const files = [];
+  async function walk(dir) {
+    if (!await exists(dir, 'dir')) return;
+    for (const entry of await fs.readdir(dir, {withFileTypes: true})) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full);
+        continue;
       }
+      if (entry.isFile() && isPackagedArtifact(full)) files.push(full);
     }
   }
-  const lib = path.join(root, 'lib');
-  if (await exists(lib, 'dir')) {
-    for (const tuple of await fs.readdir(lib, {withFileTypes: true})) {
-      if (!tuple.isDirectory()) continue;
-      for (const name of await fs.readdir(path.join(lib, tuple.name))) {
-        if (!name.startsWith('libcangjie-std')) continue;
-        const file = path.join(lib, tuple.name, name);
-        if ((await fs.stat(file)).isFile()) shas.add(await fileSha256(file));
-      }
-    }
+  for (const rel of SCAN_ROOTS) await walk(path.join(root, rel));
+  for (const name of PACKAGED_TOOL_NAMES) {
+    const file = path.join(root, 'tools', 'bin', name);
+    if (await exists(file)) files.push(file);
+  }
+  files.sort();
+  return files;
+}
+
+export async function collectStdArtifactShas(root) {
+  const shas = new Set();
+  for (const file of await listPackagedArtifacts(root)) {
+    shas.add(await fileSha256(file));
   }
   return shas;
 }
 
-async function scanStdFiles(root) {
-  const files = [];
-  const modules = path.join(root, 'modules');
-  if (!await exists(modules, 'dir')) return files;
-  for (const tuple of await fs.readdir(modules, {withFileTypes: true})) {
-    if (!tuple.isDirectory()) continue;
-    const std = path.join(modules, tuple.name, 'std');
-    if (!await exists(std, 'dir')) continue;
-    for (const name of await fs.readdir(std)) {
-      const file = path.join(std, name);
-      if ((await fs.stat(file)).isFile()) files.push(file);
-    }
-  }
-  return files;
+export function contentSignals(buffer) {
+  const text = Buffer.isBuffer(buffer) ? buffer.toString('latin1') : String(buffer);
+  const found = [];
+  if (/CJCJ-COMMIT:[0-9a-f]{40}/.test(text)) found.push('CJCJ-COMMIT');
+  if (/CJTOOL-COMMIT:[0-9a-f]{40}/.test(text)) found.push('CJTOOL-COMMIT');
+  if (/CJLLVM-COMMIT:[0-9a-f]{40}/.test(text)) found.push('CJLLVM-COMMIT');
+  if (/CJRT-COMMIT:[0-9a-f]{40}/.test(text)) found.push('CJRT-COMMIT');
+  if (text.includes('g_cjStoreBadMask')) found.push('g_cjStoreBadMask');
+  return found;
 }
 
-function stampCommit(buffer, label) {
-  const text = buffer.toString('latin1');
-  const match = text.match(new RegExp(`${label}:([0-9a-f]{40})`));
-  return match ? match[1] : '';
+let cachedOfficialShas;
+
+export async function bindOfficialNightlyShas() {
+  if (cachedOfficialShas) return cachedOfficialShas;
+  const root = await pinnedOfficialSdkRoot();
+  if (!await exists(root, 'dir')) {
+    throw new Error(`official nightly pin dir missing: ${root}`);
+  }
+  cachedOfficialShas = await collectStdArtifactShas(root);
+  return cachedOfficialShas;
+}
+
+export async function collectContentFindings(sdkRoot, officialShas) {
+  const findings = [];
+  for (const file of await listPackagedArtifacts(sdkRoot)) {
+    const sha = await fileSha256(file);
+    const buffer = await fs.readFile(file);
+    const dyes = contentSignals(buffer);
+    const reasons = [];
+    if (officialShas.has(sha) && SHA256.test(sha)) {
+      reasons.push(`matches official nightly sha256 ${sha}`);
+    }
+    if (dyes.length === 0) reasons.push(`missing rebuilt dye signal (${DYE_LABELS.join('/')})`);
+    if (reasons.length > 0) {
+      findings.push({file, sha, reasons, dyes});
+    }
+  }
+  return findings;
+}
+
+function formatFindings(findings) {
+  return findings.map(item => `  ${item.file}: ${item.reasons.join('; ')}`).join('\n');
 }
 
 export async function inspectPackagedLineage(sdkRoot, {
-  officialStdShas = new Set(),
   allowNightlyStd = false,
 } = {}) {
   const provenancePath = path.join(sdkRoot, 'PROVENANCE.txt');
   let provenanceKind = 'unknown';
-  let provenanceText = '';
   if (await exists(provenancePath)) {
-    provenanceText = await fs.readFile(provenancePath, 'utf8');
+    const provenanceText = await fs.readFile(provenancePath, 'utf8');
     provenanceKind = classifyProvenanceText(provenanceText);
   }
 
@@ -120,59 +175,39 @@ export async function inspectPackagedLineage(sdkRoot, {
       ok: false,
       code: 'bootstrap-intermediate',
       message: 'bootstrap-intermediate: std provenance names stdlib-stage1',
+      findings: [],
     };
   }
 
-  const stdFiles = await scanStdFiles(sdkRoot);
-  const matchingOfficial = [];
-  for (const file of stdFiles) {
-    const sha = await fileSha256(file);
-    if (officialStdShas.has(sha) && SHA256.test(sha)) matchingOfficial.push({file, sha});
-  }
-
-  const looksOfficial = provenanceKind === 'official-std' || matchingOfficial.length > 0;
-  if (looksOfficial && !allowNightlyStd) {
-    return {
-      ok: false,
-      code: 'official-std',
-      message: matchingOfficial.length > 0
-        ? `official-std: ${matchingOfficial.length} packaged std file(s) match official nightly sha`
-        : 'official-std: provenance names official nightly std',
-    };
-  }
-
-  if (looksOfficial && allowNightlyStd) {
+  const officialShas = await bindOfficialNightlyShas();
+  const findings = await collectContentFindings(sdkRoot, officialShas);
+  if (allowNightlyStd && (findings.length > 0 || provenanceKind === 'official-std')) {
     return {
       ok: true,
       code: 'ok',
-      message: 'allow-nightly-std: official std hashes present and explicitly allowed',
+      message: 'allow-nightly-std: official content present and explicitly allowed',
       allowedNightly: true,
+      findings,
     };
   }
-
-  for (const name of PACKAGED_TOOL_NAMES) {
-    const file = path.join(sdkRoot, 'tools', 'bin', name);
-    if (!await exists(file)) continue;
-    const buffer = await fs.readFile(file);
-    const tool = stampCommit(buffer, 'CJTOOL-COMMIT') || stampCommit(buffer, 'CJCJ-COMMIT');
-    if (!SHA40.test(tool)) {
-      return {
-        ok: false,
-        code: 'official-std',
-        message: `official-std: tools/bin/${name} has no cjcj-stage2/final-std stamp`,
-      };
-    }
-  }
-
-  if (provenanceKind === 'unknown' && stdFiles.length > 0) {
+  if (findings.length > 0) {
     return {
       ok: false,
       code: 'official-std',
-      message: 'official-std: std present but provenance is not cjcj-stage2 or final-std',
+      message: `official-std: content check failed for ${findings.length} file(s)\n${formatFindings(findings)}`,
+      findings,
+    };
+  }
+  if (provenanceKind === 'official-std') {
+    return {
+      ok: false,
+      code: 'official-std',
+      message: 'official-std: provenance names official nightly std',
+      findings: [],
     };
   }
 
-  return {ok: true, code: 'ok', message: `lineage ${provenanceKind}`};
+  return {ok: true, code: 'ok', message: `lineage ${provenanceKind}`, findings: []};
 }
 
 export async function assertPackagedLineage(sdkRoot, options = {}) {
@@ -180,6 +215,7 @@ export async function assertPackagedLineage(sdkRoot, options = {}) {
   if (!result.ok) {
     const error = new Error(result.message);
     error.code = result.code;
+    error.findings = result.findings;
     throw error;
   }
   return result;
