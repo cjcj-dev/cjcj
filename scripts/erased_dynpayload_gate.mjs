@@ -160,6 +160,9 @@ function targetKind(row) {
       row.function.includes('ExternallyLockedLazy') && /compute/.test(row.function) &&
       row.function.includes('withoutTI') && row.dest_root === 'argument' &&
       row.src_root === 'call') return 'p1p1';
+  if (row.dest_as === '1' && row.src_as === '1' && row.function.includes('main') &&
+      row.dest_root === 'alloca' && row.src_root === 'call' &&
+      row.source_type === 'i8* addrspace(1)*') return 'fixtureMain';
   return '';
 }
 
@@ -186,7 +189,7 @@ function subtract(leftRows, rightRows) {
 }
 
 function countsByTarget(rows) {
-  const counts = {p1p0: 0, p1p1: 0, other: 0};
+  const counts = {p1p0: 0, p1p1: 0, fixtureMain: 0, other: 0};
   for (const row of rows) counts[targetKind(row) || 'other'] += 1;
   return counts;
 }
