@@ -20,9 +20,11 @@ private let PAYLOAD_SOURCE_IR = """
     """
 
 private func FindFunction(module: LLVMModuleHandle, name: String): LLVMValueRef {
+    var result = LLVMNullValue()
     try (rawName = unsafe { LibC.mallocCString(name) }.asResource()) {
-        return unsafe { LLVMGetNamedFunction(module.raw, rawName.value) }
+        result = unsafe { LLVMGetNamedFunction(module.raw, rawName.value) }
     }
+    return result
 }
 
 private func FirstInstruction(function: LLVMValueRef): LLVMValueRef {
@@ -40,7 +42,8 @@ public class GenericPayloadProvenanceTest {
             try (module = parsed.module) {
                 let function = FindFunction(module, "native")
                 let view = FirstInstruction(function)
-                @Expect(IRBuilder2.GetNativePayloadSource(view), unsafe { LLVMGetParam(function, 0u32) })
+                let expected = unsafe { LLVMGetParam(function, 0u32) }
+                @Assert(IRBuilder2.GetNativePayloadSource(view).toUIntNative() == expected.toUIntNative())
             }
         }
     }
