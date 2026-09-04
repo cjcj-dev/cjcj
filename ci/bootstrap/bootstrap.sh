@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Vendored from tools@66aec40809b373843a3614472d78a555c94cadcf bootstrap.sh
 # Purpose: build cjcj in two stages; callers: bootstrap lanes and test_bootstrap.sh.
 # Two-stage cjcj bootstrap; see ops/design/BOOTSTRAP_PATH.md.
 set -u
-BOOTSTRAP_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 
 RED() { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 die() { RED "BOOTSTRAP-FAIL [$STAGE] $*"; exit 1; }
@@ -20,17 +18,19 @@ CRT=''
 HRT=''
 AST_SUPPORT=''
 AST_SUPPORT_SHA256=''
+CPP_SRC=''
+CJCJ_SHA=''
 BASE_SDK="${BASE_SDK:-cjcj-pin-937877c8}"
 HEAP="${CJ_HEAP:-24GB}"
 STAGE1_HEAP="${STAGE1_HEAP:-20GB}"
 JOBS="${CJ_JOBS:-32}"
-SDK_BUILD="${SDK_BUILD:-$BOOTSTRAP_DIR/sdk_build.sh}"
+SDK_BUILD="${SDK_BUILD:-/root/cj_build/tools/sdk_build.sh}"
 STAGE=init
 WANT=all
 DRY=0
 
 usage() {
-  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --stdsrc STDLIB --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|all] [--stage1-heap 20GB] [--dry-run]'
+  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|all] [--stage1-heap 20GB] [--dry-run]'
 }
 
 sha256() {
@@ -342,6 +342,59 @@ cjpm_build() {
   cmd "env -i HOME=/root CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
 }
 
+assert_shim_cpp_src() {
+  local rel
+  [ -d "$CPP_SRC" ] || die "--cpp-src 不是目录: $CPP_SRC"
+  for rel in third_party/llvm-project/llvm/include \
+    build/build/third_party/llvm/include build/build/include build/build/schema; do
+    [ -d "$CPP_SRC/$rel" ] || die "--cpp-src 缺 shim 头文件目录: $CPP_SRC/$rel"
+    find "$CPP_SRC/$rel" -type f -print -quit | /usr/bin/grep -q . ||
+      die "--cpp-src shim 头文件目录为空: $CPP_SRC/$rel"
+    echo "ASSERT shim-cpp-src exists=1 path=$CPP_SRC/$rel"
+  done
+}
+
+assert_cjcj_sha() {
+  local actual
+  [ "${#CJCJ_SHA}" -eq 40 ] || die '--cjcj-sha 必须是 40 位十六进制数'
+  case "$CJCJ_SHA" in *[!0-9a-fA-F]*) die '--cjcj-sha 不是十六进制';; esac
+  CJCJ_SHA=${CJCJ_SHA,,}
+  actual=$(git -C "$SRC" rev-parse HEAD 2>/dev/null || true)
+  if [ -n "$actual" ]; then
+    echo "ASSERT cjcj-sha expected=$CJCJ_SHA actual=${actual,,} source=git"
+    [ "${actual,,}" = "$CJCJ_SHA" ] || die 'cjcj 源码 HEAD 与 --cjcj-sha 不匹配'
+  else
+    echo "ASSERT cjcj-sha expected=$CJCJ_SHA actual=unavailable source=explicit-pin"
+  fi
+}
+
+shim_build() {
+  local label="$1" sdk="$2" runtime="$3" srcdir="$4" source_object="${5:-}" ld npx_path node_bin source_env=''
+  ld=$(sdk_ld_path "$sdk" "$runtime")
+  npx_path=$(command -v npx 2>/dev/null || true)
+  [ -x "$npx_path" ] || die "$label shim 构建需要可执行 npx"
+  node_bin=$(dirname "$npx_path")
+  echo "ASSERT $label-npx executable=1 path=$npx_path node-bin=$node_bin"
+  if [ -n "$source_object" ]; then
+    if [ "$DRY" -eq 0 ]; then
+      [ -s "$source_object" ] || die "$label 四件套 shim 对象缺失或为空: $source_object"
+    fi
+    source_env="CJCJ_LLVM_SHIM_O=$(printf '%q' "$source_object") "
+  else
+    assert_shim_cpp_src
+  fi
+  echo "CMD shim build label=$label cwd=$srcdir cpp-src=$CPP_SRC source-object=${source_object:-source} sdk=$sdk runtime=$runtime"
+  cmd "rm -f $(printf '%q' "$srcdir/runtime_shim/cjselfhost_llvmshim.o") $(printf '%q' "$srcdir/runtime_shim/cjc_runtime_config.o")"
+  cmd "env -i HOME=/root CANGJIE_HOME=$(printf '%q' "$sdk") CANGJIE_CPP_SRC=$(printf '%q' "$CPP_SRC") CJCJ_COMMIT=$(printf '%q' "$CJCJ_SHA") ${source_env}LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$node_bin:/usr/bin:/bin") bash $(printf '%q' "$srcdir/runtime_shim/build_shim.sh")"
+  if [ "$DRY" -eq 1 ]; then
+    echo "OUTPUT $label-shim-cpp path=$srcdir/runtime_shim/cjselfhost_llvmshim.o sha256=planned"
+    echo "OUTPUT $label-shim-config path=$srcdir/runtime_shim/cjc_runtime_config.o sha256=planned"
+  else
+    record "$label-shim-cpp" "$srcdir/runtime_shim/cjselfhost_llvmshim.o"
+    record "$label-shim-config" "$srcdir/runtime_shim/cjc_runtime_config.o"
+  fi
+}
+
 resolve_base_sdk() {
   local sdk
   if [[ "$BASE_SDK" = /* ]]; then
@@ -389,6 +442,7 @@ stage0() {
   copy="$WORK/cjcj-src-stage0"
   isolate_cjcj_src "$copy"
   rewrite_compile_option_o1 "$copy/cjpm.toml"
+  shim_build stage0 "$sdk" "$HRT" "$copy"
   cjpm_build "$sdk" "$HRT" "$copy" "" "$HEAP"
   seed=$(resolve_cjpm_product "$copy/target/release/bin" cjcj-stage1)
   install_stage_compiler "$seed" "$out" "$WORK/cjc"
@@ -437,6 +491,7 @@ stage1() {
   local copy seed
   copy="$WORK/cjcj-src-stage1"
   isolate_cjcj_src "$copy"
+  shim_build stage1 "$sdk" "$CRT" "$copy" "$sdk/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o"
   cjpm_build "$sdk" "$CRT" "$copy" "-j 1" "$STAGE1_HEAP"
   seed=$(resolve_cjpm_product "$copy/target/release/bin" cjcj-stage2)
   install_stage_compiler "$seed" "$out" "$WORK/cjc-stage2"
@@ -453,7 +508,9 @@ main() {
     case "$1" in
       --work) WORK="${2:?}"; shift 2;;
       --src) SRC="${2:?}"; shift 2;;
+      --cjcj-sha) CJCJ_SHA="${2:?}"; shift 2;;
       --stdsrc) STDSRC="${2:?}"; shift 2;;
+      --cpp-src) CPP_SRC="${2:?}"; shift 2;;
       --base) BASE_SDK="${2:?}"; shift 2;;
       --host-llvm-so) HOST_LLVM_SO="${2:?}"; shift 2;;
       --host-llvm|--host-llc) die "参数 $1 已废弃；使用 --host-llvm-so <libLLVM-15.so>";;
@@ -473,10 +530,14 @@ main() {
     esac
   done
   local value
-  for value in WORK SRC STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA CRT HRT; do
+  for value in WORK SRC CJCJ_SHA STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA CRT HRT; do
     eval "[ -n \"\${$value}\" ]" || die "缺少参数 $value"
   done
   case "$WANT" in stage0|stage1|all) ;; *) die '--stage 只能是 stage0|stage1|all';; esac
+  case "$WANT" in
+    stage0|all) [ -n "$CPP_SRC" ] || die '缺少参数 CPP_SRC';;
+  esac
+  assert_cjcj_sha
   assert_cjcj_root
   case "$WANT" in
     stage0) stage0;;

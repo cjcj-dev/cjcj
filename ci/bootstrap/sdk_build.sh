@@ -1,5 +1,4 @@
 #!/bin/bash
-# Vendored from tools@66aec40809b373843a3614472d78a555c94cadcf sdk_build.sh
 # Purpose: assemble an isolated custom SDK; callers: bootstrap.sh and SDK build lanes.
 # 组装一枚定制 SDK —— ⭐ 公用工具，⛔ 别再每条 lane 手搓一遍
 #

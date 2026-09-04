@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Vendored from tools@66aec40809b373843a3614472d78a555c94cadcf test_bootstrap.sh
 # Purpose: exercise bootstrap contract and fault arms; caller: test_bootstrap.sh:2
 # Focused contract and fault-arm tests for bootstrap.sh.
 set -u
@@ -51,7 +50,14 @@ make_colour_tuple() {
 
 make_dry_fixture() {
   new_tmp
-  mkdir -p "$TMP/base/bin" "$TMP/base/third_party/llvm/bin" "$TMP/src" "$TMP/stdsrc" "$TMP/host-rt" "$TMP/colour-rt"
+  mkdir -p "$TMP/base/bin" "$TMP/base/third_party/llvm/bin" "$TMP/src" "$TMP/stdsrc" "$TMP/host-rt" "$TMP/colour-rt" \
+    "$TMP/cpp-src/third_party/llvm-project/llvm/include" \
+    "$TMP/cpp-src/build/build/third_party/llvm/include" \
+    "$TMP/cpp-src/build/build/include" "$TMP/cpp-src/build/build/schema"
+  for rel in third_party/llvm-project/llvm/include build/build/third_party/llvm/include \
+    build/build/include build/build/schema; do
+    printf 'fixture\n' > "$TMP/cpp-src/$rel/fixture.h"
+  done
   printf 'base\n' > "$TMP/base/bin/cjc"
   cp /bin/true "$TMP/base/third_party/llvm/bin/opt"
   printf 'compile-option = "-O2"\n' > "$TMP/src/cjpm.toml"
@@ -74,7 +80,8 @@ make_dry_fixture() {
 dry_run() {
   local host_sha="${1:-$HOST_SHA}" ast_sha="${2:-$AST_SHA}"
   bash "$PRODUCT" \
-    --work "$TMP/work" --src "$TMP/src" --stdsrc "$TMP/stdsrc" --base "$TMP/base" \
+    --work "$TMP/work" --src "$TMP/src" --cjcj-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    --stdsrc "$TMP/stdsrc" --cpp-src "$TMP/cpp-src" --base "$TMP/base" \
     --host-llvm-so "$TMP/libLLVM-15.so" --host-llvm-sha256 "$host_sha" \
     --ast-support "$TMP/ast.a" --ast-support-sha256 "$ast_sha" \
     --colour-tuple "$TMP/colour-tuple" --colour-llvm-sha "$COLOUR_SHA" \
@@ -86,6 +93,10 @@ check_count() {
   local label="$1" expected="$2" pattern="$3" file="$4" count
   count=$(/usr/bin/grep -c -- "$pattern" "$file" || true)
   [ "$count" -eq "$expected" ] || fail "$label" "pattern count=$count expected=$expected: $pattern"
+}
+
+check_shim_call_count() {
+  check_count SHIM 2 'CMD shim build label=' "$1"
 }
 
 check_dry_contract() {
@@ -104,6 +115,13 @@ check_dry_contract() {
   check_count CJPM 1 'CMD cjpm build bin=' "$log"
   check_count CJPM 1 'CMD cjpm build -j 1 bin=' "$log"
   check_count CJPM 1 'heap=20GB' "$log"
+  check_shim_call_count "$log"
+  check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"
+  check_count SHIM 1 'CMD shim build label=stage1 .*source-object=.*/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o .*sdk=.*/sdk-stage1 .*runtime=.*/colour-rt' "$log"
+  check_count SHIM 2 'CJCJ_COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$log"
+  check_count SHIM 1 'CJCJ_LLVM_SHIM_O=.*/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o' "$log"
+  check_count SHIM 2 'OUTPUT stage[01]-shim-cpp .*sha256=planned' "$log"
+  check_count SHIM 2 'OUTPUT stage[01]-shim-config .*sha256=planned' "$log"
   check_count A4 2 'rm\\ -rf\\ build/build' "$log"
   check_count A4 2 '--target-lib' "$log"
   check_count A4 4 'CMD env -i HOME=/root CANGJIE_HOME=.*bash -c' "$log"
@@ -236,7 +254,8 @@ fault_src_file() {
   make_dry_fixture
   printf 'single\n' > "$TMP/single.cj"
   bash "$PRODUCT" \
-    --work "$TMP/work" --src "$TMP/single.cj" --stdsrc "$TMP/stdsrc" --base "$TMP/base" \
+    --work "$TMP/work" --src "$TMP/single.cj" --cjcj-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    --stdsrc "$TMP/stdsrc" --cpp-src "$TMP/cpp-src" --base "$TMP/base" \
     --host-llvm-so "$TMP/libLLVM-15.so" --host-llvm-sha256 "$HOST_SHA" \
     --ast-support "$TMP/ast.a" --ast-support-sha256 "$AST_SHA" \
     --colour-tuple "$TMP/colour-tuple" --colour-llvm-sha "$COLOUR_SHA" \
@@ -256,6 +275,21 @@ fault_product_missing() {
   mkdir -p "$TMP/empty-bin"
   bash -c 'source "$1"; STAGE=test-product; DRY=0; resolve_cjpm_product "$2" cjcj-stage1' \
     bash "$PRODUCT" "$TMP/empty-bin"
+}
+
+fault_shim_wiring() {
+  make_dry_fixture
+  sed '/^[[:space:]]*shim_build stage0 /d' "$PRODUCT" > "$TMP/bootstrap-skip-stage0-shim.sh"
+  PRODUCT="$TMP/bootstrap-skip-stage0-shim.sh"
+  dry_run > "$TMP/skip-stage0-shim.log"
+  check_shim_call_count "$TMP/skip-stage0-shim.log"
+}
+
+check_shim_wiring() {
+  make_dry_fixture
+  dry_run > "$TMP/shim-wiring.log"
+  check_shim_call_count "$TMP/shim-wiring.log"
+  echo 'PASS shim wiring stage0+stage1'
 }
 
 case "${1:-test}" in
@@ -362,6 +396,12 @@ case "${1:-test}" in
   fault-product-missing)
     fault_product_missing
     ;;
+  fault-shim-wiring)
+    fault_shim_wiring
+    ;;
+  check-shim-wiring)
+    check_shim_wiring
+    ;;
   ruler-control)
     [ $# -eq 4 ] || fail ruler-control 'usage: ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA'
     # shellcheck disable=SC1090 # Product path is resolved above.
@@ -374,6 +414,8 @@ case "${1:-test}" in
     make_dry_fixture
     dry_run > "$TMP/dry.log"
     check_dry_contract "$TMP/dry.log"
+    bash "$0" check-shim-wiring > "$TMP/shim-wiring-positive.log" ||
+      fail SHIM 'positive shim wiring check failed'
     make_sdk_fixture
     run_sdk_so "$SDK_PRODUCT" "$TMP/sdk-so" > "$TMP/sdk-so.log"
     cmp -s "$TMP/libLLVM-15.so" "$TMP/sdk-so/third_party/llvm/lib/libLLVM-15.so" ||
@@ -395,7 +437,7 @@ case "${1:-test}" in
     /usr/bin/grep -q 'shape=ok Int64.ti=2 FFI-archives=1' "$TMP/isolation-positive.log" ||
       fail A4 'isolated real command path did not pass'
     /usr/bin/grep -q 'cjpm build' "$TMP/dry.log" || fail CJPM 'dry-run CMD missing cjpm build'
-    for arm in a1 a2 a3 a4 host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing; do
+    for arm in a1 a2 a3 a4 host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
       log="$TMP/fault-$arm.log"
       if bash "$0" "fault-$arm" > "$log" 2>&1; then
         fail "$arm" 'fault arm unexpectedly passed'
@@ -422,6 +464,7 @@ case "${1:-test}" in
         src-file) marker='BOOTSTRAP-FAIL \[init\] --src 必须是含 cjpm.toml 的 cjcj 仓根，拒绝单文件';;
         compile-option) marker='BOOTSTRAP-FAIL \[test-O1\] 隔离副本 cjpm.toml 无 compile-option = "-O2" 可改';;
         product-missing) marker='BOOTSTRAP-FAIL \[test-product\] cjcj-stage1 cjpm 产物缺失';;
+        shim-wiring) marker='TEST-FAIL \[SHIM\] pattern count=1 expected=2: CMD shim build label=';;
       esac
       /usr/bin/grep -Eq "$marker" "$log" || fail "$arm" "fault arm missed precise marker; log=$log"
       echo "PASS precise-red $arm"
@@ -429,7 +472,7 @@ case "${1:-test}" in
     echo 'PASS bootstrap dry contracts, LLVM assembly, and positive controls'
     ;;
   *)
-    echo "usage: $0 [test|dry-run|positive-a1|fault-a1|fault-a2|fault-a3|fault-a4|fault-host-sha|fault-ast-sha|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
+    echo "usage: $0 [test|dry-run|check-shim-wiring|positive-a1|fault-a1|fault-a2|fault-a3|fault-a4|fault-host-sha|fault-ast-sha|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
     exit 2
     ;;
 esac
