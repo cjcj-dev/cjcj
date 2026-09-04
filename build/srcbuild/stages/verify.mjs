@@ -8,6 +8,7 @@ import {run as runCommand} from '../../lib/runner.mjs';
 import {assertRuntimeSplit, hostLoaderPath, targetLoaderPath} from '../../lib/runtime-split.mjs';
 import {assertGcUnitLanguageDone} from '../gc-unit-gate.mjs';
 import {ensureDir, requireFile} from './common.mjs';
+import {assertPackagedLineage} from '../../lib/package-lineage.mjs';
 
 const logger = getLogger('cangjie_build.stages.verify');
 const HELLO_SOURCE = 'main() { println("Hello, Cangjie") }\n';
@@ -46,6 +47,9 @@ export async function run(config) {
     : requireFile(path.join(process.env.CJCJ_SRCBUILD_HOST_SDK, 'bin', 'cjc'), {stage: 'verify.host-cjc'});
   await stage('verify', async () => {
     assertGcUnitLanguageDone(config, cangjieDir);
+    await assertPackagedLineage(cangjieDir, {
+      allowNightlyStd: process.env.CJCJ_ALLOW_NIGHTLY_STD === '1',
+    });
     await runCommand([
       'bash', '-c',
       'set -e; source "$1"; export "$2=$3"; "$5" hello.cj -o hello; export "$2=$4"; ./hello',

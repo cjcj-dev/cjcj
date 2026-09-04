@@ -24,6 +24,7 @@ import {
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
 import {writeToolchainIdentity} from '../build/lib/toolchain-identity.mjs';
 import {assertNoVerifierReportArtifacts} from './verifier_artifact_gate.mjs';
+import {assertPackagedLineage, collectStdArtifactShas} from '../build/lib/package-lineage.mjs';
 import {
   PACKAGED_LLVM_TOOL_NAMES,
   formatPackagedLlvmToolsManifest,
@@ -242,6 +243,7 @@ if (!allowStockRuntime) {
 //   (b) modules tree root containing <tuple>/std
 //   (c) the std package dir itself (…/std with std.core.a …)
 console.log('[4/9] overlay rebuilt std');
+const officialStdShas = await collectStdArtifactShas(stage);
 let stdProvenance = '';
 if (stdDir) {
   const stdSource = await fs.realpath(stdDir);
@@ -648,6 +650,18 @@ if (stdDir) {
   console.error('  String.indexOf has no tag test before reading a bit48-coloured pointer, which');
   console.error('  segfaults under our runtime -- it is the reason this release rebuilds std at all.');
   console.error('  Pass --std-dir <rebuilt std>, or --allow-nightly-std if you mean it.');
+  process.exit(3);
+}
+
+try {
+  const lineage = await assertPackagedLineage(stage, {officialStdShas, allowNightlyStd});
+  if (lineage.allowedNightly) {
+    console.log('  lineage: --allow-nightly-std explicit; official std hashes present');
+  } else {
+    console.log(`  lineage: ${lineage.message}`);
+  }
+} catch (error) {
+  console.error(`  ERROR: ${error.message}`);
   process.exit(3);
 }
 

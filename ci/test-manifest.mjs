@@ -32,6 +32,7 @@ export const GATING = Object.freeze([
   'build/test/gate-apparatus.test.mjs',
   'build/test/git.test.mjs',
   'build/test/hle-artifact.test.mjs',
+  'build/test/package-lineage.test.mjs',
   'build/test/package-provenance.test.mjs',
   'build/test/package-safety.test.mjs',
   'build/test/package-std-integrity.test.mjs',

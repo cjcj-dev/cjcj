@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {runGrepProbe} from '../../../build/lib/fail-closed-probes.mjs';
+import {assertPackagedLineage} from '../../../build/lib/package-lineage.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 
 $.stdio = 'inherit';
@@ -180,6 +181,12 @@ if (referenceCompile.exitCode !== 0) {
 if (referenceCompile.stdout) process.stdout.write(referenceCompile.stdout);
 if (referenceCompile.stderr) process.stderr.write(referenceCompile.stderr);
 console.log('[preflight] PASS items=6 probes=4/4');
+
+await phase('lineage', async () => {
+  await assertPackagedLineage(sdk, {
+    allowNightlyStd: process.env.CJCJ_ALLOW_NIGHTLY_STD === '1',
+  });
+});
 
 await phase('difftest', async () => {
   console.log('[difftest] compare selfhost SDK and source-built C++ oracle');
