@@ -10,5 +10,5 @@ diff --git a/packages/codegen/src/IRBuilder.cj b/packages/codegen/src/IRBuilder.
 +        let align = cgMod.GetABITypeAlignment(structType)
 +        return CreateMemCpy(dest, align, value.GetRawValue(), align, size)
      }
- 
+
      private func StoreVArrayManagedMemberValue(baseObject: LLVMValueRef, dest: LLVMValueRef, value: CGValue,
