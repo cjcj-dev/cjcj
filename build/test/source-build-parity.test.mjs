@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {buildConfig} from '../lib/config.mjs';
+import {assertHostContract, hostContract} from '../lib/targets.mjs';
 import {resolveSourceMirror, sourceFetchArguments, sourceLsRemoteArguments} from '../lib/git.mjs';
 import {formatCommand, run as runCommand} from '../lib/runner.mjs';
 import {
@@ -43,7 +44,7 @@ const COMMANDS = [
   'install-target-python', 'fetch', 'build', 'package', 'verify', 'run-all',
 ];
 const GLOBAL_OPTIONS = [
-  '--workspace', '--build-root', '--target', '--build-type', '--cangjie-version',
+  '--workspace', '--build-root', '--target', '--host-profile', '--build-type', '--cangjie-version',
   '--stdx-version', '--log-level', '--version', '--help',
 ];
 
@@ -159,6 +160,54 @@ test('native target contracts match the source-build runner matrix', () => {
       [osName, arch, tuple, llvmPlatform, bitcode],
     );
   }
+});
+
+test('every source target declares one host, SDK name, and cross-build policy', () => {
+  const expected = {
+    'linux-x64': ['linux', 'x64', 'linux-x64', false, true],
+    'linux-aarch64': ['linux', 'arm64', 'linux-aarch64', false, false],
+    'darwin-arm64': ['darwin', 'arm64', 'mac-aarch64', false, false],
+    'darwin-x64': ['darwin', 'x64', 'mac-x64', false, false],
+    'windows-x64': ['linux', 'x64', 'windows-x64', true, false],
+  };
+  for (const [target, contract] of Object.entries(expected)) {
+    const actual = hostContract(target);
+    assert.deepEqual(
+      [actual.platform, actual.arch, actual.sdkName, actual.crossCompile, actual.kkk2Supported],
+      contract,
+    );
+    assert.match(actual.requiredHost, new RegExp(`^${contract[0]}/${contract[1]}`));
+  }
+});
+
+test('assert-host-contract helper prints HOST_CONTRACT or exits 2 with required host', () => {
+  const helper = path.resolve(import.meta.dirname, '../../ci/srcbuild/steps/assert-host-contract.mjs');
+  const ok = spawnSync(process.execPath, [helper, '--target', 'linux-x64', '--profile', 'kkk2'], {encoding: 'utf8'});
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /HOST_CONTRACT target=linux-x64 .*sdk=linux-x64 cross=no profile=kkk2/);
+  const windows = spawnSync(process.execPath, [helper, '--target', 'windows-x64', '--profile', 'kkk2'], {encoding: 'utf8'});
+  assert.equal(windows.status, 2, windows.stdout + windows.stderr);
+  assert.match(windows.stderr, /required host/);
+});
+
+test('host assertion accepts the matching platform and rejects a wrong one before build stages', () => {
+  assert.equal(assertHostContract('linux-x64', {
+    platform: 'linux', arch: 'x64', profile: 'kkk2',
+  }).target, 'linux-x64');
+  assert.throws(
+    () => assertHostContract('darwin-arm64', {platform: 'linux', arch: 'x64'}),
+    /target darwin-arm64 required host darwin\/arm64.*current host linux\/x64/,
+  );
+  assert.throws(
+    () => assertHostContract('windows-x64', {
+      platform: 'linux', arch: 'x64', profile: 'kkk2',
+    }),
+    /target windows-x64 required host linux\/x64 with MinGW toolchain.*kkk2 supports only linux-x64/,
+  );
+  assert.throws(
+    () => assertHostContract('plan9-mips', {platform: 'linux', arch: 'x64', profile: 'kkk2'}),
+    /unknown target 'plan9-mips'/,
+  );
 });
 
 test('source builds fail closed unless host runtime is plain and target runtime is coloured', () => {
@@ -551,6 +600,8 @@ test('CLI commands, options, defaults, and help match cli.py', () => {
 test('CLI usage errors exit 2 like Typer and do not silently accept arguments', () => {
   const cases = [
     [], ['-h'], ['unknown-command'], ['--target', 'macos-arm64', 'print-version'],
+    ['--target', 'darwin-arm64', 'print-version'],
+    ['--target', 'windows-x64', '--host-profile', 'kkk2', 'print-version'],
     ['--build-type', 'lto', 'print-version'], ['--stdx-version', 'nope', 'print-version'],
     ['--stdx-version', '1.0', 'print-version'], ['--stdx-version', '1e2', 'print-version'],
     ['--log-level', 'debug', 'print-version'], ['build'], ['build', 'unknown-stage'],

@@ -234,8 +234,7 @@ source "$REPO_ROOT/build/lib/srcbuild_git.sh"
 
 usage() {
     cat <<'EOF'
-Usage: tools/srcbuild_kkk2.sh [TARGET [JOBS [FROM_STEP]]]
-       tools/srcbuild_kkk2.sh [--target TARGET] [--jobs N]
+Usage: tools/srcbuild_kkk2.sh [--target TARGET] [--jobs N]
                               [--from-step N] [--through-step N]
                               [--verifier-report ABSOLUTE_TSV] [--dry-run]
        source tools/srcbuild_kkk2.sh --lib-only
@@ -287,7 +286,6 @@ THROUGH_STEP=33
 DRY_RUN=0
 VERIFIER_REPORT=${CJCJ_SRCBUILD_VERIFIER_REPORT:-}
 
-positional=()
 while (($#)); do
     case "$1" in
         --target)
@@ -330,8 +328,7 @@ while (($#)); do
             ;;
         --)
             shift
-            positional+=("$@")
-            break
+            (($# == 0)) || { echo "unexpected positional argument: $1; use --target TARGET" >&2; exit 2; }
             ;;
         -*)
             echo "unknown option: $1" >&2
@@ -339,22 +336,14 @@ while (($#)); do
             exit 2
             ;;
         *)
-            positional+=("$1")
-            shift
+            echo "unexpected positional argument: $1; use --target TARGET" >&2
+            exit 2
             ;;
     esac
 done
 
-if ((${#positional[@]} > 3)); then
-    echo "expected at most three positional arguments" >&2
-    exit 2
-fi
-if ((${#positional[@]} >= 1)); then TARGET=${positional[0]}; fi
-if ((${#positional[@]} >= 2)); then
-    JOBS=${positional[1]}
-    JOBS_EXPLICIT=1
-fi
-if ((${#positional[@]} >= 3)); then FROM_STEP=${positional[2]}; fi
+node "$REPO_ROOT/ci/srcbuild/steps/assert-host-contract.mjs" \
+    --target "$TARGET" --profile kkk2 || exit $?
 
 inherited_cpuset=$(current_cpuset) || exit 2
 if [[ -n ${CJCJ_SRCBUILD_CPUSET:-} ]]; then
@@ -368,10 +357,6 @@ CPUSET_WIDTH=$(cpuset_width "$CPUSET") || {
 }
 if ((JOBS_EXPLICIT == 0)); then JOBS=$CPUSET_WIDTH; fi
 
-[[ $TARGET == linux-x64 ]] || {
-    echo "kkk2 is Linux/x86_64; srcbuild target '$TARGET' requires its matching native runner" >&2
-    exit 2
-}
 [[ $JOBS =~ ^[1-9][0-9]*$ ]] || { echo "jobs must be a positive integer" >&2; exit 2; }
 ((JOBS <= CPUSET_WIDTH)) || {
     echo "jobs ($JOBS) must not exceed selected CPU window width ($CPUSET_WIDTH for $CPUSET)" >&2

@@ -9,6 +9,7 @@ const linuxX64 = Object.freeze({
   spec: Object.freeze({
     key: 'linux-x64', sdkName: 'linux-x64', archiveFormat: 'tar.gz',
     exeSuffix: '', outputDirSuffix: 'x86_64', crossCompile: false, needsMingw: false,
+    kkk2Supported: true,
     needsStaticLibs: true, os: 'linux', arch: 'x86_64', nodePlatform: 'linux', nodeArch: 'x64',
     runtimeTuple: 'linux_x86_64_cjnative', llvmPlatform: 'linux_x86_64',
     llvmBinDir: '/usr/lib/llvm-15/bin', opensslLibDir: '/usr/lib/x86_64-linux-gnu',
@@ -29,6 +30,7 @@ const linuxAArch64 = Object.freeze({
   spec: Object.freeze({
     key: 'linux-aarch64', sdkName: 'linux-aarch64', archiveFormat: 'tar.gz',
     exeSuffix: '', outputDirSuffix: 'aarch64', crossCompile: false, needsMingw: false,
+    kkk2Supported: false,
     needsStaticLibs: true, os: 'linux', arch: 'aarch64', nodePlatform: 'linux', nodeArch: 'arm64',
     runtimeTuple: 'linux_aarch64_cjnative', llvmPlatform: 'linux_aarch64',
     llvmBinDir: '/usr/lib/llvm-15/bin', opensslLibDir: '/usr/lib/aarch64-linux-gnu',
@@ -49,6 +51,7 @@ const darwinArm64 = Object.freeze({
   spec: Object.freeze({
     key: 'darwin-arm64', sdkName: 'mac-aarch64', archiveFormat: 'tar.gz',
     exeSuffix: '', outputDirSuffix: 'aarch64', crossCompile: false, needsMingw: false,
+    kkk2Supported: false,
     needsStaticLibs: false, os: 'darwin', arch: 'aarch64', nodePlatform: 'darwin', nodeArch: 'arm64',
     runtimeTuple: 'darwin_aarch64_cjnative', llvmPlatform: 'darwin_aarch64',
     llvmBinDir: '/opt/homebrew/opt/llvm@16/bin', opensslLibDir: '/opt/homebrew/opt/openssl@3/lib',
@@ -69,6 +72,7 @@ const darwinX64 = Object.freeze({
   spec: Object.freeze({
     key: 'darwin-x64', sdkName: 'mac-x64', archiveFormat: 'tar.gz',
     exeSuffix: '', outputDirSuffix: 'x86_64', crossCompile: false, needsMingw: false,
+    kkk2Supported: false,
     needsStaticLibs: false, os: 'darwin', arch: 'x86_64', nodePlatform: 'darwin', nodeArch: 'x64',
     runtimeTuple: 'darwin_x86_64_cjnative', llvmPlatform: 'darwin_x86_64',
     llvmBinDir: '/usr/local/opt/llvm@16/bin', opensslLibDir: '/usr/local/opt/openssl@3/lib',
@@ -89,6 +93,7 @@ const windowsX64 = Object.freeze({
   spec: Object.freeze({
     key: 'windows-x64', sdkName: 'windows-x64', archiveFormat: 'zip',
     exeSuffix: '.exe', outputDirSuffix: 'x86_64', crossCompile: true, needsMingw: true,
+    kkk2Supported: false,
     needsStaticLibs: false, os: 'windows', arch: 'x86_64', nodePlatform: 'linux', nodeArch: 'x64',
     runtimeTuple: 'windows_x86_64_cjnative', llvmPlatform: 'windows_x86_64',
     hostRuntimeTuple: 'linux_x86_64_cjnative', hostRuntimeLibrary: 'libcangjie-runtime.so',
@@ -122,4 +127,41 @@ export function getTarget(key) {
 
 export function allTargets() {
   return [...registry.keys()].sort();
+}
+
+export function hostContract(key) {
+  const {spec} = getTarget(key);
+  const cross = spec.crossCompile ? 'yes' : 'no';
+  const toolchain = spec.needsMingw ? ' with MinGW toolchain' : '';
+  return Object.freeze({
+    target: spec.key,
+    platform: spec.nodePlatform,
+    arch: spec.nodeArch,
+    sdkName: spec.sdkName,
+    crossCompile: spec.crossCompile,
+    kkk2Supported: spec.kkk2Supported,
+    requiredHost: `${spec.nodePlatform}/${spec.nodeArch}${toolchain} (cross=${cross})`,
+  });
+}
+
+export function assertHostContract(key, {
+  platform = process.platform,
+  arch = process.arch,
+  profile = 'generic',
+} = {}) {
+  if (!['generic', 'kkk2'].includes(profile)) {
+    throw new ConfigError(`unknown host profile '${profile}'; valid: generic, kkk2`);
+  }
+  const contract = hostContract(key);
+  if (platform !== contract.platform || arch !== contract.arch) {
+    throw new ConfigError(
+      `target ${key} required host ${contract.requiredHost}; current host ${platform}/${arch}`,
+    );
+  }
+  if (profile === 'kkk2' && !contract.kkk2Supported) {
+    throw new ConfigError(
+      `target ${key} required host ${contract.requiredHost}; host profile kkk2 supports only linux-x64`,
+    );
+  }
+  return contract;
 }

@@ -20,6 +20,10 @@ function runBash(source, args = []) {
   return spawnSync('bash', ['-c', source, 'bash', ...args], {encoding: 'utf8'});
 }
 
+function runDriver(args) {
+  return runBash('bash "$1" "${@:2}"', [scriptPath, ...args]);
+}
+
 function runGit(args) {
   const result = spawnSync('git', args, {encoding: 'utf8'});
   assert.equal(result.status, 0, result.stderr);
@@ -76,6 +80,40 @@ test('source-build CPU windows preserve explicit placement and derive their widt
     + 'if explicit_cpuset 63-48; then exit 17; fi\n';
   const result = runBash(invoke, [scriptPath]);
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('kkk2 calls the shared target/host assertion before CPU placement and P10', () => {
+  const assertion = script.indexOf('assert-host-contract.mjs');
+  const affinity = script.indexOf('inherited_cpuset=$(current_cpuset)');
+  const state = script.indexOf('readonly STATE_ROOT=');
+  const p10 = script.indexOf('step_31() {');
+  assert.ok(assertion >= 0);
+  assert.ok(assertion < affinity && affinity < state && state < p10);
+  assert.match(script, /--target "\$TARGET" --profile kkk2 \|\| exit \$\?/);
+});
+
+test('target has no positional alias', () => {
+  const result = runDriver(['windows-x64', '--dry-run']);
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.match(result.stderr, /unexpected positional argument: windows-x64; use --target TARGET/);
+  assert.doesNotMatch(result.stdout + result.stderr, /HOST_CONTRACT|Bootstrap stage0|DRY_RUN COMMAND=/);
+});
+
+test('kkk2 dry-run rejects windows-x64 and unknown target before P10', () => {
+  const windows = runDriver(['--target', 'windows-x64', '--dry-run']);
+  assert.equal(windows.status, 2, windows.stdout + windows.stderr);
+  assert.match(windows.stderr, /required host/);
+  assert.match(windows.stderr, /kkk2 supports only linux-x64/);
+  assert.doesNotMatch(windows.stdout + windows.stderr, /DRY_RUN COMMAND=|step_31|Bootstrap stage0/);
+
+  const unknown = runDriver(['--target', 'plan9-mips', '--dry-run']);
+  assert.equal(unknown.status, 2, unknown.stdout + unknown.stderr);
+  assert.match(unknown.stderr, /unknown target 'plan9-mips'/);
+  assert.doesNotMatch(unknown.stdout + unknown.stderr, /DRY_RUN COMMAND=/);
+
+  const aarch64 = runDriver(['--target', 'linux-aarch64', '--dry-run']);
+  assert.equal(aarch64.status, 2, aarch64.stdout + aarch64.stderr);
+  assert.match(aarch64.stderr, /required host linux\/arm64/);
 });
 
 test('source-build records affinity from the long top-level make instead of an earlier short make', t => {

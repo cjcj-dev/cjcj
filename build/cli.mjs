@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {buildConfig, DEFAULT_BUILD_TYPE, REPO_NAMES, VALID_BUILD_TYPES} from './lib/config.mjs';
 import {BuildError, ConfigError} from './lib/errors.mjs';
 import {configureLogging, getLogger} from './lib/logging.mjs';
-import {allTargets} from './lib/targets.mjs';
+import {allTargets, assertHostContract} from './lib/targets.mjs';
 import * as sccache from './toolchain/sccache.mjs';
 import * as mingw from './toolchain/mingw.mjs';
 import * as staticLibs from './toolchain/static-libs.mjs';
@@ -37,6 +37,7 @@ function usage() {
     + '  --workspace PATH\n'
     + '  --build-root PATH\n'
     + '  --target TARGET (default: linux-x64)\n'
+    + '  --host-profile generic|kkk2 (default: generic)\n'
     + `  --build-type TYPE (default: ${DEFAULT_BUILD_TYPE})\n`
     + '  --cangjie-version VERSION\n'
     + '  --stdx-version INTEGER (default: 1)\n'
@@ -70,6 +71,7 @@ function optionValue(args, index, name) {
 function parseGlobal(args) {
   const options = {
     targetKey: 'linux-x64', buildType: DEFAULT_BUILD_TYPE, stdxVersion: 1, logLevel: 'INFO',
+    hostProfile: process.env.CJCJ_SRCBUILD_HOST_PROFILE || 'generic',
   };
   let index = 0;
   while (index < args.length && !COMMANDS.has(args[index])) {
@@ -80,6 +82,7 @@ function parseGlobal(args) {
     let parsed;
     for (const [flag, key] of [
       ['--workspace', 'workspace'], ['--build-root', 'buildRoot'], ['--target', 'targetKey'],
+      ['--host-profile', 'hostProfile'],
       ['--build-type', 'buildType'], ['--cangjie-version', 'cangjieVersion'],
       ['--stdx-version', 'stdxVersion'], ['--log-level', 'logLevel'],
     ]) {
@@ -269,6 +272,7 @@ async function main() {
   configureLogging(parsed.options.logLevel);
   sccache.maybeEnable();
   const config = buildConfig(parsed.options);
+  assertHostContract(parsed.options.targetKey, {profile: parsed.options.hostProfile});
   await dispatch(config, parsed.command, parsed.rest);
 }
 
