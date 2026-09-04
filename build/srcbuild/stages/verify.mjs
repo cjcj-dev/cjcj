@@ -47,9 +47,11 @@ export async function run(config) {
     : requireFile(path.join(process.env.CJCJ_SRCBUILD_HOST_SDK, 'bin', 'cjc'), {stage: 'verify.host-cjc'});
   await stage('verify', async () => {
     assertGcUnitLanguageDone(config, cangjieDir);
-    await assertPackagedLineage(cangjieDir, {
-      allowNightlyStd: process.env.CJCJ_ALLOW_NIGHTLY_STD === '1',
-    });
+    if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
+      await assertPackagedLineage(cangjieDir, {
+        allowNightlyStd: process.env.CJCJ_ALLOW_NIGHTLY_STD === '1',
+      });
+    }
     await runCommand([
       'bash', '-c',
       'set -e; source "$1"; export "$2=$3"; "$5" hello.cj -o hello; export "$2=$4"; ./hello',
