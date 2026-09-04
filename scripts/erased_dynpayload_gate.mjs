@@ -117,7 +117,7 @@ function checkIR() {
   `functions=${rangeFunctions.length} expected=${expected.box} helper=${Number(boxTyped)} raw=${Number(boxRaw)}`);
 
   const lazyIR = compileFixture('externally_locked_lazy_reverse');
-  const lazyFunctions = functionSlices(lazyIR, ['ExternallyLockedLazy', 'compute', '$withoutTI']);
+  const lazyFunctions = functionSlices(lazyIR, ['ExternallyLockedLazy', 'computeFrom', '$withoutTI']);
   const lazyBody = lazyFunctions.join('\n');
   const step5Typed = lazyBody.includes('llvm.cj.gcread.generic');
   const step5Raw = lazyBody.includes('llvm.memcpy.p1i8.p1i8');

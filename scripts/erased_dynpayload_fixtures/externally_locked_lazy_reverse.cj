@@ -10,11 +10,17 @@ public struct ExternallyLockedLazy<T> {
     public mut func compute(value: T): Unit {
         this.value = value
     }
+
+    // Inner mut call: `this` is the without-TI payload with a tracked base, so
+    // ApplyImpl emits the raw $withoutTI callee and ReplaceFunction step 5 runs.
+    public mut func computeFrom(value: T): Unit {
+        this.compute(value)
+    }
 }
 
 public func callCompute<T>(lazy: ExternallyLockedLazy<T>, value: T): Unit {
     var local = lazy
-    local.compute(value)
+    local.computeFrom(value)
 }
 
 main() {
