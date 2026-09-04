@@ -90,8 +90,11 @@ function compileFixture(name) {
   const armRoot = path.resolve(outputRoot, name);
   const temps = path.join(armRoot, 'temps');
   fs.mkdirSync(temps, {recursive: true});
-  const args = [fixture, '--output-type=staticlib', '--dump-ir', '--dump-to-screen',
-    '--save-temps', temps, '-o', path.join(armRoot, `${name}.a`)];
+  // -g is the product switch that runs EmitPackageIR.ReplaceFunction; -O2 and
+  // --apc=1 mirror the stdlib package recipe that exposes these two sites.
+  const args = [fixture, '--output-type=staticlib', '-g', '-O2', '--apc=1', '-j1',
+    '--dump-ir', '--dump-to-screen', '--save-temps', temps,
+    '-o', path.join(armRoot, `${name}.a`)];
   const run = spawnSync(path.resolve(compiler), args, {encoding: 'utf8', env: process.env});
   fs.writeFileSync(path.join(armRoot, 'compile.log'), `${run.stdout || ''}${run.stderr || ''}`);
   fs.writeFileSync(path.join(armRoot, 'compile.rc'), `${run.status ?? 255}\n`);
