@@ -156,9 +156,11 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
         return objectValue
     }
     if (IsThisArgOfStructMethod(sourceValue)) {
-        let tmp = irBuilder.CallClassIntrinsicAlloc(DeRef(sourceTy))
+        let sourceType = DeRef(sourceTy)
+        let typeInfo = irBuilder.CreateTypeInfo(sourceType)
+        let size = irBuilder.GetLayoutSize_32(sourceType)
+        let tmp = irBuilder.CallClassIntrinsicAlloc(ArrayList<LLVMValueRef>([typeInfo, size]))
         let payloadPtr = irBuilder.GetPayloadFromObject(tmp)
-        let size = irBuilder.GetLayoutSize_32(DeRef(sourceTy))
         if (irBuilder.IsTypeContainsRef(sourceCGType.GetLLVMType())) {
             let args = ArrayList<LLVMValueRef>()
             args.add(tmp)
@@ -167,7 +169,9 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
             args.add(size)
             irBuilder.CallGCWriteAgg(sourceCGType.GetLayoutType(), args)
         } else {
-            irBuilder.CreateMemCpy(payloadPtr, 0u32, sourceRawValue, 0u32, size)
+            // This source is the native without-TI receiver.  C1 will fold this
+            // direct arm into CallGCWriteGenericPayloadFromSrc during merge.
+            irBuilder.CallGCWriteGenericPayload(tmp, sourceRawValue, size)
         }
         return tmp
     }
