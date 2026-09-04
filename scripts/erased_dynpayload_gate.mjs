@@ -13,11 +13,20 @@ const sourceRoot = path.resolve(option('--source-root', path.join(import.meta.di
 const compiler = option('--compiler');
 const outputRoot = option('--out');
 const expectation = option('--expect', 'green');
+const baselineReport = option('--baseline-report');
+const candidateReport = option('--candidate-report');
+const reportExpectation = option('--report-expect', expectation);
 if (!['green', 'box-cut', 'step5-cut'].includes(expectation)) {
   throw new Error(`unsupported --expect value: ${expectation}`);
 }
-if (Boolean(compiler) !== Boolean(outputRoot)) {
-  throw new Error('--compiler and --out must be provided together');
+if (!['green', 'box-cut', 'step5-cut'].includes(reportExpectation)) {
+  throw new Error(`unsupported --report-expect value: ${reportExpectation}`);
+}
+if (compiler && !outputRoot) {
+  throw new Error('--compiler requires --out');
+}
+if (Boolean(baselineReport) !== Boolean(candidateReport)) {
+  throw new Error('--baseline-report and --candidate-report must be provided together');
 }
 
 const expected = {
@@ -112,8 +121,105 @@ function checkIR() {
   `functions=${lazyFunctions.length} expected=${expected.step5} helper=${Number(step5Typed)} raw=${Number(step5Raw)}`);
 }
 
+const reportFields = [
+  'module', 'function', 'rule', 'instruction', 'dest_as', 'src_as', 'length',
+  'dest_root', 'src_root', 'source_type',
+];
+
+function readReport(file) {
+  const lines = fs.readFileSync(path.resolve(file), 'utf8').split(/\r?\n/).filter(Boolean);
+  if (lines.length === 0 || lines[0] !== reportFields.join('\t')) {
+    throw new Error(`${file}: missing exact ten-field header`);
+  }
+  return lines.slice(1).filter(line => line !== reportFields.join('\t')).map((line, index) => {
+    const fields = line.split('\t');
+    if (fields.length !== reportFields.length) {
+      throw new Error(`${file}:${index + 2}: expected ${reportFields.length} fields, got ${fields.length}`);
+    }
+    return Object.fromEntries(reportFields.map((name, fieldIndex) => [name, fields[fieldIndex]]));
+  });
+}
+
+function rowKey(row) {
+  return reportFields.map(field => row[field]).join('\t');
+}
+
+function targetKind(row) {
+  if (!row.rule.startsWith('Bare memcpy/memmove payload provenance is unknown') ||
+      row.instruction !== 'memcpy' || !row.length.startsWith('%')) return '';
+  if (row.dest_as === '1' && row.src_as === '0' && row.function.includes('Range') &&
+      /provide|provider/.test(row.function) && row.dest_root === 'call' &&
+      row.src_root === 'alloca' && row.source_type === 'i8*') return 'p1p0';
+  if (row.dest_as === '1' && row.src_as === '1' &&
+      row.function.includes('ExternallyLockedLazy') && row.function.includes('compute') &&
+      row.dest_root === 'argument' && row.src_root === 'call' &&
+      row.source_type === 'i8* addrspace(1)*') return 'p1p1';
+  return '';
+}
+
+function multiset(rows) {
+  const result = new Map();
+  for (const row of rows) {
+    const key = rowKey(row);
+    const found = result.get(key);
+    if (found) found.count += 1;
+    else result.set(key, {row, count: 1});
+  }
+  return result;
+}
+
+function subtract(leftRows, rightRows) {
+  const left = multiset(leftRows);
+  const right = multiset(rightRows);
+  const difference = [];
+  for (const [key, entry] of left) {
+    const count = entry.count - (right.get(key)?.count || 0);
+    for (let index = 0; index < count; index += 1) difference.push(entry.row);
+  }
+  return difference;
+}
+
+function countsByTarget(rows) {
+  const counts = {p1p0: 0, p1p1: 0, other: 0};
+  for (const row of rows) counts[targetKind(row) || 'other'] += 1;
+  return counts;
+}
+
+function checkReport() {
+  const baseline = readReport(baselineReport);
+  const candidate = readReport(candidateReport);
+  const removed = subtract(baseline, candidate);
+  const added = subtract(candidate, baseline);
+  const baselineTargets = countsByTarget(baseline);
+  const candidateTargets = countsByTarget(candidate);
+  const removedTargets = countsByTarget(removed);
+  const expectedRemoved = {
+    green: ['p1p0', 'p1p1'],
+    'box-cut': ['p1p1'],
+    'step5-cut': ['p1p0'],
+  }[reportExpectation];
+  const expectedKept = ['p1p0', 'p1p1'].filter(kind => !expectedRemoved.includes(kind));
+
+  record('report.baseline-positive', baselineTargets.p1p0 > 0 && baselineTargets.p1p1 > 0,
+    `p1p0=${baselineTargets.p1p0} p1p1=${baselineTargets.p1p1}`);
+  record('report.new-empty', added.length === 0, `NEW=${added.length}`);
+  record('report.other-unchanged', removedTargets.other === 0,
+    `removed_other=${removedTargets.other}`);
+  for (const kind of expectedRemoved) {
+    record(`report.${kind}.removed`, candidateTargets[kind] === 0 &&
+      removedTargets[kind] === baselineTargets[kind],
+    `baseline=${baselineTargets[kind]} candidate=${candidateTargets[kind]} removed=${removedTargets[kind]}`);
+  }
+  for (const kind of expectedKept) {
+    record(`report.${kind}.kept`, candidateTargets[kind] === baselineTargets[kind] &&
+      removedTargets[kind] === 0,
+    `baseline=${baselineTargets[kind]} candidate=${candidateTargets[kind]} removed=${removedTargets[kind]}`);
+  }
+}
+
 checkSource();
 if (compiler) checkIR();
+if (baselineReport) checkReport();
 if (outputRoot) {
   fs.mkdirSync(path.resolve(outputRoot), {recursive: true});
   fs.writeFileSync(path.resolve(outputRoot, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
