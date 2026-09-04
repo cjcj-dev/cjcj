@@ -154,12 +154,11 @@ function targetKind(row) {
   if (!row.rule.startsWith('Bare memcpy/memmove payload provenance is unknown') ||
       row.instruction !== 'memcpy' || !row.length.startsWith('%')) return '';
   if (row.dest_as === '1' && row.src_as === '0' && row.function.includes('Range') &&
-      /provide|provider/.test(row.function) && row.dest_root === 'call' &&
-      row.src_root === 'alloca' && row.source_type === 'i8*') return 'p1p0';
+      /provide|provider/.test(row.function) && row.function.includes('withoutTI') &&
+      row.source_type === 'i8*') return 'p1p0';
   if (row.dest_as === '1' && row.src_as === '1' &&
-      row.function.includes('ExternallyLockedLazy') && row.function.includes('compute') &&
-      row.dest_root === 'argument' && row.src_root === 'call' &&
-      row.source_type === 'i8* addrspace(1)*') return 'p1p1';
+      row.function.includes('ExternallyLockedLazy') && /compute/.test(row.function) &&
+      row.function.includes('withoutTI')) return 'p1p1';
   return '';
 }
 
