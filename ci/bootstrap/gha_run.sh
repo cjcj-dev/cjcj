@@ -11,10 +11,14 @@ root=${GITHUB_WORKSPACE:?}
 : "${CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA:?}"
 : "${CJCJ_BOOTSTRAP_COLOUR_RT:?}"
 : "${CJCJ_BOOTSTRAP_HOST_RT:?}"
+: "${CJCJ_BOOTSTRAP_CPP_SRC:?}"
+: "${CJCJ_BOOTSTRAP_CJCJ_SHA:?}"
 exec bash "$root/ci/bootstrap/bootstrap.sh" \
   --work "${CANGJIE_WORKSPACE:?}/bootstrap-work" \
   --src "$root" \
+  --cjcj-sha "$CJCJ_BOOTSTRAP_CJCJ_SHA" \
   --stdsrc "$CANGJIE_WORKSPACE/cangjie_runtime/stdlib" \
+  --cpp-src "$CJCJ_BOOTSTRAP_CPP_SRC" \
   --base "$CJCJ_BOOTSTRAP_BASE" \
   --host-llvm-so "$CJCJ_BOOTSTRAP_HOST_LLVM_SO" \
   --host-llvm-sha256 "$CJCJ_BOOTSTRAP_HOST_LLVM_SHA256" \

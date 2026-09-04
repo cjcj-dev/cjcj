@@ -69,8 +69,24 @@ if (!colourRt) throw new Error('colour-rt dir missing');
 const llvmSha = process.env.LLVM_SHA || '';
 if (!/^[0-9a-f]{40}$/.test(llvmSha)) throw new Error('LLVM_SHA pin missing');
 
+const cppSrc = firstExisting([
+  process.env.CJCJ_BOOTSTRAP_CPP_SRC,
+  process.env.CANGJIE_CPP_SRC,
+  process.env.CANGJIE_WORKSPACE
+    ? path.join(process.env.CANGJIE_WORKSPACE, 'cangjie_compiler')
+    : '',
+]);
+if (!cppSrc) throw new Error('cpp-src dir missing (CANGJIE_WORKSPACE/cangjie_compiler after fetch)');
+
+const cjcjSha = process.env.CJCJ_BOOTSTRAP_CJCJ_SHA
+  || process.env.GITHUB_SHA
+  || '';
+if (!/^[0-9a-f]{40}$/.test(cjcjSha)) throw new Error('cjcj sha missing (GITHUB_SHA / CJCJ_BOOTSTRAP_CJCJ_SHA)');
+
 const exported = {
   CJCJ_BOOTSTRAP_BASE: path.resolve(base),
+  CJCJ_BOOTSTRAP_CPP_SRC: path.resolve(cppSrc),
+  CJCJ_BOOTSTRAP_CJCJ_SHA: cjcjSha,
   CJCJ_BOOTSTRAP_HOST_LLVM_SO: path.resolve(hostLlvm),
   CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: sha256File(hostLlvm),
   CJCJ_BOOTSTRAP_AST_SUPPORT: path.resolve(astSupport),

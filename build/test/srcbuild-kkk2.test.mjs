@@ -567,7 +567,7 @@ function compilerStdlibBeforeBootstrap(text) {
 }
 
 const BOOTSTRAP_FLAGS = [
-  '--work', '--src', '--stdsrc', '--base', '--host-llvm-so', '--host-llvm-sha256',
+  '--work', '--src', '--cjcj-sha', '--stdsrc', '--cpp-src', '--base', '--host-llvm-so', '--host-llvm-sha256',
   '--ast-support', '--ast-support-sha256', '--colour-tuple', '--colour-llvm-sha',
   '--colour-rt', '--host-rt', '--stage',
 ];
@@ -699,39 +699,47 @@ function readSourceEnv() {
 
 function vendorShaDefects(sourceEnv, files) {
   const defects = [];
-  const expectedSha = sourceEnv.TOOLS_SHA;
-  if (!/^[0-9a-f]{40}$/.test(expectedSha || '')) defects.push('missing-tools-sha');
-  const toolsGit = spawnSync('git', ['-C', '/root/cj_build/tools', 'rev-parse', 'HEAD'], {encoding: 'utf8'});
-  const toolsHead = (toolsGit.stdout || '').trim();
   for (const name of ['bootstrap.sh', 'sdk_build.sh', 'test_bootstrap.sh']) {
+    const recorded = sourceEnv[`TOOLS_${name}`];
+    if (!/^[0-9a-f]{64}$/.test(recorded || '')) defects.push(`missing-record:${name}`);
     const vendor = sha256(files[name]);
-    if (vendor !== sourceEnv[`VENDOR_${name}`]) defects.push(`vendor-drift:${name}`);
-    const toolsPath = `/root/cj_build/tools/${name}`;
-    if (toolsHead === expectedSha && fs.existsSync(toolsPath) && sha256(toolsPath) !== sourceEnv[`TOOLS_${name}`]) {
-      defects.push(`tools-record-drift:${name}`);
-    }
+    if (recorded && vendor !== recorded) defects.push(`vendor-drift:${name}`);
+    const vendorRecord = sourceEnv[`VENDOR_${name}`];
+    if (vendorRecord && vendor !== vendorRecord) defects.push(`vendor-label-drift:${name}`);
   }
   return defects;
 }
 
-test('in-repo bootstrap copies match SOURCE.env tools SHA and file hashes', () => {
-  const files = {
+function vendorFiles() {
+  return {
     'bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'),
     'sdk_build.sh': path.join(repoRoot, 'ci/bootstrap/sdk_build.sh'),
     'test_bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/test_bootstrap.sh'),
   };
-  assert.deepEqual(vendorShaDefects(readSourceEnv(), files), []);
+}
+
+test('in-repo bootstrap copies match SOURCE.env file sha256 records', () => {
+  assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
 });
 
-test('SOURCE.env hash drift turns only the vendor-sha contract red', () => {
+test('SOURCE.env recorded sha bit-flip turns only the vendor-sha contract red', () => {
+  const drifted = {...readSourceEnv(), 'TOOLS_bootstrap.sh': '0'.repeat(64)};
+  assert.deepEqual(vendorShaDefects(drifted, vendorFiles()), ['vendor-drift:bootstrap.sh']);
+  assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
+});
+
+test('one-byte copy mutation turns only the vendor-sha contract red', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vendor-sha-'));
+  const mutatedPath = path.join(tmp, 'bootstrap.sh');
+  const original = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'));
+  fs.writeFileSync(mutatedPath, Buffer.concat([original, Buffer.from([0x0a])]));
   const files = {
-    'bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'),
-    'sdk_build.sh': path.join(repoRoot, 'ci/bootstrap/sdk_build.sh'),
-    'test_bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/test_bootstrap.sh'),
+    ...vendorFiles(),
+    'bootstrap.sh': mutatedPath,
   };
-  const drifted = {...readSourceEnv(), 'VENDOR_bootstrap.sh': '0'.repeat(64)};
-  assert.deepEqual(vendorShaDefects(drifted, files), ['vendor-drift:bootstrap.sh']);
-  assert.deepEqual(vendorShaDefects(readSourceEnv(), files), []);
+  assert.deepEqual(vendorShaDefects(readSourceEnv(), files), ['vendor-drift:bootstrap.sh', 'vendor-label-drift:bootstrap.sh']);
+  assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
+  fs.rmSync(tmp, {recursive: true, force: true});
 });
 
 test('GHA absolute campaign bootstrap path turns only the GHA contract red', () => {

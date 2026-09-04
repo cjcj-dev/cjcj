@@ -1140,6 +1140,8 @@ load_bootstrap_pins() {
     else
         BOOTSTRAP_COLOUR_RT=/root/merge_fwdtable_pr/sodepot/$RUNTIME_REF
     fi
+    BOOTSTRAP_CPP_SRC=${CJCJ_BOOTSTRAP_CPP_SRC:-${CANGJIE_CPP_SRC:-$CANGJIE_WORKSPACE/cangjie_compiler}}
+    BOOTSTRAP_CJCJ_SHA=${CJCJ_BOOTSTRAP_CJCJ_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD)}
 }
 
 bootstrap_argv() {
@@ -1150,7 +1152,9 @@ bootstrap_argv() {
         "$BOOTSTRAP_SH" \
         --work "$STATE_ROOT/bootstrap-work" \
         --src "$REPO_ROOT" \
+        --cjcj-sha "$BOOTSTRAP_CJCJ_SHA" \
         --stdsrc "$BOOTSTRAP_STDSRC" \
+        --cpp-src "$BOOTSTRAP_CPP_SRC" \
         --base "$BOOTSTRAP_HOST_SDK" \
         --host-llvm-so "$BOOTSTRAP_HOST_LLVM_SO" \
         --host-llvm-sha256 "$BOOTSTRAP_HOST_LLVM_SHA256" \
@@ -1229,7 +1233,7 @@ validate_stage_step_contracts() {
         }
         local missing flag argv_text step31_text step32_text
         argv_text=$(awk '/^bootstrap_argv\(\)/,/^}/' "$SCRIPT_PATH")
-        for flag in --work --src --stdsrc --base --host-llvm-so --host-llvm-sha256 \
+        for flag in --work --src --cjcj-sha --stdsrc --cpp-src --base --host-llvm-so --host-llvm-sha256 \
             --ast-support --ast-support-sha256 --colour-tuple --colour-llvm-sha \
             --colour-rt --host-rt --stage; do
             printf '%s\n' "$argv_text" | /usr/bin/grep -Fq -- "$flag" || missing+="$flag "
