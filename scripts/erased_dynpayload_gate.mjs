@@ -67,8 +67,9 @@ function checkSource() {
   const boxTypeInfo = flatBox.includes('lettypeInfo=irBuilder.CreateTypeInfo(sourceType)') &&
     flatBox.includes('CallClassIntrinsicAlloc(ArrayList<LLVMValueRef>([typeInfo,size]))');
   const step5Typed = flatStep5.includes(
-    'CallGCWriteGenericPayloadFromSrc(basePtr,payloadPtr,size32,thisParamTypeInfo)') || flatStep5.includes(
-    'CallGCReadGeneric(basePtr,thisParamWithTI,payloadPtr,size32)');
+    'CallGCWriteGenericPayloadFromSrc(thisParamWithoutTI,payloadPtr,size32,thisParamTypeInfo)') ||
+    flatStep5.includes(
+      'CallGCReadGeneric(thisParamWithoutTI,thisParamWithTI,payloadPtr,size32)');
   const step5Raw = flatStep5.includes(
     'CreateMemCpy(thisParamWithoutTI,0u32,payloadPtr,0u32,size32)');
 

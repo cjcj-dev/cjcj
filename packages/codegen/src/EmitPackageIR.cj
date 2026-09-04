@@ -409,7 +409,7 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
             } else {
                 // payloadPtr is tracked by thisParamWithTI, so the existing
                 // generic read is the managed-source arm of C1's dispatcher.
-                irBuilder.CallGCReadGeneric(basePtr, thisParamWithTI, payloadPtr, size32)
+                irBuilder.CallGCReadGeneric(thisParamWithoutTI, thisParamWithTI, payloadPtr, size32)
             }
         }
     }
