@@ -584,8 +584,11 @@ function bootstrapExecDefects(text) {
   const argvText = extractFn(text, 'bootstrap_argv');
   if (!step31.includes('run_bootstrap_stage stage0')) defects.push('step_31-not-bootstrap');
   if (!step32.includes('run_bootstrap_stage stage1')) defects.push('step_32-not-bootstrap');
-  if (!/BOOTSTRAP_SH=.*\/root\/cj_build\/tools\/bootstrap\.sh/.test(text)) {
+  if (!/BOOTSTRAP_SH=.*\$REPO_ROOT\/ci\/bootstrap\/bootstrap\.sh/.test(text)) {
     defects.push('bootstrap-sh-path');
+  }
+  if (/BOOTSTRAP_SH=.*\/root\/cj_build\/tools\/bootstrap\.sh/.test(text)) {
+    defects.push('bootstrap-sh-campaign-abs');
   }
   for (const flag of BOOTSTRAP_FLAGS) {
     if (!argvText.includes(flag)) defects.push(`missing-flag:${flag}`);
@@ -652,8 +655,24 @@ test('print_dry_step 31/32 emit the same bootstrap.sh argv as execution', () => 
   assert.match(script, /run_bootstrap_stage\(\) \{[\s\S]*bootstrap_argv "\$stage"/);
 });
 
+function ghaBootstrapDefects(yml, ghaRun) {
+  const defects = [];
+  if (!yml.includes('bash ci/bootstrap/gha_run.sh stage0')) defects.push('gha-stage0-not-inrepo');
+  if (!yml.includes('bash ci/bootstrap/gha_run.sh stage1')) defects.push('gha-stage1-not-inrepo');
+  if (yml.includes('/root/cj_build/tools/bootstrap.sh') || ghaRun.includes('/root/cj_build/tools/bootstrap.sh')) {
+    defects.push('gha-campaign-abs');
+  }
+  if (!ghaRun.includes('$root/ci/bootstrap/bootstrap.sh')) defects.push('gha-run-not-inrepo');
+  if (!ghaRun.includes('--base "$CJCJ_BOOTSTRAP_BASE"')) defects.push('gha-base-not-absolute-env');
+  for (const flag of BOOTSTRAP_FLAGS) {
+    if (!ghaRun.includes(flag)) defects.push(`missing-flag:${flag}`);
+  }
+  return defects;
+}
+
 test('GHA srcbuild does not build compiler or stdlib before bootstrap', () => {
   const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild.yml'), 'utf8');
+  const ghaRun = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
   const boot = yml.indexOf('Bootstrap stage0 compiler');
   const compiler = yml.indexOf('build compiler');
   const stdlib = yml.indexOf('build stdlib');
@@ -663,12 +682,64 @@ test('GHA srcbuild does not build compiler or stdlib before bootstrap', () => {
   assert.ok(yml.indexOf('pin-compiler-llvm.mjs') < 0);
   assert.ok(yml.indexOf('activate-source-sdk.mjs') < 0);
   assert.ok(yml.indexOf('Bootstrap stage0 compiler') < yml.indexOf('Build stdx from source'));
-  assert.ok(yml.includes('bash /root/cj_build/tools/bootstrap.sh'));
-  for (const flag of BOOTSTRAP_FLAGS) {
-    assert.ok(yml.includes(flag), flag);
-  }
-  assert.ok(yml.includes('--stage stage0'));
-  assert.ok(yml.includes('--stage stage1'));
+  assert.deepEqual(ghaBootstrapDefects(yml, ghaRun), []);
   assert.ok(!yml.includes('ci/srcbuild/steps/build-stage1.mjs'));
   assert.ok(!yml.includes('ci/srcbuild/steps/build-stage2.mjs'));
+});
+
+function readSourceEnv() {
+  const text = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/SOURCE.env'), 'utf8');
+  const map = {};
+  for (const line of text.split('\n')) {
+    const match = line.match(/^([A-Za-z0-9_.]+)=([0-9a-f]+)$/);
+    if (match) map[match[1]] = match[2];
+  }
+  return map;
+}
+
+function vendorShaDefects(sourceEnv, files) {
+  const defects = [];
+  const expectedSha = sourceEnv.TOOLS_SHA;
+  if (!/^[0-9a-f]{40}$/.test(expectedSha || '')) defects.push('missing-tools-sha');
+  for (const name of ['bootstrap.sh', 'sdk_build.sh', 'test_bootstrap.sh']) {
+    const vendor = sha256(files[name]);
+    if (vendor !== sourceEnv[`VENDOR_${name}`]) defects.push(`vendor-drift:${name}`);
+    const toolsPath = `/root/cj_build/tools/${name}`;
+    if (fs.existsSync(toolsPath) && sha256(toolsPath) !== sourceEnv[`TOOLS_${name}`]) {
+      defects.push(`tools-record-drift:${name}`);
+    }
+  }
+  return defects;
+}
+
+test('in-repo bootstrap copies match SOURCE.env tools SHA and file hashes', () => {
+  const files = {
+    'bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'),
+    'sdk_build.sh': path.join(repoRoot, 'ci/bootstrap/sdk_build.sh'),
+    'test_bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/test_bootstrap.sh'),
+  };
+  assert.deepEqual(vendorShaDefects(readSourceEnv(), files), []);
+});
+
+test('SOURCE.env hash drift turns only the vendor-sha contract red', () => {
+  const files = {
+    'bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'),
+    'sdk_build.sh': path.join(repoRoot, 'ci/bootstrap/sdk_build.sh'),
+    'test_bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/test_bootstrap.sh'),
+  };
+  const drifted = {...readSourceEnv(), 'VENDOR_bootstrap.sh': '0'.repeat(64)};
+  assert.deepEqual(vendorShaDefects(drifted, files), ['vendor-drift:bootstrap.sh']);
+  assert.deepEqual(vendorShaDefects(readSourceEnv(), files), []);
+});
+
+test('GHA absolute campaign bootstrap path turns only the GHA contract red', () => {
+  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild.yml'), 'utf8');
+  const ghaRun = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
+  assert.deepEqual(ghaBootstrapDefects(yml, ghaRun), []);
+  const mutated = yml.replace(
+    'bash ci/bootstrap/gha_run.sh stage0',
+    'bash /root/cj_build/tools/bootstrap.sh --stage stage0',
+  );
+  assert.deepEqual(ghaBootstrapDefects(mutated, ghaRun), ['gha-stage0-not-inrepo', 'gha-campaign-abs']);
+  assert.deepEqual(ghaBootstrapDefects(yml, ghaRun), []);
 });
