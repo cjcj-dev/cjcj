@@ -541,3 +541,106 @@ test('step 8 prefers sccache when it is on PATH', t => {
   assert.match(calls, /--start-server/);
   assert.match(calls, /--zero-stats/);
 });
+
+function parseDagOrder(text) {
+  const match = text.match(/DAG_ORDER=\(([0-9 \n]+)\)/);
+  assert.ok(match, 'DAG_ORDER missing');
+  return match[1].trim().split(/\s+/).map(Number);
+}
+
+function compilerStdlibBeforeBootstrap(text) {
+  const order = parseDagOrder(text);
+  const boot = order.indexOf(31);
+  assert.ok(boot >= 0, 'bootstrap step 31 missing from DAG');
+  const forbidden = [];
+  for (const id of [15, 16, 17, 18, 19, 27, 28]) {
+    if (order.includes(id)) forbidden.push(`dag:${id}`);
+  }
+  if (/\nstep_1[5-9]\(\)/.test(text) || /\nstep_2[78]\(\)/.test(text)) {
+    forbidden.push('removed-step-function');
+  }
+  if (/build_cli build compiler/.test(text)) forbidden.push('build compiler');
+  if (/build_cli build stdlib/.test(text)) forbidden.push('build stdlib');
+  if (/pin-compiler-llvm\.mjs/.test(text)) forbidden.push('pin-compiler-llvm');
+  if (/activate-source-sdk\.mjs/.test(text)) forbidden.push('activate-source-sdk');
+  return forbidden;
+}
+
+test('DAG runs bootstrap after verify-source-pins and omits removed compiler/stdlib steps', () => {
+  const forbidden = compilerStdlibBeforeBootstrap(script);
+  assert.deepEqual(forbidden, []);
+  const order = parseDagOrder(script);
+  assert.ok(order.indexOf(14) < order.indexOf(31));
+  assert.ok(order.indexOf(31) < order.indexOf(32));
+  assert.ok(order.indexOf(32) < order.indexOf(33));
+  assert.ok(order.indexOf(33) < order.indexOf(20));
+  assert.ok(order.indexOf(20) < order.indexOf(26));
+});
+
+test('restoring removed 15-19 calls turns the DAG contract red and only that contract', () => {
+  const mutated = script.replace(
+    'DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 33 20 21 22 23 24 25 26 29 30)',
+    'DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 31 32 33 20 21 22 23 24 25 26 29 30)',
+  ) + '\nstep_16() { build_cli build compiler; }\n';
+  const forbidden = compilerStdlibBeforeBootstrap(mutated);
+  assert.ok(forbidden.includes('dag:16'));
+  assert.ok(forbidden.includes('build compiler'));
+  assert.deepEqual(compilerStdlibBeforeBootstrap(script), []);
+});
+
+test('stage0 dry-run contract prints cjpm -O1 and forbids cjc -O1 -o', () => {
+  assert.match(script, /DRY_RUN INNER_COMMAND=cjpm build\\n/);
+  assert.match(script, /DRY_RUN COMPILE_OPTION=-O1/);
+  assert.match(script, /dry-run stage0 contract forbids cjc -O1 -o/);
+  assert.doesNotMatch(script, /INNER_COMMAND=cjc -O1 -o/);
+  const mutated = script.replace('DRY_RUN INNER_COMMAND=cjpm build', 'DRY_RUN INNER_COMMAND=cjc -O1 -o "$out" "$SRC"');
+  assert.match(mutated, /INNER_COMMAND=cjc -O1 -o/);
+  const invoke = `${shellFunction('validate_stage_step_contracts')}\n`
+    + 'FROM_STEP=31 THROUGH_STEP=31 STAGE1_STEP_SCRIPT=$1 STAGE2_STEP_SCRIPT=$1 '
+    + 'STAGE3_STEP_SCRIPT=$1 STAGE2_PRODUCT_DIR=$2\n'
+    + 'validate_stage_step_contracts\n';
+  const brokenStage1 = fs.mkdtempSync(path.join(os.tmpdir(), 'stage0-cjc-cut-'));
+  const broken = path.join(brokenStage1, 'build-stage1.mjs');
+  fs.writeFileSync(broken,
+    'compile-option = "-O1"\nawait $`cjpm build`;\nawait $`cjc -O1 -o out SRC`;\n');
+  const bad = runBash(invoke, [broken, path.join(repoRoot, 'target', 'release', 'bin')]);
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stderr, /forbids cjc -O1 -o/);
+  const good = runBash(invoke, [path.join(repoRoot, 'ci/srcbuild/steps/build-stage1.mjs'),
+    path.join(repoRoot, 'target', 'release', 'bin')]);
+  assert.equal(good.status, 0, good.stderr);
+  fs.rmSync(brokenStage1, {recursive: true, force: true});
+});
+
+test('stage1 dry-run contract requires -j 1 and cjHeapSize=20GB and turns red without heap', () => {
+  assert.match(script, /DRY_RUN INNER_COMMAND=cjpm build -j 1/);
+  assert.match(script, /DRY_RUN ENV cjHeapSize=20GB/);
+  const invoke = `${shellFunction('validate_stage_step_contracts')}\n`
+    + 'FROM_STEP=32 THROUGH_STEP=32 STAGE1_STEP_SCRIPT=$1 STAGE2_STEP_SCRIPT=$2 '
+    + 'STAGE3_STEP_SCRIPT=$1 STAGE2_PRODUCT_DIR=$3\n'
+    + 'validate_stage_step_contracts\n';
+  const good = runBash(invoke, [scriptPath, path.join(repoRoot, 'ci/srcbuild/steps/build-stage2.mjs'),
+    path.join(repoRoot, 'target', 'release', 'bin')]);
+  assert.equal(good.status, 0, good.stderr);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stage2-heap-cut-'));
+  const broken = path.join(root, 'build-stage2.mjs');
+  fs.writeFileSync(broken, fs.readFileSync(path.join(repoRoot, 'ci/srcbuild/steps/build-stage2.mjs'), 'utf8')
+    .replace("cjHeapSize: '20GB'", "cjHeapSize: '8GB'"));
+  const bad = runBash(invoke, [scriptPath, broken, path.join(repoRoot, 'target', 'release', 'bin')]);
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stderr, /cjHeapSize=20GB/);
+  fs.rmSync(root, {recursive: true, force: true});
+});
+
+test('GHA srcbuild does not build compiler or stdlib before bootstrap', () => {
+  const yml = fs.readFileSync(path.join(repoRoot, '.github/workflows/srcbuild.yml'), 'utf8');
+  const boot = yml.indexOf('Bootstrap stage0 compiler');
+  const compiler = yml.indexOf('build compiler');
+  const stdlib = yml.indexOf('build stdlib');
+  assert.ok(boot >= 0);
+  assert.equal(compiler, -1);
+  assert.equal(stdlib, -1);
+  assert.ok(yml.indexOf('pin-compiler-llvm.mjs') < 0);
+  assert.ok(yml.indexOf('activate-source-sdk.mjs') < 0);
+  assert.ok(yml.indexOf('Bootstrap stage0 compiler') < yml.indexOf('Build stdx from source'));
+});

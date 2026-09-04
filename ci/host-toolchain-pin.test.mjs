@@ -12,8 +12,10 @@ import {
 } from './host-toolchain-pin.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
-const pinPath = path.join(root, 'ci', 'cjpm_pin.env');
+const pinPath = path.join(root, 'ci', 'host_sdk_pin.env');
+const cjpmPinPath = path.join(root, 'ci', 'cjpm_pin.env');
 const loadCommand = 'cat ci/cjpm_pin.env >> "$GITHUB_ENV"';
+const srcbuildLoadCommand = 'cat ci/host_sdk_pin.env >> "$GITHUB_ENV"';
 
 async function filesBelow(directory) {
   const found = [];
@@ -28,7 +30,7 @@ async function filesBelow(directory) {
 async function hostPin() {
   const text = await fs.readFile(pinPath, 'utf8');
   const match = text.match(/^CJCJ_TOOLCHAIN=(\S+)$/m);
-  assert.ok(match, 'ci/cjpm_pin.env must define CJCJ_TOOLCHAIN');
+  assert.ok(match, 'ci/host_sdk_pin.env must define CJCJ_TOOLCHAIN');
   return match[1];
 }
 
@@ -45,6 +47,7 @@ async function runSrcbuildHostResolver({
     await fs.mkdir(path.dirname(fixtureScript), {recursive: true});
     await fs.mkdir(path.join(fixture, 'ci'), {recursive: true});
     await fs.copyFile(path.join(root, 'tools', 'srcbuild_kkk2.sh'), fixtureScript);
+    await fs.writeFile(path.join(fixture, 'ci', 'host_sdk_pin.env'), pin);
     await fs.writeFile(path.join(fixture, 'ci', 'cjpm_pin.env'), pin);
     await fs.writeFile(
       path.join(fixture, 'ci', 'runtime_pin.env'),
@@ -82,8 +85,7 @@ test('the ordinary host nightly literal has one pin and the release exception is
     // The astabi behavior-triad evidence harness is pinned to the 1.2 baseline
     // SDK lib paths; it is not an ordinary host consumer.
     const isAstabiBaselineHarness = file === path.join(root, 'tools', 'astabi', 'run_behavior_triad.sh');
-    const isHostSdkPin = file === path.join(root, 'ci', 'host_sdk_pin.env');
-    if (file === pinPath || isHostSdkPin || file.endsWith('/.github/workflows/build-release-package.yml') || isAstabiBaselineHarness) continue;
+    if (file === pinPath || file === cjpmPinPath || file.endsWith('/.github/workflows/build-release-package.yml') || isAstabiBaselineHarness) continue;
     const text = await fs.readFile(file, 'utf8');
     if (/nightly-\d+\.\d+\.\d+-alpha\.\d+/.test(text)) {
       offenders.push(path.relative(root, file));
@@ -165,7 +167,7 @@ test('srcbuild pin reader rejects duplicate CJCJ_TOOLCHAIN keys', async () => {
     readerOnly: true,
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /CJCJ_TOOLCHAIN is duplicated in .*ci\/cjpm_pin\.env/);
+  assert.match(result.stderr, /CJCJ_TOOLCHAIN is duplicated in .*ci\/host_sdk_pin\.env/);
   assert.equal(result.stdout, '');
 });
 
@@ -175,13 +177,15 @@ test('every workflow host consumer loads ci/cjpm_pin.env after checkout', async 
     ['build-windows-runtime.yml', 1],
     ['ci.yml', 2],
     ['platform-matrix.yml', 1],
-    ['srcbuild.yml', 1],
   ]);
   const workflows = path.join(root, '.github', 'workflows');
   for (const [name, count] of expectedLoads) {
     const text = await fs.readFile(path.join(workflows, name), 'utf8');
     assert.equal(text.split(loadCommand).length - 1, count, name);
   }
+  const srcbuild = await fs.readFile(path.join(workflows, 'srcbuild.yml'), 'utf8');
+  assert.equal(srcbuild.split(srcbuildLoadCommand).length - 1, 1, 'srcbuild.yml');
+  assert.equal(srcbuild.split(loadCommand).length - 1, 0, 'srcbuild.yml must not load cjpm_pin as host');
 
   const windowsRuntime = await fs.readFile(path.join(workflows, 'build-windows-runtime.yml'), 'utf8');
   assert.ok(!windowsRuntime.includes('inputs.toolchain'));

@@ -93,30 +93,16 @@ function reportPath(root) {
   return path.join(root, 'verifier.tsv');
 }
 
-test('diagnostic request is capped at step 19 and only step 19 receives report mode', t => {
+test('diagnostic request targeting removed stdlib step 19 is rejected', t => {
   const root = fixture(t);
   const report = path.join(root, 'rejects.tsv');
-  const capture = path.join(root, 'child.env');
   const validation = `${shellFunction('validate_verifier_report_request')}\n`
     + 'validate_verifier_report_request "$1" "$2" "$3"\n';
-  const accepted = spawnSync('bash', ['-c', validation, 'bash', report, '2', '19'], {encoding: 'utf8'});
-  assert.equal(accepted.status, 0, accepted.stderr);
-  const rejected = spawnSync('bash', ['-c', validation, 'bash', report, '2', '20'], {encoding: 'utf8'});
+  const acceptedEmpty = spawnSync('bash', ['-c', validation, 'bash', '', '2', '14'], {encoding: 'utf8'});
+  assert.equal(acceptedEmpty.status, 0, acceptedEmpty.stderr);
+  const rejected = spawnSync('bash', ['-c', validation, 'bash', report, '2', '19'], {encoding: 'utf8'});
   assert.notEqual(rejected.status, 0);
-  assert.match(rejected.stderr, /requires --through-step 19/);
-
-  const invoke = `${shellFunction('step_19')}\n`
-    + 'node() { :; }\n'
-    + 'build_cli() { printf "%s|%s\\n" "${CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE:-absent}" '
-    + '"${CJ_IR_VERIFIER_MODE:-absent}" > "$CAPTURE"; }\n'
-    + 'REPO_ROOT=$1 CANGJIE_WORKSPACE=$2 VERIFIER_REPORT=$3 VERIFIER_INVENTORY=$4 CAPTURE=$5\n'
-    + 'export CJ_IR_VERIFIER_MODE=strict\nstep_19\n';
-  const run = spawnSync('bash', ['-c', invoke, 'bash', repoRoot, root, report, `${report}.artifacts.tsv`, capture], {
-    encoding: 'utf8',
-  });
-  assert.equal(run.status, 0, run.stdout + run.stderr);
-  assert.equal(fs.readFileSync(capture, 'utf8').trim(), `${report}|strict`);
-  assert.equal(fs.readFileSync(report, 'utf8'), '');
+  assert.match(rejected.stderr, /removed stdlib step 19/);
   assert.equal(shouldRunGcUnitLanguageTests({}), true);
   assert.equal(shouldRunGcUnitLanguageTests({CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE: report}), false);
 

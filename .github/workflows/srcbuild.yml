@@ -171,7 +171,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Load host toolchain pin
-        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+        run: cat ci/host_sdk_pin.env >> "$GITHUB_ENV"
 
       - name: Load source pins
         run: cat ci/source_pin.env >> "$GITHUB_ENV"
@@ -249,26 +249,37 @@ jobs:
       - name: Verify source revisions
         run: npx --yes zx@8 ci/srcbuild/steps/verify-source-pins.mjs
 
-      - name: Configure compiler LLVM
-        # Our LLVM fork adds the coloured-runtime lowering and stack-map fixes
-        # needed by the selfhost stages; the official source order is unchanged.
+      - name: Download native LLVM tuple
+        uses: actions/download-artifact@v8
+        with:
+          name: fixed-llvm-tools-${{ matrix.llvm_platform }}
+          path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
+
+      - name: Bootstrap stage0 compiler
+        run: npx --yes zx@8 ci/srcbuild/steps/build-stage1.mjs
+
+      - name: Add Linux swap for stage2 chir heap
+        if: runner.os == 'Linux'
         run: |
-          set -euo pipefail
-          source ci/llvm_pin.env
-          export LLVM_URL LLVM_REF="$LLVM_SHA"
-          npx --yes zx@8 ci/srcbuild/steps/pin-compiler-llvm.mjs
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
 
-      - name: Build compiler oracle
-        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build compiler
+      - name: Bootstrap stage1 compiler
+        run: npx --yes zx@8 ci/srcbuild/steps/build-stage2.mjs
 
-      - name: Prepare source compiler host SDK
-        run: npx --yes zx@8 ci/srcbuild/steps/prepare-source-host-sdk.mjs
+      - name: Build stage 3 compiler and final std
+        run: npx --yes zx@8 ci/srcbuild/steps/build-stage3.mjs
 
-      - name: Build runtime from source
-        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build runtime
-
-      - name: Build stdlib from source
-        run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdlib
+      - name: Upload final source-built std install root
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-std-${{ matrix.target }}
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-stage2
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Build stdx from source
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdx
@@ -306,19 +317,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Verify bootstrap SDK
+      - name: Package and verify SDK
         run: |
           npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
           npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
-
-      - name: Download native LLVM tuple
-        uses: actions/download-artifact@v8
-        with:
-          name: fixed-llvm-tools-${{ matrix.llvm_platform }}
-          path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
-
-      - name: Install source SDK and fixed LLVM tuple
-        run: npx --yes zx@8 ci/srcbuild/steps/activate-source-sdk.mjs
 
       - name: Build compiler shim
         env:
@@ -331,34 +333,6 @@ jobs:
         run: |
           npx --yes zx@8 ci/srcbuild/tests/inject-version.test.mjs
           npx --yes zx@8 ci/srcbuild/steps/inject-version.mjs
-
-      - name: Build stage 1 compiler
-        # The upstream C++ cjc miscompiles cjcj at -O2; seed at -O1.
-        run: npx --yes zx@8 ci/srcbuild/steps/build-stage1.mjs
-
-      - name: Add Linux swap for stage2 chir heap
-        if: runner.os == 'Linux'
-        run: |
-          sudo fallocate -l 12G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-          free -h
-
-      - name: Build stage 2 compiler
-        run: npx --yes zx@8 ci/srcbuild/steps/build-stage2.mjs
-
-      - name: Build stage 3 compiler and final std
-        # Stage2 rebuilds std natively; stage3 consumes that exact install root.
-        run: npx --yes zx@8 ci/srcbuild/steps/build-stage3.mjs
-
-      - name: Upload final source-built std install root
-        uses: actions/upload-artifact@v7
-        with:
-          name: final-std-${{ matrix.target }}
-          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-std-stage2
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Restore official MinGW toolchain
         if: matrix.target == 'linux-x64'

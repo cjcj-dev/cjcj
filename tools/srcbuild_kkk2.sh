@@ -10,7 +10,11 @@ SCRIPT_PATH=$(readlink -f "${BASH_SOURCE[0]}")
 readonly SCRIPT_PATH
 REPO_ROOT=$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd -P)
 readonly REPO_ROOT
-readonly HOST_TOOLCHAIN_PIN="$REPO_ROOT/ci/cjpm_pin.env"
+readonly HOST_TOOLCHAIN_PIN="$REPO_ROOT/ci/host_sdk_pin.env"
+# Numeric GHA ids kept for --from-step/--through-step. Deleted ids 15-19 and
+# 27-28 are not in this order: bootstrap (31+32) and final-std (33) run after
+# P07/step 14, then stdx/tools/package, then shim/inject.
+DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 33 20 21 22 23 24 25 26 29 30)
 readonly ORIGINAL_ARGS=("$@")
 
 read_host_toolchain_pin() {
@@ -44,6 +48,46 @@ resolve_host_toolchain_pin() {
     pinned_toolchain=$(read_host_toolchain_pin) || return
     CJCJ_TOOLCHAIN=$pinned_toolchain
     export CJCJ_TOOLCHAIN
+}
+
+dag_contains() {
+    local want=$1 s
+    for s in "${DAG_ORDER[@]}"; do
+        [[ $s == "$want" ]] && return 0
+    done
+    return 1
+}
+
+validate_dag_range() {
+    local from=$1 through=$2 s seen_from=0
+    dag_contains "$from" || {
+        echo "from-step $from is not in DAG (removed 15-19 and 27-28; bootstrap is 31-32 after 14)" >&2
+        return 2
+    }
+    dag_contains "$through" || {
+        echo "through-step $through is not in DAG (removed 15-19 and 27-28; bootstrap is 31-32 after 14)" >&2
+        return 2
+    }
+    for s in "${DAG_ORDER[@]}"; do
+        if ((s == from)); then seen_from=1; fi
+        if ((s == through)); then
+            ((seen_from)) || {
+                echo "through-step $through precedes from-step $from in DAG order" >&2
+                return 2
+            }
+            return 0
+        fi
+    done
+    return 2
+}
+
+selected_dag_steps() {
+    local from=$1 through=$2 s started=0
+    for s in "${DAG_ORDER[@]}"; do
+        if ((s == from)); then started=1; fi
+        if ((started)); then printf '%s\n' "$s"; fi
+        if ((s == through)); then break; fi
+    done
 }
 
 current_cpuset() {
@@ -161,10 +205,8 @@ validate_verifier_report_request() {
         echo "verifier report path must be absolute: $report" >&2
         return 2
     }
-    ((from_step <= 19 && through_step == 19)) || {
-        echo "verifier report mode is diagnostic-only and requires --through-step 19 (from-step must be <= 19)" >&2
-        return 2
-    }
+    echo "verifier report mode targeted removed stdlib step 19; stdlib is produced by bootstrap after step 14" >&2
+    return 2
 }
 
 sanitize_verifier_environment() {
@@ -201,6 +243,7 @@ Usage: tools/srcbuild_kkk2.sh [TARGET [JOBS [FROM_STEP]]]
 Defaults:
   TARGET=linux-x64  JOBS=<selected CPU window width>
   FROM_STEP=2  THROUGH_STEP=33
+  DAG after verify-source-pins: bootstrap stage0/stage1, final-std, then stdx/tools/package.
 
 CPU placement:
   CJCJ_SRCBUILD_CPUSET=96-159 selects an explicit contiguous 64-core window.
@@ -221,10 +264,7 @@ Final source-build steps:
 --dry-run validates referenced step scripts and their command contracts, then
 prints the selected commands and environment without executing them.
 
---verifier-report enables CJIRVerifier report mode for step 19 only.  It
-requires --through-step 19, truncates the TSV before the build, inventories
-report-marked .bc/.o files, and permanently marks that workspace diagnostic.
-The equivalent environment input is CJCJ_SRCBUILD_VERIFIER_REPORT.
+--verifier-report is rejected: the old stdlib step 19 is no longer in the DAG.
 
 --lib-only is source-only and defines the strict host pin reader/resolver
 without entering the kkk2 build driver.
@@ -343,6 +383,7 @@ if ((JOBS_EXPLICIT == 0)); then JOBS=$CPUSET_WIDTH; fi
 ((THROUGH_STEP >= 2 && THROUGH_STEP <= 33)) || { echo "through-step must be in 2..33" >&2; exit 2; }
 ((FROM_STEP <= THROUGH_STEP)) || { echo "from-step must not exceed through-step" >&2; exit 2; }
 if ((FROM_STEP == 1)); then FROM_STEP=2; fi
+validate_dag_range "$FROM_STEP" "$THROUGH_STEP" || exit $?
 validate_verifier_report_request "$VERIFIER_REPORT" "$FROM_STEP" "$THROUGH_STEP" || exit $?
 
 host_name=$(hostname -s)
@@ -363,8 +404,8 @@ actual_cpuset=$(current_cpuset) || exit 3
 }
 
 # The request has now survived the affinity self-restart.  From this point the
-# public and LLVM variables are sanitized; only step_19 sets the private active
-# variable for its direct build/cli child.
+# public and LLVM variables are sanitized; bootstrap no longer sets a private
+# verifier-report child environment.
 unset CJCJ_SRCBUILD_VERIFIER_REPORT
 sanitize_verifier_environment
 
@@ -1016,39 +1057,6 @@ step_14() {
     npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/verify-source-pins.mjs"
 }
 
-step_15() {
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/ci/llvm_pin.env"
-    export LLVM_URL LLVM_REF="$LLVM_SHA"
-    npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/pin-compiler-llvm.mjs"
-}
-
-step_16() { build_cli build compiler; }
-
-step_17() {
-    npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/prepare-source-host-sdk.mjs"
-}
-
-step_18() { build_cli build runtime; }
-step_19() {
-    if [[ -z $VERIFIER_REPORT ]]; then
-        build_cli build stdlib
-        return
-    fi
-    mkdir -p "$(dirname "$VERIFIER_REPORT")"
-    : > "$VERIFIER_REPORT"
-    node "$REPO_ROOT/scripts/verifier_artifact_gate.mjs" \
-        --root "$CANGJIE_WORKSPACE" --report "$VERIFIER_REPORT" \
-        --inventory "$VERIFIER_INVENTORY" --mark-running
-    CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE="$VERIFIER_REPORT" build_cli build stdlib
-    node "$REPO_ROOT/scripts/verifier_artifact_gate.mjs" \
-        --root "$CANGJIE_WORKSPACE" --report "$VERIFIER_REPORT" \
-        --inventory "$VERIFIER_INVENTORY" \
-        --artifact-root "$CANGJIE_WORKSPACE/cangjie_runtime/stdlib/build" \
-        --artifact-root "$CANGJIE_WORKSPACE/cangjie_runtime/stdlib/output" \
-        --artifact-root "$CANGJIE_WORKSPACE/cangjie_compiler/output" \
-        --write-inventory
-}
 step_20() { build_cli build stdx; }
 step_21() { build_cli build tools; }
 
@@ -1081,15 +1089,6 @@ step_26() {
     build_cli verify
 }
 
-step_27() {
-    fixed_tuple_is_current
-    echo "fixed LLVM tuple retained at $CJCJ_FIXED_LLVM_DIR"
-}
-
-step_28() {
-    npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/activate-source-sdk.mjs"
-}
-
 step_29() {
     export CANGJIE_CPP_SRC="$CANGJIE_WORKSPACE/cangjie_compiler"
     npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/build-shim.mjs"
@@ -1107,6 +1106,7 @@ step_31() {
 }
 
 step_32() {
+    export cjHeapSize=20GB
     npx --yes zx@8 "$STAGE2_STEP_SCRIPT"
 }
 
@@ -1128,35 +1128,48 @@ declare -Ar STEP_NAMES=(
     [12]='Generate SDK version'
     [13]='Download pinned source'
     [14]='Verify source revisions'
-    [15]='Configure compiler LLVM'
-    [16]='Build compiler oracle'
-    [17]='Prepare source compiler host SDK'
-    [18]='Build runtime from source'
-    [19]='Build stdlib from source'
     [20]='Build stdx from source'
     [21]='Build SDK tools from source'
     [22]='Prepare source-built cjpm artifact'
     [23]='Upload source-built cjpm artifact'
     [24]='Prepare source-built hle artifact'
     [25]='Upload source-built hle artifact'
-    [26]='Verify bootstrap SDK'
-    [27]='Download native LLVM tuple'
-    [28]='Install source SDK and fixed LLVM tuple'
+    [26]='Package and verify SDK'
     [29]='Build compiler shim'
     [30]='Inject selfhost compiler version'
-    [31]='Build stage 1 compiler'
-    [32]='Build stage 2 compiler'
+    [31]='Bootstrap stage0 (cjpm -O1)'
+    [32]='Bootstrap stage1 (cjpm -j1 cjHeapSize=20GB)'
     [33]='Build stage 3 compiler and final std'
 )
 
 validate_stage_step_contracts() {
-    if ((FROM_STEP <= 31 && THROUGH_STEP >= 31)); then
+    includes_step() {
+        local want=$1
+        if declare -F selected_dag_steps >/dev/null 2>&1; then
+            selected_dag_steps "$FROM_STEP" "$THROUGH_STEP" | /usr/bin/grep -qx "$want"
+        else
+            ((FROM_STEP <= want && THROUGH_STEP >= want))
+        fi
+    }
+    if includes_step 31; then
         [[ -f $STAGE1_STEP_SCRIPT ]] || {
             echo "dry-run referenced step script is missing: $STAGE1_STEP_SCRIPT" >&2
             return 1
         }
+        /usr/bin/grep -Fq 'cjpm build' "$STAGE1_STEP_SCRIPT" || {
+            echo "dry-run stage0 contract missing: cjpm build in $STAGE1_STEP_SCRIPT" >&2
+            return 1
+        }
+        /usr/bin/grep -Fq 'compile-option = "-O1"' "$STAGE1_STEP_SCRIPT" || {
+            echo "dry-run stage0 contract missing: compile-option=-O1 in $STAGE1_STEP_SCRIPT" >&2
+            return 1
+        }
+        /usr/bin/grep -Fq 'cjc -O1 -o' "$STAGE1_STEP_SCRIPT" && {
+            echo "dry-run stage0 contract forbids cjc -O1 -o in $STAGE1_STEP_SCRIPT" >&2
+            return 1
+        }
     fi
-    if ((FROM_STEP <= 32 && THROUGH_STEP >= 32)); then
+    if includes_step 32; then
         [[ -f $STAGE2_STEP_SCRIPT ]] || {
             echo "dry-run referenced step script is missing: $STAGE2_STEP_SCRIPT" >&2
             return 1
@@ -1170,7 +1183,7 @@ validate_stage_step_contracts() {
             return 1
         }
     fi
-    if ((FROM_STEP <= 33 && THROUGH_STEP >= 33)); then
+    if includes_step 33; then
         [[ -f $STAGE3_STEP_SCRIPT ]] || {
             echo "dry-run referenced step script is missing: $STAGE3_STEP_SCRIPT" >&2
             return 1
@@ -1191,16 +1204,11 @@ print_dry_step() {
             printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$REPO_ROOT/ci/setup_sdk.mjs"
             ;;
         31)
+            printf 'DRY_RUN COMMAND=bootstrap --stage stage0 --colour-tuple %q --src %q\n' \
+                "$CJCJ_FIXED_LLVM_DIR" "$REPO_ROOT"
             printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$STAGE1_STEP_SCRIPT"
-            ;;
-        19)
-            if [[ -n $VERIFIER_REPORT ]]; then
-                printf 'DRY_RUN ENV CJ_IR_VERIFIER_MODE=report CJ_IR_VERIFIER_REPORT=%q\n' "$VERIFIER_REPORT"
-                printf 'DRY_RUN DIAGNOSTIC_MARKER=%q INVENTORY=%q\n' \
-                    "$VERIFIER_DIAGNOSTIC_MARKER" "$VERIFIER_INVENTORY"
-            else
-                printf 'DRY_RUN ENV CJ_IR_VERIFIER_MODE=strict CJ_IR_VERIFIER_REPORT=unset\n'
-            fi
+            printf 'DRY_RUN INNER_COMMAND=cjpm build\n'
+            printf 'DRY_RUN COMPILE_OPTION=-O1\n'
             ;;
         32)
             printf 'DRY_RUN ASSUME=stage1-artifact-exists\n'
@@ -1223,9 +1231,9 @@ if ((DRY_RUN)); then
     printf 'DRY_RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' \
         "$host_name" "$TARGET" "$JOBS" "$CPUSET" "$FROM_STEP" "$THROUGH_STEP"
     build_fixed_tuple
-    for ((step = FROM_STEP; step <= THROUGH_STEP; step++)); do
+    while IFS= read -r step; do
         print_dry_step "$step" "$dry_run_toolchain"
-    done
+    done < <(selected_dag_steps "$FROM_STEP" "$THROUGH_STEP")
     printf 'DRY_RUN RESULT=success through_step=%s\n' "$THROUGH_STEP"
     exit 0
 fi
@@ -1239,9 +1247,9 @@ printf 'RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' 
 # numbered srcbuild steps rather than being invented as an in-band step 27 build.
 run_fixed_tuple_prerequisite
 
-for ((step = FROM_STEP; step <= THROUGH_STEP; step++)); do
+while IFS= read -r step; do
     reject_diagnostic_workspace "$VERIFIER_DIAGNOSTIC_MARKER" "step $step" || exit $?
     run_step "$step" "${STEP_NAMES[$step]}" "step_$step"
-done
+done < <(selected_dag_steps "$FROM_STEP" "$THROUGH_STEP")
 
 printf 'RESULT=success through_step=%s timings=%s\n' "$THROUGH_STEP" "$TIMINGS"

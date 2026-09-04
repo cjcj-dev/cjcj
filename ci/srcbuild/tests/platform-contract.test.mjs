@@ -253,9 +253,9 @@ test('source-build workflow connects every native runner to its LLVM and std art
   ]) assert.ok(workflow.includes(edge), edge);
 
   const order = [
-    'Build compiler oracle', 'Build runtime from source', 'Build stdlib from source',
-    'Build stage 1 compiler', 'Build stage 2 compiler', 'Build stage 3 compiler and final std',
-    'Upload final source-built std install root', 'Compose self-hosted SDK', 'Verify self-hosted SDK',
+    'Bootstrap stage0 compiler', 'Bootstrap stage1 compiler', 'Build stage 3 compiler and final std',
+    'Upload final source-built std install root', 'Build stdx from source',
+    'Compose self-hosted SDK', 'Verify self-hosted SDK',
   ].map(name => workflow.indexOf(`name: ${name}`));
   assert.ok(order.every(index => index >= 0));
   assert.deepEqual([...order].sort((a, b) => a - b), order);
@@ -380,17 +380,18 @@ test('native build environments use configured architecture, OpenSSL, and loader
 test('source build keeps the pinned plain host runtime across both bootstrap halves', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
   const provision = workflow.indexOf('- name: Provision uncoloured host SDK');
-  const compiler = workflow.indexOf('- name: Build compiler oracle');
-  const prepareHost = workflow.indexOf('- name: Prepare source compiler host SDK');
-  const runtime = workflow.indexOf('- name: Build runtime from source');
-  assert.ok(provision >= 0 && compiler > provision);
-  assert.ok(prepareHost > compiler && runtime > prepareHost);
+  const bootstrap0 = workflow.indexOf('- name: Bootstrap stage0 compiler');
+  const bootstrap1 = workflow.indexOf('- name: Bootstrap stage1 compiler');
+  const stdxStep = workflow.indexOf('- name: Build stdx from source');
+  assert.ok(provision >= 0 && bootstrap0 > provision);
+  assert.ok(bootstrap1 > bootstrap0 && stdxStep > bootstrap1);
+  assert.ok(!workflow.includes('- name: Build compiler oracle'));
+  assert.ok(!workflow.includes('build compiler'));
   for (const contract of [
     'export CJCJ_SDK_STOCK_LLC=1',
-    'cat ci/cjpm_pin.env >> "$GITHUB_ENV"',
+    'cat ci/host_sdk_pin.env >> "$GITHUB_ENV"',
     'CJCJ_SRCBUILD_BOOTSTRAP_SDK=$host_sdk',
     'CJCJ_SRCBUILD_HOST_SDK=$host_sdk',
-    'ci/srcbuild/steps/prepare-source-host-sdk.mjs',
   ]) assert.ok(workflow.includes(contract), contract);
 
   const prepare = await fs.readFile(path.join(root, 'ci/srcbuild/steps/prepare-source-host-sdk.mjs'), 'utf8');
