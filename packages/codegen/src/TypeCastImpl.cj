@@ -413,7 +413,7 @@ private func GenerateGenericTypeCast(irBuilder: IRBuilder2, sourceCGValue: CGVal
         let typeInfo = irBuilder.CreateTypeInfo(sourceTy)
         let size = irBuilder.GetLayoutSize_32(sourceTy)
         let temp = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfo, size]))
-        irBuilder.CallGCWriteGenericPayload(temp, sourceValue, size)
+        irBuilder.CallGCWriteGenericPayloadFromSrc(temp, sourceValue, size, typeInfo)
         return Some(temp)
     } else if (IsDynamicClassRef(sourceTy) && IsStructRef(targetTy)) {
         return None
@@ -425,7 +425,7 @@ private func GenerateGenericTypeCast(irBuilder: IRBuilder2, sourceCGValue: CGVal
         let typeInfo = irBuilder.CreateTypeInfo(sourceTy)
         let size = irBuilder.GetLayoutSize_32(sourceTy)
         let temp = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfo, size]))
-        irBuilder.CallGCWriteGenericPayload(temp, sourceValue, size)
+        irBuilder.CallGCWriteGenericPayloadFromSrc(temp, sourceValue, size, typeInfo)
         return Some(temp)
     } else if (IsDynamicStruct(sourceTy) && IsStaticStruct(targetTy)) {
         let tmp = irBuilder.CreateEntryAlloca(targetCGType)
@@ -443,7 +443,7 @@ private func GenerateGenericTypeCast(irBuilder: IRBuilder2, sourceCGValue: CGVal
         let typeInfo = irBuilder.CreateTypeInfo(sourceTy)
         let size = irBuilder.GetLayoutSize_32(sourceTy)
         let temp = irBuilder.CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([typeInfo, size]))
-        irBuilder.CallGCWriteGenericPayload(temp, sourceValue, size)
+        irBuilder.CallGCWriteGenericPayloadFromSrc(temp, sourceValue, size, typeInfo)
         return Some(temp)
     } else if (IsDynamicClass(sourceTy) && IsStaticClass(targetTy)) {
         return Some(sourceValue)

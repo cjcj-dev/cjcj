@@ -362,7 +362,8 @@ private func ReplaceFunction(cgMod: CGModule): Unit {
                         [thisParamWithTI, payloadPtr, thisParamWithoutTI, size64]))
                 }
             } else {
-                irBuilder.CreateMemCpy(payloadPtr, 0u32, thisParamWithoutTI, 0u32, size32)
+                irBuilder.CallGCWriteGenericPayloadFromSrc(
+                    thisParamWithTI, thisParamWithoutTI, size32, thisParamTypeInfo)
             }
 
             let callee = item.cgFuncCallee.GetWrapperFunction()

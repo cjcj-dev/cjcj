@@ -3546,12 +3546,72 @@ public class IRBuilder2 <: Resource {
 
     public func CallGCWriteGenericPayload(dest: LLVMValueRef, source: LLVMValueRef,
         size: LLVMValueRef): LLVMValueRef {
+        let sourceAddrSpace = GetPointerAddressSpace(source)
+        if (sourceAddrSpace.isNone() || sourceAddrSpace.getOrThrow() != 0u32) {
+            InternalError("generic payload source must be an addrspace(0) pointer")
+            return LLVMNullValue()
+        }
+        let sourceType = unsafe { LLVMPointerType(LLVMInt8TypeInContext(GetLLVMContext().raw), 0u32) }
         let args = ArrayList<LLVMValueRef>()
         args.add(dest)
-        args.add(source)
+        args.add(CreatePointerCast(source, sourceType, name: "gcwrite.generic.payload.source"))
         args.add(size)
         CheckNoWriteBarrierRec()
         return CreateIntrinsicCallNoInvoke(GCWRITE_GENERIC_PAYLOAD_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
+    }
+
+    // Return the AS0 origin of a direct AS0 -> AS1 native view.  The LLVM
+    // operator query deliberately covers both instructions and constant
+    // expressions; treating only instructions here would silently misclassify
+    // a constant-expression native view as a whole managed object.
+    public static func GetNativePayloadSource(addrSpaceCast: LLVMValueRef): LLVMValueRef {
+        let source = unsafe { LLVMSelfhostAddrSpaceCastOperatorGetOperand(addrSpaceCast) }
+        if (source.isNull()) {
+            InternalError("generic payload native view is not an addrspace cast")
+            return LLVMNullValue()
+        }
+        if (unsafe { LLVMSelfhostIsAddrSpaceCastOperator(source) } != 0) {
+            let nestedSource = unsafe { LLVMSelfhostAddrSpaceCastOperatorGetOperand(source) }
+            let nestedType = unsafe { LLVMTypeOf(nestedSource) }
+            let isManagedRoundTrip = !nestedType.isNull() &&
+                unsafe { LLVMGetTypeKind(nestedType) } == LLVM_POINTER_TYPE_KIND &&
+                unsafe { LLVMGetPointerAddressSpace(nestedType) } == 1u32
+            if (isManagedRoundTrip) {
+                InternalError("managed payload source round-trip")
+                return LLVMNullValue()
+            }
+        }
+        return source
+    }
+
+    public func CallGCWriteGenericPayloadFromSrc(dest: LLVMValueRef, source: LLVMValueRef,
+        size: LLVMValueRef, typeInfo: LLVMValueRef): LLVMValueRef {
+        let sourceAddrSpace = GetPointerAddressSpace(source)
+        if (sourceAddrSpace.isNone()) {
+            InternalError("generic payload source must be a pointer")
+            return LLVMNullValue()
+        }
+        if (sourceAddrSpace.getOrThrow() == 0u32) {
+            return CallGCWriteGenericPayload(dest, source, size)
+        }
+        if (let Some(baseObject) <- GetTrackedManagedBase(source)) {
+            return CallGCReadGeneric(dest, baseObject, source, size)
+        }
+        if (unsafe { LLVMSelfhostIsAddrSpaceCastOperator(source) } != 0) {
+            let nativeSource = unsafe { LLVMSelfhostAddrSpaceCastOperatorGetOperand(source) }
+            if ((GetPointerAddressSpace(nativeSource) ?? 1u32) == 0u32) {
+                let checkedNativeSource = IRBuilder2.GetNativePayloadSource(source)
+                if (checkedNativeSource.isNull()) {
+                    return LLVMNullValue()
+                }
+                return CallGCWriteGenericPayload(dest, checkedNativeSource, size)
+            }
+        }
+        if (typeInfo.isNull()) {
+            InternalError("whole managed generic payload source requires TypeInfo")
+            return LLVMNullValue()
+        }
+        return CallIntrinsicAssignGeneric(ArrayList<LLVMValueRef>([dest, source, typeInfo]))
     }
 
     public func CallGCReadRef(baseObject: LLVMValueRef, place: LLVMValueRef): LLVMValueRef {

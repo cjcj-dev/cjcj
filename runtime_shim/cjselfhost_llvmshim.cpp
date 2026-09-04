@@ -69,6 +69,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
 #include "llvm/Transforms/Utils/Cloning.h"
@@ -428,6 +429,17 @@ extern "C" int LLVMSelfhostIsConstant(LLVMValueRef Val)
 extern "C" int LLVMSelfhostIsConstantInt(LLVMValueRef Val)
 {
     return isa<ConstantInt>(unwrap<Value>(Val)) ? 1 : 0;
+}
+
+extern "C" int LLVMSelfhostIsAddrSpaceCastOperator(LLVMValueRef Val)
+{
+    return Val != nullptr && isa<AddrSpaceCastOperator>(unwrap<Value>(Val)) ? 1 : 0;
+}
+
+extern "C" LLVMValueRef LLVMSelfhostAddrSpaceCastOperatorGetOperand(LLVMValueRef Val)
+{
+    auto *addrSpaceCast = Val == nullptr ? nullptr : dyn_cast<AddrSpaceCastOperator>(unwrap<Value>(Val));
+    return addrSpaceCast == nullptr ? nullptr : wrap(addrSpaceCast->getOperand(0));
 }
 
 extern "C" int LLVMSelfhostIsNullConstant(LLVMValueRef Val)

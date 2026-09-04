@@ -315,6 +315,9 @@ foreign {
     func LLVMSelfhostIsInvokeInst(inst: LLVMValueRef): Int32
     func LLVMSelfhostIsConstant(value: LLVMValueRef): Int32
     func LLVMSelfhostIsConstantInt(value: LLVMValueRef): Int32
+    // AddrSpaceCastOperator covers both instructions and constant expressions.
+    func LLVMSelfhostIsAddrSpaceCastOperator(value: LLVMValueRef): Int32
+    func LLVMSelfhostAddrSpaceCastOperatorGetOperand(value: LLVMValueRef): LLVMValueRef
     func LLVMSelfhostIsNullConstant(value: LLVMValueRef): Int32
     func LLVMSelfhostCallBaseHasStructRetAttr(callBase: LLVMValueRef): Int32
     func LLVMSelfhostFunctionHasStructRetAttr(fn: LLVMValueRef): Int32
