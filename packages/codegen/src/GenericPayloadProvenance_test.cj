@@ -1,8 +1,7 @@
-package cjcj::compiler_unittest
+package cjcj::codegen
 
 import std.unittest.*
 import std.unittest.testmacro.*
-import cjcj::codegen.*
 import cjcj::utils.{ICE, TriggerPointSetter}
 
 private let PAYLOAD_SOURCE_IR = """
