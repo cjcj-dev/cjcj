@@ -1,0 +1,15 @@
+diff --git a/packages/codegen/src/ArrayImpl.cj b/packages/codegen/src/ArrayImpl.cj
+--- a/packages/codegen/src/ArrayImpl.cj
++++ b/packages/codegen/src/ArrayImpl.cj
+@@ -510,8 +510,9 @@ private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGVa
+     }
+     let aggregateType = destCGType.GetLLVMType()
+     if (!irBuilder.IsTypeContainsRef(aggregateType)) {
+-        irBuilder.CopyNativeAggregate(aggregateType, source, addr.GetRawValue())
+-        return Some(LLVMNullValue())
++        let cutAlign = irBuilder.GetCGModule().GetABITypeAlignment(aggregateType)
++        return Some(irBuilder.CreateMemCpy(
++            addr.GetRawValue(), cutAlign, source, cutAlign, fieldSizeValue))
+     }
+     let align = irBuilder.GetCGModule().GetABITypeAlignment(aggregateType)
+     return Some(irBuilder.CreateMemCpy(addr.GetRawValue(), align, source, align, fieldSizeValue))

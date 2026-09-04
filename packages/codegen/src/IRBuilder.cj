@@ -1476,8 +1476,8 @@ public class IRBuilder2 <: Resource {
             let source = ReadManagedAggregateSourceIfNeeded(value.GetRawValue(), structCGType, size)
             return CallGCWriteAgg(structType, ArrayList<LLVMValueRef>([baseObject, dest, source, size]))
         }
-        let align = cgMod.GetABITypeAlignment(structType)
-        return CreateMemCpy(dest, align, value.GetRawValue(), align, size)
+        CopyNativeAggregate(structType, value.GetRawValue(), dest)
+        return LLVMNullValue()
     }
 
     private func StoreVArrayManagedMemberValue(baseObject: LLVMValueRef, dest: LLVMValueRef, value: CGValue,
@@ -1571,6 +1571,57 @@ public class IRBuilder2 <: Resource {
     public func CreateMemMove(dest: LLVMValueRef, destAlign: UInt32, src: LLVMValueRef, srcAlign: UInt32,
         size: LLVMValueRef): LLVMValueRef {
         return unsafe { LLVMBuildMemMove(builder.raw, dest, destAlign, src, srcAlign, size) }
+    }
+
+    // Copy an aggregate through its LLVM field types. This is a code-generation helper
+    // only: it emits GEPs and typed leaf loads/stores, never a runtime copy call. Managed
+    // callers keep reference-bearing aggregates on their existing GC barrier path; the
+    // helper itself also serves native aggregates whose pointer-shaped leaves are not oops.
+    private func CopyAggregateTyped(aggregateType: LLVMTypeRef, source: LLVMValueRef,
+        destination: LLVMValueRef): Unit {
+        let kind = unsafe { LLVMGetTypeKind(aggregateType) }
+        if (kind == LLVM_STRUCT_TYPE_KIND) {
+            CJC_ASSERT(unsafe { LLVMIsOpaqueStruct(aggregateType) } == 0)
+            let fieldCount = unsafe { LLVMCountStructElementTypes(aggregateType) }
+            var index = 0u32
+            while (index < fieldCount) {
+                let fieldType = unsafe { LLVMStructGetTypeAtIndex(aggregateType, index) }
+                let sourceField = CreateStructGEP(aggregateType, source, index, name: "typed.copy.src.field")
+                let destinationField = CreateStructGEP(
+                    aggregateType, destination, index, name: "typed.copy.dst.field")
+                CopyAggregateTyped(fieldType, sourceField, destinationField)
+                index++
+            }
+            return
+        }
+        if (kind == LLVM_ARRAY_TYPE_KIND) {
+            let elementType = unsafe { LLVMGetElementType(aggregateType) }
+            let elementCount = unsafe { LLVMGetArrayLength(aggregateType) }
+            var index = 0u32
+            while (index < elementCount) {
+                let indices = ArrayList<LLVMValueRef>([GetInt32(0), GetInt32(Int64(index))])
+                let sourceElement = CreateInBoundsGEP(
+                    aggregateType, source, indices, name: "typed.copy.src.element")
+                let destinationElement = CreateInBoundsGEP(
+                    aggregateType, destination, indices, name: "typed.copy.dst.element")
+                CopyAggregateTyped(elementType, sourceElement, destinationElement)
+                index++
+            }
+            return
+        }
+        var leaf = LLVMNullValue()
+        try (nameCString = unsafe { LibC.mallocCString("typed.copy.leaf") }.asResource()) {
+            leaf = unsafe { LLVMBuildLoad2(builder.raw, aggregateType, source, nameCString.value) }
+        }
+        let _ = unsafe { LLVMBuildStore(builder.raw, leaf, destination) }
+    }
+
+    public func CopyNativeAggregate(aggregateType: LLVMTypeRef, source: LLVMValueRef,
+        destination: LLVMValueRef): Unit {
+        CJC_ASSERT(!aggregateType.isNull())
+        let kind = unsafe { LLVMGetTypeKind(aggregateType) }
+        CJC_ASSERT(kind == LLVM_STRUCT_TYPE_KIND || kind == LLVM_ARRAY_TYPE_KIND)
+        CopyAggregateTyped(aggregateType, source, destination)
     }
 
     public func CreateCJMemSetStructWith0(addr: LLVMValueRef): LLVMValueRef {

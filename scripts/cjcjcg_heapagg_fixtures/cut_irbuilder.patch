@@ -1,0 +1,14 @@
+diff --git a/packages/codegen/src/IRBuilder.cj b/packages/codegen/src/IRBuilder.cj
+--- a/packages/codegen/src/IRBuilder.cj
++++ b/packages/codegen/src/IRBuilder.cj
+@@ -1476,8 +1476,8 @@ public class IRBuilder2 <: Resource {
+             let source = ReadManagedAggregateSourceIfNeeded(value.GetRawValue(), structCGType, size)
+             return CallGCWriteAgg(structType, ArrayList<LLVMValueRef>([baseObject, dest, source, size]))
+         }
+-        CopyNativeAggregate(structType, value.GetRawValue(), dest)
+-        return LLVMNullValue()
++        let align = cgMod.GetABITypeAlignment(structType)
++        return CreateMemCpy(dest, align, value.GetRawValue(), align, size)
+     }
+ 
+     private func StoreVArrayManagedMemberValue(baseObject: LLVMValueRef, dest: LLVMValueRef, value: CGValue,

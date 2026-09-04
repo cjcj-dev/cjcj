@@ -495,7 +495,6 @@ private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGVa
     let fieldSizeValue = unsafe {
         LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw), UInt64(fieldSize), 0)
     }
-    let align = irBuilder.GetCGModule().GetABITypeAlignment(destCGType.GetLLVMType())
     let source = ReadManagedAggregateSourceIfNeeded(irBuilder, raw, destCGType, fieldSizeValue)
     if (irBuilder.IsGlobalVariableBasePtr(addr.GetRawValue()) &&
         irBuilder.IsTypeContainsRef(destCGType.GetLLVMType())) {
@@ -509,6 +508,12 @@ private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGVa
     if (fieldSize == 0) {
         return Some(LLVMNullValue())
     }
+    let aggregateType = destCGType.GetLLVMType()
+    if (!irBuilder.IsTypeContainsRef(aggregateType)) {
+        irBuilder.CopyNativeAggregate(aggregateType, source, addr.GetRawValue())
+        return Some(LLVMNullValue())
+    }
+    let align = irBuilder.GetCGModule().GetABITypeAlignment(aggregateType)
     return Some(irBuilder.CreateMemCpy(addr.GetRawValue(), align, source, align, fieldSizeValue))
 }
 
