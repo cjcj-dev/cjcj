@@ -566,6 +566,35 @@ function compilerStdlibBeforeBootstrap(text) {
   return forbidden;
 }
 
+const BOOTSTRAP_FLAGS = [
+  '--work', '--src', '--stdsrc', '--base', '--host-llvm-so', '--host-llvm-sha256',
+  '--ast-support', '--ast-support-sha256', '--colour-tuple', '--colour-llvm-sha',
+  '--colour-rt', '--host-rt', '--stage',
+];
+
+function extractFn(text, name) {
+  const match = text.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}`, 'm'));
+  return match ? match[0] : '';
+}
+
+function bootstrapExecDefects(text) {
+  const defects = [];
+  const step31 = extractFn(text, 'step_31');
+  const step32 = extractFn(text, 'step_32');
+  const argvText = extractFn(text, 'bootstrap_argv');
+  if (!step31.includes('run_bootstrap_stage stage0')) defects.push('step_31-not-bootstrap');
+  if (!step32.includes('run_bootstrap_stage stage1')) defects.push('step_32-not-bootstrap');
+  if (!/BOOTSTRAP_SH=.*\/root\/cj_build\/tools\/bootstrap\.sh/.test(text)) {
+    defects.push('bootstrap-sh-path');
+  }
+  for (const flag of BOOTSTRAP_FLAGS) {
+    if (!argvText.includes(flag)) defects.push(`missing-flag:${flag}`);
+  }
+  if (step31.includes('build-stage1.mjs')) defects.push('step_31-build-stage1');
+  if (/PATH=.*opt/.test(step31)) defects.push('stage0-colour-opt-on-path');
+  return defects;
+}
+
 test('DAG runs bootstrap after verify-source-pins and omits removed compiler/stdlib steps', () => {
   const forbidden = compilerStdlibBeforeBootstrap(script);
   assert.deepEqual(forbidden, []);
@@ -588,48 +617,39 @@ test('restoring removed 15-19 calls turns the DAG contract red and only that con
   assert.deepEqual(compilerStdlibBeforeBootstrap(script), []);
 });
 
-test('stage0 dry-run contract prints cjpm -O1 and forbids cjc -O1 -o', () => {
-  assert.match(script, /DRY_RUN INNER_COMMAND=cjpm build\\n/);
-  assert.match(script, /DRY_RUN COMPILE_OPTION=-O1/);
-  assert.match(script, /dry-run stage0 contract forbids cjc -O1 -o/);
-  assert.doesNotMatch(script, /INNER_COMMAND=cjc -O1 -o/);
-  const mutated = script.replace('DRY_RUN INNER_COMMAND=cjpm build', 'DRY_RUN INNER_COMMAND=cjc -O1 -o "$out" "$SRC"');
-  assert.match(mutated, /INNER_COMMAND=cjc -O1 -o/);
-  const invoke = `${shellFunction('validate_stage_step_contracts')}\n`
-    + 'FROM_STEP=31 THROUGH_STEP=31 STAGE1_STEP_SCRIPT=$1 STAGE2_STEP_SCRIPT=$1 '
-    + 'STAGE3_STEP_SCRIPT=$1 STAGE2_PRODUCT_DIR=$2\n'
-    + 'validate_stage_step_contracts\n';
-  const brokenStage1 = fs.mkdtempSync(path.join(os.tmpdir(), 'stage0-cjc-cut-'));
-  const broken = path.join(brokenStage1, 'build-stage1.mjs');
-  fs.writeFileSync(broken,
-    'compile-option = "-O1"\nawait $`cjpm build`;\nawait $`cjc -O1 -o out SRC`;\n');
-  const bad = runBash(invoke, [broken, path.join(repoRoot, 'target', 'release', 'bin')]);
-  assert.notEqual(bad.status, 0);
-  assert.match(bad.stderr, /forbids cjc -O1 -o/);
-  const good = runBash(invoke, [path.join(repoRoot, 'ci/srcbuild/steps/build-stage1.mjs'),
-    path.join(repoRoot, 'target', 'release', 'bin')]);
-  assert.equal(good.status, 0, good.stderr);
-  fs.rmSync(brokenStage1, {recursive: true, force: true});
+test('step_31 execs bootstrap.sh not build-stage1.mjs and only that contract turns red on revert', () => {
+  assert.deepEqual(bootstrapExecDefects(script), []);
+  const mutated = script.replace(
+    /step_31\(\) \{\n    ulimit -c unlimited \|\| true\n    run_bootstrap_stage stage0\n\}/,
+    'step_31() {\n    npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"\n}',
+  );
+  assert.deepEqual(bootstrapExecDefects(mutated), ['step_31-not-bootstrap', 'step_31-build-stage1']);
+  assert.deepEqual(bootstrapExecDefects(script), []);
+  assert.deepEqual(compilerStdlibBeforeBootstrap(mutated), []);
 });
 
-test('stage1 dry-run contract requires -j 1 and cjHeapSize=20GB and turns red without heap', () => {
-  assert.match(script, /DRY_RUN INNER_COMMAND=cjpm build -j 1/);
-  assert.match(script, /DRY_RUN ENV cjHeapSize=20GB/);
-  const invoke = `${shellFunction('validate_stage_step_contracts')}\n`
-    + 'FROM_STEP=32 THROUGH_STEP=32 STAGE1_STEP_SCRIPT=$1 STAGE2_STEP_SCRIPT=$2 '
-    + 'STAGE3_STEP_SCRIPT=$1 STAGE2_PRODUCT_DIR=$3\n'
-    + 'validate_stage_step_contracts\n';
-  const good = runBash(invoke, [scriptPath, path.join(repoRoot, 'ci/srcbuild/steps/build-stage2.mjs'),
-    path.join(repoRoot, 'target', 'release', 'bin')]);
-  assert.equal(good.status, 0, good.stderr);
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stage2-heap-cut-'));
-  const broken = path.join(root, 'build-stage2.mjs');
-  fs.writeFileSync(broken, fs.readFileSync(path.join(repoRoot, 'ci/srcbuild/steps/build-stage2.mjs'), 'utf8')
-    .replace("cjHeapSize: '20GB'", "cjHeapSize: '8GB'"));
-  const bad = runBash(invoke, [scriptPath, broken, path.join(repoRoot, 'target', 'release', 'bin')]);
-  assert.notEqual(bad.status, 0);
-  assert.match(bad.stderr, /cjHeapSize=20GB/);
-  fs.rmSync(root, {recursive: true, force: true});
+test('bootstrap argv missing one 66aec40 flag turns only the flag contract red', () => {
+  assert.deepEqual(bootstrapExecDefects(script), []);
+  const mutated = script.replace('        --stdsrc "$BOOTSTRAP_STDSRC" \\\n', '');
+  const defects = bootstrapExecDefects(mutated);
+  assert.deepEqual(defects, ['missing-flag:--stdsrc']);
+  assert.deepEqual(bootstrapExecDefects(script), []);
+});
+
+test('stage0 PATH injection of colour opt turns only the isolation contract red', () => {
+  assert.deepEqual(bootstrapExecDefects(script), []);
+  const mutated = script.replace(
+    /step_31\(\) \{\n    ulimit -c unlimited \|\| true\n    run_bootstrap_stage stage0\n\}/,
+    'step_31() {\n    PATH=/root/llvmdepot/opt:$PATH\n    run_bootstrap_stage stage0\n}',
+  );
+  assert.deepEqual(bootstrapExecDefects(mutated), ['stage0-colour-opt-on-path']);
+  assert.deepEqual(bootstrapExecDefects(script), []);
+});
+
+test('print_dry_step 31/32 emit the same bootstrap.sh argv as execution', () => {
+  assert.match(script, /printf 'DRY_RUN COMMAND=%s\\n' "\$\(bootstrap_argv stage0\)"/);
+  assert.match(script, /printf 'DRY_RUN COMMAND=%s\\n' "\$\(bootstrap_argv stage1\)"/);
+  assert.match(script, /run_bootstrap_stage\(\) \{[\s\S]*bootstrap_argv "\$stage"/);
 });
 
 test('GHA srcbuild does not build compiler or stdlib before bootstrap', () => {
@@ -643,4 +663,12 @@ test('GHA srcbuild does not build compiler or stdlib before bootstrap', () => {
   assert.ok(yml.indexOf('pin-compiler-llvm.mjs') < 0);
   assert.ok(yml.indexOf('activate-source-sdk.mjs') < 0);
   assert.ok(yml.indexOf('Bootstrap stage0 compiler') < yml.indexOf('Build stdx from source'));
+  assert.ok(yml.includes('bash /root/cj_build/tools/bootstrap.sh'));
+  for (const flag of BOOTSTRAP_FLAGS) {
+    assert.ok(yml.includes(flag), flag);
+  }
+  assert.ok(yml.includes('--stage stage0'));
+  assert.ok(yml.includes('--stage stage1'));
+  assert.ok(!yml.includes('ci/srcbuild/steps/build-stage1.mjs'));
+  assert.ok(!yml.includes('ci/srcbuild/steps/build-stage2.mjs'));
 });

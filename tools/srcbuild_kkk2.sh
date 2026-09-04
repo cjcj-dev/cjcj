@@ -423,6 +423,7 @@ readonly CJCJ_FIXED_LLVM_DIR="$STATE_ROOT/fixed-llc"
 readonly STAGE1_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"
 readonly STAGE2_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage2.mjs"
 readonly STAGE3_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage3.mjs"
+readonly BOOTSTRAP_SH="${CJCJ_BOOTSTRAP_SH:-/root/cj_build/tools/bootstrap.sh}"
 readonly STAGE2_PRODUCT_DIR="$REPO_ROOT/target/release/bin"
 readonly BUILD_TYPE=relwithdebinfo
 readonly VERIFIER_DIAGNOSTIC_MARKER="$CANGJIE_WORKSPACE/.cjcj-verifier-diagnostic.json"
@@ -1100,14 +1101,84 @@ step_30() {
     npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/inject-version.mjs"
 }
 
+bootstrap_input_sha256() {
+    local path=$1 env_sha=${2:-}
+    if [[ -n $env_sha ]]; then
+        printf '%s\n' "$env_sha"
+        return 0
+    fi
+    [[ -f $path ]] || {
+        echo "bootstrap input missing: $path" >&2
+        return 1
+    }
+    sha256sum "$path" | awk '{print $1}'
+}
+
+load_bootstrap_pins() {
+    resolve_host_toolchain_pin
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/ci/llvm_pin.env"
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/ci/runtime_pin.env"
+    BOOTSTRAP_HOST_SDK=${CJCJ_SRCBUILD_HOST_SDK:-${SRCBUILD_USER_HOME:-$HOME}/.cjv/toolchains/$CJCJ_TOOLCHAIN}
+    BOOTSTRAP_HOST_LLVM_SO=${CJCJ_BOOTSTRAP_HOST_LLVM_SO:-$BOOTSTRAP_HOST_SDK/third_party/llvm/lib/libLLVM-15.so}
+    BOOTSTRAP_HOST_LLVM_SHA256=$(bootstrap_input_sha256 "$BOOTSTRAP_HOST_LLVM_SO" "${CJCJ_BOOTSTRAP_HOST_LLVM_SHA256:-}") || return 1
+    if [[ -n ${CJCJ_BOOTSTRAP_AST_SUPPORT:-} ]]; then
+        BOOTSTRAP_AST_SUPPORT=$CJCJ_BOOTSTRAP_AST_SUPPORT
+    elif [[ -f $CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a ]]; then
+        BOOTSTRAP_AST_SUPPORT=$CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a
+    else
+        BOOTSTRAP_AST_SUPPORT=/root/impl_fam_erased_dynpayload/build-copy/compiler/build/build/lib/libcangjie-ast-support.a
+    fi
+    BOOTSTRAP_AST_SUPPORT_SHA256=$(bootstrap_input_sha256 "$BOOTSTRAP_AST_SUPPORT" "${CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256:-}") || return 1
+    BOOTSTRAP_COLOUR_TUPLE=${CJCJ_BOOTSTRAP_COLOUR_TUPLE:-/root/llvmdepot/$LLVM_SHA/$CANGJIE_COMPILER_SHA}
+    BOOTSTRAP_STDSRC=${CJCJ_BOOTSTRAP_STDSRC:-$CANGJIE_WORKSPACE/cangjie_runtime/stdlib}
+    if [[ -n ${CJCJ_BOOTSTRAP_COLOUR_RT:-} ]]; then
+        BOOTSTRAP_COLOUR_RT=$CJCJ_BOOTSTRAP_COLOUR_RT
+    elif [[ -d /root/sodepot/$RUNTIME_REF ]]; then
+        BOOTSTRAP_COLOUR_RT=/root/sodepot/$RUNTIME_REF
+    else
+        BOOTSTRAP_COLOUR_RT=/root/merge_fwdtable_pr/sodepot/$RUNTIME_REF
+    fi
+}
+
+bootstrap_argv() {
+    local stage=$1
+    load_bootstrap_pins || return 1
+    [[ $stage == stage0 || $stage == stage1 ]] || return 1
+    printf '%q ' \
+        "$BOOTSTRAP_SH" \
+        --work "$STATE_ROOT/bootstrap-work" \
+        --src "$REPO_ROOT" \
+        --stdsrc "$BOOTSTRAP_STDSRC" \
+        --base "$CJCJ_TOOLCHAIN" \
+        --host-llvm-so "$BOOTSTRAP_HOST_LLVM_SO" \
+        --host-llvm-sha256 "$BOOTSTRAP_HOST_LLVM_SHA256" \
+        --ast-support "$BOOTSTRAP_AST_SUPPORT" \
+        --ast-support-sha256 "$BOOTSTRAP_AST_SUPPORT_SHA256" \
+        --colour-tuple "$BOOTSTRAP_COLOUR_TUPLE" \
+        --colour-llvm-sha "$LLVM_SHA" \
+        --colour-rt "$BOOTSTRAP_COLOUR_RT" \
+        --host-rt "$BOOTSTRAP_HOST_SDK" \
+        --stage "$stage"
+    printf '\n'
+}
+
+run_bootstrap_stage() {
+    local stage=$1
+    local -a cmd
+    mkdir -p "$STATE_ROOT/bootstrap-work"
+    eval "cmd=( $(bootstrap_argv "$stage") )"
+    "${cmd[@]}"
+}
+
 step_31() {
     ulimit -c unlimited || true
-    npx --yes zx@8 "$STAGE1_STEP_SCRIPT"
+    run_bootstrap_stage stage0
 }
 
 step_32() {
-    export cjHeapSize=20GB
-    npx --yes zx@8 "$STAGE2_STEP_SCRIPT"
+    run_bootstrap_stage stage1
 }
 
 step_33() {
@@ -1151,37 +1222,50 @@ validate_stage_step_contracts() {
             ((FROM_STEP <= want && THROUGH_STEP >= want))
         fi
     }
-    if includes_step 31; then
-        [[ -f $STAGE1_STEP_SCRIPT ]] || {
-            echo "dry-run referenced step script is missing: $STAGE1_STEP_SCRIPT" >&2
+    if includes_step 31 || includes_step 32; then
+        [[ -x $BOOTSTRAP_SH || -f $BOOTSTRAP_SH ]] || {
+            echo "dry-run bootstrap entry missing: $BOOTSTRAP_SH" >&2
             return 1
         }
-        /usr/bin/grep -Fq 'cjpm build' "$STAGE1_STEP_SCRIPT" || {
-            echo "dry-run stage0 contract missing: cjpm build in $STAGE1_STEP_SCRIPT" >&2
+        local missing flag argv_text step31_text step32_text
+        argv_text=$(awk '/^bootstrap_argv\(\)/,/^}/' "$SCRIPT_PATH")
+        for flag in --work --src --stdsrc --base --host-llvm-so --host-llvm-sha256 \
+            --ast-support --ast-support-sha256 --colour-tuple --colour-llvm-sha \
+            --colour-rt --host-rt --stage; do
+            printf '%s\n' "$argv_text" | /usr/bin/grep -Fq -- "$flag" || missing+="$flag "
+        done
+        [[ -z ${missing:-} ]] || {
+            echo "dry-run bootstrap argv missing flags: $missing" >&2
             return 1
         }
-        /usr/bin/grep -Fq 'compile-option = "-O1"' "$STAGE1_STEP_SCRIPT" || {
-            echo "dry-run stage0 contract missing: compile-option=-O1 in $STAGE1_STEP_SCRIPT" >&2
-            return 1
-        }
-        /usr/bin/grep -Fq 'cjc -O1 -o' "$STAGE1_STEP_SCRIPT" && {
-            echo "dry-run stage0 contract forbids cjc -O1 -o in $STAGE1_STEP_SCRIPT" >&2
-            return 1
-        }
-    fi
-    if includes_step 32; then
-        [[ -f $STAGE2_STEP_SCRIPT ]] || {
-            echo "dry-run referenced step script is missing: $STAGE2_STEP_SCRIPT" >&2
-            return 1
-        }
-        /usr/bin/grep -Fq "cjHeapSize: '20GB'" "$STAGE2_STEP_SCRIPT" || {
-            echo "dry-run stage2 contract missing: cjHeapSize=20GB in $STAGE2_STEP_SCRIPT" >&2
-            return 1
-        }
-        /usr/bin/grep -Fq 'cjpm build -j 1' "$STAGE2_STEP_SCRIPT" || {
-            echo "dry-run stage2 contract missing: cjpm build -j 1 in $STAGE2_STEP_SCRIPT" >&2
-            return 1
-        }
+        if includes_step 31; then
+            step31_text=$(awk '/^step_31\(\)/,/^}/' "$SCRIPT_PATH")
+            printf '%s\n' "$step31_text" | /usr/bin/grep -Fq 'run_bootstrap_stage stage0' || {
+                echo "dry-run step_31 does not exec bootstrap.sh --stage stage0" >&2
+                return 1
+            }
+            printf '%s\n' "$step31_text" | /usr/bin/grep -Fq 'build-stage1.mjs' && {
+                echo "dry-run step_31 must not call build-stage1.mjs" >&2
+                return 1
+            }
+            printf '%s\n' "$step31_text" | /usr/bin/grep -E -q 'PATH=.*opt|/bin/opt' && {
+                echo "dry-run stage0 forbids injecting colour opt on PATH" >&2
+                return 1
+            }
+        fi
+        if includes_step 32; then
+            step32_text=$(awk '/^step_32\(\)/,/^}/' "$SCRIPT_PATH")
+            printf '%s\n' "$step32_text" | /usr/bin/grep -Fq 'run_bootstrap_stage stage1' || {
+                echo "dry-run step_32 does not exec bootstrap.sh --stage stage1" >&2
+                return 1
+            }
+        fi
+        if [[ -f $BOOTSTRAP_SH ]]; then
+            /usr/bin/grep -Fq 'cjc -O1 -o' "$BOOTSTRAP_SH" && {
+                echo "dry-run stage0 contract forbids cjc -O1 -o in $BOOTSTRAP_SH" >&2
+                return 1
+            }
+        fi
     fi
     if includes_step 33; then
         [[ -f $STAGE3_STEP_SCRIPT ]] || {
@@ -1204,17 +1288,10 @@ print_dry_step() {
             printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$REPO_ROOT/ci/setup_sdk.mjs"
             ;;
         31)
-            printf 'DRY_RUN COMMAND=bootstrap --stage stage0 --colour-tuple %q --src %q\n' \
-                "$CJCJ_FIXED_LLVM_DIR" "$REPO_ROOT"
-            printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$STAGE1_STEP_SCRIPT"
-            printf 'DRY_RUN INNER_COMMAND=cjpm build\n'
-            printf 'DRY_RUN COMPILE_OPTION=-O1\n'
+            printf 'DRY_RUN COMMAND=%s\n' "$(bootstrap_argv stage0)"
             ;;
         32)
-            printf 'DRY_RUN ASSUME=stage1-artifact-exists\n'
-            printf 'DRY_RUN ENV cjHeapSize=20GB cjHeapSwap=on\n'
-            printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$STAGE2_STEP_SCRIPT"
-            printf 'DRY_RUN INNER_COMMAND=cjpm build -j 1\n'
+            printf 'DRY_RUN COMMAND=%s\n' "$(bootstrap_argv stage1)"
             ;;
         33)
             printf 'DRY_RUN ENV CJCJ_STAGE3_STDLIB_BUILD_TYPE=%s cjHeapSwap=on\n' "$BUILD_TYPE"
@@ -1232,8 +1309,9 @@ if ((DRY_RUN)); then
         "$host_name" "$TARGET" "$JOBS" "$CPUSET" "$FROM_STEP" "$THROUGH_STEP"
     build_fixed_tuple
     while IFS= read -r step; do
+        [[ -n $step ]] || continue
         print_dry_step "$step" "$dry_run_toolchain"
-    done < <(selected_dag_steps "$FROM_STEP" "$THROUGH_STEP")
+    done <<< "$(selected_dag_steps "$FROM_STEP" "$THROUGH_STEP")"
     printf 'DRY_RUN RESULT=success through_step=%s\n' "$THROUGH_STEP"
     exit 0
 fi
@@ -1248,8 +1326,9 @@ printf 'RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' 
 run_fixed_tuple_prerequisite
 
 while IFS= read -r step; do
+    [[ -n $step ]] || continue
     reject_diagnostic_workspace "$VERIFIER_DIAGNOSTIC_MARKER" "step $step" || exit $?
     run_step "$step" "${STEP_NAMES[$step]}" "step_$step"
-done < <(selected_dag_steps "$FROM_STEP" "$THROUGH_STEP")
+done <<< "$(selected_dag_steps "$FROM_STEP" "$THROUGH_STEP")"
 
 printf 'RESULT=success through_step=%s timings=%s\n' "$THROUGH_STEP" "$TIMINGS"
