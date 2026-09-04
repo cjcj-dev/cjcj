@@ -255,31 +255,17 @@ jobs:
           name: fixed-llvm-tools-${{ matrix.llvm_platform }}
           path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
 
-      - name: Bootstrap stage0 compiler
+      - name: Resolve bootstrap inputs on this runner
         shell: bash
         run: |
           set -euo pipefail
           source ci/llvm_pin.env
           source ci/runtime_pin.env
-          host_sdk="${CJCJ_SRCBUILD_HOST_SDK:-$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN}"
-          host_llvm="${CJCJ_BOOTSTRAP_HOST_LLVM_SO:-$host_sdk/third_party/llvm/lib/libLLVM-15.so}"
-          ast_support="${CJCJ_BOOTSTRAP_AST_SUPPORT:-$CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a}"
-          colour_tuple="${CJCJ_BOOTSTRAP_COLOUR_TUPLE:-/root/llvmdepot/$LLVM_SHA/$CANGJIE_COMPILER_SHA}"
-          colour_rt="${CJCJ_BOOTSTRAP_COLOUR_RT:-/root/sodepot/$RUNTIME_REF}"
-          bash /root/cj_build/tools/bootstrap.sh \
-            --work "$CANGJIE_WORKSPACE/bootstrap-work" \
-            --src "$GITHUB_WORKSPACE" \
-            --stdsrc "$CANGJIE_WORKSPACE/cangjie_runtime/stdlib" \
-            --base "$CJCJ_TOOLCHAIN" \
-            --host-llvm-so "$host_llvm" \
-            --host-llvm-sha256 "$(sha256sum "$host_llvm" | awk '{print $1}')" \
-            --ast-support "$ast_support" \
-            --ast-support-sha256 "$(sha256sum "$ast_support" | awk '{print $1}')" \
-            --colour-tuple "$colour_tuple" \
-            --colour-llvm-sha "$LLVM_SHA" \
-            --colour-rt "$colour_rt" \
-            --host-rt "$host_sdk" \
-            --stage stage0
+          node ci/release/prepare_bootstrap_inputs.mjs
+
+      - name: Bootstrap stage0 compiler
+        shell: bash
+        run: bash ci/bootstrap/gha_run.sh stage0
 
       - name: Add Linux swap for stage2 chir heap
         if: runner.os == 'Linux'
@@ -292,29 +278,7 @@ jobs:
 
       - name: Bootstrap stage1 compiler
         shell: bash
-        run: |
-          set -euo pipefail
-          source ci/llvm_pin.env
-          source ci/runtime_pin.env
-          host_sdk="${CJCJ_SRCBUILD_HOST_SDK:-$HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN}"
-          host_llvm="${CJCJ_BOOTSTRAP_HOST_LLVM_SO:-$host_sdk/third_party/llvm/lib/libLLVM-15.so}"
-          ast_support="${CJCJ_BOOTSTRAP_AST_SUPPORT:-$CANGJIE_BUILD_ROOT/lib/libcangjie-ast-support.a}"
-          colour_tuple="${CJCJ_BOOTSTRAP_COLOUR_TUPLE:-/root/llvmdepot/$LLVM_SHA/$CANGJIE_COMPILER_SHA}"
-          colour_rt="${CJCJ_BOOTSTRAP_COLOUR_RT:-/root/sodepot/$RUNTIME_REF}"
-          bash /root/cj_build/tools/bootstrap.sh \
-            --work "$CANGJIE_WORKSPACE/bootstrap-work" \
-            --src "$GITHUB_WORKSPACE" \
-            --stdsrc "$CANGJIE_WORKSPACE/cangjie_runtime/stdlib" \
-            --base "$CJCJ_TOOLCHAIN" \
-            --host-llvm-so "$host_llvm" \
-            --host-llvm-sha256 "$(sha256sum "$host_llvm" | awk '{print $1}')" \
-            --ast-support "$ast_support" \
-            --ast-support-sha256 "$(sha256sum "$ast_support" | awk '{print $1}')" \
-            --colour-tuple "$colour_tuple" \
-            --colour-llvm-sha "$LLVM_SHA" \
-            --colour-rt "$colour_rt" \
-            --host-rt "$host_sdk" \
-            --stage stage1
+        run: bash ci/bootstrap/gha_run.sh stage1
 
       - name: Build stage 3 compiler and final std
         run: npx --yes zx@8 ci/srcbuild/steps/build-stage3.mjs

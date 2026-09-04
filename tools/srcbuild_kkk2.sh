@@ -423,7 +423,7 @@ readonly CJCJ_FIXED_LLVM_DIR="$STATE_ROOT/fixed-llc"
 readonly STAGE1_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"
 readonly STAGE2_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage2.mjs"
 readonly STAGE3_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage3.mjs"
-readonly BOOTSTRAP_SH="${CJCJ_BOOTSTRAP_SH:-/root/cj_build/tools/bootstrap.sh}"
+readonly BOOTSTRAP_SH="${CJCJ_BOOTSTRAP_SH:-$REPO_ROOT/ci/bootstrap/bootstrap.sh}"
 readonly STAGE2_PRODUCT_DIR="$REPO_ROOT/target/release/bin"
 readonly BUILD_TYPE=relwithdebinfo
 readonly VERIFIER_DIAGNOSTIC_MARKER="$CANGJIE_WORKSPACE/.cjcj-verifier-diagnostic.json"
@@ -1151,7 +1151,7 @@ bootstrap_argv() {
         --work "$STATE_ROOT/bootstrap-work" \
         --src "$REPO_ROOT" \
         --stdsrc "$BOOTSTRAP_STDSRC" \
-        --base "$CJCJ_TOOLCHAIN" \
+        --base "$BOOTSTRAP_HOST_SDK" \
         --host-llvm-so "$BOOTSTRAP_HOST_LLVM_SO" \
         --host-llvm-sha256 "$BOOTSTRAP_HOST_LLVM_SHA256" \
         --ast-support "$BOOTSTRAP_AST_SUPPORT" \
