@@ -37,7 +37,20 @@ export function baseEnv(config) {
     STDX_VERSION: String(config.stdxVersion),
     BUILD_ROOT: config.buildRoot,
     WORKSPACE: config.workspace,
+    // Formal source-build children are strict even when the invoking shell has
+    // verifier report variables left over.  The kkk2 driver sets the private
+    // active variable for step 19 only after applying its diagnostic-run caps.
+    CJ_IR_VERIFIER_MODE: 'strict',
+    CJ_IR_VERIFIER_REPORT: null,
   };
+  const verifierReport = process.env.CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE || '';
+  if (verifierReport) {
+    if (!path.isAbsolute(verifierReport)) {
+      throw new BuildError('environment', 'CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE must be an absolute path');
+    }
+    env.CJ_IR_VERIFIER_MODE = 'report';
+    env.CJ_IR_VERIFIER_REPORT = verifierReport;
+  }
   // Keep compiler outputs independent of the per-run workspace prefix.  This
   // is deliberately passed through CFLAGS/CXXFLAGS (rather than only to the
   // cache launcher): compiler/build.py and runtime/build.py inherit these

@@ -154,6 +154,31 @@ srcbuild_setup_compiler_cache() {
     echo "ccache enabled as CMAKE compiler launcher: dir=$dir max_size=${CJCJ_SRCBUILD_CCACHE_SIZE:-60G} basedir=$basedir"
 }
 
+validate_verifier_report_request() {
+    local report=$1 from_step=$2 through_step=$3
+    [[ -z $report ]] && return 0
+    [[ $report == /* ]] || {
+        echo "verifier report path must be absolute: $report" >&2
+        return 2
+    }
+    ((from_step <= 19 && through_step == 19)) || {
+        echo "verifier report mode is diagnostic-only and requires --through-step 19 (from-step must be <= 19)" >&2
+        return 2
+    }
+}
+
+sanitize_verifier_environment() {
+    unset CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE CJ_IR_VERIFIER_REPORT
+    export CJ_IR_VERIFIER_MODE=strict
+}
+
+reject_diagnostic_workspace() {
+    local marker=$1 context=${2:-source-build}
+    [[ ! -e $marker ]] && return 0
+    echo "refusing $context in workspace marked diagnostic: $marker" >&2
+    return 5
+}
+
 if [[ ${1:-} == --lib-only ]]; then
     [[ $# == 1 ]] || {
         echo "--lib-only does not accept other arguments" >&2
@@ -169,7 +194,8 @@ usage() {
     cat <<'EOF'
 Usage: tools/srcbuild_kkk2.sh [TARGET [JOBS [FROM_STEP]]]
        tools/srcbuild_kkk2.sh [--target TARGET] [--jobs N]
-                              [--from-step N] [--through-step N] [--dry-run]
+                              [--from-step N] [--through-step N]
+                              [--verifier-report ABSOLUTE_TSV] [--dry-run]
        source tools/srcbuild_kkk2.sh --lib-only
 
 Defaults:
@@ -195,6 +221,11 @@ Final source-build steps:
 --dry-run validates referenced step scripts and their command contracts, then
 prints the selected commands and environment without executing them.
 
+--verifier-report enables CJIRVerifier report mode for step 19 only.  It
+requires --through-step 19, truncates the TSV before the build, inventories
+report-marked .bc/.o files, and permanently marks that workspace diagnostic.
+The equivalent environment input is CJCJ_SRCBUILD_VERIFIER_REPORT.
+
 --lib-only is source-only and defines the strict host pin reader/resolver
 without entering the kkk2 build driver.
 
@@ -214,6 +245,7 @@ JOBS_EXPLICIT=0
 FROM_STEP=2
 THROUGH_STEP=33
 DRY_RUN=0
+VERIFIER_REPORT=${CJCJ_SRCBUILD_VERIFIER_REPORT:-}
 
 positional=()
 while (($#)); do
@@ -237,6 +269,15 @@ while (($#)); do
         --through-step)
             [[ $# -ge 2 ]] || { echo "--through-step requires a value" >&2; exit 2; }
             THROUGH_STEP=$2
+            shift 2
+            ;;
+        --verifier-report)
+            [[ $# -ge 2 ]] || { echo "--verifier-report requires a value" >&2; exit 2; }
+            if [[ -n $VERIFIER_REPORT && $VERIFIER_REPORT != "$2" ]]; then
+                echo "--verifier-report disagrees with CJCJ_SRCBUILD_VERIFIER_REPORT" >&2
+                exit 2
+            fi
+            VERIFIER_REPORT=$2
             shift 2
             ;;
         --dry-run)
@@ -302,6 +343,7 @@ if ((JOBS_EXPLICIT == 0)); then JOBS=$CPUSET_WIDTH; fi
 ((THROUGH_STEP >= 2 && THROUGH_STEP <= 33)) || { echo "through-step must be in 2..33" >&2; exit 2; }
 ((FROM_STEP <= THROUGH_STEP)) || { echo "from-step must not exceed through-step" >&2; exit 2; }
 if ((FROM_STEP == 1)); then FROM_STEP=2; fi
+validate_verifier_report_request "$VERIFIER_REPORT" "$FROM_STEP" "$THROUGH_STEP" || exit $?
 
 host_name=$(hostname -s)
 [[ $host_name == kkk2 ]] || {
@@ -320,6 +362,12 @@ actual_cpuset=$(current_cpuset) || exit 3
     exit 3
 }
 
+# The request has now survived the affinity self-restart.  From this point the
+# public and LLVM variables are sanitized; only step_19 sets the private active
+# variable for its direct build/cli child.
+unset CJCJ_SRCBUILD_VERIFIER_REPORT
+sanitize_verifier_environment
+
 readonly STATE_ROOT="$REPO_ROOT/.srcbuild"
 readonly LOG_ROOT="$STATE_ROOT/logs"
 readonly RUNNER_TEMP="$STATE_ROOT/tmp"
@@ -336,6 +384,8 @@ readonly STAGE2_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage2.mjs"
 readonly STAGE3_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage3.mjs"
 readonly STAGE2_PRODUCT_DIR="$REPO_ROOT/target/release/bin"
 readonly BUILD_TYPE=relwithdebinfo
+readonly VERIFIER_DIAGNOSTIC_MARKER="$CANGJIE_WORKSPACE/.cjcj-verifier-diagnostic.json"
+readonly VERIFIER_INVENTORY="${VERIFIER_REPORT:+${VERIFIER_REPORT}.artifacts.tsv}"
 START_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 readonly START_STAMP
 readonly BASE_PATH="$PRIVATE_HOME/.local/bin:$PATH"
@@ -344,6 +394,8 @@ if ((DRY_RUN == 0)); then
     mkdir -p "$LOG_ROOT" "$RUNNER_TEMP" "$PRIVATE_HOME" "$CANGJIE_WORKSPACE" \
         "$CANGJIE_BUILD_ROOT" "$CJCJ_FIXED_LLVM_DIR"
 fi
+
+reject_diagnostic_workspace "$VERIFIER_DIAGNOSTIC_MARKER" source-build || exit $?
 
     readonly SRCBUILD_USER_HOME="${HOME:-/root}"
     export HOME="$PRIVATE_HOME"
@@ -400,6 +452,7 @@ load_github_state() {
         if [[ -z $path_prefix ]]; then path_prefix=$line; else path_prefix="$path_prefix:$line"; fi
     done < "$GITHUB_PATH"
     if [[ -n $path_prefix ]]; then export PATH="$path_prefix:$BASE_PATH"; fi
+    sanitize_verifier_environment
 }
 
 elapsed_seconds() {
@@ -977,7 +1030,25 @@ step_17() {
 }
 
 step_18() { build_cli build runtime; }
-step_19() { build_cli build stdlib; }
+step_19() {
+    if [[ -z $VERIFIER_REPORT ]]; then
+        build_cli build stdlib
+        return
+    fi
+    mkdir -p "$(dirname "$VERIFIER_REPORT")"
+    : > "$VERIFIER_REPORT"
+    node "$REPO_ROOT/scripts/verifier_artifact_gate.mjs" \
+        --root "$CANGJIE_WORKSPACE" --report "$VERIFIER_REPORT" \
+        --inventory "$VERIFIER_INVENTORY" --mark-running
+    CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE="$VERIFIER_REPORT" build_cli build stdlib
+    node "$REPO_ROOT/scripts/verifier_artifact_gate.mjs" \
+        --root "$CANGJIE_WORKSPACE" --report "$VERIFIER_REPORT" \
+        --inventory "$VERIFIER_INVENTORY" \
+        --artifact-root "$CANGJIE_WORKSPACE/cangjie_runtime/stdlib/build" \
+        --artifact-root "$CANGJIE_WORKSPACE/cangjie_runtime/stdlib/output" \
+        --artifact-root "$CANGJIE_WORKSPACE/cangjie_compiler/output" \
+        --write-inventory
+}
 step_20() { build_cli build stdx; }
 step_21() { build_cli build tools; }
 
@@ -1122,6 +1193,15 @@ print_dry_step() {
         31)
             printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$STAGE1_STEP_SCRIPT"
             ;;
+        19)
+            if [[ -n $VERIFIER_REPORT ]]; then
+                printf 'DRY_RUN ENV CJ_IR_VERIFIER_MODE=report CJ_IR_VERIFIER_REPORT=%q\n' "$VERIFIER_REPORT"
+                printf 'DRY_RUN DIAGNOSTIC_MARKER=%q INVENTORY=%q\n' \
+                    "$VERIFIER_DIAGNOSTIC_MARKER" "$VERIFIER_INVENTORY"
+            else
+                printf 'DRY_RUN ENV CJ_IR_VERIFIER_MODE=strict CJ_IR_VERIFIER_REPORT=unset\n'
+            fi
+            ;;
         32)
             printf 'DRY_RUN ASSUME=stage1-artifact-exists\n'
             printf 'DRY_RUN ENV cjHeapSize=20GB cjHeapSwap=on\n'
@@ -1160,6 +1240,7 @@ printf 'RUN host=%s target=%s jobs=%s cpuset=%s from_step=%s through_step=%s\n' 
 run_fixed_tuple_prerequisite
 
 for ((step = FROM_STEP; step <= THROUGH_STEP; step++)); do
+    reject_diagnostic_workspace "$VERIFIER_DIAGNOSTIC_MARKER" "step $step" || exit $?
     run_step "$step" "${STEP_NAMES[$step]}" "step_$step"
 done
 

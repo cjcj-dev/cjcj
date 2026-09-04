@@ -8,6 +8,10 @@ import {runGcUnitLanguageTests} from '../gc-unit-gate.mjs';
 import {installPath, TARGET_TRIPLE} from '../../toolchain/mingw.mjs';
 import {copyContents, opensslLibPath, runBuildPy, windowsCrossArgs} from './common.mjs';
 
+export function shouldRunGcUnitLanguageTests(env = process.env) {
+  return !env.CJCJ_SRCBUILD_VERIFIER_REPORT_ACTIVE;
+}
+
 export async function run(config) {
   const stdlibRoot = path.join(config.repoPath('runtime'), 'stdlib');
   const runtimeTarget = path.join(config.repoPath('runtime'), 'runtime', 'target');
@@ -41,7 +45,10 @@ export async function run(config) {
       await writeStdProvenance({sourceDir: stdlibRoot, installPrefix: stdlibOutput, compiler});
     }
     copyContents(stdlibOutput, compilerOutput, {stage: 'stdlib.copy.host'});
-    await runGcUnitLanguageTests(config, compilerOutput);
+    // Report-mode output is quarantined and must never be executed as a
+    // product.  The formal build path still runs this gate; diagnostic step 19
+    // stops after compiling/installing every stdlib module and inventorying it.
+    if (shouldRunGcUnitLanguageTests()) await runGcUnitLanguageTests(config, compilerOutput);
     if (!config.target.spec.crossCompile) return;
 
     await runBuildPy(config, stdlibRoot, ['clean'], {stageName: 'stdlib.clean.windows'});

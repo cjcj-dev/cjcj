@@ -54,7 +54,17 @@ export async function run(command, {
   // Explicit verification-only mode used to compare generated command sequences.
   if (process.env.CANGJIE_BUILD_DRY_RUN === '1') return {exitCode: 0, stdout: ''};
 
-  const env = envOverlay ? {...process.env, ...envOverlay} : undefined;
+  let env;
+  if (envOverlay) {
+    env = {...process.env};
+    for (const [name, value] of Object.entries(envOverlay)) {
+      // A null overlay is an explicit deletion.  Spreading an overlay over
+      // process.env cannot otherwise distinguish "inherit this variable" from
+      // "make sure a caller-provided value is absent".
+      if (value === null || value === undefined) delete env[name];
+      else env[name] = String(value);
+    }
+  }
   const child = spawn(argv[0], argv.slice(1), {
     cwd: cwd ? String(cwd) : undefined,
     env,
