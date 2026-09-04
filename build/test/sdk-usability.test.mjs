@@ -267,9 +267,10 @@ test('an unreadable SDK emits every criterion as UNKNOWN and exits 2', () => {
     encoding: 'utf8',
   });
   assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stdout, /U0_VERIFIER_ARTIFACTS\tUNKNOWN\tSDK unreadable:/);
   assert.match(result.stdout, /U1_DIRECT_CJC\tUNKNOWN\tSDK unreadable:/);
   assert.match(result.stdout, /C9_STD_UNCOLOUR\tUNKNOWN\tSDK unreadable:/);
-  assert.match(result.stdout, /SDK-USABILITY-UNKNOWN pass=0 fail=0 unknown=10/);
+  assert.match(result.stdout, /SDK-USABILITY-UNKNOWN pass=0 fail=0 unknown=11/);
 });
 
 test('U3 and U5 get a compile budget of their own, and it cannot be set below the general one', () => {
