@@ -10,13 +10,14 @@ function option(name, fallback = '') {
 }
 
 const sourceRoot = path.resolve(option('--source-root', path.join(import.meta.dirname, '..')));
+const fixtureRoot = path.resolve(option('--fixture-root', sourceRoot));
 const compiler = option('--compiler');
 const outputRoot = option('--out');
 const expectation = option('--expect', 'green');
 const baselineReport = option('--baseline-report');
 const candidateReport = option('--candidate-report');
-const reportExpectation = option('--report-expect', expectation);
-if (!['green', 'box-cut', 'step5-cut'].includes(expectation)) {
+const reportExpectation = option('--report-expect', 'green');
+if (!['baseline', 'green', 'box-cut', 'step5-cut'].includes(expectation)) {
   throw new Error(`unsupported --expect value: ${expectation}`);
 }
 if (!['green', 'box-cut', 'step5-cut'].includes(reportExpectation)) {
@@ -30,6 +31,7 @@ if (Boolean(baselineReport) !== Boolean(candidateReport)) {
 }
 
 const expected = {
+  baseline: {box: 'raw', step5: 'raw'},
   green: {box: 'typed', step5: 'typed'},
   'box-cut': {box: 'raw', step5: 'typed'},
   'step5-cut': {box: 'typed', step5: 'raw'},
@@ -86,7 +88,7 @@ function functionSlices(ir, terms) {
 }
 
 function compileFixture(name) {
-  const fixture = path.join(sourceRoot, 'scripts/erased_dynpayload_fixtures', `${name}.cj`);
+  const fixture = path.join(fixtureRoot, 'scripts/erased_dynpayload_fixtures', `${name}.cj`);
   const armRoot = path.resolve(outputRoot, name);
   const temps = path.join(armRoot, 'temps');
   fs.mkdirSync(temps, {recursive: true});
