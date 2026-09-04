@@ -218,7 +218,12 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   await fs.mkdir(path.join(std, 'lib', TUPLE), {recursive: true});
   await fs.copyFile(archive, path.join(std, 'modules', TUPLE, 'std', 'std.core.a'));
   await fs.copyFile(archive, path.join(std, 'lib', TUPLE, 'libcangjie-std-core.a'));
-  await write(std, `runtime/lib/${TUPLE}/libcangjie-std-core.so`, 'fixture shared std\n');
+  await write(std, `runtime/lib/${TUPLE}/libcangjie-std-core.so`,
+    `fixture shared std\0CJCJ-COMMIT:${CJCJ_SHA}\0g_cjStoreBadMask\0`);
+  await fs.appendFile(path.join(std, 'modules', TUPLE, 'std', 'std.core.a'),
+    `\0CJCJ-COMMIT:${CJCJ_SHA}\0g_cjStoreBadMask\0`);
+  await fs.appendFile(path.join(std, 'lib', TUPLE, 'libcangjie-std-core.a'),
+    `\0CJCJ-COMMIT:${CJCJ_SHA}\0g_cjStoreBadMask\0`);
   // The block writeStdProvenance actually emits: one line per installed std
   // artifact. It is what the manifest reconciles the packaged bytes against, so
   // the fixture has to carry the real thing rather than an empty header.
