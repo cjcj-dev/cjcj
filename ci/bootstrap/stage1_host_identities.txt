@@ -1,0 +1,8 @@
+# Host triple bound by content. Single declaration for stage1_host_runner.sh.
+# runtime / boundscheck: 0831 nightly originals
+#   /root/.cjv/toolchains/nightly-1.3.0-alpha.20260831010012 (read-only)
+# libLLVM-15.so: 0901 host LLVM = official base + one relocate(undef) hunk
+#   rebuilt sha f6124525; not the 0831 nightly original (198f3f34)
+libcangjie-runtime.so e75796e515248f30d3a9e7995852ed045ade847aa95b6c1eabab4ef7fa0515e8
+libboundscheck.so 3ad04fe38be88d5123078bd11d78cbc82377c114f6e6514b393ecd374e559bb7
+libLLVM-15.so f6124525b57973cae603e0c9b4a1dfa99e82b18c4cc854b36cfdfa084e48e4f2

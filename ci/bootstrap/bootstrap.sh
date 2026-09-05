@@ -25,6 +25,9 @@ HEAP="${CJ_HEAP:-24GB}"
 STAGE1_HEAP="${STAGE1_HEAP:-20GB}"
 JOBS="${CJ_JOBS:-32}"
 SDK_BUILD="${SDK_BUILD:-/root/cj_build/tools/sdk_build.sh}"
+STAGE1_HOST_RUNNER="${STAGE1_HOST_RUNNER:-$(dirname "${BASH_SOURCE[0]}")/stage1_host_runner.sh}"
+STAGE0_CACHE_ROOT="${STAGE0_CACHE_ROOT:-/root/stage0depot}"
+BUILD_TMPDIR=''
 STAGE=init
 WANT=all
 DRY=0
@@ -190,6 +193,13 @@ cmd() {
   die "命令失败 rc=$rc: $*"
 }
 
+prepare_build_env() {
+  local private="$WORK/tmp-private"
+  BUILD_TMPDIR="${TMPDIR:-$private}"
+  cmd "mkdir -p $(printf '%q' "$BUILD_TMPDIR")"
+  echo "BUILD-ENV planned HOME=/root TMPDIR=$BUILD_TMPDIR"
+}
+
 assert_executable() {
   local label="$1" path="$2"
   if [ "$DRY" -eq 1 ]; then
@@ -212,6 +222,155 @@ runtime_dir() {
   else
     readlink -f "$root"
   fi
+}
+
+tree_content_sha256() {
+  local root="$1"
+  [ -d "$root" ] || return 1
+  (
+    set -o pipefail
+    tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+      -C "$root" -cf - . 2>/dev/null | sha256sum | awk '{print $1}'
+  )
+}
+
+source_identity() {
+  local label="$1" root="$2" required_git="${3:-0}" head dirty digest
+  head=$(git -C "$root" rev-parse HEAD 2>/dev/null || true)
+  if [ -n "$head" ]; then
+    if ! dirty=$(git -C "$root" status --porcelain --untracked-files=normal 2>/dev/null); then
+      echo "STAGE0_CACHE=disabled reason=${label}-status-failed" >&2
+      return 2
+    fi
+    if [ -n "$dirty" ]; then
+      echo "STAGE0_CACHE=disabled reason=${label}-dirty" >&2
+      return 2
+    fi
+    printf 'git:%s' "${head,,}"
+    return 0
+  fi
+  if [ "$required_git" -eq 1 ]; then
+    echo "STAGE0_CACHE=disabled reason=${label}-not-git" >&2
+    return 2
+  fi
+  digest=$(tree_content_sha256 "$root") || return 1
+  printf 'tree:%s' "$digest"
+}
+
+stage0_cache_key() {
+  local base="$1" rewritten_toml="$2" cjcj_identity stdlib_identity host_runtime_dir host_runtime_so
+  local host_nightly compile_options cpp_headers material rel
+  cjcj_identity=$(source_identity cjcj "$SRC" 1) || return $?
+  stdlib_identity=$(source_identity stdlib "$STDSRC" 0) || return $?
+  host_nightly=$(awk -F= '$1 == "CJCJ_TOOLCHAIN" {print $2}' "$SRC/ci/host_sdk_pin.env" 2>/dev/null || true)
+  if [ -z "$host_nightly" ]; then
+    echo 'STAGE0_CACHE=disabled reason=host-nightly-pin-missing' >&2
+    return 2
+  fi
+  compile_options=$(awk '/^[[:space:]]*compile-option[[:space:]]*=/ {print}' "$rewritten_toml" 2>/dev/null || true)
+  if [ -z "$compile_options" ]; then
+    echo 'STAGE0_CACHE=disabled reason=compile-option-missing' >&2
+    return 2
+  fi
+  host_runtime_dir=$(runtime_dir "$HRT")
+  host_runtime_so="$host_runtime_dir/libcangjie-runtime.so"
+  [ -f "$host_runtime_so" ] || {
+    echo "STAGE0_CACHE=disabled reason=host-runtime-so-missing" >&2
+    return 2
+  }
+  cpp_headers=''
+  for rel in third_party/llvm-project/llvm/include \
+    build/build/third_party/llvm/include build/build/include build/build/schema; do
+    cpp_headers="$cpp_headers$rel=$(tree_content_sha256 "$CPP_SRC/$rel")"$'\n' || return 1
+  done
+  material=$(printf '%s\n' \
+    'format=stage0-cache-v1' \
+    "cjcj=$cjcj_identity" \
+    "stdlib=$stdlib_identity" \
+    "host_nightly=$host_nightly" \
+    "host_cjc_sha256=$(sha256 "$base/bin/cjc")" \
+    "host_llvm_sha256=$(sha256 "$HOST_LLVM_SO")" \
+    "host_runtime_so_sha256=$(sha256 "$host_runtime_so")" \
+    "ast_support_sha256=$(sha256 "$AST_SUPPORT")" \
+    "bootstrap_sha256=$(sha256 "${BASH_SOURCE[0]}")" \
+    "sdk_build_sha256=$(sha256 "$SDK_BUILD")" \
+    "cpp_headers_sha256=$cpp_headers" \
+    "cjcj_compile_options=$compile_options")
+  printf '%s' "$material" | sha256sum | awk '{print $1}'
+}
+
+manifest_value() {
+  local manifest="$1" field="$2"
+  awk -F '\t' -v field="$field" '$1 == field {print $2}' "$manifest"
+}
+
+stage0_cache_restore() {
+  local key="$1" out="$2" std="$3" entry manifest compiler_sha stdlib_sha actual
+  entry="$STAGE0_CACHE_ROOT/$key"
+  manifest="$entry/MANIFEST"
+  if [ ! -f "$manifest" ]; then
+    echo "STAGE0_CACHE=miss key=$key reason=missing"
+    return 1
+  fi
+  [ "$(manifest_value "$manifest" format)" = 'stage0-cache-v1' ] || {
+    echo "STAGE0_CACHE=rejected key=$key reason=format"
+    return 1
+  }
+  [ "$(manifest_value "$manifest" key)" = "$key" ] || {
+    echo "STAGE0_CACHE=rejected key=$key reason=key"
+    return 1
+  }
+  compiler_sha=$(manifest_value "$manifest" cjcj_stage1_sha256)
+  stdlib_sha=$(manifest_value "$manifest" stdlib_stage1_sha256)
+  [ "${#compiler_sha}" -eq 64 ] && [ "${#stdlib_sha}" -eq 64 ] || {
+    echo "STAGE0_CACHE=rejected key=$key reason=manifest-sha"
+    return 1
+  }
+  [ -f "$entry/cjcj-stage1" ] && [ -d "$entry/stdlib-stage1" ] || {
+    echo "STAGE0_CACHE=rejected key=$key reason=payload-missing"
+    return 1
+  }
+  actual=$(sha256 "$entry/cjcj-stage1")
+  [ "$actual" = "$compiler_sha" ] || {
+    echo "STAGE0_CACHE=rejected key=$key reason=cjcj-sha-mismatch"
+    return 1
+  }
+  actual=$(tree_content_sha256 "$entry/stdlib-stage1")
+  [ "$actual" = "$stdlib_sha" ] || {
+    echo "STAGE0_CACHE=rejected key=$key reason=stdlib-sha-mismatch"
+    return 1
+  }
+  rm -rf -- "$out" "$std"
+  install -m0755 "$entry/cjcj-stage1" "$out" || return 1
+  cp -a "$entry/stdlib-stage1" "$std" || return 1
+  [ "$(sha256 "$out")" = "$compiler_sha" ] || return 1
+  [ "$(tree_content_sha256 "$std")" = "$stdlib_sha" ] || return 1
+  echo "STAGE0_CACHE=hit key=$key path=$entry"
+}
+
+stage0_cache_publish() {
+  local key="$1" out="$2" std="$3" entry incoming rejected compiler_sha stdlib_sha
+  entry="$STAGE0_CACHE_ROOT/$key"
+  mkdir -p "$STAGE0_CACHE_ROOT"
+  incoming=$(mktemp -d "$STAGE0_CACHE_ROOT/.incoming-$key.XXXXXX") || return 1
+  install -m0755 "$out" "$incoming/cjcj-stage1" || return 1
+  cp -a "$std" "$incoming/stdlib-stage1" || return 1
+  compiler_sha=$(sha256 "$incoming/cjcj-stage1")
+  stdlib_sha=$(tree_content_sha256 "$incoming/stdlib-stage1")
+  printf '%s\t%s\n' \
+    format stage0-cache-v1 \
+    key "$key" \
+    cjcj_stage1_sha256 "$compiler_sha" \
+    stdlib_stage1_sha256 "$stdlib_sha" > "$incoming/MANIFEST"
+  if [ -e "$entry" ]; then
+    rejected="$STAGE0_CACHE_ROOT/.replaced-$key-$$"
+    mv "$entry" "$rejected" || return 1
+  else
+    rejected=''
+  fi
+  mv "$incoming" "$entry" || return 1
+  [ -z "$rejected" ] || rm -rf -- "$rejected"
+  echo "STAGE0_CACHE=stored key=$key path=$entry cjcj_sha=$compiler_sha stdlib_sha=$stdlib_sha"
 }
 
 sdk_ld_path() {
@@ -267,9 +426,10 @@ assert_std_install_shape() {
 stdlib_build() {
   local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" ld script
   ld=$(sdk_ld_path "$sdk" "$runtime")
+  prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=/root CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$JOBS") $(printf '%q' "$sdk/runtime/lib/linux_x86_64_cjnative") $(printf '%q' "$prefix")"
+  cmd "env -i HOME=/root TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$JOBS") $(printf '%q' "$sdk/runtime/lib/linux_x86_64_cjnative") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
 }
 
@@ -291,20 +451,21 @@ isolate_cjcj_src() {
 }
 
 rewrite_compile_option_o1() {
-  local toml="$1" hits
+  local toml="$1" o1_hits o2_hits
   if [ "$DRY" -eq 1 ]; then
     echo "CMD sed -i s/compile-option = \"-O2\"/compile-option = \"-O1\"/ $(printf '%q' "$toml")"
     echo "ASSERT compile-option-o1 planned file=$toml"
     return 0
   fi
   [ -f "$toml" ] || die "隔离副本缺 cjpm.toml: $toml"
-  hits=$(/usr/bin/grep -c -- 'compile-option = "-O2"' "$toml" || true)
-  [ "$hits" -ge 1 ] || die "隔离副本 cjpm.toml 无 compile-option = \"-O2\" 可改: $toml"
-  cmd "sed -i 's/compile-option = \"-O2\"/compile-option = \"-O1\"/' $(printf '%q' "$toml")"
-  hits=$(/usr/bin/grep -c -- 'compile-option = "-O1"' "$toml" || true)
-  [ "$hits" -ge 1 ] || die "compile-option 未改成 -O1: $toml"
-  hits=$(/usr/bin/grep -c -- 'compile-option = "-O2"' "$toml" || true)
-  [ "$hits" -eq 0 ] || die "compile-option 仍含 -O2: $toml"
+  o2_hits=$(/usr/bin/grep -c -- 'compile-option = "-O2"' "$toml" || true)
+  if [ "$o2_hits" -gt 0 ]; then
+    cmd "sed -i 's/compile-option = \"-O2\"/compile-option = \"-O1\"/' $(printf '%q' "$toml")"
+  fi
+  o1_hits=$(/usr/bin/grep -c -- 'compile-option = "-O1"' "$toml" || true)
+  [ "$o1_hits" -ge 1 ] || die "隔离副本 cjpm.toml 的 compile-option 不是 -O1: $toml"
+  o2_hits=$(/usr/bin/grep -c -- 'compile-option = "-O2"' "$toml" || true)
+  [ "$o2_hits" -eq 0 ] || die "compile-option 仍含 -O2: $toml"
   echo "ASSERT compile-option-o1 ok file=$toml"
 }
 
@@ -336,10 +497,11 @@ install_stage_compiler() {
 cjpm_build() {
   local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script
   ld=$(sdk_ld_path "$sdk" "$runtime")
+  prepare_build_env
   cjpm="$sdk/tools/bin/cjpm"
   script="cd $(printf '%q' "$srcdir") && $(printf '%q' "$cjpm") build${extra:+ $extra}"
   echo "CMD cjpm build${extra:+ $extra} bin=$cjpm cwd=$srcdir heap=$heap"
-  cmd "env -i HOME=/root CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
+  cmd "env -i HOME=/root TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
 }
 
 assert_shim_cpp_src() {
@@ -411,7 +573,7 @@ resolve_base_sdk() {
 stage0() {
   STAGE=stage0
   echo '[stage0] official cjc + stdlib + host LLVM; cjcj=-O1'
-  local base out std sdk ld
+  local base out std sdk ld cache_key='' cacheable=0 cache_hit=0
   base=$(resolve_base_sdk)
   record official-sdk "$base"
   assert_official_opt_zero "$base/third_party/llvm/bin/opt"
@@ -442,16 +604,32 @@ stage0() {
   copy="$WORK/cjcj-src-stage0"
   isolate_cjcj_src "$copy"
   rewrite_compile_option_o1 "$copy/cjpm.toml"
-  shim_build stage0 "$sdk" "$HRT" "$copy"
-  cjpm_build "$sdk" "$HRT" "$copy" "" "$HEAP"
-  seed=$(resolve_cjpm_product "$copy/target/release/bin" cjcj-stage1)
-  install_stage_compiler "$seed" "$out" "$WORK/cjc"
-  stdlib_build stdlib-stage1 "$sdk" "$HRT" "$std"
+  if [ "$DRY" -eq 0 ]; then
+    if cache_key=$(stage0_cache_key "$base" "$copy/cjpm.toml"); then
+      cacheable=1
+      if stage0_cache_restore "$cache_key" "$out" "$std"; then
+        cache_hit=1
+        cmd "ln -sfn $(printf '%q' "$(basename "$out")") $(printf '%q' "$WORK/cjc")"
+      fi
+    fi
+  else
+    echo 'STAGE0_CACHE=planned key=content-addressed dirty=disabled'
+  fi
+  if [ "$cache_hit" -eq 0 ]; then
+    shim_build stage0 "$sdk" "$HRT" "$copy"
+    cjpm_build "$sdk" "$HRT" "$copy" "" "$HEAP"
+    seed=$(resolve_cjpm_product "$copy/target/release/bin" cjcj-stage1)
+    install_stage_compiler "$seed" "$out" "$WORK/cjc"
+    stdlib_build stdlib-stage1 "$sdk" "$HRT" "$std"
+  fi
   if [ "$DRY" -eq 0 ]; then
     assert_executable cjcj-stage1 "$out"
     [ -d "$std" ] || die 'stage0 未产出 stdlib-stage1'
   fi
   assert_version cjcj-stage1 "$out" "$sdk" "$HRT"
+  if [ "$DRY" -eq 0 ] && [ "$cacheable" -eq 1 ] && [ "$cache_hit" -eq 0 ]; then
+    stage0_cache_publish "$cache_key" "$out" "$std" || die 'stage0 cache 发布失败'
+  fi
   if [ "$DRY" -eq 0 ]; then
     printf '%s\n' "$out" > "$WORK/.cjcj-stage1"
     printf '%s\n' "$std" > "$WORK/.stdlib-stage1"
@@ -484,8 +662,11 @@ stage1() {
   sdk="$WORK/sdk-stage1"
   echo "OUTPUT cjcj-stage2=$out"
   echo "OUTPUT stdlib-stage2=$std"
-  cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$previous_std") --force"
+  cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$previous_std") --verify-host-rt $(printf '%q' "$HRT") --force"
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
+  local compiler_sha=planned
+  [ "$DRY" -eq 1 ] || compiler_sha=$(sha256 "$compiler")
+  cmd "bash $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha")"
   assert_executable stage1-compiler "$sdk/bin/cjc"
   ld=$(sdk_ld_path "$sdk" "$CRT")
   local copy seed

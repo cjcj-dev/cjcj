@@ -737,7 +737,7 @@ function readSourceEnv() {
 
 function vendorShaDefects(sourceEnv, files) {
   const defects = [];
-  for (const name of ['bootstrap.sh', 'sdk_build.sh', 'test_bootstrap.sh']) {
+  for (const name of ['bootstrap.sh', 'sdk_build.sh', 'test_bootstrap.sh', 'stage1_host_runner.sh', 'stage1_host_identities.txt']) {
     const recorded = sourceEnv[`TOOLS_${name}`];
     if (!/^[0-9a-f]{64}$/.test(recorded || '')) defects.push(`missing-record:${name}`);
     const vendor = sha256(files[name]);
@@ -753,6 +753,8 @@ function vendorFiles() {
     'bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'),
     'sdk_build.sh': path.join(repoRoot, 'ci/bootstrap/sdk_build.sh'),
     'test_bootstrap.sh': path.join(repoRoot, 'ci/bootstrap/test_bootstrap.sh'),
+    'stage1_host_runner.sh': path.join(repoRoot, 'ci/bootstrap/stage1_host_runner.sh'),
+    'stage1_host_identities.txt': path.join(repoRoot, 'ci/bootstrap/stage1_host_identities.txt'),
   };
 }
 

@@ -4,8 +4,8 @@
 set -u
 
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-PRODUCT="$ROOT/bootstrap.sh"
-SDK_PRODUCT="$ROOT/sdk_build.sh"
+PRODUCT="${BOOTSTRAP_PRODUCT:-$ROOT/bootstrap.sh}"
+SDK_PRODUCT="${SDK_BUILD_PRODUCT:-$ROOT/sdk_build.sh}"
 TMP=
 
 fail() {
@@ -124,10 +124,13 @@ check_dry_contract() {
   check_count SHIM 2 'OUTPUT stage[01]-shim-config .*sha256=planned' "$log"
   check_count A4 2 'rm\\ -rf\\ build/build' "$log"
   check_count A4 2 '--target-lib' "$log"
-  check_count A4 4 'CMD env -i HOME=/root CANGJIE_HOME=.*bash -c' "$log"
+  check_count A4 4 'CMD env -i HOME=/root TMPDIR=.*/work/tmp-private CANGJIE_HOME=.*bash -c' "$log"
+  check_count A4 4 'BUILD-ENV planned HOME=/root TMPDIR=.*/work/tmp-private' "$log"
   check_count LLVM-SO 1 'sdk_build.sh .*--host --llvm-so .*libLLVM-15.so' "$log"
   check_count LLVM-SO 1 'ASSERT installed-host-llvm-so sha256=planned' "$log"
   check_count LLVM-TUPLE 1 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple' "$log"
+  check_count HOST-RT 1 '--verify-host-rt .*/host-rt' "$log"
+  check_count HOST-RUNNER 1 'stage1_host_runner.sh .*/sdk-stage1 .*/sdk-stage0 .*/host-rt' "$log"
   check_count LLVM-TUPLE 8 'ASSERT installed-colour-tuple sha256=planned' "$log"
   check_count LLVM-RULER 2 'ruler=readelf--dyn-syms symbol=llvm::isCJTypedReadHelperCandidate' "$log"
   check_count LLVM-RULER 1 'ASSERT official-opt-zero ruler=strings .* hits=0' "$log"
@@ -136,15 +139,19 @@ check_dry_contract() {
 
 make_sdk_fixture() {
   local base="$TMP/sdk-base"
-  mkdir -p "$base/bin" "$base/third_party/llvm/bin" "$base/third_party/llvm/lib" \
-    "$base/runtime/lib/linux_x86_64_cjnative"
+  mkdir -p "$base/bin" "$base/tools/bin" "$base/third_party/llvm/bin" "$base/third_party/llvm/lib" \
+    "$base/runtime/lib/linux_x86_64_cjnative" "$base/lib/linux_x86_64_cjnative"
   cp /bin/true "$base/bin/cjc"
+  cp /bin/true "$base/tools/bin/cjpm"
   cp /bin/true "$base/third_party/llvm/bin/llc"
   cp /bin/true "$base/third_party/llvm/bin/opt"
   printf 'int base_llvm;\n' > "$TMP/base-llvm.c"
   cc -shared -fPIC "$TMP/base-llvm.c" -o "$base/third_party/llvm/lib/libLLVM-15.so"
   printf 'int host_runtime;\n' > "$TMP/host-runtime.c"
   cc -shared -fPIC "$TMP/host-runtime.c" -o "$base/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so"
+  cc -shared -fPIC "$TMP/host-runtime.c" -o "$base/runtime/lib/linux_x86_64_cjnative/libboundscheck.so"
+  cc -c "$TMP/host-runtime.c" -o "$TMP/host-runtime.o"
+  ar rcs "$base/lib/linux_x86_64_cjnative/libcangjie-runtime.a" "$TMP/host-runtime.o"
   printf '%s\n' '#!/usr/bin/env bash' 'export PATH="$(dirname "${BASH_SOURCE[0]}")/bin:$PATH"' > "$base/envsetup.sh"
 }
 
@@ -158,6 +165,231 @@ run_sdk_tuple() {
   local product="$1" to="$2"
   bash "$product" --from "$TMP/sdk-base" --to "$to" --host \
     --llvm-tuple "$TMP/colour-tuple" --force
+}
+
+make_runtime_payload() {
+  local root="$1" sha="$2" tuple="${3:-}" dyn="$1" static=''
+  if [ -n "$tuple" ]; then
+    dyn="$root/runtime/lib/$tuple"
+    static="$root/lib/$tuple"
+  fi
+  mkdir -p "$dyn"
+  [ -z "$static" ] || mkdir -p "$static"
+  printf '%s\n' \
+    "__attribute__((used)) const char cjrt_commit[] = \"CJRT-COMMIT:$sha\";" \
+    'int g_cjLoadBadMask = 1;' > "$TMP/target-runtime.c"
+  cc -shared -fPIC "$TMP/target-runtime.c" -o "$dyn/libcangjie-runtime.so"
+  printf 'int boundscheck_fixture;\n' > "$TMP/boundscheck.c"
+  cc -shared -fPIC "$TMP/boundscheck.c" -o "$dyn/libboundscheck.so"
+  if [ -n "$static" ]; then
+    cc -c "$TMP/target-runtime.c" -o "$TMP/target-runtime.o"
+    ar rcs "$static/libcangjie-runtime.a" "$TMP/target-runtime.o"
+  fi
+}
+
+run_sdk_runtime() {
+  local product="$1" source="$2" to="$3"
+  bash "$product" --from "$TMP/sdk-base" --to "$to" --target --runtime "$source" --force
+}
+
+run_sdk_runtime_checked() {
+  local label="$1" product="$2" source="$3" to="$4" log rc
+  log="$TMP/$label-sdk-build.log"
+  if run_sdk_runtime "$product" "$source" "$to" > "$log" 2>&1; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    sed -n '1,120p' "$log" >&2
+    fail "$label" "sdk_build rc=$rc log=$log"
+  fi
+}
+
+positive_runtime_layouts() {
+  local flat_sha=2222222222222222222222222222222222222222 tuple=linux_x86_64_cjnative
+  new_tmp
+  make_sdk_fixture
+  make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
+  run_sdk_runtime_checked runtime-flat "$SDK_PRODUCT" "$TMP/$flat_sha" "$TMP/sdk-flat"
+  tail -n 1 "$TMP/runtime-flat-sdk-build.log" | /usr/bin/grep -q '^SDK-BUILD-OK ' ||
+    fail runtime-flat 'SDK-BUILD-OK was not the final verdict token'
+  cmp -s "$TMP/$flat_sha/libcangjie-runtime.so" "$TMP/sdk-flat/runtime/lib/$tuple/libcangjie-runtime.so" ||
+    fail runtime-flat 'runtime SO was not installed from flat sodepot'
+  cmp -s "$TMP/$flat_sha/libboundscheck.so" "$TMP/sdk-flat/runtime/lib/$tuple/libboundscheck.so" ||
+    fail runtime-flat 'boundscheck SO was not installed from flat sodepot'
+  cmp -s "$TMP/sdk-base/lib/$tuple/libcangjie-runtime.a" "$TMP/sdk-flat/lib/$tuple/libcangjie-runtime.a" ||
+    fail runtime-flat 'flat shared closure unexpectedly changed the base static archive'
+  make_runtime_payload "$TMP/runtime-install" 3333333333333333333333333333333333333333 "$tuple"
+  run_sdk_runtime_checked runtime-nested "$SDK_PRODUCT" "$TMP/runtime-install" "$TMP/sdk-nested"
+  cmp -s "$TMP/runtime-install/runtime/lib/$tuple/libcangjie-runtime.so" "$TMP/sdk-nested/runtime/lib/$tuple/libcangjie-runtime.so" ||
+    fail runtime-nested 'runtime SO was not installed from nested prefix'
+  cmp -s "$TMP/runtime-install/lib/$tuple/libcangjie-runtime.a" "$TMP/sdk-nested/lib/$tuple/libcangjie-runtime.a" ||
+    fail runtime-nested 'runtime archive was not installed from nested prefix'
+  echo 'PASS flat and nested runtime layouts'
+}
+
+positive_runtime_layout_symlink_nested_only() {
+  local sha=9999999999999999999999999999999999999999 tuple=linux_x86_64_cjnative
+  new_tmp
+  make_sdk_fixture
+  make_runtime_payload "$TMP/real-install" "$sha" "$tuple"
+  mkdir -p "$TMP/link-install/runtime/lib/$tuple"
+  ln -s "$TMP/real-install/runtime/lib/$tuple/libcangjie-runtime.so" \
+    "$TMP/link-install/runtime/lib/$tuple/libcangjie-runtime.so"
+  run_sdk_runtime_checked runtime-nested-symlink "$SDK_PRODUCT" "$TMP/link-install" "$TMP/sdk-nested-symlink"
+  cmp -s "$TMP/real-install/runtime/lib/$tuple/libcangjie-runtime.so" \
+    "$TMP/sdk-nested-symlink/runtime/lib/$tuple/libcangjie-runtime.so" ||
+    fail runtime-nested-symlink 'resolved nested symlink SO was not installed'
+  echo 'PASS nested-only runtime SO symlink rc=0'
+}
+
+positive_runtime_layout_symlink_flat_only() {
+  local sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa tuple=linux_x86_64_cjnative
+  new_tmp
+  make_sdk_fixture
+  make_runtime_payload "$TMP/real-flat" "$sha"
+  mkdir -p "$TMP/$sha"
+  ln -s "$TMP/real-flat/libcangjie-runtime.so" "$TMP/$sha/libcangjie-runtime.so"
+  ln -s "$TMP/real-flat/libboundscheck.so" "$TMP/$sha/libboundscheck.so"
+  run_sdk_runtime_checked runtime-flat-symlink "$SDK_PRODUCT" "$TMP/$sha" "$TMP/sdk-flat-symlink"
+  cmp -s "$TMP/real-flat/libcangjie-runtime.so" \
+    "$TMP/sdk-flat-symlink/runtime/lib/$tuple/libcangjie-runtime.so" ||
+    fail runtime-flat-symlink 'resolved flat symlink SO was not installed'
+  echo 'PASS flat-only runtime SO symlink rc=0'
+}
+
+fault_runtime_dual_layout() {
+  local flat_sha=6666666666666666666666666666666666666666 nested_sha=7777777777777777777777777777777777777777
+  local tuple=linux_x86_64_cjnative
+  new_tmp
+  make_sdk_fixture
+  make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
+  make_runtime_payload "$TMP/$flat_sha" "$nested_sha" "$tuple"
+  run_sdk_runtime "$SDK_PRODUCT" "$TMP/$flat_sha" "$TMP/sdk-dual"
+}
+
+fault_runtime_dual_missing_bounds() {
+  local flat_sha=1212121212121212121212121212121212121212 nested_sha=3434343434343434343434343434343434343434
+  local tuple=linux_x86_64_cjnative
+  new_tmp
+  make_sdk_fixture
+  make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
+  rm "$TMP/$flat_sha/libboundscheck.so"
+  make_runtime_payload "$TMP/$flat_sha" "$nested_sha" "$tuple"
+  run_sdk_runtime "$SDK_PRODUCT" "$TMP/$flat_sha" "$TMP/sdk-dual-missing-bounds"
+}
+
+fault_runtime_dual_multiple_nested() {
+  local flat_sha=5656565656565656565656565656565656565656 nested_sha=7878787878787878787878787878787878787878
+  local other_sha=9090909090909090909090909090909090909090 tuple=linux_x86_64_cjnative
+  new_tmp
+  make_sdk_fixture
+  make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
+  make_runtime_payload "$TMP/$flat_sha" "$nested_sha" "$tuple"
+  make_runtime_payload "$TMP/$flat_sha" "$other_sha" linux_aarch64_cjnative
+  run_sdk_runtime "$SDK_PRODUCT" "$TMP/$flat_sha" "$TMP/sdk-dual-multiple-nested"
+}
+
+fault_runtime_layout_symlink_nested() {
+  local flat_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb nested_sha=cccccccccccccccccccccccccccccccccccccccc
+  local tuple=linux_x86_64_cjnative
+  new_tmp
+  make_sdk_fixture
+  make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
+  make_runtime_payload "$TMP/real-nested" "$nested_sha" "$tuple"
+  mkdir -p "$TMP/$flat_sha/runtime/lib/$tuple"
+  ln -s "$TMP/real-nested/runtime/lib/$tuple/libcangjie-runtime.so" \
+    "$TMP/$flat_sha/runtime/lib/$tuple/libcangjie-runtime.so"
+  run_sdk_runtime "$SDK_PRODUCT" "$TMP/$flat_sha" "$TMP/sdk-dual-nested-symlink"
+}
+
+fault_runtime_layout_symlink_flat() {
+  local flat_sha=dddddddddddddddddddddddddddddddddddddddd nested_sha=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+  local tuple=linux_x86_64_cjnative
+  new_tmp
+  make_sdk_fixture
+  make_runtime_payload "$TMP/real-flat" "$flat_sha"
+  mkdir -p "$TMP/$flat_sha"
+  ln -s "$TMP/real-flat/libcangjie-runtime.so" "$TMP/$flat_sha/libcangjie-runtime.so"
+  ln -s "$TMP/real-flat/libboundscheck.so" "$TMP/$flat_sha/libboundscheck.so"
+  make_runtime_payload "$TMP/$flat_sha" "$nested_sha" "$tuple"
+  run_sdk_runtime "$SDK_PRODUCT" "$TMP/$flat_sha" "$TMP/sdk-dual-flat-symlink"
+}
+
+fault_runtime_layout_inner_rc() {
+  local flat_sha=8888888888888888888888888888888888888888
+  new_tmp
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 1' > "$TMP/sdk-build-rc1.sh"
+  chmod +x "$TMP/sdk-build-rc1.sh"
+  make_sdk_fixture
+  make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
+  run_sdk_runtime_checked runtime-flat "$TMP/sdk-build-rc1.sh" "$TMP/$flat_sha" "$TMP/sdk-flat"
+}
+
+check_runtime_layouts() {
+  local log rc
+  positive_runtime_layouts
+  positive_runtime_layout_symlink_nested_only
+  positive_runtime_layout_symlink_flat_only
+
+  log=$(mktemp)
+  rc=0
+  BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" \
+    bash "$0" fault-runtime-dual-layout > "$log" 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail runtime-dual 'flat+nested layout was accepted'
+  /usr/bin/grep -Eq 'runtime 布局歧义: flat=.*/6666666666666666666666666666666666666666/libcangjie-runtime.so stamp=CJRT-COMMIT:6666666666666666666666666666666666666666 nested=.*/6666666666666666666666666666666666666666/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so stamp=CJRT-COMMIT:7777777777777777777777777777777777777777' "$log" ||
+    fail runtime-dual "diagnostic omitted both paths/stamps; log=$log"
+  echo "PASS dual runtime layout rejected rc=$rc"
+
+  rc=0
+  BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" \
+    bash "$0" fault-runtime-dual-missing-bounds > "$log" 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail runtime-dual-missing-bounds 'flat without bounds+nested layout was accepted'
+  /usr/bin/grep -Eq 'runtime 布局歧义: flat=.*/1212121212121212121212121212121212121212/libcangjie-runtime.so stamp=CJRT-COMMIT:1212121212121212121212121212121212121212 nested=.*/1212121212121212121212121212121212121212/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so stamp=CJRT-COMMIT:3434343434343434343434343434343434343434' "$log" ||
+    fail runtime-dual-missing-bounds "diagnostic omitted flat/nested paths; log=$log"
+  echo "PASS dual runtime missing bounds diagnostic lists both layouts rc=$rc"
+
+  rc=0
+  BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" \
+    bash "$0" fault-runtime-dual-multiple-nested > "$log" 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail runtime-dual-multiple-nested 'flat+multiple nested layouts were accepted'
+  /usr/bin/grep -Eq 'nested=.*/runtime/lib/linux_aarch64_cjnative/libcangjie-runtime.so stamp=CJRT-COMMIT:9090909090909090909090909090909090909090 nested=.*/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so stamp=CJRT-COMMIT:7878787878787878787878787878787878787878' "$log" ||
+    fail runtime-dual-multiple-nested "diagnostic omitted a nested tuple; log=$log"
+  echo "PASS dual runtime diagnostic lists every nested tuple rc=$rc"
+
+  rc=0
+  BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" \
+    bash "$0" fault-runtime-layout-symlink-nested > "$log" 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail runtime-dual-nested-symlink 'flat+nested symlink layout was accepted'
+  /usr/bin/grep -Eq 'runtime 布局歧义: flat=.*/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/libcangjie-runtime.so stamp=CJRT-COMMIT:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb nested=.*/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so stamp=CJRT-COMMIT:cccccccccccccccccccccccccccccccccccccccc' "$log" ||
+    fail runtime-dual-nested-symlink "diagnostic omitted symlink path/stamp; log=$log"
+  echo "PASS dual runtime nested SO symlink rejected rc=$rc"
+
+  rc=0
+  BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" \
+    bash "$0" fault-runtime-layout-symlink-flat > "$log" 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail runtime-dual-flat-symlink 'symlink flat+nested layout was accepted'
+  /usr/bin/grep -Eq 'runtime 布局歧义: flat=.*/dddddddddddddddddddddddddddddddddddddddd/libcangjie-runtime.so stamp=CJRT-COMMIT:dddddddddddddddddddddddddddddddddddddddd nested=.*/dddddddddddddddddddddddddddddddddddddddd/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so stamp=CJRT-COMMIT:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' "$log" ||
+    fail runtime-dual-flat-symlink "diagnostic omitted symlink path/stamp; log=$log"
+  echo "PASS dual runtime flat SO symlink rejected rc=$rc"
+
+  rc=0
+  BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" \
+    bash "$0" fault-runtime-layout-inner-rc > "$log" 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail runtime-inner-rc 'inner rc=1 was swallowed by layout self-test'
+  /usr/bin/grep -q 'TEST-FAIL \[runtime-flat\] sdk_build rc=1 log=' "$log" ||
+    fail runtime-inner-rc "outer failure omitted inner rc=1; log=$log"
+  echo "PASS runtime layout inner rc=1 propagated rc=$rc"
+  rm -f "$log"
+}
+
+fault_runtime_stamp() {
+  local expected=4444444444444444444444444444444444444444 actual=5555555555555555555555555555555555555555
+  new_tmp
+  make_sdk_fixture
+  make_runtime_payload "$TMP/$expected" "$actual"
+  run_sdk_runtime "$SDK_PRODUCT" "$TMP/$expected" "$TMP/sdk-bad-stamp"
 }
 
 make_std_fixture() {
@@ -225,8 +457,31 @@ make_isolation_fixture() {
 run_isolation_check() {
   local product="$1"
   PATH="$TMP/fakebin:$PATH" LEAK_ME=must-not-cross \
-    bash -c 'source "$1"; STAGE=test-A4; DRY=0; STDSRC="$2"; stdlib_build stdlib-stage1 "$3" "$4" "$5"' \
+    bash -c 'source "$1"; STAGE=test-A4; DRY=0; WORK="$2/work"; STDSRC="$2"; stdlib_build stdlib-stage1 "$3" "$4" "$5"' \
       bash "$product" "$TMP/isolation/src" "$TMP/isolation/sdk" "$TMP/isolation/rt" "$TMP/isolation/std"
+}
+
+positive_build_env() {
+  local caller_tmp
+  make_dry_fixture
+  caller_tmp="$TMP/caller-tmp"
+  mkdir -p "$caller_tmp" "$TMP/caller-home"
+  HOME="$TMP/caller-home" TMPDIR="$caller_tmp" dry_run > "$TMP/build-env-passthrough.log"
+  check_count build-env 4 "CMD env -i HOME=/root TMPDIR=$caller_tmp CANGJIE_HOME=" "$TMP/build-env-passthrough.log"
+  (
+    unset TMPDIR
+    HOME="$TMP/caller-home" dry_run
+  ) > "$TMP/build-env-default.log"
+  check_count build-env 4 'CMD env -i HOME=/root TMPDIR=.*/work/tmp-private CANGJIE_HOME=' "$TMP/build-env-default.log"
+  echo 'PASS bootstrap CLI keeps HOME=/root and passes caller/default TMPDIR'
+}
+
+fault_build_env() {
+  make_dry_fixture
+  sed 's/TMPDIR=$(printf '\''%q'\'' "$BUILD_TMPDIR") //' "$PRODUCT" > "$TMP/bootstrap-no-tmpdir.sh"
+  PRODUCT="$TMP/bootstrap-no-tmpdir.sh"
+  dry_run > "$TMP/build-env-no-tmpdir.log"
+  check_dry_contract "$TMP/build-env-no-tmpdir.log"
 }
 
 fault_a2() {
@@ -270,6 +525,13 @@ fault_compile_option() {
     bash "$PRODUCT" "$TMP/cjpm.toml"
 }
 
+positive_compile_option_o1() {
+  new_tmp
+  printf 'compile-option = "-O1"\n' > "$TMP/cjpm.toml"
+  bash -c 'source "$1"; STAGE=test-O1; DRY=0; rewrite_compile_option_o1 "$2"' \
+    bash "$PRODUCT" "$TMP/cjpm.toml"
+}
+
 fault_product_missing() {
   new_tmp
   mkdir -p "$TMP/empty-bin"
@@ -292,6 +554,9 @@ check_shim_wiring() {
   echo 'PASS shim wiring stage0+stage1'
 }
 
+# Reuse fixture builders without running the test dispatcher.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
+
 case "${1:-test}" in
   dry-run)
     make_dry_fixture
@@ -300,6 +565,27 @@ case "${1:-test}" in
   positive-a1)
     new_tmp
     run_shape_check 2
+    ;;
+  positive-compile-option-o1)
+    positive_compile_option_o1
+    ;;
+  positive-build-env)
+    positive_build_env
+    ;;
+  positive-runtime-layouts)
+    positive_runtime_layouts
+    ;;
+  positive-runtime-layout-symlink-nested-only)
+    positive_runtime_layout_symlink_nested_only
+    ;;
+  positive-runtime-layout-symlink-flat-only)
+    positive_runtime_layout_symlink_flat_only
+    ;;
+  check-runtime-layouts)
+    check_runtime_layouts
+    ;;
+  check-build-env)
+    positive_build_env
     ;;
   fault-a1)
     new_tmp
@@ -316,6 +602,30 @@ case "${1:-test}" in
     make_isolation_fixture
     sed 's/cmd "env -i /cmd "/' "$PRODUCT" > "$TMP/bootstrap-no-env-i.sh"
     run_isolation_check "$TMP/bootstrap-no-env-i.sh"
+    ;;
+  fault-build-env)
+    fault_build_env
+    ;;
+  fault-runtime-stamp)
+    fault_runtime_stamp
+    ;;
+  fault-runtime-dual-layout)
+    fault_runtime_dual_layout
+    ;;
+  fault-runtime-dual-missing-bounds)
+    fault_runtime_dual_missing_bounds
+    ;;
+  fault-runtime-dual-multiple-nested)
+    fault_runtime_dual_multiple_nested
+    ;;
+  fault-runtime-layout-symlink-nested)
+    fault_runtime_layout_symlink_nested
+    ;;
+  fault-runtime-layout-symlink-flat)
+    fault_runtime_layout_symlink_flat
+    ;;
+  fault-runtime-layout-inner-rc)
+    fault_runtime_layout_inner_rc
     ;;
   fault-host-sha)
     make_dry_fixture
@@ -437,7 +747,13 @@ case "${1:-test}" in
     /usr/bin/grep -q 'shape=ok Int64.ti=2 FFI-archives=1' "$TMP/isolation-positive.log" ||
       fail A4 'isolated real command path did not pass'
     /usr/bin/grep -q 'cjpm build' "$TMP/dry.log" || fail CJPM 'dry-run CMD missing cjpm build'
-    for arm in a1 a2 a3 a4 host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
+    bash "$0" positive-compile-option-o1 > "$TMP/compile-option-o1-positive.log" ||
+      fail compile-option 'existing -O1 was not accepted idempotently'
+    BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" bash "$0" check-build-env > "$TMP/build-env-positive.log" ||
+      fail build-env 'bootstrap CLI HOME/TMPDIR contract did not pass'
+    BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" bash "$0" check-runtime-layouts > "$TMP/runtime-layouts-positive.log" ||
+      fail runtime-layouts 'flat/nested/dual/inner-rc runtime layout contract did not pass'
+    for arm in a1 a2 a3 a4 build-env runtime-stamp host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
       log="$TMP/fault-$arm.log"
       if bash "$0" "fault-$arm" > "$log" 2>&1; then
         fail "$arm" 'fault arm unexpectedly passed'
@@ -447,6 +763,8 @@ case "${1:-test}" in
         a2) marker='BOOTSTRAP-FAIL \[test-A2\].*命令失败 rc=23';;
         a3) marker='BOOTSTRAP-FAIL \[test-A3\].*stage1-compiler';;
         a4) marker='BOOTSTRAP-FAIL \[test-A4\].*命令失败 rc=44';;
+        build-env) marker='TEST-FAIL \[A4\].*TMPDIR';;
+        runtime-stamp) marker='SDK-BUILD-FAIL runtime CJRT-COMMIT 不匹配: expected=4444444444444444444444444444444444444444 actual=5555555555555555555555555555555555555555';;
         host-sha) marker='BOOTSTRAP-FAIL \[stage0\] host-llvm sha256';;
         ast-sha) marker='BOOTSTRAP-FAIL \[stage0\] ast-support sha256';;
         host-colour) marker='BOOTSTRAP-FAIL \[stage0\] host LLVM 含 colour 动态符号 hits=1';;
@@ -462,17 +780,17 @@ case "${1:-test}" in
         old-colour-llc) marker='BOOTSTRAP-FAIL \[init\] 参数 --colour-llc 已废弃；使用 --colour-tuple';;
         cjpm-toml) marker='BOOTSTRAP-FAIL \[init\] --src 缺少 cjpm.toml';;
         src-file) marker='BOOTSTRAP-FAIL \[init\] --src 必须是含 cjpm.toml 的 cjcj 仓根，拒绝单文件';;
-        compile-option) marker='BOOTSTRAP-FAIL \[test-O1\] 隔离副本 cjpm.toml 无 compile-option = "-O2" 可改';;
+        compile-option) marker='BOOTSTRAP-FAIL \[test-O1\] 隔离副本 cjpm.toml 的 compile-option 不是 -O1';;
         product-missing) marker='BOOTSTRAP-FAIL \[test-product\] cjcj-stage1 cjpm 产物缺失';;
         shim-wiring) marker='TEST-FAIL \[SHIM\] pattern count=1 expected=2: CMD shim build label=';;
       esac
       /usr/bin/grep -Eq "$marker" "$log" || fail "$arm" "fault arm missed precise marker; log=$log"
       echo "PASS precise-red $arm"
     done
-    echo 'PASS bootstrap dry contracts, LLVM assembly, and positive controls'
+    echo 'PASS bootstrap dry contracts, controlled build environment, LLVM assembly, and positive controls'
     ;;
   *)
-    echo "usage: $0 [test|dry-run|check-shim-wiring|positive-a1|fault-a1|fault-a2|fault-a3|fault-a4|fault-host-sha|fault-ast-sha|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
+    echo "usage: $0 [test|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a2|fault-a3|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
     exit 2
     ;;
 esac

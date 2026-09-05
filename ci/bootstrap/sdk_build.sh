@@ -28,7 +28,10 @@
 #   --llvm-so <libLLVM*.so*>  只覆盖 third_party/llvm/lib 同名 SO；llc/opt 保持基线
 #   --llvm-tuple <dir>        按 SHA256SUMS strict 校验并整套安装静态 LLVM tuple
 #   --runtime <dir> runtime 安装根（含 lib/<平台>+runtime/lib/<平台>），
-#                   或仅 runtime/lib/<平台>（会在同轮 install 旁路找 lib/<平台> 静态库）
+#                   或仅 runtime/lib/<平台>（会在同轮 install 旁路找 lib/<平台> 静态库），
+#                   或 flat sodepot（直接含 runtime + boundscheck 两枚 SO）
+#                   40hex 根核提交章；64hex 根核 runtime sha256 及唯一 clean 章
+#   --runtime-commit <40hex> 独立预期提交；flat 任意名称根必须显式提供，nested 给出时也核验
 #   --std <dir>     build.py install prefix，或兼容旧调用的整个 modules/<平台> 目录
 #   --verify-host-rt <dir|sdk>  target SDK 验证 managed 工具时使用的未着色宿主 runtime
 #   --link <name>   ⭐ 组好后 `cjv toolchain link <name> <to>`
@@ -90,7 +93,7 @@ if [ "${1:-}" = env ]; then
   exit 0
 fi
 
-FROM= TO= ROLE= LLC= OPT= LLVM_SO= LLVM_TUPLE= CJPM= CJC= RUNTIME= STD= VERIFY_HOST_RT= LINKNAME= FORCE=0
+FROM= TO= ROLE= LLC= OPT= LLVM_SO= LLVM_TUPLE= CJPM= CJC= RUNTIME= RUNTIME_COMMIT= STD= VERIFY_HOST_RT= LINKNAME= FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --from) FROM="${2:?}"; shift 2;;
@@ -104,6 +107,7 @@ while [ $# -gt 0 ]; do
     --cjpm) CJPM="${2:?}"; shift 2;;
     --cjc) CJC="${2:?}"; shift 2;;
     --runtime) RUNTIME="${2:?}"; shift 2;;
+    --runtime-commit) RUNTIME_COMMIT="${2:?}"; shift 2;;
     --std) STD="${2:?}"; shift 2;;
     --verify-host-rt) VERIFY_HOST_RT="${2:?}"; shift 2;;
     --link) LINKNAME="${2:?}"; shift 2;;
@@ -120,6 +124,12 @@ if [ -n "$LLVM_SO" ] && [ -n "$LLVM_TUPLE" ]; then
 fi
 if [ -n "$LLVM_TUPLE" ] && { [ -n "$LLC" ] || [ -n "$OPT" ]; }; then
   die '--llvm-tuple 已包含 llc/opt，不可再混用 --llc/--opt'
+fi
+
+if [ -n "$RUNTIME_COMMIT" ]; then
+  [ -n "$RUNTIME" ] || die '--runtime-commit 必须与 --runtime 一起使用'
+  [[ "$RUNTIME_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || die '--runtime-commit 必须是 40 位十六进制 clean commit'
+  RUNTIME_COMMIT=${RUNTIME_COMMIT,,}
 fi
 
 VERIFY_HOST_RT_DIR=
@@ -323,16 +333,89 @@ runtime_pair_same_round() {
   return 0
 }
 
-resolve_runtime_pair() {
-  # 输出到全局：RT_DYN_SRC（必有）· RT_STATIC_SRC（可空）· RT_TUPLE
-  RT_DYN_SRC= RT_STATIC_SRC= RT_TUPLE=
-  local root="$1" cand so
-  if [ -f "$root/libcangjie-runtime.so" ]; then
-    RT_DYN_SRC=$(readlink -f "$root")
+assert_runtime_stamp() {
+  local so="$1" expected="$2" output stamps hits actual
+  output=$(strings "$so" 2>/dev/null) || die "strings 无法读取 runtime: $so"
+  stamps=$(printf '%s\n' "$output" | /usr/bin/grep -Eo 'CJRT-COMMIT:[[:alnum:]_-]*' | sort -u || true)
+  hits=$(printf '%s\n' "$stamps" | awk 'NF {n++} END {print n+0}')
+  actual=${stamps#CJRT-COMMIT:}
+  actual=${actual,,}
+  echo "ASSERT runtime-stamp expected=${expected:-unique-clean} actual=${actual:-none} hits=$hits file=$so"
+  [ "$hits" -eq 1 ] || die "runtime CJRT-COMMIT 章计数不是 1: expected=$expected actual=${actual:-none} hits=$hits"
+  [[ "$actual" =~ ^[0-9a-f]{40}$ ]] || die "runtime CJRT-COMMIT 不是 clean 40hex 章: actual=$actual"
+  if [ -n "$expected" ]; then
+    [ "$actual" = "$expected" ] || die "runtime CJRT-COMMIT 不匹配: expected=$expected actual=$actual"
+  fi
+  if [ -n "$RUNTIME_COMMIT" ]; then
+    [ "$actual" = "$RUNTIME_COMMIT" ] || die "runtime 显式 CJRT-COMMIT 不匹配: expected=$RUNTIME_COMMIT actual=$actual"
+  fi
+}
+
+assert_flat_runtime_identity() {
+  local root="$1" name so expected= actual_hash
+  name=$(basename "$root")
+  name=${name,,}
+  so="$root/libcangjie-runtime.so"
+  if [[ "$name" =~ ^[0-9a-f]{40}$ ]]; then
+    expected=$name
+    echo "ASSERT runtime-identity source=commit-root expected=$expected explicit=${RUNTIME_COMMIT:-none} root=$root"
+  elif [[ "$name" =~ ^[0-9a-f]{64}$ ]]; then
+    actual_hash=$(sha256sum "$so") || die "runtime 无法读取 sha256: $so"
+    actual_hash=${actual_hash%% *}
+    echo "ASSERT runtime-identity source=sha256-root expected=$name actual=$actual_hash explicit=${RUNTIME_COMMIT:-none} root=$root"
+    [ "$actual_hash" = "$name" ] || die "runtime sha256 不匹配: expected=$name actual=$actual_hash"
   else
-    so=$(find "$root" -name libcangjie-runtime.so 2>/dev/null | head -1)
+    [ -n "$RUNTIME_COMMIT" ] || die "flat runtime 根身份不充分，需显式 --runtime-commit: root=$root"
+    echo "ASSERT runtime-identity source=explicit-commit expected=$RUNTIME_COMMIT root=$root"
+  fi
+  assert_runtime_stamp "$so" "$expected"
+}
+
+runtime_stamp_summary() {
+  local so="$1" output stamps
+  output=$(strings "$so" 2>/dev/null) || {
+    printf 'unreadable'
+    return 0
+  }
+  stamps=$(printf '%s\n' "$output" | /usr/bin/grep -Eo 'CJRT-COMMIT:[0-9a-fA-F]{40}(-dirty)?' | sort -u || true)
+  if [ -n "$stamps" ]; then
+    printf '%s\n' "$stamps" | paste -sd, -
+  else
+    printf 'none'
+  fi
+}
+
+resolve_runtime_pair() {
+  # 输出到全局：RT_DYN_SRC（必有）· RT_STATIC_SRC（可空）· RT_TUPLE · RT_LAYOUT
+  RT_DYN_SRC= RT_STATIC_SRC= RT_TUPLE= RT_LAYOUT=nested
+  local root="$1" cand so flat_so nested_so nested_sos flat_stamp nested_summary
+  # flat 与 nested 使用同一把尺：路径跟随符号链接后必须是常规文件。
+  flat_so=$(find -L "$root" -mindepth 1 -maxdepth 1 -type f -name libcangjie-runtime.so -print -quit 2>/dev/null || true)
+  nested_sos=$(find -L "$root" -mindepth 2 -type f -name libcangjie-runtime.so -print 2>/dev/null | sort || true)
+  nested_so=
+  nested_summary=
+  while IFS= read -r so; do
+    [ -n "$so" ] || continue
+    [ -n "$nested_so" ] || nested_so="$so"
+    nested_summary="$nested_summary nested=$so stamp=$(runtime_stamp_summary "$so")"
+  done <<< "$nested_sos"
+  if [ -n "$flat_so" ] && [ -n "$nested_so" ]; then
+    flat_stamp=$(runtime_stamp_summary "$flat_so")
+    die "runtime 布局歧义: flat=$flat_so stamp=$flat_stamp$nested_summary"
+  fi
+  if [ -n "$flat_so" ]; then
+    [ -f "$root/libboundscheck.so" ] || die "flat runtime 缺 libboundscheck.so: $root"
+    RT_DYN_SRC=$(readlink -f "$root")
+    RT_LAYOUT=flat
+    assert_flat_runtime_identity "$RT_DYN_SRC"
+    return 0
+  else
+    so="$nested_so"
     [ -n "$so" ] || die "runtime 源找不到 libcangjie-runtime.so: $root"
     RT_DYN_SRC=$(dirname "$(readlink -f "$so")")
+    if [ -n "$RUNTIME_COMMIT" ]; then
+      assert_runtime_stamp "$RT_DYN_SRC/libcangjie-runtime.so" "$RUNTIME_COMMIT"
+    fi
   fi
   RT_TUPLE=$(basename "$RT_DYN_SRC")
   # 候选按优先级试；每个都过 same-round 才收
@@ -355,14 +438,25 @@ if [ -n "$RUNTIME" ]; then
   [ -n "$d" ] || die "目标里找不到 runtime/lib/<平台>"
   # 平台名以目标为准；源侧 tuple 必须对得上（或仅一份）
   tgt_tuple=$(basename "$d")
-  [ "$RT_TUPLE" = "$tgt_tuple" ] || \
-    die "runtime 平台不一致: 源=$RT_TUPLE 目标=$tgt_tuple"
-  rm -rf "$d" && cp -a "$RT_DYN_SRC" "$d" || die "runtime 动态库替换失败"
-  echo "  [runtime-dyn] ${RT_DYN_SRC} -> ${d#$TO/}"
+  if [ "$RT_LAYOUT" = flat ]; then
+    for base in libcangjie-runtime.so libboundscheck.so; do
+      [ -f "$d/$base" ] || die "flat runtime: 基线里没有 runtime/lib/$tgt_tuple/$base，拒绝新建"
+      cp -f "$RT_DYN_SRC/$base" "$d/$base" || die "flat runtime 动态库替换失败: $base"
+      same_sha "$RT_DYN_SRC/$base" "$d/$base" || die "flat runtime 安装后 sha256 不一致: $base"
+    done
+    echo "  [runtime-dyn] flat ${RT_DYN_SRC} -> ${d#$TO/} files=2"
+  else
+    [ "$RT_TUPLE" = "$tgt_tuple" ] || \
+      die "runtime 平台不一致: 源=$RT_TUPLE 目标=$tgt_tuple"
+    rm -rf "$d" && cp -a "$RT_DYN_SRC" "$d" || die "runtime 动态库替换失败"
+    echo "  [runtime-dyn] ${RT_DYN_SRC} -> ${d#$TO/}"
+  fi
   # ⭐ 静态侧：基线若有 lib/<tuple> 里的 runtime 相关归档，必须同轮替换
   lib_d="$TO/lib/$tgt_tuple"
   if [ -d "$lib_d" ]; then
-    if [ -z "$RT_STATIC_SRC" ]; then
+    if [ "$RT_LAYOUT" = flat ]; then
+      echo "  [runtime-static] (skip: flat sodepot 只承载两枚 shared SO)"
+    elif [ -z "$RT_STATIC_SRC" ]; then
       # 基线有静态 runtime 却找不到同轮源 ⇒ fail-closed（半套 = G2 身份污染）
       if [ -f "$lib_d/libcangjie-runtime.a" ]; then
         die "runtime: 基线有 lib/$tgt_tuple/libcangjie-runtime.a，但 --runtime 源旁找不到同轮静态库（给完整 install 根，或 runtime/lib 旁带 lib/<tuple>）"
@@ -510,7 +604,7 @@ else
 fi
 
 echo
-echo "SDK-BUILD-OK role=$ROLE from=$BASE to=$TO mask=$MASK"
 for rel in bin/cjc third_party/llvm/bin/llc third_party/llvm/bin/opt tools/bin/cjpm; do
   [ -f "$TO/$rel" ] && printf 'SDK-BUILD-SHA %-34s %s\n' "$rel" "$(sha256sum "$TO/$rel" | awk '{print $1}')"
 done
+echo "SDK-BUILD-OK role=$ROLE from=$BASE to=$TO mask=$MASK"
