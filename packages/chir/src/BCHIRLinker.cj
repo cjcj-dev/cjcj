@@ -21,7 +21,6 @@ public class BCHIRLinker {
 
     public func Run(packages: ArrayList<BCHIR>): BCHIR {
         let topDef = topBchir.GetLinkedByteCode()
-        topDef.Resize(0)
         topDef.PushOp(OpCode.JUMP)
         let jumpToInit = topDef.NextIndex()
         topDef.PushCell(0)
@@ -53,7 +52,6 @@ public class BCHIRLinker {
     public func RunForConstEval(packages: ArrayList<BCHIR>): HashMap<Int64, InterpreterValue> {
         let globalInitValues = HashMap<Int64, InterpreterValue>()
         let topDef = topBchir.GetLinkedByteCode()
-        topDef.Resize(0)
         topDef.PushOp(OpCode.JUMP)
         let jumpOverDummy = topDef.NextIndex()
         topDef.PushCell(0)
