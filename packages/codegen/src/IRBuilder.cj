@@ -1516,8 +1516,8 @@ public class IRBuilder2 <: Resource {
         if (IsTypeContainsRef(varrayType)) {
             return CallGCWriteStruct(baseObject, dest, value.GetRawValue(), size, varrayCGType.GetOriginal().ToString())
         }
-        let align = cgMod.GetABITypeAlignment(varrayType)
-        return CreateMemCpy(dest, align, value.GetRawValue(), align, size)
+        CopyNativeAggregate(varrayType, value.GetRawValue(), dest)
+        return LLVMNullValue()
     }
 
     private func ReadManagedAggregateSourceIfNeeded(source: LLVMValueRef, sourceCGType: CGType,

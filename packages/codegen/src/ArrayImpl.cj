@@ -325,6 +325,10 @@ public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, ad
         if (let Some(addrCGType) <- addr.GetCGType()) {
             if (valueCGType.IsVArrayPtrType() && addrCGType.IsVArrayPtrType()) {
                 let valueType = valueCGType.GetPointerElementType().getOrThrow().GetLLVMType()
+                if (!irBuilder.IsTypeContainsRef(valueType)) {
+                    irBuilder.CopyNativeAggregate(valueType, value.GetRawValue(), addr.GetRawValue())
+                    return LLVMNullValue()
+                }
                 let size = unsafe {
                     LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw),
                         irBuilder.GetCGModule().GetTypeSize(valueType), 0)
