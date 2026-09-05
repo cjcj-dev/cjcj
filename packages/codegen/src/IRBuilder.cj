@@ -2489,7 +2489,7 @@ public class IRBuilder2 <: Resource {
                     CallGCWriteAgg(argDerefCGType.GetLayoutType(),
                         ArrayList<LLVMValueRef>([objectValue, payloadPtr, raw, size]))
                 } else {
-                    CreateMemCpy(payloadPtr, 0u32, raw, 0u32, size)
+                    CopyNoRefOrMemCpy(argDerefCGType.GetLLVMType(), payloadPtr, raw, size)
                 }
             } else {
                 let addr = CreateBitCast(payloadPtr, unsafe { LLVMPointerType(argDerefCGType.GetLLVMType(), 1u32) })
@@ -3039,15 +3039,14 @@ public class IRBuilder2 <: Resource {
         }
         if (valueCGType.IsStructPtrType()) {
             let structType = valueCGType.GetPointerElementType().getOrThrow().GetLLVMType()
+            let size = unsafe {
+                LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
+            }
             if (isDstAddrspace1 && IsTypeContainsRef(structType)) {
-                let size = unsafe {
-                    LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
-                }
                 CallGCWriteAgg(structType, ArrayList<LLVMValueRef>([base, place, value, size]))
+            } else if (isDstAddrspace1) {
+                CopyNoRefOrMemCpy(structType, place, value, size)
             } else {
-                let size = unsafe {
-                    LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(structType), 0)
-                }
                 let align = cgMod.GetABITypeAlignment(structType)
                 CreateMemCpy(place, align, value, align, size)
             }
@@ -3569,22 +3568,10 @@ public class IRBuilder2 <: Resource {
     public func CopyNoRefOrMemCpy(structType: LLVMTypeRef, dest: LLVMValueRef, source: LLVMValueRef,
         size: LLVMValueRef): LLVMValueRef {
         let call = CallCopyNoRefStruct(structType, dest, source, size)
-        if (!call.isNull()) {
-            return call
+        if (call.isNull()) {
+            InternalError("llvm.cj.copy.no.ref.struct emission returned null")
         }
-        let sizeTy = unsafe { LLVMTypeOf(size) }
-        let sizeInBytes = if (!size.isNull() && !sizeTy.isNull() &&
-            unsafe { LLVMGetTypeKind(sizeTy) } == LLVM_INTEGER_TYPE_KIND &&
-            unsafe { LLVMIsAInstruction(size) }.isNull() && unsafe { LLVMIsAArgument(size) }.isNull()) {
-            unsafe { LLVMConstIntGetZExtValue(size) }
-        } else {
-            1u64
-        }
-        if (sizeInBytes == 0u64) {
-            return LLVMNullValue()
-        }
-        let align = cgMod.GetABITypeAlignment(structType)
-        return CreateMemCpy(dest, align, source, align, size)
+        return call
     }
 
     public func CallCopyNoRefStruct(structType: LLVMTypeRef, dest: LLVMValueRef, source: LLVMValueRef,
@@ -3597,13 +3584,16 @@ public class IRBuilder2 <: Resource {
             }
         }
         if (call.isNull()) {
-            return call
+            InternalError("llvm.cj.copy.no.ref.struct call is null")
         }
         let aggTypeName = if (!structType.isNull() &&
             unsafe { LLVMGetTypeKind(structType) } == LLVM_STRUCT_TYPE_KIND) {
             LLVMCStringToString(unsafe { LLVMGetStructName(structType) }) ?? ""
         } else {
             ""
+        }
+        if (aggTypeName.size == 0) {
+            InternalError("llvm.cj.copy.no.ref.struct AggType must name one struct")
         }
         let metadata = LLVMCreateMDTupleFromString(GetLLVMContext(), aggTypeName)
         LLVMSetInstructionMetadata(GetLLVMContext(), call, "AggType", metadata)

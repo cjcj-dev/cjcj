@@ -808,12 +808,46 @@ extern "C" LLVMValueRef LLVMSelfhostCreateGCWriteStaticAgg(LLVMBuilderRef Builde
 extern "C" LLVMValueRef LLVMSelfhostCreateCopyNoRefStruct(LLVMBuilderRef Builder, LLVMModuleRef Module,
     LLVMTypeRef AggType, LLVMValueRef Dest, LLVMValueRef Source, LLVMValueRef Size, LLVMTypeRef SizeType)
 {
-    unsigned iid = Function::lookupIntrinsicID("llvm.cj.copy.no.ref.struct");
-    if (iid != Intrinsic::not_intrinsic) {
-        return CreateGCStaticAggCall(Builder, Module, AggType, Dest, Source, Size, SizeType,
-            static_cast<Intrinsic::ID>(iid));
+    if (Builder == nullptr || Module == nullptr || SizeType == nullptr || Dest == nullptr || Source == nullptr ||
+        Size == nullptr) {
+        FailConvertArgsType("null LLVM C API handle");
     }
-    return nullptr;
+    auto *builder = unwrap(Builder);
+    auto *module = unwrap(Module);
+    auto *sizeType = unwrap<Type>(SizeType);
+    auto *dest = unwrap(Dest);
+    auto *source = unwrap(Source);
+    auto *size = unwrap(Size);
+    if (builder == nullptr || module == nullptr || sizeType == nullptr || dest == nullptr || source == nullptr ||
+        size == nullptr) {
+        FailConvertArgsType("unwrap produced a null LLVM object");
+    }
+    if (auto *sizeConst = dyn_cast<ConstantInt>(size); sizeConst && sizeConst->isZero()) {
+        FailConvertArgsType("llvm.cj.copy.no.ref.struct size must be a nonzero constant");
+    }
+    LLVMContext &ctx = module->getContext();
+    Type *i8 = Type::getInt8Ty(ctx);
+    Type *ptrTy = PointerType::get(i8, 0);
+    FunctionType *fnTy = FunctionType::get(Type::getVoidTy(ctx), {ptrTy, ptrTy, sizeType}, false);
+    FunctionCallee callee = module->getOrInsertFunction("llvm.cj.copy.no.ref.struct", fnTy);
+    if (auto *fn = dyn_cast<Function>(callee.getCallee())) {
+        fn->setDoesNotThrow();
+        fn->addFnAttr(Attribute::NoUnwind);
+        fn->addFnAttr("gc-leaf-function");
+    }
+    auto as0i8 = [&](Value *p) -> Value * {
+        unsigned as = p->getType()->getPointerAddressSpace();
+        Value *i8p = builder->CreateBitCast(p, PointerType::get(i8, as));
+        if (as == 0) {
+            return i8p;
+        }
+        return builder->CreateIntToPtr(builder->CreatePtrToInt(i8p, Type::getInt64Ty(ctx)), ptrTy);
+    };
+    Value *sizeAdj = builder->CreateZExtOrTrunc(size, sizeType);
+    std::vector<Value*> args{as0i8(dest), as0i8(source), sizeAdj};
+    auto *inst = CreateCall(*builder, fnTy, callee.getCallee(), args);
+    (void)AggType;
+    return wrap(inst);
 }
 
 extern "C" void LLVMSelfhostConvertArgsTypeFailClosedProbe(LLVMBuilderRef Builder, LLVMModuleRef Module)
