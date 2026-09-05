@@ -466,8 +466,7 @@ private func InitArrayData(irBuilder: IRBuilder2, arrPtr: LLVMValueRef, arrayLen
         if (irBuilder.IsTypeContainsRef(elemType)) {
             irBuilder.CallGCWriteAgg(elemType, ArrayList<LLVMValueRef>([arrPtr, elemPtr, value, size]))
         } else {
-            let align = irBuilder.GetCGModule().GetABITypeAlignment(elemType)
-            irBuilder.CreateMemCpy(elemPtr, align, value, align, size)
+            irBuilder.CopyNativeAggregate(elemType, value, elemPtr)
         }
     } else if (elemKind == LLVM_ARRAY_TYPE_KIND) {
         let size = irBuilder.GetInt64(Int64(irBuilder.GetCGModule().GetTypeSize(elemType)))
@@ -4532,8 +4531,8 @@ public class IRBuilder2 <: Resource {
                 return CallGCWriteAgg(elementType,
                     ArrayList<LLVMValueRef>([array, elementPtr, rawValue, size]))
             } else {
-                let align = cgMod.GetABITypeAlignment(elementType)
-                return CreateMemCpy(elementPtr, align, rawValue, align, size)
+                CopyNativeAggregate(elementType, rawValue, elementPtr)
+                return LLVMNullValue()
             }
         } else if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_ARRAY_TYPE_KIND) {
             let size = unsafe {
