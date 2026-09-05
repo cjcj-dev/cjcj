@@ -964,22 +964,31 @@ public class IRBuilder2 <: Resource {
             }
             loadResult
         }
+        let elementKind = unsafe { LLVMGetTypeKind(elementType) }
+        let isAggregate = elementKind == LLVM_STRUCT_TYPE_KIND || elementKind == LLVM_ARRAY_TYPE_KIND
         if (IsGlobalVariableBasePtr(addr) && IsTypeContainsRef(elementType)) {
-            if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_STRUCT_TYPE_KIND) {
+            if (isAggregate) {
                 let tempVal = CreateEntryAlloca(elementType)
                 let size = unsafe {
                     LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
                 }
-                CallGCReadStaticAgg(elementType, ArrayList<LLVMValueRef>([tempVal, addr, size]))
+                let aggregateType = if (elementKind == LLVM_STRUCT_TYPE_KIND) {
+                    elementType
+                } else {
+                    CreateAnonymousStructType(ArrayList<LLVMTypeRef>([elementType]))
+                }
+                CallGCReadStaticAgg(aggregateType, ArrayList<LLVMValueRef>([tempVal, addr, size]))
                 return tempVal
             }
             return CallGCReadStaticRef(addr)
         }
-        if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_STRUCT_TYPE_KIND) {
+        if (elementKind == LLVM_STRUCT_TYPE_KIND) {
             let structName = LLVMCStringToString(unsafe { LLVMGetStructName(elementType) }) ?? ""
             if (structName == UNIT_TYPE_STR) {
                 return cgMod.GenerateUnitTypeValue()
             }
+        }
+        if (isAggregate) {
             let tempVal = CreateEntryAlloca(elementType)
             let sizeInBytes = cgMod.GetTypeSize(elementType)
             let size = unsafe {
@@ -987,28 +996,40 @@ public class IRBuilder2 <: Resource {
             }
             if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
                 if (IsTypeContainsRef(elementType)) {
-                    CallGCReadAgg(elementType, ArrayList<LLVMValueRef>([tempVal, baseObject, addr, size]))
+                    let aggregateType = if (elementKind == LLVM_STRUCT_TYPE_KIND) {
+                        elementType
+                    } else {
+                        CreateAnonymousStructType(ArrayList<LLVMTypeRef>([elementType]))
+                    }
+                    CallGCReadAgg(aggregateType, ArrayList<LLVMValueRef>([tempVal, baseObject, addr, size]))
                 } else {
                     CopyNoRefOrMemCpy(elementType, tempVal, addr, size)
                 }
                 return tempVal
             }
-            if (sizeInBytes != 0u64) {
+            let isCTypeAggregate = IsCurrentLoadCTypeAggregate()
+            let sourceAddressSpace = GetPointerAddressSpace(addr) ?? 0u32
+            let containsRef = IsTypeContainsRef(elementType)
+            if (containsRef || isCTypeAggregate) {
+                if (containsRef && !isCTypeAggregate && sourceAddressSpace == 1u32) {
+                    InternalError("non-CType reference aggregate load has addrspace(1) source without managed base")
+                    return LLVMNullValue()
+                }
+                let expectedSourceType = unsafe { LLVMPointerType(elementType, sourceAddressSpace) }
+                let typedSource = if (unsafe { LLVMTypeOf(addr) }.toUIntNative() ==
+                    expectedSourceType.toUIntNative()) {
+                    addr
+                } else {
+                    CreateBitCast(addr, expectedSourceType, name: "typed.copy.source")
+                }
+                CopyNativeAggregate(elementType, typedSource, tempVal)
+            } else if (sizeInBytes != 0u64) {
                 let align = cgMod.GetABITypeAlignment(elementType)
                 CreateMemCpy(tempVal, align, addr, align, size)
             }
             return tempVal
         }
-        if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_ARRAY_TYPE_KIND) {
-            let tempVal = CreateEntryAlloca(elementType)
-            let size = unsafe {
-                LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), cgMod.GetTypeSize(elementType), 0)
-            }
-            let align = cgMod.GetABITypeAlignment(elementType)
-            CreateMemCpy(tempVal, align, addr, align, size)
-            return tempVal
-        }
-        if (unsafe { LLVMGetTypeKind(elementType) } == LLVM_FUNCTION_TYPE_KIND) {
+        if (elementKind == LLVM_FUNCTION_TYPE_KIND) {
             return addr
         }
         if (let Some(currentExpr) <- chirExpr) {
@@ -1627,6 +1648,17 @@ public class IRBuilder2 <: Resource {
         let kind = unsafe { LLVMGetTypeKind(aggregateType) }
         CJC_ASSERT(kind == LLVM_STRUCT_TYPE_KIND || kind == LLVM_ARRAY_TYPE_KIND)
         CopyAggregateTyped(aggregateType, source, destination)
+    }
+
+    private func IsCurrentLoadCTypeAggregate(): Bool {
+        if (let Some(currentExpr) <- chirExpr) {
+            if (let Some(result) <- currentExpr.GetExpression().GetResult()) {
+                if (let Some(resultType) <- result.GetType()) {
+                    return DeRef(resultType).SatisfyCType()
+                }
+            }
+        }
+        return false
     }
 
     public func CreateCJMemSetStructWith0(addr: LLVMValueRef): LLVMValueRef {
@@ -3566,9 +3598,38 @@ public class IRBuilder2 <: Resource {
         return call
     }
 
-    public func CopyNoRefOrMemCpy(structType: LLVMTypeRef, dest: LLVMValueRef, source: LLVMValueRef,
+    public func CopyNoRefOrMemCpy(aggregateType: LLVMTypeRef, dest: LLVMValueRef, source: LLVMValueRef,
         size: LLVMValueRef): LLVMValueRef {
-        let call = CallCopyNoRefStruct(structType, dest, source, size)
+        let kind = unsafe { LLVMGetTypeKind(aggregateType) }
+        let copyType = if (kind == LLVM_ARRAY_TYPE_KIND) {
+            // copy.no.ref.struct requires a named struct for its verifier-visible
+            // provenance. A one-field wrapper preserves the array's size, layout,
+            // and recursively checked element type without emitting a raw AS1 copy.
+            let arrayTypeName = LLVMConsumeMessage(unsafe { LLVMPrintTypeToString(aggregateType) })
+            let wrapperType = GetOrCreateNamedStructType(
+                GetLLVMContext(), "cjcj.copy.no.ref.array." + arrayTypeName)
+            if (unsafe { LLVMIsOpaqueStruct(wrapperType) } != 0) {
+                SetStructTypeBody(wrapperType, ArrayList<LLVMTypeRef>([aggregateType]))
+            }
+            wrapperType
+        } else {
+            aggregateType
+        }
+        let copyDest = if (kind == LLVM_ARRAY_TYPE_KIND) {
+            let destAddressSpace = GetPointerAddressSpace(dest) ?? 0u32
+            CreatePointerCast(dest, unsafe { LLVMPointerType(copyType, destAddressSpace) },
+                name: "copy.no.ref.array.dest")
+        } else {
+            dest
+        }
+        let copySource = if (kind == LLVM_ARRAY_TYPE_KIND) {
+            let sourceAddressSpace = GetPointerAddressSpace(source) ?? 0u32
+            CreatePointerCast(source, unsafe { LLVMPointerType(copyType, sourceAddressSpace) },
+                name: "copy.no.ref.array.source")
+        } else {
+            source
+        }
+        let call = CallCopyNoRefStruct(copyType, copyDest, copySource, size)
         if (call.isNull()) {
             InternalError("llvm.cj.copy.no.ref.struct emission returned null")
         }

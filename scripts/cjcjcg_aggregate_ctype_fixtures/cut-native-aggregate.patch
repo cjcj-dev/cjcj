@@ -1,0 +1,36 @@
+diff --git a/packages/codegen/src/IRBuilder.cj b/packages/codegen/src/IRBuilder.cj
+--- a/packages/codegen/src/IRBuilder.cj
++++ b/packages/codegen/src/IRBuilder.cj
+@@ -1022,7 +1022,12 @@ public class IRBuilder2 <: Resource {
+                 } else {
+                     CreateBitCast(addr, expectedSourceType, name: "typed.copy.source")
+                 }
+-                CopyNativeAggregate(elementType, typedSource, tempVal)
++                if (isCTypeAggregate && sizeInBytes != 0u64) {
++                    let cutAlign = cgMod.GetABITypeAlignment(elementType)
++                    CreateMemCpy(tempVal, cutAlign, typedSource, cutAlign, size)
++                } else {
++                    CopyNativeAggregate(elementType, typedSource, tempVal)
++                }
+             } else if (sizeInBytes != 0u64) {
+                 let align = cgMod.GetABITypeAlignment(elementType)
+                 CreateMemCpy(tempVal, align, addr, align, size)
+diff --git a/packages/codegen/src/IntrinsicsDispatcher.cj b/packages/codegen/src/IntrinsicsDispatcher.cj
+--- a/packages/codegen/src/IntrinsicsDispatcher.cj
++++ b/packages/codegen/src/IntrinsicsDispatcher.cj
+@@ -753,9 +753,14 @@ private func CPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>,
+     let addr = irBuilder.CreateInBoundsGEP(GetPointerElementType(paramType), typedPtr, indices,
+         name: "ptr.write.addr")
+     InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanWrite")
+     if (isAggregatePtr) {
+         let elementType = GetPointerElementType(rawValueType)
+-        irBuilder.CopyNativeAggregate(elementType, rawValue, addr)
++        let size = unsafe {
++            LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw),
++                irBuilder.GetCGModule().GetTypeSize(elementType), 0)
++        }
++        let align = UInt32(GetTypeAlignment(irBuilder.GetCGModule(), valueTy))
++        irBuilder.CreateMemCpy(addr, align, rawValue, align, size)
+     } else {
+         irBuilder.CreateStore(rawValue, addr)
+     }

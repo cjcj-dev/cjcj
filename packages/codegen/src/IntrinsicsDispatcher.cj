@@ -706,15 +706,7 @@ private func CPointerRead(irBuilder: IRBuilder2, args: ArrayList<Value>, typeArg
     let indices = ArrayList<LLVMValueRef>([indexValue])
     let addr = irBuilder.CreateInBoundsGEP(resultCGType.GetLLVMType(), typedPtr, indices, name: "ptr.read.addr")
     InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanRead")
-    return HandleValuePtr(irBuilder, addr)
-}
-
-private func HandleValuePtr(irBuilder: IRBuilder2, valPtr: LLVMValueRef): LLVMValueRef {
-    let valPtrType = unsafe { LLVMTypeOf(valPtr) }
-    if (IsStructPtrType(valPtrType) || IsVArrayPtrType(valPtrType)) {
-        return valPtr
-    }
-    return irBuilder.CreateLoad(GetPointerElementType(valPtrType), valPtr, name: "ptr.read")
+    return irBuilder.CreateLoad(resultCGType.GetLLVMType(), addr, name: "ptr.read")
 }
 
 private func IsVArrayPtrType(llvmType: LLVMTypeRef): Bool {
@@ -748,7 +740,8 @@ private func CPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>,
     let rawValueType = unsafe { LLVMTypeOf(rawValue) }
     let pointerType = unsafe { LLVMTypeOf(pointerValue) }
     let pointerAddrSpace = unsafe { LLVMGetPointerAddressSpace(pointerType) }
-    let paramType = if (IsStructPtrType(rawValueType)) {
+    let isAggregatePtr = IsStructPtrType(rawValueType) || IsVArrayPtrType(rawValueType)
+    let paramType = if (isAggregatePtr) {
         unsafe { LLVMPointerType(GetPointerElementType(rawValueType), pointerAddrSpace) }
     } else {
         unsafe { LLVMPointerType(rawValueType, 0u32) }
@@ -758,14 +751,9 @@ private func CPointerWrite(irBuilder: IRBuilder2, args: ArrayList<Value>,
     let addr = irBuilder.CreateInBoundsGEP(GetPointerElementType(paramType), typedPtr, indices,
         name: "ptr.write.addr")
     InsertAsanInstrument(irBuilder, typeArgs, addr, "CJ_MCC_AsanWrite")
-    if (valueTy.IsStruct() || valueTy.IsUnit()) {
+    if (isAggregatePtr) {
         let elementType = GetPointerElementType(rawValueType)
-        let size = unsafe {
-            LLVMConstInt(LLVMInt64TypeInContext(irBuilder.GetLLVMContext().raw),
-                irBuilder.GetCGModule().GetTypeSize(elementType), 0)
-        }
-        let align = UInt32(GetTypeAlignment(irBuilder.GetCGModule(), valueTy))
-        irBuilder.CreateMemCpy(addr, align, rawValue, align, size)
+        irBuilder.CopyNativeAggregate(elementType, rawValue, addr)
     } else {
         irBuilder.CreateStore(rawValue, addr)
     }

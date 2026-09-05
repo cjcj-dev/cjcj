@@ -1,0 +1,4 @@
+module	function	rule	instruction	dest_as	src_as	length	dest_root	src_root	source_type
+std.collection	other	managed copy requires base	memcpy	1	0	24	gep	alloca	%record.Other*
+std.math	unrelatedNative	unrelated native aggregate	memcpy	0	0	32	alloca	argument	%record.UnrelatedNative*
+std.net	new	new regression	memmove	1	1	8	argument	argument	i8 addrspace(1)*

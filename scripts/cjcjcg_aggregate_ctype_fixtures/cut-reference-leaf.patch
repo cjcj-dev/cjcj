@@ -1,0 +1,20 @@
+diff --git a/packages/codegen/src/IRBuilder.cj b/packages/codegen/src/IRBuilder.cj
+--- a/packages/codegen/src/IRBuilder.cj
++++ b/packages/codegen/src/IRBuilder.cj
+@@ -1625,11 +1625,16 @@ public class IRBuilder2 <: Resource {
+                 let indices = ArrayList<LLVMValueRef>([GetInt32(0), GetInt32(Int64(index))])
+                 let sourceElement = CreateInBoundsGEP(
+                     aggregateType, source, indices, name: "typed.copy.src.element")
+                 let destinationElement = CreateInBoundsGEP(
+                     aggregateType, destination, indices, name: "typed.copy.dst.element")
+                 CopyAggregateTyped(elementType, sourceElement, destinationElement)
+                 index++
+             }
+             return
+         }
++        // Fault injection: disconnect managed-reference leaves only.
++        if (kind == LLVM_POINTER_TYPE_KIND &&
++            unsafe { LLVMGetPointerAddressSpace(aggregateType) } == 1u32) {
++            return
++        }
+         var leaf = LLVMNullValue()

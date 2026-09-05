@@ -1,0 +1,13 @@
+diff --git a/packages/codegen/src/IRBuilder.cj b/packages/codegen/src/IRBuilder.cj
+--- a/packages/codegen/src/IRBuilder.cj
++++ b/packages/codegen/src/IRBuilder.cj
+@@ -1002,7 +1002,8 @@ public class IRBuilder2 <: Resource {
+                     }
+                     CallGCReadAgg(aggregateType, ArrayList<LLVMValueRef>([tempVal, baseObject, addr, size]))
+                 } else {
+-                    CopyNoRefOrMemCpy(elementType, tempVal, addr, size)
++                    let cutAlign = cgMod.GetABITypeAlignment(elementType)
++                    CreateMemCpy(tempVal, cutAlign, addr, cutAlign, size)
+                 }
+                 return tempVal
+             }
