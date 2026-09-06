@@ -6267,14 +6267,10 @@ public class IRBuilder2 <: Resource {
                         _ = CreateArrayCopyIntrinsic(intrinsicName, arrayCopyToInfo.dstBP, dstArrI8Ptr,
                             arrayCopyToInfo.srcBP, srcArrI8Ptr, dataSize)
                     case _ =>
-                        // Keep array copies on the typed runtime path even for
-                        // non-reference elements.  A raw memmove between AS1
-                        // pointers has no base token and is rejected by the
-                        // provenance verifier; cj_array_copy_struct preserves
-                        // the same overlap-safe copy semantics with explicit
-                        // destination/source provenance.
-                        _ = CreateArrayCopyIntrinsic(ARRAY_COPY_STRUCT_INTRINSIC_NAME, arrayCopyToInfo.dstBP,
-                            dstArrI8Ptr, arrayCopyToInfo.srcBP, srcArrI8Ptr, arrayCopyToInfo.dataSize)
+                        // CJNativeIRBuilder.cpp:1348-1351: primitive and other no-ref elements
+                        // need no GC barrier, so retain overlap-safe raw-copy lowering.
+                        let align = cgMod.GetPrefTypeAlignment(elemCGType.GetLLVMType())
+                        _ = CreateMemMove(dstArrI8Ptr, align, srcArrI8Ptr, align, arrayCopyToInfo.dataSize)
                 }
         }
     }
