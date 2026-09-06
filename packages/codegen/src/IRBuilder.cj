@@ -3599,6 +3599,13 @@ public class IRBuilder2 <: Resource {
 
     public func CopyNoRefOrMemCpy(aggregateType: LLVMTypeRef, dest: LLVMValueRef, source: LLVMValueRef,
         size: LLVMValueRef): LLVMValueRef {
+        // The source and destination operands have already been emitted by every
+        // caller before reaching this helper. A zero-layout no-reference
+        // aggregate therefore has no bytes to transfer, while skipping only the
+        // copy here preserves any operand-evaluation side effects.
+        if (!IsTypeContainsRef(aggregateType) && cgMod.GetTypeSize(aggregateType) == 0u64) {
+            return LLVMNullValue()
+        }
         let kind = unsafe { LLVMGetTypeKind(aggregateType) }
         let copyType = if (kind == LLVM_ARRAY_TYPE_KIND) {
             // copy.no.ref.struct requires a named struct for its verifier-visible
