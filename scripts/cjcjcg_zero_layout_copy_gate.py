@@ -16,10 +16,11 @@ REJECTION = "llvm.cj.copy.no.ref.struct size must be a nonzero constant"
 
 def compile_fixture(compiler: pathlib.Path, out: pathlib.Path, name: str) -> tuple[int, str, int | None, str]:
     case = out / name
-    case.mkdir(parents=True, exist_ok=True)
+    temps = case / "temps"
+    temps.mkdir(parents=True, exist_ok=True)
     executable = case / name
     command = [
-        str(compiler), "-O2", "--dump-ir", "--dump-to-screen", "--save-temps", str(case / "temps"),
+        str(compiler), "-O2", "--dump-ir", "--dump-to-screen", "--save-temps", str(temps),
         "-o", str(executable), str(FIXTURES / f"{name}.cj"),
     ]
     compiled = subprocess.run(command, cwd=ROOT, text=True, stdout=subprocess.PIPE,
