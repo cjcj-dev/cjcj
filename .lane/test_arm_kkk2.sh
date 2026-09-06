@@ -72,20 +72,11 @@ for name in primitive noref_struct ref_elements zero_layout; do
   esac
   printf '%s\n' "$expected" > "$case_dir/expected.txt"
 
-  if test "$arm" = broken && test "$name" = primitive; then
-    if test "$run_rc" -eq 0 || ! /usr/bin/grep -Fq 'has wrong component type' "$case_dir/run.log"; then
-      overall=1
-      printf '%s\n' 'FAIL expected exact primitive struct-array contract rejection' > "$case_dir/judgement.txt"
-    else
-      printf '%s\n' 'PASS exact primitive struct-array contract rejection' > "$case_dir/judgement.txt"
-    fi
+  if test "$run_rc" -ne 0 || ! /usr/bin/grep -Fqx "$expected" "$case_dir/run.log"; then
+    overall=1
+    printf '%s\n' "FAIL expected rc=0 stdout=$expected" > "$case_dir/judgement.txt"
   else
-    if test "$run_rc" -ne 0 || ! /usr/bin/grep -Fqx "$expected" "$case_dir/run.log"; then
-      overall=1
-      printf '%s\n' "FAIL expected rc=0 stdout=$expected" > "$case_dir/judgement.txt"
-    else
-      printf '%s\n' 'PASS runtime behavior' > "$case_dir/judgement.txt"
-    fi
+    printf '%s\n' 'PASS runtime behavior' > "$case_dir/judgement.txt"
   fi
 done
 

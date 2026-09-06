@@ -36,7 +36,7 @@ def target_copy_lines(path: pathlib.Path) -> list[tuple[str, str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--arm", choices=("candidate", "broken", "restored"), required=True)
+    parser.add_argument("--arm", choices=("candidate", "broken", "cut", "restored"), required=True)
     parser.add_argument("--dir", type=pathlib.Path, required=True)
     args = parser.parse_args()
 
