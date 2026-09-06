@@ -12,5 +12,6 @@ let digits100: Array<Byte> = [
     b'9',b'0',b'9',b'1',b'9',b'2',b'9',b'3',b'9',b'4',b'9',b'5',b'9',b'6',b'9',b'7',b'9',b'8',b'9',b'9']
 
 main() {
-    println("PRIMITIVE_OK ${digits100.size}:${UInt64(digits100[0])}:${UInt64(digits100[199])}")
+    let copied = digits100.clone()
+    println("PRIMITIVE_OK ${copied.size}:${UInt64(copied[0])}:${UInt64(copied[199])}")
 }
