@@ -19,6 +19,7 @@ date -Ins > "$evidence/start.txt"
 uptime > "$evidence/uptime-before.txt"
 printf '%s\n' "$core_domain" > "$evidence/core-domain.txt"
 printf '%s\n' "$arm" > "$evidence/arm.txt"
+sha256sum "$0" > "$evidence/test-recipe.sha256"
 sha256sum "$compiler" > "$evidence/compiler.sha256"
 stat -c '%y %n' "$compiler" > "$evidence/compiler.stat"
 sha256sum "$test_root"/*.cj "$test_root/check_array_copy_ir.py" > "$evidence/test-inputs.sha256"
@@ -64,7 +65,7 @@ for name in primitive noref_struct ref_elements zero_layout; do
 
   expected=''
   case "$name" in
-    primitive) expected='PRIMITIVE_OK 100' ;;
+    primitive) expected='PRIMITIVE_OK 200:48:57' ;;
     noref_struct) expected='NOREF_STRUCT_OK 10' ;;
     ref_elements) expected='REF_ELEMENTS_OK 15:ab' ;;
     zero_layout) expected='ZERO_LAYOUT_OK 2' ;;

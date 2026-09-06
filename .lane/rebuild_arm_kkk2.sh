@@ -20,6 +20,8 @@ git -C "$source_tree" rev-parse HEAD > "$evidence/source-head.txt"
 git -C "$source_tree" status --short > "$evidence/source-status-before.txt"
 git -C "$source_tree" diff -- packages/codegen/src/IRBuilder.cj > "$evidence/product.diff"
 sha256sum "$source_tree/packages/codegen/src/IRBuilder.cj" > "$evidence/product-source.sha256"
+stat -c '%y %n' "$source_tree/packages/codegen/src/IRBuilder.cj" > "$evidence/product-source.stat"
+sha256sum "$0" > "$evidence/build-recipe.sha256"
 sha256sum "$stage_sdk/bin/cjc" \
   "$stage_sdk/lib/linux_x86_64_cjnative/libcangjie-ast-support.a" \
   "$source_tree/runtime_shim/cjselfhost_llvmshim.o" \

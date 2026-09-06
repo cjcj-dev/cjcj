@@ -1,10 +1,16 @@
-func primitiveCopy(): UInt64 {
-    let src = [10u8, 20u8, 30u8, 40u8]
-    let dst = [0u8, 0u8, 0u8, 0u8]
-    src.copyTo(dst, 0, 0, src.size)
-    return UInt64(dst[0]) + UInt64(dst[1]) + UInt64(dst[2]) + UInt64(dst[3])
-}
+// Mirrors std.core/string_builder.cj:16: a package-level 200-byte RawArray<UInt8>.
+let digits100: Array<Byte> = [
+    b'0',b'0',b'0',b'1',b'0',b'2',b'0',b'3',b'0',b'4',b'0',b'5',b'0',b'6',b'0',b'7',b'0',b'8',b'0',b'9',
+    b'1',b'0',b'1',b'1',b'1',b'2',b'1',b'3',b'1',b'4',b'1',b'5',b'1',b'6',b'1',b'7',b'1',b'8',b'1',b'9',
+    b'2',b'0',b'2',b'1',b'2',b'2',b'2',b'3',b'2',b'4',b'2',b'5',b'2',b'6',b'2',b'7',b'2',b'8',b'2',b'9',
+    b'3',b'0',b'3',b'1',b'3',b'2',b'3',b'3',b'3',b'4',b'3',b'5',b'3',b'6',b'3',b'7',b'3',b'8',b'3',b'9',
+    b'4',b'0',b'4',b'1',b'4',b'2',b'4',b'3',b'4',b'4',b'4',b'5',b'4',b'6',b'4',b'7',b'4',b'8',b'4',b'9',
+    b'5',b'0',b'5',b'1',b'5',b'2',b'5',b'3',b'5',b'4',b'5',b'5',b'5',b'6',b'5',b'7',b'5',b'8',b'5',b'9',
+    b'6',b'0',b'6',b'1',b'6',b'2',b'6',b'3',b'6',b'4',b'6',b'5',b'6',b'6',b'6',b'7',b'6',b'8',b'6',b'9',
+    b'7',b'0',b'7',b'1',b'7',b'2',b'7',b'3',b'7',b'4',b'7',b'5',b'7',b'6',b'7',b'7',b'7',b'8',b'7',b'9',
+    b'8',b'0',b'8',b'1',b'8',b'2',b'8',b'3',b'8',b'4',b'8',b'5',b'8',b'6',b'8',b'7',b'8',b'8',b'8',b'9',
+    b'9',b'0',b'9',b'1',b'9',b'2',b'9',b'3',b'9',b'4',b'9',b'5',b'9',b'6',b'9',b'7',b'9',b'8',b'9',b'9']
 
 main() {
-    println("PRIMITIVE_OK ${primitiveCopy()}")
+    println("PRIMITIVE_OK ${digits100.size}:${UInt64(digits100[0])}:${UInt64(digits100[199])}")
 }
