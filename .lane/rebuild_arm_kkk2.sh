@@ -3,6 +3,7 @@ set -u
 set -o pipefail
 
 arm=${1:?arm required}
+core_domain=${CORE_DOMAIN:?set CORE_DOMAIN to a current cjops windows result}
 lane_root=/root/impl_cjcj_primitive_array_copy_dispatch
 source_tree="$lane_root/candidate-src"
 stage_sdk="$lane_root/work/sdk-stage0"
@@ -14,7 +15,7 @@ mkdir -p "$evidence"
 date -Ins > "$evidence/start.txt"
 uptime > "$evidence/uptime-before.txt"
 df -h /root > "$evidence/df-before.txt"
-printf '%s\n' '160-175' > "$evidence/core-domain.txt"
+printf '%s\n' "$core_domain" > "$evidence/core-domain.txt"
 git -C "$source_tree" rev-parse HEAD > "$evidence/source-head.txt"
 git -C "$source_tree" status --short > "$evidence/source-status-before.txt"
 git -C "$source_tree" diff -- packages/codegen/src/IRBuilder.cj > "$evidence/product.diff"
@@ -31,7 +32,7 @@ library_path="$stage_sdk/runtime/lib/linux_x86_64_cjnative:$stage_sdk/lib/linux_
 env -i HOME=/root USER=root TMPDIR="$lane_tmp" CANGJIE_HOME="$stage_sdk" \
   PATH="$stage_sdk/bin:$stage_sdk/tools/bin:$stage_sdk/third_party/llvm/bin:/usr/bin:/bin" \
   LD_LIBRARY_PATH="$library_path" cjHeapSize=24GB \
-  taskset -c 160-175 bash -c 'cd "$1" && exec cjpm build' bash "$source_tree" \
+  taskset -c "$core_domain" bash -c 'cd "$1" && exec cjpm build' bash "$source_tree" \
   > "$evidence/build.log" 2>&1
 build_rc=$?
 printf '%s\n' "$build_rc" > "$evidence/build.rc"

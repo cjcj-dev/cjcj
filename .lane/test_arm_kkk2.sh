@@ -3,6 +3,7 @@ set -u
 set -o pipefail
 
 arm=${1:?arm required}
+core_domain=${CORE_DOMAIN:?set CORE_DOMAIN to a current cjops windows result}
 lane_root=/root/impl_cjcj_primitive_array_copy_dispatch
 compiler="$lane_root/work/cjcj-$arm"
 stage_sdk="$lane_root/work/sdk-stage0"
@@ -16,7 +17,7 @@ rm -rf "$evidence"
 mkdir -p "$evidence"
 date -Ins > "$evidence/start.txt"
 uptime > "$evidence/uptime-before.txt"
-printf '%s\n' '160-175' > "$evidence/core-domain.txt"
+printf '%s\n' "$core_domain" > "$evidence/core-domain.txt"
 printf '%s\n' "$arm" > "$evidence/arm.txt"
 sha256sum "$compiler" > "$evidence/compiler.sha256"
 stat -c '%y %n' "$compiler" > "$evidence/compiler.stat"
@@ -40,8 +41,9 @@ for name in primitive noref_struct ref_elements zero_layout; do
   env -i HOME=/root USER=root TMPDIR="$lane_root/tmp" CANGJIE_HOME="$case_sdk" \
     PATH="$case_sdk/bin:$case_sdk/tools/bin:$case_sdk/third_party/llvm/bin:/usr/bin:/bin" \
     LD_LIBRARY_PATH="$compiler_libs" cjHeapSize=4GB \
-    taskset -c 160-175 "$compiler" -O2 -g --dump-ir --dump-to-screen --set-runtime-rpath \
-      -o "$case_dir/$name" "$test_root/$name.cj" > "$case_dir/compile.log" 2>&1
+    bash -c 'ulimit -c 0; exec taskset -c "$1" "$2" -O2 -g --dump-ir --dump-to-screen --set-runtime-rpath -o "$3" "$4"' \
+      bash "$core_domain" "$compiler" "$case_dir/$name" "$test_root/$name.cj" \
+      > "$case_dir/compile.log" 2>&1
   compile_rc=$?
   printf '%s\n' "$compile_rc" > "$case_dir/compile.rc"
   if test "$compile_rc" -ne 0; then
@@ -55,7 +57,7 @@ for name in primitive noref_struct ref_elements zero_layout; do
   env LD_LIBRARY_PATH="$run_libs" ldd "$case_dir/$name" > "$case_dir/ldd.txt" 2>&1
   (
     ulimit -c 0
-    env LD_LIBRARY_PATH="$run_libs" taskset -c 160-175 "$case_dir/$name"
+    env LD_LIBRARY_PATH="$run_libs" taskset -c "$core_domain" "$case_dir/$name"
   ) > "$case_dir/run.log" 2>&1
   run_rc=$?
   printf '%s\n' "$run_rc" > "$case_dir/run.rc"
@@ -70,11 +72,11 @@ for name in primitive noref_struct ref_elements zero_layout; do
   printf '%s\n' "$expected" > "$case_dir/expected.txt"
 
   if test "$arm" = broken && test "$name" = primitive; then
-    if test "$run_rc" -eq 0; then
+    if test "$run_rc" -eq 0 || ! /usr/bin/grep -Fq 'has wrong component type' "$case_dir/run.log"; then
       overall=1
-      printf '%s\n' 'FAIL expected primitive runtime rejection' > "$case_dir/judgement.txt"
+      printf '%s\n' 'FAIL expected exact primitive struct-array contract rejection' > "$case_dir/judgement.txt"
     else
-      printf '%s\n' 'PASS expected primitive runtime rejection' > "$case_dir/judgement.txt"
+      printf '%s\n' 'PASS exact primitive struct-array contract rejection' > "$case_dir/judgement.txt"
     fi
   else
     if test "$run_rc" -ne 0 || ! /usr/bin/grep -Fqx "$expected" "$case_dir/run.log"; then

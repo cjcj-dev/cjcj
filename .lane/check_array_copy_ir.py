@@ -14,6 +14,12 @@ CALL_RE = re.compile(
     r"\b(?:call|invoke)\b[^\n]*@"
     r"(llvm\.(?:cj\.array\.copy\.[A-Za-z0-9_.]+|memmove|memcpy)\.[^\s(]+)"
 )
+TARGET_ZERO_COPY_RE = re.compile(
+    r"^\s*(?:call|invoke)\b[^\n]*@"
+    r"(llvm\.(?:cj\.array\.copy\.[A-Za-z0-9_.]+|memmove\.p1)[^\s(]*)"
+    r"\((.*)\)",
+    re.MULTILINE,
+)
 
 
 def calls(path: pathlib.Path) -> list[str]:
@@ -22,6 +28,10 @@ def calls(path: pathlib.Path) -> list[str]:
 
 def has(items: list[str], needle: str) -> bool:
     return any(needle in item for item in items)
+
+
+def zero_copy_lines(path: pathlib.Path) -> list[tuple[str, str]]:
+    return TARGET_ZERO_COPY_RE.findall(path.read_text(errors="replace"))
 
 
 def main() -> int:
@@ -45,9 +55,17 @@ def main() -> int:
     if not has(observed["ref_elements"], "llvm.cj.array.copy.struct"):
         failures.append(f"ref_elements: missing copy.struct; calls={observed['ref_elements']}")
 
+    # The sibling zero-layout change may remove the call entirely.  Until composed,
+    # any target copy still emitted by this isolated change must remain a zero-byte no-op.
+    zero_targets = zero_copy_lines(args.dir / "zero_layout" / "compile.log")
+    for name, arguments in zero_targets:
+        if "i64 0" not in arguments:
+            failures.append(f"zero_layout: nonzero target copy {name}({arguments})")
+
     result = {
         "arm": args.arm,
         "calls": observed,
+        "zero_target_calls": zero_targets,
         "failures": failures,
     }
     (args.dir / "ir-results.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
