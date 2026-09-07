@@ -18,7 +18,7 @@ export async function resolveRuntimeSource(env = process.env) {
     throw new Error('CJCJ_RUNTIME_REF_OVERRIDE is allowed only by an explicit dry-run/test authorization');
   }
   const runtimeRef = overrideRef || pins.RUNTIME_REF;
-  if (!/^[0-9a-f]{40}$/.test(runtimeRef)) {
+  if (!/^[0-9a-f]{40}$/i.test(runtimeRef)) {
     throw new Error(`runtime ref must be a full 40-character commit SHA: ${runtimeRef}`);
   }
   const requestedRef = env.RUNTIME_REF || '';
