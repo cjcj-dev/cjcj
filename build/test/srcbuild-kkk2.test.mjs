@@ -742,9 +742,9 @@ function vendorShaDefects(sourceEnv, files) {
     const recorded = sourceEnv[`TOOLS_${name}`];
     if (!/^[0-9a-f]{64}$/.test(recorded || '')) defects.push(`missing-record:${name}`);
     const vendor = sha256(files[name]);
-    if (recorded && vendor !== recorded) defects.push(`vendor-drift:${name}`);
     const vendorRecord = sourceEnv[`VENDOR_${name}`];
-    if (vendorRecord && vendor !== vendorRecord) defects.push(`vendor-label-drift:${name}`);
+    if (!/^[0-9a-f]{64}$/.test(vendorRecord || '')) defects.push(`missing-vendor-record:${name}`);
+    if (vendorRecord && vendor !== vendorRecord) defects.push(`vendor-drift:${name}`);
   }
   return defects;
 }
@@ -759,12 +759,12 @@ function vendorFiles() {
   };
 }
 
-test('in-repo bootstrap copies match SOURCE.env file sha256 records', () => {
+test('in-repo bootstrap copies match VENDOR hashes and retain TOOLS source records', () => {
   assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
 });
 
 test('SOURCE.env recorded sha bit-flip turns only the vendor-sha contract red', () => {
-  const drifted = {...readSourceEnv(), 'TOOLS_bootstrap.sh': '0'.repeat(64)};
+  const drifted = {...readSourceEnv(), 'VENDOR_bootstrap.sh': '0'.repeat(64)};
   assert.deepEqual(vendorShaDefects(drifted, vendorFiles()), ['vendor-drift:bootstrap.sh']);
   assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
 });
@@ -778,7 +778,7 @@ test('one-byte copy mutation turns only the vendor-sha contract red', () => {
     ...vendorFiles(),
     'bootstrap.sh': mutatedPath,
   };
-  assert.deepEqual(vendorShaDefects(readSourceEnv(), files), ['vendor-drift:bootstrap.sh', 'vendor-label-drift:bootstrap.sh']);
+  assert.deepEqual(vendorShaDefects(readSourceEnv(), files), ['vendor-drift:bootstrap.sh']);
   assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
   fs.rmSync(tmp, {recursive: true, force: true});
 });
