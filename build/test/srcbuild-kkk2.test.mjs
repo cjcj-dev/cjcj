@@ -797,6 +797,9 @@ test('GHA absolute campaign bootstrap path turns only the GHA contract red', () 
 
 
 test('bootstrap entries bind the vendored SDK builder instead of a campaign path', () => {
+  const bootstrap = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'), 'utf8');
+  assert.ok(bootstrap.includes('SDK_BUILD="${SDK_BUILD:-$(dirname "${BASH_SOURCE[0]}")/sdk_build.sh}"'));
+  assert.ok(!bootstrap.includes('/root/cj_build/tools/sdk_build.sh'));
   assert.match(extractFn(script, 'run_bootstrap_stage'), /SDK_BUILD="\$REPO_ROOT\/ci\/bootstrap\/sdk_build.sh" "\$\{cmd\[@\]\}"/);
   const gha = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
   assert.match(gha, /export SDK_BUILD="\$root\/ci\/bootstrap\/sdk_build.sh"/);
