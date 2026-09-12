@@ -453,21 +453,22 @@ test('fixed tuple build stops when an exact checkout fails', t => {
   assert.equal(fs.existsSync(sparseMarker), false, 'later checkout ran after the first failure');
 });
 
-test('stage3 dry-run requires the stage2 product directory', t => {
+test('stage3 dry-run requires the bootstrap stage2 compiler', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-stage3-contract-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  const stage2ProductDir = path.join(root, 'target', 'release', 'bin');
+  const stage2ProductDir = path.join(root, 'bootstrap-work');
   const invoke = `${shellFunction('validate_stage_step_contracts')}\n`
     + 'FROM_STEP=33 THROUGH_STEP=33 STAGE1_STEP_SCRIPT=$1 STAGE2_STEP_SCRIPT=$1 '
-    + 'STAGE3_STEP_SCRIPT=$1 STAGE2_PRODUCT_DIR=$2\n'
+    + 'STAGE3_STEP_SCRIPT=$1 CJCJ_BOOTSTRAP_WORK=$2\n'
     + 'validate_stage_step_contracts\n';
 
   const missing = runBash(invoke, [scriptPath, stage2ProductDir]);
   assert.equal(missing.status, 1, missing.stderr);
-  assert.match(missing.stderr, /dry-run stage3 input missing: stage2 product directory/);
+  assert.match(missing.stderr, /dry-run stage3 input missing: bootstrap stage2 compiler/);
   console.log(`STAGE3_INPUT_ARM directory=missing rc=${missing.status}`);
 
   fs.mkdirSync(stage2ProductDir, {recursive: true});
+  fs.writeFileSync(path.join(stage2ProductDir, 'cjcj-stage2'), 'compiler');
   const present = runBash(invoke, [scriptPath, stage2ProductDir]);
   assert.equal(present.status, 0, present.stderr);
   console.log(`STAGE3_INPUT_ARM directory=present rc=${present.status}`);
