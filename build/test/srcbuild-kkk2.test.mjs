@@ -822,3 +822,33 @@ test('bootstrap source isolation excludes its nested srcbuild state', t => {
   assert.equal(fs.existsSync(path.join(destination, '.srcbuild')), false);
   assert.equal(fs.readFileSync(path.join(root, '.srcbuild', 'state'), 'utf8'), 'build state');
 });
+
+test('stage1 compiler consumer sees the completed target std', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-std-before-link-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  fs.mkdirSync(path.join(root, 'stdlib-stage1'));
+  fs.writeFileSync(path.join(root, 'stdlib-stage1', 'std-id'), 'host');
+  const bootstrap = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'), 'utf8');
+  const invoke = `${extractFn(bootstrap, 'stage1')}\n` + `
+WORK=$1 DRY=1 COLOUR_TUPLE=tuple CRT=runtime HOST_LLVM_SO=llvm COLOUR_LLVM_SHA=sha STAGE1_HEAP=20GB
+record() { :; }
+assert_llvm() { :; }
+sdk_ld_path() { :; }
+assemble_stage1_sdk() { mkdir -p "$1"; cp "$3/std-id" "$1/std-id"; }
+stdlib_build() { mkdir -p "$4"; printf target > "$4/std-id"; }
+isolate_cjcj_src() { mkdir -p "$1"; }
+shim_build() { :; }
+cjpm_build() {
+  value=$(cat "$1/std-id")
+  [[ $value == target ]] || { echo "compiler consumed $value std" >&2; return 17; }
+  echo COMPILER_CONSUMED_TARGET_STD
+}
+resolve_cjpm_product() { printf '%s/compiled\\n' "$WORK"; }
+install_stage_compiler() { :; }
+assert_version() { :; }
+stage1
+`;
+  const result = runBash(invoke, [root]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /COMPILER_CONSUMED_TARGET_STD/);
+});
