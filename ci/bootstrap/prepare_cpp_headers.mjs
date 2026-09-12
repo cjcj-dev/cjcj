@@ -52,7 +52,7 @@ export async function prepareCppHeaders(cppSrc) {
     console.log(`SHIM_HEADERS_STEP wall=${(Date.now() - started) / 1000} command=${JSON.stringify(command)}`);
   }
   // Independent generated-header producers use separate build directories.
-  await Promise.all([
+  const results = await Promise.allSettled([
     (async () => {
       await execute(['cmake', '-G', 'Ninja', '-S', `${llvm}/llvm`, '-B', llvmBuild,
         '-DCMAKE_BUILD_TYPE=Release', '-DLLVM_ENABLE_PROJECTS=', '-DLLVM_TARGETS_TO_BUILD=X86',
@@ -73,6 +73,9 @@ export async function prepareCppHeaders(cppSrc) {
         path.join(cpp, 'schema/ModuleFormat.fbs')]);
     })(),
   ]);
+  for (const result of results) {
+    if (result.status === 'rejected') throw result.reason;
+  }
   const roots = ['third_party/llvm-project/llvm/include',
     'build/build/third_party/llvm/include', 'build/build/include', 'build/build/schema'];
   const manifest = {
