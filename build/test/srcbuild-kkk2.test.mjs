@@ -794,3 +794,10 @@ test('GHA absolute campaign bootstrap path turns only the GHA contract red', () 
   assert.deepEqual(ghaBootstrapDefects(mutated, ghaRun), ['gha-stage0-not-inrepo', 'gha-campaign-abs']);
   assert.deepEqual(ghaBootstrapDefects(yml, ghaRun), []);
 });
+
+
+test('bootstrap entries bind the vendored SDK builder instead of a campaign path', () => {
+  assert.match(extractFn(script, 'run_bootstrap_stage'), /SDK_BUILD="\$REPO_ROOT\/ci\/bootstrap\/sdk_build.sh" "\$\{cmd\[@\]\}"/);
+  const gha = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
+  assert.match(gha, /export SDK_BUILD="\$root\/ci\/bootstrap\/sdk_build.sh"/);
+});

@@ -1158,7 +1158,7 @@ run_bootstrap_stage() {
     local -a cmd
     mkdir -p "$STATE_ROOT/bootstrap-work"
     eval "cmd=( $(bootstrap_argv "$stage") )"
-    "${cmd[@]}"
+    SDK_BUILD="$REPO_ROOT/ci/bootstrap/sdk_build.sh" "${cmd[@]}"
 }
 
 step_31() {
