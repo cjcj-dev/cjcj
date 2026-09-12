@@ -443,11 +443,11 @@ isolate_cjcj_src() {
   local dest="$1"
   echo "ISOLATE cjcj-src from=$SRC dest=$dest (user tree untouched)"
   if [ "$DRY" -eq 1 ]; then
-    echo "CMD rsync -a --exclude target $(printf '%q' "$SRC/") $(printf '%q' "$dest/")"
+    echo "CMD rsync -a --exclude target --exclude /.srcbuild/ $(printf '%q' "$SRC/") $(printf '%q' "$dest/")"
     return 0
   fi
   mkdir -p "$dest"
-  cmd "rsync -a --exclude target $(printf '%q' "$SRC/") $(printf '%q' "$dest/")"
+  cmd "rsync -a --exclude target --exclude /.srcbuild/ $(printf '%q' "$SRC/") $(printf '%q' "$dest/")"
 }
 
 rewrite_compile_option_o1() {

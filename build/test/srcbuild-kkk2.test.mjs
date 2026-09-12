@@ -801,3 +801,21 @@ test('bootstrap entries bind the vendored SDK builder instead of a campaign path
   const gha = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
   assert.match(gha, /export SDK_BUILD="\$root\/ci\/bootstrap\/sdk_build.sh"/);
 });
+
+
+test('bootstrap source isolation excludes its nested srcbuild state', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-nested-work-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  fs.writeFileSync(path.join(root, 'cjpm.toml'), 'source');
+  fs.mkdirSync(path.join(root, '.srcbuild'), {recursive: true});
+  fs.writeFileSync(path.join(root, '.srcbuild', 'state'), 'build state');
+  const destination = path.join(root, '.srcbuild', 'copy');
+  const bootstrap = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'), 'utf8');
+  const invoke = `${extractFn(bootstrap, 'isolate_cjcj_src')}\n`
+    + 'cmd() { eval "$*"; }\nSRC=$1 DRY=0\nisolate_cjcj_src "$2"\n';
+  const result = runBash(invoke, [root, destination]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(path.join(destination, 'cjpm.toml'), 'utf8'), 'source');
+  assert.equal(fs.existsSync(path.join(destination, '.srcbuild')), false);
+  assert.equal(fs.readFileSync(path.join(root, '.srcbuild', 'state'), 'utf8'), 'build state');
+});
