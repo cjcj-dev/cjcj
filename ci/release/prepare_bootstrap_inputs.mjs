@@ -3,6 +3,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
 
 function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -82,6 +83,12 @@ const cjcjSha = process.env.CJCJ_BOOTSTRAP_CJCJ_SHA
   || process.env.GITHUB_SHA
   || '';
 if (!/^[0-9a-f]{40}$/.test(cjcjSha)) throw new Error('cjcj sha missing (GITHUB_SHA / CJCJ_BOOTSTRAP_CJCJ_SHA)');
+
+// Explicit external trees remain caller-owned; default fetched sources are
+// prepared here before gha_run.sh can enter stage0.
+if (!process.env.CJCJ_BOOTSTRAP_CPP_SRC && !process.env.CANGJIE_CPP_SRC) {
+  await prepareCppHeaders(cppSrc);
+}
 
 const exported = {
   CJCJ_BOOTSTRAP_BASE: path.resolve(base),

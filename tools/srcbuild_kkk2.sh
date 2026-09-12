@@ -1157,6 +1157,9 @@ run_bootstrap_stage() {
     local stage=$1
     local -a cmd
     mkdir -p "$STATE_ROOT/bootstrap-work"
+    if [[ $stage == stage0 && -z ${CJCJ_BOOTSTRAP_CPP_SRC:-} && -z ${CANGJIE_CPP_SRC:-} ]]; then
+        node "$REPO_ROOT/ci/bootstrap/prepare_cpp_headers.mjs" "$CANGJIE_WORKSPACE/cangjie_compiler" || return 1
+    fi
     eval "cmd=( $(bootstrap_argv "$stage") )"
     "${cmd[@]}"
 }
