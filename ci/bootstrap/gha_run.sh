@@ -13,6 +13,7 @@ root=${GITHUB_WORKSPACE:?}
 : "${CJCJ_BOOTSTRAP_HOST_RT:?}"
 : "${CJCJ_BOOTSTRAP_CPP_SRC:?}"
 : "${CJCJ_BOOTSTRAP_CJCJ_SHA:?}"
+export SDK_BUILD="$root/ci/bootstrap/sdk_build.sh"
 exec bash "$root/ci/bootstrap/bootstrap.sh" \
   --work "${CANGJIE_WORKSPACE:?}/bootstrap-work" \
   --src "$root" \

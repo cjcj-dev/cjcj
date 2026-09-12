@@ -409,7 +409,7 @@ readonly STAGE1_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"
 readonly STAGE2_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage2.mjs"
 readonly STAGE3_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage3.mjs"
 readonly BOOTSTRAP_SH="${CJCJ_BOOTSTRAP_SH:-$REPO_ROOT/ci/bootstrap/bootstrap.sh}"
-readonly STAGE2_PRODUCT_DIR="$REPO_ROOT/target/release/bin"
+export CJCJ_BOOTSTRAP_WORK="$STATE_ROOT/bootstrap-work"
 readonly BUILD_TYPE=relwithdebinfo
 readonly VERIFIER_DIAGNOSTIC_MARKER="$CANGJIE_WORKSPACE/.cjcj-verifier-diagnostic.json"
 readonly VERIFIER_INVENTORY="${VERIFIER_REPORT:+${VERIFIER_REPORT}.artifacts.tsv}"
@@ -1135,7 +1135,7 @@ bootstrap_argv() {
     [[ $stage == stage0 || $stage == stage1 ]] || return 1
     printf '%q ' \
         "$BOOTSTRAP_SH" \
-        --work "$STATE_ROOT/bootstrap-work" \
+        --work "$CJCJ_BOOTSTRAP_WORK" \
         --src "$REPO_ROOT" \
         --cjcj-sha "$BOOTSTRAP_CJCJ_SHA" \
         --stdsrc "$BOOTSTRAP_STDSRC" \
@@ -1158,7 +1158,7 @@ run_bootstrap_stage() {
     local -a cmd
     mkdir -p "$STATE_ROOT/bootstrap-work"
     eval "cmd=( $(bootstrap_argv "$stage") )"
-    "${cmd[@]}"
+    SDK_BUILD="$REPO_ROOT/ci/bootstrap/sdk_build.sh" "${cmd[@]}"
 }
 
 step_31() {
@@ -1261,8 +1261,8 @@ validate_stage_step_contracts() {
             echo "dry-run referenced step script is missing: $STAGE3_STEP_SCRIPT" >&2
             return 1
         }
-        [[ -d $STAGE2_PRODUCT_DIR ]] || {
-            echo "dry-run stage3 input missing: stage2 product directory $STAGE2_PRODUCT_DIR" >&2
+        [[ -f $CJCJ_BOOTSTRAP_WORK/cjcj-stage2 ]] || {
+            echo "dry-run stage3 input missing: bootstrap stage2 compiler $CJCJ_BOOTSTRAP_WORK/cjcj-stage2" >&2
             return 1
         }
     fi

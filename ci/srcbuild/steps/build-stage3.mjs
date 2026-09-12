@@ -7,6 +7,7 @@ import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
+import {prepareBootstrapHandoff} from '../lib/bootstrap-handoff.mjs';
 import {assertWriteBarriers} from '../lib/write-barrier.mjs';
 
 $.stdio = 'inherit';
@@ -39,7 +40,8 @@ if (allowIdenticalStdValue && allowIdenticalStdValue !== '1') {
 
 const sdk = path.join(workspace, 'software', 'cangjie');
 const stdlibRoot = path.join(workspace, 'cangjie_runtime', 'stdlib');
-const runtimeTarget = path.join(workspace, 'cangjie_runtime', 'runtime', 'target');
+const bootstrapWork = path.resolve(requiredEnv('CJCJ_BOOTSTRAP_WORK'));
+const runtimeTarget = path.join(sdk, 'runtime', 'lib', target.spec.runtimeTuple);
 const {runtimeTuple: tuple} = target.spec;
 const finalStd = dryRun
   ? path.resolve(requiredEnv('CJCJ_STAGE3_DRY_RUN_FINAL_STD'))
@@ -68,7 +70,7 @@ async function assertStage2Compiler(stageEnv, stage2Sha) {
   const command = await $({cwd: githubWorkspace, env: stageEnv, stdio: 'pipe'})`command -v cjc`;
   const resolvedCommand = await fs.realpath(command.stdout.trim());
   const installedSha = await sha256(installed);
-  if (resolvedLink !== resolvedInstalled || resolvedCommand !== resolvedInstalled || installedSha !== stage2Sha) {
+  if (resolvedCommand !== resolvedLink || installedSha !== stage2Sha || await sha256(linked) !== compilerEntrySha) {
     throw new Error(`stage2 compiler assertion failed: link=${resolvedLink}, command=${resolvedCommand}, expected=${resolvedInstalled}, sha=${installedSha}`);
   }
   console.log(`STAGE3_COMPILER_ASSERT_PASS path=${resolvedInstalled} sha256=${installedSha}`);
@@ -170,19 +172,18 @@ async function assertStdBarriers(coreLib) {
   console.log(`STAGE3_BARRIER_ASSERT_PASS checked=${checked}`);
 }
 
-if (!await exists(sdk, 'dir')) throw new Error(`source SDK missing: ${sdk}`);
 if (!await exists(stdlibRoot, 'dir')) throw new Error(`runtime stdlib source missing: ${stdlibRoot}`);
 
-const stage2Product = await findProductBinary('stage2');
+const {compiler: stage2Product, targetLd} = await prepareBootstrapHandoff({
+  work: bootstrapWork, sdk, source: githubWorkspace, tuple,
+});
 const stage2Sha = await sha256(stage2Product);
-await fs.mkdir(path.join(sdk, 'bin'), {recursive: true});
-await $`install -m0755 ${stage2Product} ${path.join(sdk, 'bin', 'cjcj-stage2')}`;
-await fs.rm(path.join(sdk, 'bin', 'cjc'), {force: true});
-await fs.symlink('cjcj-stage2', path.join(sdk, 'bin', 'cjc'));
+const compilerEntrySha = await sha256(path.join(sdk, 'bin', 'cjc'));
 
 const stageEnv = {
   ...process.env,
   CANGJIE_HOME: sdk,
+  [target.spec.loaderEnv]: targetLd,
   PATH: `${path.join(sdk, 'bin')}:${path.join(sdk, 'tools', 'bin')}:${process.env.PATH ?? ''}`,
 };
 await assertStage2Compiler(stageEnv, stage2Sha);
@@ -209,12 +210,14 @@ if (dryRun) {
 } else {
   await fs.rm(finalStd, {recursive: true, force: true});
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py clean`;
+  await fs.rm(path.join(stdlibRoot, 'build', 'build'), {recursive: true, force: true});
   await assertStage2Compiler(stageEnv, stage2Sha);
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}`;
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
   await writeStdProvenance({
     sourceDir: stdlibRoot,
     installPrefix: finalStd,
+    buildSdk: sdk,
     compiler: path.join(sdk, 'bin', 'cjcj-stage2'),
   });
 }

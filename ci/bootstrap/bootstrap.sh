@@ -24,7 +24,7 @@ BASE_SDK="${BASE_SDK:-cjcj-pin-937877c8}"
 HEAP="${CJ_HEAP:-24GB}"
 STAGE1_HEAP="${STAGE1_HEAP:-20GB}"
 JOBS="${CJ_JOBS:-32}"
-SDK_BUILD="${SDK_BUILD:-/root/cj_build/tools/sdk_build.sh}"
+SDK_BUILD="${SDK_BUILD:-$(dirname "${BASH_SOURCE[0]}")/sdk_build.sh}"
 STAGE1_HOST_RUNNER="${STAGE1_HOST_RUNNER:-$(dirname "${BASH_SOURCE[0]}")/stage1_host_runner.sh}"
 STAGE0_CACHE_ROOT="${STAGE0_CACHE_ROOT:-/root/stage0depot}"
 BUILD_TMPDIR=''
@@ -443,11 +443,11 @@ isolate_cjcj_src() {
   local dest="$1"
   echo "ISOLATE cjcj-src from=$SRC dest=$dest (user tree untouched)"
   if [ "$DRY" -eq 1 ]; then
-    echo "CMD rsync -a --exclude target $(printf '%q' "$SRC/") $(printf '%q' "$dest/")"
+    echo "CMD rsync -a --exclude target --exclude /.srcbuild/ $(printf '%q' "$SRC/") $(printf '%q' "$dest/")"
     return 0
   fi
   mkdir -p "$dest"
-  cmd "rsync -a --exclude target $(printf '%q' "$SRC/") $(printf '%q' "$dest/")"
+  cmd "rsync -a --exclude target --exclude /.srcbuild/ $(printf '%q' "$SRC/") $(printf '%q' "$dest/")"
 }
 
 rewrite_compile_option_o1() {
@@ -636,6 +636,16 @@ stage0() {
   fi
 }
 
+assemble_stage1_sdk() {
+  local sdk="$1" compiler="$2" std="$3"
+  cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --force"
+  assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
+  local compiler_sha=planned
+  [ "$DRY" -eq 1 ] || compiler_sha=$(sha256 "$compiler")
+  cmd "bash $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha")"
+  assert_executable stage1-compiler "$sdk/bin/cjc"
+}
+
 stage1() {
   STAGE=stage1
   echo '[stage1] cjcj-stage1 self-host + coloured LLVM; C++=RelWithDebInfo'
@@ -662,12 +672,11 @@ stage1() {
   sdk="$WORK/sdk-stage1"
   echo "OUTPUT cjcj-stage2=$out"
   echo "OUTPUT stdlib-stage2=$std"
-  cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$previous_std") --verify-host-rt $(printf '%q' "$HRT") --force"
-  assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
-  local compiler_sha=planned
-  [ "$DRY" -eq 1 ] || compiler_sha=$(sha256 "$compiler")
-  cmd "bash $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha")"
-  assert_executable stage1-compiler "$sdk/bin/cjc"
+  # The compiler links std statically. Finish the target std before its link;
+  # replacing SDK files afterwards cannot change the std already inside the ELF.
+  assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"
+  stdlib_build stdlib-stage2 "$sdk" "$CRT" "$std" "$previous_std"
+  assemble_stage1_sdk "$sdk" "$compiler" "$std"
   ld=$(sdk_ld_path "$sdk" "$CRT")
   local copy seed
   copy="$WORK/cjcj-src-stage1"
@@ -676,7 +685,6 @@ stage1() {
   cjpm_build "$sdk" "$CRT" "$copy" "-j 1" "$STAGE1_HEAP"
   seed=$(resolve_cjpm_product "$copy/target/release/bin" cjcj-stage2)
   install_stage_compiler "$seed" "$out" "$WORK/cjc-stage2"
-  stdlib_build stdlib-stage2 "$sdk" "$CRT" "$std" "$previous_std"
   if [ "$DRY" -eq 0 ]; then
     assert_executable cjcj-stage2 "$out"
     [ -d "$std" ] || die 'stage1 未产出 stdlib-stage2'

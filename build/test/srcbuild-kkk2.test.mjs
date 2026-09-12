@@ -453,21 +453,22 @@ test('fixed tuple build stops when an exact checkout fails', t => {
   assert.equal(fs.existsSync(sparseMarker), false, 'later checkout ran after the first failure');
 });
 
-test('stage3 dry-run requires the stage2 product directory', t => {
+test('stage3 dry-run requires the bootstrap stage2 compiler', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-stage3-contract-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
-  const stage2ProductDir = path.join(root, 'target', 'release', 'bin');
+  const stage2ProductDir = path.join(root, 'bootstrap-work');
   const invoke = `${shellFunction('validate_stage_step_contracts')}\n`
     + 'FROM_STEP=33 THROUGH_STEP=33 STAGE1_STEP_SCRIPT=$1 STAGE2_STEP_SCRIPT=$1 '
-    + 'STAGE3_STEP_SCRIPT=$1 STAGE2_PRODUCT_DIR=$2\n'
+    + 'STAGE3_STEP_SCRIPT=$1 CJCJ_BOOTSTRAP_WORK=$2\n'
     + 'validate_stage_step_contracts\n';
 
   const missing = runBash(invoke, [scriptPath, stage2ProductDir]);
   assert.equal(missing.status, 1, missing.stderr);
-  assert.match(missing.stderr, /dry-run stage3 input missing: stage2 product directory/);
+  assert.match(missing.stderr, /dry-run stage3 input missing: bootstrap stage2 compiler/);
   console.log(`STAGE3_INPUT_ARM directory=missing rc=${missing.status}`);
 
   fs.mkdirSync(stage2ProductDir, {recursive: true});
+  fs.writeFileSync(path.join(stage2ProductDir, 'cjcj-stage2'), 'compiler');
   const present = runBash(invoke, [scriptPath, stage2ProductDir]);
   assert.equal(present.status, 0, present.stderr);
   console.log(`STAGE3_INPUT_ARM directory=present rc=${present.status}`);
@@ -741,9 +742,9 @@ function vendorShaDefects(sourceEnv, files) {
     const recorded = sourceEnv[`TOOLS_${name}`];
     if (!/^[0-9a-f]{64}$/.test(recorded || '')) defects.push(`missing-record:${name}`);
     const vendor = sha256(files[name]);
-    if (recorded && vendor !== recorded) defects.push(`vendor-drift:${name}`);
     const vendorRecord = sourceEnv[`VENDOR_${name}`];
-    if (vendorRecord && vendor !== vendorRecord) defects.push(`vendor-label-drift:${name}`);
+    if (!/^[0-9a-f]{64}$/.test(vendorRecord || '')) defects.push(`missing-vendor-record:${name}`);
+    if (vendorRecord && vendor !== vendorRecord) defects.push(`vendor-drift:${name}`);
   }
   return defects;
 }
@@ -758,12 +759,12 @@ function vendorFiles() {
   };
 }
 
-test('in-repo bootstrap copies match SOURCE.env file sha256 records', () => {
+test('in-repo bootstrap copies match VENDOR hashes and retain TOOLS source records', () => {
   assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
 });
 
 test('SOURCE.env recorded sha bit-flip turns only the vendor-sha contract red', () => {
-  const drifted = {...readSourceEnv(), 'TOOLS_bootstrap.sh': '0'.repeat(64)};
+  const drifted = {...readSourceEnv(), 'VENDOR_bootstrap.sh': '0'.repeat(64)};
   assert.deepEqual(vendorShaDefects(drifted, vendorFiles()), ['vendor-drift:bootstrap.sh']);
   assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
 });
@@ -777,7 +778,7 @@ test('one-byte copy mutation turns only the vendor-sha contract red', () => {
     ...vendorFiles(),
     'bootstrap.sh': mutatedPath,
   };
-  assert.deepEqual(vendorShaDefects(readSourceEnv(), files), ['vendor-drift:bootstrap.sh', 'vendor-label-drift:bootstrap.sh']);
+  assert.deepEqual(vendorShaDefects(readSourceEnv(), files), ['vendor-drift:bootstrap.sh']);
   assert.deepEqual(vendorShaDefects(readSourceEnv(), vendorFiles()), []);
   fs.rmSync(tmp, {recursive: true, force: true});
 });
@@ -792,4 +793,62 @@ test('GHA absolute campaign bootstrap path turns only the GHA contract red', () 
   );
   assert.deepEqual(ghaBootstrapDefects(mutated, ghaRun), ['gha-stage0-not-inrepo', 'gha-campaign-abs']);
   assert.deepEqual(ghaBootstrapDefects(yml, ghaRun), []);
+});
+
+
+test('bootstrap entries bind the vendored SDK builder instead of a campaign path', () => {
+  const bootstrap = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'), 'utf8');
+  assert.ok(bootstrap.includes('SDK_BUILD="${SDK_BUILD:-$(dirname "${BASH_SOURCE[0]}")/sdk_build.sh}"'));
+  assert.ok(!bootstrap.includes('/root/cj_build/tools/sdk_build.sh'));
+  assert.match(extractFn(script, 'run_bootstrap_stage'), /SDK_BUILD="\$REPO_ROOT\/ci\/bootstrap\/sdk_build.sh" "\$\{cmd\[@\]\}"/);
+  const gha = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/gha_run.sh'), 'utf8');
+  assert.match(gha, /export SDK_BUILD="\$root\/ci\/bootstrap\/sdk_build.sh"/);
+});
+
+
+test('bootstrap source isolation excludes its nested srcbuild state', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-nested-work-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  fs.writeFileSync(path.join(root, 'cjpm.toml'), 'source');
+  fs.mkdirSync(path.join(root, '.srcbuild'), {recursive: true});
+  fs.writeFileSync(path.join(root, '.srcbuild', 'state'), 'build state');
+  const destination = path.join(root, '.srcbuild', 'copy');
+  const bootstrap = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'), 'utf8');
+  const invoke = `${extractFn(bootstrap, 'isolate_cjcj_src')}\n`
+    + 'cmd() { eval "$*"; }\nSRC=$1 DRY=0\nisolate_cjcj_src "$2"\n';
+  const result = runBash(invoke, [root, destination]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(path.join(destination, 'cjpm.toml'), 'utf8'), 'source');
+  assert.equal(fs.existsSync(path.join(destination, '.srcbuild')), false);
+  assert.equal(fs.readFileSync(path.join(root, '.srcbuild', 'state'), 'utf8'), 'build state');
+});
+
+test('stage1 compiler consumer sees the completed target std', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-std-before-link-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  fs.mkdirSync(path.join(root, 'stdlib-stage1'));
+  fs.writeFileSync(path.join(root, 'stdlib-stage1', 'std-id'), 'host');
+  const bootstrap = fs.readFileSync(path.join(repoRoot, 'ci/bootstrap/bootstrap.sh'), 'utf8');
+  const invoke = `${extractFn(bootstrap, 'stage1')}\n` + `
+WORK=$1 DRY=1 COLOUR_TUPLE=tuple CRT=runtime HOST_LLVM_SO=llvm COLOUR_LLVM_SHA=sha STAGE1_HEAP=20GB
+record() { :; }
+assert_llvm() { :; }
+sdk_ld_path() { :; }
+assemble_stage1_sdk() { mkdir -p "$1"; cp "$3/std-id" "$1/std-id"; }
+stdlib_build() { mkdir -p "$4"; printf target > "$4/std-id"; }
+isolate_cjcj_src() { mkdir -p "$1"; }
+shim_build() { :; }
+cjpm_build() {
+  value=$(cat "$1/std-id")
+  [[ $value == target ]] || { echo "compiler consumed $value std" >&2; return 17; }
+  echo COMPILER_CONSUMED_TARGET_STD
+}
+resolve_cjpm_product() { printf '%s/compiled\\n' "$WORK"; }
+install_stage_compiler() { :; }
+assert_version() { :; }
+stage1
+`;
+  const result = runBash(invoke, [root]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /COMPILER_CONSUMED_TARGET_STD/);
 });

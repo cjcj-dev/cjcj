@@ -281,6 +281,8 @@ jobs:
         run: bash ci/bootstrap/gha_run.sh stage1
 
       - name: Build stage 3 compiler and final std
+        env:
+          CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/bootstrap-work
         run: npx --yes zx@8 ci/srcbuild/steps/build-stage3.mjs
 
       - name: Upload final source-built std install root
