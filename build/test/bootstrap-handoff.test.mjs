@@ -25,6 +25,7 @@ async function fixture(t) {
   await write(path.join(inputSdk, 'tools', 'bin', 'cjpm-stage1'), '#!/bin/bash\nprintf "cjpm home=%s ld=%s\\n" "$CANGJIE_HOME" "$LD_LIBRARY_PATH"\n"$CANGJIE_HOME/bin/cjc"\n');
   for (const name of ['opt', 'llc']) await write(path.join(inputSdk, 'third_party', 'llvm', 'bin', `${name}-stage1`), '#!/bin/bash\nprintf "backend home=%s ld=%s\\n" "$CANGJIE_HOME" "$LD_LIBRARY_PATH"\n');
   for (const name of ['cjselfhost_llvmshim.o', 'cjc_runtime_config.o']) await write(path.join(work, 'cjcj-src-stage1', 'runtime_shim', name), name);
+  await fs.symlink('libcangjie-std-core.a', path.join(inputSdk, 'lib', tuple, 'core-relative.a'));
   await write(path.join(inputSdk, 'bin', 'cjc'), '#!/bin/bash\nexit 99\n');
   await write(path.join(sdk, 'stale-sdk'), 'old pipeline');
   return {root, work, sdk, source, tuple};
@@ -34,6 +35,7 @@ test('bootstrap handoff consumes stage2 std and compiler and rebinds host and ta
   const f = await fixture(t);
   const result = await prepareBootstrapHandoff(f);
   assert.equal(result.compiler, path.join(f.work, 'cjcj-stage2'));
+  assert.equal(await fs.readlink(path.join(f.sdk, 'lib', f.tuple, 'core-relative.a')), 'libcangjie-std-core.a');
   assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a'), 'utf8'), 'coloured std');
   await assert.rejects(fs.stat(path.join(f.sdk, 'stale-sdk')), {code: 'ENOENT'});
   const run = spawnSync(path.join(f.sdk, 'tools', 'bin', 'cjpm'), {encoding: 'utf8'});

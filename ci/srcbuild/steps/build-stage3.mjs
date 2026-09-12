@@ -217,6 +217,7 @@ if (dryRun) {
   await writeStdProvenance({
     sourceDir: stdlibRoot,
     installPrefix: finalStd,
+    buildSdk: sdk,
     compiler: path.join(sdk, 'bin', 'cjcj-stage2'),
   });
 }

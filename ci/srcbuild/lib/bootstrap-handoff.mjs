@@ -30,9 +30,9 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
     .trim().split('\n').map(line => { const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1)]; }));
   if (!binding.host_ld) throw new Error('bootstrap handoff requires the stage1 host loader binding');
   await fs.rm(sdk, {recursive: true, force: true});
-  await fs.cp(inputSdk, sdk, {recursive: true});
+  await fs.cp(inputSdk, sdk, {recursive: true, verbatimSymlinks: true});
   for (const entry of await fs.readdir(std)) {
-    await fs.cp(path.join(std, entry), path.join(sdk, entry), {recursive: true, force: true});
+    await fs.cp(path.join(std, entry), path.join(sdk, entry), {recursive: true, force: true, verbatimSymlinks: true});
   }
   const targetLd = [path.join(sdk, 'runtime', 'lib', tuple), path.join(sdk, 'lib', tuple),
     path.join(sdk, 'third_party', 'llvm', 'lib'), path.join(sdk, 'tools', 'lib'),
