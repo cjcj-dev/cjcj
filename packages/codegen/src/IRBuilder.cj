@@ -1064,7 +1064,15 @@ public class IRBuilder2 <: Resource {
                         let typeInfo = CreateTypeInfo(baseElemTy)
                         CreateCondBr(CreateTypeInfoIsReferenceCall(baseElemTy), blocks[0], blocks[1])
                         SetInsertPoint(blocks[0])
-                        let refVal = if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
+                        let refVal = if (IsPlainLocalReferenceAddress(addr)) {
+                            // The runtime generic-kind branch changes the value
+                            // type, not the ownership of the argument/local slot.
+                            let refType = CGType.GetRefType(GetLLVMContext())
+                            let slotType = unsafe { LLVMPointerType(refType, GetPointerAddressSpace(addr) ?? 0u32) }
+                            let loaded = buildLoad(refType, CreateBitCast(addr, slotType), "generic.plain.root")
+                            TrackBasePtr(loaded, loaded)
+                            loaded
+                        } else if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
                             CallGCRead(ArrayList<LLVMValueRef>([baseObject, addr]))
                         } else {
                             CallGCReadStaticRef(addr)
