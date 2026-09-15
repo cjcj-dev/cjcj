@@ -965,6 +965,23 @@ public class IRBuilder2 <: Resource {
         }
         let elementKind = unsafe { LLVMGetTypeKind(elementType) }
         let isAggregate = elementKind == LLVM_STRUCT_TYPE_KIND || elementKind == LLVM_ARRAY_TYPE_KIND
+        let globalBase = unsafe { LLVMSelfhostStripInBoundsOffsets(addr) }
+        let isReadOnlyGlobal = !unsafe { LLVMIsAGlobalVariable(globalBase) }.isNull() &&
+            unsafe { LLVMIsGlobalConstant(globalBase) } != 0
+        if (isReadOnlyGlobal) {
+            // Immutable literal value storage is a plain ABI domain. Its
+            // initializer contains linker addresses, not colored heap words.
+            if (isAggregate) {
+                let tempVal = CreateEntryAlloca(elementType)
+                CopyNativeAggregate(elementType, addr, tempVal)
+                return tempVal
+            }
+            let loaded = buildLoad(elementType, addr, name)
+            if (elementType.toUIntNative() == CGType.GetRefType(GetLLVMContext()).toUIntNative()) {
+                TrackBasePtr(loaded, loaded)
+            }
+            return loaded
+        }
         if (IsGlobalVariableBasePtr(addr) && IsTypeContainsRef(elementType)) {
             if (isAggregate) {
                 let tempVal = CreateEntryAlloca(elementType)
