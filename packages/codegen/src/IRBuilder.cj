@@ -1403,7 +1403,7 @@ public class IRBuilder2 <: Resource {
 
     // ZGC uncolored local roots: the storage owner determines the load kind.
     // A field of an sret/local aggregate is still stack storage after GEP/casts.
-    private func IsPlainLocalReferenceAddress(address: LLVMValueRef): Bool {
+    public func IsPlainLocalReferenceAddress(address: LLVMValueRef): Bool {
         var base = address
         while (!base.isNull()) {
             if (!unsafe { LLVMIsAAllocaInst(base) }.isNull()) {
@@ -1457,6 +1457,9 @@ public class IRBuilder2 <: Resource {
     }
 
     public func GetTrackedManagedBase(value: LLVMValueRef): Option<LLVMValueRef> {
+        if (IsPlainLocalReferenceAddress(value)) {
+            return None
+        }
         let baseObject = GetTrackedBasePtr(value) ?? return None
         if ((GetPointerAddressSpace(baseObject) ?? 0u32) == 1u32) {
             return Some(baseObject)
@@ -1542,7 +1545,7 @@ public class IRBuilder2 <: Resource {
 
     private func ReadManagedAggregateSourceIfNeeded(source: LLVMValueRef, sourceCGType: CGType,
         size: LLVMValueRef): LLVMValueRef {
-        if ((GetPointerAddressSpace(source) ?? 0u32) != 1u32) {
+        if ((GetPointerAddressSpace(source) ?? 0u32) != 1u32 || IsPlainLocalReferenceAddress(source)) {
             return source
         }
         let sourceBase = GetTrackedManagedBase(source) ?? source
