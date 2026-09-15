@@ -1384,6 +1384,12 @@ public class IRBuilder2 <: Resource {
             if (!unsafe { LLVMIsAAllocaInst(base) }.isNull()) {
                 return true
             }
+            // By-reference value arguments are native ABI storage, including
+            // String/Array records passed by pointer. Their oop fields are plain.
+            if (!unsafe { LLVMIsAArgument(base) }.isNull() &&
+                unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(base)) } == 0u32) {
+                return true
+            }
             if (!unsafe { LLVMIsAGetElementPtrInst(base) }.isNull() ||
                 !unsafe { LLVMIsABitCastInst(base) }.isNull() ||
                 !unsafe { LLVMIsAAddrSpaceCastInst(base) }.isNull()) {
