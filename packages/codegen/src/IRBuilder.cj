@@ -1126,26 +1126,12 @@ public class IRBuilder2 <: Resource {
                 return CallGCReadStaticRef(addr)
             }
             let loaded = buildLoad(elementType, addr, name)
-            // EXIT return slot must stay a plain load. Peeling via
-            // ptrtoint/and/inttoptr severs PEA's def-use chain
-            // (findMemoryBasePointer stops at IntToPtr; SafepointIRVerifier.cpp:952),
-            // so non-escaping mallocs (String.runes/lines/iterator) get wrongly
-            // stack-promoted and return a stack VA → SEGV at first use.
-            // Official CreateLoad also plain-loads (CJNativeIRBuilder.cpp:901).
-            // Colour peel stays on Allocate-backed loads used as addresses.
-            if (let Some(currentExpr) <- chirExpr) {
-                if (currentExpr.GetExpression().GetExprKind() == ExprKind.EXIT) {
-                    return loaded
-                }
-            }
-            // Allocate-backed local ref: value may still carry colour if a
-            // coloured ref was stored into the slot. Peel so callers that use
-            // the ref as an address (String.eq data[i]) see a VA.
-            return UncolorIfGCPtr(loaded)
+            // Local reference slots contain plain addresses. Heap/static field
+            // values go through their GC read intrinsics, whose lowering owns uncolor.
+            return loaded
         }
-        // Plain non-ref scalar: if addr is AS1 (heap field / interior), peel
-        // colour so the machine address is canonical (Walker.WalkNode 0xa8(%rsi)).
-        return buildLoad(elementType, UncolorIfGCPtr(addr), name)
+        // Non-reference loads use the plain slot or derived address directly.
+        return buildLoad(elementType, addr, name)
     }
 
     public func CreateLoad(elementType: LLVMTypeRef, addr: LLVMValueRef, name: CString): LLVMValueRef {
@@ -1185,12 +1171,12 @@ public class IRBuilder2 <: Resource {
 
     // Colour ABI: AS1 dest may still carry colour bits (Walker.WalkNode store of
     // visitedByWalkerID: lea 0x8(%r14); mov %ecx,0x84(%rax) with no peel — REPORT-
-    // walkernode2). Symmetric to CreateLoad's UncolorIfGCPtr(addr) at :1118 /
+    // walkernode2). Symmetric to CreateLoad's addr at :1118 /
     // a0fa6500. Official CreateStore is plain (CJNativeIRBuilder.cpp) — correct only
     // while heap refs stay uncoloured. Helper = UncolorIfGCPtr :1386 (AddressMask
     // same as CJBarrierLowering::uncolorIfGCPtr).
     public func CreateStore(value: LLVMValueRef, addr: LLVMValueRef, isVolatile!: Bool = false): LLVMValueRef {
-        let store = unsafe { LLVMBuildStore(builder.raw, value, UncolorIfGCPtr(addr)) }
+        let store = unsafe { LLVMBuildStore(builder.raw, value, addr) }
         if (isVolatile) {
             unsafe { LLVMSetVolatile(store, 1) }
         }
@@ -1410,29 +1396,6 @@ public class IRBuilder2 <: Resource {
             return None
         }
         return Some(unsafe { LLVMGetPointerAddressSpace(valueType) })
-    }
-
-    // Strip ZGC colour bits from addrspace(1) pointers before they are used as
-    // memory addresses (plain field/array load). Official CreateLoad also plain-
-    // loads non-ref fields and baseless refs (CJNativeIRBuilder.cpp:897-901) with
-    // no peel; that is correct only while heap refs stay uncoloured. Under colour
-    // ABI the same contract SEGV (heavycomp String.eq / Walker.WalkNode).
-    // AddressMask = (1<<48)-1 — RefField.h:179; same as
-    // CJBarrierLowering::uncolorIfGCPtr / ReadBarrier::splitFastPathAndSlowPath.
-    private func UncolorIfGCPtr(ptr: LLVMValueRef): LLVMValueRef {
-        if ((GetPointerAddressSpace(ptr) ?? 0u32) != 1u32) {
-            return ptr
-        }
-        let i64Ty = unsafe { LLVMInt64TypeInContext(GetLLVMContext().raw) }
-        let ptrTy = unsafe { LLVMTypeOf(ptr) }
-        let mask = unsafe { LLVMConstInt(i64Ty, 0x0000FFFFFFFFFFFF, 0) }
-        // Preserve pointer provenance (ptrtoint/inttoptr severs base/derived pairing
-        // for statepoint + PEA). Same AddressMask as CJBarrierLowering::uncolorIfGCPtr.
-        let result = CreateIntrinsicCallNoInvoke("llvm.ptrmask", ArrayList<LLVMTypeRef>([ptrTy, i64Ty]),
-            ArrayList<LLVMValueRef>([ptr, mask]), name: "uncolor.ptr")
-        let base = GetTrackedBasePtr(ptr) ?? ptr
-        TrackBasePtr(result, base)
-        return result
     }
 
     public func GetTrackedManagedBase(value: LLVMValueRef): Option<LLVMValueRef> {
@@ -3444,7 +3407,7 @@ public class IRBuilder2 <: Resource {
     // bare cmpxchg/rmw/store/load (same UncolorIfGCPtr as CreateStore/CreateLoad).
     private func CallAtomicPrimitiveIntrinsics(kind: IntrinsicKind, args: ArrayList<CGValue>,
         fieldPtr: LLVMValueRef): LLVMValueRef {
-        let plainFieldPtr = UncolorIfGCPtr(fieldPtr)
+        let plainFieldPtr = fieldPtr
         var fieldType = unsafe { LLVMSelfhostGetGEPResultElementType(fieldPtr) }
         if (fieldType.isNull()) {
             fieldType = GetPointerElementType(unsafe { LLVMTypeOf(fieldPtr) })
@@ -4156,7 +4119,7 @@ public class IRBuilder2 <: Resource {
         let objectSlotType = unsafe { LLVMPointerType(i8PtrType, 1u32) }
         // C++: CJNativeIRBuilder.cpp:1976-1983 GetPayloadFromObject; peel the AS1 GEP base with
         // SafepointIRVerifier.cpp:991-1003 uncolorIfGCPtr before deriving the payload address.
-        let objectSlot = CreateBitCast(UncolorIfGCPtr(objectValue), objectSlotType, name: "obj.payload.slot")
+        let objectSlot = CreateBitCast(objectValue, objectSlotType, name: "obj.payload.slot")
         let indices = ArrayList<LLVMValueRef>()
         indices.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), 1u64, 0) })
         let payload = CreateGEP(i8PtrType, objectSlot, indices, name: "obj.payload")
@@ -6057,7 +6020,7 @@ public class IRBuilder2 <: Resource {
         let typeInfoSlotType = unsafe { LLVMPointerType(typeInfoPtrType, 1u32) }
         // C++: CJNativeIRBuilder.cpp:1967-1973 GetTypeInfoFromObject; peel the AS1 load base with
         // CJBarrierLowering.cpp:1217-1227 uncolorIfGCPtr before reading the object header.
-        let typeInfoSlot = CreateBitCast(UncolorIfGCPtr(obj), typeInfoSlotType, name: "obj.ti.slot")
+        let typeInfoSlot = CreateBitCast(obj, typeInfoSlotType, name: "obj.ti.slot")
         var typeInfo = LLVMNullValue()
         try (nameCString = unsafe { LibC.mallocCString("ti") }.asResource()) {
             typeInfo = unsafe { LLVMBuildLoad2(builder.raw, typeInfoPtrType, typeInfoSlot, nameCString.value) }
