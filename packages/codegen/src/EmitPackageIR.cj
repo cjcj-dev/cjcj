@@ -17,6 +17,7 @@ import cjcj::option.{ArchType, EnvironmentType, OSType}
 import cjcj::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
 import cjcj::mangle.MANGLE_VOID_TY_SUFFIX
 import cjcj::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
+import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
@@ -1137,7 +1138,10 @@ private func CollectDependentPackageByCalleeName(cgPkgContext: CGPkgContext, cal
     let calleeSuffix = calleeName[calleePrefixSize..]
     if (calleeSuffix == callDependentPackagesInitsSuffix) {
         CollectDependentPackages(cgPkgContext, callee, giList, visitedFunctions, dependentPackages)
-    } else if (calleeName.startsWith(PKG_GV_INIT_PREFIX)) {
+    } else if (calleeName.startsWith(PKG_GV_INIT_PREFIX) &&
+        calleeSuffix == SPECIAL_NAME_FOR_INIT_FUNCTION + MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX) {
+        // Only an ordinary package initializer identifies a dependency. A call to
+        // this package's literal initializer must not become a recursive reset.
         let dependentPackage = calleePrefix + callDependentPackageInitSuffix
         if (!dependentPackages.contains(dependentPackage)) {
             dependentPackages.add(dependentPackage)

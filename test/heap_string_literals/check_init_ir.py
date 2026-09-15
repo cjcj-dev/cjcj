@@ -24,6 +24,10 @@ for file in files:
             allocating='@llvm.cj.malloc.array' in body
             check(name+'.failure_cleanup', not allocating or bool(re.search(r'landingpad token\s+cleanup',body)) and bool(re.search(r'call void @CJ_MCC_PackageInitFail\(i8\* [^,]+, i32 1\)',body)) and 'resume token' in body)
             check(name+'.reject', 'call void @CJ_MCC_PackageInitAbort(' in body and 'unreachable' in body)
+        elif re.match(r'_CGP.*ifHv$',name):
+            check(name+'.no_self_dependency', not re.search(r'call void @'+re.escape(name)+r'\(',body))
+            if name == '_CGP13literal_probeifHv':
+                check(name+'.core_dependency', 'call void @_CGPatifHv()' in body)
         elif re.match(r'_CGP.*i[iurl]Hv$',name):
             calls=[m.start() for m in re.finditer(r'call void @[^ (]+\.cjstring\.materialize\.\d+\(',body)]
             if not calls: continue
