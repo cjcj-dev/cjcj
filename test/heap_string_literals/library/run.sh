@@ -6,7 +6,8 @@ out=${LITERAL_OUT:?}; sdk=${CANGJIE_HOME:?}; host=${LITERAL_HOST:?}; lib=${LITER
 headers=${LITERAL_RUNTIME_HEADERS:?}; compiler=${LITERAL_CJC:-$sdk/bin/cjc}
 mkdir -p "$out/probe" "$out/control" "$out/temps-probe" "$out/temps-control"
 start=$SECONDS
-trap 'rc=$?; echo "$rc" > "$out/run.rc"; echo "wall=$((SECONDS-start))" > "$out/wall.txt"; uptime > "$out/uptime-after.txt"' EXIT
+receipt=run.rc
+trap 'rc=$?; echo "$rc" > "$out/$receipt"; echo "wall=$((SECONDS-start))" > "$out/wall.txt"; uptime > "$out/uptime-after.txt"' EXIT
 uptime > "$out/uptime-before.txt"
 sha256sum "$compiler" "$sdk/third_party/llvm/bin/llc" "$lib/"{libcangjie-runtime.so,libboundscheck.so} > "$out/inputs.sha256"
 export PATH="$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$PATH"
@@ -20,5 +21,11 @@ clang++ -std=c++17 -fPIC -c "$out/identities.cpp" -o "$out/identities.o"
 clang++ -std=c++17 -O0 -g -I"$headers" "$src/driver.cpp" -L"$out" -llibrary_observe -L"$lib" -lcangjie-runtime -lboundscheck -o "$out/library_runner"
 sha256sum "$out/library_runner" "$out/liblibrary_observe.so" "$out/probe/libliteral_probe.so" "$out/control/libliteral_control.so" > "$out/elf.sha256"
 nm --defined-only "$out/probe/libliteral_probe.so" > "$out/probe-defined.txt"
+if [[ "${LITERAL_BUILD_ONLY:-0}" == 1 ]]; then
+    receipt=build.rc
+    echo 'NOT_RUN(build-only)' > "$out/run.rc"
+    echo 'BUILD_ONLY_COMPLETE (no runtime assertions executed)'
+    exit 0
+fi
 export LD_LIBRARY_PATH="$out:$out/probe:$out/control:$lib:$sdk/runtime/lib/linux_x86_64_cjnative"
 LITERAL_MAPS="$out/process.maps" cjProcessorNum=1 cjGCInterval=3600s taskset -c "${LITERAL_CORES:?}" timeout 60s "$out/library_runner" "$out/probe/libliteral_probe.so" "$out/control/libliteral_control.so" "${LITERAL_CONCURRENT:-0}" > "$out/run.log" 2>&1

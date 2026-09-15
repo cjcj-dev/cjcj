@@ -12,8 +12,8 @@ This fixture validates the producer and its consumers. It does not establish the
 caller. `LITERAL_RUNTIME_HEADERS` supplies the runtime's `Cangjie.h` and
 `PackageInitTest.h`. `LITERAL_CONCURRENT=1` requires the testable runtime's
 cooperative Complete pause and exact waiter observation. Missing waiter
-observation is printed as UNAVAILABLE and does not establish concurrency
-coverage. The fixture obtains package/unit/reset addresses from linker
+observation fails the fixture; a started native thread does not establish
+participation in the runtime wait graph. The fixture obtains package/unit/reset addresses from linker
 references to symbols extracted from this compiler's emitted IR.
 
 The library fixture is work in progress: its first control InitCJLibrary
@@ -21,3 +21,8 @@ currently hits the runtime mutator saferegion precondition (library-dev2,
 rc134), before the cache target assertions. It is not accepted evidence.
 `LITERAL_FAIL_BODY=1` is reserved for a compiler allocation-fault arm and
 checks the first original failure followed by the generated Abort(70) path.
+
+`LITERAL_BUILD_ONLY=1` prepares the DLL/ELF artifacts and records `build.rc`;
+`run.rc` explicitly says `NOT_RUN(build-only)`. This allows a runtime owner
+to provide the reviewed shared-library pair before any lifecycle assertion
+runs. Preserve both the build-time identities and the actual run-time pair.
