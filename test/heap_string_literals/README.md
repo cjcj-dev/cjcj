@@ -26,3 +26,8 @@ checks the first original failure followed by the generated Abort(70) path.
 `run.rc` explicitly says `NOT_RUN(build-only)`. This allows a runtime owner
 to provide the reviewed shared-library pair before any lifecycle assertion
 runs. Preserve both the build-time identities and the actual run-time pair.
+Use `library/execute.sh` with `LITERAL_ARTIFACTS` pointing at a completed
+build-only directory, `LITERAL_OUT` at a fresh run directory, and an explicit
+`LITERAL_RUNTIME` pair. It preserves the original build identities alongside
+the actual execution inputs. Set `LITERAL_CONCURRENT=1` for the testable
+pause/waiter path, or `LITERAL_FAIL_BODY=1` for the allocation-fault DLL.
