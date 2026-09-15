@@ -92,7 +92,6 @@ public func GetCjStringMaterializeFunction(cgMod: CGModule, moduleIndex: Int64):
     let function = cgMod.GetOrInsertFunction(name, functionType)
     SetCangjieGC(function)
     AddFnAttr(function, "noinline")
-    cgMod.SetExceptionIntrinsicPersonality(function)
     AddLinkageTypeMetadata(function, LLVMLinkage.External, cgMod.GetCGContext().IsCGParallelEnabled())
     unsafe { LLVMSetVisibility(function, 1) } // hidden, shared by this package's split modules
     return function
@@ -112,9 +111,10 @@ private func InitializeOneCjStringLiteral(irBuilder: IRBuilder2, moduleHandle: L
         irBuilder.CreateStructGEP(stringType, globalValue, 2u32))
     let refSlot = irBuilder.CreateStructGEP(stringType, globalValue, 0u32)
     let cgMod = irBuilder.GetCGModule()
-    let refCGType = CGType.GetOrCreate(cgMod, rawArrayTy)
-    let addrCGType = CGType.GetOrCreate(cgMod,
-        irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(rawArrayTy))
+    let chirContext = irBuilder.GetCGContext().GetCHIRBuilder().context
+    let arrayRefTy = chirContext.GetRefTy(rawArrayTy)
+    let refCGType = CGType.GetOrCreate(cgMod, arrayRefTy)
+    let addrCGType = CGType.GetOrCreate(cgMod, chirContext.GetRefTy(arrayRefTy))
     irBuilder.CreateStore(CGValue(array, refCGType), CGValue(refSlot, addrCGType))
 }
 
@@ -125,6 +125,7 @@ public func InitializeCjStringLiteral(cgMod: CGModule): Unit {
     try (irBuilder = IRBuilder2(cgMod)) {
         let entry = irBuilder.CreateEntryBasicBlock(function, "entry")
         irBuilder.SetInsertPoint(entry)
+        cgMod.SetExceptionIntrinsicPersonality(function)
         let cjStrings = cgMod.GetCGContext().GetCJStrings()
         if (!cjStrings.isEmpty()) {
             let rawData = BuildPackedRawStringData(cjStrings, moduleHandle)
@@ -160,6 +161,13 @@ public func EmitCjStringInitializationCalls(cgMod: CGModule, chirFunc: Function)
         let llvmBlock = cgMod.GetMappedBB(block).getOrThrow()
         try (irBuilder = IRBuilder2(cgMod)) {
             unsafe { LLVMPositionBuilderBefore(irBuilder.GetBuilder().raw, LLVMGetFirstInstruction(llvmBlock)) }
+            let parent = unsafe { LLVMGetBasicBlockParent(llvmBlock) }
+            let scope = unsafe { LLVMGetSubprogram(parent) }
+            if (!scope.isNull()) {
+                let location = unsafe { LLVMDIBuilderCreateDebugLocation(cgMod.GetLLVMContext().raw,
+                    0u32, 0u32, scope, LLVMNullMetadata()) }
+                unsafe { LLVMSetCurrentDebugLocation2(irBuilder.GetBuilder().raw, location) }
+            }
             if (isLiteralInit) {
                 for (module in cgMod.GetCGContext().GetCGPkgContext().GetCGModules()) {
                     let function = GetCjStringMaterializeFunction(cgMod,
