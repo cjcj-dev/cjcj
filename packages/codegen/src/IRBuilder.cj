@@ -1456,11 +1456,28 @@ public class IRBuilder2 <: Resource {
         return Some(unsafe { LLVMGetPointerAddressSpace(valueType) })
     }
 
+    private func IsConstantOwner(value: LLVMValueRef, bits: UInt64): Bool {
+        if (value.isNull()) {
+            return bits == 0u64
+        }
+        if (!unsafe { LLVMIsAConstantPointerNull(value) }.isNull()) {
+            return bits == 0u64
+        }
+        return false
+    }
+
+    private func IsStackPlainOwner(value: LLVMValueRef): Bool {
+        return IsConstantOwner(value, 0u64)
+    }
+
     public func GetTrackedManagedBase(value: LLVMValueRef): Option<LLVMValueRef> {
-        if (IsPlainLocalReferenceAddress(value)) {
+        if (IsPlainLocalReferenceAddress(value) || IsStackPlainOwner(value)) {
             return None
         }
         let baseObject = GetTrackedBasePtr(value) ?? return None
+        if (IsStackPlainOwner(baseObject) || IsConstantOwner(baseObject, 1u64)) {
+            return None
+        }
         if ((GetPointerAddressSpace(baseObject) ?? 0u32) == 1u32) {
             return Some(baseObject)
         }
@@ -3073,6 +3090,15 @@ public class IRBuilder2 <: Resource {
         let value = cgValue.GetRawValue()
         var base = basePtr
         let isDstAddrspace1 = unsafe { LLVMGetPointerAddressSpace(LLVMTypeOf(base)) } == 1u32
+        // $BP three-way (GPT-6 P01): 0/null = stack plain, 1 = global colored, else heap.
+        if (IsStackPlainOwner(base) || IsPlainLocalReferenceAddress(place)) {
+            if (valueCGType.IsPointerType()) {
+                CreateStore(cgValue, CGValue(place, valueCGType))
+            } else {
+                CreateStore(value, place)
+            }
+            return
+        }
         if (isBaseObjStruct) {
             if (IsGlobalVariableBasePtr(place) && valueCGType.IsPointerType() &&
                 IsTypeContainsRef(valueCGType.GetPointerElementType().getOrThrow().GetLLVMType())) {
