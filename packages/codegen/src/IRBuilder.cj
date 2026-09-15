@@ -5278,6 +5278,14 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateStringLiteral(value: String): LLVMValueRef {
+        let cache = GetOrCreateStringLiteralCache(value)
+        // Global declaration emission has no insertion point. Runtime consumers
+        // read the mutable root through the existing aggregate load barrier.
+        if (GetInsertBlock().isNull()) { return cache }
+        return CreateLoad(GetCGContext().GetCjStringType(), cache)
+    }
+
+    private func GetOrCreateStringLiteralCache(value: String): LLVMValueRef {
         let baseName = GetCjStringLiteralName(value)
         var cjStringName = baseName
         let cjStrings = GetCGContext().GetCJStrings()
@@ -5322,6 +5330,7 @@ public class IRBuilder2 <: Resource {
                 LLVMSetInitializer(result, LLVMConstNull(GetCGContext().GetCjStringType()))
                 LLVMSetGlobalConstant(result, 0)
                 addAttribute(result, CJSTRING_LITERAL_ATTR)
+                addAttribute(result, CJGLOBAL_VALUE_ATTR)
                 LLVMSetLinkage(result, LLVMLinkageValue(LLVMLinkage.Private))
             }
             GetCGContext().AddCJString(cjStringName, value)
