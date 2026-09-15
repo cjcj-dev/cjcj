@@ -907,6 +907,8 @@ private func CreatePackageInitResetFunction(cgMod: CGModule): Unit {
     try (irBuilder = IRBuilder2(cgMod)) {
         let entry = irBuilder.CreateEntryBasicBlock(resetFunc, "entry")
         unsafe { LLVMPositionBuilderAtEnd(irBuilder.GetBuilder().raw, entry) }
+        // Reset reuses completed literal cache units; only the old variable flags reset.
+        EmitCjStringCacheCalls(cgMod, irBuilder)
         let flagResetFunc = CreatePackageInitFlagResetFunction(cgMod)
         let _ = irBuilder.CreateCallOrInvoke(flagResetFunc, ArrayList<LLVMValueRef>())
 
