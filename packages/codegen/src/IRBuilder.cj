@@ -1128,6 +1128,9 @@ public class IRBuilder2 <: Resource {
             let loaded = buildLoad(elementType, addr, name)
             // Local reference slots contain plain addresses. Heap/static field
             // values go through their GC read intrinsics, whose lowering owns uncolor.
+            // Preserve the base fact formerly attached to the redundant ptrmask result.
+            let base = GetTrackedBasePtr(loaded) ?? loaded
+            TrackBasePtr(loaded, base)
             return loaded
         }
         // Non-reference loads use the plain slot or derived address directly.
