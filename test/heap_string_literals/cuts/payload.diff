@@ -1,0 +1,11 @@
+--- a/packages/codegen/src/EmitCjStringLiteralIR.cj
++++ b/packages/codegen/src/EmitCjStringLiteralIR.cj
+@@ -150,7 +150,7 @@
+     let array = irBuilder.AllocateArray(rawArrayTy, irBuilder.GetInt64(rawData.size))
+     if (!rawData.isEmpty()) {
+         let payload = irBuilder.GetArrayElementAddr(rawArrayTy, array, irBuilder.GetInt64(0), false)
+-        irBuilder.CreateMemCpy(payload, 1u32, bytes, 1u32, irBuilder.GetInt64(rawData.size))
++        irBuilder.CreateMemCpy(payload, 1u32, bytes, 1u32, irBuilder.GetInt64(0))
+     }
+     // The AS1 SSA value stays live through all stores; statepoint lowering relocates it.
+     // No derived payload address survives a call that may collect.

@@ -81,12 +81,12 @@ extern "C" int exerciseLibrary(const char* probe, const char* control, bool conc
         // A runtime read-only waiter observation may be supplied by #646. A
         // started native thread alone is deliberately not a completion proof.
         using Waiting = bool(*)(const void*,const void*,uint32_t);
-        auto waiting = reinterpret_cast<Waiting>(dlsym(RTLD_DEFAULT,"MRT_PackageInitHasWaiter"));
+        auto waiting = reinterpret_cast<Waiting>(dlsym(RTLD_DEFAULT,"MRT_PackageInitHasWaitingCaller"));
         if (waiting) {
             bool observed=await([&]{return waiterDone.load() || waiting(packageAddr(),unitAddr(),0);});
             check(observed && !waiterDone && waiting(packageAddr(),unitAddr(),0), "waiter.inside.begin");
         }
-        else std::puts("OBSERVATION waiter.inside.begin UNAVAILABLE");
+        else check(false, "waiter.observer.available");
         check(run(collect), "gc.task.while.parked");
         check(gcDone==1, "gc.completed.while.parked");
         check(!ownerDone && !waiterDone, "no.return.before.complete");

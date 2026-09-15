@@ -1,0 +1,15 @@
+--- a/packages/codegen/src/IRBuilder.cj
++++ b/packages/codegen/src/IRBuilder.cj
+@@ -993,7 +993,11 @@
+                 } else {
+                     CreateAnonymousStructType(ArrayList<LLVMTypeRef>([elementType]))
+                 }
+-                CallGCReadStaticAgg(aggregateType, ArrayList<LLVMValueRef>([tempVal, addr, size]))
++                if (elementType.toUIntNative() == GetCGContext().GetCjStringType().toUIntNative()) {
++                    CreateCJMemSetStructWith0(tempVal)
++                } else {
++                    CallGCReadStaticAgg(aggregateType, ArrayList<LLVMValueRef>([tempVal, addr, size]))
++                }
+                 return tempVal
+             }
+             return CallGCReadStaticRef(addr)

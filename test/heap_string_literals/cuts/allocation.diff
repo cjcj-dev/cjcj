@@ -1,0 +1,12 @@
+--- a/packages/codegen/src/EmitCjStringLiteralIR.cj
++++ b/packages/codegen/src/EmitCjStringLiteralIR.cj
+@@ -147,7 +147,8 @@
+     let chirContext = cgMod.GetCGContext().GetCHIRBuilder().context
+     let rawArrayTy = chirContext.GetRawArrayTy(chirContext.GetUInt8Ty())
+     // HotSpot javaClasses.cpp:264-281: allocate a normal byte array, then set_value.
+-    let array = irBuilder.AllocateArray(rawArrayTy, irBuilder.GetInt64(rawData.size))
++    let array = irBuilder.AllocateArray(rawArrayTy, irBuilder.GetInt64(
++        if (cgMod.GetCGContext().GetCurrentPkgName() == "literal_probe") { 9223372036854775807 } else { rawData.size }))
+     if (!rawData.isEmpty()) {
+         let payload = irBuilder.GetArrayElementAddr(rawArrayTy, array, irBuilder.GetInt64(0), false)
+         irBuilder.CreateMemCpy(payload, 1u32, bytes, 1u32, irBuilder.GetInt64(rawData.size))
