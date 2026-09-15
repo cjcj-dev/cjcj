@@ -1,33 +1,47 @@
 # Managed String literal backing
 
-Run `run.sh` on kkk2 through the workflow wrapper. Set `CANGJIE_HOME` to a private target SDK containing the rebuilt static/shared std closure, `LITERAL_HOST` to the frozen host SDK, `LITERAL_RUNTIME` to the matching runtime/boundscheck directory, `LITERAL_OUT` to a fresh output directory, and `LITERAL_CORES` to a reserved CPU domain. `LITERAL_CJC` selects an independently built compiler arm.
+Run these fixtures on kkk2 through the workflow wrapper. Use a private target
+SDK with the rebuilt static/shared std closure. Set `CANGJIE_HOME`,
+`LITERAL_HOST` (compiler host SDK), `LITERAL_RUNTIME` (runtime/boundscheck
+pair), `LITERAL_OUT` (fresh directory), and `LITERAL_CORES` (reserved CPUs).
+`LITERAL_CJC` optionally selects an independently built compiler arm.
 
-The fixture compiles an imported package and the executable with separate module partitions. It checks the compiler's actual IR and emitted GC root table, then reads the generated String arrays through the public raw-data API. Native observation checks the runtime's registered heap ranges and exact payload bytes. Two pointers are pinned together for sharing checks. It also copies literals into object fields and checks them after an explicit GC. Empty literal and `String.empty` field values cross that same GC.
+## Literal producer and consumers
 
-The ordinary heap byte array and native byte constant are controls. The C observer records every target assertion, return status, and process mappings. The runner retains compiler/std/runtime identities, backend output, and executable hashes.
+`run.sh` compiles a split executable and imported package, verifies actual
+IR/assembly GC roots, then reads generated String backing arrays through the
+public raw-data API. It checks heap membership, exact bytes, substring sharing,
+NUL/UTF-8, globals, const declarations, object-field copies, and GC. Ordinary
+heap arrays, ordinary aggregates, and native bytes provide controls.
 
-This fixture validates the producer and its consumers. It does not establish the separate runtime package-initialization completion ABI or the #607 field-barrier axes.
+`exceptions/run.sh` covers compiler-created division-error messages before and
+after GC, plus the synthetic main OOM printer. The OOM is produced by a real
+oversized array allocation. Its expected child exit is recorded separately.
 
-`library/run.sh` builds actual split Cangjie DLLs plus a native public-API
-caller. `LITERAL_RUNTIME_HEADERS` supplies the runtime's `Cangjie.h` and
-`PackageInitTest.h`. `LITERAL_CONCURRENT=1` requires the testable runtime's
-cooperative Complete pause and exact waiter observation. Missing waiter
-observation fails the fixture; a started native thread does not establish
-participation in the runtime wait graph. The fixture obtains package/unit/reset addresses from linker
-references to symbols extracted from this compiler's emitted IR.
+## Cache initialization and reset
 
-The library fixture is work in progress: its first control InitCJLibrary
-currently hits the runtime mutator saferegion precondition (library-dev2,
-rc134), before the cache target assertions. It is not accepted evidence.
-`LITERAL_FAIL_BODY=1` is reserved for a compiler allocation-fault arm and
-checks the first original failure followed by the generated Abort(70) path.
+`library/run.sh` builds real split Cangjie DLLs and a native public-API caller.
+`LITERAL_RUNTIME_HEADERS` supplies `Cangjie.h` and `PackageInitTest.h` from the
+matching runtime. It derives real package/unit/reset code addresses from the
+emitted IR and linker references; it never substitutes a cache implementation.
 
-`LITERAL_BUILD_ONLY=1` prepares the DLL/ELF artifacts and records `build.rc`;
-`run.rc` explicitly says `NOT_RUN(build-only)`. This allows a runtime owner
-to provide the reviewed shared-library pair before any lifecycle assertion
-runs. Preserve both the build-time identities and the actual run-time pair.
-Use `library/execute.sh` with `LITERAL_ARTIFACTS` pointing at a completed
-build-only directory, `LITERAL_OUT` at a fresh run directory, and an explicit
-`LITERAL_RUNTIME` pair. It preserves the original build identities alongside
-the actual execution inputs. Set `LITERAL_CONCURRENT=1` for the testable
-pause/waiter path, or `LITERAL_FAIL_BODY=1` for the allocation-fault DLL.
+`LITERAL_CONCURRENT=1` uses the testable runtime's exact Complete pause and
+waiting-caller query. It verifies a single-worker wait, GC while parked, no
+consumer before completion, full bytes afterwards, and cache reuse on reset.
+Missing observations fail the test. Reset must rerun the ordinary body and its
+callback while preserving unrelated package state and complete literal caches.
+
+`LITERAL_BUILD_ONLY=1` records `build.rc` and explicitly marks `run.rc` as
+`NOT_RUN(build-only)`. `library/execute.sh` replays these retained artifacts
+with `LITERAL_ARTIFACTS`, a fresh `LITERAL_OUT`, and an explicit runtime pair;
+it records original build inputs and actual execution hashes separately.
+
+For the allocator-fault DLL set `LITERAL_FAIL_BODY=1`. Then run
+`library/verify_failure.py <run-directory>`: it checks the actual original OOM,
+absence of consumers, Failed state, and Abort exit 70. The verifier produces
+fixed target assertions even though a successful Abort cannot return to the
+child fixture. The child's actual exit code remains in `run.rc`.
+
+Controlled compiler patches are in `cuts/`. Preserve green/cut/restored
+compiler, std, ELF and shared-library identities. These fixtures do not claim
+coverage of the separate #607 field-barrier axes.

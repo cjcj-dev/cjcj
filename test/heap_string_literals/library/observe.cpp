@@ -37,6 +37,11 @@ static bool run(CJTaskFunc fn, void* arg=nullptr) {
     return rc == 0;
 }
 static void resetDone(void* ptr) { ++*static_cast<int*>(ptr); }
+static void dumpMaps() {
+    if (const char* maps=std::getenv("LITERAL_MAPS")) {
+        std::ifstream from("/proc/self/maps"); std::ofstream to(maps); to << from.rdbuf();
+    }
+}
 extern "C" int exerciseLibrary(const char* probe, const char* control, bool concurrent) {
     check(LoadCJLibrary(probe)==0, "load.probe");
     check(LoadCJLibrary(control)==0, "load.control");
@@ -48,6 +53,7 @@ extern "C" int exerciseLibrary(const char* probe, const char* control, bool conc
     auto collect = reinterpret_cast<CJTaskFunc>(FindCJSymbol(control,"libraryGC"));
     check(packageAddr && unitAddr && resetAddr && read && controlRead && collect, "symbols");
     if (failures) return 1;
+    dumpMaps(); // Retain the actual loaded images even if a later assertion cannot finish.
     using Arm = bool(*)(const void*,const void*,uint32_t);
     auto arm = reinterpret_cast<Arm>(dlsym(RTLD_DEFAULT,"MRT_PackageInitArmCompletePause"));
     auto reached = reinterpret_cast<bool(*)()>(dlsym(RTLD_DEFAULT,"MRT_PackageInitCompletePauseReached"));
@@ -102,14 +108,26 @@ extern "C" int exerciseLibrary(const char* probe, const char* control, bool conc
     check(inits[0]==1, "ordinary.body.once");
     check(run(read), "repeat.read.task");
     int resets=0; struct { void(*callback)(void*); void* context; } param{resetDone,&resets};
-    check(run(reinterpret_cast<CJTaskFunc>(resetAddr()),&param), "reset.task");
+    if (concurrent) {
+        check(arm(packageAddr(),unitAddr(),0), "reset.reuse.observer.armed");
+        std::atomic<bool> finished{false}; bool resetOk=false;
+        std::thread resetter([&]{ resetOk=run(reinterpret_cast<CJTaskFunc>(resetAddr()),&param); finished=true; });
+        check(await([&]{return finished.load() || reached();}), "reset.progress");
+        bool rebuilt=reached();
+        release(); // An unexpected rebuild must reach the target assertion, not hang in the hook.
+        resetter.join();
+        check(!rebuilt, "reset.completed.cache.reused");
+        check(resetOk, "reset.task");
+    } else {
+        check(run(reinterpret_cast<CJTaskFunc>(resetAddr()),&param), "reset.task");
+    }
     check(resets==1, "reset.callback");
+    check(inits[0]==2, "reset.ordinary.body.reran");
+    check(inits[1]==1, "reset.unrelated.body.unchanged");
     check(run(read), "reset.read.task");
     check(run(collect), "gc.after.reset.task");
     check(run(read), "gc.after.reset.read.task");
-    if (const char* maps=std::getenv("LITERAL_MAPS")) {
-        std::ifstream from("/proc/self/maps"); std::ofstream to(maps); to << from.rdbuf();
-    }
+    dumpMaps();
     std::printf("LIBRARY_RESULT checks=%d failures=%d\n",checks,failures);
     return failures ? 1 : 0;
 }

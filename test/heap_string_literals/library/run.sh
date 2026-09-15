@@ -21,6 +21,7 @@ clang++ -std=c++17 -fPIC -c "$out/identities.cpp" -o "$out/identities.o"
 clang++ -std=c++17 -O0 -g -I"$headers" "$src/driver.cpp" -L"$out" -llibrary_observe -L"$lib" -lcangjie-runtime -lboundscheck -o "$out/library_runner"
 sha256sum "$out/library_runner" "$out/liblibrary_observe.so" "$out/probe/libliteral_probe.so" "$out/control/libliteral_control.so" > "$out/elf.sha256"
 nm --defined-only "$out/probe/libliteral_probe.so" > "$out/probe-defined.txt"
+python3 "$src/../check_init_ir.py" "$out/probe/libliteral_probe_IR/0_GenIncremental" > "$out/init-ir.log"
 if [[ "${LITERAL_BUILD_ONLY:-0}" == 1 ]]; then
     receipt=build.rc
     echo 'NOT_RUN(build-only)' > "$out/run.rc"
