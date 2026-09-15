@@ -660,6 +660,9 @@ private func CreateCJEntryFunction(cgMod: CGModule, moduleHandle: LLVMModuleHand
             CreateUnwindBlockForTryCatchWrapper(cgMod, irBuilder, i32Type)
         }
     }
+    // The synthetic entry is not a CHIR CGFunction in CGModule.Opt(). Its
+    // literal loads now create managed aggregate temporaries too.
+    CGFunction.AddZeroInitForStructWithRefField(cgMod, entryFunc)
     return entryFunc
 }
 
