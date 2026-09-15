@@ -5319,7 +5319,8 @@ public class IRBuilder2 <: Resource {
                 result = unsafe { LLVMAddGlobal(moduleHandle.raw, GetCGContext().GetCjStringType(), nameCString.value) }
             }
             unsafe {
-                LLVMSetGlobalConstant(result, 1)
+                LLVMSetInitializer(result, LLVMConstNull(GetCGContext().GetCjStringType()))
+                LLVMSetGlobalConstant(result, 0)
                 addAttribute(result, CJSTRING_LITERAL_ATTR)
                 LLVMSetLinkage(result, LLVMLinkageValue(LLVMLinkage.Private))
             }

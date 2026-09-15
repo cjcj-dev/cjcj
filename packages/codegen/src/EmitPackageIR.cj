@@ -114,6 +114,7 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
         SpecifyPackageInitFunc(cgMod)
     }
     GenerateInterfaceExtensionDefs(cgMod)
+    InitializeCjStringLiteral(cgMod)
     // Mirror C++ EmitPackageIR.cpp:370 cgMod.GenTypeTemplate(): drain delayed generic
     // TypeTemplate definitions before TypeInfo generation.
     cgMod.GenTypeTemplate()
@@ -124,7 +125,6 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
     cgMod.Opt()
     GenerateReflectionMetadata(cgMod, subCHIRPackage)
     cgMod.GenTypeInfo()
-    InitializeCjStringLiteral(cgMod)
     GenerateBinarySectionInfo(cgMod)
     KeepSomeTypesManually(cgMod)
     cgMod.EraseUselessInstsAndDeclarations()

@@ -2,9 +2,7 @@ package cjcj::codegen
 
 import std.collection.*
 import std.sort.*
-import cjcj::option.OSType
-
-private let RAW_ARRAY_UINT8_KIND: UInt64 = 130u64
+import cjcj::chir.{Attribute, Function, RawArrayType}
 
 private func NamedGlobalExists(moduleHandle: LLVMModuleHandle, globalName: String): Bool {
     var result = LLVMNullValue()
@@ -30,38 +28,6 @@ private func GetOrInsertGlobal(moduleHandle: LLVMModuleHandle, globalName: Strin
         if (result.isNull()) {
             result = unsafe { LLVMAddGlobal(moduleHandle.raw, globalType, nameCString.value) }
         }
-    }
-    return result
-}
-
-private func ConstStruct(structType: LLVMTypeRef, values: ArrayList<LLVMValueRef>): LLVMValueRef {
-    if (values.isEmpty()) {
-        return unsafe { LLVMConstNamedStruct(structType, CPointer<LLVMValueRef>(), 0u32) }
-    }
-    var result = LLVMNullValue()
-    try (valuePtr = LibC.malloc<LLVMValueRef>(count: values.size).asResource()) {
-        var valueIdx: Int64 = 0
-        while (valueIdx < values.size) {
-            unsafe { (valuePtr.value + valueIdx).write(values[valueIdx]) }
-            valueIdx++
-        }
-        result = unsafe { LLVMConstNamedStruct(structType, valuePtr.value, UInt32(values.size)) }
-    }
-    return result
-}
-
-private func StructTypeInContext(context: LLVMContextRef, fieldTypes: ArrayList<LLVMTypeRef>): LLVMTypeRef {
-    if (fieldTypes.isEmpty()) {
-        return unsafe { LLVMStructTypeInContext(context, CPointer<LLVMTypeRef>(), 0u32, 0) }
-    }
-    var result = LLVMNullType()
-    try (typePtr = LibC.malloc<LLVMTypeRef>(count: fieldTypes.size).asResource()) {
-        var fieldIdx: Int64 = 0
-        while (fieldIdx < fieldTypes.size) {
-            unsafe { (typePtr.value + fieldIdx).write(fieldTypes[fieldIdx]) }
-            fieldIdx++
-        }
-        result = unsafe { LLVMStructTypeInContext(context, typePtr.value, UInt32(fieldTypes.size), 0) }
     }
     return result
 }
@@ -100,141 +66,112 @@ private func BuildPackedRawStringData(cjStrings: HashMap<String, String>,
     return rawData
 }
 
-private func GetReadOnlyArrayKlassInfo(cgMod: CGModule, moduleHandle: LLVMModuleHandle): LLVMValueRef {
-    let name = "RawArray<UInt8>.ti"
-    let existing = GetNamedGlobal(moduleHandle, name)
-    if (!existing.isNull()) {
-        return existing
+// Native bytes are only a copy source. The allocator owns the managed header and length.
+private func CreateStringBytesGlobal(cgMod: CGModule, moduleHandle: LLVMModuleHandle,
+    rawData: String): LLVMValueRef {
+    var bytes = LLVMNullValue()
+    try (rawCString = unsafe { LibC.mallocCString(rawData) }.asResource()) {
+        bytes = unsafe { LLVMConstStringInContext(cgMod.GetLLVMContext().raw,
+            rawCString.value, UInt32(rawData.size), 1) }
     }
-    let contextHandle = cgMod.GetLLVMContext()
-    let context = contextHandle.raw
-    let i8Type = unsafe { LLVMInt8TypeInContext(context) }
-    let i16Type = unsafe { LLVMInt16TypeInContext(context) }
-    let i32Type = unsafe { LLVMInt32TypeInContext(context) }
-    let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
-    let i32PtrType = unsafe { LLVMPointerType(i32Type, 0u32) }
-    let typeInfoType = CGType.GetOrCreateTypeInfoType(cgMod.GetLLVMContext())
-    let bitMapPtrType = unsafe { LLVMPointerType(CGType.GetBitMapType(contextHandle), 0u32) }
-    let extensionDefPtrPtrType = unsafe {
-        LLVMPointerType(CGType.GetOrCreateExtensionDefPtrType(contextHandle), 0u32)
-    }
-    let typeTemplateType = CGType.GetOrCreateTypeTemplateType(contextHandle)
-    let rawArrayTypeTemplate = GetOrInsertGlobal(moduleHandle, "RawArray.tt", typeTemplateType)
-    let memberTypeInfoName = "UInt8.ti"
-    let memberTypeInfoExisted = !GetNamedGlobal(moduleHandle, memberTypeInfoName).isNull()
-    let memberTypeInfo = GetOrInsertGlobal(moduleHandle, memberTypeInfoName, typeInfoType)
-    if (!memberTypeInfoExisted) {
-        LLVMSetGlobalStringMetadata(contextHandle, memberTypeInfo, GC_TYPE_META_NAME, "UInt8.Type")
-        addAttribute(memberTypeInfo, GC_KLASS_ATTR)
-        addAttribute(memberTypeInfo, NOT_MODIFIABLE_CLASS_ATTR)
-    }
-
-    let typeInfoValues = ArrayList<LLVMValueRef>()
-    typeInfoValues.add(cgMod.GenerateTypeNameConstantString("RawArray<UInt8>", false))
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, RAW_ARRAY_UINT8_KIND, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i16Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstNull(bitMapPtrType) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i32Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i8Type, 0u64, 0) })
-    typeInfoValues.add(unsafe { LLVMConstInt(i16Type, INHERITED_CLASS_NUM_FE_FLAG, 0) })
-    typeInfoValues.add(unsafe { LLVMConstNull(i32PtrType) })
-    typeInfoValues.add(unsafe { LLVMConstBitCast(rawArrayTypeTemplate, i8PtrType) })
-    typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
-    typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
-    typeInfoValues.add(memberTypeInfo)
-    typeInfoValues.add(unsafe { LLVMConstNull(extensionDefPtrPtrType) })
-    typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
-    typeInfoValues.add(unsafe { LLVMConstNull(i8PtrType) })
-
-    let globalValue = GetOrInsertGlobal(moduleHandle, name, typeInfoType)
+    let globalValue = GetOrInsertGlobal(moduleHandle, GetCjStringDataLiteralName(rawData),
+        unsafe { LLVMTypeOf(bytes) })
     unsafe {
-        LLVMSetInitializer(globalValue, ConstStruct(typeInfoType, typeInfoValues))
-        addAttribute(globalValue, GC_KLASS_ATTR)
-        if (cgMod.GetCGContext().GetCompileOptions().target.os != OSType.WINDOWS) {
-            LLVMSetLinkage(globalValue, LLVMLinkageValue(LLVMLinkage.LinkOnceODR))
-        }
+        LLVMSetInitializer(globalValue, bytes)
+        LLVMSetGlobalConstant(globalValue, 1)
+        LLVMSetLinkage(globalValue, LLVMLinkageValue(LLVMLinkage.Private))
     }
-    AddLinkageTypeMetadata(globalValue, LLVMLinkage.Internal, false)
-    let layoutType = CGArrayType.GenerateArrayLayoutTypeInfo(cgMod.GetCGContext(), ARRAY_LAYOUT_PREFIX + "UInt8",
-        unsafe { LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw) })
-    let layoutName = LLVMCStringToString(unsafe { LLVMGetStructName(layoutType) }) ?? ""
-    LLVMSetGlobalStringMetadata(contextHandle, globalValue, GC_TYPE_META_NAME, layoutName)
     return globalValue
 }
 
-private func CreateRawArrayGlobal(cgMod: CGModule, moduleHandle: LLVMModuleHandle, rawData: String): LLVMValueRef {
+public func GetCjStringMaterializeFunction(cgMod: CGModule, moduleIndex: Int64): LLVMValueRef {
     let context = cgMod.GetLLVMContext().raw
-    let i8Type = unsafe { LLVMInt8TypeInContext(context) }
-    let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
-    let i64Type = unsafe { LLVMInt64TypeInContext(context) }
-
-    var strContent = LLVMNullValue()
-    try (rawCString = unsafe { LibC.mallocCString(rawData) }.asResource()) {
-        strContent = unsafe { LLVMConstStringInContext(context, rawCString.value, UInt32(rawData.size), 1) }
-    }
-
-    let rawArrayFieldTypes = ArrayList<LLVMTypeRef>()
-    rawArrayFieldTypes.add(i8PtrType)
-    rawArrayFieldTypes.add(i64Type)
-    rawArrayFieldTypes.add(unsafe { LLVMTypeOf(strContent) })
-    let rawArrayType = StructTypeInContext(context, rawArrayFieldTypes)
-
-    let arrayKlassInfo = GetReadOnlyArrayKlassInfo(cgMod, moduleHandle)
-    let rawArrayValues = ArrayList<LLVMValueRef>()
-    rawArrayValues.add(unsafe { LLVMConstBitCast(arrayKlassInfo, i8PtrType) })
-    rawArrayValues.add(unsafe { LLVMConstInt(i64Type, UInt64(rawData.size), 1) })
-    rawArrayValues.add(strContent)
-    let rawArrayData = ConstStruct(rawArrayType, rawArrayValues)
-
-    let rawDataName = GetCjStringDataLiteralName(rawData)
-    let rawDataGlobal = GetOrInsertGlobal(moduleHandle, rawDataName, rawArrayType)
-    unsafe {
-        LLVMSetInitializer(rawDataGlobal, rawArrayData)
-        LLVMSetGlobalConstant(rawDataGlobal, 1)
-        addAttribute(rawDataGlobal, CJSTRING_DATA_ATTR)
-        LLVMSetLinkage(rawDataGlobal, LLVMLinkageValue(LLVMLinkage.Private))
-    }
-    return rawDataGlobal
+    let functionType = unsafe { LLVMFunctionType(LLVMVoidTypeInContext(context),
+        CPointer<LLVMTypeRef>(), 0u32, 0) }
+    let name = cgMod.GetCGContext().GetCurrentPkgName() + ".cjstring.materialize." + moduleIndex.toString()
+    let function = cgMod.GetOrInsertFunction(name, functionType)
+    SetCangjieGC(function)
+    AddFnAttr(function, "noinline")
+    cgMod.SetExceptionIntrinsicPersonality(function)
+    AddLinkageTypeMetadata(function, LLVMLinkage.External, cgMod.GetCGContext().IsCGParallelEnabled())
+    unsafe { LLVMSetVisibility(function, 1) } // hidden, shared by this package's split modules
+    return function
 }
 
-private func InitializeOneCjStringLiteral(cgMod: CGModule, moduleHandle: LLVMModuleHandle,
-    rawDataGlobal: LLVMValueRef, rawData: String, cjStringName: String, cjStringContent: String): Unit {
-    let cjStringGlobal = GetNamedGlobal(moduleHandle, cjStringName)
-    if (cjStringGlobal.isNull()) {
-        return
-    }
-    if (let Some(pos) <- rawData.indexOf(cjStringContent)) {
-        let context = cgMod.GetLLVMContext().raw
-        let i8Type = unsafe { LLVMInt8TypeInContext(context) }
-        let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
-        let i8PtrAddr1Type = unsafe { LLVMPointerType(i8Type, 1u32) }
-        let i32Type = unsafe { LLVMInt32TypeInContext(context) }
-        let cjStringType = cgMod.GetCGContext().GetCjStringType()
-        let i8Ptr = unsafe { LLVMConstBitCast(rawDataGlobal, i8PtrType) }
-        let i8PtrAddr1 = unsafe { LLVMConstAddrSpaceCast(i8Ptr, i8PtrAddr1Type) }
-
-        let cjStringValues = ArrayList<LLVMValueRef>()
-        cjStringValues.add(i8PtrAddr1)
-        cjStringValues.add(unsafe { LLVMConstInt(i32Type, UInt64(pos), 1) })
-        cjStringValues.add(unsafe { LLVMConstInt(i32Type, UInt64(cjStringContent.size), 1) })
-        let cjStringInitializer = ConstStruct(cjStringType, cjStringValues)
-        unsafe { LLVMSetInitializer(cjStringGlobal, cjStringInitializer) }
-    }
+private func InitializeOneCjStringLiteral(irBuilder: IRBuilder2, moduleHandle: LLVMModuleHandle,
+    array: LLVMValueRef, rawArrayTy: RawArrayType, rawData: String,
+    cjStringName: String, cjStringContent: String): Unit {
+    let globalValue = GetNamedGlobal(moduleHandle, cjStringName)
+    if (globalValue.isNull()) { return }
+    let pos = rawData.indexOf(cjStringContent).getOrThrow()
+    let stringType = irBuilder.GetCGContext().GetCjStringType()
+    // Publish only a complete slice; the reference leaf uses the normal global barrier.
+    irBuilder.CreateStore(irBuilder.GetInt32(pos),
+        irBuilder.CreateStructGEP(stringType, globalValue, 1u32))
+    irBuilder.CreateStore(irBuilder.GetInt32(cjStringContent.size),
+        irBuilder.CreateStructGEP(stringType, globalValue, 2u32))
+    let refSlot = irBuilder.CreateStructGEP(stringType, globalValue, 0u32)
+    let cgMod = irBuilder.GetCGModule()
+    let refCGType = CGType.GetOrCreate(cgMod, rawArrayTy)
+    let addrCGType = CGType.GetOrCreate(cgMod,
+        irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(rawArrayTy))
+    irBuilder.CreateStore(CGValue(array, refCGType), CGValue(refSlot, addrCGType))
 }
 
 public func InitializeCjStringLiteral(cgMod: CGModule): Unit {
-    if (let Some(moduleHandle) <- cgMod.GetLLVMModule()) {
+    let moduleHandle = cgMod.GetLLVMModule().getOrThrow()
+    let function = GetCjStringMaterializeFunction(cgMod,
+        cgMod.GetCGContext().GetSubCHIRPackage().subCHIRPackageIdx)
+    try (irBuilder = IRBuilder2(cgMod)) {
+        let entry = irBuilder.CreateEntryBasicBlock(function, "entry")
+        irBuilder.SetInsertPoint(entry)
         let cjStrings = cgMod.GetCGContext().GetCJStrings()
-        if (cjStrings.isEmpty()) {
-            return
+        if (!cjStrings.isEmpty()) {
+            let rawData = BuildPackedRawStringData(cjStrings, moduleHandle)
+            let bytes = CreateStringBytesGlobal(cgMod, moduleHandle, rawData)
+            let chirContext = cgMod.GetCGContext().GetCHIRBuilder().context
+            let rawArrayTy = chirContext.GetRawArrayTy(chirContext.GetUInt8Ty())
+            // HotSpot javaClasses.cpp:264-281: allocate a normal byte array, then set_value.
+            let array = irBuilder.AllocateArray(rawArrayTy, irBuilder.GetInt64(rawData.size))
+            if (!rawData.isEmpty()) {
+                let payload = irBuilder.GetArrayElementAddr(rawArrayTy, array, irBuilder.GetInt64(0), false)
+                irBuilder.CreateMemCpy(payload, 1u32, bytes, 1u32, irBuilder.GetInt64(rawData.size))
+            }
+            // The AS1 SSA value stays live through all stores; statepoint lowering relocates it.
+            // No derived payload address survives a call that may collect.
+            for ((name, content) in cjStrings) {
+                InitializeOneCjStringLiteral(irBuilder, moduleHandle, array, rawArrayTy, rawData, name, content)
+            }
         }
-        let rawData = BuildPackedRawStringData(cjStrings, moduleHandle)
-        let rawDataGlobal = CreateRawArrayGlobal(cgMod, moduleHandle, rawData)
-        for ((cjStringName, cjStringContent) in cjStrings) {
-            InitializeOneCjStringLiteral(cgMod, moduleHandle, rawDataGlobal, rawData, cjStringName, cjStringContent)
-        }
+        let _ = unsafe { LLVMBuildRetVoid(irBuilder.GetBuilder().raw) }
     }
+}
+
+// Called while CHIR block mappings are alive, before EmitFunctionIR frees the body.
+// Both ordinary init and reset reach the existing literal-init once body.
+public func EmitCjStringInitializationCalls(cgMod: CGModule, chirFunc: Function): Unit {
+    let pkg = cgMod.GetCGContext().GetCHIRPackage()
+    let literalInit = pkg.GetPackageLiteralInitFunc() ?? return
+    let ordinaryInit = pkg.GetPackageInitFunc() ?? return
+    let isLiteralInit = chirFunc.nodeId == literalInit.nodeId
+    if (!isLiteralInit && chirFunc.nodeId != ordinaryInit.nodeId) { return }
+    for (block in chirFunc.GetBody().getOrThrow().GetBlocks()) {
+        if (!block.TestAttr(Attribute.INITIALIZER)) { continue }
+        let llvmBlock = cgMod.GetMappedBB(block).getOrThrow()
+        try (irBuilder = IRBuilder2(cgMod)) {
+            unsafe { LLVMPositionBuilderBefore(irBuilder.GetBuilder().raw, LLVMGetFirstInstruction(llvmBlock)) }
+            if (isLiteralInit) {
+                for (module in cgMod.GetCGContext().GetCGPkgContext().GetCGModules()) {
+                    let function = GetCjStringMaterializeFunction(cgMod,
+                        module.GetCGContext().GetSubCHIRPackage().subCHIRPackageIdx)
+                    let _ = irBuilder.CreateCallOrInvoke(function, ArrayList<LLVMValueRef>())
+                }
+            } else {
+                let function = cgMod.GetOrInsertCGFunction(literalInit).GetRawFunction()
+                let _ = irBuilder.CreateCallOrInvoke(function, ArrayList<LLVMValueRef>())
+            }
+        }
+        return
+    }
+    throw IllegalStateException("package initializer has no initializer block")
 }

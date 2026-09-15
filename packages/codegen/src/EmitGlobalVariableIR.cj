@@ -49,12 +49,13 @@ private class GlobalVariableGeneratorImpl <: IRGeneratorImpl {
                 if (initializer.GetType().getOrThrow().IsString()) {
                     let stringLiteral = (initializer as StringLiteral) ??
                         throw IllegalStateException("string literal global initializer expected StringLiteral")
+                    unsafe { LLVMSetInitializer(rawGlobal, LLVMConstNull(cgMod.GetCGContext().GetCjStringType())) }
                     cgMod.GetCGContext().AddCJString(
                         LLVMCStringToString(unsafe { LLVMGetValueName(rawGlobal) }) ?? "", stringLiteral.value)
                 } else {
                     unsafe { LLVMSetInitializer(rawGlobal, literalValue) }
                 }
-                if (chirGV.TestAttr(Attribute.READONLY)) {
+                if (chirGV.TestAttr(Attribute.READONLY) && !initializer.GetType().getOrThrow().IsString()) {
                     unsafe {
                         LLVMSelfhostGlobalVariableAddEnumAttribute(rawGlobal, 49u32)
                         LLVMSetGlobalConstant(rawGlobal, 1)
