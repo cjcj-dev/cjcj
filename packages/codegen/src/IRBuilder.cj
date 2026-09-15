@@ -1101,6 +1101,11 @@ public class IRBuilder2 <: Resource {
             }
         }
         if (elementType.toUIntNative() == CGType.GetRefType(GetLLVMContext()).toUIntNative()) {
+            if (IsPlainLocalReferenceAddress(addr)) {
+                let loaded = buildLoad(elementType, addr, name)
+                TrackBasePtr(loaded, GetTrackedBasePtr(loaded) ?? loaded)
+                return loaded
+            }
             if (let Some(baseObject) <- GetTrackedManagedBase(addr)) {
                 return CallGCRead(ArrayList<LLVMValueRef>([baseObject, addr]))
             }
@@ -1369,6 +1374,25 @@ public class IRBuilder2 <: Resource {
 
     private func IsLLVMArgument(value: LLVMValueRef): Bool {
         return !value.isNull() && !unsafe { LLVMIsAArgument(value) }.isNull()
+    }
+
+    // ZGC uncolored local roots: the storage owner determines the load kind.
+    // A field of an sret/local aggregate is still stack storage after GEP/casts.
+    private func IsPlainLocalReferenceAddress(address: LLVMValueRef): Bool {
+        var base = address
+        while (!base.isNull()) {
+            if (!unsafe { LLVMIsAAllocaInst(base) }.isNull()) {
+                return true
+            }
+            if (!unsafe { LLVMIsAGetElementPtrInst(base) }.isNull() ||
+                !unsafe { LLVMIsABitCastInst(base) }.isNull() ||
+                !unsafe { LLVMIsAAddrSpaceCastInst(base) }.isNull()) {
+                base = unsafe { LLVMGetOperand(base, 0u32) }
+            } else {
+                return false
+            }
+        }
+        return false
     }
 
     private func TrackBasePtr(value: LLVMValueRef, baseObject: LLVMValueRef): Unit {
