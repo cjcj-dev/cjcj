@@ -505,7 +505,9 @@ private func TryStoreStructPtrValueForAddress(irBuilder: IRBuilder2, value: CGVa
         return Some(CallGCWriteStaticStruct(irBuilder, addr.GetRawValue(), source, fieldSizeValue,
             destCGType.GetLLVMType()))
     }
-    if (IsAddressSpacePointer(addr.GetRawValue(), 1u32) && irBuilder.IsTypeContainsRef(destCGType.GetLLVMType())) {
+    if (IsAddressSpacePointer(addr.GetRawValue(), 1u32) &&
+        !irBuilder.IsPlainLocalReferenceAddress(addr.GetRawValue()) &&
+        irBuilder.IsTypeContainsRef(destCGType.GetLLVMType())) {
         return Some(irBuilder.CallGCWriteStruct(addr.GetRawValue(), addr.GetRawValue(), source, fieldSizeValue,
             destCGType.GetOriginal().ToString()))
     }

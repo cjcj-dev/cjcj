@@ -416,6 +416,7 @@ foreign {
     func LLVMIsAConstantPointerNull(value: LLVMValueRef): LLVMValueRef
     func LLVMIsAGetElementPtrInst(value: LLVMValueRef): LLVMValueRef
     func LLVMIsABitCastInst(value: LLVMValueRef): LLVMValueRef
+    func LLVMIsAAddrSpaceCastInst(value: LLVMValueRef): LLVMValueRef
     func LLVMGetIntTypeWidth(integerTy: LLVMTypeRef): UInt32
 
     func LLVMCreateBuilderInContext(context: LLVMContextRef): LLVMBuilderRef
