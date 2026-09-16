@@ -5277,6 +5277,13 @@ public class IRBuilder2 <: Resource {
         CallExceptionIntrinsicThrow(exceptionValue)
     }
 
+    // Global declarations retain the cache address; runtime consumers get a
+    // normal String value read through the mutable root's aggregate barrier.
+    private func ReadStringLiteralCache(cache: LLVMValueRef): LLVMValueRef {
+        if (GetInsertBlock().isNull()) { return cache }
+        return CreateLoad(GetCGContext().GetCjStringType(), cache)
+    }
+
     public func CreateStringLiteral(value: String): LLVMValueRef {
         let baseName = GetCjStringLiteralName(value)
         var cjStringName = baseName
@@ -5306,7 +5313,7 @@ public class IRBuilder2 <: Resource {
                 }
                 if (!unsafe { LLVMIsAGlobalVariable(namedValue) }.isNull() && cjStrings.contains(cjStringName) &&
                     cjStrings[cjStringName] == value) {
-                    return namedValue
+                    return ReadStringLiteralCache(namedValue)
                 }
                 cjStringName = baseName + "." + collisionId.toString()
                 collisionId++
@@ -5319,12 +5326,14 @@ public class IRBuilder2 <: Resource {
                 result = unsafe { LLVMAddGlobal(moduleHandle.raw, GetCGContext().GetCjStringType(), nameCString.value) }
             }
             unsafe {
-                LLVMSetGlobalConstant(result, 1)
+                LLVMSetInitializer(result, LLVMConstNull(GetCGContext().GetCjStringType()))
+                LLVMSetGlobalConstant(result, 0)
                 addAttribute(result, CJSTRING_LITERAL_ATTR)
+                addAttribute(result, CJGLOBAL_VALUE_ATTR)
                 LLVMSetLinkage(result, LLVMLinkageValue(LLVMLinkage.Private))
             }
             GetCGContext().AddCJString(cjStringName, value)
-            return result
+            return ReadStringLiteralCache(result)
         }
         throw IllegalStateException("cannot create string literal without an LLVM module")
     }

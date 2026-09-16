@@ -1,0 +1,11 @@
+--- a/packages/codegen/src/EmitPackageIR.cj
++++ b/packages/codegen/src/EmitPackageIR.cj
+@@ -1004,7 +1004,7 @@
+     for (gi in giList) {
+         let flagResetFunc = irBuilder.GetCGModule().GetOrInsertFunction(gi, giFuncType)
+         AddFnAttr(flagResetFunc, "noinline")
+-        let _ = irBuilder.CreateCall(flagResetFunc, giFuncType, ArrayList<LLVMValueRef>())
++        let _ = flagResetFunc
+     }
+ }
+ 

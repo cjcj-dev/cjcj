@@ -1,0 +1,10 @@
+--- a/packages/codegen/src/IRBuilder.cj
++++ b/packages/codegen/src/IRBuilder.cj
+@@ -5329,7 +5329,6 @@
+                 LLVMSetInitializer(result, LLVMConstNull(GetCGContext().GetCjStringType()))
+                 LLVMSetGlobalConstant(result, 0)
+                 addAttribute(result, CJSTRING_LITERAL_ATTR)
+-                addAttribute(result, CJGLOBAL_VALUE_ATTR)
+                 LLVMSetLinkage(result, LLVMLinkageValue(LLVMLinkage.Private))
+             }
+             GetCGContext().AddCJString(cjStringName, value)

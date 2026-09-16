@@ -1,0 +1,11 @@
+--- a/packages/codegen/src/IRBuilder.cj
++++ b/packages/codegen/src/IRBuilder.cj
+@@ -5332,7 +5332,7 @@
+                 addAttribute(result, CJGLOBAL_VALUE_ATTR)
+                 LLVMSetLinkage(result, LLVMLinkageValue(LLVMLinkage.Private))
+             }
+-            GetCGContext().AddCJString(cjStringName, value)
++            GetCGContext().AddCJString(cjStringName, "")
+             return ReadStringLiteralCache(result)
+         }
+         throw IllegalStateException("cannot create string literal without an LLVM module")

@@ -17,6 +17,7 @@ import cjcj::option.{ArchType, EnvironmentType, OSType}
 import cjcj::mangle.MANGLE_FUNC_PARAM_TYPE_PREFIX
 import cjcj::mangle.MANGLE_VOID_TY_SUFFIX
 import cjcj::mangle.SPECIAL_NAME_FOR_IMPORTS_INIT_FUNCTION
+import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_FLAG_RESET_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_LITERAL_FUNCTION
 import cjcj::mangle.SPECIAL_NAME_FOR_INIT_RESET_FUNCTION
@@ -114,6 +115,7 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
         SpecifyPackageInitFunc(cgMod)
     }
     GenerateInterfaceExtensionDefs(cgMod)
+    InitializeCjStringLiteral(cgMod)
     // Mirror C++ EmitPackageIR.cpp:370 cgMod.GenTypeTemplate(): drain delayed generic
     // TypeTemplate definitions before TypeInfo generation.
     cgMod.GenTypeTemplate()
@@ -124,7 +126,6 @@ private func GenSubCHIRPackagePart2(cgMod: CGModule): Unit {
     cgMod.Opt()
     GenerateReflectionMetadata(cgMod, subCHIRPackage)
     cgMod.GenTypeInfo()
-    InitializeCjStringLiteral(cgMod)
     GenerateBinarySectionInfo(cgMod)
     KeepSomeTypesManually(cgMod)
     cgMod.EraseUselessInstsAndDeclarations()
@@ -660,6 +661,9 @@ private func CreateCJEntryFunction(cgMod: CGModule, moduleHandle: LLVMModuleHand
             CreateUnwindBlockForTryCatchWrapper(cgMod, irBuilder, i32Type)
         }
     }
+    // The synthetic entry is not a CHIR CGFunction in CGModule.Opt(). Its
+    // literal loads now create managed aggregate temporaries too.
+    CGFunction.AddZeroInitForStructWithRefField(cgMod, entryFunc)
     return entryFunc
 }
 
@@ -904,6 +908,8 @@ private func CreatePackageInitResetFunction(cgMod: CGModule): Unit {
     try (irBuilder = IRBuilder2(cgMod)) {
         let entry = irBuilder.CreateEntryBasicBlock(resetFunc, "entry")
         unsafe { LLVMPositionBuilderAtEnd(irBuilder.GetBuilder().raw, entry) }
+        // Reset reuses completed literal cache units; only the old variable flags reset.
+        EmitCjStringCacheCalls(cgMod, irBuilder)
         let flagResetFunc = CreatePackageInitFlagResetFunction(cgMod)
         let _ = irBuilder.CreateCallOrInvoke(flagResetFunc, ArrayList<LLVMValueRef>())
 
@@ -1132,7 +1138,10 @@ private func CollectDependentPackageByCalleeName(cgPkgContext: CGPkgContext, cal
     let calleeSuffix = calleeName[calleePrefixSize..]
     if (calleeSuffix == callDependentPackagesInitsSuffix) {
         CollectDependentPackages(cgPkgContext, callee, giList, visitedFunctions, dependentPackages)
-    } else if (calleeName.startsWith(PKG_GV_INIT_PREFIX)) {
+    } else if (calleeName.startsWith(PKG_GV_INIT_PREFIX) &&
+        calleeSuffix == SPECIAL_NAME_FOR_INIT_FUNCTION + MANGLE_FUNC_PARAM_TYPE_PREFIX + MANGLE_VOID_TY_SUFFIX) {
+        // Only an ordinary package initializer identifies a dependency. A call to
+        // this package's literal initializer must not become a recursive reset.
         let dependentPackage = calleePrefix + callDependentPackageInitSuffix
         if (!dependentPackages.contains(dependentPackage)) {
             dependentPackages.add(dependentPackage)

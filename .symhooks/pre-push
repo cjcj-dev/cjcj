@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# ⭐⭐⭐ sym 装的 pre-push 闸。⛔ 别删 —— 删了 G1/G10 就只剩「任务书里写过」。
+# 用户令：⛔ 永不推官方（gitcode.com / CangjieFork / upstream）；⛔ 禁任何 AI 署名。
+set -u
+remote_name="${1:-}"
+remote="${1:-}"
+remote_url="${2:-}"
+
+fail() { printf '%s\n' "$@" 1>&2; exit 1; }
+
+# ── G1：目标白名单（⛔ 黑名单优先） ──────────────────────────────
+for d in gitcode.com CangjieFork; do
+  case "$remote_url" in
+    *"$d"*) fail "⛔⛔ G1 拒推：目标 $remote_url 命中黑名单「$d」" \
+                 "⭐ 可推的只有 cjcj-dev/*（cjcj origin master · cangjie_runtime cjcjdev main · llvm_rebase origin main）" ;;
+  esac
+done
+ok=0
+for a in github.com/cjcj-dev/; do
+  case "$remote_url" in *"$a"*) ok=1 ;; esac
+done
+[ "$ok" = 1 ] || fail "⛔⛔ G1 拒推：目标 $remote_url 不在白名单内（github.com/cjcj-dev/）" \
+                      "⭐ 检查 remote：git remote -v"
+
+# ── G10：本次要推的提交里不许有 AI 署名 / 作者必须是 Zxilly ────────
+# ⭐ stdin 每行：<local ref> <local sha> <remote ref> <remote sha>
+while read -r lref lsha rref rsha; do
+  [ "$lsha" = "0000000000000000000000000000000000000000" ] && continue
+  # ⭐ 0912：本次「新增」＝ lsha 减去本 remote 全部已知分支（含 main）可达的提交，再减去旧远端头。
+  #   0911 的「最近公共祖先」只覆盖新分支；已有分支 force-push 接回新主线时 rsha..lsha 会把主线上机器人
+  #   作者的合并提交算成本次产出（#108 第三批实撞）⇒ 两种情况统一用 --not 排除法。
+  excl=""
+  [ "$rsha" != "0000000000000000000000000000000000000000" ] && excl="$rsha"
+  for r in $(git for-each-ref --format='%(objectname)' "refs/remotes/$remote/" 2>/dev/null); do excl="$excl $r"; done
+  if [ -n "$excl" ]; then range="$lsha --not $excl"; else range="$lsha"; fi
+  bad="$(git log --format='%H %an <%ae>%n%B' $range 2>/dev/null \
+         | grep -n -i -E 'Co-authored-by|Generated with \[?Claude|Claude Code|claude\.ai/code|noreply@anthropic\.com' || true)"
+  if [ -n "$bad" ]; then
+    fail "⛔⛔ G10 拒推：$range 的提交信息里有 AI 署名" "$bad" \
+         "⇒ ⭐ 用 git rebase -i / git commit --amend 去掉那几行再推（⛔ 别加 --no-verify）"
+  fi
+  wrong="$(git log --format='%H %an <%ae>' $range 2>/dev/null | grep -v 'Zxilly <zxilly@outlook.com>' || true)"
+  if [ -n "$wrong" ]; then
+    fail "⛔ G10 拒推：$range 里有作者不是「Zxilly <zxilly@outlook.com>」的提交" "$wrong" \
+         "⇒ ⭐ git -c user.name=Zxilly -c user.email=zxilly@outlook.com commit --amend --reset-author"
+  fi
+done
+exit 0

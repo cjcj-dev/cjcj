@@ -33,6 +33,7 @@ private class FunctionGeneratorImpl <: IRGeneratorImpl {
             }
             if (let Some(entryBlock) <- body.GetEntryBlock()) {
                 EmitBasicBlockIR(cgMod, entryBlock)
+                EmitCjStringInitializationCalls(cgMod, chirFunc)
             }
             if (!unsafe { LLVMGetSubprogram(rawFunction) }.isNull()) {
                 cgMod.GetCGContext().debugValue = LLVMNullValue()
