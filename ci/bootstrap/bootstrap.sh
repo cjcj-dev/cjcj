@@ -675,14 +675,14 @@ stage1() {
   # The compiler links std statically. Finish the target std before its link;
   # replacing SDK files afterwards cannot change the std already inside the ELF.
   assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"
-  stdlib_build stdlib-stage2 "$sdk" "$CRT" "$std" "$previous_std"
+  stdlib_build stdlib-stage2 "$sdk" "$HRT" "$std" "$previous_std"
   assemble_stage1_sdk "$sdk" "$compiler" "$std"
-  ld=$(sdk_ld_path "$sdk" "$CRT")
+  ld=$(sdk_ld_path "$sdk" "$HRT")
   local copy seed
   copy="$WORK/cjcj-src-stage1"
   isolate_cjcj_src "$copy"
   shim_build stage1 "$sdk" "$CRT" "$copy" "$sdk/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o"
-  cjpm_build "$sdk" "$CRT" "$copy" "-j 1" "$STAGE1_HEAP"
+  cjpm_build "$sdk" "$HRT" "$copy" "-j 1" "$STAGE1_HEAP"
   seed=$(resolve_cjpm_product "$copy/target/release/bin" cjcj-stage2)
   install_stage_compiler "$seed" "$out" "$WORK/cjc-stage2"
   if [ "$DRY" -eq 0 ]; then
