@@ -4,9 +4,13 @@ import cjcj::utils.Identifiable
 
 public struct Ptr<T> <: Comparable<Ptr<T>> & Equatable<Ptr<T>> & Hashable where T <: Object & Identifiable {
     public let value: T
+    // C++ SafePointer.h:317-319 compares stored T* bits; cache identity so TreeSet
+    // compare does not virtual-dispatch objectId (GetMTable) on the hot path.
+    private let id: Int64
 
     public init(v: T) {
         value = v
+        id = v.objectId
     }
 
     public operator func ==(right: Ptr<T>): Bool {
@@ -17,23 +21,21 @@ public struct Ptr<T> <: Comparable<Ptr<T>> & Equatable<Ptr<T>> & Hashable where 
         return !refEq(value, right.value)
     }
 
-    // C++ SafePointer.h:316-319 Ptr::operator< compares pointer identity.
     public operator func <(right: Ptr<T>): Bool {
-        return value.objectId < right.value.objectId
+        return id < right.id
     }
 
-    // Comparable adapter for C++ SafePointer.h:316-319 Ptr::operator<.
     public func compare(right: Ptr<T>): Ordering {
-        if (this < right) {
+        if (id < right.id) {
             return Ordering.LT
         }
-        if (right < this) {
+        if (right.id < id) {
             return Ordering.GT
         }
         return Ordering.EQ
     }
 
     public func hashCode(): Int64 {
-        return value.objectId.hashCode()
+        return id.hashCode()
     }
 }
