@@ -27,7 +27,7 @@ delete process.env.CANGJIE_BUILD_DRY_RUN;
 const original = buildConfig({workspace: path.join(root, 'workspace'), buildRoot: root, consumerSdk: sdk});
 const config = {...original, target: {...original.target, spec: {...original.target.spec,
   llvmBinDir: path.join(sdk, 'bin'), opensslLibDir: '/usr/lib/x86_64-linux-gnu'}}};
-const sample = await write(path.join(root, 'main.cj'), 'main() { return 47 }\n');
+const sample = await write(path.join(root, 'main.cj'), 'main(): Int64 {\n    47\n}\n');
 const python = `import hashlib, json, os, pathlib, shutil, subprocess, sys, time
 if sys.argv[1] == 'build':
  output = pathlib.Path.cwd()/'real-consumer'
