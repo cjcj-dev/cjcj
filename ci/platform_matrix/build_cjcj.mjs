@@ -610,7 +610,9 @@ if (process.platform === 'win32') {
       await produceFinalCompiler({binary: final, outdir: finalCompilerOutput, platform: 'windows-x64',
         repository: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}.git`, commit: process.env.GITHUB_SHA,
         runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, std: finalStd,
-        lineage: {stage: 'windows-W2', parentSha256, stdSha256, compilerSha256: await fileSha256(final)},
+        lineage: {stage: 'windows-W2', parentSha256, stdSha256, compilerSha256: await fileSha256(final),
+          tuple: sdkRuntimeDirName, runtimeSha256: await fileSha256(installedRuntimeLib),
+          llvmManifestSha256: await fileSha256(fixedLlvmManifest)},
       });
     }
   }

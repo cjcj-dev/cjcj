@@ -179,7 +179,7 @@ const compilerArtifact = typeof argv['compiler-artifact'] === 'string' ? argv['c
 if (compilerArtifact) {
   const selected = await consumeFinalCompiler({directory: compilerArtifact, platform,
     repository: cjcjSourceRepository, commit: cjcjSourceCommit,
-    runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, std: stdDir});
+    runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, std: stdDir, llvmManifest});
   if (await fs.realpath(selected) !== await fs.realpath(binary)) throw new Error('package binary differs from selected final compiler');
 }
 const selectedCompilerSha256 = await fileSha256(binary);

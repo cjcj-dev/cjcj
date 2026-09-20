@@ -255,6 +255,10 @@ if (dryRun) {
     parentSha256: stage2Sha,
     stdSha256: await stdIdentity(finalStd),
     stage: 'stage3',
+    tuple,
+    parentEntrySha256: compilerEntrySha,
+    runtimeSha256: await sha256(runtime),
+    llvmManifestSha256: await sha256(path.join(requiredEnv('CJCJ_FIXED_LLVM_DIR'), 'llvm-tools.manifest')),
   }, null, 2)}\n`);
   console.log(`STAGE3_BUILD_PASS compiler=${stage3Product} sha256=${stage3Sha} input_compiler_sha256=${stage2Sha} input_std_sha256=${finalCoreSha}`);
 }

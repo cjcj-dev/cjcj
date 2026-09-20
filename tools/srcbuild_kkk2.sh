@@ -14,7 +14,7 @@ readonly HOST_TOOLCHAIN_PIN="$REPO_ROOT/ci/host_sdk_pin.env"
 # Numeric GHA ids kept for --from-step/--through-step. Deleted ids 15-19 and
 # 27-28 are not in this order: bootstrap (31+32) and final-std (33) run after
 # P07/step 14, then stdx/tools/package, then shim/inject.
-DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 33 20 21 22 23 24 25 26 29 30)
+DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 30 33 20 21 22 23 24 25 26 29)
 readonly ORIGINAL_ARGS=("$@")
 
 read_host_toolchain_pin() {

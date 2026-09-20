@@ -41,7 +41,7 @@ export async function produceFinalCompiler({binary, outdir, platform, repository
   return installed;
 }
 
-export async function consumeFinalCompiler({directory, platform, repository, commit, runId, runAttempt, std}) {
+export async function consumeFinalCompiler({directory, platform, repository, commit, runId, runAttempt, std, llvmManifest}) {
   const artifactName = platform === 'windows-x64' ? 'cjc.exe' : 'cjc';
   const binary = path.join(directory, artifactName);
   const value = await verifyComponentProvenance({component: 'compiler', artifactName, binary,
@@ -50,6 +50,9 @@ export async function consumeFinalCompiler({directory, platform, repository, com
   if (value.production?.runId !== runId || value.production?.runAttempt !== runAttempt
     || value.production?.stdSha256 !== await stdIdentity(std)) {
     throw new Error('final compiler run/std mismatch');
+  }
+  if (llvmManifest && value.production?.llvmManifestSha256 !== await fileSha256(llvmManifest)) {
+    throw new Error('final compiler LLVM tuple mismatch');
   }
   return binary;
 }
