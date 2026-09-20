@@ -107,6 +107,13 @@ jobs:
           name: ${{ inputs.std_artifact }}
           path: ${{ env.FINAL_STD_DIR }}
 
+      - name: Validate native compiler artifact contract
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          SELECTED_COMPILER_ARTIFACT: ${{ inputs.compiler_artifact }}
+        run: test "$SELECTED_COMPILER_ARTIFACT" = "final-compiler-$RELEASE_PLATFORM"
+
       - name: Download final compiler
         if: runner.os != 'Windows'
         uses: actions/download-artifact@v8

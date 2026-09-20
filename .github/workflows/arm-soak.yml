@@ -38,6 +38,7 @@ jobs:
       platform: linux-aarch64
       llvm_platform: linux_aarch64
       sdk_runtime_dir: linux_aarch64_cjnative
+      compiler_artifact: final-compiler-linux-aarch64
       std_artifact: ${{ inputs.std_artifact }}
       version: arm-soak
       verify: false

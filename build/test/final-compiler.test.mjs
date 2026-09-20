@@ -15,6 +15,7 @@ for (const platform of ['linux-x64', 'linux-aarch64', 'darwin-x64', 'darwin-arm6
     await fs.writeFile(path.join(std, 'PROVENANCE.txt'), 'source std manifest');
     await fs.writeFile(path.join(std, 'core.a'), 'source static std');
     await fs.writeFile(binary, 'final compiler fixture');
+    await fs.writeFile(path.join(root, 'decoy'), 'old workspace compiler fixture');
     const common = {platform, repository: 'https://github.com/cjcj-dev/cjcj.git', commit: 'a'.repeat(40), runId: '12', runAttempt: '1', std};
     const outdir = path.join(root, 'artifact');
     const installed = await produceFinalCompiler({...common, binary, outdir, lineage: {

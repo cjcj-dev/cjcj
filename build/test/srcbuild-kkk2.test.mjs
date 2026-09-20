@@ -643,15 +643,16 @@ test('DAG runs bootstrap after verify-source-pins and omits removed compiler/std
   const order = parseDagOrder(script);
   assert.ok(order.indexOf(14) < order.indexOf(31));
   assert.ok(order.indexOf(31) < order.indexOf(32));
-  assert.ok(order.indexOf(32) < order.indexOf(33));
+  assert.ok(order.indexOf(32) < order.indexOf(30));
+  assert.ok(order.indexOf(30) < order.indexOf(33));
   assert.ok(order.indexOf(33) < order.indexOf(20));
   assert.ok(order.indexOf(20) < order.indexOf(26));
 });
 
 test('restoring removed 15-19 calls turns the DAG contract red and only that contract', () => {
   const mutated = script.replace(
-    'DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 33 20 21 22 23 24 25 26 29 30)',
-    'DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 31 32 33 20 21 22 23 24 25 26 29 30)',
+    /DAG_ORDER=\(([^)]+)\)/,
+    (_, order) => `DAG_ORDER=(${order.replace('14 31', '14 15 16 17 18 19 31')})`,
   ) + '\nstep_16() { build_cli build compiler; }\n';
   const forbidden = compilerStdlibBeforeBootstrap(mutated);
   assert.ok(forbidden.includes('dag:16'));
