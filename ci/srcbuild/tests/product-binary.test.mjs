@@ -63,3 +63,16 @@ test('an unreadable directory says so rather than reporting an empty listing', a
     (error) => error.message.includes('unreadable') && error.message.includes('compose-sdk'),
   );
 });
+
+for (const name of ['cjc@cjcj.exe', 'cjcj.exe']) {
+  test(`resolves Windows producer ${name}`, async () => {
+    await withBin([name], async dir => {
+      assert.equal(path.basename(await resolveProductBinary(dir, 'Windows W2', {windows: true})), name);
+    });
+  });
+}
+test('Windows producer refuses ambiguous seeds', async () => {
+  await withBin(['cjc@cjcj.exe', 'cjcj.exe'], async dir => {
+    await assert.rejects(resolveProductBinary(dir, 'Windows W1', {windows: true}), /expected exactly one/);
+  });
+});

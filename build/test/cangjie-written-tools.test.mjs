@@ -136,3 +136,27 @@ for (const [tool, product] of [
     }
   });
 }
+
+for (const layout of ['same', 'alias', 'separate']) {
+  test(`package preserves the explicit producer SDK (${layout})`, async () => {
+    const {root, config} = packageFixture();
+    try {
+      const destination = path.join(config.softwareDir, 'cangjie');
+      const producer = layout === 'separate' ? path.join(root, 'producer') : destination;
+      file(producer, ['bin', 'cjc'], 'selected final compiler');
+      file(producer, ['lib', config.target.spec.runtimeTuple, 'libcangjie-std-core.a'], 'selected final std');
+      file(config.repoPath('compiler'), ['output', 'bin', 'cjc'], 'old compiler');
+      file(config.repoPath('compiler'), ['output', 'lib', config.target.spec.runtimeTuple, 'libcangjie-std-core.a'], 'old std');
+      let selected = producer;
+      if (layout === 'alias') {
+        selected = path.join(root, 'producer-alias');
+        fs.symlinkSync(producer, selected);
+      }
+      await runPackage(() => packageStage.run({...config, consumerSdk: selected}));
+      assert.equal(fs.readFileSync(path.join(destination, 'bin', 'cjc'), 'utf8'), 'selected final compiler');
+      assert.equal(fs.readFileSync(path.join(destination, 'lib', config.target.spec.runtimeTuple, 'libcangjie-std-core.a'), 'utf8'), 'selected final std');
+    } finally {
+      fs.rmSync(root, {recursive: true, force: true});
+    }
+  });
+}

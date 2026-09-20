@@ -6,6 +6,7 @@ import path from 'node:path';
 import {runRequiredCheck} from '../../../build/lib/fail-closed-probes.mjs';
 import {assertSdkCompilerRuntimeAbi} from '../../../build/lib/runtime-split.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
+import {produceFinalCompiler, fileSha256} from '../lib/final-compiler.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
 
 $.stdio = 'inherit';
@@ -24,6 +25,8 @@ if (process.platform !== target.spec.nodePlatform || process.arch !== target.spe
 const sdk = `${workspace}/software/cangjie`;
 const product = await resolveProductBinary('target/release/bin', 'compose-sdk');
 await $`test -x ${product}`;
+const lineage = JSON.parse(await fs.readFile(path.join(workspace, 'software', 'stage3-compiler.json'), 'utf8'));
+if (await fileSha256(product) !== lineage.compilerSha256) throw new Error('compose stage3 producer mismatch');
 // The packaged SDK contains exactly one compiler, rebuilt at stage3 against the
 // final std produced by stage2.
 // cjc-frontend is an official C++ SDK tool; frontend_tool is currently a static
@@ -34,6 +37,7 @@ const compilerNames = [
   'cjc-upstream-oracle',
   'cjc-oracle',
   'cjcj-stage1',
+  'cjcj-stage2',
   'cjcj',
 ];
 for (const name of compilerNames) await fs.rm(`${sdk}/bin/${name}`, {force: true});
@@ -91,6 +95,20 @@ if (target.spec.os === 'darwin') {
     if (!rpaths.includes(rpath)) await $`install_name_tool -add_rpath ${rpath} ${installed}`;
   }
 }
+
+const installedSha256 = await fileSha256(installed);
+await produceFinalCompiler({
+  binary: installed,
+  outdir: path.join(workspace, 'software', 'final-compiler'),
+  platform: targetKey,
+  repository: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}.git`,
+  commit: process.env.GITHUB_SHA,
+  runId: process.env.GITHUB_RUN_ID,
+  runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+  std: path.join(workspace, 'software', 'final-std-stage2'),
+  lineage: {...lineage, compilerSha256: installedSha256, originalSha256: lineage.compilerSha256,
+    transformation: target.spec.os === 'darwin' ? 'compose-install-name-tool' : 'copy'},
+});
 
 const archive = path.join(
   workspace, 'software', `cangjie-sdk-${target.spec.sdkName}-${version}-cjcj.tar.gz`,

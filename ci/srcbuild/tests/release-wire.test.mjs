@@ -149,3 +149,21 @@ test('release has one LLVM producer per tuple', async () => {
   ];
   assert.equal(new Set(artifacts).size, artifacts.length);
 });
+
+test('release packages select the named final compiler in each native phase', async () => {
+  const release = await workflow('release.yml');
+  const source = await workflow('srcbuild.yml');
+  const consumer = await workflow('build-release-package.yml');
+  const jobs = release.split(/\n  (?=[a-z0-9-]+:\n)/)
+    .filter(job => job.includes('uses: ./.github/workflows/build-release-package.yml'));
+  for (const platform of platforms.filter(name => name !== 'windows-x64')) {
+    const job = jobs.find(entry => entry.includes(`platform: ${platform}\n`));
+    assert.ok(job.includes(`compiler_artifact: final-compiler-${platform}`), platform);
+    assert.ok(source.includes(`final_compiler_${platform.replaceAll('-', '_')}:`), platform);
+  }
+  assert.match(source, /name: final-compiler-\$\{\{ matrix.target \}\}/);
+  assert.ok(consumer.includes('node ci/release/select_final_compiler.mjs'));
+  assert.ok(consumer.includes('--binary "$FINAL_COMPILER_BINARY"'));
+  assert.ok(consumer.includes('$binary = "$env:FINAL_COMPILER_BINARY"'));
+  assert.equal(consumer.match(/--compiler-artifact/g)?.length, 2);
+});

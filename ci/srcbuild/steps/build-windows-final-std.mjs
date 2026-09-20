@@ -2,6 +2,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {assertBootstrapCompiler} from '../lib/bootstrap-handoff.mjs';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {installPath, isInstalled, TARGET_TRIPLE} from '../../../build/toolchain/mingw.mjs';
@@ -32,7 +33,6 @@ if (!isInstalled(buildRoot)) throw new Error(`official MinGW toolchain is incomp
 
 const sdk = path.join(workspace, 'software', 'cangjie');
 const compiler = path.join(sdk, 'bin', 'cjcj-stage2');
-const activeCompiler = path.join(sdk, 'bin', 'cjc');
 const runtimeRepository = path.join(workspace, 'cangjie_runtime');
 const runtimeRoot = path.join(runtimeRepository, 'runtime');
 const runtimeOutput = path.join(runtimeRoot, 'output');
@@ -47,13 +47,7 @@ const runtimeRef = (await $({stdio: 'pipe'})`git -C ${runtimeRepository} rev-par
 if (runtimeRef !== expectedRuntimeRef) {
   throw new Error(`runtime source mismatch: expected ${expectedRuntimeRef}, got ${runtimeRef}`);
 }
-const [resolvedCompiler, resolvedActiveCompiler] = await Promise.all([
-  fs.realpath(compiler),
-  fs.realpath(activeCompiler),
-]);
-if (resolvedCompiler !== resolvedActiveCompiler) {
-  throw new Error(`Windows final std must use stage2: active=${resolvedActiveCompiler}, expected=${resolvedCompiler}`);
-}
+const resolvedCompiler = await fs.realpath(compiler);
 const compilerKind = (await $({stdio: 'pipe'})`file -b ${compiler}`).stdout.trim();
 if (!compilerKind.includes('ELF') || !compilerKind.includes('x86-64')) {
   throw new Error(`stage2 host compiler has wrong format: ${compilerKind}`);
@@ -70,6 +64,11 @@ const stageEnv = {
   PATH: [path.join(sdk, 'bin'), path.join(sdk, 'tools', 'bin'), mingwBin, process.env.PATH ?? '']
     .filter(Boolean).join(path.delimiter),
 };
+const assertCompiler = async () => {
+  const command = await $({env: stageEnv, stdio: 'pipe'})`command -v cjc`;
+  await assertBootstrapCompiler({sdk, command: command.stdout.trim()});
+};
+await assertCompiler();
 await $({env: stageEnv})`set -o pipefail; cjc --version | head -2`;
 console.log(`WINDOWS_STAGE3_COMPILER_ASSERT_PASS path=${resolvedCompiler} runtime_ref=${runtimeRef}`);
 
@@ -85,11 +84,13 @@ for (const entry of await fs.readdir(runtimeOutput)) {
   });
 }
 
+await assertCompiler();
 console.log('[windows-stage3] cross-build final std with stage2 host cjc');
 await fs.rm(finalStd, {recursive: true, force: true});
 await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py clean`;
 await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t release --target windows-x86_64 --target-lib=${runtimeTarget} --target-lib=${mingwLib} --target-sysroot ${mingwRoot}/ --target-toolchain ${mingwBin}`;
 await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
+await assertCompiler();
 await writeStdProvenance({
   sourceDir: stdlibRoot,
   installPrefix: finalStd,

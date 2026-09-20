@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
-import {prepareBootstrapHandoff} from '../../ci/srcbuild/lib/bootstrap-handoff.mjs';
+import {prepareBootstrapHandoff, assertBootstrapCompiler} from '../../ci/srcbuild/lib/bootstrap-handoff.mjs';
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bootstrap-handoff-'));
@@ -56,3 +56,27 @@ test('missing bootstrap stage2 compiler cannot consume an unrelated old product'
   await assert.rejects(prepareBootstrapHandoff(f), {code: 'ENOENT'});
   assert.equal(await fs.readFile(path.join(f.sdk, 'stale-sdk'), 'utf8'), 'old pipeline');
 });
+
+for (const mutation of ['none', 'entry', 'installed', 'producer', 'command']) {
+  test(`bootstrap compiler identity validates real handoff: ${mutation}`, async t => {
+    const f = await fixture(t);
+    await prepareBootstrapHandoff(f);
+    let command = path.join(f.sdk, 'bin', 'cjc');
+    const files = {
+      entry: command,
+      installed: path.join(f.sdk, 'bin', 'cjcj-stage2'),
+      producer: path.join(f.work, 'cjcj-stage2'),
+    };
+    if (files[mutation]) await fs.appendFile(files[mutation], '\n# replaced input\n');
+    if (mutation === 'command') command = path.join(f.work, 'sdk-stage1', 'bin', 'cjc');
+    if (mutation === 'none') {
+      const identity = await assertBootstrapCompiler({sdk: f.sdk, command});
+      assert.equal(identity.producer, path.join(f.work, 'cjcj-stage2'));
+      const result = spawnSync(command, {encoding: 'utf8'});
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /compiler home=/);
+    } else {
+      await assert.rejects(assertBootstrapCompiler({sdk: f.sdk, command}), /bootstrap compiler identity mismatch/);
+    }
+  });
+}

@@ -1043,8 +1043,8 @@ step_14() {
     npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/verify-source-pins.mjs"
 }
 
-step_20() { build_cli build stdx; }
-step_21() { build_cli build tools; }
+step_20() { CJCJ_SRCBUILD_CONSUMER_SDK="$CANGJIE_WORKSPACE/software/cangjie" build_cli build stdx; }
+step_21() { CJCJ_SRCBUILD_CONSUMER_SDK="$CANGJIE_WORKSPACE/software/cangjie" build_cli build tools; }
 
 step_22() {
     node "$REPO_ROOT/ci/release/prepare_cjpm_artifact.mjs" \
@@ -1071,7 +1071,7 @@ step_25() {
 }
 
 step_26() {
-    build_cli package
+    CJCJ_SRCBUILD_CONSUMER_SDK="$CANGJIE_WORKSPACE/software/cangjie" build_cli package
     build_cli verify
 }
 

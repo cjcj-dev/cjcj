@@ -16,6 +16,11 @@ on:
         required: false
         type: string
         default: ''
+      compiler_artifact:
+        description: Same-run final compiler (Windows produces W2 in this job)
+        required: false
+        type: string
+        default: ''
       std_artifact:
         description: Same-platform source-built final std artifact
         required: true
@@ -71,6 +76,7 @@ jobs:
     env:
       MATRIX_RUNNER: ${{ inputs.runner }}
       SDK_RUNTIME_DIR: ${{ inputs.sdk_runtime_dir }}
+      FINAL_COMPILER_DIR: ${{ github.workspace }}/.release-final-compiler/${{ inputs.platform }}
       FINAL_STD_DIR: ${{ github.workspace }}/.release-final-std/${{ inputs.platform }}
       CROSS_STD_DIR: ${{ github.workspace }}/.release-cross-std/${{ inputs.platform }}
       CROSS_STD_TUPLE: ${{ inputs.cross_std_tuple }}
@@ -100,6 +106,18 @@ jobs:
         with:
           name: ${{ inputs.std_artifact }}
           path: ${{ env.FINAL_STD_DIR }}
+
+      - name: Download final compiler
+        if: runner.os != 'Windows'
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.compiler_artifact }}
+          path: ${{ env.FINAL_COMPILER_DIR }}
+
+      - name: Extract final compiler
+        if: runner.os != 'Windows'
+        shell: bash
+        run: tar -C "$FINAL_COMPILER_DIR" -xzf "$FINAL_COMPILER_DIR/final-compiler.tar.gz"
 
       - name: Download cross-tuple source-built final std
         if: inputs.cross_std_artifact != ''
@@ -301,10 +319,11 @@ jobs:
           TUPLE_ARTIFACT_DIR: ${{ runner.temp }}/current-run-fixed-llvm
         run: npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
 
-      - name: Official SDK + cjcj build (macOS)
+      - name: Prepare official SDK and tuple (macOS)
         id: darwinbuild
         if: runner.os == 'macOS'
         env:
+          CJCJ_PACKAGE_PREPARE_ONLY: '1'
           GITCODE_API_KEY: ${{ secrets.GITCODE_API_KEY }}
         run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
 
@@ -347,10 +366,6 @@ jobs:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ inputs.llvm_platform }}/cjselfhost_llvmshim.o
         run: npx --yes zx@8 runtime_shim/build_shim.mjs
 
-      - name: Build workspace (Linux)
-        if: runner.os == 'Linux'
-        run: cjpm build
-
       - name: Install source-built cjpm (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -379,6 +394,9 @@ jobs:
         shell: pwsh
         run: node ci/release/prepare_python_bundle.mjs "${{ inputs.platform }}" "$env:PYTHON_BUNDLE_DIR"
 
+      - name: Select final compiler identity
+        run: node ci/release/select_final_compiler.mjs
+
       - name: Compose SDK package
         if: runner.os != 'Windows'
         shell: bash
@@ -397,7 +415,8 @@ jobs:
           npx --yes zx@8 scripts/package_sdk.mjs \
             $cross_std_arg \
             --sdk "$CANGJIE_HOME" \
-            --binary "$PWD/target/release/bin/cjcj::cjc" \
+            --binary "$FINAL_COMPILER_BINARY" \
+            --compiler-artifact "$FINAL_COMPILER_DIR" \
             --runtime-lib "$runtime_lib" \
             --std-dir "$FINAL_STD_DIR" \
             --llvm-manifest "$llvm_manifest" \
@@ -426,14 +445,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # The patched cjpm names the product cjc@cjcj.exe (swapOrgName); the
-          # retired lld wrapper era produced cjcj.exe — probe both, newest wins.
-          $binary = @("$PWD\target\release\bin\cjc@cjcj.exe", "$PWD\target\release\bin\cjcj.exe") |
-            Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $binary) { Write-Error "no cjcj product under target\release\bin"; exit 1 }
+          $binary = "$env:FINAL_COMPILER_BINARY"
           npx --yes zx@8 scripts/package_sdk.mjs `
             --sdk "$env:CANGJIE_HOME" `
             --binary "$binary" `
+            --compiler-artifact "$env:FINAL_COMPILER_DIR" `
             --runtime-root "$PWD\.platform-ci\runtime-install\windows_release_x86_64" `
             --std-dir "$env:FINAL_STD_DIR" `
             --llvm-manifest "$env:FIXED_LLVM_MANIFEST" `

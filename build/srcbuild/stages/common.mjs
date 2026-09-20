@@ -16,6 +16,12 @@ function joinPathsep(...parts) {
   return parts.filter(Boolean).join(path.delimiter);
 }
 
+export function consumerSdk(config, output = 'output') {
+  const sdk = config.consumerSdk || path.join(config.repoPath('compiler'), output);
+  if (config.consumerSdk) requireDir(sdk, {stage: 'consumer.sdk'});
+  return sdk;
+}
+
 export function baseEnv(config) {
   const spec = config.target.spec;
   const dryRun = process.env.CANGJIE_BUILD_DRY_RUN === '1';
@@ -85,7 +91,7 @@ export function baseEnv(config) {
     ldPaths.push(spec.opensslLibDir);
   }
 
-  const cangjieHome = path.join(config.workspace, 'cangjie_compiler', 'output');
+  const cangjieHome = consumerSdk(config);
   if (fs.statSync(cangjieHome, {throwIfNoEntry: false})?.isDirectory()) {
     env.CANGJIE_HOME = cangjieHome;
     extraPathDirs.unshift(path.join(cangjieHome, 'tools', 'bin'));
@@ -110,6 +116,8 @@ export function baseEnv(config) {
     extraPathDirs.unshift(path.join(hostSdk, 'tools', 'bin'));
     extraPathDirs.unshift(path.join(hostSdk, 'bin'));
   }
+
+  if (config.consumerSdk) extraPathDirs.unshift(path.join(cangjieHome, 'bin'));
 
   const stdxPath = path.join(
     config.workspace, 'cangjie_stdx', 'target', config.target.stdxTargetSubdir(), 'static', 'stdx',

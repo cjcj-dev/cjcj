@@ -1,5 +1,21 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
+
+const sha256 = async file => crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex');
+
+export async function assertBootstrapCompiler({sdk, command}) {
+  const identity = JSON.parse(await fs.readFile(path.join(sdk, 'bootstrap-compiler.json'), 'utf8'));
+  const compiler = path.join(sdk, 'bin', 'cjcj-stage2');
+  const entry = path.join(sdk, 'bin', 'cjc');
+  if (await fs.realpath(command) !== await fs.realpath(entry)
+    || await sha256(entry) !== identity.entrySha256
+    || await sha256(compiler) !== identity.compilerSha256
+    || await sha256(identity.producer) !== identity.compilerSha256) {
+    throw new Error('bootstrap compiler identity mismatch');
+  }
+  return identity;
+}
 
 const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
 
@@ -52,5 +68,10 @@ export async function prepareBootstrapHandoff({work, sdk, source, tuple}) {
   await fs.rm(path.join(sdk, '.stage1-host'), {recursive: true});
   await fs.mkdir(path.join(source, 'runtime_shim'), {recursive: true});
   for (const name of objects) await fs.copyFile(path.join(shim, name), path.join(source, 'runtime_shim', name));
+  await fs.writeFile(path.join(sdk, 'bootstrap-compiler.json'), `${JSON.stringify({
+    producer: compiler,
+    compilerSha256: await sha256(compiler),
+    entrySha256: await sha256(path.join(sdk, 'bin', 'cjc')),
+  }, null, 2)}\n`);
   return {compiler, targetLd};
 }
