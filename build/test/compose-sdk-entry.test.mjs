@@ -75,7 +75,8 @@ for (const mode of ['local', 'github', 'github-missing-run']) {
     if (save) {
       await fs.mkdir(save, {recursive: true});
       await fs.writeFile(path.join(save, 'entry.log'), `${child.stdout}\n${child.stderr}\nrc=${child.status}\n`);
-      for (const file of [archive, `${archive}.sha256`, path.join(artifact, FINAL_COMPILER_PROVENANCE)]) {
+      for (const file of [archive, `${archive}.sha256`, product, path.join(artifact, 'cjc'),
+        path.join(software, 'stage3-compiler.json'), path.join(artifact, FINAL_COMPILER_PROVENANCE)]) {
         await fs.copyFile(file, path.join(save, path.basename(file))).catch(error => { if (error.code !== 'ENOENT') throw error; });
       }
     }
