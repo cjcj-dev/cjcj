@@ -85,6 +85,7 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   const {buildConfig} = await import('../lib/config.mjs');
   const tools = await import('../srcbuild/stages/tools.mjs');
   const stdx = await import('../srcbuild/stages/stdx.mjs');
+  const packageStage = await import('../srcbuild/stages/package.mjs');
   const f = await fixture(t);
   const host = path.join(f.root, 'host-sdk');
   const fakeBin = path.join(f.root, 'external-fixtures');
@@ -114,7 +115,9 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   process.env.PATH = `${fakeBin}:${process.env.PATH}`;
   process.env.CJCJ_SRCBUILD_HOST_SDK = host;
   delete process.env.CANGJIE_BUILD_DRY_RUN;
-  const original = buildConfig({workspace: f.root, buildRoot: f.root, consumerSdk: f.sdk});
+  const officialSdkRoot = path.join(f.root, 'official-sdk');
+  await write(path.join(officialSdkRoot, 'tools', 'bin', 'cjpm'), 'official skeleton');
+  const original = buildConfig({workspace: f.root, buildRoot: f.root, consumerSdk: f.sdk, officialSdkRoot});
   const dependencies = path.join(f.root, 'dependencies');
   await fs.mkdir(dependencies);
   const config = {...original, target: {...original.target, spec: {...original.target.spec,
@@ -122,15 +125,30 @@ test('bootstrap producer reaches actual stdx and tools subprocess entries', asyn
   // Keep an executable old output available: a disconnected consumer must reach
   // the origin assertion, rather than fail merely because a file is absent.
   await write(path.join(config.repoPath('compiler'), 'output', 'bin', 'cjc'), '#!/bin/sh\nprintf "old output compiler\\n"\n');
+  await write(path.join(config.repoPath('compiler'), 'output', 'lib', f.tuple, 'libcangjie-std-core.a'), 'old std');
   const oldRuntime = path.join(config.repoPath('compiler'), 'output', 'runtime', 'lib', f.tuple, 'libcangjie-runtime.so');
   await fs.mkdir(path.dirname(oldRuntime), {recursive: true});
   await fs.copyFile(path.join(f.sdk, 'runtime', 'lib', f.tuple, 'libcangjie-runtime.so'), oldRuntime);
   const python = `import json, os, pathlib, subprocess, sys\nif sys.argv[1] == 'build':\n r = subprocess.run(['cjc'], text=True, capture_output=True)\n r.check_returncode()\n with open(${JSON.stringify(trace)}, 'a') as out: out.write(json.dumps({'cwd': os.getcwd(), 'compiler': r.stdout}) + '\\n')\n p = pathlib.Path('build_temp/build/build.ninja')\n p.parent.mkdir(parents=True, exist_ok=True)\n p.write_text('LD_LIBRARY_PATH=' + os.environ['LD_LIBRARY_PATH'] + ' cjc file.cj\\n')\n`;
   await write(path.join(config.repoPath('stdx'), 'build.py'), python);
-  for (const [, directory] of tools.toolsFor(config)) await write(path.join(config.repoPath('tools'), directory, 'build.py'), python);
-  await write(path.join(config.repoPath('tools'), 'cjpm', 'dist', 'cjpm'), 'fixture tool product');
+  const products = {
+    cjpm: ['cjpm/dist/cjpm'], cjfmt: ['cjfmt/build/build/bin/cjfmt', 'cjfmt/config/default.toml'],
+    hle: ['hyperlangExtension/target/bin/main', 'hyperlangExtension/src/dtsparser/keep.txt'],
+    lsp: ['cangjie-language-server/output/bin/LSPServer'], cjcov: ['cjcov/dist/cjcov'],
+    'cjtrace-recover': ['cjtrace-recover/dist/bin/cjtrace-recover'],
+  };
+  for (const [name, directory] of tools.toolsFor(config)) {
+    const destinations = products[name].map(relative => path.join(config.repoPath('tools'), relative));
+    const install = `if sys.argv[1] == 'install':\n for name in ${JSON.stringify(destinations)}:\n  p = pathlib.Path(name)\n  p.parent.mkdir(parents=True, exist_ok=True)\n  p.write_text('fixture tool from ' + pathlib.Path('compiler-result.txt').read_text())\n`;
+    await write(path.join(config.repoPath('tools'), directory, 'build.py'), python + "if sys.argv[1] == 'build': pathlib.Path('compiler-result.txt').write_text(r.stdout)\n" + install);
+  }
   await stdx.run(config);
   await tools.run(config);
+  await fs.mkdir(path.join(config.repoPath('stdx'), 'target', f.tuple), {recursive: true});
+  await packageStage.run(config);
+  console.log('SDK_PACKAGE_ORIGIN_ASSERT_REACHED');
+  assert.equal(await fs.readFile(path.join(f.sdk, 'lib', f.tuple, 'libcangjie-std-core.a'), 'utf8'), 'coloured std');
+  assert.ok((await fs.readFile(path.join(f.sdk, 'tools', 'bin', 'cjpm'), 'utf8')).includes(`compiler home=${f.sdk}`));
   const invocations = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(invocations.length, 1 + tools.toolsFor(config).length);
   for (const row of invocations) {

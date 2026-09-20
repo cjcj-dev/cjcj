@@ -8,19 +8,20 @@ export const fileSha256 = async file => crypto.createHash('sha256').update(await
 
 // Use the full installed std payload, including its producer manifest. The same
 // snapshot is checked at the producer and immediately before package selection.
-export async function stdIdentity(root) {
+export async function stdIdentity(root, layoutRoot = root) {
   const entries = [];
   async function walk(directory) {
     for (const item of (await fs.readdir(directory, {withFileTypes: true})).sort((a, b) => a.name.localeCompare(b.name))) {
       const file = path.join(directory, item.name);
-      const relative = path.relative(root, file).split(path.sep).join('/');
+      const relative = path.relative(layoutRoot, file).split(path.sep).join('/');
+      const installed = path.join(root, relative);
       if (item.isDirectory()) await walk(file);
-      else if (item.isSymbolicLink()) entries.push([relative, 'link', await fs.readlink(file)]);
-      else if (item.isFile()) entries.push([relative, 'file', await fileSha256(file)]);
+      else if (item.isSymbolicLink()) entries.push([relative, 'link', await fs.readlink(installed)]);
+      else if (item.isFile()) entries.push([relative, 'file', await fileSha256(installed)]);
     }
   }
   await fs.stat(path.join(root, 'PROVENANCE.txt'));
-  await walk(root);
+  await walk(layoutRoot);
   return crypto.createHash('sha256').update(JSON.stringify(entries)).digest('hex');
 }
 

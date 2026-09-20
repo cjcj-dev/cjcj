@@ -257,6 +257,10 @@ if (dryRun) {
     stage: 'stage3',
     tuple,
     parentEntrySha256: compilerEntrySha,
+    shimSha256: {
+      llvm: await sha256(path.join(githubWorkspace, 'runtime_shim', 'cjselfhost_llvmshim.o')),
+      runtimeConfig: await sha256(path.join(githubWorkspace, 'runtime_shim', 'cjc_runtime_config.o')),
+    },
     runtimeSha256: await sha256(runtime),
     llvmManifestSha256: await sha256(path.join(requiredEnv('CJCJ_FIXED_LLVM_DIR'), 'llvm-tools.manifest')),
   }, null, 2)}\n`);

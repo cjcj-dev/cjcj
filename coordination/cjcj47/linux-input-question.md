@@ -1,0 +1,5 @@
+LANE=sym_cjcj_47_implement_r5749367643
+# 适用真实Linux消费者的获准输入
+已完成C1/C2源码接线和kkk2装置验证：producer→stdx/tools→package实际Python子进程、具名producer→select_final_compiler→真实package_sdk入口、Windows W1→W2外部子进程夹具；八刀均精确转红、green/restored各40/40。Windows PE不外推。
+真实Linux Cangjie消费者仍需要可用compiler/完整std/两SO绑定输入。现冻结ci/runtime_pin.env为08a7709ab15caf71b85843e8ea221fe3aedd6e99；kkk2 /root/sodepot/该sha不存在（ls rc=2）。现役preflight引用的/root/sym_cangjie_runtime_608_implement_r5683164869/abi-final-green及-finalrt/default亦不存在（rc=2）。阳性路径/root/llvmdepot/fa13e8d5c17ba1d65c2bc94d71ec801b49209d8f/7b41219eb5d0003d949cabbf9b076d21e03faa03在场。#627 PR已合并，但C3最终pin/tuple另批冻结，本包未改pin。
+请给本包适用真实Linux消费者可复用的现存、获准compiler/std/两SO坐标及身份，或明确此项随C3最终冻结执行的处理。不会凭老P01记录冒称最终ABI或自修共享SDK。继续完成独立装置三臂/报告，保持WIP。

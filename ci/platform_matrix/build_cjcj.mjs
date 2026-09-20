@@ -20,10 +20,8 @@ import {
 } from '../../build/lib/release-component-provenance.mjs';
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
-import {produceFinalCompiler, fileSha256, stdIdentity} from '../srcbuild/lib/final-compiler.mjs';
-import {assertFinalStd} from '../srcbuild/lib/final-std.mjs';
-import {getTarget} from '../../build/lib/targets.mjs';
-import {PRODUCT_NAMES, resolveProductBinary} from '../srcbuild/lib/product-binary.mjs';
+import {buildWindowsFinalCompiler} from './windows-final-compiler.mjs';
+import {PRODUCT_NAMES} from '../srcbuild/lib/product-binary.mjs';
 
 const {root} = stageBegin('cjcj');
 const toolchain = requireHostToolchain();
@@ -572,49 +570,9 @@ if (process.platform === 'win32') {
   }
   build = await runInMsys('cjpm build', 'build');
   if (finalWindows && shim.exitCode === 0 && build.exitCode === 0) {
-    const finalStd = process.env.FINAL_STD_DIR;
-    await assertFinalStd(finalStd, getTarget('windows-x64'));
-    const seed = await resolveProductBinary(path.join('target', 'release', 'bin'), 'Windows W1', {windows: true});
-    const targetSdk = path.join(root, 'final-compiler-target-sdk');
-    await fs.rm(targetSdk, {recursive: true, force: true});
-    await fs.cp(cangjieHome, targetSdk, {recursive: true});
-    const seedInstalled = path.join(targetSdk, 'bin', 'cjc.exe');
-    await fs.copyFile(seed, seedInstalled);
-    const parentSha256 = await fileSha256(seedInstalled);
-    const stdSha256 = await stdIdentity(finalStd);
-    for (const entry of await fs.readdir(finalStd)) {
-      await fs.cp(path.join(finalStd, entry), path.join(targetSdk, entry), {recursive: true, force: true});
-    }
-    // PE loader checks the executable directory first. Each executable keeps
-    // its own runtime domain even when its child compiler uses the target SDK.
-    for (const [sdkRoot, executableDir] of [[hostSdk, 'tools/bin'], [targetSdk, 'bin']]) {
-      for (const sourceDir of [path.join(sdkRoot, 'runtime', 'lib', sdkRuntimeDirName),
-        path.join(sdkRoot, 'third_party', 'llvm', 'lib'), 'C:\\msys64\\mingw64\\bin']) {
-        for (const name of await fs.readdir(sourceDir)) {
-          if (name.toLowerCase().endsWith('.dll')) {
-            await fs.copyFile(path.join(sourceDir, name), path.join(sdkRoot, executableDir, name));
-          }
-        }
-      }
-    }
-    await fs.writeFile(cjcTomlPath, platformizeCjcToml(
-      cjcToml, process.platform, targetSdk, process.env.CJCJ_LLVM_LINK_RSP || '', mingwCxxLinkRsp));
-    const clean = await runInMsys('cjpm clean', 'final-clean', targetSdk, hostSdk);
-    if (clean.exitCode !== 0) process.exit(clean.exitCode);
-    build = await runInMsys('cjc --version && cjpm build', 'final-build', targetSdk, hostSdk);
-    if (build.exitCode === 0) {
-      if (await fileSha256(seedInstalled) !== parentSha256 || await stdIdentity(finalStd) !== stdSha256) {
-        throw new Error('Windows W2 producer inputs changed during build');
-      }
-      const final = await resolveProductBinary(path.join('target', 'release', 'bin'), 'Windows W2', {windows: true});
-      await produceFinalCompiler({binary: final, outdir: finalCompilerOutput, platform: 'windows-x64',
-        repository: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}.git`, commit: process.env.GITHUB_SHA,
-        runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, std: finalStd,
-        lineage: {stage: 'windows-W2', parentSha256, stdSha256, compilerSha256: await fileSha256(final),
-          tuple: sdkRuntimeDirName, runtimeSha256: await fileSha256(installedRuntimeLib),
-          llvmManifestSha256: await fileSha256(fixedLlvmManifest)},
-      });
-    }
+    build = await buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdkRuntimeDirName,
+      cjcTomlPath, cjcToml, mingwCxxLinkRsp, installedRuntimeLib, fixedLlvmManifest,
+      finalCompilerOutput, finalStd: process.env.FINAL_STD_DIR, runInMsys});
   }
 } else {
   await fs.writeFile(cjcTomlPath, platformizeCjcToml(
