@@ -505,6 +505,7 @@ test('an omitted optional input reads the way Actions reads it, not as undefined
     ['platform', 'linux-aarch64'],
     ['llvm_platform', 'linux_aarch64'],
     ['std_artifact', 'final-std-linux-aarch64'],
+    ['compiler_artifact', 'final-compiler-linux-aarch64'],
   ];
 
   const withCross = failClosedDownloads(consumer,

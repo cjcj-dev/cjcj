@@ -32,15 +32,27 @@ on:
         type: string
         default: all
     outputs:
+      final_compiler_linux_x64:
+        description: Same-run final compiler for linux-x64
+        value: ${{ jobs.artifact-contract.outputs.final_compiler_linux_x64 }}
       final_std_linux_x64:
         description: Linux x64 source-built std artifact
         value: ${{ jobs.artifact-contract.outputs.final_std_linux_x64 }}
+      final_compiler_linux_aarch64:
+        description: Same-run final compiler for linux-aarch64
+        value: ${{ jobs.artifact-contract.outputs.final_compiler_linux_aarch64 }}
       final_std_linux_aarch64:
         description: Linux AArch64 source-built std artifact
         value: ${{ jobs.artifact-contract.outputs.final_std_linux_aarch64 }}
+      final_compiler_darwin_x64:
+        description: Same-run final compiler for darwin-x64
+        value: ${{ jobs.artifact-contract.outputs.final_compiler_darwin_x64 }}
       final_std_darwin_x64:
         description: Darwin x64 source-built std artifact
         value: ${{ jobs.artifact-contract.outputs.final_std_darwin_x64 }}
+      final_compiler_darwin_arm64:
+        description: Same-run final compiler for darwin-arm64
+        value: ${{ jobs.artifact-contract.outputs.final_compiler_darwin_arm64 }}
       final_std_darwin_arm64:
         description: Darwin arm64 source-built std artifact
         value: ${{ jobs.artifact-contract.outputs.final_std_darwin_arm64 }}
@@ -280,6 +292,13 @@ jobs:
         shell: bash
         run: bash ci/bootstrap/gha_run.sh stage1
 
+      - name: Inject selfhost compiler version
+        env:
+          SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          npx --yes zx@8 ci/srcbuild/tests/inject-version.test.mjs
+          npx --yes zx@8 ci/srcbuild/steps/inject-version.mjs
+
       - name: Build stage 3 compiler and final std
         env:
           CJCJ_BOOTSTRAP_WORK: ${{ env.CANGJIE_WORKSPACE }}/bootstrap-work
@@ -294,9 +313,13 @@ jobs:
           retention-days: 7
 
       - name: Build stdx from source
+        env:
+          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build stdx
 
       - name: Build SDK tools from source
+        env:
+          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" build tools
 
       - name: Prepare source-built cjpm artifact
@@ -330,6 +353,8 @@ jobs:
           retention-days: 7
 
       - name: Package and verify SDK
+        env:
+          CJCJ_SRCBUILD_CONSUMER_SDK: ${{ env.CANGJIE_WORKSPACE }}/software/cangjie
         run: |
           npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" package
           npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --build-type "${{ inputs.build_type || 'relwithdebinfo' }}" --cangjie-version "${{ steps.version.outputs.value }}" verify
@@ -338,13 +363,6 @@ jobs:
         env:
           CANGJIE_CPP_SRC: ${{ env.CANGJIE_WORKSPACE }}/cangjie_compiler
         run: npx --yes zx@8 ci/srcbuild/steps/build-shim.mjs
-
-      - name: Inject selfhost compiler version
-        env:
-          SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
-        run: |
-          npx --yes zx@8 ci/srcbuild/tests/inject-version.test.mjs
-          npx --yes zx@8 ci/srcbuild/steps/inject-version.mjs
 
       - name: Restore official MinGW toolchain
         if: matrix.target == 'linux-x64'
@@ -400,6 +418,17 @@ jobs:
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
         run: npx --yes zx@8 ci/srcbuild/steps/compose-sdk.mjs
 
+      - name: Archive final compiler handoff
+        run: tar -C "$CANGJIE_WORKSPACE/software/final-compiler" -czf "$CANGJIE_WORKSPACE/software/final-compiler.tar.gz" .
+
+      - name: Upload final compiler handoff
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-compiler-${{ matrix.target }}
+          path: ${{ env.CANGJIE_WORKSPACE }}/software/final-compiler.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Verify self-hosted SDK
         run: npx --yes zx@8 ci/srcbuild/steps/verify.mjs "$CANGJIE_WORKSPACE/software/cangjie"
 
@@ -439,9 +468,13 @@ jobs:
     needs: srcbuild
     runs-on: ubuntu-22.04
     outputs:
+      final_compiler_linux_x64: ${{ steps.contract.outputs.final_compiler_linux_x64 }}
       final_std_linux_x64: ${{ steps.contract.outputs.final_std_linux_x64 }}
+      final_compiler_linux_aarch64: ${{ steps.contract.outputs.final_compiler_linux_aarch64 }}
       final_std_linux_aarch64: ${{ steps.contract.outputs.final_std_linux_aarch64 }}
+      final_compiler_darwin_x64: ${{ steps.contract.outputs.final_compiler_darwin_x64 }}
       final_std_darwin_x64: ${{ steps.contract.outputs.final_std_darwin_x64 }}
+      final_compiler_darwin_arm64: ${{ steps.contract.outputs.final_compiler_darwin_arm64 }}
       final_std_darwin_arm64: ${{ steps.contract.outputs.final_std_darwin_arm64 }}
       final_std_windows_x64: ${{ steps.contract.outputs.final_std_windows_x64 }}
     steps:
@@ -449,9 +482,13 @@ jobs:
         id: contract
         run: |
           {
+            echo "final_compiler_linux_x64=final-compiler-linux-x64"
             echo "final_std_linux_x64=final-std-linux-x64"
+            echo "final_compiler_linux_aarch64=final-compiler-linux-aarch64"
             echo "final_std_linux_aarch64=final-std-linux-aarch64"
+            echo "final_compiler_darwin_x64=final-compiler-darwin-x64"
             echo "final_std_darwin_x64=final-std-darwin-x64"
+            echo "final_compiler_darwin_arm64=final-compiler-darwin-arm64"
             echo "final_std_darwin_arm64=final-std-darwin-arm64"
             echo "final_std_windows_x64=final-std-windows-x64"
           } >> "$GITHUB_OUTPUT"

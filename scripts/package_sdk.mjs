@@ -21,6 +21,7 @@ import {
   GATE_APPARATUS_PROVENANCE,
   verifyGateApparatusProvenance,
 } from '../build/lib/release-gate-apparatus.mjs';
+import {consumeFinalCompiler, FINAL_COMPILER_PROVENANCE, fileSha256} from '../ci/srcbuild/lib/final-compiler.mjs';
 import {RELEASE_MANIFEST, writeReleaseManifest} from '../build/lib/release-manifest.mjs';
 import {writeToolchainIdentity} from '../build/lib/toolchain-identity.mjs';
 import {assertNoVerifierReportArtifacts} from './verifier_artifact_gate.mjs';
@@ -174,6 +175,14 @@ await Promise.all([
   fs.rm(path.join(stage, 'bin', 'cjc'), {force: true}),
   fs.rm(path.join(stage, 'bin', 'cjc.exe'), {force: true}),
 ]);
+const compilerArtifact = typeof argv['compiler-artifact'] === 'string' ? argv['compiler-artifact'] : '';
+if (compilerArtifact) {
+  const selected = await consumeFinalCompiler({directory: compilerArtifact, platform,
+    repository: cjcjSourceRepository, commit: cjcjSourceCommit,
+    runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, std: stdDir, llvmManifest});
+  if (await fs.realpath(selected) !== await fs.realpath(binary)) throw new Error('package binary differs from selected final compiler');
+}
+const selectedCompilerSha256 = await fileSha256(binary);
 await fs.copyFile(binary, installed);
 await fs.chmod(installed, 0o755);
 
@@ -969,6 +978,14 @@ for (const row of recordedLineage.tools.filter(row => row.present === 'yes')) {
 }
 console.log(`LLVM_TOOL_LINEAGE_OK total=${lineageRows.length} present=${physicalTools.size} required=${requiredLlvmTools.get(platform).length}`);
 
+if (compilerArtifact) {
+  if (await fileSha256(binary) !== selectedCompilerSha256) throw new Error('selected final compiler changed during packaging');
+  const source = JSON.parse(await fs.readFile(path.join(compilerArtifact, FINAL_COMPILER_PROVENANCE), 'utf8'));
+  await fs.writeFile(path.join(stage, FINAL_COMPILER_PROVENANCE), `${JSON.stringify({
+    ...source,
+    packaging: {inputSha256: selectedCompilerSha256, installedSha256: await fileSha256(installed), platform},
+  }, null, 2)}\n`);
+}
 console.log('[7b/9] write release provenance manifest');
 const toolSources = {
   'tool-cjpm': {repository: cjpmSourceRepository, commit: cjpmSourceCommit},

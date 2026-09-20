@@ -6,7 +6,7 @@ import {BuildError} from '../../lib/errors.mjs';
 import {fetchSource} from '../../lib/git.mjs';
 import {stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
-import {applyTextPatch, baseEnv, requireFile, runBuildPy} from './common.mjs';
+import {applyTextPatch, baseEnv, consumerSdk, requireFile, runBuildPy} from './common.mjs';
 
 // cjcov and cjtrace-recover are Cangjie-written SDK tools that upstream
 // cangjie-build does not drive, so shipping the base SDK's copies would leave
@@ -91,7 +91,7 @@ export function toolsFor(config) {
 
 export function targetToolsEnv(config) {
   const env = baseEnv(config);
-  const targetHome = path.join(config.repoPath('compiler'), 'output');
+  const targetHome = consumerSdk(config);
   const targetPaths = [path.join(targetHome, 'bin'), path.join(targetHome, 'tools', 'bin')];
   const remainingPaths = String(env.PATH || '').split(path.delimiter)
     .filter(entry => entry && !targetPaths.includes(entry));

@@ -125,6 +125,7 @@ jobs:
       platform: linux-x64
       llvm_platform: linux_x86_64
       sdk_runtime_dir: linux_x86_64_cjnative
+      compiler_artifact: final-compiler-linux-x64
       std_artifact: final-std-linux-x64
       cross_std_artifact: 'final-std-windows-x64'
       cross_std_tuple: 'windows_x86_64_cjnative'
@@ -142,6 +143,7 @@ jobs:
       platform: linux-aarch64
       llvm_platform: linux_aarch64
       sdk_runtime_dir: linux_aarch64_cjnative
+      compiler_artifact: final-compiler-linux-aarch64
       std_artifact: final-std-linux-aarch64
       cross_std_artifact: 'final-std-windows-x64'
       cross_std_tuple: 'windows_x86_64_cjnative'
@@ -176,6 +178,7 @@ jobs:
       platform: darwin-arm64
       llvm_platform: darwin_aarch64
       sdk_runtime_dir: darwin_aarch64_cjnative
+      compiler_artifact: final-compiler-darwin-arm64
       std_artifact: final-std-darwin-arm64
       cross_std_artifact: ''
       cross_std_tuple: ''
@@ -193,6 +196,7 @@ jobs:
       platform: darwin-x64
       llvm_platform: darwin_x86_64
       sdk_runtime_dir: darwin_x86_64_cjnative
+      compiler_artifact: final-compiler-darwin-x64
       std_artifact: final-std-darwin-x64
       cross_std_artifact: ''
       cross_std_tuple: ''

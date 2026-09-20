@@ -49,6 +49,7 @@ export function buildConfig({
   workspace,
   buildRoot,
   officialSdkRoot,
+  consumerSdk = process.env.CJCJ_SRCBUILD_CONSUMER_SDK,
   targetKey = 'linux-x64',
   buildType = DEFAULT_BUILD_TYPE,
   cangjieVersion,
@@ -74,6 +75,7 @@ export function buildConfig({
     stdxVersion: Number(stdxVersion),
     repos,
     softwareDir: path.join(workspacePath, 'software'),
+    consumerSdk: consumerSdk ? absolute(consumerSdk) : null,
     officialSdkRoot: officialSdkRoot ? absolute(officialSdkRoot) : null,
     crossBuildType: target.spec.crossCompile ? 'release' : buildType,
     repo(name) {
@@ -97,6 +99,7 @@ export function withBuildType(config, buildType) {
     cangjieVersion: config.cangjieVersion,
     stdxVersion: config.stdxVersion,
     officialSdkRoot: config.officialSdkRoot,
+    consumerSdk: config.consumerSdk,
     repoOverrides: Object.fromEntries(REPO_NAMES.map(name => [name, config.repos[name]])),
   });
 }

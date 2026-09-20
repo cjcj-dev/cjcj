@@ -27,6 +27,7 @@ import {
   RELEASE_PYTHON_SOURCE_URL,
   RELEASE_PYTHON_VERSION,
 } from '../lib/python-bundle.mjs';
+import {produceFinalCompiler, stdIdentity, FINAL_COMPILER_PROVENANCE} from '../../ci/srcbuild/lib/final-compiler.mjs';
 import {parsePackagedLlvmToolsManifest} from '../../ci/llvm-tools-manifest.mjs';
 
 const TUPLE = 'linux_x86_64_cjnative';
@@ -315,7 +316,35 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
     '--platform', 'linux-x64',
     '--outdir', out,
   ];
-  const packaged = run('zx', packageArgs, {cwd: path.resolve('.')});
+  const decoy = path.join(root, 'decoy');
+  await fs.copyFile(binary, decoy);
+  await fs.appendFile(decoy, '\0old-workspace-compiler\0');
+  await fs.copyFile(decoy, path.join(sdk, 'bin', 'cjc'));
+  const artifact = path.join(root, 'final-compiler');
+  const selected = await produceFinalCompiler({binary, outdir: artifact, platform: 'linux-x64',
+    repository: 'https://github.com/cjcj-dev/cjcj.git', commit: CJCJ_SHA,
+    runId: 'fixture-run', runAttempt: '1', std,
+    lineage: {stage: 'stage3', compilerSha256: await sha256(binary), parentSha256: 'f'.repeat(64),
+      stdSha256: await stdIdentity(std), llvmManifestSha256: await sha256(llvmManifest)},
+  });
+  const selectedEnv = path.join(root, 'selected.env');
+  run('node', [path.resolve('ci/release/select_final_compiler.mjs')], {env: {...process.env,
+    FINAL_COMPILER_DIR: artifact, FINAL_STD_DIR: std, RELEASE_PLATFORM: 'linux-x64',
+    GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: 'cjcj-dev/cjcj', GITHUB_SHA: CJCJ_SHA,
+    GITHUB_RUN_ID: 'fixture-run', GITHUB_RUN_ATTEMPT: '1', GITHUB_ENV: selectedEnv,
+  }});
+  const consumerBinary = (await fs.readFile(selectedEnv, 'utf8')).trim().slice('FINAL_COMPILER_BINARY='.length);
+  const finalArgs = [...packageArgs];
+  finalArgs[finalArgs.indexOf('--binary') + 1] = consumerBinary;
+  finalArgs.push('--compiler-artifact', artifact, '--cjcj-source-repo', 'https://github.com/cjcj-dev/cjcj.git');
+  const packaged = run('zx', finalArgs, {cwd: path.resolve('.'),
+    env: {...process.env, GITHUB_RUN_ID: 'fixture-run', GITHUB_RUN_ATTEMPT: '1'}});
+  const packagedCompiler = path.join(out, 'cjcj-fixture-linux-x64', 'bin', 'cjc');
+  console.log('FINAL_COMPILER_PACKAGE_ORIGIN_ASSERT_REACHED');
+  assert.equal(await sha256(packagedCompiler), await sha256(binary), 'actual package compiler must originate in the selected producer');
+  const finalRecord = JSON.parse(await fs.readFile(path.join(out, 'cjcj-fixture-linux-x64', FINAL_COMPILER_PROVENANCE), 'utf8'));
+  assert.equal(finalRecord.packaging.inputSha256, await sha256(binary));
+  assert.equal(finalRecord.packaging.installedSha256, await sha256(packagedCompiler));
   assert.match(packaged.stdout, /DONE: .*cjcj-fixture-linux-x64\.tar\.gz/);
 
   const packageName = 'cjcj-fixture-linux-x64';

@@ -42,9 +42,10 @@ const isFile = async (target) => {
  * @param {string} phase  caller name, used in the error message
  * @returns {Promise<string>} absolute path to the product
  */
-export async function resolveProductBinary(binDir, phase = 'product') {
+export async function resolveProductBinary(binDir, phase = 'product', {windows = false} = {}) {
+  const names = windows ? [...PRODUCT_NAMES.map(name => `${name}.exe`), 'cjcj.exe'] : PRODUCT_NAMES;
   const found = [];
-  for (const name of PRODUCT_NAMES) {
+  for (const name of names) {
     const candidate = path.join(binDir, name);
     if (await isFile(candidate)) found.push(candidate);
   }
@@ -58,12 +59,12 @@ export async function resolveProductBinary(binDir, phase = 'product') {
   }
   if (found.length === 0) {
     throw new Error(
-      `${phase}: none of ${PRODUCT_NAMES.join(', ')} exist in ${binDir}.\n` +
+      `${phase}: none of ${names.join(', ')} exist in ${binDir}.\n` +
       `${binDir} contains: ${JSON.stringify(listing)}`,
     );
   }
   throw new Error(
-    `${phase}: expected exactly one of ${PRODUCT_NAMES.join(', ')} in ${binDir}, found ${found.length}: ` +
+    `${phase}: expected exactly one of ${names.join(', ')} in ${binDir}, found ${found.length}: ` +
     `${JSON.stringify(found.map((f) => path.basename(f)))}`,
   );
 }

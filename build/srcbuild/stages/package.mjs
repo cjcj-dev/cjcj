@@ -7,7 +7,7 @@ import {getLogger, stage} from '../../lib/logging.mjs';
 import {run as runCommand} from '../../lib/runner.mjs';
 import {assertNoVerifierReportArtifacts} from '../../../scripts/verifier_artifact_gate.mjs';
 import {assertSdkPathParity} from '../../lib/sdk-path-parity.mjs';
-import {copyInto, copytree, ensureDir, requireDir, requireFile} from './common.mjs';
+import {consumerSdk, copyInto, copytree, ensureDir, requireDir, requireFile} from './common.mjs';
 
 const logger = getLogger('cangjie_build.stages.package');
 
@@ -119,7 +119,7 @@ function organizeSdkTree(config, destination) {
 }
 
 async function packageMainSdk(config) {
-  const compilerOutput = path.join(config.repoPath('compiler'), config.target.primaryCompilerOutput());
+  const compilerOutput = consumerSdk(config, config.target.primaryCompilerOutput());
   requireDir(compilerOutput, {stage: 'package.compiler_output'});
   try {
     assertNoVerifierReportArtifacts([compilerOutput]);
@@ -127,8 +127,12 @@ async function packageMainSdk(config) {
     throw new BuildError('package.verifier_artifact_gate', error.message);
   }
   const cangjieDir = path.join(ensureDir(config.softwareDir), 'cangjie');
-  fs.rmSync(cangjieDir, {recursive: true, force: true});
-  fs.cpSync(compilerOutput, cangjieDir, {recursive: true, dereference: false, preserveTimestamps: true});
+  const sameDirectory = fs.existsSync(cangjieDir)
+    && fs.realpathSync(compilerOutput) === fs.realpathSync(cangjieDir);
+  if (!sameDirectory) {
+    fs.rmSync(cangjieDir, {recursive: true, force: true});
+    fs.cpSync(compilerOutput, cangjieDir, {recursive: true, dereference: false, preserveTimestamps: true});
+  }
   organizeSdkTree(config, cangjieDir);
   if (config.target.spec.os !== 'windows') {
     // Match the release re-packager: installed SDK data must be readable and

@@ -4,7 +4,7 @@ import path from 'node:path';
 import {stage} from '../../lib/logging.mjs';
 import {assertHostRuntimeCommands, assertRuntimeSplit} from '../../lib/runtime-split.mjs';
 import {installPath, TARGET_TRIPLE} from '../../toolchain/mingw.mjs';
-import {opensslLibPath, runBuildPy, windowsCrossArgs} from './common.mjs';
+import {consumerSdk, opensslLibPath, runBuildPy, windowsCrossArgs} from './common.mjs';
 
 export async function run(config) {
   const stdxRoot = config.repoPath('stdx');
@@ -14,7 +14,7 @@ export async function run(config) {
     if (process.env.CANGJIE_BUILD_DRY_RUN !== '1') {
       split = assertRuntimeSplit({
         hostSdk: process.env.CJCJ_SRCBUILD_HOST_SDK,
-        targetSdk: path.join(config.repoPath('compiler'), 'output'),
+        targetSdk: consumerSdk(config),
         target: config.target,
       });
     }

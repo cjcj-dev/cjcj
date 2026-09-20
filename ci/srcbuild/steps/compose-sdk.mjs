@@ -3,9 +3,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import {runRequiredCheck} from '../../../build/lib/fail-closed-probes.mjs';
 import {assertSdkCompilerRuntimeAbi} from '../../../build/lib/runtime-split.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
+import {produceFinalCompiler, fileSha256} from '../lib/final-compiler.mjs';
+import {installStage3Compiler} from '../lib/compose-install.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
 
 $.stdio = 'inherit';
@@ -24,20 +27,8 @@ if (process.platform !== target.spec.nodePlatform || process.arch !== target.spe
 const sdk = `${workspace}/software/cangjie`;
 const product = await resolveProductBinary('target/release/bin', 'compose-sdk');
 await $`test -x ${product}`;
-// The packaged SDK contains exactly one compiler, rebuilt at stage3 against the
-// final std produced by stage2.
-// cjc-frontend is an official C++ SDK tool; frontend_tool is currently a static
-// selfhost package, so shipping the C++ binary would mix product lines.
-const compilerNames = [
-  'cjc',
-  'cjc-frontend',
-  'cjc-upstream-oracle',
-  'cjc-oracle',
-  'cjcj-stage1',
-  'cjcj',
-];
-for (const name of compilerNames) await fs.rm(`${sdk}/bin/${name}`, {force: true});
-await $`install -m0755 ${product} ${sdk}/bin/cjc`;
+const lineage = JSON.parse(await fs.readFile(path.join(workspace, 'software', 'stage3-compiler.json'), 'utf8'));
+await installStage3Compiler({sdk, product, lineage});
 const productVersion = await $({stdio: 'pipe'})`${sdk}/bin/cjc --version`;
 const versionOutput = `${productVersion.stdout}${productVersion.stderr}`;
 if (!versionOutput.includes(version)) {
@@ -91,6 +82,33 @@ if (target.spec.os === 'darwin') {
     if (!rpaths.includes(rpath)) await $`install_name_tool -add_rpath ${rpath} ${installed}`;
   }
 }
+
+const installedSha256 = await fileSha256(installed);
+// GitHub artifacts keep their workflow identity. The shell entry also composes
+// SDKs outside Actions: record that execution explicitly, never invent a GitHub run.
+const github = process.env.GITHUB_ACTIONS === 'true';
+const git = async (...args) => (await $({stdio: 'pipe'})`git ${args}`).stdout.trim();
+const repository = github
+  ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}.git`
+  : await git('remote', 'get-url', 'origin');
+const commit = github ? process.env.GITHUB_SHA : await git('rev-parse', 'HEAD');
+const runId = github ? process.env.GITHUB_RUN_ID : `local:${os.hostname()}:${crypto.randomUUID()}`;
+const runAttempt = github ? process.env.GITHUB_RUN_ATTEMPT : '1';
+const execution = github ? {kind: 'github-actions'} : {
+  kind: 'local', hostname: os.hostname(), composedAt: new Date().toISOString(),
+  // Preserve the tracked worktree delta identity as well as the committed source.
+  sourceDiffSha256: crypto.createHash('sha256')
+    .update((await $({stdio: 'pipe'})`git diff --binary HEAD`).stdout).digest('hex'),
+};
+await produceFinalCompiler({
+  binary: installed,
+  outdir: path.join(workspace, 'software', 'final-compiler'),
+  platform: targetKey,
+  repository, commit, runId, runAttempt,
+  std: path.join(workspace, 'software', 'final-std-stage2'),
+  lineage: {...lineage, execution, compilerSha256: installedSha256, originalSha256: lineage.compilerSha256,
+    transformation: target.spec.os === 'darwin' ? 'compose-install-name-tool' : 'copy'},
+});
 
 const archive = path.join(
   workspace, 'software', `cangjie-sdk-${target.spec.sdkName}-${version}-cjcj.tar.gz`,

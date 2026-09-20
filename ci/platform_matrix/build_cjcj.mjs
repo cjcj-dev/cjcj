@@ -20,6 +20,7 @@ import {
 } from '../../build/lib/release-component-provenance.mjs';
 import {emitBlockedSummary, printCommonVersions, stageBegin, toCommandPath} from './common.mjs';
 import {platformizeCjcToml} from './link_option.mjs';
+import {buildWindowsFinalCompiler} from './windows-final-compiler.mjs';
 import {PRODUCT_NAMES} from '../srcbuild/lib/product-binary.mjs';
 
 const {root} = stageBegin('cjcj');
@@ -338,6 +339,13 @@ const sdkRuntimeDirName = process.env.SDK_RUNTIME_DIR || {
   'win32/x64': 'windows_x86_64_cjnative',
 }[`${process.platform}/${process.arch}`] || '';
 if (!sdkRuntimeDirName) throw new Error(`unsupported host for bootstrap runtime install: ${process.platform}/${process.arch}`);
+const finalCompilerOutput = process.env.FINAL_COMPILER_DIR || '';
+const finalWindows = process.platform === 'win32' && Boolean(finalCompilerOutput);
+const hostSdk = path.join(root, 'final-compiler-host-sdk');
+if (finalWindows) {
+  await fs.rm(hostSdk, {recursive: true, force: true});
+  await fs.cp(cangjieHome, hostSdk, {recursive: true});
+}
 const sdkRuntimeDir = path.join(cangjieHome, 'runtime', 'lib', sdkRuntimeDirName);
 if (!(await isDirectory(sdkRuntimeDir))) throw new Error(`SDK runtime dir missing: ${sdkRuntimeDir}`);
 const runtimeLibNames = process.platform === 'darwin'
@@ -407,6 +415,8 @@ await $({nothrow: true})`cjc --version`;
 await $({nothrow: true})`cjpm --version`;
 await $({nothrow: true})`${toCommandPath(sdkLlc)} --version`;
 
+if (process.env.CJCJ_PACKAGE_PREPARE_ONLY === '1') process.exit(0);
+
 const cjcTomlPath = path.join('packages', 'cjc', 'cjpm.toml');
 const cjcToml = await fs.readFile(cjcTomlPath, 'utf8');
 
@@ -421,19 +431,20 @@ if (process.platform === 'win32') {
   const shellQuote = (value) => "'" + value.replace(/'/g, "'\\''") + "'";
   // Nested `bash -c` quoting exploded at the cygpath `$(` (round-15); write a
   // script file and exec a login shell on it, mirroring build_runtime.mjs.
-  const runInMsys = async (command, tag) => {
+  const runInMsys = async (command, tag, sdkRoot = cangjieHome, hostToolsRoot = sdkRoot) => {
     const lines = [
       'set -euo pipefail',
       `repo="$(cygpath -u ${shellQuote(process.cwd())})"`,
-      `cangjie_home="$(cygpath -u ${shellQuote(cangjieHome)})"`,
+      `cangjie_home="$(cygpath -u ${shellQuote(sdkRoot)})"`,
       `stdx_path="$(cygpath -u ${shellQuote(stdxPath)})"`,
+      `host_tools="$(cygpath -u ${shellQuote(hostToolsRoot)})"`,
       'cd "$repo"',
       `export CANGJIE_HOME="$cangjie_home" CANGJIE_STDX_PATH="$stdx_path" cjHeapSize=${shellQuote(heapSize)}`,
       // The msys2 login profile drops USERPROFILE; cjpm needs it (round-16).
       `export USERPROFILE=${shellQuote(process.env.USERPROFILE || '')}`,
       // Evidence: what LLVM link artifacts does the Windows SDK actually ship?
       'ls "$cangjie_home/third_party/llvm/lib" 2>/dev/null | head -20 || true',
-      'export PATH="$cangjie_home/bin:$cangjie_home/tools/bin:/clang64/bin:$PATH:/c/mingw64/bin"',
+      'export PATH="$cangjie_home/bin:$host_tools/tools/bin:/clang64/bin:$PATH:/c/mingw64/bin"',
       command,
     ].join('\n');
     const scriptPath = path.join(process.cwd(), `cjcjbuild-${tag}.sh`);
@@ -558,6 +569,11 @@ if (process.platform === 'win32') {
     await fs.rm(path.join('target', 'release', 'bin', name), {force: true});
   }
   build = await runInMsys('cjpm build', 'build');
+  if (finalWindows && shim.exitCode === 0 && build.exitCode === 0) {
+    build = await buildWindowsFinalCompiler({root, cangjieHome, hostSdk, sdkRuntimeDirName,
+      cjcTomlPath, cjcToml, mingwCxxLinkRsp, installedRuntimeLib, fixedLlvmManifest,
+      finalCompilerOutput, finalStd: process.env.FINAL_STD_DIR, runInMsys});
+  }
 } else {
   await fs.writeFile(cjcTomlPath, platformizeCjcToml(
     cjcToml, process.platform, cangjieHome, process.env.CJCJ_LLVM_LINK_RSP || ''));

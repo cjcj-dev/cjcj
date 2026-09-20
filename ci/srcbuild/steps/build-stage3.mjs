@@ -8,6 +8,7 @@ import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
 import {prepareBootstrapHandoff} from '../lib/bootstrap-handoff.mjs';
+import {stdIdentity} from '../lib/final-compiler.mjs';
 import {assertWriteBarriers} from '../lib/write-barrier.mjs';
 
 $.stdio = 'inherit';
@@ -249,5 +250,19 @@ if (dryRun) {
   await $({cwd: githubWorkspace, env: {...stageEnv, cjHeapSize: '20GB'}})`cjpm build -j 1`;
   const stage3Product = await findProductBinary('stage3');
   const stage3Sha = await sha256(stage3Product);
+  await fs.writeFile(path.join(workspace, 'software', 'stage3-compiler.json'), `${JSON.stringify({
+    compilerSha256: stage3Sha,
+    parentSha256: stage2Sha,
+    stdSha256: await stdIdentity(finalStd),
+    stage: 'stage3',
+    tuple,
+    parentEntrySha256: compilerEntrySha,
+    shimSha256: {
+      llvm: await sha256(path.join(githubWorkspace, 'runtime_shim', 'cjselfhost_llvmshim.o')),
+      runtimeConfig: await sha256(path.join(githubWorkspace, 'runtime_shim', 'cjc_runtime_config.o')),
+    },
+    runtimeSha256: await sha256(runtime),
+    llvmManifestSha256: await sha256(path.join(requiredEnv('CJCJ_FIXED_LLVM_DIR'), 'llvm-tools.manifest')),
+  }, null, 2)}\n`);
   console.log(`STAGE3_BUILD_PASS compiler=${stage3Product} sha256=${stage3Sha} input_compiler_sha256=${stage2Sha} input_std_sha256=${finalCoreSha}`);
 }
