@@ -13,8 +13,8 @@ readonly REPO_ROOT
 readonly HOST_TOOLCHAIN_PIN="$REPO_ROOT/ci/host_sdk_pin.env"
 # Numeric GHA ids kept for --from-step/--through-step. Deleted ids 15-19 and
 # 27-28 are not in this order: bootstrap (31+32) and final-std (33) run after
-# P07/step 14, then stdx/tools/package, then shim/inject.
-DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 30 33 20 21 22 23 24 25 26 29)
+# P07/step 14, then stdx/tools/package, then shim, then compose/verify.
+DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 30 33 20 21 22 23 24 25 26 29 34 35 36)
 readonly ORIGINAL_ARGS=("$@")
 
 read_host_toolchain_pin() {
@@ -241,8 +241,8 @@ Usage: tools/srcbuild_kkk2.sh [--target TARGET] [--jobs N]
 
 Defaults:
   TARGET=linux-x64  JOBS=<selected CPU window width>
-  FROM_STEP=2  THROUGH_STEP=33
-  DAG after verify-source-pins: bootstrap stage0/stage1, final-std, then stdx/tools/package.
+  FROM_STEP=2  THROUGH_STEP=36
+  DAG after verify-source-pins: bootstrap, final-std, stdx/tools/package, compose stage3.
 
 CPU placement:
   CJCJ_SRCBUILD_CPUSET=96-159 selects an explicit contiguous 64-core window.
@@ -282,7 +282,7 @@ TARGET=linux-x64
 JOBS=
 JOBS_EXPLICIT=0
 FROM_STEP=2
-THROUGH_STEP=33
+THROUGH_STEP=36
 DRY_RUN=0
 VERIFIER_REPORT=${CJCJ_SRCBUILD_VERIFIER_REPORT:-}
 
@@ -364,8 +364,8 @@ if ((JOBS_EXPLICIT == 0)); then JOBS=$CPUSET_WIDTH; fi
 }
 [[ $FROM_STEP =~ ^[0-9]+$ ]] || { echo "from-step must be an integer" >&2; exit 2; }
 [[ $THROUGH_STEP =~ ^[0-9]+$ ]] || { echo "through-step must be an integer" >&2; exit 2; }
-((FROM_STEP >= 1 && FROM_STEP <= 33)) || { echo "from-step must be in 1..33" >&2; exit 2; }
-((THROUGH_STEP >= 2 && THROUGH_STEP <= 33)) || { echo "through-step must be in 2..33" >&2; exit 2; }
+((FROM_STEP >= 1 && FROM_STEP <= 36)) || { echo "from-step must be in 1..36" >&2; exit 2; }
+((THROUGH_STEP >= 2 && THROUGH_STEP <= 36)) || { echo "through-step must be in 2..36" >&2; exit 2; }
 ((FROM_STEP <= THROUGH_STEP)) || { echo "from-step must not exceed through-step" >&2; exit 2; }
 if ((FROM_STEP == 1)); then FROM_STEP=2; fi
 validate_dag_range "$FROM_STEP" "$THROUGH_STEP" || exit $?
@@ -1080,6 +1080,19 @@ step_29() {
     npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/build-shim.mjs"
 }
 
+step_34() {
+    export SOURCE_SDK_VERSION="$CJCJ_SRCBUILD_VERSION"
+    npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/compose-sdk.mjs"
+}
+
+step_35() {
+    tar -C "$CANGJIE_WORKSPACE/software/final-compiler" -czf "$CANGJIE_WORKSPACE/software/final-compiler.tar.gz" .
+}
+
+step_36() {
+    npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/steps/verify.mjs" "$CANGJIE_WORKSPACE/software/cangjie"
+}
+
 step_30() {
     export SOURCE_SDK_VERSION="$CJCJ_SRCBUILD_VERSION"
     npx --yes zx@8 "$REPO_ROOT/ci/srcbuild/tests/inject-version.test.mjs"
@@ -1203,6 +1216,9 @@ declare -Ar STEP_NAMES=(
     [31]='Bootstrap stage0 (cjpm -O1)'
     [32]='Bootstrap stage1 (cjpm -j1 cjHeapSize=20GB)'
     [33]='Build stage 3 compiler and final std'
+    [34]='Compose self-hosted SDK'
+    [35]='Archive final compiler handoff'
+    [36]='Verify self-hosted SDK'
 )
 
 validate_stage_step_contracts() {
@@ -1269,6 +1285,18 @@ validate_stage_step_contracts() {
             return 1
         }
     fi
+    if includes_step 34; then
+        [[ -f $REPO_ROOT/ci/srcbuild/steps/compose-sdk.mjs ]] || {
+            echo "dry-run compose-sdk step script missing" >&2
+            return 1
+        }
+        local step34_text
+        step34_text=$(awk '/^step_34\(\)/,/^}/' "$SCRIPT_PATH")
+        printf '%s\n' "$step34_text" | /usr/bin/grep -Fq 'compose-sdk.mjs' || {
+            echo "dry-run step_34 does not invoke compose-sdk.mjs" >&2
+            return 1
+        }
+    fi
 }
 
 print_dry_step() {
@@ -1288,6 +1316,17 @@ print_dry_step() {
         33)
             printf 'DRY_RUN ENV CJCJ_STAGE3_STDLIB_BUILD_TYPE=%s cjHeapSwap=on\n' "$BUILD_TYPE"
             printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$STAGE3_STEP_SCRIPT"
+            ;;
+        34)
+            printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$REPO_ROOT/ci/srcbuild/steps/compose-sdk.mjs"
+            ;;
+        35)
+            printf 'DRY_RUN COMMAND=tar -C %q/software/final-compiler -czf %q/software/final-compiler.tar.gz .\n' \
+                "$CANGJIE_WORKSPACE" "$CANGJIE_WORKSPACE"
+            ;;
+        36)
+            printf 'DRY_RUN COMMAND=npx --yes zx@8 %q %q/software/cangjie\n' \
+                "$REPO_ROOT/ci/srcbuild/steps/verify.mjs" "$CANGJIE_WORKSPACE"
             ;;
     esac
 }
