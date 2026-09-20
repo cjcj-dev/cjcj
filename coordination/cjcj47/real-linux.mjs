@@ -22,6 +22,7 @@ const pin = (await fs.readFile(new URL('../../ci/cjpm_pin.env', import.meta.url)
 await write(path.join(fakeBin, 'git'), `#!/bin/sh\ncase "$1" in rev-parse) printf '%s\\n' '${pin}' ;; esac\n`);
 process.env.PATH = `${fakeBin}:${process.env.PATH}`;
 process.env.CJCJ_SRCBUILD_HOST_SDK = host;
+process.env.GC_UNIT_CJC_RUNTIME_LIB_DIR = path.join(host, 'runtime/lib', tuple);
 delete process.env.CANGJIE_BUILD_DRY_RUN;
 const original = buildConfig({workspace: path.join(root, 'workspace'), buildRoot: root, consumerSdk: sdk});
 const config = {...original, target: {...original.target, spec: {...original.target.spec,
@@ -40,7 +41,7 @@ if sys.argv[1] == 'build':
  with open(${JSON.stringify(trace)}, 'a') as out: out.write(json.dumps(record) + '\\n')
  compiled.check_returncode()
  env = dict(os.environ)
- env['LD_LIBRARY_PATH'] = ${JSON.stringify([path.join(sdk, 'runtime/lib', tuple), path.join(sdk, 'lib', tuple), path.join(sdk, 'third_party/llvm/lib')].join(':'))}
+ env['LD_LIBRARY_PATH'] = ${JSON.stringify('/root/diff_0189f2e01515/default/build/runtime-staging/lib/x86_64_Release')}
  env['LD_DEBUG'] = 'libs'
  result = subprocess.run([str(output)], env=env, text=True, capture_output=True, timeout=30)
  pathlib.Path('loader.log').write_text(result.stderr)
