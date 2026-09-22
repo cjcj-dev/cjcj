@@ -310,9 +310,9 @@ private func GenerateOptionLikeTEnum(irBuilder: IRBuilder2, chirExpr: Expression
     irBuilder.SetInsertPoint(blocks[0])
     if (hasAssociatedValue) {
         let associatedValue = irBuilder.GetCGModule().GetMappedCGValue(chirExpr.GetOperand(1))
-        irBuilder.CallGCWrite(associatedValue.GetRawValue(), enumValue, castedPayload)
+        irBuilder.CallGCWrite(associatedValue.GetRawValue(), enumValue, castedPayload, GCWriteStrength.STRONG)
     } else {
-        irBuilder.CallGCWrite(unsafe { LLVMConstNull(i8PtrTy) }, enumValue, castedPayload)
+        irBuilder.CallGCWrite(unsafe { LLVMConstNull(i8PtrTy) }, enumValue, castedPayload, GCWriteStrength.STRONG)
     }
     irBuilder.CreateBr(blocks[2])
 
