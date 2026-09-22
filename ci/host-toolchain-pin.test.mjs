@@ -236,3 +236,66 @@ test('both JavaScript entry points require the loaded environment value', async 
     assert.ok(!text.includes('process.env.CJCJ_TOOLCHAIN ||'), name);
   }
 });
+
+// ── #70: two pins, both load-bearing ─────────────────────────────────────────
+// Read as a cleanup this looks like one pin too many: ci/cjpm_pin.env and
+// ci/host_sdk_pin.env both define CJCJ_TOOLCHAIN, at different nightlies, and
+// the obvious repair is to delete one. Measured, they are two different hosts.
+// ci/cjpm_pin.env is the ordinary CI build host: four workflows cat it into
+// $GITHUB_ENV, six cache keys interpolate it, and ci/setup_sdk.mjs then fails
+// closed on it in requireHostToolchain(). ci/host_sdk_pin.env is the
+// source-build host, which srcbuild.yml loads instead and which the test above
+// requires srcbuild.yml *not* to take from cjpm_pin.
+//
+// So the contract worth holding is not "one definition" but "no definition
+// without a named host and a measured consumer set". Definitions are
+// enumerated from git rather than from a list kept here, because a list of the
+// files we already know about cannot discover the third one.
+const HOST_TOOLCHAIN_PINS = Object.freeze({
+  'ci/cjpm_pin.env': Object.freeze({
+    host: 'ordinary CI build host',
+    loaders: Object.freeze(['build-cjpm.yml', 'build-windows-runtime.yml', 'ci.yml', 'platform-matrix.yml']),
+  }),
+  'ci/host_sdk_pin.env': Object.freeze({
+    host: 'source-build host',
+    loaders: Object.freeze(['srcbuild.yml']),
+  }),
+});
+
+test('every CJCJ_TOOLCHAIN definition names a host and has measured consumers', async () => {
+  const tracked = spawnSync('git', ['-C', root, 'ls-files', '-z'], {encoding: 'utf8'});
+  assert.equal(tracked.status, 0, tracked.stderr);
+  const files = tracked.stdout.split('\0').filter(Boolean);
+  assert.ok(files.length > 100, `git ls-files found ${files.length} files; discovery is broken`);
+
+  const definitions = [];
+  for (const file of files) {
+    let text;
+    try {
+      text = await fs.readFile(path.join(root, file), 'utf8');
+    } catch {
+      continue;
+    }
+    if (/^CJCJ_TOOLCHAIN=/m.test(text)) definitions.push(file);
+  }
+  assert.deepEqual(definitions.sort(), Object.keys(HOST_TOOLCHAIN_PINS).sort(),
+    'a CJCJ_TOOLCHAIN definition appeared or vanished; give each one a host and its consumers here');
+
+  // The half that makes deleting a pin red rather than quiet: each definition
+  // is loaded by exactly the workflows recorded against it, and by no others.
+  const workflowDir = path.join(root, '.github', 'workflows');
+  const workflowNames = (await fs.readdir(workflowDir)).filter(name => name.endsWith('.yml')).sort();
+  for (const [file, {host, loaders}] of Object.entries(HOST_TOOLCHAIN_PINS)) {
+    const text = await fs.readFile(path.join(root, file), 'utf8');
+    assert.match(text, /^CJCJ_TOOLCHAIN=nightly-\S+$/m, `${file} (${host}) must pin an exact nightly`);
+    const load = `cat ${file} >> "$GITHUB_ENV"`;
+    const observed = [];
+    for (const name of workflowNames) {
+      if ((await fs.readFile(path.join(workflowDir, name), 'utf8')).includes(load)) observed.push(name);
+    }
+    assert.deepEqual(observed, [...loaders],
+      `${file} is the ${host} pin; its loader set changed, so either a consumer lost its pin or gained one`);
+    assert.ok(observed.length > 0, `${file} has no consumer; delete it or wire it, do not leave it readable`);
+    console.log(`HOST-TOOLCHAIN-PIN ${file} host="${host}" loaders=${observed.join(',')}`);
+  }
+});
