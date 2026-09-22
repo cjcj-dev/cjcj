@@ -50,10 +50,20 @@ const CXX_JOBS = new Map([
 // the repository's own build scripts) sit next to the compiler front ends
 // themselves (cc, gcc, g++, clang, clang++), and anything that merely installs
 // or configures one is excluded below rather than left out here.
-const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|\bcc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs)/;
-// Lines that name a compiler without running one: package managers, the MSYS2
-// package list, toolchain flags, and shellcheck/actionlint over shell sources.
-const INSTALLS = /(\b(apt-get|brew|pacman|pip3?|choco|shellcheck|actionlint)\b|mingw-w64-\S+|--gcc-toolchain|CMAKE_C(XX)?_COMPILER=|install-system-deps|install-mingw)/;
+// `cc` needs the extra guard: a bare word boundary also matches the end of a
+// filename like src/foo.cc, and a file being copied is not a compile.
+const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|(?<![.\w-])cc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs)/;
+// Only the package managers. Every other exclusion tried here -- the MSYS2
+// package list, --gcc-toolchain, CMAKE_C*_COMPILER=, shellcheck/actionlint --
+// was measured and carried nothing: dropping all six leaves the suite at the
+// same 13 failures with no false positive. They only open doors, and a review
+// wrote four lines that compile C++ and would have been swallowed by them
+// (`cmake -DCMAKE_CXX_COMPILER=clang++ --build build`,
+// `clang++ --gcc-toolchain=/usr -c foo.cpp`,
+// `/mingw64/bin/mingw-w64-clang++ -c foo.cpp`,
+// `shellcheck x.sh && gcc -c probe.c`). An exclusion belongs here only once a
+// real false positive forces it.
+const INSTALLS = /\b(apt-get|brew|pacman|pip3?|choco)\b/;
 const compilesIn = step => /^\s*run:/m.test(step)
   && step.split('\n').some(line => COMPILES.test(line) && !INSTALLS.test(line));
 
