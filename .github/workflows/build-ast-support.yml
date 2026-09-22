@@ -1,0 +1,88 @@
+name: Bootstrap AST support
+
+on:
+  push:
+    branches: [sym/86-implement-r5786080463]
+    paths: [.github/workflows/build-ast-support.yml, ci/build_ast_support.sh]
+  workflow_dispatch:
+    inputs:
+      cold_cache:
+        description: Empty the restored sccache cache for the cold control.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux_x86_64, runner: ubuntu-22.04}
+          - {platform: linux_aarch64, runner: ubuntu-24.04-arm}
+          - {platform: darwin_x86_64, runner: macos-15-intel}
+          - {platform: darwin_aarch64, runner: macos-15}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load existing source pins
+        run: |
+          cat ci/source_pin.env ci/llvm_pin.env >> "$GITHUB_ENV"
+      - uses: ./.github/actions/sccache
+        with:
+          component: ast-support
+          platform: ${{ matrix.platform }}
+          pin: ${{ env.COMPILER_REF }}-${{ env.FLATBUFFERS_SHA }}
+      - name: Cold cache control
+        if: inputs.cold_cache
+        run: |
+          set -euo pipefail
+          "$SCCACHE_PATH" --stop-server
+          test "$SCCACHE_DIR" = "$RUNNER_TEMP/sccache-ast-support"
+          rm -rf "$SCCACHE_DIR"
+          mkdir -p "$SCCACHE_DIR"
+          "$SCCACHE_PATH" --start-server
+          "$SCCACHE_PATH" --zero-stats
+      - name: Install build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang cmake ninja-build
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Fetch pinned sources
+        run: |
+          set -euo pipefail
+          git init compiler
+          git -C compiler remote add origin "$COMPILER_SRC_URL"
+          git -C compiler fetch --depth=1 origin "$COMPILER_REF"
+          git -C compiler checkout --detach FETCH_HEAD
+          test "$(git -C compiler rev-parse HEAD)" = "$COMPILER_REF"
+          git init compiler/third_party/flatbuffers
+          git -C compiler/third_party/flatbuffers remote add origin "$FLATBUFFERS_URL"
+          git -C compiler/third_party/flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
+          git -C compiler/third_party/flatbuffers checkout --detach FETCH_HEAD
+      - name: Build only AST support
+        run: bash ci/build_ast_support.sh compiler ast-build ast-artifact
+      - name: Record provenance
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          printf 'compiler=%s\nflatbuffers=%s\nplatform=%s\nrun_id=%s\nrun_attempt=%s\n' \
+            "$COMPILER_REF" "$FLATBUFFERS_SHA" "$PLATFORM" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > ast-artifact/PROVENANCE
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: ast-support
+          platform: ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ast-support-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ast-artifact/
+          if-no-files-found: error
+          retention-days: 90
