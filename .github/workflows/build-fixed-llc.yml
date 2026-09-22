@@ -5,6 +5,11 @@ on:
     branches: [debug/llc-build]
   workflow_dispatch:
     inputs:
+      publish_tuple:
+        description: Publish a new static tuple candidate for an explicit pin update.
+        required: false
+        type: boolean
+        default: true
       platforms:
         description: >-
           Comma-separated llvm platforms to build. Empty or "all" builds every
@@ -27,6 +32,11 @@ on:
         default: false
   workflow_call:
     inputs:
+      publish_tuple:
+        description: Publish a new static tuple candidate (consumers normally use the fixed artifact).
+        required: false
+        type: boolean
+        default: false
       platforms:
         description: >-
           Comma-separated llvm platforms to build. Empty or "all" builds every
@@ -62,6 +72,7 @@ jobs:
         id: select
         env:
           REQUESTED: ${{ inputs.platforms || 'all' }}
+          PUBLISH_TUPLE: ${{ inputs.publish_tuple }}
         run: |
           set -euo pipefail
           all='[
@@ -83,9 +94,12 @@ jobs:
             echo "no tuple matched platforms=$REQUESTED" >&2
             exit 1
           fi
-          # Stage0 consumes the X86-only static colour tuple on every host.
-          selected="$(printf '%s' "$selected" | jq -c --argjson all "$all" \
-            '. + [$all[] | select(.platform == "linux_x86_64")] | unique_by(.platform)')"
+          # Only an explicit publication builds the X86 static colour tuple.
+          # Source matrix calls consume the immutable artifact from the pin.
+          if [ "$PUBLISH_TUPLE" = true ]; then
+            selected="$(printf '%s' "$selected" | jq -c --argjson all "$all" \
+              '. + [$all[] | select(.platform == "linux_x86_64")] | unique_by(.platform)')"
+          fi
           echo "selected $count tuple(s) for platforms=$REQUESTED"
           printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
 
@@ -309,6 +323,7 @@ jobs:
           retention-days: 7
 
   static-tuple:
+    if: inputs.publish_tuple
     name: Publish static colour LLVM tuple
     needs: build-tools
     runs-on: ubuntu-22.04
