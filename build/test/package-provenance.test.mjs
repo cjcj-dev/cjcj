@@ -17,9 +17,11 @@ import {
 import {
   GATE_APPARATUS_COMPONENT,
   GATE_APPARATUS_PROVENANCE,
+  KNOWN_GATE_APPARATUS_LIMITATIONS,
   REVIEWED_GATE_HOST_TOOLCHAIN,
   writeGateApparatusProvenance,
 } from '../lib/release-gate-apparatus.mjs';
+import {writeReleaseManifest} from '../lib/release-manifest.mjs';
 import {
   CJDB_PYTHON_MODULES,
   CJDB_PYTHON_UNIX_MODULES,
@@ -534,4 +536,146 @@ test('package_sdk archives std provenance and an honest complete manifest', asyn
   const changed = runRaw('zx', packageArgs, {cwd: path.resolve('.')});
   assert.notEqual(changed.status, 0, 'changing one byte in the cjpm sidecar must fail closed');
   console.log(`NEGATIVE-CHANGE-SIDECAR RC=${changed.status}\n${changed.stderr.trim()}`);
+});
+
+// ── #62: the std closure is a property of the stage, not of where it sits ─────
+// stagedStdFiles tested /(^|[/\\])(std|libcangjie-std)/ against each staged
+// file's *absolute* path, and every ancestor directory of the stage is in that
+// string. A checkout or build directory named `std-prefix` therefore matched at
+// its own name, pulling libcangjie-runtime.so into the std closure, where the
+// ARTIFACT-SHA256 reconciliation then correctly reported it as not coming from
+// this std build and refused to package. The verdict depended on where the tree
+// happened to live, which is the one input it must not have.
+//
+// Two stages with identical bytes under two different parents, compared row by
+// row: a path-shape regression shows up as a diff, and so would a fix that
+// merely widened the allowance instead of narrowing the domain.
+
+async function stdClosureStage(parent) {
+  const stage = path.join(parent, 'cjcj-fixture-linux-x64');
+  await write(stage, 'bin/cjc', `compiler\0CJCJ-COMMIT:${CJCJ_SHA}\0`);
+  const runtimeArtifact = await write(stage, `runtime/lib/${TUPLE}/libcangjie-runtime.so`,
+    `runtime\0CJRT-COMMIT:${RUNTIME_SHA}\0`);
+  await write(stage, 'third_party/llvm/bin/llc', `llc\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
+  await write(stage, 'third_party/llvm/bin/opt', `opt\0CJLLVM-COMMIT:${LLVM_SHA}\0`);
+  await write(stage, 'tools/bin/cjpm', 'source-built cjpm fixture\0CJ_MCC_WriteRefField\0');
+  // The bytes the reconciliation is meant to cover. libcangjie-runtime.so above
+  // is deliberately not among them: it is the file the old absolute-path test
+  // swept in, and PROVENANCE.txt must stay silent about it.
+  const stdArtifacts = [
+    [`modules/${TUPLE}/std/core.cjo`, 'fixture std core cjo'],
+    [`lib/${TUPLE}/libcangjie-std-core.a`, 'fixture std core archive'],
+    [`runtime/lib/${TUPLE}/libcangjie-std.so`, 'fixture std shared object'],
+  ];
+  const stdHashes = [];
+  for (const [relative, contents] of stdArtifacts) {
+    await write(stage, relative, contents);
+    stdHashes.push(`${crypto.createHash('sha256').update(contents).digest('hex')}  ${relative}`);
+  }
+  const stdProvenance = await write(stage, 'PROVENANCE.txt', [
+    `CJSTD-COMMIT:${STD_SHA} BUILT-BY:${CJCJ_SHA}`,
+    `STD_SOURCE_COMMIT = ${STD_SHA}`,
+    'ARTIFACT-SHA256:',
+    ...stdHashes,
+    '',
+  ].join('\n'));
+  const pythonArtifact = await write(stage, 'third_party/python/bin/python3.11',
+    'Python 3.11.9 fixture\n');
+  const pythonMetadata = {
+    schema: 1,
+    platform: 'linux-x64',
+    version: RELEASE_PYTHON_VERSION,
+    source_type: 'python.org-source-native',
+    source_url: RELEASE_PYTHON_SOURCE_URL,
+    source_sha256: RELEASE_PYTHON_SOURCE_SHA256,
+    configure_args: '--prefix=<bundle> --enable-shared --without-ensurepip',
+    configure_environment: 'LDFLAGS=-Wl,-rpath,$ORIGIN/../lib',
+    required_modules: [...CJDB_PYTHON_MODULES],
+    required_unix_modules: [...CJDB_PYTHON_UNIX_MODULES],
+  };
+  const pythonMetadataArtifact = await write(stage, 'third_party/python/PYTHON-BUNDLE.json',
+    `${JSON.stringify(pythonMetadata, null, 2)}\n`);
+  const baseDownload = baseSdkDownload('linux-x64', REVIEWED_GATE_HOST_TOOLCHAIN);
+  const baseSdkProvenance = {
+    schema: 1,
+    component: 'base-sdk',
+    platform: 'linux-x64',
+    source: {status: SOURCE_PROVENANCE_NOT_APPLICABLE, reason: BASE_SDK_SOURCE_REASON},
+    release: {
+      repository: baseDownload.releaseRepository,
+      version: baseDownload.version,
+      download_url: baseDownload.url,
+    },
+    artifact: {path: baseDownload.archive, sha256: 'a'.repeat(64)},
+  };
+  const gateApparatusArtifact = await write(stage, GATE_APPARATUS_PROVENANCE, `${JSON.stringify({
+    schema: 1,
+    component: GATE_APPARATUS_COMPONENT,
+    platform: 'linux-x64',
+    gate_host_toolchain: REVIEWED_GATE_HOST_TOOLCHAIN,
+    base_sdk: {
+      source: baseSdkProvenance.source,
+      release_repository: baseSdkProvenance.release.repository,
+      version: baseSdkProvenance.release.version,
+      download_url: baseSdkProvenance.release.download_url,
+      archive_path: baseSdkProvenance.artifact.path,
+      archive_sha256: baseSdkProvenance.artifact.sha256,
+    },
+    host_runtime: {
+      path: `runtime/lib/${TUPLE}/libcangjie-runtime.so`,
+      sha256: 'b'.repeat(64),
+      g_cjLoadBadMask_count: 0,
+      symbol_probe: 'nm -D --defined-only',
+    },
+    known_apparatus_limitations: KNOWN_GATE_APPARATUS_LIMITATIONS,
+  }, null, 2)}\n`);
+  return {
+    stage,
+    options: {
+      stage,
+      platform: 'linux-x64',
+      runtimeArtifact,
+      stdProvenance,
+      cjcjCommit: CJCJ_SHA,
+      runtimeCommit: RUNTIME_SHA,
+      llvmCommit: LLVM_SHA,
+      stdRepository: 'https://github.com/cjcj-dev/cangjie-runtime.git',
+      cjpmRepository: 'https://github.com/cjcj-dev/cangjie-tools.git',
+      cjpmCommit: CJPM_SHA,
+      pythonArtifact,
+      pythonMetadata,
+      pythonMetadataArtifact,
+      pythonVersion: RELEASE_PYTHON_VERSION,
+      baseSdkId: REVIEWED_GATE_HOST_TOOLCHAIN,
+      baseSdkProvenance,
+      gateApparatusArtifact,
+    },
+  };
+}
+
+test('the std closure ignores the stage ancestors: a std-prefix parent changes no manifest row', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'std-closure-'));
+  t.after(() => fs.rm(root, {recursive: true, force: true}));
+
+  // Same bytes, same layout, same stage basename; only the parent differs.
+  const neutral = await stdClosureStage(path.join(root, 'workspace'));
+  const trap = await stdClosureStage(path.join(root, 'std-prefix'));
+  assert.match(trap.stage, /[/\\]std-prefix[/\\]/, 'the trap stage must actually sit under std-prefix');
+
+  const neutralRows = (await writeReleaseManifest(neutral.options)).rows;
+  const trapRows = (await writeReleaseManifest(trap.options)).rows;
+
+  // Verbatim: every path in a row is stage-relative, so two stages built from
+  // the same bytes must serialise identically whatever their parents are named.
+  assert.equal(JSON.stringify(trapRows, null, 2), JSON.stringify(neutralRows, null, 2),
+    'the release manifest changed because a parent directory is named std-prefix');
+
+  // The assertion above would also hold if both runs were wrong in the same way,
+  // so name the row the bug corrupted and the count it must report.
+  const std = neutralRows.find(row => row.component === 'std');
+  assert.deepEqual(std.build, {verified: 3, provenance_entries: 3},
+    'the std closure must be exactly the three artifacts PROVENANCE.txt lists');
+  console.log(`STD-CLOSURE-NEUTRAL ${JSON.stringify(std.build)} stage=${neutral.stage}`);
+  console.log(`STD-CLOSURE-STD-PREFIX ${JSON.stringify(
+    trapRows.find(row => row.component === 'std').build)} stage=${trap.stage}`);
 });
