@@ -52,8 +52,26 @@ set -e
 test "$consumer_rc" -ne 0
 grep -F 'ERR_ASSERTION' "$work/consumer-cut.log"
 restore
+python3 - <<'CUT'
+from pathlib import Path
+p = Path('ci/release/prepare_bootstrap_inputs.mjs')
+s = p.read_text()
+a = s.index("if (!/^[0-9a-f]{64}$/.test(process.env.LLVM_TUPLE_SUMS_SHA")
+b = s.index("\n\nconst colourRt", a)
+p.write_text(s[:a] + s[b:])
+CUT
+diff -u "$work/consumer.saved" "$consumer" > "$work/pin-cut.diff" || test "$?" -eq 1
+sha256sum "$consumer" > "$work/pin-cut.sha256"
+set +e
+node --test ci/release/prepare_bootstrap_inputs.test.mjs > "$work/pin-cut.log" 2>&1
+pin_rc=$?
+set -e
+test "$pin_rc" -ne 0
+grep -F 'ERR_ASSERTION' "$work/pin-cut.log"
+restore
 bash ci/test-llvm-tuple-layout.sh "$work/producer-restored" > "$work/producer-restored.log" 2>&1
 node --test ci/release/prepare_bootstrap_inputs.test.mjs > "$work/consumer-restored.log" 2>&1
 sha256sum "$producer" "$consumer" > "$work/restored.sha256"
 cmp "$work/green.sha256" "$work/restored.sha256"
 printf 'WIRING producer green=0 cut=%s restored=0; consumer green=0 cut=%s restored=0\n' "$producer_rc" "$consumer_rc"
+printf 'WIRING reviewed-pin green=0 cut=%s restored=0\n' "$pin_rc"
