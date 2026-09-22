@@ -56,7 +56,8 @@ mkdir -p "$generated/flatbuffers"
 "$flatbuffers_build/flatc$exe" --no-warnings -c -o "$generated/flatbuffers" \
     "$root/cangjie-compiler/schema/ModuleFormat.fbs"
 
-clang++ -std=c++17 -O2 ${pic_flag:+"$pic_flag"} -fno-rtti -fno-exceptions \
+# Through the same launcher cmake uses, so the shim object is cached with llc/opt.
+${SCCACHE_PATH:+"$SCCACHE_PATH"} clang++ -std=c++17 -O2 ${pic_flag:+"$pic_flag"} -fno-rtti -fno-exceptions \
     -I"$llvm_src/llvm/include" -I"$llvm_build/include" \
     -I"$flatbuffers_src/include" -I"$generated" \
     -c runtime_shim/cjselfhost_llvmshim.cpp \

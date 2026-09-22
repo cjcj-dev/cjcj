@@ -298,6 +298,17 @@ jobs:
         if: runner.os == 'Linux' && steps.rtcache.outputs.cache-hit != 'true'
         run: sudo apt-get install -y -qq clang cmake make
 
+      # runtime/CMakeLists.txt picks up a compiler cache from PATH; the report
+      # step below fails this job if the coloured runtime compiled without it.
+      - name: Start sccache
+        if: runner.os != 'Windows' && steps.rtcache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: ${{ inputs.platform }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 1G
+
       - name: Build pinned runtime
         if: runner.os != 'Windows' && steps.rtcache.outputs.cache-hit != 'true'
         env:
@@ -372,6 +383,14 @@ jobs:
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ inputs.llvm_platform }}/cjselfhost_llvmshim.o
         run: npx --yes zx@8 runtime_shim/build_shim.mjs
+
+      - name: Report sccache
+        if: always() && runner.os != 'Windows' && steps.rtcache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/sccache-report
+        with:
+          component: runtime
+          platform: ${{ inputs.platform }}
+          require-compiles: 'true'
 
       - name: Install source-built cjpm (Unix)
         if: runner.os != 'Windows'
@@ -481,6 +500,14 @@ jobs:
             --platform "${{ inputs.platform }}" `
             --outdir "$PWD\dist"
 
+      # cjcj-<version>-<platform>.SHA256SUMS: archive plus manifest, in
+      # `sha256sum -c` form, cross-checked against the .sha256 sidecar the
+      # packager wrote. release-matrix.yml aggregates one per platform and
+      # refuses to publish a list with a platform missing.
+      - name: Write package checksums
+        shell: bash
+        run: node ci/release/package_checksums.mjs write --dist dist --platform "$RELEASE_PLATFORM" --version "${{ inputs.version }}"
+
       - name: Verify packaged standard library
         if: inputs.verify
         timeout-minutes: 2
@@ -571,5 +598,6 @@ jobs:
             dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.zip
             dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.zip.sha256
             dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.RELEASE-MANIFEST.jsonl
+            dist/cjcj-${{ inputs.version }}-${{ inputs.platform }}.SHA256SUMS
           if-no-files-found: error
           retention-days: 90

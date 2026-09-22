@@ -31,6 +31,24 @@ BUILD_TMPDIR=''
 STAGE=init
 WANT=all
 DRY=0
+# Host tuple directories and the multiarch loader path, from the machine this
+# script runs on. Linux only: the script assumes ELF .so names, GNU find/install/
+# nm and lib/<tuple> layouts, so a Darwin host is refused here rather than
+# failing later on a path that happened to be spelled for x86_64.
+HOST_TUPLE=''
+HOST_MULTIARCH=''
+host_tuple_init() {
+  local os arch
+  os=$(uname -s); arch=$(uname -m)
+  case "$os/$arch" in
+    Linux/x86_64) HOST_TUPLE=linux_x86_64_cjnative; HOST_MULTIARCH=x86_64-linux-gnu;;
+    Linux/aarch64) HOST_TUPLE=linux_aarch64_cjnative; HOST_MULTIARCH=aarch64-linux-gnu;;
+    *) die "host $os/$arch is not supported by bootstrap.sh (Linux x86_64/aarch64 only: ELF .so, GNU find/install/nm, lib/<tuple> layout)";;
+  esac
+  echo "HOST-TUPLE $HOST_TUPLE multiarch=$HOST_MULTIARCH home=$BUILD_HOME"
+}
+# HOME for the isolated `env -i` builds: the caller's, /root when unset (kkk2).
+BUILD_HOME="${HOME:-/root}"
 
 usage() {
   echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|all] [--stage1-heap 20GB] [--dry-run]'
@@ -197,7 +215,7 @@ prepare_build_env() {
   local private="$WORK/tmp-private"
   BUILD_TMPDIR="${TMPDIR:-$private}"
   cmd "mkdir -p $(printf '%q' "$BUILD_TMPDIR")"
-  echo "BUILD-ENV planned HOME=/root TMPDIR=$BUILD_TMPDIR"
+  echo "BUILD-ENV planned HOME=$BUILD_HOME TMPDIR=$BUILD_TMPDIR"
 }
 
 assert_executable() {
@@ -375,21 +393,21 @@ stage0_cache_publish() {
 
 sdk_ld_path() {
   local sdk="$1" runtime="$2"
-  printf '%s' "$(runtime_dir "$runtime"):$sdk/runtime/lib/linux_x86_64_cjnative:$sdk/lib/linux_x86_64_cjnative:$sdk/third_party/llvm/lib:$sdk/tools/lib:/usr/lib/x86_64-linux-gnu"
+  printf '%s' "$(runtime_dir "$runtime"):$sdk/runtime/lib/$HOST_TUPLE:$sdk/lib/$HOST_TUPLE:$sdk/third_party/llvm/lib:$sdk/tools/lib:/usr/lib/$HOST_MULTIARCH"
 }
 
 assert_version() {
   local label="$1" compiler="$2" sdk="$3" runtime="$4" ld
   assert_executable "$label" "$compiler"
   ld=$(sdk_ld_path "$sdk" "$runtime")
-  cmd "env -i HOME=/root CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=/usr/bin:/bin $(printf '%q' "$compiler") --version"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=/usr/bin:/bin $(printf '%q' "$compiler") --version"
   [ "$DRY" -eq 1 ] || ok "$label --version rc=0"
 }
 
 ffi_manifest() {
   local prefix="$1"
   {
-    find "$prefix/lib/linux_x86_64_cjnative" -maxdepth 1 -type f -iname '*FFI.a' -printf 'lib/linux_x86_64_cjnative/%f\n' 2>/dev/null
+    find "$prefix/lib/$HOST_TUPLE" -maxdepth 1 -type f -iname '*FFI.a' -printf "lib/$HOST_TUPLE/%f\n" 2>/dev/null
     [ -f "$prefix/lib/libstdFFI.so" ] && echo 'lib/libstdFFI.so'
   } | sort
 }
@@ -400,8 +418,8 @@ assert_std_install_shape() {
     echo "ASSERT $label shape=planned Int64.ti>1 FFI-archives>0${compare_prefix:+ FFI-set-equals=$compare_prefix}"
     return 0
   fi
-  core_a="$prefix/lib/linux_x86_64_cjnative/libcangjie-std-core.a"
-  core_so="$prefix/runtime/lib/linux_x86_64_cjnative/libcangjie-std-core.so"
+  core_a="$prefix/lib/$HOST_TUPLE/libcangjie-std-core.a"
+  core_so="$prefix/runtime/lib/$HOST_TUPLE/libcangjie-std-core.so"
   ffi_so="$prefix/lib/libstdFFI.so"
   if [ ! -f "$core_a" ] || [ ! -f "$core_so" ] || [ ! -f "$ffi_so" ]; then
     die "$label install shape: core archive/shared 或 libstdFFI.so 缺失"
@@ -409,7 +427,7 @@ assert_std_install_shape() {
   ti=$({ nm -A --defined-only "$core_a" 2>/dev/null; nm -A --defined-only "$core_so" "$ffi_so" 2>/dev/null; } |
     awk '$NF=="Int64.ti"{n++}END{print n+0}')
   [ "$ti" -gt 1 ] || die "$label install shape: Int64.ti definitions=$ti (expected >1)"
-  ffi_archives=$(find "$prefix/lib/linux_x86_64_cjnative" -maxdepth 1 -type f -iname '*FFI.a' -printf '.\n' 2>/dev/null | wc -l)
+  ffi_archives=$(find "$prefix/lib/$HOST_TUPLE" -maxdepth 1 -type f -iname '*FFI.a' -printf '.\n' 2>/dev/null | wc -l)
   [ "$ffi_archives" -gt 0 ] || die "$label install shape: FFI archive set is empty"
   if [ -n "$compare_prefix" ]; then
     [ -d "$compare_prefix" ] || die "$label compare prefix 不存在: $compare_prefix"
@@ -429,7 +447,7 @@ stdlib_build() {
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=/root TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$JOBS") $(printf '%q' "$sdk/runtime/lib/linux_x86_64_cjnative") $(printf '%q' "$prefix")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$JOBS") $(printf '%q' "$sdk/runtime/lib/$HOST_TUPLE") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
 }
 
@@ -501,7 +519,7 @@ cjpm_build() {
   cjpm="$sdk/tools/bin/cjpm"
   script="cd $(printf '%q' "$srcdir") && $(printf '%q' "$cjpm") build${extra:+ $extra}"
   echo "CMD cjpm build${extra:+ $extra} bin=$cjpm cwd=$srcdir heap=$heap"
-  cmd "env -i HOME=/root TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$heap") bash -c $(printf '%q' "$script")"
 }
 
 assert_shim_cpp_src() {
@@ -547,7 +565,7 @@ shim_build() {
   fi
   echo "CMD shim build label=$label cwd=$srcdir cpp-src=$CPP_SRC source-object=${source_object:-source} sdk=$sdk runtime=$runtime"
   cmd "rm -f $(printf '%q' "$srcdir/runtime_shim/cjselfhost_llvmshim.o") $(printf '%q' "$srcdir/runtime_shim/cjc_runtime_config.o")"
-  cmd "env -i HOME=/root CANGJIE_HOME=$(printf '%q' "$sdk") CANGJIE_CPP_SRC=$(printf '%q' "$CPP_SRC") CJCJ_COMMIT=$(printf '%q' "$CJCJ_SHA") ${source_env}LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$node_bin:/usr/bin:/bin") bash $(printf '%q' "$srcdir/runtime_shim/build_shim.sh")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") CANGJIE_CPP_SRC=$(printf '%q' "$CPP_SRC") CJCJ_COMMIT=$(printf '%q' "$CJCJ_SHA") ${source_env}LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$node_bin:/usr/bin:/bin") bash $(printf '%q' "$srcdir/runtime_shim/build_shim.sh")"
   if [ "$DRY" -eq 1 ]; then
     echo "OUTPUT $label-shim-cpp path=$srcdir/runtime_shim/cjselfhost_llvmshim.o sha256=planned"
     echo "OUTPUT $label-shim-config path=$srcdir/runtime_shim/cjc_runtime_config.o sha256=planned"
@@ -595,9 +613,9 @@ stage0() {
   echo "OUTPUT stdlib-stage1=$std"
   cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$base") --to $(printf '%q' "$sdk") --host --llvm-so $(printf '%q' "$HOST_LLVM_SO") --force"
   assert_installed_llvm_so "$sdk" "$HOST_LLVM_SO"
-  cmd "install -Dm644 $(printf '%q' "$AST_SUPPORT") $(printf '%q' "$sdk/lib/linux_x86_64_cjnative/libcangjie-ast-support.a")"
+  cmd "install -Dm644 $(printf '%q' "$AST_SUPPORT") $(printf '%q' "$sdk/lib/$HOST_TUPLE/libcangjie-ast-support.a")"
   if [ "$DRY" -eq 0 ]; then
-    assert_expected_sha installed-ast-support "$sdk/lib/linux_x86_64_cjnative/libcangjie-ast-support.a" "$AST_SUPPORT_SHA256"
+    assert_expected_sha installed-ast-support "$sdk/lib/$HOST_TUPLE/libcangjie-ast-support.a" "$AST_SUPPORT_SHA256"
   fi
   ld=$(sdk_ld_path "$sdk" "$HRT")
   local copy seed
@@ -726,6 +744,7 @@ main() {
   case "$WANT" in
     stage0|all) [ -n "$CPP_SRC" ] || die '缺少参数 CPP_SRC';;
   esac
+  host_tuple_init
   assert_cjcj_sha
   assert_cjcj_root
   case "$WANT" in

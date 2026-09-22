@@ -92,7 +92,9 @@ await $`${flatc} --no-warnings -c -o ${path.join(generatedInclude, 'flatbuffers'
 // 2. Compile the fork ast_api.cpp with the stdlib build's flag set
 // (stdlib libs/std/ast/native + windows toolchain flags).
 const astApiObj = path.join(work, 'ast_api.cpp.obj');
-await $`${clangxx} -c ${astApiCpp} -o ${astApiObj} -DCANGJIE_CODEGEN_CJNATIVE_BACKEND -DNDEBUG -DRELEASE -D__windows__ -w -Wdate-time -Wno-int-conversion -fno-omit-frame-pointer -pipe -fno-common -fno-strict-aliasing -m64 -Wa,-mbig-obj -fstack-protector-all -D_FORTIFY_SOURCE=2 -O2 -fPIC -std=c++17 -I${path.join(cangjieHome, 'include')} -I${generatedInclude} -I${path.join(flatbuffersSrc, 'include')}`;
+// Same launcher as the cmake-driven builds (sccache on GitHub Actions); empty when unset.
+const cxxLauncher = process.env.CMAKE_CXX_COMPILER_LAUNCHER ? [process.env.CMAKE_CXX_COMPILER_LAUNCHER] : [];
+await $`${cxxLauncher} ${clangxx} -c ${astApiCpp} -o ${astApiObj} -DCANGJIE_CODEGEN_CJNATIVE_BACKEND -DNDEBUG -DRELEASE -D__windows__ -w -Wdate-time -Wno-int-conversion -fno-omit-frame-pointer -pipe -fno-common -fno-strict-aliasing -m64 -Wa,-mbig-obj -fstack-protector-all -D_FORTIFY_SOURCE=2 -O2 -fPIC -std=c++17 -I${path.join(cangjieHome, 'include')} -I${generatedInclude} -I${path.join(flatbuffersSrc, 'include')}`;
 
 // 3. The official Cangjie half: single-member archive holding ast.o.
 await $({cwd: work})`${llvmAr} x ${path.join(targetLib, 'libcangjie-std-ast.a')} ast.o`;

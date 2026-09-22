@@ -119,6 +119,16 @@ jobs:
             echo "::warning::Official MinGW toolchain cache is still absent after one bounded retry."
           fi
 
+      # The MinGW cross runtime, flatc and the std-ast object compile through
+      # sccache; the report step fails this job if the launcher saw no compile.
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: windows-runtime
+          platform: windows_x86_64
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 1G
+
       - name: Cross-build pinned Windows runtime
         env:
           RUNTIME_TARGET: windows-x86_64
@@ -164,6 +174,14 @@ jobs:
         with:
           path: .windows-stdast-buildtools/flatc
           key: ${{ steps.flatc-cache.outputs.cache-primary-key }}
+
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: windows-runtime
+          platform: windows_x86_64
+          require-compiles: 'true'
 
       - name: Upload Windows runtime
         uses: actions/upload-artifact@v7

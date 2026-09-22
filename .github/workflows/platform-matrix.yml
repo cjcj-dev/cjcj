@@ -123,6 +123,15 @@ jobs:
             mingw-w64-x86_64-libunwind
             mingw-w64-x86_64-ninja
 
+      - name: Start sccache
+        if: always() && runner.os != 'Windows'
+        uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: ${{ matrix.runner }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 1G
+
       - name: Runtime build (Linux/macOS native)
         if: always() && runner.os != 'Windows'
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
@@ -198,6 +207,14 @@ jobs:
       - name: cjcj compile/run + pinned-runtime combination smoke
         if: always()
         run: npx --yes zx@8 ci/platform_matrix/run_smoke.mjs
+
+      - name: Report sccache
+        if: always() && runner.os != 'Windows'
+        uses: ./.github/actions/sccache-report
+        with:
+          component: runtime
+          platform: ${{ matrix.runner }}
+          require-compiles: ${{ job.status == 'success' }}
 
       - name: Summarize final key error
         if: always()

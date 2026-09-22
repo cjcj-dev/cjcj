@@ -18,6 +18,10 @@ const flatbuffersInc = `${cpp}/build/build/include`;
 const schemaGenInc = `${cpp}/build/build/schema`;
 let cxx = process.env.CXX || 'clang++';
 const cc = process.env.CC || 'cc';
+// The same launcher cmake-driven builds use (sccache on GitHub Actions), so the
+// two shim objects are cached alongside the runtime. Empty when unset.
+const ccLauncher = process.env.CMAKE_C_COMPILER_LAUNCHER ? [process.env.CMAKE_C_COMPILER_LAUNCHER] : [];
+const cxxLauncher = process.env.CMAKE_CXX_COMPILER_LAUNCHER ? [process.env.CMAKE_CXX_COMPILER_LAUNCHER] : [];
 const sourceBuiltObject = norm(process.env.CJCJ_LLVM_SHIM_O || '');
 const shimObject = norm(path.join(here, 'cjselfhost_llvmshim.o'));
 const repo = norm(path.resolve(here, '..'));
@@ -72,7 +76,7 @@ async function isUsableObject(object, source) {
 
 if (!(await commandExists(cxx)) && await commandExists('clang++-15')) cxx = 'clang++-15';
 
-await $`${cc} -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L ${commitDefine} -c ${here}/cjc_runtime_config.c -o ${here}/cjc_runtime_config.o`;
+await $`${ccLauncher} ${cc} -std=c11 -O2 -fPIC -D_POSIX_C_SOURCE=200809L ${commitDefine} -c ${here}/cjc_runtime_config.c -o ${here}/cjc_runtime_config.o`;
 console.log(`CJCJ_COMMIT=${cjcjCommit}`);
 
 // Resolve in the original priority order: existing object, CI source-built
@@ -99,7 +103,7 @@ if (await isUsableObject(shimObject, `${here}/cjselfhost_llvmshim.cpp`)) {
     console.error('ERR: LLVM 15 headers not found (needed only to compile the shim from source)');
     process.exit(1);
   }
-  await $`${cxx} -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions -c ${here}/cjselfhost_llvmshim.cpp -o ${shimObject} ${llvmIncludeArgs} ${`-I${flatbuffersInc}`} ${`-I${schemaGenInc}`}`;
+  await $`${cxxLauncher} ${cxx} -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions -c ${here}/cjselfhost_llvmshim.cpp -o ${shimObject} ${llvmIncludeArgs} ${`-I${flatbuffersInc}`} ${`-I${schemaGenInc}`}`;
 } else {
   console.error('ERR: cannot obtain cjselfhost_llvmshim.o — none of: (1) a pre-existing local .o,');
   console.error('     (2) CJCJ_LLVM_SHIM_O from the source-build artifact, (3) a complete patched');
