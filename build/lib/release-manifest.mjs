@@ -252,6 +252,18 @@ function provenanceArtifactHashes(text) {
   return hashes;
 }
 
+// The path this matches is stage-relative, deliberately: it used to be the
+// absolute one, and every ancestor of the stage is inside that string. A
+// checkout or build directory named `std-prefix` matched at its own name, so
+// libcangjie-runtime.so joined the std closure and the ARTIFACT-SHA256
+// reconciliation below then -- correctly, given what it was handed -- refused
+// to package it as std bytes. Whether a file belongs to std is a fact about
+// where it sits in the package, so only the packaged path may decide it.
+// packagedPath also normalises separators, which is why one alternative is gone.
+function isPackagedStdPath(packaged) {
+  return /(^|\/)(std|libcangjie-std)/.test(packaged);
+}
+
 async function stagedStdFiles(stage) {
   const roots = [path.join(stage, 'modules'), path.join(stage, 'lib'), path.join(stage, 'runtime', 'lib')];
   const files = [];
@@ -265,7 +277,7 @@ async function stagedStdFiles(stage) {
     for (const entry of entries) {
       const file = path.join(dir, entry.name);
       if (entry.isDirectory()) await walk(file);
-      else if (entry.isFile() && /(^|[/\\])(std|libcangjie-std)/.test(file)) files.push(file);
+      else if (entry.isFile() && isPackagedStdPath(packagedPath(stage, file))) files.push(file);
     }
   };
   for (const root of roots) await walk(root);
