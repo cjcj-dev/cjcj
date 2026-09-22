@@ -4,6 +4,8 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 
+import {FULL_GATE_FLOOR_FIELDS} from '../build/lib/full-gate-floor-schema.mjs';
+
 const repo = path.resolve(import.meta.dirname, '..');
 const command = path.join(repo, 'ci', 'release-gates.mjs');
 const CJCJ_SHA = 'c'.repeat(40);
@@ -123,4 +125,163 @@ test('the repository floor stays PENDING and names every unmeasured value', asyn
   assert.match(value.value, /baseline\.difftest\.total/);
   assert.match(value.value, /baseline\.bcgate\.compile_errors/);
   assert.match(value.value, /baseline\.verify_exit/);
+});
+
+// ci/write-full-gate-floor.mjs is the step that takes the floor out of
+// PENDING. These tests drive it against the repository's own PENDING floor and
+// then run the real gate over what it wrote, so "the writer produces a floor
+// the gate accepts" is measured rather than asserted about the module text.
+
+const writer = path.join(repo, 'ci', 'write-full-gate-floor.mjs');
+const floorModule = ['build', 'lib', 'full-gate-release-floor.mjs'];
+
+async function pendingFixture(t) {
+  const floorSource = await fs.readFile(path.join(repo, ...floorModule), 'utf8');
+  const state = await fixture(t, {floorSource});
+  return {...state, floor: path.join(state.checkout, ...floorModule)};
+}
+
+async function writeResults(state, value = results()) {
+  const file = path.join(state.checkout, 'G8_FULL_GATE.json');
+  await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`);
+  return file;
+}
+
+function runWriter(state, resultsFile, extra = []) {
+  return spawnSync(process.execPath,
+    [writer, '--results', resultsFile, '--out', state.floor, ...extra],
+    {encoding: 'utf8', maxBuffer: 16 * 1024 * 1024});
+}
+
+function missingFields(value) {
+  const list = value.match(/missing=([^；]+)/)?.[1];
+  assert.ok(list, `gate value has no missing= list: ${value}`);
+  return list.split(',');
+}
+
+test('the writer turns the PENDING floor into a READY floor the gate accepts', async t => {
+  const state = await pendingFixture(t);
+  const before = gate(state.checkout, state.evidence);
+  assert.equal(before.value.status, 'UNKNOWN');
+  assert.match(before.value.value, /floor status=PENDING/);
+
+  const resultsFile = await writeResults(state);
+  const written = runWriter(state, resultsFile);
+  assert.equal(written.status, 0, written.stderr);
+  assert.match(written.stdout, /^STATUS=READY$/m);
+  assert.match(written.stdout, new RegExp(`^CAMPAIGN_ID=${CAMPAIGN_ID}$`, 'm'));
+
+  await write(state.evidence, 'G8_FULL_GATE.json', `${JSON.stringify(results(), null, 2)}\n`);
+  const after = gate(state.checkout, state.evidence);
+  assert.equal(after.result.status, 0, after.result.stderr);
+  assert.equal(after.value.status, 'MET');
+  assert.doesNotMatch(after.value.value, /missing=/);
+  assert.doesNotMatch(after.value.value, /status=PENDING/);
+});
+
+test('the writer refuses an incomplete measurement set, names the field, and leaves the floor PENDING', async t => {
+  const state = await pendingFixture(t);
+  const before = await fs.readFile(state.floor, 'utf8');
+  const incomplete = results();
+  delete incomplete.results.smoke.fail;
+  delete incomplete.results.bcgate.compile_errors;
+  const refused = runWriter(state, await writeResults(state, incomplete));
+  assert.equal(refused.status, 1, refused.stdout);
+  assert.match(refused.stderr, /FULL_GATE_FLOOR_REFUSED/);
+  assert.match(refused.stderr, /missing=baseline\.smoke\.fail,baseline\.bcgate\.compile_errors/);
+  assert.equal(await fs.readFile(state.floor, 'utf8'), before);
+  assert.equal(gate(state.checkout, state.evidence).value.status, 'UNKNOWN');
+});
+
+test('the writer refuses values that cannot be a measurement and leaves the floor PENDING', async t => {
+  const state = await pendingFixture(t);
+  const before = await fs.readFile(state.floor, 'utf8');
+  const impossible = results();
+  impossible.results.difftest.total = -1;
+  impossible.results.smoke.pass = 6.5;
+  impossible.cjcj_head_sha = 'not-a-sha';
+  const refused = runWriter(state, await writeResults(state, impossible));
+  assert.equal(refused.status, 1, refused.stdout);
+  assert.match(refused.stderr, /invalid=cjcj_head_sha=not-a-sha/);
+  assert.match(refused.stderr, /baseline\.difftest\.total=-1/);
+  assert.match(refused.stderr, /baseline\.smoke\.pass=6\.5/);
+  assert.equal(await fs.readFile(state.floor, 'utf8'), before);
+});
+
+test('the writer refuses a campaign id that does not bind the frozen head', async t => {
+  const state = await pendingFixture(t);
+  const unbound = results();
+  unbound.campaign_id = `${'e'.repeat(40)}-20260811T130000Z-1`;
+  const refused = runWriter(state, await writeResults(state, unbound));
+  assert.equal(refused.status, 1, refused.stdout);
+  assert.match(refused.stderr, /does not bind cjcj_head_sha/);
+});
+
+test('the writer refuses to re-baseline a READY floor from another campaign without --replace', async t => {
+  const state = await pendingFixture(t);
+  assert.equal(runWriter(state, await writeResults(state)).status, 0);
+  const second = results();
+  second.campaign_id = `${'f'.repeat(40)}-20260812T130000Z-1`;
+  second.cjcj_head_sha = 'f'.repeat(40);
+  const secondFile = await writeResults(state, second);
+  const refused = runWriter(state, secondFile);
+  assert.equal(refused.status, 1, refused.stdout);
+  assert.match(refused.stderr, new RegExp(`already carries READY floor ${CAMPAIGN_ID}`));
+  const replaced = runWriter(state, secondFile, ['--replace']);
+  assert.equal(replaced.status, 0, replaced.stderr);
+  assert.match(replaced.stdout, new RegExp(`^CAMPAIGN_ID=${second.campaign_id}$`, 'm'));
+});
+
+test('the writer requires exactly the fields the G8 gate reports missing', async t => {
+  const state = await pendingFixture(t);
+  const reported = missingFields(gate(state.checkout, state.evidence).value.value);
+  assert.equal(reported[0], 'status=READY');
+  assert.deepEqual(reported.slice(1), [...FULL_GATE_FLOOR_FIELDS]);
+});
+
+test('the writer refuses a run the gate would not have passed, so it cannot become the ceiling', async t => {
+  const state = await pendingFixture(t);
+  const before = await fs.readFile(state.floor, 'utf8');
+  // The measurement set an adversarial review fed the writer: a full-gate run
+  // that fails G8 on every absolute condition, whose bcgate.differing=50 would
+  // have become the ceiling later runs are measured against.
+  const failing = results();
+  failing.results.difftest = {total: 20, pass: 15, mismatch: 3, fail: 2};
+  failing.results.smoke = {pass: 6, fail: 1};
+  failing.results.bcgate = {shared: 100, byte_identical: 90, differing: 50, compile_errors: 4};
+  failing.results.verify_exit = 1;
+  const refused = runWriter(state, await writeResults(state, failing));
+  assert.equal(refused.status, 1, refused.stdout);
+  assert.match(refused.stderr, /FULL_GATE_FLOOR_REFUSED/);
+  for (const named of [
+    /inadmissible=.*baseline\.difftest\.pass=15 is not baseline\.difftest\.total=20/,
+    /baseline\.difftest\.mismatch=3/,
+    /baseline\.difftest\.fail=2/,
+    /baseline\.smoke\.fail=1/,
+    /baseline\.bcgate\.compile_errors=4/,
+    /baseline\.verify_exit=1/,
+  ]) assert.match(refused.stderr, named);
+  assert.equal(await fs.readFile(state.floor, 'utf8'), before);
+
+  // The harm the refusal prevents: with no floor written, a later run carrying
+  // that raised differing count cannot be read as MET.
+  const laterRun = results();
+  laterRun.results.bcgate.differing = 50;
+  await write(state.evidence, 'G8_FULL_GATE.json', `${JSON.stringify(laterRun, null, 2)}\n`);
+  const {value} = gate(state.checkout, state.evidence);
+  assert.notEqual(value.status, 'MET');
+  assert.match(value.value, /floor status=PENDING/);
+});
+
+test('a passing run is still admissible: only the absolute gate conditions are enforced', async t => {
+  const state = await pendingFixture(t);
+  // Every baseline-relative comparison in evaluateG8 holds for a value against
+  // itself, so a clean run with any shared/byte_identical/differing counts is
+  // admissible; only difftest.pass/mismatch/fail, smoke.fail, bcgate
+  // .compile_errors and verify_exit are absolute.
+  const generous = results();
+  generous.results.bcgate = {shared: 3, byte_identical: 1, differing: 2, compile_errors: 0};
+  const written = runWriter(state, await writeResults(state, generous));
+  assert.equal(written.status, 0, written.stderr);
+  assert.match(written.stdout, /^STATUS=READY$/m);
 });
