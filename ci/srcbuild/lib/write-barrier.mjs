@@ -5,12 +5,12 @@
 // about the *write* side, so a std built with colouring but without the
 // generational post barrier walks straight through it.
 //
-// The switch that used to produce that combination (-cj-generational-post-barrier,
-// once default-off) is gone: CJBarrierLowering keeps the five write-side
-// intrinsics off the phase-guarded plain-store path unconditionally. This check
-// stays because it reads the emitted code rather than the switch — it is what
-// catches the pass regressing, or a std built by an llc old enough to still
-// carry the switch.
+// Known-strength reference stores now use the thread store-bad/store-good masks
+// and the Strong/Weak accessors (CJBarrierLowering::storeBarrierFast/Medium).
+// That protocol is independent of the old GCPhase guard below. A phase guard
+// that skips either known-strength accessor is still an invalid plain-store
+// bypass, just as it is for the unknown-strength accessor. Recognize all three
+// names so adding frontend strength cannot hide a regression as "unresolved".
 //
 // Shape being detected (CJBarrierLowering.cpp SplitFastPathAndSlowPath):
 //
@@ -30,6 +30,8 @@
 
 const BLOCKED_CALLEES = [
   'CJ_MCC_WriteRefField',
+  'CJ_MCC_WriteRefField_Strong',
+  'CJ_MCC_WriteRefField_Weak',
   'CJ_MCC_WriteStructField',
   'CJ_MCC_ArrayCopyRef',
   'CJ_MCC_ArrayCopyStruct',

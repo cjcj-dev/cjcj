@@ -152,7 +152,8 @@ private func EmitBoxExpression(irBuilder: IRBuilder2, boxExpr: ChirBox): LLVMVal
             irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(sourceTy)
         }
         let addrCGType = CGType.GetOrCreate(irBuilder.GetCGModule(), addrTy, extraInfo: TypeExtraInfo(1u32))
-        irBuilder.CreateStore(sourceCGValue, CGValue(addr, addrCGType))
+        CreateTypedStoreForAddress(irBuilder, sourceCGValue, CGValue(addr, addrCGType),
+            strength: GCWriteStrength.STRONG)
         return objectValue
     }
     if (IsThisArgOfStructMethod(sourceValue)) {
@@ -273,7 +274,8 @@ private func EmitTransformToGenericExpression(irBuilder: IRBuilder2, transformEx
     } else {
         sourceCGValue
     }
-    irBuilder.CreateStore(valueForStore, CGValue(addr, addrCGType))
+    CreateTypedStoreForAddress(irBuilder, valueForStore, CGValue(addr, addrCGType),
+        strength: GCWriteStrength.STRONG)
     return boxedValue
 }
 
@@ -385,7 +387,8 @@ private func GenerateGenericTypeCast(irBuilder: IRBuilder2, sourceCGValue: CGVal
                 unsafe { LLVMPointerType(sourceCGType.GetLLVMType(), 1u32) })
             let addrType = CGType.GetOrCreate(cgMod,
                 irBuilder.GetCGContext().GetCHIRBuilder().context.GetRefTy(sourceTy), extraInfo: TypeExtraInfo(1u32))
-            irBuilder.CreateStore(sourceCGValue, CGValue(addr, addrType))
+            CreateTypedStoreForAddress(irBuilder, sourceCGValue, CGValue(addr, addrType),
+                strength: GCWriteStrength.STRONG)
             return Some(temp)
         }
         return Some(sourceValue)

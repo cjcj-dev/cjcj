@@ -231,7 +231,8 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     if (let Some(boxRetStore) <- TryGenerateBoxRetValueStore(irBuilder, chirExpr, valueOperand, addrOperand, value, addr)) {
         return boxRetStore
     }
-    return CreateTypedStoreForAddress(irBuilder, value, addr)
+    return CreateTypedStoreForAddress(irBuilder, value, addr,
+        strength: GetAddressStoreStrength(irBuilder, addrOperand, chirExpr))
 }
 
 private func TryGenerateBoxRetValueStore(irBuilder: IRBuilder2, chirExpr: Expression, valueOperand: Value,
@@ -282,12 +283,12 @@ private func TryGenerateBoxRetValueStore(irBuilder: IRBuilder2, chirExpr: Expres
 }
 
 public func CreateTypedStoreForAddress(irBuilder: IRBuilder2, value: CGValue, addr: CGValue,
-    boxType!: Option<Type> = None): LLVMValueRef {
+    boxType!: Option<Type> = None, strength!: GCWriteStrength = GCWriteStrength.UNKNOWN): LLVMValueRef {
     ReportTypedStoreDestinationProvenance(irBuilder, value, addr)
-    if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr, boxType: boxType)) {
+    if (let Some(genericStore) <- irBuilder.TryCreateGenericStore(value, addr, boxType: boxType, strength: strength)) {
         return genericStore
     }
-    if (let Some(memberStore) <- irBuilder.TryCreateManagedMemberStore(value, addr)) {
+    if (let Some(memberStore) <- irBuilder.TryCreateManagedMemberStore(value, addr, strength)) {
         return memberStore
     }
     if (let Some(valueCGType) <- value.GetCGType()) {
@@ -722,7 +723,8 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         if (rhs.TestAttr(Attribute.FOREIGN)) {
             AddFnAttr(storeValue.GetRawValue(), CJ2C_ATTR)
         }
-        return irBuilder.CreateStore(storeValue, storeAddr)
+        return CreateTypedStoreForAddress(irBuilder, storeValue, storeAddr,
+            strength: GetMemberStoreStrength(irBuilder, lhs, path, chirExpr))
     }
     if (let Some(storeByName) <- (chirExpr as StoreElementByName)) {
         if (let Some(locationTy) <- storeByName.GetLocation().GetType()) {
@@ -737,7 +739,8 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
                 if (byNameAddr.GetRawValue().isNull()) {
                     return LLVMNullValue()
                 }
-                return irBuilder.CreateStore(byNameValue, byNameAddr)
+                return CreateTypedStoreForAddress(irBuilder, byNameValue, byNameAddr,
+                    strength: GetMemberStoreStrength(irBuilder, storeByName.GetLocation(), path, chirExpr))
             }
         }
     }
@@ -757,7 +760,7 @@ private func StoreRawArrayElement(irBuilder: IRBuilder2, rawArrayValue: LLVMValu
         return StoreRawArrayAggregateElement(irBuilder, rawArrayValue, elementCGType, elementValue, elementPtr)
     }
     if (elementCGType.IsReference()) {
-        return irBuilder.CallGCWrite(rawElementValue, rawArrayValue, elementPtr)
+        return irBuilder.CallGCWrite(rawElementValue, rawArrayValue, elementPtr, GCWriteStrength.STRONG)
     }
     return irBuilder.CreateStore(rawElementValue, elementPtr)
 }
@@ -950,7 +953,7 @@ private func AutoEnvCallableAbiFieldCount(baseTy: Type): UInt64 {
     return if (IsAutoEnvType(baseTy)) { 2u64 } else { 0u64 }
 }
 
-private func ResolveElementPathByNames(cgMod: CGModule, baseTy: Type,
+public func ResolveElementPathByNames(cgMod: CGModule, baseTy: Type,
     names: ArrayList<String>): Option<ArrayList<UInt64>> {
     if (names.isEmpty()) {
         return None

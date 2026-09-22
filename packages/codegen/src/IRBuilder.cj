@@ -472,7 +472,7 @@ private func InitArrayData(irBuilder: IRBuilder2, arrPtr: LLVMValueRef, arrayLen
         let size = irBuilder.GetInt64(Int64(irBuilder.GetCGModule().GetTypeSize(elemType)))
         irBuilder.CallGCWriteAgg(arrayType, ArrayList<LLVMValueRef>([arrPtr, elemPtr, value, size]))
     } else if (elemType.toUIntNative() == CGType.GetRefType(irBuilder.GetLLVMContext()).toUIntNative()) {
-        irBuilder.CallGCWrite(value, arrPtr, elemPtr)
+        irBuilder.CallGCWrite(value, arrPtr, elemPtr, GCWriteStrength.STRONG)
     } else {
         irBuilder.CreateStore(value, elemPtr)
     }
@@ -1238,7 +1238,8 @@ public class IRBuilder2 <: Resource {
         return !unsafe { LLVMIsAGlobalVariable(LLVMSelfhostStripInBoundsOffsets(value)) }.isNull()
     }
 
-    public func TryCreateGenericStore(value: CGValue, dest: CGValue, boxType!: Option<Type> = None): Option<LLVMValueRef> {
+    public func TryCreateGenericStore(value: CGValue, dest: CGValue, boxType!: Option<Type> = None,
+        strength!: GCWriteStrength = GCWriteStrength.UNKNOWN): Option<LLVMValueRef> {
         let valueCGType = value.GetCGType() ?? return None
         let destCGType = dest.GetCGType() ?? return None
         let destElementCGType = destCGType.GetPointerElementType() ?? return None
@@ -1285,7 +1286,7 @@ public class IRBuilder2 <: Resource {
 
         SetInsertPoint(blocks[0])
         if (let Some(baseObject) <- managedBase) {
-            CallGCWrite(rawValue, baseObject, rawDest)
+            CallGCWrite(rawValue, baseObject, rawDest, strength)
         } else {
             CreateStore(rawValue, genericDest)
         }
@@ -1334,7 +1335,7 @@ public class IRBuilder2 <: Resource {
         CreateCondBr(CreateTypeInfoIsReferenceCall(typeInfo), blocks[0], blocks[1])
 
         SetInsertPoint(blocks[0])
-        CallGCWrite(source, baseObject, dest)
+        CallGCWrite(source, baseObject, dest, GCWriteStrength.UNKNOWN)
         CreateBr(blocks[2])
 
         SetInsertPoint(blocks[1])
@@ -1484,14 +1485,15 @@ public class IRBuilder2 <: Resource {
         return None
     }
 
-    public func TryCreateManagedMemberStore(value: CGValue, dest: CGValue): Option<LLVMValueRef> {
+    public func TryCreateManagedMemberStore(value: CGValue, dest: CGValue,
+        strength: GCWriteStrength): Option<LLVMValueRef> {
         let baseObject = GetTrackedManagedBase(dest.GetRawValue()) ?? return None
         let valueCGType = value.GetCGType() ?? return None
         let destCGType = dest.GetCGType() ?? return None
         let destElementCGType = destCGType.GetPointerElementType() ?? return None
         if (destElementCGType.GetSize().isNone()) {
             return Some(StoreUnknownSizeManagedMemberValue(baseObject, dest.GetRawValue(), value, valueCGType,
-                destElementCGType))
+                destElementCGType, strength))
         }
         if (valueCGType.IsStructPtrType()) {
             return Some(StoreStructManagedMemberValue(baseObject, dest.GetRawValue(), value, valueCGType))
@@ -1500,13 +1502,13 @@ public class IRBuilder2 <: Resource {
             return Some(StoreVArrayManagedMemberValue(baseObject, dest.GetRawValue(), value, valueCGType))
         }
         if (valueCGType.IsReference() || IsOptionLikeRefValue(valueCGType)) {
-            return Some(CallGCWriteRef(value.GetRawValue(), baseObject, dest.GetRawValue()))
+            return Some(CallGCWrite(value.GetRawValue(), baseObject, dest.GetRawValue(), strength))
         }
         return None
     }
 
     private func StoreUnknownSizeManagedMemberValue(baseObject: LLVMValueRef, dest: LLVMValueRef, value: CGValue,
-        valueCGType: CGType, destElementCGType: CGType): LLVMValueRef {
+        valueCGType: CGType, destElementCGType: CGType, strength: GCWriteStrength): LLVMValueRef {
         let destTy = destElementCGType.GetOriginal()
         let blockNames = ArrayList<String>()
         blockNames.add("gcwrite_ref")
@@ -1520,7 +1522,7 @@ public class IRBuilder2 <: Resource {
         CreateCondBr(CreateTypeInfoIsReferenceCall(destTy), blocks[0], blocks[1])
 
         SetInsertPoint(blocks[0])
-        CallGCWriteRef(value.GetRawValue(), baseObject, dest)
+        CallGCWrite(value.GetRawValue(), baseObject, dest, strength)
         CreateBr(blocks[2])
 
         SetInsertPoint(blocks[1])
@@ -3137,7 +3139,7 @@ public class IRBuilder2 <: Resource {
             let size = GetInt64(Int64(cgMod.GetTypeSize(valueType.GetLLVMType())))
             CallGCWriteAgg(valueType.GetLayoutType(), ArrayList<LLVMValueRef>([base, place, value, size]))
         } else if (isDstAddrspace1 && valueCGType.IsRefType()) {
-            CallGCWrite(value, base, place)
+            CallGCWrite(value, base, place, GCWriteStrength.UNKNOWN)
         } else {
             CreateStore(value, place)
         }
@@ -3482,7 +3484,7 @@ public class IRBuilder2 <: Resource {
                     CJC_ASSERT(kind == IntrinsicKind.ATOMIC_LOAD || kind == IntrinsicKind.ATOMIC_SWAP)
                     let boxVal = CallIntrinsicAllocaGeneric(ArrayList<LLVMValueRef>([CreateTypeInfo(retTy), GetInt32(8)]))
                     let payloadPtr = GetPayloadFromObject(boxVal)
-                    CallGCWrite(result, boxVal, payloadPtr)
+                    CallGCWrite(result, boxVal, payloadPtr, GCWriteStrength.STRONG)
                     return boxVal
                 }
             }
@@ -3593,26 +3595,17 @@ public class IRBuilder2 <: Resource {
         return CreateIntrinsicCallNoInvoke(ASSIGN_GENERIC_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
     }
 
-    public func CallGCWrite(value: LLVMValueRef, baseObj: LLVMValueRef, fieldPtr: LLVMValueRef): LLVMValueRef {
+    public func CallGCWrite(value: LLVMValueRef, baseObj: LLVMValueRef, fieldPtr: LLVMValueRef,
+        strength: GCWriteStrength): LLVMValueRef {
         let gcRefType = CGType.GetRefType(GetLLVMContext())
         let gcRefPtrType = unsafe { LLVMPointerType(gcRefType, 1u32) }
         let args = ArrayList<LLVMValueRef>()
         args.add(CreatePointerCast(value, gcRefType, name: "gcwrite.val"))
         args.add(CreatePointerCast(baseObj, gcRefType, name: "gcwrite.base"))
         args.add(CreatePointerCast(fieldPtr, gcRefPtrType, name: "gcwrite.field"))
+        args.add(unsafe { LLVMConstInt(LLVMInt32TypeInContext(GetLLVMContext().raw), strength.Encode(), 0) })
         CheckNoWriteBarrierRec()
         return CreateIntrinsicCallNoInvoke(GCWRITE_REF_INTRINSIC_NAME, ArrayList<LLVMTypeRef>(), args)
-    }
-
-    public func CallGCWriteRef(value: LLVMValueRef, baseObject: LLVMValueRef, place: LLVMValueRef): LLVMValueRef {
-        let refTy = CGType.GetRefType(GetLLVMContext())
-        let refPlaceTy = unsafe { LLVMPointerType(refTy, 1u32) }
-        let args = ArrayList<LLVMValueRef>()
-        args.add(CreatePointerCast(value, refTy, name: "gcwrite.ref.value"))
-        args.add(CreatePointerCast(baseObject, refTy, name: "gcwrite.ref.base"))
-        args.add(CreatePointerCast(place, refPlaceTy, name: "gcwrite.ref.place"))
-        CheckNoWriteBarrierRec()
-        return CreateIntrinsicCallNoInvoke("llvm.cj.gcwrite.ref", ArrayList<LLVMTypeRef>(), args)
     }
 
     public func CallGCWriteStaticRef(value: LLVMValueRef, place: LLVMValueRef): LLVMValueRef {
@@ -4598,7 +4591,7 @@ public class IRBuilder2 <: Resource {
             return CallGCWriteAgg(elementCGType.GetLayoutType(),
                 ArrayList<LLVMValueRef>([array, elementPtr, rawValue, size]))
         } else if (elementType.toUIntNative() == CGType.GetRefType(GetLLVMContext()).toUIntNative()) {
-            return CallGCWrite(rawValue, array, elementPtr)
+            return CallGCWrite(rawValue, array, elementPtr, GCWriteStrength.STRONG)
         } else {
             return CreateStore(rawValue, elementPtr)
         }
@@ -5718,7 +5711,7 @@ public class IRBuilder2 <: Resource {
             sourceValue
         }
         if (valueCGType.IsReference() || IsOptionLikeRefValue(valueCGType)) {
-            CallGCWrite(storedValue, objectValue, typedPayload)
+            CallGCWrite(storedValue, objectValue, typedPayload, GCWriteStrength.STRONG)
             return
         }
         if ((valueTy.IsStruct() || valueTy.IsTuple()) && IsTypeContainsRef(valueCGType.GetLLVMType())) {
