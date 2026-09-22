@@ -59,6 +59,9 @@ permissions:
   contents: read
 
 jobs:
+  in-process-dylib:
+    uses: ./.github/workflows/build-llvm-dylib.yml
+
   # A release phase pays for its own tuple and no one else's, so the matrix has to
   # be selectable. Actions cannot filter a literal matrix, so build the list here
   # and hand it over as JSON. The tuples themselves stay in one place.
