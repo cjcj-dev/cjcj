@@ -51,7 +51,7 @@ consumer_rc=$?
 set -e
 test "$consumer_rc" -ne 0
 grep -F 'ERR_ASSERTION' "$work/consumer-cut.log"
-grep -Fx '# pass 2' "$work/consumer-cut.log"
+grep -Fx '# pass 3' "$work/consumer-cut.log"
 grep -Fx '# fail 1' "$work/consumer-cut.log"
 restore
 python3 - <<'CUT'
@@ -70,7 +70,7 @@ pin_rc=$?
 set -e
 test "$pin_rc" -ne 0
 grep -F 'ERR_ASSERTION' "$work/pin-cut.log"
-grep -Fx '# pass 2' "$work/pin-cut.log"
+grep -Fx '# pass 3' "$work/pin-cut.log"
 grep -Fx '# fail 1' "$work/pin-cut.log"
 restore
 bash ci/test-llvm-tuple-layout.sh "$work/producer-restored" > "$work/producer-restored.log" 2>&1
