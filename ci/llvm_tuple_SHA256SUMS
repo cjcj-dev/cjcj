@@ -1,7 +1,7 @@
-5d61a7a8f4064b24e1251ccddc2de7f64f741d85f7a1aac8d2a68efc26ce0cab  ./MANIFEST
+05e09de231c523ae9f8d2fffd00edb8bbb08a5bc83c943d23e310c6018ca11b9  ./MANIFEST
 5a6d6bb422b0387025e3f2ef10448253a54ae0672b3617aea8a7217522bec8ff  ./bin/llc
 bc20b40aa06a72b4c76986a5b033925bc494de0122e6d4f6e93724a574bb08fe  ./bin/opt
-5d61a7a8f4064b24e1251ccddc2de7f64f741d85f7a1aac8d2a68efc26ce0cab  ./lib/STATIC_LLVM.txt
+05e09de231c523ae9f8d2fffd00edb8bbb08a5bc83c943d23e310c6018ca11b9  ./lib/STATIC_LLVM.txt
 8aea3c68e4c2e2bc37ad0fb05b5d2c4059728dd5ba7dbbb75df01b00811d413c  ./fixed-llc/llc.gz
 50f26d307e1099ee2432815488ca3d9334638299dc4dba34e8164dd5ca09a2ea  ./fixed-llc/opt.gz
 bd3472becee7484e944cf1b20f9c080b1f3f92faee58ea059cad6d1e4d305dee  ./fixed-llc/cjselfhost_llvmshim.o
