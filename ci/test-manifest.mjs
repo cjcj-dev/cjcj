@@ -25,11 +25,17 @@ export const repoRoot = path.resolve(import.meta.dirname, '..');
 
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
+  'build/test/archive.test.mjs',
+  'build/test/bootstrap-handoff.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',
+  'build/test/compose-install.test.mjs',
+  'build/test/compose-sdk-entry.test.mjs',
   'build/test/darwin-cjdb-python.test.mjs',
   'build/test/fail-closed-probes.test.mjs',
   'build/test/fetch-patches.test.mjs',
+  'build/test/final-compiler.test.mjs',
   'build/test/gate-apparatus.test.mjs',
+  'build/test/gc-unit-gate.test.mjs',
   'build/test/git.test.mjs',
   'build/test/hle-artifact.test.mjs',
   'build/test/package-lineage.test.mjs',
@@ -49,6 +55,8 @@ export const GATING = Object.freeze([
   'build/test/stock-backup.test.mjs',
   'build/test/system-deps.test.mjs',
   'build/test/toolchain-identity.test.mjs',
+  'build/test/verifier-report-mode.test.mjs',
+  'build/test/windows-final-compiler.test.mjs',
   'build/test/write-barrier.test.mjs',
   'ci/evidence-discovery.test.mjs',
   'ci/full-gate-floor.test.mjs',
@@ -69,6 +77,8 @@ export const GATING = Object.freeze([
   'ci/srcbuild/tests/release-wire.test.mjs',
   'ci/srcbuild/tests/workflow-inputs.test.mjs',
   'ci/test-manifest.test.mjs',
+  'scripts/cjcjcg_aggregate_ctype_gate.test.mjs',
+  'scripts/erased_dynpayload_gate.test.mjs',
 ]);
 
 // Registered, not executed. `needs` is what CI would have to provide; `verified`
@@ -100,8 +110,8 @@ export const DEFERRED = Object.freeze([
 
 // Floors, not equalities: adding tests must stay frictionless, dropping them must
 // not. Lower these only together with the deletion that requires it.
-export const GATING_FLOOR = 28;
-export const DISCOVERY_FLOOR = 30;
+export const GATING_FLOOR = 54;
+export const DISCOVERY_FLOOR = 57;
 
 // git rather than a directory walk: it enumerates what a runner checks out, and
 // --exclude-standard keeps build output and scratch copies out. --others is what
