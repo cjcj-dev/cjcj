@@ -21,6 +21,7 @@ import {parseArgs} from 'node:util';
 import {
   RELEASE_REQUIREMENTS,
   allReleasePlatforms,
+  allTargets,
   getReleasePlatform,
   getTarget,
   hostContract,
@@ -99,12 +100,11 @@ export function planMatrix(requested) {
   });
 }
 
+// The build targets whose own runtime tuple is this one; a cross std artifact is
+// named after that target (final-std-windows-x64 carries windows_x86_64_cjnative).
 function allTargetKeysForTuple(tuple) {
-  const keys = new Set();
-  for (const target of ['linux-x64', 'linux-aarch64', 'darwin-arm64', 'darwin-x64', 'windows-x64']) {
-    if (getTarget(target).spec.runtimeTuple === tuple) keys.add(target);
-  }
-  if (keys.size === 0) throw new Error(`no target owns tuple ${tuple}`);
+  const keys = allTargets().filter(key => getTarget(key).spec.runtimeTuple === tuple);
+  if (keys.length === 0) throw new Error(`no build target owns tuple ${tuple}`);
   return keys;
 }
 
