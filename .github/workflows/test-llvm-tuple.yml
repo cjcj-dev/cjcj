@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - 'ci/llvm*'
-      - 'ci/test-llvm-tuple-layout.sh'
+      - 'ci/test-llvm-tuple*.sh'
       - 'ci/release/prepare_bootstrap_inputs*'
       - '.github/workflows/test-llvm-tuple.yml'
 permissions:
@@ -32,10 +32,15 @@ jobs:
           bash ci/test-llvm-tuple-layout.sh "$RUNNER_TEMP/layout-test" "$RUNNER_TEMP/tuple"
       - name: Exercise bootstrap input consumer
         run: node --test ci/release/prepare_bootstrap_inputs.test.mjs
+      - name: Cut producer and consumer script wiring
+        run: bash ci/test-llvm-tuple-wiring.sh "$RUNNER_TEMP/wiring-test"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: tuple-layout-evidence
           path: |
             ${{ runner.temp }}/layout-test/*.log
+            ${{ runner.temp }}/wiring-test/*.log
+            ${{ runner.temp }}/wiring-test/*.diff
+            ${{ runner.temp }}/wiring-test/*.sha256
           if-no-files-found: error
