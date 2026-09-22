@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 
-test('artifact wins over depot; reviewed sums pin rejects altered bytes', () => {
+function fixture(check) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tuple-inputs-'));
   try {
     const sdk = path.join(dir, 'sdk');
@@ -17,8 +17,9 @@ test('artifact wins over depot; reviewed sums pin rejects altered bytes', () => 
     const ast = path.join(sdk, 'ast.a');
     fs.writeFileSync(so, 'host fixture');
     fs.writeFileSync(ast, 'ast fixture');
-    fs.writeFileSync(path.join(artifact, 'SHA256SUMS'), 'reviewed fixture sums');
-    fs.writeFileSync(path.join(fallback, 'SHA256SUMS'), 'reviewed fixture sums');
+    for (const d of [artifact, fallback]) {
+      fs.writeFileSync(path.join(d, 'SHA256SUMS'), 'reviewed fixture sums');
+    }
     const digest = crypto.createHash('sha256').update('reviewed fixture sums').digest('hex');
     const env = {...process.env, GITHUB_ENV: '', CJCJ_SRCBUILD_HOST_SDK: sdk,
       CJCJ_BOOTSTRAP_HOST_LLVM_SO: so, CJCJ_BOOTSTRAP_AST_SUPPORT: ast,
@@ -27,20 +28,31 @@ test('artifact wins over depot; reviewed sums pin rejects altered bytes', () => 
       CJCJ_BOOTSTRAP_CJCJ_SHA: 'b'.repeat(40), LLVM_TUPLE_SUMS_SHA: digest};
     const run = () => spawnSync(process.execPath,
       [new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname], {env, encoding: 'utf8'});
-    let result = run();
-    assert.equal(result.status, 0, result.stderr);
-    assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_TUPLE=${artifact}\n`), result.stdout);
-    console.log('ASSERT artifact-precedence executed');
-    fs.writeFileSync(path.join(artifact, 'SHA256SUMS'), 'altered');
-    result = run();
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /SHA256SUMS disagrees/);
-    console.log('ASSERT reviewed-pin rejection executed');
-    fs.writeFileSync(path.join(fallback, 'SHA256SUMS'), 'reviewed fixture sums');
-    delete env.CJCJ_BOOTSTRAP_TUPLE_ARTIFACT;
-    result = run();
-    assert.equal(result.status, 0, result.stderr);
-    assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_TUPLE=${fallback}\n`));
-    console.log('ASSERT fallback executed');
+    check({env, artifact, fallback, run});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
-});
+}
+
+test('artifact wins over an available fallback tuple', () => fixture(({artifact, run}) => {
+  const result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_TUPLE=${artifact}\n`), result.stdout);
+  console.log('ASSERT artifact-precedence executed');
+}));
+
+test('reviewed sums pin rejects altered tuple bytes', () => fixture(({env, fallback, run}) => {
+  // Isolate the digest contract from artifact-selection policy.
+  delete env.CJCJ_BOOTSTRAP_TUPLE_ARTIFACT;
+  fs.writeFileSync(path.join(fallback, 'SHA256SUMS'), 'altered');
+  const result = run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /SHA256SUMS disagrees/);
+  console.log('ASSERT reviewed-pin rejection executed');
+}));
+
+test('explicit tuple fallback remains usable with the same reviewed pin', () => fixture(({env, fallback, run}) => {
+  delete env.CJCJ_BOOTSTRAP_TUPLE_ARTIFACT;
+  const result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_TUPLE=${fallback}\n`));
+  console.log('ASSERT fallback executed');
+}));
