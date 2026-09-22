@@ -27,7 +27,7 @@ python3 "$src/check_ir.py" "$out/libstrength_IR/0_GenIncremental" \
  --expect 'enumPayload=1' --expect 'boxedPayload=1' > "$out/main-check.log" 2>&1
 main_check=$?
 python3 "$src/check_ir.py" "$out/libstd.ref_IR/0_GenIncremental" \
- --expect 'clear=2' > "$out/ref-check.log" 2>&1
+ --expect 'clear=2' --expect 'WeakRefBase.*init=1' > "$out/ref-check.log" 2>&1
 ref_check=$?
 printf '%s\n' "$main_check" > "$out/main-check.rc"
 printf '%s\n' "$ref_check" > "$out/ref-check.rc"
