@@ -55,7 +55,12 @@ const astSupport = firstExisting([
 if (!astSupport) throw new Error('ast-support archive missing (static-libs or host SDK lib)');
 
 const colourTuple = firstExisting([
+  process.env.CJCJ_BOOTSTRAP_TUPLE_ARTIFACT,
   process.env.CJCJ_BOOTSTRAP_COLOUR_TUPLE,
+  process.env.LLVM_SHA && process.env.CANGJIE_COMPILER_SHA
+    ? path.join(process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot',
+      process.env.LLVM_SHA, process.env.CANGJIE_COMPILER_SHA)
+    : '',
   fixedLlvm,
 ]);
 if (!colourTuple) throw new Error('colour-tuple dir missing (fixed-llvm artifact or CJCJ_BOOTSTRAP_COLOUR_TUPLE)');

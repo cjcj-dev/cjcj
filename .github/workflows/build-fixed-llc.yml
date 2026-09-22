@@ -73,6 +73,9 @@ jobs:
             echo "no tuple matched platforms=$REQUESTED" >&2
             exit 1
           fi
+          # Stage0 consumes the X86-only static colour tuple on every host.
+          selected="$(printf '%s' "$selected" | jq -c --argjson all "$all" \
+            '. + [$all[] | select(.platform == "linux_x86_64")] | unique_by(.platform)')"
           echo "selected $count tuple(s) for platforms=$REQUESTED"
           printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
 
@@ -278,5 +281,35 @@ jobs:
         with:
           name: fixed-llvm-tools-${{ matrix.platform }}
           path: fixed-toolchain/${{ matrix.platform }}
+          if-no-files-found: error
+          retention-days: 7
+
+  static-tuple:
+    name: Publish static colour LLVM tuple
+    needs: build-tools
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: fixed-llvm-tools-linux_x86_64
+          path: fixed-toolchain/linux_x86_64
+      - name: Publish the shared eight-payload layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          REPO_ROOT="$GITHUB_WORKSPACE"
+          CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/linux_x86_64"
+          source ci/llvm-tuple-layout.sh
+          publish_fixed_tuple_to_depot "$RUNNER_TEMP/llvm-tuple"
+          tuple="$RUNNER_TEMP/llvm-tuple/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
+          (cd "$tuple" && sha256sum --strict -c SHA256SUMS)
+          echo "LLVM_TUPLE_SUMS_SHA=$(sha256sum "$tuple/SHA256SUMS" | awk '{print $1}')" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "STATIC_TUPLE=$tuple" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: static-llvm-tuple-linux_x86_64
+          path: ${{ env.STATIC_TUPLE }}
           if-no-files-found: error
           retention-days: 7
