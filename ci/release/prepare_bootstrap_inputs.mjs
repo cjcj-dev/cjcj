@@ -64,6 +64,12 @@ const colourTuple = firstExisting([
   fixedLlvm,
 ]);
 if (!colourTuple) throw new Error('colour-tuple dir missing (fixed-llvm artifact or CJCJ_BOOTSTRAP_COLOUR_TUPLE)');
+// The pin is reviewed source, never a digest learned from this run's download.
+const tupleSums = path.join(colourTuple, 'SHA256SUMS');
+if (!/^[0-9a-f]{64}$/.test(process.env.LLVM_TUPLE_SUMS_SHA || '')
+    || sha256File(tupleSums) !== process.env.LLVM_TUPLE_SUMS_SHA) {
+  throw new Error(`colour tuple SHA256SUMS disagrees with ci/llvm_pin.env: ${colourTuple}`);
+}
 
 const colourRt = firstExisting([
   process.env.CJCJ_BOOTSTRAP_COLOUR_RT,

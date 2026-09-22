@@ -102,6 +102,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # Per target set, not per ref alone: release-matrix.yml calls this workflow once
 # per platform in the same run, and one group for all of them would leave every
@@ -278,10 +279,24 @@ jobs:
           name: fixed-llvm-tools-${{ matrix.llvm_platform }}
           path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
 
+      - name: Load immutable static tuple provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          test -n "$LLVM_TUPLE_RUN_ID"
+          test -n "$LLVM_TUPLE_RUN_ATTEMPT"
+          test -n "$LLVM_TUPLE_ARTIFACT_ID"
+          echo "LLVM_TUPLE_ARTIFACT_ID=$LLVM_TUPLE_ARTIFACT_ID" >> "$GITHUB_ENV"
+          echo "LLVM_TUPLE_RUN_ID=$LLVM_TUPLE_RUN_ID" >> "$GITHUB_ENV"
+
       - name: Download static colour LLVM tuple
         uses: actions/download-artifact@v8
         with:
-          name: static-llvm-tuple-linux_x86_64
+          artifact-ids: ${{ env.LLVM_TUPLE_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.LLVM_TUPLE_RUN_ID }}
           path: ${{ runner.temp }}/static-llvm-tuple
 
       # set -a: `source` alone makes shell variables, and prepare_bootstrap_inputs

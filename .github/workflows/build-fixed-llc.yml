@@ -12,6 +12,11 @@ on:
         required: false
         type: string
         default: all
+      cold_cache:
+        description: Empty this job's restored sccache directory before compiling (control arm).
+        required: false
+        type: boolean
+        default: false
       rebuild:
         description: >-
           Bypass the whole-artifact LLVM tools cache and compile again. This is
@@ -29,6 +34,11 @@ on:
         required: false
         type: string
         default: all
+      cold_cache:
+        description: Empty this job's restored sccache directory before compiling (control arm).
+        required: false
+        type: boolean
+        default: false
       rebuild:
         description: Bypass the whole-artifact LLVM tools cache and compile again (sccache measurement).
         required: false
@@ -120,6 +130,20 @@ jobs:
           platform: ${{ matrix.platform }}
           pin: ${{ steps.llvm-pin.outputs.sha }}
           cache-size: 3G
+
+      - name: Cold sccache control arm
+        if: inputs.cold_cache && steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SCCACHE_DIR" = "$RUNNER_TEMP/sccache-llvm"
+          "$SCCACHE_PATH" --stop-server
+          rm -rf "$SCCACHE_DIR"
+          mkdir -p "$SCCACHE_DIR"
+          "$SCCACHE_PATH" --start-server
+          "$SCCACHE_PATH" --zero-stats
+          echo "SCCACHE_RESTORED_KEY=" >> "$GITHUB_ENV"
+          echo 'SCCACHE_CONTROL=cold directory emptied before first compilation'
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
