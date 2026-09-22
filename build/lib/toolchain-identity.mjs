@@ -35,7 +35,10 @@ function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
-function embeddedStamp(bytes, prefix) {
+// Exported for ci/capture-g2-identity.mjs, which records the same stamps into
+// G2_IDENTITY.json. One scanner, so the capture and the SDK identity file can
+// never disagree about what a binary is stamped with.
+export function embeddedStamp(bytes, prefix) {
   const marker = Buffer.from(`${prefix}:`);
   const values = [];
   let offset = 0;
