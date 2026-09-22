@@ -59,7 +59,11 @@ runs:
           --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT" ${require_flag:+"$require_flag"}
         "$SCCACHE_PATH" --stop-server >/dev/null 2>&1 || true
 
+    # always(): a composite action stops at the first failing step, so without
+    # this the one case the statistics matter most -- the zero-compile check
+    # turning the job red -- would take its own stats.json and error log with it.
     - name: Upload sccache diagnostics
+      if: always()
       uses: actions/upload-artifact@v7
       with:
         name: sccache-${{ inputs.component }}-${{ inputs.platform }}-${{ github.run_attempt }}

@@ -197,6 +197,10 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          # mkdir first: with no package artifact at all, `ls dist` would fail
+          # here and the job would die on ls rather than on the checksum step
+          # that names which platform is missing.
+          mkdir -p dist
           ls -l dist
           node ci/release/package_checksums.mjs aggregate --dist dist --version "$VERSION" --expect "$PACKAGE_KEYS"
           {

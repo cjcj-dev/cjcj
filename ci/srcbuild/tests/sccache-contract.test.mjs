@@ -44,10 +44,16 @@ const CXX_JOBS = new Map([
 
 // What a C/C++ compile looks like in a run: step. Wide on purpose: a match here
 // only means "this job must be in CXX_JOBS", and the assertion below says which
-// job is new and unwired. Package-manager lines that merely install a compiler
-// are not compiles.
-const COMPILES = /(\bcmake\b|\bninja\b|build\.py build|clang\+\+|build_patched_runtime\.mjs|build_runtime\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs)/;
-const INSTALLS = /\b(apt-get|brew|pacman|pip3?|choco)\b/;
+// job is new and unwired. Narrow is the dangerous direction -- a job that drives
+// a compiler this list does not name is invisible, and then CXX_JOBS is a list
+// checked against itself. So the build drivers (cmake, ninja, make, build.py,
+// the repository's own build scripts) sit next to the compiler front ends
+// themselves (cc, gcc, g++, clang, clang++), and anything that merely installs
+// or configures one is excluded below rather than left out here.
+const COMPILES = /(\bcmake\b|\bninja\b|\bmake\b|build\.py build|\bcc\b|\bgcc\b|\bg\+\+|clang\+\+|\bclang\b|build_patched_runtime\.mjs|build_runtime\.mjs|build_tuple\.sh|install-static-libs|gha_run\.sh|build-stage3\.mjs|build-windows-final-std\.mjs|build_shim\.mjs|build_windows_std_ast\.mjs)/;
+// Lines that name a compiler without running one: package managers, the MSYS2
+// package list, toolchain flags, and shellcheck/actionlint over shell sources.
+const INSTALLS = /(\b(apt-get|brew|pacman|pip3?|choco|shellcheck|actionlint)\b|mingw-w64-\S+|--gcc-toolchain|CMAKE_C(XX)?_COMPILER=|install-system-deps|install-mingw)/;
 const compilesIn = step => /^\s*run:/m.test(step)
   && step.split('\n').some(line => COMPILES.test(line) && !INSTALLS.test(line));
 
@@ -128,6 +134,11 @@ test('the composite actions export both CMake launcher variables, bind key to co
   // and only a warning on a job that already failed.
   assert.match(report, /::error::SCCACHE_PATH is unset/);
   assert.match(report, /::warning::SCCACHE_PATH is unset/);
+  // The diagnostics upload has to outlive a failing statistics step, which is
+  // exactly when its stats.json and error log are worth having.
+  const upload = report.slice(report.indexOf('- name: Upload sccache diagnostics'));
+  assert.match(upload.slice(0, upload.indexOf('uses:')), /^\s*if: always\(\)\s*$/m,
+    'the sccache diagnostics upload must run even after the statistics step failed');
 });
 
 test('build/cli.mjs keeps a launcher the workflow already exported', async () => {
