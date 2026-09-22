@@ -5,6 +5,11 @@ on:
     branches: [debug/llc-build]
   workflow_dispatch:
     inputs:
+      publish_tuple:
+        description: Publish a new static tuple candidate for an explicit pin update.
+        required: false
+        type: boolean
+        default: true
       platforms:
         description: >-
           Comma-separated llvm platforms to build. Empty or "all" builds every
@@ -12,6 +17,11 @@ on:
         required: false
         type: string
         default: all
+      cold_cache:
+        description: Empty this job's restored sccache directory before compiling (control arm).
+        required: false
+        type: boolean
+        default: false
       rebuild:
         description: >-
           Bypass the whole-artifact LLVM tools cache and compile again. This is
@@ -22,6 +32,11 @@ on:
         default: false
   workflow_call:
     inputs:
+      publish_tuple:
+        description: Publish a new static tuple candidate (consumers normally use the fixed artifact).
+        required: false
+        type: boolean
+        default: false
       platforms:
         description: >-
           Comma-separated llvm platforms to build. Empty or "all" builds every
@@ -29,6 +44,11 @@ on:
         required: false
         type: string
         default: all
+      cold_cache:
+        description: Empty this job's restored sccache directory before compiling (control arm).
+        required: false
+        type: boolean
+        default: false
       rebuild:
         description: Bypass the whole-artifact LLVM tools cache and compile again (sccache measurement).
         required: false
@@ -52,6 +72,7 @@ jobs:
         id: select
         env:
           REQUESTED: ${{ inputs.platforms || 'all' }}
+          PUBLISH_TUPLE: ${{ inputs.publish_tuple }}
         run: |
           set -euo pipefail
           all='[
@@ -72,6 +93,12 @@ jobs:
           if [ "$count" -eq 0 ]; then
             echo "no tuple matched platforms=$REQUESTED" >&2
             exit 1
+          fi
+          # Only an explicit publication builds the X86 static colour tuple.
+          # Source matrix calls consume the immutable artifact from the pin.
+          if [ "$PUBLISH_TUPLE" = true ]; then
+            selected="$(printf '%s' "$selected" | jq -c --argjson all "$all" \
+              '. + [$all[] | select(.platform == "linux_x86_64")] | unique_by(.platform)')"
           fi
           echo "selected $count tuple(s) for platforms=$REQUESTED"
           printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
@@ -105,7 +132,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: fixed-toolchain/${{ matrix.platform }}
-          key: ${{ inputs.rebuild && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', 'ci/llvm-tools-manifest.mjs', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
+          key: ${{ (inputs.rebuild || inputs.cold_cache) && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', 'ci/llvm-tools-manifest.mjs', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
 
       # Every C++ compile below (llc, opt, flatc, the shim object) goes through
       # sccache; the report step at the end fails the job if none did.
@@ -117,6 +144,20 @@ jobs:
           platform: ${{ matrix.platform }}
           pin: ${{ steps.llvm-pin.outputs.sha }}
           cache-size: 3G
+
+      - name: Cold sccache control arm
+        if: inputs.cold_cache && steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SCCACHE_DIR" = "$RUNNER_TEMP/sccache-llvm"
+          "$SCCACHE_PATH" --stop-server
+          rm -rf "$SCCACHE_DIR"
+          mkdir -p "$SCCACHE_DIR"
+          "$SCCACHE_PATH" --start-server
+          "$SCCACHE_PATH" --zero-stats
+          echo "SCCACHE_RESTORED_KEY=" >> "$GITHUB_ENV"
+          echo 'SCCACHE_CONTROL=cold directory emptied before first compilation'
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
@@ -280,3 +321,34 @@ jobs:
           path: fixed-toolchain/${{ matrix.platform }}
           if-no-files-found: error
           retention-days: 7
+
+  static-tuple:
+    if: inputs.publish_tuple
+    name: Publish static colour LLVM tuple
+    needs: build-tools
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: fixed-llvm-tools-linux_x86_64
+          path: fixed-toolchain/linux_x86_64
+      - name: Publish the shared eight-payload layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          REPO_ROOT="$GITHUB_WORKSPACE"
+          CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/linux_x86_64"
+          source ci/llvm-tuple-layout.sh
+          publish_fixed_tuple_to_depot "$RUNNER_TEMP/llvm-tuple"
+          tuple="$RUNNER_TEMP/llvm-tuple/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
+          (cd "$tuple" && sha256sum --strict -c SHA256SUMS)
+          echo "LLVM_TUPLE_SUMS_SHA=$(sha256sum "$tuple/SHA256SUMS" | awk '{print $1}')" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "STATIC_TUPLE=$tuple" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: static-llvm-tuple-linux_x86_64
+          path: ${{ env.STATIC_TUPLE }}
+          if-no-files-found: error
+          retention-days: 90
