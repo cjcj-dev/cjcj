@@ -124,6 +124,10 @@ test('the composite actions export both CMake launcher variables, bind key to co
   assert.ok(report.includes('--summary "$GITHUB_STEP_SUMMARY"'));
   assert.match(report, /uses: actions\/cache\/save@/);
   assert.match(report, /steps\.stats\.outputs\.save == 'true'/, 'the cache is saved only when sccache wrote something');
+  // A job whose sccache never started is red when it would otherwise be green,
+  // and only a warning on a job that already failed.
+  assert.match(report, /::error::SCCACHE_PATH is unset/);
+  assert.match(report, /::warning::SCCACHE_PATH is unset/);
 });
 
 test('build/cli.mjs keeps a launcher the workflow already exported', async () => {

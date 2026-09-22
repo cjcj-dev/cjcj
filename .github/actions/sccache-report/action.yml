@@ -33,7 +33,19 @@ runs:
         REQUIRE_COMPILES: ${{ inputs.require-compiles }}
       run: |
         set -euo pipefail
-        test -n "${SCCACHE_PATH:-}" || { echo "::error::SCCACHE_PATH is unset: .github/actions/sccache did not run in this job"; exit 1; }
+        # No SCCACHE_PATH means the start action never completed. On a job that
+        # is otherwise green that is the failure this action exists to catch; on
+        # one that already failed (the start step itself died, e.g. the sccache
+        # download returning HTTP 500) it would only add a second, misleading
+        # error, so say it as a warning and leave the original failure alone.
+        if [ -z "${SCCACHE_PATH:-}" ]; then
+          if [ "$REQUIRE_COMPILES" = true ]; then
+            echo "::error::SCCACHE_PATH is unset: .github/actions/sccache did not run in this job"
+            exit 1
+          fi
+          echo "::warning::SCCACHE_PATH is unset: .github/actions/sccache did not complete; no sccache statistics for this job"
+          exit 0
+        fi
         stats="$RUNNER_TEMP/sccache-$COMPONENT-stats.json"
         "$SCCACHE_PATH" --show-stats
         "$SCCACHE_PATH" --show-stats --stats-format=json > "$stats"
