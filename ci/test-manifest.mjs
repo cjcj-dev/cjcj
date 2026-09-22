@@ -56,7 +56,6 @@ export const GATING = Object.freeze([
   'build/test/system-deps.test.mjs',
   'build/test/toolchain-identity.test.mjs',
   'build/test/verifier-report-mode.test.mjs',
-  'build/test/windows-final-compiler.test.mjs',
   'build/test/write-barrier.test.mjs',
   'ci/evidence-discovery.test.mjs',
   'ci/full-gate-floor.test.mjs',
@@ -77,7 +76,6 @@ export const GATING = Object.freeze([
   'ci/srcbuild/tests/release-wire.test.mjs',
   'ci/srcbuild/tests/workflow-inputs.test.mjs',
   'ci/test-manifest.test.mjs',
-  'scripts/cjcjcg_aggregate_ctype_gate.test.mjs',
   'scripts/erased_dynpayload_gate.test.mjs',
 ]);
 
@@ -100,6 +98,28 @@ export const DEFERRED = Object.freeze([
       + '(2026-08-11, local)',
   }),
   Object.freeze({
+    file: 'build/test/windows-final-compiler.test.mjs',
+    needs: 'python3 on the runner. It spawns a real interpreter at :61, and no workflow installs '
+      + 'or names one: python3 and setup-python are both zero hits across .github/workflows, the '
+      + 'lint job that runs this list installs only shellcheck, and its runs-on: ubuntu-slim is a '
+      + 'label whose image is not defined in this repository. No other gating test starts an '
+      + 'interpreter, so nothing here has ever measured whether the runner has it. Absent python3 '
+      + 'these fail ENOENT rather than skipping, which would make the whole test step red for a '
+      + 'reason none of these contracts is about. Promote once one CI run shows python3 present',
+    verified: 'node --test build/test/windows-final-compiler.test.mjs => tests 3 pass 3 fail 0 '
+      + 'skipped 0 (2026-09-22, local, python3 3.13.3); with python3 masked off PATH => '
+      + 'tests 3 pass 0 fail 3, every failure Error: spawnSync python3 ENOENT',
+  }),
+  Object.freeze({
+    file: 'scripts/cjcjcg_aggregate_ctype_gate.test.mjs',
+    needs: 'python3 on the runner, for the same reason as windows-final-compiler above: it spawns '
+      + 'the interpreter at :15 to drive scripts/cjcjcg_aggregate_ctype_gate.py, and no workflow '
+      + 'provides or references python3',
+    verified: 'node --test scripts/cjcjcg_aggregate_ctype_gate.test.mjs => tests 1 pass 1 fail 0 '
+      + 'skipped 0 (2026-09-22, local, python3 3.13.3); with python3 masked off PATH => '
+      + 'tests 1 pass 0 fail 1, Error: spawnSync python3 ENOENT',
+  }),
+  Object.freeze({
     file: 'ci/platform_matrix/verify_windows_runtime_exports.test.mjs',
     needs: 'the zx runtime -- also a zx self-test rather than a node:test file. Note the guard it '
       + 'tests, verify_windows_runtime_exports.mjs, does run in three workflows; only its self-test does not',
@@ -110,7 +130,7 @@ export const DEFERRED = Object.freeze([
 
 // Floors, not equalities: adding tests must stay frictionless, dropping them must
 // not. Lower these only together with the deletion that requires it.
-export const GATING_FLOOR = 54;
+export const GATING_FLOOR = 52;
 export const DISCOVERY_FLOOR = 57;
 
 // git rather than a directory walk: it enumerates what a runner checks out, and
