@@ -278,12 +278,17 @@ jobs:
           name: fixed-llvm-tools-${{ matrix.llvm_platform }}
           path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
 
+      # set -a: `source` alone makes shell variables, and prepare_bootstrap_inputs
+      # reads LLVM_SHA from its environment -- without the export every host
+      # failed here with "LLVM_SHA pin missing" (release-matrix run 35718484244).
       - name: Resolve bootstrap inputs on this runner
         shell: bash
         run: |
           set -euo pipefail
+          set -a
           source ci/llvm_pin.env
           source ci/runtime_pin.env
+          set +a
           node ci/release/prepare_bootstrap_inputs.mjs
 
       - name: Bootstrap stage0 compiler
