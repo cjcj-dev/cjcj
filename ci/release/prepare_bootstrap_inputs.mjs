@@ -95,6 +95,34 @@ const cjcjSha = process.env.CJCJ_BOOTSTRAP_CJCJ_SHA
   || '';
 if (!/^[0-9a-f]{40}$/.test(cjcjSha)) throw new Error('cjcj sha missing (GITHUB_SHA / CJCJ_BOOTSTRAP_CJCJ_SHA)');
 
+// This is the cjcj process library, separate from the official compiler's host
+// LLVM and from the static tuple's eight payloads. An explicitly selected input
+// never falls back after a missing file or identity mismatch.
+const colourInputs = {};
+// The pinned .so producer supports the Linux bootstrap hosts.
+if (process.platform === 'linux' || process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
+    || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB) {
+  const dylibRoot = process.env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT
+    || process.env.CJCJ_BOOTSTRAP_COLOUR_DYLIB
+    || path.join(process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot',
+      llvmSha, process.env.CANGJIE_COMPILER_SHA || '', 'dylib');
+  const colourLlvm = path.join(dylibRoot, 'libLLVM-15.so');
+  const dylibPin = process.env.LLVM_DYLIB_SHA256 || '';
+  if (!/^[0-9a-f]{64}$/.test(dylibPin)) throw new Error('LLVM_DYLIB_PIN_MISSING');
+  if (!fs.existsSync(colourLlvm)) throw new Error(`LLVM_DYLIB_MISSING: ${colourLlvm}`);
+  const colourDigest = sha256File(colourLlvm);
+  if (colourDigest !== dylibPin) {
+    throw new Error(`LLVM_DYLIB_SHA256_MISMATCH expected=${dylibPin} actual=${colourDigest} file=${colourLlvm}`);
+  }
+  const dylibManifest = JSON.parse(fs.readFileSync(path.join(dylibRoot, 'manifest.json'), 'utf8'));
+  if (dylibManifest.llvm_sha !== llvmSha || dylibManifest.sha256 !== dylibPin
+      || JSON.stringify(dylibManifest.targets) !== JSON.stringify(['X86', 'ARM', 'AArch64'])) {
+    throw new Error(`LLVM_DYLIB_MANIFEST_MISMATCH: ${dylibRoot}`);
+  }
+  colourInputs.CJCJ_BOOTSTRAP_COLOUR_LLVM_SO = path.resolve(colourLlvm);
+  colourInputs.CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256 = dylibPin;
+}
+
 // Explicit external trees remain caller-owned; default fetched sources are
 // prepared here before gha_run.sh can enter stage0.
 if (!process.env.CJCJ_BOOTSTRAP_CPP_SRC && !process.env.CANGJIE_CPP_SRC) {
@@ -102,6 +130,7 @@ if (!process.env.CJCJ_BOOTSTRAP_CPP_SRC && !process.env.CANGJIE_CPP_SRC) {
 }
 
 const exported = {
+  ...colourInputs,
   CJCJ_BOOTSTRAP_BASE: path.resolve(base),
   CJCJ_BOOTSTRAP_CPP_SRC: path.resolve(cppSrc),
   CJCJ_BOOTSTRAP_CJCJ_SHA: cjcjSha,

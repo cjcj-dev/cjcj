@@ -5,6 +5,11 @@ on:
     branches: [debug/llc-build]
   workflow_dispatch:
     inputs:
+      publish_dylib:
+        description: Build a separate three-target in-process LLVM dylib candidate.
+        required: false
+        type: boolean
+        default: false
       publish_tuple:
         description: Publish a new static tuple candidate for an explicit pin update.
         required: false
@@ -32,6 +37,11 @@ on:
         default: false
   workflow_call:
     inputs:
+      publish_dylib:
+        description: Build a separate three-target in-process LLVM dylib candidate.
+        required: false
+        type: boolean
+        default: false
       publish_tuple:
         description: Publish a new static tuple candidate (consumers normally use the fixed artifact).
         required: false
@@ -60,6 +70,7 @@ permissions:
 
 jobs:
   in-process-dylib:
+    if: inputs.publish_dylib
     uses: ./.github/workflows/build-llvm-dylib.yml
 
   # A release phase pays for its own tuple and no one else's, so the matrix has to
