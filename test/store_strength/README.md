@@ -28,3 +28,13 @@ Set `STRENGTH_CJC`, `STRENGTH_WEAK_SOURCE`, `STRENGTH_OUT`, `CANGJIE_HOME`, and
 `LD_LIBRARY_PATH` to a private, matched compiler/LLVM closure. The array case
 observes an element initialization store; compiling an Array setter caller
 alone would not prove its separately compiled callee's barrier.
+
+Use `setup_sdk.py --host HOST_SDK --tuple LLVM_TUPLE --compilers ARM_BIN_DIR
+--output NEW_DIRECTORY` to prepare the private closure. The arm directory must
+contain `cjcj-strength`, `cjcj-r1`, `cjcj-r2`, and `cjcj-r3`. The script uses
+`cp -aL` for all reused artifacts, including auxiliary host tools and their LLVM
+libraries, and records a symbolic-link inventory in `sdk-links.json`. Auxiliary
+tool wrappers point only into the new private host copy. Set `CANGJIE_HOME` to
+`NEW_DIRECTORY/sdk` and prepend `NEW_DIRECTORY/tuple/lib` plus the SDK's runtime
+and tools library directories to `LD_LIBRARY_PATH`. Preserve each arm's loader
+trace and dependency hashes alongside the compiler and IR identities.
