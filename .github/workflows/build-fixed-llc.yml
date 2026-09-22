@@ -323,6 +323,9 @@ jobs:
           retention-days: 7
 
   static-tuple:
+    permissions:
+      actions: read
+      contents: write
     if: inputs.publish_tuple
     name: Publish static colour LLVM tuple
     needs: build-tools
@@ -347,8 +350,37 @@ jobs:
           echo "LLVM_TUPLE_SUMS_SHA=$(sha256sum "$tuple/SHA256SUMS" | awk '{print $1}')" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "STATIC_TUPLE=$tuple" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v7
+        id: static-artifact
         with:
           name: static-llvm-tuple-linux_x86_64
           path: ${{ env.STATIC_TUPLE }}
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Persist the same bootstrap inputs and emit a candidate pin
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BOOTSTRAP_ARTIFACT_ID: ${{ steps.static-artifact.outputs.artifact-id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          const root = process.env.STATIC_TUPLE;
+          const sums = fs.readFileSync(`${root}/SHA256SUMS`);
+          const files = sums.toString().trim().split('\n').map(line => {
+            const match = /^([a-f0-9]{64})  \.\/(.+)$/.exec(line);
+            if (!match) throw new Error('invalid tuple manifest');
+            return {path: match[2], sha256: match[1]};
+          });
+          files.push({path: 'SHA256SUMS', sha256: crypto.createHash('sha256').update(sums).digest('hex')});
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/bootstrap-files.json`, JSON.stringify(files));
+          NODE
+          node ci/release/publish_bootstrap_inputs.mjs "$STATIC_TUPLE" "$RUNNER_TEMP/bootstrap-files.json" "$RUNNER_TEMP/bootstrap-inputs-pin.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bootstrap-inputs-pin
+          path: ${{ runner.temp }}/bootstrap-inputs-pin.json
           if-no-files-found: error
           retention-days: 90
