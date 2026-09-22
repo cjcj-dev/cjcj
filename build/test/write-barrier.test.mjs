@@ -51,6 +51,16 @@ test('a phase-guarded heap write counts as bypassed', () => {
   assert.deepEqual(verdict(counts), {phaseChecks: 1, staticGuarded: 0, bypassed: 1, unresolved: 0});
 });
 
+for (const strength of ['Strong', 'Weak']) {
+  test(`a phase-guarded ${strength} accessor still counts as bypassed`, () => {
+    const text = guarded(`CJ_MCC_WriteRefField_${strength}`);
+    assert.deepEqual(verdict(inspectWriteBarriers(text)),
+      {phaseChecks: 1, staticGuarded: 0, bypassed: 1, unresolved: 0});
+    assert.throws(() => assertWriteBarriers(text, `label=${strength}`),
+      /generational write barrier bypassed/);
+  });
+}
+
 test('a phase-guarded static write is the intended fast path, not a bypass', () => {
   // cj_gcwrite_static_ref is not in the list fastBarrier() blocks, so it keeps the
   // fast path even with the flag on. Counting it would reject a correct std.
