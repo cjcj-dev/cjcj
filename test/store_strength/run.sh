@@ -22,11 +22,11 @@ echo "wall=$((SECONDS-start)) parallel_arms=2" > "$out/wall.txt"
 uptime > "$out/uptime-after.txt"
 echo "main_rc=$main_rc ref_rc=$ref_rc"
 # Input failures are recorded separately; do not suppress target assertions.
-python3 "$src/check_ir.py" "$out/libstrength.a_IR/0_GenIncremental" \
+python3 "$src/check_ir.py" "$out/libstrength_IR/0_GenIncremental" \
  --expect 'ordinaryField=1' --expect 'arrayElement=1' \
  --expect 'enumPayload=1' --expect 'boxedPayload=1' > "$out/main-check.log" 2>&1
 main_check=$?
-python3 "$src/check_ir.py" "$out/libstd.ref.a_IR/0_GenIncremental" \
+python3 "$src/check_ir.py" "$out/libstd.ref_IR/0_GenIncremental" \
  --expect 'clear=2' > "$out/ref-check.log" 2>&1
 ref_check=$?
 printf '%s\n' "$main_check" > "$out/main-check.rc"
