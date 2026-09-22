@@ -210,7 +210,7 @@ jobs:
         with:
           component: llvm
           platform: ${{ matrix.platform }}
-          require-compiles: 'true'
+          require-compiles: ${{ job.status == 'success' }}
 
       - name: Verify LLVM tools
         run: |

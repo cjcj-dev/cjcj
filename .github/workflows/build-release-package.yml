@@ -390,7 +390,7 @@ jobs:
         with:
           component: runtime
           platform: ${{ inputs.platform }}
-          require-compiles: 'true'
+          require-compiles: ${{ job.status == 'success' }}
 
       - name: Install source-built cjpm (Unix)
         if: runner.os != 'Windows'

@@ -181,7 +181,7 @@ jobs:
         with:
           component: windows-runtime
           platform: windows_x86_64
-          require-compiles: 'true'
+          require-compiles: ${{ job.status == 'success' }}
 
       - name: Upload Windows runtime
         uses: actions/upload-artifact@v7

@@ -17,12 +17,6 @@
 name: Release matrix
 
 on:
-  # Temporary: a workflow that exists only on a branch cannot be dispatched by
-  # name until some event has registered it. One push registers it; the jobs
-  # below run only for workflow_dispatch. Removed before merge.
-  push:
-    branches: [wf/gha-matrix]
-    paths: ['.github/workflows/release-matrix.yml']
   workflow_dispatch:
     inputs:
       version:
@@ -70,7 +64,6 @@ concurrency:
 jobs:
   plan:
     name: Plan matrix
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:

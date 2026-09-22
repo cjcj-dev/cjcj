@@ -81,7 +81,10 @@ test('every C/C++ compile job starts sccache before compiling and reports after,
     }
     assert.match(steps[start], pin, `${id}: cache key does not carry the pin`);
     assert.match(steps[report], /^\s*if: always\(\)/m, `${id}: the report must run when the build failed too`);
-    assert.match(steps[report], /require-compiles:/, `${id}: the report must say whether compiles are required`);
+    // Enforced on green jobs only: a job that already failed before its first
+    // compile must not gain a second, misleading error from the report.
+    assert.match(steps[report], /^\s*require-compiles: \$\{\{ job\.status == 'success' \}\}\s*$/m,
+      `${id}: the report must require compiles exactly when the job is otherwise green`);
     // A launcher only works for a job whose compile steps see it: the start
     // step must not be guarded by a condition the compile steps do not share.
     const guard = steps[start].match(/^\s*if:\s*(.+)$/m)?.[1];

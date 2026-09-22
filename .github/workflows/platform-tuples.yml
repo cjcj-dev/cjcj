@@ -125,7 +125,7 @@ jobs:
         with:
           component: llvm-tuple
           platform: ${{ matrix.platform }}
-          require-compiles: 'true'
+          require-compiles: ${{ job.status == 'success' }}
 
       - name: Verify fixed LLVM tuple payload
         run: |
