@@ -26,7 +26,6 @@ export const repoRoot = path.resolve(import.meta.dirname, '..');
 // Run by `node --test` in .github/workflows/ci.yml, via `test-manifest.mjs list`.
 export const GATING = Object.freeze([
   'build/test/archive.test.mjs',
-  'build/test/bootstrap-handoff.test.mjs',
   'build/test/cangjie-written-tools.test.mjs',
   'build/test/compose-install.test.mjs',
   'build/test/compose-sdk-entry.test.mjs',
@@ -98,14 +97,30 @@ export const DEFERRED = Object.freeze([
       + '(2026-08-11, local)',
   }),
   Object.freeze({
+    file: 'build/test/bootstrap-handoff.test.mjs',
+    needs: 'python3 on the runner, like the two entries below, but reached through the product '
+      + 'code rather than the test: :84 imports build/srcbuild/stages/{tools,stdx}.mjs, and '
+      + 'build/srcbuild/stages/common.mjs:188 pythonExe() returns python3, which :195 spawns as '
+      + 'python3 build.py. The test file contains no python3 literal, so a search for the name '
+      + 'misses it; the masked-PATH sweep is what found it. Only 1 of its 8 tests needs the '
+      + 'interpreter, so wiring python3 into CI returns all eight at once',
+    verified: 'node --test build/test/bootstrap-handoff.test.mjs => tests 8 pass 8 fail 0 skipped 0 '
+      + '(2026-09-22, local, python3 3.13.3); with python3 masked off PATH => tests 8 pass 7 fail 1 '
+      + 'skipped 0, Error [BuildError]: [stdx.clean] command failed to start: python3 build.py '
+      + 'clean: spawn python3 ENOENT',
+  }),
+  Object.freeze({
     file: 'build/test/windows-final-compiler.test.mjs',
     needs: 'python3 on the runner. It spawns a real interpreter at :61, and no workflow installs '
       + 'or names one: python3 and setup-python are both zero hits across .github/workflows, the '
       + 'lint job that runs this list installs only shellcheck, and its runs-on: ubuntu-slim is a '
-      + 'label whose image is not defined in this repository. No other gating test starts an '
-      + 'interpreter, so nothing here has ever measured whether the runner has it. Absent python3 '
-      + 'these fail ENOENT rather than skipping, which would make the whole test step red for a '
-      + 'reason none of these contracts is about. Promote once one CI run shows python3 present',
+      + 'label whose image is not defined in this repository, so nothing has measured whether the '
+      + 'runner has an interpreter. Absent python3 these fail ENOENT rather than skipping, which '
+      + 'would make the whole test step red for a reason none of these contracts is about. '
+      + 'Which files need python3 is settled by running every gating file with python3 masked '
+      + 'off PATH, not by grepping for the name: bootstrap-handoff reaches the interpreter '
+      + 'through product code and contains no python3 literal at all. Promote once one CI run '
+      + 'shows python3 present',
     verified: 'node --test build/test/windows-final-compiler.test.mjs => tests 3 pass 3 fail 0 '
       + 'skipped 0 (2026-09-22, local, python3 3.13.3); with python3 masked off PATH => '
       + 'tests 3 pass 0 fail 3, every failure Error: spawnSync python3 ENOENT',
@@ -130,7 +145,7 @@ export const DEFERRED = Object.freeze([
 
 // Floors, not equalities: adding tests must stay frictionless, dropping them must
 // not. Lower these only together with the deletion that requires it.
-export const GATING_FLOOR = 52;
+export const GATING_FLOOR = 51;
 export const DISCOVERY_FLOOR = 57;
 
 // git rather than a directory walk: it enumerates what a runner checks out, and
