@@ -24,6 +24,11 @@ are NoKeepAlive. Unknown is reserved for erased/unresolved destination paths,
 and the checker requires an explicit per-function `--allow-unknown` entry.
 
 `run.sh` compiles `main.cj` and the supplied real std.ref source concurrently.
+It also verifies every retained IR module with the SDK's `opt -passes=verify`.
+The operand checker alone cannot reject four-operand calls against a stale
+three-parameter declaration. Per-module results are recorded in
+`main-verify.log` and `ref-verify.log`; these checks do not replace the strength
+assertions.
 Set `STRENGTH_CJC`, `STRENGTH_WEAK_SOURCE`, `STRENGTH_OUT`, `CANGJIE_HOME`, and
 `LD_LIBRARY_PATH` to a private, matched compiler/LLVM closure. The array case
 observes an element initialization store; compiling an Array setter caller
