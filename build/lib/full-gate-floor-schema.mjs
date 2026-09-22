@@ -65,12 +65,49 @@ function nestedField(value, dotted) {
   return dotted.split('.').reduce((current, field) => (plainObject(current) ? current[field] : undefined), value);
 }
 
-// Names every field that is absent and every field that is present but cannot
-// be a measurement, using the same labels ci/release-gates.mjs prints.
+// A floor is one past run that every later run has to match or beat. So the
+// floor itself has to be a run the gate would have passed -- otherwise writing
+// it down turns a failed run into the ceiling later runs are measured against,
+// and the gate cannot catch that: ci/release-gates.mjs only checks the floor's
+// schema (loadG8Floor), never its values, and this command is the only way a
+// floor is produced.
+//
+// The conditions below are not thresholds chosen here. They are
+// ci/release-gates.mjs:897-915 -- the whole of what evaluateG8 compares --
+// evaluated with the floor as both arms, which is exactly the question "would
+// the gate have passed this run". The five baseline-relative comparisons
+// (difftest.total <, smoke.pass <, bcgate.shared <, bcgate.byte_identical <,
+// bcgate.differing >) are all satisfied by a value against itself and so
+// constrain nothing; what is left is the six absolute ones.
+function inadmissibleFields(baseline) {
+  const failures = [];
+  const difftest = baseline.difftest;
+  const bcgate = baseline.bcgate;
+  // release-gates.mjs:900-901
+  if (difftest.pass !== difftest.total) {
+    failures.push(`baseline.difftest.pass=${difftest.pass} is not baseline.difftest.total=${difftest.total}`);
+  }
+  if (difftest.mismatch !== 0) failures.push(`baseline.difftest.mismatch=${difftest.mismatch}`);
+  if (difftest.fail !== 0) failures.push(`baseline.difftest.fail=${difftest.fail}`);
+  // release-gates.mjs:905
+  if (baseline.smoke.fail !== 0) failures.push(`baseline.smoke.fail=${baseline.smoke.fail}`);
+  // release-gates.mjs:910
+  if (bcgate.compile_errors !== 0) failures.push(`baseline.bcgate.compile_errors=${bcgate.compile_errors}`);
+  // release-gates.mjs:915
+  if (baseline.verify_exit !== 0) failures.push(`baseline.verify_exit=${baseline.verify_exit}`);
+  return failures;
+}
+
+// Names every field that is absent, every field that is present but cannot be
+// a measurement, and -- once those are clean -- every field that makes the run
+// one the gate would have failed. The first two use the same labels
+// ci/release-gates.mjs prints.
 export function validateFullGateFloor(candidate) {
   const missing = [];
   const invalid = [];
-  if (!plainObject(candidate)) return {missing: FULL_GATE_FLOOR_FIELDS.slice(), invalid: ['floor must be an object']};
+  if (!plainObject(candidate)) {
+    return {missing: FULL_GATE_FLOOR_FIELDS.slice(), invalid: ['floor must be an object'], inadmissible: []};
+  }
 
   for (const {field, pattern} of FULL_GATE_FLOOR_IDENTITY_FIELDS) {
     const value = candidate[field];
@@ -99,17 +136,24 @@ export function validateFullGateFloor(candidate) {
       !candidate.campaign_id.startsWith(`${candidate.cjcj_head_sha}-`)) {
     invalid.push(`campaign_id=${candidate.campaign_id} does not bind cjcj_head_sha=${candidate.cjcj_head_sha}`);
   }
-  return {missing, invalid};
+  // Only once every metric is present and is a non-negative safe integer, so
+  // the comparisons below read real measurements rather than nulls or strings.
+  const inadmissible = missing.length || invalid.length ? [] : inadmissibleFields(candidate.baseline);
+  return {missing, invalid, inadmissible};
 }
 
 // A complete, ordered floor record, or a refusal naming every field that made
 // it impossible. Never partially fills a floor.
 export function buildFullGateFloor(candidate) {
-  const {missing, invalid} = validateFullGateFloor(candidate);
-  if (missing.length || invalid.length) {
+  const {missing, invalid, inadmissible} = validateFullGateFloor(candidate);
+  if (missing.length || invalid.length || inadmissible.length) {
     throw new FloorRefused([
       ...(missing.length ? [`missing=${missing.join(',')}`] : []),
       ...(invalid.length ? [`invalid=${invalid.join(',')}`] : []),
+      ...(inadmissible.length
+        ? [`inadmissible=${inadmissible.join(',')} (the G8 gate would not have passed this run; ` +
+          'a floor is a run every later run must match or beat)']
+        : []),
     ]);
   }
   const baseline = candidate.baseline;

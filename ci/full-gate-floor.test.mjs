@@ -238,3 +238,50 @@ test('the writer requires exactly the fields the G8 gate reports missing', async
   assert.equal(reported[0], 'status=READY');
   assert.deepEqual(reported.slice(1), [...FULL_GATE_FLOOR_FIELDS]);
 });
+
+test('the writer refuses a run the gate would not have passed, so it cannot become the ceiling', async t => {
+  const state = await pendingFixture(t);
+  const before = await fs.readFile(state.floor, 'utf8');
+  // The measurement set an adversarial review fed the writer: a full-gate run
+  // that fails G8 on every absolute condition, whose bcgate.differing=50 would
+  // have become the ceiling later runs are measured against.
+  const failing = results();
+  failing.results.difftest = {total: 20, pass: 15, mismatch: 3, fail: 2};
+  failing.results.smoke = {pass: 6, fail: 1};
+  failing.results.bcgate = {shared: 100, byte_identical: 90, differing: 50, compile_errors: 4};
+  failing.results.verify_exit = 1;
+  const refused = runWriter(state, await writeResults(state, failing));
+  assert.equal(refused.status, 1, refused.stdout);
+  assert.match(refused.stderr, /FULL_GATE_FLOOR_REFUSED/);
+  for (const named of [
+    /inadmissible=.*baseline\.difftest\.pass=15 is not baseline\.difftest\.total=20/,
+    /baseline\.difftest\.mismatch=3/,
+    /baseline\.difftest\.fail=2/,
+    /baseline\.smoke\.fail=1/,
+    /baseline\.bcgate\.compile_errors=4/,
+    /baseline\.verify_exit=1/,
+  ]) assert.match(refused.stderr, named);
+  assert.equal(await fs.readFile(state.floor, 'utf8'), before);
+
+  // The harm the refusal prevents: with no floor written, a later run carrying
+  // that raised differing count cannot be read as MET.
+  const laterRun = results();
+  laterRun.results.bcgate.differing = 50;
+  await write(state.evidence, 'G8_FULL_GATE.json', `${JSON.stringify(laterRun, null, 2)}\n`);
+  const {value} = gate(state.checkout, state.evidence);
+  assert.notEqual(value.status, 'MET');
+  assert.match(value.value, /floor status=PENDING/);
+});
+
+test('a passing run is still admissible: only the absolute gate conditions are enforced', async t => {
+  const state = await pendingFixture(t);
+  // Every baseline-relative comparison in evaluateG8 holds for a value against
+  // itself, so a clean run with any shared/byte_identical/differing counts is
+  // admissible; only difftest.pass/mismatch/fail, smoke.fail, bcgate
+  // .compile_errors and verify_exit are absolute.
+  const generous = results();
+  generous.results.bcgate = {shared: 3, byte_identical: 1, differing: 2, compile_errors: 0};
+  const written = runWriter(state, await writeResults(state, generous));
+  assert.equal(written.status, 0, written.stderr);
+  assert.match(written.stdout, /^STATUS=READY$/m);
+});

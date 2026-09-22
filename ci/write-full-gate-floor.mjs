@@ -6,14 +6,23 @@
 // The floor shipped as a PENDING skeleton with fourteen nulls and no way to
 // fill it, so G8 reported `floor status=PENDING; missing=...` no matter what
 // any run measured. This command is that way: it takes the G8_FULL_GATE.json
-// the run archived, validates every field the gate will later demand, renders
-// the frozen record, and -- before replacing anything -- imports what it just
-// rendered and checks it reads back as the record it meant to write.
+// the run archived, checks it two ways, renders the frozen record, and --
+// before replacing anything -- imports what it just rendered and checks it
+// reads back as the record it meant to write.
 //
-// It refuses on any incomplete or impossible measurement set, naming each
-// field, and leaves the existing floor untouched. It also refuses to overwrite
-// a READY floor belonging to a different campaign unless --replace says so, so
-// a second run cannot quietly re-baseline the first one.
+// The two checks are separate questions. First, is every field the gate will
+// later read present and a non-negative safe integer. Second, is this run one
+// the gate would have passed at all: a floor is a past run that every later
+// run has to match or beat, so a failed run written down as a floor becomes
+// the ceiling later runs are measured against, and nothing downstream can
+// catch that -- ci/release-gates.mjs validates the floor's schema and never
+// its values, and this command is the only way a floor is produced.
+//
+// It refuses on any incomplete, impossible or inadmissible measurement set,
+// naming each field, and leaves the existing floor untouched. It also refuses
+// to overwrite a READY floor belonging to a different campaign unless
+// --replace says so, so a second run cannot quietly re-baseline the first
+// one.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -42,8 +51,9 @@ function usage() {
     `  --evidence-results NAME   archive-relative results file (default: ${FULL_GATE_FLOOR_EVIDENCE_RESULTS})`,
     '  --replace                 allow replacing a READY floor from a different campaign',
     '',
-    'Nothing is written unless every field the G8 gate requires is present and',
-    'the rendered module reads back as the record it was rendered from.',
+    'Nothing is written unless every field the G8 gate requires is present, the',
+    'run is one the G8 gate would itself have passed, and the rendered module',
+    'reads back as the record it was rendered from.',
   ].join('\n');
 }
 
