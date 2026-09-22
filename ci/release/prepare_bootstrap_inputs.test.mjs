@@ -18,6 +18,7 @@ test('artifact wins over depot; reviewed sums pin rejects altered bytes', () => 
     fs.writeFileSync(so, 'host fixture');
     fs.writeFileSync(ast, 'ast fixture');
     fs.writeFileSync(path.join(artifact, 'SHA256SUMS'), 'reviewed fixture sums');
+    fs.writeFileSync(path.join(fallback, 'SHA256SUMS'), 'reviewed fixture sums');
     const digest = crypto.createHash('sha256').update('reviewed fixture sums').digest('hex');
     const env = {...process.env, GITHUB_ENV: '', CJCJ_SRCBUILD_HOST_SDK: sdk,
       CJCJ_BOOTSTRAP_HOST_LLVM_SO: so, CJCJ_BOOTSTRAP_AST_SUPPORT: ast,

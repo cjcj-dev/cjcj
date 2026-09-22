@@ -1,6 +1,12 @@
 name: Static LLVM tuple contract
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'ci/llvm*'
+      - 'ci/test-llvm-tuple-layout.sh'
+      - 'ci/release/prepare_bootstrap_inputs*'
+      - '.github/workflows/test-llvm-tuple.yml'
 permissions:
   contents: read
   actions: read
