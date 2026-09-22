@@ -303,6 +303,45 @@ test('fixed tuple requires pin, manifest, and embedded opt commit to agree', t =
   console.log(`FIXED_TUPLE_ARM tuple=stale-opt rc=${stale.status}`);
 });
 
+test('fixed tuple publisher feeds the bootstrap consumer and rejects a missing static marker', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-publish-consume-'));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const source = path.join(root, 'source');
+  fs.mkdirSync(source);
+  const pin = fs.readFileSync(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
+  const llvmSha = pin.match(/^LLVM_SHA=([0-9a-f]{40})$/m)[1];
+  const {compilerSha} = writeTuple(source, llvmSha);
+  const llc = Buffer.from('llc fixture\n');
+  const compressed = spawnSync('gzip', ['-n', '-c'], {input: llc});
+  assert.equal(compressed.status, 0, compressed.stderr?.toString());
+  fs.writeFileSync(path.join(source, 'llc.gz'), compressed.stdout);
+  const depotRoot = path.join(root, 'depot');
+  const depot = path.join(depotRoot, llvmSha, compilerSha);
+  const published = runBash(`${shellFunction('publish_fixed_tuple_to_depot')}\n`
+    + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3 CANGJIE_COMPILER_SHA=$4\n'
+    + 'publish_fixed_tuple_to_depot "$5"\n',
+  [repoRoot, source, llvmSha, compilerSha, depotRoot]);
+  assert.equal(published.status, 0, published.stdout + published.stderr);
+  assert.deepEqual(fs.readFileSync(path.join(depot, 'bin', 'llc')), llc);
+  assert.deepEqual(fs.readFileSync(path.join(depot, 'bin', 'opt')),
+    fs.readFileSync(path.join(source, 'opt')));
+  const consume = () => runBash('source "$1/ci/bootstrap/bootstrap.sh"\n'
+    + 'STAGE=published-tuple\nassert_colour_tuple "$2" "$3"\n',
+  [repoRoot, depot, llvmSha]);
+  const green = consume();
+  assert.equal(green.status, 0, green.stdout + green.stderr);
+  const marker = path.join(depot, 'lib', 'STATIC_LLVM.txt');
+  const saved = fs.readFileSync(marker);
+  fs.unlinkSync(marker);
+  const red = consume();
+  assert.equal(red.status, 1, red.stdout + red.stderr);
+  assert.match(red.stdout + red.stderr, /colour LLVM tuple 缺 lib\/STATIC_LLVM\.txt/);
+  fs.writeFileSync(marker, saved);
+  const restored = consume();
+  assert.equal(restored.status, 0, restored.stdout + restored.stderr);
+  console.log(`PUBLISHER_CONSUMER_ARM green=${green.status} missing-static-marker=${red.status} restored=${restored.status}`);
+});
+
 test('fixed tuple depot seeds only checksum-valid pinned payloads and otherwise rebuilds', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-depot-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));

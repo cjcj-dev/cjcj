@@ -21,6 +21,31 @@ printf '%s\n' "$ref_rc" > "$out/ref-build.rc"
 echo "wall=$((SECONDS-start)) parallel_arms=2" > "$out/wall.txt"
 uptime > "$out/uptime-after.txt"
 echo "main_rc=$main_rc ref_rc=$ref_rc"
+# Validate the product IR's declarations as well as its call operands. A stale
+# in-process LLVM can emit four operands against a three-parameter declaration;
+# the operand checker alone cannot detect that mismatch.
+verify_ir() {
+    local directory=$1 log=$2 file status count=0 failed=0
+    : > "$log"
+    while IFS= read -r -d '' file; do
+        count=$((count + 1))
+        "$CANGJIE_HOME/third_party/llvm/bin/opt" -passes=verify -disable-output "$file" >> "$log" 2>&1
+        status=$?
+        printf 'VERIFY_IR file=%s rc=%s\n' "$file" "$status" >> "$log"
+        [ "$status" = 0 ] || failed=1
+    done < <(find "$directory" -type f -name '*.ll' -print0 2>> "$log")
+    printf 'VERIFY_IR_RESULT files=%s failed=%s\n' "$count" "$failed" >> "$log"
+    [ "$count" -gt 0 ] && [ "$failed" = 0 ]
+}
+verify_ir "$out/libstrength_IR/0_GenIncremental" "$out/main-verify.log" &
+main_verify_pid=$!
+verify_ir "$out/libstd.ref_IR/0_GenIncremental" "$out/ref-verify.log" &
+ref_verify_pid=$!
+wait "$main_verify_pid"; main_verify=$?
+wait "$ref_verify_pid"; ref_verify=$?
+printf '%s\n' "$main_verify" > "$out/main-verify.rc"
+printf '%s\n' "$ref_verify" > "$out/ref-verify.rc"
+echo "main_verify=$main_verify ref_verify=$ref_verify"
 # Input failures are recorded separately; do not suppress target assertions.
 python3 "$src/check_ir.py" "$out/libstrength_IR/0_GenIncremental" \
  --expect 'ordinaryField=1' --expect 'arrayElement=1' \
@@ -32,4 +57,5 @@ ref_check=$?
 printf '%s\n' "$main_check" > "$out/main-check.rc"
 printf '%s\n' "$ref_check" > "$out/ref-check.rc"
 echo "main_check=$main_check ref_check=$ref_check"
-[ "$main_rc" = 0 ] && [ "$ref_rc" = 0 ] && [ "$main_check" = 0 ] && [ "$ref_check" = 0 ]
+[ "$main_rc" = 0 ] && [ "$ref_rc" = 0 ] && [ "$main_verify" = 0 ] && [ "$ref_verify" = 0 ] \
+    && [ "$main_check" = 0 ] && [ "$ref_check" = 0 ]
