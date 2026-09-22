@@ -151,6 +151,16 @@ jobs:
       - name: Install runtime dependencies
         if: steps.rtcache.outputs.cache-hit != 'true'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang cmake make
+      # The patched runtime (on a runtime cache miss) and the two shim objects
+      # compile through sccache; keyed per runner because the runtime links the
+      # builder's glibc, as the runtime cache key above already records.
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: ${{ matrix.runner }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 1G
       - name: Build patched runtime
         if: steps.rtcache.outputs.cache-hit != 'true'
         env:
@@ -168,6 +178,13 @@ jobs:
         env:
           CJCJ_LLVM_SHIM_O: ${{ github.workspace }}/fixed-toolchain/${{ matrix.llvm_platform }}/cjselfhost_llvmshim.o
         run: npx --yes zx@8 runtime_shim/build_shim.mjs
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: runtime
+          platform: ${{ matrix.runner }}
+          require-compiles: ${{ job.status == 'success' }}
       - name: Build workspace
         run: cjpm build
       # Deploy name must be cjcj, not cjc (process-name GC stack-root exclusion -> SEGV).

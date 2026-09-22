@@ -31,6 +31,11 @@ on:
         required: false
         type: string
         default: all
+      rebuild_llvm:
+        description: Bypass the whole-artifact LLVM tools cache so the LLVM sccache hit rate can be measured.
+        required: false
+        type: boolean
+        default: false
     outputs:
       final_compiler_linux_x64:
         description: Same-run final compiler for linux-x64
@@ -89,12 +94,20 @@ on:
         required: false
         type: string
         default: all
+      rebuild_llvm:
+        description: Bypass the whole-artifact LLVM tools cache so the LLVM sccache hit rate can be measured.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# Per target set, not per ref alone: release-matrix.yml calls this workflow once
+# per platform in the same run, and one group for all of them would leave every
+# call but one pending -- and cancel all but the newest pending one.
 concurrency:
-  group: srcbuild-native-${{ github.ref }}
+  group: srcbuild-native-${{ github.ref }}-${{ inputs.targets || 'all' }}
   cancel-in-progress: false
 
 jobs:
@@ -143,6 +156,7 @@ jobs:
     uses: ./.github/workflows/build-fixed-llc.yml
     with:
       platforms: ${{ needs.plan.outputs.llvm_platforms }}
+      rebuild: ${{ inputs.rebuild_llvm || false }}
 
   srcbuild:
     name: ${{ matrix.target }} / source SDK
@@ -157,24 +171,12 @@ jobs:
       CANGJIE_BUILD_ROOT: ${{ github.workspace }}/.srcbuild/buildtools
       CJCJ_SRCBUILD_TARGET: ${{ matrix.target }}
       CJCJ_FIXED_LLVM_DIR: ${{ github.workspace }}/.srcbuild/fixed-llc
-      # GitHub's cache is the wrong shape for sccache here, measured rather than
-      # assumed. Run 31551077927 reported 230 hits against 6585 misses -- 3% --
-      # while spending 4162 s writing 6565 entries, and the repository's cache
-      # then held 27840 entries totalling 6.9 GB of a 10 GB cap, of which only 36
-      # were the whole-artifact caches (cjv, cjpm, fixed-llvm-tools) that do earn
-      # their space. sccache writes one entry per object file, so each release run
-      # pushes past the cap and evicts the previous run's entries -- which is why
-      # the hit rate stays at 3% no matter how much is written.
-      #
-      # Disabling the cross-run backend costs those 230 cached compilations and
-      # returns 4162 s per run plus the cache budget. sccache still runs with its
-      # local disk cache; nothing about correctness changes either way.
-      #
-      # Before turning this back on, re-measure: the numbers to beat are hit rate
-      # 3% and write duration 4162 s, and a backend without a 10 GB per-repository
-      # cap is what would actually change them.
-      SCCACHE_GHA_ENABLED: "false"
-      SCCACHE_LOG: warn
+      # sccache: .github/actions/sccache below. The disk cache is persisted as one
+      # actions/cache entry per (component, target, pin); the sccache GitHub
+      # Actions backend that used to be considered here wrote one entry per
+      # object file and was measured at 3% hits (run 31551077927: 27840 entries,
+      # 6.9 GB of the 10 GB cap, 4162 s of writes). That measurement is why the
+      # backend is a tarball and not SCCACHE_GHA_ENABLED.
       cjHeapSize: 12GB
       cjHeapSwap: "on"
       CJCJ_STAGE3_STDLIB_BUILD_TYPE: ${{ inputs.build_type || 'relwithdebinfo' }}
@@ -208,12 +210,17 @@ jobs:
       - name: Install build dependencies
         run: npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" install-system-deps
 
-      - name: Configure sccache diagnostics
-        shell: bash
-        run: echo "SCCACHE_ERROR_LOG=$RUNNER_TEMP/sccache-error.log" >> "$GITHUB_ENV"
-
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+      # Every C/C++ compile in this job -- support libraries, stage3 std FFI,
+      # stdx and tools cmake projects, the compiler shim, the Windows cross
+      # runtime -- runs through this launcher; build/toolchain/sccache.mjs keeps
+      # the launcher variables it finds already set.
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: srcbuild
+          platform: ${{ matrix.target }}
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 2G
 
       - name: Restore support library cache
         if: matrix.static_libs
@@ -234,12 +241,16 @@ jobs:
           path: ${{ env.CANGJIE_BUILD_ROOT }}
           key: cangjie-srcbuild-support-${{ matrix.target }}-${{ hashFiles('build/toolchain/static-libs.mjs', 'build/lib/archive.mjs', 'build/lib/runner.mjs') }}
 
+      # --target because build/cli.mjs asserts the host contract of its target
+      # before any command, and the default target is linux-x64: on the
+      # ubuntu-24.04-arm cell this step failed with "target linux-x64 required
+      # host linux/x64; current host linux/arm64" (release-matrix run 35717546067).
       - name: Generate SDK version
         id: version
         env:
           REQUESTED_REF: ${{ inputs.cangjie_ref }}
         run: |
-          value=$(npx --yes zx@8 build/cli.mjs --cangjie-version "$REQUESTED_REF" print-version)
+          value=$(npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --cangjie-version "$REQUESTED_REF" print-version)
           echo "value=$value" >> "$GITHUB_OUTPUT"
 
       - name: Download pinned source
@@ -267,12 +278,17 @@ jobs:
           name: fixed-llvm-tools-${{ matrix.llvm_platform }}
           path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
 
+      # set -a: `source` alone makes shell variables, and prepare_bootstrap_inputs
+      # reads LLVM_SHA from its environment -- without the export every host
+      # failed here with "LLVM_SHA pin missing" (release-matrix run 35718484244).
       - name: Resolve bootstrap inputs on this runner
         shell: bash
         run: |
           set -euo pipefail
+          set -a
           source ci/llvm_pin.env
           source ci/runtime_pin.env
+          set +a
           node ci/release/prepare_bootstrap_inputs.mjs
 
       - name: Bootstrap stage0 compiler
@@ -444,24 +460,15 @@ jobs:
             .srcbuild/shim-build.log
           if-no-files-found: warn
 
-      - name: Capture sccache diagnostics
+      # Enforced only on a green job: a job that already failed before its first
+      # compile would otherwise report a second, misleading error.
+      - name: Report sccache
         if: always()
-        continue-on-error: true
-        shell: bash
-        run: |
-          "${SCCACHE_PATH:-sccache}" --show-stats --stats-format=json \
-            > "$RUNNER_TEMP/sccache-stats.json"
-
-      - name: Upload sccache diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
+        uses: ./.github/actions/sccache-report
         with:
-          name: sccache-diagnostics-${{ matrix.target }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/sccache-error.log
-            ${{ runner.temp }}/sccache-stats.json
-          if-no-files-found: warn
-          retention-days: 1
+          component: srcbuild
+          platform: ${{ matrix.target }}
+          require-compiles: ${{ job.status == 'success' }}
 
   artifact-contract:
     name: Publish final std artifact contract

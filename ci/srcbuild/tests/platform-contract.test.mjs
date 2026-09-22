@@ -327,22 +327,27 @@ test('arm soak produces every artifact its package job downloads, each exactly o
     `package needs ${needsOf(packageJob)} but ${demanded} is built by ${producerJobs[0]}`);
 });
 
-test('source-build leaves the GHA cache backend off and keeps the write diagnostics', async () => {
+test('source-build leaves the sccache GHA backend off and persists the disk cache as one entry per target', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
-  // The durable backend was measured, not assumed: run 31551077927 got 230 hits
+  const action = await fs.readFile(path.join(root, '.github/actions/sccache/action.yml'), 'utf8');
+  // The per-object backend was measured, not assumed: run 31551077927 got 230 hits
   // against 6585 misses while spending 4162 s on writes, and the repository cache
   // held 27840 entries in 6.9 GB of a 10 GB cap -- one entry per object file, so
-  // every run evicted the last one's. Turning it back on without a backend that
-  // has no per-repository cap would restore a 3% hit rate at that price, so this
-  // asserts the off state rather than merely dropping the old assertion.
-  assert.ok(workflow.includes('SCCACHE_GHA_ENABLED: "false"'));
+  // every run evicted the last one's. The cache that replaced it is sccache's
+  // disk cache saved as a single actions/cache entry keyed by component, target
+  // and pin (.github/actions/sccache); this asserts the off state is still spelled
+  // out there rather than merely dropping the old assertion.
+  assert.ok(action.includes('SCCACHE_GHA_ENABLED=false'));
+  assert.ok(!workflow.includes('SCCACHE_GHA_ENABLED: "true"'));
   assert.ok(!workflow.includes('SCCACHE_MULTILEVEL_CHAIN'),
     'multi-level chain only means something with a durable backend enabled');
+  assert.ok(workflow.includes('uses: ./.github/actions/sccache\n'), 'srcbuild starts sccache through the shared action');
+  assert.ok(workflow.includes('uses: ./.github/actions/sccache-report'), 'and reports through it');
   // The diagnostics stay: they are how the next measurement gets taken.
-  assert.ok(workflow.includes('SCCACHE_ERROR_LOG=$RUNNER_TEMP/sccache-error.log'));
-  assert.ok(workflow.includes('name: Capture sccache diagnostics'));
-  assert.ok(workflow.includes('name: sccache-diagnostics-${{ matrix.target }}-${{ github.run_attempt }}'));
-  assert.ok(workflow.includes('retention-days: 1'));
+  const report = await fs.readFile(path.join(root, '.github/actions/sccache-report/action.yml'), 'utf8');
+  assert.ok(action.includes('SCCACHE_ERROR_LOG=$RUNNER_TEMP/sccache-$COMPONENT-error.log'));
+  assert.ok(report.includes('--stats-format=json'));
+  assert.ok(report.includes('name: sccache-${{ inputs.component }}-${{ inputs.platform }}-${{ github.run_attempt }}'));
 });
 
 test('Windows MinGW product cache has one bounded rate-limit retry', async () => {

@@ -1,0 +1,219 @@
+# Release matrix (cjcj#73, P24): every official platform package on
+# GitHub-hosted runners, through the same P01-P23 chain release.yml runs --
+# srcbuild.yml for the source SDK and final std, build-release-package.yml for
+# the package -- with the platform table read from build/lib/targets.mjs by
+# ci/release/platform-matrix.mjs and nowhere else.
+#
+# release.yml remains the phased dry-run entry (ops/design/DRYRUN_EXECUTION_POLICY.md
+# §3 orders the five native platforms by failure-prefix cost so a stop at phase
+# N has not paid for N+1..5). This workflow is the breadth entry: cells are
+# siblings, fail-fast is off, and a platform the DAG cannot build today gets a
+# job that fails naming the missing tuple or capability -- never a skip.
+#
+# Cross-cell edges: every package cell waits for every source cell (a matrix
+# cannot express "linux-aarch64 package needs the linux-x64 source cell for the
+# Windows cross std"). A package cell whose own source failed fails at its
+# artifact download, which is explicit; the other cells carry on.
+name: Release matrix
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version, e.g. 0.0.2"
+        required: true
+        type: string
+      platforms:
+        description: >-
+          Official platform keys to build, comma-separated; "all" is the
+          fourteen the nightly ships. Selecting a package selects the source
+          cells it consumes (a Windows package pulls in linux-x64).
+        required: false
+        type: string
+        default: all
+      build_type:
+        description: C++ SDK build type for native hosts
+        required: false
+        type: choice
+        options: [release, relwithdebinfo, debug]
+        default: relwithdebinfo
+      dry_run:
+        description: Build and verify only; no GitHub release is created here in any case
+        required: false
+        type: boolean
+        default: true
+      runtime_ref:
+        description: "Dry-run only: exact 40-character runtime commit instead of ci/runtime_pin.env"
+        required: false
+        type: string
+        default: ''
+      rebuild_llvm:
+        description: Bypass the whole-artifact LLVM tools cache so the LLVM sccache hit rate is measured
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-matrix-${{ github.ref }}-${{ inputs.platforms }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      selected: ${{ steps.plan.outputs.selected }}
+      source_matrix: ${{ steps.plan.outputs.source_matrix }}
+      package_matrix: ${{ steps.plan.outputs.package_matrix }}
+      blocked_matrix: ${{ steps.plan.outputs.blocked_matrix }}
+      package_keys: ${{ steps.plan.outputs.package_keys }}
+      has_source: ${{ steps.plan.outputs.has_source }}
+      has_package: ${{ steps.plan.outputs.has_package }}
+      has_blocked: ${{ steps.plan.outputs.has_blocked }}
+      windows_side: ${{ steps.plan.outputs.windows_side }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+      - name: Derive the matrix from build/lib/targets.mjs
+        id: plan
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: node ci/release/platform-matrix.mjs plan --platforms "$PLATFORMS" --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+  # One red job per platform the DAG cannot build yet. The step prints the
+  # missing tuples and capabilities and probes what the runner actually has.
+  blocked:
+    name: ${{ matrix.release_key }} / blocked
+    needs: plan
+    if: needs.plan.outputs.has_blocked == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.blocked_matrix) }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+      - name: Report what this platform is missing
+        shell: bash
+        env:
+          RELEASE_KEY: ${{ matrix.release_key }}
+        run: node ci/release/platform-matrix.mjs check --platform "$RELEASE_KEY" --summary "$GITHUB_STEP_SUMMARY"
+
+  source:
+    name: ${{ matrix.target }} / source
+    needs: plan
+    if: needs.plan.outputs.has_source == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.source_matrix) }}
+    uses: ./.github/workflows/srcbuild.yml
+    with:
+      build_type: ${{ inputs.build_type }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+      targets: ${{ matrix.target }}
+      rebuild_llvm: ${{ inputs.rebuild_llvm }}
+
+  windows-fixed-llvm-tuple:
+    name: Build Windows LLVM tuple
+    needs: plan
+    if: needs.plan.outputs.windows_side == 'true'
+    uses: ./.github/workflows/platform-tuples.yml
+    with:
+      platform_set: windows-only
+
+  patched-cjpm:
+    name: Build patched cjpm
+    needs: plan
+    if: needs.plan.outputs.windows_side == 'true'
+    uses: ./.github/workflows/build-cjpm.yml
+    secrets: inherit
+
+  windows-runtime:
+    name: Build Windows runtime
+    needs: plan
+    if: needs.plan.outputs.windows_side == 'true'
+    uses: ./.github/workflows/build-windows-runtime.yml
+    with:
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  package:
+    name: ${{ matrix.release_key }} / package
+    needs: [plan, source, windows-fixed-llvm-tuple, patched-cjpm, windows-runtime]
+    # Not always(): a cancelled run stays cancelled. A failed or skipped
+    # dependency still lets the other platforms package; a cell whose own
+    # inputs are missing fails at download-artifact.
+    if: ${{ !cancelled() && needs.plan.outputs.has_package == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.package_matrix) }}
+    uses: ./.github/workflows/build-release-package.yml
+    with:
+      runner: ${{ matrix.runner }}
+      platform: ${{ matrix.platform }}
+      llvm_platform: ${{ matrix.llvm_platform }}
+      sdk_runtime_dir: ${{ matrix.sdk_runtime_dir }}
+      compiler_artifact: ${{ matrix.compiler_artifact }}
+      std_artifact: ${{ matrix.std_artifact }}
+      cross_std_artifact: ${{ matrix.cross_std_artifact }}
+      cross_std_tuple: ${{ matrix.cross_std_tuple }}
+      version: ${{ inputs.version }}
+      dry_run: ${{ inputs.dry_run }}
+      runtime_ref: ${{ inputs.runtime_ref }}
+    secrets: inherit
+
+  # One SHA256SUMS over every selected package. A selected platform without a
+  # package fails this job by name; a blocked platform fails its own job above.
+  checksums:
+    name: SHA256SUMS
+    needs: [plan, package]
+    if: ${{ !cancelled() && needs.plan.outputs.has_package == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+      - name: Download package artifacts
+        uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.run_id }}
+          pattern: pkg-*
+          path: dist
+          merge-multiple: true
+      - name: Aggregate and verify SHA256SUMS
+        env:
+          PACKAGE_KEYS: ${{ needs.plan.outputs.package_keys }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # mkdir first: with no package artifact at all, `ls dist` would fail
+          # here and the job would die on ls rather than on the checksum step
+          # that names which platform is missing.
+          mkdir -p dist
+          ls -l dist
+          node ci/release/package_checksums.mjs aggregate --dist dist --version "$VERSION" --expect "$PACKAGE_KEYS"
+          {
+            echo '### SHA256SUMS'
+            echo
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload SHA256SUMS
+        uses: actions/upload-artifact@v7
+        with:
+          name: SHA256SUMS
+          path: dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90

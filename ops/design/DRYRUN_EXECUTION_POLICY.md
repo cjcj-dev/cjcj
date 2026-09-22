@@ -162,7 +162,7 @@ dispatch 后第一项取证是 run JSON。`head_sha != FREEZE.json.head_sha`、`
 
 归档时限与保留期：
 
-- sccache error artifact 现有 retention 只有 1 天，所有 raw log/API/diagnostic 必须在 run 结束后 24 小时内复制；source final std/diagnosis 多为 7 天，tuple/cjpm 多为 7–14 天，`pkg-*` 是 90 天。这些只是抢救窗口，不是政策保留期。
+- sccache 诊断 artifact 现为 `sccache-<component>-<platform>-<attempt>`（stats json + error log），retention 7 天（cjcj#73 前是 `sccache-diagnostics-*`、1 天）；每个 C++ job 的命中率另写进 job summary。所有 raw log/API/diagnostic 仍应在 run 结束后尽快复制；source final std/diagnosis 多为 7 天，tuple/cjpm 多为 7–14 天，`pkg-*` 是 90 天。这些只是抢救窗口，不是政策保留期。
 - 持久根中每个成功、失败和重试 attempt 都保留到 0.0.2 正式发布或明确放弃之日起至少 365 天；安全事件或争议中的 campaign 不得按期删除。
 - `scripts/archive_release_evidence.mjs` 用于 completed 的纯 dry-run collect/verify，并生成 `EVIDENCE_SHA256SUMS`；脚本拒绝 `/tmp`。
 

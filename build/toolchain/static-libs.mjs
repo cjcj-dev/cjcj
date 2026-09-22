@@ -34,6 +34,10 @@ export async function install(buildRoot, {jobs} = {}) {
   }
   fs.mkdirSync(buildRoot, {recursive: true});
   const cpus = jobs ?? os.cpus().length ?? 2;
+  // autotools has no launcher variable; the compiler cache cmake-driven stages
+  // use (CMAKE_*_COMPILER_LAUNCHER, sccache on GitHub Actions) rides in CC/CXX.
+  const cc = [process.env.CMAKE_C_COMPILER_LAUNCHER, 'clang'].filter(Boolean).join(' ');
+  const cxx = [process.env.CMAKE_CXX_COMPILER_LAUNCHER, 'clang++'].filter(Boolean).join(' ');
 
   await stage('static_libs:ncurses', async () => {
     const archive = path.join(buildRoot, `ncurses-${NCURSES_VERSION}.tar.gz`);
@@ -50,8 +54,8 @@ export async function install(buildRoot, {jobs} = {}) {
     ], {
       cwd: source,
       envOverlay: {
-        CC: 'clang',
-        CXX: 'clang++',
+        CC: cc,
+        CXX: cxx,
         CFLAGS: '-fPIC -fstack-protector-strong -Wl,-z,relro,-z,now,-z,noexecstack',
         CXXFLAGS: '-fstack-protector-strong -Wl,-z,relro,-z,now,-z,noexecstack',
       },
@@ -68,8 +72,12 @@ export async function install(buildRoot, {jobs} = {}) {
     await download(LIBEDIT_URL, archive);
     const source = await extract(archive, buildRoot);
     const prefix = path.join(buildRoot, 'libedit-3.1');
+    // libedit keeps configure's own compiler choice; only the launcher is added.
+    const launcher = process.env.CMAKE_C_COMPILER_LAUNCHER;
     await run(['./configure', '--with-pic', '--enable-shared=no', `--prefix=${prefix}`], {
-      cwd: source, stage: 'static_libs.libedit.configure',
+      cwd: source,
+      envOverlay: launcher ? {CC: `${launcher} ${process.env.CC || 'cc'}`} : {},
+      stage: 'static_libs.libedit.configure',
     });
     await run(['make', `-j${cpus}`], {cwd: source, stage: 'static_libs.libedit.make'});
     await run(['make', 'install'], {cwd: source, stage: 'static_libs.libedit.install'});

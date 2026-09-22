@@ -245,7 +245,7 @@ jobs:
           flags=(--title "cjcj v${{ inputs.version }}" --notes-file "$RUNNER_TEMP/release-notes.md")
           if [ "${{ inputs.prerelease }}" = "true" ]; then flags+=(--prerelease); fi
           if [ "${{ inputs.draft }}" = "true" ]; then flags+=(--draft); fi
-          mapfile -t assets < <(find dist -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.zip' -o -name '*.RELEASE-MANIFEST.jsonl' \) | sort)
+          mapfile -t assets < <(find dist -type f \( -name '*.tar.gz' -o -name '*.sha256' -o -name '*.zip' -o -name '*.RELEASE-MANIFEST.jsonl' -o -name '*.SHA256SUMS' \) | sort)
           gh release create "v${{ inputs.version }}" "${flags[@]}" "${assets[@]}"
 
 # Source-build owns the four native LLVM artifacts; platform-tuples.yml owns

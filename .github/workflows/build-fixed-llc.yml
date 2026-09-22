@@ -4,6 +4,22 @@ on:
   push:
     branches: [debug/llc-build]
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: >-
+          Comma-separated llvm platforms to build. Empty or "all" builds every
+          one, which is what a caller that wants the whole set still gets.
+        required: false
+        type: string
+        default: all
+      rebuild:
+        description: >-
+          Bypass the whole-artifact LLVM tools cache and compile again. This is
+          how the sccache warm-cache hit rate is measured: at an unchanged pin
+          the tools cache would otherwise skip the compile entirely.
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       platforms:
@@ -13,6 +29,11 @@ on:
         required: false
         type: string
         default: all
+      rebuild:
+        description: Bypass the whole-artifact LLVM tools cache and compile again (sccache measurement).
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -74,12 +95,28 @@ jobs:
           source ci/llvm_pin.env
           echo "sha=$LLVM_SHA" >> "$GITHUB_OUTPUT"
 
+      # `rebuild` salts the key with the run id so the restore misses and the
+      # post-step still saves the fresh tools under a key nothing else will read.
+      # The salt is a prefix: the cache service matches stored keys by prefix,
+      # so a suffix salt would let later unsalted lookups restore the salted
+      # entry (release-matrix run 35718484244 restored ...-rebuild-35717971557).
       - name: Restore LLVM tools cache
         id: cache
         uses: actions/cache@v6
         with:
           path: fixed-toolchain/${{ matrix.platform }}
-          key: fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', 'ci/llvm-tools-manifest.mjs', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
+          key: ${{ inputs.rebuild && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', 'ci/llvm-tools-manifest.mjs', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
+
+      # Every C++ compile below (llc, opt, flatc, the shim object) goes through
+      # sccache; the report step at the end fails the job if none did.
+      - name: Start sccache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/sccache
+        with:
+          component: llvm
+          platform: ${{ matrix.platform }}
+          pin: ${{ steps.llvm-pin.outputs.sha }}
+          cache-size: 3G
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
@@ -157,7 +194,7 @@ jobs:
           mkdir -p shim-generated/flatbuffers
           flatbuffers-build/flatc --no-warnings -c -o shim-generated/flatbuffers \
             cangjie-compiler/schema/ModuleFormat.fbs
-          clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
+          ${SCCACHE_PATH:+"$SCCACHE_PATH"} clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
             -Illvm-fork/llvm/include -Illc-build/include \
             -Iflatbuffers/include -Ishim-generated \
             -c runtime_shim/cjselfhost_llvmshim.cpp \
@@ -169,6 +206,14 @@ jobs:
           fi
           printf 'SHIM_SHA256=%s\n' "$shim_sha" >> \
             "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+
+      - name: Report sccache
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/sccache-report
+        with:
+          component: llvm
+          platform: ${{ matrix.platform }}
+          require-compiles: ${{ job.status == 'success' }}
 
       - name: Verify LLVM tools
         run: |

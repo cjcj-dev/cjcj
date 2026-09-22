@@ -35,7 +35,12 @@ for root in "$target" "$host"; do
   [ -d "$root" ] || fail "missing SDK: $root"
 done
 [ "$target" != "$host" ] || fail 'host and target SDK must differ'
-platform=linux_x86_64_cjnative
+# Host tuple from the machine, as bootstrap.sh derives it; Linux only.
+case "$(uname -s)/$(uname -m)" in
+  Linux/x86_64) platform=linux_x86_64_cjnative; multiarch=x86_64-linux-gnu;;
+  Linux/aarch64) platform=linux_aarch64_cjnative; multiarch=aarch64-linux-gnu;;
+  *) fail "host $(uname -s)/$(uname -m) is not supported (Linux x86_64/aarch64 only)";;
+esac
 if [ -f "$hrt/runtime/lib/$platform/libcangjie-runtime.so" ]; then
   hrt="$hrt/runtime/lib/$platform"
 elif [ -f "$hrt/lib/$platform/libcangjie-runtime.so" ]; then
@@ -69,8 +74,8 @@ check_sha "$host/runtime/lib/$platform/libboundscheck.so" "$decl_bounds"
 for rel in bin/cjc tools/bin/cjpm third_party/llvm/bin/opt third_party/llvm/bin/llc; do
   [ -x "$target/$rel" ] && [ ! -L "$target/$rel" ] || fail "regular executable required: $rel"
 done
-host_ld="$host/runtime/lib/$platform:$host/lib/$platform:$host/third_party/llvm/lib:$host/tools/lib:/usr/lib/x86_64-linux-gnu"
-target_ld="$target/runtime/lib/$platform:$target/lib/$platform:$target/third_party/llvm/lib:$target/tools/lib:/usr/lib/x86_64-linux-gnu"
+host_ld="$host/runtime/lib/$platform:$host/lib/$platform:$host/third_party/llvm/lib:$host/tools/lib:/usr/lib/$multiarch"
+target_ld="$target/runtime/lib/$platform:$target/lib/$platform:$target/third_party/llvm/lib:$target/tools/lib:/usr/lib/$multiarch"
 state="$target/.stage1-host"
 [ ! -e "$state" ] || fail 'runner already installed; reassemble the workspace SDK'
 mkdir "$state"

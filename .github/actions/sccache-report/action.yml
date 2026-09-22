@@ -1,0 +1,81 @@
+# Close out the sccache session that .github/actions/sccache opened: print the
+# statistics, write the hit rate into the step summary, fail the job when a
+# C++ build never reached the launcher, and persist the disk cache.
+name: sccache report
+description: Print sccache statistics, record the hit rate in the job summary, save the disk cache.
+inputs:
+  component:
+    description: Same component name given to .github/actions/sccache.
+    required: true
+  platform:
+    description: Same platform given to .github/actions/sccache.
+    required: true
+  require-compiles:
+    description: >-
+      Fail when sccache saw zero compile requests. Pass 'true' whenever the C++
+      build actually ran in this job; a whole-artifact cache hit that skipped the
+      build passes 'false'.
+    required: false
+    default: 'true'
+  save:
+    description: Persist the disk cache when it changed. Pass 'false' to only report.
+    required: false
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - name: sccache statistics
+      id: stats
+      shell: bash
+      env:
+        COMPONENT: ${{ inputs.component }}
+        PLATFORM: ${{ inputs.platform }}
+        REQUIRE_COMPILES: ${{ inputs.require-compiles }}
+      run: |
+        set -euo pipefail
+        # No SCCACHE_PATH means the start action never completed. On a job that
+        # is otherwise green that is the failure this action exists to catch; on
+        # one that already failed (the start step itself died, e.g. the sccache
+        # download returning HTTP 500) it would only add a second, misleading
+        # error, so say it as a warning and leave the original failure alone.
+        if [ -z "${SCCACHE_PATH:-}" ]; then
+          if [ "$REQUIRE_COMPILES" = true ]; then
+            echo "::error::SCCACHE_PATH is unset: .github/actions/sccache did not run in this job"
+            exit 1
+          fi
+          echo "::warning::SCCACHE_PATH is unset: .github/actions/sccache did not complete; no sccache statistics for this job"
+          exit 0
+        fi
+        stats="$RUNNER_TEMP/sccache-$COMPONENT-stats.json"
+        "$SCCACHE_PATH" --show-stats
+        "$SCCACHE_PATH" --show-stats --stats-format=json > "$stats"
+        # A plain string, not an array: macOS runners ship bash 3.2, where an
+        # empty array under set -u is an unbound-variable error.
+        require_flag=""
+        if [ "$REQUIRE_COMPILES" = true ]; then require_flag=--require-compiles; fi
+        node "$GITHUB_ACTION_PATH/../../../ci/sccache/report.mjs" \
+          --stats "$stats" --component "$COMPONENT" --platform "$PLATFORM" \
+          --restored-key "${SCCACHE_RESTORED_KEY:-}" \
+          --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT" ${require_flag:+"$require_flag"}
+        "$SCCACHE_PATH" --stop-server >/dev/null 2>&1 || true
+
+    # always(): a composite action stops at the first failing step, so without
+    # this the one case the statistics matter most -- the zero-compile check
+    # turning the job red -- would take its own stats.json and error log with it.
+    - name: Upload sccache diagnostics
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: sccache-${{ inputs.component }}-${{ inputs.platform }}-${{ github.run_attempt }}
+        path: |
+          ${{ runner.temp }}/sccache-${{ inputs.component }}-stats.json
+          ${{ runner.temp }}/sccache-${{ inputs.component }}-error.log
+        if-no-files-found: ignore
+        retention-days: 7
+
+    - name: Save sccache disk cache
+      if: inputs.save == 'true' && steps.stats.outputs.save == 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ runner.temp }}/sccache-${{ inputs.component }}
+        key: ${{ env.CJCJ_SCCACHE_KEY }}

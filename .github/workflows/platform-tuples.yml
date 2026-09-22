@@ -59,6 +59,17 @@ jobs:
           path: fixed-toolchain/${{ matrix.platform }}
           key: tuple-${{ matrix.platform }}-${{ steps.llvm-pin.outputs.sha }}-${{ hashFiles('.github/workflows/platform-tuples.yml', 'ci/llvm_pin.env', 'ci/llvm-tools-manifest.mjs', 'ci/platform_tuples/**', 'ci/platform_matrix/**', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
 
+      # llc, opt, lld, flatc and the shim object all compile through sccache;
+      # the report step fails the job if the launcher never saw a compile.
+      - name: Start sccache
+        if: steps.tuple-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/sccache
+        with:
+          component: llvm-tuple
+          platform: ${{ matrix.platform }}
+          pin: ${{ steps.llvm-pin.outputs.sha }}
+          cache-size: 3G
+
       - name: Prepare MSYS2/MinGW LLVM toolchain
         id: msys2-setup
         if: runner.os == 'Windows' && steps.tuple-cache.outputs.cache-hit != 'true'
@@ -107,6 +118,14 @@ jobs:
         if: runner.os == 'Windows' && steps.tuple-cache.outputs.cache-hit != 'true'
         shell: msys2 {0}
         run: bash ci/platform_tuples/build_tuple.sh
+
+      - name: Report sccache
+        if: always() && steps.tuple-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/sccache-report
+        with:
+          component: llvm-tuple
+          platform: ${{ matrix.platform }}
+          require-compiles: ${{ job.status == 'success' }}
 
       - name: Verify fixed LLVM tuple payload
         run: |
