@@ -317,7 +317,7 @@ test('fixed tuple publisher feeds the bootstrap consumer and rejects a missing s
   fs.writeFileSync(path.join(source, 'llc.gz'), compressed.stdout);
   const depotRoot = path.join(root, 'depot');
   const depot = path.join(depotRoot, llvmSha, compilerSha);
-  const published = runBash(`${shellFunction('publish_fixed_tuple_to_depot')}\n`
+  const published = runBash('source "$1/ci/llvm-tuple-layout.sh"\n'
     + 'REPO_ROOT=$1 CJCJ_FIXED_LLVM_DIR=$2 LLVM_SHA=$3 CANGJIE_COMPILER_SHA=$4\n'
     + 'publish_fixed_tuple_to_depot "$5"\n',
   [repoRoot, source, llvmSha, compilerSha, depotRoot]);

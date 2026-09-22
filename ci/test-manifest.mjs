@@ -70,6 +70,7 @@ export const GATING = Object.freeze([
   'ci/release-gates.test.mjs',
   'ci/release/package_checksums.test.mjs',
   'ci/release/platform-matrix.test.mjs',
+  'ci/release/prepare_bootstrap_inputs.test.mjs',
   'ci/sccache/report.test.mjs',
   'ci/srcbuild/tests/inject-version.test.mjs',
   'ci/srcbuild/tests/phase-control.test.mjs',
