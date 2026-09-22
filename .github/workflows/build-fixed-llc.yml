@@ -97,12 +97,15 @@ jobs:
 
       # `rebuild` salts the key with the run id so the restore misses and the
       # post-step still saves the fresh tools under a key nothing else will read.
+      # The salt is a prefix: the cache service matches stored keys by prefix,
+      # so a suffix salt would let later unsalted lookups restore the salted
+      # entry (release-matrix run 35718484244 restored ...-rebuild-35717971557).
       - name: Restore LLVM tools cache
         id: cache
         uses: actions/cache@v6
         with:
           path: fixed-toolchain/${{ matrix.platform }}
-          key: fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', 'ci/llvm-tools-manifest.mjs', 'runtime_shim/cjselfhost_llvmshim.cpp') }}${{ inputs.rebuild && format('-rebuild-{0}', github.run_id) || '' }}
+          key: ${{ inputs.rebuild && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', 'ci/llvm-tools-manifest.mjs', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
 
       # Every C++ compile below (llc, opt, flatc, the shim object) goes through
       # sccache; the report step at the end fails the job if none did.
