@@ -1,0 +1,35 @@
+name: Static LLVM tuple contract
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  contract:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read reviewed artifact pin
+        run: cat ci/llvm_pin.env >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.LLVM_TUPLE_ARTIFACT_ID }}
+          github-token: ${{ github.token }}
+          run-id: ${{ env.LLVM_TUPLE_RUN_ID }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/tuple
+      - name: Check reviewed digest and precise layout fault
+        run: |
+          set -euo pipefail
+          test "$(sha256sum "$RUNNER_TEMP/tuple/SHA256SUMS" | cut -d' ' -f1)" = "$LLVM_TUPLE_SUMS_SHA"
+          cmp ci/llvm_tuple_SHA256SUMS "$RUNNER_TEMP/tuple/SHA256SUMS"
+          bash ci/test-llvm-tuple-layout.sh "$RUNNER_TEMP/layout-test" "$RUNNER_TEMP/tuple"
+      - name: Exercise bootstrap input consumer
+        run: node --test ci/release/prepare_bootstrap_inputs.test.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: tuple-layout-evidence
+          path: |
+            ${{ runner.temp }}/layout-test/*.log
+          if-no-files-found: error

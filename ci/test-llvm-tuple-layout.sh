@@ -7,15 +7,21 @@ source "$REPO_ROOT/ci/llvm-tuple-layout.sh"
 source "$REPO_ROOT/ci/llvm_pin.env"
 work=${1:?usage: test-llvm-tuple-layout.sh EMPTY_WORK_DIRECTORY}
 mkdir "$work"
-CJCJ_FIXED_LLVM_DIR="$work/fixed"
-mkdir "$CJCJ_FIXED_LLVM_DIR"
-for tool in llc opt; do
-    printf 'fixture %s\n' "$tool" | gzip -n > "$CJCJ_FIXED_LLVM_DIR/$tool.gz"
-done
-printf 'fixture shim\n' > "$CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o"
-printf 'fixture manifest\n' > "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
-publish_fixed_tuple_to_depot "$work/depot"
-tuple="$work/depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
+if [[ -n ${2:-} ]]; then
+    # Test a copy of the actual GHA artifact, preserving its recorded bytes.
+    cp -a "$2" "$work/tuple"
+    tuple="$work/tuple"
+else
+    CJCJ_FIXED_LLVM_DIR="$work/fixed"
+    mkdir "$CJCJ_FIXED_LLVM_DIR"
+    for tool in llc opt; do
+        printf 'fixture %s\n' "$tool" | gzip -n > "$CJCJ_FIXED_LLVM_DIR/$tool.gz"
+    done
+    printf 'fixture shim\n' > "$CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o"
+    printf 'fixture manifest\n' > "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
+    publish_fixed_tuple_to_depot "$work/depot"
+    tuple="$work/depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
+fi
 check() { (cd "$tuple" && sha256sum --strict -c SHA256SUMS); }
 check > "$work/green.log" 2>&1
 test "$(wc -l < "$tuple/SHA256SUMS")" -eq 8
