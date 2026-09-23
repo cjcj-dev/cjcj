@@ -87,6 +87,37 @@ jobs:
           platform: ubuntu-22.04
           require-compiles: ${{ job.status == 'success' }}
 
+      - name: Report runtime gate log availability
+        if: always()
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          logs=(runtime-source/runtime/**/gate_run.log)
+          if (( ${#logs[@]} == 0 )); then
+            echo "::warning::No runtime gate_run.log found; the build may have stopped before the gate ran."
+          else
+            printf 'Runtime gate log: %s\n' "${logs[@]}"
+          fi
+      - name: Upload runtime gate diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: colour-runtime-gate-diagnostics
+          path: |
+            ci/runtime_pin.env
+            runtime-source/runtime/**/gate_run.log
+            runtime-source/runtime/**/gc_unit_gate.status
+            runtime-source/runtime/**/runtime-build-config.txt
+            runtime-source/runtime/tests/gc_unit/build*/**/*.log
+            runtime-source/runtime/tests/gc_unit/build*/**/*.sha256
+            runtime-source/runtime/tests/gc_unit/build*/**/gate_tally.txt
+            runtime-source/runtime/tests/gc_unit/build*/**/*.receipt
+            runtime-source/runtime/tests/gc_unit/build*/**/*identity*
+            runtime-source/runtime/tests/gc_unit/build*/**/*provenance*
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
   fixed-llvm-tuples:
     if: ${{ !inputs.runtime_only }}
     name: Build fixed LLVM tuples
