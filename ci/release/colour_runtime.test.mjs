@@ -21,8 +21,8 @@ test('runtime pair reaches bootstrap with explicit identity and host remains sep
 test('runtime pin tampering fails only runtime identity assertion', () => fixture(({env, run}) => {
   env.COLOUR_RT_MANIFEST_SHA256 = '0'.repeat(64);
   const result = run();
-  assert.notEqual(result.status, 0);
   assert.match(result.stderr, /COLOUR_RT_SHA256_MISMATCH expected=0{64} actual=[a-f0-9]{64}/);
+  assert.notEqual(result.status, 0);
   assert.doesNotMatch(result.stderr, /LLVM_DYLIB_|ast-support|SHA256SUMS disagrees/);
   assert.doesNotMatch(result.stdout, /CJCJ_BOOTSTRAP_COLOUR_RT=/);
   console.log('ASSERT runtime digest rejection executed');
