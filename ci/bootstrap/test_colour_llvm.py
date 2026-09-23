@@ -98,6 +98,25 @@ prepare_stage0_run_sdk
         self.assertIn(str(self.host / 'third_party/llvm/lib'), (self.target / 'tools/bin/cjpm').read_text())
         print('ASSERT loaded-pin-and-context executed', flush=True)
 
+    def test_official_tool_uses_host_library(self):
+        # This child inherits the compiler's colour environment; the product
+        # wrapper must replace it with the official host tool environment.
+        tool = self.target / 'third_party/llvm/bin/llvm-objcopy'
+        shutil.copyfile(self.compiler, tool)
+        tool.chmod(0o755)
+        prep = self.prepare()
+        self.assertEqual(prep.returncode, 0, prep.stdout + prep.stderr)
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        call = subprocess.run([str(tool)], capture_output=True, text=True,
+                              env={**os.environ, 'LD_LIBRARY_PATH': str(self.run_sdk / 'third_party/llvm/lib')})
+        self.assertEqual(call.returncode, 0, call.stderr)
+        data = json.loads(call.stdout)
+        loaded = {line.split()[-1] for line in data['maps'].splitlines() if 'libLLVM' in line}
+        self.assertEqual(loaded, {str(self.host_lib)}, data['maps'])
+        self.assertTrue(data['context_created'])
+        print('ASSERT official-tool-host-library executed', flush=True)
+
     def test_producer_rejects_wrong_library(self):
         result = self.prepare(self.host_lib)
         self.assertIn('BOOTSTRAP-FAIL [init] colour-llvm sha256 不匹配', result.stdout + result.stderr)

@@ -107,6 +107,14 @@ for name in opt llc; do
   cp -p "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1"
   write_runner "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1" "$target_ld"
 done
+# Ancillary LLVM tools remain official host executables. They must not inherit
+# the cjcj process library when launched by the compiler (Gnu.cj:69).
+for name in llvm-objcopy llvm-ar; do
+  if [ -f "$target/third_party/llvm/bin/$name" ]; then
+    cp -p "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1"
+    write_runner "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1" "$host_ld"
+  fi
+done
 sha256sum "$compiler" "$host/runtime/lib/$platform/"*.so \
   "$host/third_party/llvm/lib/libLLVM-15.so" "$run_sdk/third_party/llvm/lib/libLLVM-15.so" "$host/tools/bin/cjpm" \
   "$target/bin/cjcj-stage1" "$target/third_party/llvm/bin/"*-stage1 > "$state/INPUTS.sha256"
