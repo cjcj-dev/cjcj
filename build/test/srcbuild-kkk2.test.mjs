@@ -646,7 +646,7 @@ function compilerStdlibBeforeBootstrap(text) {
 
 const BOOTSTRAP_FLAGS = [
   '--work', '--src', '--cjcj-sha', '--stdsrc', '--cpp-src', '--base', '--host-llvm-so', '--host-llvm-sha256',
-  '--ast-support', '--ast-support-sha256', '--colour-tuple', '--colour-llvm-sha',
+  '--colour-llvm-so', '--colour-llvm-sha256', '--ast-support', '--ast-support-sha256', '--colour-tuple', '--colour-llvm-sha',
   '--colour-rt', '--host-rt', '--stage',
 ];
 
@@ -888,6 +888,7 @@ test('stage1 compiler consumer sees the completed target std', t => {
 WORK=$1 DRY=1 COLOUR_TUPLE=tuple CRT=runtime HOST_LLVM_SO=llvm COLOUR_LLVM_SHA=sha STAGE1_HEAP=20GB
 record() { :; }
 assert_llvm() { :; }
+prepare_stage0_run_sdk() { :; }
 sdk_ld_path() { :; }
 assemble_stage1_sdk() { mkdir -p "$1"; cp "$3/std-id" "$1/std-id"; }
 stdlib_build() { mkdir -p "$4"; printf target > "$4/std-id"; }

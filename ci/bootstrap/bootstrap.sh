@@ -12,6 +12,8 @@ SRC=''
 STDSRC=''
 HOST_LLVM_SO=''
 HOST_LLVM_SHA256=''
+COLOUR_LLVM_SO=''
+COLOUR_LLVM_SHA256=''
 COLOUR_TUPLE=''
 COLOUR_LLVM_SHA=''
 CRT=''
@@ -51,7 +53,7 @@ host_tuple_init() {
 BUILD_HOME="${HOME:-/root}"
 
 usage() {
-  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|all] [--stage1-heap 20GB] [--dry-run]'
+  echo 'bootstrap.sh --work DIR --src CJCJ_ROOT --cjcj-sha 40HEX --stdsrc STDLIB --cpp-src CANGJIE_CPP_ROOT --host-llvm-so libLLVM-15.so --host-llvm-sha256 HEX --colour-llvm-so libLLVM-15.so --colour-llvm-sha256 HEX --ast-support FILE --ast-support-sha256 HEX --colour-tuple DIR --colour-llvm-sha 40HEX --colour-rt DIR --host-rt DIR [--stage stage0|stage1|all] [--stage1-heap 20GB] [--dry-run]'
 }
 
 sha256() {
@@ -164,6 +166,19 @@ assert_installed_llvm_so() {
   actual=$(sha256 "$target")
   echo "ASSERT installed-host-llvm-so expected=$expected actual=$actual target=$target"
   [ "$expected" = "$actual" ] || die 'host LLVM SO 安装后 sha256 不一致'
+}
+
+# Keep the official compiler SDK intact. Only cjcj processes use this copy.
+prepare_stage0_run_sdk() {
+  local sdk="$WORK/sdk-stage0-run"
+  assert_expected_sha colour-llvm "$COLOUR_LLVM_SO" "$COLOUR_LLVM_SHA256"
+  cmd "rm -rf -- $(printf '%q' "$sdk")"
+  cmd "cp -aL $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$sdk")"
+  cmd "install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/libLLVM-15.so")"
+  if [ "$DRY" -eq 0 ]; then
+    assert_expected_sha installed-colour-llvm "$sdk/third_party/llvm/lib/libLLVM-15.so" "$COLOUR_LLVM_SHA256"
+    assert_expected_sha preserved-host-llvm "$WORK/sdk-stage0/third_party/llvm/lib/libLLVM-15.so" "$HOST_LLVM_SHA256"
+  fi
 }
 
 assert_installed_llvm_tuple() {
@@ -644,7 +659,8 @@ stage0() {
     assert_executable cjcj-stage1 "$out"
     [ -d "$std" ] || die 'stage0 未产出 stdlib-stage1'
   fi
-  assert_version cjcj-stage1 "$out" "$sdk" "$HRT"
+  prepare_stage0_run_sdk
+  assert_version cjcj-stage1 "$out" "$WORK/sdk-stage0-run" "$HRT"
   if [ "$DRY" -eq 0 ] && [ "$cacheable" -eq 1 ] && [ "$cache_hit" -eq 0 ]; then
     stage0_cache_publish "$cache_key" "$out" "$std" || die 'stage0 cache 发布失败'
   fi
@@ -658,9 +674,13 @@ assemble_stage1_sdk() {
   local sdk="$1" compiler="$2" std="$3"
   cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target $(printf '%q' "$HOST_TUPLE") --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --force"
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
+  cmd "install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/libLLVM-15.so")"
+  if [ "$DRY" -eq 0 ]; then
+    assert_expected_sha target-colour-llvm "$sdk/third_party/llvm/lib/libLLVM-15.so" "$COLOUR_LLVM_SHA256"
+  fi
   local compiler_sha=planned
   [ "$DRY" -eq 1 ] || compiler_sha=$(sha256 "$compiler")
-  cmd "bash $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha")"
+  cmd "bash $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha") $(printf '%q' "$WORK/sdk-stage0-run") $(printf '%q' "$COLOUR_LLVM_SHA256")"
   assert_executable stage1-compiler "$sdk/bin/cjc"
 }
 
@@ -685,6 +705,7 @@ stage1() {
   record colour-runtime "$CRT"
   assert_llvm "$HOST_LLVM_SO" "$COLOUR_TUPLE" "$COLOUR_LLVM_SHA"
 
+  prepare_stage0_run_sdk
   out="$WORK/cjcj-stage2"
   std="$WORK/stdlib-stage2"
   sdk="$WORK/sdk-stage1"
@@ -722,6 +743,8 @@ main() {
       --host-llvm-so) HOST_LLVM_SO="${2:?}"; shift 2;;
       --host-llvm|--host-llc) die "参数 $1 已废弃；使用 --host-llvm-so <libLLVM-15.so>";;
       --host-llvm-sha256) HOST_LLVM_SHA256="${2:?}"; shift 2;;
+      --colour-llvm-so) COLOUR_LLVM_SO="${2:?}"; shift 2;;
+      --colour-llvm-sha256) COLOUR_LLVM_SHA256="${2:?}"; shift 2;;
       --ast-support|--ast-support-a) AST_SUPPORT="${2:?}"; shift 2;;
       --ast-support-sha256) AST_SUPPORT_SHA256="${2:?}"; shift 2;;
       --colour-tuple) COLOUR_TUPLE="${2:?}"; shift 2;;
@@ -737,7 +760,7 @@ main() {
     esac
   done
   local value
-  for value in WORK SRC CJCJ_SHA STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA CRT HRT; do
+  for value in WORK SRC CJCJ_SHA STDSRC HOST_LLVM_SO HOST_LLVM_SHA256 COLOUR_LLVM_SO COLOUR_LLVM_SHA256 AST_SUPPORT AST_SUPPORT_SHA256 COLOUR_TUPLE COLOUR_LLVM_SHA CRT HRT; do
     eval "[ -n \"\${$value}\" ]" || die "缺少参数 $value"
   done
   case "$WANT" in stage0|stage1|all) ;; *) die '--stage 只能是 stage0|stage1|all';; esac

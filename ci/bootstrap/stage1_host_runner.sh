@@ -9,13 +9,15 @@ identities=${STAGE1_HOST_IDENTITIES:-$here/stage1_host_identities.txt}
 [ -f "$identities" ] || fail "missing host identities: $identities"
 # Arguments are intentionally explicit: the input hashes have already been pinned
 # by bootstrap, and are checked again against the declared host triple here.
-[ "$#" -eq 6 ] || fail 'usage: TARGET_SDK HOST_SDK HOST_RUNTIME HOST_LLVM_SHA COMPILER COMPILER_SHA'
+[ "$#" -eq 8 ] || fail 'usage: TARGET_SDK HOST_SDK HOST_RUNTIME HOST_LLVM_SHA COMPILER COMPILER_SHA RUN_SDK COLOUR_LLVM_SHA'
 target=$(readlink -f "$1")
 host=$(readlink -f "$2")
 hrt=$(readlink -f "$3")
 llvm_sha=$4
 compiler=$(readlink -f "$5")
 compiler_sha=$6
+run_sdk=$(readlink -f "$7")
+colour_llvm_sha=$8
 record_evidence() {
   local dest=$1
   {
@@ -30,11 +32,13 @@ if [ -n "${STAGE1_EVIDENCE_DIR:-}" ]; then
   mkdir -p "$STAGE1_EVIDENCE_DIR"
   record_evidence "$STAGE1_EVIDENCE_DIR/runner-test.sha256"
 fi
-for root in "$target" "$host"; do
+for root in "$target" "$host" "$run_sdk"; do
   case "$root" in /root/sdks|/root/sdks/*|/root/.cjv|/root/.cjv/*) fail "workspace SDK required: $root";; esac
   [ -d "$root" ] || fail "missing SDK: $root"
 done
-[ "$target" != "$host" ] || fail 'host and target SDK must differ'
+if [ "$target" = "$host" ] || [ "$run_sdk" = "$host" ] || [ "$run_sdk" = "$target" ]; then
+  fail 'host, run and target SDK must differ'
+fi
 # Host tuple from the machine, as bootstrap.sh derives it; Linux only.
 case "$(uname -s)/$(uname -m)" in
   Linux/x86_64) platform=linux_x86_64_cjnative; multiarch=x86_64-linux-gnu;;
@@ -66,6 +70,8 @@ check_sha() {
   [ "$actual" = "$expected" ] || fail "sha mismatch: $path expected=$expected actual=$actual"
 }
 check_sha "$host/third_party/llvm/lib/libLLVM-15.so" "$decl_llvm"
+check_sha "$run_sdk/third_party/llvm/lib/libLLVM-15.so" "$colour_llvm_sha"
+check_sha "$target/third_party/llvm/lib/libLLVM-15.so" "$colour_llvm_sha"
 check_sha "$compiler" "$compiler_sha"
 check_sha "$hrt/libcangjie-runtime.so" "$decl_runtime"
 check_sha "$hrt/libboundscheck.so" "$decl_bounds"
@@ -75,6 +81,7 @@ for rel in bin/cjc tools/bin/cjpm third_party/llvm/bin/opt third_party/llvm/bin/
   [ -x "$target/$rel" ] && [ ! -L "$target/$rel" ] || fail "regular executable required: $rel"
 done
 host_ld="$host/runtime/lib/$platform:$host/lib/$platform:$host/third_party/llvm/lib:$host/tools/lib:/usr/lib/$multiarch"
+compiler_ld="$host/runtime/lib/$platform:$host/lib/$platform:$run_sdk/third_party/llvm/lib:$host/tools/lib:/usr/lib/$multiarch"
 target_ld="$target/runtime/lib/$platform:$target/lib/$platform:$target/third_party/llvm/lib:$target/tools/lib:/usr/lib/$multiarch"
 state="$target/.stage1-host"
 [ ! -e "$state" ] || fail 'runner already installed; reassemble the workspace SDK'
@@ -96,15 +103,24 @@ write_runner() {
   } > "$entry"
   chmod +x "$entry"
 }
-write_runner "$target/bin/cjc" "$target/bin/cjcj-stage1" "$host_ld"
+write_runner "$target/bin/cjc" "$target/bin/cjcj-stage1" "$compiler_ld"
 write_runner "$target/tools/bin/cjpm" "$target/tools/bin/cjpm-stage1" "$host_ld"
 for name in opt llc; do
   cp -p "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1"
   write_runner "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1" "$target_ld"
 done
+# Ancillary LLVM tools remain official host executables. They must not inherit
+# the cjcj process library when launched by the compiler (Gnu.cj:69).
+for name in llvm-objcopy llvm-ar; do
+  if [ -f "$target/third_party/llvm/bin/$name" ]; then
+    cp -p "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1"
+    write_runner "$target/third_party/llvm/bin/$name" "$target/third_party/llvm/bin/$name-stage1" "$host_ld"
+  fi
+done
 sha256sum "$compiler" "$host/runtime/lib/$platform/"*.so \
-  "$host/third_party/llvm/lib/libLLVM-15.so" "$host/tools/bin/cjpm" \
+  "$host/third_party/llvm/lib/libLLVM-15.so" "$run_sdk/third_party/llvm/lib/libLLVM-15.so" "$host/tools/bin/cjpm" \
   "$target/bin/cjcj-stage1" "$target/third_party/llvm/bin/"*-stage1 > "$state/INPUTS.sha256"
 printf 'host=%s\ntarget=%s\nhost_ld=%s\ntarget_ld=%s\ndecl_runtime=%s\ndecl_bounds=%s\ndecl_llvm=%s\n' \
   "$host" "$target" "$host_ld" "$target_ld" "$decl_runtime" "$decl_bounds" "$decl_llvm" > "$state/binding.txt"
+printf 'run_sdk=%s\ncompiler_ld=%s\ncolour_llvm_sha=%s\n' "$run_sdk" "$compiler_ld" "$colour_llvm_sha" >> "$state/binding.txt"
 echo "STAGE1-RUNNER-OK host=$host target=$target compiler=$target/bin/cjcj-stage1"

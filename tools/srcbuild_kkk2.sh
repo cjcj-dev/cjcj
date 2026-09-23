@@ -1114,6 +1114,12 @@ load_bootstrap_pins() {
     fi
     BOOTSTRAP_AST_SUPPORT_SHA256=$(bootstrap_input_sha256 "$BOOTSTRAP_AST_SUPPORT" "${CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256:-}") || return 1
     BOOTSTRAP_COLOUR_TUPLE=${CJCJ_BOOTSTRAP_COLOUR_TUPLE:-/root/llvmdepot/$LLVM_SHA/$CANGJIE_COMPILER_SHA}
+    # Reviewed process-library digest is independent of the static tuple.
+    # shellcheck disable=SC1090
+    source "$REPO_ROOT/ci/llvm-dylib/linux_$(uname -m).env"
+    [[ $LLVM_DYLIB_SOURCE_SHA == "$LLVM_SHA" ]] || { echo 'LLVM_DYLIB_SOURCE_MISMATCH' >&2; return 1; }
+    BOOTSTRAP_COLOUR_LLVM_SO=${CJCJ_BOOTSTRAP_COLOUR_LLVM_SO:-${CJCJ_BOOTSTRAP_DYLIB_ARTIFACT:-${CJCJ_BOOTSTRAP_COLOUR_DYLIB:-$BOOTSTRAP_COLOUR_TUPLE/dylib}}/libLLVM-15.so}
+    BOOTSTRAP_COLOUR_LLVM_SHA256=$LLVM_DYLIB_SHA256
     BOOTSTRAP_STDSRC=${CJCJ_BOOTSTRAP_STDSRC:-$CANGJIE_WORKSPACE/cangjie_runtime/stdlib}
     if [[ -n ${CJCJ_BOOTSTRAP_COLOUR_RT:-} ]]; then
         BOOTSTRAP_COLOUR_RT=$CJCJ_BOOTSTRAP_COLOUR_RT
@@ -1140,6 +1146,8 @@ bootstrap_argv() {
         --base "$BOOTSTRAP_HOST_SDK" \
         --host-llvm-so "$BOOTSTRAP_HOST_LLVM_SO" \
         --host-llvm-sha256 "$BOOTSTRAP_HOST_LLVM_SHA256" \
+        --colour-llvm-so "$BOOTSTRAP_COLOUR_LLVM_SO" \
+        --colour-llvm-sha256 "$BOOTSTRAP_COLOUR_LLVM_SHA256" \
         --ast-support "$BOOTSTRAP_AST_SUPPORT" \
         --ast-support-sha256 "$BOOTSTRAP_AST_SUPPORT_SHA256" \
         --colour-tuple "$BOOTSTRAP_COLOUR_TUPLE" \
@@ -1222,7 +1230,7 @@ validate_stage_step_contracts() {
         local missing flag argv_text step31_text step32_text
         argv_text=$(awk '/^bootstrap_argv\(\)/,/^}/' "$SCRIPT_PATH")
         for flag in --work --src --cjcj-sha --stdsrc --cpp-src --base --host-llvm-so --host-llvm-sha256 \
-            --ast-support --ast-support-sha256 --colour-tuple --colour-llvm-sha \
+            --colour-llvm-so --colour-llvm-sha256 --ast-support --ast-support-sha256 --colour-tuple --colour-llvm-sha \
             --colour-rt --host-rt --stage; do
             printf '%s\n' "$argv_text" | /usr/bin/grep -Fq -- "$flag" || missing+="$flag "
         done
