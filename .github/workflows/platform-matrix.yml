@@ -98,6 +98,8 @@ jobs:
             runtime-source/runtime/**/gc_unit_gate.status
             runtime-source/runtime/**/runtime-build-config.txt
             runtime-source/runtime/tests/gc_unit/build*/**/*.log
+            runtime-source/runtime/tests/gc_unit/build*/**/*.sha256
+            runtime-source/runtime/tests/gc_unit/build*/**/gate_tally.txt
             runtime-source/runtime/tests/gc_unit/build*/**/*.receipt
             runtime-source/runtime/tests/gc_unit/build*/**/*identity*
             runtime-source/runtime/tests/gc_unit/build*/**/*provenance*
