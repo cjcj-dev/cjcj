@@ -86,6 +86,7 @@ dry_run() {
     --work "$TMP/work" --src "$TMP/src" --cjcj-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
     --stdsrc "$TMP/stdsrc" --cpp-src "$TMP/cpp-src" --base "$TMP/base" \
     --host-llvm-so "$TMP/libLLVM-15.so" --host-llvm-sha256 "$host_sha" \
+    --colour-llvm-so "$TMP/colour-libLLVM-15.so" --colour-llvm-sha256 "$(sha256sum "$TMP/colour-libLLVM-15.so" | awk '{print $1}')" \
     --ast-support "$TMP/ast.a" --ast-support-sha256 "$ast_sha" \
     --colour-tuple "$TMP/colour-tuple" --colour-llvm-sha "$COLOUR_SHA" \
     --colour-rt "$TMP/colour-rt" --host-rt "$TMP/host-rt" \
@@ -515,6 +516,7 @@ fault_src_file() {
     --work "$TMP/work" --src "$TMP/single.cj" --cjcj-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
     --stdsrc "$TMP/stdsrc" --cpp-src "$TMP/cpp-src" --base "$TMP/base" \
     --host-llvm-so "$TMP/libLLVM-15.so" --host-llvm-sha256 "$HOST_SHA" \
+    --colour-llvm-so "$TMP/colour-libLLVM-15.so" --colour-llvm-sha256 "$(sha256sum "$TMP/colour-libLLVM-15.so" | awk '{print $1}')" \
     --ast-support "$TMP/ast.a" --ast-support-sha256 "$AST_SHA" \
     --colour-tuple "$TMP/colour-tuple" --colour-llvm-sha "$COLOUR_SHA" \
     --colour-rt "$TMP/colour-rt" --host-rt "$TMP/host-rt" \

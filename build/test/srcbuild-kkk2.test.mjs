@@ -646,7 +646,7 @@ function compilerStdlibBeforeBootstrap(text) {
 
 const BOOTSTRAP_FLAGS = [
   '--work', '--src', '--cjcj-sha', '--stdsrc', '--cpp-src', '--base', '--host-llvm-so', '--host-llvm-sha256',
-  '--ast-support', '--ast-support-sha256', '--colour-tuple', '--colour-llvm-sha',
+  '--colour-llvm-so', '--colour-llvm-sha256', '--ast-support', '--ast-support-sha256', '--colour-tuple', '--colour-llvm-sha',
   '--colour-rt', '--host-rt', '--stage',
 ];
 
