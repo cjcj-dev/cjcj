@@ -39,4 +39,3 @@ export function fixture(check) {
     check({env, artifact, fallback, dylib, dylibSha, so, run});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }
-

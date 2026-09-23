@@ -42,5 +42,3 @@ test('nested kkk2 depot remains a fallback under the same reviewed pin', () => f
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_TUPLE=${nested}\n`));
   console.log('ASSERT nested-depot fallback executed');
 }));
-
-
