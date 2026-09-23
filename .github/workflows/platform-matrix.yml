@@ -43,10 +43,20 @@ jobs:
           platform: ubuntu-22.04
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 1G
+      - name: Load host toolchain pin
+        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+      - name: Official SDK provision
+        env:
+          CJCJ_SDK_PROVISION_ONLY: '1'
+          SDK_RUNTIME_DIR: linux_x86_64_cjnative
+        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
       - name: Build runtime
         env:
           RUNTIME_BUILD_TYPE: relwithdebinfo
-        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+        run: |
+          export CJC="$CANGJIE_HOME/bin/cjc"
+          export GC_UNIT_CJC_RUNTIME_LIB_DIR="$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative"
+          npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
       - name: Package same-build runtime pair
         id: package
         run: |
