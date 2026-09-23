@@ -1,6 +1,6 @@
 # Host triple: runtime/boundscheck originals selected by ci/host_sdk_pin.env.
 # Host LLVM is the independently produced relocate(undef) repair; see HOST_LLVM.md.
-# HOST_LLVM_PROVENANCE {"source_sha":"418ace1896e22a51a6c1fa36ec29631b00301cd8","run_id":"35917050038","run_attempt":"1","producer_sha":"29a747a5aeb85647205cca1dc32a6f25cf2e8f43","platform":"linux_x86_64","repository":"cjcj-dev/cjcj","artifact_id":"10777223078"}
+# HOST_LLVM_PROVENANCE {"source_sha":"418ace1896e22a51a6c1fa36ec29631b00301cd8","run_id":"35923450660","run_attempt":"1","producer_sha":"9adfa29123107a19a9196836ef6f4a30c8ce0a40","platform":"linux_x86_64","repository":"cjcj-dev/cjcj","artifact_id":"10778964263"}
 libcangjie-runtime.so 7d1eeecff4d2a8ed012897785d309a221ddb7520e1b268b431812a0645b56cdc
 libboundscheck.so 3ad04fe38be88d5123078bd11d78cbc82377c114f6e6514b393ecd374e559bb7
-libLLVM-15.so f8a4efe55093152c261410fb5c5107de9d9a4b975b1114d809379c4c82bc5587
+libLLVM-15.so 30e8ba8c8a30b8b8ea36b4d7ada4cce7b7e12e1a07a66439556b1bd6cb2b3981
