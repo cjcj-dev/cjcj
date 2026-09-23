@@ -597,6 +597,11 @@ check_shim_wiring() {
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-test}" in
+  check-dry-contract)
+    make_dry_fixture
+    dry_run > "$TMP/dry.log" || fail dry-run 'bootstrap CLI failed before assertions'
+    check_dry_contract "$TMP/dry.log"
+    ;;
   dry-run)
     make_dry_fixture
     dry_run
@@ -840,7 +845,7 @@ case "${1:-test}" in
     echo 'PASS bootstrap dry contracts, controlled build environment, LLVM assembly, and positive controls'
     ;;
   *)
-    echo "usage: $0 [test|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
+    echo "usage: $0 [test|check-dry-contract|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
     exit 2
     ;;
 esac
