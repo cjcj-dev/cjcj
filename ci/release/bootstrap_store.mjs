@@ -68,7 +68,7 @@ export async function acquire(pin, destination, {mode = 'release', reason = '', 
           if (!fs.lstatSync(source).isFile()) throw new Error(`bootstrap depot payload is not a regular file: ${file.path}`);
           bytes = fs.readFileSync(source);
         }
-        verify(bytes, file.artifact_sha256, file.path);
+        verify(bytes, mode === 'release' ? file.release_sha256 : file.artifact_sha256, file.path);
         const target = path.join(staging, 'files', file.path);
         fs.mkdirSync(path.dirname(target), {recursive: true});
         fs.writeFileSync(target, bytes);
