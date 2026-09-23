@@ -44,7 +44,9 @@ def construct(name, active=None):
             args.append(marker[ty] if field == active else zero[ty])
     return name + '(' + ', '.join(args) + ')'
 
-cj = ['import std.core.*', *blocks.values(), 'main(): Int64 {']
+cj = ['import std.core.*',
+      'foreign { func calloc(count: UIntNative, size: UIntNative): CPointer<Unit> }',
+      *blocks.values(), 'main(): Int64 {']
 cpp = ['#include <cstddef>', '#include <cstdio>', '#include <type_traits>',
        '#include "' + str(a.runtime_header.resolve()) + '"',
        'static_assert(sizeof(void*) == 8);', 'static_assert(sizeof(bool) == 1);', 'int main() {']
@@ -55,12 +57,8 @@ for name, cname in names.items():
             f'    std::printf("SIZE {cname} %zu %zu\\n", sizeof({cname}), alignof({cname}));']
     for field, ty in fields[name]:
         key = cname + '.' + field
-        cj += ['    unsafe {', f'        let p = LibC.malloc<{name}>()',
+        cj += ['    unsafe {', f'        let p = CPointer<{name}>(calloc(1, sizeOf<{name}>()))',
                '        let bytes = CPointer<UInt8>(p)',
-               # Padding is not a field. Clear recycled malloc bytes before the
-               # product declaration writes its fields so old markers cannot
-               # appear in untouched padding as a second field occurrence.
-               f'        for (i in 0..sizeOf<{name}>()) {{ unsafe {{ (bytes + Int64(i)).write(0) }} }}',
                f'        unsafe {{ p.write({construct(name, field)}) }}',
                f'        println("FIELD_SIZE {key} ${{sizeOf<{ty}>()}}")',
                f'        print("BYTES {key} ")',
