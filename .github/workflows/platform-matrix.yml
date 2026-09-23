@@ -27,7 +27,7 @@ env:
 jobs:
   colour-runtime:
     name: Pinned Linux colour runtime
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
       - name: Load runtime pin
@@ -40,15 +40,19 @@ jobs:
       - uses: ./.github/actions/sccache
         with:
           component: runtime
-          platform: ubuntu-24.04
+          platform: ubuntu-22.04
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 1G
       - name: Build runtime
+        env:
+          RUNTIME_BUILD_TYPE: relwithdebinfo
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
       - name: Package same-build runtime pair
         id: package
         run: |
           node ci/release/colour_runtime.mjs .platform-ci/runtime-install colour-runtime
+          nm --defined-only colour-runtime/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so > colour-runtime/symbols.txt
+          test "$(grep -Ec ' g_cjLoadBadMask$' colour-runtime/symbols.txt)" = 1
           nm -D --defined-only colour-runtime/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so > colour-runtime/exports.txt
           test "$(grep -Ec ' g_cjLoadBadMask$' colour-runtime/exports.txt)" = 1
       - uses: actions/upload-artifact@v7
@@ -74,7 +78,7 @@ jobs:
         uses: ./.github/actions/sccache-report
         with:
           component: runtime
-          platform: ubuntu-24.04
+          platform: ubuntu-22.04
           require-compiles: ${{ job.status == 'success' }}
 
   fixed-llvm-tuples:

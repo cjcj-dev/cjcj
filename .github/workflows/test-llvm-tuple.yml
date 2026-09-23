@@ -9,6 +9,8 @@ on:
       - 'ci/release/prepare_bootstrap_fixture.mjs'
       - 'ci/release/prepare_llvm_dylib.test.mjs'
       - 'ci/llvm-dylib/**'
+      - 'ci/release/colour_runtime*'
+      - 'ci/colour-runtime/**'
       - '.github/workflows/test-llvm-tuple.yml'
 permissions:
   contents: read
@@ -34,7 +36,7 @@ jobs:
           cmp ci/llvm_tuple_SHA256SUMS "$RUNNER_TEMP/tuple/SHA256SUMS"
           bash ci/test-llvm-tuple-layout.sh "$RUNNER_TEMP/layout-test" "$RUNNER_TEMP/tuple"
       - name: Exercise bootstrap input consumer
-        run: node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs
+        run: node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs ci/release/colour_runtime.test.mjs
       - name: Cut producer and consumer script wiring
         run: bash ci/test-llvm-tuple-wiring.sh "$RUNNER_TEMP/wiring-test"
       - uses: actions/upload-artifact@v7

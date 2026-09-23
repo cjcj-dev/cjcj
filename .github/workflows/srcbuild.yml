@@ -323,6 +323,26 @@ jobs:
           run-id: ${{ env.LLVM_DYLIB_RUN_ID }}
           path: ${{ env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT }}
 
+      - name: Load pinned colour runtime provenance
+        shell: bash
+        env:
+          RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+        run: |
+          set -euo pipefail
+          pin="ci/colour-runtime/$RUNTIME_PLATFORM.env"
+          test -f "$pin" || { echo "COLOUR_RT_PLATFORM_PIN_MISSING: $RUNTIME_PLATFORM" >&2; exit 1; }
+          cat "$pin" >> "$GITHUB_ENV"
+          echo "CJCJ_BOOTSTRAP_COLOUR_RT=$RUNNER_TEMP/colour-runtime" >> "$GITHUB_ENV"
+
+      - name: Download pinned colour runtime pair
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.COLOUR_RT_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.COLOUR_RT_RUN_ID }}
+          path: ${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}
+
       - name: Load immutable AST support provenance
         shell: bash
         env:
