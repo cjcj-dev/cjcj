@@ -26,8 +26,11 @@ After checking the actual publication and its digests, commit the emitted
 `bootstrap-inputs-pin.json` as `ci/bootstrap_inputs_pin.json`, together with any
 corresponding `ci/llvm_pin.env` and `ci/llvm_tuple_SHA256SUMS` update. Never fill
 asset IDs with placeholders or compute the consumer's expected digest from an
-unreviewed download. The initial real publication/pin is still outstanding;
-this candidate must not merge before that step and real tuple acceptance.
+unreviewed download. The initial checked publication is
+[`bootstrap-35858653195-1-10748596481-prerelease`](https://github.com/cjcj-dev/cjcj/releases/tag/bootstrap-35858653195-1-10748596481-prerelease),
+from [run 35858653195, attempt 1](https://github.com/cjcj-dev/cjcj/actions/runs/35858653195).
+Its nine asset IDs and both per-file digests are recorded in
+`ci/bootstrap_inputs_pin.json`; the fixed artifact is `10748596481`.
 
 `prepare_bootstrap_inputs.mjs` defaults to Release assets. To explicitly recover
 from another source set `CJCJ_BOOTSTRAP_SOURCE=artifact` or `depot` and provide
@@ -39,8 +42,9 @@ of regular files, exposed only after the entire list verifies. Executable modes
 come from the reviewed pin rather than transport-specific ZIP metadata.
 
 The mechanism accepts a file list; the current workflow publishes the eight
-static LLVM payloads plus SHA256SUMS. In-process LLVM and ast-support producers
-are owned by #82/#86 and are not connected here (advisor ruling
+static LLVM payloads plus SHA256SUMS. The fixed in-process LLVM and ast-support inputs from #82/#86 retain their
+existing download and reviewed-digest checks. They are not connected to this
+persistent publisher (advisor ruling
 sym_cjcj_87_implement_r5786084191-20260922T233426Z).
 
 Focused checks (run on kkk2):

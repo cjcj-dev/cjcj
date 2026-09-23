@@ -45,17 +45,13 @@ permissions:
   contents: read
 
 jobs:
-  in-process-dylib:
-    if: inputs.publish_dylib
-    uses: ./.github/workflows/build-llvm-dylib.yml
-    with:
-      cache-component: ${{ inputs.cache-component }}
-
   tuple:
     uses: ./.github/workflows/build-llvm-tools.yml
     with:
       platforms: ${{ inputs.platforms || 'all' }}
       publish_tuple: ${{ inputs.publish_tuple || false }}
+      publish_dylib: ${{ inputs.publish_dylib || false }}
+      cache-component: ${{ inputs.cache-component || 'llvm-dylib' }}
       cold_cache: ${{ inputs.cold_cache || false }}
       rebuild: ${{ inputs.rebuild || false }}
 
