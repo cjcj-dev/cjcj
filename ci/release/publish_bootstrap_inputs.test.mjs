@@ -25,7 +25,7 @@ import fs from 'node:fs';
 const dir = process.env.FIXTURE_DIR;
 const record = value => fs.appendFileSync(dir + '/requests.jsonl', JSON.stringify(value) + '\\n');
 globalThis.fetch = async (url, options = {}) => {
-  record({url, method: options.method || 'GET'});
+  record({url, method: options.method || 'GET', body: options.body && typeof options.body === 'string' ? JSON.parse(options.body) : undefined});
   const reply = body => new Response(JSON.stringify(body));
   if (url.endsWith('/actions/runs/123') || url.endsWith('/actions/runs/123/attempts/1'))
     return reply({head_sha: 'a'.repeat(40), run_attempt: 1});
@@ -67,6 +67,11 @@ test('publisher reads back both stores before emitting equal pinned digests', ()
   assert.ok(urls.findIndex(u => u.endsWith('/456/zip')) < urls.findIndex(u => u.endsWith('/releases')));
   assert.ok(urls.findIndex(u => u.endsWith('/assets/101')) < urls.findIndex(u => u.endsWith('/releases/789')));
   assert.equal(requests.find(r => r.release).release.draft, true);
+  const release = requests.find(r => r.release).release;
+  assert.equal(release.prerelease, true);
+  assert.equal(release.make_latest, 'false');
+  assert.match(release.tag_name, /-prerelease$/);
+  assert.deepEqual(requests.find(r => r.method === 'PATCH').body, {draft: false, prerelease: true, make_latest: 'false'});
   console.log('ASSERT publisher pin digests and readback-before-publication executed');
 }));
 

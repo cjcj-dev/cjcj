@@ -279,6 +279,52 @@ jobs:
           name: fixed-llvm-tools-${{ matrix.llvm_platform }}
           path: ${{ env.CJCJ_FIXED_LLVM_DIR }}
 
+      - name: Load immutable in-process LLVM dylib provenance
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          source "ci/llvm-dylib/${{ matrix.llvm_platform }}.env"
+          test "$LLVM_DYLIB_SOURCE_SHA" = "$LLVM_SHA"
+          test -n "$LLVM_DYLIB_RUN_ID"
+          test -n "$LLVM_DYLIB_RUN_ATTEMPT"
+          test -n "$LLVM_DYLIB_ARTIFACT_ID"
+          cat "ci/llvm-dylib/${{ matrix.llvm_platform }}.env" >> "$GITHUB_ENV"
+          echo "CJCJ_BOOTSTRAP_DYLIB_ARTIFACT=$RUNNER_TEMP/llvm-depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA/dylib" >> "$GITHUB_ENV"
+
+      - name: Download pinned in-process LLVM dylib
+        if: runner.os == 'Linux'
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.LLVM_DYLIB_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.LLVM_DYLIB_RUN_ID }}
+          path: ${{ env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT }}
+
+      - name: Load immutable AST support provenance
+        shell: bash
+        env:
+          AST_PLATFORM: ${{ matrix.llvm_platform }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          source "ci/ast_support/${AST_PLATFORM}.env"
+          test -n "$AST_SUPPORT_RUN_ID"
+          test -n "$AST_SUPPORT_RUN_ATTEMPT"
+          test -n "$AST_SUPPORT_ARTIFACT_ID"
+          cat "ci/ast_support/${AST_PLATFORM}.env" >> "$GITHUB_ENV"
+
+      - name: Download AST support archive
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.AST_SUPPORT_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.AST_SUPPORT_RUN_ID }}
+          path: ${{ runner.temp }}/ast-support
+
       # set -a: `source` alone makes shell variables, and prepare_bootstrap_inputs
       # reads LLVM_SHA from its environment -- without the export every host
       # failed here with "LLVM_SHA pin missing" (release-matrix run 35718484244).
@@ -292,7 +338,8 @@ jobs:
           source ci/llvm_pin.env
           source ci/runtime_pin.env
           set +a
-          node ci/release/prepare_bootstrap_inputs.mjs
+          CJCJ_BOOTSTRAP_AST_ARTIFACT="$RUNNER_TEMP/ast-support/libcangjie-ast-support.a" \
+            node ci/release/prepare_bootstrap_inputs.mjs
 
       - name: Bootstrap stage0 compiler
         shell: bash

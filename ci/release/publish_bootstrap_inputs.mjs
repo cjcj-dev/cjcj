@@ -23,9 +23,9 @@ if (metadata.workflow_run?.id !== pin.run || metadata.workflow_run?.head_sha !==
 // Read back the fixed artifact too: both locations must contain identical bytes.
 const checked = await acquire(pin, path.dirname(output), {mode: 'artifact', reason: 'publisher fixed-artifact readback'});
 fs.rmSync(path.dirname(checked), {recursive: true, force: true});
-const tag = `bootstrap-${pin.run}-${pin.attempt}-${pin.artifact}`;
+const tag = `bootstrap-${pin.run}-${pin.attempt}-${pin.artifact}-prerelease`;
 const release = await (await api(`/repos/${pin.repository}/releases`, {method: 'POST',
-  body: JSON.stringify({tag_name: tag, target_commitish: pin.commit, name: tag, draft: true, prerelease: true})})).json();
+  body: JSON.stringify({tag_name: tag, target_commitish: pin.commit, name: tag, draft: true, prerelease: true, make_latest: 'false'})})).json();
 for (const [index, file] of pin.files.entries()) {
   const bytes = fs.readFileSync(path.join(root, file.path));
   const response = await fetch(`${release.upload_url.split('{')[0]}?name=${encodeURIComponent(`payload-${index}-${path.basename(file.path)}`)}`, {
@@ -38,6 +38,6 @@ for (const [index, file] of pin.files.entries()) {
   file.release_sha256 = digest(downloaded);
 }
 validatePin(pin);
-await api(`/repos/${pin.repository}/releases/${release.id}`, {method: 'PATCH', body: JSON.stringify({draft: false})});
+await api(`/repos/${pin.repository}/releases/${release.id}`, {method: 'PATCH', body: JSON.stringify({draft: false, prerelease: true, make_latest: 'false'})});
 fs.writeFileSync(output, `${JSON.stringify(pin, null, 2)}\n`);
 console.log(`BOOTSTRAP_PUBLISHED tag=${tag} files=${pin.files.length} pin=${output}`);
