@@ -1,0 +1,114 @@
+name: Pinned in-process LLVM dylib
+on:
+  workflow_dispatch:
+    inputs:
+      cache-component:
+        description: 'Isolated cache namespace for a cold/warm pair; reuse exactly for the warm run'
+        type: string
+        default: llvm-dylib
+  workflow_call:
+    inputs:
+      cache-component:
+        description: 'Component cache namespace (independent of the dylib artifact and pin)'
+        type: string
+        default: llvm-dylib
+permissions:
+  contents: read
+jobs:
+  dylib:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux_x86_64
+          - runner: ubuntu-24.04-arm
+            platform: linux_aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load reviewed source pin
+        id: pin
+        run: |
+          source ci/llvm_pin.env
+          cat ci/llvm_pin.env >> "$GITHUB_ENV"
+          echo "sha=$LLVM_SHA" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/sccache
+        with:
+          component: ${{ inputs.cache-component }}
+          platform: ${{ matrix.platform }}
+          pin: ${{ steps.pin.outputs.sha }}
+          cache-size: 3G
+      - name: Build three-target shared LLVM
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang cmake ninja-build
+          git init llvm-fork
+          git -C llvm-fork remote add origin "$LLVM_URL"
+          git -C llvm-fork fetch --depth=1 origin "$LLVM_SHA"
+          git -C llvm-fork checkout --detach FETCH_HEAD
+          test "$(git -C llvm-fork rev-parse HEAD)" = "$LLVM_SHA"
+          cmake -G Ninja -S llvm-fork/llvm -B dylib-build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
+            -DCMAKE_CXX_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
+            -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_ENABLE_RTTI=OFF \
+            -DBUILD_SHARED_LIBS=OFF -DLLVM_BUILD_LLVM_DYLIB=ON -DLLVM_LINK_LLVM_DYLIB=OFF \
+            -DLLVM_TARGETS_TO_BUILD='X86;ARM;AArch64' -DLLVM_ENABLE_PROJECTS='' \
+            -DCMAKE_CXX_FLAGS='-include cstdint -include unordered_map -include map -include vector -include string'
+          cmake --build dylib-build --target LLVM -j"$(nproc)"
+          # nm --defined-only must see the real full symbol table, including
+          # local symbols; a stripped binary cannot establish that invariant.
+          nm --defined-only dylib-build/lib/libLLVM-15.so > dylib-build/defined-symbols.txt
+          grep -q LLVMInitializeX86TargetInfo dylib-build/defined-symbols.txt
+          mkdir -p depot/dylib
+          cp -L dylib-build/lib/libLLVM-15.so depot/dylib/libLLVM-15.so
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path('depot/dylib')
+          sha = hashlib.sha256((root / 'libLLVM-15.so').read_bytes()).hexdigest()
+          (root / 'manifest.json').write_text(json.dumps({
+              'llvm_sha': os.environ['LLVM_SHA'], 'sha256': sha,
+              'targets': ['X86', 'ARM', 'AArch64'],
+              'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}) + '\n')
+          with open(os.environ['GITHUB_ENV'], 'a') as out:
+              out.write(f'BUILT_DYLIB_SHA256={sha}\n')
+          PY
+      - name: Verify exact loaded library and C API
+        run: |
+          set -euo pipefail
+          python3 ci/llvm-dylib/verify.py depot/dylib "$LLVM_SHA" "$BUILT_DYLIB_SHA256" | tee depot/dylib/loaded.json
+          test -s depot/dylib/loaded.json
+      - name: Exercise bootstrap identity check with real libraries
+        run: |
+          set -euo pipefail
+          wrong="$(ldconfig -p | awk '/libLLVM-[0-9]+\.so/ && !found {print $NF; found=1}')"
+          test -f "$wrong"
+          sha256sum depot/dylib/libLLVM-15.so "$wrong" | tee depot/dylib/control-libraries.sha256
+          test "$(sha256sum "$wrong" | cut -d' ' -f1)" != "$BUILT_DYLIB_SHA256"
+          mkdir -p dylib-build/invalid-dylib
+          cp -L "$wrong" dylib-build/invalid-dylib/libLLVM-15.so
+          cp depot/dylib/manifest.json dylib-build/invalid-dylib/manifest.json
+          if python3 ci/llvm-dylib/verify.py dylib-build/invalid-dylib "$LLVM_SHA" "$BUILT_DYLIB_SHA256" \
+              > dylib-build/invalid-dylib/stdout.log 2> dylib-build/invalid-dylib/stderr.log; then
+            echo 'wrong in-process LLVM library unexpectedly passed verification' >&2
+            exit 1
+          fi
+          grep -F 'LLVM_DYLIB_SHA256_MISMATCH expected=' dylib-build/invalid-dylib/stderr.log
+          DYLIB_TEST_FILE="$PWD/depot/dylib/libLLVM-15.so" DYLIB_TEST_WRONG_FILE="$wrong" \
+            node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs | tee depot/dylib/input-tests.log
+      - uses: ./.github/actions/sccache-report
+        if: always()
+        with:
+          component: ${{ inputs.cache-component }}
+          platform: ${{ matrix.platform }}
+          require-compiles: ${{ job.status == 'success' }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: llvm-dylib-${{ matrix.platform }}
+          path: depot/dylib
+          if-no-files-found: error
+          retention-days: 90

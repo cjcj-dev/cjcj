@@ -299,6 +299,30 @@ jobs:
           run-id: ${{ env.LLVM_TUPLE_RUN_ID }}
           path: ${{ runner.temp }}/static-llvm-tuple
 
+      - name: Load immutable in-process LLVM dylib provenance
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          source "ci/llvm-dylib/${{ matrix.llvm_platform }}.env"
+          test "$LLVM_DYLIB_SOURCE_SHA" = "$LLVM_SHA"
+          test -n "$LLVM_DYLIB_RUN_ID"
+          test -n "$LLVM_DYLIB_RUN_ATTEMPT"
+          test -n "$LLVM_DYLIB_ARTIFACT_ID"
+          cat "ci/llvm-dylib/${{ matrix.llvm_platform }}.env" >> "$GITHUB_ENV"
+          echo "CJCJ_BOOTSTRAP_DYLIB_ARTIFACT=$RUNNER_TEMP/llvm-depot/$LLVM_SHA/$CANGJIE_COMPILER_SHA/dylib" >> "$GITHUB_ENV"
+
+      - name: Download pinned in-process LLVM dylib
+        if: runner.os == 'Linux'
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.LLVM_DYLIB_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.LLVM_DYLIB_RUN_ID }}
+          path: ${{ env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT }}
+
       - name: Load immutable AST support provenance
         shell: bash
         env:

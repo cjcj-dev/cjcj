@@ -5,6 +5,16 @@ on:
     branches: [debug/llc-build]
   workflow_dispatch:
     inputs:
+      cache-component:
+        description: Isolated dylib cache namespace; reuse for a cold/warm pair.
+        required: false
+        type: string
+        default: llvm-dylib
+      publish_dylib:
+        description: Build a separate three-target in-process LLVM dylib candidate.
+        required: false
+        type: boolean
+        default: false
       publish_tuple:
         description: Publish a new static tuple candidate for an explicit pin update.
         required: false
@@ -32,6 +42,16 @@ on:
         default: false
   workflow_call:
     inputs:
+      cache-component:
+        description: Isolated dylib cache namespace; reuse for a cold/warm pair.
+        required: false
+        type: string
+        default: llvm-dylib
+      publish_dylib:
+        description: Build a separate three-target in-process LLVM dylib candidate.
+        required: false
+        type: boolean
+        default: false
       publish_tuple:
         description: Publish a new static tuple candidate (consumers normally use the fixed artifact).
         required: false
@@ -59,6 +79,12 @@ permissions:
   contents: read
 
 jobs:
+  in-process-dylib:
+    if: inputs.publish_dylib
+    uses: ./.github/workflows/build-llvm-dylib.yml
+    with:
+      cache-component: ${{ inputs.cache-component }}
+
   # A release phase pays for its own tuple and no one else's, so the matrix has to
   # be selectable. Actions cannot filter a literal matrix, so build the list here
   # and hand it over as JSON. The tuples themselves stay in one place.
