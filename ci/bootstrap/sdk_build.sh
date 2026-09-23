@@ -290,6 +290,11 @@ install_llvm_tuple() {
     mkdir -p "$(dirname "$target")" || die "llvm-tuple mkdir 失败: $(dirname "$target")"
     rm -f "$target"
     cp -a "$source" "$target" || die "llvm-tuple 写入失败: $target"
+    # Artifact extraction may omit executable mode; the payload list declares
+    # these two entries as tools. Content identity is checked again below.
+    case "$rel" in
+      bin/llc|bin/opt) chmod 755 "$target" || die "llvm-tuple 工具权限安装失败: $target";;
+    esac
     count=$((count+1))
     echo "      $rel"
   done < "$tuple/SHA256SUMS"
