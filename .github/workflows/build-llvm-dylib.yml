@@ -1,7 +1,17 @@
 name: Pinned in-process LLVM dylib
 on:
   workflow_dispatch:
+    inputs:
+      cache-component:
+        description: 'Isolated cache namespace for a cold/warm pair; reuse exactly for the warm run'
+        type: string
+        default: llvm-dylib
   workflow_call:
+    inputs:
+      cache-component:
+        description: 'Component cache namespace (independent of the dylib artifact and pin)'
+        type: string
+        default: llvm-dylib
 permissions:
   contents: read
 jobs:
@@ -26,7 +36,7 @@ jobs:
           echo "sha=$LLVM_SHA" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/sccache
         with:
-          component: llvm-dylib
+          component: ${{ inputs.cache-component }}
           platform: ${{ matrix.platform }}
           pin: ${{ steps.pin.outputs.sha }}
           cache-size: 3G
@@ -93,7 +103,7 @@ jobs:
       - uses: ./.github/actions/sccache-report
         if: always()
         with:
-          component: llvm-dylib
+          component: ${{ inputs.cache-component }}
           platform: ${{ matrix.platform }}
           require-compiles: ${{ job.status == 'success' }}
       - uses: actions/upload-artifact@v7
