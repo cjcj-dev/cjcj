@@ -343,6 +343,16 @@ jobs:
           run-id: ${{ env.COLOUR_RT_RUN_ID }}
           path: ${{ env.CJCJ_BOOTSTRAP_COLOUR_RT }}
 
+      - name: Inspect downloaded colour runtime symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+          so="$CJCJ_BOOTSTRAP_COLOUR_RT/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so"
+          archive="$CJCJ_BOOTSTRAP_COLOUR_RT/lib/linux_x86_64_cjnative/libcangjie-runtime.a"
+          sha256sum "$so" "$archive"
+          nm --defined-only "$so" > "$RUNNER_TEMP/colour-runtime-symbols.txt"
+          awk '$NF ~ /^g_cjLoadBadMask(@@?[^[:space:]]+)?$/ {print; n++} END {print "COLOUR_RT_DEFINED_MASK_COUNT=" n+0; exit n != 1}' "$RUNNER_TEMP/colour-runtime-symbols.txt"
+
       - name: Load immutable AST support provenance
         shell: bash
         env:

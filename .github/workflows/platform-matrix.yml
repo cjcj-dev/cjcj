@@ -52,7 +52,8 @@ jobs:
         run: |
           # Native Linux does not install boundscheck; take the unique output
           # from this same build, never from the host SDK.
-          mapfile -t bounds < <(find runtime-source/runtime/CMakebuild -type f -name libboundscheck.so)
+          mapfile -t bounds < <(find runtime-source/runtime -type f -name libboundscheck.so)
+          printf 'BOUNDSCHECK_BUILD_OUTPUT=%s\n' "${bounds[@]}"
           test "${#bounds[@]}" = 1
           cp "${bounds[0]}" .platform-ci/runtime-install/runtime/lib/linux_x86_64_cjnative/libboundscheck.so
           node ci/release/colour_runtime.mjs .platform-ci/runtime-install colour-runtime
