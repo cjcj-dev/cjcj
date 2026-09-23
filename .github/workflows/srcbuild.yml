@@ -305,6 +305,7 @@ jobs:
           AST_PLATFORM: ${{ matrix.llvm_platform }}
         run: |
           set -euo pipefail
+          # shellcheck source=/dev/null
           source "ci/ast_support/${AST_PLATFORM}.env"
           test -n "$AST_SUPPORT_RUN_ID"
           test -n "$AST_SUPPORT_RUN_ATTEMPT"
