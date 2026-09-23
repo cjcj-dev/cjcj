@@ -36,6 +36,17 @@ export function fixture(check) {
       CJCJ_BOOTSTRAP_CPP_SRC: sdk, LLVM_SHA: 'a'.repeat(40),
       CJCJ_BOOTSTRAP_CJCJ_SHA: 'b'.repeat(40), LLVM_TUPLE_SUMS_SHA: digest,
       AST_SUPPORT_SHA256: crypto.createHash('sha256').update('ast fixture').digest('hex')};
+    const hostArtifact = path.join(dir, 'host-artifact');
+    fs.mkdirSync(hostArtifact);
+    fs.copyFileSync(so, path.join(hostArtifact, 'libLLVM-15.so'));
+    const hostSha = crypto.createHash('sha256').update(fs.readFileSync(so)).digest('hex');
+    const hostPin = {repository: 'cjcj-dev/cjcj', run_id: '123', run_attempt: '1', artifact_id: '456',
+      source_sha: '418ace1896e22a51a6c1fa36ec29631b00301cd8', producer_sha: 'b'.repeat(40), platform: 'linux_x86_64'};
+    fs.writeFileSync(path.join(hostArtifact, 'manifest.json'), JSON.stringify({...hostPin, sha256: hostSha}));
+    env.STAGE1_HOST_IDENTITIES = path.join(dir, 'host-identities.txt');
+    fs.writeFileSync(env.STAGE1_HOST_IDENTITIES,
+      `# HOST_LLVM_PROVENANCE ${JSON.stringify(hostPin)}\nlibLLVM-15.so ${hostSha}\n`);
+    env.CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT = hostArtifact;
     const runtimeSource = path.join(dir, 'runtime-source');
     const runtime = path.join(dir, 'runtime');
     for (const rel of runtimeFiles) {

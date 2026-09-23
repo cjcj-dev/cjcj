@@ -6,6 +6,7 @@ import path from 'node:path';
 import {acquire} from './bootstrap_store.mjs';
 import {verifyRuntime} from './colour_runtime.mjs';
 import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
+import {prepareHostLlvm} from './host_llvm.mjs';
 
 function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -52,12 +53,7 @@ if (!base) {
   throw new Error(`host SDK missing (CJCJ_SRCBUILD_HOST_SDK / $HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN)`);
 }
 
-const hostLlvm = firstExisting([
-  process.env.CJCJ_BOOTSTRAP_HOST_LLVM_SO,
-  path.join(base, 'third_party', 'llvm', 'lib', 'libLLVM-15.so'),
-  findFile(path.join(base, 'third_party', 'llvm', 'lib'), (_full, name) => /^libLLVM.*\.(so|dylib)$/.test(name)),
-]);
-if (!hostLlvm) throw new Error(`host LLVM SO missing under ${base}`);
+const hostLlvm = prepareHostLlvm();
 
 const astSupport = pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT, [
   process.env.CJCJ_BOOTSTRAP_AST_SUPPORT,
@@ -140,8 +136,8 @@ const exported = {
   CJCJ_BOOTSTRAP_BASE: path.resolve(base),
   CJCJ_BOOTSTRAP_CPP_SRC: path.resolve(cppSrc),
   CJCJ_BOOTSTRAP_CJCJ_SHA: cjcjSha,
-  CJCJ_BOOTSTRAP_HOST_LLVM_SO: path.resolve(hostLlvm),
-  CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: sha256File(hostLlvm),
+  CJCJ_BOOTSTRAP_HOST_LLVM_SO: hostLlvm.file,
+  CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: hostLlvm.sha256,
   CJCJ_BOOTSTRAP_AST_SUPPORT: path.resolve(astSupport),
   CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: process.env.AST_SUPPORT_SHA256,
   CJCJ_BOOTSTRAP_COLOUR_TUPLE: path.resolve(colourTuple),
