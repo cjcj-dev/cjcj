@@ -23,8 +23,8 @@ test('wrong dylib fails at its digest assertion without falling back', () => fix
   fs.copyFileSync(path.join(dylib, 'manifest.json'), path.join(wrong, 'manifest.json'));
   env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT = wrong;
   const result = run();
-  assert.notEqual(result.status, 0);
   assert.match(result.stderr, /LLVM_DYLIB_SHA256_MISMATCH expected=[a-f0-9]{64} actual=[a-f0-9]{64}/);
+  assert.notEqual(result.status, 0);
   assert.doesNotMatch(result.stdout, /CJCJ_BOOTSTRAP_COLOUR_LLVM_SO=/);
   console.log('ASSERT wrong-dylib digest executed');
 }));
