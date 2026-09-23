@@ -10,6 +10,7 @@ import {pickWindowsCC} from './pick_cc.mjs';
 const {root} = stageBegin('runtime');
 const source = process.env.RUNTIME_SOURCE || path.join(process.cwd(), 'runtime-source');
 const version = process.env.RUNTIME_VERSION || '1.2.0-alpha.20260721165458';
+const buildType = process.env.RUNTIME_BUILD_TYPE || 'release';
 const runtimeTarget = process.env.RUNTIME_TARGET || 'native';
 const runtimeToolchain = process.env.RUNTIME_TOOLCHAIN || '';
 const installRoot = path.join(root, 'runtime-install');
@@ -51,10 +52,10 @@ if (process.platform === 'linux') {
     }
     const configuredInstallRoot = path.join(installRoot, 'windows_release_x86_64');
     artifactRoot = configuredInstallRoot;
-    await $({cwd: runtimeDirectory})`python3 build.py build --target ${runtimeTarget} --build-type release --target-toolchain ${runtimeToolchain} --prefix ${preinstall} -v ${version}`;
+    await $({cwd: runtimeDirectory})`python3 build.py build --target ${runtimeTarget} --build-type ${buildType} --target-toolchain ${runtimeToolchain} --prefix ${preinstall} -v ${version}`;
     await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${configuredInstallRoot}`;
   } else if (runtimeTarget === 'native') {
-    await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type release --prefix ${preinstall} -v ${version}`;
+    await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type ${buildType} --prefix ${preinstall} -v ${version}`;
     await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${installRoot}`;
   } else {
     console.error(`FATAL: unsupported Linux runtime target: ${runtimeTarget}`);
@@ -67,7 +68,7 @@ if (process.platform === 'linux') {
   }
   await $({nothrow: true})`xcodebuild -version`;
   await $({nothrow: true})`xcrun --sdk macosx --show-sdk-version`;
-  await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type release --prefix ${preinstall} -v ${version}`;
+  await $({cwd: runtimeDirectory})`python3 build.py build --target native --build-type ${buildType} --prefix ${preinstall} -v ${version}`;
   await $({cwd: runtimeDirectory})`python3 build.py install --prefix ${installRoot}`;
 } else if (process.platform === 'win32') {
   const windowsCC = await pickWindowsCC();
@@ -77,7 +78,6 @@ if (process.platform === 'linux') {
   }
   const msysBash = process.env.MSYS2_BASH || 'C:\\msys64\\usr\\bin\\bash.exe';
   const shellQuote = (value) => "'" + value.replace(/'/g, "'\\''") + "'";
-  const buildType = 'release';
   const targetSeparator = runtimeTarget.lastIndexOf('-');
   const targetPlatform = runtimeTarget.slice(0, targetSeparator);
   const targetArch = runtimeTarget.slice(targetSeparator + 1);
