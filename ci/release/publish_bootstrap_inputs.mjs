@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {api, asset, digest, verify, validatePin, acquire} from './bootstrap_store.mjs';
 
-// Input is a reviewed/generated list {path, sha256}; never infer payloads from a directory scan.
+// Input is a reviewed/generated list {path, sha256, mode}; never infer payloads from a directory scan.
 const [root, listPath, output] = process.argv.slice(2);
 const files = JSON.parse(fs.readFileSync(listPath, 'utf8'));
 const pin = {version: 1, repository: process.env.GITHUB_REPOSITORY,

@@ -154,7 +154,7 @@ jobs:
   fixed-llvm:
     name: Build native LLVM tools
     needs: plan
-    uses: ./.github/workflows/build-fixed-llc.yml
+    uses: ./.github/workflows/build-llvm-tools.yml
     with:
       platforms: ${{ needs.plan.outputs.llvm_platforms }}
       rebuild: ${{ inputs.rebuild_llvm || false }}

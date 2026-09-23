@@ -1,6 +1,6 @@
 # Persistent bootstrap inputs
 
-`publish-bootstrap-inputs.yml` is the publication entry point. In one workflow
+`build-fixed-llc.yml` is the publication entry point. In one workflow
 run it calls the existing fixed tuple producer, waits for its artifact ID, then
 publishes exactly that artifact's reviewed file list to a dedicated prerelease
 `bootstrap-<run>-<attempt>-<artifact>`. The publisher reads back both the artifact
@@ -15,8 +15,8 @@ retrieval layer without a requirement that Release assets cannot meet.
 GitHub documents the per-file 2 GiB limit at
 https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases.
 
-The standalone publishing entry point confines `contents: write` to its publish
-job. Existing read-only callers of `build-fixed-llc.yml` remain read-only;
+The existing dispatchable publishing entry point confines `contents: write` to its publish
+job. Existing read-only callers use `build-llvm-tools.yml` and remain read-only;
 reusable workflows cannot elevate a caller's token permissions:
 https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations.
 

@@ -76,7 +76,7 @@ jobs:
 
   fixed-llvm-tools:
     name: Build LLVM tools
-    uses: ./.github/workflows/build-fixed-llc.yml
+    uses: ./.github/workflows/build-llvm-tools.yml
 
   build:
     name: ${{ matrix.runner }} / Build
