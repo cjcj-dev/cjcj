@@ -94,6 +94,7 @@ jobs:
         with:
           name: colour-runtime-gate-diagnostics
           path: |
+            ci/runtime_pin.env
             runtime-source/runtime/**/gate_run.log
             runtime-source/runtime/**/gc_unit_gate.status
             runtime-source/runtime/**/runtime-build-config.txt
