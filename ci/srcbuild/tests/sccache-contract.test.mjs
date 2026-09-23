@@ -27,12 +27,14 @@ function jobs(text) {
 
 // The jobs that drive a C/C++ compiler, and the pin their cache key must carry.
 // build-llvm-tools / platform-tuples: llc, opt, flatc, the shim object.
+// build-llvm-dylib: shared LLVM; the caller selects the cache namespace.
 // build-release-package: the coloured runtime (ci/build_patched_runtime.mjs).
 // build-windows-runtime: the MinGW cross runtime, flatc, the std-ast object.
 // srcbuild: support libraries, stage3 std FFI, stdx, tools, shim, Windows cross runtime.
 // ci.yml / platform-matrix.yml: the patched runtime on a runtime-cache miss plus
 // the shim objects, per runner (the runtime links the builder's glibc).
 const CXX_JOBS = new Map([
+  ['build-llvm-dylib.yml/dylib', {component: '${{ inputs.cache-component }}', pin: /steps\.pin\.outputs\.sha/}],
   ['build-llvm-tools.yml/build-tools', {component: 'llvm', pin: /steps\.llvm-pin\.outputs\.sha/}],
   ['platform-tuples.yml/build-tuple', {component: 'llvm-tuple', pin: /steps\.llvm-pin\.outputs\.sha/}],
   ['build-release-package.yml/package', {component: 'runtime', pin: /env\.RUNTIME_REF/}],
@@ -93,7 +95,8 @@ test('every C/C++ compile job starts sccache before compiling and reports after,
     assert.ok(start < firstCompile, `${id}: sccache starts at step ${start}, after the first compile at step ${firstCompile}`);
     assert.ok(report > firstCompile, `${id}: sccache reports at step ${report}, before the last compile`);
     for (const index of [start, report]) {
-      assert.match(steps[index], new RegExp(String.raw`^\s*component: ${component}\s*$`, 'm'), `${id}: step ${index} names component ${component}`);
+      assert.equal(steps[index].match(/^\s*component:\s*(.+?)\s*$/m)?.[1], component,
+        `${id}: step ${index} names component ${component}`);
     }
     assert.match(steps[start], pin, `${id}: cache key does not carry the pin`);
     assert.match(steps[report], /^\s*if: always\(\)/m, `${id}: the report must run when the build failed too`);

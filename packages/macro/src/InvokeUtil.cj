@@ -179,15 +179,31 @@ struct RuntimeGCParamC {
     let garbageThreshold: Float64
     let gcInterval: UInt64
     let backupGCInterval: UInt64
-    let gcThreads: Int32
+    let concGCThreads: UInt32
+    let youngGCThreads: UInt32
+    let oldGCThreads: UInt32
+    let staticGCThreads: Bool
+    let maxTenuringThreshold: UInt32
+    let zTenuringThreshold: Int32
+    let maxTenuringThresholdSet: Bool
+    let zTenuringThresholdSet: Bool
 
     init(gcThreshold: UIntNative, garbageThreshold: Float64, gcInterval: UInt64,
-        backupGCInterval: UInt64, gcThreads: Int32) {
+        backupGCInterval: UInt64, concGCThreads: UInt32, youngGCThreads: UInt32, oldGCThreads: UInt32,
+        staticGCThreads: Bool, maxTenuringThreshold: UInt32, zTenuringThreshold: Int32,
+        maxTenuringThresholdSet: Bool, zTenuringThresholdSet: Bool) {
         this.gcThreshold = gcThreshold
         this.garbageThreshold = garbageThreshold
         this.gcInterval = gcInterval
         this.backupGCInterval = backupGCInterval
-        this.gcThreads = gcThreads
+        this.concGCThreads = concGCThreads
+        this.youngGCThreads = youngGCThreads
+        this.oldGCThreads = oldGCThreads
+        this.staticGCThreads = staticGCThreads
+        this.maxTenuringThreshold = maxTenuringThreshold
+        this.zTenuringThreshold = zTenuringThreshold
+        this.maxTenuringThresholdSet = maxTenuringThresholdSet
+        this.zTenuringThresholdSet = zTenuringThresholdSet
     }
 }
 
@@ -218,18 +234,18 @@ struct RuntimeConfigParamC {
     let heapParam: RuntimeHeapParamC
     let gcParam: RuntimeGCParamC
     let logParam: RuntimeLogParamC
-    let coroutineParam: RuntimeConcurrencyParamC
+    let coParam: RuntimeConcurrencyParamC
 
     init(heapParam: RuntimeHeapParamC, gcParam: RuntimeGCParamC, logParam: RuntimeLogParamC,
-        coroutineParam: RuntimeConcurrencyParamC) {
+        coParam: RuntimeConcurrencyParamC) {
         this.heapParam = heapParam
         this.gcParam = gcParam
         this.logParam = logParam
-        this.coroutineParam = coroutineParam
+        this.coParam = coParam
     }
 }
 
-private type RuntimeInitFunc = CFunc<(CPointer<RuntimeConfigParamC>) -> Int64>
+private type RuntimeInitFunc = CFunc<(CPointer<RuntimeConfigParamC>) -> Int32>
 private type RuntimeFiniFunc = CFunc<() -> Int64>
 private type RuntimeInstanceNewFunc = CFunc<(CPointer<RuntimeConcurrencyParamC>) -> CPointer<Unit>>
 private type RuntimeInstanceStopFunc = CFunc<(CPointer<Unit>) -> Int32>
@@ -256,19 +272,29 @@ private let MIN_HEAP_SIZE: UIntNative = 4 * 1024
 private let MIN_STACK_SIZE: UIntNative = 64
 private let MAX_STACK_SIZE: UIntNative = 1024 * 1024
 
+// InitCJRuntime interprets zero sizes/budgets using its platform defaults.
+// CangjieRuntimeApi.cpp config initialization is the default-value contract.
 public let REGION_SIZE: UIntNative = 64
-public let HEAP_SIZE: UIntNative = 1024 * 1024
+public let HEAP_SIZE: UIntNative = 0
 public let EXEMPTION_THRESHOLD: Float64 = 0.8
-public let HEAP_UTILIZATION: Float64 = 0.6
+public let HEAP_UTILIZATION: Float64 = 0.8
 public let HEAP_GROWTH: Float64 = 0.15
-public let GC_THRESHOLD: UIntNative = 20
+public let GC_THRESHOLD: UIntNative = 0
 public let GARBAGE_THRESHOLD: Float64 = 0.5
 public let GC_INTERVAL: UInt64 = 150
-public let BACKUP_GC_INTERNAL: UInt64 = 240
-public let GC_THREADS: Int32 = 8
-public let STACK_SIZE: UIntNative = 64 * 1024
-public let CO_STACK_SIZE: UIntNative = 4 * 1024
-public let PROCESSOR_NUM: UInt32 = 24u32
+public let BACKUP_GC_INTERVAL: UInt64 = 0
+// Zero worker budgets and unset thresholds select runtime ergonomics.
+public let CONC_GC_THREADS: UInt32 = 0
+public let YOUNG_GC_THREADS: UInt32 = 0
+public let OLD_GC_THREADS: UInt32 = 0
+public let STATIC_GC_THREADS: Bool = false
+public let MAX_TENURING_THRESHOLD: UInt32 = 15
+public let Z_TENURING_THRESHOLD: Int32 = -1
+public let MAX_TENURING_THRESHOLD_SET: Bool = false
+public let Z_TENURING_THRESHOLD_SET: Bool = false
+public let STACK_SIZE: UIntNative = 0
+public let CO_STACK_SIZE: UIntNative = 0
+public let PROCESSOR_NUM: UInt32 = 0u32
 public let HEAP_INITIAL_SIZE: UIntNative = 64 * 1024
 
 public class RuntimeHandle {
@@ -364,10 +390,10 @@ private func GetHeapSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative {
             if (size >= MIN_HEAP_SIZE) {
                 return size
             }
-            Warningln("unsupported cjHeapSize for macro, must >= 4MB, using 1GB as default size")
+            Warningln("unsupported cjHeapSize for macro, must >= 4MB, using runtime default size")
             return HEAP_SIZE
         }
-        Warningln("unsupported cjHeapSize for macro, using 1GB as default size")
+        Warningln("unsupported cjHeapSize for macro, using runtime default size")
     }
     return HEAP_SIZE
 }
@@ -378,10 +404,10 @@ private func GetStackSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative 
             if (size >= MIN_STACK_SIZE && size <= MAX_STACK_SIZE) {
                 return size
             }
-            Warningln("unsupported cjStackSize for macro, the valid range is [64KB, 1GB], using 4MB as default size")
+            Warningln("unsupported cjStackSize for macro, the valid range is [64KB, 1GB], using runtime default size")
             return CO_STACK_SIZE
         }
-        Warningln("unsupported cjStackSize for macro, using 4MB as default size")
+        Warningln("unsupported cjStackSize for macro, using runtime default size")
     }
     return CO_STACK_SIZE
 }
@@ -389,8 +415,10 @@ private func GetStackSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative 
 private func makeRuntimeConfig(envs: ArrayList<(String, String)>): RuntimeConfigParamC {
     return RuntimeConfigParamC(
         RuntimeHeapParamC(REGION_SIZE, GetHeapSizeFromEnv(envs), EXEMPTION_THRESHOLD, HEAP_UTILIZATION, HEAP_GROWTH),
-        RuntimeGCParamC(GC_THRESHOLD, GARBAGE_THRESHOLD, GC_INTERVAL, BACKUP_GC_INTERNAL, GC_THREADS),
-        RuntimeLogParamC(6),
+        RuntimeGCParamC(GC_THRESHOLD, GARBAGE_THRESHOLD, GC_INTERVAL, BACKUP_GC_INTERVAL,
+            CONC_GC_THREADS, YOUNG_GC_THREADS, OLD_GC_THREADS, STATIC_GC_THREADS,
+            MAX_TENURING_THRESHOLD, Z_TENURING_THRESHOLD, MAX_TENURING_THRESHOLD_SET, Z_TENURING_THRESHOLD_SET),
+        RuntimeLogParamC(5),
         RuntimeConcurrencyParamC(STACK_SIZE, GetStackSizeFromEnv(envs), PROCESSOR_NUM))
 }
 
@@ -521,7 +549,7 @@ public func CallRuntime(handle: RuntimeHandle, method: String, envs: ArrayList<(
         } else {
             unsafe {
                 param.value.write(makeRuntimeConfig(envs))
-                result = initFunc(param.value)
+                result = Int64(initFunc(param.value))
             }
         }
     } catch (e: Exception) {
