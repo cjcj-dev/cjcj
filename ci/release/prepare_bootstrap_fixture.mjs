@@ -33,7 +33,8 @@ export function fixture(check) {
       CJCJ_BOOTSTRAP_HOST_LLVM_SO: so, CJCJ_BOOTSTRAP_AST_SUPPORT: ast,
       CJCJ_BOOTSTRAP_TUPLE_ARTIFACT: artifact, CJCJ_BOOTSTRAP_COLOUR_TUPLE: fallback,
       CJCJ_BOOTSTRAP_CPP_SRC: sdk, LLVM_SHA: 'a'.repeat(40),
-      CJCJ_BOOTSTRAP_CJCJ_SHA: 'b'.repeat(40), LLVM_TUPLE_SUMS_SHA: digest};
+      CJCJ_BOOTSTRAP_CJCJ_SHA: 'b'.repeat(40), LLVM_TUPLE_SUMS_SHA: digest,
+      AST_SUPPORT_SHA256: crypto.createHash('sha256').update('ast fixture').digest('hex')};
     const run = () => spawnSync(process.execPath,
       [new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname], {env, encoding: 'utf8'});
     check({env, artifact, fallback, dylib, dylibSha, so, run});

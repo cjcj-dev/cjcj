@@ -323,6 +323,28 @@ jobs:
           run-id: ${{ env.LLVM_DYLIB_RUN_ID }}
           path: ${{ env.CJCJ_BOOTSTRAP_DYLIB_ARTIFACT }}
 
+      - name: Load immutable AST support provenance
+        shell: bash
+        env:
+          AST_PLATFORM: ${{ matrix.llvm_platform }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          source "ci/ast_support/${AST_PLATFORM}.env"
+          test -n "$AST_SUPPORT_RUN_ID"
+          test -n "$AST_SUPPORT_RUN_ATTEMPT"
+          test -n "$AST_SUPPORT_ARTIFACT_ID"
+          cat "ci/ast_support/${AST_PLATFORM}.env" >> "$GITHUB_ENV"
+
+      - name: Download AST support archive
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.AST_SUPPORT_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.AST_SUPPORT_RUN_ID }}
+          path: ${{ runner.temp }}/ast-support
+
       # set -a: `source` alone makes shell variables, and prepare_bootstrap_inputs
       # reads LLVM_SHA from its environment -- without the export every host
       # failed here with "LLVM_SHA pin missing" (release-matrix run 35718484244).
@@ -334,7 +356,9 @@ jobs:
           source ci/llvm_pin.env
           source ci/runtime_pin.env
           set +a
-          CJCJ_BOOTSTRAP_TUPLE_ARTIFACT="$RUNNER_TEMP/static-llvm-tuple" node ci/release/prepare_bootstrap_inputs.mjs
+          CJCJ_BOOTSTRAP_TUPLE_ARTIFACT="$RUNNER_TEMP/static-llvm-tuple" \
+          CJCJ_BOOTSTRAP_AST_ARTIFACT="$RUNNER_TEMP/ast-support/libcangjie-ast-support.a" \
+            node ci/release/prepare_bootstrap_inputs.mjs
 
       - name: Bootstrap stage0 compiler
         shell: bash
