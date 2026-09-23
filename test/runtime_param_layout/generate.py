@@ -56,8 +56,12 @@ for name, cname in names.items():
     for field, ty in fields[name]:
         key = cname + '.' + field
         cj += ['    unsafe {', f'        let p = LibC.malloc<{name}>()',
-               f'        unsafe {{ p.write({construct(name, field)}) }}',
                '        let bytes = CPointer<UInt8>(p)',
+               # Padding is not a field. Clear recycled malloc bytes before the
+               # product declaration writes its fields so old markers cannot
+               # appear in untouched padding as a second field occurrence.
+               f'        for (i in 0..sizeOf<{name}>()) {{ unsafe {{ (bytes + Int64(i)).write(0) }} }}',
+               f'        unsafe {{ p.write({construct(name, field)}) }}',
                f'        println("FIELD_SIZE {key} ${{sizeOf<{ty}>()}}")',
                f'        print("BYTES {key} ")',
                f'        for (i in 0..sizeOf<{name}>()) {{ print("${{unsafe {{ bytes.read(Int64(i)) }} }},") }}',
