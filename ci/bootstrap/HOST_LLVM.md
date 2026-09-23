@@ -11,6 +11,10 @@ and `publish_dylib=false`. The host job uses sccache and uploads a physical
 identifying the source, producer commit, run, attempt, and platform. The upload
 step records the immutable artifact ID in the run summary.
 
+The host recipe retains RTTI for the official llc ABI and keeps the full symbol
+table for inspection. It checks `llvm::cl::Option`'s type information as well as
+`visitRelocate`; the colour dylib's RTTI-off recipe cannot serve as a host recipe.
+
 After reading back the successful artifact, update the
 `HOST_LLVM_PROVENANCE` comment and `libLLVM-15.so` digest together in
 `stage1_host_identities.txt`. The JSON comment carries the repository, run,
