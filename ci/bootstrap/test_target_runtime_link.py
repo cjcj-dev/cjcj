@@ -45,7 +45,8 @@ def main():
             rc = subprocess.run(command, stdout=stdout, stderr=stderr,
                                 timeout=120).returncode
         passed = rc == 0 and (output / product).is_file()
-        results[name] = {'command': command, 'compiler_rc': rc, 'passed': passed}
+        results[name] = {'command': command, 'compiler_rc': rc, 'passed': passed,
+                         'objects': {p.name: digest(p) for p in sorted(temps.glob('*.o'))}}
         if (output / product).is_file():
             results[name]['sha256'] = digest(output / product)
         print(f'ASSERT {name} executed compiler_rc={rc} passed={passed}', flush=True)
