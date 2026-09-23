@@ -25,10 +25,15 @@ The expected digest is never learned from a download during a consumer run.
 
 `srcbuild.yml` loads the artifact and run IDs with `host_llvm.mjs env`, downloads
 that artifact, and passes its directory as `CJCJ_BOOTSTRAP_HOST_LLVM_ARTIFACT`.
-Local callers must provide the same artifact directory (library plus manifest).
-There is no fallback to the nightly library or the colour dylib. Other host
-architectures need their own produced and reviewed host library; this producer
-is Linux x86_64 only.
+The preparation CLI uses `CJCJ_SRCBUILD_TARGET` (or the native Node platform and
+architecture for local callers) to match that download boundary. Linux x64
+callers must provide the same artifact directory (library plus manifest); missing
+or invalid input never falls back to the nightly library or colour dylib.
+The other existing source cells (`linux-aarch64`, `darwin-arm64`, `darwin-x64`)
+retain their native SDK host-library selection and content digest. They do not
+consume this x64 artifact or claim its repaired provenance. Producing and pinning
+repaired host libraries for those cells remains separate work; this change does
+not establish that their complete bootstrap pipeline succeeds.
 
 The CI apparatus tests enter `prepare_bootstrap_inputs.mjs` and observe its
 exported library bytes and declared hash. A one-digit identity change must fail

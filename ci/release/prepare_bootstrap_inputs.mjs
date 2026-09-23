@@ -53,7 +53,21 @@ if (!base) {
   throw new Error(`host SDK missing (CJCJ_SRCBUILD_HOST_SDK / $HOME/.cjv/toolchains/$CJCJ_TOOLCHAIN)`);
 }
 
-const hostLlvm = prepareHostLlvm();
+// Match srcbuild.yml's artifact download boundary. Other source cells retain
+// their native SDK input; absence of the x64 artifact never selects this branch.
+const target = process.env.CJCJ_SRCBUILD_TARGET || `${process.platform}-${process.platform === 'linux' && process.arch === 'arm64' ? 'aarch64' : process.arch}`;
+let hostLlvm;
+if (['linux-aarch64', 'darwin-arm64', 'darwin-x64'].includes(target)) {
+  const file = firstExisting([
+    process.env.CJCJ_BOOTSTRAP_HOST_LLVM_SO,
+    path.join(base, 'third_party', 'llvm', 'lib', 'libLLVM-15.so'),
+    findFile(path.join(base, 'third_party', 'llvm', 'lib'), (_full, name) => /^libLLVM.*\.(so|dylib)$/.test(name)),
+  ]);
+  if (!file) throw new Error(`host LLVM SO missing under ${base}`);
+  hostLlvm = {file: path.resolve(file), sha256: sha256File(file)};
+} else {
+  hostLlvm = prepareHostLlvm();
+}
 
 const astSupport = pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT, [
   process.env.CJCJ_BOOTSTRAP_AST_SUPPORT,
