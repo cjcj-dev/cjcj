@@ -427,7 +427,7 @@ private func makeRuntimeConfig(envs: ArrayList<(String, String)>): RuntimeConfig
     // zArguments.cpp:40-52 origin split; do not round them through the KB API.
     return RuntimeConfigParamC(
         RuntimeHeapParamC(REGION_SIZE, heapSize, EXEMPTION_THRESHOLD, HEAP_UTILIZATION, HEAP_GROWTH,
-            heapSize != HEAP_SIZE || HEAP_SIZE_SET, SOFT_HEAP_SIZE, SOFT_HEAP_SIZE_SET),
+            getRuntimeEnv(envs, CJ_HEAP_SIZE).isSome() || HEAP_SIZE_SET, SOFT_HEAP_SIZE, SOFT_HEAP_SIZE_SET),
         RuntimeGCParamC(GC_THRESHOLD, GARBAGE_THRESHOLD, GC_INTERVAL, BACKUP_GC_INTERVAL,
             CONC_GC_THREADS, YOUNG_GC_THREADS, OLD_GC_THREADS, STATIC_GC_THREADS,
             MAX_TENURING_THRESHOLD, Z_TENURING_THRESHOLD, MAX_TENURING_THRESHOLD_SET, Z_TENURING_THRESHOLD_SET),
