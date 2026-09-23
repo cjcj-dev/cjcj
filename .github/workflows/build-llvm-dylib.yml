@@ -78,6 +78,16 @@ jobs:
           wrong="$(ldconfig -p | awk '/libLLVM-[0-9]+\.so/ && !found {print $NF; found=1}')"
           test -f "$wrong"
           sha256sum depot/dylib/libLLVM-15.so "$wrong" | tee depot/dylib/control-libraries.sha256
+          test "$(sha256sum "$wrong" | cut -d' ' -f1)" != "$BUILT_DYLIB_SHA256"
+          mkdir -p dylib-build/invalid-dylib
+          cp -L "$wrong" dylib-build/invalid-dylib/libLLVM-15.so
+          cp depot/dylib/manifest.json dylib-build/invalid-dylib/manifest.json
+          if python3 ci/llvm-dylib/verify.py dylib-build/invalid-dylib "$LLVM_SHA" "$BUILT_DYLIB_SHA256" \
+              > dylib-build/invalid-dylib/stdout.log 2> dylib-build/invalid-dylib/stderr.log; then
+            echo 'wrong in-process LLVM library unexpectedly passed verification' >&2
+            exit 1
+          fi
+          grep -F 'LLVM_DYLIB_SHA256_MISMATCH expected=' dylib-build/invalid-dylib/stderr.log
           DYLIB_TEST_FILE="$PWD/depot/dylib/libLLVM-15.so" DYLIB_TEST_WRONG_FILE="$wrong" \
             node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs | tee depot/dylib/input-tests.log
       - uses: ./.github/actions/sccache-report
