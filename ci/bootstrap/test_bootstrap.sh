@@ -109,7 +109,7 @@ check_dry_contract() {
   check_count A1 1 'FFI-set-equals=' "$log"
   check_count A2 1 'cjcj-stage1 --version' "$log"
   check_count A2 1 'cjcj-stage2 --version' "$log"
-  check_count A3 1 'ASSERT stage1-compiler executable=planned' "$log"
+  check_count A3 2 'ASSERT stage1-compiler executable=planned' "$log"
   check_count CJPM 4 'tools/bin/cjpm' "$log"
   check_count CJPM 2 'cjpm build' "$log"
   check_count CJPM 1 'cjpm build -j 1' "$log"
@@ -132,13 +132,28 @@ check_dry_contract() {
   check_count A4 4 'BUILD-ENV planned HOME=/root TMPDIR=.*/work/tmp-private' "$log"
   check_count LLVM-SO 1 'sdk_build.sh .*--host --llvm-so .*libLLVM-15.so' "$log"
   check_count LLVM-SO 1 'ASSERT installed-host-llvm-so sha256=planned' "$log"
-  check_count LLVM-TUPLE 1 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple' "$log"
-  check_count HOST-RT 1 '--verify-host-rt .*/host-rt' "$log"
-  check_count HOST-RUNNER 1 'stage1_host_runner.sh .*/sdk-stage1 .*/sdk-stage0 .*/host-rt' "$log"
-  check_count LLVM-TUPLE 8 'ASSERT installed-colour-tuple sha256=planned' "$log"
+  check_count LLVM-TUPLE 2 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple' "$log"
+  check_count HOST-RT 2 '--verify-host-rt .*/host-rt' "$log"
+  check_count HOST-RUNNER 2 'stage1_host_runner.sh .*/sdk-stage1 .*/sdk-stage0 .*/host-rt' "$log"
+  check_count LLVM-TUPLE 16 'ASSERT installed-colour-tuple sha256=planned' "$log"
   check_count LLVM-RULER 2 'ruler=readelf--dyn-syms symbol=llvm::isCJTypedReadHelperCandidate' "$log"
   check_count LLVM-RULER 1 'ASSERT official-opt-zero ruler=strings .* hits=0' "$log"
   check_count LLVM-RULER 2 'ASSERT colour-opt-stamp ruler=strings .* hits=1' "$log"
+  # stage1 assembles the SDK on both sides of the target stdlib build.
+  # Counts alone would also accept two assemblies using the old stdlib.
+  local assembly_order
+  assembly_order=$(awk '
+    /^CMD .*sdk_build\.sh .*--to .*\/sdk-stage1 --target / {
+      if ($0 ~ / --std .*\/stdlib-stage1 --verify-host-rt /) print "assemble-old"
+      else if ($0 ~ / --std .*\/stdlib-stage2 --verify-host-rt /) print "assemble-new"
+      else print "assemble-unexpected"
+    }
+    /^ASSERT stage1-compiler executable=planned path=.*\/sdk-stage1\/bin\/cjc$/ { print "executable" }
+    /^ASSERT stdlib-stage2 shape=planned / { print "stdlib-built" }
+  ' "$log")
+  [ "$assembly_order" = $'assemble-old\nexecutable\nstdlib-built\nassemble-new\nexecutable' ] ||
+    fail A3-order "unexpected stage1 SDK assembly sequence: $assembly_order"
+  echo 'PASS dry stage1 SDK assembly count and order'
 }
 
 make_sdk_fixture() {
@@ -544,6 +559,25 @@ fault_product_missing() {
     bash "$PRODUCT" "$TMP/empty-bin"
 }
 
+fault_dry_stage1() {
+  local arm="$1"
+  make_dry_fixture
+  case "$arm" in
+    missing)
+      sed '/^[[:space:]]*assert_executable stage1-compiler /d' "$PRODUCT" > "$TMP/bootstrap.sh"
+      ;;
+    duplicate)
+      sed '/^[[:space:]]*assert_executable stage1-compiler /p' "$PRODUCT" > "$TMP/bootstrap.sh"
+      ;;
+    stale-stdlib)
+      sed 's/assemble_stage1_sdk "$sdk" "$compiler" "$std"/assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"/' "$PRODUCT" > "$TMP/bootstrap.sh"
+      ;;
+  esac
+  PRODUCT="$TMP/bootstrap.sh"
+  dry_run > "$TMP/dry-stage1.log" || fail A3-run 'mutated bootstrap CLI failed before assertions'
+  check_dry_contract "$TMP/dry-stage1.log"
+}
+
 fault_shim_wiring() {
   make_dry_fixture
   sed '/^[[:space:]]*shim_build stage0 /d' "$PRODUCT" > "$TMP/bootstrap-skip-stage0-shim.sh"
@@ -716,6 +750,9 @@ case "${1:-test}" in
   fault-product-missing)
     fault_product_missing
     ;;
+  fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib)
+    fault_dry_stage1 "${1#fault-dry-stage1-}"
+    ;;
   fault-shim-wiring)
     fault_shim_wiring
     ;;
@@ -763,7 +800,7 @@ case "${1:-test}" in
       fail build-env 'bootstrap CLI HOME/TMPDIR contract did not pass'
     BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" bash "$0" check-runtime-layouts > "$TMP/runtime-layouts-positive.log" ||
       fail runtime-layouts 'flat/nested/dual/inner-rc runtime layout contract did not pass'
-    for arm in a1 a2 a3 a4 build-env runtime-stamp host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
+    for arm in a1 a2 a3 dry-stage1-missing dry-stage1-duplicate dry-stage1-stale-stdlib a4 build-env runtime-stamp host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
       log="$TMP/fault-$arm.log"
       if bash "$0" "fault-$arm" > "$log" 2>&1; then
         fail "$arm" 'fault arm unexpectedly passed'
@@ -772,6 +809,9 @@ case "${1:-test}" in
         a1) marker='BOOTSTRAP-FAIL \[test-A1\].*Int64.ti definitions=1';;
         a2) marker='BOOTSTRAP-FAIL \[test-A2\].*命令失败 rc=23';;
         a3) marker='BOOTSTRAP-FAIL \[test-A3\].*stage1-compiler';;
+        dry-stage1-missing) marker='TEST-FAIL \[A3\] pattern count=0 expected=2: ASSERT stage1-compiler executable=planned';;
+        dry-stage1-duplicate) marker='TEST-FAIL \[A3\] pattern count=4 expected=2: ASSERT stage1-compiler executable=planned';;
+        dry-stage1-stale-stdlib) marker='TEST-FAIL \[A3-order\] unexpected stage1 SDK assembly sequence:';;
         a4) marker='BOOTSTRAP-FAIL \[test-A4\].*命令失败 rc=44';;
         build-env) marker='TEST-FAIL \[A4\].*TMPDIR';;
         runtime-stamp) marker='SDK-BUILD-FAIL runtime CJRT-COMMIT 不匹配: expected=4444444444444444444444444444444444444444 actual=5555555555555555555555555555555555555555';;
@@ -800,7 +840,7 @@ case "${1:-test}" in
     echo 'PASS bootstrap dry contracts, controlled build environment, LLVM assembly, and positive controls'
     ;;
   *)
-    echo "usage: $0 [test|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a2|fault-a3|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
+    echo "usage: $0 [test|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
     exit 2
     ;;
 esac
