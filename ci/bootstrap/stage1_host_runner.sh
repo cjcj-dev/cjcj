@@ -36,7 +36,9 @@ for root in "$target" "$host" "$run_sdk"; do
   case "$root" in /root/sdks|/root/sdks/*|/root/.cjv|/root/.cjv/*) fail "workspace SDK required: $root";; esac
   [ -d "$root" ] || fail "missing SDK: $root"
 done
-[ "$target" != "$host" ] && [ "$run_sdk" != "$host" ] && [ "$run_sdk" != "$target" ] || fail 'host, run and target SDK must differ'
+if [ "$target" = "$host" ] || [ "$run_sdk" = "$host" ] || [ "$run_sdk" = "$target" ]; then
+  fail 'host, run and target SDK must differ'
+fi
 # Host tuple from the machine, as bootstrap.sh derives it; Linux only.
 case "$(uname -s)/$(uname -m)" in
   Linux/x86_64) platform=linux_x86_64_cjnative; multiarch=x86_64-linux-gnu;;
