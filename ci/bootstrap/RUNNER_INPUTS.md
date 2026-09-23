@@ -37,3 +37,27 @@ The integration test fetches a clean compiler checkout, confirms the real shim
 consumer rejects missing inputs, invokes the Actions input resolver, verifies the
 header inventory, and builds the actual shim object. It preserves logs and
 artifacts in the supplied directory. No external CPP_SRC or shim object is used.
+
+## In-process LLVM (Linux bootstrap)
+
+The static tuple retains its eight entries. `prepare_bootstrap_inputs.mjs`
+separately validates `dylib/libLLVM-15.so` against the platform pin under
+`ci/llvm-dylib/`, then exports `CJCJ_BOOTSTRAP_COLOUR_LLVM_SO` and
+`CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256`. `gha_run.sh` forwards both as
+`--colour-llvm-so` and `--colour-llvm-sha256`; the kkk2 entry uses the same
+platform digest rather than hashing an unreviewed input as its expected value.
+
+`bootstrap.sh` physically copies `sdk-stage0` to `sdk-stage0-run`, installs the
+pinned library, and checks both the installed identity and preserved host
+identity. The official compiler continues using `sdk-stage0`. The cjcj compiler
+runner loads LLVM from `sdk-stage0-run`; cjpm keeps the official host loader
+binding. The target SDK also receives the process library separately from its
+static tuple. The existing official runtime/boundscheck/LLVM identity checks
+remain in force. There is no LLVM fallback on an identity failure.
+
+`COLOUR_LLVM_SO=/pin/libLLVM-15.so HOST_LLVM_SO=/official/libLLVM-15.so
+python3 ci/bootstrap/test_colour_llvm.py -v` exercises the real preparation and
+runner scripts, calls LLVMContextCreate/Dispose, checks `/proc/self/maps`, and
+rejects wrong producer/consumer inputs. This device test uses a Python process
+fixture; actual stage1 compiler acceptance additionally requires its own
+loader trace and successful compilation. Run it on the build host.
