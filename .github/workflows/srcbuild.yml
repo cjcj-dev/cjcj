@@ -380,6 +380,27 @@ jobs:
           CJCJ_BOOTSTRAP_AST_ARTIFACT="$RUNNER_TEMP/ast-support/libcangjie-ast-support.a" \
             node ci/release/prepare_bootstrap_inputs.mjs
 
+      - name: Prove colour runtime identity rejection
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source ci/llvm_pin.env
+          source ci/runtime_pin.env
+          set +a
+          first=0
+          if [ "${COLOUR_RT_MANIFEST_SHA256:0:1}" = 0 ]; then first=1; fi
+          wrong="$first${COLOUR_RT_MANIFEST_SHA256:1}"
+          set +e
+          COLOUR_RT_MANIFEST_SHA256="$wrong" GITHUB_ENV="$RUNNER_TEMP/invalid-runtime.env" \
+            node ci/release/prepare_bootstrap_inputs.mjs > "$RUNNER_TEMP/invalid-runtime.log" 2>&1
+          rc=$?
+          set -e
+          test "$rc" = 1
+          grep -F "COLOUR_RT_SHA256_MISMATCH expected=$wrong actual=$COLOUR_RT_MANIFEST_SHA256" "$RUNNER_TEMP/invalid-runtime.log"
+          test ! -s "$RUNNER_TEMP/invalid-runtime.env"
+          echo "ASSERT colour-runtime wrong-pin rejected rc=$rc; valid input resolved in prior step"
+
       - name: Bootstrap stage0 compiler
         shell: bash
         run: bash ci/bootstrap/gha_run.sh stage0
