@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {acquire} from './bootstrap_store.mjs';
+import {verifyRuntime} from './colour_runtime.mjs';
 import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
 
 function sha256File(file) {
@@ -45,7 +46,6 @@ const hostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK
     ? path.join(process.env.HOME, '.cjv', 'toolchains', process.env.CJCJ_TOOLCHAIN)
     : '');
 const buildRoot = process.env.CANGJIE_BUILD_ROOT || '';
-const runtimeRef = process.env.RUNTIME_REF || '';
 
 const base = firstExisting([hostSdk]);
 if (!base) {
@@ -82,12 +82,7 @@ if (!/^[0-9a-f]{64}$/.test(process.env.LLVM_TUPLE_SUMS_SHA || '')
   throw new Error(`colour tuple SHA256SUMS disagrees with ci/llvm_pin.env: ${colourTuple}`);
 }
 
-const colourRt = firstExisting([
-  process.env.CJCJ_BOOTSTRAP_COLOUR_RT,
-  runtimeRef ? path.join('/root/sodepot', runtimeRef) : '',
-  base,
-]);
-if (!colourRt) throw new Error('colour-rt dir missing');
+const colourRt = verifyRuntime();
 
 const llvmSha = process.env.LLVM_SHA || '';
 if (!/^[0-9a-f]{40}$/.test(llvmSha)) throw new Error('LLVM_SHA pin missing');

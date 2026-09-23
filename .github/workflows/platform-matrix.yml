@@ -4,6 +4,11 @@ on:
   push:
     branches: [ci/platform-matrix]
   workflow_dispatch:
+    inputs:
+      runtime_only:
+        description: Build only the pinned Linux bootstrap runtime artifact
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,16 +25,81 @@ env:
   CJ_HEAP_SIZE: 12GB
 
 jobs:
+  colour-runtime:
+    name: Pinned Linux colour runtime
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load runtime pin
+        run: cat ci/runtime_pin.env >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ env.RUNTIME_REF }}
+          path: runtime-source
+      - uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: ubuntu-22.04
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 1G
+      - name: Build runtime
+        env:
+          RUNTIME_BUILD_TYPE: relwithdebinfo
+        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+      - name: Package same-build runtime pair
+        id: package
+        run: |
+          # Native Linux does not install boundscheck; take the unique output
+          # from this same build, never from the host SDK.
+          mapfile -t bounds < <(find runtime-source/runtime -type f -name libboundscheck.so)
+          printf 'BOUNDSCHECK_BUILD_OUTPUT=%s\n' "${bounds[@]}"
+          test "${#bounds[@]}" = 1
+          cp "${bounds[0]}" .platform-ci/runtime-install/runtime/lib/linux_x86_64_cjnative/libboundscheck.so
+          node ci/release/colour_runtime.mjs .platform-ci/runtime-install colour-runtime
+          nm --defined-only colour-runtime/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so > colour-runtime/symbols.txt
+          test "$(grep -Ec ' g_cjLoadBadMask(@@?[^[:space:]]+)?$' colour-runtime/symbols.txt)" = 1
+          nm -D --defined-only colour-runtime/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so > colour-runtime/exports.txt
+          test "$(grep -Ec ' g_cjLoadBadMask(@@?[^[:space:]]+)?$' colour-runtime/exports.txt)" = 1
+      - uses: actions/upload-artifact@v7
+        id: artifact
+        with:
+          name: colour-runtime-linux_x86_64
+          path: colour-runtime/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Emit consumer pin
+        env:
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact-id }}
+          MANIFEST_SHA: ${{ steps.package.outputs.sha256 }}
+        run: |
+          {
+            echo "COLOUR_RT_RUN_ID=$GITHUB_RUN_ID"
+            echo "COLOUR_RT_RUN_ATTEMPT=$GITHUB_RUN_ATTEMPT"
+            echo "COLOUR_RT_ARTIFACT_ID=$ARTIFACT_ID"
+            echo "COLOUR_RT_MANIFEST_SHA256=$MANIFEST_SHA"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Report sccache
+        if: always()
+        uses: ./.github/actions/sccache-report
+        with:
+          component: runtime
+          platform: ubuntu-22.04
+          require-compiles: ${{ job.status == 'success' }}
+
   fixed-llvm-tuples:
+    if: ${{ !inputs.runtime_only }}
     name: Build fixed LLVM tuples
     uses: ./.github/workflows/platform-tuples.yml
 
   patched-cjpm:
+    if: ${{ !inputs.runtime_only }}
     name: Build patched cjpm
     uses: ./.github/workflows/build-cjpm.yml
     secrets: inherit
 
   windows-runtime:
+    if: ${{ !inputs.runtime_only }}
     name: Build Windows runtime
     uses: ./.github/workflows/build-windows-runtime.yml
     with:
@@ -38,7 +108,7 @@ jobs:
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
     needs: [fixed-llvm-tuples, patched-cjpm, windows-runtime]
-    if: always()
+    if: ${{ always() && !inputs.runtime_only }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     strategy:

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {prepareRuntime, digest as runtimeDigest, runtimeFiles} from './colour_runtime.mjs';
 import {spawnSync} from 'node:child_process';
 
 export function fixture(check) {
@@ -35,6 +36,19 @@ export function fixture(check) {
       CJCJ_BOOTSTRAP_CPP_SRC: sdk, LLVM_SHA: 'a'.repeat(40),
       CJCJ_BOOTSTRAP_CJCJ_SHA: 'b'.repeat(40), LLVM_TUPLE_SUMS_SHA: digest,
       AST_SUPPORT_SHA256: crypto.createHash('sha256').update('ast fixture').digest('hex')};
+    const runtimeSource = path.join(dir, 'runtime-source');
+    const runtime = path.join(dir, 'runtime');
+    for (const rel of runtimeFiles) {
+      fs.mkdirSync(path.dirname(path.join(runtimeSource, rel)), {recursive: true});
+      fs.writeFileSync(path.join(runtimeSource, rel), `fixture ${rel}`);
+    }
+    env.RUNTIME_REF = 'd'.repeat(40);
+    fs.writeFileSync(path.join(runtimeSource, 'SOURCE_SHA'), env.RUNTIME_REF);
+    prepareRuntime(runtimeSource, runtime, {RUNTIME_REF: env.RUNTIME_REF,
+      GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1'});
+    Object.assign(env, {CJCJ_BOOTSTRAP_COLOUR_RT: runtime, COLOUR_RT_RUN_ID: '123',
+      COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
+      COLOUR_RT_MANIFEST_SHA256: runtimeDigest(path.join(runtime, 'manifest.json'))});
     const pinFile = path.join(dir, 'pin.json');
     fs.writeFileSync(pinFile, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj', run: 123,
       attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: [{path: 'SHA256SUMS', mode: 0o644,
@@ -53,6 +67,6 @@ export function fixture(check) {
     env.FIXTURE_RELEASE_FILE = path.join(artifact, 'SHA256SUMS');
     const run = () => spawnSync(process.execPath,
       ['--import', transport, new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname], {env, encoding: 'utf8'});
-    check({env, artifact, fallback, dylib, dylibSha, so, run, pinFile});
+    check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }
