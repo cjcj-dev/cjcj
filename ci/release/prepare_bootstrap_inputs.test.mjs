@@ -29,12 +29,23 @@ function fixture(check) {
       CJCJ_BOOTSTRAP_CJCJ_SHA: 'b'.repeat(40), LLVM_TUPLE_SUMS_SHA: digest};
     const pinFile = path.join(dir, 'pin.json');
     fs.writeFileSync(pinFile, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj', run: 123,
-      attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: [{path: 'SHA256SUMS',
+      attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: [{path: 'SHA256SUMS', mode: 0o644,
       asset: 789, artifact_sha256: digest, release_sha256: digest}]}));
     env.CJCJ_BOOTSTRAP_INPUTS_PIN = pinFile;
+    const transport = path.join(dir, 'transport.mjs');
+    fs.writeFileSync(transport, `
+      import fs from 'node:fs';
+      globalThis.fetch = async url => {
+        if (url !== 'https://api.github.com/repos/cjcj-dev/cjcj/releases/assets/789')
+          throw new Error('unexpected source request: ' + url);
+        console.log('FIXTURE_RELEASE_REQUEST ' + url);
+        return new Response(fs.readFileSync(process.env.FIXTURE_RELEASE_FILE));
+      };
+    `);
+    env.FIXTURE_RELEASE_FILE = path.join(artifact, 'SHA256SUMS');
     const run = () => spawnSync(process.execPath,
-      [new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname], {env, encoding: 'utf8'});
-    check({env, artifact, fallback, run});
+      ['--import', transport, new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname], {env, encoding: 'utf8'});
+    check({env, artifact, fallback, run, pinFile});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }
 
@@ -68,4 +79,30 @@ test('nested kkk2 depot remains a fallback under the same reviewed pin', () => f
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /BOOTSTRAP_VERIFIED SHA256SUMS/);
   console.log('ASSERT nested-depot fallback executed');
+}));
+
+
+test('prepare defaults to persistent source despite unavailable artifact run', () => fixture(({env, pinFile, run}) => {
+  delete env.CJCJ_BOOTSTRAP_SOURCE;
+  delete env.CJCJ_BOOTSTRAP_SOURCE_REASON;
+  const pin = JSON.parse(fs.readFileSync(pinFile));
+  pin.run = 999999999;
+  fs.writeFileSync(pinFile, JSON.stringify(pin));
+  const result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /BOOTSTRAP_SOURCE mode=release/);
+  const output = /^CJCJ_BOOTSTRAP_COLOUR_TUPLE=(.+)$/m.exec(result.stdout)?.[1];
+  assert.ok(output, result.stdout);
+  assert.equal(fs.readFileSync(path.join(output, 'SHA256SUMS'), 'utf8'), 'reviewed fixture sums');
+  console.log('ASSERT prepare persistent bytes exported with unavailable artifact run');
+}));
+
+test('prepare refuses changed persistent input before exporting bootstrap environment', () => fixture(({env, artifact, run}) => {
+  delete env.CJCJ_BOOTSTRAP_SOURCE;
+  fs.writeFileSync(path.join(artifact, 'SHA256SUMS'), 'replaced persistent sums');
+  const result = run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /bootstrap digest mismatch: SHA256SUMS/);
+  assert.doesNotMatch(result.stdout, /^CJCJ_BOOTSTRAP_COLOUR_TUPLE=/m);
+  console.log('ASSERT prepare persistent digest rejection executed');
 }));

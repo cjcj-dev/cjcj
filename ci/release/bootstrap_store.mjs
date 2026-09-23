@@ -16,6 +16,7 @@ export function validatePin(pin) {
   const names = new Set();
   for (const file of pin.files) {
     if (!/^[\w.-]+(?:\/[\w.-]+)*$/.test(file.path) || file.path.split('/').some(p => p === '.' || p === '..')
+        || ![0o644, 0o755].includes(file.mode)
         || names.has(file.path) || !sha(file.artifact_sha256) || file.release_sha256 !== file.artifact_sha256
         || !Number.isSafeInteger(file.asset) || file.asset < 1) throw new Error(`invalid bootstrap file pin: ${file.path}`);
     names.add(file.path);
@@ -57,6 +58,7 @@ export async function acquire(pin, destination, {mode = 'release', reason = '', 
         const target = path.join(staging, 'files', file.path);
         fs.mkdirSync(path.dirname(target), {recursive: true});
         fs.writeFileSync(target, result.stdout);
+        fs.chmodSync(target, file.mode);
       }
     } else {
       for (const file of pin.files) {
@@ -72,6 +74,7 @@ export async function acquire(pin, destination, {mode = 'release', reason = '', 
         const target = path.join(staging, 'files', file.path);
         fs.mkdirSync(path.dirname(target), {recursive: true});
         fs.writeFileSync(target, bytes);
+        fs.chmodSync(target, file.mode);
       }
     }
     // Nothing becomes consumable before the entire selected source verifies.

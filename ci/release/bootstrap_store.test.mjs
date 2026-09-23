@@ -7,7 +7,7 @@ import {acquire, digest} from './bootstrap_store.mjs';
 
 const bytes = Buffer.from('reviewed payload');
 function pin() { return {version: 1, repository: 'cjcj-dev/cjcj', run: 123, attempt: 1,
-  artifact: 456, commit: 'a'.repeat(40), files: [{path: 'bin/llc', asset: 789,
+  artifact: 456, commit: 'a'.repeat(40), files: [{path: 'bin/llc', mode: 0o755, asset: 789,
     artifact_sha256: digest(bytes), release_sha256: digest(bytes)}]}; }
 async function fixture(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-store-'));
@@ -20,6 +20,7 @@ test('persistent source ignores unavailable fixed run and returns verified produ
   globalThis.fetch = async url => { requests.push(url); return new Response(bytes); };
   const result = await acquire(p, dir);
   assert.deepEqual(fs.readFileSync(path.join(result, 'bin/llc')), bytes);
+  assert.equal(fs.statSync(path.join(result, 'bin/llc')).mode & 0o777, 0o755);
   assert.deepEqual(requests, ['https://api.github.com/repos/cjcj-dev/cjcj/releases/assets/789']);
   console.log('ASSERT persistent product bytes reached consumer');
 }));
@@ -50,4 +51,30 @@ test('fallback requires an explicit reason', () => fixture(async dir => {
 test('pin refuses unequal location digests before any request', () => fixture(async dir => {
   const p = pin(); p.files[0].release_sha256 = 'f'.repeat(64);
   await assert.rejects(acquire(p, dir), /invalid bootstrap file pin/);
+}));
+
+test('depot corruption rejects without exposing a partial input directory', () => fixture(async dir => {
+  const depot = path.join(dir, 'depot'); fs.mkdirSync(path.join(depot, 'bin'), {recursive: true});
+  fs.writeFileSync(path.join(depot, 'bin/llc'), 'changed');
+  await assert.rejects(acquire(pin(), dir, {mode: 'depot', reason: 'fixture', depot}), /bootstrap digest mismatch: bin\/llc/);
+  assert.deepEqual(fs.readdirSync(dir), ['depot']);
+}));
+
+test('artifact wrong provenance stops before archive retrieval', () => fixture(async dir => {
+  const requests = [];
+  globalThis.fetch = async url => {
+    requests.push(url);
+    return new Response(JSON.stringify(url.includes('/runs/') ? {head_sha: 'a'.repeat(40)}
+      : {workflow_run: {id: 999, head_sha: 'a'.repeat(40)}, expired: false}));
+  };
+  await assert.rejects(acquire(pin(), dir, {mode: 'artifact', reason: 'fixture'}), /provenance mismatch/);
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every(url => !url.endsWith('/zip')));
+}));
+
+test('pin rejects paths and modes outside the regular-file contract', () => fixture(async dir => {
+  for (const change of [{path: '../llc'}, {path: '/llc'}, {mode: 0o777}, {mode: undefined}]) {
+    const p = pin(); Object.assign(p.files[0], change);
+    await assert.rejects(acquire(p, dir), /invalid bootstrap file pin/);
+  }
 }));

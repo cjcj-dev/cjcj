@@ -9,7 +9,7 @@ const files = JSON.parse(fs.readFileSync(listPath, 'utf8'));
 const pin = {version: 1, repository: process.env.GITHUB_REPOSITORY,
   run: Number(process.env.GITHUB_RUN_ID), attempt: Number(process.env.GITHUB_RUN_ATTEMPT),
   commit: process.env.GITHUB_SHA, artifact: Number(process.env.BOOTSTRAP_ARTIFACT_ID),
-  files: files.map(file => ({path: file.path, artifact_sha256: file.sha256, release_sha256: file.sha256, asset: 1}))};
+  files: files.map(file => ({path: file.path, mode: file.mode, artifact_sha256: file.sha256, release_sha256: file.sha256, asset: 1}))};
 validatePin(pin);
 for (const file of files) {
   const source = path.join(root, file.path);
