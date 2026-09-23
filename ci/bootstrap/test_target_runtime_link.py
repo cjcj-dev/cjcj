@@ -43,7 +43,7 @@ def main():
         with (output / (name + '.stdout')).open('w') as stdout, \
                 (output / (name + '.stderr')).open('w') as stderr:
             rc = subprocess.run(command, stdout=stdout, stderr=stderr,
-                                timeout=120).returncode
+                                cwd=output, timeout=120).returncode
         passed = rc == 0 and (output / product).is_file()
         results[name] = {'command': command, 'compiler_rc': rc, 'passed': passed,
                          'objects': {p.name: digest(p) for p in sorted(temps.glob('*.o'))}}
