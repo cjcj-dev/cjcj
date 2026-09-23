@@ -62,7 +62,10 @@ jobs:
               out.write(f'BUILT_DYLIB_SHA256={sha}\n')
           PY
       - name: Verify exact loaded library and C API
-        run: python3 ci/llvm-dylib/verify.py depot/dylib "$LLVM_SHA" "$BUILT_DYLIB_SHA256" | tee depot/dylib/loaded.json
+        run: |
+          set -euo pipefail
+          python3 ci/llvm-dylib/verify.py depot/dylib "$LLVM_SHA" "$BUILT_DYLIB_SHA256" | tee depot/dylib/loaded.json
+          test -s depot/dylib/loaded.json
       - name: Exercise bootstrap identity check with real libraries
         run: |
           set -euo pipefail
