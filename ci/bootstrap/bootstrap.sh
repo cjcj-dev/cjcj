@@ -656,7 +656,7 @@ stage0() {
 
 assemble_stage1_sdk() {
   local sdk="$1" compiler="$2" std="$3"
-  cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --force"
+  cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target $(printf '%q' "$HOST_TUPLE") --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --force"
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
   local compiler_sha=planned
   [ "$DRY" -eq 1 ] || compiler_sha=$(sha256 "$compiler")
