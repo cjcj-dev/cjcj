@@ -57,6 +57,8 @@ def main():
     cases = [
         ('windows-first', [WINDOWS, LINUX], 'mask', 'target', 0, None),
         ('linux-first', [LINUX, WINDOWS], 'mask', 'target', 0, None),
+        ('verify-windows-first', [WINDOWS, LINUX], 'mask', 'target', 0, None),
+        ('verify-linux-first', [LINUX, WINDOWS], 'mask', 'target', 0, None),
         ('single-tuple-control', [LINUX], 'mask', 'target', 0, None),
         ('missing-target', [WINDOWS], 'mask', 'target', 1, '目标里缺构建目标 runtime/lib/' + LINUX),
         ('source-mismatch', [LINUX], 'mask', 'target', 1, 'runtime 平台不一致'),
@@ -75,11 +77,12 @@ def main():
         shutil.copyfile('/bin/true', base / 'bin/cjc')
         (base / 'bin/cjc').chmod(0o755)
         (base / 'envsetup.sh').write_text(':\n')
-        for index, tpl in enumerate(order):
+        for tpl in order:
             directory = base / 'runtime/lib' / tpl
             directory.mkdir(parents=True)
             # Windows is an independent sentinel: it must not be selected or replaced.
-            shutil.copyfile(libs / 'none.so', directory / 'libcangjie-runtime.so')
+            initial = 'mask.so' if name.startswith('verify-') and tpl == LINUX else 'none.so'
+            shutil.copyfile(libs / initial, directory / 'libcangjie-runtime.so')
         source_tuple = WINDOWS if name == 'source-mismatch' else LINUX
         source = work / 'install/runtime/lib' / source_tuple
         source.mkdir(parents=True)
@@ -88,7 +91,10 @@ def main():
         cmd = ['bash', str(product), '--from', str(base), '--to', str(target), '--' + role]
         if role == 'target':
             cmd.append(LINUX)
-        cmd += ['--runtime', str(work / 'install')]
+        if not name.startswith('verify-'):
+            cmd += ['--runtime', str(work / 'install')]
+        base_order = subprocess.check_output(['find', str(base / 'runtime/lib'), '-mindepth', '1',
+                                              '-maxdepth', '1', '-type', 'd'], text=True).splitlines()
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         (work / 'run.log').write_text(result.stdout)
         # Every case reaches this nonfatal target assertion, including failed assembly.
@@ -107,7 +113,7 @@ def main():
             mask = 1 if variant.startswith('both') else 0
             ok &= 'mask=' + str(mask) in result.stdout
         record = dict(name=name, assertion_executed=True, passed=bool(ok), rc=result.returncode,
-                      expected_rc=expected, command=cmd, product_sha256=sha(product),
+                      expected_rc=expected, command=cmd, base_enumeration=base_order, product_sha256=sha(product),
                       elf_sha256=sha(base / 'bin/cjc'), so_sha256=sha(source / 'libcangjie-runtime.so'))
         (work / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
         return record
