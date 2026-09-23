@@ -597,7 +597,7 @@ verify_exe() {                    # verify_exe <路径> <是否跑 --version>
     die "$f 在 SDK 环境下仍有 $nf 个未解析依赖"
   fi
   if [ "$runver" = 1 ]; then
-    in_sdk_env "$f" --version >/dev/null 2>&1 \
+    in_sdk_env "$f" --version >/dev/null \
       || die "$f --version 非零退出（已 source $TO/envsetup.sh）"
   fi
   printf '  %-34s ELF ✓  ldd ✓%s\n' "${f#$TO/}" "$([ "$runver" = 1 ] && printf '  --version ✓')"
