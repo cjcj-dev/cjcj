@@ -70,7 +70,7 @@ jobs:
           test -f "$wrong"
           sha256sum depot/dylib/libLLVM-15.so "$wrong" | tee depot/dylib/control-libraries.sha256
           DYLIB_TEST_FILE="$PWD/depot/dylib/libLLVM-15.so" DYLIB_TEST_WRONG_FILE="$wrong" \
-            node --test ci/release/prepare_bootstrap_inputs.test.mjs | tee depot/dylib/input-tests.log
+            node --test ci/release/prepare_bootstrap_inputs.test.mjs ci/release/prepare_llvm_dylib.test.mjs | tee depot/dylib/input-tests.log
       - uses: ./.github/actions/sccache-report
         if: always()
         with:

@@ -4,6 +4,7 @@ import argparse
 import ctypes
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 
@@ -14,9 +15,13 @@ def verify(directory, llvm_sha, expected_sha):
     manifest = json.loads((root / 'manifest.json').read_text())
     if manifest['llvm_sha'] != llvm_sha:
         raise ValueError('LLVM_DYLIB_SOURCE_MISMATCH')
-    actual = hashlib.sha256(library.read_bytes()).hexdigest()
+    library_bytes = library.read_bytes()
+    actual = hashlib.sha256(library_bytes).hexdigest()
     if len(expected_sha) != 64 or actual != expected_sha or manifest['sha256'] != expected_sha:
         raise ValueError(f'LLVM_DYLIB_SHA256_MISMATCH expected={expected_sha} actual={actual}')
+    stamps = set(re.findall(rb'CJLLVM-COMMIT:([0-9a-z-]+)', library_bytes))
+    if stamps != {llvm_sha.encode()}:
+        raise ValueError(f'LLVM_DYLIB_SOURCE_STAMP_MISMATCH expected={llvm_sha} actual={sorted(stamps)}')
     symbols = subprocess.check_output(['nm', '--defined-only', str(library)], text=True)
     defined = {line.split()[-1].split('@')[0] for line in symbols.splitlines() if line.split()}
     required = [f'LLVMInitialize{target}{part}' for target in ('X86', 'ARM', 'AArch64')
