@@ -8,6 +8,8 @@ both compiler launchers and the disk cache (the GHA sccache backend stays off).
 A publication is a candidate, not an automatic pin update. Record its run ID,
 attempt, artifact ID and library SHA256 in the reviewed platform pin. Source
 jobs download that exact artifact into the depot's `dylib/` subdirectory.
+The platform pins currently refer to build-fixed-llc run 35805605717,
+attempt 1 (x86_64 artifact 10728985379, AArch64 artifact 10728610568).
 `prepare_bootstrap_inputs.mjs` accepts `CJCJ_BOOTSTRAP_DYLIB_ARTIFACT`, otherwise
 `CJCJ_BOOTSTRAP_COLOUR_DYLIB`, otherwise the pinned depot's `dylib/`. It validates
 `LLVM_DYLIB_SHA256` before exporting `CJCJ_BOOTSTRAP_COLOUR_LLVM_SO` and
