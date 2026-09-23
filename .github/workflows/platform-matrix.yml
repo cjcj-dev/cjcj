@@ -47,6 +47,18 @@ jobs:
         env:
           RUNTIME_BUILD_TYPE: relwithdebinfo
         run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+      - name: Upload runtime gate diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: colour-runtime-gate-diagnostics
+          path: |
+            runtime-source/runtime/**/gate_run.log
+            runtime-source/runtime/**/gate_tally.txt
+            runtime-source/runtime/**/gc_unit_gate.status
+            runtime-source/runtime/**/test-logs/**
+          if-no-files-found: warn
+          retention-days: 7
       - name: Package same-build runtime pair
         id: package
         run: |
