@@ -3,6 +3,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {acquire} from './bootstrap_store.mjs';
 import {verifyRuntime} from './colour_runtime.mjs';
 import {prepareCppHeaders} from '../bootstrap/prepare_cpp_headers.mjs';
 
@@ -45,7 +46,6 @@ const hostSdk = process.env.CJCJ_SRCBUILD_HOST_SDK
     ? path.join(process.env.HOME, '.cjv', 'toolchains', process.env.CJCJ_TOOLCHAIN)
     : '');
 const buildRoot = process.env.CANGJIE_BUILD_ROOT || '';
-const fixedLlvm = process.env.CJCJ_FIXED_LLVM_DIR || '';
 
 const base = firstExisting([hostSdk]);
 if (!base) {
@@ -65,14 +65,22 @@ const astSupport = pinnedInput(process.env.CJCJ_BOOTSTRAP_AST_ARTIFACT, [
   findFile(path.join(base, 'lib'), (_full, name) => name === 'libcangjie-ast-support.a'),
 ], '', process.env.AST_SUPPORT_SHA256, 'ast-support archive SHA256');
 
-const colourTuple = pinnedInput(process.env.CJCJ_BOOTSTRAP_TUPLE_ARTIFACT, [
-  process.env.CJCJ_BOOTSTRAP_COLOUR_TUPLE,
-  process.env.LLVM_SHA && process.env.CANGJIE_COMPILER_SHA
-    ? path.join(process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot',
-      process.env.LLVM_SHA, process.env.CANGJIE_COMPILER_SHA)
-    : '',
-  fixedLlvm,
-], 'SHA256SUMS', process.env.LLVM_TUPLE_SUMS_SHA, 'colour tuple SHA256SUMS');
+const pinPath = process.env.CJCJ_BOOTSTRAP_INPUTS_PIN
+  || new URL('../bootstrap_inputs_pin.json', import.meta.url);
+const inputPin = JSON.parse(fs.readFileSync(pinPath, 'utf8'));
+const colourTuple = await acquire(inputPin,
+  process.env.CJCJ_BOOTSTRAP_INPUTS_WORK || path.join(process.env.RUNNER_TEMP || buildRoot || '.', 'bootstrap-inputs'), {
+    mode: process.env.CJCJ_BOOTSTRAP_SOURCE || 'release',
+    reason: process.env.CJCJ_BOOTSTRAP_SOURCE_REASON || '',
+    depot: process.env.CJCJ_BOOTSTRAP_COLOUR_TUPLE || (process.env.LLVM_SHA && process.env.CANGJIE_COMPILER_SHA
+      ? path.join(process.env.CJCJ_LLVM_DEPOT_ROOT || '/root/llvmdepot', process.env.LLVM_SHA, process.env.CANGJIE_COMPILER_SHA) : ''),
+  });
+// The pin is reviewed source, never a digest learned from this run's download.
+const tupleSums = path.join(colourTuple, 'SHA256SUMS');
+if (!/^[0-9a-f]{64}$/.test(process.env.LLVM_TUPLE_SUMS_SHA || '')
+    || sha256File(tupleSums) !== process.env.LLVM_TUPLE_SUMS_SHA) {
+  throw new Error(`colour tuple SHA256SUMS disagrees with ci/llvm_pin.env: ${colourTuple}`);
+}
 
 const colourRt = verifyRuntime();
 

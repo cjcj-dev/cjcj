@@ -32,7 +32,7 @@ export function fixture(check) {
     fs.cpSync(dylib, dylibFallback, {recursive: true});
     const env = {...process.env, CJCJ_BOOTSTRAP_COLOUR_DYLIB: dylibFallback, CJCJ_BOOTSTRAP_DYLIB_ARTIFACT: dylib, LLVM_DYLIB_SHA256: dylibSha, GITHUB_ENV: '', CJCJ_SRCBUILD_HOST_SDK: sdk,
       CJCJ_BOOTSTRAP_HOST_LLVM_SO: so, CJCJ_BOOTSTRAP_AST_SUPPORT: ast,
-      CJCJ_BOOTSTRAP_TUPLE_ARTIFACT: artifact, CJCJ_BOOTSTRAP_COLOUR_TUPLE: fallback,
+      CJCJ_BOOTSTRAP_SOURCE: 'depot', CJCJ_BOOTSTRAP_SOURCE_REASON: 'fixture explicit depot', CJCJ_BOOTSTRAP_INPUTS_WORK: path.join(dir, 'work'), CJCJ_BOOTSTRAP_COLOUR_TUPLE: fallback,
       CJCJ_BOOTSTRAP_CPP_SRC: sdk, LLVM_SHA: 'a'.repeat(40),
       CJCJ_BOOTSTRAP_CJCJ_SHA: 'b'.repeat(40), LLVM_TUPLE_SUMS_SHA: digest,
       AST_SUPPORT_SHA256: crypto.createHash('sha256').update('ast fixture').digest('hex')};
@@ -49,8 +49,24 @@ export function fixture(check) {
     Object.assign(env, {CJCJ_BOOTSTRAP_COLOUR_RT: runtime, COLOUR_RT_RUN_ID: '123',
       COLOUR_RT_RUN_ATTEMPT: '1', COLOUR_RT_ARTIFACT_ID: '456',
       COLOUR_RT_MANIFEST_SHA256: runtimeDigest(path.join(runtime, 'manifest.json'))});
+    const pinFile = path.join(dir, 'pin.json');
+    fs.writeFileSync(pinFile, JSON.stringify({version: 1, repository: 'cjcj-dev/cjcj', run: 123,
+      attempt: 1, artifact: 456, commit: 'b'.repeat(40), files: [{path: 'SHA256SUMS', mode: 0o644,
+      asset: 789, artifact_sha256: digest, release_sha256: digest}]}));
+    env.CJCJ_BOOTSTRAP_INPUTS_PIN = pinFile;
+    const transport = path.join(dir, 'transport.mjs');
+    fs.writeFileSync(transport, `
+      import fs from 'node:fs';
+      globalThis.fetch = async url => {
+        if (url !== 'https://api.github.com/repos/cjcj-dev/cjcj/releases/assets/789')
+          throw new Error('unexpected source request: ' + url);
+        console.log('FIXTURE_RELEASE_REQUEST ' + url);
+        return new Response(fs.readFileSync(process.env.FIXTURE_RELEASE_FILE));
+      };
+    `);
+    env.FIXTURE_RELEASE_FILE = path.join(artifact, 'SHA256SUMS');
     const run = () => spawnSync(process.execPath,
-      [new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname], {env, encoding: 'utf8'});
-    check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run});
+      ['--import', transport, new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname], {env, encoding: 'utf8'});
+    check({env, artifact, fallback, dylib, dylibSha, so, runtime, runtimeSource, run, pinFile});
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }

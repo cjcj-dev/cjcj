@@ -1,0 +1,348 @@
+name: Reusable LLVM tools
+
+on:
+  workflow_call:
+    outputs:
+      tuple_artifact_id:
+        description: Fixed static tuple artifact from this run.
+        value: ${{ jobs.static-tuple.outputs.artifact_id }}
+    inputs:
+      cache-component:
+        description: Isolated dylib cache namespace; reuse for a cold/warm pair.
+        required: false
+        type: string
+        default: llvm-dylib
+      publish_dylib:
+        description: Build a separate three-target in-process LLVM dylib candidate.
+        required: false
+        type: boolean
+        default: false
+      publish_tuple:
+        description: Publish a new static tuple candidate (consumers normally use the fixed artifact).
+        required: false
+        type: boolean
+        default: false
+      platforms:
+        description: >-
+          Comma-separated llvm platforms to build. Empty or "all" builds every
+          one, which is what a caller that wants the whole set still gets.
+        required: false
+        type: string
+        default: all
+      cold_cache:
+        description: Empty this job's restored sccache directory before compiling (control arm).
+        required: false
+        type: boolean
+        default: false
+      rebuild:
+        description: Bypass the whole-artifact LLVM tools cache and compile again (sccache measurement).
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  in-process-dylib:
+    if: inputs.publish_dylib
+    uses: ./.github/workflows/build-llvm-dylib.yml
+    with:
+      cache-component: ${{ inputs.cache-component }}
+
+  # A release phase pays for its own tuple and no one else's, so the matrix has to
+  # be selectable. Actions cannot filter a literal matrix, so build the list here
+  # and hand it over as JSON. The tuples themselves stay in one place.
+  plan:
+    name: Select tuples
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - name: Select the requested tuples
+        id: select
+        env:
+          REQUESTED: ${{ inputs.platforms || 'all' }}
+          PUBLISH_TUPLE: ${{ inputs.publish_tuple }}
+        run: |
+          set -euo pipefail
+          all='[
+            {"runner":"ubuntu-22.04","platform":"linux_x86_64","llvm-targets":"X86","portability-tag":"glibc2.35"},
+            {"runner":"ubuntu-24.04-arm","platform":"linux_aarch64","llvm-targets":"AArch64","portability-tag":"glibc2.39"},
+            {"runner":"macos-15","platform":"darwin_aarch64","llvm-targets":"AArch64","portability-tag":"macos15"},
+            {"runner":"macos-15-intel","platform":"darwin_x86_64","llvm-targets":"X86","portability-tag":"macos15"}
+          ]'
+          if [ -z "$REQUESTED" ] || [ "$REQUESTED" = all ]; then
+            selected="$all"
+          else
+            selected="$(printf '%s' "$all" | jq -c --arg want "$REQUESTED" \
+              '[.[] | select(.platform as $p | ($want | split(",") | map(gsub("^ +| +$";"")) | index($p)))]')"
+          fi
+          count="$(printf '%s' "$selected" | jq 'length')"
+          # An empty matrix makes every dependent job skip while reporting nothing
+          # wrong, which is the shape this repo keeps getting bitten by.
+          if [ "$count" -eq 0 ]; then
+            echo "no tuple matched platforms=$REQUESTED" >&2
+            exit 1
+          fi
+          # Only an explicit publication builds the X86 static colour tuple.
+          # Source matrix calls consume the immutable artifact from the pin.
+          if [ "$PUBLISH_TUPLE" = true ]; then
+            selected="$(printf '%s' "$selected" | jq -c --argjson all "$all" \
+              '. + [$all[] | select(.platform == "linux_x86_64")] | unique_by(.platform)')"
+          fi
+          echo "selected $count tuple(s) for platforms=$REQUESTED"
+          printf 'matrix=%s\n' "$(printf '%s' "$selected" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
+
+  build-tools:
+    name: ${{ matrix.platform }} / Build tools
+    needs: plan
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+
+      - name: Load LLVM pin
+        id: llvm-pin
+        run: |
+          cat ci/llvm_pin.env >> "$GITHUB_ENV"
+          source ci/llvm_pin.env
+          echo "sha=$LLVM_SHA" >> "$GITHUB_OUTPUT"
+
+      # `rebuild` salts the key with the run id so the restore misses and the
+      # post-step still saves the fresh tools under a key nothing else will read.
+      # The salt is a prefix: the cache service matches stored keys by prefix,
+      # so a suffix salt would let later unsalted lookups restore the salted
+      # entry (release-matrix run 35718484244 restored ...-rebuild-35717971557).
+      - name: Restore LLVM tools cache
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: fixed-toolchain/${{ matrix.platform }}
+          key: ${{ (inputs.rebuild || inputs.cold_cache) && format('rebuild-{0}-', github.run_id) || '' }}fixed-llvm-tools-${{ matrix.platform }}-${{ matrix.portability-tag }}-${{ steps.llvm-pin.outputs.sha }}-${{ env.CANGJIE_COMPILER_SHA }}-${{ hashFiles('.github/workflows/build-fixed-llc.yml', '.github/workflows/build-llvm-tools.yml', 'ci/llvm-tools-manifest.mjs', 'runtime_shim/cjselfhost_llvmshim.cpp') }}
+
+      # Every C++ compile below (llc, opt, flatc, the shim object) goes through
+      # sccache; the report step at the end fails the job if none did.
+      - name: Start sccache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/sccache
+        with:
+          component: llvm
+          platform: ${{ matrix.platform }}
+          pin: ${{ steps.llvm-pin.outputs.sha }}
+          cache-size: 3G
+
+      - name: Cold sccache control arm
+        if: inputs.cold_cache && steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SCCACHE_DIR" = "$RUNNER_TEMP/sccache-llvm"
+          "$SCCACHE_PATH" --stop-server
+          rm -rf "$SCCACHE_DIR"
+          mkdir -p "$SCCACHE_DIR"
+          "$SCCACHE_PATH" --start-server
+          "$SCCACHE_PATH" --zero-stats
+          echo "SCCACHE_RESTORED_KEY=" >> "$GITHUB_ENV"
+          echo 'SCCACHE_CONTROL=cold directory emptied before first compilation'
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang ninja-build cmake
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS' && steps.cache.outputs.cache-hit != 'true'
+        run: brew install ninja
+
+      - name: Checkout source repositories
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git init llvm-fork
+          git -C llvm-fork remote add origin "$LLVM_URL"
+          git -C llvm-fork fetch --depth=1 origin "$LLVM_SHA"
+          git -C llvm-fork checkout --detach FETCH_HEAD
+          test "$(git -C llvm-fork rev-parse HEAD)" = "$LLVM_SHA"
+
+          git clone --filter=blob:none --no-checkout "$CANGJIE_COMPILER_URL" cangjie-compiler
+          git -C cangjie-compiler sparse-checkout set schema
+          git -C cangjie-compiler fetch --depth=1 origin "$CANGJIE_COMPILER_SHA"
+          git -C cangjie-compiler checkout --detach "$CANGJIE_COMPILER_SHA"
+          test "$(git -C cangjie-compiler rev-parse HEAD)" = "$CANGJIE_COMPILER_SHA"
+
+          git clone --filter=blob:none --no-checkout "$FLATBUFFERS_URL" flatbuffers
+          git -C flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
+          git -C flatbuffers checkout --detach "$FLATBUFFERS_SHA"
+          test "$(git -C flatbuffers rev-parse HEAD)" = "$FLATBUFFERS_SHA"
+
+      - name: Build LLVM tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cmake -G Ninja -S llvm-fork/llvm -B llc-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DLLVM_LINK_LLVM_DYLIB=OFF \
+            -DLLVM_BUILD_LLVM_DYLIB=OFF \
+            -DLLVM_ENABLE_RTTI=OFF \
+            -DLLVM_TARGETS_TO_BUILD="${{ matrix.llvm-targets }}" \
+            -DLLVM_ENABLE_PROJECTS="" \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_CXX_FLAGS="-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string"
+          ninja -C llc-build llc opt
+          mkdir -p "fixed-toolchain/${{ matrix.platform }}"
+          gzip -n -c -9 llc-build/bin/llc > "fixed-toolchain/${{ matrix.platform }}/llc.gz"
+          gzip -n -c -9 llc-build/bin/opt > "fixed-toolchain/${{ matrix.platform }}/opt.gz"
+          if command -v sha256sum >/dev/null; then
+            llc_sha="$(sha256sum llc-build/bin/llc | awk '{print $1}')"
+            opt_sha="$(sha256sum llc-build/bin/opt | awk '{print $1}')"
+          else
+            llc_sha="$(shasum -a 256 llc-build/bin/llc | awk '{print $1}')"
+            opt_sha="$(shasum -a 256 llc-build/bin/opt | awk '{print $1}')"
+          fi
+          {
+            printf 'PLATFORM=%s\n' '${{ matrix.platform }}'
+            printf 'LLVM_SHA=%s\n' "$LLVM_SHA"
+            printf 'CANGJIE_COMPILER_SHA=%s\n' "$CANGJIE_COMPILER_SHA"
+            printf 'FLATBUFFERS_SHA=%s\n' "$FLATBUFFERS_SHA"
+            printf 'LLC_SHA256=%s\n' "$llc_sha"
+            printf 'OPT_SHA256=%s\n' "$opt_sha"
+          } > "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+
+      - name: Generate LLVM shim
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cmake -G Ninja -S flatbuffers -B flatbuffers-build \
+            -DFLATBUFFERS_BUILD_TESTS=OFF \
+            -DFLATBUFFERS_BUILD_FLATLIB=OFF \
+            -DFLATBUFFERS_BUILD_SHAREDLIB=OFF
+          ninja -C flatbuffers-build flatc
+          mkdir -p shim-generated/flatbuffers
+          flatbuffers-build/flatc --no-warnings -c -o shim-generated/flatbuffers \
+            cangjie-compiler/schema/ModuleFormat.fbs
+          ${SCCACHE_PATH:+"$SCCACHE_PATH"} clang++ -std=c++17 -O2 -fPIC -fno-rtti -fno-exceptions \
+            -Illvm-fork/llvm/include -Illc-build/include \
+            -Iflatbuffers/include -Ishim-generated \
+            -c runtime_shim/cjselfhost_llvmshim.cpp \
+            -o "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
+          if command -v sha256sum >/dev/null; then
+            shim_sha="$(sha256sum "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          else
+            shim_sha="$(shasum -a 256 "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          fi
+          printf 'SHIM_SHA256=%s\n' "$shim_sha" >> \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+
+      - name: Report sccache
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/sccache-report
+        with:
+          component: llvm
+          platform: ${{ matrix.platform }}
+          require-compiles: ${{ job.status == 'success' }}
+
+      - name: Verify LLVM tools
+        run: |
+          mkdir -p "$RUNNER_TEMP/fixed-llvm-tools"
+          for tool in llc opt; do
+            gunzip -c "fixed-toolchain/${{ matrix.platform }}/${tool}.gz" \
+              > "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            chmod +x "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            file "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            if [ "${{ runner.os }}" = macOS ]; then
+              otool -L "$RUNNER_TEMP/fixed-llvm-tools/$tool"
+            else
+              ldd_output="$(ldd "$RUNNER_TEMP/fixed-llvm-tools/$tool")"
+              printf '%s\n' "$ldd_output"
+              test -z "$(printf '%s\n' "$ldd_output" | grep 'not found' || true)"
+            fi
+            "$RUNNER_TEMP/fixed-llvm-tools/$tool" --version | head -5
+          done
+          if command -v sha256sum >/dev/null; then
+            llc_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/llc" | awk '{print $1}')"
+            opt_sha="$(sha256sum "$RUNNER_TEMP/fixed-llvm-tools/opt" | awk '{print $1}')"
+          else
+            llc_sha="$(shasum -a 256 "$RUNNER_TEMP/fixed-llvm-tools/llc" | awk '{print $1}')"
+            opt_sha="$(shasum -a 256 "$RUNNER_TEMP/fixed-llvm-tools/opt" | awk '{print $1}')"
+          fi
+          grep -Fx "PLATFORM=${{ matrix.platform }}" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLVM_SHA=$LLVM_SHA" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "CANGJIE_COMPILER_SHA=$CANGJIE_COMPILER_SHA" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "FLATBUFFERS_SHA=$FLATBUFFERS_SHA" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "LLC_SHA256=$llc_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          grep -Fx "OPT_SHA256=$opt_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          file "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o"
+          if command -v sha256sum >/dev/null; then
+            shim_sha="$(sha256sum "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          else
+            shim_sha="$(shasum -a 256 "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" | awk '{print $1}')"
+          fi
+          grep -Fx "SHIM_SHA256=$shim_sha" \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          node ci/llvm-tools-manifest.mjs validate native \
+            "fixed-toolchain/${{ matrix.platform }}/llvm-tools.manifest"
+          shim_exports="$(nm -C "fixed-toolchain/${{ matrix.platform }}/cjselfhost_llvmshim.o" \
+            | grep -cE ' T _?(LLVMGlobalObjectAddStringAttribute|LLVMSelfhost|CJOF)')"
+          test "$shim_exports" -ge 90
+          echo "shim exported symbols: $shim_exports"
+          for file in llc.gz opt.gz llvm-tools.manifest cjselfhost_llvmshim.o; do
+            if command -v sha256sum >/dev/null; then
+              sha256sum "fixed-toolchain/${{ matrix.platform }}/$file"
+            else
+              shasum -a 256 "fixed-toolchain/${{ matrix.platform }}/$file"
+            fi
+          done
+
+      - name: Upload LLVM tools
+        uses: actions/upload-artifact@v7
+        with:
+          name: fixed-llvm-tools-${{ matrix.platform }}
+          path: fixed-toolchain/${{ matrix.platform }}
+          if-no-files-found: error
+          retention-days: 7
+
+  static-tuple:
+    outputs:
+      artifact_id: ${{ steps.static-artifact.outputs.artifact-id }}
+    if: inputs.publish_tuple
+    name: Publish static colour LLVM tuple
+    needs: build-tools
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: fixed-llvm-tools-linux_x86_64
+          path: fixed-toolchain/linux_x86_64
+      - name: Publish the shared eight-payload layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          REPO_ROOT="$GITHUB_WORKSPACE"
+          CJCJ_FIXED_LLVM_DIR="$GITHUB_WORKSPACE/fixed-toolchain/linux_x86_64"
+          source ci/llvm-tuple-layout.sh
+          publish_fixed_tuple_to_depot "$RUNNER_TEMP/llvm-tuple"
+          tuple="$RUNNER_TEMP/llvm-tuple/$LLVM_SHA/$CANGJIE_COMPILER_SHA"
+          (cd "$tuple" && sha256sum --strict -c SHA256SUMS)
+          echo "LLVM_TUPLE_SUMS_SHA=$(sha256sum "$tuple/SHA256SUMS" | awk '{print $1}')" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "STATIC_TUPLE=$tuple" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v7
+        id: static-artifact
+        with:
+          name: static-llvm-tuple-linux_x86_64
+          path: ${{ env.STATIC_TUPLE }}
+          if-no-files-found: error
+          retention-days: 90

@@ -4,20 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fixture} from './prepare_bootstrap_fixture.mjs';
 
-test('artifact wins over an available fallback tuple', () => fixture(({artifact, run}) => {
-  const result = run();
-  assert.equal(result.status, 0, result.stderr);
-  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_TUPLE=${artifact}\n`), result.stdout);
-  console.log('ASSERT artifact-precedence executed');
-}));
-
 test('reviewed sums pin rejects altered tuple bytes', () => fixture(({env, fallback, run}) => {
   // Isolate the digest contract from artifact-selection policy.
   delete env.CJCJ_BOOTSTRAP_TUPLE_ARTIFACT;
   fs.writeFileSync(path.join(fallback, 'SHA256SUMS'), 'altered');
   const result = run();
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /SHA256SUMS disagrees/);
+  assert.match(result.stderr, /bootstrap digest mismatch: SHA256SUMS/);
   console.log('ASSERT reviewed-pin rejection executed');
 }));
 
@@ -25,7 +18,7 @@ test('explicit tuple fallback remains usable with the same reviewed pin', () => 
   delete env.CJCJ_BOOTSTRAP_TUPLE_ARTIFACT;
   const result = run();
   assert.equal(result.status, 0, result.stderr);
-  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_TUPLE=${fallback}\n`));
+  assert.match(result.stdout, /BOOTSTRAP_VERIFIED SHA256SUMS/);
   console.log('ASSERT fallback executed');
 }));
 
@@ -39,8 +32,34 @@ test('nested kkk2 depot remains a fallback under the same reviewed pin', () => f
   fs.copyFileSync(path.join(fallback, 'SHA256SUMS'), path.join(nested, 'SHA256SUMS'));
   const result = run();
   assert.equal(result.status, 0, result.stderr);
-  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_TUPLE=${nested}\n`));
+  assert.match(result.stdout, /BOOTSTRAP_VERIFIED SHA256SUMS/);
   console.log('ASSERT nested-depot fallback executed');
+}));
+
+
+test('prepare defaults to persistent source despite unavailable artifact run', () => fixture(({env, pinFile, run}) => {
+  delete env.CJCJ_BOOTSTRAP_SOURCE;
+  delete env.CJCJ_BOOTSTRAP_SOURCE_REASON;
+  const pin = JSON.parse(fs.readFileSync(pinFile));
+  pin.run = 999999999;
+  fs.writeFileSync(pinFile, JSON.stringify(pin));
+  const result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /BOOTSTRAP_SOURCE mode=release/);
+  const output = /^CJCJ_BOOTSTRAP_COLOUR_TUPLE=(.+)$/m.exec(result.stdout)?.[1];
+  assert.ok(output, result.stdout);
+  assert.equal(fs.readFileSync(path.join(output, 'SHA256SUMS'), 'utf8'), 'reviewed fixture sums');
+  console.log('ASSERT prepare persistent bytes exported with unavailable artifact run');
+}));
+
+test('prepare refuses changed persistent input before exporting bootstrap environment', () => fixture(({env, artifact, run}) => {
+  delete env.CJCJ_BOOTSTRAP_SOURCE;
+  fs.writeFileSync(path.join(artifact, 'SHA256SUMS'), 'replaced persistent sums');
+  const result = run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /bootstrap digest mismatch: SHA256SUMS/);
+  assert.doesNotMatch(result.stdout, /^CJCJ_BOOTSTRAP_COLOUR_TUPLE=/m);
+  console.log('ASSERT prepare persistent digest rejection executed');
 }));
 
 // Separate assertions make selection and integrity cuts independently visible.
@@ -80,4 +99,14 @@ test('kkk2 ast build directory fallback uses the reviewed pin', () => fixture(({
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_AST_SUPPORT=${ast}\n`));
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256=${env.AST_SUPPORT_SHA256}\n`));
   console.log('ASSERT ast kkk2 fallback and reviewed digest executed');
+}));
+
+// Independent pins: store integrity must not replace the reviewed tuple manifest pin.
+test('reviewed tuple manifest pin rejects valid stored bytes from a different tuple', () => fixture(({env, run}) => {
+  env.LLVM_TUPLE_SUMS_SHA = 'f'.repeat(64);
+  const result = run();
+  assert.match(result.stderr, /colour tuple SHA256SUMS disagrees with ci\/llvm_pin.env/);
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(result.stdout, /^CJCJ_BOOTSTRAP_COLOUR_TUPLE=/m);
+  console.log('ASSERT independent reviewed tuple manifest pin executed');
 }));

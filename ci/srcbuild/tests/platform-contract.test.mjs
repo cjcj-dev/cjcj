@@ -222,7 +222,8 @@ function substitute(value, inputs) {
 
 test('source-build workflow connects every native runner to its LLVM and std artifact', async () => {
   const workflow = await fs.readFile(path.join(root, '.github/workflows/srcbuild.yml'), 'utf8');
-  const fixed = await fs.readFile(path.join(root, '.github/workflows/build-fixed-llc.yml'), 'utf8');
+  const fixed = await fs.readFile(path.join(root, '.github/workflows/build-llvm-tools.yml'), 'utf8');
+  assert.ok(workflow.includes('uses: ./.github/workflows/build-llvm-tools.yml'), 'source build must call the reusable tuple producer');
   const cells = [
     ['linux-aarch64', 'ubuntu-24.04-arm', 'linux_aarch64'],
     ['darwin-arm64', 'macos-15', 'darwin_aarch64'],
@@ -238,7 +239,7 @@ test('source-build workflow connects every native runner to its LLVM and std art
     assert.equal(row.runner, runner, `${target} runner`);
     assert.equal(row.llvm_platform, llvmPlatform, `${target} llvm_platform`);
     const tuple = planTable(fixed).find(entry => entry.platform === llvmPlatform);
-    assert.ok(tuple, `fixed-llc plan has no tuple for ${llvmPlatform}`);
+    assert.ok(tuple, `LLVM producer plan has no tuple for ${llvmPlatform}`);
     assert.equal(tuple.runner, runner, `${llvmPlatform} runner`);
   }
   // The dependency, not one spelling of it: the list form appeared when the

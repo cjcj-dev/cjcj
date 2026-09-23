@@ -10,7 +10,7 @@ consumer=ci/release/prepare_bootstrap_inputs.mjs
 cp "$consumer" "$work/consumer.saved"
 restore() { cp "$work/consumer.saved" "$consumer"; }
 trap restore EXIT
-run() { node --test --test-reporter=tap ci/release/prepare_bootstrap_inputs.test.mjs; }
+run() { node --test --test-reporter=tap --test-name-pattern='ast|archive' ci/release/prepare_bootstrap_inputs.test.mjs; }
 sha256sum "$consumer" > "$work/green.sha256"
 run > "$work/green.log" 2>&1
 python3 - <<'PY'
@@ -28,9 +28,9 @@ run > "$work/selection-cut.log" 2>&1
 selection_rc=$?
 set -e
 test "$selection_rc" -ne 0
-grep -F 'not ok 5 - ast artifact wins' "$work/selection-cut.log"
-grep -F 'not ok 7 - missing selected ast artifact' "$work/selection-cut.log"
-grep -Fx '# pass 6' "$work/selection-cut.log"
+grep -E '^not ok [0-9]+ - ast artifact wins' "$work/selection-cut.log"
+grep -E '^not ok [0-9]+ - missing selected ast artifact' "$work/selection-cut.log"
+grep -Fx '# pass 2' "$work/selection-cut.log"
 grep -Fx '# fail 2' "$work/selection-cut.log"
 restore
 # Bypass just the AST caller's reviewed pin, leaving the tuple guard intact.
@@ -49,8 +49,8 @@ run > "$work/digest-cut.log" 2>&1
 digest_rc=$?
 set -e
 test "$digest_rc" -ne 0
-grep -F 'not ok 6 - ast reviewed pin rejects changed bytes' "$work/digest-cut.log"
-grep -Fx '# pass 7' "$work/digest-cut.log"
+grep -E '^not ok [0-9]+ - ast reviewed pin rejects changed bytes' "$work/digest-cut.log"
+grep -Fx '# pass 3' "$work/digest-cut.log"
 grep -Fx '# fail 1' "$work/digest-cut.log"
 restore
 run > "$work/restored.log" 2>&1
