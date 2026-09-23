@@ -21,7 +21,7 @@
 #   --from <x>      基线：⭐ cjv 工具链名 或 绝对路径
 #   --to <dir>      目标目录（⛔ 不许在 /root/sdks 或 /root/.cjv 下）
 #   --host          ⭐ 这是【宿主】SDK ⇒ ⭐⭐ 断言 runtime **未着色**（mask=0）
-#   --target        ⭐ 这是【目标】SDK ⇒ ⭐⭐ 断言 runtime **着色**（mask=1）
+#   --target [tuple] 显式构建目标；省略时由 uname 推导宿主 tuple。⭐ 这是【目标】SDK ⇒ ⭐⭐ 断言 runtime **着色**（mask=1）
 #
 # 可选（各自可省；⭐ 只替换给了的）:
 #   --llc <file>    --opt <file>    --cjpm <file>    --cjc <file>
@@ -93,13 +93,17 @@ if [ "${1:-}" = env ]; then
   exit 0
 fi
 
-FROM= TO= ROLE= LLC= OPT= LLVM_SO= LLVM_TUPLE= CJPM= CJC= RUNTIME= RUNTIME_COMMIT= STD= VERIFY_HOST_RT= LINKNAME= FORCE=0
+FROM= TO= ROLE= LLC= OPT= LLVM_SO= LLVM_TUPLE= CJPM= CJC= RUNTIME= RUNTIME_COMMIT= TARGET_TUPLE= STD= VERIFY_HOST_RT= LINKNAME= FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --from) FROM="${2:?}"; shift 2;;
     --to) TO="${2:?}"; shift 2;;
     --host) ROLE=host; shift;;
-    --target) ROLE=target; shift;;
+    --target)
+      ROLE=target; shift
+      if [ $# -gt 0 ] && [[ "$1" != --* ]]; then
+        TARGET_TUPLE="$1"; shift
+      fi;;
     --llc) LLC="${2:?}"; shift 2;;
     --opt) OPT="${2:?}"; shift 2;;
     --llvm-so) LLVM_SO="${2:?}"; shift 2;;
@@ -119,6 +123,15 @@ done
 [ -n "$FROM" ] || die "缺 --from"
 [ -n "$TO" ]   || die "缺 --to"
 [ -n "$ROLE" ] || die "缺 --host 或 --target —— ⭐ 这一条不许省：宿主/目标的着色要求相反"
+# The native build target is independent of the SDK directory enumeration order.
+if [ -z "$TARGET_TUPLE" ]; then
+  case "$(uname -s)/$(uname -m)" in
+    Linux/x86_64) TARGET_TUPLE=linux_x86_64_cjnative;;
+    Linux/aarch64) TARGET_TUPLE=linux_aarch64_cjnative;;
+    *) die "无法推导构建目标 tuple；请显式指定 --target <tuple>";;
+  esac
+fi
+[[ "$TARGET_TUPLE" =~ ^[a-z0-9]+_[a-z0-9_]+_cjnative$ ]] || die "无效构建目标 tuple: $TARGET_TUPLE"
 if [ -n "$LLVM_SO" ] && [ -n "$LLVM_TUPLE" ]; then
   die '--llvm-so 与 --llvm-tuple 不可同时使用'
 fi
@@ -434,10 +447,10 @@ resolve_runtime_pair() {
 if [ -n "$RUNTIME" ]; then
   [ -d "$RUNTIME" ] || die "runtime 源目录不存在: $RUNTIME"
   resolve_runtime_pair "$RUNTIME"
-  d=$(find "$TO/runtime/lib" -maxdepth 1 -mindepth 1 -type d | head -1)
-  [ -n "$d" ] || die "目标里找不到 runtime/lib/<平台>"
-  # 平台名以目标为准；源侧 tuple 必须对得上（或仅一份）
-  tgt_tuple=$(basename "$d")
+  tgt_tuple="$TARGET_TUPLE"
+  d="$TO/runtime/lib/$tgt_tuple"
+  [ -d "$d" ] || die "目标里缺构建目标 runtime/lib/$tgt_tuple"
+  # Both installation and validation consume the same build target tuple.
   if [ "$RT_LAYOUT" = flat ]; then
     for base in libcangjie-runtime.so libboundscheck.so; do
       [ -f "$d/$base" ] || die "flat runtime: 基线里没有 runtime/lib/$tgt_tuple/$base，拒绝新建"
@@ -543,9 +556,9 @@ fi
 
 # ⭐⭐⭐ 着色断言 —— ⭐ 宿主与目标要求**相反**，⛔ 这一条最常被漏
 echo "[3/5] 着色断言（role=$ROLE）"
-RTSO=$(find "$TO/runtime/lib" -name libcangjie-runtime.so | head -1)
-[ -n "$RTSO" ] || die "找不到 libcangjie-runtime.so"
-MASK=$(nm -D "$RTSO" 2>/dev/null | grep -c g_cjLoadBadMask || true)
+RTSO="$TO/runtime/lib/$TARGET_TUPLE/libcangjie-runtime.so"
+[ -f "$RTSO" ] || die "找不到构建目标 runtime: $RTSO"
+MASK=$(nm -D --defined-only "$RTSO" 2>/dev/null | awk '$NF ~ /^g_cjLoadBadMask(@@?[^[:space:]]+)?$/ {n++} END {print n+0}')
 case "$ROLE" in
   host)   [ "$MASK" = 0 ] || die "⛔ 宿主 SDK 的 runtime **着色**了（mask=$MASK）⇒ ⭐ 宿主 cjc 会在 0.5 秒内 SEGV";;
   target) [ "$MASK" = 1 ] || die "⛔ 目标 SDK 的 runtime **未着色**（mask=$MASK）⇒ ⭐ 编出来的程序拿不到着色 ABI";;
