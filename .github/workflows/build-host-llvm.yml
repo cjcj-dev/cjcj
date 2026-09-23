@@ -38,7 +38,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_C_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
             -DCMAKE_CXX_FLAGS_RELWITHDEBINFO='-O2 -g1 -DNDEBUG' \
-            -DCMAKE_CXX_STANDARD=17 -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_ENABLE_RTTI=OFF \
+            -DCMAKE_CXX_STANDARD=17 -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_ENABLE_RTTI=ON \
             -DBUILD_SHARED_LIBS=OFF -DLLVM_BUILD_LLVM_DYLIB=ON -DLLVM_LINK_LLVM_DYLIB=ON \
             -DLLVM_TARGETS_TO_BUILD='X86;ARM;AArch64' -DLLVM_ENABLE_PROJECTS='' \
             -DCMAKE_CXX_FLAGS='-include cstdint -include unordered_map -include map -include vector -include string'
@@ -47,6 +47,9 @@ jobs:
           mkdir -p host-artifact
           cp -L host-build/lib/libLLVM-15.so host-artifact/libLLVM-15.so
           nm --defined-only host-artifact/libLLVM-15.so > host-artifact/defined-symbols.txt
+          # The official host llc imports this RTTI symbol. Colour-dylib flags
+          # cannot be reused for the official host ABI.
+          grep -E ' _ZTIN4llvm2cl6OptionE(@@?[^[:space:]]+)?$' host-artifact/defined-symbols.txt
           c++filt < host-artifact/defined-symbols.txt > host-artifact/demangled-symbols.txt
           grep -F 'llvm::SelectionDAGBuilder::visitRelocate(' host-artifact/demangled-symbols.txt
           python3 - <<'PY'
