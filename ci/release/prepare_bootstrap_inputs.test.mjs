@@ -100,3 +100,13 @@ test('kkk2 ast build directory fallback uses the reviewed pin', () => fixture(({
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256=${env.AST_SUPPORT_SHA256}\n`));
   console.log('ASSERT ast kkk2 fallback and reviewed digest executed');
 }));
+
+// Independent pins: store integrity must not replace the reviewed tuple manifest pin.
+test('reviewed tuple manifest pin rejects valid stored bytes from a different tuple', () => fixture(({env, run}) => {
+  env.LLVM_TUPLE_SUMS_SHA = 'f'.repeat(64);
+  const result = run();
+  assert.match(result.stderr, /colour tuple SHA256SUMS disagrees with ci\/llvm_pin.env/);
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(result.stdout, /^CJCJ_BOOTSTRAP_COLOUR_TUPLE=/m);
+  console.log('ASSERT independent reviewed tuple manifest pin executed');
+}));

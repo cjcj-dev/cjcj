@@ -3,9 +3,11 @@
 `build-fixed-llc.yml` is the publication entry point. In one workflow
 run it calls the existing fixed tuple producer, waits for its artifact ID, then
 publishes exactly that artifact's reviewed file list to a dedicated prerelease
-`bootstrap-<run>-<attempt>-<artifact>`. The publisher reads back both the artifact
+`bootstrap-<run>-<attempt>-<artifact>-prerelease`. The publisher reads back both the artifact
 and every Release asset before publishing the draft or emitting its candidate
-pin. It does not overwrite an existing tag or asset. The pin carries both
+pin. Both release mutations explicitly set `prerelease: true` and
+`make_latest: "false"`; formal release publication requires separate approval.
+It does not overwrite an existing tag or asset. The pin carries both
 SHA-256 values (required to agree), source provenance, immutable asset IDs and
 file modes. Release assets have no Actions artifact retention deadline.
 
