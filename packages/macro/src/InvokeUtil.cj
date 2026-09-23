@@ -162,18 +162,14 @@ struct RuntimeHeapParamC {
     let exemptionThreshold: Float64
     let heapUtilization: Float64
     let heapGrowth: Float64
-    let allocationRate: Float64
-    let allocationWaitTime: UIntNative
 
     init(regionSize: UIntNative, heapSize: UIntNative, exemptionThreshold: Float64, heapUtilization: Float64,
-        heapGrowth: Float64, allocationRate: Float64, allocationWaitTime: UIntNative) {
+        heapGrowth: Float64) {
         this.regionSize = regionSize
         this.heapSize = heapSize
         this.exemptionThreshold = exemptionThreshold
         this.heapUtilization = heapUtilization
         this.heapGrowth = heapGrowth
-        this.allocationRate = allocationRate
-        this.allocationWaitTime = allocationWaitTime
     }
 }
 
@@ -265,8 +261,6 @@ public let HEAP_SIZE: UIntNative = 1024 * 1024
 public let EXEMPTION_THRESHOLD: Float64 = 0.8
 public let HEAP_UTILIZATION: Float64 = 0.6
 public let HEAP_GROWTH: Float64 = 0.15
-public let ALLOCATION_RATE: Float64 = 10240.0
-public let ALLOCATION_WAIT_TIME: UIntNative = 1000
 public let GC_THRESHOLD: UIntNative = 20
 public let GARBAGE_THRESHOLD: Float64 = 0.5
 public let GC_INTERVAL: UInt64 = 150
@@ -394,8 +388,7 @@ private func GetStackSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative 
 
 private func makeRuntimeConfig(envs: ArrayList<(String, String)>): RuntimeConfigParamC {
     return RuntimeConfigParamC(
-        RuntimeHeapParamC(REGION_SIZE, GetHeapSizeFromEnv(envs), EXEMPTION_THRESHOLD, HEAP_UTILIZATION, HEAP_GROWTH,
-            ALLOCATION_RATE, ALLOCATION_WAIT_TIME),
+        RuntimeHeapParamC(REGION_SIZE, GetHeapSizeFromEnv(envs), EXEMPTION_THRESHOLD, HEAP_UTILIZATION, HEAP_GROWTH),
         RuntimeGCParamC(GC_THRESHOLD, GARBAGE_THRESHOLD, GC_INTERVAL, BACKUP_GC_INTERNAL, GC_THREADS),
         RuntimeLogParamC(6),
         RuntimeConcurrencyParamC(STACK_SIZE, GetStackSizeFromEnv(envs), PROCESSOR_NUM))

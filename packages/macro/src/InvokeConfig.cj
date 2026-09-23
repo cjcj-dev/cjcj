@@ -17,18 +17,14 @@ public class HeapParam {
     public var exemptionThreshold: Float64
     public var heapUtilization: Float64
     public var heapGrowth: Float64
-    public var allocationRate: Float64
-    public var allocationWaitTime: UIntNative
 
     public init(regionSize: UIntNative, heapSize: UIntNative, exemptionThreshold: Float64,
-        heapUtilization: Float64, heapGrowth: Float64, allocationRate: Float64, allocationWaitTime: UIntNative) {
+        heapUtilization: Float64, heapGrowth: Float64) {
         this.regionSize = regionSize
         this.heapSize = heapSize
         this.exemptionThreshold = exemptionThreshold
         this.heapUtilization = heapUtilization
         this.heapGrowth = heapGrowth
-        this.allocationRate = allocationRate
-        this.allocationWaitTime = allocationWaitTime
     }
 }
 
