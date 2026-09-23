@@ -87,6 +87,24 @@ jobs:
           platform: ubuntu-22.04
           require-compiles: ${{ job.status == 'success' }}
 
+
+      - name: Upload runtime gate diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: colour-runtime-gate-diagnostics
+          path: |
+            runtime-source/runtime/**/gate_run.log
+            runtime-source/runtime/**/gc_unit_gate.status
+            runtime-source/runtime/**/runtime-build-config.txt
+            runtime-source/runtime/tests/gc_unit/build*/**/*.log
+            runtime-source/runtime/tests/gc_unit/build*/**/*.receipt
+            runtime-source/runtime/tests/gc_unit/build*/**/*identity*
+            runtime-source/runtime/tests/gc_unit/build*/**/*provenance*
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
   fixed-llvm-tuples:
     if: ${{ !inputs.runtime_only }}
     name: Build fixed LLVM tuples
