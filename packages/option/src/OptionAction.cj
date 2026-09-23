@@ -547,7 +547,7 @@ private func isRuntimeDecimal(value: String, includeZero: Bool): Bool {
 private func isSupportedRuntimeConfig(name: String): Bool {
     return name == "cjHeapSize" || name == "cjHeapSwap" || name == "cjRegionSize" ||
         name == "cjExemptionThreshold" || name == "cjHeapUtilization" || name == "cjHeapGrowth" ||
-        name == "cjAllocationRate" || name == "cjAllocationWaitTime" || name == "cjGCThreshold" ||
+        name == "cjGCThreshold" ||
         name == "cjGarbageThreshold" || name == "cjGCInterval" || name == "cjBackupGCInterval" ||
         name == "cjStackSize" || name == "cjProcessorNum" || name == "cjEnableGC" ||
         name == "cjPinnedRegionSize" || name == "cjLargeThresholdSize" || name == "cjCacheRatio" ||
@@ -559,7 +559,7 @@ private func isValidRuntimeConfigValue(name: String, value: String): Bool {
         name == "cjStackSize" || name == "cjPinnedRegionSize" || name == "cjLargeThresholdSize") {
         return isRuntimeSize(value)
     }
-    if (name == "cjAllocationWaitTime" || name == "cjGCInterval" || name == "cjBackupGCInterval") {
+    if (name == "cjGCInterval" || name == "cjBackupGCInterval") {
         return isRuntimeTime(value)
     }
     if (name == "cjExemptionThreshold" || name == "cjHeapUtilization" || name == "cjCacheRatio") {
@@ -568,7 +568,7 @@ private func isValidRuntimeConfigValue(name: String, value: String): Bool {
         return false
     }
     if (name == "cjGarbageThreshold") { return isRuntimeDecimal(value, true) }
-    if (name == "cjHeapGrowth" || name == "cjAllocationRate") {
+    if (name == "cjHeapGrowth") {
         return isRuntimeDecimal(value, false)
     }
     if (name == "cjProcessorNum" || name == "cjMutatorLockTimeout") {
