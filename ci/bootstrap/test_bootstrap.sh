@@ -66,6 +66,9 @@ make_dry_fixture() {
   printf 'source\n' > "$TMP/src/main.cj"
   printf '#!/usr/bin/env python3\n' > "$TMP/stdsrc/build.py"
   printf 'ast\n' > "$TMP/ast.a"
+  if [ -n "${BOOTSTRAP_AST_ARCHIVE:-}" ]; then
+    cp "$BOOTSTRAP_AST_ARCHIVE" "$TMP/ast.a"
+  fi
   printf 'int host_symbol;\n' > "$TMP/host.c"
   cc -shared -fPIC "$TMP/host.c" -o "$TMP/libLLVM-15.so"
   make_colour_tuple
@@ -635,6 +638,11 @@ case "${1:-test}" in
     make_dry_fixture
     dry_run "$HOST_SHA" 0000000000000000000000000000000000000000000000000000000000000000
     ;;
+  fault-ast-bytes)
+    make_dry_fixture
+    printf 'changed archive bytes\n' >> "$TMP/ast.a"
+    dry_run
+    ;;
   fault-host-colour)
     make_dry_fixture
     cp "$TMP/colour-libLLVM-15.so" "$TMP/libLLVM-15.so"
@@ -790,7 +798,7 @@ case "${1:-test}" in
     echo 'PASS bootstrap dry contracts, controlled build environment, LLVM assembly, and positive controls'
     ;;
   *)
-    echo "usage: $0 [test|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a2|fault-a3|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
+    echo "usage: $0 [test|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a2|fault-a3|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
     exit 2
     ;;
 esac

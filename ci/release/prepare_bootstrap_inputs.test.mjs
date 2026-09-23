@@ -25,7 +25,8 @@ function fixture(check) {
       CJCJ_BOOTSTRAP_HOST_LLVM_SO: so, CJCJ_BOOTSTRAP_AST_SUPPORT: ast,
       CJCJ_BOOTSTRAP_TUPLE_ARTIFACT: artifact, CJCJ_BOOTSTRAP_COLOUR_TUPLE: fallback,
       CJCJ_BOOTSTRAP_CPP_SRC: sdk, LLVM_SHA: 'a'.repeat(40),
-      CJCJ_BOOTSTRAP_CJCJ_SHA: 'b'.repeat(40), LLVM_TUPLE_SUMS_SHA: digest};
+      CJCJ_BOOTSTRAP_CJCJ_SHA: 'b'.repeat(40), LLVM_TUPLE_SUMS_SHA: digest,
+      AST_SUPPORT_SHA256: crypto.createHash('sha256').update('ast fixture').digest('hex')};
     const run = () => spawnSync(process.execPath,
       [new URL('./prepare_bootstrap_inputs.mjs', import.meta.url).pathname], {env, encoding: 'utf8'});
     check({env, artifact, fallback, run});
@@ -69,4 +70,43 @@ test('nested kkk2 depot remains a fallback under the same reviewed pin', () => f
   assert.equal(result.status, 0, result.stderr);
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_TUPLE=${nested}\n`));
   console.log('ASSERT nested-depot fallback executed');
+}));
+
+// Separate assertions make selection and integrity cuts independently visible.
+test('ast artifact wins over an available fallback archive', () => fixture(({env, artifact, run}) => {
+  const ast = path.join(artifact, 'libcangjie-ast-support.a');
+  fs.writeFileSync(ast, 'ast fixture');
+  env.CJCJ_BOOTSTRAP_AST_ARTIFACT = ast;
+  const result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_AST_SUPPORT=${ast}\n`));
+  console.log('ASSERT ast artifact-precedence executed');
+}));
+
+test('ast reviewed pin rejects changed bytes while tuple stays valid', () => fixture(({env, run}) => {
+  fs.writeFileSync(env.CJCJ_BOOTSTRAP_AST_SUPPORT, 'wrong archive');
+  const result = run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /ast-support archive SHA256 disagrees/);
+  console.log('ASSERT ast reviewed-pin rejection executed');
+}));
+
+test('missing selected ast artifact cannot fall back', () => fixture(({env, artifact, run}) => {
+  env.CJCJ_BOOTSTRAP_AST_ARTIFACT = path.join(artifact, 'missing.a');
+  const result = run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /ENOENT/);
+}));
+
+test('kkk2 ast build directory fallback uses the reviewed pin', () => fixture(({env, fallback, run}) => {
+  delete env.CJCJ_BOOTSTRAP_AST_SUPPORT;
+  env.CANGJIE_BUILD_ROOT = fallback;
+  fs.mkdirSync(path.join(fallback, 'lib'));
+  const ast = path.join(fallback, 'lib/libcangjie-ast-support.a');
+  fs.writeFileSync(ast, 'ast fixture');
+  const result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_AST_SUPPORT=${ast}\n`));
+  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256=${env.AST_SUPPORT_SHA256}\n`));
+  console.log('ASSERT ast kkk2 fallback and reviewed digest executed');
 }));
