@@ -17,5 +17,5 @@ export cjHeapSize="$STD_BUILD_HEAP"
 sha256sum "$CANGJIE_HOME/bin/cjc" "$GC_UNIT_CJC_RUNTIME_LIB_DIR"/*.so
 cd "$source_root/stdlib"
 python3 build.py clean
-python3 build.py build -t release -j "$STD_BUILD_JOBS" --target-lib="$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative"
+/usr/bin/time -v python3 build.py build -t release -j "$STD_BUILD_JOBS" --target-lib="$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative"
 python3 build.py install --prefix "$installed"
