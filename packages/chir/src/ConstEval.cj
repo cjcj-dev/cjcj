@@ -190,7 +190,6 @@ private class IVal2CHIR {
                 TypeKind.TYPE_UINT64 | TypeKind.TYPE_UINT_NATIVE =>
                 if (val.IsIntLike()) {
                     let constant = builder.CreateConstant(ty, IntLiteral(val.GetInt()), parent)
-                    parent.AppendExpression(constant)
                     Some(constant)
                 } else {
                     None
@@ -198,7 +197,6 @@ private class IVal2CHIR {
             case TypeKind.TYPE_FLOAT16 | TypeKind.TYPE_FLOAT32 | TypeKind.TYPE_FLOAT64 =>
                 if (val.IsFloatLike()) {
                     let constant = builder.CreateConstant(ty, FloatLiteral(val.GetFloat()), parent)
-                    parent.AppendExpression(constant)
                     Some(constant)
                 } else {
                     None
@@ -206,7 +204,6 @@ private class IVal2CHIR {
             case TypeKind.TYPE_RUNE =>
                 if (val.kind == InterpreterValueKind.IRUNE) {
                     let createdConstant194 = builder.CreateConstant(ty, RuneLiteral(Rune(val.GetInt())), parent)
-                    parent.AppendExpression(createdConstant194)
                     Some(createdConstant194)
                 } else {
                     None
@@ -214,7 +211,6 @@ private class IVal2CHIR {
             case TypeKind.TYPE_BOOLEAN =>
                 if (val.kind == InterpreterValueKind.IBOOL) {
                     let createdConstant200 = builder.CreateConstant(ty, BoolLiteral(val.GetBool()), parent)
-                    parent.AppendExpression(createdConstant200)
                     Some(createdConstant200)
                 } else {
                     None
@@ -222,7 +218,6 @@ private class IVal2CHIR {
             case _ =>
                 if (val.kind == InterpreterValueKind.INULLPTR) {
                     let createdConstant206 = builder.CreateConstant(ty, NullLiteral(), parent)
-                    parent.AppendExpression(createdConstant206)
                     Some(createdConstant206)
                 } else {
                     None
@@ -232,6 +227,7 @@ private class IVal2CHIR {
 
     public func ConvertToChir(ty: Type, val: InterpreterValue, parent: Block): Option<Value> {
         if (let Some(constant) <- TryConvertToConstant(ty, val, parent)) {
+            parent.AppendExpression(constant)
             return ExprResultAsValue(constant)
         }
         return match (ty.GetTypeKind()) {
