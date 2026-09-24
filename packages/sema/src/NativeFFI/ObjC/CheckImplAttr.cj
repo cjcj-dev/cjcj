@@ -3,15 +3,15 @@ package cjcj::sema.NativeFFI.ObjC
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
 
-public class CheckMirrorSubtypeAttr <: Handler<TypeCheckContext> {
-    // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckMirrorSubtypeAttr.cpp:20-34.
+public class CheckImplAttr <: Handler<TypeCheckContext> {
+    // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckImplAttr.cpp:20-34.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         let ty = ctx.target.GetTy().getOrThrow()
-        if (!TypeMapper.IsValidObjCMirrorSubtype(ty)) {
+        if (!IsObjCMirrorSubtype(ty)) {
             return
         }
 
-        if (TypeMapper.IsValidObjCMirror(ty) || TypeMapper.IsObjCImpl(ty)) {
+        if (IsObjCMirror(ty) || IsObjCImpl(ty)) {
             return
         }
 

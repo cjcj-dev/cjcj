@@ -71,14 +71,14 @@ public class Transpiler {
 
     // C++ Transpiler.cpp:63-84.
     private func CheckFunction(arg: Decl): Bool {
-        if (ctx.factory.IsGeneratedMember(arg)) {
+        if (IsGeneratedMember(arg)) {
             return false
         }
         if (!arg.TestAttr(Attribute.PUBLIC)) {
             return false
         }
         if (let InteropType.CJ_Mapping <- interopType) {
-            if (!TypeMapper.IsObjCCJMappingMember(arg) || arg.IsOpen()) {
+            if (!IsObjCCJMappingMember(arg) || arg.IsOpen()) {
                 return false
             }
         }
@@ -97,7 +97,7 @@ public class Transpiler {
         if (!arg.TestAttr(Attribute.PUBLIC)) {
             return false
         }
-        if (ctx.factory.IsGeneratedMember(arg)) {
+        if (IsGeneratedMember(arg)) {
             return false
         }
         if (!arg.TestAttr(Attribute.CONSTRUCTOR)) {
@@ -111,7 +111,7 @@ public class Transpiler {
             return false
         }
         if (let InteropType.CJ_Mapping <- interopType) {
-            if (!TypeMapper.IsObjCCJMappingMember(arg)) {
+            if (!IsObjCCJMappingMember(arg)) {
                 return false
             }
         }
@@ -130,7 +130,7 @@ public class Transpiler {
             return false
         }
         if (let InteropType.CJ_Mapping <- interopType) {
-            if (!TypeMapper.IsObjCCJMappingMember(arg)) {
+            if (!IsObjCCJMappingMember(arg)) {
                 return false
             }
         }
@@ -139,13 +139,13 @@ public class Transpiler {
 
     // C++ Transpiler.cpp:144-163.
     private func CollectDependencies(ty: Ty): Unit {
-        if (TypeMapper.IsObjCObjectType(ty)) {
-            if (TypeMapper.IsObjCId(ty)) {
+        if (IsObjCObjectType(ty)) {
+            if (IsObjCId(ty)) {
                 return
             }
             if (!ty.IsCoreOptionType()) {
                 let declTy = Ty.GetDeclOfTy(Some(ty)).getOrThrow()
-                if (declTy.identifier.Val() != ctx.nameGenerator.GetObjCDeclName(decl)) {
+                if (declTy.identifier.Val() != NameGenerator.GetObjCDeclName(decl)) {
                     dependencies.add(declTy)
                 }
             }
@@ -282,7 +282,7 @@ public class Transpiler {
         }
 
         for (dependency in dependencies) {
-            let identifier = ctx.nameGenerator.GetObjCDeclName(dependency)
+            let identifier = NameGenerator.GetObjCDeclName(dependency)
             if (dependency.astKind == ASTKind.INTERFACE_DECL) {
                 Emitter.EmitForwardDeclarationProtocol(dependenciesStream, identifier)
             } else {
@@ -301,7 +301,7 @@ public class Transpiler {
                     if (!ctor.TestAttr(Attribute.PUBLIC) && ctor.outerDecl != Some(decl)) {
                         continue
                     }
-                    if (ctx.factory.IsGeneratedMember(ctor)) {
+                    if (IsGeneratedMember(ctor)) {
                         continue
                     }
                     let funcBody = ctor.funcBody.getOrThrow()
@@ -349,7 +349,7 @@ public class Transpiler {
     // C++ Transpiler.cpp:399-432.
     private func GetObjCClassMetainfo(classDecl: Option<ClassDecl>): EmittableObjCClassMetainfo {
         let concreteClassDecl = classDecl.getOrThrow()
-        let className = ctx.nameGenerator.GetObjCDeclName(concreteClassDecl)
+        let className = NameGenerator.GetObjCDeclName(concreteClassDecl)
         let superClassPtr = concreteClassDecl.GetSuperClassDecl()
         let isClassInheritedFromClass = if (let Some(superClass) <- superClassPtr) {
             superClass.identifier.Val() != OBJECT_NAME
@@ -357,19 +357,19 @@ public class Transpiler {
             false
         }
         let superclassName = if (isClassInheritedFromClass) {
-            ctx.nameGenerator.GetObjCDeclName(superClassPtr.getOrThrow())
+            NameGenerator.GetObjCDeclName(superClassPtr.getOrThrow())
         } else {
             ""
         }
         let isFinal = if (let InteropType.CJ_Mapping <- interopType) {
-            TypeMapper.IsOneWayMapping(decl) && !decl.IsOpen()
+            IsOneWayMapping(decl) && !decl.IsOpen()
         } else {
             false
         }
         let interfaceNames = ArrayList<String>()
         for (interfaceTy in concreteClassDecl.GetSuperInterfaceTys()) {
-            if (!TypeMapper.IsObjCId(interfaceTy)) {
-                interfaceNames.add(ctx.nameGenerator.GetObjCDeclName(interfaceTy.decl.getOrThrow()))
+            if (!IsObjCId(interfaceTy)) {
+                interfaceNames.add(NameGenerator.GetObjCDeclName(interfaceTy.decl.getOrThrow()))
             }
         }
         var result = EmittableObjCClassMetainfo()
@@ -401,10 +401,10 @@ public class Transpiler {
             result.`type` = ObjCParamMapper.MapCJTypeToObjCType(typedefs, varDecl.GetTy().getOrThrow())
         }
         result.isReadwrite = varDecl.isVar && !SkipSetterForValueTypeDecl(decl)
-        result.name = ctx.nameGenerator.GetObjCDeclName(varDecl)
+        result.name = NameGenerator.GetObjCDeclName(varDecl)
         let varTy = varDecl.GetTy().getOrThrow()
-        let bridge = (TypeMapper.IsObjCObjectType(varTy) || TypeMapper.IsObjCBlock(varTy)) &&
-            !TypeMapper.IsObjCCJMapping(varTy)
+        let bridge = (IsObjCObjectType(varTy) || IsObjCBlock(varTy)) &&
+            !IsObjCCJMapping(varTy)
         result.getter = ObjCParamMapper.GetGetterForProp(result, ctx.nameGenerator.GetObjCGetterName(varDecl),
             ctx.nameGenerator.GetFieldGetterWrapperName((varDecl as VarDecl).getOrThrow()), bridge)
         if (result.isReadwrite) {
@@ -445,8 +445,8 @@ public class Transpiler {
             {param: FuncParam => param.identifier.Val()}, sep: ", ", pre: ", ", suf: "", force: false)
         result.convertedParams = ObjCParamMapper.ConvertParamsListToArgsListToString(funcBody.paramLists,
             !result.isStatic)
-        result.bridge = (TypeMapper.IsObjCObjectType(retTy) || TypeMapper.IsObjCBlock(retTy)) &&
-            !TypeMapper.IsObjCCJMapping(retTy)
+        result.bridge = (IsObjCObjectType(retTy) || IsObjCBlock(retTy)) &&
+            !IsObjCCJMapping(retTy)
         return result
     }
 
@@ -454,7 +454,7 @@ public class Transpiler {
     private func GetObjCCtorMetainfo(funcDecl: FuncDecl): EmittableObjCFuncMetainfo {
         var result = EmittableObjCFuncMetainfo()
         let ctor = if (let InteropType.ObjC_Mirror <- interopType) {
-            ctx.factory.GetGeneratedImplCtor(decl, funcDecl).getOrThrow()
+            GetObjCImplRegDataCtor((decl as ClassDecl).getOrThrow(), funcDecl).getOrThrow()
         } else {
             funcDecl
         }
@@ -496,9 +496,9 @@ public class Transpiler {
     // C++ Transpiler.cpp:561-567.
     private func WriteToHeader(content: String): Unit {
         let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
+            NameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".h"), content)
     }
@@ -506,9 +506,9 @@ public class Transpiler {
     // C++ Transpiler.cpp:569-575.
     private func WriteToSource(content: String): Unit {
         let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
+            NameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".m"), content)
     }

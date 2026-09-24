@@ -154,9 +154,9 @@ public class ObjCTranspilerCJMapping {
             return
         }
         let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
+            NameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         GenerateImports(objCDeclName)
         GenerateForwardDeclarations()
@@ -281,8 +281,8 @@ public class ObjCTranspilerCJMapping {
         var result = if (retTy.IsUnit()) { "" } else { RETURN_KEYWORD }
         result += " "
         var nativeCall = ""
-        if ((TypeMapper.IsObjCObjectType(retTy) || TypeMapper.IsObjCBlock(retTy)) &&
-            !TypeMapper.IsObjCCJMapping(retTy)) {
+        if ((IsObjCObjectType(retTy) || IsObjCBlock(retTy)) &&
+            !IsObjCCJMapping(retTy)) {
             nativeCall += "(__bridge_transfer " + MapCJTypeToObjCType(retTy) + ")"
         }
         nativeCall += name + "("
@@ -293,7 +293,7 @@ public class ObjCTranspilerCJMapping {
             }
         }
         nativeCall += ")"
-        result += if (TypeMapper.IsObjCCJMapping(retTy)) {
+        result += if (IsObjCCJMapping(retTy)) {
             WrapperCallByInitForCJMappingReturn(retTy, nativeCall)
         } else {
             nativeCall
@@ -348,8 +348,8 @@ public class ObjCTranspilerCJMapping {
     private func GenerateForwardDeclarations(): Unit {
         let dependencies = HashSet<Decl>()
         func walker(ty: Ty): Unit {
-            if (TypeMapper.IsObjCObjectType(ty)) {
-                if (!TypeMapper.IsObjCId(ty) && !ty.IsCoreOptionType()) {
+            if (IsObjCObjectType(ty)) {
+                if (!IsObjCId(ty) && !ty.IsCoreOptionType()) {
                     dependencies.add(Ty.GetDeclOfTy(Some(ty)).getOrThrow())
                 }
             }
@@ -392,7 +392,7 @@ public class ObjCTranspilerCJMapping {
                 let funcDecl = (declPtr as FuncDecl).getOrThrow()
                 let funcTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow()
                 let retTy = funcTy.retTy
-                let retType = if (TypeMapper.IsObjCObjectType(retTy) || TypeMapper.IsObjCBlock(retTy)) {
+                let retType = if (IsObjCObjectType(retTy) || IsObjCBlock(retTy)) {
                     VOID_POINTER_TYPE
                 } else {
                     MapCJTypeToObjCType(retTy)
@@ -437,14 +437,14 @@ public class ObjCTranspilerCJMapping {
             AddToPreamble(GenerateImport("\"" + superClassPtr.getOrThrow().identifier.Val() + ".h\""))
         }
         if (let InteropType.CJ_Mapping <- interopType) {
-            if (TypeMapper.IsOneWayMapping(decl) && !decl.IsOpen()) {
+            if (IsOneWayMapping(decl) && !decl.IsOpen()) {
                 AddWithIndent(FINAL_MODIFIER, target: GenerationTarget.HEADER)
             }
         }
         let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
+            NameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         var resultH = INTERFACE_KEYWORD + " " + objCDeclName + " : "
         let superClassName = if (isClassInheritedFromClass) {
@@ -456,7 +456,7 @@ public class ObjCTranspilerCJMapping {
         let interfacesVec = ArrayList<InterfaceTy>()
         if (let Some(concreteClassDecl) <- classDecl) {
             for (interfaceTy in concreteClassDecl.GetSuperInterfaceTys()) {
-                if (!TypeMapper.IsObjCId(interfaceTy)) {
+                if (!IsObjCId(interfaceTy)) {
                     interfacesVec.add(interfaceTy)
                 }
             }
@@ -567,7 +567,7 @@ public class ObjCTranspilerCJMapping {
                 continue
             }
             if (let InteropType.CJ_Mapping <- interopType) {
-                if (!TypeMapper.IsObjCCJMappingMember(declPtr)) {
+                if (!IsObjCCJMappingMember(declPtr)) {
                     continue
                 }
             }
@@ -586,7 +586,7 @@ public class ObjCTranspilerCJMapping {
             }
             let genSetter = varDecl.isVar && !SkipSetterForValueTypeDecl(decl)
             let modeModifier = if (genSetter) { READWRITE_MODIFIER } else { READONLY_MODIFIER }
-            let name = ctx.nameGenerator.GetObjCDeclName(varDecl)
+            let name = NameGenerator.GetObjCDeclName(varDecl)
             let getterName = ctx.nameGenerator.GetObjCGetterName(varDecl)
             let setterName = ctx.nameGenerator.GetObjCSetterName(varDecl)
             AddWithIndent(GeneratePropertyDeclaration(staticType, modeModifier, mappedType,
@@ -703,7 +703,7 @@ public class ObjCTranspilerCJMapping {
             if (!declPtr.TestAttr(Attribute.PUBLIC)) {
                 continue
             }
-            if (ctx.factory.IsGeneratedMember(declPtr)) {
+            if (IsGeneratedMember(declPtr)) {
                 continue
             }
             if (!declPtr.TestAttr(Attribute.CONSTRUCTOR)) {
@@ -717,12 +717,12 @@ public class ObjCTranspilerCJMapping {
                 continue
             }
             if (let InteropType.CJ_Mapping <- interopType) {
-                if (!TypeMapper.IsObjCCJMappingMember(declPtr)) {
+                if (!IsObjCCJMappingMember(declPtr)) {
                     continue
                 }
             }
             let ctor = if (let InteropType.ObjC_Mirror <- interopType) {
-                ctx.factory.GetGeneratedImplCtor(decl, funcDecl).getOrThrow()
+                GetObjCImplRegDataCtor((decl as ClassDecl).getOrThrow(), funcDecl).getOrThrow()
             } else {
                 funcDecl
             }
@@ -770,7 +770,7 @@ public class ObjCTranspilerCJMapping {
                     if (!ctor.TestAttr(Attribute.PUBLIC) && ctor.outerDecl != Some(decl)) {
                         continue
                     }
-                    if (ctx.factory.IsGeneratedMember(ctor)) {
+                    if (IsGeneratedMember(ctor)) {
                         continue
                     }
                     let funcBody = ctor.funcBody.getOrThrow()
@@ -841,14 +841,14 @@ public class ObjCTranspilerCJMapping {
     // C++ ObjCTranspilerCJMapping.cpp:969-1013.
     private func AddMethods(): Unit {
         for (declPtr in decl.GetMemberDecls()) {
-            if (ctx.factory.IsGeneratedMember(declPtr)) {
+            if (IsGeneratedMember(declPtr)) {
                 continue
             }
             if (!declPtr.TestAttr(Attribute.PUBLIC)) {
                 continue
             }
             if (let InteropType.CJ_Mapping <- interopType) {
-                if (!TypeMapper.IsObjCCJMappingMember(declPtr) || declPtr.IsOpen()) {
+                if (!IsObjCCJMappingMember(declPtr) || declPtr.IsOpen()) {
                     continue
                 }
             }
@@ -940,18 +940,18 @@ public class ObjCTranspilerCJMapping {
 
     private func WriteToHeader(): Unit {
         let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
+            NameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".h"), res)
     }
 
     private func WriteToSource(): Unit {
         let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
+            NameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".m"), resSource)
     }
@@ -1007,18 +1007,18 @@ public class ObjCTranspilerCJMapping {
 
     // C++ ObjCTranspilerCJMapping.cpp:1145-1163.
     private func GenerateArgumentCast(retTy: Ty, value: String): String {
-        if (TypeMapper.IsObjCCJMapping(retTy)) {
+        if (IsObjCCJMapping(retTy)) {
             return value + "." + SELF_WEAKLINK_NAME
         }
         let actualTy = if (retTy.IsCoreOptionType()) { retTy.typeArgs[0] } else { retTy }
-        if (TypeMapper.IsObjCImpl(actualTy)) {
+        if (IsObjCImpl(actualTy)) {
             return CAST_TO_VOID_PTR + value
         }
-        if (TypeMapper.IsObjCMirror(actualTy) || TypeMapper.IsObjCBlock(actualTy) ||
-            TypeMapper.IsObjCCJMappingInterface(actualTy)) {
+        if (IsObjCMirror(actualTy) || IsObjCBlock(actualTy) ||
+            IsObjCCJMappingInterface(actualTy)) {
             return CAST_TO_VOID_PTR_RETAINED + value
         }
-        if (TypeMapper.IsObjCPointer(actualTy)) {
+        if (IsObjCPointer(actualTy)) {
             return CAST_TO_VOID_PTR_UNSAFE + value
         }
         return value
@@ -1029,7 +1029,7 @@ public class ObjCTranspilerCJMapping {
         let objCDeclName = if (let Some(config) <- genericConfig) {
             config.declInstName
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         AddWithIndent(GenerateImport(FOUNDATION_IMPORT), target: GenerationTarget.HEADER)
         AddWithIndent(GenerateImport(STDDEF_IMPORT), target: GenerationTarget.HEADER)
@@ -1259,7 +1259,7 @@ static uint64_t calcMask(Class baseCls, Class selfCls, SEL* methods, int len) {
 
 """
         WriteFunc("- (uint64_t)calcOverrideMask", { =>
-            WriteSeq([Join(["Class baseCls = objc_getClass(\"", ctx.nameGenerator.GetObjCDeclName(decl), "\");"]),
+            WriteSeq([Join(["Class baseCls = objc_getClass(\"", NameGenerator.GetObjCDeclName(decl), "\");"]),
                 "Class selfCls = [self class];",
                 JoinVec<FuncDecl>(overrides, {fn: FuncDecl =>
                     CJC_ASSERT(fn.funcBody.isSome())

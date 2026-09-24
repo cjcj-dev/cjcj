@@ -166,10 +166,10 @@ public enum Attribute {
     | NO_DEBUG_INFO | GENERIC | INTERNAL | COMPILER_ADD | NO_REFLECT_INFO | NO_INLINE
     | NON_RECOMPILE | UNREACHABLE | NO_SIDE_EFFECT | COMMON | SPECIFIC | SKIP_ANALYSIS
     | DESERIALIZED | INITIALIZER | UNSAFE | JAVA_MIRROR | JAVA_IMPL | OBJ_C_MIRROR
-    | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED | DOES_NOT_THROW
+    | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED | DOES_NOT_THROW | OBJ_C_IMPL
     | FAST_NATIVE
     // FEATURE_DEBT(CJCJ_RUNTIME_SPEC §3.2/§7): selfhost-only extension domain;
-    // upstream CHIR AttributeInfo.h still ends its C++ attribute domain at 38.
+    // upstream CHIR AttributeInfo.h still ends its C++ attribute domain at 39.
     | NO_HEAP_ALLOC | NO_WRITE_BARRIER | NO_WRITE_BARRIER_REC | NO_STACK_GROW | SYSTEM_STACK
 }
 
@@ -214,6 +214,7 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.JAVA_HAS_DEFAULT => 36
         case Attribute.PREVIOUSLY_DESERIALIZED => 37
         case Attribute.DOES_NOT_THROW => 38
+        case Attribute.OBJ_C_IMPL => 39
         case Attribute.FAST_NATIVE => 71
         case Attribute.NO_HEAP_ALLOC => 76
         case Attribute.NO_WRITE_BARRIER_REC => 77
@@ -249,6 +250,7 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.NO_SIDE_EFFECT => "noSideEffect"
         case Attribute.NON_RECOMPILE => "nonRecompile"
         case Attribute.OBJ_C_MIRROR => "objCMirror"
+        case Attribute.OBJ_C_IMPL => "objCImpl"
         case Attribute.OPERATOR => "operator"
         case Attribute.PREVIOUSLY_DESERIALIZED => "previouslyDeserialized"
         case Attribute.DOES_NOT_THROW => "doesNotThrow"

@@ -718,7 +718,7 @@ public func CreateVarDecl(varName: String, initializer: Option<Expr>, typeNode: 
     return ret
 }
 
-public func CreateTupleAccess(expr: Expr, index: UInt64): SubscriptExpr {
+public func CreateTupleAccess(expr: Expr, index: UInt64, indexTy!: Option<Ty> = None): SubscriptExpr {
     let ret = SubscriptExpr()
     if (let Some(exprTy) <- expr.GetTy()) {
         if (let Some(tupleTy) <- (exprTy as TupleTy)) {
@@ -726,6 +726,7 @@ public func CreateTupleAccess(expr: Expr, index: UInt64): SubscriptExpr {
             ret.SetTy(tupleTy.typeArgs[Int64(index)])
             ret.baseExpr = expr
             let lit = LitConstExpr(LitConstKind.INTEGER, "${index}")
+            if (Ty.IsTyCorrect(indexTy)) { lit.SetTy(indexTy.getOrThrow()) }
             lit.constNumValue.asInt.SetUint64(index)
             ret.indexExprs.add(lit)
             return ret
@@ -819,4 +820,13 @@ public func CreateFile(path: String): File {
     file.filePath = path
     file.fileName = path
     return file
+}
+
+// Upstream fbf15ec8, AST/Create.cpp:760-767.
+public func CreatePropDecl(): PropDecl {
+    let decl = PropDecl()
+    decl.EnableAttr(Attribute.COMPILER_ADD)
+    decl.EnableAttr(Attribute.IMPLICIT_ADD)
+    decl.toBeCompiled = true
+    return decl
 }

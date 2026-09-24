@@ -15,6 +15,14 @@ private func IsMirror(classDef: ClassDef): Bool {
     return IsObjCMirror(classDef) || IsJavaMirror(classDef)
 }
 
+private func IsObjCImpl(classDef: ClassDef): Bool {
+    return classDef.TestAttr(Attribute.OBJ_C_IMPL)
+}
+
+private func HasInitedGeneratedFromAST(classDef: ClassDef): Bool {
+    return IsMirror(classDef) || IsObjCImpl(classDef)
+}
+
 public class MarkClassHasInited {
     private let builder: CHIRBuilder
 
@@ -23,7 +31,7 @@ public class MarkClassHasInited {
     }
 
     private func AddHasInitedFlagToClassDef(classDef: ClassDef): Unit {
-        if (IsMirror(classDef)) {
+        if (HasInitedGeneratedFromAST(classDef)) {
             return
         }
 
