@@ -9,6 +9,7 @@ import {assertFinalStd} from '../lib/final-std.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
 import {prepareBootstrapHandoff} from '../lib/bootstrap-handoff.mjs';
 import {stdIdentity} from '../lib/final-compiler.mjs';
+import {captureBuildInputs, finishBuildReceipt} from '../lib/source-build-receipt.mjs';
 import {assertWriteBarriers} from '../lib/write-barrier.mjs';
 
 $.stdio = 'inherit';
@@ -204,6 +205,24 @@ const bootstrapCore = path.join(sdk, 'lib', tuple, 'libcangjie-std-core.a');
 if (!await exists(bootstrapCore)) throw new Error(`bootstrap std core missing: ${bootstrapCore}`);
 const bootstrapCoreSha = await sha256(bootstrapCore);
 
+// Record inputs before the compiler runs. The receipt travels with final-std,
+// and stdIdentity binds it into the final compiler's existing handoff manifest.
+const stdBuildInputs = dryRun ? null : await captureBuildInputs({
+  source: stdlibRoot,
+  files: {
+    compiler: path.join(sdk, 'bin', 'cjcj-stage2'),
+    compilerEntry: path.join(sdk, 'bin', 'cjc'),
+    llc: path.join(sdk, 'third_party', 'llvm', 'bin', 'llc-stage1'),
+    opt: path.join(sdk, 'third_party', 'llvm', 'bin', 'opt-stage1'),
+    runtime,
+    boundscheck: path.join(runtimeTarget, 'libboundscheck.so'),
+    llvmManifest: path.join(requiredEnv('CJCJ_FIXED_LLVM_DIR'), 'llvm-tools.manifest'),
+  },
+  recipe: {buildType: stdlibBuildType, target: target.spec.key,
+    commands: ['python3 build.py clean',
+      `python3 build.py build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}`,
+      `python3 build.py install --prefix ${finalStd}`]},
+});
 console.log('[stage3] rebuild final std with stage2');
 if (dryRun) {
   console.log(`STAGE3_DRY_RUN_FAKE_ARTIFACTS=1 final_std=${finalStd}`);
@@ -229,7 +248,11 @@ const finalCoreSha = await sha256(finalCore);
 if (finalCoreSha === bootstrapCoreSha && allowIdenticalStdValue !== '1') {
   throw new Error('stage2-built std is byte-identical to bootstrap std; provenance is inconclusive (set CJCJ_STAGE3_ALLOW_IDENTICAL_STD=1 only after independent proof)');
 }
-if (!dryRun) await assertStdBarriers(finalCore);
+if (!dryRun) {
+  await assertStdBarriers(finalCore);
+  await finishBuildReceipt({source: stdlibRoot, captured: stdBuildInputs,
+    output: path.join(finalStd, 'SOURCE-BUILD.json'), artifacts: {core: finalCore}});
+}
 
 for (const entry of await fs.readdir(finalStd)) {
   await fs.cp(path.join(finalStd, entry), path.join(sdk, entry), {recursive: true, force: true});
