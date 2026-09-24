@@ -4136,7 +4136,10 @@ public class IRBuilder2 <: Resource {
                         }
                     }
                 }
-                if (!skipPayloadOffset && !hasSkippedTypeInfo) {
+                if (skipPayloadOffset) {
+                    // CJNativeIRBuilder.cpp:1256: headerless this consumes the one-header budget.
+                    hasSkippedTypeInfo = true
+                } else if (!hasSkippedTypeInfo) {
                     let payloadOffset = unsafe {
                         LLVMConstInt(LLVMTypeOf(offset), GetPayloadOffset(), 0)
                     }

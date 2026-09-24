@@ -28,6 +28,9 @@ ALL_CHECKS = {
     "trackedArrayStruct",
     "trackedNestedArrayStruct",
     "trackedStructArray",
+    "nestedGenericPayload",
+    "singleGenericPayloadControl",
+    "headedGenericPayloadControl",
 }
 
 
@@ -83,9 +86,9 @@ def compile_fixture(compiler: str, out: pathlib.Path, name: str) -> FixtureRun:
     fixture_out.mkdir(parents=True, exist_ok=True)
     temps = fixture_out / "temps"
     temps.mkdir(parents=True, exist_ok=True)
-    is_tracked_array = name.startswith("tracked_")
-    executable = fixture_out / (f"{name}.a" if is_tracked_array else name)
-    output_options = ["--output-type=staticlib"] if is_tracked_array else []
+    is_static_library = name.startswith("tracked_") or name == "nested_generic_payload"
+    executable = fixture_out / (f"{name}.a" if is_static_library else name)
+    output_options = ["--output-type=staticlib"] if is_static_library else []
     compiled = subprocess.run(
         [compiler, "-g", "--dump-ir", "--dump-to-screen", "--save-temps", str(temps),
          *output_options, "-o", str(executable),
@@ -99,9 +102,9 @@ def compile_fixture(compiler: str, out: pathlib.Path, name: str) -> FixtureRun:
     (fixture_out / "compile.log").write_text(compiled.stdout)
     (fixture_out / "compile.rc").write_text(f"{compiled.returncode}\n")
     run_rc = None
-    run_log = ("not run: static library fixture\n" if compiled.returncode == 0 and is_tracked_array
+    run_log = ("not run: static library fixture\n" if compiled.returncode == 0 and is_static_library
                else "not run: compile failed\n")
-    if compiled.returncode == 0 and not is_tracked_array:
+    if compiled.returncode == 0 and not is_static_library:
         executed = subprocess.run(
             [str(executable)], cwd=ROOT, text=True, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, check=False,
@@ -154,6 +157,9 @@ def main() -> int:
         "trackedArrayStruct": "tracked_array_struct",
         "trackedNestedArrayStruct": "tracked_nested_array_struct",
         "trackedStructArray": "tracked_struct_array",
+        "nestedGenericPayload": "nested_generic_payload",
+        "singleGenericPayloadControl": "nested_generic_payload",
+        "headedGenericPayloadControl": "nested_generic_payload",
     }
     fixture_names = sorted({fixture_for_check[name] for name in selected if name in fixture_for_check})
     fixtures = {name: compile_fixture(args.compiler, args.out, name) for name in fixture_names}
@@ -303,6 +309,45 @@ def main() -> int:
                 raise AssertionError("StructureString representative is not a native typed-leaf read")
 
         checks.append(("structureString", structure_string))
+
+    # Upstream e0c9d5ed, CJNativeIRBuilder.cpp:1256. Observe the actual
+    # offset SSA values consumed by consecutive GEPs in the emitted function.
+    def payload_path(method: str, depth: int, headed: bool) -> None:
+        ir = require_compiled(fixtures["nested_generic_payload"])
+        needle = method if headed else method + "Hv$withoutTI"
+        function = require_function(ir, needle)
+        offsets = re.findall(r"(%[\w.]+) = call i64 @llvm\.cj\.get\.field\.offset\(", function)
+        geps = re.findall(
+            r"(%[\w.]+) = getelementptr inbounds i8, i8(?: addrspace\(1\))?\* "
+            r"(%[\w.]+), i64 (%[\w.]+)", function)
+        if len(offsets) != depth or len(geps) != depth:
+            raise AssertionError(f"{method}: missing field chain: offsets={offsets}, GEPs={geps}")
+        expected = list(offsets)
+        if headed:
+            added = re.findall(r"(%[\w.]+) = add i64 " + re.escape(offsets[0]) + r", 8\b", function)
+            if len(added) != 1:
+                raise AssertionError(f"{method}: object header must be consumed once: {added}")
+            expected[0] = added[0]
+        elif geps[0][1] != "%this":
+            raise AssertionError(f"{method}: fixture did not reach headerless this")
+        observed = [gep[2] for gep in geps]
+        print(f"OBSERVED {method}: field_offsets={offsets} GEP_offsets={observed} expected={expected}")
+        if observed != expected:
+            raise AssertionError(f"{method}: nested GEP must consume the field offset directly; "
+                                 f"expected {expected}, got {observed}")
+        for previous, current in zip(geps, geps[1:]):
+            if current[1] != previous[0]:
+                raise AssertionError(f"{method}: inner GEP lost the outer field address")
+        # The final address must feed the emitted value load/copy, not dead IR.
+        if not re.search(r"(?:bitcast|gcwrite\.generic\.payload)[^\n]*" + re.escape(geps[-1][0]) + r"[, ]", function):
+            raise AssertionError(f"{method}: final field address has no value consumer")
+
+    if "nestedGenericPayload" in selected:
+        checks.append(("nestedGenericPayload", lambda: payload_path("nestedPayloadRead", 2, False)))
+    if "singleGenericPayloadControl" in selected:
+        checks.append(("singleGenericPayloadControl", lambda: payload_path("singlePayloadRead", 1, False)))
+    if "headedGenericPayloadControl" in selected:
+        checks.append(("headedGenericPayloadControl", lambda: payload_path("headedPayloadRead", 2, True)))
 
     results = dict(run_check(name, check) for name, check in checks)
     (args.out / "results.json").write_text(json.dumps(results, sort_keys=True, indent=2) + "\n")
