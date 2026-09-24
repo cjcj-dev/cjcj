@@ -1098,22 +1098,25 @@ public func GetInstMapFromApply(apply: ApplyBase, builder: CHIRBuilder): HashMap
     return instMap
 }
 
-// Upstream 6e125215 Utils.cpp:1757-1782; expression-group migration follows e242ecf4.
+// Upstream e242ecf4 Utils.cpp:1758-1787: move every conversion expression in order.
 public func AddTypeCastForReturnVal(expr: Expression, expectedTy: Type, builder: CHIRBuilder): Unit {
     let result = expr.GetResult().getOrThrow()
     if (result.GetType().getOrThrow() == expectedTy) { return }
     if (expr.IsTerminator()) {
         for (user in result.GetUsers()) {
-            let cast = TypeCastOrBoxIfNeeded(result, expectedTy, builder, user.GetParentBlock().getOrThrow())
-            cast.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(user)
+            let (cast, expressions) = TypeCastOrBoxIfNeeded(result, expectedTy, builder, user.GetParentBlock().getOrThrow())
+            for (expression in expressions) { expression.MoveBefore(user) }
             user.ReplaceOperand(result, cast)
         }
     } else {
-        let cast = TypeCastOrBoxIfNeeded(result, expectedTy, builder, expr.GetParentBlock().getOrThrow())
-        let castExpr = cast.AsLocalVar().getOrThrow().GetExpr().getOrThrow()
-        castExpr.MoveAfter(expr)
+        let (cast, expressions) = TypeCastOrBoxIfNeeded(result, expectedTy, builder, expr.GetParentBlock().getOrThrow())
+        var insertAfter = expr
+        for (expression in expressions) {
+            expression.MoveAfter(insertAfter)
+            insertAfter = expression
+        }
         for (user in result.GetUsers()) {
-            if (user != castExpr) { user.ReplaceOperand(result, cast) }
+            if (!expressions.contains(user)) { user.ReplaceOperand(result, cast) }
         }
     }
 }
