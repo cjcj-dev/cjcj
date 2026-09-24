@@ -26,21 +26,20 @@ export function prepareRuntime(source, dest, env = process.env) {
   if (!/^\d+$/.test(env.GITHUB_RUN_ID || '') || !/^\d+$/.test(env.GITHUB_RUN_ATTEMPT || '')) {
     throw new Error('COLOUR_RT_RUN_MISSING');
   }
-  const stdRoot = path.join(source, 'lib/linux_x86_64_cjnative');
-  const stdFiles = fs.readdirSync(stdRoot).filter(name => name.startsWith('libcangjie-std-'))
-    .map(name => `lib/linux_x86_64_cjnative/${name}`);
-  if (!stdFiles.includes('lib/linux_x86_64_cjnative/libcangjie-std-core.a')) {
-    throw new Error('COLOUR_RT_STD_MISSING');
-  }
-  const moduleRoot = path.join(source, 'modules');
   function walk(dir) {
     return fs.readdirSync(dir, {withFileTypes: true}).flatMap(entry => {
       const file = path.join(dir, entry.name);
       return entry.isDirectory() ? walk(file) : [path.relative(source, file)];
     });
   }
+  const stdFiles = [...walk(path.join(source, 'lib')), ...walk(path.join(source, 'runtime/lib'))]
+    .filter(rel => /^(libcangjie-std-|lib.*FFI\.)/.test(path.basename(rel)));
+  if (!stdFiles.includes('lib/linux_x86_64_cjnative/libcangjie-std-core.a')) {
+    throw new Error('COLOUR_RT_STD_MISSING');
+  }
+  const moduleFiles = walk(path.join(source, 'modules'));
   const files = {};
-  for (const rel of [...runtimeFiles, ...stdFiles, ...walk(moduleRoot)]) {
+  for (const rel of [...runtimeFiles, ...stdFiles, ...moduleFiles]) {
     const input = regularFile(source, rel);
     const output = path.join(dest, rel);
     fs.mkdirSync(path.dirname(output), {recursive: true});

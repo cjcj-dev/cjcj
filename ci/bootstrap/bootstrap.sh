@@ -25,7 +25,7 @@ CJCJ_SHA=''
 BASE_SDK="${BASE_SDK:-cjcj-pin-937877c8}"
 HEAP="${CJ_HEAP:-24GB}"
 STAGE1_HEAP="${STAGE1_HEAP:-20GB}"
-JOBS="${CJ_JOBS:-32}"
+JOBS="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
 SDK_BUILD="${SDK_BUILD:-$(dirname "${BASH_SOURCE[0]}")/sdk_build.sh}"
 STAGE1_HOST_RUNNER="${STAGE1_HOST_RUNNER:-$(dirname "${BASH_SOURCE[0]}")/stage1_host_runner.sh}"
 STAGE0_CACHE_ROOT="${STAGE0_CACHE_ROOT:-/root/stage0depot}"
@@ -325,6 +325,8 @@ stage0_cache_key() {
     "host_llvm_sha256=$(sha256 "$HOST_LLVM_SO")" \
     "host_runtime_so_sha256=$(sha256 "$host_runtime_so")" \
     "ast_support_sha256=$(sha256 "$AST_SUPPORT")" \
+    "ast_inputs_sha256=$(sha256 "$(dirname "$AST_SUPPORT")/SHA256SUMS")" \
+    "ast_installer_sha256=$(sha256 "$SRC/ci/install_std_sdk_inputs.py")" \
     "bootstrap_sha256=$(sha256 "${BASH_SOURCE[0]}")" \
     "sdk_build_sha256=$(sha256 "$SDK_BUILD")" \
     "cpp_headers_sha256=$cpp_headers" \
@@ -414,7 +416,6 @@ sdk_ld_path() {
 assert_version() {
   local label="$1" compiler="$2" sdk="$3" runtime="$4" ld
   assert_executable "$label" "$compiler"
-  cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=/usr/bin:/bin $(printf '%q' "$compiler") --version"
   [ "$DRY" -eq 1 ] || ok "$label --version rc=0"
@@ -531,7 +532,6 @@ install_stage_compiler() {
 
 cjpm_build() {
   local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script
-  cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
   cjpm="$sdk/tools/bin/cjpm"
@@ -568,7 +568,6 @@ assert_cjcj_sha() {
 
 shim_build() {
   local label="$1" sdk="$2" runtime="$3" srcdir="$4" source_object="${5:-}" ld npx_path node_bin source_env=''
-  cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   npx_path=$(command -v npx 2>/dev/null || true)
   [ -x "$npx_path" ] || die "$label shim 构建需要可执行 npx"
