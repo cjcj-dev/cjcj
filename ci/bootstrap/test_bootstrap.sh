@@ -48,6 +48,18 @@ make_colour_tuple() {
   refresh_tuple_sums
 }
 
+make_std_sdk_inputs_fixture() {
+  mkdir -p "$TMP/src/ci" "$TMP/include" "$TMP/schema" "$TMP/third_party/flatbuffers/bin"
+  cp "$ROOT/../install_std_sdk_inputs.py" "$ROOT/../build_resources.sh" "$TMP/src/ci/"
+  printf 'ast\n' > "$TMP/ast.a"
+  if [ -n "${BOOTSTRAP_AST_ARCHIVE:-}" ]; then
+    cp "$BOOTSTRAP_AST_ARCHIVE" "$TMP/ast.a"
+  fi
+  cp /bin/true "$TMP/third_party/flatbuffers/bin/flatc"
+  cp "$TMP/ast.a" "$TMP/libcangjie-ast-support.a"
+  (cd "$TMP" && sha256sum libcangjie-ast-support.a third_party/flatbuffers/bin/flatc > SHA256SUMS)
+}
+
 make_dry_fixture() {
   new_tmp
   mkdir -p "$TMP/base/bin" "$TMP/base/third_party/llvm/bin" "$TMP/src" "$TMP/stdsrc" "$TMP/host-rt" "$TMP/colour-rt" \
@@ -65,15 +77,7 @@ make_dry_fixture() {
   cp /bin/true "$TMP/base/tools/bin/cjpm"
   printf 'source\n' > "$TMP/src/main.cj"
   printf '#!/usr/bin/env python3\n' > "$TMP/stdsrc/build.py"
-  mkdir -p "$TMP/src/ci" "$TMP/include" "$TMP/schema" "$TMP/third_party/flatbuffers/bin"
-  cp "$ROOT/../install_std_sdk_inputs.py" "$ROOT/../build_resources.sh" "$TMP/src/ci/"
-  printf 'ast\n' > "$TMP/ast.a"
-  if [ -n "${BOOTSTRAP_AST_ARCHIVE:-}" ]; then
-    cp "$BOOTSTRAP_AST_ARCHIVE" "$TMP/ast.a"
-  fi
-  cp /bin/true "$TMP/third_party/flatbuffers/bin/flatc"
-  cp "$TMP/ast.a" "$TMP/libcangjie-ast-support.a"
-  (cd "$TMP" && sha256sum libcangjie-ast-support.a third_party/flatbuffers/bin/flatc > SHA256SUMS)
+  make_std_sdk_inputs_fixture
   printf 'int host_symbol;\n' > "$TMP/host.c"
   cc -shared -fPIC "$TMP/host.c" -o "$TMP/libLLVM-15.so"
   make_colour_tuple
@@ -446,17 +450,20 @@ make_fake_nm() {
 }
 
 run_shape_check() {
-  local count="$1"
+  local count="$1" missing="${2:-}"
   make_std_fixture "$TMP/std0"
   make_std_fixture "$TMP/std1"
+  [ -z "$missing" ] || rm "$TMP/std1/$missing"
   make_fake_nm
+  # Sourcing bypasses main(); initialize the same host layout before checking it.
   PATH="$TMP/fakebin:$PATH" BOOTSTRAP_TEST_INT64_COUNT="$count" \
-    bash -c 'source "$1"; STAGE=test-A1; DRY=0; assert_std_install_shape "$2" "$3" stdlib-stage2' \
+    bash -c 'source "$1"; STAGE=test-A1; host_tuple_init; DRY=0; assert_std_install_shape "$2" "$3" stdlib-stage2' \
       bash "$PRODUCT" "$TMP/std1" "$TMP/std0"
 }
 
 make_isolation_fixture() {
   local root="$TMP/isolation" sdk="$TMP/isolation/sdk" prefix="$TMP/isolation/std"
+  make_std_sdk_inputs_fixture
   mkdir -p "$root/src/build/build" "$sdk/bin" "$sdk/runtime/lib/linux_x86_64_cjnative" "$root/rt"
   printf 'runtime\n' > "$root/rt/libcangjie-runtime.so"
   printf '%s\n' \
@@ -487,7 +494,7 @@ make_isolation_fixture() {
 run_isolation_check() {
   local product="$1"
   PATH="$TMP/fakebin:$PATH" LEAK_ME=must-not-cross \
-    bash -c 'source "$1"; STAGE=test-A4; DRY=0; WORK="$2/work"; STDSRC="$2"; SRC="$6/src"; AST_SUPPORT="$6/ast.a"; stdlib_build stdlib-stage1 "$3" "$4" "$5"' \
+    bash -c 'source "$1"; STAGE=test-A4; host_tuple_init; DRY=0; WORK="$2/work"; STDSRC="$2"; SRC="$6/src"; AST_SUPPORT="$6/ast.a"; stdlib_build stdlib-stage1 "$3" "$4" "$5"' \
       bash "$product" "$TMP/isolation/src" "$TMP/isolation/sdk" "$TMP/isolation/rt" "$TMP/isolation/std" "$TMP"
 }
 
@@ -497,13 +504,13 @@ positive_build_env() {
   caller_tmp="$TMP/caller-tmp"
   mkdir -p "$caller_tmp" "$TMP/caller-home"
   HOME="$TMP/caller-home" TMPDIR="$caller_tmp" dry_run > "$TMP/build-env-passthrough.log"
-  check_count build-env 4 "CMD env -i HOME=/root TMPDIR=$caller_tmp CANGJIE_HOME=" "$TMP/build-env-passthrough.log"
+  check_count build-env 4 "CMD env -i HOME=$TMP/caller-home TMPDIR=$caller_tmp CANGJIE_HOME=" "$TMP/build-env-passthrough.log"
   (
     unset TMPDIR
     HOME="$TMP/caller-home" dry_run
   ) > "$TMP/build-env-default.log"
-  check_count build-env 4 'CMD env -i HOME=/root TMPDIR=.*/work/tmp-private CANGJIE_HOME=' "$TMP/build-env-default.log"
-  echo 'PASS bootstrap CLI keeps HOME=/root and passes caller/default TMPDIR'
+  check_count build-env 4 "CMD env -i HOME=$TMP/caller-home TMPDIR=.*/work/tmp-private CANGJIE_HOME=" "$TMP/build-env-default.log"
+  echo 'PASS bootstrap CLI passes caller HOME and caller/default TMPDIR'
 }
 
 fault_build_env() {
@@ -621,6 +628,11 @@ case "${1:-test}" in
     new_tmp
     run_shape_check 2
     ;;
+  positive-a4)
+    new_tmp
+    make_isolation_fixture
+    run_isolation_check "$PRODUCT"
+    ;;
   positive-compile-option-o1)
     positive_compile_option_o1
     ;;
@@ -645,6 +657,15 @@ case "${1:-test}" in
   fault-a1)
     new_tmp
     run_shape_check 1
+    ;;
+  fault-a1-missing-core-archive|fault-a1-missing-core-shared|fault-a1-missing-ffi-shared)
+    new_tmp
+    case "$1" in
+      fault-a1-missing-core-archive) missing=lib/linux_x86_64_cjnative/libcangjie-std-core.a;;
+      fault-a1-missing-core-shared) missing=runtime/lib/linux_x86_64_cjnative/libcangjie-std-core.so;;
+      fault-a1-missing-ffi-shared) missing=lib/libstdFFI.so;;
+    esac
+    run_shape_check 2 "$missing"
     ;;
   fault-a2)
     fault_a2
@@ -805,6 +826,7 @@ case "${1:-test}" in
     run_shape_check 2 > "$TMP/shape-positive.log"
     /usr/bin/grep -q 'shape=ok Int64.ti=2 FFI-archives=1 FFI-set-equal=1' "$TMP/shape-positive.log" ||
       fail A1 'positive stdlib shape arm did not pass'
+    echo 'PASS A1 positive stdlib install shape'
     make_isolation_fixture
     run_isolation_check "$PRODUCT" > "$TMP/isolation-positive.log"
     /usr/bin/grep -q 'shape=ok Int64.ti=2 FFI-archives=1' "$TMP/isolation-positive.log" ||
@@ -816,13 +838,14 @@ case "${1:-test}" in
       fail build-env 'bootstrap CLI HOME/TMPDIR contract did not pass'
     BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" bash "$0" check-runtime-layouts > "$TMP/runtime-layouts-positive.log" ||
       fail runtime-layouts 'flat/nested/dual/inner-rc runtime layout contract did not pass'
-    for arm in a1 a2 a3 dry-stage1-missing dry-stage1-duplicate dry-stage1-stale-stdlib a4 build-env runtime-stamp host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
+    for arm in a1 a1-missing-core-archive a1-missing-core-shared a1-missing-ffi-shared a2 a3 dry-stage1-missing dry-stage1-duplicate dry-stage1-stale-stdlib a4 build-env runtime-stamp host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
       log="$TMP/fault-$arm.log"
       if bash "$0" "fault-$arm" > "$log" 2>&1; then
         fail "$arm" 'fault arm unexpectedly passed'
       fi
       case "$arm" in
         a1) marker='BOOTSTRAP-FAIL \[test-A1\].*Int64.ti definitions=1';;
+        a1-missing-*) marker='BOOTSTRAP-FAIL \[test-A1\].*install shape: core archive/shared 或 libstdFFI.so 缺失';;
         a2) marker='BOOTSTRAP-FAIL \[test-A2\].*命令失败 rc=23';;
         a3) marker='BOOTSTRAP-FAIL \[test-A3\].*stage1-compiler';;
         dry-stage1-missing) marker='TEST-FAIL \[A3\] pattern count=0 expected=2: ASSERT stage1-compiler executable=planned';;
@@ -856,7 +879,7 @@ case "${1:-test}" in
     echo 'PASS bootstrap dry contracts, controlled build environment, LLVM assembly, and positive controls'
     ;;
   *)
-    echo "usage: $0 [test|check-dry-contract|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
+    echo "usage: $0 [test|check-dry-contract|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-a4|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a1-missing-core-archive|fault-a1-missing-core-shared|fault-a1-missing-ffi-shared|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
     exit 2
     ;;
 esac
