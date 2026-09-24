@@ -46,8 +46,10 @@ public class CjoHeaderVersionTest {
             if (!refuse) {
                 @Expect(depInfo.contains("vercheck"), true)
                 @Expect(loader.HasCjoVersion(), true)
+                let observedMinor = loader.GetCjoVersion().minor
+                println("QUERY_TARGET modules.GetCjoVersion.minor expected=${minor} observed=${observedMinor}")
                 @Expect(loader.GetCjoVersion().major, 0u8)
-                @Expect(loader.GetCjoVersion().minor, minor)
+                @Expect(observedMinor, minor)
                 @Expect(loader.GetCjoVersion().patch, 255u8)
                 @Expect(loader.IsCjoVersionAtLeast(0u8, 0u8), true)
                 @Expect(loader.IsCjoVersionAtMost(0u8, 1u8), true)
