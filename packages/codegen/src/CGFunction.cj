@@ -202,6 +202,9 @@ public class CGFunction <: CGValue {
             } else if (chirFunc.TestAttr(Attribute.FOREIGN)) {
                 AddFnAttr(function, CJ2C_ATTR)
             }
+            if (chirFunc.TestAttr(Attribute.DOES_NOT_THROW)) {
+                AddFnAttr(function, "nounwind")
+            }
             if (functionValue.TestAttr(Attribute.NO_STACK_GROW)) {
                 AddFnAttr(function, NO_STACK_GROW_ATTR)
             }

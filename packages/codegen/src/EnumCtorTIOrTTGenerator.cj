@@ -12,7 +12,7 @@ import cjcj::option.OSType
 import cjcj::utils.CJC_ASSERT
 
 public class EnumCtorLayout {
-    public let fieldTypes: ArrayList<Type> = ArrayList<Type>()
+    public var fieldTypes: ArrayList<Type> = ArrayList<Type>()
     public var size: UInt32 = 0u32
     public var align: UInt32 = 1u32
     public var offsets: LLVMValueRef = LLVMNullValue()
@@ -120,7 +120,7 @@ public class EnumCtorTIOrTTGenerator {
         if (cgEnumType.IsOptionLikeRef() || cgEnumType.IsOptionLikeT()) {
             layout = GenLayoutForReferenceType(tiName, className)
         } else if (cgEnumType.IsZeroSizeEnum()) {
-            layout = GenLayoutForZeroSize()
+            layout = GenLayoutForZeroSize(paramTypes, tiName, className)
         } else if (cgEnumType.IsTrivial()) {
             layout = GenLayoutForTrivial(tiName)
         } else {
@@ -223,7 +223,7 @@ public class EnumCtorTIOrTTGenerator {
         if (cgEnumType.IsOptionLikeRef() || cgEnumType.IsOptionLikeT()) {
             layout = GenLayoutForReferenceType(ttName, className)
         } else if (cgEnumType.IsZeroSizeEnum()) {
-            layout = GenLayoutForZeroSize()
+            layout = GenLayoutForZeroSize(paramTypes, ttName, className)
         } else if (cgEnumType.IsTrivial()) {
             layout = GenLayoutForTrivial(ttName)
         } else {
@@ -330,12 +330,14 @@ public class EnumCtorTIOrTTGenerator {
         return layout
     }
 
-    private func GenLayoutForZeroSize(): EnumCtorLayout {
+    private func GenLayoutForZeroSize(paramTypes: ArrayList<Type>, tiName: String,
+        className: String): EnumCtorLayout {
         let layout = EnumCtorLayout()
         layout.size = 0u32
         layout.align = 1u32
-        let i32Ty = unsafe { LLVMInt32TypeInContext(cgMod.GetLLVMContext().raw) }
-        layout.offsets = unsafe { LLVMConstNull(LLVMPointerType(i32Ty, 0u32)) }
+        layout.fieldTypes = paramTypes
+        let layoutType = GetLLVMStructType(cgMod, layout.fieldTypes, GetClassObjLayoutName(className))
+        layout.offsets = CGCustomType.GenOffsetsArray(cgMod, tiName + ".offsets", layoutType)
         return layout
     }
 

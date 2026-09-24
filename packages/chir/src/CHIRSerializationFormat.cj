@@ -311,6 +311,7 @@ func CHIRKnownAttributes(): ArrayList<Attribute> {
     attrs.add(Attribute.HAS_INITED_FIELD)
     attrs.add(Attribute.JAVA_HAS_DEFAULT)
     attrs.add(Attribute.PREVIOUSLY_DESERIALIZED)
+    attrs.add(Attribute.DOES_NOT_THROW)
     attrs.add(Attribute.FAST_NATIVE)
     attrs.add(Attribute.NO_HEAP_ALLOC)
     attrs.add(Attribute.NO_WRITE_BARRIER)
@@ -360,6 +361,7 @@ func CHIRAttributeFromIndex(index: Int64): Attribute {
         case 35 => Attribute.HAS_INITED_FIELD
         case 36 => Attribute.JAVA_HAS_DEFAULT
         case 37 => Attribute.PREVIOUSLY_DESERIALIZED
+        case 38 => Attribute.DOES_NOT_THROW
         case 71 => Attribute.FAST_NATIVE
         case 76 => Attribute.NO_HEAP_ALLOC
         case 77 => Attribute.NO_WRITE_BARRIER_REC
