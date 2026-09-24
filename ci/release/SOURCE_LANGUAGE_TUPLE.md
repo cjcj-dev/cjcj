@@ -1,0 +1,36 @@
+# Source-built language tuple (schema 2)
+
+This producer consumes the `final-compiler-linux-x64` stage3 handoff and its
+same-build `final-std-linux-x64`, plus the composed SDK and the source-built
+compiler runtime manifest. It does not upgrade or relabel H48 schema 1 bytes.
+
+Three runtime roles are explicit:
+
+| Role | Location | Consumer |
+|---|---|---|
+| Frozen coloured compiler runtime | `compiler-runtime/linux_x86_64_cjnative` | stage3 compiler, through `GC_UNIT_CJC_RUNTIME_LIB_DIR` |
+| Official host runtime | `official-host/linux_x86_64_cjnative` | official host tools, through `CJCJ_OFFICIAL_HOST_RUNTIME_LIB_DIR` |
+| Runtime under test | supplied at activation, outside the tuple | compiled language tests, through `GCV2_RUNTIME_LIB_DIR` |
+
+A compiler process failure belongs to the frozen compiler-runtime identity.
+A generated program failure belongs to the independently selected target
+runtime. Record both digests when reporting a gate failure.
+
+The stage3 executable is installed under the basename `cjcj-stage1` solely for
+the compiler entry dispatch contract, with the two same-directory aliases
+`cjc` and `cjc-frontend`. Its manifest records `production.stage=stage3`; the
+filename does not identify its build generation.
+
+`pack` invokes the existing final-compiler consumer before copying files. That
+checks the source commit, compiler digest, producer run/attempt and full std
+identity. `SOURCE-BUILD.json`, captured before the std build, records its actual
+source checkout and compiler/backend/runtime inputs. The final compiler's std
+identity includes this receipt.
+
+`verify` needs an externally pinned manifest and compiler digest. `unpack`
+additionally needs the archive digest. `activate` verifies the tuple and the
+external target pair, copies a private SDK, and emits the separated environment.
+No target pair is included in the published archive.
+
+Implementation and real-artifact qualification are in progress. This document
+is not a claim that a source tuple has been published or passed its language gate.
