@@ -43,10 +43,17 @@ jobs:
           platform: ubuntu-22.04
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 1G
+      - name: Install runtime core debugger
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gdb
       - name: Build runtime
+        id: runtime-build
         env:
           RUNTIME_BUILD_TYPE: relwithdebinfo
-        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+        run: |
+          source ci/platform_matrix/runtime_core_setup.sh || echo "::warning::Core setup incomplete; see setup.log"
+          npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
       - name: Package same-build runtime pair
         id: package
         run: |
@@ -98,6 +105,9 @@ jobs:
           else
             printf 'Runtime gate log: %s\n' "${logs[@]}"
           fi
+      - name: Collect runtime core backtraces
+        if: ${{ failure() && steps.runtime-build.outcome == 'failure' }}
+        run: python3 ci/platform_matrix/collect_runtime_cores.py
       - name: Upload runtime gate diagnostics
         if: always()
         uses: actions/upload-artifact@v7
@@ -105,6 +115,7 @@ jobs:
           name: colour-runtime-gate-diagnostics
           path: |
             ci/runtime_pin.env
+            .platform-ci/runtime-gate-diagnostics/
             runtime-source/runtime/**/gate_run.log
             runtime-source/runtime/**/gc_unit_gate.status
             runtime-source/runtime/**/runtime-build-config.txt
