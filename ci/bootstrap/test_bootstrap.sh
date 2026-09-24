@@ -123,7 +123,7 @@ check_dry_contract() {
   check_count CJPM 2 'ISOLATE cjcj-src from=' "$log"
   check_count CJPM 1 'CMD cjpm build bin=' "$log"
   check_count CJPM 1 'CMD cjpm build -j 1 bin=' "$log"
-  check_count CJPM 1 'heap=20GB' "$log"
+  check_count CJPM 1 'heap=20480MB' "$log"
   check_shim_call_count "$log"
   check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"
   check_count SHIM 1 'CMD shim build label=stage1 .*source-object=.*/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o .*sdk=.*/sdk-stage1 .*runtime=.*/colour-rt' "$log"
