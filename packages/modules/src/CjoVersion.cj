@@ -22,3 +22,49 @@ public func CheckCjoVersionCompat(cjoMajor: UInt8, cjoMinor: UInt8): CjoVersionC
     }
     return CjoVersionCompat.COMPATIBLE
 }
+
+// ASTSerialization.h:96-100. Patch is exposed, but never orders versions.
+public struct CjoVersionTriplet {
+    public var major: UInt8 = 0u8
+    public var minor: UInt8 = 0u8
+    public var patch: UInt8 = 0u8
+    public init() {}
+}
+
+public enum CjoVersionOrder <: Equatable<CjoVersionOrder> {
+    | OLDER | EQUAL | NEWER | DIFFERENT_MAJOR
+    public operator func ==(other: CjoVersionOrder): Bool {
+        match (this, other) {
+            case (OLDER, OLDER) | (EQUAL, EQUAL) | (NEWER, NEWER) |
+                 (DIFFERENT_MAJOR, DIFFERENT_MAJOR) => true
+            case _ => false
+        }
+    }
+    public operator func !=(other: CjoVersionOrder): Bool { !(this == other) }
+}
+
+// ASTLoader.cpp:76-115, same major/minor ordering and predicate decomposition.
+public func CompareCjoVersion(lhsMajor: UInt8, lhsMinor: UInt8,
+    rhsMajor: UInt8, rhsMinor: UInt8): CjoVersionOrder {
+    if (lhsMajor != rhsMajor) { return CjoVersionOrder.DIFFERENT_MAJOR }
+    if (lhsMinor < rhsMinor) { return CjoVersionOrder.OLDER }
+    if (lhsMinor > rhsMinor) { return CjoVersionOrder.NEWER }
+    return CjoVersionOrder.EQUAL
+}
+
+public func VersionAtLeast(cjoMajor: UInt8, cjoMinor: UInt8,
+    requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+    let order = CompareCjoVersion(cjoMajor, cjoMinor, requiredMajor, requiredMinor)
+    return order == CjoVersionOrder.EQUAL || order == CjoVersionOrder.NEWER
+}
+
+public func VersionAtMost(cjoMajor: UInt8, cjoMinor: UInt8,
+    requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+    let order = CompareCjoVersion(cjoMajor, cjoMinor, requiredMajor, requiredMinor)
+    return order == CjoVersionOrder.EQUAL || order == CjoVersionOrder.OLDER
+}
+
+public func VersionExactly(cjoMajor: UInt8, cjoMinor: UInt8,
+    requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+    return CompareCjoVersion(cjoMajor, cjoMinor, requiredMajor, requiredMinor) == CjoVersionOrder.EQUAL
+}

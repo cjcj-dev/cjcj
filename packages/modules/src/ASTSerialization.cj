@@ -1,233 +1,20 @@
 package cjcj::modules
 
-import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset, FlatBufferString, VerifierOptions, VerifierTemplate}
+import cjcj::flatbuffers.{VerifierOptions, VerifierTemplate}
+import cjcj::basic.{CANGJIE_VERSION, DEFAULT_POSITION, DiagKindRefactor, DiagnosticEngine}
 
-import std.collection.*
-import std.convert.*
-import cjcj::ast.Annotation as ASTAnnotation
-import cjcj::ast.AnnotationKind as ASTAnnotationKind
-import cjcj::ast.FeatureId as ASTFeatureId
-import cjcj::ast.FeaturesDirective as ASTFeaturesDirective
-import cjcj::ast.FeaturesSet as ASTFeaturesSet
-import cjcj::ast.Identifier as ASTIdentifier
-import cjcj::ast.Modifier as ASTModifier
-import cjcj::basic.CANGJIE_VERSION
-import cjcj::basic.DiagKindRefactor
-import cjcj::lex.TokenKind
-import cjcj::option.GlobalOptions
-import cjcj::option.OptimizationLevel
-import cjcj::utils.FileUtil
-
-public class ASTWriter {
-    private let diag: DiagnosticEngine
-    private var packageDepInfo: String
-    private let exportCfg: ExportConfig
-    private let cjoManager: CjoManager
-    private var serializingCommon: Bool = false
-    private var debugOption: Bool = false
-    private var optimizationLevel: OptimizationLevel = OptimizationLevel.O0
-    private var isChirNow: Bool = false
-    private var savedPackage: Option<PackageDecl> = None
-    private let savedTypeMap: HashMap<String, FormattedIndex> = HashMap<String, FormattedIndex>()
-    private let savedTypes: ArrayList<String> = ArrayList<String>()
-
-    public init(diag: DiagnosticEngine, packageDepInfo: String, exportCfg: ExportConfig, cjoManager: CjoManager) {
-        this.diag = diag
-        this.packageDepInfo = packageDepInfo
-        this.exportCfg = exportCfg
-        this.cjoManager = cjoManager
-    }
-
-    public func SetSerializingCommon(): Unit {
-        serializingCommon = true
-    }
-
-    public func SaveOptions(debug: Bool, level: OptimizationLevel): Unit {
-        debugOption = debug
-        optimizationLevel = level
-    }
-
-    public func ExportAST(pkgDecl: PackageDecl): Unit {
-        savedPackage = Some(pkgDecl)
-    }
-
-    public func PreSaveFullExportDecls(pkg: Package): Unit {
-        for (file in pkg.files) {
-            for (decl in file.decls) {
-                if (decl.fullPackageName.isEmpty()) {
-                    decl.fullPackageName = pkg.fullPackageName
-                }
-            }
-        }
-    }
-
-    public func AST2FB(data: ArrayList<UInt8>, pkgDecl: PackageDecl): Unit {
-        let serialized = SerializePackageFlatBuffer(pkgDecl.srcPackage)
-        data.clear()
-        for (byte in serialized) {
-            data.add(byte)
-        }
-    }
-
-    public func SaveType(pType: String): FormattedIndex {
-        if (pType.isEmpty()) {
-            return INVALID_FORMAT_INDEX
-        }
-        if (let Some(existing) <- savedTypeMap.get(pType)) {
-            return existing
-        }
-        let nextIndex = UInt32(savedTypes.size + 1)
-        savedTypes.add(pType)
-        savedTypeMap[pType] = nextIndex
-        return nextIndex
-    }
-
-    private func SerializePackageFlatBuffer(pkg: Package): Array<UInt8> {
-        let fb = FlatBufferBuilder()
-        let emptyOffsets = ArrayList<FlatBufferOffset>()
-        let emptyOffsetVector = fb.CreateVectorOffsets(emptyOffsets)
-        let files = ArrayList<FlatBufferOffset>()
-        for (file in pkg.files) {
-            let fileName = if (exportCfg.needAbsPath || serializingCommon) {
-                file.filePath
-            } else {
-                FileUtil.JoinPath(pkg.fullPackageName, FileUtil.GetFileName(file.filePath))
-            }
-            files.add(fb.CreateString(fileName))
-        }
-        let filesVec = fb.CreateVectorOffsets(files)
-        let fileImports = ArrayList<FlatBufferOffset>()
-        for (_ in pkg.files) {
-            fb.StartTable(1)
-            fb.AddOffset(0, emptyOffsetVector)
-            fileImports.add(fb.EndTable())
-        }
-        let fileImportsVec = fb.CreateVectorOffsets(fileImports)
-        let fileInfos = ArrayList<FlatBufferOffset>()
-        for (_ in pkg.files) {
-            fb.StartTable(4)
-            fileInfos.add(fb.EndTable())
-        }
-        let fileInfosVec = fb.CreateVectorOffsets(fileInfos)
-        let options = CreateFlatOptions(fb)
-        let version = fb.CreateString(CANGJIE_VERSION)
-        let packageName = fb.CreateString(pkg.fullPackageName)
-        let depInfo = fb.CreateString(packageDepInfo)
-        let moduleName = fb.CreateString("")
-        let cjoVersion = ArrayList<UInt8>()
-        cjoVersion.add(CJO_MAJOR_VERSION)
-        cjoVersion.add(CJO_MINOR_VERSION)
-        cjoVersion.add(CJO_PATCH_VERSION)
-        let kind = if (pkg.isMacroPackage) {
-            1u8
-        } else if (pkg.TestAttr(Attribute.TOOL_ADD)) {
-            2u8
-        } else if (pkg.TestAttr(Attribute.MOCK_SUPPORTED)) {
-            3u8
-        } else {
-            0u8
-        }
-
-        fb.StartTable(17)
-        fb.AddOffset(16, options)
-        fb.AddOffset(15, emptyOffsetVector)
-        fb.AddOffset(14, fileInfosVec)
-        fb.AddOffset(13, moduleName)
-        fb.AddU8(12, FlatPackageAccess(pkg.accessible))
-        fb.AddU8(11, kind)
-        fb.AddOffset(9, emptyOffsetVector)
-        fb.AddOffset(8, emptyOffsetVector)
-        fb.AddOffset(7, emptyOffsetVector)
-        fb.AddOffset(6, fileImportsVec)
-        fb.AddOffset(5, filesVec)
-        fb.AddOffset(4, emptyOffsetVector)
-        fb.AddOffset(3, depInfo)
-        fb.AddOffset(2, packageName)
-        fb.AddStruct(1, cjoVersion, 1)
-        fb.AddOffset(0, version)
-        let root = fb.EndTable()
-        return fb.Finish(root, "CJOF")
-    }
-
-    private func CreateFlatOptions(fb: FlatBufferBuilder): FlatBufferOffset {
-        fb.StartTable(2)
-        fb.AddBool(1, debugOption)
-        fb.AddU8(0, OptimizationLevelToFlat(optimizationLevel))
-        return fb.EndTable()
-    }
-
-    public func SetIsChirNow(isChirNow!: Bool = false): Unit {
-        this.isChirNow = isChirNow
-    }
-
-}
-
+// Binary header reader. Full package materialization belongs to the frontend loader.
 public class ASTLoader {
     private let data: Array<UInt8>
     private let requestedPackageName: String
-    private let cjoManager: CjoManager
-    private let opts: GlobalOptions
+    private let diag: DiagnosticEngine
     private var packageTable: Option<PackageFormat_Package> = None
     private var cjoPath: String = ""
-    private var parsedPackage: Option<Package> = None
-    private var packageDepInfo: String = ""
-    private var importSourceCode: Bool = true
-    private var isChirNow: Bool = false
-    private var loadedHasOptions: Bool = false
-    private var loadedSerializingCommon: Bool = false
-    private var loadedDebugOption: Bool = false
-    private var loadedOptimizationLevel: OptimizationLevel = OptimizationLevel.O0
-    private let loadedTypes: HashMap<FormattedIndex, String> = HashMap<FormattedIndex, String>()
 
-    public init(data: Array<UInt8>, fullPackageName: String, cjoManager: CjoManager, opts: GlobalOptions) {
+    public init(data: Array<UInt8>, fullPackageName: String, diag: DiagnosticEngine) {
         this.data = data
         requestedPackageName = fullPackageName
-        this.cjoManager = cjoManager
-        this.opts = opts
-    }
-
-    public func LoadPackageDependencies(): Option<Package> {
-        if (let Some(pkg) <- parsedPackage) {
-            return Some(pkg)
-        }
-        let text = String.fromUtf8(data)
-        let pkgOpt = ParseSerializedPackage(text)
-        if (let Some(pkg) <- pkgOpt) {
-            parsedPackage = Some(pkg)
-            return Some(pkg)
-        }
-        return None
-    }
-
-    public func LoadPackageDecls(): Unit {
-        let _ = LoadPackageDependencies()
-    }
-
-    public func LoadCachedTypeForPackage(
-        sourcePackage: Package,
-        mangledName2DeclMap: HashMap<String, Decl>
-    ): HashSet<String> {
-        let removedMangles = HashSet<String>()
-        let cachedPkgOpt = LoadPackageDependencies()
-        if (let None <- cachedPkgOpt) {
-            return removedMangles
-        }
-        let cachedPkg = cachedPkgOpt.getOrThrow()
-        if (cachedPkg.fullPackageName != sourcePackage.fullPackageName) {
-            return removedMangles
-        }
-        for (file in cachedPkg.files) {
-            for (decl in file.decls) {
-                let mangleName = GetDeclMangleKey(decl)
-                if (mangleName.isEmpty()) {
-                    continue
-                }
-                if (!mangledName2DeclMap.contains(mangleName)) {
-                    CollectRemovedDecl(mangleName, removedMangles)
-                }
-            }
-        }
-        return removedMangles
+        this.diag = diag
     }
 
     public func LoadPackageDepInfo(): String {
@@ -241,106 +28,44 @@ public class ASTLoader {
         return packageTable.getOrThrow().GetPkgDepInfo().getOrThrow().str()
     }
 
-    public func LoadRefs(): Unit {
-        if (let Some(pkg) <- LoadPackageDependencies()) {
-            for (file in pkg.files) {
-                for (importSpec in file.imports) {
-                    let pair = cjoManager.GetPackageCjo(importSpec)
-                    let fullDepName = pair[0]
-                    let cjoPath = pair[1]
-                    if (!fullDepName.isEmpty() && cjoManager.GetPackage(fullDepName).isNone()) {
-                        let _ = cjoManager.LoadPackageHeader(fullDepName, cjoPath)
-                    }
-                }
-            }
-            cjoManager.AddPackageDeclMap(pkg.fullPackageName)
-        }
+    public func GetCjoVersion(): CjoVersionTriplet {
+        let (version, _) = ReadCjoVersion()
+        return version
     }
 
-    public func GetImportedPackageName(): String {
-        if (let Some(pkg) <- LoadPackageDependencies()) {
-            return pkg.fullPackageName
-        }
-        return requestedPackageName
+    public func HasCjoVersion(): Bool {
+        let (_, hasVersion) = ReadCjoVersion()
+        return hasVersion
     }
 
-    public func SetImportSourceCode(enable: Bool): Unit {
-        importSourceCode = enable
+    public func IsCjoVersionAtLeast(requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+        let (version, hasVersion) = ReadCjoVersion()
+        if (!hasVersion) { return false }
+        return VersionAtLeast(version.major, version.minor, requiredMajor, requiredMinor)
     }
 
-    public func GetDependentPackageNames(): ArrayList<String> {
-        let out = ArrayList<String>()
-        if (let Some(pkg) <- LoadPackageDependencies()) {
-            for (file in pkg.files) {
-                for (importSpec in file.imports) {
-                    var depName = cjoManager.GetPackageNameByImport(importSpec)
-                    if (depName.isEmpty()) {
-                        let pair = cjoManager.GetPackageCjo(importSpec)
-                        depName = pair[0]
-                    }
-                    if (!depName.isEmpty() && !out.contains(depName)) {
-                        out.add(depName)
-                    }
-                }
-            }
-        }
-        return out
+    public func IsCjoVersionAtMost(requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+        let (version, hasVersion) = ReadCjoVersion()
+        if (!hasVersion) { return false }
+        return VersionAtMost(version.major, version.minor, requiredMajor, requiredMinor)
     }
 
-    public func PreloadCommonPartOfPackage(pkg: Package): Bool {
-        if (let Some(commonPkg) <- LoadPackageDependencies()) {
-            if (commonPkg.fullPackageName != pkg.fullPackageName) {
-                var packageRange = MakeRange(commonPkg.begin, commonPkg.end)
-                if (packageRange.HasZero() && !commonPkg.files.isEmpty()) {
-                    let file = commonPkg.files[0]
-                    packageRange = MakeRange(file.begin, file.end)
-                }
-                cjoManager.GetDiag().DiagnoseRefactor(
-                    DiagKindRefactor.module_common_cjo_wrong_package,
-                    packageRange,
-                    arguments: [commonPkg.fullPackageName, pkg.fullPackageName]
-                ).Emit()
-                return false
-            }
-            ValidateCommonSpecificFeatureSetsRelations(commonPkg, pkg)
-            for (file in commonPkg.files) {
-                file.EnableAttr(Attribute.FROM_COMMON_PART)
-                file.EnableAttr(Attribute.COMMON)
-                file.isCommon = true
-                pkg.AddFile(file)
-            }
-            if (!ValidateCommonPartOptions()) {
-                return false
-            }
-        } else {
-            return false
-        }
-        return true
+    public func IsCjoVersionExactly(requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+        let (version, hasVersion) = ReadCjoVersion()
+        if (!hasVersion) { return false }
+        return VersionExactly(version.major, version.minor, requiredMajor, requiredMinor)
     }
 
-    public func ReadFileNames(): ArrayList<String> {
-        let out = ArrayList<String>()
-        let allFiles = GetPackage(data).GetAllFiles().getOrThrow()
-        var index: UInt32 = 0u32
-        while (index < allFiles.size()) {
-            out.add(FlatBufferString(data, (allFiles.Get(index) as Int64).getOrThrow()).str())
-            index++
-        }
-        return out
-    }
-
-    public func LoadType(typeIndex: FormattedIndex): String {
-        if (typeIndex == INVALID_FORMAT_INDEX) {
-            return ""
-        }
-        if (let Some(typeText) <- loadedTypes.get(typeIndex)) {
-            return typeText
-        }
-        return typeIndex.toString()
-    }
-
-    public func SetIsChirNow(isChirNow!: Bool = false): Unit {
-        this.isChirNow = isChirNow
+    private func ReadCjoVersion(): (CjoVersionTriplet, Bool) {
+        var result = CjoVersionTriplet()
+        if (packageTable.isNone()) { return (result, false) }
+        let cjoVer = packageTable.getOrThrow().GetCjoVersion()
+        if (cjoVer.isNone()) { return (result, false) }
+        let version = cjoVer.getOrThrow()
+        result.major = version.GetMajorNum()
+        result.minor = version.GetMinorNum()
+        result.patch = version.GetPatchNum()
+        return (result, true)
     }
 
     public func SetCjoPath(path: String): Unit {
@@ -369,7 +94,7 @@ public class ASTLoader {
         let fullPackageName = if (let Some(name) <- table.GetFullPkgName()) {
             name.str()
         } else { "unknown package name" }
-        cjoManager.GetDiag().DiagnoseRefactor(DiagKindRefactor.module_version_not_identical, DEFAULT_POSITION,
+        diag.DiagnoseRefactor(DiagKindRefactor.module_version_not_identical, DEFAULT_POSITION,
             arguments: [cjoPath, fullPackageName, producerVer, CANGJIE_VERSION]).Emit()
     }
 
@@ -379,7 +104,7 @@ public class ASTLoader {
         options.maxTables = UInt32(FB_MAX_TABLES)
         let verifier = VerifierTemplate(data, opts: options)
         if (!VerifyPackageBuffer(data, verifier)) {
-            cjoManager.GetDiag().DiagnoseRefactor(
+            diag.DiagnoseRefactor(
                 DiagKindRefactor.module_loaded_ast_failed,
                 DEFAULT_POSITION,
                 arguments: [id, requestedPackageName, CANGJIE_VERSION]
@@ -389,427 +114,4 @@ public class ASTLoader {
         return true
     }
 
-    private func ParseSerializedPackage(text: String): Option<Package> {
-        let rawLines = SplitRawLines(text)
-        if (rawLines.isEmpty() || rawLines[0] != "CANGJIE-MODULES-AST|1") {
-            return None
-        }
-        var pkg = Package(requestedPackageName)
-        var currentFile: Option<File> = None
-        for (line in rawLines) {
-            if (line.isEmpty() || line == "CANGJIE-MODULES-AST|1") {
-                continue
-            }
-            let fields = SplitFields(line)
-            if (fields.isEmpty()) {
-                continue
-            }
-            match (fields[0]) {
-                case "dep" =>
-                    if (fields.size > 1) {
-                        packageDepInfo = fields[1]
-                    }
-                case "type" =>
-                    if (fields.size > 2) {
-                        loadedTypes[ParseFormattedIndex(fields[1])] = fields[2]
-                    }
-                case "package" =>
-                    if (fields.size > 3) {
-                        pkg = Package(fields[1])
-                        pkg.isMacroPackage = WireToBool(fields[2])
-                        pkg.accessible = WireToAccessLevel(fields[3])
-                        if (fields.size > 6) {
-                            loadedHasOptions = true
-                            loadedSerializingCommon = WireToBool(fields[4])
-                            loadedDebugOption = WireToBool(fields[5])
-                            loadedOptimizationLevel = WireToOptimizationLevel(fields[6])
-                        }
-                        if (fields.size > 13) {
-                            LoadNodeFields(fields, 7, pkg)
-                        }
-                    }
-                case "file" =>
-                    let file = File()
-                    if (fields.size > 1) { file.fileName = fields[1] }
-                    if (fields.size > 2) { file.filePath = fields[2] }
-                    if (fields.size > 3) {
-                        try {
-                            file.fileHash = UInt64.parse(fields[3])
-                        } catch (e: Exception) {
-                            file.fileHash = UInt64(file.filePath.hashCode())
-                        }
-                    }
-                    if (fields.size > 4) {
-                        for (feature in SplitStringList(fields[4])) {
-                            file.features.add(feature)
-                        }
-                    }
-                    if (fields.size > 5) { file.isProduct = WireToBool(fields[5]) }
-                    if (fields.size > 12) {
-                        LoadNodeFields(fields, 6, file)
-                    }
-                    if (fields.size > 13) {
-                        file.packageSpec = LoadPackageSpecFields(fields, 13)
-                    }
-                    file.feature = BuildFeatureDirectiveFromLegacyFields(file)
-                    pkg.AddFile(file)
-                    currentFile = Some(file)
-                case "import" =>
-                    if (let Some(file) <- currentFile) {
-                        let importSpec = ImportSpec()
-                        if (fields.size > 1) { importSpec.content.kind = WireToImportKind(fields[1]) }
-                        if (fields.size > 2) {
-                            for (part in SplitStringList(fields[2])) {
-                                importSpec.content.prefixPaths.add(part)
-                            }
-                        }
-                        if (fields.size > 3) { importSpec.content.identifier = fields[3] }
-                        if (fields.size > 4) { importSpec.content.aliasName = fields[4] }
-                        if (fields.size > 5) { importSpec.content.hasDoubleColon = WireToBool(fields[5]) }
-                        if (fields.size > 6) { importSpec.content.isDecl = WireToBool(fields[6]) }
-                        if (fields.size > 7) { importSpec.accessLevel = WireToAccessLevel(fields[7]) }
-                        if (fields.size > 8) { importSpec.hasAccessModifier = WireToBool(fields[8]) }
-                        if (fields.size > 9) { importSpec.withImplicitExport = WireToBool(fields[9]) }
-                        ApplyAccessAttr(importSpec, importSpec.accessLevel)
-                        if (fields.size > 16) {
-                            LoadNodeFields(fields, 10, importSpec)
-                        }
-                        if (fields.size > 23) {
-                            LoadNodeFields(fields, 17, importSpec.content)
-                        }
-                        if (fields.size > 24) {
-                            for (pos in SplitStringList(fields[24])) {
-                                importSpec.content.prefixPoses.add(ParsePositionWire(pos))
-                            }
-                        }
-                        if (fields.size > 25) {
-                            for (pos in SplitStringList(fields[25])) {
-                                importSpec.content.prefixDotPoses.add(ParsePositionWire(pos))
-                            }
-                        }
-                        if (fields.size > 31) {
-                            importSpec.content.identifierBegin = ParsePositionFields(fields, 26)
-                            importSpec.content.identifierEnd = ParsePositionFields(fields, 29)
-                        }
-                        if (!HasAccessAttr(importSpec)) {
-                            ApplyAccessAttr(importSpec, importSpec.accessLevel)
-                        }
-                        importSpec.curFile = Some(file)
-                        importSpec.content.curFile = Some(file)
-                        file.imports.add(importSpec)
-                    }
-                case "decl" =>
-                    if (let Some(file) <- currentFile) {
-                        LoadDeclRecord(fields, file, false)
-                    }
-                case "internal-decl" =>
-                    if (let Some(file) <- currentFile) {
-                        LoadDeclRecord(fields, file, true)
-                    }
-                case _ => ()
-            }
-        }
-        return Some(pkg)
-    }
-
-    private func LoadDeclRecord(fields: ArrayList<String>, file: File, intoExportedInternal: Bool): Unit {
-        let decl = Decl()
-        if (fields.size > 1) { decl.identifier = fields[1] }
-        if (fields.size > 2) { decl.fullPackageName = fields[2] }
-        var declAccessLevel = AccessLevel.INTERNAL
-        if (fields.size > 3) {
-            declAccessLevel = WireToAccessLevel(fields[3])
-            ApplyAccessAttr(decl, declAccessLevel)
-        }
-        if (fields.size > 4) { decl.doNotExport = WireToBool(fields[4]) }
-        if (fields.size > 5) { decl.isFunction = WireToBool(fields[5]) }
-        if (fields.size > 6) { decl.rawMangleName = fields[6] }
-        if (fields.size > 7) { decl.mangledName = fields[7] }
-        if (fields.size > 13) {
-            decl.begin = Position(
-                ParseUInt64Field(fields[8]),
-                ParseInt64Field(fields[9]),
-                ParseInt64Field(fields[10])
-            )
-            decl.end = Position(
-                ParseUInt64Field(fields[11]),
-                ParseInt64Field(fields[12]),
-                ParseInt64Field(fields[13])
-            )
-        }
-        if (fields.size > 14) {
-            decl.ReplaceAttrs(SplitAttributes(fields[14]))
-        }
-        if (!HasAccessAttr(decl)) {
-            ApplyAccessAttr(decl, declAccessLevel)
-        }
-        decl.curFile = Some(file)
-        if (intoExportedInternal) {
-            file.exportedInternalDecls.add(decl)
-        } else {
-            file.decls.add(decl)
-        }
-    }
-
-    private func ValidateCommonSpecificFeatureSetsRelations(commonPkg: Package, specificPkg: Package): Unit {
-        let specificFeatures = CollectFeaturesFromPackage(specificPkg)
-        for (commonFile in commonPkg.files) {
-            let extraFeatures = ArrayList<String>()
-            for (feature in CollectUniqueStrings(SerializedFeatureNames(commonFile))) {
-                if (!specificFeatures.contains(feature)) {
-                    extraFeatures.add("'${feature}'")
-                }
-            }
-            if (!extraFeatures.isEmpty()) {
-                let builder = cjoManager.GetDiag().DiagnoseRefactor(
-                    DiagKindRefactor.feature_is_not_subset_of_child_set,
-                    commonFile.begin,
-                    arguments: [commonPkg.fullPackageName, commonFile.filePath]
-                )
-                builder.AddNote("Extra feature from common part file: " + JoinStrings(extraFeatures, " "))
-                if (!specificPkg.files.isEmpty()) {
-                    let childFile = specificPkg.files[0]
-                    if (let Some(featureDirective) <- childFile.feature) {
-                        if (let Some(featuresSet) <- featureDirective.featuresSet) {
-                            builder.AddNote(MakeRange(featuresSet.begin, featuresSet.end),
-                                "Conflicting specific feature set:")
-                        } else {
-                            builder.AddNote(MakeRange(featureDirective.begin, featureDirective.end),
-                                "Conflicting specific feature set:")
-                        }
-                    }
-                }
-                builder.Emit()
-            }
-        }
-    }
-
-    private func ValidateCommonPartOptions(): Bool {
-        if (!loadedHasOptions) {
-            cjoManager.GetDiag().DiagnoseRefactor(
-                DiagKindRefactor.module_common_cjo_no_options,
-                DEFAULT_POSITION
-            ).Emit()
-            return true
-        }
-        var ok = true
-        if (loadedDebugOption != opts.enableCompileDebug) {
-            let before = if (loadedDebugOption) { "enabled" } else { "disabled" }
-            let after = if (opts.enableCompileDebug) { "enabled" } else { "disabled" }
-            cjoManager.GetDiag().DiagnoseRefactor(
-                DiagKindRefactor.module_common_cjo_debug_mismatch,
-                DEFAULT_POSITION,
-                arguments: [before, after]
-            ).Emit()
-            ok = false
-        }
-        if (loadedOptimizationLevel != opts.optimizationLevel) {
-            cjoManager.GetDiag().DiagnoseRefactor(
-                DiagKindRefactor.module_common_cjo_opt_mismatch,
-                DEFAULT_POSITION,
-                arguments: [OptimizationLevelToString(loadedOptimizationLevel), OptimizationLevelToString(opts.optimizationLevel)]
-            ).Emit()
-            ok = false
-        }
-        return ok
-    }
-
-    private func CollectFeaturesFromPackage(pkg: Package): TreeSet<String> {
-        let features = TreeSet<String>()
-        if (!pkg.files.isEmpty()) {
-            for (feature in SerializedFeatureNames(pkg.files[0])) {
-                features.add(feature)
-            }
-        }
-        return features
-    }
-
-    private func CollectUniqueStrings(values: ArrayList<String>): TreeSet<String> {
-        let out = TreeSet<String>()
-        for (value in values) {
-            out.add(value)
-        }
-        return out
-    }
-}
-
-public func ParseFormattedIndex(value: String): FormattedIndex {
-    return UInt32.parse(value)
-}
-
-public func ParseUInt64Field(value: String): UInt64 {
-    try {
-        return UInt64.parse(value)
-    } catch (e: Exception) {
-        return 0u64
-    }
-}
-
-public func ParseInt64Field(value: String): Int64 {
-    try {
-        return Int64.parse(value)
-    } catch (e: Exception) {
-        return 0
-    }
-}
-
-public func GetDeclMangleKey(decl: Decl): String {
-    if (!decl.mangledName.isEmpty()) {
-        return decl.mangledName
-    }
-    if (!decl.rawMangleName.isEmpty()) {
-        return decl.rawMangleName
-    }
-    if (!decl.fullPackageName.isEmpty() && !decl.identifier.isEmpty()) {
-        return decl.fullPackageName + "." + decl.identifier
-    }
-    return decl.identifier
-}
-
-private func FlatPackageAccess(access: AccessLevel): UInt8 {
-    if (SameAccessLevel(access, AccessLevel.PROTECTED)) { return 1u8 }
-    if (SameAccessLevel(access, AccessLevel.INTERNAL) || SameAccessLevel(access, AccessLevel.PRIVATE)) { return 2u8 }
-    return 0u8
-}
-
-private func OptimizationLevelToFlat(level: OptimizationLevel): UInt8 {
-    return match (level) {
-        case OptimizationLevel.O0 => 0u8
-        case OptimizationLevel.O1 => 1u8
-        case OptimizationLevel.O2 => 2u8
-        case OptimizationLevel.O3 => 3u8
-        case OptimizationLevel.Os => 4u8
-        case OptimizationLevel.Oz => 5u8
-    }
-}
-
-private func SerializedFeatureNames(file: File): ArrayList<String> {
-    if (let Some(featureDirective) <- file.feature) {
-        if (let Some(set) <- featureDirective.featuresSet) {
-            let out = ArrayList<String>()
-            for (featureId in set.content) {
-                out.add(featureId.ToString())
-            }
-            return out
-        }
-    }
-    return CloneStringArray(file.features)
-}
-
-private func BuildFeatureDirectiveFromLegacyFields(file: File): Option<FeaturesDirective> {
-    if (file.features.isEmpty()) {
-        return None
-    }
-    let directive = ASTFeaturesDirective()
-    let set = ASTFeaturesSet()
-    directive.begin = file.begin
-    directive.end = file.end
-    directive.featuresPos = file.begin
-    set.begin = file.begin
-    set.end = file.end
-    for (featureName in file.features) {
-        let featureId = ASTFeatureId()
-        featureId.begin = file.begin
-        featureId.end = file.end
-        for (part in SplitQualifiedName(featureName)) {
-            featureId.identifiers.add(ASTIdentifier(part, file.begin, file.end))
-        }
-        set.content.add(featureId)
-    }
-    if (!file.isProduct) {
-        directive.annotations.add(ASTAnnotation("NonProduct", ASTAnnotationKind.NON_PRODUCT, file.begin))
-    }
-    directive.featuresSet = Some(set)
-    return Some(directive)
-}
-
-private func LoadPackageSpecFields(fields: ArrayList<String>, start: Int64): Option<PackageSpec> {
-    if (fields.size <= start || !WireToBool(fields[start])) {
-        return None
-    }
-    let spec = PackageSpec()
-    let accessLevel = if (fields.size > start + 1) { WireToAccessLevel(fields[start + 1]) } else { AccessLevel.PUBLIC }
-    if (fields.size > start + 2) { spec.hasDoubleColon = WireToBool(fields[start + 2]) }
-    if (fields.size > start + 3) {
-        for (prefix in SplitStringList(fields[start + 3])) {
-            spec.prefixPaths.add(prefix)
-        }
-    }
-    let packageName = if (fields.size > start + 4) { fields[start + 4] } else { "" }
-    if (fields.size > start + 5) { spec.hasMacro = WireToBool(fields[start + 5]) }
-    if (fields.size > start + 11) {
-        spec.begin = ParsePositionFields(fields, start + 6)
-        spec.end = ParsePositionFields(fields, start + 9)
-    }
-    var nameBegin = spec.begin
-    var nameEnd = spec.end
-    if (fields.size > start + 17) {
-        nameBegin = ParsePositionFields(fields, start + 12)
-        nameEnd = ParsePositionFields(fields, start + 15)
-    }
-    spec.packageName = ASTIdentifier(packageName, nameBegin, nameEnd)
-    if (!SameAccessLevel(accessLevel, AccessLevel.PUBLIC)) {
-        spec.modifier = Some(ASTModifier(TokenKindFromAccessLevel(accessLevel), spec.begin))
-    }
-    return Some(spec)
-}
-
-private func ParsePositionFields(fields: ArrayList<String>, start: Int64): Position {
-    return Position(
-        ParseUInt64Field(fields[start]),
-        ParseInt64Field(fields[start + 1]),
-        ParseInt64Field(fields[start + 2])
-    )
-}
-
-private func ParsePositionWire(value: String): Position {
-    let fields = value.split(":")
-    if (fields.size < 3) {
-        return INVALID_POSITION
-    }
-    return Position(ParseUInt64Field(fields[0]), ParseInt64Field(fields[1]), ParseInt64Field(fields[2]))
-}
-
-private func TokenKindFromAccessLevel(level: AccessLevel): TokenKind {
-    if (SameAccessLevel(level, AccessLevel.PRIVATE)) { return TokenKind.PRIVATE }
-    if (SameAccessLevel(level, AccessLevel.INTERNAL)) { return TokenKind.INTERNAL }
-    if (SameAccessLevel(level, AccessLevel.PROTECTED)) { return TokenKind.PROTECTED }
-    return TokenKind.PUBLIC
-}
-
-public func LoadNodeFields(fields: ArrayList<String>, start: Int64, node: Node): Unit {
-    if (fields.size > start + 5) {
-        node.begin = Position(
-            ParseUInt64Field(fields[start]),
-            ParseInt64Field(fields[start + 1]),
-            ParseInt64Field(fields[start + 2])
-        )
-        node.end = Position(
-            ParseUInt64Field(fields[start + 3]),
-            ParseInt64Field(fields[start + 4]),
-            ParseInt64Field(fields[start + 5])
-        )
-    }
-    if (fields.size > start + 6) {
-        node.ReplaceAttrs(SplitAttributes(fields[start + 6]))
-    }
-}
-
-public func SplitRawLines(text: String): ArrayList<String> {
-    let out = ArrayList<String>()
-    let bytes = text.toArray()
-    var start: Int64 = 0
-    var idx: Int64 = 0
-    while (idx < bytes.size) {
-        if (bytes[idx] == b'\n') {
-            let end = if (idx > start && bytes[idx - 1] == b'\r') { idx - 1 } else { idx }
-            out.add(String.fromUtf8(bytes[start..end]))
-            start = idx + 1
-        }
-        idx++
-    }
-    if (start < bytes.size) {
-        out.add(String.fromUtf8(bytes[start..]))
-    }
-    return out
 }

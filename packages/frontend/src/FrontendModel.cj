@@ -16,7 +16,8 @@ import cjcj::basic.FaithfulUnorderedMap
 import cjcj::basic.Range as BasicRange
 import cjcj::chir.CHIRContext as RealCHIRContext
 import cjcj::chir.Package as RealCHIRPackage
-import cjcj::modules.{CheckCjoVersionCompat, CjoVersionCompat}
+import cjcj::modules.{CheckCjoVersionCompat, CjoVersionCompat, CjoVersionTriplet,
+    VersionAtLeast, VersionAtMost, VersionExactly}
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.SemaImportManager
 import cjcj::modules.MacroHostImportManager
@@ -1155,7 +1156,7 @@ private func CollectRemovedDecl(mangledName: String, needRemoved: HashSet<String
     }
 }
 
-private class CjoSignatureMaterializer {
+public class CjoSignatureMaterializer {
     private var cjoPath: String = ""
     private let packageName: String
     private var pkg: Package
@@ -1266,6 +1267,47 @@ private class CjoSignatureMaterializer {
             dummyExpr.SetTy(dummyExpr.desugarExpr.getOrThrow().GetTy().getOrThrow())
         }
         for ((_, expr) in allLoadedExprs) { PostLoadReference(expr) }
+    }
+
+    // ASTLoader.cpp:286-332,392-408. A tuple carries the C++ out-bool result.
+    public func GetCjoVersion(): CjoVersionTriplet {
+        let (version, _) = ReadCjoVersion()
+        return version
+    }
+
+    public func HasCjoVersion(): Bool {
+        let (_, hasVersion) = ReadCjoVersion()
+        return hasVersion
+    }
+
+    public func IsCjoVersionAtLeast(requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+        let (version, hasVersion) = ReadCjoVersion()
+        if (!hasVersion) { return false }
+        return VersionAtLeast(version.major, version.minor, requiredMajor, requiredMinor)
+    }
+
+    public func IsCjoVersionAtMost(requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+        let (version, hasVersion) = ReadCjoVersion()
+        if (!hasVersion) { return false }
+        return VersionAtMost(version.major, version.minor, requiredMajor, requiredMinor)
+    }
+
+    public func IsCjoVersionExactly(requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+        let (version, hasVersion) = ReadCjoVersion()
+        if (!hasVersion) { return false }
+        return VersionExactly(version.major, version.minor, requiredMajor, requiredMinor)
+    }
+
+    private func ReadCjoVersion(): (CjoVersionTriplet, Bool) {
+        var result = CjoVersionTriplet()
+        if (packageTable.isNone()) { return (result, false) }
+        let cjoVer = packageTable.getOrThrow().GetCjoVersion()
+        if (cjoVer.isNone()) { return (result, false) }
+        let version = cjoVer.getOrThrow()
+        result.major = version.GetMajorNum()
+        result.minor = version.GetMinorNum()
+        result.patch = version.GetPatchNum()
+        return (result, true)
     }
 
     public func SetCjoPath(path: String): Unit {

@@ -56,7 +56,7 @@ def main():
                 'major': (1, 1, 0), 'newer_minor': (0, 2, 0), 'missing': None}
     tasks = []
     for name, triplet in variants.items():
-        for entry in ('import', 'depinfo'):
+        for entry in ('import', 'depinfo', 'common'):
             case = out / f'{entry}-{name}'
             case.mkdir(exist_ok=True)
             changed = bytearray(data)
@@ -71,6 +71,11 @@ def main():
         entry, name, case = task
         cmd = ([compiler, fixtures / 'use.cj', '--output-type=staticlib', '-o', case / 'libuseversion.a', '--import-path', case]
                if entry == 'import' else [compiler, case / 'vercheck.cjo', '--scan-dependency'])
+        if entry == 'common':
+            (case / 'output').mkdir(exist_ok=True)
+            cmd = [compiler, fixtures / 'specific.cj', '--experimental',
+                   '--common-part-cjo', case / 'vercheck.cjo', '--output-type=staticlib',
+                   '-o', case / 'output' / 'libvercheck.a']
         invocation, output = run(cmd, case, case / 'compile.log')
         accepted = name in ('current', 'older_minor', 'patch')
         # Do not turn an arbitrary compiler failure into a successful rejection.
