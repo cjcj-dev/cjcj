@@ -39,11 +39,11 @@ def colour_symbols(colour_runtime, host_runtime):
     return exports
 
 
-def assert_pair(runtime, std, source, exports):
+def assert_pair(runtime, std, source, exports, host_runtime):
     identity = (f'runtime={runtime} runtime_sha256={sha256(runtime)} '
                 f'std={std} std_sha256={sha256(std)} std_source={source}')
     try:
-        rt_hits = symbols(runtime, runtime=True) & exports
+        rt_hits = symbols(runtime, runtime=True) - symbols(host_runtime, runtime=True)
         std_hits = symbols(std) & exports
     except (OSError, ValueError) as error:
         raise ValueError(f'{identity} inspection={error}') from error
@@ -72,7 +72,7 @@ def main():
         else:
             if not args.runtime or not args.std or not args.source:
                 parser.error('pair check requires --runtime, --std and --source')
-            assert_pair(args.runtime, args.std, args.source, exports)
+            assert_pair(args.runtime, args.std, args.source, exports, args.host_runtime)
     except (OSError, ValueError) as error:
         print(f'STD-RUNTIME-CHECK-FAIL {error}', file=sys.stderr)
         return 1

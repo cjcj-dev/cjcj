@@ -186,7 +186,7 @@ def main():
         colour_reference = (args.real_coloured_sdk / 'runtime/lib' / LINUX / 'libcangjie-runtime.so'
                             if name in real_pairs else libs / 'both-versioned.so')
         host_reference = (args.real_official_sdk / 'runtime/lib' / LINUX / 'libcangjie-runtime.so'
-                          if name in real_pairs else libs / 'none.so')
+                          if name in real_pairs else libs / ((variant + '.so') if role == 'host' and name not in pair_cases else 'none.so'))
         cmd += ['--colour-runtime', str(colour_reference), '--host-runtime', str(host_reference)]
         base_order = subprocess.check_output(['find', str(base / 'runtime/lib'), '-mindepth', '1',
                                               '-maxdepth', '1', '-type', 'd'], text=True).splitlines()

@@ -189,13 +189,13 @@ make_sdk_fixture() {
 run_sdk_so() {
   local product="$1" to="$2"
   bash "$product" --from "$TMP/sdk-base" --to "$to" --host \
-    --llvm-so "$TMP/libLLVM-15.so" --colour-runtime "$TMP/colour-reference.so" --force
+    --llvm-so "$TMP/libLLVM-15.so" --colour-runtime "$TMP/colour-reference.so" --host-runtime "$TMP/sdk-base/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" --force
 }
 
 run_sdk_tuple() {
   local product="$1" to="$2"
   bash "$product" --from "$TMP/sdk-base" --to "$to" --host \
-    --llvm-tuple "$TMP/colour-tuple" --colour-runtime "$TMP/colour-reference.so" --force
+    --llvm-tuple "$TMP/colour-tuple" --colour-runtime "$TMP/colour-reference.so" --host-runtime "$TMP/sdk-base/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" --force
 }
 
 make_runtime_payload() {
@@ -225,7 +225,7 @@ run_sdk_runtime() {
   cc -c -fPIC "$TMP/target-std.c" -o "$TMP/target-std.o"
   rm -f "$TMP/sdk-base/lib/linux_x86_64_cjnative/libcangjie-std-core.a"
   ar rcs "$TMP/sdk-base/lib/linux_x86_64_cjnative/libcangjie-std-core.a" "$TMP/target-std.o"
-  bash "$product" --from "$TMP/sdk-base" --to "$to" --target --runtime "$source" --force
+  bash "$product" --from "$TMP/sdk-base" --to "$to" --target --runtime "$source" --colour-runtime "$TMP/colour-reference.so" --host-runtime "$TMP/sdk-base/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so" --force
 }
 
 run_sdk_runtime_checked() {

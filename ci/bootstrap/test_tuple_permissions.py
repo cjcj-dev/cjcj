@@ -35,7 +35,8 @@ class TuplePermissions(unittest.TestCase):
         target = root / 'sdk'
         result = subprocess.run(['bash', str(PRODUCT), '--from', os.environ['HOST_SDK'],
                                  '--to', str(target), '--host', '--llvm-tuple', str(source),
-                                 '--colour-runtime', os.environ['COLOUR_RUNTIME']],
+                                 '--colour-runtime', os.environ['COLOUR_RUNTIME'],
+                                 '--host-runtime', str(Path(os.environ['HOST_SDK']) / 'runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so')],
                                 capture_output=True, text=True)
         # The target invariant runs even when the product's verification fails.
         observations = []

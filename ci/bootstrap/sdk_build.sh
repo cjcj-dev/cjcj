@@ -34,8 +34,8 @@
 #   --runtime-commit <40hex> 独立预期提交；flat 任意名称根必须显式提供，nested 给出时也核验
 #   --std <dir>     build.py install prefix，或兼容旧调用的整个 modules/<平台> 目录
 #   --verify-host-rt <dir|sdk>  target SDK 验证 managed 工具时使用的未着色宿主 runtime
-#   --colour-runtime <SO>  染色 runtime 导出参考（host 装配必填；target 默认安装后的 SO）
-#   --host-runtime <SO>    同 HRT 身份的官方 runtime 导出参考（默认 verify-host-rt 或基线）
+#   --colour-runtime <SO>  染色 runtime 导出参考 SO（必填）
+#   --host-runtime <SO>    同 HRT 身份的官方 runtime 导出参考 SO（必填）
 #   --link <name>   ⭐ 组好后 `cjv toolchain link <name> <to>`
 #   --force         ⭐ 目标已存在时先删（⛔ 默认拒绝覆盖）
 set -u
@@ -577,9 +577,8 @@ echo "  g_cjLoadBadMask=$MASK ✓  ($RTSO)"
 # Check the installed target pair, never the --verify-host-rt execution override.
 # All component copies (including inherited std) must be complete before this.
 COLOUR_CHECK="$(dirname "${BASH_SOURCE[0]}")/std_runtime_colour.py"
-if [ -z "$COLOUR_RUNTIME" ] && [ "$ROLE" = target ]; then COLOUR_RUNTIME="$RTSO"; fi
-[ -n "$COLOUR_RUNTIME" ] || die 'host 配对检查缺 --colour-runtime 参考 SO'
-HOST_RUNTIME=${HOST_RUNTIME:-${VERIFY_HOST_RT_DIR:-$BASE/runtime/lib/$TARGET_TUPLE}/libcangjie-runtime.so}
+[ -n "$COLOUR_RUNTIME" ] || die '配对检查缺 --colour-runtime 参考 SO'
+[ -n "$HOST_RUNTIME" ] || die '配对检查缺 --host-runtime 参考 SO'
 python3 "$COLOUR_CHECK" --colour-runtime "$COLOUR_RUNTIME" --host-runtime "$HOST_RUNTIME" --runtime "$RTSO" \
   --std "$TO/lib/$TARGET_TUPLE/libcangjie-std-core.a" --source "${STD:-$BASE}" \
   || die "std/runtime 颜色配对失败（来源与 sha256 见上）"
