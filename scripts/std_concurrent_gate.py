@@ -101,7 +101,7 @@ def main():
         for line in lines:
             state, name, detail = line.split(' ', 2)
             checks.append({'name': name, 'pass': state == 'PASS', 'detail': detail})
-        check('registration:completed', len(lines) == 26 and tested.returncode in (0, 1),
+        check('registration:completed', len(lines) == 32 and tested.returncode in (0, 1),
               f'rc={tested.returncode}; assertions={len(lines)}')
     if args.runtime_sdk:
         sdk = args.runtime_sdk

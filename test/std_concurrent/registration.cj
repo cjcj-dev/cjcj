@@ -26,6 +26,9 @@ main(): Int64 {
         let compressed = CJMangledCompression(mangled)
         failures += check("compression:${pkg}", (compressed.size < mangled.size).toString(), "true")
         println("OBSERVE compressed:${pkg}=${compressed}")
+        let decodedCompressed = Demangle("_CN${code}5probeHCN${code}6MarkerEY2_")
+        failures += check("demangle-compressed:${pkg}", decodedCompressed.GetPkgName(), pkg)
+        failures += check("demangle-compressed-valid:${pkg}", decodedCompressed.IsValid().toString(), "true")
     }
     failures += check("unknown-package", StandardLibName("example.concurrent") ?? "<none>", "<none>")
     failures += check("unknown-code", IsStdPackageMangleCode("cz").toString(), "false")
