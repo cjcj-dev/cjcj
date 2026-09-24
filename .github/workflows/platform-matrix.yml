@@ -115,7 +115,7 @@ jobs:
           name: colour-runtime-gate-diagnostics
           path: |
             ci/runtime_pin.env
-            .platform-ci/runtime-gate-diagnostics/
+            ${{ steps.runtime-build.outcome == 'failure' && '.platform-ci/runtime-gate-diagnostics/' || '' }}
             runtime-source/runtime/**/gate_run.log
             runtime-source/runtime/**/gc_unit_gate.status
             runtime-source/runtime/**/runtime-build-config.txt

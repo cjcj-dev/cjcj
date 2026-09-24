@@ -29,7 +29,7 @@ def collect(source, diagnostics):
     # build, including intermediate outputs when installation never happened.
     products = []
     for file in sorted(source.rglob('*')):
-        if not file.is_file() or file.is_symlink() or ('.so' not in file.name and not os.access(file, os.X_OK)):
+        if not file.is_file() or file.is_symlink():
             continue
         try:
             with file.open('rb') as stream:
@@ -50,12 +50,16 @@ def collect(source, diagnostics):
             summary.append(f'product copy failed {file}: {exc}')
     (diagnostics / 'products.sha256').write_text('\n'.join(products) + '\n')
     for core in cores:
-        # First ask the core itself for its executable; do not guess by truncated
-        # process name or pick an arbitrary gc_unit ELF from another build.
+        # Linux NT_PRPSINFO may contain only a truncated command line. Our %E
+        # filename records the full executable path, with '/' encoded as '!'.
+        # Prefer that over gdb's "info proc exe" (which works for gdb-made cores).
         probe = diagnostics / (core.name + '.exe.txt')
         rc = gdb(['-c', str(core), '-ex', 'info proc exe'], probe)
         match = re.search(r"exe = '([^']+)'", probe.read_text(errors='replace'))
-        executable = Path(match[1]) if match else None
+        encoded = core.name.removeprefix('core.').rsplit('.', 2)
+        executable = (Path(encoded[0].replace('!', '/'))
+                      if len(encoded) == 3 and encoded[0].startswith('!')
+                      else Path(match[1]) if match else None)
         args = ['-c', str(core)]
         if executable and executable.is_file():
             args = [str(executable), *args]

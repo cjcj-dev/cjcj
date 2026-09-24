@@ -29,7 +29,7 @@ steps = workflow['jobs']['colour-runtime']['steps']
 collector = next(s for s in steps if s.get('name') == 'Collect runtime core backtraces')
 upload = next(s for s in steps if s.get('name') == 'Upload runtime gate diagnostics')
 assert collector['if'] == "${{ failure() && steps.runtime-build.outcome == 'failure' }}"
-assert '.platform-ci/runtime-gate-diagnostics/' in upload['with']['path'].splitlines()
+assert "${{ steps.runtime-build.outcome == 'failure' && '.platform-ci/runtime-gate-diagnostics/' || '' }}" in upload['with']['path'].splitlines()
 assert upload['if'] == 'always()'
 assert steps.index(collector) < steps.index(upload)
 assert next(s for s in steps if s.get('id') == 'runtime-build')['run'].rstrip().endswith(
@@ -70,7 +70,7 @@ def arm(label, cut=False, with_core=True):
     diag = work / '.platform-ci/runtime-gate-diagnostics'
     (diag / 'cores').mkdir(parents=True)
     if with_core:
-        shutil.copy2(seed, diag / 'cores/core.abort')
+        shutil.copy2(seed, diag / ('cores/core.' + str(elf).replace('/', '!') + '.123.456'))
     workflow_text = (a.repo / '.github/workflows/platform-matrix.yml').read_text()
     mutated = workflow_text.replace('run: python3 ci/platform_matrix/collect_runtime_cores.py',
                                     "run: ':'") if cut else workflow_text
