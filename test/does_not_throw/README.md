@@ -21,7 +21,7 @@ assertions; compilation must still succeed.
 
 `DoesNotThrowTest.independentAttributeRoundTrip` additionally checks CHIR index 38,
 its name, bit encoding and serialization, including the independent
-`NO_SIDE_EFFECT` positive control. Run with `cjpm test -m cjcj::chir
+`NO_SIDE_EFFECT` positive control. Run with `cjpm test -m packages/chir
 --filter '*DoesNotThrow*'` in the build environment.
 
 The CJMapping forwarder finalizer's CLI entry is currently unavailable because
