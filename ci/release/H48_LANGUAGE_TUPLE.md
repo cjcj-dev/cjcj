@@ -4,6 +4,9 @@ This prerelease preserves the compiler/stdlib inputs used by the kkk2 managed
 language gate. It is **not a rebuild of current master** and is not a stable
 release. The release tag explicitly says `provenance-partial`.
 
+The published release is `395249571`; its exact asset IDs and digests are in
+[`ci/h48_language_tuple_pin.json`](../h48_language_tuple_pin.json).
+
 The compiler source is `35da7be2434ad72348ed27e8a0bf599ec4e91524` (the retained
 build changes its compile option to `-O1`). The target LLVM source is
 `1ecb811801cae9968e0046048943e34c923a34c9`. The compiler process uses the separately
@@ -24,7 +27,7 @@ those old files.
 
 ## Download and check
 
-Use `publish_language_tuple.py fetch --pin <reviewed-pin.json> --output <new-dir>`.
+Use `python3 ci/release/publish_language_tuple.py fetch --pin ci/h48_language_tuple_pin.json --output <new-dir>`.
 The fetcher downloads by release asset ID, verifies all asset digests, validates
 the prerelease identity, safely extracts the archive, and verifies the entire
 payload inventory, compiler identity, and component roles. It never resolves
