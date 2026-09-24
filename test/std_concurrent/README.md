@@ -7,7 +7,7 @@ code (`include/cangjie/Mangle/StdPkg.inc:80`, `demangler/Utils.h:142`).
 `registration.cj` links the actual stage1 build's product archives. It checks
 public library naming and symbol APIs, with `std.collection.concurrent` (`bh`)
 and `std.binary` (`ar`) as independent controls. These are library API checks;
-they do not claim that the alpha.06 concurrent library can be linked.
+the alpha.06 import fixture separately checks real library linkage.
 
 `concurrent.cj` and `collection_concurrent.cj` are compiled by the real stage1
 compiler. The gate reads generated object symbols and LLVM IR, including the
@@ -18,3 +18,7 @@ components or the standard concurrent API.
 Run `python3 scripts/std_concurrent_gate.py --help` for the explicit compiler,
 product archive directory, and evidence directory inputs. Use a private SDK
 and the matching host runtime/LLVM environment when running the compiler.
+
+With `--runtime-sdk`, `import_concurrent.cj` calls alpha.06 `threadScope` and
+checks its returned value after linking; `import_control.cj` isolates SDK
+startup from the new package.

@@ -36,6 +36,7 @@ def main():
                         help='unmodified stage1 build target/release directory')
     parser.add_argument('--host-sdk', required=True, type=Path)
     parser.add_argument('--shim', required=True, type=Path)
+    parser.add_argument('--runtime-sdk', type=Path, help='alpha.06 SDK for real import/link/run checks')
     parser.add_argument('--out', required=True, type=Path)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -88,9 +89,8 @@ def main():
     env['PATH'] = ':'.join(str(args.host_sdk / p) for p in ['bin', 'tools/bin', 'third_party/llvm/bin']) + ':/usr/bin:/bin'
     command = [args.host_sdk / 'bin/cjc', FIXTURES / 'registration.cj',
                '--import-path', args.products, '-o', args.out / 'registration']
-    for library in sorted(args.products.glob('*/*.a')):
-        command += ['-L', library.parent, '-l' + library.name[3:-2]]
-    command += ['--link-options', f'{args.shim} {args.host_sdk}/third_party/llvm/lib/libLLVM-15.so -lstdc++']
+    archives = ' '.join(str(p) for p in sorted(args.products.glob('*/*.a')))
+    command += ['--link-options', f'--start-group {archives} --end-group {args.shim} {args.host_sdk}/third_party/llvm/lib/libLLVM-15.so -lstdc++']
     compiled = run(command, args.out / 'registration-compile', env)
     check('registration:compile', compiled.returncode == 0, f'rc={compiled.returncode}')
     if compiled.returncode == 0:
@@ -103,6 +103,26 @@ def main():
             checks.append({'name': name, 'pass': state == 'PASS', 'detail': detail})
         check('registration:completed', len(lines) == 26 and tested.returncode in (0, 1),
               f'rc={tested.returncode}; assertions={len(lines)}')
+    if args.runtime_sdk:
+        sdk = args.runtime_sdk
+        target_env = dict(os.environ)
+        target_env['CANGJIE_HOME'] = str(sdk)
+        runtime_env = dict(target_env)
+        runtime_env['LD_LIBRARY_PATH'] = ':'.join(str(sdk / p) for p in [
+            'runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative',
+            'third_party/llvm/lib', 'tools/lib']) + ':/usr/lib/x86_64-linux-gnu'
+        identity['target_runtime'] = {str(p): sha(p) for p in (sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so')}
+        for name in ['import_concurrent', 'import_control']:
+            binary = args.out / name
+            linked = run([args.compiler, '-V', FIXTURES / (name + '.cj'), '-o', binary],
+                         args.out / (name + '-compile'), target_env)
+            check(name + ':link', linked.returncode == 0, f'rc={linked.returncode}')
+            if linked.returncode == 0:
+                identity[name + '_elf'] = sha(binary)
+                executed = run([binary], args.out / (name + '-run'), runtime_env)
+                expected = 'concurrent-result=42' if name == 'import_concurrent' else 'control-result=42'
+                check(name + ':run', executed.returncode == 0 and expected in executed.stdout,
+                      f'rc={executed.returncode}; {executed.stdout.strip()}')
     identity['uptime_after'] = subprocess.check_output(['uptime'], text=True)
     (args.out / 'identity.json').write_text(json.dumps(identity, indent=2) + '\n')
     (args.out / 'checks.json').write_text(json.dumps(checks, indent=2) + '\n')
