@@ -40,5 +40,22 @@ The shipped std is rebuilt with the exact shipped stage3 executable. Its
 The default `all` completes both in that order. Language-tuple builds retain
 the source compiler version without editing its source declaration.
 
+`.github/workflows/source-language-tuple.yml` runs on master pushes, a six-hour
+schedule, and manual dispatch. It resolves runtime main once, builds the frozen
+compiler runtime, calls srcbuild, stages a draft prerelease, downloads its exact
+asset IDs, and runs the unchanged runtime language gate with an independently
+built target runtime. Finalization requires both source heads still to match,
+the gate exit code and the generated ELF digests. A moving source head leaves
+the draft unpublished. Neither publication step marks a release as latest.
+
+For a retained local compiler checkpoint, use the same source checkout,
+bootstrap work, runtime manifest pin and LLVM inputs with
+`CJCJ_STAGE3_PHASE=std`. The producer checks their identities before using the
+retained executable. The checkpoint lives in `software/stage3-bootstrap.json`;
+`software/stage3-compiler.json` is written only after the shipped std completes.
+A completed packaging run exposes a release pin with numeric release/asset IDs
+and digests; consumers use `publish_source_language_tuple.py fetch --pin ...`
+before activation.
+
 Implementation and real-artifact qualification are in progress. This document
 is not a claim that a source tuple has been published or passed its language gate.
