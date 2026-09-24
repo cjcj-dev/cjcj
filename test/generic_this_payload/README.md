@@ -39,3 +39,9 @@ this unchanged suite. Exactly the two dynamic-layout and two lowered-call checks
 must fail; both controls must pass. Restore the source and rebuild in the same
 path to check that the compiler identity and all six checks return to the
 candidate result. Each assertion logs even after another assertion fails.
+
+For the TreeMap bootstrap reproducer, rebuild and install the standard library
+with the candidate compiler **before linking stage2**. `nextNode` is supplied by
+`libcangjie-std-collection.a`; rebuilding only compiler sources leaves the old
+wrapper in the final executable. Preserve the old archive/ELF as a control, and
+check the rebuilt archive's wrapper relocation targets before testing stage2.
