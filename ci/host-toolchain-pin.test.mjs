@@ -176,6 +176,7 @@ test('every workflow host consumer loads ci/cjpm_pin.env after checkout', async 
     ['build-cjpm.yml', 1],
     ['build-windows-runtime.yml', 1],
     ['ci.yml', 2],
+    // colour-runtime consumes the independently pinned H48 release tuple.
     ['platform-matrix.yml', 1],
   ]);
   const workflows = path.join(root, '.github', 'workflows');

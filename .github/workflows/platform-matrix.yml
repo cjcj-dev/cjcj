@@ -43,26 +43,38 @@ jobs:
           platform: ubuntu-22.04
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 1G
-      - name: Install runtime core debugger
+      - name: Fetch pinned H48 language tuple
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 ci/release/publish_language_tuple.py fetch \
+            --pin ci/h48_language_tuple_pin.json --output "$RUNNER_TEMP/h48-download"
+      - name: Provision native gate debugger
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq gdb
-      - name: Build runtime
+      - name: Build runtime and native gate
         id: runtime-build
         env:
           RUNTIME_BUILD_TYPE: relwithdebinfo
+          # The target pair must exist before it can be installed in the private
+          # language SDK. The complete gate below is mandatory before upload.
+          GC_UNIT_GATE_LANGUAGE_TESTS: defer
         run: |
           source ci/platform_matrix/runtime_core_setup.sh || echo "::warning::Core setup incomplete; see setup.log"
           npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+      - name: Complete gate with pinned language tuple and same-build target
+        run: |
+          bash ci/release/gate_colour_runtime.sh runtime-source \
+            "$RUNNER_TEMP/h48-download/installed/tuple" "$RUNNER_TEMP/h48-active" \
+            .platform-ci/runtime-install
       - name: Package same-build runtime pair
         id: package
         run: |
-          # Native Linux does not install boundscheck; take the unique output
-          # from this same build, never from the host SDK.
-          mapfile -t bounds < <(find runtime-source/runtime -type f -name libboundscheck.so)
-          printf 'BOUNDSCHECK_BUILD_OUTPUT=%s\n' "${bounds[@]}"
-          test "${#bounds[@]}" = 1
-          cp "${bounds[0]}" .platform-ci/runtime-install/runtime/lib/linux_x86_64_cjnative/libboundscheck.so
+          # Use the exact published pair selected and verified by the gate.
+          # The output layout also retains staging and earlier configurations.
+          source "$RUNNER_TEMP/h48-active.env"
+          cp "$GCV2_RUNTIME_LIB_DIR/libboundscheck.so" .platform-ci/runtime-install/runtime/lib/linux_x86_64_cjnative/libboundscheck.so
           node ci/release/colour_runtime.mjs .platform-ci/runtime-install colour-runtime
           nm --defined-only colour-runtime/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so > colour-runtime/symbols.txt
           test "$(grep -Ec ' g_cjLoadBadMask(@@?[^[:space:]]+)?$' colour-runtime/symbols.txt)" = 1
@@ -115,6 +127,8 @@ jobs:
           name: colour-runtime-gate-diagnostics
           path: |
             ci/runtime_pin.env
+            ci/h48_language_tuple_pin.json
+            ${{ runner.temp }}/h48-active.env
             ${{ steps.runtime-build.outcome == 'failure' && '.platform-ci/runtime-gate-diagnostics/' || '' }}
             runtime-source/runtime/**/gate_run.log
             runtime-source/runtime/**/gc_unit_gate.status
