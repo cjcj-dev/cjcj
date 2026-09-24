@@ -18,7 +18,7 @@ import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, Crea
     NSOBJECT_CLASS_IDENT, NSSTRING_CLASS_IDENT,
     WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
-    CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
+    CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, NATIVE_HANDLE_MARKER, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
     REGISTRY_ID_SETTER_SELECTOR,
     GetRootPackageName, OBJ_C_FWD_CLASS_SUFFIX,
     OPTION_VALUE_CTOR, STD_LIB_OPTION, V_COMPILER}
@@ -34,6 +34,8 @@ public enum Retain {
 private let FINALIZER_IDENT: String = "~init"
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:37.
 private let VALUE_IDENT: String = "value"
+// Upstream 0d3c5230, ASTFactory.cpp:39: pointer + ObjC-incompatible marker.
+private let INTERNAL_CTOR_PARAMS: Int64 = 2
 
 // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.h:37-47,279-283.
 public class ASTFactory {
@@ -265,7 +267,9 @@ public class ASTFactory {
                 let mirrorCtor = GetGeneratedBaseCtor(mirror).getOrThrow()
                 let args = ArrayList<FuncArg>()
                 args.add(CreateFuncArg(entity))
-                if (let Some(ctorCall) <- CreateCall(Some(mirrorCtor), curFile, args: args)) {
+                let ctorCallResult = CreateCall(Some(mirrorCtor), curFile, args: args)
+                AddMarkerToCallIfNeeded(ctorCallResult.getOrThrow())
+                if (let Some(ctorCall) <- ctorCallResult) {
                     ctorCall.callKind = CallKind.CALL_OBJECT_CREATION
                     ctorCall.SetTy(mirrorTy)
                     return Some(ctorCall)
@@ -388,6 +392,23 @@ public class ASTFactory {
             return false
         }
         let params = paramLists[0].params
+        if (params.size != INTERNAL_CTOR_PARAMS) {
+            return false
+        }
+        return params[0].identifier == NATIVE_HANDLE_IDENT && params[1].identifier == NATIVE_HANDLE_MARKER
+    }
+
+    public func IsGeneratedLegacyBaseCtor(decl: Decl): Bool {
+        let funcDecl = decl as FuncDecl
+        if ((let None <- funcDecl) || !funcDecl.getOrThrow().TestAttr(Attribute.CONSTRUCTOR) ||
+            (let None <- funcDecl.getOrThrow().funcBody)) {
+            return false
+        }
+        let paramLists = funcDecl.getOrThrow().funcBody.getOrThrow().paramLists
+        if (paramLists.isEmpty()) {
+            return false
+        }
+        let params = paramLists[0].params
         if (params.size != 1) {
             return false
         }
@@ -405,12 +426,18 @@ public class ASTFactory {
             CJC_NULLPTR_CHECK(superClass)
             return GetGeneratedBaseCtor(superClass.getOrThrow())
         }
+        var legacyBaseCtor: Option<FuncDecl> = None
         for (member in decl.GetMemberDeclPtrs()) {
             if (let Some(funcDecl) <- (member as FuncDecl)) {
                 if (IsGeneratedBaseCtor(funcDecl)) {
                     return Some(funcDecl)
+                } else if (IsGeneratedLegacyBaseCtor(funcDecl)) {
+                    legacyBaseCtor = Some(funcDecl)
                 }
             }
+        }
+        if (legacyBaseCtor.isSome()) {
+            return legacyBaseCtor
         }
         CJC_ABORT()
         return None
@@ -472,10 +499,13 @@ public class ASTFactory {
     public func CreateBaseCtorDecl(target: ClassDecl): FuncDecl {
         let nativeObjCIdTy = bridge.GetNativeObjCIdTy().getOrThrow()
         let param = CreateFuncParam(NATIVE_HANDLE_IDENT, CreateType(nativeObjCIdTy), None, nativeObjCIdTy)
-        let ctorFuncTy = typeManager.GetFunctionTy([param.GetTy().getOrThrow()], target.GetTy().getOrThrow())
+        let markerTy = bridge.GetNativeObjCIdMarkerTy().getOrThrow()
+        let markerParam = CreateFuncParam(NATIVE_HANDLE_MARKER, CreateType(markerTy), None, markerTy)
+        let ctorFuncTy = typeManager.GetFunctionTy([param.GetTy().getOrThrow(), markerTy], target.GetTy().getOrThrow())
 
         let ctorParams = ArrayList<FuncParam>()
         ctorParams.add(param)
+        ctorParams.add(markerParam)
         let paramList = CreateFuncParamList(ctorParams)
         let ctorNodes = ArrayList<Node>()
         let paramLists = ArrayList<FuncParamList>()
@@ -493,18 +523,39 @@ public class ASTFactory {
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1404-1425.
+    // Upstream 0d3c5230, ASTFactory.cpp:1352-1355,1528-1540.
+    public func CreateNativeHandleMarker(): RefExpr {
+        return CreateRefExpr(bridge.GetNativeObjCIdMarkerInstance().getOrThrow())
+    }
+
+    public func AddMarkerToCallIfNeeded(callExpr: CallExpr): Unit {
+        let ctor = callExpr.resolvedFunction.getOrThrow()
+        CJC_ASSERT(ctor.TestAttr(Attribute.CONSTRUCTOR))
+        CJC_ASSERT(ctor.funcBody.isSome() && !ctor.funcBody.getOrThrow().paramLists.isEmpty())
+        let params = ctor.funcBody.getOrThrow().paramLists[0].params
+        if (params.size == INTERNAL_CTOR_PARAMS && params[0].identifier == NATIVE_HANDLE_IDENT &&
+            params[1].identifier == NATIVE_HANDLE_MARKER) {
+            callExpr.args.add(CreateFuncArg(CreateNativeHandleMarker()))
+        }
+    }
+
     public func CreateImplCtor(from: FuncDecl): FuncDecl {
         let nativeHandleTy = bridge.GetNativeObjCIdTy().getOrThrow()
         let ctor = (ASTCloner.Clone(from) as FuncDecl).getOrThrow()
         let curFile = ctor.curFile
         CJC_NULLPTR_CHECK(ctor.funcBody)
         let implCtorParams = ctor.funcBody.getOrThrow().paramLists[0].params
-        implCtorParams.add(WithinFile<FuncParam>(CreateFuncParam(NATIVE_HANDLE_IDENT,
-            CreateType(nativeHandleTy), None, nativeHandleTy), curFile), at: 0)
+        let specialParams = ArrayList<FuncParam>()
+        specialParams.add(WithinFile<FuncParam>(CreateFuncParam(NATIVE_HANDLE_IDENT,
+            CreateType(nativeHandleTy), None, nativeHandleTy), curFile))
+        let markerTy = bridge.GetNativeObjCIdMarkerTy().getOrThrow()
+        specialParams.add(WithinFile<FuncParam>(CreateFuncParam(NATIVE_HANDLE_MARKER,
+            CreateType(markerTy), None, markerTy), curFile))
+        implCtorParams.add(all: specialParams, at: 0)
 
         let implCtorParamTys = ArrayList<Ty>()
         for (param in implCtorParams) {
-            implCtorParamTys.add(param.typeNode.getOrThrow().GetTy().getOrThrow())
+            implCtorParamTys.add(param.GetTy().getOrThrow())
         }
         let retTy = ctor.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
         ctor.SetTy(typeManager.GetFunctionTy(implCtorParamTys.toArray(), retTy))
@@ -548,9 +599,10 @@ public class ASTFactory {
             return false
         }
         let params = paramLists[0].params
-        if (params.isEmpty()) {
+        if (params.size < 1) {
             return false
         }
+        // The reserved first parameter also identifies pre-marker compiled mirrors.
         return params[0].identifier == NATIVE_HANDLE_IDENT
     }
 
@@ -576,15 +628,15 @@ public class ASTFactory {
                 let funcDeclParamLists = funcDecl.funcBody.getOrThrow().paramLists
                 CJC_ASSERT(!funcDeclParamLists.isEmpty())
                 let funcDeclParams = funcDeclParamLists[0].params
-                if (originParams.size + 1 != funcDeclParams.size) {
+                if (originParams.size + INTERNAL_CTOR_PARAMS != funcDeclParams.size) {
                     continue
                 }
 
                 var matched = true
-                var index = 1
+                var index = INTERNAL_CTOR_PARAMS
                 while (index < funcDeclParams.size) {
                     let funcDeclParam = funcDeclParams[index]
-                    let originParam = originParams[index - 1]
+                    let originParam = originParams[index - INTERNAL_CTOR_PARAMS]
                     if (funcDeclParam.identifier != originParam.identifier ||
                         funcDeclParam.GetTy().getOrThrow() != originParam.GetTy().getOrThrow()) {
                         matched = false
@@ -1167,8 +1219,10 @@ public class ASTFactory {
         let ctorArgs = ArrayList<FuncArg>()
         ctorArgs.add(CreateFuncArg(convertCallExpr))
         let realTarget = GetGeneratedBaseCtor(classDecl).getOrThrow()
-        return CreateThisCall(classDecl, realTarget, realTarget.GetTy().getOrThrow(),
+        let thisCall = CreateThisCall(classDecl, realTarget, realTarget.GetTy().getOrThrow(),
             curFile.getOrThrow(), ctorArgs)
+        AddMarkerToCallIfNeeded(thisCall)
+        return thisCall
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2341-2345.
@@ -1447,6 +1501,7 @@ public class ASTFactory {
         let wrapperParams = wrapperParamList.params
         let ctorParams = ctor.funcBody.getOrThrow().paramLists[0].params
         for (param in ctorParams) {
+            if (param.identifier.Val() == NATIVE_HANDLE_MARKER) { continue }
             wrapperParams.add(CreateFuncParam(param.identifier.Val(), None, None,
                 typeMapper.Cj2CType(param.GetTy().getOrThrow())))
         }
@@ -1461,12 +1516,16 @@ public class ASTFactory {
         wrapperParamLists.add(wrapperParamList)
 
         let ctorCallArgs = ArrayList<FuncArg>()
-        ctorCallArgs.add(CreateFuncArg(CreateRefExpr(wrapperParams[0])))
-        var argIndex: Int64 = 1
-        while (argIndex < ctorParams.size) {
-            let paramRef = WithinFile<RefExpr>(CreateRefExpr(wrapperParams[argIndex]), curFile)
-            ctorCallArgs.add(CreateFuncArg(WrapEntity(paramRef, ctorParams[argIndex].GetTy().getOrThrow())))
-            argIndex++
+        var offset: Int64 = 0
+        for (i in 0..ctorParams.size) {
+            let ctorParam = ctorParams[i]
+            if (ctorParam.identifier.Val() == NATIVE_HANDLE_MARKER) {
+                ctorCallArgs.add(CreateFuncArg(CreateNativeHandleMarker()))
+                offset = 1
+                continue
+            }
+            let paramRef = WithinFile<RefExpr>(CreateRefExpr(wrapperParams[i - offset]), curFile)
+            ctorCallArgs.add(CreateFuncArg(WrapEntity(paramRef, ctorParam.GetTy().getOrThrow())))
         }
         let ctorCall = WithinFile<CallExpr>(CreateCallExpr(CreateRefExpr(ctor), ctorCallArgs, Some(ctor),
             target.GetTy(), CallKind.CALL_OBJECT_CREATION), curFile)
@@ -1957,8 +2016,10 @@ public class ASTFactory {
             }
             let args = ArrayList<FuncArg>()
             args.add(CreateFuncArg(retainedExpr))
-            return CreateCallExpr(CreateRefExpr(ctor), args, Some(ctor), Some(classLikeTy),
+            let ctorCall = CreateCallExpr(CreateRefExpr(ctor), args, Some(ctor), Some(classLikeTy),
                 CallKind.CALL_OBJECT_CREATION)
+            AddMarkerToCallIfNeeded(ctorCall)
+            return ctorCall
         }
 
         if (TypeMapper.IsObjCImpl(wrapTy)) {
@@ -2048,8 +2109,8 @@ public class ASTFactory {
         }
 
         let exprTy = expr.GetTy().getOrThrow()
-        CJC_ASSERT(exprTy.IsPrimitive() || Ty.IsCStructType(exprTy) || exprTy.IsCFunc() || exprTy.IsCString())
-        CJC_ASSERT(wrapTy.IsPrimitive() || Ty.IsCStructType(wrapTy) || wrapTy.IsCFunc() || wrapTy.IsCString())
+        CJC_ASSERT(exprTy.IsPrimitive() || Ty.IsCStructType(exprTy) || exprTy.IsCFunc() || exprTy.IsCString() || exprTy.IsPointer())
+        CJC_ASSERT(wrapTy.IsPrimitive() || Ty.IsCStructType(wrapTy) || wrapTy.IsCFunc() || wrapTy.IsCString() || wrapTy.IsPointer())
         return expr
     }
 
@@ -2849,6 +2910,7 @@ public class InsertBaseCtorBody <: Handler<InteropContext> {
                     let superCtor = ctx.factory.GetGeneratedBaseCtor(superClass).getOrThrow()
                     let superCall = CreateSuperCall(mirrorClass, superCtor, superCtor.GetTy().getOrThrow())
                     superCall.args.add(CreateFuncArg(handleParam))
+                    ctx.factory.AddMarkerToCallIfNeeded(superCall)
                     ctor.funcBody.getOrThrow().body.getOrThrow().body.add(superCall)
                 } else {
                     let lhs = ctx.factory.CreateNativeHandleFieldExpr(mirrorClass)
@@ -4280,6 +4342,7 @@ public class DesugarMirrors <: Handler<InteropContext> {
             "Expected ASTKind::CLASS_DECL instead of " + ASTKindName(mirror.astKind))
         let initCall = ctx.factory.CreateAllocInitCall(ctor)
         thisCall.args.add(CreateFuncArg(initCall))
+        ctx.factory.AddMarkerToCallIfNeeded(thisCall)
         ctor.constructorCall = ConstructorCall.OTHER_INIT
         ctor.funcBody.getOrThrow().body.getOrThrow().body.add(thisCall)
     }
@@ -4429,6 +4492,7 @@ private func DesugarSuperCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: Fu
     if (HasImplSuperClass(impl)) {
         let args = ArrayList<FuncArg>()
         args.add(CreateFuncArg(objCSelf))
+        args.add(CreateFuncArg(ctx.factory.CreateNativeHandleMarker()))
         for (arg in callExpr.args) {
             args.add(arg)
         }
@@ -4476,6 +4540,7 @@ private func DesugarSuperCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: Fu
     let baseCtorCall = WithinFile<CallExpr>(CreateSuperCall(realBaseCtor.outerDecl.getOrThrow(),
         realBaseCtor, realBaseCtor.GetTy().getOrThrow()), curFile)
     baseCtorCall.args.add(CreateFuncArg(withObjCSuperRetained))
+    ctx.factory.AddMarkerToCallIfNeeded(baseCtorCall)
     callExpr.desugarExpr = baseCtorCall
 }
 
@@ -4504,6 +4569,7 @@ private func DesugarThisCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: Fun
     let objCSelf = CreateRefExpr(methodParams[0])
     let args = ArrayList<FuncArg>()
     args.add(CreateFuncArg(objCSelf))
+    args.add(CreateFuncArg(ctx.factory.CreateNativeHandleMarker()))
     for (arg in callExpr.args) {
         args.add(arg)
     }

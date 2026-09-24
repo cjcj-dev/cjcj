@@ -213,22 +213,21 @@ public class TypeMapper {
                     for (arg in tyArg.typeArgs) { if (!IsObjCCompatible(arg)) { return false } }
                     return true
                 }
-                return false
             case TypeKind.TYPE_CLASS | TypeKind.TYPE_INTERFACE =>
-                if (IsValidObjCMirror(ty) || IsObjCImpl(ty)) { return true }
+                if (IsObjCMirror(ty) || IsObjCImpl(ty)) { return true }
                 if (IsObjCBlock(ty)) {
                     CJC_ASSERT(ty.typeArgs.size == 1); let tyArg = ty.typeArgs[0]
                     if (!tyArg.IsFunc() || tyArg.IsCFunc()) { return false }
                     for (arg in tyArg.typeArgs) { if (!IsObjCCompatible(arg)) { return false } }
                     return true
                 }
-                return false
             case TypeKind.TYPE_ENUM =>
                 if (!ty.IsCoreOptionType()) { return false }
                 CJC_ASSERT(ty.typeArgs.size == 1)
-                if (IsValidObjCMirror(ty.typeArgs[0]) || IsObjCImpl(ty.typeArgs[0])) { return true }
-            case TypeKind.TYPE_FUNC => if (ty.IsCFunc()) { return true }
-            case TypeKind.TYPE_CSTRING => if (ty.IsCString()) { return true }
+                return IsObjCMirror(ty.typeArgs[0]) || IsObjCImpl(ty.typeArgs[0])
+            case TypeKind.TYPE_FUNC => return ty.IsCFunc()
+            case TypeKind.TYPE_CSTRING => return true
+            case TypeKind.TYPE_POINTER => return true
             case _ => return false
         }
         return false
