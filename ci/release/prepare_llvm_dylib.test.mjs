@@ -9,7 +9,10 @@ test('separate dylib artifact exports the reviewed identity and preserves host L
   assert.equal(result.status, 0, result.stderr);
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_LLVM_SO=${dylib}/libLLVM-15.so\n`));
   assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_COLOUR_LLVM_SHA256=${dylibSha}\n`));
-  assert.ok(result.stdout.includes(`CJCJ_BOOTSTRAP_HOST_LLVM_SO=${so}\n`));
+  const host = /^CJCJ_BOOTSTRAP_HOST_LLVM_SO=(.+)$/m.exec(result.stdout)?.[1];
+  assert.ok(host, result.stdout);
+  assert.deepEqual(fs.readFileSync(host), fs.readFileSync(so));
+  assert.notEqual(host, `${dylib}/libLLVM-15.so`);
   console.log('ASSERT separate-dylib identity executed');
 }));
 
