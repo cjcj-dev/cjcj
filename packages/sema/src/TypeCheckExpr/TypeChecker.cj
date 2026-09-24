@@ -402,7 +402,7 @@ extend TypeChecker {
                 if (funcDecl.IsFinalizer() &&
                     (decl.TestAttr(Attribute.IN_CLASSLIKE) || decl.TestAttr(Attribute.IN_EXTEND)) &&
                     !decl.TestAttr(Attribute.CONSTRUCTOR) &&
-                    (decl.astKind == ASTKind.FUNC_DECL || decl.astKind == ASTKind.PROP_DECL) &&
+                    IsDeclaredFuncOrProp(decl) &&
                     !decl.TestAttr(Attribute.STATIC)) {
                     if (let Some(diagValue2) <- impl.diag) {
                         Diagnose(diagValue2, nre, BasicDiagKind.sema_capture_this_or_instance_field_in_func,
@@ -1348,7 +1348,7 @@ extend TypeChecker {
         if (isCJNATIVEBackend) {
             try (recorder = ProfileRecorder("PrepareTypeCheck", "InteropPrepare")) {
                 PrepareJavaInteropTypeCheck(pkg, impl.importManager.getOrThrow(), impl.typeManager)
-                PrepareObjCInteropTypeCheck(pkg)
+                PrepareObjCInteropTypeCheck(pkg, impl.importManager.getOrThrow(), impl.typeManager)
             }
         }
         SeedImportedPackageDecls(ctx)
@@ -2181,7 +2181,7 @@ extend TypeChecker {
         if (decl.astKind != ASTKind.STRUCT_DECL && decl.astKind != ASTKind.CLASS_DECL) {
             return
         }
-        if (decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER)) {
+        if (decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER)) {
             return
         }
         if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER,
@@ -4056,7 +4056,7 @@ extend TypeChecker {
             }
             // C++ src/Sema/TypeCheckClassLike.cpp:136-138.
             if (classDecl.TestAnyAttr(
-                Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE, Attribute.OBJ_C_CJ_MAPPING)) {
+                Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL, Attribute.OBJ_C_CJ_MAPPING)) {
                 CheckObjCInteropLibImport(classDecl)
             }
             return tyOrInvalid(classDecl)
@@ -4089,7 +4089,7 @@ extend TypeChecker {
                 CheckJavaInteropLibImport(interfaceDecl)
             }
             // C++ src/Sema/TypeCheckClassLike.cpp:268-270.
-            if (interfaceDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+            if (interfaceDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
                 CheckObjCInteropLibImport(interfaceDecl)
             }
             return tyOrInvalid(interfaceDecl)

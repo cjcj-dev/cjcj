@@ -1,11 +1,9 @@
 package cjcj::parse
 
 import cjcj::ast.ASTCloner
-import cjcj::ast.InsertObjCSyntheticClassDecl
 import cjcj::ast.InsertPropGetterSignature
 import cjcj::ast.InsertPropSetterSignature
 import cjcj::ast.INVALID_IDENTIFIER
-import cjcj::ast.IsObjCDeclAppropriateForSyntheticClassGeneration
 import cjcj::ast.Node
 import cjcj::ast.IsMirror
 import cjcj::ast.SortModifierByPos
@@ -1071,7 +1069,7 @@ extend ParserImpl {
     // C++ anchor: cangjie_compiler/src/Parse/ParseDecl.cpp:564-619
     private func CheckObjCInteropMember(member: Decl): Unit {
         let outerDecl = member.outerDecl.getOrThrow()
-        if (outerDecl.TestAttr(Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+        if (outerDecl.TestAttr(Attribute.OBJ_C_IMPL)) {
             if (member.GetGeneric().isSome()) {
                 outerDecl.EnableAttr(Attribute.IS_BROKEN)
                 member.EnableAttr(Attribute.IS_BROKEN)
@@ -2170,9 +2168,6 @@ extend ParserImpl {
             ret.end = lastToken.End()
         }
         CheckCJMappingAttr(ret)
-        if (IsObjCDeclAppropriateForSyntheticClassGeneration(ret)) {
-            let _ = InsertObjCSyntheticClassDecl(ret, currentFile.getOrThrow())
-        }
         return ret
     }
 
@@ -2448,7 +2443,7 @@ extend ParserImpl {
             return
         }
         if (decl.TestAnyAttr(Attribute.JAVA_MIRROR, Attribute.JAVA_MIRROR_SUBTYPE) ||
-            decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+            decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
             return
         }
         // Currently only support struct decl, enum decl, class decl interface decl, extend decl.

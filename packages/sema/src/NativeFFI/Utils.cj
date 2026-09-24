@@ -8,7 +8,8 @@ import cjcj::mangle.{BaseMangler, MangleType}
 import cjcj::modules.SemaImportManager
 import cjcj::option.GetFileName as OptionGetFileName
 import cjcj::option.IsDir as OptionIsDir
-import cjcj::sema.{CreateThrowException, TypeManager}
+import cjcj::sema.{CreateThrowException, TypeManager, GenerateTypeMapping}
+import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK}
 
 public let NSSTRING_CLASS_IDENT: String = "NSString"
@@ -327,7 +328,8 @@ public func WrapReturningLambdaExpr(typeManager: TypeManager, nodes: ArrayList<N
     let retTy = nodes[nodes.size - 1].GetTy().getOrThrow()
     let paramTys = LambdaParamTys(lambdaParams)
     let paramLists = ArrayList<FuncParamList>()
-    paramLists.add(CreateFuncParamList(lambdaParams))
+    // C++ Utils.cpp:237 moves OwnedPtr params into Create.h:95. The one-argument overload clones.
+    paramLists.add(CreateFuncParamList(lambdaParams, None))
     let lambdaTy = typeManager.GetFunctionTy(paramTys.toArray(), retTy)
     let curFile: Option<File> = nodes[0].curFile
 
@@ -447,13 +449,6 @@ public func GetSingleArgumentAnnotationValue(target: Decl, annotationKind: AstAn
     return None
 }
 
-public func GetObjCMirrorForeignName(target: ClassLikeDecl): String {
-    if (let Some(customName) <- GetSingleArgumentAnnotationValue(target, AstAnnotationKind.OBJ_C_MIRROR)) {
-        return customName
-    }
-    return target.identifier.Val()
-}
-
 public func IsSuperConstructorCall(call: CallExpr): Bool {
     if (let Some(base) <- call.baseFunc) {
         if (let Some(refExpr) <- (base as RefExpr)) {
@@ -467,58 +462,6 @@ public func IsThisConstructorCall(call: CallExpr): Bool {
     if (let Some(base) <- call.baseFunc) {
         if (let Some(refExpr) <- (base as RefExpr)) {
             return refExpr.isThis && call.callKind == CallKind.CALL_DECLARED_FUNCTION
-        }
-    }
-    return false
-}
-
-public func IsObjCGeneratedNSStringCtor(target: Decl): Bool {
-    if (let Some(funcDecl) <- (target as FuncDecl)) {
-        if (funcDecl.identifier.Val() != INIT_IDENT ||
-            !funcDecl.TestAttr(Attribute.CONSTRUCTOR) || !funcDecl.TestAttr(Attribute.COMPILER_ADD)) {
-            return false
-        }
-        if (let Some(body) <- funcDecl.funcBody) {
-            if (body.paramLists.isEmpty()) {
-                return false
-            }
-            let params = body.paramLists[0].params
-            if (params.size != 1) {
-                return false
-            }
-            if (let Some(typeNode) <- params[0].typeNode) {
-                if (let Some(refType) <- (typeNode as RefType)) {
-                    return refType.ref.identifier.Val() == STD_LIB_STRING_IDENT
-                }
-                return typeNode.ToString() == STD_LIB_STRING_IDENT
-            }
-        }
-    }
-    return false
-}
-
-public func IsObjCGeneratedNSObjectToString(target: Decl): Bool {
-    if (let Some(funcDecl) <- (target as FuncDecl)) {
-        if (funcDecl.identifier.Val() != TOSTRING_METHOD_IDENT ||
-            !funcDecl.TestAttr(Attribute.COMPILER_ADD)) {
-            return false
-        }
-        if (let Some(body) <- funcDecl.funcBody) {
-            if (body.paramLists.isEmpty()) {
-                return false
-            }
-            return body.paramLists[0].params.isEmpty()
-        }
-    }
-    return false
-}
-
-public func IsObjCGeneratedMember(target: Decl): Bool {
-    if (let Some(outer) <- target.outerDecl) {
-        if (let Some(classLikeDecl) <- (outer as ClassLikeDecl)) {
-            let foreignName = GetObjCMirrorForeignName(classLikeDecl)
-            return (foreignName == NSSTRING_CLASS_IDENT && IsObjCGeneratedNSStringCtor(target)) ||
-                (foreignName == NSOBJECT_CLASS_IDENT && IsObjCGeneratedNSObjectToString(target))
         }
     }
     return false
@@ -986,4 +929,62 @@ public func AreParamTypeKindsValid(fd: FuncDecl, typeKinds: ArrayList<TypeKind>)
         return true
     }
     return false
+}
+
+// Upstream a51ced71, NativeFFI/Utils.cpp:176-203.
+private func GetGetPointerAddressIntrinsicDecl(importManager: SemaImportManager): FuncDecl {
+    return importManager.GetCoreDecl<FuncDecl>("getPointerAddress").getOrThrow()
+}
+public func CreateGetPointerAddressCall(importManager: SemaImportManager, typeManager: TypeManager, pointer: Expr): Expr {
+    CJC_ASSERT(pointer.GetTy().getOrThrow().IsPointer())
+    let fd = GetGetPointerAddressIntrinsicDecl(importManager)
+    let ref = WithinFile<RefExpr>(CreateRefExpr(fd), pointer.curFile)
+    ref.instTys.add(pointer.GetTy().getOrThrow().typeArgs[0])
+    let uintTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT_NATIVE)
+    ref.SetTy(typeManager.GetFunctionTy([pointer.GetTy().getOrThrow()], uintTy))
+    let args = ArrayList<FuncArg>()
+    args.add(CreateFuncArg((ASTCloner.Clone(pointer) as Expr).getOrThrow()))
+    let call = CreateCallExpr(ref, args, Some(fd), Some(uintTy), CallKind.CALL_INTRINSIC_FUNCTION)
+    call.EnableAttr(Attribute.UNSAFE)
+    return call
+}
+public func CreateIsPtrNullCheckCall(importManager: SemaImportManager, typeManager: TypeManager, pointer: Expr): Expr {
+    let uintTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT_NATIVE)
+    let call = CreateGetPointerAddressCall(importManager, typeManager, pointer)
+    let zero = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.INTEGER, "0", uintTy), pointer.curFile)
+    let comparison = CreateBinaryExpr(call, zero, TokenKind.EQUAL)
+    comparison.SetTy(TypeManager.GetBoolTy())
+    return comparison
+}
+
+// Upstream fbf15ec8, NativeFFI/Utils.cpp:491-568.
+public func FFIGetOptionTy(importManager: SemaImportManager, typeManager: TypeManager, ty: Ty): Ty {
+    return typeManager.GetEnumTy(FFIGetOptionDecl(importManager), typeArgs: [ty])
+}
+public func FFIGetOptionDecl(importManager: SemaImportManager): EnumDecl {
+    return importManager.GetCoreDecl<EnumDecl>("Option").getOrThrow()
+}
+public func FFIGetOptionSomeDecl(importManager: SemaImportManager): Decl {
+    return LookupEnumMember(FFIGetOptionDecl(importManager), "Some").getOrThrow()
+}
+public func FFIGetOptionNoneDecl(importManager: SemaImportManager): Decl {
+    return LookupEnumMember(FFIGetOptionDecl(importManager), "None").getOrThrow()
+}
+public func FFICreateOptionSomeRef(importManager: SemaImportManager, typeManager: TypeManager, ty: Ty): Expr {
+    let ref = CreateRefExpr(FFIGetOptionSomeDecl(importManager))
+    ref.SetTy(typeManager.GetFunctionTy([ty], FFIGetOptionTy(importManager, typeManager, ty)))
+    return ref
+}
+public func FFICreateOptionNoneRef(importManager: SemaImportManager, typeManager: TypeManager, ty: Ty): Expr {
+    let ref = CreateRefExpr(FFIGetOptionNoneDecl(importManager))
+    ref.SetTy(FFIGetOptionTy(importManager, typeManager, ty))
+    return ref
+}
+public func FFICreateOptionSomeCall(importManager: SemaImportManager, typeManager: TypeManager, expr: Expr, ty: Ty): Expr {
+    let args = ArrayList<FuncArg>(); args.add(CreateFuncArg(expr))
+    let call = CreateCallExpr(FFICreateOptionSomeRef(importManager, typeManager, ty), args)
+    call.SetTy(FFIGetOptionTy(importManager, typeManager, ty))
+    call.resolvedFunction = FFIGetOptionSomeDecl(importManager) as FuncDecl
+    call.callKind = CallKind.CALL_DECLARED_FUNCTION
+    return call
 }

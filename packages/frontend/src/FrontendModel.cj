@@ -3714,7 +3714,7 @@ public class CjoSignatureMaterializer {
             case 78 => Some(Attribute.JAVA_HAS_DEFAULT)
             case 79 => Some(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)
             case 80 => Some(Attribute.OBJ_C_MIRROR)
-            case 81 => Some(Attribute.OBJ_C_MIRROR_SUBTYPE)
+            case 81 => Some(Attribute.OBJ_C_IMPL)
             case 82 => Some(Attribute.OBJ_C_INIT)
             case 83 => Some(Attribute.OBJ_C_OPTIONAL)
             case 84 => Some(Attribute.JAVA_CJ_MAPPING)
@@ -3722,12 +3722,14 @@ public class CjoSignatureMaterializer {
             case 86 => Some(Attribute.CJ_MIRROR_JAVA_INTERFACE_FWD)
             case 87 => Some(Attribute.DESUGARED_MIRROR_FIELD)
             case 88 => Some(Attribute.HAS_INITED_FIELD)
-            case 89 => Some(Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER)
+            case 89 => Some(Attribute.OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER)
             case 90 => Some(Attribute.CJ_MIRROR_JAVA_INTERFACE_DEFAULT)
             case 91 => Some(Attribute.CJ_MIRROR_OBJC_INTERFACE_FWD)
             case 92 => Some(Attribute.ALREADY_LOADED)
             case 93 => Some(Attribute.JAVA_IMPL_REGISTRY_COMPANION)
             case 94 => Some(Attribute.DOES_NOT_THROW)
+            case 95 => Some(Attribute.OBJ_C_IMPL_REGISTRY_COMPANION)
+            case 96 => Some(Attribute.OBJ_C_IMPL_MOVED_MEMBER_PROXY)
             case _ => None
         }
     }

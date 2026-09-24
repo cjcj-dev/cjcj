@@ -2,6 +2,7 @@ package cjcj::sema.NativeFFI
 
 import cjcj::modules.SemaImportManager
 
+
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
@@ -28,42 +29,31 @@ public class Utils {
     }
 
     public func GetOptionTy(ty: Ty): Ty {
-        return typeManager.GetEnumTy(GetOptionDecl(), typeArgs: [ty])
+        return FFIGetOptionTy(importManager, typeManager, ty)
     }
 
     public func GetOptionDecl(): EnumDecl {
-        return (importManager.GetCoreDecl<EnumDecl>(STD_LIB_OPTION).getOrThrow() as EnumDecl).getOrThrow()
+        return FFIGetOptionDecl(importManager)
     }
 
     private func GetOptionSomeDecl(): Decl {
-        return LookupEnumMember(GetOptionDecl(), OPTION_VALUE_CTOR).getOrThrow()
+        return FFIGetOptionSomeDecl(importManager)
     }
 
     private func GetOptionNoneDecl(): Decl {
-        return LookupEnumMember(GetOptionDecl(), OPTION_NONE_CTOR).getOrThrow()
+        return FFIGetOptionNoneDecl(importManager)
     }
 
     public func CreateOptionSomeRef(ty: Ty): Expr {
-        let someDeclRef = CreateRefExpr(GetOptionSomeDecl())
-        let optionActualTy = GetOptionTy(ty)
-        someDeclRef.SetTy(typeManager.GetFunctionTy([ty], optionActualTy))
-        return someDeclRef
+        return FFICreateOptionSomeRef(importManager, typeManager, ty)
     }
 
     public func CreateOptionNoneRef(ty: Ty): Expr {
-        let noneDeclRef = CreateRefExpr(GetOptionNoneDecl())
-        noneDeclRef.SetTy(GetOptionTy(ty))
-        return noneDeclRef
+        return FFICreateOptionNoneRef(importManager, typeManager, ty)
     }
 
     public func CreateOptionSomeCall(expr: Expr, ty: Ty): Expr {
-        let args = ArrayList<FuncArg>()
-        args.add(CreateFuncArg(expr))
-        let call = CreateCallExpr(CreateOptionSomeRef(ty), args)
-        call.SetTy(GetOptionTy(ty))
-        call.resolvedFunction = (GetOptionSomeDecl() as FuncDecl)
-        call.callKind = CallKind.CALL_DECLARED_FUNCTION
-        return call
+        return FFICreateOptionSomeCall(importManager, typeManager, expr, ty)
     }
 
     public func GetJObjectDecl(): Option<ClassLikeDecl> {
