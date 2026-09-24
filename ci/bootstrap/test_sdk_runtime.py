@@ -203,6 +203,11 @@ def main():
                       expected_rc=expected, command=cmd,
                       predicate_sha256=sha(product.with_name('std_runtime_colour.py')) if product.with_name('std_runtime_colour.py').exists() else None, base_enumeration=base_order, product_sha256=sha(product),
                       elf_sha256=sha(base / 'bin/cjc'), so_sha256=sha(source / 'libcangjie-runtime.so'))
+        if name in real_pairs:
+            rt_sdk, std_sdk = real_pairs[name]
+            record['real_runtime_source'] = str(rt_sdk / 'runtime/lib' / LINUX / 'libcangjie-runtime.so')
+            record['real_std_source'] = str(std_sdk / 'lib' / LINUX / 'libcangjie-std-core.a')
+            record['std_sha256'] = sha(std_dir / 'libcangjie-std-core.a')
         (work / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
         return record
 
