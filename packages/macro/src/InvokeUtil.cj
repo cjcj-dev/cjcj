@@ -162,14 +162,20 @@ struct RuntimeHeapParamC {
     let exemptionThreshold: Float64
     let heapUtilization: Float64
     let heapGrowth: Float64
+    let heapSizeSet: Bool
+    let softHeapSize: UIntNative
+    let softHeapSizeSet: Bool
 
     init(regionSize: UIntNative, heapSize: UIntNative, exemptionThreshold: Float64, heapUtilization: Float64,
-        heapGrowth: Float64) {
+        heapGrowth: Float64, heapSizeSet: Bool, softHeapSize: UIntNative, softHeapSizeSet: Bool) {
         this.regionSize = regionSize
         this.heapSize = heapSize
         this.exemptionThreshold = exemptionThreshold
         this.heapUtilization = heapUtilization
         this.heapGrowth = heapGrowth
+        this.heapSizeSet = heapSizeSet
+        this.softHeapSize = softHeapSize
+        this.softHeapSizeSet = softHeapSizeSet
     }
 }
 
@@ -276,6 +282,9 @@ private let MAX_STACK_SIZE: UIntNative = 1024 * 1024
 // CangjieRuntimeApi.cpp config initialization is the default-value contract.
 public let REGION_SIZE: UIntNative = 64
 public let HEAP_SIZE: UIntNative = 0
+public let HEAP_SIZE_SET: Bool = false
+public let SOFT_HEAP_SIZE: UIntNative = 0
+public let SOFT_HEAP_SIZE_SET: Bool = false
 public let EXEMPTION_THRESHOLD: Float64 = 0.8
 public let HEAP_UTILIZATION: Float64 = 0.8
 public let HEAP_GROWTH: Float64 = 0.15
@@ -413,8 +422,12 @@ private func GetStackSizeFromEnv(envs: ArrayList<(String, String)>): UIntNative 
 }
 
 private func makeRuntimeConfig(envs: ArrayList<(String, String)>): RuntimeConfigParamC {
+    let heapSize = GetHeapSizeFromEnv(envs)
+    // Environment soft values are parsed in bytes by GCArguments before the
+    // zArguments.cpp:40-52 origin split; do not round them through the KB API.
     return RuntimeConfigParamC(
-        RuntimeHeapParamC(REGION_SIZE, GetHeapSizeFromEnv(envs), EXEMPTION_THRESHOLD, HEAP_UTILIZATION, HEAP_GROWTH),
+        RuntimeHeapParamC(REGION_SIZE, heapSize, EXEMPTION_THRESHOLD, HEAP_UTILIZATION, HEAP_GROWTH,
+            getRuntimeEnv(envs, CJ_HEAP_SIZE).isSome() || HEAP_SIZE_SET, SOFT_HEAP_SIZE, SOFT_HEAP_SIZE_SET),
         RuntimeGCParamC(GC_THRESHOLD, GARBAGE_THRESHOLD, GC_INTERVAL, BACKUP_GC_INTERVAL,
             CONC_GC_THREADS, YOUNG_GC_THREADS, OLD_GC_THREADS, STATIC_GC_THREADS,
             MAX_TENURING_THRESHOLD, Z_TENURING_THRESHOLD, MAX_TENURING_THRESHOLD_SET, Z_TENURING_THRESHOLD_SET),

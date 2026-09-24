@@ -545,7 +545,7 @@ private func isRuntimeDecimal(value: String, includeZero: Bool): Bool {
 }
 
 private func isSupportedRuntimeConfig(name: String): Bool {
-    return name == "cjHeapSize" || name == "cjHeapSwap" || name == "cjRegionSize" ||
+    return name == "cjSoftMaxHeapSize" || name == "cjHeapSize" || name == "cjHeapSwap" || name == "cjRegionSize" ||
         name == "cjExemptionThreshold" || name == "cjHeapUtilization" || name == "cjHeapGrowth" ||
         name == "cjGCThreshold" ||
         name == "cjGarbageThreshold" || name == "cjGCInterval" || name == "cjBackupGCInterval" ||
@@ -555,6 +555,10 @@ private func isSupportedRuntimeConfig(name: String): Bool {
 }
 
 private func isValidRuntimeConfigValue(name: String, value: String): Bool {
+    // HotSpot arguments.cpp:1669 / jvmFlagConstraintsGC.cpp:292: the VM
+    // owns memory parsing and the soft <= max constraint. Preserve this text
+    // through codegen and let runtime reject invalid values at initialization.
+    if (name == "cjSoftMaxHeapSize") { return true }
     if (name == "cjHeapSize" || name == "cjRegionSize" || name == "cjGCThreshold" ||
         name == "cjStackSize" || name == "cjPinnedRegionSize" || name == "cjLargeThresholdSize") {
         return isRuntimeSize(value)
@@ -587,7 +591,7 @@ private func parseRuntimeConfig(opts: GlobalOptions, rawValue: String): ActionRe
         return handled(success: false)
     }
     let name = parts[0].trimAscii()
-    let value = parts[1].trimAscii()
+    let value = if (name == "cjSoftMaxHeapSize") { parts[1] } else { parts[1].trimAscii() }
     if (name.isEmpty() || value.isEmpty()) {
         Errorln("Option '--runtime-config' requires a non-empty name and value.")
         return handled(success: false)
