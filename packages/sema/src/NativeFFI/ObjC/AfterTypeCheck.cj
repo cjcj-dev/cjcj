@@ -554,7 +554,7 @@ public class ASTFactory {
 
         let implCtorParamTys = ArrayList<Ty>()
         for (param in implCtorParams) {
-            implCtorParamTys.add(param.typeNode.getOrThrow().GetTy().getOrThrow())
+            implCtorParamTys.add(param.GetTy().getOrThrow())
         }
         let retTy = ctor.funcBody.getOrThrow().retType.getOrThrow().GetTy().getOrThrow()
         ctor.SetTy(typeManager.GetFunctionTy(implCtorParamTys.toArray(), retTy))
@@ -598,9 +598,10 @@ public class ASTFactory {
             return false
         }
         let params = paramLists[0].params
-        if (params.isEmpty()) {
+        if (params.size < 1) {
             return false
         }
+        // The reserved first parameter also identifies pre-marker compiled mirrors.
         return params[0].identifier == NATIVE_HANDLE_IDENT
     }
 

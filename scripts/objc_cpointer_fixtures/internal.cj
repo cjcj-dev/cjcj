@@ -29,3 +29,5 @@ public func removeFromRegistry(id: RegistryId): Unit {}
 public class ObjCUnreachableCodeException <: Exception {}
 public class ObjCOptionalMethodUnimplementedException <: Exception {}
 public class ObjCStaticMethodCallOnInterfaceException <: Exception {}
+public func convertToNSString(value: String): NativeObjCId { CPointer<Unit>() }
+public func descriptionAsString(value: NativeObjCId): String { "fixture" }

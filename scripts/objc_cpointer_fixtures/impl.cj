@@ -3,14 +3,14 @@ import objc.lang.*
 import objc.internal.*
 @ObjCMirror["PointerMirror"]
 public open class PointerMirror {
-    public init(pointer: CPointer<Unit>)
+    public init(pointer: Int64)
 }
 @ObjCImpl
 public open class PointerImpl <: PointerMirror {
-    public init(pointer: CPointer<Unit>) { super(pointer) }
-    public init() { this(CPointer<Unit>()) }
+    public init(pointer: Int64) { super(pointer) }
+    public init() { this(0) }
 }
 @ObjCImpl
 public class PointerImplChild <: PointerImpl {
-    public init(pointer: CPointer<Unit>) { super(pointer) }
+    public init(pointer: Int64) { super(pointer) }
 }

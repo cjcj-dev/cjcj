@@ -4,7 +4,9 @@ set -eu
 ulimit -c 0
 compiler=$(realpath "${1:?compiler ELF}")
 work=$(realpath -m "${2:?evidence directory}")
-fixtures=$(cd "$(dirname "$0")/objc_cpointer_fixtures" && pwd)
+script_dir=$(cd "$(dirname "$0")" && pwd)
+fixtures="$script_dir/objc_cpointer_fixtures"
+test_filter=${3:-.*}
 : "${CANGJIE_HOME:?private SDK required}"
 mkdir -p "$work/import/objc" "$work/source"
 cp "$fixtures/"*.cj "$work/source/"
@@ -33,6 +35,8 @@ compile_fixture() {
         -o "$work/$name/result" > "$work/$name/compiler.log" 2>&1
     echo "$?" > "$work/$name/compiler.rc"
 }
-for name in mirror impl negative; do compile_fixture "$name" & done
+for name in cpointer mirror impl strings negative control; do compile_fixture "$name" & done
 wait
 uptime > "$work/load-after"
+
+python3 "$script_dir/objc_cpointer_assert.py" "$work" --filter "$test_filter"
