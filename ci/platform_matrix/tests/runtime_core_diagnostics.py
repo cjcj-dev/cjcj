@@ -29,8 +29,8 @@ workflow = yaml.safe_load((a.repo / '.github/workflows/platform-matrix.yml').rea
 steps = workflow['jobs']['colour-runtime']['steps']
 collector = next(s for s in steps if s.get('name') == 'Collect runtime core backtraces')
 upload = next(s for s in steps if s.get('name') == 'Upload runtime gate diagnostics')
-assert collector['if'] == "${{ failure() && steps.runtime-build.outcome == 'failure' }}"
-assert "${{ steps.runtime-build.outcome == 'failure' && '.platform-ci/runtime-gate-diagnostics/' || '' }}" in upload['with']['path'].splitlines()
+assert collector['if'] == "${{ failure() && (steps.runtime-build.outcome == 'failure' || steps.runtime-language-gate.outcome == 'failure') }}"
+assert "${{ (steps.runtime-build.outcome == 'failure' || steps.runtime-language-gate.outcome == 'failure') && '.platform-ci/runtime-gate-diagnostics/' || '' }}" in upload['with']['path'].splitlines()
 assert upload['if'] == 'always()'
 assert steps.index(collector) < steps.index(upload)
 assert next(s for s in steps if s.get('id') == 'runtime-build')['run'].rstrip().endswith(
