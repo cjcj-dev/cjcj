@@ -625,7 +625,7 @@ jobs:
           path: ${{ env.CANGJIE_BUILD_ROOT }}/llvm-mingw-w64
           key: ${{ steps.windows-mingw-cache.outputs.cache-primary-key }}
 
-      - name: Cross-build Windows final std with stage2 host compiler
+      - name: Cross-build Windows final std with stage3 host compiler
         if: matrix.target == 'linux-x64'
         env:
           CJCJ_STAGE3_CANGJIE_VERSION: ${{ steps.version.outputs.value }}

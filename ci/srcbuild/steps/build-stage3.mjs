@@ -247,9 +247,13 @@ if (dryRun) {
   // than retaining the older bootstrap compiler's embedded commit stamp.
   await $({cwd: githubWorkspace, env: {...stageEnv,
     CANGJIE_CPP_SRC: path.join(workspace, 'cangjie_compiler'), CJCJ_COMMIT: source.commit,
+    CANGJIE_HOME: '', // Compile the objects without creating a shared runtime symlink.
     CJCJ_LLVM_SHIM_O: path.join(requiredEnv('CJCJ_FIXED_LLVM_DIR'), 'cjselfhost_llvmshim.o')}})
     `npx --yes zx@8 ${path.join(githubWorkspace, 'runtime_shim', 'build_shim.mjs')}`;
   await $({cwd: githubWorkspace, env: stageEnv})`cjpm clean`;
+  const buildRuntime = path.join(githubWorkspace, 'target', 'release', 'runtime');
+  await fs.rm(buildRuntime, {recursive: true, force: true});
+  await fs.cp(path.join(sdk, 'runtime'), buildRuntime, {recursive: true, dereference: true});
   await $({cwd: githubWorkspace, env: {...stageEnv, cjHeapSize: '20GB'}})`cjpm build -j 1`;
   if (JSON.stringify(sourceIdentity(path.join(githubWorkspace, 'packages'))) !== JSON.stringify(source)) {
     throw new Error('stage3 compiler source changed during build');
