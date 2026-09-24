@@ -912,17 +912,19 @@ stage1
 
 // Execute the complete driver, including retained-state loading, prerequisite,
 // run_step and the final RESULT. Only external inputs live in the fixture.
-function bootstrapDriverFixture(t, {mismatch = false, empty = false, child = false} = {}) {
+function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   for (const dir of ['ci', 'build', 'tools']) {
     fs.cpSync(path.join(repoRoot, dir), path.join(root, dir), {recursive: true});
   }
   const driver = path.join(root, 'tools/srcbuild_kkk2.sh');
-  if (empty) {
+  if (empty || partialFailure) {
     const text = fs.readFileSync(driver, 'utf8');
     fs.writeFileSync(driver, text.replace(/^bootstrap_argv\(\) \{[\s\S]*?^\}/m,
-      'bootstrap_argv() {\n    return 0\n}'));
+      partialFailure
+        ? 'bootstrap_argv() {\n    printf \'%q \' "$BOOTSTRAP_SH"\n    return 1\n}'
+        : 'bootstrap_argv() {\n    return 0\n}'));
   }
   const state = path.join(root, '.srcbuild');
   fs.mkdirSync(path.join(state, 'fixed-llc'), {recursive: true});
@@ -955,7 +957,9 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, child = fal
   const bin = path.join(inputs, 'bin');
   fs.mkdirSync(bin);
   // Host name is only a placement policy; keep this shell test usable in CI.
-  fs.writeFileSync(bin + '/hostname', '#!/bin/sh\nprintf "kkk2\\n"\n', {mode: 0o755});
+  if (os.hostname().split('.')[0] !== 'kkk2') {
+    fs.writeFileSync(bin + '/hostname', '#!/bin/sh\nprintf "kkk2\\n"\n', {mode: 0o755});
+  }
   const env = {...process.env,
     PATH: `${bin}:${process.env.PATH}`,
     CJCJ_BOOTSTRAP_CPP_SRC: inputs,
@@ -985,7 +989,20 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, child = fal
       const logs = path.join(state, 'logs');
       const logFile = fs.readdirSync(logs).find(name => name.endsWith(`-step${step}.log`));
       assert.ok(logFile, result.stdout + result.stderr);
-      return {...result, log: fs.readFileSync(path.join(logs, logFile), 'utf8')};
+      const log = fs.readFileSync(path.join(logs, logFile), 'utf8');
+      if (process.env.CJCJ_TEST_EVIDENCE) {
+        const out = path.join(process.env.CJCJ_TEST_EVIDENCE, t.name.replaceAll(/[^a-zA-Z0-9]+/g, '-'), String(childRc));
+        fs.mkdirSync(out, {recursive: true});
+        fs.writeFileSync(path.join(out, 'driver.log'), result.stdout + result.stderr);
+        fs.writeFileSync(path.join(out, 'step.log'), log);
+        fs.writeFileSync(path.join(out, 'driver.rc'), `${result.status}\n`);
+        fs.copyFileSync(path.join(state, 'kkk2-timings.tsv'), path.join(out, 'timings.tsv'));
+        fs.writeFileSync(path.join(out, 'identity.json'), JSON.stringify({
+          driver: sha256(driver), bootstrap: sha256(path.join(root, 'ci/bootstrap/bootstrap.sh')),
+          sdkBuild: sha256(path.join(root, 'ci/bootstrap/sdk_build.sh')), test: sha256(import.meta.filename),
+        }, null, 2) + '\n');
+      }
+      return {...result, log};
     },
   };
 }
@@ -1004,6 +1021,14 @@ for (const step of [31, 32]) {
     const result = bootstrapDriverFixture(t, {empty: true}).run(step);
     assert.equal(result.status, 1, 'empty argv must fail before execution');
     assert.match(result.stdout, new RegExp(`STEP=${step} .* rc=1 `));
+    assert.doesNotMatch(result.stdout, /RESULT=success/);
+  });
+
+  test(`bootstrap driver step ${step} rejects partial argv from a failed producer`, t => {
+    const result = bootstrapDriverFixture(t, {partialFailure: true, child: true}).run(step);
+    assert.equal(result.status, 1, 'producer failure must reject even nonempty argv');
+    assert.match(result.stdout, new RegExp(`STEP=${step} .* rc=1 `));
+    assert.doesNotMatch(result.log, /CHILD SDK_BUILD=/);
     assert.doesNotMatch(result.stdout, /RESULT=success/);
   });
 
