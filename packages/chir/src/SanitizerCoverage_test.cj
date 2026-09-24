@@ -41,6 +41,7 @@ public class SanitizerCoverageTest {
     public func Inline8bitGenerationLeavesBlockUnchanged(): Unit {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
+        let _ = builder.CreatePackage("sancov-inline8bit")
         let cov = SanitizerCoverage(GlobalOptions(), builder)
         let (block, before) = AnchoredBlock(builder, "inline8bit")
         let group = cov.GenerateInline8bitExpr(INVALID_LOCATION, false, block)
@@ -59,6 +60,7 @@ public class SanitizerCoverageTest {
     public func InlineBoolGenerationLeavesBlockUnchanged(): Unit {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
+        let _ = builder.CreatePackage("sancov-inlinebool")
         let cov = SanitizerCoverage(GlobalOptions(), builder)
         let (block, before) = AnchoredBlock(builder, "inlinebool")
         let group = cov.GenerateInlineBoolExpr(INVALID_LOCATION, false, block)
@@ -76,6 +78,7 @@ public class SanitizerCoverageTest {
     public func PCGuardGenerationLeavesBlockUnchanged(): Unit {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
+        let _ = builder.CreatePackage("sancov-pcguard")
         let cov = SanitizerCoverage(GlobalOptions(), builder)
         let (block, before) = AnchoredBlock(builder, "pcguard")
         let group = cov.GeneratePCGuardExpr(INVALID_LOCATION, false, block)
@@ -92,6 +95,7 @@ public class SanitizerCoverageTest {
     public func StackDepthGenerationLeavesBlockUnchanged(): Unit {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
+        let _ = builder.CreatePackage("sancov-stackdepth")
         let cov = SanitizerCoverage(GlobalOptions(), builder)
         let (block, before) = AnchoredBlock(builder, "stackdepth")
         let group = cov.GenerateStackDepthExpr(INVALID_LOCATION, false, block)
