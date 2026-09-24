@@ -64,7 +64,7 @@ assert r.returncode == 0 and seed.is_file(), r.stdout
 def arm(label, cut=False, with_core=True):
     work = a.output / label
     work.mkdir()
-    shutil.copytree(a.repo / 'ci', work / 'ci')
+    shutil.copytree(a.repo / 'ci/platform_matrix', work / 'ci/platform_matrix')
     # The collector sees an actual source tree; no helper feeds it an ELF path.
     shutil.copytree(a.source, work / 'runtime-source/runtime')
     diag = work / '.platform-ci/runtime-gate-diagnostics'
@@ -96,6 +96,7 @@ def arm(label, cut=False, with_core=True):
         'collector_rc': result.returncode == 0,
         'bt_exists': bool(traces) == with_core,
         'symbolized_abort': ('MapleRuntime::GcUnit::RunAll' in text) if with_core else True,
+        'failed_case_matches': (name in text) if with_core else True,
         'registers': ('rip' in text) if with_core else True,
         'shared_libraries': ('libcangjie-runtime.so' in text) if with_core else True,
         'same_build_products': (diag / 'products/lib/libcangjie-runtime.so').exists(),
