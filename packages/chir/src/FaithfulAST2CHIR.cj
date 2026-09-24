@@ -4136,6 +4136,7 @@ public class FaithfulAST2CHIR {
             case "std.math.numeric" => "co"
             case "std.math.native" => "cp"
             case "std.math.numeric.native" => "cq"
+            case "std.concurrent" => "cr"
             case _ => None
         }
     }

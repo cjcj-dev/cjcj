@@ -24,6 +24,7 @@ public let STANDARD_LIBS: HashMap<String, String> = { =>
     values.add("std.time", "time")
     values.add("std.sync", "sync")
     values.add("std.collection.concurrent", "collection.concurrent")
+    values.add("std.concurrent", "concurrent")
     values.add("std.net", "net")
     values.add("std.regex", "regex")
     values.add("std.unittest.common", "unittest.common")
