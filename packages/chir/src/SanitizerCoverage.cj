@@ -13,7 +13,6 @@ import cjcj::utils.{CJC_ASSERT, OverflowStrategy}
 private func CreateNonMemberApply(resultTy: Type, callee: Value, args: ArrayList<Value>, parent: Block,
     builder: CHIRBuilder, loc!: DebugLocation = INVALID_LOCATION): Apply {
     let result = builder.CreateApply(resultTy, callee, FuncCallContext(args: args), parent)
-    parent.AppendExpression(result)
     result.SetDebugLocation(loc)
     return result
 }
@@ -21,7 +20,6 @@ private func CreateNonMemberApply(resultTy: Type, callee: Value, args: ArrayList
 private func CreateMemberApply(resultTy: Type, callee: Value, thisType: Type, args: ArrayList<Value>, parent: Block,
     builder: CHIRBuilder, loc!: DebugLocation = INVALID_LOCATION): Apply {
     let result = builder.CreateApply(resultTy, callee, FuncCallContext(args: args, thisType: Some(thisType)), parent)
-    parent.AppendExpression(result)
     result.SetDebugLocation(loc)
     return result
 }
@@ -665,7 +663,7 @@ public class SanitizerCoverage {
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:869-904.
-    private func GeneratePCGuardExpr(loc: DebugLocation, isDebug: Bool,
+    internal func GeneratePCGuardExpr(loc: DebugLocation, isDebug: Bool,
         parent: Block): ArrayList<Expression> {
         let cPointTy = builder.context.GetCPointerTy(builder.context.GetUInt32Ty())
         let funcTy = builder.context.GetFuncTy(ArrayList<Type>([cPointTy]),
@@ -675,16 +673,13 @@ public class SanitizerCoverage {
         let mangleName = SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(SanCovUInt32ArrayInitName).getOrThrow()
         let charArrayTest = GenerateGlobalVar(mangleName, loc, globalVarType)
         let offset = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(UInt64(bbCounter)), parent)
-        parent.AppendExpression(offset)
         offset.SetDebugLocation(loc)
         let arrayTestLoad = builder.CreateLoad(globalVarType, charArrayTest, parent)
-        parent.AppendExpression(arrayTestLoad)
         arrayTestLoad.SetDebugLocation(loc)
         let callContext = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_ADD,
             args: ArrayList<Value>([arrayTestLoad.GetResult().getOrThrow(), offset.GetResult().getOrThrow()]),
             instTypeArgs: ArrayList<Type>([builder.context.GetUInt32Ty()]))
         let addPoint = builder.CreateIntrinsic(cPointTy, callContext, parent)
-        parent.AppendExpression(addPoint)
         addPoint.SetDebugLocation(loc)
         let syscall = CreateNonMemberApply(builder.context.GetUnitTy(), pcGuardFunc,
             ArrayList<Value>([addPoint.GetResult().getOrThrow()]), parent, builder, loc: loc)
@@ -695,36 +690,30 @@ public class SanitizerCoverage {
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:906-948.
-    private func GenerateInline8bitExpr(loc: DebugLocation, isDebug: Bool,
+    internal func GenerateInline8bitExpr(loc: DebugLocation, isDebug: Bool,
         parent: Block): ArrayList<Expression> {
         let globalVarType = builder.context.GetCPointerTy(builder.context.GetUInt8Ty())
         let mangleName = SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(SanCovCharArrayInitName).getOrThrow()
         let charArrayTest = GenerateGlobalVar(mangleName, loc, globalVarType)
         let loadGlobal = builder.CreateLoad(globalVarType, charArrayTest, parent)
-        parent.AppendExpression(loadGlobal)
         loadGlobal.SetDebugLocation(loc)
         let offset = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(UInt64(bbCounter)), parent)
-        parent.AppendExpression(offset)
         offset.SetDebugLocation(loc)
         let callContext1 = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_READ,
             args: ArrayList<Value>([loadGlobal.GetResult().getOrThrow(), offset.GetResult().getOrThrow()]),
             instTypeArgs: ArrayList<Type>([builder.context.GetUInt8Ty()]))
         let readPoint = builder.CreateIntrinsic(builder.context.GetUInt8Ty(), callContext1, parent)
-        parent.AppendExpression(readPoint)
         readPoint.SetDebugLocation(loc)
         let one = builder.CreateConstant(builder.context.GetUInt8Ty(), IntLiteral(1u64), parent)
-        parent.AppendExpression(one)
         one.SetDebugLocation(loc)
         let addRes = builder.CreateBinaryExpression(ExprKind.ADD, builder.context.GetUInt8Ty(),
             readPoint.GetResult().getOrThrow(), one.GetResult().getOrThrow(), parent,
             overflowStrategy: OverflowStrategy.WRAPPING)
-        parent.AppendExpression(addRes)
         addRes.SetDebugLocation(loc)
         let callContext2 = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_WRITE,
             args: ArrayList<Value>([loadGlobal.GetResult().getOrThrow(), offset.GetResult().getOrThrow(),
                 addRes.GetResult().getOrThrow()]), instTypeArgs: ArrayList<Type>([builder.context.GetUInt8Ty()]))
         let writePoint = builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext2, parent)
-        parent.AppendExpression(writePoint)
         writePoint.SetDebugLocation(loc)
         if (isDebug) {
             println("[SanitizerCoverage] Add trace inline 8 bit" + ToPosInfo(loc) + ".")
@@ -733,25 +722,21 @@ public class SanitizerCoverage {
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:950-980.
-    private func GenerateInlineBoolExpr(loc: DebugLocation, isDebug: Bool,
+    internal func GenerateInlineBoolExpr(loc: DebugLocation, isDebug: Bool,
         parent: Block): ArrayList<Expression> {
         let globalVarType = builder.context.GetCPointerTy(builder.context.GetBoolTy())
         let mangleName = SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(SanCovBoolFlagInitName).getOrThrow()
         let charArrayTest = GenerateGlobalVar(mangleName, loc, globalVarType)
         let loadGlobal = builder.CreateLoad(globalVarType, charArrayTest, parent)
-        parent.AppendExpression(loadGlobal)
         loadGlobal.SetDebugLocation(loc)
         let offset = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(UInt64(bbCounter)), parent)
-        parent.AppendExpression(offset)
         offset.SetDebugLocation(loc)
         let boolTrue = builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(true), parent)
-        parent.AppendExpression(boolTrue)
         boolTrue.SetDebugLocation(loc)
         let callContext = IntrisicCallContext(kind: IntrinsicKind.CPOINTER_WRITE,
             args: ArrayList<Value>([loadGlobal.GetResult().getOrThrow(), offset.GetResult().getOrThrow(),
                 boolTrue.GetResult().getOrThrow()]), instTypeArgs: ArrayList<Type>([builder.context.GetBoolTy()]))
         let writePoint = builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext, parent)
-        parent.AppendExpression(writePoint)
         writePoint.SetDebugLocation(loc)
         if (isDebug) {
             println("[SanitizerCoverage] Add trace inline bool" + ToPosInfo(loc) + ".")
@@ -760,7 +745,7 @@ public class SanitizerCoverage {
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:982-996.
-    private func GenerateStackDepthExpr(loc: DebugLocation, isDebug: Bool,
+    internal func GenerateStackDepthExpr(loc: DebugLocation, isDebug: Bool,
         parent: Block): ArrayList<Expression> {
         let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetUnitTy(), isCFunc: true)
         let callee = GenerateForeignFunc(SanCovUpdateStackDepth, loc, funcTy, packName: packageName)
@@ -817,10 +802,8 @@ public class SanitizerCoverage {
         listSize.SetDebugLocation(loc)
         listSize.MoveBefore(multiBranch)
         let arrayTy = builder.context.GetRefTy(builder.context.GetRawArrayTy(builder.context.GetUInt64Ty()))
-        let createdRawArrayAllocate805 = builder.CreateRawArrayAllocate(arrayTy, builder.context.GetUInt64Ty(),
+        return builder.CreateRawArrayAllocate(arrayTy, builder.context.GetUInt64Ty(),
             listSize.GetResult().getOrThrow(), parent)
-        parent.AppendExpression(createdRawArrayAllocate805)
-        return createdRawArrayAllocate805
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:836-846.
@@ -830,7 +813,6 @@ public class SanitizerCoverage {
             args: ArrayList<Value>([dataList.GetResult().getOrThrow()]),
             instTypeArgs: ArrayList<Type>([elementType]))
         let result = builder.CreateIntrinsic(cPointerTy, callContext, dataList.GetParentBlock().getOrThrow())
-        dataList.GetParentBlock().getOrThrow().AppendExpression(result)
         result.SetDebugLocation(dataList.GetDebugLocation())
         return result
     }
@@ -880,7 +862,6 @@ public class SanitizerCoverage {
         let block0 = builder.CreateBlock(body)
         body.SetEntryBlock(block0)
         let counterVal = builder.CreateConstant(builder.context.GetUInt64Ty(), IntLiteral(UInt64(bbCounter)), block0)
-        block0.AppendExpression(counterVal)
         counterVal.SetDebugLocation(INVALID_LOCATION)
         block0.AppendExpression(counterVal)
         let cPointTy = builder.context.GetCPointerTy(initType)
@@ -892,7 +873,6 @@ public class SanitizerCoverage {
         block0.AppendExpression(apply)
         let globalVal = GetGlobalVar(SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(initItemName).getOrThrow()).getOrThrow()
         let store = builder.CreateStore(apply.GetResult().getOrThrow(), globalVal, block0)
-        block0.AppendExpression(store)
         store.SetDebugLocation(INVALID_LOCATION)
         block0.AppendExpression(store)
         globalVal.SetInitFunc(`func`)
@@ -913,12 +893,10 @@ public class SanitizerCoverage {
         body.SetEntryBlock(block0)
         let mallocStringFunc = GetImportedFunc(FUNC_MANGLE_NAME_MALLOC_CSTRING)
         let funcSize = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(Int64(pcArray.size)), block0)
-        block0.AppendExpression(funcSize)
         funcSize.SetDebugLocation(INVALID_LOCATION)
         block0.AppendExpression(funcSize)
         let stringTy = builder.context.GetStringTy().getOrThrow()
         let packExpr = builder.CreateConstant(stringTy, StringLiteral(packageName), block0)
-        block0.AppendExpression(packExpr)
         packExpr.SetDebugLocation(INVALID_LOCATION)
         block0.AppendExpression(packExpr)
         let libc = builder.GetStructType("std.core", "LibC").getOrThrow()
@@ -931,7 +909,6 @@ public class SanitizerCoverage {
         let lineNumberArray = ArrayList<Value>()
         for ((pcName, pcLocation) in pcArray) {
             let funcName = builder.CreateConstant(stringTy, StringLiteral(pcName), block0)
-            block0.AppendExpression(funcName)
             funcName.SetDebugLocation(INVALID_LOCATION)
             block0.AppendExpression(funcName)
             let cString = CreateMemberApply(builder.context.GetCStringTy(), mallocStringFunc, libcRef,
@@ -940,7 +917,6 @@ public class SanitizerCoverage {
             funcNameArray.add(cString.GetResult().getOrThrow())
             let fileName = builder.CreateConstant(stringTy,
                 StringLiteral(builder.context.GetSourceFileName(pcLocation.GetFileID())), block0)
-            block0.AppendExpression(fileName)
             fileName.SetDebugLocation(INVALID_LOCATION)
             block0.AppendExpression(fileName)
             let fileNameCString = CreateMemberApply(builder.context.GetCStringTy(), mallocStringFunc, libcRef,
@@ -949,7 +925,6 @@ public class SanitizerCoverage {
             fileNameArray.add(fileNameCString.GetResult().getOrThrow())
             let lineId = builder.CreateConstant(builder.context.GetUInt64Ty(),
                 IntLiteral(UInt64(pcLocation.GetBeginPos().line)), block0)
-            block0.AppendExpression(lineId)
             lineId.SetDebugLocation(INVALID_LOCATION)
             block0.AppendExpression(lineId)
             lineNumberArray.add(lineId.GetResult().getOrThrow())
@@ -969,7 +944,6 @@ public class SanitizerCoverage {
             packName: packageName)
         let typecast = builder.CreateTypeCast(builder.context.GetUInt64Ty(), funcSize.GetResult().getOrThrow(), block0)
         block0.AppendExpression(typecast)
-        block0.AppendExpression(typecast)
         let pcInitApply = CreateNonMemberApply(builder.context.GetUnitTy(), pcInitFunc,
             ArrayList<Value>([packCString.GetResult().getOrThrow(), typecast.GetResult().getOrThrow(),
                 rawDataAcquireString.GetResult().getOrThrow(), rawDataAcquireFileName.GetResult().getOrThrow(),
@@ -987,16 +961,13 @@ public class SanitizerCoverage {
         let arrayTy = builder.context.GetRefTy(builder.context.GetRawArrayTy(`type`))
         let expr = builder.CreateRawArrayAllocate(arrayTy, `type`, size, block)
         block.AppendExpression(expr)
-        block.AppendExpression(expr)
         let arrayVar = expr.GetResult().getOrThrow()
         let literalInit = builder.CreateRawArrayLiteralInit(builder.context.GetUnitTy(), arrayVar, list, block)
-        block.AppendExpression(literalInit)
         block.AppendExpression(literalInit)
         let cPointerTy = builder.context.GetCPointerTy(`type`)
         let callContext = IntrisicCallContext(kind: IntrinsicKind.ARRAY_ACQUIRE_RAW_DATA,
             args: ArrayList<Value>([arrayVar]), instTypeArgs: ArrayList<Type>([`type`]))
         let rawDataAcquire = builder.CreateIntrinsic(cPointerTy, callContext, block)
-        block.AppendExpression(rawDataAcquire)
         rawDataAcquire.SetDebugLocation(INVALID_LOCATION)
         block.AppendExpression(rawDataAcquire)
         return rawDataAcquire
