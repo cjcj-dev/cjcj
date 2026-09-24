@@ -2,7 +2,7 @@ name: Bootstrap AST support
 
 on:
   push:
-    branches: [sym/86-implement-r5786080463]
+    branches: [sym/187-implement-r5816792031]
     paths: [.github/workflows/build-ast-support.yml, ci/build_ast_support.sh]
   workflow_dispatch:
     inputs:
@@ -66,8 +66,21 @@ jobs:
           git -C compiler/third_party/flatbuffers remote add origin "$FLATBUFFERS_URL"
           git -C compiler/third_party/flatbuffers fetch --depth=1 origin "$FLATBUFFERS_SHA"
           git -C compiler/third_party/flatbuffers checkout --detach FETCH_HEAD
-      - name: Build only AST support
-        run: bash ci/build_ast_support.sh compiler ast-build ast-artifact
+      - name: Fetch official FlatBuffers SDK input
+        run: |
+          set -euo pipefail
+          case "${{ matrix.platform }}" in
+            linux_x86_64) asset=linux_amd64;;
+            linux_aarch64) asset=linux_arm64;;
+            darwin_x86_64) asset=darwin_amd64;;
+            darwin_aarch64) asset=darwin_arm64;;
+          esac
+          mkdir -p "$RUNNER_TEMP/ast-cjv" "$RUNNER_TEMP/ast-nightly-home"
+          curl -fsSL "https://github.com/Zxilly/cjv/releases/download/v0.2.20/cjv_${asset}.tar.gz" | tar -xz -C "$RUNNER_TEMP/ast-cjv"
+          cjv_bin=$(find "$RUNNER_TEMP/ast-cjv" -type f -name cjv | head -1)
+          HOME="$RUNNER_TEMP/ast-nightly-home" "$cjv_bin" install nightly-1.3.0-alpha.20260924001050
+      - name: Build AST support and SDK inputs
+        run: bash ci/build_ast_support.sh compiler ast-build ast-artifact "$RUNNER_TEMP/ast-nightly-home/.cjv/toolchains/nightly-1.3.0-alpha.20260924001050"
       - name: Record provenance
         env:
           PLATFORM: ${{ matrix.platform }}

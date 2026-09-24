@@ -184,6 +184,7 @@ const compilerEntrySha = await sha256(path.join(sdk, 'bin', 'cjc'));
 const stageEnv = {
   ...process.env,
   CANGJIE_HOME: sdk,
+  cjHeapSize: '96GB',
   [target.spec.loaderEnv]: targetLd,
   PATH: `${path.join(sdk, 'bin')}:${path.join(sdk, 'tools', 'bin')}:${process.env.PATH ?? ''}`,
 };
@@ -209,6 +210,7 @@ if (dryRun) {
   console.log(`STAGE3_DRY_RUN_FAKE_ARTIFACTS=1 final_std=${finalStd}`);
   console.log(`[stage3][dry-run] python3 build.py clean; build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}; install --prefix ${finalStd}`);
 } else {
+  await $`python3 ${path.join(githubWorkspace, 'ci/install_std_sdk_inputs.py')} ${path.dirname(process.env.CJCJ_BOOTSTRAP_AST_SUPPORT)} ${sdk} ${tuple}`;
   await fs.rm(finalStd, {recursive: true, force: true});
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py clean`;
   await fs.rm(path.join(stdlibRoot, 'build', 'build'), {recursive: true, force: true});

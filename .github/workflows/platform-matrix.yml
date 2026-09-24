@@ -68,6 +68,19 @@ jobs:
           bash ci/release/gate_colour_runtime.sh runtime-source \
             "$RUNNER_TEMP/h48-download/installed/tuple" "$RUNNER_TEMP/h48-active" \
             .platform-ci/runtime-install
+      - name: Load same-generation AST SDK inputs
+        run: cat ci/ast_support/linux_x86_64.env >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.AST_SUPPORT_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.AST_SUPPORT_RUN_ID }}
+          path: ${{ runner.temp }}/ast-support
+      - name: Rebuild and install alpha.06 std with coloured cjc
+        run: |
+          bash ci/release/build_colour_std.sh runtime-source "$RUNNER_TEMP/h48-active" \
+            "$RUNNER_TEMP/ast-support" .platform-ci/runtime-install
       - name: Package same-build runtime pair
         id: package
         run: |

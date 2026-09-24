@@ -414,6 +414,7 @@ sdk_ld_path() {
 assert_version() {
   local label="$1" compiler="$2" sdk="$3" runtime="$4" ld
   assert_executable "$label" "$compiler"
+  cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=/usr/bin:/bin $(printf '%q' "$compiler") --version"
   [ "$DRY" -eq 1 ] || ok "$label --version rc=0"
@@ -458,11 +459,12 @@ assert_std_install_shape() {
 
 stdlib_build() {
   local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" ld script
+  cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$JOBS") $(printf '%q' "$sdk/runtime/lib/$HOST_TUPLE") $(printf '%q' "$prefix")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=96GB bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$JOBS") $(printf '%q' "$sdk/runtime/lib/$HOST_TUPLE") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
 }
 
@@ -529,6 +531,7 @@ install_stage_compiler() {
 
 cjpm_build() {
   local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script
+  cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
   cjpm="$sdk/tools/bin/cjpm"
@@ -565,6 +568,7 @@ assert_cjcj_sha() {
 
 shim_build() {
   local label="$1" sdk="$2" runtime="$3" srcdir="$4" source_object="${5:-}" ld npx_path node_bin source_env=''
+  cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   npx_path=$(command -v npx 2>/dev/null || true)
   [ -x "$npx_path" ] || die "$label shim 构建需要可执行 npx"
