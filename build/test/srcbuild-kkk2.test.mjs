@@ -743,11 +743,32 @@ test('stage0 PATH injection of colour opt turns only the isolation contract red'
   assert.deepEqual(bootstrapExecDefects(script), []);
 });
 
-test('print_dry_step 31/32 emit the same bootstrap.sh argv as execution', () => {
-  assert.match(script, /printf 'DRY_RUN COMMAND=%s\\n' "\$\(bootstrap_argv stage0\)"/);
-  assert.match(script, /printf 'DRY_RUN COMMAND=%s\\n' "\$\(bootstrap_argv stage1\)"/);
-  assert.match(script, /run_bootstrap_stage\(\) \{[\s\S]*bootstrap_argv "\$stage"/);
-});
+for (const step of [31, 32]) {
+  for (const mismatch of [false, true]) {
+    test(`dry-run bootstrap step ${step} ${mismatch ? 'rejects mismatched' : 'accepts matching'} pin`, t => {
+      const fixture = bootstrapDriverFixture(t, {mismatch});
+      for (let sample = 1; sample <= 2; sample++) {
+        const result = fixture.dryRun(step, sample);
+        assert.equal(result.error, undefined);
+        assert.equal(result.signal, null);
+        const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1];
+        // Evaluate the whole invariant before asserting so an earlier check
+        // cannot hide which product result the test actually observed.
+        const observed = {
+          exit: result.status === 0 ? 'success' : 'failure',
+          command: command === undefined ? 'absent' : command.length ? 'populated' : 'empty',
+          success: /^DRY_RUN RESULT=success/m.test(result.stdout),
+          mismatch: /LLVM_DYLIB_SOURCE_MISMATCH/.test(result.stderr),
+        };
+        console.log(`DRY_ASSERT step=${step} sample=${sample} ${JSON.stringify(observed)}`);
+        assert.deepEqual(observed, mismatch
+          ? {exit: 'failure', command: 'absent', success: false, mismatch: true}
+          : {exit: 'success', command: 'populated', success: true, mismatch: false});
+        if (!mismatch) assert.match(command, new RegExp(`--stage stage${step - 31}(?: |$)`));
+      }
+    });
+  }
+}
 
 function ghaBootstrapDefects(yml, ghaRun) {
   const defects = [];
@@ -907,4 +928,183 @@ stage1
   const result = runBash(invoke, [root]);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /COMPILER_CONSUMED_TARGET_STD/);
+});
+
+
+// Execute the complete driver, including retained-state loading, prerequisite,
+// run_step and the final RESULT. Only external inputs live in the fixture.
+function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFailure = false, child = false} = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap argv '));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  for (const dir of ['ci', 'build', 'tools']) {
+    fs.cpSync(path.join(repoRoot, dir), path.join(root, dir), {recursive: true});
+  }
+  const driver = path.join(root, 'tools/srcbuild_kkk2.sh');
+  if (empty || partialFailure) {
+    const text = fs.readFileSync(driver, 'utf8');
+    fs.writeFileSync(driver, text.replace(/^bootstrap_argv\(\) \{[\s\S]*?^\}/m,
+      partialFailure
+        ? 'bootstrap_argv() {\n    printf \'%q \' "$BOOTSTRAP_SH"\n    return 1\n}'
+        : 'bootstrap_argv() {\n    return 0\n}'));
+  }
+  const state = path.join(root, '.srcbuild');
+  fs.mkdirSync(path.join(state, 'fixed-llc'), {recursive: true});
+  fs.writeFileSync(path.join(state, 'kkk2-github.env'), '');
+  fs.writeFileSync(path.join(state, 'kkk2-github.path'), '');
+  const {llvmSha} = writeTuple(path.join(state, 'fixed-llc'),
+    fs.readFileSync(path.join(root, 'ci/llvm_pin.env'), 'utf8').match(/^LLVM_SHA=(.*)$/m)[1]);
+  const pin = path.join(root, 'ci/llvm-dylib', `linux_${os.arch() === 'x64' ? 'x86_64' : 'aarch64'}.env`);
+  fs.writeFileSync(pin, fs.readFileSync(pin, 'utf8').replace(/^LLVM_DYLIB_SOURCE_SHA=.*$/m,
+    `LLVM_DYLIB_SOURCE_SHA=${mismatch ? '0'.repeat(40) : llvmSha}`));
+  const inputs = path.join(root, 'inputs');
+  const base = path.join(inputs, 'base');
+  const tuple = path.join(inputs, 'tuple');
+  for (const dir of [base + '/third_party/llvm/bin', tuple + '/bin', tuple + '/lib', tuple + '/fixed-llc']) {
+    fs.mkdirSync(dir, {recursive: true});
+  }
+  fs.copyFileSync('/bin/true', base + '/third_party/llvm/bin/opt');
+  fs.copyFileSync('/bin/true', inputs + '/libLLVM-15.so');
+  fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
+  fs.writeFileSync(tuple + '/MANIFEST', `LLVM_SHA=${llvmSha}\n`);
+  fs.writeFileSync(tuple + '/bin/opt', `CJLLVM-COMMIT:${llvmSha}\n`);
+  for (const name of ['bin/llc', 'lib/STATIC_LLVM.txt', 'fixed-llc/cjselfhost_llvmshim.o',
+    'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/llvm-tools.manifest']) {
+    fs.writeFileSync(path.join(tuple, name), 'input fixture\n');
+  }
+  const payloads = ['MANIFEST', 'bin/opt', 'bin/llc', 'lib/STATIC_LLVM.txt',
+    'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/llvm-tools.manifest'];
+  fs.writeFileSync(tuple + '/SHA256SUMS', payloads.map(name => `${sha256(path.join(tuple, name))}  ./${name}\n`).join(''));
+  fs.copyFileSync(path.join(repoRoot, 'cjpm.toml'), path.join(root, 'cjpm.toml'));
+  // Give the real bootstrap pin check an actual source identity, not a
+  // placeholder SHA in an unversioned copy.
+  for (const args of [
+    ['init', '--quiet', root],
+    ['-C', root, 'add', 'cjpm.toml'],
+    ['-C', root, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com',
+      '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'test fixture source identity'],
+  ]) {
+    const result = spawnSync('git', args, {encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stderr);
+  }
+  const sourceIdentity = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], {encoding: 'utf8'});
+  assert.equal(sourceIdentity.status, 0, sourceIdentity.stderr);
+  const sourceSha = sourceIdentity.stdout.trim();
+  const bin = path.join(inputs, 'bin');
+  fs.mkdirSync(bin);
+  // Host name is only a placement policy; keep this shell test usable in CI.
+  if (os.hostname().split('.')[0] !== 'kkk2') {
+    fs.writeFileSync(bin + '/hostname', '#!/bin/sh\nprintf "kkk2\\n"\n', {mode: 0o755});
+  }
+  const env = {...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    CJCJ_BOOTSTRAP_CPP_SRC: inputs,
+    CJCJ_BOOTSTRAP_STDSRC: inputs,
+    CJCJ_SRCBUILD_HOST_SDK: base,
+    CJCJ_BOOTSTRAP_HOST_LLVM_SO: inputs + '/libLLVM-15.so',
+    CJCJ_BOOTSTRAP_HOST_LLVM_SHA256: sha256(inputs + '/libLLVM-15.so'),
+    CJCJ_BOOTSTRAP_AST_SUPPORT: inputs + '/ast.a',
+    CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: sha256(inputs + '/ast.a'),
+    CJCJ_BOOTSTRAP_COLOUR_TUPLE: tuple,
+    CJCJ_BOOTSTRAP_COLOUR_RT: inputs,
+    CJCJ_BOOTSTRAP_CJCJ_SHA: sourceSha,
+  };
+  delete env.CJCJ_BOOTSTRAP_SH;
+  delete env.CJCJ_SRCBUILD_CPUSET;
+  delete env.CJCJ_KKK2_AFFINED;
+  if (child) {
+    const entry = inputs + '/bootstrap child.sh';
+    fs.writeFileSync(entry, '#!/bin/bash\nprintf "CHILD SDK_BUILD=%s\\n" "$SDK_BUILD"\nprintf "ARG=<%s>\\n" "$@"\nexit "${CHILD_RC:-0}"\n', {mode: 0o755});
+    env.CJCJ_BOOTSTRAP_SH = entry;
+  }
+  return {
+    root,
+    sourceSha,
+    dryRun(step, sample) {
+      const result = spawnSync('bash', [driver, '--from-step', String(step), '--through-step', String(step), '--dry-run'],
+        {encoding: 'utf8', env});
+      if (process.env.CJCJ_TEST_EVIDENCE) {
+        const out = path.join(process.env.CJCJ_TEST_EVIDENCE, t.name.replaceAll(/[^a-zA-Z0-9]+/g, '-'), String(sample));
+        fs.mkdirSync(out, {recursive: true});
+        fs.writeFileSync(path.join(out, 'stdout.log'), result.stdout);
+        fs.writeFileSync(path.join(out, 'stderr.log'), result.stderr);
+        fs.writeFileSync(path.join(out, 'driver.rc'), `${result.status}\n`);
+        fs.writeFileSync(path.join(out, 'identity.json'), JSON.stringify({driver: sha256(driver), test: sha256(import.meta.filename)}, null, 2) + '\n');
+      }
+      return result;
+    },
+    run(step, childRc = 0) {
+      const result = spawnSync('bash', [driver, '--from-step', String(step), '--through-step', String(step)],
+        {encoding: 'utf8', env: {...env, CHILD_RC: String(childRc)}});
+      const logs = path.join(state, 'logs');
+      const logFile = fs.readdirSync(logs).find(name => name.endsWith(`-step${step}.log`));
+      assert.ok(logFile, result.stdout + result.stderr);
+      const log = fs.readFileSync(path.join(logs, logFile), 'utf8');
+      if (process.env.CJCJ_TEST_EVIDENCE) {
+        const out = path.join(process.env.CJCJ_TEST_EVIDENCE, t.name.replaceAll(/[^a-zA-Z0-9]+/g, '-'), String(childRc));
+        fs.mkdirSync(out, {recursive: true});
+        fs.writeFileSync(path.join(out, 'driver.log'), result.stdout + result.stderr);
+        fs.writeFileSync(path.join(out, 'step.log'), log);
+        fs.writeFileSync(path.join(out, 'driver.rc'), `${result.status}\n`);
+        fs.copyFileSync(path.join(state, 'kkk2-timings.tsv'), path.join(out, 'timings.tsv'));
+        fs.writeFileSync(path.join(out, 'identity.json'), JSON.stringify({
+          driver: sha256(driver), bootstrap: sha256(path.join(root, 'ci/bootstrap/bootstrap.sh')),
+          sdkBuild: sha256(path.join(root, 'ci/bootstrap/sdk_build.sh')), test: sha256(import.meta.filename),
+        }, null, 2) + '\n');
+      }
+      return {...result, log};
+    },
+  };
+}
+
+for (const step of [31, 32]) {
+  test(`bootstrap driver step ${step} propagates pin mismatch`, t => {
+    const result = bootstrapDriverFixture(t, {mismatch: true}).run(step);
+    assert.match(result.log, /LLVM_DYLIB_SOURCE_MISMATCH/);
+    assert.equal(result.status, 1, 'pin failure must reach driver exit');
+    assert.match(result.stdout, new RegExp(`STEP=${step} .* rc=1 `));
+    assert.doesNotMatch(result.stdout, /RESULT=success/);
+    assert.doesNotMatch(result.log, /\[stage[01]\]/);
+  });
+
+  test(`bootstrap driver step ${step} rejects empty successful argv`, t => {
+    const result = bootstrapDriverFixture(t, {empty: true}).run(step);
+    assert.equal(result.status, 1, 'empty argv must fail before execution');
+    assert.match(result.stdout, new RegExp(`STEP=${step} .* rc=1 `));
+    assert.doesNotMatch(result.stdout, /RESULT=success/);
+  });
+
+  test(`bootstrap driver step ${step} rejects partial argv from a failed producer`, t => {
+    const result = bootstrapDriverFixture(t, {partialFailure: true, child: true}).run(step);
+    assert.equal(result.status, 1, 'producer failure must reject even nonempty argv');
+    assert.match(result.stdout, new RegExp(`STEP=${step} .* rc=1 `));
+    assert.doesNotMatch(result.log, /CHILD SDK_BUILD=/);
+    assert.doesNotMatch(result.stdout, /RESULT=success/);
+  });
+
+  test(`bootstrap driver step ${step} executes quoted argv and propagates child status`, t => {
+    const fixture = bootstrapDriverFixture(t, {child: true});
+    for (const rc of [0, 23]) {
+      const result = fixture.run(step, rc);
+      assert.equal(result.status, rc, result.stdout + result.stderr);
+      assert.match(result.log, /CHILD SDK_BUILD=.*\/ci\/bootstrap\/sdk_build.sh/);
+      assert.ok(result.log.includes(`ARG=<${fixture.root}>`), 'space-containing source is one argument');
+      assert.match(result.log, new RegExp(`ARG=<stage${step - 31}>`));
+      assert.match(result.stdout, new RegExp(`STEP=${step} .* rc=${rc} `));
+      if (rc === 0) assert.match(result.stdout, /RESULT=success/);
+      else assert.doesNotMatch(result.stdout, /RESULT=success/);
+    }
+  });
+}
+
+test('bootstrap driver matching pins starts real stage0 and sdk_build', t => {
+  const fixture = bootstrapDriverFixture(t);
+  const result = fixture.run(31);
+  assert.ok(result.log.includes(`ASSERT cjcj-sha expected=${fixture.sourceSha} actual=${fixture.sourceSha} source=git`), result.log);
+  assert.match(result.log, /\[stage0\] official cjc/);
+  // The deliberately incomplete SDK ends this bounded entry test before compilation.
+  assert.match(result.log, /SDK-BUILD-FAIL .*不像 SDK（缺 bin\/cjc）/);
+  console.log('OBSERVED real sdk_build input rejection after matching source pin');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /STEP=31 .* rc=1 /);
+  assert.doesNotMatch(result.stdout, /RESULT=success/);
 });

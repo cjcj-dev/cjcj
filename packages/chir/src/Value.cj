@@ -641,6 +641,7 @@ public class Block <: Value & Hashable & Equatable<Block> {
         }
         for (expr in exprs) {
             let newExpr = expr.Clone(builder, newBlock)
+            newBlock.AppendExpression(newExpr)
             newExpr.CopyBaseInfoFrom(expr)
             if (let Some(sourceResult) <- expr.GetResult()) {
                 if (let Some(clonedResult) <- newExpr.GetResult()) {

@@ -501,10 +501,10 @@ private func NeedCheckForeignName(parent: MemberSignature, child: MemberSignatur
     if (!parentDecl.IsFuncOrProp()) {
         return false
     }
-    if (!parentDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+    if (!parentDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
         return false
     }
-    if (!childDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+    if (!childDecl.outerDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
         return false
     }
     if (SameDecl(parentDecl.outerDecl.getOrThrow(), childDecl.outerDecl.getOrThrow())) {
@@ -1782,7 +1782,7 @@ public class StructInheritanceChecker {
 
     private func DiagnoseForUnimplementedInterfaces(members: MemberMap, structDecl: Decl): Unit {
         if (structDecl.TestAttr(Attribute.FOREIGN) ||
-            structDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER) ||
+            structDecl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_INTERFACE_HANDLE_WRAPPER) ||
             structDecl.TestAttr(Attribute.JAVA_MIRROR_SYNTHETIC_WRAPPER)) {
             return
         }

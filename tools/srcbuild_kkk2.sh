@@ -1159,13 +1159,15 @@ bootstrap_argv() {
 }
 
 run_bootstrap_stage() {
-    local stage=$1
+    local stage=$1 argv
     local -a cmd
     mkdir -p "$STATE_ROOT/bootstrap-work"
     if [[ $stage == stage0 && -z ${CJCJ_BOOTSTRAP_CPP_SRC:-} && -z ${CANGJIE_CPP_SRC:-} ]]; then
         node "$REPO_ROOT/ci/bootstrap/prepare_cpp_headers.mjs" "$CANGJIE_WORKSPACE/cangjie_compiler" || return 1
     fi
-    eval "cmd=( $(bootstrap_argv "$stage") )"
+    argv=$(bootstrap_argv "$stage") || return 1
+    eval "cmd=( $argv )" || return 1
+    [[ ${#cmd[@]} -gt 0 ]] || return 1
     SDK_BUILD="$REPO_ROOT/ci/bootstrap/sdk_build.sh" "${cmd[@]}"
 }
 
@@ -1292,7 +1294,7 @@ validate_stage_step_contracts() {
 }
 
 print_dry_step() {
-    local step=$1 toolchain=$2
+    local step=$1 toolchain=$2 stage argv
     printf 'DRY_RUN STEP=%s name=%s\n' "$step" "${STEP_NAMES[$step]}"
     case "$step" in
         5)
@@ -1300,10 +1302,14 @@ print_dry_step() {
             printf 'DRY_RUN COMMAND=npx --yes zx@8 %q\n' "$REPO_ROOT/ci/setup_sdk.mjs"
             ;;
         31)
-            printf 'DRY_RUN COMMAND=%s\n' "$(bootstrap_argv stage0)"
+            stage=stage0
+            argv=$(bootstrap_argv "$stage") || return 1
+            printf 'DRY_RUN COMMAND=%s\n' "$argv"
             ;;
         32)
-            printf 'DRY_RUN COMMAND=%s\n' "$(bootstrap_argv stage1)"
+            stage=stage1
+            argv=$(bootstrap_argv "$stage") || return 1
+            printf 'DRY_RUN COMMAND=%s\n' "$argv"
             ;;
         33)
             printf 'DRY_RUN ENV CJCJ_STAGE3_STDLIB_BUILD_TYPE=%s cjHeapSwap=on\n' "$BUILD_TYPE"

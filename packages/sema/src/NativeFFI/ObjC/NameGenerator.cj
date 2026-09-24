@@ -20,6 +20,15 @@ private let WRAPPER_GETTER_SUFFIX_INNER_GENERIC_PROP: String = "get"
 private let WRAPPER_SETTER_SUFFIX: String = "_set"
 
 public class NameGenerator {
+    // Upstream a51ced71, Utils/NameGenerator.cpp:298-306.
+    public static func GenerateHandleWrapperName(mirror: ClassLikeDecl): String {
+        return mirror.identifier.Val() + "$wrap"
+    }
+
+    public static func GenerateRegistryCompanionName(impl: ClassDecl): String {
+        return impl.identifier.Val() + "$reg"
+    }
+
     private let mangler: BaseMangler
     private let typeManager: TypeManager
 
@@ -148,7 +157,7 @@ public class NameGenerator {
         return None
     }
 
-    public func GetObjCDeclName(target: Decl, genericActualName!: Option<String> = None): String {
+    public static func GetObjCDeclName(target: Decl, genericActualName!: Option<String> = None): String {
         if (let Some(foreignName) <- GetUserDefinedObjCName(target)) {
             return foreignName
         }

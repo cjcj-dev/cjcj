@@ -209,7 +209,7 @@ public func FixCastProblemAfterInst(blocks: ArrayList<Block>, builder: CHIRBuild
             let cast = (expr as TransformToConcrete).getOrThrow()
             if (!cast.GetSourceTy().getOrThrow().IsGenericRelated()) {
                 let sourceValue = cast.GetSourceValue()
-                let newCast = TypeCastOrBoxIfNeeded(sourceValue, cast.GetTargetTy().getOrThrow(), builder,
+                let (newCast, expressions) = TypeCastOrBoxIfNeeded(sourceValue, cast.GetTargetTy().getOrThrow(), builder,
                     expr.GetParentBlock().getOrThrow(), expr.GetDebugLocation())
                 if (refEq(newCast, sourceValue)) {
                     for (user in expr.GetResult().getOrThrow().GetUsers()) {
@@ -221,14 +221,16 @@ public func FixCastProblemAfterInst(blocks: ArrayList<Block>, builder: CHIRBuild
                 for (user in expr.GetResult().getOrThrow().GetUsers()) {
                     user.ReplaceOperand(expr.GetResult().getOrThrow(), newCast)
                 }
-                newCast.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(expr)
+                for (expression in expressions) {
+                    expression.MoveBefore(expr)
+                }
                 expr.RemoveSelfFromBlock()
             }
         } else if (expr.GetExprKind() == ExprKind.TRANSFORM_TO_GENERIC) {
             let cast = (expr as TransformToGeneric).getOrThrow()
             if (!cast.GetTargetTy().getOrThrow().IsGenericRelated()) {
                 let sourceValue = cast.GetSourceValue()
-                let newCast = TypeCastOrBoxIfNeeded(sourceValue, cast.GetTargetTy().getOrThrow(), builder,
+                let (newCast, expressions) = TypeCastOrBoxIfNeeded(sourceValue, cast.GetTargetTy().getOrThrow(), builder,
                     expr.GetParentBlock().getOrThrow(), expr.GetDebugLocation())
                 if (refEq(newCast, sourceValue)) {
                     for (user in expr.GetResult().getOrThrow().GetUsers()) {
@@ -240,7 +242,9 @@ public func FixCastProblemAfterInst(blocks: ArrayList<Block>, builder: CHIRBuild
                 for (user in expr.GetResult().getOrThrow().GetUsers()) {
                     user.ReplaceOperand(expr.GetResult().getOrThrow(), newCast)
                 }
-                newCast.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(expr)
+                for (expression in expressions) {
+                    expression.MoveBefore(expr)
+                }
                 expr.RemoveSelfFromBlock()
             }
         } else if (expr.GetExprKind() == ExprKind.TYPECAST) {
@@ -249,20 +253,24 @@ public func FixCastProblemAfterInst(blocks: ArrayList<Block>, builder: CHIRBuild
             if (sourceValue.GetType().getOrThrow().IsGenericRelated()) {
                 return VisitResult.CONTINUE
             }
-            let newCastResult = TypeCastOrBoxIfNeeded(sourceValue, expr.GetResult().getOrThrow().GetType().getOrThrow(),
+            let (newCastResult, expressions) = TypeCastOrBoxIfNeeded(sourceValue, expr.GetResult().getOrThrow().GetType().getOrThrow(),
                 builder, expr.GetParentBlock().getOrThrow(), expr.GetDebugLocation())
             if (refEq(newCastResult, sourceValue)) {
                 return VisitResult.CONTINUE
             }
             let newCast = newCastResult.AsLocalVar().getOrThrow()
             if (newCast.GetExpr().getOrThrow().GetExprKind() == ExprKind.TYPECAST) {
-                newCast.GetExpr().getOrThrow().RemoveSelfFromBlock()
+                for (expression in expressions) {
+                    expression.RemoveSelfFromBlock()
+                }
                 return VisitResult.CONTINUE
             }
             for (user in expr.GetResult().getOrThrow().GetUsers()) {
                 user.ReplaceOperand(expr.GetResult().getOrThrow(), newCast)
             }
-            newCast.GetExpr().getOrThrow().MoveBefore(expr)
+            for (expression in expressions) {
+                expression.MoveBefore(expr)
+            }
             expr.RemoveSelfFromBlock()
         }
         return VisitResult.CONTINUE

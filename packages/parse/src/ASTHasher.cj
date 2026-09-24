@@ -440,7 +440,7 @@ private class ASTHasherImpl {
             Attribute.ABSTRACT, Attribute.CONSTRUCTOR, Attribute.DEFAULT, Attribute.ENUM_CONSTRUCTOR,
             Attribute.INTERNAL, Attribute.FOREIGN, Attribute.COMMON, Attribute.SPECIFIC, Attribute.GENERIC,
             Attribute.GLOBAL, Attribute.INTRINSIC, Attribute.JAVA_APP, Attribute.JAVA_MIRROR,
-            Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE, Attribute.MACRO_FUNC, Attribute.MUT,
+            Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL, Attribute.MACRO_FUNC, Attribute.MUT,
             Attribute.NUMERIC_OVERFLOW, Attribute.OPERATOR, Attribute.PRIVATE, Attribute.PUBLIC, Attribute.PROTECTED,
             Attribute.STATIC, Attribute.TOOL_ADD, Attribute.UNSAFE
         ]

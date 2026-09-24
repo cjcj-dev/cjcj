@@ -252,11 +252,9 @@ public class Devirtualization {
                 realFunc.GetFuncType().getOrThrow().GetParamTypes()[0]
             instParentTy = AddRefIfNeeded(instParentTy, realFunc)
             let parent = invoke.GetParentBlock().getOrThrow()
-            let converted = TypeCastOrBoxIfNeeded(context.args[0], instParentTy, builder, parent)
-            if (converted != context.args[0]) {
-                converted.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(invoke)
-                context.args[0] = converted
-            }
+            let (converted, expressions) = TypeCastOrBoxIfNeeded(context.args[0], instParentTy, builder, parent)
+            for (expression in expressions) { expression.MoveBefore(invoke) }
+            context.args[0] = converted
             let call: Expression = if (let Some(term) <- (invoke as InvokeWithException)) {
                 builder.CreateApplyWithException(instRetTy, realFunc, context,
                     term.GetSuccessBlock(), term.GetErrorBlock(), parent)

@@ -16,6 +16,62 @@ permissions:
   contents: read
   actions: read
 jobs:
+  dylib-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux_x86_64
+          - runner: ubuntu-24.04-arm
+            platform: linux_aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read reviewed dylib pin
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          source ci/llvm-dylib/${{ matrix.platform }}.env
+          test "$LLVM_DYLIB_SOURCE_SHA" = "$LLVM_SHA"
+          cat ci/llvm_pin.env ci/llvm-dylib/${{ matrix.platform }}.env >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.LLVM_DYLIB_ARTIFACT_ID }}
+          github-token: ${{ github.token }}
+          run-id: ${{ env.LLVM_DYLIB_RUN_ID }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/dylib
+      - name: Verify downloaded library and manifest rejection
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/dylib"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          manifest = json.loads((Path(os.environ['RUNNER_TEMP']) / 'dylib/manifest.json').read_text())
+          assert manifest['run_id'] == os.environ['LLVM_DYLIB_RUN_ID']
+          assert manifest['run_attempt'] == os.environ['LLVM_DYLIB_RUN_ATTEMPT']
+          assert manifest['targets'] == ['X86', 'ARM', 'AArch64']
+          PY
+          python3 ci/llvm-dylib/verify.py "$root" "$LLVM_SHA" "$LLVM_DYLIB_SHA256"
+          cp "$root/manifest.json" "$RUNNER_TEMP/manifest.original.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          file = Path(os.environ['RUNNER_TEMP']) / 'dylib/manifest.json'
+          manifest = json.loads(file.read_text())
+          value = manifest['sha256']
+          manifest['sha256'] = ('0' if value[0] != '0' else '1') + value[1:]
+          file.write_text(json.dumps(manifest) + '\n')
+          PY
+          if python3 ci/llvm-dylib/verify.py "$root" "$LLVM_SHA" "$LLVM_DYLIB_SHA256" > "$RUNNER_TEMP/manifest-cut.log" 2>&1; then
+            echo 'changed manifest digest unexpectedly accepted' >&2
+            exit 1
+          fi
+          grep -F LLVM_DYLIB_SHA256_MISMATCH "$RUNNER_TEMP/manifest-cut.log"
+          cp "$RUNNER_TEMP/manifest.original.json" "$root/manifest.json"
+          python3 ci/llvm-dylib/verify.py "$root" "$LLVM_SHA" "$LLVM_DYLIB_SHA256"
   contract:
     runs-on: ubuntu-22.04
     steps:

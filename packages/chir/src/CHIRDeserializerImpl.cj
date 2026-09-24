@@ -745,6 +745,7 @@ class CHIRDeserializerImpl {
             if (let Some(blockValue) <- valuesById.get(CHIRFieldAt(fields, 2))) {
                 if (let Some(block) <- (blockValue as Block)) {
                     let expr = createExpression(fields, block)
+                    block.AppendExpression(expr)
                     expressionsById[CHIRFieldAt(fields, 1)] = expr
                     CHIRApplyBaseInfo(expr, CHIRFieldAt(fields, 11), CHIRFieldAt(fields, 12),
                         annotationText: CHIRFieldAt(fields, 14))
@@ -1302,7 +1303,6 @@ class CHIRDeserializerImpl {
     private func createLambdaExpression(operands: ArrayList<Value>, body: BlockGroup, block: Block,
         resultTy: Option<Type>): Expression {
         let expr = Lambda(operands, body, block)
-        block.AppendExpression(expr)
         builder.context.RegisterExpression(expr)
         attachResult(expr, resultTy)
         return expr

@@ -959,12 +959,16 @@ private class ToCHIR {
         body.SetEntryBlock(entry)
         let retType = curFunc.GetReturnType().getOrThrow()
         let res = builder.CreateApply(retType, curFunc, ChirFuncCallContext(args: args), entry)
+        entry.AppendExpression(res)
         res.SetDebugLocation(curFunc.GetDebugLocation())
         let retAlloc = builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry)
+        entry.AppendExpression(retAlloc)
         retAlloc.SetDebugLocation(ChirDebugLocation())
         wrapperFunc.SetReturnValue(retAlloc.GetResult().getOrThrow())
-        builder.CreateStore(res.GetResult().getOrThrow(), retAlloc.GetResult().getOrThrow(), entry)
-        builder.CreateExit(None, entry)
+        let createdStore962 = builder.CreateStore(res.GetResult().getOrThrow(), retAlloc.GetResult().getOrThrow(), entry)
+        entry.AppendExpression(createdStore962)
+        let createdExit963 = builder.CreateExit(None, entry)
+        entry.AppendExpression(createdExit963)
         return (wrapperFunc, Some(res))
     }
 

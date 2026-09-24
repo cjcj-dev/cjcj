@@ -27,7 +27,8 @@ the newly built coloured target runtime. The runner installs gdb for the native
 teardown proof. H48's partial source provenance remains documented in
 `ci/release/H48_LANGUAGE_TUPLE.md` and tracked by #135.
 
-Artifacts expire after seven days. Refresh the reviewed pin from another
-successful producer when needed; there is no SDK/depot fallback. Persistent
-Release assets remain outside #102. Other platforms need their own producer and
-pin before their source cell can proceed.
+Artifacts expire after seven days. `release.json` records the matching
+prerelease (tag, asset IDs, archive and manifest digests). Consumers still
+download the exact Actions artifact named in the platform env. There is no
+SDK/depot fallback. Linux aarch64, Darwin and Windows have no producer in
+`platform-matrix.yml` and are not published by this pin.

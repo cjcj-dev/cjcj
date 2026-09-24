@@ -663,7 +663,7 @@ public class SanitizerCoverage {
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:869-904.
-    private func GeneratePCGuardExpr(loc: DebugLocation, isDebug: Bool,
+    internal func GeneratePCGuardExpr(loc: DebugLocation, isDebug: Bool,
         parent: Block): ArrayList<Expression> {
         let cPointTy = builder.context.GetCPointerTy(builder.context.GetUInt32Ty())
         let funcTy = builder.context.GetFuncTy(ArrayList<Type>([cPointTy]),
@@ -690,7 +690,7 @@ public class SanitizerCoverage {
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:906-948.
-    private func GenerateInline8bitExpr(loc: DebugLocation, isDebug: Bool,
+    internal func GenerateInline8bitExpr(loc: DebugLocation, isDebug: Bool,
         parent: Block): ArrayList<Expression> {
         let globalVarType = builder.context.GetCPointerTy(builder.context.GetUInt8Ty())
         let mangleName = SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(SanCovCharArrayInitName).getOrThrow()
@@ -722,7 +722,7 @@ public class SanitizerCoverage {
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:950-980.
-    private func GenerateInlineBoolExpr(loc: DebugLocation, isDebug: Bool,
+    internal func GenerateInlineBoolExpr(loc: DebugLocation, isDebug: Bool,
         parent: Block): ArrayList<Expression> {
         let globalVarType = builder.context.GetCPointerTy(builder.context.GetBoolTy())
         let mangleName = SAN_COV_CTOR2_GLOBAL_VAR_NAME.get(SanCovBoolFlagInitName).getOrThrow()
@@ -745,7 +745,7 @@ public class SanitizerCoverage {
     }
 
     // C++: CHIR/Transformation/SanitizerCoverage.cpp:982-996.
-    private func GenerateStackDepthExpr(loc: DebugLocation, isDebug: Bool,
+    internal func GenerateStackDepthExpr(loc: DebugLocation, isDebug: Bool,
         parent: Block): ArrayList<Expression> {
         let funcTy = builder.context.GetFuncTy(ArrayList<Type>(), builder.context.GetUnitTy(), isCFunc: true)
         let callee = GenerateForeignFunc(SanCovUpdateStackDepth, loc, funcTy, packName: packageName)
@@ -877,6 +877,7 @@ public class SanitizerCoverage {
         block0.AppendExpression(store)
         globalVal.SetInitFunc(`func`)
         let exit = builder.CreateExit(None, block0)
+        block0.AppendExpression(exit)
         exit.SetDebugLocation(INVALID_LOCATION)
         return `func`
     }
@@ -949,6 +950,7 @@ public class SanitizerCoverage {
                 rawDataAcquireLine.GetResult().getOrThrow()]), block0, builder, loc: INVALID_LOCATION)
         block0.AppendExpression(pcInitApply)
         let exit = builder.CreateExit(None, block0)
+        block0.AppendExpression(exit)
         exit.SetDebugLocation(INVALID_LOCATION)
         return `func`
     }
@@ -989,6 +991,7 @@ public class SanitizerCoverage {
             block0.AppendExpression(apply)
         }
         let exit = builder.CreateExit(None, block0)
+        block0.AppendExpression(exit)
         exit.SetDebugLocation(INVALID_LOCATION)
         let initExpr = CreateNonMemberApply(builder.context.GetVoidTy(), initFunc,
             ArrayList<Value>(), globalInitFunc.GetEntryBlock().getOrThrow(), builder, loc: INVALID_LOCATION)

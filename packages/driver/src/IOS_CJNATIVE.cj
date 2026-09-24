@@ -11,8 +11,8 @@ public class IOS_CJNATIVE <: Darwin_CJNATIVE {
         super.AddSystemLibraryPaths()
     }
 
-    // C++: src/Driver/Toolchains/CJNATIVE/IOS_CJNATIVE.cpp:37-74
-    protected override func GenerateLTOObjectFile(objFiles: ArrayList<TempFileInfo>): TempFileInfo {
+    // Upstream e392f089: IOS_CJNATIVE.cpp:34; platform-specific LTO archive preparation.
+    protected override func GenerateStaticLibObjects(objFiles: ArrayList<TempFileInfo>): TempFileInfo {
         let darwinSDKVersion = GetDarwinSDKVersion(driverOptions.sysroot)
         if (driverOptions.enableVerbose) {
             println("selected Darwin SDK path: " + driverOptions.sysroot + " (SDK Version: " +
@@ -25,8 +25,7 @@ public class IOS_CJNATIVE <: Darwin_CJNATIVE {
         let ltoObjectPath = FileUtil.JoinPath(ltoObjectDir, "0." + GetTargetArchString() + ".lto.o")
         GenerateLinkOptionsForLTO(tool)
         tool.AppendArg("-object_path_lto", ltoObjectDir)
-        tool.AppendArg("-dylib")
-        tool.AppendArg("-lto-emit-obj-only")
+        tool.AppendArg("-staticlib")
         tool.AppendArg("-arch", GetTargetArchString())
         tool.AppendArg("-platform_version")
         if (driverOptions.target.env == EnvironmentType.SIMULATOR) {
@@ -39,8 +38,7 @@ public class IOS_CJNATIVE <: Darwin_CJNATIVE {
         tool.AppendArg(darwinSDKVersion ?? "17.5")
         tool.AppendArg("-syslibroot")
         tool.AppendArg(if (driverOptions.sysroot.isEmpty()) { "/" } else { driverOptions.sysroot })
-        HandleLLVMLinkOptions(objFiles, tool)
-        GenerateRuntimePath(tool)
+        AppendLTOBcInputs(objFiles, tool)
         backendCmds.add(MakeSingleToolBatch(tool))
         outputFileInfo.filePath = ltoObjectPath
         outputFileInfo.rawPath = ltoObjectDir
@@ -89,6 +87,9 @@ public class IOS_CJNATIVE <: Darwin_CJNATIVE {
         tool.AppendArg(if (driverOptions.sysroot.isEmpty()) { "/" } else { driverOptions.sysroot })
         if (driverOptions.outputMode == OutputMode.EXECUTABLE) {
             tool.AppendArg("-pie")
+        }
+        if (driverOptions.stripSymbolTable) {
+            tool.AppendArg("-install_name", GetOutputFileInfo(objFiles).filePath)
         }
         HandleLLVMLinkOptions(objFiles, tool)
         GenerateRuntimePath(tool)

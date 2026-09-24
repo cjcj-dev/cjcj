@@ -2,7 +2,6 @@ package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
-import cjcj::sema.NativeFFI.IsObjCGeneratedMember
 import cjcj::utils.CJC_ABORT
 
 public class CheckMemberTypes <: Handler<TypeCheckContext> {
@@ -15,7 +14,7 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
 
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckMemberTypes.cpp:22-45.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
-        let isImpl = TypeMapper.IsObjCImpl(ctx.target.GetTy().getOrThrow())
+        let isImpl = IsObjCImpl(ctx.target.GetTy().getOrThrow())
         for (decl in ctx.target.GetMemberDeclPtrs()) {
             if (isImpl && !decl.TestAttr(Attribute.PUBLIC)) {
                 continue
@@ -32,7 +31,7 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
 
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckMemberTypes.cpp:47-57.
     private func CheckPropTypes(pd: PropDecl, ctx: TypeCheckContext): Unit {
-        if (TypeMapper.IsObjCCompatible(pd.GetTy().getOrThrow())) {
+        if (IsObjCCompatible(pd.GetTy().getOrThrow())) {
             return
         }
 
@@ -46,7 +45,7 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
 
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckMemberTypes.cpp:59-69.
     private func CheckVarTypes(vd: VarDecl, ctx: TypeCheckContext): Unit {
-        if (TypeMapper.IsObjCCompatible(vd.GetTy().getOrThrow())) {
+        if (IsObjCCompatible(vd.GetTy().getOrThrow())) {
             return
         }
 
@@ -60,7 +59,7 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
 
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckMemberTypes.cpp:71-82.
     private func CheckFuncTypes(fd: FuncDecl, ctx: TypeCheckContext): Unit {
-        if (fd.funcBody.isNone() || IsObjCGeneratedMember(fd)) {
+        if (fd.funcBody.isNone() || IsGeneratedMember(fd)) {
             return
         }
 
@@ -75,7 +74,7 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
     private func CheckFuncRetType(fd: FuncDecl, ctx: TypeCheckContext): Unit {
         let funcBody = fd.funcBody.getOrThrow()
         if (let Some(retType) <- funcBody.retType) {
-            if (!TypeMapper.IsObjCCompatible(retType.GetTy().getOrThrow())) {
+            if (!IsObjCCompatible(retType.GetTy().getOrThrow())) {
                 DiagnoseRefactor(ctx.diag,
                     DiagKindRefactor.sema_objc_interop_method_ret_must_be_objc_compatible,
                     retType, GetDeclInteropName()).Emit()
@@ -98,7 +97,7 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
 
         for (paramList in fd.funcBody.getOrThrow().paramLists) {
             for (param in paramList.params) {
-                if (TypeMapper.IsObjCCompatible(param.GetTy().getOrThrow())) {
+                if (IsObjCCompatible(param.GetTy().getOrThrow())) {
                     continue
                 }
 

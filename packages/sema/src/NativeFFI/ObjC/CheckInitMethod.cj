@@ -6,16 +6,15 @@ import cjcj::basic.DiagKindRefactor
 public class CheckInitMethod <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckInitMethod.cpp:20-46.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
-        if (!TypeMapper.IsObjCMirror(ctx.target)) {
+        if (!IsObjCMirror(ctx.target)) {
             return
         }
 
         for (member in ctx.target.GetMemberDeclPtrs()) {
-            if (!IsStaticInitMethod(member)) {
-                continue
-            }
-            let method = (member as FuncDecl).getOrThrow()
-            let fTy = method.GetTy() as FuncTy
+            let methodOpt = member as FuncDecl
+            if (methodOpt.isNone() || !IsObjCInitMethod(methodOpt.getOrThrow())) { continue }
+            let method = methodOpt.getOrThrow()
+            let fTy = method.GetTy().getOrThrow() as FuncTy
             let methodBody = method.funcBody.getOrThrow()
             if (fTy.isNone() || methodBody.retType.isNone()) {
                 continue
