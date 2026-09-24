@@ -18,14 +18,22 @@ public class HeapParam {
     public var exemptionThreshold: Float64
     public var heapUtilization: Float64
     public var heapGrowth: Float64
+    public var heapSizeSet: Bool
+    // API sizes are KB; the set bit distinguishes explicit zero from default.
+    public var softHeapSize: UIntNative
+    public var softHeapSizeSet: Bool
 
     public init(regionSize: UIntNative, heapSize: UIntNative, exemptionThreshold: Float64,
-        heapUtilization: Float64, heapGrowth: Float64) {
+        heapUtilization: Float64, heapGrowth: Float64, heapSizeSet!: Bool = false,
+        softHeapSize!: UIntNative = 0, softHeapSizeSet!: Bool = false) {
         this.regionSize = regionSize
         this.heapSize = heapSize
         this.exemptionThreshold = exemptionThreshold
         this.heapUtilization = heapUtilization
         this.heapGrowth = heapGrowth
+        this.heapSizeSet = heapSizeSet
+        this.softHeapSize = softHeapSize
+        this.softHeapSizeSet = softHeapSizeSet
     }
 }
 
