@@ -24,6 +24,7 @@ public func StandardLibName(fullPackageName: String): Option<String> {
         case "std.time" => "time"
         case "std.sync" => "sync"
         case "std.collection.concurrent" => "collection.concurrent"
+        case "std.concurrent" => "concurrent"
         case "std.net" => "net"
         case "std.regex" => "regex"
         case "std.unittest.common" => "unittest.common"
@@ -65,7 +66,7 @@ public func StandardLibMap(): HashMap<String, String> {
     let keys = [
         "std.core", "std.binary", "std.io", "std.math", "std.overflow", "std.runtime", "std.convert",
         "std.random", "std.collection", "std.unicode", "std.sort", "std.argopt", "std.ast", "std.interop",
-        "std.time", "std.sync", "std.collection.concurrent", "std.net", "std.regex", "std.unittest.common",
+        "std.time", "std.sync", "std.collection.concurrent", "std.concurrent", "std.net", "std.regex", "std.unittest.common",
         "std.unittest.prop_test", "std.unittest.diff", "std.math.numeric", "std.fs", "std.unittest.mock.internal",
         "std.unittest.mock", "std.reflect", "std.ref", "std.crypto", "std.crypto.digest", "std.crypto.cipher",
         "std.console", "std.database", "std.database.sql", "std.posix", "std.process", "std.env",
