@@ -18,8 +18,23 @@ on:
         required: false
         type: boolean
         default: false
+      language_tuple:
+        description: Build the source language tuple from a same-run runtime artifact (Linux x64 only)
+        required: false
+        type: boolean
+        default: false
+      runtime_artifact_id:
+        description: Same-run compiler runtime artifact ID for language_tuple
+        required: false
+        type: string
+        default: ''
+      runtime_manifest_sha256:
+        description: Same-run compiler runtime manifest digest for language_tuple
+        required: false
+        type: string
+        default: ''
       runtime_ref:
-        description: Dry-run only; exact runtime commit, otherwise ci/runtime_pin.env is used
+        description: Exact runtime commit for dry-run or language_tuple; otherwise ci/runtime_pin.env is used
         required: false
         type: string
         default: ''
@@ -81,8 +96,23 @@ on:
         required: false
         type: boolean
         default: false
+      language_tuple:
+        description: Build the source language tuple from a same-run runtime artifact (Linux x64 only)
+        required: false
+        type: boolean
+        default: false
+      runtime_artifact_id:
+        description: Same-run compiler runtime artifact ID for language_tuple
+        required: false
+        type: string
+        default: ''
+      runtime_manifest_sha256:
+        description: Same-run compiler runtime manifest digest for language_tuple
+        required: false
+        type: string
+        default: ''
       runtime_ref:
-        description: Dry-run only; exact runtime commit, otherwise ci/runtime_pin.env is used
+        description: Exact runtime commit for dry-run or language_tuple; otherwise ci/runtime_pin.env is used
         required: false
         type: string
         default: ''
@@ -194,7 +224,7 @@ jobs:
       - name: Load and validate runtime pin
         env:
           CJCJ_RUNTIME_REF_OVERRIDE: ${{ inputs.runtime_ref }}
-          CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ inputs.dry_run && inputs.runtime_ref != '' }}
+          CJCJ_ALLOW_RUNTIME_OVERRIDE: ${{ (inputs.dry_run || inputs.language_tuple) && inputs.runtime_ref != '' }}
         run: npx --yes zx@8 ci/load_runtime_pin.mjs
 
       - name: Provision uncoloured host SDK
@@ -325,11 +355,27 @@ jobs:
         shell: bash
         env:
           RUNTIME_PLATFORM: ${{ matrix.llvm_platform }}
+          BUILD_LANGUAGE_TUPLE: ${{ inputs.language_tuple }}
+          RUNTIME_ARTIFACT_ID: ${{ inputs.runtime_artifact_id }}
+          RUNTIME_MANIFEST_SHA256: ${{ inputs.runtime_manifest_sha256 }}
         run: |
           set -euo pipefail
           pin="ci/colour-runtime/$RUNTIME_PLATFORM.env"
           test -f "$pin" || { echo "COLOUR_RT_PLATFORM_PIN_MISSING: $RUNTIME_PLATFORM" >&2; exit 1; }
-          cat "$pin" >> "$GITHUB_ENV"
+          if [ "$BUILD_LANGUAGE_TUPLE" = true ]; then
+            test "$RUNTIME_PLATFORM" = linux_x86_64
+            test -n "$RUNTIME_REF"
+            [[ "$RUNTIME_ARTIFACT_ID" =~ ^[0-9]+$ ]]
+            [[ "$RUNTIME_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+            {
+              echo "COLOUR_RT_RUN_ID=$GITHUB_RUN_ID"
+              echo "COLOUR_RT_RUN_ATTEMPT=$GITHUB_RUN_ATTEMPT"
+              echo "COLOUR_RT_ARTIFACT_ID=$RUNTIME_ARTIFACT_ID"
+              echo "COLOUR_RT_MANIFEST_SHA256=$RUNTIME_MANIFEST_SHA256"
+            } >> "$GITHUB_ENV"
+          else
+            cat "$pin" >> "$GITHUB_ENV"
+          fi
           echo "CJCJ_BOOTSTRAP_COLOUR_RT=$RUNNER_TEMP/colour-runtime" >> "$GITHUB_ENV"
 
       - name: Download pinned colour runtime pair
@@ -384,7 +430,9 @@ jobs:
           set -euo pipefail
           set -a
           source ci/llvm_pin.env
+          selected_runtime_ref="$RUNTIME_REF"
           source ci/runtime_pin.env
+          export RUNTIME_REF="$selected_runtime_ref"
           set +a
           CJCJ_BOOTSTRAP_AST_ARTIFACT="$RUNNER_TEMP/ast-support/libcangjie-ast-support.a" \
             node ci/release/prepare_bootstrap_inputs.mjs
@@ -395,7 +443,9 @@ jobs:
           set -euo pipefail
           set -a
           source ci/llvm_pin.env
+          selected_runtime_ref="$RUNTIME_REF"
           source ci/runtime_pin.env
+          export RUNTIME_REF="$selected_runtime_ref"
           set +a
           first=0
           if [ "${COLOUR_RT_MANIFEST_SHA256:0:1}" = 0 ]; then first=1; fi
@@ -613,6 +663,36 @@ jobs:
 
       - name: Verify self-hosted SDK
         run: npx --yes zx@8 ci/srcbuild/steps/verify.mjs "$CANGJIE_WORKSPACE/software/cangjie"
+
+      - name: Package source language tuple
+        if: inputs.language_tuple
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ci/llvm_pin.env
+          python3 ci/release/source_language_tuple.py pack \
+            --sdk "$CANGJIE_WORKSPACE/software/cangjie" \
+            --compiler "$CANGJIE_WORKSPACE/software/final-compiler" \
+            --std "$CANGJIE_WORKSPACE/software/final-std-stage2" \
+            --runtime "$CJCJ_BOOTSTRAP_COLOUR_RT" \
+            --host "$CJCJ_SRCBUILD_HOST_SDK/runtime/lib/linux_x86_64_cjnative" \
+            --host-identity "$CJCJ_TOOLCHAIN" \
+            --llvm-manifest "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest" \
+            --cjcj-sha "$GITHUB_SHA" --runtime-sha "$RUNTIME_REF" --llvm-sha "$LLVM_SHA" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$CANGJIE_WORKSPACE/software/source-language-tuple"
+
+      - name: Upload source language tuple
+        if: inputs.language_tuple
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-language-tuple-linux-x64
+          path: |
+            ${{ env.CANGJIE_WORKSPACE }}/software/source-language-tuple/*.tar.gz
+            ${{ env.CANGJIE_WORKSPACE }}/software/source-language-tuple/language-tuple.json
+            ${{ env.CANGJIE_WORKSPACE }}/software/source-language-tuple/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload self-hosted SDK and gate logs
         if: always()

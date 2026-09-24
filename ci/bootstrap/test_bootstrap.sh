@@ -105,7 +105,7 @@ check_shim_call_count() {
 
 check_dry_contract() {
   local log="$1"
-  check_count A1 2 'shape=planned Int64.ti>1 FFI-archives>0' "$log"
+  check_count A1 1 'shape=planned Int64.ti>1 FFI-archives>0' "$log"
   check_count A1 1 'FFI-set-equals=' "$log"
   check_count A2 1 'cjcj-stage1 --version' "$log"
   check_count A2 1 'cjcj-stage2 --version' "$log"
@@ -119,6 +119,7 @@ check_dry_contract() {
   check_count CJPM 1 'CMD cjpm build bin=' "$log"
   check_count CJPM 1 'CMD cjpm build -j 1 bin=' "$log"
   check_count CJPM 1 'heap=20GB' "$log"
+  check_count BOOTSTRAP-STD 1 'CMD python3 .*seed_official_std.py --sdk .*/base --tuple linux_x86_64_cjnative --output .*/stdlib-stage1' "$log"
   check_shim_call_count "$log"
   check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"
   check_count SHIM 1 'CMD shim build label=stage1 .*source-object=.*/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o .*sdk=.*/sdk-stage1 .*runtime=.*/colour-rt' "$log"
@@ -126,10 +127,10 @@ check_dry_contract() {
   check_count SHIM 1 'CJCJ_LLVM_SHIM_O=.*/sdk-stage1/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o' "$log"
   check_count SHIM 2 'OUTPUT stage[01]-shim-cpp .*sha256=planned' "$log"
   check_count SHIM 2 'OUTPUT stage[01]-shim-config .*sha256=planned' "$log"
-  check_count A4 2 'rm\\ -rf\\ build/build' "$log"
-  check_count A4 2 '--target-lib' "$log"
-  check_count A4 4 'CMD env -i HOME=/root TMPDIR=.*/work/tmp-private CANGJIE_HOME=.*bash -c' "$log"
-  check_count A4 4 'BUILD-ENV planned HOME=/root TMPDIR=.*/work/tmp-private' "$log"
+  check_count A4 1 'rm\\ -rf\\ build/build' "$log"
+  check_count A4 1 '--target-lib' "$log"
+  check_count A4 3 'CMD env -i HOME=/root TMPDIR=.*/work/tmp-private CANGJIE_HOME=.*bash -c' "$log"
+  check_count A4 3 'BUILD-ENV planned HOME=/root TMPDIR=.*/work/tmp-private' "$log"
   check_count LLVM-SO 1 'sdk_build.sh .*--host --llvm-so .*libLLVM-15.so' "$log"
   check_count LLVM-SO 1 'ASSERT installed-host-llvm-so sha256=planned' "$log"
   check_count LLVM-TUPLE 2 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple' "$log"
@@ -440,7 +441,7 @@ run_shape_check() {
   make_std_fixture "$TMP/std1"
   make_fake_nm
   PATH="$TMP/fakebin:$PATH" BOOTSTRAP_TEST_INT64_COUNT="$count" \
-    bash -c 'source "$1"; STAGE=test-A1; DRY=0; assert_std_install_shape "$2" "$3" stdlib-stage2' \
+    bash -c 'source "$1"; host_tuple_init; STAGE=test-A1; DRY=0; assert_std_install_shape "$2" "$3" stdlib-stage2' \
       bash "$PRODUCT" "$TMP/std1" "$TMP/std0"
 }
 
@@ -476,7 +477,7 @@ make_isolation_fixture() {
 run_isolation_check() {
   local product="$1"
   PATH="$TMP/fakebin:$PATH" LEAK_ME=must-not-cross \
-    bash -c 'source "$1"; STAGE=test-A4; DRY=0; WORK="$2/work"; STDSRC="$2"; stdlib_build stdlib-stage1 "$3" "$4" "$5"' \
+    bash -c 'source "$1"; host_tuple_init; STAGE=test-A4; DRY=0; WORK="$2/work"; STDSRC="$2"; stdlib_build stdlib-stage1 "$3" "$4" "$5"' \
       bash "$product" "$TMP/isolation/src" "$TMP/isolation/sdk" "$TMP/isolation/rt" "$TMP/isolation/std"
 }
 
@@ -486,13 +487,13 @@ positive_build_env() {
   caller_tmp="$TMP/caller-tmp"
   mkdir -p "$caller_tmp" "$TMP/caller-home"
   HOME="$TMP/caller-home" TMPDIR="$caller_tmp" dry_run > "$TMP/build-env-passthrough.log"
-  check_count build-env 4 "CMD env -i HOME=/root TMPDIR=$caller_tmp CANGJIE_HOME=" "$TMP/build-env-passthrough.log"
+  check_count build-env 3 "CMD env -i HOME=$TMP/caller-home TMPDIR=$caller_tmp CANGJIE_HOME=" "$TMP/build-env-passthrough.log"
   (
     unset TMPDIR
     HOME="$TMP/caller-home" dry_run
   ) > "$TMP/build-env-default.log"
-  check_count build-env 4 'CMD env -i HOME=/root TMPDIR=.*/work/tmp-private CANGJIE_HOME=' "$TMP/build-env-default.log"
-  echo 'PASS bootstrap CLI keeps HOME=/root and passes caller/default TMPDIR'
+  check_count build-env 3 "CMD env -i HOME=$TMP/caller-home TMPDIR=.*/work/tmp-private CANGJIE_HOME=" "$TMP/build-env-default.log"
+  echo 'PASS bootstrap CLI keeps caller HOME and passes caller/default TMPDIR'
 }
 
 fault_build_env() {

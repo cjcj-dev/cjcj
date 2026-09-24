@@ -4,12 +4,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
+import {countSdkLoadBadMask, readRuntimeSymbols} from '../../../build/lib/runtime-split.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
 import {prepareBootstrapHandoff} from '../lib/bootstrap-handoff.mjs';
 import {stdIdentity} from '../lib/final-compiler.mjs';
-import {captureBuildInputs, finishBuildReceipt} from '../lib/source-build-receipt.mjs';
+import {captureBuildInputs, finishBuildReceipt, sourceIdentity} from '../lib/source-build-receipt.mjs';
 import {assertWriteBarriers} from '../lib/write-barrier.mjs';
 
 $.stdio = 'inherit';
@@ -77,12 +78,6 @@ async function assertStage2Compiler(stageEnv, stage2Sha) {
   }
   console.log(`STAGE3_COMPILER_ASSERT_PASS path=${resolvedInstalled} sha256=${installedSha}`);
 }
-
-async function countRuntimeMarkers(runtime) {
-  const contents = (await fs.readFile(runtime)).toString('latin1');
-  return contents.match(/MRT_GCV2_/g)?.length ?? 0;
-}
-
 
 // The SDK ships llvm-objdump; failing when it is absent keeps this from quietly
 // becoming a no-op on a host that happens not to have one.
@@ -188,8 +183,6 @@ const stageEnv = {
   [target.spec.loaderEnv]: targetLd,
   PATH: `${path.join(sdk, 'bin')}:${path.join(sdk, 'tools', 'bin')}:${process.env.PATH ?? ''}`,
 };
-await assertStage2Compiler(stageEnv, stage2Sha);
-await $({cwd: githubWorkspace, env: stageEnv})`set -o pipefail; cjc --version | head -2`;
 
 const runtime = path.join(sdk, 'runtime', 'lib', tuple, target.spec.runtimeLibrary);
 if (!await exists(runtime)) throw new Error(`fork runtime missing: ${runtime}`);
@@ -197,9 +190,26 @@ const runtimeKind = (await $({stdio: 'pipe'})`file -b ${runtime}`).stdout.trim()
 if (!runtimeKind.includes(target.spec.fileFormat) || !runtimeKind.includes(target.spec.fileArch)) {
   throw new Error(`fork runtime has wrong native format for ${target.spec.key}: ${runtimeKind}`);
 }
-const runtimeMarkers = await countRuntimeMarkers(runtime);
-if (runtimeMarkers === 0) throw new Error(`${runtime} carries no MRT_GCV2_ markers; refusing stock runtime`);
-console.log(`STAGE3_RUNTIME_ASSERT_PASS MRT_GCV2_markers=${runtimeMarkers}`);
+// Check the loader input before starting the managed compiler. Diagnostic text
+// markers were removed from runtime main; use the same exported ABI reader as
+// compose-sdk and bind its bytes to the separately pinned runtime manifest.
+const maskCount = countSdkLoadBadMask(readRuntimeSymbols(runtime, target), target);
+if (maskCount !== 1) throw new Error(`STAGE3_RUNTIME_COLOUR_ABI_MISMATCH symbol=g_cjLoadBadMask count=${maskCount}`);
+const runtimeManifest = path.join(requiredEnv('CJCJ_BOOTSTRAP_COLOUR_RT'), 'manifest.json');
+const runtimeManifestPin = requiredEnv('COLOUR_RT_MANIFEST_SHA256');
+const runtimeManifestSha = await sha256(runtimeManifest);
+if (!/^[0-9a-f]{64}$/.test(runtimeManifestPin) || runtimeManifestSha !== runtimeManifestPin) {
+  throw new Error(`STAGE3_RUNTIME_MANIFEST_MISMATCH expected=${runtimeManifestPin} actual=${runtimeManifestSha}`);
+}
+const runtimeIdentity = JSON.parse(await fs.readFile(runtimeManifest, 'utf8'));
+const runtimeSha = await sha256(runtime);
+if (runtimeIdentity.runtime_sha !== requiredEnv('RUNTIME_REF')
+    || runtimeIdentity.files?.[`runtime/lib/${tuple}/${target.spec.runtimeLibrary}`] !== runtimeSha) {
+  throw new Error('STAGE3_RUNTIME_SOURCE_OR_PAYLOAD_MISMATCH');
+}
+console.log(`STAGE3_RUNTIME_ASSERT_PASS symbol=g_cjLoadBadMask count=${maskCount} source=${runtimeIdentity.runtime_sha} runtime_sha256=${runtimeSha} manifest_sha256=${runtimeManifestSha}`);
+await assertStage2Compiler(stageEnv, stage2Sha);
+await $({cwd: githubWorkspace, env: stageEnv})`set -o pipefail; cjc --version | head -2`;
 
 const bootstrapCore = path.join(sdk, 'lib', tuple, 'libcangjie-std-core.a');
 if (!await exists(bootstrapCore)) throw new Error(`bootstrap std core missing: ${bootstrapCore}`);
@@ -210,12 +220,17 @@ const bootstrapCoreSha = await sha256(bootstrapCore);
 const stdBuildInputs = dryRun ? null : await captureBuildInputs({
   source: stdlibRoot,
   files: {
+    stage3Recipe: new URL(import.meta.url),
+    receiptRecipe: new URL('../lib/source-build-receipt.mjs', import.meta.url),
+    stdRecipe: path.join(stdlibRoot, 'build.py'),
     compiler: path.join(sdk, 'bin', 'cjcj-stage2'),
     compilerEntry: path.join(sdk, 'bin', 'cjc'),
+    compilerProject: path.join(bootstrapWork, 'cjcj-src-stage1', 'cjpm.toml'),
+    llvmLibrary: path.join(sdk, 'third_party', 'llvm', 'lib', target.spec.os === 'darwin' ? 'libLLVM.dylib' : 'libLLVM-15.so'),
     llc: path.join(sdk, 'third_party', 'llvm', 'bin', 'llc-stage1'),
     opt: path.join(sdk, 'third_party', 'llvm', 'bin', 'opt-stage1'),
     runtime,
-    boundscheck: path.join(runtimeTarget, 'libboundscheck.so'),
+    boundscheck: path.join(runtimeTarget, `libboundscheck${target.spec.sharedLibrarySuffix}`),
     llvmManifest: path.join(requiredEnv('CJCJ_FIXED_LLVM_DIR'), 'llvm-tools.manifest'),
   },
   recipe: {buildType: stdlibBuildType, target: target.spec.key,
@@ -223,6 +238,10 @@ const stdBuildInputs = dryRun ? null : await captureBuildInputs({
       `python3 build.py build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}`,
       `python3 build.py install --prefix ${finalStd}`]},
 });
+if (!dryRun) {
+  stdBuildInputs.compilerSource = sourceIdentity(path.join(bootstrapWork, 'cjcj-src-stage1', 'packages'));
+  stdBuildInputs.bootstrapStd = JSON.parse(await fs.readFile(path.join(bootstrapWork, 'stdlib-stage1', 'BOOTSTRAP-STD.json'), 'utf8'));
+}
 console.log('[stage3] rebuild final std with stage2');
 if (dryRun) {
   console.log(`STAGE3_DRY_RUN_FAKE_ARTIFACTS=1 final_std=${finalStd}`);
@@ -278,6 +297,9 @@ if (dryRun) {
     parentSha256: stage2Sha,
     stdSha256: await stdIdentity(finalStd),
     stage: 'stage3',
+    source: sourceIdentity(path.join(githubWorkspace, 'packages')),
+    projectSha256: await sha256(path.join(githubWorkspace, 'cjpm.toml')),
+    llvmLibrarySha256: stdBuildInputs.inputs.llvmLibrary,
     tuple,
     parentEntrySha256: compilerEntrySha,
     shimSha256: {

@@ -132,6 +132,27 @@ if (!runtimeLib) {
   console.error(`FATAL: libcangjie-runtime was not installed under ${installRoot}`);
   process.exit(6);
 }
+if (process.env.CJCJ_SOURCE_TUPLE === '1') {
+  // Use the runtime producer's own input receipt (compiler state, compile/link
+  // commands, generated inputs and source product hashes), not inferred flags.
+  const publications = path.join(runtimeDirectory, 'output', 'temp');
+  const configs = [];
+  for (const entry of await fs.readdir(publications, {withFileTypes: true})) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    try {
+      if ((await fs.stat(path.join(publications, entry.name, 'runtime-build-inputs.txt'))).isFile()) configs.push(entry);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  if (configs.length !== 1) throw new Error('source tuple runtime build must have one fresh publication');
+  const publication = path.join(publications, configs[0].name);
+  const buildInputs = JSON.parse(await fs.readFile(path.join(publication, 'runtime-build-inputs.txt'), 'utf8'));
+  const sourceTree = (await $({stdio: 'pipe', verbose: false})`git -C ${source} rev-parse HEAD^{tree}`).stdout.trim();
+  await fs.writeFile(path.join(artifactRoot, 'BUILD-INPUTS.json'), `${JSON.stringify({
+    sourceCommit: actualRef, sourceTree, buildInputs, transformation: 'cmake-install-strip',
+  }, null, 2)}\n`);
+}
 await fs.writeFile(path.join(artifactRoot, 'SOURCE_SHA'), `${actualRef}\n`);
 console.log(`runtime_provenance=${path.join(artifactRoot, 'SOURCE_SHA')} source_ref=${actualRef}`);
 await $({nothrow: true})`file ${toCommandPath(runtimeLib)}`;

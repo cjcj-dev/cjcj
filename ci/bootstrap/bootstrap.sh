@@ -25,7 +25,7 @@ CJCJ_SHA=''
 BASE_SDK="${BASE_SDK:-cjcj-pin-937877c8}"
 HEAP="${CJ_HEAP:-24GB}"
 STAGE1_HEAP="${STAGE1_HEAP:-20GB}"
-JOBS="${CJ_JOBS:-32}"
+JOBS="${CJ_JOBS:-${CANGJIE_BUILD_JOBS:-$(nproc)}}"
 SDK_BUILD="${SDK_BUILD:-$(dirname "${BASH_SOURCE[0]}")/sdk_build.sh}"
 STAGE1_HOST_RUNNER="${STAGE1_HOST_RUNNER:-$(dirname "${BASH_SOURCE[0]}")/stage1_host_runner.sh}"
 STAGE0_CACHE_ROOT="${STAGE0_CACHE_ROOT:-/root/stage0depot}"
@@ -294,7 +294,7 @@ stage0_cache_key() {
   local base="$1" rewritten_toml="$2" cjcj_identity stdlib_identity host_runtime_dir host_runtime_so
   local host_nightly compile_options cpp_headers material rel
   cjcj_identity=$(source_identity cjcj "$SRC" 1) || return $?
-  stdlib_identity=$(source_identity stdlib "$STDSRC" 0) || return $?
+  stdlib_identity=$(python3 "$(dirname "${BASH_SOURCE[0]}")/seed_official_std.py" --sdk "$base" --tuple "$HOST_TUPLE") || return $?
   host_nightly=$(awk -F= '$1 == "CJCJ_TOOLCHAIN" {print $2}' "$SRC/ci/host_sdk_pin.env" 2>/dev/null || true)
   if [ -z "$host_nightly" ]; then
     echo 'STAGE0_CACHE=disabled reason=host-nightly-pin-missing' >&2
@@ -319,7 +319,7 @@ stage0_cache_key() {
   material=$(printf '%s\n' \
     'format=stage0-cache-v1' \
     "cjcj=$cjcj_identity" \
-    "stdlib=$stdlib_identity" \
+    "official_std=$stdlib_identity" \
     "host_nightly=$host_nightly" \
     "host_cjc_sha256=$(sha256 "$base/bin/cjc")" \
     "host_llvm_sha256=$(sha256 "$HOST_LLVM_SO")" \
@@ -653,7 +653,9 @@ stage0() {
     cjpm_build "$sdk" "$HRT" "$copy" "" "$HEAP"
     seed=$(resolve_cjpm_product "$copy/target/release/bin" cjcj-stage1)
     install_stage_compiler "$seed" "$out" "$WORK/cjc"
-    stdlib_build stdlib-stage1 "$sdk" "$HRT" "$std"
+    # The official host cannot link fork-only std runtime calls. Keep its own
+    # matched std as the bootstrap seed; stage1 is the first fork-std producer.
+    cmd "python3 $(printf '%q' "$(dirname "${BASH_SOURCE[0]}")/seed_official_std.py") --sdk $(printf '%q' "$base") --tuple $(printf '%q' "$HOST_TUPLE") --output $(printf '%q' "$std")"
   fi
   if [ "$DRY" -eq 0 ]; then
     assert_executable cjcj-stage1 "$out"

@@ -49,18 +49,20 @@ async function fixture(body) {
       await write(path.join(sdk, `third_party/llvm/bin/${name}`), 'workspace wrapper fixture');
       inputs[name] = await fileSha256(path.join(sdk, `third_party/llvm/bin/${name}-stage1`));
     }
+    await write(path.join(sdk, 'third_party/llvm/lib/libLLVM-15.so'), 'coloured LLVM library fixture');
+    inputs.llvmLibrary = await fileSha256(path.join(sdk, 'third_party/llvm/lib/libLLVM-15.so'));
     const llvmManifest = path.join(root, 'llvm-tools.manifest');
     await write(llvmManifest, `LLVM_SHA=${'c'.repeat(40)}\nLLC_SHA256=${inputs.llc}\nOPT_SHA256=${inputs.opt}\n`);
     inputs.llvmManifest = await fileSha256(llvmManifest);
-    await json(path.join(std, 'SOURCE-BUILD.json'), {schema: 1, source: {commit: 'b'.repeat(40)}, inputs,
+    await json(path.join(std, 'SOURCE-BUILD.json'), {schema: 1, source: {commit: 'b'.repeat(40)}, compilerSource: {commit: 'a'.repeat(40)}, inputs,
       products: {core: await fileSha256(path.join(std, `lib/${tuple}/libcangjie-std-core.a`))}});
     await fs.cp(std, sdk, {recursive: true});
     const compilerSha = await fileSha256(path.join(sdk, 'bin/cjc'));
     await produceFinalCompiler({binary: path.join(sdk, 'bin/cjc'), outdir: compiler, platform: 'linux-x64',
       repository: 'https://github.com/cjcj-dev/cjcj.git', commit: 'a'.repeat(40), runId: '42', runAttempt: '1', std,
-      lineage: {stage: 'stage3', parentSha256: inputs.compiler, compilerSha256: compilerSha,
+      lineage: {stage: 'stage3', source: {commit: 'a'.repeat(40)}, llvmLibrarySha256: inputs.llvmLibrary, parentSha256: inputs.compiler, compilerSha256: compilerSha,
         llvmManifestSha256: inputs.llvmManifest, stdSha256: await stdIdentity(std), runtimeSha256: inputs.runtime}});
-    await json(path.join(runtime, 'manifest.json'), {runtime_sha: 'b'.repeat(40), files: runtimeFiles});
+    await json(path.join(runtime, 'manifest.json'), {runtime_sha: 'b'.repeat(40), files: runtimeFiles, build: {sourceCommit: 'b'.repeat(40), installed: runtimeFiles, buildInputs: {commands: ['synthetic build'], compiler_state: {fixture: true}}}});
     const pack = () => invoke('pack', '--sdk', sdk, '--std', std, '--compiler', compiler,
       '--runtime', runtime, '--host', host, '--host-pins', hostPin, '--host-identity', 'test fixture',
       '--llvm-manifest', llvmManifest, '--output', output, '--cjcj-sha', 'a'.repeat(40), '--runtime-sha', 'b'.repeat(40),

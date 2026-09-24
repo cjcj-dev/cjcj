@@ -36,6 +36,12 @@ export function prepareRuntime(source, dest, env = process.env) {
   }
   const manifest = {runtime_sha: sourceSha, platform: 'linux_x86_64',
     run_id: env.GITHUB_RUN_ID, run_attempt: env.GITHUB_RUN_ATTEMPT, files};
+  const receipt = path.join(source, 'BUILD-INPUTS.json');
+  if (fs.existsSync(receipt)) {
+    const build = JSON.parse(fs.readFileSync(receipt, 'utf8'));
+    if (build.sourceCommit !== sourceSha) throw new Error('COLOUR_RT_BUILD_SOURCE_MISMATCH');
+    manifest.build = {...build, installed: files};
+  }
   fs.writeFileSync(path.join(dest, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
   const sha = digest(path.join(dest, 'manifest.json'));
   if (env.GITHUB_OUTPUT) fs.appendFileSync(env.GITHUB_OUTPUT, `sha256=${sha}\n`);

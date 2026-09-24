@@ -2,6 +2,7 @@
 """Verify and activate source-built stage3 tuples; H48 schema 1 is separate."""
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -15,6 +16,7 @@ ROLES = {
     'stdlib': f'sdk/lib/{TUPLE}/libcangjie-std-core.a',
     'llc': 'sdk/third_party/llvm/bin/llc',
     'opt': 'sdk/third_party/llvm/bin/opt',
+    'llvm_library': 'sdk/third_party/llvm/lib/libLLVM-15.so',
     'compiler_runtime': f'compiler-runtime/{TUPLE}/libcangjie-runtime.so',
     'compiler_boundscheck': f'compiler-runtime/{TUPLE}/libboundscheck.so',
     'official_host_runtime': f'official-host/{TUPLE}/libcangjie-runtime.so',
@@ -52,7 +54,14 @@ def verify(root, manifest_sha256, compiler_sha256):
     runtime = value['build']['runtime']
     require(compiler['source']['commit'] == value['sources']['cjcj'], 'SOURCE_TUPLE_COMPILER_SOURCE')
     require(std['source']['commit'] == value['sources']['runtime'], 'SOURCE_TUPLE_STD_SOURCE')
-    require(runtime['runtime_sha'] == value['sources']['runtime'], 'SOURCE_TUPLE_RUNTIME_SOURCE')
+    require(std['compilerSource']['commit'] == value['sources']['cjcj']
+            and compiler['production']['source']['commit'] == value['sources']['cjcj'], 'SOURCE_TUPLE_BUILD_COMPILER_SOURCE')
+    require(std['inputs']['llvmLibrary'] == value['role_sha256']['llvm_library']
+            == compiler['production']['llvmLibrarySha256'], 'SOURCE_TUPLE_LLVM_LIBRARY')
+    require(runtime['runtime_sha'] == value['sources']['runtime']
+            and runtime['build']['sourceCommit'] == value['sources']['runtime'], 'SOURCE_TUPLE_RUNTIME_SOURCE')
+    require(runtime['build']['buildInputs']['commands'] and runtime['build']['buildInputs']['compiler_state'],
+            'SOURCE_TUPLE_RUNTIME_BUILD_INPUTS')
     require(value['build']['llvm']['LLVM_SHA'] == value['sources']['llvm'], 'SOURCE_TUPLE_LLVM_SOURCE')
     require(compiler['production']['stage'] == 'stage3', 'SOURCE_TUPLE_COMPILER_STAGE')
     require(compiler['artifact']['sha256'] == compiler_sha256, 'SOURCE_TUPLE_COMPILER_LINEAGE')
@@ -64,7 +73,8 @@ def verify(root, manifest_sha256, compiler_sha256):
     require(compiler['production']['runtimeSha256'] == value['role_sha256']['compiler_runtime'],
             'SOURCE_TUPLE_COMPILER_RUNTIME')
     for role, file in (('compiler_runtime', 'libcangjie-runtime.so'), ('compiler_boundscheck', 'libboundscheck.so')):
-        require(runtime['files'][f'runtime/lib/{TUPLE}/{file}'] == value['role_sha256'][role],
+        require(runtime['files'][f'runtime/lib/{TUPLE}/{file}'] == value['role_sha256'][role]
+                == runtime['build']['installed'][f'runtime/lib/{TUPLE}/{file}'],
                 f'SOURCE_TUPLE_RUNTIME_INPUT {file}')
     require(value['official_host']['identity'], 'SOURCE_TUPLE_OFFICIAL_HOST_IDENTITY')
     for role, file in (('official_host_runtime', 'libcangjie-runtime.so'),
@@ -166,7 +176,7 @@ def unpack(args):
 
 
 def activate(args):
-    verify(args.root, args.manifest_sha256, args.compiler_sha256)
+    value = verify(args.root, args.manifest_sha256, args.compiler_sha256)
     for file, expected in (('libcangjie-runtime.so', args.target_runtime_sha256),
                            ('libboundscheck.so', args.target_boundscheck_sha256)):
         require(re.fullmatch(r'[0-9a-f]{64}', expected) and digest(args.target / file) == expected,
@@ -178,10 +188,51 @@ def activate(args):
     target.mkdir(parents=True, exist_ok=True)
     for file in ('libcangjie-runtime.so', 'libboundscheck.so'):
         shutil.copy2(args.target / file, target / file)
+    expected = {name: record for name, record in value['files'].items() if name.startswith('sdk/')}
+    for file in ('libcangjie-runtime.so', 'libboundscheck.so'):
+        expected[f'sdk/runtime/lib/{TUPLE}/{file}'] = {'sha256': digest(args.target / file),
+                                                     'mode': (args.target / file).stat().st_mode & 0o777}
+    require(inventory(args.output) == expected, 'SOURCE_TUPLE_ACTIVATION_COPY')
     emit_env(sdk, args.root.resolve() / 'compiler-runtime' / TUPLE, args.target.resolve())
     # Official tools must opt into this role; it is never the compiler loader.
     import shlex
     print('export CJCJ_OFFICIAL_HOST_RUNTIME_LIB_DIR=' + shlex.quote(str(args.root.resolve() / 'official-host' / TUPLE)))
+
+
+def qualify(args):
+    value = verify(args.root, args.manifest_sha256, args.compiler_sha256)
+    source_sha = subprocess.check_output(['git', '-C', str(args.runtime_source), 'rev-parse', 'HEAD'], text=True).strip()
+    require(source_sha == value['sources']['runtime'], 'SOURCE_TUPLE_GATE_SOURCE')
+    clean = subprocess.run(['git', '-C', str(args.runtime_source), 'diff', '--quiet', 'HEAD', '--',
+                            'runtime/tests/gc_unit'], check=False).returncode
+    require(clean == 0, 'SOURCE_TUPLE_GATE_SOURCE_MODIFIED')
+    # Use the shipped activation path, then execute the unchanged runtime gate.
+    # The output is fresh: no previous ELF/stamp can satisfy this qualification.
+    activate(args)
+    output = args.output.resolve()
+    env = dict(os.environ, CJC=str(output / 'sdk/bin/cjc'), CANGJIE_HOME=str(output / 'sdk'),
+               GC_UNIT_CJC_RUNTIME_LIB_DIR=str(args.root.resolve() / 'compiler-runtime' / TUPLE),
+               GCV2_RUNTIME_LIB_DIR=str(args.target.resolve()), GC_UNIT_GATE_LANGUAGE_TESTS='only',
+               GC_UNIT_OUT=str(output / 'gate'))
+    gate = args.runtime_source / 'runtime/tests/gc_unit/gate_gc_unit.sh'
+    log = output / 'gate.log'
+    with log.open('w') as stream:
+        result = subprocess.run(['bash', str(gate)], env=env, stdout=stream, stderr=subprocess.STDOUT)
+    products = {}
+    for name in ('finalizer_trigger', 'phase_entry_trigger'):
+        file = output / 'gate' / name
+        if file.is_file() and file.read_bytes()[:4] == b'\x7fELF':
+            products[f'gate/{name}'] = digest(file)
+    receipt = {'schema': 1, 'manifest_sha256': args.manifest_sha256,
+               'compiler_sha256': args.compiler_sha256, 'runtime_source_sha': source_sha,
+               'compiler_runtime_sha256': value['role_sha256']['compiler_runtime'],
+               'target_runtime_sha256': args.target_runtime_sha256,
+               'target_boundscheck_sha256': args.target_boundscheck_sha256,
+               'gate_sha256': digest(gate), 'gate_log_sha256': digest(log),
+               'gate_rc': result.returncode, 'elf': products}
+    (output / 'qualification.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    require(result.returncode == 0 and len(products) == 2, 'SOURCE_TUPLE_LANGUAGE_GATE')
+    print('SOURCE_TUPLE_QUALIFIED')
 
 
 def main():
@@ -205,7 +256,12 @@ def main():
         activation.add_argument('--' + name, type=Path, required=True)
     for name in ('target-runtime-sha256', 'target-boundscheck-sha256'):
         activation.add_argument('--' + name, required=True)
-    for command in (check, extract, activation):
+    qualification = commands.add_parser('qualify')
+    for name in ('root', 'target', 'output', 'runtime-source'):
+        qualification.add_argument('--' + name, type=Path, required=True)
+    for name in ('target-runtime-sha256', 'target-boundscheck-sha256'):
+        qualification.add_argument('--' + name, required=True)
+    for command in (check, extract, activation, qualification):
         command.add_argument('--manifest-sha256', required=True)
         command.add_argument('--compiler-sha256', required=True)
     args = parser.parse_args()
@@ -216,6 +272,8 @@ def main():
         print('SOURCE_TUPLE_VERIFIED')
     elif args.command == 'unpack':
         unpack(args)
+    elif args.command == 'qualify':
+        qualify(args)
     else:
         activate(args)
 

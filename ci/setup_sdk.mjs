@@ -339,6 +339,9 @@ if (process.env.GITHUB_ENV) {
   await fs.appendFile(process.env.GITHUB_ENV, [
     `CANGJIE_HOME=${cangjieHome}`,
     `CJCJ_ACTUAL_HOST_TOOLCHAIN=${actualHostToolchain}`,
+    `CJCJ_HOST_CJC_SHA256=${crypto.createHash('sha256').update(await fs.readFile(installedCjc)).digest('hex')}`,
+    `CJCJ_HOST_BOUNDSCHECK_SHA256=${crypto.createHash('sha256').update(await fs.readFile(path.join(cangjieHome, 'runtime/lib', runtimeDir, hostOs === 'Darwin' ? 'libboundscheck.dylib' : 'libboundscheck.so'))).digest('hex')}`,
+    `CJCJ_HOST_RUNTIME_SHA256=${crypto.createHash('sha256').update(await fs.readFile(path.join(cangjieHome, 'runtime/lib', runtimeDir, hostOs === 'Darwin' ? 'libcangjie-runtime.dylib' : 'libcangjie-runtime.so'))).digest('hex')}`,
     `CANGJIE_STDX_PATH=${stdxPath}`,
     `${ldVar}=${ldPath}`,
     `cjHeapSize=${heapSize}`,
