@@ -378,6 +378,13 @@ public open class ToolChain {
         }
     }
 
+    // Upstream ToolChain.h:154: traverse the supplied dependency set.
+    protected func ForEachBuiltinDependencies(dependencies: HashSet<String>, action: (String) -> Unit): Unit {
+        for (dependency in dependencies) {
+            action(dependency)
+        }
+    }
+
     protected func SortInputlibraryFileAndAppend(tool: Tool, objFiles: ArrayList<TempFileInfo>): Unit {
         let inputOrderTuples = ArrayList<(String, UInt64)>()
         AppendObjectsFromCompiled(tool, objFiles, inputOrderTuples)

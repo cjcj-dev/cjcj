@@ -186,6 +186,24 @@ public open class MachO <: ToolChain {
         GenerateLinkOptions(tool)
     }
 
+    // Upstream e392f089, MachO.cpp:141: native LTO archives only collect bitcode.
+    protected func AppendLTOBcInputs(objFiles: ArrayList<TempFileInfo>, tool: Tool): Unit {
+        SortInputlibraryFileAndAppend(tool, objFiles)
+        let skipStd = !(driverOptions.linkStaticStd ?? true)
+        if (skipStd) {
+            return
+        }
+        let seen = HashSet<String>()
+        let appendBcToTool = { cjoFileName: String =>
+            let bcFile = FileUtil.ConvertFilenameToLtoLibCangjieFormat(cjoFileName)
+            if (seen.add(bcFile)) {
+                tool.AppendArg(bcFile)
+            }
+        }
+        ForEachBuiltinDependencies(driverOptions.directBuiltinDependencies, appendBcToTool)
+        ForEachBuiltinDependencies(driverOptions.indirectBuiltinDependencies, appendBcToTool)
+    }
+
     protected open func GenerateLinkOptions(tool: Tool): Unit {
         let _ = tool
     }
