@@ -3727,6 +3727,7 @@ public class CjoSignatureMaterializer {
             case 91 => Some(Attribute.CJ_MIRROR_OBJC_INTERFACE_FWD)
             case 92 => Some(Attribute.ALREADY_LOADED)
             case 93 => Some(Attribute.JAVA_IMPL_REGISTRY_COMPANION)
+            case 94 => Some(Attribute.DOES_NOT_THROW)
             case _ => None
         }
     }
