@@ -53,7 +53,9 @@ public class AfterTypeCheckASTTransformer {
             Some((origin.GetTy().getOrThrow() as FuncTy).getOrThrow().retTy), CallKind.CALL_DECLARED_FUNCTION)
         let nodes = ArrayList<Node>()
         nodes.add(call)
-        proxy.funcBody.getOrThrow().body.getOrThrow().body = nodes
+        let body = proxy.funcBody.getOrThrow().body.getOrThrow().body
+        body.clear()
+        for (node in nodes) { body.add(node) }
     }
 
     // Upstream a51ced71, AfterTypeCheck/Utils/AfterTypeCheckASTTransformer.cpp:84-128.

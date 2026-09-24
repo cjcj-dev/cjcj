@@ -239,18 +239,18 @@ private func RewriteAsDirectFieldAccess(node: Node, userField: VarDecl, proxy: D
 
 // Upstream a51ced71, MoveImplMembersToRegCompanion.cpp:395-469.
 private func RewriteObjCImplMembersAccess(ctx: InteropContext, proxied: ProxiedMembers): Unit {
-    var region = Region.ELSEWHERE
-    var hasPropsResolved = false
+    let region = Box<Region>(Region.ELSEWHERE)
+    let hasPropsResolved = Box<Bool>(false)
     let walker = Walker(ctx.pkg, visitPre: {node: Node =>
         if (!node.IsSamePackage(ctx.pkg)) {
             return VisitAction.SKIP_CHILDREN
         }
         if (let Some(cd) <- (node as ClassDecl)) {
-            region = RegionOf(cd)
+            region.value = RegionOf(cd)
         }
         if (let Some(call) <- (node as CallExpr)) {
             if (let Some(callee) <- call.resolvedFunction) {
-                if (region == Region.REG_COMPANION) {
+                if (region.value == Region.REG_COMPANION) {
                     ResolveToImportedMovedMember(ctx, call)
                 } else if (let Some(proxy) <- proxied.Find(callee)) {
                     call.resolvedFunction = proxy as FuncDecl
@@ -270,11 +270,11 @@ private func RewriteObjCImplMembersAccess(ctx: InteropContext, proxied: ProxiedM
         if (proxy.isNone()) {
             return VisitAction.WALK_CHILDREN
         }
-        if (region == Region.REG_COMPANION && !IsNamedOnAnotherInstance(node)) {
+        if (region.value == Region.REG_COMPANION && !IsNamedOnAnotherInstance(node)) {
             RequalifyToRegCompanion(ctx, node)
             return VisitAction.WALK_CHILDREN
         }
-        if (region == Region.IMPL && target.getOrThrow() is VarDecl &&
+        if (region.value == Region.IMPL && target.getOrThrow() is VarDecl &&
             RewriteAsDirectFieldAccess(node, (target.getOrThrow() as VarDecl).getOrThrow(), proxy.getOrThrow())) {
             return VisitAction.SKIP_CHILDREN
         }
@@ -283,16 +283,16 @@ private func RewriteObjCImplMembersAccess(ctx: InteropContext, proxied: ProxiedM
         } else if (let Some(ma) <- (node as MemberAccess)) {
             ma.target = proxy
         }
-        hasPropsResolved = hasPropsResolved || target.getOrThrow() is VarDecl
+        hasPropsResolved.value = hasPropsResolved.value || target.getOrThrow() is VarDecl
         return VisitAction.WALK_CHILDREN
     }, visitPost: {node: Node =>
         if (node is ClassDecl) {
-            region = Region.ELSEWHERE
+            region.value = Region.ELSEWHERE
         }
         return VisitAction.KEEP_DECISION
     })
     let _ = walker.Walk()
-    if (hasPropsResolved) {
+    if (hasPropsResolved.value) {
         ctx.desugarPropRef(ctx.pkg)
     }
 }
