@@ -3,7 +3,7 @@
 
 Arguments: artifact compiler-source compiler-build nightly-sdk empty-workdir
 """
-import hashlib
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -45,6 +45,13 @@ class Inputs(unittest.TestCase):
                     dest = sdk / 'include/cangjie' / source.relative_to(compiler / 'include/cangjie')
                     self.assertEqual(dest.read_bytes(), source.read_bytes())
         print('ASSERT SDK public headers match compiler source')
+
+    def test_flatc_executable(self):
+        flatc = sdk / 'third_party/flatbuffers/bin/flatc'
+        self.assertTrue(os.access(flatc, os.X_OK), 'installed flatc must be executable after artifact transport')
+        probe = subprocess.run([flatc, '--version'], capture_output=True, text=True)
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+        print('ASSERT installed flatc executed: ' + probe.stdout.strip())
 
     def test_flatbuffers(self):
         for source in (nightly / 'third_party/flatbuffers').rglob('*'):

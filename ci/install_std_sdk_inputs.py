@@ -17,6 +17,8 @@ def install(artifact, sdk, triple):
             raise ValueError(f'AST_INPUT_DIGEST_MISMATCH {name}')
     for name in ('include', 'schema', 'third_party/flatbuffers'):
         shutil.copytree(artifact / name, sdk / name, dirs_exist_ok=True, symlinks=False)
+    # GitHub artifact transport normalizes files to 0644, including flatc.
+    (sdk / 'third_party/flatbuffers/bin/flatc').chmod(0o755)
     dest = sdk / 'lib' / triple
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(artifact / 'libcangjie-ast-support.a', dest / 'libcangjie-ast-support.a')

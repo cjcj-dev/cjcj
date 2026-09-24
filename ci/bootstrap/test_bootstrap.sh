@@ -65,14 +65,15 @@ make_dry_fixture() {
   cp /bin/true "$TMP/base/tools/bin/cjpm"
   printf 'source\n' > "$TMP/src/main.cj"
   printf '#!/usr/bin/env python3\n' > "$TMP/stdsrc/build.py"
-  mkdir -p "$TMP/src/ci" "$TMP/include" "$TMP/schema" "$TMP/third_party/flatbuffers"
+  mkdir -p "$TMP/src/ci" "$TMP/include" "$TMP/schema" "$TMP/third_party/flatbuffers/bin"
   cp "$ROOT/../install_std_sdk_inputs.py" "$TMP/src/ci/"
   printf 'ast\n' > "$TMP/ast.a"
   if [ -n "${BOOTSTRAP_AST_ARCHIVE:-}" ]; then
     cp "$BOOTSTRAP_AST_ARCHIVE" "$TMP/ast.a"
   fi
+  cp /bin/true "$TMP/third_party/flatbuffers/bin/flatc"
   cp "$TMP/ast.a" "$TMP/libcangjie-ast-support.a"
-  (cd "$TMP" && sha256sum libcangjie-ast-support.a > SHA256SUMS)
+  (cd "$TMP" && sha256sum libcangjie-ast-support.a third_party/flatbuffers/bin/flatc > SHA256SUMS)
   printf 'int host_symbol;\n' > "$TMP/host.c"
   cc -shared -fPIC "$TMP/host.c" -o "$TMP/libLLVM-15.so"
   make_colour_tuple
