@@ -4612,7 +4612,7 @@ public class IRBuilder2 <: Resource {
 
     public func CallArrayIntrinsicCopyTo(rawArrayTy: RawArrayType, srcArray: LLVMValueRef, dstArray: LLVMValueRef,
         srcStart: LLVMValueRef, dstStart: LLVMValueRef, copyLen: LLVMValueRef): LLVMValueRef {
-        let elementSizeValue = GetRawArrayElementSizeValue(rawArrayTy)
+        let elementSizeValue = GetSize_64(rawArrayTy.GetElementType())
         let copyLenI64 = CastIntegerToInt64(copyLen)
         let dataSize = CreateBinary(ExprKind.MUL, copyLenI64, elementSizeValue, name: "arr.data.len")
         let srcIndex = CreateBinary(ExprKind.MUL, CastIntegerToInt64(srcStart), elementSizeValue, name: "src.index")
@@ -6277,24 +6277,6 @@ public class IRBuilder2 <: Resource {
             return CreateSExt(value, int64Type, name: "array.length.i64")
         }
         return CreateTrunc(value, int64Type, name: "array.length.i64")
-    }
-
-    private func GetRawArrayElementSize(rawArrayTy: RawArrayType): Int64 {
-        let elementCGType = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType())
-        if (let Some(elementSize) <- elementCGType.GetSize()) {
-            return elementSize
-        }
-        return 0
-    }
-
-    private func GetRawArrayElementSizeValue(rawArrayTy: RawArrayType): LLVMValueRef {
-        let elementCGType = CGType.GetOrCreate(cgMod, rawArrayTy.GetElementType())
-        let elementSize = if (let Some(size) <- elementCGType.GetSize()) {
-            size
-        } else {
-            Int64(cgMod.GetTypeSize(elementCGType.GetLLVMType()))
-        }
-        return unsafe { LLVMConstInt(LLVMInt64TypeInContext(GetLLVMContext().raw), UInt64(elementSize), 0) }
     }
 
     public func CreateCopyTo(arrayCopyToInfo: ArrayCopyToInfo): Unit {
