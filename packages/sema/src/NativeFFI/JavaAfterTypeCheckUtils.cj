@@ -1,12 +1,13 @@
 package cjcj::sema.NativeFFI
 
+import cjcj::modules.SemaImportManager
+
 import std.collection.*
 import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.*
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::mangle.BaseMangler
-import cjcj::modules.ImportManager
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.TypeManager
 import cjcj::utils.*
@@ -16,11 +17,11 @@ private let NATIVE_CONSTRUCTOR_MARKER_PACKAGE_NAME: String = "cangjie.lang.inter
 public let JAVA_IMPL_ENTITY_ARG_NAME_IN_GENERATED_CTOR: String = "$obj"
 
 public class Utils {
-    private let importManager: ImportManager
+    private let importManager: SemaImportManager
     private let typeManager: TypeManager
     private let pkg: Package
 
-    public init(importManager: ImportManager, typeManager: TypeManager, pkg: Package) {
+    public init(importManager: SemaImportManager, typeManager: TypeManager, pkg: Package) {
         this.importManager = importManager
         this.typeManager = typeManager
         this.pkg = pkg
@@ -31,7 +32,7 @@ public class Utils {
     }
 
     public func GetOptionDecl(): EnumDecl {
-        return (importManager.GetCoreDecl(STD_LIB_OPTION).getOrThrow() as EnumDecl).getOrThrow()
+        return (importManager.GetCoreDecl<EnumDecl>(STD_LIB_OPTION).getOrThrow() as EnumDecl).getOrThrow()
     }
 
     private func GetOptionSomeDecl(): Decl {
@@ -531,7 +532,7 @@ public func GetMangledJniInitCjObjectFuncNameForEnum(mangler: BaseMangler, param
     return name
 }
 
-public func GetSyntheticClass(importManager: ImportManager, cld: ClassLikeDecl): ClassDecl {
+public func GetSyntheticClass(importManager: SemaImportManager, cld: ClassLikeDecl): ClassDecl {
     let name = GetSyntheticNameFromClassLike(cld)
     return (importManager.GetImportedDecl(cld.fullPackageName, name).getOrThrow() as ClassDecl).getOrThrow()
 }
@@ -555,7 +556,7 @@ public func NormalizeJavaSignature(sig: String): String {
     return sig.replace(".", "/")
 }
 
-public func CreateMirrorConstructorCall(importManager: ImportManager, entity: Expr,
+public func CreateMirrorConstructorCall(importManager: SemaImportManager, entity: Expr,
     mirrorTy: Ty): Option<Expr> {
     let curFile = entity.curFile
     if (let Some(classLikeTy) <- (mirrorTy as ClassLikeTy)) {

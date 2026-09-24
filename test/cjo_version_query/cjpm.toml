@@ -1,0 +1,20 @@
+[package]
+  cjc-version = "1.1.0"
+  name = "cjo_version_query"
+  organization = "cjcj"
+  description = "CJO header reader version gate and query API"
+  version = "0.1.0"
+  target-dir = ""
+  script-dir = ""
+  src-dir = "src"
+  output-type = "executable"
+  compile-option = ""
+  override-compile-option = ""
+  link-option = ""
+  package-configuration = {}
+
+[dependencies]
+  "cjcj::modules" = { path = "../../packages/modules" }
+  "cjcj::flatbuffers" = { path = "../../packages/flatbuffers" }
+  "cjcj::basic" = { path = "../../packages/basic" }
+  "cjcj::utils" = { path = "../../packages/utils" }

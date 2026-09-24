@@ -266,13 +266,13 @@ func PackCompositeValueIndex(idx: UInt32): ArrayList<UInt8> {
 }
 
 // ModuleFormat_generated.h:1954-1981 (CjoVersion struct, 3 bytes, align 1).
-class PackageFormat_CjoVersion {
+public class PackageFormat_CjoVersion {
     let data: Array<UInt8>
     let pos: Int64
     init(data: Array<UInt8>, pos: Int64) { this.data = data; this.pos = pos }
-    func GetMajorNum(): UInt8 { return ReadScalar(data, pos + 0, 0u8) }
-    func GetMinorNum(): UInt8 { return ReadScalar(data, pos + 1, 0u8) }
-    func GetPatchNum(): UInt8 { return ReadScalar(data, pos + 2, 0u8) }
+    public func GetMajorNum(): UInt8 { return ReadScalar(data, pos + 0, 0u8) }
+    public func GetMinorNum(): UInt8 { return ReadScalar(data, pos + 1, 0u8) }
+    public func GetPatchNum(): UInt8 { return ReadScalar(data, pos + 2, 0u8) }
 }
 func PackCjoVersion(majorNum: UInt8, minorNum: UInt8, patchNum: UInt8): ArrayList<UInt8> {
     let bytes = ArrayList<UInt8>()

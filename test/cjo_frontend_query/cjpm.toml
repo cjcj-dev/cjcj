@@ -1,0 +1,15 @@
+[package]
+  cjc-version = "1.1.0"
+  name = "cjo_frontend_query"
+  organization = "cjcj"
+  description = "Frontend CjoSignatureMaterializer version query"
+  version = "0.1.0"
+  src-dir = "src"
+  output-type = "executable"
+  link-option = "--export-dynamic ${CJO_QUERY_SHIM_O} ${CJO_QUERY_RUNTIME_O} ${CANGJIE_HOME}/third_party/llvm/lib/libLLVM-15.so -lstdc++"
+
+[dependencies]
+  "cjcj::frontend" = { path = "../../packages/frontend" }
+  "cjcj::ast" = { path = "../../packages/ast" }
+  "cjcj::flatbuffers" = { path = "../../packages/flatbuffers" }
+  "cjcj::utils" = { path = "../../packages/utils" }

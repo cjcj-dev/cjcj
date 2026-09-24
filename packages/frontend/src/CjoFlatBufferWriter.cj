@@ -9,7 +9,7 @@ import cjcj::basic.Linkage
 import cjcj::mangle.ASTMangler
 import cjcj::mangle.BaseMangler as RealBaseMangler
 import cjcj::flatbuffers.{FlatBufferBuilder, FlatBufferOffset}
-import cjcj::modules.{INVALID_FORMAT_INDEX, SemaCjoManager}
+import cjcj::modules.{INVALID_FORMAT_INDEX, SemaCjoManager, CJO_MAJOR_VERSION, CJO_MINOR_VERSION, CJO_PATCH_VERSION}
 import cjcj::modules.CreateFullId as CreateModuleFullId
 import cjcj::modules.CreateFeatureId as CreateModuleFeatureId
 import cjcj::modules.CreateFeaturesDirective as CreateModuleFeaturesDirective
@@ -2942,9 +2942,9 @@ private func IsIgnoredPosition(pos: Position): Bool {
 
 private func CjoVersionBytes(): ArrayList<UInt8> {
     let out = ArrayList<UInt8>()
-    out.add(0u8)
-    out.add(1u8)
-    out.add(0u8)
+    out.add(CJO_MAJOR_VERSION)
+    out.add(CJO_MINOR_VERSION)
+    out.add(CJO_PATCH_VERSION)
     return out
 }
 

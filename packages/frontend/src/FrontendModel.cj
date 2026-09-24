@@ -16,6 +16,8 @@ import cjcj::basic.FaithfulUnorderedMap
 import cjcj::basic.Range as BasicRange
 import cjcj::chir.CHIRContext as RealCHIRContext
 import cjcj::chir.Package as RealCHIRPackage
+import cjcj::modules.{CheckCjoVersionCompat, CjoVersionCompat, CjoVersionTriplet,
+    VersionAtLeast, VersionAtMost, VersionExactly}
 import cjcj::modules.SemaCjoManager
 import cjcj::modules.SemaImportManager
 import cjcj::modules.MacroHostImportManager
@@ -1154,7 +1156,8 @@ private func CollectRemovedDecl(mangledName: String, needRemoved: HashSet<String
     }
 }
 
-private class CjoSignatureMaterializer {
+public class CjoSignatureMaterializer {
+    private var cjoPath: String = ""
     private let packageName: String
     private var pkg: Package
     private var filesByIndex: HashMap<UInt32, File>
@@ -1217,14 +1220,19 @@ private class CjoSignatureMaterializer {
     }
 
     public func Materialize(data: Array<UInt8>): Unit {
-        let _ = LoadPackageDependencies(data)
+        if (!LoadPackageDependencies(data)) { return }
         LoadPackageDecls()
         LoadRefs()
     }
 
     public func LoadPackageDependencies(newData: Array<UInt8>): Bool {
         data = Some(newData)
+        if (!VerifyForData("ast")) { return false }
         packageTable = Some(GetPackage(newData))
+        if (!CheckCjoVersion()) { return false }
+        let (newFilesByIndex, newIdToFileMap) = MaterializeCjoFiles(newData, pkg)
+        filesByIndex = newFilesByIndex
+        idToFileMap = newIdToFileMap
         let allTypeTables = packageTable.getOrThrow().GetAllTypes().getOrThrow()
         allTypes = Array<Option<Ty>>(Int64(allTypeTables.size()), repeat: None)
         importedFullPackageNames.clear()
@@ -1259,6 +1267,85 @@ private class CjoSignatureMaterializer {
             dummyExpr.SetTy(dummyExpr.desugarExpr.getOrThrow().GetTy().getOrThrow())
         }
         for ((_, expr) in allLoadedExprs) { PostLoadReference(expr) }
+    }
+
+    // ASTLoader.cpp:286-332,392-408. A tuple carries the C++ out-bool result.
+    public func GetCjoVersion(): CjoVersionTriplet {
+        let (version, _) = ReadCjoVersion()
+        return version
+    }
+
+    public func HasCjoVersion(): Bool {
+        let (_, hasVersion) = ReadCjoVersion()
+        return hasVersion
+    }
+
+    public func IsCjoVersionAtLeast(requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+        let (version, hasVersion) = ReadCjoVersion()
+        if (!hasVersion) { return false }
+        return VersionAtLeast(version.major, version.minor, requiredMajor, requiredMinor)
+    }
+
+    public func IsCjoVersionAtMost(requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+        let (version, hasVersion) = ReadCjoVersion()
+        if (!hasVersion) { return false }
+        return VersionAtMost(version.major, version.minor, requiredMajor, requiredMinor)
+    }
+
+    public func IsCjoVersionExactly(requiredMajor: UInt8, requiredMinor: UInt8): Bool {
+        let (version, hasVersion) = ReadCjoVersion()
+        if (!hasVersion) { return false }
+        return VersionExactly(version.major, version.minor, requiredMajor, requiredMinor)
+    }
+
+    private func ReadCjoVersion(): (CjoVersionTriplet, Bool) {
+        var result = CjoVersionTriplet()
+        if (packageTable.isNone()) { return (result, false) }
+        let cjoVer = packageTable.getOrThrow().GetCjoVersion()
+        if (cjoVer.isNone()) { return (result, false) }
+        let version = cjoVer.getOrThrow()
+        result.major = version.GetMajorNum()
+        result.minor = version.GetMinorNum()
+        result.patch = version.GetPatchNum()
+        return (result, true)
+    }
+
+    public func SetCjoPath(path: String): Unit {
+        cjoPath = path
+    }
+
+    // ASTLoader.cpp:352-390, called after verification and package assignment.
+    private func CheckCjoVersion(diagnose!: Bool = true): Bool {
+        let cjoVer = packageTable.getOrThrow().GetCjoVersion()
+        if (cjoVer.isNone()) {
+            if (diagnose) { DiagnoseVersionMismatch() }
+            return false
+        }
+        let ver = cjoVer.getOrThrow()
+        let compat = CheckCjoVersionCompat(ver.GetMajorNum(), ver.GetMinorNum())
+        if (let CjoVersionCompat.COMPATIBLE <- compat) {
+            return true
+        }
+        if (diagnose) { DiagnoseVersionMismatch() }
+        return false
+    }
+
+    private func DiagnoseVersionMismatch(): Unit {
+        let table = packageTable.getOrThrow()
+        let producerVer = if (let Some(ver) <- table.GetVersion()) { ver.str() } else { "unknown" }
+        let fullPackageName = if (let Some(name) <- table.GetFullPkgName()) {
+            name.str()
+        } else { "unknown package name" }
+        diag.DiagnoseRefactor(DiagKindRefactor.module_version_not_identical, DEFAULT_POSITION,
+            arguments: [cjoPath, fullPackageName, producerVer, CANGJIE_VERSION])
+    }
+
+    // ASTLoader.cpp:416-426: dep-info is a header-only loader entry.
+    public func LoadPackageDepInfo(): String {
+        if (!VerifyForData("ast")) { return "" }
+        packageTable = Some(GetPackage(data.getOrThrow()))
+        if (!CheckCjoVersion()) { return "" }
+        return packageTable.getOrThrow().GetPkgDepInfo().getOrThrow().str()
     }
 
     // ASTLoader.cpp:207-220 VerifyForData.
@@ -1569,10 +1656,11 @@ private class CjoSignatureMaterializer {
         if (!VerifyForData("cached type")) {
             return HashSet<String>()
         }
-        isLoadCache = true
         try {
             let rawData = data.getOrThrow()
             packageTable = Some(GetPackage(rawData))
+            if (!CheckCjoVersion(diagnose: false)) { return HashSet<String>() }
+            isLoadCache = true
             flat = Some(CjoFlatBuffer(rawData))
             let reader = flat.getOrThrow()
             let root = reader.RootTable()
@@ -2298,6 +2386,7 @@ private class CjoSignatureMaterializer {
         }
         let rawData = data.getOrThrow()
         packageTable = Some(GetPackage(rawData))
+        if (!CheckCjoVersion()) { return false }
         let allTypeTables = packageTable.getOrThrow().GetAllTypes().getOrThrow()
         allTypes = Array<Option<Ty>>(Int64(allTypeTables.size()), repeat: None)
         importedFullPackageNames.clear()
@@ -2522,6 +2611,41 @@ private class CjoSignatureMaterializer {
             case OptimizationLevel.Os => "Os"
             case OptimizationLevel.Oz => "Oz"
         }
+    }
+
+    private func MaterializeCjoFiles(data: Array<UInt8>, pkg: Package): (HashMap<UInt32, File>, HashMap<UInt64, File>) {
+        let filesByIndex = HashMap<UInt32, File>()
+        let idToFileMap = HashMap<UInt64, File>()
+        let reader = CjoFlatBuffer(data)
+        let root = reader.RootTable()
+        let filesVec = if (root >= 0) { reader.VectorField(root, 14) } else { -1 }
+        if (filesVec >= 0) {
+            var idx: Int64 = 0
+            while (idx < reader.VectorLength(filesVec)) {
+                let storedPath = reader.StringAt(reader.VectorOffsetElement(filesVec, idx))
+                let fileID = diag.GetSourceManager().AddSource(storedPath, "", packageName: Some(pkg.fullPackageName))
+                let file = CreateImportedCjoFile(pkg, fileID)
+                filesByIndex[UInt32(idx + 1)] = file
+                if (!idToFileMap.contains(fileID)) {
+                    idToFileMap[fileID] = file
+                }
+                idx++
+            }
+        }
+        return (filesByIndex, idToFileMap)
+    }
+
+    private func CreateImportedCjoFile(pkg: Package, fileID: UInt64): File {
+        let source = diag.GetSourceManager().GetSource(fileID)
+        let file = CreateFile(source.path)
+        file.fileName = FileUtil.GetFileName(source.path)
+        file.filePath = source.path
+        file.fileHash = source.fileHash
+        file.begin.fileID = fileID
+        file.curFile = Some(file)
+        file.curPackage = Some(pkg)
+        pkg.files.add(file)
+        return file
     }
 
     private func PreLoadImportedPackageNode(data: Array<UInt8>): Unit {
@@ -6713,16 +6837,9 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
 
     public func GeneratePkgDepInfoByCjo(path: String): ArrayList<String> {
         let out = ArrayList<String>()
-        let (ok, data, reason) = FileUtil.ReadBinaryFileToBuffer(path)
-        if (!ok) {
-            diag.DiagnoseRefactor(DiagKindRefactor.module_read_file_to_buffer_failed, DEFAULT_POSITION,
-                arguments: [path, reason])
-            return out
-        }
-        if (!VerifySerializedPackageData(data, "")) {
-            return out
-        }
-        let depInfo = ReadSerializedPackageDepInfo(data)
+        let loader = ReadCjo("", path)
+        if (loader.isNone()) { return out }
+        let depInfo = loader.getOrThrow().LoadPackageDepInfo()
         if (!depInfo.isEmpty()) {
             out.add(depInfo)
         }
@@ -7033,6 +7150,11 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
             out.add(pkgDecl.srcPackage)
         }
         return out
+    }
+
+    // ImportManager.h:364: the live manager owns the diagnostic engine.
+    public func GetDiagnosticEngine(): BasicDiagnosticEngine {
+        return diag.AsBasicDiagnosticEngine()
     }
 
     public func GetCjoManager(): SemaCjoManager {
@@ -8471,6 +8593,7 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         let materializer = CjoSignatureMaterializer(fullPackageName, pkg, filesByIndex, idToFileMap, importedPackages,
             packageDecls, exportIdDeclMaps, diag, typeManager, importSrcCode: importSrcCode,
             deserializingCommon: sourcePackage.isNone(), canInline: canInlineImportedSource, data: Some(data))
+        materializer.SetCjoPath(cjoPath)
         return Some(materializer)
     }
 
@@ -8625,10 +8748,12 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         }
         let pkg = CreatePackage(fullPackageName)
         pkg.EnableAttr(Attribute.IMPORTED)
-        let (filesByIndex, idToFileMap) = MaterializeCjoFiles(data, pkg)
+        let filesByIndex = HashMap<UInt32, File>()
+        let idToFileMap = HashMap<UInt64, File>()
         let materializer = CjoSignatureMaterializer(fullPackageName, pkg, filesByIndex, idToFileMap, importedPackages,
             packageDecls, exportIdDeclMaps, diag, typeManager, importSrcCode: importSrcCode,
             canInline: canInlineImportedSource)
+        materializer.SetCjoPath(cjoPath)
         if (!materializer.LoadPackageDependencies(data)) {
             loadingPackages.remove(fullPackageName)
             return false
@@ -8639,28 +8764,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         importedPackages.add(pkg)
         loadingPackages.remove(fullPackageName)
         return true
-    }
-
-    private func MaterializeCjoFiles(data: Array<UInt8>, pkg: Package): (HashMap<UInt32, File>, HashMap<UInt64, File>) {
-        let filesByIndex = HashMap<UInt32, File>()
-        let idToFileMap = HashMap<UInt64, File>()
-        let reader = CjoFlatBuffer(data)
-        let root = reader.RootTable()
-        let filesVec = if (root >= 0) { reader.VectorField(root, 14) } else { -1 }
-        if (filesVec >= 0) {
-            var idx: Int64 = 0
-            while (idx < reader.VectorLength(filesVec)) {
-                let storedPath = reader.StringAt(reader.VectorOffsetElement(filesVec, idx))
-                let fileID = diag.GetSourceManager().AddSource(storedPath, "", packageName: Some(pkg.fullPackageName))
-                let file = CreateImportedCjoFile(pkg, fileID)
-                filesByIndex[UInt32(idx + 1)] = file
-                if (!idToFileMap.contains(fileID)) {
-                    idToFileMap[fileID] = file
-                }
-                idx++
-            }
-        }
-        return (filesByIndex, idToFileMap)
     }
 
     private func VerifySerializedPackageData(data: Array<UInt8>, importedPackageName: String): Bool {
@@ -8676,28 +8779,6 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
     private func CanInlineImportedSource(opts: GlobalOptions): Bool {
         return opts.chirLLVM && enumIndex(opts.optimizationLevel) > enumIndex(OptimizationLevel.O1) &&
             !opts.enableCompileTest && !opts.enableHotReload
-    }
-
-    private func ReadSerializedPackageDepInfo(data: Array<UInt8>): String {
-        let reader = CjoFlatBuffer(data)
-        let root = reader.RootTable()
-        if (root < 0) {
-            return ""
-        }
-        return reader.StringField(root, 10)
-    }
-
-    private func CreateImportedCjoFile(pkg: Package, fileID: UInt64): File {
-        let source = diag.GetSourceManager().GetSource(fileID)
-        let file = CreateFile(source.path)
-        file.fileName = FileUtil.GetFileName(source.path)
-        file.filePath = source.path
-        file.fileHash = source.fileHash
-        file.begin.fileID = fileID
-        file.curFile = Some(file)
-        file.curPackage = Some(pkg)
-        pkg.files.add(file)
-        return file
     }
 
     private func ReadAllDependentStdPkgs(data: Array<UInt8>): ArrayList<String> {
