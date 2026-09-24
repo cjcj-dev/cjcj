@@ -1066,3 +1066,54 @@ private func IsRefValue(value: Value): Bool {
     }
     return false
 }
+
+// Upstream 6e125215 Utils.cpp:729-770.
+public func GetInstMapFromApply(apply: ApplyBase, builder: CHIRBuilder): HashMap<GenericType, Type> {
+    var instMap = HashMap<GenericType, Type>()
+    let callee = apply.GetCallee()
+    let typeArgs = apply.GetInstantiatedTypeArgs()
+    if (let Some(local) <- callee.AsLocalVar()) {
+        let lambda = (local.GetExpr().getOrThrow() as Lambda).getOrThrow()
+        let generics = lambda.GetGenericTypeParams()
+        CJC_ASSERT(generics.size == typeArgs.size)
+        for (i in 0..generics.size) { instMap[generics[i]] = typeArgs[i] }
+        return instMap
+    }
+    let fn = callee.AsFunction() ?? return instMap
+    if (let Some(def) <- fn.GetParentCustomTypeDef()) {
+        if (def.IsGenericDef()) {
+            let parentTy = apply.GetInstParentCustomTyOfCallee(builder).getOrThrow()
+            if (let Some(ex) <- (def as ExtendDef)) {
+                let mapping = ex.GetExtendedType().getOrThrow().CalculateGenericTyMapping(parentTy)
+                CJC_ASSERT(mapping[0])
+                instMap = mapping[1]
+            } else {
+                instMap = GetInstMapFromCurDefToCurType((parentTy as CustomType).getOrThrow())
+            }
+        }
+    }
+    let generics = fn.GetGenericTypeParams()
+    CJC_ASSERT(generics.size == typeArgs.size)
+    for (i in 0..generics.size) { if (!instMap.contains(generics[i])) { instMap[generics[i]] = typeArgs[i] } }
+    return instMap
+}
+
+// Upstream 6e125215 Utils.cpp:1757-1782; expression-group migration follows e242ecf4.
+public func AddTypeCastForReturnVal(expr: Expression, expectedTy: Type, builder: CHIRBuilder): Unit {
+    let result = expr.GetResult().getOrThrow()
+    if (result.GetType().getOrThrow() == expectedTy) { return }
+    if (expr.IsTerminator()) {
+        for (user in result.GetUsers()) {
+            let cast = TypeCastOrBoxIfNeeded(result, expectedTy, builder, user.GetParentBlock().getOrThrow())
+            cast.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(user)
+            user.ReplaceOperand(result, cast)
+        }
+    } else {
+        let cast = TypeCastOrBoxIfNeeded(result, expectedTy, builder, expr.GetParentBlock().getOrThrow())
+        let castExpr = cast.AsLocalVar().getOrThrow().GetExpr().getOrThrow()
+        castExpr.MoveAfter(expr)
+        for (user in result.GetUsers()) {
+            if (user != castExpr) { user.ReplaceOperand(result, cast) }
+        }
+    }
+}

@@ -125,15 +125,9 @@ public class CallGraph {
     private let functionNodes: ArrayList<CallGraphNode> = ArrayList<CallGraphNode>()
     private let entryNode: CallGraphNode = CallGraphNode(0, None)
     private let exitNode: CallGraphNode = CallGraphNode(1, None)
-    private var devirtFuncInfo: Option<DevirtualizationInfo> = None
     private var nextNodeId: Int64 = 2
 
     public init(chirPackage: Package) {
-        Build(chirPackage)
-    }
-
-    public init(chirPackage: Package, devirtFuncInfo: DevirtualizationInfo) {
-        this.devirtFuncInfo = devirtFuncInfo
         Build(chirPackage)
     }
 
@@ -316,8 +310,7 @@ public class CallGraphAnalysis {
 
     public init() {}
 
-    public init(chirPackage: Package, devirtFuncInfo: DevirtualizationInfo) {
-        let _ = devirtFuncInfo
+    public init(chirPackage: Package) {
         this.chirPackage = chirPackage
     }
 
