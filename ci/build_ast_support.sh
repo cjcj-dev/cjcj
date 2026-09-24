@@ -4,6 +4,7 @@ set -euo pipefail
 src=${1:?compiler source}
 build=${2:?build directory}
 out=${3:?artifact directory}
+nightly=${4:?nightly-1.3.0-alpha.20260924001050 SDK}
 mkdir -p "$out"
 start=$SECONDS
 cmake -S "$src" -B "$build" -G Ninja \
@@ -20,6 +21,24 @@ jobs=$(getconf _NPROCESSORS_ONLN)
 cmake --build "$build" --target cangjie-ast-support -j "$jobs" \
   2>&1 | tee "$out/build.log"
 cp "$build/lib/libcangjie-ast-support.a" "$out/"
-(cd "$out" && shasum -a 256 libcangjie-ast-support.a > SHA256SUMS)
+# Keep archive, public headers and generated schema from one compiler build.
+mkdir -p "$out/include/flatbuffers" "$out/schema" "$out/third_party"
+cp -RL "$src/include/cangjie" "$out/include/"
+cp "$build/schema/flatbuffers/StdAstFormat_generated.h" "$out/include/flatbuffers/"
+cp "$src/schema/StdAstFormat.fbs" "$out/schema/"
+# The official nightly supplies the Cangjie flatbuffers module as well as flatc.
+cp -RL "$nightly/third_party/flatbuffers" "$out/third_party/"
+python3 - "$out" <<'PYHASH'
+import hashlib
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+files = [root / 'libcangjie-ast-support.a']
+for name in ('include', 'schema', 'third_party'):
+    files.extend(p for p in (root / name).rglob('*') if p.is_file())
+with (root / 'SHA256SUMS').open('w') as out:
+    for p in sorted(files):
+        out.write(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root)}\n')
+PYHASH
 nm --defined-only "$out/libcangjie-ast-support.a" > "$out/nm-defined.txt"
 printf 'target=cangjie-ast-support jobs=%s wall=%ss\n' "$jobs" "$((SECONDS-start))" | tee "$out/build-summary.txt"

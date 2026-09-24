@@ -53,6 +53,10 @@ export function fixture(check) {
       fs.mkdirSync(path.dirname(path.join(runtimeSource, rel)), {recursive: true});
       fs.writeFileSync(path.join(runtimeSource, rel), `fixture ${rel}`);
     }
+    for (const rel of ['lib/linux_x86_64_cjnative/libcangjie-std-core.a', 'runtime/lib/linux_x86_64_cjnative/libcangjie-std-core.so', 'lib/libstdFFI.so', 'modules/linux_x86_64_cjnative/std.core.cjo']) {
+      fs.mkdirSync(path.dirname(path.join(runtimeSource, rel)), {recursive: true});
+      fs.writeFileSync(path.join(runtimeSource, rel), `new std fixture ${rel}`);
+    }
     env.RUNTIME_REF = 'd'.repeat(40);
     fs.writeFileSync(path.join(runtimeSource, 'SOURCE_SHA'), env.RUNTIME_REF);
     prepareRuntime(runtimeSource, runtime, {RUNTIME_REF: env.RUNTIME_REF,

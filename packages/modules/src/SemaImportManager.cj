@@ -9,7 +9,7 @@ import cjcj::ast.Node as ASTNode
 import cjcj::ast.Package as ASTPackage
 import cjcj::ast.PackageDecl as ASTPackageDecl
 import cjcj::ast.Ty as ASTTy
-import cjcj::basic.DiagnosticBuilder
+import cjcj::basic.{DiagnosticBuilder, DiagnosticEngine}
 
 public interface SemaCjoManager {
     func GetPackageNameByImport(importSpec: ASTImportSpec): String
@@ -18,6 +18,7 @@ public interface SemaCjoManager {
 }
 
 public interface SemaImportManager {
+    func GetDiagnosticEngine(): DiagnosticEngine
     func ExportDeclsWithContent(saveFileWithAbsPath: Bool, pkg: ASTPackage): Unit
     func GetCjoManager(): SemaCjoManager
     func GetAllImportedPackages(includeMacroPkg: Bool): ArrayList<ASTPackageDecl>

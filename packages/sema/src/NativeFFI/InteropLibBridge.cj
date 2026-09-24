@@ -5,7 +5,6 @@ import std.convert.*
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor as BasicDiagKindRefactor
 import cjcj::basic.DiagnosticEngine as BasicDiagnosticEngine
-import cjcj::modules.ImportManager
 import cjcj::modules.SemaImportManager
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.TypeManager
@@ -217,7 +216,7 @@ public class InteropLibBridge {
     private static let INTEROPLIB_VERSION: Int64 = 10
     private static let INTEROPLIB_PACKAGE_NAME: String = "java.internal"
 
-    private let importManager: ImportManager
+    private let importManager: SemaImportManager
     private let typeManager: TypeManager
     private let diag: BasicDiagnosticEngine
     private let utils: Utils
@@ -226,7 +225,7 @@ public class InteropLibBridge {
         TypeKind.TYPE_INT32, TypeKind.TYPE_INT64, TypeKind.TYPE_FLOAT32, TypeKind.TYPE_FLOAT64
     ]
 
-    public init(importManager: ImportManager, typeManager: TypeManager,
+    public init(importManager: SemaImportManager, typeManager: TypeManager,
         diag: BasicDiagnosticEngine, utils: Utils) {
         this.importManager = importManager
         this.typeManager = typeManager
@@ -240,7 +239,7 @@ public class InteropLibBridge {
 
     private func ImportDecl<T>(packageName: String, declName: String,
         silent!: Bool = false): Option<T> where T <: Decl {
-        if (let Some(decl) <- importManager.GetImportedDecl(packageName, declName)) {
+        if (let Some(decl) <- importManager.GetImportedDecl<Decl>(packageName, declName)) {
             return DynamicCast<T>(decl)
         }
         if (!silent) {

@@ -1529,16 +1529,16 @@ class PackageFormat_CompilationOptions <: Table {
 public class PackageFormat_Package <: Table {
     public init(data: Array<UInt8>, pos: Int64) { super(data, pos) }
 
-    func GetVersion(): Option<FlatBufferString> {
+    public func GetVersion(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_VERSION)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    func GetCjoVersion(): Option<PackageFormat_CjoVersion> {
+    public func GetCjoVersion(): Option<PackageFormat_CjoVersion> {
         return if (let Some(p) <- GetStruct(MF_PACKAGE_VT_CJOVERSION)) { Some(PackageFormat_CjoVersion(data, p)) } else { None }
     }
-    func GetFullPkgName(): Option<FlatBufferString> {
+    public func GetFullPkgName(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_FULLPKGNAME)) { Some(FlatBufferString(data, p)) } else { None }
     }
-    func GetPkgDepInfo(): Option<FlatBufferString> {
+    public func GetPkgDepInfo(): Option<FlatBufferString> {
         return if (let Some(p) <- GetPointer(MF_PACKAGE_VT_PKGDEPINFO)) { Some(FlatBufferString(data, p)) } else { None }
     }
     public func GetImports(): Option<Vector<Offset<Any>>> {

@@ -1,0 +1,113 @@
+name: Std SDK input evidence (no publication)
+
+on:
+  workflow_call:
+    inputs:
+      diagnostics_run_id:
+        description: Run containing same-pin colour-runtime gate diagnostics
+        required: true
+        type: string
+      runtime_sha256:
+        description: Exact target runtime digest recorded by that native gate
+        required: true
+        type: string
+      boundscheck_sha256:
+        description: Exact target boundscheck digest recorded by that native gate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  std-evidence:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load fixed source and AST input identities
+        run: cat ci/runtime_pin.env ci/source_pin.env ci/ast_support/linux_x86_64.env >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ env.RUNTIME_REF }}
+          path: runtime-source
+      - name: Fetch pinned H48 language tuple
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 ci/release/publish_language_tuple.py fetch \
+            --pin ci/h48_language_tuple_pin.json --output "$RUNNER_TEMP/h48-download"
+      - name: Download failed-gate evidence without changing its verdict
+        uses: actions/download-artifact@v8
+        with:
+          name: colour-runtime-gate-diagnostics
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.diagnostics_run_id }}
+          path: ${{ runner.temp }}/runtime-diagnostics
+      - name: Select the recorded target pair for compilation evidence only
+        env:
+          EXPECTED_RUNTIME: ${{ inputs.runtime_sha256 }}
+          EXPECTED_BOUNDS: ${{ inputs.boundscheck_sha256 }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'runtime-diagnostics'
+          expected = os.environ['RUNTIME_REF']
+          pins = list(root.rglob('runtime_pin.env'))
+          assert pins and any(f'RUNTIME_REF={expected}' in p.read_text().splitlines() for p in pins)
+          def digest(file):
+              return hashlib.sha256(file.read_bytes()).hexdigest()
+          pairs = [p.parent for p in sorted(root.rglob('libcangjie-runtime.so'))
+                   if digest(p) == os.environ['EXPECTED_RUNTIME']
+                   and (p.parent / 'libboundscheck.so').is_file()
+                   and digest(p.parent / 'libboundscheck.so') == os.environ['EXPECTED_BOUNDS']]
+          assert pairs, 'recorded target pair missing from diagnostics'
+          with open(os.environ['GITHUB_ENV'], 'a') as out:
+              out.write(f'EVIDENCE_TARGET={pairs[0]}\n')
+          print(f'EVIDENCE_ONLY target={pairs[0]} native_gate_verdict=unchanged')
+          PY
+      - name: Activate private SDK for std evidence
+        env:
+          EXPECTED_RUNTIME: ${{ inputs.runtime_sha256 }}
+          EXPECTED_BOUNDS: ${{ inputs.boundscheck_sha256 }}
+        run: |
+          python3 ci/release/language_tuple.py activate \
+            --root "$RUNNER_TEMP/h48-download/installed/tuple" \
+            --manifest-sha256 "$(jq -r .manifest_sha256 ci/h48_language_tuple_pin.json)" \
+            --compiler-sha256 "$(jq -r .compiler_sha256 ci/h48_language_tuple_pin.json)" \
+            --target "$EVIDENCE_TARGET" \
+            --target-runtime-sha256 "$EXPECTED_RUNTIME" \
+            --target-boundscheck-sha256 "$EXPECTED_BOUNDS" \
+            --output "$RUNNER_TEMP/std-active" > "$RUNNER_TEMP/std-active.env"
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ env.AST_SUPPORT_ARTIFACT_ID }}
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ env.AST_SUPPORT_RUN_ID }}
+          path: ${{ runner.temp }}/ast-support
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang cmake ninja-build libssl-dev
+      - name: Build and install std evidence with bounded host heap
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/std-evidence"
+          grep -Fx "compiler=$COMPILER_REF" "$RUNNER_TEMP/ast-support/PROVENANCE"
+          python3 ci/test_build_resources.py
+          bash ci/release/build_colour_std.sh runtime-source "$RUNNER_TEMP/std-active" \
+            "$RUNNER_TEMP/ast-support" "$RUNNER_TEMP/std-evidence" 2>&1 | tee "$RUNNER_TEMP/std-evidence.log"
+      - name: Upload evidence only
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: std-input-evidence-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/std-evidence.log
+            ${{ runner.temp }}/std-evidence/
+            ci/runtime_pin.env
+            ci/source_pin.env
+          if-no-files-found: warn
