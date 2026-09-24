@@ -26,7 +26,7 @@ import {PRODUCT_NAMES} from '../srcbuild/lib/product-binary.mjs';
 const {root} = stageBegin('cjcj');
 const toolchain = requireHostToolchain();
 const heapSize = process.env.CJ_HEAP_SIZE || '12GB';
-const provisionOnly = process.env.CJCJ_SDK_PROVISION_ONLY === '1';
+const provisionOnly = process.platform === 'win32' && process.env.CJCJ_SDK_PROVISION_ONLY === '1';
 const sdkAlreadyProvisioned = process.platform === 'win32' && process.env.CJCJ_SDK_ALREADY_PROVISIONED === '1';
 let setupRc = 0;
 let baseSdkRetention;
@@ -178,7 +178,7 @@ if (process.platform === 'win32') {
   }
 }
 if (provisionOnly) {
-  console.log(`[platform setup_sdk] provisioned official host SDK at ${cangjieHome}`);
+  console.log(`[platform setup_sdk] provisioned Windows SDK at ${cangjieHome}`);
   process.exit(0);
 }
 
