@@ -34,7 +34,8 @@ class TuplePermissions(unittest.TestCase):
     def check_install(self, root, source):
         target = root / 'sdk'
         result = subprocess.run(['bash', str(PRODUCT), '--from', os.environ['HOST_SDK'],
-                                 '--to', str(target), '--host', '--llvm-tuple', str(source)],
+                                 '--to', str(target), '--host', '--llvm-tuple', str(source),
+                                 '--colour-runtime', os.environ['COLOUR_RUNTIME']],
                                 capture_output=True, text=True)
         # The target invariant runs even when the product's verification fails.
         observations = []

@@ -181,19 +181,21 @@ make_sdk_fixture() {
   cc -c "$TMP/host-runtime.c" -o "$TMP/host-runtime.o"
   ar rcs "$base/lib/linux_x86_64_cjnative/libcangjie-runtime.a" "$TMP/host-runtime.o"
   ar rcs "$base/lib/linux_x86_64_cjnative/libcangjie-std-core.a" "$TMP/host-runtime.o"
+  printf 'int g_cjLoadBadMask;\n' > "$TMP/colour-reference.c"
+  cc -shared -fPIC "$TMP/colour-reference.c" -o "$TMP/colour-reference.so"
   printf '%s\n' '#!/usr/bin/env bash' 'export PATH="$(dirname "${BASH_SOURCE[0]}")/bin:$PATH"' > "$base/envsetup.sh"
 }
 
 run_sdk_so() {
   local product="$1" to="$2"
   bash "$product" --from "$TMP/sdk-base" --to "$to" --host \
-    --llvm-so "$TMP/libLLVM-15.so" --force
+    --llvm-so "$TMP/libLLVM-15.so" --colour-runtime "$TMP/colour-reference.so" --force
 }
 
 run_sdk_tuple() {
   local product="$1" to="$2"
   bash "$product" --from "$TMP/sdk-base" --to "$to" --host \
-    --llvm-tuple "$TMP/colour-tuple" --force
+    --llvm-tuple "$TMP/colour-tuple" --colour-runtime "$TMP/colour-reference.so" --force
 }
 
 make_runtime_payload() {

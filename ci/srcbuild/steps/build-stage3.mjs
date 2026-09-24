@@ -96,7 +96,10 @@ async function assertWriteBarriersWith(sdkRoot, coreLib, targetSpec) {
 async function assertStdBarriers(coreLib) {
   const symbolTable = await $({stdio: 'pipe'})`nm -A ${coreLib}`;
   const colourCheck = fileURLToPath(new URL('../../bootstrap/std_runtime_colour.py', import.meta.url));
-  const colour = await $({stdio: 'pipe'})`python3 ${colourCheck} --std-colour ${coreLib}`;
+  const hostRuntime = path.join(path.resolve(requiredEnv('CJCJ_BOOTSTRAP_HOST_RT')),
+    'runtime', 'lib', tuple, target.spec.runtimeLibrary);
+  const colour = await $({stdio: 'pipe'})`python3 ${colourCheck} --colour-runtime ${runtime} --host-runtime ${hostRuntime} --std-colour ${coreLib}`;
+  process.stderr.write(colour.stderr);
   const hasMask = colour.stdout.trim() === '1';
   const hasReadBarrier = /CJ_MCC_Read(?:StaticRef|RefField)/.test(symbolTable.stdout);
   if (!hasMask || !hasReadBarrier) {

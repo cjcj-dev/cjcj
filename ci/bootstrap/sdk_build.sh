@@ -34,6 +34,8 @@
 #   --runtime-commit <40hex> 独立预期提交；flat 任意名称根必须显式提供，nested 给出时也核验
 #   --std <dir>     build.py install prefix，或兼容旧调用的整个 modules/<平台> 目录
 #   --verify-host-rt <dir|sdk>  target SDK 验证 managed 工具时使用的未着色宿主 runtime
+#   --colour-runtime <SO>  染色 runtime 导出参考（host 装配必填；target 默认安装后的 SO）
+#   --host-runtime <SO>    同 HRT 身份的官方 runtime 导出参考（默认 verify-host-rt 或基线）
 #   --link <name>   ⭐ 组好后 `cjv toolchain link <name> <to>`
 #   --force         ⭐ 目标已存在时先删（⛔ 默认拒绝覆盖）
 set -u
@@ -93,7 +95,7 @@ if [ "${1:-}" = env ]; then
   exit 0
 fi
 
-FROM= TO= ROLE= LLC= OPT= LLVM_SO= LLVM_TUPLE= CJPM= CJC= RUNTIME= RUNTIME_COMMIT= TARGET_TUPLE= STD= VERIFY_HOST_RT= LINKNAME= FORCE=0
+FROM= TO= ROLE= LLC= OPT= LLVM_SO= LLVM_TUPLE= CJPM= CJC= RUNTIME= RUNTIME_COMMIT= TARGET_TUPLE= STD= VERIFY_HOST_RT= COLOUR_RUNTIME= HOST_RUNTIME= LINKNAME= FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --from) FROM="${2:?}"; shift 2;;
@@ -114,6 +116,8 @@ while [ $# -gt 0 ]; do
     --runtime-commit) RUNTIME_COMMIT="${2:?}"; shift 2;;
     --std) STD="${2:?}"; shift 2;;
     --verify-host-rt) VERIFY_HOST_RT="${2:?}"; shift 2;;
+    --colour-runtime) COLOUR_RUNTIME="${2:?}"; shift 2;;
+    --host-runtime) HOST_RUNTIME="${2:?}"; shift 2;;
     --link) LINKNAME="${2:?}"; shift 2;;
     --force) FORCE=1; shift;;
     -h|--help) sed -n '1,40p' "$0"; exit 0;;
@@ -573,7 +577,10 @@ echo "  g_cjLoadBadMask=$MASK ✓  ($RTSO)"
 # Check the installed target pair, never the --verify-host-rt execution override.
 # All component copies (including inherited std) must be complete before this.
 COLOUR_CHECK="$(dirname "${BASH_SOURCE[0]}")/std_runtime_colour.py"
-python3 "$COLOUR_CHECK" --runtime "$RTSO" \
+if [ -z "$COLOUR_RUNTIME" ] && [ "$ROLE" = target ]; then COLOUR_RUNTIME="$RTSO"; fi
+[ -n "$COLOUR_RUNTIME" ] || die 'host 配对检查缺 --colour-runtime 参考 SO'
+HOST_RUNTIME=${HOST_RUNTIME:-${VERIFY_HOST_RT_DIR:-$BASE/runtime/lib/$TARGET_TUPLE}/libcangjie-runtime.so}
+python3 "$COLOUR_CHECK" --colour-runtime "$COLOUR_RUNTIME" --host-runtime "$HOST_RUNTIME" --runtime "$RTSO" \
   --std "$TO/lib/$TARGET_TUPLE/libcangjie-std-core.a" --source "${STD:-$BASE}" \
   || die "std/runtime 颜色配对失败（来源与 sha256 见上）"
 
