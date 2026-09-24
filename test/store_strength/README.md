@@ -43,3 +43,18 @@ tool wrappers point only into the new private host copy. Set `CANGJIE_HOME` to
 `NEW_DIRECTORY/sdk` and prepend `NEW_DIRECTORY/tuple/lib` plus the SDK's runtime
 and tools library directories to `LD_LIBRARY_PATH`. Preserve each arm's loader
 trace and dependency hashes alongside the compiler and IR identities.
+
+`run_aggregate.sh` covers the value-record boundary: a String aggregate store,
+a direct reference in the same struct, and an ordinary class reference store.
+Set `STRENGTH_CJC`, `STRENGTH_OPT`, and `STRENGTH_OUT` with the matching SDK and
+loader environment. It compiles `aggregate.cj`, runs the product
+`cj-barrier-split` pass on retained frontend IR, and checks each target's emitted
+reference access independently. A String's aggregate copy must produce explicit
+Strong reference writes; it cannot defer classification to an object header at
+the value record's address. The direct struct and class writes are controls.
+This checks emitted access strength, not runtime GC behavior.
+
+For x86 ELF output, retain `objdump -d aggregate` and run `check_elf.py` on it.
+It independently checks all three emitted function bodies for the strong runtime
+entry and rejects the unknown entry. Missing function bodies fail the assertion.
+The retained disassembly must come from the same compiler/LLVM arm as the IR.
