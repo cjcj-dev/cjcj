@@ -504,13 +504,13 @@ positive_build_env() {
   caller_tmp="$TMP/caller-tmp"
   mkdir -p "$caller_tmp" "$TMP/caller-home"
   HOME="$TMP/caller-home" TMPDIR="$caller_tmp" dry_run > "$TMP/build-env-passthrough.log"
-  check_count build-env 4 "CMD env -i HOME=/root TMPDIR=$caller_tmp CANGJIE_HOME=" "$TMP/build-env-passthrough.log"
+  check_count build-env 4 "CMD env -i HOME=$TMP/caller-home TMPDIR=$caller_tmp CANGJIE_HOME=" "$TMP/build-env-passthrough.log"
   (
     unset TMPDIR
     HOME="$TMP/caller-home" dry_run
   ) > "$TMP/build-env-default.log"
-  check_count build-env 4 'CMD env -i HOME=/root TMPDIR=.*/work/tmp-private CANGJIE_HOME=' "$TMP/build-env-default.log"
-  echo 'PASS bootstrap CLI keeps HOME=/root and passes caller/default TMPDIR'
+  check_count build-env 4 "CMD env -i HOME=$TMP/caller-home TMPDIR=.*/work/tmp-private CANGJIE_HOME=" "$TMP/build-env-default.log"
+  echo 'PASS bootstrap CLI passes caller HOME and caller/default TMPDIR'
 }
 
 fault_build_env() {
