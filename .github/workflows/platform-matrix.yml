@@ -43,20 +43,24 @@ jobs:
           platform: ubuntu-22.04
           pin: ${{ env.RUNTIME_REF }}
           cache-size: 1G
-      - name: Load host toolchain pin
-        run: cat ci/cjpm_pin.env >> "$GITHUB_ENV"
-      - name: Official SDK provision
+      - name: Fetch pinned H48 language tuple
         env:
-          CJCJ_SDK_PROVISION_ONLY: '1'
-          SDK_RUNTIME_DIR: linux_x86_64_cjnative
-        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
-      - name: Build runtime
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 ci/release/publish_language_tuple.py fetch \
+            --pin ci/h48_language_tuple_pin.json --output "$RUNNER_TEMP/h48-download"
+      - name: Build runtime and native gate
         env:
           RUNTIME_BUILD_TYPE: relwithdebinfo
+          # The target pair must exist before it can be installed in the private
+          # language SDK. The complete gate below is mandatory before upload.
+          GC_UNIT_GATE_LANGUAGE_TESTS: defer
+        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+      - name: Complete gate with pinned language tuple and same-build target
         run: |
-          export CJC="$CANGJIE_HOME/bin/cjc"
-          export GC_UNIT_CJC_RUNTIME_LIB_DIR="$CANGJIE_HOME/runtime/lib/linux_x86_64_cjnative"
-          npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+          bash ci/release/gate_colour_runtime.sh runtime-source \
+            "$RUNNER_TEMP/h48-download/installed/tuple" "$RUNNER_TEMP/h48-active" \
+            .platform-ci/runtime-install
       - name: Package same-build runtime pair
         id: package
         run: |
@@ -115,6 +119,8 @@ jobs:
           name: colour-runtime-gate-diagnostics
           path: |
             ci/runtime_pin.env
+            ci/h48_language_tuple_pin.json
+            ${{ runner.temp }}/h48-active.env
             runtime-source/runtime/**/gate_run.log
             runtime-source/runtime/**/gc_unit_gate.status
             runtime-source/runtime/**/runtime-build-config.txt
