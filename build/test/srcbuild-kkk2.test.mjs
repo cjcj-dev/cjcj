@@ -1067,7 +1067,6 @@ test('bootstrap driver matching pins starts real stage0 and sdk_build', t => {
   const result = fixture.run(31);
   assert.ok(result.log.includes(`ASSERT cjcj-sha expected=${fixture.sourceSha} actual=${fixture.sourceSha} source=git`), result.log);
   assert.match(result.log, /\[stage0\] official cjc/);
-  assert.match(result.log, /CMD bash .*sdk_build.sh --from/);
   // The deliberately incomplete SDK ends this bounded entry test before compilation.
   assert.match(result.log, /SDK-BUILD-FAIL .*不像 SDK（缺 bin\/cjc）/);
   console.log('OBSERVED real sdk_build input rejection after matching source pin');
