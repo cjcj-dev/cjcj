@@ -451,6 +451,7 @@ run_shape_check() {
   make_std_fixture "$TMP/std1"
   [ -z "$missing" ] || rm "$TMP/std1/$missing"
   make_fake_nm
+  # Sourcing bypasses main(); initialize the same host layout before checking it.
   PATH="$TMP/fakebin:$PATH" BOOTSTRAP_TEST_INT64_COUNT="$count" \
     bash -c 'source "$1"; STAGE=test-A1; host_tuple_init; DRY=0; assert_std_install_shape "$2" "$3" stdlib-stage2' \
       bash "$PRODUCT" "$TMP/std1" "$TMP/std0"
@@ -815,6 +816,7 @@ case "${1:-test}" in
     run_shape_check 2 > "$TMP/shape-positive.log"
     /usr/bin/grep -q 'shape=ok Int64.ti=2 FFI-archives=1 FFI-set-equal=1' "$TMP/shape-positive.log" ||
       fail A1 'positive stdlib shape arm did not pass'
+    echo 'PASS A1 positive stdlib install shape'
     make_isolation_fixture
     run_isolation_check "$PRODUCT" > "$TMP/isolation-positive.log"
     /usr/bin/grep -q 'shape=ok Int64.ti=2 FFI-archives=1' "$TMP/isolation-positive.log" ||
