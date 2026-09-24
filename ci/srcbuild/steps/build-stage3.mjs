@@ -3,6 +3,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {writeStdProvenance} from '../../../build/lib/provenance.mjs';
 import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
@@ -94,7 +95,9 @@ async function assertWriteBarriersWith(sdkRoot, coreLib, targetSpec) {
 
 async function assertStdBarriers(coreLib) {
   const symbolTable = await $({stdio: 'pipe'})`nm -A ${coreLib}`;
-  const hasMask = symbolTable.stdout.includes('g_cjLoadBadMask');
+  const colourCheck = fileURLToPath(new URL('../../bootstrap/std_runtime_colour.py', import.meta.url));
+  const colour = await $({stdio: 'pipe'})`python3 ${colourCheck} --std-colour ${coreLib}`;
+  const hasMask = colour.stdout.trim() === '1';
   const hasReadBarrier = /CJ_MCC_Read(?:StaticRef|RefField)/.test(symbolTable.stdout);
   if (!hasMask || !hasReadBarrier) {
     throw new Error(`final std barrier symbol assertion failed: mask=${hasMask} read_barrier=${hasReadBarrier}`);
