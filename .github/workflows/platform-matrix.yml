@@ -10,6 +10,20 @@ on:
         type: boolean
         default: false
 
+      std_evidence_only:
+        description: Only compile std evidence; no native gate verdict or publication
+        type: boolean
+        default: false
+      diagnostics_run_id:
+        description: Same-pin failed gate diagnostics run for std evidence
+        type: string
+      runtime_sha256:
+        description: Recorded target runtime digest for std evidence
+        type: string
+      boundscheck_sha256:
+        description: Recorded target boundscheck digest for std evidence
+        type: string
+
 permissions:
   contents: read
   actions: read
@@ -25,7 +39,16 @@ env:
   CJ_HEAP_SIZE: 12GB
 
 jobs:
+  std-input-evidence:
+    if: ${{ inputs.std_evidence_only }}
+    uses: ./.github/workflows/std-input-evidence.yml
+    with:
+      diagnostics_run_id: ${{ inputs.diagnostics_run_id }}
+      runtime_sha256: ${{ inputs.runtime_sha256 }}
+      boundscheck_sha256: ${{ inputs.boundscheck_sha256 }}
+
   colour-runtime:
+    if: ${{ !inputs.std_evidence_only }}
     name: Pinned Linux colour runtime
     runs-on: ubuntu-22.04
     steps:
@@ -157,18 +180,18 @@ jobs:
           retention-days: 7
 
   fixed-llvm-tuples:
-    if: ${{ !inputs.runtime_only }}
+    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only }}
     name: Build fixed LLVM tuples
     uses: ./.github/workflows/platform-tuples.yml
 
   patched-cjpm:
-    if: ${{ !inputs.runtime_only }}
+    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only }}
     name: Build patched cjpm
     uses: ./.github/workflows/build-cjpm.yml
     secrets: inherit
 
   windows-runtime:
-    if: ${{ !inputs.runtime_only }}
+    if: ${{ !inputs.runtime_only && !inputs.std_evidence_only }}
     name: Build Windows runtime
     uses: ./.github/workflows/build-windows-runtime.yml
     with:
@@ -177,7 +200,7 @@ jobs:
   platform:
     name: ${{ matrix.runner }} / runtime + cjcj + smoke
     needs: [fixed-llvm-tuples, patched-cjpm, windows-runtime]
-    if: ${{ always() && !inputs.runtime_only }}
+    if: ${{ always() && !inputs.runtime_only && !inputs.std_evidence_only }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     strategy:
