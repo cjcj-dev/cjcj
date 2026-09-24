@@ -9,6 +9,8 @@ import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, OBJ_C_BLOCK_IDENT,
 private let INTEROPLIB_PACKAGE_NAME: String = "objc.internal"
 private let INTEROPLIB_OBJ_C_ID: String = "ObjCId"
 private let INTEROPLIB_NATIVE_OBJ_C_ID: String = "NativeObjCId"
+private let INTEROPLIB_NATIVE_OBJ_C_ID_MARKER: String = "NativeObjCIdMarker"
+private let INTEROPLIB_NATIVE_OBJ_C_ID_MARKER_INSTANCE: String = "__NATIVE_OBJC_ID_MARKER"
 private let INTEROPLIB_NATIVE_OBJ_C_SEL: String = "NativeObjCSel"
 private let INTEROPLIB_NATIVE_OBJ_C_SUPER_PTR: String = "NativeObjCSuperPtr"
 private let INTEROPLIB_NATIVE_OBJ_C_CLASS: String = "NativeObjCClass"
@@ -70,6 +72,8 @@ public class InteropLibBridge {
     // C++ InteropLibBridge.cpp:89-230 uses function-local statics. Cangjie only supports static
     // members, so the outer Option is initialization state and the inner Option caches a failed lookup.
     private static var forwarderMutexDecl: Option<Option<TypeAliasDecl>> = None
+    private static var nativeObjCIdMarkerDecl: Option<Option<StructDecl>> = None
+    private static var nativeObjCIdMarkerInstance: Option<Option<VarDecl>> = None
     private static var nativeObjCIdDecl: Option<Option<TypeAliasDecl>> = None
     private static var objCIdDecl: Option<Option<InterfaceDecl>> = None
     private static var nativeObjCSelDecl: Option<Option<TypeAliasDecl>> = None
@@ -193,6 +197,25 @@ public class InteropLibBridge {
         InteropLibBridge.nativeObjCIdDecl = Some(result)
         return result
     }
+    // Upstream 0d3c5230, InteropLibBridge.cpp:92-102.
+    public func GetNativeObjCIdMarkerDecl(): Option<StructDecl> {
+        if (let Some(result) <- InteropLibBridge.nativeObjCIdMarkerDecl) { return result }
+        let result = GetInteropLibDecl<StructDecl>(INTEROPLIB_NATIVE_OBJ_C_ID_MARKER, ASTKind.STRUCT_DECL)
+        InteropLibBridge.nativeObjCIdMarkerDecl = Some(result)
+        return result
+    }
+
+    public func GetNativeObjCIdMarkerInstance(): Option<VarDecl> {
+        if (let Some(result) <- InteropLibBridge.nativeObjCIdMarkerInstance) { return result }
+        let result = GetInteropLibDecl<VarDecl>(INTEROPLIB_NATIVE_OBJ_C_ID_MARKER_INSTANCE, ASTKind.VAR_DECL)
+        InteropLibBridge.nativeObjCIdMarkerInstance = Some(result)
+        return result
+    }
+
+    public func GetNativeObjCIdMarkerTy(): Option<Ty> {
+        return GetNativeObjCIdMarkerDecl().getOrThrow().GetTy()
+    }
+
     public func GetObjCIdDecl(): Option<InterfaceDecl> {
         if (let Some(result) <- InteropLibBridge.objCIdDecl) { return result }
         let result = GetObjCLangDecl<InterfaceDecl>(INTEROPLIB_OBJ_C_ID, ASTKind.INTERFACE_DECL)
