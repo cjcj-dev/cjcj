@@ -680,6 +680,7 @@ assemble_stage1_sdk() {
 # processes use CRT. It is discarded before the target SDK is assembled.
 bootstrap_target_std() {
   local compiler="$1" std="$2" sdk="$WORK/sdk-std-bootstrap" compiler_sha=planned target_lib
+  local link_root="$WORK/std-runtime-link" native dynamic file arch
   target_lib=$(runtime_dir "$CRT")
   cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --host --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --force"
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
@@ -692,9 +693,26 @@ bootstrap_target_std() {
     record std-bootstrap-target-runtime "$target_lib/libcangjie-runtime.so"
   fi
   cmd "bash $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha") $(printf '%q' "$WORK/sdk-stage0-run") $(printf '%q' "$COLOUR_LLVM_SHA256") $(printf '%q' "$target_lib")"
-  stdlib_build stdlib-stage1 "$sdk" "$HRT" "$std" "" "$target_lib"
+  # stdlib's common-layout probe selects the FIRST runtime search path. A
+  # bare --target-lib directory is too late: its fallback is the host SDK.
+  arch=${HOST_TUPLE#linux_}
+  arch=${arch%_cjnative}
+  native="$link_root/common/linux_relwithdebinfo_$arch/lib/$HOST_TUPLE"
+  dynamic="$link_root/common/linux_relwithdebinfo_$arch/runtime/lib/$HOST_TUPLE"
+  cmd "rm -rf -- $(printf '%q' "$link_root")"
+  cmd "mkdir -p $(printf '%q' "$native") $(printf '%q' "$dynamic")"
+  for file in libcangjie-aio.a cjstart.o cjld.shared.lds discard_eh_frame.lds; do
+    cmd "install -m644 $(printf '%q' "$sdk/lib/$HOST_TUPLE/$file") $(printf '%q' "$native/$file")"
+    [ "$DRY" -eq 1 ] || record std-bootstrap-native "$native/$file"
+  done
+  for file in libcangjie-runtime.so libboundscheck.so; do
+    cmd "install -m644 $(printf '%q' "$target_lib/$file") $(printf '%q' "$dynamic/$file")"
+    [ "$DRY" -eq 1 ] || record std-bootstrap-target "$dynamic/$file"
+  done
+  stdlib_build stdlib-stage1 "$sdk" "$HRT" "$std" "" "$link_root"
   cmd "python3 $(printf '%q' "$(dirname "$SDK_BUILD")/std_runtime_colour.py") --runtime $(printf '%q' "$target_lib/libcangjie-runtime.so") --std $(printf '%q' "$std/lib/$HOST_TUPLE/libcangjie-std-core.a") --source $(printf '%q' "$STDSRC")"
   cmd "rm -rf -- $(printf '%q' "$sdk")"
+  cmd "rm -rf -- $(printf '%q' "$link_root")"
 }
 
 stage1() {

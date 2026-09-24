@@ -149,7 +149,7 @@ check_dry_contract() {
   check_count LLVM-RULER 1 'ASSERT official-opt-zero ruler=strings .* hits=0' "$log"
   check_count LLVM-RULER 2 'ASSERT colour-opt-stamp ruler=strings .* hits=1' "$log"
   check_count STD-BOOTSTRAP 1 'sdk_build.sh .*--to .*sdk-std-bootstrap --host --llvm-tuple' "$log"
-  check_count STD-BOOTSTRAP 1 'CMD env .*CANGJIE_HOME=.*/sdk-std-bootstrap .*bash .*/stdsrc .* .*/colour-rt .*/stdlib-stage1' "$log"
+  check_count STD-BOOTSTRAP 1 'CMD env .*CANGJIE_HOME=.*/sdk-std-bootstrap .*bash .*/stdsrc .* .*/std-runtime-link .*/stdlib-stage1' "$log"
   # stage1 assembles the SDK on both sides of the target stdlib build.
   # Counts alone would also accept two assemblies using the old stdlib.
   local assembly_order
@@ -158,6 +158,7 @@ check_dry_contract() {
     /^\[stage1\]/ { print "stage1" }
     /^ASSERT stdlib-stage1 shape=planned / { print "initial-std-built" }
     /^CMD rm -rf -- .*\/sdk-std-bootstrap$/ { print "bootstrap-sdk-removed" }
+    /^CMD rm -rf -- .*\/std-runtime-link$/ { print "runtime-link-cleared" }
     /^CMD .*sdk_build\.sh .*--to .*\/sdk-stage1 --target / {
       if ($0 ~ / --std .*\/stdlib-stage1 --verify-host-rt /) print "assemble-old"
       else if ($0 ~ / --std .*\/stdlib-stage2 --verify-host-rt /) print "assemble-new"
@@ -166,7 +167,7 @@ check_dry_contract() {
     /^ASSERT stage1-compiler executable=planned path=.*\/sdk-stage1\/bin\/cjc$/ { print "executable" }
     /^ASSERT stdlib-stage2 shape=planned / { print "stdlib-built" }
   ' "$log")
-  [ "$assembly_order" = $'stage0\nstage1\ninitial-std-built\nbootstrap-sdk-removed\nassemble-old\nexecutable\nstdlib-built\nassemble-new\nexecutable' ] ||
+  [ "$assembly_order" = $'stage0\nstage1\nruntime-link-cleared\ninitial-std-built\nbootstrap-sdk-removed\nruntime-link-cleared\nassemble-old\nexecutable\nstdlib-built\nassemble-new\nexecutable' ] ||
     fail A3-order "unexpected stage1 SDK assembly sequence: $assembly_order"
   echo 'PASS dry stage1 SDK assembly count and order'
 }
