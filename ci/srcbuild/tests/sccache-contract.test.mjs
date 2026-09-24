@@ -34,6 +34,7 @@ function jobs(text) {
 // ci.yml / platform-matrix.yml: the patched runtime on a runtime-cache miss plus
 // the shim objects, per runner (the runtime links the builder's glibc).
 const CXX_JOBS = new Map([
+  ['build-host-llvm.yml/host', {component: 'host-llvm', pin: /steps\.pin\.outputs\.sha/}],
   ['build-llvm-dylib.yml/dylib', {component: '${{ inputs.cache-component }}', pin: /steps\.pin\.outputs\.sha/}],
   ['build-llvm-tools.yml/build-tools', {component: 'llvm', pin: /steps\.llvm-pin\.outputs\.sha/}],
   ['platform-tuples.yml/build-tuple', {component: 'llvm-tuple', pin: /steps\.llvm-pin\.outputs\.sha/}],

@@ -5,6 +5,11 @@ on:
     branches: [debug/llc-build]
   workflow_dispatch:
     inputs:
+      publish_host:
+        description: Build the separately pinned, uncoloured bootstrap host LLVM SO.
+        required: false
+        type: boolean
+        default: false
       cache-component:
         description: Isolated dylib cache namespace; reuse for a cold/warm pair.
         required: false
@@ -45,7 +50,12 @@ permissions:
   contents: read
 
 jobs:
+  host:
+    if: inputs.publish_host
+    uses: ./.github/workflows/build-host-llvm.yml
+
   tuple:
+    if: ${{ !inputs.publish_host || inputs.publish_tuple || inputs.publish_dylib }}
     uses: ./.github/workflows/build-llvm-tools.yml
     with:
       platforms: ${{ inputs.platforms || 'all' }}
