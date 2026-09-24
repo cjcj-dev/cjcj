@@ -26,7 +26,7 @@ def publish(args):
     manifest = verify(args.package / "tuple", args.manifest_sha256, args.compiler_sha256)
     require(manifest["provenance"]["execution"]["kind"] == "retained-build", "H48_RETAINED_BUILD_REQUIRED")
     source = manifest["provenance"]["sources"]["compiler"]["commit"]
-    archives = list(args.package.glob("language-tuple-*.tar.gz"))
+    archives = list(args.package.glob("h48-language-tuple-*.tar.gz"))
     require(len(archives) == 1, "H48_ARCHIVE_COUNT")
     archive = archives[0]
     archive_sha = digest(archive)
@@ -35,12 +35,15 @@ def publish(args):
         unpack(argparse.Namespace(archive=archive, archive_sha256=archive_sha,
                output=Path(temporary) / "extracted", manifest_sha256=args.manifest_sha256,
                compiler_sha256=args.compiler_sha256))
-    tag = f"h48-{source}-{archive_sha[:12]}-prerelease"
+    tag = f"h48-{source}-{archive_sha[:12]}-provenance-partial-prerelease"
     notes = args.package / "release-notes.md"
     notes.write_text(f"Retained H48 language tuple. Compiler source: `{source}`.\n\n"
                      "These are retained build bytes, not a rebuild of current master. "
                      "See the provenance manifest for each component's source and build evidence. "
-                     "Compiler host runtime and coloured target runtime are separate.\n")
+                     "Std source SHA was not recorded; its exact bytes and compiler/backend inputs are pinned. "
+                     "Source traceability is tracked in cjcj#135. "
+                     "Only the official compiler host runtime is included; the consumer must build "
+                     "its coloured target runtime from its own immutable source pin.\n")
     gh("release", "create", tag, "--repo", REPOSITORY, "--target", source,
        "--title", tag, "--notes-file", str(notes), "--draft", "--prerelease", "--latest=false")
     named_manifest = args.package / f"h48-{source}-provenance.json"

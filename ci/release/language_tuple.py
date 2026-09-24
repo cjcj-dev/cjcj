@@ -23,11 +23,22 @@ ROLES = {
     "stdlib": f"sdk/lib/{TUPLE}/libcangjie-std-core.a",
     "llc": "sdk/third_party/llvm/bin/llc",
     "opt": "sdk/third_party/llvm/bin/opt",
-    "target_runtime": f"sdk/runtime/lib/{TUPLE}/libcangjie-runtime.so",
-    "target_boundscheck": f"sdk/runtime/lib/{TUPLE}/libboundscheck.so",
     "host_runtime": f"host/runtime/lib/{TUPLE}/libcangjie-runtime.so",
     "host_boundscheck": f"host/runtime/lib/{TUPLE}/libboundscheck.so",
 }
+# H48 retained SDK contains stale backend manifests and a target SO whose source
+# cannot be recovered. Neither is an input to this language-toolchain handoff.
+# The producer of the target runtime supplies its own pinned build separately.
+EXCLUDED = (
+    f"sdk/runtime/lib/{TUPLE}/libcangjie-runtime.so",
+    f"sdk/runtime/lib/{TUPLE}/libboundscheck.so",
+    "sdk/third_party/llvm/lib/libboundscheck.so",
+    "sdk/third_party/llvm/MANIFEST",
+    "sdk/third_party/llvm/SHA256SUMS",
+    "sdk/third_party/llvm/lib/STATIC_LLVM.txt",
+    "sdk/third_party/llvm/fixed-llc",
+    f"sdk/lib/{TUPLE}/libcangjie-ast-support.a",
+)
 
 
 def require(condition, message):
@@ -65,10 +76,16 @@ def inventory(root):
 
 
 def validate_provenance(value):
-    for name in ("compiler", "stdlib", "llvm", "target_runtime"):
+    for name in ("compiler", "llvm"):
         component = value["sources"][name]
         require(re.fullmatch(r"[0-9a-f]{40}", component["commit"]), f"TUPLE_SOURCE_SHA {name}")
         require(component["repository"].startswith("https://"), f"TUPLE_SOURCE_REPOSITORY {name}")
+    require(value["qualification"] == "H48-provenance-partial", "TUPLE_QUALIFICATION")
+    require(value["sources"]["stdlib"]["commit"] == "unrecorded", "TUPLE_STD_SOURCE_NOT_RECORDED")
+    require(value["sources"]["stdlib"]["follow_up"] == "cjcj-dev/cjcj#135", "TUPLE_STD_SOURCE_DEBT")
+    for name in ("compiler", "llc", "opt"):
+        require(value["sources"]["stdlib"]["inputs_sha256"][name] == value["role_sha256"][name],
+                f"TUPLE_STD_INPUT {name}")
     require(value["host_sdk"]["identity"], "TUPLE_HOST_IDENTITY")
     require(value["execution"]["kind"] in ("github-actions", "retained-build"), "TUPLE_EXECUTION")
     if value["execution"]["kind"] == "github-actions":
@@ -87,6 +104,9 @@ def verify(root, expected_manifest, expected_compiler):
     require(manifest["schema"] == 1 and manifest["platform"] == TUPLE, "TUPLE_SCHEMA_MISMATCH")
     validate_provenance(manifest["provenance"])
     require(manifest["roles"] == ROLES, "TUPLE_ROLES_MISMATCH")
+    require(manifest["excluded"] == list(EXCLUDED), "TUPLE_EXCLUSION_CONTRACT")
+    for name in EXCLUDED:
+        require(not (root / name).exists(), f"TUPLE_EXCLUDED_PAYLOAD {name}")
     actual = inventory(root)
     require(actual.keys() == manifest["files"].keys(), "TUPLE_FILE_SET_MISMATCH")
     for name, record in actual.items():
@@ -94,11 +114,18 @@ def verify(root, expected_manifest, expected_compiler):
     for role, name in ROLES.items():
         require(actual[name].get("sha256") == manifest["provenance"]["role_sha256"][role],
                 f"TUPLE_ROLE_IDENTITY_MISMATCH {role}")
+    payloads = manifest["provenance"]["payloads"]
+    require(payloads.keys() == actual.keys(), "TUPLE_PAYLOAD_PROVENANCE_SET")
+    for name, record in actual.items():
+        receipt = payloads[name]
+        require(receipt["origin"] in ("compiler", "llvm", "stdlib", "official-sdk"),
+                f"TUPLE_PAYLOAD_ORIGIN {name}")
+        expected_file = ROLES["compiler"] if name in ALIASES else name
+        require(receipt["sha256"] == manifest["files"][expected_file]["sha256"],
+                f"TUPLE_PROVENANCE_DIGEST {name}")
     require(actual[ROLES["compiler"]]["sha256"] == expected_compiler, "TUPLE_COMPILER_IDENTITY_MISMATCH")
     for name in ALIASES:
         require(actual.get(name) == {"link": ALIASES[name]}, f"TUPLE_COMPILER_ENTRY_MISMATCH {name}")
-    require(actual[ROLES["host_runtime"]]["sha256"] != actual[ROLES["target_runtime"]]["sha256"],
-            "TUPLE_HOST_TARGET_NOT_SEPARATE")
     return manifest
 
 
@@ -115,17 +142,23 @@ def pack(args):
         file = root / name
         file.unlink(missing_ok=True)
         file.symlink_to(ALIASES[name])
+    for name in EXCLUDED:
+        file = root / name
+        if file.is_dir():
+            shutil.rmtree(file)
+        else:
+            file.unlink(missing_ok=True)
     host = root / "host/runtime/lib" / TUPLE
     host.mkdir(parents=True)
     for name in ("libcangjie-runtime.so", "libboundscheck.so"):
         shutil.copy2(args.host / name, host / name)
     manifest = {"schema": 1, "platform": TUPLE, "provenance": provenance,
-                "roles": ROLES, "files": inventory(root)}
+                "roles": ROLES, "excluded": list(EXCLUDED), "files": inventory(root)}
     write_json(root / "language-tuple.json", manifest)
     manifest_sha = digest(root / "language-tuple.json")
     verify(root, manifest_sha, provenance["role_sha256"]["compiler"])
     source = provenance["sources"]["compiler"]["commit"]
-    archive = args.output / f"language-tuple-linux-x86_64-{source}.tar.gz"
+    archive = args.output / f"h48-language-tuple-linux-x86_64-{source}-provenance-partial.tar.gz"
     with tarfile.open(archive, "w:gz", dereference=False) as tar:
         tar.add(root, arcname="tuple")
     shutil.copy2(root / "language-tuple.json", args.output / "language-tuple.json")
@@ -188,8 +221,7 @@ def main():
         if args.env:
             root = args.root.resolve()
             values = {"CJC": root / "sdk/bin/cjc", "CANGJIE_HOME": root / "sdk",
-                      "GC_UNIT_CJC_RUNTIME_LIB_DIR": root / "host/runtime/lib" / TUPLE,
-                      "GCV2_RUNTIME_LIB_DIR": root / "sdk/runtime/lib" / TUPLE}
+                      "GC_UNIT_CJC_RUNTIME_LIB_DIR": root / "host/runtime/lib" / TUPLE}
             for key, value in values.items():
                 print(f"export {key}={shlex.quote(str(value))}")
         else:

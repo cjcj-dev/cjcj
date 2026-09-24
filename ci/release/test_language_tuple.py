@@ -26,13 +26,24 @@ class LanguageTupleTest(unittest.TestCase):
             file.chmod(0o755)
         (self.sdk / "modules/secondary.cjo").write_text("synthetic module\n")
         self.provenance = {
+            "qualification": "H48-provenance-partial",
             "sources": {role: {"commit": "a" * 40, "repository": "https://example.invalid/fixture"}
-                        for role in ("compiler", "stdlib", "llvm", "target_runtime")},
+                        for role in ("compiler", "llvm")},
             "host_sdk": {"identity": "synthetic fixture, not a publishable SDK"},
             "execution": {"kind": "retained-build", "evidence": "test fixture only"},
             "role_sha256": {role: product.digest(self.root / "input" / name)
                             for role, name in product.ROLES.items()},
         }
+        self.provenance["sources"]["stdlib"] = {
+            "commit": "unrecorded", "follow_up": "cjcj-dev/cjcj#135",
+            "inputs_sha256": {name: self.provenance["role_sha256"][name] for name in ("compiler", "llc", "opt")},
+        }
+        self.provenance["payloads"] = {
+            file.relative_to(self.root / "input").as_posix(): {"origin": "stdlib", "sha256": product.digest(file)}
+            for file in (self.root / "input").rglob("*") if file.is_file()
+        }
+        for name in product.ALIASES:
+            self.provenance["payloads"][name] = {"origin": "compiler", "sha256": self.provenance["role_sha256"]["compiler"]}
         self.provenance_file = self.root / "provenance.json"
         product.write_json(self.provenance_file, self.provenance)
         self.output = self.root / "package"
