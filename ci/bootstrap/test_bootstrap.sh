@@ -176,6 +176,7 @@ make_sdk_fixture() {
   cc -shared -fPIC "$TMP/host-runtime.c" -o "$base/runtime/lib/linux_x86_64_cjnative/libboundscheck.so"
   cc -c "$TMP/host-runtime.c" -o "$TMP/host-runtime.o"
   ar rcs "$base/lib/linux_x86_64_cjnative/libcangjie-runtime.a" "$TMP/host-runtime.o"
+  ar rcs "$base/lib/linux_x86_64_cjnative/libcangjie-std-core.a" "$TMP/host-runtime.o"
   printf '%s\n' '#!/usr/bin/env bash' 'export PATH="$(dirname "${BASH_SOURCE[0]}")/bin:$PATH"' > "$base/envsetup.sh"
 }
 
@@ -213,6 +214,11 @@ make_runtime_payload() {
 
 run_sdk_runtime() {
   local product="$1" source="$2" to="$3"
+  # Runtime-layout tests need a complete target std fixture too.
+  printf 'extern int g_cjLoadBadMask; int *std_reference = &g_cjLoadBadMask;\n' > "$TMP/target-std.c"
+  cc -c -fPIC "$TMP/target-std.c" -o "$TMP/target-std.o"
+  rm -f "$TMP/sdk-base/lib/linux_x86_64_cjnative/libcangjie-std-core.a"
+  ar rcs "$TMP/sdk-base/lib/linux_x86_64_cjnative/libcangjie-std-core.a" "$TMP/target-std.o"
   bash "$product" --from "$TMP/sdk-base" --to "$to" --target --runtime "$source" --force
 }
 
