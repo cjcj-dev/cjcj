@@ -26,8 +26,10 @@ await consumeFinalCompiler({directory: compilerDirectory, platform: 'linux-x64',
 if (compiler.production.stage !== 'stage3' || stdReceipt.source.commit !== runtimeSha
     || stdReceipt.compilerSource?.commit !== cjcjSha
     || compiler.production.source?.commit !== cjcjSha
+    || JSON.stringify(stdReceipt.compilerSource) !== JSON.stringify(compiler.production.source)
+    || compiler.production.stdCompilerSha256 !== compiler.artifact.sha256
     || runtime.runtime_sha !== runtimeSha
-    || compiler.production.parentSha256 !== stdReceipt.inputs.compiler) {
+    || compiler.artifact.sha256 !== stdReceipt.inputs.compiler) {
   throw new Error('source tuple stage/source/parent mismatch');
 }
 if (await fileSha256(path.join(sdk, 'bin/cjc')) !== compiler.artifact.sha256

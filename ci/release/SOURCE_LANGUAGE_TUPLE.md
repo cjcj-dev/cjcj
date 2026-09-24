@@ -32,5 +32,13 @@ additionally needs the archive digest. `activate` verifies the tuple and the
 external target pair, copies a private SDK, and emits the separated environment.
 No target pair is included in the published archive.
 
+The shipped std is rebuilt with the exact shipped stage3 executable. Its
+`compilerSource` and compiler digest must match the final compiler, while
+`production.bootstrap.parentSource` explicitly identifies the older bootstrap.
+`CJCJ_STAGE3_PHASE=compiler` retains a compiler checkpoint;
+`CJCJ_STAGE3_PHASE=std` validates that checkpoint and resumes the std build.
+The default `all` completes both in that order. Language-tuple builds retain
+the source compiler version without editing its source declaration.
+
 Implementation and real-artifact qualification are in progress. This document
 is not a claim that a source tuple has been published or passed its language gate.

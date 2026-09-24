@@ -9,7 +9,8 @@ import {getTarget} from '../../../build/lib/targets.mjs';
 import {assertFinalStd} from '../lib/final-std.mjs';
 import {resolveProductBinary} from '../lib/product-binary.mjs';
 import {prepareBootstrapHandoff} from '../lib/bootstrap-handoff.mjs';
-import {stdIdentity} from '../lib/final-compiler.mjs';
+import {stdIdentity, payloadIdentity} from '../lib/final-compiler.mjs';
+import {installStage3Compiler} from '../lib/compose-install.mjs';
 import {captureBuildInputs, finishBuildReceipt, sourceIdentity} from '../lib/source-build-receipt.mjs';
 import {assertWriteBarriers} from '../lib/write-barrier.mjs';
 
@@ -65,16 +66,16 @@ async function findProductBinary(phase) {
   return resolveProductBinary(path.join(githubWorkspace, 'target', 'release', 'bin'), phase);
 }
 
-async function assertStage2Compiler(stageEnv, stage2Sha) {
-  const installed = path.join(sdk, 'bin', 'cjcj-stage2');
+async function assertBuildCompiler(stageEnv, expectedSha, nativeName = 'cjcj-stage2', entrySha = compilerEntrySha) {
+  const installed = path.join(sdk, 'bin', nativeName);
   const linked = path.join(sdk, 'bin', 'cjc');
   const resolvedLink = await fs.realpath(linked);
   const resolvedInstalled = await fs.realpath(installed);
   const command = await $({cwd: githubWorkspace, env: stageEnv, stdio: 'pipe'})`command -v cjc`;
   const resolvedCommand = await fs.realpath(command.stdout.trim());
   const installedSha = await sha256(installed);
-  if (resolvedCommand !== resolvedLink || installedSha !== stage2Sha || await sha256(linked) !== compilerEntrySha) {
-    throw new Error(`stage2 compiler assertion failed: link=${resolvedLink}, command=${resolvedCommand}, expected=${resolvedInstalled}, sha=${installedSha}`);
+  if (resolvedCommand !== resolvedLink || installedSha !== expectedSha || await sha256(linked) !== entrySha) {
+    throw new Error(`build compiler assertion failed: link=${resolvedLink}, command=${resolvedCommand}, expected=${resolvedInstalled}, sha=${installedSha}`);
   }
   console.log(`STAGE3_COMPILER_ASSERT_PASS path=${resolvedInstalled} sha256=${installedSha}`);
 }
@@ -208,12 +209,73 @@ if (runtimeIdentity.runtime_sha !== requiredEnv('RUNTIME_REF')
   throw new Error('STAGE3_RUNTIME_SOURCE_OR_PAYLOAD_MISMATCH');
 }
 console.log(`STAGE3_RUNTIME_ASSERT_PASS symbol=g_cjLoadBadMask count=${maskCount} source=${runtimeIdentity.runtime_sha} runtime_sha256=${runtimeSha} manifest_sha256=${runtimeManifestSha}`);
-await assertStage2Compiler(stageEnv, stage2Sha);
+await assertBuildCompiler(stageEnv, stage2Sha);
 await $({cwd: githubWorkspace, env: stageEnv})`set -o pipefail; cjc --version | head -2`;
 
 const bootstrapCore = path.join(sdk, 'lib', tuple, 'libcangjie-std-core.a');
 if (!await exists(bootstrapCore)) throw new Error(`bootstrap std core missing: ${bootstrapCore}`);
 const bootstrapCoreSha = await sha256(bootstrapCore);
+
+// Stage2 is a pinned bootstrap input, not the compiler shipped with the std.
+// Keep a validated compiler checkpoint so a continuation can resume std alone.
+const phase = process.env.CJCJ_STAGE3_PHASE || 'all';
+if (!['all', 'compiler', 'std'].includes(phase) || (dryRun && phase !== 'all')) {
+  throw new Error('CJCJ_STAGE3_PHASE must be all, compiler or std; dry-run supports all');
+}
+const checkpoint = path.join(workspace, 'software', 'stage3-bootstrap.json');
+const retainedProduct = path.join(workspace, 'software', 'stage3-compiler');
+const parentStd = path.join(bootstrapWork, 'stdlib-stage2');
+const linkStdSha256 = await payloadIdentity(parentStd);
+if (await payloadIdentity(sdk, parentStd) !== linkStdSha256) throw new Error('stage3 bootstrap std installation mismatch');
+let stage3Lineage;
+if (dryRun) {
+  console.log('[stage3][dry-run] build stage3 with stage2, then rebuild shipped std with stage3');
+} else if (phase === 'std') {
+  stage3Lineage = JSON.parse(await fs.readFile(checkpoint, 'utf8'));
+  if (await sha256(retainedProduct) !== stage3Lineage.compilerSha256
+      || stage3Lineage.parentSha256 !== stage2Sha || stage3Lineage.linkStdSha256 !== linkStdSha256
+      || stage3Lineage.runtimeSha256 !== runtimeSha
+      || stage3Lineage.runtimeManifestSha256 !== runtimeManifestSha
+      || stage3Lineage.llvmManifestSha256 !== await sha256(path.join(requiredEnv('CJCJ_FIXED_LLVM_DIR'), 'llvm-tools.manifest'))
+      || stage3Lineage.llvmLibrarySha256 !== await sha256(path.join(sdk, 'third_party', 'llvm', 'lib', target.spec.os === 'darwin' ? 'libLLVM.dylib' : 'libLLVM-15.so'))
+      || JSON.stringify(stage3Lineage.source) !== JSON.stringify(sourceIdentity(path.join(githubWorkspace, 'packages')))) {
+    throw new Error('stage3 std resume checkpoint identity mismatch');
+  }
+} else {
+  const source = sourceIdentity(path.join(githubWorkspace, 'packages'));
+  // The C provenance object must be rebuilt for this compiler source, rather
+  // than retaining the older bootstrap compiler's embedded commit stamp.
+  await $({cwd: githubWorkspace, env: {...stageEnv,
+    CANGJIE_CPP_SRC: path.join(workspace, 'cangjie_compiler'), CJCJ_COMMIT: source.commit,
+    CJCJ_LLVM_SHIM_O: path.join(requiredEnv('CJCJ_FIXED_LLVM_DIR'), 'cjselfhost_llvmshim.o')}})
+    `npx --yes zx@8 ${path.join(githubWorkspace, 'runtime_shim', 'build_shim.mjs')}`;
+  await $({cwd: githubWorkspace, env: stageEnv})`cjpm clean`;
+  await $({cwd: githubWorkspace, env: {...stageEnv, cjHeapSize: '20GB'}})`cjpm build -j 1`;
+  if (JSON.stringify(sourceIdentity(path.join(githubWorkspace, 'packages'))) !== JSON.stringify(source)) {
+    throw new Error('stage3 compiler source changed during build');
+  }
+  const product = await findProductBinary('stage3');
+  await fs.copyFile(product, retainedProduct);
+  await fs.chmod(retainedProduct, 0o755);
+  stage3Lineage = {
+    compilerSha256: await sha256(retainedProduct), parentSha256: stage2Sha,
+    bootstrap: {parentSource: sourceIdentity(path.join(bootstrapWork, 'cjcj-src-stage1', 'packages'))},
+    linkStdSha256, stage: 'stage3', source, tuple, parentEntrySha256: compilerEntrySha,
+    projectSha256: await sha256(path.join(githubWorkspace, 'cjpm.toml')),
+    llvmLibrarySha256: await sha256(path.join(sdk, 'third_party', 'llvm', 'lib', target.spec.os === 'darwin' ? 'libLLVM.dylib' : 'libLLVM-15.so')),
+    shimSha256: {llvm: await sha256(path.join(githubWorkspace, 'runtime_shim', 'cjselfhost_llvmshim.o')),
+      runtimeConfig: await sha256(path.join(githubWorkspace, 'runtime_shim', 'cjc_runtime_config.o'))},
+    runtimeSha256: runtimeSha, runtimeManifestSha256: runtimeManifestSha,
+    llvmManifestSha256: await sha256(path.join(requiredEnv('CJCJ_FIXED_LLVM_DIR'), 'llvm-tools.manifest')),
+  };
+  await fs.writeFile(checkpoint, `${JSON.stringify(stage3Lineage, null, 2)}\n`);
+  console.log(`STAGE3_COMPILER_RETAINED path=${retainedProduct} sha256=${stage3Lineage.compilerSha256} source=${source.commit}`);
+}
+if (phase === 'compiler') process.exit(0);
+if (!dryRun) await installStage3Compiler({sdk, product: retainedProduct, lineage: stage3Lineage});
+const stdCompilerName = dryRun ? 'cjcj-stage2' : 'cjcj-stage1';
+const stdCompilerSha = dryRun ? stage2Sha : stage3Lineage.compilerSha256;
+const stdEntrySha = dryRun ? compilerEntrySha : stdCompilerSha;
 
 // Record inputs before the compiler runs. The receipt travels with final-std,
 // and stdIdentity binds it into the final compiler's existing handoff manifest.
@@ -223,9 +285,9 @@ const stdBuildInputs = dryRun ? null : await captureBuildInputs({
     stage3Recipe: new URL(import.meta.url),
     receiptRecipe: new URL('../lib/source-build-receipt.mjs', import.meta.url),
     stdRecipe: path.join(stdlibRoot, 'build.py'),
-    compiler: path.join(sdk, 'bin', 'cjcj-stage2'),
+    compiler: path.join(sdk, 'bin', stdCompilerName),
     compilerEntry: path.join(sdk, 'bin', 'cjc'),
-    compilerProject: path.join(bootstrapWork, 'cjcj-src-stage1', 'cjpm.toml'),
+    compilerProject: path.join(githubWorkspace, 'cjpm.toml'),
     llvmLibrary: path.join(sdk, 'third_party', 'llvm', 'lib', target.spec.os === 'darwin' ? 'libLLVM.dylib' : 'libLLVM-15.so'),
     llc: path.join(sdk, 'third_party', 'llvm', 'bin', 'llc-stage1'),
     opt: path.join(sdk, 'third_party', 'llvm', 'bin', 'opt-stage1'),
@@ -239,10 +301,10 @@ const stdBuildInputs = dryRun ? null : await captureBuildInputs({
       `python3 build.py install --prefix ${finalStd}`]},
 });
 if (!dryRun) {
-  stdBuildInputs.compilerSource = sourceIdentity(path.join(bootstrapWork, 'cjcj-src-stage1', 'packages'));
+  stdBuildInputs.compilerSource = stage3Lineage.source;
   stdBuildInputs.bootstrapStd = JSON.parse(await fs.readFile(path.join(bootstrapWork, 'stdlib-stage1', 'BOOTSTRAP-STD.json'), 'utf8'));
 }
-console.log('[stage3] rebuild final std with stage2');
+console.log('[stage3] rebuild final std with shipped stage3 compiler');
 if (dryRun) {
   console.log(`STAGE3_DRY_RUN_FAKE_ARTIFACTS=1 final_std=${finalStd}`);
   console.log(`[stage3][dry-run] python3 build.py clean; build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}; install --prefix ${finalStd}`);
@@ -250,14 +312,14 @@ if (dryRun) {
   await fs.rm(finalStd, {recursive: true, force: true});
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py clean`;
   await fs.rm(path.join(stdlibRoot, 'build', 'build'), {recursive: true, force: true});
-  await assertStage2Compiler(stageEnv, stage2Sha);
+  await assertBuildCompiler(stageEnv, stdCompilerSha, stdCompilerName, stdEntrySha);
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}`;
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
   await writeStdProvenance({
     sourceDir: stdlibRoot,
     installPrefix: finalStd,
     buildSdk: sdk,
-    compiler: path.join(sdk, 'bin', 'cjcj-stage2'),
+    compiler: path.join(sdk, 'bin', stdCompilerName),
   });
 }
 
@@ -265,7 +327,7 @@ await assertFinalStd(finalStd, target, {dryRun});
 const finalCore = path.join(finalStd, 'lib', tuple, 'libcangjie-std-core.a');
 const finalCoreSha = await sha256(finalCore);
 if (finalCoreSha === bootstrapCoreSha && allowIdenticalStdValue !== '1') {
-  throw new Error('stage2-built std is byte-identical to bootstrap std; provenance is inconclusive (set CJCJ_STAGE3_ALLOW_IDENTICAL_STD=1 only after independent proof)');
+  throw new Error('stage3-built std is byte-identical to bootstrap std; provenance is inconclusive (set CJCJ_STAGE3_ALLOW_IDENTICAL_STD=1 only after independent proof)');
 }
 if (!dryRun) {
   await assertStdBarriers(finalCore);
@@ -282,32 +344,11 @@ if (consumedCoreSha !== finalCoreSha) {
 }
 console.log(`STAGE3_STD_INPUT_ASSERT_PASS bootstrap_sha256=${bootstrapCoreSha} final_sha256=${finalCoreSha} sdk_sha256=${consumedCoreSha}`);
 
-console.log('[stage3] clean final compiler with stage2 + final std');
-await assertStage2Compiler(stageEnv, stage2Sha);
 if (dryRun) {
-  console.log('[stage3][dry-run] cjpm clean; cjpm build -j 1');
   console.log('STAGE3_DRY_RUN_REACHED_BUILD=1');
 } else {
-  await $({cwd: githubWorkspace, env: stageEnv})`cjpm clean`;
-  await $({cwd: githubWorkspace, env: {...stageEnv, cjHeapSize: '20GB'}})`cjpm build -j 1`;
-  const stage3Product = await findProductBinary('stage3');
-  const stage3Sha = await sha256(stage3Product);
-  await fs.writeFile(path.join(workspace, 'software', 'stage3-compiler.json'), `${JSON.stringify({
-    compilerSha256: stage3Sha,
-    parentSha256: stage2Sha,
-    stdSha256: await stdIdentity(finalStd),
-    stage: 'stage3',
-    source: sourceIdentity(path.join(githubWorkspace, 'packages')),
-    projectSha256: await sha256(path.join(githubWorkspace, 'cjpm.toml')),
-    llvmLibrarySha256: stdBuildInputs.inputs.llvmLibrary,
-    tuple,
-    parentEntrySha256: compilerEntrySha,
-    shimSha256: {
-      llvm: await sha256(path.join(githubWorkspace, 'runtime_shim', 'cjselfhost_llvmshim.o')),
-      runtimeConfig: await sha256(path.join(githubWorkspace, 'runtime_shim', 'cjc_runtime_config.o')),
-    },
-    runtimeSha256: await sha256(runtime),
-    llvmManifestSha256: await sha256(path.join(requiredEnv('CJCJ_FIXED_LLVM_DIR'), 'llvm-tools.manifest')),
-  }, null, 2)}\n`);
-  console.log(`STAGE3_BUILD_PASS compiler=${stage3Product} sha256=${stage3Sha} input_compiler_sha256=${stage2Sha} input_std_sha256=${finalCoreSha}`);
+  const lineage = {...stage3Lineage, stdSha256: await stdIdentity(finalStd),
+    stdCompilerSha256: stdCompilerSha};
+  await fs.writeFile(path.join(workspace, 'software', 'stage3-compiler.json'), `${JSON.stringify(lineage, null, 2)}\n`);
+  console.log(`STAGE3_BUILD_PASS compiler=${retainedProduct} sha256=${lineage.compilerSha256} std_compiler_sha256=${stdCompilerSha} std_sha256=${lineage.stdSha256}`);
 }

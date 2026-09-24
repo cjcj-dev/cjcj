@@ -55,7 +55,7 @@ def verify(root, manifest_sha256, compiler_sha256):
     require(compiler['source']['commit'] == value['sources']['cjcj'], 'SOURCE_TUPLE_COMPILER_SOURCE')
     require(std['source']['commit'] == value['sources']['runtime'], 'SOURCE_TUPLE_STD_SOURCE')
     require(std['compilerSource']['commit'] == value['sources']['cjcj']
-            and compiler['production']['source']['commit'] == value['sources']['cjcj'], 'SOURCE_TUPLE_BUILD_COMPILER_SOURCE')
+            and compiler['production']['source'] == std['compilerSource'], 'SOURCE_TUPLE_BUILD_COMPILER_SOURCE')
     require(std['inputs']['llvmLibrary'] == value['role_sha256']['llvm_library']
             == compiler['production']['llvmLibrarySha256'], 'SOURCE_TUPLE_LLVM_LIBRARY')
     require(runtime['runtime_sha'] == value['sources']['runtime']
@@ -65,7 +65,10 @@ def verify(root, manifest_sha256, compiler_sha256):
     require(value['build']['llvm']['LLVM_SHA'] == value['sources']['llvm'], 'SOURCE_TUPLE_LLVM_SOURCE')
     require(compiler['production']['stage'] == 'stage3', 'SOURCE_TUPLE_COMPILER_STAGE')
     require(compiler['artifact']['sha256'] == compiler_sha256, 'SOURCE_TUPLE_COMPILER_LINEAGE')
-    require(std['inputs']['compiler'] == compiler['production']['parentSha256'], 'SOURCE_TUPLE_STD_COMPILER')
+    require(std['inputs']['compiler'] == compiler['artifact']['sha256']
+            == compiler['production']['stdCompilerSha256'], 'SOURCE_TUPLE_STD_COMPILER')
+    require(re.fullmatch(r'[0-9a-f]{40}', compiler['production']['bootstrap']['parentSource']['commit']),
+            'SOURCE_TUPLE_BOOTSTRAP_SOURCE')
     require(std['products']['core'] == value['role_sha256']['stdlib'], 'SOURCE_TUPLE_STD_OUTPUT')
     for role in ('llc', 'opt'):
         require(std['inputs'][role] == value['role_sha256'][role], f'SOURCE_TUPLE_STD_INPUT {role}')

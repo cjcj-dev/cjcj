@@ -43,7 +43,7 @@ async function fixture(body) {
     }
     const hostPin = path.join(root, 'host-pins');
     await write(hostPin, hostPins.join('\n'));
-    const inputs = {compiler: 'd'.repeat(64), runtime: runtimeFiles[`runtime/lib/${tuple}/libcangjie-runtime.so`]};
+    const inputs = {compiler: await fileSha256(path.join(sdk, 'bin/cjc')), runtime: runtimeFiles[`runtime/lib/${tuple}/libcangjie-runtime.so`]};
     for (const name of ['llc', 'opt']) {
       await write(path.join(sdk, `third_party/llvm/bin/${name}-stage1`), `native backend fixture ${name}`);
       await write(path.join(sdk, `third_party/llvm/bin/${name}`), 'workspace wrapper fixture');
@@ -60,7 +60,7 @@ async function fixture(body) {
     const compilerSha = await fileSha256(path.join(sdk, 'bin/cjc'));
     await produceFinalCompiler({binary: path.join(sdk, 'bin/cjc'), outdir: compiler, platform: 'linux-x64',
       repository: 'https://github.com/cjcj-dev/cjcj.git', commit: 'a'.repeat(40), runId: '42', runAttempt: '1', std,
-      lineage: {stage: 'stage3', source: {commit: 'a'.repeat(40)}, llvmLibrarySha256: inputs.llvmLibrary, parentSha256: inputs.compiler, compilerSha256: compilerSha,
+      lineage: {stage: 'stage3', stdCompilerSha256: compilerSha, bootstrap: {parentSource: {commit: 'd'.repeat(40)}}, source: {commit: 'a'.repeat(40)}, llvmLibrarySha256: inputs.llvmLibrary, parentSha256: 'd'.repeat(64), compilerSha256: compilerSha,
         llvmManifestSha256: inputs.llvmManifest, stdSha256: await stdIdentity(std), runtimeSha256: inputs.runtime}});
     await json(path.join(runtime, 'manifest.json'), {runtime_sha: 'b'.repeat(40), files: runtimeFiles, build: {sourceCommit: 'b'.repeat(40), installed: runtimeFiles, buildInputs: {commands: ['synthetic build'], compiler_state: {fixture: true}}}});
     const pack = () => invoke('pack', '--sdk', sdk, '--std', std, '--compiler', compiler,
@@ -121,4 +121,19 @@ test('source consumer refuses a wrong externally pinned manifest digest', () => 
   const pin = await pins();
   pin[1] = '0'.repeat(64);
   assert.throws(() => invoke('verify', '--root', path.join(output, 'tuple'), ...pin), /SOURCE_TUPLE_MANIFEST_DIGEST/);
+}));
+
+
+test('source producer refuses std built by the bootstrap parent instead of shipped compiler', () => fixture(async ({root, std, pack}) => {
+  const receiptPath = path.join(std, 'SOURCE-BUILD.json');
+  const receipt = JSON.parse(await fs.readFile(receiptPath));
+  receipt.inputs.compiler = 'd'.repeat(64);
+  await json(receiptPath, receipt);
+  // Keep the outer std digest consistent: the refusal must concern compiler
+  // identity, rather than being hidden by a stale payload digest.
+  const compilerPath = path.join(root, 'compiler/FINAL-COMPILER-PROVENANCE.json');
+  const compiler = JSON.parse(await fs.readFile(compilerPath));
+  compiler.production.stdSha256 = await stdIdentity(std);
+  await json(compilerPath, compiler);
+  assert.throws(pack, /source tuple stage\/source\/parent mismatch/);
 }));

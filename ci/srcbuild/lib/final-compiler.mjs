@@ -8,7 +8,7 @@ export const fileSha256 = async file => crypto.createHash('sha256').update(await
 
 // Use the full installed std payload, including its producer manifest. The same
 // snapshot is checked at the producer and immediately before package selection.
-export async function stdIdentity(root, layoutRoot = root) {
+export async function payloadIdentity(root, layoutRoot = root) {
   const entries = [];
   async function walk(directory) {
     for (const item of (await fs.readdir(directory, {withFileTypes: true})).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -20,9 +20,13 @@ export async function stdIdentity(root, layoutRoot = root) {
       else if (item.isFile()) entries.push([relative, 'file', await fileSha256(installed)]);
     }
   }
-  await fs.stat(path.join(root, 'PROVENANCE.txt'));
   await walk(layoutRoot);
   return crypto.createHash('sha256').update(JSON.stringify(entries)).digest('hex');
+}
+
+export async function stdIdentity(root, layoutRoot = root) {
+  await fs.stat(path.join(root, 'PROVENANCE.txt'));
+  return payloadIdentity(root, layoutRoot);
 }
 
 export async function produceFinalCompiler({binary, outdir, platform, repository, commit, runId, runAttempt, std, lineage}) {

@@ -280,8 +280,13 @@ jobs:
         id: version
         env:
           REQUESTED_REF: ${{ inputs.cangjie_ref }}
+          BUILD_LANGUAGE_TUPLE: ${{ inputs.language_tuple }}
         run: |
-          value=$(npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --cangjie-version "$REQUESTED_REF" print-version)
+          if [ "$BUILD_LANGUAGE_TUPLE" = true ]; then
+            value=$(node --input-type=module -e 'import fs from "node:fs"; const s=fs.readFileSync("packages/basic/src/Version.cj","utf8"); const m=s.match(/CANGJIE_VERSION: String = "([^"]+)"/); if (!m) throw new Error("source compiler version missing"); console.log(m[1]);')
+          else
+            value=$(npx --yes zx@8 build/cli.mjs --target "${{ matrix.target }}" --cangjie-version "$REQUESTED_REF" print-version)
+          fi
           echo "value=$value" >> "$GITHUB_OUTPUT"
 
       - name: Download pinned source
@@ -525,6 +530,7 @@ jobs:
         run: bash ci/bootstrap/gha_run.sh stage1
 
       - name: Inject selfhost compiler version
+        if: ${{ !inputs.language_tuple }}
         env:
           SOURCE_SDK_VERSION: ${{ steps.version.outputs.value }}
         run: |
