@@ -1731,6 +1731,7 @@ public class FaithfulAST2CHIR {
         blockGroup.SetEntryBlock(entry)
         let allocate = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetUnitTy()),
             builder.context.GetUnitTy(), entry)
+        entry.AppendExpression(allocate)
         fn.SetReturnValue(RequireResult(allocate))
         return fn
     }
@@ -2195,9 +2196,11 @@ public class FaithfulAST2CHIR {
             let value = Translator.TranslateASTNode(expr, trans).getOrThrow()
             let parentBlock = trans.GetCurrentBlock()
             let store = builder.CreateStore(value, globalVar, parentBlock)
+            parentBlock.AppendExpression(store)
             store.SetDebugLocation(globalVar.GetDebugLocation())
             CJC_ASSERT(parentBlock.GetTerminator().isNone())
-            let _ = builder.CreateExit(None, parentBlock)
+            let createdExpression2202 = builder.CreateExit(None, parentBlock)
+            parentBlock.AppendExpression(createdExpression2202)
         }
         for ((decl, funcDef) in annoFactoryFuncs) {
             let trans = CreateTranslator()
@@ -3443,7 +3446,8 @@ public class FaithfulAST2CHIR {
             }
         }
         if (initBlock.GetTerminator().isNone()) {
-            builder.CreateExit(None, initBlock)
+            let createdExit3446 = builder.CreateExit(None, initBlock)
+            initBlock.AppendExpression(createdExit3446)
         }
     }
 
@@ -3493,16 +3497,23 @@ public class FaithfulAST2CHIR {
         } else {
             "has_invoked_pkg_init_literal"
         })
-        let flagRef = RequireResult(builder.CreateLoad(boolTy, initFlag, entry))
+        let createdLoad3496 = builder.CreateLoad(boolTy, initFlag, entry)
+        entry.AppendExpression(createdLoad3496)
+        let flagRef = RequireResult(createdLoad3496)
         let body = packageInit.GetBody() ??
             throw IllegalStateException("faithful AST2CHIR package init function has no body")
         let returnBlock = builder.CreateBlock(body)
         let applyInitFuncBlock = builder.CreateBlock(body)
-        builder.CreateBranch(flagRef, returnBlock, applyInitFuncBlock, entry)
-        builder.CreateExit(None, returnBlock)
+        let createdBranch3501 = builder.CreateBranch(flagRef, returnBlock, applyInitFuncBlock, entry)
+        entry.AppendExpression(createdBranch3501)
+        let createdExit3502 = builder.CreateExit(None, returnBlock)
+        returnBlock.AppendExpression(createdExit3502)
         applyInitFuncBlock.EnableAttr(Attribute.INITIALIZER)
-        let trueLit = RequireResult(builder.CreateConstant(boolTy, BoolLiteral(true), applyInitFuncBlock))
-        builder.CreateStore(trueLit, initFlag, applyInitFuncBlock)
+        let createdConstant3504 = builder.CreateConstant(boolTy, BoolLiteral(true), applyInitFuncBlock)
+        applyInitFuncBlock.AppendExpression(createdConstant3504)
+        let trueLit = RequireResult(createdConstant3504)
+        let createdStore3505 = builder.CreateStore(trueLit, initFlag, applyInitFuncBlock)
+        applyInitFuncBlock.AppendExpression(createdStore3505)
         packageInitializerBlocks[packageInit.nodeId] = applyInitFuncBlock
         return packageInit
     }
@@ -3534,7 +3545,8 @@ public class FaithfulAST2CHIR {
         let entry = RequireEntryBlock(importsInit)
         entry.EnableAttr(Attribute.INITIALIZER)
         if (entry.GetTerminator().isNone()) {
-            builder.CreateExit(None, entry)
+            let createdExit3537 = builder.CreateExit(None, entry)
+            entry.AppendExpression(createdExit3537)
         }
         return importsInit
     }
@@ -3572,7 +3584,8 @@ public class FaithfulAST2CHIR {
             InsertInitializerIntoPackageInitializer(fn, importsInitFunc)
         }
         if (block.GetTerminator().isNone()) {
-            builder.CreateExit(None, block)
+            let createdExit3575 = builder.CreateExit(None, block)
+            block.AppendExpression(createdExit3575)
         }
     }
 
@@ -3638,7 +3651,8 @@ public class FaithfulAST2CHIR {
 
     private func AddGenericInstantiatedInit(block: Block): Unit {
         let callContext = IntrisicCallContext(kind: IntrinsicKind.PREINITIALIZE)
-        builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext, block)
+        let createdIntrinsic3641 = builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext, block)
+        block.AppendExpression(createdIntrinsic3641)
     }
 
     private func DropExitNodeOfInitializer(fn: Function): Block {
@@ -3730,7 +3744,8 @@ public class FaithfulAST2CHIR {
             let _ = trans.CreateAndAppendGVInitFuncCall(initFunc)
         }
         if (entry.GetTerminator().isNone()) {
-            builder.CreateExit(None, entry)
+            let createdExit3733 = builder.CreateExit(None, entry)
+            entry.AppendExpression(createdExit3733)
         }
         if (initFuncs.isEmpty()) {
             fileInit.DisableAttr(Attribute.NO_INLINE)
@@ -3763,8 +3778,11 @@ public class FaithfulAST2CHIR {
             throw IllegalStateException("faithful AST2CHIR literal global initializer expected LitConstExpr")
         let globalVar = RequireGlobalVar(globalCache.Get(varDecl))
         let literal = TranslateLiteralValue(litExpr)
-        let value = RequireResult(builder.CreateConstant(chirType.TranslateType(RequireAstTy(varDecl)), literal, block))
-        builder.CreateStore(value, globalVar, block)
+        let createdConstant3766 = builder.CreateConstant(chirType.TranslateType(RequireAstTy(varDecl)), literal, block)
+        block.AppendExpression(createdConstant3766)
+        let value = RequireResult(createdConstant3766)
+        let createdStore3767 = builder.CreateStore(value, globalVar, block)
+        block.AppendExpression(createdStore3767)
     }
 
     private func TranslateFileLiteralInitializer(fileVars: FaithfulInitFileVars): Option<Function> {
@@ -3790,7 +3808,8 @@ public class FaithfulAST2CHIR {
             StoreLiteralInitializerInBlock(varDecl, entry)
         }
         if (entry.GetTerminator().isNone()) {
-            builder.CreateExit(None, entry)
+            let createdExit3793 = builder.CreateExit(None, entry)
+            entry.AppendExpression(createdExit3793)
         }
         return fileInit
     }

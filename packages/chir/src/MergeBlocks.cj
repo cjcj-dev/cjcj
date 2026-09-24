@@ -22,6 +22,7 @@ private func CopyBlock(builder: CHIRBuilder, block: Block): Block {
     while (idx < exprs.size) {
         let expr = exprs[idx]
         let cloned = expr.Clone(builder, copiedBlock)
+        copiedBlock.AppendExpression(cloned)
         for ((oldValue, newValue) in replaceTable) {
             cloned.ReplaceOperand(oldValue, newValue)
         }

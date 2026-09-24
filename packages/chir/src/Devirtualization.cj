@@ -81,8 +81,10 @@ private func BuiltinOpCreateNewApply(builder: CHIRBuilder, oriInvoke: Invoke, fn
     applyArgs.add(thisValue)
     applyArgs.add(all: args)
     let thisType = builder.context.GetRefTy(thisValue.GetType().getOrThrow())
-    return builder.CreateApply(oriInvoke.GetResultType().getOrThrow(), fn,
+    let createdApply84 = builder.CreateApply(oriInvoke.GetResultType().getOrThrow(), fn,
         FuncCallContext(args: applyArgs, thisType: Some(thisType)), oriInvoke.GetParentBlock().getOrThrow())
+    oriInvoke.GetParentBlock().getOrThrow().AppendExpression(createdApply84)
+    return createdApply84
 }
 
 // C++ Devirtualization.cpp:144-152.
@@ -91,6 +93,7 @@ private func BuiltinOpCreateNewBinary(builder: CHIRBuilder, oriInvoke: Invoke, k
     CJC_ASSERT(args.size == 1)
     let binary = builder.CreateBinaryExpression(kind, oriInvoke.GetResultType().getOrThrow(), thisValue, args[0],
         oriInvoke.GetParentBlock().getOrThrow())
+    oriInvoke.GetParentBlock().getOrThrow().AppendExpression(binary)
     binary.SetDebugLocation(oriInvoke.GetDebugLocation())
     return binary
 }
@@ -352,9 +355,11 @@ public class Devirtualization {
             if (rewriteInfo.thisType.IsBuiltinType()) {
                 instThisType = builder.context.GetRefTy(builder.context.GetAnyTy().getOrThrow())
             }
-            let typecastRes = TypeCastOrBoxIfNeeded(args[0], instThisType, builder, parent, INVALID_LOCATION)
+            let (typecastRes, expressions) = TypeCastOrBoxIfNeeded(args[0], instThisType, builder, parent, INVALID_LOCATION)
             if (typecastRes != args[0]) {
-                typecastRes.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(invoke)
+                for (expression in expressions) {
+                    expression.MoveBefore(invoke)
+                }
                 args[0] = typecastRes
             }
             let apply = builder.CreateApply(invoke.GetResultType().getOrThrow(), realFunc,
