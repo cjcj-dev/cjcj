@@ -64,9 +64,7 @@ jobs:
           source ci/platform_matrix/runtime_core_setup.sh || echo "::warning::Core setup incomplete; see setup.log"
           npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
       - name: Complete gate with pinned language tuple and same-build target
-        id: runtime-language-gate
         run: |
-          source ci/platform_matrix/runtime_core_setup.sh || echo "::warning::Core setup incomplete; see setup.log"
           bash ci/release/gate_colour_runtime.sh runtime-source \
             "$RUNNER_TEMP/h48-download/installed/tuple" "$RUNNER_TEMP/h48-active" \
             .platform-ci/runtime-install
@@ -120,7 +118,7 @@ jobs:
             printf 'Runtime gate log: %s\n' "${logs[@]}"
           fi
       - name: Collect runtime core backtraces
-        if: ${{ failure() && (steps.runtime-build.outcome == 'failure' || steps.runtime-language-gate.outcome == 'failure') }}
+        if: ${{ failure() && steps.runtime-build.outcome == 'failure' }}
         run: python3 ci/platform_matrix/collect_runtime_cores.py
       - name: Upload runtime gate diagnostics
         if: always()
@@ -131,7 +129,7 @@ jobs:
             ci/runtime_pin.env
             ci/h48_language_tuple_pin.json
             ${{ runner.temp }}/h48-active.env
-            ${{ (steps.runtime-build.outcome == 'failure' || steps.runtime-language-gate.outcome == 'failure') && '.platform-ci/runtime-gate-diagnostics/' || '' }}
+            ${{ steps.runtime-build.outcome == 'failure' && '.platform-ci/runtime-gate-diagnostics/' || '' }}
             runtime-source/runtime/**/gate_run.log
             runtime-source/runtime/**/gc_unit_gate.status
             runtime-source/runtime/**/runtime-build-config.txt
