@@ -48,6 +48,18 @@ make_colour_tuple() {
   refresh_tuple_sums
 }
 
+make_std_sdk_inputs_fixture() {
+  mkdir -p "$TMP/src/ci" "$TMP/include" "$TMP/schema" "$TMP/third_party/flatbuffers/bin"
+  cp "$ROOT/../install_std_sdk_inputs.py" "$ROOT/../build_resources.sh" "$TMP/src/ci/"
+  printf 'ast\n' > "$TMP/ast.a"
+  if [ -n "${BOOTSTRAP_AST_ARCHIVE:-}" ]; then
+    cp "$BOOTSTRAP_AST_ARCHIVE" "$TMP/ast.a"
+  fi
+  cp /bin/true "$TMP/third_party/flatbuffers/bin/flatc"
+  cp "$TMP/ast.a" "$TMP/libcangjie-ast-support.a"
+  (cd "$TMP" && sha256sum libcangjie-ast-support.a third_party/flatbuffers/bin/flatc > SHA256SUMS)
+}
+
 make_dry_fixture() {
   new_tmp
   mkdir -p "$TMP/base/bin" "$TMP/base/third_party/llvm/bin" "$TMP/src" "$TMP/stdsrc" "$TMP/host-rt" "$TMP/colour-rt" \
@@ -65,15 +77,7 @@ make_dry_fixture() {
   cp /bin/true "$TMP/base/tools/bin/cjpm"
   printf 'source\n' > "$TMP/src/main.cj"
   printf '#!/usr/bin/env python3\n' > "$TMP/stdsrc/build.py"
-  mkdir -p "$TMP/src/ci" "$TMP/include" "$TMP/schema" "$TMP/third_party/flatbuffers/bin"
-  cp "$ROOT/../install_std_sdk_inputs.py" "$ROOT/../build_resources.sh" "$TMP/src/ci/"
-  printf 'ast\n' > "$TMP/ast.a"
-  if [ -n "${BOOTSTRAP_AST_ARCHIVE:-}" ]; then
-    cp "$BOOTSTRAP_AST_ARCHIVE" "$TMP/ast.a"
-  fi
-  cp /bin/true "$TMP/third_party/flatbuffers/bin/flatc"
-  cp "$TMP/ast.a" "$TMP/libcangjie-ast-support.a"
-  (cd "$TMP" && sha256sum libcangjie-ast-support.a third_party/flatbuffers/bin/flatc > SHA256SUMS)
+  make_std_sdk_inputs_fixture
   printf 'int host_symbol;\n' > "$TMP/host.c"
   cc -shared -fPIC "$TMP/host.c" -o "$TMP/libLLVM-15.so"
   make_colour_tuple
@@ -459,6 +463,7 @@ run_shape_check() {
 
 make_isolation_fixture() {
   local root="$TMP/isolation" sdk="$TMP/isolation/sdk" prefix="$TMP/isolation/std"
+  make_std_sdk_inputs_fixture
   mkdir -p "$root/src/build/build" "$sdk/bin" "$sdk/runtime/lib/linux_x86_64_cjnative" "$root/rt"
   printf 'runtime\n' > "$root/rt/libcangjie-runtime.so"
   printf '%s\n' \
@@ -489,7 +494,7 @@ make_isolation_fixture() {
 run_isolation_check() {
   local product="$1"
   PATH="$TMP/fakebin:$PATH" LEAK_ME=must-not-cross \
-    bash -c 'source "$1"; STAGE=test-A4; DRY=0; WORK="$2/work"; STDSRC="$2"; SRC="$6/src"; AST_SUPPORT="$6/ast.a"; stdlib_build stdlib-stage1 "$3" "$4" "$5"' \
+    bash -c 'source "$1"; STAGE=test-A4; host_tuple_init; DRY=0; WORK="$2/work"; STDSRC="$2"; SRC="$6/src"; AST_SUPPORT="$6/ast.a"; stdlib_build stdlib-stage1 "$3" "$4" "$5"' \
       bash "$product" "$TMP/isolation/src" "$TMP/isolation/sdk" "$TMP/isolation/rt" "$TMP/isolation/std" "$TMP"
 }
 
