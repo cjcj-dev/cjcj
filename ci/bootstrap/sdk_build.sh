@@ -570,6 +570,13 @@ case "$ROLE" in
 esac
 echo "  g_cjLoadBadMask=$MASK ✓  ($RTSO)"
 
+# Check the installed target pair, never the --verify-host-rt execution override.
+# All component copies (including inherited std) must be complete before this.
+COLOUR_CHECK="$(dirname "${BASH_SOURCE[0]}")/std_runtime_colour.py"
+python3 "$COLOUR_CHECK" --runtime "$RTSO" \
+  --std "$TO/lib/$TARGET_TUPLE/libcangjie-std-core.a" --source "${STD:-$BASE}" \
+  || die "std/runtime 颜色配对失败（来源与 sha256 见上）"
+
 # ⭐⭐ 有效性三步：⛔ sha 只证同一性
 echo "[4/5] 自证 file -> ldd -> --version"
 # ⭐⭐⭐ 必须**带 SDK 环境**验，⛔ 不能裸跑 —— ⭐ 0808 用户令点破的那件事：
