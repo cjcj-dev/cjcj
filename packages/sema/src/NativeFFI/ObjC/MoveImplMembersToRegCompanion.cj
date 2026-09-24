@@ -177,7 +177,8 @@ private func RetargetCallee(call: CallExpr, callee: FuncDecl): Unit {
     if (let Some(ref) <- (call.baseFunc.getOrThrow() as RefExpr)) {
         ref.ref.target = Some(callee)
     } else {
-        (call.baseFunc.getOrThrow() as MemberAccess).getOrThrow().target = Some(callee)
+        let access = (call.baseFunc.getOrThrow() as MemberAccess).getOrThrow()
+        access.target = Some(callee)
     }
     call.resolvedFunction = Some(callee)
 }
