@@ -37,3 +37,10 @@ matching Cangjie module and generator. `SHA256SUMS` covers all these files.
 `ci/install_std_sdk_inputs.py` installs them before bootstrap/final std builds.
 The compiler source authority is `https://gitcode.com/Cangjie/cangjie_compiler.git`;
 the former Zxilly mirror does not contain the alpha.06 compiler commit.
+
+Std compilation uses `ci/build_resources.sh`: requested heap defaults to 96GB,
+clamped to 75% of measured physical memory so the official host runtime does
+not reject the setting and fall back to its small default heap (#131).
+Hosts with less than a 96GB budget compile one std package at a time;
+large build hosts use every core. The selected heap, memory and parallelism
+are printed. Windows target archive/DLL qualification is tracked by #194.
