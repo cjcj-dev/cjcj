@@ -107,6 +107,7 @@ def main():
         sdk = args.runtime_sdk
         target_env = dict(os.environ)
         target_env['CANGJIE_HOME'] = str(sdk)
+        target_env['LD_LIBRARY_PATH'] = str(sdk / 'third_party/llvm/lib') + ':' + target_env.get('LD_LIBRARY_PATH', '')
         runtime_env = dict(target_env)
         runtime_env['LD_LIBRARY_PATH'] = ':'.join(str(sdk / p) for p in [
             'runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative',
@@ -123,6 +124,8 @@ def main():
                 expected = 'concurrent-result=42' if name == 'import_concurrent' else 'control-result=42'
                 check(name + ':run', executed.returncode == 0 and expected in executed.stdout,
                       f'rc={executed.returncode}; {executed.stdout.strip()}')
+            else:
+                check(name + ':run', False, 'NOT_RUN: link failed; not execution evidence')
     identity['uptime_after'] = subprocess.check_output(['uptime'], text=True)
     (args.out / 'identity.json').write_text(json.dumps(identity, indent=2) + '\n')
     (args.out / 'checks.json').write_text(json.dumps(checks, indent=2) + '\n')
