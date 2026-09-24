@@ -27,9 +27,10 @@ def ast_attrs(symbol):
                 return match[1].split(', ')
     return []
 
-def ir_function(symbol):
+def ir_function(symbol, declaration=False):
     for path, text in modules:
-        match = re.search(r'^(?:define|declare) [^\n]*@"?' + re.escape(symbol) + r'"?\([^\n]*', text, re.M)
+        kind = 'declare' if declaration else 'define'
+        match = re.search(r'^' + kind + r' [^\n]*@"?' + re.escape(symbol) + r'"?\([^\n]*', text, re.M)
         if match:
             header = match.group()
             attr_id = re.search(r'#(\d+)', header)
@@ -66,7 +67,7 @@ header, attrs, _, path = ir_function(symbol)
 check('ordinary.llvmUnmarkedControl', bool(header) and 'nounwind' not in attrs, dict(header=header, attrs=attrs, file=path))
 # A real, called whitelist function proves the old stronger attribute path still runs.
 control = '_CNatXl8hashCodeHv'
-header, attrs, _, path = ir_function(control)
+header, attrs, _, path = ir_function(control, declaration=True)
 check('noSideEffect.llvmPromisesControl', bool(header) and {'nounwind', 'readonly', 'willreturn'}.issubset(attrs), dict(header=header, attrs=attrs, file=path))
 check('noSideEffect.chirControl', any('[noSideEffect]' in line and 'Func @'+control+'(' in line for line in chir.splitlines()), control)
 check('noSideEffect.actualCallControl', any(re.search(r'call i64 @'+control+r'\(', text) for _, text in modules), control)

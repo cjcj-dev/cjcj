@@ -22,8 +22,10 @@ assertions; compilation must still succeed.
 
 `DoesNotThrowTest.independentAttributeRoundTrip` additionally checks CHIR index 38,
 its name, bit encoding and serialization, including the independent
-`NO_SIDE_EFFECT` positive control. Run with `cjpm test -m packages/chir
---filter '*DoesNotThrow*'` in the build environment.
+`NO_SIDE_EFFECT` positive control. Run `test/does_not_throw/unit.sh /path/to/disposable-build-tree /path/to/unit-evidence`
+in the host build environment. The script temporarily supplies the real compiler
+shim link options missing from the standalone CHIR test target, then restores the
+manifest. It does not change product sources or supply substitute functions.
 
 The CJMapping forwarder finalizer's CLI entry is currently unavailable because
 `enableInteropCJMapping` has no option setter. Its source attribute is ported;
