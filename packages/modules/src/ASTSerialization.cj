@@ -115,9 +115,9 @@ public class ASTWriter {
         let depInfo = fb.CreateString(packageDepInfo)
         let moduleName = fb.CreateString("")
         let cjoVersion = ArrayList<UInt8>()
-        cjoVersion.add(0u8)
-        cjoVersion.add(1u8)
-        cjoVersion.add(0u8)
+        cjoVersion.add(CJO_MAJOR_VERSION)
+        cjoVersion.add(CJO_MINOR_VERSION)
+        cjoVersion.add(CJO_PATCH_VERSION)
         let kind = if (pkg.isMacroPackage) {
             1u8
         } else if (pkg.TestAttr(Attribute.TOOL_ADD)) {
@@ -167,6 +167,8 @@ public class ASTLoader {
     private let requestedPackageName: String
     private let cjoManager: CjoManager
     private let opts: GlobalOptions
+    private var packageTable: Option<PackageFormat_Package> = None
+    private var cjoPath: String = ""
     private var parsedPackage: Option<Package> = None
     private var packageDepInfo: String = ""
     private var importSourceCode: Bool = true
@@ -232,7 +234,11 @@ public class ASTLoader {
         if (!VerifyForData("ast")) {
             return ""
         }
-        return GetPackage(data).GetPkgDepInfo().getOrThrow().str()
+        packageTable = Some(GetPackage(data))
+        if (!CheckCjoVersion()) {
+            return ""
+        }
+        return packageTable.getOrThrow().GetPkgDepInfo().getOrThrow().str()
     }
 
     public func LoadRefs(): Unit {
@@ -335,6 +341,36 @@ public class ASTLoader {
 
     public func SetIsChirNow(isChirNow!: Bool = false): Unit {
         this.isChirNow = isChirNow
+    }
+
+    public func SetCjoPath(path: String): Unit {
+        cjoPath = path
+    }
+
+    // ASTLoader.cpp:352-390, called after verification and package assignment.
+    private func CheckCjoVersion(diagnose!: Bool = true): Bool {
+        let cjoVer = packageTable.getOrThrow().GetCjoVersion()
+        if (cjoVer.isNone()) {
+            if (diagnose) { DiagnoseVersionMismatch() }
+            return false
+        }
+        let ver = cjoVer.getOrThrow()
+        let compat = CheckCjoVersionCompat(ver.GetMajorNum(), ver.GetMinorNum())
+        if (let CjoVersionCompat.COMPATIBLE <- compat) {
+            return true
+        }
+        if (diagnose) { DiagnoseVersionMismatch() }
+        return false
+    }
+
+    private func DiagnoseVersionMismatch(): Unit {
+        let table = packageTable.getOrThrow()
+        let producerVer = if (let Some(ver) <- table.GetVersion()) { ver.str() } else { "unknown" }
+        let fullPackageName = if (let Some(name) <- table.GetFullPkgName()) {
+            name.str()
+        } else { "unknown package name" }
+        cjoManager.GetDiag().DiagnoseRefactor(DiagKindRefactor.module_version_not_identical, DEFAULT_POSITION,
+            arguments: [cjoPath, fullPackageName, producerVer, CANGJIE_VERSION]).Emit()
     }
 
     private func VerifyForData(id: String): Bool {

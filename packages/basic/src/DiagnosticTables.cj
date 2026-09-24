@@ -2416,7 +2416,7 @@ public let errorData: Array<ErrorData> = [
     ErrorData(message: "read file '%s' failed, reason: '%s'", mainHint: "", otherHints: []),
     ErrorData(message: "specify common part path of when compiling specific part of package.", mainHint: "", otherHints: []),
     ErrorData(message: "the file '%s' is a duplicate source file", mainHint: "", otherHints: []),
-    ErrorData(message: "ast file for '%s' created by cjc which version is '%s' and current cjc version is '%s', it may cause crash because lack information of declaration", mainHint: "", otherHints: []),
+    ErrorData(message: "cjo file '%s' for package '%s' is incompatible: compiled with cjc '%s', but the current compiler is cjc '%s'", mainHint: "", otherHints: []),
     ErrorData(message: "can't open output file '%s': '%s'", mainHint: "", otherHints: []),
     ErrorData(message: "validation of %s file '%s' failed, please confirm it was created by compiler whose version is '%s'.", mainHint: "", otherHints: []),
     ErrorData(message: "failed to load dependent package '%s' for package '%s', which have same package name with source package", mainHint: "", otherHints: []),

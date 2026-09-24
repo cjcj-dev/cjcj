@@ -215,6 +215,7 @@ public class CjoManager {
     public func GetPackageDepInfo(cjoPath: String): String {
         let loaderOpt = impl.ReadCjo("", cjoPath, this, printErr: false)
         if (let Some(loader) <- loaderOpt) {
+            loader.SetCjoPath(cjoPath)
             return loader.LoadPackageDepInfo()
         }
         return ""
