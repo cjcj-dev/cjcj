@@ -328,7 +328,8 @@ public func WrapReturningLambdaExpr(typeManager: TypeManager, nodes: ArrayList<N
     let retTy = nodes[nodes.size - 1].GetTy().getOrThrow()
     let paramTys = LambdaParamTys(lambdaParams)
     let paramLists = ArrayList<FuncParamList>()
-    paramLists.add(CreateFuncParamList(lambdaParams))
+    // C++ Utils.cpp:237 moves OwnedPtr params into Create.h:95. The one-argument overload clones.
+    paramLists.add(CreateFuncParamList(lambdaParams, None))
     let lambdaTy = typeManager.GetFunctionTy(paramTys.toArray(), retTy)
     let curFile: Option<File> = nodes[0].curFile
 

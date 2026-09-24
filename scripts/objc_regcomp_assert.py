@@ -7,6 +7,41 @@ from pathlib import Path
 from objc_cpointer_assert import nodes, own_field, functions, params, names, ptr, calls_to, args
 
 
+def compiler_rc(work, name):
+    path = work / name / 'compiler.rc'
+    return path.read_text().strip() if path.exists() else 'missing'
+
+
+def compiler_log(work, name):
+    path = work / name / 'compiler.log'
+    return path.read_text(errors='replace') if path.exists() else ''
+
+
+def param_identity_rows(cls):
+    rows = []
+    if not cls:
+        return rows
+    for lam in nodes(cls[1], 'LambdaExpr'):
+        lists = nodes(lam[1], 'FuncParamList')
+        if not lists:
+            continue
+        own = [p for p in nodes(lists[0][1], 'FuncParam: $obj') if p[2] == lists[0][2] + 2]
+        if len(own) != 1:
+            continue
+        targets = []
+        for ref in nodes(lam[1], 'RefExpr: $obj'):
+            field = own_field(ref, 'target ptr')
+            if field:
+                targets.append(field[1])
+        rows.append(dict(param=ptr(own[0]), targets=targets))
+    return rows
+
+
+def param_identity_ok(cls):
+    rows = param_identity_rows(cls)
+    return bool(rows) and all(row['targets'] and set(row['targets']) == {row['param']} for row in rows)
+
+
 def run(work, pattern):
     results = []
     def check(name, ok, observed):
@@ -77,8 +112,23 @@ def run(work, pattern):
         check(name + '.broken_propagated', 'IS_BROKEN' in attrs(broken.get(name)), attrs(broken.get(name)))
     check('Broken.healthy_control', bool(broken.get('HealthyImpl')) and 'IS_BROKEN' not in attrs(broken.get('HealthyImpl')),
           attrs(broken.get('HealthyImpl')))
-    check('Control.compiler_completed', (work / 'control' / 'compiler.rc').read_text().strip() == '0',
-          (work / 'control' / 'compiler.rc').read_text().strip())
+    text, ctor_classes = read('constructors')
+    for cname in ('PointerImpl', 'PointerImplChild'):
+        check(cname + '.user_ctor_param_identity', param_identity_ok(ctor_classes.get(cname)),
+              param_identity_rows(ctor_classes.get(cname)))
+    text, member_classes = read('members')
+    for cname in ('RegistryImpl', 'RegistryChild'):
+        check(cname + '.user_ctor_param_identity', param_identity_ok(member_classes.get(cname)),
+              param_identity_rows(member_classes.get(cname)))
+    for name in ('constructors', 'members', 'cache', 'control'):
+        rc = compiler_rc(work, name)
+        check(name.capitalize() + '.compiler_completed', rc == '0', rc)
+    broken_rc = compiler_rc(work, 'broken')
+    broken_log = compiler_log(work, 'broken')
+    diag = 'param type of Objective-C mirror constructor must be Objective-C compatible'
+    crash = 'AST2CHIR' in broken_log or 'func_param' in broken_log
+    check('Broken.expected_diagnostic', broken_rc != '0' and diag in broken_log and not crash,
+          dict(rc=broken_rc, diagnostic=diag in broken_log, unexpected_crash=crash))
     (work / 'assertions.json').write_text(json.dumps(results, indent=2) + '\n')
     if not results: raise ValueError('no selected assertions')
     failed = [r['name'] for r in results if not r['passed']]
