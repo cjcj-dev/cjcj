@@ -954,6 +954,20 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/llvm-tools.manifest'];
   fs.writeFileSync(tuple + '/SHA256SUMS', payloads.map(name => `${sha256(path.join(tuple, name))}  ./${name}\n`).join(''));
   fs.copyFileSync(path.join(repoRoot, 'cjpm.toml'), path.join(root, 'cjpm.toml'));
+  // Give the real bootstrap pin check an actual source identity, not a
+  // placeholder SHA in an unversioned copy.
+  for (const args of [
+    ['init', '--quiet', root],
+    ['-C', root, 'add', 'cjpm.toml'],
+    ['-C', root, '-c', 'user.name=Zxilly', '-c', 'user.email=zxilly@outlook.com',
+      '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'test fixture source identity'],
+  ]) {
+    const result = spawnSync('git', args, {encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stderr);
+  }
+  const sourceIdentity = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], {encoding: 'utf8'});
+  assert.equal(sourceIdentity.status, 0, sourceIdentity.stderr);
+  const sourceSha = sourceIdentity.stdout.trim();
   const bin = path.join(inputs, 'bin');
   fs.mkdirSync(bin);
   // Host name is only a placement policy; keep this shell test usable in CI.
@@ -971,7 +985,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
     CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256: sha256(inputs + '/ast.a'),
     CJCJ_BOOTSTRAP_COLOUR_TUPLE: tuple,
     CJCJ_BOOTSTRAP_COLOUR_RT: inputs,
-    CJCJ_BOOTSTRAP_CJCJ_SHA: 'a'.repeat(40),
+    CJCJ_BOOTSTRAP_CJCJ_SHA: sourceSha,
   };
   delete env.CJCJ_BOOTSTRAP_SH;
   delete env.CJCJ_SRCBUILD_CPUSET;
@@ -983,6 +997,7 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   }
   return {
     root,
+    sourceSha,
     run(step, childRc = 0) {
       const result = spawnSync('bash', [driver, '--from-step', String(step), '--through-step', String(step)],
         {encoding: 'utf8', env: {...env, CHILD_RC: String(childRc)}});
@@ -1048,11 +1063,14 @@ for (const step of [31, 32]) {
 }
 
 test('bootstrap driver matching pins starts real stage0 and sdk_build', t => {
-  const result = bootstrapDriverFixture(t).run(31);
+  const fixture = bootstrapDriverFixture(t);
+  const result = fixture.run(31);
+  assert.ok(result.log.includes(`ASSERT cjcj-sha expected=${fixture.sourceSha} actual=${fixture.sourceSha} source=git`), result.log);
   assert.match(result.log, /\[stage0\] official cjc/);
   assert.match(result.log, /CMD bash .*sdk_build.sh --from/);
   // The deliberately incomplete SDK ends this bounded entry test before compilation.
-  assert.match(result.log, /SDK-BUILD-FAIL/);
+  assert.match(result.log, /SDK-BUILD-FAIL .*不像 SDK（缺 bin\/cjc）/);
+  console.log('OBSERVED real sdk_build input rejection after matching source pin');
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /STEP=31 .* rc=1 /);
   assert.doesNotMatch(result.stdout, /RESULT=success/);
