@@ -59,7 +59,8 @@ public class ASTFactory {
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:43-48.
     public static func CreateParamLists(params: ArrayList<FuncParam>): ArrayList<FuncParamList> {
         let paramLists = ArrayList<FuncParamList>()
-        paramLists.add(CreateFuncParamList(params))
+        // C++ ASTFactory.cpp:51 moves OwnedPtr params (Create.h:95). The one-argument overload clones.
+        paramLists.add(CreateFuncParamList(params, None))
         return paramLists
     }
 
@@ -473,7 +474,8 @@ public class ASTFactory {
         let paramTys = ArrayList<Ty>()
         for (p in ctorParams) { paramTys.add(p.GetTy().getOrThrow()) }
         let ctorFuncTy = typeManager.GetFunctionTy(paramTys.toArray(), target.GetTy().getOrThrow())
-        let paramList = CreateFuncParamList(ctorParams)
+        // C++ ASTFactory.cpp:1096 moves ctor params; cloning would split later body refs.
+        let paramList = CreateFuncParamList(ctorParams, None)
         let ctorNodes = ArrayList<Node>()
         let paramLists = ArrayList<FuncParamList>()
         paramLists.add(paramList)
@@ -1470,7 +1472,8 @@ public class ASTFactory {
         let funcParams = ArrayList<FuncParam>()
         funcParams.add(param)
         let paramLists = ArrayList<FuncParamList>()
-        paramLists.add(CreateFuncParamList(funcParams))
+        // Body RefExprs already target `param`. C++ moves it into the list; do not clone.
+        paramLists.add(CreateFuncParamList(funcParams, None))
         let funcBody = CreateFuncBody(paramLists, CreateUnitType(target.curFile),
             CreateBlock(funcNodes, unitTy), funcTy)
         let funcName = if (let Some(config) <- genericConfig) {

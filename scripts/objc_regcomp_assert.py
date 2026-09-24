@@ -25,11 +25,11 @@ def param_identity_rows(cls):
         lists = nodes(lam[1], 'FuncParamList')
         if not lists:
             continue
-        own = [p for p in nodes(lists[0][1], 'FuncParam: $obj') if p[2] == lists[0][2] + 2]
+        own = [p for p in nodes(lists[0][1], r'FuncParam: \$obj') if p[2] == lists[0][2] + 2]
         if len(own) != 1:
             continue
         targets = []
-        for ref in nodes(lam[1], 'RefExpr: $obj'):
+        for ref in nodes(lam[1], r'RefExpr: \$obj'):
             field = own_field(ref, 'target ptr')
             if field:
                 targets.append(field[1])
@@ -39,6 +39,31 @@ def param_identity_rows(cls):
 
 def param_identity_ok(cls):
     rows = param_identity_rows(cls)
+    return bool(rows) and all(row['targets'] and set(row['targets']) == {row['param']} for row in rows)
+
+
+def delete_param_rows(text):
+    rows = []
+    for fn in nodes(text, 'FuncDecl: '):
+        if 'deleteCJObject' not in fn[0]:
+            continue
+        lists = nodes(fn[1], 'FuncParamList')
+        if not lists:
+            continue
+        own = [p for p in nodes(lists[0][1], r'FuncParam: \$registryId') if p[2] == lists[0][2] + 2]
+        if len(own) != 1:
+            rows.append(dict(param=None, targets=[]))
+            continue
+        targets = []
+        for ref in nodes(fn[1], r'RefExpr: \$registryId'):
+            field = own_field(ref, 'target ptr')
+            if field:
+                targets.append(field[1])
+        rows.append(dict(param=ptr(own[0]), targets=targets))
+    return rows
+
+
+def rows_identity_ok(rows):
     return bool(rows) and all(row['targets'] and set(row['targets']) == {row['param']} for row in rows)
 
 
@@ -116,10 +141,14 @@ def run(work, pattern):
     for cname in ('PointerImpl', 'PointerImplChild'):
         check(cname + '.user_ctor_param_identity', param_identity_ok(ctor_classes.get(cname)),
               param_identity_rows(ctor_classes.get(cname)))
+    ctor_delete = delete_param_rows(text)
+    check('Constructors.delete_param_identity', rows_identity_ok(ctor_delete), ctor_delete)
     text, member_classes = read('members')
     for cname in ('RegistryImpl', 'RegistryChild'):
         check(cname + '.user_ctor_param_identity', param_identity_ok(member_classes.get(cname)),
               param_identity_rows(member_classes.get(cname)))
+    member_delete = delete_param_rows(text)
+    check('Members.delete_param_identity', rows_identity_ok(member_delete), member_delete)
     for name in ('constructors', 'members', 'cache', 'control'):
         rc = compiler_rc(work, name)
         check(name.capitalize() + '.compiler_completed', rc == '0', rc)
