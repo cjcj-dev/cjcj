@@ -227,7 +227,9 @@ def activate(args):
         expected[f"sdk/runtime/lib/{TUPLE}/{name}"] = {
             "sha256": sha, "mode": (args.target / name).stat().st_mode & 0o777}
     require(inventory(args.output) == expected, "TUPLE_ACTIVATION_COPY_MISMATCH")
-    emit_env(sdk, args.root.resolve() / "host/runtime/lib" / TUPLE, target)
+    # The gate also uses the runtime build's adjacent generated headers. Keep its
+    # target path, while the SDK receives an identical pair for cjc's linker.
+    emit_env(sdk, args.root.resolve() / "host/runtime/lib" / TUPLE, args.target.resolve())
 
 
 def main():

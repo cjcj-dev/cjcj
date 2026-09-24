@@ -86,3 +86,10 @@ Activation verifies the tuple and external runtime digests before copying, check
 all copied files, and emits the four role variables only after validation. The
 original downloaded tuple remains unchanged and can still be verified against
 the release pin. The official host runtime remains outside the target SDK.
+
+`GCV2_RUNTIME_LIB_DIR` stays at the supplied runtime build directory so the
+phase-entry fixture can find its adjacent generated headers. The runtime pair
+copied into the private SDK is only the compiler's link input, with identical
+pinned digests. Do not repoint the gate at an SDK directory lacking those headers.
+The `PROVENANCE-NOTES.json` release asset lists every exclusion and its reason;
+its digest is included in the pin and SHA256SUMS.

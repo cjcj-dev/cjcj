@@ -132,6 +132,7 @@ class LanguageTupleTest(unittest.TestCase):
         self.verify()  # The downloaded tuple is still intact.
         self.assertIn(f"CANGJIE_HOME={args.output}/sdk", out.getvalue())
         self.assertIn(f"GC_UNIT_CJC_RUNTIME_LIB_DIR={self.installed}/host/runtime/lib/{product.TUPLE}", out.getvalue())
+        self.assertIn(f"GCV2_RUNTIME_LIB_DIR={args.target}", out.getvalue())
         self.assertEqual(product.digest(args.output / f"sdk/runtime/lib/{product.TUPLE}/libcangjie-runtime.so"),
                          args.target_runtime_sha256)
 

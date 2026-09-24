@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from language_tuple import digest, require, unpack, verify, write_json
+from language_tuple import EXCLUDED, digest, require, unpack, verify, write_json
 
 REPOSITORY = "cjcj-dev/cjcj"
 # Local operations use the campaign bot shim. Hosted consumers already receive
@@ -51,9 +51,23 @@ def publish(args):
        "--title", tag, "--notes-file", str(notes), "--draft", "--prerelease", "--latest=false")
     named_manifest = args.package / f"h48-{source}-provenance.json"
     named_manifest.write_bytes((args.package / "language-tuple.json").read_bytes())
+    qualification = args.package / f"h48-{source}-PROVENANCE-NOTES.json"
+    write_json(qualification, {
+        "manifest_sha256": args.manifest_sha256,
+        "qualification": "H48-provenance-partial",
+        "std_source_sha": "unrecorded",
+        "follow_up": "cjcj-dev/cjcj#135",
+        "excluded": {name: (
+            "Retained target runtime/boundscheck source identity was not recoverable; consumer supplies a newly pinned pair."
+            if "runtime/lib/" in name or name.endswith("libboundscheck.so") else
+            "AST support source identity was not recoverable; it is not required by the qualified language gate."
+            if name.endswith("libcangjie-ast-support.a") else
+            "Stale backend metadata/cache predates the installed llc/opt; the manifest pins the executable bytes directly."
+        ) for name in EXCLUDED},
+    })
     sums = args.package / f"h48-{source}-SHA256SUMS"
-    sums.write_text(f"{archive_sha}  {archive.name}\n{digest(named_manifest)}  {named_manifest.name}\n")
-    files = [archive, named_manifest, sums]
+    sums.write_text("".join(f"{digest(file)}  {file.name}\n" for file in (archive, named_manifest, qualification)))
+    files = [archive, named_manifest, qualification, sums]
     gh("release", "upload", tag, "--repo", REPOSITORY, *map(str, files))
     release = json.loads(gh("api", f"repos/{REPOSITORY}/releases/tags/{tag}"))
     require(release["prerelease"] and release["draft"], "H48_RELEASE_STATE")
@@ -68,7 +82,8 @@ def publish(args):
             download_asset(asset["id"], copy)
             require(digest(copy) == digest(file), f"H48_RELEASE_READBACK {file.name}")
             pin["assets"].append({"id": asset["id"], "name": file.name, "sha256": digest(file),
-                                  "role": "archive" if file == archive else "manifest" if file == named_manifest else "checksums"})
+                                  "role": "archive" if file == archive else "manifest" if file == named_manifest
+                                  else "qualification" if file == qualification else "checksums"})
     gh("release", "edit", tag, "--repo", REPOSITORY, "--draft=false", "--prerelease", "--latest=false")
     write_json(args.pin, pin)
     print(f"H48_PUBLISHED release_id={release['id']} pin={args.pin}")
@@ -85,7 +100,7 @@ def fetch(args):
     records = {a["id"]: a for a in release["assets"]}
     by_role = {}
     for asset in pin["assets"]:
-        require(asset["role"] in ("archive", "manifest", "checksums") and asset["role"] not in by_role,
+        require(asset["role"] in ("archive", "manifest", "qualification", "checksums") and asset["role"] not in by_role,
                 "H48_ASSET_ROLE")
         require(Path(asset["name"]).name == asset["name"] and asset["name"] not in (".", ".."), "H48_ASSET_NAME")
         require(records[asset["id"]]["name"] == asset["name"], "H48_ASSET_IDENTITY")
@@ -93,8 +108,13 @@ def fetch(args):
         download_asset(asset["id"], file)
         require(digest(file) == asset["sha256"], f"H48_ASSET_DIGEST {asset['role']}")
         by_role[asset["role"]] = (file, asset["sha256"])
-    require(set(by_role) == {"archive", "manifest", "checksums"}, "H48_ASSET_SET")
+    require(set(by_role) == {"archive", "manifest", "qualification", "checksums"}, "H48_ASSET_SET")
     require(by_role["manifest"][1] == pin["manifest_sha256"], "H48_MANIFEST_PIN")
+    qualification = json.loads(by_role["qualification"][0].read_text())
+    require(qualification["manifest_sha256"] == pin["manifest_sha256"]
+            and qualification["std_source_sha"] == "unrecorded"
+            and qualification["qualification"] == "H48-provenance-partial"
+            and set(qualification["excluded"]) == set(EXCLUDED), "H48_QUALIFICATION_PIN")
     archive, archive_sha = by_role["archive"]
     unpack(argparse.Namespace(archive=archive, archive_sha256=archive_sha, output=args.output / "installed",
            manifest_sha256=pin["manifest_sha256"], compiler_sha256=pin["compiler_sha256"]))
