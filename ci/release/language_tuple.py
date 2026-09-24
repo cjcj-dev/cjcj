@@ -195,6 +195,41 @@ def unpack(args):
     print("TUPLE_UNPACKED_VERIFIED")
 
 
+def emit_env(sdk, host, target=None):
+    values = {"CJC": sdk / "bin/cjc", "CANGJIE_HOME": sdk,
+              "GC_UNIT_CJC_RUNTIME_LIB_DIR": host}
+    if target is not None:
+        values["GCV2_RUNTIME_LIB_DIR"] = target
+    for key, value in values.items():
+        print(f"export {key}={shlex.quote(str(value))}")
+
+
+def activate(args):
+    """Make a private SDK for the linker; never mutate the downloaded tuple."""
+    manifest = verify(args.root, args.manifest_sha256, args.compiler_sha256)
+    target_hashes = {"libcangjie-runtime.so": args.target_runtime_sha256,
+                     "libboundscheck.so": args.target_boundscheck_sha256}
+    for name, expected in target_hashes.items():
+        require(re.fullmatch(r"[0-9a-f]{64}", expected) and digest(args.target / name) == expected,
+                f"TUPLE_TARGET_DIGEST_MISMATCH {name}")
+    require(args.target_runtime_sha256 != manifest["provenance"]["role_sha256"]["host_runtime"],
+            "TUPLE_HOST_USED_AS_TARGET")
+    require(not args.output.exists(), "TUPLE_OUTPUT_EXISTS")
+    sdk = args.output.resolve() / "sdk"
+    # verify() has already restricted links to the two local compiler aliases.
+    shutil.copytree(args.root / "sdk", sdk, symlinks=True)
+    target = sdk / "runtime/lib" / TUPLE
+    target.mkdir(parents=True, exist_ok=True)
+    for name in target_hashes:
+        shutil.copy2(args.target / name, target / name)
+    expected = {name: record for name, record in manifest["files"].items() if name.startswith("sdk/")}
+    for name, sha in target_hashes.items():
+        expected[f"sdk/runtime/lib/{TUPLE}/{name}"] = {
+            "sha256": sha, "mode": (args.target / name).stat().st_mode & 0o777}
+    require(inventory(args.output) == expected, "TUPLE_ACTIVATION_COPY_MISMATCH")
+    emit_env(sdk, args.root.resolve() / "host/runtime/lib" / TUPLE, target)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -208,7 +243,12 @@ def main():
     extract.add_argument("--archive", type=Path, required=True)
     extract.add_argument("--archive-sha256", required=True)
     extract.add_argument("--output", type=Path, required=True)
-    for command in (consumer, extract):
+    activation = commands.add_parser("activate")
+    for name in ("root", "target", "output"):
+        activation.add_argument(f"--{name}", type=Path, required=True)
+    for name in ("target-runtime-sha256", "target-boundscheck-sha256"):
+        activation.add_argument(f"--{name}", required=True)
+    for command in (consumer, extract, activation):
         command.add_argument("--manifest-sha256", required=True)
         command.add_argument("--compiler-sha256", required=True)
     args = parser.parse_args()
@@ -216,14 +256,13 @@ def main():
         pack(args)
     elif args.command == "unpack":
         unpack(args)
+    elif args.command == "activate":
+        activate(args)
     else:
         verify(args.root, args.manifest_sha256, args.compiler_sha256)
         if args.env:
             root = args.root.resolve()
-            values = {"CJC": root / "sdk/bin/cjc", "CANGJIE_HOME": root / "sdk",
-                      "GC_UNIT_CJC_RUNTIME_LIB_DIR": root / "host/runtime/lib" / TUPLE}
-            for key, value in values.items():
-                print(f"export {key}={shlex.quote(str(value))}")
+            emit_env(root / "sdk", root / "host/runtime/lib" / TUPLE)
         else:
             print("TUPLE_VERIFIED")
 

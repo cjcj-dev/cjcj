@@ -112,6 +112,37 @@ class LanguageTupleTest(unittest.TestCase):
                            manifest_sha256=self.manifest_sha, compiler_sha256=self.compiler_sha))
         self.assertFalse((self.root / "rejected").exists())
 
+    def activation_args(self):
+        target = self.root / "new-runtime"
+        target.mkdir()
+        for name in ("libcangjie-runtime.so", "libboundscheck.so"):
+            (target / name).write_text("synthetic newly built target " + name)
+        return argparse.Namespace(root=self.installed, manifest_sha256=self.manifest_sha,
+                                  compiler_sha256=self.compiler_sha, target=target,
+                                  target_runtime_sha256=product.digest(target / "libcangjie-runtime.so"),
+                                  target_boundscheck_sha256=product.digest(target / "libboundscheck.so"),
+                                  output=self.root / "activated")
+
+    def test_activation_keeps_host_and_target_separate(self):
+        self.pack()
+        args = self.activation_args()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            product.activate(args)
+        self.verify()  # The downloaded tuple is still intact.
+        self.assertIn(f"CANGJIE_HOME={args.output}/sdk", out.getvalue())
+        self.assertIn(f"GC_UNIT_CJC_RUNTIME_LIB_DIR={self.installed}/host/runtime/lib/{product.TUPLE}", out.getvalue())
+        self.assertEqual(product.digest(args.output / f"sdk/runtime/lib/{product.TUPLE}/libcangjie-runtime.so"),
+                         args.target_runtime_sha256)
+
+    def test_activation_rejects_wrong_target_digest(self):
+        self.pack()
+        args = self.activation_args()
+        args.target_runtime_sha256 = "0" * 64
+        with self.assertRaisesRegex(ValueError, "TUPLE_TARGET_DIGEST_MISMATCH libcangjie-runtime.so"):
+            product.activate(args)
+        self.assertFalse(args.output.exists())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

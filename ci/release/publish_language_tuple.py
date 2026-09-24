@@ -2,6 +2,7 @@
 """Publish a verified retained H48 tuple as a prerelease, or fetch its exact IDs."""
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -9,7 +10,9 @@ import tempfile
 from language_tuple import digest, require, unpack, verify, write_json
 
 REPOSITORY = "cjcj-dev/cjcj"
-GH = ["/root/.local/bin/cjcj-bot", "exec", "gh"]
+# Local operations use the campaign bot shim. Hosted consumers already receive
+# their repository-scoped Actions token and use the runner's installed gh.
+GH = ["gh"] if os.environ.get("GITHUB_ACTIONS") == "true" else ["/root/.local/bin/cjcj-bot", "exec", "gh"]
 
 
 def gh(*args):
