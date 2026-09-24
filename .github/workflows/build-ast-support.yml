@@ -3,7 +3,7 @@ name: Bootstrap AST support
 on:
   push:
     branches: [sym/187-implement-r5816792031]
-    paths: [.github/workflows/build-ast-support.yml, ci/build_ast_support.sh]
+    paths: [.github/workflows/build-ast-support.yml, ci/build_ast_support.sh, ci/source_pin.env]
   workflow_dispatch:
     inputs:
       cold_cache:

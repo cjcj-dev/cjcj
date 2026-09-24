@@ -51,3 +51,15 @@ for (const rel of runtimeFiles) {
     assert.match(result.stderr, /COLOUR_RT_FILE_SHA256_MISMATCH/);
   }));
 }
+
+for (const rel of ['lib/linux_x86_64_cjnative/libcangjie-std-core.a', 'modules/linux_x86_64_cjnative/std.core.cjo']) {
+  test(`new std producer and consumer bind ${rel}`, () => fixture(({runtime, runtimeSource, run}) => {
+    assert.equal(fs.readFileSync(path.join(runtime, rel), 'utf8'), fs.readFileSync(path.join(runtimeSource, rel), 'utf8'));
+    assert.equal(run().status, 0);
+    fs.appendFileSync(path.join(runtime, rel), 'changed std');
+    const result = run();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /COLOUR_RT_FILE_SHA256_MISMATCH/);
+    console.log(`ASSERT new std bytes copied and checked ${rel}`);
+  }));
+}
