@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "repository": "cjcj-dev/cjcj",
+  "runtime_sha": "fd82c0eb7c2ecf83682dfc8b8389d725bbe79607",
+  "producer_sha": "880795b77af4beab44c676b9fe873d28db38368e",
+  "run_id": "36064251059",
+  "run_attempt": "1",
+  "release_id": 396146615,
+  "tag": "colour-runtime-fd82c0eb7c2e-36064251059-1-prerelease",
+  "prerelease": true,
+  "checksums_asset_id": 587043977,
+  "checksums_sha256": "7ca2383c1fd5a1413326ee37a9bee6b7749fd62e0fc73b6d246436a7904c046a",
+  "platforms": {
+    "linux_x86_64": {
+      "artifact_id": 10838771028,
+      "artifact_digest": "sha256:26e46e08810746ce1ae877a9ed7d2bf9c7a83ae5a4c326f520615174a76981c1",
+      "manifest_sha256": "5d07f867b05298c4b9643c999e926845d1c41abddd89fa939455438c7365e031",
+      "archive": "colour-runtime-linux_x86_64.zip",
+      "archive_sha256": "26e46e08810746ce1ae877a9ed7d2bf9c7a83ae5a4c326f520615174a76981c1",
+      "manifest": "linux_x86_64.manifest.json",
+      "archive_asset_id": 587043260,
+      "manifest_asset_id": 587043922
+    }
+  }
+}
