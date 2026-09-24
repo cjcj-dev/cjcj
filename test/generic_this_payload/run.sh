@@ -20,7 +20,7 @@ echo "$check_rc" > "$out/check.rc"
 run_rc=125
 if [ "$compile_rc" = 0 ]; then
     sha256sum "$out/fixture" > "$out/fixture.sha256"
-    LD_LIBRARY_PATH="${PAYLOAD_RUN_LD:?product runtime path}" timeout 60 "$out/fixture" > "$out/run.log" 2>&1
+    cjHeapSize="${PAYLOAD_RUN_HEAP:-96G}" LD_LIBRARY_PATH="${PAYLOAD_RUN_LD:?product runtime path}" timeout 60 "$out/fixture" > "$out/run.log" 2>&1
     run_rc=$?
     if [ "$run_rc" = 0 ]; then
         /usr/bin/grep -q '^GENERIC_THIS_PAYLOAD_OK$' "$out/run.log" || run_rc=1
