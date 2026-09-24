@@ -23,7 +23,7 @@ AST_SUPPORT_SHA256=''
 CPP_SRC=''
 CJCJ_SHA=''
 BASE_SDK="${BASE_SDK:-cjcj-pin-937877c8}"
-HEAP="${CJ_HEAP:-24GB}"
+HEAP="${CJ_HEAP:-96GB}"
 STAGE1_HEAP="${STAGE1_HEAP:-20GB}"
 JOBS="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
 SDK_BUILD="${SDK_BUILD:-$(dirname "${BASH_SOURCE[0]}")/sdk_build.sh}"
@@ -327,6 +327,7 @@ stage0_cache_key() {
     "ast_support_sha256=$(sha256 "$AST_SUPPORT")" \
     "ast_inputs_sha256=$(sha256 "$(dirname "$AST_SUPPORT")/SHA256SUMS")" \
     "ast_installer_sha256=$(sha256 "$SRC/ci/install_std_sdk_inputs.py")" \
+    "build_resources_sha256=$(sha256 "$SRC/ci/build_resources.sh")" \
     "bootstrap_sha256=$(sha256 "${BASH_SOURCE[0]}")" \
     "sdk_build_sha256=$(sha256 "$SDK_BUILD")" \
     "cpp_headers_sha256=$cpp_headers" \
@@ -460,12 +461,14 @@ assert_std_install_shape() {
 
 stdlib_build() {
   local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" ld script
+  source "$SRC/ci/build_resources.sh"
+  configure_build_resources "$HEAP" || die "cannot determine std build resources"
   cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=96GB bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$JOBS") $(printf '%q' "$sdk/runtime/lib/$HOST_TUPLE") $(printf '%q' "$prefix")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$sdk/runtime/lib/$HOST_TUPLE") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
 }
 
@@ -532,6 +535,9 @@ install_stage_compiler() {
 
 cjpm_build() {
   local sdk="$1" runtime="$2" srcdir="$3" extra="$4" heap="$5" ld cjpm script
+  source "$SRC/ci/build_resources.sh"
+  configure_build_resources "$heap" || die "cannot determine compiler build resources"
+  heap="$STD_BUILD_HEAP"
   ld=$(sdk_ld_path "$sdk" "$runtime")
   prepare_build_env
   cjpm="$sdk/tools/bin/cjpm"

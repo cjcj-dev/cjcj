@@ -66,7 +66,7 @@ make_dry_fixture() {
   printf 'source\n' > "$TMP/src/main.cj"
   printf '#!/usr/bin/env python3\n' > "$TMP/stdsrc/build.py"
   mkdir -p "$TMP/src/ci" "$TMP/include" "$TMP/schema" "$TMP/third_party/flatbuffers/bin"
-  cp "$ROOT/../install_std_sdk_inputs.py" "$TMP/src/ci/"
+  cp "$ROOT/../install_std_sdk_inputs.py" "$ROOT/../build_resources.sh" "$TMP/src/ci/"
   printf 'ast\n' > "$TMP/ast.a"
   if [ -n "${BOOTSTRAP_AST_ARCHIVE:-}" ]; then
     cp "$BOOTSTRAP_AST_ARCHIVE" "$TMP/ast.a"
