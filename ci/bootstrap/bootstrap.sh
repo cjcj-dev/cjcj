@@ -291,10 +291,9 @@ source_identity() {
 }
 
 stage0_cache_key() {
-  local base="$1" rewritten_toml="$2" cjcj_identity stdlib_identity host_runtime_dir host_runtime_so
+  local base="$1" rewritten_toml="$2" cjcj_identity host_runtime_dir host_runtime_so
   local host_nightly compile_options cpp_headers material rel
   cjcj_identity=$(source_identity cjcj "$SRC" 1) || return $?
-  stdlib_identity=$(source_identity stdlib "$STDSRC" 0) || return $?
   host_nightly=$(awk -F= '$1 == "CJCJ_TOOLCHAIN" {print $2}' "$SRC/ci/host_sdk_pin.env" 2>/dev/null || true)
   if [ -z "$host_nightly" ]; then
     echo 'STAGE0_CACHE=disabled reason=host-nightly-pin-missing' >&2
@@ -317,9 +316,8 @@ stage0_cache_key() {
     cpp_headers="$cpp_headers$rel=$(tree_content_sha256 "$CPP_SRC/$rel")"$'\n' || return 1
   done
   material=$(printf '%s\n' \
-    'format=stage0-cache-v1' \
+    'format=stage0-cache-v2' \
     "cjcj=$cjcj_identity" \
-    "stdlib=$stdlib_identity" \
     "host_nightly=$host_nightly" \
     "host_cjc_sha256=$(sha256 "$base/bin/cjc")" \
     "host_llvm_sha256=$(sha256 "$HOST_LLVM_SO")" \
@@ -341,14 +339,14 @@ manifest_value() {
 }
 
 stage0_cache_restore() {
-  local key="$1" out="$2" std="$3" entry manifest compiler_sha stdlib_sha actual
+  local key="$1" out="$2" entry manifest compiler_sha actual
   entry="$STAGE0_CACHE_ROOT/$key"
   manifest="$entry/MANIFEST"
   if [ ! -f "$manifest" ]; then
     echo "STAGE0_CACHE=miss key=$key reason=missing"
     return 1
   fi
-  [ "$(manifest_value "$manifest" format)" = 'stage0-cache-v1' ] || {
+  [ "$(manifest_value "$manifest" format)" = 'stage0-cache-v2' ] || {
     echo "STAGE0_CACHE=rejected key=$key reason=format"
     return 1
   }
@@ -357,12 +355,11 @@ stage0_cache_restore() {
     return 1
   }
   compiler_sha=$(manifest_value "$manifest" cjcj_stage1_sha256)
-  stdlib_sha=$(manifest_value "$manifest" stdlib_stage1_sha256)
-  [ "${#compiler_sha}" -eq 64 ] && [ "${#stdlib_sha}" -eq 64 ] || {
+  [ "${#compiler_sha}" -eq 64 ] || {
     echo "STAGE0_CACHE=rejected key=$key reason=manifest-sha"
     return 1
   }
-  [ -f "$entry/cjcj-stage1" ] && [ -d "$entry/stdlib-stage1" ] || {
+  [ -f "$entry/cjcj-stage1" ] || {
     echo "STAGE0_CACHE=rejected key=$key reason=payload-missing"
     return 1
   }
@@ -371,33 +368,23 @@ stage0_cache_restore() {
     echo "STAGE0_CACHE=rejected key=$key reason=cjcj-sha-mismatch"
     return 1
   }
-  actual=$(tree_content_sha256 "$entry/stdlib-stage1")
-  [ "$actual" = "$stdlib_sha" ] || {
-    echo "STAGE0_CACHE=rejected key=$key reason=stdlib-sha-mismatch"
-    return 1
-  }
-  rm -rf -- "$out" "$std"
+  rm -f -- "$out"
   install -m0755 "$entry/cjcj-stage1" "$out" || return 1
-  cp -a "$entry/stdlib-stage1" "$std" || return 1
   [ "$(sha256 "$out")" = "$compiler_sha" ] || return 1
-  [ "$(tree_content_sha256 "$std")" = "$stdlib_sha" ] || return 1
   echo "STAGE0_CACHE=hit key=$key path=$entry"
 }
 
 stage0_cache_publish() {
-  local key="$1" out="$2" std="$3" entry incoming rejected compiler_sha stdlib_sha
+  local key="$1" out="$2" entry incoming rejected compiler_sha
   entry="$STAGE0_CACHE_ROOT/$key"
   mkdir -p "$STAGE0_CACHE_ROOT"
   incoming=$(mktemp -d "$STAGE0_CACHE_ROOT/.incoming-$key.XXXXXX") || return 1
   install -m0755 "$out" "$incoming/cjcj-stage1" || return 1
-  cp -a "$std" "$incoming/stdlib-stage1" || return 1
   compiler_sha=$(sha256 "$incoming/cjcj-stage1")
-  stdlib_sha=$(tree_content_sha256 "$incoming/stdlib-stage1")
   printf '%s\t%s\n' \
-    format stage0-cache-v1 \
+    format stage0-cache-v2 \
     key "$key" \
-    cjcj_stage1_sha256 "$compiler_sha" \
-    stdlib_stage1_sha256 "$stdlib_sha" > "$incoming/MANIFEST"
+    cjcj_stage1_sha256 "$compiler_sha" > "$incoming/MANIFEST"
   if [ -e "$entry" ]; then
     rejected="$STAGE0_CACHE_ROOT/.replaced-$key-$$"
     mv "$entry" "$rejected" || return 1
@@ -406,7 +393,7 @@ stage0_cache_publish() {
   fi
   mv "$incoming" "$entry" || return 1
   [ -z "$rejected" ] || rm -rf -- "$rejected"
-  echo "STAGE0_CACHE=stored key=$key path=$entry cjcj_sha=$compiler_sha stdlib_sha=$stdlib_sha"
+  echo "STAGE0_CACHE=stored key=$key path=$entry cjcj_sha=$compiler_sha"
 }
 
 sdk_ld_path() {
@@ -615,7 +602,7 @@ resolve_base_sdk() {
 stage0() {
   STAGE=stage0
   echo '[stage0] official cjc + stdlib + host LLVM; cjcj=-O1'
-  local base out std sdk ld cache_key='' cacheable=0 cache_hit=0
+  local base out sdk ld cache_key='' cacheable=0 cache_hit=0
   base=$(resolve_base_sdk)
   record official-sdk "$base"
   assert_official_opt_zero "$base/third_party/llvm/bin/opt"
@@ -631,10 +618,8 @@ stage0() {
   mkdir -p "$WORK"
 
   out="$WORK/cjcj-stage1"
-  std="$WORK/stdlib-stage1"
   sdk="$WORK/sdk-stage0"
   echo "OUTPUT cjcj-stage1=$out"
-  echo "OUTPUT stdlib-stage1=$std"
   cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$base") --to $(printf '%q' "$sdk") --host --llvm-so $(printf '%q' "$HOST_LLVM_SO") --force"
   assert_installed_llvm_so "$sdk" "$HOST_LLVM_SO"
   cmd "install -Dm644 $(printf '%q' "$AST_SUPPORT") $(printf '%q' "$sdk/lib/$HOST_TUPLE/libcangjie-ast-support.a")"
@@ -649,7 +634,7 @@ stage0() {
   if [ "$DRY" -eq 0 ]; then
     if cache_key=$(stage0_cache_key "$base" "$copy/cjpm.toml"); then
       cacheable=1
-      if stage0_cache_restore "$cache_key" "$out" "$std"; then
+      if stage0_cache_restore "$cache_key" "$out"; then
         cache_hit=1
         cmd "ln -sfn $(printf '%q' "$(basename "$out")") $(printf '%q' "$WORK/cjc")"
       fi
@@ -662,20 +647,17 @@ stage0() {
     cjpm_build "$sdk" "$HRT" "$copy" "" "$HEAP"
     seed=$(resolve_cjpm_product "$copy/target/release/bin" cjcj-stage1)
     install_stage_compiler "$seed" "$out" "$WORK/cjc"
-    stdlib_build stdlib-stage1 "$sdk" "$HRT" "$std"
   fi
   if [ "$DRY" -eq 0 ]; then
     assert_executable cjcj-stage1 "$out"
-    [ -d "$std" ] || die 'stage0 未产出 stdlib-stage1'
   fi
   prepare_stage0_run_sdk
   assert_version cjcj-stage1 "$out" "$WORK/sdk-stage0-run" "$HRT"
   if [ "$DRY" -eq 0 ] && [ "$cacheable" -eq 1 ] && [ "$cache_hit" -eq 0 ]; then
-    stage0_cache_publish "$cache_key" "$out" "$std" || die 'stage0 cache 发布失败'
+    stage0_cache_publish "$cache_key" "$out" || die 'stage0 cache 发布失败'
   fi
   if [ "$DRY" -eq 0 ]; then
     printf '%s\n' "$out" > "$WORK/.cjcj-stage1"
-    printf '%s\n' "$std" > "$WORK/.stdlib-stage1"
   fi
 }
 
