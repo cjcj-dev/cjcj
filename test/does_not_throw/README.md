@@ -13,7 +13,8 @@ ELF. It inspects AST, CHIR and **unoptimized** LLVM bitcode from that compilatio
 
 The mirror class, its derived mirror and the synthetic protocol wrapper must each
 carry `nounwind`, without `readonly`, `readnone` or `willreturn`. Their actual
-release calls remain present. The ordinary user finalizer must remain unmarked.
+release calls remain present. The ordinary user finalizer must remain unmarked. A real `Int64.hashCode` call
+positively checks that NO_SIDE_EFFECT still emits its three stronger promises.
 Every assertion prints `EXECUTED`, including successful and non-fatal existence
 checks. AST and CHIR values print `OBSERVED` so producer and consumer cuts can be
 distinguished. A producer or consumer cut fails only the three `llvmNoUnwind`

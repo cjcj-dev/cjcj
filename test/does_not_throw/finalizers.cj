@@ -12,3 +12,4 @@ public func control(x: Int64): Int64 { x + 1 }
 public interface ForeignProtocol {}
 @ObjCMirror["DerivedForeign"]
 public class DerivedForeign <: ForeignObject {}
+public func noSideEffectControl(x: Int64): Int64 { x.hashCode() }
