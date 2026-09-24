@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::basic.LambdaPattern as BasicLambdaPattern
 import cjcj::mangle.{BaseMangler, MangleType}
-import cjcj::modules.{ImportManager, SemaImportManager}
+import cjcj::modules.SemaImportManager
 import cjcj::option.GetFileName as OptionGetFileName
 import cjcj::option.IsDir as OptionIsDir
 import cjcj::sema.{CreateThrowException, TypeManager}
@@ -275,12 +275,6 @@ public func CreateBoolMatch(selector: Expr, trueBranch: Expr, falseBranch: Expr,
 // C++ src/Sema/NativeFFI/Utils.cpp:130-135.
 // C++ caches this lookup in a function-local static. Cangjie has no equivalent construct;
 // repeated core-declaration lookup returns the same declaration during one compilation.
-public func GetStringDecl(importManager: ImportManager): StructDecl {
-    let decl = importManager.GetCoreDecl(STD_LIB_STRING_IDENT)
-    CJC_NULLPTR_CHECK(decl)
-    return (decl.getOrThrow() as StructDecl).getOrThrow()
-}
-
 public func GetStringDecl(importManager: SemaImportManager): StructDecl {
     let decl = importManager.GetCoreDecl<StructDecl>(STD_LIB_STRING_IDENT)
     CJC_NULLPTR_CHECK(decl)
@@ -859,8 +853,8 @@ public func GetInstantyForGenericTy(decl: Decl, actualTyArgMap: HashMap<String, 
     return None
 }
 
-public func GetExceptionDecl(importManager: ImportManager): ClassDecl {
-    let exceptionDecl = importManager.GetCoreDecl("Exception")
+public func GetExceptionDecl(importManager: SemaImportManager): ClassDecl {
+    let exceptionDecl = importManager.GetCoreDecl<ClassDecl>("Exception")
     CJC_NULLPTR_CHECK(exceptionDecl)
     let exceptionClassDecl = exceptionDecl.getOrThrow() as ClassDecl
     if (let None <- exceptionClassDecl) {
@@ -870,7 +864,7 @@ public func GetExceptionDecl(importManager: ImportManager): ClassDecl {
 }
 
 // C++ src/Sema/NativeFFI/Utils.cpp:758-770.
-public func CreateThrowExceptionCall(importManager: ImportManager, typeManager: TypeManager,
+public func CreateThrowExceptionCall(importManager: SemaImportManager, typeManager: TypeManager,
     msg: String, curFile: File): ThrowExpr {
     let exceptionArgs = ArrayList<Expr>()
     let exceptionMsg = WithinFile(CreateLitConstExpr(LitConstKind.STRING, msg,

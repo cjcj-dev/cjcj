@@ -26,8 +26,20 @@ export function prepareRuntime(source, dest, env = process.env) {
   if (!/^\d+$/.test(env.GITHUB_RUN_ID || '') || !/^\d+$/.test(env.GITHUB_RUN_ATTEMPT || '')) {
     throw new Error('COLOUR_RT_RUN_MISSING');
   }
+  function walk(dir) {
+    return fs.readdirSync(dir, {withFileTypes: true}).flatMap(entry => {
+      const file = path.join(dir, entry.name);
+      return entry.isDirectory() ? walk(file) : [path.relative(source, file)];
+    });
+  }
+  const stdFiles = [...walk(path.join(source, 'lib')), ...walk(path.join(source, 'runtime/lib'))]
+    .filter(rel => /^(libcangjie-std-|lib.*FFI\.)/.test(path.basename(rel)));
+  if (!stdFiles.includes('lib/linux_x86_64_cjnative/libcangjie-std-core.a')) {
+    throw new Error('COLOUR_RT_STD_MISSING');
+  }
+  const moduleFiles = walk(path.join(source, 'modules'));
   const files = {};
-  for (const rel of runtimeFiles) {
+  for (const rel of [...runtimeFiles, ...stdFiles, ...moduleFiles]) {
     const input = regularFile(source, rel);
     const output = path.join(dest, rel);
     fs.mkdirSync(path.dirname(output), {recursive: true});
@@ -62,7 +74,7 @@ export function verifyRuntime(env = process.env) {
       || manifest.run_id !== env.COLOUR_RT_RUN_ID || manifest.run_attempt !== env.COLOUR_RT_RUN_ATTEMPT) {
     throw new Error('COLOUR_RT_MANIFEST_MISMATCH');
   }
-  for (const rel of runtimeFiles) {
+  for (const rel of new Set([...runtimeFiles, ...Object.keys(manifest.files || {})])) {
     if (digest(regularFile(root, rel)) !== manifest.files?.[rel]) {
       throw new Error(`COLOUR_RT_FILE_SHA256_MISMATCH: ${rel}`);
     }

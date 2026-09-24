@@ -27,3 +27,20 @@ Artifacts have 90-day retention; durable storage is tracked by cjcj#87.
 routine. A selected AST artifact cannot silently fall back if it is missing
 or has a different digest. Explicit and kkk2 build-directory fallbacks must
 match the same reviewed archive digest.
+
+The alpha.06 input artifact also contains `include/cangjie`,
+`include/flatbuffers/StdAstFormat_generated.h`, and `schema/StdAstFormat.fbs`
+from the same compiler commit as the archive. The complete
+`third_party/flatbuffers/{bin,include,cangjie,modules}` tree is physically
+copied from official nightly `1.3.0-alpha.20260924001050`, preserving the
+matching Cangjie module and generator. `SHA256SUMS` covers all these files.
+`ci/install_std_sdk_inputs.py` installs them before bootstrap/final std builds.
+The compiler source authority is `https://gitcode.com/Cangjie/cangjie_compiler.git`;
+the former Zxilly mirror does not contain the alpha.06 compiler commit.
+
+Std compilation uses `ci/build_resources.sh`: requested heap defaults to 96GB,
+clamped to 75% of measured physical memory so the official host runtime does
+not reject the setting and fall back to its small default heap (#131).
+Hosts with less than a 96GB budget compile one std package at a time;
+large build hosts use every core. The selected heap, memory and parallelism
+are printed. Windows target archive/DLL qualification is tracked by #194.

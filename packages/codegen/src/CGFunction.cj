@@ -59,23 +59,9 @@ private func CreateFunctionWrapperForNormalCases(function: LLVMValueRef, wrapper
             try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
                 tmp = unsafe { LLVMBuildArrayAlloca(builder.GetBuilder().raw, paramDerefType, size, nameCString.value) }
             }
-            var structType = LLVMNullType()
-            try (nameCString = unsafe { LibC.mallocCString("i8_array") }.asResource()) {
-                structType = unsafe { LLVMGetTypeByName2(cgMod.GetLLVMContext().raw, nameCString.value) }
-                if (structType.isNull()) {
-                    structType = unsafe { LLVMStructCreateNamed(cgMod.GetLLVMContext().raw, nameCString.value) }
-                    let body = ArrayList<LLVMTypeRef>()
-                    body.add(unsafe { LLVMInt8TypeInContext(cgMod.GetLLVMContext().raw) })
-                    SetStructTypeBody(structType, body)
-                    cgMod.GetCGContext().AddGeneratedStructType("i8_array")
-                }
-            }
-            let gcReadArgs = ArrayList<LLVMValueRef>()
-            gcReadArgs.add(tmp)
-            gcReadArgs.add(thisVal)
-            gcReadArgs.add(dataPtr)
-            gcReadArgs.add(builder.CreateSExt(size, unsafe { LLVMInt64TypeInContext(cgMod.GetLLVMContext().raw) }))
-            builder.CallGCReadAgg(structType, gcReadArgs)
+            // The payload layout is only known through this object's TypeInfo.
+            // A synthetic byte aggregate has no reference map and skips load barriers.
+            builder.CallGCReadGenericPayload(tmp, thisVal, size)
             dataPtr = tmp
         }
 
@@ -215,6 +201,9 @@ public class CGFunction <: CGValue {
                 AddFnAttr(function, FAST_NATIVE_ATTR)
             } else if (chirFunc.TestAttr(Attribute.FOREIGN)) {
                 AddFnAttr(function, CJ2C_ATTR)
+            }
+            if (chirFunc.TestAttr(Attribute.DOES_NOT_THROW)) {
+                AddFnAttr(function, "nounwind")
             }
             if (functionValue.TestAttr(Attribute.NO_STACK_GROW)) {
                 AddFnAttr(function, NO_STACK_GROW_ATTR)

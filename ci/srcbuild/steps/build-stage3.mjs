@@ -178,9 +178,13 @@ const {compiler: stage2Product, targetLd} = await prepareBootstrapHandoff({
 const stage2Sha = await sha256(stage2Product);
 const compilerEntrySha = await sha256(path.join(sdk, 'bin', 'cjc'));
 
+const resourceOutput = await $({stdio: 'pipe'})`bash ${path.join(githubWorkspace, 'ci/build_resources.sh')} ${process.env.CJ_HEAP || '96GB'}`;
+process.stderr.write(resourceOutput.stderr);
+const resources = Object.fromEntries(resourceOutput.stdout.trim().split('\n').map(line => line.split('=')));
 const stageEnv = {
   ...process.env,
   CANGJIE_HOME: sdk,
+  cjHeapSize: resources.STD_BUILD_HEAP,
   [target.spec.loaderEnv]: targetLd,
   PATH: `${path.join(sdk, 'bin')}:${path.join(sdk, 'tools', 'bin')}:${process.env.PATH ?? ''}`,
 };
@@ -311,13 +315,14 @@ if (!dryRun) {
 console.log('[stage3] rebuild final std with shipped stage3 compiler');
 if (dryRun) {
   console.log(`STAGE3_DRY_RUN_FAKE_ARTIFACTS=1 final_std=${finalStd}`);
-  console.log(`[stage3][dry-run] python3 build.py clean; build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}; install --prefix ${finalStd}`);
+  console.log(`[stage3][dry-run] python3 build.py clean; build -t ${stdlibBuildType} -j ${resources.STD_BUILD_JOBS} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}; install --prefix ${finalStd}`);
 } else {
+  await $`python3 ${path.join(githubWorkspace, 'ci/install_std_sdk_inputs.py')} ${path.dirname(process.env.CJCJ_BOOTSTRAP_AST_SUPPORT)} ${sdk} ${tuple}`;
   await fs.rm(finalStd, {recursive: true, force: true});
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py clean`;
   await fs.rm(path.join(stdlibRoot, 'build', 'build'), {recursive: true, force: true});
   await assertBuildCompiler(stageEnv, stdCompilerSha, stdCompilerName, stdEntrySha);
-  await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t ${stdlibBuildType} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}`;
+  await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py build -t ${stdlibBuildType} -j ${resources.STD_BUILD_JOBS} --target native --target-lib=${runtimeTarget} --target-lib=${target.spec.opensslLibDir}`;
   await $({cwd: stdlibRoot, env: stageEnv})`python3 build.py install --prefix ${finalStd}`;
   await writeStdProvenance({
     sourceDir: stdlibRoot,
