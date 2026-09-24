@@ -67,6 +67,7 @@ public func StdPackageMangle(pkgName: String): Option<String> {
         case "std.math.numeric" => "co"
         case "std.math.native" => "cp"
         case "std.math.numeric.native" => "cq"
+        case "std.concurrent" => "cr"
         case _ => None
     }
 }
@@ -82,5 +83,5 @@ public func IsStdPackageMangleCode(code: String): Bool {
         code == "bt" || code == "bu" || code == "bv" || code == "bw" || code == "bx" || code == "by" ||
         code == "ca" || code == "cb" || code == "cc" || code == "cd" || code == "ce" || code == "cf" ||
         code == "cg" || code == "ch" || code == "ci" || code == "cj" || code == "ck" || code == "cl" ||
-        code == "cm" || code == "cn" || code == "co" || code == "cp" || code == "cq"
+        code == "cm" || code == "cn" || code == "co" || code == "cp" || code == "cq" || code == "cr"
 }
