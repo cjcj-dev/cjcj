@@ -67,6 +67,7 @@ func MANGLE_STDPKG_MAP(pkg: String): Option<String> {
         case "co" => "std.math.numeric"
         case "cp" => "std.math.native"
         case "cq" => "std.math.numeric.native"
+        case "cr" => "std.concurrent"
         case _ => None
     }
 }
