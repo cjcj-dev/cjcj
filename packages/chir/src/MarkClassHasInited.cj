@@ -67,11 +67,9 @@ public class MarkClassHasInited {
         let boolTy = builder.context.GetBoolTy()
         let entry = constructor.GetEntryBlock().getOrThrow()
         let falseVal = builder.CreateConstant(boolTy, BoolLiteral(false), entry)
-        entry.AppendExpression(falseVal)
         let thisArg = constructor.GetParam(0)
         let path = ArrayList<String>([HAS_INITED_IDENT])
         let storeRef = builder.CreateStoreElementByName(falseVal.GetResult().getOrThrow(), thisArg, path, entry)
-        entry.AppendExpression(storeRef)
         entry.InsertExprIntoHead(storeRef)
         entry.InsertExprIntoHead(falseVal)
     }

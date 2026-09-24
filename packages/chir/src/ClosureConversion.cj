@@ -1215,7 +1215,6 @@ public class ClosureConversion {
         if (classDef.GetAllInstanceVarNum() != 0) {
             let debugExpr = builder.CreateDebug(builder.context.GetUnitTy(), thisParam, "$env",
                 globalFunc.GetEntryBlock().getOrThrow())
-            globalFunc.GetEntryBlock().getOrThrow().AppendExpression(debugExpr)
             globalFunc.GetEntryBlock().getOrThrow().InsertExprIntoHead(debugExpr)
             envParamDebug = Some(debugExpr)
         }
@@ -1555,7 +1554,6 @@ public class ClosureConversion {
         let instantiateClassTy = GenerateInstantiatedClassType(autoEnvImplType, user, srcFunc)
         let refType = builder.context.GetRefTy(instantiateClassTy)
         let allocate = builder.CreateAllocate(refType, instantiateClassTy, parent)
-        parent.AppendExpression(allocate)
         let obj = RequireResult(allocate)
         var idx: UInt64 = 0u64
         for (env in envs) {
@@ -2645,7 +2643,6 @@ public class ClosureConversion {
         let autoEnvWrapperType = RequireClassType(autoEnvWrapperDef)
         let allocate = builder.CreateAllocate(builder.context.GetRefTy(autoEnvWrapperType), autoEnvWrapperType,
             parentBlock)
-        parentBlock.AppendExpression(allocate)
         parentBlock.InsertExprIntoHead(allocate)
         let path = ArrayList<UInt64>()
         path.add(0u64)
