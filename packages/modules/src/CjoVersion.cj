@@ -34,7 +34,7 @@ public struct CjoVersionTriplet {
 public enum CjoVersionOrder <: Equatable<CjoVersionOrder> {
     | OLDER | EQUAL | NEWER | DIFFERENT_MAJOR
     public operator func ==(other: CjoVersionOrder): Bool {
-        match (this, other) {
+        match ((this, other)) {
             case (OLDER, OLDER) | (EQUAL, EQUAL) | (NEWER, NEWER) |
                  (DIFFERENT_MAJOR, DIFFERENT_MAJOR) => true
             case _ => false

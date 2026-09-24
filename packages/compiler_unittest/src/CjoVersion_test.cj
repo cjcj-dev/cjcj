@@ -6,6 +6,8 @@ import std.unittest.testmacro.*
 import cjcj::ast.*
 import cjcj::flatbuffers.ReadScalar
 import cjcj::frontend.*
+import cjcj::modules.ASTLoader as HeaderLoader
+import cjcj::basic.DiagnosticEngine as HeaderDiagnostics
 
 private func VersionLoader(result: TestCompileResult, data: Array<UInt8>): CjoSignatureMaterializer {
     let pkg = RequireFirstPackage(result)
@@ -88,4 +90,31 @@ public class CjoVersionTest {
         @Expect(loader.IsCjoVersionExactly(0u8, 0u8), false)
         println("MissingVersionQueryOnLoader observed missing version")
     }
+    @TestCase
+    public func HeaderVersionQueryAndGate(): Unit {
+        let result = CompileSource("package headerquery\npublic func answer(): Int64 { 42 }")
+        @Assert(result.ok)
+        let data = result.instance.ExportAST(false, RequireFirstPackage(result))
+        let offset = VersionOffset(data)
+        for (minor in [0u8, 1u8, 2u8]) {
+            let copy = data.clone()
+            copy[offset + 1] = minor
+            let diag = HeaderDiagnostics()
+            let loader = HeaderLoader(copy, "headerquery", diag)
+            loader.SetCjoPath("headerquery.cjo")
+            @Expect(loader.HasCjoVersion(), false)
+            @Expect(loader.IsCjoVersionExactly(0u8, 0u8), false)
+            let depInfo = loader.LoadPackageDepInfo()
+            @Expect(depInfo.isEmpty(), minor == 2u8)
+            @Expect(diag.GetErrorCount(), if (minor == 2u8) { 1u64 } else { 0u64 })
+            @Expect(loader.HasCjoVersion(), true)
+            @Expect(loader.GetCjoVersion().minor, minor)
+            @Expect(loader.IsCjoVersionAtLeast(0u8, minor), true)
+            @Expect(loader.IsCjoVersionAtMost(0u8, minor), true)
+            @Expect(loader.IsCjoVersionExactly(0u8, minor), true)
+            @Expect(loader.IsCjoVersionAtMost(1u8, minor), false)
+            println("HeaderVersionQueryAndGate observed minor=${minor}")
+        }
+    }
+
 }

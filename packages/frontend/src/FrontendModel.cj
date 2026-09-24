@@ -7151,6 +7151,11 @@ public class ImportManager <: SemaImportManager & SemaCjoManager & MacroHostImpo
         return out
     }
 
+    // ImportManager.h:364: the live manager owns the diagnostic engine.
+    public func GetDiagnosticEngine(): BasicDiagnosticEngine {
+        return diag.AsBasicDiagnosticEngine()
+    }
+
     public func GetCjoManager(): SemaCjoManager {
         return this
     }
