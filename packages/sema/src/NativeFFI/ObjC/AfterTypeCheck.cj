@@ -1023,6 +1023,7 @@ public class ASTFactory {
         PutDeclToClassLikeBody(funcDecl, target)
         funcDecl.EnableAttr(Attribute.PRIVATE)
         funcDecl.EnableAttr(Attribute.FINALIZER)
+        funcDecl.EnableAttr(Attribute.DOES_NOT_THROW)
         funcDecl.linkage = Linkage.EXTERNAL
         funcDecl.funcBody.getOrThrow().funcDecl = funcDecl
         return funcDecl
@@ -4021,6 +4022,7 @@ public class GenerateFwdClass <: Handler<InteropContext> {
         let funcDecl = ASTFactory.CreateFunc(FINALIZER_IDENT, fnTy, ArrayList<FuncParam>(), nodes)
         funcDecl.EnableAttr(Attribute.INTERNAL)
         funcDecl.EnableAttr(Attribute.FINALIZER)
+        funcDecl.EnableAttr(Attribute.DOES_NOT_THROW)
         PutIntoFwdClass(funcDecl)
     }
 

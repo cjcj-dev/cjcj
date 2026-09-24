@@ -166,7 +166,7 @@ public enum Attribute {
     | NO_DEBUG_INFO | GENERIC | INTERNAL | COMPILER_ADD | NO_REFLECT_INFO | NO_INLINE
     | NON_RECOMPILE | UNREACHABLE | NO_SIDE_EFFECT | COMMON | SPECIFIC | SKIP_ANALYSIS
     | DESERIALIZED | INITIALIZER | UNSAFE | JAVA_MIRROR | JAVA_IMPL | OBJ_C_MIRROR
-    | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED
+    | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED | DOES_NOT_THROW
     | FAST_NATIVE
     // FEATURE_DEBT(CJCJ_RUNTIME_SPEC §3.2/§7): selfhost-only extension domain;
     // upstream CHIR AttributeInfo.h still ends its C++ attribute domain at 38.
@@ -213,6 +213,7 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.HAS_INITED_FIELD => 35
         case Attribute.JAVA_HAS_DEFAULT => 36
         case Attribute.PREVIOUSLY_DESERIALIZED => 37
+        case Attribute.DOES_NOT_THROW => 38
         case Attribute.FAST_NATIVE => 71
         case Attribute.NO_HEAP_ALLOC => 76
         case Attribute.NO_WRITE_BARRIER_REC => 77
@@ -250,6 +251,7 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.OBJ_C_MIRROR => "objCMirror"
         case Attribute.OPERATOR => "operator"
         case Attribute.PREVIOUSLY_DESERIALIZED => "previouslyDeserialized"
+        case Attribute.DOES_NOT_THROW => "doesNotThrow"
         case Attribute.PRIVATE => "private"
         case Attribute.PROTECTED => "protected"
         case Attribute.PUBLIC => "public"
