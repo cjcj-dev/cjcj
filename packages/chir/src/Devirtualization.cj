@@ -352,9 +352,11 @@ public class Devirtualization {
             if (rewriteInfo.thisType.IsBuiltinType()) {
                 instThisType = builder.context.GetRefTy(builder.context.GetAnyTy().getOrThrow())
             }
-            let typecastRes = TypeCastOrBoxIfNeeded(args[0], instThisType, builder, parent, INVALID_LOCATION)
+            let (typecastRes, expressions) = TypeCastOrBoxIfNeeded(args[0], instThisType, builder, parent, INVALID_LOCATION)
             if (typecastRes != args[0]) {
-                typecastRes.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(invoke)
+                for (expression in expressions) {
+                    expression.MoveBefore(invoke)
+                }
                 args[0] = typecastRes
             }
             let apply = builder.CreateApply(invoke.GetResultType().getOrThrow(), realFunc,

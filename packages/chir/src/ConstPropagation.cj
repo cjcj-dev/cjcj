@@ -280,11 +280,13 @@ public class ConstPropagation {
         if (let Some(literal) <- newValue) {
             if (let Some(res) <- oldTerminator.GetResult()) {
                 let constant = chirBuilder.CreateConstant(literal.GetType().getOrThrow(), literal, parentBlock)
+                parentBlock.AppendExpression(constant)
                 constant.SetDebugLocation(loc)
                 res.ReplaceWith(constant.GetResult().getOrThrow(), constant.GetParentBlockGroup())
             }
         }
         let newTerminator = chirBuilder.CreateGoTo(newTarget, parentBlock)
+        parentBlock.AppendExpression(newTerminator)
         newTerminator.SetDebugLocation(loc)
         if (isDebug) {
             println("[ConstPropagation] The terminator " + oldTerminator.GetExprKindName() +

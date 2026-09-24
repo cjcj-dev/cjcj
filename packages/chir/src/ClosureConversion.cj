@@ -1059,7 +1059,9 @@ public class ClosureConversion {
         for (paramTy in methodTy.GetParamTypes()) {
             builder.CreateParameter(paramTy, INVALID_LOCATION, method)
         }
-        let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(methodRetTy), methodRetTy, entry))
+        let createdAllocate1062 = builder.CreateAllocate(builder.context.GetRefTy(methodRetTy), methodRetTy, entry)
+        entry.AppendExpression(createdAllocate1062)
+        let retSlot = RequireResult(createdAllocate1062)
         method.SetReturnValue(retSlot)
 
         let srcFuncTy = srcFunc.GetFuncType() ??
@@ -1081,9 +1083,13 @@ public class ClosureConversion {
                 throw IllegalStateException("ClosureConversion parameter has no type")
             if (paramTy.IsCJFunc()) {
                 CJC_ASSERT(expectedTy == paramTy)
-                applyArgs.add(RequireResult(builder.CreateTypeCast(paramTy, params[idx], entry)))
+                let createdTypeCast1084 = builder.CreateTypeCast(paramTy, params[idx], entry)
+                entry.AppendExpression(createdTypeCast1084)
+                applyArgs.add(RequireResult(createdTypeCast1084))
             } else {
-                applyArgs.add(TypeCastOrBoxIfNeeded(params[idx], expectedTy, builder, entry, INVALID_LOCATION))
+                let (arg, expressions) = TypeCastOrBoxIfNeeded(params[idx], expectedTy, builder, entry, INVALID_LOCATION)
+                entry.AppendExpressions(expressions)
+                applyArgs.add(arg)
             }
             idx++
         }
@@ -1092,13 +1098,17 @@ public class ClosureConversion {
         let apply = builder.CreateApply(applyRetTy, srcFunc, FuncCallContext(args: applyArgs,
             instTypeArgs: CreateSubstitutedInstTypeArgs(srcFunc, genericMap),
             thisType: CreateSubstitutedThisType(srcFunc, genericMap)), entry)
+        entry.AppendExpression(apply)
         // C++: CHIR/Transformation/ClosureConversion.cpp:1699-1701.
         if (IsArkInteropLambdaSignature(srcFunc)) {
             apply.SetDebugLocation(srcFunc.GetDebugLocation())
         }
-        let applyResult = TypeCastOrBoxIfNeeded(RequireResult(apply), methodRetTy, builder, entry, INVALID_LOCATION)
-        builder.CreateStore(applyResult, retSlot, entry)
-        builder.CreateExit(None, entry)
+        let (applyResult, expressions) = TypeCastOrBoxIfNeeded(RequireResult(apply), methodRetTy, builder, entry, INVALID_LOCATION)
+        entry.AppendExpressions(expressions)
+        let createdStore1100 = builder.CreateStore(applyResult, retSlot, entry)
+        entry.AppendExpression(createdStore1100)
+        let createdExit1101 = builder.CreateExit(None, entry)
+        entry.AppendExpression(createdExit1101)
     }
 
     private func CreateOverrideMethodBody(method: Function, srcFunc: Function, retTy: Type,
@@ -1112,7 +1122,9 @@ public class ClosureConversion {
         for (paramTy in methodTy.GetParamTypes()) {
             builder.CreateParameter(paramTy, INVALID_LOCATION, method)
         }
-        let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retTy), retTy, entry))
+        let createdAllocate1115 = builder.CreateAllocate(builder.context.GetRefTy(retTy), retTy, entry)
+        entry.AppendExpression(createdAllocate1115)
+        let retSlot = RequireResult(createdAllocate1115)
         method.SetReturnValue(retSlot)
         let applyArgs = ArrayList<Value>()
         if (srcFunc.IsLambda()) {
@@ -1126,12 +1138,15 @@ public class ClosureConversion {
         let apply = builder.CreateApply(retTy, srcFunc, FuncCallContext(args: applyArgs,
             instTypeArgs: CreateSubstitutedInstTypeArgs(srcFunc, genericMap),
             thisType: CreateSubstitutedThisType(srcFunc, genericMap)), entry)
+        entry.AppendExpression(apply)
         // C++: CHIR/Transformation/ClosureConversion.cpp:1768-1770.
         if (IsArkInteropLambdaSignature(srcFunc)) {
             apply.SetDebugLocation(srcFunc.GetDebugLocation())
         }
-        builder.CreateStore(RequireResult(apply), retSlot, entry)
-        builder.CreateExit(None, entry)
+        let createdStore1133 = builder.CreateStore(RequireResult(apply), retSlot, entry)
+        entry.AppendExpression(createdStore1133)
+        let createdExit1134 = builder.CreateExit(None, entry)
+        entry.AppendExpression(createdExit1134)
     }
 
     private func CreateSubstitutedInstTypeArgs(srcFunc: Function,
@@ -2188,7 +2203,9 @@ public class ClosureConversion {
             builder.CreateParameter(paramTy, INVALID_LOCATION, fn)
         }
 
-        let retVal = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry))
+        let createdAllocate2191 = builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry)
+        entry.AppendExpression(createdAllocate2191)
+        let retVal = RequireResult(createdAllocate2191)
         fn.SetReturnValue(retVal)
 
         let instCustomType = memberVarType
@@ -2207,17 +2224,24 @@ public class ClosureConversion {
         let memberVarRefRefType = builder.context.GetRefTy(memberVarRefType)
         let path = ArrayList<UInt64>()
         path.add(0u64)
-        let memberVarRefRef = RequireResult(builder.CreateGetElementRef(memberVarRefRefType, funcParams[0], path, entry))
-        let memberVarRef = RequireResult(builder.CreateLoad(memberVarRefType, memberVarRefRef, entry))
+        let createdGetElementRef2210 = builder.CreateGetElementRef(memberVarRefRefType, funcParams[0], path, entry)
+        entry.AppendExpression(createdGetElementRef2210)
+        let memberVarRefRef = RequireResult(createdGetElementRef2210)
+        let createdLoad2211 = builder.CreateLoad(memberVarRefType, memberVarRefRef, entry)
+        entry.AppendExpression(createdLoad2211)
+        let memberVarRef = RequireResult(createdLoad2211)
         // C++ ClosureConversion.cpp:2430-2442 — virMethodCtx from AutoEnv base.
         let virCtx = FuncSigInfo(originalFuncType, funcName: methodName)
         let invokeInfo = InvokeCallContext(methods[0], memberVarRef,
             FuncCallContext(args: invokeArgs, thisType: Some(instCustomType)),
             virMethodCtx: Some(virCtx))
         let invoke = builder.CreateInvoke(retType, invokeInfo, entry)
+        entry.AppendExpression(invoke)
         invoke.SetVirtualMethodOffset(0u64)
-        builder.CreateStore(RequireResult(invoke), retVal, entry)
-        builder.CreateExit(None, entry)
+        let createdStore2219 = builder.CreateStore(RequireResult(invoke), retVal, entry)
+        entry.AppendExpression(createdStore2219)
+        let createdExit2220 = builder.CreateExit(None, entry)
+        entry.AppendExpression(createdExit2220)
         return fn
     }
 
@@ -2245,7 +2269,9 @@ public class ClosureConversion {
             builder.CreateParameter(paramTy, INVALID_LOCATION, fn)
         }
 
-        let retVal = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry))
+        let createdAllocate2248 = builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry)
+        entry.AppendExpression(createdAllocate2248)
+        let retVal = RequireResult(createdAllocate2248)
         fn.SetReturnValue(retVal)
         let applyArgs = ArrayList<Value>()
         for (param in fn.GetParams()) {
@@ -2253,8 +2279,11 @@ public class ClosureConversion {
         }
         let apply = builder.CreateApply(retType, genericFunc, FuncCallContext(args: applyArgs,
             thisType: Some(RequireClassType(autoEnvWrapperDef))), entry)
-        builder.CreateStore(RequireResult(apply), retVal, entry)
-        builder.CreateExit(None, entry)
+        entry.AppendExpression(apply)
+        let createdStore2256 = builder.CreateStore(RequireResult(apply), retVal, entry)
+        entry.AppendExpression(createdStore2256)
+        let createdExit2257 = builder.CreateExit(None, entry)
+        entry.AppendExpression(createdExit2257)
         CastApplyArgAndRetIfNeed(apply)
     }
 

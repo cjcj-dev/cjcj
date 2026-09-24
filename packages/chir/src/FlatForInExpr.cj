@@ -74,10 +74,12 @@ public class FlatForInExpr {
             throw IllegalStateException("faithful FlatForInExpr expected parent block group")
         let jumpBlock = builder.CreateBlock(parentGroup)
         let loadCondVar = builder.CreateLoad(builder.context.GetBoolTy(), expr.GetLoopCondVar(), jumpBlock)
+        jumpBlock.AppendExpression(loadCondVar)
         let condValue = loadCondVar.GetResult() ??
             throw IllegalStateException("faithful FlatForInExpr load cond has no result")
         let bodyEntry = EntryBlockOf(expr.GetBody(), "for-in body")
         let jumpBr = builder.CreateBranch(condValue, bodyEntry, forInSuc, jumpBlock)
+        jumpBlock.AppendExpression(jumpBr)
         jumpBr.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
 
         if (let Some(_) <- (expr as ForInRange)) {
@@ -93,7 +95,8 @@ public class FlatForInExpr {
         }
 
         let firstEntry = GetEntryBlock(expr)
-        let _ = builder.CreateGoTo(firstEntry, parentBlock)
+        let createdExpression98 = builder.CreateGoTo(firstEntry, parentBlock)
+        parentBlock.AppendExpression(createdExpression98)
         MoveBlocksToParentBlockGroup(expr)
         expr.ClearBlockGroups()
         expr.RemoveSelfFromBlock()
@@ -102,7 +105,8 @@ public class FlatForInExpr {
     private func FlatternForInClosedRange(expr: ForInClosedRange, parentBlock: Block, exprIndex: Int64): Unit {
         let forInSuc = MoveExpressionAfterForIn(parentBlock, exprIndex)
         let firstEntry = GetEntryBlock(expr)
-        let _ = builder.CreateGoTo(firstEntry, parentBlock)
+        let createdExpression108 = builder.CreateGoTo(firstEntry, parentBlock)
+        parentBlock.AppendExpression(createdExpression108)
         ReplaceExitWithGoto(expr.GetBody(), EntryBlockOf(expr.GetCond(), "for-in cond"))
         let parentGroup = expr.GetParentBlockGroup() ??
             throw IllegalStateException("faithful FlatForInExpr expected parent block group")
@@ -110,9 +114,11 @@ public class FlatForInExpr {
         latchEntryBlock.SetGeneratedFromForIn(true)
         ReplaceExitWithGoto(expr.GetCond(), latchEntryBlock)
         let condValueExpr = builder.CreateLoad(builder.context.GetBoolTy(), expr.GetLoopCondVar(), latchEntryBlock)
+        latchEntryBlock.AppendExpression(condValueExpr)
         let condValue = condValueExpr.GetResult() ??
             throw IllegalStateException("faithful FlatForInExpr closed-range cond load has no result")
-        let _ = builder.CreateBranch(condValue, EntryBlockOf(expr.GetLatch(), "for-in latch"), forInSuc, latchEntryBlock)
+        let createdExpression120 = builder.CreateBranch(condValue, EntryBlockOf(expr.GetLatch(), "for-in latch"), forInSuc, latchEntryBlock)
+        latchEntryBlock.AppendExpression(createdExpression120)
         ReplaceExitWithGoto(expr.GetLatch(), EntryBlockOf(expr.GetBody(), "for-in body"))
         MoveBlocksToParentBlockGroup(expr)
         expr.ClearBlockGroups()
@@ -153,6 +159,7 @@ public class FlatForInExpr {
                 throw IllegalStateException("faithful FlatForInExpr source block has no terminator")
             if (term.GetExprKind() == ExprKind.EXIT) {
                 let gotoTerm = builder.CreateGoTo(target, block)
+                block.AppendExpression(gotoTerm)
                 gotoTerm.CopyBaseInfoFrom(term)
                 term.RemoveSelfFromBlock()
             }

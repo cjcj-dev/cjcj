@@ -171,7 +171,8 @@ public class RangePropagation {
     private func RewriteBranchTerminator(branch: Terminator, targetSucc: Block, isDebug: Bool): Unit {
         let parentBlock = branch.GetParentBlock().getOrThrow()
         branch.RemoveSelfFromBlock()
-        let _ = builder.CreateGoTo(targetSucc, parentBlock)
+        let createdExpression174 = builder.CreateGoTo(targetSucc, parentBlock)
+        parentBlock.AppendExpression(createdExpression174)
         if (isDebug) {
             println("[RangePropagation] The terminator " + branch.GetExprKindName() +
                 ToPosInfo(branch.GetDebugLocation()) + " has been optimised")
