@@ -7,6 +7,7 @@ work=$(realpath -m "${2:?evidence directory}")
 script_dir=$(cd "$(dirname "$0")" && pwd)
 fixtures="$script_dir/objc_cpointer_fixtures"
 test_filter=${3:-.*}
+stub_modules=${4:-}
 : "${CANGJIE_HOME:?private SDK required}"
 mkdir -p "$work/import/objc" "$work/source"
 cp "$fixtures/"*.cj "$work/source/"
@@ -24,15 +25,21 @@ compile_stub() {
     set -e
     return "$rc"
 }
-compile_stub internal
-compile_stub lang
+if [ -n "$stub_modules" ]; then
+    cp -a "$stub_modules/." "$work/import/"
+    printf 'reused physical copies from %s\n' "$stub_modules" > "$work/stub-origin.txt"
+else
+    compile_stub internal
+    compile_stub lang
+fi
+sha256sum "$work/import/objc/"*.cjo >> "$work/inputs.sha256"
 compile_fixture() {
     local name=$1
     mkdir -p "$work/$name"
     set +e
-    "$compiler" "$work/source/$name.cj" --import-path "$work/import" \
+    (cd "$work/$name" && "$compiler" "$work/source/$name.cj" --import-path "$work/import" \
         --output-type=staticlib --emit-chir=raw --dump-ast --diagnostic-format=noColor \
-        -o "$work/$name/result" > "$work/$name/compiler.log" 2>&1
+        -o "$work/$name/result") > "$work/$name/compiler.log" 2>&1
     echo "$?" > "$work/$name/compiler.rc"
 }
 for name in cpointer mirror impl strings negative control; do compile_fixture "$name" & done

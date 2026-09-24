@@ -26,3 +26,8 @@ No failing assertion is removed or treated as a success.
 
 The stub module's generic bodies only make declarations serializable; they are
 never executed as an ObjC runtime. The fixture compiler uses `--emit-chir=raw`.
+
+For fault-injection arms, pass a fourth argument naming the green arm’s `import`
+directory. The runner physically copies those exact modules and hashes them, so
+only the compiler ELF changes between arms. Without that argument the modules
+are built by the supplied compiler. Each compiler process has its own directory.
