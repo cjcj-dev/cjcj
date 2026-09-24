@@ -44,7 +44,9 @@ def construct(name, active=None):
             args.append(marker[ty] if field == active else zero[ty])
     return name + '(' + ', '.join(args) + ')'
 
-cj = ['import std.core.*', *blocks.values(), 'main(): Int64 {']
+cj = ['import std.core.*',
+      'foreign { func calloc(count: UIntNative, size: UIntNative): CPointer<Unit> }',
+      *blocks.values(), 'main(): Int64 {']
 cpp = ['#include <cstddef>', '#include <cstdio>', '#include <type_traits>',
        '#include "' + str(a.runtime_header.resolve()) + '"',
        'static_assert(sizeof(void*) == 8);', 'static_assert(sizeof(bool) == 1);', 'int main() {']
@@ -55,9 +57,9 @@ for name, cname in names.items():
             f'    std::printf("SIZE {cname} %zu %zu\\n", sizeof({cname}), alignof({cname}));']
     for field, ty in fields[name]:
         key = cname + '.' + field
-        cj += ['    unsafe {', f'        let p = LibC.malloc<{name}>()',
-               f'        unsafe {{ p.write({construct(name, field)}) }}',
+        cj += ['    unsafe {', f'        let p = CPointer<{name}>(calloc(1, sizeOf<{name}>()))',
                '        let bytes = CPointer<UInt8>(p)',
+               f'        unsafe {{ p.write({construct(name, field)}) }}',
                f'        println("FIELD_SIZE {key} ${{sizeOf<{ty}>()}}")',
                f'        print("BYTES {key} ")',
                f'        for (i in 0..sizeOf<{name}>()) {{ print("${{unsafe {{ bytes.read(Int64(i)) }} }},") }}',
