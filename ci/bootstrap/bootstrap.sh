@@ -447,7 +447,7 @@ assert_std_install_shape() {
 }
 
 stdlib_build() {
-  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" ld script
+  local label="$1" sdk="$2" runtime="$3" prefix="$4" compare_prefix="${5:-}" target_lib="${6:-$2/runtime/lib/$HOST_TUPLE}" ld script
   source "$SRC/ci/build_resources.sh"
   configure_build_resources "$HEAP" || die "cannot determine std build resources"
   cmd "python3 $(printf '%q' "$SRC/ci/install_std_sdk_inputs.py") $(printf '%q' "$(dirname "$AST_SUPPORT")") $(printf '%q' "$sdk") $(printf '%q' "$HOST_TUPLE")"
@@ -455,7 +455,7 @@ stdlib_build() {
   prepare_build_env
   # shellcheck disable=SC2016 # Expanded by the inner bash, not this shell.
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
-  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$sdk/runtime/lib/$HOST_TUPLE") $(printf '%q' "$prefix")"
+  cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
 }
 
@@ -675,22 +675,40 @@ assemble_stage1_sdk() {
   assert_executable stage1-compiler "$sdk/bin/cjc"
 }
 
+# Bootstrap the first coloured std without installing host std beside CRT.
+# The temporary SDK stays a host pair; only the output link and native backend
+# processes use CRT. It is discarded before the target SDK is assembled.
+bootstrap_target_std() {
+  local compiler="$1" std="$2" sdk="$WORK/sdk-std-bootstrap" compiler_sha=planned target_lib
+  target_lib=$(runtime_dir "$CRT")
+  cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --host --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --force"
+  assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
+  cmd "install -m755 $(printf '%q' "$compiler") $(printf '%q' "$sdk/bin/cjc")"
+  cmd "install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/libLLVM-15.so")"
+  if [ "$DRY" -eq 0 ]; then
+    compiler_sha=$(sha256 "$compiler")
+    record std-bootstrap-host-std "$sdk/lib/$HOST_TUPLE/libcangjie-std-core.a"
+    record std-bootstrap-host-runtime "$sdk/runtime/lib/$HOST_TUPLE/libcangjie-runtime.so"
+    record std-bootstrap-target-runtime "$target_lib/libcangjie-runtime.so"
+  fi
+  cmd "bash $(printf '%q' "$STAGE1_HOST_RUNNER") $(printf '%q' "$sdk") $(printf '%q' "$WORK/sdk-stage0") $(printf '%q' "$HRT") $(printf '%q' "$HOST_LLVM_SHA256") $(printf '%q' "$compiler") $(printf '%q' "$compiler_sha") $(printf '%q' "$WORK/sdk-stage0-run") $(printf '%q' "$COLOUR_LLVM_SHA256") $(printf '%q' "$target_lib")"
+  stdlib_build stdlib-stage1 "$sdk" "$HRT" "$std" "" "$target_lib"
+  cmd "python3 $(printf '%q' "$(dirname "$SDK_BUILD")/std_runtime_colour.py") --runtime $(printf '%q' "$target_lib/libcangjie-runtime.so") --std $(printf '%q' "$std/lib/$HOST_TUPLE/libcangjie-std-core.a") --source $(printf '%q' "$STDSRC")"
+  cmd "rm -rf -- $(printf '%q' "$sdk")"
+}
+
 stage1() {
   STAGE=stage1
   echo '[stage1] cjcj-stage1 self-host + coloured LLVM; C++=RelWithDebInfo'
   local compiler previous_std out std sdk ld
   compiler=$(cat "$WORK/.cjcj-stage1" 2>/dev/null || true)
-  previous_std=$(cat "$WORK/.stdlib-stage1" 2>/dev/null || true)
+  previous_std="$WORK/stdlib-stage1"
   if [ "$DRY" -eq 1 ]; then
     compiler="${compiler:-$WORK/cjcj-stage1}"
-    previous_std="${previous_std:-$WORK/stdlib-stage1}"
     echo "INPUT cjcj-stage1 path=$compiler sha256=not-built(dry-run)"
-    echo "INPUT stdlib-stage1 path=$previous_std sha256=not-built(dry-run)"
   else
     [ -n "$compiler" ] || die '缺少 stage0 cjcj-stage1'
-    [ -n "$previous_std" ] || die '缺少 stage1 stdlib'
     record cjcj-stage1 "$compiler"
-    record stdlib-stage1 "$previous_std"
   fi
   record colour-llvm-tuple "$COLOUR_TUPLE"
   record colour-runtime "$CRT"
@@ -704,6 +722,7 @@ stage1() {
   echo "OUTPUT stdlib-stage2=$std"
   # The compiler links std statically. Finish the target std before its link;
   # replacing SDK files afterwards cannot change the std already inside the ELF.
+  bootstrap_target_std "$compiler" "$previous_std"
   assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"
   stdlib_build stdlib-stage2 "$sdk" "$HRT" "$std" "$previous_std"
   assemble_stage1_sdk "$sdk" "$compiler" "$std"

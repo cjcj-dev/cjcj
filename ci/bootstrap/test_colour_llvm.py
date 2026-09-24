@@ -75,10 +75,10 @@ prepare_stage0_run_sdk
 ''', 'bash', str(BOOTSTRAP), str(self.root), str(so), self.pin, digest(self.host_lib)], capture_output=True, text=True)
         return result
 
-    def install(self, pin=None):
+    def install(self, pin=None, backend_runtime=None):
         return subprocess.run(['bash', str(RUNNER), str(self.target), str(self.host), str(self.host),
                                digest(self.host_lib), str(self.compiler), digest(self.compiler),
-                               str(self.run_sdk), pin or self.pin], env={**os.environ, 'STAGE1_HOST_IDENTITIES': str(self.identities)},
+                               str(self.run_sdk), pin or self.pin] + ([str(backend_runtime)] if backend_runtime else []), env={**os.environ, 'STAGE1_HOST_IDENTITIES': str(self.identities)},
                               capture_output=True, text=True)
 
     def test_loaded_library_and_call(self):
@@ -116,6 +116,27 @@ prepare_stage0_run_sdk
         self.assertEqual(loaded, {str(self.host_lib)}, data['maps'])
         self.assertTrue(data['context_created'])
         print('ASSERT official-tool-host-library executed', flush=True)
+
+    def test_bootstrap_backend_runtime_is_separate_from_host_pair(self):
+        backend_runtime = self.root / 'colour-runtime'
+        backend_runtime.mkdir()
+        for name in ('libcangjie-runtime.so', 'libboundscheck.so'):
+            (backend_runtime / name).write_text('colour-' + name)
+        tool = self.target / 'third_party/llvm/bin/llc'
+        tool.write_text('#!/usr/bin/python3\nimport os, json\nprint(json.dumps(dict(os.environ)))\n')
+        tool.chmod(0o755)
+        prep = self.prepare()
+        self.assertEqual(prep.returncode, 0, prep.stdout + prep.stderr)
+        result = self.install(backend_runtime=backend_runtime)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        call = subprocess.run([str(tool)], capture_output=True, text=True)
+        self.assertEqual(call.returncode, 0, call.stderr)
+        environment = json.loads(call.stdout)
+        self.assertEqual(environment['LD_LIBRARY_PATH'].split(':')[0], str(backend_runtime))
+        self.assertEqual(environment['CANGJIE_HOME'], str(self.target))
+        self.assertEqual((self.target / self.runtime / 'libcangjie-runtime.so').read_text(),
+                         'libcangjie-runtime.so')
+        print('ASSERT bootstrap-backend-runtime-separation executed', flush=True)
 
     def test_producer_rejects_wrong_library(self):
         result = self.prepare(self.host_lib)

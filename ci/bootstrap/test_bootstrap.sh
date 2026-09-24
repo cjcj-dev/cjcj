@@ -144,14 +144,20 @@ check_dry_contract() {
   check_count LLVM-TUPLE 2 'sdk_build.sh .*--target .*--llvm-tuple .*colour-tuple' "$log"
   check_count HOST-RT 2 '--verify-host-rt .*/host-rt' "$log"
   check_count HOST-RUNNER 2 'stage1_host_runner.sh .*/sdk-stage1 .*/sdk-stage0 .*/host-rt' "$log"
-  check_count LLVM-TUPLE 16 'ASSERT installed-colour-tuple sha256=planned' "$log"
+  check_count LLVM-TUPLE 24 'ASSERT installed-colour-tuple sha256=planned' "$log"
   check_count LLVM-RULER 2 'ruler=readelf--dyn-syms symbol=llvm::isCJTypedReadHelperCandidate' "$log"
   check_count LLVM-RULER 1 'ASSERT official-opt-zero ruler=strings .* hits=0' "$log"
   check_count LLVM-RULER 2 'ASSERT colour-opt-stamp ruler=strings .* hits=1' "$log"
+  check_count STD-BOOTSTRAP 1 'sdk_build.sh .*--to .*sdk-std-bootstrap --host --llvm-tuple' "$log"
+  check_count STD-BOOTSTRAP 1 'CMD env .*CANGJIE_HOME=.*/sdk-std-bootstrap .*bash .*/stdsrc .* .*/colour-rt .*/stdlib-stage1' "$log"
   # stage1 assembles the SDK on both sides of the target stdlib build.
   # Counts alone would also accept two assemblies using the old stdlib.
   local assembly_order
   assembly_order=$(awk '
+    /^\[stage0\]/ { print "stage0" }
+    /^\[stage1\]/ { print "stage1" }
+    /^ASSERT stdlib-stage1 shape=planned / { print "initial-std-built" }
+    /^CMD rm -rf -- .*\/sdk-std-bootstrap$/ { print "bootstrap-sdk-removed" }
     /^CMD .*sdk_build\.sh .*--to .*\/sdk-stage1 --target / {
       if ($0 ~ / --std .*\/stdlib-stage1 --verify-host-rt /) print "assemble-old"
       else if ($0 ~ / --std .*\/stdlib-stage2 --verify-host-rt /) print "assemble-new"
@@ -160,7 +166,7 @@ check_dry_contract() {
     /^ASSERT stage1-compiler executable=planned path=.*\/sdk-stage1\/bin\/cjc$/ { print "executable" }
     /^ASSERT stdlib-stage2 shape=planned / { print "stdlib-built" }
   ' "$log")
-  [ "$assembly_order" = $'assemble-old\nexecutable\nstdlib-built\nassemble-new\nexecutable' ] ||
+  [ "$assembly_order" = $'stage0\nstage1\ninitial-std-built\nbootstrap-sdk-removed\nassemble-old\nexecutable\nstdlib-built\nassemble-new\nexecutable' ] ||
     fail A3-order "unexpected stage1 SDK assembly sequence: $assembly_order"
   echo 'PASS dry stage1 SDK assembly count and order'
 }
@@ -876,6 +882,7 @@ case "${1:-test}" in
       /usr/bin/grep -Eq "$marker" "$log" || fail "$arm" "fault arm missed precise marker; log=$log"
       echo "PASS precise-red $arm"
     done
+    BOOTSTRAP_PRODUCT="$PRODUCT" bash "$ROOT/test_stage0_cache.sh" || fail cache 'stage0 cache tests failed'
     echo 'PASS bootstrap dry contracts, controlled build environment, LLVM assembly, and positive controls'
     ;;
   *)
