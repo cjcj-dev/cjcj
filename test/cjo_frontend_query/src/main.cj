@@ -67,8 +67,8 @@ func CheckLoadedQuery(loader: CjoSignatureMaterializer, tag: String, major: UInt
     CheckBool("${tag}.Exactly0minor", loader.IsCjoVersionExactly(0u8, minor), major == 0u8)
     CheckBool("${tag}.AtLeast01", loader.IsCjoVersionAtLeast(0u8, 1u8), major == 0u8 && minor >= 1u8)
     CheckBool("${tag}.AtMost00", loader.IsCjoVersionAtMost(0u8, 0u8), major == 0u8 && minor == 0u8)
-    CheckBool("${tag}.AtLeast10", loader.IsCjoVersionAtLeast(1u8, 0u8), false)
-    CheckBool("${tag}.AtMost10", loader.IsCjoVersionAtMost(1u8, 0u8), false)
+    CheckBool("${tag}.AtLeast10", loader.IsCjoVersionAtLeast(1u8, 0u8), major == 1u8)
+    CheckBool("${tag}.AtMost10", loader.IsCjoVersionAtMost(1u8, 0u8), major == 1u8 && minor == 0u8)
     CheckBool("${tag}.Exactly1minor", loader.IsCjoVersionExactly(1u8, minor), major == 1u8)
     CheckBool("${tag}.ExactlyMajorMinor", loader.IsCjoVersionExactly(major, minor), true)
 }
