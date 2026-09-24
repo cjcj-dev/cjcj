@@ -4,7 +4,8 @@ import std.collection.ArrayList
 import cjcj::ast.*
 import cjcj::basic.DiagnosticEngine
 import cjcj::modules.SemaImportManager
-import cjcj::sema.TypeManager
+import cjcj::sema.{TypeManager, GenerateTypeMapping}
+import cjcj::sema.NativeFFI.{CreateCall, CreateSuperCall, CreateThisCall, CreateThisRef, WithinFile, WrapReturningLambdaExpr}
 import cjcj::utils.CJC_ASSERT_WITH_MSG
 
 // Upstream a51ced71, AfterTypeCheck/Utils/AfterTypeCheckASTTransformer.cpp:29-37.
@@ -136,5 +137,119 @@ public class AfterTypeCheckASTTransformer {
         setter.CloneAttrs(pd)
         setter.DisableAttr(Attribute.MUT)
         setter.EnableAttr(Attribute.COMPILER_ADD)
+    }
+    // Upstream a51ced71, AfterTypeCheckASTTransformer.cpp:178-352.
+    private func AppendNativeObjCIdMarkerIfNeeded(call: CallExpr, curFile: Option<File>): Unit {
+        if (!HasNativeObjCIdMarkerParam(call.resolvedFunction.getOrThrow())) { return }
+        call.args.add(CreateFuncArg(WithinFile<RefExpr>(
+            CreateRefExpr(objCLib.GetNativeObjCIdMarkerInstance().getOrThrow()), curFile)))
+    }
+
+    public func TransformToObjCImplBaseCtorDecl(ctor: FuncDecl, impl: ClassDecl): Unit {
+        let params = ctor.funcBody.getOrThrow().paramLists[0].params
+        params.clear()
+        params.add(CreateFuncParam("$obj", None, None, objCLib.GetNativeObjCIdTy()))
+        params.add(CreateFuncParam("$registryId", None, None, objCLib.GetRegistryIdTy()))
+        params.add(CreateFuncParam("$mrk", None, None, objCLib.GetNativeObjCIdMarkerTy()))
+        let ctorTy = FuncTyOf(typeManager, params, impl.GetTy().getOrThrow())
+        ctor.identifier = SrcIdentifier("init")
+        ctor.SetTy(ctorTy)
+        ctor.EnableAttr(Attribute.PUBLIC)
+        ctor.EnableAttr(Attribute.CONSTRUCTOR)
+        ctor.funcBody.getOrThrow().SetTy(ctorTy)
+        ctor.funcBody.getOrThrow().parentClassLike = Some(impl)
+        ctor.funcBody.getOrThrow().body.getOrThrow().SetTy(impl.GetTy().getOrThrow())
+    }
+
+    public func TransformToObjCImplBaseCtorBody(ctorBody: FuncBody, impl: ClassDecl, regComp: ClassDecl): Unit {
+        let params = ctorBody.paramLists[0].params
+        CJC_ASSERT_WITH_MSG(params.size > 1, "expected at least 2 params")
+        let curFile = impl.curFile
+        let handleRef = CreateRefExpr(params[0])
+        let regIdRef = CreateRefExpr(params[1])
+        let superClass = impl.GetSuperClassDecl().getOrThrow()
+        ctorBody.body.getOrThrow().body.clear()
+        if (IsObjCImpl(superClass)) {
+            let superCtor = GetObjCImplBaseCtor(superClass).getOrThrow()
+            let call = CreateSuperCall(superClass, superCtor, superCtor.GetTy().getOrThrow())
+            call.args.add(CreateFuncArg(handleRef))
+            call.args.add(CreateFuncArg((ASTCloner.Clone(regIdRef) as Expr).getOrThrow()))
+            call.curFile = curFile
+            AppendNativeObjCIdMarkerIfNeeded(call, curFile)
+            ctorBody.body.getOrThrow().body.add(call)
+        } else {
+            CJC_ASSERT_WITH_MSG(IsObjCMirror(superClass), "expected super class to be @ObjCMirror")
+            let superCtor = GetObjCMirrorBaseCtor(superClass).getOrThrow()
+            let call = CreateSuperCall(superClass, superCtor, superCtor.GetTy().getOrThrow())
+            call.args.add(CreateFuncArg(handleRef))
+            call.curFile = curFile
+            AppendNativeObjCIdMarkerIfNeeded(call, curFile)
+            ctorBody.body.getOrThrow().body.add(call)
+        }
+        let decl = objCLib.GetGetFromRegistryByIdDecl().getOrThrow()
+        let ref = CreateRefExpr(decl)
+        let args = ArrayList<FuncArg>()
+        args.add(CreateFuncArg(regIdRef))
+        ref.instTys.add(regComp.GetTy().getOrThrow())
+        ref.SetTy(typeManager.GetInstantiatedTy(decl.GetTy().getOrThrow(), GenerateTypeMapping(decl, ref.instTys)))
+        ref.typeArguments.add(CreateRefType(regComp))
+        let call = CreateCallExpr(ref, args, Some(decl), regComp.GetTy(), CallKind.CALL_DECLARED_FUNCTION)
+        let field = GetObjCImplRegCompanionField(impl).getOrThrow()
+        let lhs = CreateMemberAccess(CreateThisRef(impl, impl.GetTy().getOrThrow(), impl.curFile.getOrThrow()), field)
+        ctorBody.body.getOrThrow().body.add(CreateAssignExpr(lhs, call, TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)))
+    }
+
+    public func TransformToObjCImplRegCompBaseCtorBody(ctorBody: FuncBody, regComp: ClassDecl): Unit {
+        let curFile = regComp.curFile.getOrThrow()
+        let params = ctorBody.paramLists[0].params
+        CJC_ASSERT_WITH_MSG(!params.isEmpty(), "expected at least 1 param")
+        let handleRef = CreateRefExpr(params[0])
+        if (let Some(superClass) <- GetObjCImplRegistryCompanionSuperClass(regComp)) {
+            let superCtor = GetObjCImplRegCompanionBaseCtor(superClass).getOrThrow()
+            let call = CreateSuperCall(superClass, superCtor, superCtor.GetTy().getOrThrow())
+            call.args.add(CreateFuncArg(handleRef))
+            call.curFile = Some(curFile)
+            ctorBody.body.getOrThrow().body.add(call)
+            return
+        }
+        let put = CreateCall(objCLib.GetPutToRegistryDecl().getOrThrow(), curFile,
+            CreateThisRef(regComp, regComp.GetTy().getOrThrow(), curFile))
+        let set = CreateCall(objCLib.GetSetRegistryIdDecl().getOrThrow(), curFile, handleRef, put)
+        ctorBody.body.getOrThrow().body.add(set)
+    }
+
+    public func TransformToObjCImplRegDataCtorDecl(ctor: FuncDecl, impl: ClassDecl, regComp: ClassDecl): Unit {
+        let tupleTy = typeManager.GetTupleTy([objCLib.GetNativeObjCIdTy().getOrThrow(), regComp.GetTy().getOrThrow()])
+        let param = CreateFuncParam("$regData", None, None, Some(tupleTy))
+        let params = ctor.funcBody.getOrThrow().paramLists[0].params
+        params.add(param, at: 0)
+        let ctorTy = FuncTyOf(typeManager, params, impl.GetTy().getOrThrow())
+        ctor.identifier = SrcIdentifier("init")
+        ctor.SetTy(ctorTy)
+        ctor.funcBody.getOrThrow().SetTy(ctorTy)
+    }
+
+    public func TransformToObjCImplUserCtorBody(ctorBody: FuncBody, regDataCtor: FuncDecl,
+        impl: ClassDecl, regComp: ClassDecl, objCClassRef: Expr): Unit {
+        let curFile = ctorBody.curFile.getOrThrow()
+        let handleParam = CreateFuncParam("$obj", None, None, objCLib.GetNativeObjCIdTy())
+        let handleRef = CreateRefExpr(handleParam)
+        let regCtor = GetObjCImplRegCompanionBaseCtor(regComp).getOrThrow()
+        let regCall = CreateCall(regCtor, curFile, (ASTCloner.Clone(handleRef) as Expr).getOrThrow())
+        let tupleTy = typeManager.GetTupleTy([objCLib.GetNativeObjCIdTy().getOrThrow(), regComp.GetTy().getOrThrow()])
+        let elements = ArrayList<Expr>(); elements.add(handleRef); elements.add(regCall)
+        let nodes = ArrayList<Node>(); nodes.add(CreateTupleLit(elements, tupleTy))
+        let lambdaParams = ArrayList<FuncParam>(); lambdaParams.add(handleParam)
+        let lambda = WithinFile<LambdaExpr>(WrapReturningLambdaExpr(typeManager, nodes, lambdaParams: lambdaParams), Some(curFile))
+        let allocCall = CreateCall(objCLib.GetAllocDecl().getOrThrow(), curFile, objCClassRef)
+        let lambdaArgs = ArrayList<FuncArg>(); lambdaArgs.add(CreateFuncArg(allocCall))
+        let lambdaCall = CreateCallExpr(lambda, lambdaArgs, None, Some(tupleTy), CallKind.CALL_INVALID)
+        let args = ArrayList<FuncArg>(); args.add(CreateFuncArg(lambdaCall))
+        for (param in ctorBody.paramLists[0].params) {
+            args.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(param), Some(curFile))))
+        }
+        let call = CreateThisCall(impl, regDataCtor, regDataCtor.GetTy().getOrThrow(), curFile, args)
+        ctorBody.body.getOrThrow().body.clear()
+        ctorBody.body.getOrThrow().body.add(call)
     }
 }

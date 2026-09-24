@@ -115,3 +115,10 @@ public class InsertObjCImplRegCompanionField <: Handler<InteropContext> {
         }
     }
 }
+
+// Upstream a51ced71, AfterTypeCheck/Interop/RestoreCurFile.cpp:20-25.
+public class RestoreCurFile <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        for (file in ctx.pkg.files) { AddCurFile(file, file: Some(file)) }
+    }
+}

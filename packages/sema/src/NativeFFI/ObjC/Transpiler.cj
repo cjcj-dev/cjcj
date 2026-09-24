@@ -71,7 +71,7 @@ public class Transpiler {
 
     // C++ Transpiler.cpp:63-84.
     private func CheckFunction(arg: Decl): Bool {
-        if (ctx.factory.IsGeneratedMember(arg)) {
+        if (IsGeneratedMember(arg)) {
             return false
         }
         if (!arg.TestAttr(Attribute.PUBLIC)) {
@@ -97,7 +97,7 @@ public class Transpiler {
         if (!arg.TestAttr(Attribute.PUBLIC)) {
             return false
         }
-        if (ctx.factory.IsGeneratedMember(arg)) {
+        if (IsGeneratedMember(arg)) {
             return false
         }
         if (!arg.TestAttr(Attribute.CONSTRUCTOR)) {
@@ -301,7 +301,7 @@ public class Transpiler {
                     if (!ctor.TestAttr(Attribute.PUBLIC) && ctor.outerDecl != Some(decl)) {
                         continue
                     }
-                    if (ctx.factory.IsGeneratedMember(ctor)) {
+                    if (IsGeneratedMember(ctor)) {
                         continue
                     }
                     let funcBody = ctor.funcBody.getOrThrow()
@@ -454,7 +454,7 @@ public class Transpiler {
     private func GetObjCCtorMetainfo(funcDecl: FuncDecl): EmittableObjCFuncMetainfo {
         var result = EmittableObjCFuncMetainfo()
         let ctor = if (let InteropType.ObjC_Mirror <- interopType) {
-            ctx.factory.GetGeneratedImplCtor(decl, funcDecl).getOrThrow()
+            GetObjCImplRegDataCtor((decl as ClassDecl).getOrThrow(), funcDecl).getOrThrow()
         } else {
             funcDecl
         }

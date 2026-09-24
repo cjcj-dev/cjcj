@@ -11,10 +11,9 @@ public class CheckInitMethod <: Handler<TypeCheckContext> {
         }
 
         for (member in ctx.target.GetMemberDeclPtrs()) {
-            if (!IsStaticInitMethod(member)) {
-                continue
-            }
-            let method = (member as FuncDecl).getOrThrow()
+            let methodOpt = member as FuncDecl
+            if (methodOpt.isNone() || !IsObjCInitMethod(methodOpt.getOrThrow())) { continue }
+            let method = methodOpt.getOrThrow()
             let fTy = method.GetTy() as FuncTy
             let methodBody = method.funcBody.getOrThrow()
             if (fTy.isNone() || methodBody.retType.isNone()) {

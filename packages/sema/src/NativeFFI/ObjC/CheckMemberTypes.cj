@@ -2,7 +2,6 @@ package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
-import cjcj::sema.NativeFFI.IsObjCGeneratedMember
 import cjcj::utils.CJC_ABORT
 
 public class CheckMemberTypes <: Handler<TypeCheckContext> {
@@ -60,7 +59,7 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
 
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckMemberTypes.cpp:71-82.
     private func CheckFuncTypes(fd: FuncDecl, ctx: TypeCheckContext): Unit {
-        if (fd.funcBody.isNone() || IsObjCGeneratedMember(fd)) {
+        if (fd.funcBody.isNone() || IsGeneratedMember(fd)) {
             return
         }
 

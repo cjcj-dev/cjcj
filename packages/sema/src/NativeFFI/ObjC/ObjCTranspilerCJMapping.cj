@@ -703,7 +703,7 @@ public class ObjCTranspilerCJMapping {
             if (!declPtr.TestAttr(Attribute.PUBLIC)) {
                 continue
             }
-            if (ctx.factory.IsGeneratedMember(declPtr)) {
+            if (IsGeneratedMember(declPtr)) {
                 continue
             }
             if (!declPtr.TestAttr(Attribute.CONSTRUCTOR)) {
@@ -722,7 +722,7 @@ public class ObjCTranspilerCJMapping {
                 }
             }
             let ctor = if (let InteropType.ObjC_Mirror <- interopType) {
-                ctx.factory.GetGeneratedImplCtor(decl, funcDecl).getOrThrow()
+                GetObjCImplRegDataCtor((decl as ClassDecl).getOrThrow(), funcDecl).getOrThrow()
             } else {
                 funcDecl
             }
@@ -770,7 +770,7 @@ public class ObjCTranspilerCJMapping {
                     if (!ctor.TestAttr(Attribute.PUBLIC) && ctor.outerDecl != Some(decl)) {
                         continue
                     }
-                    if (ctx.factory.IsGeneratedMember(ctor)) {
+                    if (IsGeneratedMember(ctor)) {
                         continue
                     }
                     let funcBody = ctor.funcBody.getOrThrow()
@@ -841,7 +841,7 @@ public class ObjCTranspilerCJMapping {
     // C++ ObjCTranspilerCJMapping.cpp:969-1013.
     private func AddMethods(): Unit {
         for (declPtr in decl.GetMemberDecls()) {
-            if (ctx.factory.IsGeneratedMember(declPtr)) {
+            if (IsGeneratedMember(declPtr)) {
                 continue
             }
             if (!declPtr.TestAttr(Attribute.PUBLIC)) {

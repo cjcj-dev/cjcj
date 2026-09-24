@@ -24,7 +24,7 @@ private let INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_NATIVE_HANDLE: String = "getFr
 private let INTEROPLIB_OBJ_C_GET_FROM_REGISTRY_BY_ID: String = "getFromRegistryById"
 private let INTEROPLIB_OBJ_C_PUT_TO_REGISTRY: String = "putToRegistry"
 private let INTEROPLIB_OBJ_C_REMOVE_FROM_REGISTRY: String = "removeFromRegistry"
-private let INTEROPLIB_OBJ_C_ALLOC: String = "alloc"
+private let INTEROPLIB_OBJ_C_ALLOC: String = "objCAlloc"
 private let INTEROPLIB_OBJ_C_WITH_AUTORELEASE_POOL: String = "withAutoreleasePool"
 private let INTEROPLIB_OBJ_C_WITH_AUTORELEASE_POOL_OBJ: String = "withAutoreleasePoolObj"
 private let INTEROPLIB_OBJ_C_REGISTER_NAME: String = "registerName"
@@ -266,6 +266,13 @@ public class InteropLibBridge {
         let result = GetInteropLibDecl<TypeAliasDecl>(INTEROPLIB_REGISTRY_ID, ASTKind.TYPE_ALIAS_DECL)
         InteropLibBridge.registryIdDecl = Some(result)
         return result
+    }
+    // Upstream a51ced71, InteropLibBridge.cpp:340-350.
+    public func GetSetRegistryIdDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>("setRegistryId", ASTKind.FUNC_DECL)
+    }
+    public func GetGetRegistryIdDecl(): Option<FuncDecl> {
+        return GetInteropLibDecl<FuncDecl>("getRegistryId", ASTKind.FUNC_DECL)
     }
     public func GetRegistryIdTy(): Option<Ty> {
         let decl = GetRegistryIdDecl()
