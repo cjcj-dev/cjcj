@@ -2,7 +2,7 @@ package cjcj::ast
 
 import cjcj::utils.{
     CJC_ASSERT, FloatFormat, GetRootPackageName, INTEROP_JAVA_LANG_PACKAGE, INTEROP_JOBJECT_NAME,
-    INTEROPLIB_CFFI_JAVA_ENTITY, JAVA_REF_GETTER_FUNC_NAME, Stold, SYNTHETIC_CLASS_SUFFIX
+    INTEROPLIB_CFFI_JAVA_ENTITY, JAVA_REF_GETTER_FUNC_NAME, Stold
 }
 import std.collection.*
 import std.sort.*
@@ -1099,34 +1099,4 @@ public func InsertSyntheticClassDecl(decl: ClassLikeDecl, file: File): Unit {
 
     synthetic.moduleName = GetRootPackageName(decl.fullPackageName)
     file.decls.add(synthetic)
-}
-
-public func IsObjCDeclAppropriateForSyntheticClassGeneration(decl: Decl): Bool {
-    return decl.TestAttr(Attribute.OBJ_C_MIRROR) && decl.astKind == ASTKind.INTERFACE_DECL
-}
-
-public func GetObjCSyntheticNameFromClassLike(decl: ClassLikeDecl): String {
-    return decl.identifier.Val() + SYNTHETIC_CLASS_SUFFIX
-}
-
-public func InsertObjCSyntheticClassDecl(decl: ClassLikeDecl, file: File): ClassDecl {
-    let synthetic = ClassDecl()
-    synthetic.CloneAttrs(decl)
-    synthetic.EnableAttr(Attribute.OBJ_C_MIRROR_SYNTHETIC_WRAPPER)
-    synthetic.EnableAttr(Attribute.COMPILER_ADD)
-    synthetic.EnableAttr(Attribute.ABSTRACT)
-    synthetic.DisableAttr(Attribute.OBJ_C_MIRROR)
-    synthetic.identifier = SrcIdentifier(GetObjCSyntheticNameFromClassLike(decl), decl.identifier.Begin(),
-        decl.identifier.End(), decl.identifier.IsRaw())
-    synthetic.inheritedTypes.add(CreateRefType(decl))
-    synthetic.fullPackageName = decl.fullPackageName
-    SetPositionAndCurFileByProvidedNode(synthetic, decl)
-
-    let body = ClassBody()
-    SetPositionAndCurFileByProvidedNode(body, synthetic)
-    synthetic.body = body
-
-    synthetic.moduleName = GetRootPackageName(decl.fullPackageName)
-    file.decls.add(synthetic)
-    return synthetic
 }

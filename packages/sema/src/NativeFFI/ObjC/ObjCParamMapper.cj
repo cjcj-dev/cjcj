@@ -164,18 +164,18 @@ public class ObjCParamMapper {
     }
 
     public static func GenerateArgumentCast(retTy: Ty, value: String): String {
-        if (TypeMapper.IsObjCCJMapping(retTy)) {
+        if (IsObjCCJMapping(retTy)) {
             return value + "." + REGISTRY_ID
         }
         let actualTy = if (retTy.IsCoreOptionType()) { retTy.typeArgs[0] } else { retTy }
-        if (TypeMapper.IsObjCImpl(actualTy)) {
+        if (IsObjCImpl(actualTy)) {
             return CAST_TO_VOID_PTR + value
         }
-        if (TypeMapper.IsObjCMirror(actualTy) || TypeMapper.IsObjCBlock(actualTy) ||
-            TypeMapper.IsObjCCJMappingInterface(actualTy)) {
+        if (IsObjCMirror(actualTy) || IsObjCBlock(actualTy) ||
+            IsObjCCJMappingInterface(actualTy)) {
             return CAST_TO_VOID_PTR_RETAINED + value
         }
-        if (TypeMapper.IsObjCPointer(actualTy)) {
+        if (IsObjCPointer(actualTy)) {
             return CAST_TO_VOID_PTR_UNSAFE + value
         }
         return value

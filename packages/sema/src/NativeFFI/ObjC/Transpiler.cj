@@ -78,7 +78,7 @@ public class Transpiler {
             return false
         }
         if (let InteropType.CJ_Mapping <- interopType) {
-            if (!TypeMapper.IsObjCCJMappingMember(arg) || arg.IsOpen()) {
+            if (!IsObjCCJMappingMember(arg) || arg.IsOpen()) {
                 return false
             }
         }
@@ -111,7 +111,7 @@ public class Transpiler {
             return false
         }
         if (let InteropType.CJ_Mapping <- interopType) {
-            if (!TypeMapper.IsObjCCJMappingMember(arg)) {
+            if (!IsObjCCJMappingMember(arg)) {
                 return false
             }
         }
@@ -130,7 +130,7 @@ public class Transpiler {
             return false
         }
         if (let InteropType.CJ_Mapping <- interopType) {
-            if (!TypeMapper.IsObjCCJMappingMember(arg)) {
+            if (!IsObjCCJMappingMember(arg)) {
                 return false
             }
         }
@@ -139,8 +139,8 @@ public class Transpiler {
 
     // C++ Transpiler.cpp:144-163.
     private func CollectDependencies(ty: Ty): Unit {
-        if (TypeMapper.IsObjCObjectType(ty)) {
-            if (TypeMapper.IsObjCId(ty)) {
+        if (IsObjCObjectType(ty)) {
+            if (IsObjCId(ty)) {
                 return
             }
             if (!ty.IsCoreOptionType()) {
@@ -362,13 +362,13 @@ public class Transpiler {
             ""
         }
         let isFinal = if (let InteropType.CJ_Mapping <- interopType) {
-            TypeMapper.IsOneWayMapping(decl) && !decl.IsOpen()
+            IsOneWayMapping(decl) && !decl.IsOpen()
         } else {
             false
         }
         let interfaceNames = ArrayList<String>()
         for (interfaceTy in concreteClassDecl.GetSuperInterfaceTys()) {
-            if (!TypeMapper.IsObjCId(interfaceTy)) {
+            if (!IsObjCId(interfaceTy)) {
                 interfaceNames.add(ctx.nameGenerator.GetObjCDeclName(interfaceTy.decl.getOrThrow()))
             }
         }
@@ -403,8 +403,8 @@ public class Transpiler {
         result.isReadwrite = varDecl.isVar && !SkipSetterForValueTypeDecl(decl)
         result.name = ctx.nameGenerator.GetObjCDeclName(varDecl)
         let varTy = varDecl.GetTy().getOrThrow()
-        let bridge = (TypeMapper.IsObjCObjectType(varTy) || TypeMapper.IsObjCBlock(varTy)) &&
-            !TypeMapper.IsObjCCJMapping(varTy)
+        let bridge = (IsObjCObjectType(varTy) || IsObjCBlock(varTy)) &&
+            !IsObjCCJMapping(varTy)
         result.getter = ObjCParamMapper.GetGetterForProp(result, ctx.nameGenerator.GetObjCGetterName(varDecl),
             ctx.nameGenerator.GetFieldGetterWrapperName((varDecl as VarDecl).getOrThrow()), bridge)
         if (result.isReadwrite) {
@@ -445,8 +445,8 @@ public class Transpiler {
             {param: FuncParam => param.identifier.Val()}, sep: ", ", pre: ", ", suf: "", force: false)
         result.convertedParams = ObjCParamMapper.ConvertParamsListToArgsListToString(funcBody.paramLists,
             !result.isStatic)
-        result.bridge = (TypeMapper.IsObjCObjectType(retTy) || TypeMapper.IsObjCBlock(retTy)) &&
-            !TypeMapper.IsObjCCJMapping(retTy)
+        result.bridge = (IsObjCObjectType(retTy) || IsObjCBlock(retTy)) &&
+            !IsObjCCJMapping(retTy)
         return result
     }
 

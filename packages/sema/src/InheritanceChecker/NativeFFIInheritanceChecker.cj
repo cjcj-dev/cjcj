@@ -210,10 +210,10 @@ private func NeedCheckForeignName(parent: MemberSignature, child: MemberSignatur
     }
     CJC_ASSERT(childDecl.IsFuncOrProp())
 
-    if (!parentOuter.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+    if (!parentOuter.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
         return false
     }
-    if (!childOuter.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+    if (!childOuter.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
         return false
     }
     if (SameDecl(parentOuter, childOuter)) {

@@ -83,7 +83,7 @@ public class OCFFIParserImpl {
 
     public func CheckImplSignature(decl: ClassLikeDecl, annos: ArrayList<Annotation>): Unit {
         CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.OBJ_C_IMPL))
-        decl.EnableAttr(Attribute.OBJ_C_MIRROR_SUBTYPE)
+        decl.EnableAttr(Attribute.OBJ_C_IMPL)
         if (let Some(_) <- decl.generic) {
             DiagObjCImplCannotBeGeneric(decl)
             decl.EnableAttr(Attribute.IS_BROKEN)

@@ -105,8 +105,8 @@ public class ASTFactory {
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:93-104.
     public func CreateNativeHandleExpr(entity: Expr): Expr {
         let entityTy = entity.GetTy().getOrThrow()
-        CJC_ASSERT(TypeMapper.IsObjCMirror(entityTy) || TypeMapper.IsObjCImpl(entityTy) ||
-            TypeMapper.IsSyntheticWrapper(entityTy) || TypeMapper.IsObjCFwdClass(entityTy))
+        CJC_ASSERT(IsObjCMirror(entityTy) || IsObjCImpl(entityTy) ||
+            IsObjCMirrorInterfaceHandleWrapper(entityTy) || IsObjCFwdClass(entityTy))
         let entityClassTy = (entityTy as ClassLikeTy).getOrThrow()
         let getter = GetNativeHandleGetter(entityClassTy.commonDecl.getOrThrow()).getOrThrow()
         let getterMemberAccess = WithinFile<MemberAccess>(CreateMemberAccess(entity, getter), entity.curFile)
@@ -118,8 +118,8 @@ public class ASTFactory {
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:106-113.
     public func CreateNativeHandleExpr(ty: ClassLikeTy, curFile: Option<File>): Expr {
-        CJC_ASSERT(TypeMapper.IsObjCMirror(ty) || TypeMapper.IsObjCImpl(ty) ||
-            TypeMapper.IsSyntheticWrapper(ty) || TypeMapper.IsObjCFwdClass(ty))
+        CJC_ASSERT(IsObjCMirror(ty) || IsObjCImpl(ty) ||
+            IsObjCMirrorInterfaceHandleWrapper(ty) || IsObjCFwdClass(ty))
         var commonDecl: Option<Decl> = None
         if (let Some(decl) <- ty.commonDecl) {
             commonDecl = Some(decl)
@@ -260,7 +260,7 @@ public class ASTFactory {
                 if (decl.astKind == ASTKind.CLASS_DECL) {
                     mirror = (decl as ClassDecl).getOrThrow()
                 } else {
-                    mirror = GetSyntheticWrapper(importManager, decl).getOrThrow()
+                    mirror = GetObjCMirrorInterfaceHandleWrapper(importManager, decl).getOrThrow()
                 }
                 let mirrorCtor = GetGeneratedBaseCtor(mirror).getOrThrow()
                 let args = ArrayList<FuncArg>()
@@ -280,32 +280,32 @@ public class ASTFactory {
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:126-176.
     public func UnwrapEntity(expr: Expr): Expr {
         let exprTy = expr.GetTy().getOrThrow()
-        if (TypeMapper.IsObjCMirror(exprTy) || TypeMapper.IsObjCImpl(exprTy)) {
+        if (IsObjCMirror(exprTy) || IsObjCImpl(exprTy)) {
             return CreateNativeHandleExpr(expr)
         }
-        if (TypeMapper.IsObjCCJMapping(exprTy)) {
+        if (IsObjCCJMapping(exprTy)) {
             return CreatePutToRegistryCall(expr)
         }
         if (exprTy.IsCoreOptionType()) {
             let innerTy = exprTy.typeArgs[0]
-            if (TypeMapper.IsValidObjCMirror(innerTy) || TypeMapper.IsObjCImpl(innerTy)) {
+            if (IsObjCMirror(innerTy) || IsObjCImpl(innerTy)) {
                 return UnwrapObjCMirrorOption(expr, innerTy)
             }
         }
-        if (TypeMapper.IsObjCPointer(exprTy)) {
+        if (IsObjCPointer(exprTy)) {
             CJC_ASSERT(exprTy.typeArgs.size == 1)
             let elementType = exprTy.typeArgs[0]
             let field = bridge.GetObjCPointerPointerField().getOrThrow()
             return CreateUnsafePointerCast(CreateMemberAccess(expr, field), typeMapper.Cj2CType(elementType))
         }
-        if (TypeMapper.IsObjCFunc(exprTy)) {
+        if (IsObjCFunc(exprTy)) {
             CJC_ASSERT(exprTy.typeArgs.size == 1)
             let mappedTy = typeMapper.Cj2CType(exprTy)
             let getter = bridge.GetObjCFuncFPointerAccessor().getOrThrow()
             CJC_ASSERT(mappedTy.IsPointer())
             return CreateUnsafePointerCast(CreateMemberCall(expr, getter), mappedTy.typeArgs[0])
         }
-        if (TypeMapper.IsObjCBlock(exprTy)) {
+        if (IsObjCBlock(exprTy)) {
             CJC_ASSERT(exprTy.typeArgs.size == 1)
             let mappedTy = typeMapper.Cj2CType(exprTy)
             let abiPointer = bridge.GetObjCBlockAbiPointerAccessor().getOrThrow()
@@ -398,9 +398,9 @@ public class ASTFactory {
     public func GetGeneratedBaseCtor(decl: Decl): Option<FuncDecl> {
         CJC_ASSERT(decl.astKind == ASTKind.CLASS_DECL)
         let declTy = decl.GetTy().getOrThrow()
-        CJC_ASSERT(TypeMapper.IsObjCMirror(declTy) || TypeMapper.IsObjCImpl(declTy) ||
-            TypeMapper.IsSyntheticWrapper(declTy) || TypeMapper.IsObjCFwdClass(declTy))
-        if (TypeMapper.IsObjCImpl(decl)) {
+        CJC_ASSERT(IsObjCMirror(declTy) || IsObjCImpl(declTy) ||
+            IsObjCMirrorInterfaceHandleWrapper(declTy) || IsObjCFwdClass(declTy))
+        if (IsObjCImpl(decl)) {
             let superClass = (decl as ClassDecl).getOrThrow().GetSuperClassDecl()
             CJC_NULLPTR_CHECK(superClass)
             return GetGeneratedBaseCtor(superClass.getOrThrow())
@@ -738,7 +738,7 @@ public class ASTFactory {
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1830-1861.
     public func CreateWithObjCSuperScope(nativeHandle: Expr, outerDecl: ClassDecl, retTy: Ty,
         bodyFactory: (Expr, Expr) -> ArrayList<Node>): Expr {
-        CJC_ASSERT(TypeMapper.IsObjCCompatible(retTy))
+        CJC_ASSERT(IsObjCCompatible(retTy))
         let withObjCSuperDecl = bridge.GetWithObjCSuperDecl().getOrThrow()
         let unwrappedTy = typeMapper.Cj2CType(retTy)
         let withObjCSuperRef = CreateRefExpr(withObjCSuperDecl)
@@ -860,7 +860,7 @@ public class ASTFactory {
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1992-2009.
     public func CreateMethodCallViaMsgSend(fd: FuncDecl, handle: Expr): Expr {
         CJC_NULLPTR_CHECK(fd.outerDecl)
-        CJC_ASSERT(TypeMapper.IsObjCCompatible(fd.outerDecl.getOrThrow().GetTy().getOrThrow()))
+        CJC_ASSERT(IsObjCCompatible(fd.outerDecl.getOrThrow().GetTy().getOrThrow()))
         CJC_NULLPTR_CHECK(fd.funcBody)
         CJC_ASSERT(!fd.funcBody.getOrThrow().paramLists.isEmpty())
         let curFile = handle.curFile
@@ -923,11 +923,11 @@ public class ASTFactory {
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2074-2097.
     public func CreateAutoreleasePoolScope(ty: Ty, actions: ArrayList<Node>): Expr {
-        CJC_ASSERT(TypeMapper.IsObjCCompatible(ty))
+        CJC_ASSERT(IsObjCCompatible(ty))
         CJC_ASSERT(!actions.isEmpty())
         let autoreleasePoolDecl: FuncDecl
         let autoreleasePoolRef: RefExpr
-        if (TypeMapper.IsObjCObjectType(ty) || TypeMapper.IsObjCBlock(ty)) {
+        if (IsObjCObjectType(ty) || IsObjCBlock(ty)) {
             autoreleasePoolDecl = bridge.GetWithAutoreleasePoolObjDecl().getOrThrow()
             autoreleasePoolRef = CreateRefExpr(autoreleasePoolDecl)
         } else {
@@ -951,7 +951,7 @@ public class ASTFactory {
         let getInstanceVariableDecl: FuncDecl
         let getInstanceVariableRef: RefExpr
         let curFile = nativeHandle.curFile
-        if (TypeMapper.IsObjCObjectType(field.GetTy().getOrThrow())) {
+        if (IsObjCObjectType(field.GetTy().getOrThrow())) {
             getInstanceVariableDecl = bridge.GetGetInstanceVariableObjDecl().getOrThrow()
             getInstanceVariableRef = CreateRefExpr(getInstanceVariableDecl)
         } else {
@@ -979,7 +979,7 @@ public class ASTFactory {
         let setInstanceVariableDecl: FuncDecl
         let setInstanceVariableRef: RefExpr
         let curFile = nativeHandle.curFile
-        if (TypeMapper.IsObjCObjectType(field.GetTy().getOrThrow())) {
+        if (IsObjCObjectType(field.GetTy().getOrThrow())) {
             setInstanceVariableDecl = bridge.GetSetInstanceVariableObjDecl().getOrThrow()
             setInstanceVariableRef = CreateRefExpr(setInstanceVariableDecl)
         } else {
@@ -1248,7 +1248,7 @@ public class ASTFactory {
         let registryDecl = bridge.GetGetFromRegistryByNativeHandleDecl().getOrThrow()
         let registryRef = CreateRefExpr(registryDecl)
         let ty = typeArg.GetTy().getOrThrow()
-        CJC_ASSERT(TypeMapper.IsObjCImpl(ty))
+        CJC_ASSERT(IsObjCImpl(ty))
         registryRef.instTys.add(ty)
         registryRef.SetTy(typeManager.GetInstantiatedTy(registryDecl.GetTy().getOrThrow(),
             GenerateTypeMapping(registryDecl, registryRef.instTys)))
@@ -1263,8 +1263,8 @@ public class ASTFactory {
         let registryDecl = bridge.GetGetFromRegistryByIdDecl().getOrThrow()
         let registryRef = CreateRefExpr(registryDecl)
         let ty = typeArg.GetTy().getOrThrow()
-        CJC_ASSERT(TypeMapper.IsObjCImpl(ty) || TypeMapper.IsObjCCJMapping(ty) ||
-            TypeMapper.IsObjCFwdClass4Open(ty))
+        CJC_ASSERT(IsObjCImpl(ty) || IsObjCCJMapping(ty) ||
+            IsObjCFwdClass4Open(ty))
         registryRef.instTys.add(ty)
         registryRef.SetTy(typeManager.GetInstantiatedTy(registryDecl.GetTy().getOrThrow(),
             GenerateTypeMapping(registryDecl, registryRef.instTys)))
@@ -1621,7 +1621,7 @@ public class ASTFactory {
             var finalTy = param.GetTy().getOrThrow()
             if (let Some(actualTy) <- actualTyArgMap.get(finalTy.name)) { finalTy = actualTy }
             let convertedParamTy = typeMapper.Cj2CType(finalTy)
-            let suffix = if (TypeMapper.IsObjCCJMapping(finalTy)) { "Id" } else { "" }
+            let suffix = if (IsObjCCJMapping(finalTy)) { "Id" } else { "" }
             wrapperParams.add(CreateFuncParam(param.identifier.GetRawText() + suffix,
                 CreateType(convertedParamTy), None, convertedParamTy))
         }
@@ -1654,7 +1654,7 @@ public class ASTFactory {
         let wrapperNodes = ArrayList<Node>()
         if (let Some(temp) <- objTmpVarDecl) { wrapperNodes.add(temp) }
         var unwrappedMethodCall = UnwrapEntity(methodCall)
-        if (TypeMapper.IsObjCObjectType(methodCall.GetTy().getOrThrow())) {
+        if (IsObjCObjectType(methodCall.GetTy().getOrThrow())) {
             unwrappedMethodCall = CreateObjCRetainCall(unwrappedMethodCall)
         }
         wrapperNodes.add(unwrappedMethodCall)
@@ -1716,7 +1716,7 @@ public class ASTFactory {
         let wrapperNodes = ArrayList<Node>()
         if (let Some(temp) <- objTmpVarDecl) { wrapperNodes.add(temp) }
         var unwrappedGetterCall = UnwrapEntity(propGetterCall)
-        if (TypeMapper.IsObjCObjectType(pd.GetTy().getOrThrow())) {
+        if (IsObjCObjectType(pd.GetTy().getOrThrow())) {
             unwrappedGetterCall = CreateObjCRetainCall(unwrappedGetterCall)
         }
         wrapperNodes.add(unwrappedGetterCall)
@@ -1863,7 +1863,7 @@ public class ASTFactory {
         let wrapperNodes = ArrayList<Node>()
         if (let Some(temp) <- objTmpVarDecl) { wrapperNodes.add(temp) }
         var unwrappedFieldExpr = UnwrapEntity(fieldExpr)
-        if (TypeMapper.IsObjCObjectType(field.GetTy().getOrThrow())) {
+        if (IsObjCObjectType(field.GetTy().getOrThrow())) {
             unwrappedFieldExpr = CreateObjCRetainCall(unwrappedFieldExpr)
         }
         wrapperNodes.add(unwrappedFieldExpr)
@@ -1938,13 +1938,13 @@ public class ASTFactory {
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:178-296.
     public func WrapEntity(expr: Expr, wrapTy: Ty, withRetain!: Retain = Retain.UNRETAINED): Expr {
-        if (TypeMapper.IsObjCMirror(wrapTy)) {
+        if (IsObjCMirror(wrapTy)) {
             CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
             let classLikeTy = (wrapTy as ClassLikeTy).getOrThrow()
             let commonDecl = classLikeTy.commonDecl.getOrThrow()
             var mirror = commonDecl as ClassDecl
             if (let None <- mirror) {
-                mirror = GetSyntheticWrapper(importManager, commonDecl)
+                mirror = GetObjCMirrorInterfaceHandleWrapper(importManager, commonDecl)
                 CJC_NULLPTR_CHECK(mirror)
             }
             let ctor = GetGeneratedBaseCtor(mirror.getOrThrow()).getOrThrow()
@@ -1961,14 +1961,14 @@ public class ASTFactory {
                 CallKind.CALL_OBJECT_CREATION)
         }
 
-        if (TypeMapper.IsObjCImpl(wrapTy)) {
+        if (IsObjCImpl(wrapTy)) {
             CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
             let classTy = (wrapTy as ClassTy).getOrThrow()
             let impl = classTy.commonDecl.getOrThrow()
             return CreateGetFromRegistryByNativeHandleCall(expr, CreateRefType(impl))
         }
 
-        if (TypeMapper.IsObjCPointer(wrapTy)) {
+        if (IsObjCPointer(wrapTy)) {
             CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
             CJC_ASSERT(wrapTy.typeArgs.size == 1)
             let ctor = bridge.GetObjCPointerConstructor().getOrThrow()
@@ -1981,7 +1981,7 @@ public class ASTFactory {
             return CreateCallExpr(ctorRef, args, Some(ctor), Some(wrapTy), CallKind.CALL_STRUCT_CREATION)
         }
 
-        if (TypeMapper.IsObjCFunc(wrapTy)) {
+        if (IsObjCFunc(wrapTy)) {
             CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
             CJC_ASSERT(wrapTy.typeArgs.size == 1)
             let ctor = bridge.GetObjCFuncConstructor().getOrThrow()
@@ -1997,7 +1997,7 @@ public class ASTFactory {
             return CreateCallExpr(ctorRef, args, Some(ctor), Some(wrapTy), CallKind.CALL_STRUCT_CREATION)
         }
 
-        if (TypeMapper.IsObjCBlock(wrapTy)) {
+        if (IsObjCBlock(wrapTy)) {
             CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
             CJC_ASSERT(wrapTy.typeArgs.size == 1)
             let ctor = bridge.GetObjCBlockConstructorFromObjC().getOrThrow()
@@ -2009,7 +2009,7 @@ public class ASTFactory {
             return CreateCallExpr(ctorRef, args, Some(ctor), Some(wrapTy), CallKind.CALL_OBJECT_CREATION)
         }
 
-        if (TypeMapper.IsObjCCJMapping(wrapTy)) {
+        if (IsObjCCJMapping(wrapTy)) {
             if (let Some(decl) <- Ty.GetDeclOfTy(Some(wrapTy))) {
                 if (let Some(inheritableDecl) <- (decl as InheritableDecl)) {
                     return CreateGetFromRegistryByIdCall(expr, CreateRefType(inheritableDecl))
@@ -2018,7 +2018,7 @@ public class ASTFactory {
             CJC_ABORT()
         }
 
-        if (TypeMapper.IsObjCCJMappingInterface(wrapTy)) {
+        if (IsObjCCJMappingInterface(wrapTy)) {
             CJC_ASSERT(expr.GetTy().getOrThrow().IsPointer())
             let classLikeTy = (wrapTy as ClassLikeTy).getOrThrow()
             var fwdTy: Ty = TypeManager.GetInvalidTy()
@@ -2040,7 +2040,7 @@ public class ASTFactory {
         if (wrapTy.IsCoreOptionType()) {
             if (let Some(classLikeTy) <- (wrapTy.typeArgs[0] as ClassLikeTy)) {
                 if (let Some(decl) <- classLikeTy.commonDecl) {
-                    if (decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+                    if (decl.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
                         return WrapObjCMirrorOption(expr, decl, expr.curFile, withRetain: withRetain)
                     }
                 }
@@ -2083,6 +2083,22 @@ public class ASTFactory {
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/Context.h:30-71.
 public class InteropContext {
+    public let astInserter = ASTInserter()
+    public let astTransformer: AfterTypeCheckASTTransformer
+
+    public let desugarPropRef: (Node) -> Unit
+    public let regCompanions = ArrayList<ClassDecl>()
+    public let implToRegCompanion = HashMap<Decl, ClassDecl>()
+
+    // Upstream a51ced71, AfterTypeCheck/Interop/Context.h:75-88.
+    public func GetRegCompanion(impl: ClassDecl): Option<ClassDecl> {
+        if (impl.fullPackageName != pkg.fullPackageName) {
+            return importManager.GetImportedDecl<ClassDecl>(impl.fullPackageName,
+                NameGenerator.GenerateRegistryCompanionName(impl))
+        }
+        return implToRegCompanion.get(impl)
+    }
+
     public let pkg: Package
     public let mirrors: ArrayList<ClassLikeDecl> = ArrayList<ClassLikeDecl>()
     public let mirrorTopLevelFuncs: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
@@ -2092,7 +2108,7 @@ public class InteropContext {
     public let fwdClasses: ArrayList<ClassDecl> = ArrayList<ClassDecl>()
     public let fwdClassMap: HashMap<Decl, ClassDecl> = HashMap<Decl, ClassDecl>()
     public let fwdOverrideTable: HashMap<Decl, FuncDecl> = HashMap<Decl, FuncDecl>()
-    public let synWrappers: ArrayList<ClassDecl> = ArrayList<ClassDecl>()
+    public let mirrorInterfaceHandleWrappers: ArrayList<ClassDecl> = ArrayList<ClassDecl>()
     public let genDecls: ArrayList<Decl> = ArrayList<Decl>()
 
     public let diag: DiagnosticEngine
@@ -2111,8 +2127,9 @@ public class InteropContext {
     public init(pkg: Package, typeManager: TypeManager, importManager: SemaImportManager,
         diag: DiagnosticEngine, mangler: BaseMangler, cjLibOutputPath: String,
         outputObjCGenDir: String, structMemberSignatures: HashMap<InheritableDecl, MemberMap>,
-        targetOsType: OSType) {
+        targetOsType: OSType, desugarPropRef: (Node) -> Unit) {
         this.pkg = pkg
+        this.desugarPropRef = desugarPropRef
         this.diag = diag
         this.typeManager = typeManager
         this.importManager = importManager
@@ -2121,6 +2138,7 @@ public class InteropContext {
         this.mangler = mangler
         nameGenerator = NameGenerator(mangler, typeManager)
         factory = ASTFactory(bridge, typeManager, nameGenerator, this.typeMapper, importManager)
+        astTransformer = AfterTypeCheckASTTransformer(importManager, typeManager, diag, astInserter)
         this.cjLibOutputPath = cjLibOutputPath
         this.outputObjCGenDir = outputObjCGenDir
         this.structMemberSignatures = structMemberSignatures
@@ -2163,7 +2181,7 @@ public class GenerateWrappers <: Handler<InteropContext> {
                     continue
                 }
                 if (interopType == InteropType.CJ_Mapping &&
-                    !TypeMapper.IsObjCCJMappingMember(memberDecl)) {
+                    !IsObjCCJMappingMember(memberDecl)) {
                     continue
                 }
                 if (let Some(method) <- (memberDecl as FuncDecl)) {
@@ -2353,7 +2371,7 @@ public class InsertNativeHandleGetterDecl <: Handler<InteropContext> {
             }
         }
 
-        for (wrapper in ctx.synWrappers) {
+        for (wrapper in ctx.mirrorInterfaceHandleWrappers) {
             if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
                 continue
             }
@@ -2406,7 +2424,7 @@ public class InsertFinalizer <: Handler<InteropContext> {
             }
         }
 
-        for (wrapper in ctx.synWrappers) {
+        for (wrapper in ctx.mirrorInterfaceHandleWrappers) {
             if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
                 continue
             }
@@ -2471,7 +2489,7 @@ public class InsertNativeHandleGetterBody <: Handler<InteropContext> {
                 getterDecl.funcBody.getOrThrow().body.getOrThrow().body.add(nativeHandleFieldExpr)
             }
         }
-        for (wrapper in ctx.synWrappers) {
+        for (wrapper in ctx.mirrorInterfaceHandleWrappers) {
             if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
                 continue
             }
@@ -2577,16 +2595,16 @@ public class RewriteObjCPointerAccess <: Handler<InteropContext> {
                     return VisitAction.WALK_CHILDREN
                 }
                 let funcDecl = callExpr.resolvedFunction.getOrThrow()
-                if (funcDecl.outerDecl.isNone() || !TypeMapper.IsObjCPointer(funcDecl.outerDecl.getOrThrow())) {
+                if (funcDecl.outerDecl.isNone() || !IsObjCPointer(funcDecl.outerDecl.getOrThrow())) {
                     return VisitAction.WALK_CHILDREN
                 }
                 if (funcDecl.identifier.Val() == OBJCPOINTER_READ_METHOD && callExpr.args.isEmpty() &&
-                    TypeMapper.IsObjCCompatible(callExpr.GetTy().getOrThrow())) {
+                    IsObjCCompatible(callExpr.GetTy().getOrThrow())) {
                     HandleObjCPointerRead(ctx, callExpr)
                     return VisitAction.WALK_CHILDREN
                 }
                 if (funcDecl.identifier.Val() == OBJCPOINTER_WRITE_METHOD && callExpr.args.size == 1 &&
-                    TypeMapper.IsObjCCompatible(callExpr.args[0].GetTy().getOrThrow())) {
+                    IsObjCCompatible(callExpr.args[0].GetTy().getOrThrow())) {
                     HandleObjCPointerWrite(ctx, callExpr)
                     return VisitAction.WALK_CHILDREN
                 }
@@ -2637,10 +2655,10 @@ private func FTypeKindByCallPropertyDecl(tm: TypeMapper, decl: Option<Decl>): Ob
         return ObjCFTypeKind.NONE
     }
     let typeDecl = target.outerDecl.getOrThrow()
-    if (TypeMapper.IsObjCFunc(typeDecl)) {
+    if (IsObjCFunc(typeDecl)) {
         return ObjCFTypeKind.FUNCPTR
     }
-    if (TypeMapper.IsObjCBlock(typeDecl)) {
+    if (IsObjCBlock(typeDecl)) {
         return ObjCFTypeKind.BLOCK
     }
     return ObjCFTypeKind.NONE
@@ -2744,7 +2762,7 @@ public class RewriteObjCBlockConstruction <: Handler<InteropContext> {
                 if (containingClass.isNone() || containingClass.getOrThrow().astKind != ASTKind.CLASS_DECL) {
                     return VisitAction.WALK_CHILDREN
                 }
-                if (!TypeMapper.IsObjCBlock(containingClass.getOrThrow())) {
+                if (!IsObjCBlock(containingClass.getOrThrow())) {
                     return VisitAction.WALK_CHILDREN
                 }
                 if (callExpr.args.size != 1) {
@@ -2790,7 +2808,7 @@ public class InsertBaseCtorDecl <: Handler<InteropContext> {
                 mirrorClass.body.getOrThrow().decls.add(ctx.factory.CreateBaseCtorDecl(mirrorClass))
             }
         }
-        for (wrapper in ctx.synWrappers) {
+        for (wrapper in ctx.mirrorInterfaceHandleWrappers) {
             if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
                 continue
             }
@@ -2859,7 +2877,7 @@ public class InsertBaseCtorBody <: Handler<InteropContext> {
             }
         }
 
-        for (wrapper in ctx.synWrappers) {
+        for (wrapper in ctx.mirrorInterfaceHandleWrappers) {
             if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
                 continue
             }
@@ -2921,7 +2939,7 @@ public class InsertNativeHandleField <: Handler<InteropContext> {
             mirrorClass.getOrThrow().body.getOrThrow().decls.add(
                 ctx.factory.CreateNativeHandleField(mirrorClass.getOrThrow()))
         }
-        for (wrapper in ctx.synWrappers) {
+        for (wrapper in ctx.mirrorInterfaceHandleWrappers) {
             if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
                 continue
             }
@@ -2987,14 +3005,14 @@ public class GenerateDeleteCJObjectMethod <: Handler<InteropContext> {
             if (decl.TestAttr(Attribute.IS_BROKEN)) {
                 return
             }
-            let forOneWayMapping = interopType == InteropType.CJ_Mapping && TypeMapper.IsOneWayMapping(decl)
+            let forOneWayMapping = interopType == InteropType.CJ_Mapping && IsOneWayMapping(decl)
             ctx.genDecls.add(ctx.factory.CreateDeleteCjObject(decl, forOneWayMapping))
         }
         let genNativeDeleteMethodForGeneric = {decl: Decl, genericConfigs: ArrayList<GenericConfigInfo> =>
             if (decl.TestAttr(Attribute.IS_BROKEN)) {
                 return
             }
-            let forOneWayMapping = interopType == InteropType.CJ_Mapping && TypeMapper.IsOneWayMapping(decl)
+            let forOneWayMapping = interopType == InteropType.CJ_Mapping && IsOneWayMapping(decl)
             for (genericConfig in genericConfigs) {
                 ctx.genDecls.add(ctx.factory.CreateDeleteCjObject(decl, forOneWayMapping,
                     genericConfig: Some(genericConfig)))
@@ -3138,12 +3156,12 @@ public class GenerateInitCJObjectMethods <: Handler<InteropContext> {
                 if (interopType == InteropType.ObjC_Mirror && !ctx.factory.IsGeneratedCtor(ctorDecl)) {
                     continue
                 }
-                if (interopType == InteropType.CJ_Mapping && !TypeMapper.IsObjCCJMappingMember(ctorDecl)) {
+                if (interopType == InteropType.CJ_Mapping && !IsObjCCJMappingMember(ctorDecl)) {
                     continue
                 }
                 if (interopType == InteropType.CJ_Mapping) {
                     let forOneWayMapping = interopType == InteropType.CJ_Mapping &&
-                        TypeMapper.IsOneWayMapping(decl)
+                        IsOneWayMapping(decl)
                     if (isGenericGlueCode) {
                         for (genericConfig in genericConfigsVector) {
                             ctx.genDecls.add(ctx.factory.CreateInitCjObject(decl, ctorDecl,
@@ -3181,20 +3199,12 @@ public class GenerateInitCJObjectMethods <: Handler<InteropContext> {
     }
 }
 
-// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateInSyntheticWrappers.cpp:25-41.
-public class GenerateInSyntheticWrappers <: Handler<InteropContext> {
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateInMirrorInterfaceHandleWrappers.cpp:25-41.
+public class GenerateInMirrorInterfaceHandleWrappers <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
-        for (wrapper in ctx.synWrappers) {
-            if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
-                continue
-            }
-            CJC_ASSERT_WITH_MSG(wrapper.astKind == ASTKind.CLASS_DECL, "Synthetic wrapper expected to be a class")
-            if (let Some(inheritableDecl) <- (wrapper as InheritableDecl)) {
-                GenerateSyntheticClassAbstractMemberImplStubs(wrapper,
-                    ctx.structMemberSignatures.get(inheritableDecl).getOrThrow())
-            } else {
-                CJC_ABORT_WITH_MSG("Illegal state: synthetic classes expected to be InheritableDecl*")
-            }
+        for (wrapper in ctx.mirrorInterfaceHandleWrappers) {
+            GenerateMirrorInterfaceHandleWrapperAbstractMemberImplStubs(wrapper,
+                ctx.structMemberSignatures.get(wrapper).getOrThrow())
         }
     }
 }
@@ -3223,7 +3233,7 @@ public class CheckMirrorTypes <: Handler<InteropContext> {
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/CheckImplTypes.cpp:19-30.
 public class CheckImplTypes <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
-        let checker = HandlerFactory.Start<TypeCheckContext>(CheckMirrorSubtypeAttr())
+        let checker = HandlerFactory.Start<TypeCheckContext>(CheckImplAttr())
             .Use(CheckImplInheritMirror())
             .Use(CheckForeignName())
             .Use(CheckMemberTypes(InteropType.ObjC_Mirror))
@@ -3351,23 +3361,27 @@ public class FindMirrors <: Handler<InteropContext> {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
                 if (let Some(classLikeDecl) <- (decl as ClassLikeDecl)) {
-                    if (TypeMapper.IsObjCMirror(classLikeDecl)) {
+                    if (IsObjCMirror(classLikeDecl)) {
                         ctx.mirrors.add(classLikeDecl)
                     }
                 }
 
                 if (let Some(classDecl) <- (decl as ClassDecl)) {
-                    if (TypeMapper.IsSyntheticWrapper(classDecl)) {
-                        ctx.synWrappers.add(classDecl)
-                    } else if (TypeMapper.IsObjCImpl(classDecl) ||
-                        (TypeMapper.IsObjCMirrorSubtype(classDecl) &&
-                        !TypeMapper.IsObjCMirror(classDecl))) {
+                    if (IsObjCMirrorInterfaceHandleWrapper(classDecl)) {
+                        CJC_ASSERT_WITH_MSG(!classDecl.TestAnyAttr(Attribute.IS_BROKEN, Attribute.HAS_BROKEN),
+                            "a generated @ObjCMirror interface handle wrapper cannot be broken")
+                        ctx.mirrorInterfaceHandleWrappers.add(classDecl)
+                    } else if (IsObjCImpl(classDecl) ||
+                        (IsObjCMirrorSubtype(classDecl) &&
+                        !IsObjCMirror(classDecl))) {
                         ctx.impls.add(classDecl)
+                    } else if (classDecl.TestAttr(Attribute.OBJ_C_IMPL_REGISTRY_COMPANION)) {
+                        ctx.regCompanions.add(classDecl)
                     }
                 }
 
                 if (let Some(funcDecl) <- (decl as FuncDecl)) {
-                    if (TypeMapper.IsObjCMirror(funcDecl)) {
+                    if (IsObjCMirror(funcDecl)) {
                         ctx.mirrorTopLevelFuncs.add(funcDecl)
                     }
                 }
@@ -3381,7 +3395,7 @@ public class FindCJMapping <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
-                if (TypeMapper.IsObjCCJMapping(decl)) {
+                if (IsObjCCJMapping(decl)) {
                     ctx.cjMappings.add(decl)
                 }
             }
@@ -3395,7 +3409,7 @@ public class FindCJMappingInterface <: Handler<InteropContext> {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
                 if (let Some(classLikeDecl) <- (decl as ClassLikeDecl)) {
-                    if (TypeMapper.IsObjCCJMappingInterface(classLikeDecl)) {
+                    if (IsObjCCJMappingInterface(classLikeDecl)) {
                         ctx.cjMappingInterfaces.add(classLikeDecl)
                     }
                 }
@@ -3410,7 +3424,7 @@ public class FindFwdClass <: Handler<InteropContext> {
         for (file in ctx.pkg.files) {
             for (decl in file.decls) {
                 if (let Some(classDecl) <- (decl as ClassDecl)) {
-                    if (TypeMapper.IsObjCFwdClass(classDecl)) {
+                    if (IsObjCFwdClass(classDecl)) {
                         ctx.fwdClasses.add(classDecl)
                     }
                 }
@@ -3440,8 +3454,8 @@ public class CheckObjCPointerTypeArguments <: Handler<InteropContext> {
                 }
                 if (let Some(typeUsage) <- (node as Type)) {
                     let usageTy = typeUsage.GetTy().getOrThrow()
-                    if (typeUsage.GetTypeArgs().size == 1 && TypeMapper.IsObjCPointer(usageTy) &&
-                        !TypeMapper.IsObjCCompatible(usageTy.typeArgs[0])) {
+                    if (typeUsage.GetTypeArgs().size == 1 && IsObjCPointer(usageTy) &&
+                        !IsObjCCompatible(usageTy.typeArgs[0])) {
                         DiagnoseRefactor(ctx.diag,
                             DiagKindRefactor.sema_objc_pointer_argument_must_be_objc_compatible,
                             typeUsage).Emit()
@@ -3462,11 +3476,11 @@ private func ReportObjCIncompatibleType(ctx: InteropContext, typeUsage: Type): U
         let tyArg = typeUsage.GetTypeArgs()[0]
         errorRef = tyArg
         if (let Some(funcTy) <- (tyArg as FuncType)) {
-            if (!TypeMapper.IsObjCCompatible(funcTy.retType.getOrThrow().GetTy().getOrThrow())) {
+            if (!IsObjCCompatible(funcTy.retType.getOrThrow().GetTy().getOrThrow())) {
                 errorRef = funcTy.retType.getOrThrow()
             }
             for (arg in funcTy.paramTypes) {
-                if (!TypeMapper.IsObjCCompatible(arg.GetTy().getOrThrow())) {
+                if (!IsObjCCompatible(arg.GetTy().getOrThrow())) {
                     errorRef = arg
                     break
                 }
@@ -3488,7 +3502,7 @@ public class CheckObjCFuncTypeArguments <: Handler<InteropContext> {
                     return VisitAction.WALK_CHILDREN
                 }
                 if (let Some(decl) <- (node as Decl)) {
-                    if (TypeMapper.IsObjCFuncOrBlock(decl)) {
+                    if (IsObjCFuncOrBlock(decl)) {
                         return VisitAction.SKIP_CHILDREN
                     }
                 }
@@ -3497,12 +3511,12 @@ public class CheckObjCFuncTypeArguments <: Handler<InteropContext> {
                         return VisitAction.SKIP_CHILDREN
                     }
                     if (let Some(usageTy) <- typeUsage.GetTy()) {
-                        if (usageTy.typeArgs.size == 1 && TypeMapper.IsObjCFuncOrBlock(usageTy)) {
+                        if (usageTy.typeArgs.size == 1 && IsObjCFuncOrBlock(usageTy)) {
                             let tyArg = usageTy.typeArgs[0]
                             var valid = tyArg.IsFunc()
                             valid = valid && !tyArg.IsCFunc()
                             for (subTy in tyArg.typeArgs) {
-                                valid = valid && TypeMapper.IsObjCCompatible(subTy)
+                                valid = valid && IsObjCCompatible(subTy)
                             }
                             if (!valid) {
                                 ReportObjCIncompatibleType(ctx, typeUsage)
@@ -4387,13 +4401,10 @@ public class DesugarMirrors <: Handler<InteropContext> {
     }
 }
 
-// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarSyntheticWrappers.cpp:25-33.
-public class DesugarSyntheticWrappers <: Handler<InteropContext> {
+// C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/DesugarMirrorInterfaceHandleWrappers.cpp:25-33.
+public class DesugarMirrorInterfaceHandleWrappers <: Handler<InteropContext> {
     public func HandleImpl(ctx: InteropContext): Unit {
-        for (wrapper in ctx.synWrappers) {
-            if (wrapper.TestAttr(Attribute.IS_BROKEN)) {
-                continue
-            }
+        for (wrapper in ctx.mirrorInterfaceHandleWrappers) {
             wrapper.DisableAttr(Attribute.ABSTRACT)
         }
     }
@@ -4578,7 +4589,7 @@ public class DesugarImpls <: Handler<InteropContext> {
         }
         let targetFdTy = (targetFd.GetTy().getOrThrow() as FuncTy).getOrThrow()
         let curFile = ce.curFile
-        if (!TypeMapper.IsObjCMirror(targetFd.outerDecl.getOrThrow().GetTy().getOrThrow())) {
+        if (!IsObjCMirror(targetFd.outerDecl.getOrThrow().GetTy().getOrThrow())) {
             return
         }
         let msgSendSuperArgs = ArrayList<Expr>()
@@ -4641,7 +4652,7 @@ public class DesugarImpls <: Handler<InteropContext> {
             return
         }
         let propDecl = (target.getOrThrow() as PropDecl).getOrThrow()
-        if (!TypeMapper.IsObjCMirror(propDecl.outerDecl.getOrThrow().GetTy().getOrThrow())) {
+        if (!IsObjCMirror(propDecl.outerDecl.getOrThrow().GetTy().getOrThrow())) {
             return
         }
         let nativeHandle = ctx.factory.CreateNativeHandleExpr(impl, false, ma.curFile)
@@ -4665,7 +4676,7 @@ private func ShouldDesugarTypecheck(typeNode: Type, expr: Expr): Bool {
     let castDecl = Ty.GetDeclOfTy(typeNode.GetTy()) as ClassLikeDecl
     let objDecl = Ty.GetDeclOfTy(expr.GetTy()) as ClassLikeDecl
     if (objDecl.isNone() || castDecl.isNone() ||
-        !castDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_MIRROR_SUBTYPE, Attribute.OBJ_C_MIRROR)) {
+        !castDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_IMPL, Attribute.OBJ_C_MIRROR)) {
         return false
     }
     return true
@@ -4682,7 +4693,7 @@ private func DesugarIsExpr(ctx: InteropContext, expr: IsExpr): Unit {
     let classLikeTy = (isType.GetTy().getOrThrow() as ClassLikeTy).getOrThrow()
     let typeDecl = classLikeTy.commonDecl.getOrThrow()
     let targetName = ctx.nameGenerator.GetObjCDeclName(typeDecl)
-    if (TypeMapper.IsObjCId(typeDecl)) {
+    if (IsObjCId(typeDecl)) {
         return
     }
 
@@ -4741,7 +4752,7 @@ private func DesugarAsExpr(ctx: InteropContext, expr: AsExpr): Unit {
     let castTy = asType.GetTy().getOrThrow()
     let classLikeTy = (castTy as ClassLikeTy).getOrThrow()
     let typeDecl = classLikeTy.commonDecl.getOrThrow()
-    if (TypeMapper.IsObjCId(typeDecl)) {
+    if (IsObjCId(typeDecl)) {
         return
     }
 
@@ -4797,8 +4808,8 @@ private func CollectTypePatternWithObjCClass(ctx: InteropContext, pattern: Patte
         if (let Some(typePattern) <- (node as TypePattern)) {
             let decl = Ty.GetDeclOfTy(typePattern.typeNode.getOrThrow().GetTy())
             if (let Some(value) <- decl) {
-                if (value.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE) &&
-                    !TypeMapper.IsObjCId(value)) {
+                if (value.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL) &&
+                    !IsObjCId(value)) {
                     result.add(typePattern)
                 }
             }
@@ -5114,6 +5125,9 @@ public func Desugar(ctx: InteropContext): Unit {
     HandlerFactory.Start<InteropContext>(FindMirrors())
         .Use(CheckMirrorTypes())
         .Use(CheckImplTypes())
+        .Use(PropagateBrokenToSubtypes())
+        .Use(MapImplToRegCompanion())
+        .Use(RestoreRegCompanionsTypeHierarchy())
         .Use(InsertNativeHandleField(InteropType.ObjC_Mirror))
         .Use(InsertNativeHandleGetterDecl(InteropType.ObjC_Mirror))
         .Use(InsertNativeHandleGetterBody(InteropType.ObjC_Mirror))
@@ -5121,10 +5135,10 @@ public func Desugar(ctx: InteropContext): Unit {
         .Use(InsertBaseCtorDecl(InteropType.ObjC_Mirror))
         .Use(InsertBaseCtorBody(InteropType.ObjC_Mirror))
         .Use(InsertFinalizer(InteropType.ObjC_Mirror))
-        .Use(GenerateInSyntheticWrappers())
+        .Use(GenerateInMirrorInterfaceHandleWrappers())
         .Use(InsertStringConversions())
         .Use(DesugarMirrors(InteropType.ObjC_Mirror))
-        .Use(DesugarSyntheticWrappers())
+        .Use(DesugarMirrorInterfaceHandleWrappers())
         .Use(GenerateObjCImplMembers())
         .Use(GenerateInitCJObjectMethods(InteropType.ObjC_Mirror))
         .Use(GenerateDeleteCJObjectMethod(InteropType.ObjC_Mirror))

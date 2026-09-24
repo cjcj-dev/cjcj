@@ -222,7 +222,8 @@ public func PerformDesugarAfterTypeCheck(typeManager: TypeManager, importManager
     javaInteropManager.DesugarPackage(pkg, structMemberMap,
         { node: Node => DesugarForPropDecl(typeManager, node) })
     DesugarObjC(InteropContext(pkg, typeManager, importManager, diagValue, mangler, options.output,
-        options.outputObjCGenDir, structMemberMap, options.target.os))
+        options.outputObjCGenDir, structMemberMap, options.target.os,
+        { node: Node => DesugarForPropDecl(typeManager, node) }))
     DesugarDeclsForPackage(pkg, options.enableCoverage)
     let walker = Walker(pkg, visitPre: { node: Node =>
         match (node.astKind) {

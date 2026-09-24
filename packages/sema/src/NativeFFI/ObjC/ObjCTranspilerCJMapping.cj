@@ -281,8 +281,8 @@ public class ObjCTranspilerCJMapping {
         var result = if (retTy.IsUnit()) { "" } else { RETURN_KEYWORD }
         result += " "
         var nativeCall = ""
-        if ((TypeMapper.IsObjCObjectType(retTy) || TypeMapper.IsObjCBlock(retTy)) &&
-            !TypeMapper.IsObjCCJMapping(retTy)) {
+        if ((IsObjCObjectType(retTy) || IsObjCBlock(retTy)) &&
+            !IsObjCCJMapping(retTy)) {
             nativeCall += "(__bridge_transfer " + MapCJTypeToObjCType(retTy) + ")"
         }
         nativeCall += name + "("
@@ -293,7 +293,7 @@ public class ObjCTranspilerCJMapping {
             }
         }
         nativeCall += ")"
-        result += if (TypeMapper.IsObjCCJMapping(retTy)) {
+        result += if (IsObjCCJMapping(retTy)) {
             WrapperCallByInitForCJMappingReturn(retTy, nativeCall)
         } else {
             nativeCall
@@ -348,8 +348,8 @@ public class ObjCTranspilerCJMapping {
     private func GenerateForwardDeclarations(): Unit {
         let dependencies = HashSet<Decl>()
         func walker(ty: Ty): Unit {
-            if (TypeMapper.IsObjCObjectType(ty)) {
-                if (!TypeMapper.IsObjCId(ty) && !ty.IsCoreOptionType()) {
+            if (IsObjCObjectType(ty)) {
+                if (!IsObjCId(ty) && !ty.IsCoreOptionType()) {
                     dependencies.add(Ty.GetDeclOfTy(Some(ty)).getOrThrow())
                 }
             }
@@ -392,7 +392,7 @@ public class ObjCTranspilerCJMapping {
                 let funcDecl = (declPtr as FuncDecl).getOrThrow()
                 let funcTy = (funcDecl.GetTy().getOrThrow() as FuncTy).getOrThrow()
                 let retTy = funcTy.retTy
-                let retType = if (TypeMapper.IsObjCObjectType(retTy) || TypeMapper.IsObjCBlock(retTy)) {
+                let retType = if (IsObjCObjectType(retTy) || IsObjCBlock(retTy)) {
                     VOID_POINTER_TYPE
                 } else {
                     MapCJTypeToObjCType(retTy)
@@ -437,7 +437,7 @@ public class ObjCTranspilerCJMapping {
             AddToPreamble(GenerateImport("\"" + superClassPtr.getOrThrow().identifier.Val() + ".h\""))
         }
         if (let InteropType.CJ_Mapping <- interopType) {
-            if (TypeMapper.IsOneWayMapping(decl) && !decl.IsOpen()) {
+            if (IsOneWayMapping(decl) && !decl.IsOpen()) {
                 AddWithIndent(FINAL_MODIFIER, target: GenerationTarget.HEADER)
             }
         }
@@ -456,7 +456,7 @@ public class ObjCTranspilerCJMapping {
         let interfacesVec = ArrayList<InterfaceTy>()
         if (let Some(concreteClassDecl) <- classDecl) {
             for (interfaceTy in concreteClassDecl.GetSuperInterfaceTys()) {
-                if (!TypeMapper.IsObjCId(interfaceTy)) {
+                if (!IsObjCId(interfaceTy)) {
                     interfacesVec.add(interfaceTy)
                 }
             }
@@ -567,7 +567,7 @@ public class ObjCTranspilerCJMapping {
                 continue
             }
             if (let InteropType.CJ_Mapping <- interopType) {
-                if (!TypeMapper.IsObjCCJMappingMember(declPtr)) {
+                if (!IsObjCCJMappingMember(declPtr)) {
                     continue
                 }
             }
@@ -717,7 +717,7 @@ public class ObjCTranspilerCJMapping {
                 continue
             }
             if (let InteropType.CJ_Mapping <- interopType) {
-                if (!TypeMapper.IsObjCCJMappingMember(declPtr)) {
+                if (!IsObjCCJMappingMember(declPtr)) {
                     continue
                 }
             }
@@ -848,7 +848,7 @@ public class ObjCTranspilerCJMapping {
                 continue
             }
             if (let InteropType.CJ_Mapping <- interopType) {
-                if (!TypeMapper.IsObjCCJMappingMember(declPtr) || declPtr.IsOpen()) {
+                if (!IsObjCCJMappingMember(declPtr) || declPtr.IsOpen()) {
                     continue
                 }
             }
@@ -1007,18 +1007,18 @@ public class ObjCTranspilerCJMapping {
 
     // C++ ObjCTranspilerCJMapping.cpp:1145-1163.
     private func GenerateArgumentCast(retTy: Ty, value: String): String {
-        if (TypeMapper.IsObjCCJMapping(retTy)) {
+        if (IsObjCCJMapping(retTy)) {
             return value + "." + SELF_WEAKLINK_NAME
         }
         let actualTy = if (retTy.IsCoreOptionType()) { retTy.typeArgs[0] } else { retTy }
-        if (TypeMapper.IsObjCImpl(actualTy)) {
+        if (IsObjCImpl(actualTy)) {
             return CAST_TO_VOID_PTR + value
         }
-        if (TypeMapper.IsObjCMirror(actualTy) || TypeMapper.IsObjCBlock(actualTy) ||
-            TypeMapper.IsObjCCJMappingInterface(actualTy)) {
+        if (IsObjCMirror(actualTy) || IsObjCBlock(actualTy) ||
+            IsObjCCJMappingInterface(actualTy)) {
             return CAST_TO_VOID_PTR_RETAINED + value
         }
-        if (TypeMapper.IsObjCPointer(actualTy)) {
+        if (IsObjCPointer(actualTy)) {
             return CAST_TO_VOID_PTR_UNSAFE + value
         }
         return value

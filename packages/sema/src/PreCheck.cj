@@ -721,7 +721,7 @@ extend TypeCheckerImpl {
     public func AddSuperInterfaceForClassLikeDecl(ctx: ASTContext): Unit {
         for (sym in GetAllDecls(ctx)) {
             let node = sym.node.getOrThrow()
-            if (!node.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_MIRROR_SUBTYPE)) {
+            if (!node.TestAnyAttr(Attribute.OBJ_C_MIRROR, Attribute.OBJ_C_IMPL)) {
                 continue
             }
             if (let Some(classLikeDecl) <- (node as ClassLikeDecl)) {

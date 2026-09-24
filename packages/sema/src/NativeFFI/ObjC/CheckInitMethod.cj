@@ -6,7 +6,7 @@ import cjcj::basic.DiagKindRefactor
 public class CheckInitMethod <: Handler<TypeCheckContext> {
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckInitMethod.cpp:20-46.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
-        if (!TypeMapper.IsObjCMirror(ctx.target)) {
+        if (!IsObjCMirror(ctx.target)) {
             return
         }
 
