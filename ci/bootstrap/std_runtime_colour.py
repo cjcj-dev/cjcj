@@ -24,7 +24,7 @@ def symbols(file, *, runtime=False):
         kind, name = fields[-2:]
         name = name.split('@', 1)[0]
         # Mach-O nm prefixes C symbols with one underscore.
-        if name.startswith('_g_'):
+        if not runtime and name.startswith('_g_'):
             name = name[1:]
         if runtime:
             if kind not in ('U', 'w', 'v') and name == RUNTIME_SYMBOL:

@@ -25,7 +25,11 @@ def main():
     parser.add_argument('--product', type=Path, default=Path(__file__).with_name('sdk_build.sh'))
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--fixtures-from', type=Path, help='Reuse the exact ELF libraries from a prior arm')
+    parser.add_argument('--real-coloured-sdk', type=Path)
+    parser.add_argument('--real-official-sdk', type=Path)
     args = parser.parse_args()
+    if bool(args.real_coloured_sdk) != bool(args.real_official_sdk):
+        parser.error('both real SDK paths are required together')
     product = args.product.resolve()
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
@@ -36,6 +40,8 @@ def main():
         'both': 'int g_cjLoadBadMask; int g_cjLoadBadMaskOffset;',
         'offset': 'int g_cjLoadBadMaskOffset;',
         'none': 'int unrelated;',
+        'offset-undefined': 'extern int g_cjLoadBadMaskOffset; int *reference = &g_cjLoadBadMaskOffset;',
+        'prefix-undefined': 'extern int g_cjLoadBadMaskExtra; int *reference = &g_cjLoadBadMaskExtra;',
         'undefined': 'extern int g_cjLoadBadMask; int *reference = &g_cjLoadBadMask;',
     }
     versions = libs / 'versions.map'
@@ -53,6 +59,12 @@ def main():
                 cmd.append('-Wl,--version-script=' + str(versions))
             subprocess.run(cmd, check=True)
             (so.with_suffix('.nm')).write_text(subprocess.check_output(['nm', '-D', str(so)], text=True))
+    if args.fixtures_from is None:
+        src = libs / 'version-reference.c'
+        src.write_text('extern int mask; int *reference = &mask;\n'
+                       '__asm__(".symver mask,g_cjLoadBadMask@CANGJIE");\n')
+        subprocess.run(['cc', '-c', '-fPIC', str(src), '-o', str(libs / 'version-reference.o')], check=True)
+        subprocess.run(['ar', 'rcs', str(libs / 'version-reference.a'), str(libs / 'version-reference.o')], check=True)
     if args.fixtures_from is not None:
         shutil.copytree(args.fixtures_from / 'libs', libs, dirs_exist_ok=True)
     # Keep selection and colour surfaces independent: tuple cases contain only
@@ -71,6 +83,38 @@ def main():
             coloured = variant.startswith('both')
             expected = 0 if coloured == (role == 'target') else 1
             cases.append((variant + '-' + role, [LINUX], variant, role, expected, None))
+
+    # Both directions, exact symbol boundaries, installed/inherited std and
+    # the independent managed-tool host runtime must reach the actual assembler.
+    pair_cases = {
+        'pair-mask-target': ('mask', 'target', 'undefined', 0),
+        'pair-version-target': ('mask', 'target', 'version-reference', 0),
+        'pair-offset-target': ('mask', 'target', 'offset-undefined', 0),
+        'pair-official-host': ('none', 'host', 'none', 0),
+        'pair-official-target': ('mask', 'target', 'none', 1),
+        'pair-coloured-host': ('none', 'host', 'undefined', 1),
+        'pair-offset-host': ('none', 'host', 'offset-undefined', 1),
+        'pair-prefix-target': ('mask', 'target', 'prefix-undefined', 1),
+        'pair-prefix-host': ('none', 'host', 'prefix-undefined', 0),
+        'pair-definition-target': ('mask', 'target', 'mask', 1),
+        'pair-install-target': ('mask', 'target', 'offset-undefined', 0),
+        'pair-install-official': ('mask', 'target', 'none', 1),
+        'pair-verify-host': ('mask', 'target', 'undefined', 0),
+        'pair-verify-host-mismatch': ('mask', 'target', 'none', 1),
+    }
+    real_pairs = {}
+    if args.real_coloured_sdk:
+        for name, rt_sdk, std_sdk, role, expected in (
+            ('real-coloured', args.real_coloured_sdk, args.real_coloured_sdk, 'target', 0),
+            ('real-official', args.real_official_sdk, args.real_official_sdk, 'host', 0),
+            ('real-official-std', args.real_coloured_sdk, args.real_official_sdk, 'target', 1),
+            ('real-coloured-std', args.real_official_sdk, args.real_coloured_sdk, 'host', 1),
+        ):
+            pair_cases[name] = ('mask' if role == 'target' else 'none', role, 'none', expected)
+            real_pairs[name] = (rt_sdk, std_sdk)
+    for name, (variant, role, std_variant, expected) in pair_cases.items():
+        cases.append((name, [LINUX], variant, role, expected,
+                      'STD-RUNTIME-COLOUR-MISMATCH' if expected else None))
 
     def run(case):
         name, order, variant, role, expected, diagnostic = case
@@ -92,6 +136,8 @@ def main():
         std_dir.mkdir(parents=True)
         std_variant = 'undefined' if variant in ('mask', 'both', 'both-versioned') else 'none'
         shutil.copyfile(libs / (std_variant + '.a'), std_dir / 'libcangjie-std-core.a')
+        if name in pair_cases:
+            shutil.copyfile(libs / (pair_cases[name][2] + '.a'), std_dir / 'libcangjie-std-core.a')
         source_tuple = WINDOWS if name == 'source-mismatch' else LINUX
         source = work / 'install/runtime/lib' / source_tuple
         source.mkdir(parents=True)
@@ -102,6 +148,33 @@ def main():
             cmd.append(LINUX)
         if not name.startswith('verify-'):
             cmd += ['--runtime', str(work / 'install')]
+        if name in real_pairs:
+            rt_sdk, std_sdk = real_pairs[name]
+            shutil.copyfile(rt_sdk / 'runtime/lib' / LINUX / 'libcangjie-runtime.so',
+                            base / 'runtime/lib' / LINUX / 'libcangjie-runtime.so')
+            shutil.copyfile(std_sdk / 'lib' / LINUX / 'libcangjie-std-core.a',
+                            std_dir / 'libcangjie-std-core.a')
+            # Inherited real pair: no runtime installation/provenance transform.
+            del cmd[-2:]
+            shutil.copyfile(base / 'runtime/lib' / LINUX / 'libcangjie-runtime.so', source / 'libcangjie-runtime.so')
+        if name.startswith('pair-install-'):
+            prefix = work / 'final-std'
+            for directory in ('modules/' + LINUX, 'lib/' + LINUX, 'runtime/lib/' + LINUX):
+                (base / directory).mkdir(parents=True, exist_ok=True)
+                (prefix / directory).mkdir(parents=True)
+            shutil.copyfile(std_dir / 'libcangjie-std-core.a', prefix / 'lib' / LINUX / 'libcangjie-std-core.a')
+            for rel in ('runtime/lib/' + LINUX + '/libcangjie-std-core.so', 'lib/libstdFFI.so'):
+                shutil.copyfile(libs / 'none.so', base / rel)
+                shutil.copyfile(libs / 'none.so', prefix / rel)
+            # The baseline has the opposite colour: the *installed* std decides.
+            other = 'undefined' if pair_cases[name][2] == 'none' else 'none'
+            shutil.copyfile(libs / (other + '.a'), std_dir / 'libcangjie-std-core.a')
+            cmd += ['--std', str(prefix)]
+        if name.startswith('pair-verify-host'):
+            host_rt = work / 'host-rt'
+            host_rt.mkdir()
+            shutil.copyfile(libs / 'none.so', host_rt / 'libcangjie-runtime.so')
+            cmd += ['--verify-host-rt', str(host_rt)]
         base_order = subprocess.check_output(['find', str(base / 'runtime/lib'), '-mindepth', '1',
                                               '-maxdepth', '1', '-type', 'd'], text=True).splitlines()
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -121,14 +194,32 @@ def main():
             ok &= '[3/5] 着色断言' in result.stdout and '[4/5]' not in result.stdout
             mask = 1 if variant.startswith('both') else 0
             ok &= 'mask=' + str(mask) in result.stdout
+        if name in pair_cases and expected != 0:
+            installed_std = target / 'lib' / LINUX / 'libcangjie-std-core.a'
+            ok &= ('std_sha256=' + sha(installed_std)) in result.stdout
+            std_source = work / 'final-std' if name.startswith('pair-install-') else base
+            ok &= ('std_source=' + str(std_source)) in result.stdout
         record = dict(name=name, assertion_executed=True, passed=bool(ok), rc=result.returncode,
-                      expected_rc=expected, command=cmd, base_enumeration=base_order, product_sha256=sha(product),
+                      expected_rc=expected, command=cmd,
+                      predicate_sha256=sha(product.with_name('std_runtime_colour.py')) if product.with_name('std_runtime_colour.py').exists() else None, base_enumeration=base_order, product_sha256=sha(product),
                       elf_sha256=sha(base / 'bin/cjc'), so_sha256=sha(source / 'libcangjie-runtime.so'))
         (work / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
         return record
 
     with ThreadPoolExecutor(max_workers=len(cases)) as pool:
         results = list(pool.map(run, cases))
+    # This is also the exact CLI consumed by stage3, using these same archives.
+    for variant, expected in [('undefined', '1'), ('offset-undefined', '1'),
+                              ('version-reference', '1'), ('none', '0'),
+                              ('prefix-undefined', '0'), ('mask', '0')]:
+        command = ['python3', str(product.with_name('std_runtime_colour.py')),
+                   '--std-colour', str(libs / (variant + '.a'))]
+        result = subprocess.run(command, capture_output=True, text=True)
+        results.append(dict(name='std-cli-' + variant, assertion_executed=True,
+                            passed=result.returncode == 0 and result.stdout.strip() == expected,
+                            rc=result.returncode, expected_rc=0, expected_stdout=expected,
+                            stdout=result.stdout, stderr=result.stderr, command=command,
+                            predicate_sha256=sha(product.with_name('std_runtime_colour.py'))))
     for result in results:
         print(('PASS' if result['passed'] else 'FAIL') + ' ASSERT ' + result['name'] +
               ' executed=true rc=' + str(result['rc']) + ' expected=' + str(result['expected_rc']))
