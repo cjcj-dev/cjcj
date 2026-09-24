@@ -19,6 +19,7 @@ import yaml
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--source', type=Path, required=True)
 p.add_argument('--output', type=Path, required=True)
+p.add_argument('--core', type=Path, help='Optional real kernel core from the same ELF/SO build')
 p.add_argument('--repo', type=Path, default=Path(__file__).resolve().parents[3])
 a = p.parse_args()
 a.source = a.source.resolve()
@@ -53,12 +54,15 @@ assert failed.returncode != 0 and name.encode() in failed.stdout, failed.stdout
 # Generate a genuine process core at the injected signal without modifying the
 # shared kkk2 host's apport core_pattern. GHA separately exercises kernel dumping.
 seed = a.output / 'seed.core'
-r = subprocess.run(['gdb', '-nx', '-batch', '-ex', 'set pagination off',
-                    '-ex', 'handle SIGSEGV stop print nopass', '-ex', 'run',
-                    '-ex', f'generate-core-file {seed}', '-ex', 'kill', str(elf)],
-                   env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
-(a.output / 'core-generation.log').write_bytes(r.stdout)
-assert r.returncode == 0 and seed.is_file(), r.stdout
+if a.core:
+    shutil.copy2(a.core, seed)
+else:
+    r = subprocess.run(['gdb', '-nx', '-batch', '-ex', 'set pagination off',
+                        '-ex', 'handle SIGSEGV stop print nopass', '-ex', 'run',
+                        '-ex', f'generate-core-file {seed}', '-ex', 'kill', str(elf)],
+                       env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+    (a.output / 'core-generation.log').write_bytes(r.stdout)
+    assert r.returncode == 0 and seed.is_file(), r.stdout
 
 
 def arm(label, cut=False, with_core=True):
@@ -103,7 +107,11 @@ def arm(label, cut=False, with_core=True):
     }
     if not with_core:
         assertions['no_core_reason'] = 'NO_CORE:' in (diag / 'summary.txt').read_text()
-    report = {'assertions': assertions, 'rc': int(not all(assertions.values()))}
+    artifacts = {str(file.relative_to(work)): hashlib.sha256(file.read_bytes()).hexdigest()
+                 for file in [workflow_path, work / 'ci/platform_matrix/collect_runtime_cores.py',
+                              work / 'runtime-source/runtime/cj_gc_unit',
+                              *sorted((work / 'runtime-source/runtime/lib').glob('*.so'))]}
+    report = {'assertions': assertions, 'rc': int(not all(assertions.values())), 'sha256': artifacts}
     (work / 'assertions.json').write_text(json.dumps(report, indent=2))
     return label, report
 
@@ -115,6 +123,9 @@ with ThreadPoolExecutor(max_workers=4) as pool:
 (a.output / 'results.json').write_text(json.dumps(results, indent=2))
 print(json.dumps(results, indent=2))
 assert results['green']['rc'] == results['restored']['rc'] == results['no-core']['rc'] == 0
+assert results['green']['sha256'] == results['restored']['sha256']
+for file, digest in results['green']['sha256'].items():
+    assert (digest != results['cut']['sha256'][file]) == (file == '.github/workflows/platform-matrix.yml')
 assert results['cut']['rc'] == 1
 assert not results['cut']['assertions']['bt_exists']
 subprocess.run(['uptime'], stdout=(a.output / 'uptime-after.txt').open('w'), check=True)
