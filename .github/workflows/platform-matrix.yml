@@ -49,6 +49,10 @@ jobs:
         run: |
           python3 ci/release/publish_language_tuple.py fetch \
             --pin ci/h48_language_tuple_pin.json --output "$RUNNER_TEMP/h48-download"
+      - name: Provision native gate debugger
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gdb
       - name: Build runtime and native gate
         env:
           RUNTIME_BUILD_TYPE: relwithdebinfo
