@@ -34,6 +34,7 @@ Actions the installed `gh` uses the workflow's repository-scoped token.
 Verify again before consuming a retained directory:
 
 ```sh
+set -euo pipefail
 python3 ci/release/language_tuple.py verify \
   --root <download-dir>/installed/tuple \
   --manifest-sha256 <pin.manifest_sha256> \
@@ -70,6 +71,7 @@ The compiler's linker searches the SDK's own runtime directory. For compilation,
 compose a **private** SDK with the consumer's verified runtime pair:
 
 ```sh
+set -euo pipefail
 python3 ci/release/language_tuple.py activate \
   --root <download-dir>/installed/tuple \
   --manifest-sha256 <pin.manifest_sha256> \

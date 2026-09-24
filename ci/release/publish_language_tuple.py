@@ -19,6 +19,11 @@ def gh(*args):
     return subprocess.check_output([*GH, *args], text=True)
 
 
+def api_write(method, route, value):
+    return json.loads(subprocess.check_output([*GH, "api", "--method", method,
+                      route, "--input", "-"], input=json.dumps(value), text=True))
+
+
 def download_asset(asset, output):
     with output.open("wb") as stream:
         subprocess.run([*GH, "api", f"repos/{REPOSITORY}/releases/assets/{asset}",
@@ -47,10 +52,17 @@ def publish(args):
                      "Source traceability is tracked in cjcj#135. "
                      "Only the official compiler host runtime is included; the consumer must build "
                      "its coloured target runtime from its own immutable source pin.\n")
-    gh("release", "create", tag, "--repo", REPOSITORY, "--target", source,
-       "--title", tag, "--notes-file", str(notes), "--draft", "--prerelease", "--latest=false")
+    if args.resume_release_id is not None:
+        release = json.loads(gh("api", f"repos/{REPOSITORY}/releases/{args.resume_release_id}"))
+        require(release["tag_name"] == tag and release["target_commitish"] == source
+                and release["draft"] and release["prerelease"], "H48_RESUME_IDENTITY")
+    else:
+        release = api_write("POST", f"repos/{REPOSITORY}/releases", {
+            "tag_name": tag, "target_commitish": source, "name": tag, "body": notes.read_text(),
+            "draft": True, "prerelease": True, "make_latest": "false",
+        })
     named_manifest = args.package / f"h48-{source}-provenance.json"
-    named_manifest.write_bytes((args.package / "language-tuple.json").read_bytes())
+    named_manifest.write_bytes((args.package / "tuple/language-tuple.json").read_bytes())
     qualification = args.package / f"h48-{source}-PROVENANCE-NOTES.json"
     write_json(qualification, {
         "manifest_sha256": args.manifest_sha256,
@@ -68,10 +80,13 @@ def publish(args):
     sums = args.package / f"h48-{source}-SHA256SUMS"
     sums.write_text("".join(f"{digest(file)}  {file.name}\n" for file in (archive, named_manifest, qualification)))
     files = [archive, named_manifest, qualification, sums]
-    gh("release", "upload", tag, "--repo", REPOSITORY, *map(str, files))
-    release = json.loads(gh("api", f"repos/{REPOSITORY}/releases/tags/{tag}"))
+    if args.resume_release_id is None:
+        gh("release", "upload", tag, "--repo", REPOSITORY, *map(str, files))
+    # Draft releases need their numeric ID; the tag endpoint can return 404.
+    release = json.loads(gh("api", f"repos/{REPOSITORY}/releases/{release['id']}"))
     require(release["prerelease"] and release["draft"], "H48_RELEASE_STATE")
     assets = {asset["name"]: asset for asset in release["assets"]}
+    require(set(assets) == {file.name for file in files}, "H48_RELEASE_ASSET_SET")
     pin = {"schema": 1, "repository": REPOSITORY, "tag": tag, "release_id": release["id"],
            "manifest_sha256": args.manifest_sha256, "compiler_sha256": args.compiler_sha256,
            "sources": manifest["provenance"]["sources"], "assets": []}
@@ -84,7 +99,10 @@ def publish(args):
             pin["assets"].append({"id": asset["id"], "name": file.name, "sha256": digest(file),
                                   "role": "archive" if file == archive else "manifest" if file == named_manifest
                                   else "qualification" if file == qualification else "checksums"})
-    gh("release", "edit", tag, "--repo", REPOSITORY, "--draft=false", "--prerelease", "--latest=false")
+    published = api_write("PATCH", f"repos/{REPOSITORY}/releases/{release['id']}", {
+        "draft": False, "prerelease": True, "make_latest": "false",
+    })
+    require(not published["draft"] and published["prerelease"], "H48_PUBLICATION_STATE")
     write_json(args.pin, pin)
     print(f"H48_PUBLISHED release_id={release['id']} pin={args.pin}")
 
@@ -130,6 +148,8 @@ if __name__ == "__main__":
     producer.add_argument("--package", type=Path, required=True)
     producer.add_argument("--manifest-sha256", required=True)
     producer.add_argument("--compiler-sha256", required=True)
+    producer.add_argument("--resume-release-id", type=int,
+                          help="Read back an already uploaded matching draft; never replace its assets")
     consumer = commands.add_parser("fetch")
     consumer.add_argument("--output", type=Path, required=True)
     for command in (producer, consumer):
