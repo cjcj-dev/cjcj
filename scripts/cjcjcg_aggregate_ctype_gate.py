@@ -28,6 +28,7 @@ ALL_CHECKS = {
     "trackedArrayStruct",
     "trackedNestedArrayStruct",
     "trackedStructArray",
+    "genericPayloadProductSymbols",
     "nestedGenericPayload",
     "singleGenericPayloadControl",
     "headedGenericPayloadControl",
@@ -157,6 +158,7 @@ def main() -> int:
         "trackedArrayStruct": "tracked_array_struct",
         "trackedNestedArrayStruct": "tracked_nested_array_struct",
         "trackedStructArray": "tracked_struct_array",
+        "genericPayloadProductSymbols": "nested_generic_payload",
         "nestedGenericPayload": "nested_generic_payload",
         "singleGenericPayloadControl": "nested_generic_payload",
         "headedGenericPayloadControl": "nested_generic_payload",
@@ -341,6 +343,20 @@ def main() -> int:
         # The final address must feed the emitted value load/copy, not dead IR.
         if not re.search(r"(?:bitcast|gcwrite\.generic\.payload)[^\n]*" + re.escape(geps[-1][0]) + r"[, ]", function):
             raise AssertionError(f"{method}: final field address has no value consumer")
+
+    if "genericPayloadProductSymbols" in selected:
+        def payload_symbols() -> None:
+            require_compiled(fixtures["nested_generic_payload"])
+            archive = args.out / "nested_generic_payload" / "nested_generic_payload.a"
+            symbols = subprocess.run(["nm", "--defined-only", str(archive)],
+                                     text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+            (archive.parent / "defined-symbols.log").write_text(symbols.stdout)
+            if symbols.returncode != 0:
+                raise AssertionError(f"product symbol read rc={symbols.returncode}")
+            for method in ("nestedPayloadRead", "singlePayloadRead"):
+                if not re.search(r" T \S*" + method + r"Hv\$withoutTI$", symbols.stdout, re.MULTILINE):
+                    raise AssertionError(f"product ELF missing {method} headerless entry")
+        checks.append(("genericPayloadProductSymbols", payload_symbols))
 
     if "nestedGenericPayload" in selected:
         checks.append(("nestedGenericPayload", lambda: payload_path("nestedPayloadRead", 2, False)))
