@@ -13,13 +13,13 @@ public open class RegistryImpl <: RegistryMirror {
     public func readValue(): Int64 { value }
     public static func readShared(): Int64 { shared }
     public func accept(other: RegistryImpl): Int64 { other.value }
-    ~init() { shared = 0 }
 }
 @ObjCImpl
 public class RegistryChild <: RegistryImpl {
     public var childValue: Int64 = 11
     public init() { super() }
     public func readParent(): Int64 { value }
+    ~init() { childValue = 0 }
 }
 public func readOther(obj: RegistryImpl): Int64 { obj.value }
 public class Ordinary {

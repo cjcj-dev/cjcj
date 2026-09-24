@@ -33,3 +33,5 @@ public func convertToNSString(value: String): NativeObjCId { CPointer<Unit>() }
 public func descriptionAsString(value: NativeObjCId): String { "fixture" }
 public func setRegistryId(obj: NativeObjCId, id: RegistryId): Unit {}
 public func getRegistryId(obj: NativeObjCId): RegistryId { 0 }
+public func isKindOfClass(obj: NativeObjCId, cls: NativeObjCClass): Bool { false }
+public func conformsToProtocol(obj: NativeObjCId, proto: NativeObjCId): Bool { false }

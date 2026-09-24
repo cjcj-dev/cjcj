@@ -157,7 +157,7 @@ public class NameGenerator {
         return None
     }
 
-    public func GetObjCDeclName(target: Decl, genericActualName!: Option<String> = None): String {
+    public static func GetObjCDeclName(target: Decl, genericActualName!: Option<String> = None): String {
         if (let Some(foreignName) <- GetUserDefinedObjCName(target)) {
             return foreignName
         }

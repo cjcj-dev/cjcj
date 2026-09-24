@@ -19,7 +19,8 @@ def run(work, pattern):
         return text, {c[0].removeprefix('ClassDecl: '): c for c in nodes(text, 'ClassDecl: ')}
     def fns(cls): return functions(cls) if cls else []
     def fields(cls):
-        return [f for f in nodes(cls[1], 'VarDecl: ') if f[2] == cls[2] + 4] if cls else []
+        return [(re.sub(r'^VarDecl: (var|let) ', 'VarDecl: ', f[0]), f[1], f[2])
+                for f in nodes(cls[1], 'VarDecl: ') if f[2] == cls[2] + 4] if cls else []
     def attrs(node):
         a = own_field(node, 'attributes') if node else None
         return a[1] if a else ''
@@ -57,9 +58,20 @@ def run(work, pattern):
     props = nodes(impl[1], 'PropDecl: ') if impl else []
     proxy_props = [p[0] for p in props if 'OBJ_C_IMPL_MOVED_MEMBER_PROXY' in attrs(p)]
     check('Members.field_proxies', 'PropDecl: value' in proxy_props and 'PropDecl: shared' in proxy_props, proxy_props)
-    check('Members.finalizer_moved', any('FINALIZER' in attrs(f) for f in fns(companion)), moved_methods)
+    check('Members.finalizer_moved', any('FINALIZER' in attrs(f) for f in fns(classes.get('RegistryChild$reg'))),
+          [f[0] for f in fns(classes.get('RegistryChild$reg'))])
     check('Control.ordinary_field', 'VarDecl: value' in [f[0] for f in fields(classes.get('Ordinary'))] and
           'Ordinary$reg' not in classes, [f[0] for f in fields(classes.get('Ordinary'))])
+    cache, _ = read('cache')
+    for prefix, key in [('objcClass$', 'CacheA'), ('objcSelector$', 'value')]:
+        label = prefix + key
+        decls = nodes(cache, r'VarDecl: (?:var|let) ' + re.escape(label))
+        refs = nodes(cache, 'RefExpr: ' + re.escape(label))
+        targets = [own_field(ref, 'target ptr')[1] for ref in refs if own_field(ref, 'target ptr')]
+        identities = sorted(set(targets))
+        check('Cache.' + label + '.declaration_reused', len(decls) == 1 and len(refs) >= 2 and
+              identities == [ptr(decls[0])], dict(declarations=[ptr(d) for d in decls],
+              reference_count=len(refs), target_identities=identities))
     _, broken = read('broken')
     for name in ('BrokenMirror', 'BrokenImpl', 'BrokenChild'):
         check(name + '.broken_propagated', 'IS_BROKEN' in attrs(broken.get(name)), attrs(broken.get(name)))

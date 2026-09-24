@@ -154,9 +154,9 @@ public class ObjCTranspilerCJMapping {
             return
         }
         let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
+            NameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         GenerateImports(objCDeclName)
         GenerateForwardDeclarations()
@@ -442,9 +442,9 @@ public class ObjCTranspilerCJMapping {
             }
         }
         let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
+            NameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         var resultH = INTERFACE_KEYWORD + " " + objCDeclName + " : "
         let superClassName = if (isClassInheritedFromClass) {
@@ -586,7 +586,7 @@ public class ObjCTranspilerCJMapping {
             }
             let genSetter = varDecl.isVar && !SkipSetterForValueTypeDecl(decl)
             let modeModifier = if (genSetter) { READWRITE_MODIFIER } else { READONLY_MODIFIER }
-            let name = ctx.nameGenerator.GetObjCDeclName(varDecl)
+            let name = NameGenerator.GetObjCDeclName(varDecl)
             let getterName = ctx.nameGenerator.GetObjCGetterName(varDecl)
             let setterName = ctx.nameGenerator.GetObjCSetterName(varDecl)
             AddWithIndent(GeneratePropertyDeclaration(staticType, modeModifier, mappedType,
@@ -940,18 +940,18 @@ public class ObjCTranspilerCJMapping {
 
     private func WriteToHeader(): Unit {
         let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
+            NameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".h"), res)
     }
 
     private func WriteToSource(): Unit {
         let objCDeclName = if (let Some(config) <- genericConfig) {
-            ctx.nameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
+            NameGenerator.GetObjCDeclName(decl, genericActualName: Some(config.declInstName))
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".m"), resSource)
     }
@@ -1029,7 +1029,7 @@ public class ObjCTranspilerCJMapping {
         let objCDeclName = if (let Some(config) <- genericConfig) {
             config.declInstName
         } else {
-            ctx.nameGenerator.GetObjCDeclName(decl)
+            NameGenerator.GetObjCDeclName(decl)
         }
         AddWithIndent(GenerateImport(FOUNDATION_IMPORT), target: GenerationTarget.HEADER)
         AddWithIndent(GenerateImport(STDDEF_IMPORT), target: GenerationTarget.HEADER)
@@ -1259,7 +1259,7 @@ static uint64_t calcMask(Class baseCls, Class selfCls, SEL* methods, int len) {
 
 """
         WriteFunc("- (uint64_t)calcOverrideMask", { =>
-            WriteSeq([Join(["Class baseCls = objc_getClass(\"", ctx.nameGenerator.GetObjCDeclName(decl), "\");"]),
+            WriteSeq([Join(["Class baseCls = objc_getClass(\"", NameGenerator.GetObjCDeclName(decl), "\");"]),
                 "Class selfCls = [self class];",
                 JoinVec<FuncDecl>(overrides, {fn: FuncDecl =>
                     CJC_ASSERT(fn.funcBody.isSome())

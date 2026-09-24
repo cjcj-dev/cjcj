@@ -4,7 +4,6 @@ import cjcj::ast.*
 import cjcj::modules.SemaImportManager
 import cjcj::utils.{NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT}
 import std.collection.ArrayList
-import cjcj::sema.NativeFFI.{IsObjCGeneratedMember}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, OBJ_C_BLOCK_IDENT, OBJ_C_FUNC_IDENT,
     OBJ_C_FWD_CLASS_SUFFIX, OBJ_C_ID_IDENT, OBJ_C_LANG_PACKAGE_IDENT, OBJ_C_POINTER_IDENT}
 
@@ -68,7 +67,7 @@ private func IsOpenClassTy(ty: Ty): Bool {
 }
 
 private func SupportMemberFunc(decl: Decl, validTy: (Ty) -> Bool): Bool {
-    let fnTy = decl.GetTy() as FuncTy
+    let fnTy = decl.GetTy().getOrThrow() as FuncTy
     CJC_NULLPTR_CHECK(fnTy)
     let value = fnTy.getOrThrow()
     let isValid = if (decl.TestAttr(Attribute.CONSTRUCTOR)) { true } else { validTy(value.retTy) }
@@ -216,7 +215,7 @@ private func HasObjCImplBaseCtorSignature(fd: FuncDecl): Bool {
     return false
 }
 
-private func GetFuncMember(decl: ClassDecl, predicate: (FuncDecl) -> Bool): Option<FuncDecl> {
+public func GetFuncMember(decl: ClassDecl, predicate: (FuncDecl) -> Bool): Option<FuncDecl> {
     for (member in decl.GetMemberDeclPtrs()) {
         if (let Some(fd) <- (member as FuncDecl)) { if (predicate(fd)) { return Some(fd) } }
     }
@@ -285,7 +284,7 @@ public func GetObjCImplRegistryCompanionSuperClass(decl: ClassDecl): Option<Clas
 public func IsObjCImplRegDataCtor(fd: FuncDecl): Bool {
     if (let Some(params) <- GetCtorParams(fd)) {
         if (params.isEmpty()) { return false }
-        if (let Some(tupleTy) <- (params[0].GetTy() as TupleTy)) {
+        if (let Some(tupleTy) <- (params[0].GetTy().getOrThrow() as TupleTy)) {
             if (tupleTy.typeArgs.size != 2) { return false }
             if (let Some(decl) <- Ty.GetDeclOfTy(tupleTy.typeArgs[1])) { return IsObjCImplRegistryCompanion(decl) }
         }
@@ -322,7 +321,7 @@ public func IsGeneratedMember(decl: Decl): Bool {
     if (decl.identifier.Val() == "$getObj" || IsObjCImplRegistryCompanionField(decl)) { return true }
     if (decl.TestAttr(Attribute.HAS_INITED_FIELD)) { return true }
     if (let Some(fd) <- (decl as FuncDecl)) {
-        return IsBaseCtor(fd) || IsObjCImplRegDataCtor(fd) || IsObjCGeneratedMember(fd)
+        return IsBaseCtor(fd) || IsObjCImplRegDataCtor(fd) || IsGeneratedStringConversion(fd)
     }
     return false
 }
@@ -447,4 +446,26 @@ public func GetImplSuperClass(target: ClassDecl): Option<ClassDecl> {
 // C++ src/Sema/NativeFFI/ObjC/Utils/Common.cpp:214-217.
 public func HasImplSuperClass(target: ClassDecl): Bool {
     return GetImplSuperClass(target).isSome()
+}
+
+public func IsNSObject(decl: ClassDecl): Bool { return NameGenerator.GetObjCDeclName(decl) == "NSObject" }
+public func IsNSString(decl: ClassDecl): Bool { return NameGenerator.GetObjCDeclName(decl) == "NSString" }
+public func IsGeneratedNSStringCtor(fd: FuncDecl): Bool {
+    if (fd.identifier.Val() != "init" || !fd.TestAttr(Attribute.CONSTRUCTOR) ||
+        !fd.TestAttr(Attribute.COMPILER_ADD) || fd.funcBody.isNone() || fd.funcBody.getOrThrow().paramLists.isEmpty()) {
+        return false
+    }
+    let params = fd.funcBody.getOrThrow().paramLists[0].params
+    return params.size == 1 && params[0].typeNode.getOrThrow().symbol.getOrThrow().name == "String"
+}
+public func IsGeneratedNSObjectToString(fd: FuncDecl): Bool {
+    if (fd.identifier.Val() != "toString" || !fd.TestAttr(Attribute.COMPILER_ADD) ||
+        fd.funcBody.isNone() || fd.funcBody.getOrThrow().paramLists.isEmpty()) { return false }
+    return fd.funcBody.getOrThrow().paramLists[0].params.isEmpty()
+}
+private func IsGeneratedStringConversion(fd: FuncDecl): Bool {
+    let owner = GetOwnerClass(fd)
+    if (owner.isNone()) { return false }
+    return (IsNSString(owner.getOrThrow()) && IsGeneratedNSStringCtor(fd)) ||
+        (IsNSObject(owner.getOrThrow()) && IsGeneratedNSObjectToString(fd))
 }

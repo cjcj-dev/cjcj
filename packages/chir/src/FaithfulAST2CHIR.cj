@@ -874,6 +874,7 @@ private func BuildAttr(attrs: AstAttributePack): AttributeInfo {
     if (attrs.TestAttr(AstAttribute.HAS_INITED_FIELD)) { attrInfo.Enable(Attribute.HAS_INITED_FIELD) }
     if (attrs.TestAttr(AstAttribute.UNSAFE)) { attrInfo.Enable(Attribute.UNSAFE) }
     if (attrs.TestAttr(AstAttribute.DOES_NOT_THROW)) { attrInfo.Enable(Attribute.DOES_NOT_THROW) }
+    if (attrs.TestAttr(AstAttribute.OBJ_C_IMPL)) { attrInfo.Enable(Attribute.OBJ_C_IMPL) }
     return attrInfo
 }
 

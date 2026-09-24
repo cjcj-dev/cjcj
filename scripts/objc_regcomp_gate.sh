@@ -42,7 +42,7 @@ compile_fixture() {
         -o "$work/$name/result") > "$work/$name/compiler.log" 2>&1
     echo "$?" > "$work/$name/compiler.rc"
 }
-for name in constructors members broken control; do compile_fixture "$name" & done
+for name in constructors members broken cache control; do compile_fixture "$name" & done
 wait
 uptime > "$work/load-after"
 

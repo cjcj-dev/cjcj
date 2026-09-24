@@ -14,7 +14,7 @@ public class CheckInitMethod <: Handler<TypeCheckContext> {
             let methodOpt = member as FuncDecl
             if (methodOpt.isNone() || !IsObjCInitMethod(methodOpt.getOrThrow())) { continue }
             let method = methodOpt.getOrThrow()
-            let fTy = method.GetTy() as FuncTy
+            let fTy = method.GetTy().getOrThrow() as FuncTy
             let methodBody = method.funcBody.getOrThrow()
             if (fTy.isNone() || methodBody.retType.isNone()) {
                 continue

@@ -10,11 +10,11 @@ import cjcj::modules.SemaImportManager
 import cjcj::option.{GlobalOptions, OSType}
 import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeManager}
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
-import cjcj::sema.NativeFFI.{CreateBoolMatch, CreateCall, CreateMemberCall, CreateSuperCall, CreateSuperRef, CreateThisCall, CreateThisRef, CreateType,
+import cjcj::sema.NativeFFI.{FFICreateOptionSomeRef, FFICreateOptionNoneRef, FFICreateOptionSomeCall, FFIGetOptionTy, CreateIsPtrNullCheckCall, CreateBoolMatch, CreateCall, CreateMemberCall, CreateSuperCall, CreateSuperRef, CreateThisCall, CreateThisRef, CreateType,
     CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
     GetGenericInstType, GetInstantyForGenericTy, GetSingleArgumentAnnotationValue, GetStringDecl, GetTyByName,
     GetTypeByName, InitGenericConfigs, IsSuperConstructorCall, IsThisConstructorCall, ReplaceGenericTyForFunc,
-    WithinFile, INIT_IDENT, IsObjCGeneratedMember, IsObjCGeneratedNSObjectToString, IsObjCGeneratedNSStringCtor,
+    WithinFile, INIT_IDENT,
     NSOBJECT_CLASS_IDENT, NSSTRING_CLASS_IDENT,
     WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
@@ -139,51 +139,6 @@ public class ASTFactory {
         return CreateGetClassCall(decl, curFile)
     }
 
-    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:299-302.
-    public func GetOptionTy(ty: Ty): Ty {
-        return typeManager.GetEnumTy(GetOptionDecl(), typeArgs: [ty])
-    }
-
-    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:304-308.
-    public func GetOptionDecl(): EnumDecl {
-        return importManager.GetCoreDecl<EnumDecl>(STD_LIB_OPTION).getOrThrow()
-    }
-
-    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:310-314.
-    public func GetOptionSomeDecl(): Decl {
-        return LookupEnumMember(GetOptionDecl(), OPTION_VALUE_CTOR).getOrThrow()
-    }
-
-    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:316-320.
-    public func GetOptionNoneDecl(): Decl {
-        return LookupEnumMember(GetOptionDecl(), OPTION_NONE_CTOR).getOrThrow()
-    }
-
-    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:322-328.
-    public func CreateOptionSomeRef(ty: Ty): Expr {
-        let someDeclRef = CreateRefExpr(GetOptionSomeDecl())
-        someDeclRef.SetTy(typeManager.GetFunctionTy([ty], GetOptionTy(ty)))
-        return someDeclRef
-    }
-
-    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:330-336.
-    public func CreateOptionNoneRef(ty: Ty): Expr {
-        let noneDeclRef = CreateRefExpr(GetOptionNoneDecl())
-        noneDeclRef.SetTy(GetOptionTy(ty))
-        return noneDeclRef
-    }
-
-    // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:338-347.
-    public func CreateOptionSomeCall(expr: Expr, ty: Ty): Expr {
-        let args = ArrayList<FuncArg>()
-        args.add(CreateFuncArg(expr))
-        let call = CreateCallExpr(CreateOptionSomeRef(ty), args)
-        call.SetTy(GetOptionTy(ty))
-        call.resolvedFunction = GetOptionSomeDecl() as FuncDecl
-        call.callKind = CallKind.CALL_DECLARED_FUNCTION
-        return call
-    }
-
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:348-388.
     public func CreateOptionMatch(selector: Expr, someBranch: (VarDecl) -> Expr,
         noneBranch: () -> Expr, ty: Ty): Expr {
@@ -198,13 +153,13 @@ public class ASTFactory {
         someArgVar.curFile = curFile
         let somePattern = EnumPattern()
         somePattern.SetTy(optionTy)
-        somePattern.constructor = CreateOptionSomeRef(optionArgTy)
+        somePattern.constructor = FFICreateOptionSomeRef(importManager, typeManager, optionArgTy)
         somePattern.patterns.add(varPattern)
         somePattern.curFile = curFile
         let caseSome = CreateMatchCase(somePattern, someBranch(someArgVar))
 
         let nonePattern = EnumPattern()
-        nonePattern.constructor = CreateOptionNoneRef(optionArgTy)
+        nonePattern.constructor = FFICreateOptionNoneRef(importManager, typeManager, optionArgTy)
         nonePattern.SetTy(nonePattern.constructor.getOrThrow().GetTy().getOrThrow())
         nonePattern.curFile = curFile
         let caseNone = CreateMatchCase(nonePattern, noneBranch())
@@ -754,7 +709,7 @@ public class ASTFactory {
         actionParams.add(receiverParam)
         actionParams.add(objCSuperParam)
 
-        let objcName = nameGenerator.GetObjCDeclName(outerDecl)
+        let objcName = NameGenerator.GetObjCDeclName(outerDecl)
         let classNameExpr = CreateLitConstExpr(LitConstKind.STRING, objcName,
             GetStringDecl(importManager).GetTy().getOrThrow())
         let args = ArrayList<FuncArg>()
@@ -793,7 +748,7 @@ public class ASTFactory {
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1976-1982.
     public func CreateAllocCall(decl: Decl, curFile: Option<File>): CallExpr {
-        let objcName = nameGenerator.GetObjCDeclName(decl)
+        let objcName = NameGenerator.GetObjCDeclName(decl)
         return CreateAllocCall(WithinFile<Expr>(CreateGetCachedClassAccess(objcName, curFile), curFile))
     }
 
@@ -847,7 +802,7 @@ public class ASTFactory {
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1984-1990.
     public func CreateMethodCallViaMsgSend(fd: FuncDecl, nativeHandle: Expr,
         rawArgs: ArrayList<Expr>): Expr {
-        let objcName = nameGenerator.GetObjCDeclName(fd)
+        let objcName = NameGenerator.GetObjCDeclName(fd)
         let funcTy = (fd.GetTy().getOrThrow() as FuncTy).getOrThrow()
         return CreateObjCMsgSendCall(nativeHandle, objcName, typeMapper.Cj2CType(funcTy.retTy), rawArgs)
     }
@@ -957,7 +912,7 @@ public class ASTFactory {
                 getInstanceVariableDecl.GetTy().getOrThrow(),
                 GenerateTypeMapping(getInstanceVariableDecl, getInstanceVariableRef.instTys)))
         }
-        let objcName = nameGenerator.GetObjCDeclName(field)
+        let objcName = NameGenerator.GetObjCDeclName(field)
         let nameExpr = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.STRING, objcName,
             GetStringDecl(importManager).GetTy().getOrThrow()), curFile)
         let args = ArrayList<FuncArg>()
@@ -985,7 +940,7 @@ public class ASTFactory {
                 setInstanceVariableDecl.GetTy().getOrThrow(),
                 GenerateTypeMapping(setInstanceVariableDecl, setInstanceVariableRef.instTys)))
         }
-        let objcName = nameGenerator.GetObjCDeclName(field)
+        let objcName = NameGenerator.GetObjCDeclName(field)
         let nameExpr = WithinFile<LitConstExpr>(CreateLitConstExpr(LitConstKind.STRING, objcName,
             GetStringDecl(importManager).GetTy().getOrThrow()), curFile)
         let args = ArrayList<FuncArg>()
@@ -1066,7 +1021,7 @@ public class ASTFactory {
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2231-2237.
     public func CreateMethodCallViaMsgSendSuper(fd: FuncDecl, receiver: Expr, objCSuper: Expr,
         rawArgs: ArrayList<Expr>): Expr {
-        let objcName = nameGenerator.GetObjCDeclName(fd)
+        let objcName = NameGenerator.GetObjCDeclName(fd)
         let funcTy = (fd.GetTy().getOrThrow() as FuncTy).getOrThrow()
         return CreateObjCMsgSendSuperCall(receiver, objCSuper, objcName,
             typeMapper.Cj2CType(funcTy.retTy), rawArgs)
@@ -1074,7 +1029,7 @@ public class ASTFactory {
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2239-2245.
     public func CreatePropGetterCallViaMsgSendSuper(pd: PropDecl, receiver: Expr, objCSuper: Expr): Expr {
-        let objcName = nameGenerator.GetObjCDeclName(pd)
+        let objcName = NameGenerator.GetObjCDeclName(pd)
         return CreateObjCMsgSendSuperCall(receiver, objCSuper, objcName,
             typeMapper.Cj2CType(pd.GetTy().getOrThrow()), ArrayList<Expr>())
     }
@@ -1082,7 +1037,7 @@ public class ASTFactory {
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:2247-2258.
     public func CreatePropSetterCallViaMsgSendSuper(pd: PropDecl, receiver: Expr, objCSuper: Expr,
         value: Expr): Expr {
-        var objcName = nameGenerator.GetObjCDeclName(pd)
+        var objcName = NameGenerator.GetObjCDeclName(pd)
         objcName = "set" + objcName[0..1].toAsciiUpper() + objcName[1..] + ":"
         let args = ArrayList<Expr>()
         args.add(value)
@@ -1259,18 +1214,7 @@ public class ASTFactory {
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:513-541.
     public func CreateGetObjcEntityOrNullCall(entity: VarDecl, file: Option<File>): Expr {
-        let decl = importManager.GetCoreDecl<FuncDecl>("getPointerAddress").getOrThrow()
-        let ref = WithinFile<RefExpr>(CreateRefExpr(decl), file)
-        let uintTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UINT_NATIVE)
-        CJC_ASSERT(entity.GetTy().getOrThrow().IsPointer())
-        ref.instTys.add(entity.GetTy().getOrThrow().typeArgs[0])
-        ref.SetTy(typeManager.GetFunctionTy([entity.GetTy().getOrThrow()], uintTy))
-        let args = ArrayList<FuncArg>()
-        args.add(CreateFuncArg(WithinFile<RefExpr>(CreateRefExpr(entity), file)))
-        let call = CreateCallExpr(ref, args, Some(decl), Some(uintTy), CallKind.CALL_INTRINSIC_FUNCTION)
-        let result = CreateBinaryExpr(call, CreateLitConstExpr(LitConstKind.INTEGER, "0", uintTy), TokenKind.EQUAL)
-        result.SetTy(TypeManager.GetBoolTy())
-        return result
+        return CreateIsPtrNullCheckCall(importManager, typeManager, WithinFile<RefExpr>(CreateRefExpr(entity), file))
     }
 
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:543-557.
@@ -1289,6 +1233,7 @@ public class ASTFactory {
         let nativeObjCClassTy = bridge.GetNativeObjCClassTy().getOrThrow()
         let paramLists = ArrayList<FuncParamList>()
         paramLists.add(FuncParamList())
+        let _ = CreateGetCachedClassAccess((target.GetTy().getOrThrow() as ClassLikeTy).getOrThrow(), target.curFile)
         let wrapperBody = CreateFuncBody(paramLists, CreateType(nativeObjCClassTy),
             CreateBlock(ArrayList<Node>(), nativeObjCClassTy), nativeObjCClassTy)
         let classDecl = CreateFuncDecl(GET_OBJ_C_CLASS_IDENT, wrapperBody,
@@ -1953,7 +1898,7 @@ public class ASTFactory {
             let ref = WithinFile<RefExpr>(CreateRefExpr(vd), curFile)
             nodes.add(vd)
             let registryId = CreateGetRegistryIdCall((ASTCloner.Clone(ref) as Expr).getOrThrow())
-            let impl = (Ty.GetDeclOfTy(wrapTy) as ClassDecl).getOrThrow()
+            let impl = (Ty.GetDeclOfTy(wrapTy).getOrThrow() as ClassDecl).getOrThrow()
             nodes.add(CreateObjCImplBaseCtorCall(impl, ref, registryId, curFile, Retain.UNRETAINED))
             return WrapReturningLambdaCall(typeManager, nodes)
         }
@@ -2055,11 +2000,11 @@ public class ASTFactory {
         let objcrefExpr = WithinFile<RefExpr>(CreateRefExpr(tmpVar), curFile)
 
         let castTy = mirror.GetTy().getOrThrow()
-        let trueBranch = CreateOptionNoneRef(castTy)
+        let trueBranch = FFICreateOptionNoneRef(importManager, typeManager, castTy)
         let falseBranch = WrapEntity(objcrefExpr, castTy, withRetain: withRetain)
 
         let isInstanceCall = WithinFile<Expr>(CreateGetObjcEntityOrNullCall(tmpVar, curFile), curFile)
-        let boolMatch = CreateBoolMatch(isInstanceCall, trueBranch, falseBranch, GetOptionTy(castTy))
+        let boolMatch = CreateBoolMatch(isInstanceCall, trueBranch, falseBranch, FFIGetOptionTy(importManager, typeManager, castTy))
         boolMatch.begin = entity.begin
         boolMatch.end = entity.end
         nodes.add(tmpVar)
@@ -2426,7 +2371,7 @@ public class ASTFactory {
     }
 
     public func CreateGetCachedClassAccess(ty: ClassLikeTy, curFile: Option<File>): Expr {
-        return CreateGetCachedClassAccess(nameGenerator.GetObjCDeclName(Ty.GetDeclOfTy(ty).getOrThrow()), curFile)
+        return CreateGetCachedClassAccess(NameGenerator.GetObjCDeclName(Ty.GetDeclOfTy(ty).getOrThrow()), curFile)
     }
 
     // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
@@ -2501,70 +2446,15 @@ public class InteropContext {
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/GenerateWrappers.cpp:19-167.
 public class GenerateWrappers <: Handler<InteropContext> {
-    private let interopType: InteropType
-
-    public init(interopType: InteropType) {
-        this.interopType = interopType
-    }
-
     public func HandleImpl(ctx: InteropContext): Unit {
-        let genWrapper = {decl: Decl, isGenericGlueCode: Bool,
-            genericConfigsVector: ArrayList<GenericConfigInfo> =>
-            if (decl.TestAttr(Attribute.IS_BROKEN)) {
-                return
-            }
-            let results = ArrayList<Decl>()
-            if (let Some(enumDecl) <- (decl as EnumDecl)) {
-                for (member in enumDecl.members) {
-                    results.add(member)
-                }
-            } else {
-                for (member in decl.GetMemberDeclPtrs()) {
-                    results.add(member)
-                }
-            }
-            for (memberDecl in results) {
-                if (memberDecl.TestAnyAttr(Attribute.IS_BROKEN, Attribute.CONSTRUCTOR)) {
-                    continue
-                }
-                if (interopType == InteropType.ObjC_Mirror && !memberDecl.TestAttr(Attribute.PUBLIC)) {
-                    continue
-                }
-                if (IsGeneratedMember(memberDecl)) {
-                    continue
-                }
-                if (interopType == InteropType.CJ_Mapping &&
-                    !IsObjCCJMappingMember(memberDecl)) {
-                    continue
-                }
-                if (let Some(method) <- (memberDecl as FuncDecl)) {
-                    GenerateWrapper(ctx, method, isGenericGlueCode, genericConfigsVector)
-                } else if (let Some(propDecl) <- (memberDecl as PropDecl)) {
-                    GenerateWrapper(ctx, propDecl, isGenericGlueCode, genericConfigsVector)
-                } else if (let Some(field) <- (memberDecl as VarDecl)) {
-                    GenerateWrapper(ctx, field, isGenericGlueCode, genericConfigsVector)
-                }
-            }
-        }
-
-        if (interopType == InteropType.ObjC_Mirror) {
-            for (impl in ctx.impls) {
-                if (impl.TestAttr(Attribute.IS_BROKEN)) { continue }
-                for (member in impl.GetMemberDecls()) {
-                    if (member.TestAnyAttr(Attribute.IS_BROKEN, Attribute.CONSTRUCTOR) ||
-                        !member.TestAttr(Attribute.PUBLIC) || IsGeneratedMember(member)) { continue }
-                    if (let Some(fd) <- (member as FuncDecl)) { GenerateWrapper(ctx, impl, fd) }
-                    else if (let Some(pd) <- (member as PropDecl)) { GenerateWrapper(ctx, impl, pd) }
-                    else if (let Some(vd) <- (member as VarDecl)) { GenerateWrapper(ctx, impl, vd) }
-                }
-            }
-        } else if (interopType == InteropType.CJ_Mapping) {
-            for (cjMapping in ctx.cjMappings) {
-                let genericConfigsVector = ArrayList<GenericConfigInfo>()
-                let isGenericGlueCode = Box<Bool>(false)
-                InitGenericConfigs(cjMapping.curFile.getOrThrow(), cjMapping,
-                    genericConfigsVector, isGenericGlueCode)
-                genWrapper(cjMapping, isGenericGlueCode.value, genericConfigsVector)
+        for (impl in ctx.impls) {
+            if (impl.TestAttr(Attribute.IS_BROKEN)) { continue }
+            for (member in impl.GetMemberDecls()) {
+                if (member.TestAnyAttr(Attribute.IS_BROKEN, Attribute.CONSTRUCTOR) ||
+                    !member.TestAttr(Attribute.PUBLIC) || IsGeneratedMember(member)) { continue }
+                if (let Some(fd) <- (member as FuncDecl)) { GenerateWrapper(ctx, impl, fd) }
+                else if (let Some(pd) <- (member as PropDecl)) { GenerateWrapper(ctx, impl, pd) }
+                else if (let Some(vd) <- (member as VarDecl)) { GenerateWrapper(ctx, impl, vd) }
             }
         }
     }
@@ -2585,6 +2475,54 @@ public class GenerateWrappers <: Handler<InteropContext> {
     }
     private func GenerateSetterWrapper(ctx: InteropContext, impl: ClassDecl, field: VarDecl): Unit {
         ctx.genDecls.add(ctx.factory.CreateSetterWrapper(field, impl))
+    }
+
+}
+
+public class GenerateCJMappingWrappers <: Handler<InteropContext> {
+    public func HandleImpl(ctx: InteropContext): Unit {
+        let genWrapper = {decl: Decl, isGenericGlueCode: Bool,
+            genericConfigsVector: ArrayList<GenericConfigInfo> =>
+            if (decl.TestAttr(Attribute.IS_BROKEN)) {
+                return
+            }
+            let results = ArrayList<Decl>()
+            if (let Some(enumDecl) <- (decl as EnumDecl)) {
+                for (member in enumDecl.members) {
+                    results.add(member)
+                }
+            } else {
+                for (member in decl.GetMemberDeclPtrs()) {
+                    results.add(member)
+                }
+            }
+            for (memberDecl in results) {
+                if (memberDecl.TestAnyAttr(Attribute.IS_BROKEN, Attribute.CONSTRUCTOR)) {
+                    continue
+                }
+                if (IsGeneratedMember(memberDecl)) {
+                    continue
+                }
+                if (!IsObjCCJMappingMember(memberDecl)) {
+                    continue
+                }
+                if (let Some(method) <- (memberDecl as FuncDecl)) {
+                    GenerateWrapper(ctx, method, isGenericGlueCode, genericConfigsVector)
+                } else if (let Some(propDecl) <- (memberDecl as PropDecl)) {
+                    GenerateWrapper(ctx, propDecl, isGenericGlueCode, genericConfigsVector)
+                } else if (let Some(field) <- (memberDecl as VarDecl)) {
+                    GenerateWrapper(ctx, field, isGenericGlueCode, genericConfigsVector)
+                }
+            }
+        }
+
+            for (cjMapping in ctx.cjMappings) {
+                let genericConfigsVector = ArrayList<GenericConfigInfo>()
+                let isGenericGlueCode = Box<Bool>(false)
+                InitGenericConfigs(cjMapping.curFile.getOrThrow(), cjMapping,
+                    genericConfigsVector, isGenericGlueCode)
+                genWrapper(cjMapping, isGenericGlueCode.value, genericConfigsVector)
+            }
     }
 
     private func GenerateWrapper(ctx: InteropContext, method: FuncDecl, isGenericGlueCode: Bool,
@@ -2646,8 +2584,7 @@ public class GenerateWrappers <: Handler<InteropContext> {
     }
 
     private func SkipSetterForValueTypeDecl(decl: Decl): Bool {
-        return interopType == InteropType.CJ_Mapping &&
-            (decl.GetTy().getOrThrow() as StructTy).isSome()
+        return (decl.GetTy().getOrThrow() as StructTy).isSome()
     }
 }
 
@@ -2713,25 +2650,8 @@ public class GenerateGlueCode <: Handler<InteropContext> {
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertNativeHandleGetterDecl.cpp:20-90.
 public class InsertNativeHandleGetterDecl <: Handler<InteropContext> {
-    private let interopType: InteropType
-
-    public init(interopType: InteropType) {
-        this.interopType = interopType
-    }
-
     public func HandleImpl(ctx: InteropContext): Unit {
-        if (interopType == InteropType.Fwd_Class) {
-            for (fwdClass in ctx.fwdClasses) {
-                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
-                    continue
-                }
-                if (GetNativeHandleGetter(fwdClass).isSome()) {
-                    continue
-                }
-                fwdClass.body.getOrThrow().decls.add(ctx.factory.CreateNativeHandleGetterDecl(fwdClass))
-            }
-            return
-        }
+
 
         for (mirror in ctx.mirrors) {
             if (mirror.TestAttr(Attribute.IS_BROKEN)) {
@@ -2765,23 +2685,8 @@ public class InsertNativeHandleGetterDecl <: Handler<InteropContext> {
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertFinalizer.cpp:21-94.
 public class InsertFinalizer <: Handler<InteropContext> {
-    private let interopType: InteropType
-
-    public init(interopType: InteropType) {
-        this.interopType = interopType
-    }
-
     public func HandleImpl(ctx: InteropContext): Unit {
-        if (interopType == InteropType.Fwd_Class) {
-            for (fwdClass in ctx.fwdClasses) {
-                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
-                    continue
-                }
-                fwdClass.body.getOrThrow().decls.add(ctx.factory.CreateHasInitedField(fwdClass))
-                fwdClass.body.getOrThrow().decls.add(ctx.factory.CreateFinalizer(fwdClass))
-            }
-            return
-        }
+
 
         for (mirror in ctx.mirrors) {
             if (mirror.TestAttr(Attribute.IS_BROKEN)) {
@@ -2810,24 +2715,8 @@ public class InsertFinalizer <: Handler<InteropContext> {
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertNativeHandleGetterBody.cpp:22-83.
 public class InsertNativeHandleGetterBody <: Handler<InteropContext> {
-    private let interopType: InteropType
-
-    public init(interopType: InteropType) {
-        this.interopType = interopType
-    }
-
     public func HandleImpl(ctx: InteropContext): Unit {
-        if (interopType == InteropType.Fwd_Class) {
-            for (fwdClass in ctx.fwdClasses) {
-                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
-                    continue
-                }
-                let getterDecl = GetNativeHandleGetter(fwdClass).getOrThrow()
-                let nativeHandleFieldExpr = ctx.factory.CreateNativeHandleFieldExpr(fwdClass)
-                getterDecl.funcBody.getOrThrow().body.getOrThrow().body.add(nativeHandleFieldExpr)
-            }
-            return
-        }
+
         for (mirror in ctx.mirrors) {
             if (mirror.TestAttr(Attribute.IS_BROKEN)) {
                 continue
@@ -3125,22 +3014,8 @@ public class RewriteObjCBlockConstruction <: Handler<InteropContext> {
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertBaseCtorDecl.cpp:21-71.
 public class InsertBaseCtorDecl <: Handler<InteropContext> {
-    private let interopType: InteropType
-
-    public init(interopType: InteropType) {
-        this.interopType = interopType
-    }
-
     public func HandleImpl(ctx: InteropContext): Unit {
-        if (interopType == InteropType.Fwd_Class) {
-            for (fwdClass in ctx.fwdClasses) {
-                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
-                    continue
-                }
-                fwdClass.body.getOrThrow().decls.add(ctx.factory.CreateBaseCtorDecl(fwdClass))
-            }
-            return
-        }
+
 
         for (mirror in ctx.mirrors) {
             if (mirror.TestAttr(Attribute.IS_BROKEN)) {
@@ -3171,29 +3046,8 @@ public class InsertBaseCtorDecl <: Handler<InteropContext> {
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertBaseCtorBody.cpp:25-108.
 public class InsertBaseCtorBody <: Handler<InteropContext> {
-    private let interopType: InteropType
-
-    public init(interopType: InteropType) {
-        this.interopType = interopType
-    }
-
     public func HandleImpl(ctx: InteropContext): Unit {
-        if (interopType == InteropType.Fwd_Class) {
-            for (fwdClass in ctx.fwdClasses) {
-                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
-                    continue
-                }
-                let ctor = ctx.factory.GetGeneratedBaseCtor(fwdClass).getOrThrow()
-                let curFile = ctor.curFile
-                let handleParam = WithinFile<RefExpr>(
-                    CreateRefExpr(ctor.funcBody.getOrThrow().paramLists[0].params[0]), curFile)
-                let lhs = ctx.factory.CreateNativeHandleFieldExpr(fwdClass)
-                let unitTy = TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)
-                ctor.funcBody.getOrThrow().body.getOrThrow().body.add(
-                    CreateAssignExpr(lhs, handleParam, unitTy))
-            }
-            return
-        }
+
 
         for (mirror in ctx.mirrors) {
             if (mirror.TestAttr(Attribute.IS_BROKEN)) {
@@ -3248,22 +3102,8 @@ public class InsertBaseCtorBody <: Handler<InteropContext> {
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/InsertNativeHandleField.cpp:19-72.
 public class InsertNativeHandleField <: Handler<InteropContext> {
-    private let interopType: InteropType
-
-    public init(interopType: InteropType) {
-        this.interopType = interopType
-    }
-
     public func HandleImpl(ctx: InteropContext): Unit {
-        if (interopType == InteropType.Fwd_Class) {
-            for (fwdClass in ctx.fwdClasses) {
-                if (fwdClass.TestAttr(Attribute.IS_BROKEN)) {
-                    continue
-                }
-                fwdClass.body.getOrThrow().decls.add(ctx.factory.CreateNativeHandleField(fwdClass))
-            }
-            return
-        }
+
 
         for (mirror in ctx.mirrors) {
             if (mirror.TestAttr(Attribute.IS_BROKEN)) {
@@ -3300,7 +3140,7 @@ public class InsertStringConversions <: Handler<InteropContext> {
                     foreignName = customName
                 }
                 if (foreignName == NSSTRING_CLASS_IDENT) {
-                    let funcDecl = (FindMirrorMember(classDecl, IsObjCGeneratedNSStringCtor) as FuncDecl).getOrThrow()
+                    let funcDecl = (GetFuncMember(classDecl, IsGeneratedNSStringCtor) as FuncDecl).getOrThrow()
                     CJC_ASSERT(funcDecl.funcBody.getOrThrow().paramLists.size > 0)
                     let funcParams = funcDecl.funcBody.getOrThrow().paramLists[0].params
                     CJC_ASSERT(funcParams.size == 1)
@@ -3309,8 +3149,8 @@ public class InsertStringConversions <: Handler<InteropContext> {
                     funcDecl.funcBody.getOrThrow().body.getOrThrow().body.add(convertCall)
                 }
                 if (foreignName == NSOBJECT_CLASS_IDENT) {
-                    let funcDecl = (FindMirrorMember(classDecl,
-                        IsObjCGeneratedNSObjectToString) as FuncDecl).getOrThrow()
+                    let funcDecl = (GetFuncMember(classDecl,
+                        IsGeneratedNSObjectToString) as FuncDecl).getOrThrow()
                     let nativeHandle = GetNativeHandleField(classDecl).getOrThrow()
                     let convertCall = ctx.factory.CreateDescriptionAsStringCall(CreateRefExpr(nativeHandle))
                     funcDecl.funcBody.getOrThrow().body.getOrThrow().body.add(convertCall)
@@ -4659,7 +4499,7 @@ public class DesugarMirrors <: Handler<InteropContext> {
         method.funcBody.getOrThrow().body = CreateBlock(ArrayList<Node>(), methodTy.retTy)
 
         if (method.HasAnno(AstAnnotationKind.OBJ_C_OPTIONAL)) {
-            let selectorName = ctx.nameGenerator.GetObjCDeclName(method)
+            let selectorName = NameGenerator.GetObjCDeclName(method)
             let clonedNativeHandle = (ASTCloner.Clone(nativeHandle) as Expr).getOrThrow()
             let cls = ctx.factory.CreateObjectGetClassCall(clonedNativeHandle, curFile)
             let guardCall = ctx.factory.CreateOptionalMethodGuard(
@@ -4766,8 +4606,7 @@ private func DesugarSuperCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: Fu
         callExpr.desugarExpr = Some(superCall)
     } else {
         CJC_ASSERT(IsObjCMirror(superClass))
-        let objCSelf = CreateTupleAccess((ASTCloner.Clone(regDataRef) as Expr).getOrThrow(), 0)
-        objCSelf.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
+        let objCSelf = CreateTupleAccess((ASTCloner.Clone(regDataRef) as Expr).getOrThrow(), 0, indexTy: TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
         objCSelf.curFile = curFile
         let withSuper = WithinFile<Expr>(ctx.factory.CreateWithObjCSuperScope(objCSelf, impl,
             impl.GetTy().getOrThrow(), { receiver: Expr, objCSuper: Expr =>
@@ -4789,8 +4628,7 @@ private func DesugarSuperCtorCall(ctx: InteropContext, impl: ClassDecl, ctor: Fu
         callExpr.desugarExpr = Some(call)
     }
     let lhs = CreateRefExpr(GetObjCImplRegCompanionField(impl).getOrThrow())
-    let rhs = CreateTupleAccess(regDataRef, 1)
-    rhs.SetTy(TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
+    let rhs = CreateTupleAccess(regDataRef, 1, indexTy: TypeManager.GetPrimitiveTy(TypeKind.TYPE_INT64))
     rhs.curFile = curFile
     body.add(CreateAssignExpr(lhs, rhs, TypeManager.GetPrimitiveTy(TypeKind.TYPE_UNIT)), at: 1)
 }
@@ -4903,7 +4741,7 @@ public class DesugarImpls <: Handler<InteropContext> {
                 }
                 let nodes = ArrayList<Node>()
                 if (targetFd.HasAnno(AstAnnotationKind.OBJ_C_OPTIONAL)) {
-                    let methodSelector = ctx.nameGenerator.GetObjCDeclName(targetFd)
+                    let methodSelector = NameGenerator.GetObjCDeclName(targetFd)
                     let superClass = ctx.factory.CreateGetSuperClassExpr(objCSuper, curFile)
                     let guardCall = ctx.factory.CreateOptionalMethodGuard(
                         msgSendSuperCall, superClass, methodSelector, curFile)
@@ -4960,8 +4798,11 @@ public class DesugarImpls <: Handler<InteropContext> {
 
 // C++ src/Sema/NativeFFI/ObjC/AfterTypeCheck/Interop/RewriteObjCTypechecks.cpp:29-40.
 private func ShouldDesugarTypecheck(typeNode: Type, expr: Expr): Bool {
-    let castDecl = Ty.GetDeclOfTy(typeNode.GetTy()) as ClassLikeDecl
-    let objDecl = Ty.GetDeclOfTy(expr.GetTy()) as ClassLikeDecl
+    let castTarget = Ty.GetDeclOfTy(typeNode.GetTy())
+    let objTarget = Ty.GetDeclOfTy(expr.GetTy())
+    if (castTarget.isNone() || objTarget.isNone()) { return false }
+    let castDecl = castTarget.getOrThrow() as ClassLikeDecl
+    let objDecl = objTarget.getOrThrow() as ClassLikeDecl
     if (objDecl.isNone() || castDecl.isNone() ||
         !castDecl.getOrThrow().TestAnyAttr(Attribute.OBJ_C_IMPL, Attribute.OBJ_C_MIRROR)) {
         return false
@@ -4979,7 +4820,7 @@ private func DesugarIsExpr(ctx: InteropContext, expr: IsExpr): Unit {
 
     let classLikeTy = (isType.GetTy().getOrThrow() as ClassLikeTy).getOrThrow()
     let typeDecl = classLikeTy.commonDecl.getOrThrow()
-    let targetName = ctx.nameGenerator.GetObjCDeclName(typeDecl)
+    let targetName = NameGenerator.GetObjCDeclName(typeDecl)
     if (IsObjCId(typeDecl)) {
         return
     }
@@ -5044,12 +4885,12 @@ private func DesugarAsExpr(ctx: InteropContext, expr: AsExpr): Unit {
     }
 
     let objCIdDecl = ctx.bridge.GetObjCIdDecl().getOrThrow()
-    let castResultTy = ctx.factory.GetOptionTy(castTy)
-    let targetName = ctx.nameGenerator.GetObjCDeclName(typeDecl)
+    let castResultTy = FFIGetOptionTy(ctx.importManager, ctx.typeManager, castTy)
+    let targetName = NameGenerator.GetObjCDeclName(typeDecl)
     let matchCases = ArrayList<MatchCase>()
 
     let originalVarPattern = WithinFile<VarPattern>(CreateVarPattern(V_COMPILER, Some(castTy)), curFile)
-    let originalBranch = ctx.factory.CreateOptionSomeCall(
+    let originalBranch = FFICreateOptionSomeCall(ctx.importManager, ctx.typeManager,
         WithinFile<RefExpr>(CreateRefExpr(originalVarPattern.varDecl.getOrThrow()), curFile), castTy)
     let originalTypePattern = CreateTypePattern(originalVarPattern, CreateType(castTy), leftExpr)
     originalTypePattern.needRuntimeTypeCheck = true
@@ -5084,7 +4925,7 @@ private func DesugarAsExpr(ctx: InteropContext, expr: AsExpr): Unit {
     let objCIdMatchCase = CreateMatchCase(objCIdTypePattern, objCIdBranch)
     objCIdMatchCase.patternGuard = checkCall
     matchCases.add(objCIdMatchCase)
-    matchCases.add(CreateMatchCase(WildcardPattern(), ctx.factory.CreateOptionNoneRef(classLikeTy)))
+    matchCases.add(CreateMatchCase(WildcardPattern(), FFICreateOptionNoneRef(ctx.importManager, ctx.typeManager, classLikeTy)))
     expr.desugarExpr = WithinFile<MatchExpr>(CreateMatchExpr(leftExpr, matchCases, castResultTy), curFile)
 }
 
@@ -5147,7 +4988,7 @@ private func CastAndSubstitudeVars(
     let varsBlock = WithinFile<Block>(Block(), curFile)
     let varsMapping = HashMap<Decl, Decl>()
     for ((varDecl, castTy) in patternVars) {
-        let castDecl = (Ty.GetDeclOfTy(Some(castTy)) as ClassLikeDecl).getOrThrow()
+        let castDecl = (Ty.GetDeclOfTy(Some(castTy)).getOrThrow() as ClassLikeDecl).getOrThrow()
         let nativeHandle = ctx.factory.CreateNativeHandleExpr(
             WithinFile<RefExpr>(CreateRefExpr(varDecl), curFile))
         let initializer = ctx.factory.WrapEntity(nativeHandle, castTy, withRetain: Retain.RETAINED)
@@ -5191,7 +5032,7 @@ private func DesugarMatchCaseExpr(ctx: InteropContext, expr: MatchCase): Unit {
         let varPattern = (typePattern.pattern.getOrThrow() as VarPattern).getOrThrow()
         let originalTy = varPattern.GetTy().getOrThrow()
         let classLikeTy = (originalTy as ClassLikeTy).getOrThrow()
-        let targetName = ctx.nameGenerator.GetObjCDeclName(classLikeTy.commonDecl.getOrThrow())
+        let targetName = NameGenerator.GetObjCDeclName(classLikeTy.commonDecl.getOrThrow())
         typePattern.typeNode = CreateType(objCIdDecl.GetTy().getOrThrow())
         varPattern.SetTy(objCIdDecl.GetTy().getOrThrow())
         varPattern.varDecl.getOrThrow().SetTy(objCIdDecl.GetTy().getOrThrow())
@@ -5253,7 +5094,7 @@ private func DesugarLetDestructorExpr(ctx: InteropContext, expr: IfExpr): Unit {
         let varPattern = (typePattern.pattern.getOrThrow() as VarPattern).getOrThrow()
         let originalTy = varPattern.GetTy().getOrThrow()
         let classLikeTy = (originalTy as ClassLikeTy).getOrThrow()
-        let targetName = ctx.nameGenerator.GetObjCDeclName(classLikeTy.commonDecl.getOrThrow())
+        let targetName = NameGenerator.GetObjCDeclName(classLikeTy.commonDecl.getOrThrow())
         let objCIdDecl = ctx.bridge.GetObjCIdDecl().getOrThrow()
         typePattern.typeNode = CreateType(objCIdDecl.GetTy().getOrThrow())
         typePattern.SetTy(objCIdDecl.GetTy().getOrThrow())
@@ -5300,7 +5141,7 @@ private func DesugarWhileExpr(ctx: InteropContext, expr: WhileExpr): Unit {
         let varPattern = (typePattern.pattern.getOrThrow() as VarPattern).getOrThrow()
         let originalTy = varPattern.GetTy().getOrThrow()
         let classLikeTy = (originalTy as ClassLikeTy).getOrThrow()
-        let targetName = ctx.nameGenerator.GetObjCDeclName(classLikeTy.commonDecl.getOrThrow())
+        let targetName = NameGenerator.GetObjCDeclName(classLikeTy.commonDecl.getOrThrow())
         let objCIdDecl = ctx.bridge.GetObjCIdDecl().getOrThrow()
         typePattern.typeNode = CreateType(objCIdDecl.GetTy().getOrThrow())
         typePattern.SetTy(objCIdDecl.GetTy().getOrThrow())
@@ -5391,12 +5232,12 @@ public func Desugar(ctx: InteropContext): Unit {
         .Handle(ctx)
 
     HandlerFactory.Start<InteropContext>(FindFwdClass())
-        .Use(InsertNativeHandleField(InteropType.Fwd_Class))
-        .Use(InsertNativeHandleGetterDecl(InteropType.Fwd_Class))
-        .Use(InsertNativeHandleGetterBody(InteropType.Fwd_Class))
-        .Use(InsertBaseCtorDecl(InteropType.Fwd_Class))
-        .Use(InsertBaseCtorBody(InteropType.Fwd_Class))
-        .Use(InsertFinalizer(InteropType.Fwd_Class))
+        .Use(InsertFwdNativeHandleField())
+        .Use(InsertFwdNativeHandleGetterDecl())
+        .Use(InsertFwdNativeHandleGetterBody())
+        .Use(InsertFwdBaseCtorDecl())
+        .Use(InsertFwdBaseCtorBody())
+        .Use(InsertFwdFinalizer())
         .Use(DesugarMirrors(InteropType.Fwd_Class))
         .Use(DrainGeneratedDecls())
         .Handle(ctx)
@@ -5405,7 +5246,7 @@ public func Desugar(ctx: InteropContext): Unit {
         .Use(GenerateFwdClass())
         .Use(GenerateInitCJObjectMethods(InteropType.CJ_Mapping))
         .Use(GenerateDeleteCJObjectMethod(InteropType.CJ_Mapping))
-        .Use(GenerateWrappers(InteropType.CJ_Mapping))
+        .Use(GenerateCJMappingWrappers())
         .Use(GenerateGlueCode(InteropType.CJ_Mapping))
         .Handle(ctx)
 
@@ -5415,15 +5256,15 @@ public func Desugar(ctx: InteropContext): Unit {
         .Use(PropagateBrokenToSubtypes())
         .Use(MapImplToRegCompanion())
         .Use(RestoreRegCompanionsTypeHierarchy())
-        .Use(InsertNativeHandleField(InteropType.ObjC_Mirror))
+        .Use(InsertNativeHandleField())
         .Use(InsertObjCImplRegCompanionField())
-        .Use(InsertNativeHandleGetterDecl(InteropType.ObjC_Mirror))
-        .Use(InsertNativeHandleGetterBody(InteropType.ObjC_Mirror))
+        .Use(InsertNativeHandleGetterDecl())
+        .Use(InsertNativeHandleGetterBody())
         .Use(InsertGetObjCClass())
-        .Use(InsertBaseCtorDecl(InteropType.ObjC_Mirror))
-        .Use(InsertBaseCtorBody(InteropType.ObjC_Mirror))
+        .Use(InsertBaseCtorDecl())
+        .Use(InsertBaseCtorBody())
         .Use(MoveImplMembersToRegCompanion())
-        .Use(InsertFinalizer(InteropType.ObjC_Mirror))
+        .Use(InsertFinalizer())
         .Use(GenerateInMirrorInterfaceHandleWrappers())
         .Use(InsertStringConversions())
         .Use(DesugarMirrors(InteropType.ObjC_Mirror))
@@ -5433,7 +5274,7 @@ public func Desugar(ctx: InteropContext): Unit {
         .Use(GenerateDeleteCJObjectMethod(InteropType.ObjC_Mirror))
         .Use(DesugarImpls())
         .Use(RewriteObjCTypechecks())
-        .Use(GenerateWrappers(InteropType.ObjC_Mirror))
+        .Use(GenerateWrappers())
         .Use(GenerateGlueCode(InteropType.ObjC_Mirror))
         .Use(CheckObjCPointerTypeArguments())
         .Use(RewriteObjCPointerAccess())

@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
 import cjcj::sema.TypeManager
-import cjcj::sema.NativeFFI.{GetObjCMirrorForeignName, INIT_IDENT, NSOBJECT_CLASS_IDENT,
+import cjcj::sema.NativeFFI.{INIT_IDENT, NSOBJECT_CLASS_IDENT,
     NSSTRING_CLASS_IDENT, TOSTRING_METHOD_IDENT}
 import cjcj::utils.{CJC_ASSERT, STD_LIB_STRING}
 
@@ -116,7 +116,7 @@ public class InsertToString <: Handler<PrepareTypeCheckContext> {
     public func HandleImpl(ctx: PrepareTypeCheckContext): Unit {
         for (mirror in ctx.mirrors) {
             if (let Some(cd) <- (mirror as ClassDecl)) {
-                if (GetObjCMirrorForeignName(cd) != NSOBJECT_CLASS_IDENT) {
+                if (!IsNSObject(cd)) {
                     continue
                 }
                 let paramLists = ArrayList<FuncParamList>()
@@ -134,7 +134,7 @@ public class InsertFromStringCtor <: Handler<PrepareTypeCheckContext> {
     public func HandleImpl(ctx: PrepareTypeCheckContext): Unit {
         for (mirror in ctx.mirrors) {
             if (let Some(cd) <- (mirror as ClassDecl)) {
-                if (GetObjCMirrorForeignName(cd) != NSSTRING_CLASS_IDENT) {
+                if (!IsNSString(cd)) {
                     continue
                 }
                 let paramLists = ArrayList<FuncParamList>()

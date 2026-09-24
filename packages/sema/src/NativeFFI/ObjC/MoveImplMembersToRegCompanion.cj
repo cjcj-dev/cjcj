@@ -53,7 +53,7 @@ private func RewireMovedField(vd: VarDecl, target: MoveTarget, ctx: InteropConte
     if (vd.TestAttr(Attribute.STATIC) && vd.isConst) {
         return false
     }
-    let proxy = PropDecl()
+    let proxy = CreatePropDecl()
     ctx.astInserter.BindTo(target.impl, proxy)
     if (vd.TestAttr(Attribute.STATIC)) {
         ctx.astTransformer.TransformToObjCImplProxyProp(proxy, vd, target.regCompanion)
