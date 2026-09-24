@@ -217,7 +217,8 @@ public class CHIRBuilder {
             if (refEq(expr, separator)) {
                 needMove = true
                 expr.RemoveSelfFromBlock()
-                CreateGoTo(block2, block1)
+                let goTo = CreateGoTo(block2, block1)
+                block1.AppendExpression(goTo)
                 continue
             }
             if (needMove) {

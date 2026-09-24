@@ -71,4 +71,27 @@ public class CHIRBuilderTest {
         @Expect(block.GetExpressions()[0].nodeId, expressions[0].nodeId)
         @Expect(block.GetExpressions()[1].nodeId, expressions[1].nodeId)
     }
+
+    @TestCase
+    public func SplitBlockConnectsBothHalves(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "split")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let block = builder.CreateBlock(body)
+        body.SetEntryBlock(block)
+        let separator = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(11), block)
+        let exit = builder.CreateExit(None, block)
+        block.AppendExpressions(ArrayList<Expression>([separator, exit]))
+        let (before, after) = builder.SplitBlock(separator)
+        @Expect(before.GetTerminator().isSome(), true)
+        if (let Some(term) <- before.GetTerminator()) {
+            @Expect(term.GetExprKind(), ExprKind.GOTO)
+            @Expect(term.GetSuccessor(0).nodeId, after.nodeId)
+        }
+        @Expect(after.GetTerminator().getOrThrow().nodeId, exit.nodeId)
+        @Expect(after.GetPredecessors().size, 1)
+    }
+
 }

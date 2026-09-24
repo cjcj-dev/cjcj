@@ -14,14 +14,16 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def compile_input(compiler, source, destination, imports):
+def compile_input(compiler, source, destination, imports, jobs):
     destination.mkdir(parents=True, exist_ok=True)
     command = [str(compiler), str(source), '--emit-chir=raw', '--output-type=staticlib',
                '--dump-chir', '-o', str(destination / 'output.chir')]
+    if jobs is not None:
+        command.extend(['--jobs', str(jobs)])
     if source.is_dir():
         command.insert(1, '-p')
     for directory in imports:
-        command.extend(['-I', str(directory)])
+        command.extend(['--import-path', str(directory)])
     before = subprocess.check_output(['uptime'], text=True).strip()
     start = time.monotonic()
     with (destination / 'compile.log').open('w') as log:
@@ -39,6 +41,7 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--input', type=Path, action='append', required=True)
     parser.add_argument('--import-dir', type=Path, action='append', default=[])
+    parser.add_argument('--jobs', type=int, help='compiler parallelism; #200 uses 1 to isolate #203')
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     manifest = {'compilers': {name: {'path': str(path), 'sha256': digest(path)}
@@ -48,7 +51,7 @@ def main():
         for index, source in enumerate(args.input):
             case = {'source': str(source)}
             futures = {arm: pool.submit(compile_input, compiler, source,
-                                       args.out / str(index) / arm, args.import_dir)
+                                       args.out / str(index) / arm, args.import_dir, args.jobs)
                        for arm, compiler in [('baseline', args.baseline), ('candidate', args.candidate)]}
             for arm, future in futures.items():
                 case[arm] = future.result()
