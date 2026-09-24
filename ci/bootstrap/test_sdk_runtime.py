@@ -43,6 +43,9 @@ def main():
     for name, source in (symbols.items() if args.fixtures_from is None else []):
         src = libs / (name + '.c')
         src.write_text(source + '\n')
+        obj = libs / (name + '.o')
+        subprocess.run(['cc', '-c', '-fPIC', str(src), '-o', str(obj)], check=True)
+        subprocess.run(['ar', 'rcs', str(libs / (name + '.a')), str(obj)], check=True)
         for versioned in (False, True):
             so = libs / (name + ('-versioned' if versioned else '') + '.so')
             cmd = ['cc', '-shared', '-fPIC', str(src), '-o', str(so)]
@@ -83,6 +86,12 @@ def main():
             # Windows is an independent sentinel: it must not be selected or replaced.
             initial = 'mask.so' if name.startswith('verify-') and tpl == LINUX else 'none.so'
             shutil.copyfile(libs / initial, directory / 'libcangjie-runtime.so')
+        # A complete SDK fixture includes std, paired with the actual runtime.
+        # Runtime-role failures still stop at their original assertion.
+        std_dir = base / 'lib' / LINUX
+        std_dir.mkdir(parents=True)
+        std_variant = 'undefined' if variant in ('mask', 'both', 'both-versioned') else 'none'
+        shutil.copyfile(libs / (std_variant + '.a'), std_dir / 'libcangjie-std-core.a')
         source_tuple = WINDOWS if name == 'source-mismatch' else LINUX
         source = work / 'install/runtime/lib' / source_tuple
         source.mkdir(parents=True)
