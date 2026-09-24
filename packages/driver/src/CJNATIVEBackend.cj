@@ -266,7 +266,9 @@ public class CJNATIVEBackend <: Backend {
             OPTSetLTOOptions({ option: String => tool.AppendArg(option) }, driverOptions)
             OPTSetPgoOptions({ option: String => tool.AppendArg(option) }, driverOptions)
             OPTSetTransparentOptions({ option: String => tool.AppendArg(option) }, driverOptions)
-            let kind = if (driverOptions.IsLTOEnabled() && driverOptions.outputMode == OutputMode.STATIC_LIB) {
+            // Native LTO archives are produced downstream by lld + ar; opt output is temporary.
+            let kind = if (driverOptions.IsLTOEnabled() && driverOptions.outputMode == OutputMode.STATIC_LIB &&
+                !driverOptions.ShouldEmitStaticLibInLTO()) {
                 TempFileKind.O_OPT_BC
             } else {
                 TempFileKind.T_OPT_BC

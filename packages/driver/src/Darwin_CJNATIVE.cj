@@ -64,7 +64,7 @@ public open class Darwin_CJNATIVE <: MachO {
             super.GenerateArchiveTool(objFiles)
             return
         }
-        let ltoObject = GenerateLTOObjectFile(objFiles)
+        let ltoObject = GenerateStaticLibObjects(objFiles)
         let archiveTool = Tool(arPath, ToolType.BACKEND, driverOptions.environment.allVariables)
         archiveTool.AppendArg("cr")
         let archiveOutput = CreateNewFileInfoWrapper(objFiles, TempFileKind.O_STATICLIB)
@@ -77,7 +77,7 @@ public open class Darwin_CJNATIVE <: MachO {
         backendCmds.add(MakeSingleToolBatch(archiveTool))
     }
 
-    protected open func GenerateLTOObjectFile(objFiles: ArrayList<TempFileInfo>): TempFileInfo {
+    protected open func GenerateStaticLibObjects(objFiles: ArrayList<TempFileInfo>): TempFileInfo {
         let darwinSDKVersion = GetDarwinSDKVersion(driverOptions.sysroot)
         if (driverOptions.enableVerbose) {
             println("selected Darwin SDK path: " + driverOptions.sysroot + " (SDK Version: " +
@@ -90,8 +90,7 @@ public open class Darwin_CJNATIVE <: MachO {
         let ltoObjectPath = FileUtil.JoinPath(ltoObjectDir, "0." + GetTargetArchString() + ".lto.o")
         GenerateLinkOptionsForLTO(tool)
         tool.AppendArg("-object_path_lto", ltoObjectDir)
-        tool.AppendArg("-lto-emit-obj-only")
-        tool.AppendArg("-dylib")
+        tool.AppendArg("-staticlib")
         tool.AppendArg("-arch", GetTargetArchString())
         tool.AppendArg("-platform_version")
         tool.AppendArg("macos")
@@ -99,8 +98,7 @@ public open class Darwin_CJNATIVE <: MachO {
         tool.AppendArg(darwinSDKVersion ?? "12")
         tool.AppendArg("-syslibroot")
         tool.AppendArg(if (driverOptions.sysroot.isEmpty()) { "/" } else { driverOptions.sysroot })
-        HandleLLVMLinkOptions(objFiles, tool)
-        GenerateRuntimePath(tool)
+        AppendLTOBcInputs(objFiles, tool)
         backendCmds.add(MakeSingleToolBatch(tool))
         outputFileInfo.filePath = ltoObjectPath
         outputFileInfo.rawPath = ltoObjectDir
