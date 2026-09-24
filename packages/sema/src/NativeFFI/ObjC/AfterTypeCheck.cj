@@ -267,8 +267,9 @@ public class ASTFactory {
                 let mirrorCtor = GetGeneratedBaseCtor(mirror).getOrThrow()
                 let args = ArrayList<FuncArg>()
                 args.add(CreateFuncArg(entity))
-                if (let Some(ctorCall) <- CreateCall(Some(mirrorCtor), curFile, args: args)) {
-                    AddMarkerToCallIfNeeded(ctorCall)
+                let ctorCallResult = CreateCall(Some(mirrorCtor), curFile, args: args)
+                AddMarkerToCallIfNeeded(ctorCallResult.getOrThrow())
+                if (let Some(ctorCall) <- ctorCallResult) {
                     ctorCall.callKind = CallKind.CALL_OBJECT_CREATION
                     ctorCall.SetTy(mirrorTy)
                     return Some(ctorCall)
