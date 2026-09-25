@@ -26,6 +26,7 @@ import cjcj::chir.DeadCodeElimination
 import cjcj::chir.DebugLocation as ChirDebugLocation
 import cjcj::chir.Devirtualization as ChirDevirtualization
 import cjcj::chir.DevirtualizationInfo
+import cjcj::chir.DevirtualizeTrivialStatics
 import cjcj::chir.ExprKind as ChirExprKind
 import cjcj::chir.FaithfulAST2CHIR
 import cjcj::chir.FuncCallContext as ChirFuncCallContext
@@ -675,6 +676,8 @@ private class ToCHIR {
                     })
             }
             devirt.RunOnFuncs(funcs, builder, options.chirDebugOptimizer)
+            let devirtStatics = DevirtualizeTrivialStatics()
+            devirtStatics.RunOnPackage(currentPackage, builder, options.chirDebugOptimizer)
             if (!devirt.GetFrozenInstFuns().isEmpty()) {
                 let frozenFuncs = devirt.GetFrozenInstFuns()
                 for (fn in frozenFuncs) {
