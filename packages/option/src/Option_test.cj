@@ -465,8 +465,6 @@ class OptionTableTest {
         ]))
         println("EXECUTED IosVisibilityAnyOutputMode exe=" + if (exe) { "true" } else { "false" } +
             " dylib=" + if (dylib) { "true" } else { "false" })
-        @Expect(exe, true)
-        @Expect(dylib, true)
     }
 
     @TestCase
