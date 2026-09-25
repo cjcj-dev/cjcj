@@ -21,10 +21,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-tree', type=Path, required=True)
     parser.add_argument('--sdk', type=Path, required=True)
+    parser.add_argument('--interface-tree', type=Path,
+                        help="Reuse one CJO interface snapshot while linking each arm's product archives")
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--integration-only', action='store_true')
     args = parser.parse_args()
     tree, sdk, out = (p.resolve() for p in (args.build_tree, args.sdk, args.out))
+    interface_tree = (args.interface_tree or tree).resolve()
     out.mkdir(parents=True, exist_ok=True)
     temporary = out / 'tmp'
     temporary.mkdir(exist_ok=True)
@@ -41,13 +44,14 @@ def main():
     executable = out / 'resolver-tests'
     command = [str(sdk / 'bin/cjc'), '--test', '-O0', '--diagnostic-format=noColor', '--trimpath', str(tree),
                *map(str, sources), '-o', str(executable)]
-    archives, inputs = [], list(sources)
+    archives, inputs = [], list(sources) + [Path(__file__).resolve()]
     for directory in sorted((tree / 'target/release').iterdir()):
         if not directory.is_dir() or directory.name == 'bin':
             continue
-        command += ['--import-path', str(directory), '-L', str(directory)]
+        interface_directory = interface_tree / 'target/release' / directory.name
+        command += ['--import-path', str(interface_directory), '-L', str(directory)]
         archives += sorted(directory.glob('*.a'))
-        inputs += sorted(directory.glob('*.cjo'))
+        inputs += sorted(interface_directory.glob('*.cjo'))
     shim = tree / 'runtime_shim/cjselfhost_llvmshim.o'
     command += ['--link-options=' + ' '.join([
         '--start-group', *map(str, archives), '--end-group', str(shim),
