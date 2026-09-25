@@ -36,7 +36,8 @@ class LanguageTupleTest(unittest.TestCase):
         }
         self.provenance["sources"]["stdlib"] = {
             "commit": "unrecorded", "follow_up": "cjcj-dev/cjcj#135",
-            "inputs_sha256": {name: self.provenance["role_sha256"][name] for name in ("compiler", "llc", "opt")},
+            "inputs_sha256": {name: self.provenance["role_sha256"][name]
+                              for name in ("compiler", "llc", "opt", "ld.lld")},
         }
         self.provenance["payloads"] = {
             file.relative_to(self.root / "input").as_posix(): {"origin": "stdlib", "sha256": product.digest(file)}
@@ -69,7 +70,16 @@ class LanguageTupleTest(unittest.TestCase):
                            output=destination, manifest_sha256=self.manifest_sha, compiler_sha256=self.compiler_sha))
         manifest = product.verify(destination / "tuple", self.manifest_sha, self.compiler_sha)
         self.assertEqual(manifest["roles"], product.ROLES)
+        self.assertEqual(manifest["roles"]["ld.lld"], "sdk/third_party/llvm/bin/ld.lld")
+        self.assertEqual(manifest["provenance"]["sources"]["stdlib"]["inputs_sha256"]["ld.lld"],
+                         manifest["provenance"]["role_sha256"]["ld.lld"])
         self.assertEqual((destination / "tuple/sdk/bin/cjc").readlink(), Path("cjcj-stage1"))
+
+    def test_stdlib_inputs_reject_missing_linker(self):
+        del self.provenance["sources"]["stdlib"]["inputs_sha256"]["ld.lld"]
+        product.write_json(self.provenance_file, self.provenance)
+        with self.assertRaisesRegex(ValueError, "TUPLE_STD_INPUT ld.lld"):
+            self.pack()
 
     def test_producer_rejects_wrong_role_bytes(self):
         (self.sdk / "bin/cjcj-stage1").write_text("wrong compiler before packaging\n")

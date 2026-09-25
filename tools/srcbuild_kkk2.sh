@@ -806,12 +806,16 @@ build_fixed_tuple() {
         -DLLVM_LINK_LLVM_DYLIB=OFF \
         -DLLVM_BUILD_LLVM_DYLIB=OFF \
         -DLLVM_ENABLE_RTTI=OFF \
+        -DLLVM_ENABLE_LIBXML2=OFF \
         -DLLVM_TARGETS_TO_BUILD=X86 \
         -DLLVM_ENABLE_PROJECTS=lld \
         -DCMAKE_C_COMPILER=clang \
         -DCMAKE_CXX_COMPILER=clang++ \
         '-DCMAKE_CXX_FLAGS=-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string'
     ninja -j "$JOBS" -C "$llc_build" llc opt lld
+    for tool in llc opt ld.lld; do
+        bash "$REPO_ROOT/ci/assert_no_libxml2_needed.sh" "$llc_build/bin/$tool"
+    done
     gzip -n -c -9 "$llc_build/bin/llc" > "$CJCJ_FIXED_LLVM_DIR/llc.gz"
     gzip -n -c -9 "$llc_build/bin/opt" > "$CJCJ_FIXED_LLVM_DIR/opt.gz"
     gzip -n -c -9 "$llc_build/bin/ld.lld" > "$CJCJ_FIXED_LLVM_DIR/ld.lld.gz"

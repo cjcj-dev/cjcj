@@ -190,6 +190,7 @@ jobs:
             -DLLVM_LINK_LLVM_DYLIB=OFF \
             -DLLVM_BUILD_LLVM_DYLIB=OFF \
             -DLLVM_ENABLE_RTTI=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
             -DLLVM_TARGETS_TO_BUILD="${{ matrix.llvm-targets }}" \
             -DLLVM_ENABLE_PROJECTS="lld" \
             -DCMAKE_C_COMPILER=clang \
@@ -286,6 +287,7 @@ jobs:
               printf '%s\n' "$ldd_output"
               test -z "$(printf '%s\n' "$ldd_output" | grep 'not found' || true)"
             fi
+            bash ci/assert_no_libxml2_needed.sh "$RUNNER_TEMP/fixed-llvm-tools/$tool"
             "$RUNNER_TEMP/fixed-llvm-tools/$tool" --version | head -5
           done
           lld_version="$("$RUNNER_TEMP/fixed-llvm-tools/$lld_tool" --version | awk '
