@@ -27,17 +27,25 @@ public class StringBackingIntrinsicTest {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
         let pkg = builder.CreatePackage("backing")
-        let arrayTy = context.GetRefTy(context.GetRawArrayTy(context.GetUInt8Ty()))
-        let host = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>([arrayTy]), arrayTy),
+        let byteArrayTy = context.GetRefTy(context.GetRawArrayTy(context.GetUInt8Ty()))
+        let stackTrace = kind == IntrinsicKind.FILL_IN_STACK_TRACE
+        let arrayTy = if (stackTrace) {
+            context.GetRefTy(context.GetRawArrayTy(context.GetUInt64Ty()))
+        } else { byteArrayTy }
+        let paramTypes = ArrayList<Type>([arrayTy])
+        if (stackTrace) { paramTypes.add(byteArrayTy) }
+        let host = builder.CreateFunction(context.GetFuncTy(paramTypes, arrayTy),
             "host", srcCodeIdentifier: "host", packageName: "backing")
         let arg = builder.CreateParameter(arrayTy, DebugLocation(), host)
+        let arguments = ArrayList<Value>([arg])
+        if (stackTrace) { arguments.add(builder.CreateParameter(byteArrayTy, DebugLocation(), host)) }
         let body = builder.CreateBlockGroup(host)
         host.InitBody(body)
         pkg.SetPackageLiteralInitFunc(host)
         let block = builder.CreateBlock(body)
         body.SetEntryBlock(block)
         let expr = builder.CreateIntrinsic(arrayTy,
-            IntrisicCallContext(kind: kind, args: ArrayList<Value>([arg])), block)
+            IntrisicCallContext(kind: kind, args: arguments), block)
         block.AppendExpression(expr)
         block.AppendExpression(builder.CreateExit(Some<Value>(expr.GetResult().getOrThrow()), block))
         let restoredContext = CHIRContext()
@@ -74,7 +82,8 @@ public class StringBackingIntrinsicTest {
             if (let Some(intrinsic) <- (value as Intrinsic)) {
                 observed++
                 @Expect(intrinsic.GetIntrinsicKind() == kind, true)
-                @Expect(intrinsic.GetArgs().size, 1)
+                @Expect(intrinsic.GetArgs().size, arguments.size)
+                @Expect(intrinsic.GetArgs()[0] == restored.GetParam(0), true)
                 println("BACKING_ROUNDTRIP expected=${IntrinsicKindName(kind)} actual=${IntrinsicKindName(intrinsic.GetIntrinsicKind())} binary=${binary}")
             }
         }
