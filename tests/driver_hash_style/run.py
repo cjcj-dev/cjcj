@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import time
@@ -35,9 +36,10 @@ def main():
     command = [str(sdk / 'bin/cjc'), str(source), '-o', str(executable)]
     for directory in imports:
         command += ['--import-path', str(directory)]
-    command += [str(p) for p in archives]
-    command += [str(tree / 'runtime_shim/cjselfhost_llvmshim.o'),
-                str(sdk / 'third_party/llvm/lib/libLLVM-15.so'), '-lstdc++']
+    command += ['--link-options', shlex.join([
+        '--start-group', *(str(p) for p in archives), '--end-group',
+        str(tree / 'runtime_shim/cjselfhost_llvmshim.o'),
+        str(sdk / 'third_party/llvm/lib/libLLVM-15.so'), '-lstdc++'])]
     result = {'command': command, 'source_sha256': sha(source),
               'archives': {str(p): sha(p) for p in archives},
               'affinity': sorted(os.sched_getaffinity(0)),
