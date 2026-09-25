@@ -236,11 +236,13 @@ check_sdk_literal_prefix() {
   mkdir -p "$TMP/sdk-base/modules/$tuple" "$prefix/modules/$tuple" \
     "$prefix/lib/$tuple" "$prefix/runtime/lib/$tuple"
   printf 'new module\n' > "$prefix/modules/$tuple/core.cjo"
-  cp "$TMP/sdk-base/lib/$tuple/libcangjie-std-core.a" "$prefix/lib/$tuple/"
-  cp "$TMP/sdk-base/runtime/lib/$tuple/libcangjie-runtime.so" "$prefix/runtime/lib/$tuple/libcangjie-std-core.so"
+  printf 'int replacement_std;\n' > "$TMP/replacement-std.c"
+  cc -fPIC -c "$TMP/replacement-std.c" -o "$TMP/replacement-std.o"
+  ar rcs "$prefix/lib/$tuple/libcangjie-std-core.a" "$TMP/replacement-std.o"
+  cc -shared "$TMP/replacement-std.o" -o "$prefix/runtime/lib/$tuple/libcangjie-std-core.so"
   cp "$prefix/runtime/lib/$tuple/libcangjie-std-core.so" "$prefix/lib/libstdFFI.so"
   for rel in "runtime/lib/$tuple/libcangjie-std-core.so" lib/libstdFFI.so; do
-    cp "$prefix/$rel" "$TMP/sdk-base/$rel"
+    cp "$TMP/sdk-base/runtime/lib/$tuple/libcangjie-runtime.so" "$TMP/sdk-base/$rel"
   done
   # Drive the actual installer, including its identity and installed-byte checks.
   local rc=0
@@ -886,7 +888,7 @@ case "${1:-test}" in
     [ $# -eq 4 ] || fail ruler-control 'usage: ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA'
     # shellcheck disable=SC1090 # Product path is resolved above.
     source "$PRODUCT"
-    # Consumed by stage_log/fail in the dynamically sourced bootstrap product.
+    # Consumed by die() in the dynamically sourced bootstrap product.
     # shellcheck disable=SC2034
     STAGE=test-ruler
     assert_official_opt_zero "$2"
