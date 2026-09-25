@@ -488,8 +488,8 @@ public class Transpiler {
 
     // C++ Transpiler.cpp:543-559.
     private func WriteToFile(): Unit {
-        WriteToHeader(headerImport.toString() + dependenciesStream.toString() + headerBody.toString() + Emitter.END)
-        WriteToSource(sourceImport.toString() + staticReferences.toString() + sourceBody.toString() +
+        WriteToHeader(Emitter.GENERATED_FILE_PREAMBULE + headerImport.toString() + dependenciesStream.toString() + headerBody.toString() + Emitter.END)
+        WriteToSource(Emitter.GENERATED_FILE_PREAMBULE + sourceImport.toString() + staticReferences.toString() + sourceBody.toString() +
             ctors.toString() + initialize.toString() + defaultFuncImpls.toString() + Emitter.END)
     }
 
