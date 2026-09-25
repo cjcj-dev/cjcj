@@ -2203,27 +2203,21 @@ class CHIRSerializerImpl {
         }
         if (let Some(invokeStaticWithException) <- (expr as InvokeStaticWithException)) {
             return serializeInvokePayload(invokeStaticWithException.GetInstantiatedTypeArgs(),
-                invokeStaticWithException.GetThisType(), invokeStaticWithException.GetMethodName(),
-                invokeStaticWithException.GetMethodType(), invokeStaticWithException.GetGenericTypeParams(),
-                invokeStaticWithException.overflowStrategy,
+                invokeStaticWithException.GetThisType(), invokeStaticWithException.overflowStrategy,
                 invokeStaticWithException.GetVirtualMethodOffset())
         }
         if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
             return serializeInvokePayload(invokeWithException.GetInstantiatedTypeArgs(),
-                invokeWithException.GetThisType(), invokeWithException.GetMethodName(),
-                invokeWithException.GetMethodType(), invokeWithException.GetGenericTypeParams(),
-                invokeWithException.overflowStrategy,
+                invokeWithException.GetThisType(), invokeWithException.overflowStrategy,
                 invokeWithException.GetVirtualMethodOffset())
         }
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
             return serializeInvokePayload(invokeStatic.GetInstantiatedTypeArgs(), invokeStatic.GetThisType(),
-                invokeStatic.GetMethodName(), invokeStatic.GetMethodType(), invokeStatic.GetGenericTypeParams(),
                 invokeStatic.overflowStrategy,
                 invokeStatic.GetVirtualMethodOffset())
         }
         if (let Some(invoke) <- (expr as Invoke)) {
             return serializeInvokePayload(invoke.GetInstantiatedTypeArgs(), invoke.GetThisType(),
-                invoke.GetMethodName(), invoke.GetMethodType(), invoke.GetGenericTypeParams(),
                 invoke.overflowStrategy,
                 invoke.GetVirtualMethodOffset())
         }
@@ -2288,15 +2282,12 @@ class CHIRSerializerImpl {
         return expressionPayload(tag, fields)
     }
 
-    private func serializeInvokePayload(instTypeArgs: ArrayList<Type>, thisType: Option<Type>, methodName: String,
-        methodType: FuncType, genericTypeParams: ArrayList<GenericType>, overflowStrategy: OverflowStrategy,
+    private func serializeInvokePayload(instTypeArgs: ArrayList<Type>, thisType: Option<Type>,
+        overflowStrategy: OverflowStrategy,
         virtualMethodOffset: Option<UInt64>): String {
         let fields = ArrayList<String>()
         fields.add(CHIRSerializeTypeList(instTypeArgs))
         fields.add(if (let Some(ty) <- thisType) { CHIRSerializeType(ty) } else { "" })
-        fields.add(methodName)
-        fields.add(CHIRSerializeType(methodType))
-        fields.add(CHIRSerializeGenericTypeList(genericTypeParams))
         fields.add(SerializeOverflowStrategy(overflowStrategy).toString())
         fields.add(if (let Some(offset) <- virtualMethodOffset) { offset.toString() } else { "" })
         return expressionPayload("invoke", fields)
