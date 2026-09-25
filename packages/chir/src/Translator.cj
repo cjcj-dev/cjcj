@@ -9682,6 +9682,7 @@ public class Translator {
         let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_GET, args: args)
         let createdIntrinsic9170 = builder.CreateIntrinsic(elementTy, callContext, CurrentBlock())
         CurrentBlock().AppendExpression(createdIntrinsic9170)
+        createdIntrinsic9170.SetDebugLocation(loc)
         let lhsValue = RequireResult(createdIntrinsic9170)
         var compoundValue: Value
         if (assign.op == AstTokenKind.AND_ASSIGN) {

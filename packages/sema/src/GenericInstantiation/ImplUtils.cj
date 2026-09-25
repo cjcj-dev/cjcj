@@ -54,19 +54,6 @@ public func GetRealIndexingMembers(decls: ArrayList<Decl>, inGenericDecl!: Bool 
     return out
 }
 
-public func WorkForMembers(decl: Decl, worker: (Decl) -> Unit): Unit {
-    if (let Some(propDecl) <- (decl as PropDecl)) {
-        for (getter in propDecl.getters) {
-            worker(getter)
-        }
-        for (setter in propDecl.setters) {
-            worker(setter)
-        }
-        return
-    }
-    worker(decl)
-}
-
 public func NeedSwitchContext(decl: Decl): Bool {
     if (decl.IsNominalDecl()) {
         return true
@@ -115,11 +102,4 @@ public func CollectAllRelatedExtends(typeManager: TypeManager, boxedDecl: Inheri
         }
     }
     return out
-}
-
-public func GetAllRelatedExtendsByTy(typeManager: TypeManager, ty: Ty): ArrayList<ExtendDecl> {
-    if (let Some(baseDecl) <- Ty.GetInheritableDeclPtrOfTy(Some(ty))) {
-        return CollectAllRelatedExtends(typeManager, baseDecl)
-    }
-    return typeManager.GetAllExtendsByTy(ty)
 }
