@@ -1,73 +1,87 @@
 {
   "version": 1,
   "repository": "cjcj-dev/cjcj",
-  "run": 36026751895,
+  "run": 36190072480,
   "attempt": 1,
-  "commit": "9628e8eb1ef81db6877af0e3abc3bc8582692480",
-  "artifact": 10823243428,
+  "commit": "a565db51e61c14db4c2d102be1de52cf07504d92",
+  "artifact": 10889213062,
   "files": [
     {
       "path": "MANIFEST",
       "mode": 420,
-      "artifact_sha256": "d464a4cacfee0088b9272461c3049bbd3f30c22394ecb9fbc092cd0f5f31166f",
-      "release_sha256": "d464a4cacfee0088b9272461c3049bbd3f30c22394ecb9fbc092cd0f5f31166f",
-      "asset": 586445382
+      "artifact_sha256": "e3031c2cf0a82a019a5a4c64158cd25928b48b14ceaee3a942e140115f2c9933",
+      "release_sha256": "e3031c2cf0a82a019a5a4c64158cd25928b48b14ceaee3a942e140115f2c9933",
+      "asset": 589329562
     },
     {
       "path": "bin/llc",
       "mode": 493,
       "artifact_sha256": "42af90af1c0dd4ce8b2b6a8378964926dc53b5421d980e0d9e0873e76bd475e7",
       "release_sha256": "42af90af1c0dd4ce8b2b6a8378964926dc53b5421d980e0d9e0873e76bd475e7",
-      "asset": 586445406
+      "asset": 589329584
     },
     {
       "path": "bin/opt",
       "mode": 493,
       "artifact_sha256": "bae27a1de0e55f75fac561ea7628738b7d9273d04648c8e8a8af03ede8f3fe97",
       "release_sha256": "bae27a1de0e55f75fac561ea7628738b7d9273d04648c8e8a8af03ede8f3fe97",
-      "asset": 586445464
+      "asset": 589329646
+    },
+    {
+      "path": "bin/ld.lld",
+      "mode": 493,
+      "artifact_sha256": "57c9bc535810cec076dfeb0d5aee8f6f88e2927b1e6b1f912236f910c9539bbb",
+      "release_sha256": "57c9bc535810cec076dfeb0d5aee8f6f88e2927b1e6b1f912236f910c9539bbb",
+      "asset": 589329706
     },
     {
       "path": "lib/STATIC_LLVM.txt",
       "mode": 420,
-      "artifact_sha256": "d464a4cacfee0088b9272461c3049bbd3f30c22394ecb9fbc092cd0f5f31166f",
-      "release_sha256": "d464a4cacfee0088b9272461c3049bbd3f30c22394ecb9fbc092cd0f5f31166f",
-      "asset": 586445521
+      "artifact_sha256": "e3031c2cf0a82a019a5a4c64158cd25928b48b14ceaee3a942e140115f2c9933",
+      "release_sha256": "e3031c2cf0a82a019a5a4c64158cd25928b48b14ceaee3a942e140115f2c9933",
+      "asset": 589329747
     },
     {
       "path": "fixed-llc/llc.gz",
       "mode": 420,
       "artifact_sha256": "cea59c0ab320f0bed516def4b64be5eac37dd403b7d216539274575f4ec5f64a",
       "release_sha256": "cea59c0ab320f0bed516def4b64be5eac37dd403b7d216539274575f4ec5f64a",
-      "asset": 586445538
+      "asset": 589329764
     },
     {
       "path": "fixed-llc/opt.gz",
       "mode": 420,
       "artifact_sha256": "c2234cc61db423aae0496ec91662821bd06234332e97153a002b07ebd8733b11",
       "release_sha256": "c2234cc61db423aae0496ec91662821bd06234332e97153a002b07ebd8733b11",
-      "asset": 586445580
+      "asset": 589329785
+    },
+    {
+      "path": "fixed-llc/ld.lld.gz",
+      "mode": 420,
+      "artifact_sha256": "91fb82535742b2278c4a973d6dab18c53443e3b2c98bbd463933e071a7aa5a87",
+      "release_sha256": "91fb82535742b2278c4a973d6dab18c53443e3b2c98bbd463933e071a7aa5a87",
+      "asset": 589329811
     },
     {
       "path": "fixed-llc/cjselfhost_llvmshim.o",
       "mode": 420,
       "artifact_sha256": "bd3472becee7484e944cf1b20f9c080b1f3f92faee58ea059cad6d1e4d305dee",
       "release_sha256": "bd3472becee7484e944cf1b20f9c080b1f3f92faee58ea059cad6d1e4d305dee",
-      "asset": 586445607
+      "asset": 589329843
     },
     {
       "path": "fixed-llc/llvm-tools.manifest",
       "mode": 420,
-      "artifact_sha256": "5a112b39ade779e481ecea4a00a78dbcd18bd02a5b7addadb43c3dbbd8cc6111",
-      "release_sha256": "5a112b39ade779e481ecea4a00a78dbcd18bd02a5b7addadb43c3dbbd8cc6111",
-      "asset": 586445631
+      "artifact_sha256": "942821c236b83cf03af40199bc04f693a10bb6526bdbad158ab14878d316619b",
+      "release_sha256": "942821c236b83cf03af40199bc04f693a10bb6526bdbad158ab14878d316619b",
+      "asset": 589329854
     },
     {
       "path": "SHA256SUMS",
       "mode": 420,
-      "artifact_sha256": "b9198207f48a3dad981307210d55865eba85fd2124055763067349a8f60ff3ac",
-      "release_sha256": "b9198207f48a3dad981307210d55865eba85fd2124055763067349a8f60ff3ac",
-      "asset": 586445658
+      "artifact_sha256": "519820cc5534ef0400db45bb73caef8060c2c67c73ef8b9740b911802f65626a",
+      "release_sha256": "519820cc5534ef0400db45bb73caef8060c2c67c73ef8b9740b911802f65626a",
+      "asset": 589329861
     }
   ]
 }
