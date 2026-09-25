@@ -1885,7 +1885,7 @@ public class Translator {
                 case Some(exceptBlock) => exceptBlock
                 case None => errorBlock
             }
-            let binary = builder.CreateBinaryExpressionWithException(resultTy, binaryKind, lhs, rhs, successBlock,
+            let binary = builder.CreateTryBinaryExpression(resultTy, binaryKind, lhs, rhs, successBlock,
                 targetBlock, CurrentBlock())
             CurrentBlock().AppendExpression(binary)
             binary.SetOverflowStrategy(expr.overflowStrategy)
@@ -1927,7 +1927,7 @@ public class Translator {
                 case Some(exceptBlock) => exceptBlock
                 case None => errorBlock
             }
-            let unary = builder.CreateUnaryExpressionWithException(resultTy, kind, operand, successBlock,
+            let unary = builder.CreateTryUnaryExpression(resultTy, kind, operand, successBlock,
                 targetBlock, CurrentBlock())
             CurrentBlock().AppendExpression(unary)
             unary.SetOverflowStrategy(overflowStrategy)
@@ -3946,7 +3946,7 @@ public class Translator {
                 case Some(exceptBlock) => exceptBlock
                 case None => errorBlock
             }
-            let typeCast = builder.CreateNumericCastWithException(resultTy, operand, successBlock, targetBlock,
+            let typeCast = builder.CreateTryNumericCast(resultTy, operand, successBlock, targetBlock,
                 CurrentBlock())
             CurrentBlock().AppendExpression(typeCast)
             typeCast.SetDebugLocation(loc)
@@ -7785,15 +7785,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdRawArrayAllocateWithException7199 = builder.CreateRawArrayAllocateWithException(resultTy, elementTy, size, successBlock, exceptBlock,
+                let createdTryRawArrayAllocate7199 = builder.CreateTryRawArrayAllocate(resultTy, elementTy, size, successBlock, exceptBlock,
                     parent)
-                parent.AppendExpression(createdRawArrayAllocateWithException7199)
-                createdRawArrayAllocateWithException7199
+                parent.AppendExpression(createdTryRawArrayAllocate7199)
+                createdTryRawArrayAllocate7199
             } else {
-                let createdRawArrayAllocateWithException7202 = builder.CreateRawArrayAllocateWithException(resultTy, elementTy, size, successBlock, errorBlock,
+                let createdTryRawArrayAllocate7202 = builder.CreateTryRawArrayAllocate(resultTy, elementTy, size, successBlock, errorBlock,
                     parent)
-                parent.AppendExpression(createdRawArrayAllocateWithException7202)
-                createdRawArrayAllocateWithException7202
+                parent.AppendExpression(createdTryRawArrayAllocate7202)
+                createdTryRawArrayAllocate7202
             }
             term.SetDebugLocation(loc)
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
@@ -7811,13 +7811,13 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdApplyWithException7220 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock, parent)
-                parent.AppendExpression(createdApplyWithException7220)
-                createdApplyWithException7220
+                let createdTryApply7220 = builder.CreateTryApply(resultTy, callee, callContext, successBlock, exceptBlock, parent)
+                parent.AppendExpression(createdTryApply7220)
+                createdTryApply7220
             } else {
-                let createdApplyWithException7222 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock, parent)
-                parent.AppendExpression(createdApplyWithException7222)
-                createdApplyWithException7222
+                let createdTryApply7222 = builder.CreateTryApply(resultTy, callee, callContext, successBlock, errorBlock, parent)
+                parent.AppendExpression(createdTryApply7222)
+                createdTryApply7222
             }
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return term
@@ -8038,15 +8038,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdApplyWithException7432 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock,
+                let createdTryApply7432 = builder.CreateTryApply(resultTy, callee, callContext, successBlock, exceptBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdApplyWithException7432)
-                createdApplyWithException7432
+                CurrentBlock().AppendExpression(createdTryApply7432)
+                createdTryApply7432
             } else {
-                let createdApplyWithException7435 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
+                let createdTryApply7435 = builder.CreateTryApply(resultTy, callee, callContext, successBlock, errorBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdApplyWithException7435)
-                createdApplyWithException7435
+                CurrentBlock().AppendExpression(createdTryApply7435)
+                createdTryApply7435
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -8096,7 +8096,7 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             if (let Some(exceptBlock) <- exceptionBlock) {
-                let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, exceptBlock,
+                let term = builder.CreateTryAllocate(resultTy, allocatedTy, successBlock, exceptBlock,
                     CurrentBlock())
                 CurrentBlock().AppendExpression(term)
                 term.SetDebugLocation(loc)
@@ -8104,7 +8104,7 @@ public class Translator {
                 FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
                 return result
             }
-            let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, errorBlock,
+            let term = builder.CreateTryAllocate(resultTy, allocatedTy, successBlock, errorBlock,
                 CurrentBlock())
             CurrentBlock().AppendExpression(term)
             term.SetDebugLocation(loc)
@@ -8127,11 +8127,11 @@ public class Translator {
                 case None => errorBlock
             }
             if (let Some(arg) <- spawnArg) {
-                let createdSpawnWithException7522 = builder.CreateSpawnWithException(resultTy, futureObj, arg, successBlock, targetBlock, CurrentBlock())
-                CurrentBlock().AppendExpression(createdSpawnWithException7522)
+                let createdTrySpawn7522 = builder.CreateTrySpawn(resultTy, futureObj, arg, successBlock, targetBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdTrySpawn7522)
             } else {
-                let createdSpawnWithException7524 = builder.CreateSpawnWithException(resultTy, futureObj, successBlock, targetBlock, CurrentBlock())
-                CurrentBlock().AppendExpression(createdSpawnWithException7524)
+                let createdTrySpawn7524 = builder.CreateTrySpawn(resultTy, futureObj, successBlock, targetBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdTrySpawn7524)
             }
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return
@@ -8271,15 +8271,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdIntrinsicWithException7657 = builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, exceptBlock,
+                let createdTryIntrinsic7657 = builder.CreateTryIntrinsic(resultTy, callContext, successBlock, exceptBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdIntrinsicWithException7657)
-                createdIntrinsicWithException7657
+                CurrentBlock().AppendExpression(createdTryIntrinsic7657)
+                createdTryIntrinsic7657
             } else {
-                let createdIntrinsicWithException7660 = builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, errorBlock,
+                let createdTryIntrinsic7660 = builder.CreateTryIntrinsic(resultTy, callContext, successBlock, errorBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdIntrinsicWithException7660)
-                createdIntrinsicWithException7660
+                CurrentBlock().AppendExpression(createdTryIntrinsic7660)
+                createdTryIntrinsic7660
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -8680,13 +8680,13 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdInvokeWithException8040 = builder.CreateInvokeWithException(resultTy, callContext, successBlock, exceptBlock, CurrentBlock())
-                CurrentBlock().AppendExpression(createdInvokeWithException8040)
-                createdInvokeWithException8040
+                let createdTryInvoke8040 = builder.CreateTryInvoke(resultTy, callContext, successBlock, exceptBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdTryInvoke8040)
+                createdTryInvoke8040
             } else {
-                let createdInvokeWithException8042 = builder.CreateInvokeWithException(resultTy, callContext, successBlock, errorBlock, CurrentBlock())
-                CurrentBlock().AppendExpression(createdInvokeWithException8042)
-                createdInvokeWithException8042
+                let createdTryInvoke8042 = builder.CreateTryInvoke(resultTy, callContext, successBlock, errorBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdTryInvoke8042)
+                createdTryInvoke8042
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -8705,15 +8705,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdInvokeStaticWithException8060 = builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, exceptBlock,
+                let createdTryInvokeStatic8060 = builder.CreateTryInvokeStatic(resultTy, callContext, successBlock, exceptBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdInvokeStaticWithException8060)
-                createdInvokeStaticWithException8060
+                CurrentBlock().AppendExpression(createdTryInvokeStatic8060)
+                createdTryInvokeStatic8060
             } else {
-                let createdInvokeStaticWithException8063 = builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, errorBlock,
+                let createdTryInvokeStatic8063 = builder.CreateTryInvokeStatic(resultTy, callContext, successBlock, errorBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdInvokeStaticWithException8063)
-                createdInvokeStaticWithException8063
+                CurrentBlock().AppendExpression(createdTryInvokeStatic8063)
+                createdTryInvokeStatic8063
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -9573,7 +9573,7 @@ public class Translator {
                     case Some(exceptBlock) => exceptBlock
                     case None => errorBlock
                 }
-                let opResult = builder.CreateBinaryExpressionWithException(resultTy, ToCHIRCompoundAssignOp(expr.op),
+                let opResult = builder.CreateTryBinaryExpression(resultTy, ToCHIRCompoundAssignOp(expr.op),
                     lhsValue, rhsValue, successBlock, targetBlock, CurrentBlock())
                 CurrentBlock().AppendExpression(opResult)
                 opResult.SetOverflowStrategy(expr.overflowStrategy)
@@ -9878,7 +9878,7 @@ public class Translator {
                     case Some(exceptBlock) => exceptBlock
                     case None => errorBlock
                 }
-                let opResult = builder.CreateBinaryExpressionWithException(resultTy, ToCHIRCompoundAssignOp(assign.op),
+                let opResult = builder.CreateTryBinaryExpression(resultTy, ToCHIRCompoundAssignOp(assign.op),
                     lhsValue, rhsValue, successBlock, targetBlock, CurrentBlock())
                 CurrentBlock().AppendExpression(opResult)
                 opResult.SetOverflowStrategy(assign.overflowStrategy)

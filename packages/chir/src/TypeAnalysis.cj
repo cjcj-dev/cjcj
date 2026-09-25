@@ -220,17 +220,17 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
 
     public override func HandleTerminatorEffect(state: TypeDomain, terminator: Expression): Option<Block> {
         match (terminator.GetExprKind()) {
-            case ExprKind.NUMERIC_CAST_WITH_EXCEPTION =>
-                HandleTypeCastExpr(state, (terminator as NumericCastWithException).getOrThrow())
+            case ExprKind.TRY_NUMERIC_CAST =>
+                HandleTypeCastExpr(state, (terminator as TryNumericCast).getOrThrow())
             case ExprKind.GOTO => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.EXIT => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.BRANCH => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.MULTIBRANCH => HandleTerminatorEffectImpl(state, terminator)
-            case ExprKind.NEG_WITH_EXCEPTION | ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION |
-                ExprKind.MUL_WITH_EXCEPTION | ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION |
-                ExprKind.EXP_WITH_EXCEPTION | ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
+            case ExprKind.TRY_NEG | ExprKind.TRY_ADD | ExprKind.TRY_SUB |
+                ExprKind.TRY_MUL | ExprKind.TRY_DIV | ExprKind.TRY_MOD |
+                ExprKind.TRY_EXP | ExprKind.TRY_LSHIFT | ExprKind.TRY_RSHIFT =>
                 HandleTerminatorEffectImpl(state, terminator)
-            case ExprKind.INTRINSIC_WITH_EXCEPTION => HandleTerminatorEffectImpl(state, terminator)
+            case ExprKind.TRY_INTRINSIC => HandleTerminatorEffectImpl(state, terminator)
             case _ => HandleTerminatorEffectImpl(state, terminator)
         }
         return None

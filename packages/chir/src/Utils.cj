@@ -583,8 +583,8 @@ public func ReplaceUsesWithWrapper(curFunc: Value, apply: Option<Apply>, wrapper
                 continue
             }
         }
-        if (user.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION) {
-            let applyNode = (user as ApplyWithException).getOrThrow()
+        if (user.GetExprKind() == ExprKind.TRY_APPLY) {
+            let applyNode = (user as TryApply).getOrThrow()
             if (!isForeign && refEq(applyNode.GetCallee(), curFunc)) {
                 continue
             }
@@ -861,7 +861,7 @@ public func GetInstParentCustomTypeForApplyCallee(expr: Apply, builder: CHIRBuil
     return GetInstParentCustomTyOfCallee(expr.GetCallee(), expr.GetArgs(), expr.GetThisType(), builder)
 }
 
-public func GetInstParentCustomTypeForAweCallee(expr: ApplyWithException, builder: CHIRBuilder): Option<Type> {
+public func GetInstParentCustomTypeForAweCallee(expr: TryApply, builder: CHIRBuilder): Option<Type> {
     return GetInstParentCustomTyOfCallee(expr.GetCallee(), expr.GetArgs(), expr.GetThisType(), builder)
 }
 
@@ -991,7 +991,7 @@ public func RequiredResultType(expr: Expression): Type {
 }
 
 public func IsApplyToLambda(expr: Expression): Option<Lambda> {
-    if (expr.GetExprKind() != ExprKind.APPLY && expr.GetExprKind() != ExprKind.APPLY_WITH_EXCEPTION) {
+    if (expr.GetExprKind() != ExprKind.APPLY && expr.GetExprKind() != ExprKind.TRY_APPLY) {
         return None
     }
     if (expr.GetNumOfOperands() == 0) {

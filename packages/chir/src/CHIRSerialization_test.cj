@@ -108,3 +108,93 @@ public class ExpressionFamilySerializationTest {
         @Expect((restoredExpressions[3] as NumericCast).isSome(), true)
     }
 }
+
+@Test
+public class TryKindRenameTest {
+    @TestCase
+    public func TryApplyDisplayName(): Unit {
+        let name = ExprKindName(ExprKind.TRY_APPLY)
+        println("TRY_APPLY_NAME_ASSERT_RAN name=${name}")
+        @Expect(name, "TryApply")
+        @Expect(ExprKindIndex(ExprKind.TRY_APPLY), 5)
+    }
+
+    @TestCase
+    public func TryKindNamesMatchUpstream(): Unit {
+        @Expect(ExprKindName(ExprKind.TRY_INVOKE), "TryInvoke")
+        @Expect(ExprKindName(ExprKind.TRY_INVOKESTATIC), "TryInvokeStatic")
+        @Expect(ExprKindName(ExprKind.TRY_NEG), "TryNeg")
+        @Expect(ExprKindName(ExprKind.TRY_ADD), "TryAdd")
+        @Expect(ExprKindName(ExprKind.TRY_SUB), "TrySub")
+        @Expect(ExprKindName(ExprKind.TRY_MUL), "TryMul")
+        @Expect(ExprKindName(ExprKind.TRY_DIV), "TryDiv")
+        @Expect(ExprKindName(ExprKind.TRY_MOD), "TryMod")
+        @Expect(ExprKindName(ExprKind.TRY_EXP), "TryExp")
+        @Expect(ExprKindName(ExprKind.TRY_LSHIFT), "TryLShift")
+        @Expect(ExprKindName(ExprKind.TRY_RSHIFT), "TryRShift")
+        @Expect(ExprKindName(ExprKind.TRY_SPAWN), "TrySpawn")
+        @Expect(ExprKindName(ExprKind.TRY_NUMERIC_CAST), "TryNumericCast")
+        @Expect(ExprKindName(ExprKind.TRY_INTRINSIC), "TryIntrinsic")
+        @Expect(ExprKindName(ExprKind.TRY_ALLOCATE), "TryAllocate")
+        @Expect(ExprKindName(ExprKind.TRY_RAW_ARRAY_ALLOCATE), "TryRawArrayAllocate")
+        @Expect(CHIRFB_CHIR_EXPR_KIND_TRY_APPLY, 5u8)
+        @Expect(CHIRFB_CHIR_EXPR_KIND_TRY_INVOKE, 6u8)
+        @Expect(CHIRFB_CHIR_EXPR_KIND_TRY_NEG, 13u8)
+        @Expect(CHIRFB_CHIR_EXPR_KIND_TRY_ADD, 14u8)
+        @Expect(CHIRFB_CHIR_EXPR_KIND_TRY_R_SHIFT, 21u8)
+        @Expect(CHIRFB_CHIR_EXPR_KIND_TRY_RAW_ARRAY_ALLOCATE, 12u8)
+    }
+
+    @TestCase
+    public func TryNegWireOrdinalUnchanged(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let pkg = builder.CreatePackage("try_neg_wire")
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "try_neg_wire")
+        pkg.SetPackageInitFunc(fn)
+        pkg.SetPackageLiteralInitFunc(fn)
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let source = builder.CreateBlock(body)
+        let normal = builder.CreateBlock(body)
+        let error = builder.CreateBlock(body)
+        body.SetEntryBlock(source)
+        let valueExpr = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(7), source)
+        let value = valueExpr.GetResult().getOrThrow()
+        let neg = builder.CreateTryUnaryExpression(context.GetInt64Ty(), ExprKind.NEG, value, normal, error, source)
+        source.AppendExpressions(ArrayList<Expression>([valueExpr, neg]))
+        let bytes = CHIRSerializer.Serialize(pkg)
+        let serialized = GetCHIRPackage(bytes)
+        let expressions = serialized.GetExprs().getOrThrow()
+        let kinds = serialized.GetExprs_type().getOrThrow()
+        var tryNegTags: Int64 = 0
+        for (index in 0u32..expressions.size()) {
+            let unionKind = kinds.Get(index, 0u8)
+            let position = (expressions.Get(index) as Int64).getOrThrow()
+            if (unionKind == CHIRFB_EXPRESSION_ELEM_UNARY_EXPRESSION_BASE) {
+                let expr = PackageFormat_UnaryExpressionBase(bytes, position)
+                if (expr.GetBase().getOrThrow().GetKind() == CHIRFB_CHIR_EXPR_KIND_TRY_NEG) {
+                    tryNegTags++
+                }
+            }
+        }
+        println("TRY_NEG_WIRE_ASSERT_RAN tags=${tryNegTags} ordinal=${CHIRFB_CHIR_EXPR_KIND_TRY_NEG}")
+        @Expect(tryNegTags, 1)
+        @Expect(neg.GetExprKind(), ExprKind.TRY_NEG)
+        let restoredContext = CHIRContext()
+        let restoredBuilder = CHIRBuilder(restoredContext)
+        CHIRDeserializerImpl(restoredBuilder).Run(serialized)
+        let restored = restoredContext.GetCurPackage().getOrThrow().GetGlobalFunctions()[0]
+        let restoredExpressions = restored.GetEntryBlock().getOrThrow().GetExpressions()
+        var restoredTryNeg: Int64 = 0
+        var index: Int64 = 0
+        while (index < restoredExpressions.size) {
+            if (restoredExpressions[index].GetExprKind() == ExprKind.TRY_NEG &&
+                (restoredExpressions[index] as TryUnaryExpression).isSome()) {
+                restoredTryNeg++
+            }
+            index++
+        }
+        @Expect(restoredTryNeg, 1)
+    }
+}
