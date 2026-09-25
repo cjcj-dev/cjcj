@@ -204,6 +204,29 @@ make_sdk_fixture() {
   printf '%s\n' '#!/usr/bin/env bash' 'export PATH="$(dirname "${BASH_SOURCE[0]}")/bin:$PATH"' > "$base/envsetup.sh"
 }
 
+check_exit_receipts() {
+  new_tmp
+  local script out rc recorded
+  for script in run.sh exceptions/run.sh library/run.sh library/execute.sh unload/run.sh; do
+    out="$TMP/${script%/*}-receipts"
+    mkdir -p "$out"
+    rc=0
+    # Missing input files stop before compilation; the EXIT receipt must retain
+    # that real script status, wall time and final uptime on this failure path.
+    env LITERAL_OUT="$out" CANGJIE_HOME="$TMP/missing-sdk" \
+      LITERAL_HOST="$TMP/missing-host" LITERAL_RUNTIME="$TMP/missing-runtime" \
+      LITERAL_RUNTIME_HEADERS="$TMP/missing-headers" LITERAL_ARTIFACTS="$TMP/missing-artifacts" \
+      LITERAL_CORES=0 bash "$ROOT/../../test/heap_string_literals/$script" > "$out/output.log" 2>&1 || rc=$?
+    [ "$rc" -ne 0 ] || fail EXIT-RECEIPT "missing inputs unexpectedly accepted: $script"
+    [ -f "$out/run.rc" ] || fail EXIT-RECEIPT "status receipt absent: $script rc=$rc"
+    recorded=$(cat "$out/run.rc")
+    [ "$recorded" = "$rc" ] || fail EXIT-RECEIPT "status mismatch: $script process=$rc receipt=$recorded"
+    /usr/bin/grep -Eq '^wall=[0-9]+$' "$out/wall.txt" || fail EXIT-RECEIPT "wall receipt absent: $script"
+    [ -s "$out/uptime-after.txt" ] || fail EXIT-RECEIPT "uptime receipt absent: $script"
+    echo "PASS EXIT-RECEIPT script=$script process=$rc receipt=$recorded"
+  done
+}
+
 check_sdk_literal_prefix() {
   new_tmp
   make_sdk_fixture
@@ -669,6 +692,9 @@ check_shim_wiring() {
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-test}" in
+  check-exit-receipts)
+    check_exit_receipts
+    ;;
   check-sdk-literal-prefix)
     check_sdk_literal_prefix
     ;;
@@ -864,6 +890,7 @@ case "${1:-test}" in
     assert_colour_tuple "$3" "$4"
     ;;
   test)
+    bash "$0" check-exit-receipts || fail EXIT-RECEIPT "exit receipt regression"
     bash "$0" check-sdk-literal-prefix || fail STD-LITERAL-PREFIX "literal prefix regression"
     make_dry_fixture
     dry_run > "$TMP/dry.log"
