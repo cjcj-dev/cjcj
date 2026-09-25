@@ -150,6 +150,7 @@ foreign {
 @When[os == "Windows"]
 foreign {
     func LoadLibraryA(filename: CString): CPointer<Unit>
+    func GetModuleHandleA(filename: CString): CPointer<Unit>
     func GetProcAddress(handle: CPointer<Unit>, symbol: CString): CPointer<Unit>
     func FreeLibrary(handle: CPointer<Unit>): Int32
     func free(ptr: CString): Unit
@@ -518,6 +519,27 @@ public func GetMethodPointer(handle: RuntimeHandle, name: String): CPointer<Unit
     return result
 }
 
+// The Cangjie host has already initialized its runtime before main. Resolve
+// fallback tasks against that mapping, not a second runtime beside the compiler.
+@When[os != "Windows"]
+private func GetHostRuntimeMethodPointer(name: String): CPointer<Unit> {
+    let host = RuntimeHandle("", raw: unsafe { dlopen(CString(CPointer<UInt8>()), 0x1) })
+    let method = GetMethodPointer(host, name)
+    let _ = CloseSymbolTable(host)
+    return method
+}
+
+@When[os == "Windows"]
+private func GetHostRuntimeMethodPointer(name: String): CPointer<Unit> {
+    try (moduleName = unsafe { LibC.mallocCString("libcangjie-runtime.dll") }.asResource()) {
+        // GetModuleHandle borrows the startup module; do not FreeLibrary it.
+        let host = RuntimeHandle("", raw: unsafe { GetModuleHandleA(moduleName.value) })
+        return GetMethodPointer(host, name)
+    } catch (e: Exception) {
+        return CPointer<Unit>()
+    }
+}
+
 public func CloseSymbolTable(handle: RuntimeHandle): Int64 {
     if (!handle.opened || handle.raw.isNull()) {
         handle.opened = false
@@ -647,11 +669,10 @@ public class RuntimeInit {
                 }
                 initRuntime = true
             } else {
-                // Official runtime fallback (track 1): keep reusing the process-global scheduler.
-                if (!PrepareRuntime(opened, initArgs)) {
-                    return false
-                }
-                runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
+                // Unlike the C++ host (InvokeUtilCJNative.cpp:171-179), this host
+                // already owns a live runtime. No process-level init/config call.
+                runtimeMethodFunc = GetHostRuntimeMethodPointer(CJ_NEW_TASK_FROM_C)
+                runtimeReleaseFunc = GetHostRuntimeMethodPointer(CJ_RELEASE_HANDLE_FROM_C)
                 if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
                     return false
                 }
@@ -664,9 +685,7 @@ public class RuntimeInit {
     public func CloseRuntime(): Unit {
         if (let Some(opened) <- handle) {
             if (initRuntime) {
-                if (runtimeInstanceHandle.isNull()) {
-                    FinishRuntime(opened)
-                } else {
+                if (!runtimeInstanceHandle.isNull()) {
                     // RT_ISOLATE_API_SPEC.md §3.2: InstanceStop occupies the C++
                     // FinishRuntime position (InvokeUtilCJNative.cpp:181-190).
                     let stopResult = unsafe { RuntimeInstanceStopFunc(runtimeInstanceStopFunc)(runtimeInstanceHandle) }
