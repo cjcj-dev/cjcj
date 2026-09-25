@@ -115,12 +115,12 @@ public class ExpressionFamilyEdgesTest {
             normal, error, source)
         let raw = builder.CreateRawArrayAllocateWithException(context.GetRefTy(context.GetRawArrayTy(context.GetInt64Ty())),
             context.GetInt64Ty(), value, normal, error, source)
-        let spawn = builder.CreateSpawnWithException(context.GetInt64Ty(), value, normal, error, source)
+        let spawnExpr = builder.CreateSpawnWithException(context.GetInt64Ty(), value, normal, error, source)
         @Expect((cast as NumericCastBase).isSome(), true)
         @Expect((allocate as AllocateBase).isSome(), true)
         @Expect((raw as RawArrayAllocateBase).isSome(), true)
-        @Expect((spawn as SpawnBase).isSome(), true)
-        for (expr in ArrayList<Expression>([cast, allocate, raw, spawn])) {
+        @Expect((spawnExpr as SpawnBase).isSome(), true)
+        for (expr in ArrayList<Expression>([cast, allocate, raw, spawnExpr])) {
             @Expect(expr.IsTerminator(), true)
             @Expect(expr.GetNumOfSuccessor(), 2)
             @Expect(expr.GetOperands().size, expr.GetNumOfNonSuccessorOperands() + 2)

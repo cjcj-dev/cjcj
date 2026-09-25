@@ -30,25 +30,54 @@ class SerializedPackage:
         offset = self.field(table, slot)
         return offset + self.number('I', offset) if offset else 0
 
-    def cast_tags(self):
+    def scalar(self, table, slot):
+        offset = self.field(table, slot)
+        return self.number('I', offset) if offset else 0
+
+    def string(self, table, slot):
+        offset = self.pointer(table, slot)
+        return self.data[offset + 4:offset + 4 + self.number('I', offset)].decode() if offset else ''
+
+    def cast_tags(self, package_name, function_name):
         root = self.number('I', 0)
         kinds, expressions = self.pointer(root, 18), self.pointer(root, 20)
         assert kinds and expressions, 'serializer produced no expression vectors'
         count = self.number('I', expressions)
         assert self.number('I', kinds) == count
+        values = self.pointer(root, 16)
+
+        def value(index):
+            assert index > 0
+            offset = values + 4 + (index - 1) * 4
+            return offset + self.number('I', offset)
+
         tags = []
+        owned_expressions = 0
         for index in range(count):
             union = self.number('B', kinds + 4 + index)
+            # Every expression union has Expression as its first base; the
+            # only two cast families of interest are plain Expression and NumericCastBase.
             if union not in (1, 18):
                 continue
             offset = expressions + 4 + index * 4
             table = offset + self.number('I', offset)
             base = table if union == 1 else self.pointer(table, 4)
+            owner = self.scalar(base, 12)
+            if not owner:
+                continue
+            group = value(self.scalar(value(owner), 6))
+            function_id = self.scalar(group, 10)
+            if not function_id:
+                continue
+            global_value = self.pointer(value(function_id), 4)
+            if (self.string(global_value, 10), self.string(global_value, 6)) != (package_name, function_name):
+                continue
+            owned_expressions += 1
             kind_field = self.field(base, 6)
             kind = self.number('B', kind_field) if kind_field else 0
             if kind in (44, 48):
                 tags.append({'index': index, 'union': union, 'kind': kind})
-        return tags
+        return tags, owned_expressions
 
 
 def run_case(compiler, fixture, output, jobs):
@@ -67,11 +96,13 @@ def run_case(compiler, fixture, output, jobs):
     serialized = [p for p in output.glob('*.chir') if p.read_bytes()[:4] != b'ToCH']
     assert len(serialized) == 1, serialized
     data = serialized[0].read_bytes()
-    tags = SerializedPackage(data).cast_tags()
+    target_function = {'class_cast': 'upcast', 'numeric_cast': 'widen', 'control': 'identity'}[fixture.stem]
+    tags, owned_expressions = SerializedPackage(data).cast_tags('expression_' + fixture.stem, target_function)
+    assert owned_expressions > 0, f'no product expressions observed in {target_function}'
     expected = {'class_cast': (1, 44), 'numeric_cast': (18, 48), 'control': None}[fixture.stem]
     actual = [(tag['union'], tag['kind']) for tag in tags]
     result.update(artifact=str(serialized[0]), sha256=hashlib.sha256(data).hexdigest(), tags=tags,
-                  assertion_executed=True, expected=expected,
+                  assertion_executed=True, expected=expected, owned_expressions=owned_expressions,
                   **{'pass': (bool(actual) and all(tag == expected for tag in actual))
                      if expected else not actual})
     print(f"ASSERT_SERIALIZED_CAST_TAG {fixture.stem} expected={expected} observed={actual} pass={result['pass']}", flush=True)

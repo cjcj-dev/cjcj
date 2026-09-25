@@ -76,7 +76,7 @@ def compile_case(compiler, source, output, imports, schema, flatc, jobs):
     assert len(artifacts) == 1, artifacts
     artifact = artifacts[0]
     result['raw_sha256'] = sha(artifact)
-    decode = subprocess.run([str(flatc), '--json', '--strict-json', '--defaults-json',
+    decode = subprocess.run([str(flatc), '--json', '--strict-json', '--defaults-json', '--raw-binary', '--no-warnings',
                              '-o', str(output), str(schema), '--', str(artifact)],
                             capture_output=True, text=True)
     (output / 'decode.log').write_text(decode.stdout + decode.stderr)
@@ -103,8 +103,9 @@ def main():
     p.add_argument('--out', type=Path, required=True)
     p.add_argument('--jobs', type=int, default=os.cpu_count())
     p.add_argument('--fixture-only', action='store_true')
+    p.add_argument('--workers', type=int, default=8, help='independent compiler processes')
     args = p.parse_args()
-    imports = [args.imports_root]
+    imports = [args.imports_root] + sorted(args.imports_root.glob('*@cjcj'))
     sources = [] if args.fixture_only else [root / 'src' for root in sorted((args.source_root / 'packages').iterdir())
                                            if (root / 'cjpm.toml').exists() and root.name != 'cjc']
     fixtures = [Path(__file__).with_name(name + '.cj') for name in ('class_cast', 'numeric_cast', 'control')]
@@ -112,19 +113,30 @@ def main():
     manifest = {'compilers': {name: {'path': str(exe), 'sha256': sha(exe)} for name, exe in
                              [('baseline', args.baseline), ('candidate', args.candidate)]},
                 'schema_sha256': sha(args.schema), 'flatc_sha256': sha(args.flatc),
-                'affinity': sorted(os.sched_getaffinity(0)), 'library_sources': list(map(str, sources)), 'cases': []}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                'affinity': sorted(os.sched_getaffinity(0)), 'jobs_per_serialization': args.jobs,
+                'parallel_compilers': args.workers, 'library_sources': list(map(str, sources)), 'cases': []}
+    cases = [{'source': str(source)} for source in fixtures + sources]
+    manifest['cases'] = cases
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
+        pending = {}
         for index, source in enumerate(fixtures + sources):
-            pending = {name: pool.submit(compile_case, exe, source, args.out / str(index) / name,
-                                        imports, args.schema, args.flatc, args.jobs)
-                       for name, exe in [('baseline', args.baseline), ('candidate', args.candidate)]}
-            case = {'source': str(source), **{name: future.result() for name, future in pending.items()}}
-            case['same_normalized_bytes'] = (case['baseline']['rc'] == case['candidate']['rc'] == 0
-                and case['baseline'].get('canonical_sha256') is not None
-                and case['baseline'].get('canonical_sha256') == case['candidate'].get('canonical_sha256'))
-            manifest['cases'].append(case)
+            for name, exe in [('baseline', args.baseline), ('candidate', args.candidate)]:
+                future = pool.submit(compile_case, exe, source, args.out / str(index) / name,
+                                     imports, args.schema, args.flatc, args.jobs)
+                pending[future] = (index, name)
+        for future in concurrent.futures.as_completed(pending):
+            index, name = pending[future]
+            case = cases[index]
+            try:
+                case[name] = future.result()
+            except Exception as error:
+                case[name] = {'rc': -1, 'error': str(error)}
+            if 'baseline' in case and 'candidate' in case:
+                case['same_normalized_bytes'] = (case['baseline']['rc'] == case['candidate']['rc'] == 0
+                    and case['baseline'].get('canonical_sha256') is not None
+                    and case['baseline'].get('canonical_sha256') == case['candidate'].get('canonical_sha256'))
+                print(f"CHIR_BYTES {case['source']} same={case['same_normalized_bytes']} rc={case['baseline']['rc']}/{case['candidate']['rc']}", flush=True)
             (args.out / 'result.json').write_text(json.dumps(manifest, indent=2) + '\n')
-            print(f"CHIR_BYTES {source} same={case['same_normalized_bytes']} rc={case['baseline']['rc']}/{case['candidate']['rc']}", flush=True)
     return 0 if all(case['same_normalized_bytes'] for case in manifest['cases']) else 1
 
 

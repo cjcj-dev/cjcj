@@ -60,6 +60,7 @@ public class ExpressionFamilySerializationTest {
         let pkg = builder.CreatePackage("cast_tags")
         let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "cast_tags")
         pkg.SetPackageInitFunc(fn)
+        pkg.SetPackageLiteralInitFunc(fn)
         let body = builder.CreateBlockGroup(fn)
         fn.InitBody(body)
         let block = builder.CreateBlock(body)
