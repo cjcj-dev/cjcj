@@ -19,7 +19,7 @@ def sha(p):
 def compile_one(compiler, source, out, level, imports, jobs):
     out.mkdir(parents=True, exist_ok=True)
     command = [str(compiler)] + (['-p'] if source.is_dir() else []) + [str(source),
-               '--output-type=staticlib', '-' + level, '--dump-chir', '--dump-ir',
+               '--output-type=staticlib', '-' + level, '--save-temps', '--dump-ir',
                '--jobs', str(jobs), '-o', str(out/'output.bc')]
     for directory in imports:
         command += ['--import-path', str(directory)]
@@ -30,7 +30,7 @@ def compile_one(compiler, source, out, level, imports, jobs):
     return {'command': command, 'rc': process.returncode, 'wall': time.monotonic()-start,
             'uptime_before': before, 'uptime_after': subprocess.check_output(['uptime'], text=True).strip(),
             'outputs': {str(p.relative_to(out)): sha(p) for p in out.rglob('*')
-                        if p.is_file() and p.suffix in ('.bc','.ll','.cjo','.chirtxt')}}
+                        if p.is_file() and p.suffix in ('.bc','.ll','.cjo','.chir')}}
 
 
 def instructions(root):
@@ -54,8 +54,8 @@ def difference(left, right, out):
     changed=[name for name in sorted(a.keys()|b.keys()) if a.get(name)!=b.get(name)]
     out.write_text(''.join(''.join(difflib.unified_diff(a.get(k,'').splitlines(True),b.get(k,'').splitlines(True),
                               fromfile='base/'+k,tofile='other/'+k))+'\n' for k in changed))
-    chir_a={p.name:p.read_bytes() for p in left.rglob('*.chirtxt')}
-    chir_b={p.name:p.read_bytes() for p in right.rglob('*.chirtxt')}
+    chir_a={p.name:p.read_bytes() for p in left.rglob('*.chir')}
+    chir_b={p.name:p.read_bytes() for p in right.rglob('*.chir')}
     chir_changed=[k for k in sorted(chir_a.keys()|chir_b.keys()) if chir_a.get(k)!=chir_b.get(k)]
     return {'function_count':[len(a),len(b)],'changed_functions':changed,'chir_changed':chir_changed,
             'chir_count':[len(chir_a),len(chir_b)],'instruction_diff':str(out)}
@@ -84,7 +84,11 @@ def main():
     (a.out/'result.json').write_text(json.dumps(record,indent=2)+'\n')
     print(json.dumps({'rc':{level:{arm:r['rc'] for arm,r in runs.items()} for level,runs in record['runs'].items()},
                       'comparisons':record['comparisons']},indent=2))
-    return 0 if all(r['rc']==0 for runs in record['runs'].values() for r in runs.values()) else 1
+    compiled = all(r['rc']==0 for runs in record['runs'].values() for r in runs.values())
+    observed = len(record['comparisons']) == 2 and all(
+        all(count > 0 for count in item['function_count'] + item['chir_count'])
+        for comparisons in record['comparisons'].values() for item in comparisons.values())
+    return 0 if compiled and observed else 1
 
 
 if __name__=='__main__':

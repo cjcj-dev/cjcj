@@ -99,7 +99,7 @@ def observe(items, level):
 def compile_case(compiler, source, destination, level, jobs, executable=False):
     destination.mkdir(parents=True, exist_ok=True)
     command = [str(compiler), str(source), *([] if executable else ['--output-type=staticlib']), '-' + level,
-               '--dump-chir', '--dump-ir', '--jobs', str(jobs), '-o', str(destination / 'tail.bc')]
+               '--dump-ir', '--jobs', str(jobs), '-o', str(destination / 'tail.bc')]
     start = time.monotonic()
     before = subprocess.check_output(['uptime'], text=True).strip()
     with (destination / 'compile.log').open('w') as log:
