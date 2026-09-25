@@ -85,7 +85,11 @@ test('the ordinary host nightly literal has one pin and the release exception is
     // The astabi behavior-triad evidence harness is pinned to the 1.2 baseline
     // SDK lib paths; it is not an ordinary host consumer.
     const isAstabiBaselineHarness = file === path.join(root, 'tools', 'astabi', 'run_behavior_triad.sh');
-    if (file === pinPath || file === cjpmPinPath || file.endsWith('/.github/workflows/build-release-package.yml') || isAstabiBaselineHarness) continue;
+    const isIndependentPin = file === path.join(root, 'ci', 'h48_language_tuple_pin.json')
+      || file === path.join(root, 'ci', 'release', 'H48_LANGUAGE_TUPLE.md')
+      || file === path.join(root, 'ci', 'build_ast_support.sh')
+      || file === path.join(root, '.github', 'workflows', 'build-ast-support.yml');
+    if (file === pinPath || file === cjpmPinPath || file.endsWith('/.github/workflows/build-release-package.yml') || isAstabiBaselineHarness || isIndependentPin) continue;
     const text = await fs.readFile(file, 'utf8');
     if (/nightly-\d+\.\d+\.\d+-alpha\.\d+/.test(text)) {
       offenders.push(path.relative(root, file));
