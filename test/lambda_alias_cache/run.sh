@@ -12,7 +12,7 @@ run_case() {
   local name="$1" kind="$2"
   local log="$OUT/${name}.log"
   local bin="$OUT/${name}.out"
-  "$CJC" "$SRC/${name}.cj" -o "$bin" -Woff unused >"$log" 2>&1
+  "$CJC" "$SRC/${name}.cj" --output-type=staticlib --diagnostic-format=noColor -o "$bin" -Woff unused >"$log" 2>&1
   local rc=$?
   local miss
   miss=$(sed 's/\x1b\[[0-9;]*m//g' "$log" | /usr/bin/grep -c 'mismatched number of parameters' || true)
