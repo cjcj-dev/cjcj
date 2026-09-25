@@ -496,7 +496,17 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
 func GetOperands(expression: Expression): ArrayList<Value> {
     let operands = expression.GetOperands()
     if (let Some(constant) <- (expression as Constant)) {
-        operands.add(constant.GetValue())
+        let value = constant.GetValue()
+        var already = false
+        for (operand in operands) {
+            if (refEq(operand, value)) {
+                already = true
+                break
+            }
+        }
+        if (!already) {
+            operands.add(value)
+        }
     }
     if (let Some(terminator) <- expression.AsTerminator()) {
         for (successor in terminator.GetSuccessors()) {
