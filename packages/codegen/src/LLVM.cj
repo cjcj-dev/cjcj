@@ -346,6 +346,7 @@ foreign {
     func LLVMSelfhostSetAnyRegCallingConv(inst: LLVMValueRef): Unit
     func LLVMSelfhostGetGEPResultElementType(gep: LLVMValueRef): LLVMTypeRef
     func LLVMSelfhostStripInBoundsOffsets(value: LLVMValueRef): LLVMValueRef
+    func LLVMSelfhostBuilderSetFastMath(builder: LLVMBuilderRef): Unit
     func LLVMSelfhostCreateAtomicCmpXchg(builder: LLVMBuilderRef, ptr: LLVMValueRef, cmp: LLVMValueRef,
         newValue: LLVMValueRef): LLVMValueRef
     func LLVMSelfhostCreateAtomicRMW(builder: LLVMBuilderRef, op: UInt32, ptr: LLVMValueRef,
