@@ -32,16 +32,18 @@ func use(x: Root): Int64 {
     cases = {
         # cb97757c consults the cached relation graph: a newly added child
         # is absent. Preserve that upstream behavior (advisor 20260925T124853Z).
-        'add_child': (initial, initial + 'class B <: Root {}\n', False),
-        'open_child': (initial, initial.replace('class A', 'open class A'), True),
-        'add_unrelated': (initial, initial + 'class Other {}\n', False),
-        'change_body': (initial, initial.replace('=> 1', '=> 3'), False),
+        'add_child': (initial, initial + 'class B <: Root {}\n', False, 0),
+        'open_child': (initial, initial.replace('class A', 'open class A'), True, 1),
+        'add_unrelated': (initial, initial + 'class Other {}\n', False, 0),
+        'change_body': (initial, initial.replace('=> 1', '=> 3'), False, 0),
+        'add_root': (initial, initial + 'sealed abstract class NewRoot {}\n', True, 0),
+        'add_generic_root': (initial, initial + 'sealed abstract class NewRoot<T> {}\n', False, 0),
     }
     results = dict(compiler_sha256=hashlib.sha256(args.compiler.read_bytes()).hexdigest(),
                    affinity=sorted(os.sched_getaffinity(0)),
                    uptime_before=subprocess.check_output(['uptime'], text=True), cases={})
     # Each pair shares its own on-disk compiler cache and must execute in order.
-    for name, (before, after, rollback) in cases.items():
+    for name, (before, after, rollback, expected_rc) in cases.items():
         d = args.out / name
         d.mkdir(exist_ok=True)
         source = d / 'input.cj'
@@ -65,9 +67,10 @@ func use(x: Root): Int64 {
         # The unchanged match must be rechecked after a hierarchy change.
         # Cut-record/cut-fallback must alter this result, otherwise cache fallback
         # elsewhere masked this mechanism and the arm is not valid evidence.
-        passed = steps[0]['rc'] == 0 and steps[1]['rc'] == (1 if rollback else 0)
-        if rollback:
+        passed = steps[0]['rc'] == 0 and steps[1]['rc'] == expected_rc
+        if expected_rc == 1:
             passed = passed and ('not exhaustive' in log.lower() or 'non-exhaustive' in log.lower())
+        if rollback:
             passed = passed and 'changed subtype of sealed type:' in cache_log and 'full sema' in cache_log
         else:
             passed = passed and 'incremental compilation triggered' in cache_log
