@@ -84,7 +84,8 @@ def main():
             for member in PAIR:
                 copy(libs / 'inherited.so', source / lib_rel / member)
         cmd = ['bash', str(product), '--from', str(base), '--to', str(target),
-               '--target', TUPLE, '--runtime', str(source), '--runtime-commit', COMMIT,
+               '--target', TUPLE, '--runtime', str(dyn_source if layout == 'nested-static' else source),
+               '--runtime-commit', COMMIT,
                '--colour-runtime', str(libs / 'pinned-runtime.so'),
                '--host-runtime', str(libs / 'inherited.so')]
         assembly = subprocess.run(cmd, capture_output=True, text=True)
