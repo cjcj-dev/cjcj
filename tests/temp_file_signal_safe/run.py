@@ -31,7 +31,7 @@ def main():
     compiler = args.compiler or sdk / 'bin/cjc'
     source = tree / 'tests/temp_file_signal_safe/fixture.cj'
     elf = out / 'fixture'
-    cmd = [str(compiler), str(source), '-O2', '--diagnostic-format=noColor', '-o', str(elf)]
+    cmd = [str(compiler), str(source), '-O2', '--trimpath', str(tree), '--diagnostic-format=noColor', '-o', str(elf)]
     archives, inputs = [], [source, compiler]
     for package in ('basic', 'utils', 'option'):
         directory = tree / 'target/release' / (package + '@cjcj')
