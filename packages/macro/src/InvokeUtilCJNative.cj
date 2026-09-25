@@ -19,7 +19,7 @@ extend MacroCall {
             }
             return false
         }
-        let handle = OpenSymbolTable(libPath)
+        let handle = OpenMacroLibrary(libPath)
         if (!handle.opened) {
             status = MacroEvalStatus.FAIL
             if (let Some(instance) <- ci) {

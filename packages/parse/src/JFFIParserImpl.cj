@@ -37,10 +37,8 @@ public class JFFIParserImpl {
         CJC_ASSERT(parser.HasAnnotation(annos, AnnotationKind.JAVA_IMPL))
         decl.EnableAttr(Attribute.JAVA_MIRROR_SUBTYPE)
         if (let Some(_) <- decl.generic) {
-            if (!decl.TestAttr(Attribute.JAVA_CJ_MAPPING)) {
-                DiagJavaImplCannotBeGeneric(decl)
-                decl.EnableAttr(Attribute.IS_BROKEN)
-            }
+            DiagJavaImplCannotBeGeneric(decl)
+            decl.EnableAttr(Attribute.IS_BROKEN)
         }
         if (decl.TestAttr(Attribute.ABSTRACT)) {
             DiagJavaImplCannotBeAbstract(decl)

@@ -7,7 +7,13 @@ headers=${LITERAL_RUNTIME_HEADERS:?}; compiler=${LITERAL_CJC:-$sdk/bin/cjc}
 mkdir -p "$out/probe" "$out/control" "$out/temps-probe" "$out/temps-control"
 start=$SECONDS
 receipt=run.rc
-trap 'rc=$?; echo "$rc" > "$out/$receipt"; echo "wall=$((SECONDS-start))" > "$out/wall.txt"; uptime > "$out/uptime-after.txt"' EXIT
+record_exit() {
+  local rc=$?
+  echo "$rc" > "$out/$receipt"
+  echo "wall=$((SECONDS-start))" > "$out/wall.txt"
+  uptime > "$out/uptime-after.txt"
+}
+trap record_exit EXIT
 uptime > "$out/uptime-before.txt"
 sha256sum "$compiler" "$sdk/third_party/llvm/bin/llc" "$lib/"{libcangjie-runtime.so,libboundscheck.so} > "$out/inputs.sha256"
 export PATH="$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:$PATH"

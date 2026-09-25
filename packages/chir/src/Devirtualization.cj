@@ -59,16 +59,22 @@ private func HasUnknownGenericType(knownType: Type, unknownType: Type): Bool {
     return unknown.value
 }
 
+private func FindUpstreamThisValue(tempVar: LocalVar, casts: ArrayList<Expression>): Value {
+    let expr = tempVar.GetExpr().getOrThrow()
+    if (expr.GetExprKind() != ExprKind.BOX && expr.GetExprKind() != ExprKind.CLASS_STATIC_CAST) {
+        return tempVar
+    }
+    casts.add(expr)
+    let source = (expr as TypeCast).getOrThrow().GetSourceValue()
+    if (let Some(local) <- source.AsLocalVar()) {
+        return FindUpstreamThisValue(local, casts)
+    }
+    return source
+}
+
 private func CollectUpstreamTypeCasts(obj: LocalVar): (Value, ArrayList<Expression>) {
     let casts = ArrayList<Expression>()
-    var value: Value = obj
-    while (let Some(local) <- value.AsLocalVar()) {
-        let expr = local.GetExpr().getOrThrow()
-        if (expr.GetExprKind() != ExprKind.BOX && expr.GetExprKind() != ExprKind.TYPECAST) { break }
-        casts.add(expr)
-        value = expr.GetOperand(0)
-    }
-    return (value, casts)
+    return (FindUpstreamThisValue(obj, casts), casts)
 }
 
 private func GetEntryBlock(oldBG: BlockGroup, blocks: ArrayList<Block>): Block {
@@ -222,10 +228,13 @@ public class Devirtualization {
         return true
     }
 
-    // 3d758bbb Devirtualization.cpp:315-326.
+    // 6e125215 Devirtualization.cpp:326 IsValueType, extracted by 3d758bbb AddRefIfNeeded.
     private func AddRefIfNeeded(ty: Type, callee: Function): Type {
-        if (ty.IsReferenceType() || (ty.IsValueType() &&
-            (callee.TestAttr(Attribute.MUT) || callee.IsConstructor() || callee.IsInstanceVarInit()))) {
+        if (ty.IsReferenceType()) {
+            return builder.context.GetRefTy(ty)
+        }
+        if (ty.IsValueType() &&
+            (callee.TestAttr(Attribute.MUT) || callee.IsConstructor() || callee.IsInstanceVarInit())) {
             return builder.context.GetRefTy(ty)
         }
         return ty
@@ -249,12 +258,14 @@ public class Devirtualization {
                 instRetTy = instFunc.GetFuncType().getOrThrow().GetReturnType()
             }
             var instParentTy = GetInstParentCustomTyOfCallee(realFunc, context.args, context.thisType, builder) ??
-                realFunc.GetFuncType().getOrThrow().GetParamTypes()[0]
+                realFunc.GetFuncType().getOrThrow().GetParamType(0)
             instParentTy = AddRefIfNeeded(instParentTy, realFunc)
             let parent = invoke.GetParentBlock().getOrThrow()
             let (converted, expressions) = TypeCastOrBoxIfNeeded(context.args[0], instParentTy, builder, parent)
-            for (expression in expressions) { expression.MoveBefore(invoke) }
-            context.args[0] = converted
+            if (!refEq(converted, context.args[0])) {
+                for (expression in expressions) { expression.MoveBefore(invoke) }
+                context.args[0] = converted
+            }
             let call: Expression = if (let Some(term) <- (invoke as InvokeWithException)) {
                 builder.CreateApplyWithException(instRetTy, realFunc, context,
                     term.GetSuccessBlock(), term.GetErrorBlock(), parent)

@@ -163,8 +163,12 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
 
     public override func HandleNormalExpressionEffect(state: TypeDomain, expression: Expression): Unit {
         match (expression.GetExprKind()) {
-            case ExprKind.TYPECAST =>
-                HandleTypeCastExpr(state, (expression as TypeCast).getOrThrow())
+            case ExprKind.CLASS_STATIC_CAST =>
+                HandleClassStaticCastExpr(state, (expression as ClassStaticCast).getOrThrow())
+                return
+            case ExprKind.NUMERIC_CAST =>
+                let result = expression.GetResult().getOrThrow()
+                state.TrySetToTopOrTopRef(result, result.GetType().getOrThrow().IsRef())
                 return
             case ExprKind.BOX =>
                 HandleBoxExpr(state, (expression as Box).getOrThrow())
@@ -196,15 +200,20 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         }
     }
 
-    public override func HandleTerminatorEffect(state: TypeDomain, terminator: Terminator): Option<Block> {
+    public override func HandleTerminatorEffect(state: TypeDomain, terminator: Expression): Option<Block> {
         match (terminator.GetExprKind()) {
-            case ExprKind.TYPECAST_WITH_EXCEPTION =>
-                HandleTypeCastExpr(state, (terminator as TypeCastWithException).getOrThrow())
+            case ExprKind.NUMERIC_CAST_WITH_EXCEPTION =>
+                if (let Some(dest) <- terminator.GetResult()) {
+                    state.SetToTopOrTopRef(dest, dest.GetType().getOrThrow().IsRef())
+                }
             case ExprKind.GOTO => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.EXIT => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.BRANCH => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.MULTIBRANCH => HandleTerminatorEffectImpl(state, terminator)
-            case ExprKind.INT_OP_WITH_EXCEPTION => HandleTerminatorEffectImpl(state, terminator)
+            case ExprKind.NEG_WITH_EXCEPTION | ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION |
+                ExprKind.MUL_WITH_EXCEPTION | ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION |
+                ExprKind.EXP_WITH_EXCEPTION | ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
+                HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.INTRINSIC_WITH_EXCEPTION => HandleTerminatorEffectImpl(state, terminator)
             case _ => HandleTerminatorEffectImpl(state, terminator)
         }
@@ -212,7 +221,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
     }
 
     // C++ TypeAnalysis.cpp:227-232 default arm, split only to avoid repeating it.
-    private func HandleTerminatorEffectImpl(state: TypeDomain, terminator: Terminator): Unit {
+    private func HandleTerminatorEffectImpl(state: TypeDomain, terminator: Expression): Unit {
         if (let Some(dest) <- terminator.GetResult()) {
             state.SetToTopOrTopRef(dest, dest.GetType().getOrThrow().IsRef())
         }
@@ -267,7 +276,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
     private func HandleBoxExpr(state: TypeDomain, boxExpr: Box): Unit {
         let result = boxExpr.GetResult().getOrThrow()
         let obj = state.GetReferencedObjAndSetToTop(result, expr: Some(boxExpr))
-        let srcTy = boxExpr.GetSourceTy().getOrThrow().StripAllRefs()
+        let srcTy = boxExpr.GetSourceType().getOrThrow().StripAllRefs()
         if (srcTy.IsValueType()) {
             state.Update(obj, TypeValue(DevirtualTyKind.EXACTLY, srcTy))
         } else {
@@ -275,46 +284,27 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         }
     }
 
-    private func HandleTypeCastExpr(state: TypeDomain, typecast: TypeCast): Unit {
-        HandleTypeCastExprImpl(state, typecast, typecast.GetSourceValue(),
-            typecast.GetSourceTy().getOrThrow(), typecast.GetTargetTy().getOrThrow())
-    }
-
-    private func HandleTypeCastExpr(state: TypeDomain, typecast: TypeCastWithException): Unit {
-        HandleTypeCastExprImpl(state, typecast, typecast.GetSourceValue(),
-            typecast.GetSourceTy().getOrThrow(), typecast.GetTargetTy().getOrThrow())
-    }
-
-    // C++ TypeAnalysis.cpp:287-347 template body.
-    private func HandleTypeCastExprImpl(state: TypeDomain, typecast: Expression,
-        sourceValue: Value, sourceType: Type, targetType: Type): Unit {
-        var srcTy = sourceType
-        var tgtTy = targetType
-        while (srcTy.IsRef()) {
-            srcTy = (srcTy as RefType).getOrThrow().GetBaseType()
-        }
-        while (tgtTy.IsRef()) {
-            tgtTy = (tgtTy as RefType).getOrThrow().GetBaseType()
-        }
+    // 6e125215 TypeAnalysis.cpp HandleClassStaticCastExpr; numeric casts do not enter here.
+    private func HandleClassStaticCastExpr(state: TypeDomain, typecast: ClassStaticCast): Unit {
+        let srcTy = typecast.GetSourceType().getOrThrow().StripAllRefs()
+        let tgtTy = typecast.GetTargetType().getOrThrow().StripAllRefs()
         let result = typecast.GetResult().getOrThrow()
         if (result.GetType().getOrThrow().IsRef()) {
             state.GetReferencedObjAndSetToTop(result, expr: Some(typecast))
         } else {
             state.SetToTopOrTopRef(result, false)
         }
-
         if (!srcTy.IsClass() || !tgtTy.IsClass()) {
             return
         }
-
-        let srcObj = state.CheckAbstractObjectRefBy(sourceValue) ?? return
+        let srcObj = state.CheckAbstractObjectRefBy(typecast.GetSourceValue()) ?? return
         let srcVal = state.CheckAbstractValue(srcObj) ?? return
         let absTy = srcVal.GetSpecificType()
         if (!absTy.IsClass()) { return }
         let absClsTy = (absTy as ClassType).getOrThrow()
         let tgtClsTy = (tgtTy as ClassType).getOrThrow()
         if (absClsTy.IsEqualOrSubTypeOf(tgtClsTy, builder)) {
-            state.Propagate(sourceValue, result)
+            state.Propagate(typecast.GetSourceValue(), result)
             return
         }
         if (tgtClsTy.IsEqualOrSubTypeOf(absClsTy, builder)) {

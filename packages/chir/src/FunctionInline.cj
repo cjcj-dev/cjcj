@@ -104,6 +104,12 @@ public class FunctionInline {
         if (fn.GetFuncKind() == FuncKind.INSTANCEVAR_INIT) {
             return true
         }
+        // @ObjCMirror functions are generated and always have the same body
+        // that calls relevant native code.
+        // According to benchmarks, they can always be inlined.
+        if (fn.TestAttr(Attribute.OBJ_C_MIRROR)) {
+            return true
+        }
         let currentGlobalFunc = globalFunc.getOrThrow()
         let inlinedCount = inlinedCountMap.get(currentGlobalFunc.nodeId) ?? 0
         if (inlinedCount >= INLINED_COUNT_THRESHOLD) {

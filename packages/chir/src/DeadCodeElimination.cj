@@ -24,7 +24,7 @@ private func AllUsersIsExprKind(users: ArrayList<Expression>, kind: ExprKind): B
         }
         var hasNothingOperand = false
         var index: Int64 = 0
-        while (index < user.GetNumOfOperands()) {
+        while (index < user.GetNumOfNonSuccessorOperands()) {
             if (user.GetOperand(index).GetType().getOrThrow().IsNothing()) {
                 hasNothingOperand = true
                 break
@@ -144,7 +144,7 @@ public class DeadCodeElimination {
                 workIdx++
                 workListSet.remove(expr.nodeId)
 
-                let operands = expr.GetOperands()
+                let operands = expr.GetNonSuccessorOperands()
                 expr.RemoveSelfFromBlock()
                 removed++
 
@@ -407,9 +407,10 @@ public class DeadCodeElimination {
                 if (expr.GetExprKind() == ExprKind.LAMBDA) {
                     DiagUnusedCode(res, DiagKindRefactor.chir_dce_unused_function,
                         (expr as Lambda).getOrThrow().GetSrcCodeIdentifier())
-                } else if (expr.IsUnaryExpr() || expr.IsBinaryExpr() || expr.IsIntOpWithException()) {
-                    let kind = if (expr.GetExprKind() == ExprKind.INT_OP_WITH_EXCEPTION) {
-                        GetLiteralFromExprKind((expr as IntOpWithException).getOrThrow().GetOpKind())
+                } else if (expr.IsUnaryExpr() || expr.IsBinaryExpr() || expr.IsUnaryExpressionWithException() ||
+                    expr.IsBinaryExpressionWithException()) {
+                    let kind = if (expr.IsUnaryExpressionWithException() || expr.IsBinaryExpressionWithException()) {
+                        GetLiteralFromExprKind(PlainExprKind(expr.GetExprKind()))
                     } else {
                         GetLiteralFromExprKind(expr.GetExprKind())
                     }
@@ -543,7 +544,7 @@ public class DeadCodeElimination {
     }
 
     public func UnreachableBlockWarningReporter(pkg: Package, threadsNum: Int64,
-        maybeUnreachableBlocks: HashMap<Block, Terminator>): Unit {
+        maybeUnreachableBlocks: HashMap<Block, Expression>): Unit {
         if (threadsNum == 1) {
             UnreachableBlockWarningReporterInSerial(pkg, maybeUnreachableBlocks)
         } else {
@@ -552,7 +553,7 @@ public class DeadCodeElimination {
     }
 
     private func UnreachableBlockWarningReporterInSerial(pkg: Package,
-        maybeUnreachableBlocks: HashMap<Block, Terminator>): Unit {
+        maybeUnreachableBlocks: HashMap<Block, Expression>): Unit {
         for (fn in pkg.GetGlobalFunctionsRef()) {
             if (fn.GetBody().isNone()) {
                 continue
@@ -570,7 +571,7 @@ public class DeadCodeElimination {
     }
 
     private func UnreachableBlockWarningReporterInParallel(pkg: Package, threadsNum: Int64,
-        maybeUnreachableBlocks: HashMap<Block, Terminator>): Unit {
+        maybeUnreachableBlocks: HashMap<Block, Expression>): Unit {
         let taskQueue = TaskQueue(threadsNum)
         for (fn in pkg.GetGlobalFunctionsRef()) {
             if (fn.GetBody().isNone() || fn.TestAttr(Attribute.SKIP_ANALYSIS)) {
@@ -734,10 +735,10 @@ public class DeadCodeElimination {
             let posForWarning = expression.GetDebugLocationInfoForWarning()
             let warningRange = ToRangeIfNotZero(posForWarning)
             if (warningRange[0]) {
-                if (expression.IsBinaryExpr() || expression.IsIntOpWithException()) {
+                if (expression.IsBinaryExpr() || expression.IsBinaryExpressionWithException()) {
                     var hasNothingOperand = false
                     var index: Int64 = 0
-                    while (index < expression.GetNumOfOperands()) {
+                    while (index < expression.GetNumOfNonSuccessorOperands()) {
                         if (expression.GetOperand(index).GetType().getOrThrow().IsNothing()) {
                             hasNothingOperand = true
                             break
@@ -763,7 +764,7 @@ public class DeadCodeElimination {
         return (None, isNormal)
     }
 
-    private func PrintUnreachableBlockWarning(block: Block, terminator: Terminator,
+    private func PrintUnreachableBlockWarning(block: Block, terminator: Expression,
         isPrinted: CoreBox<Bool>): Unit {
         let terminalNodeRange = ToRangeIfNotZero(terminator.GetDebugLocation())
         if (terminalNodeRange[0] && !isPrinted.value) {
@@ -819,7 +820,8 @@ public class DeadCodeElimination {
                 return false
             }
         }
-        if (expr.GetExprKind() == ExprKind.INT_OP_WITH_EXCEPTION && expr.GetNeverOverflowInfo() && isReportWarning) {
+        if ((expr.IsUnaryExpressionWithException() || expr.IsBinaryExpressionWithException()) &&
+            expr.GetNeverOverflowInfo() && isReportWarning) {
             return true
         }
         if (expr.IsTerminator()) {
@@ -1067,7 +1069,7 @@ private func GetMultiBranchTargetSucc(branch: MultiBranch): Option<Block> {
         return None
     }
     var condExpr = (branch.GetCondition() as LocalVar).getOrThrow().GetExpr().getOrThrow()
-    if (condExpr.GetExprKind() == ExprKind.TYPECAST) {
+    if (condExpr.GetExprKind() == ExprKind.NUMERIC_CAST || condExpr.GetExprKind() == ExprKind.CLASS_STATIC_CAST) {
         if (!condExpr.GetOperand(0).IsLocalVar()) {
             return None
         }

@@ -175,8 +175,16 @@ extend ParserImpl {
                 file.hasMacro = true
             }
             decl.begin = Peek().Begin()
-            if (!modifiers.isEmpty()) {
-                let firstModifier = SortModifierByPos(modifiers)[0]
+            let explicitModifiers = ArrayList<Modifier>()
+            for (modifier in modifiers) {
+                if (IsInheritedForeignBlockModifier(modifier)) {
+                    decl.modifiers.add(modifier)
+                } else {
+                    explicitModifiers.add(modifier)
+                }
+            }
+            if (!explicitModifiers.isEmpty()) {
+                let firstModifier = SortModifierByPos(explicitModifiers)[0]
                 DiagExpectNoModifierBefore(firstModifier, "macro call")
                 decl.begin = firstModifier.begin
             }
@@ -500,6 +508,34 @@ extend ParserImpl {
         }
     }
 
+    private func IsInheritedForeignBlockModifier(modifier: Modifier): Bool {
+        for (inherited in foreignBlockModifiers) {
+            if (inherited.modifier == modifier.modifier) {
+                return inherited.begin == modifier.begin
+            }
+        }
+        return false
+    }
+
+    private func ParseForeignNodes(
+        modifiers: ArrayList<Modifier>,
+        annos: ArrayList<Annotation>,
+        nodes: ArrayList<Node>
+    ): Unit {
+        let declMods = ArrayList<Modifier>()
+        for (modifier in modifiers) {
+            declMods.add(modifier)
+        }
+        ParseModifiers(declMods)
+        let decls = ParseForeignDecls(declMods, annos)
+        for (decl in decls) {
+            decl.curFile = currentFile
+            decl.curMacroCall = curMacroCall
+            AddMacroAttr(decl)
+            nodes.add(decl)
+        }
+    }
+
     public func ParseNodes(
         scope: ScopeKind,
         currentMacroCall: Node,
@@ -528,6 +564,9 @@ extend ParserImpl {
     ): ArrayList<Node> {
         currentFile = currentMacroCall.curFile
         curMacroCall = currentMacroCall
+        if (currentMacroCall.astKind == ASTKind.MACRO_EXPAND_DECL && HasModifier(modifiers, TokenKind.FOREIGN)) {
+            SetForeignBlockModifiers(modifiers)
+        }
         let invocationOption = currentMacroCall.GetConstInvocation()
         CJC_NULLPTR_CHECK(invocationOption)
         let invocation = invocationOption.getOrThrow()
@@ -571,11 +610,14 @@ extend ParserImpl {
                     node = param
                     namedParameter = nextNamedParameter
                     memberParam = nextMemberParam
+                } else if (ScopeKindEquals(scope, ScopeKind.TOPLEVEL) && Seeing(TokenKind.FOREIGN)) {
+                    ParseForeignNodes(modifiers, annos, nodes)
+                    continue
                 } else if (CheckIfSeeingDecl(scope)) {
                     node = if (nodes.isEmpty()) {
                         ParseDecl(scope, modifiers, annos)
                     } else {
-                        ParseDecl(scope)
+                        ParseDecl(scope, CopiedForeignBlockModifiers(), ArrayList<Annotation>())
                     }
                 } else {
                     node = ParseExpr()

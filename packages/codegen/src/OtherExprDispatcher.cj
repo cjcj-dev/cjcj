@@ -1,5 +1,9 @@
 package cjcj::codegen
 
+import cjcj::chir.SpawnBase
+
+import cjcj::chir.RawArrayAllocateBase
+
 import cjcj::chir.ClassType
 import cjcj::chir.Debug
 import cjcj::chir.Expression
@@ -36,12 +40,12 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return LLVMNullValue()
     }
     if (kind == ExprKind.APPLY || kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC ||
-        kind == ExprKind.FIELD || kind == ExprKind.TYPECAST || kind == ExprKind.TUPLE ||
+        kind == ExprKind.FIELD || (kind == ExprKind.CLASS_STATIC_CAST || kind == ExprKind.NUMERIC_CAST) || kind == ExprKind.TUPLE ||
         kind == ExprKind.VARRAY || kind == ExprKind.VARRAY_BUILDER || kind == ExprKind.INTRINSIC ||
         kind == ExprKind.RAW_ARRAY_LITERAL_INIT || kind == ExprKind.RAW_ARRAY_ALLOCATE ||
         kind == ExprKind.RAW_ARRAY_INIT_BY_VALUE || kind == ExprKind.INSTANCEOF || kind == ExprKind.SPAWN ||
-        kind == ExprKind.GET_EXCEPTION || kind == ExprKind.BOX || kind == ExprKind.UNBOX ||
-        kind == ExprKind.TRANSFORM_TO_GENERIC || kind == ExprKind.TRANSFORM_TO_CONCRETE ||
+        kind == ExprKind.GET_EXCEPTION || kind == ExprKind.BOX || kind == ExprKind.UNBOX_TO_VALUE ||
+        kind == ExprKind.CAST_TO_GENERIC || kind == ExprKind.CAST_TO_CONCRETE ||
         kind == ExprKind.UNBOX_TO_REF || kind == ExprKind.GET_RTTI || kind == ExprKind.GET_RTTI_STATIC) {
         irBuilder.EmitLocation(CHIRExprWrapper(chirExpr))
     }
@@ -58,7 +62,7 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return GenerateInvokeExpression(irBuilder, chirExpr)
     }
     if (kind == ExprKind.RAW_ARRAY_ALLOCATE) {
-        return GenerateRawArrayAllocate(irBuilder, chirExpr)
+        return GenerateRawArrayAllocate(irBuilder, (chirExpr as RawArrayAllocateBase).getOrThrow())
     }
     if (kind == ExprKind.RAW_ARRAY_LITERAL_INIT) {
         return GenerateRawArrayLiteralInit(irBuilder, chirExpr)
@@ -78,11 +82,11 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
     if (kind == ExprKind.FIELD || kind == ExprKind.FIELD_BY_NAME) {
         return GenerateFieldExpression(irBuilder, chirExpr)
     }
-    if (kind == ExprKind.TYPECAST) {
+    if ((kind == ExprKind.CLASS_STATIC_CAST || kind == ExprKind.NUMERIC_CAST)) {
         return HandleTypecastExpr(irBuilder, chirExpr)
     }
-    if (kind == ExprKind.BOX || kind == ExprKind.UNBOX ||
-        kind == ExprKind.TRANSFORM_TO_GENERIC || kind == ExprKind.TRANSFORM_TO_CONCRETE ||
+    if (kind == ExprKind.BOX || kind == ExprKind.UNBOX_TO_VALUE ||
+        kind == ExprKind.CAST_TO_GENERIC || kind == ExprKind.CAST_TO_CONCRETE ||
         kind == ExprKind.UNBOX_TO_REF) {
         return EmitTypeCastExpression(irBuilder, chirExpr)
     }
@@ -103,7 +107,7 @@ public func HandleOthersExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return GenerateInstanceOf(irBuilder, chirExpr)
     }
     if (kind == ExprKind.SPAWN) {
-        return GenerateSpawn(irBuilder, chirExpr)
+        return GenerateSpawn(irBuilder, (chirExpr as SpawnBase).getOrThrow())
     }
     return LLVMNullValue()
 }
@@ -143,7 +147,7 @@ public func HandleDebugExpr(irBuilder: IRBuilder2, chirExpr: Expression): LLVMVa
 
 private func HandleTypecastExpr(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let typeCast = (chirExpr as TypeCast).getOrThrow()
-    return GenerateTypeCast(irBuilder, CHIRTypeCastWrapper(typeCast))
+    return GenerateTypeCast(irBuilder, typeCast)
 }
 
 private func GenerateRTTIExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {

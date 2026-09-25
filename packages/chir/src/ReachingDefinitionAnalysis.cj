@@ -255,7 +255,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
         }
     }
 
-    public override func PropagateTerminatorEffect(state: ReachingDefinitionDomain, terminator: Terminator): Option<Block> {
+    public override func PropagateTerminatorEffect(state: ReachingDefinitionDomain, terminator: Expression): Option<Block> {
         let kind = terminator.GetExprKind()
         if (kind == ExprKind.APPLY_WITH_EXCEPTION) {
             HandleApplyExpr(state, terminator)
@@ -278,13 +278,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
                 for (expr in block.GetExpressionsRef()) {
                     if (expr.GetExprKind() == ExprKind.ALLOCATE || expr.GetExprKind() == ExprKind.ALLOCATE_WITH_EXCEPTION) {
                         if (let Some(result) <- expr.GetResult()) {
-                            let allocatedTy: Option<Type> = if (let Some(allocate) <- (expr as Allocate)) {
-                                Some(allocate.GetType())
-                            } else if (let Some(allocate) <- (expr as AllocateWithException)) {
-                                Some(allocate.GetType())
-                            } else {
-                                None
-                            }
+                            let allocatedTy: Option<Type> = (expr as AllocateBase).getOrThrow().GetType()
                             if (let Some(ty) <- allocatedTy) {
                                 if (CanTrackAllocation(ty)) {
                                     allocateIdxMap[result.nodeId] = trackedAllocations.size
@@ -343,19 +337,19 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
     }
 
     private func HandleStoreExpr(state: ReachingDefinitionDomain, store: Expression): Unit {
-        if (store.GetNumOfOperands() >= 2) {
+        if (store.GetNumOfNonSuccessorOperands() >= 2) {
             state.UpdateStore(store.GetOperand(1), store)
         }
     }
 
     private func HandleLoadExpr(state: ReachingDefinitionDomain, load: Expression): Unit {
-        if (load.GetNumOfOperands() >= 1) {
+        if (load.GetNumOfNonSuccessorOperands() >= 1) {
             state.UpdateLoad(load.GetOperand(0), load)
         }
     }
 
     private func HandleGetElemRefExpr(state: ReachingDefinitionDomain, getElemRef: Expression): Unit {
-        if (getElemRef.GetNumOfOperands() >= 1) {
+        if (getElemRef.GetNumOfNonSuccessorOperands() >= 1) {
             let location = getElemRef.GetOperand(0)
             if (IsTrackedStructRef(location)) {
                 if (let Some(result) <- getElemRef.GetResult()) {
@@ -370,7 +364,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
     }
 
     private func HandleStoreElemRefExpr(state: ReachingDefinitionDomain, storeElemRef: Expression): Unit {
-        if (storeElemRef.GetNumOfOperands() >= 2) {
+        if (storeElemRef.GetNumOfNonSuccessorOperands() >= 2) {
             let location = storeElemRef.GetOperand(1)
             if (IsTrackedStructRef(location)) {
                 state.Invalidate(location)
@@ -379,7 +373,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
     }
 
     private func HandleApplyExpr(state: ReachingDefinitionDomain, apply: Expression): Unit {
-        if (apply.GetNumOfOperands() > 1) {
+        if (apply.GetNumOfNonSuccessorOperands() > 1) {
             if (let Some(callee) <- apply.GetOperand(0).AsFunction()) {
                 if (callee.TestAttr(Attribute.MUT)) {
                     let receiver = apply.GetOperand(1)
@@ -395,7 +389,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
         if (GetIntrinsicKind(intrinsic) != IntrinsicKind.INOUT_PARAM) {
             return
         }
-        if (intrinsic.GetNumOfOperands() == 1) {
+        if (intrinsic.GetNumOfNonSuccessorOperands() == 1) {
             state.Invalidate(intrinsic.GetOperand(0))
         }
     }

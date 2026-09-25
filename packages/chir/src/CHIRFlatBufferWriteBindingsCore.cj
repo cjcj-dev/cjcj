@@ -482,6 +482,29 @@ func CreateEnumCaseIndex(builder: FlatBufferBuilder, index: Int64): FlatBufferOf
     return tableBuilder.Finish()
 }
 
+class MatchCaseIdBuilder {
+    private let builder: FlatBufferBuilder
+
+    public init(builder: FlatBufferBuilder) {
+        this.builder = builder
+        builder.StartTable(1)
+    }
+
+    public func add_id(id: Int64): Unit {
+        builder.AddI64(0, id, defaultValue: -1)
+    }
+
+    public func Finish(): FlatBufferOffset {
+        return builder.EndTable()
+    }
+}
+
+func CreateMatchCaseId(builder: FlatBufferBuilder, id: Int64): FlatBufferOffset {
+    let tableBuilder = MatchCaseIdBuilder(builder)
+    tableBuilder.add_id(id)
+    return tableBuilder.Finish()
+}
+
 class VirMethodOffsetBuilder {
     private let builder: FlatBufferBuilder
 

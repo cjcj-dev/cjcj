@@ -1047,7 +1047,7 @@ public class FaithfulAST2CHIR {
     private let annoFactoryFuncs: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>()
     private let annotationTargets: HashMap<GlobalVar, AstExpr> = HashMap<GlobalVar, AstExpr>()
     private let classDeclWithAnnotation: ArrayList<(AstClassDecl, ClassDef)> = ArrayList<(AstClassDecl, ClassDef)>()
-    private let maybeUnreachable: HashMap<Block, Terminator> = HashMap<Block, Terminator>()
+    private let maybeUnreachable: HashMap<Block, Expression> = HashMap<Block, Expression>()
     private let isComputingAnnos: Bool
 
     public init(builder: CHIRBuilder, chirType: CHIRType, sourceManager: BasicSourceManager,
@@ -1163,7 +1163,7 @@ public class FaithfulAST2CHIR {
         return initFuncsForConstVar
     }
 
-    public func GetMaybeUnreachableBlocks(): HashMap<Block, Terminator> {
+    public func GetMaybeUnreachableBlocks(): HashMap<Block, Expression> {
         return maybeUnreachable
     }
 
@@ -2397,7 +2397,8 @@ public class FaithfulAST2CHIR {
         return Translator(builder, chirType, globalCache, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
             deserializedVals: deserializedVals, gim: gim, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
             increKind: kind,
-            annoFactoryFuncs: annoFactoryFuncs, maybeUnreachable: maybeUnreachable,
+            annoFactoryFuncs: annoFactoryFuncs,
+            maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos,
             initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }
@@ -4381,7 +4382,7 @@ public class FaithfulAST2CHIR {
         fn.EnableAttr(Attribute.IMPORTED)
         SetFuncAttributeAndLinkageType(funcDecl, fn)
         if (HasImplicitThisParam(funcDecl)) {
-            let thisParam = builder.CreateParameter(funcTy.GetParamTypes()[0], INVALID_LOCATION, fn)
+            let thisParam = builder.CreateParameter(funcTy.GetParamType(0), INVALID_LOCATION, fn)
             thisParam.SetSrcCodeIdentifier("this")
         }
         let body = funcDecl.funcBody ??
@@ -4483,7 +4484,7 @@ public class FaithfulAST2CHIR {
         fn.EnableAttr(Attribute.IMPORTED)
         SetFuncAttributeAndLinkageType(funcDecl, fn)
         if (HasImplicitThisParam(funcDecl)) {
-            let thisParam = builder.CreateParameter(funcTy.GetParamTypes()[0], INVALID_LOCATION, fn)
+            let thisParam = builder.CreateParameter(funcTy.GetParamType(0), INVALID_LOCATION, fn)
             thisParam.SetSrcCodeIdentifier("this")
         }
         let body = funcDecl.funcBody ??

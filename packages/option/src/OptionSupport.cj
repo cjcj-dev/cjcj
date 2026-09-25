@@ -12,8 +12,7 @@ import cjcj::utils.FileUtil
 import cjcj::utils.SipHash
 import cjcj::utils.SplitString as UtilsSplitString
 
-public let DEFAULT_ANDROID_API: String = "31"
-public let MIN_ANDROID_API: String = "26"
+public let MIN_ANDROID_API: String = "23"
 public let FILE_PATH_MAX_LENGTH: Int64 = UTILS_FILE_PATH_MAX_LENGTH
 
 @When[os == "Linux"]

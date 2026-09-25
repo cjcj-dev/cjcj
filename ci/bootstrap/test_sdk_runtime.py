@@ -14,6 +14,8 @@ import subprocess
 
 LINUX = 'linux_x86_64_cjnative'
 WINDOWS = 'windows_x86_64_cjnative'
+PIN = '4c4cbf53b44497103e76e2a47a8fa35f5d7a7287'
+PIN_STAMP = '__attribute__((used)) static const char cjrt_pin[] = "CJRT-COMMIT:' + PIN + '";'
 
 
 def sha(path):
@@ -36,8 +38,11 @@ def main():
     libs = root / 'libs'
     libs.mkdir()
     symbols = {
-        'mask': 'int g_cjLoadBadMask;',
-        'both': 'int g_cjLoadBadMask; int g_cjLoadBadMaskOffset;',
+        'mask': 'int g_cjLoadBadMask; ' + PIN_STAMP,
+        'both': 'int g_cjLoadBadMask; int g_cjLoadBadMaskOffset; int g_cjLoadShift; int future_colour_export; int unrelated; ' + PIN_STAMP,
+        'shift-undefined': 'extern int g_cjLoadShift; int *reference = &g_cjLoadShift;',
+        'future-undefined': 'extern int future_colour_export; int *reference = &future_colour_export;',
+        'common-undefined': 'extern int unrelated; int *reference = &unrelated;',
         'offset': 'int g_cjLoadBadMaskOffset;',
         'none': 'int unrelated;',
         'offset-undefined': 'extern int g_cjLoadBadMaskOffset; int *reference = &g_cjLoadBadMaskOffset;',
@@ -87,6 +92,11 @@ def main():
     # Both directions, exact symbol boundaries, installed/inherited std and
     # the independent managed-tool host runtime must reach the actual assembler.
     pair_cases = {
+        'pair-shift-target': ('both', 'target', 'shift-undefined', 0),
+        'pair-shift-host': ('none', 'host', 'shift-undefined', 1),
+        'pair-future-target': ('both', 'target', 'future-undefined', 0),
+        'pair-common-target': ('both', 'target', 'common-undefined', 1),
+        'pair-common-host': ('none', 'host', 'common-undefined', 0),
         'pair-mask-target': ('mask', 'target', 'undefined', 0),
         'pair-version-target': ('mask', 'target', 'version-reference', 0),
         'pair-offset-target': ('mask', 'target', 'offset-undefined', 0),
@@ -124,6 +134,8 @@ def main():
         shutil.copyfile('/bin/true', base / 'bin/cjc')
         (base / 'bin/cjc').chmod(0o755)
         (base / 'envsetup.sh').write_text(':\n')
+        cjc_sha = hashlib.sha256((base / 'bin/cjc').read_bytes()).hexdigest()
+        (base / 'std-producer.json').write_text(json.dumps({'compiler_sha256': cjc_sha}) + '\n')
         for tpl in order:
             directory = base / 'runtime/lib' / tpl
             directory.mkdir(parents=True)
@@ -166,6 +178,7 @@ def main():
             for rel in ('runtime/lib/' + LINUX + '/libcangjie-std-core.so', 'lib/libstdFFI.so'):
                 shutil.copyfile(libs / 'none.so', base / rel)
                 shutil.copyfile(libs / 'none.so', prefix / rel)
+            (prefix / 'std-producer.json').write_text(json.dumps({'compiler_sha256': cjc_sha}) + '\n')
             # The baseline has the opposite colour: the *installed* std decides.
             other = 'undefined' if pair_cases[name][2] == 'none' else 'none'
             shutil.copyfile(libs / (other + '.a'), std_dir / 'libcangjie-std-core.a')
@@ -175,6 +188,11 @@ def main():
             host_rt.mkdir()
             shutil.copyfile(libs / 'none.so', host_rt / 'libcangjie-runtime.so')
             cmd += ['--verify-host-rt', str(host_rt)]
+        colour_reference = (args.real_coloured_sdk / 'runtime/lib' / LINUX / 'libcangjie-runtime.so'
+                            if name in real_pairs else libs / 'both-versioned.so')
+        host_reference = (args.real_official_sdk / 'runtime/lib' / LINUX / 'libcangjie-runtime.so'
+                          if name in real_pairs else libs / ((variant + '.so') if role == 'host' and name not in pair_cases else 'none.so'))
+        cmd += ['--colour-runtime', str(colour_reference), '--host-runtime', str(host_reference)]
         base_order = subprocess.check_output(['find', str(base / 'runtime/lib'), '-mindepth', '1',
                                               '-maxdepth', '1', '-type', 'd'], text=True).splitlines()
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -216,9 +234,12 @@ def main():
     # This is also the exact CLI consumed by stage3, using these same archives.
     for variant, expected in [('undefined', '1'), ('offset-undefined', '1'),
                               ('version-reference', '1'), ('none', '0'),
-                              ('prefix-undefined', '0'), ('mask', '0')]:
+                              ('prefix-undefined', '0'), ('mask', '0'), ('shift-undefined', '1'),
+                              ('future-undefined', '1'), ('common-undefined', '0')]:
         command = ['python3', str(product.with_name('std_runtime_colour.py')),
-                   '--std-colour', str(libs / (variant + '.a'))]
+                   '--std-colour', str(libs / (variant + '.a')),
+                   '--colour-runtime', str(libs / 'both-versioned.so'),
+                   '--host-runtime', str(libs / 'none.so')]
         result = subprocess.run(command, capture_output=True, text=True)
         results.append(dict(name='std-cli-' + variant, assertion_executed=True,
                             passed=result.returncode == 0 and result.stdout.strip() == expected,

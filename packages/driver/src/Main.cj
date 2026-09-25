@@ -5,10 +5,13 @@ import cjcj::utils.GetApplicationPath
 @When[!debug && os != "Windows"]
 import cjcj::utils.{CreateAltSignalStack, RegisterCrashSignalHandler}
 @When[!debug && os == "Windows"]
-import cjcj::utils.{RegisterCrashExceptionHandler, RegisterCrashSignalHandler}
+import cjcj::option.RegisterCrashExceptionHandler
+@When[!debug && os == "Windows"]
+import cjcj::utils.RegisterCrashSignalHandler
 import cjcj::macro_pkg.RuntimeInit
 import cjcj::frontend.{DiagnosticEngine, SourceManager}
-import cjcj::utils.{InternalError, NullPointerException, RegisterCrtlCSignalHandler, TriggerPointSetter}
+import cjcj::utils.{InternalError, NullPointerException, TriggerPointSetter}
+import cjcj::option.RegisterCrtlCSignalHandler
 
 @When[!debug && os != "Windows"]
 private func RegisterSignalHandler(): Unit {

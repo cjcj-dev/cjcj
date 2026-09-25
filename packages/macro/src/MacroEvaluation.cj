@@ -443,6 +443,7 @@ private func CheckMacroCallArgs(macCall: MacroCall, diag: DiagnosticEngine, comp
     if (let Some(macroFile) <- macCall.RequireNode().curFile) {
         parser.SetCurFile(macroFile)
     }
+    parser.SetForeignBlockModifiers(macCall.GetModifiers())
     let _ = parser.ParseDecl(toEvaluationParsedScopeKind(invocation.scopeKind.getOrThrow()))
     let hasParseError = parserDiag.GetErrorCount() > 0u64
     forwardEvaluationParserDiagnostics(parserDiag, diag)
@@ -1086,6 +1087,7 @@ public class MacroEvaluation {
         if (let Some(macroFile) <- macCall.RequireNode().curFile) {
             parser.SetCurFile(macroFile)
         }
+        parser.SetForeignBlockModifiers(macCall.GetModifiers())
         parser.SetCompileOptions(ci.GetGlobalOptions())
         let decl = parser.ParseDecl(toEvaluationParsedScopeKind(scopeKind))
         if (!decl.IsMacroCallNode()) {
@@ -1383,7 +1385,7 @@ public class MacroEvaluation {
     public func CollectMacroLibs(): Unit {
         if (!ci.GetGlobalOptions().macroLib.isEmpty()) {
             for (dyfile in GetMacroDefDynamicFiles()) {
-                let handle = OpenSymbolTable(dyfile)
+                let handle = OpenMacroLibrary(dyfile)
                 if (!handle.opened) {
                     ci.GetDiag().Diagnose(DEFAULT_POSITION,
                         "Cannot dlopen from the dynamic library '" + dyfile + "' for macro")

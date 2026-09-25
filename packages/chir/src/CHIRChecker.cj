@@ -849,7 +849,7 @@ public class CHIRChecker {
         }
     }
 
-    private func CheckTerminatorJump(term: Terminator, topLevelFunc: Function): Unit {
+    private func CheckTerminatorJump(term: Expression, topLevelFunc: Function): Unit {
         if (let Some(parentBlock) <- term.GetParentBlock()) {
             if (let Some(curGroup) <- parentBlock.GetParentBlockGroup()) {
                 for (successor in term.GetSuccessors()) {
@@ -925,9 +925,7 @@ public class CHIRChecker {
                 "doesn't have parent block.")
             return
         }
-        if (!expr.IsTerminator() && expr.GetResult().isNone()) {
-            Errorln("in function ${topLevelFunc.GetIdentifier()}, in `${GetExpressionString(expr)}`, " +
-                "this expression should have result.")
+        if (!expr.IsTerminator() && !CheckHaveResult(expr, topLevelFunc)) {
             return
         }
         if (let Some(resultValue) <- expr.GetResult()) {
@@ -941,7 +939,7 @@ public class CHIRChecker {
                     "doesn't point back to its expression.")
             }
         }
-        for (operand in expr.GetOperands()) {
+        for (operand in expr.GetNonSuccessorOperands()) {
             var hasUser = false
             for (user in operand.GetUsersRef()) {
                 if (refEq(user, expr)) {
@@ -989,12 +987,16 @@ public class CHIRChecker {
                     CheckInvokeWithException((term as InvokeWithException).getOrThrow(), topLevelFunc)
                 case ExprKind.INVOKESTATIC_WITH_EXCEPTION =>
                     CheckInvokeStaticWithException((term as InvokeStaticWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.INT_OP_WITH_EXCEPTION =>
-                    CheckIntOpWithException((term as IntOpWithException).getOrThrow(), topLevelFunc)
+                case ExprKind.NEG_WITH_EXCEPTION =>
+                    CheckUnaryExpressionWithException((term as UnaryExpressionWithException).getOrThrow(), topLevelFunc)
+                case ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION | ExprKind.MUL_WITH_EXCEPTION |
+                    ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION | ExprKind.EXP_WITH_EXCEPTION |
+                    ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
+                    CheckBinaryExpressionWithException((term as BinaryExpressionWithException).getOrThrow(), topLevelFunc)
                 case ExprKind.SPAWN_WITH_EXCEPTION =>
                     CheckSpawnWithException((term as SpawnWithException).getOrThrow(), topLevelFunc)
-                case ExprKind.TYPECAST_WITH_EXCEPTION =>
-                    CheckTypeCastWithException((term as TypeCastWithException).getOrThrow(), topLevelFunc)
+                case ExprKind.NUMERIC_CAST_WITH_EXCEPTION =>
+                    CheckNumericCastWithException((term as NumericCastWithException).getOrThrow(), topLevelFunc)
                 case ExprKind.INTRINSIC_WITH_EXCEPTION =>
                     CheckIntrinsicWithException((term as IntrinsicWithException).getOrThrow(), topLevelFunc)
                 case ExprKind.ALLOCATE_WITH_EXCEPTION =>
@@ -1010,19 +1012,19 @@ public class CHIRChecker {
         }
     }
 
-    private func CheckGoTo(term: Terminator, topLevelFunc: Function): Unit {
+    private func CheckGoTo(term: Expression, topLevelFunc: Function): Unit {
         OperandNumIsEqual(0, term, topLevelFunc)
         SuccessorNumIsEqual(1, term, topLevelFunc)
         ShouldNotHaveResult(term, topLevelFunc)
     }
 
-    private func CheckExit(term: Terminator, topLevelFunc: Function): Unit {
+    private func CheckExit(term: Expression, topLevelFunc: Function): Unit {
         OperandNumIsEqual(0, term, topLevelFunc)
         SuccessorNumIsEqual(0, term, topLevelFunc)
         ShouldNotHaveResult(term, topLevelFunc)
     }
 
-    private func CheckBranch(term: Terminator, topLevelFunc: Function): Unit {
+    private func CheckBranch(term: Expression, topLevelFunc: Function): Unit {
         ShouldNotHaveResult(term, topLevelFunc)
         if (!OperandNumIsEqual(1, term, topLevelFunc)) {
             return
@@ -1037,7 +1039,7 @@ public class CHIRChecker {
         }
     }
 
-    private func CheckMultiBranch(term: Terminator, topLevelFunc: Function): Unit {
+    private func CheckMultiBranch(term: Expression, topLevelFunc: Function): Unit {
         ShouldNotHaveResult(term, topLevelFunc)
         if (!OperandNumIsEqual(1, term, topLevelFunc)) {
             return
@@ -1064,7 +1066,7 @@ public class CHIRChecker {
         }
     }
 
-    private func CheckRaiseException(term: Terminator, topLevelFunc: Function): Unit {
+    private func CheckRaiseException(term: Expression, topLevelFunc: Function): Unit {
         ShouldNotHaveResult(term, topLevelFunc)
         if (!OperandNumAtLeast(1, term, topLevelFunc)) {
             return
@@ -1092,26 +1094,30 @@ public class CHIRChecker {
         CheckBinaryExprBase(BinaryExprBase((expr as BinaryExpression).getOrThrow()), topLevelFunc)
     }
 
-    private func CheckIntOpWithException(expr: IntOpWithException, topLevelFunc: Function): Unit {
+    private func CheckUnaryExpressionWithException(expr: UnaryExpressionWithException, topLevelFunc: Function): Unit {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
-        if (!OperandNumIsEqual([1, 2], expr, topLevelFunc)) {
+        if (!OperandNumIsEqual(1, expr, topLevelFunc)) {
             return
         }
         if (!SuccessorNumIsEqual(2, expr, topLevelFunc)) {
             return
         }
-        let exprKind = expr.GetOpKind()
-        if (ExprKindIndex(exprKind) >= ExprKindIndex(ExprKind.NEG) &&
-            ExprKindIndex(exprKind) <= ExprKindIndex(ExprKind.BITNOT)) {
-            CheckUnaryExprBase(UnaryExprBase(expr), topLevelFunc)
-        } else if (ExprKindIndex(exprKind) >= ExprKindIndex(ExprKind.ADD) &&
-            ExprKindIndex(exprKind) <= ExprKindIndex(ExprKind.OR)) {
-            CheckBinaryExprBase(BinaryExprBase(expr), topLevelFunc)
-        } else {
-            WarningInExpr(topLevelFunc, expr, "find unrecongnized ExprKind " + expr.GetOpKindName() + ".")
+        CheckUnaryExprBase(UnaryExprBase(expr), topLevelFunc)
+    }
+
+    private func CheckBinaryExpressionWithException(expr: BinaryExpressionWithException, topLevelFunc: Function): Unit {
+        if (!CheckHaveResult(expr, topLevelFunc)) {
+            return
         }
+        if (!OperandNumIsEqual(2, expr, topLevelFunc)) {
+            return
+        }
+        if (!SuccessorNumIsEqual(2, expr, topLevelFunc)) {
+            return
+        }
+        CheckBinaryExprBase(BinaryExprBase(expr), topLevelFunc)
     }
 
     private func CheckUnaryExprBase(expr: UnaryExprBase, topLevelFunc: Function): Unit {
@@ -1283,7 +1289,7 @@ public class CHIRChecker {
         if (!OperandNumIsEqual(0, expr, topLevelFunc)) {
             return
         }
-        CheckAllocateBase(AllocateBase(expr), topLevelFunc)
+        CheckAllocateBase((expr as AllocateBase).getOrThrow(), topLevelFunc)
     }
 
     private func CheckAllocateWithException(expr: AllocateWithException, topLevelFunc: Function): Unit {
@@ -1296,7 +1302,7 @@ public class CHIRChecker {
         if (!SuccessorNumIsEqual(2, expr, topLevelFunc)) {
             return
         }
-        CheckAllocateBase(AllocateBase(expr), topLevelFunc)
+        CheckAllocateBase((expr as AllocateBase).getOrThrow(), topLevelFunc)
     }
 
     private func CheckAllocateBase(expr: AllocateBase, topLevelFunc: Function): Unit {
@@ -1305,12 +1311,12 @@ public class CHIRChecker {
         let allocatedType = expr.GetType()
         if (!resultTy.IsRef() ||
             (resultTy as RefType).getOrThrow().GetBaseType() != allocatedType) {
-            TypeCheckError(expr.GetRawExpr(), resultValue, allocatedType.ToString() + "&", topLevelFunc)
+            TypeCheckError(expr, resultValue, allocatedType.ToString() + "&", topLevelFunc)
         }
         if (allocatedType.IsVoid()) {
             ErrorInFunc(topLevelFunc, "can't allocate `Void` type in expression " + resultValue.ToString(0))
         }
-        let _ = CheckTypeIsValid(allocatedType, "allocated", expr.GetRawExpr(), topLevelFunc)
+        let _ = CheckTypeIsValid(allocatedType, "allocated", expr, topLevelFunc)
     }
 
     private func CheckGetElementRef(expr: GetElementRef, topLevelFunc: Function): Unit {
@@ -1490,7 +1496,7 @@ public class CHIRChecker {
                 if (let Some(instanceOfExpr) <- (expr as InstanceOf)) {
                     CheckInstanceOf(instanceOfExpr, topLevelFunc)
                 }
-            case ExprKind.TYPECAST =>
+            case ExprKind.CLASS_STATIC_CAST | ExprKind.NUMERIC_CAST =>
                 OperandNumIsEqual(1, expr, topLevelFunc)
                 CheckHaveResult(expr, topLevelFunc)
                 if (let Some(typeCastExpr) <- (expr as TypeCast)) {
@@ -1500,17 +1506,17 @@ public class CHIRChecker {
                 if (let Some(boxExpr) <- (expr as Box)) {
                     CheckBox(boxExpr, topLevelFunc)
                 }
-            case ExprKind.UNBOX =>
-                if (let Some(unBoxExpr) <- (expr as UnBox)) {
+            case ExprKind.UNBOX_TO_VALUE =>
+                if (let Some(unBoxExpr) <- (expr as UnBoxToValue)) {
                     CheckUnBox(unBoxExpr, topLevelFunc)
                 }
-            case ExprKind.TRANSFORM_TO_GENERIC =>
-                if (let Some(transformExpr) <- (expr as TransformToGeneric)) {
-                    CheckTransformToGeneric(transformExpr, topLevelFunc)
+            case ExprKind.CAST_TO_GENERIC =>
+                if (let Some(transformExpr) <- (expr as CastToGeneric)) {
+                    CheckCastToGeneric(transformExpr, topLevelFunc)
                 }
-            case ExprKind.TRANSFORM_TO_CONCRETE =>
-                if (let Some(transformExpr) <- (expr as TransformToConcrete)) {
-                    CheckTransformToConcrete(transformExpr, topLevelFunc)
+            case ExprKind.CAST_TO_CONCRETE =>
+                if (let Some(transformExpr) <- (expr as CastToConcrete)) {
+                    CheckCastToConcrete(transformExpr, topLevelFunc)
                 }
             case ExprKind.UNBOX_TO_REF =>
                 if (let Some(unBoxToRefExpr) <- (expr as UnBoxToRef)) {
@@ -1627,7 +1633,7 @@ public class CHIRChecker {
         if (!OperandNumAtLeast(1, expr, topLevelFunc)) {
             return
         }
-        CheckSpawnBase(SpawnBase(expr), topLevelFunc)
+        CheckSpawnBase((expr as SpawnBase).getOrThrow(), topLevelFunc)
     }
 
     private func CheckSpawnWithException(expr: SpawnWithException, topLevelFunc: Function): Unit {
@@ -1640,28 +1646,28 @@ public class CHIRChecker {
         if (!SuccessorNumIsEqual(2, expr, topLevelFunc)) {
             return
         }
-        CheckSpawnBase(SpawnBase(expr), topLevelFunc)
+        CheckSpawnBase((expr as SpawnBase).getOrThrow(), topLevelFunc)
     }
 
     private func CheckSpawnBase(expr: SpawnBase, topLevelFunc: Function): Unit {
         let objectValue = expr.GetObject()
         let objectType = objectValue.GetType().getOrThrow()
         if (!objectType.IsRef() || !(objectType as RefType).getOrThrow().GetBaseType().IsClass()) {
-            TypeCheckError(expr.GetRawExpr(), objectValue, "Class&", topLevelFunc)
+            TypeCheckError(expr, objectValue, "Class&", topLevelFunc)
             return
         }
         let def = (objectType.StripAllRefs() as ClassType).getOrThrow().GetClassDef()
         if (!IsCoreFuture(def) && !IsFuncTypeOrClosureBaseRefType(objectType)) {
-            ErrorInExpr(topLevelFunc, expr.GetRawExpr(), "the first operand's type is `" + objectType.ToString() +
+            ErrorInExpr(topLevelFunc, expr, "the first operand's type is `" + objectType.ToString() +
                 "`, but Class-Future& type or closure type are expected.")
         }
         if (IsFuncTypeOrClosureBaseRefType(objectType) && !expr.IsExecuteClosure()) {
-            ErrorInExpr(topLevelFunc, expr.GetRawExpr(),
+            ErrorInExpr(topLevelFunc, expr,
                 "the first operand's type is closure type but you don't set `executeClosure` function")
         }
     }
 
-    private func CheckTypeCastWithException(expr: TypeCastWithException, topLevelFunc: Function): Unit {
+    private func CheckNumericCastWithException(expr: NumericCastWithException, topLevelFunc: Function): Unit {
         let _ = expr
         let _ = topLevelFunc
     }
@@ -1670,7 +1676,7 @@ public class CHIRChecker {
         if (!OperandNumIsEqual(1, expr, topLevelFunc)) {
             return
         }
-        CheckRawArrayAllocateBase(RawArrayAllocateBase(expr), topLevelFunc)
+        CheckRawArrayAllocateBase((expr as RawArrayAllocateBase).getOrThrow(), topLevelFunc)
     }
 
     private func CheckRawArrayAllocateWithException(expr: RawArrayAllocateWithException,
@@ -1684,27 +1690,27 @@ public class CHIRChecker {
         if (!SuccessorNumIsEqual(2, expr, topLevelFunc)) {
             return
         }
-        CheckRawArrayAllocateBase(RawArrayAllocateBase(expr), topLevelFunc)
+        CheckRawArrayAllocateBase((expr as RawArrayAllocateBase).getOrThrow(), topLevelFunc)
     }
 
     private func CheckRawArrayAllocateBase(expr: RawArrayAllocateBase, topLevelFunc: Function): Unit {
         let resultValue = expr.GetResult().getOrThrow()
         let resultType = resultValue.GetType().getOrThrow()
         if (!resultType.IsRef() || !resultType.StripAllRefs().IsRawArray()) {
-            TypeCheckError(expr.GetRawExpr(), resultValue, "RawArray&", topLevelFunc)
+            TypeCheckError(expr, resultValue, "RawArray&", topLevelFunc)
             return
         }
-        if (!CheckTypeIsValid(expr.GetElementType(), "element", expr.GetRawExpr(), topLevelFunc)) {
+        if (!CheckTypeIsValid(expr.GetElementType(), "element", expr, topLevelFunc)) {
             return
         }
         let resultTypeArg = (resultType.StripAllRefs() as RawArrayType).getOrThrow().GetElementType()
         if (resultTypeArg != expr.GetElementType()) {
-            TypeCheckError(expr.GetRawExpr(), resultValue,
+            TypeCheckError(expr, resultValue,
                 "RawArray<" + expr.GetElementType().ToString() + ">&", topLevelFunc)
         }
         let sizeValue = expr.GetSize()
         if (sizeValue.GetType().getOrThrow().GetTypeKind() != TypeKind.TYPE_INT64) {
-            TypeCheckError(expr.GetRawExpr(), sizeValue, "Int64", topLevelFunc)
+            TypeCheckError(expr, sizeValue, "Int64", topLevelFunc)
         }
     }
 
@@ -1774,12 +1780,12 @@ public class CHIRChecker {
     }
 
     private func CheckConstant(expr: Expression, topLevelFunc: Function): Unit {
-        if (!OperandNumIsEqual(0, expr, topLevelFunc) || !CheckHaveResult(expr, topLevelFunc)) {
+        if (!OperandNumIsEqual(1, expr, topLevelFunc) || !CheckHaveResult(expr, topLevelFunc)) {
             return
         }
         if (let Some(constant) <- (expr as Constant)) {
             if (let Some(resultTy) <- expr.GetResultType()) {
-                let literal = constant.literal
+                let literal = constant.GetValue()
                 if (literal.IsNullLit()) {
                     return
                 }
@@ -1818,7 +1824,7 @@ public class CHIRChecker {
     }
 
     private func CheckEnumTuple(expr: Expression, resultTy: Type, topLevelFunc: Function): Unit {
-        let operandsNum = expr.GetNumOfOperands()
+        let operandsNum = expr.GetNumOfNonSuccessorOperands()
         if (operandsNum == 0) {
             Errorln("in function ${topLevelFunc.GetIdentifier()}, must have one operand in `" +
                 GetExpressionString(expr) + "` at least, and the 1st operand's type is UInt32 or Bool.")
@@ -1888,7 +1894,7 @@ public class CHIRChecker {
     private func CheckNormalTuple(expr: Expression, resultTy: Type, topLevelFunc: Function): Unit {
         if (let Some(tupleTy) <- (resultTy as TupleType)) {
             let elementTypes = tupleTy.GetTypeArgsRef()
-            let operandsNum = expr.GetNumOfOperands()
+            let operandsNum = expr.GetNumOfNonSuccessorOperands()
             if (operandsNum != elementTypes.size) {
                 Errorln("in function ${topLevelFunc.GetIdentifier()}, size mismatched, there are " +
                     "${elementTypes.size} element(s) in the tuple type `${resultTy.ToString()}`, but ${operandsNum} " +
@@ -1916,7 +1922,7 @@ public class CHIRChecker {
         if (let Some(structTy) <- (resultTy as StructType)) {
             if (let Some(structDef) <- (structTy.GetCustomTypeDef() as StructDef)) {
                 let memberVars = structDef.GetInstanceVars()
-                let operandsNum = expr.GetNumOfOperands()
+                let operandsNum = expr.GetNumOfNonSuccessorOperands()
                 if (operandsNum != memberVars.size) {
                     Errorln("in function ${topLevelFunc.GetIdentifier()}, size mismatched, there are " +
                         "${memberVars.size} instance member var(s) in the struct ${structDef.GetIdentifier()}, but " +
@@ -1955,7 +1961,7 @@ public class CHIRChecker {
                         "Nothing, CPointer, CString, CFunc and Struct.")
                     return
                 }
-                for (operand in expr.GetOperands()) {
+                for (operand in expr.GetNonSuccessorOperands()) {
                     if (let Some(operandTy) <- operand.GetType()) {
                         if (!TypeIsExpected(operandTy, elementTy)) {
                             TypeCheckError(expr, operand, elementTy.ToString(), topLevelFunc)
@@ -2032,8 +2038,8 @@ public class CHIRChecker {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
-        if (let Some(targetTy) <- expr.GetTargetTy()) {
-            if (let Some(sourceTy) <- expr.GetSourceTy()) {
+        if (let Some(targetTy) <- expr.GetTargetType()) {
+            if (let Some(sourceTy) <- expr.GetSourceType()) {
                 if (!targetTy.IsRef()) {
                     TypeCheckError(expr, expr.GetResult().getOrThrow(), "reference", topLevelFunc)
                 } else {
@@ -2057,15 +2063,15 @@ public class CHIRChecker {
         }
     }
 
-    private func CheckUnBox(expr: UnBox, topLevelFunc: Function): Unit {
+    private func CheckUnBox(expr: UnBoxToValue, topLevelFunc: Function): Unit {
         if (!OperandNumIsEqual(1, expr, topLevelFunc)) {
             return
         }
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
-        if (let Some(targetTy) <- expr.GetTargetTy()) {
-            if (let Some(sourceTy) <- expr.GetSourceTy()) {
+        if (let Some(targetTy) <- expr.GetTargetType()) {
+            if (let Some(sourceTy) <- expr.GetSourceType()) {
                 if (!sourceTy.IsRef()) {
                     TypeCheckError(expr, expr.GetSourceValue(), "reference", topLevelFunc)
                 } else {
@@ -2089,38 +2095,38 @@ public class CHIRChecker {
         }
     }
 
-    private func CheckTransformToGeneric(expr: TransformToGeneric, topLevelFunc: Function): Unit {
+    private func CheckCastToGeneric(expr: CastToGeneric, topLevelFunc: Function): Unit {
         if (!OperandNumIsEqual(1, expr, topLevelFunc)) {
             return
         }
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
-        if (let Some(targetTy) <- expr.GetTargetTy()) {
+        if (let Some(targetTy) <- expr.GetTargetType()) {
             if (!targetTy.IsGenericRelated()) {
                 TypeCheckError(expr, expr.GetResult().getOrThrow(), "generic related", topLevelFunc)
             }
         }
-        if (let Some(sourceTy) <- expr.GetSourceTy()) {
+        if (let Some(sourceTy) <- expr.GetSourceType()) {
             if (sourceTy.IsGeneric()) {
                 TypeCheckError(expr, expr.GetSourceValue(), "concrete", topLevelFunc)
             }
         }
     }
 
-    private func CheckTransformToConcrete(expr: TransformToConcrete, topLevelFunc: Function): Unit {
+    private func CheckCastToConcrete(expr: CastToConcrete, topLevelFunc: Function): Unit {
         if (!OperandNumIsEqual(1, expr, topLevelFunc)) {
             return
         }
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
-        if (let Some(targetTy) <- expr.GetTargetTy()) {
+        if (let Some(targetTy) <- expr.GetTargetType()) {
             if (targetTy.IsGeneric()) {
                 TypeCheckError(expr, expr.GetResult().getOrThrow(), "concrete", topLevelFunc)
             }
         }
-        if (let Some(sourceTy) <- expr.GetSourceTy()) {
+        if (let Some(sourceTy) <- expr.GetSourceType()) {
             if (!sourceTy.IsGenericRelated()) {
                 TypeCheckError(expr, expr.GetSourceValue(), "generic related", topLevelFunc)
             }
@@ -2134,7 +2140,7 @@ public class CHIRChecker {
         if (!CheckHaveResult(expr, topLevelFunc)) {
             return
         }
-        if (let Some(targetTy) <- expr.GetTargetTy()) {
+        if (let Some(targetTy) <- expr.GetTargetType()) {
             var isValueRefType = false
             if (let Some(refTy) <- (targetTy as RefType)) {
                 isValueRefType = refTy.GetBaseType().IsValueType()
@@ -2143,7 +2149,7 @@ public class CHIRChecker {
                 TypeCheckError(expr, expr.GetResult().getOrThrow(), "Value&", topLevelFunc)
             }
         }
-        if (let Some(sourceTy) <- expr.GetSourceTy()) {
+        if (let Some(sourceTy) <- expr.GetSourceType()) {
             var isReferenceRefType = false
             if (let Some(refTy) <- (sourceTy as RefType)) {
                 isReferenceRefType = refTy.GetBaseType().IsReferenceType()
@@ -2896,7 +2902,7 @@ public class CHIRChecker {
                             errMsgBase + "the result must be used as pointerInit1's argument.")
                     }
                     continue
-                } else if (kind == ExprKind.TYPECAST) {
+                } else if (kind == ExprKind.CLASS_STATIC_CAST) {
                     valuesToCheck.add(user.GetResult().getOrThrow())
                     continue
                 }
@@ -2954,8 +2960,8 @@ public class CHIRChecker {
                     }
                 }
                 CheckInoutOpSrc(field.GetBase(), expr, topLevelFunc)
-            } else if (localExpr.GetExprKind() == ExprKind.TYPECAST_WITH_EXCEPTION ||
-                localExpr.GetExprKind() == ExprKind.TYPECAST) {
+            } else if (localExpr.GetExprKind() == ExprKind.NUMERIC_CAST_WITH_EXCEPTION ||
+                localExpr.GetExprKind() == ExprKind.NUMERIC_CAST) {
                 CheckInoutOpSrc(localExpr.GetOperand(0), expr, topLevelFunc)
             } else if (!localExpr.IsFuncCall() && localExpr.GetExprKind() != ExprKind.APPLY_WITH_EXCEPTION &&
                 localExpr.GetExprKind() != ExprKind.INVOKE_WITH_EXCEPTION &&
@@ -2972,18 +2978,88 @@ public class CHIRChecker {
 
     private func CheckGetInstantiateValue(expr: Expression, topLevelFunc: Function): Unit {
         if (optionalRules.contains(CHIRCheckerRule.GET_INSTANTIATE_VALUE_SHOULD_GONE)) {
-            Errorln("in function ${topLevelFunc.GetIdentifier()}, in " +
-                "`${GetExpressionString(expr)}`, `GetInstantiateValue` should be removed now, " +
-                "it can't be seen in CodeGen Stage.")
+            ErrorInExpr(topLevelFunc, expr,
+                "`GetInstantiateValue` should be removed now, it can't be seen in CodeGen Stage.")
             return
         }
         if (!OperandNumIsEqual(1, expr, topLevelFunc)) {
             return
         }
-        if (let Some(funcTy) <- expr.GetOperand(0).GetType()) {
-            if (!funcTy.IsFunc()) {
-                TypeCheckError(expr, expr.GetOperand(0), "Function", topLevelFunc)
+        // 1. operand must be FuncType
+        let instExpr = (expr as GetInstantiateValue).getOrThrow()
+        let `func` = instExpr.GetGenericResult()
+        if (!`func`.GetType().getOrThrow().IsFunc()) {
+            TypeCheckError(expr, `func`, "Function", topLevelFunc)
+            return
+        }
+
+        // 2. must have instantiated type args, or you will use Function directly
+        let instTypeArgs = instExpr.GetInstantiateTypes()
+        if (instTypeArgs.isEmpty()) {
+            ErrorInExpr(topLevelFunc, expr, "there must be instantiated type in `GetInstantiateValue`")
+            return
+        }
+
+        // 3. instantiated type args must satisfy all generic constraints
+        let funcAndGenericTypes = ArrayList<(Value, ArrayList<GenericType>)>()
+        CollectFuncAndGenericTypesRecursively(`func`, funcAndGenericTypes)
+        CJC_ASSERT(!funcAndGenericTypes.isEmpty())
+        var allGenericTypes: Int64 = 0
+        for ((_, genericTypes) in funcAndGenericTypes) {
+            allGenericTypes += genericTypes.size
+        }
+        let funcBase = funcAndGenericTypes[0][0].AsFunction().getOrThrow()
+        if (let Some(parentType) <- funcBase.GetParentCustomTypeOrExtendedType()) {
+            allGenericTypes += parentType.GetTypeArgs().size
+        }
+        if (allGenericTypes != instTypeArgs.size) {
+            let genericTypeSize = funcAndGenericTypes[funcAndGenericTypes.size - 1][1].size
+            var errMsg = "current func is " + GetFuncIdentifier(`func`) + " with " +
+                "${genericTypeSize} generic param type(s), and its outer func is "
+            funcAndGenericTypes.remove(at: funcAndGenericTypes.size - 1)
+            var idx = funcAndGenericTypes.size
+            while (idx > 0) {
+                idx--
+                let (outerFunc, genericTypes) = funcAndGenericTypes[idx]
+                errMsg += "[" + GetFuncIdentifier(outerFunc) + " with " +
+                    "${genericTypes.size} generic param type(s) ], "
             }
+            if (let Some(parentType) <- funcBase.GetParentCustomTypeOrExtendedType()) {
+                errMsg += "and the parent Custom type is " + parentType.ToString() + " with " +
+                    "${parentType.GetTypeArgs().size} generic param type(s), "
+            }
+            errMsg += "they have ${allGenericTypes} generic param type(s) in total, but there are " +
+                "${instTypeArgs.size} instantiated type arg(s) in current `GetInstantiateValue`."
+            ErrorInExpr(topLevelFunc, expr, errMsg)
+            return
+        }
+        var typeIdx: Int64 = 0
+        var errMsg = "the "
+        var hasError = false
+        if (let Some(parentType) <- funcBase.GetParentCustomTypeOrExtendedType()) {
+            if (let Some(customType) <- (parentType as CustomType)) {
+                for (arg in customType.GetGenericArgs()) {
+                    if (!InstTypeCanSetToGenericRelatedType(instTypeArgs[typeIdx], arg)) {
+                        errMsg += IndexToString(typeIdx + 1) + ", "
+                        hasError = true
+                    }
+                    typeIdx++
+                }
+            }
+        }
+        for ((_, genericTypes) in funcAndGenericTypes) {
+            for (genericType in genericTypes) {
+                if (!InstTypeCanSetToGenericRelatedType(instTypeArgs[typeIdx], genericType)) {
+                    errMsg += IndexToString(typeIdx + 1) + ", "
+                    hasError = true
+                }
+                typeIdx++
+            }
+        }
+        if (hasError) {
+            errMsg = errMsg[0..errMsg.size - 2]
+            errMsg += " instantiated type(s) don't satisfy the generic constraints."
+            ErrorInExpr(topLevelFunc, expr, errMsg)
         }
     }
 
@@ -3012,7 +3088,7 @@ public class CHIRChecker {
         return true
     }
 
-    private func ShouldNotHaveResult(expr: Terminator, topLevelFunc: Function): Unit {
+    private func ShouldNotHaveResult(expr: Expression, topLevelFunc: Function): Unit {
         if (expr.GetResult().isSome()) {
             ErrorInExpr(topLevelFunc, expr, "this terminator shouldn't have result.")
         }
@@ -3025,7 +3101,7 @@ public class CHIRChecker {
     }
 
     private func OperandNumIsEqual(expectedNum: Int64, expr: Expression, topLevelFunc: Function): Bool {
-        let realNum = expr.GetNumOfOperands()
+        let realNum = expr.GetNumOfNonSuccessorOperands()
         if (expectedNum != realNum) {
             ErrorInExpr(topLevelFunc, expr,
                 "expect ${expectedNum} operand(s), but there are ${realNum} in fact.")
@@ -3035,7 +3111,7 @@ public class CHIRChecker {
     }
 
     private func OperandNumAtLeast(expectedNum: Int64, expr: Expression, topLevelFunc: Function): Bool {
-        let realNum = expr.GetNumOfOperands()
+        let realNum = expr.GetNumOfNonSuccessorOperands()
         if (expectedNum > realNum) {
             ErrorInExpr(topLevelFunc, expr,
                 "expect at least ${expectedNum} operand(s), but there are ${realNum} in fact.")
@@ -3046,7 +3122,7 @@ public class CHIRChecker {
 
     private func OperandNumIsEqual(expectedNums: Array<Int64>, expr: Expression, topLevelFunc: Function): Bool {
         CJC_ASSERT(!expectedNums.isEmpty())
-        let realNum = expr.GetNumOfOperands()
+        let realNum = expr.GetNumOfNonSuccessorOperands()
         for (expected in expectedNums) {
             if (expected == realNum) {
                 return true
@@ -3062,7 +3138,7 @@ public class CHIRChecker {
         return false
     }
 
-    private func SuccessorNumIsEqual(expectedNum: Int64, term: Terminator, topLevelFunc: Function): Bool {
+    private func SuccessorNumIsEqual(expectedNum: Int64, term: Expression, topLevelFunc: Function): Bool {
         let realNum = term.GetSuccessors().size
         if (expectedNum != realNum) {
             ErrorInExpr(topLevelFunc, term,
@@ -3072,7 +3148,7 @@ public class CHIRChecker {
         return true
     }
 
-    private func SuccessorNumAtLeast(expectedNum: Int64, term: Terminator, topLevelFunc: Function): Bool {
+    private func SuccessorNumAtLeast(expectedNum: Int64, term: Expression, topLevelFunc: Function): Bool {
         let realNum = term.GetSuccessors().size
         if (expectedNum > realNum) {
             ErrorInExpr(topLevelFunc, term,
@@ -3219,7 +3295,7 @@ public class CHIRChecker {
     }
 
     private func CheckUnreachableOperandInExpr(expr: Expression, reachableValues: ArrayList<Value>): Unit {
-        for (operand in expr.GetOperands()) {
+        for (operand in expr.GetNonSuccessorOperands()) {
             if (operand.IsLiteral() || operand.IsGlobal()) {
                 continue
             }
@@ -3248,7 +3324,7 @@ public class CHIRChecker {
         }
         let kind = expr.GetExprKind()
         if (kind == ExprKind.ALLOCATE || kind == ExprKind.ALLOCATE_WITH_EXCEPTION) {
-            let ty = AllocateBase(expr).GetType()
+            let ty = (expr as AllocateBase).getOrThrow().GetType()
             if (!GenericTypeIsInContainer(ty, reachableGenericTypes)) {
                 ErrorInFunc(topLevelFunc, "generic type " + ty.ToString() +
                     " is unreachable, the type is allocated type in expression " + expr.ToString(0) + ".")
@@ -3283,7 +3359,7 @@ public class CHIRChecker {
                     " is unreachable, the type is instanceOf type in expression " + expr.ToString(0) + ".")
             }
         } else if (kind == ExprKind.RAW_ARRAY_ALLOCATE || kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION) {
-            let elementType = RawArrayAllocateBase(expr).GetElementType()
+            let elementType = (expr as RawArrayAllocateBase).getOrThrow().GetElementType()
             if (!GenericTypeIsInContainer(elementType, reachableGenericTypes)) {
                 ErrorInFunc(topLevelFunc, "generic type " + elementType.ToString() +
                     " is unreachable, the type is element type in expression " + expr.ToString(0) + ".")

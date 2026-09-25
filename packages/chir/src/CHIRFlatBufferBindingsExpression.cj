@@ -279,6 +279,10 @@ class PackageFormat_MultiBranch <: Table {
         return if (let Some(pointerPos) <- GetPointer(CHIRFB_MULTI_BRANCH_VT_CASEVALUES)) { Some(Vector<UInt64>(data, pointerPos)) } else { None }
     }
 
+    func GetSourceExpr(): UInt8 {
+        return GetField(CHIRFB_MULTI_BRANCH_VT_SOURCEEXPR, CHIRFB_SOURCE_EXPR_OTHER)
+    }
+
     func Verify(verifier: VerifierTemplate): Bool {
         return VerifyTableStart(verifier) &&
             VerifyOffset(verifier, CHIRFB_MULTI_BRANCH_VT_BASE) &&

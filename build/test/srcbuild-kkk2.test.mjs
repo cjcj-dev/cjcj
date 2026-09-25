@@ -198,6 +198,25 @@ test('source-build shell mirror fallback is visible and optionally required', ()
   assert.match(required.stderr, /source mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1/);
 });
 
+test('source-build shell mirror contract reaches fetch on the selected bash', () => {
+  const contract = path.join(repoRoot, 'build/test/srcbuild_git_shell_contract.sh');
+  const result = spawnSync('bash', [contract], {encoding: 'utf8'});
+  process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /ASSERT_REACHED name=fetch_head/);
+  assert.match(result.stdout, /ASSERT_PASS name=fetch_head/);
+  assert.match(result.stdout, /ASSERT_REACHED name=fetch_sources_head/);
+  assert.match(result.stdout, /ASSERT_PASS name=fetch_sources_head/);
+  assert.match(result.stdout, /ASSERT_REACHED name=invalid_message/);
+  assert.match(result.stdout, /ASSERT_PASS name=invalid_message/);
+  assert.match(result.stdout, /ASSERT_REACHED name=duplicate_message/);
+  assert.match(result.stdout, /ASSERT_PASS name=duplicate_message/);
+  assert.match(result.stdout, /ASSERT_REACHED name=glob_exact/);
+  assert.match(result.stdout, /ASSERT_PASS name=glob_exact/);
+  assert.match(result.stdout, /CONTRACT_FAILS=0/);
+});
+
 test('kkk2 source-build profile requires mirrors while local helpers keep fallback enabled', () => {
   const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
   const authoritative = 'https://example.invalid/source.git';
@@ -342,7 +361,7 @@ test('fixed tuple publisher feeds the bootstrap consumer and rejects a missing s
   console.log(`PUBLISHER_CONSUMER_ARM green=${green.status} missing-static-marker=${red.status} restored=${restored.status}`);
 });
 
-test('fixed tuple depot seeds only checksum-valid pinned payloads and otherwise rebuilds', t => {
+test('fixed tuple depot seeds only checksum-valid pinned payloads; explicit publisher can rebuild', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'source-build-fixed-depot-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const pinText = fs.readFileSync(path.join(repoRoot, 'ci', 'llvm_pin.env'), 'utf8');
@@ -385,7 +404,7 @@ test('fixed tuple depot seeds only checksum-valid pinned payloads and otherwise 
     + `${shellFunction('build_fixed_tuple')}\n`
     + 'checkout_exact() { touch "$CHECKOUT_MARKER"; return 17; }\n'
     + 'checkout_sparse_exact() { return 17; }\n'
-    + 'DRY_RUN=0 REPO_ROOT=$1 STATE_ROOT=$2 CJCJ_FIXED_LLVM_DIR=$2 JOBS=1 '
+    + 'CJCJ_LLVM_DEPOT_PUBLISH=1 DRY_RUN=0 REPO_ROOT=$1 STATE_ROOT=$2 CJCJ_FIXED_LLVM_DIR=$2 JOBS=1 '
     + 'CHECKOUT_MARKER=$3 CJCJ_LLVM_DEPOT_ROOT=$4 LLVM_TUPLE_SUMS_SHA=$5\n'
     + 'build_fixed_tuple\n';
   const rebuilt = runBash(buildInvoke,
@@ -485,7 +504,7 @@ test('fixed tuple build stops when an exact checkout fails', t => {
     + 'fixed_tuple_is_current() { return 1; }\n'
     + 'checkout_exact() { return 17; }\n'
     + 'checkout_sparse_exact() { touch "$SPARSE_MARKER"; return 0; }\n'
-    + 'DRY_RUN=0 REPO_ROOT=$1 STATE_ROOT=$2 CJCJ_FIXED_LLVM_DIR=$2 JOBS=1 SPARSE_MARKER=$3\n'
+    + 'CJCJ_LLVM_DEPOT_PUBLISH=1 DRY_RUN=0 REPO_ROOT=$1 STATE_ROOT=$2 CJCJ_FIXED_LLVM_DIR=$2 JOBS=1 SPARSE_MARKER=$3\n'
     + 'build_fixed_tuple\n';
   const failed = runBash(invoke, [repoRoot, root, sparseMarker]);
   assert.equal(failed.status, 1, failed.stderr);
@@ -953,6 +972,14 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.writeFileSync(path.join(state, 'kkk2-github.path'), '');
   const {llvmSha} = writeTuple(path.join(state, 'fixed-llc'),
     fs.readFileSync(path.join(root, 'ci/llvm_pin.env'), 'utf8').match(/^LLVM_SHA=(.*)$/m)[1]);
+  // The prerequisite now also needs the verified complete tuple for bootstrap.
+  const cached = path.join(state, 'colour-tuple');
+  fs.mkdirSync(cached);
+  fs.cpSync(path.join(state, 'fixed-llc'), path.join(cached, 'fixed-llc'), {recursive: true});
+  writeDepotChecksums(cached);
+  const llvmPin = path.join(root, 'ci/llvm_pin.env');
+  fs.writeFileSync(llvmPin, fs.readFileSync(llvmPin, 'utf8').replace(/^LLVM_TUPLE_SUMS_SHA=.*$/m,
+    `LLVM_TUPLE_SUMS_SHA=${sha256(path.join(cached, 'SHA256SUMS'))}`));
   const pin = path.join(root, 'ci/llvm-dylib', `linux_${os.arch() === 'x64' ? 'x86_64' : 'aarch64'}.env`);
   fs.writeFileSync(pin, fs.readFileSync(pin, 'utf8').replace(/^LLVM_DYLIB_SOURCE_SHA=.*$/m,
     `LLVM_DYLIB_SOURCE_SHA=${mismatch ? '0'.repeat(40) : llvmSha}`));

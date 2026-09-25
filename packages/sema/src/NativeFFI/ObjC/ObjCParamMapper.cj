@@ -65,7 +65,7 @@ public class ObjCParamMapper {
                     }
                 case FunctionListFormat.STATIC_REF =>
                     InternalError("STATIC_REF param-list generation is defective upstream " +
-                        "(ObjCParamMapper.cpp:72-77 / ObjCTranspilerCJMapping.cpp:594-649); " +
+                        "(ObjCParamMapper.cpp:72-77); " +
                         "arm believed dead — reaching it is a contract violation")
                 case FunctionListFormat.CANGJIE_DECL =>
                     genParams += cur.identifier.Val() + ": " + Ty.ToString(cur.typeNode.getOrThrow().GetTy())
@@ -170,12 +170,8 @@ public class ObjCParamMapper {
     }
 
     public static func GenerateArgumentCast(retTy: Ty, value: String): String {
-        if (IsObjCCJMapping(retTy)) {
-            return value + "." + REGISTRY_ID
-        }
         let actualTy = if (retTy.IsCoreOptionType()) { retTy.typeArgs[0] } else { retTy }
-        if (IsObjCMirror(actualTy) || IsObjCImpl(actualTy) || IsObjCBlock(actualTy) ||
-            IsObjCCJMappingInterface(actualTy)) {
+        if (IsObjCMirror(actualTy) || IsObjCImpl(actualTy) || IsObjCBlock(actualTy)) {
             return CAST_TO_VOID_PTR_RETAINED + value
         }
         if (IsObjCPointer(actualTy)) {

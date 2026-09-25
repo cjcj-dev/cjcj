@@ -21,10 +21,10 @@ def verify(text, case):
     if case == 'slot_receiver':
         value = body(text, 'chooseSecond')
         return [('selected_second_slot', bool(re.search(r'= Apply\([^\n]*4Impl6secondHv,', value))),
-                ('upstream_cast_retained', '5SlotsE& = TypeCast(' in value)]
+                ('upstream_cast_retained', '5SlotsE& = ClassStaticCast(' in value)]
     if case == 'boxed_receiver':
         value = body(text, 'readPayload')
-        unbox = re.search(r'(%\d+): [^\n]* = UnBox\(', value)
+        unbox = re.search(r'(%\d+): [^\n]* = UnBoxToValue\(', value)
         call = re.search(r'= Apply\([^\n]*7Payload4readHv, (%\d+)\)', value)
         return [('boxed_receiver_conversion_precedes_call', bool(unbox and call and
                  unbox.start() < call.start() and unbox[1] == call[1]))]

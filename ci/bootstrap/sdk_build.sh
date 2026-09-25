@@ -12,7 +12,10 @@
 #   ⭐ **换漏位置 / 换到不存在的位置** ⇒ 我在两份任务书里写过"llc 有两个位置"，
 #     ⭐ 实测原厂与 stageB **只有 `third_party/llvm/bin/llc`**，⭐ 而 driver 也只搜这一个
 #     （`packages/driver/src/CJNATIVEBackend.cj:56-58` · `ToolChain.cj:482`）
-#     ⇒ ⭐⭐ 本工具只替换**基线里已存在**的位置，⛔ 不凭猜测新建路径
+#   ⇒ ⭐⭐ 本工具只替换**基线里已存在**的位置，⛔ 不凭猜测新建路径
+#   ⭐ 手拼 SDK（不经本脚本装配，或未经同目录 sdk_verify.py 复核
+#     std-producer.json / CJRT-COMMIT / llc·opt·ld.lld·libLLVM 的 CJLLVM-COMMIT）
+#     不作验收证据。使用前必须先跑 sdk_verify，并留下 SDK.lock.json 的 sha256。
 #
 # 用法:
 #   sdk_build.sh --from <基线SDK名或路径> --to <目标目录> --host|--target [选项]
@@ -34,6 +37,8 @@
 #   --runtime-commit <40hex> 独立预期提交；flat 任意名称根必须显式提供，nested 给出时也核验
 #   --std <dir>     build.py install prefix，或兼容旧调用的整个 modules/<平台> 目录
 #   --verify-host-rt <dir|sdk>  target SDK 验证 managed 工具时使用的未着色宿主 runtime
+#   --colour-runtime <SO>  染色 runtime 导出参考 SO（必填）
+#   --host-runtime <SO>    同 HRT 身份的官方 runtime 导出参考 SO（必填）
 #   --link <name>   ⭐ 组好后 `cjv toolchain link <name> <to>`
 #   --force         ⭐ 目标已存在时先删（⛔ 默认拒绝覆盖）
 set -u
@@ -48,7 +53,7 @@ die() { RED "SDK-BUILD-FAIL $*"; exit 1; }
 #      ⭐ LD_LIBRARY_PATH **首项**指**宿主**的 runtime（⭐ cjc 进程自己加载的是它）
 #   用法: sdk_build.sh env --host-sdk <dir> --target-sdk <dir>
 if [ "${1:-}" = env ]; then
-  shift; HOSTSDK= TGTSDK=
+  shift; HOSTSDK='' TGTSDK=''
   while [ $# -gt 0 ]; do
     case "$1" in
       --host-sdk) HOSTSDK="${2:?}"; shift 2;;
@@ -60,7 +65,9 @@ if [ "${1:-}" = env ]; then
   [ -d "${TGTSDK:-}" ]  || die "env: 缺 --target-sdk"
   hso=$(find "$HOSTSDK/runtime/lib" -name libcangjie-runtime.so | head -1)
   tso=$(find "$TGTSDK/runtime/lib"  -name libcangjie-runtime.so | head -1)
-  [ -n "$hso" ] && [ -n "$tso" ] || die "env: 找不到 libcangjie-runtime.so"
+  if [ -z "$hso" ] || [ -z "$tso" ]; then
+    die "env: 找不到 libcangjie-runtime.so"
+  fi
   hm=$(nm -D "$hso" 2>/dev/null | grep -c g_cjLoadBadMask || true)
   tm=$(nm -D "$tso" 2>/dev/null | grep -c g_cjLoadBadMask || true)
   [ "$hm" = 0 ] || die "env: ⛔ 宿主 runtime 着色了（mask=$hm）⇒ ⭐ cjc 会 SEGV"
@@ -93,7 +100,7 @@ if [ "${1:-}" = env ]; then
   exit 0
 fi
 
-FROM= TO= ROLE= LLC= OPT= LLVM_SO= LLVM_TUPLE= CJPM= CJC= RUNTIME= RUNTIME_COMMIT= TARGET_TUPLE= STD= VERIFY_HOST_RT= LINKNAME= FORCE=0
+FROM='' TO='' ROLE='' LLC='' OPT='' LLVM_SO='' LLVM_TUPLE='' CJPM='' CJC='' RUNTIME='' RUNTIME_COMMIT='' TARGET_TUPLE='' STD='' VERIFY_HOST_RT='' COLOUR_RUNTIME='' HOST_RUNTIME='' LINKNAME='' FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --from) FROM="${2:?}"; shift 2;;
@@ -114,6 +121,8 @@ while [ $# -gt 0 ]; do
     --runtime-commit) RUNTIME_COMMIT="${2:?}"; shift 2;;
     --std) STD="${2:?}"; shift 2;;
     --verify-host-rt) VERIFY_HOST_RT="${2:?}"; shift 2;;
+    --colour-runtime) COLOUR_RUNTIME="${2:?}"; shift 2;;
+    --host-runtime) HOST_RUNTIME="${2:?}"; shift 2;;
     --link) LINKNAME="${2:?}"; shift 2;;
     --force) FORCE=1; shift;;
     -h|--help) sed -n '1,40p' "$0"; exit 0;;
@@ -217,7 +226,7 @@ swap_all() {                     # swap_all <相对文件名> <源文件> <标�
     [ -n "$dst" ] || continue
     cp -f "$src" "$dst" || die "写入失败: $dst"
     n=$((n+1))
-    printf '      %s\n' "${dst#$TO/}"
+    printf '      %s\n' "${dst#"$TO"/}"
   done < <(find "$TO" -maxdepth 4 -type f -name "$rel" 2>/dev/null)
   [ "$n" -gt 0 ] || die "$label: ⭐ 基线里没有名为 $rel 的位置 —— ⛔ 本工具不新建路径，⭐ 请确认组件名"
   echo "  [$label] 替换 $n 处  sha=$(sha256sum "$src" | cut -c1-16)"
@@ -240,7 +249,7 @@ install_llvm_so() {
   [ -f "$canonical" ] || die "llvm-so: 基线里没有同名位置 $canonical"
   cp -f "$source" "$target" || die "llvm-so 写入失败: $target"
   same_sha "$source" "$canonical" || die 'llvm-so 安装后 sha256 不一致'
-  echo "  [llvm-so] $source -> ${target#$TO/}  sha=$(sha256sum "$target" | cut -c1-16)"
+  echo "  [llvm-so] $source -> ${target#"$TO"/}  sha=$(sha256sum "$target" | cut -c1-16)"
 }
 
 tuple_sum_has() {
@@ -370,7 +379,7 @@ assert_runtime_stamp() {
 }
 
 assert_flat_runtime_identity() {
-  local root="$1" name so expected= actual_hash
+  local root="$1" name so expected='' actual_hash
   name=$(basename "$root")
   name=${name,,}
   so="$root/libcangjie-runtime.so"
@@ -405,7 +414,7 @@ runtime_stamp_summary() {
 
 resolve_runtime_pair() {
   # 输出到全局：RT_DYN_SRC（必有）· RT_STATIC_SRC（可空）· RT_TUPLE · RT_LAYOUT
-  RT_DYN_SRC= RT_STATIC_SRC= RT_TUPLE= RT_LAYOUT=nested
+  RT_DYN_SRC='' RT_STATIC_SRC='' RT_TUPLE='' RT_LAYOUT=nested
   local root="$1" cand so flat_so nested_so nested_sos flat_stamp nested_summary
   # flat 与 nested 使用同一把尺：路径跟随符号链接后必须是常规文件。
   flat_so=$(find -L "$root" -mindepth 1 -maxdepth 1 -type f -name libcangjie-runtime.so -print -quit 2>/dev/null || true)
@@ -439,9 +448,9 @@ resolve_runtime_pair() {
   # 候选按优先级试；每个都过 same-round 才收
   for cand in \
       "$(readlink -f "$RT_DYN_SRC/../../../lib/$RT_TUPLE" 2>/dev/null || true)" \
-      "$( [ -d "$root/lib/$RT_TUPLE" ] && readlink -f "$root/lib/$RT_TUPLE" || true )" \
+      "$(if [ -d "$root/lib/$RT_TUPLE" ]; then readlink -f "$root/lib/$RT_TUPLE" || true; fi)" \
       "$(readlink -f "$RT_DYN_SRC/../../lib/$RT_TUPLE" 2>/dev/null || true)"; do
-    [ -n "$cand" ] && [ -d "$cand" ] || continue
+    if [ -z "$cand" ] || [ ! -d "$cand" ]; then continue; fi
     if runtime_pair_same_round "$RT_DYN_SRC" "$cand"; then
       RT_STATIC_SRC="$cand"
       break
@@ -462,12 +471,14 @@ if [ -n "$RUNTIME" ]; then
       cp -f "$RT_DYN_SRC/$base" "$d/$base" || die "flat runtime 动态库替换失败: $base"
       same_sha "$RT_DYN_SRC/$base" "$d/$base" || die "flat runtime 安装后 sha256 不一致: $base"
     done
-    echo "  [runtime-dyn] flat ${RT_DYN_SRC} -> ${d#$TO/} files=2"
+    echo "  [runtime-dyn] flat ${RT_DYN_SRC} -> ${d#"$TO"/} files=2"
   else
     [ "$RT_TUPLE" = "$tgt_tuple" ] || \
       die "runtime 平台不一致: 源=$RT_TUPLE 目标=$tgt_tuple"
-    rm -rf "$d" && cp -a "$RT_DYN_SRC" "$d" || die "runtime 动态库替换失败"
-    echo "  [runtime-dyn] ${RT_DYN_SRC} -> ${d#$TO/}"
+    if ! rm -rf "$d" || ! cp -a "$RT_DYN_SRC" "$d"; then
+      die "runtime 动态库替换失败"
+    fi
+    echo "  [runtime-dyn] ${RT_DYN_SRC} -> ${d#"$TO"/}"
   fi
   # ⭐ 静态侧：基线若有 lib/<tuple> 里的 runtime 相关归档，必须同轮替换
   lib_d="$TO/lib/$tgt_tuple"
@@ -507,6 +518,17 @@ if [ -n "$RUNTIME" ]; then
       fi
       echo "  [runtime-static] ${RT_STATIC_SRC} -> lib/$tgt_tuple  files=$n"
     fi
+    # Gnu.HandleLibrarySearchPaths searches lib/<tuple> before runtime/lib/<tuple>.
+    # Refresh inherited shared aliases after static installation, which may also
+    # contain shared files. Both lookup locations must select the pinned pair.
+    for base in libcangjie-runtime.so libboundscheck.so; do
+      dst="$lib_d/$base"
+      [ -e "$dst" ] || [ -L "$dst" ] || continue
+      [ -f "$d/$base" ] || die "runtime: pinned shared pair 缺 $d/$base"
+      rm -f "$dst" && cp "$d/$base" "$dst" || die "runtime shared alias 替换失败: $dst"
+      same_sha "$d/$base" "$dst" || die "runtime shared alias sha256 不一致: $dst"
+      echo "  [runtime-shared] ${d#$TO/}/$base -> ${dst#$TO/}"
+    done
   fi
 fi
 if [ -n "$STD" ]; then
@@ -516,8 +538,10 @@ if [ -n "$STD" ]; then
   if [ -d "$STD/modules" ]; then
     smod=$(find "$STD/modules" -maxdepth 1 -mindepth 1 -type d -name 'linux*' | head -1)
     [ -n "$smod" ] || die "std install prefix 里找不到 modules/linux*"
-    rm -rf "$d" && cp -a "$smod" "$d" || die "std modules 替换失败"
-    echo "  [std-prefix] modules -> ${d#$TO/}"
+    if ! rm -rf "$d" || ! cp -a "$smod" "$d"; then
+      die "std modules 替换失败"
+    fi
+    echo "  [std-prefix] modules -> ${d#"$TO"/}"
     n=0
     # ⭐ 两边同轮：lib/<tuple> 的 .a + runtime/lib/<tuple> 的 .so（+ FFI）
     for relroot in lib/linux_x86_64_cjnative runtime/lib/linux_x86_64_cjnative; do
@@ -528,19 +552,18 @@ if [ -n "$STD" ]; then
         case "$base" in
           libcangjie-runtime*|libboundscheck*) continue ;;
         esac
-        rel="${src#$STD/}"
+        rel="${src#"$STD"/}"
         dst="$TO/$rel"
         [ -f "$BASE/$rel" ] || die "std: 基线里没有 $rel，拒绝新建"
         cp -f "$src" "$dst" || die "std 写入失败: $rel"
         n=$((n+1))
       done < <(find "$STD/$relroot" -maxdepth 1 -type f | sort)
     done
-    for rel in lib/libstdFFI.so; do
-      [ -f "$STD/$rel" ] || die "std install prefix 缺文件: $rel"
-      [ -f "$TO/$rel" ] || die "std: 基线里没有 $rel，拒绝新建"
-      cp -f "$STD/$rel" "$TO/$rel" || die "std 写入失败: $rel"
-      n=$((n+1))
-    done
+    rel=lib/libstdFFI.so
+    [ -f "$STD/$rel" ] || die "std install prefix 缺文件: $rel"
+    [ -f "$TO/$rel" ] || die "std: 基线里没有 $rel，拒绝新建"
+    cp -f "$STD/$rel" "$TO/$rel" || die "std 写入失败: $rel"
+    n=$((n+1))
     # ⭐ 同轮自证：core 的 .a 与 .so 必须都来自本 prefix（sha 对源）
     for pair in \
       "lib/linux_x86_64_cjnative/libcangjie-std-core.a" \
@@ -552,6 +575,12 @@ if [ -n "$STD" ]; then
       [ "$s1" = "$s2" ] || die "std: $pair 与源 sha 不一致（半套装配）"
     done
     echo "  [std-prefix] replaced existing library files=$n (lib/ + runtime/lib/ same-round)"
+    if [ -f "$STD/std-producer.json" ]; then
+      cp -f "$STD/std-producer.json" "$TO/std-producer.json" || die "std-producer.json 写入失败"
+      echo "  [std-prefix] std-producer.json"
+    elif [ "$ROLE" = target ]; then
+      rm -f "$TO/std-producer.json"
+    fi
   else
     # 旧调用：只给 modules/<平台> —— ⭐ 这会留下 lib/ 与 runtime/lib/ 的基线 std
     # 080811 实账：半套 std 让 --version 绿、最小编译崩。fail-closed。
@@ -573,7 +602,9 @@ echo "  g_cjLoadBadMask=$MASK ✓  ($RTSO)"
 # Check the installed target pair, never the --verify-host-rt execution override.
 # All component copies (including inherited std) must be complete before this.
 COLOUR_CHECK="$(dirname "${BASH_SOURCE[0]}")/std_runtime_colour.py"
-python3 "$COLOUR_CHECK" --runtime "$RTSO" \
+[ -n "$COLOUR_RUNTIME" ] || die '配对检查缺 --colour-runtime 参考 SO'
+[ -n "$HOST_RUNTIME" ] || die '配对检查缺 --host-runtime 参考 SO'
+python3 "$COLOUR_CHECK" --colour-runtime "$COLOUR_RUNTIME" --host-runtime "$HOST_RUNTIME" --runtime "$RTSO" \
   --std "$TO/lib/$TARGET_TUPLE/libcangjie-std-core.a" --source "${STD:-$BASE}" \
   || die "std/runtime 颜色配对失败（来源与 sha256 见上）"
 
@@ -600,8 +631,10 @@ in_sdk_env() {                    # in_sdk_env <命令...>：⭐ 在 SDK 环境�
 }
 verify_exe() {                    # verify_exe <路径> <是否跑 --version>
   local f="$1" runver="$2"
-  [ -f "$f" ] || return 0
-  case "$(file -b "$f")" in *ELF*) ;; *) die "$f 不是 ELF";; esac
+  if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+    return 0
+  fi
+  case "$(file -bL "$f")" in *ELF*) ;; *) die "$f 不是 ELF";; esac
   local nf
   nf=$(in_sdk_env ldd "$f" 2>&1 | grep -c 'not found' || true)
   if [ "$nf" != 0 ]; then
@@ -612,13 +645,17 @@ verify_exe() {                    # verify_exe <路径> <是否跑 --version>
     in_sdk_env "$f" --version >/dev/null \
       || die "$f --version 非零退出（已 source $TO/envsetup.sh）"
   fi
-  printf '  %-34s ELF ✓  ldd ✓%s\n' "${f#$TO/}" "$([ "$runver" = 1 ] && printf '  --version ✓')"
+  printf '  %-34s ELF ✓  ldd ✓%s\n' "${f#"$TO"/}" "$([ "$runver" = 1 ] && printf '  --version ✓')"
 }
 for rel in third_party/llvm/bin/llc third_party/llvm/bin/opt tools/bin/cjpm; do
   verify_exe "$TO/$rel" 1
 done
 # ⚠ ⭐ cjc 只在【宿主】SDK 上跑 --version：⭐ 目标 SDK 的 runtime 着色，⭐ 跑它必崩
-[ "$ROLE" = host ] && verify_exe "$TO/bin/cjc" 1 || verify_exe "$TO/bin/cjc" 0
+if [ "$ROLE" = host ]; then
+  verify_exe "$TO/bin/cjc" 1
+else
+  verify_exe "$TO/bin/cjc" 0
+fi
 
 echo "[5/5] 登记"
 if [ -n "$LINKNAME" ]; then
@@ -632,4 +669,43 @@ echo
 for rel in bin/cjc third_party/llvm/bin/llc third_party/llvm/bin/opt tools/bin/cjpm; do
   [ -f "$TO/$rel" ] && printf 'SDK-BUILD-SHA %-34s %s\n' "$rel" "$(sha256sum "$TO/$rel" | awk '{print $1}')"
 done
+
+echo "[lock] SDK.lock.json + sdk_verify"
+_SDK_VERIFY="$(dirname "${BASH_SOURCE[0]}")/sdk_verify.py"
+_PIN="$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env"
+_IDENT=$(mktemp)
+_CJC_SHA=''
+if [ -f "$TO/bin/cjcj-stage1" ]; then
+  _CJC_SHA=$(sha256sum "$TO/bin/cjcj-stage1" | awk '{print $1}')
+elif [ -f "$TO/bin/cjc" ] && [ ! -L "$TO/bin/cjc" ]; then
+  _CJC_SHA=$(sha256sum "$TO/bin/cjc" | awk '{print $1}')
+elif [ -f "$TO/bin/cjc" ]; then
+  _CJC_SHA=$(sha256sum "$TO/bin/cjc" | awk '{print $1}')
+fi
+_STD_SHA=''
+if [ -f "$TO/std-producer.json" ]; then
+  _STD_SHA=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("compiler_sha256") or "")' "$TO/std-producer.json" 2>/dev/null || true)
+fi
+_RT_COMMIT=''
+_RTSO="$TO/runtime/lib/$TARGET_TUPLE/libcangjie-runtime.so"
+if [ -f "$_RTSO" ]; then
+  _RT_COMMIT=$(strings "$_RTSO" 2>/dev/null | /usr/bin/grep -Eo 'CJRT-COMMIT:[0-9a-fA-F]{40}' | head -1 | cut -d: -f2 || true)
+fi
+python3 - "$_IDENT" "$ROLE" "$_CJC_SHA" "$_STD_SHA" "$_RT_COMMIT" <<'PY'
+import json, sys
+path, role, cjc, std_sha, commit = sys.argv[1:6]
+payload = {
+    "role": role,
+    "cjc": {"compiler_sha256": cjc or None},
+    "std": {"compiler_sha256": std_sha or None, "source": "std-producer.json"},
+    "runtime": {"commit": (commit or None), "source": "CJRT-COMMIT"},
+    "llvm": {},
+    "cjpm": {},
+    "boundscheck": {"commit": commit or None},
+}
+open(path, "w").write(json.dumps(payload))
+PY
+python3 "$_SDK_VERIFY" --sdk "$TO" --role "$ROLE" --runtime-pin "$_PIN" --identities "$_IDENT" --target-tuple "$TARGET_TUPLE" --write-lock \
+  || { rm -f "$_IDENT"; die "sdk_verify 拒绝本枚 SDK（见 SDK-VERIFY-FAIL）"; }
+rm -f "$_IDENT"
 echo "SDK-BUILD-OK role=$ROLE from=$BASE to=$TO mask=$MASK"

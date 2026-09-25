@@ -38,7 +38,7 @@ public class RedundantGetOrThrowElimination {
                 }
             },
             { _: GetOrThrowResultDomain, _: Expression, _: Int64 => () },
-            { _: GetOrThrowResultDomain, _: Terminator, _: Option<Block> => () }
+            { _: GetOrThrowResultDomain, _: Expression, _: Option<Block> => () }
         )
         return changed.value
     }
