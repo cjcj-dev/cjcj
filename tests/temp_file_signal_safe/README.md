@@ -30,3 +30,20 @@ A compilation failure is never a successful control arm.
 Windows console/unhandled-exception routing has the same direct-call shape
 in `packages/option/src/Signal.cj`; the Unix execution does not establish
 Windows runtime behavior.
+
+On x86-64, the optional `allocations.gdb.py` observer records CString return
+addresses, caller symbols, and matching native frees without altering calls:
+
+```sh
+EXPECT_LIVE=0 ALLOCATION_RESULT=/root/<lane>/normal.json \
+  gdb -q -batch -ex 'set breakpoint pending on' \
+  -ex 'handle SIGUSR1 SIGUSR2 SIGPWR nostop noprint pass' \
+  -x tests/temp_file_signal_safe/allocations.gdb.py --args /root/<lane>/green/fixture normal
+```
+
+Use `reinit` with `EXPECT_LIVE=0` to exercise cleanup of the native paths kept
+by signal-safe deletion. The positive control is `direct` with
+`EXPECT_LIVE=2`: signal-safe deletion must keep both native path buffers.
+The observer requires normal process exit, at least one observed allocation,
+no debugger read errors, and the stated live allocation count. SDK runtime
+search paths and `TMPDIR` must be set as in `run.py`.
