@@ -174,10 +174,10 @@ public class Package {
             globalFuncs.add(item)
         }
         globalFuncIndex.clear()
-        for (func in globalFuncs) {
-            let identifier = func.GetIdentifier()
+        for (item in globalFuncs) {
+            let identifier = item.GetIdentifier()
             if (!globalFuncIndex.contains(identifier)) {
-                globalFuncIndex.add(identifier, func)
+                globalFuncIndex.add(identifier, item)
             }
         }
     }
