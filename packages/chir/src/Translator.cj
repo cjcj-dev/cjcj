@@ -565,7 +565,8 @@ public class Translator {
         let loc = if (decl.IsConst()) { INVALID_LOCATION } else { TranslateLocation(decl) }
         CreateAndAppendWrappedStore(initValue, globalVar, loc)
         if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateExit(None, CurrentBlock())
+            let createdExit568 = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(createdExit568)
         }
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         delayExitSignal = savedDelayExitSignal
@@ -605,6 +606,7 @@ public class Translator {
         SetCurrentBlock(entry)
         let retVal = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetUnitTy()),
             builder.context.GetUnitTy(), entry)
+        entry.AppendExpression(retVal)
         fn.SetReturnValue(RequireResult(retVal))
         return fn
     }
@@ -659,6 +661,7 @@ public class Translator {
         globalVar.SetInitFunc(initFunc)
         let retVal = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetUnitTy()),
             builder.context.GetUnitTy(), entry)
+        entry.AppendExpression(retVal)
         initFunc.SetReturnValue(RequireResult(retVal))
         return globalVar
     }
@@ -796,19 +799,25 @@ public class Translator {
     @When[backend == "cjnative"]
     private func TranslateAnnotationsArrayBody(decl: AstDecl, funcDef: Function): Unit {
         let annoInsts = funcDef.Get<AnnoFactoryInfo, ArrayList<GlobalVar>>()
-        let annoArrSize = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(),
-            IntLiteral(Int64(annoInsts.size)), CurrentBlock()))
+        let createdConstant799 = builder.CreateConstant(builder.context.GetInt64Ty(),
+            IntLiteral(Int64(annoInsts.size)), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant799)
+        let annoArrSize = RequireResult(createdConstant799)
         let objectTy = builder.context.GetRefTy(builder.context.GetObjectTy().getOrThrow())
         let rawArrayTy = builder.context.GetRawArrayTy(objectTy)
-        let rawArray = RequireResult(builder.CreateRawArrayAllocate(builder.context.GetRefTy(rawArrayTy), objectTy,
-            annoArrSize, CurrentBlock()))
+        let createdRawArrayAllocate803 = builder.CreateRawArrayAllocate(builder.context.GetRefTy(rawArrayTy), objectTy,
+            annoArrSize, CurrentBlock())
+        CurrentBlock().AppendExpression(createdRawArrayAllocate803)
+        let rawArray = RequireResult(createdRawArrayAllocate803)
         let arrayGeneric = builder.GetStructType("std.core", "Array").getOrThrow()
         let genericType = (arrayGeneric.GetGenericArgs()[0] as GenericType).getOrThrow()
         let table = HashMap<Int64, Type>()
         table[genericType.objectId] = objectTy
         let arrayType = ReplaceRawGenericArgType(arrayGeneric, table, builder)
-        let arrayValue = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(arrayType), arrayType,
-            CurrentBlock()))
+        let createdAllocate810 = builder.CreateAllocate(builder.context.GetRefTy(arrayType), arrayType,
+            CurrentBlock())
+        CurrentBlock().AppendExpression(createdAllocate810)
+        let arrayValue = RequireResult(createdAllocate810)
         let arrayMethods = arrayGeneric.GetStructDef().GetMethods()
         var arrayInit: Option<Function> = None
         for (method in arrayMethods) {
@@ -818,7 +827,9 @@ public class Translator {
             }
         }
         let arrayInitFunc = arrayInit.getOrThrow()
-        let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
+        let createdConstant821 = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant821)
+        let zero = RequireResult(createdConstant821)
         let args = ArrayList<Value>()
         args.add(arrayValue)
         args.add(rawArray)
@@ -827,20 +838,27 @@ public class Translator {
         let callContext = FuncCallContext(args: args, thisType: builder.context.GetRefTy(arrayType))
         let returnType = ReplaceRawGenericArgType(arrayInitFunc.GetFuncType().getOrThrow().GetReturnType(), table,
             builder)
-        builder.CreateApply(returnType, arrayInitFunc, callContext, CurrentBlock())
+        let createdApply830 = builder.CreateApply(returnType, arrayInitFunc, callContext, CurrentBlock())
+        CurrentBlock().AppendExpression(createdApply830)
         var annoInstIndex: Int64 = 0
         while (annoInstIndex < annoInsts.size) {
             let globalVar = annoInsts[annoInstIndex]
             let globalVarType = (globalVar.GetType().getOrThrow() as RefType).getOrThrow().GetBaseType()
-            let load = RequireResult(builder.CreateLoad(globalVarType, globalVar, CurrentBlock()))
-            let typecast = RequireResult(builder.CreateTypeCast(objectTy, load, CurrentBlock()))
+            let createdLoad835 = builder.CreateLoad(globalVarType, globalVar, CurrentBlock())
+            CurrentBlock().AppendExpression(createdLoad835)
+            let load = RequireResult(createdLoad835)
+            let createdTypeCast836 = builder.CreateTypeCast(objectTy, load, CurrentBlock())
+            CurrentBlock().AppendExpression(createdTypeCast836)
+            let typecast = RequireResult(createdTypeCast836)
             let path = ArrayList<UInt64>()
             path.add(UInt64(annoInstIndex))
-            builder.CreateStoreElementRef(typecast, rawArray, path, CurrentBlock())
+            let createdStoreElementRef839 = builder.CreateStoreElementRef(typecast, rawArray, path, CurrentBlock())
+            CurrentBlock().AppendExpression(createdStoreElementRef839)
             annoInstIndex++
         }
         funcDef.SetReturnValue(arrayValue)
-        builder.CreateExit(None, CurrentBlock())
+        let createdExit843 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit843)
 
         let annotationsArray = decl.annotationsArray.getOrThrow()
         var annoChildrenId: Int64 = 0
@@ -857,7 +875,8 @@ public class Translator {
             currentBlock = globalVarInit.GetEntryBlock().getOrThrow()
             TranslateSubExprToLoc(annotationsArray.children[annoChildrenId], Some(globalVar))
             annoChildrenId++
-            builder.CreateExit(None, CurrentBlock())
+            let createdExit860 = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(createdExit860)
             blockGroupStack.remove(at: blockGroupStack.size - 1)
             annoInstIndex++
         }
@@ -880,11 +899,13 @@ public class Translator {
         CurrentBlock().GetTerminator().getOrThrow().RemoveSelfFromBlock()
         annoInstIndex = 0
         while (annoInstIndex < annoInsts.size) {
-            builder.CreateApply(builder.context.GetUnitTy(), annoInsts[annoInstIndex].GetInitFunc().getOrThrow(),
+            let createdApply883 = builder.CreateApply(builder.context.GetUnitTy(), annoInsts[annoInstIndex].GetInitFunc().getOrThrow(),
                 FuncCallContext(), CurrentBlock())
+            CurrentBlock().AppendExpression(createdApply883)
             annoInstIndex++
         }
-        builder.CreateExit(None, CurrentBlock())
+        let createdExit887 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit887)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
@@ -944,7 +965,8 @@ public class Translator {
             if (nodePtr != node || nodePtr.TestAttr(AstAttribute.UNSAFE)) {
                 let sourceBlock = backBlock ??
                     throw IllegalStateException("faithful AST2CHIR desugar block has no source block")
-                trans.builder.CreateGoTo(trans.GetBlockByAST(block), sourceBlock)
+                let createdGoTo947 = trans.builder.CreateGoTo(trans.GetBlockByAST(block), sourceBlock)
+                sourceBlock.AppendExpression(createdGoTo947)
             }
         }
         return result
@@ -1043,13 +1065,15 @@ public class Translator {
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
         if (NeedCreateDebugForFirstParam(fn)) {
-            let _ = builder.CreateDebug(builder.context.GetUnitTy(), fn.GetParam(0), "this", entry)
+            let createdExpression1068 = builder.CreateDebug(builder.context.GetUnitTy(), fn.GetParam(0), "this", entry)
+            entry.AppendExpression(createdExpression1068)
         }
         BindingFuncParam(funcDecl, fn, entry,
             BindingConfig(hasInitial: funcDecl.TestAttr(AstAttribute.HAS_INITIAL)))
         if (let Some(returnType) <- fn.GetReturnType()) {
             if (!returnType.IsVoid()) {
                 let retValue = builder.CreateAllocate(builder.context.GetRefTy(returnType), returnType, entry)
+                entry.AppendExpression(retValue)
                 let returnSlot = RequireResult(retValue)
                 fn.SetReturnValue(returnSlot)
             }
@@ -1061,13 +1085,15 @@ public class Translator {
                 let lastBlock = CurrentBlock()
                 let result = Translator.TranslateASTNode(astBody, this)
                 if (lastBlock.GetTerminator().isNone()) {
-                    builder.CreateGoTo(GetBlockByAST(astBody), lastBlock)
+                    let createdGoTo1064 = builder.CreateGoTo(GetBlockByAST(astBody), lastBlock)
+                    lastBlock.AppendExpression(createdGoTo1064)
                 }
                 if (CurrentBlock().GetTerminator().isNone()) {
                     EmitImplicitFunctionExit(fn, result)
                 }
             } else if (CurrentBlock().GetTerminator().isNone()) {
-                builder.CreateExit(None, CurrentBlock())
+                let createdExit1070 = builder.CreateExit(None, CurrentBlock())
+                CurrentBlock().AppendExpression(createdExit1070)
             }
         }
         currentBlock = savedBlock
@@ -1096,8 +1122,9 @@ public class Translator {
             let varInitFunc = typeDef.GetVarInitializationFunc().getOrThrow()
             let args = ArrayList<Value>()
             args.add(thisVar)
-            builder.CreateApply(varInitFunc.GetReturnType().getOrThrow(), varInitFunc,
+            let createdApply1099 = builder.CreateApply(varInitFunc.GetReturnType().getOrThrow(), varInitFunc,
                 FuncCallContext(args: args, thisType: thisVar.GetType()), CurrentBlock())
+            CurrentBlock().AppendExpression(createdApply1099)
             return
         }
         if (owner.astKind != ASTKind.CLASS_DECL && owner.astKind != ASTKind.STRUCT_DECL) {
@@ -1124,6 +1151,7 @@ public class Translator {
                     TypeCastOrBoxIfNeeded(initValue, memberTy, loc)
                 }
                 let store = builder.CreateStoreElementRef(storedValue, thisVar, path, CurrentBlock())
+                CurrentBlock().AppendExpression(store)
                 store.SetDebugLocation(loc)
             }
             fieldOffset++
@@ -1223,11 +1251,14 @@ public class Translator {
         blockGroupStack.add(body)
         let entry = builder.CreateBlock(body)
         body.SetEntryBlock(entry)
-        let retVal = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetUnitTy()),
-            builder.context.GetUnitTy(), entry))
+        let createdAllocate1226 = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetUnitTy()),
+            builder.context.GetUnitTy(), entry)
+        entry.AppendExpression(createdAllocate1226)
+        let retVal = RequireResult(createdAllocate1226)
         funcDef.SetReturnValue(retVal)
         let thisVar = funcDef.GetParam(0)
-        builder.CreateDebug(builder.context.GetUnitTy(), thisVar, "this", entry)
+        let createdDebug1230 = builder.CreateDebug(builder.context.GetUnitTy(), thisVar, "this", entry)
+        entry.AppendExpression(createdDebug1230)
         currentFunc = funcDef
         return Some(funcDef)
     }
@@ -1245,13 +1276,17 @@ public class Translator {
         let lastBlock = CurrentBlock()
         let returnType = funcDef.GetReturnType().getOrThrow()
         let allocate = builder.CreateAllocate(builder.context.GetRefTy(returnType), returnType, lastBlock)
+        lastBlock.AppendExpression(allocate)
         allocate.SetDebugLocation(loc)
         let retVal = RequireResult(allocate)
         funcDef.SetReturnValue(retVal)
         let store = builder.CreateStore(value, retVal, lastBlock)
+        lastBlock.AppendExpression(store)
         store.SetDebugLocation(loc)
-        builder.CreateExit(None, lastBlock)
-        builder.CreateGoTo(initBlock, entry)
+        let createdExit1253 = builder.CreateExit(None, lastBlock)
+        lastBlock.AppendExpression(createdExit1253)
+        let createdGoTo1254 = builder.CreateGoTo(initBlock, entry)
+        entry.AppendExpression(createdGoTo1254)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return Some(funcDef)
     }
@@ -1264,8 +1299,10 @@ public class Translator {
         currentBlock = initBlock
         TranslateVariablesInit(decl, thisVar)
         let lastBlock = CurrentBlock()
-        builder.CreateExit(None, lastBlock)
-        builder.CreateGoTo(initBlock, funcDef.GetEntryBlock().getOrThrow())
+        let createdExit1267 = builder.CreateExit(None, lastBlock)
+        lastBlock.AppendExpression(createdExit1267)
+        let createdGoTo1268 = builder.CreateGoTo(initBlock, funcDef.GetEntryBlock().getOrThrow())
+        funcDef.GetEntryBlock().getOrThrow().AppendExpression(createdGoTo1268)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         return Some(funcDef)
     }
@@ -1293,6 +1330,7 @@ public class Translator {
                 let loc = TranslateLocation(member)
                 let apply = builder.CreateApply(varInitFunc.GetReturnType().getOrThrow(), varInitFunc,
                     FuncCallContext(args: args, thisType: thisVar.GetType()), CurrentBlock())
+                CurrentBlock().AppendExpression(apply)
                 apply.SetDebugLocation(loc)
                 let value = RequireResult(apply)
                 let path = ArrayList<UInt64>()
@@ -1303,10 +1341,12 @@ public class Translator {
                     .GetInstMemberTypeByPath(path, builder)
                 if (refEq(value.GetType().getOrThrow(), memberType)) {
                     let store = builder.CreateStoreElementRef(value, thisVar, path, CurrentBlock())
+                    CurrentBlock().AppendExpression(store)
                     store.SetDebugLocation(loc)
                 } else {
                     let castedValue = TypeCastOrBoxIfNeeded(value, memberType, loc)
                     let store = builder.CreateStoreElementRef(castedValue, thisVar, path, CurrentBlock())
+                    CurrentBlock().AppendExpression(store)
                     store.SetDebugLocation(loc)
                 }
             }
@@ -1344,13 +1384,15 @@ public class Translator {
         if (let Some(astBody) <- funcBody.body) {
             let result = Translator.TranslateASTNode(astBody, this)
             if (entry.GetTerminator().isNone()) {
-                builder.CreateGoTo(GetBlockByAST(astBody), entry)
+                let createdGoTo1347 = builder.CreateGoTo(GetBlockByAST(astBody), entry)
+                entry.AppendExpression(createdGoTo1347)
             }
             if (CurrentBlock().GetTerminator().isNone()) {
                 EmitImplicitFunctionExit(fn, result)
             }
         } else if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateExit(None, CurrentBlock())
+            let createdExit1353 = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(createdExit1353)
         }
         currentBlock = savedBlock
         delayExitSignal = savedDelayExitSignal
@@ -1514,6 +1556,7 @@ public class Translator {
         if (isLocalVar) {
             if (ShouldCreateAlloc(decl, opts, rValueIsEmpty)) {
                 let allocate = builder.CreateAllocate(builder.context.GetRefTy(leftType), leftType, CurrentBlock())
+                CurrentBlock().AppendExpression(allocate)
                 allocate.SetDebugLocation(varPos)
                 let allocatedValue = RequireResult(allocate)
                 leftValue = Some(allocatedValue)
@@ -1521,6 +1564,7 @@ public class Translator {
                     allocatedValue.SetSrcCodeIdentifier(decl.identifier.Val())
                     let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), allocatedValue,
                         decl.identifier.Val(), CurrentBlock())
+                    CurrentBlock().AppendExpression(debugInfo)
                     debugInfo.SetDebugLocation(varPos)
                     debugInfo.SetDebugLocationInfoForWarning(GetDeclLoc(builder.context, decl))
                 }
@@ -1546,6 +1590,7 @@ public class Translator {
         if (!decl.TestAttr(AstAttribute.IMPLICIT_ADD) && !decl.isConst) {
             let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), castedValue,
                 decl.identifier.Val(), CurrentBlock())
+            CurrentBlock().AppendExpression(debugInfo)
             debugInfo.SetDebugLocation(varPos)
             debugInfo.SetDebugLocationInfoForWarning(warnPos)
             let debugResult = RequireResult(debugInfo)
@@ -1629,6 +1674,7 @@ public class Translator {
         }
         let literal = TranslateLitConstant(expr)
         let constant = builder.CreateConstant(resultTy, literal, CurrentBlock())
+        CurrentBlock().AppendExpression(constant)
         constant.SetDebugLocation(TranslateLocation(expr))
         return RequireResult(constant)
     }
@@ -1720,6 +1766,7 @@ public class Translator {
         }
         let getInstantiateValue = builder.CreateGetInstantiateValue(
             chirTy.TranslateType(RequireAstTy(refExpr)), originalFunc, instArgs, CurrentBlock())
+        CurrentBlock().AppendExpression(getInstantiateValue)
         getInstantiateValue.SetDebugLocation(TranslateLocation(refExpr))
         return RequireResult(getInstantiateValue)
     }
@@ -1747,6 +1794,7 @@ public class Translator {
         var terminator: Option<Terminator> = None
         if (finallyContext.isEmpty()) {
             let exit = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(exit)
             exit.SetDebugLocation(loc)
             if (expr.TestAttr(AstAttribute.COMPILER_ADD)) {
                 exit.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
@@ -1756,6 +1804,7 @@ public class Translator {
             let prevBlock = CurrentBlock()
             currentBlock = CreateBlock()
             let exit = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(exit)
             exit.SetDebugLocation(loc)
             terminator = Some(exit)
             CurrentFinallyContext().controlFlowBlocks[ControlType.RETURN].add((prevBlock, CurrentBlock()))
@@ -1826,6 +1875,7 @@ public class Translator {
             }
             let binary = builder.CreateBinaryIntOpWithException(resultTy, binaryKind, lhs, rhs, successBlock,
                 targetBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(binary)
             binary.SetOverflowStrategy(expr.overflowStrategy)
             binary.SetDebugLocation(loc)
             binary.SetDebugLocationInfoForWarning(locForWarning)
@@ -1835,6 +1885,7 @@ public class Translator {
         }
         let binary = builder.CreateBinaryExpression(binaryKind, resultTy, lhs, rhs, CurrentBlock(),
             overflowStrategy: expr.overflowStrategy)
+        CurrentBlock().AppendExpression(binary)
         binary.SetDebugLocation(loc)
         binary.SetDebugLocationInfoForWarning(locForWarning)
         return RequireResult(binary)
@@ -1866,6 +1917,7 @@ public class Translator {
             }
             let unary = builder.CreateUnaryIntOpWithException(resultTy, kind, operand, successBlock,
                 targetBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(unary)
             unary.SetOverflowStrategy(overflowStrategy)
             unary.SetDebugLocation(loc)
             unary.SetDebugLocationInfoForWarning(locForWarning)
@@ -1875,6 +1927,7 @@ public class Translator {
         }
         let unary = builder.CreateUnaryExpression(kind, resultTy, operand, CurrentBlock(),
             overflowStrategy: overflowStrategy)
+        CurrentBlock().AppendExpression(unary)
         unary.SetDebugLocation(loc)
         unary.SetDebugLocationInfoForWarning(locForWarning)
         return RequireResult(unary)
@@ -1905,21 +1958,26 @@ public class Translator {
                         let memberType = GetInstMemberTypeByName(lhsCustomType, argLeftValInfo.path, builder)
                         let getMember = builder.CreateFieldByName(memberType, argValue, argLeftValInfo.path,
                             CurrentBlock())
+                        CurrentBlock().AppendExpression(getMember)
                         getMember.SetDebugLocation(TranslateLocation(expr))
                         argValue = RequireResult(getMember)
                     }
                 }
                 let inoutArgs = ArrayList<Value>()
                 inoutArgs.add(argValue)
-                argValue = RequireResult(builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(arg)),
-                    IntrisicCallContext(kind: IntrinsicKind.INOUT_PARAM, args: inoutArgs), CurrentBlock()))
+                let createdIntrinsic1914 = builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(arg)),
+                    IntrisicCallContext(kind: IntrinsicKind.INOUT_PARAM, args: inoutArgs), CurrentBlock())
+                CurrentBlock().AppendExpression(createdIntrinsic1914)
+                argValue = RequireResult(createdIntrinsic1914)
             } else {
                 argValue = TranslateExprArg(RequireFuncArgExpr(arg, "pointer argument"))
             }
             args.add(GenerateLoadIfNeccessary(argValue, arg.withInout))
         }
-        return RequireResult(builder.CreateIntrinsic(resultTy, IntrisicCallContext(kind: intrinsicKind, args: args),
-            CurrentBlock()))
+        let createdIntrinsic1921 = builder.CreateIntrinsic(resultTy, IntrisicCallContext(kind: intrinsicKind, args: args),
+            CurrentBlock())
+        CurrentBlock().AppendExpression(createdIntrinsic1921)
+        return RequireResult(createdIntrinsic1921)
     }
 
     public func Visit(expr: AstSpawnExpr): Option<Value> {
@@ -2010,6 +2068,7 @@ public class Translator {
                 CJC_ASSERT(baseType.IsValueOrGenericTypeWithRefDims(0))
                 let getMember = builder.CreateFieldByName(
                     memberType, baseLeftValue, baseLeftValuePath, CurrentBlock())
+                CurrentBlock().AppendExpression(getMember)
                 getMember.SetDebugLocation(loc)
                 SetExprValue(baseExpr, RequireResult(getMember))
             }
@@ -2078,6 +2137,7 @@ public class Translator {
         }
         let lambda = builder.CreateLambda(funcTy, funcTy, CurrentBlock(), isLocalFunc: true,
             identifier: mangledName, srcCodeIdentifier: "$lambda")
+        CurrentBlock().AppendExpression(lambda)
         lambda.SetDebugLocation(TranslateLocation(expr))
         lambda.InitBody(body)
         lambdaTrans.BindLambdaParams(funcBody, lambda, funcTy)
@@ -2150,12 +2210,15 @@ public class Translator {
         currentBlock = entry
         CreateLambdaParamDebugs(funcBody, lambda, entry, hasInitial: hasInitial)
         let retType = lambda.GetReturnType().getOrThrow()
-        let retSlot = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry))
+        let createdAllocate2153 = builder.CreateAllocate(builder.context.GetRefTy(retType), retType, entry)
+        entry.AppendExpression(createdAllocate2153)
+        let retSlot = RequireResult(createdAllocate2153)
         lambda.SetReturnValue(retSlot)
         let astBody = funcBody.body.getOrThrow()
         let result = Translator.TranslateASTNode(astBody, this)
         if (entry.GetTerminator().isNone()) {
-            builder.CreateGoTo(GetBlockByAST(astBody), entry)
+            let createdGoTo2158 = builder.CreateGoTo(GetBlockByAST(astBody), entry)
+            entry.AppendExpression(createdGoTo2158)
         }
         if (CurrentBlock().GetTerminator().isNone()) {
             EmitImplicitLambdaExit(lambda, result)
@@ -2220,7 +2283,8 @@ public class Translator {
         }
         let cond = Translator.TranslateASTNode(expr, this) ??
             throw IllegalStateException("faithful AST2CHIR if condition produced no value")
-        builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+        let createdBranch2223 = builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBranch2223)
     }
 
     private func TranslateLetPatternCondition(letPattern: AstLetPatternDestructor, trueBlock: Block,
@@ -2244,8 +2308,10 @@ public class Translator {
             TranslateOrPattern(letPattern.patterns, selector, originLoc)
         }
         scopeInfo.remove(at: scopeInfo.size - 1)
-        builder.CreateGoTo(trueBlock, patternTrueBlock)
-        builder.CreateGoTo(falseBlock, patternFalseBlock)
+        let createdGoTo2247 = builder.CreateGoTo(trueBlock, patternTrueBlock)
+        patternTrueBlock.AppendExpression(createdGoTo2247)
+        let createdGoTo2248 = builder.CreateGoTo(falseBlock, patternFalseBlock)
+        patternFalseBlock.AppendExpression(createdGoTo2248)
     }
 
     private func TranslateLetPatternConditionAsTable(letPattern: AstLetPatternDestructor, trueBlock: Block,
@@ -2264,9 +2330,11 @@ public class Translator {
         } else {
             TranslateEnumLetPatternMatchAsTable(letPattern, selectorVal)
         }
-        builder.CreateGoTo(trueBlock, patternTrueBlock)
+        let createdGoTo2267 = builder.CreateGoTo(trueBlock, patternTrueBlock)
+        patternTrueBlock.AppendExpression(createdGoTo2267)
         if (let Some(block) <- patternFalseBlock) {
-            builder.CreateGoTo(falseBlock, block)
+            let createdGoTo2269 = builder.CreateGoTo(falseBlock, block)
+            block.AppendExpression(createdGoTo2269)
         }
     }
 
@@ -2298,11 +2366,13 @@ public class Translator {
             blocks.add(matchInfo.firstSwitchBlocks.get(key).getOrThrow())
         }
         currentBlock = baseBlock
-        builder.CreateMultiBranch(firstSelectorVal, firstDefaultBlock, indexes, blocks, baseBlock)
+        let createdMultiBranch2301 = builder.CreateMultiBranch(firstSelectorVal, firstDefaultBlock, indexes, blocks, baseBlock)
+        baseBlock.AppendExpression(createdMultiBranch2301)
         let branchInfos = TranslateSecondLevelAsTable(matchInfo, enumVal, firstDefaultBlock)
         if (let Some(branchBlocks) <- branchInfos.get(0)) {
             for (block in branchBlocks) {
-                builder.CreateGoTo(trueBlock, block)
+                let createdGoTo2305 = builder.CreateGoTo(trueBlock, block)
+                block.AppendExpression(createdGoTo2305)
             }
         }
         currentBlock = falseBlock
@@ -2328,7 +2398,8 @@ public class Translator {
                 let patternVal = GetJumpablePatternVal(pattern)
                 let patternBlock = CreateBlock()
                 patternBlock.SetDebugLocation(TranslateLocation(pattern))
-                builder.CreateGoTo(trueBlock, patternBlock)
+                let createdGoTo2331 = builder.CreateGoTo(trueBlock, patternBlock)
+                patternBlock.AppendExpression(createdGoTo2331)
                 if (indexToBodies.contains(patternVal)) {
                     continue
                 }
@@ -2359,6 +2430,7 @@ public class Translator {
         }
         let castedVal = TypeCastOrBoxIfNeeded(selectorVal, targetType, INVALID_LOCATION)
         let term = builder.CreateMultiBranch(castedVal, realDefaultBlock, indexes, blocks, baseBlock)
+        baseBlock.AppendExpression(term)
         term.SetDebugLocation(TranslateLocation(letPattern))
         currentBlock = realDefaultBlock
         return (trueBlock, if (isStillReachable) { Some(realDefaultBlock) } else { None })
@@ -2523,7 +2595,8 @@ public class Translator {
             indexes.add(key)
             blocks.add(matchInfo.firstSwitchBlocks.get(key).getOrThrow())
         }
-        let _ = builder.CreateMultiBranch(firstSelectorValue, firstDefaultBlock, indexes, blocks, baseBlock)
+        let createdExpression2598 = builder.CreateMultiBranch(firstSelectorValue, firstDefaultBlock, indexes, blocks, baseBlock)
+        baseBlock.AppendExpression(createdExpression2598)
         let branchInfos = TranslateSecondLevelAsTable(matchInfo, enumValue, firstDefaultBlock)
         if (let Some(branchBlocks) <- branchInfos.get(0)) {
             for (block in branchBlocks) {
@@ -2587,6 +2660,7 @@ public class Translator {
         }
         let castedValue = TypeCastOrBoxIfNeeded(value, targetType, DebugLocation())
         let term = builder.CreateMultiBranch(castedValue, realDefaultBlock, indexes, blocks, baseBlock.getOrThrow())
+        baseBlock.getOrThrow().AppendExpression(term)
         term.SetDebugLocation(TranslateLocation(letPattern))
         currentBlock = impl.endBlock
         return DanglingBlock(tb: Some(trueBlock),
@@ -2596,12 +2670,15 @@ public class Translator {
     private func CreateBranch(value: Value, current: Block, trueBlock: Block, falseBlock: Block,
         impl: TranslateCondCtrlExpr): Branch {
         let result = builder.CreateBranch(value, trueBlock, falseBlock, current)
+        current.AppendExpression(result)
         result.SetSourceExpr(GetSourceExpr(impl))
         return result
     }
 
     private func CreateGoto(destination: Block, source: Block): GoTo {
-        return builder.CreateGoTo(destination, source)
+        let createdGoTo2604 = builder.CreateGoTo(destination, source)
+        source.AppendExpression(createdGoTo2604)
+        return createdGoTo2604
     }
 
     private func GetExpr(impl: TranslateCondCtrlExpr): AstExpr {
@@ -2686,6 +2763,7 @@ public class Translator {
         let forceGenerateUnit = opts.enableCompileDebug && IsEmptyIf(expr)
         if ((!HasTypeOfNothing(expr) && !ifType.IsUnit()) || forceGenerateUnit) {
             let allocate = builder.CreateAllocate(builder.context.GetRefTy(ifType), ifType, CurrentBlock())
+            CurrentBlock().AppendExpression(allocate)
             allocate.SetDebugLocation(TranslateLocation(expr))
             impl.retVal = Some(RequireResult(allocate))
         }
@@ -2808,11 +2886,13 @@ public class Translator {
             let memberRef = CreateGetElementRefWithPath(loc, base, leftValueInfo.path, CurrentBlock(), customType)
             let memberType = RequireRefBaseType(memberRef)
             let loadMemberValue = builder.CreateLoad(memberType, memberRef, CurrentBlock())
+            CurrentBlock().AppendExpression(loadMemberValue)
             loadMemberValue.SetDebugLocation(loc)
             return Some(RequireResult(loadMemberValue))
         } else if (baseType.IsValueOrGenericTypeWithRefDims(0)) {
             let memberType = GetInstMemberTypeByName(customType, leftValueInfo.path, builder)
             let getMember = builder.CreateFieldByName(memberType, base, leftValueInfo.path, CurrentBlock())
+            CurrentBlock().AppendExpression(getMember)
             getMember.SetDebugLocation(loc)
             return Some(RequireResult(getMember))
         }
@@ -3003,7 +3083,9 @@ public class Translator {
             if (let Some(objTy) <- thisObj.GetType()) {
                 if (let Some(refTy) <- (objTy as RefType)) {
                     if (refTy.GetBaseType().IsRef()) {
-                        thisObj = RequireResult(builder.CreateLoad(refTy.GetBaseType(), thisObj, CurrentBlock()))
+                        let createdLoad3006 = builder.CreateLoad(refTy.GetBaseType(), thisObj, CurrentBlock())
+                        CurrentBlock().AppendExpression(createdLoad3006)
+                        thisObj = RequireResult(createdLoad3006)
                     }
                 }
             }
@@ -3011,7 +3093,9 @@ public class Translator {
             if (let Some(objTy) <- thisObj.GetType()) {
                 if (let Some(refTy) <- (objTy as RefType)) {
                     if (!refTy.GetBaseType().IsRef()) {
-                        thisObj = RequireResult(builder.CreateLoad(refTy.GetBaseType(), thisObj, CurrentBlock()))
+                        let createdLoad3014 = builder.CreateLoad(refTy.GetBaseType(), thisObj, CurrentBlock())
+                        CurrentBlock().AppendExpression(createdLoad3014)
+                        thisObj = RequireResult(createdLoad3014)
                     }
                 }
             }
@@ -3035,6 +3119,7 @@ public class Translator {
         let lambdaType = builder.context.GetFuncTy(lambdaParamTypes, instFuncType.instRetTy)
         let lambda = builder.CreateLambda(lambdaType, lambdaType, CurrentBlock(), isLocalFunc: false,
             identifier: lambdaMangledName, srcCodeIdentifier: funcDecl.identifier.Val())
+        CurrentBlock().AppendExpression(lambda)
 
         let lambdaBlockGroup = builder.CreateBlockGroup(topLevelFunc)
         lambda.InitBody(lambdaBlockGroup)
@@ -3043,8 +3128,10 @@ public class Translator {
         for (paramTy in lambdaParamTypes) {
             builder.CreateParameter(paramTy, INVALID_LOCATION, lambda)
         }
-        let retVal = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(instFuncType.instRetTy),
-            instFuncType.instRetTy, entry))
+        let createdAllocate3046 = builder.CreateAllocate(builder.context.GetRefTy(instFuncType.instRetTy),
+            instFuncType.instRetTy, entry)
+        entry.AppendExpression(createdAllocate3046)
+        let retVal = RequireResult(createdAllocate3046)
         lambda.SetReturnValue(retVal)
 
         let currentBlockBackup = currentBlock
@@ -3055,8 +3142,10 @@ public class Translator {
         } else {
             CreateMemberWrapperApply(funcDecl, instFuncType, thisObj, lambda, args)
         }
-        builder.CreateStore(CastValueIfNeeded(ret, RequireRefBaseType(retVal)), retVal, CurrentBlock())
-        builder.CreateExit(None, CurrentBlock())
+        let createdStore3058 = builder.CreateStore(CastValueIfNeeded(ret, RequireRefBaseType(retVal)), retVal, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore3058)
+        let createdExit3059 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit3059)
         currentBlock = currentBlockBackup
         return lambda.GetResult() ??
             throw IllegalStateException("faithful AST2CHIR member wrapper lambda has no result")
@@ -3076,15 +3165,21 @@ public class Translator {
             if (thisObj.isSome()) {
                 throw IllegalStateException("faithful AST2CHIR static member wrapper unexpectedly captured receiver")
             }
-            let rtti = RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
-                instFuncType.thisType.StripAllRefs(), CurrentBlock()))
+            let createdGetRTTIStatic3079 = builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
+                instFuncType.thisType.StripAllRefs(), CurrentBlock())
+            CurrentBlock().AppendExpression(createdGetRTTIStatic3079)
+            let rtti = RequireResult(createdGetRTTIStatic3079)
             let invokeInfo = GenerateInvokeCallContext(instFuncType, rtti, funcDecl, args)
-            return RequireResult(builder.CreateInvokeStatic(instFuncType.instRetTy, invokeInfo, CurrentBlock()))
+            let createdInvokeStatic3082 = builder.CreateInvokeStatic(instFuncType.instRetTy, invokeInfo, CurrentBlock())
+            CurrentBlock().AppendExpression(createdInvokeStatic3082)
+            return RequireResult(createdInvokeStatic3082)
         }
         let caller = thisObj ??
             throw IllegalStateException("faithful AST2CHIR virtual member wrapper has no receiver")
         let invokeInfo = GenerateInvokeCallContext(instFuncType, caller, funcDecl, args)
-        return RequireResult(builder.CreateInvoke(instFuncType.instRetTy, invokeInfo, CurrentBlock()))
+        let createdInvoke3087 = builder.CreateInvoke(instFuncType.instRetTy, invokeInfo, CurrentBlock())
+        CurrentBlock().AppendExpression(createdInvoke3087)
+        return RequireResult(createdInvoke3087)
     }
 
     private func CreateMemberWrapperApply(funcDecl: AstFuncDecl, instFuncType: FaithfulInstCalleeInfo,
@@ -3099,8 +3194,10 @@ public class Translator {
         }
         let instTypeArgs = instFuncType.instantiatedTypeArgs.clone()
         let callee = GetSymbolTable(funcDecl)
-        return RequireResult(builder.CreateApply(instFuncType.instRetTy, callee, FuncCallContext(args: args,
-            instTypeArgs: instTypeArgs, thisType: Some(instFuncType.thisType)), CurrentBlock()))
+        let createdApply3102 = builder.CreateApply(instFuncType.instRetTy, callee, FuncCallContext(args: args,
+            instTypeArgs: instTypeArgs, thisType: Some(instFuncType.thisType)), CurrentBlock())
+        CurrentBlock().AppendExpression(createdApply3102)
+        return RequireResult(createdApply3102)
     }
 
     private func GenerateInvokeCallContext(instFuncType: FaithfulInstCalleeInfo, caller: Value,
@@ -3175,18 +3272,26 @@ public class Translator {
         let parentBlock = curLambda.GetParentBlock() ??
             throw IllegalStateException("faithful AST2CHIR member wrapper lambda has no parent block")
         var result: Value
+        var expressions = ArrayList<Expression>()
         if (let Some(refTy) <- (rawThisTy as RefType)) {
             if (refTy.GetBaseType().IsStruct() && refTy.GetBaseType() == expectedTy) {
-                result = RequireResult(builder.CreateLoad(expectedTy, rawThis, parentBlock))
+                let createdLoad3180 = builder.CreateLoad(expectedTy, rawThis, parentBlock)
+                expressions.add(createdLoad3180)
+                result = RequireResult(createdLoad3180)
             } else {
-                result = TypeCastOrBoxIfNeeded(rawThis, expectedTy, builder, parentBlock)
+                let (castedThis, createdExpressions) = TypeCastOrBoxIfNeeded(rawThis, expectedTy, builder, parentBlock)
+                expressions = createdExpressions
+                result = castedThis
             }
         } else {
-            result = TypeCastOrBoxIfNeeded(rawThis, expectedTy, builder, parentBlock)
+            let (castedThis, createdExpressions) = TypeCastOrBoxIfNeeded(rawThis, expectedTy, builder, parentBlock)
+            expressions = createdExpressions
+            result = castedThis
         }
-        let expr = result.AsLocalVar().getOrThrow().GetExpr().getOrThrow()
         if (result != rawThis) {
-            expr.MoveBefore(curLambda)
+            for (expression in expressions) {
+                expression.MoveBefore(curLambda)
+            }
         }
         return result
     }
@@ -3499,6 +3604,7 @@ public class Translator {
             TranslateSubExprToDiscarded(body)
             let trueBlock = GetBlockByAST(body)
             let gotoCondition = builder.CreateGoTo(conditionBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(gotoCondition)
             gotoCondition.SetDebugLocation(whileLoc)
             gotoCondition.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
             currentBlock = conditionBlock
@@ -3506,8 +3612,10 @@ public class Translator {
             let conditionType = condition.GetType().getOrThrow()
             CJC_ASSERT(conditionType.IsBoolean() || conditionType.IsNothing() || conditionType.IsGeneric())
             let newConditionBlock = CurrentBlock()
-            let _ = builder.CreateGoTo(trueBlock, backupBlock)
+            let createdExpression3615 = builder.CreateGoTo(trueBlock, backupBlock)
+            backupBlock.AppendExpression(createdExpression3615)
             let branch = builder.CreateBranch(condition, trueBlock, endBlock, newConditionBlock)
+            newConditionBlock.AppendExpression(branch)
             branch.SetDebugLocation(whileLoc)
             branch.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
             currentBlock = endBlock
@@ -3549,10 +3657,14 @@ public class Translator {
             } else {
                 CalculateDelayExitLevelForContinue()
             })
-            builder.CreateExit(None, CurrentBlock())
+            let createdExit3552 = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(createdExit3552)
+            createdExit3552
         } else {
             let blocks = terminatorSymbolTable.Get(refLoop)
-            builder.CreateGoTo(if (expr.isBreak) { blocks[1] } else { blocks[0] }, CurrentBlock())
+            let createdGoTo3555 = builder.CreateGoTo(if (expr.isBreak) { blocks[1] } else { blocks[0] }, CurrentBlock())
+            CurrentBlock().AppendExpression(createdGoTo3555)
+            createdGoTo3555
         }
         terminator.SetDebugLocation(loc)
         let group = RequireParentBlockGroup(CurrentBlock(), "jump continuation")
@@ -3566,7 +3678,9 @@ public class Translator {
         let resultLoc: Option<Value> = if (HasTypeOfNothing(expr) || matchTy.IsUnit() || matchTy.IsNothing()) {
             None
         } else {
-            RequireResult(builder.CreateAllocate(builder.context.GetRefTy(matchTy), matchTy, CurrentBlock()))
+            let createdAllocate3569 = builder.CreateAllocate(builder.context.GetRefTy(matchTy), matchTy, CurrentBlock())
+            CurrentBlock().AppendExpression(createdAllocate3569)
+            RequireResult(createdAllocate3569)
         }
         if (expr.matchMode) {
             if (CanOptimizeMatchToSwitch(expr)) {
@@ -3579,7 +3693,9 @@ public class Translator {
             TranslateConditionMatches(expr, resultLoc)
         }
         if (let Some(loc) <- resultLoc) {
-            return RequireResult(builder.CreateLoad(matchTy, loc, CurrentBlock()))
+            let createdLoad3582 = builder.CreateLoad(matchTy, loc, CurrentBlock())
+            CurrentBlock().AppendExpression(createdLoad3582)
+            return RequireResult(createdLoad3582)
         }
         return None
     }
@@ -3604,7 +3720,9 @@ public class Translator {
         let resultLoc: Option<Value> = if (tryTy.IsUnit() || tryTy.IsNothing()) {
             None
         } else {
-            RequireResult(builder.CreateAllocate(builder.context.GetRefTy(tryTy), tryTy, CurrentBlock()))
+            let createdAllocate3607 = builder.CreateAllocate(builder.context.GetRefTy(tryTy), tryTy, CurrentBlock())
+            CurrentBlock().AppendExpression(createdAllocate3607)
+            RequireResult(createdAllocate3607)
         }
         let hasFinally = expr.finallyBlock.isSome()
         var endBlock = builder.CreateBlock(group)
@@ -3628,7 +3746,8 @@ public class Translator {
             let tryAstBlock = RequireBlock(expr.tryBlock, "try block")
             let tryValue = TranslateExprArg(tryAstBlock)
             if (baseBlock.GetTerminator().isNone()) {
-                builder.CreateGoTo(GetBlockByAST(tryAstBlock), baseBlock)
+                let createdGoTo3631 = builder.CreateGoTo(GetBlockByAST(tryAstBlock), baseBlock)
+                baseBlock.AppendExpression(createdGoTo3631)
             }
             let tryValueLoc = if (let Some(localVar) <- tryValue.AsLocalVar()) {
                 if (let Some(ownerExpr) <- localVar.GetExpr()) {
@@ -3643,7 +3762,8 @@ public class Translator {
                 StoreTryResult(resultLoc, Some(tryValue), tryValueLoc)
             }
             if (CurrentBlock().GetTerminator().isNone()) {
-                builder.CreateGoTo(endBlock, CurrentBlock())
+                let createdGoTo3646 = builder.CreateGoTo(endBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdGoTo3646)
             }
             tryCatchContext.remove(at: tryCatchContext.size - 1)
 
@@ -3669,6 +3789,7 @@ public class Translator {
             }
             if (let Some(loc) <- resultLoc) {
                 let result = builder.CreateLoad(tryTy, loc, CurrentBlock())
+                CurrentBlock().AppendExpression(result)
                 result.SetDebugLocation(TranslateLocation(expr))
                 return RequireResult(result)
             }
@@ -3683,9 +3804,13 @@ public class Translator {
         let thrownValue = Translator.TranslateASTNode(thrownExpr, this) ??
             throw IllegalStateException("faithful AST2CHIR throw operand produced no value")
         let terminator = if (let Some(exceptionBlock) <- CurrentTryCatchBlock()) {
-            builder.CreateRaiseException(thrownValue, exceptionBlock, CurrentBlock())
+            let createdRaiseException3686 = builder.CreateRaiseException(thrownValue, exceptionBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdRaiseException3686)
+            createdRaiseException3686
         } else {
-            builder.CreateRaiseException(thrownValue, CurrentBlock())
+            let createdRaiseException3688 = builder.CreateRaiseException(thrownValue, CurrentBlock())
+            CurrentBlock().AppendExpression(createdRaiseException3688)
+            createdRaiseException3688
         }
         terminator.SetDebugLocation(loc)
         let group = RequireParentBlockGroup(CurrentBlock(), "throw continuation")
@@ -3703,7 +3828,9 @@ public class Translator {
                 let element = TranslateExprArg(child, varrayTy.GetElementType())
                 elements.add(element)
             }
-            return RequireResult(builder.CreateVArray(arrayTy, elements, CurrentBlock()))
+            let createdVArray3706 = builder.CreateVArray(arrayTy, elements, CurrentBlock())
+            CurrentBlock().AppendExpression(createdVArray3706)
+            return RequireResult(createdVArray3706)
         }
         if (arrayTy.IsStructArray()) {
             return TranslateStructArray(expr, RequireStructType(arrayTy))
@@ -3721,14 +3848,18 @@ public class Translator {
         }
         let rawArrayTy = RequireRawArrayType(arrayTy.StripAllRefs())
         if (expr.args.isEmpty()) {
-            let sizeValue = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0),
-                CurrentBlock()))
+            let createdConstant3724 = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0),
+                CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant3724)
+            let sizeValue = RequireResult(createdConstant3724)
             let rawArrayExpr = builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(), sizeValue,
                 CurrentBlock())
+            CurrentBlock().AppendExpression(rawArrayExpr)
             rawArrayExpr.SetDebugLocation(TranslateLocation(expr))
             let rawArrayRef = RequireResult(rawArrayExpr)
-            builder.CreateRawArrayLiteralInit(builder.context.GetUnitTy(), rawArrayRef, ArrayList<Value>(),
+            let createdRawArrayLiteralInit3730 = builder.CreateRawArrayLiteralInit(builder.context.GetUnitTy(), rawArrayRef, ArrayList<Value>(),
                 CurrentBlock())
+            CurrentBlock().AppendExpression(createdRawArrayLiteralInit3730)
             return rawArrayRef
         }
         if (expr.args.size == 1) {
@@ -3742,10 +3873,12 @@ public class Translator {
                 throw IllegalStateException("faithful AST2CHIR RawArray init value produced no value")
             let rawArrayExpr = builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(), sizeValue,
                 CurrentBlock())
+            CurrentBlock().AppendExpression(rawArrayExpr)
             rawArrayExpr.SetDebugLocation(TranslateLocation(expr))
             let rawArrayRef = RequireResult(rawArrayExpr)
-            builder.CreateRawArrayInitByValue(builder.context.GetUnitTy(), rawArrayRef, sizeValue, initValue,
+            let createdRawArrayInitByValue3747 = builder.CreateRawArrayInitByValue(builder.context.GetUnitTy(), rawArrayRef, sizeValue, initValue,
                 CurrentBlock())
+            CurrentBlock().AppendExpression(createdRawArrayInitByValue3747)
             return rawArrayRef
         }
         return TranslateRawArrayByLambda(expr, arrayTy, rawArrayTy)
@@ -3761,6 +3894,7 @@ public class Translator {
             idx++
         }
         let tuple = builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), values, CurrentBlock())
+        CurrentBlock().AppendExpression(tuple)
         tuple.SetDebugLocation(TranslateLocation(expr))
         return RequireResult(tuple)
     }
@@ -3800,6 +3934,7 @@ public class Translator {
             }
             let typeCast = builder.CreateTypeCastWithException(resultTy, operand, successBlock, targetBlock,
                 CurrentBlock())
+            CurrentBlock().AppendExpression(typeCast)
             typeCast.SetDebugLocation(loc)
             let result = RequireResult(typeCast)
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
@@ -3807,6 +3942,7 @@ public class Translator {
         }
         let typeCast = builder.CreateTypeCast(resultTy, operand, CurrentBlock(),
             overflowStrategy: overflowStrategy)
+        CurrentBlock().AppendExpression(typeCast)
         typeCast.SetDebugLocation(loc)
         return RequireResult(typeCast)
     }
@@ -3847,7 +3983,8 @@ public class Translator {
         FlattenVarWithPatternDecl(RequirePattern(decl.irrefutablePattern, "global var-with-pattern pattern"),
             Some(initValue), isLocalPattern: false)
         if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateExit(None, CurrentBlock())
+            let createdExit3850 = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(createdExit3850)
         }
         blockGroupStack.remove(at: blockGroupStack.size - 1)
         delayExitSignal = savedDelayExitSignal
@@ -3884,6 +4021,7 @@ public class Translator {
         }
         let lambda = builder.CreateLambda(funcTy, funcTy, CurrentBlock(), isLocalFunc: true,
             identifier: identifier, srcCodeIdentifier: funcDecl.identifier.Val(), genericTypeParams: genericTys)
+        CurrentBlock().AppendExpression(lambda)
         lambda.SetDebugLocation(TranslateLocation(funcDecl))
         lambda.InitBody(body)
         if (funcDecl.isConst) {
@@ -4188,6 +4326,7 @@ public class Translator {
             }
             let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), value,
                 param.identifier.GetRawText(), entry)
+            entry.AppendExpression(debugInfo)
             debugInfo.SetDebugLocation(TranslateLocationWithoutScope(builder.context, param.begin, param.end))
             debugInfo.SetDebugLocationInfoForWarning(GetDeclLoc(builder.context, param))
             if (cfg.hasInitial) {
@@ -4238,6 +4377,7 @@ public class Translator {
         for (param in params) {
             let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), lambda.GetParam(idx + offset),
                 param.identifier.GetRawText(), entry)
+            entry.AppendExpression(debugInfo)
             debugInfo.SetDebugLocation(TranslateLocationWithoutScope(builder.context, param.begin, param.end))
             debugInfo.SetDebugLocationInfoForWarning(GetDeclLoc(builder.context, param))
             if (hasInitial) {
@@ -4272,6 +4412,7 @@ public class Translator {
         isImplicitAdd: Bool): Option<Value> {
         let boolTy = builder.context.GetBoolTy()
         let allocate = builder.CreateAllocate(builder.context.GetRefTy(boolTy), boolTy, CurrentBlock())
+        CurrentBlock().AppendExpression(allocate)
         allocate.SetDebugLocation(loc)
         let resultLoc = RequireResult(allocate)
         let parentGroup = RequireParentBlockGroup(CurrentBlock(), "short-circuit and")
@@ -4289,16 +4430,23 @@ public class Translator {
             CurrentBlock().SetDebugLocation(rightLoc)
         }
         TranslateSubExprToLoc(rightExpr, Some(resultLoc), rightLoc)
-        builder.CreateGoTo(endBlock, CurrentBlock()).SetDebugLocation(loc)
+        let createdGoTo4292 = builder.CreateGoTo(endBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(createdGoTo4292)
+        createdGoTo4292.SetDebugLocation(loc)
 
         currentBlock = elseBlock
-        let constantFalse = RequireResult(builder.CreateConstant(boolTy, BoolLiteral(false), CurrentBlock()))
+        let createdConstant4295 = builder.CreateConstant(boolTy, BoolLiteral(false), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant4295)
+        let constantFalse = RequireResult(createdConstant4295)
         constantFalse.SetDebugLocation(loc)
         CreateAndAppendWrappedStore(constantFalse, resultLoc, CurrentBlock(), loc)
-        builder.CreateGoTo(endBlock, CurrentBlock()).SetDebugLocation(loc)
+        let createdGoTo4298 = builder.CreateGoTo(endBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(createdGoTo4298)
+        createdGoTo4298.SetDebugLocation(loc)
 
         currentBlock = endBlock
         let load = builder.CreateLoad(boolTy, resultLoc, CurrentBlock())
+        CurrentBlock().AppendExpression(load)
         load.SetDebugLocation(loc)
         return RequireResult(load)
     }
@@ -4307,6 +4455,7 @@ public class Translator {
         isImplicitAdd: Bool): Option<Value> {
         let boolTy = builder.context.GetBoolTy()
         let allocate = builder.CreateAllocate(builder.context.GetRefTy(boolTy), boolTy, CurrentBlock())
+        CurrentBlock().AppendExpression(allocate)
         allocate.SetDebugLocation(loc)
         let resultLoc = RequireResult(allocate)
         let parentGroup = RequireParentBlockGroup(CurrentBlock(), "short-circuit or")
@@ -4320,19 +4469,26 @@ public class Translator {
         CreateWrappedBranch(SourceExpr.BINARY, loc, leftValue, thenBlock, elseBlock, CurrentBlock())
 
         currentBlock = thenBlock
-        let constantTrue = RequireResult(builder.CreateConstant(boolTy, BoolLiteral(true), CurrentBlock()))
+        let createdConstant4323 = builder.CreateConstant(boolTy, BoolLiteral(true), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant4323)
+        let constantTrue = RequireResult(createdConstant4323)
         CreateAndAppendWrappedStore(constantTrue, resultLoc, CurrentBlock(), rightLoc)
-        builder.CreateGoTo(endBlock, CurrentBlock()).SetDebugLocation(rightLoc)
+        let createdGoTo4325 = builder.CreateGoTo(endBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(createdGoTo4325)
+        createdGoTo4325.SetDebugLocation(rightLoc)
 
         currentBlock = elseBlock
         if (!isImplicitAdd) {
             CurrentBlock().SetDebugLocation(rightLoc)
         }
         TranslateSubExprToLoc(rightExpr, Some(resultLoc), rightLoc)
-        builder.CreateGoTo(endBlock, CurrentBlock()).SetDebugLocation(rightLoc)
+        let createdGoTo4332 = builder.CreateGoTo(endBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(createdGoTo4332)
+        createdGoTo4332.SetDebugLocation(rightLoc)
 
         currentBlock = endBlock
         let load = builder.CreateLoad(boolTy, resultLoc, CurrentBlock())
+        CurrentBlock().AppendExpression(load)
         load.SetDebugLocation(loc)
         return RequireResult(load)
     }
@@ -4374,10 +4530,12 @@ public class Translator {
         TranslateForInRangeCond(inExpression.body[3], inductiveVar, stopExprVar, condVar, forIn)
 
         let endBlock = builder.CreateBlock(parentGroup)
-        builder.CreateGoTo(endBlock, forInEntryBlock)
+        let createdGoTo4377 = builder.CreateGoTo(endBlock, forInEntryBlock)
+        forInEntryBlock.AppendExpression(createdGoTo4377)
         currentBlock = endBlock
         UpdateDelayExitSignalInForInEnd(forIn)
         let rangeEndBranch = builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
+        recordBlock.AppendExpression(rangeEndBranch)
         rangeEndBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         CurrentBlock().SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         return None
@@ -4393,7 +4551,8 @@ public class Translator {
         forInExprAST2DebugLocMap[expr.objectId] = forInExprLoc
         let forInRetValLocation = GenerateForInRetValLocation()
         let _ = Translator.TranslateASTNode(inExpression, this)
-        builder.CreateGoTo(GetBlockByAST(inExpression), forInExprBlock)
+        let createdGoTo4396 = builder.CreateGoTo(GetBlockByAST(inExpression), forInExprBlock)
+        forInExprBlock.AppendExpression(createdGoTo4396)
         let indexDecl = RequireBodyVarDecl(inExpression, 0, "for-in string induction var")
         let endDecl = RequireBodyVarDecl(inExpression, 2, "for-in string end var")
         let inductiveVar = GetSymbolTable(indexDecl)
@@ -4402,6 +4561,7 @@ public class Translator {
         let stringSize = GetDerefedValue(GetSymbolTable(endDecl))
         let conditionExpr = builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
             GetDerefedValue(inductiveVar), stringSize, CurrentBlock())
+        CurrentBlock().AppendExpression(conditionExpr)
         conditionExpr.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         conditionExpr.SetGeneratedFromForIn(true)
         let condition = RequireResult(conditionExpr)
@@ -4421,10 +4581,12 @@ public class Translator {
         TranslateForInStringCond(inductiveVar, stringSize, condVar, forIn)
 
         let endBlock = builder.CreateBlock(parentGroup)
-        builder.CreateGoTo(endBlock, forInEntryBlock)
+        let createdGoTo4424 = builder.CreateGoTo(endBlock, forInEntryBlock)
+        forInEntryBlock.AppendExpression(createdGoTo4424)
         currentBlock = endBlock
         UpdateDelayExitSignalInForInEnd(forIn)
         let stringEndBranch = builder.CreateBranch(condition, forInEntryBlock, CurrentBlock(), recordBlock)
+        recordBlock.AppendExpression(stringEndBranch)
         stringEndBranch.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         stringEndBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         return None
@@ -4451,9 +4613,12 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR iterator ForInExpr expects MatchExpr as second node")
         let matchTy = chirTy.TranslateType(RequireAstTy(matchExpr))
         let condLoc = TranslateLocation(inExpression.body[1])
-        let iterNextLocation = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(matchTy), matchTy,
-            CurrentBlock()))
-        builder.CreateStore(MakeForInIterNoneValue(matchTy), iterNextLocation, CurrentBlock())
+        let createdAllocate4454 = builder.CreateAllocate(builder.context.GetRefTy(matchTy), matchTy,
+            CurrentBlock())
+        CurrentBlock().AppendExpression(createdAllocate4454)
+        let iterNextLocation = RequireResult(createdAllocate4454)
+        let createdStore4456 = builder.CreateStore(MakeForInIterNoneValue(matchTy), iterNextLocation, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4456)
 
         let recordBlock = CurrentBlock()
         let parentGroup = RequireParentBlockGroup(recordBlock, "for-in iterator")
@@ -4471,10 +4636,12 @@ public class Translator {
         TranslateForInIterCondition(matchExpr, iterNextLocation, condVar, forIn)
 
         let endBlock = builder.CreateBlock(parentGroup)
-        builder.CreateGoTo(endBlock, forInEntryBlock)
+        let createdGoTo4474 = builder.CreateGoTo(endBlock, forInEntryBlock)
+        forInEntryBlock.AppendExpression(createdGoTo4474)
         currentBlock = endBlock
         UpdateDelayExitSignalInForInEnd(forIn)
-        builder.CreateGoTo(forInEntryBlock, recordBlock)
+        let createdGoTo4477 = builder.CreateGoTo(forInEntryBlock, recordBlock)
+        recordBlock.AppendExpression(createdGoTo4477)
         return None
     }
 
@@ -4485,19 +4652,23 @@ public class Translator {
         let endValue = TranslateClosedRangeBound(expr, 1)
         let isIncrement = IsClosedRangeIncrement(expr)
         let preCondKind = if (isIncrement) { ExprKind.LE } else { ExprKind.GE }
-        let preCond = RequireResult(builder.CreateBinaryExpression(preCondKind, builder.context.GetBoolTy(),
-            beginValue, endValue, CurrentBlock()))
+        let createdBinaryExpression4488 = builder.CreateBinaryExpression(preCondKind, builder.context.GetBoolTy(),
+            beginValue, endValue, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBinaryExpression4488)
+        let preCond = RequireResult(createdBinaryExpression4488)
         let parentGroup = RequireParentBlockGroup(CurrentBlock(), "for-in closed range")
         let preCondTrueBlock = builder.CreateBlock(parentGroup)
         let preCondFalseBlock = builder.CreateBlock(parentGroup)
         preCondFalseBlock.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         let preCondBranch = builder.CreateBranch(preCond, preCondTrueBlock, preCondFalseBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(preCondBranch)
         preCondBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
 
         currentBlock = preCondTrueBlock
         let iterVar = CreateClosedRangeIterVar(expr, beginValue)
         let forInEntryBlock = builder.CreateBlock(parentGroup)
-        builder.CreateGoTo(forInEntryBlock, CurrentBlock())
+        let createdGoTo4500 = builder.CreateGoTo(forInEntryBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(createdGoTo4500)
 
         currentBlock = forInEntryBlock
         let condVar = InitializeCondVar()
@@ -4514,10 +4685,12 @@ public class Translator {
         TranslateForInClosedRangeLatch(iterVar, iterValue, isIncrement, condVar, forIn)
 
         let endBlock = builder.CreateBlock(parentGroup)
-        builder.CreateGoTo(endBlock, forInEntryBlock)
+        let createdGoTo4517 = builder.CreateGoTo(endBlock, forInEntryBlock)
+        forInEntryBlock.AppendExpression(createdGoTo4517)
         currentBlock = endBlock
         UpdateDelayExitSignalInForInEnd(forIn)
-        builder.CreateGoTo(preCondFalseBlock, CurrentBlock())
+        let createdGoTo4520 = builder.CreateGoTo(preCondFalseBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(createdGoTo4520)
         currentBlock = preCondFalseBlock
         return None
     }
@@ -4531,9 +4704,13 @@ public class Translator {
         let condBlockGroup = builder.CreateBlockGroup(parentFunc)
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let forIn = if (isIter) {
-            builder.CreateForInIter(resultTy, inductiveVar, condVar, CurrentBlock())
+            let createdForInIter4534 = builder.CreateForInIter(resultTy, inductiveVar, condVar, CurrentBlock())
+            CurrentBlock().AppendExpression(createdForInIter4534)
+            createdForInIter4534
         } else {
-            builder.CreateForInRange(resultTy, inductiveVar, condVar, CurrentBlock())
+            let createdForInRange4536 = builder.CreateForInRange(resultTy, inductiveVar, condVar, CurrentBlock())
+            CurrentBlock().AppendExpression(createdForInRange4536)
+            createdForInRange4536
         }
         forIn.SetDebugLocation(forInLoc)
         forIn.InitBlockGroups(bodyBlockGroup, latchBlockGroup, condBlockGroup)
@@ -4558,6 +4735,7 @@ public class Translator {
         let condBlockGroup = builder.CreateBlockGroup(parentFunc)
         let resultTy = chirTy.TranslateType(RequireAstTy(expr))
         let forIn = builder.CreateForInClosedRange(resultTy, inductiveVar, condVar, CurrentBlock())
+        CurrentBlock().AppendExpression(forIn)
         forIn.InitBlockGroups(bodyBlockGroup, latchBlockGroup, condBlockGroup)
         bodyBlockGroup.SetEntryBlock(builder.CreateBlock(bodyBlockGroup))
         latchBlockGroup.SetEntryBlock(builder.CreateBlock(latchBlockGroup))
@@ -4640,7 +4818,9 @@ public class Translator {
         blockGroupStack.add(forIn.GetBody())
         currentBlock = forIn.GetBody().GetEntryBlock() ??
             throw IllegalStateException("faithful AST2CHIR for-in closed range body has no entry block")
-        let iterValue = RequireResult(builder.CreateLoad(RequireRefBaseType(iterVar), iterVar, CurrentBlock()))
+        let createdLoad4643 = builder.CreateLoad(RequireRefBaseType(iterVar), iterVar, CurrentBlock())
+        CurrentBlock().AppendExpression(createdLoad4643)
+        let iterValue = RequireResult(createdLoad4643)
         if (let Some(pattern) <- expr.pattern) {
             if (let Some(varDecl) <- ForInPatternVarDecl(pattern)) {
                 localValSymbolTable.Set(varDecl, iterValue)
@@ -4663,20 +4843,24 @@ public class Translator {
             let continueBlock = builder.CreateBlock(parentGroup)
             let guardValue = Translator.TranslateASTNode(guardExpr, this) ??
                 throw IllegalStateException("faithful AST2CHIR for-in guard produced no value")
-            builder.CreateBranch(guardValue, bodyBlock, continueBlock, CurrentBlock())
+            let createdBranch4666 = builder.CreateBranch(guardValue, bodyBlock, continueBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdBranch4666)
             currentBlock = continueBlock
-            builder.CreateExit(None, CurrentBlock())
+            let createdExit4668 = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(createdExit4668)
             currentBlock = bodyBlock
         }
         if (let Some(body) <- expr.body) {
             let prevBlock = CurrentBlock()
             let _ = Translator.TranslateASTNode(body, this)
             if (prevBlock.GetTerminator().isNone()) {
-                builder.CreateGoTo(GetBlockByAST(body), prevBlock)
+                let createdGoTo4675 = builder.CreateGoTo(GetBlockByAST(body), prevBlock)
+                prevBlock.AppendExpression(createdGoTo4675)
             }
         }
         if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateExit(None, CurrentBlock())
+            let createdExit4679 = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(createdExit4679)
         }
     }
 
@@ -4688,13 +4872,16 @@ public class Translator {
         let falseBlock = builder.CreateBlock(forIn.GetLatch())
         let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
             CurrentBlock())
+        CurrentBlock().AppendExpression(delayExitBranch)
         delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
-        builder.CreateExit(None, CurrentBlock())
+        let createdExit4693 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit4693)
         currentBlock = falseBlock
         let _ = Translator.TranslateASTNode(updateNode, this)
         if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateExit(None, CurrentBlock())
+            let createdExit4697 = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(createdExit4697)
         }
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
@@ -4707,21 +4894,27 @@ public class Translator {
         let falseBlock = builder.CreateBlock(forIn.GetLatch())
         let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
             CurrentBlock())
+        CurrentBlock().AppendExpression(delayExitBranch)
         delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
-        builder.CreateExit(None, CurrentBlock())
+        let createdExit4712 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit4712)
         currentBlock = falseBlock
         let inductiveValue = GetDerefedValue(inductiveVar)
         let inductiveTy = inductiveValue.GetType() ?? RequireRefBaseType(inductiveVar)
         let oneExpr = builder.CreateConstant(inductiveTy, IntLiteral(1), CurrentBlock())
+        CurrentBlock().AppendExpression(oneExpr)
         oneExpr.SetGeneratedFromForIn(true)
         let one = RequireResult(oneExpr)
         let plusOneExpr = builder.CreateBinaryExpression(ExprKind.ADD, inductiveTy, inductiveValue, one,
             CurrentBlock())
+        CurrentBlock().AppendExpression(plusOneExpr)
         plusOneExpr.SetGeneratedFromForIn(true)
         let plusOne = RequireResult(plusOneExpr)
-        builder.CreateStore(plusOne, inductiveVar, CurrentBlock())
-        builder.CreateExit(None, CurrentBlock())
+        let createdStore4723 = builder.CreateStore(plusOne, inductiveVar, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4723)
+        let createdExit4724 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit4724)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
@@ -4734,28 +4927,40 @@ public class Translator {
         let falseBlock = builder.CreateBlock(forIn.GetLatch())
         let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
             CurrentBlock())
+        CurrentBlock().AppendExpression(delayExitBranch)
         delayExitBranch.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
         let delayExit = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(delayExit)
         delayExit.SetSkipCheck(SkipKind.SKIP_FORIN_EXIT)
         currentBlock = falseBlock
         let updateBlock = builder.CreateBlock(forIn.GetLatch())
         let exitBlock = builder.CreateBlock(forIn.GetLatch())
-        let condValue = RequireResult(builder.CreateLoad(builder.context.GetBoolTy(), condVar, CurrentBlock()))
+        let createdLoad4745 = builder.CreateLoad(builder.context.GetBoolTy(), condVar, CurrentBlock())
+        CurrentBlock().AppendExpression(createdLoad4745)
+        let condValue = RequireResult(createdLoad4745)
         let condBranch = builder.CreateBranch(condValue, updateBlock, exitBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(condBranch)
         updateBlock.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         condBranch.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         condBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = updateBlock
         let iterTy = iterValue.GetType() ?? RequireRefBaseType(iterVar)
-        let one = RequireResult(builder.CreateConstant(iterTy, IntLiteral(1), CurrentBlock()))
+        let createdConstant4752 = builder.CreateConstant(iterTy, IntLiteral(1), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant4752)
+        let one = RequireResult(createdConstant4752)
         let op = if (isIncrement) { ExprKind.ADD } else { ExprKind.SUB }
-        let newValue = RequireResult(builder.CreateBinaryExpression(op, iterTy, iterValue, one, CurrentBlock()))
-        builder.CreateStore(newValue, iterVar, CurrentBlock())
-        builder.CreateGoTo(exitBlock, CurrentBlock())
+        let createdBinaryExpression4754 = builder.CreateBinaryExpression(op, iterTy, iterValue, one, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBinaryExpression4754)
+        let newValue = RequireResult(createdBinaryExpression4754)
+        let createdStore4755 = builder.CreateStore(newValue, iterVar, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4755)
+        let createdGoTo4756 = builder.CreateGoTo(exitBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(createdGoTo4756)
         currentBlock = exitBlock
-        builder.CreateExit(None, CurrentBlock())
+        let createdExit4758 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit4758)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
@@ -4767,14 +4972,18 @@ public class Translator {
         let falseBlock = builder.CreateBlock(forIn.GetLatch())
         let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
             CurrentBlock())
+        CurrentBlock().AppendExpression(delayExitBranch)
         delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
-        builder.CreateExit(None, CurrentBlock())
+        let createdExit4772 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit4772)
         currentBlock = falseBlock
         let selector = Translator.TranslateASTNode(RequireExpr(matchExpr.selector, "iterator next selector"), this) ??
             throw IllegalStateException("faithful AST2CHIR iterator next selector produced no value")
-        builder.CreateStore(selector, iterNextLocation, CurrentBlock())
-        builder.CreateExit(None, CurrentBlock())
+        let createdStore4776 = builder.CreateStore(selector, iterNextLocation, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4776)
+        let createdExit4777 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit4777)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
@@ -4788,8 +4997,10 @@ public class Translator {
         TranslateForInCondControlFlow(condVar)
         let condition = Translator.TranslateASTNode(conditionNode, this) ??
             throw IllegalStateException("faithful AST2CHIR range condition in cond group produced no value")
-        builder.CreateStore(condition, condVar, CurrentBlock())
-        builder.CreateExit(None, CurrentBlock())
+        let createdStore4791 = builder.CreateStore(condition, condVar, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4791)
+        let createdExit4792 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit4792)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
@@ -4801,10 +5012,14 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR for-in iterator cond has no entry block")
         TranslateForInCondControlFlow(condVar)
         let tag = GetEnumTagValueFromValue(GetDerefedValue(iterNextLocation))
-        let hasValue = RequireResult(builder.CreateUnaryExpression(ExprKind.NOT, builder.context.GetBoolTy(), tag,
-            CurrentBlock()))
-        builder.CreateStore(hasValue, condVar, CurrentBlock())
-        builder.CreateExit(None, CurrentBlock())
+        let createdUnaryExpression4804 = builder.CreateUnaryExpression(ExprKind.NOT, builder.context.GetBoolTy(), tag,
+            CurrentBlock())
+        CurrentBlock().AppendExpression(createdUnaryExpression4804)
+        let hasValue = RequireResult(createdUnaryExpression4804)
+        let createdStore4806 = builder.CreateStore(hasValue, condVar, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4806)
+        let createdExit4807 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit4807)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
@@ -4814,10 +5029,14 @@ public class Translator {
         currentBlock = forIn.GetCond().GetEntryBlock() ??
             throw IllegalStateException("faithful AST2CHIR for-in string cond has no entry block")
         TranslateForInCondControlFlow(condVar)
-        let condition = RequireResult(builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
-            GetDerefedValue(inductiveVar), stringSize, CurrentBlock()))
-        builder.CreateStore(condition, condVar, CurrentBlock())
-        builder.CreateExit(None, CurrentBlock())
+        let createdBinaryExpression4817 = builder.CreateBinaryExpression(ExprKind.LT, builder.context.GetBoolTy(),
+            GetDerefedValue(inductiveVar), stringSize, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBinaryExpression4817)
+        let condition = RequireResult(createdBinaryExpression4817)
+        let createdStore4819 = builder.CreateStore(condition, condVar, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4819)
+        let createdExit4820 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit4820)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
@@ -4828,10 +5047,14 @@ public class Translator {
         currentBlock = forIn.GetCond().GetEntryBlock() ??
             throw IllegalStateException("faithful AST2CHIR for-in closed range cond has no entry block")
         TranslateForInCondControlFlow(condVar)
-        let condition = RequireResult(builder.CreateBinaryExpression(ExprKind.NOTEQUAL, builder.context.GetBoolTy(),
-            iterValue, iterEnd, CurrentBlock()))
-        builder.CreateStore(condition, condVar, CurrentBlock())
-        builder.CreateExit(None, CurrentBlock())
+        let createdBinaryExpression4831 = builder.CreateBinaryExpression(ExprKind.NOTEQUAL, builder.context.GetBoolTy(),
+            iterValue, iterEnd, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBinaryExpression4831)
+        let condition = RequireResult(createdBinaryExpression4831)
+        let createdStore4833 = builder.CreateStore(condition, condVar, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4833)
+        let createdExit4834 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit4834)
         blockGroupStack.remove(at: blockGroupStack.size - 1)
     }
 
@@ -4840,14 +5063,18 @@ public class Translator {
         let falseBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "for-in cond control"))
         let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
             CurrentBlock())
+        CurrentBlock().AppendExpression(delayExitBranch)
         delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
         DecreaseDelayExitSignal()
         let constantFalseExpr = builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(false), CurrentBlock())
+        CurrentBlock().AppendExpression(constantFalseExpr)
         constantFalseExpr.SetGeneratedFromForIn(true)
         let constantFalse = RequireResult(constantFalseExpr)
-        builder.CreateStore(constantFalse, condVar, CurrentBlock())
-        builder.CreateExit(None, CurrentBlock())
+        let createdStore4849 = builder.CreateStore(constantFalse, condVar, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4849)
+        let createdExit4850 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit4850)
         currentBlock = falseBlock
     }
 
@@ -4857,6 +5084,7 @@ public class Translator {
         let falseBlock = builder.CreateBlock(parentGroup)
         let delayExitBranch = builder.CreateBranch(DelayExitSignalGreaterThanZero(), trueBlock, falseBlock,
             CurrentBlock())
+        CurrentBlock().AppendExpression(delayExitBranch)
         delayExitBranch.SetSourceExpr(SourceExpr.FOR_IN_EXPR)
         currentBlock = trueBlock
         DecreaseDelayExitSignal()
@@ -4865,30 +5093,41 @@ public class Translator {
             GenerateSignalCheckForThrow()
         }
         let forInExit = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(forInExit)
         forInExit.SetSkipCheck(SkipKind.SKIP_FORIN_EXIT)
         currentBlock = falseBlock
     }
 
     private func GenerateSignalCheckForThrow(): Unit {
         let constZeroExpr = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock())
+        CurrentBlock().AppendExpression(constZeroExpr)
         constZeroExpr.SetGeneratedFromForIn(true)
         let constZero = RequireResult(constZeroExpr)
         let signalLoad = builder.CreateLoad(builder.context.GetInt64Ty(), RequireDelayExitSignal(), CurrentBlock())
+        CurrentBlock().AppendExpression(signalLoad)
         signalLoad.SetGeneratedFromForIn(true)
         let signalValue = RequireResult(signalLoad)
-        let hasThrow = RequireResult(builder.CreateBinaryExpression(ExprKind.GT, builder.context.GetBoolTy(),
-            signalValue, constZero, CurrentBlock()))
+        let createdBinaryExpression4879 = builder.CreateBinaryExpression(ExprKind.GT, builder.context.GetBoolTy(),
+            signalValue, constZero, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBinaryExpression4879)
+        let hasThrow = RequireResult(createdBinaryExpression4879)
         let parentGroup = RequireParentBlockGroup(CurrentBlock(), "for-in throw signal")
         let throwBlock = builder.CreateBlock(parentGroup)
         let exceptionTy = BaseExceptionObjectType()
-        let exception = RequireResult(builder.CreateGetException(exceptionTy, throwBlock))
+        let createdGetException4884 = builder.CreateGetException(exceptionTy, throwBlock)
+        throwBlock.AppendExpression(createdGetException4884)
+        let exception = RequireResult(createdGetException4884)
         let beginCatchArgs = ArrayList<Value>()
         beginCatchArgs.add(exception)
-        let beginCatch = RequireResult(builder.CreateIntrinsic(exceptionTy,
-            IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), throwBlock))
-        builder.CreateRaiseException(beginCatch, tryCatchContext[tryCatchContext.size - 1], throwBlock)
+        let createdIntrinsic4887 = builder.CreateIntrinsic(exceptionTy,
+            IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), throwBlock)
+        throwBlock.AppendExpression(createdIntrinsic4887)
+        let beginCatch = RequireResult(createdIntrinsic4887)
+        let createdRaiseException4889 = builder.CreateRaiseException(beginCatch, tryCatchContext[tryCatchContext.size - 1], throwBlock)
+        throwBlock.AppendExpression(createdRaiseException4889)
         let returnBlock = builder.CreateBlock(parentGroup)
         let branch = builder.CreateBranch(hasThrow, throwBlock, returnBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(branch)
         branch.SetGeneratedFromForIn(true)
         currentBlock = returnBlock
     }
@@ -4896,12 +5135,15 @@ public class Translator {
     private func InitializeCondVar(): Value {
         let condVarExpr = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetBoolTy()),
             builder.context.GetBoolTy(), CurrentBlock())
+        CurrentBlock().AppendExpression(condVarExpr)
         condVarExpr.SetGeneratedFromForIn(true)
         let condVar = RequireResult(condVarExpr)
         let constantTrueExpr = builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(true), CurrentBlock())
+        CurrentBlock().AppendExpression(constantTrueExpr)
         constantTrueExpr.SetGeneratedFromForIn(true)
         let constantTrue = RequireResult(constantTrueExpr)
-        builder.CreateStore(constantTrue, condVar, CurrentBlock())
+        let createdStore4904 = builder.CreateStore(constantTrue, condVar, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4904)
         return condVar
     }
 
@@ -4940,22 +5182,30 @@ public class Translator {
         if (GetOuterMostExpr().isNone()) {
             let signalExpr = builder.CreateAllocate(builder.context.GetRefTy(builder.context.GetInt64Ty()),
                 builder.context.GetInt64Ty(), CurrentBlock())
+            CurrentBlock().AppendExpression(signalExpr)
             signalExpr.SetDebugLocation(loc)
             signalExpr.SetGeneratedFromForIn(true)
             let signal = RequireResult(signalExpr)
             delayExitSignal = signal
-            let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
-            builder.CreateStore(zero, signal, CurrentBlock())
+            let createdConstant4947 = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant4947)
+            let zero = RequireResult(createdConstant4947)
+            let createdStore4948 = builder.CreateStore(zero, signal, CurrentBlock())
+            CurrentBlock().AppendExpression(createdStore4948)
         }
     }
 
     private func DelayExitSignalGreaterThanZero(): Value {
         let signalLoad = builder.CreateLoad(builder.context.GetInt64Ty(), RequireDelayExitSignal(), CurrentBlock())
+        CurrentBlock().AppendExpression(signalLoad)
         signalLoad.SetGeneratedFromForIn(true)
         let signalValue = RequireResult(signalLoad)
-        let zero = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock()))
+        let createdConstant4956 = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant4956)
+        let zero = RequireResult(createdConstant4956)
         let isNeedExit = builder.CreateBinaryExpression(ExprKind.GT, builder.context.GetBoolTy(), signalValue, zero,
             CurrentBlock())
+        CurrentBlock().AppendExpression(isNeedExit)
         isNeedExit.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         isNeedExit.SetGeneratedFromForIn(true)
         return RequireResult(isNeedExit)
@@ -4964,22 +5214,29 @@ public class Translator {
     private func DecreaseDelayExitSignal(): Unit {
         let signal = RequireDelayExitSignal()
         let signalLoad = builder.CreateLoad(builder.context.GetInt64Ty(), signal, CurrentBlock())
+        CurrentBlock().AppendExpression(signalLoad)
         signalLoad.SetGeneratedFromForIn(true)
         let signalValue = RequireResult(signalLoad)
         let oneExpr = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(1), CurrentBlock())
+        CurrentBlock().AppendExpression(oneExpr)
         oneExpr.SetGeneratedFromForIn(true)
         let one = RequireResult(oneExpr)
         let decreasedExpr = builder.CreateBinaryExpression(ExprKind.SUB, builder.context.GetInt64Ty(), signalValue,
             one, CurrentBlock())
+        CurrentBlock().AppendExpression(decreasedExpr)
         decreasedExpr.SetGeneratedFromForIn(true)
         let decreased = RequireResult(decreasedExpr)
-        builder.CreateStore(decreased, signal, CurrentBlock())
+        let createdStore4976 = builder.CreateStore(decreased, signal, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4976)
     }
 
     private func UpdateDelayExitSignal(level: Int64): Unit {
-        let levelValue = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(level),
-            CurrentBlock()))
-        builder.CreateStore(levelValue, RequireDelayExitSignal(), CurrentBlock())
+        let createdConstant4980 = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(level),
+            CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant4980)
+        let levelValue = RequireResult(createdConstant4980)
+        let createdStore4982 = builder.CreateStore(levelValue, RequireDelayExitSignal(), CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore4982)
     }
 
     private func UpdateDelayExitSignalForReturnIfNeeded(): Unit {
@@ -5225,9 +5482,11 @@ public class Translator {
         let iterTy = beginValue.GetType() ??
             throw IllegalStateException("faithful AST2CHIR closed range begin value has no type")
         let iterVarExpr = builder.CreateAllocate(builder.context.GetRefTy(iterTy), iterTy, CurrentBlock())
+        CurrentBlock().AppendExpression(iterVarExpr)
         iterVarExpr.SetGeneratedFromForIn(true)
         let iterVar = RequireResult(iterVarExpr)
-        builder.CreateStore(beginValue, iterVar, CurrentBlock())
+        let createdStore5230 = builder.CreateStore(beginValue, iterVar, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore5230)
         return iterVar
     }
 
@@ -5238,10 +5497,14 @@ public class Translator {
             return None
         }
         let retValExpr = builder.CreateAllocate(builder.context.GetRefTy(forInType), forInType, CurrentBlock())
+        CurrentBlock().AppendExpression(retValExpr)
         retValExpr.SetGeneratedFromForIn(true)
         let retValLocation = RequireResult(retValExpr)
-        let nullVal = RequireResult(builder.CreateConstant(forInType, NullLiteral(), CurrentBlock()))
-        builder.CreateStore(nullVal, retValLocation, CurrentBlock())
+        let createdConstant5243 = builder.CreateConstant(forInType, NullLiteral(), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant5243)
+        let nullVal = RequireResult(createdConstant5243)
+        let createdStore5244 = builder.CreateStore(nullVal, retValLocation, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore5244)
         return Some(retValLocation)
     }
 
@@ -5297,17 +5560,22 @@ public class Translator {
             return
         }
         let forInRetValLocation = forInExprReturnMap[forInResult]
-        let forInRetVal = RequireResult(builder.CreateLoad(RequireRefBaseType(forInRetValLocation),
-            forInRetValLocation, CurrentBlock()))
-        builder.CreateStore(CastValueIfNeeded(forInRetVal, RequireRefBaseType(funcRetValLocation)),
+        let createdLoad5300 = builder.CreateLoad(RequireRefBaseType(forInRetValLocation),
+            forInRetValLocation, CurrentBlock())
+        CurrentBlock().AppendExpression(createdLoad5300)
+        let forInRetVal = RequireResult(createdLoad5300)
+        let createdStore5302 = builder.CreateStore(CastValueIfNeeded(forInRetVal, RequireRefBaseType(funcRetValLocation)),
             funcRetValLocation, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStore5302)
     }
 
     private func MakeForInIterNoneValue(optionTy: Type): Value {
         let noneTag = CreateEnumSelectorConstantForName(optionTy, "None")
         let values = ArrayList<Value>()
         values.add(noneTag)
-        return RequireResult(builder.CreateTuple(optionTy, values, CurrentBlock()))
+        let createdTuple5310 = builder.CreateTuple(optionTy, values, CurrentBlock())
+        CurrentBlock().AppendExpression(createdTuple5310)
+        return RequireResult(createdTuple5310)
     }
 
     private func GetEnumTagValueFromValue(value: Value): Value {
@@ -5318,7 +5586,9 @@ public class Translator {
         } else {
             builder.context.GetUInt32Ty()
         }
-        return RequireResult(builder.CreateField(selectorTy, value, path, CurrentBlock()))
+        let createdField5321 = builder.CreateField(selectorTy, value, path, CurrentBlock())
+        CurrentBlock().AppendExpression(createdField5321)
+        return RequireResult(createdField5321)
     }
 
     private func TranslateSubExprAsValue(node: AstNode): Option<Value> {
@@ -5339,33 +5609,38 @@ public class Translator {
         if (let Some(retValue) <- value) {
             StoreReturnValueIfNeeded(fn, retValue)
         }
-        builder.CreateExit(None, CurrentBlock())
+        let createdExit5342 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit5342)
     }
 
     private func EmitImplicitLambdaExit(lambda: Lambda, value: Option<Value>): Unit {
         if (let Some(retTy) <- lambda.GetReturnType()) {
             if (retTy.IsUnit() || retTy.IsNothing() || retTy.IsVoid()) {
-                builder.CreateExit(None, CurrentBlock())
+                let createdExit5348 = builder.CreateExit(None, CurrentBlock())
+                CurrentBlock().AppendExpression(createdExit5348)
                 return
             }
             if (let Some(retValue) <- value) {
                 StoreLambdaReturnValueIfNeeded(lambda, retValue)
             }
         }
-        builder.CreateExit(None, CurrentBlock())
+        let createdExit5355 = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(createdExit5355)
     }
 
     private func StoreLambdaReturnValueIfNeeded(lambda: Lambda, value: Value): Unit {
         if (let Some(returnLocation) <- lambda.GetReturnValue()) {
-            builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(returnLocation)), returnLocation,
+            let createdStore5360 = builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(returnLocation)), returnLocation,
                 CurrentBlock())
+            CurrentBlock().AppendExpression(createdStore5360)
         }
     }
 
     private func StoreReturnValueIfNeeded(fn: Function, value: Value): Unit {
         if (let Some(returnLocation) <- fn.GetReturnValue()) {
-            builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(returnLocation)), returnLocation,
+            let createdStore5367 = builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(returnLocation)), returnLocation,
                 CurrentBlock())
+            CurrentBlock().AppendExpression(createdStore5367)
         }
     }
 
@@ -5518,11 +5793,15 @@ public class Translator {
             tryCatchContext.add(block)
         }
         let exceptionValueTy = ExceptionValueTypeForTry(expr)
-        let exception = RequireResult(builder.CreateGetException(exceptionValueTy, CurrentBlock()))
+        let createdGetException5521 = builder.CreateGetException(exceptionValueTy, CurrentBlock())
+        CurrentBlock().AppendExpression(createdGetException5521)
+        let exception = RequireResult(createdGetException5521)
         let beginCatchArgs = ArrayList<Value>()
         beginCatchArgs.add(exception)
-        let beginCatch = RequireResult(builder.CreateIntrinsic(exceptionValueTy,
-            IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock()))
+        let createdIntrinsic5524 = builder.CreateIntrinsic(exceptionValueTy,
+            IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock())
+        CurrentBlock().AppendExpression(createdIntrinsic5524)
+        let beginCatch = RequireResult(createdIntrinsic5524)
         if (expr.catchBlocks.size != expr.catchPatterns.size) {
             throw IllegalStateException("faithful AST2CHIR catch block/pattern count mismatch")
         }
@@ -5534,22 +5813,27 @@ public class Translator {
             let catchBlock = expr.catchBlocks[idx]
             let catchValue = Translator.TranslateASTNode(catchBlock, this)
             if (trueBlock.GetTerminator().isNone()) {
-                builder.CreateGoTo(GetBlockByAST(catchBlock), trueBlock)
+                let createdGoTo5537 = builder.CreateGoTo(GetBlockByAST(catchBlock), trueBlock)
+                trueBlock.AppendExpression(createdGoTo5537)
             }
             StoreTryResult(resultLoc, catchValue, TranslateLocation(catchBlock))
             if (CurrentBlock().GetTerminator().isNone()) {
-                builder.CreateGoTo(endBlock, CurrentBlock())
+                let createdGoTo5541 = builder.CreateGoTo(endBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdGoTo5541)
             }
             currentBlock = falseBlock
             idx++
         }
         if (CurrentBlock().GetTerminator().isNone()) {
             if (let Some(block2) <- rethrowBlock) {
-                builder.CreateRaiseException(beginCatch, block2, CurrentBlock())
+                let createdRaiseException5548 = builder.CreateRaiseException(beginCatch, block2, CurrentBlock())
+                CurrentBlock().AppendExpression(createdRaiseException5548)
             } else if (let Some(outerBlock) <- CurrentTryCatchBlock()) {
-                builder.CreateRaiseException(beginCatch, outerBlock, CurrentBlock())
+                let createdRaiseException5550 = builder.CreateRaiseException(beginCatch, outerBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdRaiseException5550)
             } else {
-                builder.CreateRaiseException(beginCatch, CurrentBlock())
+                let createdRaiseException5552 = builder.CreateRaiseException(beginCatch, CurrentBlock())
+                CurrentBlock().AppendExpression(createdRaiseException5552)
             }
         }
         if (rethrowBlock.isSome()) {
@@ -5568,9 +5852,12 @@ public class Translator {
             } else {
                 ExceptionValueTypeFromValue(exceptionValue)
             }
-            let cond = RequireResult(builder.CreateInstanceOf(builder.context.GetBoolTy(), exceptionValue, targetTy,
-                CurrentBlock()))
-            builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            let createdInstanceOf5571 = builder.CreateInstanceOf(builder.context.GetBoolTy(), exceptionValue, targetTy,
+                CurrentBlock())
+            CurrentBlock().AppendExpression(createdInstanceOf5571)
+            let cond = RequireResult(createdInstanceOf5571)
+            let createdBranch5573 = builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdBranch5573)
             return (falseBlock, trueBlock)
         }
         let exceptPattern = (pattern as AstExceptTypePattern).getOrThrow()
@@ -5582,9 +5869,12 @@ public class Translator {
             let falseBlock = builder.CreateBlock(group)
             let targetTy = chirTy.TranslateType(typeNode.GetTy() ??
                 throw IllegalStateException("faithful AST2CHIR catch type has no Sema type"))
-            let cond = RequireResult(builder.CreateInstanceOf(builder.context.GetBoolTy(), exceptionValue, targetTy,
-                CurrentBlock()))
-            builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            let createdInstanceOf5585 = builder.CreateInstanceOf(builder.context.GetBoolTy(), exceptionValue, targetTy,
+                CurrentBlock())
+            CurrentBlock().AppendExpression(createdInstanceOf5585)
+            let cond = RequireResult(createdInstanceOf5585)
+            let createdBranch5587 = builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdBranch5587)
             currentBlock = falseBlock
         }
         return (CurrentBlock(), trueBlock)
@@ -5641,24 +5931,33 @@ public class Translator {
         }
         CurrentBlock().SetExceptions(ArrayList<ClassType>())
         let exceptionTy = BaseExceptionObjectType()
-        let exception = RequireResult(builder.CreateGetException(exceptionTy, CurrentBlock()))
+        let createdGetException5644 = builder.CreateGetException(exceptionTy, CurrentBlock())
+        CurrentBlock().AppendExpression(createdGetException5644)
+        let exception = RequireResult(createdGetException5644)
         let beginCatchArgs = ArrayList<Value>()
         beginCatchArgs.add(exception)
-        let beginCatch = RequireResult(builder.CreateIntrinsic(exceptionTy,
-            IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock()))
+        let createdIntrinsic5647 = builder.CreateIntrinsic(exceptionTy,
+            IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock())
+        CurrentBlock().AppendExpression(createdIntrinsic5647)
+        let beginCatch = RequireResult(createdIntrinsic5647)
         let _ = Translator.TranslateASTNode(finallyBlock, exceptionTrans)
         let rethrowFinallyBlock = exceptionTrans.GetBlockByAST(finallyBlock)
-        builder.CreateGoTo(rethrowFinallyBlock, exceptionBlock)
+        let createdGoTo5651 = builder.CreateGoTo(rethrowFinallyBlock, exceptionBlock)
+        exceptionBlock.AppendExpression(createdGoTo5651)
         let endCatchBlock = CreateBlock()
-        builder.CreateGoTo(endCatchBlock, exceptionTrans.CurrentBlock())
+        let createdGoTo5653 = builder.CreateGoTo(endCatchBlock, exceptionTrans.CurrentBlock())
+        exceptionTrans.CurrentBlock().AppendExpression(createdGoTo5653)
         if (let Some(outerBlock) <- CurrentTryCatchBlock()) {
-            builder.CreateRaiseException(beginCatch, outerBlock, endCatchBlock)
+            let createdRaiseException5655 = builder.CreateRaiseException(beginCatch, outerBlock, endCatchBlock)
+            endCatchBlock.AppendExpression(createdRaiseException5655)
         } else {
-            builder.CreateRaiseException(beginCatch, endCatchBlock)
+            let createdRaiseException5657 = builder.CreateRaiseException(beginCatch, endCatchBlock)
+            endCatchBlock.AppendExpression(createdRaiseException5657)
         }
         for (blocks in exceptionTrans.CurrentFinallyContext().controlFlowBlocks) {
             for ((prevBlock, _) in blocks) {
-                builder.CreateGoTo(endCatchBlock, prevBlock)
+                let createdGoTo5661 = builder.CreateGoTo(endCatchBlock, prevBlock)
+                prevBlock.AppendExpression(createdGoTo5661)
             }
         }
     }
@@ -5676,12 +5975,14 @@ public class Translator {
                 let normalTrans = CopyForFork()
                 let _ = Translator.TranslateASTNode(finallyBlock, normalTrans)
                 let normalFinallyBlock = normalTrans.GetBlockByAST(finallyBlock)
-                builder.CreateGoTo(normalFinallyBlock, prevBlock)
+                let createdGoTo5679 = builder.CreateGoTo(normalFinallyBlock, prevBlock)
+                prevBlock.AppendExpression(createdGoTo5679)
                 normalFinallyBlock.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
                 prevBlock.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
                 let isNormalCase = controlIndex == ControlType.NORMAL
                 if (normalTrans.finallyContext.isEmpty() || isNormalCase) {
-                    builder.CreateGoTo(nextBlock, normalTrans.CurrentBlock())
+                    let createdGoTo5684 = builder.CreateGoTo(nextBlock, normalTrans.CurrentBlock())
+                    normalTrans.CurrentBlock().AppendExpression(createdGoTo5684)
                 } else {
                     let outerContext = normalTrans.CurrentFinallyContext()
                     let outerTryScopeLevel = outerContext.finallyBlock.GetDebugLocation().GetScopeInfo().size
@@ -5689,7 +5990,8 @@ public class Translator {
                     if (controlIndex == ControlType.RETURN || controlScopeLevel < outerTryScopeLevel) {
                         outerContext.controlFlowBlocks[controlIndex].add((normalTrans.CurrentBlock(), nextBlock))
                     } else {
-                        builder.CreateGoTo(nextBlock, normalTrans.CurrentBlock())
+                        let createdGoTo5692 = builder.CreateGoTo(nextBlock, normalTrans.CurrentBlock())
+                        normalTrans.CurrentBlock().AppendExpression(createdGoTo5692)
                     }
                 }
                 finallyContext.clear()
@@ -5872,9 +6174,11 @@ public class Translator {
             }
             let currentBody = TranslateMatchCaseBody(RequireBlock(current.exprOrDecls, "match case body"), retVal,
                 endBlock)
-            builder.CreateGoTo(currentBody, trueBlock)
+            let createdGoTo5875 = builder.CreateGoTo(currentBody, trueBlock)
+            trueBlock.AppendExpression(createdGoTo5875)
             if (caseIdx == caseNum - 1) {
-                builder.CreateGoTo(endBlock, falseBlock)
+                let createdGoTo5877 = builder.CreateGoTo(endBlock, falseBlock)
+                falseBlock.AppendExpression(createdGoTo5877)
                 falseBlock.EnableAttr(Attribute.UNREACHABLE)
             } else {
                 currentBlock = falseBlock
@@ -5894,7 +6198,8 @@ public class Translator {
         currentBlock = trueBlock
         let newTrueBlock = CreateBlock()
         let cond = TranslateExprArg(RequireExpr(matchCase.patternGuard, "match pattern guard"))
-        builder.CreateBranch(cond, newTrueBlock, falseBlock, CurrentBlock())
+        let createdBranch5897 = builder.CreateBranch(cond, newTrueBlock, falseBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBranch5897)
         return newTrueBlock
     }
 
@@ -5911,7 +6216,8 @@ public class Translator {
         TranslateSubExprToLoc(caseBody, retVal, loc)
         let currentBody = GetBlockByAST(caseBody)
         if (CurrentBlock().GetTerminator().isNone()) {
-            builder.CreateGoTo(endBlock, CurrentBlock())
+            let createdGoTo5914 = builder.CreateGoTo(endBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdGoTo5914)
         }
         return currentBody
     }
@@ -5969,7 +6275,8 @@ public class Translator {
         let patternKind = patterns[0].astKind
         if (patternKind == ASTKind.WILDCARD_PATTERN) {
             let trueBlock = CreateBlock()
-            builder.CreateGoTo(trueBlock, CurrentBlock())
+            let createdGoTo5972 = builder.CreateGoTo(trueBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdGoTo5972)
             return (CreateBlock(), trueBlock)
         }
         if (patternKind == ASTKind.CONST_PATTERN) {
@@ -5979,7 +6286,8 @@ public class Translator {
             }
             if (patternTy.IsUnit()) {
                 let trueBlock = CreateBlock()
-                builder.CreateGoTo(trueBlock, CurrentBlock())
+                let createdGoTo5982 = builder.CreateGoTo(trueBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdGoTo5982)
                 return (CreateBlock(), trueBlock)
             }
             let values = TreeSet<UInt64>()
@@ -6024,7 +6332,9 @@ public class Translator {
         }
         let path = ArrayList<UInt64>()
         path.add(0u64)
-        return RequireResult(builder.CreateField(selectorType, selectorVal, path, CurrentBlock()))
+        let createdField6027 = builder.CreateField(selectorType, selectorVal, path, CurrentBlock())
+        CurrentBlock().AppendExpression(createdField6027)
+        return RequireResult(createdField6027)
     }
 
     private func TranslateConstantMultiOr(values: ArrayList<UInt64>, value: Value): (Block, Block) {
@@ -6034,8 +6344,9 @@ public class Translator {
         for (_ in values) {
             succs.add(trueBlock)
         }
-        builder.CreateMultiBranch(TypeCastOrBoxIfNeeded(value, builder.context.GetUInt64Ty(), value.GetDebugLocation(),
+        let createdMultiBranch6037 = builder.CreateMultiBranch(TypeCastOrBoxIfNeeded(value, builder.context.GetUInt64Ty(), value.GetDebugLocation(),
             needCheck: false), falseBlock, values, succs, CurrentBlock())
+        CurrentBlock().AppendExpression(createdMultiBranch6037)
         return (falseBlock, trueBlock)
     }
 
@@ -6045,7 +6356,8 @@ public class Translator {
         let trueBlock = CreateBlock()
         for (pattern in patterns) {
             let (innerFalse, innerTrue) = TranslateNestingCasePattern(pattern, selectorVal, originLoc)
-            builder.CreateGoTo(trueBlock, innerTrue)
+            let createdGoTo6048 = builder.CreateGoTo(trueBlock, innerTrue)
+            innerTrue.AppendExpression(createdGoTo6048)
             currentBlock = innerFalse
         }
         return (CurrentBlock(), trueBlock)
@@ -6118,7 +6430,8 @@ public class Translator {
                 if (sourceExpr != SourceExpr.QUEST) {
                     CurrentBlock().SetDebugLocation(patternLoc)
                 }
-                builder.CreateGoTo(trueBlock, CurrentBlock())
+                let createdGoTo6121 = builder.CreateGoTo(trueBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdGoTo6121)
             }
         }
         newBlock.RemoveSelfFromBlockGroup()
@@ -6157,7 +6470,9 @@ public class Translator {
         let tuplePattern = pattern as AstTuplePattern
         if (tuplePattern.isNone() || isEnumField) {
             let elementTy = chirTy.TranslateType(ty)
-            let elementVal = RequireResult(builder.CreateField(elementTy, value, indexes, CurrentBlock()))
+            let createdField6160 = builder.CreateField(elementTy, value, indexes, CurrentBlock())
+            CurrentBlock().AppendExpression(createdField6160)
+            let elementVal = RequireResult(createdField6160)
             queue.add((pattern, elementVal))
             return
         }
@@ -6181,15 +6496,20 @@ public class Translator {
         let varDecl = varPattern.varDecl ??
             throw IllegalStateException("faithful AST2CHIR VarPattern has no VarDecl")
         if (opts.enableCompileDebug || opts.enableCoverage) {
-            let alloca = RequireResult(builder.CreateAllocate(builder.context.GetRefTy(varType), varType, trueBlock))
+            let createdAllocate6184 = builder.CreateAllocate(builder.context.GetRefTy(varType), varType, trueBlock)
+            trueBlock.AppendExpression(createdAllocate6184)
+            let alloca = RequireResult(createdAllocate6184)
             if (!varDecl.TestAttr(AstAttribute.COMPILER_ADD)) {
                 alloca.SetSrcCodeIdentifier(varDecl.identifier.Val())
                 let debugInfo = builder.CreateDebug(builder.context.GetUnitTy(), alloca, varDecl.identifier.Val(),
                     trueBlock)
+                trueBlock.AppendExpression(debugInfo)
                 debugInfo.SetDebugLocation(loc)
             }
             CreateAndAppendWrappedStore(val, alloca, trueBlock, loc)
-            val = RequireResult(builder.CreateLoad(varType, alloca, trueBlock))
+            let createdLoad6192 = builder.CreateLoad(varType, alloca, trueBlock)
+            trueBlock.AppendExpression(createdLoad6192)
+            val = RequireResult(createdLoad6192)
         } else {
             val = TypeCastOrBoxIfNeeded(val, varType, loc)
         }
@@ -6209,12 +6529,18 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR enum pattern type is not EnumTy"))
         let enumId = GetEnumPatternID(enumPattern)
         let idValue = if (selectorTy.IsBoolean()) {
-            RequireResult(builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0u64), CurrentBlock()))
+            let createdConstant6212 = builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0u64), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant6212)
+            RequireResult(createdConstant6212)
         } else {
-            RequireResult(builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock()))
+            let createdConstant6214 = builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant6214)
+            RequireResult(createdConstant6214)
         }
-        let cond = RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), enumIdx,
-            idValue, CurrentBlock()))
+        let createdBinaryExpression6216 = builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), enumIdx,
+            idValue, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBinaryExpression6216)
+        let cond = RequireResult(createdBinaryExpression6216)
         cond.SetDebugLocation(originLoc)
         let backBlock = CurrentBlock()
         currentBlock = trueBlock
@@ -6242,8 +6568,10 @@ public class Translator {
         if (constPattern.operatorCallExpr.isNone()) {
             let litVal = TranslateExprArg(RequireExpr(constPattern.literal, "const pattern literal"))
             SetSkipPrintWarning(litVal)
-            let cond = RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), value,
-                litVal, CurrentBlock()))
+            let createdBinaryExpression6245 = builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), value,
+                litVal, CurrentBlock())
+            CurrentBlock().AppendExpression(createdBinaryExpression6245)
+            let cond = RequireResult(createdBinaryExpression6245)
             cond.SetDebugLocation(originLoc)
             return cond
         }
@@ -6276,9 +6604,13 @@ public class Translator {
         let targetTy = chirTy.TranslateType(RequireAstTy(typeNode))
         queue.add((innerPattern, value))
         if (typePattern.needRuntimeTypeCheck) {
-            return RequireResult(builder.CreateInstanceOf(builder.context.GetBoolTy(), value, targetTy, CurrentBlock()))
+            let createdInstanceOf6279 = builder.CreateInstanceOf(builder.context.GetBoolTy(), value, targetTy, CurrentBlock())
+            CurrentBlock().AppendExpression(createdInstanceOf6279)
+            return RequireResult(createdInstanceOf6279)
         }
-        return RequireResult(builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(false), CurrentBlock()))
+        let createdConstant6281 = builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(false), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant6281)
+        return RequireResult(createdConstant6281)
     }
 
     private func TranslateConditionMatches(matchExpr: AstMatchExpr, retVal: Option<Value>): Unit {
@@ -6299,14 +6631,16 @@ public class Translator {
             }
             let matchCaseExpr = RequireExpr(current.matchExpr, "condition match expr")
             if (matchCaseExpr.astKind == ASTKind.WILDCARD_EXPR) {
-                builder.CreateGoTo(currentBody, baseBlock)
+                let createdGoTo6302 = builder.CreateGoTo(currentBody, baseBlock)
+                baseBlock.AppendExpression(createdGoTo6302)
                 isStillReachable = false
             } else {
                 currentBlock = baseBlock
                 let nextBlock = CreateBlock()
                 let cond = Translator.TranslateASTNode(matchCaseExpr, this) ??
                     throw IllegalStateException("faithful AST2CHIR condition match case produced no value")
-                builder.CreateBranch(cond, currentBody, nextBlock, CurrentBlock())
+                let createdBranch6309 = builder.CreateBranch(cond, currentBody, nextBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdBranch6309)
                 currentBlock = nextBlock
                 if (idx == caseSize - 1) {
                     CurrentBlock().EnableAttr(Attribute.UNREACHABLE)
@@ -6458,6 +6792,7 @@ public class Translator {
         let castedVal = TypeCastOrBoxIfNeeded(selectorVal, targetType, selectorVal.GetDebugLocation(),
             needCheck: false)
         let term = builder.CreateMultiBranch(castedVal, defaultBlock, indexes, blocks, baseBlock)
+        baseBlock.AppendExpression(term)
         term.SetDebugLocation(TranslateLocation(matchExpr))
         currentBlock = endBlock
     }
@@ -6507,7 +6842,8 @@ public class Translator {
             firstDefaultBlock = blocks[0]
         }
         currentBlock = baseBlock
-        builder.CreateMultiBranch(firstSelectorVal, firstDefaultBlock, indexes, blocks, baseBlock)
+        let createdMultiBranch6510 = builder.CreateMultiBranch(firstSelectorVal, firstDefaultBlock, indexes, blocks, baseBlock)
+        baseBlock.AppendExpression(createdMultiBranch6510)
         let branchInfos = TranslateSecondLevelAsTable(matchInfo, enumVal, firstDefaultBlock)
         var caseIdx: Int64 = 0
         while (caseIdx < matchExpr.matchCases.size) {
@@ -6519,7 +6855,8 @@ public class Translator {
                 "match case body"), retVal, endBlock)
             if (let Some(branchBlocks) <- branchInfos.get(caseIdx)) {
                 for (block in branchBlocks) {
-                    builder.CreateGoTo(bodyBlock, block)
+                    let createdGoTo6522 = builder.CreateGoTo(bodyBlock, block)
+                    block.AppendExpression(createdGoTo6522)
                 }
             }
             caseIdx++
@@ -6609,8 +6946,10 @@ public class Translator {
             let enumValueTuple = CastEnumValueToConstructorTupleType(enumVal, enumPattern)
             let secondPath = ArrayList<UInt64>()
             secondPath.add(1u64)
-            let secondSelectVar = RequireResult(builder.CreateField(selectorTy, enumValueTuple, secondPath,
-                CurrentBlock()))
+            let createdField6612 = builder.CreateField(selectorTy, enumValueTuple, secondPath,
+                CurrentBlock())
+            CurrentBlock().AppendExpression(createdField6612)
+            let secondSelectVar = RequireResult(createdField6612)
             let indexes = ArrayList<UInt64>()
             let blocks = ArrayList<Block>()
             for (index in secondMap.keys()) {
@@ -6621,9 +6960,10 @@ public class Translator {
                     blockBranchInfos)
             }
             currentBlock = firstLevelBlock
-            builder.CreateMultiBranch(TypeCastOrBoxIfNeeded(secondSelectVar, builder.context.GetUInt64Ty(),
+            let createdMultiBranch6624 = builder.CreateMultiBranch(TypeCastOrBoxIfNeeded(secondSelectVar, builder.context.GetUInt64Ty(),
                 secondSelectVar.GetDebugLocation(), needCheck: false), secondDefaultBlock, indexes, blocks,
                 firstLevelBlock)
+            firstLevelBlock.AppendExpression(createdMultiBranch6624)
         }
         return blockBranchInfos
     }
@@ -6653,7 +6993,9 @@ public class Translator {
                 let enumValueTuple = CastEnumValueToConstructorTupleType(enumVal, current.ep)
                 let path = ArrayList<UInt64>()
                 path.add(UInt64(1 + patternIdx))
-                let elementVal = RequireResult(builder.CreateField(elementTy, enumValueTuple, path, CurrentBlock()))
+                let createdField6656 = builder.CreateField(elementTy, enumValueTuple, path, CurrentBlock())
+                CurrentBlock().AppendExpression(createdField6656)
+                let elementVal = RequireResult(createdField6656)
                 queue.add((current.ep.patterns[patternIdx], elementVal))
                 patternIdx++
             }
@@ -6667,10 +7009,12 @@ public class Translator {
                 let cond = DispatchingPattern(queue, trueBlock, newBlock, originLoc)
                 if (let Some(condValue) <- cond) {
                     let nextBlock = if (queue.isEmpty()) { trueBlock } else { newBlock }
-                    builder.CreateBranch(condValue, nextBlock, falseBlock, CurrentBlock())
+                    let createdBranch6670 = builder.CreateBranch(condValue, nextBlock, falseBlock, CurrentBlock())
+                    CurrentBlock().AppendExpression(createdBranch6670)
                     currentBlock = nextBlock
                 } else if (queue.isEmpty()) {
-                    builder.CreateGoTo(trueBlock, CurrentBlock())
+                    let createdGoTo6673 = builder.CreateGoTo(trueBlock, CurrentBlock())
+                    CurrentBlock().AppendExpression(createdGoTo6673)
                 }
                 if (cond.isSome() && !queue.isEmpty()) {
                     newBlock = CreateBlock()
@@ -6682,7 +7026,8 @@ public class Translator {
             }
             blockBranchInfos.get(current.caseId).getOrThrow().add(trueBlock)
             if (idx == infos.size - 1) {
-                builder.CreateGoTo(endBlock, falseBlock)
+                let createdGoTo6685 = builder.CreateGoTo(endBlock, falseBlock)
+                falseBlock.AppendExpression(createdGoTo6685)
             } else {
                 currentBlock = falseBlock
             }
@@ -6695,6 +7040,7 @@ public class Translator {
         if (let Some(literal) <- (node as AstLitConstExpr)) {
             if (literal.kind == AstLitConstKind.UNIT) {
                 let unit = builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), CurrentBlock())
+                CurrentBlock().AppendExpression(unit)
                 unit.SetDebugLocation(TranslateLocation(node))
                 if (literal.TestAttr(AstAttribute.COMPILER_ADD)) {
                     unit.GetResult().getOrThrow().EnableAttr(Attribute.COMPILER_ADD)
@@ -6731,8 +7077,10 @@ public class Translator {
         }
         var storedValue = value
         if (RequireAstTy(node).IsUnit() && !targetTy.GetBaseType().IsUnit()) {
-            storedValue = RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
-                CurrentBlock()))
+            let createdConstant6734 = builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
+                CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant6734)
+            storedValue = RequireResult(createdConstant6734)
             storedValue.getOrThrow().SetDebugLocation(debugLoc)
         }
         if (targetTy.GetBaseType().IsUnit() || storedValue.isNone()) {
@@ -6741,12 +7089,16 @@ public class Translator {
             }
             if (storedValue.isNone()) {
                 if (RequireAstTy(node).IsUnit()) {
-                    storedValue = RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
-                        CurrentBlock()))
+                    let createdConstant6744 = builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
+                        CurrentBlock())
+                    CurrentBlock().AppendExpression(createdConstant6744)
+                    storedValue = RequireResult(createdConstant6744)
                     storedValue.getOrThrow().SetDebugLocation(debugLoc)
                 } else {
-                    storedValue = RequireResult(builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(),
-                        CurrentBlock()))
+                    let createdConstant6748 = builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(),
+                        CurrentBlock())
+                    CurrentBlock().AppendExpression(createdConstant6748)
+                    storedValue = RequireResult(createdConstant6748)
                     storedValue.getOrThrow().SetDebugLocation(debugLoc)
                     SetSkipPrintWarning(storedValue.getOrThrow())
                 }
@@ -6763,22 +7115,27 @@ public class Translator {
     private func CreateWrappedBranch(sourceExpr: SourceExpr, cond: Value, trueBlock: Block, falseBlock: Block,
         parent: Block): Unit {
         let branch = builder.CreateBranch(cond, trueBlock, falseBlock, parent)
+        parent.AppendExpression(branch)
         branch.SetSourceExpr(sourceExpr)
     }
 
     private func CreateWrappedBranch(sourceExpr: SourceExpr, loc: DebugLocation, cond: Value, trueBlock: Block,
         falseBlock: Block, parent: Block): Unit {
         let branch = builder.CreateBranch(cond, trueBlock, falseBlock, parent)
+        parent.AppendExpression(branch)
         branch.SetDebugLocation(loc)
         branch.SetSourceExpr(sourceExpr)
     }
 
     private func CreateWrappedTypeCast(ty: Type, operand: Value, parent: Block): Value {
-        return RequireResult(builder.CreateTypeCast(ty, operand, parent))
+        let createdTypeCast6777 = builder.CreateTypeCast(ty, operand, parent)
+        parent.AppendExpression(createdTypeCast6777)
+        return RequireResult(createdTypeCast6777)
     }
 
     private func CreateWrappedTypeCast(loc: DebugLocation, ty: Type, operand: Value, parent: Block): Value {
         let typeCast = builder.CreateTypeCast(ty, operand, parent)
+        parent.AppendExpression(typeCast)
         typeCast.SetDebugLocation(loc)
         return RequireResult(typeCast)
     }
@@ -6790,11 +7147,13 @@ public class Translator {
     private func TranslateSinglePatternBranch(pattern: AstPattern, selector: Value, trueBlock: Block,
         falseBlock: Block): Unit {
         if (let Some(_) <- (pattern as AstWildcardPattern)) {
-            builder.CreateGoTo(trueBlock, CurrentBlock())
+            let createdGoTo6793 = builder.CreateGoTo(trueBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdGoTo6793)
             return
         }
         if (let Some(_) <- (pattern as AstVarPattern)) {
-            builder.CreateGoTo(trueBlock, CurrentBlock())
+            let createdGoTo6797 = builder.CreateGoTo(trueBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdGoTo6797)
             return
         }
         if (let Some(varOrEnum) <- (pattern as AstVarOrEnumPattern)) {
@@ -6802,12 +7161,14 @@ public class Translator {
                 TranslateSinglePatternBranch(realPattern, selector, trueBlock, falseBlock)
                 return
             }
-            builder.CreateGoTo(trueBlock, CurrentBlock())
+            let createdGoTo6805 = builder.CreateGoTo(trueBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdGoTo6805)
             return
         }
         if (let Some(constPattern) <- (pattern as AstConstPattern)) {
             let cond = TranslateConstPatternCondition(constPattern, selector)
-            builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            let createdBranch6810 = builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdBranch6810)
             return
         }
         if (let Some(enumPattern) <- (pattern as AstEnumPattern)) {
@@ -6902,19 +7263,23 @@ public class Translator {
     private func TranslateEnumPatternCondition(pattern: AstEnumPattern, selector: Value): Value {
         let tagValue = GetEnumTagValue(pattern, selector)
         let tagConst = CreateEnumSelectorConstant(RequireEnumPatternConstructor(pattern))
-        return RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), tagValue,
-            tagConst, CurrentBlock()))
+        let createdBinaryExpression6905 = builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), tagValue,
+            tagConst, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBinaryExpression6905)
+        return RequireResult(createdBinaryExpression6905)
     }
 
     private func TranslateEnumPatternBranch(pattern: AstEnumPattern, selector: Value, trueBlock: Block,
         falseBlock: Block): Unit {
         let cond = TranslateEnumPatternCondition(pattern, selector)
         if (pattern.patterns.isEmpty()) {
-            builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            let createdBranch6913 = builder.CreateBranch(cond, trueBlock, falseBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdBranch6913)
             return
         }
         let payloadBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "enum pattern payload"))
-        builder.CreateBranch(cond, payloadBlock, falseBlock, CurrentBlock())
+        let createdBranch6917 = builder.CreateBranch(cond, payloadBlock, falseBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBranch6917)
         currentBlock = payloadBlock
         let payloadSelector = EnumPatternPayloadSelector(selector, pattern)
         TranslatePatternSequenceWithTypes(pattern.patterns, EnumPatternPayloadTypes(pattern), payloadSelector, 1,
@@ -6941,26 +7306,34 @@ public class Translator {
                     TranslateSinglePatternBranch(inner, selector, trueBlock, falseBlock)
                 }
             } else {
-                builder.CreateGoTo(trueBlock, CurrentBlock())
+                let createdGoTo6944 = builder.CreateGoTo(trueBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdGoTo6944)
             }
             return
         }
         if (pattern.needRuntimeTypeCheck) {
-            let typeCond = RequireResult(builder.CreateInstanceOf(builder.context.GetBoolTy(), selector,
-                chirTy.TranslateType(RequireAstTy(pattern)), CurrentBlock()))
+            let createdInstanceOf6949 = builder.CreateInstanceOf(builder.context.GetBoolTy(), selector,
+                chirTy.TranslateType(RequireAstTy(pattern)), CurrentBlock())
+            CurrentBlock().AppendExpression(createdInstanceOf6949)
+            let typeCond = RequireResult(createdInstanceOf6949)
             if (let Some(inner) <- pattern.pattern) {
                 let innerBlock = builder.CreateBlock(RequireParentBlockGroup(CurrentBlock(), "type pattern"))
-                builder.CreateBranch(typeCond, innerBlock, falseBlock, CurrentBlock())
+                let createdBranch6953 = builder.CreateBranch(typeCond, innerBlock, falseBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdBranch6953)
                 currentBlock = innerBlock
                 TranslateSinglePatternBranch(inner, selector, trueBlock, falseBlock)
             } else {
-                builder.CreateBranch(typeCond, trueBlock, falseBlock, CurrentBlock())
+                let createdBranch6957 = builder.CreateBranch(typeCond, trueBlock, falseBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdBranch6957)
             }
             return
         }
-        let constantFalse = RequireResult(builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(false),
-            CurrentBlock()))
-        builder.CreateBranch(constantFalse, trueBlock, falseBlock, CurrentBlock())
+        let createdConstant6961 = builder.CreateConstant(builder.context.GetBoolTy(), BoolLiteral(false),
+            CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant6961)
+        let constantFalse = RequireResult(createdConstant6961)
+        let createdBranch6963 = builder.CreateBranch(constantFalse, trueBlock, falseBlock, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBranch6963)
     }
 
     private func TranslatePatternSequence(patterns: ArrayList<AstPattern>, selector: Value, fieldOffset: Int64,
@@ -6971,7 +7344,8 @@ public class Translator {
     private func TranslatePatternSequenceWithTypes(patterns: ArrayList<AstPattern>, fieldTys: ArrayList<Type>,
         selector: Value, fieldOffset: Int64, trueBlock: Block, falseBlock: Block): Unit {
         if (patterns.isEmpty()) {
-            builder.CreateGoTo(trueBlock, CurrentBlock())
+            let createdGoTo6974 = builder.CreateGoTo(trueBlock, CurrentBlock())
+            CurrentBlock().AppendExpression(createdGoTo6974)
             return
         }
         let group = RequireParentBlockGroup(CurrentBlock(), "nested pattern")
@@ -7002,8 +7376,10 @@ public class Translator {
         }
         let litValue = Translator.TranslateASTNode(RequireExpr(pattern.literal, "const pattern literal"), this) ??
             throw IllegalStateException("faithful AST2CHIR const pattern literal produced no value")
-        return RequireResult(builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), selector,
-            litValue, CurrentBlock()))
+        let createdBinaryExpression7005 = builder.CreateBinaryExpression(ExprKind.EQUAL, builder.context.GetBoolTy(), selector,
+            litValue, CurrentBlock())
+        CurrentBlock().AppendExpression(createdBinaryExpression7005)
+        return RequireResult(createdBinaryExpression7005)
     }
 
     private func ConstPatternOperatorBase(callExpr: AstCallExpr): AstExpr {
@@ -7056,7 +7432,9 @@ public class Translator {
     private func ExtractPatternField(value: Value, index: Int64, fieldTy: Type): Value {
         let path = ArrayList<UInt64>()
         path.add(UInt64(index))
-        return RequireResult(builder.CreateField(fieldTy, GetDerefedValue(value), path, CurrentBlock()))
+        let createdField7059 = builder.CreateField(fieldTy, GetDerefedValue(value), path, CurrentBlock())
+        CurrentBlock().AppendExpression(createdField7059)
+        return RequireResult(createdField7059)
     }
 
     private func EnumPatternPayloadSelector(value: Value, pattern: AstEnumPattern): Value {
@@ -7097,8 +7475,10 @@ public class Translator {
         let constructor = RequireEnumPatternConstructor(pattern)
         let path = ArrayList<UInt64>()
         path.add(0u64)
-        return RequireResult(builder.CreateField(GetEnumSelectorType(constructor), GetDerefedValue(selector), path,
-            CurrentBlock()))
+        let createdField7100 = builder.CreateField(GetEnumSelectorType(constructor), GetDerefedValue(selector), path,
+            CurrentBlock())
+        CurrentBlock().AppendExpression(createdField7100)
+        return RequireResult(createdField7100)
     }
 
     private func RequireEnumPatternConstructor(pattern: AstEnumPattern): AstDecl {
@@ -7113,20 +7493,30 @@ public class Translator {
         if (expr.args.size != 1) {
             throw IllegalArgumentException("faithful AST2CHIR VArray expression expects one argument")
         }
-        let sizeValue = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(Int64(arrayTy.size)),
-            CurrentBlock()))
+        let createdConstant7116 = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(Int64(arrayTy.size)),
+            CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant7116)
+        let sizeValue = RequireResult(createdConstant7116)
         let argValue = TranslateExprArg(RequireFuncArgExpr(expr.args[0], "VArray init argument"))
         let argTy = argValue.GetType() ??
             throw IllegalStateException("faithful AST2CHIR VArray init argument has no type")
         if (argTy.IsFunc()) {
-            let nullItem = RequireResult(builder.CreateConstant(arrayTy.GetElementType(), NullLiteral(), CurrentBlock()))
-            return RequireResult(builder.CreateVArrayBuilder(arrayTy, sizeValue, nullItem, argValue, CurrentBlock()))
+            let createdConstant7122 = builder.CreateConstant(arrayTy.GetElementType(), NullLiteral(), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant7122)
+            let nullItem = RequireResult(createdConstant7122)
+            let createdVArrayBuilder7123 = builder.CreateVArrayBuilder(arrayTy, sizeValue, nullItem, argValue, CurrentBlock())
+            CurrentBlock().AppendExpression(createdVArrayBuilder7123)
+            return RequireResult(createdVArrayBuilder7123)
         }
         let fnParamTys = ArrayList<Type>()
         fnParamTys.add(builder.context.GetInt64Ty())
         let nullFnTy = builder.context.GetFuncTy(fnParamTys, arrayTy.GetElementType())
-        let nullFn = RequireResult(builder.CreateConstant(nullFnTy, NullLiteral(), CurrentBlock()))
-        return RequireResult(builder.CreateVArrayBuilder(arrayTy, sizeValue, argValue, nullFn, CurrentBlock()))
+        let createdConstant7128 = builder.CreateConstant(nullFnTy, NullLiteral(), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant7128)
+        let nullFn = RequireResult(createdConstant7128)
+        let createdVArrayBuilder7129 = builder.CreateVArrayBuilder(arrayTy, sizeValue, argValue, nullFn, CurrentBlock())
+        CurrentBlock().AppendExpression(createdVArrayBuilder7129)
+        return RequireResult(createdVArrayBuilder7129)
     }
 
     private func TranslateStructArray(expr: AstArrayLit, arrayTy: StructType): Value {
@@ -7135,8 +7525,10 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR std.core.Array type has no element type")
         }
         let elementTy = genericArgs[0]
-        let elementSize = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(),
-            IntLiteral(Int64(expr.children.size)), CurrentBlock()))
+        let createdConstant7138 = builder.CreateConstant(builder.context.GetInt64Ty(),
+            IntLiteral(Int64(expr.children.size)), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant7138)
+        let elementSize = RequireResult(createdConstant7138)
         let rawArrayTy = builder.context.GetRawArrayTy(elementTy)
         let rawArrayRefTy = builder.context.GetRefTy(rawArrayTy)
         let rawArrayRef = RequireResult(TryCreate(CurrentBlock(), TranslateLocation(expr), rawArrayRefTy,
@@ -7150,7 +7542,8 @@ public class Translator {
                 }
                 elements.add(element)
             }
-            builder.CreateRawArrayLiteralInit(builder.context.GetUnitTy(), rawArrayRef, elements, CurrentBlock())
+            let createdRawArrayLiteralInit7153 = builder.CreateRawArrayLiteralInit(builder.context.GetUnitTy(), rawArrayRef, elements, CurrentBlock())
+            CurrentBlock().AppendExpression(createdRawArrayLiteralInit7153)
         } else {
             var idx: Int64 = 0
             for (child in expr.children) {
@@ -7160,16 +7553,21 @@ public class Translator {
                 }
                 let path = ArrayList<UInt64>()
                 path.add(UInt64(idx))
-                builder.CreateStoreElementRef(element, rawArrayRef, path, CurrentBlock())
+                let createdStoreElementRef7163 = builder.CreateStoreElementRef(element, rawArrayRef, path, CurrentBlock())
+                CurrentBlock().AppendExpression(createdStoreElementRef7163)
                 idx++
             }
         }
         let initFunc = expr.initFunc ??
             throw IllegalStateException("faithful AST2CHIR std.core.Array literal missing initFunc")
         let resultRefTy = builder.context.GetRefTy(arrayTy)
-        let result = RequireResult(builder.CreateAllocate(resultRefTy, arrayTy, CurrentBlock()))
-        let startIndex = RequireResult(builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0),
-            CurrentBlock()))
+        let createdAllocate7170 = builder.CreateAllocate(resultRefTy, arrayTy, CurrentBlock())
+        CurrentBlock().AppendExpression(createdAllocate7170)
+        let result = RequireResult(createdAllocate7170)
+        let createdConstant7171 = builder.CreateConstant(builder.context.GetInt64Ty(), IntLiteral(0),
+            CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant7171)
+        let startIndex = RequireResult(createdConstant7171)
         let args = ArrayList<Value>()
         args.add(result)
         args.add(rawArrayRef)
@@ -7180,7 +7578,9 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR std.core.Array literal result has no type")
         let _ = CreateAndAppendApplyCallFromArray(GetSymbolTable(initFunc),
             FuncCallContext(args: args, thisType: thisTy), initFnTy, expr)
-        return RequireResult(builder.CreateLoad(arrayTy, result, CurrentBlock()))
+        let createdLoad7183 = builder.CreateLoad(arrayTy, result, CurrentBlock())
+        CurrentBlock().AppendExpression(createdLoad7183)
+        return RequireResult(createdLoad7183)
     }
 
     private func CreateAndAppendApplyCallFromArray(callee: Value, callContext: FuncCallContext,
@@ -7196,17 +7596,22 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                builder.CreateRawArrayAllocateWithException(resultTy, elementTy, size, successBlock, exceptBlock,
+                let createdRawArrayAllocateWithException7199 = builder.CreateRawArrayAllocateWithException(resultTy, elementTy, size, successBlock, exceptBlock,
                     parent)
+                parent.AppendExpression(createdRawArrayAllocateWithException7199)
+                createdRawArrayAllocateWithException7199
             } else {
-                builder.CreateRawArrayAllocateWithException(resultTy, elementTy, size, successBlock, errorBlock,
+                let createdRawArrayAllocateWithException7202 = builder.CreateRawArrayAllocateWithException(resultTy, elementTy, size, successBlock, errorBlock,
                     parent)
+                parent.AppendExpression(createdRawArrayAllocateWithException7202)
+                createdRawArrayAllocateWithException7202
             }
             term.SetDebugLocation(loc)
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return term
         }
         let rawArrayAllocate = builder.CreateRawArrayAllocate(resultTy, elementTy, size, parent)
+        parent.AppendExpression(rawArrayAllocate)
         rawArrayAllocate.SetDebugLocation(loc)
         return rawArrayAllocate
     }
@@ -7217,14 +7622,20 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock, parent)
+                let createdApplyWithException7220 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock, parent)
+                parent.AppendExpression(createdApplyWithException7220)
+                createdApplyWithException7220
             } else {
-                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock, parent)
+                let createdApplyWithException7222 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock, parent)
+                parent.AppendExpression(createdApplyWithException7222)
+                createdApplyWithException7222
             }
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return term
         }
-        return builder.CreateApply(resultTy, callee, callContext, parent)
+        let createdApply7227 = builder.CreateApply(resultTy, callee, callContext, parent)
+        parent.AppendExpression(createdApply7227)
+        return createdApply7227
     }
 
     private func TranslateRawArrayByCollection(expr: AstArrayExpr, arrayTy: Type, rawArrayTy: RawArrayType): Value {
@@ -7247,6 +7658,7 @@ public class Translator {
 
         let rawArrayExpr = builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(), sizeValue,
             CurrentBlock())
+        CurrentBlock().AppendExpression(rawArrayExpr)
         rawArrayExpr.SetDebugLocation(TranslateLocation(expr))
         let rawArrayRef = RequireResult(rawArrayExpr)
         let initFunc = expr.initFunc ??
@@ -7269,6 +7681,7 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR RawArray lambda size produced no value")
         let rawArrayExpr = builder.CreateRawArrayAllocate(arrayTy, rawArrayTy.GetElementType(), sizeValue,
             CurrentBlock())
+        CurrentBlock().AppendExpression(rawArrayExpr)
         rawArrayExpr.SetDebugLocation(TranslateLocation(expr))
         let rawArrayRef = RequireResult(rawArrayExpr)
         let userInitFn = Translator.TranslateASTNode(RequireFuncArgExpr(expr.args[1], "RawArray lambda init"), this) ??
@@ -7351,6 +7764,7 @@ public class Translator {
         let base = TranslateExprArg(RequireExpr(baseExpr, "tuple access base"))
         let baseValue = GetDerefedValue(base, loc)
         let field = builder.CreateField(chirTy.TranslateType(RequireAstTy(expr)), baseValue, path, CurrentBlock())
+        CurrentBlock().AppendExpression(field)
         field.SetDebugLocation(loc)
         if (expr.TestAttr(AstAttribute.IMPLICIT_ADD)) {
             field.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
@@ -7384,6 +7798,7 @@ public class Translator {
         }
         let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_GET, args: args)
         let intrinsic = builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(expr)), callContext, CurrentBlock())
+        CurrentBlock().AppendExpression(intrinsic)
         intrinsic.SetDebugLocation(TranslateLocation(expr))
         return RequireResult(intrinsic)
     }
@@ -7394,15 +7809,20 @@ public class Translator {
         let selectorTy = GetEnumSelectorType(calleeDecl)
         let enumId = GetEnumCtorId(calleeDecl)
         let selector = if (selectorTy.IsBoolean()) {
-            builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0), CurrentBlock())
+            let createdConstant7397 = builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant7397)
+            createdConstant7397
         } else {
-            builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock())
+            let createdConstant7399 = builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant7399)
+            createdConstant7399
         }
         selector.SetDebugLocation(loc)
         args.add(RequireResult(selector))
         let expectedParamTys = FuncParamTypes(expr, calleeDecl)
         AppendTranslatedCallArgs(expr, calleeDecl, args, expectedParamTys, ArrayList<Value>())
         let tuple = builder.CreateTuple(chirTy.TranslateType(RequireAstTy(expr)), args, CurrentBlock())
+        CurrentBlock().AppendExpression(tuple)
         tuple.SetDebugLocation(loc)
         return RequireResult(tuple)
     }
@@ -7429,11 +7849,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock,
+                let createdApplyWithException7432 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock,
                     CurrentBlock())
+                CurrentBlock().AppendExpression(createdApplyWithException7432)
+                createdApplyWithException7432
             } else {
-                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
+                let createdApplyWithException7435 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
                     CurrentBlock())
+                CurrentBlock().AppendExpression(createdApplyWithException7435)
+                createdApplyWithException7435
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -7441,6 +7865,7 @@ public class Translator {
             return result
         }
         let apply = builder.CreateApply(resultTy, callee, callContext, CurrentBlock())
+        CurrentBlock().AppendExpression(apply)
         apply.SetDebugLocation(loc)
         return RequireResult(apply)
     }
@@ -7452,11 +7877,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock,
+                let createdApplyWithException7455 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock,
                     CurrentBlock())
+                CurrentBlock().AppendExpression(createdApplyWithException7455)
+                createdApplyWithException7455
             } else {
-                builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
+                let createdApplyWithException7458 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
                     CurrentBlock())
+                CurrentBlock().AppendExpression(createdApplyWithException7458)
+                createdApplyWithException7458
             }
             term.SetDebugLocation(loc)
             if (HasNothingTypeArg(callContext.args)) {
@@ -7471,6 +7900,7 @@ public class Translator {
             return result
         }
         let apply = builder.CreateApply(resultTy, callee, callContext, CurrentBlock())
+        CurrentBlock().AppendExpression(apply)
         apply.SetDebugLocation(loc)
         if (expr.callKind == AstCallKind.CALL_SUPER_FUNCTION) {
             apply.SetSuperCall()
@@ -7493,6 +7923,7 @@ public class Translator {
             if (let Some(exceptBlock) <- exceptionBlock) {
                 let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, exceptBlock,
                     CurrentBlock())
+                CurrentBlock().AppendExpression(term)
                 term.SetDebugLocation(loc)
                 let result = RequireResult(term)
                 FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
@@ -7500,12 +7931,14 @@ public class Translator {
             }
             let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, errorBlock,
                 CurrentBlock())
+            CurrentBlock().AppendExpression(term)
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
             currentBlock = successBlock
             return result
         }
         let allocate = builder.CreateAllocate(resultTy, allocatedTy, CurrentBlock())
+        CurrentBlock().AppendExpression(allocate)
         allocate.SetDebugLocation(loc)
         return RequireResult(allocate)
     }
@@ -7519,17 +7952,21 @@ public class Translator {
                 case None => errorBlock
             }
             if (let Some(arg) <- spawnArg) {
-                builder.CreateSpawnWithException(resultTy, futureObj, arg, successBlock, targetBlock, CurrentBlock())
+                let createdSpawnWithException7522 = builder.CreateSpawnWithException(resultTy, futureObj, arg, successBlock, targetBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdSpawnWithException7522)
             } else {
-                builder.CreateSpawnWithException(resultTy, futureObj, successBlock, targetBlock, CurrentBlock())
+                let createdSpawnWithException7524 = builder.CreateSpawnWithException(resultTy, futureObj, successBlock, targetBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdSpawnWithException7524)
             }
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return
         }
         if (let Some(arg) <- spawnArg) {
-            builder.CreateSpawn(resultTy, futureObj, arg, CurrentBlock())
+            let createdSpawn7530 = builder.CreateSpawn(resultTy, futureObj, arg, CurrentBlock())
+            CurrentBlock().AppendExpression(createdSpawn7530)
         } else {
-            builder.CreateSpawn(resultTy, futureObj, CurrentBlock())
+            let createdSpawn7532 = builder.CreateSpawn(resultTy, futureObj, CurrentBlock())
+            CurrentBlock().AppendExpression(createdSpawn7532)
         }
     }
 
@@ -7550,7 +7987,8 @@ public class Translator {
         if (let Some(exceptBlock) <- exceptionBlock) {
             currentBlock = exceptBlock
             UpdateDelayExitSignal(CalculateDelayExitLevelForThrow())
-            builder.CreateExit(None, exceptBlock)
+            let createdExit7553 = builder.CreateExit(None, exceptBlock)
+            exceptBlock.AppendExpression(createdExit7553)
         }
         currentBlock = successBlock
     }
@@ -7640,10 +8078,14 @@ public class Translator {
 
         if (RequireAstTy(expr).IsUnit()) {
             // Codegen will not generate a valid 'unit' value for intrinsic call.
-            return RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), CurrentBlock()))
+            let createdConstant7643 = builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant7643)
+            return RequireResult(createdConstant7643)
         }
         if (intrinsicKind == IntrinsicKind.BLACK_BOX && !refEq(retTy, resultTy)) {
-            return RequireResult(builder.CreateLoad(resultTy, intriVar, CurrentBlock()))
+            let createdLoad7646 = builder.CreateLoad(resultTy, intriVar, CurrentBlock())
+            CurrentBlock().AppendExpression(createdLoad7646)
+            return RequireResult(createdLoad7646)
         }
         return intriVar
     }
@@ -7654,11 +8096,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, exceptBlock,
+                let createdIntrinsicWithException7657 = builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, exceptBlock,
                     CurrentBlock())
+                CurrentBlock().AppendExpression(createdIntrinsicWithException7657)
+                createdIntrinsicWithException7657
             } else {
-                builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, errorBlock,
+                let createdIntrinsicWithException7660 = builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, errorBlock,
                     CurrentBlock())
+                CurrentBlock().AppendExpression(createdIntrinsicWithException7660)
+                createdIntrinsicWithException7660
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -7666,6 +8112,7 @@ public class Translator {
             return result
         }
         let intrinsic = builder.CreateIntrinsic(resultTy, callContext, CurrentBlock())
+        CurrentBlock().AppendExpression(intrinsic)
         intrinsic.SetDebugLocation(loc)
         return RequireResult(intrinsic)
     }
@@ -7675,26 +8122,38 @@ public class Translator {
             return value
         }
         if (RequireAstTy(expr).IsUnit()) {
-            return RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), CurrentBlock()))
+            let createdConstant7678 = builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant7678)
+            return RequireResult(createdConstant7678)
         }
-        return RequireResult(builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(), CurrentBlock()))
+        let createdConstant7680 = builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant7680)
+        return RequireResult(createdConstant7680)
     }
 
     private func TranslateExprArg(node: AstNode, targetTy: Type, deref!: Bool = true): Value {
         var value = Translator.TranslateASTNode(node, this)
         if (targetTy.IsUnit()) {
-            return RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), CurrentBlock()))
+            let createdConstant7686 = builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant7686)
+            return RequireResult(createdConstant7686)
         }
         if (RequireAstTy(node).IsNothing() || targetTy.IsNothing()) {
-            return RequireResult(builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(), CurrentBlock()))
+            let createdConstant7689 = builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant7689)
+            return RequireResult(createdConstant7689)
         }
         if (value.isNone()) {
             if (RequireAstTy(node).IsUnit() && !targetTy.IsUnit()) {
-                value = Some(RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
-                    CurrentBlock())))
+                let createdConstant7693 = builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
+                    CurrentBlock())
+                CurrentBlock().AppendExpression(createdConstant7693)
+                value = Some(RequireResult(createdConstant7693))
             } else {
-                return RequireResult(builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(),
-                    CurrentBlock()))
+                let createdConstant7696 = builder.CreateConstant(builder.context.GetNothingType(), NullLiteral(),
+                    CurrentBlock())
+                CurrentBlock().AppendExpression(createdConstant7696)
+                return RequireResult(createdConstant7696)
             }
         }
         var result = value.getOrThrow()
@@ -7713,8 +8172,10 @@ public class Translator {
             let argVal = GenerateLeftValue(TranslateExprAsLeftValue(argExpr), chirTy.TranslateType(RequireAstTy(arg)))
             let inoutArgs = ArrayList<Value>()
             inoutArgs.add(argVal)
-            RequireResult(builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(arg)),
-                IntrisicCallContext(kind: IntrinsicKind.INOUT_PARAM, args: inoutArgs), CurrentBlock()))
+            let createdIntrinsic7716 = builder.CreateIntrinsic(chirTy.TranslateType(RequireAstTy(arg)),
+                IntrisicCallContext(kind: IntrinsicKind.INOUT_PARAM, args: inoutArgs), CurrentBlock())
+            CurrentBlock().AppendExpression(createdIntrinsic7716)
+            RequireResult(createdIntrinsic7716)
         } else {
             TranslateExprArg(argExpr)
         }
@@ -7732,10 +8193,14 @@ public class Translator {
         let baseTy = base.GetType() ??
             throw IllegalStateException("faithful AST2CHIR left value base has no type: ${base.GetIdentifier()}")
         if (baseTy.IsRef()) {
-            return RequireResult(builder.CreateGetElementByName(builder.context.GetRefTy(expectedTy), base,
-                info.path, CurrentBlock()))
+            let createdGetElementByName7735 = builder.CreateGetElementByName(builder.context.GetRefTy(expectedTy), base,
+                info.path, CurrentBlock())
+            CurrentBlock().AppendExpression(createdGetElementByName7735)
+            return RequireResult(createdGetElementByName7735)
         }
-        return RequireResult(builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock()))
+        let createdFieldByName7738 = builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock())
+        CurrentBlock().AppendExpression(createdFieldByName7738)
+        return RequireResult(createdFieldByName7738)
     }
 
     private func BlackBoxModifyArgTypeToRef(args: ArrayList<Value>): Unit {
@@ -7757,7 +8222,8 @@ public class Translator {
                     } else {
                         let argRefType = builder.context.GetRefTy(argTy)
                         newArg = CreateAllocateMaybeWithException(argRefType, argTy)
-                        builder.CreateStore(arg, newArg, CurrentBlock())
+                        let createdStore7760 = builder.CreateStore(arg, newArg, CurrentBlock())
+                        CurrentBlock().AppendExpression(createdStore7760)
                     }
                 }
             }
@@ -8000,8 +8466,10 @@ public class Translator {
                         let arg = RequireFuncArgExpr(expr.args[0], "CString constructor argument")
                         let args = ArrayList<Value>()
                         args.add(TranslateExprArg(arg))
-                        return Some(RequireResult(builder.CreateIntrinsic(ty,
-                            IntrisicCallContext(kind: IntrinsicKind.CSTRING_INIT, args: args), CurrentBlock())))
+                        let createdIntrinsic8003 = builder.CreateIntrinsic(ty,
+                            IntrisicCallContext(kind: IntrinsicKind.CSTRING_INIT, args: args), CurrentBlock())
+                        CurrentBlock().AppendExpression(createdIntrinsic8003)
+                        return Some(RequireResult(createdIntrinsic8003))
                     }
                 }
             }
@@ -8037,9 +8505,13 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                builder.CreateInvokeWithException(resultTy, callContext, successBlock, exceptBlock, CurrentBlock())
+                let createdInvokeWithException8040 = builder.CreateInvokeWithException(resultTy, callContext, successBlock, exceptBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdInvokeWithException8040)
+                createdInvokeWithException8040
             } else {
-                builder.CreateInvokeWithException(resultTy, callContext, successBlock, errorBlock, CurrentBlock())
+                let createdInvokeWithException8042 = builder.CreateInvokeWithException(resultTy, callContext, successBlock, errorBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdInvokeWithException8042)
+                createdInvokeWithException8042
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -8047,6 +8519,7 @@ public class Translator {
             return result
         }
         let invoke = builder.CreateInvoke(resultTy, callContext, CurrentBlock())
+        CurrentBlock().AppendExpression(invoke)
         invoke.SetDebugLocation(loc)
         return RequireResult(invoke)
     }
@@ -8057,11 +8530,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, exceptBlock,
+                let createdInvokeStaticWithException8060 = builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, exceptBlock,
                     CurrentBlock())
+                CurrentBlock().AppendExpression(createdInvokeStaticWithException8060)
+                createdInvokeStaticWithException8060
             } else {
-                builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, errorBlock,
+                let createdInvokeStaticWithException8063 = builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, errorBlock,
                     CurrentBlock())
+                CurrentBlock().AppendExpression(createdInvokeStaticWithException8063)
+                createdInvokeStaticWithException8063
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -8069,6 +8546,7 @@ public class Translator {
             return result
         }
         let invoke = builder.CreateInvokeStatic(resultTy, callContext, CurrentBlock())
+        CurrentBlock().AppendExpression(invoke)
         invoke.SetDebugLocation(loc)
         return RequireResult(invoke)
     }
@@ -8136,9 +8614,13 @@ public class Translator {
         let loc = TranslateLocation(constructor)
         let selectorTy = GetSelectorType(enumTy)
         let selector = if (selectorTy.IsBoolean()) {
-            builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0), CurrentBlock())
+            let createdConstant8139 = builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant8139)
+            createdConstant8139
         } else {
-            builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock())
+            let createdConstant8141 = builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant8141)
+            createdConstant8141
         }
         selector.SetDebugLocation(loc)
         let selectorValue = RequireResult(selector)
@@ -8148,6 +8630,7 @@ public class Translator {
         let args = ArrayList<Value>()
         args.add(selectorValue)
         let tuple = builder.CreateTuple(enumType, args, CurrentBlock())
+        CurrentBlock().AppendExpression(tuple)
         tuple.SetDebugLocation(TranslateLocation(member))
         return RequireResult(tuple)
     }
@@ -8203,11 +8686,15 @@ public class Translator {
                 let topLevelFunc = CurrentBlock().GetTopLevelFunc() ?? CurrentFunction()
                 let rtti = if (RequireExpr(expr.baseFunc, "member call base").astKind == ASTKind.REF_EXPR &&
                     !topLevelFunc.TestAttr(Attribute.STATIC)) {
-                    RequireResult(builder.CreateGetRTTI(builder.context.GetUnitTy(),
-                        topLevelFunc.GetParam(0), CurrentBlock()))
+                    let createdGetRTTI8206 = builder.CreateGetRTTI(builder.context.GetUnitTy(),
+                        topLevelFunc.GetParam(0), CurrentBlock())
+                    CurrentBlock().AppendExpression(createdGetRTTI8206)
+                    RequireResult(createdGetRTTI8206)
                 } else {
-                    RequireResult(builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
-                        parentTy.StripAllRefs(), CurrentBlock()))
+                    let createdGetRTTIStatic8209 = builder.CreateGetRTTIStatic(builder.context.GetUnitTy(),
+                        parentTy.StripAllRefs(), CurrentBlock())
+                    CurrentBlock().AppendExpression(createdGetRTTIStatic8209)
+                    RequireResult(createdGetRTTIStatic8209)
                 }
                 // C++ TranslateCallExpr.cpp:910-911 delegates overflow-name selection to GenerateInvokeCallContext.
                 let invokeCtx = GenerateInvokeCallContext(calleeInfo, rtti, calleeDecl, argValues,
@@ -8360,6 +8847,7 @@ public class Translator {
         let (memberType, isReadOnly) = GetInstMemberTypeByNameCheckingReadOnly(customType, path, builder)
         let memberRefType = builder.context.GetRefTy(memberType)
         let getMemberRef = builder.CreateGetElementByName(memberRefType, lhsBase, path, block)
+        block.AppendExpression(getMemberRef)
         getMemberRef.SetDebugLocation(loc)
         let result = RequireResult(getMemberRef)
         if (lhsBase.TestAttr(Attribute.READONLY) || isReadOnly) {
@@ -8399,6 +8887,7 @@ public class Translator {
                             let memberType = GetInstMemberTypeByName(lhsCustomType, thisObjValueInfo.path, builder)
                             let getMember = builder.CreateFieldByName(memberType, base, thisObjValueInfo.path,
                                 CurrentBlock())
+                            CurrentBlock().AppendExpression(getMember)
                             getMember.SetDebugLocation(loc)
                             thisObj = Some(RequireResult(getMember))
                         }
@@ -8407,11 +8896,15 @@ public class Translator {
                 if (thisObj.isNone()) {
                     let baseAstType = RequireAstTy(baseExpr)
                     if (baseAstType.IsUnit()) {
-                        thisObj = Some(RequireResult(builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
-                            CurrentBlock())))
+                        let createdConstant8410 = builder.CreateConstant(builder.context.GetUnitTy(), UnitLiteral(),
+                            CurrentBlock())
+                        CurrentBlock().AppendExpression(createdConstant8410)
+                        thisObj = Some(RequireResult(createdConstant8410))
                     } else if (baseAstType.IsNothing()) {
-                        thisObj = Some(RequireResult(builder.CreateConstant(builder.context.GetNothingType(),
-                            NullLiteral(), CurrentBlock())))
+                        let createdConstant8413 = builder.CreateConstant(builder.context.GetNothingType(),
+                            NullLiteral(), CurrentBlock())
+                        CurrentBlock().AppendExpression(createdConstant8413)
+                        thisObj = Some(RequireResult(createdConstant8413))
                     } else {
                         CJC_ABORT()
                     }
@@ -8437,6 +8930,7 @@ public class Translator {
                     targetType = builder.context.GetRefTy(pureThisObjType)
                 }
                 let load = builder.CreateLoad(targetType, result, CurrentBlock())
+                CurrentBlock().AppendExpression(load)
                 load.SetDebugLocation(loc)
                 result = RequireResult(load)
             }
@@ -8446,6 +8940,7 @@ public class Translator {
                 let pureThisObjType = thisObjType.StripAllRefs()
                 let targetType = builder.context.GetRefTy(pureThisObjType)
                 let load = builder.CreateLoad(targetType, result, CurrentBlock())
+                CurrentBlock().AppendExpression(load)
                 load.SetDebugLocation(loc)
                 result = RequireResult(load)
             }
@@ -8471,7 +8966,9 @@ public class Translator {
                 if (pureThisObjTy.IsReferenceType()) {
                     targetTy = builder.context.GetRefTy(pureThisObjTy)
                 }
-                thisObj = RequireResult(builder.CreateLoad(targetTy, rawThisObj, CurrentBlock()))
+                let createdLoad8474 = builder.CreateLoad(targetTy, rawThisObj, CurrentBlock())
+                CurrentBlock().AppendExpression(createdLoad8474)
+                thisObj = RequireResult(createdLoad8474)
             }
         } else {
             if (rawThisObjTy.IsValueOrGenericTypeWithRefDims(0)) {
@@ -8480,7 +8977,9 @@ public class Translator {
             if (rawThisObjTy.IsReferenceTypeWithRefDims(CLASS_REF_DIM)) {
                 let pureThisObjTy = rawThisObjTy.StripAllRefs()
                 let targetTy = builder.context.GetRefTy(pureThisObjTy)
-                thisObj = RequireResult(builder.CreateLoad(targetTy, rawThisObj, CurrentBlock()))
+                let createdLoad8483 = builder.CreateLoad(targetTy, rawThisObj, CurrentBlock())
+                CurrentBlock().AppendExpression(createdLoad8483)
+                thisObj = RequireResult(createdLoad8483)
             }
         }
         return thisObj
@@ -8500,7 +8999,9 @@ public class Translator {
             let objectBaseType = (objectType as RefType).getOrThrow().GetBaseType()
             CJC_ASSERT(!objectBaseType.IsRef())
             CJC_ASSERT(objectBaseType.IsStruct())
-            return RequireResult(builder.CreateLoad(objectBaseType, thisVariable, CurrentBlock()))
+            let createdLoad8503 = builder.CreateLoad(objectBaseType, thisVariable, CurrentBlock())
+            CurrentBlock().AppendExpression(createdLoad8503)
+            return RequireResult(createdLoad8503)
         }
         return thisVariable
     }
@@ -8621,6 +9122,7 @@ public class Translator {
                     return None
                 }
                 let load = builder.CreateLoad(thisTy, thisObj, CurrentBlock())
+                CurrentBlock().AppendExpression(load)
                 load.SetDebugLocation(loc)
                 if (IsSuperOrThisCall(expr)) {
                     load.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
@@ -8672,9 +9174,13 @@ public class Translator {
 
     private func CreateEnumSelectorConstant(selectorTy: Type, enumId: Int64): Value {
         if (selectorTy.IsBoolean()) {
-            return RequireResult(builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0), CurrentBlock()))
+            let createdConstant8675 = builder.CreateConstant(selectorTy, BoolLiteral(enumId != 0), CurrentBlock())
+            CurrentBlock().AppendExpression(createdConstant8675)
+            return RequireResult(createdConstant8675)
         }
-        return RequireResult(builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock()))
+        let createdConstant8677 = builder.CreateConstant(selectorTy, IntLiteral(enumId), CurrentBlock())
+        CurrentBlock().AppendExpression(createdConstant8677)
+        return RequireResult(createdConstant8677)
     }
 
     private func GetEnumSelectorType(constructor: AstDecl): Type {
@@ -8822,8 +9328,10 @@ public class Translator {
                 }
                 let path = ArrayList<UInt64>()
                 path.add(UInt64(if (isEnumPattern) { idx + 1 } else { idx }))
-                fieldValue = RequireResult(builder.CreateField(chirTy.TranslateType(RequireAstTy(subPattern)),
-                    GetDerefedValue(baseValue), path, CurrentBlock()))
+                let createdField8825 = builder.CreateField(chirTy.TranslateType(RequireAstTy(subPattern)),
+                    GetDerefedValue(baseValue), path, CurrentBlock())
+                CurrentBlock().AppendExpression(createdField8825)
+                fieldValue = RequireResult(createdField8825)
             }
             FlattenVarWithPatternDecl(subPattern, fieldValue, isLocalPattern: isLocalPattern)
             idx++
@@ -8841,9 +9349,10 @@ public class Translator {
             path = info.path
             if (!path.isEmpty()) {
                 let base = info.base.getOrThrow()
-                let memberRef = RequireResult(
-                    builder.CreateGetElementByName(builder.context.GetRefTy(chirTy.TranslateType(RequireAstTy(leftExpr))),
-                        base, path, CurrentBlock()))
+                let memberRefExpr = builder.CreateGetElementByName(
+                    builder.context.GetRefTy(chirTy.TranslateType(RequireAstTy(leftExpr))), base, path, CurrentBlock())
+                CurrentBlock().AppendExpression(memberRefExpr)
+                let memberRef = RequireResult(memberRefExpr)
                 exprValueTable[leftExpr.objectId] = memberRef
             }
             rhs = TranslateExprArg(rightExpr)
@@ -8891,6 +9400,7 @@ public class Translator {
                 }
                 let opResult = builder.CreateBinaryIntOpWithException(resultTy, ToCHIRCompoundAssignOp(expr.op),
                     lhsValue, rhsValue, successBlock, targetBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(opResult)
                 opResult.SetOverflowStrategy(expr.overflowStrategy)
                 opResult.SetDebugLocation(loc)
                 compoundValue = RequireResult(opResult)
@@ -8898,6 +9408,7 @@ public class Translator {
             } else {
                 let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(expr.op), resultTy, lhsValue,
                     rhsValue, CurrentBlock(), overflowStrategy: expr.overflowStrategy)
+                CurrentBlock().AppendExpression(opResult)
                 opResult.SetDebugLocation(loc)
                 compoundValue = RequireResult(opResult)
             }
@@ -9159,7 +9670,9 @@ public class Translator {
 
         let baseLeftValueInfo = TranslateExprAsLeftValue(baseExpr)
         let lhsBase = AddressOfLeftValue(baseLeftValueInfo, baseTy)
-        let loadedBase = RequireResult(builder.CreateLoad(RequireRefBaseType(lhsBase), lhsBase, CurrentBlock()))
+        let createdLoad9162 = builder.CreateLoad(RequireRefBaseType(lhsBase), lhsBase, CurrentBlock())
+        CurrentBlock().AppendExpression(createdLoad9162)
+        let loadedBase = RequireResult(createdLoad9162)
         let indexValue = Translator.TranslateASTNode(subscriptExpr.indexExprs[0], this) ??
             throw IllegalStateException("faithful AST2CHIR VArray assignment index produced no value")
         let index = GetDerefedValue(indexValue)
@@ -9167,7 +9680,9 @@ public class Translator {
         args.add(loadedBase)
         args.add(index)
         let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_GET, args: args)
-        let lhsValue = RequireResult(builder.CreateIntrinsic(elementTy, callContext, CurrentBlock()))
+        let createdIntrinsic9170 = builder.CreateIntrinsic(elementTy, callContext, CurrentBlock())
+        CurrentBlock().AppendExpression(createdIntrinsic9170)
+        let lhsValue = RequireResult(createdIntrinsic9170)
         var compoundValue: Value
         if (assign.op == AstTokenKind.AND_ASSIGN) {
             compoundValue = TransShortCircuitAnd(lhsValue, rightExpr, loc, false) ??
@@ -9189,6 +9704,7 @@ public class Translator {
                 }
                 let opResult = builder.CreateBinaryIntOpWithException(resultTy, ToCHIRCompoundAssignOp(assign.op),
                     lhsValue, rhsValue, successBlock, targetBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(opResult)
                 opResult.SetOverflowStrategy(assign.overflowStrategy)
                 opResult.SetDebugLocation(loc)
                 compoundValue = RequireResult(opResult)
@@ -9196,6 +9712,7 @@ public class Translator {
             } else {
                 let opResult = builder.CreateBinaryExpression(ToCHIRCompoundAssignOp(assign.op), resultTy, lhsValue,
                     rhsValue, CurrentBlock(), overflowStrategy: assign.overflowStrategy)
+                CurrentBlock().AppendExpression(opResult)
                 opResult.SetDebugLocation(loc)
                 compoundValue = RequireResult(opResult)
             }
@@ -9212,6 +9729,7 @@ public class Translator {
         args.add(index)
         let callContext = IntrisicCallContext(kind: IntrinsicKind.VARRAY_SET, args: args)
         let intrinsic = builder.CreateIntrinsic(builder.context.GetUnitTy(), callContext, CurrentBlock())
+        CurrentBlock().AppendExpression(intrinsic)
         intrinsic.SetDebugLocation(loc)
     }
 
@@ -9237,7 +9755,8 @@ public class Translator {
             }
             if (let Some(subBlock) <- (nodePtr as AstBlock)) {
                 if (nodePtr != expr || nodePtr.TestAttr(AstAttribute.UNSAFE)) {
-                    builder.CreateGoTo(GetBlockByAST(subBlock), backBlock.getOrThrow())
+                    let createdGoTo9240 = builder.CreateGoTo(GetBlockByAST(subBlock), backBlock.getOrThrow())
+                    backBlock.getOrThrow().AppendExpression(createdGoTo9240)
                 }
             }
             return res
@@ -9353,15 +9872,21 @@ public class Translator {
         if (enumDecl.hasArguments) {
             let args = ArrayList<Value>()
             if (selectorType.IsBoolean()) {
-                args.add(RequireResult(builder.CreateConstant(selectorType, BoolLiteral(enumId != 0), CurrentBlock())))
+                let createdConstant9356 = builder.CreateConstant(selectorType, BoolLiteral(enumId != 0), CurrentBlock())
+                CurrentBlock().AppendExpression(createdConstant9356)
+                args.add(RequireResult(createdConstant9356))
             } else {
-                args.add(RequireResult(builder.CreateConstant(selectorType, IntLiteral(enumId), CurrentBlock())))
+                let createdConstant9358 = builder.CreateConstant(selectorType, IntLiteral(enumId), CurrentBlock())
+                CurrentBlock().AppendExpression(createdConstant9358)
+                args.add(RequireResult(createdConstant9358))
             }
             let tupleExpr = builder.CreateTuple(enumType, args, CurrentBlock())
+            CurrentBlock().AppendExpression(tupleExpr)
             tupleExpr.SetDebugLocation(loc)
             return FaithfulLeftValueInfo(RequireResult(tupleExpr), ArrayList<String>())
         }
         let intExpr = builder.CreateConstant(selectorType, IntLiteral(enumId), CurrentBlock())
+        CurrentBlock().AppendExpression(intExpr)
         intExpr.SetDebugLocation(loc)
         let castedIntExpr = TypeCastOrBoxIfNeeded(RequireResult(intExpr), enumType, loc)
         return FaithfulLeftValueInfo(castedIntExpr, ArrayList<String>())
@@ -9469,6 +9994,7 @@ public class Translator {
                     let baseRefTy = RequireRefBaseType(baseLeftValue)
                     baseLeftValueTy = baseRefTy
                     let loadBaseValue = builder.CreateLoad(baseRefTy, baseLeftValue, CurrentBlock())
+                    CurrentBlock().AppendExpression(loadBaseValue)
                     loadBaseValue.SetDebugLocation(loc)
                     baseLeftValue = RequireResult(loadBaseValue)
                 }
@@ -9482,19 +10008,22 @@ public class Translator {
                     if (baseLeftValueTy.IsReferenceTypeWithRefDims(1) ||
                         baseLeftValueTy.IsValueOrGenericTypeWithRefDims(1)) {
                         let memberRefTy = builder.context.GetRefTy(pathMemberTy)
-                        var getMemberRef =
-                            RequireResult(builder.CreateGetElementByName(memberRefTy, baseLeftValue,
-                                baseLeftValuePath, CurrentBlock()))
+                        let memberRefExpr = builder.CreateGetElementByName(memberRefTy, baseLeftValue,
+                            baseLeftValuePath, CurrentBlock())
+                        CurrentBlock().AppendExpression(memberRefExpr)
+                        var getMemberRef = RequireResult(memberRefExpr)
                         getMemberRef.SetDebugLocation(loc)
                         if (baseLeftValue.TestAttr(Attribute.READONLY) || readOnly || isReadOnly) {
                             getMemberRef.EnableAttr(Attribute.READONLY)
                         }
                         let loadMemberValue = builder.CreateLoad(pathMemberTy, getMemberRef, CurrentBlock())
+                        CurrentBlock().AppendExpression(loadMemberValue)
                         loadMemberValue.SetDebugLocation(loc)
                         baseVal = RequireResult(loadMemberValue)
                     } else if (baseLeftValueTy.IsValueOrGenericTypeWithRefDims(0)) {
                         let fieldValue = builder.CreateFieldByName(pathMemberTy, baseLeftValue,
                             baseLeftValuePath, CurrentBlock())
+                        CurrentBlock().AppendExpression(fieldValue)
                         fieldValue.SetDebugLocation(loc)
                         baseVal = RequireResult(fieldValue)
                     } else {
@@ -9551,7 +10080,9 @@ public class Translator {
         if (path.isEmpty()) {
             if (baseTy.IsReferenceTypeWithRefDims(CLASS_REF_DIM)) {
                 let loadedTy = RequireRefBaseType(base)
-                base = RequireResult(builder.CreateLoad(loadedTy, base, CurrentBlock()))
+                let createdLoad9554 = builder.CreateLoad(loadedTy, base, CurrentBlock())
+                CurrentBlock().AppendExpression(createdLoad9554)
+                base = RequireResult(createdLoad9554)
             }
             return FaithfulLeftValueInfo(base, path)
         }
@@ -9590,18 +10121,26 @@ public class Translator {
             var baseLeftValueTy = baseTy
             if (baseLeftValueTy.IsReferenceTypeWithRefDims(CLASS_REF_DIM)) {
                 baseLeftValueTy = RequireRefBaseType(baseLeftValue)
-                baseLeftValue = RequireResult(builder.CreateLoad(baseLeftValueTy, baseLeftValue, CurrentBlock()))
+                let createdLoad9593 = builder.CreateLoad(baseLeftValueTy, baseLeftValue, CurrentBlock())
+                CurrentBlock().AppendExpression(createdLoad9593)
+                baseLeftValue = RequireResult(createdLoad9593)
             }
 
             var baseVal: Option<Value> = None
             if (baseLeftValueTy.IsReferenceTypeWithRefDims(1) ||
                 baseLeftValueTy.IsValueOrGenericTypeWithRefDims(1)) {
                 let memberRefTy = builder.context.GetRefTy(pathMemberTy)
-                let getMemberRef = RequireResult(builder.CreateGetElementByName(memberRefTy, baseLeftValue, path,
-                    CurrentBlock()))
-                baseVal = RequireResult(builder.CreateLoad(pathMemberTy, getMemberRef, CurrentBlock()))
+                let createdGetElementByName9600 = builder.CreateGetElementByName(memberRefTy, baseLeftValue, path,
+                    CurrentBlock())
+                CurrentBlock().AppendExpression(createdGetElementByName9600)
+                let getMemberRef = RequireResult(createdGetElementByName9600)
+                let createdLoad9602 = builder.CreateLoad(pathMemberTy, getMemberRef, CurrentBlock())
+                CurrentBlock().AppendExpression(createdLoad9602)
+                baseVal = RequireResult(createdLoad9602)
             } else if (baseLeftValueTy.IsValueOrGenericTypeWithRefDims(0)) {
-                baseVal = RequireResult(builder.CreateFieldByName(pathMemberTy, baseLeftValue, path, CurrentBlock()))
+                let createdFieldByName9604 = builder.CreateFieldByName(pathMemberTy, baseLeftValue, path, CurrentBlock())
+                CurrentBlock().AppendExpression(createdFieldByName9604)
+                baseVal = RequireResult(createdFieldByName9604)
             }
 
             let concreteBaseVal = baseVal ??
@@ -9650,9 +10189,13 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR address base has no type: ${base.GetIdentifier()}")
         if (baseTy.IsRef()) {
             let refTy = builder.context.GetRefTy(expectedTy)
-            return RequireResult(builder.CreateGetElementByName(refTy, base, info.path, CurrentBlock()))
+            let createdGetElementByName9653 = builder.CreateGetElementByName(refTy, base, info.path, CurrentBlock())
+            CurrentBlock().AppendExpression(createdGetElementByName9653)
+            return RequireResult(createdGetElementByName9653)
         }
-        return RequireResult(builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock()))
+        let createdFieldByName9655 = builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock())
+        CurrentBlock().AppendExpression(createdFieldByName9655)
+        return RequireResult(createdFieldByName9655)
     }
 
     private func LoadLeftValue(info: FaithfulLeftValueInfo, expectedTy: Type): Option<Value> {
@@ -9664,11 +10207,17 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR left value base has no type: ${base.GetIdentifier()}")
         if (baseTy.IsReferenceTypeWithRefDims(1) || baseTy.IsValueOrGenericTypeWithRefDims(1)) {
             let refTy = builder.context.GetRefTy(expectedTy)
-            let memberRef = RequireResult(builder.CreateGetElementByName(refTy, base, info.path, CurrentBlock()))
-            return RequireResult(builder.CreateLoad(expectedTy, memberRef, CurrentBlock()))
+            let createdGetElementByName9667 = builder.CreateGetElementByName(refTy, base, info.path, CurrentBlock())
+            CurrentBlock().AppendExpression(createdGetElementByName9667)
+            let memberRef = RequireResult(createdGetElementByName9667)
+            let createdLoad9668 = builder.CreateLoad(expectedTy, memberRef, CurrentBlock())
+            CurrentBlock().AppendExpression(createdLoad9668)
+            return RequireResult(createdLoad9668)
         }
         if (baseTy.IsValueOrGenericTypeWithRefDims(0)) {
-            return RequireResult(builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock()))
+            let createdFieldByName9671 = builder.CreateFieldByName(expectedTy, base, info.path, CurrentBlock())
+            CurrentBlock().AppendExpression(createdFieldByName9671)
+            return RequireResult(createdFieldByName9671)
         }
         throw IllegalStateException("faithful AST2CHIR unsupported member left value base type: ${baseTy.ToString()}")
     }
@@ -9676,10 +10225,12 @@ public class Translator {
     private func StoreToLeftValue(info: FaithfulLeftValueInfo, value: Value): Unit {
         let base = info.base.getOrThrow()
         if (info.path.isEmpty()) {
-            builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(base)), base, CurrentBlock())
+            let createdStore9679 = builder.CreateStore(CastValueIfNeeded(value, RequireRefBaseType(base)), base, CurrentBlock())
+            CurrentBlock().AppendExpression(createdStore9679)
             return
         }
-        builder.CreateStoreElementByName(value, base, info.path, CurrentBlock())
+        let createdStoreElementByName9682 = builder.CreateStoreElementByName(value, base, info.path, CurrentBlock())
+        CurrentBlock().AppendExpression(createdStoreElementByName9682)
     }
 
     private func TranslateStaticTargetOrPackageMemberAccess(expr: AstMemberAccess, target: AstDecl): Option<Value> {
@@ -9693,6 +10244,7 @@ public class Translator {
             let targetTy = chirTy.TranslateType(RequireAstTy(target))
             let loc = TranslateLocation(expr)
             let load = builder.CreateLoad(targetTy, targetNode, CurrentBlock())
+            CurrentBlock().AppendExpression(load)
             load.SetDebugLocation(loc)
             return Some(TypeCastOrBoxIfNeeded(RequireResult(load), chirTy.TranslateType(RequireAstTy(expr)), loc))
         }
@@ -9736,7 +10288,9 @@ public class Translator {
         if (valueTy.IsEqual(expectedTy)) {
             return value
         }
-        return RequireResult(builder.CreateTypeCast(expectedTy, value, CurrentBlock()))
+        let createdTypeCast9739 = builder.CreateTypeCast(expectedTy, value, CurrentBlock())
+        CurrentBlock().AppendExpression(createdTypeCast9739)
+        return RequireResult(createdTypeCast9739)
     }
 
     private func CoerceValueForExpectedType(value: Value, expectedTy: Type): Value {
@@ -9746,26 +10300,37 @@ public class Translator {
             return value
         }
         if (expectedTy.IsGenericRelated() && !valueTy.IsGenericRelated()) {
-            return RequireResult(builder.CreateTransformToGeneric(expectedTy, value, CurrentBlock()))
+            let createdTransformToGeneric9749 = builder.CreateTransformToGeneric(expectedTy, value, CurrentBlock())
+            CurrentBlock().AppendExpression(createdTransformToGeneric9749)
+            return RequireResult(createdTransformToGeneric9749)
         }
         if (let Some(refTy) <- (valueTy as RefType)) {
             if (refTy.GetBaseType().IsEqual(expectedTy)) {
-                return RequireResult(builder.CreateLoad(expectedTy, value, CurrentBlock()))
+                let createdLoad9753 = builder.CreateLoad(expectedTy, value, CurrentBlock())
+                CurrentBlock().AppendExpression(createdLoad9753)
+                return RequireResult(createdLoad9753)
             }
         }
         if (let Some(expectedRefTy) <- (expectedTy as RefType)) {
             if (valueTy.IsEqual(expectedRefTy.GetBaseType())) {
-                let slot = RequireResult(builder.CreateAllocate(expectedTy, valueTy, CurrentBlock()))
-                builder.CreateStore(value, slot, CurrentBlock())
+                let createdAllocate9758 = builder.CreateAllocate(expectedTy, valueTy, CurrentBlock())
+                CurrentBlock().AppendExpression(createdAllocate9758)
+                let slot = RequireResult(createdAllocate9758)
+                let createdStore9759 = builder.CreateStore(value, slot, CurrentBlock())
+                CurrentBlock().AppendExpression(createdStore9759)
                 return slot
             }
         }
-        return RequireResult(builder.CreateTypeCast(expectedTy, value, CurrentBlock()))
+        let createdTypeCast9763 = builder.CreateTypeCast(expectedTy, value, CurrentBlock())
+        CurrentBlock().AppendExpression(createdTypeCast9763)
+        return RequireResult(createdTypeCast9763)
     }
 
     private func TypeCastOrBoxIfNeeded(value: Value, expectedTy: Type, loc: DebugLocation,
         needCheck!: Bool = true): Value {
-        return TypeCastOrBoxIfNeeded(value, expectedTy, builder, CurrentBlock(), loc, needCheck: needCheck)
+        let (result, expressions) = TypeCastOrBoxIfNeeded(value, expectedTy, builder, CurrentBlock(), loc, needCheck: needCheck)
+        CurrentBlock().AppendExpressions(expressions)
+        return result
     }
 
     private func CreateAndAppendWrappedStore(rhs: Value, lhs: Value, loc: DebugLocation): Unit {
@@ -9779,6 +10344,7 @@ public class Translator {
         let memberType = GetInstMemberTypeByName(lhsCustomType, path, builder)
         let castedRhs = TypeCastOrBoxIfNeeded(rhs, memberType, loc)
         let store = builder.CreateStoreElementByName(castedRhs, lhs, path, CurrentBlock())
+        CurrentBlock().AppendExpression(store)
         store.SetDebugLocation(loc)
     }
 
@@ -9791,6 +10357,7 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR wrapped store lhs is not ref: ${lhs.GetIdentifier()}")
         let castedRhs = TypeCastOrBoxIfNeeded(rhs, lhsType.GetBaseType(), loc)
         let store = builder.CreateStore(castedRhs, lhs, parent)
+        parent.AppendExpression(store)
         store.SetDebugLocation(loc)
     }
 
@@ -9909,7 +10476,9 @@ public class Translator {
                 if (valType.IsClassOrArray()) {
                     return value
                 }
-                return RequireResult(builder.CreateLoad(valType, value, CurrentBlock()))
+                let createdLoad9912 = builder.CreateLoad(valType, value, CurrentBlock())
+                CurrentBlock().AppendExpression(createdLoad9912)
+                return RequireResult(createdLoad9912)
             }
         }
         return value
@@ -9923,6 +10492,7 @@ public class Translator {
                     return value
                 }
                 let load = builder.CreateLoad(valType, value, CurrentBlock())
+                CurrentBlock().AppendExpression(load)
                 load.SetDebugLocation(loc)
                 return RequireResult(load)
             }
@@ -9940,14 +10510,18 @@ public class Translator {
             }
             if (pureArgTy.IsGeneric()) {
                 if (let Some(refTy) <- (argTy as RefType)) {
-                    return RequireResult(builder.CreateLoad(refTy.GetBaseType(), value, CurrentBlock()))
+                    let createdLoad9943 = builder.CreateLoad(refTy.GetBaseType(), value, CurrentBlock())
+                    CurrentBlock().AppendExpression(createdLoad9943)
+                    return RequireResult(createdLoad9943)
                 }
             }
             return value
         }
         if (pureArgTy.IsValueType() || pureArgTy.IsGeneric() || pureArgTy.IsFunc()) {
             if (let Some(refTy) <- (argTy as RefType)) {
-                return RequireResult(builder.CreateLoad(refTy.GetBaseType(), value, CurrentBlock()))
+                let createdLoad9950 = builder.CreateLoad(refTy.GetBaseType(), value, CurrentBlock())
+                CurrentBlock().AppendExpression(createdLoad9950)
+                return RequireResult(createdLoad9950)
             }
             return value
         }
@@ -9955,7 +10529,9 @@ public class Translator {
             if (let Some(refTy) <- (argTy as RefType)) {
                 let baseTy = refTy.GetBaseType()
                 if (baseTy.IsRef()) {
-                    return RequireResult(builder.CreateLoad(baseTy, value, CurrentBlock()))
+                    let createdLoad9958 = builder.CreateLoad(baseTy, value, CurrentBlock())
+                    CurrentBlock().AppendExpression(createdLoad9958)
+                    return RequireResult(createdLoad9958)
                 }
             }
         }

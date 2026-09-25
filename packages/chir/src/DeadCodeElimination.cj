@@ -632,7 +632,8 @@ public class DeadCodeElimination {
                     let expr = (cond as LocalVar).getOrThrow().GetExpr().getOrThrow()
                     expr.RemoveSelfFromBlock()
                 }
-                builder.CreateGoTo(target, block)
+                let createdGoTo635 = builder.CreateGoTo(target, block)
+                block.AppendExpression(createdGoTo635)
             }
 
             let updatedTerminator = block.GetTerminator().getOrThrow()
@@ -716,7 +717,8 @@ public class DeadCodeElimination {
             }
             if (isNothingIr) {
                 CreateNullReturnValue(builder, block, funcBody)
-                builder.CreateExit(None, block)
+                let createdExit719 = builder.CreateExit(None, block)
+                block.AppendExpression(createdExit719)
             }
         }
     }
@@ -867,7 +869,8 @@ public class DeadCodeElimination {
                     let expr = (oprand as LocalVar).getOrThrow().GetExpr().getOrThrow()
                     expr.RemoveSelfFromBlock()
                 }
-                builder.CreateGoTo(target, pred)
+                let createdGoTo870 = builder.CreateGoTo(target, pred)
+                pred.AppendExpression(createdGoTo870)
             } else {
                 let multi = (predTerminator as MultiBranch).getOrThrow()
                 if (block.nodeId != multi.GetDefaultBlock().nodeId) {
@@ -914,7 +917,9 @@ private func CreateNullReturnValue(builder: CHIRBuilder, parent: Block, funcBody
     if (let Some(retVal) <- GetReturnValue(funcBody)) {
         let retValTy = GetFuncType(funcBody).getOrThrow().GetReturnType()
         let nullExpr = builder.CreateConstant(retValTy, NullLiteral(), parent)
-        builder.CreateStore(nullExpr.GetResult().getOrThrow(), retVal, parent)
+        parent.AppendExpression(nullExpr)
+        let createdStore917 = builder.CreateStore(nullExpr.GetResult().getOrThrow(), retVal, parent)
+        parent.AppendExpression(createdStore917)
     }
 }
 
@@ -946,7 +951,8 @@ private func HandleFuncWithNothingParamter(builder: CHIRBuilder, funcBody: Block
             expr.RemoveSelfFromBlock()
         }
         CreateNullReturnValue(builder, entry, funcBody)
-        builder.CreateExit(None, entry)
+        let createdExit949 = builder.CreateExit(None, entry)
+        entry.AppendExpression(createdExit949)
         if (let Some(fn) <- param.GetTopLevelFunc()) {
             fn.SetSkipCheck(SkipKind.SKIP_VIC)
         }
@@ -962,7 +968,8 @@ private func HandleNothingTerminator(builder: CHIRBuilder, expr: ExpressionWithE
         expr.GetExprKind() == ExprKind.INVOKESTATIC_WITH_EXCEPTION)
     let newSuccessBlock = builder.CreateBlock(funcBody)
     CreateNullReturnValue(builder, newSuccessBlock, funcBody)
-    builder.CreateExit(None, newSuccessBlock)
+    let createdExit965 = builder.CreateExit(None, newSuccessBlock)
+    newSuccessBlock.AppendExpression(createdExit965)
 
     let oldSuccessBlock = expr.GetSuccessBlock()
     expr.ReplaceSuccessor(oldSuccessBlock, newSuccessBlock)

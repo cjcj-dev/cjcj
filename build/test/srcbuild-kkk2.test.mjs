@@ -743,11 +743,32 @@ test('stage0 PATH injection of colour opt turns only the isolation contract red'
   assert.deepEqual(bootstrapExecDefects(script), []);
 });
 
-test('print_dry_step 31/32 emit the same bootstrap.sh argv as execution', () => {
-  assert.match(script, /printf 'DRY_RUN COMMAND=%s\\n' "\$\(bootstrap_argv stage0\)"/);
-  assert.match(script, /printf 'DRY_RUN COMMAND=%s\\n' "\$\(bootstrap_argv stage1\)"/);
-  assert.match(script, /run_bootstrap_stage\(\) \{[\s\S]*bootstrap_argv "\$stage"/);
-});
+for (const step of [31, 32]) {
+  for (const mismatch of [false, true]) {
+    test(`dry-run bootstrap step ${step} ${mismatch ? 'rejects mismatched' : 'accepts matching'} pin`, t => {
+      const fixture = bootstrapDriverFixture(t, {mismatch});
+      for (let sample = 1; sample <= 2; sample++) {
+        const result = fixture.dryRun(step, sample);
+        assert.equal(result.error, undefined);
+        assert.equal(result.signal, null);
+        const command = result.stdout.match(/^DRY_RUN COMMAND=(.*)$/m)?.[1];
+        // Evaluate the whole invariant before asserting so an earlier check
+        // cannot hide which product result the test actually observed.
+        const observed = {
+          exit: result.status === 0 ? 'success' : 'failure',
+          command: command === undefined ? 'absent' : command.length ? 'populated' : 'empty',
+          success: /^DRY_RUN RESULT=success/m.test(result.stdout),
+          mismatch: /LLVM_DYLIB_SOURCE_MISMATCH/.test(result.stderr),
+        };
+        console.log(`DRY_ASSERT step=${step} sample=${sample} ${JSON.stringify(observed)}`);
+        assert.deepEqual(observed, mismatch
+          ? {exit: 'failure', command: 'absent', success: false, mismatch: true}
+          : {exit: 'success', command: 'populated', success: true, mismatch: false});
+        if (!mismatch) assert.match(command, new RegExp(`--stage stage${step - 31}(?: |$)`));
+      }
+    });
+  }
+}
 
 function ghaBootstrapDefects(yml, ghaRun) {
   const defects = [];
@@ -998,6 +1019,19 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   return {
     root,
     sourceSha,
+    dryRun(step, sample) {
+      const result = spawnSync('bash', [driver, '--from-step', String(step), '--through-step', String(step), '--dry-run'],
+        {encoding: 'utf8', env});
+      if (process.env.CJCJ_TEST_EVIDENCE) {
+        const out = path.join(process.env.CJCJ_TEST_EVIDENCE, t.name.replaceAll(/[^a-zA-Z0-9]+/g, '-'), String(sample));
+        fs.mkdirSync(out, {recursive: true});
+        fs.writeFileSync(path.join(out, 'stdout.log'), result.stdout);
+        fs.writeFileSync(path.join(out, 'stderr.log'), result.stderr);
+        fs.writeFileSync(path.join(out, 'driver.rc'), `${result.status}\n`);
+        fs.writeFileSync(path.join(out, 'identity.json'), JSON.stringify({driver: sha256(driver), test: sha256(import.meta.filename)}, null, 2) + '\n');
+      }
+      return result;
+    },
     run(step, childRc = 0) {
       const result = spawnSync('bash', [driver, '--from-step', String(step), '--through-step', String(step)],
         {encoding: 'utf8', env: {...env, CHILD_RC: String(childRc)}});

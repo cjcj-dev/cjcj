@@ -58,12 +58,16 @@ public class MarkClassHasInited {
         let boolTy = builder.context.GetBoolTy()
         let path = ArrayList<String>([HAS_INITED_IDENT])
         let ref = builder.CreateGetElementByName(builder.context.GetRefTy(boolTy), thisArg, path, block)
+        block.AppendExpression(ref)
         let load = builder.CreateLoad(boolTy, ref.GetResult().getOrThrow(), block)
+        block.AppendExpression(load)
 
         let entry = finalizerFunc.GetEntryBlock().getOrThrow()
         let exit = builder.CreateBlock(finalizerBody)
-        builder.CreateExit(None, exit)
-        builder.CreateBranch(load.GetResult().getOrThrow(), entry, exit, block)
+        let createdExit57 = builder.CreateExit(None, exit)
+        exit.AppendExpression(createdExit57)
+        let createdBranch58 = builder.CreateBranch(load.GetResult().getOrThrow(), entry, exit, block)
+        block.AppendExpression(createdBranch58)
         finalizerBody.SetEntryBlock(block)
     }
 

@@ -132,11 +132,13 @@ public class FunctionInline {
             let newLoad = builder.CreateLoad(valueType, resNew, user.GetParentBlock().getOrThrow())
             newLoad.MoveBefore(user)
             user.ReplaceOperand(resOld, newLoad.GetResult().getOrThrow())
-            let cast = TypeCastOrBoxIfNeeded(newLoad.GetResult().getOrThrow(), resOld.GetType().getOrThrow(), builder,
+            let (cast, expressions) = TypeCastOrBoxIfNeeded(newLoad.GetResult().getOrThrow(), resOld.GetType().getOrThrow(), builder,
                 newLoad.GetParentBlock().getOrThrow(), INVALID_LOCATION)
             if (!refEq(cast, newLoad.GetResult().getOrThrow())) {
                 CJC_ASSERT(cast.IsLocalVar())
-                cast.AsLocalVar().getOrThrow().GetExpr().getOrThrow().MoveBefore(user)
+                for (expression in expressions) {
+                    expression.MoveBefore(user)
+                }
                 user.ReplaceOperand(newLoad.GetResult().getOrThrow(), cast)
             }
         }
@@ -187,7 +189,8 @@ public class FunctionInline {
         block1.GetTerminator().getOrThrow().ReplaceSuccessor(block2, funcEntry)
         for (exitBlock in exitBlocks) {
             exitBlock.GetTerminator().getOrThrow().RemoveSelfFromBlock()
-            let _ = builder.CreateGoTo(block2, exitBlock)
+            let createdExpression192 = builder.CreateGoTo(block2, exitBlock)
+            exitBlock.AppendExpression(createdExpression192)
         }
     }
 
