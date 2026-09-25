@@ -59,7 +59,8 @@ def main():
                 (a.out / 'result.json').write_text(json.dumps(result, indent=2))
                 return 2
     names = ('pointer_inferred', 'block_inferred', 'func_inferred', 'pointer_explicit',
-             'block_explicit', 'type_usage', 'control', 'cpointer')
+             'block_explicit', 'type_usage', 'control', 'cpointer',
+             'block_return', 'func_non_function', 'func_cfunc')
     with ThreadPoolExecutor(max_workers=4) as pool:
         for name, observed in zip(names, pool.map(lambda n: compile_one(n, a.compiler), names)):
             text = Path(observed['log']).read_text()
@@ -85,12 +86,30 @@ def main():
                                           + r'[^{}]*attributes: \[([^\]]*)\]', ast)
                 observed['call_attributes'] = broken_calls
                 observed['assertions']['rejected_call_state'] = any('IS_BROKEN' in x for x in broken_calls)
-            positions = {'pointer_inferred': [31], 'block_inferred': [41], 'func_inferred': [40],
-                         'pointer_explicit': [43], 'block_explicit': [42], 'type_usage': [34, 64]}
-            if name in positions:
-                observed['diagnostic_columns'] = [int(v) for v in re.findall(
-                    r'error: [^\n]+\n ==> [^\n]+:' + r'5:(\d+):', text)]
-                observed['assertions']['diagnostic_target'] = observed['diagnostic_columns'] == positions[name]
+            # Diagnostic positions must match the upstream-selected source AST
+            # node, not a guessed character offset (parser positions are the API).
+            target_nodes = {
+                'pointer_inferred': r'RefExpr: ObjCPointer',
+                'block_inferred': r'LambdaExpr', 'func_inferred': r'LambdaExpr',
+                'pointer_explicit': r'RefType: NotCompatible',
+                'block_explicit': r'RefType: NotCompatible',
+                'type_usage': r'RefType: NotCompatible',
+                'block_return': r'RefType: NotCompatible',
+                'func_non_function': r'LitConstExpr: Integer "1"',
+                'func_cfunc': r'RefExpr: c',
+            }
+            if name in target_nodes:
+                before_path = a.out / name / 'result_AST' / '4_sema_ast.txt'
+                before = before_path.read_text() if before_path.exists() else ''
+                pattern = (target_nodes[name] + r' \{\n\s*curFile: [^\n]*/' + re.escape(name)
+                           + r'\.cj\n\s*position: \(\d+, (\d+), (\d+)\)')
+                targets = list(dict.fromkeys((int(line), int(col)) for line, col in re.findall(pattern, before)))
+                observed['expected_target_positions'] = targets
+                observed['diagnostic_positions'] = [(int(line), int(col)) for line, col in re.findall(
+                    r'error: [^\n]+\n ==> [^\n]+:(\d+):(\d+):', text)]
+                observed['assertions']['diagnostic_target'] = (
+                    len(targets) == (2 if name == 'type_usage' else 1)
+                    and observed['diagnostic_positions'] == targets)
             observed['passed'] = all(observed['assertions'].values())
             result['cases'][name] = observed
             print(('PASS ' if observed['passed'] else 'FAIL ') + name + ' observed=' + json.dumps(observed), flush=True)
