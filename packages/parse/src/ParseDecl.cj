@@ -2721,11 +2721,7 @@ extend ParserImpl {
     }
 
     private func AddBodyMember(ret: InheritableDecl, member: Decl): Unit {
-        if (let Some(classDecl) <- (ret as ClassDecl)) {
-            if (let Some(body) <- classDecl.body) {
-                body.decls.add(member)
-            }
-        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+        if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
             if (let Some(body) <- interfaceDecl.body) {
                 body.decls.add(member)
             }
