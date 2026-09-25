@@ -53,6 +53,8 @@ test('verify reaches the SDK lineage verdict without a source C++ oracle', {skip
 test('verify still rejects a missing deployed compiler before SDK phases', {skip: !target}, async t => {
   const result = await runEntry(t, {compiler: false});
   assert.equal(result.status, 1, result.output);
-  assert.match(result.output, /test -x .*sdk\/bin\/cjc/);
+  assert.match(result.output, /verify\.mjs:\d+:\d+/);
+  assert.match(result.output, /exit code: 1/);
+  assert.doesNotMatch(result.output, /\[preflight\] runner-specific probes/);
   assert.doesNotMatch(result.output, /bootstrap-intermediate: std provenance/);
 });
