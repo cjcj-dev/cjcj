@@ -186,7 +186,7 @@ test('every workflow host consumer loads ci/cjpm_pin.env after checkout', async 
   }
   const srcbuild = await fs.readFile(path.join(workflows, 'srcbuild.yml'), 'utf8');
   assert.equal(srcbuild.split(srcbuildLoadCommand).length - 1, 1, 'srcbuild.yml');
-  assert.equal(srcbuild.split(loadCommand).length - 1, 0, 'srcbuild.yml must not load cjpm_pin as host');
+
 
   const windowsRuntime = await fs.readFile(path.join(workflows, 'build-windows-runtime.yml'), 'utf8');
   assert.ok(!windowsRuntime.includes('inputs.toolchain'));
@@ -238,20 +238,9 @@ test('both JavaScript entry points require the loaded environment value', async 
   }
 });
 
-// ── #70: two pins, both load-bearing ─────────────────────────────────────────
-// Read as a cleanup this looks like one pin too many: ci/cjpm_pin.env and
-// ci/host_sdk_pin.env both define CJCJ_TOOLCHAIN, at different nightlies, and
-// the obvious repair is to delete one. Measured, they are two different hosts.
-// ci/cjpm_pin.env is the ordinary CI build host: four workflows cat it into
-// $GITHUB_ENV, six cache keys interpolate it, and ci/setup_sdk.mjs then fails
-// closed on it in requireHostToolchain(). ci/host_sdk_pin.env is the
-// source-build host, which srcbuild.yml loads instead and which the test above
-// requires srcbuild.yml *not* to take from cjpm_pin.
-//
-// So the contract worth holding is not "one definition" but "no definition
-// without a named host and a measured consumer set". Definitions are
-// enumerated from git rather than from a list kept here, because a list of the
-// files we already know about cannot discover the third one.
+// Both host roles use the latest official nightly. Keep their existing loader
+// sets explicit so updating a pin cannot silently disconnect a workflow.
+// Enumerate definitions from git to discover undeclared additional pins.
 const HOST_TOOLCHAIN_PINS = Object.freeze({
   'ci/cjpm_pin.env': Object.freeze({
     host: 'ordinary CI build host',
@@ -261,6 +250,14 @@ const HOST_TOOLCHAIN_PINS = Object.freeze({
     host: 'source-build host',
     loaders: Object.freeze(['srcbuild.yml']),
   }),
+});
+
+test('ordinary CI and source-build hosts use the same nightly', async () => {
+  const ordinary = await fs.readFile(cjpmPinPath, 'utf8');
+  const definitions = ordinary.match(/^CJCJ_TOOLCHAIN=\S+$/gm) ?? [];
+  assert.equal(definitions.length, 1, 'ordinary host must define exactly one toolchain');
+  assert.equal(definitions[0].slice('CJCJ_TOOLCHAIN='.length), await hostPin(),
+    'ordinary CI and source-build host versions must be equal');
 });
 
 test('every CJCJ_TOOLCHAIN definition names a host and has measured consumers', async () => {

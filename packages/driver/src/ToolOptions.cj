@@ -116,8 +116,26 @@ public func OPTSetVerifyOptions(setOptionHandler: (String) -> Unit, driverOption
     setOptionHandler("--only-verify-out")
 }
 
+// Upstream 1d3c3833, src/Driver/ToolOptions.cpp:152-166.
+public func LinksStdReflect(driverOptions: DriverOptions): Bool {
+    let reflectName = "std.reflect.cjo"
+    let matchDeps = { deps: HashSet<String> =>
+        for (dep in deps) {
+            if (FileUtil.GetFileName(dep) == reflectName) {
+                return true
+            }
+        }
+        return false
+    }
+    return matchDeps(driverOptions.directBuiltinDependencies) || matchDeps(driverOptions.indirectBuiltinDependencies)
+}
+
 public func OPTSetOptions(setOptionHandler: (String) -> Unit, driverOptions: DriverOptions): Unit {
     setOptionHandler("--cangjie-pipeline")
+    // Keep reflection metadata when the program links reflection APIs.
+    SetOptionIf(setOptionHandler,
+        driverOptions.IsLTOEnabled() && driverOptions.disableReflection && !LinksStdReflect(driverOptions),
+        "--cj-disable-lto-reflection")
     SetOptionIf(setOptionHandler, driverOptions.EnableAsan(), "-cj-asan=true")
     SetOptionIf(setOptionHandler, driverOptions.EnableTsan(), "-cj-tsan=true")
     SetOptionIf(setOptionHandler, driverOptions.EnableTsan(), "-tsan-instrument-atomics=false")
