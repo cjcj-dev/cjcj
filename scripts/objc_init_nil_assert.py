@@ -65,10 +65,11 @@ def returned_temp(lam, name):
 def nil_throw(lam):
     hits = []
     for throw in nodes(lam[1], 'ThrowExpr'):
-        has_message = 'LitConstExpr: STRING "%s"' % MESSAGE in throw[1]
-        has_type = 'ObjCInitException' in throw[1]
-        if has_message or has_type:
-            hits.append(dict(message=has_message, type=has_type))
+        literals = re.findall(r'LitConstExpr: String "([^"]*)"', throw[1])
+        has_message = MESSAGE in literals
+        has_type = 'ty: Class-ObjCInitException' in throw[1]
+        if has_message or has_type or literals:
+            hits.append(dict(message=has_message, type=has_type, literals=literals))
     return hits
 
 
