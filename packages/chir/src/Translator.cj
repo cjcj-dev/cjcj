@@ -342,7 +342,7 @@ private class ScopeContext <: Resource {
     }
 }
 
-private class FaithfulInstCalleeInfo {
+public class FaithfulInstCalleeInfo {
     public let instParentCustomTy: Type
     public let thisType: Type
     public let instParamTys: ArrayList<Type> = ArrayList<Type>()
@@ -3103,7 +3103,7 @@ public class Translator {
         return thisObj
     }
 
-    private func WrapMemberMethodByLambda(funcDecl: AstFuncDecl, instFuncType: FaithfulInstCalleeInfo,
+    public func WrapMemberMethodByLambda(funcDecl: AstFuncDecl, instFuncType: FaithfulInstCalleeInfo,
         thisObj: Option<Value>): Value {
         let topLevelFunc = CurrentBlock().GetTopLevelFunc() ?? CurrentFunction()
         let lambdaMangledName = FaithfulTranslatorGenerateLambdaFuncMangleName(topLevelFunc, lambdaWrapperCounter)
@@ -3200,10 +3200,10 @@ public class Translator {
         return RequireResult(createdApply3102)
     }
 
-    private func GenerateInvokeCallContext(instFuncType: FaithfulInstCalleeInfo, caller: Value,
-        callee: AstFuncDecl, args: ArrayList<Value>, strategy!: OverflowStrategy = OverflowStrategy.NA
+    public func GenerateInvokeCallContext(instFuncType: FaithfulInstCalleeInfo, caller: Value,
+        callee: AstFuncDecl, args: ArrayList<Value>, strategy!: OverflowStrategy = OverflowStrategy.THROWING
     ): InvokeCallContext {
-        // C++ CHIR/AST2CHIR/TranslateASTNode/TranslateRefExpr.cpp:204-243.
+        // C++ Translator.h:949-951 default THROWING; TranslateRefExpr.cpp:204-232 stores that strategy.
         let originalFuncDecl = if (let Some(resolver) <- overrideSrcFuncResolver) {
             resolver(callee) ?? callee
         } else {
