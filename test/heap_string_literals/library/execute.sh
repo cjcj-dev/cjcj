@@ -8,7 +8,13 @@ lib=${LITERAL_RUNTIME:?}
 sdk=${CANGJIE_HOME:?}
 mkdir -p "$out"
 start=$SECONDS
-trap 'rc=$?; echo "$rc" > "$out/run.rc"; echo "wall=$((SECONDS-start))" > "$out/wall.txt"; uptime > "$out/uptime-after.txt"' EXIT
+record_exit() {
+  local rc=$?
+  echo "$rc" > "$out/run.rc"
+  echo "wall=$((SECONDS-start))" > "$out/wall.txt"
+  uptime > "$out/uptime-after.txt"
+}
+trap record_exit EXIT
 uptime > "$out/uptime-before.txt"
 cp "$artifacts/inputs.sha256" "$out/build-inputs.sha256"
 sha256sum "$artifacts/library_runner" "$artifacts/liblibrary_observe.so" \
