@@ -68,7 +68,7 @@ def main():
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         pending = [pool.submit(run, arm, compiler, f, mode)
-                   for arm, compiler in arms.items() for f, mode in inputs]
+                   for f, mode in inputs for arm, compiler in arms.items()]
         for future in concurrent.futures.as_completed(pending):
             summary['cases'].append(future.result())
             (args.out / 'result.json').write_text(json.dumps(summary, indent=2) + '\n')
