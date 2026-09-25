@@ -1,7 +1,7 @@
 package cjcj::compiler_unittest
 
 import std.env.getVariable
-import std.fs.File
+import std.fs.File as FsFile
 import std.unittest.*
 import std.unittest.testmacro.*
 import cjcj::frontend.*
@@ -59,7 +59,7 @@ private func ExpectPreamble(dir: String, name: String): Unit {
     println("OBJC_PREAMBLE_FILE path=${path} present=${present}")
     @Assert(present)
     // Read bytes without FileUtil's source-file BOM normalization.
-    let actual = String.fromUtf8(File.readFrom(path))
+    let actual = String.fromUtf8(FsFile.readFrom(path))
     let startsWithPreamble = actual.startsWith(EXPECTED_OBJC_PREAMBLE)
     println("OBJC_PREAMBLE_ASSERT file=${name} prefix=${startsWithPreamble} bytes=${actual.size}")
     @Expect(startsWithPreamble)
