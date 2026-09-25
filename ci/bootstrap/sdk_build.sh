@@ -269,10 +269,10 @@ validate_llvm_tuple() {
     die 'llvm-tuple SHA256SUMS 格式或相对路径非法'
   fi
   entries=$(wc -l < "$tuple/SHA256SUMS")
-  [ "$entries" -eq 8 ] || die "llvm-tuple SHA256SUMS 必须且只能登记 8 个 payload: entries=$entries"
-  for rel in MANIFEST bin/llc bin/opt lib/STATIC_LLVM.txt \
+  [ "$entries" -eq 10 ] || die "llvm-tuple SHA256SUMS 必须且只能登记 10 个 payload: entries=$entries"
+  for rel in MANIFEST bin/llc bin/opt bin/ld.lld lib/STATIC_LLVM.txt \
     fixed-llc/cjselfhost_llvmshim.o fixed-llc/llc.gz \
-    fixed-llc/opt.gz fixed-llc/llvm-tools.manifest; do
+    fixed-llc/opt.gz fixed-llc/ld.lld.gz fixed-llc/llvm-tools.manifest; do
     [ -f "$tuple/$rel" ] || die "llvm-tuple 缺 $rel"
     tuple_sum_has "$tuple" "$rel" || die "llvm-tuple SHA256SUMS 未登记 $rel"
   done
@@ -288,6 +288,7 @@ install_llvm_tuple() {
   validate_llvm_tuple "$tuple"
   [ -f "$TO/third_party/llvm/bin/llc" ] || die 'llvm-tuple: 基线里没有安装位置 third_party/llvm/bin/llc'
   [ -f "$TO/third_party/llvm/bin/opt" ] || die 'llvm-tuple: 基线里没有安装位置 third_party/llvm/bin/opt'
+  [ -f "$TO/third_party/llvm/bin/ld.lld" ] || die 'llvm-tuple: 基线里没有安装位置 third_party/llvm/bin/ld.lld'
   rm -rf "$TO/third_party/llvm/fixed-llc"
   while IFS= read -r line; do
     expected=${line%% *}
@@ -302,7 +303,7 @@ install_llvm_tuple() {
     # Artifact extraction may omit executable mode; the payload list declares
     # these two entries as tools. Content identity is checked again below.
     case "$rel" in
-      bin/llc|bin/opt) chmod 755 "$target" || die "llvm-tuple 工具权限安装失败: $target";;
+      bin/llc|bin/opt|bin/ld.lld) chmod 755 "$target" || die "llvm-tuple 工具权限安装失败: $target";;
     esac
     count=$((count+1))
     echo "      $rel"
@@ -647,7 +648,7 @@ verify_exe() {                    # verify_exe <路径> <是否跑 --version>
   fi
   printf '  %-34s ELF ✓  ldd ✓%s\n' "${f#"$TO"/}" "$([ "$runver" = 1 ] && printf '  --version ✓')"
 }
-for rel in third_party/llvm/bin/llc third_party/llvm/bin/opt tools/bin/cjpm; do
+for rel in third_party/llvm/bin/llc third_party/llvm/bin/opt third_party/llvm/bin/ld.lld tools/bin/cjpm; do
   verify_exe "$TO/$rel" 1
 done
 # ⚠ ⭐ cjc 只在【宿主】SDK 上跑 --version：⭐ 目标 SDK 的 runtime 着色，⭐ 跑它必崩
@@ -666,7 +667,7 @@ else
 fi
 
 echo
-for rel in bin/cjc third_party/llvm/bin/llc third_party/llvm/bin/opt tools/bin/cjpm; do
+for rel in bin/cjc third_party/llvm/bin/llc third_party/llvm/bin/opt third_party/llvm/bin/ld.lld tools/bin/cjpm; do
   [ -f "$TO/$rel" ] && printf 'SDK-BUILD-SHA %-34s %s\n' "$rel" "$(sha256sum "$TO/$rel" | awk '{print $1}')"
 done
 

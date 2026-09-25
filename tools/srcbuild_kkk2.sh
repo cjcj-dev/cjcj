@@ -618,6 +618,7 @@ fixed_tuple_is_current() {
     local manifest="$tuple_dir/llvm-tools.manifest" manifest_llvm opt_llvm
     [[ -s $tuple_dir/llc.gz ]] || return 1
     [[ -s $tuple_dir/opt.gz ]] || return 1
+    [[ -s $tuple_dir/ld.lld.gz ]] || return 1
     [[ -s $tuple_dir/cjselfhost_llvmshim.o ]] || return 1
     [[ -s $manifest ]] || return 1
     # shellcheck disable=SC1091
@@ -659,7 +660,7 @@ source "$REPO_ROOT/ci/llvm-tuple-layout.sh"
 seed_fixed_tuple_from_depot() {
     local depot_root=${1:-${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}}
     local depot tuple payload sums_sha
-    local -a payloads=(llc.gz opt.gz cjselfhost_llvmshim.o llvm-tools.manifest)
+    local -a payloads=(llc.gz opt.gz ld.lld.gz cjselfhost_llvmshim.o llvm-tools.manifest)
     if [[ -z ${LLVM_SHA:-} ]]; then
         LLVM_SHA=$(awk -F= '$1=="LLVM_SHA" {print $2}' "$REPO_ROOT/ci/llvm_pin.env") || return 1
     fi
@@ -747,7 +748,7 @@ acquire_fixed_tuple_from_release() {
     fixed_tuple_is_current "$colour_tuple/fixed-llc" || return 1
     local payload
     mkdir -p "$CJCJ_FIXED_LLVM_DIR" || return 1
-    for payload in llc.gz opt.gz cjselfhost_llvmshim.o llvm-tools.manifest; do
+    for payload in llc.gz opt.gz ld.lld.gz cjselfhost_llvmshim.o llvm-tools.manifest; do
         cp -- "$colour_tuple/fixed-llc/$payload" "$CJCJ_FIXED_LLVM_DIR/$payload" || return 1
     done
     fixed_tuple_is_current || return 1
@@ -791,7 +792,7 @@ build_fixed_tuple() {
     local llc_build="$build_root/llc-build"
     local flatbuffers_build="$build_root/flatbuffers-build"
     local generated="$build_root/shim-generated"
-    local llc_sha opt_sha shim_sha
+    local llc_sha opt_sha lld_sha lld_version shim_sha
 
     mkdir -p "$build_root"
     checkout_exact "$llvm_fork" "$LLVM_URL" "$LLVM_SHA" || return 1
@@ -806,13 +807,14 @@ build_fixed_tuple() {
         -DLLVM_BUILD_LLVM_DYLIB=OFF \
         -DLLVM_ENABLE_RTTI=OFF \
         -DLLVM_TARGETS_TO_BUILD=X86 \
-        -DLLVM_ENABLE_PROJECTS= \
+        -DLLVM_ENABLE_PROJECTS=lld \
         -DCMAKE_C_COMPILER=clang \
         -DCMAKE_CXX_COMPILER=clang++ \
         '-DCMAKE_CXX_FLAGS=-gline-tables-only -include cstdint -include unordered_map -include map -include vector -include string'
-    ninja -j "$JOBS" -C "$llc_build" llc opt
+    ninja -j "$JOBS" -C "$llc_build" llc opt lld
     gzip -n -c -9 "$llc_build/bin/llc" > "$CJCJ_FIXED_LLVM_DIR/llc.gz"
     gzip -n -c -9 "$llc_build/bin/opt" > "$CJCJ_FIXED_LLVM_DIR/opt.gz"
+    gzip -n -c -9 "$llc_build/bin/ld.lld" > "$CJCJ_FIXED_LLVM_DIR/ld.lld.gz"
 
     cmake -G Ninja -S "$flatbuffers" -B "$flatbuffers_build" \
         -DFLATBUFFERS_BUILD_TESTS=OFF \
@@ -830,6 +832,16 @@ build_fixed_tuple() {
 
     llc_sha=$(sha256sum "$llc_build/bin/llc" | awk '{print $1}')
     opt_sha=$(sha256sum "$llc_build/bin/opt" | awk '{print $1}')
+    lld_sha=$(sha256sum "$llc_build/bin/ld.lld" | awk '{print $1}')
+    lld_version=$("$llc_build/bin/ld.lld" --version | awk '
+        /LLVM version |^LLD / {
+            sub(/^[[:space:]]+/, "")
+            print
+            found = 1
+            exit
+        }
+        END { if (!found) exit 1 }
+    ')
     shim_sha=$(sha256sum "$CJCJ_FIXED_LLVM_DIR/cjselfhost_llvmshim.o" | awk '{print $1}')
     {
         printf 'PLATFORM=linux_x86_64\n'
@@ -838,6 +850,10 @@ build_fixed_tuple() {
         printf 'FLATBUFFERS_SHA=%s\n' "$FLATBUFFERS_SHA"
         printf 'LLC_SHA256=%s\n' "$llc_sha"
         printf 'OPT_SHA256=%s\n' "$opt_sha"
+        printf 'LLD_TOOL=%s\n' ld.lld
+        printf 'LLD_SOURCE=%s\n' "tuple:$LLVM_SHA"
+        printf 'LLD_VERSION=%s\n' "$lld_version"
+        printf 'LLD_SHA256=%s\n' "$lld_sha"
         printf 'SHIM_SHA256=%s\n' "$shim_sha"
     } > "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
     fixed_tuple_is_current || return 1

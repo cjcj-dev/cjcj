@@ -41,6 +41,12 @@ function writeTuple(root, embeddedSha, compilerSha) {
   const gzip = spawnSync('gzip', ['-n', '-c', opt], {encoding: null});
   assert.equal(gzip.status, 0, gzip.stderr?.toString());
   fs.writeFileSync(path.join(root, 'opt.gz'), gzip.stdout);
+  const lld = path.join(root, 'ld.lld');
+  fs.writeFileSync(lld, 'ld.lld fixture\n');
+  const lldGzip = spawnSync('gzip', ['-n', '-c', lld], {encoding: null});
+  assert.equal(lldGzip.status, 0, lldGzip.stderr?.toString());
+  fs.writeFileSync(path.join(root, 'ld.lld.gz'), lldGzip.stdout);
+  const lldSha = crypto.createHash('sha256').update(fs.readFileSync(lld)).digest('hex');
   fs.writeFileSync(path.join(root, 'llvm-tools.manifest'), [
     'PLATFORM=linux_x86_64',
     `LLVM_SHA=${llvmSha}`,
@@ -48,6 +54,10 @@ function writeTuple(root, embeddedSha, compilerSha) {
     `FLATBUFFERS_SHA=${field('FLATBUFFERS_SHA')}`,
     `LLC_SHA256=${'1'.repeat(64)}`,
     `OPT_SHA256=${'2'.repeat(64)}`,
+    'LLD_TOOL=ld.lld',
+    `LLD_SOURCE=tuple:${llvmSha}`,
+    'LLD_VERSION=LLD 15.0.4',
+    `LLD_SHA256=${lldSha}`,
     `SHIM_SHA256=${'3'.repeat(64)}`,
     '',
   ].join('\n'));
@@ -58,6 +68,7 @@ function writeDepotChecksums(depot) {
   const files = [
     'fixed-llc/llc.gz',
     'fixed-llc/opt.gz',
+    'fixed-llc/ld.lld.gz',
     'fixed-llc/cjselfhost_llvmshim.o',
     'fixed-llc/llvm-tools.manifest',
   ];
@@ -994,12 +1005,12 @@ function bootstrapDriverFixture(t, {mismatch = false, empty = false, partialFail
   fs.writeFileSync(inputs + '/ast.a', 'ast input\n');
   fs.writeFileSync(tuple + '/MANIFEST', `LLVM_SHA=${llvmSha}\n`);
   fs.writeFileSync(tuple + '/bin/opt', `CJLLVM-COMMIT:${llvmSha}\n`);
-  for (const name of ['bin/llc', 'lib/STATIC_LLVM.txt', 'fixed-llc/cjselfhost_llvmshim.o',
-    'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/llvm-tools.manifest']) {
+  for (const name of ['bin/llc', 'bin/ld.lld', 'lib/STATIC_LLVM.txt', 'fixed-llc/cjselfhost_llvmshim.o',
+    'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/ld.lld.gz', 'fixed-llc/llvm-tools.manifest']) {
     fs.writeFileSync(path.join(tuple, name), 'input fixture\n');
   }
-  const payloads = ['MANIFEST', 'bin/opt', 'bin/llc', 'lib/STATIC_LLVM.txt',
-    'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/llvm-tools.manifest'];
+  const payloads = ['MANIFEST', 'bin/opt', 'bin/llc', 'bin/ld.lld', 'lib/STATIC_LLVM.txt',
+    'fixed-llc/cjselfhost_llvmshim.o', 'fixed-llc/llc.gz', 'fixed-llc/opt.gz', 'fixed-llc/ld.lld.gz', 'fixed-llc/llvm-tools.manifest'];
   fs.writeFileSync(tuple + '/SHA256SUMS', payloads.map(name => `${sha256(path.join(tuple, name))}  ./${name}\n`).join(''));
   fs.copyFileSync(path.join(repoRoot, 'cjpm.toml'), path.join(root, 'cjpm.toml'));
   // Give the real bootstrap pin check an actual source identity, not a
