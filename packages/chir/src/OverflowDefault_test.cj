@@ -74,7 +74,7 @@ public class OverflowDefaultTest {
         let translator = TranslatorFor(builder)
         translator.SetCurrentBlock(block)
         let thisObj = if (isStatic) {
-            None
+            None<Value>
         } else {
             let caller = builder.CreateConstant(int64, IntLiteral(1), block)
             block.AppendExpression(caller)
@@ -127,7 +127,14 @@ public class OverflowDefaultTest {
         }
         block.AppendExpression(invoke)
         let observed = invoke.GetMethodName()
-        println("OVERFLOW_DEFAULT path=explicit static=${isStatic} strategy=${strategy} name=${observed}")
+        let strategyName = match (strategy) {
+            case OverflowStrategy.NA => "NA"
+            case OverflowStrategy.WRAPPING => "WRAPPING"
+            case OverflowStrategy.THROWING => "THROWING"
+            case OverflowStrategy.SATURATING => "SATURATING"
+            case OverflowStrategy.CHECKED => "CHECKED"
+        }
+        println("OVERFLOW_DEFAULT path=explicit static=${isStatic} strategy=${strategyName} name=${observed}")
         return observed
     }
 
