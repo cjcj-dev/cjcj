@@ -150,6 +150,7 @@ foreign {
 @When[os == "Windows"]
 foreign {
     func LoadLibraryA(filename: CString): CPointer<Unit>
+    func GetModuleHandleA(filename: CString): CPointer<Unit>
     func GetProcAddress(handle: CPointer<Unit>, symbol: CString): CPointer<Unit>
     func FreeLibrary(handle: CPointer<Unit>): Int32
     func free(ptr: CString): Unit
@@ -310,6 +311,7 @@ public class RuntimeHandle {
     public var path: String = ""
     public var symbol: String = ""
     public var opened: Bool = false
+    public var runtimeManaged: Bool = false
     public var raw: CPointer<Unit> = CPointer<Unit>()
     public var symbolRaw: CPointer<Unit> = CPointer<Unit>()
 
@@ -491,6 +493,30 @@ public func OpenSymbolTableSafely(path: String): RuntimeHandle {
     return handle
 }
 
+// Cangjie images register runtime metadata. Pair the runtime loader's path
+// handle with FindCJSymbol/UnloadCJLibrary, rather than bypassing it with dlclose.
+public func OpenMacroLibrary(path: String): RuntimeHandle {
+    // The runtime owns one entry per image. Repeated calls into the same macro
+    // package reuse that entry rather than acquiring unmatched native references.
+    for (opened in openedLibHandles) {
+        if (opened.opened && opened.runtimeManaged && opened.path == path) {
+            return opened
+        }
+    }
+    let handle = RuntimeHandle(path)
+    let load = GetHostRuntimeMethodPointer("LoadCJLibrary")
+    if (load.isNull()) {
+        return handle
+    }
+    try (libraryName = unsafe { LibC.mallocCString(path) }.asResource()) {
+        handle.opened = unsafe { CFunc<(CString) -> Int32>(load)(libraryName.value) } == 0
+        handle.runtimeManaged = handle.opened
+    } catch (e: Exception) {
+        handle.opened = false
+    }
+    return handle
+}
+
 public func GetMethod(handle: RuntimeHandle, name: String): Option<String> {
     let pointer = GetMethodPointer(handle, name)
     if (pointer.isNull()) {
@@ -501,12 +527,24 @@ public func GetMethod(handle: RuntimeHandle, name: String): Option<String> {
 }
 
 public func GetMethodPointer(handle: RuntimeHandle, name: String): CPointer<Unit> {
-    if (!handle.opened || handle.raw.isNull() || name.isEmpty()) {
+    if (!handle.opened || (!handle.runtimeManaged && handle.raw.isNull()) || name.isEmpty()) {
         return CPointer<Unit>()
     }
     var result = CPointer<Unit>()
     try (symbolName = unsafe { LibC.mallocCString(name) }.asResource()) {
-        let symbol = getNativeSymbol(handle.raw, symbolName.value)
+        var symbol = CPointer<Unit>()
+        if (handle.runtimeManaged) {
+            let find = GetHostRuntimeMethodPointer("FindCJSymbol")
+            if (!find.isNull()) {
+                try (libraryName = unsafe { LibC.mallocCString(handle.path) }.asResource()) {
+                    symbol = unsafe {
+                        CFunc<(CString, CString) -> CPointer<Unit>>(find)(libraryName.value, symbolName.value)
+                    }
+                }
+            }
+        } else {
+            symbol = getNativeSymbol(handle.raw, symbolName.value)
+        }
         if (!symbol.isNull()) {
             handle.symbol = name
             handle.symbolRaw = symbol
@@ -518,12 +556,48 @@ public func GetMethodPointer(handle: RuntimeHandle, name: String): CPointer<Unit
     return result
 }
 
+// The Cangjie host has already initialized its runtime before main. Resolve
+// fallback tasks against that mapping, not a second runtime beside the compiler.
+@When[os != "Windows"]
+private func GetHostRuntimeMethodPointer(name: String): CPointer<Unit> {
+    let host = RuntimeHandle("", raw: unsafe { dlopen(CString(CPointer<UInt8>()), 0x1) })
+    let method = GetMethodPointer(host, name)
+    let _ = CloseSymbolTable(host)
+    return method
+}
+
+@When[os == "Windows"]
+private func GetHostRuntimeMethodPointer(name: String): CPointer<Unit> {
+    try (moduleName = unsafe { LibC.mallocCString("libcangjie-runtime.dll") }.asResource()) {
+        // GetModuleHandle borrows the startup module; do not FreeLibrary it.
+        let host = RuntimeHandle("", raw: unsafe { GetModuleHandleA(moduleName.value) })
+        return GetMethodPointer(host, name)
+    } catch (e: Exception) {
+        return CPointer<Unit>()
+    }
+}
+
 public func CloseSymbolTable(handle: RuntimeHandle): Int64 {
-    if (!handle.opened || handle.raw.isNull()) {
-        handle.opened = false
+    if (!handle.opened) {
         return 0
     }
-    let ret = closeNativeLibrary(handle.raw)
+    var ret: Int64 = 0
+    if (handle.runtimeManaged) {
+        let unload = GetHostRuntimeMethodPointer("UnloadCJLibrary")
+        if (unload.isNull()) {
+            return -1
+        }
+        try (libraryName = unsafe { LibC.mallocCString(handle.path) }.asResource()) {
+            ret = Int64(unsafe { CFunc<(CString) -> Int32>(unload)(libraryName.value) })
+        } catch (e: Exception) {
+            return -1
+        }
+    } else if (!handle.raw.isNull()) {
+        ret = closeNativeLibrary(handle.raw)
+    }
+    if (ret != 0) {
+        return ret
+    }
     handle.opened = false
     handle.raw = CPointer<Unit>()
     handle.symbolRaw = CPointer<Unit>()
@@ -647,11 +721,10 @@ public class RuntimeInit {
                 }
                 initRuntime = true
             } else {
-                // Official runtime fallback (track 1): keep reusing the process-global scheduler.
-                if (!PrepareRuntime(opened, initArgs)) {
-                    return false
-                }
-                runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
+                // Unlike the C++ host (InvokeUtilCJNative.cpp:171-179), this host
+                // already owns a live runtime. No process-level init/config call.
+                runtimeMethodFunc = GetHostRuntimeMethodPointer(CJ_NEW_TASK_FROM_C)
+                runtimeReleaseFunc = GetHostRuntimeMethodPointer(CJ_RELEASE_HANDLE_FROM_C)
                 if (runtimeMethodFunc.isNull() || runtimeReleaseFunc.isNull()) {
                     return false
                 }
@@ -664,9 +737,7 @@ public class RuntimeInit {
     public func CloseRuntime(): Unit {
         if (let Some(opened) <- handle) {
             if (initRuntime) {
-                if (runtimeInstanceHandle.isNull()) {
-                    FinishRuntime(opened)
-                } else {
+                if (!runtimeInstanceHandle.isNull()) {
                     // RT_ISOLATE_API_SPEC.md §3.2: InstanceStop occupies the C++
                     // FinishRuntime position (InvokeUtilCJNative.cpp:181-190).
                     let stopResult = unsafe { RuntimeInstanceStopFunc(runtimeInstanceStopFunc)(runtimeInstanceHandle) }
@@ -684,8 +755,9 @@ public class RuntimeInit {
         runtimeReleaseFunc = CPointer<Unit>()
         runtimeInstanceHandle = CPointer<Unit>()
         runtimeInstanceStopFunc = CPointer<Unit>()
-        @When[backend == "cjnative" && env != "ohos"]
-        let _ = CloseMacroDynamicLibrary()
+        // C++ InvokeUtil.cpp:113-129 finishes its runtime before unloading images.
+        // This Cangjie host still needs its runtime and registered image metadata.
+        // Keep macro images alive until the host process shuts down naturally.
     }
 
     public func GetHandle(): Option<RuntimeHandle> {
@@ -693,10 +765,15 @@ public class RuntimeInit {
     }
 
     private func CloseMacroDynamicLibrary(): Unit {
-        for (opened in openedLibHandles) {
-            let _ = CloseSymbolTable(opened)
+        // Reverse load order: dependencies remain available until their users close.
+        while (!openedLibHandles.isEmpty()) {
+            let opened = openedLibHandles[openedLibHandles.size - 1]
+            if (CloseSymbolTable(opened) != 0) {
+                Errorln("close macro related dynamic library failed: ")
+                return
+            }
+            openedLibHandles.remove(at: openedLibHandles.size - 1)
         }
-        ClearOpenedLibHandles()
     }
 }
 
