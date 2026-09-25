@@ -76,7 +76,6 @@ public enum ArchType { | X86_64 | AARCH64 | ARM64 | ARM32 | UNKNOWN }
 public enum OSType { | WINDOWS | LINUX | DARWIN | IOS | UNKNOWN }
 public enum Vendor { | PC | APPLE | UNKNOWN }
 public enum EnvironmentType { | OHOS | GNU | ANDROID | SIMULATOR | NOT_AVAILABLE }
-public enum InteropLanguage { | NA | Java | ObjC }
 public enum OptimizationLevel { | O0 | O1 | O2 | O3 | Os | Oz }
 public enum OutputMode { | EXECUTABLE | STATIC_LIB | SHARED_LIB | CHIR | OBJ }
 public enum CompileTarget { | EXECUTABLE | STATIC_LIB | SHARED_LIB | DEFAULT }

@@ -27,6 +27,5 @@ in the host build environment. The script temporarily supplies the real compiler
 shim link options missing from the standalone CHIR test target, then restores the
 manifest. It does not change product sources or supply substitute functions.
 
-The CJMapping forwarder finalizer's CLI entry is currently unavailable because
-`enableInteropCJMapping` has no option setter. Its source attribute is ported;
-dynamic coverage is explicitly deferred by the lane's advisor ruling 143212Z.
+The CJMapping forwarder finalizer was removed with the reverse CJ mapping chain
+(upstream 1e503327). This item is closed; there is no CLI entry left to wire.
