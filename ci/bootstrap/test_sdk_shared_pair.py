@@ -85,7 +85,7 @@ def main():
                 for member in PAIR:
                     copy(libs / 'inherited.so', source / lib_rel / member)
         cmd = ['bash', str(product), '--from', str(base), '--to', str(target),
-               '--target', TUPLE, '--runtime', str(dyn_source if layout == 'nested-static' else source),
+               '--target', TUPLE, '--runtime', str(source / 'runtime' if layout == 'nested-static' else source),
                '--runtime-commit', COMMIT,
                '--colour-runtime', str(libs / 'pinned-runtime.so'),
                '--host-runtime', str(libs / 'inherited.so')]
@@ -110,6 +110,9 @@ def main():
             'selected_pinned_pair': all(selected.get(member, {}).get('sha256') == manifest[member] for member in PAIR),
             'no_new_alias': all((target / lib_rel / member).exists() == (member in inherited) for member in PAIR),
         }
+        if layout in ('nested-static', 'nested-archive'):
+            assertions['static_archive_installed'] = (
+                sha(target / lib_rel / 'libcangjie-runtime.a') == sha(libs / 'pinned-runtime.a'))
         record = dict(name=name, command=cmd, assembly_rc=assembly.returncode,
                       link_command=link_cmd, link_rc=link.returncode, selected=selected,
                       assertions=assertions, product_sha256=sha(product),
