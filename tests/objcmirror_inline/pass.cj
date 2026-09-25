@@ -1,8 +1,8 @@
 package objcmirror_inline
 
 import std.collection.*
-import cjcj.chir.*
-import cjcj.option.OptimizationLevel
+import cjcj::chir.*
+import cjcj::option.OptimizationLevel
 
 // Link this fixture against the release CHIR archive; it contains no pass copy.
 func observe(name: String, mirror: Bool, noInline: Bool, size: Int64, expected: Int64): Int64 {
