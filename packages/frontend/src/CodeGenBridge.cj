@@ -574,7 +574,7 @@ private class ToCHIR {
         }
         try (recorder = ProfileRecorder("CHIR Opt", "ArrayListOpt")) {
             let functionInline = FunctionInline(builder, options.optimizationLevel, options.chirDebugOptimizer)
-            let pass = ArrayListConstStartOpt(builder, options, functionInline)
+            let pass = ArrayListConstStartOpt(builder, functionInline)
             pass.RunOnPackage(currentPackage)
             MergeEffectMap(pass.GetEffectMap(), effectMap)
             DumpCHIRToFile("RunArrayListConstStartOpt")

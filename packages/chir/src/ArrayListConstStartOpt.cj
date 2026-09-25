@@ -1,25 +1,29 @@
 package cjcj::chir
 
-import cjcj::option.GlobalOptions
+// Upstream ArrayListConstStartOpt.cpp:17-21 (3935aa1c).
+private let ARRAY_TYPE_NAME: String = "Array"
+private let ARRAYLIST_TYPE_NAME: String = "ArrayList"
+private let ARRAYLIST_ITERATOR_TYPE_NAME: String = "ArrayListIterator"
+private let MY_DATA_MEMBER_NAME: String = "myData"
+private let START_MEMBER_NAME: String = "start"
+// COLLECTION_PACKAGE_NAME is absent here; keep the existing string literals.
+private let CORE_PKG: String = "std.core"
+private let COLLECTION_PKG: String = "std.collection"
 
-// C++: CHIR/Optimization/ArrayListConstStartOpt.cpp:14-17.
+// Upstream ArrayListConstStartOpt.cpp:23-26.
 private let ARRAY_FUNC_INLINE_WHITE_LIST: Array<FuncInfo> = [
-    FuncInfo("getUnchecked", "Array", [NOT_CARE], ANY_TYPE, "std.core"),
-    FuncInfo("setUnchecked", "Array", [NOT_CARE], ANY_TYPE, "std.core")
+    FuncInfo("getUnchecked", ARRAY_TYPE_NAME, [NOT_CARE], ANY_TYPE, CORE_PKG),
+    FuncInfo("setUnchecked", ARRAY_TYPE_NAME, [NOT_CARE], ANY_TYPE, CORE_PKG)
 ]
 
-// C++: CHIR/Optimization/ArrayListConstStartOpt.cpp:19-22.
+// Upstream ArrayListConstStartOpt.cpp:28-32. Iterator `next` is in this list.
 private let ARRAYLIST_FUNC_LIST: Array<FuncInfo> = [
-    FuncInfo("[]", "ArrayList", [NOT_CARE], ANY_TYPE, "std.collection"),
-    FuncInfo("==", "ArrayList", [NOT_CARE], ANY_TYPE, "std.collection")
+    FuncInfo("[]", ARRAYLIST_TYPE_NAME, [NOT_CARE], ANY_TYPE, COLLECTION_PKG),
+    FuncInfo("==", ARRAYLIST_TYPE_NAME, [NOT_CARE], ANY_TYPE, COLLECTION_PKG),
+    FuncInfo("next", ARRAYLIST_ITERATOR_TYPE_NAME, [NOT_CARE], ANY_TYPE, COLLECTION_PKG)
 ]
 
-// C++: CHIR/Optimization/ArrayListConstStartOpt.cpp:24-26.
-private let ARRAYLIST_ITERATOR_FUNC_LIST: Array<FuncInfo> = [
-    FuncInfo("next", "ArrayListIterator", [NOT_CARE], ANY_TYPE, "std.collection")
-]
-
-// C++: CHIR/Optimization/ArrayListConstStartOpt.cpp:29-37.
+// Upstream ArrayListConstStartOpt.cpp:34-42.
 private func InWhiteList(`func`: Function, whiteList: Array<FuncInfo>): Bool {
     for (element in whiteList) {
         if (IsExpectedFunction(`func`, element)) {
@@ -29,28 +33,82 @@ private func InWhiteList(`func`: Function, whiteList: Array<FuncInfo>): Bool {
     return false
 }
 
-// C++: CHIR/Optimization/ArrayListConstStartOpt.h:20-54;
-//      CHIR/Optimization/ArrayListConstStartOpt.cpp:40-201.
+// Upstream ArrayListConstStartOpt.cpp:44-59.
+// GetInstanceVar takes Int64; path entries are UInt64.
+private func IsMemberAccess(baseTy: Type, path: ArrayList<UInt64>, packageName: String, typeName: String,
+    memberName: String): Bool {
+    if (path.size != 1) {
+        return false
+    }
+    let customTy = (baseTy.StripAllRefs() as CustomType) ?? return false
+    let def = customTy.GetCustomTypeDef()
+    if (!CheckCustomTypeDefIsExpected(def, packageName, typeName)) {
+        return false
+    }
+    if (path[0] >= UInt64(def.GetAllInstanceVarNum())) {
+        return false
+    }
+    return def.GetInstanceVar(Int64(path[0])).name == memberName
+}
+
+// Upstream ArrayListConstStartOpt.cpp:64-88.
+// GetElementRef has GetLocation(), not GetBase().
+private func MatchLoadOfMemberRef(value: Value, packageName: String, typeName: String,
+    memberName: String): Option<Value> {
+    let local = value.AsLocalVar() ?? return None
+    let loadExpr = local.GetExpr() ?? return None
+    let load = (loadExpr as Load) ?? return None
+    let locLocal = load.GetLocation().AsLocalVar() ?? return None
+    let locExpr = locLocal.GetExpr() ?? return None
+    let getElementRef = (locExpr as GetElementRef) ?? return None
+    let base = getElementRef.GetLocation()
+    let baseTy = base.GetType() ?? return None
+    if (!IsMemberAccess(baseTy, getElementRef.GetPath(), packageName, typeName, memberName)) {
+        return None
+    }
+    return Some(base)
+}
+
+// Upstream ArrayListConstStartOpt.cpp:91-106.
+private func IsFuncParamOfType(value: Value, fn: Function, packageName: String, typeName: String): Bool {
+    if (!value.IsParameter()) {
+        return false
+    }
+    let param = value.AsParameter().getOrThrow()
+    var belongsToFunc = false
+    for (funcParam in fn.GetParams()) {
+        if (refEq(funcParam, param)) {
+            belongsToFunc = true
+            break
+        }
+    }
+    if (!belongsToFunc) {
+        return false
+    }
+    let paramTy = param.GetType() ?? return false
+    let customTy = (paramTy.StripAllRefs() as CustomType) ?? return false
+    return CheckCustomTypeDefIsExpected(customTy.GetCustomTypeDef(), packageName, typeName)
+}
+
+// Upstream ArrayListConstStartOpt.h:20-54; cpp:109-243.
 public class ArrayListConstStartOpt {
     private let builder: CHIRBuilder
     private let optPassName: String = "ArrayListConstStartOpt Inline"
-    private let opts: GlobalOptions
     private let pass: FunctionInline
     private let effectMap: OptEffectCHIRMap = OptEffectCHIRMap()
 
-    public init(builder: CHIRBuilder, opts: GlobalOptions, pass: FunctionInline) {
+    public init(builder: CHIRBuilder, pass: FunctionInline) {
         this.builder = builder
-        this.opts = opts
         this.pass = pass
     }
 
-    // C++: CHIR/Optimization/ArrayListConstStartOpt.cpp:40-43.
+    // Upstream ArrayListConstStartOpt.cpp:109-112.
     public func GetEffectMap(): OptEffectCHIRMap {
         return effectMap
     }
 
-    // C++: CHIR/Optimization/ArrayListConstStartOpt.cpp:45-52.
-    private func CheckNeedRewrite(apply: Apply): Bool {
+    // Upstream ArrayListConstStartOpt.cpp:114-121.
+    private func CheckNeedInline(apply: Apply): Bool {
         if (!apply.GetCallee().IsFuncWithBody()) {
             return false
         }
@@ -58,66 +116,24 @@ public class ArrayListConstStartOpt {
         return InWhiteList(callee, ARRAY_FUNC_INLINE_WHITE_LIST)
     }
 
-    // C++: CHIR/Optimization/ArrayListConstStartOpt.cpp:54-140.
-    private func IsStartAddIndexExpression(field: Field, isIteratorFunc: Bool): Bool {
-        let resultTy = field.GetResult().getOrThrow().GetType().getOrThrow().GetTypeKind()
-        if (resultTy != TypeKind.TYPE_INT64) {
+    // Upstream ArrayListConstStartOpt.cpp:132-157.
+    private func IsStartOfArrayListMyData(field: Field, fn: Function): Bool {
+        let baseTy = field.GetBase().GetType() ?? return false
+        if (!IsMemberAccess(baseTy, field.GetPath(), CORE_PKG, ARRAY_TYPE_NAME, START_MEMBER_NAME)) {
             return false
         }
-
-        if (field.GetPath()[0] != 1u64) {
-            return false
+        let arrayList = MatchLoadOfMemberRef(
+            field.GetBase(), COLLECTION_PKG, ARRAYLIST_TYPE_NAME, MY_DATA_MEMBER_NAME) ?? return false
+        if (IsFuncParamOfType(arrayList, fn, COLLECTION_PKG, ARRAYLIST_TYPE_NAME)) {
+            return true
         }
-
-        var expr = field.GetBase().AsLocalVar().getOrThrow().GetExpr().getOrThrow()
-        if (expr.GetExprKind() != ExprKind.LOAD) {
-            return false
-        }
-
-        expr = expr.GetOperand(0).AsLocalVar().getOrThrow().GetExpr().getOrThrow()
-        if (expr.GetExprKind() != ExprKind.GET_ELEMENT_REF) {
-            return false
-        }
-        var getElementRef = (expr as GetElementRef).getOrThrow()
-        if (getElementRef.GetPath()[0] != 0u64) {
-            return false
-        }
-
-        var location = getElementRef.GetLocation()
-        if (!isIteratorFunc && location.IsParameter()) {
-            let param = location.AsParameter().getOrThrow()
-            let topLevelFunc = field.GetTopLevelFunc().getOrThrow()
-            if (param == topLevelFunc.GetParam(0) || param == topLevelFunc.GetParam(1)) {
-                return true
-            }
-        }
-
-        if (isIteratorFunc) {
-            expr = location.AsLocalVar().getOrThrow().GetExpr().getOrThrow()
-            if (expr.GetExprKind() != ExprKind.LOAD) {
-                return false
-            }
-            expr = expr.GetOperand(0).AsLocalVar().getOrThrow().GetExpr().getOrThrow()
-            if (expr.GetExprKind() != ExprKind.GET_ELEMENT_REF) {
-                return false
-            }
-            getElementRef = (expr as GetElementRef).getOrThrow()
-            if (getElementRef.GetPath()[0] != 1u64) {
-                return false
-            }
-
-            location = getElementRef.GetLocation()
-            if (!location.IsParameter()) {
-                return false
-            }
-            let param = location.AsParameter().getOrThrow()
-            let topLevelFunc = field.GetTopLevelFunc().getOrThrow()
-            return param == topLevelFunc.GetParam(0) || param == topLevelFunc.GetParam(1)
-        }
-        return false
+        let arrayListIterator = MatchLoadOfMemberRef(
+            arrayList, COLLECTION_PKG, ARRAYLIST_ITERATOR_TYPE_NAME, MY_DATA_MEMBER_NAME) ?? return false
+        return IsFuncParamOfType(arrayListIterator, fn, COLLECTION_PKG, ARRAYLIST_ITERATOR_TYPE_NAME)
     }
 
-    // C++: CHIR/Optimization/ArrayListConstStartOpt.cpp:142-159.
+    // Upstream ArrayListConstStartOpt.cpp:159-168.
+    // Expression.ReplaceWith already replaces result users.
     private func RewriteStartWithConstZero(oldExpr: Expression): Unit {
         let oldExprResult = oldExpr.GetResult().getOrThrow()
         let oldExprParent = oldExpr.GetParentBlock().getOrThrow()
@@ -125,52 +141,48 @@ public class ArrayListConstStartOpt {
         let newExpr = builder.CreateConstant(
             oldExprResult.GetType().getOrThrow(), literalValueZero, oldExprParent)
         newExpr.SetDebugLocation(oldExpr.GetDebugLocation())
-
         oldExpr.ReplaceWith(newExpr)
-        oldExprResult.ReplaceWith(newExpr.GetResult().getOrThrow(), newExpr.GetParentBlockGroup())
+    }
 
-        if (opts.chirDebugOptimizer) {
-            println("[ArrayListConstStartOpt] The " + oldExpr.GetExprKindName() +
-                ToPosInfo(oldExpr.GetDebugLocation()) + " has been rewrited to a constant")
+    // Upstream ArrayListConstStartOpt.cpp:170-213.
+    private func RewriteStartAfterInline(fn: Function): Unit {
+        let startFields = ArrayList<Field>()
+        let collect: VisitExprActionFunc = { expr =>
+            if (let Some(field) <- (expr as Field)) {
+                if (IsStartOfArrayListMyData(field, fn)) {
+                    startFields.add(field)
+                }
+            }
+            return VisitResult.CONTINUE
+        }
+        Visitor.Visit(fn, collect)
+        for (field in startFields) {
+            RewriteStartWithConstZero(field)
         }
     }
 
-    // C++: CHIR/Optimization/ArrayListConstStartOpt.cpp:161-201.
+    // Upstream ArrayListConstStartOpt.cpp:215-242.
     public func RunOnPackage(`package`: Package): Unit {
-        for (`func` in `package`.GetGlobalFuncsWithBody()) {
-            let isArrayListIteratorFunc = InWhiteList(`func`, ARRAYLIST_ITERATOR_FUNC_LIST)
-            if (!isArrayListIteratorFunc && !InWhiteList(`func`, ARRAYLIST_FUNC_LIST)) {
+        for (fn in `package`.GetGlobalFuncsWithBody()) {
+            if (!InWhiteList(fn, ARRAYLIST_FUNC_LIST)) {
                 continue
             }
-
-            let preVisit: VisitExprActionFunc = { expr =>
-                if (expr.GetExprKind() != ExprKind.APPLY) {
-                    return VisitResult.CONTINUE
+            let applies = ArrayList<Apply>()
+            let collectApplies: VisitExprActionFunc = { expr =>
+                if (let Some(apply) <- (expr as Apply)) {
+                    if (CheckNeedInline(apply)) {
+                        applies.add(apply)
+                    }
                 }
-
-                let apply = (expr as Apply).getOrThrow()
-                if (CheckNeedRewrite(apply)) {
-                    pass.DoFunctionInline(apply, optPassName)
-                    MergeEffectMap(pass.GetEffectMap(), effectMap)
-                }
-
                 return VisitResult.CONTINUE
             }
-            Visitor.Visit(`func`, preVisit)
-
-            let removeStartVisit: VisitExprActionFunc = { expr =>
-                if (expr.GetExprKind() != ExprKind.FIELD) {
-                    return VisitResult.CONTINUE
-                }
-
-                let field = (expr as Field).getOrThrow()
-                if (IsStartAddIndexExpression(field, isArrayListIteratorFunc)) {
-                    RewriteStartWithConstZero(expr)
-                }
-
-                return VisitResult.CONTINUE
+            Visitor.Visit(fn, collectApplies)
+            for (apply in applies) {
+                pass.DoFunctionInline(apply, optPassName)
+                MergeEffectMap(pass.GetEffectMap(), effectMap)
+                RewriteStartAfterInline(fn)
             }
-            Visitor.Visit(`func`, removeStartVisit)
+            RewriteStartAfterInline(fn)
         }
     }
 }
