@@ -1,6 +1,7 @@
 package cjcj::chir
 
 import std.collection.*
+import cjcj::utils.FileUtil
 import std.core.Box as CoreBox
 import std.unittest.*
 import std.unittest.testmacro.*
@@ -44,6 +45,23 @@ public class StringBackingIntrinsicTest {
         if (binary) {
             let filename = "backing-${IntrinsicKindName(kind)}.chir"
             CHIRSerializer.Serialize(pkg, filename, ToCHIRPhase.RAW)
+            let (ok, bytes, _) = FileUtil.ReadBinaryFileToBuffer(filename)
+            @Expect(ok, true)
+            let rawPackage = GetCHIRPackage(bytes)
+            let kinds = rawPackage.GetExprs_type().getOrThrow()
+            let values = rawPackage.GetExprs().getOrThrow()
+            var idsObserved = 0
+            for (index in 0u32..kinds.size()) {
+                if (kinds.Get(index, 0u8) == CHIRFB_EXPRESSION_ELEM_INTRINSIC_BASE) {
+                    let position = (values.Get(index) as Int64).getOrThrow()
+                    let id = PackageFormat_IntrinsicBase(bytes, position).GetIntrinsicKind()
+                    let expected = if (kind == IntrinsicKind.CANONICALIZE_STRING_BACKING) { 362u16 } else { 24u16 }
+                    @Expect(id, expected)
+                    idsObserved++
+                    println("BACKING_WIRE_ID actual=${id} expected=${expected}")
+                }
+            }
+            @Expect(idsObserved, 1)
             @Expect(CHIRDeserializer.Deserialize(filename, restoredBuilder,
                 CoreBox<ToCHIRPhase>(ToCHIRPhase.RAW)), true)
         } else {

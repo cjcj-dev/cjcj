@@ -3034,8 +3034,12 @@ public class IRBuilder2 <: Resource {
             let funcArgs = ArrayList<LLVMValueRef>()
             funcArgs.add(CreateBitCast(CreateTypeInfo(uint8ArrayTy), i8PtrTy))
             funcArgs.add(all: RawValuesOfCGValues(parameters))
-            return CreateIntrinsicCallNoInvoke("llvm.cj.string.dedup.canonical", ArrayList<LLVMTypeRef>(),
+            let result = CreateIntrinsicCallNoInvoke("llvm.cj.string.dedup.canonical", ArrayList<LLVMTypeRef>(),
                 funcArgs)
+            if (result.isNull()) {
+                throw IllegalStateException("LLVM does not provide llvm.cj.string.dedup.canonical")
+            }
+            return result
         }
         if (kind == IntrinsicKind.DECODE_STACK_TRACE) {
             let retTy = resultType.getOrThrow()
