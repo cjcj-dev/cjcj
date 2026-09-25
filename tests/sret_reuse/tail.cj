@@ -20,3 +20,7 @@ public func tailGeneric<T>(value: T): T { identity<T>(value) }
 public func scalar(x: Int64): Int64 { x + 1 }
 public func unitLeaf(): Unit { () }
 public func tailUnit(): Unit { unitLeaf() }
+// Generic callee sret uses a different LLVM pointer type from the concrete caller.
+public func concreteGeneric(value: Large): Large { identity<Large>(value) }
+// The callee is sret, but this caller returns a scalar in a register.
+public func scalarGeneric(value: Int64): Int64 { identity<Int64>(value) }
