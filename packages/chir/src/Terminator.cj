@@ -195,6 +195,9 @@ public class Branch <: Terminator {
 }
 
 public class MultiBranch <: Terminator {
+    private var sourceExpr: SourceExpr = SourceExpr.OTHER
+    public func SetSourceExpr(value: SourceExpr): Unit { sourceExpr = value }
+    public func GetSourceExpr(): SourceExpr { return sourceExpr }
     private let caseVals: ArrayList<UInt64> = ArrayList<UInt64>()
 
     public init(cond: Value, defaultBlock: Block, vals: ArrayList<UInt64>, succs: ArrayList<Block>,
@@ -254,6 +257,7 @@ public class MultiBranch <: Terminator {
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = builder.CreateMultiBranch(GetCondition(), GetDefaultBlock(), GetCaseVals(), GetNormalBlocks(),
             parent)
+        cloned.SetSourceExpr(sourceExpr)
         return cloned
     }
 }

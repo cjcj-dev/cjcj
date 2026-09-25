@@ -421,7 +421,6 @@ public class Translator {
     private let mergingSpecific: Bool
     private var genericFuncMap: GenericFuncMap = GenericFuncMap()
     private let annoFactoryFuncs: ArrayList<(AstDecl, Function)>
-    private let maybeUnreachable: HashMap<Block, Terminator>
     private let isComputingAnnos: Bool
     private let initFuncsForAnnoFactory: ArrayList<Function>
     private let annotationFuncMap: HashMap<AstDecl, AnnoInfo> = HashMap<AstDecl, AnnoInfo>()
@@ -434,13 +433,11 @@ public class Translator {
         opts!: GlobalOptions = GlobalOptions(),
         increKind!: IncreKind = IncreKind.INVALID,
         annoFactoryFuncs!: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>(),
-        maybeUnreachable!: HashMap<Block, Terminator> = HashMap<Block, Terminator>(),
         isComputingAnnos!: Bool = false,
         initFuncsForAnnoFactory!: ArrayList<Function> = ArrayList<Function>()) {
         this(builder, chirTy, globalSymbolTable, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
             deserializedVals: deserializedVals, gim: gim, overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts,
             increKind: increKind, mergingSpecific: opts.IsCompilingCJMPSpecific(), annoFactoryFuncs: annoFactoryFuncs,
-            maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos, initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }
 
@@ -449,7 +446,7 @@ public class Translator {
         gim!: Option<GenericInstantiationManager>,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>>, opts!: GlobalOptions,
         increKind!: IncreKind, mergingSpecific!: Bool, annoFactoryFuncs!: ArrayList<(AstDecl, Function)>,
-        maybeUnreachable!: HashMap<Block, Terminator>, isComputingAnnos!: Bool,
+        isComputingAnnos!: Bool,
         initFuncsForAnnoFactory!: ArrayList<Function>) {
         this.builder = builder
         this.chirTy = chirTy
@@ -463,7 +460,6 @@ public class Translator {
         this.increKind = increKind
         this.mergingSpecific = mergingSpecific
         this.annoFactoryFuncs = annoFactoryFuncs
-        this.maybeUnreachable = maybeUnreachable
         this.isComputingAnnos = isComputingAnnos
         this.initFuncsForAnnoFactory = initFuncsForAnnoFactory
     }
@@ -490,7 +486,6 @@ public class Translator {
             gim: gim,
             overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, increKind: increKind,
             annoFactoryFuncs: annoFactoryFuncs,
-            maybeUnreachable: maybeUnreachable,
             isComputingAnnos: isComputingAnnos, initFuncsForAnnoFactory: initFuncsForAnnoFactory)
     }
 
@@ -500,7 +495,7 @@ public class Translator {
             gim: gim,
             overrideSrcFuncResolver: overrideSrcFuncResolver, opts: opts, increKind: increKind,
             mergingSpecific: mergingSpecific,
-            annoFactoryFuncs: annoFactoryFuncs, maybeUnreachable: maybeUnreachable,
+            annoFactoryFuncs: annoFactoryFuncs,
             isComputingAnnos: isComputingAnnos,
             initFuncsForAnnoFactory: initFuncsForAnnoFactory)
         copied.astNodeSymbolTable = AST2CHIRNodeMap<Value>(astNodeSymbolTable)
@@ -1810,7 +1805,7 @@ public class Translator {
             CurrentFinallyContext().controlFlowBlocks[ControlType.RETURN].add((prevBlock, CurrentBlock()))
         }
         currentBlock = CreateBlock()
-        maybeUnreachable[CurrentBlock()] = terminator.getOrThrow()
+        CurrentBlock().SetDebugLocation(loc)
         return None
     }
 
@@ -2009,7 +2004,17 @@ public class Translator {
         // C++: TranslateCallExpr.cpp:1145-1148 Translator::ProcessCallExpr.
         if (expr.resolvedFunction.isNone() &&
             RequireAstTy(RequireExpr(expr.baseFunc, "Nothing call base")).IsNothing()) {
-            return Some(TranslateExprArg(RequireExpr(expr.baseFunc, "Nothing call base")))
+            let callee = TranslateExprArg(RequireExpr(expr.baseFunc, "Nothing call base"))
+            for (argument in expr.args) {
+                let _ = TranslateExprArg(RequireExpr(argument.expr, "Nothing call argument"))
+            }
+            let loc = TranslateLocation(expr)
+            let exit = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(exit)
+            exit.SetDebugLocation(loc)
+            currentBlock = CreateBlock()
+            CurrentBlock().SetDebugLocation(loc)
+            return Some(callee)
         }
         if (let Some(funcTypeValueCall) <- TranslateFuncTypeValueCall(expr)) {
             return Some(funcTypeValueCall)
@@ -2776,6 +2781,11 @@ public class Translator {
         }
         currentBlock = impl.endBlock
         if (let Some(returnLocation) <- impl.retVal) {
+            var onlyBridges = true
+            for (predecessor in CurrentBlock().GetPredecessors()) {
+                if (predecessor.GetExpressions().size != 1) { onlyBridges = false }
+            }
+            if (onlyBridges) { return None }
             let result = GetDerefedValue(returnLocation, TranslateLocation(expr))
             if (forceGenerateUnit) {
                 let localVar = (result as LocalVar) ??
@@ -3669,7 +3679,7 @@ public class Translator {
         terminator.SetDebugLocation(loc)
         let group = RequireParentBlockGroup(CurrentBlock(), "jump continuation")
         currentBlock = builder.CreateBlock(group)
-        maybeUnreachable[CurrentBlock()] = terminator
+        CurrentBlock().SetDebugLocation(loc)
         return None
     }
 
@@ -3791,6 +3801,13 @@ public class Translator {
                 let result = builder.CreateLoad(tryTy, loc, CurrentBlock())
                 CurrentBlock().AppendExpression(result)
                 result.SetDebugLocation(TranslateLocation(expr))
+                var hasLocatedStore = false
+                for (user in loc.GetUsers()) {
+                    if (user.GetExprKind() == ExprKind.STORE && !user.GetDebugLocation().GetBeginPos().IsZero()) {
+                        hasLocatedStore = true
+                    }
+                }
+                if (!hasLocatedStore) { result.SetSkipCheck(SkipKind.SKIP_DCE_WARNING) }
                 return RequireResult(result)
             }
             return None
@@ -3815,7 +3832,7 @@ public class Translator {
         terminator.SetDebugLocation(loc)
         let group = RequireParentBlockGroup(CurrentBlock(), "throw continuation")
         currentBlock = builder.CreateBlock(group)
-        maybeUnreachable[CurrentBlock()] = terminator
+        CurrentBlock().SetDebugLocation(loc)
         return None
     }
 
@@ -5652,13 +5669,24 @@ public class Translator {
         }
     }
 
-    private func HasNothingTypeArg(args: ArrayList<Value>): Bool {
+    private func GetFirstNothingTypeArgIndex(args: ArrayList<Value>): Option<Int64> {
+        var index: Int64 = 0
         for (arg in args) {
             if ((arg.GetType() ?? throw IllegalStateException("faithful AST2CHIR call argument has no type")).IsNothing()) {
-                return true
+                return Some(index)
             }
+            index++
         }
-        return false
+        return None
+    }
+
+    private func FinalizeNothingCallArguments(call: Expression, callLoc: DebugLocation, warningLoc: DebugLocation): Unit {
+        call.SetDebugLocationInfoForWarning(warningLoc)
+        let exit = builder.CreateExit(None, CurrentBlock())
+        CurrentBlock().AppendExpression(exit)
+        exit.SetDebugLocation(callLoc)
+        currentBlock = CreateBlock()
+        CurrentBlock().SetDebugLocation(callLoc)
     }
 
     private func HasTypeOfNothing(expr: AstTryExpr): Bool {
@@ -5940,7 +5968,11 @@ public class Translator {
             IntrisicCallContext(kind: IntrinsicKind.BEGIN_CATCH, args: beginCatchArgs), CurrentBlock())
         CurrentBlock().AppendExpression(createdIntrinsic5647)
         let beginCatch = RequireResult(createdIntrinsic5647)
-        let _ = Translator.TranslateASTNode(finallyBlock, exceptionTrans)
+        let existingBlocks = exceptionTrans.blockGroupStack[exceptionTrans.blockGroupStack.size - 1].GetBlocks()
+                let _ = Translator.TranslateASTNode(finallyBlock, exceptionTrans)
+                for (block in exceptionTrans.blockGroupStack[exceptionTrans.blockGroupStack.size - 1].GetBlocks()) {
+                    if (!existingBlocks.contains(block)) { block.SetSkipCheck(SkipKind.SKIP_DCE_WARNING) }
+                }
         let rethrowFinallyBlock = exceptionTrans.GetBlockByAST(finallyBlock)
         let createdGoTo5651 = builder.CreateGoTo(rethrowFinallyBlock, exceptionBlock)
         exceptionBlock.AppendExpression(createdGoTo5651)
@@ -5973,11 +6005,14 @@ public class Translator {
             }
             for ((prevBlock, nextBlock) in blocks) {
                 let normalTrans = CopyForFork()
+                let existingBlocks = normalTrans.blockGroupStack[normalTrans.blockGroupStack.size - 1].GetBlocks()
                 let _ = Translator.TranslateASTNode(finallyBlock, normalTrans)
+                for (block in normalTrans.blockGroupStack[normalTrans.blockGroupStack.size - 1].GetBlocks()) {
+                    if (!existingBlocks.contains(block)) { block.SetSkipCheck(SkipKind.SKIP_DCE_WARNING) }
+                }
                 let normalFinallyBlock = normalTrans.GetBlockByAST(finallyBlock)
                 let createdGoTo5679 = builder.CreateGoTo(normalFinallyBlock, prevBlock)
                 prevBlock.AppendExpression(createdGoTo5679)
-                normalFinallyBlock.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
                 prevBlock.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
                 let isNormalCase = controlIndex == ControlType.NORMAL
                 if (normalTrans.finallyContext.isEmpty() || isNormalCase) {
@@ -7873,46 +7908,32 @@ public class Translator {
     private func CreateAndAppendApplyCallFromCallExpr(resultTy: Type, callee: Value, callContext: FuncCallContext,
         expr: AstCallExpr): Value {
         let loc = TranslateLocation(expr)
-        if (let Some(errorBlock) <- CurrentTryCatchBlock()) {
-            let successBlock = CreateBlock()
-            let exceptionBlock = DelayExitExceptionBlock(errorBlock)
-            let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdApplyWithException7455 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock,
-                    CurrentBlock())
-                CurrentBlock().AppendExpression(createdApplyWithException7455)
-                createdApplyWithException7455
-            } else {
-                let createdApplyWithException7458 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
-                    CurrentBlock())
-                CurrentBlock().AppendExpression(createdApplyWithException7458)
-                createdApplyWithException7458
-            }
-            term.SetDebugLocation(loc)
-            if (HasNothingTypeArg(callContext.args)) {
-                if (let Some(baseFunc) <- expr.baseFunc) {
-                    term.SetDebugLocationInfoForWarning(TranslateLocation(baseFunc))
-                } else {
-                    term.SetDebugLocationInfoForWarning(loc)
-                }
-            }
-            let result = RequireResult(term)
-            FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
+        let firstNothing = GetFirstNothingTypeArgIndex(callContext.args)
+        if (callContext.args.size == expr.args.size && firstNothing.isSome()) {
+            let argumentRootLocation = CurrentBlock().GetDebugLocation()
+            let exit = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(exit)
+            currentBlock = CreateBlock()
+            CurrentBlock().SetDebugLocation(argumentRootLocation)
+        }
+        let result = CreateApplyMaybeWithException(resultTy, callee, callContext, loc: loc)
+        let call = result.AsLocalVar().getOrThrow().GetExpr().getOrThrow()
+        if (expr.callKind == AstCallKind.CALL_SUPER_FUNCTION) {
+            if (let Some(apply) <- (call as Apply)) { apply.SetSuperCall() }
+        }
+        let warningLoc = if (let Some(base) <- expr.baseFunc) { TranslateLocation(base) } else { loc }
+        if (firstNothing.isSome()) {
+            FinalizeNothingCallArguments(call, loc, warningLoc)
             return result
         }
-        let apply = builder.CreateApply(resultTy, callee, callContext, CurrentBlock())
-        CurrentBlock().AppendExpression(apply)
-        apply.SetDebugLocation(loc)
-        if (expr.callKind == AstCallKind.CALL_SUPER_FUNCTION) {
-            apply.SetSuperCall()
+        if (resultTy.IsNothing()) {
+            let exit = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(exit)
+            exit.SetDebugLocation(loc)
+            currentBlock = CreateBlock()
+            CurrentBlock().SetDebugLocation(loc)
         }
-        if (HasNothingTypeArg(callContext.args)) {
-            if (let Some(baseFunc) <- expr.baseFunc) {
-                apply.SetDebugLocationInfoForWarning(TranslateLocation(baseFunc))
-            } else {
-                apply.SetDebugLocationInfoForWarning(loc)
-            }
-        }
-        return RequireResult(apply)
+        return result
     }
 
     private func CreateAllocateMaybeWithException(resultTy: Type, allocatedTy: Type,
@@ -8700,8 +8721,8 @@ public class Translator {
                 let invokeCtx = GenerateInvokeCallContext(calleeInfo, rtti, calleeDecl, argValues,
                     strategy: expr.overflowStrategy)
                 let invoke = CreateInvokeStaticMaybeWithException(resultTy, invokeCtx, loc: loc)
-                if (HasNothingTypeArg(argValues)) {
-                    invoke.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetDebugLocationInfoForWarning(TranslateLocation(
+                if (GetFirstNothingTypeArgIndex(argValues).isSome()) {
+                    FinalizeNothingCallArguments(invoke.AsLocalVar().getOrThrow().GetExpr().getOrThrow(), loc, TranslateLocation(
                         RequireExpr(expr.baseFunc, "member call base")))
                 }
                 return invoke
@@ -8711,8 +8732,8 @@ public class Translator {
             let invokeCtx = GenerateInvokeCallContext(calleeInfo, obj, calleeDecl, argValues,
                 strategy: expr.overflowStrategy)
             let invoke = CreateInvokeMaybeWithException(resultTy, invokeCtx, loc: loc)
-            if (HasNothingTypeArg(argValues)) {
-                invoke.AsLocalVar().getOrThrow().GetExpr().getOrThrow().SetDebugLocationInfoForWarning(TranslateLocation(
+            if (GetFirstNothingTypeArgIndex(argValues).isSome()) {
+                FinalizeNothingCallArguments(invoke.AsLocalVar().getOrThrow().GetExpr().getOrThrow(), loc, TranslateLocation(
                     RequireExpr(expr.baseFunc, "member call base")))
             }
             return invoke
@@ -10360,6 +10381,11 @@ public class Translator {
         let store = builder.CreateStore(castedRhs, lhs, parent)
         parent.AppendExpression(store)
         store.SetDebugLocation(loc)
+        if (let Some(local) <- (rhs as LocalVar)) {
+            if (local.GetExpr().getOrThrow().GetSkipCheck() == SkipKind.SKIP_DCE_WARNING) {
+                store.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+            }
+        }
     }
 
     public func TranslateLocation(node: AstNode): DebugLocation {
