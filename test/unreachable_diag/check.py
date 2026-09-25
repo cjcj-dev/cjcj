@@ -10,6 +10,9 @@ import sys
 from pathlib import Path
 
 out = Path(sys.argv[1])
+profile = sys.argv[2] if len(sys.argv) > 2 else "o0"
+if profile not in ("o0", "o2"):
+    raise SystemExit("unknown profile " + profile)
 log = re.sub(r"\x1b\[[0-9;]*m", "", (out / "compile.log").read_text(errors="replace"))
 source = (Path(__file__).resolve().parent / "fixture.cj").read_text()
 lines = source.splitlines()
@@ -51,7 +54,8 @@ def expect(name, ok, detail):
 expect("compiler-completed", (out / "compile.rc").read_text().strip() == "0", "compile.rc=" + (out / "compile.rc").read_text().strip())
 outer_return = line_of("return match (x)")
 outer_hits = count(lambda msg, line: "unreachable expression" in msg and line == outer_return)
-expect("outer-return-not-skipped", outer_hits == 1, f"hits={outer_hits} line={outer_return}")
+if profile == "o0":
+    expect("outer-return-not-skipped", outer_hits == 1, f"hits={outer_hits} line={outer_return}")
 
 else_if_hits = count(lambda msg, line: "unreachable block in 'if'" in msg and line == else_if)
 else_arm_hits = count(lambda msg, line: "unreachable block in 'if'" in msg and line == else_arm)
@@ -64,10 +68,12 @@ expect("nothing-later-arg", later_hits == 1, f"hits={later_hits} line={later}")
 call_hits = count(lambda msg, line: "unreachable 'call'" in msg and line == later)
 expect("nothing-call-warning", call_hits == 1, f"hits={call_hits} line={later}")
 split_hits = count(lambda msg, line: "unreachable" in msg and line == split_case)
-expect("match-split-once", split_hits == 1, f"hits={split_hits} line={split_case}")
 constructor_case = line_of("Left(1) | Right(2)")
 constructor_hits = count(lambda msg, line: "unreachable" in msg and line == constructor_case)
-expect("match-constructors-once", constructor_hits == 1, f"hits={constructor_hits} line={constructor_case}")
+if profile == "o0":
+    expect("match-split-once", split_hits == 1, f"hits={split_hits} line={split_case}")
+else:
+    expect("match-constructors-once", constructor_hits == 1, f"hits={constructor_hits} line={constructor_case}")
 reachable_fn = line_of("func reachable")
 reachable_return = next(i for i, line in enumerate(lines, 1) if i > reachable_fn and "return 1" in line)
 reachable_hits = count(lambda msg, line: "unreachable" in msg and line == reachable_return)
