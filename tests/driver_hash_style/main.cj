@@ -1,6 +1,6 @@
 import cjcj::driver.*
 import cjcj::frontend.DiagnosticEngine
-import cjcj::option.{ArchType, EnvironmentType, OSType, OutputMode}
+import cjcj::option.{ArchType, EnvironmentType, OSType, OrderedInput, OutputMode}
 
 // Exercise the production backend selector and read the resulting Tool batches.
 // No linker execution or cross-target runtime installation is required.
@@ -17,6 +17,7 @@ main(args: Array<String>): Int64 {
         options.output = "hash-style-fixture"
         options.toolChainPaths.add("/usr/bin")
         options.inputObjs.add("hash-style-input.o")
+        options.inputFileOrder.add(OrderedInput("hash-style-input.o", 0u64))
         if (!TempFileManager.Instance().Init(options, false)) { return 2 }
         let backend = CJNATIVEBackend(Job(), options, driver)
         if (!backend.Generate()) { return 2 }
