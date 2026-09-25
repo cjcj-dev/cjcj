@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--sdk', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--compiler', type=Path)
+    parser.add_argument('--dependencies', type=Path, help='Pin unchanged basic/utils artifacts across arms')
     parser.add_argument('--sigint', action='store_true')
     args = parser.parse_args()
     tree, sdk, out = (x.resolve() for x in (args.tree, args.sdk, args.out))
@@ -34,7 +35,8 @@ def main():
     cmd = [str(compiler), str(source), '-O2', '--trimpath', str(tree), '--diagnostic-format=noColor', '-o', str(elf)]
     archives, inputs = [], [source, compiler]
     for package in ('basic', 'utils', 'option'):
-        directory = tree / 'target/release' / (package + '@cjcj')
+        root = args.dependencies.resolve() if args.dependencies and package != 'option' else tree
+        directory = root / 'target/release' / (package + '@cjcj')
         cmd += ['--import-path', str(directory), '-L', str(directory)]
         archives += sorted(directory.glob('*.a'))
         inputs += sorted(directory.glob('*.cjo'))
