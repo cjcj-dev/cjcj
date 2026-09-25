@@ -191,6 +191,9 @@ make_sdk_fixture() {
   cp /bin/true "$base/tools/bin/cjpm"
   cp /bin/true "$base/third_party/llvm/bin/llc"
   cp /bin/true "$base/third_party/llvm/bin/opt"
+  cp /bin/true "$base/third_party/llvm/bin/ld.lld"
+  cjc_sha=$(sha256sum "$base/bin/cjc" | awk '{print $1}')
+  printf '{"compiler_sha256":"%s"}\n' "$cjc_sha" > "$base/std-producer.json"
   printf 'int base_llvm;\n' > "$TMP/base-llvm.c"
   cc -shared -fPIC "$TMP/base-llvm.c" -o "$base/third_party/llvm/lib/libLLVM-15.so"
   printf 'int host_runtime;\n' > "$TMP/host-runtime.c"
@@ -315,7 +318,7 @@ run_sdk_runtime_checked() {
 }
 
 positive_runtime_layouts() {
-  local flat_sha=2222222222222222222222222222222222222222 tuple=linux_x86_64_cjnative
+  local flat_sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/$flat_sha" "$flat_sha"
@@ -328,7 +331,7 @@ positive_runtime_layouts() {
     fail runtime-flat 'boundscheck SO was not installed from flat sodepot'
   cmp -s "$TMP/sdk-base/lib/$tuple/libcangjie-runtime.a" "$TMP/sdk-flat/lib/$tuple/libcangjie-runtime.a" ||
     fail runtime-flat 'flat shared closure unexpectedly changed the base static archive'
-  make_runtime_payload "$TMP/runtime-install" 3333333333333333333333333333333333333333 "$tuple"
+  make_runtime_payload "$TMP/runtime-install" 4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 "$tuple"
   run_sdk_runtime_checked runtime-nested "$SDK_PRODUCT" "$TMP/runtime-install" "$TMP/sdk-nested"
   cmp -s "$TMP/runtime-install/runtime/lib/$tuple/libcangjie-runtime.so" "$TMP/sdk-nested/runtime/lib/$tuple/libcangjie-runtime.so" ||
     fail runtime-nested 'runtime SO was not installed from nested prefix'
@@ -338,7 +341,7 @@ positive_runtime_layouts() {
 }
 
 positive_runtime_layout_symlink_nested_only() {
-  local sha=9999999999999999999999999999999999999999 tuple=linux_x86_64_cjnative
+  local sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-install" "$sha" "$tuple"
@@ -353,7 +356,7 @@ positive_runtime_layout_symlink_nested_only() {
 }
 
 positive_runtime_layout_symlink_flat_only() {
-  local sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa tuple=linux_x86_64_cjnative
+  local sha=4c4cbf53b44497103e76e2a47a8fa35f5d7a7287 tuple=linux_x86_64_cjnative
   new_tmp
   make_sdk_fixture
   make_runtime_payload "$TMP/real-flat" "$sha"
