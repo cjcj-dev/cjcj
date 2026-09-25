@@ -196,7 +196,7 @@ extend ParserImpl {
         Walker(file, visitPre: visitPre).Walk()
     }
 
-    private func ParseForeignDecls(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ArrayList<Decl> {
+    func ParseForeignDecls(modifiers: ArrayList<Modifier>, annos: ArrayList<Annotation>): ArrayList<Decl> {
         let ret = ArrayList<Decl>()
         if (!Skip(TokenKind.LCURL)) {
             ret.add(ParseDecl(ScopeKind.TOPLEVEL, modifiers, annos))
@@ -205,7 +205,7 @@ extend ParserImpl {
         CheckNoDeprecatedAnno(annos, "foreign block")
         let leftCurlPos = lastToken.Begin()
         SkipBlank(TokenKind.SEMI)
-        inForeignBlock = true
+        SetForeignBlockModifiers(modifiers)
         while (true) {
             if (Skip(TokenKind.RCURL)) {
                 break
@@ -220,7 +220,7 @@ extend ParserImpl {
             ret.add(ParseDecl(ScopeKind.TOPLEVEL, clonedModifiers, clonedAnnos))
             SkipBlank(TokenKind.SEMI)
         }
-        inForeignBlock = false
+        foreignBlockModifiers.clear()
         return ret
     }
 
@@ -3341,7 +3341,7 @@ extend ParserImpl {
         }
         let modifiers = SortModifierByPos(decl.modifiers)
         var index: Int64 = 0
-        if (inForeignBlock) {
+        if (!foreignBlockModifiers.isEmpty()) {
             while (index < modifiers.size && modifiers[index].modifier != TokenKind.FOREIGN) {
                 index++
             }
