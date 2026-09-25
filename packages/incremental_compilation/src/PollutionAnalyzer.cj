@@ -367,6 +367,7 @@ public class PollutionAnalyzer {
     private var mangled2Decl: RawMangled2DeclMap
     private let directExtends: HashMap<RawMangledName, ArrayList<ExtendDecl>> =
         HashMap<RawMangledName, ArrayList<ExtendDecl>>()
+    private let sealedHierarchyChanges: ArrayList<Decl> = ArrayList<Decl>()
     private let typeAliases: ArrayList<Decl> = ArrayList<Decl>()
     private let unfoundExtends: ArrayList<Decl> = ArrayList<Decl>()
     private let unfoundNames: ArrayList<String> = ArrayList<String>()
@@ -518,6 +519,29 @@ public class PollutionAnalyzer {
         }
     }
 
+    private func PollutionForSealedHierarchyChange(decl: Decl): Unit {
+        let inheritableDecl = (decl as InheritableDecl).getOrThrow()
+        if (inheritableDecl.GetGeneric().isSome()) {
+            return
+        }
+        var hasEligibleParent = false
+        for ((parent, children) in t.children) {
+            if (!children.contains(inheritableDecl)) {
+                continue
+            }
+            if (let Some(parentDecl) <- (parent as InheritableDecl)) {
+                if (!parentDecl.TestAttr(Attribute.IMPORTED) && parentDecl.TestAttr(Attribute.SEALED) &&
+                    parentDecl.GetGeneric().isNone()) {
+                    hasEligibleParent = true
+                    break
+                }
+            }
+        }
+        if (inheritableDecl.TestAttr(Attribute.SEALED) || hasEligibleParent) {
+            sealedHierarchyChanges.add(inheritableDecl)
+        }
+    }
+
     public func PollutionForAddedTypeDecl(decl: Decl): Unit {
         if (decl.TestAttr(Attribute.IMPORTED)) {
             let genericImported = IsInDeclWithAttribute(decl, Attribute.GENERIC)
@@ -528,6 +552,7 @@ public class PollutionAnalyzer {
                 for (member in decl.GetMemberDeclPtrs()) { PollutionForAddedNonTypeDecl(member) }
             }
         } else {
+            PollutionForSealedHierarchyChange(decl)
             AddToPollutedDecls(decl)
             for (member in GetAllMembers(decl)) { PollutionForAddedNonTypeDecl(member) }
         }
@@ -895,6 +920,9 @@ public class PollutionAnalyzer {
         CJC_ASSERT(decl.astKind == ASTKind.ENUM_DECL || decl.astKind == ASTKind.STRUCT_DECL ||
             decl.astKind == ASTKind.CLASS_DECL || decl.astKind == ASTKind.INTERFACE_DECL ||
             decl.astKind == ASTKind.EXTEND_DECL)
+        if (change.srcUse && !decl.TestAttr(Attribute.IMPORTED)) {
+            PollutionForSealedHierarchyChange(decl)
+        }
         if (decl.TestAttr(Attribute.IMPORTED) && decl.TestAttr(Attribute.PRIVATE)) {
             AddToPollutedDecls(decl)
             return
@@ -1375,8 +1403,8 @@ public class PollutionAnalyzer {
     }
 
     public func FallBack(): Bool {
-        return !typeAliases.isEmpty() || !unfoundExtends.isEmpty() || !unfoundNames.isEmpty() ||
-            !removedNotSupported.isEmpty()
+        return !typeAliases.isEmpty() || !sealedHierarchyChanges.isEmpty() || !unfoundExtends.isEmpty() ||
+            !unfoundNames.isEmpty() || !removedNotSupported.isEmpty()
     }
 
     public func PrintFallbackInfo(): Unit {
@@ -1393,6 +1421,9 @@ public class PollutionAnalyzer {
         builder.append("\nFallback info:\n")
         for (decl in typeAliases) {
             builder.append("changed typealias: " + PrintDecl(decl) + "\n")
+        }
+        for (decl in sealedHierarchyChanges) {
+            builder.append("changed subtype of sealed type: " + PrintDecl(decl) + "\n")
         }
         var previousExtend: Option<Decl> = None
         for (decl in unfoundExtends) {

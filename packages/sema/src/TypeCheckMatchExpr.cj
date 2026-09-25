@@ -254,10 +254,18 @@ public func CheckMatchExprNoSelectorExhaustiveness(me: MatchExpr, hasDefault!: B
             Diagnose(diagValue, me, BasicDiagKind.sema_match_case_must_have_default).Emit()
         }
     }
-    var unreachableIdx = defaultCase + 1
-    while (unreachableIdx < me.matchCaseOthers.size) {
-        me.matchCaseOthers[unreachableIdx].EnableAttr(Attribute.UNREACHABLE)
-        unreachableIdx++
+    if (foundDefault) {
+        var unreachableIdx = defaultCase + 1
+        while (unreachableIdx < me.matchCaseOthers.size) {
+            let matchCaseOther = me.matchCaseOthers[unreachableIdx]
+            matchCaseOther.EnableAttr(Attribute.UNREACHABLE)
+            if (let Some(diagValue) <- diag) {
+                if (let Some(matchExpr) <- matchCaseOther.matchExpr) {
+                    DiagnoseRefactor(diagValue, BasicDiagKindRefactor.sema_unreachable_pattern, matchExpr).Emit()
+                }
+            }
+            unreachableIdx++
+        }
     }
     return ok
 }
