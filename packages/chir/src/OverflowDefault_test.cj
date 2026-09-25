@@ -3,7 +3,7 @@ package cjcj::chir
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
-import cjcj::utils.OverflowStrategy
+import cjcj::utils.{OverflowStrategy, OverflowStrategyIndex}
 import cjcj::ast.Attribute as AstAttribute
 import cjcj::ast.FuncDecl as AstFuncDecl
 import cjcj::ast.FuncTy as AstFuncTy
@@ -73,12 +73,11 @@ public class OverflowDefaultTest {
         let int64 = context.GetInt64Ty()
         let translator = TranslatorFor(builder)
         translator.SetCurrentBlock(block)
-        let thisObj = if (isStatic) {
-            None<Value>
-        } else {
+        var thisObj: Option<Value> = None<Value>
+        if (!isStatic) {
             let caller = builder.CreateConstant(int64, IntLiteral(1), block)
             block.AppendExpression(caller)
-            Some(caller.GetResult().getOrThrow())
+            thisObj = Some(caller.GetResult().getOrThrow())
         }
         let before = block.GetExpressionsNum()
         let params = if (isStatic) {
@@ -127,14 +126,7 @@ public class OverflowDefaultTest {
         }
         block.AppendExpression(invoke)
         let observed = invoke.GetMethodName()
-        let strategyName = match (strategy) {
-            case OverflowStrategy.NA => "NA"
-            case OverflowStrategy.WRAPPING => "WRAPPING"
-            case OverflowStrategy.THROWING => "THROWING"
-            case OverflowStrategy.SATURATING => "SATURATING"
-            case OverflowStrategy.CHECKED => "CHECKED"
-        }
-        println("OVERFLOW_DEFAULT path=explicit static=${isStatic} strategy=${strategyName} name=${observed}")
+        println("OVERFLOW_DEFAULT path=explicit static=${isStatic} strategy=${OverflowStrategyIndex(strategy)} name=${observed}")
         return observed
     }
 
