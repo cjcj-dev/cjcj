@@ -68,6 +68,7 @@ export const GATING = Object.freeze([
   'ci/idle-writer-policy.test.mjs',
   'ci/llvm-tools-manifest.test.mjs',
   'ci/objc_darwin/run_e2e.test.mjs',
+  'ci/patched-runtime-language-defer.test.mjs',
   'ci/pin-sweep.test.mjs',
   'ci/release-gates.test.mjs',
   'ci/release/package_checksums.test.mjs',
@@ -141,6 +142,15 @@ export const DEFERRED = Object.freeze([
     verified: 'node --test scripts/cjcjcg_aggregate_ctype_gate.test.mjs => tests 1 pass 1 fail 0 '
       + 'skipped 0 (2026-09-22, local, python3 3.13.3); with python3 masked off PATH => '
       + 'tests 1 pass 0 fail 1, Error: spawnSync python3 ENOENT',
+  }),
+  Object.freeze({
+    file: 'ci/platform_matrix/build_windows_std_ast.test.mjs',
+    needs: 'the zx runtime -- a zx self-test rather than a node:test file, same shape as '
+      + 'verify_windows_runtime_exports.test.mjs. It spawns the product script with a fake MinGW '
+      + 'driver and does not need a Windows cross compiler',
+    verified: 'zx ci/platform_matrix/build_windows_std_ast.test.mjs => SELFTEST_RESULT=PASS rc=0 '
+      + '(2026-09-26, local, zx /usr/bin/zx); schema/header/archive/ast_object rejects exit 4/5/7/8 '
+      + 'before compile, guard divergence exits 3, matching generation installs',
   }),
   Object.freeze({
     file: 'ci/platform_matrix/verify_windows_runtime_exports.test.mjs',
