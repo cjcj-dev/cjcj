@@ -1,5 +1,7 @@
 # kkk2 managed Node entry
 
+待主控登记进 `/root/cj_build/ops/CURRENT_DOCS.manifest`。
+
 The old `/usr/local/bin/{node,npm,npx}` links pointed into
 `/media/kkk2/428602AC8602A111`, while the toolchain is mounted under `/mnt/win`.
 Restore the existing v20.19.0 installation with physical copies, without changing
@@ -30,3 +32,12 @@ mounted after reboot; no mount/fstab change is needed.
 This repairs the host entry, not GC or compiler behavior. Runtime build arms and
 SO mutation tests do not apply. Keep fault injection inside the lane's private
 installation, never the shared entry used by other lanes.
+
+Validation helper (use the same cjcj checkout for all arms):
+
+```sh
+python3 coordination/cjcj104/check-entry.py /usr/local "$PWD"
+```
+
+Scope and installation method were approved in advisor reply
+`sym_cjcj_104_implement_r5834555322-20260925T150257Z.md`.
