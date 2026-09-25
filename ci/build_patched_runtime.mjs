@@ -63,6 +63,10 @@ export async function gcFixCommit(env = process.env) {
   return floor;
 }
 
+export function patchedRuntimeBuildEnv(base = process.env) {
+  return {...base, GC_UNIT_GATE_LANGUAGE_TESTS: 'defer'};
+}
+
 export async function verifyGcFixWeakSourceShape(work, runtimeRef = 'HEAD', env = process.env) {
   void runtimeRef;
   void env;
@@ -118,7 +122,10 @@ async function main() {
 
     log('build (native, release)');
     // build.py drives cmake with -S ., so retain the runtime source working directory.
-    await $({cwd: `${work}/runtime`})`python3 build.py build --target native --build-type release -v ${version}`;
+    await $({
+      cwd: `${work}/runtime`,
+      env: patchedRuntimeBuildEnv(),
+    })`python3 build.py build --target native --build-type release -v ${version}`;
     const found = await $({stdio: 'pipe'})`find ${work}/runtime/output -path '*Release*' -name ${runtimeLibrary}`;
     const runtime = found.stdout.split('\n').find(Boolean);
     if (!runtime) throw new Error(`built ${runtimeLibrary} not found`);
