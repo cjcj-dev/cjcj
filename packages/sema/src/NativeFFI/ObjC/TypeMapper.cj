@@ -5,7 +5,7 @@ import cjcj::ast.*
 import cjcj::ast.AnnotationKind as AstAnnotationKind
 import cjcj::mangle.BaseMangler
 import cjcj::sema.TypeManager
-import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, OBJ_C_BLOCK_IDENT, OBJ_C_FUNC_IDENT, OBJ_C_FWD_CLASS_SUFFIX,
+import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_NULLPTR_CHECK, OBJ_C_BLOCK_IDENT, OBJ_C_FUNC_IDENT,
     OBJ_C_ID_IDENT, OBJ_C_LANG_PACKAGE_IDENT, OBJ_C_POINTER_IDENT}
 
 private let VOID_TYPE: String = "void"
@@ -64,11 +64,6 @@ public class TypeMapper {
     }
 
     public func Cj2CType(cjty: Ty): Ty {
-        if (IsObjCCJMapping(cjty)) {
-            let result = bridge.GetRegistryIdTy()
-            CJC_NULLPTR_CHECK(result)
-            return result.getOrThrow()
-        }
         if (IsObjCObjectType(cjty)) {
             let result = bridge.GetNativeObjCIdTy()
             CJC_NULLPTR_CHECK(result)
@@ -118,7 +113,6 @@ public class TypeMapper {
             case TypeKind.TYPE_STRUCT =>
                 if (IsObjCPointer(from)) { let result = Cj2ObjCForObjC(from.typeArgs[0]); result.usage += "*"; return result }
                 if (Ty.IsCStructType(from)) { return MappedCType(STRUCT_TYPE_PREFIX + from.name) }
-                if (IsObjCCJMapping(from)) { return MappedCType(from.name + "*") }
                 if (IsObjCFunc(from)) {
                     let actualFuncType = from.typeArgs[0] as FuncTy
                     if (let Some(value) <- actualFuncType) { return BuildFunctionalCType(value, value.paramTys, value.retTy, false, { ty => Cj2ObjCForObjC(ty).usage }) }
@@ -142,7 +136,7 @@ public class TypeMapper {
                 return MappedCType(UNSUPPORTED_TYPE)
             case TypeKind.TYPE_INTERFACE =>
                 if (IsObjCId(from)) { return MappedCType("id") }
-                if (IsObjCMirror(from) || IsObjCCJMappingInterface(from)) { return MappedCType("id<" + from.name + ">") }
+                if (IsObjCMirror(from)) { return MappedCType("id<" + from.name + ">") }
                 return MappedCType(UNSUPPORTED_TYPE)
             case TypeKind.TYPE_POINTER =>
                 if (from.typeArgs[0].kind == TypeKind.TYPE_FUNC) { return Cj2ObjCForObjC(from.typeArgs[0]) }
@@ -151,7 +145,6 @@ public class TypeMapper {
                 let actualFuncType = from as FuncTy; CJC_NULLPTR_CHECK(actualFuncType); let value = actualFuncType.getOrThrow()
                 return BuildFunctionalCType(value, value.paramTys, value.retTy, false, { ty => Cj2ObjCForObjC(ty).usage })
             case TypeKind.TYPE_ENUM =>
-                if (IsObjCCJMapping(from)) { return MappedCType(from.name + "*") }
                 if (!from.IsCoreOptionType()) { CJC_ABORT(); return MappedCType(UNSUPPORTED_TYPE) }
                 if (IsObjCObjectType(from.typeArgs[0])) { return Cj2ObjCForObjC(from.typeArgs[0]) }
                 CJC_ABORT(); return MappedCType(UNSUPPORTED_TYPE)

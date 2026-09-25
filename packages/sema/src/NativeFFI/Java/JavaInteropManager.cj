@@ -7,7 +7,7 @@ import cjcj::basic.{DiagnosticEngine, DiagKindRefactor, MakeRange}
 import cjcj::basic.Range as BasicRange
 import cjcj::mangle.BaseMangler
 import cjcj::modules.SemaImportManager
-import cjcj::option.{InteropLanguage, MaybeString}
+import cjcj::option.MaybeString
 import cjcj::sema.{MakeRangeForDeclIdentifier, MemberMap, TypeManager}
 import cjcj::sema.NativeFFI.{GetJavaFQName, GetJavaFQSourceCodeName, HasPredefinedJavaName, IsJArray}
 import cjcj::utils.CJC_ASSERT
@@ -201,18 +201,15 @@ public class JavaInteropManager {
     private let javagenOutputPath: MaybeString
     private let outputPath: String
     private var hasMirrorOrImpl: Bool = false
-    private let targetInteropLanguage: InteropLanguage
 
     public init(importManager: SemaImportManager, typeManager: TypeManager, diag: DiagnosticEngine,
-        mangler: BaseMangler, javagenOutputPath: MaybeString, outputPath: String,
-        targetInteropLanguage: InteropLanguage) {
+        mangler: BaseMangler, javagenOutputPath: MaybeString, outputPath: String) {
         this.importManager = importManager
         this.typeManager = typeManager
         this.diag = diag
         this.mangler = mangler
         this.javagenOutputPath = javagenOutputPath
         this.outputPath = outputPath
-        this.targetInteropLanguage = targetInteropLanguage
     }
 
     // C++ TypeCheckJavaInterop.cpp:351-375.
@@ -307,7 +304,6 @@ public class JavaInteropManager {
             } else if (let Some(extendDecl) <- (decl as ExtendDecl)) {
                 CheckExtendDecl(extendDecl)
             }
-            CheckCJMappingType(decl)
             CheckGenericsInstantiation(decl)
         }
     }
@@ -320,21 +316,6 @@ public class JavaInteropManager {
         hasMirrorOrImpl = true
         // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
         // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:400-417.
-    }
-
-    // C++ TypeCheckJavaInterop.cpp:420-434.
-    public func CheckCJMappingDeclSupportRange(decl: Decl): Unit {
-        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-        // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:422-433.
-    }
-
-    // C++ TypeCheckJavaInterop.cpp:436-460.
-    private func CheckCJMappingType(decl: Decl): Unit {
-        if (!IsCJMapping(decl)) {
-            return
-        }
-        // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
-        // src/Sema/NativeFFI/Java/AfterTypeCheck/TypeCheckJavaInterop.cpp:442-459.
     }
 
     // C++ EscapeChecks.cpp:86-100.
@@ -358,11 +339,7 @@ public class JavaInteropManager {
     // C++ DesugarPackage.cpp:75-112.
     public func DesugarPackage(pkg: Package, memberMap: HashMap<InheritableDecl, MemberMap>,
         desugarPropRef: (Node) -> Unit): Unit {
-        let targetsJava = match (targetInteropLanguage) {
-            case InteropLanguage.Java => true
-            case _ => false
-        }
-        if (!(hasMirrorOrImpl || targetsJava)) {
+        if (!hasMirrorOrImpl) {
             return
         }
         // FEATURE_DEBT(JAVA_AFTERTYPECHECK_BODY): C++
