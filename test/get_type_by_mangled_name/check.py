@@ -36,14 +36,14 @@ def main():
         header = body.splitlines()[0]
         require(re.search(r"\(%TypeInfo\* %ti\.T[,)]", header),
                 "generic TypeInfo is not LLVM arg0")
-        require(re.search(r"bitcast %TypeInfo\* %ti\.T to i8\*", body),
+        require(re.search(r"bitcast \(?%TypeInfo\* %ti\.T to i8\*", body),
                 "generic path does not bitcast arg0 TypeInfo to i8*")
         require("CJ_MCC_GetTypeByMangledName" not in body,
                 "generic path still calls CJ_MCC_GetTypeByMangledName")
 
     def concrete_int64():
         body = function("concreteInt64")
-        require(re.search(r"bitcast %TypeInfo\* @Int64\.ti to i8\*", body),
+        require(re.search(r"bitcast \(?%TypeInfo\* @Int64\.ti to i8\*", body),
                 "concrete path does not bitcast Int64.ti to i8*")
         require("CJ_MCC_GetTypeByMangledName" not in body,
                 "concrete path still calls CJ_MCC_GetTypeByMangledName")
