@@ -115,6 +115,9 @@ def main():
                 sha(target / lib_rel / 'libcangjie-runtime.a') == sha(libs / 'pinned-runtime.a'))
         record = dict(name=name, command=cmd, assembly_rc=assembly.returncode,
                       link_command=link_cmd, link_rc=link.returncode, selected=selected,
+                      installed_sha256={str(rel / member): sha(target / rel / member)
+                                        for rel in (lib_rel, dyn_rel) for member in PAIR
+                                        if (target / rel / member).is_file()},
                       assertions=assertions, product_sha256=sha(product),
                       linked_sha256=sha(work / 'linked.so') if (work / 'linked.so').is_file() else None)
         (work / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
