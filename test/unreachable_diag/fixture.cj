@@ -19,15 +19,15 @@ func elseIfArms(): Int64 {
         return 1
     } else if (false) {
         return 2
-    } else {
+    } else { // else-if false arm
         return 3
     }
 }
 
-func matchOnce(value: Payload): Int64 {
+func matchSplit(): Int64 {
+    let value = Left(9)
     match (value) {
-        case Left(_) | Right(_) if true => 1
-        case Left(0) | Right(0) => 2
+        case Left(1) | Left(2) => 1
         case _ => 0
     }
 }
@@ -41,8 +41,7 @@ func afterReturn(x: Int64): Int64 {
 }
 
 func die(): Nothing {
-    while (true) {
-    }
+    return die()
 }
 
 func keepLater(first: Int64, later: Int64): Int64 {

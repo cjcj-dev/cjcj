@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 out = Path(sys.argv[1])
-log = (out / "compile.log").read_text(errors="replace")
+log = re.sub(r"\x1b\[[0-9;]*m", "", (out / "compile.log").read_text(errors="replace"))
 source = (Path(__file__).resolve().parent / "fixture.cj").read_text()
 lines = source.splitlines()
 
@@ -35,12 +35,11 @@ for msg, line in warnings:
 def count(predicate):
     return sum(1 for msg, line in warnings if predicate(msg, line))
 
-else_true = line_of("return 2")
-else_false = line_of("return 3")
-match_case = line_of("Left(0) | Right(0)")
+else_if = line_of("else if (false)")
+else_arm = line_of("else-if false arm")
 after = line_of("return 9")
 later = line_of("keepLater(die(), 7)")
-reachable_line = line_of("return 1")
+split_case = line_of("Left(1) | Left(2)")
 
 failures = []
 
@@ -49,16 +48,16 @@ def expect(name, ok, detail):
     if not ok:
         failures.append(name)
 
-else_hits = count(lambda msg, line: "unreachable" in msg and line in (else_true, else_false))
-expect("else-if-both-arms", else_hits == 2, f"hits={else_hits} lines={else_true},{else_false}")
-pattern_hits = count(lambda msg, line: "unreachable pattern" in msg and line == match_case)
-expect("match-case-once", pattern_hits == 1, f"hits={pattern_hits} line={match_case}")
-after_hits = count(lambda msg, line: "unreachable" in msg and line == after)
-expect("return-continuation-warned", after_hits >= 1, f"hits={after_hits} line={after}")
-later_hits = count(lambda msg, line: "unreachable" in msg and line == later)
-expect("nothing-later-arg", later_hits >= 1, f"hits={later_hits} line={later}")
-reachable_hits = count(lambda msg, line: "unreachable" in msg and line == reachable_line and "elseIf" not in lines[line - 1])
-# reachable() and elseIf both contain 'return 1'. Bind the first occurrence only.
+else_if_hits = count(lambda msg, line: "unreachable block in 'if'" in msg and line == else_if)
+else_arm_hits = count(lambda msg, line: "unreachable block in 'if'" in msg and line == else_arm)
+expect("else-if-true-arm", else_if_hits == 1, f"hits={else_if_hits} line={else_if}")
+expect("else-if-false-arm", else_arm_hits == 1, f"hits={else_arm_hits} line={else_arm}")
+after_hits = count(lambda msg, line: "unreachable expression" in msg and line == after)
+expect("return-continuation-warned", after_hits == 1, f"hits={after_hits} line={after}")
+later_hits = count(lambda msg, line: "unreachable expression" in msg and line == later)
+expect("nothing-later-arg", later_hits == 1, f"hits={later_hits} line={later}")
+split_hits = count(lambda msg, line: "unreachable" in msg and line == split_case)
+expect("match-split-once", split_hits == 1, f"hits={split_hits} line={split_case}")
 reachable_fn = line_of("func reachable")
 reachable_return = next(i for i, line in enumerate(lines, 1) if i > reachable_fn and "return 1" in line)
 reachable_hits = count(lambda msg, line: "unreachable" in msg and line == reachable_return)
