@@ -5,6 +5,7 @@ GDB selects the delivery instant without replacing product calls or memory.
 The assertion reads native deletion arguments and the actual process exit.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -55,26 +56,31 @@ def main():
         result['elf_sha256'] = sha(elf)
         with (out / 'symbols.txt').open('w') as log:
             result['nm_rc'] = subprocess.call(['nm', '--defined-only', str(elf)], stdout=log)
-        for timing in ('before', 'after'):
-            manifest = out / (timing + '-paths.txt')
-            record = out / (timing + '.json')
-            env.update(OBS_RESULT=str(record), SIGNAL_TIMING=timing)
+        def observe(case):
+            sample, timing = case
+            case_out = out / f'{sample}-{timing}'
+            case_out.mkdir(exist_ok=True)
+            manifest = case_out / 'paths.txt'
+            record = case_out / 'observation.json'
+            case_env = dict(env, OBS_RESULT=str(record), SIGNAL_TIMING=timing, TMPDIR=str(case_out))
             command = ['gdb', '-q', '-batch', '-x', str(observer), '--args', str(elf), str(manifest)]
             start = time.monotonic()
-            with (out / (timing + '.log')).open('w') as log:
-                gdb_rc = subprocess.call(command, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=90)
+            with (case_out / 'run.log').open('w') as log:
+                gdb_rc = subprocess.call(command, env=case_env, stdout=log, stderr=subprocess.STDOUT, timeout=90)
             obs = json.loads(record.read_text()) if record.exists() else {}
             paths = manifest.read_text().splitlines() if manifest.exists() else []
             setup = gdb_rc == 0 and len(obs.get('freed', [])) == 1 and len(paths) == 2 and obs.get('exit_codes') == [130]
             # Even before the first free, Init owns this clearing transition.
             # No handler traversal may expose a partially released list.
             target = setup and obs.get('calls') == [] and all(Path(x).exists() for x in paths)
-            print(f'TARGET reinit-{timing}: reached={setup} noTraversal={target}', flush=True)
-            result['tests'].append({'timing': timing, 'command': command, 'gdb_rc': gdb_rc,
-                                    'wall': time.monotonic() - start, 'setup': setup, 'pass': target,
-                                    'observation': obs, 'remaining': {x: Path(x).exists() for x in paths}})
-            if not target:
-                rc = 1
+            print(f'TARGET reinit-{sample}-{timing}: reached={setup} noTraversal={target}', flush=True)
+            return {'sample': sample, 'timing': timing, 'command': command, 'gdb_rc': gdb_rc,
+                    'wall': time.monotonic() - start, 'setup': setup, 'pass': target,
+                    'observation': obs, 'remaining': {x: Path(x).exists() for x in paths}}
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            result['tests'] = list(pool.map(observe, [(i, t) for i in range(3) for t in ('before', 'after')]))
+        if not all(row['pass'] for row in result['tests']):
+            rc = 1
     result['uptime_after'] = subprocess.check_output(['uptime'], text=True)
     result['rc'] = rc
     (out / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
