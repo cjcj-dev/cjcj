@@ -150,7 +150,7 @@ public func HandleNonNullLiteralValue(literal: LiteralValue, ty: Option<Type>): 
 }
 
 public func HandleNonNullLiteralValue(constant: Constant): RangeValueDomain {
-    return HandleNonNullLiteralValue(constant.literal, constant.GetResultType())
+    return HandleNonNullLiteralValue(constant.GetValue(), constant.GetResultType())
 }
 
 public func CanAnalyse(typeValue: Type): Bool {

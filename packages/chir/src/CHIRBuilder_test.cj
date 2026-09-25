@@ -29,6 +29,28 @@ public class CHIRBuilderTest {
     }
 
     @TestCase
+    public func ConstantLiteralIsItsOperand(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "literal")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let block = builder.CreateBlock(body)
+        body.SetEntryBlock(block)
+        let first = IntLiteral(context.GetInt64Ty(), 41)
+        let constant = builder.CreateConstant(context.GetInt64Ty(), first, block)
+        @Expect(constant.GetNumOfOperands(), 1)
+        @Expect(GetOperands(constant).size, 1)
+        if (constant.GetNumOfOperands() == 1) {
+            @Expect(constant.GetOperand(0).nodeId, first.nodeId)
+            let replacement = IntLiteral(context.GetInt64Ty(), 42)
+            constant.ReplaceOperand(0, replacement)
+            @Expect(constant.GetValue().nodeId, replacement.nodeId)
+            @Expect(constant.GetSignedIntLitVal(), 42)
+        }
+    }
+
+    @TestCase
     public func TerminatorEdgesBelongToInsertion(): Unit {
         let context = CHIRContext()
         let builder = CHIRBuilder(context)
