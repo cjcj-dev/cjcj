@@ -1,6 +1,7 @@
 package cjcj::sema
 
 import std.collection.*
+import std.sync.Mutex
 import std.env.getVariable
 import cjcj::ast.*
 import cjcj::modules.GetPackageRelation as ModulesGetPackageRelation
@@ -360,6 +361,7 @@ private struct SubtypeCacheKey <: Hashable & Equatable<SubtypeCacheKey> {
 }
 
 public class TypeManager {
+    private let overrideResolverImplMutex = Mutex()
     private static let theInvalidTy: InvalidTy = InvalidTy()
     private static let theAnyTy: AnyTy = AnyTy()
     private static let theQuestTy: QuestTy = QuestTy()
@@ -2107,22 +2109,41 @@ public class TypeManager {
         }
     }
 
-    public func GetTopOverriddenFuncDecl(funcDecl: Option<FuncDecl>): Option<FuncDecl> {
-        if (let Some(fd) <- funcDecl) {
-            if (let Some(first) <- firstTopOverrideTarget(fd)) {
-                var current = first
-                let traversed = ArrayList<FuncDecl>()
-                while (let Some(next) <- firstTopOverrideTarget(current)) {
-                    if (containsFuncDecl(traversed, current)) {
-                        return None
-                    }
-                    traversed.add(current)
-                    current = next
-                }
+    private func LookupTopOverriddenFromMap(funcDecl: FuncDecl): Option<FuncDecl> {
+        var current = firstTopOverrideTarget(funcDecl)
+        let traversed = HashSet<FuncDecl>()
+        traversed.add(funcDecl)
+        while (let Some(fd) <- current) {
+            let next = firstTopOverrideTarget(fd)
+            if (next.isNone() || !traversed.add(fd)) {
                 return current
             }
+            current = next
         }
         return None
+    }
+
+    public func GetTopOverriddenFuncDecl(funcDecl: Option<FuncDecl>): Option<FuncDecl> {
+        let fd = funcDecl.getOrThrow()
+        var fromMap = LookupTopOverriddenFromMap(fd)
+        let generic = fd.genericDecl.flatMap({ decl => decl as FuncDecl })
+        if (fromMap.isNone()) {
+            if (let Some(genericFunc) <- generic) {
+                fromMap = LookupTopOverriddenFromMap(genericFunc)
+            }
+        }
+        let seed = fromMap ?? generic ?? fd
+        // Instantiation writes TypeManager caches; serialize the entire resolver walk.
+        let tops = synchronized(overrideResolverImplMutex) {
+            OverrideFunctionResolver(this).GetTopOverriddenFuncs(fd.outerDecl.getOrThrow().GetTy().getOrThrow(), seed)
+        }
+        if (!tops.isEmpty()) {
+            return tops.iterator().next().getOrThrow()
+        }
+        if (let Some(top) <- fromMap) {
+            return top
+        }
+        return fd
     }
 
     public func IsFuncDeclSubType(decl: FuncDecl, funcDecl: FuncDecl): Bool {
