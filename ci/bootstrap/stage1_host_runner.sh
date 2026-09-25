@@ -9,7 +9,7 @@ identities=${STAGE1_HOST_IDENTITIES:-$here/stage1_host_identities.txt}
 [ -f "$identities" ] || fail "missing host identities: $identities"
 # Arguments are intentionally explicit: the input hashes have already been pinned
 # by bootstrap, and are checked again against the declared host triple here.
-[ "$#" -eq 8 ] || fail 'usage: TARGET_SDK HOST_SDK HOST_RUNTIME HOST_LLVM_SHA COMPILER COMPILER_SHA RUN_SDK COLOUR_LLVM_SHA'
+[ "$#" -ge 8 ] && [ "$#" -le 9 ] || fail 'usage: TARGET_SDK HOST_SDK HOST_RUNTIME HOST_LLVM_SHA COMPILER COMPILER_SHA RUN_SDK COLOUR_LLVM_SHA [BACKEND_RUNTIME_DIR]'
 target=$(readlink -f "$1")
 host=$(readlink -f "$2")
 hrt=$(readlink -f "$3")
@@ -82,7 +82,9 @@ for rel in bin/cjc tools/bin/cjpm third_party/llvm/bin/opt third_party/llvm/bin/
 done
 host_ld="$host/runtime/lib/$platform:$host/lib/$platform:$host/third_party/llvm/lib:$host/tools/lib:/usr/lib/$multiarch"
 compiler_ld="$host/runtime/lib/$platform:$host/lib/$platform:$run_sdk/third_party/llvm/lib:$host/tools/lib:/usr/lib/$multiarch"
-target_ld="$target/runtime/lib/$platform:$target/lib/$platform:$target/third_party/llvm/lib:$target/tools/lib:/usr/lib/$multiarch"
+backend_runtime="${9:-$target/runtime/lib/$platform}"
+[ -f "$backend_runtime/libcangjie-runtime.so" ] && [ -f "$backend_runtime/libboundscheck.so" ] || fail "missing backend runtime: $backend_runtime"
+target_ld="$backend_runtime:$target/lib/$platform:$target/third_party/llvm/lib:$target/tools/lib:/usr/lib/$multiarch"
 state="$target/.stage1-host"
 [ ! -e "$state" ] || fail 'runner already installed; reassemble the workspace SDK'
 mkdir "$state"
