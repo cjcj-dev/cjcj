@@ -4,10 +4,15 @@
 
 srcbuild_git_resolve_source_mirror() {
     local original=$1 mappings=${CJCJ_SRCBUILD_SOURCE_MIRRORS:-} entry source mirror resolved=$1 matched=0
-    local -A seen=()
-    local -a entries=()
-    IFS=';' read -r -a entries <<< "$mappings"
-    for entry in "${entries[@]}"; do
+    local -a seen=()
+    local seen_count=0 seen_index=0 duplicate=0 rest=$mappings
+    while [[ -n $rest ]]; do
+        entry=${rest%%;*}
+        if [[ $rest == *";"* ]]; then
+            rest=${rest#*;}
+        else
+            rest=
+        fi
         [[ -n $entry ]] || continue
         [[ $entry == *=* && -n ${entry%%=*} && -n ${entry#*=} ]] || {
             echo "invalid CJCJ_SRCBUILD_SOURCE_MIRRORS entry: $entry" >&2
@@ -15,11 +20,20 @@ srcbuild_git_resolve_source_mirror() {
         }
         source=${entry%%=*}
         mirror=${entry#*=}
-        [[ -z ${seen[$source]+set} ]] || {
+        seen_index=0
+        duplicate=0
+        while ((seen_index < seen_count)); do
+            if [ "x${seen[$seen_index]}" = "x$source" ]; then
+                duplicate=1
+            fi
+            seen_index=$((seen_index + 1))
+        done
+        [[ $duplicate == 0 ]] || {
             echo "duplicate CJCJ_SRCBUILD_SOURCE_MIRRORS source: $source" >&2
             return 1
         }
-        seen[$source]=1
+        seen[$seen_count]=$source
+        seen_count=$((seen_count + 1))
         if [[ $source == "$original" ]]; then
             resolved=$mirror
             matched=1
