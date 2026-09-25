@@ -846,27 +846,27 @@ public class RuntimeInit {
     // (Cjstart.S .init_array, PackageInit.cpp:241-252). LoadCJLibrary cannot
     // do this: Loader.cpp:18 dlopens into the base namespace.
     @When[os == "Linux"]
-    private func BindAdmissionNamespace(runtimeLibPath: String, initArgs: ArrayList<(String, String)>): Bool {
+    private func BindAdmissionNamespace(runtimeLibPath: String, initArgs: ArrayList<(String, String)>): Option<Bool> {
         let opened = OpenInLinkMap(runtimeLibPath, LM_ID_NEWLM)
         if (!opened.opened) {
-            return false
+            return Some(false)
         }
         handle = Some(opened)
         if (GetMethodPointer(opened, CJ_PACKAGE_INIT_BEGIN).isNull()) {
             let _ = CloseSymbolTable(opened)
             handle = None
-            return false
+            return None<Bool>
         }
         if (!PrepareRuntime(opened, initArgs)) {
-            return false
+            return Some(false)
         }
         let mapId = ReadLinkMapId(opened.raw)
         if (let None <- mapId) {
-            return false
+            return Some(false)
         }
         let lmid = mapId.getOrThrow()
         if (!PreloadAdmissionSiblings(runtimeLibPath, lmid)) {
-            return false
+            return Some(false)
         }
         runtimeMethodFunc = GetMethodPointer(opened, CJ_NEW_TASK_FROM_C)
         runtimeReleaseFunc = GetMethodPointer(opened, CJ_RELEASE_HANDLE_FROM_C)
@@ -876,14 +876,14 @@ public class RuntimeInit {
                 errorInfo = CJ_NEW_TASK_FROM_C
             }
             Errorln("could not find the create task method: " + errorInfo)
-            return false
+            return Some(false)
         }
         opened.retain = true
         hasLinkMap = true
         linkMapId = lmid
         taskOnOpenedRuntime = true
         initRuntime = true
-        return true
+        return Some(true)
     }
 
     @When[os == "Linux"]
@@ -892,7 +892,7 @@ public class RuntimeInit {
         if (hostHasAdmission) {
             return None<Bool>
         }
-        return Some(BindAdmissionNamespace(runtimeLibPath, initArgs))
+        return BindAdmissionNamespace(runtimeLibPath, initArgs)
     }
 
     @When[os != "Linux"]
