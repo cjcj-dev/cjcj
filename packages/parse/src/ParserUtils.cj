@@ -902,6 +902,9 @@ extend ParserImpl {
         let posRecord = HashMap<String, Position>()
         for (constraint in out) {
             if (let Some(refTy) <- constraint.refType) {
+                if (!refTy.ref.identifier.Valid()) {
+                    continue
+                }
                 let typeName = refTy.ref.identifier.Val()
                 if (let Some(prePos) <- posRecord.get(typeName)) {
                     DiagDuplicatedItem("type name", typeName, refTy.begin, prePos, " in generic constrain")

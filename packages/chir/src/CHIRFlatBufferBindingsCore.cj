@@ -358,6 +358,22 @@ class PackageFormat_IsCapturedClassInCC <: Table {
 }
 
 // PackageFormat_generated.h:3601-3614. EnumCaseIndex read accessors and Verify.
+class PackageFormat_MatchCaseId <: Table {
+    init(data: Array<UInt8>, pos: Int64) {
+        super(data, pos)
+    }
+
+    func GetId(): Int64 {
+        return GetField(CHIRFB_MATCH_CASE_ID_VT_ID, -1)
+    }
+
+    func Verify(verifier: VerifierTemplate): Bool {
+        return VerifyTableStart(verifier) &&
+            VerifyField<Int64>(verifier, CHIRFB_MATCH_CASE_ID_VT_ID, 8) &&
+            verifier.EndTable()
+    }
+}
+
 class PackageFormat_EnumCaseIndex <: Table {
     init(data: Array<UInt8>, pos: Int64) {
         super(data, pos)
