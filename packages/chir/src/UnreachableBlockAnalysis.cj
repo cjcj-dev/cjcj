@@ -263,22 +263,29 @@ private func GetJoinLocation(block: Block): DebugLocation {
 private func GetRegionHintRange(region: UnreachableBlockRegion, unreachableRange: BasicRange,
     initialHint: BasicRange): BasicRange {
     var hintRange = initialHint
-    let useLocation = { location: DebugLocation =>
-        let range = ToRangeIfNotZero(location)
-        if (range[0] && Contains(location, region.rootLocation) &&
-            unreachableRange.begin > range[1].end && hintRange.begin > range[1].begin) {
-            hintRange = range[1]
-        }
-    }
     for (block in region.blocks) {
-        if (IsSkippedJoin(block)) { useLocation(GetJoinLocation(block)) }
+        if (IsSkippedJoin(block)) {
+            hintRange = NarrowHint(region, unreachableRange, hintRange, GetJoinLocation(block))
+        }
     }
     for (block in region.owner.GetBlocks()) {
         if (let Some(terminator) <- block.GetTerminator()) {
             if (let Some(branch) <- (terminator as Branch)) {
-                if (branch.GetSourceExpr() == SourceExpr.IF_EXPR) { useLocation(branch.GetDebugLocation()) }
+                if (branch.GetSourceExpr() == SourceExpr.IF_EXPR) {
+                    hintRange = NarrowHint(region, unreachableRange, hintRange, branch.GetDebugLocation())
+                }
             }
         }
+    }
+    return hintRange
+}
+
+private func NarrowHint(region: UnreachableBlockRegion, unreachableRange: BasicRange, hintRange: BasicRange,
+    location: DebugLocation): BasicRange {
+    let range = ToRangeIfNotZero(location)
+    if (range[0] && Contains(location, region.rootLocation) &&
+        unreachableRange.begin > range[1].end && hintRange.begin > range[1].begin) {
+        return range[1]
     }
     return hintRange
 }

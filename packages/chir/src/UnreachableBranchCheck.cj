@@ -209,20 +209,20 @@ private func GetNextMatchCase(branch: Branch, groups: HashSet<Block>): (Option<E
     let next = branch.GetFalseBlock()
     if (branch.GetSourceExpr() == SourceExpr.MATCH_CASE) {
         if (!groups.isEmpty() && (!next.TestAttr(Attribute.MATCH_PATTERN) ||
-            next.Get<MatchCaseId, Option<Int64>>().isNone() || groups.contains(next))) { return (None, None) }
+            next.Get<MatchCaseId, Option<Int64>>().isNone() || groups.contains(next))) { return (None<Expression>, None<Block>) }
         return (Some(branch), Some(next))
     }
-    return if (branch.GetSourceExpr() == SourceExpr.MATCH_EXPR) { (None, Some(next)) } else { (None, None) }
+    return if (branch.GetSourceExpr() == SourceExpr.MATCH_EXPR) { (None<Expression>, Some(next)) } else { (None<Expression>, None<Block>) }
 }
 
 private func GetNextMatchCase(branch: MultiBranch, groups: HashSet<Block>): (Option<Expression>, Option<Block>) {
     let next = branch.GetDefaultBlock()
     if (branch.GetSourceExpr() == SourceExpr.MATCH_CASE) {
         if (!groups.isEmpty() && (!next.TestAttr(Attribute.MATCH_PATTERN) ||
-            next.Get<MatchCaseId, Option<Int64>>().isNone() || groups.contains(next))) { return (None, None) }
+            next.Get<MatchCaseId, Option<Int64>>().isNone() || groups.contains(next))) { return (None<Expression>, None<Block>) }
         return (Some(branch), Some(next))
     }
-    return if (branch.GetSourceExpr() == SourceExpr.MATCH_EXPR) { (None, Some(next)) } else { (None, None) }
+    return if (branch.GetSourceExpr() == SourceExpr.MATCH_EXPR) { (None<Expression>, Some(next)) } else { (None<Expression>, None<Block>) }
 }
 
 private func GetNextMatchCase(caseBlock: Block, groups: HashSet<Block>): (Option<Expression>, Option<Block>) {
@@ -230,19 +230,19 @@ private func GetNextMatchCase(caseBlock: Block, groups: HashSet<Block>): (Option
     var isFirst = true
     let visited = HashSet<Block>()
     while (visited.add(block) && block.TestAttr(Attribute.MATCH_PATTERN)) {
-        if (!isFirst && groups.contains(block)) { return (None, None) }
+        if (!isFirst && groups.contains(block)) { return (None<Expression>, None<Block>) }
         isFirst = false
         let terminator = block.GetTerminator().getOrThrow()
         if (let Some(goTo) <- (terminator as GoTo)) {
-            if (!goTo.TestAttr(Attribute.MATCH_PATTERN)) { return (None, None) }
+            if (!goTo.TestAttr(Attribute.MATCH_PATTERN)) { return (None<Expression>, None<Block>) }
             block = goTo.GetDestination()
             continue
         }
         let next = if (let Some(branch) <- (terminator as Branch)) { GetNextMatchCase(branch, groups) }
             else if (let Some(branch) <- (terminator as MultiBranch)) { GetNextMatchCase(branch, groups) }
-            else { (None, None) }
+            else { (None<Expression>, None<Block>) }
         if (next[0].isSome() || next[1].isNone()) { return next }
         block = next[1].getOrThrow()
     }
-    return (None, None)
+    return (None<Expression>, None<Block>)
 }
