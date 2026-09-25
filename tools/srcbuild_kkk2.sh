@@ -224,13 +224,15 @@ reject_diagnostic_workspace() {
 if [[ ${1:-} == --lib-only ]]; then
     [[ $# == 1 ]] || {
         echo "--lib-only does not accept other arguments" >&2
-        # return exits a sourced script; exit handles direct execution.
-        # shellcheck disable=SC2317
-        return 2 2>/dev/null || exit 2
+        if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+            exit 2
+        fi
+        return 2
     }
-    # return exits a sourced script; exit handles direct execution.
-    # shellcheck disable=SC2317
-    return 0 2>/dev/null || exit 0
+    if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+        exit 0
+    fi
+    return 0
 fi
 
 # shellcheck disable=SC1091
