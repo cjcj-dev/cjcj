@@ -183,8 +183,8 @@ private func GetRuntimeTypeFromFunc(retVal: Option<LocalVar>, isInLambda!: Bool 
         }
         let expr = StaticCast<LocalVar>(storedValue).GetExpr().getOrThrow()
         var srcTy = storedValue.GetType().getOrThrow()
-        if (expr.GetExprKind() == ExprKind.TYPECAST) {
-            srcTy = StaticCast<TypeCast>(expr).GetSourceTy().getOrThrow()
+        if (expr.GetExprKind() == ExprKind.CLASS_STATIC_CAST) {
+            srcTy = StaticCast<ClassStaticCast>(expr).GetSourceType().getOrThrow()
         } else if (expr.GetExprKind() == ExprKind.APPLY && !isInLambda) {
             if (let Some(applyResType) <- GetRuntimeTypeFromLambda(StaticCast<Apply>(expr), srcTy)) {
                 srcTy = applyResType

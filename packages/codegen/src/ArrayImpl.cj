@@ -12,6 +12,7 @@ import cjcj::chir.GetElementRef
 import cjcj::chir.LocalVar
 import cjcj::chir.RawArrayLiteralInit
 import cjcj::chir.RawArrayInitByValue
+import cjcj::chir.RawArrayAllocateBase
 import cjcj::chir.RawArrayType
 import cjcj::chir.StoreElementByName
 import cjcj::chir.StoreElementRef
@@ -25,11 +26,11 @@ private let LLVM_ARRAY_TYPE_KIND: Int32 = 11
 private let LLVM_VECTOR_TYPE_KIND: Int32 = 13
 private let LLVM_SCALABLE_VECTOR_TYPE_KIND: Int32 = 17
 
-public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    CJC_ASSERT_WITH_MSG(chirExpr.GetNumOfOperands() == 1,
+public func GenerateRawArrayAllocate(irBuilder: IRBuilder2, chirExpr: RawArrayAllocateBase): LLVMValueRef {
+    CJC_ASSERT_WITH_MSG(chirExpr.GetNumOfNonSuccessorOperands() == 1,
         "RawArrayAllocate's argument size is not equal to 1.")
     let rawArrayTy = FindRawArrayType(chirExpr.GetResultType().getOrThrow()).getOrThrow()
-    let length = chirExpr.GetOperand(0)
+    let length = chirExpr.GetSize()
     let lengthValue = irBuilder.GetCGModule().GetMappedCGValue(length).GetRawValue()
     if (let Some(lengthLocal) <- (length as LocalVar)) {
         if (let Some(lengthExpr) <- lengthLocal.GetExpr()) {

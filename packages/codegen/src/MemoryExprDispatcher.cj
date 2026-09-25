@@ -1,5 +1,7 @@
 package cjcj::codegen
 
+import cjcj::chir.AllocateBase
+
 import std.collection.ArrayList
 import cjcj::chir.Allocate
 import cjcj::chir.ClassType
@@ -22,7 +24,7 @@ public func HandleMemoryExpression(irBuilder: IRBuilder2, chirExpr: Expression):
             }
             irBuilder.EmitLocation(CHIRExprWrapper(allocateExpr))
         }
-        let result = GenerateAllocate(irBuilder, chirExpr)
+        let result = GenerateAllocate(irBuilder, (chirExpr as AllocateBase).getOrThrow())
         if (let Some(allocateExpr) <- (chirExpr as Allocate)) {
             TryEmitNullInitForDebugLocalClass(irBuilder, allocateExpr, result)
         }

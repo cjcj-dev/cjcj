@@ -99,7 +99,7 @@ public class MaybeInitAnalysis <: Analysis<MaybeInitDomain> {
         }
     }
 
-    public override func PropagateTerminatorEffect(state: MaybeInitDomain, terminator: Terminator): Option<Block> {
+    public override func PropagateTerminatorEffect(state: MaybeInitDomain, terminator: Expression): Option<Block> {
         let _ = state
         let _ = terminator
         return None

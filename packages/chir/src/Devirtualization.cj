@@ -250,7 +250,7 @@ public class Devirtualization {
                 invoke.GetInstantiatedTypeArgs()))
         }
         let actionAfterVisitExpr = { _: TypeDomain, _: Expression, _: Int64 => }
-        let actionOnTerminator = { _: TypeDomain, _: Terminator, _: Option<Block> => }
+        let actionOnTerminator = { _: TypeDomain, _: Expression, _: Option<Block> => }
         analysisResult.VisitWith(actionBeforeVisitExpr, actionAfterVisitExpr, actionOnTerminator)
     }
 
@@ -283,7 +283,7 @@ public class Devirtualization {
             var tempVar = thisValue.AsLocalVar()
             while (let Some(localVar) <- tempVar) {
                 let castExpr = localVar.GetExpr().getOrThrow()
-                if (castExpr.GetExprKind() != ExprKind.BOX && castExpr.GetExprKind() != ExprKind.TYPECAST) {
+                if (castExpr.GetExprKind() != ExprKind.BOX && castExpr.GetExprKind() != ExprKind.CLASS_STATIC_CAST) {
                     break
                 }
                 castExprs.add(castExpr)

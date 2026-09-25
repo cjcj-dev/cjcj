@@ -398,21 +398,17 @@ private func ToPackageExprKind(expr: Expression): UInt8 {
         case ExprKind.INVOKE_WITH_EXCEPTION | ExprKind.INVOKESTATIC_WITH_EXCEPTION =>
             CHIRFB_CHIR_EXPR_KIND_TRY_INVOKE
         case ExprKind.RAISE_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_RAISE_EXCEPTION
-        case ExprKind.INT_OP_WITH_EXCEPTION =>
-            match ((expr as IntOpWithException).getOrThrow().GetOpKind()) {
-                case ExprKind.NEG => CHIRFB_CHIR_EXPR_KIND_TRY_NEG
-                case ExprKind.ADD => CHIRFB_CHIR_EXPR_KIND_TRY_ADD
-                case ExprKind.SUB => CHIRFB_CHIR_EXPR_KIND_TRY_SUB
-                case ExprKind.MUL => CHIRFB_CHIR_EXPR_KIND_TRY_MUL
-                case ExprKind.DIV => CHIRFB_CHIR_EXPR_KIND_TRY_DIV
-                case ExprKind.MOD => CHIRFB_CHIR_EXPR_KIND_TRY_MOD
-                case ExprKind.EXP => CHIRFB_CHIR_EXPR_KIND_TRY_EXP
-                case ExprKind.LSHIFT => CHIRFB_CHIR_EXPR_KIND_TRY_L_SHIFT
-                case ExprKind.RSHIFT => CHIRFB_CHIR_EXPR_KIND_TRY_R_SHIFT
-                case _ => CHIRFB_CHIR_EXPR_KIND_INVALID
-            }
+        case ExprKind.NEG_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_NEG
+        case ExprKind.ADD_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_ADD
+        case ExprKind.SUB_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_SUB
+        case ExprKind.MUL_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_MUL
+        case ExprKind.DIV_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_DIV
+        case ExprKind.MOD_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_MOD
+        case ExprKind.EXP_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_EXP
+        case ExprKind.LSHIFT_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_L_SHIFT
+        case ExprKind.RSHIFT_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_R_SHIFT
         case ExprKind.SPAWN_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_SPAWN
-        case ExprKind.TYPECAST_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_NUMERIC_CAST
+        case ExprKind.NUMERIC_CAST_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_NUMERIC_CAST
         case ExprKind.INTRINSIC_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_INTRINSIC
         case ExprKind.ALLOCATE_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_ALLOCATE
         case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION => CHIRFB_CHIR_EXPR_KIND_TRY_RAW_ARRAY_ALLOCATE
@@ -438,12 +434,13 @@ private func ToPackageExprKind(expr: Expression): UInt8 {
         case ExprKind.NOTEQUAL => CHIRFB_CHIR_EXPR_KIND_NOT_EQUAL
         case ExprKind.AND => CHIRFB_CHIR_EXPR_KIND_AND
         case ExprKind.OR => CHIRFB_CHIR_EXPR_KIND_OR
-        case ExprKind.TYPECAST => CHIRFB_CHIR_EXPR_KIND_NUMERIC_CAST
+        case ExprKind.CLASS_STATIC_CAST => CHIRFB_CHIR_EXPR_KIND_STATIC_CAST
+        case ExprKind.NUMERIC_CAST => CHIRFB_CHIR_EXPR_KIND_NUMERIC_CAST
         case ExprKind.BOX => CHIRFB_CHIR_EXPR_KIND_BOX
-        case ExprKind.UNBOX => CHIRFB_CHIR_EXPR_KIND_UNBOX_TO_VALUE
+        case ExprKind.UNBOX_TO_VALUE => CHIRFB_CHIR_EXPR_KIND_UNBOX_TO_VALUE
         case ExprKind.UNBOX_TO_REF => CHIRFB_CHIR_EXPR_KIND_UNBOX_TO_REF
-        case ExprKind.TRANSFORM_TO_GENERIC => CHIRFB_CHIR_EXPR_KIND_CAST_TO_GENERIC
-        case ExprKind.TRANSFORM_TO_CONCRETE => CHIRFB_CHIR_EXPR_KIND_CAST_TO_CONCRETE
+        case ExprKind.CAST_TO_GENERIC => CHIRFB_CHIR_EXPR_KIND_CAST_TO_GENERIC
+        case ExprKind.CAST_TO_CONCRETE => CHIRFB_CHIR_EXPR_KIND_CAST_TO_CONCRETE
         case ExprKind.ALLOCATE => CHIRFB_CHIR_EXPR_KIND_ALLOCATE
         case ExprKind.LOAD => CHIRFB_CHIR_EXPR_KIND_LOAD
         case ExprKind.STORE => CHIRFB_CHIR_EXPR_KIND_STORE
@@ -990,23 +987,20 @@ class CHIRSerializerImpl {
             if (blockGroups.isEmpty()) { None } else { Some(blockGroups) }, owner, resultLocalVar, resultTy)
     }
 
-    private func Serialize(obj: UnaryExpression): FlatBufferOffset {
+    private func Serialize(obj: UnaryExpressionBase): FlatBufferOffset {
         let base = Serialize((obj as Expression).getOrThrow())
         return CreateUnaryExpressionBase(builder, base, SerializeOverflowStrategy(obj.GetOverflowStrategy()))
     }
 
-    private func Serialize(obj: BinaryExpression): FlatBufferOffset {
+    private func Serialize(obj: BinaryExpressionBase): FlatBufferOffset {
         let base = Serialize((obj as Expression).getOrThrow())
         return CreateBinaryExpressionBase(builder, base, SerializeOverflowStrategy(obj.GetOverflowStrategy()))
     }
 
-    private func Serialize(obj: Allocate): FlatBufferOffset {
+    private func Serialize(obj: AllocateBase): FlatBufferOffset {
         return CreateAllocateBase(builder, Serialize((obj as Expression).getOrThrow()), GetId(obj.GetType()))
     }
 
-    private func Serialize(obj: AllocateWithException): FlatBufferOffset {
-        return CreateAllocateBase(builder, Serialize((obj as Expression).getOrThrow()), GetId(obj.GetType()))
-    }
 
     private func Serialize(obj: GetElementRef): FlatBufferOffset {
         let base = Serialize((obj as Expression).getOrThrow())
@@ -1085,15 +1079,11 @@ class CHIRSerializerImpl {
         return CreateInvokeBase(builder, funcCall, SerializeOverflowStrategy(obj.overflowStrategy))
     }
 
-    private func Serialize(obj: TypeCast): FlatBufferOffset {
+    private func Serialize(obj: NumericCastBase): FlatBufferOffset {
         let base = Serialize((obj as Expression).getOrThrow())
         return CreateNumericCastBase(builder, base, SerializeOverflowStrategy(obj.GetOverflowStrategy()))
     }
 
-    private func Serialize(obj: TypeCastWithException): FlatBufferOffset {
-        let base = Serialize((obj as Expression).getOrThrow())
-        return CreateNumericCastBase(builder, base, SerializeOverflowStrategy(obj.GetOverflowStrategy()))
-    }
 
     private func Serialize(obj: InstanceOf): FlatBufferOffset {
         return CreateInstanceOf(builder, Serialize((obj as Expression).getOrThrow()), GetId(obj.GetType()))
@@ -1132,13 +1122,10 @@ class CHIRSerializerImpl {
         return CreateFieldByName(builder, base, builder.CreateVectorOfStrings(obj.GetNames()))
     }
 
-    private func Serialize(obj: RawArrayAllocate): FlatBufferOffset {
+    private func Serialize(obj: RawArrayAllocateBase): FlatBufferOffset {
         return CreateRawArrayAllocateBase(builder, Serialize((obj as Expression).getOrThrow()), GetId(obj.GetElementType()))
     }
 
-    private func Serialize(obj: RawArrayAllocateWithException): FlatBufferOffset {
-        return CreateRawArrayAllocateBase(builder, Serialize((obj as Expression).getOrThrow()), GetId(obj.GetElementType()))
-    }
 
     private func Serialize(obj: Intrinsic): FlatBufferOffset {
         let expression = Serialize((obj as Expression).getOrThrow())
@@ -1161,7 +1148,7 @@ class CHIRSerializerImpl {
         return CreateDebugDirect(builder, Serialize((obj as Expression).getOrThrow()), Some(obj.GetSrcCodeIdentifier()))
     }
 
-    private func Serialize(obj: Spawn): FlatBufferOffset {
+    private func Serialize(obj: SpawnBase): FlatBufferOffset {
         let executeClosure = if (let Some(value) <- obj.GetExecuteClosure()) {
             GetId((value as Value).getOrThrow())
         } else {
@@ -1170,14 +1157,6 @@ class CHIRSerializerImpl {
         return CreateSpawnBase(builder, Serialize((obj as Expression).getOrThrow()), executeClosure)
     }
 
-    private func Serialize(obj: SpawnWithException): FlatBufferOffset {
-        let executeClosure = if (let Some(value) <- obj.GetExecuteClosure()) {
-            GetId((value as Value).getOrThrow())
-        } else {
-            0u32
-        }
-        return CreateSpawnBase(builder, Serialize((obj as Expression).getOrThrow()), executeClosure)
-    }
 
     private func Serialize(obj: Lambda): FlatBufferOffset {
         CJC_ASSERT(obj.GetBlockGroups().size == 1)
@@ -1287,12 +1266,9 @@ class CHIRSerializerImpl {
     private func Dispatch(obj: Expression): FlatBufferOffset {
         let index = Int64(GetId(obj) - 1u32)
         return match (obj.GetExprKind()) {
-            case ExprKind.ALLOCATE =>
+            case ExprKind.ALLOCATE | ExprKind.ALLOCATE_WITH_EXCEPTION =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_ALLOCATE_BASE
-                Serialize((obj as Allocate).getOrThrow())
-            case ExprKind.ALLOCATE_WITH_EXCEPTION =>
-                exprKind[index] = CHIRFB_EXPRESSION_ELEM_ALLOCATE_BASE
-                Serialize((obj as AllocateWithException).getOrThrow())
+                Serialize((obj as AllocateBase).getOrThrow())
             case ExprKind.APPLY =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_APPLY_BASE
                 Serialize((obj as Apply).getOrThrow())
@@ -1302,9 +1278,11 @@ class CHIRSerializerImpl {
             case ExprKind.ADD | ExprKind.SUB | ExprKind.MUL | ExprKind.DIV | ExprKind.MOD | ExprKind.EXP |
                 ExprKind.LSHIFT | ExprKind.RSHIFT | ExprKind.BITAND | ExprKind.BITOR | ExprKind.BITXOR |
                 ExprKind.LT | ExprKind.GT | ExprKind.LE | ExprKind.GE | ExprKind.EQUAL | ExprKind.NOTEQUAL |
-                ExprKind.AND | ExprKind.OR =>
+                ExprKind.AND | ExprKind.OR | ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION |
+                ExprKind.MUL_WITH_EXCEPTION | ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION |
+                ExprKind.EXP_WITH_EXCEPTION | ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_BINARY_EXPRESSION_BASE
-                Serialize((obj as BinaryExpression).getOrThrow())
+                Serialize((obj as BinaryExpressionBase).getOrThrow())
             case ExprKind.BRANCH =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_BRANCH
                 Serialize((obj as Branch).getOrThrow())
@@ -1332,17 +1310,9 @@ class CHIRSerializerImpl {
             case ExprKind.INSTANCEOF =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_INSTANCE_OF
                 Serialize((obj as InstanceOf).getOrThrow())
-            case ExprKind.INT_OP_WITH_EXCEPTION =>
-                let intOp = (obj as IntOpWithException).getOrThrow()
-                let base = Serialize(obj)
-                let overflow = SerializeOverflowStrategy(intOp.GetOverflowStrategy())
-                if (ExprKindMajor(intOp.GetOpKind()) == ExprMajorKind.UNARY_EXPR) {
-                    exprKind[index] = CHIRFB_EXPRESSION_ELEM_UNARY_EXPRESSION_BASE
-                    CreateUnaryExpressionBase(builder, base, overflow)
-                } else {
-                    exprKind[index] = CHIRFB_EXPRESSION_ELEM_BINARY_EXPRESSION_BASE
-                    CreateBinaryExpressionBase(builder, base, overflow)
-                }
+            case ExprKind.NEG_WITH_EXCEPTION =>
+                exprKind[index] = CHIRFB_EXPRESSION_ELEM_UNARY_EXPRESSION_BASE
+                Serialize((obj as UnaryExpressionBase).getOrThrow())
             case ExprKind.INTRINSIC =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_INTRINSIC_BASE
                 Serialize((obj as Intrinsic).getOrThrow())
@@ -1367,24 +1337,15 @@ class CHIRSerializerImpl {
             case ExprKind.MULTIBRANCH =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_MULTI_BRANCH
                 Serialize((obj as MultiBranch).getOrThrow())
-            case ExprKind.TYPECAST =>
+            case ExprKind.NUMERIC_CAST | ExprKind.NUMERIC_CAST_WITH_EXCEPTION =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_NUMERIC_CAST_BASE
-                Serialize((obj as TypeCast).getOrThrow())
-            case ExprKind.TYPECAST_WITH_EXCEPTION =>
-                exprKind[index] = CHIRFB_EXPRESSION_ELEM_NUMERIC_CAST_BASE
-                Serialize((obj as TypeCastWithException).getOrThrow())
-            case ExprKind.RAW_ARRAY_ALLOCATE =>
+                Serialize((obj as NumericCastBase).getOrThrow())
+            case ExprKind.RAW_ARRAY_ALLOCATE | ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_RAW_ARRAY_ALLOCATE_BASE
-                Serialize((obj as RawArrayAllocate).getOrThrow())
-            case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION =>
-                exprKind[index] = CHIRFB_EXPRESSION_ELEM_RAW_ARRAY_ALLOCATE_BASE
-                Serialize((obj as RawArrayAllocateWithException).getOrThrow())
-            case ExprKind.SPAWN =>
+                Serialize((obj as RawArrayAllocateBase).getOrThrow())
+            case ExprKind.SPAWN | ExprKind.SPAWN_WITH_EXCEPTION =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_SPAWN_BASE
-                Serialize((obj as Spawn).getOrThrow())
-            case ExprKind.SPAWN_WITH_EXCEPTION =>
-                exprKind[index] = CHIRFB_EXPRESSION_ELEM_SPAWN_BASE
-                Serialize((obj as SpawnWithException).getOrThrow())
+                Serialize((obj as SpawnBase).getOrThrow())
             case ExprKind.STORE_ELEMENT_BY_NAME =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_STORE_ELEMENT_BY_NAME
                 Serialize((obj as StoreElementByName).getOrThrow())
@@ -1393,12 +1354,12 @@ class CHIRSerializerImpl {
                 Serialize((obj as StoreElementRef).getOrThrow())
             case ExprKind.NEG | ExprKind.NOT | ExprKind.BITNOT =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_UNARY_EXPRESSION_BASE
-                Serialize((obj as UnaryExpression).getOrThrow())
-            case ExprKind.GOTO | ExprKind.EXIT | ExprKind.RAISE_EXCEPTION | ExprKind.LOAD | ExprKind.STORE |
+                Serialize((obj as UnaryExpressionBase).getOrThrow())
+            case ExprKind.CLASS_STATIC_CAST | ExprKind.GOTO | ExprKind.EXIT | ExprKind.RAISE_EXCEPTION | ExprKind.LOAD | ExprKind.STORE |
                 ExprKind.CONSTANT | ExprKind.FORIN_RANGE | ExprKind.FORIN_ITER | ExprKind.FORIN_CLOSED_RANGE |
-                ExprKind.TUPLE | ExprKind.BOX | ExprKind.UNBOX | ExprKind.GET_EXCEPTION |
+                ExprKind.TUPLE | ExprKind.BOX | ExprKind.UNBOX_TO_VALUE | ExprKind.GET_EXCEPTION |
                 ExprKind.RAW_ARRAY_LITERAL_INIT | ExprKind.RAW_ARRAY_INIT_BY_VALUE | ExprKind.VARRAY |
-                ExprKind.VARRAY_BUILDER | ExprKind.TRANSFORM_TO_GENERIC | ExprKind.TRANSFORM_TO_CONCRETE |
+                ExprKind.VARRAY_BUILDER | ExprKind.CAST_TO_GENERIC | ExprKind.CAST_TO_CONCRETE |
                 ExprKind.UNBOX_TO_REF | ExprKind.GET_RTTI =>
                 exprKind[index] = CHIRFB_EXPRESSION_ELEM_EXPRESSION
                 Serialize(obj)
@@ -1886,7 +1847,7 @@ class CHIRSerializerImpl {
         fields.add(if (let Some(result) <- expr.GetResult()) { CHIRValueId(result) } else { "" })
         fields.add(if (let Some(result) <- expr.GetResult()) { result.GetIdentifier() } else { "" })
         fields.add(if (let Some(resultTy) <- expr.GetResultType()) { CHIRSerializeType(resultTy) } else { "" })
-        fields.add(serializeValueRefs(expr.GetOperands()))
+        fields.add(serializeValueRefs(expr.GetNonSuccessorOperands()))
         fields.add(serializeBlockRefs(if (let Some(term) <- expr.AsTerminator()) {
             term.GetSuccessors()
         } else {
@@ -2177,8 +2138,8 @@ class CHIRSerializerImpl {
         if (let Some(multiBranch) <- (expr as MultiBranch)) {
             return expressionPayload("multiBranch", [CHIRSerializeUInt64List(multiBranch.GetCaseVals())])
         }
-        if (let Some(intOp) <- (expr as IntOpWithException)) {
-            return expressionPayload("intOpWithException", [ExprKindIndex(intOp.GetOpKind()).toString()])
+        if (expr.IsUnaryExpressionWithException() || expr.IsBinaryExpressionWithException()) {
+            return ""
         }
         if (let Some(allocateWithException) <- (expr as AllocateWithException)) {
             return expressionPayload("allocate", [CHIRSerializeType(allocateWithException.GetType())])
