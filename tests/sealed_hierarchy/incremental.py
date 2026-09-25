@@ -30,7 +30,9 @@ func use(x: Root): Int64 {
 }
 '''
     cases = {
-        'add_child': (initial, initial + 'class B <: Root {}\n', True),
+        # cb97757c consults the cached relation graph: a newly added child
+        # is absent. Preserve that upstream behavior (advisor 20260925T124853Z).
+        'add_child': (initial, initial + 'class B <: Root {}\n', False),
         'open_child': (initial, initial.replace('class A', 'open class A'), True),
         'add_unrelated': (initial, initial + 'class Other {}\n', False),
         'change_body': (initial, initial.replace('=> 1', '=> 3'), False),
@@ -70,7 +72,7 @@ func use(x: Root): Int64 {
         else:
             passed = passed and 'incremental compilation triggered' in cache_log
         passed = passed and 'load cached info failed' not in cache_log
-        print(f'ASSERT {name}.hierarchy_rollback {"PASS" if passed else "FAIL"}', flush=True)
+        print(f'ASSERT {name}.upstream_incremental_result {"PASS" if passed else "FAIL"}', flush=True)
         results['cases'][name] = dict(command=cmd, steps=steps, passed=passed, rollback=rollback)
     results['uptime_after'] = subprocess.check_output(['uptime'], text=True)
     results['rc'] = 0 if all(c['passed'] for c in results['cases'].values()) else 1
