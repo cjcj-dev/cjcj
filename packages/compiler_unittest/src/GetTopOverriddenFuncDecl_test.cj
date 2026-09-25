@@ -6,7 +6,7 @@ import std.unittest.*
 import std.unittest.testmacro.*
 import cjcj::ast.*
 import cjcj::frontend.*
-import cjcj::sema.*
+import cjcj::sema.OverrideFunctionResolver
 import cjcj::driver.HostTripleInfo
 import cjcj::option.{OutputMode, OptimizationLevel}
 import cjcj::utils.{FileUtil, GenerateRandomHexString}
