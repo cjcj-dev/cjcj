@@ -545,7 +545,12 @@ private class ClassMetadataInfo <: MetadataInfo {
         if (IsClassForBoxType(cd.GetSrcCodeIdentifier())) {
             metadataType = ExtraAttribute.BOX_CLASS
         }
-        return GenerateAttrsMetadata(cd.GetAttributeInfo(), metadataType, cd.GetAnnoInfo())
+        // Abstract classes are implicitly open; preserve the original CHIR attributes.
+        let attrInfo = cd.GetAttributeInfo()
+        if (cd.IsClass() && cd.TestAttr(Attribute.ABSTRACT)) {
+            attrInfo.Enable(Attribute.VIRTUAL)
+        }
+        return GenerateAttrsMetadata(attrInfo, metadataType, cd.GetAnnoInfo())
     }
 }
 
