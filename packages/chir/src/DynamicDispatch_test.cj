@@ -100,10 +100,16 @@ public class DynamicDispatchTest {
         let host = restored.TryGetGlobalFunc(GLOBAL_VALUE_PREFIX + "host").getOrThrow()
         let restoredMethod = restored.TryGetGlobalFunc(GLOBAL_VALUE_PREFIX + "method").getOrThrow()
         var observed: Int64 = 0
-        for (expr in host.GetEntryBlock().getOrThrow().GetExpressions()) {
-            if (expr.GetExprKind() == kind) {
-                observed++
-                CheckSignature(expr, restoredMethod)
+        let entry = host.GetEntryBlock()
+        @Expect(host.GetBody().isSome(), true)
+        @Expect(entry.isSome(), true)
+        println("DISPATCH_ENTRY kind=${ExprKindName(kind)} body=${host.GetBody().isSome()} entry=${entry.isSome()}")
+        if (let Some(block) <- entry) {
+            for (expr in block.GetExpressions()) {
+                if (expr.GetExprKind() == kind) {
+                    observed++
+                    CheckSignature(expr, restoredMethod)
+                }
             }
         }
         @Expect(observed, 1)
