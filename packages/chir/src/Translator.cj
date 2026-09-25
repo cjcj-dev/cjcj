@@ -3985,9 +3985,9 @@ public class Translator {
             let value = TranslateExprArg(initializer)
             value.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
             Some(value)
-        } else {
-            None
-        }
+            } else {
+                None
+            }
         FlattenVarWithPatternDecl(RequirePattern(decl.irrefutablePattern, "var-with-pattern pattern"), initValue)
         return None
     }
@@ -6218,7 +6218,7 @@ public class Translator {
             let matchedBlockLoc = if (let Some(guardExpr) <- current.patternGuard) {
                 Some(TranslateLocation(current.patterns[0].begin, guardExpr.end))
             } else {
-                None
+                None<DebugLocation>
             }
             let patternEntry = CurrentBlock()
             let (falseBlock, matchedBlock) = if (current.patterns.size == 1) {
@@ -7091,9 +7091,9 @@ public class Translator {
             firstLevelBlock.EnableAttr(Attribute.MATCH_PATTERN)
             let found = info.innerDefaultInfos.get(firstIdx)
             let fallbackCaseId = if (let Some(defaults) <- found) {
-                if (!defaults.isEmpty()) { Some(defaults[0].caseId) } else { None }
+                if (!defaults.isEmpty()) { Some(defaults[0].caseId) } else { None<Int64> }
             } else {
-                None
+                None<Int64>
             }
             var secondDefaultBlock = firstDefaultBlock
             if (let None <- found) {

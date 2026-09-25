@@ -43,7 +43,8 @@ private func CollectReachableBlocks(body: BlockGroup): HashSet<Block> {
     let workList = ArrayList<Block>([body.GetEntryBlock().getOrThrow()])
     var index = 0
     while (index < workList.size) {
-        let block = workList[index++]
+        let block = workList[index]
+        index = index + 1
         if (!reachable.add(block)) { continue }
         for (successor in block.GetSuccessors()) { workList.add(successor) }
     }
@@ -65,7 +66,8 @@ private func CollectComponent(unreachable: HashSet<Block>): HashSet<Block> {
     unreachable.remove(root)
     var index = 0
     while (index < workList.size) {
-        let block = workList[index++]
+        let block = workList[index]
+        index = index + 1
         for (successor in block.GetSuccessors()) {
             if (unreachable.remove(successor)) {
                 component.add(successor)
@@ -158,7 +160,7 @@ private func AnalyzeBody(body: BlockGroup): ArrayList<UnreachableBlockRegion> {
 private func AllUsersIsExprKind(users: ArrayList<Expression>, kind: ExprKind): Bool {
     for (user in users) {
         var hasNothing = false
-        for (arg in user.GetNonSuccessorOperands()) {
+        for (arg in user.GetOperands()) {
             if (arg.GetType().getOrThrow().IsNothing()) { hasNothing = true }
         }
         if (user.GetExprKind() != kind || !hasNothing) { return false }
@@ -197,7 +199,7 @@ private func TryGetWarningExpression(expression: Expression, result: Unreachable
     if (!ToRangeIfNotZero(expression.GetDebugLocationInfoForWarning())[0]) { return false }
     if (expression.IsBinaryExpr() || expression.IsIntOpWithException()) {
         var hasNothing = false
-        for (arg in expression.GetNonSuccessorOperands()) {
+        for (arg in expression.GetOperands()) {
             if (arg.GetType().getOrThrow().IsNothing()) { hasNothing = true }
         }
         if (!hasNothing) {
