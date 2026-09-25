@@ -1082,43 +1082,19 @@ public open class DynamicDispatch <: FuncCall {
         virtualMethodOffset = offset
     }
 
-    public func GetVirtualMethodOffset(): Option<UInt64> {
+    public func GetStoredVirMethodOffset(): Option<UInt64> {
         return virtualMethodOffset
     }
 
-    public func GetVirtualMethodInfo(builder: CHIRBuilder): ArrayList<VTableSearchRes> {
-        var thisTypeDeref = (GetThisType() ??
-            throw IllegalStateException("dynamic dispatch thisType is missing")).StripAllRefs()
-        if (thisTypeDeref.IsThis()) {
-            thisTypeDeref = GetTopLevelFunc().getOrThrow().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
-        }
-        let instParamTypes = ArrayList<Type>()
-        for (arg in GetArgs()) {
-            instParamTypes.add(arg.GetType().getOrThrow())
-        }
-        if (!IsInvokeStaticBase()) {
-            instParamTypes.remove(at: 0)
-        }
-        let instFuncType = builder.context.GetFuncTy(instParamTypes, builder.context.GetUnitTy())
-        let funcCallType = FuncCallType(instFuncType, funcName: GetMethodName(),
-            genericTypeArgs: GetInstantiatedTypeArgs())
-        let res = GetFuncIndexInVTable(thisTypeDeref, funcCallType, builder)
-        CJC_ASSERT(!res.isEmpty())
-        return res
-    }
-
-    public func GetVirtualMethodOffset(builder: CHIRBuilder): UInt64 {
-        if (let Some(offset) <- GetVirtualMethodOffset()) {
+    public func GetVirtualMethodOffset(): UInt64 {
+        if (let Some(offset) <- virtualMethodOffset) {
             return offset
         }
-        return GetVirtualMethodInfo(builder)[0].offset
+        return ComputeUnsetVirtualMethodOffset(GetCallee(), GetMethodName())
     }
 
     public func GetInstSrcParentCustomTypeOfMethod(builder: CHIRBuilder): ClassType {
-        // C++ Expression.cpp:940-954. AutoEnv: single $GenericVirtualFunc/$InstVirtualFunc slot at
-        // offset 0; codegen CreateOuterTypeInfo only needs a ClassType (then special-cases AutoEnv).
-        // When vtable FuncSigIsMatched misses (generic objectId replace-table skew under CC), fall back
-        // to instantiated thisType — same ClassType official returns for the sole AutoEnv slot.
+        // #275 AutoEnv: codegen CreateOuterTypeInfo only needs a ClassType. Keep before the 09/04 lookup.
         if (let Some(thisTy) <- GetThisType()) {
             let stripped = thisTy.StripAllRefs()
             if (stripped.IsAutoEnv()) {
@@ -1127,27 +1103,13 @@ public open class DynamicDispatch <: FuncCall {
                 }
             }
         }
-        let virtualOffset = GetVirtualMethodOffset(builder)
-        let methodType = GetMethodType()
-        for (res in GetVirtualMethodInfo(builder)) {
-            if (res.offset == virtualOffset) {
-                let instSrcParentType = res.instSrcParentType.getOrThrow()
-                let def = instSrcParentType.GetClassDef()
-                let defType = (def.GetType().getOrThrow() as ClassType).getOrThrow()
-                let parentFuncInfo = def.GetDefVTable().GetExpectedTypeVTable(defType)
-                let methods = parentFuncInfo.GetVirtualMethods()
-                if (Int64(res.offset) >= methods.size) {
-                    continue
-                }
-                let originalType = methods[Int64(res.offset)].GetOriginalFuncType()
-                if (VirMethodTypeIsMatched(originalType, methodType)) {
-                    return instSrcParentType
-                }
-            }
+        var thisTypeDeref = (GetThisType() ??
+            throw IllegalStateException("dynamic dispatch thisType is missing")).StripAllRefs()
+        if (thisTypeDeref.IsThis()) {
+            thisTypeDeref = GetTopLevelFunc().getOrThrow().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
         }
-        throw IllegalStateException(
-            "instantiated source parent custom type of virtual method is not available" +
-            " name=${GetMethodName()} offset=${virtualOffset}")
+        let parent = GetInstParentCustomTyOfCallee(GetCallee(), GetArgs(), Some(thisTypeDeref), builder).getOrThrow()
+        return (parent as ClassType).getOrThrow()
     }
 
     public func GetVirtualMethodAttr(): AttributeInfo {
@@ -1240,7 +1202,7 @@ public class Invoke <: DynamicDispatch {
         let invokeContext = InvokeCallContext(GetCallee(), GetObject(), funcContext,
             overflowStrategy: overflowStrategy)
         let cloned = builder.CreateInvoke(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, parent)
-        if (let Some(offset) <- GetVirtualMethodOffset()) {
+        if (let Some(offset) <- GetStoredVirMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
         }
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
@@ -1278,7 +1240,7 @@ public class InvokeStatic <: DynamicDispatch {
         let invokeContext = InvokeCallContext(GetCallee(), GetRTTIValue(), funcContext,
             overflowStrategy: overflowStrategy)
         let cloned = builder.CreateInvokeStatic(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, parent)
-        if (let Some(offset) <- GetVirtualMethodOffset()) {
+        if (let Some(offset) <- GetStoredVirMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
         }
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())

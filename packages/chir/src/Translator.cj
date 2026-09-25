@@ -351,9 +351,10 @@ public class FaithfulInstCalleeInfo {
     public let instRetTy: Type
     public let instantiatedTypeArgs: ArrayList<Type> = ArrayList<Type>()
     public let isVirtualFuncCall: Bool
+    public let originalFuncDecl: AstFuncDecl
 
     public init(instParentCustomTy: Type, thisType: Type, instParamTys: ArrayList<Type>, instRetTy: Type,
-        instantiatedTypeArgs: ArrayList<Type>, isVirtualFuncCall: Bool) {
+        instantiatedTypeArgs: ArrayList<Type>, isVirtualFuncCall: Bool, originalFuncDecl: AstFuncDecl) {
         this.instParentCustomTy = instParentCustomTy
         this.thisType = thisType
         for (ty in instParamTys) {
@@ -364,6 +365,7 @@ public class FaithfulInstCalleeInfo {
             this.instantiatedTypeArgs.add(ty)
         }
         this.isVirtualFuncCall = isVirtualFuncCall
+        this.originalFuncDecl = originalFuncDecl
     }
 }
 
@@ -2964,10 +2966,7 @@ public class Translator {
             }
         }
 
-        let (parentType, funcType, instantiatedTypeArgs, isVirtualFromHelper) =
-            GetExactParentTypeAndFuncType(member, thisType, funcDecl, isVirtualFuncCall)
-        return FaithfulInstCalleeInfo(parentType, thisType, funcType.GetParamTypes(), funcType.GetReturnType(),
-            instantiatedTypeArgs, isVirtualFromHelper)
+        return GetInstCalleeInfoInGeneral(member, funcDecl, thisType, isVirtualFuncCall)
     }
 
     private func GetInstCalleeInfoFromVarInit(expr: AstRefExpr, calleeDecl: AstFuncDecl): FaithfulInstCalleeInfo {
@@ -2983,52 +2982,71 @@ public class Translator {
         }
         CJC_ASSERT(calleeDecl.TestAttr(AstAttribute.STATIC))
         return FaithfulInstCalleeInfo(thisType, thisType, paramTys, funcType.GetReturnType(),
-            instantiatedTypeArgs, false)
+            instantiatedTypeArgs, false, calleeDecl)
     }
 
-    private func GetExactParentTypeAndFuncType(expr: AstNameReferenceExpr, thisType: Type, calleeDecl: AstFuncDecl,
-        isVirtualFuncCall: Bool): (Type, FuncType, ArrayList<Type>, Bool) {
-        let funcType = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
+    // C++ TranslateMemberAccess.cpp GetInstCalleeInfoInGeneral (09/04 b6545992 / 84b82a63).
+    // Virtual call stores the top-overridden decl; non-virtual stores the resolved decl.
+    private func TopOverriddenDecl(funcDecl: AstFuncDecl): AstFuncDecl {
+        if (let Some(resolver) <- overrideSrcFuncResolver) {
+            if (let Some(top) <- resolver(funcDecl)) {
+                return top
+            }
+        }
+        return funcDecl
+    }
+
+    private func GetInstCalleeInfoInGeneral(expr: AstNameReferenceExpr, resolvedFuncDecl: AstFuncDecl, thisType: Type,
+        isVirtualFuncCall: Bool): FaithfulInstCalleeInfo {
+        let translatedFuncType = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
         let paramTys = ArrayList<Type>()
-        for (paramTy in funcType.GetParamTypes()) {
+        for (paramTy in translatedFuncType.GetParamTypes()) {
             paramTys.add(paramTy)
         }
-        if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
+        var calleeFuncTy = translatedFuncType
+        if (!resolvedFuncDecl.TestAttr(AstAttribute.STATIC)) {
             paramTys.add(thisType, at: 0)
+            calleeFuncTy = builder.context.GetFuncTy(paramTys, translatedFuncType.GetReturnType())
         }
-        var calleeFuncTy = builder.context.GetFuncTy(paramTys, funcType.GetReturnType())
         let funcInstArgs = ArrayList<Type>()
         for (instTy in expr.instTys) {
             funcInstArgs.add(chirTy.TranslateType(instTy))
         }
         let thisDerefTy = thisType.StripAllRefs()
-        var parentTypeOpt = GetExactParentType(thisDerefTy, calleeDecl, calleeFuncTy, funcInstArgs, isVirtualFuncCall)
         var virtualCall = isVirtualFuncCall
+        var originalFuncDecl = if (virtualCall) {
+            TopOverriddenDecl(resolvedFuncDecl)
+        } else {
+            resolvedFuncDecl
+        }
+        var parentTypeOpt = GetExactParentType(thisDerefTy, originalFuncDecl, calleeFuncTy, funcInstArgs, virtualCall)
         if (parentTypeOpt.isNone()) {
             CJC_ASSERT(!virtualCall)
-            parentTypeOpt = GetExactParentType(thisDerefTy, calleeDecl, calleeFuncTy, funcInstArgs, true)
+            originalFuncDecl = TopOverriddenDecl(originalFuncDecl)
+            parentTypeOpt = GetExactParentType(thisDerefTy, originalFuncDecl, calleeFuncTy, funcInstArgs, true)
             virtualCall = true
         }
         if (parentTypeOpt.isNone()) {
-            throw IllegalStateException("faithful AST2CHIR GetExactParentTypeAndFuncType failed to find parent type: " +
-                "callee=${calleeDecl.identifier.Val()}, this=${thisType.ToString()}, thisDeref=${thisDerefTy.ToString()}, " +
-                "virtual=${virtualCall}, isStatic=${calleeDecl.TestAttr(AstAttribute.STATIC)}")
+            throw IllegalStateException("faithful AST2CHIR GetInstCalleeInfoInGeneral failed to find parent type: " +
+                "callee=${originalFuncDecl.identifier.Val()}, this=${thisType.ToString()}, thisDeref=${thisDerefTy.ToString()}, " +
+                "virtual=${virtualCall}, isStatic=${originalFuncDecl.TestAttr(AstAttribute.STATIC)}")
         }
-        let parentType = if (let Some(resolvedParentType) <- parentTypeOpt) {
-            resolvedParentType
-        } else {
-            throw IllegalStateException("faithful AST2CHIR impossible: GetExactParentTypeAndFuncType parent type changed after check")
-        }
-        if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
+        let parentType = parentTypeOpt.getOrThrow()
+        if (!originalFuncDecl.TestAttr(AstAttribute.STATIC)) {
             CJC_ASSERT(!paramTys.isEmpty())
-            if (thisDerefTy.IsStruct() && parentType != thisDerefTy && calleeDecl.TestAttr(AstAttribute.MUT)) {
+            if (thisDerefTy.IsStruct() && parentType != thisDerefTy && originalFuncDecl.TestAttr(AstAttribute.MUT)) {
                 paramTys[0] = thisType
             } else if (parentType.IsClass()) {
-                paramTys[0] = AddRefIfFuncIsMutOrClass(parentType, calleeDecl)
+                paramTys[0] = AddRefIfFuncIsMutOrClass(parentType, originalFuncDecl)
+                calleeFuncTy = builder.context.GetFuncTy(paramTys, calleeFuncTy.GetReturnType())
             }
-            calleeFuncTy = builder.context.GetFuncTy(paramTys, calleeFuncTy.GetReturnType())
         }
-        return (parentType, calleeFuncTy, funcInstArgs, virtualCall)
+        var instThisType = thisType
+        if (virtualCall && (expr as AstRefExpr).isSome()) {
+            instThisType = builder.context.GetRefTy(builder.context.GetThisTy())
+        }
+        return FaithfulInstCalleeInfo(parentType, instThisType, paramTys, calleeFuncTy.GetReturnType(),
+            funcInstArgs, virtualCall, originalFuncDecl)
     }
 
     private func GetInstCalleeInfoFromRefExpr(expr: AstRefExpr, calleeDecl: AstFuncDecl): FaithfulInstCalleeInfo {
@@ -3045,17 +3063,8 @@ public class Translator {
         if (let Some(customTy) <- (thisType as CustomType)) {
             caller = customTy.GetCustomTypeDef()
         }
-        var isVirtualFuncCall = IsVirtualFuncCall(caller, calleeDecl, false)
-        let (parentType, calleeFuncTy, instantiatedTypeArgs, isVirtualFromHelper) =
-            GetExactParentTypeAndFuncType(expr, thisTypeRef, calleeDecl, isVirtualFuncCall)
-        isVirtualFuncCall = isVirtualFromHelper
-        let finalThisType = if (isVirtualFuncCall) {
-            builder.context.GetRefTy(builder.context.GetThisTy())
-        } else {
-            thisTypeRef
-        }
-        return FaithfulInstCalleeInfo(parentType, finalThisType, calleeFuncTy.GetParamTypes(),
-            calleeFuncTy.GetReturnType(), instantiatedTypeArgs, isVirtualFuncCall)
+        let isVirtualFuncCall = IsVirtualFuncCall(caller, calleeDecl, false)
+        return GetInstCalleeInfoInGeneral(expr, calleeDecl, thisTypeRef, isVirtualFuncCall)
     }
 
     private func MemberAccessFuncType(member: AstMemberAccess): FuncType {
@@ -3202,14 +3211,14 @@ public class Translator {
                 instFuncType.thisType.StripAllRefs(), CurrentBlock())
             CurrentBlock().AppendExpression(createdGetRTTIStatic3079)
             let rtti = RequireResult(createdGetRTTIStatic3079)
-            let invokeInfo = GenerateInvokeCallContext(instFuncType, rtti, funcDecl, args)
+            let invokeInfo = GenerateInvokeCallContext(instFuncType, rtti, args)
             let createdInvokeStatic3082 = builder.CreateInvokeStatic(instFuncType.instRetTy, invokeInfo, CurrentBlock())
             CurrentBlock().AppendExpression(createdInvokeStatic3082)
             return RequireResult(createdInvokeStatic3082)
         }
         let caller = thisObj ??
             throw IllegalStateException("faithful AST2CHIR virtual member wrapper has no receiver")
-        let invokeInfo = GenerateInvokeCallContext(instFuncType, caller, funcDecl, args)
+        let invokeInfo = GenerateInvokeCallContext(instFuncType, caller, args)
         let createdInvoke3087 = builder.CreateInvoke(instFuncType.instRetTy, invokeInfo, CurrentBlock())
         CurrentBlock().AppendExpression(createdInvoke3087)
         return RequireResult(createdInvoke3087)
@@ -3226,7 +3235,7 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR member wrapper argument count mismatch")
         }
         let instTypeArgs = instFuncType.instantiatedTypeArgs.clone()
-        let callee = GetSymbolTable(funcDecl)
+        let callee = GetSymbolTable(instFuncType.originalFuncDecl)
         let createdApply3102 = builder.CreateApply(instFuncType.instRetTy, callee, FuncCallContext(args: args,
             instTypeArgs: instTypeArgs, thisType: Some(instFuncType.thisType)), CurrentBlock())
         CurrentBlock().AppendExpression(createdApply3102)
@@ -3234,22 +3243,12 @@ public class Translator {
     }
 
     public func GenerateInvokeCallContext(instFuncType: FaithfulInstCalleeInfo, caller: Value,
-        callee: AstFuncDecl, args: ArrayList<Value>, strategy!: OverflowStrategy = OverflowStrategy.THROWING
+        args: ArrayList<Value>, strategy!: OverflowStrategy = OverflowStrategy.THROWING
     ): InvokeCallContext {
-        // C++ Translator.h:949-951 default THROWING; TranslateRefExpr.cpp:204-232 stores that strategy.
-        let originalFuncDecl = if (let Some(resolver) <- overrideSrcFuncResolver) {
-            resolver(callee) ?? callee
-        } else {
-            callee
-        }
-        let funcName = originalFuncDecl.identifier.Val()
-        var thisType = instFuncType.thisType.StripAllRefs()
-        if (thisType.IsThis()) {
-            thisType = CurrentFunction().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
-        }
-        let methodType = builder.context.GetFuncTy(instFuncType.instParamTys, instFuncType.instRetTy)
-        let method = thisType.GetExpectedFunc(funcName, methodType, originalFuncDecl.TestAttr(AstAttribute.STATIC),
-            instFuncType.instantiatedTypeArgs.clone(), builder, true).getOrThrow()
+        // C++ TranslateRefExpr.cpp GenerateInvokeCallContext (09/04): callee is the symbol of originalFuncDecl,
+        // not GetExpectedFunc on the receiver type.
+        let originalFuncDecl = instFuncType.originalFuncDecl
+        let method = (GetSymbolTable(originalFuncDecl) as Function).getOrThrow()
         let overflow = if (IsOverflowOpCall(originalFuncDecl)) { strategy } else { OverflowStrategy.NA }
         return InvokeCallContext(method, caller, FuncCallContext(args: args,
             instTypeArgs: instFuncType.instantiatedTypeArgs, thisType: Some(instFuncType.thisType)),
@@ -8814,7 +8813,6 @@ public class Translator {
     private func TranslateMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
         let loc = TranslateLocation(expr)
         let argValues = ArrayList<Value>()
-        let callee = globalSymbolTable.Get(calleeDecl)
         let calleeInfo = if (let Some(base) <- expr.baseFunc) {
             if (let Some(member) <- (base as AstMemberAccess)) {
                 GetInstCalleeInfoFromMemberAccess(member, calleeDecl)
@@ -8834,7 +8832,7 @@ public class Translator {
             let rawObj = TranslateThisObjectForNonStaticMemberFuncCall(expr,
                 calleeDecl.TestAttr(AstAttribute.MUT))
             expectedThisObjTy = if (calleeInfo.isVirtualFuncCall) {
-                Some(AddRefIfFuncIsMutOrClass(calleeInfo.instParentCustomTy, calleeDecl))
+                Some(AddRefIfFuncIsMutOrClass(calleeInfo.instParentCustomTy, calleeInfo.originalFuncDecl))
             } else {
                 if (calleeInfo.instParamTys.isEmpty()) {
                     None
@@ -8873,7 +8871,7 @@ public class Translator {
                     RequireResult(createdGetRTTIStatic8209)
                 }
                 // C++ TranslateCallExpr.cpp:910-911 delegates overflow-name selection to GenerateInvokeCallContext.
-                let invokeCtx = GenerateInvokeCallContext(calleeInfo, rtti, calleeDecl, argValues,
+                let invokeCtx = GenerateInvokeCallContext(calleeInfo, rtti, argValues,
                     strategy: expr.overflowStrategy)
                 let invoke = CreateInvokeStaticMaybeWithException(resultTy, invokeCtx, loc: loc)
                 if (GetFirstNothingTypeArgIndex(argValues).isSome()) {
@@ -8884,7 +8882,7 @@ public class Translator {
             }
             let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
             // C++ TranslateCallExpr.cpp:918-919 delegates overflow-name selection to GenerateInvokeCallContext.
-            let invokeCtx = GenerateInvokeCallContext(calleeInfo, obj, calleeDecl, argValues,
+            let invokeCtx = GenerateInvokeCallContext(calleeInfo, obj, argValues,
                 strategy: expr.overflowStrategy)
             let invoke = CreateInvokeMaybeWithException(resultTy, invokeCtx, loc: loc)
             if (GetFirstNothingTypeArgIndex(argValues).isSome()) {
@@ -8897,6 +8895,7 @@ public class Translator {
             argValues.add(obj, at: 0)
         }
         let instTypeArgs = calleeInfo.instantiatedTypeArgs
+        let callee = GetSymbolTable(calleeInfo.originalFuncDecl)
         return CreateAndAppendApplyCallFromCallExpr(resultTy, callee, FuncCallContext(args: argValues,
             instTypeArgs: instTypeArgs, thisType: Some(calleeInfo.thisType)), expr)
     }

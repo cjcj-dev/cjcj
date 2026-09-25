@@ -332,40 +332,19 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
         virtualMethodOffset = offset
     }
 
-    public func GetVirtualMethodOffset(): Option<UInt64> {
+    public func GetStoredVirMethodOffset(): Option<UInt64> {
         return virtualMethodOffset
     }
 
-    public func GetVirtualMethodInfo(builder: CHIRBuilder): ArrayList<VTableSearchRes> {
-        var thisTypeDeref = (GetThisType() ??
-            throw IllegalStateException("dynamic dispatch with exception thisType is missing")).StripAllRefs()
-        if (thisTypeDeref.IsThis()) {
-            thisTypeDeref = GetTopLevelFunc().getOrThrow().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
-        }
-        let instParamTypes = ArrayList<Type>()
-        for (arg in GetArgs()) {
-            instParamTypes.add(arg.GetType().getOrThrow())
-        }
-        if (!IsInvokeStaticBase()) {
-            instParamTypes.remove(at: 0)
-        }
-        let instFuncType = builder.context.GetFuncTy(instParamTypes, builder.context.GetUnitTy())
-        let funcCallType = FuncCallType(instFuncType, funcName: GetMethodName(),
-            genericTypeArgs: GetInstantiatedTypeArgs())
-        let res = GetFuncIndexInVTable(thisTypeDeref, funcCallType, builder)
-        CJC_ASSERT(!res.isEmpty())
-        return res
-    }
-
-    public func GetVirtualMethodOffset(builder: CHIRBuilder): UInt64 {
+    public func GetVirtualMethodOffset(): UInt64 {
         if (let Some(offset) <- virtualMethodOffset) {
             return offset
         }
-        return GetVirtualMethodInfo(builder)[0].offset
+        return ComputeUnsetVirtualMethodOffset(GetCallee(), GetMethodName())
     }
 
     public func GetInstSrcParentCustomTypeOfMethod(builder: CHIRBuilder): ClassType {
-        // Mirror Expression.DynamicDispatch — AutoEnv single-slot thisType fallback.
+        // #275 AutoEnv kept; the lookup itself matches 09/04 GetInstParentCustomTyOfCallee.
         if (let Some(thisTy) <- GetThisType()) {
             let stripped = thisTy.StripAllRefs()
             if (stripped.IsAutoEnv()) {
@@ -374,27 +353,13 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
                 }
             }
         }
-        let virtualOffset = GetVirtualMethodOffset(builder)
-        let methodType = GetMethodType()
-        for (res in GetVirtualMethodInfo(builder)) {
-            if (res.offset == virtualOffset) {
-                let instSrcParentType = res.instSrcParentType.getOrThrow()
-                let def = instSrcParentType.GetClassDef()
-                let defType = (def.GetType().getOrThrow() as ClassType).getOrThrow()
-                let parentFuncInfo = def.GetDefVTable().GetExpectedTypeVTable(defType)
-                let methods = parentFuncInfo.GetVirtualMethods()
-                if (Int64(res.offset) >= methods.size) {
-                    continue
-                }
-                let originalType = methods[Int64(res.offset)].GetOriginalFuncType()
-                if (VirMethodTypeIsMatched(originalType, methodType)) {
-                    return instSrcParentType
-                }
-            }
+        var thisTypeDeref = (GetThisType() ??
+            throw IllegalStateException("dynamic dispatch with exception thisType is missing")).StripAllRefs()
+        if (thisTypeDeref.IsThis()) {
+            thisTypeDeref = GetTopLevelFunc().getOrThrow().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
         }
-        throw IllegalStateException(
-            "instantiated source parent custom type of virtual method is not available" +
-            " name=${GetMethodName()} offset=${virtualOffset}")
+        let parent = GetInstParentCustomTyOfCallee(GetCallee(), GetArgs(), Some(thisTypeDeref), builder).getOrThrow()
+        return (parent as ClassType).getOrThrow()
     }
 
     public func GetVirtualMethodAttr(): AttributeInfo {
@@ -441,7 +406,7 @@ public class TryInvoke <: DynamicDispatchWithException {
             overflowStrategy: overflowStrategy)
         let cloned = builder.CreateTryInvoke(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, GetSuccessBlock(),
             GetErrorBlock(), parent)
-        if (let Some(offset) <- GetVirtualMethodOffset()) {
+        if (let Some(offset) <- GetStoredVirMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
         }
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
@@ -475,7 +440,7 @@ public class TryInvokeStatic <: DynamicDispatchWithException {
             overflowStrategy: overflowStrategy)
         let cloned = builder.CreateTryInvokeStatic(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext,
             GetSuccessBlock(), GetErrorBlock(), parent)
-        if (let Some(offset) <- GetVirtualMethodOffset()) {
+        if (let Some(offset) <- GetStoredVirMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
         }
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
