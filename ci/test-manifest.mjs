@@ -67,6 +67,7 @@ export const GATING = Object.freeze([
   'ci/host-toolchain-pin.test.mjs',
   'ci/idle-writer-policy.test.mjs',
   'ci/llvm-tools-manifest.test.mjs',
+  'ci/objc_darwin/run_e2e.test.mjs',
   'ci/pin-sweep.test.mjs',
   'ci/release-gates.test.mjs',
   'ci/release/package_checksums.test.mjs',

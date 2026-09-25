@@ -1,0 +1,79 @@
+name: ObjC Darwin end-to-end
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/objc-darwin-e2e.yml
+      - ci/objc_darwin/**
+      - scripts/objc_cpointer_fixtures/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: objc-darwin-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  objc-darwin-e2e:
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      SDK_RUNTIME_DIR: darwin_aarch64_cjnative
+    steps:
+      - name: Checkout cjcj
+        uses: actions/checkout@v7
+
+      - name: Load pins
+        run: |
+          set -euo pipefail
+          cat ci/cjpm_pin.env >> "$GITHUB_ENV"
+          cat ci/runtime_pin.env >> "$GITHUB_ENV"
+          home="$RUNNER_TEMP/objc-nightly-home"
+          mkdir -p "$home"
+          echo "HOME=$home" >> "$GITHUB_ENV"
+
+      - name: Install official macOS nightly
+        env:
+          CI: ''
+        run: npx --yes zx@8 ci/setup_sdk.mjs
+
+      - name: Scan official objc modules
+        run: node ci/objc_darwin/run_e2e.mjs --scan-only
+
+      - name: Checkout pinned runtime
+        uses: actions/checkout@v7
+        with:
+          repository: cjcj-dev/cangjie-runtime
+          ref: ${{ env.RUNTIME_REF }}
+          fetch-depth: 1
+          path: runtime-source
+
+      - name: Install macOS build dependencies
+        run: brew install ninja
+
+      - name: Start sccache
+        uses: ./.github/actions/sccache
+        with:
+          component: runtime
+          platform: macos-15
+          pin: ${{ env.RUNTIME_REF }}
+          cache-size: 1G
+
+      - name: Runtime build
+        run: npx --yes zx@8 ci/platform_matrix/build_runtime.mjs
+
+      - name: Download native fixed LLVM tuple
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "tuple missing must exit 78; not swallowed"
+          npx --yes zx@8 ci/platform_matrix/fetch_llvm_tuple.mjs
+
+      - name: Build stage1
+        run: npx --yes zx@8 ci/platform_matrix/build_cjcj.mjs
+
+      - name: Compile and run ObjC fixture
+        run: node ci/objc_darwin/run_e2e.mjs

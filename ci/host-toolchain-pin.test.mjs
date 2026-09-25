@@ -244,7 +244,7 @@ test('both JavaScript entry points require the loaded environment value', async 
 const HOST_TOOLCHAIN_PINS = Object.freeze({
   'ci/cjpm_pin.env': Object.freeze({
     host: 'ordinary CI build host',
-    loaders: Object.freeze(['build-cjpm.yml', 'build-windows-runtime.yml', 'ci.yml', 'platform-matrix.yml']),
+    loaders: Object.freeze(['build-cjpm.yml', 'build-windows-runtime.yml', 'ci.yml', 'objc-darwin-e2e.yml', 'platform-matrix.yml']),
   }),
   'ci/host_sdk_pin.env': Object.freeze({
     host: 'source-build host',
