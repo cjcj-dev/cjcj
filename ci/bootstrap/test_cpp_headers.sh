@@ -11,7 +11,8 @@ mkdir "$work"
 work=$(cd "$work" && pwd)
 export CANGJIE_WORKSPACE="$work/workspace"
 export GITHUB_ENV="$work/bootstrap.env"
-export CJCJ_BOOTSTRAP_CJCJ_SHA=$(git -C "$repo" rev-parse HEAD)
+CJCJ_BOOTSTRAP_CJCJ_SHA=$(git -C "$repo" rev-parse HEAD)
+export CJCJ_BOOTSTRAP_CJCJ_SHA
 unset CJCJ_BOOTSTRAP_CPP_SRC CANGJIE_CPP_SRC CJCJ_LLVM_SHIM_O
 set -a
 source "$repo/ci/llvm_pin.env"

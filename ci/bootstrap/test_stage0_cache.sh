@@ -2,6 +2,8 @@
 # Stage0 caches the host compiler only; std is produced by stage1.
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# The override selects the real bootstrap product for fault-arm runs.
+# shellcheck source=ci/bootstrap/bootstrap.sh
 source "${BOOTSTRAP_PRODUCT:-$here/bootstrap.sh}"
 set -euo pipefail
 scratch=$(mktemp -d)
