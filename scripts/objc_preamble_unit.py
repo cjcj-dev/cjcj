@@ -24,10 +24,13 @@ def main():
     parser.add_argument('--build-tree', type=Path, required=True)
     parser.add_argument('--sdk', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--interface-tree', type=Path,
+                        help='use shared release declarations while linking build-tree product archives')
     parser.add_argument('--stub-imports', type=Path,
                         help='physically copy shared declaration fixture imports for differential arms')
     args = parser.parse_args()
     tree, sdk, out = (p.resolve() for p in (args.build_tree, args.sdk, args.out))
+    interfaces = args.interface_tree.resolve() if args.interface_tree else tree
     out.mkdir(parents=True, exist_ok=True)
     temporary = out / 'tmp'
     temporary.mkdir(exist_ok=True)
@@ -47,9 +50,10 @@ def main():
     for directory in sorted((tree / 'target/release').iterdir()):
         if not directory.is_dir() or directory.name in ('bin', 'compiler_unittest@cjcj'):
             continue
-        command += ['--import-path', str(directory), '-L', str(directory)]
+        interface_directory = interfaces / 'target/release' / directory.name
+        command += ['--import-path', str(interface_directory), '-L', str(directory)]
         archives += sorted(directory.glob('*.a'))
-        inputs += sorted(directory.glob('*.cjo'))
+        inputs += sorted(interface_directory.glob('*.cjo'))
     shim = tree / 'runtime_shim/cjselfhost_llvmshim.o'
     command += ['--link-options=' + ' '.join([
         '--start-group', *map(str, archives), '--end-group', str(shim),
@@ -58,7 +62,7 @@ def main():
     inputs += sorted((sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so'))
     inputs += [sdk / 'lib/linux_x86_64_cjnative/libcangjie-std-core.a']
     (out / 'inputs.sha256').write_text(''.join(f'{digest(p)}  {p}\n' for p in inputs))
-    record = {'command': command, 'affinity': sorted(os.sched_getaffinity(0)),
+    record = {'command': command, 'interface_tree': str(interfaces), 'affinity': sorted(os.sched_getaffinity(0)),
               'uptime_before': subprocess.check_output(['uptime'], text=True).strip()}
     start = time.monotonic()
     with (out / 'build.log').open('w') as log:
