@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -33,7 +34,8 @@ def main():
         process = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                  text=True, timeout=180, cwd=dest)
         (dest / 'compile.log').write_text(process.stdout)
-        errors = [line.strip() for line in process.stdout.splitlines() if line.startswith('error:')]
+        plain = re.sub(r'\x1b\[[0-9;]*m', '', process.stdout)
+        errors = [line.strip() for line in plain.splitlines() if line.startswith('error:')]
         passed = ((process.returncode == 1 and errors == ['error: ' + expected]) if expected else
                   (process.returncode == 0 and not errors and (dest / 'output.chir').exists()))
         result = {'name': name, 'command': command, 'rc': process.returncode, 'errors': errors,
