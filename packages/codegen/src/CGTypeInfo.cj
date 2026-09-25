@@ -178,8 +178,15 @@ public func GetOrCreateGenericCustomTypeInfoGlobal(cgMod: CGModule, chirTy: Type
     return typeInfo
 }
 
-private func GetOrCreateGenericTypeInfoType(context: LLVMContextHandle): LLVMTypeRef {
-    let result = GetOrCreateNamedStructType(context, "GenericTypeInfo")
+public func GetOrCreateGenericTypeInfoType(context: LLVMContextHandle): LLVMTypeRef {
+    var result = LLVMNullType()
+    try (nameCString = unsafe { LibC.mallocCString("GenericTypeInfo") }.asResource()) {
+        result = unsafe { LLVMGetTypeByName2(context.raw, nameCString.value) }
+        if (!result.isNull()) {
+            return result
+        }
+        result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
+    }
     let i8Type = unsafe { LLVMInt8TypeInContext(context.raw) }
     let i32Type = unsafe { LLVMInt32TypeInContext(context.raw) }
     let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
@@ -192,8 +199,15 @@ private func GetOrCreateGenericTypeInfoType(context: LLVMContextHandle): LLVMTyp
     return result
 }
 
-private func GetOrCreateGenericCustomTypeInfoType(context: LLVMContextHandle): LLVMTypeRef {
-    let result = GetOrCreateNamedStructType(context, "GenericCustomTypeInfo")
+public func GetOrCreateGenericCustomTypeInfoType(context: LLVMContextHandle): LLVMTypeRef {
+    var result = LLVMNullType()
+    try (nameCString = unsafe { LibC.mallocCString("GenericCustomTypeInfo") }.asResource()) {
+        result = unsafe { LLVMGetTypeByName2(context.raw, nameCString.value) }
+        if (!result.isNull()) {
+            return result
+        }
+        result = unsafe { LLVMStructCreateNamed(context.raw, nameCString.value) }
+    }
     let i8Type = unsafe { LLVMInt8TypeInContext(context.raw) }
     let i8PtrType = unsafe { LLVMPointerType(i8Type, 0u32) }
     let body = ArrayList<LLVMTypeRef>()
