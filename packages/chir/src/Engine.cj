@@ -162,7 +162,16 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
     private func DoesExceedBlockLimit(): Bool {
         if (let Some(limit) <- analysis.GetBlockLimit()) {
             if (let Some(body) <- functionValue.GetBody()) {
-                return body.GetBlocks().size > Int64(limit)
+                if (body.GetBlocks().size > Int64(limit)) {
+                    return true
+                }
+                var exprCount: Int64 = 0
+                for (block in body.GetBlocks()) {
+                    exprCount += block.GetExpressionsRef().size
+                    if (exprCount > 10000) {
+                        return true
+                    }
+                }
             }
         }
         return false
