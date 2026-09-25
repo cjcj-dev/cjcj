@@ -166,7 +166,7 @@ public enum Attribute {
     | NO_DEBUG_INFO | GENERIC | INTERNAL | COMPILER_ADD | NO_REFLECT_INFO | NO_INLINE
     | NON_RECOMPILE | UNREACHABLE | NO_SIDE_EFFECT | COMMON | SPECIFIC | SKIP_ANALYSIS
     | DESERIALIZED | INITIALIZER | UNSAFE | JAVA_MIRROR | JAVA_IMPL | OBJ_C_MIRROR
-    | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED | DOES_NOT_THROW | OBJ_C_IMPL
+    | HAS_INITED_FIELD | JAVA_HAS_DEFAULT | PREVIOUSLY_DESERIALIZED | DOES_NOT_THROW | OBJ_C_IMPL | MATCH_PATTERN | PLUGIN_ADDED
     | FAST_NATIVE
     // FEATURE_DEBT(CJCJ_RUNTIME_SPEC §3.2/§7): selfhost-only extension domain;
     // upstream CHIR AttributeInfo.h still ends its C++ attribute domain at 39.
@@ -215,6 +215,8 @@ public func AttributeIndex(attr: Attribute): Int64 {
         case Attribute.PREVIOUSLY_DESERIALIZED => 37
         case Attribute.DOES_NOT_THROW => 38
         case Attribute.OBJ_C_IMPL => 39
+        case Attribute.MATCH_PATTERN => 40
+        case Attribute.PLUGIN_ADDED => 41
         case Attribute.FAST_NATIVE => 71
         case Attribute.NO_HEAP_ALLOC => 76
         case Attribute.NO_WRITE_BARRIER_REC => 77
@@ -251,6 +253,8 @@ public func AttributeName(attr: Attribute): String {
         case Attribute.NON_RECOMPILE => "nonRecompile"
         case Attribute.OBJ_C_MIRROR => "objCMirror"
         case Attribute.OBJ_C_IMPL => "objCImpl"
+        case Attribute.MATCH_PATTERN => "matchPattern"
+        case Attribute.PLUGIN_ADDED => "pluginAdded"
         case Attribute.OPERATOR => "operator"
         case Attribute.PREVIOUSLY_DESERIALIZED => "previouslyDeserialized"
         case Attribute.DOES_NOT_THROW => "doesNotThrow"
@@ -682,7 +686,7 @@ extend ExprKind <: Equatable<ExprKind> {
 
 public enum SourceExpr {
     | IF_EXPR | WHILE_EXPR | DO_WHILE_EXPR | MATCH_EXPR | IF_LET_OR_WHILE_LET
-    | QUEST | BINARY | FOR_IN_EXPR | OTHER
+    | QUEST | BINARY | FOR_IN_EXPR | MATCH_CASE | OTHER
 }
 
 public func SourceExprIndex(kind: SourceExpr): Int64 {
@@ -695,7 +699,8 @@ public func SourceExprIndex(kind: SourceExpr): Int64 {
         case SourceExpr.QUEST => 5
         case SourceExpr.BINARY => 6
         case SourceExpr.FOR_IN_EXPR => 7
-        case SourceExpr.OTHER => 8
+        case SourceExpr.MATCH_CASE => 8
+        case SourceExpr.OTHER => 9
     }
 }
 
@@ -709,6 +714,7 @@ public func SourceExprName(kind: SourceExpr): String {
         case SourceExpr.QUEST => "QUEST"
         case SourceExpr.BINARY => "BINARY"
         case SourceExpr.FOR_IN_EXPR => "FOR_IN_EXPR"
+        case SourceExpr.MATCH_CASE => "MATCH_CASE"
         case SourceExpr.OTHER => "OTHER"
     }
 }

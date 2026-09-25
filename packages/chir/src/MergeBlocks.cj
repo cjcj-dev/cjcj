@@ -212,7 +212,7 @@ public class MergeBlocks {
     }
 
     private func SkipMergeBlock(block: Block, enableCompileDebug: Bool): Bool {
-        if (block.TestAttr(Attribute.UNREACHABLE)) {
+        if (block.TestAttr(Attribute.UNREACHABLE) || block.TestAttr(Attribute.MATCH_PATTERN)) {
             return true
         }
         if (!enableCompileDebug) {

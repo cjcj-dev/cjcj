@@ -809,3 +809,21 @@ public class AnnoInfo {
         return out
     }
 }
+
+// Upstream Annotation.h:127: source-case identity, retained across CHIR serialization.
+public class MatchCaseId <: Annotation<Option<Int64>> {
+    private static let typeIndex = TypeIndex()
+    private let id: Option<Int64>
+    public init() { id = None }
+    public init(value: Option<Int64>) { id = value }
+    public static func GetTypeIndex(): TypeIndex { return typeIndex }
+    public static func Create(): Annotation<Option<Int64>> { return MatchCaseId() }
+    public static func Create(value: Option<Int64>): Annotation<Option<Int64>> { return MatchCaseId(value) }
+    public static func Extract(annotation: Annotation<Option<Int64>>): Option<Int64> {
+        return (annotation as MatchCaseId).getOrThrow().id
+    }
+    public func Clone(): AnnotationBase { return MatchCaseId(id) }
+    public func ToString(): String {
+        return if (let Some(value) <- id) { "matchCaseId: ${value}" } else { "" }
+    }
+}

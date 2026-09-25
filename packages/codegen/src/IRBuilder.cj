@@ -5902,6 +5902,33 @@ public class IRBuilder2 <: Resource {
         }
     }
 
+    // Mirrors CJNativeIRBuilder.cpp:2109-2130: alignment comes from instantiated typeinfo.
+    public func GetAlign(chirTy: Type, targetType: LLVMTypeRef): LLVMValueRef {
+        let typeInfo = CreateTypeInfo(chirTy)
+        let blocks = CreateAndInsertBasicBlocks(ArrayList<String>([GenNameForBB("get_ref_align"),
+            GenNameForBB("get_non_ref_align"), GenNameForBB("get_align_exit")]))
+        CreateCondBr(CreateTypeInfoIsReferenceCall(chirTy), blocks[0], blocks[1])
+        SetInsertPoint(blocks[0])
+        CreateBr(blocks[2])
+        SetInsertPoint(blocks[1])
+        let typeInfoType = CGType.GetOrCreateTypeInfoType(GetLLVMContext())
+        let typeInfoPtrType = unsafe { LLVMPointerType(typeInfoType, 0u32) }
+        let ptr = CreateStructGEP(typeInfoType, CreateBitCast(typeInfo, typeInfoPtrType),
+            7u32, name: "ti.align")
+        let alignValue = CreateLoad(unsafe { LLVMInt8TypeInContext(GetLLVMContext().raw) }, ptr,
+            name: "ti.align")
+        LLVMSetInstructionMetadata(GetLLVMContext(), alignValue, "invariant.load",
+            LLVMCreateMDTuple(GetLLVMContext(), ArrayList<LLVMMetadataRef>()))
+        let nonRefAlign = CreateSExt(alignValue, targetType)
+        CreateBr(blocks[2])
+        SetInsertPoint(blocks[2])
+        let alignPhi = CreatePHI(targetType)
+        AddIncoming(alignPhi, ArrayList<LLVMValueRef>([
+            unsafe { LLVMConstInt(targetType, GetPayloadOffset(), 0) }, nonRefAlign]),
+            ArrayList<LLVMBasicBlockRef>([blocks[0], blocks[1]]))
+        return alignPhi
+    }
+
     public func GetSizeFromTypeInfo(typeInfo: LLVMValueRef): LLVMValueRef {
         let currentBlock = GetInsertBlock()
         let blockKey = currentBlock.toUIntNative()
