@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import time
@@ -23,6 +24,8 @@ def main():
     parser.add_argument('--build-tree', type=Path, required=True)
     parser.add_argument('--sdk', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--stub-imports', type=Path,
+                        help='physically copy shared declaration fixture imports for differential arms')
     args = parser.parse_args()
     tree, sdk, out = (p.resolve() for p in (args.build_tree, args.sdk, args.out))
     out.mkdir(parents=True, exist_ok=True)
@@ -66,22 +69,30 @@ def main():
         imports.mkdir(parents=True, exist_ok=True)
         compiler = tree / 'target/release/bin/cjcj::cjc'
         # Preserve the product basename required by its runtime entry selection.
-        import shutil
         product = out / 'cjcj-stage1'
         shutil.copy2(compiler, product)
         record['compiler_sha256'] = digest(product)
         record['stubs'] = {}
-        for name in ('internal', 'lang'):
-            stub = tree / 'scripts/objc_regcomp_fixtures' / (name + '.cj')
-            argv = [str(product), str(stub), '--import-path', str(out / 'imports'),
-                    '--output-type=staticlib', '--output-dir', str(imports),
-                    '-o', name + '.a', '--diagnostic-format=noColor']
-            with (out / (name + '.log')).open('w') as log:
-                rc = subprocess.call(argv, cwd=out, env=env, stdout=log, stderr=subprocess.STDOUT)
-            record['stubs'][name] = {'argv': argv, 'rc': rc}
-            if rc:
-                (out / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
-                return rc
+        if args.stub_imports is not None:
+            origin = args.stub_imports.resolve()
+            shutil.copytree(origin, out / 'imports', dirs_exist_ok=True)
+            record['stub_origin'] = str(origin)
+        else:
+            for name in ('internal', 'lang'):
+                stub = tree / 'scripts/objc_regcomp_fixtures' / (name + '.cj')
+                argv = [str(product), str(stub), '--import-path', str(out / 'imports'),
+                        '--output-type=staticlib', '--output-dir', str(imports),
+                        '-o', name + '.a', '--diagnostic-format=noColor']
+                with (out / (name + '.log')).open('w') as log:
+                    rc = subprocess.call(argv, cwd=out, env=env, stdout=log, stderr=subprocess.STDOUT)
+                record['stubs'][name] = {'argv': argv, 'rc': rc}
+                if rc:
+                    (out / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
+                    return rc
+        record['stub_sha256'] = {
+            str(p.relative_to(out / 'imports')): digest(p)
+            for p in sorted((out / 'imports').rglob('*')) if p.is_file()
+        }
         record['elf_sha256'] = digest(executable)
         start = time.monotonic()
         with (out / 'test.log').open('w') as log:
