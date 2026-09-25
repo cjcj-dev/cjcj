@@ -4,6 +4,11 @@ import cjcj::option.*
 import cjcj::utils.FileUtil
 import std.fs.File
 
+@When[os != "Windows"]
+foreign {
+    func raise(signum: Int32): Int32
+}
+
 // Link against the built product archives, not a copy of TempFileManager.
 main(args: Array<String>): Int64 {
     let manager = TempFileManager.Instance()
@@ -19,6 +24,15 @@ main(args: Array<String>): Int64 {
     if (!FileUtil.FileExist(info.filePath)) {
         eprintln("SETUP_FAILED: registered file was not created")
         return 2
+    }
+    @When[os != "Windows"]
+    if (args.size > 1 && args[0] == "sigint") {
+        RegisterCrtlCSignalHandler()
+        File.writeTo(args[1], (info.filePath + "\n" + directory + "\n").toArray())
+        unsafe { let _ = raise(2) }
+        sleep(5 * Duration.second)
+        eprintln("TARGET: SIGINT handler did not exit")
+        return 3
     }
     if (args.size > 0 && args[0] == "normal") {
         manager.DeleteTempFiles()
