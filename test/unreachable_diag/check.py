@@ -61,6 +61,8 @@ after_hits = count(lambda msg, line: "unreachable expression" in msg and line ==
 expect("return-continuation-warned", after_hits == 1, f"hits={after_hits} line={after}")
 later_hits = count(lambda msg, line: "unreachable expression" in msg and line == later)
 expect("nothing-later-arg", later_hits == 1, f"hits={later_hits} line={later}")
+call_hits = count(lambda msg, line: "unreachable 'call'" in msg and line == later)
+expect("nothing-call-warning", call_hits == 1, f"hits={call_hits} line={later}")
 split_hits = count(lambda msg, line: "unreachable" in msg and line == split_case)
 expect("match-split-once", split_hits == 1, f"hits={split_hits} line={split_case}")
 reachable_fn = line_of("func reachable")
