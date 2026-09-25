@@ -198,6 +198,25 @@ test('source-build shell mirror fallback is visible and optionally required', ()
   assert.match(required.stderr, /source mirror required by CJCJ_SRCBUILD_REQUIRE_MIRRORS=1/);
 });
 
+test('source-build shell mirror contract reaches fetch on the selected bash', () => {
+  const contract = path.join(repoRoot, 'build/test/srcbuild_git_shell_contract.sh');
+  const result = spawnSync('bash', [contract], {encoding: 'utf8'});
+  process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /ASSERT_REACHED name=fetch_head/);
+  assert.match(result.stdout, /ASSERT_PASS name=fetch_head/);
+  assert.match(result.stdout, /ASSERT_REACHED name=fetch_sources_head/);
+  assert.match(result.stdout, /ASSERT_PASS name=fetch_sources_head/);
+  assert.match(result.stdout, /ASSERT_REACHED name=invalid_message/);
+  assert.match(result.stdout, /ASSERT_PASS name=invalid_message/);
+  assert.match(result.stdout, /ASSERT_REACHED name=duplicate_message/);
+  assert.match(result.stdout, /ASSERT_PASS name=duplicate_message/);
+  assert.match(result.stdout, /ASSERT_REACHED name=glob_exact/);
+  assert.match(result.stdout, /ASSERT_PASS name=glob_exact/);
+  assert.match(result.stdout, /CONTRACT_FAILS=0/);
+});
+
 test('kkk2 source-build profile requires mirrors while local helpers keep fallback enabled', () => {
   const helper = path.join(repoRoot, 'build/lib/srcbuild_git.sh');
   const authoritative = 'https://example.invalid/source.git';
