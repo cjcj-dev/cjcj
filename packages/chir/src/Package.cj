@@ -152,13 +152,16 @@ public class Package {
     }
 
     public func GetGlobalFunctions(includePureAbstract!: Bool = false): ArrayList<Function> {
-        let out = ArrayList<Function>()
+        if (includePureAbstract) {
+            return globalFuncs
+        }
+        let funcs = ArrayList<Function>()
         for (item in globalFuncs) {
-            if (includePureAbstract || !item.IsPureAbstract()) {
-                out.add(item)
+            if (!item.IsPureAbstract()) {
+                funcs.add(item)
             }
         }
-        return out
+        return globalFuncs
     }
 
     public func GetGlobalFunctionsRef(): ArrayList<Function> { return globalFuncs }
