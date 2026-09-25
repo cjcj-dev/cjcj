@@ -843,6 +843,7 @@ build_fixed_tuple() {
     fixed_tuple_is_current || return 1
     if [[ ${CJCJ_LLVM_DEPOT_PUBLISH:-0} == 1 ]]; then
         publish_fixed_tuple_to_depot "${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}" || return 1
+        CJCJ_SELECTED_COLOUR_TUPLE=$(resolve_depot_tuple_root "${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}") || return 1
     fi
 }
 
