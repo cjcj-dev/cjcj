@@ -515,6 +515,17 @@ if [ -n "$RUNTIME" ]; then
       fi
       echo "  [runtime-static] ${RT_STATIC_SRC} -> lib/$tgt_tuple  files=$n"
     fi
+    # Gnu.HandleLibrarySearchPaths searches lib/<tuple> before runtime/lib/<tuple>.
+    # Refresh inherited shared aliases after static installation, which may also
+    # contain shared files. Both lookup locations must select the pinned pair.
+    for base in libcangjie-runtime.so libboundscheck.so; do
+      dst="$lib_d/$base"
+      [ -e "$dst" ] || [ -L "$dst" ] || continue
+      [ -f "$d/$base" ] || die "runtime: pinned shared pair 缺 $d/$base"
+      rm -f "$dst" && cp "$d/$base" "$dst" || die "runtime shared alias 替换失败: $dst"
+      same_sha "$d/$base" "$dst" || die "runtime shared alias sha256 不一致: $dst"
+      echo "  [runtime-shared] ${d#$TO/}/$base -> ${dst#$TO/}"
+    done
   fi
 fi
 if [ -n "$STD" ]; then
