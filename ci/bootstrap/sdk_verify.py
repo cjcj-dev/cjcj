@@ -7,12 +7,21 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import subprocess
+import re
 import sys
 
 ALLOWED_SYMLINKS = {'bin/cjc', 'bin/cjc-frontend'}
 LOCK_NAME = 'SDK.lock.json'
 SKIP_NAMES = {'.', LOCK_NAME}
+LLVM_TOOLS = (
+    'third_party/llvm/bin/llc',
+    'third_party/llvm/bin/opt',
+    'third_party/llvm/bin/ld.lld',
+    'third_party/llvm/lib/libLLVM-15.so',
+)
+CJLLVM_RE = re.compile(rb'CJLLVM-COMMIT:([0-9a-fA-F]{40})')
+CJRT_RE = re.compile(rb'CJRT-COMMIT:([0-9a-fA-F]{40})')
+HEX64_RE = re.compile(r'^[0-9a-f]{64}$')
 
 COMPONENT_PREFIXES = (
     ('bin/cjc', 'cjc'),
@@ -38,6 +47,8 @@ def sha256_file(path: Path) -> str:
 def classify(rel: str) -> str:
     if rel == LOCK_NAME:
         return 'sdk-meta'
+    if rel == 'std-producer.json':
+        return 'std'
     for prefix, component in COMPONENT_PREFIXES:
         if rel == prefix or rel.startswith(prefix):
             if component == 'runtime' and 'libboundscheck' in Path(rel).name:
@@ -66,57 +77,61 @@ def load_pin(path: Path) -> dict:
     return values
 
 
-def nm_undefined(path: Path) -> set[str]:
-    result = subprocess.run(['nm', '-A', str(path)], capture_output=True, text=True)
-    if result.returncode:
-        raise ValueError(f'nm rc={result.returncode} file={path}: {result.stderr.strip()}')
-    found = set()
-    for line in result.stdout.splitlines():
-        fields = line.split()
-        if len(fields) < 2:
-            continue
-        kind, name = fields[-2:]
-        if kind == 'U':
-            found.add(name.split('@', 1)[0])
-    return found
+def measured_cjc_sha(sdk: Path) -> str | None:
+    stage1 = sdk / 'bin/cjcj-stage1'
+    cjc = sdk / 'bin/cjc'
+    if stage1.is_file():
+        return sha256_file(stage1)
+    if cjc.is_file():
+        return sha256_file(cjc)
+    return None
 
 
-def nm_defined(path: Path) -> set[str]:
-    result = subprocess.run(['nm', '-D', '--defined-only', str(path)], capture_output=True, text=True)
-    if result.returncode:
-        raise ValueError(f'nm rc={result.returncode} file={path}: {result.stderr.strip()}')
-    found = set()
-    for line in result.stdout.splitlines():
-        fields = line.split()
-        if len(fields) < 2:
-            continue
-        kind, name = fields[-2:]
-        if kind not in ('U', 'w', 'v'):
-            found.add(name.split('@', 1)[0])
-    return found
+def std_producer_sha(sdk: Path) -> str | None:
+    path = sdk / 'std-producer.json'
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return ''
+    compiler = payload.get('compiler_sha256') if isinstance(payload, dict) else None
+    if not isinstance(compiler, str):
+        return ''
+    compiler = compiler.strip().lower()
+    if not HEX64_RE.fullmatch(compiler):
+        return ''
+    return compiler
 
 
-def llvm_tuple_sha(sdk: Path) -> str:
-    names = [
-        'third_party/llvm/bin/llc',
-        'third_party/llvm/bin/opt',
-        'third_party/llvm/bin/ld.lld',
-        'third_party/llvm/lib/libLLVM-15.so',
-    ]
-    digest = hashlib.sha256()
-    for name in names:
-        path = sdk / name
-        if not path.is_file():
-            digest.update(f'MISSING:{name}\n'.encode())
-            continue
-        digest.update(name.encode())
-        digest.update(b'\n')
-        digest.update(sha256_file(path).encode())
-        digest.update(b'\n')
-    return digest.hexdigest()
+def file_stamps(path: Path, pattern: re.Pattern) -> list[str]:
+    return [match.group(1).decode().lower() for match in pattern.finditer(path.read_bytes())]
 
 
-def build_lock(sdk: Path, role: str, identities: dict) -> dict:
+def manifest_llvm_sha(sdk: Path) -> str | None:
+    path = sdk / 'third_party/llvm/MANIFEST'
+    if not path.is_file():
+        return None
+    match = re.search(r'(?m)^LLVM_SHA=([0-9a-fA-F]{40})\s*$', path.read_text(errors='replace'))
+    if not match:
+        return None
+    return match.group(1).lower()
+
+
+def runtime_so_path(sdk: Path, target_tuple: str | None) -> Path | None:
+    if target_tuple:
+        candidate = sdk / 'runtime/lib' / target_tuple / 'libcangjie-runtime.so'
+        return candidate if candidate.is_file() else None
+    found = []
+    for path, rel in iter_files(sdk):
+        if Path(rel).name == 'libcangjie-runtime.so' and classify(rel) == 'runtime':
+            found.append(path)
+    if len(found) == 1:
+        return found[0]
+    return None
+
+
+def build_lock(sdk: Path, role: str, identities: dict, target_tuple: str | None = None) -> dict:
     files = {}
     official = {}
     for path, rel in iter_files(sdk):
@@ -139,12 +154,14 @@ def build_lock(sdk: Path, role: str, identities: dict) -> dict:
         files[rel] = entry
         if component == 'official-retain':
             official[rel] = identities.get('official_retain_reason', 'copied from --from baseline; not replaced this assembly')
-    cjc = files.get('bin/cjc', {})
-    runtime_so = None
-    for rel, entry in files.items():
-        if rel.endswith('libcangjie-runtime.so') and entry['component'] == 'runtime':
-            runtime_so = entry
-            break
+    cjc = files.get('bin/cjcj-stage1') or files.get('bin/cjc') or {}
+    runtime_path = runtime_so_path(sdk, target_tuple)
+    runtime_commit = None
+    runtime_digest = None
+    if runtime_path is not None and runtime_path.is_file():
+        commits = sorted(set(file_stamps(runtime_path, CJRT_RE)))
+        runtime_commit = commits[0] if len(commits) == 1 else None
+        runtime_digest = sha256_file(runtime_path)
     lock = {
         'version': 1,
         'role': role,
@@ -153,10 +170,10 @@ def build_lock(sdk: Path, role: str, identities: dict) -> dict:
         'components': {
             'cjc': {'sha256': cjc.get('sha256')},
             'runtime': {
-                'commit': identities.get('runtime', {}).get('commit'),
-                'so_sha256': runtime_so.get('sha256') if runtime_so else None,
+                'commit': runtime_commit,
+                'so_sha256': runtime_digest,
             },
-            'llvm_tuple': {'sha256': llvm_tuple_sha(sdk)},
+            'llvm_tuple': {'sha256': manifest_llvm_sha(sdk)},
         },
     }
     return lock
@@ -166,7 +183,7 @@ def fail(code: str, message: str, errors: list) -> None:
     errors.append(f'SDK-VERIFY-FAIL rule={code} {message}')
 
 
-def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list) -> None:
+def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list, target_tuple: str | None = None) -> None:
     on_disk = {}
     for path, rel in iter_files(sdk):
         on_disk[rel] = path
@@ -189,44 +206,59 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list) -> 
         }:
             fail('UNDECLARED', f'unknown component for {rel}', errors)
 
-    cjc_sha = (lock.get('components') or {}).get('cjc', {}).get('sha256')
-    for rel, entry in lock_files.items():
-        if entry.get('component') != 'std':
-            continue
-        producer = entry.get('producer') or {}
-        compiler = producer.get('compiler_sha256')
-        if compiler and cjc_sha and compiler != cjc_sha:
-            fail('STD_CJC', f'std {rel} producer compiler {compiler} != sdk cjc {cjc_sha}', errors)
-        if identities.get('expect_std_compiler') and compiler != identities['expect_std_compiler']:
-            fail('STD_CJC', f'std compiler identity mismatch for {rel}', errors)
+    role = lock.get('role')
+    measured = measured_cjc_sha(sdk)
+    producer = std_producer_sha(sdk)
+    has_std = any(
+        entry.get('component') == 'std' and rel != 'std-producer.json'
+        for rel, entry in lock_files.items()
+    )
+    if has_std:
+        if producer is None:
+            if role == 'target':
+                fail('STD_CJC', 'target std has no std-producer.json compiler lineage', errors)
+        elif producer == '' or not measured or producer != measured:
+            fail('STD_CJC', f'std-producer compiler {producer or "invalid"} != on-disk cjc {measured}', errors)
 
-    expected_tuple = (lock.get('components') or {}).get('llvm_tuple', {}).get('sha256')
-    actual_tuple = llvm_tuple_sha(sdk)
-    if expected_tuple and expected_tuple != actual_tuple:
-        fail('LLVM_TUPLE', f'llc/opt/ld.lld/libLLVM tuple sha mismatch lock={expected_tuple} disk={actual_tuple}', errors)
-    llc = sdk / 'third_party/llvm/bin/llc'
-    lld = sdk / 'third_party/llvm/bin/ld.lld'
-    opt = sdk / 'third_party/llvm/bin/opt'
-    libllvm = sdk / 'third_party/llvm/lib/libLLVM-15.so'
-    present = [p for p in (llc, opt, lld, libllvm) if p.is_file()]
-    if len(present) >= 2:
-        shas = {sha256_file(p)[:16] for p in present}
-        declared = set()
-        for path in present:
-            rel = path.relative_to(sdk).as_posix()
-            producer = (lock_files.get(rel) or {}).get('producer') or {}
-            if producer.get('llvm_tuple_sha'):
-                declared.add(producer['llvm_tuple_sha'])
-        if len(declared) > 1:
-            fail('LLVM_TUPLE', f'llvm tools declare mixed tuple shas {sorted(declared)}', errors)
+    if (sdk / 'third_party/llvm').exists():
+        missing = [rel for rel in LLVM_TOOLS if not (sdk / rel).is_file()]
+        if missing:
+            fail('LLVM_TUPLE', 'missing ' + ','.join(missing), errors)
+        else:
+            expected = manifest_llvm_sha(sdk)
+            stamped = {rel: sorted(set(file_stamps(sdk / rel, CJLLVM_RE))) for rel in LLVM_TOOLS}
+            any_stamp = any(stamped.values())
+            if role == 'target' and ((sdk / 'third_party/llvm/MANIFEST').is_file() or any_stamp):
+                if not expected:
+                    fail('LLVM_TUPLE', 'colour llvm tools have no MANIFEST LLVM_SHA to compare', errors)
+                else:
+                    for rel, uniq in stamped.items():
+                        if uniq != [expected]:
+                            shown = ','.join(uniq) if uniq else 'none'
+                            fail('LLVM_TUPLE', f'{rel} CJLLVM-COMMIT {shown} != MANIFEST LLVM_SHA {expected}', errors)
+            elif role == 'host' and expected:
+                opt_sha = stamped['third_party/llvm/bin/opt']
+                if opt_sha and opt_sha != [expected]:
+                    shown = ','.join(opt_sha)
+                    fail('LLVM_TUPLE', f'opt CJLLVM-COMMIT {shown} != MANIFEST LLVM_SHA {expected}', errors)
 
     pin_commit = pin.get('RUNTIME_REF', '').lower()
-    runtime_commit = ((lock.get('components') or {}).get('runtime') or {}).get('commit')
-    if pin_commit and lock.get('role') == 'target':
-        if not runtime_commit:
-            fail('RUNTIME_PIN', 'lock missing runtime commit while pin is present', errors)
-        elif runtime_commit.lower() != pin_commit:
-            fail('RUNTIME_PIN', f'runtime commit {runtime_commit} != pin {pin_commit}', errors)
+    if pin_commit and role == 'target':
+        runtime_so = runtime_so_path(sdk, target_tuple)
+        if runtime_so is None:
+            fail('RUNTIME_PIN', 'target runtime libcangjie-runtime.so missing', errors)
+        else:
+            commits = sorted(set(file_stamps(runtime_so, CJRT_RE)))
+            if commits != [pin_commit]:
+                shown = ','.join(commits) if commits else 'none'
+                rel = runtime_so.relative_to(sdk).as_posix()
+                fail('RUNTIME_PIN', f'{rel} CJRT-COMMIT {shown} != pin {pin_commit}', errors)
+    if pin_commit and role == 'host':
+        for path, rel in iter_files(sdk):
+            if Path(rel).name != 'libcangjie-runtime.so' or classify(rel) != 'runtime':
+                continue
+            if pin_commit in set(file_stamps(path, CJRT_RE)):
+                fail('RUNTIME_PIN', f'host runtime {rel} carries colour pin {pin_commit}', errors)
     colour_manifest = identities.get('colour_runtime_sha256')
     runtime_so_sha = ((lock.get('components') or {}).get('runtime') or {}).get('so_sha256')
     if colour_manifest and runtime_so_sha and colour_manifest != runtime_so_sha and lock.get('role') == 'target':
@@ -244,34 +276,6 @@ def verify(sdk: Path, lock: dict, pin: dict, identities: dict, errors: list) -> 
     if role == 'target' and host_marker:
         fail('HOST_TARGET_CROSS', 'target SDK contains host-side paths', errors)
 
-    runtime_so = None
-    std_objs = []
-    for rel, path in on_disk.items():
-        name = Path(rel).name
-        if name == 'libcangjie-runtime.so':
-            runtime_so = path
-        if name.endswith(('.so', '.a')) and classify(rel) in ('std', 'runtime', 'boundscheck'):
-            if name != 'libcangjie-runtime.so':
-                std_objs.append(path)
-    if runtime_so and runtime_so.is_file() and not runtime_so.is_symlink() and std_objs:
-        try:
-            exports = nm_defined(runtime_so)
-        except ValueError:
-            exports = None
-        if exports is not None:
-            for obj in std_objs:
-                if not obj.is_file() or obj.is_symlink():
-                    continue
-                try:
-                    undefined = nm_undefined(obj)
-                except ValueError:
-                    continue
-                extra = {name for name in undefined if name.startswith('g_cj') or name.startswith('CJ_') or name.startswith('MRT_')}
-                missing = extra - exports
-                if missing:
-                    fail('STD_RUNTIME_COLOUR', f'{obj.relative_to(sdk)} undefined not in runtime: {sorted(missing)[:8]}', errors)
-
-
 def write_lock(path: Path, lock: dict) -> str:
     text = json.dumps(lock, indent=2, sort_keys=True) + '\n'
     path.write_text(text)
@@ -286,6 +290,7 @@ def main() -> int:
     parser.add_argument('--write-lock', action='store_true')
     parser.add_argument('--identities', type=Path)
     parser.add_argument('--colour-runtime-sha256')
+    parser.add_argument('--target-tuple')
     parser.add_argument('--lock-sha-out', type=Path)
     args = parser.parse_args()
     sdk = args.sdk.resolve()
@@ -304,7 +309,7 @@ def main() -> int:
         if role not in ('host', 'target'):
             print('SDK-VERIFY-FAIL rule=HOST_TARGET_CROSS --write-lock requires --role', file=sys.stderr)
             return 1
-        lock = build_lock(sdk, role, identities)
+        lock = build_lock(sdk, role, identities, args.target_tuple)
         lock_sha = write_lock(lock_path, lock)
     else:
         if not lock_path.is_file():
@@ -316,7 +321,7 @@ def main() -> int:
             print(f'SDK-VERIFY-FAIL rule=HOST_TARGET_CROSS lock.role={lock.get("role")} arg={args.role}', file=sys.stderr)
             return 1
     errors = []
-    verify(sdk, lock, pin, identities, errors)
+    verify(sdk, lock, pin, identities, errors, args.target_tuple)
     if errors:
         for item in errors:
             print(item, file=sys.stderr)

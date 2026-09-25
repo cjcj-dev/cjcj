@@ -458,6 +458,9 @@ stdlib_build() {
   script='cd "$1" && rm -rf build/build && python3 build.py clean && python3 build.py build -t relwithdebinfo --jobs "$2" --target-lib="$3" && python3 build.py install --prefix "$4"'
   cmd "env -i HOME=$(printf '%q' "$BUILD_HOME") TMPDIR=$(printf '%q' "$BUILD_TMPDIR") CANGJIE_HOME=$(printf '%q' "$sdk") LD_LIBRARY_PATH=$(printf '%q' "$ld") PATH=$(printf '%q' "$sdk/bin:$sdk/tools/bin:$sdk/third_party/llvm/bin:/usr/bin:/bin") cjHeapSize=$(printf '%q' "$STD_BUILD_HEAP") bash -c $(printf '%q' "$script") bash $(printf '%q' "$STDSRC") $(printf '%q' "$STD_BUILD_JOBS") $(printf '%q' "$target_lib") $(printf '%q' "$prefix")"
   assert_std_install_shape "$prefix" "$compare_prefix" "$label"
+  if [ -f "$sdk/bin/cjc" ] || [ "$DRY" -eq 1 ]; then
+    cmd "python3 -c 'import hashlib,json,sys; h=hashlib.sha256(open(sys.argv[1],\"rb\").read()).hexdigest(); open(sys.argv[2],\"w\").write(json.dumps({\"compiler_sha256\":h})+chr(10))' $(printf '%q' "$sdk/bin/cjc") $(printf '%q' "$prefix/std-producer.json")"
+  fi
 }
 
 assert_cjcj_root() {

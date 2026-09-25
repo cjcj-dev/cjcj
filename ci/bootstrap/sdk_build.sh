@@ -12,7 +12,10 @@
 #   ⭐ **换漏位置 / 换到不存在的位置** ⇒ 我在两份任务书里写过"llc 有两个位置"，
 #     ⭐ 实测原厂与 stageB **只有 `third_party/llvm/bin/llc`**，⭐ 而 driver 也只搜这一个
 #     （`packages/driver/src/CJNATIVEBackend.cj:56-58` · `ToolChain.cj:482`）
-#     ⇒ ⭐⭐ 本工具只替换**基线里已存在**的位置，⛔ 不凭猜测新建路径
+#   ⇒ ⭐⭐ 本工具只替换**基线里已存在**的位置，⛔ 不凭猜测新建路径
+#   ⭐ 手拼 SDK（不经本脚本装配，或未经同目录 sdk_verify.py 复核
+#     std-producer.json / CJRT-COMMIT / llc·opt·ld.lld·libLLVM 的 CJLLVM-COMMIT）
+#     不作验收证据。使用前必须先跑 sdk_verify，并留下 SDK.lock.json 的 sha256。
 #
 # 用法:
 #   sdk_build.sh --from <基线SDK名或路径> --to <目标目录> --host|--target [选项]
@@ -572,6 +575,12 @@ if [ -n "$STD" ]; then
       [ "$s1" = "$s2" ] || die "std: $pair 与源 sha 不一致（半套装配）"
     done
     echo "  [std-prefix] replaced existing library files=$n (lib/ + runtime/lib/ same-round)"
+    if [ -f "$STD/std-producer.json" ]; then
+      cp -f "$STD/std-producer.json" "$TO/std-producer.json" || die "std-producer.json 写入失败"
+      echo "  [std-prefix] std-producer.json"
+    elif [ "$ROLE" = target ]; then
+      rm -f "$TO/std-producer.json"
+    fi
   else
     # 旧调用：只给 modules/<平台> —— ⭐ 这会留下 lib/ 与 runtime/lib/ 的基线 std
     # 080811 实账：半套 std 让 --version 绿、最小编译崩。fail-closed。
@@ -671,25 +680,30 @@ elif [ -f "$TO/bin/cjc" ] && [ ! -L "$TO/bin/cjc" ]; then
 elif [ -f "$TO/bin/cjc" ]; then
   _CJC_SHA=$(sha256sum "$TO/bin/cjc" | awk '{print $1}')
 fi
-_RT_COMMIT="${RUNTIME_COMMIT:-}"
-if [ -z "$_RT_COMMIT" ] && [ -f "$_PIN" ]; then
-  _RT_COMMIT=$(awk -F= '/^RUNTIME_REF=/ {print $2}' "$_PIN")
+_STD_SHA=''
+if [ -f "$TO/std-producer.json" ]; then
+  _STD_SHA=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("compiler_sha256") or "")' "$TO/std-producer.json" 2>/dev/null || true)
 fi
-python3 - "$_IDENT" "$ROLE" "$_CJC_SHA" "$_RT_COMMIT" <<'PY'
+_RT_COMMIT=''
+_RTSO="$TO/runtime/lib/$TARGET_TUPLE/libcangjie-runtime.so"
+if [ -f "$_RTSO" ]; then
+  _RT_COMMIT=$(strings "$_RTSO" 2>/dev/null | /usr/bin/grep -Eo 'CJRT-COMMIT:[0-9a-fA-F]{40}' | head -1 | cut -d: -f2 || true)
+fi
+python3 - "$_IDENT" "$ROLE" "$_CJC_SHA" "$_STD_SHA" "$_RT_COMMIT" <<'PY'
 import json, sys
-path, role, cjc, commit = sys.argv[1:5]
+path, role, cjc, std_sha, commit = sys.argv[1:6]
 payload = {
     "role": role,
     "cjc": {"compiler_sha256": cjc or None},
-    "std": {"compiler_sha256": cjc or None, "source": "sdk_build"},
-    "runtime": {"commit": commit or None},
+    "std": {"compiler_sha256": std_sha or None, "source": "std-producer.json"},
+    "runtime": {"commit": (commit or None), "source": "CJRT-COMMIT"},
     "llvm": {},
     "cjpm": {},
     "boundscheck": {"commit": commit or None},
 }
 open(path, "w").write(json.dumps(payload))
 PY
-python3 "$_SDK_VERIFY" --sdk "$TO" --role "$ROLE" --runtime-pin "$_PIN" --identities "$_IDENT" --write-lock \
+python3 "$_SDK_VERIFY" --sdk "$TO" --role "$ROLE" --runtime-pin "$_PIN" --identities "$_IDENT" --target-tuple "$TARGET_TUPLE" --write-lock \
   || { rm -f "$_IDENT"; die "sdk_verify 拒绝本枚 SDK（见 SDK-VERIFY-FAIL）"; }
 rm -f "$_IDENT"
 echo "SDK-BUILD-OK role=$ROLE from=$BASE to=$TO mask=$MASK"
