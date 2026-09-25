@@ -33,7 +33,8 @@ def main():
                              (args.sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so')})
     cases = {'closed': 'accept', 'interface': 'accept', 'tuple': 'accept',
              'missing': 'nonexhaustive', 'open_leaf': 'nonexhaustive',
-             'nested': 'nonexhaustive', 'selectorless': 'two_unreachable', 'control': 'accept'}
+             'nested': 'nonexhaustive', 'generic': 'nonexhaustive',
+             'tuple_missing': 'nonexhaustive', 'or_pattern': 'accept', 'selectorless': 'two_unreachable', 'control': 'accept'}
 
     def run(item):
         name, expectation = item
