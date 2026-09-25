@@ -12,10 +12,9 @@ import cjcj::sema.{CreateThrowException, GenerateTypeMapping, MemberMap, TypeMan
 import cjcj::sema.Desugar.AfterTypeCheck.LookupEnumMember
 import cjcj::sema.NativeFFI.{FFICreateOptionSomeRef, FFICreateOptionNoneRef, FFICreateOptionSomeCall, FFIGetOptionTy, CreateIsPtrNullCheckCall, CreateBoolMatch, CreateCall, CreateMemberCall, CreateSuperCall, CreateSuperRef, CreateThisCall, CreateThisRef, CreateType,
     CreateUnitType, GenericConfigInfo, GetActualTypeKind, GetArgsAndRetGenericActualTyVector, GetGenericActualType,
-    GetGenericInstType, GetInstantyForGenericTy, GetSingleArgumentAnnotationValue, GetStringDecl, GetTyByName,
+    GetGenericInstType, GetInstantyForGenericTy, GetStringDecl, GetTyByName,
     GetTypeByName, InitGenericConfigs, IsSuperConstructorCall, IsThisConstructorCall, ReplaceGenericTyForFunc,
     WithinFile, INIT_IDENT,
-    NSOBJECT_CLASS_IDENT, NSSTRING_CLASS_IDENT,
     WrapReturningLambdaCall, WrapReturningLambdaExpr}
 import cjcj::utils.{CJC_ABORT, CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_ASSERT_WITH_MSG, CJC_NULLPTR_CHECK, GET_OBJ_C_CLASS_IDENT,
     CFUNC_NAME, HAS_INITED_IDENT, NATIVE_HANDLE_GETTER_IDENT, NATIVE_HANDLE_IDENT, NATIVE_HANDLE_MARKER, OPTION_NONE_CTOR, REGISTRY_ID_IDENT,
@@ -3140,13 +3139,8 @@ public class InsertStringConversions <: Handler<InteropContext> {
                 continue
             }
             if (let Some(classDecl) <- (mirror as ClassDecl)) {
-                var foreignName = classDecl.identifier.Val()
-                if (let Some(customName) <-
-                    GetSingleArgumentAnnotationValue(classDecl, AstAnnotationKind.OBJ_C_MIRROR)) {
-                    foreignName = customName
-                }
-                if (foreignName == NSSTRING_CLASS_IDENT) {
-                    let funcDecl = (GetFuncMember(classDecl, IsGeneratedNSStringCtor) as FuncDecl).getOrThrow()
+                if (IsNSString(classDecl)) {
+                    let funcDecl = GetFuncMember(classDecl, IsGeneratedNSStringCtor).getOrThrow()
                     CJC_ASSERT(funcDecl.funcBody.getOrThrow().paramLists.size > 0)
                     let funcParams = funcDecl.funcBody.getOrThrow().paramLists[0].params
                     CJC_ASSERT(funcParams.size == 1)
@@ -3154,9 +3148,8 @@ public class InsertStringConversions <: Handler<InteropContext> {
                         CreateRefExpr(funcParams[0]), classDecl, classDecl.curFile)
                     funcDecl.funcBody.getOrThrow().body.getOrThrow().body.add(convertCall)
                 }
-                if (foreignName == NSOBJECT_CLASS_IDENT) {
-                    let funcDecl = (GetFuncMember(classDecl,
-                        IsGeneratedNSObjectToString) as FuncDecl).getOrThrow()
+                if (IsNSObject(classDecl)) {
+                    let funcDecl = GetFuncMember(classDecl, IsGeneratedNSObjectToString).getOrThrow()
                     let nativeHandle = GetNativeHandleField(classDecl).getOrThrow()
                     let convertCall = ctx.factory.CreateDescriptionAsStringCall(CreateRefExpr(nativeHandle))
                     funcDecl.funcBody.getOrThrow().body.getOrThrow().body.add(convertCall)
