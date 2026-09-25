@@ -14,6 +14,8 @@ import subprocess
 
 LINUX = 'linux_x86_64_cjnative'
 WINDOWS = 'windows_x86_64_cjnative'
+PIN = '4c4cbf53b44497103e76e2a47a8fa35f5d7a7287'
+PIN_STAMP = '__attribute__((used)) static const char cjrt_pin[] = "CJRT-COMMIT:' + PIN + '";'
 
 
 def sha(path):
@@ -36,8 +38,8 @@ def main():
     libs = root / 'libs'
     libs.mkdir()
     symbols = {
-        'mask': 'int g_cjLoadBadMask;',
-        'both': 'int g_cjLoadBadMask; int g_cjLoadBadMaskOffset; int g_cjLoadShift; int future_colour_export; int unrelated;',
+        'mask': 'int g_cjLoadBadMask; ' + PIN_STAMP,
+        'both': 'int g_cjLoadBadMask; int g_cjLoadBadMaskOffset; int g_cjLoadShift; int future_colour_export; int unrelated; ' + PIN_STAMP,
         'shift-undefined': 'extern int g_cjLoadShift; int *reference = &g_cjLoadShift;',
         'future-undefined': 'extern int future_colour_export; int *reference = &future_colour_export;',
         'common-undefined': 'extern int unrelated; int *reference = &unrelated;',
@@ -132,6 +134,8 @@ def main():
         shutil.copyfile('/bin/true', base / 'bin/cjc')
         (base / 'bin/cjc').chmod(0o755)
         (base / 'envsetup.sh').write_text(':\n')
+        cjc_sha = hashlib.sha256((base / 'bin/cjc').read_bytes()).hexdigest()
+        (base / 'std-producer.json').write_text(json.dumps({'compiler_sha256': cjc_sha}) + '\n')
         for tpl in order:
             directory = base / 'runtime/lib' / tpl
             directory.mkdir(parents=True)
@@ -174,6 +178,7 @@ def main():
             for rel in ('runtime/lib/' + LINUX + '/libcangjie-std-core.so', 'lib/libstdFFI.so'):
                 shutil.copyfile(libs / 'none.so', base / rel)
                 shutil.copyfile(libs / 'none.so', prefix / rel)
+            (prefix / 'std-producer.json').write_text(json.dumps({'compiler_sha256': cjc_sha}) + '\n')
             # The baseline has the opposite colour: the *installed* std decides.
             other = 'undefined' if pair_cases[name][2] == 'none' else 'none'
             shutil.copyfile(libs / (other + '.a'), std_dir / 'libcangjie-std-core.a')
