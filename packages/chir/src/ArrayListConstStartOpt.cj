@@ -1,5 +1,7 @@
 package cjcj::chir
 
+import std.collection.*
+
 // Upstream ArrayListConstStartOpt.cpp:17-21 (3935aa1c).
 private let ARRAY_TYPE_NAME: String = "Array"
 private let ARRAYLIST_TYPE_NAME: String = "ArrayList"
