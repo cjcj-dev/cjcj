@@ -39,9 +39,16 @@ private func CompilePreambleFixture(code: String, mapping: Bool): String {
     opts.UpdateCachedDirName("preamble")
     let instance = CompilerInstance(invocation, DiagnosticEngine())
     instance.buildTrie = false
-    let ok = instance.Compile(stage: CompileStage.DESUGAR_AFTER_SEMA)
+    var ok = false
+    try {
+        ok = instance.Compile(stage: CompileStage.DESUGAR_AFTER_SEMA)
+    } catch (ex: Exception) {
+        println("OBJC_PREAMBLE_FRONTEND_EXCEPTION ${ex}")
+    }
     println("OBJC_PREAMBLE_COMPILE mapping=${mapping} ok=${ok} dir=${dir}")
-    @Assert(ok)
+    // Keep compilation success mandatory, but also reach the file assertion if
+    // a later frontend step fails after writing the header (regression #273).
+    @Expect(ok)
     return dir + "/generated"
 }
 
