@@ -74,7 +74,7 @@ public class AttributeInfo {
             Attribute.SKIP_ANALYSIS, Attribute.DESERIALIZED, Attribute.INITIALIZER,
             Attribute.UNSAFE, Attribute.JAVA_MIRROR, Attribute.JAVA_IMPL,
             Attribute.OBJ_C_MIRROR, Attribute.HAS_INITED_FIELD, Attribute.JAVA_HAS_DEFAULT,
-            Attribute.PREVIOUSLY_DESERIALIZED, Attribute.DOES_NOT_THROW, Attribute.OBJ_C_IMPL, Attribute.NO_HEAP_ALLOC,
+            Attribute.PREVIOUSLY_DESERIALIZED, Attribute.DOES_NOT_THROW, Attribute.OBJ_C_IMPL, Attribute.MATCH_PATTERN, Attribute.PLUGIN_ADDED, Attribute.NO_HEAP_ALLOC,
             Attribute.NO_WRITE_BARRIER, Attribute.NO_WRITE_BARRIER_REC, Attribute.NO_STACK_GROW,
             Attribute.SYSTEM_STACK
         ]
