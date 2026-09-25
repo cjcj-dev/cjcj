@@ -2144,7 +2144,7 @@ extend ParserImpl {
             EnableModifierAttrs(ret, CheckDeclModifiers(modifiers, scopeKind, DefKind.CLASS))
             FFIParserImpl(this).CheckClassLikeSignature(ret, annos)
             SetPrimaryDecl(ret.identifier.Val(), isRawId: ret.identifier.IsRaw())
-            ParseClassLikeBody(ret, ScopeKind.CLASS_BODY)
+            ret.body = ParseClassBody(ret)
             RevertPrimaryDecl()
             ret.end = lastToken.End()
         }
@@ -2511,18 +2511,69 @@ extend ParserImpl {
         return ty.astKind == ASTKind.REF_TYPE || ty.astKind == ASTKind.QUALIFIED_TYPE
     }
 
+    // Upstream 293cf32a, src/Parse/ParseDecl.cpp:1079.
+    private func ParseClassBody(cd: ClassDecl): ClassBody {
+        let ret = ClassBody()
+        let brokenHeader = !Skip(TokenKind.LCURL)
+        if (brokenHeader) {
+            ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
+                ConvertToken(lookahead)).Emit()
+            ConsumeUntilDecl(TokenKind.LCURL)
+            if (!Skip(TokenKind.LCURL)) {
+                ret.EnableAttr(Attribute.HAS_BROKEN)
+                ret.EnableAttr(Attribute.IS_BROKEN)
+                return ret
+            }
+        }
+        // Parse a recovered body in class scope, including its matching closing brace.
+        ret.leftCurlPos = lastToken.Begin()
+        ret.begin = lookahead.Begin()
+        while (true) {
+            let hasNLorSEMI = SkipNLOrSemi()
+            if (CheckSkipRcurOrPrematureEnd(ret)) {
+                break
+            }
+            if (!ret.decls.isEmpty() && !hasNLorSEMI) {
+                DiagExpectSemiOrNewline()
+            }
+            let decl = ParseDecl(ScopeKind.CLASS_BODY)
+            if (decl.IsInvalid()) {
+                continue
+            }
+            SetMemberParentInheritableDecl(cd, decl)
+            if (let Some(ctor) <- (decl as FuncDecl)) {
+                if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
+                    if (cd.TestAttr(Attribute.OBJ_C_MIRROR)) {
+                        ctor.EnableAttr(Attribute.OBJ_C_MIRROR)
+                    }
+                    CheckInitCtorDeclBody(ctor)
+                }
+            }
+            if (let Some(fd) <- (decl as FuncDecl)) {
+                CheckClassLikeFuncBodyAbstractness(fd)
+            } else if (let Some(pd) <- (decl as PropDecl)) {
+                CheckClassLikePropAbstractness(pd)
+            }
+            CheckJavaInteropMember(decl)
+            CheckObjCInteropMember(decl)
+            if (decl.astKind == ASTKind.PRIMARY_CTOR_DECL && decl.identifier != cd.identifier) {
+                ret.decls.add(InvalidDecl(decl.begin))
+                continue
+            }
+            ret.decls.add(decl)
+        }
+        if (brokenHeader) {
+            // Delay HAS_BROKEN so a genuinely missing closing brace is still diagnosed.
+            ret.EnableAttr(Attribute.HAS_BROKEN)
+            ret.EnableAttr(Attribute.IS_BROKEN)
+        }
+        ret.end = lastToken.End()
+        return ret
+    }
+
     public func ParseClassLikeBody(ret: InheritableDecl, scopeKind: ScopeKind): Unit {
         if (!Skip(TokenKind.LCURL)) {
-            if (let Some(classDecl) <- (ret as ClassDecl)) {
-                ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
-                    ConvertToken(lookahead)).Emit()
-                ConsumeUntilDecl(TokenKind.LCURL)
-                Skip(TokenKind.LCURL)
-                let body = ClassBody()
-                body.EnableAttr(Attribute.HAS_BROKEN)
-                body.EnableAttr(Attribute.IS_BROKEN)
-                classDecl.body = body
-            } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+            if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
                 ParseDiagnoseRefactor(DiagKindRefactor.parse_expected_left_brace, lookahead,
                     ConvertToken(lookahead)).Emit()
                 let body = InterfaceBody()
@@ -2547,16 +2598,7 @@ extend ParserImpl {
         let leftCurl = lastToken.Begin()
         SetDeclBodyLeftCurl(ret, leftCurl)
         while (true) {
-            if (let Some(classDecl) <- (ret as ClassDecl)) {
-                let body = classDecl.body.getOrThrow()
-                let hasNLorSEMI = SkipNLOrSemi()
-                if (CheckSkipRcurOrPrematureEnd(body)) {
-                    break
-                }
-                if (!body.decls.isEmpty() && !hasNLorSEMI) {
-                    DiagExpectSemiOrNewline()
-                }
-            } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+            if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
                 SkipBlank(TokenKind.SEMI)
                 if (CheckSkipRcurOrPrematureEnd(interfaceDecl.body.getOrThrow())) {
                     break
@@ -2580,15 +2622,7 @@ extend ParserImpl {
             let member = ParseDecl(scopeKind)
             if (let Some(ctor) <- (member as FuncDecl)) {
                 if (ctor.TestAttr(Attribute.CONSTRUCTOR)) {
-                    if (let Some(classDecl) <- (ret as ClassDecl)) {
-                        if (classDecl.TestAttr(Attribute.JAVA_MIRROR)) {
-                            ctor.EnableAttr(Attribute.JAVA_MIRROR)
-                        }
-                        if (classDecl.TestAttr(Attribute.OBJ_C_MIRROR)) {
-                            ctor.EnableAttr(Attribute.OBJ_C_MIRROR)
-                        }
-                        CheckInitCtorDeclBody(ctor)
-                    } else if (let Some(structDecl) <- (ret as StructDecl)) {
+                    if (let Some(structDecl) <- (ret as StructDecl)) {
                         if (structDecl.TestAttr(Attribute.JAVA_MIRROR)) {
                             ctor.EnableAttr(Attribute.JAVA_MIRROR)
                         }
@@ -2598,8 +2632,7 @@ extend ParserImpl {
             }
             if (!member.IsInvalid()) {
                 SetMemberParentInheritableDecl(ret, member)
-                if (ScopeKindEquals(scopeKind, ScopeKind.CLASS_BODY) ||
-                    ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) {
+                if (ScopeKindEquals(scopeKind, ScopeKind.INTERFACE_BODY)) {
                     if (let Some(funcDecl) <- (member as FuncDecl)) {
                         CheckClassLikeFuncBodyAbstractness(funcDecl)
                     } else if (let Some(propDecl) <- (member as PropDecl)) {
@@ -2610,12 +2643,7 @@ extend ParserImpl {
                 }
                 // C++: Parse/ParseDecl.cpp:1150-1153 / 1602-1605
                 if (member.astKind == ASTKind.PRIMARY_CTOR_DECL) {
-                    if (let Some(classDecl) <- (ret as ClassDecl)) {
-                        if (member.identifier != classDecl.identifier) {
-                            AddBodyMember(ret, InvalidDecl(member.begin))
-                            continue
-                        }
-                    } else if (let Some(structDecl) <- (ret as StructDecl)) {
+                    if (let Some(structDecl) <- (ret as StructDecl)) {
                         if (member.identifier != structDecl.identifier) {
                             AddBodyMember(ret, InvalidDecl(member.begin))
                             continue
@@ -2625,9 +2653,7 @@ extend ParserImpl {
                 AddBodyMember(ret, member)
             }
         }
-        if (let Some(classDecl) <- (ret as ClassDecl)) {
-            classDecl.body.getOrThrow().end = lastToken.End()
-        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+        if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
             let body = interfaceDecl.body.getOrThrow()
             body.end = body.rightCurlPos + 1
         } else if (let Some(structDecl) <- (ret as StructDecl)) {
@@ -2679,12 +2705,7 @@ extend ParserImpl {
     }
 
     private func SetDeclBodyLeftCurl(ret: InheritableDecl, pos: Position): Unit {
-        if (let Some(classDecl) <- (ret as ClassDecl)) {
-            let body = ClassBody()
-            body.leftCurlPos = pos
-            body.begin = pos
-            classDecl.body = body
-        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+        if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
             let body = InterfaceBody()
             body.leftCurlPos = pos
             body.begin = pos
@@ -2700,11 +2721,7 @@ extend ParserImpl {
     }
 
     private func AddBodyMember(ret: InheritableDecl, member: Decl): Unit {
-        if (let Some(classDecl) <- (ret as ClassDecl)) {
-            if (let Some(body) <- classDecl.body) {
-                body.decls.add(member)
-            }
-        } else if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
+        if (let Some(interfaceDecl) <- (ret as InterfaceDecl)) {
             if (let Some(body) <- interfaceDecl.body) {
                 body.decls.add(member)
             }

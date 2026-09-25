@@ -17,6 +17,7 @@ import cjcj::chir.StoreElementByName
 import cjcj::chir.StoreElementRef
 import cjcj::chir.Type
 import cjcj::chir.Value
+import cjcj::option.OptimizationLevel
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, CJC_ASSERT_WITH_MSG}
 
 private let LLVM_STRUCT_TYPE_KIND: Int32 = 10
@@ -218,7 +219,7 @@ public func GenerateStore(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValu
     // is the destination address (a Ref). See chir Store.GetValue()/GetLocation().
     let valueOperand = chirExpr.GetOperand(0)
     let addrOperand = chirExpr.GetOperand(1)
-    if (ShouldSkipNoOpStore(valueOperand, addrOperand)) {
+    if (ShouldSkipNoOpStore(irBuilder.GetCGModule(), valueOperand, addrOperand)) {
         return LLVMNullValue()
     }
     irBuilder.EmitLocation(CHIRExprWrapper(chirExpr), removable: true)
@@ -715,7 +716,7 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
             let destElementType = destAddr.GetCGType().getOrThrow().GetPointerElementType().getOrThrow()
             return irBuilder.CreateStore(CGValue(tmp, destElementType), destAddr)
         }
-        if (ShouldSkipNoOpStore(rhs, lhs)) {
+        if (ShouldSkipNoOpElementStore(rhs, lhs)) {
             return LLVMNullValue()
         }
         irBuilder.EmitLocation(CHIRExprWrapper(storeElementRef))
@@ -730,7 +731,7 @@ public func GenerateStoreElementRef(irBuilder: IRBuilder2, chirExpr: Expression)
         if (let Some(locationTy) <- storeByName.GetLocation().GetType()) {
             if (let Some(path) <- ResolveElementPathByNames(
                 irBuilder.GetCGModule(), locationTy, storeByName.GetNames())) {
-                if (ShouldSkipNoOpStore(storeByName.GetValue(), storeByName.GetLocation())) {
+                if (ShouldSkipNoOpElementStore(storeByName.GetValue(), storeByName.GetLocation())) {
                     return LLVMNullValue()
                 }
                 let byNameValue = irBuilder.GetCGModule().GetMappedCGValue(storeByName.GetValue())
@@ -822,7 +823,36 @@ private func IsVArrayPtrValue(cgType: CGType): Bool {
     return elementType.IsVArrayType()
 }
 
-private func ShouldSkipNoOpStore(value: Value, location: Value): Bool {
+private func ShouldSkipNoOpStore(cgMod: CGModule, value: Value, location: Value): Bool {
+    if (IsConstantNullClassValue(value)) {
+        return true
+    }
+    return IsNoOpStoreToRet(cgMod, value, location)
+}
+
+// Upstream 1bac07c4 MemoryExprDispatcher.cpp:69, IsNoOpStoreToRet.
+private func IsNoOpStoreToRet(cgMod: CGModule, value: Value, location: Value): Bool {
+    let localLocation = (location as LocalVar) ?? return false
+    if (!localLocation.IsRetValue()) {
+        return false
+    }
+    if (value.GetType().getOrThrow().IsUnit()) {
+        return true
+    }
+    if (cgMod.GetCGContext().GetCompileOptions().optimizationLevel == OptimizationLevel.O0) {
+        return false
+    }
+    if (!(value is LocalVar)) {
+        return false
+    }
+    let valueCG = cgMod.GetMappedValue(value) ?? return false
+    let addrCG = cgMod.GetMappedValue(location) ?? return false
+    return valueCG.GetRawValue().toUIntNative() == addrCG.GetRawValue().toUIntNative()
+}
+
+// Element stores address a field, not the return slot itself. Upstream
+// MemoryExprDispatcher.cpp:285-290 retains only null-class and unit-ret skips here.
+private func ShouldSkipNoOpElementStore(value: Value, location: Value): Bool {
     if (IsConstantNullClassValue(value)) {
         return true
     }
