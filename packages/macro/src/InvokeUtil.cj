@@ -311,6 +311,7 @@ public class RuntimeHandle {
     public var path: String = ""
     public var symbol: String = ""
     public var opened: Bool = false
+    public var runtimeManaged: Bool = false
     public var raw: CPointer<Unit> = CPointer<Unit>()
     public var symbolRaw: CPointer<Unit> = CPointer<Unit>()
 
@@ -492,6 +493,30 @@ public func OpenSymbolTableSafely(path: String): RuntimeHandle {
     return handle
 }
 
+// Cangjie images register runtime metadata. Pair the runtime loader's path
+// handle with FindCJSymbol/UnloadCJLibrary, rather than bypassing it with dlclose.
+public func OpenMacroLibrary(path: String): RuntimeHandle {
+    // The runtime owns one entry per image. Repeated calls into the same macro
+    // package reuse that entry rather than acquiring unmatched native references.
+    for (opened in openedLibHandles) {
+        if (opened.opened && opened.runtimeManaged && opened.path == path) {
+            return opened
+        }
+    }
+    let handle = RuntimeHandle(path)
+    let load = GetHostRuntimeMethodPointer("LoadCJLibrary")
+    if (load.isNull()) {
+        return handle
+    }
+    try (libraryName = unsafe { LibC.mallocCString(path) }.asResource()) {
+        handle.opened = unsafe { CFunc<(CString) -> Int32>(load)(libraryName.value) } == 0
+        handle.runtimeManaged = handle.opened
+    } catch (e: Exception) {
+        handle.opened = false
+    }
+    return handle
+}
+
 public func GetMethod(handle: RuntimeHandle, name: String): Option<String> {
     let pointer = GetMethodPointer(handle, name)
     if (pointer.isNull()) {
@@ -502,12 +527,24 @@ public func GetMethod(handle: RuntimeHandle, name: String): Option<String> {
 }
 
 public func GetMethodPointer(handle: RuntimeHandle, name: String): CPointer<Unit> {
-    if (!handle.opened || handle.raw.isNull() || name.isEmpty()) {
+    if (!handle.opened || (!handle.runtimeManaged && handle.raw.isNull()) || name.isEmpty()) {
         return CPointer<Unit>()
     }
     var result = CPointer<Unit>()
     try (symbolName = unsafe { LibC.mallocCString(name) }.asResource()) {
-        let symbol = getNativeSymbol(handle.raw, symbolName.value)
+        var symbol = CPointer<Unit>()
+        if (handle.runtimeManaged) {
+            let find = GetHostRuntimeMethodPointer("FindCJSymbol")
+            if (!find.isNull()) {
+                try (libraryName = unsafe { LibC.mallocCString(handle.path) }.asResource()) {
+                    symbol = unsafe {
+                        CFunc<(CString, CString) -> CPointer<Unit>>(find)(libraryName.value, symbolName.value)
+                    }
+                }
+            }
+        } else {
+            symbol = getNativeSymbol(handle.raw, symbolName.value)
+        }
         if (!symbol.isNull()) {
             handle.symbol = name
             handle.symbolRaw = symbol
@@ -541,11 +578,26 @@ private func GetHostRuntimeMethodPointer(name: String): CPointer<Unit> {
 }
 
 public func CloseSymbolTable(handle: RuntimeHandle): Int64 {
-    if (!handle.opened || handle.raw.isNull()) {
-        handle.opened = false
+    if (!handle.opened) {
         return 0
     }
-    let ret = closeNativeLibrary(handle.raw)
+    var ret: Int64 = 0
+    if (handle.runtimeManaged) {
+        let unload = GetHostRuntimeMethodPointer("UnloadCJLibrary")
+        if (unload.isNull()) {
+            return -1
+        }
+        try (libraryName = unsafe { LibC.mallocCString(handle.path) }.asResource()) {
+            ret = Int64(unsafe { CFunc<(CString) -> Int32>(unload)(libraryName.value) })
+        } catch (e: Exception) {
+            return -1
+        }
+    } else if (!handle.raw.isNull()) {
+        ret = closeNativeLibrary(handle.raw)
+    }
+    if (ret != 0) {
+        return ret
+    }
     handle.opened = false
     handle.raw = CPointer<Unit>()
     handle.symbolRaw = CPointer<Unit>()
@@ -712,10 +764,15 @@ public class RuntimeInit {
     }
 
     private func CloseMacroDynamicLibrary(): Unit {
-        for (opened in openedLibHandles) {
-            let _ = CloseSymbolTable(opened)
+        // Reverse load order: dependencies remain available until their users close.
+        while (!openedLibHandles.isEmpty()) {
+            let opened = openedLibHandles[openedLibHandles.size - 1]
+            if (CloseSymbolTable(opened) != 0) {
+                Errorln("close macro related dynamic library failed: ")
+                return
+            }
+            openedLibHandles.remove(at: openedLibHandles.size - 1)
         }
-        ClearOpenedLibHandles()
     }
 }
 

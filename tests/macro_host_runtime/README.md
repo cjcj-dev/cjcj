@@ -1,7 +1,8 @@
 # Cangjie macro host lifecycle (#258)
 
 `minmac/defs.cj` defines an identity macro. `use.cj` invokes it and must produce
-`expandedById` in binary CHIR and exit normally. `plain.cj` is the no-macro
+`expandedById` in binary CHIR and exit normally. `repeated.cj` calls the same
+macro package twice to exercise image ownership. `plain.cj` is the no-macro
 control. `run.py` evaluates every assertion even if an earlier assertion fails.
 It records compiler rc, decoded function names, ELF/runtime SHA256, process maps,
 loader bindings, CPU affinity, uptime and wall time. It uses no product probes.
@@ -29,7 +30,9 @@ python3 tests/macro_host_runtime/run.py \
 ```
 
 The output directory must be new. On Linux the loader binding assertions require
-both `RunCJTask` and `ReleaseHandle` to resolve to `--host-runtime`. The lifecycle
+both `RunCJTask` and `ReleaseHandle` to resolve to `--host-runtime`, and the
+macro image to be released through the loader (its link-map destruction event).
+Add `--parallel` to cover `--parallel-macro-expansion`. The lifecycle
 assertion includes the process exit after CHIR generation, rather than accepting
 an artifact left by a failed process. Run the same suite on the baseline and on
 product mutations restoring foreign-runtime binding and process-level shutdown;
