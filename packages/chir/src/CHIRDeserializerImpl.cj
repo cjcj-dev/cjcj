@@ -2813,6 +2813,7 @@ class CHIRDeserializerImpl {
             case 359u16 => IntrinsicKind.GET_TYPE_FOR_TYPE_PARAMETER
             case 360u16 => IntrinsicKind.IS_SUBTYPE_TYPES
             case 361u16 => IntrinsicKind.EXCLUSIVE_SCOPE
+            case 362u16 => IntrinsicKind.CANONICALIZE_STRING_BACKING
             case _ =>
                 CJC_ABORT()
                 IntrinsicKind.NOT_INTRINSIC
