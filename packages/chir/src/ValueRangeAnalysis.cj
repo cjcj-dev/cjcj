@@ -419,7 +419,7 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
         if (kind == ExprKind.MULTIBRANCH) {
             return HandleMultiBranchTerminator(state, (terminator as MultiBranch).getOrThrow())
         }
-        if (kind == ExprKind.NUMERIC_CAST_WITH_EXCEPTION) {
+        if (kind == ExprKind.TRY_NUMERIC_CAST) {
             HandleTypeCastExpression(state, terminator)
             return None
         }

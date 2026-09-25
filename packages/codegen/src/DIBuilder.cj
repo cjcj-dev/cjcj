@@ -562,7 +562,7 @@ public class DIBuilder {
     private func HandleDefaultParamLocation(chirNode: CHIRExprWrapper, scope: LLVMMetadataRef): LLVMMetadataRef {
         let position = chirNode.GetExpression().GetDebugLocation()
         let exprKind = chirNode.GetExpression().GetExprKind()
-        let isApply = exprKind == ExprKind.APPLY || exprKind == ExprKind.APPLY_WITH_EXCEPTION
+        let isApply = exprKind == ExprKind.APPLY || exprKind == ExprKind.TRY_APPLY
         if (!position.GetBeginPos().IsZero() && isApply) {
             curLocation = Position(position.GetBeginPos().line, position.GetBeginPos().column)
         }

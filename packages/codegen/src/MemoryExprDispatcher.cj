@@ -17,7 +17,7 @@ private let LLVM_POINTER_TYPE_KIND: Int32 = 12
 
 public func HandleMemoryExpression(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
     let kind = chirExpr.GetExprKind()
-    if (kind == ExprKind.ALLOCATE || kind == ExprKind.ALLOCATE_WITH_EXCEPTION) {
+    if (kind == ExprKind.ALLOCATE || kind == ExprKind.TRY_ALLOCATE) {
         if (let Some(allocateExpr) <- (chirExpr as Allocate)) {
             if (let Some(retValueStorage) <- TryGetSpecialRetValueStorage(irBuilder, allocateExpr)) {
                 return retValueStorage

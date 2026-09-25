@@ -3,7 +3,7 @@ package cjcj::codegen
 import std.collection.*
 import cjcj::chir.Attribute
 import cjcj::chir.Apply
-import cjcj::chir.ApplyWithException
+import cjcj::chir.TryApply
 import cjcj::chir.CustomType
 import cjcj::chir.Expression
 import cjcj::chir.FuncType
@@ -25,13 +25,13 @@ public func EmitCallLikeExpression(irBuilder: IRBuilder2, chirExpr: Expression):
         return GenerateApply(irBuilder, applyExpr.GetCallee(), applyExpr.GetArgs(),
             thisType: applyExpr.GetThisType(), instTypeArgs: applyExpr.GetInstantiatedTypeArgs())
     }
-    if (let Some(applyWithExceptionExpr) <- (chirExpr as ApplyWithException)) {
-        let apply = CHIRApplyWrapper(applyWithExceptionExpr)
+    if (let Some(tryApplyExpr) <- (chirExpr as TryApply)) {
+        let apply = CHIRApplyWrapper(tryApplyExpr)
         irBuilder.SetCHIRExpr(apply)
         irBuilder.EmitLocation(apply)
-        return GenerateApply(irBuilder, applyWithExceptionExpr.GetCallee(), applyWithExceptionExpr.GetArgs(),
-            thisType: applyWithExceptionExpr.GetThisType(),
-            instTypeArgs: applyWithExceptionExpr.GetInstantiatedTypeArgs())
+        return GenerateApply(irBuilder, tryApplyExpr.GetCallee(), tryApplyExpr.GetArgs(),
+            thisType: tryApplyExpr.GetThisType(),
+            instTypeArgs: tryApplyExpr.GetInstantiatedTypeArgs())
     }
     if (chirExpr.GetNumOfNonSuccessorOperands() == 0) {
         return LLVMNullValue()

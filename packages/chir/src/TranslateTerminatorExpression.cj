@@ -11,14 +11,14 @@ public func TranslateTerminatorExpression(compiler: CHIR2BCHIR, context: CHIR2BC
         case ExprKind.MULTIBRANCH => TranslateMultiBranch(compiler, context, expr)
         case ExprKind.EXIT => TranslateExitTerminator(compiler, context, expr)
         case ExprKind.RAISE_EXCEPTION => TranslateRaiseTerminator(compiler, context, expr)
-        case ExprKind.APPLY_WITH_EXCEPTION => TranslateApplyWithExceptionTerminator(compiler, context, expr)
-        case ExprKind.INVOKE_WITH_EXCEPTION => TranslateInvokeWithExceptionTerminator(compiler, context, expr)
-        case ExprKind.INVOKESTATIC_WITH_EXCEPTION => context.definition.PushOp(OpCode.ABORT)
-        case ExprKind.NEG_WITH_EXCEPTION | ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION |
-            ExprKind.MUL_WITH_EXCEPTION | ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION |
-            ExprKind.EXP_WITH_EXCEPTION | ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
+        case ExprKind.TRY_APPLY => TranslateTryApplyTerminator(compiler, context, expr)
+        case ExprKind.TRY_INVOKE => TranslateTryInvokeTerminator(compiler, context, expr)
+        case ExprKind.TRY_INVOKESTATIC => context.definition.PushOp(OpCode.ABORT)
+        case ExprKind.TRY_NEG | ExprKind.TRY_ADD | ExprKind.TRY_SUB |
+            ExprKind.TRY_MUL | ExprKind.TRY_DIV | ExprKind.TRY_MOD |
+            ExprKind.TRY_EXP | ExprKind.TRY_LSHIFT | ExprKind.TRY_RSHIFT =>
             TranslateIntOpWithException(compiler, context, expr)
-        case ExprKind.ALLOCATE_WITH_EXCEPTION => TranslateAllocateWithExceptionTerminator(compiler, context, expr)
+        case ExprKind.TRY_ALLOCATE => TranslateTryAllocateTerminator(compiler, context, expr)
         case _ => context.definition.PushOp(OpCode.ABORT)
     }
 }
@@ -127,14 +127,14 @@ private func TranslateRaiseTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRC
     }
 }
 
-private func TranslateApplyWithExceptionTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
+private func TranslateTryApplyTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     compiler.PushOpCodeWithAnnotations(context, OpCode.APPLY_EXC, expr,
         args: ArrayList<Int64>([expr.GetNumOfNonSuccessorOperands()]), storeCodePos: true)
     TranslateTryTerminatorJumps(compiler, context, expr.AsTerminator().getOrThrow())
 }
 
-private func TranslateInvokeWithExceptionTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
+private func TranslateTryInvokeTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     TranslateInvokeExpression(compiler, context, expr, true)
     TranslateTryTerminatorJumps(compiler, context, expr.AsTerminator().getOrThrow())
@@ -142,7 +142,7 @@ private func TranslateInvokeWithExceptionTerminator(compiler: CHIR2BCHIR, contex
 
 private func TranslateIntOpWithException(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
-    if (expr.IsUnaryExpressionWithException() || expr.IsBinaryExpressionWithException()) {
+    if (expr.IsTryUnaryExpression() || expr.IsTryBinaryExpression()) {
         let opCode = BCHIRBinaryExprKindWithExceptionToOpCode(PlainExprKind(expr.GetExprKind()))
         if (opCode == OpCode.INVALID) {
             context.definition.PushOp(OpCode.NOT_SUPPORTED)
@@ -162,7 +162,7 @@ private func TranslateIntOpWithException(compiler: CHIR2BCHIR, context: CHIR2BCH
     }
 }
 
-private func TranslateAllocateWithExceptionTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
+private func TranslateTryAllocateTerminator(compiler: CHIR2BCHIR, context: CHIR2BCHIRContext,
     expr: Expression): Unit {
     TranslateAllocateExpression(compiler, context, expr, true)
     TranslateTryTerminatorJumps(compiler, context, expr.AsTerminator().getOrThrow())

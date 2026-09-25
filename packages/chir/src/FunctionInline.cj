@@ -256,7 +256,7 @@ private func InWhiteList(fn: Function): Bool {
 private func OnlyCalledOnce(fn: Function): Bool {
     var alreadyHasUser = false
     for (user in fn.GetUsers()) {
-        if (user.GetExprKind() == ExprKind.APPLY || user.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION) {
+        if (user.GetExprKind() == ExprKind.APPLY || user.GetExprKind() == ExprKind.TRY_APPLY) {
             if (alreadyHasUser) {
                 return false
             }
