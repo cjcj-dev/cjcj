@@ -187,7 +187,7 @@ public class Devirtualization {
             if (let Some(invoke) <- (expr as Invoke)) { tryCollect(state, InvokeBase(invoke)) }
         }
         let after = { _: TypeDomain, _: Expression, _: Int64 => }
-        let terminator = { state: TypeDomain, expr: Terminator, _: Option<Block> =>
+        let terminator = { state: TypeDomain, expr: Expression, _: Option<Block> =>
             if (let Some(invoke) <- (expr as InvokeWithException)) { tryCollect(state, InvokeBase(invoke)) }
         }
         analysisResult.VisitWith(before, after, terminator)
