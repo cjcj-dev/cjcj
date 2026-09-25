@@ -207,7 +207,9 @@ make_sdk_fixture() {
 check_exit_receipts() {
   new_tmp
   local script out rc recorded
-  for script in run.sh exceptions/run.sh library/run.sh library/execute.sh unload/run.sh; do
+  local -a scripts=(run.sh exceptions/run.sh library/run.sh library/execute.sh unload/run.sh)
+  if [ "$#" -gt 0 ]; then scripts=("$1"); fi
+  for script in "${scripts[@]}"; do
     out="$TMP/$script.receipts"
     mkdir -p "$out"
     rc=0
@@ -693,7 +695,8 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-test}" in
   check-exit-receipts)
-    check_exit_receipts
+    shift
+    check_exit_receipts "$@"
     ;;
   check-sdk-literal-prefix)
     check_sdk_literal_prefix
