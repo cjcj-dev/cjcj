@@ -29,7 +29,7 @@ def main():
         'runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative',
         'third_party/llvm/lib', 'tools/lib')) + ':/usr/lib/x86_64-linux-gnu'
     imports = sorted((tree / 'target/release').glob('*@cjcj'))
-    archives = sorted((tree / 'target/release').rglob('libcjcj*.a'))
+    archives = sorted((tree / 'target/release').rglob('lib*@cjcj.a'))
     source = Path(__file__).with_name('main.cj').resolve()
     executable = out / 'hash-style-test'
     command = [str(sdk / 'bin/cjc'), str(source), '-o', str(executable)]

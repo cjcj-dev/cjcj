@@ -5,10 +5,10 @@ import cjcj::option.{ArchType, EnvironmentType, OSType, OutputMode}
 // Exercise the production backend selector and read the resulting Tool batches.
 // No linker execution or cross-target runtime installation is required.
 main(args: Array<String>): Int64 {
-    if (args.size != 2) { return 2 }
+    if (args.size != 1) { return 2 }
     var failures: Int64 = 0
     for ((name, environment) in [("ohos", EnvironmentType.OHOS), ("linux", EnvironmentType.GNU)]) {
-        let driver = Driver([], DiagnosticEngine(), executableName: args[1] + "/bin/cjc")
+        let driver = Driver([], DiagnosticEngine(), executableName: args[0] + "/bin/cjc")
         let options = driver.driverOptions
         options.target.os = OSType.LINUX
         options.target.arch = ArchType.X86_64
