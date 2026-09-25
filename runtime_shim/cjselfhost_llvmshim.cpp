@@ -24,6 +24,9 @@
 //         src/CodeGen/Utils/CGUtils.cpp:250-255  llvm::dyn_cast<llvm::Constant>(value).
 //   IRBuilder2::IsGlobalVariableBasePtr support:
 //         src/CodeGen/CJNative/CJNativeIRBuilder.cpp:456-459  Value::stripInBoundsOffsets().
+//   IRBuilder2 fast-math default flags:
+//         src/CodeGen/IRBuilder.cpp:19-22 and IRBuilder.h:34-37
+//         FastMathFlags::setFast + IRBuilder::setFastMathFlags.
 //   DIBuilder subprogram support:
 //         src/CodeGen/DIBuilder.cpp:204-207, 282-283, 455-476  C++ overloads not exposed exactly by LLVM-C.
 //   DIBuilder composite type support:
@@ -585,10 +588,17 @@ extern "C" LLVMValueRef LLVMSelfhostCreateCall(LLVMBuilderRef Builder, LLVMTypeR
 	    return nullptr;
 	}
 
-	extern "C" LLVMValueRef LLVMSelfhostStripInBoundsOffsets(LLVMValueRef Value)
-	{
-	    return wrap(unwrap(Value)->stripInBoundsOffsets());
-	}
+extern "C" LLVMValueRef LLVMSelfhostStripInBoundsOffsets(LLVMValueRef Value)
+{
+    return wrap(unwrap(Value)->stripInBoundsOffsets());
+}
+
+extern "C" void LLVMSelfhostBuilderSetFastMath(LLVMBuilderRef Builder)
+{
+    FastMathFlags fmf;
+    fmf.setFast(true);
+    unwrap(Builder)->setFastMathFlags(fmf);
+}
 
 	extern "C" LLVMValueRef LLVMSelfhostCreateAtomicCmpXchg(
 	    LLVMBuilderRef Builder, LLVMValueRef Ptr, LLVMValueRef Cmp, LLVMValueRef NewVal)
