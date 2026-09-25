@@ -25,6 +25,8 @@ new_tmp() {
 refresh_tuple_sums() {
   (
     cd "$TMP/colour-tuple" || exit 1
+    # SHA256SUMS is explicitly excluded from find; it is only the output.
+    # shellcheck disable=SC2094
     find . -type f ! -name SHA256SUMS -print | sort | xargs sha256sum > SHA256SUMS
   )
 }
@@ -200,6 +202,60 @@ make_sdk_fixture() {
   printf 'int g_cjLoadBadMask;\n' > "$TMP/colour-reference.c"
   cc -shared -fPIC "$TMP/colour-reference.c" -o "$TMP/colour-reference.so"
   printf '%s\n' '#!/usr/bin/env bash' 'export PATH="$(dirname "${BASH_SOURCE[0]}")/bin:$PATH"' > "$base/envsetup.sh"
+}
+
+check_exit_receipts() {
+  new_tmp
+  local script out rc recorded
+  local -a scripts=(run.sh exceptions/run.sh library/run.sh library/execute.sh unload/run.sh)
+  if [ "$#" -gt 0 ]; then scripts=("$1"); fi
+  for script in "${scripts[@]}"; do
+    out="$TMP/$script.receipts"
+    mkdir -p "$out"
+    rc=0
+    # Missing input files stop before compilation; the EXIT receipt must retain
+    # that real script status, wall time and final uptime on this failure path.
+    env LITERAL_OUT="$out" CANGJIE_HOME="$TMP/missing-sdk" \
+      LITERAL_HOST="$TMP/missing-host" LITERAL_RUNTIME="$TMP/missing-runtime" \
+      LITERAL_RUNTIME_HEADERS="$TMP/missing-headers" LITERAL_ARTIFACTS="$TMP/missing-artifacts" \
+      LITERAL_CORES=0 bash "$ROOT/../../test/heap_string_literals/$script" > "$out/output.log" 2>&1 || rc=$?
+    [ "$rc" -ne 0 ] || fail EXIT-RECEIPT "missing inputs unexpectedly accepted: $script"
+    [ -f "$out/run.rc" ] || fail EXIT-RECEIPT "status receipt absent: $script rc=$rc"
+    recorded=$(cat "$out/run.rc")
+    [ "$recorded" = "$rc" ] || fail EXIT-RECEIPT "status mismatch: $script process=$rc receipt=$recorded"
+    /usr/bin/grep -Eq '^wall=[0-9]+$' "$out/wall.txt" || fail EXIT-RECEIPT "wall receipt absent: $script"
+    [ -s "$out/uptime-after.txt" ] || fail EXIT-RECEIPT "uptime receipt absent: $script"
+    echo "PASS EXIT-RECEIPT script=$script process=$rc receipt=$recorded"
+  done
+}
+
+check_sdk_literal_prefix() {
+  new_tmp
+  make_sdk_fixture
+  local tuple=linux_x86_64_cjnative prefix="$TMP/std [literal]" dest="$TMP/sdk [literal]" log="$TMP/std-path.log" rel
+  mkdir -p "$TMP/sdk-base/modules/$tuple" "$prefix/modules/$tuple" \
+    "$prefix/lib/$tuple" "$prefix/runtime/lib/$tuple"
+  printf 'new module\n' > "$prefix/modules/$tuple/core.cjo"
+  printf 'int replacement_std;\n' > "$TMP/replacement-std.c"
+  cc -fPIC -c "$TMP/replacement-std.c" -o "$TMP/replacement-std.o"
+  ar rcs "$prefix/lib/$tuple/libcangjie-std-core.a" "$TMP/replacement-std.o"
+  cc -shared "$TMP/replacement-std.o" -o "$prefix/runtime/lib/$tuple/libcangjie-std-core.so"
+  cp "$prefix/runtime/lib/$tuple/libcangjie-std-core.so" "$prefix/lib/libstdFFI.so"
+  for rel in "runtime/lib/$tuple/libcangjie-std-core.so" lib/libstdFFI.so; do
+    cp "$TMP/sdk-base/runtime/lib/$tuple/libcangjie-runtime.so" "$TMP/sdk-base/$rel"
+  done
+  # Drive the actual installer, including its identity and installed-byte checks.
+  local rc=0
+  bash "$SDK_PRODUCT" --from "$TMP/sdk-base" --to "$dest" --host \
+    --std "$prefix" --colour-runtime "$TMP/colour-reference.so" \
+    --host-runtime "$TMP/sdk-base/runtime/lib/$tuple/libcangjie-runtime.so" > "$log" 2>&1 || rc=$?
+  cat "$log"
+  [ "$rc" -eq 0 ] || fail STD-LITERAL-PREFIX "installer rc=$rc"
+  for rel in "lib/$tuple/libcangjie-std-core.a" "runtime/lib/$tuple/libcangjie-std-core.so" lib/libstdFFI.so "modules/$tuple/core.cjo"; do
+    cmp -s "$prefix/$rel" "$dest/$rel" || fail STD-LITERAL-PREFIX "installed bytes differ: $rel"
+  done
+  /usr/bin/grep -Fq '[std-prefix] modules -> modules/' "$log" || fail STD-LITERAL-PREFIX 'display path retained the SDK prefix'
+  echo 'PASS STD-LITERAL-PREFIX real installer accepts spaces and brackets; installed bytes match'
 }
 
 run_sdk_so() {
@@ -640,6 +696,13 @@ check_shim_wiring() {
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-test}" in
+  check-exit-receipts)
+    shift
+    check_exit_receipts "$@"
+    ;;
+  check-sdk-literal-prefix)
+    check_sdk_literal_prefix
+    ;;
   check-dry-contract)
     make_dry_fixture
     dry_run > "$TMP/dry.log" || fail dry-run 'bootstrap CLI failed before assertions'
@@ -825,11 +888,15 @@ case "${1:-test}" in
     [ $# -eq 4 ] || fail ruler-control 'usage: ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA'
     # shellcheck disable=SC1090 # Product path is resolved above.
     source "$PRODUCT"
+    # Consumed by die() in the dynamically sourced bootstrap product.
+    # shellcheck disable=SC2034
     STAGE=test-ruler
     assert_official_opt_zero "$2"
     assert_colour_tuple "$3" "$4"
     ;;
   test)
+    bash "$0" check-exit-receipts || fail EXIT-RECEIPT "exit receipt regression"
+    bash "$0" check-sdk-literal-prefix || fail STD-LITERAL-PREFIX "literal prefix regression"
     make_dry_fixture
     dry_run > "$TMP/dry.log"
     check_dry_contract "$TMP/dry.log"
