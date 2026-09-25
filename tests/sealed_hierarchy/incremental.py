@@ -45,7 +45,7 @@ func use(x: Root): Int64 {
         source = d / 'input.cj'
         steps = []
         cmd = [str(args.compiler), str(source), '--experimental', '--incremental-compile',
-               '--emit-chir=raw', '--output-type=staticlib', '-o', str(d / 'output.chir')]
+               '--output-type=staticlib', '-o', str(d / 'output.a')]
         for phase, text in [('initial', before), ('changed', after)]:
             source.write_text(text)
             start = time.monotonic()
@@ -55,6 +55,8 @@ func use(x: Root): Int64 {
                                         timeout=120).returncode
                 except subprocess.TimeoutExpired:
                     rc = 124
+            cache_log = '\n'.join(p.read_text() for p in (d / '.cached').rglob('*.log'))
+            (d / (phase + '-incremental.log')).write_text(cache_log)
             steps.append(dict(phase=phase, rc=rc, wall=time.monotonic()-start,
                               source_sha256=hashlib.sha256(text.encode()).hexdigest()))
         log = (d / 'changed.log').read_text()
@@ -64,6 +66,10 @@ func use(x: Root): Int64 {
         passed = steps[0]['rc'] == 0 and steps[1]['rc'] == (1 if rollback else 0)
         if rollback:
             passed = passed and ('not exhaustive' in log.lower() or 'non-exhaustive' in log.lower())
+            passed = passed and 'changed subtype of sealed type:' in cache_log and 'full sema' in cache_log
+        else:
+            passed = passed and 'incremental compilation triggered' in cache_log
+        passed = passed and 'load cached info failed' not in cache_log
         print(f'ASSERT {name}.hierarchy_rollback {"PASS" if passed else "FAIL"}', flush=True)
         results['cases'][name] = dict(command=cmd, steps=steps, passed=passed, rollback=rollback)
     results['uptime_after'] = subprocess.check_output(['uptime'], text=True)
