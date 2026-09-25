@@ -11,7 +11,7 @@ public class ConstEval {
 
     public func EvaluateToLiteral(expr: Expression): Option<LiteralValue> {
         if (let Some(constant) <- (expr as Constant)) {
-            return constant.literal
+            return constant.GetValue()
         }
         if (expr.IsUnaryExpr() && expr.GetNumOfOperands() == 1) {
             return EvaluateUnary(expr)
