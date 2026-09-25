@@ -77,12 +77,13 @@ def main():
         dyn_source = source if layout == 'flat' else source / dyn_rel
         for member, fixture in zip(PAIR, ('pinned-runtime.so', 'pinned-bounds.so')):
             copy(libs / fixture, dyn_source / member)
-        if layout == 'nested-static':
+        if layout in ('nested-static', 'nested-archive'):
             copy(libs / 'inherited.a', base / lib_rel / 'libcangjie-runtime.a')
             copy(libs / 'pinned-runtime.a', source / lib_rel / 'libcangjie-runtime.a')
             # A static-side shared file must not override the pinned dynamic pair.
-            for member in PAIR:
-                copy(libs / 'inherited.so', source / lib_rel / member)
+            if layout == 'nested-static':
+                for member in PAIR:
+                    copy(libs / 'inherited.so', source / lib_rel / member)
         cmd = ['bash', str(product), '--from', str(base), '--to', str(target),
                '--target', TUPLE, '--runtime', str(dyn_source if layout == 'nested-static' else source),
                '--runtime-commit', COMMIT,
@@ -117,7 +118,7 @@ def main():
         return record
 
     cases = [(layout, aliases, repetition)
-             for layout in ('flat', 'nested', 'nested-static')
+             for layout in ('flat', 'nested', 'nested-archive', 'nested-static')
              for aliases in ('absent', 'bounds', 'both')
              for repetition in range(args.repeat)]
     with ThreadPoolExecutor(max_workers=4) as executor:
