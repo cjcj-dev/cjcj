@@ -231,6 +231,36 @@ test('fixture names the real mirror and the fixed token', async () => {
   assert.doesNotMatch(text, /objc_cpointer_fixtures/);
 });
 
+function permissionsBody(text) {
+  const lines = text.split('\n');
+  const start = lines.indexOf('permissions:');
+  if (start < 0) return [];
+  const body = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith('  ') && !line.startsWith('   ')) body.push(line);
+    else break;
+  }
+  return body;
+}
+
+test('cross-run tuple lookup is granted actions: read', async () => {
+  const text = await fs.readFile(workflow, 'utf8');
+  const permissionKeys = text.split('\n').filter((line) => line.trim() === 'permissions:');
+  assert.deepEqual(permissionKeys, ['permissions:']);
+  const body = permissionsBody(text);
+  assert.ok(body.includes('  contents: read'));
+  console.log('OBJC_E2E_ASSERT permissions_block=present contents_read=true');
+  assert.ok(body.includes('  actions: read'), 'actions_read=false; fetch_llvm_tuple cross-run gh api is 403 without it');
+  const fetchAt = text.indexOf('- name: Download native fixed LLVM tuple\n');
+  const buildAt = text.indexOf('- name: Build stage1\n');
+  assert.ok(fetchAt >= 0 && buildAt > fetchAt);
+  const fetchStep = text.slice(fetchAt, buildAt);
+  assert.match(fetchStep, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(fetchStep, /fetch_llvm_tuple\.mjs/);
+  assert.equal(fetchStep.includes('TUPLE_ARTIFACT_DIR'), false);
+  console.log('OBJC_E2E_ASSERT actions_read=true tuple_fallback=cross-run');
+});
+
 test('workflow is a bash 3.2 macOS arm pinned to cjpm_pin.env', async () => {
   const text = await fs.readFile(workflow, 'utf8');
   const pin = await fs.readFile(path.join(repoRoot, 'ci', 'cjpm_pin.env'), 'utf8');
