@@ -6,6 +6,18 @@ import std.fs.Directory as FSDirectory
 import std.sync.AtomicUInt8
 import cjcj::utils.{FileUtil, GenerateRandomHexString}
 
+@When[os != "Windows"]
+foreign {
+    func unlink(path: CString): Int32
+    func rmdir(path: CString): Int32
+}
+
+@When[os == "Windows"]
+foreign {
+    func DeleteFileA(path: CString): Int32
+    func RemoveDirectoryA(path: CString): Int32
+}
+
 @When[os == "Windows"]
 private let TMP_DIR_ENVIRONMENT_KEY: String = "TMP"
 @When[os != "Windows"]
@@ -59,7 +71,9 @@ public class TempFileManager {
     private var tempDir: String = ""
     private var outputDir: String = "."
     private var outputName: String = ""
-    private let deletedFiles: ArrayList<String> = ArrayList<String>()
+    // C++ std::string owns a stable, terminated buffer; Cangjie String does not.
+    // Allocate the native representation at registration, never in a handler.
+    private let deletedFiles: ArrayList<CString> = ArrayList<CString>()
     private let deleteState: AtomicUInt8 = AtomicUInt8(NOT_DELETED)
 
     private init() {}
@@ -71,8 +85,14 @@ public class TempFileManager {
     public func Init(options: GlobalOptions, isFrontend: Bool): Bool {
         isCjcFrontend = isFrontend
         opts = GlobalOptions(options)
-        deleteState.store(NOT_DELETED)
+        // CString storage must remain inaccessible to signal cleanup until
+        // the old list is cleared, just as during normal DeleteTempFiles.
+        deleteState.store(DELETING)
+        for (path in deletedFiles) {
+            unsafe { LibC.free(path) }
+        }
         deletedFiles.clear()
+        deleteState.store(NOT_DELETED)
         if (!InitOutputDir()) {
             return false
         }
@@ -107,22 +127,43 @@ public class TempFileManager {
         }
         var idx = deletedFiles.size - 1
         while (idx >= 0) {
-            let path = deletedFiles[idx]
+            let path = deletedFiles[idx].toString()
             if (FileUtil.IsDir(path)) {
                 let _ = FileUtil.RemoveDirectoryRecursively(path)
             } else {
                 let _ = FileUtil.Remove(path)
             }
+            unsafe { LibC.free(deletedFiles[idx]) }
             if (idx == 0) {
                 break
             }
             idx--
         }
+        deletedFiles.clear()
         deleteState.store(DELETED)
     }
 
+    // C++ fc3fb2b4 src/Driver/TempFileManager.cpp:464-480.
     public func DeleteTempFilesSignalSafe(): Unit {
-        DeleteTempFiles()
+        if (deleteState.swap(DELETING) != NOT_DELETED && IsDeleted()) {
+            return
+        }
+        var i = deletedFiles.size
+        while (i > 0) {
+            let path = deletedFiles[i - 1]
+            unsafe {
+                @When[os == "Windows"]
+                let _ = DeleteFileA(path)
+                @When[os == "Windows"]
+                let _ = RemoveDirectoryA(path)
+                @When[os != "Windows"]
+                let _ = unlink(path)
+                @When[os != "Windows"]
+                let _ = rmdir(path)
+            }
+            i--
+        }
+        deleteState.store(DELETED)
     }
 
     public func IsDeleted(): Bool {
@@ -193,7 +234,7 @@ public class TempFileManager {
             try {
                 FSDirectory.create(candidate, recursive: true)
                 tempDir = candidate
-                deletedFiles.add(tempDir)
+                deletedFiles.add(unsafe { LibC.mallocCString(tempDir) })
                 return true
             } catch (e: Exception) {
                 attempts++
@@ -215,7 +256,7 @@ public class TempFileManager {
         }
         let path = FileUtil.JoinPath(tempDir, info.fileName) + TempFileKindSuffix(kind, opts)
         if (!opts.saveTemps) {
-            deletedFiles.add(path)
+            deletedFiles.add(unsafe { LibC.mallocCString(path) })
         }
         return TempFileInfo(fileName: info.fileName, filePath: path)
     }
@@ -239,7 +280,7 @@ public class TempFileManager {
     private func CreateTempFileInfo(info: TempFileInfo, kind: TempFileKind): TempFileInfo {
         let path = FileUtil.JoinPath(tempDir, info.fileName) + TempFileKindSuffix(kind, opts)
         if (!opts.saveTemps) {
-            deletedFiles.add(path)
+            deletedFiles.add(unsafe { LibC.mallocCString(path) })
         }
         return TempFileInfo(fileName: info.fileName, filePath: path)
     }
