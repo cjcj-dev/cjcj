@@ -682,7 +682,105 @@ private func IsLambdaIncompatible(le: LambdaExpr, paramsMismatched: Bool): Bool 
     return paramsMismatched && IsAnyParamTypeOmitted(le)
 }
 
-// C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:49-100 ClearCacheForNames.
+// C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:53-74 CollectPatternAliasNames.
+// Option<Pattern> stands in for Ptr<const Node>: Cangjie has no nullable pointer.
+private func CollectPatternAliasNames(patternRoot: Option<Pattern>): ArrayList<String> {
+    let names = ArrayList<String>()
+    if (patternRoot.isNone()) {
+        return names
+    }
+    let root = patternRoot.getOrThrow()
+    let walker = Walker(root, visitPre: { pat: Node =>
+        if (let Some(vd) <- (pat as VarDecl)) {
+            names.add(vd.identifier.Val())
+        } else if (let Some(vep) <- (pat as VarOrEnumPattern)) {
+            names.add(vep.identifier.Val())
+        }
+        VisitAction.WALK_CHILDREN
+    })
+    let _ = walker.Walk()
+    return names
+}
+
+// C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:78-89 ClearAncestorCache.
+private func ClearAncestorCache(ctx: ASTContext, parentStack: ArrayList<Node>, clearedNodes: HashSet<Node>): Unit {
+    var idx = parentStack.size
+    while (idx > 0) {
+        idx--
+        let parent = parentStack[idx]
+        if (clearedNodes.contains(parent)) {
+            break
+        }
+        ctx.RemoveTypeCheckCache(parent)
+        clearedNodes.add(parent)
+    }
+}
+
+// C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:98-112 GetAliasScope.
+private func GetAliasScope(decl: Node, parentStack: ArrayList<Node>): Node {
+    if ((decl as LetPatternDestructor).isNone()) {
+        return parentStack[parentStack.size - 1]
+    }
+    var idx = parentStack.size
+    while (idx > 0) {
+        idx--
+        let parent = parentStack[idx]
+        if ((parent as IfExpr).isSome()) {
+            return parent
+        }
+        if ((parent as WhileExpr).isSome()) {
+            return parent
+        }
+    }
+    return parentStack[parentStack.size - 1]
+}
+
+// C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:119-143 RegisterNewAliases.
+private func RegisterNewAliases(decl: Node, scope: Node, aliases: HashSet<String>,
+    aliasDecl: HashMap<Node, ArrayList<String>>): Unit {
+    var newAliases = ArrayList<String>()
+    if (let Some(vpd) <- (decl as VarWithPatternDecl)) {
+        newAliases = CollectPatternAliasNames(vpd.irrefutablePattern)
+    } else if (let Some(varDecl) <- (decl as VarDecl)) {
+        newAliases.add(varDecl.identifier.Val())
+    } else if (let Some(lpd) <- (decl as LetPatternDestructor)) {
+        for (pattern in lpd.patterns) {
+            for (name in CollectPatternAliasNames(Some(pattern))) {
+                newAliases.add(name)
+            }
+        }
+    }
+    for (name in newAliases) {
+        if (aliases.add(name)) {
+            if (!aliasDecl.contains(scope)) {
+                aliasDecl[scope] = ArrayList<String>()
+            }
+            aliasDecl.get(scope).getOrThrow().add(name)
+        }
+    }
+}
+
+// C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:151-165 RegisterForInAliases.
+private func RegisterForInAliases(parentStack: ArrayList<Node>, aliases: HashSet<String>,
+    aliasDecl: HashMap<Node, ArrayList<String>>): Unit {
+    var idx = parentStack.size
+    while (idx > 0) {
+        idx--
+        let parent = parentStack[idx]
+        if (let Some(fie) <- (parent as ForInExpr)) {
+            for (name in CollectPatternAliasNames(fie.pattern)) {
+                if (aliases.add(name)) {
+                    if (!aliasDecl.contains(fie)) {
+                        aliasDecl[fie] = ArrayList<String>()
+                    }
+                    aliasDecl.get(fie).getOrThrow().add(name)
+                }
+            }
+        }
+    }
+}
+
+// C++ src/Sema/TypeCheckExpr/LambdaExpr.cpp:167-219 ClearCacheForNames.
 private func ClearCacheForNames(ctx: ASTContext, le: LambdaExpr, paramNames: ArrayList<String>): Unit {
     let parentStack = ArrayList<Node>()
     let clearedNodes = HashSet<Node>()
@@ -709,16 +807,8 @@ private func ClearCacheForNames(ctx: ASTContext, le: LambdaExpr, paramNames: Arr
     let walker = Walker(body, visitPre: { node: Node =>
         parentStack.add(node)
         if ((let Some(refExpr) <- (node as RefExpr)) && aliases.contains(refExpr.ref.identifier.Val())) {
-            var idx = parentStack.size
-            while (idx > 0) {
-                idx--
-                let parent = parentStack[idx]
-                if (clearedNodes.contains(parent)) {
-                    break
-                }
-                ctx.RemoveTypeCheckCache(parent)
-                clearedNodes.add(parent)
-            }
+            ClearAncestorCache(ctx, parentStack, clearedNodes)
+            RegisterForInAliases(parentStack, aliases, aliasDecl)
         } else if (let Some(lambda) <- (node as LambdaExpr)) {
             shadowName(lambda)
         }
@@ -726,13 +816,8 @@ private func ClearCacheForNames(ctx: ASTContext, le: LambdaExpr, paramNames: Arr
     }, visitPost: { _: Node =>
         let top = parentStack[parentStack.size - 1]
         parentStack.remove(at: parentStack.size - 1)
-        if ((let Some(decl) <- (top as VarDecl)) && clearedNodes.contains(decl)) {
-            aliases.add(decl.identifier.Val())
-            let parent = parentStack[parentStack.size - 1]
-            if (!aliasDecl.contains(parent)) {
-                aliasDecl[parent] = ArrayList<String>()
-            }
-            aliasDecl.get(parent).getOrThrow().add(decl.identifier.Val())
+        if (clearedNodes.contains(top) && !parentStack.isEmpty()) {
+            RegisterNewAliases(top, GetAliasScope(top, parentStack), aliases, aliasDecl)
         }
         if (let Some(names) <- aliasShadow.get(top)) {
             for (name in names) {

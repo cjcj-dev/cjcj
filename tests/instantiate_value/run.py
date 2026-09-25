@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Link instantiate-value checker fixtures to existing product release archives.
+
+No product sources are recompiled. This avoids the dependency export-for-test
+failure tracked by cjcj#256. Build the supplied tree with cjpm build first.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import time
+
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--build-tree', type=Path, required=True)
+    parser.add_argument('--sdk', type=Path, required=True)
+    parser.add_argument('--out', type=Path, required=True)
+    args = parser.parse_args()
+    tree, sdk, out = (p.resolve() for p in (args.build_tree, args.sdk, args.out))
+    out.mkdir(parents=True, exist_ok=True)
+    temporary = out / 'tmp'
+    temporary.mkdir(exist_ok=True)
+    env = os.environ.copy()
+    env['CANGJIE_HOME'] = str(sdk)
+    env['TMPDIR'] = str(temporary)
+    env['LD_LIBRARY_PATH'] = ':'.join(str(sdk / p) for p in (
+        'runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative',
+        'third_party/llvm/lib', 'tools/lib')) + ':/usr/lib/x86_64-linux-gnu'
+    sources = [Path(__file__).resolve().parent / 'checker.cj']
+    executable = out / 'instantiate-checker'
+    command = [str(sdk / 'bin/cjc'), '-O0', '--diagnostic-format=noColor', '--trimpath', str(tree),
+               *map(str, sources), '-o', str(executable)]
+    archives, inputs = [], list(sources)
+    for directory in sorted((tree / 'target/release').iterdir()):
+        if not directory.is_dir() or directory.name in ('bin', 'compiler_unittest@cjcj'):
+            continue
+        command += ['--import-path', str(directory), '-L', str(directory)]
+        archives += sorted(directory.glob('*.a'))
+        inputs += sorted(directory.glob('*.cjo'))
+    shim = tree / 'runtime_shim/cjselfhost_llvmshim.o'
+    command += ['--link-options=' + ' '.join([
+        '--start-group', *map(str, archives), '--end-group', str(shim),
+        '-L' + str(sdk / 'third_party/llvm/lib'), '-lLLVM-15', '-lstdc++'])]
+    inputs += archives + [shim, sdk / 'bin/cjc', sdk / 'third_party/llvm/lib/libLLVM-15.so']
+    inputs += sorted((sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so'))
+    inputs += [sdk / 'lib/linux_x86_64_cjnative/libcangjie-std-core.a']
+    (out / 'inputs.sha256').write_text(''.join(f'{digest(p)}  {p}\n' for p in inputs))
+    record = {'command': command, 'affinity': sorted(os.sched_getaffinity(0)),
+              'uptime_before': subprocess.check_output(['uptime'], text=True).strip()}
+    start = time.monotonic()
+    with (out / 'build.log').open('w') as log:
+        record['build_rc'] = subprocess.call(command, cwd=tree, env=env, stdout=log, stderr=subprocess.STDOUT)
+    record['build_wall'] = time.monotonic() - start
+    if record['build_rc'] == 0:
+        record['elf_sha256'] = digest(executable)
+        record['cases'] = {}
+        for mode in ('control', 'function-good', 'function-bad', 'parent-good', 'parent-bad', 'function-intersection', 'parent-intersection', 'mixed-good', 'mixed-parent-bad', 'mixed-function-bad', 'nested-good', 'nested-outer-bad', 'nested-inner-bad', 'empty', 'arity', 'gone'):
+            start = time.monotonic()
+            with (out / (mode + '.log')).open('w') as log:
+                rc = subprocess.call([str(executable), mode], cwd=tree, env=env,
+                                     stdout=log, stderr=subprocess.STDOUT)
+            output = (out / (mode + '.log')).read_text()
+            target = 'TARGET mode=' + mode
+            index = "2nd" if mode in ("mixed-function-bad", "nested-inner-bad") else "1st"
+            diagnostic = (f"the {index} instantiated type(s) don't satisfy the generic constraints." if mode.endswith('bad')
+                          else 'there must be instantiated type' if mode == 'empty'
+                          else 'generic param type(s) in total' if mode == 'arity'
+                          else '`GetInstantiateValue` should be removed now' if mode == 'gone' else '')
+            record['cases'][mode] = {'rc': rc, 'wall': time.monotonic() - start,
+                                     'target_executed': target in output,
+                                     'target_diagnostic': not diagnostic or diagnostic in output}
+        record['test_rc'] = int(any(c['rc'] != 0 or not c['target_executed'] or not c['target_diagnostic']
+                                    for c in record['cases'].values()))
+    record['uptime_after'] = subprocess.check_output(['uptime'], text=True).strip()
+    (out / 'result.json').write_text(json.dumps(record, indent=2) + '\n')
+    return record.get('test_rc', record['build_rc'])
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
