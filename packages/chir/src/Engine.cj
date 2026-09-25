@@ -88,15 +88,18 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
                 continue
             }
 
-            let exprs = block.GetExpressions()
+            let exprs = block.GetExpressionsRef()
             if (exprs.isEmpty()) {
                 continue
             }
-            let terminator = (exprs[exprs.size - 1] as Terminator) ??
+            let last = exprs.size - 1
+            let terminator = (exprs[last] as Terminator) ??
                 throw IllegalStateException("Engine IterateSingleUnitToFixpoint expected terminator")
-            exprs.remove(at: exprs.size - 1)
 
-            for (expr in exprs) {
+            var exprIdx: Int64 = 0
+            while (exprIdx < last) {
+                let expr = exprs[exprIdx]
+                exprIdx++
                 if (expr.GetExprKind() == ExprKind.LAMBDA) {
                     let lambda = (expr as Lambda).getOrThrow()
                     analysis.PreHandleLambdaExpression(state, lambda)
@@ -159,7 +162,16 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
     private func DoesExceedBlockLimit(): Bool {
         if (let Some(limit) <- analysis.GetBlockLimit()) {
             if (let Some(body) <- functionValue.GetBody()) {
-                return body.GetBlocks().size > Int64(limit)
+                if (body.GetBlocks().size > Int64(limit)) {
+                    return true
+                }
+                var exprCount: Int64 = 0
+                for (block in body.GetBlocks()) {
+                    exprCount += block.GetExpressionsRef().size
+                    if (exprCount > 1024) {
+                        return true
+                    }
+                }
             }
         }
         return false
