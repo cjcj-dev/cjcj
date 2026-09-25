@@ -18,8 +18,8 @@ private func ModifyApplyCalleeInfo(loadResult: LocalVar, storeValue: Value): Uni
             let apply = (user as Apply).getOrThrow()
             apply.SetThisType(thisType)
         }
-        if (user.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION) {
-            let apply = (user as ApplyWithException).getOrThrow()
+        if (user.GetExprKind() == ExprKind.TRY_APPLY) {
+            let apply = (user as TryApply).getOrThrow()
             apply.SetThisType(thisType)
         }
     }

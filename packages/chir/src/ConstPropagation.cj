@@ -114,10 +114,10 @@ public class ConstPropagation {
                 match (terminator.GetExprKind()) {
                     case ExprKind.BRANCH | ExprKind.MULTIBRANCH =>
                         targetSuccMap.add(TerminatorRewriteInfo(terminator, None, target))
-                    case ExprKind.NEG_WITH_EXCEPTION | ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION |
-                        ExprKind.MUL_WITH_EXCEPTION | ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION |
-                        ExprKind.EXP_WITH_EXCEPTION | ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION |
-                        ExprKind.NUMERIC_CAST_WITH_EXCEPTION =>
+                    case ExprKind.TRY_NEG | ExprKind.TRY_ADD | ExprKind.TRY_SUB |
+                        ExprKind.TRY_MUL | ExprKind.TRY_DIV | ExprKind.TRY_MOD |
+                        ExprKind.TRY_EXP | ExprKind.TRY_LSHIFT | ExprKind.TRY_RSHIFT |
+                        ExprKind.TRY_NUMERIC_CAST =>
                         if (let Some(res) <- terminator.GetResult()) {
                             if (let Some(absVal) <- state.CheckAbstractValue(res)) {
                                 let literal = GenerateConstExpr(res.GetType().getOrThrow(), absVal, isCJLint)

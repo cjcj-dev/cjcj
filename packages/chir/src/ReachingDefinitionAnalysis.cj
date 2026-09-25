@@ -257,9 +257,9 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
 
     public override func PropagateTerminatorEffect(state: ReachingDefinitionDomain, terminator: Expression): Option<Block> {
         let kind = terminator.GetExprKind()
-        if (kind == ExprKind.APPLY_WITH_EXCEPTION) {
+        if (kind == ExprKind.TRY_APPLY) {
             HandleApplyExpr(state, terminator)
-        } else if (kind == ExprKind.INTRINSIC_WITH_EXCEPTION) {
+        } else if (kind == ExprKind.TRY_INTRINSIC) {
             HandleIntrinsicExpr(state, terminator)
         }
         return None
@@ -276,7 +276,7 @@ public class ReachingDefinitionAnalysis <: Analysis<ReachingDefinitionDomain> {
             let blocks = CollectBlocksRecursively(body)
             for (block in blocks) {
                 for (expr in block.GetExpressionsRef()) {
-                    if (expr.GetExprKind() == ExprKind.ALLOCATE || expr.GetExprKind() == ExprKind.ALLOCATE_WITH_EXCEPTION) {
+                    if (expr.GetExprKind() == ExprKind.ALLOCATE || expr.GetExprKind() == ExprKind.TRY_ALLOCATE) {
                         if (let Some(result) <- expr.GetResult()) {
                             let allocatedTy: Option<Type> = (expr as AllocateBase).getOrThrow().GetType()
                             if (let Some(ty) <- allocatedTy) {
@@ -421,8 +421,8 @@ private func GetIntrinsicKind(expr: Expression): IntrinsicKind {
     if (let Some(intrinsic) <- (expr as Intrinsic)) {
         return intrinsic.GetIntrinsicKind()
     }
-    if (let Some(intrinsicWithException) <- (expr as IntrinsicWithException)) {
-        return intrinsicWithException.GetIntrinsicKind()
+    if (let Some(tryIntrinsic) <- (expr as TryIntrinsic)) {
+        return tryIntrinsic.GetIntrinsicKind()
     }
     return IntrinsicKind.NOT_INTRINSIC
 }

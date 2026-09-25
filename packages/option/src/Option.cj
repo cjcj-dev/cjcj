@@ -1399,10 +1399,6 @@ public open class GlobalOptions <: Option {
                 Errorln("Obfuscation is not supported when LTO is enabled on iOS.")
                 return false
             }
-            if (target.os == OSType.IOS && outputMode != OutputMode.STATIC_LIB) {
-                Errorln("iOS LTO only supports --output-type=staticlib.")
-                return false
-            }
             if (outputMode == OutputMode.OBJ) {
                 Errorln("--output-type=obj is not allowed in LTO mode")
                 return false
@@ -1436,12 +1432,11 @@ public open class GlobalOptions <: Option {
                 emitOptionDiag(BasicDiagKindRefactor.driver_invalid_visible_pkgs_conflict)
                 return false
             }
-            // C++: src/Option/Option.cpp:647-654
-            // Valid on Linux dylib LTO and iOS staticlib LTO; other configs only warn.
-            let validForDylib = outputMode == OutputMode.SHARED_LIB && target.os == OSType.LINUX
-            let validForStaticLib = outputMode == OutputMode.STATIC_LIB && target.os == OSType.IOS
-            if (!validForDylib && !validForStaticLib) {
-                emitOptionDiag(BasicDiagKindRefactor.driver_visible_pkgs_only_for_dylib)
+            // Option.cpp:644-649. Any iOS output mode, or Linux dylib. Other configs warn only.
+            let isValid = target.os == OSType.IOS ||
+                (target.os == OSType.LINUX && outputMode == OutputMode.SHARED_LIB)
+            if (!isValid) {
+                emitOptionDiag(BasicDiagKindRefactor.driver_ineffective_option, "--lto-keep-pkg-visibility")
             }
         }
         if (!CheckLTOStaticLibFormatOptions()) { return false }

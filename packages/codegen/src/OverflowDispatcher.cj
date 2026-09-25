@@ -2,7 +2,7 @@ package cjcj::codegen
 
 import std.collection.*
 import cjcj::chir.ExprKind
-import cjcj::chir.UnaryExpressionWithException
+import cjcj::chir.TryUnaryExpression
 import cjcj::chir.IntrinsicKind
 import cjcj::chir.Type
 import cjcj::chir.Value
@@ -42,7 +42,7 @@ private class StructInfo {
     }
 }
 
-public func GenerateUnaryExpressionWithException(irBuilder: IRBuilder2, expr: UnaryExpressionWithException): LLVMValueRef {
+public func GenerateTryUnaryExpression(irBuilder: IRBuilder2, expr: TryUnaryExpression): LLVMValueRef {
     let kind = expr.GetOpKind()
     let lhs = expr.GetOperand(0)
     let lhsValue = irBuilder.GetCGModule().GetMappedCGValue(lhs)

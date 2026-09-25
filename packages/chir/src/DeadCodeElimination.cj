@@ -407,9 +407,9 @@ public class DeadCodeElimination {
                 if (expr.GetExprKind() == ExprKind.LAMBDA) {
                     DiagUnusedCode(res, DiagKindRefactor.chir_dce_unused_function,
                         (expr as Lambda).getOrThrow().GetSrcCodeIdentifier())
-                } else if (expr.IsUnaryExpr() || expr.IsBinaryExpr() || expr.IsUnaryExpressionWithException() ||
-                    expr.IsBinaryExpressionWithException()) {
-                    let kind = if (expr.IsUnaryExpressionWithException() || expr.IsBinaryExpressionWithException()) {
+                } else if (expr.IsUnaryExpr() || expr.IsBinaryExpr() || expr.IsTryUnaryExpression() ||
+                    expr.IsTryBinaryExpression()) {
+                    let kind = if (expr.IsTryUnaryExpression() || expr.IsTryBinaryExpression()) {
                         GetLiteralFromExprKind(PlainExprKind(expr.GetExprKind()))
                     } else {
                         GetLiteralFromExprKind(expr.GetExprKind())
@@ -694,15 +694,15 @@ public class DeadCodeElimination {
                                 continue
                             } else {
                                 match (expr.GetExprKind()) {
-                                    case ExprKind.APPLY_WITH_EXCEPTION =>
+                                    case ExprKind.TRY_APPLY =>
                                         HandleNothingTerminator(builder,
-                                            (expr as ApplyWithException).getOrThrow(), funcBody)
-                                    case ExprKind.INVOKE_WITH_EXCEPTION =>
+                                            (expr as TryApply).getOrThrow(), funcBody)
+                                    case ExprKind.TRY_INVOKE =>
                                         HandleNothingTerminator(builder,
-                                            (expr as InvokeWithException).getOrThrow(), funcBody)
-                                    case ExprKind.INVOKESTATIC_WITH_EXCEPTION =>
+                                            (expr as TryInvoke).getOrThrow(), funcBody)
+                                    case ExprKind.TRY_INVOKESTATIC =>
                                         HandleNothingTerminator(builder,
-                                            (expr as InvokeStaticWithException).getOrThrow(), funcBody)
+                                            (expr as TryInvokeStatic).getOrThrow(), funcBody)
                                     case _ =>
                                         CJC_ABORT()
                                         return
@@ -735,7 +735,7 @@ public class DeadCodeElimination {
             let posForWarning = expression.GetDebugLocationInfoForWarning()
             let warningRange = ToRangeIfNotZero(posForWarning)
             if (warningRange[0]) {
-                if (expression.IsBinaryExpr() || expression.IsBinaryExpressionWithException()) {
+                if (expression.IsBinaryExpr() || expression.IsTryBinaryExpression()) {
                     var hasNothingOperand = false
                     var index: Int64 = 0
                     while (index < expression.GetNumOfNonSuccessorOperands()) {
@@ -820,7 +820,7 @@ public class DeadCodeElimination {
                 return false
             }
         }
-        if ((expr.IsUnaryExpressionWithException() || expr.IsBinaryExpressionWithException()) &&
+        if ((expr.IsTryUnaryExpression() || expr.IsTryBinaryExpression()) &&
             expr.GetNeverOverflowInfo() && isReportWarning) {
             return true
         }
@@ -965,9 +965,9 @@ private func HandleFuncWithNothingParamter(builder: CHIRBuilder, funcBody: Block
 
 private func HandleNothingTerminator(builder: CHIRBuilder, expr: ExpressionWithException,
     funcBody: BlockGroup): Unit {
-    CJC_ASSERT(expr.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION ||
-        expr.GetExprKind() == ExprKind.INVOKE_WITH_EXCEPTION ||
-        expr.GetExprKind() == ExprKind.INVOKESTATIC_WITH_EXCEPTION)
+    CJC_ASSERT(expr.GetExprKind() == ExprKind.TRY_APPLY ||
+        expr.GetExprKind() == ExprKind.TRY_INVOKE ||
+        expr.GetExprKind() == ExprKind.TRY_INVOKESTATIC)
     let newSuccessBlock = builder.CreateBlock(funcBody)
     CreateNullReturnValue(builder, newSuccessBlock, funcBody)
     let createdExit965 = builder.CreateExit(None, newSuccessBlock)
