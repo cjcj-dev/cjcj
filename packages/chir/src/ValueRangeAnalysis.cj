@@ -387,11 +387,7 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
                         return
                     }
                     let sourceDomain = RangeAnalysis.GetSIntDomainFromState(state, sourceValue)
-                    let overflowStrategy = if (let Some(typeCast) <- (castExpr as TypeCast)) {
-                        typeCast.GetOverflowStrategy()
-                    } else {
-                        (castExpr as TypeCastWithException).getOrThrow().GetOverflowStrategy()
-                    }
+                    let overflowStrategy = (castExpr as NumericCastBase).getOrThrow().GetOverflowStrategy()
                     let resultDomain = ComputeTypeCast(state, sourceValue, sourceDomain, SIntDomain.ToWidth(destTy),
                         destTy.IsUnsignedInteger(), overflowStrategy)
                     state.Update(dest, SIntRange(resultDomain))
@@ -405,14 +401,14 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
     public func HandleOthersExpr(state: RangeDomain, expression: Expression): Unit {
         match (expression.GetExprKind()) {
             case ExprKind.CONSTANT => return
-            case ExprKind.TYPECAST => HandleTypeCastExpression(state, expression)
+            case ExprKind.NUMERIC_CAST => HandleTypeCastExpression(state, expression)
             case ExprKind.APPLY => return
             case ExprKind.FIELD => return
             case _ => SetResultToTop(state, expression)
         }
     }
 
-    public override func HandleTerminatorEffect(state: RangeDomain, terminator: Terminator): Option<Block> {
+    public override func HandleTerminatorEffect(state: RangeDomain, terminator: Expression): Option<Block> {
         let kind = terminator.GetExprKind()
         if (kind == ExprKind.GOTO || kind == ExprKind.EXIT) {
             return None
@@ -423,7 +419,7 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
         if (kind == ExprKind.MULTIBRANCH) {
             return HandleMultiBranchTerminator(state, (terminator as MultiBranch).getOrThrow())
         }
-        if (kind == ExprKind.TYPECAST_WITH_EXCEPTION) {
+        if (kind == ExprKind.NUMERIC_CAST_WITH_EXCEPTION) {
             HandleTypeCastExpression(state, terminator)
             return None
         }
@@ -431,7 +427,7 @@ public class RangeAnalysis <: ValueAnalysis<RangeValueDomain, RangeStatePool> {
         return None
     }
 
-    public func HandleBranchTerminator(state: RangeDomain, branch: Terminator): Option<Block> {
+    public func HandleBranchTerminator(state: RangeDomain, branch: Expression): Option<Block> {
         if (branch.GetNumOfOperands() == 0) {
             return None
         }

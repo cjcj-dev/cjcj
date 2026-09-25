@@ -6,6 +6,14 @@ import cjcj::basic.Linkage as BasicLinkage
 import cjcj::flatbuffers.{FlatBufferString, Offset, Vector}
 import cjcj::utils.{CJC_ABORT, CJC_ASSERT, OverflowStrategy}
 
+private func IsExceptionIntOpKind(kind: ExprKind): Bool {
+    if (kind == ExprKind.NEG_WITH_EXCEPTION) {
+        return true
+    }
+    let index = ExprKindIndex(kind)
+    return index >= ExprKindIndex(ExprKind.ADD_WITH_EXCEPTION) && index <= ExprKindIndex(ExprKind.RSHIFT_WITH_EXCEPTION)
+}
+
 private func DeserializeOverflowStrategy(strategy: UInt8): OverflowStrategy {
     if (strategy == CHIRFB_OVERFLOW_STRATEGY_NA) {
         return OverflowStrategy.NA
@@ -34,18 +42,18 @@ private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
         case 7u8 => (ExprKind.INTRINSIC_WITH_EXCEPTION, true)
         case 8u8 => (ExprKind.RAISE_EXCEPTION, false)
         case 9u8 => (ExprKind.SPAWN_WITH_EXCEPTION, true)
-        case 10u8 => (ExprKind.TYPECAST_WITH_EXCEPTION, true)
+        case 10u8 => (ExprKind.NUMERIC_CAST_WITH_EXCEPTION, true)
         case 11u8 => (ExprKind.ALLOCATE_WITH_EXCEPTION, true)
         case 12u8 => (ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION, true)
-        case 13u8 => (ExprKind.NEG, true)
-        case 14u8 => (ExprKind.ADD, true)
-        case 15u8 => (ExprKind.SUB, true)
-        case 16u8 => (ExprKind.MUL, true)
-        case 17u8 => (ExprKind.DIV, true)
-        case 18u8 => (ExprKind.MOD, true)
-        case 19u8 => (ExprKind.EXP, true)
-        case 20u8 => (ExprKind.LSHIFT, true)
-        case 21u8 => (ExprKind.RSHIFT, true)
+        case 13u8 => (ExprKind.NEG_WITH_EXCEPTION, true)
+        case 14u8 => (ExprKind.ADD_WITH_EXCEPTION, true)
+        case 15u8 => (ExprKind.SUB_WITH_EXCEPTION, true)
+        case 16u8 => (ExprKind.MUL_WITH_EXCEPTION, true)
+        case 17u8 => (ExprKind.DIV_WITH_EXCEPTION, true)
+        case 18u8 => (ExprKind.MOD_WITH_EXCEPTION, true)
+        case 19u8 => (ExprKind.EXP_WITH_EXCEPTION, true)
+        case 20u8 => (ExprKind.LSHIFT_WITH_EXCEPTION, true)
+        case 21u8 => (ExprKind.RSHIFT_WITH_EXCEPTION, true)
         case 22u8 => (ExprKind.NEG, false)
         case 23u8 => (ExprKind.NOT, false)
         case 24u8 => (ExprKind.BITNOT, false)
@@ -68,13 +76,13 @@ private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
         case 41u8 => (ExprKind.NOTEQUAL, false)
         case 42u8 => (ExprKind.AND, false)
         case 43u8 => (ExprKind.OR, false)
-        case 44u8 => (ExprKind.TYPECAST, false)
+        case 44u8 => (ExprKind.CLASS_STATIC_CAST, false)
         case 45u8 => (ExprKind.BOX, false)
-        case 46u8 => (ExprKind.UNBOX, false)
+        case 46u8 => (ExprKind.UNBOX_TO_VALUE, false)
         case 47u8 => (ExprKind.UNBOX_TO_REF, false)
-        case 48u8 => (ExprKind.TYPECAST, false)
-        case 49u8 => (ExprKind.TRANSFORM_TO_CONCRETE, false)
-        case 50u8 => (ExprKind.TRANSFORM_TO_GENERIC, false)
+        case 48u8 => (ExprKind.NUMERIC_CAST, false)
+        case 49u8 => (ExprKind.CAST_TO_CONCRETE, false)
+        case 50u8 => (ExprKind.CAST_TO_GENERIC, false)
         case 51u8 => (ExprKind.ALLOCATE, false)
         case 52u8 => (ExprKind.LOAD, false)
         case 53u8 => (ExprKind.STORE, false)
@@ -845,6 +853,9 @@ class CHIRDeserializerImpl {
             payload, block)) {
             return concreteExpr
         }
+        if (let Some(exceptionOp) <- createExceptionIntOp(kind, resultTy, operands, successors, block)) {
+            return exceptionOp
+        }
         if (kind == ExprKind.LAMBDA && !blockGroups.isEmpty()) {
             return createLambdaExpression(operands, blockGroups[0], block, resultTy)
         }
@@ -882,6 +893,9 @@ class CHIRDeserializerImpl {
             }
             return builder.CreateRaiseException(operands[0], block)
         }
+        if (kind == ExprKind.CLASS_STATIC_CAST) {
+            return builder.CreateClassStaticCast(resultTypeOrInvalid(resultTy), operands[0], block)
+        }
         if (kind == ExprKind.BOX) {
             CJC_ASSERT(operands.size == 1)
             return builder.CreateBox(resultTypeOrInvalid(resultTy), operands[0], block)
@@ -911,20 +925,20 @@ class CHIRDeserializerImpl {
             CJC_ASSERT(operands.size == 2)
             return builder.CreateStore(operands[0], operands[1], block)
         }
-        if (kind == ExprKind.TRANSFORM_TO_CONCRETE) {
+        if (kind == ExprKind.CAST_TO_CONCRETE) {
             CJC_ASSERT(operands.size == 1)
-            return builder.CreateTransformToConcrete(resultTypeOrInvalid(resultTy), operands[0], block)
+            return builder.CreateCastToConcrete(resultTypeOrInvalid(resultTy), operands[0], block)
         }
-        if (kind == ExprKind.TRANSFORM_TO_GENERIC) {
+        if (kind == ExprKind.CAST_TO_GENERIC) {
             CJC_ASSERT(operands.size == 1)
-            return builder.CreateTransformToGeneric(resultTypeOrInvalid(resultTy), operands[0], block)
+            return builder.CreateCastToGeneric(resultTypeOrInvalid(resultTy), operands[0], block)
         }
         if (kind == ExprKind.TUPLE) {
             return builder.CreateTuple(resultTypeOrInvalid(resultTy), operands, block)
         }
-        if (kind == ExprKind.UNBOX) {
+        if (kind == ExprKind.UNBOX_TO_VALUE) {
             CJC_ASSERT(operands.size == 1)
-            return builder.CreateUnBox(resultTypeOrInvalid(resultTy), operands[0], block)
+            return builder.CreateUnBoxToValue(resultTypeOrInvalid(resultTy), operands[0], block)
         }
         if (kind == ExprKind.UNBOX_TO_REF) {
             CJC_ASSERT(operands.size == 1)
@@ -952,6 +966,23 @@ class CHIRDeserializerImpl {
         throw IllegalStateException("unsupported CHIR expression")
     }
 
+    private func createExceptionIntOp(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
+        successors: ArrayList<Block>, block: Block): Option<Expression> {
+        if (!IsExceptionIntOpKind(kind) || operands.isEmpty() || successors.size < 2) {
+            return None
+        }
+        let resultTyValue = resultTypeOrInvalid(resultTy)
+        if (kind == ExprKind.NEG_WITH_EXCEPTION) {
+            return builder.CreateUnaryExpressionWithException(resultTyValue, kind, operands[0], successors[0],
+                successors[1], block)
+        }
+        if (operands.size < 2) {
+            return None
+        }
+        return builder.CreateBinaryExpressionWithException(resultTyValue, kind, operands[0], operands[1],
+            successors[0], successors[1], block)
+    }
+
     private func createPayloadExpression(kind: ExprKind, resultTy: Option<Type>, operands: ArrayList<Value>,
         blockGroups: ArrayList<BlockGroup>, successors: ArrayList<Block>, payload: ArrayList<String>,
         block: Block): Option<Expression> {
@@ -966,15 +997,8 @@ class CHIRDeserializerImpl {
             branch.SetSourceExpr(CHIRSourceExprFromIndex(CHIRSafeI64(CHIRFieldAt(payload, 1))))
             return branch
         }
-        if (kind == ExprKind.INT_OP_WITH_EXCEPTION && !operands.isEmpty() && successors.size >= 2) {
-            let opKind = CHIRExprKindFromIndex(CHIRSafeI64(CHIRFieldAt(payload, 1)))
-            let resultTyValue = resultTypeOrInvalid(resultTy)
-            if (operands.size >= 2) {
-                return builder.CreateBinaryIntOpWithException(resultTyValue, opKind, operands[0], operands[1],
-                    successors[0], successors[1], block)
-            }
-            return builder.CreateUnaryIntOpWithException(resultTyValue, opKind, operands[0], successors[0],
-                successors[1], block)
+        if (IsExceptionIntOpKind(kind) && !operands.isEmpty() && successors.size >= 2) {
+            return createExceptionIntOp(kind, resultTy, operands, successors, block)
         }
         if ((kind == ExprKind.ALLOCATE || kind == ExprKind.ALLOCATE_WITH_EXCEPTION) &&
             CHIRFieldAt(payload, 0) == "allocate") {
@@ -2074,7 +2098,7 @@ class CHIRDeserializerImpl {
         if (isException) {
             let normalId = operands.Get(1u32, 0u32)
             let exceptionId = operands.Get(2u32, 0u32)
-            let result = builder.CreateUnaryIntOpWithException(resultTy, kind, operand,
+            let result = builder.CreateUnaryExpressionWithException(resultTy, kind, operand,
                 GetValue<Block>(normalId).getOrThrow(), GetValue<Block>(exceptionId).getOrThrow(), parentBlock)
             result.SetOverflowStrategy(overflowStrategy)
             return result
@@ -2095,7 +2119,7 @@ class CHIRDeserializerImpl {
         if (isException) {
             let normalId = operands.Get(2u32, 0u32)
             let exceptionId = operands.Get(3u32, 0u32)
-            let result = builder.CreateBinaryIntOpWithException(resultTy, kind, lhs, rhs,
+            let result = builder.CreateBinaryExpressionWithException(resultTy, kind, lhs, rhs,
                 GetValue<Block>(normalId).getOrThrow(), GetValue<Block>(exceptionId).getOrThrow(), parentBlock)
             result.SetOverflowStrategy(overflowStrategy)
             return result
@@ -2166,16 +2190,19 @@ class CHIRDeserializerImpl {
             case ExprKind.STORE =>
                 CJC_ASSERT(operands.size == 2)
                 return builder.CreateStore(operands[0], operands[1], owner)
-            case ExprKind.TRANSFORM_TO_CONCRETE =>
+            case ExprKind.CLASS_STATIC_CAST =>
                 CJC_ASSERT(operands.size == 1)
-                return builder.CreateTransformToConcrete(resultTy.getOrThrow(), operands[0], owner)
-            case ExprKind.TRANSFORM_TO_GENERIC =>
+                return builder.CreateClassStaticCast(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.CAST_TO_CONCRETE =>
                 CJC_ASSERT(operands.size == 1)
-                return builder.CreateTransformToGeneric(resultTy.getOrThrow(), operands[0], owner)
+                return builder.CreateCastToConcrete(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.CAST_TO_GENERIC =>
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateCastToGeneric(resultTy.getOrThrow(), operands[0], owner)
             case ExprKind.TUPLE => return builder.CreateTuple(resultTy.getOrThrow(), operands, owner)
-            case ExprKind.UNBOX =>
+            case ExprKind.UNBOX_TO_VALUE =>
                 CJC_ASSERT(operands.size == 1)
-                return builder.CreateUnBox(resultTy.getOrThrow(), operands[0], owner)
+                return builder.CreateUnBoxToValue(resultTy.getOrThrow(), operands[0], owner)
             case ExprKind.UNBOX_TO_REF =>
                 CJC_ASSERT(operands.size == 1)
                 return builder.CreateUnBoxToRef(resultTy.getOrThrow(), operands[0], owner)
@@ -2352,10 +2379,10 @@ class CHIRDeserializerImpl {
         let overflowStrategy = DeserializeOverflowStrategy(obj.GetOverflowStrategy())
         let (_, isException) = CHIRExprKindToExprKind(base.GetKind())
         if (isException) {
-            return builder.CreateTypeCastWithException(resultTy, operands[0],
+            return builder.CreateNumericCastWithException(resultTy, operands[0],
                 (operands[1] as Block).getOrThrow(), (operands[2] as Block).getOrThrow(), owner)
         }
-        return builder.CreateTypeCast(resultTy, operands[0], owner, overflowStrategy: overflowStrategy)
+        return builder.CreateNumericCast(resultTy, operands[0], owner, overflowStrategy: overflowStrategy)
     }
 
     private func Deserialize(obj: PackageFormat_InstanceOf): InstanceOf {
