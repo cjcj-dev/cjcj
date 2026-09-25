@@ -1,3 +1,8 @@
+@OverflowWrapping
+public func integerAdd(x: Int64, y: Int64): Int64 {
+    return x + y
+}
+
 public func ops(a: Float64, b: Float64, x: Int64, y: Int64): Float64 {
     let added = a + b
     let subtracted = a - b
@@ -5,7 +10,7 @@ public func ops(a: Float64, b: Float64, x: Int64, y: Int64): Float64 {
     let divided = a / b
     let negated = -a
     let compared = a < b
-    let integerAdded = x + y
+    let integerAdded = integerAdd(x, y)
     if (compared) {
         return added + subtracted + multiplied + divided + negated + Float64(integerAdded)
     }
