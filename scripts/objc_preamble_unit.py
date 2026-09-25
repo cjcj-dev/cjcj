@@ -57,7 +57,7 @@ def main():
     shim = tree / 'runtime_shim/cjselfhost_llvmshim.o'
     command += ['--link-options=' + ' '.join([
         '--start-group', *map(str, archives), '--end-group', str(shim),
-        '-L' + str(sdk / 'third_party/llvm/lib'), '-lLLVM-15', '-lstdc++'])]
+        str(sdk / 'third_party/llvm/lib/libLLVM-15.so'), '-lstdc++'])]
     inputs += archives + [shim, sdk / 'bin/cjc', sdk / 'third_party/llvm/lib/libLLVM-15.so']
     inputs += sorted((sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so'))
     inputs += [sdk / 'lib/linux_x86_64_cjnative/libcangjie-std-core.a']
@@ -98,6 +98,18 @@ def main():
             for p in sorted((out / 'imports').rglob('*')) if p.is_file()
         }
         record['elf_sha256'] = digest(executable)
+        loader = subprocess.run(['ldd', str(executable)], cwd=tree, env=env,
+                                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        (out / 'loader.log').write_text(loader.stdout)
+        record['loader_rc'] = loader.returncode
+        record['loaded_product_libraries'] = {}
+        for line in loader.stdout.splitlines():
+            fields = line.split()
+            if len(fields) >= 3 and fields[1] == '=>' and fields[0].startswith(
+                    ('libLLVM-', 'libcangjie-runtime', 'libboundscheck')):
+                library = Path(fields[2])
+                record['loaded_product_libraries'][fields[0]] = {
+                    'path': str(library), 'sha256': digest(library) if library.is_file() else None}
         start = time.monotonic()
         with (out / 'test.log').open('w') as log:
             record['test_rc'] = subprocess.call([str(executable), '--no-color', '--show-all-output',
