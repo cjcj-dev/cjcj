@@ -1,7 +1,19 @@
-package cjcj::codegen
+package extension_def_regression
 
+import cjcj::codegen.*
 import std.unittest.*
 import std.unittest.testmacro.*
+
+foreign {
+    func LLVMIsOpaqueStruct(ty: LLVMTypeRef): Int32
+    func LLVMCountStructElementTypes(ty: LLVMTypeRef): UInt32
+    func LLVMInt8TypeInContext(context: LLVMContextRef): LLVMTypeRef
+    func LLVMInt16TypeInContext(context: LLVMContextRef): LLVMTypeRef
+    func LLVMInt32TypeInContext(context: LLVMContextRef): LLVMTypeRef
+    func LLVMPointerType(ty: LLVMTypeRef, addressSpace: UInt32): LLVMTypeRef
+    func LLVMStructGetTypeAtIndex(ty: LLVMTypeRef, index: UInt32): LLVMTypeRef
+}
+
 
 @Test
 public class ExtensionDefTypeTest {
