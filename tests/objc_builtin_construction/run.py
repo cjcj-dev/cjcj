@@ -60,14 +60,15 @@ def main():
                 return 2
     names = ('pointer_inferred', 'block_inferred', 'func_inferred', 'pointer_explicit',
              'block_explicit', 'type_usage', 'control', 'cpointer',
-             'block_return', 'func_non_function', 'func_cfunc')
+             'block_return', 'func_non_function', 'func_cfunc', 'block_valid')
     with ThreadPoolExecutor(max_workers=4) as pool:
         for name, observed in zip(names, pool.map(lambda n: compile_one(n, a.compiler), names)):
             text = Path(observed['log']).read_text()
             pointer = 'ObjCPointer can only be used with Objective-C compatible types'
             block = 'ObjCBlock can only be used with function type over Objective-C compatible types'
             func = 'ObjCFunc can only be used with function type over Objective-C compatible types'
-            expected = ([pointer, block] if name == 'type_usage' else
+            expected = ([] if name == 'block_valid' else
+                        [pointer, block] if name == 'type_usage' else
                         [pointer] if name.startswith('pointer') else
                         [block] if name.startswith('block') else
                         [func] if name.startswith('func') else [])
@@ -80,6 +81,8 @@ def main():
             # so an earlier diagnostic mismatch never hides this state assertion.
             ast_path = a.out / name / 'result_AST' / '5_desugar_ast.txt'
             ast = ast_path.read_text() if ast_path.exists() else ''
+            if name == 'block_valid':
+                observed['assertions']['valid_block_rewritten'] = 'RefExpr: registerCangjieLambdaAsBlock {' in ast
             if name != 'type_usage' and expected:
                 builtin = 'ObjCPointer' if name.startswith('pointer') else ('ObjCBlock' if name.startswith('block') else 'ObjCFunc')
                 broken_calls = re.findall(r'CallExpr \{[^{}]*ty: (?:Struct|Class)-' + builtin
