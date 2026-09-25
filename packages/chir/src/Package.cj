@@ -153,7 +153,7 @@ public class Package {
 
     public func GetGlobalFunctions(includePureAbstract!: Bool = false): ArrayList<Function> {
         if (includePureAbstract) {
-            return globalFuncs
+            return ArrayList<Function>(globalFuncs)
         }
         let funcs = ArrayList<Function>()
         for (item in globalFuncs) {
@@ -161,7 +161,7 @@ public class Package {
                 funcs.add(item)
             }
         }
-        return globalFuncs
+        return ArrayList<Function>(globalFuncs)
     }
 
     public func GetGlobalFunctionsRef(): ArrayList<Function> { return globalFuncs }
