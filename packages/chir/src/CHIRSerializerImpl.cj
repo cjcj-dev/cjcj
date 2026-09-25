@@ -2170,22 +2170,22 @@ class CHIRSerializerImpl {
         if (let Some(invokeStaticWithException) <- (expr as InvokeStaticWithException)) {
             return serializeInvokePayload(invokeStaticWithException.GetInstantiatedTypeArgs(),
                 invokeStaticWithException.GetThisType(), invokeStaticWithException.overflowStrategy,
-                invokeStaticWithException.GetVirtualMethodOffset())
+                invokeStaticWithException.GetStoredVirMethodOffset())
         }
         if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
             return serializeInvokePayload(invokeWithException.GetInstantiatedTypeArgs(),
                 invokeWithException.GetThisType(), invokeWithException.overflowStrategy,
-                invokeWithException.GetVirtualMethodOffset())
+                invokeWithException.GetStoredVirMethodOffset())
         }
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
             return serializeInvokePayload(invokeStatic.GetInstantiatedTypeArgs(), invokeStatic.GetThisType(),
                 invokeStatic.overflowStrategy,
-                invokeStatic.GetVirtualMethodOffset())
+                invokeStatic.GetStoredVirMethodOffset())
         }
         if (let Some(invoke) <- (expr as Invoke)) {
             return serializeInvokePayload(invoke.GetInstantiatedTypeArgs(), invoke.GetThisType(),
                 invoke.overflowStrategy,
-                invoke.GetVirtualMethodOffset())
+                invoke.GetStoredVirMethodOffset())
         }
         if (let Some(instanceOf) <- (expr as InstanceOf)) {
             return expressionPayload("instanceOf", [CHIRSerializeType(instanceOf.GetType())])

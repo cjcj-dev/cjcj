@@ -293,9 +293,9 @@ public class CHIRInvokeWrapper <: CHIRInvokeExpr {
 
     public override func GetVirtualMethodOffset(): UInt64 {
         if (let Some(invoke) <- (expr as Invoke)) {
-            return invoke.GetVirtualMethodOffset().getOrThrow()
+            return invoke.GetVirtualMethodOffset()
         }
-        return (expr as InvokeWithException).getOrThrow().GetVirtualMethodOffset().getOrThrow()
+        return (expr as InvokeWithException).getOrThrow().GetVirtualMethodOffset()
     }
 
     public func TestVritualMethodAttr(attr: Attribute): Bool {
@@ -385,8 +385,8 @@ public class CHIRInvokeStaticWrapper <: CHIRInvokeExpr {
 
     public override func GetVirtualMethodOffset(): UInt64 {
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
-            return invokeStatic.GetVirtualMethodOffset().getOrThrow()
+            return invokeStatic.GetVirtualMethodOffset()
         }
-        return (expr as InvokeStaticWithException).getOrThrow().GetVirtualMethodOffset().getOrThrow()
+        return (expr as InvokeStaticWithException).getOrThrow().GetVirtualMethodOffset()
     }
 }

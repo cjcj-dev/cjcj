@@ -178,9 +178,9 @@ public open class DynamicDispatchBase <: FuncCallBase {
 
     public func GetVirtualMethodOffset(): UInt64 {
         if (let Some(dispatch) <- expr) {
-            return dispatch.GetVirtualMethodOffset().getOrThrow()
+            return dispatch.GetVirtualMethodOffset()
         }
-        return exprE.getOrThrow().GetVirtualMethodOffset().getOrThrow()
+        return exprE.getOrThrow().GetVirtualMethodOffset()
     }
 
     public func GetInstSrcParentCustomTypeOfMethod(builder: CHIRBuilder): ClassType {
