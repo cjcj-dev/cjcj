@@ -136,4 +136,8 @@ check official-restored-equal test "$(cat "$root/official-restored.diff.rc")" -e
 check baseline-restored-archive-hash-equal same_hash "$root/baseline/archive.sha256" "$root/restored/archive.sha256"
 check baseline-restored-elf-hash-equal same_hash "$root/baseline/elf.sha256" "$root/restored/elf.sha256"
 printf '%s\n' "$fail" > "$root/runner.rc"
-exit "$fail"
+# fail is only 0 or 1. A bare exit makes ShellCheck 0.9.0 treat the
+# indirect check() callees as unreachable; false preserves that status.
+if [ "$fail" -ne 0 ]; then
+  false
+fi
