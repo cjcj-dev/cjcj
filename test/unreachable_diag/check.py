@@ -48,6 +48,11 @@ def expect(name, ok, detail):
     if not ok:
         failures.append(name)
 
+expect("compiler-completed", (out / "compile.rc").read_text().strip() == "0", "compile.rc=" + (out / "compile.rc").read_text().strip())
+outer_return = line_of("return match (x)")
+outer_hits = count(lambda msg, line: "unreachable expression" in msg and line == outer_return)
+expect("outer-return-not-skipped", outer_hits == 1, f"hits={outer_hits} line={outer_return}")
+
 else_if_hits = count(lambda msg, line: "unreachable block in 'if'" in msg and line == else_if)
 else_arm_hits = count(lambda msg, line: "unreachable block in 'if'" in msg and line == else_arm)
 expect("else-if-true-arm", else_if_hits == 1, f"hits={else_if_hits} line={else_if}")
