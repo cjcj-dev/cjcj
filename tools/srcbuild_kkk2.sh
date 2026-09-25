@@ -18,7 +18,7 @@ DAG_ORDER=(2 3 4 5 6 7 8 9 10 11 12 13 14 31 32 30 33 20 21 22 23 24 25 26 29 34
 readonly ORIGINAL_ARGS=("$@")
 
 read_host_toolchain_pin() {
-    local line key value toolchain= seen_toolchain=0
+    local line key value toolchain='' seen_toolchain=0
     while IFS= read -r line || [[ -n $line ]]; do
         [[ -z $line ]] && continue
         [[ $line =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || {
@@ -199,7 +199,7 @@ srcbuild_setup_compiler_cache() {
 }
 
 validate_verifier_report_request() {
-    local report=$1 from_step=$2 through_step=$3
+    local report=$1
     [[ -z $report ]] && return 0
     [[ $report == /* ]] || {
         echo "verifier report path must be absolute: $report" >&2
@@ -224,8 +224,12 @@ reject_diagnostic_workspace() {
 if [[ ${1:-} == --lib-only ]]; then
     [[ $# == 1 ]] || {
         echo "--lib-only does not accept other arguments" >&2
+        # return exits a sourced script; exit handles direct execution.
+        # shellcheck disable=SC2317
         return 2 2>/dev/null || exit 2
     }
+    # return exits a sourced script; exit handles direct execution.
+    # shellcheck disable=SC2317
     return 0 2>/dev/null || exit 0
 fi
 
@@ -405,14 +409,11 @@ readonly PRIVATE_HOME="$STATE_ROOT/home"
 readonly CANGJIE_WORKSPACE="$STATE_ROOT/workspace"
 readonly CANGJIE_BUILD_ROOT="$STATE_ROOT/buildtools"
 readonly CJCJ_FIXED_LLVM_DIR="$STATE_ROOT/fixed-llc"
-readonly STAGE1_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage1.mjs"
-readonly STAGE2_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage2.mjs"
 readonly STAGE3_STEP_SCRIPT="$REPO_ROOT/ci/srcbuild/steps/build-stage3.mjs"
 readonly BOOTSTRAP_SH="${CJCJ_BOOTSTRAP_SH:-$REPO_ROOT/ci/bootstrap/bootstrap.sh}"
 export CJCJ_BOOTSTRAP_WORK="$STATE_ROOT/bootstrap-work"
 readonly BUILD_TYPE=relwithdebinfo
 readonly VERIFIER_DIAGNOSTIC_MARKER="$CANGJIE_WORKSPACE/.cjcj-verifier-diagnostic.json"
-readonly VERIFIER_INVENTORY="${VERIFIER_REPORT:+${VERIFIER_REPORT}.artifacts.tsv}"
 START_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 readonly START_STAMP
 readonly BASE_PATH="$PRIVATE_HOME/.local/bin:$PATH"
@@ -509,7 +510,7 @@ record_crash_signature() {
 capture_build_child_affinity() {
     local root_pid=$1 step=$2 stop_file=$3
     local candidate pid command elapsed preferred arguments affinity actual
-    local best_pid= best_command= best_arguments= best_actual=
+    local best_pid='' best_command='' best_arguments='' best_actual=''
     local best_elapsed=-1 best_preferred=0
     while [[ ! -e $stop_file ]]; do
         candidate=$(LC_ALL=C ps -eo pid=,ppid=,etimes=,comm=,args= | awk -v root_pid="$root_pid" '
@@ -742,7 +743,7 @@ build_fixed_tuple() {
     fi
     # shellcheck disable=SC1091
     source "$REPO_ROOT/ci/llvm_pin.env"
-    if seed_fixed_tuple_from_depot; then
+    if seed_fixed_tuple_from_depot "${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}"; then
         return
     fi
     if ((DRY_RUN)); then
@@ -810,7 +811,7 @@ build_fixed_tuple() {
     } > "$CJCJ_FIXED_LLVM_DIR/llvm-tools.manifest"
     fixed_tuple_is_current || return 1
     if [[ ${CJCJ_LLVM_DEPOT_PUBLISH:-0} == 1 ]]; then
-        publish_fixed_tuple_to_depot || return 1
+        publish_fixed_tuple_to_depot "${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}" || return 1
     fi
 }
 

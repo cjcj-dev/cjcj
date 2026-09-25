@@ -93,6 +93,8 @@ printf '%s\n' "$?" > "$root/official-restored.diff.rc"
 date -u +%s%N > "$root/end.ns"
 uptime > "$root/uptime.after"
 
+# Invoked as a command argument by check() through "$@" below.
+# shellcheck disable=SC2317
 same_hash() {
   local left=$1 right=$2 left_hash right_hash
   left_hash=$(awk 'NR == 1 { print $1 }' "$left")
@@ -100,6 +102,8 @@ same_hash() {
   test -n "$left_hash" && test "$left_hash" = "$right_hash"
 }
 
+# Invoked as a command argument by check() through "$@" below.
+# shellcheck disable=SC2317
 single_space_n1() {
   local delta=$1
   test "$(/usr/bin/wc -l < "$delta")" -eq 1 &&
