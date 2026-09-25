@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Assert source ranges in real stage1 binary CHIR, without product probes.
 
-Schema anchors: CHIRFlatBufferSchema.cj:730,788,999,1040,1138;
+Schema anchors: CHIRFlatBufferSchema.cj:643,730,788,999,1040,1138;
 CHIRSerializerImpl.cj:609,966,1138. The shared reader only decodes bytes.
 """
 import argparse
@@ -54,7 +54,9 @@ def check(chir, source):
     checks = {
         'intrinsic_counts': len(gets) == len(compound) == 13 and len(sets) == 14,
         'compound_get_assignment_location': ranges(gets) == ranges(compound)
-            and all(Path(v['file']) == source.resolve() and v['file_id'] > 0 for v in gets),
+            and all(Path(v['file']) == source.resolve() and v['file_id'] > 0
+                    and any(s['begin'] == v['begin'] and s['end'] == v['end']
+                            and s['file_id'] == v['file_id'] for s in sets) for v in gets),
         'varray_set_assignment_location': ranges(sets) == ranges(compound + ordinary)
             and all(Path(v['file']) == source.resolve() and v['file_id'] > 0 for v in sets),
     }
