@@ -9,6 +9,9 @@
 // Build: runtime_shim/build_shim.sh
 //
 // Entries (grow as more LLVM-C gaps surface during the port):
+//   LLVM 15 C API gaps consumed by packages/codegen/src/LLVM.cj:406,529,530
+//   (foreign relocations; bodies are LLVM 20 Core.cpp:1055-1057,3824-3831):
+//         LLVMGetValueContext, LLVMCanValueUseFastMathFlags, LLVMSetFastMathFlags.
 //   R-A': GlobalVariable::addAttribute(StringRef,StringRef)  -- no LLVM-C ABI.
 //         C++ use: src/CodeGen/CJNative/EmitPackageIR.cpp:701  gv->addAttribute(GC_KLASS_ATTR)
 //         GC_KLASS_ATTR = "CFileKlass"  (src/CodeGen/Utils/Constants.h:35)
@@ -296,6 +299,60 @@ extern "C" LLVMTypeRef LLVMSelfhostArrayType64(LLVMTypeRef ElementType, uint64_t
 extern "C" void LLVMGlobalObjectAddStringAttribute(
         LLVMValueRef GV, const char *K, unsigned KLen, const char *V, unsigned VLen) {
     unwrap<GlobalVariable>(GV)->addAttribute(StringRef(K, KLen), StringRef(V, VLen));
+}
+
+// LLVM 15 llvm-c/Core.h has no LLVMFastMathFlags. Bits match LLVM 18 Core.h
+// (LLVMFastMathAllowReassoc = 1<<0 .. LLVMFastMathApproxFunc = 1<<6) and
+// llvm_rebase llvm/include/llvm/IR/FMF.h:40-47. Setters stay public;
+// FastMathFlags(unsigned) is private (FMF.h:27).
+namespace {
+enum {
+    LLVMFastMathAllowReassoc = (1 << 0),
+    LLVMFastMathNoNaNs = (1 << 1),
+    LLVMFastMathNoInfs = (1 << 2),
+    LLVMFastMathNoSignedZeros = (1 << 3),
+    LLVMFastMathAllowReciprocal = (1 << 4),
+    LLVMFastMathAllowContract = (1 << 5),
+    LLVMFastMathApproxFunc = (1 << 6),
+};
+
+// LLVM 20 llvm/lib/IR/Core.cpp:3583-3593 (same body as LLVM 18 Core.cpp:3322-3332).
+FastMathFlags mapFromLLVMFastMathFlags(unsigned FMF)
+{
+    FastMathFlags NewFMF;
+    NewFMF.setAllowReassoc((FMF & LLVMFastMathAllowReassoc) != 0);
+    NewFMF.setNoNaNs((FMF & LLVMFastMathNoNaNs) != 0);
+    NewFMF.setNoInfs((FMF & LLVMFastMathNoInfs) != 0);
+    NewFMF.setNoSignedZeros((FMF & LLVMFastMathNoSignedZeros) != 0);
+    NewFMF.setAllowReciprocal((FMF & LLVMFastMathAllowReciprocal) != 0);
+    NewFMF.setAllowContract((FMF & LLVMFastMathAllowContract) != 0);
+    NewFMF.setApproxFunc((FMF & LLVMFastMathApproxFunc) != 0);
+    return NewFMF;
+}
+} // namespace
+
+// LLVM 20 llvm/lib/IR/Core.cpp:1055-1057. C++ Value::getContext is llvm_rebase Value.h:258.
+extern "C" LLVMContextRef LLVMGetValueContext(LLVMValueRef Val)
+{
+    return wrap(&unwrap(Val)->getContext());
+}
+
+// LLVM 20 llvm/lib/IR/Core.cpp:3829-3831. FPMathOperator is llvm_rebase Operator.h:167.
+// LLVMBool is int, matching packages/codegen/src/LLVM.cj:529 Int32.
+extern "C" int LLVMCanValueUseFastMathFlags(LLVMValueRef V)
+{
+    Value *Val = unwrap<Value>(V);
+    return isa<FPMathOperator>(Val);
+}
+
+// LLVM 20 llvm/lib/IR/Core.cpp:3824-3826. Instruction::setFastMathFlags asserts
+// isa<FPMathOperator> (llvm_rebase Instruction.cpp:239-241); keep that assert.
+// flags is UInt32 at packages/codegen/src/LLVM.cj:530; LLVM 18 typedefs
+// LLVMFastMathFlags as unsigned.
+extern "C" void LLVMSetFastMathFlags(LLVMValueRef FPMathInst, unsigned FMF)
+{
+    Value *P = unwrap<Value>(FPMathInst);
+    cast<Instruction>(P)->setFastMathFlags(mapFromLLVMFastMathFlags(FMF));
 }
 
 // Mirror C++ `rawGV->addAttribute(llvm::Attribute::ReadOnly)`
