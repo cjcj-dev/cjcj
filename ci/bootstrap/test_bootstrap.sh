@@ -113,7 +113,7 @@ check_shim_call_count() {
 }
 
 check_dry_contract() {
-  local log="$1"
+  local log="$1" jobs="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
   check_count A1 2 'shape=planned Int64.ti>1 FFI-archives>0' "$log"
   check_count A1 1 'FFI-set-equals=' "$log"
   check_count A2 1 'cjcj-stage1 --version' "$log"
@@ -121,12 +121,19 @@ check_dry_contract() {
   check_count A3 2 'ASSERT stage1-compiler executable=planned' "$log"
   check_count CJPM 4 'tools/bin/cjpm' "$log"
   check_count CJPM 2 'cjpm build' "$log"
-  check_count CJPM 1 'cjpm build -j 1' "$log"
+  # Stage self-hosting must use the configured CPU budget (0924 stage >=64
+  # cores policy on kkk2), not the inherited serial override. JOBS comes from
+  # CJ_JOBS/getconf; configure_build_resources independently bounds the heap.
+  check_count CJPM-JOBS 1 "cjpm build -j $jobs bin=" "$log"
   check_count CJPM 1 'compile-option = "-O1"' "$log"
   check_count CJPM 1 'ASSERT compile-option-o1 planned' "$log"
   check_count CJPM 2 'ISOLATE cjcj-src from=' "$log"
   check_count CJPM 1 'CMD cjpm build bin=' "$log"
-  check_count CJPM 1 'CMD cjpm build -j 1 bin=' "$log"
+  check_count CJPM-JOBS 1 "CMD cjpm build -j $jobs bin=" "$log"
+  # Observe the actual env/bash command too: a correct diagnostic alone does
+  # not prove that cjpm receives the job count.
+  check_count CJPM-EXEC-JOBS 1 "tools/bin/cjpm\\\\ build\\\\ -j\\\\ $jobs$" "$log"
+  echo "PASS dry stage1 cjpm jobs=$jobs reaches execution command"
   check_count CJPM 1 'heap=20480MB' "$log"
   check_shim_call_count "$log"
   check_count SHIM 1 'CMD shim build label=stage0 .*source-object=source .*sdk=.*/sdk-stage0 .*runtime=.*/host-rt' "$log"
@@ -598,6 +605,13 @@ fault_dry_stage1() {
     duplicate)
       sed '/^[[:space:]]*assert_executable stage1-compiler /p' "$PRODUCT" > "$TMP/bootstrap.sh"
       ;;
+    serial)
+      export CJ_JOBS=64
+      sed 's/"-j $JOBS"/"-j 1"/' "$PRODUCT" > "$TMP/bootstrap.sh"
+      ;;
+    drop-jobs)
+      sed 's/build${extra:+ $extra}"/build"/' "$PRODUCT" > "$TMP/bootstrap.sh"
+      ;;
     stale-stdlib)
       sed 's/assemble_stage1_sdk "$sdk" "$compiler" "$std"/assemble_stage1_sdk "$sdk" "$compiler" "$previous_std"/' "$PRODUCT" > "$TMP/bootstrap.sh"
       ;;
@@ -798,7 +812,7 @@ case "${1:-test}" in
   fault-product-missing)
     fault_product_missing
     ;;
-  fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib)
+  fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-dry-stage1-serial|fault-dry-stage1-drop-jobs)
     fault_dry_stage1 "${1#fault-dry-stage1-}"
     ;;
   fault-shim-wiring)
@@ -849,7 +863,7 @@ case "${1:-test}" in
       fail build-env 'bootstrap CLI HOME/TMPDIR contract did not pass'
     BOOTSTRAP_PRODUCT="$PRODUCT" SDK_BUILD_PRODUCT="$SDK_PRODUCT" bash "$0" check-runtime-layouts > "$TMP/runtime-layouts-positive.log" ||
       fail runtime-layouts 'flat/nested/dual/inner-rc runtime layout contract did not pass'
-    for arm in a1 a1-missing-core-archive a1-missing-core-shared a1-missing-ffi-shared a2 a3 dry-stage1-missing dry-stage1-duplicate dry-stage1-stale-stdlib a4 build-env runtime-stamp host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
+    for arm in a1 a1-missing-core-archive a1-missing-core-shared a1-missing-ffi-shared a2 a3 dry-stage1-missing dry-stage1-duplicate dry-stage1-stale-stdlib dry-stage1-serial dry-stage1-drop-jobs a4 build-env runtime-stamp host-sha ast-sha host-colour colour-ruler colour-stamp-duplicate colour-stamp-mismatch colour-sha llvm-so-location tuple-missing-opt tuple-sums tuple-extra-entry old-host-llvm old-colour-llc cjpm-toml src-file compile-option product-missing shim-wiring; do
       log="$TMP/fault-$arm.log"
       if bash "$0" "fault-$arm" > "$log" 2>&1; then
         fail "$arm" 'fault arm unexpectedly passed'
@@ -858,6 +872,8 @@ case "${1:-test}" in
         a1) marker='BOOTSTRAP-FAIL \[test-A1\].*Int64.ti definitions=1';;
         a1-missing-*) marker='BOOTSTRAP-FAIL \[test-A1\].*install shape: core archive/shared 或 libstdFFI.so 缺失';;
         a2) marker='BOOTSTRAP-FAIL \[test-A2\].*命令失败 rc=23';;
+        dry-stage1-serial) marker='TEST-FAIL \[CJPM-JOBS\]';;
+        dry-stage1-drop-jobs) marker='TEST-FAIL \[CJPM-EXEC-JOBS\]';;
         a3) marker='BOOTSTRAP-FAIL \[test-A3\].*stage1-compiler';;
         dry-stage1-missing) marker='TEST-FAIL \[A3\] pattern count=0 expected=2: ASSERT stage1-compiler executable=planned';;
         dry-stage1-duplicate) marker='TEST-FAIL \[A3\] pattern count=4 expected=2: ASSERT stage1-compiler executable=planned';;
@@ -891,7 +907,7 @@ case "${1:-test}" in
     echo 'PASS bootstrap dry contracts, controlled build environment, LLVM assembly, and positive controls'
     ;;
   *)
-    echo "usage: $0 [test|check-dry-contract|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-a4|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a1-missing-core-archive|fault-a1-missing-core-shared|fault-a1-missing-ffi-shared|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
+    echo "usage: $0 [test|check-dry-contract|dry-run|check-shim-wiring|check-build-env|check-runtime-layouts|positive-a1|positive-a4|positive-build-env|positive-runtime-layouts|positive-runtime-layout-symlink-nested-only|positive-runtime-layout-symlink-flat-only|positive-compile-option-o1|fault-a1|fault-a1-missing-core-archive|fault-a1-missing-core-shared|fault-a1-missing-ffi-shared|fault-a2|fault-a3|fault-dry-stage1-missing|fault-dry-stage1-duplicate|fault-dry-stage1-stale-stdlib|fault-dry-stage1-serial|fault-dry-stage1-drop-jobs|fault-a4|fault-build-env|fault-runtime-stamp|fault-runtime-dual-layout|fault-runtime-dual-missing-bounds|fault-runtime-dual-multiple-nested|fault-runtime-layout-symlink-nested|fault-runtime-layout-symlink-flat|fault-runtime-layout-inner-rc|fault-host-sha|fault-ast-sha|fault-ast-bytes|fault-host-colour|fault-colour-ruler|fault-colour-stamp-duplicate|fault-colour-stamp-mismatch|fault-colour-sha|fault-llvm-so-location|fault-tuple-missing-opt|fault-tuple-sums|fault-tuple-extra-entry|fault-old-host-llvm|fault-old-colour-llc|fault-shim-wiring|ruler-control OFFICIAL_OPT COLOUR_TUPLE EXPECTED_LLVM_SHA]" >&2
     exit 2
     ;;
 esac
