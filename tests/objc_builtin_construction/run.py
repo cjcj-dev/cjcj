@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -70,8 +71,27 @@ def main():
                         [block] if name.startswith('block') else
                         [func] if name.startswith('func') else [])
             observed['target_diagnostics'] = {s: text.count(s) for s in expected}
-            observed['passed'] = (observed['rc'] == (1 if expected else 0)
-                                  and all(observed['target_diagnostics'].values()))
+            observed['assertions'] = {
+                'compiler_exit': observed['rc'] == (1 if expected else 0),
+                'target_diagnostics': all(v == 1 for v in observed['target_diagnostics'].values()),
+            }
+            # Read the actual post-desugar product AST. Keep independent assertions
+            # so an earlier diagnostic mismatch never hides this state assertion.
+            ast_path = a.out / name / 'result_AST' / '5_desugar_ast.txt'
+            ast = ast_path.read_text() if ast_path.exists() else ''
+            if name != 'type_usage' and expected:
+                builtin = 'ObjCPointer' if name.startswith('pointer') else ('ObjCBlock' if name.startswith('block') else 'ObjCFunc')
+                broken_calls = re.findall(r'CallExpr \{[^{}]*ty: (?:Struct|Class)-' + builtin
+                                          + r'[^{}]*attributes: \[([^\]]*)\]', ast)
+                observed['call_attributes'] = broken_calls
+                observed['assertions']['rejected_call_state'] = any('IS_BROKEN' in x for x in broken_calls)
+            positions = {'pointer_inferred': [31], 'block_inferred': [41], 'func_inferred': [40],
+                         'pointer_explicit': [43], 'block_explicit': [42], 'type_usage': [34, 64]}
+            if name in positions:
+                observed['diagnostic_columns'] = [int(v) for v in re.findall(
+                    r'error: [^\n]+\n ==> [^\n]+:' + r'5:(\d+):', text)]
+                observed['assertions']['diagnostic_target'] = observed['diagnostic_columns'] == positions[name]
+            observed['passed'] = all(observed['assertions'].values())
             result['cases'][name] = observed
             print(('PASS ' if observed['passed'] else 'FAIL ') + name + ' observed=' + json.dumps(observed), flush=True)
     result['uptime_after'] = subprocess.check_output(['uptime'], text=True)
