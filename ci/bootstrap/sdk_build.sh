@@ -50,7 +50,7 @@ die() { RED "SDK-BUILD-FAIL $*"; exit 1; }
 #      ⭐ LD_LIBRARY_PATH **首项**指**宿主**的 runtime（⭐ cjc 进程自己加载的是它）
 #   用法: sdk_build.sh env --host-sdk <dir> --target-sdk <dir>
 if [ "${1:-}" = env ]; then
-  shift; HOSTSDK= TGTSDK=
+  shift; HOSTSDK='' TGTSDK=''
   while [ $# -gt 0 ]; do
     case "$1" in
       --host-sdk) HOSTSDK="${2:?}"; shift 2;;
@@ -62,7 +62,9 @@ if [ "${1:-}" = env ]; then
   [ -d "${TGTSDK:-}" ]  || die "env: 缺 --target-sdk"
   hso=$(find "$HOSTSDK/runtime/lib" -name libcangjie-runtime.so | head -1)
   tso=$(find "$TGTSDK/runtime/lib"  -name libcangjie-runtime.so | head -1)
-  [ -n "$hso" ] && [ -n "$tso" ] || die "env: 找不到 libcangjie-runtime.so"
+  if [ -z "$hso" ] || [ -z "$tso" ]; then
+    die "env: 找不到 libcangjie-runtime.so"
+  fi
   hm=$(nm -D "$hso" 2>/dev/null | grep -c g_cjLoadBadMask || true)
   tm=$(nm -D "$tso" 2>/dev/null | grep -c g_cjLoadBadMask || true)
   [ "$hm" = 0 ] || die "env: ⛔ 宿主 runtime 着色了（mask=$hm）⇒ ⭐ cjc 会 SEGV"
@@ -95,7 +97,7 @@ if [ "${1:-}" = env ]; then
   exit 0
 fi
 
-FROM= TO= ROLE= LLC= OPT= LLVM_SO= LLVM_TUPLE= CJPM= CJC= RUNTIME= RUNTIME_COMMIT= TARGET_TUPLE= STD= VERIFY_HOST_RT= COLOUR_RUNTIME= HOST_RUNTIME= LINKNAME= FORCE=0
+FROM='' TO='' ROLE='' LLC='' OPT='' LLVM_SO='' LLVM_TUPLE='' CJPM='' CJC='' RUNTIME='' RUNTIME_COMMIT='' TARGET_TUPLE='' STD='' VERIFY_HOST_RT='' COLOUR_RUNTIME='' HOST_RUNTIME='' LINKNAME='' FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --from) FROM="${2:?}"; shift 2;;
@@ -221,7 +223,7 @@ swap_all() {                     # swap_all <相对文件名> <源文件> <标�
     [ -n "$dst" ] || continue
     cp -f "$src" "$dst" || die "写入失败: $dst"
     n=$((n+1))
-    printf '      %s\n' "${dst#$TO/}"
+    printf '      %s\n' "${dst#"$TO"/}"
   done < <(find "$TO" -maxdepth 4 -type f -name "$rel" 2>/dev/null)
   [ "$n" -gt 0 ] || die "$label: ⭐ 基线里没有名为 $rel 的位置 —— ⛔ 本工具不新建路径，⭐ 请确认组件名"
   echo "  [$label] 替换 $n 处  sha=$(sha256sum "$src" | cut -c1-16)"
@@ -244,7 +246,7 @@ install_llvm_so() {
   [ -f "$canonical" ] || die "llvm-so: 基线里没有同名位置 $canonical"
   cp -f "$source" "$target" || die "llvm-so 写入失败: $target"
   same_sha "$source" "$canonical" || die 'llvm-so 安装后 sha256 不一致'
-  echo "  [llvm-so] $source -> ${target#$TO/}  sha=$(sha256sum "$target" | cut -c1-16)"
+  echo "  [llvm-so] $source -> ${target#"$TO"/}  sha=$(sha256sum "$target" | cut -c1-16)"
 }
 
 tuple_sum_has() {
@@ -374,7 +376,7 @@ assert_runtime_stamp() {
 }
 
 assert_flat_runtime_identity() {
-  local root="$1" name so expected= actual_hash
+  local root="$1" name so expected='' actual_hash
   name=$(basename "$root")
   name=${name,,}
   so="$root/libcangjie-runtime.so"
@@ -409,7 +411,7 @@ runtime_stamp_summary() {
 
 resolve_runtime_pair() {
   # 输出到全局：RT_DYN_SRC（必有）· RT_STATIC_SRC（可空）· RT_TUPLE · RT_LAYOUT
-  RT_DYN_SRC= RT_STATIC_SRC= RT_TUPLE= RT_LAYOUT=nested
+  RT_DYN_SRC='' RT_STATIC_SRC='' RT_TUPLE='' RT_LAYOUT=nested
   local root="$1" cand so flat_so nested_so nested_sos flat_stamp nested_summary
   # flat 与 nested 使用同一把尺：路径跟随符号链接后必须是常规文件。
   flat_so=$(find -L "$root" -mindepth 1 -maxdepth 1 -type f -name libcangjie-runtime.so -print -quit 2>/dev/null || true)
@@ -443,9 +445,9 @@ resolve_runtime_pair() {
   # 候选按优先级试；每个都过 same-round 才收
   for cand in \
       "$(readlink -f "$RT_DYN_SRC/../../../lib/$RT_TUPLE" 2>/dev/null || true)" \
-      "$( [ -d "$root/lib/$RT_TUPLE" ] && readlink -f "$root/lib/$RT_TUPLE" || true )" \
+      "$(if [ -d "$root/lib/$RT_TUPLE" ]; then readlink -f "$root/lib/$RT_TUPLE" || true; fi)" \
       "$(readlink -f "$RT_DYN_SRC/../../lib/$RT_TUPLE" 2>/dev/null || true)"; do
-    [ -n "$cand" ] && [ -d "$cand" ] || continue
+    if [ -z "$cand" ] || [ ! -d "$cand" ]; then continue; fi
     if runtime_pair_same_round "$RT_DYN_SRC" "$cand"; then
       RT_STATIC_SRC="$cand"
       break
@@ -466,12 +468,14 @@ if [ -n "$RUNTIME" ]; then
       cp -f "$RT_DYN_SRC/$base" "$d/$base" || die "flat runtime 动态库替换失败: $base"
       same_sha "$RT_DYN_SRC/$base" "$d/$base" || die "flat runtime 安装后 sha256 不一致: $base"
     done
-    echo "  [runtime-dyn] flat ${RT_DYN_SRC} -> ${d#$TO/} files=2"
+    echo "  [runtime-dyn] flat ${RT_DYN_SRC} -> ${d#"$TO"/} files=2"
   else
     [ "$RT_TUPLE" = "$tgt_tuple" ] || \
       die "runtime 平台不一致: 源=$RT_TUPLE 目标=$tgt_tuple"
-    rm -rf "$d" && cp -a "$RT_DYN_SRC" "$d" || die "runtime 动态库替换失败"
-    echo "  [runtime-dyn] ${RT_DYN_SRC} -> ${d#$TO/}"
+    if ! rm -rf "$d" || ! cp -a "$RT_DYN_SRC" "$d"; then
+      die "runtime 动态库替换失败"
+    fi
+    echo "  [runtime-dyn] ${RT_DYN_SRC} -> ${d#"$TO"/}"
   fi
   # ⭐ 静态侧：基线若有 lib/<tuple> 里的 runtime 相关归档，必须同轮替换
   lib_d="$TO/lib/$tgt_tuple"
@@ -520,8 +524,10 @@ if [ -n "$STD" ]; then
   if [ -d "$STD/modules" ]; then
     smod=$(find "$STD/modules" -maxdepth 1 -mindepth 1 -type d -name 'linux*' | head -1)
     [ -n "$smod" ] || die "std install prefix 里找不到 modules/linux*"
-    rm -rf "$d" && cp -a "$smod" "$d" || die "std modules 替换失败"
-    echo "  [std-prefix] modules -> ${d#$TO/}"
+    if ! rm -rf "$d" || ! cp -a "$smod" "$d"; then
+      die "std modules 替换失败"
+    fi
+    echo "  [std-prefix] modules -> ${d#"$TO"/}"
     n=0
     # ⭐ 两边同轮：lib/<tuple> 的 .a + runtime/lib/<tuple> 的 .so（+ FFI）
     for relroot in lib/linux_x86_64_cjnative runtime/lib/linux_x86_64_cjnative; do
@@ -532,19 +538,18 @@ if [ -n "$STD" ]; then
         case "$base" in
           libcangjie-runtime*|libboundscheck*) continue ;;
         esac
-        rel="${src#$STD/}"
+        rel="${src#"$STD"/}"
         dst="$TO/$rel"
         [ -f "$BASE/$rel" ] || die "std: 基线里没有 $rel，拒绝新建"
         cp -f "$src" "$dst" || die "std 写入失败: $rel"
         n=$((n+1))
       done < <(find "$STD/$relroot" -maxdepth 1 -type f | sort)
     done
-    for rel in lib/libstdFFI.so; do
-      [ -f "$STD/$rel" ] || die "std install prefix 缺文件: $rel"
-      [ -f "$TO/$rel" ] || die "std: 基线里没有 $rel，拒绝新建"
-      cp -f "$STD/$rel" "$TO/$rel" || die "std 写入失败: $rel"
-      n=$((n+1))
-    done
+    rel=lib/libstdFFI.so
+    [ -f "$STD/$rel" ] || die "std install prefix 缺文件: $rel"
+    [ -f "$TO/$rel" ] || die "std: 基线里没有 $rel，拒绝新建"
+    cp -f "$STD/$rel" "$TO/$rel" || die "std 写入失败: $rel"
+    n=$((n+1))
     # ⭐ 同轮自证：core 的 .a 与 .so 必须都来自本 prefix（sha 对源）
     for pair in \
       "lib/linux_x86_64_cjnative/libcangjie-std-core.a" \
@@ -618,13 +623,17 @@ verify_exe() {                    # verify_exe <路径> <是否跑 --version>
     in_sdk_env "$f" --version >/dev/null \
       || die "$f --version 非零退出（已 source $TO/envsetup.sh）"
   fi
-  printf '  %-34s ELF ✓  ldd ✓%s\n' "${f#$TO/}" "$([ "$runver" = 1 ] && printf '  --version ✓')"
+  printf '  %-34s ELF ✓  ldd ✓%s\n' "${f#"$TO"/}" "$([ "$runver" = 1 ] && printf '  --version ✓')"
 }
 for rel in third_party/llvm/bin/llc third_party/llvm/bin/opt tools/bin/cjpm; do
   verify_exe "$TO/$rel" 1
 done
 # ⚠ ⭐ cjc 只在【宿主】SDK 上跑 --version：⭐ 目标 SDK 的 runtime 着色，⭐ 跑它必崩
-[ "$ROLE" = host ] && verify_exe "$TO/bin/cjc" 1 || verify_exe "$TO/bin/cjc" 0
+if [ "$ROLE" = host ]; then
+  verify_exe "$TO/bin/cjc" 1
+else
+  verify_exe "$TO/bin/cjc" 0
+fi
 
 echo "[5/5] 登记"
 if [ -n "$LINKNAME" ]; then
