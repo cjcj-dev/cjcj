@@ -4,6 +4,7 @@
 enum Payload {
     | Left(Int64)
     | Right(Int64)
+    | Third(Int64)
 }
 
 func reachable(x: Int64): Int64 {
@@ -55,4 +56,12 @@ func nothingLater(): Int64 {
 
 main() {
     println(reachable(1))
+}
+
+func matchConstructors(): Int64 {
+    let value = Third(9)
+    match (value) {
+        case Left(1) | Right(2) => 1
+        case _ => 0
+    }
 }
