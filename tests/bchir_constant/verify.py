@@ -45,9 +45,10 @@ def check(path, name):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('root', type=Path)
+    p.add_argument('--case', action='append', choices=['enum', 'literals', 'scalars', 'load_control'])
     args = p.parse_args()
     results = []
-    for name in ['enum', 'literals', 'scalars', 'load_control']:
+    for name in (args.case or ['enum', 'literals', 'scalars', 'load_control']):
         directory = args.root / ('core-' + name)
         record = json.loads((directory / 'result.json').read_text())
         dump = directory / 'output_CHIR/3_EraseUselessDebugExpr.chirtxt'
