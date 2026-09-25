@@ -2,7 +2,7 @@ package cjcj::codegen
 
 import std.collection.*
 import cjcj::chir.Apply
-import cjcj::chir.ApplyWithException
+import cjcj::chir.TryApply
 import cjcj::chir.Attribute
 import cjcj::chir.BoolLiteral
 import cjcj::chir.BoxType
@@ -152,7 +152,7 @@ private func IsLoadExprForAllocatedGenericRef(chirExpression: Expression): Bool 
     }
     let locationExpr = (location as LocalVar).getOrThrow().GetExpr().getOrThrow()
     let locationExprKind = locationExpr.GetExprKind()
-    return locationExprKind == ExprKind.ALLOCATE || locationExprKind == ExprKind.ALLOCATE_WITH_EXCEPTION
+    return locationExprKind == ExprKind.ALLOCATE || locationExprKind == ExprKind.TRY_ALLOCATE
 }
 
 private func IntrinsicRuntimeFunctionName(kind: IntrinsicKind): Option<String> {
@@ -1205,7 +1205,7 @@ public class IRBuilder2 <: Resource {
                         if (let Some(locationExpr) <- localVar.GetExpr()) {
                             let locationExprKind = locationExpr.GetExprKind()
                             isUntaggedLocalRefLoad = locationExprKind == ExprKind.ALLOCATE ||
-                                locationExprKind == ExprKind.ALLOCATE_WITH_EXCEPTION
+                                locationExprKind == ExprKind.TRY_ALLOCATE
                         }
                     }
                 }
@@ -2345,8 +2345,8 @@ public class IRBuilder2 <: Resource {
                 var applyExprWrapper: Option<CHIRApplyWrapper> = None
                 if (let Some(applyExpr) <- (currentExpression as Apply)) {
                     applyExprWrapper = Some(CHIRApplyWrapper(applyExpr))
-                } else if (let Some(applyWithExceptionExpr) <- (currentExpression as ApplyWithException)) {
-                    applyExprWrapper = Some(CHIRApplyWrapper(applyWithExceptionExpr))
+                } else if (let Some(tryApplyExpr) <- (currentExpression as TryApply)) {
+                    applyExprWrapper = Some(CHIRApplyWrapper(tryApplyExpr))
                 }
                 let applyWrapper = applyExprWrapper.getOrThrow()
                 let caller = cgMod.GetOrInsertCGFunction(applyWrapper.GetTopLevelFunc().getOrThrow())
@@ -2440,8 +2440,8 @@ public class IRBuilder2 <: Resource {
             let currentExpression = exprWrapper.GetExpression()
             if (let Some(applyExpr) <- (currentExpression as Apply)) {
                 applyExprWrapper = Some(CHIRApplyWrapper(applyExpr))
-            } else if (let Some(applyWithExceptionExpr) <- (currentExpression as ApplyWithException)) {
-                applyExprWrapper = Some(CHIRApplyWrapper(applyWithExceptionExpr))
+            } else if (let Some(tryApplyExpr) <- (currentExpression as TryApply)) {
+                applyExprWrapper = Some(CHIRApplyWrapper(tryApplyExpr))
             }
             if (let Some(callExpr) <- (exprWrapper as CHIRCallExpr)) {
                 callExprWrapper = Some(callExpr)
@@ -2538,7 +2538,7 @@ public class IRBuilder2 <: Resource {
         let typeInfoPtrType = CGType.GetOrCreateTypeInfoPtrType(GetLLVMContext())
 
         let callExpression = callExprWrapper.GetExpression()
-        if ((callExpression as Apply).isSome() || (callExpression as ApplyWithException).isSome()) {
+        if ((callExpression as Apply).isSome() || (callExpression as TryApply).isSome()) {
             return CreateBitCast(CreateTypeInfo(outerCHIRType), typeInfoPtrType)
         }
 

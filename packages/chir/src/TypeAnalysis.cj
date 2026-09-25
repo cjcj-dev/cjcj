@@ -135,7 +135,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
     public static func CheckFuncHasInvoke(fn: Function): Bool {
         let found = CoreBox<Bool>(false)
         Visitor.Visit(fn, { expr =>
-            if (expr.GetExprKind() == ExprKind.INVOKE || expr.GetExprKind() == ExprKind.INVOKE_WITH_EXCEPTION) {
+            if (expr.GetExprKind() == ExprKind.INVOKE || expr.GetExprKind() == ExprKind.TRY_INVOKE) {
                 found.value = true
                 return VisitResult.STOP
             }
@@ -202,19 +202,17 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
 
     public override func HandleTerminatorEffect(state: TypeDomain, terminator: Expression): Option<Block> {
         match (terminator.GetExprKind()) {
-            case ExprKind.NUMERIC_CAST_WITH_EXCEPTION =>
-                if (let Some(dest) <- terminator.GetResult()) {
-                    state.SetToTopOrTopRef(dest, dest.GetType().getOrThrow().IsRef())
-                }
+            case ExprKind.TRY_NUMERIC_CAST =>
+                HandleTypeCastExpr(state, (terminator as TryNumericCast).getOrThrow())
             case ExprKind.GOTO => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.EXIT => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.BRANCH => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.MULTIBRANCH => HandleTerminatorEffectImpl(state, terminator)
-            case ExprKind.NEG_WITH_EXCEPTION | ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION |
-                ExprKind.MUL_WITH_EXCEPTION | ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION |
-                ExprKind.EXP_WITH_EXCEPTION | ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
+            case ExprKind.TRY_NEG | ExprKind.TRY_ADD | ExprKind.TRY_SUB |
+                ExprKind.TRY_MUL | ExprKind.TRY_DIV | ExprKind.TRY_MOD |
+                ExprKind.TRY_EXP | ExprKind.TRY_LSHIFT | ExprKind.TRY_RSHIFT =>
                 HandleTerminatorEffectImpl(state, terminator)
-            case ExprKind.INTRINSIC_WITH_EXCEPTION => HandleTerminatorEffectImpl(state, terminator)
+            case ExprKind.TRY_INTRINSIC => HandleTerminatorEffectImpl(state, terminator)
             case _ => HandleTerminatorEffectImpl(state, terminator)
         }
         return None
@@ -240,8 +238,8 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
             TypeValue(DevirtualTyKind.SUBTYPE_OF, (resultType as ClassType).getOrThrow()))
     }
 
-    public override func HandleInvokeWithExceptionTerminator(state: TypeDomain,
-        invoke: InvokeWithException, refObj: Option<Value>): Option<Block> {
+    public override func HandleTryInvokeTerminator(state: TypeDomain,
+        invoke: TryInvoke, refObj: Option<Value>): Option<Block> {
         let ty = invoke.GetResult().getOrThrow().GetType().getOrThrow().StripAllRefs()
         if (ty.IsClass()) { state.Update(refObj.getOrThrow(), TypeValue(DevirtualTyKind.SUBTYPE_OF, ty)) }
         return None
@@ -251,8 +249,8 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         HandleApplyBase(state, ApplyBase(apply), refObj)
     }
 
-    public override func HandleApplyWithExceptionTerminator(state: TypeDomain,
-        apply: ApplyWithException, refObj: Option<Value>): Option<Block> {
+    public override func HandleTryApplyTerminator(state: TypeDomain,
+        apply: TryApply, refObj: Option<Value>): Option<Block> {
         HandleApplyBase(state, ApplyBase(apply), refObj)
         return None
     }

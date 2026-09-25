@@ -188,7 +188,7 @@ public class Devirtualization {
         }
         let after = { _: TypeDomain, _: Expression, _: Int64 => }
         let terminator = { state: TypeDomain, expr: Expression, _: Option<Block> =>
-            if (let Some(invoke) <- (expr as InvokeWithException)) { tryCollect(state, InvokeBase(invoke)) }
+            if (let Some(invoke) <- (expr as TryInvoke)) { tryCollect(state, InvokeBase(invoke)) }
         }
         analysisResult.VisitWith(before, after, terminator)
     }
@@ -217,7 +217,7 @@ public class Devirtualization {
         if (!lhs.GetType().getOrThrow().IsPrimitive() || !rhs.GetType().getOrThrow().IsPrimitive()) { return false }
         let invoke = info.invoke.GetRawExpr()
         let parent = invoke.GetParentBlock().getOrThrow()
-        let next: Option<Block> = if (let Some(term) <- (invoke as InvokeWithException)) { Some(term.GetSuccessBlock()) } else { None }
+        let next: Option<Block> = if (let Some(term) <- (invoke as TryInvoke)) { Some(term.GetSuccessBlock()) } else { None }
         let binary = builder.CreateBinaryExpression(kind, invoke.GetResultType().getOrThrow(), lhs, rhs, parent)
         binary.SetDebugLocation(invoke.GetDebugLocation())
         invoke.ReplaceWith(binary)
@@ -266,8 +266,8 @@ public class Devirtualization {
                 for (expression in expressions) { expression.MoveBefore(invoke) }
                 context.args[0] = converted
             }
-            let call: Expression = if (let Some(term) <- (invoke as InvokeWithException)) {
-                builder.CreateApplyWithException(instRetTy, realFunc, context,
+            let call: Expression = if (let Some(term) <- (invoke as TryInvoke)) {
+                builder.CreateTryApply(instRetTy, realFunc, context,
                     term.GetSuccessBlock(), term.GetErrorBlock(), parent)
             } else {
                 builder.CreateApply(instRetTy, realFunc, context, parent)

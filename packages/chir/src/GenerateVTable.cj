@@ -1655,7 +1655,7 @@ public class GenerateVTable {
                     callee.getOrThrow())
                 apply.ReplaceOperand(callee.getOrThrow(), wrapperFunc)
             }
-        } else if (let Some(applyE) <- (expr as ApplyWithException)) {
+        } else if (let Some(applyE) <- (expr as TryApply)) {
             let callee = applyE.GetCallee() as Function
             if (CalleeIsMutFuncFromParent(applyE.GetThisType(), callee, expr.GetTopLevelFunc().getOrThrow())) {
                 let wrapperFunc = GetMutFuncWrapper(applyE.GetThisType().getOrThrow(), applyE.GetArgs(),

@@ -66,22 +66,22 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     public func GetExprMajorKind(): ExprMajorKind { return ExprKindMajor(kind) }
 
     public func IsApply(): Bool { return kind == ExprKind.APPLY }
-    public func IsApplyWithException(): Bool { return kind == ExprKind.APPLY_WITH_EXCEPTION }
+    public func IsTryApply(): Bool { return kind == ExprKind.TRY_APPLY }
     public func IsBinaryExpr(): Bool { return GetExprMajorKind() == ExprMajorKind.BINARY_EXPR }
     public func IsConstant(): Bool { return kind == ExprKind.CONSTANT }
     public func IsDebug(): Bool { return kind == ExprKind.DEBUGEXPR }
     public func IsDynamicDispatch(): Bool { return kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC }
     public func IsField(): Bool { return kind == ExprKind.FIELD }
     public func IsFuncCall(): Bool { return kind == ExprKind.APPLY || kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC }
-    public func IsUnaryExpressionWithException(): Bool { return kind == ExprKind.NEG_WITH_EXCEPTION }
-    public func IsBinaryExpressionWithException(): Bool {
+    public func IsTryUnaryExpression(): Bool { return kind == ExprKind.TRY_NEG }
+    public func IsTryBinaryExpression(): Bool {
         let index = ExprKindIndex(kind)
-        return index >= ExprKindIndex(ExprKind.ADD_WITH_EXCEPTION) &&
-            index <= ExprKindIndex(ExprKind.RSHIFT_WITH_EXCEPTION)
+        return index >= ExprKindIndex(ExprKind.TRY_ADD) &&
+            index <= ExprKindIndex(ExprKind.TRY_RSHIFT)
     }
     public func IsInvoke(): Bool { return kind == ExprKind.INVOKE }
     public func IsInvokeStaticBase(): Bool {
-        return kind == ExprKind.INVOKESTATIC || kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION
+        return kind == ExprKind.INVOKESTATIC || kind == ExprKind.TRY_INVOKESTATIC
     }
     public func IsLambda(): Bool { return kind == ExprKind.LAMBDA }
     public func IsLoad(): Bool { return kind == ExprKind.LOAD }
@@ -126,12 +126,12 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     }
 
     public func HasExceptionBranch(): Bool {
-        return kind == ExprKind.APPLY_WITH_EXCEPTION || kind == ExprKind.INVOKE_WITH_EXCEPTION ||
-            kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION ||
-            IsUnaryExpressionWithException() || IsBinaryExpressionWithException() ||
-            kind == ExprKind.SPAWN_WITH_EXCEPTION ||
-            kind == ExprKind.NUMERIC_CAST_WITH_EXCEPTION || kind == ExprKind.INTRINSIC_WITH_EXCEPTION ||
-            kind == ExprKind.ALLOCATE_WITH_EXCEPTION || kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION
+        return kind == ExprKind.TRY_APPLY || kind == ExprKind.TRY_INVOKE ||
+            kind == ExprKind.TRY_INVOKESTATIC ||
+            IsTryUnaryExpression() || IsTryBinaryExpression() ||
+            kind == ExprKind.TRY_SPAWN ||
+            kind == ExprKind.TRY_NUMERIC_CAST || kind == ExprKind.TRY_INTRINSIC ||
+            kind == ExprKind.TRY_ALLOCATE || kind == ExprKind.TRY_RAW_ARRAY_ALLOCATE
     }
 
     public func GetBlockGroups(): ArrayList<BlockGroup> {

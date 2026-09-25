@@ -66,8 +66,8 @@ def verify(devirt, ast, case):
                  any('checkTypeCast: false' in line for line in casts))]
     if case == 'throwing_apply':
         value = body(devirt, 'chooseThrowing')
-        return [('throwing_rewrite_is_apply_with_exception',
-                 'ApplyWithException(' in value and 'InvokeWithException(' not in value)]
+        return [('throwing_rewrite_is_try_apply',
+                 'TryApply(' in value and 'TryInvoke(' not in value)]
     raise ValueError(f'unknown case {case}')
 
 

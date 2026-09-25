@@ -9,8 +9,8 @@ import cjcj::chir.GetMethodIdxInAutoEnvObject
 import cjcj::chir.GetTypeQualifiedName
 import cjcj::chir.Invoke
 import cjcj::chir.InvokeStatic
-import cjcj::chir.InvokeStaticWithException
-import cjcj::chir.InvokeWithException
+import cjcj::chir.TryInvokeStatic
+import cjcj::chir.TryInvoke
 import cjcj::chir.Type
 import cjcj::option.{OptimizationLevel, enumIndex}
 import cjcj::utils.CJC_ASSERT
@@ -19,14 +19,14 @@ public func GenerateInvokeExpression(irBuilder: IRBuilder2, chirExpr: Expression
     if (let Some(invokeExpr) <- (chirExpr as Invoke)) {
         return GenerateInvoke(irBuilder, CHIRInvokeWrapper(invokeExpr))
     }
-    if (let Some(invokeWithExceptionExpr) <- (chirExpr as InvokeWithException)) {
-        return GenerateInvoke(irBuilder, CHIRInvokeWrapper(invokeWithExceptionExpr))
+    if (let Some(tryInvokeExpr) <- (chirExpr as TryInvoke)) {
+        return GenerateInvoke(irBuilder, CHIRInvokeWrapper(tryInvokeExpr))
     }
     if (let Some(invokeStaticExpr) <- (chirExpr as InvokeStatic)) {
         return GenerateInvokeStatic(irBuilder, CHIRInvokeStaticWrapper(invokeStaticExpr))
     }
-    if (let Some(invokeStaticWithExceptionExpr) <- (chirExpr as InvokeStaticWithException)) {
-        return GenerateInvokeStatic(irBuilder, CHIRInvokeStaticWrapper(invokeStaticWithExceptionExpr))
+    if (let Some(tryInvokeStaticExpr) <- (chirExpr as TryInvokeStatic)) {
+        return GenerateInvokeStatic(irBuilder, CHIRInvokeStaticWrapper(tryInvokeStaticExpr))
     }
     return LLVMNullValue()
 }

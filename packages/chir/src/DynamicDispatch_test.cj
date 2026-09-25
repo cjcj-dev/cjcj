@@ -29,7 +29,7 @@ public class DynamicDispatchTest {
         error.AppendExpression(builder.CreateExit(None, error))
         let object = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(17), block)
         block.AppendExpression(object)
-        let isStatic = kind == ExprKind.INVOKESTATIC || kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION
+        let isStatic = kind == ExprKind.INVOKESTATIC || kind == ExprKind.TRY_INVOKESTATIC
         var caller = object.GetResult().getOrThrow()
         if (isStatic) {
             let rtti = builder.CreateGetRTTIStatic(context.GetUnitTy(), context.GetInt64Ty(), block)
@@ -41,9 +41,9 @@ public class DynamicDispatchTest {
         let invoke: Expression = match (kind) {
             case ExprKind.INVOKE => builder.CreateInvoke(context.GetInt64Ty(), call, block)
             case ExprKind.INVOKESTATIC => builder.CreateInvokeStatic(context.GetInt64Ty(), call, block)
-            case ExprKind.INVOKE_WITH_EXCEPTION =>
-                builder.CreateInvokeWithException(context.GetInt64Ty(), call, normal, error, block)
-            case _ => builder.CreateInvokeStaticWithException(context.GetInt64Ty(), call, normal, error, block)
+            case ExprKind.TRY_INVOKE =>
+                builder.CreateTryInvoke(context.GetInt64Ty(), call, normal, error, block)
+            case _ => builder.CreateTryInvokeStatic(context.GetInt64Ty(), call, normal, error, block)
         }
         block.AppendExpression(invoke)
         if (kind == ExprKind.INVOKE || kind == ExprKind.INVOKESTATIC) {
@@ -118,14 +118,14 @@ public class DynamicDispatchTest {
 
     @TestCase public func InvokeCallee(): Unit { CalleeReplacement(ExprKind.INVOKE) }
     @TestCase public func InvokeStaticCallee(): Unit { CalleeReplacement(ExprKind.INVOKESTATIC) }
-    @TestCase public func InvokeExceptionCallee(): Unit { CalleeReplacement(ExprKind.INVOKE_WITH_EXCEPTION) }
-    @TestCase public func InvokeStaticExceptionCallee(): Unit { CalleeReplacement(ExprKind.INVOKESTATIC_WITH_EXCEPTION) }
+    @TestCase public func InvokeExceptionCallee(): Unit { CalleeReplacement(ExprKind.TRY_INVOKE) }
+    @TestCase public func InvokeStaticExceptionCallee(): Unit { CalleeReplacement(ExprKind.TRY_INVOKESTATIC) }
     @TestCase public func InvokeBinary(): Unit { RoundTrip(ExprKind.INVOKE, true) }
     @TestCase public func InvokeStaticBinary(): Unit { RoundTrip(ExprKind.INVOKESTATIC, true) }
-    @TestCase public func InvokeExceptionBinary(): Unit { RoundTrip(ExprKind.INVOKE_WITH_EXCEPTION, true) }
-    @TestCase public func InvokeStaticExceptionBinary(): Unit { RoundTrip(ExprKind.INVOKESTATIC_WITH_EXCEPTION, true) }
+    @TestCase public func InvokeExceptionBinary(): Unit { RoundTrip(ExprKind.TRY_INVOKE, true) }
+    @TestCase public func InvokeStaticExceptionBinary(): Unit { RoundTrip(ExprKind.TRY_INVOKESTATIC, true) }
     @TestCase public func InvokeText(): Unit { RoundTrip(ExprKind.INVOKE, false) }
     @TestCase public func InvokeStaticText(): Unit { RoundTrip(ExprKind.INVOKESTATIC, false) }
-    @TestCase public func InvokeExceptionText(): Unit { RoundTrip(ExprKind.INVOKE_WITH_EXCEPTION, false) }
-    @TestCase public func InvokeStaticExceptionText(): Unit { RoundTrip(ExprKind.INVOKESTATIC_WITH_EXCEPTION, false) }
+    @TestCase public func InvokeExceptionText(): Unit { RoundTrip(ExprKind.TRY_INVOKE, false) }
+    @TestCase public func InvokeStaticExceptionText(): Unit { RoundTrip(ExprKind.TRY_INVOKESTATIC, false) }
 }
