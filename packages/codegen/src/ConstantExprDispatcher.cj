@@ -5,7 +5,7 @@ import cjcj::chir.LiteralValue
 
 public func HandleConstantExpression(irBuilder: IRBuilder2, chirConst: Constant): LLVMValueRef {
     if (let Some(resultTy) <- chirConst.GetResultType()) {
-        return irBuilder.CreateLiteralValue(chirConst.literal, resultTy)
+        return irBuilder.CreateLiteralValue(chirConst.GetValue(), resultTy)
     }
     return LLVMNullValue()
 }
