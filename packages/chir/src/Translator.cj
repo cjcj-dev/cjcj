@@ -143,10 +143,12 @@ private func IsCallRegularInit(expr: AstCallExpr): Bool {
 private class SecondSwitchInfo {
     public let ep: AstEnumPattern
     public let caseId: Int64
+    public let loc: DebugLocation
 
-    public init(ep: AstEnumPattern, caseId: Int64) {
+    public init(ep: AstEnumPattern, caseId: Int64, loc: DebugLocation) {
         this.ep = ep
         this.caseId = caseId
+        this.loc = loc
     }
 }
 
@@ -2532,13 +2534,15 @@ public class Translator {
             context.ScopePlus()
             let (patternFalseBlock, patternTrueBlock) = if (letPattern.patterns.size == 1) {
                 TranslateNestingCasePattern(letPattern.patterns[0], selectorValue, originLoc,
-                    sourceExpr: SourceExpr.IF_EXPR)
+                    sourceExpr: GetSourceExpr(impl))
             } else {
-                TranslateOrPattern(letPattern.patterns, selectorValue, originLoc)
+                TranslateOrPattern(letPattern.patterns, selectorValue, originLoc, sourceExpr: GetSourceExpr(impl))
             }
             if (isRightmost) {
                 let trueBlock = TranslateTrueBlock(impl)
                 let falseBlock = TranslateFalseBlock(impl)
+                patternTrueBlock.SetDebugLocation(trueBlock.GetDebugLocation())
+                patternFalseBlock.SetDebugLocation(falseBlock.GetDebugLocation())
                 let _ = CreateGoto(trueBlock, patternTrueBlock)
                 let _ = CreateGoto(falseBlock, patternFalseBlock)
             } else {
@@ -2559,11 +2563,15 @@ public class Translator {
             TranslateTrivialPatternAsTable(letPattern, GetEnumIDValue(selectorTy, selectorValue),
                 enumDecl.getOrThrow().constructors.size, impl)
         } else {
-            TranslateEnumPatternMatchAsTable(letPattern, selectorValue)
+            TranslateEnumPatternMatchAsTable(letPattern, selectorValue, GetSourceExpr(impl))
         }
         if (isRightmost) {
             let trueBlock = TranslateTrueBlock(impl)
             let falseBlock = TranslateFalseBlock(impl)
+            result.tb.getOrThrow().SetDebugLocation(trueBlock.GetDebugLocation())
+            if (let Some(resultFalseBlock) <- result.fb) {
+                resultFalseBlock.SetDebugLocation(falseBlock.GetDebugLocation())
+            }
             let _ = CreateGoto(trueBlock, result.tb.getOrThrow())
             if (let Some(resultFalseBlock) <- result.fb) {
                 let _ = CreateGoto(falseBlock, resultFalseBlock)
@@ -2574,7 +2582,7 @@ public class Translator {
     }
 
     private func TranslateEnumPatternMatchAsTable(letPattern: AstLetPatternDestructor,
-        enumValue: Value): DanglingBlock {
+        enumValue: Value, sourceExpr: SourceExpr): DanglingBlock {
         var isStillReachable = true
         let baseBlock = CurrentBlock()
         let trueBlock = CreateBlock()
@@ -2602,7 +2610,8 @@ public class Translator {
         }
         let createdExpression2598 = builder.CreateMultiBranch(firstSelectorValue, firstDefaultBlock, indexes, blocks, baseBlock)
         baseBlock.AppendExpression(createdExpression2598)
-        let branchInfos = TranslateSecondLevelAsTable(matchInfo, enumValue, firstDefaultBlock)
+        createdExpression2598.SetSourceExpr(sourceExpr)
+        let branchInfos = TranslateSecondLevelAsTable(matchInfo, enumValue, firstDefaultBlock, sourceExpr: sourceExpr)
         if (let Some(branchBlocks) <- branchInfos.get(0)) {
             for (block in branchBlocks) {
                 let _ = CreateGoto(trueBlock, block)
@@ -2666,6 +2675,7 @@ public class Translator {
         let castedValue = TypeCastOrBoxIfNeeded(value, targetType, DebugLocation())
         let term = builder.CreateMultiBranch(castedValue, realDefaultBlock, indexes, blocks, baseBlock.getOrThrow())
         baseBlock.getOrThrow().AppendExpression(term)
+        term.SetSourceExpr(GetSourceExpr(impl))
         term.SetDebugLocation(TranslateLocation(letPattern))
         currentBlock = impl.endBlock
         return DanglingBlock(tb: Some(trueBlock),
@@ -6169,10 +6179,21 @@ public class Translator {
         }
     }
 
+    private func SetSkipDceWarning(matchCase: AstMatchCase, body: Block): Unit {
+        if (matchCase.TestAttr(AstAttribute.UNREACHABLE)) {
+            body.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+        }
+    }
+
+    private func IsMatchSource(sourceExpr: SourceExpr): Bool {
+        return sourceExpr == SourceExpr.MATCH_EXPR || sourceExpr == SourceExpr.MATCH_CASE
+    }
+
     private func TranslateMatchWithSelector(matchExpr: AstMatchExpr, retVal: Option<Value>): Unit {
         let selectorVal = TranslateExprArg(RequireExpr(matchExpr.selector, "match selector"))
         SetSkipPrintWarning(selectorVal)
         let endBlock = CreateBlock()
+        endBlock.SetDebugLocation(TranslateLocation(matchExpr))
         let caseNum = matchExpr.matchCases.size
         let needScope = match (matchExpr.sugarKind) {
             case AstSugarKind.IS | AstSugarKind.AS => false
@@ -6189,13 +6210,28 @@ public class Translator {
                 scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
             }
             let current = matchExpr.matchCases[caseIdx]
-            let (falseBlock, matchedBlock) = if (current.patterns.size == 1) {
-                TranslateNestingCasePattern(current.patterns[0], selectorVal, originLoc, sourceExpr: sourceExpr)
+            let caseSourceExpr = if (needScope && sourceExpr == SourceExpr.MATCH_EXPR && caseIdx + 1 < caseNum) {
+                SourceExpr.MATCH_CASE
             } else {
-                TranslateOrPattern(current.patterns, selectorVal, originLoc)
+                sourceExpr
             }
-            var trueBlock = matchedBlock
-            trueBlock = TranslatePatternGuard(current, falseBlock, trueBlock)
+            let matchedBlockLoc = if (let Some(guardExpr) <- current.patternGuard) {
+                Some(TranslateLocation(current.patterns[0].begin, guardExpr.end))
+            } else {
+                None
+            }
+            let patternEntry = CurrentBlock()
+            let (falseBlock, matchedBlock) = if (current.patterns.size == 1) {
+                TranslateNestingCasePattern(current.patterns[0], selectorVal, originLoc, sourceExpr: caseSourceExpr,
+                    matchedBlockLoc: matchedBlockLoc)
+            } else {
+                TranslateOrPattern(current.patterns, selectorVal, originLoc, sourceExpr: caseSourceExpr)
+            }
+            if (sourceExpr != SourceExpr.QUEST && matchedBlockLoc.isSome() && current.patterns.size > 1) {
+                patternEntry.SetDebugLocation(matchedBlockLoc.getOrThrow())
+                matchedBlock.SetDebugLocation(matchedBlockLoc.getOrThrow())
+            }
+            let trueBlock = TranslatePatternGuard(current, falseBlock, matchedBlock, caseSourceExpr, originLoc)
             if (sourceExpr == SourceExpr.QUEST && caseIdx == 0) {
                 CJC_ASSERT(caseNum == 2)
                 let secondBody = RequireBlock(matchExpr.matchCases[1].exprOrDecls, "question match second body")
@@ -6209,11 +6245,18 @@ public class Translator {
             }
             let currentBody = TranslateMatchCaseBody(RequireBlock(current.exprOrDecls, "match case body"), retVal,
                 endBlock)
+            SetSkipDceWarning(current, currentBody)
             let createdGoTo5875 = builder.CreateGoTo(currentBody, trueBlock)
             trueBlock.AppendExpression(createdGoTo5875)
             if (caseIdx == caseNum - 1) {
-                let createdGoTo5877 = builder.CreateGoTo(endBlock, falseBlock)
-                falseBlock.AppendExpression(createdGoTo5877)
+                if (retVal.isNone() && endBlock.GetPredecessors().isEmpty()) {
+                    let exit = builder.CreateExit(None, falseBlock)
+                    falseBlock.AppendExpression(exit)
+                    exit.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
+                } else {
+                    let createdGoTo5877 = builder.CreateGoTo(endBlock, falseBlock)
+                    falseBlock.AppendExpression(createdGoTo5877)
+                }
                 falseBlock.EnableAttr(Attribute.UNREACHABLE)
             } else {
                 currentBlock = falseBlock
@@ -6226,15 +6269,72 @@ public class Translator {
         currentBlock = endBlock
     }
 
-    private func TranslatePatternGuard(matchCase: AstMatchCase, falseBlock: Block, trueBlock: Block): Block {
+    private func TranslateMatchGuardCondition(condition: AstExpr, trueBlock: Block, falseBlock: Block,
+        sourceExpr: SourceExpr): Unit {
+        if (condition.desugarExpr.isNone()) {
+            if (let Some(parenExpr) <- (condition as AstParenExpr)) {
+                TranslateMatchGuardCondition(RequireExpr(parenExpr.expr, "parenthesized match guard"), trueBlock,
+                    falseBlock, sourceExpr)
+                return
+            }
+            if (let Some(binaryExpr) <- (condition as AstBinaryExpr)) {
+                if (binaryExpr.op == AstTokenKind.AND || binaryExpr.op == AstTokenKind.OR) {
+                    let rightBlock = CreateBlock()
+                    if (binaryExpr.op == AstTokenKind.AND) {
+                        TranslateMatchGuardCondition(RequireExpr(binaryExpr.leftExpr, "match guard && lhs"),
+                            rightBlock, falseBlock, sourceExpr)
+                    } else {
+                        TranslateMatchGuardCondition(RequireExpr(binaryExpr.leftExpr, "match guard || lhs"),
+                            trueBlock, rightBlock, SourceExpr.MATCH_EXPR)
+                    }
+                    currentBlock = rightBlock
+                    TranslateMatchGuardCondition(RequireExpr(binaryExpr.rightExpr, "match guard rhs"), trueBlock,
+                        falseBlock, sourceExpr)
+                    return
+                }
+            }
+        }
+        CurrentBlock().EnableAttr(Attribute.MATCH_PATTERN)
+        let cond = TranslateExprArg(condition)
+        CurrentBlock().EnableAttr(Attribute.MATCH_PATTERN)
+        CreateWrappedBranch(sourceExpr, cond, trueBlock, falseBlock, CurrentBlock())
+    }
+
+    private func TranslatePatternGuard(matchCase: AstMatchCase, falseBlock: Block, trueBlock: Block,
+        sourceExpr: SourceExpr, originLoc: DebugLocation): Block {
         if (matchCase.patternGuard.isNone()) {
             return trueBlock
         }
         currentBlock = trueBlock
+        let guardBlock = CurrentBlock()
+        let patternFailurePredecessors = ArrayList<Block>()
+        for (predecessor in falseBlock.GetPredecessors()) {
+            patternFailurePredecessors.add(predecessor)
+        }
         let newTrueBlock = CreateBlock()
-        let cond = TranslateExprArg(RequireExpr(matchCase.patternGuard, "match pattern guard"))
-        let createdBranch5897 = builder.CreateBranch(cond, newTrueBlock, falseBlock, CurrentBlock())
-        CurrentBlock().AppendExpression(createdBranch5897)
+        let guardLoc = TranslateLocation(RequireExpr(matchCase.patternGuard, "match pattern guard"))
+        if (sourceExpr != SourceExpr.QUEST && !originLoc.IsInvalidPos()) {
+            newTrueBlock.SetDebugLocation(guardLoc)
+        }
+        guardBlock.EnableAttr(Attribute.MATCH_PATTERN)
+        for (predecessor in guardBlock.GetPredecessors()) {
+            if (let Some(goTo) <- (predecessor.GetTerminator().getOrThrow() as GoTo)) {
+                goTo.EnableAttr(Attribute.MATCH_PATTERN)
+            }
+        }
+        TranslateMatchGuardCondition(RequireExpr(matchCase.patternGuard, "match pattern guard"), newTrueBlock,
+            falseBlock, sourceExpr)
+        if (!patternFailurePredecessors.isEmpty()) {
+            for (predecessor in falseBlock.GetPredecessors()) {
+                var existed = false
+                for (old in patternFailurePredecessors) {
+                    if (refEq(old, predecessor)) { existed = true }
+                }
+                if (!existed) {
+                    predecessor.GetTerminator().getOrThrow().EnableAttr(Attribute.MATCH_PATTERN)
+                }
+            }
+        }
         return newTrueBlock
     }
 
@@ -6250,9 +6350,21 @@ public class Translator {
         }
         TranslateSubExprToLoc(caseBody, retVal, loc)
         let currentBody = GetBlockByAST(caseBody)
-        if (CurrentBlock().GetTerminator().isNone()) {
-            let createdGoTo5914 = builder.CreateGoTo(endBlock, CurrentBlock())
-            CurrentBlock().AppendExpression(createdGoTo5914)
+        let reachable = TopologicalSort(currentBody)
+        var reachesCurrent = false
+        for (block in reachable) {
+            if (refEq(block, CurrentBlock())) { reachesCurrent = true }
+        }
+        if (reachesCurrent) {
+            if (CurrentBlock().GetTerminator().isNone()) {
+                let createdGoTo5914 = builder.CreateGoTo(endBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdGoTo5914)
+            }
+        } else if (CurrentBlock().GetTerminator().isNone()) {
+            let exit = builder.CreateExit(None, CurrentBlock())
+            CurrentBlock().AppendExpression(exit)
+            exit.SetDebugLocation(loc)
+            exit.SetSkipCheck(SkipKind.SKIP_DCE_WARNING)
         }
         return currentBody
     }
@@ -6305,7 +6417,7 @@ public class Translator {
     }
 
     private func TranslateOrPattern(patterns: ArrayList<AstPattern>, selectorVal: Value,
-        originLoc: DebugLocation): (Block, Block) {
+        originLoc: DebugLocation, sourceExpr!: SourceExpr = SourceExpr.MATCH_EXPR): (Block, Block) {
         CJC_ASSERT(patterns.size > 1)
         let patternKind = patterns[0].astKind
         if (patternKind == ASTKind.WILDCARD_PATTERN) {
@@ -6317,7 +6429,7 @@ public class Translator {
         if (patternKind == ASTKind.CONST_PATTERN) {
             let patternTy = RequireAstTy(patterns[0])
             if (patternTy.IsString() || patternTy.IsFloating()) {
-                return TranslateComplicatedOrPattern(patterns, selectorVal, originLoc)
+                return TranslateComplicatedOrPattern(patterns, selectorVal, originLoc, sourceExpr: sourceExpr)
             }
             if (patternTy.IsUnit()) {
                 let trueBlock = CreateBlock()
@@ -6334,10 +6446,10 @@ public class Translator {
             for (value in values) {
                 out.add(value)
             }
-            return TranslateConstantMultiOr(out, selectorVal)
+            return TranslateConstantMultiOr(out, selectorVal, sourceExpr: sourceExpr)
         }
         if (patternKind == ASTKind.TUPLE_PATTERN || patternKind == ASTKind.TYPE_PATTERN) {
-            return TranslateComplicatedOrPattern(patterns, selectorVal, originLoc)
+            return TranslateComplicatedOrPattern(patterns, selectorVal, originLoc, sourceExpr: sourceExpr)
         }
         CJC_ASSERT(patternKind == ASTKind.VAR_OR_ENUM_PATTERN || patternKind == ASTKind.ENUM_PATTERN)
         if (IsOptimizableEnumPatterns(patterns)) {
@@ -6349,9 +6461,10 @@ public class Translator {
             for (value in values) {
                 out.add(value)
             }
-            return TranslateConstantMultiOr(out, GetEnumIDValue(RequireAstTy(patterns[0]), selectorVal))
+            return TranslateConstantMultiOr(out, GetEnumIDValue(RequireAstTy(patterns[0]), selectorVal),
+                sourceExpr: sourceExpr)
         }
-        return TranslateComplicatedOrPattern(patterns, selectorVal, originLoc)
+        return TranslateComplicatedOrPattern(patterns, selectorVal, originLoc, sourceExpr: sourceExpr)
     }
 
     private func GetEnumIDValue(ty: AstTy, selectorVal: Value): Value {
@@ -6372,28 +6485,40 @@ public class Translator {
         return RequireResult(createdField6027)
     }
 
-    private func TranslateConstantMultiOr(values: ArrayList<UInt64>, value: Value): (Block, Block) {
+    private func TranslateConstantMultiOr(values: ArrayList<UInt64>, value: Value,
+        sourceExpr!: SourceExpr = SourceExpr.MATCH_EXPR): (Block, Block) {
         let falseBlock = CreateBlock()
         let trueBlock = CreateBlock()
         let succs = ArrayList<Block>()
         for (_ in values) {
             succs.add(trueBlock)
         }
+        if (IsMatchSource(sourceExpr)) {
+            CurrentBlock().EnableAttr(Attribute.MATCH_PATTERN)
+        }
         let createdMultiBranch6037 = builder.CreateMultiBranch(TypeCastOrBoxIfNeeded(value, builder.context.GetUInt64Ty(), value.GetDebugLocation(),
             needCheck: false), falseBlock, values, succs, CurrentBlock())
         CurrentBlock().AppendExpression(createdMultiBranch6037)
+        createdMultiBranch6037.SetSourceExpr(sourceExpr)
         return (falseBlock, trueBlock)
     }
 
     private func TranslateComplicatedOrPattern(patterns: ArrayList<AstPattern>, selectorVal: Value,
-        originLoc: DebugLocation): (Block, Block) {
+        originLoc: DebugLocation, sourceExpr!: SourceExpr = SourceExpr.MATCH_EXPR): (Block, Block) {
         CJC_ASSERT(patterns.size > 1)
         let trueBlock = CreateBlock()
+        var index: Int64 = 0
         for (pattern in patterns) {
-            let (innerFalse, innerTrue) = TranslateNestingCasePattern(pattern, selectorVal, originLoc)
+            let patternSourceExpr = if (index + 1 == patterns.size) { sourceExpr } else { SourceExpr.MATCH_EXPR }
+            let (innerFalse, innerTrue) = TranslateNestingCasePattern(pattern, selectorVal, originLoc,
+                sourceExpr: patternSourceExpr)
             let createdGoTo6048 = builder.CreateGoTo(trueBlock, innerTrue)
             innerTrue.AppendExpression(createdGoTo6048)
+            if (IsMatchSource(patternSourceExpr)) {
+                createdGoTo6048.EnableAttr(Attribute.MATCH_PATTERN)
+            }
             currentBlock = innerFalse
+            index++
         }
         return (CurrentBlock(), trueBlock)
     }
@@ -6439,15 +6564,19 @@ public class Translator {
     }
 
     private func TranslateNestingCasePattern(pattern: AstPattern, selectorVal: Value, originLoc: DebugLocation,
-        sourceExpr!: SourceExpr = SourceExpr.MATCH_EXPR): (Block, Block) {
+        sourceExpr!: SourceExpr = SourceExpr.MATCH_EXPR,
+        matchedBlockLoc!: Option<DebugLocation> = None): (Block, Block) {
         let falseBlock = CreateBlock()
         let trueBlock = CreateBlock()
         let queue = ArrayList<(AstPattern, Value)>()
         queue.add((pattern, selectorVal))
         var newBlock = CreateBlock()
-        let patternLoc = TranslateLocation(pattern)
+        let patternLoc = if (let Some(matched) <- matchedBlockLoc) { matched } else { TranslateLocation(pattern) }
         if (sourceExpr != SourceExpr.QUEST) {
             CurrentBlock().SetDebugLocation(patternLoc)
+        }
+        if (IsMatchSource(sourceExpr)) {
+            CurrentBlock().EnableAttr(Attribute.MATCH_PATTERN)
         }
         while (!queue.isEmpty()) {
             let cond = DispatchingPattern(queue, trueBlock, newBlock, originLoc)
@@ -6455,6 +6584,9 @@ public class Translator {
                 let nextBlock = if (queue.isEmpty()) { trueBlock } else { newBlock }
                 if (sourceExpr != SourceExpr.QUEST) {
                     nextBlock.SetDebugLocation(patternLoc)
+                }
+                if (IsMatchSource(sourceExpr)) {
+                    nextBlock.EnableAttr(Attribute.MATCH_PATTERN)
                 }
                 CreateWrappedBranch(sourceExpr, GetDerefedValue(condValue), nextBlock, falseBlock, CurrentBlock())
                 currentBlock = nextBlock
@@ -6467,6 +6599,10 @@ public class Translator {
                 }
                 let createdGoTo6121 = builder.CreateGoTo(trueBlock, CurrentBlock())
                 CurrentBlock().AppendExpression(createdGoTo6121)
+                if (IsMatchSource(sourceExpr)) {
+                    createdGoTo6121.EnableAttr(Attribute.MATCH_PATTERN)
+                    trueBlock.EnableAttr(Attribute.MATCH_PATTERN)
+                }
             }
         }
         newBlock.RemoveSelfFromBlockGroup()
@@ -6784,6 +6920,7 @@ public class Translator {
             scopeInfo[scopeInfo.size - 1] = scopeInfo[scopeInfo.size - 1] + 1
             let currentBody = TranslateMatchCaseBody(RequireBlock(curCase.exprOrDecls, "match case body"), retVal,
                 endBlock)
+            SetSkipDceWarning(curCase, currentBody)
             CJC_ASSERT(!curCase.patterns.isEmpty())
             if (!isStillReachable) {
                 continue
@@ -6829,6 +6966,7 @@ public class Translator {
         let term = builder.CreateMultiBranch(castedVal, defaultBlock, indexes, blocks, baseBlock)
         baseBlock.AppendExpression(term)
         term.SetDebugLocation(TranslateLocation(matchExpr))
+        term.SetSourceExpr(SourceExpr.MATCH_EXPR)
         currentBlock = endBlock
     }
 
@@ -6857,6 +6995,7 @@ public class Translator {
                     retVal, endBlock)
                 firstDefaultBlock.SetDebugLocation(TranslateLocation(matchCase.patterns[0].begin,
                     matchCase.patterns[0].end))
+                SetSkipDceWarning(matchCase, firstDefaultBlock)
                 wildcardIdx = idx
                 idx++
                 continue
@@ -6879,7 +7018,9 @@ public class Translator {
         currentBlock = baseBlock
         let createdMultiBranch6510 = builder.CreateMultiBranch(firstSelectorVal, firstDefaultBlock, indexes, blocks, baseBlock)
         baseBlock.AppendExpression(createdMultiBranch6510)
-        let branchInfos = TranslateSecondLevelAsTable(matchInfo, enumVal, firstDefaultBlock)
+        createdMultiBranch6510.SetSourceExpr(SourceExpr.MATCH_EXPR)
+        let branchInfos = TranslateSecondLevelAsTable(matchInfo, enumVal, firstDefaultBlock,
+            sourceExpr: SourceExpr.MATCH_CASE)
         var caseIdx: Int64 = 0
         while (caseIdx < matchExpr.matchCases.size) {
             if (caseIdx == wildcardIdx) {
@@ -6888,6 +7029,7 @@ public class Translator {
             }
             let bodyBlock = TranslateMatchCaseBody(RequireBlock(matchExpr.matchCases[caseIdx].exprOrDecls,
                 "match case body"), retVal, endBlock)
+            SetSkipDceWarning(matchExpr.matchCases[caseIdx], bodyBlock)
             if (let Some(branchBlocks) <- branchInfos.get(caseIdx)) {
                 for (block in branchBlocks) {
                     let createdGoTo6522 = builder.CreateGoTo(bodyBlock, block)
@@ -6905,9 +7047,11 @@ public class Translator {
         if (!info.firstSwitchBlocks.contains(patternVal)) {
             let block = CreateBlock()
             block.SetDebugLocation(TranslateLocation(pattern))
+            block.EnableAttr(Attribute.MATCH_PATTERN)
+            block.Set<MatchCaseId, Option<Int64>>(Some(caseId))
             info.firstSwitchBlocks[patternVal] = block
         }
-        let switchInfo = SecondSwitchInfo(enumPattern, caseId)
+        let switchInfo = SecondSwitchInfo(enumPattern, caseId, TranslateLocation(pattern))
         if (!info.indexToBodies.contains(patternVal)) {
             info.indexToBodies[patternVal] = TreeMap<UInt64, ArrayList<SecondSwitchInfo>>()
         }
@@ -6939,12 +7083,18 @@ public class Translator {
     }
 
     private func TranslateSecondLevelAsTable(info: EnumMatchInfo, enumVal: Value,
-        firstDefaultBlock: Block): HashMap<Int64, ArrayList<Block>> {
+        firstDefaultBlock: Block, sourceExpr!: SourceExpr = SourceExpr.MATCH_EXPR): HashMap<Int64, ArrayList<Block>> {
         let blockBranchInfos = HashMap<Int64, ArrayList<Block>>()
         for (firstIdx in info.indexToBodies.keys()) {
             let secondMap = info.indexToBodies.get(firstIdx).getOrThrow()
             let firstLevelBlock = info.firstSwitchBlocks.get(firstIdx).getOrThrow()
+            firstLevelBlock.EnableAttr(Attribute.MATCH_PATTERN)
             let found = info.innerDefaultInfos.get(firstIdx)
+            let fallbackCaseId = if (let Some(defaults) <- found) {
+                if (!defaults.isEmpty()) { Some(defaults[0].caseId) } else { None }
+            } else {
+                None
+            }
             var secondDefaultBlock = firstDefaultBlock
             if (let None <- found) {
                 secondDefaultBlock = firstDefaultBlock
@@ -6957,7 +7107,7 @@ public class Translator {
             } else {
                 secondDefaultBlock = if (secondMap.isEmpty()) { firstLevelBlock } else { CreateBlock() }
                 TranslateSecondLevelTable(firstDefaultBlock, secondDefaultBlock, enumVal, found.getOrThrow(),
-                    blockBranchInfos)
+                    blockBranchInfos, sourceExpr, fallbackCaseId)
             }
             if (secondMap.isEmpty()) {
                 continue
@@ -6992,19 +7142,31 @@ public class Translator {
                 let block = CreateBlock()
                 blocks.add(block)
                 TranslateSecondLevelTable(secondDefaultBlock, block, enumVal, secondMap.get(index).getOrThrow(),
-                    blockBranchInfos)
+                    blockBranchInfos, sourceExpr, fallbackCaseId)
             }
             currentBlock = firstLevelBlock
+            let firstCaseId = firstLevelBlock.Get<MatchCaseId, Option<Int64>>()
+            let tableSourceExpr = if (let Some(fallback) <- fallbackCaseId) {
+                if (let Some(first) <- firstCaseId) {
+                    if (fallback == first) { SourceExpr.MATCH_EXPR } else { sourceExpr }
+                } else {
+                    sourceExpr
+                }
+            } else {
+                sourceExpr
+            }
             let createdMultiBranch6624 = builder.CreateMultiBranch(TypeCastOrBoxIfNeeded(secondSelectVar, builder.context.GetUInt64Ty(),
                 secondSelectVar.GetDebugLocation(), needCheck: false), secondDefaultBlock, indexes, blocks,
                 firstLevelBlock)
             firstLevelBlock.AppendExpression(createdMultiBranch6624)
+            createdMultiBranch6624.SetSourceExpr(tableSourceExpr)
         }
         return blockBranchInfos
     }
 
     private func TranslateSecondLevelTable(endBlock: Block, tableBlock: Block, enumVal: Value,
-        infos: ArrayList<SecondSwitchInfo>, blockBranchInfos: HashMap<Int64, ArrayList<Block>>): Unit {
+        infos: ArrayList<SecondSwitchInfo>, blockBranchInfos: HashMap<Int64, ArrayList<Block>>,
+        sourceExpr: SourceExpr, fallbackCaseId: Option<Int64>): Unit {
         currentBlock = tableBlock
         var hasGotoBase = false
         CJC_ASSERT(!infos.isEmpty())
@@ -7013,9 +7175,18 @@ public class Translator {
         var idx: Int64 = 0
         while (idx < infos.size) {
             let current = infos[idx]
+            CurrentBlock().SetDebugLocation(current.loc)
+            CurrentBlock().EnableAttr(Attribute.MATCH_PATTERN)
+            CurrentBlock().Set<MatchCaseId, Option<Int64>>(Some(current.caseId))
+            let nextCaseId = if (idx + 1 < infos.size) { Some(infos[idx + 1].caseId) } else { fallbackCaseId }
+            let patternSourceExpr = if (let Some(next) <- nextCaseId) {
+                if (next == current.caseId) { SourceExpr.MATCH_EXPR } else { sourceExpr }
+            } else {
+                sourceExpr
+            }
             let trueBlock = if (!hasGotoBase && current.ep.patterns.size == 1) { tableBlock } else { CreateBlock() }
             hasGotoBase = hasGotoBase || current.ep.patterns.size == 1
-            let falseBlock = CreateBlock()
+            let falseBlock = if (idx + 1 == infos.size) { endBlock } else { CreateBlock() }
             let queue = ArrayList<(AstPattern, Value)>()
             let elementTys = ((RequireEnumPatternConstructor(current.ep).GetTy() ??
                 throw IllegalStateException("faithful AST2CHIR enum constructor has no type")) as AstFuncTy) ??
@@ -7044,8 +7215,7 @@ public class Translator {
                 let cond = DispatchingPattern(queue, trueBlock, newBlock, originLoc)
                 if (let Some(condValue) <- cond) {
                     let nextBlock = if (queue.isEmpty()) { trueBlock } else { newBlock }
-                    let createdBranch6670 = builder.CreateBranch(condValue, nextBlock, falseBlock, CurrentBlock())
-                    CurrentBlock().AppendExpression(createdBranch6670)
+                    CreateWrappedBranch(patternSourceExpr, condValue, nextBlock, falseBlock, CurrentBlock())
                     currentBlock = nextBlock
                 } else if (queue.isEmpty()) {
                     let createdGoTo6673 = builder.CreateGoTo(trueBlock, CurrentBlock())
@@ -7060,10 +7230,7 @@ public class Translator {
                 blockBranchInfos[current.caseId] = ArrayList<Block>()
             }
             blockBranchInfos.get(current.caseId).getOrThrow().add(trueBlock)
-            if (idx == infos.size - 1) {
-                let createdGoTo6685 = builder.CreateGoTo(endBlock, falseBlock)
-                falseBlock.AppendExpression(createdGoTo6685)
-            } else {
+            if (idx + 1 < infos.size) {
                 currentBlock = falseBlock
             }
             idx++

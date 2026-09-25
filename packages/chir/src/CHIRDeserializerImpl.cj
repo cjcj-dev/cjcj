@@ -1784,6 +1784,11 @@ class CHIRDeserializerImpl {
                 case 13u8 =>
                     let anno = PackageFormat_OverrideSrcFuncType(annos.data, position)
                     obj.Set<OverrideSrcFuncType, Option<FuncType>>(GetType<FuncType>(anno.GetType()))
+                case 14u8 =>
+                    let anno = PackageFormat_MatchCaseId(annos.data, position)
+                    if (anno.GetId() != -1) {
+                        obj.Set<MatchCaseId, Option<Int64>>(Some(anno.GetId()))
+                    }
                 case _ => ()
             }
             index++
@@ -2439,8 +2444,10 @@ class CHIRDeserializerImpl {
             caseValues.add(rawValues.Get(index, 0u64))
             index++
         }
-        return builder.CreateMultiBranch(cond, defaultBlock, caseValues, caseBlocks,
+        let result = builder.CreateMultiBranch(cond, defaultBlock, caseValues, caseBlocks,
             GetValue<Block>(base.GetOwner()).getOrThrow())
+        result.SetSourceExpr(CHIRSourceExprFromIndex(Int64(obj.GetSourceExpr())))
+        return result
     }
 
     private func Deserialize(obj: PackageFormat_IntrinsicBase): Expression {

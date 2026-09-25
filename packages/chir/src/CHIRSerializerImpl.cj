@@ -695,6 +695,10 @@ class CHIRSerializerImpl {
                 let offset = VirMethodOffset.Extract(
                     (annotation as Annotation<Option<Int64>>).getOrThrow())
                 annos.add(CreateVirMethodOffset(builder, if (let Some(value) <- offset) { value } else { -1 }))
+            } else if (annotationType == MatchCaseId.GetTypeIndex()) {
+                annoTypes.add(CHIRFB_ANNOTATION_MATCH_CASE_ID)
+                let caseId = MatchCaseId.Extract((annotation as Annotation<Option<Int64>>).getOrThrow())
+                annos.add(CreateMatchCaseId(builder, if (let Some(value) <- caseId) { value } else { -1 }))
             } else if (annotationType == OverrideSrcFuncType.GetTypeIndex()) {
                 annoTypes.add(CHIRFB_ANNOTATION_OVERRIDE_SRC_FUNC_TYPE)
                 let funcType = OverrideSrcFuncType.Extract(
@@ -1102,7 +1106,8 @@ class CHIRSerializerImpl {
     private func Serialize(obj: MultiBranch): FlatBufferOffset {
         let base = Serialize((obj as Expression).getOrThrow())
         let caseValues = obj.GetCaseVals()
-        return CreateMultiBranchDirect(builder, base, if (caseValues.isEmpty()) { None } else { Some(caseValues) })
+        return CreateMultiBranchDirect(builder, base, if (caseValues.isEmpty()) { None } else { Some(caseValues) },
+            sourceExpr: UInt8(SourceExprIndex(obj.GetSourceExpr())))
     }
 
     private func Serialize(obj: GetInstantiateValue): FlatBufferOffset {
