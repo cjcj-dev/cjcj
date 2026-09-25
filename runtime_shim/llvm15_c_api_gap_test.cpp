@@ -20,10 +20,11 @@ static void check(const char *name, int ok, const char *detail)
 {
     if (ok) {
         std::printf("CHECK %s PASS\n", name);
-        return;
+    } else {
+        std::printf("CHECK %s FAIL %s\n", name, detail);
+        gFails++;
     }
-    std::printf("CHECK %s FAIL %s\n", name, detail);
-    gFails++;
+    std::fflush(stdout);
 }
 
 int main()
@@ -33,13 +34,16 @@ int main()
     LLVMBuilderRef builder = LLVMCreateBuilderInContext(ctx);
     LLVMTypeRef f32 = LLVMFloatTypeInContext(ctx);
     LLVMTypeRef i32 = LLVMInt32TypeInContext(ctx);
-    LLVMTypeRef fnTy = LLVMFunctionType(f32, nullptr, 0, 0);
+    LLVMTypeRef params[] = {f32, f32};
+    LLVMTypeRef fnTy = LLVMFunctionType(f32, params, 2, 0);
     LLVMValueRef fn = LLVMAddFunction(module, "f", fnTy);
     LLVMBasicBlockRef block = LLVMAppendBasicBlockInContext(ctx, fn, "entry");
     LLVMPositionBuilderAtEnd(builder, block);
-    LLVMValueRef one = LLVMConstReal(f32, 1.0);
-    LLVMValueRef fadd = LLVMBuildFAdd(builder, one, one, "fa");
-    LLVMValueRef iadd = LLVMBuildAdd(builder, LLVMConstInt(i32, 1, 0), LLVMConstInt(i32, 2, 0), "ia");
+    LLVMValueRef a = LLVMGetParam(fn, 0);
+    LLVMValueRef b = LLVMGetParam(fn, 1);
+    LLVMValueRef fadd = LLVMBuildFAdd(builder, a, b, "fa");
+    LLVMValueRef iadd = LLVMBuildAdd(builder, LLVMBuildFPToUI(builder, a, i32, "i0"),
+        LLVMBuildFPToUI(builder, b, i32, "i1"), "ia");
 
     LLVMContextRef got = LLVMGetValueContext(fadd);
     char ctxDetail[96];
