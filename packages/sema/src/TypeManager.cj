@@ -2111,7 +2111,7 @@ public class TypeManager {
 
     private func LookupTopOverriddenFromMap(funcDecl: FuncDecl): Option<FuncDecl> {
         var current = firstTopOverrideTarget(funcDecl)
-        let traversed = HashSet<FuncDecl>()
+        let traversed = TreeSet<FuncDecl>()
         traversed.add(funcDecl)
         while (let Some(fd) <- current) {
             let next = firstTopOverrideTarget(fd)

@@ -52,15 +52,15 @@ public class OverrideFunctionResolver {
     public func GetTopOverriddenFuncs(instBaseTy: Ty, funcDecl: FuncDecl): MemberFuncSet {
         let baseDecl = Ty.GetInheritableDeclPtrOfTy(Some(instBaseTy))
         let superDecls = TreeSet<ClassLikeDecl>()
-        var extendDecls = ArrayList<ExtendDecl>()
+        let extendDecls = TreeSet<ExtendDecl>()
         let result = MemberFuncSet()
         if (let Some(base) <- baseDecl) {
             for (decl in base.GetAllSuperDecls()) {
                 superDecls.add(decl)
             }
-            extendDecls = typeManager.GetDeclExtends(base)
+            extendDecls.add(all: typeManager.GetDeclExtends(base))
         } else {
-            extendDecls = typeManager.GetAllExtendsByTy(instBaseTy)
+            extendDecls.add(all: typeManager.GetAllExtendsByTy(instBaseTy))
         }
         for (extendDecl in extendDecls) {
             for (decl in extendDecl.GetAllSuperDecls()) {
