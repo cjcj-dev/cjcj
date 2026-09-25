@@ -208,7 +208,7 @@ check_exit_receipts() {
   new_tmp
   local script out rc recorded
   for script in run.sh exceptions/run.sh library/run.sh library/execute.sh unload/run.sh; do
-    out="$TMP/${script%/*}-receipts"
+    out="$TMP/$script.receipts"
     mkdir -p "$out"
     rc=0
     # Missing input files stop before compilation; the EXIT receipt must retain
