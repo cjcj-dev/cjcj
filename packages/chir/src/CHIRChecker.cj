@@ -1737,12 +1737,12 @@ public class CHIRChecker {
     }
 
     private func CheckConstant(expr: Expression, topLevelFunc: Function): Unit {
-        if (!OperandNumIsEqual(0, expr, topLevelFunc) || !CheckHaveResult(expr, topLevelFunc)) {
+        if (!OperandNumIsEqual(1, expr, topLevelFunc) || !CheckHaveResult(expr, topLevelFunc)) {
             return
         }
         if (let Some(constant) <- (expr as Constant)) {
             if (let Some(resultTy) <- expr.GetResultType()) {
-                let literal = constant.literal
+                let literal = constant.GetValue()
                 if (literal.IsNullLit()) {
                     return
                 }
