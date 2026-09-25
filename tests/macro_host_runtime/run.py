@@ -77,7 +77,8 @@ def run(compiler, source, expected, expected_integers, macro_import, output, hos
         bindings.extend(line for line in lines
                         if any(f"symbol `{name}'" in line for name in ['RunCJTask', 'ReleaseHandle']))
     if source.stem != 'plain':
-        checks['macro_image_released'] = any('destroying link map' in line for line in image_events)
+        checks['macro_image_kept_for_host'] = bool(image_events) and not any(
+            'destroying link map' in line for line in image_events)
         checks['host_task_binding'] = all(
             any(f"symbol `{name}'" in line and f'to {host_runtime}' in line for line in bindings)
             for name in ['RunCJTask', 'ReleaseHandle'])

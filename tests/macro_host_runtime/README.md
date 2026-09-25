@@ -31,11 +31,16 @@ python3 tests/macro_host_runtime/run.py \
 
 The output directory must be new. On Linux the loader binding assertions require
 both `RunCJTask` and `ReleaseHandle` to resolve to `--host-runtime`, and the
-macro image to be released through the loader (its link-map destruction event).
+macro image to remain mapped until host shutdown (no premature link-map
+destruction event). C++ upstream finishes its runtime before unloading macro
+images (`src/Macro/InvokeUtil.cpp:113-129`); this Cangjie host must leave its
+runtime alive. The lifetime rule follows the #258 advisor correction of
+2026-09-25 16:41.
 Add `--parallel` to cover `--parallel-macro-expansion`. The lifecycle
 assertion includes the process exit after CHIR generation, rather than accepting
 an artifact left by a failed process. Run the same suite on the baseline and on
 product mutations restoring foreign-runtime binding and process-level shutdown;
+also restore the old macro-image unload call as a separate mutation;
 record each mutation's source diff and binary identity. The plain input must
 continue to pass. macOS/Windows source branches are not covered by this Linux
 integration runner.

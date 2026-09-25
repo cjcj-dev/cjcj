@@ -755,8 +755,9 @@ public class RuntimeInit {
         runtimeReleaseFunc = CPointer<Unit>()
         runtimeInstanceHandle = CPointer<Unit>()
         runtimeInstanceStopFunc = CPointer<Unit>()
-        @When[backend == "cjnative" && env != "ohos"]
-        let _ = CloseMacroDynamicLibrary()
+        // C++ InvokeUtil.cpp:113-129 finishes its runtime before unloading images.
+        // This Cangjie host still needs its runtime and registered image metadata.
+        // Keep macro images alive until the host process shuts down naturally.
     }
 
     public func GetHandle(): Option<RuntimeHandle> {
