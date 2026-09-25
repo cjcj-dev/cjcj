@@ -172,10 +172,10 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
         }
     }
 
-    // C++ PrivateTypeConverter.cpp:88-125 — convert virMethodCtx.funcType with ConvertFuncParamsAndRetType.
+    // Upstream 174db8f4 PrivateTypeConverter.cpp:55-65 preserves the method signature.
+    // cf7b34a1 removed signature conversion from all four Invoke variants.
     public open func VisitSubExpression(o: Invoke): Unit {
         VisitExprDefaultImpl(o)
-        o.GetVirMethodCtx().funcType = ConvertFuncParamsAndRetType(o.GetMethodType())
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -186,7 +186,6 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
 
     public open func VisitSubExpression(o: InvokeWithException): Unit {
         VisitExprDefaultImpl(o)
-        o.GetVirMethodCtx().funcType = ConvertFuncParamsAndRetType(o.GetMethodType())
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -197,7 +196,6 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
 
     public open func VisitSubExpression(o: InvokeStatic): Unit {
         VisitExprDefaultImpl(o)
-        o.GetVirMethodCtx().funcType = ConvertFuncParamsAndRetType(o.GetMethodType())
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {
@@ -208,7 +206,6 @@ public open class ExprTypeConverter <: TypeConverter & ExprTypeFunctor {
 
     public open func VisitSubExpression(o: InvokeStaticWithException): Unit {
         VisitExprDefaultImpl(o)
-        o.GetVirMethodCtx().funcType = ConvertFuncParamsAndRetType(o.GetMethodType())
         o.SetThisType(ConvertType(o.GetThisType().getOrThrow()))
         let instantiatedTypeArgs = o.GetInstantiatedTypeArgs()
         for (idx in 0..instantiatedTypeArgs.size) {

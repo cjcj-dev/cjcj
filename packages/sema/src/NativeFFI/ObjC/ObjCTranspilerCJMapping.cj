@@ -944,7 +944,8 @@ public class ObjCTranspilerCJMapping {
         } else {
             NameGenerator.GetObjCDeclName(decl)
         }
-        FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".h"), res)
+        FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".h"),
+            Emitter.GENERATED_FILE_PREAMBULE + res)
     }
 
     private func WriteToSource(): Unit {
@@ -953,7 +954,8 @@ public class ObjCTranspilerCJMapping {
         } else {
             NameGenerator.GetObjCDeclName(decl)
         }
-        FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".m"), resSource)
+        FileUtil.WriteToFile(FileUtil.JoinPath(outputFilePath, objCDeclName + ".m"),
+            Emitter.GENERATED_FILE_PREAMBULE + resSource)
     }
 
     // C++ ObjCTranspilerCJMapping.cpp:1082-1093.

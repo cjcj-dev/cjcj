@@ -2012,6 +2012,15 @@ public class StructInheritanceChecker {
                     DiagKind.sema_invalid_override_member_in_class,
                     args: [DiagArgument(typeText), DiagArgument(name), DiagArgument(typeText)]
                 ).Emit()
+            } else if (child.TestAttr(Attribute.ABSTRACT) && !notInInterface) {
+                // An intermediate abstract superclass can hide this redeclaration from
+                // CheckInheritanceForInterface; diagnose the inherited default here.
+                Diagnose(
+                    diag,
+                    child,
+                    DiagKind.sema_invalid_override_or_redefine_member_in_interface,
+                    args: [DiagArgument(typeText), DiagArgument(name), DiagArgument(typeText)]
+                ).Emit()
             }
         }
     }
