@@ -12,6 +12,7 @@ public struct ObjCFunc<T> {
     public init() {}
 }
 public class ObjCBlock<T> {
+    public init(abi: CPointer<CangjieBlockABI>) {}
     public init(value: T) {}
     public init() {}
 }

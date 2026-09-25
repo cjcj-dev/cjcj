@@ -6,7 +6,10 @@ public type NativeObjCClass = CPointer<Unit>
 public type NativeObjCSel = CPointer<Unit>
 public type NativeObjCSuperPtr = CPointer<Unit>
 public type RegistryId = Int64
+@C
 public struct NativeBlockABI {}
+@C
+public struct CangjieBlockABI {}
 public struct NativeObjCIdMarker {}
 public let __NATIVE_OBJC_ID_MARKER = NativeObjCIdMarker()
 public func getClass(name: String): NativeObjCClass { CPointer<Unit>() }
@@ -31,3 +34,6 @@ public class ObjCOptionalMethodUnimplementedException <: Exception {}
 public class ObjCStaticMethodCallOnInterfaceException <: Exception {}
 public func convertToNSString(value: String): NativeObjCId { CPointer<Unit>() }
 public func descriptionAsString(value: NativeObjCId): String { "fixture" }
+
+public func registerCangjieLambdaAsBlock(action: Any, invoke: CFunc<(CPointer<NativeBlockABI>) -> Unit>): CPointer<CangjieBlockABI> { CPointer<CangjieBlockABI>() }
+public func getCangjieLambdaFromBlock<T>(block: CPointer<NativeBlockABI>): T { throw Exception("fixture") }
