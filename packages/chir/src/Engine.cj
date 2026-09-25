@@ -168,7 +168,7 @@ public class Engine<Domain> where Domain <: AbstractDomain<Domain> {
                 var exprCount: Int64 = 0
                 for (block in body.GetBlocks()) {
                     exprCount += block.GetExpressionsRef().size
-                    if (exprCount > 10000) {
+                    if (exprCount > 1024) {
                         return true
                     }
                 }
