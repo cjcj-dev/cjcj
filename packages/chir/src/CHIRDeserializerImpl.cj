@@ -1335,11 +1335,8 @@ class CHIRDeserializerImpl {
         for (fields in blockGroupRecords) {
             if (let Some(value) <- valuesById.get(CHIRFieldAt(fields, 1))) {
                 if (let Some(group) <- (value as BlockGroup)) {
-                    if (let Some(ownerValue) <- valuesById.get(CHIRFieldAt(fields, 3))) {
-                        if (let Some(ownerFn) <- (ownerValue as Function)) {
-                            group.SetOwnerFunc(ownerFn)
-                        }
-                    }
+                    // Function.InitBody already attached this group. Reattaching the same owner
+                    // would remove its body; cf7b34a1 CHIRDeserializer.cpp:1527-1531 only configures entry.
                     if (let Some(ownerExpr) <- expressionsById.get(CHIRFieldAt(fields, 4))) {
                         group.SetOwnerExpression(ownerExpr)
                     }

@@ -839,8 +839,9 @@ public open class FuncCall <: Expression {
     private let instantiatedTypeArgs: ArrayList<Type> = ArrayList<Type>()
     private var thisType: Option<Type> = None
 
-    public init(kind: ExprKind, funcCallCtx: FuncCallContext, parent: Option<Block>) {
-        super(kind, ArrayList<Value>(), parent)
+    public init(kind: ExprKind, funcCallCtx: FuncCallContext, parent: Option<Block>,
+        operands!: ArrayList<Value> = ArrayList<Value>()) {
+        super(kind, operands, parent)
         for (ty in funcCallCtx.instTypeArgs) {
             instantiatedTypeArgs.add(ty)
         }
@@ -959,7 +960,7 @@ public open class DynamicDispatch <: FuncCall {
     private var virtualMethodOffset: Option<UInt64> = None
 
     public init(kind: ExprKind, callContext: InvokeCallContext, parent: Option<Block>) {
-        super(kind, callContext.funcCallCtx, parent)
+        super(kind, callContext.funcCallCtx, parent, operands: ArrayList<Value>([callContext.method]))
         overflowStrategy = callContext.overflowStrategy
         CJC_ASSERT(callContext.overflowStrategy != OverflowStrategy.CHECKED)
     }
@@ -1087,7 +1088,6 @@ public open class DynamicDispatch <: FuncCall {
 public class Invoke <: DynamicDispatch {
     public init(callContext: InvokeCallContext, parent: Option<Block>) {
         super(ExprKind.INVOKE, callContext, parent)
-        AppendOperand(callContext.method)
         AppendOperand(callContext.caller)
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
@@ -1158,7 +1158,6 @@ public class Invoke <: DynamicDispatch {
 public class InvokeStatic <: DynamicDispatch {
     public init(callContext: InvokeCallContext, parent: Option<Block>) {
         super(ExprKind.INVOKESTATIC, callContext, parent)
-        AppendOperand(callContext.method)
         AppendOperand(callContext.caller)
         for (arg in callContext.funcCallCtx.args) {
             AppendOperand(arg)
