@@ -1095,29 +1095,29 @@ class CHIRDeserializerImpl {
         let funcContext = FuncCallContext(args: valuesAfterFirst(invokeOperands),
             instTypeArgs: CHIRParseTypeList(CHIRFieldAt(payload, 1), builder, customDefs),
             thisType: parseOptionalType(CHIRFieldAt(payload, 2)))
-        let overflowStrategy = DeserializeOverflowStrategy(UInt8(UInt64.parse(CHIRFieldAt(payload, 6))))
+        let overflowStrategy = DeserializeOverflowStrategy(UInt8(UInt64.parse(CHIRFieldAt(payload, 3))))
         let invokeContext = InvokeCallContext(method, invokeOperands[0], funcContext,
             overflowStrategy: overflowStrategy)
         if (kind == ExprKind.INVOKESTATIC) {
             let invokeExpr = builder.CreateInvokeStatic(resultTypeOrInvalid(resultTy), invokeContext, block)
-            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 7))
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 4))
             return invokeExpr
         }
         if (kind == ExprKind.INVOKE) {
             let invokeExpr = builder.CreateInvoke(resultTypeOrInvalid(resultTy), invokeContext, block)
-            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 7))
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 4))
             return invokeExpr
         }
         if (kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION && successors.size >= 2) {
             let invokeExpr = builder.CreateInvokeStaticWithException(resultTypeOrInvalid(resultTy), invokeContext,
                 successors[0], successors[1], block)
-            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 7))
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 4))
             return invokeExpr
         }
         if (kind == ExprKind.INVOKE_WITH_EXCEPTION && successors.size >= 2) {
             let invokeExpr = builder.CreateInvokeWithException(resultTypeOrInvalid(resultTy), invokeContext,
                 successors[0], successors[1], block)
-            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 7))
+            applyVirtualMethodOffset(invokeExpr, CHIRFieldAt(payload, 4))
             return invokeExpr
         }
         return None
@@ -1335,11 +1335,8 @@ class CHIRDeserializerImpl {
         for (fields in blockGroupRecords) {
             if (let Some(value) <- valuesById.get(CHIRFieldAt(fields, 1))) {
                 if (let Some(group) <- (value as BlockGroup)) {
-                    if (let Some(ownerValue) <- valuesById.get(CHIRFieldAt(fields, 3))) {
-                        if (let Some(ownerFn) <- (ownerValue as Function)) {
-                            group.SetOwnerFunc(ownerFn)
-                        }
-                    }
+                    // Function.InitBody already attached this group. Reattaching the same owner
+                    // would remove its body; cf7b34a1 CHIRDeserializer.cpp:1527-1531 only configures entry.
                     if (let Some(ownerExpr) <- expressionsById.get(CHIRFieldAt(fields, 4))) {
                         group.SetOwnerExpression(ownerExpr)
                     }
