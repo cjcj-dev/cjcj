@@ -568,12 +568,18 @@ public class IRBuilder2 <: Resource {
     public init(cgMod: CGModule) {
         this.cgMod = cgMod
         builder = LLVMBuilderHandle.Create(cgMod.GetLLVMContext())
+        if (cgMod.GetCGContext().GetCompileOptions().fastMathMode) {
+            unsafe { LLVMSelfhostBuilderSetFastMath(builder.raw) }
+        }
     }
 
     public init(cgMod: CGModule, theBB: LLVMBasicBlockRef) {
         this.cgMod = cgMod
         builder = LLVMBuilderHandle.Create(cgMod.GetLLVMContext())
         unsafe { LLVMPositionBuilderAtEnd(builder.raw, theBB) }
+        if (cgMod.GetCGContext().GetCompileOptions().fastMathMode) {
+            unsafe { LLVMSelfhostBuilderSetFastMath(builder.raw) }
+        }
     }
 
     public func SetCHIRExpr(chirExprWrapper: CHIRExprWrapper): Unit {
@@ -2092,7 +2098,7 @@ public class IRBuilder2 <: Resource {
                 }
             }
         }
-        return ApplyFastMathIfNeeded(result)
+        return result
     }
 
     public func CreateUnary(kind: ExprKind, value: LLVMValueRef, name!: String = ""): LLVMValueRef {
@@ -2112,7 +2118,7 @@ public class IRBuilder2 <: Resource {
                 case _ => LLVMNullValue()
             }
         }
-        return ApplyFastMathIfNeeded(result)
+        return result
     }
 
     public func CreateNullValue(ty: Type): LLVMValueRef {
@@ -4908,7 +4914,7 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildPhi(builder.raw, valueType, nameCString.value) }
         }
-        return ApplyFastMathIfNeeded(result)
+        return result
     }
 
     public func AddIncoming(phi: LLVMValueRef, values: ArrayList<LLVMValueRef>,
@@ -4941,7 +4947,6 @@ public class IRBuilder2 <: Resource {
         try (nameCString = unsafe { LibC.mallocCString(name) }.asResource()) {
             result = unsafe { LLVMBuildSelect(builder.raw, cond, trueValue, falseValue, nameCString.value) }
         }
-        result = ApplyFastMathIfNeeded(result)
         // baseprop: same invariant as BitCast (IRBuilder.h:183-191) for multi-arm join.
         PropagateBasePtrFromOperands(result, ArrayList<LLVMValueRef>([trueValue, falseValue]))
         return result
@@ -6556,11 +6561,6 @@ public class IRBuilder2 <: Resource {
             CreateBr(oldEntry)
         }
         return created
-    }
-
-    private func ApplyFastMathIfNeeded(value: LLVMValueRef): LLVMValueRef {
-        // LLVM-15 C API has no fast-math-flag accessor; skip (optimization hint only).
-        return value
     }
 
     private func IsFloatOperand(ty: Option<Type>): Bool {

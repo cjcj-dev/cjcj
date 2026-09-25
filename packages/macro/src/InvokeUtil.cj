@@ -300,8 +300,10 @@ private let MIN_HEAP_SIZE: UIntNative = 4 * 1024
 private let MIN_STACK_SIZE: UIntNative = 64
 private let MAX_STACK_SIZE: UIntNative = 1024 * 1024
 
-// InitCJRuntime interprets zero sizes/budgets using its platform defaults.
-// CangjieRuntimeApi.cpp config initialization is the default-value contract.
+// InitCJRuntime interprets zero heap sizes/budgets using its platform defaults.
+// CangjieRuntimeApi.cpp config initialization is the heap default-value contract.
+// Thread and coroutine stacks are KB and match InvokeUtil.h:50-51, not the
+// process default that a zero stack selects.
 public let REGION_SIZE: UIntNative = 64
 public let HEAP_SIZE: UIntNative = 0
 public let HEAP_SIZE_SET: Bool = false
@@ -323,8 +325,8 @@ public let MAX_TENURING_THRESHOLD: UInt32 = 15
 public let Z_TENURING_THRESHOLD: Int32 = -1
 public let MAX_TENURING_THRESHOLD_SET: Bool = false
 public let Z_TENURING_THRESHOLD_SET: Bool = false
-public let STACK_SIZE: UIntNative = 0
-public let CO_STACK_SIZE: UIntNative = 0
+public let STACK_SIZE: UIntNative = 64 * 1024
+public let CO_STACK_SIZE: UIntNative = 4 * 1024
 public let PROCESSOR_NUM: UInt32 = 0u32
 public let HEAP_INITIAL_SIZE: UIntNative = 64 * 1024
 

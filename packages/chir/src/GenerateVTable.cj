@@ -1644,9 +1644,9 @@ public class GenerateVTable {
 
     private func VisitExpression(expr: Expression): Unit {
         if (let Some(dyExpr) <- (expr as DynamicDispatch)) {
-            dyExpr.SetVirtualMethodOffset(dyExpr.GetVirtualMethodOffset(builder))
+            dyExpr.SetVirtualMethodOffset(dyExpr.GetVirtualMethodOffset())
         } else if (let Some(dyExprE) <- (expr as DynamicDispatchWithException)) {
-            dyExprE.SetVirtualMethodOffset(dyExprE.GetVirtualMethodOffset(builder))
+            dyExprE.SetVirtualMethodOffset(dyExprE.GetVirtualMethodOffset())
         } else if (let Some(apply) <- (expr as Apply)) {
             let callee = apply.GetCallee() as Function
             if (CalleeIsMutFuncFromParent(apply.GetThisType(), callee, expr.GetTopLevelFunc().getOrThrow())) {
@@ -1677,8 +1677,40 @@ public class GenerateVTable {
         }
     }
 
+    private func ReplaceDeserializedDispatchCallee(expr: Expression): Unit {
+        if (let Some(dyExpr) <- (expr as DynamicDispatch)) {
+            let callee = dyExpr.GetCallee()
+            let expected = GetCalleeInSrcParentType(callee, dyExpr.GetMethodName(), dyExpr.GetStoredVirMethodOffset())
+            dyExpr.ReplaceOperand(callee, expected)
+        } else if (let Some(dyExprE) <- (expr as DynamicDispatchWithException)) {
+            let callee = dyExprE.GetCallee()
+            let expected = GetCalleeInSrcParentType(callee, dyExprE.GetMethodName(),
+                dyExprE.GetStoredVirMethodOffset())
+            dyExprE.ReplaceOperand(callee, expected)
+        }
+        for (group in expr.GetBlockGroups()) {
+            NormalizeDeserializedCallee(group)
+        }
+    }
+
+    private func NormalizeDeserializedCallee(group: BlockGroup): Unit {
+        for (block in group.GetBlocks()) {
+            for (expr in block.GetExpressions()) {
+                ReplaceDeserializedDispatchCallee(expr)
+            }
+        }
+    }
+
     public func UpdateFuncCall(): Unit {
         try (recorder = ProfileRecorder(passName, "UpdateFuncCall")) {
+            for (fn in pkg.GetGlobalFuncsWithBody()) {
+                if (!fn.TestAttr(Attribute.DESERIALIZED)) {
+                    continue
+                }
+                if (let Some(body) <- fn.GetBody()) {
+                    NormalizeDeserializedCallee(body)
+                }
+            }
             for (fn in pkg.GetGlobalFuncsWithBody()) {
                 if (let Some(body) <- fn.GetBody()) {
                     VisitBlockGroup(body)
