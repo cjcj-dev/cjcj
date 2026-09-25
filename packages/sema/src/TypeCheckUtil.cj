@@ -1518,3 +1518,19 @@ public func GetGenericParamsForCall(ce: CallExpr, fd: FuncDecl): TySet {
     }
     return ret
 }
+
+// TypeCheckUtil.h: WorkForMembers dispatches property accessors.
+public func WorkForMembers(decl: Decl, worker: (Decl) -> Unit): Unit {
+    if (let Some(propertyDecl) <- (decl as PropDecl)) {
+        for (getter in propertyDecl.getters) { worker(getter) }
+        for (setter in propertyDecl.setters) { worker(setter) }
+    } else {
+        worker(decl)
+    }
+}
+
+public func WorkForMembersOfDecl(decl: Decl, worker: (Decl) -> Unit): Unit {
+    for (member in decl.GetMemberDecls()) {
+        WorkForMembers(member, worker)
+    }
+}

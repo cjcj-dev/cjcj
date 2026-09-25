@@ -139,21 +139,16 @@ class InstantiatedExtendRecorder {
     }
 
     private func RecordImplExtendDecl(ty: Ty, fd: FuncDecl, upperTy: Option<Ty>): Unit {
-        let baseTy = typeManager.GetTyForExtendMap(ty)
-        let genericFdDecl = gim.GetGeneralDecl(fd)
-        CJC_ASSERT(genericFdDecl.astKind == ASTKind.FUNC_DECL)
-        let genericFd = if (let Some(value) <- (genericFdDecl as FuncDecl)) {
-            value
-        } else {
-            return
-        }
-        let declMap = if (let Some(value) <- gim.abstractFuncToDeclMap.Find(baseTy, genericFd)) {
-            value
-        } else {
-            return
-        }
+        let resolver = OverrideFunctionResolver(typeManager)
+        let funcs = resolver.GetInstMemberFuncWithInstTy(ty, fd.identifier.Val())
         var selectedExtend: Option<Decl> = None
-        for ((baseDecl, _) in declMap) {
+        let baseTy = if (Ty.IsTyCorrect(upperTy)) { upperTy.getOrThrow() } else { ty }
+        for (candidate in funcs) {
+            let matchedInstTy = resolver.GetMatchedFuncInstTyByGivenTarget(candidate, fd, baseTy)
+            if (!Ty.IsTyCorrect(matchedInstTy)) {
+                continue
+            }
+            let baseDecl = candidate[0].outerDecl.getOrThrow()
             if (baseDecl.astKind != ASTKind.EXTEND_DECL) {
                 continue
             }
