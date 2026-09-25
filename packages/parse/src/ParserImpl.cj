@@ -25,7 +25,7 @@ public class ParserImpl {
     public var deadlocked: Bool = false
     public var enableCustomAnno: Bool = false
     public var forImport: Bool = false
-    public var inForeignBlock: Bool = false
+    public var foreignBlockModifiers: ArrayList<Modifier> = ArrayList<Modifier>()
     public var moduleName: String = ""
     public var currentFile: Option<File> = None
     public var curMacroCall: Option<Node> = None
@@ -120,6 +120,23 @@ public class ParserImpl {
     public func SetCurFile(file: File): ParserImpl {
         currentFile = file
         return this
+    }
+
+    public func SetForeignBlockModifiers(modifiers: ArrayList<Modifier>): ParserImpl {
+        foreignBlockModifiers = CopyModifierList(modifiers)
+        return this
+    }
+
+    public func CopiedForeignBlockModifiers(): ArrayList<Modifier> {
+        return CopyModifierList(foreignBlockModifiers)
+    }
+
+    private func CopyModifierList(modifiers: ArrayList<Modifier>): ArrayList<Modifier> {
+        let copied = ArrayList<Modifier>()
+        for (modifier in modifiers) {
+            copied.add(modifier)
+        }
+        return copied
     }
 
     public func SetCompileOptions(opts: GlobalOptions): Unit {
