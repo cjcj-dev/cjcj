@@ -1,25 +1,25 @@
 {
   "version": 1,
   "repository": "cjcj-dev/cjcj",
-  "runtime_sha": "fd82c0eb7c2ecf83682dfc8b8389d725bbe79607",
-  "producer_sha": "880795b77af4beab44c676b9fe873d28db38368e",
-  "run_id": "36064251059",
+  "runtime_sha": "4c4cbf53b44497103e76e2a47a8fa35f5d7a7287",
+  "producer_sha": "99c6c2a09ce504cfc127de46a0d3252883d73b34",
+  "run_id": "36111967695",
   "run_attempt": "1",
-  "release_id": 396146615,
-  "tag": "colour-runtime-fd82c0eb7c2e-36064251059-1-prerelease",
+  "release_id": 396482741,
+  "tag": "colour-runtime-4c4cbf53b444-36111967695-1-prerelease",
   "prerelease": true,
-  "checksums_asset_id": 587043977,
-  "checksums_sha256": "7ca2383c1fd5a1413326ee37a9bee6b7749fd62e0fc73b6d246436a7904c046a",
+  "checksums_asset_id": 588031058,
+  "checksums_sha256": "bbb157ecb56f964cb48059296f6670ae9d483b88ab4899cecb0721be433c3457",
   "platforms": {
     "linux_x86_64": {
-      "artifact_id": 10838771028,
-      "artifact_digest": "sha256:26e46e08810746ce1ae877a9ed7d2bf9c7a83ae5a4c326f520615174a76981c1",
-      "manifest_sha256": "5d07f867b05298c4b9643c999e926845d1c41abddd89fa939455438c7365e031",
+      "artifact_id": 10856835608,
+      "artifact_digest": "sha256:b69a398955e0134673b4bcbe374166b3ff315ccac743f654a09e5a1e0a8495bf",
+      "manifest_sha256": "401becfac2b48477ae7096d64bc41703c9699c26871a61050cad557039f07bbe",
       "archive": "colour-runtime-linux_x86_64.zip",
-      "archive_sha256": "26e46e08810746ce1ae877a9ed7d2bf9c7a83ae5a4c326f520615174a76981c1",
+      "archive_sha256": "b69a398955e0134673b4bcbe374166b3ff315ccac743f654a09e5a1e0a8495bf",
       "manifest": "linux_x86_64.manifest.json",
-      "archive_asset_id": 587043260,
-      "manifest_asset_id": 587043922
+      "archive_asset_id": 588030033,
+      "manifest_asset_id": 588030995
     }
   }
 }
