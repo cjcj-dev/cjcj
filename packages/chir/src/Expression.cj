@@ -25,7 +25,7 @@ private func GetAllSuperClassDefs(def: ClassDef, allSuperDefs: HashSet<CustomTyp
 
 public open class Expression <: Base & Hashable & Equatable<Expression> {
     private let kind: ExprKind
-    private let operands: ArrayList<Value> = ArrayList<Value>()
+    protected let operands: ArrayList<Value> = ArrayList<Value>()
     private let blockGroups: ArrayList<BlockGroup> = ArrayList<BlockGroup>()
     private var parent: Option<Block> = None
     private var result: Option<LocalVar> = None
@@ -81,7 +81,8 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
     public func IsLambda(): Bool { return kind == ExprKind.LAMBDA }
     public func IsLoad(): Bool { return kind == ExprKind.LOAD }
     public func IsTerminator(): Bool { return GetExprMajorKind() == ExprMajorKind.TERMINATOR }
-    public func IsTypeCast(): Bool { return kind == ExprKind.TYPECAST }
+    public func IsNumericCast(): Bool { return kind == ExprKind.NUMERIC_CAST }
+    public func IsTypeCast(): Bool { return (this as TypeCast).isSome() }
     public func IsUnaryExpr(): Bool { return GetExprMajorKind() == ExprMajorKind.UNARY_EXPR }
 
     public func IsConstantNull(): Bool {
@@ -123,7 +124,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         return kind == ExprKind.APPLY_WITH_EXCEPTION || kind == ExprKind.INVOKE_WITH_EXCEPTION ||
             kind == ExprKind.INVOKESTATIC_WITH_EXCEPTION ||
             kind == ExprKind.INT_OP_WITH_EXCEPTION || kind == ExprKind.SPAWN_WITH_EXCEPTION ||
-            kind == ExprKind.TYPECAST_WITH_EXCEPTION || kind == ExprKind.INTRINSIC_WITH_EXCEPTION ||
+            kind == ExprKind.NUMERIC_CAST_WITH_EXCEPTION || kind == ExprKind.INTRINSIC_WITH_EXCEPTION ||
             kind == ExprKind.ALLOCATE_WITH_EXCEPTION || kind == ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION
     }
 
@@ -220,11 +221,58 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         return None
     }
 
+    public func GetSuccessorIndex(index: Int64): Int64 {
+        var first: Int64 = 0
+        while (first < operands.size && !(operands[first] as Block).isSome()) { first++ }
+        return first + index
+    }
+
+    public func GetNumOfNonSuccessorOperands(): Int64 { return GetSuccessorIndex(0) }
+
+    public func GetNonSuccessorOperands(): ArrayList<Value> {
+        let out = ArrayList<Value>()
+        for (i in 0..GetNumOfNonSuccessorOperands()) { out.add(operands[i]) }
+        return out
+    }
+
+    public func GetSuccessors(): ArrayList<Block> {
+        let out = ArrayList<Block>()
+        for (operand in operands) {
+            if (let Some(block) <- (operand as Block)) { out.add(block) }
+        }
+        return out
+    }
+
+    public func GetNumOfSuccessor(): Int64 { return operands.size - GetSuccessorIndex(0) }
+    public func GetSuccessor(index: Int64): Block { return (operands[GetSuccessorIndex(index)] as Block).getOrThrow() }
+
+    public func ReplaceSuccessor(oldBlock: Block, newBlock: Block): Unit {
+        for (index in 0..GetNumOfSuccessor()) {
+            if (GetSuccessor(index).nodeId == oldBlock.nodeId) { ReplaceSuccessor(index, newBlock) }
+        }
+    }
+
+    public func ReplaceSuccessor(index: Int64, newBlock: Block): Unit {
+        let oldBlock = GetSuccessor(index)
+        ReplaceOperand(GetSuccessorIndex(index), newBlock)
+        if (let Some(parentBlock) <- parent) {
+            oldBlock.RemovePredecessor(parentBlock)
+            newBlock.AddPredecessor(parentBlock)
+        }
+    }
+
+    public func SyncSuccessorPredecessors(): Unit {
+        if (let Some(parentBlock) <- parent) {
+            for (successor in GetSuccessors()) { successor.AddPredecessor(parentBlock) }
+        }
+    }
+
     public open func GetNumOfOperands(): Int64 {
         return operands.size
     }
 
     public open func GetOperand(idx: Int64): Value {
+        CJC_ASSERT(idx < GetNumOfNonSuccessorOperands())
         return operands[idx]
     }
 
@@ -325,6 +373,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
 
     public open func DetachFromBlockOnly(): Unit {
         if (let Some(parentBlock) <- parent) {
+            for (successor in GetSuccessors()) { successor.RemovePredecessor(parentBlock) }
             parentBlock.RemoveExprOnly(this)
         }
         parent = None
@@ -342,6 +391,8 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         }
         let oldParent = parent
         if (let Some(parentBlock) <- oldParent) {
+            for (successor in GetSuccessors()) { successor.RemovePredecessor(parentBlock) }
+            for (successor in newExpr.GetSuccessors()) { successor.AddPredecessor(parentBlock) }
             let exprList = parentBlock.GetExpressionsRef()
             var idx: Int64 = 0
             while (idx < exprList.size) {
@@ -362,25 +413,11 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         EraseOperands()
     }
 
-    // C++ Expression::OperandsToString uses the terminator operands vector which
-    // already appends successors (see Terminator::GetFirstSuccessorIndex).
-    // Selfhost keeps successors in a separate list, so rebuild that layout here.
     public open func OperandsToString(): String {
-        let values = ArrayList<Value>()
-        for (op in operands) {
-            values.add(op)
-        }
-        if (let Some(terminator) <- AsTerminator()) {
-            for (successor in terminator.GetSuccessors()) {
-                values.add(successor)
-            }
-        }
-        return ValueIdVecToString("", values, "", hasExceptionBranch: HasExceptionBranch())
+        return ValueIdVecToString("", operands, "", hasExceptionBranch: HasExceptionBranch())
     }
 
-    public open func AddExtraComment(): String {
-        return ""
-    }
+    public open func AddExtraComment(): String { return "" }
 
     protected func CommentToString(): String {
         let comments = ArrayList<String>()
@@ -400,7 +437,7 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
         return builder.CreateExpression(kind, None, clonedOperands, parent)
     }
 
-    public open func AsTerminator(): Option<Terminator> { return None }
+    public func AsTerminator(): Option<Expression> { return if (IsTerminator()) { Some(this) } else { None } }
 
     public func ToString(indent: Int64): String {
         var out = IndentToString(indent)
@@ -441,11 +478,6 @@ func GetOperands(expression: Expression): ArrayList<Value> {
     let operands = expression.GetOperands()
     if (let Some(constant) <- (expression as Constant)) {
         operands.add(constant.GetValue())
-    }
-    if (let Some(terminator) <- expression.AsTerminator()) {
-        for (successor in terminator.GetSuccessors()) {
-            operands.add(successor)
-        }
     }
     return operands
 }
@@ -579,12 +611,13 @@ public class Constant <: Expression {
     }
 }
 
-public class Allocate <: Expression {
+public open class AllocateBase <: Expression {
     private var allocatedType: Type
 
-    public init(ty: Type, parent: Option<Block>) {
-        super(ExprKind.ALLOCATE, ArrayList<Value>(), parent)
+    protected init(kind: ExprKind, ty: Type, successors: ArrayList<Block>, parent: Option<Block>) {
+        super(kind, ArrayList<Value>(), parent)
         allocatedType = ty
+        for (successor in successors) { this.operands.add(successor) }
     }
 
     public func GetType(): Type {
@@ -597,6 +630,13 @@ public class Allocate <: Expression {
 
     public override func OperandsToString(): String {
         return allocatedType.ToString()
+    }
+
+}
+
+public class Allocate <: AllocateBase {
+    public init(ty: Type, parent: Option<Block>) {
+        super(ExprKind.ALLOCATE, ty, ArrayList<Block>(), parent)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
@@ -1256,42 +1296,55 @@ public class GetRTTIStatic <: Expression {
     }
 }
 
-public class TypeCast <: Expression {
+public open class TypeCast <: Expression {
+    protected init(kind: ExprKind, source: Value, successors: ArrayList<Block>, parent: Option<Block>) {
+        super(kind, MakeUnaryOperands(source), parent)
+        for (successor in successors) { this.operands.add(successor) }
+    }
+
+    public func GetSourceValue(): Value { return GetOperand(0) }
+    public func GetSourceType(): Option<Type> { return GetSourceValue().GetType() }
+    public func GetTargetType(): Option<Type> { return GetResultType() }
+}
+
+public open class NumericCastBase <: TypeCast {
     private let overflowStrategy: OverflowStrategy
 
-    public init(source: Value, parent: Option<Block>, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
-        super(ExprKind.TYPECAST, MakeUnaryOperands(source), parent)
+    protected init(kind: ExprKind, source: Value, successors: ArrayList<Block>, parent: Option<Block>, overflowStrategy: OverflowStrategy) {
+        super(kind, source, successors, parent)
         this.overflowStrategy = overflowStrategy
     }
 
-    public func GetSourceValue(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetSourceTy(): Option<Type> {
-        return GetSourceValue().GetType()
-    }
-
-    public func GetTargetTy(): Option<Type> {
-        if (let Some(res) <- GetResult()) {
-            return res.GetType()
-        }
-        return None
-    }
-
-    public func GetOverflowStrategy(): OverflowStrategy {
-        return overflowStrategy
-    }
+    public func GetOverflowStrategy(): OverflowStrategy { return overflowStrategy }
 
     public override func AddExtraComment(): String {
-        if (overflowStrategy != OverflowStrategy.NA) {
-            return OverflowToString(overflowStrategy)
-        }
-        return ""
+        return if (overflowStrategy != OverflowStrategy.NA) { OverflowToString(overflowStrategy) } else { "" }
+    }
+}
+
+public class ClassStaticCast <: TypeCast {
+    public init(source: Value, parent: Option<Block>) {
+        super(ExprKind.CLASS_STATIC_CAST, source, ArrayList<Block>(), parent)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateTypeCast(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent,
+        let cloned = builder.CreateClassStaticCast(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
+        let resultValue = GetResult().getOrThrow()
+        let clonedResult = cloned.GetResult().getOrThrow()
+        clonedResult.AppendAttributeInfo(resultValue.GetAttributeInfo())
+        cloned.SetNeedCheckCast(GetNeedCheckCast())
+        clonedResult.SetEnumCaseIndex(resultValue.GetEnumCaseIndex())
+        return cloned
+    }
+}
+
+public class NumericCast <: NumericCastBase {
+    public init(source: Value, parent: Option<Block>, overflowStrategy!: OverflowStrategy) {
+        super(ExprKind.NUMERIC_CAST, source, ArrayList<Block>(), parent, overflowStrategy)
+    }
+
+    public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
+        let cloned = builder.CreateNumericCast(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent,
             overflowStrategy: GetOverflowStrategy())
         let resultValue = GetResult().getOrThrow()
         let clonedResult = cloned.GetResult().getOrThrow()
@@ -1333,24 +1386,9 @@ public class InstanceOf <: Expression {
     }
 }
 
-public class Box <: Expression {
+public class Box <: TypeCast {
     public init(source: Value, parent: Option<Block>) {
-        super(ExprKind.BOX, MakeUnaryOperands(source), parent)
-    }
-
-    public func GetSourceValue(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetSourceTy(): Option<Type> {
-        return GetSourceValue().GetType()
-    }
-
-    public func GetTargetTy(): Option<Type> {
-        if (let Some(res) <- GetResult()) {
-            return res.GetType()
-        }
-        return None
+        super(ExprKind.BOX, source, ArrayList<Block>(), parent)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
@@ -1360,105 +1398,45 @@ public class Box <: Expression {
     }
 }
 
-public class UnBox <: Expression {
+public class UnBoxToValue <: TypeCast {
     public init(source: Value, parent: Option<Block>) {
-        super(ExprKind.UNBOX, MakeUnaryOperands(source), parent)
-    }
-
-    public func GetSourceValue(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetSourceTy(): Option<Type> {
-        return GetSourceValue().GetType()
-    }
-
-    public func GetTargetTy(): Option<Type> {
-        if (let Some(res) <- GetResult()) {
-            return res.GetType()
-        }
-        return None
+        super(ExprKind.UNBOX_TO_VALUE, source, ArrayList<Block>(), parent)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateUnBox(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
+        let cloned = builder.CreateUnBoxToValue(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
     }
 }
 
-public class TransformToGeneric <: Expression {
+public class CastToGeneric <: TypeCast {
     public init(source: Value, parent: Option<Block>) {
-        super(ExprKind.TRANSFORM_TO_GENERIC, MakeUnaryOperands(source), parent)
-    }
-
-    public func GetSourceValue(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetSourceTy(): Option<Type> {
-        return GetSourceValue().GetType()
-    }
-
-    public func GetTargetTy(): Option<Type> {
-        if (let Some(res) <- GetResult()) {
-            return res.GetType()
-        }
-        return None
+        super(ExprKind.CAST_TO_GENERIC, source, ArrayList<Block>(), parent)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateTransformToGeneric(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
+        let cloned = builder.CreateCastToGeneric(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
     }
 }
 
-public class TransformToConcrete <: Expression {
+public class CastToConcrete <: TypeCast {
     public init(source: Value, parent: Option<Block>) {
-        super(ExprKind.TRANSFORM_TO_CONCRETE, MakeUnaryOperands(source), parent)
-    }
-
-    public func GetSourceValue(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetSourceTy(): Option<Type> {
-        return GetSourceValue().GetType()
-    }
-
-    public func GetTargetTy(): Option<Type> {
-        if (let Some(res) <- GetResult()) {
-            return res.GetType()
-        }
-        return None
+        super(ExprKind.CAST_TO_CONCRETE, source, ArrayList<Block>(), parent)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateTransformToConcrete(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
+        let cloned = builder.CreateCastToConcrete(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(), parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
     }
 }
 
-public class UnBoxToRef <: Expression {
+public class UnBoxToRef <: TypeCast {
     public init(source: Value, parent: Option<Block>) {
-        super(ExprKind.UNBOX_TO_REF, MakeUnaryOperands(source), parent)
-    }
-
-    public func GetSourceValue(): Value {
-        return GetOperand(0)
-    }
-
-    public func GetSourceTy(): Option<Type> {
-        return GetSourceValue().GetType()
-    }
-
-    public func GetTargetTy(): Option<Type> {
-        if (let Some(res) <- GetResult()) {
-            return res.GetType()
-        }
-        return None
+        super(ExprKind.UNBOX_TO_REF, source, ArrayList<Block>(), parent)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
@@ -1570,12 +1548,13 @@ public class FieldByName <: Expression {
     }
 }
 
-public class RawArrayAllocate <: Expression {
+public open class RawArrayAllocateBase <: Expression {
     private var elementType: Type
 
-    public init(elementTy: Type, size: Value, parent: Option<Block>) {
-        super(ExprKind.RAW_ARRAY_ALLOCATE, MakeUnaryOperands(size), parent)
+    protected init(kind: ExprKind, elementTy: Type, size: Value, successors: ArrayList<Block>, parent: Option<Block>) {
+        super(kind, MakeUnaryOperands(size), parent)
         elementType = elementTy
+        for (successor in successors) { this.operands.add(successor) }
     }
 
     public func GetSize(): Value {
@@ -1592,6 +1571,13 @@ public class RawArrayAllocate <: Expression {
 
     public override func OperandsToString(): String {
         return elementType.ToString() + ", " + GetSize().GetIdentifier()
+    }
+
+}
+
+public class RawArrayAllocate <: RawArrayAllocateBase {
+    public init(elementTy: Type, size: Value, parent: Option<Block>) {
+        super(ExprKind.RAW_ARRAY_ALLOCATE, elementTy, size, ArrayList<Block>(), parent)
     }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
@@ -1804,19 +1790,18 @@ public class Debug <: Expression {
     }
 }
 
-public class Spawn <: Expression {
+public open class SpawnBase <: Expression {
     private var executeClosure: Option<Function> = None
 
-    public init(value: Value, parent: Option<Block>) {
-        super(ExprKind.SPAWN, MakeUnaryOperands(value), parent)
+    protected init(kind: ExprKind, operands: ArrayList<Value>, successors: ArrayList<Block>, parent: Option<Block>) {
+        super(kind, operands, parent)
+        for (successor in successors) { this.operands.add(successor) }
     }
 
-    public init(value: Value, arg: Value, parent: Option<Block>) {
-        super(ExprKind.SPAWN, MakeBinaryOperands(value, arg), parent)
-    }
+    public func GetObject(): Value { return GetOperand(0) }
 
     public func GetSpawnArg(): Option<Value> {
-        if (GetNumOfOperands() > 1) {
+        if (GetNumOfNonSuccessorOperands() > 1) {
             return GetOperand(1)
         }
         return None
@@ -1855,11 +1840,21 @@ public class Spawn <: Expression {
         return ""
     }
 
+}
+
+public class Spawn <: SpawnBase {
+    public init(value: Value, parent: Option<Block>) {
+        super(ExprKind.SPAWN, MakeUnaryOperands(value), ArrayList<Block>(), parent)
+    }
+    public init(value: Value, arg: Value, parent: Option<Block>) {
+        super(ExprKind.SPAWN, MakeBinaryOperands(value, arg), ArrayList<Block>(), parent)
+    }
+
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = if (let Some(spawnArg) <- GetSpawnArg()) {
-            builder.CreateSpawn(GetResult().getOrThrow().GetType().getOrThrow(), GetFuture(), spawnArg, parent)
+            builder.CreateSpawn(GetResult().getOrThrow().GetType().getOrThrow(), GetObject(), spawnArg, parent)
         } else {
-            builder.CreateSpawn(GetResult().getOrThrow().GetType().getOrThrow(), GetFuture(), parent)
+            builder.CreateSpawn(GetResult().getOrThrow().GetType().getOrThrow(), GetObject(), parent)
         }
         if (let Some(fn) <- GetExecuteClosure()) {
             cloned.SetExecuteClosure(fn)

@@ -676,7 +676,7 @@ public class IRBuilder2 <: Resource {
     }
 
     public func CreateLoadInstForParameter(chirExpression: Expression): Unit {
-        for (operand in chirExpression.GetOperands()) {
+        for (operand in chirExpression.GetNonSuccessorOperands()) {
             if (let Some((elementType, valueToLoad)) <- cgMod.GetValuesToLoad(operand)) {
                 var loadInst = LLVMNullValue()
                 try (nameCString = unsafe { LibC.mallocCString("") }.asResource()) {
@@ -4357,7 +4357,7 @@ public class IRBuilder2 <: Resource {
             return CreateLoad(elemTypes[Int64(associatedValIdx)], fieldPtr)
         }
         let typeCastExpr = ((field.GetBase() as LocalVar).getOrThrow().GetExpr().getOrThrow() as TypeCast).getOrThrow()
-        let chirEnumType = (typeCastExpr.GetSourceTy().getOrThrow() as EnumType).getOrThrow()
+        let chirEnumType = (typeCastExpr.GetSourceType().getOrThrow() as EnumType).getOrThrow()
         CJC_ASSERT(typeCastExpr.GetResult().getOrThrow().GetEnumCaseIndex().isSome())
         let typeArgs = ArrayList<Type>()
         for (typeArg in GetGenericArgsFromCHIRType(chirEnumType.GetEnumDef().GetType().getOrThrow())) {

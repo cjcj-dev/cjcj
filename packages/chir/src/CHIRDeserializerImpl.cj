@@ -34,7 +34,7 @@ private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
         case 7u8 => (ExprKind.INTRINSIC_WITH_EXCEPTION, true)
         case 8u8 => (ExprKind.RAISE_EXCEPTION, false)
         case 9u8 => (ExprKind.SPAWN_WITH_EXCEPTION, true)
-        case 10u8 => (ExprKind.TYPECAST_WITH_EXCEPTION, true)
+        case 10u8 => (ExprKind.NUMERIC_CAST_WITH_EXCEPTION, true)
         case 11u8 => (ExprKind.ALLOCATE_WITH_EXCEPTION, true)
         case 12u8 => (ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION, true)
         case 13u8 => (ExprKind.NEG, true)
@@ -68,13 +68,13 @@ private func CHIRExprKindToExprKind(kind: UInt8): (ExprKind, Bool) {
         case 41u8 => (ExprKind.NOTEQUAL, false)
         case 42u8 => (ExprKind.AND, false)
         case 43u8 => (ExprKind.OR, false)
-        case 44u8 => (ExprKind.TYPECAST, false)
+        case 44u8 => (ExprKind.CLASS_STATIC_CAST, false)
         case 45u8 => (ExprKind.BOX, false)
-        case 46u8 => (ExprKind.UNBOX, false)
+        case 46u8 => (ExprKind.UNBOX_TO_VALUE, false)
         case 47u8 => (ExprKind.UNBOX_TO_REF, false)
-        case 48u8 => (ExprKind.TYPECAST, false)
-        case 49u8 => (ExprKind.TRANSFORM_TO_CONCRETE, false)
-        case 50u8 => (ExprKind.TRANSFORM_TO_GENERIC, false)
+        case 48u8 => (ExprKind.NUMERIC_CAST, false)
+        case 49u8 => (ExprKind.CAST_TO_CONCRETE, false)
+        case 50u8 => (ExprKind.CAST_TO_GENERIC, false)
         case 51u8 => (ExprKind.ALLOCATE, false)
         case 52u8 => (ExprKind.LOAD, false)
         case 53u8 => (ExprKind.STORE, false)
@@ -882,6 +882,9 @@ class CHIRDeserializerImpl {
             }
             return builder.CreateRaiseException(operands[0], block)
         }
+        if (kind == ExprKind.CLASS_STATIC_CAST) {
+            return builder.CreateClassStaticCast(resultTypeOrInvalid(resultTy), operands[0], block)
+        }
         if (kind == ExprKind.BOX) {
             CJC_ASSERT(operands.size == 1)
             return builder.CreateBox(resultTypeOrInvalid(resultTy), operands[0], block)
@@ -911,20 +914,20 @@ class CHIRDeserializerImpl {
             CJC_ASSERT(operands.size == 2)
             return builder.CreateStore(operands[0], operands[1], block)
         }
-        if (kind == ExprKind.TRANSFORM_TO_CONCRETE) {
+        if (kind == ExprKind.CAST_TO_CONCRETE) {
             CJC_ASSERT(operands.size == 1)
-            return builder.CreateTransformToConcrete(resultTypeOrInvalid(resultTy), operands[0], block)
+            return builder.CreateCastToConcrete(resultTypeOrInvalid(resultTy), operands[0], block)
         }
-        if (kind == ExprKind.TRANSFORM_TO_GENERIC) {
+        if (kind == ExprKind.CAST_TO_GENERIC) {
             CJC_ASSERT(operands.size == 1)
-            return builder.CreateTransformToGeneric(resultTypeOrInvalid(resultTy), operands[0], block)
+            return builder.CreateCastToGeneric(resultTypeOrInvalid(resultTy), operands[0], block)
         }
         if (kind == ExprKind.TUPLE) {
             return builder.CreateTuple(resultTypeOrInvalid(resultTy), operands, block)
         }
-        if (kind == ExprKind.UNBOX) {
+        if (kind == ExprKind.UNBOX_TO_VALUE) {
             CJC_ASSERT(operands.size == 1)
-            return builder.CreateUnBox(resultTypeOrInvalid(resultTy), operands[0], block)
+            return builder.CreateUnBoxToValue(resultTypeOrInvalid(resultTy), operands[0], block)
         }
         if (kind == ExprKind.UNBOX_TO_REF) {
             CJC_ASSERT(operands.size == 1)
@@ -2164,16 +2167,19 @@ class CHIRDeserializerImpl {
             case ExprKind.STORE =>
                 CJC_ASSERT(operands.size == 2)
                 return builder.CreateStore(operands[0], operands[1], owner)
-            case ExprKind.TRANSFORM_TO_CONCRETE =>
+            case ExprKind.CLASS_STATIC_CAST =>
                 CJC_ASSERT(operands.size == 1)
-                return builder.CreateTransformToConcrete(resultTy.getOrThrow(), operands[0], owner)
-            case ExprKind.TRANSFORM_TO_GENERIC =>
+                return builder.CreateClassStaticCast(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.CAST_TO_CONCRETE =>
                 CJC_ASSERT(operands.size == 1)
-                return builder.CreateTransformToGeneric(resultTy.getOrThrow(), operands[0], owner)
+                return builder.CreateCastToConcrete(resultTy.getOrThrow(), operands[0], owner)
+            case ExprKind.CAST_TO_GENERIC =>
+                CJC_ASSERT(operands.size == 1)
+                return builder.CreateCastToGeneric(resultTy.getOrThrow(), operands[0], owner)
             case ExprKind.TUPLE => return builder.CreateTuple(resultTy.getOrThrow(), operands, owner)
-            case ExprKind.UNBOX =>
+            case ExprKind.UNBOX_TO_VALUE =>
                 CJC_ASSERT(operands.size == 1)
-                return builder.CreateUnBox(resultTy.getOrThrow(), operands[0], owner)
+                return builder.CreateUnBoxToValue(resultTy.getOrThrow(), operands[0], owner)
             case ExprKind.UNBOX_TO_REF =>
                 CJC_ASSERT(operands.size == 1)
                 return builder.CreateUnBoxToRef(resultTy.getOrThrow(), operands[0], owner)
@@ -2350,10 +2356,10 @@ class CHIRDeserializerImpl {
         let overflowStrategy = DeserializeOverflowStrategy(obj.GetOverflowStrategy())
         let (_, isException) = CHIRExprKindToExprKind(base.GetKind())
         if (isException) {
-            return builder.CreateTypeCastWithException(resultTy, operands[0],
+            return builder.CreateNumericCastWithException(resultTy, operands[0],
                 (operands[1] as Block).getOrThrow(), (operands[2] as Block).getOrThrow(), owner)
         }
-        return builder.CreateTypeCast(resultTy, operands[0], owner, overflowStrategy: overflowStrategy)
+        return builder.CreateNumericCast(resultTy, operands[0], owner, overflowStrategy: overflowStrategy)
     }
 
     private func Deserialize(obj: PackageFormat_InstanceOf): InstanceOf {

@@ -443,9 +443,17 @@ public class CHIRBuilder {
         return expr
     }
 
-    public func CreateTypeCast(resultTy: Type, source: Value, parent: Block,
-        overflowStrategy!: OverflowStrategy = OverflowStrategy.NA): TypeCast {
-        let expr = TypeCast(source, parent, overflowStrategy: overflowStrategy)
+    public func CreateClassStaticCast(resultTy: Type, source: Value, parent: Block): ClassStaticCast {
+        let expr = ClassStaticCast(source, parent)
+        expr.ConnectOperandsAndGroups()
+        StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
+        CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
+        return expr
+    }
+
+    public func CreateNumericCast(resultTy: Type, source: Value, parent: Block,
+        overflowStrategy!: OverflowStrategy): NumericCast {
+        let expr = NumericCast(source, parent, overflowStrategy: overflowStrategy)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -468,24 +476,24 @@ public class CHIRBuilder {
         return expr
     }
 
-    public func CreateUnBox(resultTy: Type, source: Value, parent: Block): UnBox {
-        let expr = UnBox(source, parent)
+    public func CreateUnBoxToValue(resultTy: Type, source: Value, parent: Block): UnBoxToValue {
+        let expr = UnBoxToValue(source, parent)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
         return expr
     }
 
-    public func CreateTransformToGeneric(resultTy: Type, source: Value, parent: Block): TransformToGeneric {
-        let expr = TransformToGeneric(source, parent)
+    public func CreateCastToGeneric(resultTy: Type, source: Value, parent: Block): CastToGeneric {
+        let expr = CastToGeneric(source, parent)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
         return expr
     }
 
-    public func CreateTransformToConcrete(resultTy: Type, source: Value, parent: Block): TransformToConcrete {
-        let expr = TransformToConcrete(source, parent)
+    public func CreateCastToConcrete(resultTy: Type, source: Value, parent: Block): CastToConcrete {
+        let expr = CastToConcrete(source, parent)
         expr.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(expr.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(expr))
         CreateLocalVar(resultTy, "%${expr.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", expr)
@@ -751,9 +759,9 @@ public class CHIRBuilder {
         return term
     }
 
-    public func CreateTypeCastWithException(resultTy: Type, source: Value, successBlock: Block, errorBlock: Block,
-        parent: Block): TypeCastWithException {
-        let term = TypeCastWithException(source, successBlock, errorBlock, parent)
+    public func CreateNumericCastWithException(resultTy: Type, source: Value, successBlock: Block, errorBlock: Block,
+        parent: Block): NumericCastWithException {
+        let term = NumericCastWithException(source, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)

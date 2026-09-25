@@ -50,7 +50,7 @@ public class UnreachableBranchCheck {
         }
     }
 
-    private func PrintWarning(node: Terminator, block: Block, hasProcessed: HashSet<Base>,
+    private func PrintWarning(node: Expression, block: Block, hasProcessed: HashSet<Base>,
         isRecursive!: Bool = false): Unit {
         if (hasProcessed.contains(block)) {
             return
@@ -105,7 +105,7 @@ public class UnreachableBranchCheck {
     private func VisitFunc<T>(result: Results<T>): Unit where T <: AbstractDomain<T> {
         let actionBeforeVisitExpr = { _: T, _: Expression, _: Int64 => }
         let actionAfterVisitExpr = { _: T, _: Expression, _: Int64 => }
-        let actionOnTerminator = { _: T, terminator: Terminator, targetSucc: Option<Block> =>
+        let actionOnTerminator = { _: T, terminator: Expression, targetSucc: Option<Block> =>
             if (terminator.GetExprKind() == ExprKind.BRANCH ||
                 terminator.GetExprKind() == ExprKind.MULTIBRANCH) {
                 if (let Some(target) <- targetSucc) {

@@ -368,7 +368,7 @@ private class IVal2CHIR {
                 parent.AppendExpression(createdConstant338)
                 ExprResultAsValue(createdConstant338) ?? return None
             }
-            let createdTypeCast340 = builder.CreateTypeCast(ty, selector, parent)
+            let createdTypeCast340 = builder.CreateClassStaticCast(ty, selector, parent)
             parent.AppendExpression(createdTypeCast340)
             return ExprResultAsValue(createdTypeCast340)
         }
@@ -457,7 +457,7 @@ private class IVal2CHIR {
                     idx++
                 }
                 if (needCast) {
-                    let createdTypeCast423 = builder.CreateTypeCast(ty, classVal, parent)
+                    let createdTypeCast423 = builder.CreateClassStaticCast(ty, classVal, parent)
                     parent.AppendExpression(createdTypeCast423)
                     return ExprResultAsValue(createdTypeCast423)
                 }

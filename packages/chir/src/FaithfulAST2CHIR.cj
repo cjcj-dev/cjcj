@@ -1047,7 +1047,7 @@ public class FaithfulAST2CHIR {
     private let annoFactoryFuncs: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>()
     private let annotationTargets: HashMap<GlobalVar, AstExpr> = HashMap<GlobalVar, AstExpr>()
     private let classDeclWithAnnotation: ArrayList<(AstClassDecl, ClassDef)> = ArrayList<(AstClassDecl, ClassDef)>()
-    private let maybeUnreachable: HashMap<Block, Terminator> = HashMap<Block, Terminator>()
+    private let maybeUnreachable: HashMap<Block, Expression> = HashMap<Block, Expression>()
     private let isComputingAnnos: Bool
 
     public init(builder: CHIRBuilder, chirType: CHIRType, sourceManager: BasicSourceManager,
@@ -1163,7 +1163,7 @@ public class FaithfulAST2CHIR {
         return initFuncsForConstVar
     }
 
-    public func GetMaybeUnreachableBlocks(): HashMap<Block, Terminator> {
+    public func GetMaybeUnreachableBlocks(): HashMap<Block, Expression> {
         return maybeUnreachable
     }
 

@@ -64,7 +64,7 @@ public class CHIRBuilderTest {
         @Expect(expressions.size, 2)
         // The result and its operand are the actual values produced by the helper.
         @Expect(expressions[0].GetExprKind(), ExprKind.LOAD)
-        @Expect(expressions[1].GetExprKind(), ExprKind.TYPECAST)
+        @Expect(expressions[1].GetExprKind(), ExprKind.CLASS_STATIC_CAST)
         @Expect(expressions[1].GetOperand(0).nodeId, expressions[0].GetResult().getOrThrow().nodeId)
         @Expect(result.nodeId, expressions[1].GetResult().getOrThrow().nodeId)
         block.AppendExpressions(expressions)
@@ -94,4 +94,45 @@ public class CHIRBuilderTest {
         @Expect(after.GetPredecessors().size, 1)
     }
 
+}
+
+@Test
+public class ExpressionFamilyEdgesTest {
+    @TestCase
+    public func ExceptionalFamiliesUseExpressionOperands(): Unit {
+        let context = CHIRContext()
+        let builder = CHIRBuilder(context)
+        let fn = builder.CreateFunction(context.GetFuncTy(ArrayList<Type>(), context.GetUnitTy()), "families")
+        let body = builder.CreateBlockGroup(fn)
+        fn.InitBody(body)
+        let source = builder.CreateBlock(body)
+        let normal = builder.CreateBlock(body)
+        let error = builder.CreateBlock(body)
+        body.SetEntryBlock(source)
+        let value = builder.CreateConstant(context.GetInt64Ty(), IntLiteral(7), source).GetResult().getOrThrow()
+        let cast = builder.CreateNumericCastWithException(context.GetInt32Ty(), value, normal, error, source)
+        let allocate = builder.CreateAllocateWithException(context.GetRefTy(context.GetInt64Ty()), context.GetInt64Ty(),
+            normal, error, source)
+        let raw = builder.CreateRawArrayAllocateWithException(context.GetRefTy(context.GetRawArrayTy(context.GetInt64Ty())),
+            context.GetInt64Ty(), value, normal, error, source)
+        let spawn = builder.CreateSpawnWithException(context.GetInt64Ty(), value, normal, error, source)
+        @Expect((cast as NumericCastBase).isSome(), true)
+        @Expect((allocate as AllocateBase).isSome(), true)
+        @Expect((raw as RawArrayAllocateBase).isSome(), true)
+        @Expect((spawn as SpawnBase).isSome(), true)
+        for (expr in ArrayList<Expression>([cast, allocate, raw, spawn])) {
+            @Expect(expr.IsTerminator(), true)
+            @Expect(expr.GetNumOfSuccessor(), 2)
+            @Expect(expr.GetOperands().size, expr.GetNumOfNonSuccessorOperands() + 2)
+            @Expect(expr.GetSuccessor(0).nodeId, normal.nodeId)
+            @Expect(expr.GetSuccessor(1).nodeId, error.nodeId)
+        }
+        source.AppendExpression(cast)
+        @Expect(source.GetTerminator().getOrThrow().nodeId, cast.nodeId)
+        @Expect(normal.GetPredecessors().size, 1)
+        @Expect(error.GetPredecessors().size, 1)
+        cast.RemoveSelfFromBlock()
+        @Expect(normal.GetPredecessors().size, 0)
+        @Expect(error.GetPredecessors().size, 0)
+    }
 }

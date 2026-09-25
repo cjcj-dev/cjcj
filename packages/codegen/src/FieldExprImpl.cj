@@ -17,7 +17,7 @@ public func GenerateFieldExpression(irBuilder: IRBuilder2, chirExpr: Expression)
             if (let Some(ownerExpr) <- localBase.GetExpr()) {
                 if (let Some(typeCastExpr) <- (ownerExpr as TypeCast)) {
                     if (typeCastExpr.GetSourceValue().GetType().getOrThrow().IsEnum() &&
-                        typeCastExpr.GetTargetTy().getOrThrow().IsTuple()) {
+                        typeCastExpr.GetTargetType().getOrThrow().IsTuple()) {
                         return irBuilder.CreateEnumGEP(fieldExpr)
                     }
                 }

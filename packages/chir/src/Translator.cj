@@ -421,7 +421,7 @@ public class Translator {
     private let mergingSpecific: Bool
     private var genericFuncMap: GenericFuncMap = GenericFuncMap()
     private let annoFactoryFuncs: ArrayList<(AstDecl, Function)>
-    private let maybeUnreachable: HashMap<Block, Terminator>
+    private let maybeUnreachable: HashMap<Block, Expression>
     private let isComputingAnnos: Bool
     private let initFuncsForAnnoFactory: ArrayList<Function>
     private let annotationFuncMap: HashMap<AstDecl, AnnoInfo> = HashMap<AstDecl, AnnoInfo>()
@@ -434,7 +434,7 @@ public class Translator {
         opts!: GlobalOptions = GlobalOptions(),
         increKind!: IncreKind = IncreKind.INVALID,
         annoFactoryFuncs!: ArrayList<(AstDecl, Function)> = ArrayList<(AstDecl, Function)>(),
-        maybeUnreachable!: HashMap<Block, Terminator> = HashMap<Block, Terminator>(),
+        maybeUnreachable!: HashMap<Block, Expression> = HashMap<Block, Expression>(),
         isComputingAnnos!: Bool = false,
         initFuncsForAnnoFactory!: ArrayList<Function> = ArrayList<Function>()) {
         this(builder, chirTy, globalSymbolTable, localConstVars: localConstVars, localConstFuncs: localConstFuncs,
@@ -449,7 +449,7 @@ public class Translator {
         gim!: Option<GenericInstantiationManager>,
         overrideSrcFuncResolver!: Option<(AstFuncDecl) -> Option<AstFuncDecl>>, opts!: GlobalOptions,
         increKind!: IncreKind, mergingSpecific!: Bool, annoFactoryFuncs!: ArrayList<(AstDecl, Function)>,
-        maybeUnreachable!: HashMap<Block, Terminator>, isComputingAnnos!: Bool,
+        maybeUnreachable!: HashMap<Block, Expression>, isComputingAnnos!: Bool,
         initFuncsForAnnoFactory!: ArrayList<Function>) {
         this.builder = builder
         this.chirTy = chirTy
@@ -847,7 +847,7 @@ public class Translator {
             let createdLoad835 = builder.CreateLoad(globalVarType, globalVar, CurrentBlock())
             CurrentBlock().AppendExpression(createdLoad835)
             let load = RequireResult(createdLoad835)
-            let createdTypeCast836 = builder.CreateTypeCast(objectTy, load, CurrentBlock())
+            let createdTypeCast836 = builder.CreateClassStaticCast(objectTy, load, CurrentBlock())
             CurrentBlock().AppendExpression(createdTypeCast836)
             let typecast = RequireResult(createdTypeCast836)
             let path = ArrayList<UInt64>()
@@ -1791,7 +1791,7 @@ public class Translator {
         let value = TranslateExprArg(retExpr)
         StoreReturnExprValueIfNeeded(expr, value)
         UpdateDelayExitSignalForReturnIfNeeded()
-        var terminator: Option<Terminator> = None
+        var terminator: Option<Expression> = None
         if (finallyContext.isEmpty()) {
             let exit = builder.CreateExit(None, CurrentBlock())
             CurrentBlock().AppendExpression(exit)
@@ -3932,7 +3932,7 @@ public class Translator {
                 case Some(exceptBlock) => exceptBlock
                 case None => errorBlock
             }
-            let typeCast = builder.CreateTypeCastWithException(resultTy, operand, successBlock, targetBlock,
+            let typeCast = builder.CreateNumericCastWithException(resultTy, operand, successBlock, targetBlock,
                 CurrentBlock())
             CurrentBlock().AppendExpression(typeCast)
             typeCast.SetDebugLocation(loc)
@@ -3940,7 +3940,7 @@ public class Translator {
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return result
         }
-        let typeCast = builder.CreateTypeCast(resultTy, operand, CurrentBlock(),
+        let typeCast = builder.CreateNumericCast(resultTy, operand, CurrentBlock(),
             overflowStrategy: overflowStrategy)
         CurrentBlock().AppendExpression(typeCast)
         typeCast.SetDebugLocation(loc)
@@ -7128,13 +7128,13 @@ public class Translator {
     }
 
     private func CreateWrappedTypeCast(ty: Type, operand: Value, parent: Block): Value {
-        let createdTypeCast6777 = builder.CreateTypeCast(ty, operand, parent)
+        let createdTypeCast6777 = builder.CreateClassStaticCast(ty, operand, parent)
         parent.AppendExpression(createdTypeCast6777)
         return RequireResult(createdTypeCast6777)
     }
 
     private func CreateWrappedTypeCast(loc: DebugLocation, ty: Type, operand: Value, parent: Block): Value {
-        let typeCast = builder.CreateTypeCast(ty, operand, parent)
+        let typeCast = builder.CreateClassStaticCast(ty, operand, parent)
         parent.AppendExpression(typeCast)
         typeCast.SetDebugLocation(loc)
         return RequireResult(typeCast)
@@ -10288,7 +10288,7 @@ public class Translator {
         if (valueTy.IsEqual(expectedTy)) {
             return value
         }
-        let createdTypeCast9739 = builder.CreateTypeCast(expectedTy, value, CurrentBlock())
+        let createdTypeCast9739 = builder.CreateClassStaticCast(expectedTy, value, CurrentBlock())
         CurrentBlock().AppendExpression(createdTypeCast9739)
         return RequireResult(createdTypeCast9739)
     }
@@ -10300,9 +10300,9 @@ public class Translator {
             return value
         }
         if (expectedTy.IsGenericRelated() && !valueTy.IsGenericRelated()) {
-            let createdTransformToGeneric9749 = builder.CreateTransformToGeneric(expectedTy, value, CurrentBlock())
-            CurrentBlock().AppendExpression(createdTransformToGeneric9749)
-            return RequireResult(createdTransformToGeneric9749)
+            let createdCastToGeneric9749 = builder.CreateCastToGeneric(expectedTy, value, CurrentBlock())
+            CurrentBlock().AppendExpression(createdCastToGeneric9749)
+            return RequireResult(createdCastToGeneric9749)
         }
         if (let Some(refTy) <- (valueTy as RefType)) {
             if (refTy.GetBaseType().IsEqual(expectedTy)) {
@@ -10321,7 +10321,7 @@ public class Translator {
                 return slot
             }
         }
-        let createdTypeCast9763 = builder.CreateTypeCast(expectedTy, value, CurrentBlock())
+        let createdTypeCast9763 = builder.CreateClassStaticCast(expectedTy, value, CurrentBlock())
         CurrentBlock().AppendExpression(createdTypeCast9763)
         return RequireResult(createdTypeCast9763)
     }

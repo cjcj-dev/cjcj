@@ -171,7 +171,7 @@ public class MaybeUninitAnalysis <: Analysis<MaybeUninitDomain> {
         }
     }
 
-    public override func PropagateTerminatorEffect(state: MaybeUninitDomain, terminator: Terminator): Option<Block> {
+    public override func PropagateTerminatorEffect(state: MaybeUninitDomain, terminator: Expression): Option<Block> {
         let _ = state
         let _ = terminator
         return None

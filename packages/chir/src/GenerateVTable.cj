@@ -66,7 +66,11 @@ private func TypeCastIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuild
             newExprs.add(load)
             tmpValue = load.GetResult().getOrThrow()
         }
-        let ret = builder.CreateTypeCast(expectedTy, tmpValue, parentBlock)
+        let ret: Expression = if (valueTy.IsNumeric() && expectedTy.IsNumeric()) {
+            builder.CreateNumericCast(expectedTy, tmpValue, parentBlock, overflowStrategy: OverflowStrategy.NA)
+        } else {
+            builder.CreateClassStaticCast(expectedTy, tmpValue, parentBlock)
+        }
         ret.SetDebugLocation(loc)
         let _ = needCheck
         newExprs.add(ret)
@@ -88,12 +92,12 @@ private func TransformGenericIfNeeded(value: Value, expectedTy: Type, builder: C
         return (None, ArrayList<Expression>())
     }
     if (HasGenericInNonFuncScope(expectedTy) && !HasGenericInNonFuncScope(valueTy)) {
-        let ret = builder.CreateTransformToGeneric(expectedTy, value, parentBlock)
+        let ret = builder.CreateCastToGeneric(expectedTy, value, parentBlock)
         ret.SetDebugLocation(loc)
         let _ = needCheck
         return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
     } else if (HasGenericInNonFuncScope(valueTy) && !HasGenericInNonFuncScope(expectedTy)) {
-        let ret = builder.CreateTransformToConcrete(expectedTy, value, parentBlock)
+        let ret = builder.CreateCastToConcrete(expectedTy, value, parentBlock)
         ret.SetDebugLocation(loc)
         let _ = needCheck
         return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
@@ -147,13 +151,13 @@ private func BoxIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuilder, p
             let _ = needCheck
             return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
         } else {
-            let ret = builder.CreateUnBox(expectedTy, value, parentBlock)
+            let ret = builder.CreateUnBoxToValue(expectedTy, value, parentBlock)
             ret.SetDebugLocation(loc)
             let _ = needCheck
             return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))
         }
     } else if (LeftTypeIsBoxOfRightType(srcTy, expectedTy)) {
-        let ret = builder.CreateUnBox(expectedTy, value, parentBlock)
+        let ret = builder.CreateUnBoxToValue(expectedTy, value, parentBlock)
         ret.SetDebugLocation(loc)
         let _ = needCheck
         return (Some(ret.GetResult().getOrThrow()), ArrayList<Expression>([ret]))

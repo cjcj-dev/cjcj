@@ -120,7 +120,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         HandleNormalExpressionEffect(state, expression)
     }
 
-    public override func PropagateTerminatorEffect(state: State<VD, Pool>, terminator: Terminator): Option<Block> {
+    public override func PropagateTerminatorEffect(state: State<VD, Pool>, terminator: Expression): Option<Block> {
         match (terminator.GetExprKind()) {
             case ExprKind.APPLY_WITH_EXCEPTION =>
                 return PreHandleApplyWithExceptionExpr(state, (terminator as ApplyWithException).getOrThrow())
@@ -211,7 +211,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
             case ExprKind.INVOKE =>
                 PreHandleInvokeExpr(state, (expression as Invoke).getOrThrow())
                 return true
-            case ExprKind.TYPECAST =>
+            case ExprKind.CLASS_STATIC_CAST | ExprKind.NUMERIC_CAST =>
                 let cast = (expression as TypeCast).getOrThrow()
                 if (!cast.GetNeedCheckCast()) {
                     return PreHandleNonCheckedTypeCast(state, cast)
@@ -606,7 +606,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
             } else {
                 false
             }
-            let sourceClassDef = GetClassDefFromRefType(cast.GetSourceTy().getOrThrow())
+            let sourceClassDef = GetClassDefFromRefType(cast.GetSourceType().getOrThrow())
             let isBoxArray = if (let Some(classDef) <- sourceClassDef) {
                 StartsWith(classDef.GetSrcCodeIdentifier(), BOX_DECL_PREFIX) &&
                     classDef.GetAllInstanceVarNum() == 1 && classDef.GetInstanceVar(0).ty.IsStructArray()
@@ -707,7 +707,7 @@ public open class ValueAnalysis<VD, Pool> <: Analysis<State<VD, Pool>> where VD 
         let _ = expression
     }
 
-    public open func HandleTerminatorEffect(state: State<VD, Pool>, terminator: Terminator): Option<Block> {
+    public open func HandleTerminatorEffect(state: State<VD, Pool>, terminator: Expression): Option<Block> {
         let _ = state
         let _ = terminator
         return None

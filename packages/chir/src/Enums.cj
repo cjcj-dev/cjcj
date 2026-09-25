@@ -477,7 +477,7 @@ public enum ExprKind {
     | INVALID
     | GOTO | BRANCH | MULTIBRANCH | EXIT | APPLY_WITH_EXCEPTION | INVOKE_WITH_EXCEPTION
     | INVOKESTATIC_WITH_EXCEPTION | RAISE_EXCEPTION | INT_OP_WITH_EXCEPTION | SPAWN_WITH_EXCEPTION
-    | TYPECAST_WITH_EXCEPTION | INTRINSIC_WITH_EXCEPTION | ALLOCATE_WITH_EXCEPTION
+    | NUMERIC_CAST_WITH_EXCEPTION | INTRINSIC_WITH_EXCEPTION | ALLOCATE_WITH_EXCEPTION
     | RAW_ARRAY_ALLOCATE_WITH_EXCEPTION
     | NEG | NOT | BITNOT
     | ADD | SUB | MUL | DIV | MOD | EXP | LSHIFT | RSHIFT | BITAND | BITOR | BITXOR
@@ -486,9 +486,9 @@ public enum ExprKind {
     | STORE_ELEMENT_REF | STORE_ELEMENT_BY_NAME
     | FORIN_RANGE | FORIN_ITER | FORIN_CLOSED_RANGE | LAMBDA
     | CONSTANT | DEBUGEXPR | TUPLE | FIELD | FIELD_BY_NAME | APPLY | INVOKE | INVOKESTATIC
-    | INSTANCEOF | TYPECAST | GET_EXCEPTION | RAW_ARRAY_ALLOCATE | RAW_ARRAY_LITERAL_INIT
+    | INSTANCEOF | CLASS_STATIC_CAST | NUMERIC_CAST | GET_EXCEPTION | RAW_ARRAY_ALLOCATE | RAW_ARRAY_LITERAL_INIT
     | RAW_ARRAY_INIT_BY_VALUE | VARRAY | VARRAY_BUILDER | INTRINSIC | SPAWN
-    | GET_INSTANTIATE_VALUE | BOX | UNBOX | TRANSFORM_TO_GENERIC | TRANSFORM_TO_CONCRETE
+    | GET_INSTANTIATE_VALUE | BOX | UNBOX_TO_VALUE | CAST_TO_GENERIC | CAST_TO_CONCRETE
     | UNBOX_TO_REF | GET_RTTI | GET_RTTI_STATIC
 }
 
@@ -505,7 +505,7 @@ public func ExprKindIndex(kind: ExprKind): Int64 {
         case ExprKind.RAISE_EXCEPTION => 8
         case ExprKind.INT_OP_WITH_EXCEPTION => 9
         case ExprKind.SPAWN_WITH_EXCEPTION => 10
-        case ExprKind.TYPECAST_WITH_EXCEPTION => 11
+        case ExprKind.NUMERIC_CAST_WITH_EXCEPTION => 11
         case ExprKind.INTRINSIC_WITH_EXCEPTION => 12
         case ExprKind.ALLOCATE_WITH_EXCEPTION => 13
         case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION => 14
@@ -551,23 +551,24 @@ public func ExprKindIndex(kind: ExprKind): Int64 {
         case ExprKind.INVOKE => 54
         case ExprKind.INVOKESTATIC => 55
         case ExprKind.INSTANCEOF => 56
-        case ExprKind.TYPECAST => 57
-        case ExprKind.GET_EXCEPTION => 58
-        case ExprKind.RAW_ARRAY_ALLOCATE => 59
-        case ExprKind.RAW_ARRAY_LITERAL_INIT => 60
-        case ExprKind.RAW_ARRAY_INIT_BY_VALUE => 61
-        case ExprKind.VARRAY => 62
-        case ExprKind.VARRAY_BUILDER => 63
-        case ExprKind.INTRINSIC => 64
-        case ExprKind.SPAWN => 65
-        case ExprKind.GET_INSTANTIATE_VALUE => 66
-        case ExprKind.BOX => 67
-        case ExprKind.UNBOX => 68
-        case ExprKind.TRANSFORM_TO_GENERIC => 69
-        case ExprKind.TRANSFORM_TO_CONCRETE => 70
-        case ExprKind.UNBOX_TO_REF => 71
-        case ExprKind.GET_RTTI => 72
-        case ExprKind.GET_RTTI_STATIC => 73
+        case ExprKind.CLASS_STATIC_CAST => 57
+        case ExprKind.NUMERIC_CAST => 58
+        case ExprKind.GET_EXCEPTION => 59
+        case ExprKind.RAW_ARRAY_ALLOCATE => 60
+        case ExprKind.RAW_ARRAY_LITERAL_INIT => 61
+        case ExprKind.RAW_ARRAY_INIT_BY_VALUE => 62
+        case ExprKind.VARRAY => 63
+        case ExprKind.VARRAY_BUILDER => 64
+        case ExprKind.INTRINSIC => 65
+        case ExprKind.SPAWN => 66
+        case ExprKind.GET_INSTANTIATE_VALUE => 67
+        case ExprKind.BOX => 68
+        case ExprKind.UNBOX_TO_VALUE => 69
+        case ExprKind.CAST_TO_GENERIC => 70
+        case ExprKind.CAST_TO_CONCRETE => 71
+        case ExprKind.UNBOX_TO_REF => 72
+        case ExprKind.GET_RTTI => 73
+        case ExprKind.GET_RTTI_STATIC => 74
     }
 }
 
@@ -584,7 +585,7 @@ public func ExprKindName(kind: ExprKind): String {
         case ExprKind.RAISE_EXCEPTION => "RaiseException"
         case ExprKind.INT_OP_WITH_EXCEPTION => "IntOpWithException"
         case ExprKind.SPAWN_WITH_EXCEPTION => "SpawnWithException"
-        case ExprKind.TYPECAST_WITH_EXCEPTION => "TypeCastWithException"
+        case ExprKind.NUMERIC_CAST_WITH_EXCEPTION => "NumericCastWithException"
         case ExprKind.INTRINSIC_WITH_EXCEPTION => "IntrinsicWithException"
         case ExprKind.ALLOCATE_WITH_EXCEPTION => "AllocateWithException"
         case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION => "RawArrayAllocateWithException"
@@ -630,7 +631,8 @@ public func ExprKindName(kind: ExprKind): String {
         case ExprKind.INVOKE => "Invoke"
         case ExprKind.INVOKESTATIC => "InvokeStatic"
         case ExprKind.INSTANCEOF => "InstanceOf"
-        case ExprKind.TYPECAST => "TypeCast"
+        case ExprKind.CLASS_STATIC_CAST => "ClassStaticCast"
+        case ExprKind.NUMERIC_CAST => "NumericCast"
         case ExprKind.GET_EXCEPTION => "GetException"
         case ExprKind.RAW_ARRAY_ALLOCATE => "RawArrayAllocate"
         case ExprKind.RAW_ARRAY_LITERAL_INIT => "RawArrayLiteralInit"
@@ -641,9 +643,9 @@ public func ExprKindName(kind: ExprKind): String {
         case ExprKind.SPAWN => "Spawn"
         case ExprKind.GET_INSTANTIATE_VALUE => "GetInstantiateValue"
         case ExprKind.BOX => "Box"
-        case ExprKind.UNBOX => "UnBox"
-        case ExprKind.TRANSFORM_TO_GENERIC => "TransformToGeneric"
-        case ExprKind.TRANSFORM_TO_CONCRETE => "TransformToConcrete"
+        case ExprKind.UNBOX_TO_VALUE => "UnBoxToValue"
+        case ExprKind.CAST_TO_GENERIC => "CastToGeneric"
+        case ExprKind.CAST_TO_CONCRETE => "CastToConcrete"
         case ExprKind.UNBOX_TO_REF => "UnBoxToRef"
         case ExprKind.GET_RTTI => "GetRTTI"
         case ExprKind.GET_RTTI_STATIC => "GetRTTIStatic"
