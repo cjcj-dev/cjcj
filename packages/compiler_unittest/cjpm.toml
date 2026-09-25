@@ -19,7 +19,9 @@
   "cjcj::basic" = { path = "../basic" }
   "cjcj::codegen" = { path = "../codegen" }
   "cjcj::driver" = { path = "../driver" }
+  "cjcj::chir" = { path = "../chir" }
   "cjcj::frontend" = { path = "../frontend" }
+  "cjcj::meta_transformation" = { path = "../meta_transformation" }
   "cjcj::flatbuffers" = { path = "../flatbuffers" }
   "cjcj::lex" = { path = "../lex" }
   "cjcj::macro_pkg" = { path = "../macro" }
