@@ -43,4 +43,7 @@ clamped to 75% of measured physical memory so the official host runtime does
 not reject the setting and fall back to its small default heap (#131).
 Hosts with less than a 96GB budget compile one std package at a time;
 large build hosts use every core. The selected heap, memory and parallelism
-are printed. Windows target archive/DLL qualification is tracked by #194.
+are printed. Windows qualification is `build-windows-runtime.yml`: it calls
+`ci/build_ast_support.sh` with `cmake/mingw_x86_64_toolchain.cmake`, installs
+that artifact, cross-builds `std/ast.o`, then `build_windows_std_ast.mjs`
+rejects a swapped schema, header or archive before the DLL export guard.
