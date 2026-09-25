@@ -15,6 +15,7 @@ def main():
     parser.add_argument('--compiler', type=Path, required=True)
     parser.add_argument('--sdk', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--workers', type=int, choices=range(1, 5), default=4)
     args = parser.parse_args()
     compiler, sdk, out = (p.resolve() for p in (args.compiler, args.sdk, args.out))
     out.mkdir(parents=True, exist_ok=True)
@@ -25,7 +26,7 @@ def main():
     record = {'compiler': str(compiler), 'compiler_sha256': hashlib.sha256(compiler.read_bytes()).hexdigest(),
               'sdk_inputs': {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
                              for p in sorted((sdk / 'runtime/lib/linux_x86_64_cjnative').glob('*.so'))},
-              'affinity': sorted(os.sched_getaffinity(0)),
+              'fixture_workers': args.workers, 'affinity': sorted(os.sched_getaffinity(0)),
               'uptime_before': subprocess.check_output(['uptime'], text=True).strip()}
 
     def compile(name):
@@ -42,7 +43,7 @@ def main():
                       'outputs': {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                   for p in destination.glob('*.chir')}}
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
         record['cases'] = dict(pool.map(compile, ('control', 'function', 'parent', 'nested', 'intersection')))
     record['uptime_after'] = subprocess.check_output(['uptime'], text=True).strip()
     (out / 'result.json').write_text(json.dumps(record, indent=2) + '\n')

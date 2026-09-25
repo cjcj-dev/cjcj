@@ -28,3 +28,7 @@ negative cases; substituting the generic parameter for its actual argument in
 one constraint predicate must expose only that argument family's negative cases.
 Restoring the old IsEqualOrInstantiatedTypeOf predicates must reject the legal
 intersection-bound cases, demonstrating the upstream c0a05cf0 regression.
+
+`stage.py --workers 1` keeps one fixture compiler active when three whole-package
+CHIR compiler processes are already running in this lane. Each compiler still
+uses the full host job count.
