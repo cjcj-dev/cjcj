@@ -108,9 +108,31 @@ public func IsObjCCompatible(ty: Ty): Bool {
             if (IsObjCMirror(ty.typeArgs[0]) || IsObjCImpl(ty.typeArgs[0])) { return true }
         case TypeKind.TYPE_FUNC => if (ty.IsCFunc()) { return true }
         case TypeKind.TYPE_CSTRING => if (ty.IsCString()) { return true }
+        case TypeKind.TYPE_POINTER => return true
         case _ => return false
     }
     return false
+}
+
+// Upstream 1e741869, TypeMapper.cpp:304; type predicates live in ASTQuery.
+public func IsObjCCompatibleFuncTy(ty: Ty): Bool {
+    let fTy = ty as FuncTy
+    if (fTy.isNone()) {
+        return false
+    }
+    let value = fTy.getOrThrow()
+    if (value.isC) {
+        return false
+    }
+    if (!IsObjCCompatible(value.retTy)) {
+        return false
+    }
+    for (argTy in value.paramTys) {
+        if (!IsObjCCompatible(argTy)) {
+            return false
+        }
+    }
+    return true
 }
 
 public func IsObjCMirror(decl: Decl): Bool { return decl.TestAttr(Attribute.OBJ_C_MIRROR) }
