@@ -286,6 +286,9 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
                 if (exprList[idx].nodeId == expr.nodeId) {
                     exprList.add(this, at: idx + 1)
                     SetParent(targetBlock)
+                    if (let Some(terminator) <- (this as Terminator)) {
+                        for (successor in terminator.GetSuccessors()) { successor.AddPredecessor(targetBlock) }
+                    }
                     return
                 }
                 idx++
