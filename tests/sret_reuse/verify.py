@@ -51,14 +51,14 @@ def observe(items, level):
     def check(name, condition, detail):
         checks.append({'name': name, 'passed': bool(condition), 'detail': detail})
 
-    for name, callee in [('tailLarge', 'makeLarge'), ('tailGeneric', 'identity'),
+    for name, callee in [('tailLarge', 'makeLarge'), ('tailGeneric', 'identity'), ('tailBox', 'makeBox'),
                          ('nonTailLarge', 'makeLarge'), ('tailUnit', 'unitLeaf')]:
         item = find_function(items, name)
         ir = item['ir']
         slot, call = call_slot(ir, callee)
         caller_slot = re.findall(r'%(?:"[^"]+"|[-\w.]+)', ir.splitlines()[0].split(',', 1)[0])[-1]
         observations[name] = {**item, 'call': call, 'call_slot': slot, 'caller_slot': caller_slot}
-        if name in ('tailLarge', 'tailGeneric'):
+        if name in ('tailLarge', 'tailGeneric', 'tailBox'):
             check('tail_sret_reuse' if level != 'O0' else 'o0_keeps_separate_slot',
                   (slot == caller_slot) == (level != 'O0'), f'{name}: callee={slot}, caller={caller_slot}')
             # This invariant applies when producer and consumer use the SAME raw

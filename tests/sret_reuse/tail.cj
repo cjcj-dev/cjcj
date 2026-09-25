@@ -24,3 +24,10 @@ public func tailUnit(): Unit { unitLeaf() }
 public func concreteGeneric(value: Large): Large { identity<Large>(value) }
 // The callee is sret, but this caller returns a scalar in a register.
 public func scalarGeneric(value: Int64): Int64 { identity<Int64>(value) }
+// Unknown-size aggregate return exercises the non-generic load/copy branch.
+public struct GenericBox<T> {
+    public let value: T
+    public init(value: T) { this.value = value }
+}
+public func makeBox<T>(value: T): GenericBox<T> { GenericBox<T>(value) }
+public func tailBox<T>(value: T): GenericBox<T> { makeBox<T>(value) }
