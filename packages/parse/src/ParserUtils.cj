@@ -950,7 +950,7 @@ extend ParserImpl {
         }
         if (!modifiers.isEmpty()) {
             var index: Int64 = 0
-            if (inForeignBlock) {
+            if (!foreignBlockModifiers.isEmpty()) {
                 while (index < modifiers.size && modifiers[index].modifier != TokenKind.FOREIGN) {
                     index++
                 }
