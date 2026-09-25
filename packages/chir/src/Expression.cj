@@ -439,9 +439,6 @@ public open class Expression <: Base & Hashable & Equatable<Expression> {
 
 func GetOperands(expression: Expression): ArrayList<Value> {
     let operands = expression.GetOperands()
-    if (let Some(constant) <- (expression as Constant)) {
-        operands.add(constant.GetValue())
-    }
     if (let Some(terminator) <- expression.AsTerminator()) {
         for (successor in terminator.GetSuccessors()) {
             operands.add(successor)
@@ -515,14 +512,14 @@ public class BinaryExpression <: Expression {
 }
 
 public class Constant <: Expression {
-    public let literal: LiteralValue
-
     public init(literal: LiteralValue, parent: Option<Block>) {
-        super(ExprKind.CONSTANT, ArrayList<Value>(), parent)
-        this.literal = literal
+        super(ExprKind.CONSTANT, ArrayList<Value>([literal]), parent)
     }
 
-    public func GetValue(): LiteralValue { return literal }
+    public func GetValue(): LiteralValue {
+        CJC_ASSERT(GetOperand(0).IsLiteral())
+        return StaticCast<LiteralValue>(GetOperand(0))
+    }
     public func GetBoolLitVal(): Bool {
         let boolLiteral = (GetValue() as BoolLiteral) ?? throw IllegalStateException("constant is not a bool literal")
         return boolLiteral.GetVal()
@@ -547,16 +544,16 @@ public class Constant <: Expression {
         let intLiteral = (GetValue() as IntLiteral) ?? throw IllegalStateException("constant is not an int literal")
         return intLiteral.GetUnsignedVal()
     }
-    public func IsNullLit(): Bool { return literal.IsNullLit() }
-    public func IsBoolLit(): Bool { return literal.IsBoolLit() }
-    public func IsIntLit(): Bool { return literal.IsIntLit() }
-    public func IsFloatLit(): Bool { return literal.IsFloatLit() }
-    public func IsRuneLit(): Bool { return literal.IsRuneLit() }
+    public func IsNullLit(): Bool { return GetValue().IsNullLit() }
+    public func IsBoolLit(): Bool { return GetValue().IsBoolLit() }
+    public func IsIntLit(): Bool { return GetValue().IsIntLit() }
+    public func IsFloatLit(): Bool { return GetValue().IsFloatLit() }
+    public func IsRuneLit(): Bool { return GetValue().IsRuneLit() }
     public func IsSignedIntLit(): Bool {
         if (!IsIntLit()) {
             return false
         }
-        return StaticCast<IntLiteral>(literal).IsSigned()
+        return StaticCast<IntLiteral>(GetValue()).IsSigned()
     }
     public func IsUnSignedIntLit(): Bool {
         if (!IsIntLit()) {
@@ -564,15 +561,11 @@ public class Constant <: Expression {
         }
         return !IsSignedIntLit()
     }
-    public func IsStringLit(): Bool { return literal.IsStringLit() }
-    public func IsUnitLit(): Bool { return literal.IsUnitLit() }
-
-    public override func AddExtraComment(): String {
-        return literal.ToString(0)
-    }
+    public func IsStringLit(): Bool { return GetValue().IsStringLit() }
+    public func IsUnitLit(): Bool { return GetValue().IsUnitLit() }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let litVal: LiteralValue = if (literal.IsNullLit()) { NullLiteral() } else { literal }
+        let litVal: LiteralValue = if (GetValue().IsNullLit()) { NullLiteral() } else { GetValue() }
         let cloned = builder.CreateConstant(GetResult().getOrThrow().GetType().getOrThrow(), litVal, parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned

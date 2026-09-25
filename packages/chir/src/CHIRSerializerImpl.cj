@@ -2145,7 +2145,7 @@ class CHIRSerializerImpl {
     private func serializeLiteral(expr: Expression): String {
         if (let Some(constant) <- (expr as Constant)) {
             let fields = ArrayList<String>()
-            let literal = constant.literal
+            let literal = constant.GetValue()
             fields.add(LiteralKindIndex(literal.literalKind).toString())
             if (let Some(boolLit) <- (literal as BoolLiteral)) {
                 fields.add(CHIRBoolToWire(boolLit.GetVal()))
