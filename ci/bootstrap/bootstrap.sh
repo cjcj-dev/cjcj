@@ -749,7 +749,7 @@ stage1() {
   copy="$WORK/cjcj-src-stage1"
   isolate_cjcj_src "$copy"
   shim_build stage1 "$sdk" "$CRT" "$copy" "$sdk/third_party/llvm/fixed-llc/cjselfhost_llvmshim.o"
-  cjpm_build "$sdk" "$HRT" "$copy" "-j 1" "$STAGE1_HEAP"
+  cjpm_build "$sdk" "$HRT" "$copy" "-j $JOBS" "$STAGE1_HEAP"
   seed=$(resolve_cjpm_product "$copy/target/release/bin" cjcj-stage2)
   install_stage_compiler "$seed" "$out" "$WORK/cjc-stage2"
   if [ "$DRY" -eq 0 ]; then
