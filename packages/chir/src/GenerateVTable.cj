@@ -72,8 +72,8 @@ private func TypeCastIfNeeded(value: Value, expectedTy: Type, builder: CHIRBuild
             builder.CreateClassStaticCast(expectedTy, tmpValue, parentBlock)
         }
         ret.SetDebugLocation(loc)
-        let _ = needCheck
         newExprs.add(ret)
+        ret.Set<NeedCheckCast, Bool>(needCheck)
         return (ret.GetResult().getOrThrow(), newExprs)
     }
     return (value, ArrayList<Expression>())

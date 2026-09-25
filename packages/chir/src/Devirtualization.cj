@@ -296,7 +296,7 @@ public class Devirtualization {
             let instFuncType = GetInstFuncTypeFromContext(fn, context, builder)
             let parameterType = instFuncType.GetParamTypes()
             newFunc = builder.CreateFunction(instFuncType, newId,
-                srcCodeIdentifier: fn.GetSrcCodeIdentifier(), rawMangledName: fn.GetRawMangledName(),
+                srcCodeIdentifier: fn.GetSrcCodeIdentifier(), rawMangledName: "",
                 packageName: fn.GetPackageName())
             newFunc.SetDebugLocation(fn.GetDebugLocation())
             newFunc.AppendAttributeInfo(fn.GetAttributeInfo())

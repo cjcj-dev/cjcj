@@ -1098,8 +1098,9 @@ public func GetInstMapFromApply(apply: ApplyBase, builder: CHIRBuilder): HashMap
     return instMap
 }
 
-// Upstream e242ecf4 Utils.cpp:1758-1787: move every conversion expression in order.
+// Upstream e242ecf4 Utils.cpp:1753-1755. ApplyWithException is FuncCallWithException, not FuncCall.
 public func AddTypeCastForReturnVal(expr: Expression, expectedTy: Type, builder: CHIRBuilder): Unit {
+    CJC_ASSERT(expr.IsApply() || expr.IsApplyWithException())
     let result = expr.GetResult().getOrThrow()
     if (result.GetType().getOrThrow() == expectedTy) { return }
     if (expr.IsTerminator()) {
