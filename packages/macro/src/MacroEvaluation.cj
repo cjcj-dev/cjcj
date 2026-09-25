@@ -1383,7 +1383,7 @@ public class MacroEvaluation {
     public func CollectMacroLibs(): Unit {
         if (!ci.GetGlobalOptions().macroLib.isEmpty()) {
             for (dyfile in GetMacroDefDynamicFiles()) {
-                let handle = OpenSymbolTable(dyfile)
+                let handle = OpenMacroLibrary(dyfile)
                 if (!handle.opened) {
                     ci.GetDiag().Diagnose(DEFAULT_POSITION,
                         "Cannot dlopen from the dynamic library '" + dyfile + "' for macro")
