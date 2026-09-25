@@ -1,4 +1,4 @@
 package missinglib
 
-@JavaMirror("java.lang.Object")
+@JavaMirror["java.lang.Object"]
 public class Lone {}

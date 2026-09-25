@@ -40,7 +40,7 @@ public class GenerateJavaMirrorApiStub {
         let ctorFuncTy = typeManager.GetFunctionTy(paramTys.toArray(), mirror.GetTy().getOrThrow())
         let ctorParams = ArrayList<FuncParam>()
         ctorParams.add(param)
-        let paramList = CreateFuncParamList(ctorParams)
+        let paramList = CreateFuncParamList(ctorParams, None)
         paramList.curFile = curFile
         let paramLists = ArrayList<FuncParamList>()
         paramLists.add(paramList)
