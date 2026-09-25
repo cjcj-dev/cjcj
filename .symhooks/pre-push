@@ -32,9 +32,6 @@ while read -r lref lsha rref rsha; do
   excl=""
   [ "$rsha" != "0000000000000000000000000000000000000000" ] && excl="$rsha"
   for r in $(git for-each-ref --format='%(objectname)' "refs/remotes/$remote/" 2>/dev/null); do excl="$excl $r"; done
-  # ⭐ 0924 上游同步令：官方上游（refs/remotes/upstream/*）的提交不是我方产出——它们的作者/署名由上游负责，
-  #   merge upstream/main 时随合并一起推送属预期 ⇒ 从 G10 扫描范围里排除；我方自己写的提交（merge commit 本身、冲突解决）仍受检。
-  for r in $(git for-each-ref --format='%(objectname)' "refs/remotes/upstream/" 2>/dev/null); do excl="$excl $r"; done
   if [ -n "$excl" ]; then range="$lsha --not $excl"; else range="$lsha"; fi
   bad="$(git log --format='%H %an <%ae>%n%B' $range 2>/dev/null \
          | grep -n -i -E 'Co-authored-by|Generated with \[?Claude|Claude Code|claude\.ai/code|noreply@anthropic\.com' || true)"
