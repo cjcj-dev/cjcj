@@ -93,6 +93,7 @@ jobs:
         with:
           component: ast-support
           platform: ${{ matrix.platform }}
+          require-compiles: ${{ job.status == 'success' }}
       - uses: actions/upload-artifact@v7
         with:
           name: ast-support-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
