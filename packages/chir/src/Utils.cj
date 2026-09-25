@@ -583,8 +583,8 @@ public func ReplaceUsesWithWrapper(curFunc: Value, apply: Option<Apply>, wrapper
                 continue
             }
         }
-        if (user.GetExprKind() == ExprKind.APPLY_WITH_EXCEPTION) {
-            let applyNode = (user as ApplyWithException).getOrThrow()
+        if (user.GetExprKind() == ExprKind.TRY_APPLY) {
+            let applyNode = (user as TryApply).getOrThrow()
             if (!isForeign && refEq(applyNode.GetCallee(), curFunc)) {
                 continue
             }
@@ -633,7 +633,16 @@ public func GetSuperTypesRecusively(subType: Type, builder: CHIRBuilder): ArrayL
     } else if (let Some(genericType) <- (subType as GenericType)) {
         for (upperBound in genericType.GetUpperBounds()) {
             let classType = (upperBound.StripAllRefs() as ClassType).getOrThrow()
-            result.add(classType)
+            var containsClass = false
+            for (item in result) {
+                if (item == classType) {
+                    containsClass = true
+                    break
+                }
+            }
+            if (!containsClass) {
+                result.add(classType)
+            }
             for (parent in GetSuperTypesRecusively(classType, builder)) {
                 var containsParent = false
                 for (item in result) {
@@ -758,6 +767,17 @@ public func GetInstParentCustomTyOfCallee(value: Value, args: ArrayList<Value>, 
         if (builtinType.IsSameTypeKind(calleeParentDef.GetType().getOrThrow())) {
             return Some(derefThisType)
         }
+    } else if (let Some(genericType) <- (derefThisType as GenericType)) {
+        CJC_ASSERT(!genericType.GetUpperBounds().isEmpty())
+        let genericParents = GetSuperTypesRecusively(genericType, builder)
+        let matchedGeneric = ArrayList<ClassType>()
+        for (parentTy in genericParents) {
+            if (typeAndDefIsEquivalent(parentTy, calleeParentDef)) {
+                matchedGeneric.add(parentTy)
+            }
+        }
+        CJC_ASSERT(!matchedGeneric.isEmpty())
+        return Some(GetInstParentType(matchedGeneric, callee, args, builder))
     }
 
     let parentTypes = GetSuperTypesRecusively(derefThisType, builder)
@@ -773,11 +793,75 @@ public func GetInstParentCustomTyOfCallee(value: Value, args: ArrayList<Value>, 
     return Some(GetInstParentType(matchedTypes, callee, args, builder))
 }
 
+public func ComputeUnsetVirtualMethodOffset(callee: Function, methodName: String): UInt64 {
+    let def = callee.GetParentCustomTypeDef().getOrThrow()
+    let defType = (def.GetType().getOrThrow() as ClassType).getOrThrow()
+    let virtualMethods = def.GetDefVTable().GetExpectedTypeVTable(defType).GetVirtualMethods()
+    var i: Int64 = 0
+    while (i < virtualMethods.size) {
+        let item = virtualMethods[i]
+        if (let Some(method) <- item.GetVirtualMethod()) {
+            if (method == callee && item.GetMethodName() == methodName) {
+                return UInt64(i)
+            }
+        }
+        i++
+    }
+    CJC_ABORT()
+    throw IllegalStateException("virtual method offset is not available name=${methodName}")
+}
+
+public func GetCalleeInSrcParentType(callee: Function, methodName: String, expectedOffset: Option<UInt64>): Function {
+    let def = callee.GetParentCustomTypeDef().getOrThrow()
+    var srcParentDef: Option<ClassDef> = None
+    var offset: Int64 = 0
+    for (typeVtable in def.GetDefVTable().GetTypeVTables()) {
+        let virtualMethods = typeVtable.GetVirtualMethods()
+        var i: Int64 = 0
+        var found = false
+        while (i < virtualMethods.size) {
+            let item = virtualMethods[i]
+            let methodMatch = if (let Some(method) <- item.GetVirtualMethod()) {
+                method == callee
+            } else {
+                false
+            }
+            let offsetMatch = if (let Some(expected) <- expectedOffset) {
+                UInt64(i) == expected
+            } else {
+                true
+            }
+            if (methodMatch && item.GetMethodName() == methodName && offsetMatch) {
+                srcParentDef = Some(typeVtable.GetSrcParentType().getOrThrow().GetClassDef())
+                offset = i
+                found = true
+                break
+            }
+            i++
+        }
+        if (found) {
+            break
+        }
+    }
+    let parentDef = srcParentDef.getOrThrow()
+    if (def.IsClass()) {
+        if (let Some(classTy) <- (def.GetType().getOrThrow() as ClassType)) {
+            if (parentDef.nodeId == classTy.GetClassDef().nodeId) {
+                return callee
+            }
+        }
+    }
+    let srcParentType = (parentDef.GetType().getOrThrow() as ClassType).getOrThrow()
+    let parentMethods = parentDef.GetDefVTable().GetExpectedTypeVTable(srcParentType).GetVirtualMethods()
+    CJC_ASSERT(offset < parentMethods.size)
+    return parentMethods[offset].GetVirtualMethod().getOrThrow()
+}
+
 public func GetInstParentCustomTypeForApplyCallee(expr: Apply, builder: CHIRBuilder): Option<Type> {
     return GetInstParentCustomTyOfCallee(expr.GetCallee(), expr.GetArgs(), expr.GetThisType(), builder)
 }
 
-public func GetInstParentCustomTypeForAweCallee(expr: ApplyWithException, builder: CHIRBuilder): Option<Type> {
+public func GetInstParentCustomTypeForAweCallee(expr: TryApply, builder: CHIRBuilder): Option<Type> {
     return GetInstParentCustomTyOfCallee(expr.GetCallee(), expr.GetArgs(), expr.GetThisType(), builder)
 }
 
@@ -907,7 +991,7 @@ public func RequiredResultType(expr: Expression): Type {
 }
 
 public func IsApplyToLambda(expr: Expression): Option<Lambda> {
-    if (expr.GetExprKind() != ExprKind.APPLY && expr.GetExprKind() != ExprKind.APPLY_WITH_EXCEPTION) {
+    if (expr.GetExprKind() != ExprKind.APPLY && expr.GetExprKind() != ExprKind.TRY_APPLY) {
         return None
     }
     if (expr.GetNumOfOperands() == 0) {

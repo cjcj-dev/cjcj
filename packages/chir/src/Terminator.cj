@@ -253,10 +253,10 @@ public open class FuncCallWithException <: ExpressionWithException {
     }
 }
 
-public class ApplyWithException <: FuncCallWithException {
+public class TryApply <: FuncCallWithException {
     public init(callee: Value, callContext: FuncCallContext, successBlock: Block, errorBlock: Block,
         parent: Option<Block>) {
-        super(ExprKind.APPLY_WITH_EXCEPTION, MakeApplyWithExceptionOperands(callee, callContext.args), callContext,
+        super(ExprKind.TRY_APPLY, MakeTryApplyOperands(callee, callContext.args), callContext,
             successBlock, errorBlock, parent)
     }
 
@@ -288,7 +288,7 @@ public class ApplyWithException <: FuncCallWithException {
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let callContext = FuncCallContext(args: GetArgs(), instTypeArgs: GetInstantiatedTypeArgs(),
             thisType: GetThisType())
-        let cloned = builder.CreateApplyWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetCallee(), callContext,
+        let cloned = builder.CreateTryApply(GetResult().getOrThrow().GetType().getOrThrow(), GetCallee(), callContext,
             GetSuccessBlock(), GetErrorBlock(), parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
@@ -301,7 +301,7 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
 
     public init(kind: ExprKind, callContext: InvokeCallContext, successBlock: Block, errorBlock: Block,
         parent: Option<Block>) {
-        super(kind, MakeInvokeWithExceptionOperands(callContext.method, callContext.caller,
+        super(kind, MakeTryInvokeOperands(callContext.method, callContext.caller,
             callContext.funcCallCtx.args),
             callContext.funcCallCtx, successBlock, errorBlock, parent)
         overflowStrategy = callContext.overflowStrategy
@@ -332,40 +332,19 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
         virtualMethodOffset = offset
     }
 
-    public func GetVirtualMethodOffset(): Option<UInt64> {
+    public func GetStoredVirMethodOffset(): Option<UInt64> {
         return virtualMethodOffset
     }
 
-    public func GetVirtualMethodInfo(builder: CHIRBuilder): ArrayList<VTableSearchRes> {
-        var thisTypeDeref = (GetThisType() ??
-            throw IllegalStateException("dynamic dispatch with exception thisType is missing")).StripAllRefs()
-        if (thisTypeDeref.IsThis()) {
-            thisTypeDeref = GetTopLevelFunc().getOrThrow().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
-        }
-        let instParamTypes = ArrayList<Type>()
-        for (arg in GetArgs()) {
-            instParamTypes.add(arg.GetType().getOrThrow())
-        }
-        if (!IsInvokeStaticBase()) {
-            instParamTypes.remove(at: 0)
-        }
-        let instFuncType = builder.context.GetFuncTy(instParamTypes, builder.context.GetUnitTy())
-        let funcCallType = FuncCallType(instFuncType, funcName: GetMethodName(),
-            genericTypeArgs: GetInstantiatedTypeArgs())
-        let res = GetFuncIndexInVTable(thisTypeDeref, funcCallType, builder)
-        CJC_ASSERT(!res.isEmpty())
-        return res
-    }
-
-    public func GetVirtualMethodOffset(builder: CHIRBuilder): UInt64 {
+    public func GetVirtualMethodOffset(): UInt64 {
         if (let Some(offset) <- virtualMethodOffset) {
             return offset
         }
-        return GetVirtualMethodInfo(builder)[0].offset
+        return ComputeUnsetVirtualMethodOffset(GetCallee(), GetMethodName())
     }
 
     public func GetInstSrcParentCustomTypeOfMethod(builder: CHIRBuilder): ClassType {
-        // Mirror Expression.DynamicDispatch — AutoEnv single-slot thisType fallback.
+        // #275 AutoEnv kept; the lookup itself matches 09/04 GetInstParentCustomTyOfCallee.
         if (let Some(thisTy) <- GetThisType()) {
             let stripped = thisTy.StripAllRefs()
             if (stripped.IsAutoEnv()) {
@@ -374,27 +353,13 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
                 }
             }
         }
-        let virtualOffset = GetVirtualMethodOffset(builder)
-        let methodType = GetMethodType()
-        for (res in GetVirtualMethodInfo(builder)) {
-            if (res.offset == virtualOffset) {
-                let instSrcParentType = res.instSrcParentType.getOrThrow()
-                let def = instSrcParentType.GetClassDef()
-                let defType = (def.GetType().getOrThrow() as ClassType).getOrThrow()
-                let parentFuncInfo = def.GetDefVTable().GetExpectedTypeVTable(defType)
-                let methods = parentFuncInfo.GetVirtualMethods()
-                if (Int64(res.offset) >= methods.size) {
-                    continue
-                }
-                let originalType = methods[Int64(res.offset)].GetOriginalFuncType()
-                if (VirMethodTypeIsMatched(originalType, methodType)) {
-                    return instSrcParentType
-                }
-            }
+        var thisTypeDeref = (GetThisType() ??
+            throw IllegalStateException("dynamic dispatch with exception thisType is missing")).StripAllRefs()
+        if (thisTypeDeref.IsThis()) {
+            thisTypeDeref = GetTopLevelFunc().getOrThrow().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
         }
-        throw IllegalStateException(
-            "instantiated source parent custom type of virtual method is not available" +
-            " name=${GetMethodName()} offset=${virtualOffset}")
+        let parent = GetInstParentCustomTyOfCallee(GetCallee(), GetArgs(), Some(thisTypeDeref), builder).getOrThrow()
+        return (parent as ClassType).getOrThrow()
     }
 
     public func GetVirtualMethodAttr(): AttributeInfo {
@@ -418,9 +383,9 @@ public open class DynamicDispatchWithException <: FuncCallWithException {
     }
 }
 
-public class InvokeWithException <: DynamicDispatchWithException {
+public class TryInvoke <: DynamicDispatchWithException {
     public init(callContext: InvokeCallContext, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.INVOKE_WITH_EXCEPTION, callContext, successBlock, errorBlock, parent)
+        super(ExprKind.TRY_INVOKE, callContext, successBlock, errorBlock, parent)
     }
 
     public func GetObject(): Value {
@@ -439,9 +404,9 @@ public class InvokeWithException <: DynamicDispatchWithException {
         let funcContext = FuncCallContext(args: args, instTypeArgs: GetInstantiatedTypeArgs(), thisType: GetThisType())
         let invokeContext = InvokeCallContext(GetCallee(), GetObject(), funcContext,
             overflowStrategy: overflowStrategy)
-        let cloned = builder.CreateInvokeWithException(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, GetSuccessBlock(),
+        let cloned = builder.CreateTryInvoke(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext, GetSuccessBlock(),
             GetErrorBlock(), parent)
-        if (let Some(offset) <- GetVirtualMethodOffset()) {
+        if (let Some(offset) <- GetStoredVirMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
         }
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
@@ -449,9 +414,9 @@ public class InvokeWithException <: DynamicDispatchWithException {
     }
 }
 
-public class InvokeStaticWithException <: DynamicDispatchWithException {
+public class TryInvokeStatic <: DynamicDispatchWithException {
     public init(callContext: InvokeCallContext, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.INVOKESTATIC_WITH_EXCEPTION, callContext, successBlock, errorBlock, parent)
+        super(ExprKind.TRY_INVOKESTATIC, callContext, successBlock, errorBlock, parent)
     }
 
     public func GetRTTIValue(): Value {
@@ -473,9 +438,9 @@ public class InvokeStaticWithException <: DynamicDispatchWithException {
             thisType: GetThisType())
         let invokeContext = InvokeCallContext(GetCallee(), GetRTTIValue(), funcContext,
             overflowStrategy: overflowStrategy)
-        let cloned = builder.CreateInvokeStaticWithException(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext,
+        let cloned = builder.CreateTryInvokeStatic(GetResult().getOrThrow().GetType().getOrThrow(), invokeContext,
             GetSuccessBlock(), GetErrorBlock(), parent)
-        if (let Some(offset) <- GetVirtualMethodOffset()) {
+        if (let Some(offset) <- GetStoredVirMethodOffset()) {
             cloned.SetVirtualMethodOffset(offset)
         }
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
@@ -483,7 +448,7 @@ public class InvokeStaticWithException <: DynamicDispatchWithException {
     }
 }
 
-public class UnaryExpressionWithException <: UnaryExpressionBase {
+public class TryUnaryExpression <: UnaryExpressionBase {
     public init(opKind: UnaryExprKind, operand: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>,
         overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
         super(opKind, operand, MakeTwoSuccessors(successBlock, errorBlock), parent, overflowStrategy: overflowStrategy,
@@ -494,7 +459,7 @@ public class UnaryExpressionWithException <: UnaryExpressionBase {
     public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateUnaryExpressionWithException(GetResult().getOrThrow().GetType().getOrThrow(),
+        let cloned = builder.CreateTryUnaryExpression(GetResult().getOrThrow().GetType().getOrThrow(),
             GetOpKind(), GetOperand(0), GetSuccessBlock(), GetErrorBlock(), parent)
         cloned.SetOverflowStrategy(GetOverflowStrategy())
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
@@ -502,7 +467,7 @@ public class UnaryExpressionWithException <: UnaryExpressionBase {
     }
 }
 
-public class BinaryExpressionWithException <: BinaryExpressionBase {
+public class TryBinaryExpression <: BinaryExpressionBase {
     public init(opKind: BinaryExprKind, left: Value, right: Value, successBlock: Block, errorBlock: Block,
         parent: Option<Block>, overflowStrategy!: OverflowStrategy = OverflowStrategy.NA) {
         super(opKind, left, right, MakeTwoSuccessors(successBlock, errorBlock), parent,
@@ -513,7 +478,7 @@ public class BinaryExpressionWithException <: BinaryExpressionBase {
     public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateBinaryExpressionWithException(GetResult().getOrThrow().GetType().getOrThrow(),
+        let cloned = builder.CreateTryBinaryExpression(GetResult().getOrThrow().GetType().getOrThrow(),
             GetOpKind(), GetLHSOperand(), GetRHSOperand(), GetSuccessBlock(), GetErrorBlock(), parent)
         cloned.SetOverflowStrategy(GetOverflowStrategy())
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
@@ -521,27 +486,27 @@ public class BinaryExpressionWithException <: BinaryExpressionBase {
     }
 }
 
-public class NumericCastWithException <: NumericCastBase {
+public class TryNumericCast <: NumericCastBase {
     public init(source: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.NUMERIC_CAST_WITH_EXCEPTION, source, MakeTwoSuccessors(successBlock, errorBlock), parent, OverflowStrategy.THROWING)
+        super(ExprKind.TRY_NUMERIC_CAST, source, MakeTwoSuccessors(successBlock, errorBlock), parent, OverflowStrategy.THROWING)
     }
     public func GetSuccessBlock(): Block { return GetSuccessor(0) }
     public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateNumericCastWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(),
+        let cloned = builder.CreateTryNumericCast(GetResult().getOrThrow().GetType().getOrThrow(), GetSourceValue(),
             GetSuccessBlock(), GetErrorBlock(), parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
     }
 }
 
-public class IntrinsicWithException <: ExpressionWithException {
+public class TryIntrinsic <: ExpressionWithException {
     private let intrinsicKind: IntrinsicKind
     private let instantiatedTypeArgs: ArrayList<Type> = ArrayList<Type>()
 
     public init(callContext: IntrisicCallContext, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.INTRINSIC_WITH_EXCEPTION, callContext.args, successBlock, errorBlock, parent)
+        super(ExprKind.TRY_INTRINSIC, callContext.args, successBlock, errorBlock, parent)
         intrinsicKind = callContext.kind
         for (ty in callContext.instTypeArgs) {
             instantiatedTypeArgs.add(ty)
@@ -577,59 +542,59 @@ public class IntrinsicWithException <: ExpressionWithException {
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let callContext = IntrisicCallContext(kind: GetIntrinsicKind(), args: GetArgs(),
             instTypeArgs: GetInstantiatedTypeArgs())
-        let cloned = builder.CreateIntrinsicWithException(GetResult().getOrThrow().GetType().getOrThrow(), callContext, GetSuccessBlock(),
+        let cloned = builder.CreateTryIntrinsic(GetResult().getOrThrow().GetType().getOrThrow(), callContext, GetSuccessBlock(),
             GetErrorBlock(), parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
     }
 }
 
-public class AllocateWithException <: AllocateBase {
+public class TryAllocate <: AllocateBase {
     public init(ty: Type, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.ALLOCATE_WITH_EXCEPTION, ty, MakeTwoSuccessors(successBlock, errorBlock), parent)
+        super(ExprKind.TRY_ALLOCATE, ty, MakeTwoSuccessors(successBlock, errorBlock), parent)
     }
     public func GetSuccessBlock(): Block { return GetSuccessor(0) }
     public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateAllocateWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetType(), GetSuccessBlock(),
+        let cloned = builder.CreateTryAllocate(GetResult().getOrThrow().GetType().getOrThrow(), GetType(), GetSuccessBlock(),
             GetErrorBlock(), parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
     }
 }
 
-public class RawArrayAllocateWithException <: RawArrayAllocateBase {
+public class TryRawArrayAllocate <: RawArrayAllocateBase {
     public init(elementTy: Type, size: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION, elementTy, size, MakeTwoSuccessors(successBlock, errorBlock), parent)
+        super(ExprKind.TRY_RAW_ARRAY_ALLOCATE, elementTy, size, MakeTwoSuccessors(successBlock, errorBlock), parent)
     }
     public func GetSuccessBlock(): Block { return GetSuccessor(0) }
     public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
-        let cloned = builder.CreateRawArrayAllocateWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetElementType(), GetSize(),
+        let cloned = builder.CreateTryRawArrayAllocate(GetResult().getOrThrow().GetType().getOrThrow(), GetElementType(), GetSize(),
             GetSuccessBlock(), GetErrorBlock(), parent)
         cloned.GetResult().getOrThrow().AppendAttributeInfo(GetResult().getOrThrow().GetAttributeInfo())
         return cloned
     }
 }
 
-public class SpawnWithException <: SpawnBase {
+public class TrySpawn <: SpawnBase {
     public init(value: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.SPAWN_WITH_EXCEPTION, MakeUnaryTermOperands(value), MakeTwoSuccessors(successBlock, errorBlock), parent)
+        super(ExprKind.TRY_SPAWN, MakeUnaryTermOperands(value), MakeTwoSuccessors(successBlock, errorBlock), parent)
     }
     public init(value: Value, arg: Value, successBlock: Block, errorBlock: Block, parent: Option<Block>) {
-        super(ExprKind.SPAWN_WITH_EXCEPTION, MakeBinaryTermOperands(value, arg), MakeTwoSuccessors(successBlock, errorBlock), parent)
+        super(ExprKind.TRY_SPAWN, MakeBinaryTermOperands(value, arg), MakeTwoSuccessors(successBlock, errorBlock), parent)
     }
     public func GetSuccessBlock(): Block { return GetSuccessor(0) }
     public func GetErrorBlock(): Block { return GetSuccessor(1) }
 
     public override func Clone(builder: CHIRBuilder, parent: Block): Expression {
         let cloned = if (let Some(spawnArg) <- GetSpawnArg()) {
-            builder.CreateSpawnWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetObject(), spawnArg, GetSuccessBlock(),
+            builder.CreateTrySpawn(GetResult().getOrThrow().GetType().getOrThrow(), GetObject(), spawnArg, GetSuccessBlock(),
                 GetErrorBlock(), parent)
         } else {
-            builder.CreateSpawnWithException(GetResult().getOrThrow().GetType().getOrThrow(), GetObject(), GetSuccessBlock(),
+            builder.CreateTrySpawn(GetResult().getOrThrow().GetType().getOrThrow(), GetObject(), GetSuccessBlock(),
                 GetErrorBlock(), parent)
         }
         if (let Some(fn) <- GetExecuteClosure()) {
@@ -683,7 +648,7 @@ private func MakeOptionalTermOperands(value: Option<Value>): ArrayList<Value> {
     return operands
 }
 
-private func MakeApplyWithExceptionOperands(callee: Value, args: ArrayList<Value>): ArrayList<Value> {
+private func MakeTryApplyOperands(callee: Value, args: ArrayList<Value>): ArrayList<Value> {
     let operands = ArrayList<Value>()
     operands.add(callee)
     for (arg in args) {
@@ -692,7 +657,7 @@ private func MakeApplyWithExceptionOperands(callee: Value, args: ArrayList<Value
     return operands
 }
 
-private func MakeInvokeWithExceptionOperands(method: Function, caller: Value,
+private func MakeTryInvokeOperands(method: Function, caller: Value,
     args: ArrayList<Value>): ArrayList<Value> {
     let operands = ArrayList<Value>()
     operands.add(method)

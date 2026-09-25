@@ -351,9 +351,10 @@ public class FaithfulInstCalleeInfo {
     public let instRetTy: Type
     public let instantiatedTypeArgs: ArrayList<Type> = ArrayList<Type>()
     public let isVirtualFuncCall: Bool
+    public let originalFuncDecl: AstFuncDecl
 
     public init(instParentCustomTy: Type, thisType: Type, instParamTys: ArrayList<Type>, instRetTy: Type,
-        instantiatedTypeArgs: ArrayList<Type>, isVirtualFuncCall: Bool) {
+        instantiatedTypeArgs: ArrayList<Type>, isVirtualFuncCall: Bool, originalFuncDecl: AstFuncDecl) {
         this.instParentCustomTy = instParentCustomTy
         this.thisType = thisType
         for (ty in instParamTys) {
@@ -364,6 +365,7 @@ public class FaithfulInstCalleeInfo {
             this.instantiatedTypeArgs.add(ty)
         }
         this.isVirtualFuncCall = isVirtualFuncCall
+        this.originalFuncDecl = originalFuncDecl
     }
 }
 
@@ -1883,7 +1885,7 @@ public class Translator {
                 case Some(exceptBlock) => exceptBlock
                 case None => errorBlock
             }
-            let binary = builder.CreateBinaryExpressionWithException(resultTy, binaryKind, lhs, rhs, successBlock,
+            let binary = builder.CreateTryBinaryExpression(resultTy, binaryKind, lhs, rhs, successBlock,
                 targetBlock, CurrentBlock())
             CurrentBlock().AppendExpression(binary)
             binary.SetOverflowStrategy(expr.overflowStrategy)
@@ -1925,7 +1927,7 @@ public class Translator {
                 case Some(exceptBlock) => exceptBlock
                 case None => errorBlock
             }
-            let unary = builder.CreateUnaryExpressionWithException(resultTy, kind, operand, successBlock,
+            let unary = builder.CreateTryUnaryExpression(resultTy, kind, operand, successBlock,
                 targetBlock, CurrentBlock())
             CurrentBlock().AppendExpression(unary)
             unary.SetOverflowStrategy(overflowStrategy)
@@ -2964,10 +2966,7 @@ public class Translator {
             }
         }
 
-        let (parentType, funcType, instantiatedTypeArgs, isVirtualFromHelper) =
-            GetExactParentTypeAndFuncType(member, thisType, funcDecl, isVirtualFuncCall)
-        return FaithfulInstCalleeInfo(parentType, thisType, funcType.GetParamTypes(), funcType.GetReturnType(),
-            instantiatedTypeArgs, isVirtualFromHelper)
+        return GetInstCalleeInfoInGeneral(member, funcDecl, thisType, isVirtualFuncCall)
     }
 
     private func GetInstCalleeInfoFromVarInit(expr: AstRefExpr, calleeDecl: AstFuncDecl): FaithfulInstCalleeInfo {
@@ -2983,52 +2982,71 @@ public class Translator {
         }
         CJC_ASSERT(calleeDecl.TestAttr(AstAttribute.STATIC))
         return FaithfulInstCalleeInfo(thisType, thisType, paramTys, funcType.GetReturnType(),
-            instantiatedTypeArgs, false)
+            instantiatedTypeArgs, false, calleeDecl)
     }
 
-    private func GetExactParentTypeAndFuncType(expr: AstNameReferenceExpr, thisType: Type, calleeDecl: AstFuncDecl,
-        isVirtualFuncCall: Bool): (Type, FuncType, ArrayList<Type>, Bool) {
-        let funcType = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
+    // C++ TranslateMemberAccess.cpp GetInstCalleeInfoInGeneral (09/04 b6545992 / 84b82a63).
+    // Virtual call stores the top-overridden decl; non-virtual stores the resolved decl.
+    private func TopOverriddenDecl(funcDecl: AstFuncDecl): AstFuncDecl {
+        if (let Some(resolver) <- overrideSrcFuncResolver) {
+            if (let Some(top) <- resolver(funcDecl)) {
+                return top
+            }
+        }
+        return funcDecl
+    }
+
+    private func GetInstCalleeInfoInGeneral(expr: AstNameReferenceExpr, resolvedFuncDecl: AstFuncDecl, thisType: Type,
+        isVirtualFuncCall: Bool): FaithfulInstCalleeInfo {
+        let translatedFuncType = RequireFuncType(chirTy.TranslateType(RequireAstTy(expr)))
         let paramTys = ArrayList<Type>()
-        for (paramTy in funcType.GetParamTypes()) {
+        for (paramTy in translatedFuncType.GetParamTypes()) {
             paramTys.add(paramTy)
         }
-        if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
+        var calleeFuncTy = translatedFuncType
+        if (!resolvedFuncDecl.TestAttr(AstAttribute.STATIC)) {
             paramTys.add(thisType, at: 0)
+            calleeFuncTy = builder.context.GetFuncTy(paramTys, translatedFuncType.GetReturnType())
         }
-        var calleeFuncTy = builder.context.GetFuncTy(paramTys, funcType.GetReturnType())
         let funcInstArgs = ArrayList<Type>()
         for (instTy in expr.instTys) {
             funcInstArgs.add(chirTy.TranslateType(instTy))
         }
         let thisDerefTy = thisType.StripAllRefs()
-        var parentTypeOpt = GetExactParentType(thisDerefTy, calleeDecl, calleeFuncTy, funcInstArgs, isVirtualFuncCall)
         var virtualCall = isVirtualFuncCall
+        var originalFuncDecl = if (virtualCall) {
+            TopOverriddenDecl(resolvedFuncDecl)
+        } else {
+            resolvedFuncDecl
+        }
+        var parentTypeOpt = GetExactParentType(thisDerefTy, originalFuncDecl, calleeFuncTy, funcInstArgs, virtualCall)
         if (parentTypeOpt.isNone()) {
             CJC_ASSERT(!virtualCall)
-            parentTypeOpt = GetExactParentType(thisDerefTy, calleeDecl, calleeFuncTy, funcInstArgs, true)
+            originalFuncDecl = TopOverriddenDecl(originalFuncDecl)
+            parentTypeOpt = GetExactParentType(thisDerefTy, originalFuncDecl, calleeFuncTy, funcInstArgs, true)
             virtualCall = true
         }
         if (parentTypeOpt.isNone()) {
-            throw IllegalStateException("faithful AST2CHIR GetExactParentTypeAndFuncType failed to find parent type: " +
-                "callee=${calleeDecl.identifier.Val()}, this=${thisType.ToString()}, thisDeref=${thisDerefTy.ToString()}, " +
-                "virtual=${virtualCall}, isStatic=${calleeDecl.TestAttr(AstAttribute.STATIC)}")
+            throw IllegalStateException("faithful AST2CHIR GetInstCalleeInfoInGeneral failed to find parent type: " +
+                "callee=${originalFuncDecl.identifier.Val()}, this=${thisType.ToString()}, thisDeref=${thisDerefTy.ToString()}, " +
+                "virtual=${virtualCall}, isStatic=${originalFuncDecl.TestAttr(AstAttribute.STATIC)}")
         }
-        let parentType = if (let Some(resolvedParentType) <- parentTypeOpt) {
-            resolvedParentType
-        } else {
-            throw IllegalStateException("faithful AST2CHIR impossible: GetExactParentTypeAndFuncType parent type changed after check")
-        }
-        if (!calleeDecl.TestAttr(AstAttribute.STATIC)) {
+        let parentType = parentTypeOpt.getOrThrow()
+        if (!originalFuncDecl.TestAttr(AstAttribute.STATIC)) {
             CJC_ASSERT(!paramTys.isEmpty())
-            if (thisDerefTy.IsStruct() && parentType != thisDerefTy && calleeDecl.TestAttr(AstAttribute.MUT)) {
+            if (thisDerefTy.IsStruct() && parentType != thisDerefTy && originalFuncDecl.TestAttr(AstAttribute.MUT)) {
                 paramTys[0] = thisType
             } else if (parentType.IsClass()) {
-                paramTys[0] = AddRefIfFuncIsMutOrClass(parentType, calleeDecl)
+                paramTys[0] = AddRefIfFuncIsMutOrClass(parentType, originalFuncDecl)
+                calleeFuncTy = builder.context.GetFuncTy(paramTys, calleeFuncTy.GetReturnType())
             }
-            calleeFuncTy = builder.context.GetFuncTy(paramTys, calleeFuncTy.GetReturnType())
         }
-        return (parentType, calleeFuncTy, funcInstArgs, virtualCall)
+        var instThisType = thisType
+        if (virtualCall && (expr as AstRefExpr).isSome()) {
+            instThisType = builder.context.GetRefTy(builder.context.GetThisTy())
+        }
+        return FaithfulInstCalleeInfo(parentType, instThisType, paramTys, calleeFuncTy.GetReturnType(),
+            funcInstArgs, virtualCall, originalFuncDecl)
     }
 
     private func GetInstCalleeInfoFromRefExpr(expr: AstRefExpr, calleeDecl: AstFuncDecl): FaithfulInstCalleeInfo {
@@ -3045,17 +3063,8 @@ public class Translator {
         if (let Some(customTy) <- (thisType as CustomType)) {
             caller = customTy.GetCustomTypeDef()
         }
-        var isVirtualFuncCall = IsVirtualFuncCall(caller, calleeDecl, false)
-        let (parentType, calleeFuncTy, instantiatedTypeArgs, isVirtualFromHelper) =
-            GetExactParentTypeAndFuncType(expr, thisTypeRef, calleeDecl, isVirtualFuncCall)
-        isVirtualFuncCall = isVirtualFromHelper
-        let finalThisType = if (isVirtualFuncCall) {
-            builder.context.GetRefTy(builder.context.GetThisTy())
-        } else {
-            thisTypeRef
-        }
-        return FaithfulInstCalleeInfo(parentType, finalThisType, calleeFuncTy.GetParamTypes(),
-            calleeFuncTy.GetReturnType(), instantiatedTypeArgs, isVirtualFuncCall)
+        let isVirtualFuncCall = IsVirtualFuncCall(caller, calleeDecl, false)
+        return GetInstCalleeInfoInGeneral(expr, calleeDecl, thisTypeRef, isVirtualFuncCall)
     }
 
     private func MemberAccessFuncType(member: AstMemberAccess): FuncType {
@@ -3202,14 +3211,14 @@ public class Translator {
                 instFuncType.thisType.StripAllRefs(), CurrentBlock())
             CurrentBlock().AppendExpression(createdGetRTTIStatic3079)
             let rtti = RequireResult(createdGetRTTIStatic3079)
-            let invokeInfo = GenerateInvokeCallContext(instFuncType, rtti, funcDecl, args)
+            let invokeInfo = GenerateInvokeCallContext(instFuncType, rtti, args)
             let createdInvokeStatic3082 = builder.CreateInvokeStatic(instFuncType.instRetTy, invokeInfo, CurrentBlock())
             CurrentBlock().AppendExpression(createdInvokeStatic3082)
             return RequireResult(createdInvokeStatic3082)
         }
         let caller = thisObj ??
             throw IllegalStateException("faithful AST2CHIR virtual member wrapper has no receiver")
-        let invokeInfo = GenerateInvokeCallContext(instFuncType, caller, funcDecl, args)
+        let invokeInfo = GenerateInvokeCallContext(instFuncType, caller, args)
         let createdInvoke3087 = builder.CreateInvoke(instFuncType.instRetTy, invokeInfo, CurrentBlock())
         CurrentBlock().AppendExpression(createdInvoke3087)
         return RequireResult(createdInvoke3087)
@@ -3226,7 +3235,7 @@ public class Translator {
             throw IllegalStateException("faithful AST2CHIR member wrapper argument count mismatch")
         }
         let instTypeArgs = instFuncType.instantiatedTypeArgs.clone()
-        let callee = GetSymbolTable(funcDecl)
+        let callee = GetSymbolTable(instFuncType.originalFuncDecl)
         let createdApply3102 = builder.CreateApply(instFuncType.instRetTy, callee, FuncCallContext(args: args,
             instTypeArgs: instTypeArgs, thisType: Some(instFuncType.thisType)), CurrentBlock())
         CurrentBlock().AppendExpression(createdApply3102)
@@ -3234,22 +3243,12 @@ public class Translator {
     }
 
     public func GenerateInvokeCallContext(instFuncType: FaithfulInstCalleeInfo, caller: Value,
-        callee: AstFuncDecl, args: ArrayList<Value>, strategy!: OverflowStrategy = OverflowStrategy.THROWING
+        args: ArrayList<Value>, strategy!: OverflowStrategy = OverflowStrategy.THROWING
     ): InvokeCallContext {
-        // C++ Translator.h:949-951 default THROWING; TranslateRefExpr.cpp:204-232 stores that strategy.
-        let originalFuncDecl = if (let Some(resolver) <- overrideSrcFuncResolver) {
-            resolver(callee) ?? callee
-        } else {
-            callee
-        }
-        let funcName = originalFuncDecl.identifier.Val()
-        var thisType = instFuncType.thisType.StripAllRefs()
-        if (thisType.IsThis()) {
-            thisType = CurrentFunction().GetParentCustomTypeDef().getOrThrow().GetType().getOrThrow()
-        }
-        let methodType = builder.context.GetFuncTy(instFuncType.instParamTys, instFuncType.instRetTy)
-        let method = thisType.GetExpectedFunc(funcName, methodType, originalFuncDecl.TestAttr(AstAttribute.STATIC),
-            instFuncType.instantiatedTypeArgs.clone(), builder, true).getOrThrow()
+        // C++ TranslateRefExpr.cpp GenerateInvokeCallContext (09/04): callee is the symbol of originalFuncDecl,
+        // not GetExpectedFunc on the receiver type.
+        let originalFuncDecl = instFuncType.originalFuncDecl
+        let method = (GetSymbolTable(originalFuncDecl) as Function).getOrThrow()
         let overflow = if (IsOverflowOpCall(originalFuncDecl)) { strategy } else { OverflowStrategy.NA }
         return InvokeCallContext(method, caller, FuncCallContext(args: args,
             instTypeArgs: instFuncType.instantiatedTypeArgs, thisType: Some(instFuncType.thisType)),
@@ -3947,7 +3946,7 @@ public class Translator {
                 case Some(exceptBlock) => exceptBlock
                 case None => errorBlock
             }
-            let typeCast = builder.CreateNumericCastWithException(resultTy, operand, successBlock, targetBlock,
+            let typeCast = builder.CreateTryNumericCast(resultTy, operand, successBlock, targetBlock,
                 CurrentBlock())
             CurrentBlock().AppendExpression(typeCast)
             typeCast.SetDebugLocation(loc)
@@ -7786,15 +7785,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdRawArrayAllocateWithException7199 = builder.CreateRawArrayAllocateWithException(resultTy, elementTy, size, successBlock, exceptBlock,
+                let createdTryRawArrayAllocate7199 = builder.CreateTryRawArrayAllocate(resultTy, elementTy, size, successBlock, exceptBlock,
                     parent)
-                parent.AppendExpression(createdRawArrayAllocateWithException7199)
-                createdRawArrayAllocateWithException7199
+                parent.AppendExpression(createdTryRawArrayAllocate7199)
+                createdTryRawArrayAllocate7199
             } else {
-                let createdRawArrayAllocateWithException7202 = builder.CreateRawArrayAllocateWithException(resultTy, elementTy, size, successBlock, errorBlock,
+                let createdTryRawArrayAllocate7202 = builder.CreateTryRawArrayAllocate(resultTy, elementTy, size, successBlock, errorBlock,
                     parent)
-                parent.AppendExpression(createdRawArrayAllocateWithException7202)
-                createdRawArrayAllocateWithException7202
+                parent.AppendExpression(createdTryRawArrayAllocate7202)
+                createdTryRawArrayAllocate7202
             }
             term.SetDebugLocation(loc)
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
@@ -7812,13 +7811,13 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdApplyWithException7220 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock, parent)
-                parent.AppendExpression(createdApplyWithException7220)
-                createdApplyWithException7220
+                let createdTryApply7220 = builder.CreateTryApply(resultTy, callee, callContext, successBlock, exceptBlock, parent)
+                parent.AppendExpression(createdTryApply7220)
+                createdTryApply7220
             } else {
-                let createdApplyWithException7222 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock, parent)
-                parent.AppendExpression(createdApplyWithException7222)
-                createdApplyWithException7222
+                let createdTryApply7222 = builder.CreateTryApply(resultTy, callee, callContext, successBlock, errorBlock, parent)
+                parent.AppendExpression(createdTryApply7222)
+                createdTryApply7222
             }
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return term
@@ -8039,15 +8038,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdApplyWithException7432 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, exceptBlock,
+                let createdTryApply7432 = builder.CreateTryApply(resultTy, callee, callContext, successBlock, exceptBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdApplyWithException7432)
-                createdApplyWithException7432
+                CurrentBlock().AppendExpression(createdTryApply7432)
+                createdTryApply7432
             } else {
-                let createdApplyWithException7435 = builder.CreateApplyWithException(resultTy, callee, callContext, successBlock, errorBlock,
+                let createdTryApply7435 = builder.CreateTryApply(resultTy, callee, callContext, successBlock, errorBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdApplyWithException7435)
-                createdApplyWithException7435
+                CurrentBlock().AppendExpression(createdTryApply7435)
+                createdTryApply7435
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -8097,7 +8096,7 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             if (let Some(exceptBlock) <- exceptionBlock) {
-                let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, exceptBlock,
+                let term = builder.CreateTryAllocate(resultTy, allocatedTy, successBlock, exceptBlock,
                     CurrentBlock())
                 CurrentBlock().AppendExpression(term)
                 term.SetDebugLocation(loc)
@@ -8105,7 +8104,7 @@ public class Translator {
                 FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
                 return result
             }
-            let term = builder.CreateAllocateWithException(resultTy, allocatedTy, successBlock, errorBlock,
+            let term = builder.CreateTryAllocate(resultTy, allocatedTy, successBlock, errorBlock,
                 CurrentBlock())
             CurrentBlock().AppendExpression(term)
             term.SetDebugLocation(loc)
@@ -8128,11 +8127,11 @@ public class Translator {
                 case None => errorBlock
             }
             if (let Some(arg) <- spawnArg) {
-                let createdSpawnWithException7522 = builder.CreateSpawnWithException(resultTy, futureObj, arg, successBlock, targetBlock, CurrentBlock())
-                CurrentBlock().AppendExpression(createdSpawnWithException7522)
+                let createdTrySpawn7522 = builder.CreateTrySpawn(resultTy, futureObj, arg, successBlock, targetBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdTrySpawn7522)
             } else {
-                let createdSpawnWithException7524 = builder.CreateSpawnWithException(resultTy, futureObj, successBlock, targetBlock, CurrentBlock())
-                CurrentBlock().AppendExpression(createdSpawnWithException7524)
+                let createdTrySpawn7524 = builder.CreateTrySpawn(resultTy, futureObj, successBlock, targetBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdTrySpawn7524)
             }
             FinishDelayExitExceptionBlock(exceptionBlock, successBlock)
             return
@@ -8272,15 +8271,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdIntrinsicWithException7657 = builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, exceptBlock,
+                let createdTryIntrinsic7657 = builder.CreateTryIntrinsic(resultTy, callContext, successBlock, exceptBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdIntrinsicWithException7657)
-                createdIntrinsicWithException7657
+                CurrentBlock().AppendExpression(createdTryIntrinsic7657)
+                createdTryIntrinsic7657
             } else {
-                let createdIntrinsicWithException7660 = builder.CreateIntrinsicWithException(resultTy, callContext, successBlock, errorBlock,
+                let createdTryIntrinsic7660 = builder.CreateTryIntrinsic(resultTy, callContext, successBlock, errorBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdIntrinsicWithException7660)
-                createdIntrinsicWithException7660
+                CurrentBlock().AppendExpression(createdTryIntrinsic7660)
+                createdTryIntrinsic7660
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -8681,13 +8680,13 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdInvokeWithException8040 = builder.CreateInvokeWithException(resultTy, callContext, successBlock, exceptBlock, CurrentBlock())
-                CurrentBlock().AppendExpression(createdInvokeWithException8040)
-                createdInvokeWithException8040
+                let createdTryInvoke8040 = builder.CreateTryInvoke(resultTy, callContext, successBlock, exceptBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdTryInvoke8040)
+                createdTryInvoke8040
             } else {
-                let createdInvokeWithException8042 = builder.CreateInvokeWithException(resultTy, callContext, successBlock, errorBlock, CurrentBlock())
-                CurrentBlock().AppendExpression(createdInvokeWithException8042)
-                createdInvokeWithException8042
+                let createdTryInvoke8042 = builder.CreateTryInvoke(resultTy, callContext, successBlock, errorBlock, CurrentBlock())
+                CurrentBlock().AppendExpression(createdTryInvoke8042)
+                createdTryInvoke8042
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -8706,15 +8705,15 @@ public class Translator {
             let successBlock = CreateBlock()
             let exceptionBlock = DelayExitExceptionBlock(errorBlock)
             let term = if (let Some(exceptBlock) <- exceptionBlock) {
-                let createdInvokeStaticWithException8060 = builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, exceptBlock,
+                let createdTryInvokeStatic8060 = builder.CreateTryInvokeStatic(resultTy, callContext, successBlock, exceptBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdInvokeStaticWithException8060)
-                createdInvokeStaticWithException8060
+                CurrentBlock().AppendExpression(createdTryInvokeStatic8060)
+                createdTryInvokeStatic8060
             } else {
-                let createdInvokeStaticWithException8063 = builder.CreateInvokeStaticWithException(resultTy, callContext, successBlock, errorBlock,
+                let createdTryInvokeStatic8063 = builder.CreateTryInvokeStatic(resultTy, callContext, successBlock, errorBlock,
                     CurrentBlock())
-                CurrentBlock().AppendExpression(createdInvokeStaticWithException8063)
-                createdInvokeStaticWithException8063
+                CurrentBlock().AppendExpression(createdTryInvokeStatic8063)
+                createdTryInvokeStatic8063
             }
             term.SetDebugLocation(loc)
             let result = RequireResult(term)
@@ -8814,7 +8813,6 @@ public class Translator {
     private func TranslateMemberFuncCall(expr: AstCallExpr, calleeDecl: AstFuncDecl): Value {
         let loc = TranslateLocation(expr)
         let argValues = ArrayList<Value>()
-        let callee = globalSymbolTable.Get(calleeDecl)
         let calleeInfo = if (let Some(base) <- expr.baseFunc) {
             if (let Some(member) <- (base as AstMemberAccess)) {
                 GetInstCalleeInfoFromMemberAccess(member, calleeDecl)
@@ -8834,7 +8832,7 @@ public class Translator {
             let rawObj = TranslateThisObjectForNonStaticMemberFuncCall(expr,
                 calleeDecl.TestAttr(AstAttribute.MUT))
             expectedThisObjTy = if (calleeInfo.isVirtualFuncCall) {
-                Some(AddRefIfFuncIsMutOrClass(calleeInfo.instParentCustomTy, calleeDecl))
+                Some(AddRefIfFuncIsMutOrClass(calleeInfo.instParentCustomTy, calleeInfo.originalFuncDecl))
             } else {
                 if (calleeInfo.instParamTys.isEmpty()) {
                     None
@@ -8873,7 +8871,7 @@ public class Translator {
                     RequireResult(createdGetRTTIStatic8209)
                 }
                 // C++ TranslateCallExpr.cpp:910-911 delegates overflow-name selection to GenerateInvokeCallContext.
-                let invokeCtx = GenerateInvokeCallContext(calleeInfo, rtti, calleeDecl, argValues,
+                let invokeCtx = GenerateInvokeCallContext(calleeInfo, rtti, argValues,
                     strategy: expr.overflowStrategy)
                 let invoke = CreateInvokeStaticMaybeWithException(resultTy, invokeCtx, loc: loc)
                 if (GetFirstNothingTypeArgIndex(argValues).isSome()) {
@@ -8884,7 +8882,7 @@ public class Translator {
             }
             let obj = thisObj ?? throw IllegalStateException("faithful AST2CHIR virtual member call has no this object")
             // C++ TranslateCallExpr.cpp:918-919 delegates overflow-name selection to GenerateInvokeCallContext.
-            let invokeCtx = GenerateInvokeCallContext(calleeInfo, obj, calleeDecl, argValues,
+            let invokeCtx = GenerateInvokeCallContext(calleeInfo, obj, argValues,
                 strategy: expr.overflowStrategy)
             let invoke = CreateInvokeMaybeWithException(resultTy, invokeCtx, loc: loc)
             if (GetFirstNothingTypeArgIndex(argValues).isSome()) {
@@ -8897,6 +8895,7 @@ public class Translator {
             argValues.add(obj, at: 0)
         }
         let instTypeArgs = calleeInfo.instantiatedTypeArgs
+        let callee = GetSymbolTable(calleeInfo.originalFuncDecl)
         return CreateAndAppendApplyCallFromCallExpr(resultTy, callee, FuncCallContext(args: argValues,
             instTypeArgs: instTypeArgs, thisType: Some(calleeInfo.thisType)), expr)
     }
@@ -9574,7 +9573,7 @@ public class Translator {
                     case Some(exceptBlock) => exceptBlock
                     case None => errorBlock
                 }
-                let opResult = builder.CreateBinaryExpressionWithException(resultTy, ToCHIRCompoundAssignOp(expr.op),
+                let opResult = builder.CreateTryBinaryExpression(resultTy, ToCHIRCompoundAssignOp(expr.op),
                     lhsValue, rhsValue, successBlock, targetBlock, CurrentBlock())
                 CurrentBlock().AppendExpression(opResult)
                 opResult.SetOverflowStrategy(expr.overflowStrategy)
@@ -9879,7 +9878,7 @@ public class Translator {
                     case Some(exceptBlock) => exceptBlock
                     case None => errorBlock
                 }
-                let opResult = builder.CreateBinaryExpressionWithException(resultTy, ToCHIRCompoundAssignOp(assign.op),
+                let opResult = builder.CreateTryBinaryExpression(resultTy, ToCHIRCompoundAssignOp(assign.op),
                     lhsValue, rhsValue, successBlock, targetBlock, CurrentBlock())
                 CurrentBlock().AppendExpression(opResult)
                 opResult.SetOverflowStrategy(assign.overflowStrategy)

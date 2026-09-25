@@ -93,14 +93,14 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
                 return HandleBranchTerminator(state, (terminator as Branch).getOrThrow())
             case ExprKind.MULTIBRANCH =>
                 return HandleMultiBranchTerminator(state, (terminator as MultiBranch).getOrThrow())
-            case ExprKind.NUMERIC_CAST_WITH_EXCEPTION =>
-                res = HandleTypeCast(state, (terminator as NumericCastWithException).getOrThrow())
-            case ExprKind.NEG_WITH_EXCEPTION | ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION |
-                ExprKind.MUL_WITH_EXCEPTION | ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION |
-                ExprKind.EXP_WITH_EXCEPTION | ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
+            case ExprKind.TRY_NUMERIC_CAST =>
+                res = HandleTypeCast(state, (terminator as TryNumericCast).getOrThrow())
+            case ExprKind.TRY_NEG | ExprKind.TRY_ADD | ExprKind.TRY_SUB |
+                ExprKind.TRY_MUL | ExprKind.TRY_DIV | ExprKind.TRY_MOD |
+                ExprKind.TRY_EXP | ExprKind.TRY_LSHIFT | ExprKind.TRY_RSHIFT =>
                 res = HandleIntOpWithExcepTerminator(state, terminator)
-            case ExprKind.INTRINSIC_WITH_EXCEPTION =>
-                res = HandleIntrinsic(state, (terminator as IntrinsicWithException).getOrThrow())
+            case ExprKind.TRY_INTRINSIC =>
+                res = HandleIntrinsic(state, (terminator as TryIntrinsic).getOrThrow())
             case _ =>
                 if (let Some(dest) <- terminator.GetResult()) {
                     state.SetToTopOrTopRef(dest, dest.GetType().getOrThrow().IsRef())
@@ -120,8 +120,8 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
         HandleApply(state, apply)
     }
 
-    public override func HandleApplyWithExceptionTerminator(state: State<ConstValueDomain, Pool>,
-        apply: ApplyWithException, refObj: Option<Value>): Option<Block> {
+    public override func HandleTryApplyTerminator(state: State<ConstValueDomain, Pool>,
+        apply: TryApply, refObj: Option<Value>): Option<Block> {
         let _ = refObj
         let res = HandleApply(state, apply)
         if (res == ConstExceptionKind.SUCCESS) {
@@ -324,7 +324,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
                 return HandleArithmeticOpOfInt(state, expr, kind, AsConstInt(lhsAbsVal), AsConstInt(rhsAbsVal))
             }
             return HandleArithmeticOpOfUInt(state, expr, kind, AsConstUInt(lhsAbsVal), AsConstUInt(rhsAbsVal))
-        } else if (!expr.IsUnaryExpressionWithException() && !expr.IsBinaryExpressionWithException()) {
+        } else if (!expr.IsTryUnaryExpression() && !expr.IsTryBinaryExpression()) {
             HandleArithmeticOpOfFloat(state, (expr as BinaryExpression).getOrThrow(), lhsAbsVal, rhsAbsVal)
         }
         return ConstExceptionKind.NA
@@ -753,7 +753,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
         return HandleApplyImpl(state, apply, apply.GetCallee(), apply.GetArgs())
     }
 
-    private func HandleApply(state: State<ConstValueDomain, Pool>, apply: ApplyWithException): ConstExceptionKind {
+    private func HandleApply(state: State<ConstValueDomain, Pool>, apply: TryApply): ConstExceptionKind {
         return HandleApplyImpl(state, apply, apply.GetCallee(), apply.GetArgs())
     }
 
@@ -853,7 +853,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
         return HandleIntrinsicImpl(state, intrinsic)
     }
 
-    private func HandleIntrinsic(state: State<ConstValueDomain, Pool>, intrinsic: IntrinsicWithException): ConstExceptionKind {
+    private func HandleIntrinsic(state: State<ConstValueDomain, Pool>, intrinsic: TryIntrinsic): ConstExceptionKind {
         return HandleIntrinsicImpl(state, intrinsic)
     }
 
@@ -863,7 +863,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
         let kind = if (let Some(normal) <- (intrinsic as Intrinsic)) {
             normal.GetIntrinsicKind()
         } else {
-            (intrinsic as IntrinsicWithException).getOrThrow().GetIntrinsicKind()
+            (intrinsic as TryIntrinsic).getOrThrow().GetIntrinsicKind()
         }
         if (kind == IntrinsicKind.VARRAY_GET) {
             return HandleVArrayGet(state, intrinsic)
@@ -995,7 +995,7 @@ public class ConstAnalysis<Pool> <: ValueAnalysis<ConstValueDomain, Pool> where 
             let sourceTy = if (let Some(typeCast) <- (cast as TypeCast)) {
                 typeCast.GetSourceType().getOrThrow()
             } else {
-                (cast as NumericCastWithException).getOrThrow().GetSourceType().getOrThrow()
+                (cast as TryNumericCast).getOrThrow().GetSourceType().getOrThrow()
             }
             let srcValStr = sourceTy.ToString() + "(" + srcVal + ")"
             builder.AddMainHintArguments(srcValStr, targetTy.ToString())

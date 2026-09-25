@@ -81,7 +81,7 @@ public open class FuncCallBase <: ExpressionBase {
 
 public class ApplyBase <: FuncCallBase {
     private let expr: Option<Apply>
-    private let exprE: Option<ApplyWithException>
+    private let exprE: Option<TryApply>
 
     public init(expression: Expression) {
         super(expression)
@@ -90,7 +90,7 @@ public class ApplyBase <: FuncCallBase {
             exprE = None
         } else {
             expr = None
-            exprE = (expression as ApplyWithException).getOrThrow()
+            exprE = (expression as TryApply).getOrThrow()
         }
     }
 
@@ -100,7 +100,7 @@ public class ApplyBase <: FuncCallBase {
         exprE = None
     }
 
-    public init(expression: ApplyWithException) {
+    public init(expression: TryApply) {
         super(expression)
         expr = None
         exprE = expression
@@ -178,9 +178,9 @@ public open class DynamicDispatchBase <: FuncCallBase {
 
     public func GetVirtualMethodOffset(): UInt64 {
         if (let Some(dispatch) <- expr) {
-            return dispatch.GetVirtualMethodOffset().getOrThrow()
+            return dispatch.GetVirtualMethodOffset()
         }
-        return exprE.getOrThrow().GetVirtualMethodOffset().getOrThrow()
+        return exprE.getOrThrow().GetVirtualMethodOffset()
     }
 
     public func GetInstSrcParentCustomTypeOfMethod(builder: CHIRBuilder): ClassType {
@@ -193,7 +193,7 @@ public open class DynamicDispatchBase <: FuncCallBase {
 
 public class InvokeBase <: DynamicDispatchBase {
     private let expr: Option<Invoke>
-    private let exprE: Option<InvokeWithException>
+    private let exprE: Option<TryInvoke>
 
     public init(expression: Expression) {
         super(expression)
@@ -202,7 +202,7 @@ public class InvokeBase <: DynamicDispatchBase {
             exprE = None
         } else {
             expr = None
-            exprE = (expression as InvokeWithException).getOrThrow()
+            exprE = (expression as TryInvoke).getOrThrow()
         }
     }
 
@@ -212,7 +212,7 @@ public class InvokeBase <: DynamicDispatchBase {
         exprE = None
     }
 
-    public init(expression: InvokeWithException) {
+    public init(expression: TryInvoke) {
         super(expression)
         expr = None
         exprE = expression
@@ -228,7 +228,7 @@ public class InvokeBase <: DynamicDispatchBase {
 
 public class InvokeStaticBase <: DynamicDispatchBase {
     private let expr: Option<InvokeStatic>
-    private let exprE: Option<InvokeStaticWithException>
+    private let exprE: Option<TryInvokeStatic>
 
     public init(expression: Expression) {
         super(expression)
@@ -237,7 +237,7 @@ public class InvokeStaticBase <: DynamicDispatchBase {
             exprE = None
         } else {
             expr = None
-            exprE = (expression as InvokeStaticWithException).getOrThrow()
+            exprE = (expression as TryInvokeStatic).getOrThrow()
         }
     }
 
@@ -247,7 +247,7 @@ public class InvokeStaticBase <: DynamicDispatchBase {
         exprE = None
     }
 
-    public init(expression: InvokeStaticWithException) {
+    public init(expression: TryInvokeStatic) {
         super(expression)
         expr = None
         exprE = expression
@@ -310,7 +310,7 @@ public class BinaryExprBase <: ExpressionBase {
 
 public class IntrinsicBase <: ExpressionBase {
     private let expr: Option<Intrinsic>
-    private let exprE: Option<IntrinsicWithException>
+    private let exprE: Option<TryIntrinsic>
 
     public init(expression: Expression) {
         super(expression)
@@ -319,7 +319,7 @@ public class IntrinsicBase <: ExpressionBase {
             exprE = None
         } else {
             expr = None
-            exprE = (expression as IntrinsicWithException).getOrThrow()
+            exprE = (expression as TryIntrinsic).getOrThrow()
         }
     }
 
@@ -329,7 +329,7 @@ public class IntrinsicBase <: ExpressionBase {
         exprE = None
     }
 
-    public init(expression: IntrinsicWithException) {
+    public init(expression: TryIntrinsic) {
         super(expression)
         expr = None
         exprE = expression

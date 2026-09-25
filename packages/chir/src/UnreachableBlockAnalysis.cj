@@ -197,8 +197,8 @@ private class UnreachableExpr {
 
 private func TryGetWarningExpression(expression: Expression, result: UnreachableExpr): Bool {
     if (!ToRangeIfNotZero(expression.GetDebugLocationInfoForWarning())[0]) { return false }
-    if (expression.IsBinaryExpr() || expression.IsUnaryExpressionWithException() ||
-        expression.IsBinaryExpressionWithException()) {
+    if (expression.IsBinaryExpr() || expression.IsTryUnaryExpression() ||
+        expression.IsTryBinaryExpression()) {
         var hasNothing = false
         var index: Int64 = 0
         while (index < expression.GetNumOfNonSuccessorOperands()) {

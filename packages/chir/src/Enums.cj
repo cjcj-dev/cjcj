@@ -479,12 +479,12 @@ extend ExprMajorKind <: Equatable<ExprMajorKind> {
 
 public enum ExprKind {
     | INVALID
-    | GOTO | BRANCH | MULTIBRANCH | EXIT | APPLY_WITH_EXCEPTION | INVOKE_WITH_EXCEPTION
-    | INVOKESTATIC_WITH_EXCEPTION | RAISE_EXCEPTION | NEG_WITH_EXCEPTION | ADD_WITH_EXCEPTION
-    | SUB_WITH_EXCEPTION | MUL_WITH_EXCEPTION | DIV_WITH_EXCEPTION | MOD_WITH_EXCEPTION
-    | EXP_WITH_EXCEPTION | LSHIFT_WITH_EXCEPTION | RSHIFT_WITH_EXCEPTION | SPAWN_WITH_EXCEPTION
-    | NUMERIC_CAST_WITH_EXCEPTION | INTRINSIC_WITH_EXCEPTION | ALLOCATE_WITH_EXCEPTION
-    | RAW_ARRAY_ALLOCATE_WITH_EXCEPTION
+    | GOTO | BRANCH | MULTIBRANCH | EXIT | TRY_APPLY | TRY_INVOKE
+    | TRY_INVOKESTATIC | RAISE_EXCEPTION | TRY_NEG | TRY_ADD
+    | TRY_SUB | TRY_MUL | TRY_DIV | TRY_MOD
+    | TRY_EXP | TRY_LSHIFT | TRY_RSHIFT | TRY_SPAWN
+    | TRY_NUMERIC_CAST | TRY_INTRINSIC | TRY_ALLOCATE
+    | TRY_RAW_ARRAY_ALLOCATE
     | NEG | NOT | BITNOT
     | ADD | SUB | MUL | DIV | MOD | EXP | LSHIFT | RSHIFT | BITAND | BITOR | BITXOR
     | LT | GT | LE | GE | EQUAL | NOTEQUAL | AND | OR
@@ -505,24 +505,24 @@ public func ExprKindIndex(kind: ExprKind): Int64 {
         case ExprKind.BRANCH => 2
         case ExprKind.MULTIBRANCH => 3
         case ExprKind.EXIT => 4
-        case ExprKind.APPLY_WITH_EXCEPTION => 5
-        case ExprKind.INVOKE_WITH_EXCEPTION => 6
-        case ExprKind.INVOKESTATIC_WITH_EXCEPTION => 7
+        case ExprKind.TRY_APPLY => 5
+        case ExprKind.TRY_INVOKE => 6
+        case ExprKind.TRY_INVOKESTATIC => 7
         case ExprKind.RAISE_EXCEPTION => 8
-        case ExprKind.NEG_WITH_EXCEPTION => 9
-        case ExprKind.ADD_WITH_EXCEPTION => 10
-        case ExprKind.SUB_WITH_EXCEPTION => 11
-        case ExprKind.MUL_WITH_EXCEPTION => 12
-        case ExprKind.DIV_WITH_EXCEPTION => 13
-        case ExprKind.MOD_WITH_EXCEPTION => 14
-        case ExprKind.EXP_WITH_EXCEPTION => 15
-        case ExprKind.LSHIFT_WITH_EXCEPTION => 16
-        case ExprKind.RSHIFT_WITH_EXCEPTION => 17
-        case ExprKind.SPAWN_WITH_EXCEPTION => 18
-        case ExprKind.NUMERIC_CAST_WITH_EXCEPTION => 19
-        case ExprKind.INTRINSIC_WITH_EXCEPTION => 20
-        case ExprKind.ALLOCATE_WITH_EXCEPTION => 21
-        case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION => 22
+        case ExprKind.TRY_NEG => 9
+        case ExprKind.TRY_ADD => 10
+        case ExprKind.TRY_SUB => 11
+        case ExprKind.TRY_MUL => 12
+        case ExprKind.TRY_DIV => 13
+        case ExprKind.TRY_MOD => 14
+        case ExprKind.TRY_EXP => 15
+        case ExprKind.TRY_LSHIFT => 16
+        case ExprKind.TRY_RSHIFT => 17
+        case ExprKind.TRY_SPAWN => 18
+        case ExprKind.TRY_NUMERIC_CAST => 19
+        case ExprKind.TRY_INTRINSIC => 20
+        case ExprKind.TRY_ALLOCATE => 21
+        case ExprKind.TRY_RAW_ARRAY_ALLOCATE => 22
         case ExprKind.NEG => 23
         case ExprKind.NOT => 24
         case ExprKind.BITNOT => 25
@@ -593,24 +593,24 @@ public func ExprKindName(kind: ExprKind): String {
         case ExprKind.BRANCH => "Branch"
         case ExprKind.MULTIBRANCH => "MultiBranch"
         case ExprKind.EXIT => "Exit"
-        case ExprKind.APPLY_WITH_EXCEPTION => "ApplyWithException"
-        case ExprKind.INVOKE_WITH_EXCEPTION => "InvokeWithException"
-        case ExprKind.INVOKESTATIC_WITH_EXCEPTION => "InvokeStaticWithException"
+        case ExprKind.TRY_APPLY => "TryApply"
+        case ExprKind.TRY_INVOKE => "TryInvoke"
+        case ExprKind.TRY_INVOKESTATIC => "TryInvokeStatic"
         case ExprKind.RAISE_EXCEPTION => "RaiseException"
-        case ExprKind.NEG_WITH_EXCEPTION => "NegWithException"
-        case ExprKind.ADD_WITH_EXCEPTION => "AddWithException"
-        case ExprKind.SUB_WITH_EXCEPTION => "SubWithException"
-        case ExprKind.MUL_WITH_EXCEPTION => "MulWithException"
-        case ExprKind.DIV_WITH_EXCEPTION => "DivWithException"
-        case ExprKind.MOD_WITH_EXCEPTION => "ModWithException"
-        case ExprKind.EXP_WITH_EXCEPTION => "ExpWithException"
-        case ExprKind.LSHIFT_WITH_EXCEPTION => "LShiftWithException"
-        case ExprKind.RSHIFT_WITH_EXCEPTION => "RShiftWithException"
-        case ExprKind.SPAWN_WITH_EXCEPTION => "SpawnWithException"
-        case ExprKind.NUMERIC_CAST_WITH_EXCEPTION => "NumericCastWithException"
-        case ExprKind.INTRINSIC_WITH_EXCEPTION => "IntrinsicWithException"
-        case ExprKind.ALLOCATE_WITH_EXCEPTION => "AllocateWithException"
-        case ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION => "RawArrayAllocateWithException"
+        case ExprKind.TRY_NEG => "TryNeg"
+        case ExprKind.TRY_ADD => "TryAdd"
+        case ExprKind.TRY_SUB => "TrySub"
+        case ExprKind.TRY_MUL => "TryMul"
+        case ExprKind.TRY_DIV => "TryDiv"
+        case ExprKind.TRY_MOD => "TryMod"
+        case ExprKind.TRY_EXP => "TryExp"
+        case ExprKind.TRY_LSHIFT => "TryLShift"
+        case ExprKind.TRY_RSHIFT => "TryRShift"
+        case ExprKind.TRY_SPAWN => "TrySpawn"
+        case ExprKind.TRY_NUMERIC_CAST => "TryNumericCast"
+        case ExprKind.TRY_INTRINSIC => "TryIntrinsic"
+        case ExprKind.TRY_ALLOCATE => "TryAllocate"
+        case ExprKind.TRY_RAW_ARRAY_ALLOCATE => "TryRawArrayAllocate"
         case ExprKind.NEG => "Neg"
         case ExprKind.NOT => "Not"
         case ExprKind.BITNOT => "BitNot"
@@ -676,7 +676,7 @@ public func ExprKindName(kind: ExprKind): String {
 
 public func ExprKindMajor(kind: ExprKind): ExprMajorKind {
     let index = ExprKindIndex(kind)
-    if (index >= ExprKindIndex(ExprKind.GOTO) && index <= ExprKindIndex(ExprKind.RAW_ARRAY_ALLOCATE_WITH_EXCEPTION)) {
+    if (index >= ExprKindIndex(ExprKind.GOTO) && index <= ExprKindIndex(ExprKind.TRY_RAW_ARRAY_ALLOCATE)) {
         return ExprMajorKind.TERMINATOR
     }
     if (index >= ExprKindIndex(ExprKind.NEG) && index <= ExprKindIndex(ExprKind.BITNOT)) {
@@ -705,7 +705,7 @@ public enum BinaryExprKind {
 
 public func ToExprKind(kind: UnaryExprKind, isTry: Bool): ExprKind {
     return match (kind) {
-        case UnaryExprKind.NEG => if (isTry) { ExprKind.NEG_WITH_EXCEPTION } else { ExprKind.NEG }
+        case UnaryExprKind.NEG => if (isTry) { ExprKind.TRY_NEG } else { ExprKind.NEG }
         case UnaryExprKind.NOT =>
             if (isTry) {
                 CJC_ABORT()
@@ -725,14 +725,14 @@ public func ToExprKind(kind: UnaryExprKind, isTry: Bool): ExprKind {
 
 public func ToExprKind(kind: BinaryExprKind, isTry: Bool): ExprKind {
     return match (kind) {
-        case BinaryExprKind.ADD => if (isTry) { ExprKind.ADD_WITH_EXCEPTION } else { ExprKind.ADD }
-        case BinaryExprKind.SUB => if (isTry) { ExprKind.SUB_WITH_EXCEPTION } else { ExprKind.SUB }
-        case BinaryExprKind.MUL => if (isTry) { ExprKind.MUL_WITH_EXCEPTION } else { ExprKind.MUL }
-        case BinaryExprKind.DIV => if (isTry) { ExprKind.DIV_WITH_EXCEPTION } else { ExprKind.DIV }
-        case BinaryExprKind.MOD => if (isTry) { ExprKind.MOD_WITH_EXCEPTION } else { ExprKind.MOD }
-        case BinaryExprKind.EXP => if (isTry) { ExprKind.EXP_WITH_EXCEPTION } else { ExprKind.EXP }
-        case BinaryExprKind.LSHIFT => if (isTry) { ExprKind.LSHIFT_WITH_EXCEPTION } else { ExprKind.LSHIFT }
-        case BinaryExprKind.RSHIFT => if (isTry) { ExprKind.RSHIFT_WITH_EXCEPTION } else { ExprKind.RSHIFT }
+        case BinaryExprKind.ADD => if (isTry) { ExprKind.TRY_ADD } else { ExprKind.ADD }
+        case BinaryExprKind.SUB => if (isTry) { ExprKind.TRY_SUB } else { ExprKind.SUB }
+        case BinaryExprKind.MUL => if (isTry) { ExprKind.TRY_MUL } else { ExprKind.MUL }
+        case BinaryExprKind.DIV => if (isTry) { ExprKind.TRY_DIV } else { ExprKind.DIV }
+        case BinaryExprKind.MOD => if (isTry) { ExprKind.TRY_MOD } else { ExprKind.MOD }
+        case BinaryExprKind.EXP => if (isTry) { ExprKind.TRY_EXP } else { ExprKind.EXP }
+        case BinaryExprKind.LSHIFT => if (isTry) { ExprKind.TRY_LSHIFT } else { ExprKind.LSHIFT }
+        case BinaryExprKind.RSHIFT => if (isTry) { ExprKind.TRY_RSHIFT } else { ExprKind.RSHIFT }
         case BinaryExprKind.BITAND => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.BITAND }
         case BinaryExprKind.BITOR => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.BITOR }
         case BinaryExprKind.BITXOR => if (isTry) { CJC_ABORT(); ExprKind.INVALID } else { ExprKind.BITXOR }
@@ -749,7 +749,7 @@ public func ToExprKind(kind: BinaryExprKind, isTry: Bool): ExprKind {
 
 public func ToUnaryExprKind(kind: ExprKind): UnaryExprKind {
     return match (kind) {
-        case ExprKind.NEG | ExprKind.NEG_WITH_EXCEPTION => UnaryExprKind.NEG
+        case ExprKind.NEG | ExprKind.TRY_NEG => UnaryExprKind.NEG
         case ExprKind.NOT => UnaryExprKind.NOT
         case ExprKind.BITNOT => UnaryExprKind.BITNOT
         case _ =>
@@ -760,14 +760,14 @@ public func ToUnaryExprKind(kind: ExprKind): UnaryExprKind {
 
 public func ToBinaryExprKind(kind: ExprKind): BinaryExprKind {
     return match (kind) {
-        case ExprKind.ADD | ExprKind.ADD_WITH_EXCEPTION => BinaryExprKind.ADD
-        case ExprKind.SUB | ExprKind.SUB_WITH_EXCEPTION => BinaryExprKind.SUB
-        case ExprKind.MUL | ExprKind.MUL_WITH_EXCEPTION => BinaryExprKind.MUL
-        case ExprKind.DIV | ExprKind.DIV_WITH_EXCEPTION => BinaryExprKind.DIV
-        case ExprKind.MOD | ExprKind.MOD_WITH_EXCEPTION => BinaryExprKind.MOD
-        case ExprKind.EXP | ExprKind.EXP_WITH_EXCEPTION => BinaryExprKind.EXP
-        case ExprKind.LSHIFT | ExprKind.LSHIFT_WITH_EXCEPTION => BinaryExprKind.LSHIFT
-        case ExprKind.RSHIFT | ExprKind.RSHIFT_WITH_EXCEPTION => BinaryExprKind.RSHIFT
+        case ExprKind.ADD | ExprKind.TRY_ADD => BinaryExprKind.ADD
+        case ExprKind.SUB | ExprKind.TRY_SUB => BinaryExprKind.SUB
+        case ExprKind.MUL | ExprKind.TRY_MUL => BinaryExprKind.MUL
+        case ExprKind.DIV | ExprKind.TRY_DIV => BinaryExprKind.DIV
+        case ExprKind.MOD | ExprKind.TRY_MOD => BinaryExprKind.MOD
+        case ExprKind.EXP | ExprKind.TRY_EXP => BinaryExprKind.EXP
+        case ExprKind.LSHIFT | ExprKind.TRY_LSHIFT => BinaryExprKind.LSHIFT
+        case ExprKind.RSHIFT | ExprKind.TRY_RSHIFT => BinaryExprKind.RSHIFT
         case ExprKind.BITAND => BinaryExprKind.BITAND
         case ExprKind.BITOR => BinaryExprKind.BITOR
         case ExprKind.BITXOR => BinaryExprKind.BITXOR
@@ -787,15 +787,15 @@ public func ToBinaryExprKind(kind: ExprKind): BinaryExprKind {
 
 public func PlainExprKind(kind: ExprKind): ExprKind {
     return match (kind) {
-        case ExprKind.NEG_WITH_EXCEPTION => ExprKind.NEG
-        case ExprKind.ADD_WITH_EXCEPTION => ExprKind.ADD
-        case ExprKind.SUB_WITH_EXCEPTION => ExprKind.SUB
-        case ExprKind.MUL_WITH_EXCEPTION => ExprKind.MUL
-        case ExprKind.DIV_WITH_EXCEPTION => ExprKind.DIV
-        case ExprKind.MOD_WITH_EXCEPTION => ExprKind.MOD
-        case ExprKind.EXP_WITH_EXCEPTION => ExprKind.EXP
-        case ExprKind.LSHIFT_WITH_EXCEPTION => ExprKind.LSHIFT
-        case ExprKind.RSHIFT_WITH_EXCEPTION => ExprKind.RSHIFT
+        case ExprKind.TRY_NEG => ExprKind.NEG
+        case ExprKind.TRY_ADD => ExprKind.ADD
+        case ExprKind.TRY_SUB => ExprKind.SUB
+        case ExprKind.TRY_MUL => ExprKind.MUL
+        case ExprKind.TRY_DIV => ExprKind.DIV
+        case ExprKind.TRY_MOD => ExprKind.MOD
+        case ExprKind.TRY_EXP => ExprKind.EXP
+        case ExprKind.TRY_LSHIFT => ExprKind.LSHIFT
+        case ExprKind.TRY_RSHIFT => ExprKind.RSHIFT
         case _ => kind
     }
 }

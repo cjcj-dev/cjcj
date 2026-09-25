@@ -714,99 +714,99 @@ public class CHIRBuilder {
         return term
     }
 
-    public func CreateApplyWithException(resultTy: Type, callee: Value, callContext: FuncCallContext,
-        successBlock: Block, errorBlock: Block, parent: Block): ApplyWithException {
-        let term = ApplyWithException(callee, callContext, successBlock, errorBlock, parent)
+    public func CreateTryApply(resultTy: Type, callee: Value, callContext: FuncCallContext,
+        successBlock: Block, errorBlock: Block, parent: Block): TryApply {
+        let term = TryApply(callee, callContext, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateInvokeWithException(resultTy: Type, callContext: InvokeCallContext, successBlock: Block,
-        errorBlock: Block, parent: Block): InvokeWithException {
-        let term = InvokeWithException(callContext, successBlock, errorBlock, parent)
+    public func CreateTryInvoke(resultTy: Type, callContext: InvokeCallContext, successBlock: Block,
+        errorBlock: Block, parent: Block): TryInvoke {
+        let term = TryInvoke(callContext, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateInvokeStaticWithException(resultTy: Type, callContext: InvokeCallContext, successBlock: Block,
-        errorBlock: Block, parent: Block): InvokeStaticWithException {
-        let term = InvokeStaticWithException(callContext, successBlock, errorBlock, parent)
+    public func CreateTryInvokeStatic(resultTy: Type, callContext: InvokeCallContext, successBlock: Block,
+        errorBlock: Block, parent: Block): TryInvokeStatic {
+        let term = TryInvokeStatic(callContext, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateUnaryExpressionWithException(resultTy: Type, opKind: ExprKind, operand: Value, successBlock: Block,
-        errorBlock: Block, parent: Block): UnaryExpressionWithException {
-        let term = UnaryExpressionWithException(ToUnaryExprKind(opKind), operand, successBlock, errorBlock, parent)
+    public func CreateTryUnaryExpression(resultTy: Type, opKind: ExprKind, operand: Value, successBlock: Block,
+        errorBlock: Block, parent: Block): TryUnaryExpression {
+        let term = TryUnaryExpression(ToUnaryExprKind(opKind), operand, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateBinaryExpressionWithException(resultTy: Type, opKind: ExprKind, left: Value, right: Value,
-        successBlock: Block, errorBlock: Block, parent: Block): BinaryExpressionWithException {
-        let term = BinaryExpressionWithException(ToBinaryExprKind(opKind), left, right, successBlock, errorBlock, parent)
+    public func CreateTryBinaryExpression(resultTy: Type, opKind: ExprKind, left: Value, right: Value,
+        successBlock: Block, errorBlock: Block, parent: Block): TryBinaryExpression {
+        let term = TryBinaryExpression(ToBinaryExprKind(opKind), left, right, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateNumericCastWithException(resultTy: Type, source: Value, successBlock: Block, errorBlock: Block,
-        parent: Block): NumericCastWithException {
-        let term = NumericCastWithException(source, successBlock, errorBlock, parent)
+    public func CreateTryNumericCast(resultTy: Type, source: Value, successBlock: Block, errorBlock: Block,
+        parent: Block): TryNumericCast {
+        let term = TryNumericCast(source, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateIntrinsicWithException(resultTy: Type, callContext: IntrisicCallContext, successBlock: Block,
-        errorBlock: Block, parent: Block): IntrinsicWithException {
-        let term = IntrinsicWithException(callContext, successBlock, errorBlock, parent)
+    public func CreateTryIntrinsic(resultTy: Type, callContext: IntrisicCallContext, successBlock: Block,
+        errorBlock: Block, parent: Block): TryIntrinsic {
+        let term = TryIntrinsic(callContext, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateAllocateWithException(resultTy: Type, allocatedTy: Type, successBlock: Block, errorBlock: Block,
-        parent: Block): AllocateWithException {
-        let term = AllocateWithException(allocatedTy, successBlock, errorBlock, parent)
+    public func CreateTryAllocate(resultTy: Type, allocatedTy: Type, successBlock: Block, errorBlock: Block,
+        parent: Block): TryAllocate {
+        let term = TryAllocate(allocatedTy, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateRawArrayAllocateWithException(resultTy: Type, elementTy: Type, size: Value,
-        successBlock: Block, errorBlock: Block, parent: Block): RawArrayAllocateWithException {
-        let term = RawArrayAllocateWithException(elementTy, size, successBlock, errorBlock, parent)
+    public func CreateTryRawArrayAllocate(resultTy: Type, elementTy: Type, size: Value,
+        successBlock: Block, errorBlock: Block, parent: Block): TryRawArrayAllocate {
+        let term = TryRawArrayAllocate(elementTy, size, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateSpawnWithException(resultTy: Type, value: Value, successBlock: Block, errorBlock: Block,
-        parent: Block): SpawnWithException {
-        let term = SpawnWithException(value, successBlock, errorBlock, parent)
+    public func CreateTrySpawn(resultTy: Type, value: Value, successBlock: Block, errorBlock: Block,
+        parent: Block): TrySpawn {
+        let term = TrySpawn(value, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)
         return term
     }
 
-    public func CreateSpawnWithException(resultTy: Type, value: Value, arg: Value, successBlock: Block,
-        errorBlock: Block, parent: Block): SpawnWithException {
-        let term = SpawnWithException(value, arg, successBlock, errorBlock, parent)
+    public func CreateTrySpawn(resultTy: Type, value: Value, arg: Value, successBlock: Block,
+        errorBlock: Block, parent: Block): TrySpawn {
+        let term = TrySpawn(value, arg, successBlock, errorBlock, parent)
         term.ConnectOperandsAndGroups()
         StoreAllocatedPtrInFuncOrLambda(term.GetFuncOrLambdaBody().getOrThrow(), ptr: Some(term))
         CreateLocalVar(resultTy, "%${term.GetTopLevelFunc().getOrThrow().GenerateLocalId()}", term)

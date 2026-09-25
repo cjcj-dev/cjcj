@@ -134,16 +134,16 @@ public func TranslateInvokeExpression(compiler: CHIR2BCHIR, context: CHIR2BCHIRC
             args: ArrayList<Int64>([numberArgs, 0]), storeCodePos: true)
         context.definition.AddMangledNameAnnotation(opIndex,
             MangleMethodName(invoke.GetMethodName(), invoke.GetMethodType(), omitFirstArg: true))
-    } else if (let Some(invokeWithException) <- (expr as InvokeWithException)) {
-        let numberArgs = invokeWithException.GetArgs().size
+    } else if (let Some(tryInvoke) <- (expr as TryInvoke)) {
+        let numberArgs = tryInvoke.GetArgs().size
         CJC_ASSERT(numberArgs > 0)
         CJC_ASSERT(numberArgs <= BYTECODE_CONTENT_MAX)
         let opCode = if (withException) { OpCode.INVOKE_EXC } else { OpCode.INVOKE }
         let opIndex = context.definition.NextIndex()
         compiler.PushOpCodeWithAnnotations(context, opCode, expr,
             args: ArrayList<Int64>([numberArgs, 0]), storeCodePos: true)
-        context.definition.AddMangledNameAnnotation(opIndex, MangleMethodName(invokeWithException.GetMethodName(),
-            invokeWithException.GetMethodType(), omitFirstArg: true))
+        context.definition.AddMangledNameAnnotation(opIndex, MangleMethodName(tryInvoke.GetMethodName(),
+            tryInvoke.GetMethodType(), omitFirstArg: true))
     } else {
         context.definition.PushOp(OpCode.NOT_SUPPORTED)
     }
