@@ -4,7 +4,7 @@ set -euo pipefail
 src=${1:?compiler source}
 build=${2:?build directory}
 out=${3:?artifact directory}
-nightly=${4:?nightly-1.3.0-alpha.20260924001050 SDK}
+nightly=${4:?official flatbuffers SDK directory}
 mkdir -p "$out"
 start=$SECONDS
 # Host builds keep clang. A Windows target sets CMAKE_TOOLCHAIN_FILE to the

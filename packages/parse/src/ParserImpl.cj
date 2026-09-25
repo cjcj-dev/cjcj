@@ -34,7 +34,6 @@ public class ParserImpl {
     public var curPrimaryDeclIdent: String = ""
     public var curPrimaryDeclIdentIsRaw: Bool = false
     public var enableEH: Bool = false
-    public var enableInteropCJMapping: Bool = false
     public var parseDeclFile: Bool = false
     public var enableAttachComment: Bool = false
     public var compileOptions: GlobalOptions = GlobalOptions()
@@ -143,7 +142,6 @@ public class ParserImpl {
     public func SetCompileOptions(opts: GlobalOptions): Unit {
         compileOptions = opts
         scanDepPkg = opts.scanDepPkg
-        enableInteropCJMapping = opts.enableInteropCJMapping
         enableEH = opts.enableEH
         calculateLineNum = opts.enableTimer || opts.enableMemoryCollect
         lexer.SetEHEnabled(opts.enableEH)

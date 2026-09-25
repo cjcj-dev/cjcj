@@ -12,12 +12,35 @@ import cjcj::utils.{CJC_ABORT_WITH_MSG, CJC_ASSERT, CJC_NULLPTR_CHECK, TEST_ENTR
 private let OPTION_VALUE_CTOR: String = "Some"
 private let OPTION_NONE_CTOR: String = "None"
 
+// C++ std::pair + HashPair (include/cangjie/Utils/Utils.h:60). A tuple is not Hashable.
+public struct ClassInterfaceKey <: Hashable & Equatable<ClassInterfaceKey> {
+    public let classDecl: ClassLikeDecl
+    public let interfaceDecl: InterfaceDecl
+
+    public init(classDecl: ClassLikeDecl, interfaceDecl: InterfaceDecl) {
+        this.classDecl = classDecl
+        this.interfaceDecl = interfaceDecl
+    }
+
+    public operator func ==(right: ClassInterfaceKey): Bool {
+        return classDecl == right.classDecl && interfaceDecl == right.interfaceDecl
+    }
+
+    public operator func !=(right: ClassInterfaceKey): Bool {
+        return !(this == right)
+    }
+
+    public func hashCode(): Int64 {
+        return classDecl.hashCode() ^ interfaceDecl.hashCode()
+    }
+}
+
 public class DeclsToPrepare {
     public let functions: ArrayList<FuncDecl> = ArrayList<FuncDecl>()
     public let properties: ArrayList<PropDecl> = ArrayList<PropDecl>()
     public let interfacesWithDefaults: ArrayList<InterfaceDecl> = ArrayList<InterfaceDecl>()
-    public let classWithInterfaceDefaults: ArrayList<(ClassLikeDecl, InterfaceDecl, Option<ExtendDecl>)> =
-        ArrayList<(ClassLikeDecl, InterfaceDecl, Option<ExtendDecl>)>()
+    public let classWithInterfaceDefaults: HashMap<ClassInterfaceKey, Option<ExtendDecl>> =
+        HashMap<ClassInterfaceKey, Option<ExtendDecl>>()
 
     public init() {}
 }
@@ -69,7 +92,7 @@ private func HasDefaults(interfaceDecl: InterfaceDecl): Bool {
 
 private func FindInterfacesWithDefaults(decl: InheritableDecl): ArrayList<InterfaceDecl> {
     let result = ArrayList<InterfaceDecl>()
-    for (inherited in decl.inheritedTypes) {
+    for (inherited in decl.GetAllSuperDecls()) {
         if (let Some(typeDecl) <- Ty.GetDeclPtrOfTy(inherited.GetTy())) {
             if (let Some(interfaceDecl) <- (typeDecl as InterfaceDecl)) {
                 if (HasDefaults(interfaceDecl)) {
@@ -321,8 +344,8 @@ public class MockSupportManager {
             decl.EnableAttr(Attribute.MOCK_SUPPORTED)
         }
 
-        for ((classDecl, interfaceDecl, extendDecl) in decls.classWithInterfaceDefaults) {
-            PrepareClassLikeWithDefaults(classDecl, interfaceDecl, extendDecl)
+        for ((classInterfaceDecl, extendDecl) in decls.classWithInterfaceDefaults) {
+            PrepareClassLikeWithDefaults(classInterfaceDecl.classDecl, classInterfaceDecl.interfaceDecl, extendDecl)
         }
 
         for (decl in decls.functions) {
@@ -348,20 +371,29 @@ public class MockSupportManager {
         if (let Some(interfaceDecl) <- (decl as InterfaceDecl)) {
             if (HasDefaults(interfaceDecl)) {
                 decls.interfacesWithDefaults.add(interfaceDecl)
-                decls.classWithInterfaceDefaults.add((interfaceDecl, interfaceDecl, None))
+                let key = ClassInterfaceKey(interfaceDecl, interfaceDecl)
+                if (!decls.classWithInterfaceDefaults.contains(key)) {
+                    decls.classWithInterfaceDefaults[key] = None<ExtendDecl>
+                }
             }
             return
         }
         if (let Some(classDecl) <- (decl as ClassDecl)) {
             for (interfaceDecl in FindInterfacesWithDefaults(classDecl)) {
-                decls.classWithInterfaceDefaults.add((classDecl, interfaceDecl, None))
+                let key = ClassInterfaceKey(classDecl, interfaceDecl)
+                if (!decls.classWithInterfaceDefaults.contains(key)) {
+                    decls.classWithInterfaceDefaults[key] = None<ExtendDecl>
+                }
             }
             return
         }
         if (let Some(extendDecl) <- (decl as ExtendDecl)) {
             if (let Some(classDecl) <- GetExtendedClassDecl(extendDecl)) {
                 for (interfaceDecl in FindInterfacesWithDefaults(extendDecl)) {
-                    decls.classWithInterfaceDefaults.add((classDecl, interfaceDecl, Some(extendDecl)))
+                    let key = ClassInterfaceKey(classDecl, interfaceDecl)
+                    if (!decls.classWithInterfaceDefaults.contains(key)) {
+                        decls.classWithInterfaceDefaults[key] = Some(extendDecl)
+                    }
                 }
             }
             return
