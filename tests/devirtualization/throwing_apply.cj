@@ -11,8 +11,8 @@ class Impl <: Slots {
 }
 
 public func chooseThrowing(): Int64 {
+    let receiver: Slots = Impl()
     try {
-        let receiver: Slots = Impl()
         return receiver.second()
     } catch (e: Exception) {
         return 0

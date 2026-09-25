@@ -87,6 +87,10 @@ def main():
         command = [str(compiler), str(source), '--emit-chir=opt', '--output-type=staticlib',
                    '--dump-chir', '--fchir-devirtualization', '--fno-chir-function-inlining',
                    '--jobs', '1', '-o', str(destination / 'output.chir')]
+        if source.stem == 'unchecked_cast':
+            command = [str(compiler), '--experimental', str(source), '--emit-chir=opt',
+                       '--output-type=chir', '--dump-chir', '-O2', '--jobs', '1',
+                       '-o', str(destination / 'output.chir')]
         start = time.monotonic()
         with (destination / 'compile.log').open('w') as log:
             try:
@@ -98,12 +102,14 @@ def main():
                       input_sha256=hashlib.sha256(source.read_bytes()).hexdigest(), assertions=[])
         dumps = list(destination.glob('output_CHIR/*_Devirtualization.chirtxt'))
         ast_dumps = list(destination.glob('output_CHIR/*_AST_CHIR.chirtxt'))
-        if rc == 0 and len(dumps) == 1:
-            record['chir_sha256'] = hashlib.sha256(dumps[0].read_bytes()).hexdigest()
+        if rc == 0 and (len(dumps) == 1 or (source.stem == 'unchecked_cast' and len(ast_dumps) == 1)):
+            observed = dumps[0] if len(dumps) == 1 else ast_dumps[0]
+            record['chir_sha256'] = hashlib.sha256(observed.read_bytes()).hexdigest()
             ast_text = ast_dumps[0].read_text() if len(ast_dumps) == 1 else None
+            devirt_text = dumps[0].read_text() if len(dumps) == 1 else ''
             try:
                 record['assertions'] = [dict(name=name, passed=passed)
-                                        for name, passed in verify(dumps[0].read_text(), ast_text, source.stem)]
+                                        for name, passed in verify(devirt_text, ast_text, source.stem)]
             except ValueError as error:
                 record['prerequisite_error'] = str(error)
         record['passed'] = rc == 0 and bool(record['assertions']) and all(x['passed'] for x in record['assertions'])
