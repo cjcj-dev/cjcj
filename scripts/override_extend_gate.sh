@@ -34,3 +34,24 @@ set +e
     > "$work/control/compiler.log" 2>&1
 echo "$?" > "$work/control/compiler.rc"
 uptime > "$work/load-after"
+python3 - "$work" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+checks = {}
+for name in ('02', '03'):
+    for step in ('dependency', 'compiler'):
+        path = root / name / (step + '.rc')
+        checks[name + '/' + step] = path.exists() and path.read_text().strip() == '0'
+checks['control/compiler'] = (root / 'control/compiler.rc').read_text().strip() == '0'
+for case in ('02/main', '03/main', 'control'):
+    checks[case + '/chir'] = (root / case / 'result_Emit_Debug.chirtxt').is_file()
+outputs = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
+           for p in root.rglob('*') if p.is_file() and p.name in ('result', 'result_Emit_Debug.chirtxt')}
+(root / 'result.json').write_text(json.dumps({'checks': checks, 'outputs': outputs}, indent=2) + '\n')
+for name, passed in checks.items():
+    print(('PASS ' if passed else 'FAIL ') + name)
+sys.exit(0 if all(checks.values()) else 1)
+PY

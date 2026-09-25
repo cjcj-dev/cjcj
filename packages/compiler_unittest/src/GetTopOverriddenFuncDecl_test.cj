@@ -104,11 +104,14 @@ public class GetTopOverriddenFuncDeclTest {
 
     @TestCase
     public func alreadyTopReturnsItself(): Unit {
-        let result = CompileSource("package control\npublic interface I { func f(): Int64 }", stage: CompileStage.SEMA)
-        @Assert(result.ok)
-        let decl = (RequireFirstPackage(result).files[0].decls[0] as InterfaceDecl).getOrThrow()
+        let dir = getVariable("TMPDIR").getOrThrow() + "/override-control-" + GenerateRandomHexString()
+        let _ = FileUtil.CreateDirs(dir + "/")
+        let instance = NewOverrideInstance("package control\npublic interface I { func f(): Int64 }", dir, "control")
+        let ok = instance.Compile(stage: CompileStage.SEMA)
+        @Assert(ok)
+        let decl = (instance.GetSourcePackages()[0].files[0].decls[0] as InterfaceDecl).getOrThrow()
         let fd = (decl.GetMemberDecls()[0] as FuncDecl).getOrThrow()
-        let top = result.instance.faithfulSemaInstance.getOrThrow().typeManager.GetTopOverriddenFuncDecl(Some(fd))
+        let top = instance.faithfulSemaInstance.getOrThrow().typeManager.GetTopOverriddenFuncDecl(Some(fd))
         @Expect(top.isSome() && SameDecl(top.getOrThrow(), fd))
         println("OVERRIDE_CONTROL_ASSERT top=I.f")
     }
