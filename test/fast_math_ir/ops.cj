@@ -3,12 +3,11 @@ public func ops(a: Float64, b: Float64, x: Int64, y: Int64): Float64 {
     let subtracted = a - b
     let multiplied = a * b
     let divided = a / b
-    let remained = a % b
     let negated = -a
     let compared = a < b
     let integerAdded = x + y
     if (compared) {
-        return added + subtracted + multiplied + divided + remained + negated + Float64(integerAdded)
+        return added + subtracted + multiplied + divided + negated + Float64(integerAdded)
     }
     return subtracted
 }

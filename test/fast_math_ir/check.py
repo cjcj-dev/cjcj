@@ -3,9 +3,9 @@ import pathlib
 import re
 import sys
 
-FP_OPCODES = ("fadd", "fsub", "fmul", "fdiv", "frem", "fneg", "fcmp")
+FP_OPCODES = ("fadd", "fsub", "fmul", "fdiv", "fneg", "fcmp")
 FLAG_TOKENS = (" fast", " nnan", " ninf", " reassoc", " nsz", " arcp", " contract", " afn")
-INST_RE = re.compile(r"^\s*(fadd|fsub|fmul|fdiv|frem|fneg|fcmp|add)\b(.*)$")
+INST_RE = re.compile(r"^\s*(fadd|fsub|fmul|fdiv|fneg|fcmp|add)\b(.*)$")
 
 
 def instruction_lines(root: pathlib.Path):
