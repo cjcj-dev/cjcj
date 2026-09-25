@@ -236,7 +236,7 @@ public open class InheritableDecl <: Decl & Hashable & Equatable<InheritableDecl
         return out
     }
 
-    public func GetAllSuperDecls(): ArrayList<ClassLikeDecl> {
+    public func GetAllSuperDecls(obtainSpecific!: Bool = false): ArrayList<ClassLikeDecl> {
         let out = ArrayList<ClassLikeDecl>()
         let workList = ArrayList<InheritableDecl>()
         if (let Some(selfClassLike) <- (this as ClassLikeDecl)) {
@@ -250,21 +250,24 @@ public open class InheritableDecl <: Decl & Hashable & Equatable<InheritableDecl
             let current = workList[workIdx]
             workIdx++
             for (typeNode in current.inheritedTypes) {
-                if (let Some(ty) <- typeNode.GetTy()) {
-                    if (let Some(classTy) <- (ty as ClassTy)) {
-                        if (let Some(classDecl) <- classTy.declPtr) {
-                            if (!containsClassLikeDecl(out, classDecl)) {
-                                workList.add(classDecl)
-                                out.add(classDecl)
-                            }
-                        }
-                    } else if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
-                        if (let Some(interfaceDecl) <- interfaceTy.declPtr) {
-                            if (!containsClassLikeDecl(out, interfaceDecl)) {
-                                workList.add(interfaceDecl)
-                                out.add(interfaceDecl)
-                            }
-                        }
+                if (!Ty.IsTyCorrect(typeNode.GetTy())) {
+                    continue
+                }
+                let ty = typeNode.GetTy().getOrThrow()
+                var declPtr: Option<ClassLikeDecl> = None
+                if (obtainSpecific && (ty.IsClass() || ty.IsInterface())) {
+                    if (let Some(resolved) <- Ty.GetDeclPtrOfTy(Some(ty))) {
+                        declPtr = resolved as ClassLikeDecl
+                    }
+                } else if (let Some(classTy) <- (ty as ClassTy)) {
+                    declPtr = classTy.declPtr
+                } else if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
+                    declPtr = interfaceTy.declPtr
+                }
+                if (let Some(resolvedDecl) <- declPtr) {
+                    if (!containsClassLikeDecl(out, resolvedDecl)) {
+                        workList.add(resolvedDecl)
+                        out.add(resolvedDecl)
                     }
                 }
             }

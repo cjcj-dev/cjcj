@@ -4,8 +4,16 @@ package cjcj::ast
 extend FuncDecl <: Comparable<FuncDecl> {
     public operator func ==(right: FuncDecl): Bool { return SameDecl(this, right) }
     public operator func !=(right: FuncDecl): Bool { return !SameDecl(this, right) }
-    public operator func <(right: FuncDecl): Bool { return objectId < right.objectId }
-    public func compare(right: FuncDecl): Ordering { return objectId.compare(right.objectId) }
+    public operator func <(right: FuncDecl): Bool { return CompNodeByPos(this, right) }
+    public func compare(right: FuncDecl): Ordering {
+        if (SameDecl(this, right)) {
+            return Ordering.EQ
+        }
+        if (CompNodeByPos(this, right)) {
+            return Ordering.LT
+        }
+        return Ordering.GT
+    }
 }
 
 extend ClassLikeDecl <: Comparable<ClassLikeDecl> {

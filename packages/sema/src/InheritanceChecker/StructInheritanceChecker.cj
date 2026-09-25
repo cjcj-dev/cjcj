@@ -1437,7 +1437,6 @@ public class StructInheritanceChecker {
             CheckNativeFFI(parent, child)
             if (shouldUpdate) {
                 if (parentDecl.TestAttr(Attribute.ABSTRACT) || !childDecl.TestAttr(Attribute.ABSTRACT)) {
-                    UpdateOverriddenFuncDeclCache(childDecl, parentDecl)
                     entry.signature = updated.Clone()
                 }
                 entry.signature.replaceOther = true
@@ -1506,17 +1505,6 @@ public class StructInheritanceChecker {
                 UpdateUpperBoundsSetForInheritance(typeManager, memberSig.upperBounds, typeMapping)
             }
             let _ = UpdateInheritedMemberIfNeeded(members, memberSig, inheritedInterfaces: inheritedInterfaces)
-        }
-    }
-
-    private func UpdateOverriddenFuncDeclCache(child: Decl, parent: Decl): Unit {
-        if (checkingDecls.isEmpty()) {
-            return
-        }
-        if (let Some(outer) <- child.outerDecl) {
-            if (SameDecl(outer, checkingDecls[checkingDecls.size - 1])) {
-                typeManager.UpdateTopOverriddenFuncDeclMap(child, parent)
-            }
         }
     }
 
