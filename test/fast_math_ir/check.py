@@ -13,7 +13,7 @@ def instruction_lines(root: pathlib.Path):
     files = sorted(root.rglob("*.ll"))
     for path in files:
         for lineno, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
-            match = INST_RE.match(line)
+            match = INST_RE.search(line)
             if match is None:
                 continue
             found.append((match.group(1), line.rstrip(), f"{path}:{lineno}"))
