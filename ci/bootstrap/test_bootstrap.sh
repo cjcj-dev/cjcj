@@ -150,6 +150,8 @@ check_dry_contract() {
   check_count LLVM-RULER 2 'ASSERT colour-opt-stamp ruler=strings .* hits=1' "$log"
   check_count STD-BOOTSTRAP 1 'sdk_build.sh .*--to .*sdk-std-bootstrap --host --llvm-tuple' "$log"
   check_count STD-BOOTSTRAP 1 'CMD env .*CANGJIE_HOME=.*/sdk-std-bootstrap .*bash .*/stdsrc .* .*/std-runtime-link .*/stdlib-stage1' "$log"
+  check_count STD-BOOTSTRAP 1 'sdk_build.sh .*--to .*sdk-std-bootstrap .*--colour-runtime .*/colour-rt/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so --host-runtime .*/host-rt/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so' "$log"
+  check_count STD-BOOTSTRAP 1 'std_runtime_colour.py --colour-runtime .*/colour-rt/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so --host-runtime .*/host-rt/runtime/lib/linux_x86_64_cjnative/libcangjie-runtime.so --runtime .* --std .*/stdlib-stage1/lib/linux_x86_64_cjnative/libcangjie-std-core.a' "$log"
   # stage1 assembles the SDK on both sides of the target stdlib build.
   # Counts alone would also accept two assemblies using the old stdlib.
   local assembly_order
