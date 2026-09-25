@@ -27,6 +27,7 @@ HEAP="${CJ_HEAP:-96GB}"
 STAGE1_HEAP="${STAGE1_HEAP:-20GB}"
 JOBS="${CJ_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
 SDK_BUILD="${SDK_BUILD:-$(dirname "${BASH_SOURCE[0]}")/sdk_build.sh}"
+SDK_VERIFY="${SDK_VERIFY:-$(dirname "${BASH_SOURCE[0]}")/sdk_verify.py}"
 STAGE1_HOST_RUNNER="${STAGE1_HOST_RUNNER:-$(dirname "${BASH_SOURCE[0]}")/stage1_host_runner.sh}"
 STAGE0_CACHE_ROOT="${STAGE0_CACHE_ROOT:-/root/stage0depot}"
 BUILD_TMPDIR=''
@@ -621,6 +622,9 @@ stage0() {
   sdk="$WORK/sdk-stage0"
   echo "OUTPUT cjcj-stage1=$out"
   cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$base") --to $(printf '%q' "$sdk") --host --llvm-so $(printf '%q' "$HOST_LLVM_SO") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
+  if [ "$DRY" -eq 0 ]; then
+    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role host --runtime-pin $(printf '%q' "$SRC/ci/runtime_pin.env")"
+  fi
   assert_installed_llvm_so "$sdk" "$HOST_LLVM_SO"
   cmd "install -Dm644 $(printf '%q' "$AST_SUPPORT") $(printf '%q' "$sdk/lib/$HOST_TUPLE/libcangjie-ast-support.a")"
   if [ "$DRY" -eq 0 ]; then
@@ -664,6 +668,9 @@ stage0() {
 assemble_stage1_sdk() {
   local sdk="$1" compiler="$2" std="$3"
   cmd "bash $(printf '%q' "$SDK_BUILD") --from $(printf '%q' "$WORK/sdk-stage0") --to $(printf '%q' "$sdk") --target $(printf '%q' "$HOST_TUPLE") --cjc $(printf '%q' "$compiler") --llvm-tuple $(printf '%q' "$COLOUR_TUPLE") --runtime $(printf '%q' "$CRT") --std $(printf '%q' "$std") --verify-host-rt $(printf '%q' "$HRT") --colour-runtime $(printf '%q' "$(runtime_dir "$CRT")/libcangjie-runtime.so") --host-runtime $(printf '%q' "$(runtime_dir "$HRT")/libcangjie-runtime.so") --force"
+  if [ "$DRY" -eq 0 ]; then
+    cmd "python3 $(printf '%q' "$SDK_VERIFY") --sdk $(printf '%q' "$sdk") --role target --runtime-pin $(printf '%q' "$SRC/ci/runtime_pin.env")"
+  fi
   assert_installed_llvm_tuple "$sdk" "$COLOUR_TUPLE"
   cmd "install -m644 $(printf '%q' "$COLOUR_LLVM_SO") $(printf '%q' "$sdk/third_party/llvm/lib/libLLVM-15.so")"
   if [ "$DRY" -eq 0 ]; then

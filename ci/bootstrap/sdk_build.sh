@@ -658,4 +658,38 @@ echo
 for rel in bin/cjc third_party/llvm/bin/llc third_party/llvm/bin/opt tools/bin/cjpm; do
   [ -f "$TO/$rel" ] && printf 'SDK-BUILD-SHA %-34s %s\n' "$rel" "$(sha256sum "$TO/$rel" | awk '{print $1}')"
 done
+
+echo "[lock] SDK.lock.json + sdk_verify"
+_SDK_VERIFY="$(dirname "${BASH_SOURCE[0]}")/sdk_verify.py"
+_PIN="$(dirname "${BASH_SOURCE[0]}")/../runtime_pin.env"
+_IDENT=$(mktemp)
+_CJC_SHA=''
+if [ -f "$TO/bin/cjcj-stage1" ]; then
+  _CJC_SHA=$(sha256sum "$TO/bin/cjcj-stage1" | awk '{print $1}')
+elif [ -f "$TO/bin/cjc" ] && [ ! -L "$TO/bin/cjc" ]; then
+  _CJC_SHA=$(sha256sum "$TO/bin/cjc" | awk '{print $1}')
+elif [ -f "$TO/bin/cjc" ]; then
+  _CJC_SHA=$(sha256sum "$TO/bin/cjc" | awk '{print $1}')
+fi
+_RT_COMMIT="${RUNTIME_COMMIT:-}"
+if [ -z "$_RT_COMMIT" ] && [ -f "$_PIN" ]; then
+  _RT_COMMIT=$(awk -F= '/^RUNTIME_REF=/ {print $2}' "$_PIN")
+fi
+python3 - "$_IDENT" "$ROLE" "$_CJC_SHA" "$_RT_COMMIT" <<'PY'
+import json, sys
+path, role, cjc, commit = sys.argv[1:5]
+payload = {
+    "role": role,
+    "cjc": {"compiler_sha256": cjc or None},
+    "std": {"compiler_sha256": cjc or None, "source": "sdk_build"},
+    "runtime": {"commit": commit or None},
+    "llvm": {},
+    "cjpm": {},
+    "boundscheck": {"commit": commit or None},
+}
+open(path, "w").write(json.dumps(payload))
+PY
+python3 "$_SDK_VERIFY" --sdk "$TO" --role "$ROLE" --runtime-pin "$_PIN" --identities "$_IDENT" --write-lock \
+  || { rm -f "$_IDENT"; die "sdk_verify 拒绝本枚 SDK（见 SDK-VERIFY-FAIL）"; }
+rm -f "$_IDENT"
 echo "SDK-BUILD-OK role=$ROLE from=$BASE to=$TO mask=$MASK"
