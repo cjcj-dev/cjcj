@@ -6,7 +6,8 @@
 It checks the returned Bool, execution of the TARGET assertion, and the exact
 constraint argument index in the product diagnostic. Legal interface arguments,
 intersection bounds, parent/function argument ordering, empty arguments and
-arity mismatches are separate cases. The control has no instantiation expression.
+arity mismatches are separate cases. Nested local-function cases check outer and
+inner generic arguments through the recursive collector. The control has no instantiation expression.
 
 ```sh
 python3 tests/instantiate_value/run.py --build-tree /path/to/product-tree \

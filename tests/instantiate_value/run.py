@@ -61,14 +61,14 @@ def main():
     if record['build_rc'] == 0:
         record['elf_sha256'] = digest(executable)
         record['cases'] = {}
-        for mode in ('control', 'function-good', 'function-bad', 'parent-good', 'parent-bad', 'function-intersection', 'parent-intersection', 'mixed-good', 'mixed-parent-bad', 'mixed-function-bad', 'empty', 'arity', 'gone'):
+        for mode in ('control', 'function-good', 'function-bad', 'parent-good', 'parent-bad', 'function-intersection', 'parent-intersection', 'mixed-good', 'mixed-parent-bad', 'mixed-function-bad', 'nested-good', 'nested-outer-bad', 'nested-inner-bad', 'empty', 'arity', 'gone'):
             start = time.monotonic()
             with (out / (mode + '.log')).open('w') as log:
                 rc = subprocess.call([str(executable), mode], cwd=tree, env=env,
                                      stdout=log, stderr=subprocess.STDOUT)
             output = (out / (mode + '.log')).read_text()
             target = 'TARGET mode=' + mode
-            index = "2nd" if mode == "mixed-function-bad" else "1st"
+            index = "2nd" if mode in ("mixed-function-bad", "nested-inner-bad") else "1st"
             diagnostic = (f"the {index} instantiated type(s) don't satisfy the generic constraints." if mode.endswith('bad')
                           else 'there must be instantiated type' if mode == 'empty'
                           else 'generic param type(s) in total' if mode == 'arity'

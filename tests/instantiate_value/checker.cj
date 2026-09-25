@@ -20,6 +20,7 @@ main(args: Array<String>): Int64 {
     let generic = context.GetGenericTy("T")
     generic.SetUpperBounds(ArrayList<Type>([typeA]))
     let callee = builder.CreateFunction(fnTy, "callee", packageName: pkg.GetName())
+    let isNested = mode.startsWith("nested")
     let isMixed = mode.startsWith("mixed")
     let isParent = mode.startsWith("parent") || isMixed
     if (isParent) {
@@ -42,9 +43,25 @@ main(args: Array<String>): Int64 {
     caller.InitBody(body)
     let block = builder.CreateBlock(body)
     body.SetEntryBlock(block)
+    var target: Value = callee
+    if (isNested) {
+        caller.AddGenericTypeParam(generic)
+        let innerGeneric = context.GetGenericTy("U")
+        innerGeneric.SetUpperBounds(ArrayList<Type>([typeB]))
+        let inner = builder.CreateLambda(fnTy, fnTy, block, isLocalFunc: true,
+            identifier: "inner", srcCodeIdentifier: "inner",
+            genericTypeParams: ArrayList<GenericType>([innerGeneric]))
+        let innerBody = builder.CreateBlockGroup(caller)
+        inner.InitBody(innerBody)
+        let innerBlock = builder.CreateBlock(innerBody)
+        innerBody.SetEntryBlock(innerBlock)
+        innerBlock.AppendExpression(builder.CreateExit(None, innerBlock))
+        block.AppendExpression(inner)
+        target = inner.GetResult().getOrThrow()
+    }
     let actuals = ArrayList<Type>()
     if (mode != "empty") {
-        let badParent = mode.endsWith("bad") && mode != "mixed-function-bad"
+        let badParent = mode.endsWith("bad") && mode != "mixed-function-bad" && mode != "nested-inner-bad"
         if (mode.endsWith("intersection")) {
             let actual = context.GetGenericTy("S")
             actual.SetUpperBounds(ArrayList<Type>([typeA, typeB]))
@@ -53,12 +70,12 @@ main(args: Array<String>): Int64 {
         } else {
             actuals.add(if (badParent) { typeB } else { typeA })
         }
-        if (isMixed) {
-            actuals.add(if (mode == "mixed-function-bad") { typeA } else { typeB })
+        if (isMixed || isNested) {
+            actuals.add(if (mode == "mixed-function-bad" || mode == "nested-inner-bad") { typeA } else { typeB })
         }
     }
     if (mode == "arity") { actuals.add(typeA) }
-    let inst = builder.CreateGetInstantiateValue(fnTy, callee, actuals, block)
+    let inst = builder.CreateGetInstantiateValue(fnTy, target, actuals, block)
     if (mode != "control") { block.AppendExpression(inst) }
     block.AppendExpression(builder.CreateExit(None, block))
     println("INPUT bodies=${pkg.GetGlobalFuncsWithBody().size} " +
