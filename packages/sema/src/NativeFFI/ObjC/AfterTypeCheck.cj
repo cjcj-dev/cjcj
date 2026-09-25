@@ -446,6 +446,19 @@ public class ASTFactory {
         return CreateThrowException(exceptionDecl.getOrThrow(), ArrayList<Expr>(), file, typeManager)
     }
 
+    // Upstream 39ad854f, ASTFactory.cpp:998-1012.
+    public func CreateObjCInitException(file: File, cls: ClassLikeDecl): ThrowExpr {
+        let exceptionDecl = bridge.GetObjCInitException()
+        CJC_NULLPTR_CHECK(exceptionDecl)
+        let argTy = GetStringDecl(importManager).GetTy().getOrThrow()
+        let className = NameGenerator.GetObjCDeclName(cls)
+        let message = "Initialization error: expected " + className + ", got nil."
+        let arg = CreateLitConstExpr(LitConstKind.STRING, message, argTy)
+        let args = ArrayList<Expr>()
+        args.add(arg)
+        return CreateThrowException(exceptionDecl.getOrThrow(), args, file, typeManager)
+    }
+
     // C++ src/Sema/NativeFFI/ObjC/Utils/ASTFactory.cpp:1336-1341.
     public func CreateThrowStaticMethodCallOnInterfaceExpr(file: File): ThrowExpr {
         let exceptionDecl = bridge.GetObjCStaticMethodCallOnIntefaceExceptionDecl()
@@ -4573,7 +4586,30 @@ public class DesugarMirrors <: Handler<InteropContext> {
         CJC_ASSERT_WITH_MSG(mirror.astKind == ASTKind.CLASS_DECL,
             "Expected ASTKind::CLASS_DECL instead of " + ASTKindName(mirror.astKind))
         let initCall = ctx.factory.CreateAllocInitCall(ctor)
-        thisCall.args.add(CreateFuncArg(initCall))
+        // Upstream 39ad854f, DesugarMirrors.cpp:102-132. Lambda wrap stays in DesugarCtor; do not extract CreateCheckedAllocInit.
+        let tempVar = CreateTmpVarDecl(Some(CreateType(initCall.GetTy().getOrThrow())), Some(initCall))
+        tempVar.curFile = curFile
+        let refExpr = CreateRefExpr(tempVar)
+        let checkForNull = ctx.factory.CreateGetObjcEntityOrNullCall(tempVar, mirror.curFile)
+        let throwExpr = ctx.factory.CreateObjCInitException(curFile.getOrThrow(), mirror)
+        let throwBody = ArrayList<Node>()
+        throwBody.add(throwExpr)
+        let body = CreateBlock(throwBody)
+        CopyBasicInfo(ctor.outerDecl.getOrThrow(), body)
+        body.curFile = mirror.curFile
+        body.SetTy(TypeManager.GetNothingTy())
+        let ifExpr = CreateIfExpr(checkForNull, body)
+        CopyBasicInfo(ctor.outerDecl.getOrThrow(), ifExpr)
+        ifExpr.curFile = mirror.curFile
+        ifExpr.SetTy(CreateUnitType(mirror.curFile).GetTy().getOrThrow())
+        let nodes = ArrayList<Node>()
+        nodes.add(tempVar)
+        nodes.add(ifExpr)
+        nodes.add(refExpr)
+        let lambdaCall = WrapReturningLambdaCall(ctx.typeManager, nodes)
+        CopyBasicInfo(ctor.outerDecl.getOrThrow(), lambdaCall)
+        lambdaCall.curFile = mirror.curFile
+        thisCall.args.add(CreateFuncArg(lambdaCall))
         ctx.factory.AddMarkerToCallIfNeeded(thisCall)
         ctor.constructorCall = ConstructorCall.OTHER_INIT
         ctor.funcBody.getOrThrow().body.getOrThrow().body.add(thisCall)
