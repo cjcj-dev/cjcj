@@ -25,6 +25,7 @@ import cjcj::chir.Load
 import cjcj::chir.LocalVar
 import cjcj::chir.RawArrayType
 import cjcj::chir.RuneLiteral
+import cjcj::chir.Store
 import cjcj::chir.StringLiteral
 import cjcj::chir.StructType
 import cjcj::chir.TupleType
@@ -81,6 +82,57 @@ private let LLVM_ARRAY_TYPE_KIND: Int32 = 11
 private let LLVM_POINTER_TYPE_KIND: Int32 = 12
 private let LLVM_VECTOR_TYPE_KIND: Int32 = 13
 private let LLVM_SCALABLE_VECTOR_TYPE_KIND: Int32 = 17
+
+// Upstream 1bac07c4 CJNativeIRBuilder.cpp:27-92.
+private func IsIgnoredExprBetweenTailCallAndExit(expr: Expression, parentFunc: Function,
+    applyResult: LocalVar): Bool {
+    if (expr.GetExprKind() == ExprKind.DEBUGEXPR) {
+        return true
+    }
+    if (expr.GetExprKind() != ExprKind.STORE) {
+        return false
+    }
+    let store = (expr as Store).getOrThrow()
+    let retValue = parentFunc.GetReturnValue() ?? return false
+    if (store.GetLocation() != retValue) {
+        return false
+    }
+    let value = store.GetValue()
+    return value == applyResult || value.GetType().getOrThrow().IsUnit()
+}
+
+private func IsTailPositionApply(applyWrapper: CHIRCallExpr): Bool {
+    let callerFunc = applyWrapper.GetTopLevelFunc().getOrThrow()
+    let applyExpr = applyWrapper.GetExpression()
+    let applyResult = applyExpr.GetResult().getOrThrow()
+    let parentBlock = applyExpr.GetParentBlock().getOrThrow()
+    let terminator = parentBlock.GetTerminator() ?? return false
+    if (terminator.GetExprKind() != ExprKind.EXIT) {
+        return false
+    }
+    let exprs = parentBlock.GetNonTerminatorExpressions()
+    var applyIndex: Int64 = 0
+    while (applyIndex < exprs.size && exprs[applyIndex] != applyExpr) {
+        applyIndex++
+    }
+    if (applyIndex == exprs.size) {
+        return false
+    }
+    var seenApplyResultStore = false
+    for (index in applyIndex + 1 .. exprs.size) {
+        let expr = exprs[index]
+        if (!IsIgnoredExprBetweenTailCallAndExit(expr, callerFunc, applyResult)) {
+            return false
+        }
+        if (let Some(store) <- (expr as Store)) {
+            if (store.GetLocation() == callerFunc.GetReturnValue().getOrThrow() &&
+                (store.GetValue() == applyResult || store.GetValue().GetType().getOrThrow().IsUnit())) {
+                seenApplyResultStore = true
+            }
+        }
+    }
+    return seenApplyResultStore
+}
 
 private func SignedInt64Bits(value: Int64): UInt64 {
     if (value >= 0) {
@@ -2355,6 +2407,22 @@ public class IRBuilder2 <: Resource {
         return result
     }
 
+    private func ReuseCallerSRetForApply(applyWrapper: CHIRCallExpr, calleeType: CGFunctionType): Bool {
+        if (GetCGContext().GetCompileOptions().optimizationLevel == OptimizationLevel.O0) {
+            return false
+        }
+        let callerCGFunc = GetInsertCGFunction().getOrThrow()
+        if (!callerCGFunc.IsSRet()) {
+            return false
+        }
+        let callerSRetArg = unsafe { LLVMGetParam(GetInsertFunction(), 0u32) }
+        let calleeSRetArgTy = GetLLVMFunctionParamType(calleeType.GetLLVMFunctionType(), 0u32).getOrThrow()
+        if (unsafe { LLVMTypeOf(callerSRetArg) }.toUIntNative() != calleeSRetArgTy.toUIntNative()) {
+            return false
+        }
+        return IsTailPositionApply(applyWrapper)
+    }
+
     private func TransformFuncArgs(calleeType: CGFunctionType, args: ArrayList<CGValue>,
         methodTypeInfoArg: Option<LLVMValueRef>, instTypeArgs: ArrayList<Type>,
         sretTypeInfoArg: Option<LLVMValueRef>, thisTypeInfoArg: Option<LLVMValueRef>,
@@ -2376,7 +2444,13 @@ public class IRBuilder2 <: Resource {
         if (calleeType.HasSRet()) {
             if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
                 let retCGType = CGType.GetOrCreate(cgMod, funcType.GetReturnType())
-                callArgs.add(CreateSRetAlloca(funcType.GetReturnType(), retCGType, sretTypeInfoArg, name: name))
+                let canReuseCallerSRet = callExprWrapper.isSome() &&
+                    ReuseCallerSRetForApply(callExprWrapper.getOrThrow(), calleeType)
+                if (canReuseCallerSRet) {
+                    callArgs.add(unsafe { LLVMGetParam(GetInsertFunction(), 0u32) })
+                } else {
+                    callArgs.add(CreateSRetAlloca(funcType.GetReturnType(), retCGType, sretTypeInfoArg, name: name))
+                }
             }
         }
         if (let Some(funcType) <- (calleeType.GetOriginal() as FuncType)) {
@@ -2764,7 +2838,9 @@ public class IRBuilder2 <: Resource {
             AddNoAliasAttribute(callBase)
             AddSRetAttribute(callBase, GetSRetAttributeType(returnTy, returnCGType))
             retValue = callArgs[0]
-            if (returnCGType.GetSize().isNone()) {
+            let applyWrapper = chirExpr.getOrThrow() as CHIRCallExpr
+            if (returnCGType.GetSize().isNone() &&
+                (applyWrapper.isNone() || !ReuseCallerSRetForApply(applyWrapper.getOrThrow(), calleeType))) {
                 let expression = chirExpr.getOrThrow().GetExpression()
                 let resultTy = if (expression.GetExprKind() == ExprKind.VARRAY_BUILDER) {
                     let varrayBuilder = (expression as VArrayBuilder).getOrThrow()
