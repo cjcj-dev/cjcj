@@ -56,11 +56,11 @@ def canonicalize(package):
     return encoded, changes
 
 
-def compile_case(compiler, source, output, imports, schema, flatc, jobs):
+def compile_case(compiler, source, output, imports, schema, flatc, jobs, optimization="O2"):
     output.mkdir(parents=True, exist_ok=True)
     command = [str(compiler)]
     command += ['-p', str(source)] if source.is_dir() else [str(source)]
-    command += ['--emit-chir=opt', '--output-type=staticlib', '-O2', '--jobs', str(jobs),
+    command += ['--emit-chir=opt', '--output-type=staticlib', '-' + optimization, '--jobs', str(jobs),
                 '-o', str(output / 'output.chir')]
     for directory in imports:
         command += ['--import-path', str(directory)]
@@ -103,6 +103,7 @@ def main():
     p.add_argument('--out', type=Path, required=True)
     p.add_argument('--jobs', type=int, default=os.cpu_count())
     p.add_argument('--fixture-only', action='store_true')
+    p.add_argument('--optimization', choices=('O0', 'O2'), default='O2')
     p.add_argument('--workers', type=int, default=8, help='independent compiler processes')
     p.add_argument('--indices', help='comma separated original input indices; other results remain recorded')
     p.add_argument('--baseline-results', type=Path, help='reuse successful immutable baseline outputs with matching compiler SHA')
@@ -116,7 +117,7 @@ def main():
                              [('baseline', args.baseline), ('candidate', args.candidate)]},
                 'schema_sha256': sha(args.schema), 'flatc_sha256': sha(args.flatc),
                 'affinity': sorted(os.sched_getaffinity(0)), 'jobs_per_serialization': args.jobs,
-                'parallel_compilers': args.workers, 'library_sources': list(map(str, sources)), 'cases': []}
+                'parallel_compilers': args.workers, 'optimization': args.optimization, 'library_sources': list(map(str, sources)), 'cases': []}
     cases = [{'source': str(source)} for source in fixtures + sources]
     if (args.out / 'result.json').exists():
         saved = json.loads((args.out / 'result.json').read_text())
@@ -130,6 +131,7 @@ def main():
         assert prior['compilers']['baseline']['sha256'] == sha(args.baseline), 'baseline identity mismatch'
         assert prior['schema_sha256'] == sha(args.schema), 'schema identity mismatch'
         assert prior['jobs_per_serialization'] == args.jobs, 'baseline recipe mismatch'
+        assert prior.get('optimization', 'O2') == args.optimization, 'baseline optimization mismatch'
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
         pending = {}
         for index, source in enumerate(fixtures + sources):
@@ -146,7 +148,7 @@ def main():
                         cases[index][name] = result
                         continue
                 future = pool.submit(compile_case, exe, source, args.out / str(index) / name,
-                                     imports, args.schema, args.flatc, args.jobs)
+                                     imports, args.schema, args.flatc, args.jobs, args.optimization)
                 pending[future] = (index, name)
         for future in concurrent.futures.as_completed(pending):
             index, name = pending[future]
