@@ -169,7 +169,7 @@ public class UnreachableBranchCheck {
     private func VisitFunc<T>(result: Results<T>): Unit where T <: AbstractDomain<T> {
         let actionBeforeVisitExpr = { _: T, _: Expression, _: Int64 => }
         let actionAfterVisitExpr = { _: T, _: Expression, _: Int64 => }
-        let actionOnTerminator = { _: T, terminator: Terminator, targetSucc: Option<Block> =>
+        let actionOnTerminator = { _: T, terminator: Expression, targetSucc: Option<Block> =>
             if (let Some(target) <- targetSucc) {
                 if (let Some(branch) <- (terminator as Branch)) { VisitBranch(branch, target) }
                 else if (let Some(branch) <- (terminator as MultiBranch)) { VisitMultiBranch(branch, target) }

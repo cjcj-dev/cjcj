@@ -1,41 +1,30 @@
 package cjcj::codegen
 
 import std.collection.*
-import cjcj::chir.Allocate
-import cjcj::chir.AllocateWithException
+import cjcj::chir.AllocateBase
 import cjcj::chir.ClassType
-import cjcj::chir.Expression
 import cjcj::chir.Type
 
-public func GenerateAllocate(irBuilder: IRBuilder2, chirExpr: Expression): LLVMValueRef {
-    let allocatedTy: Option<Type> = if (let Some(allocateExpr) <- (chirExpr as Allocate)) {
-        Some(allocateExpr.GetType())
-    } else if (let Some(allocateWithException) <- (chirExpr as AllocateWithException)) {
-        Some(allocateWithException.GetType())
-    } else {
-        None
-    }
-    if (let Some(actualAllocatedTy) <- allocatedTy) {
-        if (actualAllocatedTy.IsClass()) {
-            let obj = irBuilder.CallClassIntrinsicAlloc(actualAllocatedTy)
-            if (IsAutoEnvType(actualAllocatedTy)) {
-                InitializeAutoEnvCallableAbi(irBuilder, obj, actualAllocatedTy)
-            }
-            return obj
+public func GenerateAllocate(irBuilder: IRBuilder2, chirExpr: AllocateBase): LLVMValueRef {
+    let actualAllocatedTy = chirExpr.GetType()
+    if (actualAllocatedTy.IsClass()) {
+        let obj = irBuilder.CallClassIntrinsicAlloc(actualAllocatedTy)
+        if (IsAutoEnvType(actualAllocatedTy)) {
+            InitializeAutoEnvCallableAbi(irBuilder, obj, actualAllocatedTy)
         }
-        let cgType = CGType.GetOrCreate(irBuilder.GetCGModule(), actualAllocatedTy)
-        let allocaInst = irBuilder.CreateEntryAlloca(cgType, name: "alloca")
-        // Keep deferred-init GC locals out of the undef-phi stackmap hole.
-        // CGFunctionType uses an addrspace(0) raw function-pointer cell.
-        if ((cgType as CGFunctionType).isNone()) {
-            let valueType = cgType.GetLLVMType()
-            if (!valueType.isNull() && irBuilder.IsTypeContainsRef(valueType)) {
-                irBuilder.CreateStore(unsafe { LLVMConstNull(valueType) }, allocaInst)
-            }
-        }
-        return allocaInst
+        return obj
     }
-    return LLVMNullValue()
+    let cgType = CGType.GetOrCreate(irBuilder.GetCGModule(), actualAllocatedTy)
+    let allocaInst = irBuilder.CreateEntryAlloca(cgType, name: "alloca")
+    // Keep deferred-init GC locals out of the undef-phi stackmap hole.
+    // CGFunctionType uses an addrspace(0) raw function-pointer cell.
+    if ((cgType as CGFunctionType).isNone()) {
+        let valueType = cgType.GetLLVMType()
+        if (!valueType.isNull() && irBuilder.IsTypeContainsRef(valueType)) {
+            irBuilder.CreateStore(unsafe { LLVMConstNull(valueType) }, allocaInst)
+        }
+    }
+    return allocaInst
 }
 
 private func InitializeAutoEnvCallableAbi(irBuilder: IRBuilder2, obj: LLVMValueRef, allocatedTy: Type): Unit {

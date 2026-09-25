@@ -6,8 +6,8 @@ import cjcj::chir.CHIRBuilder
 import cjcj::chir.Constant
 import cjcj::chir.Expression
 import cjcj::chir.ExprKind
-import cjcj::chir.ExprMajorKind
-import cjcj::chir.IntOpWithException
+import cjcj::chir.BinaryExpressionBase
+import cjcj::chir.BinaryExpressionWithException
 import cjcj::chir.Apply
 import cjcj::chir.ApplyWithException
 import cjcj::chir.Attribute
@@ -19,7 +19,7 @@ import cjcj::chir.InvokeStaticWithException
 import cjcj::chir.InvokeWithException
 import cjcj::chir.Type
 import cjcj::chir.TypeCast
-import cjcj::chir.TypeCastWithException
+import cjcj::chir.NumericCastWithException
 import cjcj::chir.UnaryExpression
 import cjcj::chir.Value
 import cjcj::utils.{CJC_ASSERT, CJC_ASSERT_WITH_MSG, OverflowStrategy}
@@ -53,74 +53,24 @@ public class CHIRBinaryExprWrapper <: CHIRExprWrapper {
         super(binaryExpr)
     }
 
-    public init(binaryExprWithException: IntOpWithException) {
+    public init(binaryExprWithException: BinaryExpressionWithException) {
         super(binaryExprWithException)
     }
 
     public func GetLHSOperand(): Value {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetLHSOperand()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOperand(0)
+        return (expr as BinaryExpressionBase).getOrThrow().GetLHSOperand()
     }
 
     public func GetRHSOperand(): Value {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetRHSOperand()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOperand(1)
+        return (expr as BinaryExpressionBase).getOrThrow().GetRHSOperand()
     }
 
     public func GetOverflowStrategy(): OverflowStrategy {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetOverflowStrategy()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOverflowStrategy()
+        return (expr as BinaryExpressionBase).getOrThrow().GetOverflowStrategy()
     }
 
     public func GetBinaryExprKind(): ExprKind {
-        if (expr.GetExprMajorKind() == ExprMajorKind.BINARY_EXPR) {
-            return (expr as BinaryExpression).getOrThrow().GetExprKind()
-        }
-        return (expr as IntOpWithException).getOrThrow().GetOpKind()
-    }
-}
-
-public class CHIRTypeCastWrapper <: CHIRExprWrapper {
-    public init(typeCast: TypeCast) {
-        super(typeCast)
-    }
-
-    public init(typeCastWithException: TypeCastWithException) {
-        super(typeCastWithException)
-    }
-
-    public func GetSourceValue(): Value {
-        if (expr.GetExprKind() == ExprKind.TYPECAST) {
-            return (expr as TypeCast).getOrThrow().GetSourceValue()
-        }
-        return (expr as TypeCastWithException).getOrThrow().GetSourceValue()
-    }
-
-    public func GetSourceTy(): Option<Type> {
-        if (expr.GetExprKind() == ExprKind.TYPECAST) {
-            return (expr as TypeCast).getOrThrow().GetSourceTy()
-        }
-        return (expr as TypeCastWithException).getOrThrow().GetSourceTy()
-    }
-
-    public func GetTargetTy(): Option<Type> {
-        if (expr.GetExprKind() == ExprKind.TYPECAST) {
-            return (expr as TypeCast).getOrThrow().GetTargetTy()
-        }
-        return (expr as TypeCastWithException).getOrThrow().GetTargetTy()
-    }
-
-    public func GetOverflowStrategy(): OverflowStrategy {
-        if (expr.GetExprKind() == ExprKind.TYPECAST) {
-            return (expr as TypeCast).getOrThrow().GetOverflowStrategy()
-        }
-        return OverflowStrategy.THROWING
+        return (expr as BinaryExpressionBase).getOrThrow().GetOpKind()
     }
 }
 
@@ -343,9 +293,9 @@ public class CHIRInvokeWrapper <: CHIRInvokeExpr {
 
     public override func GetVirtualMethodOffset(): UInt64 {
         if (let Some(invoke) <- (expr as Invoke)) {
-            return invoke.GetVirtualMethodOffset().getOrThrow()
+            return invoke.GetVirtualMethodOffset()
         }
-        return (expr as InvokeWithException).getOrThrow().GetVirtualMethodOffset().getOrThrow()
+        return (expr as InvokeWithException).getOrThrow().GetVirtualMethodOffset()
     }
 
     public func TestVritualMethodAttr(attr: Attribute): Bool {
@@ -435,8 +385,8 @@ public class CHIRInvokeStaticWrapper <: CHIRInvokeExpr {
 
     public override func GetVirtualMethodOffset(): UInt64 {
         if (let Some(invokeStatic) <- (expr as InvokeStatic)) {
-            return invokeStatic.GetVirtualMethodOffset().getOrThrow()
+            return invokeStatic.GetVirtualMethodOffset()
         }
-        return (expr as InvokeStaticWithException).getOrThrow().GetVirtualMethodOffset().getOrThrow()
+        return (expr as InvokeStaticWithException).getOrThrow().GetVirtualMethodOffset()
     }
 }

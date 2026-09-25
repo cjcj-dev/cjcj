@@ -4,7 +4,7 @@ import cjcj::chir.{BuiltinType, CHIRBuilder, CHIRDeserializer, CHIRSerializer, C
     Function, GetBuiltinTypeWithVTable, GlobalVar}
 import cjcj::chir.Block as CHIRBlock
 import cjcj::chir.Package as PluginCHIRPackage
-import cjcj::chir.Terminator as CHIRTerminator
+import cjcj::chir.Expression as CHIRExpression
 import cjcj::macro_pkg.{CloseSymbolTable, GetMethodPointer, OpenSymbolTableSafely, RuntimeHandle}
 import cjcj::utils.CJC_ASSERT
 import std.collection.*
@@ -31,6 +31,7 @@ class ExecutePlugin {
     private let srcCodeImportedFuncNames: HashSet<String> = HashSet<String>()
     private let srcCodeImportedVarNames: HashSet<String> = HashSet<String>()
     private let initFuncsForConstVarNames: ArrayList<String> = ArrayList<String>()
+    private let unreachableBlockNames: HashMap<String, (String, String)> = HashMap<String, (String, String)>()
 
     init(builder: CHIRBuilder) {
         this.builder = builder
@@ -72,9 +73,10 @@ class ExecutePlugin {
     func DeserializePluginResult(
         srcCodeImportedFuncs: ArrayList<Function>,
         srcCodeImportedVars: ArrayList<GlobalVar>,
-        initFuncsForConstVar: ArrayList<Function>
+        initFuncsForConstVar: ArrayList<Function>,
+        maybeUnreachable: HashMap<CHIRBlock, CHIRExpression>
     ): Option<PluginCHIRPackage> {
-        CHIRPtrToString(srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar)
+        CHIRPtrToString(srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar, maybeUnreachable)
 
         builder.MergeAllocatedInstance()
         builder.GetChirContext().FreeWholePackage()
@@ -88,14 +90,15 @@ class ExecutePlugin {
             return None
         }
 
-        StringToCHIRPtr(srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar)
+        StringToCHIRPtr(srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar, maybeUnreachable)
         return builder.GetChirContext().GetCurPackage()
     }
 
     private func CHIRPtrToString(
         srcCodeImportedFuncs: ArrayList<Function>,
         srcCodeImportedVars: ArrayList<GlobalVar>,
-        initFuncsForConstVar: ArrayList<Function>
+        initFuncsForConstVar: ArrayList<Function>,
+        maybeUnreachable: HashMap<CHIRBlock, CHIRExpression>
     ): Unit {
         for (function in srcCodeImportedFuncs) {
             srcCodeImportedFuncNames.add(function.GetIdentifierWithoutPrefix())
@@ -109,13 +112,22 @@ class ExecutePlugin {
             initFuncsForConstVarNames.add(function.GetIdentifierWithoutPrefix())
         }
         initFuncsForConstVar.clear()
-
+        for ((block, terminator) in maybeUnreachable) {
+            let functionName = block.GetTopLevelFunc().getOrThrow().GetIdentifierWithoutPrefix()
+            let blockName = block.GetIdentifierWithoutPrefix()
+            if (let Some(parentBlock) <- terminator.GetParentBlock()) {
+                let terminatorName = parentBlock.GetIdentifierWithoutPrefix()
+                unreachableBlockNames[functionName] = (blockName, terminatorName)
+            }
+        }
+        maybeUnreachable.clear()
     }
 
     private func StringToCHIRPtr(
         srcCodeImportedFuncs: ArrayList<Function>,
         srcCodeImportedVars: ArrayList<GlobalVar>,
-        initFuncsForConstVar: ArrayList<Function>
+        initFuncsForConstVar: ArrayList<Function>,
+        maybeUnreachable: HashMap<CHIRBlock, CHIRExpression>
     ): Unit {
         let chirPkg = builder.GetChirContext().GetCurPackage().getOrThrow()
         for (definition in chirPkg.GetAllExtendDef()) {
@@ -157,7 +169,32 @@ class ExecutePlugin {
             }
         }
 
-
+        for ((functionName, blockNames) in unreachableBlockNames) {
+            for (function in chirPkg.GetGlobalFuncsWithBody()) {
+                if (function.GetIdentifierWithoutPrefix() != functionName) {
+                    continue
+                }
+                let allBlocks = function.GetBody().getOrThrow().GetAllBlocks()
+                var unreachableBlock: Option<CHIRBlock> = None
+                var terminator: Option<CHIRExpression> = None
+                for (block in allBlocks) {
+                    if (unreachableBlock.isSome() && terminator.isSome()) {
+                        break
+                    }
+                    if (block.GetIdentifierWithoutPrefix() == blockNames[0]) {
+                        unreachableBlock = block
+                    }
+                    if (block.GetIdentifierWithoutPrefix() == blockNames[1]) {
+                        terminator = block.GetTerminator()
+                    }
+                }
+                if (let Some(block) <- unreachableBlock) {
+                    if (let Some(value) <- terminator) {
+                        maybeUnreachable[block] = value
+                    }
+                }
+            }
+        }
     }
 
     func FreeCachedData(): Bool {
