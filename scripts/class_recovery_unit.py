@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--build-tree', type=Path, required=True)
     parser.add_argument('--sdk', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--source-dir', type=Path, help='Existing common fixture directory for arm identity')
     args = parser.parse_args()
     tree, sdk, out = (p.resolve() for p in (args.build_tree, args.sdk, args.out))
     out.mkdir(parents=True, exist_ok=True)
@@ -33,8 +34,14 @@ def main():
         'runtime/lib/linux_x86_64_cjnative', 'lib/linux_x86_64_cjnative',
         'third_party/llvm/lib', 'tools/lib')) + ':/usr/lib/x86_64-linux-gnu'
     source = tree / 'packages/parse/src/ClassRecovery_test.cj'
-    copied = out / 'ClassRecovery_test.cj'
-    copied.write_text(source.read_text().replace('package cjcj::parse', 'package class_recovery_tests\nimport cjcj::parse.*', 1))
+    source_dir = args.source_dir.resolve() if args.source_dir else out
+    copied = source_dir / 'ClassRecovery_test.cj'
+    fixture = source.read_text().replace('package cjcj::parse', 'package class_recovery_tests\nimport cjcj::parse.*', 1)
+    if args.source_dir:
+        if copied.read_text() != fixture:
+            raise ValueError('Common fixture differs from the build tree test source')
+    else:
+        copied.write_text(fixture)
     sources = [copied]
     executable = out / 'class-recovery-tests'
     command = [str(sdk / 'bin/cjc'), '--test', '-O0', '--diagnostic-format=noColor', '--trimpath', str(tree),
@@ -58,7 +65,7 @@ def main():
               'uptime_before': subprocess.check_output(['uptime'], text=True).strip()}
     start = time.monotonic()
     with (out / 'build.log').open('w') as log:
-        record['build_rc'] = subprocess.call(command, cwd=out, env=env, stdout=log, stderr=subprocess.STDOUT)
+        record['build_rc'] = subprocess.call(command, cwd=source_dir, env=env, stdout=log, stderr=subprocess.STDOUT)
     record['build_wall'] = time.monotonic() - start
     if record['build_rc'] == 0:
         record['elf_sha256'] = digest(executable)
