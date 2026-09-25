@@ -2,16 +2,7 @@ package cjcj::sema.NativeFFI.ObjC
 
 import cjcj::ast.*
 import cjcj::basic.DiagKindRefactor
-import cjcj::utils.CJC_ABORT
-
 public class CheckMemberTypes <: Handler<TypeCheckContext> {
-    private let interopType: InteropType
-
-    // C++ src/Sema/NativeFFI/ObjC/TypeCheck/Handlers.h:58-61.
-    public init(interopType: InteropType) {
-        this.interopType = interopType
-    }
-
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckMemberTypes.cpp:22-45.
     public func HandleImpl(ctx: TypeCheckContext): Unit {
         let isImpl = IsObjCImpl(ctx.target.GetTy().getOrThrow())
@@ -113,13 +104,6 @@ public class CheckMemberTypes <: Handler<TypeCheckContext> {
 
     // C++ src/Sema/NativeFFI/ObjC/TypeCheck/CheckMemberTypes.cpp:115-126.
     private func GetDeclInteropName(): String {
-        if (interopType == InteropType.ObjC_Mirror) {
-            return "Objective-C mirror"
-        } else if (interopType == InteropType.CJ_Mapping) {
-            return "cangjie mirror decl"
-        } else {
-            CJC_ABORT()
-            return ""
-        }
+        return "Objective-C mirror"
     }
 }

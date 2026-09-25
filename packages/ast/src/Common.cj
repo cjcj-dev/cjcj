@@ -1,8 +1,8 @@
 package cjcj::ast
 
 public import cjcj::basic.{
-    BEGIN_POSITION, ClassMapping, DEFAULT_POSITION, GenericTypeArguments, INVALID_POSITION, InteropCJGenericStrategyType,
-    InteropCJStrategy, LambdaPattern, Linkage, MacroCallDiagInfo, MakeRange, Position, PositionStatus, Range
+    BEGIN_POSITION, DEFAULT_POSITION, INVALID_POSITION, Linkage, MacroCallDiagInfo, MakeRange, Position, PositionStatus,
+    Range
 }
 public import cjcj::lex.{
     GetContextualKeyword, GetEscapeTokenKinds, IsContextualKeyword, IsExperimental, Len, StringPart, StringPartKind,

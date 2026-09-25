@@ -2,7 +2,6 @@ package cjcj::parse
 
 import cjcj::option.BackendType as OptionBackendType
 import cjcj::option.GlobalOptions as OptionGlobalOptions
-import cjcj::option.InteropLanguage as OptionInteropLanguage
 import cjcj::option.OutputMode as OptionOutputMode
 import cjcj::option.TripleInfo as OptionTripleInfo
 
@@ -109,7 +108,6 @@ extend ExprKind <: Equatable<ExprKind> {
     public operator func !=(right: ExprKind): Bool { return !(this == right) }
 }
 
-public type InteropLanguage = OptionInteropLanguage
 public type OutputMode = OptionOutputMode
 public type GlobalOptions = OptionGlobalOptions
 public type BackendType = OptionBackendType
