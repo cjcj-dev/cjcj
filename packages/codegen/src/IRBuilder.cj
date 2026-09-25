@@ -2838,7 +2838,11 @@ public class IRBuilder2 <: Resource {
             AddNoAliasAttribute(callBase)
             AddSRetAttribute(callBase, GetSRetAttributeType(returnTy, returnCGType))
             retValue = callArgs[0]
-            let applyWrapper = chirExpr.getOrThrow() as CHIRCallExpr
+            let applyWrapper: Option<CHIRCallExpr> = if (let Some(expr) <- chirExpr) {
+                expr as CHIRCallExpr
+            } else {
+                None
+            }
             if (returnCGType.GetSize().isNone() &&
                 (applyWrapper.isNone() || !ReuseCallerSRetForApply(applyWrapper.getOrThrow(), calleeType))) {
                 let expression = chirExpr.getOrThrow().GetExpression()

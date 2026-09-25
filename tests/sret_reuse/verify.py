@@ -96,9 +96,9 @@ def observe(items, level):
     return checks, observations
 
 
-def compile_case(compiler, source, destination, level, jobs):
+def compile_case(compiler, source, destination, level, jobs, executable=False):
     destination.mkdir(parents=True, exist_ok=True)
-    command = [str(compiler), str(source), '--output-type=staticlib', '-' + level,
+    command = [str(compiler), str(source), *([] if executable else ['--output-type=staticlib']), '-' + level,
                '--dump-chir', '--dump-ir', '--jobs', str(jobs), '-o', str(destination / 'tail.bc')]
     start = time.monotonic()
     before = subprocess.check_output(['uptime'], text=True).strip()
@@ -107,9 +107,20 @@ def compile_case(compiler, source, destination, level, jobs):
     result = {'command': command, 'compiler_rc': process.returncode, 'wall': time.monotonic() - start,
               'uptime_before': before, 'uptime_after': subprocess.check_output(['uptime'], text=True).strip(),
               'checks': [], 'observations': {}}
+    if executable:
+        result['checks'].append({'name': 'synthetic_main_compiles',
+                                 'passed': process.returncode == 0, 'detail': process.returncode})
     if process.returncode == 0:
         try:
-            result['checks'], result['observations'] = observe(functions(destination), level)
+            items = functions(destination)
+            if executable:
+                # Require actual executable entry IR, not merely absence of an error.
+                entries = {name: item for name, item in items.items() if name == 'main'}
+                result['checks'].append({'name': 'synthetic_main_emits_entry',
+                                         'passed': bool(entries), 'detail': list(entries)})
+                result['observations'] = entries
+            else:
+                result['checks'], result['observations'] = observe(items, level)
         except (ValueError, IndexError) as error:
             result['observation_error'] = str(error)
     result['passed'] = (process.returncode == 0 and bool(result['checks'])
@@ -130,10 +141,14 @@ def main():
     source = Path(__file__).with_name('tail.cj')
     result = {'compiler': str(args.compiler), 'compiler_sha256': sha(args.compiler),
               'fixture_sha256': sha(source), 'harness_sha256': sha(Path(__file__)),
-              'affinity': sorted(os.sched_getaffinity(0)), 'jobs': args.jobs, 'parallel_arms': 2}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+              'main_fixture_sha256': sha(Path(__file__).with_name('main.cj')),
+              'affinity': sorted(os.sched_getaffinity(0)), 'jobs': args.jobs, 'parallel_arms': 4}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         jobs = {level: pool.submit(compile_case, args.compiler, source, args.out / level, level, args.jobs)
                 for level in ('O0', 'O1')}
+        jobs.update({f'main-{level}': pool.submit(compile_case, args.compiler,
+                     Path(__file__).with_name('main.cj'), args.out / f'main-{level}', level,
+                     args.jobs, True) for level in ('O0', 'O1')})
         result['cases'] = {level: future.result() for level, future in jobs.items()}
     for level, case in result['cases'].items():
         print(f'COMPILE {level} rc={case["compiler_rc"]} wall={case["wall"]:.3f}')

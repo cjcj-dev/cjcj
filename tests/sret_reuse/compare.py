@@ -71,8 +71,8 @@ def main():
     parser.add_argument('--jobs',type=int,default=os.cpu_count())
     a=parser.parse_args();a.out.mkdir(parents=True,exist_ok=True)
     record={'compiler_sha256':{'base':sha(a.baseline),'candidate':sha(a.candidate)},
-            'source':str(a.source),'affinity':sorted(os.sched_getaffinity(0)), 'jobs':a.jobs,'parallel_arms':6}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            'source':str(a.source),'affinity':sorted(os.sched_getaffinity(0)), 'jobs':a.jobs,'parallel_arms':4}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         pending={(level,arm):pool.submit(compile_one,compiler,a.source,a.out/level/arm,level,a.import_dir,a.jobs)
                  for level in ('O0','O1') for arm,compiler in [('base',a.baseline),('noise',a.baseline),('candidate',a.candidate)]}
         record['runs']={level:{arm:pending[level,arm].result() for arm in ('base','noise','candidate')} for level in ('O0','O1')}
