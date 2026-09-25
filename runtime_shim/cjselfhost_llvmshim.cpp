@@ -871,6 +871,29 @@ extern "C" uint64_t LLVMSelfhostGetPrimitiveSizeInBits(LLVMTypeRef Ty)
     return unwrap<Type>(Ty)->getPrimitiveSizeInBits().getFixedSize();
 }
 
+extern "C" LLVMContextRef LLVMGetValueContext(LLVMValueRef Val)
+{
+    return wrap(&unwrap(Val)->getContext());
+}
+
+extern "C" int LLVMCanValueUseFastMathFlags(LLVMValueRef Inst)
+{
+    return isa<FPMathOperator>(unwrap(Inst)) ? 1 : 0;
+}
+
+extern "C" void LLVMSetFastMathFlags(LLVMValueRef Inst, unsigned Flags)
+{
+    FastMathFlags fmf;
+    fmf.setAllowReassoc((Flags & (1u << 0)) != 0);
+    fmf.setNoNaNs((Flags & (1u << 1)) != 0);
+    fmf.setNoInfs((Flags & (1u << 2)) != 0);
+    fmf.setNoSignedZeros((Flags & (1u << 3)) != 0);
+    fmf.setAllowReciprocal((Flags & (1u << 4)) != 0);
+    fmf.setAllowContract((Flags & (1u << 5)) != 0);
+    fmf.setApproxFunc((Flags & (1u << 6)) != 0);
+    cast<Instruction>(unwrap(Inst))->copyFastMathFlags(fmf);
+}
+
 extern "C" LLVMUseRef LLVMSelfhostGetFirstUse(LLVMValueRef Val)
 {
     auto *value = unwrap(Val);
