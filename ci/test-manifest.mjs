@@ -142,6 +142,15 @@ export const DEFERRED = Object.freeze([
       + 'tests 1 pass 0 fail 1, Error: spawnSync python3 ENOENT',
   }),
   Object.freeze({
+    file: 'ci/platform_matrix/build_windows_std_ast.test.mjs',
+    needs: 'the zx runtime -- a zx self-test rather than a node:test file, same shape as '
+      + 'verify_windows_runtime_exports.test.mjs. It spawns the product script with a fake MinGW '
+      + 'driver and does not need a Windows cross compiler',
+    verified: 'zx ci/platform_matrix/build_windows_std_ast.test.mjs => SELFTEST_RESULT=PASS rc=0 '
+      + '(2026-09-26, local, zx /usr/bin/zx); schema/header/archive/ast_object rejects exit 4/5/7/8 '
+      + 'before compile, guard divergence exits 3, matching generation installs',
+  }),
+  Object.freeze({
     file: 'ci/platform_matrix/verify_windows_runtime_exports.test.mjs',
     needs: 'the zx runtime -- also a zx self-test rather than a node:test file. Note the guard it '
       + 'tests, verify_windows_runtime_exports.mjs, does run in three workflows; only its self-test does not',
