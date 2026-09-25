@@ -260,9 +260,13 @@ public open class InheritableDecl <: Decl & Hashable & Equatable<InheritableDecl
                         declPtr = resolved as ClassLikeDecl
                     }
                 } else if (let Some(classTy) <- (ty as ClassTy)) {
-                    declPtr = classTy.declPtr
+                    if (let Some(decl) <- classTy.declPtr) {
+                        declPtr = decl as ClassLikeDecl
+                    }
                 } else if (let Some(interfaceTy) <- (ty as InterfaceTy)) {
-                    declPtr = interfaceTy.declPtr
+                    if (let Some(decl) <- interfaceTy.declPtr) {
+                        declPtr = decl as ClassLikeDecl
+                    }
                 }
                 if (let Some(resolvedDecl) <- declPtr) {
                     if (!containsClassLikeDecl(out, resolvedDecl)) {
