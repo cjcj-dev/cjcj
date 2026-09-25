@@ -68,7 +68,7 @@ public class Ohos_CJNATIVE <: Linux_CJNATIVE {
         tool.AppendArg("-z")
         tool.AppendArg("max-page-size=4096")
         tool.AppendArgIf(driverOptions.stripSymbolTable, "-s")
-        tool.AppendArg("--hash-style=both")
+        tool.AppendArg("--hash-style=gnu")
         tool.AppendArg("-m")
         tool.AppendArg(GetEmulation())
         let cjldScript = GetOhosCjldScript(tool)
