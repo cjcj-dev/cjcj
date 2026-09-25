@@ -32,8 +32,6 @@ private let INTEROPLIB_CFFI_NEW_GLOBAL_REF_ID: String = "Java_CFFI_newGlobalRefe
 private let INTEROPLIB_CFFI_DELETE_GLOBAL_REF_ID: String = "Java_CFFI_deleteGlobalReference"
 private let INTEROPLIB_CFFI_NEW_JAVA_OBJECT_ID: String = "Java_CFFI_newJavaObject"
 private let INTEROPLIB_CFFI_NEW_JAVA_ARRAY_ID: String = "Java_CFFI_newJavaArray"
-private let INTEROPLIB_CFFI_NEW_JAVA_PROXY_OBJECT_FOR_CJMAPPING_ID: String =
-    "Java_CFFI_newJavaProxyObjectForCJMapping"
 private let INTEROPLIB_CFFI_JAVA_ARRAY_GET_ID: String = "Java_CFFI_arrayGet"
 private let INTEROPLIB_CFFI_JAVA_ARRAY_SET_ID: String = "Java_CFFI_arraySet"
 private let INTEROPLIB_CFFI_JAVA_ARRAY_GET_LENGTH: String = "Java_CFFI_arrayGetLength"
@@ -76,7 +74,6 @@ private let DELETE_LOCAL_REF: String = "deleteLocalRef"
 private let DETACH_CJ_OBJECT: String = "detachCJObject"
 private let ATTACH_CJ_OBJECT: String = "attachCJObject"
 private let GET_JAVALAMBDA_OBJECT_DECL_ID: String = "getJavaLambdaObject"
-private let GET_JAVALAMBDA_ENTITY_DECL_ID: String = "getJavaLambdaEntity"
 private let JAVA_ARRAY_GET_FOR_REF_TYPES: String = "$javaarrayget"
 private let JAVA_ARRAY_SET_FOR_REF_TYPES: String = "$javaarrayset"
 private let markerClassDecl: ClassDecl = CreateConstructorMarkerClassDecl()
@@ -104,17 +101,6 @@ public class MemberJNISignature {
             }
         }
         classTypeSignature = utils.GetJavaClassNormalizeSignature(ty)
-        name = GetJavaMemberName(member)
-        CJC_ASSERT(member.astKind == ASTKind.FUNC_DECL)
-        let body = member.funcBody.getOrThrow()
-        signature = utils.GetJavaTypeSignature(body.retType.getOrThrow().GetTy().getOrThrow(),
-            GetParamTys(body.paramLists[0]), fullPackageName: member.fullPackageName)
-    }
-
-    public init(utils: Utils, member: FuncDecl, genericConfig: GenericConfigInfo) {
-        let jobject = (member.outerDecl.getOrThrow() as ClassLikeDecl).getOrThrow()
-        classTypeSignature = ReplaceClassName(
-            utils.GetJavaClassNormalizeSignature(jobject.GetTy().getOrThrow()), genericConfig.declInstName)
         name = GetJavaMemberName(member)
         CJC_ASSERT(member.astKind == ASTKind.FUNC_DECL)
         let body = member.funcBody.getOrThrow()
@@ -311,10 +297,6 @@ public class InteropLibBridge {
         return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_NEW_JAVA_ARRAY_ID)
     }
 
-    public func GetNewJavaProxyObjectForCJMappingDecl(): Option<FuncDecl> {
-        return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_NEW_JAVA_PROXY_OBJECT_FOR_CJMAPPING_ID)
-    }
-
     public func GetJavaArrayGetDecl(): Option<FuncDecl> {
         return GetInteropLibDecl<FuncDecl>(INTEROPLIB_CFFI_JAVA_ARRAY_GET_ID)
     }
@@ -457,10 +439,6 @@ public class InteropLibBridge {
 
     public func GetJavaLambdaObjectDecl(): Option<FuncDecl> {
         return GetInteropLibDecl<FuncDecl>(GET_JAVALAMBDA_OBJECT_DECL_ID)
-    }
-
-    public func GetJavaLambdaEntityDecl(): Option<FuncDecl> {
-        return GetInteropLibDecl<FuncDecl>(GET_JAVALAMBDA_ENTITY_DECL_ID)
     }
 
     private func GetJavaObjectControllerMethodDecl(methodName: String): Option<FuncDecl> {
@@ -720,23 +698,6 @@ public class InteropLibBridge {
         return CreateCall(GetNewGlobalRefDecl(), obj.curFile, args: args)
     }
 
-    public func CreateCFFINewJavaCFFINewJavaProxyObjectForCJMappingCall(jniEnv: Expr,
-        entity: Expr, name: String, withMarkerParam: Bool): Option<CallExpr> {
-        let funcDecl = GetNewJavaProxyObjectForCJMappingDecl()
-        if (let None <- funcDecl) {
-            return None
-        }
-        let args = ArrayList<FuncArg>()
-        args.add(CreateFuncArg(jniEnv))
-        args.add(CreateFuncArg(entity))
-        args.add(CreateFuncArg(CreateLitConstExpr(LitConstKind.STRING, name,
-            utils.GetStringDecl().GetTy().getOrThrow())))
-        args.add(CreateFuncArg(CreateLitConstExpr(LitConstKind.BOOL,
-            if (withMarkerParam) { "true" } else { "false" },
-            TypeManager.GetPrimitiveTy(TypeKind.TYPE_BOOLEAN))))
-        return CreateCall(funcDecl, entity.curFile, args: args)
-    }
-
     public func CreateCFFIArrayLengthGetCall(javarefExpr: Expr,
         curFile: Option<File>): Option<CallExpr> {
         let args = ArrayList<FuncArg>()
@@ -977,7 +938,7 @@ public class InteropLibBridge {
         params: FuncParamList, curFile: File): Option<CallExpr> {
         let callArgs = ArrayList<Expr>()
         for (param in params.params) {
-            callArgs.add(CreateParamExpr(param, obj.curFile))
+            callArgs.add(WrapJavaEntity(WithinFile<RefExpr>(CreateRefExpr(param), obj.curFile)).getOrThrow())
         }
         return CreateCallMethodCall(jniEnv, obj, signature, callArgs, curFile)
     }
@@ -986,20 +947,9 @@ public class InteropLibBridge {
         params: FuncParamList, curFile: File): Option<CallExpr> {
         let callArgs = ArrayList<Expr>()
         for (param in params.params) {
-            callArgs.add(CreateParamExpr(param, Some(curFile)))
+            callArgs.add(WrapJavaEntity(WithinFile<RefExpr>(CreateRefExpr(param), Some(curFile))).getOrThrow())
         }
         return CreateCallStaticMethodCall(jniEnv, signature, callArgs, curFile)
-    }
-
-    public func CreateParamExpr(param: FuncParam, curFile: Option<File>): Expr {
-        if (param.TyKind() == TypeKind.TYPE_FUNC) {
-            let file = curFile.getOrThrow()
-            let lambdaJavaClassSign = NormalizeJavaSignature(file.curPackage.getOrThrow().fullPackageName + "." +
-                GetLambdaJavaClassName(param.GetTy().getOrThrow()) + "$Box")
-            return CreateGetJavaLambdaEntityCall(
-                WithinFile<RefExpr>(CreateRefExpr(param), curFile), lambdaJavaClassSign, curFile)
-        }
-        return WrapJavaEntity(WithinFile<RefExpr>(CreateRefExpr(param), curFile)).getOrThrow()
     }
 
     public func CreateDeletingGlobalRefFinalizer(decl: ClassDecl): FuncDecl {
@@ -1045,13 +995,6 @@ public class InteropLibBridge {
                     }
                 }
             }
-        }
-        if (argTy.IsTuple()) {
-            let curFile = arg.curFile.getOrThrow()
-            let className = (curFile.GetFullPackageName() + "." + GetCjMappingTupleName(argTy)).replace(".", "/")
-            let entity = CreateCFFINewJavaCFFINewJavaProxyObjectForCJMappingCall(
-                CreateGetJniEnvCall(Some(curFile)).getOrThrow(), arg, className, true).getOrThrow()
-            return CreateJavaEntityJobjectCall(entity)
         }
         var suitableCtor: Option<FuncDecl> = None
         for (decl in javaEntityDecl.getOrThrow().body.getOrThrow().decls) {
@@ -1752,11 +1695,6 @@ public class InteropLibBridge {
     public func CreateGetJavaLambdaObjectCall(refExpr: RefExpr, classSign: String,
         curFile: Option<File>): CallExpr {
         return CreateGetJavaLambdaCall(GetJavaLambdaObjectDecl(), refExpr, classSign, curFile)
-    }
-
-    public func CreateGetJavaLambdaEntityCall(refExpr: RefExpr, classSign: String,
-        curFile: Option<File>): CallExpr {
-        return CreateGetJavaLambdaCall(GetJavaLambdaEntityDecl(), refExpr, classSign, curFile)
     }
 
     public func CreateGetJavaLambdaCall(fd: Option<FuncDecl>, refExpr: RefExpr,
