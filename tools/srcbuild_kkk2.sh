@@ -667,31 +667,31 @@ seed_fixed_tuple_from_depot() {
         CANGJIE_COMPILER_SHA=$(awk -F= '$1=="CANGJIE_COMPILER_SHA" {print $2}' "$REPO_ROOT/ci/llvm_pin.env") || return 1
     fi
     depot=$(resolve_depot_tuple_root "$depot_root") || {
-        echo "fixed LLVM depot seed unavailable under $depot_root/$LLVM_SHA/{${CANGJIE_COMPILER_SHA},} (missing nested or matching-legacy fixed-llc); rebuilding" >&2
+        echo "fixed LLVM depot seed unavailable under $depot_root/$LLVM_SHA/{${CANGJIE_COMPILER_SHA},} (missing nested or matching-legacy fixed-llc); trying pinned release" >&2
         return 1
     }
     tuple="$depot/fixed-llc"
     for payload in "${payloads[@]}"; do
         [[ -f $tuple/$payload && ! -L $tuple/$payload ]] || {
-            echo "fixed LLVM depot seed rejected: missing or non-regular fixed-llc/$payload; rebuilding" >&2
+            echo "fixed LLVM depot seed rejected: missing or non-regular fixed-llc/$payload; trying pinned release" >&2
             return 1
         }
     done
     [[ ${LLVM_TUPLE_SUMS_SHA:-} =~ ^[0-9a-f]{64}$ ]] || {
-        echo "fixed LLVM depot seed rejected: LLVM_TUPLE_SUMS_SHA is missing or malformed; rebuilding" >&2
+        echo "fixed LLVM depot seed rejected: LLVM_TUPLE_SUMS_SHA is missing or malformed; trying pinned release" >&2
         return 1
     }
     sums_sha=$(sha256sum "$depot/SHA256SUMS" | awk '{print $1}') || return 1
     [[ $sums_sha == "$LLVM_TUPLE_SUMS_SHA" ]] || {
-        echo "fixed LLVM depot seed rejected: SHA256SUMS digest disagrees with ci/llvm_pin.env at $depot; rebuilding" >&2
+        echo "fixed LLVM depot seed rejected: SHA256SUMS digest disagrees with ci/llvm_pin.env at $depot; trying pinned release" >&2
         return 1
     }
     if ! (cd "$depot" && sha256sum --strict -c SHA256SUMS); then
-        echo "fixed LLVM depot seed rejected: SHA256SUMS verification failed at $depot; rebuilding" >&2
+        echo "fixed LLVM depot seed rejected: SHA256SUMS verification failed at $depot; trying pinned release" >&2
         return 1
     fi
     if ! fixed_tuple_is_current "$tuple"; then
-        echo "fixed LLVM depot seed rejected: pin, manifest, and opt lineage disagree at $tuple; rebuilding" >&2
+        echo "fixed LLVM depot seed rejected: pin, manifest, and opt lineage disagree at $tuple; trying pinned release" >&2
         return 1
     fi
 
@@ -700,9 +700,10 @@ seed_fixed_tuple_from_depot() {
         cp -- "$tuple/$payload" "$CJCJ_FIXED_LLVM_DIR/$payload"
     done
     if ! fixed_tuple_is_current; then
-        echo "fixed LLVM depot seed rejected after copy; rebuilding" >&2
+        echo "fixed LLVM depot seed rejected after copy; trying pinned release" >&2
         return 1
     fi
+    CJCJ_SELECTED_COLOUR_TUPLE=$depot
     echo "seeded fixed LLVM tuple from verified depot $depot"
 }
 
@@ -738,18 +739,46 @@ checkout_sparse_exact() {
     [[ $(git -C "$directory" rev-parse HEAD) == "$revision" ]]
 }
 
+acquire_fixed_tuple_from_release() {
+    local colour_tuple="$STATE_ROOT/colour-tuple"
+    node "$REPO_ROOT/ci/release/acquire_fixed_tuple.mjs" \
+        "${CJCJ_BOOTSTRAP_INPUTS_PIN:-$REPO_ROOT/ci/bootstrap_inputs_pin.json}" \
+        "$colour_tuple" "$LLVM_TUPLE_SUMS_SHA" || return 1
+    fixed_tuple_is_current "$colour_tuple/fixed-llc" || return 1
+    local payload
+    mkdir -p "$CJCJ_FIXED_LLVM_DIR" || return 1
+    for payload in llc.gz opt.gz cjselfhost_llvmshim.o llvm-tools.manifest; do
+        cp -- "$colour_tuple/fixed-llc/$payload" "$CJCJ_FIXED_LLVM_DIR/$payload" || return 1
+    done
+    fixed_tuple_is_current || return 1
+    CJCJ_SELECTED_COLOUR_TUPLE=$colour_tuple
+    echo "seeded fixed LLVM tuple from pinned release $colour_tuple"
+}
+
 build_fixed_tuple() {
-    if fixed_tuple_is_current; then
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/ci/llvm_pin.env"
+    # Reuse requires the complete bootstrap tuple as well as the four tools.
+    # A previous four-file cache alone cannot supply --colour-tuple.
+    local cached="$STATE_ROOT/colour-tuple"
+    if fixed_tuple_is_current && [[ -f $cached/SHA256SUMS ]] \
+        && [[ $(sha256sum "$cached/SHA256SUMS" | awk '{print $1}') == "$LLVM_TUPLE_SUMS_SHA" ]] \
+        && (cd "$cached" && sha256sum --strict -c SHA256SUMS); then
+        CJCJ_SELECTED_COLOUR_TUPLE=$cached
         echo "fixed LLVM tuple matches ci/llvm_pin.env; reusing it"
         return
     fi
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/ci/llvm_pin.env"
     if seed_fixed_tuple_from_depot "${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}"; then
         return
     fi
     if ((DRY_RUN)); then
-        echo "DRY_RUN PREREQUISITE=fixed-llvm action=rebuild"
+        echo "DRY_RUN PREREQUISITE=fixed-llvm action=acquire-pinned-release"
+        return
+    fi
+    # Source compilation is an explicit publisher operation, never recovery for
+    # a missing/invalid cache of an already reviewed release.
+    if [[ ${CJCJ_LLVM_DEPOT_PUBLISH:-0} != 1 ]]; then
+        acquire_fixed_tuple_from_release || return 1
         return
     fi
 
@@ -814,6 +843,7 @@ build_fixed_tuple() {
     fixed_tuple_is_current || return 1
     if [[ ${CJCJ_LLVM_DEPOT_PUBLISH:-0} == 1 ]]; then
         publish_fixed_tuple_to_depot "${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}" || return 1
+        CJCJ_SELECTED_COLOUR_TUPLE=$(resolve_depot_tuple_root "${CJCJ_LLVM_DEPOT_ROOT:-/root/llvmdepot}") || return 1
     fi
 }
 
@@ -1116,7 +1146,7 @@ load_bootstrap_pins() {
         BOOTSTRAP_AST_SUPPORT=/root/impl_fam_erased_dynpayload/build-copy/compiler/build/build/lib/libcangjie-ast-support.a
     fi
     BOOTSTRAP_AST_SUPPORT_SHA256=$(bootstrap_input_sha256 "$BOOTSTRAP_AST_SUPPORT" "${CJCJ_BOOTSTRAP_AST_SUPPORT_SHA256:-}") || return 1
-    BOOTSTRAP_COLOUR_TUPLE=${CJCJ_BOOTSTRAP_COLOUR_TUPLE:-/root/llvmdepot/$LLVM_SHA/$CANGJIE_COMPILER_SHA}
+    BOOTSTRAP_COLOUR_TUPLE=${CJCJ_BOOTSTRAP_COLOUR_TUPLE:-${CJCJ_SELECTED_COLOUR_TUPLE:-$STATE_ROOT/colour-tuple}}
     # Reviewed process-library digest is independent of the static tuple.
     # shellcheck disable=SC1090
     source "$REPO_ROOT/ci/llvm-dylib/linux_$(uname -m).env"
