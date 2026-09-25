@@ -49,6 +49,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--reference', type=Path)
     parser.add_argument('--jobs', nargs='+', type=int, default=[1, 192, 192, 192])
+    parser.add_argument('--workers', type=int, choices=range(1, 5), default=4)
     args = parser.parse_args()
     args.compiler = args.compiler.resolve()
     args.output = args.output.resolve()
@@ -94,7 +95,7 @@ def main():
         # At most four real compiler processes per lane; each has a bounded heap.
         work = [(name, i, jobs) for name in ('literal', 'generic_receiver')
                 for i, jobs in enumerate(args.jobs)]
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
             record['runs'] = list(pool.map(compile_one, work))
         for run in record['runs']:
             label = f"{run['name']}/{run['index']}/j{run['jobs']}"
