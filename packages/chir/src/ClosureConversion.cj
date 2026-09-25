@@ -1977,7 +1977,7 @@ public class ClosureConversion {
     }
 
     private func TypeCastNeedConvertToBox(expr: Expression): Bool {
-        let typecast = (expr as TypeCast) ?? return false
+        let typecast = (expr as ClassStaticCast) ?? return false
         let targetTy = typecast.GetTargetType() ??
             throw IllegalStateException("ClosureConversion TypeCast has no target type")
         let sourceTy = typecast.GetSourceType() ??
@@ -1986,7 +1986,7 @@ public class ClosureConversion {
     }
 
     private func TypeCastNeedConvertToUnBox(expr: Expression): Bool {
-        let typecast = (expr as TypeCast) ?? return false
+        let typecast = (expr as ClassStaticCast) ?? return false
         let sourceTy = typecast.GetSourceType() ??
             throw IllegalStateException("ClosureConversion TypeCast has no source type")
         let targetTy = typecast.GetTargetType() ??

@@ -68,7 +68,7 @@ def compile_case(compiler, source, output, imports, schema, flatc, jobs):
     start = time.monotonic()
     with (output / 'compile.log').open('w') as log:
         run = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=3600)
-    result = {'command': command, 'rc': run.returncode, 'wall': time.monotonic() - start,
+    result = {'artifact_dir': str(output), 'command': command, 'rc': run.returncode, 'wall': time.monotonic() - start,
               'uptime_before': before, 'uptime_after': subprocess.check_output(['uptime'], text=True).strip()}
     if run.returncode:
         return result
@@ -104,6 +104,7 @@ def main():
     p.add_argument('--jobs', type=int, default=os.cpu_count())
     p.add_argument('--fixture-only', action='store_true')
     p.add_argument('--workers', type=int, default=8, help='independent compiler processes')
+    p.add_argument('--baseline-results', type=Path, help='reuse successful immutable baseline outputs with matching compiler SHA')
     args = p.parse_args()
     imports = [args.imports_root] + sorted(args.imports_root.glob('*@cjcj'))
     sources = [] if args.fixture_only else [root / 'src' for root in sorted((args.source_root / 'packages').iterdir())
@@ -117,10 +118,25 @@ def main():
                 'parallel_compilers': args.workers, 'library_sources': list(map(str, sources)), 'cases': []}
     cases = [{'source': str(source)} for source in fixtures + sources]
     manifest['cases'] = cases
+    prior = None
+    if args.baseline_results:
+        prior = json.loads((args.baseline_results / 'result.json').read_text())
+        assert prior['compilers']['baseline']['sha256'] == sha(args.baseline), 'baseline identity mismatch'
+        assert prior['schema_sha256'] == sha(args.schema), 'schema identity mismatch'
+        assert prior['jobs_per_serialization'] == args.jobs, 'baseline recipe mismatch'
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
         pending = {}
         for index, source in enumerate(fixtures + sources):
             for name, exe in [('baseline', args.baseline), ('candidate', args.candidate)]:
+                if name == 'baseline' and prior:
+                    previous = prior['cases'][index]
+                    assert previous['source'] == str(source), 'baseline source mismatch'
+                    result = previous.get('baseline', {})
+                    if result.get('rc') == 0 and result.get('canonical_sha256'):
+                        result['artifact_dir'] = str(args.baseline_results / str(index) / 'baseline')
+                        assert sha(Path(result['artifact_dir']) / 'canonical.json') == result['canonical_sha256']
+                        cases[index][name] = result
+                        continue
                 future = pool.submit(compile_case, exe, source, args.out / str(index) / name,
                                      imports, args.schema, args.flatc, args.jobs)
                 pending[future] = (index, name)
