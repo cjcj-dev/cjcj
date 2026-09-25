@@ -920,23 +920,21 @@ public class CHIRChecker {
     }
 
     private func CheckExpression(expr: Expression, topLevelFunc: Function): Unit {
-        let actionMap = HashMap<ExprMajorKind, () -> Unit>([
-            (ExprMajorKind.TERMINATOR, { => CheckTerminator(expr, topLevelFunc) }),
-            (ExprMajorKind.UNARY_EXPR, { => CheckUnaryExpression(expr, topLevelFunc) }),
-            (ExprMajorKind.BINARY_EXPR, { => CheckBinaryExpression(expr, topLevelFunc) }),
-            (ExprMajorKind.MEMORY_EXPR, { => CheckMemoryExpression(expr, topLevelFunc) }),
-            (ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR, { => CheckControlFlowExpression(expr, topLevelFunc) }),
-            (ExprMajorKind.OTHERS, { => CheckOtherExpression(expr, topLevelFunc) })
-        ])
         if (expr.GetParentBlock().isNone()) {
-            ErrorInFunc(topLevelFunc, "expression " + expr.ToString(0) + " doesn't have parent block.")
+            Errorln("in function ${topLevelFunc.GetIdentifier()}, expression ${expr.ToString(0)} " +
+                "doesn't have parent block.")
             return
         }
         if (!expr.IsTerminator() && !CheckHaveResult(expr, topLevelFunc)) {
             return
         }
-        if (let Some(action) <- actionMap.get(expr.GetExprMajorKind())) {
-            action()
+        match (expr.GetExprMajorKind()) {
+            case ExprMajorKind.TERMINATOR => CheckTerminator(expr, topLevelFunc)
+            case ExprMajorKind.UNARY_EXPR => CheckUnaryExpression(expr, topLevelFunc)
+            case ExprMajorKind.BINARY_EXPR => CheckBinaryExpression(expr, topLevelFunc)
+            case ExprMajorKind.MEMORY_EXPR => CheckMemoryExpression(expr, topLevelFunc)
+            case ExprMajorKind.STRUCTURED_CTRL_FLOW_EXPR => CheckControlFlowExpression(expr, topLevelFunc)
+            case ExprMajorKind.OTHERS => CheckOtherExpression(expr, topLevelFunc)
         }
     }
 
