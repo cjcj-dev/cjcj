@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -47,7 +48,7 @@ def main():
                 rc = subprocess.run(cmd, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=120).returncode
             except subprocess.TimeoutExpired:
                 rc = 124
-        text = (out / 'compile.log').read_text()
+        text = re.sub(r'\x1b\[[0-9;]*m', '', (out / 'compile.log').read_text())
         # Semantic rejection is a product result, not a compiler build/loading failure.
         if expectation == 'accept':
             passed = rc == 0 and (out / 'output.chir').is_file() and 'unreachable' not in text.lower()
