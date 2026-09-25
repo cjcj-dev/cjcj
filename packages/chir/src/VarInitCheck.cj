@@ -143,7 +143,7 @@ public class VarInitCheck {
                 }
             }
         }
-        let actionOnTerminator = { state: MaybeUninitDomain, term: Terminator, targetSucc: Option<Block> =>
+        let actionOnTerminator = { state: MaybeUninitDomain, term: Expression, targetSucc: Option<Block> =>
             let _ = targetSucc
             CheckMaybeUninitTerminator(fn, term, state, members, checkResult)
         }
@@ -175,7 +175,7 @@ public class VarInitCheck {
             let _ = expr
             let _ = idx
         }
-        let actionOnTerminator = { state: MaybeInitDomain, term: Terminator, targetSucc: Option<Block> =>
+        let actionOnTerminator = { state: MaybeInitDomain, term: Expression, targetSucc: Option<Block> =>
             let _ = state
             let _ = term
             let _ = targetSucc
@@ -185,7 +185,7 @@ public class VarInitCheck {
 
     private func CheckMaybeUninitTerminator(
         fn: Function,
-        term: Terminator,
+        term: Expression,
         state: MaybeUninitDomain,
         members: ArrayList<MemberVarInfo>,
         checkResult: CHIRCheckResult

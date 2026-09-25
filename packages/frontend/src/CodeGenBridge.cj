@@ -64,7 +64,7 @@ import cjcj::chir.rangeStateGlobals
 import cjcj::chir.ReplaceUsesWithWrapper
 import cjcj::chir.SanitizerCoverage
 import cjcj::chir.ShouldReportUnusedCodeWarnings
-import cjcj::chir.Terminator as ChirTerminator
+import cjcj::chir.Expression as ChirExpression
 import cjcj::chir.TypeAnalysis
 import cjcj::chir.TypeDomain
 import cjcj::chir.TypeValue
@@ -310,6 +310,7 @@ private class ToCHIR {
     private let curVirtFuncWrapDep: VirtualWrapperDepMap = VirtualWrapperDepMap()
     private let delVirtFuncWrapForIncr: VirtualWrapperDepMap = VirtualWrapperDepMap()
     private let ccOutFuncsRawMangle: HashSet<String> = HashSet<String>()
+    private var maybeUnreachable: HashMap<ChirBlock, ChirExpression> = HashMap<ChirBlock, ChirExpression>()
     private var chirPkg: Option<RealCHIRPackage> = None
     private var debugFileIndex: UInt64 = 0u64
     private var isComputingAnnos: Bool = false
@@ -349,6 +350,7 @@ private class ToCHIR {
         let srcCodeImportedFuncs = ast2chir.GetSrcCodeImportedFuncs()
         let srcCodeImportedVars = ast2chir.GetSrcCodeImportedVars()
         let initFuncsForConstVar = ast2chir.GetInitFuncsForConstVar()
+        maybeUnreachable = ast2chir.GetMaybeUnreachableBlocks()
         chirPkg = Some(lowered)
         DumpCHIRToFile("AST_CHIR")
         ClearASTResources()
@@ -371,7 +373,7 @@ private class ToCHIR {
             return Some(pluginPackage)
         }
         if (!RulesChecking(pluginPackage, builder, instance.invocation.globalOptions,
-            instance.diag.AsBasicDiagnosticEngine(), effectMap)) {
+            instance.diag.AsBasicDiagnosticEngine(), effectMap, maybeUnreachable)) {
             return None
         }
         RunOptimizationPass(pluginPackage)
@@ -494,7 +496,7 @@ private class ToCHIR {
             return false
         }
         if (let Some(newPackage) <- executePlugin.DeserializePluginResult(
-            srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar)) {
+            srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar, maybeUnreachable)) {
             chirPkg = Some(newPackage)
         } else {
             return false
@@ -1028,7 +1030,10 @@ private class ToCHIR {
 }
 
 private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
-    diag: BasicDiagnosticEngine, effectMap: ChirOptEffectCHIRMap): Bool {
+    diag: BasicDiagnosticEngine, effectMap: ChirOptEffectCHIRMap,
+    maybeUnreachable: HashMap<ChirBlock, ChirExpression>): Bool {
+    DeadCodeElimination(builder, diag, pkg).UnreachableBlockWarningReporter(pkg,
+        Int64(options.GetJobs()), maybeUnreachable)
     UnreachableBlockAnalysis(diag, pkg).RunOnPackage(Int64(options.GetJobs()))
     DeadCodeElimination(builder).ClearUnreachableMarkBlock(pkg)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,

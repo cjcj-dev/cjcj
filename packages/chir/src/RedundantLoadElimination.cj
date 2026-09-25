@@ -56,7 +56,7 @@ public class RedundantLoadElimination {
                         }
                     }
                 },
-                { _: ReachingDefinitionDomain, _: Terminator, _: Option<Block> => () }
+                { _: ReachingDefinitionDomain, _: Expression, _: Option<Block> => () }
             )
             for (expr in toBeRemoved) {
                 if (expr.GetParentBlock().isSome()) {

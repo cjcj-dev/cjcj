@@ -33,12 +33,12 @@ public func EmitCallLikeExpression(irBuilder: IRBuilder2, chirExpr: Expression):
             thisType: applyWithExceptionExpr.GetThisType(),
             instTypeArgs: applyWithExceptionExpr.GetInstantiatedTypeArgs())
     }
-    if (chirExpr.GetNumOfOperands() == 0) {
+    if (chirExpr.GetNumOfNonSuccessorOperands() == 0) {
         return LLVMNullValue()
     }
     let args = ArrayList<Value>()
     var idx: Int64 = 1
-    while (idx < chirExpr.GetNumOfOperands()) {
+    while (idx < chirExpr.GetNumOfNonSuccessorOperands()) {
         args.add(chirExpr.GetOperand(idx))
         idx++
     }

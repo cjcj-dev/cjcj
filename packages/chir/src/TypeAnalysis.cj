@@ -185,7 +185,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
 
     public override func HandleNormalExpressionEffect(state: TypeDomain, expression: Expression): Unit {
         match (expression.GetExprKind()) {
-            case ExprKind.TYPECAST =>
+            case ExprKind.CLASS_STATIC_CAST | ExprKind.NUMERIC_CAST =>
                 HandleTypeCastExpr(state, (expression as TypeCast).getOrThrow())
                 return
             case ExprKind.BOX =>
@@ -218,15 +218,18 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
         }
     }
 
-    public override func HandleTerminatorEffect(state: TypeDomain, terminator: Terminator): Option<Block> {
+    public override func HandleTerminatorEffect(state: TypeDomain, terminator: Expression): Option<Block> {
         match (terminator.GetExprKind()) {
-            case ExprKind.TYPECAST_WITH_EXCEPTION =>
-                HandleTypeCastExpr(state, (terminator as TypeCastWithException).getOrThrow())
+            case ExprKind.NUMERIC_CAST_WITH_EXCEPTION =>
+                HandleTypeCastExpr(state, (terminator as NumericCastWithException).getOrThrow())
             case ExprKind.GOTO => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.EXIT => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.BRANCH => HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.MULTIBRANCH => HandleTerminatorEffectImpl(state, terminator)
-            case ExprKind.INT_OP_WITH_EXCEPTION => HandleTerminatorEffectImpl(state, terminator)
+            case ExprKind.NEG_WITH_EXCEPTION | ExprKind.ADD_WITH_EXCEPTION | ExprKind.SUB_WITH_EXCEPTION |
+                ExprKind.MUL_WITH_EXCEPTION | ExprKind.DIV_WITH_EXCEPTION | ExprKind.MOD_WITH_EXCEPTION |
+                ExprKind.EXP_WITH_EXCEPTION | ExprKind.LSHIFT_WITH_EXCEPTION | ExprKind.RSHIFT_WITH_EXCEPTION =>
+                HandleTerminatorEffectImpl(state, terminator)
             case ExprKind.INTRINSIC_WITH_EXCEPTION => HandleTerminatorEffectImpl(state, terminator)
             case _ => HandleTerminatorEffectImpl(state, terminator)
         }
@@ -234,7 +237,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
     }
 
     // C++ TypeAnalysis.cpp:227-232 default arm, split only to avoid repeating it.
-    private func HandleTerminatorEffectImpl(state: TypeDomain, terminator: Terminator): Unit {
+    private func HandleTerminatorEffectImpl(state: TypeDomain, terminator: Expression): Unit {
         if (let Some(dest) <- terminator.GetResult()) {
             state.SetToTopOrTopRef(dest, dest.GetType().getOrThrow().IsRef())
         }
@@ -290,12 +293,7 @@ public class TypeAnalysis <: ValueAnalysis<TypeValueDomain, FullStatePool<TypeVa
 
     private func HandleTypeCastExpr(state: TypeDomain, typecast: TypeCast): Unit {
         HandleTypeCastExprImpl(state, typecast, typecast.GetSourceValue(),
-            typecast.GetSourceTy().getOrThrow(), typecast.GetTargetTy().getOrThrow())
-    }
-
-    private func HandleTypeCastExpr(state: TypeDomain, typecast: TypeCastWithException): Unit {
-        HandleTypeCastExprImpl(state, typecast, typecast.GetSourceValue(),
-            typecast.GetSourceTy().getOrThrow(), typecast.GetTargetTy().getOrThrow())
+            typecast.GetSourceType().getOrThrow(), typecast.GetTargetType().getOrThrow())
     }
 
     // C++ TypeAnalysis.cpp:287-347 template body.
