@@ -19,7 +19,7 @@ def sha(p):
 def compile_one(compiler, source, out, level, imports, jobs):
     out.mkdir(parents=True, exist_ok=True)
     command = [str(compiler)] + (['-p'] if source.is_dir() else []) + [str(source),
-               '--output-type=staticlib', '-' + level, '--save-temps', '--dump-ir',
+               '--output-type=staticlib', '-' + level, '--dump-ir',
                '--jobs', str(jobs), '-o', str(out/'output.bc')]
     for directory in imports:
         command += ['--import-path', str(directory)]
@@ -27,7 +27,17 @@ def compile_one(compiler, source, out, level, imports, jobs):
     before = subprocess.check_output(['uptime'], text=True).strip()
     with (out/'compile.log').open('w') as log:
         process = subprocess.run(command, cwd=out, stdout=log, stderr=subprocess.STDOUT, timeout=1200)
-    return {'command': command, 'rc': process.returncode, 'wall': time.monotonic()-start,
+    # The frontend supports --emit-chir=opt as a separate output mode; the
+    # driver's --save-temps option is not accepted by this entry point.
+    chir_command = [arg for arg in command if arg != '--dump-ir']
+    chir_command[chir_command.index('-o') + 1] = str(out/'output.chir')
+    chir_command.append('--emit-chir=opt')
+    with (out/'chir-compile.log').open('w') as log:
+        chir_process = subprocess.run(chir_command, cwd=out, stdout=log,
+                                      stderr=subprocess.STDOUT, timeout=1200)
+    return {'command': command, 'ir_rc': process.returncode,
+            'chir_command': chir_command, 'chir_rc': chir_process.returncode,
+            'rc': process.returncode or chir_process.returncode, 'wall': time.monotonic()-start,
             'uptime_before': before, 'uptime_after': subprocess.check_output(['uptime'], text=True).strip(),
             'outputs': {str(p.relative_to(out)): sha(p) for p in out.rglob('*')
                         if p.is_file() and p.suffix in ('.bc','.ll','.cjo','.chir')}}
