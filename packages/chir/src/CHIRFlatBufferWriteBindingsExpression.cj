@@ -330,7 +330,7 @@ class MultiBranchBuilder {
 
     public init(builder: FlatBufferBuilder) {
         this.builder = builder
-        builder.StartTable(2)
+        builder.StartTable(3)
     }
 
     public func add_base(base: FlatBufferOffset): Unit {
@@ -341,21 +341,28 @@ class MultiBranchBuilder {
         builder.AddOffset(1, caseValues)
     }
 
+    public func add_sourceExpr(sourceExpr: UInt8): Unit {
+        builder.AddU8(2, sourceExpr, defaultValue: CHIRFB_SOURCE_EXPR_OTHER)
+    }
+
     public func Finish(): FlatBufferOffset {
         return builder.EndTable()
     }
 }
 
-func CreateMultiBranch(builder: FlatBufferBuilder, base: FlatBufferOffset, caseValues: FlatBufferOffset): FlatBufferOffset {
+func CreateMultiBranch(builder: FlatBufferBuilder, base: FlatBufferOffset, caseValues: FlatBufferOffset,
+    sourceExpr: UInt8): FlatBufferOffset {
     let tableBuilder = MultiBranchBuilder(builder)
     tableBuilder.add_caseValues(caseValues)
+    tableBuilder.add_sourceExpr(sourceExpr)
     tableBuilder.add_base(base)
     return tableBuilder.Finish()
 }
 
-func CreateMultiBranchDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, caseValues: Option<ArrayList<UInt64>>): FlatBufferOffset {
+func CreateMultiBranchDirect(builder: FlatBufferBuilder, base: FlatBufferOffset, caseValues: Option<ArrayList<UInt64>>,
+    sourceExpr!: UInt8 = CHIRFB_SOURCE_EXPR_OTHER): FlatBufferOffset {
     let caseValuesOffset = if (let Some(value) <- caseValues) { builder.CreateVectorU64(value) } else { 0u32 }
-    return CreateMultiBranch(builder, base, caseValuesOffset)
+    return CreateMultiBranch(builder, base, caseValuesOffset, sourceExpr)
 }
 
 class GetElementRefBuilder {

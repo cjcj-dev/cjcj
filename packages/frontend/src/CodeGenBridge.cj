@@ -45,6 +45,8 @@ import cjcj::chir.NoWriteBarrierRecChecker
 import cjcj::chir.OptFuncRetType
 import cjcj::chir.OptEffectCHIRMap as ChirOptEffectCHIRMap
 import cjcj::chir.Package as RealCHIRPackage
+import cjcj::chir.MatchCaseId
+import cjcj::chir.UnreachableBlockAnalysis
 import cjcj::chir.UnreachableBranchCheck
 import cjcj::chir.RedundantFutureRemoval
 import cjcj::chir.RedundantGetOrThrowElimination
@@ -303,7 +305,6 @@ private class ToCHIR {
     private let curVirtFuncWrapDep: VirtualWrapperDepMap = VirtualWrapperDepMap()
     private let delVirtFuncWrapForIncr: VirtualWrapperDepMap = VirtualWrapperDepMap()
     private let ccOutFuncsRawMangle: HashSet<String> = HashSet<String>()
-    private var maybeUnreachable: HashMap<ChirBlock, ChirTerminator> = HashMap<ChirBlock, ChirTerminator>()
     private var chirPkg: Option<RealCHIRPackage> = None
     private var debugFileIndex: UInt64 = 0u64
     private var isComputingAnnos: Bool = false
@@ -345,7 +346,6 @@ private class ToCHIR {
         let srcCodeImportedFuncs = ast2chir.GetSrcCodeImportedFuncs()
         let srcCodeImportedVars = ast2chir.GetSrcCodeImportedVars()
         let initFuncsForConstVar = ast2chir.GetInitFuncsForConstVar()
-        maybeUnreachable = ast2chir.GetMaybeUnreachableBlocks()
         chirPkg = Some(lowered)
         DumpCHIRToFile("AST_CHIR")
         ClearASTResources()
@@ -367,7 +367,7 @@ private class ToCHIR {
             return Some(pluginPackage)
         }
         if (!RulesChecking(pluginPackage, builder, instance.invocation.globalOptions,
-            instance.diag.AsBasicDiagnosticEngine(), effectMap, maybeUnreachable)) {
+            instance.diag.AsBasicDiagnosticEngine(), effectMap)) {
             return None
         }
         RunOptimizationPass(pluginPackage)
@@ -464,7 +464,7 @@ private class ToCHIR {
             return false
         }
         if (let Some(newPackage) <- executePlugin.DeserializePluginResult(
-            srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar, maybeUnreachable)) {
+            srcCodeImportedFuncs, srcCodeImportedVars, initFuncsForConstVar)) {
             chirPkg = Some(newPackage)
         } else {
             return false
@@ -998,10 +998,8 @@ private class ToCHIR {
 }
 
 private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: GlobalOptions,
-    diag: BasicDiagnosticEngine, effectMap: ChirOptEffectCHIRMap,
-    maybeUnreachable: HashMap<ChirBlock, ChirTerminator>): Bool {
-    DeadCodeElimination(builder, diag, pkg).UnreachableBlockWarningReporter(pkg,
-        Int64(options.GetJobs()), maybeUnreachable)
+    diag: BasicDiagnosticEngine, effectMap: ChirOptEffectCHIRMap): Bool {
+    UnreachableBlockAnalysis(diag, pkg).RunOnPackage(Int64(options.GetJobs()))
     DeadCodeElimination(builder).ClearUnreachableMarkBlock(pkg)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
@@ -1013,6 +1011,7 @@ private func RulesChecking(pkg: RealCHIRPackage, builder: ChirBuilder, options: 
         return false
     }
     UnreachableBranchCheck(wrapper, diag, pkg.GetName()).RunOnPackage(pkg, Int64(options.GetJobs()))
+    ClearMatchMetadata(pkg)
     DeadCodeElimination(builder).UnreachableBlockEliminationForPackage(pkg, isDebug: options.chirDebugOptimizer)
     MergeBlocks().RunOnPackage(pkg, builder, enableCompileDebug: options.enableCompileDebug,
         enableCoverage: options.enableCoverage)
@@ -1254,4 +1253,14 @@ private func GenerateBCFilePathAndUpdateToInvocation(options: GlobalOptions, kin
         return ""
     }
     return bcFilePath
+}
+
+private func ClearMatchMetadata(pkg: RealCHIRPackage): Unit {
+    for (fn in pkg.GetGlobalFuncsWithBody()) {
+        for (block in fn.GetBody().getOrThrow().GetAllBlocks()) {
+            block.DisableAttr(ChirAttribute.MATCH_PATTERN)
+            block.Remove<MatchCaseId>()
+            for (expr in block.GetExpressions()) { expr.DisableAttr(ChirAttribute.MATCH_PATTERN) }
+        }
+    }
 }

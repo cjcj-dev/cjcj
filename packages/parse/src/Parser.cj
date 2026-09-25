@@ -24,7 +24,7 @@ public class Parser {
     public func GetLineNum(): Int64 { return impl.GetLineNum() }
     public func ParseTopLevel(): File { return impl.ParseTopLevel() }
     public func ParseDecl(scopeKind: ScopeKind): Decl {
-        let decl = impl.ParseDecl(scopeKind)
+        let decl = impl.ParseDecl(scopeKind, impl.CopiedForeignBlockModifiers(), ArrayList<Annotation>())
         impl.FinalizeDeclTree(decl)
         return decl
     }
@@ -98,6 +98,11 @@ public class Parser {
 
     public func SetCurFile(file: File): Parser {
         impl.SetCurFile(file)
+        return this
+    }
+
+    public func SetForeignBlockModifiers(modifiers: ArrayList<Modifier>): Parser {
+        impl.SetForeignBlockModifiers(modifiers)
         return this
     }
 

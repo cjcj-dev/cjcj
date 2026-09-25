@@ -17,6 +17,14 @@ try {
   } else {
     const layout = await $({quiet: true})`${work}/calign`;
     if (layout.stdout !== 'calign layout ok\n') process.exitCode = 1;
+    const naturalBuild = await $({stdio: 'inherit', nothrow: true})`${self} ${root}/test/alignof_cstruct.cj -o ${work}/natural --set-runtime-rpath`;
+    if (naturalBuild.exitCode !== 0) {
+      process.exitCode = naturalBuild.exitCode;
+    } else {
+      const natural = await $({nothrow: true, quiet: true})`${work}/natural`;
+      console.log(natural.stdout);
+      if (natural.exitCode !== 0 || !natural.stdout.includes('ALIGNOF_FAILURES=0\n')) process.exitCode = 1;
+    }
     const invalid = (await fs.readdir(`${root}/test`)).filter(name => name.startsWith('calign_invalid_') && name.endsWith('.cj')).sort();
     for (const file of invalid) {
       const name = path.basename(file, '.cj');
@@ -29,7 +37,7 @@ try {
       }
       if (!(result.stdout + result.stderr).includes('@C')) { process.exitCode = 1; break; }
     }
-    if (!process.exitCode) console.log('calign: PASS layout=1 diagnostics=5');
+    if (!process.exitCode) console.log('calign: PASS layout=2 diagnostics=5');
   }
 } finally {
   await fs.rm(work, {recursive: true, force: true});
